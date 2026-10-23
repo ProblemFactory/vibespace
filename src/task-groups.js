@@ -12,9 +12,14 @@
  * - Legacy Groups migration: on first load with no store, sessionGroups +
  *   groupFolders from user-state.json become kind:'group' entries (one-time,
  *   guarded by file existence). user-state keeps the legacy keys dormant.
- * - Two INDEPENDENT optional folder bindings per group: folders[] auto-include
- *   sessions by cwd (old groupFolders), contextDir = the shared context
- *   folder (injection source).
+ * - THE CONTEXT TABLE (lane task-group-context, 2.369.346): ONE ordered list
+ *   `ctx` of rows (src/task-context.js — path + note + how much the agent is
+ *   told + verbs) replaces the two old folder bindings. Derived, never stored
+ *   twice: the 'discover' rows = the old folders[] (auto-include by cwd), the
+ *   'notes' row = the old contextDir (the .vibespace/TASK.md mirror). The old
+ *   fields stay in the FILE one release (an older build reads them) but are
+ *   held aside at load (_legacy) and read only by the one migration
+ *   (migrateContextRows, src/server/migrations.js).
  * - Atomic writes + tasks-updated broadcast via onChange, same manager
  *   pattern as hosts.js/mounts.js. Export/import for config transfer.
  * NOTE: internal identifiers still say `task`/`progress` in places — the
@@ -34,10 +39,17 @@
 const fs = require('fs');
 const path = require('path');
 const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
+const GM = require('./grant-model.js'); // lane grants-unify: the group's outside visibility is a row of the ONE grants store
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const crypto = require('crypto');
+const os = require('os');
+const TC = require('./task-context.js'); // PURE: the Context table's rows, resolution, derivations, budget plan (lane task-group-context)
 const { pickColorSeq } = require('./task-color-seq');
+const { folderOf, insideFolder } = require('./task-membership.js'); // PURE (lane open-task-binds): THE folder rule (a folder includes itself; a glob tail is the recursive switch) — the bundle's panel asks the same one
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a progress note / detail a reader sees never carries a credential in the clear
+// lane cli-call-timeouts: one TASK.md mirror write's bound (each op through SafeFs / fs.promises) and the retry after a miss
+const MIRROR_BOUND_MS = 10000;
+const MIRROR_RETRY_MS = 30000;
 // Backlog PRIORITY + the ownership-aware selection every READ uses (TASK.md,
 // the per-turn reminders, the show/backlog listing) — the store keeps every
 // item; which ones a read shows is decided there (2026-09-22).
@@ -79,9 +91,20 @@ const KINDS = ['task', 'group'];
 // write is acknowledged only once it is found stored (agent-routes), and
 // scripts/test-backlog-no-truncation.mjs fails any slice on this store.
 const CAPS = { title: 120, objective: 20000, note: 2000, detail: 6000, reason: 500, backlogItem: 500 };
-// B-86d3 ② (lane hook-seen-marks): the default byte budget of ONE group's context-folder index in an injection
-// (setting tasks.contextIndexBytes; 0 = the 100-file cap only) — see _indexRows
-const CONTEXT_INDEX_BYTES = 4096;
+// lane task-group-context: the default byte budget of ONE group's Context table in an injection (setting
+// tasks.contextIndexBytes — the key B-86d3 ② gave the old folder index, kept; 0 = only the inline room) — see _ctxPlan.
+// The table never plans past what the hook carries: INJECT_ROOM = agent-routes' INLINE_CAP, LOG_RESERVE = the activity
+// log's floor below it (the law: tools / rules first, then the context block, the log last).
+const CONTEXT_BUDGET_BYTES = TC.DEFAULT_BUDGET;
+const INJECT_ROOM = 9600;
+const LOG_RESERVE = 1200;
+// a listed folder is walked at most this deep / this many entries (a walk that hits the cap is "over N files")
+const WALK_DEPTH = 4;
+const WALK_CAP = 400;
+// a told file is read up to this many bytes (a bigger one never fits a budget whole — it steps down)
+const READ_CAP = 64 * 1024;
+// the four depths in the agent's words (a stepped row's line names both)
+const TELL_WORDS = { note: 'the path and note only', names: 'file names', index: 'file names + key files', contents: 'full contents' };
 // the unclaimed-HIGH reminder line's TEXT budget in BYTES (CJK = 3 B/char), shared by every group of one injection
 const HIGH_LINE_TEXT_BYTES = 600;
 // Multi-group payloads share ONE text budget for the "claimed by THIS session"
@@ -199,7 +222,10 @@ function sanitizeStrArray(arr, cap = 200) {
 }
 
 class TaskGroupManager {
-  constructor({ dataDir, onChange, readUserState, getSetting, isPathShadowed }) {
+  constructor({ dataDir, onChange, readUserState, getSetting, isPathShadowed, mirrorFs, mirrorBoundMs, grants = null, homeDir }) {
+    // lane grants-unify: the group's outside visibility is a ROW of the ONE grants store (door group-visibility) — the store (or
+    // a getter); absent ⇒ none (every group opaque, a write refused by name)
+    this._grants = typeof grants === 'function' ? grants : () => grants;
     // (path) → the disconnected storage whose mount point contains it, or
     // null. Late singleton (mounts wire up after this store) — the getter
     // resolves at call time; server.js re-runs syncAllContextMd() once
@@ -215,8 +241,20 @@ class TaskGroupManager {
     this._onChange = onChange || (() => {});
     this._state = { version: 1, tasks: {} };
     this._lastMd = new Map(); // groupId → last written TASK.md content (skip no-op writes)
+    // lane cli-call-timeouts (hub feedback 2026-10-23: `vibespace-task progress` hung 30+ min): the TASK.md MIRROR is
+    // written OFF the store write — queued per group (the newest content wins), through SafeFs (`mirrorFs()` = server.js
+    // app.locals.safeFs: a worker with a deadline, a blocked mount refused at its door; fs.promises when none) and BOUNDED
+    // by MIRROR_BOUND_MS. A route answers after the store write; mirrorStateOf(id) says when the copy is behind.
+    this._mirrorFs = typeof mirrorFs === 'function' ? mirrorFs : (mirrorFs ? () => mirrorFs : () => null);
+    this._mirror = new Map(); // groupId → { want: {dir, content}|null, inflight, since, startedAt, failedAt, why, retry }
+    this._mirrorBoundMs = Number(mirrorBoundMs) > 0 ? Number(mirrorBoundMs) : MIRROR_BOUND_MS;   // (a suite shortens it)
     this._getSetting = getSetting || null; // tasks.autoStyleOrder for the allocator
+    this._home = homeDir || os.homedir(); // a Context row's ~ and its last relative base
+    // lane task-group-context: the OLD folder fields (folders[] / contextDir) — held aside per group, written back
+    // into the file by _save (an older build still reads them, one release), read ONLY by migrateContextRows
+    this._legacy = new Map();
     const existed = this._load();
+    for (const t of Object.values(this._state.tasks)) this._holdLegacy(t);
     // One-time migration: Task Groups lost their status (岗位 refactor) — a
     // `done` group becomes archived, others just drop the field.
     let migrated = false;
@@ -304,9 +342,18 @@ class TaskGroupManager {
     return false;
   }
 
+  // the old fields leave the live record (nothing can read them by accident) and wait in _legacy for the file
+  _holdLegacy(t) {
+    if (!t || typeof t !== 'object' || !('folders' in t || 'contextDir' in t)) return;
+    this._legacy.set(t.id, { folders: t.folders, contextDir: t.contextDir });
+    delete t.folders; delete t.contextDir;
+  }
+
   _save() {
     const tmp = this._file + '.tmp';
-    timedSync('task-groups.write', () => { fs.writeFileSync(tmp, JSON.stringify(this._state, null, 2)); fs.renameSync(tmp, this._file); });
+    // the held old fields ride back into the file beside each record (one release — see _holdLegacy)
+    const doc = !this._legacy.size ? this._state : { ...this._state, tasks: Object.fromEntries(Object.entries(this._state.tasks).map(([id, t]) => [id, this._legacy.has(id) ? { ...t, ...this._legacy.get(id) } : t])) };
+    timedSync('task-groups.write', () => { fs.writeFileSync(tmp, JSON.stringify(doc, null, 2)); fs.renameSync(tmp, this._file); });
     // Keep every context folder's generated TASK.md in lockstep with the
     // store (content-compare guard makes this a no-op for unchanged tasks)
     for (const t of Object.values(this._state.tasks)) this._syncTaskMd(t);
@@ -331,10 +378,19 @@ class TaskGroupManager {
       `- Task ID: ${t.id}`,
       `- Updated: ${ts(t.updatedAt)}`,
     ];
-    const folders = this._sanitizeFolders(t.folders);
-    // verify r5 F2 (lane peer-census): a folder / context-dir PATH is a manager agent's words too (the manage verb takes any path under the allowlisted roots; a directory name is free text) — a line piece like a file name
-    if (folders.length) lines.push(`- Auto-include folders: ${folders.map((f) => agentLine(f.path) + (f.recursive ? '/**' : '')).join(', ')}`);
-    lines.push('', '## Objective', '', agentBlock(t.objective?.trim()) || '_(not set yet)_');
+    // lane task-group-context: the objective IS the group's standing instructions — the ONE home of its rules, told
+    // verbatim to every member whatever its folder (study 3 C4: one rule in three drifting copies)
+    lines.push('', '## Objective — the group\'s standing rules', '', agentBlock(t.objective?.trim()) || '_(not set yet)_');
+    // the full renderings (TASK.md) list the Context table's rows, one line each (no contents — the injection tells
+    // them at their chosen depth); verify r5 F2 (lane peer-census): a path is a manager agent's words too — a piece
+    if (cap > 0) {
+      const rows = this._ctxRows(t);
+      if (rows.length) {
+        lines.push('', '## Context', '');
+        const res = this._res(t);
+        rows.forEach((r, i) => lines.push(this._rowHead(r, res[i], { full: true })));
+      }
+    }
     // Backlog rides in the FULL renderings only (TASK.md / show) — the
     // injection payload (cap 0) deliberately omits it (user directive 2.122.0:
     // don't dump the backlog every hook; renderContext adds only a summary of
@@ -372,17 +428,18 @@ class TaskGroupManager {
   }
 
   _syncTaskMd(t) {
-    if (!t.contextDir) return;
+    const ctxDir = this.contextDirOf(t);   // the 'notes' row's folder (lane task-group-context)
+    if (!ctxDir) return;
     // A context folder living on a storage that is currently DISCONNECTED:
     // writing would recreate the tree on the bare mount point (stranded,
     // and the reconnect then fails "not empty" — real OneDrive incident).
     // Skip; the next syncAllContextMd after the mount comes back writes it.
     let shadow = null;
-    try { shadow = this._isPathShadowed(t.contextDir); } catch { shadow = null; }
+    try { shadow = this._isPathShadowed(ctxDir); } catch { shadow = null; }
     if (shadow) {
       if (!(this._shadowWarned ||= new Set()).has(t.id)) {
         this._shadowWarned.add(t.id);
-        console.warn(`[tasks] TASK.md for ${t.id} skipped: ${t.contextDir} is on "${shadow.name}" which is not connected`);
+        console.warn(`[tasks] TASK.md for ${t.id} skipped: ${ctxDir} is on "${shadow.name}" which is not connected`);
         global.__vsEvent?.('ctx-md-skipped-shadowed');
       }
       return;
@@ -390,26 +447,104 @@ class TaskGroupManager {
     this._shadowWarned?.delete(t.id);
     // B-afc4: a context folder under a BLOCKED mount (the liveness probe: slow / wedged / dead) is skipped the same way —
     // the write would hang inside the dead FUSE. The next syncAllContextMd after it answers writes it.
-    if (DOOR.blocked(t.contextDir)) {
+    if (DOOR.blocked(ctxDir)) {
       if (!(this._blockWarned ||= new Set()).has(t.id)) {
         this._blockWarned.add(t.id);
-        console.warn(`[tasks] TASK.md for ${t.id} skipped: ${t.contextDir} is on a storage that is not answering`);
+        console.warn(`[tasks] TASK.md for ${t.id} skipped: ${ctxDir} is on a storage that is not answering`);
       }
       return;
     }
     this._blockWarned?.delete(t.id);
+    let content;
+    try { content = this.renderTaskMd(t); } catch { return; }
+    const m = this._mirror.get(t.id);
+    if (this._lastMd.get(t.id) === content && !(m && (m.inflight || m.want))) return;
+    this._queueMirror(t.id, ctxDir, content);
+  }
+
+  /** lane cli-call-timeouts: queue the group's TASK.md (the newest content wins) — never a write on the caller's turn */
+  _queueMirror(id, contextDir, content) {
+    const m = this._mirror.get(id) || { want: null, inflight: false, since: 0, startedAt: 0, failedAt: 0, why: '', retry: null };
+    m.want = { dir: contextDir, content };
+    if (!m.since) m.since = Date.now();
+    this._mirror.set(id, m);
+    if (!m.inflight) this._runMirror(id);
+  }
+
+  /** the fs the mirror writes through: SafeFs's ops (a worker, a deadline) or fs.promises — each op bounded */
+  _mirrorIo() {
+    const sf = (() => { try { return this._mirrorFs(); } catch { return null; } })();
+    const bound = (p) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Object.assign(new Error('the shared folder did not answer in ' + this._mirrorBoundMs + ' ms'), { code: 'MIRROR_TIMEOUT' })), this._mirrorBoundMs);
+      timer.unref?.();
+      Promise.resolve(p).then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+    });
+    const o = { timeoutMs: this._mirrorBoundMs };
+    if (sf && typeof sf.call === 'function') return {
+      mkdir: (p) => bound(sf.call('mkdir', { path: p }, o)),
+      read: (p) => bound(sf.call('readText', { path: p, maxSize: 4 << 20 }, o)).then((r) => (r && typeof r.content === 'string' ? r.content : null)),
+      write: (p, c) => bound(sf.call('writeFile', { path: p, content: c }, o)),
+      rename: (a, b) => bound(sf.call('rename', { oldPath: a, newPath: b }, o)),
+    };
+    const fsp = fs.promises;
+    return {
+      mkdir: (p) => bound(fsp.mkdir(p, { recursive: true })),
+      read: (p) => bound(fsp.readFile(p, 'utf-8')),
+      write: (p, c) => bound(fsp.writeFile(p, c)),
+      rename: (a, b) => bound(fsp.rename(a, b)),
+    };
+  }
+
+  /** write the queued TASK.md of one group; a failed / timed-out write keeps it queued and retries (backoff) */
+  async _runMirror(id) {
+    const m = this._mirror.get(id);
+    if (!m || m.inflight || !m.want) return;
+    if (m.retry) { clearTimeout(m.retry); m.retry = null; }
+    const { dir: contextDir, content } = m.want;
+    m.want = null; m.inflight = true; m.startedAt = Date.now();
+    const io = this._mirrorIo();
+    const dir = path.join(contextDir, '.vibespace');
+    const file = path.join(dir, 'TASK.md');
+    let ok = false; let why = '';
     try {
-      const dir = path.join(t.contextDir, '.vibespace');
-      const file = path.join(dir, 'TASK.md');
-      const content = this.renderTaskMd(t);
-      if (this._lastMd.get(t.id) === content) return;
-      fs.mkdirSync(dir, { recursive: true });
-      try { if (fs.readFileSync(file, 'utf-8') === content) { this._lastMd.set(t.id, content); return; } } catch { }
-      const tmp = file + '.tmp';
-      fs.writeFileSync(tmp, content);
-      fs.renameSync(tmp, file);
-      this._lastMd.set(t.id, content);
-    } catch { /* contextDir may be missing/unwritable — never break task ops over it */ }
+      await io.mkdir(dir);
+      let cur = null;
+      try { cur = await io.read(file); } catch { cur = null; }
+      if (cur !== content) { const tmp = file + '.tmp'; await io.write(tmp, content); await io.rename(tmp, file); }
+      ok = true;
+    } catch (e) { why = e && (e.code === 'MIRROR_TIMEOUT' || e.safeFsTimeout) ? 'timeout' : e && e.code === 'storage-blocked' ? 'blocked' : 'error'; }
+    m.inflight = false;
+    const t = this._state.tasks[id];
+    if (ok) {
+      this._lastMd.set(id, content);
+      m.failedAt = 0; m.why = '';
+      if (!m.want) m.since = 0;
+    } else {
+      m.failedAt = Date.now(); m.why = why;
+      if (!m.want) {   // nothing newer came: keep this copy for ONE retry timer (a change or syncAllContextMd before it retries at once)
+        if (t && this.contextDirOf(t) === contextDir) m.want = { dir: contextDir, content };
+        if (m.want) { m.retry = setTimeout(() => { m.retry = null; this._runMirror(id); }, MIRROR_RETRY_MS); m.retry.unref?.(); }
+        return;
+      }
+      // a newer copy was queued while this one hung: it is tried now (the writes stay serialized, each one bounded)
+    }
+    if (m.want) this._runMirror(id);
+    else if (!m.since) this._mirror.delete(id);
+  }
+
+  /** lane cli-call-timeouts: the group's mirror, as a fact a route can answer — null = current (nothing queued);
+   *  { behind: true, since, why } once a write has been waiting longer than MIRROR_BOUND_MS or the last one failed */
+  mirrorStateOf(id, now = Date.now()) {
+    const m = this._mirror.get(id);
+    if (!m || !m.since) return null;
+    const late = m.failedAt > 0 || (m.inflight && now - m.startedAt > this._mirrorBoundMs);
+    return { behind: !!late, pending: true, since: m.since, why: m.why || (late ? 'slow' : '') };
+  }
+
+  /** every queued mirror write landed or gave up (tests; a clean shutdown) */
+  async mirrorIdle(maxMs = 30000) {
+    const until = Date.now() + maxMs;
+    while (Date.now() < until && [...this._mirror.values()].some((m) => m.inflight || (m.want && !m.retry))) await new Promise((r) => setTimeout(r, 5));
   }
 
   _listContextFiles(dir, cap = 100) {
@@ -455,41 +590,294 @@ class TaskGroupManager {
     return sig;
   }
 
-  // THE CONTEXT-FOLDER INDEX IS BUDGETED (B-86d3 ②, lane hook-seen-marks): the index listed up to 100 files whatever
-  // their bytes — 12 KB and 20 KB for two real groups — so capInline cut 6 of 13 sessions' SessionStart INSIDE it, every
-  // time (the shared-folder teaching and the activity log after it never arrived). One group's index now spends at most
-  // `tasks.contextIndexBytes` (default 4096; 0 = the 100-file cap only): the NEWEST files that fit, listed in path order,
-  // then ONE line counting the rest and naming where every file is listed. The rules / tools part rides above the index
-  // untouched (it comes first by the law); the 100-file cap stays the upper bound. Returns the index's lines.
-  _indexRows(files, base, gid) {
-    const row = (f) => `- ${agentLine(base)}/${agentLine(f.path)} (${f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB'})`;
-    const rows = files.map((f) => { const text = row(f); return { f, text, bytes: Buffer.byteLength(text, 'utf-8') + 1 }; });
-    const budget = this.contextIndexBytes();
-    if (!budget || rows.reduce((n, r) => n + r.bytes, 0) <= budget) return rows.map((r) => r.text);
-    const more = (m) => `- … +${m} more (older) — \`vibespace-task ${gid}show --full\` lists every file`;
-    const keep = new Set();
-    let used = Buffer.byteLength(more(rows.length), 'utf-8') + 1;
-    for (const r of [...rows].sort((a, b) => (b.f.mtime || 0) - (a.f.mtime || 0))) {   // newest first (stable: path order on a tie)
-      if (used + r.bytes > budget) break;
-      keep.add(r); used += r.bytes;
-    }
-    return [...rows.filter((r) => keep.has(r)).map((r) => r.text), more(rows.length - keep.size)];
+  // ── THE CONTEXT TABLE (lane task-group-context, POC v2.2 + the owner's fourth level) ──
+  // ONE ordered list of rows replaces folders[] + contextDir (src/task-context.js has the rules). Every row is told
+  // with its path + note, at the depth the group chose (只说明 · 文件名 · 文件名 + 关键文件内容 · 内容), in table order,
+  // within ONE byte budget: a row that does not fit steps DOWN a level and its line says so — a shared file is never
+  // silently reduced to a name (study 3 C2). Referenced groups' shareable rows come last.
+
+  _ctxRows(t) { return Array.isArray(t && t.ctx) ? t.ctx : []; }
+  _groupOf(tOrId) { return typeof tOrId === 'string' ? this._state.tasks[tOrId] || null : tOrId || null; }
+
+  // (abs) → 'dir' | 'file' | 'missing' | 'blocked' — the mount door is asked BEFORE the stat (B-afc4)
+  _kindOf(abs) {
+    if (typeof abs !== 'string' || !path.isAbsolute(abs)) return 'missing';
+    if (DOOR.blocked(abs)) return 'blocked';
+    try { const st = fs.statSync(abs); return st.isDirectory() ? 'dir' : st.isFile() ? 'file' : 'missing'; } catch { return 'missing'; }
   }
 
-  // `tasks.contextIndexBytes` as a number (absent ⇒ 4096; 0 = no byte budget)
+  /** Where each row points (TC.resolveRows over the store's stat): [{ abs, kind, via }] in table order. Cached 4 s per
+   *  table — membership asks it on every prompt of every session. `rows` = resolve these instead (a probe). */
+  _res(t, rows = null) {
+    const list = rows || this._ctxRows(t);
+    if (!list.length) return [];
+    const key = JSON.stringify(list.map((r) => (r.ref ? '@' + r.ref : r.path)));
+    if (!this._resCache) this._resCache = new Map();
+    const hit = this._resCache.get(key);
+    if (hit && Date.now() - hit.at < 4000) return hit.res;
+    const res = TC.resolveRows(list, { home: this._home, kindOf: (a) => this._kindOf(a) });
+    if (this._resCache.size > 256) this._resCache.clear();
+    this._resCache.set(key, { res, at: Date.now() });
+    return res;
+  }
+
+  /** The old folders[], derived: every 'discover' row's folder [{ path, recursive: true }] (membership by cwd). */
+  foldersOf(tOrId) { const t = this._groupOf(tOrId); return t ? TC.discoverFolders(this._ctxRows(t), this._res(t)) : []; }
+  /** The old contextDir, derived: the 'notes' row's absolute folder or null (the .vibespace/TASK.md mirror lives there). */
+  contextDirOf(tOrId) { const t = this._groupOf(tOrId); return t ? TC.notesDir(this._ctxRows(t), this._res(t)) : null; }
+
+  // a row's stat, behind the mount door (B-afc4: a blocked mount is answered, never read) — null when blocked / gone
+  _stat(abs) {
+    if (DOOR.blocked(abs)) return null;
+    try { return fs.statSync(abs); } catch { return null; }
+  }
+
+  // a listed folder's files, path order (≤ WALK_DEPTH deep, ≤ WALK_CAP; `over` = more were there) — cached 4 s per folder;
+  // a folder on a blocked mount lists nothing (asked BEFORE the walk)
+  _walk(dir, { fresh = false } = {}) {
+    if (DOOR.blocked(dir)) return { files: [], over: false };
+    if (!this._walkCache) this._walkCache = new Map();
+    const hit = this._walkCache.get(dir);
+    if (hit && !fresh && Date.now() - hit.at < 4000) return hit.w;
+    const files = this._listContextFiles(dir, WALK_CAP + 1);
+    const w = { files: files.slice(0, WALK_CAP), over: files.length > WALK_CAP };
+    if (this._walkCache.size > 256) this._walkCache.clear();
+    this._walkCache.set(dir, { w, at: Date.now() });
+    return w;
+  }
+
+  // a told file's text: { text, size, binary, big } — never past READ_CAP (a bigger file is `big`, never read whole)
+  _readText(abs) {
+    const st = this._stat(abs);   // the mount door is asked there, BEFORE any read
+    if (!st) return { text: '', size: 0, binary: false, big: false, blocked: DOOR.blocked(abs), missing: !DOOR.blocked(abs) };
+    let fd = null;
+    try {
+      const size = st.size;
+      if (size > READ_CAP) return { text: '', size, binary: false, big: true };
+      fd = fs.openSync(abs, 'r');
+      const b = Buffer.alloc(size);
+      const n = fs.readSync(fd, b, 0, size, 0);
+      const buf = b.subarray(0, n);
+      if (buf.subarray(0, 8192).includes(0)) return { text: '', size, binary: true, big: false };
+      return { text: buf.toString('utf-8'), size, binary: false, big: false };
+    } catch { return { text: '', size: 0, binary: false, big: false, missing: true }; }
+    finally { if (fd !== null) { try { fs.closeSync(fd); } catch { } } }
+  }
+
+  // `tasks.contextIndexBytes` as a number — the Context table's budget per group (absent ⇒ 10240; 0 = no table budget,
+  // only the inline room the hook carries)
   contextIndexBytes() {
     let raw; try { raw = this._getSetting?.('tasks.contextIndexBytes'); } catch { raw = undefined; }
     const v = raw === undefined || raw === null || raw === '' ? NaN : Number(raw);
-    return Number.isFinite(v) && v >= 0 ? Math.floor(v) : CONTEXT_INDEX_BYTES;
+    return Number.isFinite(v) && v >= 0 ? Math.floor(v) : CONTEXT_BUDGET_BYTES;
   }
 
-  /** The WHOLE context-folder index (≤ 100 files, path order) — what `vibespace-task show --full` lists, where the
-   *  injection's budgeted index points. Paths as the agent reads them (a remote session's synced copy under ctxBase). */
+  // the rows a group's injection tells, in order: its own path rows, then each referenced group's shareable rows
+  // (read-only here unless shared 可写) — [{ row, x (resolution), from (null | the referenced group), refNote }]
+  _toldRows(t) {
+    const own = this._ctxRows(t), res = this._res(t);
+    const out = [];
+    own.forEach((r, i) => { if (!r.ref) out.push({ row: r, x: res[i], from: null, k: r.path }); });
+    for (const r of own) {
+      if (!r.ref) continue;
+      const g = this._state.tasks[r.ref];
+      if (!g) { out.push({ row: r, x: { ref: true }, from: null, gone: true, k: '@' + r.ref }); continue; }
+      const gr = this._ctxRows(g), gres = this._res(g);
+      const shared = [];
+      gr.forEach((sr, i) => { if (!sr.ref && TC.SHARES.includes(sr.share)) shared.push({ row: TC.sharedRows([sr])[0], x: gres[i], from: g, refNote: r.note, k: `@${g.id}:${sr.path}` }); });
+      out.push({ row: r, x: { ref: true }, from: g, head: true, n: shared.length, k: '@' + r.ref });
+      out.push(...shared);
+    }
+    return out;
+  }
+
+  // the path an agent reads a row by: the notes row of a REMOTE session reads its live-synced copy (ctxBase)
+  _shown(x, ctxBase = null, notesAbs = null) {
+    if (!x || !x.abs) return null;
+    return ctxBase && notesAbs && (x.abs === notesAbs || x.abs.startsWith(notesAbs + '/')) ? ctxBase + x.abs.slice(notesAbs.length) : x.abs;
+  }
+
+  /** ONE row's head line (verify r5 F2: a path, a note, a file name are a member's words — pieces through the belt). */
+  _rowHead(r, x, { full = false, shown = null, from = null } = {}) {
+    if (r.ref) return `- The Context table of another Task Group — "${agentLine(from ? from.title : r.ref)}" (${agentLine(r.ref)})${r.note ? ` — ${agentLine(r.note)}` : ''}`;
+    const isDir = x && x.kind === 'dir';
+    const where = x && x.abs ? agentLine(shown || x.abs) + (isDir ? '/' : '') : agentLine(r.path);
+    const verbs = [];
+    const tags = r.tags || [];
+    if (tags.includes('discover')) verbs.push('conversations started here auto-join');
+    if (tags.includes('notes')) verbs.push('agents keep the group\'s shared notes here');
+    if (tags.includes('readonly')) verbs.push('read-only: never modify it');
+    if (from) verbs.push(`from the Task Group "${agentLine(from.title)}"${tags.includes('readonly') ? '' : ', you may edit it'}`);
+    let state = '';
+    if (!x || (!x.abs && x.kind === 'missing')) state = ' — not there now';
+    else if (x.kind === 'missing') state = ' — not there now';
+    else if (x.kind === 'blocked') state = ' — its storage is not answering, not read';
+    else if (x.kind === 'remote') state = ` — a folder on the machine "${agentLine(x.host)}": told only to conversations opened there`;
+    const told = full ? ` [told: ${TELL_WORDS[TC.chosenTell(r, x && x.kind)]}]` : '';
+    return `- ${where} — ${r.note ? agentLine(r.note) : '(no note yet)'}${verbs.length ? ` (${verbs.join(' · ')})` : ''}${state}${told}`;
+  }
+
+  // the lines of ONE row at ONE level → { lines, bytes } (bytes = Infinity when the level cannot be told whole: a
+  // listing past WALK_CAP, a file past READ_CAP, a contents walk past `cap` bytes — the planner then steps down)
+  _rowAt(r, x, level, { cap = Infinity, shown = null, from = null } = {}) {
+    const head = this._rowHead(r, x, { shown, from });
+    const B = (ls) => Buffer.byteLength(ls.join('\n'), 'utf-8') + 1;
+    const ok = x && (x.kind === 'dir' || x.kind === 'file');
+    if (level === 'note' || !ok) return { lines: [head], bytes: B([head]) };
+    const kb = (n) => (n < 1024 ? n + ' B' : (n / 1024).toFixed(1).replace(/\.0$/, '') + ' KB');
+    const quote = (text) => agentBlock(text.replace(/\s+$/, '')).split('\n').map((l) => '  > ' + l);
+    // the bytes files not yet read would add (their size + a header line + the quote marks, about 1 in 16 bytes a line)
+    const estimate = (files) => files.reduce((n, f) => n + (f.size || 0) + Math.ceil((f.size || 0) / 16) + B([`  ${f.path} (00.0 KB):`]), 0);
+    if (x.kind === 'file') {
+      if (level === 'names') { const st = this._stat(x.abs); const l = `${head} — ${kb(st ? st.size : 0)}`; return { lines: [l], bytes: B([l]) }; }
+      const f = this._readText(x.abs);
+      if (f.big || f.missing || f.blocked) return { lines: [head], bytes: Infinity };
+      if (f.binary) { const l = `${head} — ${kb(f.size)}, binary (not shown)`; return { lines: [l], bytes: B([l]) }; }
+      const ls = [`${head} — contents below (${kb(f.size)}):`, ...quote(f.text)];
+      return { lines: ls, bytes: B(ls) };
+    }
+    const w = this._walk(x.abs);
+    if (w.over) return { lines: [head], bytes: Infinity, over: true };
+    const names = w.files.map((f) => `  - ${agentLine(f.path)} (${kb(f.size)})`);
+    if (level === 'names') {
+      const ls = [`${head} — ${w.files.length} file${w.files.length === 1 ? '' : 's'} below (paths relative to it), read what you need:`, ...names];
+      return { lines: ls, bytes: B(ls), files: w.files.length };
+    }
+    if (level === 'index') {
+      const keys = (r.keys || TC.KEY_FILES).map((k) => k.toLowerCase());
+      const hits = keys.map((k) => w.files.find((f) => !f.path.includes('/') && f.path.toLowerCase() === k)).filter(Boolean);
+      const body = [];
+      for (const [k, f] of hits.entries()) {
+        const c = this._readText(path.join(x.abs, f.path));
+        if (c.big || c.missing || c.blocked) return { lines: [head], bytes: Infinity };
+        body.push(`  ${agentLine(f.path)} (${kb(c.size)})${c.binary ? ' — binary (not shown)' : ':'}`, ...(c.binary ? [] : quote(c.text)));
+        if (B(body) > cap) return { lines: [head], bytes: Infinity, need: B([head, ...names, ...body]) + estimate(hits.slice(k + 1)) };   // past the room: what it WOULD need, read no further
+      }
+      const ls = [`${head} — ${w.files.length} file${w.files.length === 1 ? '' : 's'} below (paths relative to it), read what you need; ${hits.length ? `the key files' contents follow (${hits.map((f) => agentLine(f.path)).join(', ')})` : 'none of its key files is here'}:`, ...names, ...body];
+      return { lines: ls, bytes: B(ls), files: w.files.length };
+    }
+    const body = [];
+    let total = 0;
+    for (const [k, f] of w.files.entries()) {
+      const c = this._readText(path.join(x.abs, f.path));
+      if (c.big || c.missing || c.blocked) return { lines: [head], bytes: Infinity };
+      total += c.size;
+      body.push(`  ${agentLine(f.path)} (${kb(c.size)})${c.binary ? ' — binary (not shown)' : ':'}`, ...(c.binary ? [] : quote(c.text)));
+      if (B(body) > cap) return { lines: [head], bytes: Infinity, need: B([head, ...body]) + estimate(w.files.slice(k + 1)) };   // past the room: what it WOULD need, read no further
+    }
+    const ls = [`${head} — every file's contents below (${w.files.length} file${w.files.length === 1 ? '' : 's'}, ${kb(total)}):`, ...body];
+    return { lines: ls, bytes: B(ls), files: w.files.length };
+  }
+
+  /**
+   * THE TABLE AT ITS DEPTHS, within `budget` bytes: every told row in order at its chosen level, stepping down while it
+   * does not fit; a stepped row's line says what it needed and what it is told instead. → { lines, used, rows: [{ row,
+   * x, from, level, chosen, need, left, files }] } — the preview and the injection read the same plan.
+   */
+  _ctxPlan(t, budget, { ctxBase = null, gid = '', only = null } = {}) {
+    const told = this._toldRows(t).filter((it) => !only || only.has(it.k));
+    const notesAbs = this.contextDirOf(t);
+    const kb = (n) => (n < 1024 ? n + ' B' : (n / 1024).toFixed(1).replace(/\.0$/, '') + ' KB');
+    // each told row asks TC.planRows (THE step-down rule) through a lazy cost: a level is rendered only when the plan asks
+    // it, at the bytes left then (a contents walk stops reading past them and answers what it WOULD need)
+    const items = told.map((it) => {
+      if (it.head || it.gone) {
+        const line = this._rowHead(it.row, null, { from: it.from }) + (it.gone ? ' — that group no longer exists' : it.n ? ` — ${it.n} row${it.n === 1 ? '' : 's'} it shares, below:` : ' — it shares no rows yet');
+        return { it, kind: 'ref', chosen: 'note', shown: null, cache: new Map([['note', { lines: [line], bytes: Buffer.byteLength(line, 'utf-8') + 1 }]]) };
+      }
+      const shown = this._shown(it.x, ctxBase, notesAbs);
+      return { it, kind: it.x && it.x.kind, chosen: TC.chosenTell(it.row, it.x && it.x.kind), shown, cache: new Map() };
+    });
+    const at = (m, lvl, cap) => {
+      if (!m.cache.has(lvl)) m.cache.set(lvl, this._rowAt(m.it.row, m.it.x, lvl, { cap, shown: m.shown, from: m.it.from }));
+      return m.cache.get(lvl);
+    };
+    const plan = TC.planRows(items.map((m) => ({ kind: m.kind, chosen: m.chosen, cost: (lvl, left) => { const r = at(m, lvl, left); return Number.isFinite(r.bytes) ? r.bytes : r.need != null ? r.need : Infinity; } })), budget);
+    const out = [], rowsOut = [];
+    items.forEach((m, i) => {
+      const p = plan[i];
+      const { row, x, from } = m.it;
+      const r = at(m, p.level, p.left);
+      let lines = r.lines;
+      if (p.from && (m.kind === 'dir' || m.kind === 'file')) {
+        const over = m.kind === 'dir' && this._walk(x.abs).over;
+        const why = p.need != null ? `${TELL_WORDS[p.from]} need ${kb(p.need)}, ${kb(p.left)} was left` : `${TELL_WORDS[p.from]} ${over ? `cover more than ${WALK_CAP} files` : 'cannot be told whole'}`;
+        const said = ` [over the injection budget: ${why} — told as ${TELL_WORDS[p.level]} instead${p.level === 'note' ? `; \`vibespace-task ${gid}show --full\` lists every file` : ''}]`;
+        lines = [lines[0].replace(/:$/, '') + said + (lines.length > 1 ? ':' : ''), ...lines.slice(1)];
+      }
+      out.push(...lines);
+      rowsOut.push({ row, x, from, level: p.level, chosen: m.chosen, need: p.need, left: p.left, files: r.files == null ? null : r.files, bytes: Buffer.byteLength(lines.join('\n'), 'utf-8') + 1, ...(m.kind === 'ref' ? { ref: true } : {}) });
+    });
+    const used = rowsOut.reduce((n, r) => n + r.bytes, 0);
+    return { lines: out, used, rows: rowsOut };
+  }
+
+  /** The Context block as the injection prints it (heading + plan lines), or [] (no rows). */
+  _ctxBlock(t, budget, { ctxBase = null, gid = '', heading = '## Context' } = {}) {
+    if (!this._ctxRows(t).length) return { lines: [], plan: null };
+    const plan = this._ctxPlan(t, budget, { ctxBase, gid });
+    return { lines: ['', `${heading} (each row: path — note (what it is for); told at the depth the group chose, within ${(budget / 1024).toFixed(1).replace(/\.0$/, '')} KB)`, '', ...plan.lines], plan };
+  }
+
+  /** Every told file's state (path:size:mtime, % and | escaped, absolute paths): detects USER-written changes under the
+   *  rows — files added / edited / removed outside the store, which bump nothing — so the next turn re-tells them. Rows
+   *  told at 只说明 are not walked. TTL-cached 4 s (it runs on EVERY prompt for every belonged group). */
+  contextSignature(tOrId) {
+    const t = this._groupOf(tOrId);
+    if (!t || !this._ctxRows(t).length) return '';
+    if (!this._sigCache) this._sigCache = new Map();
+    const key = 'ctx:' + t.id + ':' + JSON.stringify(this._ctxRows(t).map((r) => [r.path || '@' + r.ref, r.tell || '']));
+    const hit = this._sigCache.get(key);
+    if (hit && Date.now() - hit.at < 4000) return hit.sig;
+    const esc = (p) => p.replace(/%/g, '%25').replace(/\|/g, '%7C');
+    const parts = [];
+    for (const it of this._toldRows(t)) {
+      if (it.head || it.gone || !it.x) continue;
+      const lvl = TC.chosenTell(it.row, it.x.kind);
+      if (lvl === 'note') continue;
+      if (it.x.kind === 'file') { const st = this._stat(it.x.abs); if (st) parts.push(`${esc(it.x.abs)}:${st.size}:${Math.round(st.mtimeMs || 0)}`); }
+      // a FRESH walk (it refreshes the render's cache too — a re-delivery this signature causes lists what it saw)
+      else if (it.x.kind === 'dir') for (const f of this._walk(it.x.abs, { fresh: true }).files) parts.push(`${esc(it.x.abs + '/' + f.path)}:${f.size}:${Math.round(f.mtime || 0)}`);
+    }
+    const sig = parts.join('|');
+    if (this._sigCache.size > 256) this._sigCache.clear();
+    this._sigCache.set(key, { sig, at: Date.now() });
+    return sig;
+  }
+
+  /** The WHOLE listing behind `vibespace-task show --full` (where a stepped-down row points): the notes folder (dir +
+   *  files, the old answer's shape) and every row's files. Paths as the agent reads them (a remote session's synced copy). */
   contextIndexOf(id, ctxBase = null) {
     const t = this.get(id);
-    if (!t || !t.contextDir) return null;
-    const base = ctxBase || t.contextDir;
-    return { dir: base, files: this._listContextFiles(t.contextDir).map((f) => ({ path: base + '/' + f.path, size: f.size })) };
+    if (!t || !this._ctxRows(t).length) return null;
+    const notesAbs = this.contextDirOf(t);
+    const rows = [];
+    for (const it of this._toldRows(t)) {
+      if (it.head || it.gone || !it.x || !it.x.abs) continue;
+      const shown = this._shown(it.x, ctxBase, notesAbs);
+      if (it.x.kind === 'dir') rows.push({ path: shown, note: it.row.note || '', files: this._walk(it.x.abs).files.map((f) => ({ path: shown + '/' + f.path, size: f.size })) });
+      else if (it.x.kind === 'file') { const st = this._stat(it.x.abs); rows.push({ path: shown, note: it.row.note || '', files: [{ path: shown, size: st ? st.size : 0 }] }); }
+    }
+    const base = notesAbs ? (ctxBase || notesAbs) : null;
+    return { dir: base, files: notesAbs ? this._walk(notesAbs).files.map((f) => ({ path: base + '/' + f.path, size: f.size })) : [], rows };
+  }
+
+  /** ONE migration (2026-10-task-group-context-rows, src/server/migrations.js): every group that has no table yet gets
+   *  its rows from its held old fields (TC.rowsFromLegacy — folders[] → 文件名 + 自动发现会话, contextDir → 文件名 +
+   *  记笔记). The old fields stay in the file one release, no longer read. Idempotent (a group with `ctx` is skipped). */
+  migrateContextRows() {
+    const rep = { groups: 0, rows: 0, folders: 0, notes: 0, merged: 0, nonRecursive: 0, skipped: 0 };
+    for (const t of Object.values(this._state.tasks)) {
+      if (Array.isArray(t.ctx)) { rep.skipped++; continue; }
+      const old = this._legacy.get(t.id) || {};
+      // int346 (lane open-task-binds' folder rule): a stored glob tail (the agent context's own print of a recursive folder,
+      // written back) is the recursive switch, never part of the row's path — PURE folderOf, as every other reader of folders[]
+      const m = TC.rowsFromLegacy({ ...old, folders: Array.isArray(old.folders) ? old.folders.map((f) => folderOf(f) || f) : old.folders });
+      t.ctx = m.rows;
+      rep.groups++; rep.rows += m.rows.length; rep.folders += m.folders; rep.notes += m.notes; rep.merged += m.merged; rep.nonRecursive += m.nonRecursive;
+    }
+    if (rep.groups) { this._save(); this._notify(); }
+    return rep;
   }
 
   // THE FIRST PROMPT AFTER A RESTART (B-86d3 ①): the groups whose restored seen marks say "unchanged since you last saw
@@ -675,9 +1063,60 @@ class TaskGroupManager {
     try { return nudgeThreshold(this._getSetting?.('tasks.backlogNudgeAt')); } catch { return nudgeThreshold(undefined); }
   }
 
-  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false, sessionKey = null, tools = null, isLiveClaim = null, fileTools = undefined } = {}) {
+  // the Context table's bytes in ONE injection: its own budget (tasks.contextIndexBytes; 0 = none) capped by the room
+  // the hook carries after `before` and `after` (the notes teaching) and the activity log's floor
+  _budgetFor(before, after = [], { share = 1, reserve = LOG_RESERVE } = {}) {
+    const B = (ls) => Buffer.byteLength(ls.join('\n'), 'utf-8') + 1;
+    const room = Math.max(0, Math.floor((INJECT_ROOM - reserve - B(before) - (after.length ? B(after) : 0)) / Math.max(1, share)));
+    const own = this.contextIndexBytes();
+    return own ? Math.min(own, room) : room;
+  }
+
+  // the notes row's teaching (the old shared-context-folder sections, its listing now told by the table row)
+  _notesTeaching(ctxBase, notesAbs) {
+    const base = ctxBase || notesAbs;
+    const cbase = agentLine(base);   // verify r5 F2 (the third spelling the first pass missed — reproduced by the suite's own leg): a line piece
+    return ['', `## Shared context folder (the group's shared memory)`, '',
+      (ctxBase
+        ? `\`${cbase}\` — a live-synced copy (newer file wins, ~1 min lag) of this group's shared context folder (its 记笔记 row in the Context table above).`
+        : `\`${cbase}\` — this group's shared context folder (its 记笔记 row in the Context table above).`)
+      + ` It is the group's SHARED MEMORY between agents: every session working this Task Group — now and in the future — reads it. It is NOT a place to publish deliverables for the user (put user-facing output wherever the user asked for it).`,
+      '', '### Using the shared context folder', '',
+      `Whenever you learn something that OTHER agents working this group will likely need — conventions you discovered, gotchas, decisions and their reasons, or details another ROLE depends on (e.g. a compliance-focused session needs technical specifics that only a development session knows — the dev session should write them up) — organize it into a file in \`${cbase}\` yourself, without waiting to be asked. Write for a fellow agent starting cold: skimmable, factual, dated where it matters. Prefer updating/consolidating an existing file over piling up new ones.`,
+      '',
+      ctxBase
+        ? `Files you write to \`${cbase}\` sync back to the group's shared folder (newer file wins, within ~1 minute). Do not create a \`.vibespace/\` subfolder there.`
+        : `Everything under \`${agentLine(notesAbs)}/.vibespace/\` is GENERATED by VibeSpace and read-only for you — never create, edit, or delete anything there (\`TASK.md\` in it always mirrors the state above). Write your shared files in the context folder itself, outside \`.vibespace/\`.`];
+  }
+
+  /** 「新对话会收到」 (the Task Group window's preview): what a NEW conversation of this group receives — renderContext's
+   *  EXACT output (`text`) — plus the group's own part of it (`block`: the identity, the standing instructions and the
+   *  Context table, the slice the window edits) and the plan behind the table (`rows`, `budget`, `used`). */
+  contextPreview(id, { tools = null, fileTools = undefined } = {}) {
     const t = this.get(id);
-    const now = Date.now();   // B-7960: ONE instant for the zone sentence and every dateless time below it
+    const now = Date.now();
+    const text = this.renderContext(id, { tools, fileTools, now });
+    const parts = this._contextHead(t, { now, tools, fileTools });
+    const notesAbs = this.contextDirOf(t);
+    const teach = notesAbs ? this._notesTeaching(null, notesAbs) : [];
+    const effective = this._budgetFor(parts, teach);
+    const B = (ls) => Buffer.byteLength(ls.join('\n'), 'utf-8') + 1;
+    const room = Math.max(0, INJECT_ROOM - LOG_RESERVE - B(parts) - (teach.length ? B(teach) : 0));
+    const { lines, plan } = this._ctxBlock(t, effective, { ctxBase: null, gid: '' });
+    const own = this._ctxRows(t);
+    const rows = plan ? plan.rows.map((r) => ({
+      i: r.from ? null : own.findIndex((o) => (r.ref ? o.ref === r.row.ref : !o.ref && o.path === r.row.path)),
+      from: r.from ? { id: r.from.id, title: r.from.title } : null,
+      path: r.row.ref ? null : r.row.path, ref: r.row.ref || null, note: r.row.note || '',
+      abs: r.x && r.x.abs ? r.x.abs : null, kind: r.x ? (r.x.ref ? 'ref' : r.x.kind) : null, via: r.x && r.x.via ? r.x.via : null,
+      level: r.level, chosen: r.chosen, need: r.need, left: r.left, files: r.files, bytes: r.bytes || 0,
+    })) : [];
+    const block = [this.renderTaskMd(t, 0, { now }).replace(/\n---\n[\s\S]*$/, '').trim(), ...lines].join('\n');
+    return { text, block, bytes: Buffer.byteLength(text, 'utf-8'), budget: { own: this.contextIndexBytes(), room, effective, cap: INJECT_ROOM }, used: plan ? plan.used : 0, rows };
+  }
+
+  // the head of a single-group injection, up to and including the tools section (everything the table rides after)
+  _contextHead(t, { multi = false, now = Date.now(), skipTools = false, sessionKey = null, tools = null, isLiveClaim = null, fileTools = undefined } = {}) {
     const parts = [
       `<vibespace-task-context>`,
       `This session belongs to VibeSpace Task Group "${agentLine(t.title)}" (${t.id}). The state below is shared across ALL sessions of this group. ${OF.zoneSentence(now)}`,
@@ -694,30 +1133,20 @@ class TaskGroupManager {
     // threshold (agents then see only a ~2KB head preview and never learn the
     // tools — the same fleet-wide failure 2.68.0 fixed for the single-group case).
     if (!skipTools) parts.push(...this._toolsSectionParts(multi ? `--group ${t.id} ` : '', multi, tools, fileTools));
-    if (t.contextDir) {
-      const base = ctxBase || t.contextDir;
-      parts.push('', `## Shared context folder (the group's shared memory)`, '',
-        (ctxBase
-          ? `\`${agentLine(base)}\` — a live-synced copy (newer file wins, ~1 min lag) of this group's shared context folder.`
-          : `\`${agentLine(base)}\` — this group's shared context folder.`)
-        + ` It is the group's SHARED MEMORY between agents: every session working this Task Group — now and in the future — reads it. It is NOT a place to publish deliverables for the user (put user-facing output wherever the user asked for it).`);
-      const files = this._listContextFiles(t.contextDir);
-      if (files.length) {
-        parts.push('', 'Files (read what you need with your normal file tools):');
-        parts.push(...this._indexRows(files, base, multi ? `--group ${t.id} ` : ''));   // B-86d3 ②: byte-budgeted
-      } else {
-        parts.push('', '(No shared files yet.)');
-      }
-    }
-    if (t.contextDir) {
-      const cbase = agentLine(ctxBase || t.contextDir);   // verify r5 F2 (the third spelling the first pass missed — reproduced by the suite's own leg): a line piece
-      parts.push('', '### Using the shared context folder', '',
-        `Whenever you learn something that OTHER agents working this group will likely need — conventions you discovered, gotchas, decisions and their reasons, or details another ROLE depends on (e.g. a compliance-focused session needs technical specifics that only a development session knows — the dev session should write them up) — organize it into a file in \`${cbase}\` yourself, without waiting to be asked. Write for a fellow agent starting cold: skimmable, factual, dated where it matters. Prefer updating/consolidating an existing file over piling up new ones.`,
-        '',
-        ctxBase
-          ? `Files you write to \`${cbase}\` sync back to the group's shared folder (newer file wins, within ~1 minute). Do not create a \`.vibespace/\` subfolder there.`
-          : `Everything under \`${agentLine(t.contextDir)}/.vibespace/\` is GENERATED by VibeSpace and read-only for you — never create, edit, or delete anything there (\`TASK.md\` in it always mirrors the state above). Write your shared files in the context folder itself, outside \`.vibespace/\`.`);
-    }
+    return parts;
+  }
+
+  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false, sessionKey = null, tools = null, isLiveClaim = null, fileTools = undefined, now: nowAt = null } = {}) {
+    const t = this.get(id);
+    const now = nowAt || Date.now();   // B-7960: ONE instant for the zone sentence and every dateless time below it
+    const parts = this._contextHead(t, { multi, now, skipTools, sessionKey, tools, isLiveClaim, fileTools });
+    // ── THE CONTEXT TABLE (lane task-group-context): AFTER the rules and the tools (the injection-budget law), every row
+    // at its chosen depth within the table's budget AND the room the hook carries — INJECT_ROOM less what came before,
+    // the notes teaching below it and the activity log's floor — so a row steps down and SAYS so, never cut silently
+    const notesAbs = this.contextDirOf(t);
+    const teach = notesAbs ? this._notesTeaching(ctxBase, notesAbs) : [];
+    parts.push(...this._ctxBlock(t, this._budgetFor(parts, teach), { ctxBase, gid: multi ? `--group ${t.id} ` : '' }).lines);
+    parts.push(...teach);
     // Activity log LAST — the one section that can safely lose its tail to the
     // hook-preview truncation. Newest entries win the byte budget (≥3, ≤12).
     const totalLog = (t.progress || []).length;
@@ -745,16 +1174,33 @@ class TaskGroupManager {
 
   // What the injected context RENDERS, compactly — the diff can only ever be
   // as good as this coverage, so it mirrors exactly the fields that bump
-  // contentUpdatedAt (title/objective/contextDir) + progress. The
-  // contextDir FILE state is deliberately absent: agent-routes already keeps
-  // the folder signature separately (_ctxSig) and passes old/new to the diff.
+  // contentUpdatedAt (title/objective/the Context table) + progress. The
+  // rows' FILE state is deliberately absent: agent-routes already keeps
+  // the table's signature separately (_ctxSig) and passes old/new to the diff.
+  // the table as told, row by row: { k (own: its path · a reference: @<group> · a shared row: @<group>:<path>), h, path }
+  _ctxKeys(t) {
+    return this._toldRows(t).map((it) => ({ k: it.k, h: this._h(JSON.stringify([it.row, it.n == null ? null : it.n, it.gone ? 1 : 0])), path: it.row.ref ? '@' + it.row.ref : it.row.path }));
+  }
+  _ctxHash(t) { return this._h(JSON.stringify(this._ctxKeys(t).map((r) => [r.k, r.h]))); }
+
+  /** The instant agent-routes' injection gate compares: the group's own content instant, or a REFERENCED group's table
+   *  instant when later (its shared rows are told here — an edit there must reach this group's members). */
+  contentAtOf(tOrId) {
+    const t = this._groupOf(tOrId);
+    if (!t) return 0;
+    let at = t.contentUpdatedAt || t.updatedAt || 0;
+    for (const r of this._ctxRows(t)) if (r.ref) { const g = this._state.tasks[r.ref]; if (g && (g.ctxUpdatedAt || 0) > at) at = g.ctxUpdatedAt; }
+    return at;
+  }
+
   snapshotForDiff(id) {
     const t = this.get(id);
     const prog = t.progress || [];
     return {
       title: t.title,
       objHash: this._h(t.objective || ''),
-      contextDir: t.contextDir || null,
+      ctxHash: this._ctxHash(t),          // lane task-group-context: the table as told (own rows + the referenced shared rows)
+      ctxRows: this._ctxKeys(t),          // …row by row, so the update can say which rows changed (in memory only — the LITE one keeps the hash)
       backlog: (t.backlog || []).map((b) => ({ id: b.id, text: b.text, status: b.status || 'open', p: normalizePriority(b.priority), d: b.detail ? this._h(b.detail) : '', addedBy: b.addedBy || null, claimedBy: [...(b.claimedBy || [])] })),
       // New activity = entries with at > this. Two writes inside the SAME ms
       // split by an injection in between could drop one line from a diff —
@@ -769,17 +1215,22 @@ class TaskGroupManager {
   // lines EMPTY when nothing the injection renders actually changed (e.g. an
   // objective re-saved with identical text — the old behavior re-injected the
   // whole group for that; caller skips injection, still advances markers).
-  // Returns null when the snapshot is unusable OR the change is STRUCTURAL
-  // (contextDir designated/changed/cleared mid-session — the agent needs the
-  // file index + shared-folder conventions only the full context teaches; a
-  // one-line "folder is now X" left pre-existing files permanently invisible,
-  // review-caught) → caller falls back to full delivery. Line order mirrors
+  // Returns null when the snapshot is unusable OR the change cannot be told as
+  // a delta (a pre-table / LITE snapshot whose rows changed; a file told by its
+  // CONTENTS changed — the agent needs the new text) → caller falls back to full
+  // delivery. Rows added / changed are re-told at their depths (a one-line
+  // "folder is now X" left pre-existing files permanently invisible,
+  // review-caught); removed rows are named. Line order mirrors
   // renderContext (identity → objective → folder → activity LAST)
   // so tail-first truncation drops the safest section first.
   diffChanges(id, snap, { gid = '', ctxBase = null, oldSig = '', newSig = '', sessionKey = null } = {}) {
     const t = this.get(id);
     if (!snap || typeof snap !== 'object' || typeof snap.objHash !== 'string') return null;
-    if ((snap.contextDir || null) !== (t.contextDir || null)) return null;
+    // lane task-group-context: a snapshot from before the Context table cannot be diffed against it; a restored LITE one
+    // (the hash only) cannot say WHICH rows changed — both fall back to the full delivery
+    if (typeof snap.ctxHash !== 'string') return null;
+    const rowsChanged = snap.ctxHash !== this._ctxHash(t);
+    if (rowsChanged && !Array.isArray(snap.ctxRows)) return null;
     const ch = [];
     const bits = []; // summary fragments, same order as the sections
     if (snap.title !== t.title) { ch.push(`- Renamed: "${agentLine(snap.title)}" → "${agentLine(t.title)}"`); bits.push('renamed'); }
@@ -846,10 +1297,24 @@ class TaskGroupManager {
     }
     ch.push(...blCh);
     if (nBlChanges) bits.push(`${nBlChanges} backlog change${nBlChanges > 1 ? 's' : ''}`);
-    if (t.contextDir && oldSig !== newSig) {
-      // Signature format is path:size:mtime joined by | (contextDirSignature;
-      // path has % and | escaped there) — peel size:mtime off the END so paths
-      // containing ':' stay intact, then unescape the path.
+    // ── the Context table (lane task-group-context): rows removed are named; rows added or changed are re-told at their
+    // depths within a slice of the update's room (the same plan the full context prints)
+    if (rowsChanged) {
+      const keys = this._ctxKeys(t);
+      const was = new Map(snap.ctxRows.map((r) => [r.k, r]));
+      const now = new Set(keys.map((r) => r.k));
+      for (const r of snap.ctxRows) if (!now.has(r.k)) ch.push(`- Context row REMOVED: ${agentLine(r.path)}`);
+      const touched = keys.filter((r) => !was.has(r.k) || was.get(r.k).h !== r.h);
+      if (touched.length) {
+        const plan = this._ctxPlan(t, 2400, { ctxBase, gid, only: new Set(touched.map((r) => r.k)) });
+        ch.push(`- Context row${touched.length > 1 ? 's' : ''} ${touched.every((r) => !was.has(r.k)) ? 'ADDED' : 'ADDED or CHANGED'} — as told now:`, ...plan.lines.map((l) => '  ' + l));
+      }
+      bits.push('context table changed');
+    }
+    if (oldSig !== newSig && this._ctxRows(t).length) {
+      // Signature format is path:size:mtime joined by | (contextSignature — absolute paths; a legacy
+      // contextDirSignature's are relative to the notes folder; % and | escaped there) — peel size:mtime off the END
+      // so paths containing ':' stay intact, then unescape the path.
       const parseSig = (s) => {
         const m = new Map();
         for (const e of String(s || '').split('|')) {
@@ -861,16 +1326,46 @@ class TaskGroupManager {
         return m;
       };
       const a = parseSig(oldSig), b = parseSig(newSig);
-      const base = ctxBase || t.contextDir;
-      const list = (arr) => arr.slice(0, 8).map((p) => `${agentLine(base)}/${agentLine(p)}`).join(', ') + (arr.length > 8 ? ` (+${arr.length - 8} more)` : '');
-      const upd = [...b.keys()].filter((k) => a.has(k) && a.get(k) !== b.get(k));
-      const add = [...b.keys()].filter((k) => !a.has(k));
-      const del = [...a.keys()].filter((k) => !b.has(k));
-      const fbits = [];
-      if (upd.length) fbits.push(`updated ${list(upd)}`);
-      if (add.length) fbits.push(`new ${list(add)}`);
-      if (del.length) fbits.push(`removed ${list(del)}`);
-      if (fbits.length) { ch.push(`- Shared context folder files — ${fbits.join('; ')}`); bits.push('shared files changed'); }
+      const notesAbs = this.contextDirOf(t);
+      const abs = (p) => (p.startsWith('/') ? p : notesAbs ? notesAbs + '/' + p : p);
+      const changed = new Map();   // told item → { upd, add, del } (paths relative to the row)
+      const told = this._toldRows(t).filter((it) => !it.head && !it.gone && it.x && it.x.abs && (it.x.kind === 'dir' || it.x.kind === 'file'));
+      // a path may sit under several rows (a folder row and a file row inside it) — each row hears it at its own depth
+      const itemsOf = (p) => told.filter((it) => (it.x.kind === 'file' ? p === it.x.abs : p.startsWith(it.x.abs + '/')));
+      const note = (p, kind) => {
+        const ap = abs(p);
+        for (const it of itemsOf(ap)) {
+          if (!changed.has(it)) changed.set(it, { upd: [], add: [], del: [] });
+          changed.get(it)[kind].push(it.x.kind === 'file' ? '' : ap.slice(it.x.abs.length + 1));
+        }
+      };
+      for (const k of b.keys()) if (a.has(k) && a.get(k) !== b.get(k)) note(k, 'upd');
+      for (const k of b.keys()) if (!a.has(k)) note(k, 'add');
+      for (const k of a.keys()) if (!b.has(k)) note(k, 'del');
+      for (const [it, c] of changed) {
+        // a file told by its CONTENTS changed ⇒ the agent needs the new text: the full delivery re-tells it
+        const lvl = TC.chosenTell(it.row, it.x.kind);
+        const keys = (it.row.keys || TC.KEY_FILES).map((k) => k.toLowerCase());
+        const told1 = (rel) => lvl === 'contents' || (lvl === 'index' && !rel.includes('/') && keys.includes(rel.toLowerCase()));
+        if ([...c.upd, ...c.add, ...c.del].some(told1)) return null;
+      }
+      for (const [it, c] of changed) {
+        if (it.x.kind === 'file') {
+          // a file row told by name: its folder row (if any) names the change, else its own line does
+          if ([...changed.keys()].some((o) => o !== it && o.x.kind === 'dir' && it.x.abs.startsWith(o.x.abs + '/'))) continue;
+          ch.push(`- ${agentLine(this._shown(it.x, ctxBase, notesAbs))} — ${c.del.length ? 'removed' : c.add.length ? 'is there now' : 'updated'}`);
+          if (!bits.includes('shared files changed')) bits.push('shared files changed');
+          continue;
+        }
+        const shown = this._shown(it.x, ctxBase, notesAbs);
+        const isNotes = notesAbs && it.x.abs === notesAbs;
+        const list = (arr) => arr.slice(0, 8).map((p) => `${agentLine(shown)}${p ? '/' + agentLine(p) : ''}`).join(', ') + (arr.length > 8 ? ` (+${arr.length - 8} more)` : '');
+        const fbits = [];
+        if (c.upd.length) fbits.push(`updated ${list(c.upd)}`);
+        if (c.add.length) fbits.push(`new ${list(c.add)}`);
+        if (c.del.length) fbits.push(`removed ${list(c.del)}`);
+        if (fbits.length) { ch.push(isNotes ? `- Shared context folder files — ${fbits.join('; ')}` : `- Files under ${agentLine(shown)} — ${fbits.join('; ')}`); if (!bits.includes('shared files changed')) bits.push('shared files changed'); }
+      }
     }
     const fresh = (t.progress || []).filter((p) => p.at > (snap.lastProgressAt || 0));
     if (fresh.length) {
@@ -907,13 +1402,14 @@ class TaskGroupManager {
   // Render a single group's precomputed diffChanges result as a block.
   renderDiffBlock(id, changes, { multi = false, ctxBase = null } = {}) {
     const t = this.get(id);
+    const notesAbs = this.contextDirOf(t);
     const gid = multi ? `--group ${t.id} ` : '';
     const ch = changes.lines.slice(); // cap loop mutates
     const head = [
       '<vibespace-task-update>',
       // TASK.md pointer is LOCAL-only: the remote ctx rsync excludes
       // .vibespace/, so <ctxBase>/.vibespace/TASK.md never exists on a host.
-      `Task Group "${agentLine(t.title)}" (${t.id}) changed since your last update — DELTAS ONLY below; everything else you already know still stands. Full current state: \`vibespace-task ${gid}show --full\`${t.contextDir && !ctxBase ? ` (or \`${agentLine(t.contextDir)}/.vibespace/TASK.md\`)` : ''}.`,
+      `Task Group "${agentLine(t.title)}" (${t.id}) changed since your last update — DELTAS ONLY below; everything else you already know still stands. Full current state: \`vibespace-task ${gid}show --full\`${notesAbs && !ctxBase ? ` (or \`${agentLine(notesAbs)}/.vibespace/TASK.md\`)` : ''}.`,
       '',
     ];
     // Hard cap ~5KB — drop change lines from the END (activity sits last = the
@@ -964,10 +1460,14 @@ class TaskGroupManager {
   // (a) explicit membership (sessions[] holds its key), (b) an auto-include
   // folder matching its cwd, or (c) the group it was spawned into
   // (initialGroupId — covers the window before the async UI bind lands).
-  // Belonging is LIVE: a UI bind/drag or a folder change takes effect on the
+  // lane new-session-form: the New Session form spawns into SEVERAL groups —
+  // `initialGroupIds` is that LIST (selection order; the session's
+  // `_initialGroupIds`), joined with the single `initialGroupId` older callers
+  // pass. Belonging is LIVE: a UI bind/drag or a folder change takes effect on the
   // agent's next turn with no respawn (fixes the old bind≠context gap). Returns
   // full task objects, stable order.
-  groupsForSession({ sessionKey, cwd, realCwd, initialGroupId } = {}) {
+  groupsForSession({ sessionKey, cwd, realCwd, initialGroupId, initialGroupIds } = {}) {
+    const spawnedInto = new Set([...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter((x) => typeof x === 'string' && x));
     // Match a folder against the cwd AND its symlink-resolved realpath (a session
     // opened under claude-code-webui → vibespace must match a folder on either).
     // realpath is cached (this runs per prompt; same scheme as routes/sessions.js).
@@ -987,10 +1487,10 @@ class TaskGroupManager {
       if (t.archived) continue;
       let member = false;
       if (sessionKey && Array.isArray(t.sessions) && t.sessions.includes(sessionKey)) member = true;
-      if (!member && initialGroupId && t.id === initialGroupId) member = true;
+      if (!member && spawnedInto.has(t.id)) member = true;
       if (!member && cwds.length) {
-        for (const f of this._sanitizeFolders(t.folders)) {
-          if (cwds.some(c => c === f.path || (f.recursive && c.startsWith(f.path + '/')))) { member = true; break; }
+        for (const f of this.foldersOf(t)) {   // lane task-group-context: the 自动发现会话 rows (recursive)
+          if (cwds.some((c) => insideFolder(c, f))) { member = true; break; }
         }
       }
       if (member) out.push(t);
@@ -1016,7 +1516,7 @@ class TaskGroupManager {
     const now = Date.now();   // B-7960: the zone sentence ONCE, every dateless time below it against the same day
     const head = [
       `<vibespace-task-context>`,
-      `This session belongs to ${ids.length} VibeSpace Task Groups (岗位): ${titles}. Their shared state follows in LAYERS (all groups' identities → shared folders → recent activity)${(!tools || tools.task !== false) ? '; use \`vibespace-task --group <id> …\` to act on a specific group' : ''}. ${OF.zoneSentence(now)}`,
+      `This session belongs to ${ids.length} VibeSpace Task Groups (岗位): ${titles}. Their shared state follows in LAYERS (all groups' identities → their Context tables → recent activity)${(!tools || tools.task !== false) ? '; use \`vibespace-task --group <id> …\` to act on a specific group' : ''}. ${OF.zoneSentence(now)}`,
       this._persistRescueLine(),
     ];
     head.push(...this._toolsSectionParts('--group <id> ', true, tools, fileTools));
@@ -1038,19 +1538,26 @@ class TaskGroupManager {
     // budget — N per-group paragraphs pushed a 2-group payload past 10 KiB)
     const nudge = this.backlogNudgeFor(ids, sessionKey, { multi: true, tools });
     if (nudge) head.push('', nudge);
-    const withDir = ids.filter((id) => ts[id].contextDir);
-    if (withDir.length) {
-      head.push('', `## Shared context folders (each group's shared memory)`, '',
-        `Each folder below is that group's SHARED MEMORY between agents — every session working the group, now and future, reads it (NOT a place for user-facing deliverables). When you learn something other agents of a group will likely need (conventions, gotchas, decisions and their reasons, cross-role details), organize it into a file in that group's folder yourself, without waiting to be asked — skimmable, factual, dated; prefer updating existing files over piling up new ones. The \`.vibespace/\` subfolder inside each is GENERATED and read-only (its TASK.md mirrors the group state).`);
-      for (const id of withDir) {
-        const t = ts[id];
-        const base = baseOf(id) || t.contextDir;
-        head.push('', `### "${agentLine(t.title)}" → \`${agentLine(base)}\`` + (baseOf(id) ? ' _(live-synced copy, newer file wins, ~1 min lag)_' : ''));
-        const files = this._listContextFiles(t.contextDir);
-        if (files.length) head.push(...this._indexRows(files, base, `--group ${id} `));   // B-86d3 ②: byte-budgeted per group
-        else head.push('(no shared files yet)');
-      }
+    // ── THE CONTEXT TABLES (lane task-group-context): each group's rows at their depths, the room shared — a group
+    // takes at most its own budget and an even share of what is left, its unused bytes carried to the next
+    const withRows = ids.filter((id) => this._ctxRows(ts[id]).length);
+    const withNotes = ids.filter((id) => this.contextDirOf(ts[id]));
+    const teach = [];
+    if (withNotes.length) {
+      teach.push('', `## Shared context folders (each group's shared memory)`, '',
+        `Each folder below is that group's SHARED MEMORY between agents (its 记笔记 row in the group's Context table) — every session working the group, now and future, reads it (NOT a place for user-facing deliverables). When you learn something other agents of a group will likely need (conventions, gotchas, decisions and their reasons, cross-role details), organize it into a file in that group's folder yourself, without waiting to be asked — skimmable, factual, dated; prefer updating existing files over piling up new ones. The \`.vibespace/\` subfolder inside each is GENERATED and read-only (its TASK.md mirrors the group state).`);
+      for (const id of withNotes) teach.push(`- "${agentLine(ts[id].title)}" → \`${agentLine(baseOf(id) || this.contextDirOf(ts[id]))}\`` + (baseOf(id) ? ' _(live-synced copy, newer file wins, ~1 min lag)_' : ''));
     }
+    if (withRows.length) {
+      head.push('', `## Context tables (path — note (use); told at each group's chosen depth)`);
+      withRows.forEach((id, i) => {
+        // the logs keep ~600 B a group (≥ 3 lines each, _pickLogLines)
+        const budget = this._budgetFor(head, teach, { share: withRows.length - i, reserve: Math.max(LOG_RESERVE, 600 * ids.filter((g) => (ts[g].progress || []).length).length) });
+        const plan = this._ctxPlan(ts[id], budget, { ctxBase: baseOf(id), gid: `--group ${id} ` });
+        head.push('', `### "${agentLine(ts[id].title)}"`, ...plan.lines);   // its id is in the identities layer above
+      });
+    }
+    head.push(...teach);
     const withLog = ids.filter((id) => (ts[id].progress || []).length);
     const build = (roomPer) => {
       const parts = [...head];
@@ -1095,8 +1602,7 @@ class TaskGroupManager {
         backlog: [],
         progress: [],
         sessions: sanitizeStrArray(groups[name], 2000),
-        folders: sanitizeStrArray(folders[name], 100),
-        contextDir: null,
+        ctx: TC.rowsFromLegacy({ folders: sanitizeStrArray(folders[name], 100) }).rows,   // lane task-group-context: the old group folders → 自动发现会话 rows
         color: null,
         injectContext: true,
         createdAt: at,
@@ -1120,9 +1626,46 @@ class TaskGroupManager {
 
   list() {
     return Object.values(this._state.tasks)
-      .map((t) => ({ ...t, plan: undefined, backlog: (t.backlog || []).map((b) => ({ ...b })), progress: [...(t.progress || [])], sessions: [...(t.sessions || [])], folders: this._sanitizeFolders(t.folders) }))
+      .map((t) => this._view(t))
       .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
   }
+
+  /** lane grants-unify: a group's outside visibility AS THE STORE HOLDS IT → `{externalVisibility: 'visible'|'messageable'|null,
+   *  externalVisibilityExcept: [principal]}` (the members left out; an unreadable row ⇒ null — opaque). */
+  visibilityOf(id) {
+    let rows = [];
+    try { const g = this._grants(); rows = g ? g.rowsFor('group-visibility', String(id)) : []; } catch { rows = []; }
+    const n = rows.length ? GM.normRow(rows[0]) : null;
+    if (!n || !n.ok) return { externalVisibility: null, externalVisibilityExcept: [] };
+    const e = n.row.to.find((x) => x.kind === 'group' && x.id === String(id));
+    return { externalVisibility: e && (e.level === 'visible' || e.level === 'messageable') ? e.level : null, externalVisibilityExcept: n.row.except };
+  }
+  /** THE ONE WRITER of a group's outside visibility: `{externalVisibility?, externalVisibilityExcept?}` (each absent ⇒ kept). */
+  _setVisibility(id, patch) {
+    const g = this._grants();
+    if (!g) throw new Error('the grants store is not available — the visibility was not changed');
+    const cur = this.visibilityOf(id);
+    const level = patch.externalVisibility !== undefined ? (['visible', 'messageable'].includes(patch.externalVisibility) ? patch.externalVisibility : null) : cur.externalVisibility;
+    const except = patch.externalVisibilityExcept !== undefined ? (Array.isArray(patch.externalVisibilityExcept) ? patch.externalVisibilityExcept : null) : cur.externalVisibilityExcept;
+    if (except === null) throw new Error('externalVisibilityExcept must be a list of conversations ({kind:"conversation", key}) and Task Groups');
+    const w = g.set('group-visibility', String(id), level ? { to: [{ kind: 'group', id: String(id), level }], except } : { to: [], except: [] }, 'user');
+    if (!w.ok) throw new Error(w.error || w.code);
+  }
+
+  // ONE group as the wire carries it (list() / view()) — copies, never the live record.
+  // lane task-group-context: the table + where each row points (`ctxRes`, derived); `folders` / `contextDir` are the
+  // DERIVED old names (the 'discover' rows, the 'notes' row) — every reader of the wire keeps working, nothing stores them
+  _view(t) {
+    const rows = this._ctxRows(t), res = this._res(t);
+    return {
+      ...t, plan: undefined, backlog: (t.backlog || []).map((b) => ({ ...b })), progress: [...(t.progress || [])], sessions: [...(t.sessions || [])],
+      ctx: rows.map((r) => ({ ...r, ...(r.tags ? { tags: [...r.tags] } : {}) })),
+      ctxRes: res.map((x) => (x.ref ? { ref: true } : { abs: x.abs || null, kind: x.kind, via: x.via || null, ...(x.host ? { host: x.host } : {}) })),
+      folders: TC.discoverFolders(rows, res), contextDir: TC.notesDir(rows, res),
+      ...this.visibilityOf(t.id),   // int346: lane grants-unify's outside visibility (rows of the grants store) rides this ONE wire shape
+    };
+  }
+  view(id) { return this._view(this.get(id)); }
 
   get(id) {
     const t = this._state.tasks[id];
@@ -1130,7 +1673,7 @@ class TaskGroupManager {
     return t;
   }
 
-  create({ title, kind, archived, objective, sessions, folders, contextDir, color, pattern, injectContext, browserProfileId, browserCap } = {}) {
+  create({ title, kind, archived, objective, sessions, ctx, folders, contextDir, color, pattern, injectContext, browserProfileId, browserCap } = {}) {
     const cleanTitle = String(title || '').trim().slice(0, CAPS.title);
     if (!cleanTitle) throw new Error('title required');
     const id = this._genId(cleanTitle);
@@ -1145,8 +1688,9 @@ class TaskGroupManager {
       backlog: [],
       progress: [],
       sessions: sanitizeStrArray(sessions, 2000),
-      folders: this._sanitizeFolders(folders),
-      contextDir: this._sanitizeContextDir(contextDir),
+      // lane task-group-context: THE table; the old fields still create it (the CLI's --folder / --context-dir ship to
+      // other hosts, an agent manager's verb, an old bundle) — as the rows they mean
+      ctx: this._ctxFromCreate({ ctx, folders, contextDir, id }),
       color: this._sanitizeColor(color),
       pattern: (() => { try { return this._sanitizePattern(pattern); } catch { return null; } })(),
       // Immutable auto-identity slot (2.231.1): lowest free sequence index,
@@ -1169,24 +1713,33 @@ class TaskGroupManager {
     return { ...t };
   }
 
+  _ctxFromCreate({ ctx, folders, contextDir, id }) {
+    let rows = Array.isArray(ctx) ? TC.sanitizeRows(ctx, { selfId: id }) : [];
+    if (folders !== undefined || (contextDir !== undefined && contextDir !== null && contextDir !== '')) {
+      const dir = this._sanitizeContextDir(contextDir);
+      rows = TC.applyLegacyPatch(rows, null, { ...(folders !== undefined ? { folders: this._sanitizeFolders(folders) } : {}), ...(dir ? { contextDir: dir } : {}) });
+    }
+    return rows;
+  }
+
   // Folders are {path, recursive}. recursive:true (default) = sessions in any
   // SUBFOLDER auto-join; false = only sessions whose cwd is EXACTLY path.
   // Accepts legacy bare strings (→ {path, recursive:true}) so old data + old
-  // callers keep working; dedup by path.
+  // callers keep working; dedup by path. PURE folderOf (lane open-task-binds):
+  // a glob tail (`/x/**` — the agent context's own print of a recursive
+  // folder, written back into the store) is the recursive switch, never part
+  // of the path — the stored folder matched no conversation at all.
   _sanitizeFolders(folders) {
     if (!Array.isArray(folders)) return [];
     const seen = new Set();
     const out = [];
     for (const raw of folders) {
-      let p, recursive = true;
-      if (typeof raw === 'string') p = raw;
-      else if (raw && typeof raw === 'object' && typeof raw.path === 'string') { p = raw.path; recursive = raw.recursive !== false; }
-      else continue;
-      p = p.trim().replace(/\/+$/, '');
-      if (!p || seen.has(p)) continue;
+      const f = folderOf(raw);
+      if (!f || seen.has(f.path)) continue;
+      const p = f.path;
       if (!(path.isAbsolute(p) || /^[^:]+::\//.test(p))) continue; // plain abs path or host::path
       seen.add(p);
-      out.push({ path: p, recursive: !!recursive });
+      out.push(f);
       if (out.length >= 100) break;
     }
     return out;
@@ -1237,8 +1790,20 @@ class TaskGroupManager {
     if (patch.archived !== undefined) t.archived = !!patch.archived;
     if (patch.objective !== undefined) t.objective = String(patch.objective || '').slice(0, CAPS.objective);
     if (patch.sessions !== undefined) t.sessions = sanitizeStrArray(patch.sessions, 2000);
-    if (patch.folders !== undefined) t.folders = this._sanitizeFolders(patch.folders);
-    if (patch.contextDir !== undefined) t.contextDir = this._sanitizeContextDir(patch.contextDir);
+    // lane task-group-context: the table is written whole (`ctx`); the old fields still edit it, as the rows they mean
+    // (folders = exactly these 自动发现会话 folders, contextDir = this 记笔记 folder / null = none)
+    const ctxBefore = JSON.stringify(this._ctxRows(t));
+    if (patch.ctx !== undefined) {
+      if (!Array.isArray(patch.ctx)) throw new Error('ctx must be an array of rows');
+      t.ctx = TC.sanitizeRows(patch.ctx, { selfId: t.id });
+    }
+    if (patch.folders !== undefined || patch.contextDir !== undefined) {
+      const legacy = {};
+      if (patch.folders !== undefined) legacy.folders = this._sanitizeFolders(patch.folders);
+      if (patch.contextDir !== undefined) legacy.contextDir = this._sanitizeContextDir(patch.contextDir);
+      t.ctx = TC.applyLegacyPatch(this._ctxRows(t), this._res(t), legacy);
+    }
+    const ctxChanged = JSON.stringify(this._ctxRows(t)) !== ctxBefore;
     if (patch.color !== undefined) t.color = this._sanitizeColor(patch.color);
     if (patch.pattern !== undefined) t.pattern = this._sanitizePattern(patch.pattern);
     if (patch.injectContext !== undefined) t.injectContext = !!patch.injectContext;
@@ -1249,9 +1814,9 @@ class TaskGroupManager {
     // Communication Channels v1 (2.362.0): how visible this group's sessions
     // are to sessions OUTSIDE the group — 'none' (default, opaque) |
     // 'visible' (listable) | 'messageable' (listable + can be messaged).
-    if (patch.externalVisibility !== undefined) {
-      t.externalVisibility = ['visible', 'messageable'].includes(patch.externalVisibility) ? patch.externalVisibility : null;
-    }
+    // lane grants-unify: the level and the members it leaves OUT («除了») are the group's row of the ONE grants store, written
+    // through the ONE writer — the record's own pre-unify `externalVisibility` stays on disk one release, never read
+    if (patch.externalVisibility !== undefined || patch.externalVisibilityExcept !== undefined) this._setVisibility(id, patch);
     // agent browser P1 (§3.2.5): the group's default profile for NEW sessions
     // (a `bp-<8 hex>` id or null); binding/unbinding never rewrites a running
     // session's pin — a default is where a session STARTS
@@ -1289,13 +1854,15 @@ class TaskGroupManager {
     }
     t.updatedAt = Date.now();
     // contentUpdatedAt gates AGENT re-injection: only what the injected context
-    // actually renders (title/objective/backlog/contextDir) counts. Cosmetic
-    // patches (color, injectContext, archived, kind, folders, binds) bump only
+    // actually renders (title/objective/backlog/the Context table) counts.
+    // Cosmetic patches (color, injectContext, archived, kind, binds) bump only
     // updatedAt — they used to trigger a full "was UPDATED" re-injection to
-    // every member agent.
-    if (['title', 'objective', 'backlog', 'contextDir'].some((k) => patch[k] !== undefined)) {
+    // every member agent. The table's own instant (ctxUpdatedAt) also reaches
+    // every group that REFERENCES this one (contentAtOf).
+    if (['title', 'objective', 'backlog'].some((k) => patch[k] !== undefined) || ctxChanged) {
       t.contentUpdatedAt = t.updatedAt;
     }
+    if (ctxChanged) t.ctxUpdatedAt = t.updatedAt;
     this._save();
     this._notify();
     return { ...t };
@@ -1306,6 +1873,8 @@ class TaskGroupManager {
     // its archived Activity log goes with it (first: a failed delete keeps the group, never orphaned words)
     if (archivableId(id)) fs.rmSync(path.join(this._archiveRoot, id), { recursive: true, force: true });
     delete this._state.tasks[id];
+    try { const g = this._grants(); if (g) g.remove('group-visibility', String(id), 'user'); } catch { /* the row of a gone group admits nobody */ }   // lane grants-unify
+    this._legacy.delete(id);
     this._save();
     this._notify();
   }
@@ -1692,8 +2261,7 @@ class TaskGroupManager {
         return list.map((p) => ({ ...p, id: (typeof p.id === 'string' && PROGRESS_ID_RE.test(p.id) && !taken.has(p.id)) ? (taken.add(p.id), p.id) : mintProgressId(taken) }));
       })(),
       sessions: existing?.sessions || [],
-      folders: existing?.folders || [],
-      contextDir: existing?.contextDir || null,
+      ctx: existing ? this._ctxRows(existing) : [],   // lane task-group-context: the table is the store's, never the file's
       color: (typeof fm.color === 'string' && fm.color !== 'null' && !/[{};]/.test(fm.color)) ? fm.color.slice(0, 40) : (existing?.color || null),
       createdAt: existing?.createdAt || now,
       updatedAt: now,
@@ -1738,6 +2306,7 @@ class TaskGroupManager {
       if (!raw || typeof raw !== 'object' || typeof raw.id !== 'string' || !/^T-[\w-]{1,60}$/.test(raw.id)) continue;
       const now = Date.now();
       this._importArchive(raw.id, bundle.archive && bundle.archive[raw.id]);
+      this._legacy.delete(raw.id);   // the imported record is whole — no held old fields of a replaced one
       this._state.tasks[raw.id] = {
         id: raw.id,
         title: String(raw.title || raw.id).slice(0, CAPS.title),
@@ -1774,8 +2343,9 @@ class TaskGroupManager {
           }))) : [];
         })(),
         sessions: sanitizeStrArray(raw.sessions, 2000),
-        folders: this._sanitizeFolders(raw.folders),
-        contextDir: (typeof raw.contextDir === 'string' && path.isAbsolute(raw.contextDir)) ? raw.contextDir : null,
+        // lane task-group-context: a bundle carries the table; an older instance's carries the old fields — their rows
+        ctx: Array.isArray(raw.ctx) ? TC.sanitizeRows(raw.ctx, { selfId: raw.id })
+          : TC.rowsFromLegacy({ folders: this._sanitizeFolders(raw.folders), contextDir: (typeof raw.contextDir === 'string' && path.isAbsolute(raw.contextDir)) ? raw.contextDir : null }).rows,
         color: (typeof raw.color === 'string' && !/[{};]/.test(raw.color)) ? raw.color.slice(0, 40) : null,
         createdAt: Number(raw.createdAt) || now,
         updatedAt: Number(raw.updatedAt) || now,

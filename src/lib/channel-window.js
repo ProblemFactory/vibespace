@@ -108,6 +108,7 @@ import { msgBarActions, msgMenuActions, barKey } from './msg-bar-model.js';
 import { renderMsgBar, syncMsgBar, holdBarOpen, msgActionMenu, renderMsgMore, isTouchFirst } from './channel-msg-bar.js';
 import * as P from '../channel-policy.js';
 import { firstLine } from '../channel-thread.js';
+import { draftsOf, isDraftRecord } from '../channel-record.js';   // lane gmail-draft-not-a-message: a draft is never a message
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { enterSubmits, imeOwnsKey } from './chat-enter-keys.js';
 
@@ -694,6 +695,34 @@ function daySeparator(ms) {
   return d;
 }
 
+/** lane gmail-draft-not-a-message (fleet feedback fb-9aa1d3bd1e: an unsent Gmail draft sat at the top of its thread, dated and
+ *  addressed like a sent mail): THE DRAFTS SECTION — drawn after the thread's last message, never at a draft's date. Each
+ *  standing draft is ONE row: "Draft · not sent", when it was saved, its words (dimmed) — no avatar, no author head, no
+ *  To / Cc (it went to nobody), no message bar (nothing answers or reacts to it). A draft in the Trash is never drawn: one
+ *  dim count line says how many. `view` = `draftsOf(records)`; null when there is nothing to draw. */
+function renderDraftSection(view) {
+  const v = view || {};
+  const drafts = Array.isArray(v.drafts) ? v.drafts : [];
+  const trashed = Number(v.trashed) || 0;
+  if (!drafts.length && !trashed) return null;
+  const sec = el('div', 'chandrafts');
+  for (const d of drafts) {
+    const row = el('div', 'chandraft');
+    row.dataset.draftVid = d.vendorId || '';
+    const head = el('div', 'chandraft-head');
+    head.appendChild(icon('pencil', 12, 'chandraft-ic'));
+    head.appendChild(el('b', 'chandraft-tag', t('Draft · not sent')));
+    const when = el('span', 'chandraft-at', t('saved {time}', { time: stamp(d.at) }));
+    when.title = fullStamp(d.at);
+    head.appendChild(when);
+    row.appendChild(head);
+    if (d.text) row.appendChild(el('div', 'chandraft-text', d.text));
+    sec.appendChild(row);
+  }
+  if (trashed) sec.appendChild(el('div', 'chandraft-gone', trashed === 1 ? t('1 deleted draft') : t('{n} deleted drafts', { n: trashed })));
+  return sec;
+}
+
 /**
  * Open (or focus) the window for ONE conversation. Singleton PER CONVERSATION
  * — the registry's `singleton` flag is per KIND, which is not what we want:
@@ -707,7 +736,8 @@ function daySeparator(ms) {
 export function renderAroundRows(records, { focus = null } = {}) {
   const out = [];
   let prev = null;
-  for (const rec of Array.isArray(records) ? records : []) {
+  const view = draftsOf(Array.isArray(records) ? records : []);   // lane gmail-draft-not-a-message: the drafts apart, after the last message
+  for (const rec of view.messages) {
     if (!rec) continue;
     // the window's DAY SEPARATOR too (lane around-sheet-fix): the vendor's history reaches back years — a bare "10:12" says nothing
     if (!prev || dayKey(prev.at) !== dayKey(rec.at)) out.push(daySeparator(rec.at));
@@ -717,6 +747,8 @@ export function renderAroundRows(records, { focus = null } = {}) {
     out.push(row);
     prev = rec;
   }
+  const ds = renderDraftSection(view);
+  if (ds) out.push(ds);
   return out;
 }
 
@@ -778,6 +810,10 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
    *  is reading). */
   const folds = new Map();
   const drawn = new Set();
+  /** lane gmail-draft-not-a-message: the drafts the pages carried (vendorId → record) and the account's own SENT mail drawn
+   *  (the instants a later send stands for an earlier draft) — the drafts section is re-derived from both (`draftsOf`). */
+  const draftsSeen = new Map();
+  const sentSeen = [];
   /** §25 (verify round): the composer's text across a footer rebuild — a
    *  disconnect flips the footer to the read-only line; the words the person
    *  typed come back with the composer after the re-authorization. */
@@ -1293,9 +1329,10 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   const JUMP_PAGES_MAX = 5;
   async function jumpTo(vid, place) {
     const flash = (row) => { row.scrollIntoView({ block: 'center' }); row.classList.remove('chanmsg-flash'); void row.offsetWidth; row.classList.add('chanmsg-flash'); setTimeout(() => row.classList.remove('chanmsg-flash'), 1200); };
-    const find = () => list.querySelector(`.chanmsg[data-vid="${CSS.escape(String(vid))}"]`);
+    const find = () => list.querySelector(`.chanmsg[data-vid="${CSS.escape(String(vid))}"], .chandraft[data-draft-vid="${CSS.escape(String(vid))}"]`);
     let row = find();
     if (row) { flash(row); return; }
+    if (draftsSeen.has(String(vid))) return;   // lane gmail-draft-not-a-message: a draft a later save or send replaced — no page holds it
     // lane channel-window-tidy: a SENT proposal's message (`place.sent` = its instant) newer than the oldest drawn row
     // is not older — no page up finds it; it is drawn once the conversation's next read brings it
     const notYet = !!(place && place.sent && oldest !== null && Number(place.sent) >= oldest);
@@ -1496,7 +1533,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     const head = recs[0];
     oldest = Number(head.at) || 0;
     oldestId = head.vendorId || null;
-    list.insertBefore(rowsOf(recs, null), prepend ? list.firstChild : (outboxSec.isConnected ? outboxSec : null));
+    list.insertBefore(rowsOf(recs, null), prepend ? list.firstChild : tailSlot());
     dedupeDays();
     observeRows(list);
     return recs.length;
@@ -1505,8 +1542,12 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
    *  (its author run and day continue across the seam). */
   function rowsOf(recs, prev) {
     const frag = document.createDocumentFragment();
+    let draftsMoved = false;
     for (const rec of recs) {
       if (rec && rec.vendorId) drawn.add(rec.vendorId);
+      // lane gmail-draft-not-a-message: a DRAFT is no row of the conversation — it waits for the drafts section (the end)
+      if (isDraftRecord(rec)) { draftsSeen.set(rec.vendorId || rec.id, rec); draftsMoved = true; continue; }
+      if (rec && rec.author && rec.author.isSelf === true && rec.kind === undefined) { sentSeen.push({ at: rec.at, threadKey: rec.threadKey || null, convId: rec.convId, author: { isSelf: true } }); draftsMoved = true; }
       if (!prev || dayKey(prev.at) !== dayKey(rec.at)) frag.appendChild(daySeparator(rec.at));
       // W4 (lane channel-threads): a REPLY breaks the run (its quote line needs a head), and so does a thread's ROOT
       const rootChip = !!(rec.place && rec.place.thread && rec.place.thread.isRoot);
@@ -1514,6 +1555,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
       frag.appendChild(renderRecord(rec, { cont, base, folds, mail, ctx: rowCtx }));
       prev = rec;
     }
+    if (draftsMoved) renderDrafts();
     // lane channel-avatars: THE WARM-UP — the drawn authors' pictures, newest first, ≤ Av.WARM_MAX, deduped, the answered skipped
     warmAvatars(recs.slice().reverse().filter((r) => r && r.author && r.author.id && !r.author.isSelf && r.adapterId).map((r) => ({ account: String(r.adapterId), author: String(r.author.id), conv: r.convId ? String(r.convId) : null })));
     return frag;
@@ -1572,13 +1614,13 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     const seam = tailSeam();
     const after = (x) => !seam || Number(x.at) > seam.at || (Number(x.at) === seam.at && String(x.vendorId) > seam.vendorId);
     const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
-    if (!fresh.every(after)) {
+    if (!fresh.filter((x) => !isDraftRecord(x)).every(after)) {   // a draft lands in its own section, wherever its date
       const top = list.scrollTop;
       await renderNow({ keepScroll: stick ? null : top });
       return;
     }
     list.querySelector('.chanwin-empty')?.remove();
-    list.insertBefore(rowsOf(fresh, seam), outboxSec.isConnected ? outboxSec : null);
+    list.insertBefore(rowsOf(fresh, seam), tailSlot());
     dedupeDays();
     observeRows(list);
     if (stick) list.scrollTop = list.scrollHeight;
@@ -1606,6 +1648,13 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
   // P3: this conversation's proposals, rendered INLINE from the same store
   // the Outbox window reads (§9.2). Re-read on `channel-outbox-updated`.
   const outboxSec = el('div', 'chanwin-outbox-slot');
+  // lane gmail-draft-not-a-message: THE DRAFTS SLOT — after the last message, before the Outbox; every row lands above it
+  const draftSec = el('div', 'chanwin-drafts-slot');
+  const tailSlot = () => (draftSec.isConnected ? draftSec : outboxSec.isConnected ? outboxSec : null);
+  function renderDrafts() {
+    const sec = renderDraftSection(draftsOf([...sentSeen, ...draftsSeen.values()].sort((a, b) => (Number(a.at) || 0) - (Number(b.at) || 0))));
+    if (sec) draftSec.replaceChildren(sec); else draftSec.textContent = '';
+  }
   // lane channel-window-tidy: which decided lines are open and whether the handled ones are unfolded — the WINDOW's, so
   // every redraw (a broadcast, a rebuild, an emptied section) keeps them
   const outboxUi = { open: new Set(), fold: false };
@@ -1626,10 +1675,12 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     try {
       list.textContent = '';
       drawn.clear();
+      draftsSeen.clear(); sentSeen.length = 0; draftSec.textContent = '';
       oldest = null; oldestId = null;
       historyExhausted = false;
       const n = await loadPage({});
       if (!n) list.appendChild(el('div', 'chanwin-empty', t('No messages yet.')));
+      list.appendChild(draftSec);
       list.appendChild(outboxSec);
       await renderOutbox();
       list.scrollTop = keepScroll === null ? list.scrollHeight : keepScroll;

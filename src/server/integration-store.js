@@ -302,7 +302,8 @@ function create(deps = {}) {
   function clusterPresetsFor(row) {
     if (row.delegate) {
       // lane oauth-relay-road: + the client's relay page, when the entry names one (the Gmail row's `relayUrl` field)
-      return (drivePresets() || []).map((p) => ({ key: String(p.key), label: String(p.label || p.key), values: { clientId: String(p.clientId || ''), clientSecret: String(p.clientSecret || ''), ...(typeof p.relayUrl === 'string' && p.relayUrl ? { relayUrl: p.relayUrl } : {}) } }));
+      // lane oauth-setup-instructions: + the client's kind (web | desktop), when the entry says (the Gmail row's `clientType`)
+      return (drivePresets() || []).map((p) => ({ key: String(p.key), label: String(p.label || p.key), values: { clientId: String(p.clientId || ''), clientSecret: String(p.clientSecret || ''), ...(typeof p.relayUrl === 'string' && p.relayUrl ? { relayUrl: p.relayUrl } : {}), ...(p.clientType === 'web' || p.clientType === 'desktop' ? { clientType: p.clientType } : {}) } }));
     }
     const src = clusterJsonEntries();
     let json = src.entries.filter((e) => e.id === row.id);
@@ -443,7 +444,8 @@ function create(deps = {}) {
   /** lane pod-oauth-callback: the preset values its row DECLARES readable (`clusterEnv.facts` — Lark's brand) as
    *  `{facts}`; each a short word, never a field's value (checkRow: facts ⊆ extras); nothing named ⇒ nothing added. */
   function presetFactsOf(row, values) {
-    const names = row.clusterEnv && Array.isArray(row.clusterEnv.facts) ? row.clusterEnv.facts : [];
+    // lane oauth-setup-instructions: a delegating row names its own (`delegate.facts` — Gmail's clientType)
+    const names = row.clusterEnv && Array.isArray(row.clusterEnv.facts) ? row.clusterEnv.facts : row.delegate && Array.isArray(row.delegate.facts) ? row.delegate.facts : [];
     const facts = {};
     for (const k of names) { const v = values && values[k]; if (typeof v === 'string' && /^[A-Za-z0-9._-]{1,40}$/.test(v.trim())) facts[k] = v.trim(); }
     return Object.keys(facts).length ? { facts } : {};

@@ -149,10 +149,13 @@ console.log('— activity —');
 console.log('— context folder —');
 {
   const ctxDir = path.join(tmp, 'ctx'); fs.mkdirSync(ctxDir, { recursive: true });
-  const snap = mgr.snapshotForDiff(t.id); // contextDir: null
+  const snap = mgr.snapshotForDiff(t.id); // no Context table rows yet
   mgr.update(t.id, { contextDir: ctxDir });
   const d = mgr.renderContextDiff(t.id, snap, {});
-  check('contextDir change → null (fall back to FULL context)', d === null, JSON.stringify(d));
+  // lane task-group-context: the notes folder is a ROW of the Context table now — designating one re-tells that row at its
+  // depth (its listing), so pre-existing files are never left invisible; only a LITE (restored) snapshot falls back to full
+  check('contextDir designated → its Context row is re-told (path + listing), not a bare "folder is now X"', typeof d === 'string' && d.includes('Context row ADDED') && d.includes(`${ctxDir}/ — (no note yet) (agents keep the group's shared notes here)`), d);
+  check('…a restored LITE snapshot (no row list) still falls back to the FULL context', mgr.renderContextDiff(t.id, { ...snap, ctxRows: undefined }, {}) === null);
 
   // file-level diff rides on the signatures agent-routes already tracks
   const snap2 = mgr.snapshotForDiff(t.id);

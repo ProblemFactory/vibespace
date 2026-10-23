@@ -5,6 +5,14 @@
 // tool, vibespace-design (the Design window). Auth: VIBESPACE_SESSION_TOKEN
 // (agent session) or VIBESPACE_JOB_TOKEN (Background Work). Full manual:
 // vibespace-docs pages.
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-page: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-page', flags: ['--timeout', '--call-timeout'] });
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -31,7 +39,7 @@ Hosted pages run sandboxed (opaque origin): their scripts run, they cannot reach
 Designs (screens, mockups to watch while you draft them): vibespace-design — vibespace-docs design.`;
 
 async function call(method, p, { body, headers } = {}) {
-  const res = await fetch(API + p, { method, headers: { Authorization: 'Bearer ' + TOKEN, ...(headers || {}) }, body }).catch((e) => ({ _neterr: e.message }));
+  const res = await CC.call(API + p, { ...(method !== 'GET' ? { cls: 'wake' } : {}), method, headers: { Authorization: 'Bearer ' + TOKEN, ...(headers || {}) }, body }).catch((e) => ({ _neterr: e.message }));
   if (res._neterr) { console.error('vibespace-page: server unreachable (' + res._neterr + ')'); process.exit(3); }
   let j = {};
   try { j = await res.json(); } catch { }

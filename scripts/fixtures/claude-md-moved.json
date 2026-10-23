@@ -8,7 +8,13 @@
    "region": "## INDEX",
    "lines": 577,
    "sha256": "030217ba27774f3e584dbad08c31447ecfd4ef735ca4b290124301cd8e9c44dd",
-   "retired": [],
+   "retired": [
+    {
+     "head": "432a5bdcdf",
+     "why": "lane path-field: src/lib/autocomplete.js DELETED — THE path field (src/lib/path-field.js) replaced setupDirAutocomplete at every door",
+     "at": "2026-10-23"
+    }
+   ],
    "rows": [
     "8b5dc9a99d:13daaebdea",
     "f1b9018473:f1b9018473",

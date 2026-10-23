@@ -87,6 +87,7 @@ try {
   const outReal = await runAll(CLI);
   ok(!outReal.includes(TOKEN) && !outReal.includes(CODE) && outReal.includes('vswh_[withheld]') && outReal.includes('vswp_[withheld]'), 'a vswh_ token AND a vswp_ pairing code planted in EVERY answer field (title, names, text, ids, errors) never reaches stdout / stderr — withheld at the door', outReal.slice(0, 400));
   const noDoor = path.join(tmp, 'vibespace-channels-nodoor');
+  for (const m of ['agent-cli-text.js', 'cli-call.js']) fs.copyFileSync(path.join(repo, 'src', m), path.join(tmp, m));   // lane cli-call-timeouts: a copy outside the checkout reads its modules beside it
   fs.writeFileSync(noDoor, src.replace(DOOR, DOOR.replace(".replace(/(vswh|vswp)_[A-Za-z0-9_-]*/g, '$1_[withheld]')", '')));
   const outNoDoor = await runAll(noDoor);
   ok(outNoDoor.includes(TOKEN) && outNoDoor.includes(CODE), 'CONTROL: the same CLI whose door does not withhold prints the planted token (RED)');

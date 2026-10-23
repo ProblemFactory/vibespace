@@ -152,11 +152,13 @@ async function plant() {
   const deep = T - 86400e3 - 49000 * 1000;
   await ix.update(() => {
     for (const id of Object.values(BURIED)) Object.assign(ix.entry(A, id), { title: `Buried ${id}`, kind: 'group', lastAt: deep, unread: 0, lastText: 'quiet for weeks' });
-    Object.assign(ix.entry(A, BURIED.assigned), { access: [{ principal: { kind: 'agent', id: 'cid-b', name: 'Bee' }, authority: 'draft' }], watchers: [{ principal: { kind: 'agent', id: 'cid-b', name: 'Bee' }, notify: 'each', mode: 'all' }] });
     ix.entry(A, BURIED.read).agentReads = [{ id: 'cid-r', name: 'Reader', at: T - 3600e3, upTo: deep }];
     ix.entry(A, BURIED.held).stats = { wakes: [{ at: T - 7200e3, ok: false, lane: 'none', n: 1 }] };
     ix.entry(A, BURIED.replied).selfAt = T - 600e3;
   });
+  // lane grants-unify: the hand-over is the grain's rows in THE grants store — written through the product's door
+  const ga = await eng.setGrain(A, { kind: 'conversation', convId: BURIED.assigned }, { access: [{ principal: { kind: 'agent', id: 'cid-b', name: 'Bee' }, authority: 'draft' }], watchers: [{ principal: { kind: 'agent', id: 'cid-b', name: 'Bee' }, mode: 'all' }] });
+  if (!ga.ok) throw new Error(`plant: setGrain ${ga.error}`);
   await eng.store.outbox.update((ob) => {
     ob.proposals = ob.proposals || {};
     ob.proposals['p-b1'] = { id: 'p-b1', key: `${A}/${BURIED.awaiting}`, adapterId: A, convId: BURIED.awaiting, state: 'awaiting-approval', text: 'draft', draftedBy: { kind: 'agent', id: 'cid-a' }, at: T - 60e3, updatedAt: T - 60e3 };

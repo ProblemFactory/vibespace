@@ -1189,7 +1189,7 @@ console.log('§4d a restart\'s first prompt: the re-delivered full context never
   const groupRow = { id: 'T-house', title: '3D house', updatedAt: 1, contentUpdatedAt: 1 };
   AR.setupAgentRoutes({
     app, activeSessions: f.sessions,
-    tasks: { groupsForSession: () => [groupRow], renderContext: () => FULL(), snapshotForDiff: () => ({}), contextDirSignature: () => '', _persistRescueLine: () => 'If a block is cut, read it with vibespace-task show --full (persisted-output).', backlogNudgeFor: () => '' },
+    tasks: { groupsForSession: () => [groupRow], renderContext: () => FULL(), snapshotForDiff: () => ({}), contextDirSignature: () => '', contextSignature: () => '', contentAtOf: (g) => g.contentUpdatedAt || g.updatedAt, _persistRescueLine: () => 'If a block is cut, read it with vibespace-task show --full (persisted-output).', backlogNudgeFor: () => '' },
     sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
     userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId, serverSetting: (k) => (k === 'agents.perTurnToolReminder' ? false : undefined),
     integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null,
@@ -1245,7 +1245,7 @@ console.log('§4d2 three groups\' reports fill the held room beside a 6 KB pream
     const FULL = () => { const head = '# Task Group "3D house" (T-house)\nObjective: the house model\n'; const lines = []; for (let i = 0; Buffer.byteLength(head + lines.join('\n'), 'utf-8') < full; i++) lines.push(`- activity line ${i} ` + 'x'.repeat(40)); return head + lines.join('\n'); };
     AR.setupAgentRoutes({
       app, activeSessions: f.sessions,
-      tasks: { groupsForSession: () => [{ id: 'T-house', title: '3D house', updatedAt: 1, contentUpdatedAt: 1 }], renderContext: () => FULL(), snapshotForDiff: () => ({}), contextDirSignature: () => '', _persistRescueLine: () => 'If a block is cut, read it with vibespace-task show --full (persisted-output).', backlogNudgeFor: () => '' },
+      tasks: { groupsForSession: () => [{ id: 'T-house', title: '3D house', updatedAt: 1, contentUpdatedAt: 1 }], renderContext: () => FULL(), snapshotForDiff: () => ({}), contextDirSignature: () => '', contextSignature: () => '', contentAtOf: (g) => g.contentUpdatedAt || g.updatedAt, _persistRescueLine: () => 'If a block is cut, read it with vibespace-task show --full (persisted-output).', backlogNudgeFor: () => '' },
       sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
       userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId,
       serverSetting: (k) => (k === 'agents.perTurnToolReminder' ? false : k === 'agents.injectPreamble' ? '请'.repeat(2000) : undefined),
@@ -1290,7 +1290,7 @@ console.log('§4d3 a 4 KB report rides WHOLE beside a 3.4 KB tools section + a t
   const push2 = (a, b) => queues.set(KEY, [...(queues.get(KEY) || []), notice(a), notice(b)]);
   AR.setupAgentRoutes({
     app, activeSessions: f.sessions,
-    tasks: { groupsForSession: () => [{ id: 'T-lanes', title: 'lanes', updatedAt: 1, contentUpdatedAt: 1 }], renderContext: () => TOOLS + '\n\n' + TASK, snapshotForDiff: () => ({}), contextDirSignature: () => '', _persistRescueLine: () => 'If a block is cut, read it with vibespace-task show --full (persisted-output).', backlogNudgeFor: () => '' },
+    tasks: { groupsForSession: () => [{ id: 'T-lanes', title: 'lanes', updatedAt: 1, contentUpdatedAt: 1 }], renderContext: () => TOOLS + '\n\n' + TASK, snapshotForDiff: () => ({}), contextDirSignature: () => '', contextSignature: () => '', contentAtOf: (g) => g.contentUpdatedAt || g.updatedAt, _persistRescueLine: () => 'If a block is cut, read it with vibespace-task show --full (persisted-output).', backlogNudgeFor: () => '' },
     sessionStatus: { pendingNotices: (k) => queues.get(k) || [], consumeNotices: (k, n) => { const q = queues.get(k) || []; queues.set(k, n === undefined ? [] : q.slice(n)); }, dropNotices: (k, pred) => { const q = queues.get(k) || []; const keep = q.filter((x) => !pred(x)); queues.set(k, keep); return q.length - keep.length; }, get: () => null, rekey() {} }, SessionStatusManager,
     userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId, serverSetting: (k) => (k === 'agents.perTurnToolReminder' ? false : undefined),
     integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null,

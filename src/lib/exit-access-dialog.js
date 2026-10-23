@@ -14,11 +14,16 @@
 // GET /api/hosts/:id/exit-access — never the row's broadcast copy (mirror-193) — and saves ONE PATCH with the
 // `base` it read: a list changed meanwhile ⇒ 409, the sentence, the dialog re-drawn from the list as it is.
 // Every peer-controlled string (a conversation name, a group title) is textContent only.
+// «除了» (lane grants-unify): with a Task Group or All agents picked, the picker's folded exception row leaves members
+// out of that list (the grant model's `except` — they are refused `excepted` by name); the lists live in the ONE grants
+// store, the view arrives in the model's spelling (`{kind:'conversation', key}` / `{kind:'group', id}`), drawn and
+// saved through the picker model's `rowToPick` / the live-session resolution below.
 import { t } from './i18n.js';
 import { createModalShell, showToast } from './utils.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { agoText } from './user-todos-row.js';
-import { exitAccessOf, summaryOf, spawnFailureText } from '../exit-reach.js';
+import { accessOfView, summaryOf, spawnFailureText } from '../exit-reach.js';
+import { rowToPick } from './principal-picker-model.js';
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
 
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
@@ -39,11 +44,12 @@ function hubDefaultText(info) {
 /** The words of one grant's summary (row, toast): nobody · everyone · {n} picked (+ " (ask me)" for run). */
 function grantWords(g, { ask = false } = {}) {
   const base = g.mode === 'everyone' ? t('All agents') : g.mode === 'only' ? t('{n} picked', { n: g.n }) : g.mode === 'unknown' ? t('unreadable') : t('nobody');
-  return base + (ask && g.mode !== 'nobody' ? t(' (ask me)') : '');
+  return base + (g.x ? t(', {n} left out', { n: g.x }) : '') + (ask && g.mode !== 'nobody' ? t(' (ask me)') : '');
 }
-/** The machine row's line: `Exit: network — everyone · commands — 2 picked (ask me)`. `exit` = the stored record. */
+/** The machine row's line: `Exit: network — everyone · commands — 2 picked (ask me)`. `exit` = the row's served view
+ *  (GET /api/hosts — its lists from the grants store). */
 export function exitSummaryText(exit) {
-  const s = summaryOf(exitAccessOf({ exit }));
+  const s = summaryOf(accessOfView(exit));
   return t('Exit: network — {a} · commands — {b}', { a: grantWords(s.use), b: grantWords(s.run, { ask: s.run.ask }) });
 }
 /** `Last run: ping -c1 … — 运维管理, 3 min ago, exit 0` (the whole command rides the title). */
@@ -140,28 +146,16 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
         radioEls[m] = r;
       }
       sec.appendChild(radios);
-      // the picker: the live roster + every row of the CURRENT list the roster does not cover
-      const stored = Array.isArray(g.who) ? g.who : [];
-      const live = roster();
-      const extra = [];
-      const selected = g.mode === 'everyone' ? [EVERYONE_KEY] : [];
-      for (const p of stored) {
-        if (p.kind === 'group') {
-          const k = `group:${p.id}`;
-          if (!live.some((r) => r.key === k)) extra.push({ key: k, kind: 'group', id: p.id, name: p.name || p.id, hint: t('a deleted Task Group'), groupIds: [], groupNames: [] });
-          selected.push(k);
-        } else {
-          const cid = String(p.id).includes(':') ? String(p.id).slice(String(p.id).indexOf(':') + 1) : p.id;
-          const backend = String(p.id).split(':')[0];
-          const hit = live.find((r) => r.kind === 'agent' && (backend === 'webui' ? String(r.webuiId) === cid : (r.id === cid && (r.backend || 'claude') === backend)));
-          if (hit) selected.push(hit.key);
-          else { const k = `session:${p.id}`; extra.push({ key: k, kind: 'agent', id: p.id, name: p.name || cid.slice(0, 8), hint: t('not running now'), groupIds: [], groupNames: [] }); selected.push(k); }
-        }
-      }
+      // the picker: the live roster + every row of the CURRENT list the roster does not cover (and its exceptions)
+      const pick = rowToPick({ to: [...(g.mode === 'everyone' ? [{ kind: 'everyone' }] : []), ...(g.mode === 'nobody' ? [] : g.who || [])], except: g.mode === 'nobody' ? [] : g.except || [] },
+        roster(), { everyoneKey: EVERYONE_KEY, notRunning: t('not running now'), deletedGroup: t('a deleted Task Group') });
+      const extra = pick.extra;
+      const selected = pick.selected;
       const items = () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))];
       const pickerWrap = el('div', 'exit-access-picker');
       pickerWrap.appendChild(el('p', 'agents-note', t('Pick All agents, or conversations and Task Groups. A Task Group means every conversation in it — now or later.')));
-      const picker = principalPicker({ items, app, multi: true, selected, placeholder: t('Search sessions and groups…'), label: grant === 'use' ? t('Borrow its network') : t('Run commands on it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, onChange: () => { refuseLine.textContent = ''; syncCount(); } });
+      const picker = principalPicker({ items, app, multi: true, selected, placeholder: t('Search sessions and groups…'), label: grant === 'use' ? t('Borrow its network') : t('Run commands on it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, onChange: () => { refuseLine.textContent = ''; syncCount(); },
+        except: { selected: pick.except, extra } });   // «除了» — members left out of a picked Task Group / All agents
       pickerWrap.appendChild(picker.el);
       // verify r1 T2 ④: with ALL AGENTS picked the sentence says what that IS — every conversation, the ones started
       // later included, as you — per grant; the run sentence follows "Ask me each time"
@@ -193,11 +187,14 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       const syncCount = () => {
         const used = (d.usedBy && d.usedBy[grant]) || [];
         const sel = new Set(picker.selected());
+        const out = new Set(picker.except());
         const covered = (sid) => {
           if (mode === 'nobody') return false;
-          if (sel.has(EVERYONE_KEY)) return true;   // ALL AGENTS covers every conversation
           const r = roster().find((x) => String(x.webuiId) === String(sid));
-          return !!r && (sel.has(r.key) || (r.groupIds || []).some((gid) => sel.has(`group:${gid}`)));
+          if (r && sel.has(r.key)) return true;               // its own place in the list
+          if (r && out.has(r.key)) return false;              // «除了» — left out
+          if (sel.has(EVERYONE_KEY)) return true;   // ALL AGENTS covers every conversation
+          return !!r && (r.groupIds || []).some((gid) => sel.has(`group:${gid}`));
         };
         const n = used.filter((u) => !covered(u.sessionId)).length;
         countLine.textContent = n > 0 ? t('{n} conversation(s) using it now will lose it when you save', { n }) : '';
@@ -266,12 +263,17 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
           // ALL AGENTS = the stored `everyone` mode; the rows picked beside it ride along (kept, restored when All goes)
           if (all) g.mode = 'everyone';
           const rows = roster();
-          g.who = keys.map((k) => {
+          // a LIVE conversation is sent by its webui id (the route resolves its conversation key — a pending fork's own);
+          // a stored one not running now as the key it has; a Task Group by its id
+          const wire = (k) => {
             if (k.startsWith('group:')) return { kind: 'group', id: k.slice('group:'.length) };
-            if (k.startsWith('session:')) return { kind: 'session', id: k.slice('session:'.length) };
             const r = rows.find((x) => x.key === k);
-            return r && r.webuiId ? { kind: 'session', session: String(r.webuiId), name: r.name } : null;
-          }).filter(Boolean);
+            if (r && r.webuiId) return { kind: 'session', session: String(r.webuiId), name: r.name };
+            const x = extra.find((e) => e.key === k);
+            return x && x.kind === 'agent' ? { kind: 'conversation', key: String(x.id) } : null;
+          };
+          g.who = keys.map(wire).filter(Boolean);
+          g.except = s.picker.except().map(wire).filter(Boolean);   // «除了»
         }
         if (grant === 'run') g.ask = !!(s.askBox && s.askBox.checked);
         out[grant] = g;
@@ -285,7 +287,7 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       } catch (e) { j = { error: e.message }; res = { ok: false, status: 0 }; }
       save.disabled = false;
       if (res.ok && !j.error) {
-        const s = summaryOf(exitAccessOf({ exit: { use: j.access.use, run: j.access.run } }));
+        const s = summaryOf(accessOfView(j.access));
         showToast(t('Who can use {machine}: network — {a}; commands — {b}', { machine, a: grantWords(s.use), b: grantWords(s.run, { ask: s.run.ask }) }));
         close();
         return;

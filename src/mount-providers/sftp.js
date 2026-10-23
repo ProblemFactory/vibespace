@@ -75,7 +75,7 @@ module.exports = {
       { key: 'sshUser', label: i18nKey('SSH user'), placeholder: 'ubuntu' },
       { key: 'sshPort', label: i18nKey('Port'), placeholder: '22' },
       { key: 'sshPath', label: i18nKey('Remote path (optional)'), placeholder: '/home/ubuntu/data', autocomplete: { hostDir: 'fromHost' } },
-      { key: 'keyPath', label: i18nKey('Private key path (absolute) — or use password'), placeholder: '~/.ssh/id_ed25519', autocomplete: 'local' },
+      { key: 'keyPath', label: i18nKey('Private key path (absolute) — or use password'), placeholder: '~/.ssh/id_ed25519', autocomplete: 'local', pathKind: 'file' },
       { key: 'pass', label: i18nKey('Password (if no key)'), type: 'password' },
     ],
   },

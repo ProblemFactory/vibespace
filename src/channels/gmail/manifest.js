@@ -11,7 +11,12 @@
 // `t` / `i18nKey` are only EXTRACTION MARKERS (English-string-as-key): the client re-wraps every word with the real t().
 const t = (s) => s;
 const i18nKey = (s) => s;
-const { RELAY_DEFAULT } = require('../../consent-road.js');   // PURE: the project's public relay page (the relay setting's default — a person's own app only)
+const { RELAY_DEFAULT } = require('../../consent-road.js');
+/** lane oauth-setup-instructions: Gmail's FIXED loopback — the address a Google WEB application client registers for a
+ *  browser on this machine (a Web client takes only exact addresses, so the ephemeral port cannot serve it; a Desktop
+ *  client keeps any port). Fixed and documented (deploy/README.md); a port another program holds falls through to the
+ *  named refusal + the paste-back, as Lark's does. Lark has 17865. */
+const GMAIL_LOOPBACK_URL = 'http://127.0.0.1:17866/gmail/cb';   // PURE: the project's public relay page (the relay setting's default — a person's own app only)
 
 // Gmail meters in quota units, 6000 a minute per user (a thread read 40, a change check 2), and refuses bursts well
 // inside that (lane R5): half the minute (3000), 40 units a second = one thread read a second
@@ -79,11 +84,25 @@ function integrationRow({ V, okV, bad }) {
       // the cluster's own page (the admin host's /relay/); empty = the fleet's, else none, never the public page
       { key: 'relayUrl', label: i18nKey('Relay page'), secret: false, required: false, placeholder: 'https://…/relay/',
         help: i18nKey('The company app’s relay page: the https page it sends every member back through after a sign-in — the fleet’s admin host /relay/. Register it once under the app’s Redirect URLs. Empty = the fleet’s relay page on a fleet pod, else none (the sign-in comes back to the instance’s own address). A company app never uses the public relay page.'), validate: relayPage },
+      // lane oauth-setup-instructions: WHICH kind of Google client it is (a gdrive-clients entry's `clientType`) — a Web
+      // application client takes exact addresses (the relay page, the instance's route, Gmail's fixed loopback); a Desktop
+      // app client any 127.0.0.1 port and never an https address. Empty = not said (the measured fleet client is Desktop)
+      { key: 'clientType', label: i18nKey('Client type'), secret: false, required: false, placeholder: 'web',
+        help: i18nKey('web = a Web application client (it takes the https relay page and this VibeSpace’s https address, and on this machine the fixed 127.0.0.1 address); desktop = a Desktop app client (any 127.0.0.1 port, never an https address). Empty = not said.'),
+        validate: (v) => (['web', 'desktop'].includes(String(v)) ? okV : bad('must be web or desktop')) },
     ],
-    delegate: { to: 'drive-presets', prefer: 'channels', multi: true },
+    delegate: { to: 'drive-presets', prefer: 'channels', multi: true, facts: ['clientType'] },
     // lane oauth-relay-road: where a Google client lists the relay pages the account dialog names (registered once)
     setup: {
       callbackNote: i18nKey('Google Cloud console → APIs & Services → Credentials → the OAuth client → Authorized redirect URIs. It must be a Web application client: a Desktop client cannot take an https address.'),
+    },
+    // lane oauth-setup-instructions: the setup card's facts (src/oauth-setup.js) — and deploy/README.md's, generated from them
+    redirect: {
+      console: { path: i18nKey('Google Cloud console → APIs & Services → Credentials → OAuth 2.0 Client IDs → your client → Authorized redirect URIs'), links: [{ label: i18nKey('Google Cloud console'), url: 'https://console.cloud.google.com/apis/credentials' }] },
+      refusal: 'Error 400: redirect_uri_mismatch',
+      clientTypes: true,
+      loopback: GMAIL_LOOPBACK_URL,
+      also: [{ uri: 'http://127.0.0.1:53682/', for: 'drive' }],   // rclone's own sign-in port (a Drive folder, the same Google client)
     },
     test: {
       kind: 'shape-only',
@@ -99,4 +118,4 @@ function integrationRow({ V, okV, bad }) {
   };
 }
 
-module.exports = { kind: 'gmail', adapter: 'src/channels/gmail.js', settings, integrationRow };
+module.exports = { kind: 'gmail', adapter: 'src/channels/gmail.js', settings, integrationRow, GMAIL_LOOPBACK_URL };

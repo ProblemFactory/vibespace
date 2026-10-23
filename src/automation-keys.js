@@ -1,6 +1,6 @@
 'use strict';
 /**
- * VIBESPACE'S OWN AUTOMATION KEYS — PURE (imports nothing; CJS so the hub's engine, the routes, the Vault window and the
+ * VIBESPACE'S OWN AUTOMATION KEYS — PURE (imports only the PURE grant model; CJS so the hub's engine, the routes, the Vault window and the
  * suites share ONE set of rules). Design q-046 (the owner, 2026-10-19 22:1xZ: "给 vibespace 本身开发个 API … 相关可以用作自动
  * 化的 API 都提供专门的 key 授权，存在 vault 里，内部 agent 可以被单项授权这个 key，全程不需要我看到 key"), lane L1
  * automation-keys-core.
@@ -44,6 +44,15 @@
  *     already has (a grant is per key × conversation, not per verb); a verb removed is refused from the next call
  *     (`verb_not_in_scope` — `pickKey` says it by name when the caller's granted keys lack the verb). A folder root covers
  *     its subfolders; `/` (ALL_PATHS) is 「所有路径」 — any folder on this instance, the words say so (`limitsWords`).
+ *   · THE MAINTAINER KEY (lane fleet-feedback-marks — the owner's option B, 2026-10-21: a fleet instance's feedback is READ
+ *     from the cluster side, and the maintainers had no door to MARK it — only that instance's owner cookie or a key its
+ *     owner granted). An instance started with env VIBESPACE_MAINTAINER_KEY_SHA (the chart's `maintainerKeySha`, provisioned
+ *     by the cluster admin) accepts the key whose sha256 that is — `vsmk_<43 base64url>` — for EXACTLY feedback.list and
+ *     feedback.handled, reach the whole instance; any other verb or door is refused by name `maintainer_key_scope`
+ *     (`maintainerVerdict`). Its VALUE never lives on the instance (no vault entry, no record, no grant, no first-use card —
+ *     the admin provisioned it; the maintainers' triage job holds the value). The vault's lock does not stop it: it opens
+ *     no vault entry, and an instance whose owner never set a vault up is marked all the same. ONE audit line a use,
+ *     subject `maintainer` («marked handled by the maintainer key · 2.369.NNN» — `maintainerNote`).
  */
 
 const KEY_ID_RE = /^ak-[0-9a-f]{12}$/;
@@ -140,6 +149,12 @@ const SCOPES = Object.freeze([
 ]);
 const VERBS = Object.freeze(SCOPES.map((s) => s.verb));
 const scopeOf = (verb) => SCOPES.find((s) => s.verb === verb) || null;
+// lane grants-unify (2026-10-23): a grant's WHO is a row of the ONE grants store — door `automation-key-use` (its subject, and
+// the members a Task Group grant LEAVES OUT), and its REACH another — door `automation-key-reach` (everyone = 整个 VibeSpace,
+// Task Groups, minus the members left out; no row = the key's own openings). The engine hydrates both (`use`, `reachRow`)
+// from the store; every admission is the model's `admits` (src/grant-model.js). A grant built from a pre-unify record (its
+// `subject` / `reach` — the migration's and the suites' shape) is read through the model's mappers.
+const GM = require('./grant-model.js');
 
 /** THE CODES a use answers, and their HTTP status (the door's table — src/routes/automation.js). */
 const CODES = Object.freeze({
@@ -158,6 +173,11 @@ const CODES = Object.freeze({
   // lane conversations-archive-verb: the target's turn is running (`force` ends it anyway) · the target has open For-you asks
   // (the answer lists their ids; `resolveAsks` closes them first) · the target is already in the sidebar's archived list
   subject_busy: 409, asks_open: 409, already_archived: 409,
+  // lane fleet-feedback-marks: the maintainer key asked for a verb (or a door) outside its two · a vsmk_ bearer this instance's
+  // sha does not name (or the instance has none)
+  maintainer_key_scope: 403, maintainer_key_unknown: 401,
+  // lane grants-unify: the owner LEFT THIS CONVERSATION OUT of the Task Group grant (or the reach) that would have covered it
+  excepted: 403,
 });
 
 /** A key record off disk → its shape (null = not a record). Copies NAMED fields only — never a spread. */
@@ -198,14 +218,56 @@ function widestReach(list) {
   const groups = rs.filter((r) => reachKind(r) === 'groups').flatMap((r) => r.taskGroups).filter((g, i, a) => a.indexOf(g) === i);
   return groups.length ? { taskGroups: groups } : 'opened';
 }
-/** A grant record → its shape (null = not one). Its `reach` (lane key-instance-scope): absent ⇒ 'opened'; unknown ⇒ NO grant. */
+/** lane grants-unify: a use row's subject in the grant table's spelling (`session:<cid>` / `group:<id>`), null when it names none. */
+function subjectOfRow(row) {
+  const n = row ? GM.normRow(row) : null;
+  const e = n && n.ok ? n.row.to[0] : null;
+  return !e ? null : e.kind === 'conversation' ? `session:${e.key}` : e.kind === 'group' ? `group:${e.id}` : null;
+}
+/** lane grants-unify: a reach row → the grant's reach summary ('opened' | 'instance' | {taskGroups}) — null = a row the model
+ *  cannot read (the grant is then NO grant: a damaged reach is never read wider nor quietly narrower). */
+function reachOfRow(row) {
+  if (row === null || row === undefined) return 'opened';
+  const n = GM.normRow(row);
+  if (!n.ok) return null;
+  if (n.row.to.some((e) => e.kind === 'everyone')) return 'instance';
+  const ids = n.row.to.filter((e) => e.kind === 'group').map((e) => e.id);
+  return ids.length ? { taskGroups: ids } : 'opened';
+}
+/** A grant record → its shape (null = not one). Its WHO: the store's use row (`use`, hydrated by the engine), else (a
+ *  pre-unify record — the migration's / the suites' shape) its `subject`; its REACH: the store's reach row (`reachRow`), else
+ *  `reach` (absent ⇒ 'opened'; unknown ⇒ NO grant). */
 function grantOf(raw) {
-  if (!raw || typeof raw !== 'object' || !KEY_ID_RE.test(str(raw.keyId)) || !SUBJECT_RE.test(str(raw.subject)) || !MODES.includes(raw.mode)) return null;
-  const reach = reachOf(raw.reach);
+  if (!raw || typeof raw !== 'object' || !KEY_ID_RE.test(str(raw.keyId)) || !MODES.includes(raw.mode)) return null;
+  const hasUse = raw.use !== undefined && raw.use !== null;
+  const subject = hasUse ? subjectOfRow(raw.use) : (SUBJECT_RE.test(str(raw.subject)) ? raw.subject : null);
+  if (!subject) return null;
+  const hasReachRow = raw.reachRow !== undefined;
+  const reach = hasReachRow ? reachOfRow(raw.reachRow) : reachOf(raw.reach);
   if (reach === null) return null;   // a damaged reach is refused whole — never read as wider (nor quietly as narrower)
   const num = (v) => (Number.isFinite(Number(v)) && v !== null ? Number(v) : null);
-  return { id: /^ag-[0-9a-f]{12}$/.test(str(raw.id)) ? raw.id : null, keyId: raw.keyId, subject: raw.subject, mode: raw.mode, at: num(raw.at), by: clean(raw.by, 60) || null, spentAt: num(raw.spentAt), reach };
+  return { id: /^ag-[0-9a-f]{12}$/.test(str(raw.id)) ? raw.id : null, keyId: raw.keyId, subject, mode: raw.mode, at: num(raw.at), by: clean(raw.by, 60) || null, spentAt: num(raw.spentAt), reach,
+    ...(hasUse ? { use: raw.use } : {}), ...(hasReachRow ? { reachRow: raw.reachRow } : {}) };
 }
+/** lane grants-unify: the row the model judges a grant's WHO by — the store's (hydrated), else its subject mapped. null for an
+ *  `external` grant (an outside caller is no conversation: its own rule). */
+function useRowOf(g) {
+  if (!g || g.subject === 'external') return null;
+  if (g.use) return g.use;
+  const m = GM.fromAutomationGrant(g);
+  return m ? { door: 'automation-key-use', resource: g.id || '-', to: m.to, except: [] } : null;
+}
+/** …and its REACH row (null = 'opened' — the key's own openings only). */
+function reachRowOf(g) {
+  if (!g) return null;
+  if (g.reachRow !== undefined) return g.reachRow;
+  const m = GM.fromAutomationReach(g.reach);
+  return !m ? null : m.unknown ? { door: 'automation-key-reach', resource: g.id || '-', to: 'unreadable' } : { door: 'automation-key-reach', resource: g.id || '-', to: m.to, except: [] };
+}
+/** The use row a NEW grant writes (the ONE writer's input): its subject as the grant model's principal. */
+function useRowForSubject(subject) { const m = GM.fromAutomationGrant({ subject }); return m ? { to: m.to, except: [] } : null; }
+/** The reach row a grant writes for a reach summary (null = 'opened' — no row). */
+function reachRowFor(reach) { const m = GM.fromAutomationReach(reach); return !m || m.unknown ? null : { to: m.to, except: [] }; }
 const isSubject = (s) => SUBJECT_RE.test(str(s));
 /** The subjects a CALLER is: its own conversation and each Task Group it belongs to. */
 const callerSubjects = (conversationId, groupIds = []) => [`session:${conversationId}`, ...(Array.isArray(groupIds) ? groupIds : []).filter(Boolean).map((g) => `group:${g}`)];
@@ -232,19 +294,22 @@ function openedOf(raw) {
  * `target` = { conversationId, webuiId?, groups? }. → { ok: true, by: 'self' | 'opener' | 'grant' | 'instance' | 'groups' }
  * | { ok: false, code, why, reach? } (the refusal names the reach the grant has, and the door that widens it).
  */
-function reachVerdict({ keyId = '', caller = '', target = {}, grants = [], opened = [], reach = 'opened' } = {}) {
+function reachVerdict({ keyId = '', caller = '', target = {}, grants = [], opened = [], reach = 'opened', reachRows = null } = {}) {
   const t = target && typeof target === 'object' ? target : {};
   const cid = str(t.conversationId) || null, wid = str(t.webuiId) || null;
   if (!cid && !wid) return { ok: false, code: 'not_found', why: 'no conversation named' };
   if (cid && caller && cid === str(caller)) return { ok: true, by: 'self' };
   const rows = (Array.isArray(opened) ? opened : []).map(openedOf).filter((o) => o && o.keyId === keyId);
   if (rows.some((o) => (cid && o.conversationId && o.conversationId === cid) || (wid && o.webuiId && o.webuiId === wid))) return { ok: true, by: 'opener' };
-  const groups = (Array.isArray(t.groups) ? t.groups : []).filter(Boolean).map(String);
-  const subjects = new Set([...(cid ? [`session:${cid}`] : []), ...groups.map((g) => `group:${g}`)]);
-  if ((Array.isArray(grants) ? grants : []).map(grantOf).some((g) => g && g.keyId === keyId && subjects.has(g.subject))) return { ok: true, by: 'grant' };
+  // THE ONE ADMISSION (lane grants-unify — src/grant-model.js admits): the target as the caller a grant / a reach would name
+  const facts = { conversationKeys: cid ? [cid] : [`webui:${wid}`], groupIds: (Array.isArray(t.groups) ? t.groups : []).filter(Boolean).map(String) };
+  if ((Array.isArray(grants) ? grants : []).map(grantOf).some((g) => g && g.keyId === keyId && g.subject !== 'external' && GM.admits([useRowOf(g)].filter(Boolean), facts).ok)) return { ok: true, by: 'grant' };
   const r = reachOf(reach) || 'opened';   // an unknown reach reads as the narrowest
-  if (r === 'instance') return { ok: true, by: 'instance' };
-  if (reachKind(r) === 'groups' && groups.some((g) => r.taskGroups.includes(g))) return { ok: true, by: 'groups' };
+  // the reach this use rides (`reachRows`, the riding grants' rows — useVerdict's), else the summary mapped
+  const rrows = (Array.isArray(reachRows) ? reachRows : [reachRowOf({ reach: r })]).filter(Boolean);
+  const rv = GM.admits(rrows, facts);
+  if (rv.ok) return { ok: true, by: rv.via === 'everyone' ? 'instance' : 'groups' };
+  if (rv.code === 'excepted') return { ok: false, code: 'excepted', reach: reachKind(r), why: 'the owner left that conversation out of this grant\'s reach (an exception on the key\'s row in the Vault window) — ask the owner to lift it, or to grant the key to that conversation' };
   const kind = reachKind(r);
   return { ok: false, code: 'not_granted', reach: kind, why: kind === 'groups'
     ? `that conversation is not in the Task Groups this grant reaches (${r.taskGroups.join(', ')}), the key did not open it and is not granted to it — widen the grant's reach on the key's row in the Vault window (整个 VibeSpace), or grant the key to that conversation`
@@ -268,14 +333,23 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
   const external = subject === 'external';
   if (!external && (!/^session:/.test(str(subject)) || !isSubject(subject))) return { ok: false, code: 'not_granted' };
   if (!external && !subjectLive) return { ok: false, code: 'subject_ended' };
-  // an outside caller is judged by `external` grants ONLY; a conversation by its own and its groups' — never the other's
-  const mine = external ? ['external'] : callerSubjects(str(subject).slice('session:'.length), subjectGroups);
-  const cands = (Array.isArray(grants) ? grants : []).map(grantOf).filter((g) => g && g.keyId === k.id && mine.includes(g.subject));
-  if (!cands.length) return { ok: false, code: 'not_granted' };
+  // an outside caller is judged by `external` grants ONLY; a conversation by THE ONE ADMISSION over each grant's use row
+  // (lane grants-unify: its own conversation, one of its Task Groups — minus the members the owner left out) — never the other's
+  const facts = { conversationKeys: [str(subject).slice('session:'.length)], groupIds: Array.isArray(subjectGroups) ? subjectGroups : [] };
+  const cands = [];
+  let excepted = false;
+  for (const g of (Array.isArray(grants) ? grants : []).map(grantOf)) {
+    if (!g || g.keyId !== k.id) continue;
+    if (external) { if (g.subject === 'external') cands.push(g); continue; }
+    if (g.subject === 'external') continue;
+    const v = GM.admits([useRowOf(g)].filter(Boolean), facts);
+    if (v.ok) cands.push(g); else if (v.code === 'excepted') excepted = true;
+  }
+  if (!cands.length) return { ok: false, code: excepted ? 'excepted' : 'not_granted' };
   const always = cands.filter((g) => g.mode === 'always');
-  if (always.length) return { ok: true, grant: always[0], spend: false, reach: widestReach(always.map((g) => g.reach)) };
+  if (always.length) return { ok: true, grant: always[0], spend: false, reach: widestReach(always.map((g) => g.reach)), reachRows: always.map(reachRowOf).filter(Boolean) };
   const once = cands.find((g) => g.mode === 'once' && !g.spentAt);
-  if (once) return { ok: true, grant: once, spend: true, reach: once.reach };
+  if (once) return { ok: true, grant: once, spend: true, reach: once.reach, reachRows: [reachRowOf(once)].filter(Boolean) };
   return { ok: false, code: 'once_spent' };
 }
 
@@ -573,6 +647,35 @@ function pruneWords(subjects) {
   return out;
 }
 
+// ── THE MAINTAINER KEY (lane fleet-feedback-marks — the header's last row) ──
+const MAINTAINER_PREFIX = 'vsmk_';
+const MAINTAINER_RE = /^vsmk_[A-Za-z0-9_-]{43}$/;
+const MAINTAINER_SHA_ENV = 'VIBESPACE_MAINTAINER_KEY_SHA';
+const MAINTAINER_VERBS = Object.freeze(['feedback.list', 'feedback.handled']);
+const MAINTAINER_SUBJECT = 'maintainer';
+const MAINTAINER_NAME = 'the maintainer key';
+/** The instance's maintainer sha off its env → 64 lowercase hex | null (NO key — a malformed value is none, never a wildcard). */
+const maintainerShaOf = (raw) => { const s = str(raw).trim().toLowerCase(); return /^[0-9a-f]{64}$/.test(s) ? s : null; };
+/** A bearer of the maintainer key's kind (the door hands it to maintainerVerdict, never to the session-token reader). */
+const isMaintainerToken = (t) => str(t).startsWith(MAINTAINER_PREFIX);
+/**
+ * THE JUDGMENT OF ONE MAINTAINER CALL: `token` = the bearer, `sha` = the instance's env value, `verb` = what it asks;
+ * `matches(token, sha)` = the constant-time compare of the token's sha256 with the sha (INJECTED — this module imports
+ * nothing; the engine hands src/pairing-token.js tokenMatches). The key is judged FIRST (an unknown bearer learns nothing
+ * of the table), then the closed list of two. → { ok: true, subject: 'maintainer', reach: 'instance' }
+ * | { ok: false, code: 'maintainer_key_unknown' | 'maintainer_key_scope', why }.
+ */
+function maintainerVerdict({ token = '', sha = null, verb = '', matches } = {}) {
+  if (typeof matches !== 'function') throw new TypeError('maintainerVerdict: matches is injected');
+  const want = maintainerShaOf(sha);
+  if (!want) return { ok: false, code: 'maintainer_key_unknown', why: `this instance has no maintainer key (${MAINTAINER_SHA_ENV} is not set)` };
+  if (!MAINTAINER_RE.test(str(token)) || !matches(str(token), want)) return { ok: false, code: 'maintainer_key_unknown', why: 'its sha256 is not this instance\'s ' + MAINTAINER_SHA_ENV };
+  if (!MAINTAINER_VERBS.includes(str(verb))) return { ok: false, code: 'maintainer_key_scope', why: `the maintainer key holds ${MAINTAINER_VERBS.join(' and ')} only — not ${clean(verb, 60) || 'that door'}` };
+  return { ok: true, subject: MAINTAINER_SUBJECT, reach: 'instance' };
+}
+/** The audit note of a maintainer mark: «marked handled by the maintainer key · 2.369.NNN» (null for any other line). */
+const maintainerNote = (verb, args) => (verb === 'feedback.handled' && args && RELEASE_RE.test(str(args.version)) ? `marked handled by ${MAINTAINER_NAME} · ${args.version}` : null);
+
 /** A call's arguments as the AUDIT keeps them: names and ids only — never a text body (a rename's new name IS a name). */
 function argsSummary(verb, args) {
   const a = args && typeof args === 'object' ? args : {};
@@ -591,7 +694,9 @@ function auditLine({ at, keyId = null, subject = '', verb = '', args = null, ok 
 module.exports = {
   KEY_ID_RE, VALUE_PREFIX, VALUE_RE, ENTRY_PREFIX, NAME_MAX, SUBJECT_RE, MODES, REACHES, ASK_TTL_MS, ASK_QUIET_MS, AUDIT_FILE, STORE_FILE, FEEDBACK_ID_RE, RELEASE_RE, NOTE_MAX,
   SCOPES, VERBS, scopeOf, CODES, keyOf, publicKey, grantOf, reachOf, reachKind, widestReach, isSubject, callerSubjects, openedOf, reachVerdict,
+  subjectOfRow, reachOfRow, useRowOf, reachRowOf, useRowForSubject, reachRowFor,   // lane grants-unify
   useVerdict, pickKey, mintPlan, scopesPlan, editPlan, scopesChangeWords, entryOf, keyIdOfEntry, identityOf, argsSummary, auditLine,
   LIMIT_FIELDS, LIMIT_CODES, OPEN_MODES, HARNESS_DEFAULT, SUBSCRIPTION, DEFAULT_LIMITS, ALL_PATHS, allPaths, normPath, limitsOf, limitsPlan, limitsWords, openLimitsVerdict, permissionResolvedVerdict,
   NAMED_MAX, limitSetView, FAMILIES, familyOf, verbFamilies, grantEnded, grantOrder, pruneWords,   // lane vault-key-row-compact
+  MAINTAINER_PREFIX, MAINTAINER_RE, MAINTAINER_SHA_ENV, MAINTAINER_VERBS, MAINTAINER_SUBJECT, MAINTAINER_NAME, maintainerShaOf, isMaintainerToken, maintainerVerdict, maintainerNote,   // lane fleet-feedback-marks
 };

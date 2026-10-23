@@ -147,6 +147,10 @@ const AGENT_BODY = 'agent:([A-Za-z0-9._:-]{1,128})/([A-Za-z0-9._-]{1,64})';
 const AGENT_EXACT = new RegExp(`^${AGENT_BODY}$`), AGENT_HEAD = new RegExp(`^vault://${AGENT_BODY}`);
 const AGENT_ENTRY = /^agent:([A-Za-z0-9._:-]{1,128})\/([A-Za-z0-9._-]{1,64})$/;
 const isAgentEntry = (store, entry, field) => store === 'secrets' && field === 'secret' && AGENT_ENTRY.test(String(entry));
+// lane vault-paste-request: a FREE entry (`secret:<id>` — the owner pasted it for an agent, or added it in the Vault window):
+// opened for runs like a storage credential — the row's switch, a grant (the owner's paste grants the conversation that asked)
+const FREE_ENTRY = /^secret:[\w.-]{1,160}$/;
+const isFreeEntry = (store, entry, field) => store === 'secrets' && field === 'secret' && FREE_ENTRY.test(String(entry));
 function refOf(store, entry, field) {
   const id = VI.refOf(store, entry, field);
   if (!id) return null;
@@ -483,6 +487,7 @@ const RUNNABLE_STORES = Object.freeze(['mounts', 'app-secrets']);
 function ownDoorOf(ref) {
   if (!ref) return 'no run door';
   if (isAgentEntry(ref.store, ref.entry, ref.field)) return null;   // lane vault-run-door: an AGENT's own entry (mint / put) — the owner opens it like any other; only its conversation references it
+  if (isFreeEntry(ref.store, ref.entry, ref.field)) return null;    // lane vault-paste-request: a free entry — the owner opens it (switch / grant)
   const d = OWN_DOORS.find((x) => x.store === ref.store && (!x.entry || x.entry.test(ref.entry)));
   return d ? d.door : RUNNABLE_STORES.includes(ref.store) ? null : 'no run door (a store the run table does not know)';
 }
@@ -846,7 +851,7 @@ function maskText(text, secrets) { const m = createMasker(secrets); return m.pus
 
 module.exports = {
   SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
-  parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, refFor: refOf,
+  parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, isFreeEntry, refFor: refOf,
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,

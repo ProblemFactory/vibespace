@@ -76,17 +76,17 @@ export const ROWS = [
   ['src/routes/apps.js', 'own-tree', 4, null, DATA],
   ['src/routes/browser-trace.js', 'own-tree', 2, null, DATA],
   ['src/routes/channels.js', 'own-tree', 5, null, DATA],
-  ['src/routes/files.js', 'user-path', 42, 'mounts\\.pathBlocked\\(p\\)', 'the explorer + every file op: the route middleware 503 by name, then SafeFs.call refuses at the pool door'],
+  ['src/routes/files.js', 'user-path', 43, 'mounts\\.pathBlocked\\(p\\)', 'the explorer + every file op: the route middleware 503 by name, then SafeFs.call refuses at the pool door'],
   ['src/routes/persistence.js', 'own-tree', 15, null, DATA],
   ['src/routes/sessions.js', 'user-path', 27, 'DOOR\\.blocked\\(', 'a session cwd realpath (sync, main thread): null, not cached'],
   ['src/routes/window-targets.js', 'own-tree', 1, null, DATA],
-  ['src/safe-fs-worker.js', 'exempt', 24, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked)'],
+  ['src/safe-fs-worker.js', 'exempt', 39, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked)'],
   ['src/search-index-worker.js', 'own-tree', 5, null, CLI],
   ['src/secret-box.js', 'own-tree', 13, null, DATA], // lane key-file-law-stores: +3 — THE KEY-FILE LAW's reads (the key file raw/hex, each store's ciphertext files + their dirs); lane vault-e2e-password: +4 — data/vault.json and the `.sealed` markers beside a key file (is this dir's vault set up?); lane vault-e2e-password-fix-r2: +1 — sealedDir (data/vault.json's presence, for a process with no engine)
   ['src/app-secrets.js', 'own-tree', 7, null, DATA], // lane app-display-secrets: the service/sealer files beside it, the key file (secret-box), the app dir's sealed store + bus socket; lane vault-contents-window +3 — the Vault window lists data/desktop-apps/*, asks each app dir for its sealed store and reads it (own data dir)
   ['src/app-secrets-seal.js', 'own-tree', 3, null, DATA], // lane app-display-secrets: the app dir's sealed store + its stdin; lane display-secret-fd +1: the per-display key off the inherited pipe fd (never a path anyone names)
   ['src/server/account-usage-routes.js', 'own-tree', 1, null, CLI],
-  ['src/server/agent-tool-generators.js', 'user-path', 23, 'DOOR\\.blocked\\(', 'a session root’s git facts: the sentence as facts.error'], // lane cli-one-text-arg: +2 — src/agent-cli-text.js read and its copy beside the CLIs compared (own tree, every boot)
+  ['src/server/agent-tool-generators.js', 'user-path', 25, 'DOOR\\.blocked\\(', 'a session root’s git facts: the sentence as facts.error'], // lane cli-one-text-arg: +2 — src/agent-cli-text.js read and its copy beside the CLIs compared (own tree, every boot) // lane cli-call-timeouts: +2 — src/cli-call.js read for its boot-time copy beside the CLIs (own tree, the agent-cli-text.js shape)
   ['src/server/apps-engine.js', 'own-tree', 1, null, DATA],
   ['src/server/apps-ops-door.js', 'own-tree', 4, null, 'its own socket under ~/.vibespace/apps/operator (lane app-persist-layer1: lstat of that directory, of the socket path before listen + after it, and at close) — VibeSpace’s own state, never a path anyone names'],
   ['src/server/automation-engine.js', 'own-tree', 4, null, DATA], // design q-046 (lane automation-keys-core): data/automation-keys.json (the keys' digests + the grants: read, and its tmp opened `wx`) and data/automation-audit.jsonl (a caller's own lines; + lane automation-open-limits: one key's lines for the owner's 审计…)
@@ -142,6 +142,8 @@ export const ROWS = [
   ['src/server/provider-store.js', 'own-tree', 1, null, `${DATA}; lane provider-record (q-053 P0a): data/providers.json read once at create`],
   ['src/server/fs-canary-worker.js', 'exempt', 1, null, 'the canary probes the server’s own tree in its own worker'],
   ['src/server/goal-sync.js', 'own-tree', 3, null, CLI],
+  ['src/server/grants-store.js', 'own-tree', 3, null, 'lane grants-unify: THE grants store reads data/grants.json once at create (the server\'s own store), stats its own data/grants-audit.jsonl before rotating it, and asks whether data/grants.json is on disk (the boot\'s rollback check — verify F2)'],
+  ['src/server/grants-migration.js', 'own-tree', 3, null, 'lane grants-unify: 2026-10-grants-unify reads the server\'s own stores under data/ (hosts.json, browser-profiles.json, automation-keys.json, window-reach.json, task-groups.json, channels/index.json) once, at the migration, and data/hosts.json again to carry the asks'],
   ['src/server/hook-root-watch.js', 'own-tree', 2, null, CLI],
   ['src/server/incident-wiring.js', 'own-tree', 6, null, DATA],
   ['src/server/instance-url.js', 'own-tree', 1, null, DATA],
@@ -150,7 +152,7 @@ export const ROWS = [
   ['src/server/login-expiry-watch.js', 'own-tree', 1, null, DATA],
   ['src/server/memory-pressure-watch.js', 'own-tree', 3, null, PROC],
   ['src/server/memory-sampler.js', 'own-tree', 1, null, PROC],
-  ['src/server/migrations.js', 'own-tree', 38, null, DATA], // lane llm-plugin-rename: +1 — 2026-10-llm-rename reads settings / plugins / integrations.json (own data dir) to know which live store it needs
+  ['src/server/migrations.js', 'own-tree', 39, null, DATA], // lane llm-plugin-rename: +1 — 2026-10-llm-rename reads settings / plugins / integrations.json (own data dir) to know which live store it needs; lane task-group-context: +1 — 2026-10-task-group-context-rows reads task-groups.json (own data dir) when no live store was handed in
   ['src/server/mount-health-watch.js', 'exempt', 6, null, 'the server-tree watch: /proc + mountinfo, never a user path (the judge’s P4)'],
   ['src/server/mounts-plugins-wiring.js', 'own-tree', 8, null, DATA], // lane passkey-store-core: +3 — data/browser-passkeys.json + its key file (own data dir); lane key-file-law-stores: −2 — the key file reads through secret-box lawfulKey
   ['src/server/oat-mint.js', 'own-tree', 3, null, 'its own 0700 scratch dir per mint (the $BROWSER URL file) + the boot sweep of its own orphaned vs-oat-mint-* dirs (readdir + lstat of tmpRoot)'],
@@ -183,7 +185,7 @@ export const ROWS = [
   ['src/input-inject.js', 'exempt', 2, null, 'lane stream-p1a-transport: the Linux input stub\'s own record (VIBESPACE_INPUT_STUB_FILE — the suites\' witness, unset = no file), read back only to trim it; never a hub path'],
   ['src/installed-apps.js', 'exempt', 2, null, 'lane machine-desktop-apps: runs on a paired Mac (the daemon\'s `desktop-apps-list` op) over its /Applications + ~/Applications — never a hub path, bounded by its budget'],
   ['src/sysinfo.js', 'own-tree', 9, null, PROC],
-  ['src/task-groups.js', 'user-path', 11, 'DOOR\\.blocked\\(', 'the TASK.md writer (contextDir) + a session cwd realpath: skipped / not cached, said once'],
+  ['src/task-groups.js', 'user-path', 14, 'DOOR\\.blocked\\(', 'the TASK.md writer (contextDir) + a session cwd realpath: skipped / not cached, said once; lane task-group-context: the Context table — a row\'s stat (_kindOf / _stat), a told file\'s read (_readText behind _stat) and a listed folder\'s walk (_walk) each ask the door first: a blocked row is told as "its storage is not answering"'],
   ['src/telemetry.js', 'own-tree', 5, null, DATA],
   ['src/transcript-service.js', 'own-tree', 5, null, CLI],
   ['src/usage-anchors.js', 'own-tree', 1, null, CLI],

@@ -121,7 +121,12 @@ router.get('/api/home-folders', async (req, res) => {
   const home = os.homedir();
   try {
     const { folders } = await sfs(req).call('folderCensus', { path: home });
-    _homeFolders = { at: now, body: { home, folders: Array.isArray(folders) ? folders : [] } };
+    // lane path-field (study round 4: a fresh pod PRESELECTED ~/vibespace, the product's own checkout — it holds the most
+    // files): the instance's own checkout, its data dir and dot-folders are never offered (PURE isExcludedPath)
+    const self = await dirSliceOf(req).self().catch(() => null);
+    const { isExcludedPath } = require('../path-candidates.js');
+    const kept = (Array.isArray(folders) ? folders : []).filter((f) => !(f && f.path && isExcludedPath(f.path, self || { home, roots: [] })));
+    _homeFolders = { at: now, body: { home, folders: kept } };
     res.json(_homeFolders.body);
   } catch (e) { res.status(e.status || 500).json({ home, folders: [], error: String((e && e.message) || e).slice(0, 160) }); }
 });
@@ -167,9 +172,50 @@ router.get('/api/fonts', (req, res) => {
   }
 });
 
-// Directory autocomplete — returns dirs matching partial path, with 500ms timeout
+// THE PATH FIELD's answer (lane path-field): one dir-slice per server (src/server/dir-slice.js — the listing cache per
+// folder, the folder index, the exclusion facts), the mounts read at most every 5 s.
+function dirSliceOf(req) {
+  const L = req.app.locals;
+  if (!L._dirSlice) {
+    let mc = { at: 0, rows: [] };
+    L._dirSlice = require('../server/dir-slice.js').create({
+      call: (op, payload) => sfs(req).call(op, payload),
+      mounts: () => {
+        if (Date.now() - mc.at > 5000) { let rows = []; try { rows = (L.mounts?.list?.() || []).filter((m) => m && m.mounted && m.path && !L.mounts?.pathBlocked?.(m.path)); } catch { rows = []; } mc = { at: Date.now(), rows }; }
+        return mc.rows;
+      },
+    });
+  }
+  return L._dirSlice;
+}
+const jsonList = (v) => { if (Array.isArray(v)) return v.map(String); if (typeof v !== 'string' || !v) return []; try { const a = JSON.parse(v); return Array.isArray(a) ? a.map(String) : []; } catch { return [v]; } };
+
+// Directory autocomplete — returns dirs matching partial path, with 500ms timeout.
+// lane path-field: with `bases` / `q` / `probe` / `kind` (the path field asks) the answer ALSO carries the listing slice
+// (PURE src/path-candidates.js sliceListing: each base listed, the typed parent against each base, the fuzzy index hits,
+// each probed folder's facts — exists / git / fileCount / mtime), `self` (the exclusion facts) and `took`, within the
+// 500 ms budget (`partial` when the machine was slower; the caches still fill). `suggestions` is answered as before.
 router.get('/api/dir-complete', async (req, res) => {
   const R = rfs(req);
+  const sliced = req.query.bases != null || req.query.q != null || req.query.probe != null || req.query.kind != null;
+  if (R && sliced) {
+    const guard = setTimeout(() => { if (!res.headersSent) res.json({ suggestions: [], partial: true, error: 'machine did not answer in time' }); }, 2500);
+    try {
+      const ans = await R.fs.dirSlice(R.host, { text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder') });
+      clearTimeout(guard);
+      if (!res.headersSent) res.json(ans);
+    } catch (e) {
+      clearTimeout(guard);
+      if (!res.headersSent) res.json({ suggestions: [], error: String(e.message || e).slice(0, 120) });
+    }
+    return;
+  }
+  if (!R && sliced) {
+    try {
+      const ans = await dirSliceOf(req).slice({ text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder'), budgetMs: 450 });
+      return res.json({ suggestions: require('../path-candidates.js').legacySuggestions(ans.listing, String(req.query.path || '')), ...ans });
+    } catch (e) { return res.json({ suggestions: [], error: String((e && e.message) || e).slice(0, 120) }); }
+  }
   if (R) {
     // A down/lagging machine was indistinguishable from "no matching folders":
     // every failure mapped to an empty list (so did the layers below), and the

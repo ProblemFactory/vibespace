@@ -127,8 +127,7 @@ const ENGINE = require(path.join(REPO, ENGINE_REL));
   ok(L.opts.origin === 'agent-browser' && L.opts.by && L.opts.by.sessionId === 'w-A', 'the launch carries origin agent-browser + the opener session (the keeper stamps the record from it)', L && L.opts);
   ok(r.handle === 'da-1' && r.attached === true && r.origin === 'agent-browser' && r.next === 'vibespace-window snapshot da-1', 'the answer: the handle, attached, the next window verb', r);
   ok(r.lease && r.lease.origin === 'agent-browser' && r.lease.sessionId === 'w-A', 'the lease is the opener\'s, origin agent-browser (visible in the API)', r.lease);
-  const st = JSON.parse(fs.readFileSync(W.engine.reachFile, 'utf8'));
-  const rows = (st.windows['da-1'] || { rows: [] }).rows;
+  const rows = W.engine.reachOf('da-1').rows;   // lane grants-unify: the share rows live in the ONE grants store (read back as the record)
   ok(rows.length === 1 && rows[0].by === 'self-open' && /w-A|aaaaaaaa/.test(String(rows[0].principal.id)), 'the opener grant: ONE reach row, by self-open, the opener\'s own key', rows);
   const bc = W.sent.filter((m) => m.type === 'desktop-app-opened');
   ok(bc.length === 1 && bc[0].sessionId === 'w-A' && bc[0].appId === 'da-1' && bc[0].origin === 'agent-browser' && Object.keys(bc[0]).sort().join() === 'appId,origin,sessionId,type', 'the broadcast desktop-app-opened {sessionId, appId, origin} — nothing else rides it', bc);

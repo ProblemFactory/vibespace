@@ -14,6 +14,8 @@ import { mutantCopies } from './mutant-copy.mjs';
 import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const { ExitProxyManager } = require('../src/exit-proxy.js');
+const GM = require('../src/grant-model.js');
+const GS = require('../src/server/grants-store.js');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCR = scratch('exitproxy'); // the real stores' data dirs (verify-r3)
 fs.mkdirSync(SCR, { recursive: true });
@@ -69,7 +71,12 @@ const hosts = {
 };
 // a fake conversation (the caller) — its own keys, no Task Group
 const S = { name: 'agent', backend: 'claude', claudeSessionId: 'c-1' };
-const ex = new ExitProxyManager({ hosts, log: () => {}, sessionsMap: () => new Map([['w1', S]]) });
+// lane grants-unify: the lists live in the ONE grants store — seeded from these records the way the migration does
+const grantsDir = scratch('exitproxy-grants'); fs.mkdirSync(grantsDir, { recursive: true });
+process.on('exit', () => { try { fs.rmSync(grantsDir, { recursive: true, force: true }); } catch { } });
+const grants = GS.create({ dataDir: grantsDir });
+grants.seed(GM.rowsOfHosts(records).rows);
+const ex = new ExitProxyManager({ hosts, grants, log: () => {}, sessionsMap: () => new Map([['w1', S]]) });
 const tryUse = async (ref) => { try { return { r: await ex.use(S, 'w1', ref) }; } catch (e) { return { e }; } };
 
 try {
@@ -232,14 +239,16 @@ try {
   // the machine's lists live on its record; only the PATCH re-judged, so after an import that took a conversation off
   // a machine its OPEN connection kept carrying bytes and its "ask me" request kept waiting (scratch/r3-repro-a.mjs
   // E1/E2). The REAL HostManager in a scratch dir, wired as server.js wires it (onReachChange → rejudgeAll).
-  const hostsLeg = async (HM, tag, { narrowOnly = false, waitMs = 1500 } = {}) => {
+  const hostsLeg = async (HM, tag, { narrowOnly = false, waitMs = 1500, grantsHook = true } = {}) => {
     const dir = path.join(SCR, tag); fs.mkdirSync(dir, { recursive: true });
     const H = new HM({ dataDir: dir });
     H.deviceBounded = async () => mkDevice();
     const Sx = { name: 'imp', backend: 'claude', claudeSessionId: 'c-imp' };
-    const exH = new ExitProxyManager({ hosts: H, log: () => {}, sessionsMap: () => new Map([['wi', Sx]]) });
+    const gH = GS.create({ dataDir: dir });   // lane grants-unify: the lists live in the ONE store
+    const exH = new ExitProxyManager({ hosts: H, grants: gH, log: () => {}, sessionsMap: () => new Map([['wi', Sx]]) });
     H.onReachChange = (why) => exH.rejudgeAll(`hosts-${why}`); // THE server.js wiring
-    const grant = (id) => H.setExitAccess(id, { use: { mode: 'only', who: [{ kind: 'session', id: 'claude:c-imp' }] }, run: { mode: 'only', who: [{ kind: 'session', id: 'claude:c-imp' }], ask: true }, updatedAt: 1 });
+    if (grantsHook) gH.onChange(({ door }) => { if (door === 'exit') exH.rejudgeAll('grants'); });   // server.js (lane grants-unify)
+    const grant = (id) => { const to = [{ kind: 'conversation', key: 'c-imp' }]; gH.setMany([{ door: 'exit', resource: `${id}:use`, to }, { door: 'exit', resource: `${id}:run`, to }]); H.setExitAccess(id, { ask: true, updatedAt: 1 }); };
     const out = {};
     // (1) an import that NARROWS the machine's lists
     let hid = H.add({ name: 'Box', user: 'u', host: 'box.invalid' }); grant(hid);
@@ -248,7 +257,7 @@ try {
     const askP = exH.run(Sx, 'wi', 'Box', 'id').then(() => null, (e) => e);
     await sleep(30); out.asked = exH.listAsks().length;
     const recs = JSON.parse(JSON.stringify(H.exportBundle().hosts)); recs[0].exit = { use: { mode: 'nobody' }, run: { mode: 'nobody', ask: false }, updatedAt: 2 };
-    H.importBundle({ hosts: recs, keys: {} });
+    { const b = { hosts: recs, keys: {} }; H.importBundle(b); exH.importLists(b); }   // persistence.js's order: the records, then their lists
     out.narrowCut = await new Promise((res) => { if (o.s.destroyed) return res(true); o.s.once('close', () => res(true)); setTimeout(() => res(false), waitMs); });
     out.narrowAsk = await Promise.race([askP, sleep(waitMs).then(() => 'still waiting')]);
     out.narrowStopped = !exH.list().find((m) => m.id === hid)?.active;
@@ -258,7 +267,7 @@ try {
     grant(hid);
     r = await exH.use(Sx, 'wi', 'Box'); o = await openConn(r.localPort, credsOf(r.url));
     out.before2 = (await talk(o, 'imp2')).includes('EX:imp2');
-    H.importBundle({ hosts: [], keys: {} });
+    H.importBundle({ hosts: [], keys: {} }); exH.importLists({ hosts: [] });
     out.dropCut = await new Promise((res) => { if (o.s.destroyed) return res(true); o.s.once('close', () => res(true)); setTimeout(() => res(false), 1500); });
     out.dropAfter = o.s.destroyed ? '' : await talk(o, 'imp3');
     // (3) a removal that did not go through the route's onMachineUnpaired
@@ -266,6 +275,7 @@ try {
     r = await exH.use(Sx, 'wi', 'Box'); o = await openConn(r.localPort, credsOf(r.url));
     H.remove(hid);
     out.removeCut = await new Promise((res) => { if (o.s.destroyed) return res(true); o.s.once('close', () => res(true)); setTimeout(() => res(false), 1500); });
+    out.pruned = gH.rowsOfDoor('exit').filter((x) => x.resource.startsWith(`${hid}:`)).length;   // lane grants-unify: a removed machine takes its lists with it
     try { o.s.destroy(); } catch { }
     for (const [k] of exH._live) await exH.stop(k);
     return out;
@@ -278,6 +288,7 @@ try {
     check('…its waiting "ask me" request is answered not_granted (nothing runs), the forward stops and the row lists nobody', a.narrowAsk && a.narrowAsk.code === 'not_granted' && a.narrowStopped && a.narrowUsedBy === 0, JSON.stringify(a));
     check('verify-r3 A-r3a: Import config WITHOUT the machine cuts its open connection', a.before2 && a.dropCut === true && !a.dropAfter.includes('EX:'), JSON.stringify(a));
     check('verify-r3 A-r3a: a removal that skipped the route\'s onMachineUnpaired still cuts (hosts.remove itself tells the re-judge)', a.removeCut === true, JSON.stringify(a));
+    check('lane grants-unify: a removed machine\'s two rows leave the grants store (a machine re-added under its id starts at nobody)', a.pruned === 0, JSON.stringify(a));
     const hsrc = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
     const bodyOf = (name) => { const i = hsrc.indexOf(`\n  ${name}(`); const j = hsrc.indexOf('\n  }\n', i); return i < 0 ? '' : hsrc.slice(i, j); };
     check('WIRING (A-r3a): hosts.js importBundle / remove / reshapeStore / setExitAccess each call this._reachChanged(…) after the save', ['importBundle', 'remove', 'reshapeStore', 'setExitAccess'].every((n) => /this\._save\(\);\s*\n\s*this\._reachChanged\('/.test(bodyOf(n))), ['importBundle', 'remove', 'reshapeStore', 'setExitAccess'].filter((n) => !/this\._reachChanged\('/.test(bodyOf(n))).join(','));
@@ -287,7 +298,9 @@ try {
     const patchedH = hsrc.replace("    this._reachChanged('import');", '    ;');
     check('(the A-r3a control patch applies)', patchedH !== hsrc);
     const { HostManager: HM2 } = M.load('src/hosts.js', patchedH, 'noimporthook');
-    const c = await hostsLeg(HM2, 'ctl', { narrowOnly: true, waitMs: 600 });
+    // lane grants-unify: the narrowed LISTS land in the grants store, whose change hook re-judges too — the control takes
+    // both doors away (the import's hook AND the store's), the pre-fix shape of either
+    const c = await hostsLeg(HM2, 'ctl', { narrowOnly: true, waitMs: 600, grantsHook: false });
     check('CONTROL (A-r3a): with the import not telling the re-judge the open connection still carries bytes after a narrowing import, the ask still waits — the legs above go red', c.narrowCut === false && c.narrowAsk === 'still waiting', JSON.stringify(c));
   }
 
@@ -298,7 +311,7 @@ try {
     const patched = src.replace("try { user = await socksAuth(sock, (u, p) => this._credOk(h.id, u, p)); }", "user = 'anon'; try { } ").replace("let greeted = false, pend = [];", "let greeted = true, pend = [];");
     check('(the control patch applies)', patched !== src);
     const { ExitProxyManager: EPM } = M.load('src/exit-proxy.js', patched, 'noauth');
-    const ex2 = new EPM({ hosts, log: () => {}, sessionsMap: () => new Map([['w1', S]]) });
+    const ex2 = new EPM({ hosts, grants, log: () => {}, sessionsMap: () => new Map([['w1', S]]) });
     const r3 = await ex2.use(S, 'w1', 'host-mac');
     const bare2 = await new Promise((resolve) => { const c = net.connect(r3.localPort, '127.0.0.1', () => c.write('ping')); let b = ''; c.on('data', (d) => { b += d; if (/EX:[\s\S]*ping/.test(b)) { c.end(); resolve(b); } }); c.on('error', () => resolve(b)); setTimeout(() => { try { c.destroy(); } catch {} resolve(b); }, 2000); });
     check('CONTROL: without the gate a bare local connection reaches the machine — the pre-verify shape', /EX:[\s\S]*ping/.test(bare2), JSON.stringify(bare2));
@@ -308,7 +321,7 @@ try {
     check('(the A3-r2 control patch applies)', pairOnly !== src);
     const { ExitProxyManager: EPM3 } = M.load('src/exit-proxy.js', pairOnly, 'paironly');
     const S9 = { name: 'nine', backend: 'claude', claudeSessionId: 'c-9' };
-    const ex3 = new EPM3({ hosts, log: () => {}, sessionsMap: () => new Map([['w9', S9]]) });
+    const ex3 = new EPM3({ hosts, grants, log: () => {}, sessionsMap: () => new Map([['w9', S9]]) });
     const r9 = await ex3.use(S9, 'w9', 'host-mac');
     const cr9 = credsOf(r9.url);
     ex3.sessionsMap = () => new Map(); // died
@@ -321,7 +334,7 @@ try {
     const { ExitProxyManager: EPM4 } = M.load('src/exit-proxy.js', noRejudge, 'norejudge');
     const S8 = { name: 'eight', backend: 'claude', claudeSessionId: 'c-8' };
     let m8 = ['G'];
-    const ex4 = new EPM4({ hosts, log: () => {}, sessionsMap: () => new Map([['w8', S8]]), groupsOf: () => m8.map((id) => ({ id })) });
+    const ex4 = new EPM4({ hosts, grants, log: () => {}, sessionsMap: () => new Map([['w8', S8]]), groupsOf: () => m8.map((id) => ({ id })) });
     await ex4.setAccess('host-mac', { use: { mode: 'only', who: [{ kind: 'group', id: 'G' }] } });
     const r8 = await ex4.use(S8, 'w8', 'host-mac');
     const o8 = await openConn(r8.localPort, credsOf(r8.url));

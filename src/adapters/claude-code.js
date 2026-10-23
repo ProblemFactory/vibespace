@@ -14,7 +14,7 @@
 
 const { BackendAdapter } = require('./base');
 const { CHAT_TRANSPORT_ARGS } = require('../harnesses/claude-transport'); // the ONE spelling (chat-wrapper reads it too)
-const { worktreeSpawnArgs } = require('../backend-caps');
+const { worktreeSpawnArgs, toolAllowlistArgs } = require('../backend-caps');
 const { claudeAllowRules, claudeAskRulesFor, spawnPermissionMode } = require('../agent-tool-rules.js'); // lane L: VibeSpace's own agent tools never ask per command (publish asks in a mode that asks anyway)
 // PURE (imports nothing): `parseGetUsageResponse` marks whether its own parse
 // enumerated the model-scoped set — the claim that lets a write RETIRE a limit
@@ -148,6 +148,12 @@ class ClaudeCodeAdapter extends BackendAdapter {
     if (sessionName && this.config.supportsName) args.push('--name', sessionName);
     if (model) args.push('--model', model);
     if (permissionMode) args.push('--permission-mode', permissionMode);
+    // THE 「可用工具」 TICKS (lane new-session-form): the harness's own --allowedTools / --disallowedTools, judged by the
+    // PURE rule in backend-caps (closed tool list; a ✗ Bash never reaches argv — deny beats allow and would block the
+    // vibespace-* allow rules below). Pushed here, before --effort / the user's flags / the wrapper's transport flags, so a dash always ends the variadic lists.
+    const toolPick = toolAllowlistArgs({ backend: 'claude', pick: options.tools });
+    if (toolPick.dirty) args.push(...toolPick.args);
+    if (toolPick.dropped.length) notes.push(`tool pick: ${toolPick.dropped.join(', ')} dropped (not a switch this harness offers here)`);
     // "ultracode" is NOT an effortLevel value — it's a separate boolean
     // settings key = xhigh effort + standing dynamic-workflow orchestration
     // (from disassembly: --effort ultracode parses to plain xhigh WITHOUT the

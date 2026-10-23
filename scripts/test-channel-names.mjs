@@ -58,6 +58,7 @@ function srcFiles(dir) {
 const FALLBACK_RE = /\b[\w.]*title \|\| [\w.]*?\b(?:convId|id)\b/g;
 // Each judged site: [file, a phrase of its line, why it may keep the id]
 const JUDGED = [
+  ['src/lib/new-session-form.js', 'const groupName = (g) => String(g.title || g.id);', 'a TASK GROUP\'s own name in the New Session form (lane new-session-form) — no channel conversation: the group store always holds a title'],
   ['src/channel-filter.js', '`### Channel message —', 'AGENT-FACING wake block head (the engine hands it the ladder name; ③ only when nothing is known)'],
   ['src/channel-filter.js', '#### ${safeInline(g.title || g.convId', 'AGENT-FACING scope digest section (the CLI addresses a conversation by its id)'],
   ['src/channel-filter.js', '`### Channel digest —', 'AGENT-FACING digest block head (the engine hands it the ladder name)'],

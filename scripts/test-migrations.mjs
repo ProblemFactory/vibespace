@@ -22,6 +22,11 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-mig-'));
 // developer happens to have (measured on this box: 3.9 GB, 27 s, in the FAST
 // tier). The default stays os.homedir() for production.
 const scratchHomeDir = path.join(tmp, 'home-empty');
+// lane grants-unify: "Who can use it" is judged over THE grants store's rows — a pre-unify record is judged as the
+// migration 2026-10-grants-unify carries it (the same mapper: withUse), and an old migration's live-keeper legs run that
+// migration after it (the chain old reshape → rows is what the upgrade does)
+const { withUse } = await import('./grant-fixtures.mjs');
+const runGrantsUnify = (r, opts = {}) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: create({ rootDir: r, homeDir: scratchHomeDir, serverNotice: () => { }, ...opts }).MIGRATIONS.filter((x) => x.id === '2026-10-grants-unify'), log: () => { }, warn: () => { } }).find((x) => x.id === '2026-10-grants-unify');
 fs.mkdirSync(path.join(scratchHomeDir, '.claude', 'projects'), { recursive: true });
 try {
   // ── runner semantics ──
@@ -860,6 +865,7 @@ try {
     const notices2 = [];
     ok(mm.MIGRATIONS.some((m) => m.id === ID), 'the backfill is registered as a ledger-keyed one-shot');
     fs.writeFileSync(path.join(d, 'migrations.json'), JSON.stringify({ applied: Object.fromEntries(mm.MIGRATIONS.filter((m) => m.id !== ID).map((m) => [m.id, 1])) }));
+    fs.writeFileSync(path.join(d, 'grants.json'), JSON.stringify({ v: 1, rows: [] }), { mode: 0o600 });   // lane grants-unify: an instance whose ledger names 2026-10-grants-unify holds its store (none ⇒ grants_store_missing — verify F2)
     const logs = [];
     const oLog = console.log; console.log = (...a) => { logs.push(a.join(' ')); };
     let res; try { res = mm.runLocalMigrations(); } finally { console.log = oLog; }
@@ -948,6 +954,7 @@ const mm = create({ rootDir: root, homeDir: path.join(root, 'home'), serverNotic
 let led = { applied: {} }; try { led = JSON.parse(fs.readFileSync(path.join(d, 'migrations.json'), 'utf-8')); } catch { }
 led.applied = led.applied || {}; for (const m of mm.MIGRATIONS) if (m.id !== ID) led.applied[m.id] = led.applied[m.id] || 1;
 fs.writeFileSync(path.join(d, 'migrations.json'), JSON.stringify(led));
+if (!fs.existsSync(path.join(d, 'grants.json'))) fs.writeFileSync(path.join(d, 'grants.json'), JSON.stringify({ v: 1, rows: [] }), { mode: 0o600 });   // lane grants-unify: the store an instance whose ledger names 2026-10-grants-unify holds
 const res = mm.runLocalMigrations(); const me = res.find((r) => r.id === ID);
 console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && me.report, notices }));
 `);
@@ -1222,7 +1229,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(byId['bp-0000a002'].sharing === 'instance' && byId['bp-0000a001'].sharing === 'owner', '…`sharing` (the tab-isolation knob) is never touched');
     ok(byId['bp-0000a005'].owner.kind === 'conversation' && byId['bp-0000a006'].owner.kind === 'task' && byId['bp-0000a004'].legacy === true && rp.kept.length === 4, 'the ephemeral record, the task-owned record (an explicit scope) and the legacy one are left alone; the UI-made one already is all', rp.kept);
     ok(doc.profiles.filter((p) => !p.ephemeral).every((p) => p.owner.kind !== 'session') && BP.migrateScopeAll(doc).migrated.length === 0, 'idempotent: a second pass migrates nothing');
-    ok(BP.mayAttach(byId['bp-0000a002'], { browserKey: 'bk-0000a0ff' }).ok && BP.mayAttach(byId['bp-0000a001'], { browserKey: KB }).ok, 'the study\'s path-A records now admit another conversation');
+    ok(BP.mayAttach(withUse(byId['bp-0000a002']), { browserKey: 'bk-0000a0ff' }).ok && BP.mayAttach(withUse(byId['bp-0000a001']), { browserKey: KB }).ok, 'the study\'s path-A records now admit another conversation');
     // (a) the FILE path
     const r1 = mkInst('bpall-file');
     const f1 = path.join(r1, 'data', 'browser-profiles.json');
@@ -1246,7 +1253,8 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     Kp.list(); // loaded
     const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { }, browserKeeper: () => Kp }), r3).find((x) => x.id === ID);
     ok(res3.status === 'ran' && res3.report.via === 'keeper' && Kp.profile('bp-0000a001').owner.kind === 'instance' && Kp.profile('bp-0000a001').createdBy === KA && JSON.parse(fs.readFileSync(f3, 'utf-8')).profiles.find((p) => p.id === 'bp-0000a001').owner.kind === 'instance', 'with a live keeper the IN-MEMORY record is reshaped and the keeper\'s own save puts it on disk', res3.report);
-    ok(Kp.list().profiles.find((p) => p.id === 'bp-0000a001').scope === 'all', '…and the digest says every conversation can use it (scope all)');
+    const gu3 = runGrantsUnify(r3, { browserKeeper: () => Kp });   // lane grants-unify: then the rows (what the upgrade does next)
+    ok(gu3 && gu3.status === 'ran' && Kp.list().profiles.find((p) => p.id === 'bp-0000a001').scope === 'all', '…and the digest says every conversation can use it (scope all)', gu3);
     Kp.shutdown();
     // (e) VERIFY S5 (2026-09-26): a CORRUPT / unreadable registry FAILS BY NAME — the ledger is not stamped, the file is
     // not touched, and the next run (the file whole again) migrates it; only a MISSING file is "nothing to migrate"
@@ -1267,7 +1275,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(res6 && res6.status !== 'ran' && /not a registry document/.test(String(res6.error || '')), 'a file holding `null` is not a registry — fails by name too', res6);
     // (d) CONTROL: the pre-ruling registry refuses the study's path A — what the migration exists for
     const pre = fixture();
-    ok(BP.mayAttach(pre.profiles[0], { browserKey: KB }).code === 'not_owner' && BP.mayAttach(pre.profiles[1], { browserKey: 'bk-0000a0ff' }).code === 'not_owner', 'CONTROL: before the migration both path-A records refuse another conversation (not_owner) — the legs above can go red');
+    ok(BP.mayAttach(withUse(pre.profiles[0]), { browserKey: KB }).code === 'not_owner' && BP.mayAttach(withUse(pre.profiles[1]), { browserKey: 'bk-0000a0ff' }).code === 'not_owner', 'CONTROL: before the migration both path-A records refuse another conversation (not_owner) — the legs above can go red');
   }
   // ── 2026-09-browser-profiles-who-list ("Who can use it" becomes a LIST, 2026-09-27) ──
   // A record kept to ONE conversation / Task Group becomes a one-row list, and every conversation whose USER pin let it
@@ -1304,7 +1312,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       return !!(pin && pin.profileId === p.id && pin.by !== 'agent' && (Number(pin.at) || 0) >= (Number(p.scopeAt) || 0));
     };
     const pre = fixture();
-    ok(oldAdmits(pre.profiles[1], K2, pre.pins) && !BP.mayAttach(pre.profiles[1], { browserKey: K2 }).ok && oldAdmits(pre.profiles[2], K7, pre.pins) && !BP.mayAttach(pre.profiles[2], { browserKey: K7 }).ok, 'CONTROL: yesterday\'s admission let the pinned chats in (K2 on work, K7 on Group) and today\'s — a pin never authorizes — refuses them on the pre-migration file: the fold below is what keeps them in');
+    ok(oldAdmits(pre.profiles[1], K2, pre.pins) && !BP.mayAttach(withUse(pre.profiles[1]), { browserKey: K2 }).ok && oldAdmits(pre.profiles[2], K7, pre.pins) && !BP.mayAttach(withUse(pre.profiles[2]), { browserKey: K7 }).ok, 'CONTROL: yesterday\'s admission let the pinned chats in (K2 on work, K7 on Group) and today\'s — a pin never authorizes — refuses them on the pre-migration file: the fold below is what keeps them in');
     const doc = fixture();
     const rp = BP.migrateWhoList(doc);
     const byId = Object.fromEntries(doc.profiles.map((p) => [p.id, p]));
@@ -1312,7 +1320,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(JSON.stringify(byId['bp-0000e002'].owner) === JSON.stringify({ kind: 'only', who: [{ kind: 'session', id: K1 }, { kind: 'session', id: K2 }] }) && rp.migrated[0].folded.join() === K2, 'work ⇒ [its conversation (a helper\'s key → its parent), + K2 folded]; the agent\'s pin, the older pin, another profile\'s pin and the fork\'s old copy are NOT folded', byId['bp-0000e002'].owner);
     ok(JSON.stringify(byId['bp-0000e003'].owner) === JSON.stringify({ kind: 'only', who: [{ kind: 'task', id: 'T-OPS' }, { kind: 'session', id: K7 }] }), 'Group ⇒ [Task Group T-OPS, + K7 folded] (a pre-ruling pin with no `by` is the user\'s)', byId['bp-0000e003'].owner);
     ok(byId['bp-0000e001'].owner.kind === 'instance' && byId['bp-0000e004'].owner.kind === 'conversation' && byId['bp-0000e005'].legacy === true && JSON.stringify(doc.pins) === JSON.stringify(fixture().pins), 'the instance / ephemeral / legacy records and every pin are untouched');
-    ok(BP.mayAttach(byId['bp-0000e002'], { browserKey: K2 }).ok && BP.mayAttach(byId['bp-0000e003'], { browserKey: K7 }).ok && !BP.mayAttach(byId['bp-0000e002'], { browserKey: K3 }).ok && !BP.mayAttach(byId['bp-0000e002'], { browserKey: K4 }).ok, 'after the fold, everyone yesterday admitted is admitted by the LIST (and nobody else)');
+    ok(BP.mayAttach(withUse(byId['bp-0000e002']), { browserKey: K2 }).ok && BP.mayAttach(withUse(byId['bp-0000e003']), { browserKey: K7 }).ok && !BP.mayAttach(withUse(byId['bp-0000e002']), { browserKey: K3 }).ok && !BP.mayAttach(withUse(byId['bp-0000e002']), { browserKey: K4 }).ok, 'after the fold, everyone yesterday admitted is admitted by the LIST (and nobody else)');
     doc.pins[K3] = { profileId: 'bp-0000e002', origin: 'chosen', at: 999, by: 'user' }; // a fresh user pin present at the second pass
     const again = JSON.stringify(doc.profiles);
     const rp2 = BP.migrateWhoList(doc);
@@ -1333,7 +1341,8 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const Kp = require('../src/server/browser-keeper.js').create({ dataDir: path.join(r3, 'data'), homeDir: scratchHomeDir, install: false, log: { log() { }, warn() { }, error() { } } });
     Kp.list();
     const res3 = runOnly(create({ rootDir: r3, homeDir: scratchHomeDir, serverNotice: () => { }, browserKeeper: () => Kp }), r3).find((x) => x.id === ID);
-    ok(res3.status === 'ran' && res3.report.via === 'keeper' && Kp.list().profiles.find((p) => p.id === 'bp-0000e002').use.who.map((w) => w.key).join() === [K1, K2].join(), 'with a live keeper the IN-MEMORY record is reshaped (the digest\'s `use` lists both conversations) and its own save puts it on disk', res3.report);
+    const gu3 = runGrantsUnify(r3, { browserKeeper: () => Kp });   // lane grants-unify: then the rows (what the upgrade does next)
+    ok(res3.status === 'ran' && res3.report.via === 'keeper' && gu3 && gu3.status === 'ran' && Kp.list().profiles.find((p) => p.id === 'bp-0000e002').use.who.map((w) => w.key).join() === [K1, K2].join(), 'with a live keeper the IN-MEMORY record is reshaped (the digest\'s `use` lists both conversations) and its own save puts it on disk', res3.report);
     Kp.shutdown();
     // (c) no store ⇒ ran, nothing created; (d) an unparsable store FAILS by name, the ledger unstamped, retried when whole
     const r2 = mkInst('whol-none');
@@ -1364,7 +1373,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       ok(!admits195(pz, L0, z.pins) && admits195(pz, LD, z.pins) && oldAdmits(pz, L0, z.pins), 'setup (e): 2.369.195 refused the landing dated 0 and admitted the dated pick; the 2.369.194 rule (no date clause) would have admitted the landing — the fixture tells the two apart');
       const rz = BP.migrateWhoList(z);
       ok(rz.migrated.length === 1 && rz.migrated[0].folded.join() === LD && JSON.stringify(z.profiles[0].owner) === JSON.stringify({ kind: 'only', who: [{ kind: 'session', id: K1 }, { kind: 'session', id: LD }] })
-        && !BP.mayAttach(z.profiles[0], { browserKey: L0 }).ok && BP.mayAttach(z.profiles[0], { browserKey: LD }).ok,
+        && !BP.mayAttach(withUse(z.profiles[0]), { browserKey: L0 }).ok && BP.mayAttach(withUse(z.profiles[0]), { browserKey: LD }).ok,
       '(e) the fold preserves 2.369.195\'s admission: the late key\'s landing (dated 0) is NOT folded — nothing yesterday refused is opened — the dated user pick is', rz);
       // CONTROL: migrateWhoList without the date clause (the 2.369.194 rule the lane was written against) folds the landing
       const { mutantCopies } = await import('./mutant-copy.mjs');
@@ -1378,7 +1387,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
         try {
           const B0 = MZ.load('src/browser-profiles.js', bpSrc.replace(DATED, "      if (at < (Number(p.scopeAt) || 0)) continue;\n"), 'fold-undated');
           const z0 = docZ(); const r0 = B0.migrateWhoList(z0);
-          ok(r0.migrated.length === 1 && r0.migrated[0].folded.includes(L0) && B0.mayAttach(z0.profiles[0], { browserKey: L0 }).ok, 'CONTROL (e): that copy folds the landing into the list — a conversation 2.369.195 refused would be let in by the upgrade; the date clause is what keeps it out', r0);
+          ok(r0.migrated.length === 1 && r0.migrated[0].folded.includes(L0) && B0.mayAttach(withUse(z0.profiles[0]), { browserKey: L0 }).ok, 'CONTROL (e): that copy folds the landing into the list — a conversation 2.369.195 refused would be let in by the upgrade; the date clause is what keeps it out', r0);
         } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
       }
     }
@@ -1472,8 +1481,12 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const rA = path.join(tmp, 'aw-a'); const dA = path.join(rA, 'data');
     seed(dA, legacyIndex());
     const eA = ENG.create({ dataDir: dA, env: {}, log: quiet, liveSessions: () => [] });
+    // lane grants-unify: who may see / be woken is THE grants store's rows — 2026-10-grants-unify carries a pre-split
+    // record's single assignment over (its mapper lifts it the way every pre-unify reader did); the watcher's SETTINGS
+    // are still read off the pre-split record until this pass lifts it
+    const guA = runGrantsUnify(rA, { channels: eA });
     const pre = eA.effectiveFor('fake-poll', 'c1');
-    ok(pre && pre.access.some((x) => x.row.principal.id === 'agent-A') && pre.watchers.some((x) => x.watcher.principal.id === 'agent-A') && pre.access.some((x) => x.row.principal.id === 'tg-work' && x.source === 'account'), 'BEFORE the run the engine already reads each pre-split record as one access row + one watcher row (merged, never a fallback)');
+    ok(guA && guA.status === 'ran' && pre && pre.access.some((x) => x.row.principal.id === 'agent-A') && pre.watchers.some((x) => x.watcher.principal.id === 'agent-A') && pre.access.some((x) => x.row.principal.id === 'tg-work' && x.source === 'account'), 'BEFORE the run the engine already reads each pre-split record as one access row + one watcher row (merged, never a fallback)');
     const lines = [];
     const origLog = console.log;
     console.log = (...a) => { lines.push(a.join(' ')); };
@@ -1580,8 +1593,11 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     // listed (every agent could use AND run it) reads everyone for BOTH grants after the migration, every other none
     const oldList = FIX.hosts.filter((h) => h && h.allowExit).map((h) => h.id);
     ok(JSON.stringify(oldList) === '["host-dial-Macbook"]', 'CONTROL: the pre-lane list() over the pre-migration fixture lists the allowExit machine');
-    ok(d1.hosts.every((h) => { const a = E.exitAccessOf(h); const was = oldList.includes(h.id); return h.id === 'host-new' || (was ? (a.use.mode === 'everyone' && a.run.mode === 'everyone') : (a.use.mode === 'nobody' && a.run.mode === 'nobody')); }), '…and exactly those read everyone / everyone after it (on ⇒ everyone preserves what the old boolean granted)');
-    ok(E.exitAccessOf(FIX.hosts[0]).use.mode === 'everyone', '…and the reader agrees BEFORE the migration too (a boot where it failed still reads the boolean)');
+    // lane grants-unify: the reader judges THE grants store's rows — the rows 2026-10-grants-unify carries a record to
+    const GMx = require('../src/grant-model.js');
+    const accessAfter = (h) => { const m = GMx.rowsOfHosts([h]); const of = (g) => m.rows.filter((r) => r.resource === `${h.id}:${g}`); return E.exitAccessOf(h, { use: of('use'), run: of('run') }); };
+    ok(d1.hosts.every((h) => { const a = accessAfter(h); const was = oldList.includes(h.id); return h.id === 'host-new' || (was ? (a.use.mode === 'everyone' && a.run.mode === 'everyone') : (a.use.mode === 'nobody' && a.run.mode === 'nobody')); }), '…and exactly those read everyone / everyone after it (on ⇒ everyone preserves what the old boolean granted)');
+    ok(accessAfter(FIX.hosts[0]).use.mode === 'everyone', '…and the grants migration carries the boolean the same way BEFORE 2026-09 ran (a boot where it failed: the mapper reads the boolean)');
   }
   // ── 2026-09-pool-manual-priority (2026-09-28: the whole-pool manual switch is retired — manual PRIORITY replaces it) ──
   {
@@ -2076,6 +2092,188 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     hm.pm.renamePlugin = function (from, to) { const P = this._state.plugins; P[to] = { ...P[from], ...P[to] }; delete P[from]; this._save({ loud: true }); return { settings: { moved: [], dropped: [], seeded: [] }, record: 'merged', config: null }; };
     runOne(merged, { plugins: hm.pm, integrations: hm.st });
     ok('stale' in rd(path.join(merged.dataDir, 'plugins.json')).plugins.llm, 'RED CONTROL: a merging rename carries the old record\'s stale field into the new one (the half-migrated leg would go red)');
+  }
+  // ── 2026-10-grants-unify (lane grants-unify, the owner 2026-10-23: 「权限系统要 unify 一下」) ──
+  // Every pre-unify who-list → rows of THE grants store by the model's own mappers; each resource JUDGED (old reader ≡ new
+  // reader for every principal the rows name) before it is written; a disagreement is NOT written, NAMED, and fails the
+  // run (retried next boot) — everything that agreed is written; a row the store holds is kept; the asks carried.
+  {
+    console.log('2026-10-grants-unify');
+    const ID = '2026-10-grants-unify';
+    const GS = require('../src/server/grants-store.js');
+    const GMx = require('../src/grant-model.js');
+    const mk = (name) => { const r = path.join(tmp, name); fs.mkdirSync(path.join(r, 'data', 'channels'), { recursive: true }); return r; };
+    const W = (r, rel, doc) => fs.writeFileSync(path.join(r, 'data', rel), JSON.stringify(doc), { mode: 0o600 });
+    const BK1 = 'bk-0a0a0a01', CID1 = 'cid-one-0001';
+    const fixture = (r, { mirrorBroken = false } = {}) => {
+      W(r, 'hosts.json', { hosts: [
+        { id: 'h-1', name: 'One', exit: { use: { mode: 'only', who: [{ kind: 'session', id: `claude:${CID1}` }, { kind: 'group', id: 'tg-ops' }] }, run: { mode: 'only', who: [{ kind: 'group', id: 'tg-ops' }], ask: true }, hub: { mode: 'nobody' } } },
+        { id: 'h-2', name: 'Two', allowExit: true },
+        { id: 'h-3', name: 'Three', exit: { use: { mode: 'nobody' }, run: { mode: 'nobody' } } },
+        // verify F4: a spelled-out default hub the old reader could not read (both lists refused) — no grant carried, named
+        { id: 'h-4', name: 'Four', exit: { use: { mode: 'everyone' }, run: { mode: 'everyone', ask: false }, hub: { mode: 'default' } } },
+      ] });
+      W(r, 'browser-profiles.json', { version: 1, leases: [], browsers: {}, pins: {}, profiles: [
+        { id: 'bp-0000f001', label: 'all', dir: '/x/1', provider: 'chromium', owner: { kind: 'instance', id: null } },
+        { id: 'bp-0000f002', label: 'kept', dir: '/x/2', provider: 'chromium', owner: { kind: 'only', who: [{ kind: 'session', id: BK1 }, { kind: 'task', id: 'tg-ops' }] } },
+        { id: 'bp-0000f003', label: 'eph', dir: '/x/3', provider: 'chromium', ephemeral: true, owner: { kind: 'conversation', id: BK1 } },
+        { id: 'bp-0000f004', label: 'legacy', dir: '/x/4', provider: 'chromium', legacy: true },
+      ] });
+      W(r, 'automation-keys.json', { v: 1, keys: [{ id: 'ak-0000000000a1', name: 'k', scopes: ['conversations.list'], digest: 'd', at: 1 }], opened: [], grants: [
+        { id: 'ag-000000000001', keyId: 'ak-0000000000a1', subject: `session:${CID1}`, mode: 'always', at: 1, reach: 'instance' },
+        { id: 'ag-000000000002', keyId: 'ak-0000000000a1', subject: 'group:tg-ops', mode: 'always', at: 1, reach: { taskGroups: ['tg-ops'] } },
+      ] });
+      W(r, 'window-reach.json', { v: 1, savedAt: 1, windows: { 'da-1': { windowId: 'da-1', mode: 'reach', rows: [{ principal: { kind: 'session', id: `claude:${CID1}` }, grantedAt: 1, by: 'self-open' }, { principal: { kind: 'group', id: 'tg-ops' }, grantedAt: 2, by: 'user' }] } } });
+      W(r, 'task-groups.json', { version: 2, tasks: { 'tg-ops': { id: 'tg-ops', title: 'Ops', externalVisibility: 'messageable' }, 'tg-quiet': { id: 'tg-quiet', title: 'Quiet' } } });
+      W(r, path.join('channels', 'index.json'), { v: 1, updatedAt: 0,
+        conversations: { 'lark-1/c1': { key: 'lark-1/c1', id: 'c1', adapterId: 'lark-1', access: [{ principal: { kind: 'agent', id: CID1 }, authority: 'send', createdAt: 3 }], watchers: [{ principal: { kind: 'agent', id: CID1 }, notify: 'wake', mode: 'all' }],
+          reachEntries: [{ principal: { kind: 'agent', id: CID1 }, scope: { kind: 'conversation', id: 'lark-1/c1' }, level: 'visible', origin: 'access', at: 3 }, { principal: { kind: 'group', id: 'tg-ops' }, scope: { kind: 'conversation', id: 'lark-1/c1' }, level: 'requestable', origin: 'user', at: 4 }, { principal: { kind: 'agent', id: 'cid-asker-1' }, scope: { kind: 'conversation', id: 'lark-1/c1' }, level: 'visible', origin: 'request', at: 5 }] } },
+        accountAssignments: { 'lark-1': { adapterId: 'lark-1', scope: { kind: 'account', id: 'lark-1' }, access: [{ principal: { kind: 'group', id: 'tg-ops' }, authority: 'draft' }], watchers: [{ principal: { kind: 'group', id: 'tg-ops' }, notify: 'digest', mode: 'all' }] } },
+        patternAssignments: {},
+        accountGrants: [{ principal: { kind: 'group', id: 'tg-ops' }, scope: { kind: 'adapter', id: 'lark-1' }, level: 'visible', origin: 'access', at: 1 }, ...(mirrorBroken ? [{ principal: { kind: 'agent', id: 'cid-stray-1' }, scope: { kind: 'adapter', id: 'lark-1' }, level: 'visible', origin: 'access', at: 2 }] : [])],
+        apiGrants: [{ principal: { kind: 'group', id: 'tg-ops' }, scope: { kind: 'adapter', id: 'lark-1' }, level: 'hidden', origin: 'api', api: 'write-auto', at: 1 }],
+      });
+    };
+    const runIt = (r, opts = {}) => runMigrations({ ledgerPath: path.join(r, 'data', 'migrations.json'), migrations: create({ rootDir: r, homeDir: scratchHomeDir, serverNotice: () => { }, ...opts }).MIGRATIONS.filter((x) => x.id === ID), log: () => { }, warn: () => { } }).find((x) => x.id === ID);
+    // (a) every source carried over
+    const rA = mk('gu-all');
+    fixture(rA);
+    const before = { hosts: fs.readFileSync(path.join(rA, 'data', 'hosts.json'), 'utf-8') };
+    const res = runIt(rA);
+    const st = GS.forDir(path.join(rA, 'data'));
+    const rowOf = (door, res2) => st.rowsFor(door, res2)[0] || null;
+    const admits = (door, res2, facts) => GMx.admits(st.rowsFor(door, res2), facts).ok;
+    ok(res && res.status === 'ran' && res.report && res.report.refused === 0 && res.report.seeded > 0, 'registered and run: every resource agreed, the rows are seeded', res && res.report);
+    ok(admits('exit', 'h-1:use', { conversationKey: CID1 }) && admits('exit', 'h-1:use', { conversationKey: 'x9', groupIds: ['tg-ops'] }) && !admits('exit', 'h-1:use', { conversationKey: 'x9' }) && admits('exit', 'h-2:use', { conversationKey: 'x9' }) && admits('exit', 'h-2:run', { conversationKey: 'x9' }) && !rowOf('exit', 'h-3:use'), 'exit: the listed conversation (by its id) and the Task Group admit, an outsider does not; a pre-list allowExit is everyone / everyone; nobody ⇒ no row');
+    ok(!rowOf('exit', 'h-4:use') && !rowOf('exit', 'h-4:run') && res.report.counts.exit.unknown === 2 && (res.report.unread || []).includes('exit h-4:use') && (res.report.unread || []).includes('exit h-4:run'), 'exit (verify F4): a stored hub the OLD reader could not read (`{mode:\'default\'}` spelled out — it refused both lists) carries NO grant, and the run NAMES it (`unread`) — never everyone', res.report);
+    const hostsAfter = JSON.parse(fs.readFileSync(path.join(rA, 'data', 'hosts.json'), 'utf-8')).hosts;
+    ok(hostsAfter.find((h) => h.id === 'h-1').exit.ask === true && hostsAfter.find((h) => h.id === 'h-1').exit.run.mode === 'only' && hostsAfter.find((h) => h.id === 'h-2').allowExit === true, 'exit: «Ask me each time» is carried to the record\'s own `exit.ask`; the old fields stay on disk, unread', hostsAfter.map((h) => h.exit));
+    ok(admits('browser-profile', 'bp-0000f001', { conversationKey: 'anyone' }) && admits('browser-profile', 'bp-0000f002', { conversationKeys: [BK1] }) && admits('browser-profile', 'bp-0000f002', { conversationKey: 'x9', groupIds: ['tg-ops'] }) && !admits('browser-profile', 'bp-0000f002', { conversationKey: 'x9' }) && !rowOf('browser-profile', 'bp-0000f003') && admits('browser-profile', 'bp-0000f004', { conversationKey: 'x9' }), 'browser: instance / legacy ⇒ everyone; a list keeps its conversation (a key no binding names stands for itself) and its Task Group; an ephemeral record is no grant');
+    // verify F6 — ONE spelling: the suites' fixture mapper (GM.rowsOfBrowserProfiles) writes exactly the rows the migration wrote
+    const bpFix = JSON.parse(fs.readFileSync(path.join(rA, 'data', 'browser-profiles.json'), 'utf-8')).profiles;
+    const bpMig = st.rowsOfDoor('browser-profile').map((x) => ({ resource: x.resource, to: x.to.map((e) => GMx.principalKey(e)) })).sort((x, y) => x.resource.localeCompare(y.resource));
+    const bpMap = GMx.rowsOfBrowserProfiles(bpFix).rows.filter((x) => x.to.length).map((x) => ({ resource: x.resource, to: x.to.map((e) => GMx.principalKey(e)) })).sort((x, y) => x.resource.localeCompare(y.resource));
+    ok(JSON.stringify(bpMig) === JSON.stringify(bpMap) && bpMig.some((x) => x.to.includes(`conversation:${BK1}`)), 'browser (verify F6): the fixture mapper and the migration spell a key no binding names the SAME way (its own conversation) — one spelling, the rows identical', { bpMig, bpMap });
+    ok(admits('automation-key-use', 'ag-000000000001', { conversationKey: CID1 }) && !admits('automation-key-use', 'ag-000000000001', { conversationKey: 'x9' }) && admits('automation-key-reach', 'ag-000000000001', { conversationKey: 'x9' }) && admits('automation-key-use', 'ag-000000000002', { conversationKey: 'x9', groupIds: ['tg-ops'] }) && admits('automation-key-reach', 'ag-000000000002', { conversationKey: 'x9', groupIds: ['tg-ops'] }) && !admits('automation-key-reach', 'ag-000000000002', { conversationKey: 'x9' }), 'automation: a conversation subject / a Task Group subject, reach instance ⇒ everyone, reach {taskGroups} ⇒ those groups');
+    ok(admits('window', 'da-1', { conversationKey: CID1 }) && admits('window', 'da-1', { conversationKey: 'x9', groupIds: ['tg-ops'] }) && rowOf('window', 'da-1').to.find((e) => e.kind === 'conversation').origin === 'self-open', 'window: a `<backend>:<cid>` key becomes its conversation id; the opener\'s origin rides the entry');
+    ok(admits('group-visibility', 'tg-ops', { conversationKey: 'x9', groupIds: ['tg-ops'] }) && rowOf('group-visibility', 'tg-ops').to[0].level === 'messageable' && !rowOf('group-visibility', 'tg-quiet'), 'group visibility: the level rides the entry; a group with none has no row');
+    ok(rowOf('channel-reach', 'conversation:lark-1/c1').to[0].authority === 'send' && rowOf('channel-reach', 'conversation:lark-1/c1#user').to[0].level === 'requestable' && rowOf('channel-reach', 'conversation:lark-1/c1#request').to[0].key === 'cid-asker-1' && rowOf('channel-reach', 'account:lark-1').to[0].id === 'tg-ops' && rowOf('channel-watch', 'account:lark-1').to[0].id === 'tg-ops' && rowOf('channel-watch', 'conversation:lark-1/c1').to[0].key === CID1 && rowOf('channel-api', 'lark-1').to[0].tier === 'write-auto', 'channels: the grains\' access (authority), the owner\'s and the approved rows (level), who each notification wakes, the API tier');
+    ok(runIt(rA).status === 'already', 'run-at-most-once (the ledger)');
+    // (b) RED: the old reader admits what the rows cannot carry (an account grant no access row backs) ⇒ NOT written, named, FAILED
+    const rB = mk('gu-red');
+    fixture(rB, { mirrorBroken: true });
+    const resB = runIt(rB);
+    const stB = GS.forDir(path.join(rB, 'data'));
+    const ledB = JSON.parse(fs.readFileSync(path.join(rB, 'data', 'migrations.json'), 'utf-8'));
+    ok(resB && resB.status === 'failed' && /channel-reach account:lark-1/.test(resB.error) && /cid-stray-1/.test(resB.error) && !(ledB.applied && ledB.applied[ID]), 'RED FIXTURE: an account grant no access row backs ⇒ the run FAILS naming the row and who (the ledger is not stamped — retried next boot)', resB && resB.error);
+    ok(!stB.rowsFor('channel-reach', 'account:lark-1').length && stB.rowsFor('exit', 'h-1:use').length === 1 && stB.rowsFor('channel-api', 'lark-1').length === 1, '…that resource is NOT written (nobody may use it — closed, never widened or guessed); every resource that agreed IS (the owner\'s grants never all go dark)');
+    // (c) a row the store already holds is kept (a door wrote it since the upgrade) — and the next run passes
+    stB.set('channel-reach', 'account:lark-1', { to: [{ kind: 'group', id: 'tg-ops', authority: 'draft' }], except: [] }, 'user');
+    const resB2 = runIt(rB);
+    ok(resB2.status === 'ran' && stB.rowsFor('channel-reach', 'account:lark-1')[0].to.length === 1 && resB2.report.counts['channel-reach'].kept >= 1, 'a resource the owner gave again is KEPT (never judged against the old field) — the retry then passes', resB2);
+    // (d) an unreadable grants.json ⇒ failed by name, nothing written over it
+    const rD = mk('gu-torn');
+    fixture(rD);
+    fs.writeFileSync(path.join(rD, 'data', 'grants.json'), '{"v":1,"rows":[{"door":"exit"', { mode: 0o600 });
+    const resD = runIt(rD, { grants: GS.create({ dataDir: path.join(rD, 'data') }) });
+    ok(resD.status === 'failed' && /grants\.json cannot be read/.test(resD.error) && fs.readFileSync(path.join(rD, 'data', 'grants.json'), 'utf-8').startsWith('{"v":1,"rows":[{"door":"exit"'), 'an unreadable grants.json ⇒ FAILED by name; the file is not written over', resD);
+    // (e) verify F2 — THE ROLLBACK ROAD: data/grants.json deleted after the migration ran (the ledger stamped). Each boot is a
+    // fresh store read from disk (as server.js builds it) through the real runLocalMigrations.
+    const bootIn = (r, mod = { create }) => { const said = [], notices = []; const res = mod.create({ rootDir: r, homeDir: scratchHomeDir, grants: GS.create({ dataDir: path.join(r, 'data') }), note: (l) => said.push(l), serverNotice: (k) => notices.push(k) }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID); return { res, said, notices }; };
+    const gfile = (r) => path.join(r, 'data', 'grants.json');
+    const rowsOnDisk = (r) => { try { return JSON.stringify(JSON.parse(fs.readFileSync(gfile(r), 'utf-8')).rows.map((x) => ({ door: x.door, resource: x.resource, to: x.to, except: x.except }))); } catch (e) { return e.code === 'ENOENT' ? 'absent' : 'unreadable'; } };
+    const rR = mk('gu-rollback');
+    fixture(rR);
+    const b1 = bootIn(rR), rows1 = rowsOnDisk(rR), n1 = JSON.parse(rows1).length;
+    ok(b1.res.status === 'ran' && n1 > 10, `rollback: boot 1 runs the migration (${n1} rows)`, b1.res);
+    fs.unlinkSync(gfile(rR));
+    const b2 = bootIn(rR);
+    ok(b2.res.status === 'rearmed' && rowsOnDisk(rR) === rows1 && b2.said.some((l) => /2026-10-grants-unify rearmed: data\/grants\.json was missing/.test(l)), `rollback: grants.json DELETED with the ledger stamped ⇒ boot 2 RE-RUNS it — the same ${n1} rows, byte-identical (door / resource / to / except), said by name in ⚙ Diagnostics (pre-fix: \`already\`, 0 rows, every door closed silently)`, { res: b2.res, said: b2.said });
+    const b3 = bootIn(rR);
+    ok(b3.res.status === 'already' && !b3.said.length && rowsOnDisk(rR) === rows1, 'rollback: boot 3 (the store on disk) runs nothing and says nothing', b3);
+    // a store missing with NOTHING left to carry ⇒ grants_store_missing by name, every boot, nothing made up
+    const rM = mk('gu-missing');
+    const m1 = bootIn(rM);
+    ok(m1.res.status === 'ran' && rowsOnDisk(rM) === '[]' && !m1.said.length, 'a fresh instance (nothing to carry): the first run still leaves an empty store on disk — so a later boot can tell a deleted one');
+    ok(bootIn(rM).said.length === 0, '…and the next boot (the store on disk) is silent');
+    fs.unlinkSync(gfile(rM));
+    const m3 = bootIn(rM), m4 = bootIn(rM);
+    ok(m3.res.status === 'already' && m3.res.missing === 'grants_store_missing' && m3.said.some((l) => /^grants_store_missing: data\/grants\.json is missing/.test(l)) && m3.notices.includes('grants_store_missing') && rowsOnDisk(rM) === 'absent', 'no store AND no old list ⇒ `grants_store_missing` in the log, ⚙ Diagnostics and a notice — every door closed (nobody), no file made up', m3);
+    ok(m4.res.missing === 'grants_store_missing' && m4.said.length === 1, '…and the next boot says it again (never silence until access is given)', m4);
+    // CONTROL: the boot check removed ⇒ boot 2 answers `already` with no store — the rollback leg goes red
+    const MR = mutantCopies('migrations-rearm', REPO_ROOT);
+    try {
+      const msrc = fs.readFileSync(path.join(REPO_ROOT, 'src', 'server', 'migrations.js'), 'utf-8');
+      const RLINE = "    for (const r of results) if (r.id === '2026-10-grants-unify' && r.status === 'already') Object.assign(r, grantsStoreBoot());   // verify F2: the ledger stamped, the store deleted\n";
+      ok(msrc.split(RLINE).length === 2, 'CONTROL setup: the boot-check line is found exactly once');
+      const MM = MR.load('src/server/migrations.js', msrc.replace(RLINE, ''), 'no-rearm');
+      const rX = mk('gu-rollback-ctl'); fixture(rX);
+      bootIn(rX, MM); fs.unlinkSync(gfile(rX));
+      const x2 = bootIn(rX, MM);
+      ok(x2.res.status === 'already' && rowsOnDisk(rX) === 'absent' && !x2.said.length, 'CONTROL: without the boot check boot 2 answers `already`, no store, nothing said — the rollback leg goes red', x2);
+    } finally { try { fs.rmSync(MR.dir, { recursive: true, force: true }); } catch { } }
+    // CONTROL: a migration that writes without judging carries the stray account grant as a live row — the RED leg would go red
+    const MZ = mutantCopies('grants-migration', REPO_ROOT);
+    try {
+      const src = fs.readFileSync(path.join(REPO_ROOT, 'src', 'server', 'grants-migration.js'), 'utf-8');
+      const LINE = "    const bad = probes.filter((pr) => !!oldOf(pr) !== !!newOf(pr)).map((pr) => pr.label);";
+      ok(src.split(LINE).length === 2, 'CONTROL setup: the judge line is found exactly once');
+      const GMZ = MZ.load('src/server/grants-migration.js', src.replace(LINE, '    const bad = [];').replace("const off = probes.filter((pr) => oldLevel(pr.ctx, target, oldGrants) !== newLevel(pr.ctx, target, newGrants)).map((pr) => pr.label);", 'const off = [];'), 'no-judge');
+      const rC = mk('gu-ctl'); fixture(rC, { mirrorBroken: true });
+      const stC = GS.create({ memory: true });
+      let threw = null; try { GMZ.migrate({ dataDir: path.join(rC, 'data'), store: stC }); } catch (e) { threw = e; }
+      const p = GMx.admits(stC.rowsFor('channel-reach', 'account:lark-1'), { conversationKey: 'x9', groupIds: ['tg-ops'] });
+      ok(!threw && p.ok && !GMx.admits(stC.rowsFor('channel-reach', 'account:lark-1'), { conversationKey: 'cid-stray-1' }).ok, 'CONTROL: without the judge the run PASSES and the stray grant silently disappears (the old reader let cid-stray-1 see the whole account) — the RED leg is what names it');
+    } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
+  }
+  // ── 2026-10-task-group-context-rows (lane task-group-context): a Task Group's folders[] + contextDir → its Context
+  // table's rows, THROUGH the live TaskGroupManager (it holds task-groups.json and saves it whole), the file without one;
+  // the old fields kept in the file one release; run at most once; an unreadable store fails by name ──
+  {
+    console.log('2026-10-task-group-context-rows');
+    const ID = '2026-10-task-group-context-rows';
+    const { TaskGroupManager } = require('../src/task-groups.js');
+    const rd = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
+    const oldStore = (tag) => {
+      const root = path.join(tmp, 'tgc-' + tag), dataDir = path.join(root, 'data'), w = path.join(root, 'work');
+      fs.mkdirSync(path.join(w, 'shared'), { recursive: true }); fs.mkdirSync(dataDir, { recursive: true });
+      fs.writeFileSync(path.join(dataDir, 'task-groups.json'), JSON.stringify({ version: 1, tasks: {
+        'T-1-a': { id: 'T-1-a', title: 'a', kind: 'task', archived: false, objective: '', backlog: [], progress: [], sessions: [], folders: [{ path: w, recursive: true }], contextDir: path.join(w, 'shared'), createdAt: 1, updatedAt: 1 },
+        'T-1-b': { id: 'T-1-b', title: 'b', kind: 'task', archived: false, objective: '', backlog: [], progress: [], sessions: [], folders: [], contextDir: null, createdAt: 2, updatedAt: 2 },
+      } }, null, 2));
+      return { root, dataDir, w };
+    };
+    // (1) THROUGH the live store
+    const a = oldStore('live');
+    const live = new TaskGroupManager({ dataDir: a.dataDir, homeDir: scratchHomeDir });
+    const ra = create({ rootDir: a.root, homeDir: scratchHomeDir, serverNotice: () => { }, tasks: live }).runLocalMigrations().find((r) => r.id === ID);
+    const doc = rd(path.join(a.dataDir, 'task-groups.json'));
+    ok(ra && ra.status === 'ran' && ra.report.groups === 2 && ra.report.rows === 2 && ra.report.notes === 1, 'the migration ran through the live store (2 groups, 2 rows, 1 notes row)', ra);
+    ok(JSON.stringify(live.get('T-1-a').ctx.map((r) => [r.path, r.tell, r.tags])) === JSON.stringify([[a.w, 'names', ['discover']], [path.join(a.w, 'shared'), 'names', ['notes']]]) && live.get('T-1-b').ctx.length === 0,
+      'folders[] → 文件名 + 自动发现会话, contextDir → 文件名 + agent 在这里记笔记; a group with neither gets an empty table', live.get('T-1-a').ctx);
+    ok(live.groupsForSession({ cwd: path.join(a.w, 'deep') }).map((g) => g.id).join() === 'T-1-a' && live.contextDirOf('T-1-a') === path.join(a.w, 'shared'), 'the live store answers from the rows at once (membership, the notes folder)');
+    ok(doc.tasks['T-1-a'].folders.length === 1 && doc.tasks['T-1-a'].contextDir === path.join(a.w, 'shared') && doc.tasks['T-1-a'].ctx.length === 2, 'the file holds the rows AND the old fields (kept one release — an older build reads them)');
+    const again = create({ rootDir: a.root, homeDir: scratchHomeDir, serverNotice: () => { }, tasks: live }).runLocalMigrations().find((r) => r.id === ID);
+    const mig = create({ rootDir: a.root, homeDir: scratchHomeDir, tasks: live }).MIGRATIONS.find((m) => m.id === ID);
+    ok(again.status === 'already' && mig.run().groups === 0, 'at most once: the ledger says already, and the move itself finds nothing to do');
+    // (2) no live store (a suite): the file, atomically
+    const b = oldStore('file');
+    const rb = create({ rootDir: b.root, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+    const db = rd(path.join(b.dataDir, 'task-groups.json'));
+    ok(rb.status === 'ran' && rb.report.via === 'file' && db.tasks['T-1-a'].ctx.length === 2 && db.tasks['T-1-a'].folders.length === 1, 'without a live store: the file, the rows beside the old fields', rb.report);
+    const reread = new TaskGroupManager({ dataDir: b.dataDir, homeDir: scratchHomeDir });
+    ok(reread.foldersOf('T-1-a')[0].path === b.w && !('folders' in reread.get('T-1-a')), 'a store loaded afterwards reads the rows and holds the old fields aside');
+    // (3) no store at all: nothing to do; an unreadable one: FAILED by name, retried
+    const empty = path.join(tmp, 'tgc-none'); fs.mkdirSync(path.join(empty, 'data'), { recursive: true });
+    const rn = create({ rootDir: empty, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+    ok(rn.status === 'ran' && rn.report.skipped === 'no store', 'a fresh instance (no task-groups.json) is a dry run', rn);
+    const bad = path.join(tmp, 'tgc-bad'); fs.mkdirSync(path.join(bad, 'data'), { recursive: true }); fs.writeFileSync(path.join(bad, 'data', 'task-groups.json'), '{ not json');
+    const rx = create({ rootDir: bad, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+    ok(rx.status === 'failed' && !rd(path.join(bad, 'data', 'migrations.json')).applied[ID] && fs.readFileSync(path.join(bad, 'data', 'task-groups.json'), 'utf8') === '{ not json', 'an unreadable store FAILS by name, is not recorded, and is left untouched', rx);
+    // RED CONTROL: a store that never ran it reads no old field — the cwd joins nothing (what the migration keeps)
+    const c = oldStore('ctl');
+    const unmigrated = new TaskGroupManager({ dataDir: c.dataDir, homeDir: scratchHomeDir });
+    ok(unmigrated.groupsForSession({ cwd: path.join(c.w, 'deep') }).length === 0 && unmigrated.contextDirOf('T-1-a') === null, 'RED CONTROL: without the migration the group\'s folder and notes folder are gone (the old fields are no longer read)');
   }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });

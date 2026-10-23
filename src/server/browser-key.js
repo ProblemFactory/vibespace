@@ -179,7 +179,7 @@ function create({ browserEnv = () => null, keeper = () => null, activeSessions =
     // the spawn's pin ladder: the conversation's own pin (a kept key) > the Task Group default > the instance default
     let pin = { profileId: '', dir: null, origin: 'harness' };
     const k = kp();
-    const groupFacts = { cwd: session.cwd || null, initialGroupId: session._initialGroupId || null };
+    const groupFacts = { cwd: session.cwd || null, initialGroupId: session._initialGroupId || null, initialGroupIds: session._initialGroupIds || null };
     // verify r2: A DEFAULT REACHES A CONVERSATION ONLY AT ITS START. The ladder above is read NOW; the spawn read it at
     // the start — and a default the user set to a narrowed profile in between walked in through this key (reproduced).
     // The spawn's own record of its pick (`browserPinAtStart`, a keyless spawn's WITNESS since r2) is what the late key

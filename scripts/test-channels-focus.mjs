@@ -159,9 +159,15 @@ const FIXTURE = [
   ok(Fo.readAdvance(500, [own]).moved === false && Fo.readAdvance(500, [own]).unread === 0, 'readAdvance: a self record older than the line moves nothing and adds 0');
   // lane lark-system-records: a vendor SYSTEM notice (a recall, a join) is read by construction — adds 0, never moves the line
   const sysN = { at: 400, kind: 'system', systemKind: 'recall', author: { id: '', name: '', isSelf: false, isBot: false, isSystem: true } };
-  ok(Fo.systemRead(sysN) && !Fo.systemRead(peer(1)) && !Fo.systemRead(own) && !Fo.systemRead(null), 'systemRead: kind system only');
+  ok(Fo.systemRead(sysN) && !Fo.systemRead(peer(1)) && !Fo.systemRead(own) && !Fo.systemRead(null), 'systemRead: kind system (or draft, below) only');
   const rs = Fo.readAdvance(100, [peer(150), sysN]);
   ok(rs.readAt === 100 && rs.unread === 1 && !rs.moved, 'readAdvance: a system notice adds 0 and never moves the read line', JSON.stringify(rs));
+  // lane gmail-draft-not-a-message (fb-9aa1d3bd1e): the account's unsent DRAFT is read by construction too — it adds 0 (nobody
+  // received it), and a draft stamped self (its From is the account) never moves the read line (writing is not sending)
+  const draftN = { at: 450, kind: 'draft', draftState: 'saved', author: { id: 'ou_o', isSelf: false } }, draftSelf = { ...draftN, at: 460, author: { id: 'ou_o', isSelf: true } };
+  ok(Fo.systemRead(draftN) && Fo.systemRead(draftSelf), 'systemRead: a draft too (kind draft)');
+  const rd = Fo.readAdvance(100, [peer(150), draftN, draftSelf, peer(500)]);
+  ok(rd.readAt === 100 && rd.unread === 2 && !rd.moved, 'readAdvance: a draft adds 0 and never moves the read line — the two peer messages stay unread', JSON.stringify(rd));
   // THE PRIORITY: a row that holds EVERY fact, then each dropped in turn
   const all = { outbox: { awaiting: 1, unknown: 1 }, assignment: principal('Alpha'), lastAt: NOW, touch: { read: { name: 'Gamma', at: NOW - H, upTo: NOW - 2 * H }, pending: 2, selfAt: NOW - H } };
   const steps = [];

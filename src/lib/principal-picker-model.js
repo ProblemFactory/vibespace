@@ -188,3 +188,91 @@ export function folderTail(cwd) {
   const tail = p.split('/').filter(Boolean).pop() || p || '/';
   return host ? `${host}: ${tail}` : tail;
 }
+
+// ── «除了» — THE EXCEPTION ROW (lane grants-unify, 2026-10-23; the owner: «权限系统要 unify 一下» — the only two
+// concepts are 「给谁」 and 「除了」). After a Task Group (or All agents) is ticked, the picker folds open ONE more row,
+// «除了（可选）», over the SAME searchable list: the members to leave out of what was given. The arithmetic:
+//  · OFFERED only while a Task Group or All agents is among the picks (a list of named conversations has nobody to
+//    leave out); the exceptions picked before stay put while it is not offered and are not saved (`exceptSaved`);
+//  · the CANDIDATES (`exceptCandidates`): under All agents every conversation (and every Task Group not picked); else the
+//    conversations in a picked Task Group (the roster's own membership); a conversation picked ITSELF is greyed —
+//    `disabled`, `own:true`, the caller's hint «有自己的授权» — its own grant still counts (rows add; it cannot be left
+//    out of a list that names it);
+//  · the grant model's ONE row shape is what a pick writes (`pickToRow`) and what a stored row draws (`rowToPick`) —
+//    every door maps its picker through these two, never a hand-made spelling.
+
+/** Is the «除了» row offered for these picks (a Task Group or All agents picked)? */
+export function exceptOffered(rows, selected) {
+  const sel = new Set((Array.isArray(selected) ? selected : []).map(String));
+  return (Array.isArray(rows) ? rows : []).some((r) => r && sel.has(String(r.key)) && (isEveryone(r) || r.kind === 'group'));
+}
+/** The rows the «除了» list offers for these picks (see above). */
+export function exceptCandidates(rows, selected, { ownHint = '' } = {}) {
+  const list = (Array.isArray(rows) ? rows : []).filter((r) => r && r.key != null);
+  const sel = new Set((Array.isArray(selected) ? selected : []).map(String));
+  const picked = list.filter((r) => sel.has(String(r.key)));
+  const all = picked.some(isEveryone);
+  const groups = new Set(picked.filter((r) => r.kind === 'group').map((r) => String(r.id)));
+  const out = [];
+  for (const r of list) {
+    if (isEveryone(r)) continue;
+    if (r.kind === 'group') { if (all && !sel.has(String(r.key))) out.push(r); continue; }
+    if (!(all || (Array.isArray(r.groupIds) ? r.groupIds : []).some((g) => groups.has(String(g))))) continue;
+    out.push(sel.has(String(r.key)) ? { ...r, disabled: true, own: true, hint: ownHint || r.hint || '' } : r);
+  }
+  return out;
+}
+/** The exceptions a SAVE writes: the picked ones while the row is offered, minus any picked itself; else none. */
+export function exceptSaved(rows, selected, except) {
+  if (!exceptOffered(rows, selected)) return [];
+  const sel = new Set((Array.isArray(selected) ? selected : []).map(String));
+  return (Array.isArray(except) ? except : []).map(String).filter((k) => !sel.has(k));
+}
+/** A picker row → the grant model's principal (`{kind:'everyone'}` | `{kind:'group', id}` | `{kind:'conversation',
+ *  key}` — a conversation row's `id` IS its key, the conversation id), or null. */
+export function principalOfRow(r) {
+  if (!r) return null;
+  if (isEveryone(r)) return { kind: 'everyone' };
+  if (r.kind === 'group') return r.id != null && r.id !== '' ? { kind: 'group', id: String(r.id) } : null;
+  if (r.kind === 'agent') return r.id != null && r.id !== '' ? { kind: 'conversation', key: String(r.id) } : null;
+  return null;
+}
+/** What a pick WRITES: `{to, except}` in the grant model's spelling (rows by key; unknown keys dropped). */
+export function pickToRow(rows, selected, except = []) {
+  const byKey = new Map((Array.isArray(rows) ? rows : []).filter((r) => r && r.key != null).map((r) => [String(r.key), r]));
+  const map = (keys) => (Array.isArray(keys) ? keys : []).map((k) => principalOfRow(byKey.get(String(k)))).filter(Boolean);
+  return { to: map(selected), except: map(exceptSaved([...byKey.values()], selected, except)) };
+}
+/**
+ * What a STORED row draws: `{selected, except, extra}` — the picker keys of its `to` and `except` entries over the live
+ * roster (`rows`), and an `extra` row for every entry the roster does not hold (a conversation not running now, a Task
+ * Group deleted — kept and saved again as it is, the caller's hint words). `everyoneKey` = the caller's All row key.
+ */
+export function rowToPick(row, rows, { everyoneKey = 'everyone:*', notRunning = '', deletedGroup = '' } = {}) {
+  const list = (Array.isArray(rows) ? rows : []).filter((r) => r && r.key != null);
+  const extra = [];
+  const keyOf = (p) => {
+    if (!p || typeof p !== 'object') return null;
+    if (p.kind === 'everyone') return String(everyoneKey);
+    if (p.kind === 'group') {
+      const hit = list.find((r) => r.kind === 'group' && String(r.id) === String(p.id));
+      if (hit) return String(hit.key);
+      const k = `group:${p.id}`;
+      if (!extra.some((x) => x.key === k)) extra.push({ key: k, kind: 'group', id: String(p.id), name: p.name || String(p.id), hint: deletedGroup, groupIds: [], groupNames: [] });
+      return k;
+    }
+    if (p.kind === 'conversation') {
+      const key = String(p.key);
+      const hit = list.find((r) => r.kind === 'agent' && (String(r.id) === key || (r.webuiId != null && `webui:${r.webuiId}` === key)));
+      if (hit) return String(hit.key);
+      const k = `agent:${key}`;
+      if (!extra.some((x) => x.key === k)) extra.push({ key: k, kind: 'agent', id: key, name: p.name || key.replace(/^webui:/, '').slice(0, 8), hint: notRunning, groupIds: [], groupNames: [] });
+      return k;
+    }
+    return null;
+  };
+  const r = row && typeof row === 'object' ? row : {};
+  const selected = (Array.isArray(r.to) ? r.to : []).map(keyOf).filter(Boolean);
+  const except = (Array.isArray(r.except) ? r.except : []).map(keyOf).filter(Boolean);
+  return { selected: [...new Set(selected)], except: [...new Set(except)], extra };
+}

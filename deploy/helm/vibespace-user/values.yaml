@@ -148,6 +148,18 @@ telemetry:
   forwardToken: ""
   ingestToken: ""
 
+# The MAINTAINERS' KEY (optional; lane fleet-feedback-marks). Its sha256 — 64
+# lowercase hex, NEVER the key itself (a render with anything else fails) —
+# lets the maintainers' triage job list this instance's open agent feedback and
+# mark a report handled, naming the release that shipped the fix: on the pod's
+# shell, `vibespace-feedback list --open` / `vibespace-feedback handled <id>
+# --version <2.369.NNN> [--note "…"]` with the key in env
+# VIBESPACE_MAINTAINER_KEY. Nothing else opens with it (any other verb is
+# refused `maintainer_key_scope`). The cluster admin provisions it; the value
+# stays with the maintainers. Injected as VIBESPACE_MAINTAINER_KEY_SHA; empty =
+# no maintainer key.
+maintainerKeySha: ""
+
 # The fleet's SIGN-IN RELAY PAGE (lane oauth-relay-road): a pod's Lark / Gmail
 # sign-in names this ONE address as its redirect — every pod and every kind —
 # and the page sends the browser back to the pod it started from

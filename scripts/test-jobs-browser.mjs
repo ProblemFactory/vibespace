@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { deadPort } from './scratch.mjs';
+import { withUse } from './grant-fixtures.mjs';   // lane grants-unify: a hand-built record's list mirrored from its pre-unify owner
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -112,7 +113,7 @@ for (const r of handleTable(J)) ok(r.good, r.name);
 
 // ── ② admission = the owner's ──
 console.log('— ② admission through the REAL mayAttach: a job\'s handle is judged as its owner conversation');
-const prof = (owner, label = 'work') => ({ id: 'p-' + label, label, owner, scopeAt: 1 });
+const prof = (owner, label = 'work') => withUse({ id: 'p-' + label, label, owner, scopeAt: 1 });
 const H = OWNER + '.2';
 const ADMIT = [
   ['a profile for all conversations', prof({ kind: 'instance' }), [], true],
@@ -299,10 +300,10 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   for (const route of ['pin', 'use', 'new-child', 'detach', 'resume']) { const r = await call('/api/agent/browser/' + route, 'jbt_aaaa', { profile: pOther.id }); ok(r.status === 403 && r.j && r.j.code === 'job_token', `a job is refused /${route} by name (403 job_token)`, r); }
   { const st = await fetch(base + '/api/agent/browser/status', { headers: { Authorization: 'Bearer jbt_aaaa' } }); const j = await st.json(); ok(st.status === 200 && j.shared === false, 'a job may read its status', j); }
   // not_owner: the user narrows Bank to ANOTHER conversation — the owner is refused, and so is its job
-  k._reg().profiles.find((x) => x.id === pBank.id).owner = { kind: 'only', who: [{ kind: 'session', id: KB }] };
+  k._reg().profiles.find((x) => x.id === pBank.id).grantUse = { to: [{ kind: 'conversation', key: KB, browserKey: KB }], except: [] };   // lane grants-unify: the keeper's mirror of the store's row, narrowed
   const r2 = await call('/api/agent/browser/resolve', 'jbt_aaaa', { argv: ['snapshot'] });
   ok(r2.status === 403 && r2.j && r2.j.code === 'not_owner' && /Your tab in its browser was closed/.test(r2.j.error) && !leasesOf(H).length, 'the owner conversation may no longer use Bank ⇒ its JOB is refused not_owner (the same name, the same 403) and its tab closed with the refusal', r2);
-  k._reg().profiles.find((x) => x.id === pBank.id).owner = { kind: 'instance' };
+  k._reg().profiles.find((x) => x.id === pBank.id).grantUse = { to: [{ kind: 'everyone' }], except: [] };
   // a job not running is refused; a job with no profile pinned is refused by name
   jobs.get('jb-0000bbbb').state = 'done';
   { const r = await call('/api/agent/browser/resolve', 'jbt_bbbb', { argv: ['snapshot'] }); ok(r.status === 409 && r.j && r.j.code === 'job_not_running', 'a finished job\'s token is refused job_not_running', r); }
@@ -365,10 +366,10 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
     await kk.attach({ profileId: pN.id, browserKey: X });
     const w1 = lease() && lease().windowId, t1 = tabsOfWindow(w1)[0] || null;
     let go; gate = new Promise((r) => { go = r; });
-    prof().owner = { kind: 'only', who: [{ kind: 'session', id: KB }] };
+    prof().grantUse = { to: [{ kind: 'conversation', key: KB, browserKey: KB }], except: [] };   // lane grants-unify: the mirror narrowed
     const refused = await kk.attach({ profileId: pN.id, browserKey: X }).then(() => null, (e) => e);
     const parkedClose = await until(() => held, 15000); // witness: the narrowing's close is in flight, held at its `tab close`
-    prof().owner = { kind: 'instance' };
+    prof().grantUse = { to: [{ kind: 'everyone' }], except: [] };
     let settled = false; const again = kk.attach({ profileId: pN.id, browserKey: X }).then(() => { settled = true; }, () => { settled = true; });
     await until(() => settled || jl2.some((x) => x.includes(`${X}: its attach on ${pN.id} waits for its session's close`)), 15000); // witness: parked (shipped) or bound (pre-fix)
     const attachFirst = settled;

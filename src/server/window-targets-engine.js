@@ -132,6 +132,8 @@ const T = require('../browser-takeover');
 const DESK = require('../window-desktop');
 const M = require('../desktop-apps'); // takeover r2: browserLaunchVerdict (which launches are web browsers)
 const R = require('../window-reach'); // lane E: reach + the share mode + the pixel road (PURE)
+const GM = require('../grant-model.js'); // lane grants-unify: THE grant model (admits)
+const GS = require('./grants-store.js'); // lane grants-unify: the ONE store a window's share rows live in
 const PIN = require('../desktop-pin'); // lane e2b (§E2.2): who may pin a window's pixel size (PURE)
 const DBA = require('../desktop-browser-app'); // lane e2c (§E2.3): which browser families' accessibility switch is measured
 // verify r6 (lane channel-withdraw, 2026-09-27): THE ONE PREDICATE behind "which key does this live session answer to" —
@@ -184,13 +186,16 @@ function writeJsonAtomic(file, obj) {
  *   broadcast      — (msg) => void (window-leases-updated to every client)
  *   wt / bins      — injectable for the suite (the SHARED module / the input-backend binaries)
  *   groupsOf       — lane E: (session, webuiId) => [Task Group id] — asked at VERB time (a group joined later reaches)
+ *   grants         — lane grants-unify: THE grants store (or a getter; absent ⇒ the instance's installed one) — a window's
+ *                    share ROWS live there (door `window`), its share MODE stays in data/window-reach.json
  */
 function create({ keeper, dataDir, env, activeSessions, log = console, now = Date.now, wt = WT, bins = null, python = 'python3', helper = undefined, serverSetting = () => undefined, broadcast = null, userEnv = () => process.env, selfPid = process.pid,
   // takeover r2 (T6): the running app process's own executable — the name a wrapper the human typed execs
   // INTO (x-www-browser → chrome). One readlink; injectable for the suite; null = no evidence
   procExe = (pid) => { try { return fs.readlinkSync(`/proc/${pid}/exe`); } catch { return null; } },
-  groupsOf = null, modeProbeMs = MODE_PROBE_MS } = {}) {
+  groupsOf = null, modeProbeMs = MODE_PROBE_MS, grants = null } = {}) {
   if (!keeper) throw new Error('window-targets engine: keeper required');
+  const grantsOf = typeof grants === 'function' ? grants : () => grants || GS.forDir(dataDir);
   const leaseFile = path.join(dataDir, LEASE_FILE);
   const leases = new Map(); // handle → { handle, sessionId, browserKey, since, origin, refs, snapshotAt, carrierLostAt }
   const inputs = new Map(); // handle → browser-takeover input state (in memory)
@@ -198,7 +203,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   const inputListeners = new Set();
   const desktopSeen = new Map(); // P10: pid → the a11y app row the last `list` saw on the user's desktop
   const reachFile = path.join(dataDir, REACH_FILE);
-  const reach = new Map();       // lane E: handle → the window-reach record (persisted)
+  const reach = new Map();       // lane E: handle → its window-reach.json entry — its share MODE (lane grants-unify: its pre-unify rows stay on disk, never read; the ROWS are the grants store's)
   const resolutions = new Map(); // lane E: handle → {mode, why, at} — what `auto` resolved to (in memory; re-probed after a restart)
   let reachLoaded = false;
   let loaded = false, timer = null, viewerProbe = null;
@@ -257,8 +262,39 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     reachLoaded = true;
     try {
       const j = JSON.parse(fs.readFileSync(reachFile, 'utf8'));
-      for (const [h, r] of Object.entries((j && j.windows) || {})) reach.set(String(h), R.normRecord(r, h));
-    } catch (e) { if (e && e.code !== 'ENOENT') log.warn?.(`[window] ${REACH_FILE} unreadable — every window starts hidden: ${e.message}`); }
+      for (const [h, r] of Object.entries((j && j.windows) || {})) reach.set(String(h), r && typeof r === 'object' && !Array.isArray(r) ? { ...r } : {});
+    } catch (e) { if (e && e.code !== 'ENOENT') log.warn?.(`[window] ${REACH_FILE} unreadable — every window starts in auto mode: ${e.message}`); }
+  }
+  /** lane grants-unify: a window's share rows (the ONE store; no store ⇒ none ⇒ hidden — fail closed). */
+  const rowsOf = (h) => { const g = grantsOf(); return g ? g.rowsFor('window', String(h)) : []; };
+  const modeOf = (h) => { const r = reach.get(String(h)); return r && R.MODES.includes(r.mode) ? r.mode : 'auto'; };
+  /** Every window that has a share: a mode entry, or a row in the store. */
+  const shareHandles = () => { const g = grantsOf(); return [...new Set([...reach.keys(), ...(g ? g.rowsOfDoor('window').map((r) => String(r.resource)) : [])])]; };
+  const hasShare = (h) => reach.has(String(h)) || rowsOf(h).length > 0;
+  /** THE WRITE of a window's share (lane grants-unify): its rows through the ONE writer (`grants.set`; an empty share removes
+   *  the row), its mode into window-reach.json — then the broadcast. A refused grants write throws by name (nothing changed). */
+  function putReach(h, record, by = 'user') {
+    const g = grantsOf();
+    const row = R.rowOfRecord({ ...record, windowId: String(h) });
+    if (g) { const w = g.set('window', String(h), { to: row.to, except: row.except }, by); if (!w.ok) throw namedError(w.code, w.error || w.code); }
+    else if (row.to.length || row.except.length) throw namedError('not_written', 'the grants store is not available — the share was not saved');
+    reach.set(String(h), { ...(reach.get(String(h)) || {}), windowId: String(h), mode: R.MODES.includes(record.mode) ? record.mode : 'auto' });
+    commitReach();
+  }
+  /** A share follows its window to a relaunch's successor `to` (rows + mode), and leaves `from`. */
+  function moveShare(from, to) {
+    const g = grantsOf();
+    const [r] = rowsOf(from);
+    if (g && r) { g.setMany([{ door: 'window', resource: String(to), to: r.to, except: r.except || [] }, { door: 'window', resource: String(from), to: [], except: [] }], 'keeper'); }
+    const m = reach.get(String(from));
+    reach.delete(String(from));
+    if (m) reach.set(String(to), { ...m, windowId: String(to) });
+  }
+  /** A share whose window is gone (rows + mode). */
+  function dropShare(h) {
+    const g = grantsOf();
+    if (g && rowsOf(h).length) g.remove('window', String(h), 'keeper');
+    reach.delete(String(h));
   }
   function saveReach() {
     try {
@@ -279,15 +315,14 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   function reachRecord(handle) {
     loadReach();
     const h = String(handle || '');
-    if (reach.has(h)) return reach.get(h);
-    for (const [k, r] of [...reach]) {
+    if (hasShare(h)) return R.recordOfRows(h, modeOf(h), rowsOf(h));
+    for (const k of shareHandles()) {
       if (k === h || successorOf(k) !== h) continue;
-      reach.delete(k); resolutions.delete(k);
-      const moved = R.normRecord(r, h);
-      reach.set(h, moved);
+      resolutions.delete(k);
+      moveShare(k, h);
       audit({ handle: h, verb: 'reach-carried', by: 'keeper', ok: true, from: k });
       commitReach();
-      return moved;
+      return R.recordOfRows(h, modeOf(h), rowsOf(h));
     }
     return R.emptyRecord(h);
   }
@@ -296,9 +331,9 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const res = rec.mode === 'auto' ? (resolutions.get(h) || null) : R.resolveMode({ mode: rec.mode });
     return { handle: h, ...R.viewOf(rec, { resolved: res }), summary: R.shareSummary(rec, res) };
   }
-  function reachViews() { loadReach(); return [...reach.keys()].map(reachView); }
+  function reachViews() { loadReach(); return shareHandles().map(reachView); }
   function publishReach() { if (!broadcast) return; try { broadcast({ type: 'window-reach-updated', reach: reachViews() }); } catch (e) { log.warn?.(`[window] reach broadcast failed: ${e.message}`); } }
-  function commitReach() { saveReach(); publishReach(); if (reach.size) ensureTimer(); }
+  function commitReach() { saveReach(); publishReach(); if (shareHandles().length) ensureTimer(); }
   /** Who the caller IS for reach: every key it answers to + the Task Groups it belongs to RIGHT NOW (D2).
    *  Lane E verify r2 (L4): a membership read that THROWS is `unreadable: true` — never folded into "no groups" (that
    *  read a store fault as the user's revoke: the verb answered not_exposed and the lease was dropped, audited by:user). */
@@ -306,7 +341,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const s = (facts && sessionsMap().get(facts.sessionId)) || (facts && facts.session) || {};
     let groupIds = [], unreadable = false;
     if (typeof groupsOf === 'function') { try { groupIds = (groupsOf(s, facts.sessionId) || []).map((g) => String(g && typeof g === 'object' ? g.id : g)); } catch (e) { unreadable = true; log.warn?.(`[window] group membership unreadable for ${facts.sessionId}: ${e.message}`); } }
-    return { sessionKeys: keysOf(s, facts.sessionId), groupIds, ...(unreadable ? { unreadable: true } : {}) };   // verify r6: a borrowed id is not a key
+    const sessionKeys = keysOf(s, facts.sessionId);
+    return { sessionKeys, conversationKeys: sessionKeys.map(R.sessionKeyNow).filter(Boolean), groupIds, ...(unreadable ? { unreadable: true } : {}) };   // verify r6: a borrowed id is not a key · lane grants-unify: + the ONE spelling
   }
   const reachOfFacts = (rec, facts) => R.reachFor(reachRecord(rec.id), ctxOf(facts));
   /** THE REACH GATE (D1): a VibeSpace-started window this caller does not reach is refused `not_exposed` by name; a
@@ -316,6 +352,19 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (!rec || rec.origin === 'desktop') return null;
     const v = reachOfFacts(rec, facts);
     if (v.level === 'exposed') return v;
+    if (v.unknown) {
+      // lane grants-unify: the window's share row cannot be read — refused BY NAME, the lease kept (nobody took it away)
+      audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, verb, by: 'store', ok: false, code: 'unknown_shape' });
+      throw namedError('unknown_shape', `${rec.label || rec.id} (${rec.id}): its share could not be read — nothing is allowed until the user saves it again (the window's ⋯ → Share with agents…); your lease, if any, is kept`, { handle: rec.id });
+    }
+    if (v.excepted) {
+      // lane grants-unify — «除了»: the user left this conversation OUT of a shared Task Group / All agents — a revoke: the
+      // lease goes, the refusal names the exception and where it is lifted
+      const lx = leases.get(rec.id);
+      if (lx && lx.sessionId === facts.sessionId) { dropLease(rec.id, 'left out of the share by the user', { by: 'user' }); commit(); }
+      audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, verb, by: 'reach', ok: false, code: 'excepted' });
+      throw namedError('excepted', `${rec.label || rec.id} (${rec.id}): ${R.EXCEPTED_SENTENCE}`, { handle: rec.id });
+    }
     if (v.unreadable) {
       // lane E verify r2 (L4): the store that decides a group row could not be read — the verb is refused by NAME and
       // the lease is KEPT (nobody took the window away; the next verb asks again), audited by:store
@@ -661,7 +710,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // lane E (D1's one exception): a window an agent opened itself is exposed to that agent's own session
     const s0 = sessionsMap().get(facts.sessionId) || facts.session || {};
     const g = R.openerGrant(reachRecord(rec.id), { key: keyOf(s0, facts.sessionId), name: facts.name || '', at: now() });   // verify r6: the opener's OWN key
-    if (g.ok) { reach.set(rec.id, g.record); commitReach(); }
+    if (g.ok) putReach(rec.id, g.record, 'self-open');
     const l = newLease(rec, facts);
     l.modeSeen = reachRecord(rec.id).mode;
     leases.set(rec.id, l);
@@ -715,7 +764,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // lane e2c: the launch mode lands in the reach record's `mode` (R.MODES) — ONE commit with the opener's grant
     let rr0 = g.ok ? g.record : reachRecord(rec.id);
     if (rr0.mode !== mv.mode) rr0 = R.setMode(rr0, mv.mode).record;
-    if (g.ok || rr0.mode !== reachRecord(rec.id).mode) { reach.set(rec.id, rr0); commitReach(); }
+    if (g.ok || rr0.mode !== reachRecord(rec.id).mode) putReach(rec.id, rr0, 'self-open');
     const l = newLease({ ...rec, origin: AGENT_BROWSER_ORIGIN }, facts);
     l.modeSeen = reachRecord(rec.id).mode;
     leases.set(rec.id, l);
@@ -756,11 +805,10 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const v = R.launchModeVerdict({ browserKind: row ? row.browser : null, a11y: !!(row && (DBA.A11Y_MEASURED_KINDS || []).includes(row.browser)), asked: mode });
     if (!v.ok) throw namedError(v.code, v.why);
     const r = R.setMode(reachRecord(rec.id), v.mode);
-    reach.set(rec.id, r.record);
     resolutions.delete(rec.id);
     const l = leases.get(rec.id);
     if (l && l.sessionId === facts.sessionId) l.modeSeen = v.mode; // the opener's own switch is no user's `mode-changed`
-    commitReach();
+    putReach(rec.id, r.record, 'self-open');
     const res = v.mode === 'auto' ? await ensureResolved(rec, { fresh: true }) : null; // setResolution broadcasts its answer
     audit({ sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: AGENT_BROWSER_ORIGIN, verb: 'mode', by: 'opener', ok: true, mode: v.mode, changed: r.changed, ...(res ? { resolved: res.mode } : {}) });
     return { handle: rec.id, mode: modeInfo(rec.id), why: res ? res.why : v.why, changed: r.changed };
@@ -978,11 +1026,12 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // lane E: a share lives as long as its window — carried to a relaunch's successor first, then pruned
     loadReach();
     let pruned = 0;
-    for (const h of [...reach.keys()]) {
+    for (const h of shareHandles()) {
       if (liveRecord(h)) continue;
       const next = successorOf(h);
-      if (next && liveRecord(next) && !reach.has(next)) { reach.set(next, R.normRecord(reach.get(h), next)); audit({ handle: next, verb: 'reach-carried', by: 'keeper', ok: true, from: h }); }
-      reach.delete(h); resolutions.delete(h); pruned++;
+      if (next && liveRecord(next) && !hasShare(next)) { moveShare(h, next); audit({ handle: next, verb: 'reach-carried', by: 'keeper', ok: true, from: h }); }
+      else dropShare(h);
+      resolutions.delete(h); pruned++;
     }
     if (pruned) commitReach();
     return { dropped, stamped, pruned, ended };
@@ -1090,10 +1139,10 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     }
     return n;
   }
-  function tick() { enforceConsent(); const r = reconcile({ graceMs: LEASE_DROP_GRACE_MS }); const idle = sweepIdleTakeovers(now()); if (!leases.size && !inputs.size && !reach.size && timer) { clearInterval(timer); timer = null; } return { ...r, idle }; }
+  function tick() { enforceConsent(); const r = reconcile({ graceMs: LEASE_DROP_GRACE_MS }); const idle = sweepIdleTakeovers(now()); if (!leases.size && !inputs.size && !shareHandles().length && timer) { clearInterval(timer); timer = null; } return { ...r, idle }; }
   function ensureTimer() { if (!timer) { timer = setInterval(() => { try { tick(); } catch (e) { log.warn?.(`[window] tick failed: ${e && e.message}`); } }, TICK_MS); timer.unref?.(); } }
   /** The boot path (after restoreSessions, so the live-session set is final): load, drop what nobody carries or nothing serves, start the tick. */
-  function boot() { load(); loadReach(); enforceConsent(); bootAt = now(); const r = reconcile({ graceMs: 0 }); if (openerLost.size) ensureTimer(); if (leases.size || reach.size) ensureTimer(); return { leases: leases.size, dropped: r.dropped.length, shared: reach.size, pruned: r.pruned || 0 }; }
+  function boot() { load(); loadReach(); enforceConsent(); bootAt = now(); const r = reconcile({ graceMs: 0 }); if (openerLost.size) ensureTimer(); if (leases.size || shareHandles().length) ensureTimer(); return { leases: leases.size, dropped: r.dropped.length, shared: shareHandles().length, pruned: r.pruned || 0 }; }
   function shutdown() { if (timer) clearInterval(timer); timer = null; }
   /** What the session card / status route may publish for ONE session: 'user' while somebody drives a window it holds, 'agent' when it holds one, null when none. */
   function inputSummaryFor(sessionId) {
@@ -1446,26 +1495,24 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   /** Every live session a row reaches right now (names for the dialog — a group row lists its live members), and how
    *  many live sessions' Task Group membership could NOT be read (lane E verify r3, F5: a read that threw is never
    *  "not in the group" — `reachedOf` turns a row that found nobody while one threw into `undecided`). */
-  function liveReached(row) {
+  function liveReached(row, record = null) {
     const out = [];
     let unreadable = 0;
+    // lane grants-unify: THE ONE ADMISSION — this row alone, minus the share's exceptions (a member left out is not reached)
+    const one = { door: 'window', resource: '-', to: [R.rowOfRecord({ windowId: '-', rows: [row] }).to[0]].filter(Boolean), except: record ? R.rowOfRecord(record).except : [] };
     for (const [id, s] of sessionsMap()) {
       if (!s || capsOf(s.backend).terminalOnly) continue;
-      let hit = false;
-      if (row.principal.kind === 'everyone') hit = true;   // All agents (lane everyone-principal): every live agent session
-      else if (row.principal.kind === 'session') hit = keysOf(s, id).includes(row.principal.id);
-      else {
-        const c = ctxOf({ sessionId: id, session: s });
-        if (c.unreadable) { unreadable++; continue; }
-        hit = c.groupIds.includes(row.principal.id);
-      }
+      const c = row.principal.kind === 'group' ? ctxOf({ sessionId: id, session: s }) : { sessionKeys: keysOf(s, id), conversationKeys: keysOf(s, id).map(R.sessionKeyNow).filter(Boolean), groupIds: [] };
+      const v = GM.admits([one], { conversationKeys: c.conversationKeys, groupIds: c.groupIds, groupsUnreadable: !!c.unreadable });
+      if (!v.ok && v.code === 'groups_unreadable') { unreadable++; continue; }
+      const hit = v.ok;
       if (hit) out.push({ sessionId: id, name: s.name || s.webuiName || id });
     }
     return { sessions: out, unreadable };
   }
   /** One row → `{live, state}` (R.reachedState: matched | unmatched | undecided). */
-  function reachedOf(row) {
-    const lr = liveReached(row);
+  function reachedOf(row, record = null) {
+    const lr = liveReached(row, record);
     return { live: lr.sessions, state: R.reachedState({ hits: lr.sessions.length, unreadable: lr.unreadable }) };
   }
   /** GET …/reach — the share of ONE window with its rows, who each reaches now, the mode, the lease. null = not a live window here. */
@@ -1473,7 +1520,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const rec = liveRecord(handle);
     if (!rec) return null;
     const v = reachView(rec.id);
-    return { ...v, rows: v.rows.map((r) => { const x = reachedOf(r); return { ...r, live: x.live, ...(x.state === 'undecided' ? { undecided: true } : {}) }; }), label: rec.label, browser: isHumanBrowser(rec), stream: streamOf(rec), lease: leaseOf(rec.id), modeInfo: modeInfo(rec.id) };
+    const record = reachRecord(rec.id);
+    return { ...v, rows: v.rows.map((r) => { const x = reachedOf(r, record); return { ...r, live: x.live, ...(x.state === 'undecided' ? { undecided: true } : {}) }; }), label: rec.label, browser: isHumanBrowser(rec), stream: streamOf(rec), lease: leaseOf(rec.id), modeInfo: modeInfo(rec.id) };
   }
   function requireWindow(handle) { const rec = liveRecord(handle); if (!rec) throw namedError('not-found', notFoundMsg(handle)); return rec; }
   /** After a revoke / a mode change: the holder that no longer reaches the window loses its lease NOW (by:user). */
@@ -1495,9 +1543,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const p = resolvePrincipal(principal);
     const g = R.grant(reachRecord(rec.id), p, { by, at: now() });
     if (!g.ok) throw namedError(g.code, g.why);
-    reach.set(rec.id, g.record);
+    putReach(rec.id, g.record, by === 'request' ? 'user' : by);
     audit({ handle: rec.id, verb: 'reach-grant', by: 'user', ok: true, principal: { kind: p.kind, id: p.id }, grantOrigin: by, changed: g.changed }); // `origin` stays the WINDOW class (§6.6)
-    commitReach();
     return { ...reachOf(rec.id), granted: { principal: g.row.principal, by: g.row.by, changed: g.changed } };
   }
   function revokeReach(handle, principal) {
@@ -1505,20 +1552,32 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const p = resolvePrincipal(principal);
     const r = R.revoke(reachRecord(rec.id), p);
     if (!r.ok) throw namedError(r.code, r.why);
-    reach.set(rec.id, r.record);
+    putReach(rec.id, r.record);
     audit({ handle: rec.id, verb: 'reach-revoke', by: 'user', ok: true, principal: { kind: p.kind, id: p.id }, changed: r.changed });
     const dropped = dropUnreached(rec, 'exposure revoked by the user');
     commitReach();
     return { ...reachOf(rec.id), revoked: { changed: r.changed, leaseDropped: dropped } };
   }
+  /** lane grants-unify — «除了»: the members left OUT of this window's shared Task Groups / All agents (the whole list; a
+   *  live session by its id). A holder now left out loses its lease at once (a narrowing is a revoke). */
+  function setReachExcept(handle, list) {
+    const rec = requireWindow(handle);
+    if (!Array.isArray(list)) throw namedError('bad_principal', 'except is a list of principals');
+    const r = R.setExcept(reachRecord(rec.id), list.map(resolvePrincipal));
+    if (!r.ok) throw namedError(r.code, r.why);
+    putReach(rec.id, r.record);
+    audit({ handle: rec.id, verb: 'reach-except', by: 'user', ok: true, except: r.record.except.map((p) => ({ kind: p.kind, id: p.id })), changed: r.changed });
+    const dropped = dropUnreached(rec, 'left out of the share by the user');
+    commitReach();
+    return { ...reachOf(rec.id), excepted: { changed: r.changed, leaseDropped: dropped } };
+  }
   function setShareMode(handle, mode) {
     const rec = requireWindow(handle);
     const r = R.setMode(reachRecord(rec.id), mode);
     if (!r.ok) throw namedError(r.code, r.why);
-    reach.set(rec.id, r.record);
+    putReach(rec.id, r.record);
     resolutions.delete(rec.id); // auto re-probes at the next verb; tree / pixels need no probe
     audit({ handle: rec.id, verb: 'reach-mode', by: 'user', ok: true, mode, changed: r.changed });
-    commitReach();
     return reachOf(rec.id);
   }
   /** The launch dialog's share, applied to the NEW window (D2 "before launch"): every principal + the mode, one commit. */
@@ -1530,13 +1589,12 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     let rr = reachRecord(rec.id);
     for (const p of v.share.principals) { const g = R.grant(rr, resolvePrincipal(p), { by: 'user', at: now() }); if (g.ok) rr = g.record; }
     rr = R.setMode(rr, v.share.mode).record;
-    reach.set(rec.id, rr);
+    putReach(rec.id, rr);
     // lane E verify r2 (M2): a remembered principal nobody answers to now (an ended session, a deleted Task Group) still
     // writes its row — the launcher said so in words; the audit counts them. r3 (F5): a group row the Task Group store
     // could not decide (a membership read threw) is `undecided`, never counted as nobody's
-    const counts = R.launchCounts(rr.rows.map((row) => reachedOf(row).state));
+    const counts = R.launchCounts(rr.rows.map((row) => reachedOf(row, rr).state));
     audit({ handle: rec.id, verb: 'reach-launch', by: 'user', ok: true, principals: v.share.principals.length, mode: v.share.mode, unmatched: counts.unmatched, undecided: counts.undecided });
-    commitReach();
     return reachOf(rec.id);
   }
   /** D3's "the ask ENDS another holder's hold" (the user's intent is "this agent controls it"): by:user, audited. */
@@ -1553,7 +1611,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
 
   return { factsForToken, list, open, openAgentBrowser, agentBrowserFor, stopOwn, setSize, setLaunchMode, setViewerCount, attach, attachWithMode, isHumanBrowser, detach, dropSession, reconcile, boot, tick, shutdown, snapshot, act, screenshot, watch,
     // lane E: reach + the share mode (the user's side)
-    reachOf, reachViews, grantReach, revokeReach, setShareMode, shareAtLaunch, endHold, addressable, modeInfo, reachFile, resolvePrincipal,
+    reachOf, reachViews, grantReach, revokeReach, setReachExcept, setShareMode, shareAtLaunch, endHold, addressable, modeInfo, reachFile, resolvePrincipal,
     takeover, handback, noteUserInput, inputPolicy, leaseInput, viewerLeft, sweepIdleTakeovers, onInput, setViewerProbe, inputStateFor, inputSummaryFor, takeoverIdleMs, leaseOf,
     leases: () => allViews(), auditFile: path.join(dataDir, AUDIT_FILE), leaseFile, ORIGIN,
     // P10: the other class

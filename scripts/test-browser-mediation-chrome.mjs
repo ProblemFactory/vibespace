@@ -791,7 +791,7 @@ if (AB && CHROME) {
         const src = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
         const pre = src.replace("const argv = closeAllScoped ? framed.argv.filter((x) => x !== '--all') : [...framed.argv];", "const argv = closeAllScoped ? rest.filter((x) => x !== '--all') : [...rest];"); // the hand-over line since the 2.369.182 integration (lane H's close --all filter over the in-frame argv)
         const ctl = path.join(ROOT, 'ctl-frame', 'bin'); fs.mkdirSync(ctl, { recursive: true });
-        fs.writeFileSync(path.join(ctl, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(ctl, 'vibespace-browser-verbs.js'));
+        fs.writeFileSync(path.join(ctl, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(ctl, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(ctl, 'cli-call.js'));
         const r2 = await viaFile(path.join(ctl, 'vibespace-browser'), ['pdf', './frame2.pdf']);
         ok(pre !== src && r2.ok && pdfAt(path.join(A, 'frame2.pdf')) && !fs.existsSync(path.join(Bd, 'frame2.pdf')), 'lane L r5 F1 NEGATIVE CONTROL (the REAL daemon): the r4 hand-over (patched copy, the word as typed) — judged in B — lands in A, the daemon\'s own frame', JSON.stringify({ r2: [r2.ok, r2.so.slice(-200), r2.se.slice(-300)], inA: fs.existsSync(path.join(A, 'frame2.pdf')), inB: fs.existsSync(path.join(Bd, 'frame2.pdf')) }));
       }

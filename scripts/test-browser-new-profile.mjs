@@ -242,7 +242,7 @@ let srv = null;
   const API = `http://127.0.0.1:${srv.address().port}`;
   const j = async (method, p, body) => { const res = await fetch(API + p, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? JSON.stringify(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
   let r = await j('POST', '/api/browser/profiles', { label: 'Vendor', provider: 'chromium', use: { mode: 'only', who: [{ kind: 'session', session: 'sess-1' }] } });
-  ok(r.status === 200 && r.json.profile.owner.kind === 'only' && r.json.profile.owner.who[0].id === KEY_A, 'a picked live session (its webui id) is resolved to its conversation\'s browser key by THE one resolver, and the record is born with it', r.json);
+  ok(r.status === 200 && r.json.profile.use.mode === 'only' && r.json.profile.use.who[0].key === KEY_A, 'a picked live session (its webui id) is resolved to its conversation\'s browser key by THE one resolver, and the record is born with it', r.json);
   const n1 = k.list().profiles.length;
   r = await j('POST', '/api/browser/profiles', { label: 'Remote', use: { mode: 'only', who: [{ kind: 'session', session: 'sess-r' }] } });
   ok(r.status === 409 && r.json.code === 'no_browser_key' && r.json.why === 'remote' && k.list().profiles.length === n1, 'a conversation on another machine ⇒ refused by name (no_browser_key · remote), nothing created');
@@ -258,7 +258,7 @@ let srv = null;
   ok(r.status >= 400 && ['tier3_is_a_window_target', 'provider_needs_consent'].includes(r.json.code), 'tier 3 is never a profile', r.json);
   // the picker's door: the adopt route takes the dialog's list and (an EMPTY profile — no kept directory) its fields
   r = await j('POST', '/api/browser/adopt', { sessionId: 'sess-n', label: 'Fresh profile', provider: 'chromium', use: { mode: 'only', who: [{ kind: 'session', session: 'sess-n' }, { kind: 'task', id: 'T-1' }] } });
-  ok(r.status === 200 && r.json.adopted === false && r.json.profile.owner.kind === 'only' && r.json.profile.owner.who.length === 2 && r.json.pin && r.json.pin.profileId === r.json.profile.id,
+  ok(r.status === 200 && r.json.adopted === false && r.json.profile.use.mode === 'only' && r.json.profile.use.who.length === 2 && r.json.pin && r.json.pin.profileId === r.json.profile.id,
     'the adopt route (the picker\'s "New persistent profile…"): the dialog\'s list rides it, the empty profile is created and the conversation pinned to it', r.json);
   r = await j('POST', '/api/browser/adopt', { sessionId: 'sess-n', label: 'Bad list', use: { mode: 'only', who: [{ kind: 'task', id: 'T-9' }] } });
   ok(r.status === 400 && r.json.code === 'unknown_task' && !k.list().profiles.some((p) => p.label === 'Bad list'), 'the adopt route refuses a bad list by name before anything is created');
@@ -302,7 +302,7 @@ let srv = null;
   const b6 = await ja('POST', '/api/browser/adopt', { sessionId: 'sess-n', label: 'Agent adopt', use: { mode: 'all' } });
   const vendor = k.list().profiles.find((p) => p.label === 'Vendor');
   const c6 = await ja('PATCH', '/api/browser/profiles/' + vendor.id, { use: { mode: 'all' } });
-  ok([a6, b6, c6].every((x) => x.status === 403 && x.json && x.json.code === 'agent_forbidden') && k.list().profiles.length === n6 && k.profile(vendor.id).owner.kind === 'only',
+  ok([a6, b6, c6].every((x) => x.status === 403 && x.json && x.json.code === 'agent_forbidden') && k.list().profiles.length === n6 && B.whoMayUse(k.profile(vendor.id)).mode === 'only',
     '"Who can use it" is the user\'s: an agent\'s token on the create / adopt / PATCH with `use` ⇒ 403 agent_forbidden — nothing created, nothing widened', { a: [a6.status, a6.json && a6.json.code], b: [b6.status, b6.json && b6.json.code], c: [c6.status, c6.json && c6.json.code] });
   // verify r1 (A6 revert table): a BUILD named by an agent's token on the create and on the adopt — refused by name, nothing
   // created (the adopt's refusal had no gate: reverting it left every suite green)
@@ -311,7 +311,7 @@ let srv = null;
   const b7 = await ja('POST', '/api/browser/adopt', { sessionId: 'sess-n', label: 'Agent build adopt', browser: { kind: 'build', version: '151.0.7922.34' } });
   ok([a7, b7].every((x) => x.status === 403 && x.json && x.json.code === 'agent_forbidden') && k.list().profiles.length === n7, 'which Chrome build a profile runs is the user\'s: an agent\'s token naming a build on the create / the adopt ⇒ 403 agent_forbidden, nothing created', { a: [a7.status, a7.json && a7.json.code], b: [b7.status, b7.json && b7.json.code] });
   const d6 = await ja('POST', '/api/browser/profiles', { label: 'Plain by token' });
-  ok(d6.status === 200 && d6.json.profile && d6.json.profile.owner.kind === 'instance', '…a create with NO list still answers (every conversation — what the agent\'s own `new` makes too)');
+  ok(d6.status === 200 && d6.json.profile && d6.json.profile.use && d6.json.profile.use.mode === 'all', '…a create with NO list still answers (every conversation — what the agent\'s own `new` makes too)');
 }
 if (srv) await new Promise((r) => srv.close(r));
 
@@ -351,7 +351,8 @@ console.log('— ⑤ controls: patched copies the gates above must turn red');
   const ba = Ma.createBody({ label: 'x', mode: 'all', who: [{ kind: 'task', id: 'T-1' }] });
   ok(allList !== src && (!ba.ok || 'use' in ba.body), 'control (b): a body that sends a list for "All my conversations" is caught by ①\'s body assertion', ba);
   const ks = read('src/server/browser-keeper.js');
-  const late = ks.replace("    if (use != null) owner = ownerFromUse(use, { knownKeys, label: v.value.label });\n", '').replace("    reg.profiles.push(rec);\n    commit();\n    log.log?.(`[browser] profile ${id} \"${rec.label}\" created", "    reg.profiles.push(rec);\n    commit();\n    if (use != null) { rec.owner = ownerFromUse(use, { knownKeys, label: rec.label }); commit(); }\n    log.log?.(`[browser] profile ${id} \"${rec.label}\" created");
+  // lane grants-unify: the list is judged (rowFromUse) BEFORE the record lands — the mutant judges it after the record is committed
+  const late = ks.replace("    const useRow = use != null ? rowFromUse(use, { knownKeys, label: v.value.label }) : B.rowForCreate(owner, { conversationOf: conversationOfKey });   // lane grants-unify\n", '').replace("    reg.profiles.push(rec);\n    if (!legacy) bornWithRow(rec, useRow, by); else bornWithRow(rec, { to: [{ kind: 'everyone' }], except: [] }, by);   // lane grants-unify: the list is the store's row\n    commit();", "    reg.profiles.push(rec);\n    commit();\n    const useRow = use != null ? rowFromUse(use, { knownKeys, label: rec.label }) : B.rowForCreate(owner, { conversationOf: conversationOfKey });\n    bornWithRow(rec, useRow, by);");
   ok(late !== ks, 'control (c): the patch (the list judged AFTER the record is minted) applies');
   const Kl = MUT.load('src/server/browser-keeper.js', late, 'late');
   const D = path.join(ROOT, 'data-c');

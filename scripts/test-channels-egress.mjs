@@ -50,7 +50,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 
 // ── THE RULE, as a function over injected inputs (the controls drive it over
 //    synthetic files; the census drives it over the tree) ──────────────────
-const PRIMITIVE = /https?\.request\s*\(|https?\.get\s*\(|\b(?:safeFetch|fetch)\s*\(|\baxios\b|\bgot\s*\(|\bundici\b/; // safeFetch (lane runtime-floor's belt: src/safe-fetch.js) IS a request
+const PRIMITIVE = /https?\.request\s*\(|https?\.get\s*\(|\b(?:safeFetch|fetch)\s*\(|\bCC\.call\s*\(|\baxios\b|\bgot\s*\(|\bundici\b/; // lane cli-call-timeouts: CC.call (src/cli-call.js, THE ONE CALL every agent CLI makes) IS a request too // safeFetch (lane runtime-floor's belt: src/safe-fetch.js) IS a request
 const HOST = /https?:\/\/([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)(?=[/:'"`?#\s)\]]|$)/gi;
 /** Hosts that are never egress: loopback is not a vendor, and the RFC 2606
  *  reserved names + schema hosts are documentation, not targets. */

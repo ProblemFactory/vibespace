@@ -36,6 +36,8 @@ import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToast
 import { UI_ICONS } from './icons.js';
 import { BACK_DISMISS_EVENT } from './back-guard.js'; // lane mobile-back-guard: the phone's back closes this sheet through hidePopup
 import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: an Allow counts only once it sat still where it was read
+import { applySecretBox, submitSecretBox } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its paste box's presses + state
+import { onVaultFacts, showUnlock, showSetup } from './vault-unlock.js'; // … the box says a locked vault by name (live), its 解锁… is THE unlock dialog
 
 const URG_RANK = { low: 0, normal: 1, high: 2, urgent: 3 };
 
@@ -50,6 +52,7 @@ export function installUserTodos(app) {
   // full-width sheet rule for .usage-popup beats the inline anchor).
   const mBtn = document.getElementById('mobile-nav-todos');
   const model = inboxModel(app); // THE one store + the verbs (src/lib/user-todos-actions.js) — the For-you window asks for the same one
+  onVaultFacts(() => document.querySelectorAll('.ut-secret').forEach((b) => applySecretBox(b))); // lane vault-paste-request: every paste box says the vault's state live (locked ⇒ 解锁… inline; unlocked ⇒ ready)
   let todos = { open: [], resolved: [] };
   let knownIds = null; // null until the first load — no toast storm at boot
   let layout = null;   // the popup's row order while OPEN (inc-mtw02kbq-kj96: a ✓ must not slide the next row under the pointer)
@@ -320,7 +323,7 @@ export function installUserTodos(app) {
   // appeared or MOVED (a resolved row above it shrank, an expiry) starts its ARM_MS again (PURE src/lib/press-arm.js)
   const armExitButtons = () => {
     const now = performance.now();
-    for (const b of document.querySelectorAll('.ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve, .ut-action-app.ut-app-install')) { // lane browser-propose: an Approve is armed the same way; design 009: so is a card's one-click Install
+    for (const b of document.querySelectorAll('.ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve, .ut-action-app.ut-app-install, .ut-action-grant')) { // lane browser-propose: an Approve is armed the same way; design 009: so is a card's one-click Install
       const top = b.getBoundingClientRect().top;
       b._armSince = armAfterLayout({ prevTop: b._armTop ?? null, top, prevSince: b._armSince ?? null, now });
       b._armTop = top;
@@ -751,11 +754,15 @@ export function installUserTodos(app) {
     e.preventDefault();
   }, { capture: true });
   function replyKeys(e) {
-    const ta = e.target?.closest?.('.ut-reply-input');
-    if (!ta) return;
+    // lane vault-paste-request: Enter in a paste box = 存入保险库 (the same Enter rule — one test for both boxes; the tag in the
+    // selector lets the Enter census read the element's kind off it, no markup search)
+    const si = e.target?.closest?.('input.ut-secret-input');
+    const ta = si ? null : e.target?.closest?.('.ut-reply-input');
+    if (!ta && !si) return;
     // Enter sends, Shift+Enter is a newline; an IME composition's Enter is the IME's
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
       e.preventDefault();
+      if (si) { const row = rowOf(si), sb = si.closest('div.ut-secret'); if (row && sb) submitSecretBox(model, byId(row.dataset.id), sb, 'store'); return; }
       const row = rowOf(ta);
       const send = row && row.querySelector(':scope > .ut-body > .ut-reply > .ut-reply-send');
       if (row && !(send && send.disabled)) sendReply(row, ta.value);
@@ -836,6 +843,15 @@ export function installUserTodos(app) {
     const sendBtn = e.target.closest('.ut-reply-send');
     if (sendBtn) { if (!sendBtn.disabled) { const ta = item.querySelector(':scope > .ut-body > .ut-reply textarea'); sendReply(item, ta ? ta.value : ''); } return; }
     if (e.target.closest('.ut-reply')) return;
+    // lane vault-paste-request: the PASTE box is a place to type — its own presses (存入保险库 / 拒绝 / 解锁… / 设置第二密码…), never a jump
+    const sbox = e.target.closest('.ut-secret');
+    if (sbox) {
+      if (e.target.closest('.ut-secret-unlock')) { showUnlock({ then: () => applySecretBox(sbox) }); return; }
+      if (e.target.closest('.ut-secret-setup')) { showSetup(); return; }
+      const pressed = e.target.closest('.ut-secret-save') ? 'store' : e.target.closest('.ut-secret-deny') ? 'deny' : null;
+      if (pressed) submitSecretBox(model, byId(id), sbox, pressed);
+      return;
+    }
     const chip = e.target.closest('.ut-opt');
     if (chip) {
       const rec = byId(id);
@@ -894,6 +910,17 @@ export function installUserTodos(app) {
         { label: t('Copy'), action: () => { copyText([model.wordsOf(rec), model.detailOf(rec)].filter(Boolean).join('\n\n')); showToast(t('Copied')); } },
         ...model.menuFor(id),
       ]);
+      return;
+    }
+    const grantBtn = e.target.closest('.ut-action-grant');
+    if (grantBtn) {
+      // lane controls-that-lie: the GRANT an ask names, performed (the owner's «Who can use it» door, then the agent is
+      // answered) — a grant that appeared or moved under the pointer a moment ago is not the one the user read
+      armExitButtons();
+      const pv = pressVerdict({ since: grantBtn._armSince ?? null, now: performance.now() });
+      if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again')); return; }
+      grantBtn.disabled = true;
+      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), 'grant')).finally(() => { grantBtn.disabled = false; });
       return;
     }
     const propBtn = e.target.closest('.ut-action-proposal');

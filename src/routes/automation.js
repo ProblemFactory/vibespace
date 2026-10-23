@@ -18,6 +18,9 @@
 //     Task Groups only): POST /api/agent/automation/:verb (the body = the verb's arguments; `?key=` names a key), GET
 //     /api/agent/automation/keys (the keys THIS conversation may use: names + scopes), GET /api/agent/automation/audit
 //     (THIS conversation's lines). The caller is the TOKEN's conversation, never anything the body says.
+//   · THE MAINTAINER KEY (lane fleet-feedback-marks): a `vsmk_` bearer on POST /api/agent/automation/:verb is the engine's
+//     useMaintainer (the instance's env sha; feedback.list / feedback.handled only) — never read as a session token; on the
+//     two GET doors (keys, audit: a conversation's) it is refused by name `maintainer_key_scope`.
 // Every answer carries a CODE (src/automation-keys.js CODES); the vault locked ⇒ 423 `vault_locked`, every door.
 const A = require('../automation-keys.js');
 const { personVerdict } = require('./vault.js');
@@ -46,6 +49,8 @@ const WORDS = Object.freeze({
   mode_not_allowed: 'that mode is not one of this key\'s',
   ask_unknown: 'that question is gone', ask_settled: 'already answered',
   write_failed: 'the change could not be written on the server — nothing changed; try again in a minute',   // lane feedback-handled-verb
+  maintainer_key_scope: 'the maintainer key opens the two feedback verbs only (feedback.list, feedback.handled)',   // lane fleet-feedback-marks
+  maintainer_key_unknown: 'this instance does not know that maintainer key',
   session_only: 'only a conversation uses automation keys (a job does not, yet)',
   human_only: 'only a person mints, grants, revokes or answers — an agent never writes a grant',
   cross_site: 'these doors answer this instance\'s own page only',
@@ -99,22 +104,30 @@ function registerAutomationRoutes(app, { engine, callerOf, subjects = () => ({ s
   app.post('/api/automation/keys/:id/limits', person((req) => engine.setLimits(String(req.params.id), body(req).limits, { by: byOf(req) })));
   app.get('/api/automation/keys/:id/audit', person((req) => engine.auditOfKey(String(req.params.id), { limit: req.query && req.query.limit })));
   app.post('/api/automation/keys/:id/revoke', person((req) => engine.revoke(String(req.params.id), { by: byOf(req) })));
-  app.post('/api/automation/keys/:id/grants', person((req) => engine.grant(String(req.params.id), body(req).subjects, { by: byOf(req), ...(body(req).reach !== undefined ? { reach: body(req).reach } : {}) })));
+  app.post('/api/automation/keys/:id/grants', person((req) => engine.grant(String(req.params.id), body(req).subjects, { by: byOf(req), ...(body(req).reach !== undefined ? { reach: body(req).reach } : {}), ...(body(req).except !== undefined ? { except: body(req).except } : {}) })));
   app.delete('/api/automation/grants/:grantId', person((req) => engine.ungrant(String(req.params.grantId), { by: byOf(req) })));
   app.post('/api/automation/keys/:id/prune-ended', person((req) => engine.pruneEnded(String(req.params.id), liveOf(subjects()), { by: byOf(req) })));   // lane vault-key-row-compact: 清理已结束的授权
   app.post('/api/automation/grants/:grantId/reach', person((req) => engine.setReach(String(req.params.grantId), body(req).reach, { by: byOf(req) })));   // lane key-instance-scope: the key row's reach chip
+  app.post('/api/automation/grants/:grantId/except', person((req) => engine.setExcept(String(req.params.grantId), { except: body(req).except, reachExcept: body(req).reachExcept }, { by: byOf(req) })));   // lane grants-unify: «除了» — a Task Group grant's members / its reach's conversations left out
   app.post('/api/automation/asks/:askId', person((req) => engine.answer(String(req.params.askId), { answer: body(req).answer, answeredBy: byOf(req), ...(body(req).reach !== undefined ? { reach: body(req).reach } : {}) })));
 
   // ── agents: THEIR conversation's token names the caller ──
   const callerFrom = (req, res) => {
     const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
     if (token.startsWith('jbt_')) { answer(res, { ok: false, code: 'session_only' }); return null; }
+    if (A.isMaintainerToken(token)) { answer(res, { ok: false, code: 'maintainer_key_scope', why: 'these doors read a conversation\'s own keys and audit' }); return null; }
     const c = token.startsWith('vsst_') ? callerOf(token) : null;
     if (!c) { answer(res, { ok: false, code: 'unauthorized' }); return null; }
     return c;
   };
   app.post('/api/agent/automation/:verb', async (req, res) => {
     res.set('Cache-Control', 'no-store');
+    // lane fleet-feedback-marks: the maintainer key (the instance's env sha) — its own judgment, never a session's
+    const bearer = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
+    if (A.isMaintainerToken(bearer)) {
+      try { return answer(res, await engine.useMaintainer({ token: bearer, verb: String(req.params.verb), args: body(req) })); }
+      catch (e) { return res.status(500).json({ ok: false, code: 'failed', error: 'the automation door failed — nothing ran' }); }
+    }
     const caller = callerFrom(req, res);
     if (!caller) return;
     // q-048 verify M1: the caller's request closing before its answer (the CLI killed, the turn stopped) withdraws it from its

@@ -2,6 +2,47 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.346 — 2026-10-23
+
+### Added
+- Connecting Google, Lark or Slack with your own app: VibeSpace now shows which kind of app to create and the exact addresses to register, each with Copy.
+- You see it in Integrations & keys and in the Connect dialog before you sign in, with the place in the vendor's console and what its error means.
+- Gmail can sign in at a fixed address, so a Google "Web application" client works on the VibeSpace machine too; pick the client type on the account.
+- An assistant can ask you for a password or key with a paste box in For you; what you paste goes straight into the vault, and it is told only that it is there.
+- The Vault window's Add… menu has Other key or password…, for a password, an API key or any secret VibeSpace has no card for.
+- Everywhere you type a folder, VibeSpace suggests the right ones: your Task Groups' folders, one for the session name you typed, and recent ones with counts.
+- A few letters found anywhere in a path find the folder (like "ir q3"), and a relative path works, against your Task Group's folder first, then your home.
+- The folder button next to the field opens a picker that shows your folders with the files inside them; you can make a new folder there.
+- A folder that does not exist yet asks before it is made, and leaving the field keeps what you typed, or says why it is not used.
+- On another machine, the suggestions are that machine's: your Task Groups' folders found there, its recent folders with counts and its drives.
+
+### Changed
+- On a company deployment, a problem report an assistant filed is now marked handled by the maintainers with the version that fixed it, and the assistant is told.
+- Agent browser profiles, automation keys, Channels, machines and windows now use the same "Who can use it" picker; your existing settings carry over unchanged.
+- After you pick a Task Group or All agents, an "Except" row lets you leave out some of its members; they lose access there at once.
+- The New Session window has two columns — how it runs on the left, what it may use on the right — and rarely used rows fold, their values still shown.
+- A session can join several Task Groups at once: pick them on the New Session window, in the order you want.
+- On the New Session window you tick which of your connected accounts the session may use; only the browser profiles open to its Task Groups are listed.
+- For Claude and Codex the New Session window lets you choose the tools the session may use: Claude's own tool switches, Codex's sandbox and approval.
+- A Task Group's settings now open with its standing instructions — the one home of its rules, told word for word to every conversation in it.
+- Its Context table lists the group's folders and files, each with a note and how much the assistant is told about it.
+- The four choices: the note only, file names, file names plus key files like CLAUDE.md and README.md, or everything.
+- A preview shows exactly what a new conversation of the group receives; a row too big to fit says what it was cut to.
+- A path you type takes effect when you leave the box; one that doesn't exist keeps your text and says it wasn't applied.
+- A group can take in the rows another group shares, read-only unless that group allows changes.
+- Backlog, activity and members are now tabs of the Task Group window.
+
+### Fixed
+- An assistant's bookkeeping command can no longer hang for half an hour: it waits a bounded time, then says what it waited for.
+- Logging progress answers at once even when the shared folder is slow; the folder's copy catches up by itself.
+- A conversation opened into a Task Group — from New Session, an automation key or an agent — now shows in that group everywhere, with its count.
+- A Task Group's folder now also counts for conversations started in that folder itself, and a folder written as "folder/**" includes its subfolders.
+- When an assistant asks to use one of your browser logins, For you shows “Let this conversation use …”: one press shares it and tells the assistant.
+- A one-click answer in For you now reads “Reply: …” — it only sends those words, so it never looks like it grants or does something.
+- Before refreshing the usage limits of one or every account, the question now says in plain words what happens: a free check, like typing /usage.
+- A Gmail draft you never sent no longer shows at the top of its thread as if it had been sent; it shows as a draft at the end, and a deleted draft is not shown.
+- On a new workspace, the first chat no longer starts in VibeSpace's own install folder; it starts in the folder with your files.
+
 ## 2.369.345 — 2026-10-23
 
 ### Added

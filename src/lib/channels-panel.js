@@ -537,7 +537,9 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
       const name = hit.title || chanCaps.untitledText(null, { t });
       if (grouped && ck(hit) !== lastKey) { const gh = document.createElement('div'); gh.className = 'chan-search-group'; gh.textContent = name; s1.rows.appendChild(gh); }
       lastKey = ck(hit);
-      const it = hitRow(null, sc || grouped ? '' : name, `${(hit.record.author && (hit.record.author.name || hit.record.author.id)) || ''} · ${rowTime(hit.record.at)}`, String(hit.record.text || '').slice(0, 300));
+      // lane gmail-draft-not-a-message: a hit on the account's unsent draft says so where an author would stand (it went to nobody)
+      const by = hit.record.kind === 'draft' ? t('Draft · not sent') : (hit.record.author && (hit.record.author.name || hit.record.author.id)) || '';
+      const it = hitRow(null, sc || grouped ? '' : name, `${by} · ${rowTime(hit.record.at)}`, String(hit.record.text || '').slice(0, 300));
       it.dataset.vid = String(hit.record.vendorId || '');
       // .212: a hit opens its conversation AT that message (the window's own jump)
       it.onclick = () => { close(); app.openChannel(hit.adapterId, hit.convId, { jump: { vid: hit.record.vendorId, at: hit.record.at } }); };

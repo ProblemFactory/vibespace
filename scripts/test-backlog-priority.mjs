@@ -122,6 +122,7 @@ const g = tasks.create({ title: 'prio', objective: 'obj', folders: [cwd], contex
     { text: 'd', status: 'open', priority: 'low', addedAt: 4 },
   ] }).backlog;
   check('update(): high/low kept, an unknown value and an absent one normalized to normal', out.map((b) => b.priority).join(',') === 'high,normal,normal,low', out.map((b) => b.priority).join(','));
+  await tasks.mirrorIdle();   // lane cli-call-timeouts: TASK.md is mirrored OFF the store write (queued, bounded) — wait for the copy to land
   const md = fs.readFileSync(path.join(ctx, '.vibespace', 'TASK.md'), 'utf8');
   const lines = md.split('\n').filter((l) => /^- \[B-/.test(l));
   check('TASK.md lists open items in sortBacklog order with the markers (high `!`, low `↓`)', lines.length === 4 && / ! a /.test(lines[0] + ' ') && / c /.test(lines[1] + ' ') && / b /.test(lines[2] + ' ') && / ↓ d /.test(lines[3] + ' '), lines.join(' | '));

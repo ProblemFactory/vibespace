@@ -862,6 +862,10 @@ async function seedIm() {
     mail('t_q', 'm_q1', T - 90 * MIN, 'Ada Example <ada@example.com>', 'Quarterly numbers', [{ partId: '0', mimeType: 'text/plain', body: { data: b64u('Hello Brook,\nthe Q3 numbers are in https://sheets.example/q3.\nRevenue is up 4%.\nCosts are flat.\nPlease confirm.\nAda\n') } }]),
     mail('t_q', 'm_q2', T + 5 * MIN, 'Brook Example <brook@example.com>', 'Re: Quarterly numbers', [{ partId: '0', mimeType: 'text/plain', body: { data: b64u(reply) } }, { partId: '1', mimeType: 'application/pdf', filename: 'Q3-summary.pdf', body: { attachmentId: 'ANGjdJ_q3', size: 248320 } }]),
   ]);
+  // lane gmail-draft-not-a-message: the account's unsent reply (labels DRAFT — its own row after the thread, «Draft · not sent») and an
+  // older draft in the Trash (only counted) — the zh / ja words of the drafts section on the window's shots
+  const draftOf = (conv, id, at, labelIds, words) => gmail.toRecord('gmail', conv, { id, threadId: conv, internalDate: String(at), labelIds, payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'Member A <member.a@example.com>' }, { name: 'Subject', value: 'Re: Quarterly numbers' }], body: { data: b64u(words) } } }, { selfEmail: 'member.a@example.com' });
+  store.appendRecords('gmail', 't_q', [draftOf('t_q', 'm_qd0', T - 100 * MIN, ['DRAFT', 'TRASH'], 'Thanks!\n'), draftOf('t_q', 'm_qd1', T + 10 * MIN, ['DRAFT'], 'Thanks Brook, the forecast is fine.\n')]);
   store.appendRecords('gmail', 't_budget', [mail('t_budget', 'm_b1', T - 5 * 60 * MIN, 'Cass Example <cass@example.com>', 'Budget follow-up', [{ partId: '0', mimeType: 'text/plain', body: { data: b64u('Can we close the budget this week?\n') } }])]);
   const caps = (sendAs, why) => ({ read: 'yes', sendAs, why, at: NOW });
   const conv = (a, c, title, kind, cc, { participants = '', unread = 0, lastText = '', lastAt = NOW } = {}) => { const en = store.index.entry(a, c); en.title = title; en.kind = kind; en.convCaps = cc; en.lastAt = lastAt; en.listedAt = NOW; en.participants = participants; en.unread = unread; en.lastText = lastText; };

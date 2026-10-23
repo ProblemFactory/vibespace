@@ -90,6 +90,15 @@
 //      ADDENDUM 1 (the owner 2026-10-22: the public page is never a company app's): ⑪'s pod — the Google company preset names
 //      no relay page — says «no relay page yet» in its setup and its fold; ⑫'s preset shows ONLY its own page (the fleet's
 //      here), never the public one; a custom app's public-page row reads «you may register if … no https address»
+//   ⑬ (lane oauth-setup-instructions, the owner 2026-10-23: a self-hoster with their own Google / Lark / Slack app met the
+//      redirect URIs only after a refusal) a LOCAL HUB on the public relay page: ⚙ → Integrations holds a Communication
+//      group FIRST with one setup card per OAuth type (never a key card: ⓪'s census unchanged) — which client to create and
+//      why, the exact addresses with Copy (the one used now marked), the console path + link, where the ID / secret go,
+//      the vendor's refusal words; each company preset's card (never the public page); 375 px fit; the Connect dialog
+//      shows the same card FOLDED, above the sign-in block, BEFORE the first attempt (nothing opened); Gmail's OAuth client
+//      type: «Desktop app» asks Google for 127.0.0.1 on any port (CONTROL: not said / Web ride the public page). ⑪ + the
+//      refusal fold's console lines (Google's words, the console path, the Desktop-client case for an https address);
+//      ⑨ + the setup cards' controls inside 375 px.
 //   ⑪ (lane pod-oauth-callback, study 2 B2) the server rebooted AS A POD (VIBESPACE_PUBLIC_URL + a company Lark preset
 //      naming its brand): the chat's door opens Connect on Lark with the company app AND brand lark (CONTROL: a preset
 //      naming no brand ⇒ feishu, the testers' form); Connect Google sends the browser back to the instance's own route;
@@ -446,7 +455,7 @@ ok(await p1.load(), 'page 1 loaded the app at 375×667');
 {
   const out = await p1.evaljs(`(() => {
     const bad = [];
-    for (const el of document.querySelectorAll('.integ-card button, .integ-card select, .integ-card input')) {
+    for (const el of document.querySelectorAll('.integ-card button, .integ-card select, .integ-card input, .integ-setup-card button, .integ-setup-card a')) {
       const r = el.getBoundingClientRect();
       if (r.width === 0 && r.height === 0) continue;
       if (r.right > 376 || r.left < -1) bad.push((el.className || el.tagName) + ':' + Math.round(r.left) + '-' + Math.round(r.right));
@@ -546,7 +555,7 @@ const p2 = await newPage();
     const inputs = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none' && i.type !== 'hidden');
     return { labels, clientValue: client && client.value, options: client ? [...client.options].map((o) => o.textContent) : [], hint: hint && hint.className === 'mounts-field-hint' ? hint.textContent : null, block: block ? block.querySelector('button').textContent : null, blocks: d.querySelectorAll('.mounts-drive-connect').length, query: (inputs.find((i) => i.value === 'label:INBOX') || {}).value || null, scope: ([...d.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'inbox')) || {}).value || null, submit: d.querySelector('.dialog-actions .btn-create').textContent };
   })()`);
-  ok(JSON.stringify(gm.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Google authorization', 'Mailbox']), `Gmail's fields in the storage order: Type → Name → OAuth client → Google authorization → the Mailbox scope (the labels / query fields fold away until chosen) (${JSON.stringify(gm.labels)})`);
+  ok(JSON.stringify(gm.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Google authorization', 'Mailbox', 'OAuth client type']), `Gmail's fields in the storage order: Type → Name → OAuth client → Google authorization → the Mailbox scope (the labels / query fields fold away until chosen) → the OAuth client type (read at each sign-in — lane oauth-setup-instructions) (${JSON.stringify(gm.labels)})`);
   ok(gm.clientValue === 'org1' && JSON.stringify(gm.options) === JSON.stringify(['Preset: Org 1', 'Preset: Channels', MOUNT_OPTION, 'Custom (own client id/secret)']), `\`OAuth client\` preselects presets[0] and offers Preset × 2 + the storage mount's own client (r) + Custom, no Built-in (${JSON.stringify(gm)})`);
   ok(gm.hint === R.rowById('gmail').clientHint, 'the registry\'s clientHint is the .mounts-field-hint line under the select');
   ok(gm.block === 'Connect Google' && gm.scope === 'inbox' && gm.query === null && gm.submit === 'Connect', `the \`Google authorization\` block (the storage .mounts-drive-connect, one per type, the other hidden), the Mailbox scope on Inbox (the query field hidden), and .btn-create "Connect" (${JSON.stringify({ block: gm.block, blocks: gm.blocks, scope: gm.scope, query: gm.query, submit: gm.submit })})`);
@@ -754,7 +763,7 @@ const p2 = await newPage();
     const note = [...d.querySelectorAll(':scope > .mounts-note')].find((e) => e.style.display !== 'none');
     return { labels: ${visibleLabels('connect')}, note: note ? note.textContent : null, block: ([...d.querySelectorAll('.mounts-drive-connect')].find((b) => b.style.display !== 'none') || { querySelector: () => ({}) }).querySelector('button').textContent };
   })()`);
-  ok(JSON.stringify(rs.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Google authorization', 'Mailbox']) && /^The server copies this storage mount’s client id and secret onto the account — the secret never passes through this page\./.test(rs.note || '') && rs.block === 'Connect Google',
+  ok(JSON.stringify(rs.labels) === JSON.stringify(['Type', 'Name', 'OAuth client', 'Google authorization', 'Mailbox', 'OAuth client type']) && /^The server copies this storage mount’s client id and secret onto the account — the secret never passes through this page\./.test(rs.note || '') && rs.block === 'Connect Google',
     `(r) chosen: no custom id / secret inputs, the note says the server copies the secret, the Google authorization block stays (${JSON.stringify(rs)})`);
   stubMode({ email: MOUNT_EMAIL, refresh: 'ok', expiresIn: 3600 });
   await p1.evaljs(`(() => { const d = ${DLG('connect')}; d.querySelector('.mounts-drive-connect .mounts-oauth-link')?.remove(); [...d.querySelectorAll('.mounts-drive-connect')].find((b) => b.style.display !== 'none').querySelector('button').click(); return 1; })()`);
@@ -942,6 +951,10 @@ const p2 = await newPage();
   const fold = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { if (${FOLD}) break; await new Promise((r) => setTimeout(r, 100)); } const d = ${FOLD}; if (!d) return null; const kids = [...d.parentElement.children]; return { open: d.open, summary: d.querySelector('summary').textContent, last: kids[kids.length - 1] === d, boxVisible: !!d.querySelector('input') && (typeof d.querySelector('input').checkVisibility === 'function' ? d.querySelector('input').checkVisibility() : d.querySelector('input').getBoundingClientRect().height > 0) }; })()`);
   ok(fold && fold.open === false && fold.summary === 'The sign-in did not come back here by itself?' && fold.last && fold.boxVisible === false, `the paste-back is LAST and FOLDED under one line that says when it is needed — the box itself is not shown (${JSON.stringify(fold)})`);
   const inside = await p1.evaljs(`(() => { const d = ${FOLD}; d.open = true; const admin = d.querySelector('.mounts-oauth-admin'); const copy = admin && admin.nextElementSibling && admin.nextElementSibling.querySelector('input'); const other = d.querySelector('.mounts-oauth-other'); return { admin: admin ? admin.textContent : null, value: copy ? copy.value : null, other: other ? other.textContent : null, hint: [...d.querySelectorAll('.mounts-field-hint')].map((x) => x.textContent).join(' | ') }; })()`);
+  // lane oauth-setup-instructions: the refusal fold carries the setup card's console lines — Google's own words, the path
+  const notes = await p1.evaljs(`[...${FOLD}.querySelectorAll('.mounts-oauth-admin-note')].map((n) => n.textContent)`);
+  ok(notes.length === 3 && /^If Google says “Error 400: redirect_uri_mismatch”/.test(notes[0]) && /under Google Cloud console → APIs & Services → Credentials → OAuth 2\.0 Client IDs → your client → Authorized redirect URIs\.$/.test(notes[1]) && /^An https address and Google still says “Error 400: redirect_uri_mismatch”\? The client is a Desktop app client/.test(notes[2]),
+    `the refusal fold names Google's own error, WHERE the address goes, and — for an https address — the Desktop-client case (${JSON.stringify(notes).slice(0, 400)})`);
   ok(inside.admin && /^Google said this address is not allowed\? Add it to the app’s redirect URLs/.test(inside.admin) && inside.value === `${POD}/api/channels/oauth/cb/gmail` && inside.other === 'Sign in the other way: copy the last page’s address back here',
     `unfolded: why in a person's words, the exact address an admin adds to the app, and the other road (${JSON.stringify(inside).slice(0, 400)})`);
   const bareHints = await p1.evaljs(`[...${FOLD}.querySelectorAll(':scope > .mounts-field-hint')].map((h) => h.textContent)`);
@@ -1034,6 +1047,97 @@ const p2 = await newPage();
   let n1 = n0;
   for (let i = 0; i < 60 && n1 === n0; i++) { n1 = (((await api('GET', '/api/channels')).json || {}).adapters || []).filter((a) => a.kind === 'gmail').length; if (n1 === n0) await sleep(100); }
   ok(n1 === n0 + 1, `Connect makes the account — no per-instance address was registered anywhere (${n0} → ${n1})`);
+  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay')?.remove(); 1`);
+}
+
+// ── ⑬ lane oauth-setup-instructions (the owner 2026-10-23: «web application 的话，在集群外部署你是不是应该提供一下 redirect uri
+// 有关的 instruction，不然用户会懵逼吧»): a LOCAL HUB on the relay setting's default (the public page), no fleet relay —
+// ⚙ → Integrations holds one setup card per account type; the Connect dialog's fold names the client to create and the
+// exact addresses BEFORE the first attempt; the account's OAuth client type decides the address Google is asked for ──
+{
+  console.log('\n⑬ the setup card: ⚙ → Integrations, the Connect dialog\'s fold before the first attempt, Gmail\'s client type');
+  const PUBLIC = require(path.join(wt, 'src/consent-road.js')).RELAY_DEFAULT;
+  const GLOOP = require(path.join(wt, 'src/channels/gmail/manifest.js')).GMAIL_LOOPBACK_URL;
+  srv.kill('SIGKILL'); await waitDown();
+  fs.writeFileSync(SETTINGS_FILE, '{}');
+  srv = bootServer({});
+  ok(await waitServer(), 'rebooted as a local hub: the relay settings at their default (the public page), no fleet relay');
+  ok(await p1.load(), 'page 1 on 127.0.0.1 (the browser on the VibeSpace machine)');
+  // the boot splash (#loading-screen) covers the page until boot is done — a PICTURE (the pixel probes, the shots) waits for it
+  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 150; i++) { const s = document.getElementById('loading-screen'); if (!s || getComputedStyle(s).display === 'none' || getComputedStyle(s).opacity === '0' || s.style.visibility === 'hidden') return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'the boot splash is gone (a picture shows the page, not the splash)');
+  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay')?.remove(); 1`);
+  ok(await p1.evaljs(OPEN(BB)), 'the Integrations window opened');
+  const SETUP = (k) => `document.querySelector('.integ-setup-card[data-integ-setup="${k}"]')`;
+  const sc = await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { if (document.querySelectorAll('.integ-setup-card').length >= 3) break; await new Promise((r) => setTimeout(r, 100)); }
+    const cards = [...document.querySelectorAll('.integ-setup-card')];
+    return { kinds: cards.map((c) => c.dataset.integSetup), groups: [...new Set(cards.map((c) => c.closest('.integ-group') && c.closest('.integ-group').dataset.group))], first: (document.querySelector('.integ-group') || {}).dataset?.group || null, integCards: document.querySelectorAll('.integ-card').length, head: (document.querySelector('.integ-group[data-group="communication"] .integ-group-head') || {}).textContent || null };
+  })()`);
+  ok(sameSet(sc.kinds, ['lark', 'gmail', 'slack']) && JSON.stringify(sc.groups) === JSON.stringify(['communication']) && sc.first === 'communication' && sc.head === 'Communication' && sc.integCards === WINDOW_ROWS.length,
+    `⚙ → Integrations: a Communication group FIRST with one setup card per OAuth account type (Lark, Gmail, Slack) — no key card added to the census (${JSON.stringify(sc)})`);
+  const g = await p1.evaljs(`(() => {
+    const c = ${SETUP('gmail')}; const fold = c.querySelector('details.oauth-setup-fold[data-who="custom"]'); const closed = !fold.open; fold.open = true;
+    const tx = (s) => (fold.querySelector(s) || {}).textContent || null;
+    return { closed, summary: fold.querySelector('summary').textContent, create: fold.querySelector('.oauth-setup-create').dataset.create, what: tx('.oauth-setup-create-what'), why: tx('.oauth-setup-why'), alt: tx('.oauth-setup-alt'), register: (fold.querySelector('.oauth-setup-register') || {}).firstChild?.textContent || null,
+      rows: [...fold.querySelectorAll('.oauth-setup-row')].map((li) => ({ row: li.dataset.row, now: !!li.dataset.now, uri: (li.querySelector('code') || {}).textContent || null, words: li.querySelector('.oauth-setup-row-words').firstChild.textContent, copy: !!li.querySelector('button.integ-copy') })),
+      links: [...fold.querySelectorAll('a.oauth-setup-console')].map((a) => [a.textContent, a.href, a.target, a.rel]), where: tx('.oauth-setup-where'), refusal: tx('.oauth-setup-refusal'), desktop: tx('.oauth-setup-refusal-desktop'), last: tx('.oauth-setup-last'), inactive: tx('.oauth-setup-inactive'),
+      presets: [...c.querySelectorAll('details.oauth-setup-fold[data-who="preset"]')].map((d) => d.dataset.preset) };
+  })()`);
+  ok(g.closed && g.summary === 'Setting up your own Google app? What to create and the exact addresses to register' && g.create === 'web' && g.what === 'Create a Web application OAuth client.' && /^Why: a sign-in here comes back through a relay page/.test(g.why || '') && /A Desktop app client works too/.test(g.alt || ''),
+    `the Gmail card, folded under one line: WHICH client — a Web application client (this hub signs in through the public relay page, an https address) — and the Desktop alternative for a browser on this machine (${JSON.stringify({ create: g.create, why: g.why })})`);
+  const rk = g.rows.map((r) => `${r.row}${r.now ? '*' : ''}`).join(' ');
+  ok(rk === 'public* own route loopback also' && g.rows[0].uri === PUBLIC && g.rows[1].uri === null && g.rows[2].uri === null && g.rows[2].words.includes('https://<host>/api/channels/oauth/cb/gmail') && g.rows[3].uri === GLOOP && g.rows[4].uri === R.rowById('gmail').redirect.also[0].uri && g.rows.filter((r) => r.uri).every((r) => r.copy),
+    `the exact addresses, each with Copy: ① the public relay page (used now), ② your own copy (how), ③ your own https address (the template — this hub has none), this machine's FIXED address for a Web client, Drive's (${rk})`);
+  ok(/^Register the ones you use, each exactly as written, under Google Cloud console → APIs & Services → Credentials → OAuth 2\.0 Client IDs → your client → Authorized redirect URIs:/.test(g.register || '') && JSON.stringify(g.links) === JSON.stringify([['Google Cloud console', 'https://console.cloud.google.com/apis/credentials', '_blank', 'noopener noreferrer']]),   // (en: the page's language here)
+    'the console path, word for word, with its link (a new tab, no referrer)', JSON.stringify({ register: g.register, links: g.links }));
+  ok(g.where === 'Then: Connect an account → OAuth client → Custom — enter the client ID and secret there.' && /^If Google says “Error 400: redirect_uri_mismatch”/.test(g.refusal || '') && /The client is a Desktop app client, which cannot take one/.test(g.desktop || '') && /paste the last page’s address into its fold/.test(g.last || '') && g.inactive === null,
+    'where the client ID and secret go, Google\'s own refusal words (+ the Desktop-client case), the paste-back last resort');
+  const pre = await p1.evaljs(`(() => { const d = ${SETUP('gmail')}.querySelector('details.oauth-setup-fold[data-preset="channels"]'); d.open = true; return { summary: d.querySelector('summary').textContent, rows: [...d.querySelectorAll('.oauth-setup-row')].map((li) => li.dataset.row), create: d.querySelector('.oauth-setup-create').dataset.create, where: d.querySelector('.oauth-setup-where').textContent }; })()`);
+  ok(JSON.stringify(g.presets) === JSON.stringify(['org1', 'channels']) && pre.summary === 'Company app: Channels' && pre.create === 'preset' && !pre.rows.includes('public') && pre.where === 'The client ID and secret are set by your admin in the cluster presets.',
+    `each company preset's card: nothing to create, set by your admin — and never the public page (${JSON.stringify(pre)})`);
+  const copied = await p1.evaljs(`(async () => { const b = ${SETUP('gmail')}.querySelector('.oauth-setup-row[data-row="public"] button.integ-copy'); b.click(); for (let i = 0; i < 40; i++) { const tt = [...document.querySelectorAll('#global-toasts .global-toast-body')].map((x) => x.textContent); if (tt.some((x) => x.includes(${JSON.stringify(PUBLIC)}))) return { toast: tt.find((x) => x.includes(${JSON.stringify(PUBLIC)})), mark: b.dataset.copied || null }; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+  ok(copied && copied.toast === `Copied: ${PUBLIC}` && copied.mark === '1', `Copy copies the exact address — the toast names it (${JSON.stringify(copied)})`);
+  const lark = await p1.evaljs(`(() => { const d = ${SETUP('lark')}.querySelector('details.oauth-setup-fold[data-who="custom"]'); d.open = true; return { create: d.querySelector('.oauth-setup-create').dataset.create, loop: (d.querySelector('.oauth-setup-row[data-row="loopback"] code') || {}).textContent || null, refusal: d.querySelector('.oauth-setup-refusal').textContent, links: [...d.querySelectorAll('a.oauth-setup-console')].map((a) => a.textContent) }; })()`);
+  ok(lark.create === 'app' && lark.loop === LARK_CB && /^If Lark says “20029”/.test(lark.refusal) && JSON.stringify(lark.links) === JSON.stringify(['Lark', '飞书']), `the Lark card: its one kind of app, its registered loopback, 20029, both consoles (${JSON.stringify(lark)})`);
+  await p1.probe('⚙ → Integrations: the Gmail setup card, opened', `.integ-setup-card[data-integ-setup="gmail"] .oauth-setup`);
+  const fit = await p1.evaljs(`(() => { const bad = []; for (const el of document.querySelectorAll('.integ-setup-card button, .integ-setup-card a, .integ-setup-card code')) { const r = el.getBoundingClientRect(); if (r.width === 0 && r.height === 0) continue; if (r.right > 376 || r.left < -1) bad.push((el.className || el.tagName) + ':' + Math.round(r.left) + '-' + Math.round(r.right)); } return bad; })()`);
+  ok(!fit.length, `375×667: every Copy button, console link and address of the setup cards inside the viewport (offenders: ${fit.join(', ') || 'none'})`);
+  if (process.env.OAUTH_SETUP_SHOTS) { const s = await p1.cdp('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); fs.writeFileSync(path.join(process.env.OAUTH_SETUP_SHOTS, 'integrations-gmail-setup.png'), Buffer.from(s.result.data, 'base64')); }
+  // the Connect dialog: the fold BEFORE the first attempt
+  const DLGC = `document.querySelector('.dialog-body[data-chan-dialog="connect"]')`;
+  const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('#mounts-dialog-overlay')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
+  ok(await openOn('gmail'), 'Connect an account on Gmail');
+  const before = await p1.evaljs(`(window.__opened || []).length`);
+  const dlg = await p1.evaljs(`(() => {
+    const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none'; const s = [...d.querySelectorAll(':scope > select')].find((x) => vis(x) && [...x.options].some((o) => o.value === 'custom'));
+    const presetFold = [...d.querySelectorAll(':scope > details.oauth-setup-fold')].filter(vis).map((f) => f.dataset.who);
+    s.value = 'custom'; s.dispatchEvent(new Event('change'));
+    const folds = [...d.querySelectorAll(':scope > details.oauth-setup-fold')].filter(vis);
+    const f = folds[0]; const auth = [...d.querySelectorAll('.mounts-drive-connect')].find(vis);
+    return { presetFold, who: folds.map((x) => x.dataset.who), open: f ? f.open : null, summary: f ? f.querySelector('summary').textContent : null, beforeAuth: !!(f && auth && (f.compareDocumentPosition(auth) & Node.DOCUMENT_POSITION_FOLLOWING)), rows: f ? [...f.querySelectorAll('.oauth-setup-row')].map((li) => li.dataset.row) : [] };
+  })()`);
+  ok(JSON.stringify(dlg.presetFold) === JSON.stringify(['preset']) && JSON.stringify(dlg.who) === JSON.stringify(['custom']) && dlg.open === false && dlg.summary === 'Setting up your own Google app? What to create and the exact addresses to register' && dlg.beforeAuth && dlg.rows.join(' ') === 'public own route loopback also',
+    `the Connect form, BEFORE the first attempt: the company app shows its card, Custom shows the person's own — folded under one line, above the sign-in block, the same addresses (${JSON.stringify(dlg)})`);
+  ok(await p1.evaljs(`(window.__opened || []).length`) === before, 'nothing was started to show it (no sign-in page opened)');
+  await p1.evaljs(`(() => { const f = [...${DLGC}.querySelectorAll(':scope > details.oauth-setup-fold')].find((x) => x.style.display !== 'none'); f.open = true; return 1; })()`);
+  await p1.probe('the Connect dialog: the setup fold opened (Custom)', `#mounts-dialog-overlay details.oauth-setup-fold[data-who="custom"][data-kind="gmail"] .oauth-setup`);
+  if (process.env.OAUTH_SETUP_SHOTS) { const s = await p1.cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.OAUTH_SETUP_SHOTS, 'connect-gmail-fold.png'), Buffer.from(s.result.data, 'base64')); }
+  // Gmail's OAuth client type (an account option): what Google is asked for
+  const kind = await p1.evaljs(`(() => { const d = ${DLGC}; const sel = [...d.querySelectorAll('select')].find((s) => JSON.stringify([...s.options].map((o) => o.value)) === JSON.stringify(['', 'web', 'desktop'])); if (!sel) return null; let l = sel.previousElementSibling; while (l && l.tagName !== 'LABEL') l = l.previousElementSibling; return { label: l && l.textContent, options: [...sel.options].map((o) => o.textContent), value: sel.value }; })()`);
+  ok(kind && kind.label === 'OAuth client type' && JSON.stringify(kind.options) === JSON.stringify(['Not said', 'Web application', 'Desktop app']) && kind.value === '', `Gmail's form asks the OAuth client type: Not said / Web application / Desktop app (${JSON.stringify(kind)})`);
+  const connectWith = async (type) => {
+    const b0 = await p1.evaljs(`(window.__opened || []).length`);
+    await p1.evaljs(`(() => { const d = ${DLGC}; const sel = [...d.querySelectorAll('select')].find((s) => JSON.stringify([...s.options].map((o) => o.value)) === JSON.stringify(['', 'web', 'desktop'])); sel.value = ${JSON.stringify(type)}; sel.dispatchEvent(new Event('change'));
+      const vis = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none' && !i.readOnly); const id = vis.find((i) => i.placeholder && /googleusercontent/.test(i.placeholder)); const sec = vis.find((i) => i.type === 'password');   // the type-first dialog holds every type's inputs: the VISIBLE ones
+      id.value = ${JSON.stringify(CUSTOM_ID)}; sec.value = ${JSON.stringify(CUSTOM_SECRET)}; id.dispatchEvent(new Event('input')); sec.dispatchEvent(new Event('input'));
+      const b = [...d.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const btn = b.querySelector('button.mounts-btn-primary'); btn.disabled = false; btn.click(); return 1; })()`);
+    const u = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${b0}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
+    return u ? new URL(u).searchParams.get('redirect_uri') : null;
+  };
+  const rDesk = await connectWith('desktop');
+  const rUnsaid = await connectWith('');
+  const rWeb = await connectWith('web');
+  ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(rDesk || '') && rDesk !== PUBLIC, `«Desktop app»: the sign-in asks Google for 127.0.0.1 on any port — never the relay page a Desktop client cannot take (${rDesk})`);
+  ok(rUnsaid === PUBLIC && rWeb === PUBLIC, `CONTROL: not said (as before) and «Web application» ride the public relay page on this hub — the Desktop row above is the client type's doing (${rUnsaid} / ${rWeb})`);
   await p1.evaljs(`document.querySelector('#mounts-dialog-overlay')?.remove(); 1`);
 }
 

@@ -4,6 +4,9 @@
 // headless Chrome, the built bundle:
 //   ① sign in, set the second password, store two secrets (an integration key that is an HTML payload, an API key)
 //   ② the window lists them MASKED: no value anywhere in the page's DOM (markup or any input's value)
+//   ②d (lane vault-paste-request, the owner's 「我压根没法添加啊」): 添加… ▸ 其他密钥或密码… adds a FREE entry (name, kind, a masked
+//      value, a note) — its row under Passwords & keys (Password · By you), 显示 behind 验证是你, a bearer refused human_only, 删除
+//      through the usual confirm
 //   ③ 「显示」 ⇒ 「验证是你」: a wrong second password says so; the right one ⇒ the value appears in ITS row's field, the
 //      countdown chip shows; the HTML payload stays text (no element made, no handler ran)
 //   ④ a second 「显示」 inside the window asks nothing more; the SAME cookie without the page secret (a second tab) and
@@ -200,7 +203,7 @@ await closeVaultWindow();
 check('the window opens again with it', !!(await openWindow()) && !!(await until(`!!document.querySelector('.vw-row[data-store="automation"]')`, { timeout: 8000 })));
 const RAIL = `[...document.querySelectorAll('.vw-rail .vw-rail-item')].map((b) => [b.dataset.purpose, b.querySelector('.vw-rail-n').textContent])`;
 const railNow = await until(`(() => { const r = ${RAIL}; return r.length >= 10 ? r : null; })()`, { timeout: 5000 });
-check('THE RAIL: 全部 + the nine purposes in the design\'s order (Other only when something lands in it)', !!railNow && railNow.map(([p]) => p).join() === 'all,two-step,accounts,integrations,machines,storage,app-logins,passkeys,automation,agents', railNow);
+check('THE RAIL: 全部 + the ten purposes in the design\'s order (Other only when something lands in it; lane vault-paste-request: + Passwords & keys)', !!railNow && railNow.map(([p]) => p).join() === 'all,two-step,accounts,integrations,machines,storage,app-logins,passkeys,automation,keys,agents', railNow);
 const countsNow = () => evalJs(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; const by = {}; for (const r of rows) by[r.dataset.purpose] = (by[r.dataset.purpose] || 0) + 1; return { by, total: rows.length, rail: Object.fromEntries(${RAIL}), heads: Object.fromEntries([...document.querySelectorAll('.vw-list .vw-group')].map((h) => [h.dataset.purpose, h.querySelector('.vw-group-n').textContent])) }; })()`);
 const c0 = await countsNow();
 check('NINE-COLUMN COUNTS = ROWS: each purpose\'s rail count = its rows in the list = its group head; 全部 = every row (accounts 2 · integrations 1 · automation 1)', Number(c0.rail.all) === c0.total && Object.entries(c0.rail).filter(([p]) => p !== 'all').every(([p, n]) => Number(n) === (c0.by[p] || 0)) && Object.entries(c0.heads).every(([p, n]) => Number(n) === c0.by[p]) && c0.by.accounts === 2 && c0.by.integrations === 1 && c0.by.automation === 1 && c0.total === 4, c0);
@@ -234,7 +237,7 @@ check('NO GREYED CONTROL anywhere in the window (a door a row has not is not dra
 check('unlocked ⇒ 「添加…」 in the bar', !!(await until(visible('.vw-add'), { timeout: 3000 })));
 await click('.vw-add');
 const addMenu = await until(`[...document.querySelectorAll('.context-menu .context-menu-item')].map((e) => e.textContent).join('|') || null`, { timeout: 3000 });
-check('添加… lists the doors that add a value — each the store\'s own (an account, an integration key, a channel account, an automation key)', addMenu === 'Account…|Integration key…|Channel account…|Automation key…', addMenu);
+check('添加… lists the doors that add a value — each the store\'s own (an account, an integration key, a channel account, an automation key) and (lane vault-paste-request, the owner\'s 「我压根没法添加啊」) any other key or password', addMenu === 'Account…|Integration key…|Channel account…|Automation key…|Other key or password…', addMenu);
 await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
 await shot('vw-v2-list.png');
 
@@ -255,6 +258,39 @@ check('… and the TRAY: the same item is no longer open there (its row resolved
 await click(`#user-todos-popup .ut-item[data-id="${SEED.fail}"] .ut-done`);
 check('✓ in the TRAY ⇒ the same card leaves the band, and the band goes (nothing left)', !!(await until(`!document.querySelector('.vw-band-row[data-id="${SEED.fail}"]') && document.querySelector('.vw-band').hidden`, { timeout: 8000 })) && !(await storeOpen(SEED.fail)));
 await click('#taskbar-user-todos');
+
+console.log('②d 「其他密钥或密码…」 (lane vault-paste-request — the owner: 「我压根没法添加啊」): add, reveal, delete a free entry');
+{
+  const FREE = `free-entry-${crypto.randomBytes(10).toString('hex')}`;
+  await click('.vw-add');
+  await until(`[...document.querySelectorAll('.context-menu .context-menu-item')].length >= 5`, { timeout: 3000 });
+  await evalJs(`(() => { const m = [...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => e.textContent === 'Other key or password…'); if (m) m.click(); return !!m; })()`);
+  check('the menu item opens its dialog: a name, a kind, the value (a masked field), a note', !!(await until(visible('.vault-secret-add-dialog'), { timeout: 5000 })) && (await evalJs(`(() => { const d = document.querySelector('.vault-secret-add-dialog'); const v = d.querySelector('.vault-secret-input'); return !!d.querySelector('.vault-secret-name') && !!d.querySelector('.vault-secret-kind') && v.type === 'password' && v.getAttribute('autocomplete') === 'off' && !!d.querySelector('.vault-secret-note'); })()`)) === true);
+  await typeInto('.vault-secret-add-dialog .vault-secret-name', 'Router admin');
+  await evalJs(`(() => { const k = document.querySelector('.vault-secret-add-dialog .vault-secret-kind'); k.value = 'password'; k.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await typeInto('.vault-secret-add-dialog .vault-secret-input', FREE);
+  await typeInto('.vault-secret-add-dialog .vault-secret-note', 'the flat\'s router');
+  await click('.vault-secret-add-dialog .btn-create');
+  check('Save to vault ⇒ the dialog closes', !!(await until(`!document.querySelector('.vault-secret-add-dialog')`, { timeout: 8000 })));
+  const ROW_FREE = '.vw-row[data-purpose="keys"]';
+  const fr = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW_FREE)}); if (!r) return null; const p = r.querySelector('.vw-chip-prov'); return { id: r.dataset.id, name: r.querySelector('.vw-name, .vw-label')?.textContent || r.textContent, kind: r.querySelector('.vw-chip-kind')?.textContent, prov: p && p.dataset.prov, del: !!r.querySelector('.vw-del'), show: !!r.querySelector('.vw-show'), rail: document.querySelector('.vw-rail-item[data-purpose="keys"] .vw-rail-n')?.textContent }; })()`, { timeout: 8000 });
+  check('its row: «Router admin» under Passwords & keys — Password · By you, 显示 and 删除 (the rail counts it)', !!fr && /^secrets:secret:[0-9a-f]{10}#secret$/.test(fr.id) && /Router admin/.test(fr.name) && fr.kind === 'Password' && fr.prov === 'me' && fr.show && fr.del && fr.rail === '1', fr);
+  check('the value is in no markup and no field of the page (masked; the dialog\'s field emptied)', !(await pageText()).includes(FREE));
+  await click(ROW_FREE + ' .vw-show');
+  check('显示 ⇒ 验证是你 (the second password again)', !!(await until(visible('#vault-reveal-dialog'), { timeout: 5000 })));
+  await typeInto('#vault-reveal-pw', SECOND); await click('.vault-reveal-go');
+  check('… the right one ⇒ the value appears in ITS row\'s field (the owner\'s cookie door)', (await until(`document.querySelector(${JSON.stringify(ROW_FREE + ' .vw-plain')})?.value || null`, { timeout: 8000 })) === FREE);
+  const bear = await evalJs(`fetch('/api/vault/reveal', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer vsst_' + 'f'.repeat(32) }, body: JSON.stringify({ id: ${JSON.stringify(fr ? fr.id : '')} }) }).then(async (r) => ({ status: r.status, body: await r.text() }))`);
+  check('a BEARER asking the same door for it gets the existing refusal by name (human_only) — no value', bear.status === 403 && /human_only/.test(bear.body) && !bear.body.includes(FREE), bear);
+  await click(ROW_FREE + ' .vw-del');
+  check('删除 ⇒ the usual confirm dialog (its own words: the value leaves the vault)', /The value leaves the vault/.test(await until(`[...document.querySelectorAll('.dialog-overlay')].map((o) => o.textContent).join(' ') || null`, { timeout: 5000 }) || ''));
+  await evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].pop(); o.querySelector('.btn-create').click(); return true; })()`);
+  check('confirmed ⇒ the row is gone, the rail counts 0', !!(await until(`!document.querySelector(${JSON.stringify(ROW_FREE)}) && document.querySelector('.vw-rail-item[data-purpose="keys"] .vw-rail-n')?.textContent === '0'`, { timeout: 8000 })));
+  const left = await api('GET', '/api/vault/contents');
+  check('… and the vault holds it no more (the contents list)', !((left.json && left.json.rows) || []).some((r) => r.label === 'Router admin'), left.status);
+  await closeVaultWindow();
+  check('the window reopens (its 5-minute reveal window ended with the close)', !!(await openWindow()) && (await evalJs(`document.querySelectorAll('.vw-plain').length`)) === 0);
+}
 
 console.log('③ 显示 ⇒ 验证是你 ⇒ the value');
 await click(ROW_INT + ' .vw-show');
@@ -402,7 +438,7 @@ await splashGone();
 await openWindow();
 check('「显示」', (await evalJs(`document.querySelector(${JSON.stringify(ROW_INT + ' .vw-show')})?.textContent`)) === '显示');
 check('the setup-token row says 「长期 OAuth 令牌」', /长期 OAuth 令牌/.test(await evalJs(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent || ''`)));
-check('the rail in Chinese: 全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 自动化 key · agent 存放', (await evalJs(`[...document.querySelectorAll('.vw-rail .vw-rail-name')].map((e) => e.textContent).join(' · ')`)) === '全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 自动化 key · agent 存放');
+check('the rail in Chinese: 全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 自动化 key · 密码与密钥 · agent 存放 (lane vault-paste-request: + 密码与密钥)', (await evalJs(`[...document.querySelectorAll('.vw-rail .vw-rail-name')].map((e) => e.textContent).join(' · ')`)) === '全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 自动化 key · 密码与密钥 · agent 存放');
 check('「显示」 on the automation key carries the owner\'s own sentence as its help; the chips read 「hub 铸造 · 从未显示」 / 「我自己」', (await evalJs(`document.querySelector('.vw-row[data-store="automation"] .vw-show')?.title`)) === '显示密钥值——只在要交给外部系统时；内部 agent 按授权使用，不需要看到值' && (await evalJs(`document.querySelector('.vw-row[data-store="automation"] .vw-chip-prov')?.textContent`)) === 'hub 铸造 · 从未显示' && (await evalJs(`document.querySelector(${JSON.stringify(rowKey(accId) + ' .vw-chip-prov')})?.textContent`)) === '我自己');
 await click(ROW_INT + ' .vw-show');
 check('「验证是你」', (await until(`document.querySelector('#vault-reveal-dialog h3')?.textContent`, { timeout: 5000 })) === '验证是你');

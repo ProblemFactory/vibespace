@@ -272,14 +272,16 @@ class HostManager {
    */
   _reachChanged(why) { try { this.onReachChange?.(why); } catch (e) { console.warn('[hosts] reach re-judge failed:', e && e.message); } }
 
-  /** EXIT ACCESS (lane-pairing ⑥): the machine's two lists — who may borrow its network (`use`) and who may run
-   *  commands on it (`run`) — as PURE src/exit-reach.js decided them (`patchVerdict` → `storedExit`). ONE write,
-   *  the `lastRun` kept. The legacy `allowExit` boolean is gone (migration 2026-09-exit-access-lists). */
+  /** EXIT ACCESS (lane-pairing ⑥; lane grants-unify): the machine's two LISTS live in the ONE grants store now
+   *  (src/server/grants-store.js, written by the exit manager); the record keeps what is not a list — `ask`, the hub
+   *  list, the stamp (PURE src/exit-reach.js `storedExit`) — MERGED into `exit`, so `lastRun` and the pre-unify
+   *  `use` / `run` (on disk one more release, unread) stay as they are. */
   setExitAccess(id, exit) {
     const h = this.get(id);
-    const keep = h.exit && typeof h.exit === 'object' && h.exit.lastRun ? h.exit.lastRun : null;
-    h.exit = { ...exit, ...(keep && !exit.lastRun ? { lastRun: keep } : {}) };
-    delete h.allowExit;
+    const was = h.exit && typeof h.exit === 'object' && !Array.isArray(h.exit) ? h.exit : {};
+    const keep = {};
+    for (const k of ['lastRun', 'use', 'run']) if (was[k] !== undefined) keep[k] = was[k];   // the run ledger + the pre-unify lists (unread)
+    h.exit = { ...keep, ...exit };
     this._save();
     this._reachChanged('exit-access');
     return h;
@@ -288,7 +290,7 @@ class HostManager {
    *  last-run stamps, never a grant). A record from before the migration is lifted through the ONE PURE rule. */
   setLastRun(id, rec) {
     const h = this.get(id);
-    if (!h.exit || typeof h.exit !== 'object') { h.exit = require('./exit-reach.js').migrateExitAccess(h).exit; delete h.allowExit; }
+    if (!h.exit || typeof h.exit !== 'object' || Array.isArray(h.exit)) h.exit = {};   // lane grants-unify: never a list here (the grants store holds them)
     h.exit.lastRun = rec;
     this._saveThrottled('exit:' + id);
     return h;
@@ -593,6 +595,10 @@ class HostManager {
     const hosts = [];
     for (const h of bundle.hosts) {
       const rec = { ...h };
+      // lane grants-unify: a bundle from before the unify asks each time under `exit.run.ask` — carried to `exit.ask` (the
+      // field the reader reads) so an import never runs without asking what used to ask; its lists ride `bundle.grants`
+      // (or are mapped from those records) through the exit manager's importLists — never read from here
+      if (rec.exit && typeof rec.exit === 'object' && !Array.isArray(rec.exit) && rec.exit.ask === undefined && rec.exit.run && rec.exit.run.ask === true) rec.exit = { ...rec.exit, ask: true };
       // A bundle from a pre-2.160.0 instance carries dial records WITHOUT the
       // token hash (it lived in dial-tokens.json, never exported) — a wholesale
       // replace would lock every paired device out. Keep the hash we have.
@@ -961,6 +967,59 @@ class HostManager {
       .map(s => (shownParent === '/' ? '/' : shownParent + '/') + s);
   }
 
+  /** THE PATH FIELD ON THIS MACHINE (lane path-field — the owner's note ④: a remote machine gets the SAME recommendations,
+   *  computed for it). ONE sh round trip (src/dir-slice-script.js) lists / probes / indexes there — over the device link's
+   *  runCmd first (the ONLY road for a dial machine), the ssh rung otherwise — and PURE src/path-candidates.js
+   *  sliceListing builds the listing this machine's SafeFs answer builds. Paths come in that machine's `~/…` form (a
+   *  Task Group folder under this hub's home is probed at the same place under that machine's home). Kept per machine:
+   *  the folder index 60 s (refreshed behind an answer once stale) and the Mac's display names 10 min.
+   *  → { suggestions, listing, self, took, partial } */
+  async dirSlice(id, { text = '', bases = [], probe = [], q = '', kind = 'folder' } = {}, { by = 'system:hosts' } = {}) {
+    const h = this.get(id);
+    const PC = require('./path-candidates.js');
+    const DS = require('./dir-slice-script.js');
+    const t0 = Date.now();
+    const files = kind === 'file';
+    const norm = (v) => (Array.isArray(v) ? v : []).map(String).filter((p) => p && (p.startsWith('/') || p.startsWith('~'))).map((p) => (p.length > 1 ? p.replace(/\/+$/, '') : p));
+    const baseList = norm(bases).slice(0, 12);
+    const probes = [...new Set(norm(probe))].slice(0, 40);
+    const ask = PC.sliceAsk(text, baseList.map((p) => ({ path: p })));
+    const fuzzy = String(q || '').trim();
+    const c = (this._sliceCache = this._sliceCache || new Map()).get(id) || { index: null, names: null, refreshing: null };
+    this._sliceCache.set(id, c);
+    const run = async (script) => {
+      if (h.transport === 'dial' || this.dataPlaneOn?.()) {
+        try { const dm = await this.deviceBounded(id, 4000); return String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 6000, by })).stdout || ''); }
+        catch (e) { if (h.transport === 'dial') throw e; /* ssh hosts fall through */ }
+      }
+      return String(await this._ssh(h, REMOTE_PRELUDE + script, { timeoutMs: 6000 }));
+    };
+    const fresh = (x, ms) => x && Date.now() - x.at < ms;
+    const wantIndex = !!fuzzy && !c.index;
+    const wantNames = !fresh(c.names, 600e3);
+    const raw = DS.parseSlice(await run(DS.sliceScript({ list: ask.list.slice(0, 14), probes, files, index: wantIndex, names: wantNames })));
+    if (!raw.done && !raw.home) throw new Error('the machine did not answer the folder listing');
+    if (wantIndex) c.index = { at: Date.now(), dirs: raw.index.dirs, links: raw.index.links };
+    if (wantNames) c.names = { at: Date.now(), map: raw.localized };
+    /* the index is stale: answer from it, refresh behind (one at a time) */
+    if (fuzzy && c.index && !fresh(c.index, 60e3) && !c.refreshing) {
+      c.refreshing = run(DS.sliceScript({ list: [], index: true })).then((o) => { const r2 = DS.parseSlice(o); if (r2.done) c.index = { at: Date.now(), dirs: r2.index.dirs, links: r2.index.links }; })
+        .catch(() => {}).finally(() => { c.refreshing = null; });
+    }
+    /* exactly one folder starts with the typed last segment → list it too (the field shows what is inside; Tab goes in) */
+    const tx = String(text || '');
+    const last = /\s/.test(tx) || !tx.includes('/') ? '' : tx.slice(tx.lastIndexOf('/') + 1).toLowerCase();
+    if (last) {
+      const one = [];
+      for (const d of raw.dirs) { const hits = (d.kids || []).filter((k) => !k.link && k.name.toLowerCase().startsWith(last)); if (hits.length === 1) one.push(d.path.replace(/\/$/, '') + '/' + hits[0].name); }
+      if (one.length) { const r2 = DS.parseSlice(await run(DS.sliceScript({ list: [...new Set(one)].slice(0, 4), files }))); raw.dirs.push(...r2.dirs); }
+    }
+    const homeRow = raw.dirs.find((d) => d.path === raw.home);
+    const self = { home: raw.home, roots: ((homeRow && homeRow.kids) || []).filter((k) => k.pkg === PC.SELF_PACKAGE).map((k) => raw.home + '/' + k.name) };
+    const listing = PC.sliceListing({ home: raw.home, machine: id, dirs: raw.dirs, probes: raw.probes, index: fuzzy && c.index ? c.index : null, mounts: raw.mounts, localized: (c.names && c.names.map) || {}, q: fuzzy });
+    return { suggestions: PC.legacySuggestions(listing, tx), listing, self, os: raw.os, took: Date.now() - t0, partial: !raw.done };
+  }
+
   /** Backend status on a host (mirrors local /api/backend-status shape). */
   async backendStatus(id) {
     const h = this.get(id);
@@ -1028,8 +1087,9 @@ class HostManager {
    *  src/browser-verbs.js); `vibespace-browser-stuck.js` its page-dialog words (lane browser-stuck, copied at boot from
    *  src/browser-stuck.js); `vibespace-browser-passkey.js` its passkey words (lane browser-passkey, copied at boot from
    *  src/browser-passkey.js); `agent-cli-text.js` the ONE-text rule vibespace-msg / -channels / -ask / -task
-   *  share (lane cli-one-text-arg, copied at boot from src/agent-cli-text.js). test-architecture §52 fails a static tool left out. */
-  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-remote', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-design', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'vibespace-browser-passkey.js', 'agent-cli-text.js', 'agent-browser', 'vibespace-window', 'vibespace-app', 'vibespace-feedback', 'vibespace-vault', 'vibespace-api', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
+   *  share (lane cli-one-text-arg, copied at boot from src/agent-cli-text.js); `cli-call.js` THE ONE CALL every agent CLI makes
+   *  to the hub (lane cli-call-timeouts, copied at boot from src/cli-call.js). test-architecture §52 fails a static tool left out. */
+  static AGENT_TOOLS = ['vibespace-status', 'vibespace-task', 'vibespace-ask', 'vibespace-exit', 'vibespace-remote', 'vibespace-job', 'vibespace-docs', 'vibespace-msg', 'vibespace-page', 'vibespace-design', 'vibespace-channels', 'vibespace-browser', 'vibespace-browser-verbs.js', 'vibespace-browser-stuck.js', 'vibespace-browser-passkey.js', 'agent-cli-text.js', 'cli-call.js', 'agent-browser', 'vibespace-window', 'vibespace-app', 'vibespace-feedback', 'vibespace-vault', 'vibespace-api', 'vibespace-hook.mjs', 'vibespace-hook-register.mjs', 'vibespace-remote-keeper', 'vibespace-claude-subscription-login.mjs', 'vibespace-usage'];
   /** Plugin agent-tool shims (Plugin Ph4, 2.369.30): the loader installs a
    *  provider returning the `vibespace-tool-<plugin>-<name>` files it
    *  generates right now, so they ship to ssh hosts and dial devices with the

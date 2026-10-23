@@ -141,6 +141,8 @@ const { HostManager } = require('../src/hosts.js');
 const { TaskGroupManager } = require('../src/task-groups.js');
 const { UserTodoManager } = require('../src/user-todos.js');
 const { adoptCapturedId } = require('../src/claude-lock-capture.js');
+const GM = require('../src/grant-model.js');
+const GS = require('../src/server/grants-store.js');
 const echoPort = await new Promise((r) => { const s = net.createServer((c) => c.on('data', (d) => c.write(Buffer.concat([Buffer.from('EX:'), d])))); s.listen(0, '127.0.0.1', () => r(s.address().port)); s.unref(); });
 let runs = 0;
 const mkDevice = () => ({
@@ -165,15 +167,18 @@ function world(Mgr = ExitProxyManager, dir = path.join(SCR, `w${++wn}`)) {
   let ex = null;
   const tasks = new TaskGroupManager({ dataDir: dir, onChange: () => { try { ex.rejudgeAll('task-groups'); } catch { } } });
   const todos = new UserTodoManager({ dataDir: dir, onChange: () => {}, expirySweepMs: 0 });
+  const grants = GS.create({ dataDir: dir });   // lane grants-unify: THE store the lists live in
   const sessionStatusKey = (s, id) => { const b = s?.backendSessionId || s?.claudeSessionId; return b ? `${s.backend || 'claude'}:${b}` : `webui:${id}`; };
-  ex = new Mgr({ hosts, userTodos: todos, sessionsMap: () => sessions, log: () => {}, groupsOf: (s, id) => tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id) });
+  ex = new Mgr({ hosts, grants, userTodos: todos, sessionsMap: () => sessions, log: () => {}, groupsOf: (s, id) => tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id) });
   hosts.onReachChange = (why) => ex.rejudgeAll(`hosts-${why}`);          // server.js (A-r3a)
+  grants.onChange(({ door }) => { if (door === 'exit') { try { ex.rejudgeAll('grants'); } catch { } } });   // server.js (lane grants-unify)
   const broadcastActiveSessions = () => { try { ex.rejudgeAll('sessions'); } catch { } }; // server.js (the census's C4)
   const kill = (id) => { ex.onSessionEnd(sessions.get(id), id); sessions.delete(id); broadcastActiveSessions(); }; // ws-handler + session-stdout order
   const unpair = (hid) => { ex.onMachineUnpaired(hid); hosts.remove(hid); };                                         // exit-routes DELETE order
-  return { dir, sessions, hosts, tasks, todos, ex, broadcastActiveSessions, kill, unpair };
+  return { dir, sessions, hosts, tasks, todos, grants, ex, broadcastActiveSessions, kill, unpair };
 }
-const grantBoth = (w, hid, who) => w.hosts.setExitAccess(hid, { use: { mode: 'only', who }, run: { mode: 'only', who, ask: true }, updatedAt: 1 });
+// lane grants-unify: both lists as rows of the ONE store (a `<backend>:<cid>` key in the ONE spelling), the ask on the record
+const grantBoth = (w, hid, who) => { const to = who.map((p) => GM.fromSessionPrincipal(p)); w.grants.setMany([{ door: 'exit', resource: `${hid}:use`, to }, { door: 'exit', resource: `${hid}:run`, to }]); w.hosts.setExitAccess(hid, { ask: true, updatedAt: 1 }); };
 /** Arm a leg: session `id` holds an OPEN connection through the machine and a waiting ask on it. */
 async function arm(w, hid, id, { ask = true } = {}) {
   const S = w.sessions.get(id);
@@ -257,7 +262,7 @@ const EVENTS = [
     event: (w, hid) => w.unpair(hid) }],
   ['Settings → Import config narrowing the machine\'s lists (A-r3a)', {
     setup: (w, hid) => { w.sessions.set('w1', S('c1')); grantBoth(w, hid, [{ kind: 'session', id: 'claude:c1' }]); return 'w1'; },
-    event: (w) => { const recs = JSON.parse(JSON.stringify(w.hosts.exportBundle().hosts)); recs[0].exit = { use: { mode: 'nobody' }, run: { mode: 'nobody', ask: false }, updatedAt: 2 }; w.hosts.importBundle({ hosts: recs, keys: {} }); } }],
+    event: (w) => { const recs = JSON.parse(JSON.stringify(w.hosts.exportBundle().hosts)); recs[0].exit = { use: { mode: 'nobody' }, run: { mode: 'nobody', ask: false }, updatedAt: 2 }; const b = { hosts: recs, keys: {} }; w.hosts.importBundle(b); w.ex.importLists(b); } }],   // persistence.js's order (lane grants-unify: an older bundle's lists mapped into the store)
   ['Settings → Import config without the machine (a rename by import is the same write)', {
     setup: (w, hid) => { w.sessions.set('w1', S('c1')); grantBoth(w, hid, [{ kind: 'session', id: 'claude:c1' }]); return 'w1'; },
     event: (w) => w.hosts.importBundle({ hosts: [], keys: {} }) }],

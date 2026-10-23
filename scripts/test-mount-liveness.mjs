@@ -184,7 +184,7 @@ const MC = mutantCopies('mount-liveness', REPO);
     `⑥ SafeFs refuses a blocked path at the pool door: 503 storage-blocked by the files route's sentence before the loop turned (${sf.ms.toFixed(1)} / ${sm.ms.toFixed(1)} ms; a move's dest too), no worker picked (${picked})`);
   const df = await timed(() => DFS.run('read', { dir: path.join(MP, 'design') }));
   ok(df.v?.ok === false && df.v.code === 'storage_blocked' && df.inTurn && !asked.some((p) => p.startsWith(MP)), `⑥ the design folder read answers storage_blocked before the loop turned (${df.ms.toFixed(1)} ms), never read (${df.v?.code})`);
-  const tg = { _isPathShadowed: () => null, renderTaskMd() { asked.push('render'); return ''; } };
+  const tg = { _isPathShadowed: () => null, renderTaskMd() { asked.push('render'); return ''; }, contextDirOf: (t) => t.contextDir };   // lane task-group-context: _syncTaskMd asks the store for the 记笔记 row's folder
   const tt = await timed(() => { TaskGroupManager.prototype._syncTaskMd.call(tg, { id: 'T-1', contextDir: path.join(MP, 'ctx') }); TaskGroupManager.prototype._syncTaskMd.call(tg, { id: 'T-1', contextDir: path.join(MP, 'ctx') }); });
   ok(!asked.includes('render') && !fs.existsSync(path.join(MP, 'ctx', '.vibespace')) && warn.filter((l) => l.includes('TASK.md for T-1 skipped')).length === 1 && tt.inTurn,
     `⑥ the TASK.md writer skips a context folder under a blocked mount, said ONCE over two passes, before the loop turned (${tt.ms.toFixed(1)} ms)`);

@@ -419,23 +419,25 @@ const statusGuardFailures = (tasksSrc, statusSrc, serverSrc) => {
 
 // verify r5 (reproduced in chrome): the Task Group detail window skips its WHOLE render while a non-empty field is focused
 // (never clobber typing) — and every tasks-updated returned there, so a device whose title / objective field kept the focus
-// showed a cleared Activity entry's words for good. The guard now repaints the Activity list in place (it holds no field).
+// showed a cleared Activity entry's words for good. lane task-group-context: the window's 活动记录 tab IS the log viewer
+// (mountTaskLog — keyed rows patched in place on every broadcast, focus or not), and its 设置 tab's 「新对话会收到」 preview
+// (renderContext's text: the activity log in it) is fetched again even while a box is typed in and painted in place.
 const detailGuardFailures = (src) => {
   const bad = [];
-  if (!/if \(_typing && _ae\.value\) \{ const pl = root\.querySelector\('\.task-detail-progress'\); if \(pl && !pl\.contains\(_ae\)\) \{ const st = pl\.scrollTop; fillProgress\(pl, task\); pl\.scrollTop = st; \} return; \}/.test(src)) bad.push('the typing guard returns without repainting the Activity log');
-  const fp = (src.split('const fillProgress = (progList, task) => {')[1] || '').split('\n  };\n')[0];
-  if (!fp || !/isCleared\(p\) \? `\$\{stamp\}<span class="rc-cleared">\$\{escHtml\(clearedText\(\)\)\}<\/span>`/.test(fp) || !/if \(p\.detail && !isCleared\(p\)\)/.test(fp)) bad.push('the Activity rows are not drawn by ONE cleared-aware fillProgress');
-  if ((src.match(/const fillProgress = /g) || []).length !== 1 || (src.match(/fillProgress\((progList|pl), task\)/g) || []).length !== 2) bad.push('fillProgress is not the ONE painter (defined once, called by the render and the guard)');
+  if (!/if \(typing\) \{ settingsDirty = true; fetchPreview\(\); return; \}/.test(src)) bad.push('the typing guard returns without fetching the preview again');
+  if (!/const text = state\.full \? preview\.text : preview\.block;\s*if \(pre\.textContent !== text\) pre\.textContent = text;/.test(src)) bad.push('the preview is not painted in place from the latest answer');
+  if (!/viewer = mountTaskLog\(app, taskId, host, \{ tab: state\.tab, embedded: true \}\);/.test(src)) bad.push('the 活动记录 tab is not the log viewer');
+  if (/\b(p|e|entry)\.note\b/.test(src)) bad.push('the window paints an Activity entry\'s words itself (a second painter beside the viewer)');
   return bad;
 };
 {
   const TD_REL = 'src/lib/task-detail.js', TD_SRC = fs.readFileSync(path.join(ROOT, TD_REL), 'utf8');
-  ok(detailGuardFailures(TD_SRC).length === 0, 'the Task Group detail window repaints its Activity log from the store even while a field is being typed in (verify r5)', detailGuardFailures(TD_SRC));
-  const FIXED = "if (_typing && _ae.value) { const pl = root.querySelector('.task-detail-progress'); if (pl && !pl.contains(_ae)) { const st = pl.scrollTop; fillProgress(pl, task); pl.scrollTop = st; } return; }";
+  ok(detailGuardFailures(TD_SRC).length === 0, 'the Task Group window shows no cleared Activity words while a field is typed in: its 活动记录 tab is the log viewer, its preview is fetched again and painted in place (verify r5, lane task-group-context)', detailGuardFailures(TD_SRC));
+  const FIXED = "if (typing) { settingsDirty = true; fetchPreview(); return; }";
   ok(TD_SRC.split(FIXED).length === 2, 'the guard is present once (the control swaps exactly it)');
-  const PRE = M.write(TD_REL, TD_SRC.replace(FIXED, 'if (_typing && _ae.value) return;'), 'detail-guard-skips-activity');
+  const PRE = M.write(TD_REL, TD_SRC.replace(FIXED, 'if (typing) return;'), 'detail-guard-skips-activity');
   const bad = detailGuardFailures(fs.readFileSync(PRE, 'utf8'));
-  ok(bad.some((b) => /without repainting/.test(b)), 'NEGATIVE CONTROL: the pre-r5 guard (return, nothing repainted) fails the check', bad);
+  ok(bad.some((b) => /without fetching/.test(b)), 'NEGATIVE CONTROL: the pre-r5 guard (return, nothing repainted) fails the check', bad);
 }
 
 // verify r5 (reproduced in chrome): Session Properties skips its WHOLE render while one of its selects has the focus (an open

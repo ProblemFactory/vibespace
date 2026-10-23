@@ -26,9 +26,17 @@
 //      "Test connection" that never went online;
 //   6. "where this key is used", from `consumers` (or the phase it is wired in).
 //
+// THE SETUP CARDS (lane oauth-setup-instructions, the owner 2026-10-23: a self-hoster with their own Google / Lark /
+// Slack app met the redirect URIs only after a refusal): the Communication group holds ONE card per account type whose
+// registry row declares `redirect` — the setup card (src/lib/oauth-setup-card.js over PURE src/oauth-setup.js): which
+// client to create and why, the exact addresses THIS instance needs with Copy, the console path, where the client ID
+// and secret go (Connect an account; a company app's: the cluster presets) — read off the channels kinds digest
+// (`GET /api/channels?scope=accounts`, its `oauthSetup`). A row that registers its own client (Dropline) says so on its card.
+//
 // THE CARDS ARE GROUPED by what uses the key (lane integrations-menu-home): 通讯 / 浏览器 / 插件, PURE
 // `R.groupOf` (derived, never a list of ids), a plain-noun head only over a group that has a card. Today no
-// communication row is a card — a Lark / Gmail / Slack account's client is chosen where the account is added.
+// communication row is a card — a Lark / Gmail / Slack account's client is chosen where the account is added; the
+// Communication group holds those types' SETUP CARDS (lane oauth-setup-instructions, below).
 //
 // XSS LAW: every string here is either ours or a vendor's error text; all of
 // it renders through textContent. No innerHTML with dynamic content on any
@@ -58,6 +66,8 @@ import * as PL from '../preset-layers.js';
 import { routeErrorText } from './channel-words.js';
 import { enterSubmits } from './chat-enter-keys.js';
 import { renderConnectRow } from './oauth-connect-row.js'; // lane dropline-connect-door: a row's declared OAuth tier, drawn by shape
+import { setupModelOf, renderSetupCard, providerOfRow } from './oauth-setup-card.js'; // lane oauth-setup-instructions: the setup card
+import * as OS from '../oauth-setup.js'; // PURE: a self-registering row's card (Dropline)
 
 const ICON = svgIcon16('<circle cx="5" cy="11" r="3"/><path d="M7.5 8.5L13 3M11 5l2 2M9 7l1.5 1.5"/>');
 const FOCUS_MS = 2500;
@@ -122,7 +132,7 @@ function sourceChip(v) {
 }
 
 /** ONE card. `refresh(id)` re-fetches and re-renders just this row. */
-function renderCard(app, v, { refresh, focus }) {
+function renderCard(app, v, { refresh, focus, setupBase = '' }) {
   const card = el('div', 'plugin-card integ-card');
   card.dataset.integ = v.id;
 
@@ -187,6 +197,10 @@ function renderCard(app, v, { refresh, focus }) {
       if (!st || st.error) { box.appendChild(el('div', 'plugin-detail plugin-cfg-warn', (st && st.error) || t('Server unreachable — nothing was changed'))); return; }
       renderConnectRow(box, v.connect, st, () => refresh(v.id));
     });
+    // lane oauth-setup-instructions: a row whose client the product registers itself (Dropline) — the setup card says
+    // there is nothing to create or register, and names the address it registers (this instance's https one)
+    const reg = R.rowById(v.id);
+    if (reg && reg.redirect && reg.redirect.selfRegisters) card.appendChild(renderSetupCard(OS.setupCard({ kind: v.id, redirect: reg.redirect, base: setupBase }), { provider: reg.redirect.vendor }));
   }
 
   // ── 3. who serves this row ──
@@ -416,6 +430,7 @@ export function openIntegrationsWindow(app, opts = {}) {
 
   let pendingFocus = focus;
   const cards = new Map();
+  let setupBase = '';   // lane oauth-setup-instructions: this instance's https base (the kinds digest's oauthSetup.base)
 
   function scrollTo(id) {
     const card = cards.get(id);
@@ -432,13 +447,50 @@ export function openIntegrationsWindow(app, opts = {}) {
     if (!r || !r.integration) return;
     const old = cards.get(id);
     if (old && old.querySelector('.integ-editing')) { old.dataset.stale = '1'; return; }
-    const fresh = renderCard(app, r.integration, { refresh: refreshOne, focus: null });
+    const fresh = renderCard(app, r.integration, { refresh: refreshOne, focus: null, setupBase });
     if (old) old.replaceWith(fresh); else (root.querySelector(`.integ-group[data-group="${R.groupOf(id)}"]`) || root).appendChild(fresh);
     cards.set(id, fresh);
   }
 
+  /** lane oauth-setup-instructions: THE SETUP CARDS — one per account type whose registry row declares `redirect` (the
+   *  channels kinds digest's `oauthSetup`): a person's own app folded under one line, then each company preset's card. */
+  function setupCards(kinds) {
+    const out = [];
+    for (const k of kinds || []) {
+      const row = k && k.integration ? R.rowById(k.integration) : null;
+      const own = setupModelOf(k);
+      if (!row || !own) continue;
+      const provider = providerOfRow(row);
+      const card = el('div', 'plugin-card integ-setup-card');   // not an `integ-card`: no registry row of the window's census
+      card.dataset.integSetup = k.kind;
+      const head = el('div', 'plugin-head');
+      const name = el('div', 'plugin-name');
+      name.append(el('span', null, t(k.label || row.label)), el('span', 'integ-chip integ-chip-none', t('Sign-in setup')));
+      head.appendChild(name);
+      card.appendChild(head);
+      const fold = el('details', 'oauth-setup-fold');
+      fold.dataset.kind = k.kind; fold.dataset.who = 'custom';
+      fold.append(el('summary', 'plugin-detail', t(OS.WORDS.fold, { provider })), renderSetupCard(own, { provider }));
+      card.appendChild(fold);
+      for (const p of k.presets || []) {
+        const pm = setupModelOf(k, { preset: p });
+        if (!pm) continue;
+        const pf = el('details', 'oauth-setup-fold');
+        pf.dataset.kind = k.kind; pf.dataset.who = 'preset'; pf.dataset.preset = p.key;
+        pf.append(el('summary', 'plugin-detail', t('Company app: {name}', { name: p.label || p.key })), renderSetupCard(pm, { provider }));
+        card.appendChild(pf);
+      }
+      out.push(card);
+    }
+    return out;
+  }
+
   async function render() {
-    const r = await fetchJson('/api/integrations');
+    // lane oauth-setup-instructions: the channels kinds digest beside the rows (the setup cards' facts) — a failed read
+    // draws no setup card, never a broken window
+    const [r, ch] = await Promise.all([fetchJson('/api/integrations'), fetchJson('/api/channels?scope=accounts')]);
+    const kinds = ch && !ch.error && Array.isArray(ch.kinds) ? ch.kinds : [];
+    setupBase = (kinds.find((k) => k && k.oauthSetup) || { oauthSetup: { base: '' } }).oauthSetup.base || '';
     root.textContent = '';
     cards.clear();
     if (!r || r.error || !Array.isArray(r.integrations)) {
@@ -453,8 +505,10 @@ export function openIntegrationsWindow(app, opts = {}) {
     // one section per group in R.GROUPS order; a row this page's registry cannot place (a newer server) still draws, last
     const byGroup = new Map();
     for (const v of r.integrations) { const g = R.groupOf(v.id); if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g).push(v); }
+    const setups = setupCards(kinds);
     for (const g of [...R.GROUPS, null]) {
-      if (!byGroup.has(g)) continue;
+      const extra = g === 'communication' ? setups : [];
+      if (!byGroup.has(g) && !extra.length) continue;
       let box = root;
       if (g) {
         box = el('div', 'integ-group');
@@ -462,8 +516,9 @@ export function openIntegrationsWindow(app, opts = {}) {
         box.appendChild(el('div', 'jobs-sec-head integ-group-head', t(R.GROUP_WORDS[g])));
         root.appendChild(box);
       }
-      for (const v of byGroup.get(g)) {
-        const card = renderCard(app, v, { refresh: refreshOne, focus: null });
+      for (const c of extra) box.appendChild(c);
+      for (const v of byGroup.get(g) || []) {
+        const card = renderCard(app, v, { refresh: refreshOne, focus: null, setupBase });
         cards.set(v.id, card);
         box.appendChild(card);
       }

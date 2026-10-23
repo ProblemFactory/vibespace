@@ -38,6 +38,16 @@
 //      preset); the kinds digest's `relayPages` (the addresses an app registers ONCE)
 //   ⑥ + RED CONTROL = 2c22424d (the relay never asked: a pod registers one address per pod) — red on ⑦'s fleet leg; a
 //      verdict that takes any configured relay ⇒ a pod rides the public page, which only shows the code — red on ①
+// lane oauth-setup-instructions (the owner 2026-10-23: a self-hoster's own Google client — a Web application or a Desktop
+// app — and the redirect URIs it must register):
+//   ① + a Desktop client's row (`desktop-client`: never the relay page, never the route)
+//   ⑨ the verdict with a client kind (Desktop ⇒ the loopback on any port; Web ⇒ the relay / the route / the FIXED
+//      loopback); Gmail's clientType option › its preset's; the adapter alone (a stub loopback records what it binds);
+//      THE REAL ENGINE with a Web company client: the fixed address, Google's redirect to it, the exchange byte for
+//      byte, the account's option, the digest's `oauthSetup`; the dialog's «Desktop app» ⇒ the ephemeral port; THE
+//      SETUP CARD's exact addresses per instance (local hub on the public page / no relay / its own https / a fleet
+//      pod / a company preset with and without a page / Slack / Dropline) — the public page never a preset's row; the
+//      public page's address pinned; RED CONTROL = c8aa8820 (the kind never asked: a Desktop client rides the relay)
 // ADDENDUM 1 (the owner, 2026-10-22: «github 那个 url 不能加到我们公司的 lark 和 slack app 默认配置里» — the public page is never part
 // of a company app's configuration):
 //   ① relayPick / relayOf: a company preset rides its own page › the fleet's, else NO relay — the setting (the public
@@ -114,6 +124,7 @@ console.log('① PURE src/consent-road.js');
     [{ kind: 'lark', publicUrl: POD, origin: POD, road: 'loopback' }, 'asked'],
     [{ kind: 'Lark', publicUrl: POD, origin: POD }, 'bad-kind'],
     [{ kind: '../x', publicUrl: POD, origin: POD }, 'bad-kind'],
+    [{ kind: 'gmail', publicUrl: POD, origin: POD, relayUrl: PUBLIC_RELAY, clientType: 'desktop' }, 'desktop-client'],   // lane oauth-setup-instructions
   ];
   const bad = rows.map(([i, why]) => { const v = R(i); return v.road === 'loopback' && v.redirectUri === null && v.why === why ? null : { i, v }; }).filter(Boolean);
   ok(!bad.length, `the loopback table (${rows.length} rows): a browser on this machine, no / an http / a loopback / a query-carrying address, the person's own other road, a bad kind`, bad);
@@ -229,11 +240,11 @@ const fetchFn = (url, opts) => {
 const hostOf = (p) => Object.entries(HOSTS).find(([, pre]) => p.startsWith(pre + '/'))?.[0] || null;
 
 // ── the world: the real store, engine and routes ──
-async function world(tag, { publicUrl = POD, larkPreset = { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' }, env = {}, serverSetting = () => undefined, drive = { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1' } } = {}) {
+async function world(tag, { fixedPath = 'lark/cb', publicUrl = POD, larkPreset = { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' }, env = {}, serverSetting = () => undefined, drive = { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1' } } = {}) {
   const dir = path.join(ROOT, tag);
   fs.mkdirSync(dir, { recursive: true });
   const integrations = STORE.create({ dataDir: path.join(dir, 'store'), env: { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'co', label: 'Company app', values: larkPreset }]) }, now: () => Date.now(), broadcast: () => {}, drivePresets: () => [drive], log: quiet });
-  const fixed = `http://127.0.0.1:${await freePort()}/lark/cb`;
+  const fixed = `http://127.0.0.1:${await freePort()}/${fixedPath}`;
   const oauth = OL.createOAuthLoopback({ log: quiet, fixedCallbackUrl: fixed });
   const e = ENG.create({ dataDir: path.join(dir, 'eng'), env, serverSetting, broadcast: () => {}, integrations, log: quiet, fetch: fetchFn, oauth, publicUrl: () => publicUrl });
   RT.setup({ getEngine: () => e });
@@ -510,6 +521,7 @@ console.log('⑧ the public relay page\'s address in src/: only where a person\'
     [/^key: '(slack|lark|gmail)RelayUrl', role: 'relayUrl', type: 'string', default: RELAY_DEFAULT,$/, 'the custom setting\'s default (Settings → Channels)'],
     [/^relayUrlSetting: Object\.freeze\(\{ key: '(slack|lark|gmail)RelayUrl', fallback: (CR|Manifest)\.RELAY_DEFAULT \}\),/, 'a consent row\'s setting fallback (read for a custom app only)'],
     [/^: r\.url === CR\.RELAY_DEFAULT \? tr\('A public relay page you may register if this VibeSpace has no https address'\)$/, 'the custom app\'s setup words'],
+    [/^const PUBLIC_RELAY = CR\.RELAY_DEFAULT;/, 'the setup card\'s ① row (a person\'s own app — src/oauth-setup.js never gives it to a preset: ⑨)'],
   ];
   const refs = hits(/\bRELAY_DEFAULT\b/);
   const roleOf = (x) => (ROLES.find(([re]) => re.test(x.line)) || [])[1] || null;
@@ -518,6 +530,114 @@ console.log('⑧ the public relay page\'s address in src/: only where a person\'
   const REG = require(path.join(REPO, 'src/integration-registry.js'));
   const presetFields = ['lark', 'gmail', 'slack', 'dropline'].map((id) => (REG.rowById(id).fields || []).find((f) => f.key === 'relayUrl')).filter(Boolean);
   ok(presetFields.length === 4 && presetFields.every((f) => f.default === undefined && !String(f.placeholder || '').includes(host) && !String(f.help || '').includes(host) && !/public page/.test(String(f.help || ''))), 'no registry row\'s relayUrl field (a company preset\'s value) defaults to, shows or names the public page', presetFields.map((f) => [f.key, f.default, f.placeholder]));
+}
+
+// ── ⑨ lane oauth-setup-instructions: the Google client's kind + the setup card's addresses ──
+console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the setup card\'s exact addresses per instance');
+{
+  const OS = require(path.join(REPO, 'src/oauth-setup.js'));
+  const REG = require(path.join(REPO, 'src/integration-registry.js'));
+  const GM = require(path.join(REPO, 'src/channels/gmail.js'));
+  const GMAN = require(path.join(REPO, 'src/channels/gmail/manifest.js'));
+  const R = (o) => CR.consentRoad(o);
+  const HUBO = `http://127.0.0.1:${await freePort()}`;
+  // (a) THE VERDICT with a client kind
+  const v = {
+    desktopFleet: R({ kind: 'gmail', publicUrl: FLEET, origin: FLEET, relayUrl: ADMIN_RELAY, relayFleet: true, clientType: 'desktop' }),
+    desktopHub: R({ kind: 'gmail', publicUrl: '', origin: HUBO, relayUrl: PUBLIC_RELAY, clientType: 'desktop' }),
+    webHubBare: R({ kind: 'gmail', publicUrl: '', origin: HUBO, relayUrl: '', clientType: 'web' }),
+    webHubRelay: R({ kind: 'gmail', publicUrl: '', origin: HUBO, relayUrl: PUBLIC_RELAY, clientType: 'web' }),
+    webPod: R({ kind: 'gmail', publicUrl: POD, origin: POD, relayUrl: '', clientType: 'web' }),
+    webAsked: R({ kind: 'gmail', publicUrl: POD, origin: POD, road: 'loopback', clientType: 'web' }),
+    unsaid: R({ kind: 'gmail', publicUrl: '', origin: HUBO, relayUrl: '' }),
+  };
+  ok(v.desktopFleet.road === 'loopback' && v.desktopFleet.why === 'desktop-client' && !v.desktopFleet.fixed && v.desktopHub.road === 'loopback' && v.desktopHub.why === 'desktop-client' && !v.desktopHub.fixed,
+    'a DESKTOP client takes no https address: never the relay page (the fleet\'s or the public one), never the route — the loopback on any port', { fleet: v.desktopFleet, hub: v.desktopHub });
+  ok(v.webHubBare.road === 'loopback' && v.webHubBare.fixed === true && v.webHubBare.why === 'no-address' && v.webAsked.fixed === true && v.webAsked.why === 'asked',
+    'a WEB client\'s loopback is the FIXED one (a Web client takes only exact addresses) — a local hub with no relay, and the person\'s other road', { bare: v.webHubBare, asked: v.webAsked });
+  ok(v.webHubRelay.road === 'relay' && v.webHubRelay.redirectUri === PUBLIC_RELAY && v.webPod.road === 'route' && v.webPod.redirectUri === ROUTE_GMAIL,
+    'a Web client rides the relay page and the route as before (both https)', { relay: v.webHubRelay.road, route: v.webPod.road });
+  ok(v.unsaid.road === 'loopback' && !('fixed' in v.unsaid) && CR.WHYS.includes('desktop-client') && JSON.stringify(CR.CLIENT_TYPES) === JSON.stringify(['web', 'desktop']),
+    'a client kind not said: the verdict as before (no `fixed` — the adapter\'s own loopback)', v.unsaid);
+  ok(GM.clientTypeOf({ clientType: 'desktop' }, { clientType: 'web' }) === 'desktop' && GM.clientTypeOf({ clientType: '' }, { clientType: 'web' }) === 'web' && GM.clientTypeOf({}, {}) === '' && GM.clientTypeOf({ clientType: 'bogus' }, {}) === '',
+    'the account\'s own clientType option wins; else what its company preset says; else not said');
+  const opt = GM.OPTIONS.find((o) => o.key === 'clientType');
+  ok(opt && opt.default === '' && JSON.stringify(opt.choices) === JSON.stringify(['', 'web', 'desktop']) && opt.rebuild === false && GM.consent.callbackUrl === GMAN.GMAIL_LOOPBACK_URL && GM.consent.mode.includes('fixed') && GM.consent.mode.includes('ephemeral'),
+    'Gmail\'s option `clientType` (not said / web / desktop) and its consent row: ephemeral + FIXED (the registry row\'s loopback) + public', { opt: opt && opt.choices, mode: GM.consent.mode });
+  // the adapter alone: what it hands the loopback machine (a stub records begin's arguments — no port is bound)
+  const asked = async (options, values, origin, consent) => {
+    const reg = CH.createChannelRegistry(); reg.register(GM.adapter);
+    let got = null;
+    const oauth = { begin: async (o) => { got = o; return { flowId: 'f1', mode: o.mode, consentUrl: o.buildConsentUrl({ redirectUri: o.redirectUri || o.registeredCallbackUrl || 'http://127.0.0.1:1', state: 's' }) }; }, forwardCallback: async () => ({ ok: false }) };
+    const a = reg.create('gmail', { id: 'gmail', options }, { now: () => Date.now(), fetch: fetchFn, tokens: { read: () => ({ token: null, why: 'never-authenticated' }), write: async () => {}, clear: async () => {} }, oauth, consent, resolveIntegration: () => ({ source: 'cluster', values: { clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1', ...values }, missing: [], why: null }), log: quiet });
+    await a.auth.begin({ origin });
+    return got;
+  };
+  const hubConsent = { sign, publicUrl: () => '', relayUrl: () => '', fleetRelayUrl: () => '' };
+  const gw = await asked({}, { clientType: 'web' }, HUBO, hubConsent);
+  const gd = await asked({ clientType: 'desktop' }, { clientType: 'web' }, HUBO, { ...hubConsent, fleetRelayUrl: () => ADMIN_RELAY });
+  ok(gw && gw.mode === 'fixed' && gw.registeredCallbackUrl === GMAN.GMAIL_LOOPBACK_URL && gd && gd.mode === 'ephemeral',
+    'the Gmail adapter: a Web preset on a local hub binds the registry row\'s FIXED address; the account\'s own «Desktop app» beats the preset and rides the ephemeral port even beside a fleet relay', { web: gw && [gw.mode, gw.registeredCallbackUrl], desktop: gd && gd.mode });
+  // (b) THE REAL ENGINE: a company Google client that says it is a Web client
+  const w = await world('webclient', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1', clientType: 'web' } });
+  try {
+    const st = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: HUBO });
+    const red = new URL(st.url).searchParams.get('redirect_uri');
+    ok(st.flow.mode === 'fixed' && red === w.fixed && st.flow.listening === true, 'Connect Gmail on a local hub with a WEB company client: redirect_uri = the FIXED loopback (registrable on a Web client), listening', { mode: st.flow.mode, red });
+    seen.length = 0;
+    const back = new URL(w.fixed); back.searchParams.set('code', 'road-web-code'); back.searchParams.set('state', new URL(st.url).searchParams.get('state'));
+    const landed = await fetch(back.toString()).then((r) => r.status).catch((er) => String(er));
+    const done = await waitDone(w.e, st.flowId);
+    const gt = seen.find((x) => x.path === '/google-oauth/token');
+    ok(landed === 200 && gt && gt.body.redirect_uri === w.fixed && gt.body.code === 'road-web-code' && done && done.ok, 'Google sends the browser to that address: the exchange carries it byte for byte, the flow is done', { landed, redirect: gt && gt.body.redirect_uri, done: done && done.ok });
+    const made = await w.e.connect('gmail', { flowId: st.flowId });
+    ok(made && made.adapter && made.adapter.options && made.adapter.options.clientType === 'web', 'the new account takes the preset\'s kind as its option (the dialog sent none)', made && made.adapter && made.adapter.options);
+    const kg = (w.e.digest({ scope: 'accounts' }).kinds || []).find((k) => k.kind === 'gmail');
+    ok(kg && kg.presets[0] && kg.presets[0].facts && kg.presets[0].facts.clientType === 'web' && kg.oauthSetup && kg.oauthSetup.base === POD && kg.oauthSetup.relayPages.length === 0 && JSON.stringify(kg.oauthSetup.presets) === JSON.stringify([{ key: 'org1', relayPage: null, clientType: 'web' }]),
+      'the kinds digest: the preset\'s kind as a fact + the setup card\'s facts (this instance\'s https base, no relay page, the preset\'s page and kind)', kg && { facts: kg.presets[0] && kg.presets[0].facts, oauthSetup: kg.oauthSetup });
+    const d = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: HUBO, options: { clientType: 'desktop' } });
+    ok(d.flow.mode === 'ephemeral' && /^http:\/\/127\.0\.0\.1:\d+$/.test(new URL(d.url).searchParams.get('redirect_uri')), 'the dialog says «Desktop app» ⇒ the ephemeral port (any port — nothing registered)', d.flow.mode);
+  } finally { await w.close(); }
+  // (c) THE SETUP CARD — the exact addresses this instance needs, per shape (PURE src/oauth-setup.js)
+  const G = REG.rowById('gmail').redirect, L = REG.rowById('lark').redirect, S = REG.rowById('slack').redirect, D = REG.rowById('dropline').redirect;
+  const keys = (c) => c.rows.map((x) => `${x.key}${x.now ? '*' : ''}`).join(' ');
+  const uris = (c) => c.rows.map((x) => x.uri).filter(Boolean);
+  const hubPub = OS.setupCard({ kind: 'gmail', redirect: G, base: '', relayPages: [{ url: PUBLIC_RELAY, who: 'page' }], origin: HUBO });
+  ok(keys(hubPub) === 'public* own route loopback also' && hubPub.create.key === 'web' && hubPub.create.why === 'relay' && hubPub.create.alt === 'desktop' && JSON.stringify(uris(hubPub)) === JSON.stringify([PUBLIC_RELAY, GMAN.GMAIL_LOOPBACK_URL, G.also[0].uri]) && hubPub.rows[2].tpl === 'https://<host>/api/channels/oauth/cb/gmail',
+    'a local hub on the public page: ① the public page (used now), ② your own copy, ③ the https address (template — none here), this machine\'s fixed address, Drive\'s — a Web client (alt: Desktop)', { keys: keys(hubPub), create: hubPub.create });
+  const hubBare = OS.setupCard({ kind: 'gmail', redirect: G, base: '', relayPages: [], origin: HUBO });
+  const hubBareWeb = OS.setupCard({ kind: 'gmail', redirect: G, base: '', relayPages: [], origin: HUBO, clientType: 'web' });
+  const hubBareDesk = OS.setupCard({ kind: 'gmail', redirect: G, base: '', relayPages: [], origin: HUBO, clientType: 'desktop' });
+  ok(hubBare.create.key === 'desktop' && hubBare.create.why === 'local' && hubBare.create.alt === 'web' && hubBare.now && hubBare.now.road === 'loopback' && hubBare.now.uri === null && !hubBare.rows.find((x) => x.key === 'public').active
+    && keys(hubBareWeb) === 'public own route loopback* also' && !hubBareDesk.rows.some((x) => x.key === 'loopback'),
+    'a local hub with no relay page: a Desktop client (any port, nothing to register; alt: Web + the fixed address); said Web ⇒ the fixed address is the one used; said Desktop ⇒ no address row for it', { bare: [keys(hubBare), hubBare.create], web: keys(hubBareWeb), desk: keys(hubBareDesk) });
+  const https = OS.setupCard({ kind: 'gmail', redirect: G, base: POD, relayPages: [], origin: POD });
+  ok(https.create.key === 'web' && https.create.why === 'https' && https.host === 'pod-road.example.test' && https.rows.find((x) => x.key === 'route').uri === ROUTE_GMAIL && https.now.key === 'route',
+    'an instance with its own https address, opened there: a Web client (why: the https address); ③ is the exact route, used now', { keys: keys(https), create: https.create });
+  const fleet = OS.setupCard({ kind: 'lark', redirect: L, base: FLEET, relayPages: [{ url: ADMIN_RELAY, who: 'fleet' }, { url: PUBLIC_RELAY, who: 'page' }], origin: FLEET });
+  ok(keys(fleet) === 'fleet* route loopback' && !uris(fleet).includes(PUBLIC_RELAY) && fleet.create.key === 'app' && fleet.appWords === L.create && fleet.rows.find((x) => x.key === 'loopback').uri === REG.rowById('lark').setup.callbackUrl,
+    'a fleet pod, a person\'s own Lark app: the fleet\'s page (used now — it outranks the setting), the pod\'s route, Lark\'s registered loopback — never the public page', keys(fleet));
+  const preset = OS.setupCard({ kind: 'lark', redirect: L, base: FLEET, relayPages: [{ url: PUBLIC_RELAY, who: 'page' }], origin: FLEET, preset: { key: 'co', relayPage: CO_RELAY } });
+  const presetBare = OS.setupCard({ kind: 'lark', redirect: L, base: FLEET, relayPages: [{ url: PUBLIC_RELAY, who: 'page' }], origin: FLEET, preset: { key: 'co', relayPage: null } });
+  const presetHub = OS.setupCard({ kind: 'lark', redirect: L, base: '', relayPages: [{ url: PUBLIC_RELAY, who: 'page' }], origin: HUBO, preset: { key: 'co', relayPage: null } });
+  ok(keys(preset) === 'preset*' && preset.create.key === 'preset' && preset.where === 'preset' && keys(presetBare) === 'presetRoute* loopback' && presetBare.rows[0].uri === `${FLEET}/api/channels/oauth/cb/lark` && keys(presetHub) === 'presetRoute loopback*' && presetHub.rows[0].uri === null
+    && ![preset, presetBare, presetHub].some((c) => uris(c).includes(PUBLIC_RELAY)),
+    'a COMPANY preset: its relay page only (registered by your admin); without one, this instance\'s own address (or, with no https address, this machine) — the public page NEVER (the fleet presets never show ①)', { preset: keys(preset), bare: keys(presetBare), hub: keys(presetHub) });
+  const slack = OS.setupCard({ kind: 'slack', redirect: S, base: POD, relayPages: [{ url: PUBLIC_RELAY, who: 'page' }], origin: POD });
+  const drop = OS.setupCard({ kind: 'dropline', redirect: D, base: POD, origin: POD });
+  const dropNone = OS.setupCard({ kind: 'dropline', redirect: D, base: '' });
+  ok(keys(slack) === 'public* own route' && slack.refusal === S.refusal && drop.who === 'self' && keys(drop) === 'route' && drop.rows[0].uri === `${POD}/api/channels/oauth/cb/dropline` && drop.console === null && drop.refusal === null && dropNone.rows.length === 0,
+    'Slack: no loopback (https only), the relay page used; Dropline registers its own client — nothing to create, the one address it registers, no console', { slack: keys(slack), drop: keys(drop) });
+  ok(OS.PUBLIC_RELAY === 'https://problemfactory.github.io/vibespace/slack/' && fs.existsSync(path.join(REPO, 'docs/slack-relay/index.html')) && fs.existsSync(path.join(REPO, 'docs/slack-relay/relay.js')),
+    'the public relay page is a STABLE contract: https://problemfactory.github.io/vibespace/slack/, published from docs/slack-relay (index.html + relay.js)');
+  ok(Object.values(OS.WORDS).every((s) => typeof s === 'string' && s.trim() && !/[<>]/.test(s.replace(/<host>/g, ''))) && [hubPub, hubBare, https, fleet, preset, presetBare, slack, drop].every((c) => c.rows.every((x) => OS.ROW_KEYS.includes(x.key) && OS.rowWords(x))),
+    'every card word is a plain string (no markup) and every row has its words');
+  // (d) RED CONTROL = c8aa8820 — the client's kind never asked: a Desktop client on a local hub rides the public page, which a Desktop client can never take (redirect_uri_mismatch)
+  const roadSrc = fs.readFileSync(path.join(REPO, 'src/consent-road.js'), 'utf8');
+  const DESK = "  if (clientType === 'desktop') return loop('desktop-client');";
+  const base = MUT.load('src/consent-road.js', roadSrc.replace(DESK, ''), 'nokind');
+  const was = base.consentRoad({ kind: 'gmail', publicUrl: '', origin: HUBO, relayUrl: PUBLIC_RELAY, clientType: 'desktop' });
+  ok(roadSrc.split(DESK).length === 2 && was.road === 'relay' && was.redirectUri === PUBLIC_RELAY, 'RED CONTROL = c8aa8820: a verdict that never asks the client\'s kind sends a Desktop client through the https relay page — Google refuses it (redirect_uri_mismatch) — red on (a)', was);
 }
 
 await new Promise((r) => vendor.close(r));

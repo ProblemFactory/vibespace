@@ -3,6 +3,14 @@
 // Auth: VIBESPACE_SESSION_TOKEN (agent session) or VIBESPACE_JOB_TOKEN (from
 // inside a job process). Server scopes everything by token — no ids of other
 // people's work ever leak here (uniform not-found, no 403 oracle).
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --call-timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-job: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-job', flags: ['--call-timeout'] });
 'use strict';
 const API = process.env.VIBESPACE_API;
 const SESS = process.env.VIBESPACE_SESSION_TOKEN;
@@ -32,9 +40,9 @@ function readArg(v) { // @file support
   if (typeof v === 'string' && v.startsWith('@')) { try { return require('fs').readFileSync(v.slice(1), 'utf-8'); } catch (e) { console.error('cannot read ' + v.slice(1) + ': ' + e.message); process.exit(1); } }
   return v;
 }
-async function call(method, p, body) {
-  const res = await fetch(API + p, {
-    method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (SESS || JOBT) },
+async function call(method, p, body, cc = {}) {
+  const res = await CC.call(API + p, {
+    ...cc, method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + (SESS || JOBT) },
     body: body === undefined ? undefined : JSON.stringify(body),
   }).catch((e) => ({ _neterr: e.message }));
   if (res._neterr) { console.error('vibespace-job: server unreachable (' + res._neterr + ') — if a --wait was interrupted the job is still running; retry the poll'); process.exit(3); }
@@ -157,7 +165,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
         if (schedule) body.action = { type: 'spawn-task', task };
         else Object.assign(body, task);
       }
-      const r = await call('POST', '/api/agent/jobs', body);
+      const r = await call('POST', '/api/agent/jobs', body, { cls: 'wake' });   // a run starts a job: a wake
       const j = r.job;
       console.log(`started ${j.id} (${j.kind} ${j.name})${r.renamed ? ' — name was taken, auto-suffixed' : ''}`);
       // RESOLVED-TIME ECHO: always show WHEN it actually fires, absolute (the
@@ -224,7 +232,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (Number(flags.wait) > 100) console.error('(--wait capped at 100s — you will still see current state on timeout; completion also arrives as injected context)');
       const onTerm = () => { console.error('(poll interrupted — the job keeps running; re-run the poll any time)'); process.exit(0); };
       process.on('SIGTERM', onTerm); process.on('SIGINT', onTerm);
-      const r = await call('GET', `/api/agent/jobs/${encodeURIComponent(ref)}?tail=${Number(flags.tail) || 20}&wait=${wait}${verb === 'answers' ? '&answers=1' : ''}`);
+      const r = await call('GET', `/api/agent/jobs/${encodeURIComponent(ref)}?tail=${Number(flags.tail) || 20}&wait=${wait}${verb === 'answers' ? '&answers=1' : ''}`, undefined, { extraMs: wait * 1000 });   // the hub holds the poll ≤ wait s
       printJob(r.job, Number(flags.tail) || 20);
       break;
     }

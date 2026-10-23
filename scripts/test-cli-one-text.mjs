@@ -301,6 +301,7 @@ console.log('§6 controls: the pre-fix shapes are RED under the same judge; the 
   fs.mkdirSync(HOST, { recursive: true });
   fs.copyFileSync(CLI('msg'), path.join(HOST, 'vibespace-msg'));
   fs.copyFileSync(path.join(REPO, 'src/agent-cli-text.js'), path.join(HOST, 'agent-cli-text.js'));
+  fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(HOST, 'cli-call.js'));   // lane cli-call-timeouts: THE ONE CALL rides beside them too
   const h1 = await run(path.join(HOST, 'vibespace-msg'), ['send', 'g-1', ...PIECES]);
   ok(strayJudge(h1, 'vibespace-msg send'), 'a host layout (no checkout): the copy beside the CLI is the rule — the stray words refused', h1.err || h1.out);
   fs.rmSync(path.join(HOST, 'agent-cli-text.js'));

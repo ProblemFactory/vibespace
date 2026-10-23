@@ -325,7 +325,7 @@ const auditLines = () => { try { return fs.readFileSync(k.auditFile, 'utf8').tri
     const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
     const r1v = vsrc.replace("'AGENT_BROWSER_DEFAULT_TIMEOUT']);", "'AGENT_BROWSER_DEFAULT_TIMEOUT', 'AGENT_BROWSER_SOCKET_DIR']);").replace('if (absPath(a.socketDir)) {', 'if (false) {');
     const D2 = path.join(ROOT, 'r1-cli'); fs.mkdirSync(D2, { recursive: true });
-    fs.copyFileSync(CLI, path.join(D2, 'vibespace-browser')); fs.writeFileSync(path.join(D2, 'vibespace-browser-verbs.js'), r1v);
+    fs.copyFileSync(CLI, path.join(D2, 'vibespace-browser')); fs.writeFileSync(path.join(D2, 'vibespace-browser-verbs.js'), r1v); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D2, 'cli-call.js'));
     const ctl = await new Promise((resolve) => execFile(process.execPath, [path.join(D2, 'vibespace-browser'), 'click', '@e1'], { env: decoyEnv, encoding: 'utf8', timeout: 30000 }, (err, so, se) => resolve({ status: err ? err.code : 0, stderr: String(se || '') })));
     last = cmds().filter((x) => x.ns === 'vs-' + KEY_X).pop();
     ok(r1v !== vsrc && ctl.status === 0 && last && last.socketDir === DECOY, 'r2 CONTROL: the r1 table (patched copy) drives the agent\'s decoy root — a daemon the keeper never launched, streams or counts', { st: ctl.status, last, err: ctl.stderr.slice(0, 200) });

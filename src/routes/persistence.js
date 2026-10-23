@@ -54,7 +54,7 @@ function wordlessTitles(node, depth = 0) {
 }
 
 /** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth } context. */
-function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory, onSettingsWrite, onUserStateWrite = () => {} }) {
+function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory, onSettingsWrite, onUserStateWrite = () => {}, getExitProxy = () => null }) {
   const broadcast = (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(client => {
@@ -859,7 +859,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       }
       if (includeSensitive.includes('hosts')) {
         const b = getHosts?.()?.exportBundle?.();
-        if (b?.hosts?.length) sens.hosts = b;
+        // lane grants-unify: a machine's two exit lists live in the grants store — they ride the bundle as its rows
+        if (b?.hosts?.length) { const lists = getExitProxy?.()?.exportLists?.(b.hosts.map((h) => h.id)); if (Array.isArray(lists)) b.grants = lists; sens.hosts = b; }
       }
       if (includeSensitive.includes('mounts')) {
         const b = getMounts?.()?.exportBundle?.();
@@ -922,7 +923,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         // skips it and says so; `applied` is the user-visible channel (same
         // shape as 'vsPassword: skipped (SSO configured)'), never a silent drop
         const r = getHosts?.()?.importBundle?.(sens.hosts);
-        applied.push(r?.warnings?.length ? 'hosts (' + r.warnings.join('; ') + ')' : 'hosts');
+        // lane grants-unify: the machines' exit lists → the ONE grants store (the bundle's rows, or an older bundle's
+        // records mapped); a refused write is SAID (never a machine silently open to nobody / to more than it was)
+        const lists = getExitProxy?.()?.importLists?.(sens.hosts, { by: 'import' });
+        const warn = [...(r?.warnings || []), ...(lists && !lists.ok ? [`who can use the machines was not imported: ${lists.error || lists.code}`] : [])];
+        applied.push(warn.length ? 'hosts (' + warn.join('; ') + ')' : 'hosts');
       }
       if (includeSensitive.includes('mounts') && sens.mounts) {
         getMounts?.()?.importBundle?.(sens.mounts);

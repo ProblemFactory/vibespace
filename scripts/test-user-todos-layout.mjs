@@ -12,6 +12,9 @@
 // refusal: one notice per entry per hour, counted while open, never re-filed inside the hour once answered, the next hour
 // files again; the owner's own refusal is no failure) and 建议轮换 (an agent's put: one notice, never back by itself);
 // the REAL automation engine's refusal files it; the window's band = those open items (PURE bandItemsOf); the wiring.
+// ㉔ (lane controls-that-lie, naive study round 4 R1): A BUTTON NAMED FOR AN ACTION PERFORMS IT — `vibespace-ask --grant
+// browser:<profile>` files the grant itself (PURE src/ask-grant.js, the REAL agent route over the REAL store with a stand-in
+// keeper), the REAL row draws «Let this conversation use …» and its options as «Reply: …» (control: the pre-fix row), wiring.
 // ⑪ (B-328d): notices by ORIGIN — the closed producer set (src/inbox-origin.js),
 // the legacy read-time rung, groups / chips / tab counts, the HELD filter (r2),
 // the store's origin field (REQUIRED since r2 — a filing naming none throws),
@@ -93,7 +96,7 @@ console.log('⑤ NOTICES (2.369.118, owner: spend notices are DISTRACTING beside
   ok(/sessionName: 'Spending', kind: 'notice'/.test(guard), "spend-guard's inbox item is declared a notice at the producer");
   const ask = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-ask'), 'utf8');
   const routes = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8') + fs.readFileSync(path.join(ROOT, 'src/agent-routes/status.js'), 'utf8'); // + the status / todos family (lane dc-seams-server)
-  ok(/--notice/.test(ask) && /add: \{ text, detail, urgency, kind(?:, options)? \}/.test(ask) && /kind: add\.kind \|\| null/.test(routes), 'vibespace-ask --notice reaches the store through the agent route');
+  ok(/--notice/.test(ask) && /add: \{ text, detail, urgency, kind(?:, options)?(?:, \.\.\.\(grant !== undefined \? \{ grant \} : \{\}\))? \}/.test(ask) && /kind: add\.kind \|\| null/.test(routes), 'vibespace-ask --notice reaches the store through the agent route');
   const css = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8');
   ok(/\.ut-count\.ut-seg-notice \{[^}]*var\(--text-dim\)/.test(css) && !/\.ut-count\.ut-seg-notice \{[^}]*#[0-9a-f]{3}/i.test(css), 'the grey segment uses theme vars, no literal colour');
 }
@@ -501,6 +504,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
     'src/server/hooks-late.js': 'agent', // lane hooks-create: "N running Claude Code conversations started before VibeSpace registered its hooks — Terminate and Resume them"
     'src/server/apps-engine.js': 'apps', // Layer 0 apps: an agent's install PROPOSAL (Install / Not now) + the failed-restore notice
     'src/server/oat-identity.js': 'login', // lane oat-identity-postcheck: "<row>'s long-lived token belongs to another account — re-mint it or re-bind it", ONE per saved token
+    'src/server/vault-paste-door.js': 'vault', // lane vault-paste-request: an agent's request for a secret — ONE action item per request with its masked paste box (存入保险库 / 拒绝)
     'src/server/feedback-forward.js': 'server', // lane feedback-forward-404: "Agent feedback stays on this instance: <target> has no feedback door" — ONE low notice per pause, only when a person set telemetry.forwardUrl here
   };
   // r2: no exemptions — every origin of the closed set has a producer (the
@@ -607,7 +611,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
   // site, the agent route (vibespace-ask --artifact, each attachment judged openable there first), with the asker's cwd + host
   const artSites = Object.entries(files).filter(([, src]) => /\.add\([^;]*\bartifacts\b/.test(src)).map(([rel]) => rel).filter((rel) => C.sites.some((x) => x.rel === rel));
   eq(artSites, ['src/agent-routes/status.js'], 'the census: ONE add() site declares `artifacts` (the agent route)');
-  ok(/userTodos\.add\(key, \{[^\n]*origin: 'agent'[^\n]*, artifacts, cwd: s\.cwd \|\| null, hostId: s\.host && s\.host !== 'local' \? s\.host : null \}\)/.test(files['src/agent-routes/status.js']), 'the agent route declares artifacts + the asker\'s cwd + host at the call');
+  ok(/userTodos\.add\(key, \{[^\n]*origin: 'agent'[^\n]*, artifacts, cwd: s\.cwd \|\| null, hostId: s\.host && s\.host !== 'local' \? s\.host : null(?:, \.\.\.\(grantFields \|\| \{\}\))? \}\)/.test(files['src/agent-routes/status.js']), 'the agent route declares artifacts + the asker\'s cwd + host at the call (lane controls-that-lie: + a --grant\'s resolved action)');
   {
     const os = await import('node:os');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-arts-'));
@@ -631,7 +635,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
       ok(RC.SHAPES.todo.some(([k, op]) => k === 'artifacts' && op === 'drop'), '"Clear content…" drops an item\'s attachments with its words (record-clear SHAPES todo)');
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }
-  eq(C.sites.length, 66, 'the widened match finds exactly the 66 declared sites (lane feedback-forward-404 the paused feedback forward\'s ONE low notice (src/server/feedback-forward.js pauseFor, origin server — once per pause, a person-set target only); lane judged-watch-state the LLM plugin\'s one low row a day when its budget paused judged rules (src/server/decision-engine.js notePaused, origin plugin); lane small-fixes-331 B-4934 the vault\'s «N conversations are asking» notice (src/server/vault-run-door.js askingLine, origin vault — one row, re-worded as the count moves, closed at 8 or fewer); lane vault-manual-and-lock an agent\'s request for a stored secret (src/server/vault-run-door.js request, origin vault — one per conversation × entry, never expires, a lock withdraws it); lane app-page-csp the CSP report sink\'s one notice per new app-page pair (src/server/csp-reports.js, origin server); lane vault-use-law the daily-failure card (src/server/vault-hooks.js fileFailing, origin vault — one row per actor × entry); lane vault-run-door the held run\'s card (src/server/vault-run-door.js, origin vault); lane pool-provider-latents (q-055 M2) the pool\'s UNPLACED card — «Account deleted — "<title>" needs you to pick a <provider> account», the words alone when no other provider serves its model (src/server/usage-pool-engine.js fileUnplacedAsk, origin pool); lane pool-provider-aware (q-053 P0b) the pool\'s cross-provider card — «Moving … to <member> (<provider>) needs your OK» (src/server/usage-pool-engine.js, origin pool); design q-046 the held automation call\'s card (src/server/automation-engine.js, origin vault); lane hub-act-ask the held hub act\'s urgent card (src/server/hub-act-ask.js, origin machines); lane device-bundle-signing-fix-r2 device-upgrade-watch\'s first-trust item, URGENT — a device that trusted no release key pinned the first validly signed one (origin machines); lane device-bundle-signing device-upgrade-watch\'s refused-upgrade item, URGENT — a device refused the bundle\'s release signature (origin machines); lane device-act-audit the three urgent device items (src/server/device-alerts.js, origin machines); lane browser-probe-transient (B-0b8c) the browser keeper\'s could-not-read-the-version notice, filed only when its probe ladder is exhausted (origin browser); lane oat-identity-postcheck the token identity-mismatch item (src/server/oat-identity.js, origin login); lane app-display-notify-sink an app notification item (src/server/desktop-app-keeper.js, origin server); lane https-tailscale the https owner-step item (src/server/tls.js, origin server); every classList.add(a, b) excluded, lane host-stale-dialer the second-dialer item (src/server/dial-health-watch.js, origin machines), lane voice-p1-oauth-teach the Dropline proposal item (src/server/voice-teach-engine.js, origin server), lane browser-disk-sample the profile disk item (src/server/browser-disk-run.js, origin browser), lane fuse-canary-notice the wedged-mount item (src/server/mount-health-watch.js, origin server), lane browser-resource-care the memory-pressure item (src/server/memory-pressure-watch.js, origin server), lane channel-names-readable the names item (speakNames, origin channels); lane parked-ask-inbox the main conversation ask item (src/server/main-asks.js, origin agent), lane lark-upload-preflight the partly-sent item (speakPartial, origin channels); lane gmail-quota-share the slowed-polling item (speakSlowed, origin channels); lane browser-unresponsive the browser keeper\'s not-answering item (its Restart act); B-2198 part 2 the raw-API proposal item (src/server/channel-api-cards.js); lane win-upgrade-pipe added device-upgrade-watch\'s never-came-back item; no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice; lane S1 the helper-ask item; R4 (B-6acc) the channels engine\'s composed-message approval pointer; lane R5 verify r6 the channels engine\'s unsaved-sign-in item; lane-pairing ⑥ the exit ask; lane-pool-pin r2 the pool engine\'s removed-member hold notice — the owner\'s 全B; lane browser-propose the agent\'s proposal; lane hooks-create the late-hooks line; lane browser-admin the browser keeper\'s vanished-Chrome-build notice; lane browser-admin verify r2 (B5) its fall-back notice when a new Chrome build closed within seconds; Layer 0 apps the agent\'s install proposal + the failed-restore notice; lane reset-path verify r2 the pool engine\'s unreadable-attempts-file notice; lane reset-path verify r5 the pool engine\'s unknown-vendor-word item (origin pool — the engine IS the pool producer); lane reset-path verify r8 ⑥ the pool engine\'s late-wall notice (a limit hit on a conversation whose records arrive late — origin pool); lane channel-agent-watch the channels engine\'s wake-request item (origin channels); lane unexpected-exit (B-f698) the restarted-once item; lane for-you-jobs B-dfb4 the jobs wiring\'s dropped-at-the-cap notice; lane device-upgrade-stuck the stuck-upgrade notice; lane browser-passkey the page-waits-for-a-passkey item (mounts-plugins-wiring, origin browser); lane pool-subscription-lapsed the lapsed-subscription item (usage-pool-engine noteMemberServeFailure, origin pool); lane vault-relock-door the restart\'s SET-UP+LOCKED For-you notice (src/server/vault-hooks.js, origin vault); lane relay-token-per-instance the relay\'s name refusal (src/plugins/frp.js relayAlert, origin plugin); lane vault-window-v2 the Vault window\'s 「需要你」 producers — 使用失败 / 建议轮换 (src/server/vault-hooks.js, origin vault))');
+  eq(C.sites.length, 67, 'the widened match finds exactly the 67 declared sites (lane vault-paste-request an agent\'s request for a secret the owner pastes (src/server/vault-paste-door.js request, origin vault — one action item per request); lane feedback-forward-404 the paused feedback forward\'s ONE low notice (src/server/feedback-forward.js pauseFor, origin server — once per pause, a person-set target only); lane judged-watch-state the LLM plugin\'s one low row a day when its budget paused judged rules (src/server/decision-engine.js notePaused, origin plugin); lane small-fixes-331 B-4934 the vault\'s «N conversations are asking» notice (src/server/vault-run-door.js askingLine, origin vault — one row, re-worded as the count moves, closed at 8 or fewer); lane vault-manual-and-lock an agent\'s request for a stored secret (src/server/vault-run-door.js request, origin vault — one per conversation × entry, never expires, a lock withdraws it); lane app-page-csp the CSP report sink\'s one notice per new app-page pair (src/server/csp-reports.js, origin server); lane vault-use-law the daily-failure card (src/server/vault-hooks.js fileFailing, origin vault — one row per actor × entry); lane vault-run-door the held run\'s card (src/server/vault-run-door.js, origin vault); lane pool-provider-latents (q-055 M2) the pool\'s UNPLACED card — «Account deleted — "<title>" needs you to pick a <provider> account», the words alone when no other provider serves its model (src/server/usage-pool-engine.js fileUnplacedAsk, origin pool); lane pool-provider-aware (q-053 P0b) the pool\'s cross-provider card — «Moving … to <member> (<provider>) needs your OK» (src/server/usage-pool-engine.js, origin pool); design q-046 the held automation call\'s card (src/server/automation-engine.js, origin vault); lane hub-act-ask the held hub act\'s urgent card (src/server/hub-act-ask.js, origin machines); lane device-bundle-signing-fix-r2 device-upgrade-watch\'s first-trust item, URGENT — a device that trusted no release key pinned the first validly signed one (origin machines); lane device-bundle-signing device-upgrade-watch\'s refused-upgrade item, URGENT — a device refused the bundle\'s release signature (origin machines); lane device-act-audit the three urgent device items (src/server/device-alerts.js, origin machines); lane browser-probe-transient (B-0b8c) the browser keeper\'s could-not-read-the-version notice, filed only when its probe ladder is exhausted (origin browser); lane oat-identity-postcheck the token identity-mismatch item (src/server/oat-identity.js, origin login); lane app-display-notify-sink an app notification item (src/server/desktop-app-keeper.js, origin server); lane https-tailscale the https owner-step item (src/server/tls.js, origin server); every classList.add(a, b) excluded, lane host-stale-dialer the second-dialer item (src/server/dial-health-watch.js, origin machines), lane voice-p1-oauth-teach the Dropline proposal item (src/server/voice-teach-engine.js, origin server), lane browser-disk-sample the profile disk item (src/server/browser-disk-run.js, origin browser), lane fuse-canary-notice the wedged-mount item (src/server/mount-health-watch.js, origin server), lane browser-resource-care the memory-pressure item (src/server/memory-pressure-watch.js, origin server), lane channel-names-readable the names item (speakNames, origin channels); lane parked-ask-inbox the main conversation ask item (src/server/main-asks.js, origin agent), lane lark-upload-preflight the partly-sent item (speakPartial, origin channels); lane gmail-quota-share the slowed-polling item (speakSlowed, origin channels); lane browser-unresponsive the browser keeper\'s not-answering item (its Restart act); B-2198 part 2 the raw-API proposal item (src/server/channel-api-cards.js); lane win-upgrade-pipe added device-upgrade-watch\'s never-came-back item; no other two-argument add in the tree; lane H verify r5 added the browser keeper\'s keeps-closing notice; lane S1 the helper-ask item; R4 (B-6acc) the channels engine\'s composed-message approval pointer; lane R5 verify r6 the channels engine\'s unsaved-sign-in item; lane-pairing ⑥ the exit ask; lane-pool-pin r2 the pool engine\'s removed-member hold notice — the owner\'s 全B; lane browser-propose the agent\'s proposal; lane hooks-create the late-hooks line; lane browser-admin the browser keeper\'s vanished-Chrome-build notice; lane browser-admin verify r2 (B5) its fall-back notice when a new Chrome build closed within seconds; Layer 0 apps the agent\'s install proposal + the failed-restore notice; lane reset-path verify r2 the pool engine\'s unreadable-attempts-file notice; lane reset-path verify r5 the pool engine\'s unknown-vendor-word item (origin pool — the engine IS the pool producer); lane reset-path verify r8 ⑥ the pool engine\'s late-wall notice (a limit hit on a conversation whose records arrive late — origin pool); lane channel-agent-watch the channels engine\'s wake-request item (origin channels); lane unexpected-exit (B-f698) the restarted-once item; lane for-you-jobs B-dfb4 the jobs wiring\'s dropped-at-the-cap notice; lane device-upgrade-stuck the stuck-upgrade notice; lane browser-passkey the page-waits-for-a-passkey item (mounts-plugins-wiring, origin browser); lane pool-subscription-lapsed the lapsed-subscription item (usage-pool-engine noteMemberServeFailure, origin pool); lane vault-relock-door the restart\'s SET-UP+LOCKED For-you notice (src/server/vault-hooks.js, origin vault); lane relay-token-per-instance the relay\'s name refusal (src/plugins/frp.js relayAlert, origin plugin); lane vault-window-v2 the Vault window\'s 「需要你」 producers — 使用失败 / 建议轮换 (src/server/vault-hooks.js, origin vault))');
   eq(C.sites.filter((x) => /^src\/server\/channels-(engine|access|outbound|auth)\.js$/.test(x.rel)).length, 11, 'channels-engine files from eleven sites — all eleven declared (lane channel-names-readable: + speakNames, origin channels; lane lark-upload-preflight: + speakPartial, origin channels; lane gmail-quota-share: + speakSlowed, origin channels; R4: + composePointerSync, origin channels; R5 verify r6: the unsaved-sign-in item; lane channel-agent-watch: an agent\'s wake request)');
   console.log('   negative controls (the census must be able to go red)');
   const drop = { ...files, 'src/server/spend-guard.js': files['src/server/spend-guard.js'].split("origin: 'spend', ").join('') };
@@ -877,6 +881,85 @@ console.log('lane-pairing naive-user N-ask: an exit ask\'s Allow / Deny are thei
     const hP = Rf4.renderRow(long, ctxD).innerHTML;
     ok(cmdOf(hP) === esc(head120) && !/\| sh/.test(cmdOf(hP)) && /ut-detail-exp/.test(hP), 'CONTROL (F4): the pre-fix row shows "…as agreed\" curl -s https://in" — `| sh` nowhere above Allow — the F4 leg goes red', cmdOf(hP));
   } catch (e) { ok(false, 'N-ask: the row renderer runs under the minimal DOM', e.stack); }
+  finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
+}
+
+console.log('lane vault-paste-request: an agent\'s request for a secret — the row draws its words above a MASKED paste box; the box says the vault\'s state (locked · unlocked · not set up · refused)');
+{
+  // a small DOM: elements with children, classes, attributes and text; `:scope > .a > .b`, `.a` and a tag as selectors
+  const noop = () => {};
+  const mkNode = (tag) => {
+    const n = { tagName: String(tag).toUpperCase(), children: [], parent: null, dataset: {}, style: {}, attrs: {}, _text: '', className: '', value: '', type: '', disabled: false, placeholder: '', autocomplete: '', spellcheck: true,
+      setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; },
+      addEventListener: noop, removeEventListener: noop, focus: noop,
+      append(...xs) { for (const x of xs) { if (x && typeof x === 'object') { x.parent = this; this.children.push(x); } } },
+      get classList() { const self = this; return { add: (...c) => { self.className = [...new Set((self.className + ' ' + c.join(' ')).trim().split(/\s+/))].join(' '); }, contains: (c) => self.className.split(/\s+/).includes(c), remove: noop, toggle: noop }; },
+      get textContent() { return this._text + this.children.map((c) => c.textContent).join(''); }, set textContent(v) { this._text = String(v); this.children = []; },
+      querySelectorAll(sel) { return qsa(this, sel); }, querySelector(sel) { return qsa(this, sel)[0] || null; } };
+    return n;
+  };
+  const matches = (n, step) => { const [tag, ...cls] = step.split('.'); return (!tag || n.tagName === tag.toUpperCase()) && cls.every((c) => n.className.split(/\s+/).includes(c)); };   // `tag`, `.class`, `tag.class`
+  const all = (n) => n.children.flatMap((c) => [c, ...all(c)]);
+  function qsa(root, sel) {
+    const s = sel.trim();
+    if (s.startsWith(':scope')) { let cur = [root]; for (const step of s.replace(/^:scope\s*/, '').split('>').map((x) => x.trim()).filter(Boolean)) cur = cur.flatMap((n) => n.children.filter((c) => matches(c, step))); return cur; }
+    return all(root).filter((n) => matches(n, s));
+  }
+  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, fetch: globalThis.fetch };
+  globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
+  globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
+  const body = mkNode('body');
+  globalThis.document = { createElement: mkNode, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body, head: mkNode('head') };
+  let FACTS = { state: 'locked' };
+  globalThis.fetch = async (u) => ({ json: async () => (String(u).includes('/api/vault/state') ? FACTS : {}) });
+  try {
+    const { pathToFileURL } = await import('node:url');
+    const B = await import(pathToFileURL(path.join(ROOT, 'src/lib/vault-paste-box.js')).href);
+    const VUL = await import(pathToFileURL(path.join(ROOT, 'src/lib/vault-unlock.js')).href);
+    const R = await import(pathToFileURL(path.join(ROOT, 'src/lib/user-todos-row.js')).href);
+    const fieldItem = { id: 'ut-s1', text: 'Lane asker asks you for a secret: the <b>judge</b> key', detail: 'What: the <b>judge</b> key\nWhat for, in the agent\'s words: rules\nWhere it goes: llm.apiKey', createdAt: Date.now(), action: { type: 'secret-request', requestId: 'sr-0123456789ab', into: 'llm.apiKey', kind: '', name: '', conv: 'c1', words: 'the judge key', purpose: 'rules' } };
+    const entryItem = { ...fieldItem, id: 'ut-s2', action: { ...fieldItem.action, requestId: 'sr-0123456789ac', into: '', kind: 'password', name: 'Router admin' } };
+    ok(B.isSecretAsk(fieldItem) && !B.isSecretAsk({ action: { type: 'secret-request', requestId: 'nope' } }) && !B.isSecretAsk({ action: { type: 'vault-grant-ask', requestId: 'sr-0123456789ab' } }), 'isSecretAsk: an action secret-request naming its request (sr-<12 hex>) — nothing else');
+    await VUL.refreshVaultFacts();
+    const box = B.secretBoxEl(fieldItem);
+    const input = box.querySelector('.ut-secret-input');
+    ok(box.className === 'ut-secret' && box.dataset.req === 'sr-0123456789ab' && box.dataset.target === 'field' && input.type === 'password' && input.autocomplete === 'off' && input.spellcheck === false && input.attrs['data-lpignore'] === 'true' && input.attrs.autocapitalize === 'off',
+      'the box: ONE masked field (password, autocomplete off, no spell-check, no password manager) for THIS request', { req: box.dataset.req, type: input.type, ac: input.autocomplete });
+    const words = () => box.querySelector(':scope > .ut-secret-state > .ut-secret-words').textContent;
+    const shown = (cls) => box.querySelector(`:scope > .ut-secret-state > .${cls}`).style.display !== 'none';
+    ok(box.dataset.state === 'locked' && /vault_locked/.test(words()) && shown('ut-secret-unlock') && !shown('ut-secret-setup'), 'LOCKED: the box says vault_locked by name, 解锁… inline (never a silent failure)', { state: box.dataset.state, words: words() });
+    FACTS = { state: 'unlocked' }; await VUL.refreshVaultFacts(); B.applySecretBox(box);
+    ok(box.dataset.state === 'ready' && words() === '' && !shown('ut-secret-unlock') && box.querySelector(':scope > .ut-secret-state').style.display === 'none', 'UNLOCKED: ready — no words, no door, the state line folded away');
+    FACTS = { state: 'not_set_up' }; await VUL.refreshVaultFacts(); B.applySecretBox(box);
+    const ebox = B.secretBoxEl(entryItem);
+    ok(box.dataset.state === 'ready' && ebox.dataset.state === 'not_set_up' && /not set up/.test(ebox.querySelector(':scope > .ut-secret-state > .ut-secret-words').textContent) && ebox.querySelector(':scope > .ut-secret-state > .ut-secret-setup').style.display !== 'none',
+      'NOT SET UP: a field still saves (its store keeps its key beside its data); a NEW entry says so with 设置第二密码…');
+    FACTS = { state: 'unlocked' }; await VUL.refreshVaultFacts(); B.applySecretBox(box);
+    // the press, over a model double (the real one POSTs the cookie door): a refusal is said in the box, the value kept; a store clears it
+    const V = ['pasted', 'layout', 'value'].join('-');
+    input.value = V;
+    const refusing = { runAction: async (item, answer, extra) => { extra.onRefusal('invalid_value', { why: 'at least 8 characters' }); return false; } };
+    ok(!(await B.submitSecretBox(refusing, fieldItem, box, 'store')) && /Not saved — at least 8 characters/.test(words()) && input.value === V && !box.textContent.includes(V), 'REFUSED: the field\'s rule said in the box (Not saved — …), the value kept in the field for a fix — and in no text of the box');
+    let sent = null;
+    const storing = { runAction: async (item, answer, extra) => { sent = { answer, value: extra.value, req: item.action.requestId }; return true; } };
+    ok((await B.submitSecretBox(storing, fieldItem, box, 'store')) && sent.answer === 'store' && sent.value === V && sent.req === 'sr-0123456789ab' && input.value === '', 'STORED: the value rides the ONE verb (the model\'s runAction, the cookie door) and leaves the field at once');
+    ok(!(await B.submitSecretBox(storing, fieldItem, box, 'store')) && /Paste it first/.test(words()), 'an empty paste is refused in the box before any request (Paste it first)');
+    input.value = 'second';
+    ok((await B.submitSecretBox(storing, fieldItem, box, 'deny')) && sent.answer === 'deny' && sent.value === null && input.value === '', 'REFUSE (拒绝): no value rides, the field is cleared');
+    // THE ROW: the words whole ABOVE the box (escaped, never folded below), the box appended to the row's body
+    const appended = [];
+    const realCreate = globalThis.document.createElement;
+    globalThis.document.createElement = (tag) => { const el = realCreate(tag); if (tag === 'div') { const q0 = el.querySelector.bind(el); el.querySelector = (sel) => (sel === ':scope > .ut-body' ? { append: (x) => appended.push(x) } : q0(sel)); } return el; };
+    const ctx = { t: (x, p) => (p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x), wordsOf: (i) => i.text, detailOf: (i) => i.detail || '', nameFor: () => 'S', replyState: () => ({ show: false }) };
+    const row = R.renderRow({ item: fieldItem }, ctx);
+    const html = row.innerHTML;
+    ok(/<div class="ut-proposal-plan ut-secret-plan">What: the &lt;b&gt;judge&lt;\/b&gt; key/.test(html) && !/ut-detail-exp/.test(html) && !/ut-reply-btn/.test(html) && !/<b>judge/.test(html), 'the row: the words whole ABOVE the box, escaped (an agent\'s <b> stays text), never a folded detail below, no reply button', html.slice(0, 400));
+    ok(appended.length === 1 && appended[0].className === 'ut-secret' && appended[0].dataset.req === 'sr-0123456789ab', 'renderRow appends THE box (DOM nodes — the field is never markup)', appended.map((x) => x.className));
+    appended.length = 0;
+    const done = R.renderRow({ item: { ...fieldItem, status: 'done', resolvedBy: 'stored' }, resolved: true }, ctx);
+    ok(appended.length === 0 && !/ut-secret-plan/.test(done.innerHTML) && /saved to the vault/.test(done.innerHTML), 'a RESOLVED row draws no box and says «saved to the vault»', done.innerHTML.slice(0, 300));
+    globalThis.document.createElement = realCreate;
+  } catch (e) { ok(false, 'the paste box runs under the small DOM', e.stack); }
   finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
 }
 
@@ -1225,5 +1308,116 @@ console.log('㉓ THE VAULT\'S TWO PRODUCERS (lane vault-window-v2, design q-047 
     m.stop();
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
+console.log('㉔ A BUTTON NAMED FOR AN ACTION PERFORMS IT (lane controls-that-lie, naive study round 4 R1: «Granted access» only typed two words) — the grant ask, its route, its row; a plain option reads as a reply');
+{
+  const { createRequire } = await import('node:module');
+  const { pathToFileURL } = await import('node:url');
+  const req = createRequire(import.meta.url);
+  const AG = req(path.join(ROOT, 'src/ask-grant.js'));
+  console.log('   PURE src/ask-grant.js — the spec, the profile it names, the PATCH the press plans, the answer');
+  const g1 = AG.parseGrantSpec('browser:Lark (company login)');
+  ok(g1.ok && g1.family === 'browser' && g1.ref === 'Lark (company login)', '--grant browser:<label> parses (the label may hold spaces and parentheses)', g1);
+  const gc = AG.parseGrantSpec('channel:lark/oc_1'), gm = AG.parseGrantSpec('machine:mac-mini');
+  ok(!gc.ok && /vibespace-channels request/.test(gc.error) && /nothing was filed/.test(gc.error) && !gm.ok && /Who can use it/.test(gm.error) && /ask in words/.test(gm.error), 'a channel / a machine grant is refused BY NAME with the road that grants it (nothing filed)', [gc.error, gm.error]);
+  ok(['', 'browser', 'browser:', 'disk:x', 'browser:' + 'x'.repeat(121), null].every((x) => AG.parseGrantSpec(x).code === 'bad-grant'), 'an empty / family-less / unknown-family / over-long spec is refused bad-grant');
+  const PROFILES = [{ id: 'bp-aaaa1111', label: 'Lark (company login)' }, { id: 'bp-bbbb2222', label: 'work' }, { id: 'bp-cccc3333', label: 'Work' }, { id: 'bp-dddd4444', label: 'scratch', ephemeral: true }];
+  const tg = AG.browserGrantTarget(PROFILES, 'lark (COMPANY login)');
+  ok(tg.ok && tg.profile.id === 'bp-aaaa1111' && tg.profile.label === 'Lark (company login)' && AG.browserGrantTarget(PROFILES, 'bp-bbbb2222').profile.label === 'work', 'a profile is named by its id exactly or its label (case-insensitive)', tg);
+  ok(AG.browserGrantTarget(PROFILES, 'Gmail').code === 'grant-not-found' && /vibespace-browser profiles/.test(AG.browserGrantTarget(PROFILES, 'Gmail').error)
+    && AG.browserGrantTarget(PROFILES, 'work').code === 'grant-ambiguous' && /bp-bbbb2222, bp-cccc3333/.test(AG.browserGrantTarget(PROFILES, 'work').error)
+    && AG.browserGrantTarget(PROFILES, 'scratch').code === 'grant-not-editable', 'an unknown label (the way to list them), an ambiguous one (the ids) and a temporary browser are refused by name');
+  eq(AG.grantItemFields(tg.profile), { action: { type: 'browser-grant', profileId: 'bp-aaaa1111', label: 'Lark (company login)' } }, 'the item\'s action = the grant itself (the store\'s flat action shape)');
+  const SID = 'web-1';
+  eq(AG.grantUseBody({ use: { mode: 'all' }, base: 'b0' }, SID), { already: true }, 'All agents ⇒ already open (nothing to write — the R1 profile was this)');
+  eq(AG.grantUseBody({ use: { mode: 'only', who: [{ kind: 'session', key: 'bk-11111111', sessionId: SID, live: true }] }, base: 'b1' }, SID), { already: true }, 'this conversation on the list ⇒ already open');
+  eq(AG.grantUseBody({ use: { mode: 'only', who: [{ kind: 'task', id: 'T-1', title: 'x' }, { kind: 'session', key: 'bk-22222222', sessionId: null, live: false }] }, base: 'b2' }, SID),
+    { use: { mode: 'only', who: [{ kind: 'task', id: 'T-1' }, { kind: 'session', key: 'bk-22222222' }, { kind: 'session', session: SID }] }, base: 'b2' }, 'a list without it ⇒ the WHOLE list (as the dialog\'s wire rows) + this conversation, with the base it read');
+  ok(AG.grantUseBody({ use: { mode: 'unknown', who: [] } }, SID).error === 'unknown' && AG.grantUseBody({ use: { mode: 'all' } }, '').error === 'no-session' && AG.grantUseBody(null, SID).error === 'unknown', 'an unreadable list / no live asker ⇒ refused (never a guessed write)');
+  const said = AG.grantReplyText({ label: 'Lark (company login)', profileId: 'bp-aaaa1111' }), saidA = AG.grantReplyText({ label: 'Lark (company login)', profileId: 'bp-aaaa1111', already: true });
+  ok(/^Granted — this conversation may now use the browser profile «Lark \(company login\)» \(bp-aaaa1111\)\. Attach it with `vibespace-browser use bp-aaaa1111`\.$/.test(said) && /^Already allowed — /.test(saidA) && /vibespace-browser use bp-aaaa1111/.test(saidA), 'the agent is answered with what ran and the door it now has', [said, saidA]);
+
+  console.log('   the REAL agent route (src/agent-routes/status.js) over the REAL store — the grant resolved from the keeper\'s own list');
+  const os = await import('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-grant-'));
+  const { UserTodoManager } = req(path.join(ROOT, 'src/user-todos.js'));
+  const store = new UserTodoManager({ dataDir: dir, onChange: () => {}, expirySweepMs: 0 });
+  const KFILE = req.resolve(path.join(ROOT, 'src/server/browser-keeper.js'));
+  const hadK = req.cache[KFILE];
+  let keeperNow = { list: () => ({ profiles: PROFILES.filter((p) => !p.ephemeral) }) };
+  const { default: Module } = await import('node:module');
+  const fakeMod = new Module(KFILE); fakeMod.filename = KFILE; fakeMod.loaded = true; fakeMod.exports = { keeper: () => keeperNow };
+  req.cache[KFILE] = fakeMod;
+  try {
+    const routes = {};
+    const app = { post: (p, fn) => { routes['POST ' + p] = fn; }, get: (p, fn) => { routes['GET ' + p] = fn; } };
+    const s = { name: 'contracts', cwd: '/home/u/work', host: null };
+    req(path.join(ROOT, 'src/agent-routes/status.js')).register(app, { activeSessions: new Map([['w1', s]]), sessionStatus: {}, userTodos: store, sessionStatusKey: () => 'claude:c-1', clearAsAgent: () => {}, agentSession: () => [s, 'w1'], toolOn: () => true, toolDisabled: () => {}, bookkept: () => {}, handoverItems: () => [] });
+    const call = async (add) => { let out = null; const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(b) { out = { status: this.statusCode, body: b }; return this; } }; await routes['POST /api/agent/user-todo']({ body: { add }, app: { locals: {} } }, res); return out; };
+    const a1 = await call({ text: "Share 'Lark (company login)' with me so I can message the vendor", grant: 'browser:Lark (company login)', options: ['Send it myself'] });
+    ok(a1.status === 200 && a1.body.item.action && a1.body.item.action.type === 'browser-grant' && a1.body.item.action.profileId === 'bp-aaaa1111' && a1.body.item.origin === 'agent', 'an ask with --grant browser:<label> is filed WITH the grant as its action (the keeper\'s id, not the agent\'s words)', a1.body);
+    const a2 = await call({ text: "Share 'Lark (company login)' with me so I can message the vendor", grant: 'browser:bp-aaaa1111' });
+    ok(a2.body.item.id === a1.body.item.id && a2.body.item.existing, 'a re-file naming the same profile merges into the same item (ACTION_IDENTITY browser-grant → profileId)');
+    const a3 = await call({ text: "Share 'Lark (company login)' with me so I can message the vendor", grant: 'browser:bp-bbbb2222' });
+    ok(a3.body.item.id !== a1.body.item.id, '…a re-file naming ANOTHER profile is its own item (a press can never grant the profile it did not show)');
+    const nOpen = store.forSession(['claude:c-1']).length;
+    const r1 = await call({ text: 'need gmail', grant: 'browser:Gmail' }), r2 = await call({ text: 'need a chat', grant: 'channel:lark/oc_1' }), r3 = await call({ text: 'need work', grant: 'browser:work' });
+    ok(r1.status === 404 && r1.body.code === 'grant-not-found' && r2.status === 400 && r2.body.code === 'bad-grant' && /vibespace-channels request/.test(r2.body.error) && r3.status === 409 && r3.body.code === 'grant-ambiguous' && store.forSession(['claude:c-1']).length === nOpen,
+      'an unknown profile 404, a channel grant 400 (its road named), an ambiguous label 409 — and NOTHING was filed', [r1.body, r2.body, r3.body]);
+    keeperNow = null;
+    const r4 = await call({ text: 'need lark again', grant: 'browser:Lark (company login)' });
+    ok(r4.status === 503 && r4.body.code === 'grant-unavailable' && store.forSession(['claude:c-1']).length === nOpen, 'no Agent browser on the instance ⇒ 503 by name, nothing filed', r4.body);
+    const plain = await call({ text: 'Which way?', options: ['Granted access'] });
+    ok(plain.status === 200 && !plain.body.item.action, 'a plain ask (no --grant) carries no action — its options are replies only');
+  } finally { if (hadK) req.cache[KFILE] = hadK; else delete req.cache[KFILE]; store.stop(); fs.rmSync(dir, { recursive: true, force: true }); }
+
+  console.log('   the REAL row renderer — the grant\'s own button; an option reads «Reply: …» (control: the pre-fix row wore the raw label)');
+  const noop = () => {};
+  const mkEl = () => ({ dataset: {}, className: '', innerHTML: '', querySelector: () => null, querySelectorAll: () => [], appendChild: noop, addEventListener: noop, setAttribute: noop, classList: { add: noop, remove: noop, toggle: noop }, style: {} });
+  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, addEventListener: globalThis.addEventListener };
+  globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
+  globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
+  globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl(), head: mkEl() };
+  try {
+    const { mutantCopies } = await import(path.join(ROOT, 'scripts/mutant-copy.mjs'));
+    const REL = 'src/lib/user-todos-row.js';
+    const ctx = { t: (x, p) => (p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x), wordsOf: (i) => i.text, detailOf: () => '', nameFor: () => 'S', replyState: () => ({ show: true, enabled: true }) };
+    const grantItem = { item: { id: 'ut-g', sessionKey: 'claude:c-1', text: "Share 'Lark (company login)' with me", options: ['Granted access', 'Send it myself'], action: { type: 'browser-grant', profileId: 'bp-aaaa1111', label: 'Lark (company login)' }, createdAt: Date.now() } };
+    const view = (html) => ({
+      grant: (html.match(/<button[^>]*class="ut-act ut-action-grant[^"]*"[^>]*>([^<]*)<\/button>/) || [])[1] || null,
+      inBar: /ut-action-grant/.test((html.match(/<span class="ut-actions">[\s\S]*?<\/span>/) || [''])[0]),
+      chips: [...html.matchAll(/<button type="button" class="ut-opt" data-idx="\d">([^<]*)<\/button>/g)].map((m) => m[1]),
+    });
+    const R = await import(pathToFileURL(path.join(ROOT, REL)).href);
+    const v = view(R.renderRow(grantItem, ctx).innerHTML);
+    ok(v.grant === 'Let this conversation use Lark (company login)' && !v.inBar, 'a grant ask draws ONE button that names the grant it performs, on its own line (never the hover-dimmed bar)', v);
+    eq(v.chips, ['Reply: Granted access', 'Reply: Send it myself'], 'its --options read as REPLIES — «Granted access» no longer wears an action it never performed');
+    const vPlain = view(R.renderRow({ item: { id: 'ut-p', sessionKey: 'claude:c-1', text: 'Which way?', options: ['Run now'], createdAt: Date.now() } }, ctx).innerHTML);
+    ok(vPlain.grant === null && vPlain.chips[0] === 'Reply: Run now', 'a plain ask: no grant button; its option reads «Reply: Run now»', vPlain);
+    const vDone = view(R.renderRow({ item: { ...grantItem.item, clearedAt: Date.now() } }, ctx).innerHTML);
+    ok(vDone.grant === null, 'a cleared grant item draws no grant button (its words are gone; nothing to read before a press)');
+    const src = fs.readFileSync(path.join(ROOT, REL), 'utf8');
+    // int346: lane vault-paste-request's `+ secretAskHtml(i, t, detail)` follows the grant's call on the same line — the patch drops the call alone
+    const pre = src.replace('${escHtml(optionWords(o, t))}</button>', '${escHtml(o)}</button>').replace(' + grantAskHtml(i, t)', '');
+    ok(pre !== src && pre.split('grantAskHtml(i, t)').length === 1, 'CONTROL: the patch applies (the raw chip label, no grant button — the 2.369.344 row)');
+    const M = mutantCopies('utgrant', ROOT);
+    const Rp = await import(pathToFileURL(M.write(REL, pre, 'prefix')).href);
+    const vp = view(Rp.renderRow(grantItem, ctx).innerHTML);
+    ok(vp.grant === null && vp.chips[0] === 'Granted access', 'CONTROL: the pre-fix row offers «Granted access» as a bare button and no grant — the legs above go red', vp);
+  } catch (e) { ok(false, '㉔ the row renderer runs under the minimal DOM', e.stack); }
+  finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
+
+  console.log('   wiring pins — the press goes through the owner\'s «Who can use it» door BEFORE the reply; the window and the CLI');
+  const acts = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8');
+  const gb = acts.slice(acts.indexOf('const grantBrowser = async (rec) =>'), acts.indexOf('/** A PRODUCER\'S ACTION (design-reset-credits p2)'));
+  ok(gb.length > 200 && gb.indexOf('/use`') < gb.indexOf("method: 'PATCH'") && gb.indexOf("method: 'PATCH'") < gb.indexOf('return postReply(rec.id, grantReplyText(') && /if \(rec && rec\.action && rec\.action\.type === 'browser-grant'\) return grantBrowser\(rec\);/.test(acts),
+    'runAction(browser-grant) reads the list (GET …/use), writes it (the whole-list PATCH with its base), and only THEN answers the agent (postReply)');
+  const panelSrc = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
+  ok(/\.ut-action-grant'\)\) \{|closest\('\.ut-action-grant'\)/.test(panelSrc) && /\.ut-action-app\.ut-app-install, \.ut-action-grant'/.test(panelSrc), 'the tray presses it through runAction, armed like every Approve (press-arm)');
+  const win = fs.readFileSync(path.join(ROOT, 'src/lib/inbox-window.js'), 'utf8'), winL = fs.readFileSync(path.join(ROOT, 'src/lib/inbox-window-layout.js'), 'utf8');
+  ok(/'browser-grant': \(it\) =>/.test(win) && /if \(a === 'browser-grant'\) \{/.test(win) && /optionWords\(o\.label, t\)/.test(win) && /\.\.\.\(grantAsk \? \['browser-grant'\] : \[\]\)/.test(winL), 'the For-you window draws the same grant button first and the same «Reply: …» chips');
+  const cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-ask'), 'utf8');
+  ok(/const grant = opt\('grant'\);/.test(cli) && /\.\.\.\(grant !== undefined \? \{ grant \} : \{\}\)/.test(cli) && /--grant browser:<label\|id>/.test(cli), 'vibespace-ask carries --grant to the route and says what it does in its usage');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

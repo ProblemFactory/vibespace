@@ -61,6 +61,7 @@ const TABLE = [
   { file: 'src/hosts.js', has: "out = String((await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'], { by: 'system:hosts' })).stdout", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "for c in dtach node claude codex", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "out = String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 10000, by })).stdout", verdict: 'refused', how: DOOR },
+  { file: 'src/hosts.js', has: "try { const dm = await this.deviceBounded(id, 4000); return String((await dm.runCmd('sh', ['-c', script], { timeoutMs: 6000, by })).stdout || ''); }", verdict: 'refused', how: DOOR + ' (lane path-field: the path field\'s slice — the field says «the machine did not answer: …» with the refusal)' },
   { file: 'src/hosts.js', has: "if (base === '' || base === '~') base = String((await dm.runCmd('sh'", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "else if (base.startsWith('~/')) base = String((await dm.runCmd('sh'", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "const find = await dm.runCmd('sh', ['-c', `find ${root}", verdict: 'refused', how: DOOR },

@@ -40,6 +40,9 @@ import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
+// lane grants-unify: a conversation's OWN reach rows (its access, the owner's, approved requests) are rows of THE grants store —
+// read back through the engine's reach view (the account's and a rule's derived rows left out)
+const ownRows = (eng, key) => (eng.reachView(eng.store.index.peek(key)) || { entries: [] }).entries.filter((g) => g.scope && g.scope.kind === 'conversation' && !g.derived);
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let BYPASS_COPY = null;   // ⑫: the (h) control copy — a receipt started outside the ONE door
@@ -945,13 +948,14 @@ console.log('⑥ (P2) assign, filter, wake');
 
   // (a) not-found + assignment ⇒ reach grant, unassign removes ONLY its own row
   ok((await eng.setAssignment(A, 'nope', agent)).code === 'not-found', 'assigning an undiscovered conversation is a named not-found (no row minted)');
-  await eng.store.index.update(() => { const e2 = eng.store.index.entry(A, CID, { create: false }); e2.reachEntries = [{ principal: { kind: 'agent', id: 'agent-1' }, scope: { kind: 'conversation', id: `${A}/${CID}` }, level: 'visible', origin: 'user', at: 1, by: 'user' }]; });
-  const userGrant = JSON.stringify(en().reachEntries[0]);
+  await eng.setReach(A, CID, { principal: { kind: 'agent', id: 'agent-1' }, level: 'visible' });   // lane grants-unify: the owner's row, through its door
+  const K1 = `${A}/${CID}`;
+  const userGrant = JSON.stringify(ownRows(eng, K1)[0]);
   const a1 = await eng.setAssignment(A, CID, { ...agent, mode: 'all', notify: 'wake', dailyWakeCap: 100 });
   ok(a1.ok && a1.assignment.principal.id === 'agent-1' && a1.assignment.authority === 'draft', 'assign: accepted with defaults (draft)');
-  ok(en().reachEntries.length === 2 && en().reachEntries.filter((g) => g.origin === 'access').length === 1 && en().reachEntries[1].level === 'visible', 'the compatibility write (R4: one access row + one watcher row) IMPLIES reach: exactly one grant with origin:access beside the user\'s own');
+  ok(ownRows(eng, K1).length === 2 && ownRows(eng, K1).filter((g) => g.origin === 'access').length === 1 && ownRows(eng, K1).every((g) => g.level === 'visible'), 'the compatibility write (R4: one access row + one watcher row) IMPLIES reach: exactly one grant with origin:access beside the user\'s own');
   await eng.setAssignment(A, CID, null);
-  ok(en().access.length === 0 && en().watchers.length === 0 && en().reachEntries.length === 1 && JSON.stringify(en().reachEntries[0]) === userGrant, 'unassign (null: both lists emptied) removes ONLY the origin:access row — the user\'s grant is byte-identical');
+  ok(!ownRows(eng, K1).some((g) => g.origin === 'access') && en().watchers.length === 0 && ownRows(eng, K1).length === 1 && JSON.stringify(ownRows(eng, K1)[0]) === userGrant, 'unassign (null: both lists emptied) removes ONLY the origin:access row — the user\'s grant is byte-identical');
 
   // (b) authority:'send' is capped by BOTH caps, and clamped at read time
   await eng.refreshConvCaps(A, CID);
@@ -962,7 +966,7 @@ console.log('⑥ (P2) assign, filter, wake');
   ok(okSend.ok && okSend.assignment.authority === 'send' && !okSend.assignment.authorityClamped, 'authority:send accepted once policy is direct AND the conversation offers send');
   await eng.store.index.update(() => { eng.store.index.entry(A, CID, { create: false }).policy = { mode: 'review' }; });
   const view = eng.digest().conversations.find((c) => c.key === `${A}/${CID}`);
-  ok(view.assignment.authority === 'draft' && view.assignment.authorityClamped && /review/.test(view.assignment.authorityWhy) && view.assignment.authorityStored === 'send' && en().access[0].authority === 'send', 'READ-TIME CLAMP: the stored send reads as draft with the reason once policy tightens; the bytes are untouched');
+  ok(view.assignment.authority === 'draft' && view.assignment.authorityClamped && /review/.test(view.assignment.authorityWhy) && view.assignment.authorityStored === 'send' && eng.conversationView(A, CID).own.access[0].authorityStored === 'send', 'READ-TIME CLAMP: the stored send reads as draft with the reason once policy tightens; the bytes are untouched');
   const fullView = eng.conversationView(A, CID);
   ok(fullView.authorityCaps.policyRequiresReview === true && fullView.authorityCaps.offersSend === true && fullView.wakeLatency.lane === 'poll' && fullView.wakeLatency.seconds === eng.cadenceOf(A, CID).seconds, 'the FULL view publishes both caps and the honest poll-lane latency (the row\'s own cadence)', JSON.stringify(fullView.wakeLatency));
   await eng.store.index.update(() => { eng.store.index.entry(A, CID, { create: false }).policy = null; });
@@ -1153,12 +1157,13 @@ console.log('⑩ the inline filter at the account and pattern grains (the owner\
   ok(a1.filterId === FID && a1.filter && a1.filter.rules.length === 2 && a1.filter.rules.every((r) => r.kind === 'time-window'), `the filter is stored under the id the engine minted (${FID}) and the answer carries its two rules`, JSON.stringify({ filterId: a1.filterId, filter: a1.filter }));
   const st1 = (ix().accountAssignments || {})[A] || {};
   const w1 = (st1.watchers || [])[0] || {};
+  const acc1 = ((eng.effectiveForAccount(A) || { access: [] }).access || []).map((x) => x.row);   // lane grants-unify: the account grain's access is its grants-store row
   const fs1 = (ix().filters || {})[FID] || null;
-  ok(w1.filterId === FID && w1.mode === 'filtered' && w1.principal && w1.principal.kind === 'group' && w1.principal.id === 'tg-work' && w1.principal.name === '工作' && w1.notify === 'digest' && (st1.access || [])[0] && st1.access[0].authority === 'draft' && !('principal' in st1), 'the STORED account grain holds ONE access row (the group, draft) and ONE watcher (filtered, digest) carrying that filterId — no pre-split fields', JSON.stringify(st1));
+  ok(w1.filterId === FID && w1.mode === 'filtered' && w1.principal && w1.principal.kind === 'group' && w1.principal.id === 'tg-work' && w1.principal.name === '工作' && w1.notify === 'digest' && acc1.length === 1 && acc1[0].authority === 'draft' && acc1[0].principal.id === 'tg-work' && !('principal' in st1), 'the STORED account grain holds ONE access row (the group, draft) and ONE watcher (filtered, digest) carrying that filterId — no pre-split fields', JSON.stringify(st1));
   ok(fs1 && fs1.rules.length === 2 && fs1.rules[0].from === '09:00' && fs1.rules[1].to === '18:00' && fs1.estimateAtSet && fs1.estimateAtSet.matchedPerDay === 3.4, 'the filter RECORD is in the filters table with both windows and the estimate the user saw', JSON.stringify(fs1));
   ok(w1.estimateAtSet && w1.estimateAtSet.matchedPerDay === 3.4 && w1.estimateAtSet.conversations === 2, 'the watcher keeps estimateAtSet (the measurement is compared against it later)', JSON.stringify(w1.estimateAtSet));
   ok(w1.digestMinutes === F.MAX_DIGEST_MINUTES && w1.dailyWakeCap === F.MAX_DAILY_WAKE_CAP, `9999 is held to the validator's bounds (window ${F.MAX_DIGEST_MINUTES} min, cap ${F.MAX_DAILY_WAKE_CAP}) — the Notify dialog says so before saving (R4)`, JSON.stringify([w1.digestMinutes, w1.dailyWakeCap]));
-  ok((ix().accountGrants || []).filter((g) => g && g.origin === 'access' && g.scope && g.scope.id === A).length === 1, 'the account grain wrote its ONE access grant');
+  ok(acc1.length === 1, 'the account grain wrote its ONE access grant');
   const dg = eng.digest();
   const acctView = (dg.adapters || []).find((x) => x.id === A);
   ok(acctView && acctView.accountGrain && acctView.accountGrain.watchers[0].filterId === FID && acctView.accountGrain.watchers[0].filter && acctView.accountGrain.watchers[0].filter.rules.length === 2 && acctView.assignment && acctView.assignment.filterId === FID, 'the digest the panel draws carries the account grain with its watcher\'s filter (what the Notify dialog prefills on the next open)', JSON.stringify(acctView && acctView.accountGrain));
@@ -1300,7 +1305,7 @@ console.log('⑪ R4 access and notification (two operations), compose, search');
   const w0 = await eng.setWatchers(A, OPSC, [{ principal: AL, notify: 'wake' }]);
   ok(!w0.ok && w0.code === 'watcher-needs-access' && w0.principal.id === 'agent-A' && /grant access first/.test(w0.error) && !(en().watchers || []).length, 'a notification for an agent with NO access here is refused BY NAME (watcher-needs-access) and nothing is written', JSON.stringify(w0));
   const a1 = await eng.setAccess(A, OPSC, [{ principal: AL, authority: 'draft' }, { principal: BE }, { principal: WORK }]);
-  ok(a1.ok && a1.access.length === 3 && a1.watchers.length === 0 && en().reachEntries.filter((g) => g.origin === 'access').length === 3, 'GRANT ACCESS (the first operation): three rows, three origin:access grants, no watcher');
+  ok(a1.ok && a1.access.length === 3 && a1.watchers.length === 0 && ownRows(eng, `${A}/${OPS}`).filter((g) => g.origin === 'access').length === 3, 'GRANT ACCESS (the first operation): three rows, three origin:access grants, no watcher');
   const w1 = await eng.setWatchers(A, OPSC, [{ principal: AL, notify: 'wake' }, { principal: BE, notify: 'digest', digestMinutes: 30 }]);
   ok(w1.ok && w1.watchers.map((w) => `${w.principal.id}:${w.notify}`).join() === 'agent-A:wake,agent-B:digest', 'NOTIFY (the second operation): Alpha wake, Beta digest — both hold access, so both are accepted');
   // (b) ONE conversation, TWO watchers: independent windows, tagged pending, access-only never delivered
@@ -1315,7 +1320,7 @@ console.log('⑪ R4 access and notification (two operations), compose, search');
   ok(wA.stats.wakes.length === 1 && wB.stats.wakes.length === 1 && wA.stats.wakes[0].p === 'agent:agent-A', 'each watcher carries ITS OWN pace ledger (one wake each), the conversation history names the watcher of each wake');
   // (c) REMOVING ACCESS REMOVES THE WATCHER (same write)
   const a2 = await eng.setAccess(A, OPSC, [{ principal: AL }, { principal: WORK }]);
-  ok(a2.ok && !(en().watchers || []).some((w) => w.principal.id === 'agent-B') && !en().reachEntries.some((g) => g.principal.id === 'agent-B') && eng.listFor({ kind: 'agent', id: 'agent-B', groups: [] }).conversations.length === 0, 'removing Beta\'s ACCESS removes its notification and its grant in the same write — Beta sees nothing any more');
+  ok(a2.ok && !(en().watchers || []).some((w) => w.principal.id === 'agent-B') && !ownRows(eng, `${A}/${OPS}`).some((g) => g.principal.id === 'agent-B') && eng.listFor({ kind: 'agent', id: 'agent-B', groups: [] }).conversations.length === 0, 'removing Beta\'s ACCESS removes its notification and its grant in the same write — Beta sees nothing any more');
   // CONTROL: a copy that keeps the watcher when its access goes
   {
     const esrc = engineSource(REPO);
@@ -2652,7 +2657,7 @@ console.log('⑬ mirror-193: a whole-list write from a stale copy is refused by 
   const WATCH = { path: '/api/channels/adapters/:id/watchers', params: { id: A } };
   const { eng } = mkEngine({ name: 'grain-stamp' });
   await eng.pass(A, { force: true });
-  const stored = () => F.grainOf(eng.store.index.table('accountAssignments')[A] || {});
+  const stored = () => { const e = eng.effectiveForAccount(A); return { access: e ? e.access.map((x) => x.row) : [], watchers: e ? e.watchers.map((x) => x.watcher) : [] }; };   // lane grants-unify: the account grain as the engine reads it (its access = the grants store's row)
   const names = () => stored().access.map((r) => r.principal.name).sort().join();
   const STALE = F.grainStamp({ access: [], watchers: [] });   // the copy that had not heard of Xi
   const seed = await eng.setAccess(A, ACC, [{ principal: XI, authority: 'draft' }]);   // the route seed: no base = unconditional
@@ -2683,7 +2688,9 @@ console.log('⑬ mirror-193: a whole-list write from a stale copy is refused by 
   await eng.setAccess(A, { kind: 'conversation', convId: C }, [{ principal: XI }]);
   const rc = await call(eng, 'PUT', CONV, { access: [{ principal: READER }], base: cv0 });
   ok(rc.status === 409 && rc.body.code === 'grain-changed' && eng.conversationView(A, C).own.access.map((r) => r.principal.name).join() === 'Xi', 'the CONVERSATION grain: a stale write is refused 409 and Xi keeps its access', JSON.stringify(rc.body));
-  ok(F.grainStamp(eng.conversationView(A, C).own) === F.grainStamp(F.grainOf(eng.store.index.peek(`${A}/${C}`))), '…and its view (rows clamped by the caps carry authorityStored) stamps like the stored lists');
+  // lane grants-unify: the stored lists = the conversation grain as the engine reads it (its access = the grants store's row)
+  const convStored = () => { const e = eng.effectiveFor(A, C); const own = (x) => x.source === 'conversation'; return { access: e ? e.access.filter(own).map((x) => x.row) : [], watchers: e ? e.watchers.filter(own).map((x) => x.watcher) : [] }; };
+  ok(F.grainStamp(eng.conversationView(A, C).own) === F.grainStamp(convStored()), '…and its view (rows clamped by the caps carry authorityStored) stamps like the stored lists');
   // NEGATIVE CONTROL: the engine without the verdict line writes the mirror's outcome
   const esrc = engineSource(REPO);
   const LINE = '    const bv = F.grainBaseVerdict(cur, p.base);\n    if (!bv.ok) return bv;\n';
@@ -2696,7 +2703,7 @@ console.log('⑬ mirror-193: a whole-list write from a stale copy is refused by 
   await pre.pass(A, { force: true });
   await pre.setAccess(A, ACC, [{ principal: XI, authority: 'draft' }]);
   const rp = await call(pre, 'PUT', ACCESS, { access: [{ principal: READER, authority: 'draft' }, { principal: WORK, authority: 'draft' }], base: STALE });
-  const preNames = F.grainOf(pre.store.index.table('accountAssignments')[A] || {}).access.map((r) => r.principal.name).sort().join();
+  const preNames = ((pre.effectiveForAccount(A) || { access: [] }).access || []).map((x) => x.row.principal.name).sort().join();
   ok(rp.status === 200 && preNames === 'reader,工作', `NEGATIVE CONTROL: without the verdict the stale write REPLACES Xi — the mirror's wire exactly (${preNames}) — the refusal leg above would go red`, JSON.stringify(rp.body));
   routes.setup({ getEngine: () => eng });
 }

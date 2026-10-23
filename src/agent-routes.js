@@ -33,6 +33,7 @@ const { searchTouches } = require('./channel-touch.js'); // §26 (B-099e): a sea
 const { PRIORITIES: BACKLOG_PRIORITIES, sortBacklog, nudgeThreshold, backlogNudge, nudgeText } = require('./backlog-select.js');
 const { BACKLOG_CAPS } = require('./task-groups.js');
 const cliText = require('./agent-cli-text.js'); // lane cli-one-text-arg (PURE): chars = how many characters a free-text route KEPT, echoed by the CLIs as sent: N characters
+const cliCall = require('./cli-call.js'); // lane cli-call-timeouts: the hub's half of the CLI's named wait (stepAhead: a 103 naming the step a route waits on)
 const { stopNudgeVerdict, turnStartOf } = require('./stop-nudge.js'); // B-a8f0: a turn that bookkept itself stops free (PURE)
 const { artifactsIntroLine } = require('./harnesses/artifacts-of.js'); // PURE: the one Artifacts sentence (lane artifacts-prompt-hint)
 const { renderReminderLine, AGENT_DOC_TOPICS, CHANNELS_REMINDER_SEG } = require('./agent-cli-registry.js'); // PURE: THE agent CLI registry — the reminder's segments, the docs topics (lane cli-registry)
@@ -100,10 +101,11 @@ const taskItemAnswer = (b) => (b && typeof b === 'object' ? { ...b, text: taskLi
 const taskEntryAnswer = (p) => (p && typeof p === 'object' ? { ...p, note: taskLine(p.note), ...(typeof p.detail === 'string' ? { detail: taskBlock(p.detail) } : {}), ...whenWords(p, ['at']) } : p);
 /** a job view + its instants as words (vibespace-job prints `when.<field>`) */
 const jobWhen = (v) => (v && typeof v === 'object' ? { ...v, ...whenWords({ ...v, runStartedAt: v.run && v.run.startedAt }, ['nextFireAt', 'archivedAt', 'publishSince', 'runStartedAt']) } : v);
-const taskShowAnswer = (t, openSorted) => ({ id: t.id, title: taskLine(t.title), archived: !!t.archived, objective: t.objective == null ? t.objective : taskBlock(t.objective), backlog: (openSorted || []).map(taskItemAnswer), progress: (t.progress || []).slice(-10).map(taskEntryAnswer), contextDir: t.contextDir });
+const taskShowAnswer = (t, openSorted) => ({ id: t.id, title: taskLine(t.title), archived: !!t.archived, objective: t.objective == null ? t.objective : taskBlock(t.objective), backlog: (openSorted || []).map(taskItemAnswer), progress: (t.progress || []).slice(-10).map(taskEntryAnswer), contextDir: t.contextDir ? taskLine(t.contextDir) : null });   // lane task-group-context: t = the store's view (contextDir = the 记笔记 row, derived)
 // B-86d3 ② (lane hook-seen-marks): `vibespace-task show --full` lists the WHOLE context-folder index the injection's
 // budgeted one points at — a file name is any member's word, so each path leaves through the belt as a line piece
-const contextIndexAnswer = (ix) => ({ dir: taskLine(ix.dir), files: (ix.files || []).map((f) => ({ path: taskLine(f.path), size: Number(f.size) || 0 })) });
+// lane task-group-context: + every Context-table row's files (`rows`) — a stepped-down row's line points here
+const contextIndexAnswer = (ix) => ({ dir: ix.dir == null ? null : taskLine(ix.dir), files: (ix.files || []).map((f) => ({ path: taskLine(f.path), size: Number(f.size) || 0 })), rows: (ix.rows || []).map((r) => ({ path: taskLine(r.path), note: taskLine(r.note || ''), files: (r.files || []).map((f) => ({ path: taskLine(f.path), size: Number(f.size) || 0 })) })) });
 const taskGroupBrief = (t) => ({ id: t.id, title: taskLine(t.title), archived: !!t.archived, contextDir: t.contextDir ? taskLine(t.contextDir) : null, sessions: (t.sessions || []).length });   // verify r5 F2: a manager's context-dir path is its words too (group-list prints it)
 const msgSendAnswer = (r) => ({ posted: true, group: { id: r.group.id, name: msgName(r.group.name), pair: !!r.group.pair }, pairCreated: !!r.pairCreated, woke: msgNames(r.woke), refused: msgRefusals(r.refused), nextTurn: msgNames(r.later), ...(r.message && typeof r.message.text === 'string' ? { chars: cliText.chars(r.message.text) } : {}) });
 // lane cli-one-text-arg: chars = the STORED message, counted (code points) — vibespace-msg send / dispatch echo it as sent: N characters
@@ -425,7 +427,7 @@ function agentSession(req, res) {
 function resolveAgentGroup(hit, req, res) {
   const [s, id] = hit;
   const key = sessionStatusKey(s, id);
-  const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
+  const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
   const want = String(req.query?.group || req.body?.group || '').trim();
   if (want) {
     const g = groups.find((x) => x.id === want);
@@ -555,7 +557,7 @@ app.get('/api/agent/task-context', (req, res) => {
     // prompt-context call IS its delivery (a codex sub-agent thread's SessionStart is the same call).
     if (!honoursSessionStart(s)) return res.json({ success: true, context: '' });
     const key = sessionStatusKey(s, id);
-    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
+    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
     // agents.contextInjection off (2.211.0) ⇒ no group content is injected at
     // all (falls through to the baseline tools intro) — the per-group
     // injectContext toggle stays the finer-grained instrument.
@@ -576,8 +578,8 @@ app.get('/api/agent/task-context', (req, res) => {
         s._ctxSig = s._ctxSig || {};
         s._groupSnap = s._groupSnap || {};
         for (const g of injectGroups) {
-          s._groupSeenAt[g.id] = g.contentUpdatedAt || g.updatedAt;
-          if (g.contextDir) s._ctxSig[g.id] = tasks.contextDirSignature(g.contextDir);
+          s._groupSeenAt[g.id] = tasks.contentAtOf(g);   // lane task-group-context: + a referenced group's table instant
+          s._ctxSig[g.id] = tasks.contextSignature(g);   // every told row's files (the Context table), '' = none
           // Snapshot what was just delivered — later updates diff against it
           // instead of re-injecting the whole group (2.113.0).
           s._groupSnap[g.id] = tasks.snapshotForDiff(g.id);
@@ -694,7 +696,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
       parts.push(`<vibespace-cwd-notice>\nYour working directory (${s.cwd || ''}) did NOT exist when this session was resumed — the user chose to recreate it as an EMPTY directory. Files from earlier in this conversation are GONE from disk. Re-verify every assumption about existing files/state before acting, and tell the user what is missing if it affects the task.\n</vibespace-cwd-notice>`);
     }
     const toolFlags = toolsFor(s, id);   // lane channels-teach: + `channels` (the session's reach), asked once per call
-    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId });
+    const groups = tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds });
     // agents.contextInjection off ⇒ no group payloads/diffs (see task-context)
     const injectGroups = ctxInjectionOn() ? groups.filter((g) => g.injectContext !== false) : []; // P6: per-group context toggle
     // ── THE ROOM (channel-jump verify r7, 2026-09-27) ──
@@ -757,9 +759,9 @@ app.get('/api/agent/prompt-context', (req, res) => {
       const restoredSame = [];  // B-86d3: groups the restored seen marks say are unchanged — named once, not repeated
       for (const g of injectGroups) {
         const seenAt = s._groupSeenAt[g.id];
-        // User-written contextDir files don't bump updatedAt — a signature diff
-        // (path/size/mtime of the indexed files) is how we notice them.
-        const sig = g.contextDir ? tasks.contextDirSignature(g.contextDir) : '';
+        // User-written files under the Context table's rows don't bump updatedAt — a signature diff
+        // (path/size/mtime of every told row's files) is how we notice them.
+        const sig = tasks.contextSignature(g);
         // B-86d3: RESTORED marks — a held folder digest becomes the live signature when the folder is unchanged; a restored
         // LITE snapshot serves the diff unless the folder changed (the file diff needs the old signature itself) or it was
         // cut for another key — then that group is re-sent whole, as a session without a snapshot always was
@@ -770,7 +772,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
         // Gate on CONTENT changes only (title/objective/activity/
         // contextDir) — cosmetic edits (color, toggles, binds) bump updatedAt
         // but must not re-inject the whole group to every member.
-        const contentAt = g.contentUpdatedAt || g.updatedAt;
+        const contentAt = tasks.contentAtOf(g);   // lane task-group-context: a referenced group's shared rows are told here too
         const metaChanged = contentAt > (seenAt || 0);
         if (seenAt === undefined) { firstGroups.push(g); continue; }
         if (metaChanged || ctxChanged) {
@@ -800,7 +802,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
           s._groupSeenAt[g.id] = contentAt;
           s._ctxSig[g.id] = sig;
           s._groupSnap[g.id] = tasks.snapshotForDiff(g.id);
-        } else if (!hadSig && g.contextDir) {
+        } else if (!hadSig) {
           // Meta already seen (e.g. claude's SessionStart set _groupSeenAt) but
           // no contextDir baseline recorded yet — set it now WITHOUT re-injecting.
           s._ctxSig[g.id] = sig;
@@ -843,8 +845,8 @@ app.get('/api/agent/prompt-context', (req, res) => {
           newFullGroups = firstGroups;
           for (const g of firstGroups) fullCovered.add(g.id);
           for (const g of firstGroups) {
-            s._groupSeenAt[g.id] = g.contentUpdatedAt || g.updatedAt;
-            s._ctxSig[g.id] = g.contextDir ? tasks.contextDirSignature(g.contextDir) : '';
+            s._groupSeenAt[g.id] = tasks.contentAtOf(g);
+            s._ctxSig[g.id] = tasks.contextSignature(g);
             s._groupSnap[g.id] = tasks.snapshotForDiff(g.id);
           }
         }
@@ -1194,7 +1196,7 @@ app.get('/api/agent/task', (req, res) => {
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
   try {
-    const t = tasks.get(gid);
+    const t = tasks.view(gid);   // lane task-group-context: the view carries the derived contextDir (the 记笔记 row)
     // backlog: OPEN items only, in sortBacklog order (priority high → normal →
     // low, newest first) — that's what the CLI numbers for backlog-done (the
     // resolve route's findIdx indexes the SAME sorted open list). `you` = this
@@ -1219,7 +1221,10 @@ app.post('/api/agent/task-progress', (req, res) => {
     // `entry` = the one just written (addProgress is synchronous — the last entry IS it): its P- id
     // is what `vibespace-task progress-redact` names
     const kept = t.progress[t.progress.length - 1] || null;   // lane cli-one-text-arg: what the store KEPT (a note past 2000 / a detail past 6000 is cut), counted for the echo of the CLI
-    res.json({ success: true, progress: t.progress.slice(-3).map(taskEntryAnswer), entry: taskEntryAnswer(t.progress[t.progress.length - 1] || null), ...(kept ? { chars: cliText.chars(kept.note), ...(kept.detail ? { detailChars: cliText.chars(kept.detail) } : {}) } : {}) });   // verify r4 F1: the last three entries are other sessions' too
+    // lane cli-call-timeouts: the answer follows the STORE write; the shared folder's TASK.md is mirrored after it, bounded
+    // (task-groups _queueMirror) — when that copy is behind (a write slower than its bound, or failed), the answer says so
+    const mirror = tasks.mirrorStateOf ? tasks.mirrorStateOf(gid) : null;
+    res.json({ success: true, progress: t.progress.slice(-3).map(taskEntryAnswer), entry: taskEntryAnswer(t.progress[t.progress.length - 1] || null), ...(kept ? { chars: cliText.chars(kept.note), ...(kept.detail ? { detailChars: cliText.chars(kept.detail) } : {}) } : {}), ...(mirror && mirror.behind ? { mirror: { behind: true, since: mirror.since, why: mirror.why } } : {}) });   // verify r4 F1: the last three entries are other sessions' too
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 // `vibespace-task progress-redact <P-id|at>` ("Clear content…", 2026-09-28): an
@@ -1449,7 +1454,7 @@ app.post('/api/agent/group-admin', (req, res) => {
         color: create.color ? String(create.color) : undefined,
       });
       audit(t.id, '[group-admin] group created by manager agent');
-      return res.json({ success: true, group: brief(tasks.get(t.id)) });
+      return res.json({ success: true, group: brief(tasks.view(t.id)) });
     }
     if (update && update.id) {
       const patch = {};
@@ -1462,19 +1467,19 @@ app.post('/api/agent/group-admin', (req, res) => {
       if (!Object.keys(patch).length) throw new Error('nothing to update — send title/objective/contextDir/folders/color/archived');
       tasks.update(update.id, patch);
       audit(update.id, `[group-admin] ${Object.keys(patch).join('+')} updated by manager agent`);
-      return res.json({ success: true, group: brief(tasks.get(update.id)) });
+      return res.json({ success: true, group: brief(tasks.view(update.id)) });
     }
     if (bind && bind.id) {
       const sk = String(bind.sessionKey || key);
       convOps.forDeps({ tasks }).bindConversation({ sessionKey: sk }, bind.id, { kind: 'agent', cid: s.claudeSessionId || s.backendSessionId || null }); // lane automation-verbs: THE seam, over the task store these routes were handed (an in-process hub has its own); the audit line below stays the manager's
       audit(bind.id, `[group-admin] session ${sk} bound by manager agent`);
-      return res.json({ success: true, group: brief(tasks.get(bind.id)) });
+      return res.json({ success: true, group: brief(tasks.view(bind.id)) });
     }
     if (unbind && unbind.id) {
       const sk = String(unbind.sessionKey || key);
       tasks.unbind(unbind.id, sk);
       audit(unbind.id, `[group-admin] session ${sk} unbound by manager agent`);
-      return res.json({ success: true, group: brief(tasks.get(unbind.id)) });
+      return res.json({ success: true, group: brief(tasks.view(unbind.id)) });
     }
     return res.status(400).json({ error: 'need create, update, bind, unbind, or list' });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -1498,7 +1503,7 @@ function jobsCaller(s, id) {
   return {
     conversationId: own.cid, borrowed: own.cid ? null : (own.why === FORK_PENDING ? own.why : null),
     sessionId: id, sessionCreatedAt: s.createdAt || 0,
-    groups: new Set(tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id)),
+    groups: new Set(tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id)),
   };
 }
 function jobAuth(req, res) {
@@ -1584,13 +1589,14 @@ function _msgEndpoints(exceptId) {
     // parent was refused `ambiguous`. ONE predicate with server.js's roster (`liveSessions`): addressableId.
     const cid = addressableId(t);
     if (!cid) continue;
-    const groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(t, tid), cwd: t.cwd, initialGroupId: t._initialGroupId }) || []).map((g) => g.id);
+    const groups = (tasks.groupsForSession({ sessionKey: sessionStatusKey(t, tid), cwd: t.cwd, initialGroupId: t._initialGroupId, initialGroupIds: t._initialGroupIds }) || []).map((g) => g.id);
     out.push({ id: tid, t, cid, groups, reachability: t._msgReachability || null });
   }
   return out;
 }
-const _groupExtVis = (gid) => { try { return (tasks.get(gid) || {}).externalVisibility || 'none'; } catch { return 'none'; } };
-const _myGroupIds = (s, id) => (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }) || []).map((g) => g.id);
+// lane grants-unify: a Task Group's outside visibility = its ROWS of the ONE grants store (msg-acl judges them — a member left out is not exposed)
+const _groupExtVis = (gid) => { try { const g = require('./server/grants-store.js').store(); return g ? g.rowsFor('group-visibility', String(gid)) : []; } catch { return []; } };
+const _myGroupIds = (s, id) => (tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id);
 app.get('/api/agent/msg/peers', (req, res) => {
   const who = msgCaller(req, res);   // a session, or a job speaking for its owner conversation
   if (!who) return;
@@ -1808,6 +1814,7 @@ app.post('/api/agent/msg/dispatch', async (req, res) => {
   const again = req.body?.again === true;
   const attempt = String(req.body?.attempt || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
   let r;
+  if (req.body?.compactFirst !== false) cliCall.stepAhead(res, 'compact');   // lane cli-call-timeouts: the CLI's expiry line names the compaction (≤ COMPACT_WAIT_MS), never «the hub did not answer»
   try { r = await dispatcher().dispatch({ from: myCid, fromKind: 'session', target: { cid: tgt.cid, name: tgt.name }, text, compactFirst: req.body?.compactFirst !== false, again, attempt, mayWake: wakeFloorFor(myCid), consent: agentConsent(req.body?.yes) }); }
   catch (e) { return res.status(500).json({ error: 'dispatch failed: ' + e.message }); }
   if (!r || !r.ok) return groupAnswer(res, r);

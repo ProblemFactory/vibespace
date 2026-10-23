@@ -37,7 +37,13 @@ TXT
   first) and marks it handled when it is dealt with — or the maintainer
   conversation does, naming the release that shipped the fix. A mark made on
   the maintainers' instance comes back here within 6 hours, so
-  `vibespace-feedback list` says `handled in 2.369.NNN` either way.
+  `vibespace-feedback list` says `handled in 2.369.NNN` either way. On a
+  company deployment the maintainers can also mark it on THIS VibeSpace
+  directly (their own key — it opens the feedback list and the mark, nothing
+  else).
+- When a mark names the release that fixed it, your NEXT turn says so in one
+  line: «Your feedback report fb-… (about …) was handled in 2.369.NNN: <their
+  note>». Nothing wakes you for it; it rides the next message.
 - WHO sent it is the server's fact: this conversation's name, its Task Group,
   the harness and the VibeSpace version are added for you — never pass them.
 - The same report (same words, same `--about`) seen in the last 24 hours —
@@ -51,6 +57,7 @@ TXT
 
 ```
 vibespace-feedback list
+vibespace-feedback list --open      only the ones still open
 ```
 
 Prints the reports this conversation sent (or repeated): id, time, kind ·

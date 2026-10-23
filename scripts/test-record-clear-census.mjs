@@ -101,7 +101,7 @@ const sources = (override = {}) => new Map([...SERVER_FILES, ...CLI_FILES].map((
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 const STORE_FILES = [
   // token → the modules allowed to name it (the owner first; then the one-shot migrations that rewrite the SAME file in place)
-  { token: 'task-groups.json', owners: ['src/task-groups.js'], inPlace: ['src/server/migrations.js', 'server.js'] },   // migrations: dormant plan archival; server.js: the home-rename rewrite of paths
+  { token: 'task-groups.json', owners: ['src/task-groups.js'], inPlace: ['src/server/migrations.js', 'server.js', 'src/server/grants-migration.js'] },   // migrations: dormant plan archival; server.js: the home-rename rewrite of paths; grants-migration: 2026-10-grants-unify READS a group's outside visibility (writes only data/grants.json)
   { token: 'user-todos.json', owners: ['src/user-todos.js'], inPlace: ['src/server/migrations.js'] },                 // migrations: a presence check
   { token: 'session-status.json', owners: ['src/session-status.js'], inPlace: [] },
   { token: "'jobs.json'", owners: ['src/jobs.js'], inPlace: [] },
@@ -112,7 +112,7 @@ const STORE_FILES = [
   { token: "'stash-handover.json'", owners: ['src/server/stash-handover.js'], inPlace: [] },   // the lane-redact merge onto 2.369.196: the hand-over memory (a delivered hand-over's originals + frame) is a copy of held words
   { token: "'groups.json'", owners: ['src/channel-store.js'], inPlace: [] },
   { token: "join(dir, 'msgs')", owners: ['src/channel-store.js'], inPlace: [] },
-  { token: "'TASK.md'", owners: ['src/task-groups.js'], inPlace: [] },
+  { token: "'TASK.md'", owners: ['src/task-groups.js'], inPlace: ['src/task-context.js'] },   // lane task-group-context: task-context.js names a KEY FILE a person keeps in a Context row's folder (CLAUDE.md, README.md, … TASK.md) — the folder's own file, never this store's .vibespace/ mirror (the listing never walks .vibespace/)
   { token: "'task-groups-archive'", owners: ['src/task-groups.js'], inPlace: [] },   // 2.369.204: the Activity log's overflow, MOVED (append-only month files); clearProgress rewrites the one month a cleared entry sits in
 ];
 function fileOwnership(src) {
@@ -338,6 +338,7 @@ const ROUTES = {
   'POST /api/tasks/:id/bind': 'echo',
   'POST /api/tasks/:id/unbind': 'echo',
   'POST /api/tasks/:id/progress': 'echo',
+  'GET /api/tasks/:id/context': 'reads',                // lane task-group-context: the Task Group window's 「新对话会收到」 — renderContext's exact output (the objective, the backlog note, the activity log) + the Context table's plan
   'GET /api/tasks/:id/progress': 'reads',               // 2.369.204: a page of the live list + data/task-groups-archive/ (the walk plants an archived line and reads it back cleared)
   'POST /api/tasks/:id/export': 'exception: the repo task file — a ONE-SHOT export to a path the user picks (last 30 notes, no detail); the product does not track the file, so a later clear cannot follow it (the user deletes or re-exports it)',
   'POST /api/tasks/import': 'writes',                   // declared: a file the user holds re-seeds an EMPTY group's log; an older file restores its own notes (a restore, not a leak)
@@ -460,6 +461,9 @@ const ROUTES = {
   // lane vault-manual-and-lock: an agent's REQUEST (the session resolved through the jobs stash like run), its USES (its own
   // grants and the vault-use lines of ITS conversation — names, codes, receipts) and a person's answer — no record's words
   'POST /api/agent/vault/request': 'meta', 'GET /api/agent/vault/uses': 'meta', 'POST /api/vault/request/asks/:askId': 'meta',
+  // lane vault-paste-request: a person's answer to a paste request (the person() wrapper names a refused bearer through the jobs
+  // stash, like every person door), the Vault window's free entry and its delete door — no record of the five kinds' words
+  'POST /api/vault/secret-requests/:id/answer': 'meta', 'POST /api/vault/secrets': 'meta', 'DELETE /api/vault/secrets/:id': 'meta',
   'GET /api/agent/design/systems': 'meta', 'GET /api/agent/design/system': 'meta', // lane design-systems-home: the design systems' names (belted) + ONE system's tokens.css — registry rows and a folder's file, no record
   // ── the 2.369.202 integration: lane jobs-browser's job principal — agentFacts → jobAgentFacts / refuseAgentBearer ask the
   //    jobs store jobByToken (a jbt_ caller's identity, as the other agent routes do), never a record's text ──
@@ -764,10 +768,12 @@ const STORAGE = {
   // owner's own words (never a record's); ref = the one key that can name a record (a head + {kind, id}); plugin = a
   // plugin's own sandboxed storage; telemetry = event names / stacks; marker = a flag or a timestamp
   'src/lib/app.js|localStorage|\'vs-onboarded\'': ['marker', 'the onboarding wizard ran'],
+  'src/lib/path-field.js|localStorage|memKey()': ['pref', 'lane path-field: the picker\'s last folder per field + machine (`vs-path-field-node:<id>:<host>` — a path the person chose, never a record\'s words)'],
   'src/lib/channel-window.js|localStorage|hideKey': ['marker', 'lane channel-threads: an account\'s "reactions can be read after one Re-authorize" note dismissed (a flag per adapter id — the .197 integration)'],
   'src/lib/app.js|localStorage|k': ['pref', 'CLIENT_PREF_KEYS — the per-device UI prefs (scale, font size)'],
   'src/lib/app.js|sessionStorage|key': ['marker', 'the once-per-version stale-bundle reload stamp (a time)'],
   'src/lib/appearance-panel.js|localStorage|\'termFontSize\'': ['pref', 'terminal font size'],
+  'src/lib/new-session-form.js|localStorage|FOLD_KEY': ['pref', 'lane new-session-form: the New Session form\'s «More options» fold open on this device (a "1" / "0" flag, never a record\'s words)'],
   'src/lib/appearance-panel.js|localStorage|\'termFontFamily\'': ['pref', 'terminal font'],
   'src/lib/appearance-panel.js|localStorage|key': ['pref', 'a UI pref percentage (scale / font size)'],
   'src/lib/browser-live-window.js|localStorage|\'vibespace.deviceTag\'': ['ids', 'a random device tag'],
@@ -1104,8 +1110,6 @@ const BELT = [
   ['src/lib/task-log.js', '.filter((p) => (!state.session || p.session === state.session) && (matches(p.note) || matches(p.detail)));', 'the Copy-as-markdown FILTER (the Find text); the line it writes words a cleared entry (isCleared on the next line)'],
   ['src/lib/task-log.js', "&& (matches(it.text) || matches(it.detail)))", 'a BACKLOG item (not a cleared kind)'],
   ['src/lib/task-log.js', ".map((it) => `- [${it.status === 'done'", 'a BACKLOG item (not a cleared kind)'],
-  ['src/lib/task-detail.js', 'row.innerHTML = `<summary>${stamp}${escHtml(p.note)}</summary>', 'the branch `if (p.detail && !isCleared(p))` — a cleared entry is always the plain row (a clear drops the detail)'],
-  ['src/lib/task-detail.js', 'txt.textContent = item.text;', 'a BACKLOG item (not a cleared kind)'],
   ['src/lib/inbox-window-layout.js', 'const defaultText = (i) => [i.text, i.detail,', 'the PURE layout\'s fallback when no `text` is handed in; the window hands in the model\'s wordsOf'],
   ['src/lib/inbox-window-layout.js', "const title = String(ctx.words != null ? ctx.words : (i.text || ''));", 'itemView — the window passes ctx.words = the model\'s wordsOf (the fallback is for the PURE tests)'],
   ['src/lib/session-props.js', "const histMenu = (h, x, y) => showContextMenu(x, y, [{ label: t('Clear content…'), action: () => { clearRecords([{ kind: 'status', sessionKey: histKey, id: String(h.at), at: h.at, words: h.reason || h.branch || '' }]); } }]);", 'the menu of an entry NOT cleared (`clearable(h)` guards both doors); the dialog is spent at the answer'],
@@ -1158,6 +1162,8 @@ const CACHES = {
   'src/lib/task-log.js|picked': 'selected entry ids',
   'src/lib/task-log.js|openIds': 'expanded entry ids',
   'src/lib/task-log.js|userClosed': 'entry ids the user closed',
+  'src/lib/task-detail.js|foldOpen': 'lane task-group-context: the 更多选项 fold left open, per Task Group id (an id → a flag; no record words)',
+  'src/lib/task-detail.js|unresolved': 'lane task-group-context: the text typed into a Context row that did not resolve (the person\'s own typing — a path, never a record\'s words), per window',
   'src/lib/inbox-window.js|tailIds': 'the resolved tail\'s ids',
   'src/lib/jobs-panel.js|EXPANDED': 'expanded job ids',
   'src/lib/channel-window.js|placed': 'vendor ids placed (an adapter conversation)',
@@ -1168,6 +1174,7 @@ const CACHES = {
   'src/lib/channel-window.js|rxAskedAt': 'lane channel-threads: when each message\'s reactions were last asked (vendor id → an instant)',
   'src/lib/channel-window.js|drawn': 'THE GROUP WINDOW: vendorId → the record behind a drawn row (its menu) — re-set from the broadcast\'s cleared records; an adapter window: vendor ids (Set)',
   'src/lib/channel-window.js|seen': 'vendor ids already drawn',
+  'src/lib/channel-window.js|draftsSeen': 'lane gmail-draft-not-a-message: an ADAPTER window\'s unsent drafts (vendor id → the record its drafts section draws) — emptied by every rebuild (renderNow) and re-read from the page; a group message is never a draft',
   'src/lib/channel-window.js|known': 'B-ff04: a member\'s conversation id → the last NAME the log knew it by (author / mention / raw.name) — names, never words',
   'src/lib/channel-window.js|clearedSeen': 'vendorId → a record a broadcast said was CLEARED (the sentence) — r5 ⑧',
   'src/lib/channel-window.js|rowH': 'lane reaction-strip-anchor (B-59ff): a list row element → its last measured height (a number; a WeakMap — gone with the row, never words)',
@@ -1235,7 +1242,10 @@ const REPAINT = [
   // verify r6: a row names EVERY statement its label claims — a list of patterns, each of which must hold (r5 wrote ③ as ONE
   // pattern `listener[\s\S]*|guard` — a top-level alternation that passed on the listener alone, so reverting the guard
   // kept H5 green; ④ and ⑤ pinned the listener only)
-  ['the Task Group detail window (+ its Activity list under the typing guard, r5 ③)', 'src/lib/task-detail.js', [/const onTasksMsg = \(msg\) => \{ if \(msg\.type === 'tasks-updated'\) render\(\); \};/, /if \(_typing && _ae\.value\) \{ const pl = root\.querySelector\('\.task-detail-progress'\); if \(pl && !pl\.contains\(_ae\)\) \{ const st = pl\.scrollTop; fillProgress\(pl, task\); pl\.scrollTop = st; \} return; \}/]],
+  // lane task-group-context: the window's Backlog / 活动记录 tabs ARE the log viewer (mountTaskLog — the row above); its 设置 tab
+  // repaints on the broadcast — the 「新对话会收到」 preview at once (fetched again even while a box is typed in), the rest the
+  // moment the typed-in box is left
+  ['the Task Group window (its 设置 tab: the preview at once, the rest when the box typed in is left)', 'src/lib/task-detail.js', [/const onTasksMsg = \(msg\) => \{ if \(msg\.type === 'tasks-updated'\) render\(\); \};/, /if \(typing\) \{ settingsDirty = true; fetchPreview\(\); return; \}/, /root\.addEventListener\('focusout', \(\) => \{ if \(settingsDirty\) afterPointerUp\(\(\) => \{ if \(settingsDirty && state\.tab === 'settings'\) renderSettings\(\); \}\); \}\);/]],
   ['the For-you model (every surface over it)', 'src/lib/user-todos-actions.js', /app\.ws\.onGlobal\(\(msg\) => \{ if \(msg\.type === 'user-todos-updated' && msg\.todos\) \{ liveSeen = true; setTodos\(msg\.todos\); \} \}\);/],
   ['the For-you popup + mini inbox (+ a live arrival toast, r5 ⑤)', 'src/lib/user-todos-panel.js', [/model\.on\('todos', \(next\) => apply\(next\)\);/, /for \(const el of document\.querySelectorAll\('#global-toasts > \.global-toast\[data-todo-id\]'\)\) \{\s*const it = byId\(el\.dataset\.todoId\);[\s\S]{0,240}?const want = `\$\{el\.dataset\.todoHead\} · \$\{nameFor\(it\.sessionKey, \[it\]\)\}: \$\{wordsOf\(it\)\}`;\s*if \(b\.textContent !== want\) b\.textContent = want;/]],
   ['the For-you window', 'src/lib/inbox-window.js', /model\.on\('todos', \(\) => render\(\), \{ signal \}\);/],
@@ -1291,6 +1301,7 @@ const ORDER = [
   ['src/lib/session-props.js', 'fetch(`/api/session-status/history?sessionKey=${encodeURIComponent(keys)}`).then(r => {', /^[^\n]*\n(?:[^\n]*\n){0,3}?\s*\}\)\.then\(d => \{\s*if \(!histList\.isConnected \|\| histList\._fill !== my\) return;/, 'latest', 'Session Properties\' history: the latest fill paints (r5 ④)'],
   ['src/lib/sidebar-tasks.js', "return fetch('/api/session-status').then(", [/const gen = this\._statusGen \|\| 0;\s*return $/, /^fetch\('\/api\/session-status'\)\.then\(r => r\.ok \? r\.json\(\) : null\)\.then\(d => \{\s*if \(!d\?\.statuses \|\| \(this\._statusGen \|\| 0\) !== gen\) return;/], 'generation', 'the status mirror (the page load + the reconnect resync): dropped when a status frame landed meanwhile (verify r6 ②)'],
   ['src/lib/task-log.js', 'const r = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/progress?before=${encodeURIComponent(before)}&limit=100`).then((x) => (x.ok ? x.json() : null));', /^[^\n]*\n\s*if \(g0 !== older\.gen\) return;/, 'generation', 'the Task log\'s older entries (2.369.204): a clear that reached the archive bumps older.gen (the group\'s archiveClearedAt moved) and re-reads the held rows — a page begun before it is dropped'],
+  ['src/lib/task-detail.js', 'const r = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/context`);', /^[^\n]*\n\s*if \(!r\.ok \|\| seq !== previewSeq\) return;/, 'latest', 'lane task-group-context: the Task Group window\'s 「新对话会收到」 preview — every request bumps previewSeq and an answer older than the newest request is dropped (a clear\'s tasks-updated asks again)'],
   ['src/lib/sidebar-tasks.js', "const res = await fetch('/api/tasks');", [/const gen = this\._tasksGen \|\| 0;\s*try \{\s*const res = await $/, /^[^\n]*\n(?:(?![^\n]*this\._tasks = )[^\n]*\n){0,3}?\s*if \(\(this\._tasksGen \|\| 0\) !== gen\) \{/], 'generation', 'the Task Group mirror: dropped when a tasks-updated landed meanwhile (R4 verify r1)'],
 ];
 const callArgs = (text, open) => { let d = 0; for (let i = open; i < text.length; i++) { const c = text[i]; if (c === '(') d++; else if (c === ')') { d--; if (d === 0) return text.slice(open + 1, i); } } return ''; };
@@ -1353,7 +1364,7 @@ console.log('§H6 controls: one client-side copy per class, each RED on its leg'
   const c1 = storageWrites(libSources({ [r1]: m1 }));
   ok(c1.rows.filter((r) => !(r in STORAGE)).join() === "src/lib/inbox-window.js|localStorage|'vibespace.inboxLast'", 'CONTROL 1: a new key holding the selected item\'s words is RED under H1 (an unclassified storage write)', c1.rows.filter((r) => !(r in STORAGE)));
   // 2. a window title reading a record's words on a window whose layout record KEEPS its title (the task log)
-  const r2 = 'src/lib/task-log.js', s2 = read(r2), a2 = "    app.wm.setTitle(winInfo.id, task.title + ' — ' + t('Log'));\n\n    // Preserve focus";
+  const r2 = 'src/lib/task-log.js', s2 = read(r2), a2 = "    onTitle?.(task.title);\n\n    // Preserve focus";   // lane task-group-context: the viewer is mounted (the window sets its title through onTitle)
   ok(s2.includes(a2), 'H6 control 2 anchor present');
   const m2 = MUT.write(r2, s2.replace(a2, "    app.wm.setTitle(winInfo.id, (task.progress || []).map((p) => (isCleared(p) ? clearedText() : p.note)).pop() + ' — ' + t('Log'));\n\n    // Preserve focus"), 'title-reads-words');
   const c2 = titleCensus(libSources({ [r2]: m2 }));
@@ -1375,7 +1386,7 @@ console.log('§H6 controls: one client-side copy per class, each RED on its leg'
   // 5. verify r6 (census adequacy): each r5 repaint a row's label CLAIMS, reverted on a copy, reddens exactly its own row —
   // ③ the detail window's typing guard, ④ Session Properties' select guard, ⑤ the live arrival toast's re-word loop
   const REV5 = [
-    ['src/lib/task-detail.js', "if (_typing && _ae.value) { const pl = root.querySelector('.task-detail-progress'); if (pl && !pl.contains(_ae)) { const st = pl.scrollTop; fillProgress(pl, task); pl.scrollTop = st; } return; }", 'if (_typing && _ae.value) return;', /Task Group detail window/, 'repaint-detail-guard'],
+    ['src/lib/task-detail.js', "if (typing) { settingsDirty = true; fetchPreview(); return; }", 'if (typing) return;', /Task Group window/, 'repaint-detail-guard'],
     ['src/lib/session-props.js', "    if (root.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') {\n      const nv = root.querySelector('.sp-now-value');\n      if (nv) { const h = nowHtml(s); if (nv.innerHTML !== h) nv.innerHTML = h; }\n      const hl = root.querySelector('.session-history-list');\n      if (hl) fillHistory(hl, s);\n      return;\n    }\n", "    if (root.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;\n", /Session Properties/, 'repaint-props-guard'],
     ['src/lib/user-todos-panel.js', "      const want = `${el.dataset.todoHead} · ${nameFor(it.sessionKey, [it])}: ${wordsOf(it)}`;\n      if (b.textContent !== want) b.textContent = want;\n", '', /live arrival toast/, 'repaint-toast-reword'],
   ];
@@ -1867,7 +1878,7 @@ const I_RECV = {
   'src/lib/browser-trace-view.js|k': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'], 'src/server/browser-kept.js|e': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'],
   'src/lib/browser-who-dialog.js|r.profile': ['browser profile', 'a profile label'],
   'src/lib/user-todos-actions.js|r.browser': ['browser profile', 'a profile label (the For-you Restart of a browser that stopped answering — int220, lane browser-unresponsive)'],
-  'src/lib/channel-account-dialogs.js|k': ['channel account', 'an integration key label'], 'src/lib/channel-account-dialogs.js|v': ['channel account', 'an account name'],
+  'src/lib/new-session-form.js|acc': ['channel account', 'lane new-session-form: the account ticked in the New Session form — its name in the toast that says its access row was not written'], 'src/lib/channel-account-dialogs.js|k': ['channel account', 'an integration key label'], 'src/lib/channel-account-dialogs.js|v': ['channel account', 'an account name'],
   'src/lib/channel-group-dialogs.js|group': ['agent group', 'a group\'s name'], 'src/lib/channel-outbox.js|r': ['outbox proposal', 'a send\'s refusal reason'],
   'src/lib/channel-webhook.js|v': ['channel author', 'a webhook caller\'s registered name (the owner typed it; the author of its calls)'], 'src/lib/channel-webhook.js|o': ['outbox proposal', 'a send\'s outcome — the caller\'s name + the server\'s refusal reason'], // lane webhook-l2-ui
   'src/lib/channel-webhook.js|ck': ['channel author', 'the other VibeSpace\'s name its pairing code carries (its owner\'s reply name), worded in the join box\'s done toast'], 'src/routes/webhook.js|cv': ['channel author', 'the other VibeSpace\'s name its pairing code carries, named in the join\'s refusal sentence'], // lane webhook-pair-join
@@ -1884,6 +1895,7 @@ const I_RECV = {
   'src/lib/plugin-client.js|def': ['plugin', 'a plugin window\'s label'], 'src/lib/plugin-client.js|d': ['plugin', 'a plugin\'s own notify text'],
   'src/lib/plugins-ui.js|meta': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|p': ['plugin', 'a plugin label'], 'src/lib/plugins-ui.js|st': ['plugin', 'a plugin\'s status reason'],
   'src/lib/session-lifecycle.js|a': ['account', 'an account'], 'src/lib/session-props.js|s0': ['session', 'the session\'s own name'],
+  'src/lib/task-detail.js|info': ['path', 'lane task-group-context: the path field\'s commit (src/lib/path-field.js `info.text`) — the path the person typed into a Context row; never a record\'s words'],
   'src/lib/settings-ui.js|schema': ['setting', 'a setting\'s label'], 'src/lib/sidebar-mounts.js|h': ['host', 'a machine name'], 'src/lib/sidebar-mounts.js|s': ['share', 'a share name'], 'src/lib/sidebar-mounts.js|t': ['mount token', 'a token name'],
   'src/lib/window-share.js|r': ['session', 'an agent\'s name'],
   'src/lib/machine-desktop-handover.js|r.lease.holder': ['session', 'the conversation a machine\'s desktop was handed to (its name in the hand-over toast — lane desktop-handover)'],
@@ -1974,6 +1986,7 @@ const I_RECV = {
   'src/server/stdout/acp-events.js|msg': ['harness', 'an ACP frame\'s reason'], 'src/server/stdout/codex-events.js|msg.payload': ['harness', 'a codex event\'s reason'],
   'src/server/usage-pool-engine.js|b': ['quota', 'a bucket\'s label'], 'src/server/usage-pool-engine.js|dest': ['account', 'a pool member'], 'src/server/usage-pool-engine.js|lane': ['quota', 'a lane\'s name'],
   'src/server/usage-pool-engine.js|member': ['account', 'a pool member'], 'src/server/usage-pool-engine.js|probe': ['quota', 'a probe\'s reason'], 'src/server/usage-pool-engine.js|verdict': ['account', 'a pool verdict\'s member'],
+  'src/path-candidates.js|g': ['task group', 'lane path-field: a Task Group the person made — its NAME on a 任务组 / 由名字 chip of the path field (the person\'s own label, never a record\'s words)'],
   'src/server/user-input.js|caps': ['harness', 'a wrapper capability\'s reason'], 'src/task-groups.js|shadow': ['mount', 'the storage shadowing a context folder'],
   'src/server/session-brain.js|b': ['harness', 'a fallback banner\'s model (from → to)'], 'src/server/stdout/claude-stream-json.js|b': ['harness', 'a fallback banner\'s model (from → to)'],
   'src/server/session-stdout.js|death': ['harness', 'a CLI death\'s reason code'], 'src/ws-create.js|refusal': ['harness', 'a worktree refusal\'s reason code'],
@@ -2028,6 +2041,11 @@ const I_RECV = {
   'src/server/automation-engine.js|caller': ['host', 'the asking CONVERSATION\'s name on the first-use card and its log line — the session list\'s own name (the hub\'s record), never a record\'s text'],
   // ── lane vault-run-door (design q-043 §8 P0-f) ──
   'src/server/vault-run-door.js|caller': ['host', 'the asking CONVERSATION\'s name on the run card and its journal line — the session list\'s own name (the hub\'s record), never a record\'s text'],
+  // lane vault-paste-request: a paste request's card (its words are the agent's own — bounded, hidden characters refused, secret
+  // shapes «redacted» — plus the registry's names), the place it names, the integration store's refusal rule, a free entry's label
+  'src/server/vault-paste-door.js|card': ['secret request', 'a paste request\'s CARD (PURE vault-paste cardOf): the agent\'s own words and purpose (bounded, hidden characters refused, secret shapes redacted) and the registry\'s row / field names — the request\'s own text, never a record\'s'],
+  'src/server/vault-paste-door.js|e': ['integration rule', 'the integration store\'s refusal detail on a pasted value — the field\'s own validate complaint (a fixed rule\'s words, never the value, never a record\'s text)'],
+  'src/lib/vault-paste-box.js|r': ['vault entry', 'a free entry\'s LABEL the owner typed a moment ago in 「其他密钥或密码…」, echoed by the add door in its toast — the entry\'s own name, never a record\'s text'],
   'src/server/vault-run-door.js|q': ['run reference', 'an agent\'s REQUEST (lane vault-manual-and-lock): its detail = the entry\'s label + reference and the purpose in the agent\'s own words (secret-shapes\'d) — the request\'s own text, never a record\'s'],
   'src/server/vault-run-door.js|rec': ['host', 'a running conversation\'s name in the lock\'s journal line (the session list\'s own name, kept on the run) — never a record\'s text'],
   'src/server/vault-run-door.js|shape': ['run reference', 'the TOOL\'s name (the basename argv[0] resolved to) on the run card\'s action — the agent\'s own command, never a record\'s words'],

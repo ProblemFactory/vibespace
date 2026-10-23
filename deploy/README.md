@@ -345,6 +345,84 @@ helm upgrade u-<user> . --reuse-values --set oauthRelayUrl=https://admin.<domain
   `*.ts.net` included — or an https host under its `data-allow`; it shows the
   code anywhere else.
 
+### Register the redirect URIs — your own Google, Lark or Slack app
+
+Running VibeSpace outside the fleet with your OWN vendor app (your own hub, your
+own Google client, Lark app or Slack app)? The vendor sends the browser back
+after a sign-in only to an address the app lists, and refuses any other on its
+OWN page (Google: «Error 400: redirect_uri_mismatch», Lark: 20029) — VibeSpace
+never sees that refusal. So register the addresses first. The product shows the
+same card, computed for THAT instance, in ⚙ → Integrations and in the Connect
+dialog's fold (before the first attempt), each address with a Copy button and
+the one a sign-in from that page uses marked.
+
+How the sign-in comes back, for a person's own app — register ONE of these:
+
+1. **VibeSpace's public relay page** `https://problemfactory.github.io/vibespace/slack/`
+   (the default of Settings → Channels → relay page): free, no account. It is a
+   static page that holds nothing; the BROWSER does the redirect, so the
+   instance only needs to be reachable from the browser that approves — the
+   same machine, your LAN, Tailscale (`100.64.0.0/10`, `*.ts.net`), `.local` /
+   `.lan` / `.home`, `::1` / `fc00::/7`. The relay never contacts the instance.
+   It redirects only to such private addresses: a public https hostname is
+   shown the code instead, by design (never an open redirect). This address is
+   a documented, stable contract.
+2. **Your own copy of the page**: the two static files in `docs/slack-relay/`
+   on any https host, with `data-allow` set to your domain — register its
+   address and enter it in Settings → Channels → relay page.
+3. **This instance's own https address** `https://<host>/api/channels/oauth/cb/<kind>`
+   — no relay at all.
+
+Last resort, every case: the Connect dialog's fold finishes a sign-in that did
+not come back — paste the last page's address there. A company preset never
+shows option 1 (its relay page is its own, above).
+
+<!-- oauth-setup:begin — GENERATED from the registry rows' `redirect` blocks by scripts/gen-oauth-setup-doc.mjs (src/oauth-setup.js; test-integration-registry holds it equal): edit the words there, never here -->
+
+#### Lark / 飞书
+
+- Create a custom app in the Lark / Feishu Developer Console (Lark = open.larksuite.com, 飞书 = open.feishu.cn), with the scopes im:message and im:message.send_as_user and a published version.
+- Register the ones you use, each exactly as written, under Developer Console → your app → Security Settings → Redirect URLs (<https://open.larksuite.com/app>, <https://open.feishu.cn/app>):
+  - `https://problemfactory.github.io/vibespace/slack/` — ① VibeSpace’s public relay page — free, no account. It sends the browser back only to a private address (this machine, your network, Tailscale); a public https name is shown the code instead, so it is never an open redirect.
+  - ② Or host your own copy: the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and enter it in Settings → Channels → relay page.
+  - `https://<host>/api/channels/oauth/cb/lark` — ③ This VibeSpace’s own https address — used when you open VibeSpace from another computer; no relay needed.
+  - `http://127.0.0.1:17865/lark/cb` — This machine: used when the browser runs on the VibeSpace machine itself and no relay page is set, and by “Sign in the other way”.
+- The client ID and secret: a person’s own app in Connect an account → OAuth client → Custom; a company app in the cluster presets (above).
+- If Lark says “20029”, the address it was sent is not on that list: add it there (for a company app, your admin does).
+- If a sign-in still does not come back, the Connect dialog finishes it: paste the last page’s address into its fold.
+
+#### Gmail — Google
+
+- Create a **Web application** client when this VibeSpace has an https address or uses a relay page (both are https addresses, which a Desktop client can never take); a **Desktop app** client only when the browser runs on the VibeSpace machine itself and no relay page is used — it takes any 127.0.0.1 port, nothing to register.
+- Say which kind it is: a company client with `"clientType": "web"` or `"desktop"` in its gdrive-clients.json entry, a person’s own client with the account’s OAuth client type. A Web client signs in on this machine at the fixed address below; a Desktop client never rides a relay page.
+- Register the ones you use, each exactly as written, under Google Cloud console → APIs & Services → Credentials → OAuth 2.0 Client IDs → your client → Authorized redirect URIs (<https://console.cloud.google.com/apis/credentials>):
+  - `https://problemfactory.github.io/vibespace/slack/` — ① VibeSpace’s public relay page — free, no account. It sends the browser back only to a private address (this machine, your network, Tailscale); a public https name is shown the code instead, so it is never an open redirect.
+  - ② Or host your own copy: the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and enter it in Settings → Channels → relay page.
+  - `https://<host>/api/channels/oauth/cb/gmail` — ③ This VibeSpace’s own https address — used when you open VibeSpace from another computer; no relay needed.
+  - `http://127.0.0.1:17866/gmail/cb` — This machine, with a Web application client: used when the browser runs on the VibeSpace machine itself and no relay page is set, and by “Sign in the other way”.
+  - `http://127.0.0.1:53682/` — A Google Drive folder (storage) signs in with the same client at this address.
+- The client ID and secret: a person’s own app in Connect an account → OAuth client → Custom; a company app in the cluster presets (above).
+- If Google says “Error 400: redirect_uri_mismatch”, the address it was sent is not on that list: add it there (for a company app, your admin does). An https address and Google still says “Error 400: redirect_uri_mismatch”? The client is a Desktop app client, which cannot take one — create a Web application client, or sign in the other way.
+- If a sign-in still does not come back, the Connect dialog finishes it: paste the last page’s address into its fold.
+
+#### Slack
+
+- Create a Slack app at api.slack.com/apps (a workspace app: its Client ID and Secret let every member just press Allow) — or let each person make their own app with a one-time setup token, which needs no address at all.
+- Register the ones you use, each exactly as written, under api.slack.com/apps → your app → OAuth & Permissions → Redirect URLs (<https://api.slack.com/apps>):
+  - `https://problemfactory.github.io/vibespace/slack/` — ① VibeSpace’s public relay page — free, no account. It sends the browser back only to a private address (this machine, your network, Tailscale); a public https name is shown the code instead, so it is never an open redirect.
+  - ② Or host your own copy: the two static files in docs/slack-relay on any https host, with data-allow set to your domain — register its address and enter it in Settings → Channels → relay page.
+  - `https://<host>/api/channels/oauth/cb/slack` — ③ This VibeSpace’s own https address — used when you open VibeSpace from another computer; no relay needed.
+- The client ID and secret: a person’s own app in Connect an account → OAuth client → Custom; a company app in the cluster presets (above).
+- If Slack says “redirect_uri did not match any configured URIs”, the address it was sent is not on that list: add it there (for a company app, your admin does).
+- If a sign-in still does not come back, the Connect dialog finishes it: paste the last page’s address into its fold.
+
+#### Dropline (voice input) — Fish Audio
+
+- Nothing to create and nothing to register: VibeSpace registers its own Fish Audio client the first time you connect.
+- `https://<host>/api/channels/oauth/cb/dropline` — The address VibeSpace registers for it — where Fish Audio sends you back.
+
+<!-- oauth-setup:end -->
+
 ## App system — installed apps that survive a pod rebuild (optional)
 
 `--set appSystem.enabled=true` turns on App persistence Layer 1 (VibeSpace ≥

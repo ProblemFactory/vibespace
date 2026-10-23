@@ -2,7 +2,10 @@
 /**
  * THE FILTER, THE ASSIGNMENT MODEL, AND WHAT AN AGENT IS HANDED
  * (docs/design-communication-panel.zh.md §7 — PURE; imports only the PURE
- * record module for its frame neutering).
+ * record module for its frame neutering, the peer-text belt, and — lane
+ * grants-unify — src/grant-model.js: every "does this row name that member"
+ * question (`rowNames`, `memberVia`, `memberStill`, the fan-out) is its
+ * `admits`, a row's `except` honoured).
  *
  * Three things live here and nothing else, because everything after
  * `store.append` is PURE except the two ORCH calls at the end (§6.1), so the
@@ -74,8 +77,9 @@
  * survives a restart. This module owns the first and knows nothing of the
  * other two.
  */
-const { inertFrames, isSystemRecord } = require('./channel-record.js');   // + isSystemRecord: lane lark-system-records
-const { toAgentText, cutText, foldHidden } = require('./peer-text.js');   // lane peer-census: THE belt (bound → fold → the frame rule per line / piece) every agent-facing line takes
+const { inertFrames, isSystemRecord, isDraftRecord } = require('./channel-record.js');   // + isSystemRecord: lane lark-system-records; + isDraftRecord: lane gmail-draft-not-a-message
+const { toAgentText, cutText, foldHidden } = require('./peer-text.js');
+const GM = require('./grant-model.js');   // lane grants-unify: THE one admission — a row names a member only through `admits`   // lane peer-census: THE belt (bound → fold → the frame rule per line / piece) every agent-facing line takes
 
 /** The CLOSED rule set. A kind outside it is refused by `validateFilter`. */
 const RULE_KINDS = Object.freeze(['mention', 'keyword', 'regex', 'sender-in-group', 'from-address', 'subject', 'has-attachment', 'not-contains', 'time-window', 'reply-to-mine', 'in-thread-with-me', 'reply-to-sent', 'fact', 'decision']);
@@ -653,7 +657,7 @@ function mineOf(ctx) {
  */
 function sentHit(record, ctx) {
   const rec = record || {};
-  if (isSystemRecord(rec)) return null;   // lane lark-system-records: a notice answers nothing
+  if (isSystemRecord(rec) || isDraftRecord(rec)) return null;   // lane lark-system-records: a notice answers nothing (nor does an unsent draft)
   const sent = ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : null;
   if (!sent || !sent.size) return null;
   const self = str(rec.vendorId);
@@ -702,7 +706,7 @@ function threadOnlyCaps(caps) {
  */
 function placeHit(rule, record, ctx) {
   const rec = record || {};
-  if (isSystemRecord(rec)) return null;   // lane lark-system-records
+  if (isSystemRecord(rec) || isDraftRecord(rec)) return null;   // lane lark-system-records; lane gmail-draft-not-a-message
   if (rule && rule.kind === 'reply-to-sent') { const s = sentHit(rec, ctx) || (rule.infer === true ? inferHit(rec, ctx) : null); return s ? s.why : null; }   // + the judged road (lane dm-reply-infers)
   const mine = ctx ? mineOf(ctx) : null;
   if (!mine || !mine.size || !ctx || typeof ctx.kindOf !== 'function') return null;
@@ -787,7 +791,7 @@ function inferBetweenLine(b) {
  *  (never judged — no vendor call). */
 function inferCandidate(record, ctx) {
   const rec = record || {};
-  if (isSystemRecord(rec)) return null;   // a vendor notice answers nothing
+  if (isSystemRecord(rec) || isDraftRecord(rec)) return null;   // a vendor notice answers nothing, an unsent draft neither
   const sends = ctx && ctx.sentByMe instanceof Map ? ctx.sentByMe : null;
   if (!sends || !sends.size || ctx.convKind === 'thread') return null;   // a mail thread: marker (c) already reads it
   const self = str(rec.vendorId);
@@ -846,6 +850,7 @@ function factValuesOf(rec, key) {
 function ruleHits(rule, record, ctx) {
   const rec = record || {};
   if (isSystemRecord(rec)) return false;   // lane lark-system-records
+  if (isDraftRecord(rec)) return false;   // lane gmail-draft-not-a-message: an unsent draft went to nobody
   const author = rec.author || {};
   const text = lower(rec.text);
   switch (rule.kind) {
@@ -902,6 +907,8 @@ function matchRecord(filter, record, ctx = {}) {
   // lane lark-system-records (owner's DM 2026-10-08): a vendor SYSTEM notice (a recall, a join — src/channel-record.js) is nobody's
   // message: no rule of any kind matches it, so no wake, no stash, no For-you
   if (isSystemRecord(record)) return { hit: false, why: [] };
+  // lane gmail-draft-not-a-message (fb-9aa1d3bd1e): nor is the account's unsent DRAFT — nobody received it, nobody answers it
+  if (isDraftRecord(record)) return { hit: false, why: [] };
   const f = filter && typeof filter === 'object' && Array.isArray(filter.rules) ? filter : null;
   if (!f || !f.rules.length) return { hit: false, why: [] };
   const match = MATCH_MODES.includes(f.match) ? f.match : 'any';
@@ -946,7 +953,7 @@ function estimate(filter, records, { days = 7, now = Date.now(), capHit = false,
   for (const r of list) {
     const at = Number(r.at);
     if (oldest === null || at < oldest) oldest = at;
-    if (!isSystemRecord(r) && (!filter || matchRecord(filter, r, ctx).hit)) matched++;   // lane lark-system-records: a notice is never counted
+    if (!isSystemRecord(r) && !isDraftRecord(r) && (!filter || matchRecord(filter, r, ctx).hit)) matched++;   // lane lark-system-records: a notice is never counted
   }
   const total = list.length;
   // Honest span: a corpus younger than the window rates over what it covers.
@@ -960,7 +967,7 @@ function estimate(filter, records, { days = 7, now = Date.now(), capHit = false,
   // lane decision-rule: a decision rule's hits are unknown until it runs (the estimate never calls the judge) — say how
   // many records a day it would JUDGE (the editor's cost line), never a hit rate it cannot know
   const dec = decisionRulesOf(filter).length;
-  const judged = dec ? list.filter((r) => !isSystemRecord(r)).length : 0;
+  const judged = dec ? list.filter((r) => !isSystemRecord(r) && !isDraftRecord(r)).length : 0;
   return { matched, total, matchedPerDay: per(matched), totalPerDay: per(total), windowDays, sampled: !!capHit, truncated, ...(dec ? { decision: { rules: dec, judgedPerDay: per(judged), hitsUnknown: true } } : {}) };
 }
 
@@ -1195,7 +1202,7 @@ function eligibleFor(keys, principal, row = null) {
   const k = principalKey(principal);
   if (!k || !keys) return false;
   if (keys.has(k)) return true;
-  if (principal.kind === 'agent' && row && row.via && keys.has(`group:${str(row.via)}`)) return true;
+  if (principal.kind === 'agent' && row && row.via && keys.has(principalKey({ kind: 'group', id: str(row.via) }))) return true;   // its group's access row covers it (membership: memberStill, at the wake)
   return principal.kind !== 'everyone' && keys.has(`everyone:${EVERYONE_ID}`);
 }
 /** THE MEMBERSHIP CROSSWALK's one question: the access-holding groups (`keys`' `group:` rows) session `cid` is a
@@ -1203,15 +1210,18 @@ function eligibleFor(keys, principal, row = null) {
  *  group round-robin wakes over; the dialog: the sidebar roster). → the first such group id, or null. */
 function memberVia(keys, cid, members = []) {
   const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(cid));
-  const gs = s && Array.isArray(s.groups) ? s.groups.map(str) : [];
-  return gs.find((g) => keys && keys.has(`group:${g}`)) || null;
+  if (!s || !keys) return null;
+  // lane grants-unify: the access-holding groups as ONE row, judged by THE model with the member's facts
+  const to = [...keys].filter((k) => /^group:/.test(k) && !k.includes(FAN_SEP)).map((k) => ({ kind: 'group', id: k.slice(6) }));
+  const v = to.length ? GM.admits([{ door: 'channel-reach', resource: '-', to, except: [] }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [] }) : null;
+  return v && v.ok && v.entry.kind === 'group' ? v.entry.id : null;
 }
 /** Is a `via` watcher's session still a member of its group (the wake-time re-judge)? A row without `via` is not
  *  this rule's to judge (true). */
 function memberStill(row, members = []) {
   if (!row || !row.via || !row.principal || row.principal.kind !== 'agent') return true;
   const s = (Array.isArray(members) ? members : []).find((x) => x && str(x.cid) === str(row.principal.id));
-  return !!s && Array.isArray(s.groups) && s.groups.map(str).includes(str(row.via));
+  return !!s && GM.admits([{ door: 'channel-reach', resource: '-', to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [] }).ok;
 }
 /**
  * A grain's whole WATCHERS list against ITS OWN access list: one row per
@@ -1316,7 +1326,12 @@ function grainStamp(g) {
   // one JSON line per row: a principal id is free text (a `|` or a newline in it can never re-cut a line)
   const a = (Array.isArray(r0.access) ? r0.access : []).map((x) => JSON.stringify(['a', pk(x), (x && (x.authorityStored || x.authority)) || '', at(x)])).sort();
   const w = (Array.isArray(r0.watchers) ? r0.watchers : []).map((x) => JSON.stringify(['w', pk(x), at(x)])).sort();
-  return [...a, ...w].join('\n');
+  // lane grants-unify: the members LEFT OUT («除了») of the access row (`except`) and of the watch row (`watchExcept`) are
+  // facts of the lists too — a line each, only when there are some (a grain with none stamps exactly as before)
+  const xk = (p) => GM.principalKey(GM.bareOf(p)) || '?';
+  const x = (Array.isArray(r0.except) ? r0.except : []).map((p) => JSON.stringify(['x', xk(p)])).sort();
+  const y = (Array.isArray(r0.watchExcept) ? r0.watchExcept : []).map((p) => JSON.stringify(['y', xk(p)])).sort();
+  return [...a, ...w, ...x, ...y].join('\n');
 }
 /**
  * THE WRITE'S VERDICT on its base: `base` absent (an agent route, a script,
@@ -1542,11 +1557,12 @@ function effectiveWatchers(input, facts) { const e = effectiveGrants(input, fact
  *  fan-out target names its own conversation only)? */
 function rowNames(row, ctx) {
   const p = row && row.principal;
-  if (!p || !ctx) return false;
-  if (p.kind === 'everyone') return ctx.kind === 'agent' && !!ctx.id && (!p.target || str(p.target) === str(ctx.id));
-  if (p.kind === 'agent') return ctx.kind === 'agent' && ctx.id === p.id;
-  if (p.kind === 'group') return Array.isArray(ctx.groups) && ctx.groups.includes(p.id) && (!p.target || str(p.target) === str(ctx.id));
-  return false;
+  if (!p || !ctx || ctx.kind !== 'agent' || !ctx.id) return false;
+  if (p.target && str(p.target) !== str(ctx.id)) return false;   // a fan-out item names its own conversation only
+  // lane grants-unify: THE model over this row's principal, minus the row's `except` (a member left out of its group's
+  // access / All agents is not named by it — its own row still is)
+  const e = GM.fromChannelPrincipal(p);
+  return !!e && GM.admits([{ door: 'channel-reach', resource: '-', to: [e], except: Array.isArray(row.except) ? row.except : [] }], { conversationKey: str(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : [] }).ok;
 }
 // ── ALL AGENTS: the watcher FAN-OUT (lane everyone-principal) ────────────
 
@@ -1583,10 +1599,14 @@ function fanWatcher(root, cid, name = null) {
  * running wakes nobody (its hits are not held for a conversation that does not exist). Nothing else changes:
  * access rows, the other watchers, the sources. PURE.
  */
-function fanOutWatchers(eff, live = [], { filterOf = null } = {}) {
+function fanOutWatchers(eff, live = [], { filterOf = null, admit = null } = {}) {
   // lane reply-to-sent: a GROUP row whose filter (`filterOf(watcher)`) carries `reply-to-sent` fans out to its live members
   const perMember = (w) => !!w && w.principal && w.principal.kind === 'group' && !fanTargetOf(w.principal) && w.mode === 'filtered' && typeof filterOf === 'function' && hasSentRule(filterOf(w));
   if (!eff || !Array.isArray(eff.watchers) || !eff.watchers.some((x) => x && x.watcher && x.watcher.principal && ((x.watcher.principal.kind === 'everyone' && !fanTargetOf(x.watcher.principal)) || perMember(x.watcher)))) return eff;
+  // lane grants-unify: WHO a fanned row may wake is THE model's answer — the caller's `admit(item, target)` (the watch
+  // row's `except`, the target's reach) or, without one, `admits` over the row's principal alone (All agents: every
+  // running conversation; a Task Group: its members)
+  const mayWake = (item, tg) => (typeof admit === 'function' ? !!admit(item, tg) : GM.admits([{ door: 'channel-watch', resource: '-', to: [GM.fromChannelPrincipal(item.watcher.principal)].filter(Boolean), except: [] }], { conversationKey: tg.cid, groupIds: tg.groups }).ok);
   const seen = new Set();
   const targets = [];
   for (const s of Array.isArray(live) ? live : []) {
@@ -1601,11 +1621,11 @@ function fanOutWatchers(eff, live = [], { filterOf = null } = {}) {
     if (perMember(item.watcher)) {
       // the rest of its rules (match any) stay the GROUP's one item; the sent half is judged per member, for that member
       if (splitFilter(filterOf(item.watcher), 'rest')) watchers.push({ ...item, split: 'rest' });
-      for (const tg of targets) if (tg.groups.includes(str(p.id))) watchers.push({ ...item, watcher: fanWatcher(item.watcher, tg.cid, tg.name), fan: { cid: tg.cid, root: item.watcher }, split: 'sent' });
+      for (const tg of targets) if (mayWake(item, tg)) watchers.push({ ...item, watcher: fanWatcher(item.watcher, tg.cid, tg.name), fan: { cid: tg.cid, root: item.watcher }, split: 'sent' });
       continue;
     }
     if (!p || p.kind !== 'everyone' || fanTargetOf(p)) { watchers.push(item); continue; }
-    for (const tg of targets) watchers.push({ ...item, watcher: fanWatcher(item.watcher, tg.cid, tg.name), fan: { cid: tg.cid, root: item.watcher } });
+    for (const tg of targets) if (mayWake(item, tg)) watchers.push({ ...item, watcher: fanWatcher(item.watcher, tg.cid, tg.name), fan: { cid: tg.cid, root: item.watcher } });
   }
   return { ...eff, watchers };
 }

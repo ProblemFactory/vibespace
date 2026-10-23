@@ -156,6 +156,13 @@ function integrationRow({ V, okV, bad }) {
         i18nKey('The app asks for the user scopes VibeSpace lists (node scripts/slack-manifest.mjs prints the whole manifest)'),
       ],
     },
+    // lane oauth-setup-instructions: the setup card's facts (src/oauth-setup.js) — a workspace app's Client ID + Secret;
+    // Slack takes only https redirects (no loopback), a sub-path of a registered one included
+    redirect: {
+      console: { path: i18nKey('api.slack.com/apps → your app → OAuth & Permissions → Redirect URLs'), links: [{ label: i18nKey('Slack apps'), url: 'https://api.slack.com/apps' }] },
+      refusal: 'redirect_uri did not match any configured URIs',
+      create: i18nKey('Create a Slack app at api.slack.com/apps (a workspace app: its Client ID and Secret let every member just press Allow) — or let each person make their own app with a one-time setup token, which needs no address at all.'),
+    },
     test: {
       kind: 'shape-only',
       describe: i18nKey('Checks the client id / secret shape (Slack has no exchange that proves a secret alone) and, for the paste rung, each pasted value by its shape first: a one-time setup token (xoxe.) makes your own app with one apps.manifest.create request and is not kept; the user token (xoxp-) costs one request that asks Slack who it belongs to.'),

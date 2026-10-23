@@ -68,9 +68,11 @@ const IDLE_MAX_HOURS = 720;
 /** A SECRET's entry name (r2): `host:<host id>` (a device's link token) · `frp:token` · `file:<name>` (a sealed JSON file's
  *  key — src/server/sealed-json.js) · `apikey:<key id>` (design q-046: VibeSpace's own automation key — its value, minted by
  *  src/server/automation-engine.js; the store keeps its digest only) · `totp:<name>` (design q-047 L1, lane vault-totp: a
- *  two-step code's seed + its settings, one JSON line — src/totp.js, src/server/vault-totp.js) — never a key file's name
- *  (STORE_KEYS names start with `.` or `browser-`). */
-const SECRET_RE = /^(?:host|frp|file|apikey|totp):[\w.-]{1,160}$/;
+ *  two-step code's seed + its settings, one JSON line — src/totp.js, src/server/vault-totp.js) · `secret:<id>` (lane
+ *  vault-paste-request: a FREE entry — a password, an API key, any secret the registry does not list — pasted by the owner
+ *  into For you at an agent's request, or added in the Vault window; the hub picks the id, its label / kind / note ride
+ *  beside the box: src/vault-paste.js) — never a key file's name (STORE_KEYS names start with `.` or `browser-`). */
+const SECRET_RE = /^(?:host|frp|file|apikey|totp|secret):[\w.-]{1,160}$/;
 const isSecretName = (name) => { const s = String(name || ''); return SECRET_RE.test(s) || V.AGENT_NS_RE.test(s); };   // lane vault-mint-put: `agent:<scope>/<name>` too
 
 let SIGNALS_ARMED = false;
@@ -292,7 +294,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     return v ? { ok: true, value: v } : { ok: false, code: 'key-malformed' };
   }
   /** Seal `value` under `name` (unlocked only — locked ⇒ refused by name, nothing written). */
-  function secretPut(name, value, { prov = null, actor = null } = {}) {
+  function secretPut(name, value, { prov = null, actor = null, label = null, note = null, kind = null } = {}) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }   // noteSecret: a not-set-up vault refused a store (lane door-day-one-landing)
     const plain = Buffer.isBuffer(value) ? Buffer.from(value) : Buffer.from(String(value == null ? '' : value), 'utf8');
@@ -300,6 +302,9 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       const box = { ...V.wrapEntry(dek, name, plain), at: now() };   // int317: `at` = when it was sealed (the Vault window's «saved»)
       if (prov) box.prov = prov;        // lane vault-mint-put: 'minted' | 'stored' — the Vault window's provenance chip (never a value)
       if (actor) box.actor = String(actor).slice(0, 128);   // which conversation / group owns it (a name/id, never a value)
+      if (label) box.label = String(label).slice(0, 80);    // lane vault-paste-request: a free entry's label, kind and note (words a person wrote — never a value)
+      if (note) box.note = String(note).slice(0, 400);
+      if (kind) box.kind = String(kind).slice(0, 16);
       const next = { ...record, entries: { ...record.entries, [name]: box } };
       writeRecord(next); record = next;
       return { ok: true };
@@ -335,7 +340,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   /** int317 + lane vault-mint-put: the secret entries' NAMES, their seal instants, and (agent entries) `prov`/`actor` —
    *  never a box, never a value; the Vault window's «Hub secrets» rows (src/server/vault-contents.js secretSource). */
-  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null }; }) : []);
+  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null, ...(b.label ? { label: b.label, note: b.note || '', kind: b.kind || null } : {}) }; }) : []);   // lane vault-paste-request: a free entry's label / note / kind
   /** Forget an entry (an unpaired device, a cleared relay token) — needs no DEK, so a locked vault forgets too. */
   function secretDrop(name) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
@@ -374,7 +379,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   // ── A REFUSAL IS THE SIGNAL (lane vault-locked-refusal-notice) ──
   const storeVerb = (name) => { const k = STORE_KEYS.find((x) => x.name === name); return k ? `the ${k.store} store` : name; };
-  const secretVerb = (name) => { const n = String(name), kind = n.split(':')[0]; return kind === 'host' ? 'a device link token' : kind === 'apikey' ? 'an automation key' : kind === 'file' ? `the sealed file ${n.slice(5)}` : kind === 'agent' ? 'an agent secret' : `the stored secret ${n}`; };   // a machine's / a key's id (and an agent entry's scope) is never the words
+  const secretVerb = (name) => { const n = String(name), kind = n.split(':')[0]; return kind === 'host' ? 'a device link token' : kind === 'apikey' ? 'an automation key' : kind === 'file' ? `the sealed file ${n.slice(5)}` : kind === 'agent' ? 'an agent secret' : kind === 'secret' ? 'a stored password or key' : `the stored secret ${n}`; };   // a machine's / a key's id (and an agent entry's scope) is never the words
   /** THE ONE HELPER a door calls when it refuses `vault_locked`: `actor` = WHO it stopped (a NAME a person reads — the door
    *  passes the conversation's / the machine's / the account's name, never an id), `verb` = WHAT. Only while LOCKED (a
    *  not-set-up vault refuses nothing by this code). A note that changes what the owner reads re-announces the facts and

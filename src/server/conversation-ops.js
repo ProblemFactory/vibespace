@@ -18,6 +18,11 @@
  *       new session the moment the handler answers → {ok, sessionId, claudeSessionId, sessionKey, pending, …}
  *   renameConversation(target, name, by)    the rename-session body (renameSession below — the explicit name → customNames)
  *   bindConversation(target, taskId, by, {note, noteSession})   the task store's bind (+ the caller's activity line)
+ *   settleBirthGroups()                     lane open-task-binds: every live conversation opened INTO a Task Group (ws-create's
+ *                                           `_birthBind` — the New Session window's Task, an automation's --task, a fork's
+ *                                           first group) is bound through bindConversation once it has its own id (PURE
+ *                                           src/task-membership.js birthBindVerdict); server.js asks it at the session list's
+ *                                           ONE notify point (broadcastActiveSessions — every id adoption broadcasts)
  *   endConversation(target, by, {reply})    ws-handler's kill body; `by` → the subject its device teardown audits
  *   inviteToGroup(group, members, by, opts) the agent-groups engine's invite (`by.cid` = the inviter)
  *   conversationStatus(target)              the ids a caller polls after an open (read-only, nothing spends)
@@ -39,6 +44,7 @@
 const crypto = require('crypto');
 const { capsOf } = require('../backend-caps');
 const SPEC = require('../conversation-spec.js');
+const { birthBindVerdict } = require('../task-membership.js'); // PURE (lane open-task-binds): a birth group is a membership
 
 const OPEN_REASON = 'automation-open';
 const OPEN_TIMEOUT_MS = 90 * 1000;       // the coordinator's old road waited 90 s for `created` (mkworker.mjs)
@@ -53,6 +59,8 @@ function callOp(op, ...args) {
   return typeof fn === 'function' ? fn(...args) : { ok: false, code: 'not_ready', why: 'the server is still starting — try again in a moment' };
 }
 const refusal = (code, why, extra = {}) => ({ ok: false, code, why, ...extra });
+/** The group's activity line of an automation's bind — conversations.bind's and an --task open's (lane open-task-binds) ONE spelling. */
+const boundNote = (session, by) => `[automation] session ${session} bound by ${by.name} (key ${by.key})`;
 
 /** RENAME — the ws `rename-session` case's body, unchanged (it moved here so the automation door renames through it too). */
 function renameSession(deps, data) {
@@ -194,7 +202,7 @@ function opsOver(getDeps) {
    *  handler's very first refusal carries no reqId); the sink leaves the new session's clients the moment it answers, so
    *  nothing the session prints is ever queued for it. Defined as an arrow (`= async (`) so the spend census counts its
    *  ONE call site (below, under the authorizer), never its definition. */
-  const createHeadless = async (spec, by) => {
+  const createHeadless = async (spec, by, birthBy = null) => {
     const reqId = 'auto-' + crypto.randomBytes(6).toString('hex');
     let answer = null, settle = null;
     const answered = new Promise((res) => { settle = res; });
@@ -210,6 +218,7 @@ function opsOver(getDeps) {
         if (m.type === 'created' && m.sessionId) {   // detach NOW: the creator socket is the session's first client
           const s = D().activeSessions && D().activeSessions.get(m.sessionId);
           try { if (s && s.clients && typeof s.clients.delete === 'function') s.clients.delete(sink); } catch { }
+          if (s && s._birthBind && birthBy) s._birthBind.by = birthBy;   // lane open-task-binds: who bound it, for the group's activity line
         }
         settle(m);
       },
@@ -231,7 +240,7 @@ function opsOver(getDeps) {
 
   /** OPEN A CONVERSATION. A ws caller: its own create, byte-identical. No ws: only an automation (a person opens from a
    *  window), its spec judged, the spend guard asked before anything spawns. */
-  async function openConversation(spec, by, { ws = null, attachedSessions = null } = {}) {
+  async function openConversation(spec, by, { ws = null, attachedSessions = null, birthBy = null } = {}) {
     if (ws) return D().handleCreate(ws, spec, attachedSessions);
     const b = SPEC.byVerdict(by);
     if (!b.ok) return b;
@@ -246,7 +255,7 @@ function opsOver(getDeps) {
     const g = spendGuard.authorize({ reason: 'automation-open', identity, sessionName: v.spec.name || null });
     if (!g || !g.ok) return refusal('spend_refused', (g && g.detail) || 'the spend guard refused', { bucket: (g && g.why) || 'unknown', retryAfter: (g && g.retryAfter) || 0 });
     let r;
-    try { r = await createHeadless(v.spec, b.by); }
+    try { r = await createHeadless(v.spec, b.by, birthBy); }
     catch (e) { try { spendGuard.release({ hold: g.hold }); } catch { } throw e; }
     try {
       if (r.ok) spendGuard.note({ reason: OPEN_REASON, identity, hold: g.hold });
@@ -293,6 +302,32 @@ function opsOver(getDeps) {
     return task;
   }
 
+  /** THE BIRTH GROUP IS A MEMBERSHIP (lane open-task-binds — the owner 2026-10-23: the lanes an automation opened with --task
+   *  were in no group's panel, while the agent's own groupsForSession counted the group: two truths). Every live conversation
+   *  carrying `_birthBind` is bound through bindConversation the moment it has its OWN id (a fork waits past its source's), then
+   *  the mark goes — bound or refused (a deleted group), never asked twice. An automation's open names who bound it (the same
+   *  activity line conversations.bind writes); a window's open writes none (the owner's own bind route writes none). → the
+   *  number bound. */
+  function settleBirthGroups() {
+    const active = D().activeSessions;
+    if (!active || typeof active.entries !== 'function' || !D().tasks) return 0;
+    let n = 0;
+    for (const [id, s] of active.entries()) {
+      const v = birthBindVerdict(s);
+      if (!v.bind) continue;
+      const by = s._birthBind.by;
+      s._birthBind = null;
+      for (const groupId of v.groupIds) {   // int346: every group the create named (new-session-form's taskIds), the same writer each
+        try {
+          bindConversation({ webuiId: id }, groupId, by ? { kind: 'automation', key: by.key } : { kind: 'human', actBy: null },
+            by ? { note: boundNote(s.backendSessionId || s.claudeSessionId, by), noteSession: by.session || null } : {});
+          n++;
+        } catch (e) { console.warn(`[tasks] ${id}: its group ${groupId} was not bound — ${e.message}`); }
+      }
+    }
+    return n;
+  }
+
   /** END. The ws case hands its frame and its reply (`killed`); without a reply the answer is returned. */
   async function endConversation(target, by, { reply = null } = {}) {
     if (typeof D().endSession !== 'function') return refusal('not_ready', 'the end path is not wired yet');
@@ -322,7 +357,7 @@ function opsOver(getDeps) {
     return eng.invite({ by: by && by.cid, group, members, context, quiet, mayWake, consent });
   }
 
-  return { conversationStatus, openConversation, renameConversation, bindConversation, endConversation, inviteToGroup };
+  return { conversationStatus, openConversation, renameConversation, bindConversation, settleBirthGroups, endConversation, inviteToGroup };
 }
 const sharedOps = opsOver(() => shared);
 /** ws-handler's own instance: its parts first, the provided ones (the task store, the spend guard…) behind them. */
@@ -381,10 +416,15 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
     'conversations.open': async (args, { caller, keyId }) => {
       const spec = { cwd: args.cwd };
       for (const [from, to] of [['backend', 'backend'], ['mode', 'mode'], ['name', 'name'], ['model', 'model'], ['effort', 'effort'], ['permission', 'permissionMode'], ['task', 'taskId'], ['pool', 'accountId']]) if (args[from] != null) spec[to] = args[from];
-      const r = await O().openConversation(spec, byOf(caller, keyId));
+      // --task: the Task Group is one the CALLER belongs to — conversations.bind's own rule (lane open-task-binds: the open now
+      // writes the same membership a bind does, so it asks what a bind asks)
+      if (spec.taskId && !(caller.groups || []).includes(spec.taskId)) return { ok: false, code: 'not_granted', why: 'the calling conversation is not in that Task Group' };
+      const birthBy = spec.taskId ? { name: caller.name || caller.sessionKey || caller.conversationId, key: keyId, session: caller.sessionKey || null } : null;
+      const r = await O().openConversation(spec, byOf(caller, keyId), { birthBy });
       if (!r || !r.ok) return r;
       let st = O().conversationStatus({ webuiId: r.sessionId });
       for (let t = 0; st.ok && st.pending && t < waitMs; t += 250) { await sleep(250); st = O().conversationStatus({ webuiId: r.sessionId }); }
+      if (spec.taskId && typeof O().settleBirthGroups === 'function') O().settleBirthGroups();   // its id is here: the membership lands now (the notify point would, at its next broadcast)
       return { ...r, ...(st.ok ? { claudeSessionId: st.claudeSessionId, sessionKey: st.sessionKey, pending: st.pending } : {}) };
     },
     'conversations.status': (args, ctx) => {
@@ -404,7 +444,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       // the Task Group is one the CALLER belongs to (a key granted to a group is used by that group's own conversations)
       if (!(caller.groups || []).includes(args.task)) return { ok: false, code: 'not_granted', why: 'the calling conversation is not in that Task Group' };
       try {
-        O().bindConversation({ webuiId: t.id }, args.task, byOf(caller, keyId), { note: `[automation] session ${idOf(t.s) || t.id} bound by ${caller.name || caller.sessionKey || caller.conversationId} (key ${keyId})`, noteSession: caller.sessionKey || null });
+        O().bindConversation({ webuiId: t.id }, args.task, byOf(caller, keyId), { note: boundNote(idOf(t.s) || t.id, { name: caller.name || caller.sessionKey || caller.conversationId, key: keyId }), noteSession: caller.sessionKey || null });
         return { ok: true, target: idOf(t.s) || t.id, task: args.task };
       } catch (e) {
         return { ok: false, code: e.code || (e.message === 'task not found' ? 'not_found' : 'bad_args'), why: e.message };

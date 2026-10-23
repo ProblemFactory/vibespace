@@ -30,6 +30,9 @@
 //   §6 THE SIGN-IN ROAD (lane door-signin-fixes): a code typed into the Claude sign-in card (a stub
 //      `claude auth login` that reads it on its tty and dies silently) rides no route answer, no
 //      broadcast, no file and no journal line
+//   §7 THE PASTE ROAD (lane vault-paste-request): a value the owner pastes into an agent's paste request (the cookie door) reaches
+//      the integration store sealed and nothing else — no probe answer, no broadcast, no file, no journal line, no stdin, not the
+//      agent's next turn (which says STORED); the bearer is refused at the owner's door; a clear of the item takes its words
 //   §5 CONTROL: a patched server copy whose For-you snapshot skips the fold (serves the item's
 //      original words from a shadow copy) makes the SAME walk go RED (run in-process over the
 //      real store: the fold that the copy drops is the one every reader depends on)
@@ -325,6 +328,8 @@ const statusCli = fs.existsSync(path.join(DATA, 'bin', 'vibespace-status')) ? pa
 const PROBES = [
   { name: 'file data/job-notifications.json (the held stash, seeded — drained by the first injection below)', call: async () => ({ out: fs.readFileSync(path.join(DATA, 'job-notifications.json'), 'utf8') }), before: ['j1n', 'j5h'], once: true },
   { name: 'GET /api/tasks (cookie)', call: () => raw('/api/tasks'), before: ['a1n', 'a1d', 'a2n', 'a3n', 'a3d', 'b1n', 'b1d', 'x1n'] },
+  // lane task-group-context: the Task Group window's 「新对话会收到」 — the injection a new conversation receives (its activity log)
+  { name: 'GET /api/tasks/:id/context (cookie: the window\'s preview — renderContext for a new conversation)', call: () => raw(`/api/tasks/${W}/context`), before: ['a1n'] },
   { name: 'GET /api/tasks/:id/progress (cookie: the live list, then the archive)', call: () => raw(`/api/tasks/${W}/progress?limit=200`), before: ['a1n', 'a1d', 'a2n', 'a3n', 'a3d', 'a9n', 'a9d'] },
   { name: 'file data/task-groups-archive/ (the archived Activity log)', call: async () => ({ out: fs.readdirSync(path.join(DATA, 'task-groups-archive', W)).map((f) => fs.readFileSync(path.join(DATA, 'task-groups-archive', W, f), 'utf8')).join('') }), before: ['a9n', 'a9d'] },
   { name: 'GET /api/user-todos (cookie, the snapshot: preview + i18n + options + reply)', call: () => raw('/api/user-todos'), before: ['t1x', 't1d', 't1o', 't6x', 't6d', 't6i', 't6j', 't2x', 't2d', 't3x', 't3s', 't4x', 't4r', 't5x'] },
@@ -563,6 +568,42 @@ console.log('\n§6 THE SIGN-IN ROAD: a code typed into the sign-in card reaches 
   const files = execSync(`grep -rl -F ${J(SW)} ${J(DATA)} ${J(fakeHome)} 2>/dev/null || true`, { encoding: 'utf8' }).trim();
   check('§6 … nor any file under data/ or HOME, nor the server journal (the code reached the CLI only)', !files && !fs.readFileSync(JOURNAL, 'utf8').includes(SW), files);
   await raw(`/api/accounts/${aid}`, { method: 'DELETE' });
+}
+
+// ── §7 THE PASTE ROAD (lane vault-paste-request): a value the owner pastes into an agent's paste request reaches its writer
+//    and nothing else — no answer of any probe, no broadcast, no file under data/ or HOME (the integration store keeps it
+//    sealed), no journal line, not the stub's stdin, not the agent's next turn; the request's item holds none, and a clear of
+//    the item takes the request's words with it ──
+console.log('\n§7 THE PASTE ROAD: a value pasted into a paste request reaches its writer and nothing else');
+{
+  const PV = w('pst7v'), PW7 = w('pst7w'), holds = (x, v = PV) => (typeof x === 'string' ? x : J(x) || '').includes(v);
+  const PAGE7 = { 'sec-fetch-site': 'same-origin' };   // the owner's own page (a person's vault door judges the page's verdict)
+  const f0 = frames.length;
+  const ask = await agent('/api/agent/vault/secret-request', { method: 'POST', body: { words: `the judge key ${PW7}`, purpose: 'the walk', into: 'llm.apiKey' } });
+  const rid = ask.json && ask.json.requestId;
+  check('§7 the agent asks (POST /api/agent/vault/secret-request) ⇒ a request id, ONE For-you item', ask.status === 200 && /^sr-[0-9a-f]{12}$/.test(rid || ''), ask.text.slice(0, 300));
+  const bearer = await agent(`/api/vault/secret-requests/${rid}/answer`, { method: 'POST', body: { answer: 'store', value: PV } });
+  const riding = await raw(`/api/vault/secret-requests/${rid}/answer`, { method: 'POST', headers: { ...PAGE7, ...AG }, body: { answer: 'store', value: PV } });
+  check('§7 the agent cannot answer it: its bearer alone ⇒ 401 at the sign-in gate; its bearer riding the owner\'s cookie ⇒ 403 human_only at the vault\'s door', bearer.status === 401 && riding.status === 403 && /human_only/.test(riding.text) && !holds(bearer.text) && !holds(riding.text), { bearer: bearer.text.slice(0, 120), riding: riding.text.slice(0, 160) });
+  const st = await raw(`/api/vault/secret-requests/${rid}/answer`, { method: 'POST', headers: PAGE7, body: { answer: 'store', value: PV } });
+  check('§7 the owner pastes it (the cookie door) ⇒ stored into llm.apiKey — the answer holds no value', st.status === 200 && st.json && st.json.outcome === 'stored' && st.json.into === 'llm.apiKey' && !holds(st.text), st.text.slice(0, 300));
+  const next = await agent('/api/agent/prompt-context');
+  check('§7 the agent\'s next turn says STORED (llm.apiKey) — never the value', /STORED/.test(next.text) && /llm\.apiKey/.test(next.text) && !holds(next.text), next.text.slice(0, 400));
+  const answers = [];
+  for (const p of PROBES) { let r = null; try { r = await p.call(); } catch (e) { r = { out: '' }; } if (holds(textOf(r))) answers.push(p.name); }
+  check(`§7 no probe's answer holds the pasted value (${PROBES.length} probes)`, answers.length === 0, answers);
+  const seen = frames.slice(f0);
+  check(`§7 no broadcast holds it (${seen.length} frames — the For-you snapshot and the integration's masked view among them)`, seen.length > 0 && !seen.some((f) => holds(f)), seen.filter((f) => holds(f)).slice(0, 2));
+  const files = execSync(`grep -rl -F ${J(PV)} ${J(DATA)} ${J(fakeHome)} 2>/dev/null || true`, { encoding: 'utf8' }).trim();
+  check('§7 … nor any file under data/ or HOME (sealed in the integration store), nor the journal, nor the stub\'s stdin', !files && !fs.readFileSync(JOURNAL, 'utf8').includes(PV) && !stdinLog().includes(PV), files);
+  // the request's item is the record: it holds the agent's words (never the value) — the owner's clear takes them
+  const items = ((await raw('/api/user-todos')).json || {}).todos || {};
+  const it = [...(items.open || []), ...(items.resolved || [])].find((x) => x && x.action && x.action.requestId === rid);
+  check('§7 the request\'s item (done · stored) holds the agent\'s words and no value', !!it && it.status === 'done' && holds(it, PW7) && !holds(it), it && { status: it.status, by: it.resolvedBy });
+  const cl = await clearOne({ kind: 'todo', id: it && it.id, at: it && it.createdAt });
+  const after = ((await raw('/api/user-todos')).json || {}).todos || {};
+  const it2 = [...(after.open || []), ...(after.resolved || [])].find((x) => x && x.id === (it && it.id));
+  check('§7 the owner clears it ⇒ the request\'s words are gone from the item (the cleared sentence, in its place)', cl.status === 200 && !!it2 && !holds(it2, PW7), { cl: cl.text.slice(0, 200), it2: it2 && it2.text });
 }
 
 // ── §5 CONTROL: the walk's judge over a copy whose For-you snapshot serves a SHADOW copy of the words ──

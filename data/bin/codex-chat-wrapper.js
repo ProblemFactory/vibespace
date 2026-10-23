@@ -218,6 +218,25 @@ function resolvePermissionMode(mode) {
   }
 }
 
+// THE 「可用工具」 PICK (lane new-session-form): the New Session form's codex sandbox / approval over the mode's default
+// (CODEX_WEBUI_TOOLS_PICK, one JSON row) — judged by the server (src/backend-caps.js toolAllowlistArgs) and re-checked
+// here against the same closed words; anything else leaves the mode's own answer. A live permission change later
+// (setPermissionMode) re-resolves from the mode alone: the user's newer choice wins.
+const PICK_SANDBOX_POLICY = { 'read-only': 'readOnly', 'workspace-write': 'workspaceWrite', 'danger-full-access': 'dangerFullAccess' };
+const PICK_APPROVALS = ['untrusted', 'on-request', 'on-failure', 'never'];
+function withToolsPick(perm, raw) {
+  let p = null;
+  try { p = raw ? JSON.parse(raw) : null; } catch { p = null; }
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return perm;
+  const out = { ...perm };
+  if (PICK_APPROVALS.includes(p.approval)) out.approvalPolicy = p.approval;
+  if (PICK_SANDBOX_POLICY[p.sandbox]) {
+    out.sandbox = p.sandbox;
+    out.sandboxPolicy = p.sandbox === 'danger-full-access' ? { type: 'dangerFullAccess' } : { type: PICK_SANDBOX_POLICY[p.sandbox], networkAccess: NET_OPEN };
+  }
+  return out;
+}
+
 function formatToolName(name) {
   if (name === 'spawnAgent') return 'spawn_agent';
   if (name === 'sendInput') return 'send_input';
@@ -334,7 +353,7 @@ let reconnectTimer = null;
 let shuttingDown = false;
 const outQueue = [];       // outbound JSON-RPC lines queued while the pipe is down
 let permissionMode = backendPermissionMode;
-let currentPermission = resolvePermissionMode(permissionMode);
+let currentPermission = withToolsPick(resolvePermissionMode(permissionMode), process.env.CODEX_WEBUI_TOOLS_PICK || '');
 
 // THE VERBS THIS BUILD SERVES — one list, read by the sidecar advert (what a
 // LOCAL server reads) and by every `queue_changed` publication (what a REMOTE

@@ -39,6 +39,9 @@ const STATUS = Object.freeze({
   always_not_offered: 400, conversation_gone: 410,
   bad_scope: 400, bad_length: 400, bad_charset: 400, value_required: 400, value_in_argv: 400, // lane vault-mint-put
   bad_grant_answer: 400, // lane vault-manual-and-lock: the answer to an agent's request
+  // lane vault-paste-request: a paste request's answer / a free entry (src/server/vault-paste-door.js)
+  invalid_value: 400, store_failed: 500, value_too_long: 400, unfiled: 503, request_quiet: 429, too_many_requests: 429, value_in_request: 400, job_no_use: 403,
+  name_required: 400, name_too_long: 400, note_too_long: 400, bad_kind: 400, hidden_chars: 400, entry_unknown_id: 404,
 });
 const WORDS = Object.freeze({
   wrong_password: 'that is not the second password',
@@ -87,6 +90,18 @@ const WORDS = Object.freeze({
   value_required: 'put needs a value — pass --from-file or --stdin (the value rides the request body, never the command line)',
   value_in_argv: 'the value must not ride the URL (it is logged like a command line) — put it in the request body via --from-file or --stdin',
   bad_grant_answer: 'the answer is once, 8h or deny',
+  // lane vault-paste-request
+  invalid_value: 'that value is not accepted by the field — nothing was saved',
+  store_failed: 'the value could not be saved — nothing changed',
+  value_too_long: 'that value is too long (at most 8192 characters)',
+  unfiled: 'the request could not be filed in the user\'s tray — nothing was asked',
+  request_quiet: 'the user refused that a moment ago — do not ask again for 10 minutes; carry on without it',
+  too_many_requests: 'too many paste requests are waiting on the user — wait for their answers',
+  value_in_request: 'a paste request never carries a value — the user pastes it into the box in their tray',
+  job_no_use: 'a Background Work job cannot ask the user for a secret — the conversation that owns the job asks',
+  name_required: 'give it a name', name_too_long: 'the name is at most 80 characters', note_too_long: 'the note is at most 400 characters',
+  bad_kind: 'the kind is API key, password or secret', hidden_chars: 'the words hold a hidden or direction character',
+  entry_unknown_id: 'that stored value is not there any more',
 });
 const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
 const ipOf = (req) => String(req.ip || (req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '') || null;
@@ -109,7 +124,7 @@ function slowLineOf(req, ms) {
   return `[vault] ${req.method} ${route} answered in ${Math.round(ms)} ms`;
 }
 
-function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null,
+function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null, paste = null,
   totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }), log = (line) => console.log(line), slowMs = VAULT_SLOW_MS }) {
   app.use(['/api/vault', '/api/agent/vault'], (req, res, next) => {
     const t0 = process.hrtime.bigint();
@@ -150,8 +165,8 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   };
   const person = (fn) => async (req, res) => {
     const v = personVerdict(req);
-    if (!v.ok) { take(req, 'password', 'old', 'new', 'seed', 'uri'); refusedBearer(req, v.code); return answer(res, v); }
-    try { answer(res, await fn(req)); } catch (e) { take(req, 'password', 'old', 'new', 'seed', 'uri'); res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing changed' }); }
+    if (!v.ok) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value'); refusedBearer(req, v.code); return answer(res, v); }   // lane vault-paste-request: a pasted `value` too
+    try { answer(res, await fn(req)); } catch (e) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value'); res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing changed' }); }
   };
   /** An AGENT (vsst_ session / jbt_ job token) — it may read the state and lock, nothing else. */
   const agentOk = (req) => {
@@ -296,7 +311,54 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
       return answerLink(code === 'vault_locked' ? STATUS.vault_locked : 500, { ok: false, code, error: (e && e.message) || WORDS.vault_locked }, { again });
     }
   });
-  if (run) registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take });
+  if (run) registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take, paste });
+  if (paste) registerPasteRoutes(app, { paste, activeSessions, person, take });
+}
+
+/**
+ * lane vault-paste-request (the owner 2026-10-23: 「应该允许你给我弹一个保险库输入框让我直接 paste 进去」) — src/server/vault-paste-door.js
+ * over PURE src/vault-paste.js. AN AGENT: POST /api/agent/vault/secret-request {words, purpose, into? | kind?, name?} with its
+ * conversation's own vsst_ bearer (a job token ⇒ job_no_use, read by its prefix; none ⇒ unauthorized) files ONE For-you
+ * item with a masked paste box → {requestId, target} — never a value (a `value` on the request is refused and dropped).
+ * A PERSON (this page — any bearer human_only, another site cross_site): POST /api/vault/secret-requests/:id/answer {answer: store
+ * | deny, value} — the value taken OFF the body at once, straight to the one writer of its place (a registry field: the
+ * integration store; a free entry: the vault's `secret:<id>`); POST /api/vault/secrets {label, kind, note, value} — the
+ * Vault window's 「其他密钥或密码…」 (a free entry the owner adds); DELETE /api/vault/secrets/:id — its delete door.
+ */
+function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
+  const { addressableId } = require('../claude-lock-capture.js');
+  const tokenOf = (req) => String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
+  /** The vsst_'s conversation as the paste door reads a caller — { job } for a job token (by its prefix), else null. */
+  function pasteCallerOf(req) {
+    const token = tokenOf(req);
+    if (token.startsWith('jbt_')) return { job: true };
+    if (!token.startsWith('vsst_')) return null;
+    for (const [k, s] of activeSessions) {
+      if (!s || !sameToken(token, s.agentToken)) continue;
+      const cid = addressableId(s);
+      return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, scope: String(s._webuiId || k), name: s.name || s.webuiName || null };
+    }
+    return null;
+  }
+  const refusal = (res, r) => res.status(paste.statusOf(r.code)).json({ ok: false, code: r.code, error: r.words || paste.words(r.code), ...Object.fromEntries(['until', 'fields'].filter((k) => r[k] != null).map((k) => [k, r[k]])) });
+  const bodyOf = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
+  app.post('/api/agent/vault/secret-request', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const b = bodyOf(req);
+    const carried = Object.prototype.hasOwnProperty.call(b, 'value') || !!(req.query && Object.prototype.hasOwnProperty.call(req.query, 'value'));
+    delete b.value;   // taken OFF the request — a paste request carries no value
+    const caller = pasteCallerOf(req);
+    if (!caller) return refusal(res, { code: 'unauthorized' });
+    if (carried) return refusal(res, { code: 'value_in_request', words: 'a paste request never carries a value — the user pastes it into the box in their tray' });
+    let r;
+    try { r = paste.request({ caller, words: b.words, purpose: b.purpose, into: b.into, kind: b.kind, name: b.name }); }
+    catch (e) { return refusal(res, { code: 'unfiled' }); }
+    if (!r || !r.ok) return refusal(res, r || { code: 'unfiled' });
+    return res.json({ ok: true, requestId: r.requestId, target: r.target, ...(r.already ? { already: r.already } : {}), tray: OF.tray() });
+  });
+  app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user' }); }));
+  app.post('/api/vault/secrets', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.addEntry({ label: b.label, note: b.note, kind: b.kind, value, by: 'user' }); }));
+  app.delete('/api/vault/secrets/:id', person((req) => paste.dropEntry(String(req.params.id), { by: 'user' })));
 }
 
 /**
@@ -318,7 +380,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
  * command, the egress fence is P1; ③ THE SCRUBBER IS A SIEVE — it reads stdout and stderr only: a value WRITTEN TO A FILE
  * and then `cat`-ed by the agent's own shell never meets it (write-then-cat is accepted and audited, not closed).
  */
-function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take }) {
+function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, person, take, paste = null }) {
   const DOOR = require('../server/vault-run-door.js');
   const tokenOf = (req) => String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');   // lane vault-manual-and-lock seam (int331): renamed from bearerOf so test-record-clear-census keeps use-law's bearerOf (the person doors' jobs-stash reads)
   /** The vsst_'s conversation, as the door reads a caller — or { job } / null. */
@@ -376,6 +438,7 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
     const caller = runCallerOf(req);
     if (!caller) return refusal(res, { code: 'unauthorized', words: DOOR.MORE_WORDS.unauthorized });
     const r = run.usesFor(caller);
+    if (r && r.ok && paste && typeof paste.openFor === 'function') { try { r.pastes = paste.openFor(caller.scope); } catch { r.pastes = []; } }   // lane vault-paste-request: its paste boxes still waiting (words, places — never a value)
     return r && r.ok ? res.json(r) : refusal(res, r || { code: 'failed' });
   });
   // ── people: the switch and the card's answer — ON / «always» need THIS page's 验证是你 window (the page secret, the body or X-Vault-Page) ──

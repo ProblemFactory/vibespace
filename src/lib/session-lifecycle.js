@@ -56,7 +56,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, extraTaskBinds, accountId, modelLock, lockModel, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, browserProfileId, browserProfileOrigin }) {
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, browserProfileId, browserProfileOrigin }) {
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
     // service (opencode → the 'opencode-serve' plugin, default OFF since
@@ -205,7 +205,11 @@ export function installSessionLifecycle(App, ctx = {}) {
       // char on remote helper terminals ("claude /login" → "laude").
       initialCommand: initialCommand || undefined,
       resume: !!resumeId, resumeId: resumeId||undefined, fork: fork||undefined, cols:120, rows:30, reqId,
-      taskId: taskId || undefined, // the server's _initialGroupId + session-meta taskId (the task context over the session token from the first turn; no spawn env carries it since the Task refactor P2)
+      taskId: taskId || (Array.isArray(taskIds) && taskIds[0]) || undefined, // the server's _initialGroupId + session-meta taskId (the task context over the session token from the first turn; no spawn env carries it since the Task refactor P2)
+      // lane new-session-form: EVERY group the New Session form picked, in the order picked (the server's _initialGroupIds,
+      // meta taskIds); its presence also says "the form judged the browser profile by these groups" (ws-create)
+      taskIds: Array.isArray(taskIds) ? taskIds : undefined,
+      tools: tools && typeof tools === 'object' ? tools : undefined, // lane new-session-form: the 「可用工具」 pick (each adapter judges it)
       accountId: accountId || undefined, // billing identity: undefined=server default, 'subscription', or acct-… key id
       modelLock: modelLock || undefined, // #6 lock v2: the server re-pins the target model after any fallback
       lockModel: lockModel || undefined, // explicit lock TARGET (review-caught: inferring from the spawn model re-targeted to claude.defaultModel)
@@ -431,7 +435,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // tagged with — forkGroupPlan) and waits PAST its source's id: until
         // the harness announces the fork's own id the live row carries the
         // parent's, and binding then would tag the parent instead.
-        const bindIds = [taskId, ...(extraTaskBinds || [])].filter(Boolean);
+        const bindIds = [...new Set([taskId, ...(Array.isArray(taskIds) ? taskIds : []), ...(extraTaskBinds || [])].filter(Boolean))];
         if (bindIds.length) this.sidebar?._registerPendingTaskBind?.(msg.sessionId, bindIds, { notId: fork ? (backendSessionId || resumeId || null) : null });
         if (msg.mode === 'chat' || sessionMode === 'chat') {
           const chatView = new ChatView(winInfo, this.ws, msg.sessionId, this);
@@ -936,6 +940,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       effort: effort !== undefined ? effort : savedCfg.effort,
       outputStyle: savedCfg.outputStyle,   // 2.368.0: spawn-only settings key, so a resume is where a change lands
       worktree: worktree !== undefined ? worktree : savedCfg.worktree, // owner ruling 9: the choice rides resume/restart (and a fork, which the CLI strips)
+      tools: savedCfg.tools, // lane new-session-form: the conversation's 「可用工具」 pick — the CLI records none of it, so a resume re-passes it
       autoResume: savedCfg.autoResume,     // tri-state: undefined = follow the instance default
       accountId: accountId !== undefined ? accountId : savedCfg.account,
       modelLock: savedCfg.modelLock,  // #6 lock v2: a locked conversation stays locked across resume (re-pin re-arms)

@@ -61,6 +61,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const B = require('../browser-profiles.js');
+const GS = require('./grants-store.js'); // lane grants-unify: "Who can use it" is a row of the ONE grants store
 const BIdle = require('../browser-idle.js'); // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
 const J = require('../browser-job-principal.js'); // lane jobs-browser: a Background Work job's browser handle + its release rule
 const SW = require('../browser-switch.js');
@@ -193,6 +194,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // archived}` | null (a store that no longer lists it) — the write's `unknown_task` and the panel's words. Absent ⇒ no
   // Task Group admits anyone the keeper judges itself (the routes hand their own taskIds to attach).
   taskIdsForKey = null, taskInfo = null,
+  // lane grants-unify (2026-10-23): "Who can use it" is a ROW of the ONE grants store (door `browser-profile`) — `grants` =
+  // the store (or a getter; absent ⇒ the store of this data dir); a conversation is named there by its conversation id, so
+  // the keeper maps a browser key to the conversation keys it answers to (`conversationKeysForKey(bk)` → {keys, live}) and
+  // a conversation to its browser key for the panel (`browserKeyForConversation(cid)` → bk | null). Absent ⇒ a key is its
+  // own caller only (every conversation may ⇒ it may; a named conversation never matches).
+  grants = null, conversationKeysForKey = null, browserKeyForConversation = null,
   // BROWSE YOURSELF verify r1 (H6): the browser's page targets with their OPENER (CDP Target.getTargets over the keeper
   // browser's own endpoint) — what the user's own tabs are derived from; injectable for the gate (a fake has no CDP)
   readTargets = null,
@@ -207,6 +214,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   installTimeoutMs = null } = {}) {
   if (!dataDir) throw new Error('browser-keeper: dataDir is required');
   const storeFile = path.join(dataDir, STORE_FILE);
+  const grantsOf = typeof grants === 'function' ? grants : () => grants || GS.forDir(dataDir);
   // ONE base environment for the probe, the runtime and the socket-root answer
   // (r2): the root a command lands under is computed from exactly what the
   // runtime launches and probes with
@@ -319,13 +327,58 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // the list as keys and ids only (the broadcast — the panel names them from its own rows; the agent's route strips it)
   // BROWSE YOURSELF (B-6ae8, the owner 4): `recordMine` = "Also record my own actions" — an opt-OUT, absent = on
   const pview = (p) => (p ? { ...B.publicProfileView(p), mediated: isMediated(p), scope: B.scopeOf(p), use: B.useDigestOf(p), createdBy: p.createdBy || null, ...(B.isEphemeralProfile(p) ? {} : { recordMine: HM.recordsMine(p), disk: disk.diskOf(p) }) } : null); // (a conversation's own temporary browser is never browsed by him — no switch of his rides its record: verify r1 H1)
+  // ── lane grants-unify: "Who can use it" = the profile's row of the ONE grants store, mirrored as `p.grantUse` ──
+  /** A conversation's browser key for the panel's spelling (null while it has none). */
+  // (no resolver wired — a keeper built alone: a browser key IS the conversation key it is judged by, both ways)
+  const bkOfConversation = (cid) => { if (typeof browserKeyForConversation !== 'function') return B.isBrowserKey(cid) ? cid : null; try { return browserKeyForConversation(String(cid)) || null; } catch { return null; } };
+  /** Mirror ONE record's row (never an ephemeral record — its owner is its identity, not a grant). */
+  function hydrateUse(p) {
+    if (!p || typeof p !== 'object' || B.isEphemeralProfile(p)) return p;
+    let rows = [];
+    try { const g = grantsOf(); rows = g ? g.rowsFor('browser-profile', p.id) : []; } catch (e) { log.warn?.(`[browser] the grants store could not be read for ${p.id} — ${e && e.message}`); rows = [{ door: 'browser-profile', resource: p.id, to: null }]; }
+    p.grantUse = B.useOfRows(rows, { browserKeyOf: bkOfConversation });
+    return p;
+  }
+  function hydrateAllUse() { for (const p of reg.profiles) hydrateUse(p); }
+  let ownUseWrite = false;   // the keeper's own write re-judges itself (its answer names who was detached)
+  /** THE ONE WRITER for a profile's list: the row → the store (refused by name, nothing changed), then the mirror. */
+  function writeUseRow(p, row, by = 'user') {
+    const g = grantsOf();
+    if (!g) throw namedError('not_written', 'the grants store is not available — "Who can use it" was not changed');
+    let w;
+    ownUseWrite = true;
+    try { w = g.set('browser-profile', p.id, { to: row.to || [], except: row.except || [] }, by); } finally { ownUseWrite = false; }
+    if (!w.ok) throw namedError(w.code, w.error || w.code);
+    hydrateUse(p);
+    return w;
+  }
+  // A profile's list written by ANY other writer (the permissions window, a script through the store) takes effect NOW:
+  // the mirror refreshed, every lease it no longer admits detached (a narrowing — revoke now), the panel redrawn
+  try {
+    const g0 = grantsOf();
+    if (g0 && typeof g0.onChange === 'function') g0.onChange(({ door, resource }) => {
+      if (door !== 'browser-profile' || ownUseWrite || !loaded) return;
+      const p = reg.profiles.find((x) => x && x.id === resource);
+      if (!p || B.isEphemeralProfile(p)) return;
+      hydrateUse(p);
+      try { rejudgeLeases(p.id, 'narrowed'); } catch (e) { log.warn?.(`[browser] ${p.id}: the re-judge after its list changed failed — ${e && e.message}`); }
+      notify();
+    });
+  } catch (e) { log.warn?.(`[browser] the grants store's change hook is not wired — ${e && e.message}`); }
+  /** A browser key → the conversation key the store names it by (the live session carrying it, else its binding). */
+  const conversationOfKey = (bk) => { if (typeof conversationKeysForKey !== 'function') return B.isBrowserKey(B.parentKeyOf(String(bk || ''))) ? B.parentKeyOf(String(bk)) : null; try { const r = conversationKeysForKey(B.parentKeyOf(String(bk || ''))) || {}; return Array.isArray(r.keys) && r.keys.length ? String(r.keys[0]) : null; } catch { return null; } };
   /** The Task Groups the conversation carrying `browserKey` belongs to NOW → `{ids, unreadable, live}` (never throws);
    *  `live: false` = no running session carries the key (a stopped conversation: its membership is not readable NOW and
    *  it is not "no groups" — the re-judge keeps such a lease undecided when a Task Group row could admit it). */
+  // lane grants-unify: + the browser key ITSELF — a key no binding names stands for its conversation (the migration carried
+  // such a row by the key; the key is that conversation's own browser, never another's)
+  const keysOfKey = (browserKey) => { const K = B.parentKeyOf(String(browserKey || '')); const own = B.isBrowserKey(K) ? [K] : []; if (typeof conversationKeysForKey !== 'function') return own; try { const r = conversationKeysForKey(K) || {}; return [...new Set([...(Array.isArray(r.keys) ? r.keys.map(String) : []), ...own])]; } catch { return own; } };
   const groupsOfKey = (browserKey) => {
-    if (typeof taskIdsForKey !== 'function') return { ids: [], unreadable: false, live: true };
-    try { const r = taskIdsForKey(B.parentKeyOf(String(browserKey || ''))) || {}; return { ids: Array.isArray(r.ids) ? r.ids.map(String) : [], unreadable: !!r.unreadable, live: r.live !== false }; }
-    catch (e) { log.warn?.(`[browser] the Task Group list could not be read for ${browserKey} — ${e && e.message}`); return { ids: [], unreadable: true, live: true }; }
+    // lane grants-unify: + `keys` — the conversation keys the caller answers to (the ONE spelling the store names it by)
+    const keys = keysOfKey(browserKey);
+    if (typeof taskIdsForKey !== 'function') return { ids: [], unreadable: false, live: true, keys };
+    try { const r = taskIdsForKey(B.parentKeyOf(String(browserKey || ''))) || {}; return { ids: Array.isArray(r.ids) ? r.ids.map(String) : [], unreadable: !!r.unreadable, live: r.live !== false, keys }; }
+    catch (e) { log.warn?.(`[browser] the Task Group list could not be read for ${browserKey} — ${e && e.message}`); return { ids: [], unreadable: true, live: true, keys }; }
   };
   /** A CONVERSATION ON ANOTHER MACHINE (identity verify r2, 2026-09-28): the wiring names the keys live remote sessions
    *  carry; `remote` = the caller's own knowledge (ws-create's spawn, before the session is registered). Never throws. */
@@ -535,6 +588,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (unreadable.length) { const codes = [...new Set(unreadable.map((x) => x.code))].join(', '); log.warn?.(`[browser] the launch-host lineage of ${subject(unreadable.map((x) => x.d))} kept — the directory cannot be read right now (${codes}); judged again at the next load${each(unreadable.map((x) => x.d))}`); }
       if (rekeyed.length) log.log?.(`[browser] the launch-host lineage of ${subject(rekeyed.map((x) => x.d))} is remembered under its real path ${rekeyed.length === 1 ? rekeyed[0].id : 'now'}${each(rekeyed.map((x) => `${x.d} → ${x.id}`))}`); }
     loaded = true;
+    hydrateAllUse();   // lane grants-unify: every record's "Who can use it" mirrored from the ONE store
     // BROWSE YOURSELF verify r1 (H4): the user's own holder SURVIVES a restart — restored AWAY (no window holds his tab
     // until one re-attaches; the keep runs from the restart when he was driving, from when he left when he was away), so
     // the idle clock still counts him and his tab is continued, never orphaned by a second `tab new`
@@ -550,7 +604,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function save() {
     reg.humans = humansForDisk(); // BROWSE YOURSELF verify r1 (H4): mirrored at every write (the Map stays the truth)
     reg.host = os.hostname(); // lane profile-lock-roll (L1): the file names the machine that wrote it — the next pod's legacy witness
-    try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(storeFile, reg); dirty = false; return true; }
+    // lane grants-unify: a record's `grantUse` is the grants store's row mirrored in memory — never written here
+    try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(storeFile, { ...reg, profiles: reg.profiles.map((x) => { if (!x || typeof x !== 'object' || !('grantUse' in x)) return x; const { grantUse: _u, ...rest } = x; return rest; }) }); dirty = false; return true; }
     catch (e) { log.warn?.(`[browser] could not write ${STORE_FILE}: ${e.message}`); return false; } // verify r9 (④): a caller that must know (a Forget's move) asks
   }
   function notify() {
@@ -995,7 +1050,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // lane browser-admin (the New profile… dialog): "Who can use it" is chosen AT the create — the rows the route resolved
     // (a picked live session → its browser key) are judged by THE write's verdict over an empty record, BEFORE anything is
     // minted: a refusal writes nothing, and the record is born with its list (ONE write, never create-then-PATCH)
-    if (use != null) owner = ownerFromUse(use, { knownKeys, label: v.value.label });
+    const useRow = use != null ? rowFromUse(use, { knownKeys, label: v.value.label }) : B.rowForCreate(owner, { conversationOf: conversationOfKey });   // lane grants-unify
     // lane browser-admin 2a: the Chrome BUILD the profile runs — the USER's choice only (an agent's route passes `by`),
     // judged by THE verdict over the machine's own list (`builds` = the route's fresh listing of a paired machine; this
     // machine's is read here). A new directory was never written: no version ladder at the create.
@@ -1018,6 +1073,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (choice.kind !== 'default') rec.browser = choice;
     if (clonedFrom) rec.clonedFrom = { ...clonedFrom }; // lane browser-profile-clone: born with where its logins came from (ONE write)
     reg.profiles.push(rec);
+    if (!legacy) bornWithRow(rec, useRow, by); else bornWithRow(rec, { to: [{ kind: 'everyone' }], except: [] }, by);   // lane grants-unify: the list is the store's row
     commit();
     log.log?.(`[browser] profile ${id} "${rec.label}" created${choice.kind === 'build' ? ' (Chrome ' + choice.version + ')' : choice.kind === 'path' ? ' (chrome at ' + choice.path + ')' : ''} (${rec.provider}${rec.host ? ' on ' + rec.host : ''}${rec.cdpPort ? ', cdp port ' + rec.cdpPort : ''}${isMediated(rec) ? ', separate tabs (mediated)' : ''}, ${legacy ? 'legacy shared' : 'usable by ' + whoWords(rec)}${rec.createdBy ? ', created by ' + rec.createdBy : ''})${d ? ' at ' + d : ''}`);
     return pview(rec);
@@ -1070,11 +1126,17 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** lane browser-admin: the owner a NEW record is born with from the dialog's `use` (rows already resolved to keys by the
    *  route) — THE write's verdict over an empty record, so a create says the same refusals a PATCH says. Throws by name. */
-  function ownerFromUse(use, { knownKeys = null, label = '' } = {}) {
+  function rowFromUse(use, { knownKeys = null, label = '' } = {}) {
     const known = new Set(Array.isArray(knownKeys) ? knownKeys : []);
-    const uv = B.usePatchVerdict({ profile: { id: 'bp-00000000', label: String(label || ''), owner: { kind: 'instance', id: null } }, use, knownTask: (tid) => taskFacts(tid) !== null, knownKey: (bk) => known.has(bk) });
+    const uv = B.usePatchVerdict({ profile: { id: 'bp-00000000', label: String(label || ''), grantUse: { to: [{ kind: 'everyone' }], except: [] } }, use, knownTask: (tid) => taskFacts(tid) !== null, knownKey: (bk) => known.has(bk), conversationOf: conversationOfKey });
     if (!uv.ok) throw namedError(uv.code, uv.error);
-    return uv.owner;
+    return uv.row;
+  }
+  /** lane grants-unify: a NEW record's row in the ONE store (written right after the record lands; a refused write takes
+   *  the record back out — nobody may use a profile whose list was never written). */
+  function bornWithRow(rec, row, by) {
+    try { writeUseRow(rec, row, by === 'agent' ? 'agent' : 'user'); }
+    catch (e) { const i = reg.profiles.indexOf(rec); if (i >= 0) reg.profiles.splice(i, 1); throw e; }
   }
   /** Adopt a directory that already exists (the migration's legacy record).
    *  Idempotent on `dir`. */
@@ -1160,6 +1222,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // has nothing to remember — its retire never mints into the directory (the launched record's retire remembers as r4 built it)
     if (p.dir && reg.browsers[id]) { const rr = reg.browsers[id]; if (rr.state !== 'failed') rememberDir(p.dir, launchHostsFor(rr, p.dir), { retire: true }); else lineageLedger('retire-skipped-refused', { dir: dirKeyOf(p.dir), id }); }
     reg.profiles = reg.profiles.filter((x) => x.id !== id);
+    if (!isEph(p)) { try { const g = grantsOf(); if (g) g.remove('browser-profile', id, 'user'); } catch (e) { log.warn?.(`[browser] the grant row of ${id} was not removed — ${e && e.message}`); } }   // lane grants-unify: its list goes with it (a record re-made under its id starts at its own default)
     delete reg.browsers[id];
     for (const [k, v] of Object.entries(reg.pins)) if (v && v.profileId === id) reg.pins[k] = { profileId: null, origin: 'harness', at: now(), cleared: { id, label: p.label, at: now() } }; // lane S2: the cleared MARK (read by the browser fact)
     ephPairs.delete(id); ephSessions.delete(id); humans.delete(id); rung2Refusals.delete(String(id)); delete reg.leftTabs[id]; // BROWSE YOURSELF: never outlives its record; verify r5 ②: nor the refusals told at a drive's end
@@ -1216,13 +1279,13 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const bv = B.useBaseVerdict(p, patch.base);
       if (!bv.ok) throw namedError(bv.code, bv.error, { added: bv.added || [], removed: bv.removed || [] });
       const known = knownKeysOf(p, opts.knownKeys);
-      const v = B.usePatchVerdict({ profile: p, use: patch.use, knownTask: (tid) => taskFacts(tid) !== null, knownKey: (bk) => known.has(bk) });
+      const v = B.usePatchVerdict({ profile: p, use: patch.use, knownTask: (tid) => taskFacts(tid) !== null, knownKey: (bk) => known.has(bk), conversationOf: conversationOfKey });
       if (!v.ok) throw namedError(v.code, v.error);
       const wasStamp = B.useStamp(p), was = B.useDigestOf(p);
-      const next = { ...p, owner: v.owner };
+      const next = { ...p, grantUse: { to: v.row.to, except: v.row.except } };
       if (B.useStamp(next) !== wasStamp) {
         const wasRows = new Set((was.who || []).map((w) => (w.kind === 'session' ? 's:' + w.key : 't:' + w.id)));
-        p.owner = v.owner;
+        writeUseRow(p, v.row, 'user');   // lane grants-unify: THE ONE WRITER (the store), the mirror refreshed
         p.scopeAt = now(); // the instant of the last change — logs and the row's tooltip; never an authorization input
         const nowUse = B.useDigestOf(p);
         added = (nowUse.who || []).filter((w) => !wasRows.has(w.kind === 'session' ? 's:' + w.key : 't:' + w.id));
@@ -1293,7 +1356,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function knownKeysOf(p, extra = null) {
     const out = new Set();
     const U = B.whoMayUse(p);
-    if (U && U.mode === 'only') for (const w of U.who) if (w.kind === 'session') out.add(w.id);
+    if (U) for (const w of [...(U.who || []), ...(U.kept || []), ...(U.except || [])]) if (w.kind === 'session') out.add(w.id);
     try { for (const k of liveKeys() || []) if (!isRemoteKey(k)) out.add(B.parentKeyOf(String(k))); } catch { /* none */ } // a remote session's key is never a list row
     if (p && p.createdBy) out.add(B.parentKeyOf(p.createdBy));
     for (const l of reg.leases) if (p && l.profileId === p.id) out.add(B.parentKeyOf(l.browserKey));
@@ -1319,7 +1382,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // its next command asks with live facts (verify 2026-09-28: "stopped" read as "in no group" let a WIDENING detach
       // a stopped member of the listed group — a tab closed for a change that kept it)
       const notNow = !!g.unreadable || g.live === false;
-      const may = B.mayAttach(p, { browserKey: l.browserKey, taskIds: g.ids, groupsUnreadable: notNow });
+      const may = B.mayAttach(p, { browserKey: l.browserKey, conversationKeys: g.keys || keysOfKey(l.browserKey), taskIds: g.ids, groupsUnreadable: notNow });
       if (may.ok) continue;
       if (may.code === 'groups_unreadable') { out.undecided.push(l.browserKey); if (!quietUndecided) log.log?.(`[browser] ${profileId} "${p.label}": ${l.browserKey} kept (${why}) — ${g.live === false && !g.unreadable ? 'no running session carries it, so its Task Groups are judged at its next command' : 'its Task Groups could not be read'}; whether the list still admits it is undecided`); continue; }
       try { detach({ profileId, browserKey: l.browserKey, by: 'user' }); out.detached.push({ browserKey: l.browserKey, sessionId: l.sessionId || null }); closeLeaseSession(p, l.browserKey, why); }
@@ -1345,8 +1408,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const out = { profiles: 0, detached: [], undecided: [] };
     for (const p of [...reg.profiles]) {
       if (isEph(p) || p.legacy) continue;
-      const U = B.whoMayUse(p);
-      if (!U || U.mode !== 'only' || !U.who.some((w) => w.kind === 'task')) continue;
+      // lane grants-unify: a Task Group in the list — or one LEFT OUT under All agents — is what a group change can move
+      const row = B.grantRowOf(p);
+      if (!row || ![...row.to, ...row.except].some((e) => e.kind === 'group')) continue;
       if (!reg.leases.some((l) => l.profileId === p.id)) continue;
       out.profiles++;
       const r = rejudgeLeases(p.id, why, { quietUndecided: true });
@@ -1395,13 +1459,32 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // the PATCH refuses its key, and its lease could never reach this machine's browser (the pin stays a preference)
     if (isRemoteKey(browserKey, remote)) { log.log?.(`[browser] ${B.parentKeyOf(browserKey)} NOT added to who can use ${p.id} "${p.label}" — it runs on another machine`); return null; }
     const g = facts || groupsOfKey(browserKey);
-    const may = B.mayAttach(p, { browserKey, taskIds: g.ids, groupsUnreadable: !!g.unreadable });
+    const may = B.mayAttach(p, { browserKey, conversationKeys: g.keys || keysOfKey(browserKey), taskIds: g.ids, groupsUnreadable: !!g.unreadable });
     if (may.ok) return null;
-    const owner = B.ownerWithConversation(p, browserKey);
-    if (!owner) return null;
-    p.owner = owner; p.scopeAt = now();
+    // lane grants-unify: the user's pick names the CONVERSATION in the ONE store (and lifts an exception that left it out)
+    const ck = conversationOfKey(browserKey);
+    const row = ck ? B.rowWithConversation(p, ck) : null;
+    if (!row) return null;
+    try { writeUseRow(p, row, 'user'); } catch (e) { log.warn?.(`[browser] ${B.parentKeyOf(browserKey)} NOT added to who can use ${p.id} "${p.label}" — ${e && e.message}`); return null; }
+    p.scopeAt = now();
     log.log?.(`[browser] ${B.parentKeyOf(browserKey)} added to who can use ${p.id} "${p.label}" — the user picked it for that conversation (now ${whoWords(p)})`);
     return { profileId: p.id, label: p.label };
+  }
+  /**
+   * THE NEW SESSION FORM'S ADMISSION (lane new-session-form): may a conversation that does not exist yet use profile `id`
+   * through the Task Groups it is about to join? — `B.mayAttach` over those groups and no key (a new conversation is on no
+   * list by itself). ONE verdict for the form's list (GET /api/browser/admits) and the create (ws-create judges the form's
+   * pick with it — the form never ADDS a conversation to "Who can use it"; the Agent browser panel keeps that road).
+   */
+  function mayAttachAtCreate(id, { taskIds = [] } = {}) {
+    const p = profile(String(id || ''));
+    if (!p || isEph(p)) return { ok: false, code: 'not-found', error: `no profile ${id}` };
+    return B.mayAttach(p, { browserKey: '', taskIds: Array.isArray(taskIds) ? taskIds.map(String) : [] });
+  }
+  /** Every listed profile's admission for a new conversation in `taskIds` (the form's 浏览器 row). */
+  function admitsAtCreate({ taskIds = [] } = {}) {
+    ensureLoaded();
+    return reg.profiles.filter((p) => !isEph(p)).map((p) => { const v = mayAttachAtCreate(p.id, { taskIds }); return { id: p.id, ok: !!v.ok, via: v.ok ? v.via : null, ...(v.taskId ? { taskId: v.taskId } : {}), ...(v.ok ? {} : { code: v.code }) }; });
   }
   /**
    * The conversation's pin. OWNER RULING A: a pin is the conversation's DEFAULT ATTACHMENT — its next bare command opens
@@ -1420,7 +1503,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const p = profile(profileId);
     if (!p || isEph(p)) throw namedError('not-found', `no profile ${profileId}`);
     const facts = Array.isArray(taskIds) ? { ids: taskIds.map(String), unreadable: !!groupsUnreadable } : null;
-    if (by === 'agent') { const g = facts || groupsOfKey(browserKey); const may = B.mayAttach(p, { browserKey, taskIds: g.ids, groupsUnreadable: !!g.unreadable }); if (!may.ok) throw namedError(may.code, may.error, may.remedy ? { remedy: may.remedy } : {}); }
+    if (by === 'agent') { const g = facts || groupsOfKey(browserKey); const may = B.mayAttach(p, { browserKey, conversationKeys: g.keys || keysOfKey(browserKey), taskIds: g.ids, groupsUnreadable: !!g.unreadable }); if (!may.ok) throw namedError(may.code, may.error, may.remedy ? { remedy: may.remedy } : {}); }
     const added = by !== 'agent' && origin === 'chosen' ? addConversation(p, browserKey, facts, { remote }) : null;
     reg.pins[browserKey] = { profileId: p.id, origin, at: now(), by: by === 'agent' ? 'agent' : 'user' };
     pinFailures.delete(browserKey);
@@ -4243,7 +4326,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const facts = { ids: (Array.isArray(taskIds) ? taskIds : []).map(String), unreadable: !!groupsUnreadable };
     let added = null;
     if (by === 'user') { added = addConversation(p, browserKey, facts); if (added) commit(); }
-    const d = B.decideAttach({ profile: p, leases: reg.leases, browserKey, sessionId, now: now(), taskIds: facts.ids, groupsUnreadable: facts.unreadable });
+    const d = B.decideAttach({ profile: p, leases: reg.leases, browserKey, sessionId, now: now(), taskIds: facts.ids, groupsUnreadable: facts.unreadable, conversationKeys: keysOfKey(browserKey) });   // lane grants-unify: judged by the keys the store names it by
     if (!d.ok) {
       // MEMBERSHIP IS JUDGED AT EVERY COMMAND (§2.3; the owner's default 2 — no store subscription): a conversation the
       // list no longer admits (it left the Task Group the profile is kept to, a narrowing it missed) is refused AND the
@@ -5622,7 +5705,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     ensureLoaded();
     const v = B.validateProfileInput({ label }, { existing: named() });
     if (!v.ok) throw namedError(v.code, v.error);
-    if (use != null) owner = ownerFromUse(use, { knownKeys, label: v.value.label }); // lane browser-admin: judged before the directory moves
+    const useRow = use != null ? rowFromUse(use, { knownKeys, label: v.value.label }) : B.rowForCreate(owner, { conversationOf: conversationOfKey }); // lane browser-admin: judged before the directory moves (lane grants-unify: the store's row)
     let st = null;
     try { st = fs.statSync(scratchDir); } catch { /* below */ }
     if (!st || !st.isDirectory()) throw namedError('adopt_failed', `this session's browser directory ${scratchDir} does not exist — nothing to adopt (the browser never launched, or it is on the ephemeral rung)`);
@@ -5633,6 +5716,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     try { fs.chmodSync(target, 0o700); } catch { /* best effort */ }
     const rec = B.newProfileRecord({ id, ...v.value, dir: target, owner, legacy: false, now: now(), createdBy });
     reg.profiles.push(rec);
+    bornWithRow(rec, useRow, 'user');   // lane grants-unify
     commit();
     log.log?.(`[browser] profile ${id} "${rec.label}" ADOPTED from ${scratchDir} → ${target} (usable by ${whoWords(rec)}${rec.createdBy ? ', created by ' + rec.createdBy : ''})`);
     return B.publicProfileView(rec);
@@ -5946,7 +6030,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     let admitted = null;
     if (by && by.kind === 'agent') {
       if (!browserKey || isRemoteKey(browserKey)) admitted = false;
-      else { const g = Array.isArray(taskIds) ? { ids: taskIds.map(String), unreadable: !!groupsUnreadable } : groupsOfKey(browserKey); admitted = B.mayAttach(p, { browserKey, taskIds: g.ids, groupsUnreadable: !!g.unreadable }).ok === true; }
+      else { const g = Array.isArray(taskIds) ? { ids: taskIds.map(String), unreadable: !!groupsUnreadable } : groupsOfKey(browserKey); admitted = B.mayAttach(p, { browserKey, conversationKeys: g.keys || keysOfKey(browserKey), taskIds: g.ids, groupsUnreadable: !!g.unreadable }).ok === true; }
     }
     const v = SW.switchVerdict({
       profile: p, target, rowOf, controlOf: control, capabilityRefusalOf: B.capabilityRefusal,
@@ -6888,6 +6972,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     capOf, capFor, setCap, stampGroupCap, groupCapOf, ownLive, noteViewers, sweepIdleReleases, idleReleaseAfterMs,
     pairsForKey: (k) => { const e = ephemeralFor(k); return e ? (pairsOf(e.profileId) || null) : null; }, // MULTIVIEW §4: a helper's OWN pairs (the bridge's child relay answers confirmations under them)
     pinFor, setPin, pinForCreate, instanceDefault, taskGroupDefaultFor,
+    mayAttachAtCreate, admitsAtCreate, // lane new-session-form: the New Session form's profile list + the create's judge (ONE verdict: mayAttach)
     restorePin, taskGroupCapFor, // B-f7ab verify r2: the spawn's witnessed pick restored under the late key (a PREFERENCE — it never edits "Who can use it"); the group cap READ for the witness
     // owner ruling A: a pin that did not open is said; one driver at a time; Delete… releases everything first; the adopt
     // stops the conversation's own browser first. "Who can use it" is a list (2026-09-27): the ONE re-judge, the pick that

@@ -90,17 +90,19 @@ console.log('— ① the verdict table');
 
 console.log('— ② the third list in exit-reach');
 {
-  const a0 = E.exitAccessOf({ id: 'h', exit: { use: { mode: 'nobody' }, run: { mode: 'everyone', ask: true } } });
-  const a1 = E.exitAccessOf({ id: 'h', exit: { use: { mode: 'nobody' }, run: { mode: 'everyone', ask: true }, hub: { mode: 'nobody' } } });
+  // lane grants-unify: a machine's two lists are rows of the grants store — the run list everyone + its ask on the record
+  const RUN_ALL = { run: [{ door: 'exit', resource: 'h:run', to: [{ kind: 'everyone' }] }] };
+  const a0 = E.exitAccessOf({ id: 'h', exit: { ask: true } }, RUN_ALL);
+  const a1 = E.exitAccessOf({ id: 'h', exit: { ask: true, hub: { mode: 'nobody' } } }, RUN_ALL);
   const aBad = E.exitAccessOf({ id: 'h', exit: { use: { mode: 'nobody' }, run: { mode: 'nobody' }, hub: { mode: 'sometimes' } } });
   ok(a0.hub.mode === 'default' && a1.hub.mode === 'nobody' && aBad.mode === 'unknown' && E.exitAccessOf(null).hub.mode === 'default' && E.exitAccessOf({ allowExit: true }).hub.mode === 'default', 'read: not set = default, a stored mode as is, a bad stored mode makes the WHOLE access unknown (fail closed)');
-  ok(E.exitStamp(a0) === E.exitStamp(E.exitAccessOf({ id: 'h', exit: { use: { mode: 'nobody' }, run: { mode: 'everyone', ask: true } } })) && !E.exitStamp(a0).includes('"h"') && E.exitStamp(a1).includes('["h","mode","nobody"]'),
+  ok(E.exitStamp(a0) === E.exitStamp(E.exitAccessOf({ id: 'h', exit: { ask: true } }, RUN_ALL)) && !E.exitStamp(a0).includes('"h"') && E.exitStamp(a1).includes('["h","mode","nobody"]'),
     'the stamp gains a line only when the list is set — a dialog drawn before this lane keeps its base');
   const p1 = E.patchVerdict(a0, { hub: { mode: 'ask' }, base: E.exitStamp(a0) }, { now: 5 });
   ok(p1.ok && p1.access.hub.mode === 'ask' && p1.access.use.mode === 'nobody' && p1.access.run.mode === 'everyone' && p1.changed.hub === true, 'write: the third list alone (use / run kept)', p1);
   const st = E.storedExit(p1.access);
-  ok(st.hub && st.hub.mode === 'ask' && E.exitAccessOf({ exit: st }).hub.mode === 'ask' && !('hub' in E.storedExit(a0)), 'the stored shape carries `hub` only when set; it reads back');
-  const p2 = E.patchVerdict(E.exitAccessOf({ exit: st }), { run: { mode: 'nobody' } }, { now: 6 });
+  ok(st.hub && st.hub.mode === 'ask' && E.exitAccessOf({ exit: st }, RUN_ALL).hub.mode === 'ask' && !('hub' in E.storedExit(a0)), 'the stored shape carries `hub` only when set; it reads back');
+  const p2 = E.patchVerdict(E.exitAccessOf({ exit: st }, RUN_ALL), { run: { mode: 'nobody' } }, { now: 6 });
   ok(p2.ok && p2.access.hub.mode === 'ask' && E.storedExit(p2.access).hub.mode === 'ask', 'a use / run save KEEPS the third list (hosts.setExitAccess replaces `exit` whole)');
   const b1 = E.patchVerdict(a0, { hub: { mode: 'only' } }), b2 = E.patchVerdict(a0, { hub: 'ask' }), b3 = E.patchVerdict(a0, { hub: { mode: 'ask' }, base: E.exitStamp(a1) }), b4 = E.patchVerdict(aBad, { hub: { mode: 'ask' } });
   ok(b1.code === 'bad_mode' && b2.code === 'bad_grant' && b3.code === 'list_changed' && b4.code === 'bad_grant', 'refused: a mode off the three (+ default), a non-object, a stale base, the third list alone over an unreadable access', [b1.code, b2.code, b3.code, b4.code]);
@@ -361,7 +363,7 @@ console.log('— ⑤ the routes');
   const hid = hosts.findByDeviceId('mac1').id;
   const userTodos = new UserTodoManager({ dataDir: dir, expirySweepMs: 3600e3 });
   const activeSessions = new Map([['w1', { agentToken: 'vsst_testtoken1', backend: 'claude', claudeSessionId: 'c1', name: 's1' }]]);
-  const exitProxy = new ExitProxyManager({ hosts, dataDir: dir, userTodos, log: () => { } });
+  const exitProxy = new ExitProxyManager({ hosts, grants: require('../src/server/grants-store.js').create({ dataDir: dir }), dataDir: dir, userTodos, log: () => { } });   // lane grants-unify: the lists' ONE store
   const asker = ASK.wire({ hosts, userTodos, exitProxy, settingOf: () => 'auto', activeSessions, env: { VIBESPACE_INSTANCE_NAME: 'alice' }, log: () => { } });
   const link = fakeDm(hosts.actGateFor(hid));
   const app = express(); app.use(express.json());

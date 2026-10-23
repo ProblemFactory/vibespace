@@ -31,6 +31,14 @@
 // A MACHINE'S DESKTOP (lane desktop-handover): `md-<host>` rows are a paired machine's whole desktop its OWNER handed to
 // this conversation from that machine's desktop window — pixels only (screenshot, click --at, type, key, scroll), the
 // same records the owner's own keyboard and mouse send; their own input pauses you (window_paused); no verb asks for one.
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --call-timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-window: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-window', flags: ['--call-timeout'] });
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -103,7 +111,7 @@ A MACHINE'S DESKTOP (md-<host> rows): a paired machine's whole screen its OWNER 
        wait, never loop); chords that lock / log off the machine are refused (chord_refused).`;
 
 async function call(method, p, body, { soft = false, raw = false } = {}) {
-  const res = await fetch(API + p, { method, headers: { Authorization: 'Bearer ' + TOKEN, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined }).catch((e) => ({ _neterr: e.message }));
+  const res = await CC.call(API + p, { ...(method !== 'GET' ? { cls: 'wake' } : {}), method, headers: { Authorization: 'Bearer ' + TOKEN, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined }).catch((e) => ({ _neterr: e.message }));
   if (res._neterr) { console.error('vibespace-window: server unreachable (' + res._neterr + ')'); process.exit(3); }
   if (raw && res.ok) return res;
   let j = {};

@@ -10,7 +10,8 @@
 const DAY_ONE = require('./day-one.js');   // lane door-day-one-landing: SIGN_IN — a sign-in terminal is not a session row
 const { ensureGitIdentity } = require('./server/git-identity.js');   // lane door-day-one-landing: git's name / email default from the sign-in's account
 const { MessageManager } = require('./message-manager');
-const { capsOf, worktreeRefusal, worktreeSpawnArgs } = require('./backend-caps');
+const { capsOf, worktreeRefusal, worktreeSpawnArgs, toolAllowlistArgs } = require('./backend-caps');
+const { spawnGroupIds } = require('./new-session-spec'); // PURE (lane new-session-form): the Task Groups a new session joins, in selection order
 const { get: harnessOf } = require('./harnesses'); // S9: store-side fork (opencode serve) before the spawn
 const { createMessageManager } = require('./normalizers');
 const { cwdToProjectDir, findSessionJsonlPath, warmSessionJsonlAsync } = require('./session-store');
@@ -709,6 +710,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // rule in backend-caps decides whether the flag is actually
             // emitted (never on a plain resume — the CLI re-enters its own).
             worktree: !!data.worktree,
+            // THE 「可用工具」 PICK (lane new-session-form): the harness's own tool switch — each adapter judges it with
+            // backend-caps toolAllowlistArgs (claude --allowedTools/--disallowedTools, codex sandbox + approval)
+            tools: data.tools && typeof data.tools === 'object' ? data.tools : undefined,
             // EVERY declared spawn row of this harness, typed, in ONE bag
             // (design-harness-settings §5): --brief, the prompt-cache trio,
             // disableModelFallback, tuiRenderer, … — INSTANCE settings read
@@ -951,6 +955,10 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // generation it spawned with for life; a LOCAL creds dir is the FILE road (the engine reads the token file's
           // generation per turn); a remote creds dir is not ours to read — no road, so its readings never judge a token
           const oatEnvRoad = !!spawnAccount && !spawnAccount._hostSubReady && (data.hostId ? spawnAccount.secret?.var === 'CLAUDE_CODE_OAUTH_TOKEN' : !!spawnAccount.localEnv?.CLAUDE_CODE_OAUTH_TOKEN);
+          // lane new-session-form: the New Session form picks SEVERAL Task Groups (`taskIds`, in selection order); an older
+          // page sends one `taskId`. The first stays `_initialGroupId` (and the meta `taskId` old pages read); the list rides
+          // `_initialGroupIds` into every groupsForSession ask and the meta `taskIds`. A remote session joins them the same.
+          const spawnGroups = spawnGroupIds(data);
           const session = {
             mode: sessionMode,
             pty: null, clients: new Map([[ws, { cols: data.cols || 120, rows: data.rows || 30 }]]),
@@ -971,7 +979,15 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // session token; this only covers the window before the async UI
             // bind lands. VALIDATED to the id shape (metachar-free — kept as
             // defense-in-depth even though it's no longer shell-interpolated).
-            _initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null,
+            _initialGroupId: spawnGroups[0] || null,
+            _initialGroupIds: spawnGroups,
+            // lane open-task-binds (the owner 2026-10-23: the lanes an automation opened with --task were missing from their
+            // group's panel): the group it was opened INTO is a MEMBERSHIP, not a note — bound through the ONE bind writer
+            // (src/server/conversation-ops.js settleBirthGroups, asked at the session list's notify point) the moment the
+            // conversation has its own id (PURE src/task-membership.js birthBindVerdict); an automation's open adds `by`
+            // int346 (new-session-form × open-task-binds): EVERY group the create names (`taskIds`, in the order picked) is
+            // bound through that ONE writer — a New Session ticked into two groups is a member of both
+            _birthBind: spawnGroups.length ? { groupId: spawnGroups[0], groupIds: spawnGroups.slice(), by: null } : null,
             // Billing identity badge (the key itself only lives in the spawn
             // env); a linked account spawns via the host's login but IS that
             // account — keep its identity (2.241.0)
@@ -1149,7 +1165,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               if (kp && integrationOn) {
                 forkParentKey = (data.fork && be0) ? be0.priorKeyFor(data.forkedFromId || data.resumeId) : '';
                 // the Task-Group rung asks the store with the facts a create has (cwd + the dialog's taskId)
-                const taskGroupDefault = kp.taskGroupDefaultFor({ cwd, initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null });
+                const taskGroupDefault = kp.taskGroupDefaultFor({ cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
                 pin = kp.pinForCreate({ explicit: data.browserProfileId || '', priorKey: prior, forkParentKey, taskGroupDefault, resume: !!(data.resume && data.resumeId), fork: !!data.fork });
                 if (pin.refused) console.warn(`[browser] ${id}: ${pin.refused} — starting ephemeral`);
                 // B-6b6d r3 for this knob: the New Session dialog sends the value it
@@ -1161,6 +1177,13 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 if (pin.origin === 'chosen' && (hint === 'task-group' || hint === 'instance')) {
                   const rungValue = hint === 'task-group' ? taskGroupDefault : kp.instanceDefault();
                   if (rungValue && pin.profileId === rungValue) pin = { ...pin, origin: hint };
+                }
+                // lane new-session-form: the two-column form (it sends `taskIds`) lists ONLY the profiles its groups admit —
+                // a pick it sends is judged by the SAME verdict here (mayAttach over those groups), never added to the
+                // profile's "Who can use it" at create (the Agent browser panel keeps that road, with its toast)
+                if (pin.origin === 'chosen' && pin.profileId && Array.isArray(data.taskIds) && typeof kp.mayAttachAtCreate === 'function') {
+                  const may = kp.mayAttachAtCreate(pin.profileId, { taskIds: spawnGroups });
+                  if (!may.ok) { console.warn(`[browser] ${id}: the New Session pick ${pin.profileId} is not open to this conversation (${may.code}) — starting without it`); pin = { profileId: '', dir: null, origin: 'harness', refused: may.code }; }
                 }
               }
             } catch (e) { console.warn('[browser] pin ladder unavailable — ' + (e && e.message)); }
@@ -1181,11 +1204,11 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             }
             if (!be.variant && spawnPinWitness) {
               // + the Task Group's default cap in force NOW (stampGroupCap's read, unstamped — there is no key to stamp it on)
-              try { const kc = require('./server/browser-keeper.js').keeper(); spawnPinWitness.cap = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null }) : null; } catch { spawnPinWitness.cap = null; }
+              try { const kc = require('./server/browser-keeper.js').keeper(); spawnPinWitness.cap = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { spawnPinWitness.cap = null; }
             } else if (!be.variant && be0 && integrationOn) {
               // the ladder ran and picked NOTHING: witnessed too (a cap may still be in force), so the late key knows the
               // start had no default rather than guessing from the default the user has by then
-              let c = null; try { const kc = require('./server/browser-keeper.js').keeper(); c = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null }) : null; } catch { c = null; }
+              let c = null; try { const kc = require('./server/browser-keeper.js').keeper(); c = kc && typeof kc.taskGroupCapFor === 'function' ? kc.taskGroupCapFor({ cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups }) : null; } catch { c = null; }
               spawnPinWitness = { profileId: '', origin: 'harness', at: Date.now(), by: 'user', cap: c };
             }
             if (be.variant) {
@@ -1218,7 +1241,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               // (once — a conversation that has its stamp keeps it), never read live off the group afterwards
               try {
                 const kc = require('./server/browser-keeper.js').keeper();
-                if (kc && typeof kc.stampGroupCap === 'function') kc.stampGroupCap(bk.key, { cwd, initialGroupId: (typeof data.taskId === 'string' && /^T-[\w-]{1,60}$/.test(data.taskId)) ? data.taskId : null });
+                if (kc && typeof kc.stampGroupCap === 'function') kc.stampGroupCap(bk.key, { cwd, initialGroupId: spawnGroups[0] || null, initialGroupIds: spawnGroups });
                 session._browserCap = kc && typeof kc.capOf === 'function' ? kc.capOf(bk.key) : null;
               } catch { session._browserCap = null; }
               spawnBrowserPre = be.remotePrelude || '';
@@ -1490,6 +1513,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // client asked for (a default-sourced Concise showed as "默认")
           if (data._effOutputStyle) session._outputStyle = data._effOutputStyle;
           if (data.worktree) session._worktree = true;   // owner ruling 9: the tick is a per-session fact (badge + Session Properties + resume carry)
+          { const tp = toolAllowlistArgs({ backend, pick: data.tools }); if (tp.dirty) session._toolPick = tp.pick; }   // lane new-session-form: the 「可用工具」 pick as the spawn judged it (meta + resume carry)
           if (data.autoResume !== undefined && data.autoResume !== null) session._autoResume = !!data.autoResume;
           session._spawnModel = data.model || null; // model ladder's floor (plan C) // per-session pool link key (plan C) — the id the session is registered under
           attachedSessions.add(id);
@@ -1621,6 +1645,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             lockedModel: session._lockedModel || undefined,
             agentToken: session.agentToken || null,
             taskId: session._initialGroupId || null, // group spawned into (meta key kept for back-compat)
+            taskIds: session._initialGroupIds && session._initialGroupIds.length ? session._initialGroupIds : undefined, // lane new-session-form: every group, in selection order
+            toolPick: session._toolPick || undefined, // lane new-session-form: the 「可用工具」 pick survives a restart (Session Properties / a resume re-passes it)
             accountId: session._accountId || null, // billing identity (badge restore across server restarts)
             // THE READING'S ROAD IS A FACT OF THE SESSION (lane oat-identity-fix-r3, verify r3 F-R1): HOW it billed, WHICH road
             // its long-lived token rides and its GENERATION survive a restart — boot-restore's sessionFromMeta restores them, so a
@@ -1783,6 +1809,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // Always present so the client's carries-the-key guard fires.
             worktree: !!session._worktree,
             worktreePath: session._worktreePath || null,
+            toolPick: session._toolPick || null, // lane new-session-form: the creator latches it as the conversation's own pick (its resume carry)
             autoResume: autoResume?.statusFor?.(id) || null,
             // A freshly spawned/resumed wrapper always starts with an EMPTY
             // input queue — stated explicitly (not omitted) so the creator's

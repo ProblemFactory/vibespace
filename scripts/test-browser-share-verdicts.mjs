@@ -13,6 +13,9 @@ const require = createRequire(import.meta.url);
 const B = require('../src/browser-profiles.js');
 const WIN = require('../src/browser-windows.js'); // lane browser-windows: a window per holder (PURE)
 const LIMITS = require('../src/keeper-limits.js');
+// lane grants-unify: "Who can use it" is the grants store's row — a hand-built record's list is mirrored the way the migration
+// carries a pre-unify `owner` over (the keeper mirrors the store's row the same way); a browser key stands for its conversation
+import { withUse } from './grant-fixtures.mjs';
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 900) : '')); } return !!c; };
@@ -24,12 +27,12 @@ console.log('— ① PURE: the default, one field, join-vs-launch, one driver, t
 {
   // the default: a new NAMED record with no owner is usable by every conversation; createdBy is display only
   const r0 = B.newProfileRecord({ id: 'bp-0000c0a1', label: 'Work', dir: '/x/w', createdBy: KA + '.3' });
-  ok(r0.owner.kind === 'instance' && B.scopeOf(r0) === 'all' && r0.createdBy === KA && r0.sharing === 'owner', 'a new named record with no owner is "All my conversations" (scope all), createdBy = the making conversation (a helper\'s key → its conversation), sharing (tab isolation) stays off');
-  const one = B.newProfileRecord({ id: 'bp-0000c0a2', label: 'Mine', dir: '/x/m', owner: { kind: 'session', id: KA } });
+  ok(r0.owner.kind === 'instance' && B.scopeOf(withUse(r0)) === 'all' && r0.createdBy === KA && r0.sharing === 'owner', 'a new named record with no owner is "All my conversations" (scope all), createdBy = the making conversation (a helper\'s key → its conversation), sharing (tab isolation) stays off');
+  const one = withUse(B.newProfileRecord({ id: 'bp-0000c0a2', label: 'Mine', dir: '/x/m', owner: { kind: 'session', id: KA } }));
   const eph = B.newProfileRecord({ id: 'bp-0000c0a3', label: '', dir: null, ephemeral: true, owner: { kind: 'conversation', id: KA } });
-  ok(B.scopeOf(one) === 'only' && B.scopeOf(eph) === 'only' && B.scopeOf({ ...one, legacy: true }) === 'all' && B.scopeOf({ ...one, owner: { kind: 'task', id: 'T-1' } }) === 'only' && B.scopeOf(null) === null && B.SCOPES.join() === 'all,only', 'scopeOf reads ONE field: a list (or a pre-list single session / task owner) ⇒ only, instance/legacy ⇒ all, an ephemeral record is its conversation\'s (only)');
+  ok(B.scopeOf(one) === 'only' && B.scopeOf(eph) === 'only' && B.scopeOf(withUse({ ...one, legacy: true })) === 'all' && B.scopeOf(withUse({ ...one, owner: { kind: 'task', id: 'T-1' } })) === 'only' && B.scopeOf(null) === null && B.SCOPES.join() === 'all,only', 'scopeOf reads ONE field: a list (or a pre-list single session / task owner) ⇒ only, instance/legacy ⇒ all, an ephemeral record is its conversation\'s (only)');
   // the path-A contradiction is impossible by construction: `sharing` never admits
-  ok(B.mayAttach({ ...one, sharing: 'instance' }, { browserKey: KB }).code === 'not_owner' && B.mayAttach(one, { browserKey: KB, pinned: true }).code === 'not_owner' && B.mayAttach(one, { browserKey: KB, by: 'user' }).code === 'not_owner' && B.mayAttach(one, { browserKey: KA + '.1' }).ok, 'admission reads `owner` only (sharing:instance on a record kept to one conversation admits nobody else); a pin or a `by:\'user\'` is NO input (the user\'s pick writes the list instead); a helper is its conversation');
+  ok(B.mayAttach({ ...one, sharing: 'instance' }, { browserKey: KB }).code === 'not_owner' && B.mayAttach(one, { browserKey: KB, pinned: true }).code === 'not_owner' && B.mayAttach(one, { browserKey: KB, by: 'user' }).code === 'not_owner' && B.mayAttach(one, { browserKey: KA + '.1' }).ok, 'admission reads the LIST only (lane grants-unify: the store\'s row; sharing:instance on a record kept to one conversation admits nobody else); a pin or a `by:\'user\'` is NO input (the user\'s pick writes the list instead); a helper is its conversation');
   // join vs launch
   const T = [[null, false, 'launch'], [{ state: 'stopped' }, false, 'launch'], [{ state: 'failed' }, false, 'launch'], [{ state: 'stopped' }, true, 'wait'], [{ state: 'starting' }, true, 'wait'], [{ state: 'starting' }, false, 'join'], [{ state: 'ready' }, false, 'join'], [{ state: 'ready' }, true, 'join']];
   const bad = T.filter(([record, starting, want]) => B.joinOrLaunch({ record, starting }) !== want);
@@ -72,24 +75,29 @@ console.log('— ① PURE: the default, one field, join-vs-launch, one driver, t
   ok(cnt(KA) === 2 && cnt(KB) === 1 && cnt(KC) === 0 && B.ceilingVerdict(Object.values(browsers), leases, { CONCURRENT_CAP: 3 }) === null, 'the cap: the shared Work browser counts in BOTH conversations holding it (KA 2 = Work + its own; KB 1 = Work through a helper), a stopped one in none, and ONCE on the machine (2 live < 3)');
   // ── "WHO CAN USE IT" IS A LIST (2026-09-27) ──
   // whoMayUse: THE ONE READER over every shape that can be on disk
-  const P = (owner, extra = {}) => ({ id: 'bp-0000c0c1', label: 'work', owner, ...extra });
+  const P = (owner, extra = {}) => withUse({ id: 'bp-0000c0c1', label: 'work', owner, ...extra });
+  const SA = { kind: 'session', id: KA, conversationKey: KA };   // a conversation in the panel's spelling (its key) + the store's (its conversation)
   const SHAPES = [
-    ['instance', P({ kind: 'instance', id: null }), { mode: 'all' }],
-    ['owner missing', P(undefined), { mode: 'all' }],
-    ['owner null', P(null), { mode: 'all' }],
-    ['pre-list session (a child key)', P({ kind: 'session', id: KA + '.2' }), { mode: 'only', who: [{ kind: 'session', id: KA }] }],
-    ['pre-list task', P({ kind: 'task', id: 'T-G' }), { mode: 'only', who: [{ kind: 'task', id: 'T-G' }] }],
-    ['a list', P({ kind: 'only', who: [{ kind: 'session', id: KA }, { kind: 'task', id: 'T-G' }] }), { mode: 'only', who: [{ kind: 'session', id: KA }, { kind: 'task', id: 'T-G' }] }],
-    ['a list with junk rows (dropped), a duplicate and a child key', P({ kind: 'only', who: [{ kind: 'session', id: KA }, { kind: 'bogus', id: 'x' }, { kind: 'session', id: 'not-a-key' }, { kind: 'task', id: 'bad id!' }, { kind: 'session', id: KA + '.3' }, null, 5] }), { mode: 'only', who: [{ kind: 'session', id: KA }] }],
+    ['instance', P({ kind: 'instance', id: null }), { mode: 'all', except: [] }],
+    ['owner missing', P(undefined), { mode: 'all', except: [] }],
+    ['owner null', P(null), { mode: 'all', except: [] }],
+    ['pre-list session (a child key)', P({ kind: 'session', id: KA + '.2' }), { mode: 'only', who: [SA], except: [] }],
+    ['pre-list task', P({ kind: 'task', id: 'T-G' }), { mode: 'only', who: [{ kind: 'task', id: 'T-G' }], except: [] }],
+    ['a list', P({ kind: 'only', who: [{ kind: 'session', id: KA }, { kind: 'task', id: 'T-G' }] }), { mode: 'only', who: [SA, { kind: 'task', id: 'T-G' }], except: [] }],
+    ['a list with junk rows (dropped), a duplicate and a child key', P({ kind: 'only', who: [{ kind: 'session', id: KA }, { kind: 'bogus', id: 'x' }, { kind: 'session', id: 'not-a-key' }, { kind: 'task', id: 'bad id!' }, { kind: 'session', id: KA + '.3' }, null, 5] }), { mode: 'only', who: [SA], except: [] }],
     ['ephemeral', { ...eph }, { mode: 'only', who: [{ kind: 'session', id: KA }], ephemeral: true }],
-    ['legacy (even with a list)', P({ kind: 'only', who: [{ kind: 'session', id: KA }] }, { legacy: true }), { mode: 'all' }],
+    ['legacy (even with a list)', P({ kind: 'only', who: [{ kind: 'session', id: KA }] }, { legacy: true }), { mode: 'all', except: [] }],
     ['a junk kind', P({ kind: 'everyone' }), { mode: 'unknown' }],
     ['a string owner', P('instance'), { mode: 'unknown' }],
     ['a list that is not an array', P({ kind: 'only', who: 'bk-0000c001' }), { mode: 'unknown' }],
     ['a pre-list session with a malformed key', P({ kind: 'session', id: 'nope' }), { mode: 'unknown' }],
+    // lane grants-unify — the store's row is the list: nothing else on the record is read
+    ['no row (the store holds none)', { id: 'bp-0000c0c1', label: 'work', owner: { kind: 'instance', id: null } }, { mode: 'only', who: [], except: [] }],
+    ['a row with an exception', { id: 'bp-0000c0c1', label: 'work', grantUse: { to: [{ kind: 'group', id: 'T-G' }], except: [{ kind: 'conversation', key: KB, browserKey: KB }] } }, { mode: 'only', who: [{ kind: 'task', id: 'T-G' }], except: [{ kind: 'session', id: KB, conversationKey: KB }] }],
+    ['a row the store could not read', { id: 'bp-0000c0c1', label: 'work', grantUse: { unknown: true } }, { mode: 'unknown' }],
   ];
   const badShapes = SHAPES.filter(([, p, want]) => JSON.stringify(B.whoMayUse(p)) !== JSON.stringify(want)).map(([n, p]) => [n, B.whoMayUse(p)]);
-  ok(!badShapes.length && B.whoMayUse(null) === null, `whoMayUse over every stored shape (${SHAPES.length}): instance / missing / null ⇒ all; the pre-list single shapes ⇒ a one-row list; a list normalized (junk rows DROPPED, duplicates and child keys collapsed); ephemeral ⇒ its conversation; legacy ⇒ all; anything else ⇒ unknown (fail closed)`, badShapes);
+  ok(!badShapes.length && B.whoMayUse(null) === null, `whoMayUse over every stored shape (${SHAPES.length}) — carried over as the migration carries it: instance / missing / null ⇒ all; the pre-list single shapes ⇒ a one-row list; a list normalized (junk rows DROPPED, duplicates and child keys collapsed); ephemeral ⇒ its conversation; legacy ⇒ all; anything else ⇒ unknown (fail closed); the store's row alone decides (no row ⇒ nobody)`, badShapes);
   // THE TABLE: profile {all, only[s:A], only[t:G], only[s:A,t:G], only[t:deleted], unknown} × asker {A, A.3, B, B in G, B in H, B unreadable}
   const PROFS = {
     all: P({ kind: 'instance', id: null }),
@@ -118,14 +126,19 @@ console.log('— ① PURE: the default, one field, join-vs-launch, one driver, t
   ok(B.mayAttach(PROFS['only[t:G]'], ASKERS['B in G']).taskId === 'T-G' && B.mayAttach(eph, { browserKey: KA }).via === 'own' && B.mayAttach(eph, { browserKey: KB }).code === 'not_attachable' && B.mayAttach(null, { browserKey: KA }).code === 'not-found', 'a Task Group admission names its group; an ephemeral record admits its own conversation (via own) and refuses anyone else (not_attachable); no record ⇒ not-found');
   // the whole-list stamp
   const sA = B.useStamp(PROFS['only[s:A,t:G]']);
-  ok(sA === B.useStamp(P({ kind: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', id: KA + '.7' }] })) && sA !== B.useStamp(PROFS['only[s:A]']) && B.useStamp(PROFS.all) === '["m","all"]' && B.useStamp(P({ kind: 'session', id: KA })) === B.useStamp(PROFS['only[s:A]']), 'useStamp: the order a list is drawn in and a child key vs its parent are the SAME stamp; a moved row is not; a pre-list single owner stamps as its one-row list', sA);
+  ok(sA === B.useStamp(P({ kind: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', id: KA + '.7' }] })) && sA !== B.useStamp(PROFS['only[s:A]']) && B.useStamp(PROFS.all) === '["m","all"]' && B.useStamp(P({ kind: 'session', id: KA })) === B.useStamp(PROFS['only[s:A]']) && B.useStamp({ ...PROFS['only[t:G]'], grantUse: { to: [{ kind: 'group', id: 'T-G' }], except: [{ kind: 'conversation', key: KB }] } }) !== B.useStamp(PROFS['only[t:G]']), 'useStamp: the order a list is drawn in and a child key vs its parent are the SAME stamp; a moved row is not; a pre-list single owner stamps as its one-row list; an exception is a fact of the list (lane grants-unify)', sA);
   const bv = B.useBaseVerdict(PROFS['only[s:A,t:G]'], B.useStamp(PROFS['only[s:A]']));
   ok(B.useBaseVerdict(PROFS.all, undefined).ok && B.useBaseVerdict(PROFS.all, B.useStamp(PROFS.all)).ok && bv.code === 'list-changed' && bv.added.join() === 'task:T-G' && !bv.removed.length && B.useBaseVerdict(PROFS.all, 7).code === 'bad-request', 'useBaseVerdict: no base = unconditional (a script); the current stamp = ok; a moved list ⇒ list-changed naming the rows that differ (added task:T-G); a non-string base is refused', bv);
   // the write's verdicts
   const kn = (keys) => (k) => keys.includes(k);
-  const PV = (p, use, keys = [], tasks = ['T-G', 'T-H']) => B.usePatchVerdict({ profile: p, use, knownTask: (id) => tasks.includes(id), knownKey: kn(keys) });
+  const PV = (p, use, keys = [], tasks = ['T-G', 'T-H']) => B.usePatchVerdict({ profile: p, use, knownTask: (id) => tasks.includes(id), knownKey: kn(keys), conversationOf: (k) => B.parentKeyOf(k) });
   const pv1 = PV(PROFS.all, { mode: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', key: KB + '.2' }, { kind: 'session', key: KB }, { kind: 'task', id: 'T-G' }] }, [KB]);
-  ok(pv1.ok && JSON.stringify(pv1.owner) === JSON.stringify({ kind: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', id: KB }] }), 'usePatchVerdict: a list is written deduplicated, a helper\'s key stored as its conversation\'s', pv1);
+  ok(pv1.ok && JSON.stringify(pv1.row) === JSON.stringify({ to: [{ kind: 'group', id: 'T-G' }, { kind: 'conversation', key: KB }], except: [] }), 'usePatchVerdict: a list is written deduplicated, a helper\'s key stored as its conversation (lane grants-unify: the ONE writer\'s row)', pv1);
+  // lane grants-unify — «除了» on the Save
+  const pvx = PV(PROFS.all, { mode: 'all', except: [{ kind: 'session', key: KB }, { kind: 'task', id: 'T-H' }] }, [KB]);
+  ok(pvx.ok && JSON.stringify(pvx.row) === JSON.stringify({ to: [{ kind: 'everyone' }], except: [{ kind: 'conversation', key: KB }, { kind: 'group', id: 'T-H' }] }), 'usePatchVerdict: All agents EXCEPT a conversation and a Task Group — the row carries both exceptions', pvx);
+  ok(PV(PROFS.all, { mode: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', key: KB }], except: [{ kind: 'session', key: KB }] }, [KB]).code === 'except_conflicts' && PV(PROFS.all, { mode: 'all', except: [{ kind: 'everyone' }] }).code === 'bad-request' && PV(PROFS.all, { mode: 'all', except: 'x' }).code === 'bad-request', 'usePatchVerdict: a member both picked and left out ⇒ except_conflicts; All agents is never an exception; except must be a list');
+  ok(PV(PROFS.all, { mode: 'only', who: [{ kind: 'session', key: 'cid:conv-77' }] }, ['cid:conv-77']).row.to[0].key === 'conv-77', 'a conversation with no browser key yet rides as `cid:<id>` and is stored as that conversation');
   const PVT = [
     ['all', PV(PROFS['only[s:A]'], { mode: 'all' }), 'ok'],
     ['empty list', PV(PROFS.all, { mode: 'only', who: [] }), 'empty_list'],
@@ -147,7 +160,9 @@ console.log('— ① PURE: the default, one field, join-vs-launch, one driver, t
   ok(!badPV.length, `usePatchVerdict: ${PVT.length} rows — empty_list, too_many (> ${B.WHO_MAX} after dedup), unknown kinds / modes / malformed ids refused by name, a task the store does not list / a key this profile never met refused (unless ALREADY in the list: a kept dead row), a picked session must be resolved first, legacy / ephemeral / missing records refused`, badPV);
   ok(B.useShapeVerdict({ mode: 'only', who: [{ kind: 'session', session: 'sess-1' }] }).rows[0].session === 'sess-1' && B.useShapeVerdict({ scope: 'one' }).code === 'bad-request', 'useShapeVerdict keeps a picked live session as a `session` row for the resolver; the 2.369.194 body shape is not a `use`');
   // the pick writes the list
-  ok(JSON.stringify(B.ownerWithConversation(PROFS['only[t:G]'], KB + '.1')) === JSON.stringify({ kind: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', id: KB }] }) && B.ownerWithConversation(PROFS['only[s:A]'], KA) === null && B.ownerWithConversation(PROFS.all, KB) === null && B.ownerWithConversation(eph, KB) === null, 'ownerWithConversation: the list + the picked conversation (a helper → its parent); nothing to write when it is listed, the profile is everyone\'s, or the record has no list');
+  ok(JSON.stringify(B.rowWithConversation(PROFS['only[t:G]'], KB)) === JSON.stringify({ to: [{ kind: 'group', id: 'T-G' }, { kind: 'conversation', key: KB }], except: [] }) && B.rowWithConversation(PROFS['only[s:A]'], KA) === null && B.rowWithConversation(PROFS.all, KB) === null && B.rowWithConversation(eph, KB) === null, 'rowWithConversation: the list + the picked conversation (the keeper names a key\'s conversation); nothing to write when it is listed, the profile is everyone\'s, or the record has no list');
+  const allButB = { ...PROFS.all, grantUse: { to: [{ kind: 'everyone' }], except: [{ kind: 'conversation', key: KB }] } };
+  ok(B.mayAttach(allButB, ASKERS.B).code === 'excepted' && B.mayAttach(allButB, ASKERS.A).via === 'all' && JSON.stringify(B.rowWithConversation(allButB, KB)) === JSON.stringify({ to: [{ kind: 'everyone' }, { kind: 'conversation', key: KB }], except: [] }) && /left this conversation out/.test(B.exceptedRefusal({ label: 'work' }).error) && !CMDLINE_RE.test(B.exceptedRefusal({ label: 'work' }).error), '«除了»: All agents EXCEPT B refuses B `excepted` by name (no command line), admits A; the user\'s own pick of B for a conversation lifts the exception');
   // the agent's view: whether ITS conversation may, and through what — never the list, never another conversation's key
   const av = (p, a) => B.agentUseOf(p, a);
   ok(JSON.stringify(av(PROFS.all, ASKERS.B)) === JSON.stringify({ mode: 'all', you: true, via: 'all' }) && av(PROFS['only[s:A]'], ASKERS.A).via === 'conversation' && av(PROFS['only[t:G]'], ASKERS['B in G']).via === 'task' && av(PROFS['only[t:G]'], ASKERS.B).you === false && av(PROFS['only[t:G]'], ASKERS['B unreadable']).unreadable === true, 'agentUseOf: all / yours (through the conversation) / yours (through its Task Group) / not yours / unknown for yours (the Task Group list unreadable)');

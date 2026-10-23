@@ -6,6 +6,7 @@ import { escHtml } from './utils.js';
 import { registerCommand, runCommand } from './contributions.js';
 import { t } from './i18n.js';
 import { enterSubmits } from './chat-enter-keys.js';
+import { pathSuggest } from './path-field.js'; // lane path-field: a typed /path gets THE path field's candidates
 
 function subseq(t, s) {
   let qi = 0;
@@ -72,6 +73,7 @@ export function installSessionPalette(app) {
     const listEl = overlay.querySelector('.palette-list');
     let items = [];
     let sel = 0;
+    let pathSeq = 0;
 
     const render = () => {
       listEl.innerHTML = '';
@@ -79,7 +81,7 @@ export function installSessionPalette(app) {
         const row = document.createElement('div');
         row.className = 'palette-item' + (i === sel ? ' active' : '');
         if (it.newSession) {
-          row.innerHTML = `<span class="palette-name">New session in <b>${escHtml(it.cwd)}</b></span>`;
+          row.innerHTML = `<span class="palette-name">${escHtml(t('New session in'))} <b>${escHtml(it.display || it.cwd)}</b></span>${it.chip ? `<span class="palette-path">${escHtml(it.chip)}${it.isNew ? ' · ' + escHtml(t('New')) : ''}</span>` : ''}`;
         } else if (it.searchAll) {
           row.classList.add('palette-search-all');
           row.append(Object.assign(document.createElement('span'), { className: 'palette-name', textContent: t('Search conversations and files for \'{q}\'', { q: it.q }) }));
@@ -102,8 +104,18 @@ export function installSessionPalette(app) {
       const q = input.value.trim().toLowerCase();
       const local = app.sidebar?._allSessions || [];
       if (q.startsWith('/') || q.startsWith('~')) {
-        items = [{ newSession: true, cwd: input.value.trim() }];
-        sel = 0; render(); return;
+        // lane path-field: THE path field's candidates for a typed path (the same rank — Task Groups' folders, recent ones,
+        // the listing); each row starts a new session there
+        const typed = input.value.trim();
+        items = [{ newSession: true, cwd: typed }];
+        sel = 0; render();
+        const my = ++pathSeq;
+        pathSuggest(typed).then((rows) => {
+          if (my !== pathSeq || !overlay || input.value.trim() !== typed || !rows.length) return;
+          items = rows.map((r) => ({ newSession: true, cwd: r.path, display: r.display, chip: r.chip, isNew: r.isNew }));
+          sel = 0; render();
+        });
+        return;
       }
       // Include REMOTE-discovered sessions (Ctrl+K used to search only _allSessions
       // = local + live-remote, never remote STOPPED sessions — real report). Pull

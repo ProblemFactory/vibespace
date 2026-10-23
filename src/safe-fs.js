@@ -39,7 +39,7 @@ const PATH_KEYS = ['path', 'oldPath', 'newPath', 'src', 'dest'];
 // { timeoutMs }.
 const DEFAULT_TIMEOUTS = {
   default: 15000,
-  stat: 15000, exists: 15000, access: 15000, listDir: 15000, readdirNames: 15000, fileInfo: 15000, folderCensus: 15000,
+  stat: 15000, exists: 15000, access: 15000, listDir: 15000, readdirNames: 15000, fileInfo: 15000, folderCensus: 15000, dirSlice: 15000, dirIndex: 15000,
   readText: 20000, readChunk: 20000, csvRange: 30000,
   writeFile: 30000, mkdir: 15000, rename: 15000, remove: 20000, unlink: 20000,
   copy: 120000, move: 120000,

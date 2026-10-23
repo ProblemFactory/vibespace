@@ -5,6 +5,14 @@
 // (VIBESPACE_SESSION_TOKEN / VIBESPACE_JOB_TOKEN from the environment), and writes only inside the design folder it
 // names (no `..`, symlinks resolved first, a symlinked file never written through). Every verdict comes from the hub
 // (src/design-model.js runs there — this file ships no copy of it). Full manual: vibespace-docs design.
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-design: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-design', flags: ['--timeout', '--call-timeout'] });
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -45,8 +53,9 @@ One complete HTML document per artboard; images beside it, referenced by name (s
 Full manual: vibespace-docs design`;
 
 function die(msg, code = 1) { console.error(msg); process.exit(code); }
-async function call(method, p, body) {
-  const res = await fetch(API + p, { method, headers: { Authorization: 'Bearer ' + TOKEN, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }).catch((e) => ({ _neterr: e.message }));
+// lane cli-call-timeouts: a write is a wake here (a design read / publish may run over a remote host)
+async function call(method, p, body, cc = {}) {
+  const res = await CC.call(API + p, { ...(method !== 'GET' ? { cls: 'wake' } : {}), ...cc, method, headers: { Authorization: 'Bearer ' + TOKEN, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined }).catch((e) => ({ _neterr: e.message }));
   if (res._neterr) die('vibespace-design: VibeSpace is unreachable (' + res._neterr + ')', 3);
   let j = {};
   try { j = await res.json(); } catch { }

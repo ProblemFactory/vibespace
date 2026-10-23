@@ -120,11 +120,13 @@ function selfRead(r, selfId = null) {
  *  re-derives the row's whole count past it — older unread records before it are read now). */
 /** B-ef03 (vendor system notices, 2026-10-08): a vendor SYSTEM notice (`kind: 'system'` — a recall, a join; src/channel-record.js) is READ BY CONSTRUCTION
  *  too — it adds 0, never moves the read line, is never news and never a watch hit (nobody wrote it). */
-function systemRead(r) { return !!r && typeof r === 'object' && r.kind === 'system'; }
+// lane gmail-draft-not-a-message (fb-9aa1d3bd1e): so is the account's unsent DRAFT (`kind: 'draft'` — nobody received it): it adds
+// 0, never moves the read line, is never news and never a watch hit.
+function systemRead(r) { return !!r && typeof r === 'object' && (r.kind === 'system' || r.kind === 'draft'); }
 function readAdvance(readAt, recs, selfId = null) {
   const list = Array.isArray(recs) ? recs : [];
   let line = num(readAt);
-  for (const r of list) if (selfRead(r, selfId) && num(r && r.at) > line) line = num(r.at);
+  for (const r of list) if (selfRead(r, selfId) && !systemRead(r) && num(r && r.at) > line) line = num(r.at);
   let unread = 0;
   for (const r of list) if (r && !selfRead(r, selfId) && !systemRead(r) && num(r.at) > line) unread++;
   return { readAt: line, unread, moved: line > num(readAt) };

@@ -716,7 +716,7 @@ await (async () => {
   servers.add(api);
   const BIN = path.join(D, 'bin'); fs.mkdirSync(BIN, { recursive: true });
   fs.copyFileSync(path.join(repo, 'data', 'bin', 'vibespace-browser'), path.join(BIN, 'vibespace-browser'));
-  fs.copyFileSync(path.join(repo, 'src', 'browser-verbs.js'), path.join(BIN, 'vibespace-browser-verbs.js'));
+  fs.copyFileSync(path.join(repo, 'src', 'browser-verbs.js'), path.join(BIN, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(repo, 'src/cli-call.js'), path.join(BIN, 'cli-call.js'));
   fs.copyFileSync(path.join(repo, 'src', 'browser-stuck.js'), path.join(BIN, 'vibespace-browser-stuck.js'));
   const PRELOAD = path.join(ROOT, 'h1-passwd.cjs'); fs.writeFileSync(PRELOAD, `const os = require('os'); const real = os.userInfo; os.userInfo = (o) => ({ ...real(o), homedir: ${JSON.stringify(H)} });\n`);
   const agent = (tok, argv) => new Promise((resolve) => { const c = spawn(process.execPath, ['--require', PRELOAD, path.join(BIN, 'vibespace-browser'), ...argv], { env: { PATH: env.PATH, HOME: H, XDG_RUNTIME_DIR: XDG, VIBESPACE_API: `http://127.0.0.1:${api.address().port}`, VIBESPACE_SESSION_TOKEN: tok }, stdio: ['ignore', 'pipe', 'pipe'] }); procs.add(c); let so = '', se = ''; c.stdout.on('data', (d) => { so += d; }); c.stderr.on('data', (d) => { se += d; }); c.on('exit', (code) => { procs.delete(c); resolve({ code, so: so.trim(), se: se.trim() }); }); });

@@ -29,7 +29,10 @@ import { askArtifactRow, askArtifactProbe, linkTarget } from './foryou-links.js'
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): THE confirm dialog + request path; a cleared item's words
 import { revealLeftMs, revealHeaders, askRevealPassword, forgetReveal } from './vault-reveal.js'; // lane vault-run-door: a held run's «always» asks 验证是你 FIRST, in the press's own task
 import { replyBoxView } from '../inbox-reply.js'; // PURE (lane inbox-reply-dead-session): THE reply box both surfaces draw — never disabled
+import { grantUseBody, grantReplyText } from '../ask-grant.js'; // PURE (lane controls-that-lie): an ask that names a grant — the PATCH it plans, the answer the agent reads
+import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «Who can use it»'s own refusal words (the dialog's)
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
+import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
  *  popup's Inbox tab and the window's Actions tab (B-328d: "same words as the badge"). */
@@ -226,14 +229,14 @@ export function inboxModel(app) {
    *  the typing path, quoted. Both outcomes reach the user as a toast; resolves
    *  true when the reply was sent (the caller then clears its box + draft). A
    *  reply to a conversation that ENDED reopens it (`reopened` — its window opens here). */
-  const postReply = async (id, text) => {
+  const postReply = async (id, text, { sentToast = null } = {}) => {   // `sentToast` (lane controls-that-lie): a grant's own words replace «Reply sent»
     // fetchJson never throws — a null (network) or an {error, code} body is a
     // FAILURE the user must see (no silent failures); the box keeps its text
     const r = await fetchJson(`/api/user-todos/${encodeURIComponent(id)}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
     if (r && r.ok) {
       replyFailures.delete(id); drafts.delete(id);
       if (r.reopened) { showToast(t('Reopened the conversation and sent your reply')); openReopened(r); }
-      else showToast(t('Reply sent'));
+      else showToast(sentToast || t('Reply sent'));
       return true;
     }
     const why = r && r.error ? t(r.error) : t('server unreachable');
@@ -253,9 +256,37 @@ export function inboxModel(app) {
   };
   /** The item's context-menu rows (the popup's and the window's): today only Clear content…. */
   const menuFor = (id) => { const it = byId(id); return it && !isCleared(it) ? [{ label: t('Clear content…'), action: () => { clearContent(id); } }] : []; };
+  /** AN ASK THAT NAMES A GRANT, PERFORMED (lane controls-that-lie, naive study round 4 R1 — «Granted access» only typed two
+   *  words): «Who can use it» gains the asking conversation through the owner's OWN door — the dialog's fresh GET + its
+   *  whole-list PATCH with the `base` it read (src/lib/browser-who-dialog.js) — and ONLY THEN the agent is answered on the
+   *  reply road (the item resolves `by your reply`, the words in it are `grantReplyText`'s). A refusal is said by name and
+   *  the item stays open; nothing is typed to the agent before the grant landed. Resolves true when both ran. */
+  const grantBrowser = async (rec) => {
+    const pid = String(rec.action.profileId || ''), label = String(rec.action.label || pid);
+    const live = sessionFor(rec.sessionKey);
+    const sid = live && live.webuiId ? String(live.webuiId) : '';
+    let plan = null;
+    for (let attempt = 0; attempt < 2; attempt++) {   // a list another window changed between the read and the write (409 list-changed): read it again, once
+      const view = sid ? await fetchJson(`/api/browser/profiles/${encodeURIComponent(pid)}/use`) : null;
+      if (sid && (!view || view.error)) { showToast(t('Could not change who can use it') + ' — ' + ((view && view.error) || t('server unreachable')), { type: 'error', duration: 9000 }); return false; }
+      plan = grantUseBody(view, sid);
+      if (plan.error === 'no-session') { showToast(t('The conversation that asked is not running — open it, then press again'), { type: 'error', duration: 9000 }); return false; }
+      if (plan.error) { showToast(t('Could not change who can use it') + ' — ' + t('the list could not be read; open the Agent browser panel → {label} → Who can use it', { label }), { type: 'error', duration: 9000 }); return false; }
+      if (plan.already) break;
+      const r = await fetchJson(`/api/browser/profiles/${encodeURIComponent(pid)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ use: plan.use, base: plan.base }) });
+      if (r && !r.error) break;
+      if (r && r.code === 'list-changed' && attempt === 0) continue;
+      showToast(whoRefusalWords(r, t) || (t('Could not change who can use it') + ' — ' + ((r && r.error) || t('server unreachable'))), { type: 'error', duration: 9000 });
+      return false;
+    }
+    return postReply(rec.id, grantReplyText({ label, profileId: pid, already: !!plan.already }), {
+      sentToast: plan.already ? t('{label} was already open to this conversation — the agent was told', { label }) : t('{label}: this conversation may use it now — the agent was told', { label }),
+    });
+  };
   /** A PRODUCER'S ACTION (design-reset-credits p2): the client maps the item's
    *  `action.type` to a verb it owns. Today: the reset-credit confirm dialog. */
   const runAction = async (rec, answer = null, extra = {}) => {   // `extra.reach` (lane key-instance-scope): an automation card's picked reach
+    if (rec && rec.action && rec.action.type === 'browser-grant') return grantBrowser(rec);
     if (rec && rec.action && rec.action.type === 'channel-reauth') {
       // lane channel-names-readable: the account's sign-in lacks a permission — ITS Re-authorize dialog (the channels
       // engine resolves the item once the permission works)
@@ -358,6 +389,12 @@ export function inboxModel(app) {
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_unknown' ? t('That request is gone')
         : code === 'ask_changed' ? t('The request changed after it was shown — nothing ran') : (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;
+    }
+    if (rec && rec.action && rec.action.type === 'secret-request') {
+      // lane vault-paste-request: THE owner's answer to an agent's request for a secret (cookie route; any bearer is refused
+      // human_only) — store (the field's value, in the request body only) / deny. The server resolves the item and tells the
+      // agent on its next turn; a refusal (locked, the field's rule) is said in the box and a toast — never with the value.
+      return postSecretAnswer(rec, answer === 'store' ? 'store' : 'deny', { value: answer === 'store' && extra && typeof extra.value === 'string' ? extra.value : null, onRefusal: extra && extra.onRefusal });
     }
     if (rec && rec.action && rec.action.type === 'channel-watch-request') {
       // lane channel-agent-watch W1: an agent asked to be WOKEN by a conversation — Approve writes exactly what the item

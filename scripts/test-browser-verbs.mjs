@@ -858,7 +858,7 @@ try {
     const src = fs.readFileSync(CLI, 'utf8');
     const r3 = src.replace('if (stdinJson != null) child.stdin.end(stdinJson);', 'if (stdinJson != null) child.stdin.end(stdinBuf);');
     const D5 = path.join(ROOT, 'r3-stdinctl'); fs.mkdirSync(D5, { recursive: true });
-    fs.writeFileSync(path.join(D5, 'vibespace-browser'), r3); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D5, 'vibespace-browser-verbs.js'));
+    fs.writeFileSync(path.join(D5, 'vibespace-browser'), r3); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D5, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D5, 'cli-call.js'));
     c = await nodeCli(path.join(D5, 'vibespace-browser'), ['batch'], { env: baseEnv, input: 'open https://x\nsnapshot -i\n' });
     rc = realCalls();
     ok(r3 !== src && c.status === 1 && rc[rc.length - 1].invalidStdin === true && /Invalid JSON input/.test(c.stderr), 'r4 NEGATIVE CONTROL: the r3 hand-over (patched copy: the raw lines) is the binary\'s `Invalid JSON input` — the fake reads stdin as the real binary does', JSON.stringify([c.status, c.stderr.slice(0, 200)]));
@@ -969,7 +969,7 @@ try {
       const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
       const r1v = vsrc.replace("'AGENT_BROWSER_DEFAULT_TIMEOUT']);", "'AGENT_BROWSER_DEFAULT_TIMEOUT', 'AGENT_BROWSER_SOCKET_DIR']);").replace('if (absPath(a.socketDir)) {', 'if (false) {');
       const D2 = path.join(ROOT, 'r1-sockctl'); fs.mkdirSync(D2, { recursive: true });
-      fs.copyFileSync(CLI, path.join(D2, 'vibespace-browser')); fs.writeFileSync(path.join(D2, 'vibespace-browser-verbs.js'), r1v);
+      fs.copyFileSync(CLI, path.join(D2, 'vibespace-browser')); fs.writeFileSync(path.join(D2, 'vibespace-browser-verbs.js'), r1v); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D2, 'cli-call.js'));
       resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], ...KEEPER, handles: [], pinTab: false };
       const rc2 = await nodeCli(path.join(D2, 'vibespace-browser'), ['snapshot'], { env: twinEnv });
       ok(r1v !== vsrc && r1v.includes('if (false) {') && rc2.status === 0 && last().env.AGENT_BROWSER_SOCKET_DIR === DECOY.AGENT_BROWSER_SOCKET_DIR && last().xdg === DECOY.XDG_RUNTIME_DIR, 'r2 CONTROL: the r1 table in a patched copy hands the agent\'s decoy root to the binary', JSON.stringify({ sd: last().env.AGENT_BROWSER_SOCKET_DIR, xdg: last().xdg, st: rc2.status, err: rc2.stderr.slice(0, 200) }));
@@ -979,7 +979,7 @@ try {
     const CTL = path.join(ROOT, 'vibespace-browser-prefix');
     const patched = src.replace(/const built = V\.childEnv\([^\n]*\n/, 'const built = { env: { ...process.env, ...Object.fromEntries((r.env || []).map((kv) => [kv.slice(0, kv.indexOf(\'=\')), kv.slice(kv.indexOf(\'=\') + 1)])) }, dropped: [] };\n');
     fs.writeFileSync(CTL, patched, { mode: 0o755 });
-    fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(ROOT, 'vibespace-browser-verbs.js'));
+    fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(ROOT, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(ROOT, 'cli-call.js'));
     resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], handles: [], pinTab: false };
     const rctl = await nodeCli(CTL, ['snapshot'], { env: twinEnv });
     ok(patched !== src && rctl.status === 0 && leaked(last().env).length > 5, `CONTROL: the pre-fix env line in a patched copy leaks the twins (${leaked(last().env).length})`, rctl.stderr);
@@ -1025,7 +1025,7 @@ try {
     const csrc = fs.readFileSync(CLI, 'utf8');
     const cpre = csrc.replace('  if (built.needsConfig) {', '  if (false) {');
     const D3 = path.join(ROOT, 'r2-cfgctl'); fs.mkdirSync(D3, { recursive: true });
-    fs.writeFileSync(path.join(D3, 'vibespace-browser'), cpre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D3, 'vibespace-browser-verbs.js'));
+    fs.writeFileSync(path.join(D3, 'vibespace-browser'), cpre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D3, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D3, 'cli-call.js'));
     r4 = await nodeCli(path.join(D3, 'vibespace-browser'), ['snapshot'], { env: baseEnv, cwd: DIRTY });
     ok(cpre !== csrc && r4.status === 0 && !('AGENT_BROWSER_CONFIG' in last().env), 'r3 NEGATIVE CONTROL: the r2 CLI (patched copy) runs the binary with NO config named — the search that lands ./agent-browser.json', JSON.stringify(last().env));
     fs.rmSync(UCFG, { force: true });
@@ -1079,7 +1079,7 @@ try {
     const src = fs.readFileSync(CLI, 'utf8');
     const pre = src.replace('  if (cls.uploadFiles && cls.uploadFiles.length) {', '  if (false) {');
     const D6 = path.join(ROOT, 'r2-uploadctl'); fs.mkdirSync(D6, { recursive: true });
-    fs.writeFileSync(path.join(D6, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D6, 'vibespace-browser-verbs.js'));
+    fs.writeFileSync(path.join(D6, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D6, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D6, 'cli-call.js'));
     r6 = await nodeCli(path.join(D6, 'vibespace-browser'), ['upload', '@e1', path.join(HOME, '.ssh', 'id_rsa')], { env: baseEnv, cwd: UD });
     ok(pre !== src && r6.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['upload', '@e1', path.join(HOME, '.ssh', 'id_rsa')]), 'lane L r2 NEGATIVE CONTROL: the pre-r2 CLI (patched copy, no upload check) hands ~/.ssh/id_rsa to the binary — the legs above can go red', r6.stderr);
   }
@@ -1133,7 +1133,7 @@ try {
     const pre = src.replace('  if (cls.writeFiles && cls.writeFiles.length) {', '  if (false) {')
       .replace('{ const wr = framed.writes.length ? writeRefusal(framed.writes) : null; if (wr) refuseLocally(wr); }', '{ }');
     const D7 = path.join(ROOT, 'ctl', 'r4-writectl', 'bin'); fs.mkdirSync(D7, { recursive: true });
-    fs.writeFileSync(path.join(D7, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D7, 'vibespace-browser-verbs.js'));
+    fs.writeFileSync(path.join(D7, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D7, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D7, 'cli-call.js'));
     r7 = await nodeCli(path.join(D7, 'vibespace-browser'), ['download', '#k', path.join(HOME, '.ssh', 'authorized_keys')], { env: wenv, cwd: WD });
     ok(pre !== src && r7.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['download', '#k', path.join(HOME, '.ssh', 'authorized_keys')]), 'lane L r4 NEGATIVE CONTROL: the pre-r4 CLI (patched copy, no write check) hands ~/.ssh/authorized_keys to the binary — the legs above can go red', r7.stderr);
     fs.rmSync(path.join(WD, 'evil.txt'), { force: true });
@@ -1150,7 +1150,7 @@ try {
     const penv = { ...benv, VIBESPACE_SESSION_CWD: P };
     const last = () => realCalls().pop();
     const DC = V.ensureDaemonCwd({ fs, tmpdirs: [TMPD, '/tmp'], uid: process.getuid(), checkout: REPO });   // what the CLI (TMPDIR = TMPD) must run the binary in
-    const ctlCopy = (name, cliSrc, verbsSrc) => { const d = path.join(ROOT, 'ctl', name, 'bin'); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'vibespace-browser'), cliSrc); fs.writeFileSync(path.join(d, 'vibespace-browser-verbs.js'), verbsSrc || fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8')); return path.join(d, 'vibespace-browser'); };
+    const ctlCopy = (name, cliSrc, verbsSrc) => { const d = path.join(ROOT, 'ctl', name, 'bin'); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'vibespace-browser'), cliSrc); fs.writeFileSync(path.join(d, 'vibespace-browser-verbs.js'), verbsSrc || fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(d, 'cli-call.js')); return path.join(d, 'vibespace-browser'); };
     const src = fs.readFileSync(CLI, 'utf8');
     ok(DC.ok && DC.dir === path.join(fs.realpathSync(TMPD), `vibespace-browser-cwd-${process.getuid()}`) && (fs.statSync(DC.dir).mode & 0o777) === 0o700, `lane L r5 F1(b): the private daemon directory is <TMPDIR>/vibespace-browser-cwd-<uid>, 0700 (${DC.dir})`, JSON.stringify(DC));
     // ── F1 (CRITICAL): the binary is handed the ABSOLUTE path that was judged, and runs in the private directory
@@ -1307,7 +1307,7 @@ try {
     const src = fs.readFileSync(CLI, 'utf8');
     const r3 = src.replace('  if (!pw) return { home: os.homedir(), pw: null, env, agrees: true };', '  pw = null;\n  if (!pw) return { home: os.homedir(), pw: null, env, agrees: true };');
     const D6 = path.join(ROOT, 'r3-homectl'); fs.mkdirSync(D6, { recursive: true });
-    fs.writeFileSync(path.join(D6, 'vibespace-browser'), r3); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D6, 'vibespace-browser-verbs.js'));
+    fs.writeFileSync(path.join(D6, 'vibespace-browser'), r3); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D6, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D6, 'cli-call.js'));
     r6 = await nodeCli(path.join(D6, 'vibespace-browser'), ['open', 'about:blank'], { env: { ...baseEnv, HOME: FAKEHOME } });
     const lc2 = realCalls().pop();
     const composed = lc2 && lc2.env.AGENT_BROWSER_CONFIG && fs.existsSync(lc2.env.AGENT_BROWSER_CONFIG) ? fs.readFileSync(lc2.env.AGENT_BROWSER_CONFIG, 'utf8') : '';
@@ -1339,7 +1339,7 @@ try {
     const src = fs.readFileSync(CLI, 'utf8');
     const r3 = src.replace('const drift = V.versionDrift(binVersionRaw);', 'const drift = null;'); // verify r2 (H1): the version string is read once (binVersionRaw) — the browser's own version is judged after /resolve
     const D7 = path.join(ROOT, 'r3-driftctl'); fs.mkdirSync(D7, { recursive: true });
-    fs.writeFileSync(path.join(D7, 'vibespace-browser'), r3); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D7, 'vibespace-browser-verbs.js'));
+    fs.writeFileSync(path.join(D7, 'vibespace-browser'), r3); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D7, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D7, 'cli-call.js'));
     r9 = await nodeCli(path.join(D7, 'vibespace-browser'), ['get', '--json', 'text', 'cdp-url'], { env: baseEnv });
     ok(r3 !== src && r9.status === 0 && JSON.stringify(realCalls().pop().argv) === '["get","--json","text","cdp-url"]', 'r4 NEGATIVE CONTROL: without the gate (patched copy) the 0.32.0 table runs silently on a 0.33.0 binary', r9.stderr);
     fs.writeFileSync(FAKE_VERSION, V.TABLE_VERSION);

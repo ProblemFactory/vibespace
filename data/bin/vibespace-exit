@@ -34,6 +34,14 @@
 // SAME grant as `run` (and its "ask me each time"), through the machine's own file ops — no shell, no 30 s cap, no
 // output bound: up to the user's limit (default 1 GiB), sha256-checked on both ends, never half-kept on failure. A pull
 // lands under this conversation's project directory, /tmp or ~/Downloads (default: ./<the remote file's name>).
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --call-timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-exit: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-exit', flags: ['--call-timeout'] });
 const api = process.env.VIBESPACE_API;
 const token = process.env.VIBESPACE_SESSION_TOKEN;
 if (!api || !token) { console.error('vibespace-exit: not running inside a VibeSpace session (missing env)'); process.exit(2); }
@@ -92,36 +100,27 @@ function fail(data, status) {
   process.exit(data && data.code === 'spawn_failed' && Number.isInteger(data.exitCode) ? data.exitCode : 1);
 }
 async function get(path) {
-  const res = await fetch(api + path, { headers: { Authorization: 'Bearer ' + token } });
+  const res = await CC.call(api + path, { headers: { Authorization: 'Bearer ' + token } });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) fail(data, res.status);
   return data;
 }
-async function post(path, body) {
-  const res = await fetch(api + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(body) });
+async function post(path, body, cc = {}) {
+  const res = await CC.call(api + path, { ...cc, method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) fail(data, res.status);
   return data;
 }
-// a POST whose answer may be minutes away (a pull answers once the file landed): plain http(s).request, which sets no
-// deadline — global fetch gives up on an answer's headers after 300 s (UND_ERR_HEADERS_TIMEOUT), and the hub then stops
-// the transfer between windows (verify r2: a pull longer than 5 min never landed)
-function postLong(path, body) {
-  const u = new URL(api + path), raw = Buffer.from(JSON.stringify(body));
-  return new Promise((resolve, reject) => {
-    const req = require(u.protocol === 'https:' ? 'https' : 'http').request(u, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': raw.length, Authorization: 'Bearer ' + token } }, (res) => {
-      const chunks = [];
-      res.on('data', (d) => chunks.push(d));
-      res.on('end', () => {
-        let data = {};
-        try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { }
-        if (res.statusCode >= 400) fail(data, res.statusCode); else resolve(data);
-      });
-      res.on('error', reject);
-    });
-    req.on('error', reject);
-    req.end(raw);
-  });
+// a POST whose answer may be minutes away (a pull answers once the file landed): global fetch gave up on an answer's
+// headers after 300 s (UND_ERR_HEADERS_TIMEOUT) and the hub then stopped the transfer between windows (verify r2: a pull
+// longer than 5 min never landed) — the ONE call with its own bound (lane cli-call-timeouts: 6 h — a transfer's time scales with
+// its size, and test-exit-run's verify r2 leg holds a pull past any shorter client deadline; --call-timeout overrides)
+async function postLong(path, body) {
+  const res = await CC.call(api + path, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(body), cls: 'wake', ms: 6 * 3600000 });
+  let data = {};
+  try { data = JSON.parse(await res.text()); } catch { }
+  if (res.status >= 400) fail(data, res.status);
+  return data;
 }
 
 async function main() {
@@ -187,30 +186,19 @@ async function main() {
     if (!st || !st.isFile()) { clearTimeout(note); console.error('vibespace-exit push: not a regular file here: ' + local); process.exit(1); }
     const u = new URL(api + '/api/agent/exit/push?' + new URLSearchParams({ machine: machine || '', remote, local, size: String(st.size), ...(overwrite ? { overwrite: '1' } : {}) }).toString());
     // the request BODY is the file, streamed; the answer may come before the last byte (a refusal) — then sending stops
-    const r = await new Promise((resolve, reject) => {
-      const src = fs.createReadStream(local);
-      const req = require(u.protocol === 'https:' ? 'https' : 'http').request(u, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/octet-stream' } }, (res) => {
-        const chunks = [];
-        res.on('data', (d) => chunks.push(d));
-        res.on('end', () => {
-          let data = {};
-          try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { }
-          src.destroy(); req.destroy();
-          clearTimeout(note);
-          if (res.statusCode >= 400) fail(data, res.statusCode); else resolve(data);
-        });
-      });
-      req.on('error', (e) => { if (!req.res) reject(e); });
-      src.on('error', (e) => { req.destroy(); reject(e); });
-      src.pipe(req);
-    });
+    // (the ONE call pipes it — lane cli-call-timeouts: bounded like a pull, 6 h, --call-timeout overrides)
+    const res = await CC.call(u.href, { method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/octet-stream' }, body: fs.createReadStream(local), cls: 'wake', ms: 6 * 3600000 });
+    clearTimeout(note);
+    let r = {};
+    try { r = JSON.parse(await res.text()); } catch { }
+    if (res.status >= 400) fail(r, res.status);
     console.log(r.line);
     return;
   }
 
   if (cmd === 'use' || cmd === 'url') {
     const machine = rest[0];
-    const r = await post('/api/agent/exit/use', { machine });
+    const r = await post('/api/agent/exit/use', { machine }, { cls: 'wake', ms: 90000 });   // the user's Allow ≤ 60 s
     if (cmd === 'url') { console.log(r.url); return; }
     // shell exports honored by curl/git/most CLIs; covers proxy-aware TCP
     console.log(`export ALL_PROXY=${r.url}`);
@@ -232,14 +220,14 @@ async function main() {
     // when the call outlives a second and the machine asks.
     const waitNote = setTimeout(async () => {
       try {
-        const res = await fetch(api + '/api/agent/exit', { headers: { Authorization: 'Bearer ' + token } }); // never get(): a failed list must not end the waiting run
+        const res = await CC.call(api + '/api/agent/exit', { headers: { Authorization: 'Bearer ' + token }, onExpiry: 'throw' }); // never get(): a failed list must not end the waiting run
         const { exits } = res.ok ? await res.json() : { exits: [] };
         const r0 = String(machine || '').toLowerCase();
         const hit = (exits || []).filter((e) => !r0 || e.id === machine || String(e.name).toLowerCase().includes(r0));
         if (hit.some((e) => e.grants && e.grants.runAsk)) console.error("# waiting for the user's approval (up to 60 s)…");
       } catch { }
     }, 1000);
-    const r = await post('/api/agent/exit/run', { machine, cmd: command });
+    const r = await post('/api/agent/exit/run', { machine, cmd: command }, { cls: 'wake', ms: 105000 });   // the user's Allow ≤ 60 s + the run ≤ 30 s
     clearTimeout(waitNote);
     if (r.stdout) process.stdout.write(r.stdout.endsWith('\n') ? r.stdout : r.stdout + '\n');
     if (r.stderr) process.stderr.write(r.stderr.endsWith('\n') ? r.stderr : r.stderr + '\n');

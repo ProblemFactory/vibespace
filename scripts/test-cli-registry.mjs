@@ -64,6 +64,7 @@ const EXCLUDED = Object.freeze({
   'vibespace-browser-stuck.js': 'a module vibespace-browser loads (the dialog words), copied at boot',
   'vibespace-browser-passkey.js': 'a module vibespace-browser loads (the passkey words), copied at boot',
   'agent-cli-text.js': 'the ONE-text rule module the free-text CLIs require (lane cli-one-text-arg)',
+  'cli-call.js': 'THE ONE CALL every agent CLI makes to its hub, copied at boot (lane cli-call-timeouts)',
   'agent-browser': 'the driver behind vibespace-browser — agents are never taught its name (test-architecture §52)',
   'editor': 'the EDITOR stand-in\'s own dir, off the PATH since B-b87b',
   'editor/code': 'Claude Code\'s EDITOR stand-in (Ctrl+G) — EDITOR= names it, the PATH never does (B-b87b)',

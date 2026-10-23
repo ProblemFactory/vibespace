@@ -21,6 +21,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
+import { trackedFiles } from './tracked-files.mjs';   // lane grants-unify: §97 (b) lists src via git ls-files
+import * as acorn from 'acorn';   // lane grants-unify (verify F3): §97 (a) judges each reader's function body, not its lines
 import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src.mjs';
 import { BEFORE_REF as BEFORE82, beforeBlocks, beforeText, census as censusMoved, judge as judgeMoved, region as regionMoved } from './claude-md-retire.mjs';   // lane claude-md-retire: §82's census, shared with the retire verb   // lane dc-channels-seams: the engine + its three family files as one text
 
@@ -60,7 +62,7 @@ const resolveRel = (from, spec) => {
 };
 
 // ── Tier membership (path-based; NEW files inherit their directory's tier) ──
-const PURE = new Set(['src/day-one.js' /* lane door-day-one-landing (two naive-user studies on fleet pods): DAY ONE's verdicts — the tour's steps (no protect step on a protected workspace), the folder chips' order (the home's folders with files first, the last one used), the vault's setup ask only once a secret is stored, the rail's first-week words, git's identity from the sign-in, the sign-in terminal's purpose; imports nothing */, 'src/device-runtime.js' /* lane device-node-version (the Node.js security releases of 2026-10-21): the floor table per major line + its advisory, a hello-ack's runtime bounded, the verdict (old / ok / unlisted / unknown + the recipe), a system node's upgrade line, the hosts row's `runtime`; imports nothing */, 'src/sync-arrival.js' /* lane statesync-last-arrival (B-cede): StateSync's arrival rule — may a remote op touch the client's copy of a key (apply / drop / queue by the server's store version against the own acked set), its table; the client's StateSync asks it at one place — imports nothing */, 'src/when-words.js' /* lane agent-context-owner-facts (B-7960 a): THE time formatter — every time an agent reads, in the owner's zone, named (whenOf / zoneOf / zoneSentence) */, 'src/tray-words.js' /* lane agent-context-owner-facts (B-7960 b): the owner's tray in words — its label in their language + its current place, derived from the chrome settings (trayWords) */, 'src/app-csp.js' /* lane app-page-csp (design q-043 D6): the app page's REPORT-ONLY policy (the measured directives, the sign-in page's nonce variant) + a report as a line without a value (origin + 3 segments, no sample, no query), the line / pair keys, the frame-document rule, the notice words; imports nothing */, 'src/vault-use.js' /* lane vault-use-law (design q-043 D1/D2/D7): THE USE LAW — the use's ONE shape, the vault-use audit line (a closed key set, never a value), the daily failure count, an entry in words; imports nothing */, 'src/vault-run.js' /* lane vault-run-model (design q-043 §8 P0-e): A SECRET IN A COMMAND — the reference grammar, the injection table (argv refused), the plain-env and tool refusal tables, the known tools, the shape key, the run verdict, the five-form chunked scrubber (a SIEVE, said in its header); imports only vault-inventory + vault-blocked */, 'src/vault-inventory.js' /* lane vault-contents-window: THE VAULT'S CONTENTS — the stores, the <store>:<entry>#<field> reference, rowOf, revealVerdict; imports nothing (listed by lane vault-run-model, whose PURE module imports it) */, 'src/vault-loud.js' /* lane vault-locked-loud: what a LOCKED vault says on the first screen — THE table (the dialog once per lock in a tab, the ⚙ mark, the urgent For-you item), the lock key, vaultLoudState; the bundle and the hub share it; imports nothing */, 'src/vault-blocked.js' /* lane vault-locked-refusal-notice: the vault's blocked list — who a vault_locked refusal stopped this lock epoch (≤ 50 actors, the rest a count), the one item's words, THE words toward an agent (the user was already told); imports nothing */, 'src/agentd-signature.js' /* lane device-bundle-signing (design q-042 D2): THE release signature of the device agent — the verdict a device lands a bundle on (the key chain, the codes), sign / signLink / generateKeyPair for the release machine, the hub's manifest identity check, the pin's text; node crypto is HANDED IN */, 'src/agentd/release-keys.js' /* lane device-bundle-signing: the release PUBLIC keys + the rotation chain a device pins — data, imports nothing */, 'src/agent-cli-registry.js' /* lane cli-registry: THE agent CLI registry — one row per CLI on PATH (name, topic, summary, manual, gate, teaching) and the renderers of the SessionStart section, the reminder, the index and the docs topics; imports nothing */, 'src/stream-plan.js' /* lane stream-p1b-screen (design q-041 r2 §2 采集/映射+编码): the screen source's plan — the FP16 → sRGB mapping + its 64 K table + the NV12 loop, the owner's calibration rows, the encoder ladder, the ffmpeg facts + verdict, the facts script + parser, the road + argvs, the bitrate hysteresis, the FLV reader; imports nothing */, 'src/stream-model.js' /* lane stream-p1a-transport (design q-041 r2): the WebRTC stream rung's decisions — the rung verdict over the agent's capabilities, the page's signaling state machine, the fallback verdict, video→source coordinates, the input event table, getStats → the strip, the relay framing; the daemon, the hub and the page ask it */, 'src/stream-window.js' /* lane stream-p2w-build (design q-041 r3 §3 P2w): ONE window as the stream's picture — the window source's shape (shared with the Mac source), the rung's window verdict, the picker's filter, the held verdict, the input shift + the size rule; imports nothing */, 'src/stream-h264.js' /* lane stream-p1a-transport: Annex-B → access units → RFC 6184 mode-1 payloads (single NAL / FU-A) — the daemon's packetizer, the suites' depacketizer */, 'src/stream-av1.js' /* lane stream-hdr-passthrough: IVF → AV1 temporal units → the aggregated-TU RTP payloads (W=0, Z/Y per packet — the P4 probe's measured packetizer) — the daemon's packetizer, the suites' depacketizer */, 'src/hdr-viewer.js' /* lane stream-hdr-passthrough: 「HDR 直通」's gate — the viewer verdict (dynamic-range + hardware WebRTC AV1), the machine's word, the per-machine memory, the 2 s decode-stall fallback */, 'src/sound-model.js' /* lane speaker-passthrough-v1 (B-aec9): the machine's SOUND to the viewer — the capability word, the encoder's argv + its streaming WAV header, the RTP reader, the Opus packet's samples, the session's sound clock, the 「声音」 toggle's verdict table + its per-machine memory, the refusal + consent words; imports nothing */, 'src/seen-marks.js' /* lane hook-seen-marks (B-86d3): the hook injection's seen marks — marksOf / restoreMarks / the folder-signature digest, shared by agent-routes and boot-restore */, 'src/key-file.js' /* lane key-file-law-stores: THE KEY-FILE LAW — loadOrMintKey over a store's three doors (read / mint / hasCiphertext); its fs half is secret-box lawfulKey */, 'src/agent-cli-text.js' /* lane cli-one-text-arg: THE ONE-text rule of vibespace-msg / -channels / -ask / -task (stray-word refusal, --text-file / --text - doors, the sent: N echo) + the routes' chars count — imports nothing; it ships beside the CLIs */, 'src/voice-model.js' /* Dropline voice input q-029 P0: dictationContext + voiceWords, shared by the bundle and the hub */, 'src/voice-teach.js' /* q-029 P1 (lane voice-p1-oauth-teach): the teach schedule (proposals, ignore, per-project tier, context cadence, caps) */, 'src/dial-health.js' /* lane host-stale-dialer (B-6136): a second agent with an old token — the verdict, the row's facts, the stop recipes, the journal / For-you clocks; imports nothing */, 'src/attention-model.js' /* lane foryou-folds (design q-044): THE attention list — rowOf / needsMe (five bands, the first screen's cap, the folds by band, 搁置), the judge's tie candidates, the badge and toast bands; the tray, the decision model and the engine read ONE spelling — imports nothing */, 'src/decision-model.js' /* lane decision-core: the decisions API's two dialects, the per-use input plans, the budget verdict, the journal row, the rubric v1 — imports only peer-text (PURE → PURE, the ONE belt) */, 'src/rule-learning.js' /* lane rule-learning (q-037 P0): the 「我关心什么」 drafter — availability, the bounded input, the strict schema, the normalizer, the diff — imports only decision-model (PURE → PURE) */, 'src/browser-passkey-store.js' /* lane passkey-store-core: the sealed passkey table, publicRow, THE GATE (§2.3) — imports nothing; the cipher is injected */, 'src/app-witness.js' /* lane apps-launcher-witness: what is installed OUTSIDE the door, by witness — the flatpak / desktop-entry readers, the seen.* group rule, the refresh rule, THE install-place words; imports only app-manifest (PURE → PURE) */, 'src/webhook-pair.js' /* lane webhook-l3-cli-pair: the instance pairing — the code, the hook URL verdict, the completion verdict before the one write, the pending memo, the canonical peer payload — imports webhook-auth only */, 'src/webhook-auth.js' /* lane webhook-l1-server: the inbound door's verdicts ①–⑫ + its bounded memos, the crypto handed in — imports nothing */, 'src/webhook-record.js' /* lane webhook-l1-server: a webhook call as a channel record (the mapping + its bounds) — imports only channel-record */, 'src/webhook-reply.js' /* lane webhook-l1-server: who a webhook reply goes to — imports channel-policy + webhook-record */, 'src/job-notice.js' /* lane job-notice-dedupe: a published service's notice is a STATE CHANGE — the cause classes, the verdict over the job's down record (a cause once, its recovery once, the vault class never per job), its status words; imports nothing */, 'src/vfs-cache-place.js' /* lane vfs-cache-local (B-4997): where a mount's VFS cache lives + the PARSED dirty witnesses (a move only when clean) — imports nothing */, 'src/cache-bounds.js' /* lane server-memory-residency (B-9428): every big cache's ceiling + name — the ledger window, the cold columns, the byte LRU, the census row; imports nothing */, 'src/mount-argv.js' /* lane mount-argv-dir-cache: THE rclone mount argv — the hub mount, the device pull mount and the ssh-host push mount (B-069b: SSH_HOST_WEBDAV_ROW + shellWords) build it from a row (dirCache, s3, rc socket rule); imports nothing */, 'src/mount-liveness.js' /* lane mount-liveness: the health sweep's verdict table (two questions: the daemon's liveness, the backend's readiness) */, 'src/memory-census.js' /* lane server-memory-census (B-9428): the server memory census — main heap, each worker isolate, external, native = anon − the rest; the sampler, the System window and the suite share it; imports nothing */, 'src/browser-orphans.js' /* lane daemon-orphan-end: a daemon nobody holds — the verdict, imports nothing */, 'src/mount-health.js' /* lane fuse-canary-notice (B-b327): the wedged-mount episode, who presses it, the words, the pause verdict per kind — imports only memory-pressure (PURE → PURE, the ONE attribution) */, 'src/memory-pressure.js' /* lane browser-resource-care (B-afeb): the memory-pressure episode + who started each process group — imports nothing; PURE since lane fuse-canary-notice shares its attribute() */, 'src/timed-sync.js' /* design 011 lane 1 (store-timing): the store-write clock — performance.now + counters, imports nothing; §72 */, 'src/channel-search.js' /* design 010 (B-c9be): the vendor snippet's ONE reader, the merge, the full-search refusal table, the dialog's coverage / status words — the store, the engine, the adapters and the dialog share them; imports channel-record + agent-cli-text (PURE → PURE; lane search-no-group-log: the agent search answer's words render CLI-side, the ONE place) */, 'src/channel-focus.js' /* design 008 (B-3cf8): the first screen's predicate (statusTag) + the first read's candidate test + the page rules — the engine's first read and the panel's keyed store share them; imports nothing */, 'src/app-recipes.js' /* design 009: the recipes table — imports nothing */, 'src/app-card.js' /* design 009: THE one card of an app install — its view + the digest of what it showed, shared by the engine and the client; imports nothing */, 'src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/consent-road.js' /* lane pod-oauth-callback (study 2 B2): WHERE a redirect consent comes back — the instance's route (an https address, a browser elsewhere) or the loopback — + the route's signed state and its landing page; the Lark / Gmail adapters and the engine's kinds digest ask it; lane oauth-relay-road: + the RELAY road first (one registered address per app); imports only slack-manifest (PURE → PURE: the ONE relay rule, relayTargetVerdict) */, 'src/hidden-chars.js', 'src/encoded-command.js' /* lane machine-card-fold: a PowerShell -EncodedCommand decoded for display (imports only hidden-chars) */, 'src/exit-call.js' /* lane exit-calls-in-history: a vibespace-exit Bash call + its result read as the machine call it is, and the card it draws — the server's live pairing and the bundle share it; imports only exit-reach + hidden-chars (PURE → PURE) */, 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/sealed-orders.js' /* lane pool-provider-latents (design q-055 M1): the sealed order's provider rule — the hub writes an order's provider fields, the device's local fallback obeys them (never onto another provider); imports nothing */, 'src/model-family.js', 'src/task-color-seq.js', 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js', 'src/model-providers.js' /* lane provider-record (design q-053 r1 §1, Train 1 P0a): THE model provider record — the eight kinds, the built-in records, the model-row + record validation, servesModel / resolveModel over the alias table; the store, the routes, the account dialog and the suites share it; imports nothing */,
+const PURE = new Set(['src/task-context.js' /* lane task-group-context (POC v2.2 + the owner's fourth level): THE CONTEXT TABLE's rules — a row's shape (path / note / tell four levels / verbs / share; a reference row), resolution (the row above's folder → the group's first folder → home, over a handed-in stat), the derived old folder list / contextDir, the budget's step-down plan, the shared rows, the one migration's rows + the old write doors; the store, the routes, the migration and the Task Group window share it — imports nothing */, 'src/grant-model.js' /* lane grants-unify: THE grant model — the row {door, resource, to, except}, admits (rows add, an exception subtracts only its own row, a malformed exception voids the row, fail closed by name), the write verdict, publicRow, the legacy mappers of every pre-unify who-list; every door's reader imports it (PURE → PURE); imports nothing */, 'src/vault-paste.js' /* lane vault-paste-request: an agent's request for a secret the owner PASTES — the ask's verdict (words, purpose, the place: a registry card's secret field or a free `secret:<id>` entry), the card's lines, the agent's receipt (never a value), a free entry's facts; imports only integration-registry + hidden-chars + secret-shapes + peer-text (PURE → PURE) */, 'src/ask-grant.js' /* lane controls-that-lie (naive study round 4, R1): an ask that names a GRANT — the --grant spec, the profile it names (the keeper's own list), the item's action, the «Who can use it» PATCH the press plans, the answer the agent reads; the agent route and the For-you bundle share it — imports nothing */, 'src/day-one.js' /* lane door-day-one-landing (two naive-user studies on fleet pods): DAY ONE's verdicts — the tour's steps (no protect step on a protected workspace), the folder chips' order (the home's folders with files first, the last one used), the vault's setup ask only once a secret is stored, the rail's first-week words, git's identity from the sign-in, the sign-in terminal's purpose; imports nothing */, 'src/device-runtime.js' /* lane device-node-version (the Node.js security releases of 2026-10-21): the floor table per major line + its advisory, a hello-ack's runtime bounded, the verdict (old / ok / unlisted / unknown + the recipe), a system node's upgrade line, the hosts row's `runtime`; imports nothing */, 'src/sync-arrival.js' /* lane statesync-last-arrival (B-cede): StateSync's arrival rule — may a remote op touch the client's copy of a key (apply / drop / queue by the server's store version against the own acked set), its table; the client's StateSync asks it at one place — imports nothing */, 'src/when-words.js' /* lane agent-context-owner-facts (B-7960 a): THE time formatter — every time an agent reads, in the owner's zone, named (whenOf / zoneOf / zoneSentence) */, 'src/tray-words.js' /* lane agent-context-owner-facts (B-7960 b): the owner's tray in words — its label in their language + its current place, derived from the chrome settings (trayWords) */, 'src/app-csp.js' /* lane app-page-csp (design q-043 D6): the app page's REPORT-ONLY policy (the measured directives, the sign-in page's nonce variant) + a report as a line without a value (origin + 3 segments, no sample, no query), the line / pair keys, the frame-document rule, the notice words; imports nothing */, 'src/vault-use.js' /* lane vault-use-law (design q-043 D1/D2/D7): THE USE LAW — the use's ONE shape, the vault-use audit line (a closed key set, never a value), the daily failure count, an entry in words; imports nothing */, 'src/vault-run.js' /* lane vault-run-model (design q-043 §8 P0-e): A SECRET IN A COMMAND — the reference grammar, the injection table (argv refused), the plain-env and tool refusal tables, the known tools, the shape key, the run verdict, the five-form chunked scrubber (a SIEVE, said in its header); imports only vault-inventory + vault-blocked */, 'src/vault-inventory.js' /* lane vault-contents-window: THE VAULT'S CONTENTS — the stores, the <store>:<entry>#<field> reference, rowOf, revealVerdict; imports nothing (listed by lane vault-run-model, whose PURE module imports it) */, 'src/vault-loud.js' /* lane vault-locked-loud: what a LOCKED vault says on the first screen — THE table (the dialog once per lock in a tab, the ⚙ mark, the urgent For-you item), the lock key, vaultLoudState; the bundle and the hub share it; imports nothing */, 'src/vault-blocked.js' /* lane vault-locked-refusal-notice: the vault's blocked list — who a vault_locked refusal stopped this lock epoch (≤ 50 actors, the rest a count), the one item's words, THE words toward an agent (the user was already told); imports nothing */, 'src/agentd-signature.js' /* lane device-bundle-signing (design q-042 D2): THE release signature of the device agent — the verdict a device lands a bundle on (the key chain, the codes), sign / signLink / generateKeyPair for the release machine, the hub's manifest identity check, the pin's text; node crypto is HANDED IN */, 'src/agentd/release-keys.js' /* lane device-bundle-signing: the release PUBLIC keys + the rotation chain a device pins — data, imports nothing */, 'src/agent-cli-registry.js' /* lane cli-registry: THE agent CLI registry — one row per CLI on PATH (name, topic, summary, manual, gate, teaching) and the renderers of the SessionStart section, the reminder, the index and the docs topics; imports nothing */, 'src/stream-plan.js' /* lane stream-p1b-screen (design q-041 r2 §2 采集/映射+编码): the screen source's plan — the FP16 → sRGB mapping + its 64 K table + the NV12 loop, the owner's calibration rows, the encoder ladder, the ffmpeg facts + verdict, the facts script + parser, the road + argvs, the bitrate hysteresis, the FLV reader; imports nothing */, 'src/stream-model.js' /* lane stream-p1a-transport (design q-041 r2): the WebRTC stream rung's decisions — the rung verdict over the agent's capabilities, the page's signaling state machine, the fallback verdict, video→source coordinates, the input event table, getStats → the strip, the relay framing; the daemon, the hub and the page ask it */, 'src/stream-window.js' /* lane stream-p2w-build (design q-041 r3 §3 P2w): ONE window as the stream's picture — the window source's shape (shared with the Mac source), the rung's window verdict, the picker's filter, the held verdict, the input shift + the size rule; imports nothing */, 'src/stream-h264.js' /* lane stream-p1a-transport: Annex-B → access units → RFC 6184 mode-1 payloads (single NAL / FU-A) — the daemon's packetizer, the suites' depacketizer */, 'src/stream-av1.js' /* lane stream-hdr-passthrough: IVF → AV1 temporal units → the aggregated-TU RTP payloads (W=0, Z/Y per packet — the P4 probe's measured packetizer) — the daemon's packetizer, the suites' depacketizer */, 'src/hdr-viewer.js' /* lane stream-hdr-passthrough: 「HDR 直通」's gate — the viewer verdict (dynamic-range + hardware WebRTC AV1), the machine's word, the per-machine memory, the 2 s decode-stall fallback */, 'src/sound-model.js' /* lane speaker-passthrough-v1 (B-aec9): the machine's SOUND to the viewer — the capability word, the encoder's argv + its streaming WAV header, the RTP reader, the Opus packet's samples, the session's sound clock, the 「声音」 toggle's verdict table + its per-machine memory, the refusal + consent words; imports nothing */, 'src/seen-marks.js' /* lane hook-seen-marks (B-86d3): the hook injection's seen marks — marksOf / restoreMarks / the folder-signature digest, shared by agent-routes and boot-restore */, 'src/key-file.js' /* lane key-file-law-stores: THE KEY-FILE LAW — loadOrMintKey over a store's three doors (read / mint / hasCiphertext); its fs half is secret-box lawfulKey */, 'src/agent-cli-text.js' /* lane cli-one-text-arg: THE ONE-text rule of vibespace-msg / -channels / -ask / -task (stray-word refusal, --text-file / --text - doors, the sent: N echo) + the routes' chars count — imports nothing; it ships beside the CLIs */, 'src/voice-model.js' /* Dropline voice input q-029 P0: dictationContext + voiceWords, shared by the bundle and the hub */, 'src/voice-teach.js' /* q-029 P1 (lane voice-p1-oauth-teach): the teach schedule (proposals, ignore, per-project tier, context cadence, caps) */, 'src/dial-health.js' /* lane host-stale-dialer (B-6136): a second agent with an old token — the verdict, the row's facts, the stop recipes, the journal / For-you clocks; imports nothing */, 'src/attention-model.js' /* lane foryou-folds (design q-044): THE attention list — rowOf / needsMe (five bands, the first screen's cap, the folds by band, 搁置), the judge's tie candidates, the badge and toast bands; the tray, the decision model and the engine read ONE spelling — imports nothing */, 'src/decision-model.js' /* lane decision-core: the decisions API's two dialects, the per-use input plans, the budget verdict, the journal row, the rubric v1 — imports only peer-text (PURE → PURE, the ONE belt) */, 'src/rule-learning.js' /* lane rule-learning (q-037 P0): the 「我关心什么」 drafter — availability, the bounded input, the strict schema, the normalizer, the diff — imports only decision-model (PURE → PURE) */, 'src/browser-passkey-store.js' /* lane passkey-store-core: the sealed passkey table, publicRow, THE GATE (§2.3) — imports nothing; the cipher is injected */, 'src/app-witness.js' /* lane apps-launcher-witness: what is installed OUTSIDE the door, by witness — the flatpak / desktop-entry readers, the seen.* group rule, the refresh rule, THE install-place words; imports only app-manifest (PURE → PURE) */, 'src/webhook-pair.js' /* lane webhook-l3-cli-pair: the instance pairing — the code, the hook URL verdict, the completion verdict before the one write, the pending memo, the canonical peer payload — imports webhook-auth only */, 'src/webhook-auth.js' /* lane webhook-l1-server: the inbound door's verdicts ①–⑫ + its bounded memos, the crypto handed in — imports nothing */, 'src/webhook-record.js' /* lane webhook-l1-server: a webhook call as a channel record (the mapping + its bounds) — imports only channel-record */, 'src/webhook-reply.js' /* lane webhook-l1-server: who a webhook reply goes to — imports channel-policy + webhook-record */, 'src/job-notice.js' /* lane job-notice-dedupe: a published service's notice is a STATE CHANGE — the cause classes, the verdict over the job's down record (a cause once, its recovery once, the vault class never per job), its status words; imports nothing */, 'src/vfs-cache-place.js' /* lane vfs-cache-local (B-4997): where a mount's VFS cache lives + the PARSED dirty witnesses (a move only when clean) — imports nothing */, 'src/cache-bounds.js' /* lane server-memory-residency (B-9428): every big cache's ceiling + name — the ledger window, the cold columns, the byte LRU, the census row; imports nothing */, 'src/mount-argv.js' /* lane mount-argv-dir-cache: THE rclone mount argv — the hub mount, the device pull mount and the ssh-host push mount (B-069b: SSH_HOST_WEBDAV_ROW + shellWords) build it from a row (dirCache, s3, rc socket rule); imports nothing */, 'src/mount-liveness.js' /* lane mount-liveness: the health sweep's verdict table (two questions: the daemon's liveness, the backend's readiness) */, 'src/memory-census.js' /* lane server-memory-census (B-9428): the server memory census — main heap, each worker isolate, external, native = anon − the rest; the sampler, the System window and the suite share it; imports nothing */, 'src/browser-orphans.js' /* lane daemon-orphan-end: a daemon nobody holds — the verdict, imports nothing */, 'src/mount-health.js' /* lane fuse-canary-notice (B-b327): the wedged-mount episode, who presses it, the words, the pause verdict per kind — imports only memory-pressure (PURE → PURE, the ONE attribution) */, 'src/memory-pressure.js' /* lane browser-resource-care (B-afeb): the memory-pressure episode + who started each process group — imports nothing; PURE since lane fuse-canary-notice shares its attribute() */, 'src/timed-sync.js' /* design 011 lane 1 (store-timing): the store-write clock — performance.now + counters, imports nothing; §72 */, 'src/channel-search.js' /* design 010 (B-c9be): the vendor snippet's ONE reader, the merge, the full-search refusal table, the dialog's coverage / status words — the store, the engine, the adapters and the dialog share them; imports channel-record + agent-cli-text (PURE → PURE; lane search-no-group-log: the agent search answer's words render CLI-side, the ONE place) */, 'src/channel-focus.js' /* design 008 (B-3cf8): the first screen's predicate (statusTag) + the first read's candidate test + the page rules — the engine's first read and the panel's keyed store share them; imports nothing */, 'src/app-recipes.js' /* design 009: the recipes table — imports nothing */, 'src/app-card.js' /* design 009: THE one card of an app install — its view + the digest of what it showed, shared by the engine and the client; imports nothing */, 'src/record-lateness.js' /* lane-hot-switch: a late record is not a live fact — the stream clock + the look-ahead, imports nothing */, 'src/consent-road.js' /* lane pod-oauth-callback (study 2 B2): WHERE a redirect consent comes back — the instance's route (an https address, a browser elsewhere) or the loopback — + the route's signed state and its landing page; the Lark / Gmail adapters and the engine's kinds digest ask it; lane oauth-relay-road: + the RELAY road first (one registered address per app); imports only slack-manifest (PURE → PURE: the ONE relay rule, relayTargetVerdict) */, 'src/hidden-chars.js', 'src/encoded-command.js' /* lane machine-card-fold: a PowerShell -EncodedCommand decoded for display (imports only hidden-chars) */, 'src/exit-call.js' /* lane exit-calls-in-history: a vibespace-exit Bash call + its result read as the machine call it is, and the card it draws — the server's live pairing and the bundle share it; imports only exit-reach + hidden-chars (PURE → PURE) */, 'src/assistant-note.js' /* B-40f8: text addressed to the assistant — the note rule + THE turn preview, server builders and client alike; imports nothing */, 'src/window-desktop.js', 'src/plugin-manifest.js', 'src/account-pool-auto.js', 'src/sealed-orders.js' /* lane pool-provider-latents (design q-055 M1): the sealed order's provider rule — the hub writes an order's provider fields, the device's local fallback obeys them (never onto another provider); imports nothing */, 'src/model-family.js', 'src/task-color-seq.js', 'src/task-membership.js' /* lane open-task-binds: THE Task Group membership rules — folderOf (a glob tail is the recursive switch), insideFolder (a folder includes itself), birthBindVerdict (a birth group is a membership once the conversation has its own id); the store, conversation-ops and the panel share them; imports nothing */, 'src/ssh-key-format.js', 'src/session-schema.js', 'src/otel-truth.js', 'src/msg-acl.js', 'src/backend-caps.js', 'src/model-providers.js' /* lane provider-record (design q-053 r1 §1, Train 1 P0a): THE model provider record — the eight kinds, the built-in records, the model-row + record validation, servesModel / resolveModel over the alias table; the store, the routes, the account dialog and the suites share it; imports nothing */,
   // AGENT BROWSER (design-agent-browser-v2 §3.6): the identity/spawn-env decisions, the
   // registry + lease model and the keeper's verdicts — imports nothing (P0/P1); and the ONE
   // constants home every process keeper counts and bounds by (src/keeper-limits.js)
@@ -345,9 +347,12 @@ const PURE = new Set(['src/day-one.js' /* lane door-day-one-landing (two naive-u
   // lane runtime-floor: THE NODE RUNTIME FLOOR — the one table (per major line the fixed release + its advisory), the
   // verdict; the hub's boot line, the updater, the provisioner and the Machines card's chip (device-runtime) read it
   'src/runtime-floor.js',
+  // lane path-field: THE path field's rule (resolveRelative · rankCandidates · missingVerdict · groupOn · isExcludedPath · sliceListing / mergeListing / sliceAsk — the bundle and the hub share it) + the host rung's ONE sh script and its parser; both import nothing
+  'src/path-candidates.js' /* lane path-field (L1 of the New Session train, POC v2.2): THE path field's rule — resolveRelative (the bases in order), rankCandidates (① the groups' folders · ② 由名字 per selected group · ③ recent with counts · ④ the listing / whole-path fuzzy · ⑤ mounts), missingVerdict, groupOn (a group as seen from one machine), isExcludedPath (the checkout, its data dir, dot-folders), sliceListing / mergeListing / sliceAsk (the hub's answer ⇄ the field's memory); the bundle and the hub share it — imports nothing */, 'src/dir-slice-script.js' /* lane path-field: the ONE sh script the host rung runs on another machine + its parser (the raw facts sliceListing takes); imports nothing */,
   'src/workflow-disk.js']);
 const SHARED = new Set(['src/input-inject.js' /* lane stream-p1a-transport (design q-034 §3 P1 / q-041 §3 P1b): THE one input injector the daemon runs — a resident PowerShell SendInput on Windows, a recording stub on Linux; the `input-events` op and every stream's data channel feed it (machine-desktop-model.js for the PowerShell argv) */, 'src/remoteapp-facts.js' /* lane remoteapp-r1b: a paired Windows machine's Remote Desktop facts — the bounded read-only PowerShell the daemon runs (`remoteapp-facts`), PURE remoteapp.js + machine-desktop-model.js */, 'src/installed-apps.js' /* lane machine-desktop-apps: a Windows / macOS machine's installed apps — the PURE parsers + the bounded lister the daemon runs (node builtins + the PURE run door) */, 'src/worker-memory.js' /* lane server-memory-census: every worker isolate answers ONE memory ask (worker side) + the creators' registry (main side); SafeFs (SHARED) tracks its pools through it; node builtins only */, 'src/discovery-facts.js', 'src/proc-identity.js', 'src/sysinfo.js', 'src/machine-probes.js', 'src/usage-walker.js',
   'src/transcript-service.js', 'src/ctx-sync.js', 'src/writer-sweep.js', 'src/remote-shell.js', 'src/account-material.js',
+  'src/cli-call.js' /* lane cli-call-timeouts: THE ONE CALL every agent CLI makes to its hub (PURE budgets + words, the one node http/https transport) — copied beside the CLIs at boot, so node builtins only (§99) */,
   // THE agent-CLI process identity, one rule in two spellings (B-3185 r3): the JS twin
   // (discovery-facts, so the daemon bundles it) beside the shell text the sweep and the
   // ssh discovery CO leg embed verbatim. node builtins only.
@@ -3055,6 +3060,8 @@ console.log('§66 pairing + exit access: allowExit readers · the mint · the ru
       let allowed = '';
       if (f === 'src/exit-reach.js') allowed = fnSpan(src, 'function exitAccessOf(') + fnSpan(src, 'function migrateExitAccess(');
       if (f === 'src/server/migrations.js') { const i = src.indexOf('function migrateExitLists('); allowed = i < 0 ? '' : src.slice(i, src.indexOf('\n  }\n', i)); }
+      if (f === 'src/grant-model.js') allowed = fnSpan(src, 'function fromHostExit(') + '\n' + fnSpan(src, '  exit(h, grant, ctx = {}) {');   // lane grants-unify: the migration's legacy mapper (a pre-list record arrives as everyone / everyone) and the old reader's stand-in GM.LEGACY.exit (verify F4 — it reads the RECORD)
+      if (f === 'src/server/grants-migration.js') allowed = fnSpan(src, 'function plan(');   // lane grants-unify: the migration's equivalence check reads the boolean the old reader read
       src.split('\n').forEach((l, i) => {
         if (!/allowExit/.test(l)) return;
         if (!/allowExit/.test(l.replace(/\bdelete [\w.]+\.allowExit;?/g, ''))) return; // only strips (`delete x.allowExit`) on this line
@@ -4310,7 +4317,7 @@ console.log('§76c a channel vendor is its folder + one list line: the three der
 console.log('§79 the channels engine\'s families meet only through its one context object');
 {
   const FAM_REQ = {
-    'src/server/channels-access.js': ['../channel-acl.js', '../channel-caps.js', '../channel-filter.js', '../channel-policy.js', '../channel-search.js', '../channel-watch-spec.js', '../channels/index.js', '../peer-text.js', './owner-facts.js', 'crypto'],   // ./owner-facts.js: lane agent-context-owner-facts — a refusal's time in the owner's zone (not a family)
+    'src/server/channels-access.js': ['../channel-acl.js', '../channel-caps.js', '../channel-filter.js', '../channel-policy.js', '../channel-record.js', '../channel-search.js', '../channel-watch-spec.js', '../channels/index.js', '../peer-text.js', './owner-facts.js', 'crypto'],   // ./owner-facts.js: lane agent-context-owner-facts — a refusal's time in the owner's zone (not a family); ../channel-record.js: lane gmail-draft-not-a-message — the agent's read sets a draft apart (`draftsOf`, PURE)
     'src/server/channels-outbound.js': ['../channel-acl.js', '../channel-caps.js', '../channel-drain.js', '../channel-filter.js', '../channel-outbox-files.js', '../channel-policy.js', '../channel-ref.js', '../channel-revisions.js', '../channel-thread.js', '../channels/index.js', '../channels/vendor-hold.js', '../peer-text.js'],   // lane lark-send-hold: the vendor hold's ceiling; lane channels-proposals-recall: a message the store already shows recalled
     'src/server/channels-auth.js': ['../channel-acl.js', '../channel-caps.js', '../channel-filter.js', '../channel-identity.js', '../channel-outbox-files.js', '../channel-policy.js', '../channels/index.js', '../integration-registry.js', './integration-store.js', 'crypto'],
   };
@@ -4557,7 +4564,7 @@ console.log('§81 no suite names a fixed loopback endpoint (scratch.mjs deadPort
 // then; a depth-1 checkout SKIPs that leg by name). The census itself lives in scripts/claude-md-retire.mjs.
 console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file / per-incident lines live in the kb INDEX heads:');
 {
-  const CLAUDE_MD_MAX_BYTES = 41240;   // ratchet: 37 491 measured after the move (scripts/measure-claude-md.mjs) + 10 %
+  const CLAUDE_MD_MAX_BYTES = 41660;   // ratchet: 37 491 measured after the move (scripts/measure-claude-md.mjs) + 10 % = 41 240; + 420 (lane grants-unify: ONE routing-table row «A GRANT — who may use a resource», the size law's allowed kind)
   const h82 = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 10);
   const fx82 = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-md-moved.json'), 'utf8'));
   const region82 = regionMoved, census82 = (block, lines) => censusMoved(fx82, block, lines);
@@ -5206,5 +5213,317 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
   const tf = read('scripts/tracked-files.mjs');
   ok(/export function trackedFiles\(/.test(tf) && /git'[^)]*'ls-files'/.test(tf) && /gitEnvFrom/.test(tf) && !DBIN.test(tf), '§96 the shared trackedFiles() helper lists via `git ls-files` through the sanitized gitEnvFrom (no readdir of a root)');
 }
+// §99 AN AGENT CLI'S WAIT IS BOUNDED AND NAMED (lane cli-call-timeouts, hub feedback 2026-10-23: «vibespace-task progress
+// hung for 30+ min … the same line re-issued 3 min later landed in 2 s»). Every agent CLI (data/bin/vibespace-*, and the
+// generated vibespace-status) reaches its hub through THE ONE CALL, src/cli-call.js `CC.call` — a budget by verb class
+// (a read 15 s, a write 30 s, a wake 60 s; --timeout overrides) and ONE line naming the wait on expiry (exit 124). A
+// bare global fetch( / http(s).request( in a CLI waits as long as the platform does (fetch: 300 s per phase; a bare
+// http.request: for ever) — RED unless the file is an EXEMPT99 row with its reason. Each CLI that calls through the one
+// call carries the loader (src/cli-call.js in a checkout, ./cli-call.js beside it on a host) and CC.cliStart (the flag).
+// The list is git ls-files (§96), the CONTROL a bare fetch / the pre-lane http.request postLong shape — both RED.
+{
+  console.log('\n§99 every agent CLI calls its hub through THE ONE CALL (src/cli-call.js) — a bare fetch / http.request is red');
+  // a bare hub call: global fetch( (CC.call is a member call), http.request / https.get, require('http').request / the ternary form
+  const BARE99 = [/(?<![\w$.])fetch\s*\(/, /(?<![\w$.])https?\s*\.\s*(?:request|get)\s*\(/, /require\(\s*[^)]*['"](?:node:)?https?['"]\s*\)\s*\.\s*(?:request|get)\s*\(/];
+  const code99 = (t) => String(t).replace(/\/\*[\s\S]*?\*\//g, '').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const bare99 = (t) => { const c = code99(t); return BARE99.filter((re) => re.test(c)).map((re) => (c.match(re) || [''])[0]); };
+  const EXEMPT99 = {
+    'data/bin/vibespace-hook.mjs': 'the harness hook: each fetch carries its own AbortController (2.5 s / 3 s) and the process exits at 8 s — a hook prints nothing to the agent, so its expiry is silence by design',
+    'data/bin/vibespace-opencode-op': "talks to the opencode server's own loopback port (never the hub), each http.request with its own timeoutMs — an op the hub spawns and bounds",
+  };
+  const ls99 = spawnSync('git', ['-C', REPO, 'ls-files', '-z', '--', 'data/bin'], { encoding: 'utf-8', env: gitEnvFrom(process.env) });
+  const clis99 = String(ls99.stdout || '').split('\0').filter((f) => /^data\/bin\/vibespace-/.test(f));
+  ok(!ls99.error && ls99.status === 0 && clis99.length >= 15, `§99 the agent CLIs are listed from git (${clis99.length} tracked data/bin/vibespace-*)`);
+  const LOADER99 = (t) => t.includes("require('../../src/cli-call.js')") && t.includes("require('./cli-call.js')") && /CC\.cliStart\(\{ tool: '[^']+'/.test(t);
+  const bad99 = [], unloaded99 = [], callers99 = [];
+  for (const f of clis99) {
+    const t = read(f);
+    const hits = bare99(t);
+    if (hits.length && !EXEMPT99[f]) bad99.push(`${f}: ${hits.join(' · ')}`);
+    if (/\bCC\.call\(/.test(t)) { callers99.push(f.replace('data/bin/', '')); if (!LOADER99(t)) unloaded99.push(f); }
+  }
+  ok(!bad99.length, `§99 no agent CLI calls its hub with a bare fetch / http.request (${bad99.slice(0, 4).join('; ') || 'clean'})`);
+  ok(!unloaded99.length, `§99 every CLI that calls through CC.call loads THE ONE CALL by its literal names and takes its flag with CC.cliStart (${unloaded99.join(', ') || 'clean'})`);
+  ok(['vibespace-task', 'vibespace-ask', 'vibespace-msg', 'vibespace-job', 'vibespace-channels', 'vibespace-feedback', 'vibespace-api', 'vibespace-vault', 'vibespace-design', 'vibespace-browser', 'vibespace-window', 'vibespace-exit', 'vibespace-page', 'vibespace-docs', 'vibespace-remote', 'vibespace-app'].every((n) => callers99.includes(n)),
+    `§99 the brief's CLI list calls through it (${callers99.length}: ${callers99.join(' ')})`);
+  const dead99 = Object.keys(EXEMPT99).filter((f) => !clis99.includes(f) || !bare99(read(f)).length);
+  ok(!dead99.length, `§99 every EXEMPT99 row still names a tracked CLI with a bare call (${dead99.join(', ') || 'none dead'})`);
+  // the generated vibespace-status (its template in agent-tool-generators.js) is an agent CLI too
+  const gen99 = read('src/server/agent-tool-generators.js');
+  const st99 = (gen99.match(/const script = `#!\/usr\/bin\/env node\n\/\/ vibespace-status[\s\S]*?\nfs\.writeFileSync\(STATUS_CMD|const script = `#!\/usr\/bin\/env node\n\/\/ vibespace-status[\s\S]*?`;/) || [''])[0];
+  ok(st99.length > 500 && /CC\.call\(api \+ '\/api\/agent\/session-status'/.test(st99) && !bare99(st99).length && st99.includes("require('../../src/cli-call.js')") && st99.includes("join(__dirname, 'cli-call.js')") && /CC\.cliStart\(\{ tool: 'vibespace-status'/.test(st99),
+    '§99 the GENERATED vibespace-status calls through the one call too (its template)');
+  // shipped beside the CLIs: copied at boot, gitignored, in AGENT_TOOLS
+  ok(/function createCliCallCopy\(\)[\s\S]{0,400}'src', 'cli-call\.js'[\s\S]{0,200}'cli-call\.js'\)/.test(gen99) && /\ncreateCliCallCopy\(\);/.test(gen99)
+    && (await import('node:module')).createRequire(import.meta.url)('../src/hosts.js').HostManager.AGENT_TOOLS.includes('cli-call.js') && /^data\/bin\/cli-call\.js$/m.test(read('.gitignore')), '§99 cli-call.js rides beside the CLIs: copied at boot, gitignored, in AGENT_TOOLS (every ship path carries it)');
+  // CONTROLS: a bare fetch in a CLI, and the pre-lane postLong shape (an unbounded http.request), are both RED
+  const mutFetch = read('data/bin/vibespace-task').replace('await CC.call(full, {', 'await fetch(full, {');
+  const preLane = "const req = require(u.protocol === 'https:' ? 'https' : 'http').request(u, { method: 'POST' }, (res) => {});";
+  ok(mutFetch !== read('data/bin/vibespace-task') && bare99(mutFetch).length === 1 && bare99(preLane).length === 1 && bare99('const r = await CC.call(api + p, {});\n// a comment that says fetch( is prose').length === 0,
+    '§99 CONTROL: a bare fetch( in vibespace-task and the pre-lane unbounded http.request postLong are RED; CC.call and a comment are not');
+}
+// §100 NO NATIVE DIALOG IN THE CLIENT (lane controls-that-lie, 2026-10-23 — the UI law «NO native prompt/alert/confirm»,
+// CLAUDE.md + kb-design-lessons §17, had NO census: naive study round 4 reported «Fetch quota from Anthropic?» on refresh-all
+// as a native confirm; it was showConfirmDialog (the screenshot shows the house modal), and the grep found zero native calls —
+// but nothing would have turned red on the first one). A grep over every tracked client file (src/lib + public/index.html),
+// comments stripped: no bare / window. / globalThis. / self. call of confirm( alert( prompt( — a method of another object
+// (`x.confirm(`) and a declaration (`function confirm(`, `async confirm(`) are not calls of the native dialog. The pre-law
+// spelling is caught as a planted control.
+{
+  const NATIVE100 = /(^|[^\w$.])(?:(?:window|globalThis|self)\.)?(confirm|alert|prompt)\(/;
+  const DECL100 = /(?:function\s+|async\s+|^\s*)(?:confirm|alert|prompt)\([^)]*\)\s*\{/;
+  const strip100 = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const hit100 = (line) => NATIVE100.test(line) && !DECL100.test(line);
+  const files100 = String(spawnSync('git', ['-C', REPO, 'ls-files', 'src/lib', 'public/index.html'], { encoding: 'utf-8', env: gitEnvFrom(process.env), maxBuffer: 16 << 20 }).stdout || '').split('\n').filter((f) => /\.(c?js|mjs|html)$/.test(f));
+  const hits100 = [];
+  for (const f of files100) strip100(read(f)).split('\n').forEach((l, i) => { if (hit100(l)) hits100.push(`${f}:${i + 1}: ${l.trim().slice(0, 100)}`); });
+  ok(files100.length > 200 && !hits100.length, `§100 no native confirm / alert / prompt in the client (${files100.length} tracked files under src/lib + public/index.html) — showConfirmDialog / showInputDialog / showToast are the doors`, hits100.join(' | '));
+  ok(hit100("      if (!window.confirm('Fetch quota from Anthropic?')) return;") && hit100("    if (!confirm(t('Delete {name}?', { name }))) return;") && hit100('  alert(e.message);') && hit100("  const v = prompt('Name');")
+    && !hit100("    const ok = await showConfirmDialog({ title: t('Check every account’s usage limits now?') });") && !hit100("  async function confirm(password, { ip = null } = {}) {")
+    && !hit100("  const r = await engine.confirm(id, terms);") && !hit100("  t('the notices ride its next prompt (restart the session)')"),
+    '§100 NEGATIVE CONTROL: a bare / window. confirm, an alert, a prompt are caught; showConfirmDialog, a declaration, a method of another object and the word in a sentence are not');
+}
+// §97 ONE GRANT MODEL (lane grants-unify, 2026-10-23 — the owner: 「权限系统要 unify 一下，不想引入太多复杂度」; the only
+// concepts are 给谁 and 除了). Every "who may use this" — a browser profile, an automation key's use and reach, a channel's
+// reach / notification / raw-API tier, a machine's exit, a desktop window's share, a Task Group's outside visibility —
+// is a row {door, resource, to, except} of ONE store (src/server/grants-store.js), judged by ONE model (src/grant-model.js
+// `admits`), written by ONE writer. Three grep-derived censuses, each with a planted-mutant control:
+//   (a) NO ADMISSION OUTSIDE THE MODEL — every PURE reader (READERS97) imports the model and calls `admits`; no reader
+//       and no engine that picks a member (ENGINES97) holds a hand-written membership test (MEMBERSHIP97); and, per
+//       FUNCTION BODY (acorn — verify F3: an aliased `const gs = ctx.groups; gs.includes(id)` passed the line regex), a
+//       reader function (one that asks GM.admits) names groups / taskIds / groupIds only in its parameters and in the
+//       facts it hands to GM.admits (WORDS_ALLOW97 names the rest, each with its reason);
+//   (b) NO READER OF THE OLD FIELDS — each pre-unify field (OLD97) is read only where a row allows it: the migration, the
+//       legacy mappers, the 2026-09 passes that predate the store, a SERVED view (each with its reason). A machine's
+//       `exit` is judged as ANY `.exit` read (verify F3: `const e = h.exit; … e.use` passed `.exit.use`);
+//   (c) EVERY WRITER CALLS THE ONE WRITER — each door's write function (WRITERS97) holds a call into the store, and
+//       nothing but the store writes data/grants.json.
+console.log('\n§97 one grant model: admission only in grant-model · no reader of the old fields · every writer calls the ONE writer');
+{
+  const strip97 = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => (/^\s*\/\//.test(l) ? '' : l.replace(/\s\/\/\s.*$/, ''))).join('\n');
+  // a function's body: from its head to the closing brace at the head's own indentation (top level or inside create())
+  const bodyOf = (src, head) => { const i = src.indexOf(head); if (i < 0) return ''; const ls = src.lastIndexOf('\n', i) + 1; const indent = /^\s*/.exec(src.slice(ls, i + 1))[0]; const e = src.indexOf(`\n${indent}}`, i); return src.slice(i, e < 0 ? src.length : e); };
+  // (a)
+  const READERS97 = ['src/browser-profiles.js', 'src/automation-keys.js', 'src/channel-acl.js', 'src/channel-filter.js', 'src/exit-reach.js', 'src/window-reach.js', 'src/msg-acl.js'];
+  const ENGINES97 = ['src/server/channels-access.js', 'src/server/channels-engine.js', 'src/server/channels-grants.js', 'src/server/automation-engine.js', 'src/server/browser-keeper.js', 'src/server/window-targets-engine.js', 'src/exit-proxy.js', 'src/server/grants-store.js', 'src/server/grants-migration.js'];
+  const MEMBERSHIP97 = /\.groups\.(?:includes|has|some)\(|[^a-zA-Z.]groups\.(?:includes|has)\(|\bgids\.has\(|\bmine\.has\(w\.id\)|\btaskGroups\.(?:includes|some)\(|\bsGroups\.has\(|keys\.has\(`group:|\bgroupIds\.(?:includes|has)\(|\btaskIds\.(?:includes|has)\(/;
+  const judgeA = (files) => {
+    const bad = [];
+    for (const [f, src0] of files) {
+      const src = strip97(src0);
+      if (READERS97.includes(f) && !(/require\('\.\/grant-model\.js'\)/.test(src) && /\bGM\.admits\(/.test(src))) bad.push(`${f}: a reader that does not ask THE model (require('./grant-model.js') + GM.admits)`);
+      src.split('\n').forEach((l, i) => { if (MEMBERSHIP97.test(l)) bad.push(`${f}:${i + 1} a hand-written membership test — ${l.trim().slice(0, 90)}`); });
+    }
+    return bad;
+  };
+  const aFiles = [...READERS97, ...ENGINES97].map((f) => [f, read(f)]);
+  const badA = judgeA(aFiles);
+  ok(aFiles.every(([, s]) => s.length > 0) && !badA.length, `§97 (a) ${READERS97.length} readers ask THE model's admits and ${READERS97.length + ENGINES97.length} reader / engine files hold no hand-written membership test${badA.length ? ' — ' + badA.slice(0, 6).join(' · ') : ''}`);
+  // (a) per function body: in a READER function (its own body calls GM.admits) the words below are read only in its
+  // parameters and in the facts handed to GM.admits (the literal argument, or the literal the name it passes was given)
+  const WORDS97 = new Set(['groups', 'taskIds', 'groupIds']);
+  const WORDS_ALLOW97 = { 'src/msg-acl.js levelFor': { reads: ['facts.groupIds'], why: 'a target\'s own groups NAME the resources judged (group-visibility/<g> rows, each asked GM.admits) — never a test of who is in them' } };
+  const FN97 = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
+  const kids97 = (n) => Object.entries(n).filter(([k]) => k !== 'loc').flatMap(([, v]) => (Array.isArray(v) ? v : [v])).filter((v) => v && typeof v.type === 'string');
+  const isAdmits97 = (n) => n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && !n.callee.computed && n.callee.object.type === 'Identifier' && n.callee.object.name === 'GM' && n.callee.property.name === 'admits';
+  const judgeWords97 = (f, src) => {
+    let ast; try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'script', locations: true, allowHashBang: true }); } catch (e) { return [`${f}: cannot be parsed (${e.message})`]; }
+    const bad = [];
+    const judge = (fn, name) => {
+      const exempt = new Set(), declared = new Map(), calls = [], allow = (WORDS_ALLOW97[`${f} ${name}`] || {}).reads || [];
+      const scan = (n) => { if (isAdmits97(n)) calls.push(n); if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) declared.set(n.id.name, n.init); if (FN97.has(n.type)) n.params.forEach((x) => exempt.add(x)); kids97(n).forEach(scan); };
+      scan(fn);
+      for (const c of calls) { const a = c.arguments[1]; if (a) exempt.add(a.type === 'Identifier' && declared.has(a.name) ? declared.get(a.name) : a); }
+      const walk = (n) => {
+        if (exempt.has(n)) return;
+        if (n.type === 'MemberExpression' && !n.computed) {
+          if (allow.includes(src.slice(n.start, n.end))) return;
+          if (WORDS97.has(n.property.name)) bad.push(`${f}:${n.loc.start.line} ${name} reads \`${n.property.name}\` outside the facts handed to GM.admits — ${src.slice(n.start, n.end).slice(0, 60)}`);
+          return walk(n.object);
+        }
+        if (n.type === 'Identifier' && WORDS97.has(n.name)) bad.push(`${f}:${n.loc.start.line} ${name} names \`${n.name}\` outside the facts handed to GM.admits`);
+        if (n.type === 'Property' && !n.computed && !n.shorthand) return walk(n.value);
+        kids97(n).forEach(walk);
+      };
+      walk(fn.body);
+    };
+    const visit = (n, name) => {
+      if (FN97.has(n.type)) {
+        let own = false; const s97 = (m) => { if (m !== n && FN97.has(m.type)) return; if (isAdmits97(m)) own = true; kids97(m).forEach(s97); }; s97(n.body);
+        if (own) return judge(n, (n.id && n.id.name) || name || '(anonymous)');
+      }
+      const next = n.type === 'VariableDeclarator' && n.id.type === 'Identifier' ? n.id.name : (n.type === 'Property' || n.type === 'MethodDefinition') && n.key.type === 'Identifier' ? n.key.name : name;
+      for (const k of kids97(n)) visit(k, next);
+    };
+    visit(ast, null);
+    return bad;
+  };
+  const wFiles = READERS97.map((f) => [f, read(f)]);
+  const badW = wFiles.flatMap(([f, s]) => judgeWords97(f, s));
+  ok(!badW.length, `§97 (a) per function body: every reader function of the ${READERS97.length} readers names groups / taskIds / groupIds only in its parameters and the facts it hands to GM.admits (${Object.keys(WORDS_ALLOW97).length} allowed read, with its reason)${badW.length ? ' — ' + badW.slice(0, 6).join(' · ') : ''}`);
+  const ACL97 = read('src/channel-acl.js');
+  const plantA = ACL97.replace("  const e = GM.fromChannelPrincipal(p);\n  if (!e) return false;", "  if (p.kind === 'group') return Array.isArray(ctx.groups) && ctx.groups.includes(p.id);\n  const e = GM.fromChannelPrincipal(p);\n  if (!e) return false;");
+  ok(plantA !== ACL97 && judgeA([['src/channel-acl.js', plantA]]).length === 1 && judgeWords97('src/channel-acl.js', plantA).length > 0, '§97 (a) CONTROL: the pre-unify `ctx.groups.includes(p.id)` planted back into channel-acl is RED (the line census and the body census)');
+  // the verify's gates-plant4: the same test through an alias — the line census cannot see it, the body census must
+  const plantA2 = ACL97.replace("  const e = GM.fromChannelPrincipal(p);\n  if (!e) return false;", "  const gs = Array.isArray(ctx.groups) ? ctx.groups : []; if (p.kind === 'group' && gs.includes(p.id)) return true;\n  const e = GM.fromChannelPrincipal(p);\n  if (!e) return false;");
+  ok(plantA2 !== ACL97 && judgeA([['src/channel-acl.js', plantA2]]).length === 0 && judgeWords97('src/channel-acl.js', plantA2).some((l) => /principalApplies reads `groups`/.test(l)), '§97 (a) CONTROL (verify F3, gates-plant4): an ALIASED `const gs = ctx.groups; … gs.includes(p.id)` in principalApplies is RED by the body census (the line census alone stays green on it)');
+  // (b)
+  const OLD97 = [
+    { field: 'the channel index\'s reach / account / API tables', re: /\.reachEntries\b|table\('accountGrants'\)|\.accountGrants\b(?!\s*\()|table\('apiGrants'\)|\.apiGrants\b(?!\s*(?:\(|===))/, allow: {
+      'src/server/channels-grants.js': { fns: ['function rowsOfChannelIndex('], why: 'the migration\'s mapper' },
+      'src/server/grants-migration.js': { fns: null, why: 'the migration (old reader ≡ new reader)' },
+      'src/server/channels-access.js': { fns: ['function healP2(', 'function liftGrainInPlace(', 'function legacyEffectiveFor(', 'function migrateGrants('], why: 'the 2026-09 passes that predate the store (a pre-split record lifted in place) and the entry\'s shape heal' },
+    } },
+    // ANY `.exit` read (verify F3: `const e = h.exit; … e.use` passed a `.exit.use` regex) — a machine record's `exit` is read
+    // only where a row allows it; a file whose `.exit` is not a machine record says so
+    { field: 'a machine\'s `exit` (its lists `exit.use` / `exit.run`, or the object an alias reads them through)', re: /\.exit(?![\w$-])(?!\s*\()/, allow: {
+      'src/grant-model.js': { fns: ['function fromHostExit(', 'function rowsOfHosts(', '  exit(h, grant, ctx = {}) {'], why: 'the legacy mappers and the old reader\'s stand-in GM.LEGACY.exit (verify F4: it reads the whole RECORD, as the old reader did)' },
+      'src/server/grants-migration.js': { fns: null, why: 'the migration' },
+      'src/exit-reach.js': { fns: ['function exitAccessOf(', 'function migrateExitAccess('], why: 'the record\'s OWN fields beside the store\'s rows (ask, hub, lastRun, the stamp) and the 2026-09 exit-access-lists pass' },
+      'src/hosts.js': { fns: ['setExitAccess(id, exit) {', 'setLastRun(id, rec) {', 'importBundle('], why: 'the record\'s own fields written (ask, hub, lastRun — never a list) and a config bundle from before the unify: its run list\'s ask carried to `exit.ask`' },
+      'src/server/migrations.js': { fns: ['function migrateExitLists('], why: 'the 2026-09 exit-access-lists pass (it predates the store)' },
+      'src/lib/': { fns: null, why: 'the browser holds only the SERVED view (GET /api/hosts — publicExit, built from the rows), never a stored record' },
+      'src/design-viewer-entry.js': { fns: null, why: 'not a machine: the presenter\'s exit button' },
+      'src/jobs.js': { fns: null, why: 'not a machine: a job run\'s exit code' },
+      'src/server/jobs-wiring.js': { fns: null, why: 'not a machine: a job run\'s exit code' },
+      'src/server/vault-run-door.js': { fns: null, why: 'not a machine: a command\'s exit code' },
+      'src/agentd/agentd.js': { fns: null, why: 'not a machine: the CLI\'s own exit code' },
+      'src/agentd/worker-pool.js': { fns: null, why: 'not a machine: `process.exit` named in a sentence' },
+      'src/install-slot.js': { fns: null, why: 'not a machine: the installer\'s exit file' },
+      'src/desktop-display.js': { fns: null, why: 'not a machine: the installer\'s exit file' },
+    } },
+    { field: 'a browser profile\'s owner list (`owner.who` / `owner.kind`)', re: /\bowner\.who\b|\.owner\.kind\b/, allow: {
+      'src/grant-model.js': { fns: ['function fromBrowserOwner('], why: 'the legacy mapper' },
+      'src/browser-profiles.js': { fns: ['function isEphemeralProfile(', 'function ownerForWrite(', 'function migrateScopeAll(', 'function migrateWhoList(', 'function adoptDirVerdict('], why: 'an ephemeral record\'s identity, the field a new record still carries (unread), the 2026-09 migrations, the creator of a kept directory — never who may use it' },
+      'src/server/grants-migration.js': { fns: null, why: 'the migration' },
+    } },
+    { field: 'a Task Group\'s stored `externalVisibility`', re: /\.externalVisibility\b/, allow: {
+      'src/server/grants-migration.js': { fns: null, why: 'the migration' },
+      'src/task-groups.js': { fns: ['_setVisibility(id, patch) {', '  update(id, patch = {}) {'], why: 'the PATCH\'s own field, written through the ONE writer (the view reads the row — visibilityOf)' },
+      'src/lib/task-detail.js': { fns: null, why: 'the decorated view (the list\'s visibilityOf)' },
+      'src/lib/new-session-form.js': { fns: null, why: 'the decorated view (the list\'s visibilityOf) — the New Session form\'s «Outside · notifications» fact (lane new-session-form; int346)' },
+    } },
+  ];
+  const judgeB = (files) => {
+    const bad = [];
+    for (const o of OLD97) for (const [f, src0] of files) {
+      const src = strip97(src0);
+      if (!o.re.test(src)) continue;
+      const a = o.allow[f] || Object.entries(o.allow).find(([k]) => k.endsWith('/') && f.startsWith(k))?.[1];
+      if (a && !a.fns) continue;
+      const allowed = a ? a.fns.map((h) => bodyOf(src, h)).join('\n') : '';
+      src.split('\n').forEach((l, i) => { if (o.re.test(l) && !(allowed && allowed.includes(l))) bad.push(`${f}:${i + 1} reads ${o.field} — ${l.trim().slice(0, 90)}`); });
+    }
+    return bad;
+  };
+  const srcFiles = trackedFiles(REPO, 'src').filter((f) => f.endsWith('.js'));
+  const bFiles = srcFiles.map((f) => [f, read(f)]);
+  const badB = judgeB(bFiles);
+  ok(!badB.length, `§97 (b) no reader of the old fields over ${srcFiles.length} src files: ${OLD97.length} fields, each read only where a row allows it${badB.length ? ' — ' + badB.slice(0, 6).join(' · ') : ''}`);
+  const deadB = OLD97.flatMap((o) => Object.entries(o.allow).filter(([f, a]) => (f.endsWith('/') ? !srcFiles.some((x) => x.startsWith(f)) : !read(f)) || (a.fns && a.fns.some((h) => !bodyOf(strip97(read(f)), h)))).map(([f]) => `${o.field}: ${f}`));
+  ok(!deadB.length, `§97 (b) no dead allow row (each names a live file and function)${deadB.length ? ' — ' + deadB.join(' · ') : ''}`);
+  const CA97 = read('src/server/channels-access.js');
+  const plantB = CA97.replace("return ACL.grantsForConversation(target, { entries: CG.conversationGrants(en.key),", "return ACL.grantsForConversation(target, { entries: [...CG.conversationGrants(en.key), ...(en.reachEntries || [])],");
+  // (the control judges ONLY the planted line — every other read of the file is an allowed one)
+  ok(plantB !== CA97 && judgeB([['src/server/channels-access.js', plantB]]).length === 1, '§97 (b) CONTROL: the pre-unify `en.reachEntries` read planted back into grantsOfConversation is RED');
+  // the verify's gates-plant2: a machine's lists read through an ALIAS in exit-proxy's rejudgeAll
+  const EP97 = read('src/exit-proxy.js');
+  const RJ97 = "  rejudgeAll(why = 'task-groups', { goneSessions = [], goneHosts = [] } = {}) {\n";
+  const plantB2 = EP97.replace(RJ97, RJ97 + "    for (const h0 of this._hosts()) { const legacyUse = h0.exit; if (legacyUse && legacyUse.use && legacyUse.use.mode === 'everyone') this.log('legacy'); }\n");
+  ok(plantB2 !== EP97 && judgeB([['src/exit-proxy.js', plantB2]]).some((l) => /^src\/exit-proxy\.js:\d+ reads a machine's `exit`/.test(l)), '§97 (b) CONTROL (verify F3, gates-plant2): `const legacyUse = h0.exit; … legacyUse.use.mode` planted into exit-proxy\'s rejudgeAll is RED (a `.exit.use` regex let it through)');
+  // (c)
+  const WRITERS97 = [
+    ['src/exit-proxy.js', 'setAccess(', /\.setMany\(/], ['src/server/window-targets-engine.js', 'function putReach(', /\bg\.(?:set|remove)\(/],
+    ['src/server/browser-keeper.js', 'function writeUseRow(', /\bg\.set\(/], ['src/server/automation-engine.js', 'function writeRows(', /\.setMany\(/],
+    ['src/server/automation-engine.js', 'function grant(', /\bwriteRows\(/], ['src/server/automation-engine.js', 'function setReach(', /\bwriteRows\(/], ['src/server/automation-engine.js', 'function setExcept(', /\bwriteRows\(/],
+    ['src/server/channels-access.js', 'async function setGrain(', /\bCG\.setGrainRows\(/], ['src/server/channels-access.js', 'async function setReach(', /\bCG\.setLevel\(/],
+    ['src/server/channels-access.js', 'async function decideRequest(', /\bCG\.setLevel\(/], ['src/server/channels-access.js', 'async function removePattern(', /\bCG\.removeRule\(/],
+    ['src/server/channels-engine.js', 'async function setApiGrants(', /\bCG\.setApiRows\(/], ['src/server/channels-auth.js', 'async function removeRecord(', /\bCG\.removeAccount\(/],
+    ['src/server/channels-grants.js', 'function setGrainRows(', /\.setMany\(/], ['src/task-groups.js', '_setVisibility(id, patch) {', /\bg\.set\(/], ['src/server/grants-migration.js', 'function migrate(', /\.seed\(/],
+  ];
+  const judgeC = (getSrc) => WRITERS97.filter(([f, head, re]) => !re.test(bodyOf(strip97(getSrc(f)), head))).map(([f, head]) => `${f} ${head} does not call the ONE writer`);
+  const badC = judgeC(read);
+  const otherWriters = srcFiles.filter((f) => f !== 'src/server/grants-store.js').filter((f) => /(?:writeJsonAtomic|writeFileSync)\([^)\n]*grants\.json/.test(strip97(read(f))));
+  ok(!badC.length && !otherWriters.length, `§97 (c) ${WRITERS97.length} door write sites call the ONE writer (grants.set / setMany / remove / seed); nothing else writes data/grants.json${badC.length || otherWriters.length ? ' — ' + [...badC, ...otherWriters].slice(0, 6).join(' · ') : ''}`);
+  const TG97 = read('src/task-groups.js');
+  const plantC = TG97.replace("const w = g.set('group-visibility', String(id),", "const w = ({ ok: true }); void ('group-visibility', String(id),");
+  ok(plantC !== TG97 && judgeC((f) => (f === 'src/task-groups.js' ? plantC : read(f))).length === 1, '§97 (c) CONTROL: a Task Group visibility write that skips the store is RED');
+}
+// §98 ONE PATH FIELD AT EVERY DOOR (lane path-field — L1 of the New Session train, the owner accepted POC v2.2 on
+// 2026-10-23 「没啥问题」). Every place a person types a folder is THE path field (src/lib/path-field.js over PURE
+// src/path-candidates.js): the candidates come from the person's own Task Groups, folders and history, computed for the
+// machine in question; a typed value takes effect on blur or says why not (「未生效：…」). The old setupDirAutocomplete
+// (src/lib/autocomplete.js) is DELETED. GREP-DERIVED over public/index.html + every client module (comments stripped):
+//  (a) no `setupDirAutocomplete` anywhere in src/, and src/lib/autocomplete.js does not exist;
+//  (b) every DOOR row names its live pathField( / pathSuggest( call (a dead row is red) and the path inputs it covers;
+//  (c) every PATH-SHAPED input — an <input> whose id / class / placeholder names a path, a folder, a directory or ~/, an
+//      input whose `.placeholder = t('…')` says so, a `file-path-input` — is covered by a DOOR row or is an EXEMPT row
+//      with its reason; a raw path input is RED;
+//  (d) negative controls: a planted raw path input, a planted setupDirAutocomplete( and a door whose call is gone are
+//      each caught.
+{
+  console.log('\n§98 one path field at every door (lane path-field): no raw path input, setupDirAutocomplete deleted');
+  const DOORS = [
+    { file: 'src/lib/app.js', re: /this\._cwdField = pathField\(input, \{/, covers: ['input-cwd', 'src/lib/app.js:cwdInput'], why: 'New Session — the folder (its machine, its Task Group, its name)' },
+    { file: 'src/lib/mounts-dialog.js', re: /const pf = pathField\(el, \{ host: hostOf,/, covers: [], why: 'the storage / machine-mount dialogs: every `autocomplete` field (local or a machine)' },
+    { file: 'src/lib/desktop-app-launcher.js', re: /pathField\(cwdIn, \{ host: /, covers: ['desktop-launch-cwd'], why: 'the app launcher\'s working directory (the launch\'s machine)' },
+    // int346: lane task-group-context's Context table replaced the «Link folder» and context-folder doors — every row's path
+    // and «+ Add a path…» go through ONE maker (makePathField: the row above → the group's first folder → home)
+    { file: 'src/lib/task-detail.js', re: /const pf = pathField\(input, \{\n\s*bases: \(\) => basesFor\(at\), groupsOf: \(\) => \[groupEntry\(\)\]/, covers: ['+ Add a path… (a folder or a file; relative = against the row above; takes effect when you leave the box or press Enter)'], why: 'a Task Group\'s Context table — every row\'s path and «+ Add a path…» (lane task-group-context)' },
+    { file: 'src/lib/task-detail.js', re: /const repoPf = pathField\(repoInput, \{ kind: 'file'/, covers: ['Absolute path for the .md file'], why: 'a Task Group\'s export / import file' },
+    { file: 'src/lib/file-explorer.js', re: /this\._pathField = pathField\(this\.pathInput, \{/, covers: ['src/lib/file-explorer.js:file-path-input'], why: 'the Files window\'s path bar (its machine)' },
+    { file: 'src/lib/setup-flows.js', re: /const cwdPf = pathField\(cwdInput, \{/, covers: ['ob-cwd'], why: 'the tour\'s first chat — its folder' },
+    { file: 'src/lib/session-palette.js', re: /pathSuggest\(typed\)\.then\(/, covers: [], why: 'the session palette\'s /path — the same candidates' },
+  ];
+  const EXEMPT = [
+    { key: 'pf-pk-q', why: 'the picker\'s own search box (inside the path field)' },
+    { key: 'pf-mk-name', why: 'the picker\'s «New folder» name (a name, not a path)' },
+    { key: 'src/lib/browser-window.js:file-path-input', why: 'the browser window\'s URL bar borrows the path bar\'s look (a URL, not a path)' },
+    { key: 'Filter: name / path / helper…', why: 'the Artifacts filter (search words)' },
+    { key: 'Find a design, a folder or a conversation…', why: 'the Design home\'s search (words)' },
+    { key: 'Write a message — sent as you, signed from the path\'s reply name', why: 'a webhook path\'s message box (words, not a folder)' },
+    { key: 'What this path is for (one line)', why: 'a Context row\'s note (words about the path, not a path — lane task-group-context; int346)' },
+  ];
+  const strip97 = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const clientFiles = ['public/index.html', ...fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => 'src/lib/' + f)];
+  const census97 = (tx) => {
+    const raw = [], dead = [], legacy = [];
+    for (const [f, t] of Object.entries(tx)) {
+      if (/\bsetupDirAutocomplete\b/.test(t)) legacy.push(f);
+      const keys = [];
+      for (const m of t.matchAll(/<input\b[^>]*>/g)) {
+        const tag = m[0];
+        if (/type="(?:checkbox|radio|range|color|file|number|hidden|password)"/.test(tag)) continue;
+        const id = /\bid="([^"]+)"/.exec(tag), cls = /\bclass="([^"]+)"/.exec(tag), ph = /\bplaceholder="([^"]*)"/.exec(tag);
+        const pathy = (id && /cwd|folder|-dir\b|path|directory/i.test(id[1])) || (cls && /cwd|folder|-dir\b|path|directory/i.test(cls[1])) || (ph && /~\/|\/home\/|\/Users\/|absolute path|folder|directory/i.test(ph[1]));
+        if (pathy) keys.push((id && id[1]) || (cls && cls[1].split(/\s+/)[0]) || (ph && ph[1]));
+      }
+      for (const m of t.matchAll(/\b([A-Za-z_$][\w$]*)\.placeholder\s*=\s*(?:t|tr)\(\s*(['"])((?:\\.|(?!\2).)*)\2/g)) if (/path|folder|directory|~\//i.test(m[3])) keys.push(m[1] === 'cwdInput' ? `${f}:cwdInput` : m[3].replace(/\\'/g, "'"));
+      for (const m of t.matchAll(/className\s*=\s*['"]file-path-input['"]/g)) keys.push(`${f}:file-path-input`);
+      for (const k of keys) {
+        const covered = DOORS.some((d) => d.covers.includes(k) && (tx[d.file] || '').match(d.re)) || EXEMPT.some((x) => x.key === k);
+        if (!covered) raw.push(`${f}: ${k}`);
+      }
+    }
+    for (const d of DOORS) if (!d.re.test(tx[d.file] || '')) dead.push(`${d.file} (${d.why})`);
+    return { raw, dead, legacy };
+  };
+  const tx97 = Object.fromEntries(clientFiles.map((f) => [f, strip97(read(f))]));
+  const srcAll = [];
+  const walk97 = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const p = d + '/' + e.name; if (e.isDirectory()) walk97(p); else if (/\.(?:js|mjs|cjs)$/.test(e.name)) srcAll.push(p); } };
+  walk97('src');
+  const legacySrc = srcAll.filter((f) => f !== 'src/lib/path-field.js' && /\bsetupDirAutocomplete\b/.test(strip97(read(f))));
+  ok(!fs.existsSync(path.join(REPO, 'src/lib/autocomplete.js')) && legacySrc.length === 0, `§98a setupDirAutocomplete is deleted — no src/lib/autocomplete.js, no caller in ${srcAll.length} src files${legacySrc.length ? ' — still: ' + legacySrc.join(', ') : ''}`);
+  const real97 = census97(tx97);
+  ok(real97.dead.length === 0, `§98b every door row names its live path field call (${DOORS.length} doors)${real97.dead.length ? ' — dead: ' + real97.dead.join(' | ') : ''}`);
+  ok(real97.raw.length === 0 && real97.legacy.filter((f) => f !== 'src/lib/path-field.js').length === 0, `§98c every path-shaped input is THE path field (${DOORS.reduce((n, d) => n + d.covers.length, 0)} covered, ${EXEMPT.length} exempt rows)${real97.raw.length ? ' — RAW: ' + real97.raw.join(' | ') : ''}`);
+  const deadEx = EXEMPT.filter((x) => !Object.values(tx97).some((t) => t.includes(x.key.includes(':') ? 'file-path-input' : x.key)));
+  ok(deadEx.length === 0, `§98c every exempt row still names a live input${deadEx.length ? ' — dead: ' + deadEx.map((x) => x.key).join(' | ') : ''}`);
+  const planted = census97({ ...tx97, 'src/lib/planted.js': `x.innerHTML = '<input type="text" id="export-folder" placeholder="~/somewhere">';\nconst k = document.createElement('input'); k.placeholder = t('Folder to watch');` });
+  const plantedLegacy = census97({ ...tx97, 'src/lib/planted.js': 'setupDirAutocomplete(a, b);' });
+  const gone = census97({ ...tx97, 'src/lib/setup-flows.js': tx97['src/lib/setup-flows.js'].replace('const cwdPf = pathField(cwdInput, {', 'const cwdPf = null; ({') });
+  ok(planted.raw.length === 2 && plantedLegacy.legacy.includes('src/lib/planted.js') && gone.dead.length === 1 && gone.raw.some((r) => r.includes('ob-cwd')), `§98d NEGATIVE CONTROLS: a planted raw path input (markup + a placeholder) is RED (${planted.raw.length}), a planted setupDirAutocomplete( is RED, a door whose call is gone is a dead row AND its input turns raw`);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

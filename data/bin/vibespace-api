@@ -5,6 +5,13 @@
 // line. You never see, hold or pass a key's value: there is no verb that returns one. While the vault is locked every call
 // answers `vault_locked` (exit 3) — the user has already been told (For you names this conversation and the verb): never ask
 // them to unlock it or for the password; wait, or do other work (lane vault-locked-refusal-notice). Scoped by the per-session token in the env.
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --call-timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (require.main === module) { if (!CC) { console.error('vibespace-api: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); } CC.cliStart({ tool: 'vibespace-api', flags: ['--call-timeout'] }); }
 const API = process.env.VIBESPACE_API;
 const TOKEN = process.env.VIBESPACE_SESSION_TOKEN;
 if (require.main === module && (!API || !TOKEN)) { // (a suite may require the module for its argv table)
@@ -54,7 +61,7 @@ function reachWords(r) {
   return 'opened (only what the key opened, what a grant names, and yourself)';
 }
 async function call(method, route, body) {
-  const res = await fetch(API + route, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+  const res = await CC.call(API + route, { ...(/conversations\.open/.test(route) ? { cls: 'wake' } : {}), method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.ok === false) {
     // an open outside its key's limits: the refusal by name + what the key allows (ask inside them, or ask the user to widen them)

@@ -169,32 +169,61 @@
 
   <!-- Dialogs -->
   <div id="dialog-overlay" class="dialog-overlay hidden">
-    <!-- New Session Dialog -->
-    <div id="dialog-new-session" class="dialog hidden">
-      <div class="dialog-header"><h3 data-i18n>New Agent Session</h3><button class="dialog-close">✕</button></div>
-      <div class="dialog-body">
-        <label><span data-i18n>Backend</span><select id="input-backend"><option value="claude">Claude</option><option value="codex">Codex</option><option value="opencode" hidden>OpenCode</option><option value="antigravity" hidden>Antigravity CLI</option><option value="shell" data-i18n>Terminal (plain shell)</option></select></label>
-        <label><span data-i18n>Host</span><select id="input-host"><option value="">Local</option></select></label>
-        <label><span data-i18n>Task</span><select id="input-task"><option value="">None</option></select></label>
-        <label id="row-mode"><span data-i18n>Mode</span><select id="input-mode"><option value="terminal" data-i18n>Terminal</option><option value="chat" data-i18n>Chat</option></select></label>
-        <label><span data-i18n>Working Directory</span>
-          <div class="autocomplete-wrapper">
-            <input type="text" id="input-cwd" placeholder="/home/user/project" autocomplete="off">
-            <div id="cwd-suggestions" class="autocomplete-dropdown hidden"></div>
-          </div>
-          <div id="cwd-recent" class="cwd-recent"></div>
-        </label>
-        <label><span data-i18n>Session Name</span><input type="text" id="input-session-name" placeholder="My Project" data-i18n-attr="placeholder"></label>
-        <label id="row-model"><span data-i18n>Model</span><select id="input-model"></select></label>
-        <label class="hidden" id="custom-model-row"><span data-i18n>Custom Model</span><input type="text" id="input-model-custom" placeholder="model-name" data-i18n-attr="placeholder"></label>
-        <label id="row-permission"><span data-i18n>Permission Mode</span><select id="input-permission"></select></label>
-        <label id="row-effort"><span data-i18n>Effort</span><select id="input-effort"></select></label>
-        <label id="row-account"><span data-i18n>Account</span><select id="input-account"><option value="">Default (Subscription)</option></select></label>
-        <label id="row-browser-profile" style="display:none"><span data-i18n>Browser profile</span><select id="input-browser-profile"></select></label>
-        <label id="row-extra-args"><span data-i18n>Additional Arguments</span><input type="text" id="input-extra-args" placeholder="--verbose"></label>
-        <label id="row-worktree" class="dialog-check-row hidden"><input type="checkbox" id="input-worktree"><span data-i18n>Run in a git worktree</span><span class="dialog-check-hint" id="worktree-hint" data-i18n>The agent gets its own checkout under .claude/worktrees/ on a new branch, so it never touches your working tree. Needs a git repository.</span></label>
+    <!-- New Session Dialog — lane new-session-form: TWO COLUMNS (≥ 1100 px; the phone stacks left then right). LEFT = where
+         and how it runs (the harness's own flags; the rare rows fold under «More options», their values on the footer
+         chips); RIGHT = what it may use (#ns-right, drawn by src/lib/new-session-form.js from VibeSpace's own stores).
+         Every control keeps its id; #input-backend / #input-mode stay the values the segmented switches set. -->
+    <div id="dialog-new-session" class="dialog ns-dialog hidden">
+      <div class="dialog-header ns-head">
+        <h3 data-i18n>New Agent Session</h3>
+        <span class="ns-be-chip" id="ns-be-chip" title="Backend" data-i18n-attr="title"></span>
+        <span class="ns-host-dot" id="ns-host-dot" title="Machine" data-i18n-attr="title"><i></i><span class="ns-host-name"></span></span>
+        <span class="ns-head-sp"></span>
+        <span class="ns-seg ns-kind-seg" id="ns-kind-seg" role="group" aria-label="Session kind" data-i18n-attr="aria-label"><button type="button" data-kind="chat" data-i18n>Agent</button><button type="button" data-kind="terminal" data-i18n>Terminal</button></span>
+        <button class="dialog-close">✕</button>
       </div>
-      <div class="dialog-footer"><button class="btn-cancel" data-i18n>Cancel</button><button class="btn-create" data-i18n>Create Session</button></div>
+      <div class="dialog-body ns-body">
+        <div class="ns-cols">
+          <section class="ns-col ns-left" aria-label="Where and how it runs" data-i18n-attr="aria-label">
+            <div class="ns-col-h"><b data-i18n>Where and how it runs</b><span data-i18n>Prefilled from last time · the harness’s own flags go on its command line</span></div>
+            <div class="ns-card-h" data-i18n>Machine and folder</div>
+            <div class="ns-card" id="ns-card-where">
+              <label id="row-host" data-fold="host"><span data-i18n>Host</span><select id="input-host"><option value="">Local</option></select></label>
+              <label id="row-session-name"><span data-i18n>Session Name</span><input type="text" id="input-session-name" placeholder="My Project" data-i18n-attr="placeholder" autocomplete="off"></label>
+              <label id="row-cwd"><span data-i18n>Working Directory</span>
+                <div class="autocomplete-wrapper">
+                  <input type="text" id="input-cwd" placeholder="/home/user/project" autocomplete="off">
+                </div>
+                <div id="cwd-recent" class="cwd-recent"></div>
+              </label>
+            </div>
+            <div class="ns-card-h" data-i18n>Backend and model</div>
+            <div class="ns-card" id="ns-card-backend">
+              <div class="ns-row" id="row-backend"><span class="ns-lab" data-i18n>Backend</span><span class="ns-seg ns-be-seg" id="ns-be-seg" role="group" aria-label="Backend" data-i18n-attr="aria-label"></span>
+                <select id="input-backend" class="ns-backing"><option value="claude">Claude</option><option value="codex">Codex</option><option value="opencode" hidden>OpenCode</option><option value="antigravity" hidden>Antigravity CLI</option><option value="shell" data-i18n>Terminal (plain shell)</option></select></div>
+              <div class="ns-pair" id="ns-model-pair">
+                <label id="row-model"><span data-i18n>Model</span><select id="input-model"></select></label>
+                <label id="row-effort"><span data-i18n>Effort</span><select id="input-effort"></select></label>
+              </div>
+              <label class="hidden" id="custom-model-row"><span data-i18n>Custom Model</span><input type="text" id="input-model-custom" placeholder="model-name" data-i18n-attr="placeholder"></label>
+              <label id="row-permission"><span data-i18n>Permission Mode</span><select id="input-permission"></select></label>
+              <div class="ns-row hidden" id="row-tools"></div>
+              <label id="row-account" data-fold="account"><span data-i18n>Account</span><select id="input-account"><option value="">Default (Subscription)</option></select></label>
+              <label id="row-worktree" class="dialog-check-row hidden" data-fold="worktree"><input type="checkbox" id="input-worktree"><span data-i18n>Run in a git worktree</span><span class="dialog-check-hint" id="worktree-hint" data-i18n>The agent gets its own checkout under .claude/worktrees/ on a new branch, so it never touches your working tree. Needs a git repository.</span></label>
+              <label id="row-extra-args" data-fold="args"><span data-i18n>Additional Arguments</span><input type="text" id="input-extra-args" placeholder="--verbose"></label>
+            </div>
+            <div class="ns-more hidden" id="ns-more">
+              <button type="button" class="ns-more-toggle" id="ns-more-toggle" aria-expanded="false"><span class="ns-chev" aria-hidden="true">›</span><b data-i18n>More options</b><span class="ns-more-names" id="ns-more-names"></span></button>
+              <div class="ns-more-body" id="ns-more-body"></div>
+            </div>
+            <label id="row-mode" class="ns-backing-row"><span data-i18n>Mode</span><select id="input-mode"><option value="terminal" data-i18n>Terminal</option><option value="chat" data-i18n>Chat</option></select></label>
+          </section>
+          <section class="ns-col ns-right" id="ns-right" aria-label="What it may use" data-i18n-attr="aria-label">
+            <label id="row-browser-profile" style="display:none"><span data-i18n>Browser profile</span><select id="input-browser-profile"></select></label>
+          </section>
+        </div>
+      </div>
+      <div class="dialog-footer ns-foot"><div class="ns-foot-info" id="ns-foot-info" aria-live="polite"></div><button class="btn-cancel" data-i18n>Cancel</button><button class="btn-create" data-i18n>Create Session</button></div>
     </div>
 
     <!-- Fork Session Dialog -->

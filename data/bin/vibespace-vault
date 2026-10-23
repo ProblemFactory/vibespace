@@ -12,11 +12,23 @@
 // the command and answers its output with every value and its encoded forms blanked to `[vault:…]`; the user opens each
 // entry for runs and allows each new command shape once or always. `list` names what this conversation may reference.
 // Nothing here ever prints a value: the hub never sends one.
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --call-timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-vault: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-vault', flags: ['--call-timeout'] });
   // lane vault-mint-put (design q-043 §9): `mint` — the HUB makes a random secret in its OWN namespace `agent:<this conversation>/<name>` and seals it (the agent never sees the value); `put` — seal a value the agent already has (a 0600 file / stdin, never argv). An agent can CREATE in its namespace but can never READ a stored value back — the user reveals it.
 // lane vault-manual-and-lock (design q-043 D4): `request <vault://…> --for "<purpose>"` asks the user for an entry with what it
 // is for (ONE question in their For you tray — nothing waits on it); their answer is a grant (one run, or every run for 8
 // hours; a lock ends it). `uses` = this conversation's grants, its open requests and its own uses (entry, purpose, when,
 // outcome, receipt) — names and codes, never a value.
+// lane vault-paste-request (the owner 2026-10-23: 「应该允许你给我弹一个保险库输入框让我直接 paste 进去」): `request "<what>" --purpose
+// "<why>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>]` — the SAME verb's second shape (the first
+// argument is words, not a vault:// reference): ONE item in the user's For you tray with a masked box; the user pastes the
+// value (or refuses) and this conversation reads a receipt at its next turn — where it went, never the value.
 const fs = require('fs');
 const API = process.env.VIBESPACE_API;
 const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_TOKEN;
@@ -33,6 +45,13 @@ const USAGE = [
   '  vibespace-vault request <vault://…> --for "<purpose>"',
   '                             ask the user for an entry, with what you will run with it: ONE question in their For you tray;',
   '                             nothing waits on it — `uses` shows their answer (once: your next run · 8h: every run for 8 hours)',
+  '  vibespace-vault request "<what you need, in the user\'s words>" --purpose "<what you will do with it>"',
+  '                             [--into <row>.<field> | --kind api-key|password|secret] [--name <label>]',
+  '                             ask the user to PASTE a secret you do not have (a password, an API key): ONE item in their For you',
+  '                             tray with a masked box — the value goes straight into the vault, never to you. --into = an',
+  '                             Integrations field (e.g. llm.apiKey — VibeSpace uses it there itself); otherwise a NEW vault entry',
+  '                             (--kind, --name = its label). Nothing waits on it: your next turn says «stored» (where) or «refused».',
+  '                             Never ask for a secret in the chat — this is the way.',
   '  vibespace-vault uses       what THIS conversation holds: its grants, its open requests and its own uses of the vault',
   '                             (entry, purpose, when, outcome, receipt) — never a value',
   '  vibespace-vault run [--env NAME=vault://<store>/<row>/<field>]… [--file NAME=vault://…|@<template>]… [--stdin vault://…] [--timeout <s>] -- <command…>',
@@ -66,25 +85,18 @@ async function call(method, route, body) {
   const headers = { Authorization: 'Bearer ' + TOKEN };
   let payload;
   if (body !== undefined) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
-  const res = await fetch(API + route, { method, headers, body: payload });
+  const res = await CC.call(API + route, { method, headers, body: payload });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { console.error('vibespace-vault: ' + (data.error || 'HTTP ' + res.status)); process.exit(1); }
   return data;
 }
-// a POST whose answer may be minutes away (the user's card ≤ 60 s + the run ≤ 600 s): plain http(s).request, which sets no
-// deadline — global fetch gives up on an answer's headers after 300 s (vibespace-exit's postLong, the same reason)
-function postLong(route, body) {
-  const u = new URL(API + route), raw = Buffer.from(JSON.stringify(body));
-  return new Promise((resolve, reject) => {
-    const req = require(u.protocol === 'https:' ? 'https' : 'http').request(u, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': raw.length, Authorization: 'Bearer ' + TOKEN } }, (res) => {
-      const chunks = [];
-      res.on('data', (d) => chunks.push(d));
-      res.on('end', () => { let data = {}; try { data = JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { } resolve({ status: res.statusCode, data }); });
-      res.on('error', reject);
-    });
-    req.on('error', reject);
-    req.end(raw);
-  });
+// a POST whose answer may be minutes away (the user's card ≤ 60 s + the run ≤ 600 s): global fetch gave up on an answer's
+// headers after 300 s (vibespace-exit's postLong, the same reason) — the ONE call with that bound (lane cli-call-timeouts)
+async function postLong(route, body) {
+  const res = await CC.call(API + route, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN }, body: JSON.stringify(body), cls: 'wake', ms: 60000 + 600000 + 30000 });
+  let data = {};
+  try { data = JSON.parse(await res.text()); } catch { }
+  return { status: res.status, data };
 }
 // lane agent-context-owner-facts (B-7960): the lock time and the tray are the HUB's words (the owner's zone, named; the tray's
 // label + current place) — this file never formats a time or names a tray itself (it ships to hosts in other zones)
@@ -103,21 +115,45 @@ async function callCoded(method, route, body, verb) {
   const headers = { Authorization: 'Bearer ' + TOKEN };
   let payload;
   if (body !== undefined) { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
-  const res = await fetch(API + route, { method, headers, body: payload });
+  const res = await CC.call(API + route, { method, headers, body: payload });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.ok) { console.error(`vibespace-vault ${verb}: ` + (data.error || 'HTTP ' + res.status) + (data.code ? ` (${data.code})` : '')); process.exit(1); }
   return data;
 }
 
 async function requestCmd(rest) {
-  const { out, positional } = parseFlags(rest, { '--for': 'value' });
-  if (positional.length !== 1 || out['--for'] === undefined) { console.error('vibespace-vault: request <vault://…> --for "<what you will run with it, and why>"'); process.exit(2); }
-  const d = await callCoded('POST', '/api/agent/vault/request', { entry: positional[0], purpose: out['--for'] }, 'request');
+  const { out, positional } = parseFlags(rest, { '--for': 'value', '--purpose': 'value', '--into': 'value', '--kind': 'value', '--name': 'value' });
+  // lane vault-paste-request: words (not a vault:// reference) ⇒ the PASTE shape — the user pastes a secret you do not have
+  if (positional.length === 1 && !positional[0].startsWith('vault://')) return pasteCmd(positional[0], out);
+  if (out['--into'] !== undefined || out['--kind'] !== undefined || out['--name'] !== undefined) { console.error('vibespace-vault: --into / --kind / --name belong to a paste request: vibespace-vault request "<what you need>" --purpose "<why>" — for a stored entry it is: request <vault://…> --for "<purpose>"'); process.exit(2); }
+  const why = out['--for'] !== undefined ? out['--for'] : out['--purpose'];
+  if (positional.length !== 1 || why === undefined) { console.error('vibespace-vault: request <vault://…> --for "<what you will run with it, and why>"  ·  or ask the user to paste one: request "<what>" --purpose "<why>"'); process.exit(2); }
+  const d = await callCoded('POST', '/api/agent/vault/request', { entry: positional[0], purpose: why }, 'request');
   if (d.already === 'open') { console.log(`${d.ref} is already open for runs — run it (a new kind of command still shows the user its card first)`); return; }
   if (d.already === 'granted') { console.log(`${d.ref} is already granted to this conversation (${d.once ? 'for one run' : 'for every run'} until ${whenAt(d.until)}) — run it`); return; }
   console.log(`asked the user for ${d.ref} — the question is in their For you tray; nothing waits on it`);
   console.log('  their answer: once (your next run with it) · 8h (every run for 8 hours) · deny; a lock ends a grant');
   console.log('  `vibespace-vault uses` shows it when it comes; do other work meanwhile, and do not ask again in the chat');
+}
+
+/** lane vault-paste-request: ask the user to PASTE a secret (the hub files ONE For-you item with a masked box; the value never
+ *  comes back — the receipt at the next turn says where it went). The hub judges every word (one spelling, CLI on any host). */
+async function pasteCmd(words, out) {
+  if (out['--for'] !== undefined) { console.error('vibespace-vault: in a paste request the purpose is --purpose "<why>" and the place is --into <row>.<field> (or --kind / --name for a new entry); --for belongs to request <vault://…>'); process.exit(2); }
+  if (out['--purpose'] === undefined) { console.error('vibespace-vault: request "<what you need>" --purpose "<what you will do with it>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>]'); process.exit(2); }
+  const body = { words, purpose: out['--purpose'] };
+  if (out['--into'] !== undefined) body.into = out['--into'];
+  if (out['--kind'] !== undefined) body.kind = out['--kind'];
+  if (out['--name'] !== undefined) body.name = out['--name'];
+  const d = await callCoded('POST', '/api/agent/vault/secret-request', body, 'request');
+  const t = d.target || {};
+  const where = t.into ? `${t.into} (${t.row} › ${t.field}) — VibeSpace uses it there itself` : `a new vault entry «${t.label}» (${t.kind})`;
+  const tray = (d.tray && (d.tray.phrase || d.tray.name)) || 'their For you tray';
+  if (d.already === 'open') console.log(`already asked (${d.requestId}) — the paste box still waits in ${tray}; nothing waits on it`);
+  else console.log(`asked the user to paste it (${d.requestId}) — a masked paste box is in ${tray}; nothing waits on it`);
+  console.log('  where it goes: ' + where);
+  console.log('  your next turn says «stored» (where, and how to use it) or «refused» — never the value; do other work meanwhile,');
+  console.log('  and never ask for the secret in the chat');
 }
 
 async function usesCmd() {
@@ -129,6 +165,7 @@ async function usesCmd() {
   console.log('requests waiting on the user:');
   if (!d.requests || !d.requests.length) console.log('  none');
   for (const q of d.requests || []) console.log(`  ${q.entry}  asked ${whenAt(q.at)}  for: ${q.purpose || '-'}`);
+  for (const q of d.pastes || []) console.log(`  ${q.requestId}  paste «${q.words}» → ${q.place || '-'}  for: ${q.purpose || '-'}`);   // lane vault-paste-request: a paste box waiting in their tray
   console.log('uses (newest first):');
   if (!d.uses || !d.uses.length) console.log('  none');
   for (const u of d.uses || []) console.log(`  ${whenAt(u.at)}  ${u.entry || '-'}  via ${u.door || '-'}  ${u.outcome}${u.receipt ? '  receipt ' + u.receipt : ''}${u.purpose ? '  for: ' + u.purpose : ''}`);

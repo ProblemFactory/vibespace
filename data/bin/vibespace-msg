@@ -21,6 +21,14 @@
 // DISPATCH (lane worker-dispatch, 2026-10-02): `dispatch <agent> --file brief.md` (or `send <agent> --wake
 // --compact-first "…"`) = a wake with the worker COMPACTED first when it is idle — POST /api/agent/msg/dispatch;
 // the answer says whether it compacted and why not. A conversation's verb: refused locally inside a job.
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-msg: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-msg', flags: ['--timeout', '--call-timeout'] });
 'use strict';
 const API = process.env.VIBESPACE_API;
 const SESS = process.env.VIBESPACE_SESSION_TOKEN;
@@ -103,9 +111,9 @@ function refused(j, status) {
   if (REMEDY[code]) console.error('  → ' + REMEDY[code]);
   process.exit(1);
 }
-async function call(method, p, body) {
-  const res = await fetch(API + p, {
-    method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN },
+async function call(method, p, body, cc = {}) {
+  const res = await CC.call(API + p, {
+    ...cc, method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN },
     body: body === undefined ? undefined : JSON.stringify(body),
   }).catch((e) => ({ _neterr: e.message }));
   if (res._neterr) { console.error('vibespace-msg: server unreachable (' + res._neterr + ')'); process.exit(3); }
@@ -215,7 +223,7 @@ const deliveryClause = (rows) => {
     if (flags.yes) body.yes = true;
     if (flags.again) { body.again = true; if (typeof flags.again === 'string') body.attempt = flags.again; }   // verify r2 ②: a fresh attempt (or a retry of a printed nonce)
     console.error('dispatching — an idle worker is compacted first (a large conversation takes 1–2 minutes; this waits up to 3)…');
-    const r = await call('POST', '/api/agent/msg/dispatch', body);
+    const r = await call('POST', '/api/agent/msg/dispatch', body, { cls: 'wake', ms: 240000 });   // the route compacts an idle worker first (≤ 180 s, dispatch-model COMPACT_WAIT_MS) + the wake
     const rec = r.record || {};
     const worker = (rec.target && rec.target.name) || to;
     // verify r1 ③: 'unknown' = no end record was observed (it may have finished); ②: a replay re-sent nothing
@@ -243,7 +251,7 @@ const deliveryClause = (rows) => {
     if (atRefs.length) body.at = atRefs;
     if (flags.yes) body.yes = true;
     if (handPaths.length) body.artifacts = handPaths;
-    const r = await call('POST', '/api/agent/msg/send', body);
+    const r = await call('POST', '/api/agent/msg/send', body, flags.wake ? { cls: 'wake' } : {});
     if (handPaths.length && !r.handover) console.log('NOT handed over: this server has no agent groups engine (the message itself went the legacy way)');
     if (r.handover) { // lane artifacts-handover
       for (const h of r.handover.handed || []) console.log(`handed over ${h.path} (${h.kind}) to "${h.toName || h.to}" — it shows in their chat and Artifacts list`);

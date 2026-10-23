@@ -20,7 +20,7 @@ import { fetchJson, showToast, createModalShell } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { principalPicker } from './principal-picker.js';
 import { folderTail } from './principal-picker-model.js';
-import { pickerRows, draftWho, draftUse, loseCount, saveWords, refusalWords, EVERYONE_KEY } from './browser-who-model.js';
+import { pickerRows, draftWho, draftUse, loseCount, saveWords, refusalWords, EVERYONE_KEY, draftExcept } from './browser-who-model.js';
 
 const DIALOG_ID = 'browser-who-dialog';
 
@@ -62,7 +62,7 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   // lane dialog-unsaved-guard: a pick changed and not saved ⇒ ✕ / Esc / the backdrop asks (the picker is drawn right below)
   const shell = createModalShell({ id: DIALOG_ID, title: t('Who can use {label}?', { label: title }), dialogClass: 'bwho-dialog', bodyClass: 'bwho-body', escapeToClose: true,
     onClose: () => { closed = true; try { picker.close(); } catch { /* none */ } },
-    unsaved: { isDirty: () => picker.selected().slice().sort().join('\n') !== initial.slice().sort().join('\n'), save: () => doSave() } });
+    unsaved: { isDirty: () => picker.selected().slice().sort().join('\n') !== initial.slice().sort().join('\n') || picker.except().slice().sort().join('\n') !== initialExcept.slice().sort().join('\n'), save: () => doSave() } });
   shell.dialog.dataset.profileId = id;
   const body = shell.body;
 
@@ -85,6 +85,7 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   };
   rowsNow();
   const initial = model.selected.slice();
+  const initialExcept = model.exceptSelected.slice();   // lane grants-unify: the members left out, as they were read
   const pickWrap = el('div', 'bwho-pick');
   const picker = principalPicker({
     items: () => rowsNow(), app, multi: true, selected: initial,
@@ -93,6 +94,7 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
     // ALL AGENTS = "every conversation of yours, now and later" — the profile's `all` (lane everyone-principal)
     everyone: { key: EVERYONE_KEY },
     onChange: () => refresh(),
+    except: { selected: initialExcept, extra: () => model.exceptExtra },   // «除了» — members left out of a picked Task Group / All agents
   });
   pickWrap.appendChild(picker.el);
   const remoteLine = el('div', 'bwho-remote chat-status-dim', t('Conversations on other machines are not listed — the Agent browser runs on this machine only.'));
@@ -120,11 +122,12 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
     const who = draftWho(sel, model.wire);
     const keys = sel.map((k) => model.keyOfPick.get(k)).filter(Boolean);
     const taskIds = who.filter((w) => w.kind === 'task').map((w) => w.id);
-    return { sel, who, keys, taskIds };
+    const exceptKeys = picker.except().map((k) => model.keyOfPick.get(k) || (model.exceptWire.get(k) || {}).key).filter(Boolean);   // lane grants-unify
+    return { sel, who, keys, taskIds, exceptKeys };
   }
   function refresh() {
     const d = draft();
-    const n = loseCount(view.usedBy, { mode: mode(), keys: d.keys, taskIds: d.taskIds });
+    const n = loseCount(view.usedBy, { mode: mode(), keys: d.keys, taskIds: d.taskIds, exceptKeys: d.exceptKeys });
     noteText(lose, n ? t('{n} conversation(s) using it now will lose it when you save (their pages in it close).', { n }) : '');
     lose.style.display = n ? '' : 'none';
     remoteLine.style.display = mode() === 'only' && model.remote ? '' : 'none';
@@ -144,7 +147,9 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
 
   async function doSave() {
     const d = draft();
-    const use = draftUse(d.sel, model.wire);   // ALL AGENTS ⇒ {mode:'all'} (+ the rows kept beside it); nothing ⇒ refused
+    const use0 = draftUse(d.sel, model.wire);   // ALL AGENTS ⇒ {mode:'all'} (+ the rows kept beside it); nothing ⇒ refused
+    const except = draftExcept(picker.except(), model);   // lane grants-unify: «除了»
+    const use = use0 && except.length ? { ...use0, except } : use0;
     if (!use) {
       noteText(refusal, refusalWords({ code: 'empty_list' }, t));
       refusal.style.display = '';

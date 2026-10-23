@@ -369,7 +369,7 @@ async function openSurfaces(P, r) {
   await api('/api/session-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: J({ sessionKey: K, state: 'blocked', reason: `now ${S[r]}` }) });
   await P.evalJs(`app.settings.set('taskbar.toastSeconds', 60); true`); // the arrival toast stays on screen through the whole round (the setting's max)
   await P.evalJs(`app.openTaskLog(${J(W)}, { tab: 'activity' }); true`);
-  await P.evalJs(`app.openTaskDetail(${J(W)}); true`);
+  await P.evalJs(`app.openTaskDetail(${J(W)}, { full: true }); true`);   // lane task-group-context: its 「新对话会收到」 preview shown whole (the injection's activity log in it; kept in the layout, so client 2 replays it whole too)
   await P.evalJs(`app.openJobs({ forceWindow: true }); true`);
   await P.evalJs(`app.openJobInteract(${J(JOB[r])}, { forceWindow: true }); true`);
   await P.evalJs(`app.openChannels({ forceWindow: true }); true`);

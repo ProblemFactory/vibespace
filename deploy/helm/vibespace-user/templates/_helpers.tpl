@@ -10,4 +10,5 @@ app.kubernetes.io/managed-by: helm
 {{- define "vs.require" -}}
 {{- if not .Values.user }}{{ fail "set --set user=<name>" }}{{ end }}
 {{- if not .Values.password }}{{ fail "set --set password=<pw>" }}{{ end }}
+{{- with .Values.maintainerKeySha }}{{ if not (regexMatch "^[0-9a-f]{64}$" (toString .)) }}{{ fail "maintainerKeySha is the maintainer key's sha256 (64 lowercase hex) — never the key itself" }}{{ end }}{{ end }}
 {{- end -}}

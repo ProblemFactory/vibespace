@@ -166,6 +166,7 @@ function classOf(ref, row = null) {
   const modelDoor = VR.ownDoorOf(ref);
   if (modelDoor) return { cls: NEVER_CLASS[ref.store] || 'unknown', runnable: false, door: modelDoor };
   if (VR.agentScopeOf(ref)) return { cls: 'agent-entry', runnable: true };   // an AGENT's own entry (lane vault-mint-put: mint / put) — the owner opens it like any other; only its conversation may use it
+  if (VR.isFreeEntry(ref.store, ref.entry, ref.field)) return { cls: 'secret', runnable: true };   // lane vault-paste-request: a free entry (`secret:<id>`) — the owner opens it (the switch, a grant, a paste for the asker)
   if (!Object.prototype.hasOwnProperty.call(RUN_CLASS, ref.store)) return { cls: NEVER_CLASS[ref.store] || 'unknown', runnable: false, door: 'no run door (a store this door does not open)' };
   if (row && NEVER_KINDS.includes(row.kind)) return { cls: 'login', runnable: false, door: 'a sign-in token is never referenced by a run' };
   return { cls: RUN_CLASS[ref.store], runnable: true };
@@ -613,6 +614,20 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     settleRequest(q, 'granted', 'answered');
     return { ok: true, outcome: a === 'once' ? 'granted-once' : 'granted', until };
   }
+  /** lane vault-paste-request: THE PASTE IS THE GRANT — the owner pasted a NEW free entry into For you in answer to THIS
+   *  conversation's request (its purpose on the card, src/server/vault-paste-door.js): the conversation may use that one
+   *  entry in runs for GRANT_MS (a lock ends it; each new command shape still draws its run card). No 验证是你: the entry did
+   *  not exist before the paste — a press forged on a hub with no sign-in grants only the value it supplied itself, never a
+   *  secret the owner had stored. → { ok, until, hours } | a named refusal. */
+  function grantPasted({ scope = '', ref = '', purpose = '', by = 'user', requestId = null } = {}) {
+    const r = VR.parseRef(String(ref || ''));
+    if (!scope || !r || !VR.isFreeEntry(r.store, r.entry, r.field)) return named('bad_reference');
+    if (vaultState() !== 'unlocked') return named('vault_locked');
+    const t = now(), until = t + GRANT_MS;
+    grants.set(pairOf(String(scope), r.id), { conv: String(scope), key: null, entries: [r.id], until, once: false, at: t, by: String(by).slice(0, 40), askId: null, purpose: String(purpose || '').slice(0, PURPOSE_MAX) });
+    audit('vault-grant', { by: String(by).slice(0, 40), conv: String(scope), entry: r.ref, answer: 'pasted', requestId, until });
+    return { ok: true, until, hours: GRANT_MS / 3600e3 };
+  }
   /** `vibespace-vault uses` (design D4): THIS conversation's grants, its open requests and its own use lines (the engine reads
    *  the audit file's tail) — references, purposes, times, outcomes, receipts; never a value, never another conversation's. */
   function usesFor(caller = {}) {
@@ -930,7 +945,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   /** The process ends: every child, its strays and its files with it (sync — an exit handler). */
   function closeAll() { for (const rec of [...runs]) { killGroup(rec, 'SIGKILL'); endMarked(rec.mark); shredDir(rec.dir); } runs.clear(); }
 
-  return { run, answer, setRunnable, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor,
+  return { run, answer, setRunnable, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted,
     listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet,
     listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen };
 }

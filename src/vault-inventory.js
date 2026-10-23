@@ -80,10 +80,15 @@ const AGENT_PROV = Object.freeze({
   stored: { label: 'Agent stored · the agent saw the plaintext', sawPlaintext: true },
 });
 const AGENT_ENTRY_RE = /^agent:(.+)\/([^/]+)$/;
+const FREE_ENTRY_RE = /^secret:[\w.-]{1,160}$/;   // lane vault-paste-request (src/vault-paste.js — the hub's ids are 10 hex characters)
+const FREE_KINDS = Object.freeze(['api-key', 'password', 'secret']);
 function secretRowOf(s, { machineName = (k) => k } = {}) {
   const name = String((s && s.name) || ''), at = s && s.at;
   const nameOf = (k) => { try { return String(machineName(k) || k); } catch { return k; } };
   for (const r of SECRET_ROWS) { const m = r.re.exec(name); if (m) return { entry: name, field: r.field, kind: r.kind, label: r.label(m[1], nameOf), detail: r.detail, createdAt: at }; }
+  // lane vault-paste-request: a FREE entry (`secret:<id>` — pasted by the owner in For you at an agent's request, or added
+  // in the Vault window's 「其他密钥或密码…」): its row says the label, the kind and the note a person wrote (never a value)
+  if (FREE_ENTRY_RE.test(name)) return { entry: name, field: 'secret', kind: FREE_KINDS.includes(s && s.kind) ? s.kind : 'secret', label: String((s && s.label) || name.slice(7)), detail: String((s && s.note) || ''), createdAt: at };
   const am = AGENT_ENTRY_RE.exec(name);
   if (am) {
     const prov = AGENT_PROV[s && s.prov] ? s.prov : 'stored';   // default-safe: an unknown provenance is treated as 'the agent saw it'
@@ -168,6 +173,8 @@ function doorsOf({ store, entry, field }) {
   if (store === 'app-secrets') return { delete: { method: 'POST', path: `/api/desktop/apps/${enc(e)}/secrets/forget`, confirm: 'app-logins' }, rotate: null };
   // design q-047 L1 (lane vault-totp): a two-step code — its own delete door (its grants go with it) and THE CODE door (a
   // person's GET, no 「验证是你」, audited); no 换新 (a site that changed the seed = delete + add — design §4 #9)
+  // lane vault-paste-request: a free entry — its own delete door (the run door's switch and grants on it go with it)
+  if (store === 'secrets' && FREE_ENTRY_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/secrets/${enc(e.slice(7))}`, confirm: 'secret' }, rotate: null };
   if (store === 'secrets' && /^totp:[\w.-]{1,120}$/.test(e)) { const p = `/api/vault/totp/${enc(e.slice(5))}`; return { delete: { method: 'DELETE', path: p, confirm: 'totp' }, rotate: null, code: { path: p } }; }
   return { delete: null, rotate: null };
 }
@@ -255,6 +262,7 @@ const PURPOSES = Object.freeze([
   Object.freeze({ id: 'app-logins', label: i18nKey('App logins') }),            // app-secrets
   Object.freeze({ id: 'passkeys', label: i18nKey('Passkeys') }),                // passkeys
   Object.freeze({ id: 'automation', label: i18nKey('Automation keys') }),       // automation (`apikey:`)
+  Object.freeze({ id: 'keys', label: i18nKey('Passwords & keys') }),            // secrets `secret:` (lane vault-paste-request: a free entry — pasted for an agent, or added in this window)
   Object.freeze({ id: 'agents', label: i18nKey('Kept by agents') }),            // an `agent:` entry (q-043 §9 mint / put) — BEFORE every rule above
   Object.freeze({ id: 'other', label: i18nKey('Other'), onlyWhenAny: true }),   // nothing above (a sealed file's key …)
 ]);
@@ -275,6 +283,7 @@ function purposeOf(row) {
   if (store === 'automation') return 'automation';
   if (/^(?:host|frp):/.test(entry)) return 'machines';
   if (/^totp:/.test(entry)) return 'two-step';
+  if (/^secret:/.test(entry)) return 'keys';
   if (/^apikey:/.test(entry)) return 'automation';
   return 'other';
 }
@@ -358,12 +367,14 @@ function bandItemsOf(open) {
   return { items: mine.slice(0, BAND_MAX), total: mine.length };
 }
 /** An item's doors in the band (closed per action type): a held automation call = its three answers; the restart's notice =
- *  unlock; a rotate suggestion = renew + got it; a failed use = open the row + got it; anything else = open + got it. */
+ *  unlock; a rotate suggestion = renew + got it; an agent's request for a secret = paste + refuse; a failed use = open the
+ *  row + got it; anything else = open + got it. */
 function bandDoorsOf(item) {
   const type = item && item.action && item.action.type;
   if (type === 'automation-ask') return ['once', 'always', 'deny'];
   if (type === 'vault-unlock') return ['unlock'];
   if (type === 'vault-rotate') return ['renew', 'ack'];
+  if (type === 'secret-request') return ['paste', 'deny'];   // lane vault-paste-request: an agent's request for a secret — THE paste box (a dialog here) / refuse
   return ['open', 'ack'];
 }
 

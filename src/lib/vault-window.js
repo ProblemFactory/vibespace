@@ -35,6 +35,7 @@ import { KIND_WORDS, countdownText, CLIPBOARD_CLEAR_MS, PURPOSES, purposeOf, PRO
 import { loadAutomation, automationExtras, showMintDialog } from './vault-automation.js'; // design q-046: «Automation keys» — mint, grant, revoke (never a value)
 import { loadTotp, totpExtras } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…
 import { inboxModel } from './user-todos-actions.js'; // lane vault-window-v2: 「需要你」 = For you's own items (one store, one set of answers)
+import { showSecretAddDialog, showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: 「其他密钥或密码…」 + an agent's paste request answered here (THE box, as a dialog)
 
 const ICON = svgIcon16('<rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/><circle cx="8" cy="10.5" r="1"/>');
 const MASK = '••••••••';
@@ -98,6 +99,7 @@ function confirmWords(key, row) {
   if (key === 'integration') return { title: t('Clear my keys'), message: t('Clear the keys you entered for {label}? The row falls back to the cluster default when one exists.', { label: row.label }), confirm: t('Clear') };
   if (key === 'passkey') { const [site, user] = String(row.label).split(' · '); const w = passkeyDeleteWords({ site, user: user || '' }, { w: t }); return { title: w.title, message: w.message, confirm: w.confirm }; }
   if (key === 'app-logins') return { title: t('Forget the logins this app keeps?'), message: t('VibeSpace keeps this app\'s logins for it in its own session; after you forget them the app asks again.'), confirm: t('Forget') };
+  if (key === 'secret') return { title: t('Delete "{name}"?', { name: row.label }), message: t('The value leaves the vault. A conversation that uses it in a command loses it at its next run.'), confirm: t('Delete') };   // lane vault-paste-request: a free entry
   if (key === 'totp') return { title: t('Delete the two-step code "{name}"?', { name: row.label }), message: t('Its seed leaves the vault and every grant of its code stops. A site that asks for this code needs it set up again.'), confirm: t('Delete') };
   return { title: t('Delete'), message: row.label, confirm: t('Delete') };
 }
@@ -163,6 +165,9 @@ registerVaultAdd({ id: 'account', order: 10, label: () => t('Account…'), run: 
 registerVaultAdd({ id: 'integration', order: 20, label: () => t('Integration key…'), run: (app) => app.openIntegration?.() });
 registerVaultAdd({ id: 'channel', order: 30, label: () => t('Channel account…'), run: (app) => app.openChannels?.() });
 registerVaultAdd({ id: 'automation', order: 40, label: () => t('Automation key…'), run: (app, c) => showMintDialog({ refresh: c.refresh, data: c.auto() }) });
+// lane vault-paste-request (the owner 2026-10-23: 「我压根没法添加啊」): a plain secret the registry lists no row for — a password, an
+// API key, an OAuth client secret — a FREE entry `secret:<id>` (name, kind, value, note), the same masked field as For you's paste box
+registerVaultAdd({ id: 'secret', order: 50, label: () => t('Other key or password…'), run: (app, c) => showSecretAddDialog({ refresh: c.refresh }) });
 
 /** THE WINDOW (singleton). `focus` = a row (or an entry) to bring into view — a 「需要你」 item's door. */
 export function openVaultWindow(app, { syncId, focus = null } = {}) {
@@ -506,10 +511,11 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   // ── 「需要你」 — For you's own open items of origin 'vault' (the same store; answered here = answered there) ──
   const inbox = (() => { try { return inboxModel(app); } catch { return null; } })();
   function bandDoor(item, door) {
-    const label = { once: t('Allow once'), always: t('Always for this conversation'), deny: t('Deny'), unlock: t('Unlock…'), renew: t('Renew…'), ack: t('Got it'), open: t('Open the row') }[door];
-    const b = btnEl(label, `vw-band-${door}${door === 'once' || door === 'unlock' ? ' vw-primary' : ''}${door === 'deny' ? ' vw-del' : ''}`);
+    const label = { once: t('Allow once'), always: t('Always for this conversation'), deny: t('Deny'), unlock: t('Unlock…'), renew: t('Renew…'), ack: t('Got it'), open: t('Open the row'), paste: t('Paste and save…') }[door];
+    const b = btnEl(label, `vw-band-${door}${door === 'once' || door === 'unlock' || door === 'paste' ? ' vw-primary' : ''}${door === 'deny' ? ' vw-del' : ''}`);
     b.dataset.door = door;
     b.onclick = async () => {
+      if (door === 'paste') { showSecretPasteDialog(inbox, item, { words: inbox.wordsOf(item), detail: inbox.detailOf(item) }); return; }   // lane vault-paste-request: THE paste box (the store resolves the item — the band follows)
       if (door === 'once' || door === 'always' || door === 'deny') { await inbox.runAction(item, door); return; }   // THE tray's own answer (src/lib/user-todos-actions.js)
       if (door === 'unlock') { showUnlock(); return; }
       if (door === 'ack') { await inbox.setStatus(item.id, 'done'); return; }

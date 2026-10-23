@@ -19,6 +19,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { scratch } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { seedChannelIndex } from './grant-fixtures.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const FO = require(path.join(REPO, 'src/channel-focus.js'));
@@ -83,6 +84,7 @@ await ix.update((x) => {
     Object.assign(en, { title: `Room ${id}`, kind: 'group', lastAt: T - 40 * DAY + n, unread: 0, lastText: `last line of ${id}` }, facts);
   }
 });
+seedChannelIndex(path.join(ROOT, 'eng'), ix.snapshot());   // lane grants-unify: the grains above are rows of the grants store (the migration's mapper)
 await eng.store.outbox.update((ob) => {
   ob.proposals = ob.proposals || {};
   for (const [a, id, f] of rows) {
@@ -267,9 +269,11 @@ console.log('④ source census: the full-list readers');
   const tagIt = async (on) => {
     await ve.store.outbox.update((ob) => { ob.proposals = { ...(ob.proposals || {}), 'p-v': { id: 'p-v', key: `${A}/v-await`, adapterId: A, convId: 'v-await', state: on ? 'awaiting-approval' : 'sent', text: 'd', draftedBy: { kind: 'agent', id: 'x' }, at: T - H, updatedAt: T - H } }; });
     await vx.update(() => {
-      const g = vx.entry(A, 'v-grain'); g.access = on ? [{ principal: AG, authority: 'draft' }] : []; g.watchers = on ? [{ principal: AG, notify: 'each', mode: 'all' }] : [];
       vx.entry(A, 'v-held').stats = { wakes: [{ at: T - DAY, ok: !on, lane: on ? 'none' : 'live', n: 1 }] };
     });
+    // lane grants-unify: the hand-over is the grain's rows in THE grants store — written through the product's door
+    const gr = await ve.setGrain(A, { kind: 'conversation', convId: 'v-grain' }, { access: on ? [{ principal: AG, authority: 'draft' }] : [], watchers: on ? [{ principal: AG, mode: 'all' }] : [] });
+    if (!gr.ok) throw new Error(`setGrain: ${gr.error}`);
   };
   await vx.update(() => {
     for (let i = 0; i < 40; i++) for (const a of [A, B]) Object.assign(vx.entry(a, `vq${i}`), { title: `Quiet ${i}`, kind: 'group', lastAt: T - H - i * 1000, unread: 0 });   // the heads: never the rows below

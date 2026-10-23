@@ -43,6 +43,7 @@ import { spawnSync, spawn, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, deadPort } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { withUse } from './grant-fixtures.mjs';   // lane grants-unify: a hand-built record's list mirrored as the keeper mirrors the store's row
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
 const B = require('../src/browser-profiles.js');
@@ -177,21 +178,21 @@ console.log('— ② the registry record, the lease and the keeper\'s verdicts (
   ok(B.validateProfileInput({ label: 'x', sharing: 'instance' }).code === 'sharing_refused', 'sharing:instance is refused until the mediating proxy ships (D6)');
   ok(B.validateProfileInput({ label: 'x', allowedDomains: ['example.com'] }).code === 'fence_refused', 'a domain fence on a persistent profile is refused (§6.3)');
   ok(B.validateProfileInput({ label: 'x', proxy: 'not a url' }).code === 'bad_proxy', 'a malformed proxy is refused');
-  const rec = B.newProfileRecord({ id: 'bp-00000001', ...v.value, dir: '/tmp/x', owner: { kind: 'session', id: KEY_A }, now: 5 });
+  const rec = withUse(B.newProfileRecord({ id: 'bp-00000001', ...v.value, dir: '/tmp/x', owner: { kind: 'session', id: KEY_A }, now: 5 }));
   ok(B.publicProfileView(rec).proxy === 'http://***@proxy.example:3128', 'the public view masks the proxy\'s secret half');
   ok(B.mintProfileId('deadbeef') === 'bp-deadbeef' && B.isProfileId('bp-deadbeef') && !B.isProfileId('bp-xyz'), 'profile ids are minted bp-<8 hex>');
   ok(!B.profileDirName('bp-00000001').includes('Work'), 'the label never reaches a path (the dir name is the id)');
-  const profiles = [rec, { id: 'bp-00000002', label: 'Team', owner: { kind: 'instance', id: null } }, { id: 'bp-00000003', label: 'team', owner: { kind: 'task', id: 'tg-1' } }];
+  const profiles = [rec, withUse({ id: 'bp-00000002', label: 'Team', owner: { kind: 'instance', id: null } }), withUse({ id: 'bp-00000003', label: 'team', owner: { kind: 'task', id: 'tg-1' } })];
   ok(B.findProfile(profiles, 'bp-00000002').id === 'bp-00000002' && B.findProfile(profiles, 'work').id === 'bp-00000001', 'a profile resolves by id or by label (case-insensitive)');
   ok(Array.isArray(B.findProfile(profiles, 'TEAM').ambiguous), 'two profiles differing only in case are AMBIGUOUS by label');
-  ok(B.mayAttach(profiles[1], { browserKey: KEY_B }).ok && B.mayAttach({ ...rec, legacy: true, owner: { kind: 'session', id: KEY_A } }, { browserKey: KEY_B }).ok, 'an instance-owned or legacy profile admits any conversation');
+  ok(B.mayAttach(profiles[1], { browserKey: KEY_B }).ok && B.mayAttach(withUse({ ...rec, legacy: true, owner: { kind: 'session', id: KEY_A } }), { browserKey: KEY_B }).ok, 'an instance-owned or legacy profile admits any conversation');
   ok(B.mayAttach(rec, { browserKey: KEY_A }).ok && B.mayAttach(rec, { browserKey: KEY_A + '.3' }).ok && B.mayAttach(rec, { browserKey: KEY_B }).code === 'not_owner', 'a session-owned profile admits its conversation (children included) and refuses another');
   ok(B.mayAttach(profiles[2], { browserKey: KEY_B, taskIds: ['tg-1'] }).ok && B.mayAttach(profiles[2], { browserKey: KEY_B, taskIds: [] }).code === 'not_owner', 'a task-owned profile admits the sessions bound to that Task Group');
   // "WHO CAN USE IT" IS A LIST (2026-09-27): a PIN NEVER AUTHORIZES — the admission takes no `pinned` / `by` (the user's
   // pick WRITES the list, keeper.setPin); the refusal names the BUTTON, never a command line
   ok(B.mayAttach(rec, { browserKey: KEY_B, pinned: true }).code === 'not_owner' && B.mayAttach(rec, { browserKey: KEY_B, by: 'user' }).code === 'not_owner' && B.mayAttach(profiles[2], { browserKey: KEY_B, pinned: true }).code === 'not_owner', 'the list (2026-09-27): a pin or a `by:\'user\'` is no admission input any more — a profile kept to ANOTHER conversation refuses a pinned conversation (the user\'s pick writes the list instead)');
   { const r = B.mayAttach(rec, { browserKey: KEY_B }); ok(r.code === 'not_owner' && /kept to some of the user's conversations and Task Groups/.test(r.error) && /"Who can use it" in the Agent browser panel \(Change…\)/.test(r.error) && /"All agents"/.test(r.error) && !/vibespace-browser/.test(r.error + (r.remedy || '')) && /Never create a second profile/.test(r.error), 'owner ruling A (5): not_owner names the buttons ("Who can use it" → Change… in the Agent browser panel, or "All agents" — lane everyone-principal) and no command line', r.error); }
-  ok(B.scopeOf(profiles[1]) === 'all' && B.scopeOf(rec) === 'only' && B.scopeOf(profiles[2]) === 'only' && B.scopeOf({ ...rec, legacy: true }) === 'all' && B.scopeOf(B.newProfileRecord({ id: 'bp-0000000f', label: 'x', dir: '/tmp/x' })) === 'all' && B.SCOPES.join() === 'all,only', 'owner ruling A: scopeOf reads ONE field (owner): instance/legacy = all, a list (or a pre-list single session / task owner) = only — and a new record with no owner is ALL');
+  ok(B.scopeOf(profiles[1]) === 'all' && B.scopeOf(rec) === 'only' && B.scopeOf(profiles[2]) === 'only' && B.scopeOf(withUse({ ...rec, legacy: true })) === 'all' && B.scopeOf(withUse(B.newProfileRecord({ id: 'bp-0000000f', label: 'x', dir: '/tmp/x' }))) === 'all' && B.SCOPES.join() === 'all,only', 'owner ruling A: scopeOf reads ONE field (owner): instance/legacy = all, a list (or a pre-list single session / task owner) = only — and a new record with no owner is ALL');
   ok(rec.owner.kind === 'only' && rec.owner.who.length === 1 && rec.owner.who[0].kind === 'session' && rec.owner.who[0].id === KEY_A, 'a create handed a pre-list single `session` owner stores the WRITE shape: a one-row list');
   // the lease: ONE per (profile, conversation)
   let leases = [];

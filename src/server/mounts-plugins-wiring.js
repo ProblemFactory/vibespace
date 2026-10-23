@@ -58,13 +58,18 @@ const feedbackForward = require('./feedback-forward.js').create({
   personSet: () => { try { return !!String(serverSetting('telemetry.forwardUrl') || '').trim(); } catch { return false; } }, userTodos: () => userTodos,
 });
 { const tel = getTelemetry && getTelemetry(); if (tel) tel.onForwardAnswer = (url, res) => feedbackForward.noteAnswer(url, res); }   // the target's release off the telemetry forward's own answers
-const feedback = require('./feedback-store.js').create({ dataDir: path.join(rootDir, 'data'), wss, log: (...a) => console.warn(...a), onNew: (row) => feedbackForward.enqueue(row) });
+// lane fleet-feedback-marks: a mark that names a release is TOLD to the conversation that filed the report — ONE free
+// next-turn notice (session-status `feedback-handled`; PURE feedback-model filerKey: a running session's own key, else
+// <harness>:<conversation id>), the same report's older one replaced; never a wake
+const feedbackFilerKeyOf = (sid) => { for (const [id, s] of activeSessions) if (s && !s.isTmuxView && (id === sid || require('../claude-lock-capture.js').addressableId(s) === sid)) return sessionStatusKey ? sessionStatusKey(s, id) : null; return null; };
+const feedbackTell = (notice, row) => { const st = getSessionStatus ? getSessionStatus() : null; const key = st ? require('../feedback-model.js').filerKey(row, feedbackFilerKeyOf) : null; if (!key) return; st.dropNotices(key, (x) => x && x.kind === 'feedback-handled' && x.id === notice.id); st.pushNotice(key, notice); };
+const feedback = require('./feedback-store.js').create({ dataDir: path.join(rootDir, 'data'), wss, log: (...a) => console.warn(...a), onNew: (row) => feedbackForward.enqueue(row), tell: feedbackTell });
 if (syncStores) syncStores.feedback = feedback.sync;
 require('../routes/feedback.js').registerFeedbackRoutes(app, {
   store: feedback, activeSessions, getJobs,
   groupOf: (s, id) => {
     const tasks = getTasks && getTasks();
-    const gs = tasks && sessionStatusKey ? tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }) : [];
+    const gs = tasks && sessionStatusKey ? tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) : [];
     const g = gs.find((x) => x.id === s._initialGroupId) || gs[0];
     return g ? { id: g.id, name: g.title || null } : null;
   },
@@ -115,7 +120,11 @@ const vaultTotp = require('./vault-totp.js').create({ dataDir: path.join(rootDir
 // test-msg-cli-groups §2c); a use by such a fork presents another token, so the parent's run-bound grant never covers it
 const totpSessionOf = (cid) => [...activeSessions.values()].find((s) => s && !s.isTmuxView && require('../claude-lock-capture.js').addressableId(s) === cid) || null;
 const totpRunOf = (cid) => { const s = totpSessionOf(cid); return s ? require('./vault-totp.js').runOfToken(s.agentToken) : null; };   // THIS run of a running conversation (its token's digest)
-require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun,
+// lane vault-paste-request (the owner 2026-10-23: 「应该允许你给我弹一个保险库输入框让我直接 paste 进去」): an agent ASKS for a secret, the
+// owner PASTES it into its For-you item's masked box (or refuses); the value goes to the one writer of its place (a registry
+// field: the integration store; a free entry: the vault's `secret:<id>`); the asker reads a receipt at its next turn (the stash)
+const vaultPaste = require('./vault-paste-door.js').create({ vault, integrations, userTodos, deliver, vaultRun, log: (m) => console.log('[vault-paste]', m) });
+require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste,
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
   linkTokenFor: (hostKey, who) => hostTokens.tokenFor(hostKey, who), onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
   // int317 (RED-3): the door's audit row → the device audit (the machine card's Activity…) — the session, its host key, the status
@@ -123,7 +132,7 @@ require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, 
 // design q-046 (lane automation-keys-core): VIBESPACE'S OWN AUTOMATION KEYS — a key's value is the vault entry `apikey:<id>`
 // (never in an agent's hands); a conversation / a Task Group is GRANTED a key by a person; a use is judged on the hub
 // (src/server/automation-engine.js over PURE src/automation-keys.js), audited, and stops while the vault is locked
-const automationGroupsOf = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return []; try { return tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId }).map((g) => g.id); } catch { return []; } };
+const automationGroupsOf = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return []; try { return tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id); } catch { return []; } };
 // lane automation-open-limits (the q-048 verify's M2): an open's limits judge the EFFECTIVE open — what it names, else the
 // account store's default and the instance's default model (the typed accessor ws-create's ladder reads)
 const automationSettings = require('./harness-config-sync.js').accessorsFor({ serverSetting, harnesses: require('../harnesses') });
@@ -131,7 +140,7 @@ const automationSettings = require('./harness-config-sync.js').accessorsFor({ se
 // the automation doors' and the two-step code door's (design q-047 L1) ONE reading of a session token
 const sessionCallerOf = (token) => { for (const [id, s] of activeSessions) if (s && sameToken(token, s.agentToken)) { const cid = s.backendSessionId || s.claudeSessionId || null; return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, name: s.name || s.webuiName || null, live: !s.isTmuxView, groups: automationGroupsOf(s, id) }; } return null; };
 // the grant pickers' subjects: every running conversation and every Task Group (automation keys' 授权给…, two-step codes' 用于…)
-const conversationSubjects = () => { const tasks = getTasks && getTasks(); const sessions = []; for (const s of activeSessions.values()) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && !s.isTmuxView) sessions.push({ subject: `session:${cid}`, name: s.name || s.webuiName || cid, backend: s.backend || 'claude' }); } let groups = []; try { groups = tasks ? tasks.list().filter((t) => t && !t.archivedAt).map((t) => ({ subject: `group:${t.id}`, name: t.title || t.id })) : []; } catch { groups = []; } return { sessions, groups }; };
+const conversationSubjects = () => { const tasks = getTasks && getTasks(); const sessions = []; for (const [id, s] of activeSessions) { const cid = s && (s.backendSessionId || s.claudeSessionId); if (cid && !s.isTmuxView) sessions.push({ subject: `session:${cid}`, name: s.name || s.webuiName || cid, backend: s.backend || 'claude', groupIds: automationGroupsOf(s, id) /* lane grants-unify: the «除了» row offers a picked group's members */ }); } let groups = []; try { groups = tasks ? tasks.list().filter((t) => t && !t.archivedAt).map((t) => ({ subject: `group:${t.id}`, name: t.title || t.id })) : []; } catch { groups = []; } return { sessions, groups }; };
 // lane vault-window-v2 (design q-047 §3.4): the Vault window's 「需要你」 producers — a use door's refusal (使用失败), an agent's put (建议轮换)
 const vaultAttention = require('./vault-hooks.js').createVaultAttention({ userTodos });
 const automation = require('./automation-engine.js').create({ dataDir: path.join(rootDir, 'data'), vault, userTodos, attention: vaultAttention, log: (m) => console.log('[automation]', m),
@@ -931,6 +940,8 @@ function createSessionMessages(session, sessionId) {
     let browserKept = null;
     try { browserKept = require('./browser-kept').create({ dataDir: path.join(rootDir, 'data'), keeper: () => browserKeeper, serverSetting, broadcast: (m) => bcastAll(m), liveKeys: () => new Set([...activeSessions.values()].map((s) => s && s._browserKey).filter(Boolean)), onChange: () => browserKeeper?.factsMoved?.() }); } // lane B: a kept change moves the browser fact (Resume)
     catch (e) { browserKept = null; console.warn('[browser] kept browsers unavailable — a conversation\'s browser loses its logins and tabs when it stops: ' + (e && e.message)); }
+    // lane grants-unify: the bindings reader the keeper maps a conversation ⇄ its browser key through (read per ask)
+    let grantBindings = null; try { grantBindings = require('./browser-bindings').create({ dataDir: path.join(rootDir, 'data') }); } catch (e) { console.warn('[browser] the conversation ⇄ key reader is unavailable — a stopped conversation is judged by its key alone: ' + (e && e.message)); }
     browserKeeper = require('./browser-keeper').create({
       dataDir: path.join(rootDir, 'data'), env: () => agentEnv(), broadcast: (m) => bcastAll(m),
       ...(testEgressMap.size ? { egressResolve: (h) => testEgressMap.get(String(h || '').toLowerCase()) || h } : {}),
@@ -954,11 +965,13 @@ function createSessionMessages(session, sessionId) {
       // else the earliest bound group naming a default). Belonging is the
       // store's own LIVE rule (`groupsForSession`), asked with the facts a
       // create has: cwd + the dialog's taskId (+ the session key when known).
-      taskGroupDefault: ({ cwd = null, initialGroupId = null, sessionKey = null } = {}) => {
+      taskGroupDefault: ({ cwd = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
         const tasks = getTasks ? getTasks() : null;
         if (!tasks) return '';
-        const groups = tasks.groupsForSession({ sessionKey, cwd, initialGroupId }) || [];
-        const first = (initialGroupId && groups.find((g) => g.id === initialGroupId && g.browserProfileId)) || groups.find((g) => g.browserProfileId);
+        const groups = tasks.groupsForSession({ sessionKey, cwd, initialGroupId, initialGroupIds }) || [];
+        // lane new-session-form: the FIRST spawned-into group in selection order that names a default (then any group)
+        const picked = [...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter(Boolean);
+        const first = picked.map((id) => groups.find((g) => g.id === id && g.browserProfileId)).find(Boolean) || groups.find((g) => g.browserProfileId);
         return first ? first.browserProfileId : '';
       },
       // MULTIVIEW B-325a (design-browser-multiview): what the keeper may ask
@@ -981,11 +994,12 @@ function createSessionMessages(session, sessionId) {
       },
       // MULTIVIEW D4 (lane P verify, finding 5): the Task Group's default per-conversation cap for a CREATE —
       // the same belonging rule and facts as the pin's rung above; ws-create stamps it once per conversation
-      taskGroupCap: ({ cwd = null, initialGroupId = null, sessionKey = null } = {}) => {
+      taskGroupCap: ({ cwd = null, initialGroupId = null, initialGroupIds = null, sessionKey = null } = {}) => {
         const tasks = getTasks ? getTasks() : null;
         if (!tasks) return null;
-        const groups = tasks.groupsForSession({ sessionKey, cwd, initialGroupId }) || [];
-        const first = (initialGroupId && groups.find((g) => g.id === initialGroupId && Number.isInteger(g.browserCap))) || groups.find((g) => Number.isInteger(g.browserCap));
+        const groups = tasks.groupsForSession({ sessionKey, cwd, initialGroupId, initialGroupIds }) || [];
+        const picked = [...(Array.isArray(initialGroupIds) ? initialGroupIds : []), initialGroupId].filter(Boolean);
+        const first = picked.map((id) => groups.find((g) => g.id === id && Number.isInteger(g.browserCap))).find(Boolean) || groups.find((g) => Number.isInteger(g.browserCap));
         return first ? first.browserCap : null;
       },
       // "Who can use it" is a LIST (2026-09-27): the Task Groups the conversation carrying a browser key belongs to NOW —
@@ -1002,8 +1016,20 @@ function createSessionMessages(session, sessionId) {
         if (!hit) return { ids: [], unreadable: false, live: false };
         try {
           const key = sessionStatusKey ? sessionStatusKey(hit, hitId) : null;
-          return { ids: (tasks.groupsForSession({ sessionKey: key, cwd: hit.cwd, initialGroupId: hit._initialGroupId }) || []).map((g) => g.id), unreadable: false };
+          return { ids: (tasks.groupsForSession({ sessionKey: key, cwd: hit.cwd, initialGroupId: hit._initialGroupId, initialGroupIds: hit._initialGroupIds }) || []).map((g) => g.id), unreadable: false };
         } catch (e) { console.warn(`[browser] the Task Group list could not be read for ${bk} — ${e && e.message}`); return { ids: [], unreadable: true }; }
+      },
+      // lane grants-unify: "Who can use it" names a conversation by its CONVERSATION id in the ONE grants store — a browser
+      // key → the keys its conversation answers to (the live session carrying it: its own id, a pending fork's webui key;
+      // stopped: the id its binding holds), and a conversation → its browser key (the panel speaks keys)
+      conversationKeysForKey: (bk) => {
+        for (const [id, x] of activeSessions) if (x && x._browserKey === bk) { const cid = require('../claude-lock-capture.js').addressableId(x); return { keys: cid ? [String(cid), `webui:${id}`] : [`webui:${id}`], live: true }; }
+        let cid = ''; try { cid = grantBindings ? grantBindings.conversationOf(bk) || '' : ''; } catch { cid = ''; }
+        return { keys: cid ? [cid] : [], live: false };
+      },
+      browserKeyForConversation: (cid) => {
+        for (const [id, x] of activeSessions) { if (!x || !x._browserKey) continue; const own = require('../claude-lock-capture.js').addressableId(x); if ((own && String(own) === cid) || `webui:${id}` === cid) return x._browserKey; }
+        try { return grantBindings ? grantBindings.lookup(cid) || null : null; } catch { return null; }
       },
       // one Task Group's facts (null = the store no longer lists it) — the write's unknown_task and the panel's words
       taskInfo: (id) => {
@@ -1019,7 +1045,7 @@ function createSessionMessages(session, sessionId) {
       const tasks = getTasks ? getTasks() : null;
       if (!tasks || !s) return [];
       const key = sessionStatusKey ? sessionStatusKey(s, id) : null;
-      return (tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId }) || []).map((g) => g.id);
+      return (tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }) || []).map((g) => g.id);
     };
     let browserEnvMemo;
     // the pin route re-points a RUNNING session's indirection through the
@@ -1340,6 +1366,7 @@ function createSessionMessages(session, sessionId) {
         releaseProfile: (id) => require('../routes/browser').releaseProfile(id), unpinProfile: (id) => require('../routes/browser').unpinProfile(id),
         // "Who can use it": a picked live session → its conversation's browser key (routes/browser.js's ONE resolver)
         keyForPickedSession: (webuiId) => require('../routes/browser').keyForPickedSession(webuiId),
+        exceptKeyForPicked: (webuiId) => require('../routes/browser').exceptKeyForPicked(webuiId),   // lane grants-unify: «除了» by conversation
         pinGuard: (id, unpin) => require('../routes/browser').pinGuardFor(id, unpin),
         // a narrowing's detached conversation hears it on its next message (§3.8 layer ②, the same queue as the pin's)
         notice: (sessionId, session, n) => { const st = getSessionStatus ? getSessionStatus() : null; if (st && sessionStatusKey) st.pushNotice(sessionStatusKey(session, sessionId), n); } });

@@ -59,6 +59,12 @@
 //   byte-identical to a render with the key absent (a release from an older values file); set ⇒ the env, its value
 //   exactly, right after VIBESPACE_PUBLIC_URL, and nothing else moves. CONTROL: a template that renders the env
 //   whatever the value (an empty relay on every pod) is RED.
+// M THE MAINTAINERS' KEY (lane fleet-feedback-marks — the owner's option B: the maintainers mark a pod's agent feedback
+//   from the cluster side): maintainerKeySha empty (the default) ⇒ no VIBESPACE_MAINTAINER_KEY_SHA, the Deployment
+//   byte-identical to a render with the key absent; set to a sha256 ⇒ the env with exactly that value (a plain value —
+//   a digest, never in a Secret, never a VIBESPACE_MAINTAINER_KEY value env) and nothing else moves; the KEY ITSELF (or
+//   any value that is not 64 lowercase hex) REFUSES the render, named. CONTROL: a chart without that refusal renders a
+//   key value into the pod's env (RED).
 // CONTROLS (chart copies in scratch): a subPath mount, a source without
 //   optional, an env rendered beside the volume — each turns its assert red;
 //   the app system's env without the forced caps, a second SYS_ADMIN, the env
@@ -405,6 +411,33 @@ const relayVerdict = (out, want) => {
   ok(!relayVerdict(onA, RELAY).length && !volumeVerdict(onA, { release: REL_OV }).length, 'beside the presets volume (a release with the blocks): the env and the volume form both hold');
 }
 
+console.log('M the maintainers\' key (maintainerKeySha → VIBESPACE_MAINTAINER_KEY_SHA)');
+const MSHA = 'e0dc9579d14000f912d66151c124f72bc8307bf50d6bbe568840453782ccab3e';
+const MKEY_VALUE = 'vsmk_' + 'Q'.repeat(43);
+const maintVerdict = (out, want) => {
+  const dep = depOf(out), bad = [];
+  const env = envNames(dep), n = env.filter((e) => e === 'VIBESPACE_MAINTAINER_KEY_SHA').length;
+  const val = (dep.match(/- name: VIBESPACE_MAINTAINER_KEY_SHA\n\s+value: "([^"]*)"/) || [])[1];
+  if (!want && n) bad.push('VIBESPACE_MAINTAINER_KEY_SHA rendered with no sha set');
+  if (want && val !== want) bad.push(`the env value is ${JSON.stringify(val)}, not the sha set`);
+  if (val !== undefined && !/^[0-9a-f]{64}$/.test(val)) bad.push('the env value is not a sha256 (a KEY in the pod\'s env)');
+  if (n > 1) bad.push('the env twice');
+  if (env.includes('VIBESPACE_MAINTAINER_KEY')) bad.push('a key VALUE env rendered');
+  if (want && secretDocs(out).some((d) => d.includes(want))) bad.push('the sha in a Secret');
+  return bad;
+};
+const renderErr = (values) => { const f = path.join(ROOT, `values-${++n}.json`); fs.writeFileSync(f, JSON.stringify(values)); const r = spawnSync('helm', ['template', 'u-' + values.user, CHART, '-f', f], { encoding: 'utf-8' }); return r.status === 0 ? null : String(r.stderr || r.error || 'failed'); };
+{
+  const def = render(CHART, C), withKey = render(CHART, { ...C, maintainerKeySha: '' }), on = render(CHART, { ...C, maintainerKeySha: MSHA });
+  ok(!maintVerdict(def, null).length && depOf(def) === depOf(withKey), `the default (and an explicit empty value) renders no VIBESPACE_MAINTAINER_KEY_SHA — the Deployment byte-identical either way${say(maintVerdict(def, null))}`);
+  ok(!maintVerdict(on, MSHA).length, `--set maintainerKeySha=<sha256> ⇒ the env with exactly that sha, a plain value (never a Secret, never a key value)${say(maintVerdict(on, MSHA))}`);
+  const strip = (d) => d.replace(/\n\s+# The maintainers' key, by its sha256 ONLY[\s\S]*?- name: VIBESPACE_MAINTAINER_KEY_SHA\n\s+value: "[^"]*"/, '');
+  ok(strip(depOf(on)) === depOf(def), 'nothing else in the Deployment moves (the env block is the WHOLE diff)');
+  const refused = [MKEY_VALUE, MSHA.toUpperCase(), MSHA.slice(1), 'yes'].map((v) => [v.slice(0, 12), renderErr({ ...C, maintainerKeySha: v })]);
+  ok(refused.every(([, e]) => e && /maintainerKeySha is the maintainer key's sha256 \(64 lowercase hex\) — never the key itself/.test(e)), 'the KEY ITSELF, an uppercase sha, 63 hex, a word ⇒ the render REFUSES, named (a key never reaches a pod by a slip)', JSON.stringify(refused.map(([v, e]) => [v, e && e.split('\n')[0]])));
+  ok(!maintVerdict(render(CHART, { ...A, maintainerKeySha: MSHA }), MSHA).length && !volumeVerdict(render(CHART, { ...A, maintainerKeySha: MSHA }), { release: REL_OV }).length, 'beside the presets volume (a release with the blocks): the env and the volume form both hold');
+}
+
 console.log('CONTROLS (chart copies)');
 const relayAlways = chartCopy('relay-always', (s) => s.replace('{{- with .Values.oauthRelayUrl }}', '{{- with (list .Values.oauthRelayUrl) }}').replace('              value: {{ . | quote }}\n            {{- end }}\n            {{- if and .Values.frp', '              value: {{ index . 0 | quote }}\n            {{- end }}\n            {{- if and .Values.frp'));
 ok(relayVerdict(render(relayAlways, C), null).length > 0, 'CONTROL: a template that renders VIBESPACE_OAUTH_RELAY_URL whatever the value (an empty relay on every pod) is RED');
@@ -429,6 +462,9 @@ ok(appSysVerdict(render(secc, C, ON), { on: true, caps: ['SYS_ADMIN'] }).some((b
 ok(bothMissing(ephVerdict(render(preJ, C))), 'CONTROL: a values.yaml without the ephemeral-storage keys (the chart before J) is RED on both');
 const reqDrop = chartCopy('eph-template', (s) => s.replace('requests: {{- toYaml .Values.resources.requests | nindent 14 }}', 'requests: {{- toYaml (omit .Values.resources.requests "ephemeral-storage") | nindent 14 }}'));
 ok(ephVerdict(render(reqDrop, C)).some((b) => /^requests\.ephemeral-storage missing/.test(b)), 'CONTROL: a template that drops the key from requests is RED');
+
+const maintNoGuard = chartCopy('maint-no-guard', (s) => s.replace(/\{\{- with \.Values\.maintainerKeySha \}\}\{\{ if not \(regexMatch [^\n]*\n/, ''), 'templates/_helpers.tpl');
+ok(maintVerdict(render(maintNoGuard, { ...C, maintainerKeySha: MKEY_VALUE }), MKEY_VALUE).some((b) => /not a sha256/.test(b)), 'CONTROL: a chart without the sha refusal renders the KEY into the pod\'s env — RED');
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

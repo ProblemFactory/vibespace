@@ -83,7 +83,7 @@ try {
 console.log('— ③ THE CENSUS: every fetch() site in src/server');
 // [file, raw fetch( sites, class, why] — a NEW site is RED until it is a row; class `untrusted` = safeFetch only
 const ROWS = [
-  ['src/server/agent-tool-generators.js', 3, 'own', 'the hook / tool scripts it writes call THIS instance\'s /api/agent/* (loopback, the session token)'],
+  ['src/server/agent-tool-generators.js', 2, 'own', 'the hook / tool scripts it writes call THIS instance\'s /api/agent/* (loopback, the session token) — lane cli-call-timeouts: 3 → 2, vibespace-status calls through THE ONE CALL (src/cli-call.js)'],
   ['src/server/browser-builds-keeper.js', 1, 'vendor-fixed', 'Chrome for Testing: every hop judged by egressVerdict over the record\'s two hosts before the request, https only'],
   ['src/server/decision-engine.js', 1, 'vendor-fixed', 'DECISION_ENDPOINT (OpenAI / OpenRouter), behind the budget verdict + the key (test-vendor-whitelist)'],
   ['src/server/dropline-client.js', 6, 'vendor-fixed', 'api.dropline.fish.audio — the one vendor module (test-vendor-whitelist)'],

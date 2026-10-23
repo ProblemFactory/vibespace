@@ -9,6 +9,7 @@
 import { registerMenuItem } from './contributions.js';
 import { createModalShell, getStateSync, showToast } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
+import { MAINTAINER_BY } from '../feedback-model.js';   // PURE — lane fleet-feedback-marks: a mark the instance's maintainer key made
 
 const STORE = 'feedback';
 const ICON = '<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/><path d="M8 5.5v2.2M8 9.2v.1"/></svg>';
@@ -66,7 +67,7 @@ function paintRow(node, r, act) {
   text.onclick = () => node.classList.toggle('fb-open');
   // lane feedback-handled-verb: a report the maintainer marked through vibespace-api names the release and the conversation
   const handled = r.status !== 'handled' || !r.handledAt ? ''
-    : r.handledVersion ? t('handled in {version} by {who}, {when}', { version: r.handledVersion, who: r.handledBy || t('an agent'), when: whenText(r.handledAt) })
+    : r.handledVersion ? t('handled in {version} by {who}, {when}', { version: r.handledVersion, who: r.handledBy === MAINTAINER_BY ? t('the maintainers') : r.handledBy || t('an agent'), when: whenText(r.handledAt) })
       : t('handled {when}', { when: whenText(r.handledAt) });
   const meta = el('div', 'fb-meta', [r.harness, r.instance && r.instance.name, r.instance && r.instance.version ? 'v' + r.instance.version : '', handled].filter(Boolean).join(' · '));
   node.append(head, text, meta);

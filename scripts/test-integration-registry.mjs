@@ -26,6 +26,8 @@
 //    file really calls resolveIntegration('<id>'), the callback literal has ONE
 //    definition, one env name has one resolver, no route touches plaintext,
 //    (r3) no file outside the store BUILDS an env name either
+// (f) lane oauth-setup-instructions: every OAuth row's `redirect` block (the setup card's facts), Gmail's `clientType`
+//    field, checkRow controls, the Gmail fixed loopback's ONE definition, deploy/README.md held equal to the card
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -725,6 +727,9 @@ const ENV_ALLOW = new Map([
 // that renders them) — never shipped, never run by the product; the r4
 // integrations mockups draw the Lark callback URL on purpose (2.369.165).
 const isDoc = (f) => /^docs\/.*\.md$/.test(f) || /^docs\/mockups\//.test(f) || f === 'CLAUDE.md' || f === 'CHANGELOG.md' || f === 'README.md';
+// lane oauth-setup-instructions: deploy/README.md's redirect URI block is GENERATED from the rows (held equal in (f)) — it
+// prints the loopback callbacks without being a second definition of them
+const isGeneratedDoc = (f) => f === 'deploy/README.md';
 function envNameCensus(files, read) {
   const hits = [];
   for (const f of files) {
@@ -973,7 +978,7 @@ function consumerCensus(rows, read) {
 // (d) THE CALLBACK URL HAS ONE DEFINITION
 if (tracked.length) {
   const LIT = 'http://127.0.0.1:17865/lark/cb';
-  const holders = tracked.filter((f) => !isDoc(f)).filter((f) => { try { return readRepo(f).includes(LIT); } catch { return false; } });
+  const holders = tracked.filter((f) => !isDoc(f) && !isGeneratedDoc(f)).filter((f) => { try { return readRepo(f).includes(LIT); } catch { return false; } });
   const allowed = new Set(['src/channels/lark/manifest.js', 'scripts/test-integration-registry.mjs', 'scripts/test-integrations-ui.mjs']);
   ok(holders.includes('src/channels/lark/manifest.js') && holders.every((f) => allowed.has(f)), `the Lark callback literal is defined in its manifest (src/channels/lark/manifest.js) and nowhere else in code (holders: ${holders.join(', ')})`);
   if (fs.existsSync(path.join(REPO, 'src/oauth-loopback.js'))) ok(!readRepo('src/oauth-loopback.js').includes(LIT) && !/LARK_CALLBACK_URL/.test(readRepo('src/oauth-loopback.js')) && require(path.join(REPO, 'src/channels/lark.js')).consent.callbackUrl === LIT, 'lane dc-channels-consent: src/oauth-loopback.js names no vendor callback — the Lark adapter\'s consent row hands the loopback THIS row\'s URL');
@@ -1094,7 +1099,7 @@ for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r
   const CR = require(path.join(REPO, 'src/consent-road.js'));
   const shapeOf = (r) => r.fields.map((f) => `${f.key}:${f.secret ? 's' : 'p'}${f.required ? 'R' : 'o'}`).join();
   const lk = R.rowById('lark'), gm = R.rowById('gmail'), sl = R.rowById('slack');
-  ok(shapeOf(lk) === 'appId:pR,appSecret:sR,relayUrl:po' && shapeOf(gm) === 'clientId:pR,clientSecret:sR,relayUrl:po' && sl.fields.some((f) => f.key === 'relayUrl' && !f.secret && !f.required) && !R.checkRow(lk).length && !R.checkRow(gm).length,
+  ok(shapeOf(lk) === 'appId:pR,appSecret:sR,relayUrl:po' && shapeOf(gm) === 'clientId:pR,clientSecret:sR,relayUrl:po,clientType:po' && sl.fields.some((f) => f.key === 'relayUrl' && !f.secret && !f.required) && !R.checkRow(lk).length && !R.checkRow(gm).length,
     `lark / gmail gain relayUrl (public, optional) like slack's (${shapeOf(lk)} · ${shapeOf(gm)})`);
   ok(JSON.stringify([R.clientFieldsOf('lark').idKey, R.clientFieldsOf('lark').secretKey, R.clientFieldsOf('gmail').idKey, R.clientFieldsOf('gmail').secretKey]) === JSON.stringify(['appId', 'appSecret', 'clientId', 'clientSecret']), 'the custom client is still the first id + the first secret (the relay page never becomes the client id)');
   const good = [R.validateValues(lk, { appId: 'cli_abc', appSecret: 'dummy-secret-1', relayUrl: 'https://admin.example.test/relay/' }), R.validateValues(gm, { clientId: 'x.apps.googleusercontent.com', clientSecret: 'dummy-secret-1', relayUrl: CR.RELAY_DEFAULT })];
@@ -1155,6 +1160,80 @@ for (const r of copiesCensus(MUTI.files, MUTI.dir, REPO, { minCopies: 3 })) ok(r
   ok(has(plant((r) => ({ connect: { ...r.connect, start: 'https://fish.audio/oauth' } })), /^connect = /), 'CONTROL: a non-/api route is refused');
   ok(has(plant((r) => ({ connect: { ...r.connect, whys: { 'self-hosted': r.connect.whys['self-hosted'] } } })), /^connect = /), 'CONTROL: a missing connectWhy sentence is refused');
   ok(has(plant((r) => ({ connect: { ...r.connect, words: { ...r.connect.words, extra: 'x' } } })), /^connect = /), 'CONTROL: a word outside the closed set is refused');
+}
+
+// (f) lane oauth-setup-instructions (the owner 2026-10-23: a self-hoster with their own vendor app met the redirect URIs
+// only after a refusal): THE `redirect` BLOCKS — the setup card's and deploy/README.md's ONE source
+{
+  console.log('\n(f) the setup card\'s facts: every OAuth row\'s `redirect` block, Gmail\'s client kind, deploy/README.md held equal');
+  const OS = require(path.join(REPO, 'src/oauth-setup.js'));
+  const GMm = require(path.join(REPO, 'src/channels/gmail/manifest.js'));
+  const lk = R.rowById('lark'), gm = R.rowById('gmail'), sl = R.rowById('slack'), dl = R.rowById('dropline');
+  const withRedirect = R.ROWS.filter((r) => r.redirect).map((r) => r.id);
+  ok(JSON.stringify(withRedirect) === JSON.stringify(['lark', 'gmail', 'slack', 'dropline']) && R.ROWS.filter((r) => r.redirect).every((r) => !R.checkRow(r).length),
+    `exactly the four OAuth rows declare a redirect block, each passing checkRow (${withRedirect.join(', ')})`);
+  ok(gm.redirect.clientTypes === true && gm.redirect.loopback === GMm.GMAIL_LOOPBACK_URL && Number(new URL(GMm.GMAIL_LOOPBACK_URL).port) > 1024 && new URL(GMm.GMAIL_LOOPBACK_URL).port !== new URL(lk.setup.callbackUrl).port && new URL(GMm.GMAIL_LOOPBACK_URL).pathname === '/gmail/cb' && /Authorized redirect URIs$/.test(gm.redirect.console.path) && gm.redirect.console.links[0].url === 'https://console.cloud.google.com/apis/credentials' && /redirect_uri_mismatch/.test(gm.redirect.refusal) && gm.redirect.also[0].for === 'drive',
+    'Google: a Web application OR a Desktop app client (the card says which), its OWN fixed loopback (/gmail/cb, not Lark\'s port) for a Web client, the console path ending at «Authorized redirect URIs», redirect_uri_mismatch, Drive\'s rclone address');
+  ok(lk.redirect.loopback === lk.setup.callbackUrl && /Security Settings → Redirect URLs$/.test(lk.redirect.console.path) && lk.redirect.refusal === '20029' && lk.redirect.console.links.map((l) => new URL(l.url).hostname).join() === 'open.larksuite.com,open.feishu.cn' && !lk.redirect.clientTypes && lk.redirect.create,
+    'Lark: its registered loopback IS setup.callbackUrl (one spelling), Developer Console → Security Settings → Redirect URLs (both brands linked), 20029, one kind of app');
+  ok(!sl.redirect.loopback && /OAuth & Permissions → Redirect URLs$/.test(sl.redirect.console.path) && sl.redirect.create && dl.redirect.selfRegisters === true && dl.redirect.vendor === 'Fish Audio' && Object.keys(dl.redirect).length === 2,
+    'Slack: https only (no loopback), OAuth & Permissions → Redirect URLs; Dropline registers its own client (nothing to set up in a console)');
+  const shape = gm.fields.find((f) => f.key === 'clientType');
+  ok(shape && !shape.secret && !shape.required && shape.validate('web').ok && shape.validate('desktop').ok && !shape.validate('Web').ok && !shape.validate('').ok && JSON.stringify(gm.delegate.facts) === JSON.stringify(['clientType']),
+    'Gmail\'s registry field `clientType` (web | desktop, optional, never secret) — a delegating row\'s readable preset fact');
+  const plant = (id, patch) => R.checkRow({ ...R.rowById(id), ...patch(R.rowById(id)) });
+  const has = (errs, re) => errs.some((e) => re.test(e));
+  ok(has(plant('gmail', (r) => ({ redirect: { ...r.redirect, loopback: 'https://x.example.test/cb' } })), /^redirect\.loopback must be/)
+    && has(plant('gmail', (r) => ({ redirect: { ...r.redirect, extra: 1 } })), /^redirect\.extra is not a key/)
+    && has(plant('lark', (r) => ({ redirect: { ...r.redirect, loopback: r.setup.callbackUrl.replace('/lark/cb', '/lark/cb2') } })), /one spelling/)
+    && has(plant('slack', (r) => ({ redirect: { ...r.redirect, refusal: '' } })), /^redirect\.refusal/)
+    && has(plant('slack', (r) => ({ redirect: { ...r.redirect, create: undefined } })), /^redirect\.create/)
+    && has(plant('dropline', (r) => ({ redirect: { ...r.redirect, refusal: 'x' } })), /selfRegisters/)
+    && has(plant('lark', (r) => ({ redirect: { ...r.redirect, vendor: 'X' } })), /^redirect\.vendor/)
+    && has(plant('gmail', (r) => ({ redirect: { ...r.redirect, console: { path: 'x', links: [{ label: 'x', url: 'http://x.example.test/' }] } } })), /^redirect\.console/)
+    && has(plant('gmail', (r) => ({ redirect: { ...r.redirect, also: [{ uri: r.redirect.also[0].uri, for: 'nas' }] } })), /^redirect\.also/)
+    && has(plant('gmail', (r) => ({ delegate: { ...r.delegate, facts: ['clientSecret'] } })), /^delegate\.facts/),
+    'CONTROLS: checkRow refuses a non-loopback / a second spelling of the loopback, an unknown key, a missing refusal or app, extras beside selfRegisters, a vendor elsewhere, an http console link, an unknown `also` consumer, a fact naming the secret');
+  // THE GMAIL LOOPBACK HAS ONE DEFINITION (as Lark's): its manifest; the README is generated from it
+  if (tracked.length) {
+    const holders = tracked.filter((f) => !isDoc(f) && !isGeneratedDoc(f)).filter((f) => { try { return readRepo(f).includes(GMm.GMAIL_LOOPBACK_URL); } catch { return false; } });
+    ok(JSON.stringify(holders) === JSON.stringify(['src/channels/gmail/manifest.js']), `the Gmail fixed loopback literal is defined in its manifest and nowhere else in code (holders: ${holders.join(', ')})`);
+  }
+  // deploy/README.md: the generated block equals what scripts/gen-oauth-setup-doc.mjs renders from the rows
+  const gen = await import(path.join(REPO, 'scripts/gen-oauth-setup-doc.mjs'));
+  const doc = fs.readFileSync(path.join(REPO, 'deploy/README.md'), 'utf8');
+  let regenerated = null; try { regenerated = gen.render(doc); } catch (e) { regenerated = String(e.message); }
+  ok(regenerated === doc, 'deploy/README.md\'s «Register the redirect URIs» block equals what scripts/gen-oauth-setup-doc.mjs renders from the rows' + (regenerated === doc ? '' : ' — STALE: run `node scripts/gen-oauth-setup-doc.mjs` and commit deploy/README.md'));
+  const block = doc.slice(doc.indexOf(OS.DOC_BEGIN), doc.indexOf(OS.DOC_END));
+  const cardUris = gen.entries().flatMap((x) => OS.setupCard({ kind: x.kind, redirect: x.redirect, base: OS.HOST_TPL, relayPages: [{ url: OS.PUBLIC_RELAY, who: 'page' }] }).rows.map((r) => r.uri).filter(Boolean));
+  const docUris = [...block.matchAll(/`((?:https?):\/\/[^`]+)`/g)].map((m) => m[1]);
+  ok(cardUris.length >= 10 && JSON.stringify(docUris) === JSON.stringify(cardUris), `the README lists exactly the card's addresses, in the card's order (${docUris.length})`, JSON.stringify({ docUris, cardUris }));
+  ok(doc.includes(`\`${OS.PUBLIC_RELAY}\``) && /never an open redirect/.test(block) && /docs\/slack-relay/.test(block) && /\/api\/channels\/oauth\/cb\/<kind>/.test(doc) && /paste the last page/.test(block),
+    'the README names the three ways back for a person\'s own app (the public page — its address a stable contract —, your own copy of docs/slack-relay, the instance\'s own https address) and the paste-back last resort');
+  const stale = doc.replace(`\`${GMm.GMAIL_LOOPBACK_URL}\``, `\`${GMm.GMAIL_LOOPBACK_URL.replace('/gmail/cb', '/gmail/cb2')}\``);
+  ok(stale !== doc && gen.render(stale) !== stale, 'CONTROL: a hand-edited address in the block is caught (the regenerated block differs)');
+}
+
+console.log('lane vault-paste-request: a `secret: true` field of a CARD row is a paste target — the field\'s own validate decides the value');
+{
+  const P = require(path.join(REPO, 'src/vault-paste.js'));
+  const cards = R.ROWS.filter((r) => !r.bindsPerAccount && !r.bindsPerMachine);
+  const wrong = [];
+  for (const row of R.ROWS) for (const f of row.fields || []) {
+    const t = P.targetOf({ into: `${row.id}.${f.key}` });
+    const want = row.bindsPerAccount ? 'row_per_account' : row.bindsPerMachine ? 'row_per_machine' : f.secret ? null : 'field_not_secret';
+    if (want ? (t.ok || t.code !== want) : !(t.ok && t.target.row === row.id && t.target.field === f.key && t.target.fieldLabel === f.label)) wrong.push(`${row.id}.${f.key}: ${t.ok ? 'ok' : t.code}${want ? ' (wanted ' + want + ')' : ''}`);
+  }
+  const n = cards.reduce((k, r) => k + (r.fields || []).filter((f) => f.secret).length, 0);
+  ok(!wrong.length && n >= 8, `every field of every row judged (${R.ROWS.length} rows): a card row's secret field (${n}) is a target named by its own id and label; a non-secret field ⇒ field_not_secret; an account-bound / per-machine row ⇒ refused by name`, wrong);
+  ok(!P.targetOf({ into: 'llm' }).ok && P.targetOf({ into: 'nope.apiKey' }).code === 'unknown_row' && P.targetOf({ into: 'llm.nope' }).code === 'unknown_field', 'a spelling with no field, an unknown row, an unknown field ⇒ refused by name');
+  // the VALUE: the paste door hands it to the store's ONE writer, which runs THIS validate (trimmed first — the registry's rule)
+  const row = R.rowById('llm');
+  const bad = R.validateValues(row, { apiKey: P.valueOf('  short\n').value });
+  const good = R.validateValues(row, { apiKey: P.valueOf('  sk-long-enough-key\n').value });
+  ok(!bad.ok && /at least 8 characters/.test(bad.errors.apiKey) && good.ok && good.values.apiKey === 'sk-long-enough-key', 'the field\'s validate decides: «at least 8 characters» refused by name, a good one kept TRIMMED (the paste\'s copied newline gone, nothing else rewritten)', { bad, good });
+  const dl = R.validateValues(R.rowById('dropline'), { apiKey: ['not', 'a', 'dropline', 'key'].join('-') });   // built at run time (the secret scan's rule for a key-shaped fixture)
+  ok(!dl.ok && /dl_/.test(dl.errors.apiKey), 'a row\'s own rule (Dropline: «A Dropline key starts with dl_») is the refusal the paste box says', dl.errors);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

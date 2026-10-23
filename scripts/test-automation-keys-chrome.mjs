@@ -225,18 +225,24 @@ try {
   const grantNow = (((await api('GET', '/api/automation/keys')).json || {}).keys || []).find((k) => k.name === 'Lane dispatch');
   check('整个 VibeSpace + 保存 ⇒ the chip is RED and its title says what it means; the hub\'s grant row holds reach: instance', chip1 && chip1.text === '整个 VibeSpace' && chip1.reach === 'instance' && chip1.title === '这把 key 可以对这里的每一个会话动手，包括你自己的' && grantNow && grantNow.grants[0] && grantNow.grants[0].reach === 'instance', { chip1, grants: grantNow && grantNow.grants });
   await shot('ak-3c-reach-chip.png');
+  // lane grants-unify: 授权给… is THE principal picker (it was a checkbox list) — a granted conversation is a CHIP, its ✕
+  // takes the grant back at 保存, a row of the list grants it again
   await click(ROW + ' .vw-ak-grant');
-  const sel = `#vault-ak-grant input[value="session:${LIVE_SID}"]`;
-  check('the picker lists the live conversation, checked', !!(await until(`(() => { const c = document.querySelector(${JSON.stringify(sel)}); return c && c.checked; })()`, 8000)));
+  const chipSel = `#vault-ak-grant .pp-chip[data-key="session:${LIVE_SID}"]`;
+  check('the picker shows the live conversation picked (its chip)', !!(await until(`!!document.querySelector(${JSON.stringify(chipSel)})`, 8000)));
   await shot('ak-3-picker.png');
-  await evalJs(`(() => { document.querySelector(${JSON.stringify(sel)}).checked = false; return true; })()`);
+  await click(chipSel + ' .pp-chip-x');
   await click('.vw-ak-save');
-  check('unchecked + 保存 ⇒ the grant goes (no chip)', !!(await until(`!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-g')}) && !!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-none')})`, 10000)));
+  check('its chip removed + 保存 ⇒ the grant goes (no chip)', !!(await until(`!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-g')}) && !!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-none')})`, 10000)));
   await click(ROW + ' .vw-ak-grant');
-  await until(visible(sel), 8000);
-  await evalJs(`(() => { document.querySelector(${JSON.stringify(sel)}).checked = true; return true; })()`);
+  const rowSel = `#vault-ak-grant .pp-row[data-key="session:${LIVE_SID}"]`;
+  await until(visible('#vault-ak-grant .pp-input'), 8000);
+  await click('#vault-ak-grant .pp-input');
+  await until(visible(rowSel), 8000);
+  await click(rowSel);
+  await until(`!!document.querySelector(${JSON.stringify(chipSel)})`, 8000);
   await click('.vw-ak-save');
-  check('checked + 保存 ⇒ it is back', !!(await until(`!!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-g')})`, 10000)));
+  check('picked again + 保存 ⇒ it is back', !!(await until(`!!document.querySelector(${JSON.stringify(ROW + ' .vw-ak-g')})`, 10000)));
   check('…a grant the picker adds reads 只有它开的会话 (the picker\'s default reach — lane key-instance-scope)', !!(await until(`(() => { const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-g .vw-ak-reach')}); return c && c.dataset.reach === 'opened' && c.textContent === '只有它开的会话'; })()`, 10000)));
 
   console.log('⑥b 编辑… — the key\'s verbs after minting (lane key-folder-picker-all: a verb a later release added, given to a key already granted)');

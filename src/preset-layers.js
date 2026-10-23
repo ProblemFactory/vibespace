@@ -54,7 +54,8 @@ function parseDriveClients(arr) {
   if (!Array.isArray(arr)) throw new TypeError('not an array');
   const out = [];
   for (const c of arr) {
-    if (c && c.key && c.clientId && c.clientSecret) out.push({ key: String(c.key), label: String(c.label || c.key), clientId: String(c.clientId), clientSecret: String(c.clientSecret), ...(typeof c.relayUrl === 'string' && c.relayUrl.trim() ? { relayUrl: c.relayUrl.trim() } : {}) });
+    // lane oauth-setup-instructions: + `clientType` (web | desktop) — which kind of Google client the entry is
+    if (c && c.key && c.clientId && c.clientSecret) out.push({ key: String(c.key), label: String(c.label || c.key), clientId: String(c.clientId), clientSecret: String(c.clientSecret), ...(typeof c.relayUrl === 'string' && c.relayUrl.trim() ? { relayUrl: c.relayUrl.trim() } : {}), ...(c.clientType === 'web' || c.clientType === 'desktop' ? { clientType: c.clientType } : {}) });
   }
   return out;
 }
@@ -65,7 +66,7 @@ const identityOf = (kind, e) => (kind === 'integrations' ? `${e.id}\u0000${e.key
 /** A short, value-free name for the journal / the summary (`lark/jarvis`, `org1`). */
 const nameOf = (kind, e) => (kind === 'integrations' ? `${e.id}/${e.key}` : String(e.key));
 /** The value part of an entry, compared to say "rotated" — never printed. */
-const valueOf = (kind, e) => (kind === 'integrations' ? JSON.stringify(Object.keys(e.values).sort().map((k) => [k, e.values[k]])) : JSON.stringify(e.relayUrl ? [e.clientId, e.clientSecret, e.relayUrl] : [e.clientId, e.clientSecret]));
+const valueOf = (kind, e) => (kind === 'integrations' ? JSON.stringify(Object.keys(e.values).sort().map((k) => [k, e.values[k]])) : JSON.stringify([e.clientId, e.clientSecret, ...(e.relayUrl ? [e.relayUrl] : []), ...(e.clientType ? [`type:${e.clientType}`] : [])]));
 
 /** THE MERGE, per key. `layers` = `{cluster, release}`, each an entry array or
  *  `null` (that layer's file is absent). Answers `null` when BOTH are absent —

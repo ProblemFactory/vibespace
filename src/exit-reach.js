@@ -27,10 +27,21 @@
  * unchanged), so taking All away again restores exactly the conversations and Task Groups that were picked before it
  * (the owner: "never a silent loss of the per-principal rows"); `nobody` keeps none.
  *
+ * ONE GRANT MODEL (lane grants-unify, 2026-10-23): the two lists live in the ONE grants store (data/grants.json, rows
+ * `exit` / `<hostId>:use` and `<hostId>:run` — src/server/grants-store.js) and every admission is the model's `admits`
+ * (src/grant-model.js): `everyone` = an `everyone` entry in `to` (the rows picked beside it kept there), `only` = the
+ * picked entries, `nobody` = no row. Each list may leave members OUT (`except` — «除了»): a conversation (or a Task
+ * Group) left out of a group's / everyone's grant is refused `excepted` by name — its own direct row elsewhere still
+ * counts (rows ADD). The host record keeps only what is not a who-list (`exit.ask`, `exit.hub`, `lastRun`,
+ * `updatedAt`); its pre-unify `exit.use` / `exit.run` stay on disk one release, never read (the migration
+ * `2026-10-grants-unify` carried them over). The principal spelling is the model's (`{kind:'conversation', key}` —
+ * the conversation id —, `{kind:'group', id}`); a script's pre-unify `{kind:'session', id:'<backend>:<cid>'}` is mapped.
+ *
  * Gate: scripts/test-exit-reach.mjs (fast — the 84-cell grant × access × caller table, the words census with
  * poisoned names, the PATCH / base / ask / run-record tables, the real manager over fakes, patched-copy controls).
  */
 const R = require('./window-reach.js');
+const GM = require('./grant-model.js');   // PURE → PURE: THE grant model (lane grants-unify)
 const { sessionKeyOf, callerKeys, normPrincipal, principalKey, principalsNow } = R;
 
 const GRANTS = Object.freeze(['use', 'run']);
@@ -42,8 +53,14 @@ const MODES = Object.freeze(['nobody', 'everyone', 'only']);
 const HP = require('./hub-act-policy.js');
 const HUB_MODES = HP.POLICIES;
 const normHub = (x) => (x === undefined || x === null ? { mode: 'default' } : x && typeof x === 'object' && !Array.isArray(x) && HUB_MODES.includes(x.mode) ? { mode: x.mode } : null);
+// lane grants-unify: a SERVED view spells an unset hub out (`{mode:'default'}`) — read back as unset; a STORED record keeps the
+// rule above (the old writer never stored `default`: one there is unreadable ⇒ the whole access unknown — verify F4)
+const normHubView = (x) => (x && typeof x === 'object' && x.mode === 'default' ? { mode: 'default' } : normHub(x));
 const WHO_MAX = 64;
 const REFUSALS = Object.freeze(['not_granted', 'groups_unreadable', 'unknown_shape', 'fork_pending', 'no_machine', 'ambiguous',
+  // lane grants-unify: the user left this conversation out of a group's / everyone's list (an exception) · a save that both
+  // picks and leaves out one principal · the ONE store could not write / read
+  'excepted', 'except_conflicts', 'not_written', 'store_unreadable',
   'no_exits', 'offline', 'ask_pending', 'ask_denied', 'ask_changed', 'ask_expired', 'ask_settled', 'ask_unfiled', 'human_only',
   'session_token_required', 'bad_command', 'bad_grant', 'bad_mode', 'bad_principal', 'empty_list',
   'too_many', 'list_changed', 'run_failed', 'conversation_gone', 'remote_session', 'spawn_failed', 'device_agent_outdated',
@@ -112,27 +129,37 @@ const RUNS_DEFAULT = 50;             // the history's default length
 const RUNS_MAX = 200;
 
 // ── the reader ──────────────────────────────────────────────────────────────
-/** The rows a grant stores: closed kinds, well-formed ids, no name (a name is a live read), dedup, ≤ WHO_MAX. An
- *  `everyone` row is never a row here (All agents is the `everyone` MODE — one spelling). */
+/** One row of a list in any spelling a caller sends → the grant model's bare principal, or null: `{kind:'conversation',
+ *  key}` | `{kind:'group', id}` | a script's pre-unify `{kind:'session', id:'<backend>:<cid>' | 'webui:<id>'}` (mapped).
+ *  A display name is never kept here (a name is a live read). */
+function whoPrincipal(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+  if (row.kind === 'session') return 'session' in row ? null : GM.fromSessionPrincipal({ kind: 'session', id: row.id });
+  return GM.bareOf(row);
+}
+/** The rows a grant stores: closed kinds, well-formed ids, dedup, ≤ WHO_MAX. An `everyone` row is never a row here
+ *  (All agents is the `everyone` MODE — one spelling). */
 function normWho(list) {
   const out = [], seen = new Set();
   for (const row of Array.isArray(list) ? list : []) {
-    const p = row && row.kind !== 'everyone' ? normPrincipal({ kind: row.kind, id: row.id }) : null;
-    if (!p || seen.has(principalKey(p))) continue;
-    seen.add(principalKey(p));
-    out.push({ kind: p.kind, id: p.id });
+    const p = whoPrincipal(row);
+    if (!p || p.kind === 'everyone' || seen.has(GM.principalKey(p))) continue;
+    seen.add(GM.principalKey(p));
+    out.push(p);
     if (out.length >= WHO_MAX) break;
   }
   return out;
 }
-/** A stored grant normalized, or null (a non-object, a bad mode — the whole access is then `unknown`). */
-function normGrant(g, grant) {
-  if (!g || typeof g !== 'object' || Array.isArray(g)) return null;
-  if (!MODES.includes(g.mode)) return null;
-  // `everyone` keeps the rows it was given (restored when All is taken away); `nobody` keeps none
-  const out = { mode: g.mode, who: g.mode === 'nobody' ? [] : normWho(g.who) };
-  if (grant === 'run') out.ask = g.ask === true;
-  return out;
+/** A grant's view out of its row (`rows` = `grants.rowsFor('exit', '<hostId>:<grant>')`): no row ⇒ nobody; an
+ *  `everyone` entry ⇒ everyone (the other entries kept); else only. null = a row the model cannot read. */
+function grantOfRows(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return { mode: 'nobody', who: [], except: [] };
+  const n = GM.normRow(list[0]);
+  if (!n.ok || n.row.door !== 'exit') return null;
+  const who = n.row.to.filter((p) => p.kind !== 'everyone').map(GM.bareOf).slice(0, WHO_MAX);
+  const mode = n.row.to.some((p) => p.kind === 'everyone') ? 'everyone' : who.length ? 'only' : 'nobody';
+  return { mode, who, except: n.row.except.map(GM.bareOf) };
 }
 /** A daemon's `spawnError` (the child never started) normalized to its two fields, or null (no code ⇒ nothing). */
 function spawnErrorOf(x) {
@@ -151,24 +178,41 @@ function normLastRun(x) {
   return { at: Number(x.at) || 0, by, cmd: cleanCmd(x.cmd, LAST_RUN_CMD_MAX), code: x.code === null || x.code === undefined ? null : (Number.isFinite(Number(x.code)) ? Number(x.code) : null), ms: Number(x.ms) || 0, outcome: String(x.outcome || 'ran').slice(0, 20), ...(x.timedOut ? { timedOut: true } : {}), ...(x.revokedDuringRun ? { revokedDuringRun: true } : {}), ...(sf ? { spawnError: sf } : {}), ...(knownInterpreter(x.interpreter) ? { interpreter: knownInterpreter(x.interpreter) } : {}), ...(agentVersionOf(x.agentVersion) ? { agentVersion: x.agentVersion } : {}) };
 }
 /**
- * THE ONE READER of a host record's exit access (every shape on disk):
- *   `exit` present ⇒ normalized (a bad mode / a non-object grant ⇒ `{mode: 'unknown'}` — fail closed, BOTH grants);
- *   `exit` absent + `allowExit === true` ⇒ everyone / everyone (the pre-migration read, `legacy: true`);
- *   absent ⇒ nobody / nobody.
+ * THE ONE READER of a machine's exit access (lane grants-unify): WHO from the grant rows — `rows` = `{use, run}`, each
+ * `grants.rowsFor('exit', '<hostId>:use' | ':run')` (absent ⇒ no rows ⇒ nobody) — and the rest from the host record's
+ * `exit` (`ask`, `hub`, `lastRun`, `updatedAt` — never its pre-unify `use` / `run` lists). A row the model cannot read, or
+ * a bad stored hub ⇒ `{mode: 'unknown'}` — fail closed, BOTH grants (as before).
  */
-function exitAccessOf(h) {
-  if (!h || typeof h !== 'object') return { use: { mode: 'nobody', who: [] }, run: { mode: 'nobody', who: [], ask: false }, hub: { mode: 'default' }, updatedAt: 0, lastRun: null };
-  if (h.exit !== undefined) {
-    const e = h.exit;
-    if (!e || typeof e !== 'object' || Array.isArray(e)) return { mode: 'unknown' };
-    const use = normGrant(e.use, 'use'), run = normGrant(e.run, 'run'), hub = normHub(e.hub);
-    if (!use || !run || !hub) return { mode: 'unknown', lastRun: normLastRun(e.lastRun) };
-    return { use, run, hub, updatedAt: Number(e.updatedAt) || 0, updatedBy: typeof e.updatedBy === 'string' ? e.updatedBy.slice(0, 20) : null, lastRun: normLastRun(e.lastRun) };
-  }
-  if (h.allowExit === true) return { use: { mode: 'everyone', who: [] }, run: { mode: 'everyone', who: [], ask: false }, hub: { mode: 'default' }, updatedAt: 0, lastRun: null, legacy: true };
-  return { use: { mode: 'nobody', who: [] }, run: { mode: 'nobody', who: [], ask: false }, hub: { mode: 'default' }, updatedAt: 0, lastRun: null };
+function exitAccessOf(h, rows = {}) {
+  const e = h && typeof h === 'object' && h.exit && typeof h.exit === 'object' && !Array.isArray(h.exit) ? h.exit : {};
+  const lastRun = normLastRun(e.lastRun);
+  const use = grantOfRows(rows && rows.use), run = grantOfRows(rows && rows.run), hub = normHub(e.hub);
+  if (!use || !run || !hub) return { mode: 'unknown', lastRun };
+  run.ask = e.ask === true;
+  return { use, run, hub, updatedAt: Number(e.updatedAt) || 0, updatedBy: typeof e.updatedBy === 'string' ? e.updatedBy.slice(0, 20) : null, lastRun };
+}
+/** A served / dialog view (`{use:{mode, who, except}, run:{…, ask}, hub, lastRun}` — what GET /api/hosts and the
+ *  exit-access route answer) read back tolerantly → the same access shape (the client's summary reads it). */
+function accessOfView(v) {
+  if (!v || typeof v !== 'object' || v.mode === 'unknown') return { mode: 'unknown', lastRun: v && normLastRun(v.lastRun) };
+  const g = (x) => {
+    if (!x || typeof x !== 'object' || !MODES.includes(x.mode)) return null;
+    return { mode: x.mode, who: x.mode === 'nobody' ? [] : normWho(x.who), except: Array.isArray(x.except) ? x.except.map(GM.normExcept).filter(Boolean) : [] };
+  };
+  const use = g(v.use), run = g(v.run), hub = normHubView(v.hub);
+  if (!use || !run || !hub) return { mode: 'unknown', lastRun: normLastRun(v.lastRun) };
+  run.ask = !!(v.run && v.run.ask === true);
+  return { use, run, hub, updatedAt: Number(v.updatedAt) || 0, lastRun: normLastRun(v.lastRun) };
 }
 const isUnknown = (a) => !a || a.mode === 'unknown';
+/** One grant of an access as the row the model judges (`everyone` mode = an `everyone` entry; its kept rows beside it). */
+const rowOfGrant = (g) => ({ door: 'exit', resource: '-', to: [...(g.mode === 'everyone' ? [{ kind: 'everyone' }] : []), ...(g.mode === 'nobody' ? [] : g.who || [])], except: g.except || [] });
+/** The caller's facts as the model reads them: its keys in the ONE spelling (window-reach's `<backend>:<cid>` keys
+ *  mapped — `ctx.conversationKeys` when the caller already has them), its live groups, the two fault flags. */
+function factsOf(ctx = {}) {
+  const keys = Array.isArray(ctx.conversationKeys) ? ctx.conversationKeys : (Array.isArray(ctx.sessionKeys) ? ctx.sessionKeys : []).map(GM.keyFromSessionKey).filter(Boolean);
+  return { conversationKeys: keys, groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], groupsUnreadable: !!ctx.unreadable, forkPending: !!ctx.forkPending };
+}
 
 // ── the verdict ─────────────────────────────────────────────────────────────
 /**
@@ -185,16 +229,14 @@ function exitVerdict(access, grant, ctx = {}) {
   const g = access[grant];
   if (!g || !MODES.includes(g.mode)) return refuse('unknown_shape', { grant });
   if (g.mode === 'nobody') return refuse('not_granted', { grant });
-  if (g.mode === 'everyone') return { ok: true, via: 'everyone', row: null };
-  const keys = new Set((ctx && Array.isArray(ctx.sessionKeys) ? ctx.sessionKeys : []).map(String));
-  const srow = g.who.find((p) => p.kind === 'session' && keys.has(p.id));
-  if (srow) return { ok: true, via: 'session', row: srow };
-  const gids = new Set((ctx && Array.isArray(ctx.groupIds) ? ctx.groupIds : []).map(String));
-  const grow = g.who.find((p) => p.kind === 'group' && gids.has(p.id));
-  if (grow) return { ok: true, via: 'group', row: grow };
-  if (ctx && ctx.unreadable && g.who.some((p) => p.kind === 'group')) return refuse('groups_unreadable', { grant });
-  if (ctx && ctx.forkPending) return refuse('fork_pending', { grant });
-  return refuse('not_granted', { grant });
+  // THE ONE ADMISSION (src/grant-model.js admits): everyone / a named conversation / a live group, minus the exceptions
+  const v = GM.admits([rowOfGrant(g)], factsOf(ctx || {}));
+  if (v.ok) {
+    if (g.mode === 'everyone') return { ok: true, via: 'everyone', row: null };
+    return { ok: true, via: v.via === 'conversation' ? 'session' : 'group', row: v.entry };
+  }
+  if (v.code === 'excepted') return refuse('excepted', { grant, except: v.entry ? GM.bareOf(v.entry) : null });
+  return refuse(REFUSALS.includes(v.code) ? v.code : 'not_granted', { grant });
 }
 /** What an AGENT sees of a machine: its own two answers — never another principal, never a name. */
 function agentView(access, ctx = {}) {
@@ -214,7 +256,8 @@ function exitStamp(access) {
   for (const [p, g] of [['u', access.use], ['r', access.run]]) {
     lines.push(JSON.stringify([p, 'mode', g.mode]));
     if (p === 'r') lines.push(JSON.stringify([p, 'ask', g.ask ? 1 : 0]));
-    for (const w of g.who) lines.push(JSON.stringify([p, `${w.kind}:${w.id}`]));
+    for (const w of g.who) lines.push(JSON.stringify([p, GM.principalKey(w)]));
+    for (const w of g.except || []) lines.push(JSON.stringify([p, 'x', GM.principalKey(w)]));   // lane grants-unify: an exception is a fact of the list
   }
   if (access.hub && access.hub.mode && access.hub.mode !== 'default') lines.push(JSON.stringify(['h', 'mode', access.hub.mode])); // lane hub-act-ask
   return lines.sort().join('\n');
@@ -244,7 +287,7 @@ function exitBaseVerdict(access, base) {
  * by the route BEFORE this (arriving here it is bad_principal). A grant absent from the body is kept.
  */
 function patchVerdict(current, body, { now = Date.now(), by = 'user' } = {}) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return refuse('bad_grant', { error: 'send {use?: {mode, who?}, run?: {mode, who?, ask?}, hub?: {mode}, base?}' });
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return refuse('bad_grant', { error: 'send {use?: {mode, who?, except?}, run?: {mode, who?, except?, ask?}, hub?: {mode}, base?}' });
   const extra = Object.keys(body).filter((k) => !['use', 'run', 'hub', 'base'].includes(k));
   if (extra.length) return refuse('bad_grant', { error: extra.includes('on') ? 'exit access is two lists now — send use / run ({mode, who}), not {on}' : `unknown keys: ${extra.join(', ')} — send use / run / hub / base` });
   if (!('use' in body) && !('run' in body) && !('hub' in body)) return refuse('bad_grant', { error: 'send use, run and/or hub' });
@@ -258,24 +301,36 @@ function patchVerdict(current, body, { now = Date.now(), by = 'user' } = {}) {
     const was = isUnknown(cur) ? null : cur[grant];
     if (!(grant in body)) { next[grant] = was; continue; }
     const g = body[grant];
-    if (!g || typeof g !== 'object' || Array.isArray(g)) return refuse('bad_grant', { grant, error: `${grant} must be {mode, who?${grant === 'run' ? ', ask?' : ''}}` });
+    if (!g || typeof g !== 'object' || Array.isArray(g)) return refuse('bad_grant', { grant, error: `${grant} must be {mode, who?, except?${grant === 'run' ? ', ask?' : ''}}` });
     if (!MODES.includes(g.mode)) return refuse('bad_mode', { grant, error: `${grant}.mode is one of ${MODES.join(' | ')}` });
-    let who = [];
+    let who = [], except = [];
     if (g.mode === 'only' || g.mode === 'everyone') {
       if (g.who != null && !Array.isArray(g.who)) return refuse('bad_principal', { grant, error: `${grant}.who must be a list` });
       const seen = new Set();
       for (const row of g.who || []) {
         if (row && typeof row === 'object' && row.kind === 'everyone') return refuse('bad_principal', { grant, error: `${grant}: All agents is the mode "everyone", not a row of the list` });
-        const p = row && typeof row === 'object' && !('session' in row) ? normPrincipal({ kind: row.kind, id: row.id }) : null;
-        if (!p) return refuse('bad_principal', { grant, error: `${JSON.stringify(row).slice(0, 80)} is not a conversation or a Task Group` });
-        if (seen.has(principalKey(p))) continue;
-        seen.add(principalKey(p));
-        who.push({ kind: p.kind, id: p.id });
+        const p = whoPrincipal(row);
+        if (!p || p.kind === 'everyone') return refuse('bad_principal', { grant, error: `${JSON.stringify(row).slice(0, 80)} is not a conversation or a Task Group` });
+        if (seen.has(GM.principalKey(p))) continue;
+        seen.add(GM.principalKey(p));
+        who.push(p);
       }
       if (who.length > WHO_MAX) return refuse('too_many', { grant, error: `at most ${WHO_MAX} conversations and Task Groups per list` });
       if (!who.length && g.mode === 'only') return refuse('empty_list', { grant, error: `${grant}: "only these" with nobody picked — choose nobody instead` });
+      // lane grants-unify — «除了»: members left OUT of the Task Groups (or of All agents) this list gives it to
+      if (g.except != null && !Array.isArray(g.except)) return refuse('bad_principal', { grant, error: `${grant}.except must be a list` });
+      const seenX = new Set();
+      for (const row of g.except || []) {
+        const p = row && typeof row === 'object' && row.kind === 'session' ? whoPrincipal(row) : GM.normExcept(row);
+        if (!p || p.kind === 'everyone') return refuse('bad_principal', { grant, error: `${JSON.stringify(row).slice(0, 80)} cannot be left out — an exception names a conversation or a Task Group` });
+        const k = GM.principalKey(p);
+        if (seen.has(k)) return refuse('except_conflicts', { grant, error: `${grant}: ${k} is both picked and left out — a conversation with its own place in the list cannot also be an exception` });
+        if (seenX.has(k)) continue;
+        seenX.add(k); except.push(GM.bareOf(p));
+      }
+      if (except.length > WHO_MAX) return refuse('too_many', { grant, error: `at most ${WHO_MAX} exceptions per list` });
     }
-    const out = { mode: g.mode, who };
+    const out = { mode: g.mode, who, except };
     if (grant === 'run') {
       if (g.ask !== undefined && typeof g.ask !== 'boolean') return refuse('bad_grant', { grant, error: 'run.ask must be true or false' });
       out.ask = g.ask !== undefined ? g.ask : !!(was && was.ask);
@@ -295,13 +350,29 @@ function patchVerdict(current, body, { now = Date.now(), by = 'user' } = {}) {
   const access = { use: next.use, run: next.run, hub, updatedAt: Number(now) || Date.now(), updatedBy: by, lastRun: cur.lastRun || null };
   return { ok: true, access, changed };
 }
-/** The stored shape of an access (what hosts.json carries under `exit`) — `everyone` with the rows it keeps. */
+/** What the HOST RECORD keeps of an access now (lane grants-unify) — never a who-list: `ask`, the hub list (only when
+ *  set), the stamp. hosts.js replaces `exit` with it, keeping only `lastRun` and the pre-unify `use` / `run` (unread). */
 function storedExit(access) {
-  const kept = (g) => (g.mode === 'only' || (g.mode === 'everyone' && g.who.length) ? { who: g.who } : {});
-  return { use: { mode: access.use.mode, ...kept(access.use) },
-    run: { mode: access.run.mode, ask: !!access.run.ask, ...kept(access.run) },
+  return { ask: !!access.run.ask,
     ...(access.hub && HUB_MODES.includes(access.hub.mode) ? { hub: { mode: access.hub.mode } } : {}), // lane hub-act-ask: only when set
-    updatedAt: access.updatedAt || 0, updatedBy: access.updatedBy || null, ...(access.lastRun ? { lastRun: access.lastRun } : {}) };
+    updatedAt: access.updatedAt || 0, updatedBy: access.updatedBy || null };
+}
+/** THE TWO ROWS an access writes through the ONE writer (`grants.setMany`): `<hostId>:use`, `<hostId>:run` — `to` =
+ *  everyone (when All is picked) + the rows picked beside it, `except` = the members left out; nobody ⇒ an empty row
+ *  (the store removes it). */
+function exitRows(access, hostId) {
+  return GRANTS.map((grant) => {
+    const g = access[grant];
+    const r = rowOfGrant(g);
+    return { door: 'exit', resource: `${hostId}:${grant}`, to: r.to, except: g.mode === 'nobody' ? [] : r.except };
+  });
+}
+/** The access as a page sees it (GET /api/hosts' `exit`, the dialog's GET): the lists with the CURRENT names when a
+ *  roster is given (`GM.namesNow`), the ask, the hub, the last run. */
+function exitView(access, { roster = null } = {}) {
+  if (isUnknown(access)) return { mode: 'unknown', lastRun: access && access.lastRun ? access.lastRun : null };
+  const g = (x) => ({ ...x, who: roster ? GM.namesNow(x.who, roster) : x.who, except: roster ? GM.namesNow(x.except || [], roster) : (x.except || []) });
+  return { ...access, use: g(access.use), run: g(access.run) };
 }
 
 // ── "ask me each time" ──────────────────────────────────────────────────────
@@ -642,6 +713,8 @@ function refusalText(code, { machine = '', grant = 'run', has = {}, cmd = '', er
         : `machine ${M} is not open to this conversation — ${WAY_OUT}`;
       return `this conversation may not borrow ${M}'s network — ${WAY_OUT}${has && has.run ? '; you may run commands on it (vibespace-exit run)' : ''}`;
     case 'groups_unreadable': return `whether ${M} is open to you through a Task Group could not be judged — the Task Group list could not be read; run the same command again once`;
+    // lane grants-unify: the user LEFT THIS CONVERSATION OUT of the list (an exception on a Task Group's / everyone's grant)
+    case 'excepted': return `the user left this conversation out of who may ${grant === 'run' ? 'run commands on' : 'borrow the network of'} ${M} (an exception under "Who can use it" on the machine row, Remote tab) — ask the user to lift the exception or to add this conversation itself`;
     case 'unknown_shape': return `${M}'s exit access could not be read — nothing is allowed until the user saves it again under "Who can use it" on the machine row (Remote tab)`;
     case 'fork_pending': return 'this conversation is a fork that has not announced its own id yet — run the same command again in a moment';
     case 'ask_pending': return `your previous command on ${M} still waits for the user — wait for it, then try again`;
@@ -701,8 +774,9 @@ function cliLine(rec, { machine = '' } = {}) {
 }
 /** The row's numbers (the words are the client's, §11.3). */
 function summaryOf(access) {
-  if (isUnknown(access)) return { unknown: true, use: { mode: 'unknown', n: 0 }, run: { mode: 'unknown', n: 0, ask: false } };
-  return { use: { mode: access.use.mode, n: access.use.who.length }, run: { mode: access.run.mode, n: access.run.who.length, ask: !!access.run.ask } };
+  if (isUnknown(access)) return { unknown: true, use: { mode: 'unknown', n: 0, x: 0 }, run: { mode: 'unknown', n: 0, x: 0, ask: false } };
+  const x = (g) => (g.mode === 'nobody' ? 0 : (g.except || []).length);   // lane grants-unify: how many are left out
+  return { use: { mode: access.use.mode, n: access.use.who.length, x: x(access.use) }, run: { mode: access.run.mode, n: access.run.who.length, x: x(access.run), ask: !!access.run.ask } };
 }
 /** Is anybody granted anything (the row's accent)? */
 
@@ -723,7 +797,7 @@ module.exports = {
   OUTPUT_HEAD_BYTES, RUNS_DEFAULT, RUNS_MAX, RUN_SHELL_CAP, CMD_FOLD_LINES, CMD_FOLD_CHARS,
   sessionKeyOf, callerKeys, principalsNow, cmdBytes, hiddenOrderOf, askDetailOf,
   encodedCommandOf, commandHeadOf,   // lane machine-card-fold
-  exitAccessOf, exitVerdict, agentView, exitStamp, exitBaseVerdict, patchVerdict, storedExit,
+  exitAccessOf, accessOfView, exitVerdict, agentView, exitStamp, exitBaseVerdict, patchVerdict, storedExit, exitRows, exitView, whoPrincipal,
   askState, answerVerdict, runRecord, resolveMachine, refusalText, cardText, cliLine, summaryOf, migrateExitAccess,
   spawnErrorOf, spawnMsOf, outputHeads, outputPreview, cardOutput, cmdFold, cleanLines, runRow, platformLabel, interpreterOf, knownInterpreter, spawnFailureText,
   TRANSFER_VERBS, TRANSFER_WINDOW_BYTES, TRANSFER_SETTING, TRANSFER_MAX_DEFAULT_MB, TRANSFER_MAX_MB, PATH_MAX_BYTES, PUSH_SINCE, PUSH_CAP,

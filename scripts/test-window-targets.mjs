@@ -647,8 +647,10 @@ console.log('§4 the engine over a fake keeper + the routes');
     const g = engine.grantReach('da-one', { kind: 'session', id: 's1' });
     engine.grantReach('da-one', { kind: 'session', id: 's2' });
     ok(g.rows.length === 1 && g.rows[0].principal.id === 'webui:s1' && g.rows[0].by === 'user' && g.granted.changed === true, 'the user shares it with a live session BY ITS ID — stored under its durable key (webui:<id> before a conversation exists)');
-    const stored = JSON.parse(fs.readFileSync(engine.reachFile, 'utf8'));
-    ok(stored.v === 1 && stored.windows['da-one'].rows.length === 2 && (fs.statSync(engine.reachFile).mode & 0o777) === 0o600, 'the share is PERSISTED (data/window-reach.json, v1, 0600)');
+    // lane grants-unify: the share's ROWS are the ONE grants store's (data/grants.json, door `window`), its mode window-reach.json's
+    const stored = JSON.parse(fs.readFileSync(path.join(dir, 'grants.json'), 'utf8'));
+    const srow = stored.rows.find((r) => r.door === 'window' && r.resource === 'da-one');
+    ok(stored.v === 1 && srow && srow.to.length === 2 && srow.to.every((e) => e.kind === 'conversation' && e.origin === 'user') && (fs.statSync(path.join(dir, 'grants.json')).mode & 0o777) === 0o600, 'the share is PERSISTED (data/grants.json — one row, door window, each entry its origin — v1, 0600)');
   }
   const list = await engine.list(f1);
   ok(list.targets.length === 1 && list.targets[0].handle === 'da-one' && list.targets[0].lease === null && list.targets[0].via === 'session' && list.targets[0].mode === 'auto' && list.scope === 'shared with you' && list.verbs && typeof list.a11y.ok === 'boolean', 'shared: list = the live record with no lease, how it reaches me (session) and its mode, the scope named, the verbs and the a11y probe beside it');
@@ -1034,6 +1036,25 @@ console.log('§4 the engine over a fake keeper + the routes');
     ok(afterRevoke && afterRevoke.code === 'not_exposed', 'the holder\'s next verb: not_exposed');
     const aud5 = () => fs.readFileSync(e5.auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     ok(aud5().some((l) => l.verb === 'lease-dropped' && l.by === 'user' && /revoked/.test(l.why)) && aud5().some((l) => l.verb === 'reach-revoke' && l.by === 'user'), 'the audit names the revoke and the dropped lease (by:user)');
+    // lane grants-unify — «除了»: the window shared with the group, one member LEFT OUT while it holds the lease
+    {
+      groupsOfMap.s2 = ['task-ops'];
+      e5.attach('da-e1', b);
+      const ex = e5.setReachExcept('da-e1', [{ kind: 'session', id: 's2' }]);
+      ok(ex.excepted.changed && ex.excepted.leaseDropped === true && !e5.leaseOf('da-e1') && ex.except.length === 1 && ex.except[0].id === 'conv-b', '«除了»: leaving a group member OUT while it holds the lease drops the lease AT ONCE (a narrowing is a revoke); the exception is stored under its conversation key');
+      const xe = await err(() => e5.attach('da-e1', b));
+      ok(xe && xe.code === 'excepted' && xe.message.includes(RE.EXCEPTED_SENTENCE), 'the member left out is refused `excepted` BY NAME — the exception and where the user lifts it');
+      ok(!(await e5.list(b)).targets.some((r) => r.handle === 'da-e1'), '…and the window is not listed to it');
+      const own = e5.grantReach('da-e1', { kind: 'session', id: 's2' });
+      ok(own.except.length === 0 && e5.attach('da-e1', b).handle === 'da-e1', 'sharing with the member BY NAME lifts its exception (its own row counts; it cannot be both)');
+      e5.detach('da-e1', b);
+      const conflict = await err(() => e5.setReachExcept('da-e1', [{ kind: 'session', id: 's2' }]));
+      ok(conflict && conflict.code === 'except_conflicts', 'a member shared with by name cannot also be left out (except_conflicts)');
+      e5.revokeReach('da-e1', { kind: 'session', id: 's2' });
+      const row = e5.reachOf('da-e1').rows.find((r) => r.principal.kind === 'group');
+      ok(row && row.live.some((x) => x.sessionId === 's2'), '(the group row reaches s2 again once nothing leaves it out)');
+      groupsOfMap.s2 = [];
+    }
     // the opener exception in the engine, D6 in the engine: two sessions, two windows, both acting, a cross act refused
     e5.grantReach('da-e1', { kind: 'session', id: 's1' });
     e5.grantReach('da-e2', { kind: 'session', id: 's2' });
@@ -1110,7 +1131,7 @@ console.log('§4 the engine over a fake keeper + the routes');
     records.set('da-rel1', { ...records.get('da-rel1'), state: 'exited', replacedBy: 'da-rel2' });
     records.set('da-rel2', mk('da-rel2', { label: 'Relaunched', startedAt: 2 }));
     const carried = e5.reachOf('da-rel2');
-    ok(carried && carried.mode === 'pixels' && carried.rows.length === 1 && carried.rows[0].principal.id === 'claude:conv-a' && aud5().some((l) => l.verb === 'reach-carried' && l.from === 'da-rel1' && l.handle === 'da-rel2'), 'a relaunched window KEEPS its share: the record follows `replacedBy` to the successor (mode and rows), audited reach-carried');
+    ok(carried && carried.mode === 'pixels' && carried.rows.length === 1 && carried.rows[0].principal.id === 'conv-a' && aud5().some((l) => l.verb === 'reach-carried' && l.from === 'da-rel1' && l.handle === 'da-rel2'), 'a relaunched window KEEPS its share: the record follows `replacedBy` to the successor (mode and rows), audited reach-carried');
     records.set('da-rel3', mk('da-rel3', { label: 'Gone' })); e5.grantReach('da-rel3', { kind: 'session', id: 's1' }); records.set('da-rel3', { ...records.get('da-rel3'), state: 'exited' });
     const rc = e5.reconcile({ graceMs: 60000 });
     ok(rc.pruned >= 1 && !JSON.parse(fs.readFileSync(e5.reachFile, 'utf8')).windows['da-rel3'] && JSON.parse(fs.readFileSync(e5.reachFile, 'utf8')).windows['da-rel2'], 'a share lives as long as its window: reconcile prunes the ended one (the carried one stays)');
@@ -1406,7 +1427,7 @@ console.log('§4 the engine over a fake keeper + the routes');
       ok(!cd.pass && cd.code === 'inject_failed' && !cd.did, `control (F2) FAILS the timeout leg: inject_failed with did ${JSON.stringify(cd.did)} — the partial never reaches the caller`);
       for (const E of [Ed.plain, Ed.win, Ed.desk]) E.shutdown();
       // r3 F5 control: the r2 fold — a membership read that threw counted as "not in the group"
-      const foldU = srcE.replace('if (c.unreadable) { unreadable++; continue; }', 'if (c.unreadable) { continue; }');
+      const foldU = srcE.replace("if (!v.ok && v.code === 'groups_unreadable') { unreadable++; continue; }", "if (!v.ok && v.code === 'groups_unreadable') { continue; }");   // lane grants-unify: the count rides the model's groups_unreadable
       ok(foldU !== srcE, 'control (F5): the patch applies (an unreadable membership read folded into "no groups")');
       const Mu = require(MUTW.write('src/server/window-targets-engine.js', foldU, 'foldundecided'));
       const Eu = enginesOf(Mu, 'foldundecided');
@@ -1426,7 +1447,7 @@ console.log('§4 the engine over a fake keeper + the routes');
     records.set('da-e3', mk('da-e3', { label: 'Calculator E', startedAt: 1 }));
     const free = await rq.request({ handle: 'da-e3', sessionId: 's1', note: 'add 7 and 8' });
     ok(free.delivered === 'next-turn' && free.granted && stash.length === 1 && stash[0].cid === 'conv-a' && stash[0].source === 'window-request' && stash[0].fromName === REQ.FROM_NAME && /handle da-e3/.test(stash[0].text) && /"add 7 and 8"/.test(stash[0].text) && delivered.length === 0, 'FREE (default): the request GRANTS the window to that agent (by:request) and rides its NEXT turn — the stash, nothing delivered, nothing billed');
-    ok(e5.reachOf('da-e3').rows.some((r) => r.by === 'request' && r.principal.id === 'claude:conv-a'), '…the grant is written with its origin (the dialog says "you asked it to take control")');
+    ok(e5.reachOf('da-e3').rows.some((r) => r.by === 'request' && r.principal.id === 'conv-a'), '…the grant is written with its origin (the dialog says "you asked it to take control")');
     const woke = await rq.request({ handle: 'da-e3', sessionId: 's1', wake: true });
     ok(woke.delivered === 'woken' && delivered.length === 1 && delivered[0].opts.spendReason === 'window-share-request' && delivered[0].opts.kind === 'peer' && delivered[0].opts.fromName === REQ.FROM_NAME, 'WAKE: through the gated ladder under the declared reason window-share-request, kind peer (the user\'s words)');
     const paced = await rq.request({ handle: 'da-e3', sessionId: 's1', wake: true });
@@ -1472,7 +1493,7 @@ console.log('§4 the engine over a fake keeper + the routes');
     ok((await hapi('GET', '/api/desktop/apps/da-nope/reach')).status === 404, 'an unknown window ⇒ 404');
     const lnch = await hapi('POST', '/api/desktop/apps', { appId: 'gedit', share: { principals: [{ kind: 'session', id: 'codex:conv-b', name: 'beta' }], mode: 'tree' } });
     if (lnch.status !== 200 || !lnch.j.reach) console.log('    launch answered', lnch.status, JSON.stringify(lnch.j).slice(0, 400));
-    ok(lnch.status === 200 && lnch.j.id === 'da-launched' && !('share' in hubLaunches[0].body) && lnch.j.reach && lnch.j.reach.mode === 'tree' && lnch.j.reach.rows.some((r) => r.principal.id === 'codex:conv-b'), 'D2 before launch: the launch\'s share is stripped from the keeper\'s body and applied to the NEW window (mode tree, beta by its key)');
+    ok(lnch.status === 200 && lnch.j.id === 'da-launched' && !('share' in hubLaunches[0].body) && lnch.j.reach && lnch.j.reach.mode === 'tree' && lnch.j.reach.rows.some((r) => r.principal.id === 'conv-b'), 'D2 before launch: the launch\'s share is stripped from the keeper\'s body and applied to the NEW window (mode tree, beta by its key)');
     const launchAud = () => aud5().filter((l) => l.verb === 'reach-launch').pop();
     ok(launchAud() && launchAud().unmatched === 0, 'r2 (M2): the launch\'s audit counts the rows nobody answers to now — 0 for a live agent');
     const lnchGone = await hapi('POST', '/api/desktop/apps', { appId: 'gedit', share: { principals: [{ kind: 'session', id: 'claude:conv-ended', name: 'gone' }, { kind: 'group', id: 'task-deleted', name: 'Old group' }], mode: 'pixels' } });

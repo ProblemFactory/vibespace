@@ -41,6 +41,7 @@ import * as chanCaps from '../channel-caps.js';
 import { routeErrorText, wakeWhyText, principalKindText, groupTitle, principalText, accessAuthorityText, watcherHowText, grainSummaryText, clampNoteText, notifySentence, notifyAnswers, watcherOfAnswers } from './channel-words.js';
 // the ONE principal picker (search + list, keyed, recent picks) — never a <select> of the whole roster
 import { principalPicker, rosterFromApp } from './principal-picker.js';
+import { rowToPick, principalOfRow } from './principal-picker-model.js';   // lane grants-unify: «除了» — a stored row drawn, a pick written
 import { budgetText } from './webhook-view.js';   // lane webhook-l2-ui: a path's wake budget line
 import * as DM from '../decision-model.js';   // lane decision-rule: D1's plan ceilings, price and budget default (the cost line)
 
@@ -156,7 +157,7 @@ function principalChoices(app, stored = []) {
 export async function grainState(target) {
   const st = await readGrain(target);
   // the STAMP of the two lists as drawn (mirror-193, PURE `grainStamp`) — every whole-list save sends it as `base`
-  if (st) st.stamp = F.grainStamp({ access: st.access, watchers: st.watchers });
+  if (st) st.stamp = F.grainStamp({ access: st.access, watchers: st.watchers, except: st.except, watchExcept: st.watchExcept });   // lane grants-unify: + the members left out
   return st;
 }
 async function readGrain(target) {
@@ -172,6 +173,7 @@ async function readGrain(target) {
       // the account's own sign-in name — "Only when this name is mentioned" starts from it
       selfName: (full.adapter && full.adapter.auth && full.adapter.auth.user) || '',
       access: own.access || [], watchers: own.watchers || [],
+      except: own.except || [], watchExcept: own.watchExcept || [],   // lane grants-unify: «除了» — the members of a picked Task Group / All agents left out
       // lane channel-agent-watch W3: who holds access ABOVE this chat (the account, a rule, an approved request) — Notify…
       // may name them without a per-chat access row (the PURE rule `validateWatchers` judges by the same list)
       eligibleAbove: Array.isArray(conv.eligibleAbove) ? conv.eligibleAbove : [],
@@ -211,14 +213,14 @@ async function readGrain(target) {
   const scopePreview = (kind, pattern) => (rule) => fetchJson(`/api/channels/adapters/${aid}/rules/preview`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ rule, scope: { kind }, ...(kind === 'pattern' ? { pattern: pattern() } : {}) }) });
   if (target.kind === 'account') {
     const g = a.accountGrain || { access: [], watchers: [] };
-    return { kind: 'account', target, adapter: a, name: a.label || a.id, selfName: (a.auth && a.auth.user) || '', access: g.access || [], watchers: g.watchers || [], caps, accessUrl: `/api/channels/adapters/${aid}/access`, watchersUrl: `/api/channels/adapters/${aid}/watchers`, preview: scopePreview('account', null), estimate: scopeEstimate('account') };
+    return { kind: 'account', target, adapter: a, name: a.label || a.id, selfName: (a.auth && a.auth.user) || '', access: g.access || [], watchers: g.watchers || [], except: g.except || [], watchExcept: g.watchExcept || [], caps, accessUrl: `/api/channels/adapters/${aid}/access`, watchersUrl: `/api/channels/adapters/${aid}/watchers`, preview: scopePreview('account', null), estimate: scopeEstimate('account') };
   }
   const pa = target.id ? (a.patterns || []).find((p) => p.id === target.id) : null;
   if (target.id && !pa) { showToast(t('That rule no longer exists'), { type: 'error' }); return null; }
   const pat = pa && pa.pattern ? { match: pa.pattern.match, rules: pa.pattern.rules.map((r) => ({ ...r })) } : { match: 'any', rules: [{ kind: 'title', value: '' }] };
   return {
     kind: 'pattern', target, adapter: a, id: pa ? pa.id : null, name: a.label || a.id, selfName: (a.auth && a.auth.user) || '', pattern: pat, patternLabel: pa ? pa.patternLabel : null,
-    access: pa ? (pa.access || []) : [], watchers: pa ? (pa.watchers || []) : [], caps,
+    access: pa ? (pa.access || []) : [], watchers: pa ? (pa.watchers || []) : [], except: pa ? (pa.except || []) : [], watchExcept: pa ? (pa.watchExcept || []) : [], caps,
     accessUrl: pa ? `/api/channels/adapters/${aid}/patterns/${encodeURIComponent(pa.id)}/access` : `/api/channels/adapters/${aid}/patterns`,
     watchersUrl: pa ? `/api/channels/adapters/${aid}/patterns/${encodeURIComponent(pa.id)}/watchers` : null,
     estimate: scopeEstimate('pattern', () => pat),
@@ -337,8 +339,12 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
     return live;
   };
   body.appendChild(fieldLabel(t('Access')));
+  // «除了» (lane grants-unify): with a Task Group or All agents picked, the folded exception row leaves members OUT of
+  // this grain's access (they read nothing here through that row — their own row elsewhere still counts)
+  const exPick = rowToPick({ to: [], except: st.except || [] }, pickRows(), { everyoneKey: EVERYONE_KEY, notRunning: t('not live now'), deletedGroup: t('a deleted Task Group') });
   picker = principalPicker({
     items: pickRows, app, multi: true, selected: rows.map((r) => r.key), autofocus: true,
+    except: { selected: exPick.except, extra: exPick.extra },
     placeholder: t('Add an agent or group…'), label: t('Add an agent or group'),
     // ALL AGENTS (lane everyone-principal): the first row — every conversation may see and act here, now and later
     everyone: { key: EVERYONE_KEY },
@@ -408,7 +414,7 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
     syncMoot();
   };
   draw();
-  const drawn = () => JSON.stringify({ rows: rows.map((r) => [r.key, r.authority]), pattern: st.kind === 'pattern' ? st.pattern : null });
+  const drawn = () => JSON.stringify({ rows: rows.map((r) => [r.key, r.authority]), pattern: st.kind === 'pattern' ? st.pattern : null, except: picker.except() });
   let base = drawn();
   const actions = el('div', 'chan-flow-actions');
   if (st.kind === 'pattern' && st.id) {
@@ -426,6 +432,9 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
     // re-read at the click (a session that went live after the dialog opened is in it)
     const choices = principalChoices(app, st.access);
     const access = rows.map((r) => { const c = choices.find((x) => x.value === r.key); return c ? { principal: { kind: c.kind, id: c.id, name: c.name }, authority: r.authority } : null; }).filter(Boolean);
+    // «除了»: the members left out, in the grant model's spelling (a conversation by its id, a Task Group by its id)
+    const exRows = [...pickRows(), ...exPick.extra];
+    const except = picker.except().map((k) => principalOfRow(exRows.find((x) => String(x.key) === String(k)))).filter(Boolean);
     const v = F.validateAccess(access, st.caps);
     if (!v.ok) { showToast(routeErrorText({ code: v.code, error: v.error, why: v.why, principal: v.principal }), { type: 'error' }); return; }
     if (st.kind === 'pattern') { const pv = F.validatePattern(st.pattern); if (!pv.ok) { showToast(t('The rule is incomplete: {why}', { why: F.filterProblemText(pv, { t, ruleLabel: (k) => PATTERN_LABELS()[k] || k }) }), { type: 'error' }); return; } }
@@ -442,8 +451,8 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
       // refused by name and the dialog re-opens on it — never written over
       const again = { onChanged: () => { close(); if (reopen) reopen(); else showGrantAccessDialog(app, target); } };
       const r = st.kind === 'pattern'
-        ? (st.id ? await put(st.accessUrl, { access, pattern: st.pattern, base: st.stamp }, 'PUT', again) : await put(st.accessUrl, { pattern: st.pattern, access }, 'POST'))
-        : await put(st.accessUrl, { access, base: st.stamp }, 'PUT', again);
+        ? (st.id ? await put(st.accessUrl, { access, except, pattern: st.pattern, base: st.stamp }, 'PUT', again) : await put(st.accessUrl, { pattern: st.pattern, access, except }, 'POST'))
+        : await put(st.accessUrl, { access, except, base: st.stamp }, 'PUT', again);
       if (!r) return;
       const names = access.map((a) => principalText(a.principal)).join(', ');
       showToast(access.length ? t('Access saved: {list} — nobody is woken unless you add a notification (Notify…)', { list: names }) : t('Access removed'));
@@ -1044,12 +1053,20 @@ export async function showNotifyDialog(app, target) {
   const list = el('div', 'chan-watch-list');
   body.appendChild(list);
   const rows = [];
+  // «除了» (lane grants-unify): with a Task Group or All agents notified, ONE folded exception row leaves members OUT of
+  // this grain's notifications — never woken (never billed) through that row; THE picker's own row over the notified
+  // principals (its main list hidden — the rows above pick them)
+  const exPick = rowToPick({ to: [], except: st.watchExcept || [] }, rosterFromApp(app), { everyoneKey: EVERYONE_KEY, notRunning: t('not live now'), deletedGroup: t('a deleted Task Group') });
+  const exPicker = principalPicker({ items: () => rosterFromApp(app), app, multi: true, selected: [], cls: 'pp-except-only', label: t('Who gets woken?'), everyone: { key: EVERYONE_KEY },
+    except: { selected: exPick.except, extra: exPick.extra } });
+  exPicker.el.classList.add('chan-watch-except');
   const total = el('div', 'chan-af-stat chan-watch-total', '');
   const addB = btn(t('Add a notification'), null, 'chan-af-add');
   addB.prepend(icon('plus', 11));
   const syncAll = () => {
     const used = new Set(rows.map((r) => r.key()));
     for (const r of rows) r.setWho(used);
+    exPicker.setSelected([...used].filter(Boolean));   // «除了» is offered while a Task Group / All agents is notified
     addB.style.display = principals.some((p) => !rows.some((r) => r.key() === p.value)) ? '' : 'none';
     // ALL AGENTS is one cap PER RUNNING CONVERSATION — counted that way (the roster's agent conversations now), and
     // the MULTIPLIER is said (verify r1 T2 ①: the owner must see "N conversations now × the cap", not one product)
@@ -1069,11 +1086,11 @@ export async function showNotifyDialog(app, target) {
   };
   for (const w of st.watchers) addRow(w);
   if (!st.watchers.length) addRow(null);
-  const drawn = () => JSON.stringify(rows.map((r) => r.sig()));
+  const drawn = () => JSON.stringify([rows.map((r) => r.sig()), exPicker.except()]);
   let base = drawn();
   dirtyNow = () => drawn() !== base;
   addB.onclick = () => { addRow(null); };
-  body.append(addB, total, noteEl(t('Pacing only — the account budget is the money bound.')));
+  body.append(addB, exPicker.el, total, noteEl(t('Pacing only — the account budget is the money bound.')));
   const actions = el('div', 'chan-flow-actions');
   const grant = btn(t('Grant access…'), () => { close(); showGrantAccessDialog(app, target); });
   actions.append(grant, el('span', 'chan-sp'));
@@ -1089,7 +1106,9 @@ export async function showNotifyDialog(app, target) {
     save.disabled = true;
     try {
       if (!st.watchersUrl) { showToast(t('Save the rule\'s access first'), { type: 'error' }); return; }
-      const r = await put(st.watchersUrl, { watchers, base: st.stamp }, 'PUT', { onChanged: () => { close(); showNotifyDialog(app, target); } });
+      const exRows = [...rosterFromApp(app), ...exPick.extra];
+      const except = exPicker.except().map((k) => principalOfRow(exRows.find((x) => String(x.key) === String(k)))).filter(Boolean);   // «除了»
+      const r = await put(st.watchersUrl, { watchers, except, base: st.stamp }, 'PUT', { onChanged: () => { close(); showNotifyDialog(app, target); } });
       if (!r) return;
       showToast(watchers.length ? t('Notifications saved: {list}', { list: watchers.map((w) => `${principalText(w.principal)} ${watcherHowText(w)}`).join(', ') }) + (clamped ? ' · ' + t('numbers past their bounds were kept at the bound') : '') : t('Nobody is notified here any more'));
       base = drawn();

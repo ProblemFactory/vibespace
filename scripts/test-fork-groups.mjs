@@ -266,12 +266,13 @@ console.log('④ WIRING + census');
   }
   ok(forkCreates.length === 1 && forkCreates[0].startsWith('session-lifecycle.js:') && lifeSrc.slice(0, lifeSrc.indexOf('async _doForkSession(')).split('\n').length < Number(forkCreates[0].split(':')[1]), 'CENSUS: exactly ONE client createSession({…}) names a `fork` key (the one in _doForkSession) — a second fork path would bypass the plan', forkCreates.join(' '));
   ok(doForkCallers.every((f) => f === 'session-lifecycle.js' || f === 'app.js') && doForkCallers.length >= 3, 'CENSUS: _doForkSession is called only from session-lifecycle.js / app.js', doForkCallers.join(' '));
-  ok(/const bindIds = \[taskId, \.\.\.\(extraTaskBinds \|\| \[\]\)\]\.filter\(Boolean\);/.test(lifeSrc)
+  ok(/const bindIds = \[\.\.\.new Set\(\[taskId, \.\.\.\(Array\.isArray\(taskIds\) \? taskIds : \[\]\), \.\.\.\(extraTaskBinds \|\| \[\]\)\]\.filter\(Boolean\)\)\];/.test(lifeSrc)
     && /this\.sidebar\?\._registerPendingTaskBind\?\.\(msg\.sessionId, bindIds, \{ notId: fork \? \(backendSessionId \|\| resumeId \|\| null\) : null \}\);/.test(lifeSrc),
-    'the `created` handler registers taskId + extraTaskBinds, guarded by the fork source id');
-  ok(/fork: fork\|\|undefined, cols:120, rows:30, reqId,\n\s+taskId: taskId \|\| undefined,/.test(lifeSrc)
-    && /_initialGroupId: \(typeof data\.taskId === 'string' && \/\^T-\[\\w-\]\{1,60\}\$\/\.test\(data\.taskId\)\) \? data\.taskId : null,/.test(rd('src/ws-create.js')),
-    'the ws create message carries `taskId` and ws-create turns it into `_initialGroupId` (the task context from the first turn — no spawn ENV carries it)');
+    'the `created` handler registers taskId + the New Session form\'s taskIds (lane new-session-form) + extraTaskBinds, guarded by the fork source id');
+  ok(/fork: fork\|\|undefined, cols:120, rows:30, reqId,\n\s+taskId: taskId \|\| \(Array\.isArray\(taskIds\) && taskIds\[0\]\) \|\| undefined,/.test(lifeSrc)
+    && /const spawnGroups = spawnGroupIds\(data\);/.test(rd('src/ws-create.js')) && /_initialGroupId: spawnGroups\[0\] \|\| null,/.test(rd('src/ws-create.js'))
+    && /const TASK_ID_RE = \/\^T-\[\\w-\]\{1,60\}\$\/;/.test(rd('src/new-session-spec.js')),
+    'the ws create message carries `taskId` (+ the form\'s `taskIds`) and ws-create turns it into `_initialGroupId` — the same id shape, judged in src/new-session-spec.js (the task context from the first turn — no spawn ENV carries it)');
   ok(!/VIBESPACE_TASK_ID/.test(fs.readFileSync(FG_PATH, 'utf8').replace(/VIBESPACE_TASK_ID[\s/]+has had no producer/, '')) && !/spawns VIBESPACE_TASK_ID/.test(lifeSrc),
     'no text claims a VIBESPACE_TASK_ID spawn env (its producer left in the Task refactor P2)');
   ok(/import \{ mergePendingBind, pendingBindVerdict, sweepPendingBinds \} from '\.\/fork-groups\.js';/.test(tasksSrc)

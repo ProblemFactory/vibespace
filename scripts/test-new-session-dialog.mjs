@@ -52,6 +52,17 @@
 //   G  … AND THE MACHINE (the same hole: the host list lands after the rows were filled, and its programmatic set fired
 //      no `change`) — the host list stubbed in the page: G1 an open on a machine ⇒ the account row speaks that machine;
 //      G2 the next open on this one ⇒ this machine's words
+//   H  THE NEW SESSION FORM IN TWO COLUMNS (lane new-session-form — the owner accepted POC v2.2, 2026-10-23): H1 both columns
+//      (built-in rows locked on; the name above the folder), H2 the header's kind switch Agent | Terminal (no Browser kind;
+//      the Mode row gone; a plain shell has no Agent), H3 the 可用工具 row per backend by REAL clicks (Claude's chips — Bash
+//      never ✗; Codex's sandbox + approval at the mode's default; none for a plain shell), H4 THE FOLD BY DATA (no machine
+//      used ⇒ folded; two accounts ⇒ the account row stands; a git folder ⇒ the worktree tick; a paired machine used two days
+//      ago ⇒ the machine row; the footer's chips with a folded one dashed; a chip opens its row; the toggle is remembered),
+//      H5 several Task Groups in the order picked, H6 only the browser profiles the picked groups ADMIT (the server's
+//      mayAttach), H7 Create sends taskIds + the tools pick (the name = the folder's), H8 the refusal in words before Create,
+//      H9 a REAL create: the spawn's --allowedTools / --disallowedTools, and the ticked fake account holds ONE access row
+//      {agent: that conversation, draft} once its id exists (the tools pick latched as its config), 无 | 已选 | 全部, H10 the
+//      phone stacks LEFT then RIGHT
 //   RED CONTROL = the base's open order (the account row filled from the select's previous value, then a programmatic
 //      set; the machine set only when the list lands), rebuilt from a PATCHED COPY of today's app.js in the throwaway
 //      worktree (one esbuild — never the repository's history): F2 / F3 / G1 red; the real bundle back ⇒ F2 green
@@ -165,7 +176,7 @@ fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
     { id: 'pv-lane-empty', kind: 'self-hosted', label: 'Empty', modelsSource: 'none' },
   ] }), { mode: 0o600 });
 }
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1' /* H: the fake channel accounts the form's 「账号 · 以你的身份」 lists */ }, stdio: 'ignore' });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
 let cleaned = false;
@@ -315,11 +326,13 @@ try {
     await waitFor(dialogVisible, 5000);
     await evalJs(`(() => { const i = document.getElementById('input-cwd'); i.value = ''; i.focus(); return true; })()`);
     await cdp('Input.insertText', { text: path.join(fakeHome, 'proj', 'al') });
-    const shown = await waitFor(`!document.getElementById('cwd-suggestions').classList.contains('hidden') && document.querySelectorAll('#cwd-suggestions > *').length > 0`, 5000);
+    // lane path-field: the list is THE path field's (src/lib/path-field.js) — the input names it (aria-controls)
+    const LIST = `document.getElementById(document.getElementById('input-cwd').getAttribute('aria-controls'))`;
+    const shown = await waitFor(`(() => { const l = ${LIST}; return !!l && !l.hidden && l.querySelectorAll('.pf-item').length > 0; })()`, 5000);
     check('typing a path opens the suggestion list', shown);
     await escape();
     await sleep(250);
-    check('THE FINDING: Escape hides the list …', await evalJs(`document.getElementById('cwd-suggestions').classList.contains('hidden')`));
+    check('THE FINDING: Escape hides the list …', await evalJs(`(() => { const l = ${LIST}; return !l || l.hidden; })()`));
     check('… and the dialog stays open', await evalJs(dialogVisible));
     await escape();
     check('the next Escape closes the dialog', await waitFor(`!(${dialogVisible})`, 2000));
@@ -658,6 +671,155 @@ try {
     check('G2 the next open on this machine ⇒ this machine\'s words ("Subscription (Pro/Max login)")', g2.host === '' && g2.label === 'Subscription (Pro/Max login)', g2);
   }
   check('no page error during the run', pageErrors.length === 0, pageErrors);
+
+  // ═══ H THE NEW SESSION FORM IN TWO COLUMNS (lane new-session-form; the owner accepted POC v2.2) ═══════════════════
+  console.log('H the New Session form in two columns: the fold, the chips, the groups, the tools, the profiles, the ticks');
+  {
+    const api = async (method, p, body) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }); try { return await r.json(); } catch { return null; } };
+    // the data the form reads: two Task Groups, a profile kept to one of them + one for everyone, a git folder, the fake channel accounts
+    const gIR = (await api('POST', '/api/tasks', { title: 'Investor relations', folders: [path.join(fakeHome, 'work')] }))?.task?.id;
+    const gPay = (await api('POST', '/api/tasks', { title: 'Payments', folders: [] }))?.task?.id;
+    const pIR = (await api('POST', '/api/browser/profiles', { label: 'IR portal', use: { mode: 'only', who: [{ kind: 'task', id: gIR }] } }))?.profile?.id;
+    const pAll = (await api('POST', '/api/browser/profiles', { label: 'Everyday' }))?.profile?.id;
+    const REPO_DIR = path.join(fakeHome, 'repo'); fs.mkdirSync(REPO_DIR, { recursive: true }); execSync('git init -q', { cwd: REPO_DIR });
+    check('H0 the fixtures: two Task Groups, a profile kept to one group + one for every conversation', !!gIR && !!gPay && !!pIR && !!pAll, { gIR, gPay, pIR, pAll });
+    await waitFor(`!!app.sidebar._taskById(${JSON.stringify(gIR)}) && !!app.sidebar._taskById(${JSON.stringify(gPay)}) && (app._browserProfiles?.profiles || []).some((p) => p.id === ${JSON.stringify(pIR)})`, 10000);
+    await stubCreate();
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
+    await openNs();
+    await sleep(800);
+    const where = (id) => evalJs(`(() => { const r = document.getElementById(${JSON.stringify(id)}); return r ? (r.closest('#ns-more-body') ? 'fold' : r.closest('#ns-card-where') ? 'where' : r.closest('#ns-card-backend') ? 'backend' : r.closest('#ns-right') ? 'right' : 'elsewhere') : null; })()`);
+    // H1 both columns
+    const cols = await evalJs(`(() => { const L = document.querySelector('#dialog-new-session .ns-left').getBoundingClientRect(), R = document.getElementById('ns-right').getBoundingClientRect(), d = document.getElementById('dialog-new-session').getBoundingClientRect(); return { L: [L.left, L.right, L.top], R: [R.left, R.right, R.top], dw: d.width, grid: getComputedStyle(document.querySelector('#dialog-new-session .ns-cols')).display, heads: [...document.querySelectorAll('#dialog-new-session .ns-col-h b')].map((b) => b.textContent), cards: [...document.querySelectorAll('#ns-right .ns-card-h')].map((h) => h.textContent.trim()) }; })()`);
+    check('H1 two columns at 1280 px: LEFT «Where and how it runs» beside RIGHT «What it may use»', cols.grid === 'grid' && cols.R[0] >= cols.L[1] - 1 && Math.abs(cols.R[2] - cols.L[2]) < 40 && cols.heads[0] === 'Where and how it runs' && cols.heads[1] === 'What it may use', cols);
+    check('H1 the right column: built-in (always on) · VibeSpace · Accounts · as you · MCP servers', ['Built in · always on', 'VibeSpace', 'Accounts · as you', 'MCP servers'].every((h, i) => (cols.cards[i] || '').startsWith(h)), cols.cards);
+    const order = await evalJs(`[...document.querySelectorAll('#ns-card-where > label')].map((l) => l.id).filter((id) => id !== 'row-host')`);
+    check('H1 会话名称 sits above 工作目录 (the name first)', order[0] === 'row-session-name' && order[1] === 'row-cwd', order);
+    const builtins = await evalJs(`[...document.querySelectorAll('#ns-right [data-builtin]')].map((r) => r.dataset.builtin + ':' + r.classList.contains('locked') + ':' + !!r.querySelector('.ns-on'))`);
+    check('H1 built-in rows are locked on: Artifacts · Feedback · Page publishing', builtins.join() === 'artifacts:true:true,feedback:true:true,pages:true:true', builtins);
+    // H2 the kind switch (Agent | Terminal) — it replaces the Mode row; a plain shell has no Agent
+    const kind = () => evalJs(`({ mode: document.getElementById('input-mode').value, on: [...document.querySelectorAll('#ns-kind-seg button')].filter((b) => b.classList.contains('on')).map((b) => b.dataset.kind), agentDisabled: document.querySelector('#ns-kind-seg [data-kind="chat"]').disabled, rowMode: getComputedStyle(document.getElementById('row-mode')).display, kinds: [...document.querySelectorAll('#ns-kind-seg button')].map((b) => b.dataset.kind) })`);
+    const k0 = await kind();
+    check('H2 the header\'s kind switch: Agent | Terminal (no «Browser»: no New Session road to a browser-only session), Agent on, the Mode row gone', k0.mode === 'chat' && k0.on.join() === 'chat' && k0.kinds.join() === 'chat,terminal' && k0.rowMode === 'none', k0);
+    await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; document.getElementById('input-cwd').dispatchEvent(new Event('input')); true`);   // a folder: the footer shows the run's chips, not the refusal
+    await realClick('#ns-kind-seg [data-kind="terminal"]');
+    const k1 = await kind();
+    check('H2 one real click on Terminal ⇒ mode terminal (the footer says it)', k1.mode === 'terminal' && k1.on.join() === 'terminal' && await evalJs(`!!document.querySelector('#ns-foot-info [data-chip="kind"]')`), k1);
+    await realClick('#ns-kind-seg [data-kind="chat"]');
+    // H3 the 可用工具 row per backend
+    const tools = () => evalJs(`(() => { const r = document.getElementById('row-tools'); return { shown: !r.classList.contains('hidden') && r.offsetParent !== null, kind: r.dataset.kind, chips: [...r.querySelectorAll('[data-tool]')].map((c) => c.dataset.tool), keep: [...r.querySelectorAll('[data-tool]')].filter((c) => c.querySelector('.ns-keep')).map((c) => c.dataset.tool), codex: [...r.querySelectorAll('[data-codex]')].map((b) => b.dataset.codex + '=' + b.dataset.v + (b.classList.contains('on') ? '*' : '')), flags: document.getElementById('ns-tool-flags')?.textContent || '' }; })()`);
+    const t0 = await tools();
+    check('H3 Claude: the 可用工具 row with the harness\'s own tool chips; Bash marked as kept', t0.shown && t0.kind === 'tools' && t0.chips.join() === 'Read,Edit,Write,Bash,Glob,Grep,WebFetch,WebSearch,NotebookEdit' && t0.keep.join() === 'Bash', t0);
+    await realClick('#row-tools [data-tool="Read"]');
+    await realClick('#row-tools [data-tool="WebFetch"]'); await realClick('#row-tools [data-tool="WebFetch"]');
+    await realClick('#row-tools [data-tool="Bash"]'); await realClick('#row-tools [data-tool="Bash"]');
+    const t1 = await tools();
+    check('H3 real clicks: ✓ Read, ✗ WebFetch, and Bash goes ✓ → default (never ✗) — the line shows the command line', /--allowedTools Read --disallowedTools WebFetch/.test(t1.flags) && JSON.stringify(await evalJs('app._nsToolPick()')) === JSON.stringify({ allow: ['Read'], deny: ['WebFetch'] }), t1);
+    await pickBackend('codex'); await sleep(300);
+    const t2 = await tools();
+    check('H3 Codex: sandbox + approval, the permission mode\'s default marked on', t2.shown && t2.kind === 'sandbox' && t2.codex.includes('sandbox=workspace-write*') && t2.codex.includes('approval=on-request*') && /--sandbox workspace-write/.test(t2.flags), t2);
+    await pickBackend('shell'); await sleep(300);
+    const t3 = await tools(); const k3 = await kind();
+    check('H3 a plain shell: no 可用工具 row, and Terminal is the only kind', !t3.shown && k3.agentDisabled && k3.mode === 'terminal', { t3, k3 });
+    await pickBackend('claude'); await sleep(300);
+    check('H3 back to Claude: the pick made on Claude is still the one shown', JSON.stringify(await evalJs('app._nsToolPick()')) === JSON.stringify({ allow: ['Read'], deny: ['WebFetch'] }));
+    // H4 the fold, by the person's own data
+    const fold0 = { host: await where('row-host'), account: await where('row-account'), args: await where('row-extra-args'), worktree: await where('row-worktree'), names: await evalJs(`document.getElementById('ns-more-names').textContent`), note: await evalJs(`document.querySelector('#row-account .ns-auto-note')?.textContent || ''`) };
+    check('H4 no machine used lately ⇒ the machine row folds; the arguments and the worktree tick (no git folder) fold too', fold0.host === 'fold' && fold0.args === 'fold' && fold0.worktree === 'fold' && /Machine/.test(fold0.names), fold0);
+    check('H4 two accounts for Claude (this instance\'s) ⇒ the account row stands in its card and says why', fold0.account === 'backend' && /you have 2 accounts/.test(fold0.note), fold0);
+    await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(REPO_DIR)}; document.getElementById('input-cwd').dispatchEvent(new Event('input')); document.getElementById('input-cwd').dispatchEvent(new Event('blur')); true`);
+    await waitFor(`!!document.getElementById('row-worktree').closest('#ns-card-backend')`, 6000);
+    check('H4 a git folder ⇒ the worktree tick unfolds by itself ("this folder is a git repository")', await where('row-worktree') === 'backend' && /git repository/.test(await evalJs(`document.querySelector('#row-worktree .ns-auto-note')?.textContent || ''`)));
+    check('H4 the name\'s placeholder is the folder\'s own name', await evalJs(`document.getElementById('input-session-name').placeholder`) === 'repo');
+    await evalJs(`app.sidebar._allSessions.push({ sessionId: 'lane-h-remote', host: 'h-lane', startedAt: Date.now() - 2 * 86400000, mode: 'chat' }); app._nsRender(); true`);
+    const hostUp = await where('row-host');
+    await evalJs(`app.sidebar._allSessions = app.sidebar._allSessions.filter((s) => s.sessionId !== 'lane-h-remote'); app._nsRender(); true`);
+    check('H4 a paired machine used two days ago ⇒ the machine row unfolds by itself; without it, it folds again', hostUp === 'where' && await where('row-host') === 'fold', hostUp);
+    const chips = await evalJs(`[...document.querySelectorAll('#ns-foot-info [data-chip]')].map((c) => c.dataset.chip + (c.classList.contains('folded') ? '~' : ''))`);
+    check('H4 the footer\'s chips carry every value — a folded row\'s chip dashed, never hidden', ['backend', 'model', 'permission', 'tools', 'host~', 'account'].every((c) => chips.includes(c)), chips);
+    await evalJs(`localStorage.setItem('vs.newSession.moreOpen', '0'); document.getElementById('ns-more-toggle').setAttribute('aria-expanded', 'false'); true`);
+    await realClick('#ns-foot-info [data-chip="host"]');
+    await sleep(300);
+    check('H4 one real click on the folded «This machine» chip opens the fold and focuses the machine row', await evalJs(`document.getElementById('ns-more-toggle').getAttribute('aria-expanded') === 'true' && document.activeElement?.id === 'input-host'`));
+    await openNs(); await sleep(300);
+    const closedAgain = await evalJs(`document.getElementById('ns-more-toggle').getAttribute('aria-expanded') === 'false'`);
+    await realClick('#ns-more-toggle');
+    await openNs(); await sleep(300);
+    check('H4 the fold\'s open state is remembered on this device: a chip\'s peek is not, the toggle is (the next open: still open)', closedAgain && await evalJs(`document.getElementById('ns-more-toggle').getAttribute('aria-expanded') === 'true' && localStorage.getItem('vs.newSession.moreOpen') === '1'`));
+    await realClick('#ns-more-toggle');
+    // H5 several Task Groups, in the order picked
+    await realClick('#ns-right [data-tg-add]'); await sleep(200);
+    await realClick(`.ns-tg-menu [data-tg="${gPay}"]`); await sleep(150);
+    await realClick(`.ns-tg-menu [data-tg="${gIR}"]`); await sleep(300);
+    await evalJs(`document.querySelectorAll('.ns-tg-menu').forEach((m) => m.remove()); true`);
+    const tg = await evalJs(`[...document.querySelectorAll('#ns-right .ns-tg-chip')].map((c) => c.querySelector('.ns-tg-n').textContent + ' ' + c.querySelector('.ns-tg-name').textContent)`);
+    check('H5 real clicks pick two Task Groups; the chips show the order picked', tg.join(' | ') === '1 Payments | 2 Investor relations', tg);
+    const reach = await evalJs(`[...document.querySelectorAll('#ns-right [data-row="sessions"] .ns-pv-via')].map((x) => x.textContent)`);
+    check('H5 the sessions row says the reach through each group', reach.length === 2 && reach.every((r) => /^Through Task Group/.test(r)), reach);
+    // H6 the profiles the picked groups admit (the server's mayAttach)
+    const profs = () => evalJs(`({ opts: [...document.querySelectorAll('#input-browser-profile option')].map((o) => o.value), line: document.querySelector('#ns-right [data-row="bprof"] .ns-pv-via')?.textContent || '' })`);
+    await waitFor(`[...document.querySelectorAll('#input-browser-profile option')].some((o) => o.value === ${JSON.stringify(pIR)})`, 6000);
+    const pWith = await profs();
+    await realClick(`#ns-right .ns-tg-chip[data-tg-chip="${gIR}"] [data-tg-x]`);
+    await waitFor(`![...document.querySelectorAll('#input-browser-profile option')].some((o) => o.value === ${JSON.stringify(pIR)})`, 6000);
+    const pWithout = await profs();
+    check('H6 with «Investor relations» picked the profile kept to it is offered; without it, it is not — and the row says one more is not open to it', pWith.opts.includes(pIR) && pWith.opts.includes(pAll) && !pWithout.opts.includes(pIR) && pWithout.opts.includes(pAll) && /1 more are not open to it/.test(pWithout.line), { pWith, pWithout });
+    // H7 Create sends the groups in order + the tools pick; an empty name is the folder's own (every open starts on the harness's own tools: pick again)
+    await realClick('#row-tools [data-tool="Read"]');
+    await realClick('#row-tools [data-tool="WebFetch"]'); await realClick('#row-tools [data-tool="WebFetch"]');
+    await evalJs(`document.getElementById('input-session-name').value = ''; document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; true`);
+    const n0 = await evalJs('window.__nsCreated.length');
+    await realClick('#dialog-new-session .btn-create');
+    await waitFor(`window.__nsCreated.length > ${n0}`, 6000);
+    const made = await evalJs(`window.__nsCreated.at(-1)`);
+    check('H7 Create sends taskIds in the order picked (taskId = the first, for older servers) and the 可用工具 pick', JSON.stringify(made?.taskIds) === JSON.stringify([gPay]) && made?.taskId === gPay && JSON.stringify(made?.tools) === JSON.stringify({ allow: ['Read'], deny: ['WebFetch'] }), made && { taskIds: made.taskIds, taskId: made.taskId, tools: made.tools });
+    check('H7 an empty name is the chosen folder\'s own name (the placeholder said so)', made?.name === path.basename(CWD), made?.name);
+    // H8 the refusal in words BEFORE Create
+    await openNs(); await sleep(300);
+    const refuse = await evalJs(`document.getElementById('ns-foot-info').innerText`);
+    const n1 = await evalJs('window.__nsCreated.length');
+    await realClick('#dialog-new-session .btn-create'); await sleep(900);
+    check('H8 an empty folder: the footer says «Cannot create yet: Choose a folder first», and Create sends nothing', /Cannot create yet: Choose a folder first/.test(refuse) && await evalJs('window.__nsCreated.length') === n1 && await evalJs(dialogVisible), refuse);
+    await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; document.getElementById('input-cwd').dispatchEvent(new Event('input')); true`);
+    check('H8 a folder typed ⇒ the refusal gives way to the run\'s chips', !/Cannot create yet/.test(await evalJs(`document.getElementById('ns-foot-info').innerText`)));
+    // H9 a ticked account becomes ONE access row once the conversation's id exists (a REAL create through the stub claude)
+    await evalJs('delete app.createSession; true');
+    await waitFor(`!!document.querySelector('#ns-right input[data-acc="fake-poll"]')`, 8000);
+    const acc0 = await evalJs(`document.querySelector('#ns-right input[data-acc="fake-poll"]').checked`);
+    await realClick('#ns-right input[data-acc="fake-poll"]'); await sleep(200);
+    const tick = await evalJs(`({ ticks: app._nsChannelTicks().map((x) => x.id), seg: [...document.querySelectorAll('#ns-right [data-tick-all]')].filter((b) => b.classList.contains('on')).map((b) => b.dataset.tickAll), words: document.querySelector('#ns-right [data-acc-row="fake-poll"] .ns-pv-via')?.textContent || '' })`);
+    check('H9 the fake account is unticked by default; one real click ticks it (the switch reads 已选) and says what create will write', !acc0 && tick.ticks.join() === 'fake-poll' && tick.seg.join() === 'some' && /Written into the channel assignment at create/.test(tick.words), tick);
+    await realClick('#ns-right [data-tick-all="none"]'); await sleep(150);
+    check('H9 无 unticks every tickable row', (await evalJs('app._nsChannelTicks().length')) === 0);
+    await realClick('#ns-right [data-tick-all="some"]'); await sleep(150);
+    check('H9 已选 restores the selection made by hand', (await evalJs('app._nsChannelTicks().map((x) => x.id).join()')) === 'fake-poll');
+    await realClick('#row-tools [data-tool="Read"]');
+    await realClick('#row-tools [data-tool="WebFetch"]'); await realClick('#row-tools [data-tool="WebFetch"]');
+    const winsBefore = await evalJs(`JSON.stringify([...app.sessions.keys()])`);
+    const argvBefore = new Set(argvFiles().map((a) => a.f));
+    await evalJs(`document.getElementById('input-session-name').value = 'lane H real'; true`);
+    await realClick('#dialog-new-session .btn-create');
+    let spawned = null;
+    for (let i = 0; i < 80 && !spawned; i++) { spawned = argvFiles().find((a) => !argvBefore.has(a.f)) || null; if (!spawned) await sleep(250); }
+    const SID = spawned ? '0e1a0000-0000-4000-8000-' + spawned.f.replace(/^argv-|\.json$/g, '').padStart(12, '0') : null;
+    const ai = spawned ? spawned.argv.indexOf('--allowedTools') : -1;
+    check('H9 the real spawn carries --allowedTools Read --disallowedTools WebFetch', ai >= 0 && spawned.argv[ai + 1] === 'Read' && spawned.argv[ai + 2] === '--disallowedTools' && spawned.argv[ai + 3] === 'WebFetch', spawned && spawned.argv.join(' '));
+    let row = null;
+    for (let i = 0; i < 60 && !row; i++) { const v = await api('GET', '/api/channels/adapters/fake-poll/view'); row = (v?.adapter?.accountGrain?.access || []).find((r) => r.principal?.kind === 'agent') || null; if (!row) await sleep(500); }
+    check('H9 …and once the conversation\'s own id exists, the ticked account holds ONE access row {agent: that conversation, draft} — the Channels window\'s own store', !!row && row.principal.id === SID && row.authority === 'draft', { row, SID });
+    const cfg = await evalJs(`JSON.stringify(app.sidebar.getSessionConfig({ backend: 'claude', backendSessionId: ${JSON.stringify(SID)} }))`);
+    check('H9 the 可用工具 pick became the conversation\'s own config (a resume re-passes it)', JSON.parse(cfg || '{}').tools && JSON.stringify(JSON.parse(cfg).tools) === JSON.stringify({ allow: ['Read'], deny: ['WebFetch'] }), cfg);
+    await evalJs(`(() => { const was = new Set(${winsBefore}); for (const [w, v] of app.sessions) if (!was.has(w) && v?.sessionId) { try { app.killSession(v.sessionId); } catch {} } return true; })()`);
+    await stubCreate();
+    // H10 the phone stacks LEFT then RIGHT; the kind switch is a full-width row
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await openNs(); await sleep(500);
+    const phone = await evalJs(`(() => { const L = document.querySelector('#dialog-new-session .ns-left').getBoundingClientRect(), R = document.getElementById('ns-right').getBoundingClientRect(), H = document.querySelector('#dialog-new-session .ns-head').getBoundingClientRect(), K = document.getElementById('ns-kind-seg').getBoundingClientRect(); return { L: [Math.round(L.left), Math.round(L.width), Math.round(L.bottom)], R: [Math.round(R.left), Math.round(R.width), Math.round(R.top)], K: [Math.round(K.width), Math.round(H.width)], grid: getComputedStyle(document.querySelector('#dialog-new-session .ns-cols')).display }; })()`);
+    check('H10 the phone: LEFT above RIGHT, one width; the kind switch spans the header', phone.grid !== 'grid' && phone.R[2] >= phone.L[2] - 1 && Math.abs(phone.L[0] - phone.R[0]) < 2 && Math.abs(phone.L[1] - phone.R[1]) < 2 && phone.K[0] >= phone.K[1] - 40, phone);
+    await evalJs('app.hideDialogs(); true');
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
+    check('H no page error during the form\'s legs', pageErrors.length === 0, pageErrors);
+  }
 
   // ═══ RED CONTROL: the base's open order, from a patched copy of today's app.js (one esbuild) ═══════════════════════
   console.log('RED CONTROL — the base\'s open order (a patched copy of today\'s app.js in the throwaway worktree; one esbuild)');

@@ -265,23 +265,28 @@ function liveByKey() {
 function useViewOf(p, live, cache = {}) {
   const k = ctx?.keeper || null;
   const U = B.whoMayUse(p);
+  if (U && U.mode === 'unknown') return { mode: 'unknown', who: [] };
+  const exceptOf = () => ((U && U.except) || []).map(rowView);   // lane grants-unify: the members left out, named like the list's
   // lane everyone-principal: All agents may KEEP the rows picked beside it (named like a list's, restored when All goes)
-  if (!U || (U.mode === 'all' && !(U.kept && U.kept.length))) return { mode: 'all' };
-  if (U.mode === 'unknown') return { mode: 'unknown', who: [] };
+  if (!U || (U.mode === 'all' && !(U.kept && U.kept.length))) { const ex = exceptOf(); return ex.length ? { mode: 'all', except: ex } : { mode: 'all' }; }
   const convOf = (key) => {
     if (cache.byKey === undefined) { cache.byKey = null; try { cache.byKey = ctx?.bindings?.conversationsByKey ? ctx.bindings.conversationsByKey() : null; } catch { cache.byKey = null; } }
     return cache.byKey ? cache.byKey.get(key) || null : null;
   };
+  function rowView(w) {
+    if (w.kind === 'session') {
+      const l = live.get(w.id) || null;
+      // lane grants-unify: a conversation with no browser key yet is `cid:<id>` — its conversation id is the key's own
+      return { kind: 'session', key: w.id, conversationId: (l && l.conversationId) || w.conversationKey || convOf(w.id), live: !!l, sessionId: l ? l.sessionId : null, name: l ? l.name : null, backend: l ? l.backend : null };
+    }
+    const f = k && typeof k.taskInfo === 'function' ? k.taskInfo(w.id) : undefined;
+    return { kind: 'task', id: w.id, title: f ? String(f.title || '') || null : null, deleted: f === null, archived: !!(f && f.archived), unreadable: f === undefined };
+  }
+  const ex = exceptOf();
   return {
     mode: U.mode === 'all' ? 'all' : 'only',
-    who: (U.mode === 'all' ? U.kept : U.who).map((w) => {
-      if (w.kind === 'session') {
-        const l = live.get(w.id) || null;
-        return { kind: 'session', key: w.id, conversationId: (l && l.conversationId) || convOf(w.id), live: !!l, sessionId: l ? l.sessionId : null, name: l ? l.name : null, backend: l ? l.backend : null };
-      }
-      const f = k && typeof k.taskInfo === 'function' ? k.taskInfo(w.id) : undefined;
-      return { kind: 'task', id: w.id, title: f ? String(f.title || '') || null : null, deleted: f === null, archived: !!(f && f.archived), unreadable: f === undefined };
-    }),
+    who: (U.mode === 'all' ? U.kept : U.who).map(rowView),
+    ...(ex.length ? { except: ex } : {}),
   };
 }
 function usedByOf(profileId, convs) {
@@ -388,8 +393,19 @@ router.patch('/api/browser/profiles/:id', async (req, res) => {
           rows.push({ kind: 'session', key: r.key });
         } else rows.push({ kind: 'task', id: r.id });
       }
+      // lane grants-unify — «除了»: a member left out is named by its conversation (`cid:<key>`), never given a browser key
+      const except = [];
+      for (const r of sv.except || []) {
+        if (r.kind === 'session' && r.session !== undefined) {
+          const xr = typeof ctx?.exceptKeyForPicked === 'function' ? ctx.exceptKeyForPicked(r.session) : { ok: false, code: 'session-gone', error: 'picked sessions cannot be resolved on this server' };
+          if (!xr || !xr.ok) return res.status(STATUS[xr && xr.code] || 409).json({ error: (xr && xr.error) || 'that conversation could not be left out', code: (xr && xr.code) || 'session-gone', session: r.session });
+          except.push({ kind: 'session', key: xr.key }); knownKeys.push(xr.key);
+        } else if (r.kind === 'session') except.push({ kind: 'session', key: r.key });
+        else except.push({ kind: 'task', id: r.id });
+      }
+      const ex = except.length ? { except } : {};
       // ALL AGENTS beside picked rows (lane everyone-principal): the rows ride along, kept for when All is taken away
-      patch.use = sv.mode === 'all' ? (rows.length ? { mode: 'all', who: rows } : { mode: 'all' }) : { mode: 'only', who: rows };
+      patch.use = sv.mode === 'all' ? (rows.length ? { mode: 'all', who: rows, ...ex } : { mode: 'all', ...ex }) : { mode: 'only', who: rows, ...ex };
     }
     const r = k.updateProfile(req.params.id, patch, { knownKeys });
     // a narrowing's detached conversations each hear it on their next message (layer ②, zero billed turns)

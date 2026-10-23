@@ -14,6 +14,7 @@ const { pipePtyShim } = require('../pty-duck'); // B-ae4b: the R6 re-open duck h
 const { dedupWebuiSockets } = require('../session-store');
 const { list: harnessList } = require('../harnesses');
 const { capsOf } = require('../backend-caps.js'); // PURE: caps.streamProtocol (the apiKeySource field lives in a stream-json init record)
+const { spawnGroupIds } = require('../new-session-spec.js'); // PURE (lane new-session-form): meta `taskIds` (else an older meta's `taskId`) → the spawned-into list
 const { pickCodexThreadCandidate } = require('../ws-handler');
 const { fdScanShellFns } = require('../writer-sweep.js');
 const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId, restoredForkPending, ownsItsId } = require('../claude-lock-capture'); // the ONE local lock capture (ws-create's create chain + this boot re-arm; the witness is the wrapper's pid)
@@ -110,6 +111,7 @@ function sessionFromMeta(meta, transportFacts) {
     _modelOrigin: meta.modelOrigin || null, _effortOrigin: meta.effortOrigin || null, // B-6b6d: the spawn's model/effort ORIGIN survives a restart (else the panel's honest row degrades to a guess)
     _outputStyle: meta.outputStyle || null, // 2.369.58: the chip must not report "default" for a session really running a style
     _worktree: !!meta.worktree, _worktreePath: meta.worktreePath || null,
+    _toolPick: meta.toolPick && typeof meta.toolPick === 'object' && !Array.isArray(meta.toolPick) ? meta.toolPick : null, // lane new-session-form: the 「可用工具」 pick the process was spawned with
     _vcs: meta.vcs && typeof meta.vcs === 'object' ? meta.vcs : null, _prLinks: Array.isArray(meta.prLinks) ? meta.prLinks : null, // design-unknown-records: the git chip + PR chips survive a restart
     _cliTitle: typeof meta.cliTitle === 'string' && meta.cliTitle ? meta.cliTitle : null, // lane session-title-record: the CLI's own title survives a restart
     // agent-browser P0 (§3.2.1): the CONVERSATION's browser identity and the
@@ -537,6 +539,7 @@ function restoreSessions() {
       _modelLocked: !!meta.modelLocked,
       _lockedModel: meta.lockedModel || null,
       _initialGroupId: meta.taskId || null, // group spawned into; belonging is live-derived, this only covers the pre-bind window
+      _initialGroupIds: spawnGroupIds(meta), // lane new-session-form: every group it was spawned into (meta `taskIds`; an older meta's one `taskId`)
       _heldPoolMember: typeof meta.heldPoolMember === 'string' ? meta.heldPoolMember : null, // the pool member the surviving (non-hot) process holds (design-reset-credits r2)
       _heldPoolOrigin: heldOriginOf(meta), // r4: a ledger-derived stamp stays 'ledger'; a meta that never recorded its start cannot be answered by the ledger
       _authAtSpawn: meta.authAtSpawn || null,
@@ -828,6 +831,7 @@ async function readoptOrphanKeeperSessions() {
       _modelLocked: !!meta.modelLocked,
       _lockedModel: meta.lockedModel || null,
       _initialGroupId: meta.taskId || null,
+      _initialGroupIds: spawnGroupIds(meta),
       _remotePort: rport,
       sockName, socketPath, buffer: '',
     });

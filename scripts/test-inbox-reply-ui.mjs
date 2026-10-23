@@ -22,6 +22,10 @@
 //      the agent): the SAME textarea, its text, its focus; the new row appended
 //      at its group's end
 //   ⑤ an option chip sends its label as the whole reply, the row resolves
+//   ⑤g (lane controls-that-lie, naive study round 4 R1) an ask filed with --grant browser:<profile> draws «Let this conversation
+//      use …»: a REAL click adds THIS conversation to the profile's «Who can use it» (the owner's GET …/use + PATCH) and THEN the
+//      stub's stdin gets the quoted «Granted — … vibespace-browser use <id>»; a plain option reads «Reply: Granted access», posts
+//      exactly that label and grants nothing (the 2.369.344 lie, now a reply that says so)
 //   ⑧ the dot flips to `running` after a chat-input and back to `idle` after
 //      the result — through the active-sessions broadcast, no row rebuilt
 //   ⑦ NEGATIVE CONTROL: the same hostile title through a raw innerHTML copy
@@ -352,7 +356,7 @@ try {
   await sleep(400);
   const x1 = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(rowSel(HOSTILE_ID))}); return { xss: window.__xss, text: r.querySelector('.ut-text').textContent, chips: [...r.querySelectorAll('.ut-opt')].map((c) => c.textContent), detail: r.querySelector('.ut-detail')?.textContent, imgs: r.querySelectorAll('img, svg:not(.ut-act svg), script').length }; })()`);
   check('window.__xss is undefined after the hostile row painted (title, option label and detail)', x1.xss === undefined, x1);
-  check('the row text is the RAW title, the chips the RAW labels, the detail the RAW detail', x1.text === HOSTILE_TITLE && x1.chips[0] === HOSTILE_OPT && x1.chips[1] === 'fine' && x1.detail === HOSTILE_DETAIL, x1);
+  check('the row text is the RAW title, the chips the RAW labels (as replies: «Reply: <label>», lane controls-that-lie), the detail the RAW detail', x1.text === HOSTILE_TITLE && x1.chips[0] === 'Reply: ' + HOSTILE_OPT && x1.chips[1] === 'Reply: fine' && x1.detail === HOSTILE_DETAIL, x1);
 
   // ── ③ stopped ⇒ NOTHING disabled: the fact is said, the send reopens (lane inbox-reply-dead-session) ──
   console.log('③ a stopped session: no control disabled — the box says the conversation ended and its send reopens it');
@@ -419,13 +423,56 @@ try {
   console.log('⑤ an option chip replies with its label');
   const chooseSel = rowSel(choose.item.id);
   const before5 = stdinFrames().length;
-  await evalJs(`[...document.querySelectorAll(${JSON.stringify(chooseSel + ' .ut-opt')})].find((c) => c.textContent === 'Wait for backup').click(); true`);
+  await evalJs(`[...document.querySelectorAll(${JSON.stringify(chooseSel + ' .ut-opt')})].find((c) => c.textContent === 'Reply: Wait for backup').click(); true`); // lane controls-that-lie: a chip reads as the reply it sends
   await waitFrames(before5 + 1, 5000);
   const f5 = stdinFrames()[before5] || '';
   const reply5 = f5.split('\n\n').pop();
   check('the next frame is a quoted reply to that item whose reply line IS the label', f5.startsWith(`[For you reply #${choose.item.id}]`) && reply5 === 'Wait for backup' && f5.includes('> options: Run now | Wait for backup'), f5.slice(0, 400));
   check('…and the row resolves in place', await waitFor(`document.querySelector(${JSON.stringify(chooseSel)})?.classList.contains('ut-item-inplace')`, 5000));
   check('…while the half-typed box on the other row is still there', await evalJs(`window.__ta.isConnected && window.__ta.value === 'half-typed draft'`));
+
+  // ── ⑤g THE GRANT ASK (lane controls-that-lie, naive study round 4 R1 on 2.369.344: the tray's «Granted access» only
+  // TYPED those words — no grant changed, the profile stayed invisible to the chat) ──
+  console.log('⑤g an ask that names a grant: its button CHANGES «Who can use it», then the agent is answered; a plain option is a reply and says so');
+  {
+    const pageJson = (url, method, body) => evalJs(`fetch(${JSON.stringify(url)}, { method: ${JSON.stringify(method)}, headers: { 'Content-Type': 'application/json' }, body: ${JSON.stringify(JSON.stringify(body))} }).then((r) => r.json()).catch((e) => ({ error: String(e) }))`);
+    const getUse = (pid) => evalJs(`fetch(${JSON.stringify('/api/browser/profiles/' + encodeURIComponent(pid) + '/use')}).then((r) => r.json())`);
+    const task = await pageJson('/api/tasks', 'POST', { title: 'Vendor contracts' });
+    const taskId = task && (task.task?.id || task.id);
+    const mkProfile = (label) => pageJson('/api/browser/profiles', 'POST', { label, use: { mode: 'only', who: [{ kind: 'task', id: taskId }] } });
+    const lark = await mkProfile('Lark (company login)'), gmail = await mkProfile('Gmail (company login)');
+    const LARK = lark && lark.profile && lark.profile.id, GMAIL = gmail && gmail.profile && gmail.profile.id;
+    check('setup: two profiles kept to a Task Group this conversation is NOT in (the R1 shape: invisible to the chat)', !!taskId && !!LARK && !!GMAIL, { task, lark, gmail });
+    const mineIn = (u) => !!(u && u.use && u.use.mode === 'only' && (u.use.who || []).some((w) => w.kind === 'session' && w.sessionId === sid));
+    check('…«Who can use it» of Lark does not list this conversation before the press', !mineIn(await getUse(LARK)), await getUse(LARK));
+    const g = await fileItem(token, { text: "Share 'Lark (company login)' with me so I can message the vendor", urgency: 'normal', grant: 'browser:Lark (company login)', options: ['Send it myself'] });
+    check('the agent route files it WITH the grant (action browser-grant on Lark\'s id)', g.item && g.item.action && g.item.action.type === 'browser-grant' && g.item.action.profileId === LARK, g);
+    const gSel = rowSel(g.item.id);
+    await waitFor(`!!document.querySelector(${JSON.stringify(gSel + ' .ut-action-grant')})`, 6000);
+    const face = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(gSel)}); return r ? { grant: r.querySelector('.ut-action-grant')?.textContent || null, chips: [...r.querySelectorAll('.ut-opt')].map((c) => c.textContent) } : null; })()`);
+    check('the row: ONE button naming the grant («Let this conversation use Lark (company login)»), its option a «Reply: …»', face && face.grant === 'Let this conversation use Lark (company login)' && face.chips.length === 1 && face.chips[0] === 'Reply: Send it myself', face);
+    const before5g = stdinFrames().length;
+    await sleep(900);   // press-arm: a button is pressable once it sat still ARM_MS (700 ms)
+    check('a REAL click lands on the grant button', await realClick(gSel + ' .ut-action-grant'));
+    await waitFrames(before5g + 1, 8000);
+    const f5g = stdinFrames()[before5g] || '';
+    const useAfter = await getUse(LARK);
+    check('«Who can use it» of Lark now lists THIS conversation (the owner\'s own door: GET …/use + the whole-list PATCH) — the Task Group row kept', mineIn(useAfter) && (useAfter.use.who || []).some((w) => w.kind === 'task' && w.id === taskId), useAfter.use);
+    check('…and THEN the agent was answered: the quoted reply says «Granted» and the door it now has', f5g.startsWith(`[For you reply #${g.item.id}]`) && f5g.split('\n\n').pop() === `Granted — this conversation may now use the browser profile «Lark (company login)» (${LARK}). Attach it with \`vibespace-browser use ${LARK}\`.`, f5g.slice(-400));
+    check('…the row resolves in place, and the toast names the grant (not just «Reply sent»)', await waitFor(`document.querySelector(${JSON.stringify(gSel)})?.classList.contains('ut-item-inplace')`, 5000)
+      && await waitFor(`[...document.querySelectorAll('#global-toasts .global-toast')].some((x) => x.textContent.includes('Lark (company login): this conversation may use it now — the agent was told'))`, 5000));
+    // the 2.369.344 shape — the agent's own words as an option: a REPLY (it says so), which grants nothing
+    const p = await fileItem(token, { text: "Share 'Gmail (company login)' with me", urgency: 'normal', options: ['Granted access', 'Send it myself'] });
+    const pSel = rowSel(p.item.id);
+    await waitFor(`!!document.querySelector(${JSON.stringify(pSel + ' .ut-opt')})`, 6000);
+    const chips = await evalJs(`[...document.querySelectorAll(${JSON.stringify(pSel + ' .ut-opt')})].map((c) => c.textContent)`);
+    check('a plain option reads as a reply: «Reply: Granted access» (pre-fix: a bare «Granted access» button), and no grant button', JSON.stringify(chips) === JSON.stringify(['Reply: Granted access', 'Reply: Send it myself']) && !(await evalJs(`!!document.querySelector(${JSON.stringify(pSel + ' .ut-action-grant')})`)), chips);
+    const beforeP = stdinFrames().length;
+    await evalJs(`[...document.querySelectorAll(${JSON.stringify(pSel + ' .ut-opt')})].find((c) => c.textContent === 'Reply: Granted access').click(); true`);
+    await waitFrames(beforeP + 1, 5000);
+    const fP = stdinFrames()[beforeP] || '';
+    check('…pressing it posts exactly its label as the reply (what it says it does) — and Gmail\'s «Who can use it» is unchanged (a reply grants nothing)', fP.startsWith(`[For you reply #${p.item.id}]`) && fP.split('\n\n').pop() === 'Granted access' && !mineIn(await getUse(GMAIL)), fP.slice(-200));
+  }
 
   // ── ⑨–⑭ THE TITLE-BAR MINI INBOX (chunk 3) ──
   console.log('⑨ the title-bar badge counts THIS session\'s open asks');

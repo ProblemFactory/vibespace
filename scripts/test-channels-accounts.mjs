@@ -77,6 +77,7 @@ import { createRequire } from 'node:module';
 import { scratch, freePort } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
+import { storeOf } from './grant-fixtures.mjs';   // lane grants-unify: the grants store of a data dir
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -526,13 +527,14 @@ console.log('⑧ duplicate');
   const never = {
     token: !dup.auth.tokenEnc && !dup.auth.user,
     refresh: !Object.values(ix).some((en) => en && en.adapterId === dup.id),
-    access: !Object.values(ix).some((en) => en && en.adapterId === dup.id && ((en.access || []).length || (en.watchers || []).length || en.assignment)),
-    reach: !Object.values(ix).some((en) => (en.reachEntries || []).some((g) => g.scope && (g.scope.id === dup.id || String(g.scope.id).startsWith(dup.id + '/')))),
+    // lane grants-unify: access, notification and reach are rows of THE grants store — none names the copy
+    access: !Object.values(ix).some((en) => en && en.adapterId === dup.id && ((en.watchers || []).length || en.assignment)) && !['channel-reach', 'channel-watch'].some((d) => storeOf(engDir).rowsOfDoor(d).some((r) => String(r.resource).startsWith(`conversation:${dup.id}/`) || String(r.resource).startsWith(`account:${dup.id}`))),
+    reach: !storeOf(engDir).rowsOfDoor('channel-reach').some((r) => String(r.resource).includes(dup.id)),
     log: !fs.existsSync(path.join(engDir, 'channels', 'msgs', dup.id.replace(':', '%3a'))) && JSON.stringify(dup.state) === '{}' && dup.lastPass === null,
   };
   ok(ENG.DUPLICATE_NEVER.map((n) => n.key).join() === 'token,refresh,access,reach,log' && Object.values(never).every(Boolean), `the copy carries NO token, refresh override, access grant / notification, reach grant, log or cursor (${JSON.stringify(never)})`);
   ok(r.adapter.auth.tokenHeld === false && r.adapter.auth.state !== 'connected' && r.adapter.credentialKey === 'custom' && r.adapter.customClient.appId === CUSTOM_ID, 'the answer is an UNAUTHORIZED account under the copied client');
-  ok(ix[`${idC}/thr_c`] && (ix[`${idC}/thr_c`].access || []).length === 1 && (ix[`${idC}/thr_c`].watchers || []).length === 1 && ix[`${idC}/thr_c`].refresh && ix[`${idC}/thr_c`].refresh.every === 60, 'the source is untouched (its refresh override, its access row and its notification stay)');
+  ok(ix[`${idC}/thr_c`] && ((storeOf(engDir).rowsFor('channel-reach', `conversation:${idC}/thr_c`)[0] || { to: [] }).to.length === 1) && (ix[`${idC}/thr_c`].watchers || []).length === 1 && ix[`${idC}/thr_c`].refresh && ix[`${idC}/thr_c`].refresh.every === 60, 'the source is untouched (its refresh override, its access row and its notification stay)');
   const own = await eng.reauthorize(dup.id, {});
   ok(own.flow && new URL(own.flow.consentUrl).searchParams.get('client_id') === CUSTOM_ID, 'the copy consents on its own, under the copied client');
   await eng.cancelAuth(dup.id);
@@ -559,10 +561,8 @@ console.log('⑧ duplicate');
 console.log('⑨ remove');
 {
   // C is referenced by: the assignment on thr_c, an ADAPTER-scoped reach grant, an unsettled proposal; a settled proposal and an agent group are not references
-  await eng.store.index.update(() => {
-    const en = eng.store.index.entry(idC, 'thr_c', { create: false });
-    en.reachEntries.push({ principal: { kind: 'agent', id: 'agent-9', name: 'Scout' }, scope: { kind: 'adapter', id: idC }, level: 'visible', origin: 'request', at: now(), by: 'user' });
-  });
+  // lane grants-unify: an ACCOUNT-scoped reach row is a row of THE grants store (`account:<id>#user`)
+  ok(storeOf(engDir).set('channel-reach', `account:${idC}#user`, { to: [{ kind: 'conversation', key: 'agent-9', name: 'Scout', level: 'visible' }], except: [] }, 'fixture').ok, 'fixture: an account-scoped reach row');
   await eng.store.outbox.update((ob) => {
     ob.proposals['p-open'] = { id: 'p-open', adapterId: idC, convId: 'thr_c', key: `${idC}/thr_c`, state: 'awaiting-approval', text: 'hi', at: now(), updatedAt: now() };
     ob.proposals['p-sent'] = { id: 'p-sent', adapterId: idC, convId: 'thr_c', key: `${idC}/thr_c`, state: 'sent', text: 'hi', at: now(), updatedAt: now() };
@@ -582,7 +582,7 @@ console.log('⑨ remove');
   ok(dc.ok === true && !dc.removed && rowOf(eng, idC) && rowOf(eng, idC).auth.tokenHeld === false && eng.referencesOf(idC).length === 3, 'Disconnect IGNORES references: the token is dropped, the record and every reference stay');
   // release them
   await eng.setAssignment(idC, 'thr_c', null);
-  await eng.store.index.update(() => { const en = eng.store.index.entry(idC, 'thr_c', { create: false }); en.reachEntries = en.reachEntries.filter((x) => !(x.scope && x.scope.kind === 'adapter')); });
+  storeOf(engDir).remove('channel-reach', `account:${idC}#user`, 'fixture');
   await eng.store.outbox.update((ob) => { ob.proposals['p-open'].state = 'rejected'; });
   ok(eng.referencesOf(idC).length === 0, 'released: no reference left');
   const rm = await eng.remove(idC);

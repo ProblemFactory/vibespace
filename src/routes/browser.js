@@ -306,7 +306,11 @@ function sessionFacts(id) {
   try { taskIds = (ctx.tasksForSession?.(s, id) || []).map((t) => (typeof t === 'string' ? t : t && t.id)).filter(Boolean); } catch (e) { taskIds = []; groupsUnreadable = true; console.warn(`[browser] ${id}: the Task Group list could not be read — ${e && e.message}`); }
   // identity verify r2 (2026-09-28): a session on ANOTHER machine (an ssh host / a paired device — rung H) is named so
   const remote = !!(s.hostId || s.host || s._browserVariant === require('../browser-profiles.js').VARIANTS.H);
-  return { session: s, sessionId: id, browserKey: s._browserKey || null, taskIds, groupsUnreadable, remote };
+  // lane grants-unify: the keys the grants store names this conversation by (its id — a borrowed one is nobody's —, its
+  // webui key, its browser key: the keeper's keysOfKey set)
+  const cid = require('../claude-lock-capture.js').addressableId(s);
+  const conversationKeys = [...new Set([...(cid ? [String(cid)] : []), `webui:${id}`, ...(s._browserKey ? [String(s._browserKey)] : [])])];
+  return { session: s, sessionId: id, browserKey: s._browserKey || null, taskIds, groupsUnreadable, remote, conversationKeys };
 }
 /**
  * THE ONE RESOLVER OF A PICKED LIVE SESSION (§6.3): the "Who can use it" dialog picks live sessions by their webui id;
@@ -418,6 +422,16 @@ router.get('/api/browser/profiles', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   try { res.json(k.list()); } catch (e) { fail(res, e); }
 });
+/** lane new-session-form: THE NEW SESSION FORM'S 浏览器 ROW — which profiles a conversation that does not exist yet may use
+ *  through the Task Groups it is about to join (`?taskIds=T-…,T-…`, selection order): the keeper's mayAttach per profile,
+ *  never a second rule. `{profiles:[{id, ok, via, taskId?, code?}]}` — the form lists the admitted ones and says how many
+ *  others are not open to it. Read-only. */
+router.get('/api/browser/admits', (req, res) => {
+  if (refuseHost(req, res)) return;
+  const k = keeperOr503(res); if (!k) return;
+  const taskIds = require('../new-session-spec.js').spawnGroupIds({ taskIds: String(req.query?.taskIds || '').split(',').map((x) => x.trim()) });
+  try { res.json({ profiles: k.admitsAtCreate({ taskIds }) }); } catch (e) { fail(res, e); }
+});
 /**
  * lane browser-admin (the New profile… dialog): "Who can use it" CHOSEN AT THE CREATE. The `use` body is the PATCH's
  * (`{mode:'all'}` | `{mode:'only', who:[{kind:'task', id} | {kind:'session', session:<webui id>} | {kind:'session', key}]}`);
@@ -426,13 +440,36 @@ router.get('/api/browser/profiles', (req, res) => {
  * (`{ok:false, status, body}`) — one refusal and nothing is created (a partial list is a list the user never saw).
  * `undefined` ⇒ `{ok:true, use:null}` (every conversation, owner ruling A's default).
  */
+/** lane grants-unify — «除了»: a member LEFT OUT is named by its CONVERSATION (`cid:<key>` — the ONE spelling the store
+ *  keeps; a live pick by its own id, a pending fork's by its webui key), never given a browser key it does not need. */
+function exceptKeyForPicked(webuiId) {
+  const f = sessionFacts(String(webuiId || ''));
+  if (!f) return { ok: false, code: 'session-gone', error: 'that conversation is not running any more — pick it again from the list' };
+  const cid = require('../claude-lock-capture.js').addressableId(f.session);
+  return { ok: true, key: `cid:${cid ? String(cid) : `webui:${f.sessionId}`}` };
+}
+async function resolveExceptRows(list) {
+  const out = [], knownKeys = [];
+  for (const r of Array.isArray(list) ? list : []) {
+    if (r.kind === 'session' && r.session !== undefined) {
+      const kr = exceptKeyForPicked(r.session);
+      if (!kr.ok) return { ok: false, status: STATUS[kr.code] || 409, body: { error: kr.error, code: kr.code, session: r.session } };
+      out.push({ kind: 'session', key: kr.key }); knownKeys.push(kr.key);
+    } else if (r.kind === 'session') out.push({ kind: 'session', key: r.key });
+    else out.push({ kind: 'task', id: r.id });
+  }
+  return { ok: true, rows: out, knownKeys };
+}
 async function resolveUseRows(use) {
   if (use === undefined || use === null) return { ok: true, use: null, knownKeys: [] };
   const B = require('../browser-profiles.js');
   const sv = B.useShapeVerdict(use);
   if (!sv.ok) return { ok: false, status: STATUS[sv.code] || 400, body: { error: sv.error, code: sv.code } };
-  if (sv.mode === 'all') return { ok: true, use: { mode: 'all' }, knownKeys: [] };
-  const rows = [], knownKeys = [];
+  const xr = await resolveExceptRows(sv.except);
+  if (!xr.ok) return xr;
+  const ex = xr.rows.length ? { except: xr.rows } : {};
+  if (sv.mode === 'all' && !sv.rows.length) return { ok: true, use: { mode: 'all', ...ex }, knownKeys: xr.knownKeys };
+  const rows = [], knownKeys = [...xr.knownKeys];
   for (const r of sv.rows) {
     if (r.kind === 'session' && r.session !== undefined) {
       const kr = await keyForPickedSession(r.session);
@@ -441,7 +478,7 @@ async function resolveUseRows(use) {
     } else if (r.kind === 'session') rows.push({ kind: 'session', key: r.key });
     else rows.push({ kind: 'task', id: r.id });
   }
-  return { ok: true, use: { mode: 'only', who: rows }, knownKeys };
+  return { ok: true, use: { mode: sv.mode, who: rows, ...ex }, knownKeys };
 }
 router.post('/api/browser/profiles', async (req, res) => {
   // P4: on a CREATE, `host` is the PAIRED MACHINE the browser runs on (D5
@@ -1405,7 +1442,8 @@ function jobFactsOf(token, { mint = true } = {}) {
   const label = J.jobLabelOf(job);
   // a job whose conversation is not running has no live session: the facts carry a stub (a name for the browser's
   // session label; no spawn pairs — a job never starts the conversation's own temporary browser)
-  return { session: s || { name: label, webuiName: label }, sessionId: id, browserKey: handle || ownerKey, ownerKey, taskIds, groupsUnreadable, remote: false, job: { id: String(job.id), cid } };
+  const conversationKeys = [...new Set([...(cid ? [String(cid)] : []), ...(id ? [`webui:${id}`] : []), ...(ownerKey ? [String(ownerKey)] : [])])];   // lane grants-unify: as its owner conversation
+  return { session: s || { name: label, webuiName: label }, sessionId: id, browserKey: handle || ownerKey, ownerKey, taskIds, groupsUnreadable, remote: false, job: { id: String(job.id), cid }, conversationKeys };
 }
 /** The /api/agent/browser/<route> a request names (the job's route lists judge it). */
 function agentRouteOf(req) {
@@ -1478,7 +1516,7 @@ function agentDigest(k, f) {
   return B.agentDigestView(k.list(), agentFactsOf(f), (id) => k.profile(id));
 }
 /** The asking conversation's admission facts (the ONE shape every agent view takes). */
-const agentFactsOf = (f) => ({ browserKey: f.browserKey, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable });
+const agentFactsOf = (f) => ({ browserKey: f.browserKey, taskIds: f.taskIds, groupsUnreadable: f.groupsUnreadable, ...(Array.isArray(f.conversationKeys) ? { conversationKeys: f.conversationKeys } : {}) });   // lane grants-unify: + the keys the store names it by
 router.get('/api/agent/browser/profiles', (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   const f = agentFacts(req, res); if (!f) return;
@@ -2347,4 +2385,4 @@ router.post('/api/agent/browser/site-hint', (req, res) => {
   try { res.json({ hint: k.addSiteHint({ host: req.body?.site || req.body?.url, tier: req.body?.tier, backend: req.body?.backend, why: req.body?.why, by: 'agent' }) }); } catch (e) { fail(res, e); }
 });
 
-module.exports = { router, setup, setWindowEngine, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs, keyForPickedSession, sessionFacts, pinAnswer, STATUS }; // + "Who can use it": the ONE resolver of a picked live session (the trace routes' PATCH calls it) // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins
+module.exports = { router, setup, setWindowEngine, unpinProfile, pinGuardFor, healDanglingPins, pinHoldersOf, releaseProfile, convertPinnedDirs, keyForPickedSession, exceptKeyForPicked, sessionFacts, pinAnswer, STATUS }; // + "Who can use it": the ONE resolver of a picked live session (the trace routes' PATCH calls it) // lane S2: the delete's refuse-or-warn + the one unpin (+ the boot heal); owner ruling A: Delete…'s release; the boot conversion of pre-ruling pins

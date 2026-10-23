@@ -77,7 +77,7 @@ const STATUS = {
   browser_is_human: 403,
   not_your_browser: 403, // lane e2a r3: `stop` is the opener's, on its own desktop browser only
   // lane E (src/window-reach.js REFUSALS): reach, the share mode, the pixel road, the user's share routes
-  not_exposed: 403, agent_forbidden: 403, mode_pixels: 409, window_not_visible: 409, wake_paced: 409, no_conversation: 409, fork_pending: 409, not_live: 404,
+  not_exposed: 403, excepted: 403, unknown_shape: 409, except_conflicts: 400, agent_forbidden: 403, mode_pixels: 409, window_not_visible: 409, wake_paced: 409, no_conversation: 409, fork_pending: 409, not_live: 404,
   reach_unreadable: 503, // lane E verify r2 (L4): the Task Group store could not be read — try again (the lease is kept)
   outside_window: 400, bad_principal: 400, bad_mode: 400, share_local_only: 400,
   'bad-size': 400, size_out_of_bounds: 400, pin_unsupported: 400, not_your_window: 403, // lane e2b + launch-picture-size: a pinned size refused by name

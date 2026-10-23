@@ -21,6 +21,14 @@
 // `refresh [--all]` is the MACHINE OPERATOR's verb (lane app-persist-layer1): no session — it speaks to this account's VibeSpace
 // over the unix socket ~/.vibespace/apps/operator/ops.sock (src/server/apps-ops-door.js) for a fleet script's
 // `runuser -u <user> -- vibespace-app refresh --all` or a Background Work job the user approved; refused in a conversation.
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --call-timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-app: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-app', flags: ['--call-timeout'] });
 'use strict';
 const path = require('path');
 const os = require('os');
@@ -75,8 +83,9 @@ Rules: installed something by other means (flatpak, pip, a vendor script)? REGIS
        Never download, unpack, write a launcher for or start an app yourself — propose its address; the user clicks once.
        A declined proposal ("Not now") is final: do not propose it again unless the user asks.`;
 
-async function call(method, p, body) {
-  const res = await fetch(API + p, { method, headers: { Authorization: 'Bearer ' + TOKEN, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined }).catch((e) => ({ _neterr: e.message }));
+// lane cli-call-timeouts: a write is a wake here (a plan / proposal probes the machine)
+async function call(method, p, body, cc = {}) {
+  const res = await CC.call(API + p, { ...(method !== 'GET' ? { cls: 'wake' } : {}), ...cc, method, headers: { Authorization: 'Bearer ' + TOKEN, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) }, body: body !== undefined ? JSON.stringify(body) : undefined }).catch((e) => ({ _neterr: e.message }));
   if (res._neterr) { console.error('vibespace-app: server unreachable (' + res._neterr + ')'); process.exit(3); }
   let j = {};
   try { j = await res.json(); } catch { j = {}; }
@@ -239,7 +248,7 @@ function operatorRefresh() {
     const t0 = Date.now();
     while (Date.now() - t0 < 100000) {
       const left = Math.max(1, Math.round((100000 - (Date.now() - t0)) / 1000));
-      const j = await call('GET', `/api/agent/apps/proposals/${encodeURIComponent(id)}?wait=${left}${since ? `&since=${encodeURIComponent(since)}` : ''}`);
+      const j = await call('GET', `/api/agent/apps/proposals/${encodeURIComponent(id)}?wait=${left}${since ? `&since=${encodeURIComponent(since)}` : ''}`, undefined, { extraMs: left * 1000 });   // the hub holds the poll ≤ left s
       if (!json && j.state !== last) console.log(`${new Date().toISOString().slice(11, 19)} ${j.state}`);
       last = j.state; since = j.state;
       if (['done', 'failed', 'rejected', 'withdrawn'].includes(j.state)) { out(j, j.text); return; }

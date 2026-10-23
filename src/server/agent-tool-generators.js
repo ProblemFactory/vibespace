@@ -75,6 +75,15 @@ function createStatusHelper() {
 // (For the whole task's status, use vibespace-task status instead.) Run with
 // NO arguments to print usage AND the current state. The user sees this on your
 // session card and may adjust it; if they do, you'll be told on their next turn.
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file) — bounded (a write 30 s), ONE line naming the wait on expiry (exit 124); --timeout <s> overrides
+const CC = (() => {
+  const beside = require('node:path').join(__dirname, 'cli-call.js');   // (by its full path: this text is a template the static resolve walk reads)
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require(beside); } catch { }
+  try { return require(beside); } catch { return null; }
+})();
+if (!CC) { console.error("vibespace-status: refused — this CLI's call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)"); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-status', flags: ['--timeout', '--call-timeout'] });
 const api = process.env.VIBESPACE_API;
 const token = process.env.VIBESPACE_SESSION_TOKEN;
 if (!api || !token) { console.error('vibespace-status: not running inside a VibeSpace session (missing env)'); process.exit(2); }
@@ -95,7 +104,7 @@ const USAGE = [
   'If you are waiting on the user, ALSO ask in chat + file it with vibespace-ask (both).',
 ].join('\\n');
 async function post(body) {
-  const res = await fetch(api + '/api/agent/session-status', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(body) });
+  const res = await CC.call(api + '/api/agent/session-status', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { console.error('vibespace-status:', data.error || res.status); process.exit(1); }
   return data;
@@ -357,6 +366,18 @@ function createCliTextCopy() {
   } catch (e) { console.warn('[tools] the agent CLIs\' text rule not copied beside them: ' + e.message); }
 }
 createCliTextCopy();
+// lane cli-call-timeouts: THE ONE CALL every agent CLI makes to the hub (PURE timing + the one transport, src/cli-call.js)
+// rides beside them the same way — `cli-call.js`, copied at every boot, gitignored, in AGENT_TOOLS. A CLI REFUSES without it
+// (it could not bound its wait), so every ship path must carry it.
+function createCliCallCopy() {
+  try {
+    const src = fs.readFileSync(path.join(rootDir, 'src', 'cli-call.js'));
+    const dst = path.join(AGENT_BIN_DIR, 'cli-call.js');
+    let cur = null; try { cur = fs.readFileSync(dst); } catch { cur = null; }
+    if (!cur || !cur.equals(src)) { ensureDir(AGENT_BIN_DIR); fs.writeFileSync(dst + '.tmp', src, { mode: 0o644 }); fs.renameSync(dst + '.tmp', dst); }
+  } catch (e) { console.warn('[tools] the agent CLIs\' call helper not copied beside them: ' + e.message); }
+}
+createCliCallCopy();
 
 // Idempotent, NON-DESTRUCTIVE hook registration for both harnesses: only our
 // own entry (matched by 'vibespace-hook.mjs') is ever added or updated; every

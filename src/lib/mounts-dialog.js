@@ -36,7 +36,7 @@
 //    channel side's OAuth-client select: switching the client IS a
 //    re-authorization).
 import { createModalShell, showToast, copyText } from './utils.js';
-import { setupDirAutocomplete } from './autocomplete.js';
+import { pathField } from './path-field.js'; // lane path-field: THE path field
 import { t as tr } from './i18n.js';
 
 // the storage consent routes (rclone authorize over the server) — the default
@@ -137,6 +137,13 @@ function pasteBack({ r = {}, pasteHint = null, pastePlaceholder, pasteSecret = f
     a.className = 'mounts-field-hint mounts-oauth-admin';
     a.textContent = r.askAdmin.text;
     box.append(a, copyLine(r.askAdmin.value));
+    // lane oauth-setup-instructions: the vendor's own refusal words + WHERE the address goes (the setup card's same lines)
+    for (const n of Array.isArray(r.askAdmin.notes) ? r.askAdmin.notes : []) {
+      const d = document.createElement('div');
+      d.className = 'mounts-field-hint mounts-oauth-admin-note';
+      d.textContent = n;
+      box.append(d);
+    }
   }
   box.append(hint, inp);
   if (r.otherRoad && typeof r.otherRoad.run === 'function' && onOtherRoad) {
@@ -193,6 +200,12 @@ export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
     err.textContent = '';
     submit.disabled = true;
     try {
+      for (const el of Object.values(inputs)) {
+        const pf = el._pathField;
+        if (!pf || !el.value.trim() || !pf.el.isConnected || pf.el.offsetParent === null) continue;   // empty / hidden: nothing to take
+        const v = await pf.commit();
+        if (!v || !(await pf.ensure())) { err.textContent = pf.verdict().text; submit.disabled = false; el.focus(); return; }
+      }
       const vals = Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value.trim()]));
       await onSubmit(vals, { close, body, err });
     } catch (e) { err.textContent = e.message || 'Failed'; submit.disabled = false; }
@@ -250,22 +263,22 @@ export function renderFields(body, fields) {
     if (!valueless) inputs[f.key] = el;
     const rowRec = { field: f, label, el };
     rows.push(rowRec);
-    // Path autocomplete (Tab / type-ahead) — 'local' completes against this
-    // server's filesystem; a function returns a per-keystroke endpoint URL.
+    // THE PATH FIELD (lane path-field — it replaced the Tab / type-ahead completion): 'local' = this server's folders; a
+    // function returns the per-keystroke endpoint of a machine (`/api/hosts/<id>/dir-complete`) — the field asks THAT
+    // machine. What takes effect is written back absolute (the dialog reads the input). A field that names a FILE says so
+    // (`pathKind: 'file'` — a key file); a mount point may not exist yet (made once ticked, before the submit), every other
+    // folder must; Submit commits each path field first and stops on the one that does not take (its reason under it).
     if (f.autocomplete && el.tagName === 'INPUT') {
-      const wrap = document.createElement('div');
-      wrap.style.position = 'relative';
-      wrap.style.display = 'flex';
-      wrap.style.flexDirection = 'column';
-      const dd = document.createElement('div');
-      dd.className = 'path-autocomplete hidden';
-      wrap.append(el, dd);
-      rowRec.el = wrap; // visibility toggling targets the wrapper
+      const hostOf = () => {
+        if (typeof f.autocomplete !== 'function') return null;
+        const m = /\/api\/hosts\/([^/?]+)\/dir-complete/.exec(String(f.autocomplete(inputs) || ''));
+        return m ? decodeURIComponent(m[1]) : null;
+      };
+      const madeHere = /^(mountpoint|customPath)$/.test(f.key);
+      const pf = pathField(el, { host: hostOf, kind: f.pathKind === 'file' ? 'file' : 'folder', create: madeHere ? 'ask' : 'never', createWhen: tr('Create this folder when this is saved'), id: 'mounts:' + f.key, onCommit: (info) => { if (info && info.path && el.value !== info.path) el.value = info.path; } });
+      rowRec.el = pf.el; // visibility toggling targets the field
       inputs[f.key] = el;
-      setupDirAutocomplete(el, dd, {
-        endpoint: typeof f.autocomplete === 'function' ? () => f.autocomplete(inputs) : undefined,
-      });
-      el._acWrap = wrap;
+      el._acWrap = pf.el;
     }
     // Advanced fields collect into a collapsed <details> at the end so the
     // common case isn't cluttered with tuning knobs most users never touch.

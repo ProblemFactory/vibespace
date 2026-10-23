@@ -38,6 +38,14 @@
 // cut-short reply output; `recall <conv> <msg id>` PROPOSES taking back a message the USER sent (the user approves it,
 // as any send) — refused by name where it cannot be (not-visible / unsupported / not-yours / window-passed / …).
 // Full manual: vibespace-docs channels.
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --call-timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-channels: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-channels', flags: ['--call-timeout'] });
 'use strict';
 // ── PURE (lane channel-attach-read): where an attachment lands, decided by its TYPE (the stored mime, else the
 // file's own first bytes for the four pictures and a PDF) — never by a name the sender wrote. Loading this file as a
@@ -118,9 +126,9 @@ function chText(at) {
 // HERE and a webhook token (vswh_…) or a pairing code (vswp_…, it carries one — verify r1 #1) in it is withheld before any field can be printed; no verb registers a caller or mints
 // a token (the owner does, in the Channels window — an agent proposes it with vibespace-ask). test-webhook-cli holds the census.
 async function answerOf(res) { return JSON.parse(String(await res.text()).replace(/(vswh|vswp)_[A-Za-z0-9_-]*/g, '$1_[withheld]')); }
-async function call(method, p, body) {
-  const res = await fetch(API + p, {
-    method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS },
+async function call(method, p, body, cc = {}) {
+  const res = await CC.call(API + p, {
+    ...cc, method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS },
     body: body === undefined ? undefined : JSON.stringify(body),
   }).catch((e) => ({ _neterr: e.message }));
   if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
@@ -402,7 +410,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   const refreshConv = async (conv) => {
     const i = conv.indexOf('/');
     if (i <= 0) { console.error('<conv> is <adapter>/<conversation id>, as vibespace-channels list prints it'); process.exit(1); }
-    const res = await fetch(API + `/api/agent/channels/${encodeURIComponent(conv.slice(0, i))}/${encodeURIComponent(conv.slice(i + 1))}/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: '{}' }).catch((e) => ({ _neterr: e.message }));
+    const res = await CC.call(API + `/api/agent/channels/${encodeURIComponent(conv.slice(0, i))}/${encodeURIComponent(conv.slice(i + 1))}/refresh`, { cls: 'wake', method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: '{}' }).catch((e) => ({ _neterr: e.message }));
     if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
     let j = {}; try { j = await answerOf(res); } catch { }
     if (REFRESH_REFUSED.includes(j.code)) return { refused: true, ...j };   // r5: a full request set is a refusal with its wait, like the others; r7: an account that changed while the refresh waited, the engine stopping
@@ -416,7 +424,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const conv = args[1];
     const i = conv ? conv.indexOf('/') : -1;
     if (!conv || i <= 0 || conv.startsWith('--')) { console.error('usage: vibespace-channels refresh <conv> --thread <msg id>'); process.exit(1); }
-    const res = await fetch(API + `/api/agent/channels/${encodeURIComponent(conv.slice(0, i))}/${encodeURIComponent(conv.slice(i + 1))}/thread/${encodeURIComponent(flag('--thread'))}/refresh`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: '{}' }).catch((e) => ({ _neterr: e.message }));
+    const res = await CC.call(API + `/api/agent/channels/${encodeURIComponent(conv.slice(0, i))}/${encodeURIComponent(conv.slice(i + 1))}/thread/${encodeURIComponent(flag('--thread'))}/refresh`, { cls: 'wake', method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: '{}' }).catch((e) => ({ _neterr: e.message }));
     if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
     let j = {}; try { j = await answerOf(res); } catch { }
     if (THREAD_REFUSED.includes(j.code)) { console.log(`thread not loaded: ${j.error}${j.retryAfterSec ? ` (retry in ${j.retryAfterSec} s)` : ''} [${j.code}]`); process.exit(4); }
@@ -448,7 +456,9 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const r = await call('GET', '/api/agent/channels/read?' + q);
     const recs = r.records || [];
     const th = r.thread || null;
-    console.log(`${r.conversation.key} — ${r.conversation.title}${r.conversation.polledAt ? ` · fetched ${when(r.conversation.polledAt)}` : ''} · ${recs.length} message(s)${th ? ` · thread ${th.key || flag('--thread')} (${th.count || 0} repl${th.count === 1 ? 'y' : 'ies'})` : ''}`);
+    // lane gmail-draft-not-a-message: the account's unsent drafts are no messages — counted apart, each marked on its own line
+    const drafts = recs.filter((m) => m && m.kind === 'draft').length;
+    console.log(`${r.conversation.key} — ${r.conversation.title}${r.conversation.polledAt ? ` · fetched ${when(r.conversation.polledAt)}` : ''} · ${recs.length - drafts} message(s)${drafts ? ` · ${drafts} unsent draft(s)` : ''}${th ? ` · thread ${th.key || flag('--thread')} (${th.count || 0} repl${th.count === 1 ? 'y' : 'ies'})` : ''}`);
     // lane webhook-l3-cli-pair (design-webhook §7): a webhook path's CALLERS — who a reply can go to — before the records
     if (Array.isArray(r.callers)) {
       console.log(`callers: ${r.callers.length ? r.callers.length : 'none yet — the owner registers callers (propose one with vibespace-ask)'}`);
@@ -457,9 +467,12 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     // verify r1 #13 (int248 r2): the path's wake budget (the server's words) — and a held message says so under it
     if (r.budget && r.budget.text) console.log(r.budget.text);
     if (r.note) console.log(r.note);
+    if (r.draftsTrashed) console.log(`(${r.draftsTrashed} deleted draft(s) not shown)`);
     for (const m of recs) {
       // lane lark-system-records: a vendor notice (a recall, a join) is nobody's message — ONE [system] line with its words
       if (m.kind === 'system') { console.log(`[${when(m.at)}] [system] ${String(m.text || 'a notice from the chat').replace(/\n/g, ' ')}`); continue; }
+      // lane gmail-draft-not-a-message (fb-9aa1d3bd1e): the account's unsent DRAFT — never a sent message: ONE marked line, its words
+      if (m.kind === 'draft') { console.log(`[${when(m.at)}] [draft · not sent] ${String(m.text || '').replace(/\n/g, '\n    ')}`); continue; }
       // lane channel-threads (spec §5.1): the PLACE as words (the server's) — a root's thread tag on its line, a
       // reply's "↳ replying to …" under it — and the reactions as counts, never who
       const pl = m.placeText || {};
@@ -502,7 +515,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     }
     if (out && !args.includes('--force') && fs.existsSync(out)) { console.error(`${out} already exists — nothing fetched; pass --force to overwrite it, or another --out`); process.exit(1); }
     const q = new URLSearchParams({ conv, msg: msgId, id: attId });
-    const res = await fetch(API + '/api/agent/channels/attachment?' + q, { headers: { Authorization: 'Bearer ' + SESS } }).catch((e) => ({ _neterr: e.message }));
+    const res = await CC.call(API + '/api/agent/channels/attachment?' + q, { headers: { Authorization: 'Bearer ' + SESS }, stream: true, ms: 120000 }).catch((e) => ({ _neterr: e.message }));
     if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
     if (!res.ok) {
       let j = {}; try { j = await answerOf(res); } catch { }
@@ -604,7 +617,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     if (!conv || !msg || !key || [conv, msg, key].some((x) => x.startsWith('--'))) { console.error(`usage: vibespace-channels ${verb} <conv> <msg id> <emoji key> [--why "…"]`); process.exit(1); }
     const body = { conv, msg, key, op: verb === 'unreact' ? 'remove' : 'add' };
     if (flag('--why')) body.why = flag('--why');
-    const res = await fetch(API + '/api/agent/channels/react', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: JSON.stringify(body) }).catch((e) => ({ _neterr: e.message }));
+    const res = await CC.call(API + '/api/agent/channels/react', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: JSON.stringify(body) }).catch((e) => ({ _neterr: e.message }));
     if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
     let j = {}; try { j = await answerOf(res); } catch { }
     // a REFUSAL (exit 4) names why — the policy, the emoji, the message's own state; an ERROR is exit 1
@@ -658,7 +671,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     if (!conv || !msg || [conv, msg].some((x) => x.startsWith('--')) || conv.indexOf('/') <= 0) { console.error('usage: vibespace-channels recall <conv> <msg id> [--why "…"]   (the id `read` prints)'); process.exit(1); }
     const body = { conv, msg };
     if (flag('--why')) body.why = flag('--why');
-    const res = await fetch(API + '/api/agent/channels/recall', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: JSON.stringify(body) }).catch((e) => ({ _neterr: e.message }));
+    const res = await CC.call(API + '/api/agent/channels/recall', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: JSON.stringify(body) }).catch((e) => ({ _neterr: e.message }));
     if (res._neterr) { console.error('vibespace-channels: server unreachable (' + res._neterr + ')'); process.exit(3); }
     let j = {}; try { j = await answerOf(res); } catch { }
     const RECALL_REFUSED = ['unsupported', 'recall-not-available', 'not-yours', 'already-recalled', 'window-passed'];
@@ -769,7 +782,8 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const said = (x, old, saved) => { const lines = x && x.saidKind && TX && typeof TX.searchSaid === 'function' ? TX.searchSaid(x.saidKind, { q, saved, hiddenMatch: x.hiddenMatch }) : null; if (lines) { for (const l of lines) if (!told.has(String(l))) { told.add(String(l)); console.log(String(l)); } } else if (old) console.log(old); };
     const r = await call('GET', '/api/agent/channels/search?' + qs);
     const rows = r.results || [];
-    for (const m of rows) console.log(`${m.key} — ${m.title}  [${when(m.at)}] ${(m.author && (m.author.name || m.author.id)) || '?'}: ${String(m.text || '').replace(/\n/g, ' ').slice(0, 200)}`);
+    // lane gmail-draft-not-a-message: a hit on the account's unsent draft is marked where an author would stand (never a sent message)
+    for (const m of rows) console.log(`${m.key} — ${m.title}  [${when(m.at)}] ${m.kind === 'draft' ? '[draft · not sent]' : (m.author && (m.author.name || m.author.id)) || '?'}: ${String(m.text || '').replace(/\n/g, ' ').slice(0, 200)}`);
     if (r.truncated) console.log('(more matches exist — narrow the words or pass --account)');
     if (r.namesNote) console.log(r.namesNote);   // lane channel-names-readable
     said(r, rows.length ? null : `nothing you can see matches "${q}".`);
@@ -836,7 +850,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   if (verb === 'api') {
     const sub = args[1];
     const apiReq = async (method, p, body) => {
-      const res = await fetch(API + p, { method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: body === undefined ? undefined : JSON.stringify(body) }).catch((e) => ({ _neterr: e.message }));
+      const res = await CC.call(API + p, { ...(method !== 'GET' ? { cls: 'wake' } : {}), method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SESS }, body: body === undefined ? undefined : JSON.stringify(body) }).catch((e) => ({ _neterr: e.message }));
       if (res._neterr) return { error: 'vibespace-channels: server unreachable (' + res._neterr + ')', code: 'unreachable' };
       try { return await answerOf(res); } catch { return { error: 'the server answered something that is not JSON (HTTP ' + res.status + ')', code: 'bad-answer' }; }
     };

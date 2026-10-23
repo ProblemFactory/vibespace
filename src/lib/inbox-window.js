@@ -32,9 +32,10 @@ import { registerMenuItem } from './contributions.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: an automation card's reach choices in the pane
 import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
-import { reconcileKeyed, agoText, expiresText, resolvedByText, appCardHtml, askChipEls, linkifyInto } from './user-todos-row.js'; // THE keyed reconciler + the row words
+import { reconcileKeyed, agoText, expiresText, resolvedByText, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords } from './user-todos-row.js'; // THE keyed reconciler + the row words
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
+import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's box, as a dialog over this window
 
 // The taskbar For-you button's own glyph (UI_ICONS.inbox's paths), in the registry's 16px chrome.
 const ICON = svgIcon16('<path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l1.5 6v3.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5z"/>');
@@ -338,6 +339,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     clear: () => actBtn('clear', UI_ICONS.eraser, t('Clear content…'), t('Replace this item’s text — it keeps its place and time'), 'iw-act-clear'),
     'channel-reauth': () => actBtn('channel-reauth', UI_ICONS.check, t('Re-authorize'), t('Re-authorize'), 'iw-act-primary'), // lane channel-names-readable: the account's Re-authorize dialog
     'desktop-app-show': () => actBtn('desktop-app-show', UI_ICONS.check, t('Show window'), t('Show the app’s window'), 'iw-act-primary'), // lane app-display-notify-sink
+    // lane controls-that-lie: an ask that names a grant — the button DOES it («Who can use it» gains the conversation, then the agent is told)
+    'browser-grant': (it) => { const g = grantAskOf(it) || { label: '' }; return actBtn('browser-grant', UI_ICONS.check, t('Let this conversation use {label}', { label: g.label }), t('Adds this conversation under “Who can use it” for {label}, then tells the agent', { label: g.label }), 'iw-act-primary'); },
     'browser-restart': () => actBtn('browser-restart', UI_ICONS.check, t('Restart'), t('Restart the browser that stopped answering — logins stay in the profile, its tabs are re-opened'), 'iw-act-primary'), // lane browser-unresponsive
     'browser-floor-check': () => actBtn('browser-floor-check', UI_ICONS.refresh, t('Check again'), t('Ask for the browser version once more now — this notice goes away by itself once it reads'), 'iw-act-primary'), // B-0b8c
     'exit-allow': () => actBtn('exit-allow', UI_ICONS.check, t('Allow'), t('Allow'), 'iw-act-primary iw-act-exit'),
@@ -353,6 +356,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     // lane vault-run-door: a held run's «always» = this command SHAPE for this conversation, 30 days — the second password again first
     'shape-always': () => actBtn('shape-always', UI_ICONS.check, t('Always for this shape'), t('The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first'), 'iw-act-exit'),
     // lane vault-manual-and-lock: an agent's request for a stored secret — For 8 hours = every run of that conversation with it for 8 hours (a lock ends it)
+    // lane vault-paste-request: an agent's request for a secret — Paste… opens THE paste box (the tray's, as a dialog); Refuse tells the agent
+    'secret-paste': () => actBtn('secret-paste', UI_ICONS.check, t('Paste and save…'), t('Opens a masked box — what you paste goes straight into the vault; the agent is told only that it is there'), 'iw-act-primary iw-act-exit'),
+    'secret-deny': () => actBtn('secret-deny', UI_ICONS.close, t('Refuse'), t('The agent is told you refused, on its next turn'), 'iw-act-exit'),
     'grant-8h': () => actBtn('grant-8h', UI_ICONS.check, t('For 8 hours'), t('Every run of this conversation with this secret, for 8 hours — a new kind of command still shows its card; locking the vault ends it'), 'iw-act-exit'),
     // lane browser-propose: the agent's browser proposal — ONE primary Approve (runs exactly what the item says), a quiet Reject
     'proposal-approve': () => actBtn('proposal-approve', UI_ICONS.check, t('Approve'), t('Runs exactly what this card says'), 'iw-act-primary iw-act-exit'),
@@ -458,7 +464,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     const verbatim = isCmd || !!(it.action && it.action.type === 'helper-ask');
     // lane browser-propose: a browser proposal's detail is what its Approve runs, line for line — verbatim too, never markdown
     // lane parked-ask-inbox: a conversation's own ask carries its whole request too — verbatim, never markdown
-    const plain = verbatim || !!(it.action && (it.action.type === 'browser-proposal' || it.action.type === 'main-ask' || it.action.type === 'vault-grant-ask'));   // lane vault-manual-and-lock (int331 seam): a vault GRANT ask's detail = the entry ref + the agent's OWN words (the purpose) — shown verbatim, never markdown (a `*`/`#`/line-break the agent wrote must not re-render — the exit card's verify-r4 F4 trap)
+    const plain = verbatim || !!(it.action && (it.action.type === 'browser-proposal' || it.action.type === 'main-ask' || it.action.type === 'vault-grant-ask' || it.action.type === 'secret-request'));   // lane vault-paste-request: a paste request's words are the agent's OWN — verbatim   // lane vault-manual-and-lock (int331 seam): a vault GRANT ask's detail = the entry ref + the agent's OWN words (the purpose) — shown verbatim, never markdown (a `*`/`#`/line-break the agent wrote must not re-render — the exit card's verify-r4 F4 trap)
     // design 009: an app install's ONE card — its lines, progress and Details fold (escaped; its buttons are the action row)
     const card = it.card && it.action && it.action.type === 'app-install' ? it.card : null;
     const detailSig = card ? 'card\u0000' + (v.resolved ? 'r' : 'o') + JSON.stringify(card) : (plain ? 'cmd\u0000' : 'md\u0000') + v.detail;
@@ -484,7 +490,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     // option chips (one click = a reply whose text IS the label, addressed by INDEX)
     const optSig = v.options.map((o) => o.label).join('\u0000');
     if (c.sig.opts !== optSig) {
-      c.opts.replaceChildren(...v.options.map((o) => { const b = mk('button', 'iw-opt', o.label); b.type = 'button'; b.dataset.idx = String(o.idx); return b; }));
+      c.opts.replaceChildren(...v.options.map((o) => { const b = mk('button', 'iw-opt', optionWords(o.label, t)); b.type = 'button'; b.dataset.idx = String(o.idx); return b; })); // lane controls-that-lie: a reply reads as a reply
       c.sig.opts = optSig;
     }
     c.opts.style.display = v.options.length ? '' : 'none';
@@ -717,6 +723,13 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     }
     if (a === 'channel-reauth') { await model.runAction(it); return; } // lane channel-names-readable: the dialog opens; the engine resolves the item
     if (a === 'desktop-app-show') { if (await model.runAction(it)) advance(id); return; } // lane app-display-notify-sink: the window raised resolves the item
+    if (a === 'browser-grant') {
+      // lane controls-that-lie: the grant an ask names, performed — a pane shown a moment ago is not a press on what the user read
+      const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() });
+      if (!pv.ok) { showToast(t('That button moved under the pointer just now — read it, then press it again')); return; }
+      if (await model.runAction(it, 'grant')) advance(id);
+      return;
+    }
     if (a === 'browser-restart') { if (await model.runAction(it)) advance(id); return; } // lane browser-unresponsive: THE model's verb (the server resolves the item)
     if (a === 'browser-floor-check') { if (await model.runAction(it)) advance(id); return; } // B-0b8c: one probe now — an answer withdraws the item server-side
     if (a === 'app-reject') { if (await model.runAction(it, 'reject')) advance(id); return; }
@@ -734,6 +747,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
         if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' || a === 'shape-always' ? 'always' : a === 'grant-8h' ? '8h' : a.slice(4), reachPick ? { reach: reachPick.value } : {})) advance(id);
       return;
     }
+    if (a === 'secret-paste') { showSecretPasteDialog(model, it, { words: model.wordsOf(it), detail: model.detailOf(it) }); return; }   // lane vault-paste-request: the box as a dialog (the store resolves the item — the pane follows)
+    if (a === 'secret-deny') { if (await model.runAction(it, 'deny')) advance(id); return; }
     if (a === 'exit-allow' || a === 'exit-deny') {
       // verify-r6 V1: Allow advances to the next item, whose pane shows Allow in the same place — a press on a pane
       // shown ARM_MS ago or less is not a press on what the user read (a double-click allowed the next ask unseen)

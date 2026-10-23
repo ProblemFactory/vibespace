@@ -60,6 +60,9 @@ const ROWS = {
     ['Vault locked', 'label', 'the lock chip\'s own two words and the toast confirming a person\'s own lock act — the chip\'s title says the facts', { count: 2 }],
     ['Unlock the vault', 'label', 'the unlock dialog\'s own title — the dialog IS where a person unlocks it'],
   ],
+  // lane vault-paste-request: the paste box's own state line INSIDE its For-you item (and the ⑥ dialog's verdict) — a field verdict
+  // while the person is at the box, its 解锁… button beside it (the box IS the For-you item: the telling and the door in one place)
+  'src/lib/vault-paste-box.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'the paste box\'s state line inside its For-you item (its 解锁… button beside the words — the door), the refusal said in the same line, and 「其他密钥或密码…」\'s save-time verdict — a field verdict while the person is in the box, not a background refusal', { count: 3 }]],
   'src/server/vault-hooks.js': [
     ['The vault locked after a restart', 'foryou', 'THE FOR-YOU ITEM after a restart (place 2) — the item IS the telling'],
     ['The vault is locked — agents that need a credential will be refused until you unlock it', 'foryou', 'THE FOR-YOU ITEM the moment it locks (lane vault-locked-loud, int332) — the item IS the telling; the door sentence follows'],

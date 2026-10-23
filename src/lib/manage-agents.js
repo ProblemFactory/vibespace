@@ -1605,9 +1605,9 @@ export function installManageAgents(App, ctx = {}) {
     try { acked = localStorage.getItem('vibespace.quotaRefreshAck') === '1'; } catch {}
     if (!acked) {
       const ok = await showConfirmDialog({
-        title: t('Fetch quota from Anthropic?'),
-        message: t('This makes ONE non-billable request to Anthropic’s usage endpoint per signed-in account/machine, each with that identity’s own login token — the same call the CLI makes when you run /usage. It only ever fires when you click (never on a timer) and is throttled to ≥60s per target. This notice is shown once.'),
-        confirmText: t('Fetch'),
+        title: t('Check every account’s usage limits now?'),
+        message: t('VibeSpace asks Anthropic once for each signed-in account and machine how much of its usage limits is left — the same check Claude Code makes when you type /usage. It costs nothing and uses no tokens. It runs only when you press refresh, at most once a minute per account. You see this note once.'),
+        confirmText: t('Check now'),
       });
       if (!ok) return;
       try { localStorage.setItem('vibespace.quotaRefreshAck', '1'); } catch {}

@@ -164,7 +164,7 @@ router.get('/api/channels/api', (req, res) => {
   try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; const e = engine(); res.json({ ...rawApi().ownerView(), cards: e && e.apiCards ? e.apiCards.records() : [] }); } catch (e) { fail(res, e); }
 });
 router.put('/api/channels/api/:cred/grants', async (req, res) => {
-  try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; const r = await rawApi().setTiers(String(req.params.cred), (req.body || {}).grants, { by: 'user' }); res.status(r.ok ? 200 : r.code === 'not-found' ? 404 : 400).json(r); } catch (e) { fail(res, e); }
+  try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; const r = await rawApi().setTiers(String(req.params.cred), (req.body || {}).grants, { by: 'user', except: (req.body || {}).except }); res.status(r.ok ? 200 : r.code === 'not-found' ? 404 : 400).json(r); } catch (e) { fail(res, e); }
 });
 router.get('/api/channels/api/:cred/log', (req, res) => {
   try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; res.json({ ok: true, lines: rawApi().auditTail(String(req.params.cred), { n: Number(req.query.n) || 100 }) }); } catch (e) { fail(res, e); }
@@ -409,12 +409,15 @@ function scopeAnswer(res, r) {
 // rule `adapters/:id/patterns/:pid/…` (a NEW rule: `POST …/patterns
 // {pattern, access[, watchers]}`), a conversation `/:adapterId/:convId/…`.
 const listOf = (b, key) => (b && Object.prototype.hasOwnProperty.call(b, key) ? b[key] : undefined);
+/** lane grants-unify — «除了»: the members of a picked Task Group / All agents LEFT OUT (`except`, a list of
+ *  `{kind:'agent'|'conversation', id|key}` / `{kind:'group', id}`) — absent = keep the stored ones. */
+const exceptOf = (b) => (b && Object.prototype.hasOwnProperty.call(b, 'except') ? { except: b.except } : {});
 router.put('/api/channels/adapters/:id/access', async (req, res) => {
   try {
     forHost(req);
     const list = listOf(req.body, 'access');
     if (list === undefined) return bad(res, 400, 'access is required (a list of {principal, authority}; [] removes everyone)', { code: 'bad-request' });
-    scopeAnswer(res, await engine().setAccess(req.params.id, { kind: 'account' }, list, { base: req.body.base }));
+    scopeAnswer(res, await engine().setAccess(req.params.id, { kind: 'account' }, list, { base: req.body.base, ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });
 router.put('/api/channels/adapters/:id/watchers', async (req, res) => {
@@ -422,7 +425,7 @@ router.put('/api/channels/adapters/:id/watchers', async (req, res) => {
     forHost(req);
     const list = listOf(req.body, 'watchers');
     if (list === undefined) return bad(res, 400, 'watchers is required (a list; [] notifies nobody)', { code: 'bad-request' });
-    scopeAnswer(res, await engine().setWatchers(req.params.id, { kind: 'account' }, list, { base: req.body.base }));
+    scopeAnswer(res, await engine().setWatchers(req.params.id, { kind: 'account' }, list, { base: req.body.base, ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });
 router.put('/api/channels/adapters/:id/patterns/:pid/access', async (req, res) => {
@@ -430,7 +433,7 @@ router.put('/api/channels/adapters/:id/patterns/:pid/access', async (req, res) =
     forHost(req);
     const list = listOf(req.body, 'access');
     if (list === undefined) return bad(res, 400, 'access is required', { code: 'bad-request' });
-    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern', id: req.params.pid }, { access: list, ...(req.body.pattern !== undefined ? { pattern: req.body.pattern } : {}), ...(req.body.base !== undefined ? { base: req.body.base } : {}) }));
+    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern', id: req.params.pid }, { access: list, ...(req.body.pattern !== undefined ? { pattern: req.body.pattern } : {}), ...(req.body.base !== undefined ? { base: req.body.base } : {}), ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });
 router.put('/api/channels/adapters/:id/patterns/:pid/watchers', async (req, res) => {
@@ -438,7 +441,7 @@ router.put('/api/channels/adapters/:id/patterns/:pid/watchers', async (req, res)
     forHost(req);
     const list = listOf(req.body, 'watchers');
     if (list === undefined) return bad(res, 400, 'watchers is required', { code: 'bad-request' });
-    scopeAnswer(res, await engine().setWatchers(req.params.id, { kind: 'pattern', id: req.params.pid }, list, { base: req.body.base }));
+    scopeAnswer(res, await engine().setWatchers(req.params.id, { kind: 'pattern', id: req.params.pid }, list, { base: req.body.base, ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });
 /** THE ACCOUNT GRAIN — `{assignment}` or `{assignment:null}`; the filter
@@ -462,7 +465,7 @@ router.post('/api/channels/adapters/:id/patterns', async (req, res) => {
     forHost(req);
     const b = req.body || {};
     if (b.assignment !== undefined) return scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern' }, { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
-    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern' }, { pattern: b.pattern, access: b.access === undefined ? [] : b.access, ...(b.watchers !== undefined ? { watchers: b.watchers } : {}) }));
+    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern' }, { pattern: b.pattern, access: b.access === undefined ? [] : b.access, ...(b.watchers !== undefined ? { watchers: b.watchers } : {}), ...exceptOf(b), ...(b.watchExcept !== undefined ? { watchExcept: b.watchExcept } : {}) }));
   } catch (e) { fail(res, e); }
 });
 router.put('/api/channels/adapters/:id/patterns/:pid', async (req, res) => {
@@ -470,7 +473,7 @@ router.put('/api/channels/adapters/:id/patterns/:pid', async (req, res) => {
     forHost(req);
     const b = req.body || {};
     if (b.assignment !== undefined) return scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern', id: req.params.pid }, { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
-    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern', id: req.params.pid }, { ...(b.pattern !== undefined ? { pattern: b.pattern } : {}), ...(b.access !== undefined ? { access: b.access } : {}), ...(b.watchers !== undefined ? { watchers: b.watchers } : {}), ...(b.base !== undefined ? { base: b.base } : {}) }));
+    scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern', id: req.params.pid }, { ...(b.pattern !== undefined ? { pattern: b.pattern } : {}), ...(b.access !== undefined ? { access: b.access } : {}), ...(b.watchers !== undefined ? { watchers: b.watchers } : {}), ...exceptOf(b), ...(b.watchExcept !== undefined ? { watchExcept: b.watchExcept } : {}), ...(b.base !== undefined ? { base: b.base } : {}) }));
   } catch (e) { fail(res, e); }
 });
 router.delete('/api/channels/adapters/:id/patterns/:pid', async (req, res) => {
@@ -1045,7 +1048,7 @@ router.put('/api/channels/:adapterId/:convId/access', async (req, res) => {
     forHost(req);
     const list = listOf(req.body, 'access');
     if (list === undefined) return bad(res, 400, 'access is required (a list of {principal, authority}; [] removes everyone)', { code: 'bad-request' });
-    answer(res, await engine().setAccess(req.params.adapterId, { kind: 'conversation', convId: req.params.convId }, list, { base: req.body.base }));
+    answer(res, await engine().setAccess(req.params.adapterId, { kind: 'conversation', convId: req.params.convId }, list, { base: req.body.base, ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });
 router.put('/api/channels/:adapterId/:convId/watchers', async (req, res) => {
@@ -1053,7 +1056,7 @@ router.put('/api/channels/:adapterId/:convId/watchers', async (req, res) => {
     forHost(req);
     const list = listOf(req.body, 'watchers');
     if (list === undefined) return bad(res, 400, 'watchers is required (a list; [] notifies nobody)', { code: 'bad-request' });
-    answer(res, await engine().setWatchers(req.params.adapterId, { kind: 'conversation', convId: req.params.convId }, list, { base: req.body.base }));
+    answer(res, await engine().setWatchers(req.params.adapterId, { kind: 'conversation', convId: req.params.convId }, list, { base: req.body.base, ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });
 /** FILTER — `{filter:{match, rules[]}}` or `{filter:null}`; `estimate` may

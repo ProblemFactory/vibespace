@@ -681,7 +681,9 @@ async function laneE() {
       await new Promise((r) => pageSrv.listen(0, '127.0.0.1', r));
       const URL0 = `http://127.0.0.1:${pageSrv.address().port}/`;
       const ch = await launch({ appId: 'vs-chrome', dpr: 1, uiScale: 1, url: URL0, share: { principals: [{ kind: 'session', id: 's2', name: 'beta' }], mode: 'tree' } });
-      ok(ch.ready && ch.reach && ch.reach.mode === 'tree' && ch.reach.rows.some((r) => r.principal.id === 'codex:conv-b') && ch.rec.args.includes('--force-renderer-accessibility'), 'D2 before launch + D4: the user launches Chrome SHARED with beta in tree mode — its argv carries --force-renderer-accessibility', ch.err);
+      // int346: lane grants-unify — a conversation is named by its conversation id in the ONE grants store (no harness prefix;
+      // its test-desktop-app-window says so) — the share row reads back `conv-b`
+      ok(ch.ready && ch.reach && ch.reach.mode === 'tree' && ch.reach.rows.some((r) => r.principal.id === 'conv-b') && ch.rec.args.includes('--force-renderer-accessibility'), 'D2 before launch + D4: the user launches Chrome SHARED with beta in tree mode — its argv carries --force-renderer-accessibility', ch.err);
       const H = ch.id;
       const ac = await cli('vsst_bbbb', 'attach', H);
       ok(ac.code === 0 && /\[the user's browser\]|the user's own browser/.test(ac.out + (await cli('vsst_bbbb', 'list')).out) && /mode: tree/.test(ac.out), 'beta attaches the user\'s browser like any app (marked as the user\'s browser), mode tree');

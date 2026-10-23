@@ -10,6 +10,14 @@
 // and NOT the Task Group checklist (vibespace-task plan-add). File an item here
 // ONLY when progress genuinely depends on the user. When the user answers in
 // chat, resolve the item yourself.
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-ask: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-ask', flags: ['--timeout', '--call-timeout'] });
 const api = process.env.VIBESPACE_API;
 const token = process.env.VIBESPACE_SESSION_TOKEN;
 if (!api || !token) { console.error('vibespace-ask: not running inside a VibeSpace session (missing env)'); process.exit(2); }
@@ -52,6 +60,10 @@ const optionsRaw = opt('options');
 // Labels go to the route AS TYPED (trimmed only): an empty label ("A||B", a trailing '|')
 // is the store's to refuse BY NAME (`options[1] is empty`), never dropped here (inbox r1).
 const options = optionsRaw === undefined ? undefined : optionsRaw.split('|').map((x) => x.trim());
+// --grant browser:<profile label|id> (lane controls-that-lie): an ask for ACCESS the user grants — the tray draws the grant
+// itself («Let this conversation use …»), which changes «Who can use it» and then answers you; an --options label is only
+// ever a reply the user sends (it shows as «Reply: …»), so never offer a label that names an action it cannot perform
+const grant = opt('grant');
 // --notice (2.369.118): the item is FOR THE USER'S INFORMATION, not an ask — it
 // lands in the inbox's own Notices section with a grey count, never the red badge.
 const noticeIdx = rawArgs.indexOf('--notice');
@@ -69,12 +81,15 @@ for (let i = rawArgs.indexOf('--artifact'); i >= 0; i = rawArgs.indexOf('--artif
 }
 const USAGE = [
   'usage — mirror questions for the USER into their tray (the answer names its label and where it is on their screen; they may not be watching this window):',
-  '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation (up to 8000 chars)"] [--urgency low|normal|high|urgent] [--options "A|B|C"] [--notice] [--artifact <path|/p/id>…]',
+  '  vibespace-ask "question or decision needed" [--detail "context, options, your recommendation (up to 8000 chars)"] [--urgency low|normal|high|urgent] [--options "A|B|C"] [--grant browser:<profile>] [--notice] [--artifact <path|/p/id>…]',
   '      --artifact = up to 8 things the user should OPEN from the item (a file you want reviewed, a design folder, a published /p/<id> page) —',
   '                   chips under the question, one press opens each; every path after the flag until the next flag, relative to this shell\'s cwd.',
   '                   Each must open NOW (exists, readable, a design holds design.json, a page is published) or NOTHING is filed (exit 2) —',
   '                   fix the named attachment and run vibespace-ask again. Paths and links written in the question / --detail are clickable too',
-  '      --options = up to 6 one-click answers (≤40 chars each) — the user\'s reply is then exactly one label',
+  '      --options = up to 6 one-click answers (≤40 chars each) — the user\'s reply is then exactly one label (each shows as «Reply: <label>»: a reply, never an action)',
+  '      --grant browser:<label|id> = you need a browser profile «Who can use it» keeps from you: the item carries the real grant button — one press',
+  '                   adds this conversation to the profile\'s list, then you are answered «Granted …» with how to attach (`vibespace-browser use <id>`).',
+  '                   A channel conversation is asked with `vibespace-channels request`; a machine only in words (the user opens it on its row)',
   '      --notice = for their information only (no action needed): its own Notices section, grey count, never the red badge',
   '      long or quoted text: --text-file <path> or --text - (stdin, a heredoc) for the question, --detail-file <path> for --detail;',
   '                   the CLI refuses stray words (the question is ONE argument: a word after it ⇒ exit 2, nothing filed) and answers sent: N characters',
@@ -88,7 +103,7 @@ const USAGE = [
 ].join('\n');
 
 async function call(body) {
-  const res = await fetch(api + '/api/agent/user-todo', {
+  const res = await CC.call(api + '/api/agent/user-todo', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
     body: JSON.stringify(body),
@@ -169,7 +184,7 @@ async function fileItem(typed) {
     if (d.error) { console.error('vibespace-ask: refused — ' + d.error.replace(/nothing was sent$/, 'nothing was filed')); process.exit(TX.STRAY_EXIT); }
     detail = d.text;
   }
-  const body = { add: { text, detail, urgency, kind, options } };
+  const body = { add: { text, detail, urgency, kind, options, ...(grant !== undefined ? { grant } : {}) } };
   if (artifacts.length) body.add.artifacts = artifacts; // lane foryou-attachments: judged by the server — any that would not open ⇒ nothing filed
   const answer = await call(body);
   const { item } = answer;
@@ -180,6 +195,7 @@ async function fileItem(typed) {
   console.log((item.existing ? 'already in ' + trayName + ' (refreshed): ' : 'added to ' + trayPhrase + ': ') + item.text + '  (' + item.id + ')');
   console.log('  ' + TX.sentLine(answer, text, detail));   // lane cli-one-text-arg: the route's count — a cut is visible here
   if (Array.isArray(item.options) && item.options.length) console.log('  options: ' + item.options.join(' | ') + '  (a chip reply arrives as exactly that label)');
+  if (item.action && item.action.type === 'browser-grant') console.log('  grant: the user sees «Let this conversation use ' + item.action.label + '» — one press adds this conversation to the profile\'s «Who can use it» and answers you');
   for (const a of Array.isArray(item.artifacts) ? item.artifacts : []) console.log('  attached: ' + (a.kind === 'page' ? a.url : a.path) + ' (' + a.kind + (a.host ? ' on ' + a.host : '') + ') — one press opens it from the item');
   if (item.artifactsCut) console.log('NOTE: only the first ' + item.artifactsCut + ' attachments were kept — attach the rest to a second item.');
   // THE CUT, NAMED (2026-09-27): the store keeps a question up to 500 chars and a detail up

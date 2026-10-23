@@ -15,7 +15,7 @@
  * project's public page); a preset with neither has NO relay (the route / the loopback). The public page serves only an
  * app a person registered themselves.
  *
- *   consentRoad({kind, publicUrl, origin, road, relayUrl, relayFleet}) → {road, redirectUri, base, u, why}
+ *   consentRoad({kind, publicUrl, origin, road, relayUrl, relayFleet, clientType}) → {road, redirectUri, base, u, why, fixed?}
  *     'relay'    — a relay page is known for this account (`relayUrl`, relayPick below: a company preset's own relayUrl ›
  *                  the fleet's VIBESPACE_OAUTH_RELAY_URL; a person's own app: the fleet's › the Settings → Channels relay
  *                  page — the project's public page by default) AND it sends THIS browser back: the browser's origin
@@ -32,7 +32,13 @@
  *     'loopback' — the adapter's own loopback listener, as before (a local hub: the browser IS on this machine). Also
  *                  when there is no https address, and when the person asked for the copy-the-address way
  *                  (`road: 'loopback'` — the dialog's last resort, for a vendor app that does not list the route yet).
- *     why ∈ WHYS: relay-page | https-address | asked | local-browser | no-address | not-https | bad-kind.
+ *     why ∈ WHYS: relay-page | https-address | asked | local-browser | no-address | not-https | bad-kind | desktop-client.
+ *     lane oauth-setup-instructions (the owner 2026-10-23: a self-hoster's Google client is a Web application or a Desktop
+ *     app, and the two take different addresses): `clientType` = what the account says its Google client is. 'desktop'
+ *     — a Desktop app client takes ANY 127.0.0.1 port and never an https address, so neither the relay page nor the
+ *     route can serve it: the loopback (`desktop-client`), on any port. 'web' — a Web application client takes only
+ *     addresses registered EXACTLY, so its loopback is the kind's FIXED one (`fixed: true` on the loopback verdict; the
+ *     adapter binds its registered callback). '' — not said: as before (the relay, the route, the adapter's own loopback).
  *   relayPick({fleet, preset, setting}) → {url, fleet, who} — the relay a consent rides. `preset` = a company preset
  *                  account's own relayUrl ('' when it names none), null for any other client: a preset rides its own ›
  *                  the fleet's, NEVER the setting; any other client the fleet's › the setting's (the first that is a
@@ -53,7 +59,8 @@ const CALLBACK_BASE = '/api/channels/oauth/cb/';
  *  only a person's own app rides (addendum 1: a company preset never does). */
 const RELAY_DEFAULT = SM.RELAY_DEFAULT;
 const ROADS = Object.freeze(['relay', 'route', 'loopback']);
-const WHYS = Object.freeze(['relay-page', 'https-address', 'asked', 'local-browser', 'no-address', 'not-https', 'bad-kind']);
+const WHYS = Object.freeze(['relay-page', 'https-address', 'asked', 'local-browser', 'no-address', 'not-https', 'bad-kind', 'desktop-client']);
+const CLIENT_TYPES = Object.freeze(['web', 'desktop']);   // lane oauth-setup-instructions: a Google client's two kinds
 const KIND_RE = /^[a-z][a-z0-9-]{1,19}$/;
 const STATE_MAX = 1200;
 const STATE_TTL_MS = 30 * 60e3;
@@ -126,10 +133,12 @@ function relayOf(consent, cred) {
 
 /** THE VERDICT: the relay page when one is known and it sends this browser back; else the route on the instance when
  *  it has an https address and the browser is elsewhere; else the loopback. */
-function consentRoad({ kind, publicUrl = '', origin = null, road = null, relayUrl = '', relayFleet = false } = {}) {
-  const loop = (why) => ({ road: 'loopback', redirectUri: null, base: null, u: null, why });
+function consentRoad({ kind, publicUrl = '', origin = null, road = null, relayUrl = '', relayFleet = false, clientType = '' } = {}) {
+  // lane oauth-setup-instructions: a Web application client's loopback is the kind's FIXED registered one
+  const loop = (why) => ({ road: 'loopback', redirectUri: null, base: null, u: null, why, ...(clientType === 'web' && why !== 'bad-kind' ? { fixed: true } : {}) });
   if (typeof kind !== 'string' || !KIND_RE.test(kind)) return loop('bad-kind');
   if (road === 'loopback') return loop('asked');
+  if (clientType === 'desktop') return loop('desktop-client');   // a Desktop client takes no https address: no relay, no route
   const base = httpsBaseOf(publicUrl);
   // lane oauth-relay-road: THE RELAY — `u` = the browser's own origin (the page that pressed Connect); the relay page
   // judges it by the ONE table (a private address; the fleet's relay also this instance's own https host)
@@ -192,4 +201,4 @@ function landingHtml(r = {}, { name = 'the account' } = {}) {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="referrer" content="no-referrer"><title>VibeSpace · ${escHtml(nm)}</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em}</style></head><body data-landing="${kind}">${lines}${kind === 'ok' ? `<script>${CLOSE_SCRIPT}</script>` : ''}</body></html>`;
 }
 
-module.exports = { CALLBACK_BASE, RELAY_DEFAULT, ROADS, WHYS, KIND_RE, STATE_MAX, STATE_TTL_MS, CLOSE_SCRIPT, LANDING, LANDING_WHY, originOf, loopbackHost, loopbackOrigin, httpsBaseOf, relayPageOf, relayPick, relayOf, consentRoad, stateOf, stateVerdict, landingHtml };
+module.exports = { CALLBACK_BASE, RELAY_DEFAULT, ROADS, WHYS, CLIENT_TYPES, KIND_RE, STATE_MAX, STATE_TTL_MS, CLOSE_SCRIPT, LANDING, LANDING_WHY, originOf, loopbackHost, loopbackOrigin, httpsBaseOf, relayPageOf, relayPick, relayOf, consentRoad, stateOf, stateVerdict, landingHtml };

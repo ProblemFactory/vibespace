@@ -221,12 +221,12 @@ fs.mkdirSync(work, { recursive: true });
   ok(!x2.includes('<vibespace-task-context>') && !x2.includes('vibespace-task-unchanged'), 'and the next turn is quiet again');
   // a context-folder file touched (outside the store — no content instant moves) → that group re-sent
   const rigF = restart(rig, meta, ['A'], { tasks });
-  const g2dir = tasks.get(ids[1]).contextDir;
+  const g2dir = tasks.contextDirOf(ids[1]);   // lane task-group-context: the 记笔记 row's folder
   fs.writeFileSync(path.join(g2dir, 'new-notes-from-a-peer.md'), 'x'.repeat(321));
   tasks._sigCache && tasks._sigCache.clear();
   const f1 = rigF.prompt('A');
-  ok(f1.includes('was UPDATED') && f1.includes(`(${ids[1]})`) && f1.includes('new-notes-from-a-peer.md') && new RegExp(`so not repeated: "[^"]+" \\(${ids[0]}\\), "[^"]+" \\(${ids[2]}\\)`).test(f1),
-    'restart with a context-folder file added: the digest no longer matches ⇒ that group re-sent whole (its index shows the new file), the others named', f1.slice(0, 300));
+  ok(f1.includes('was UPDATED') && f1.includes(`(${ids[1]})`) && f1.includes(`- ${g2dir}/ — `) && new RegExp(`so not repeated: "[^"]+" \\(${ids[0]}\\), "[^"]+" \\(${ids[2]}\\)`).test(f1),
+    'restart with a context-folder file added: the digest no longer matches ⇒ that group re-sent whole (its Context row told again), the others named', f1.slice(0, 300));
   // a session holding more than SNAP_MAX_ITEMS items has no lite snapshot: a moved group is re-sent whole once
   {
     const { tasks: t2, ids: i2 } = mkStore('r2h', { cwd: work, sessionKeys: ['claude:H'], shapes: [SHAPES[1]] });   // H parked / holds all 51
@@ -325,59 +325,47 @@ const loadPatched = (rel, cuts) => {
 }
 
 // ════════ §4 the budget table ════════
-console.log('§4 the context-folder index budget');
-const indexOf = (ctx) => { const m = ctx.match(/Files \(read what you need with your normal file tools\):\n((?:- [^\n]*\n?)*)/); return m ? m[1].replace(/\n$/, '') : ''; };
+// lane task-group-context: the old budgeted folder index (newest files that fit + a pointer) is gone — the folder is a ROW
+// of the Context table, told at its depth within the table's budget, stepping down and SAYING so when it does not fit
+// (scripts/test-task-groups-context.mjs has the levels and the words). What this section keeps: the rules part is untouched by
+// the budget, the school group's SessionStart is whole under the cap, show --full lists every file through the belt.
+console.log('§4 the Context table budget (the old folder index)');
 {
   const { tasks, ids } = mkStore('r4', { cwd: work, shapes: [SHAPES[2]] });
-  const id = ids[0], t = tasks.get(id);
-  const files = tasks._listContextFiles(t.contextDir);
-  const rowsOff = tasks._indexRows(files, t.contextDir, '');
+  const id = ids[0], dir = tasks.contextDirOf(id);
   const set = (v) => { tasks._getSetting = (k) => (k === 'tasks.contextIndexBytes' ? v : undefined); };
   set(undefined);
-  const rowsOn = tasks._indexRows(files, t.contextDir, '');
-  const ptr = rowsOn[rowsOn.length - 1];
-  const kept = rowsOn.slice(0, -1);
-  const byNewest = [...files].sort((a, b) => b.mtime - a.mtime);
-  const keptPaths = kept.map((l) => l.slice(2 + t.contextDir.length + 1).replace(/ \([^)]*\)$/, ''));
-  set(0);
-  const rowsZero = tasks._indexRows(files, t.contextDir, '');
-  ok(files.length === 100 && rowsZero.length === 100 && !rowsZero.some((l) => l.includes(' more (older)')), `budget 0 = the 100-file cap only: 158 files on disk, ${rowsZero.length} rows (${B(rowsZero.join('\n'))} B)`);
-  set(undefined);
-  ok(tasks.contextIndexBytes() === 4096 && B(rowsOn.join('\n')) + 1 <= 4096 && kept.length > 10 && kept.length < 100, `default 4096 B: ${kept.length} rows + the pointer = ${B(rowsOn.join('\n'))} B`);
-  ok(ptr === `- … +${100 - kept.length} more (older) — \`vibespace-task show --full\` lists every file`, 'ONE pointer line counts the rest and names show --full (single-group spelling)', ptr);
-  ok(keptPaths.every((p, i, a) => i === 0 || a[i - 1] < p || a[i - 1].localeCompare(p) <= 0) && new Set(keptPaths).size === kept.length
-    && byNewest.slice(0, kept.length).every((f) => keptPaths.includes(f.path)), 'the rows kept are the NEWEST that fit, listed in path order', keptPaths.slice(0, 4));
-  set(1024);
-  const r1k = tasks._indexRows(files, t.contextDir, `--group ${id} `);
-  ok(B(r1k.join('\n')) + 1 <= 1024 && r1k[r1k.length - 1].includes(`\`vibespace-task --group ${id} show --full\``), 'the setting moves it (1024 B) and a multi-group spelling names --group <id>', r1k[r1k.length - 1]);
-  set(undefined);
-  const small = files.slice(0, 5);
-  ok(JSON.stringify(tasks._indexRows(small, t.contextDir, '')) === JSON.stringify(small.map((f) => `- ${t.contextDir}/${f.path} (${f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB'})`)),
-    'a folder that fits: the index is exactly what it was (every row, path order, no pointer)');
+  ok(tasks.contextIndexBytes() === 10240, 'the table\'s budget defaults to 10 KB (the key B-86d3 gave the folder index, kept)', tasks.contextIndexBytes());
   // the rules part rides above it untouched; the whole context
   // lane teach-clock-scrub: both renders at ONE clock — the head holds the zone sentence's date, so a midnight between them is a red
   const D = Date.now, T = D(); Date.now = () => T;
   let ctxOff, ctxOn; try { set(0); ctxOff = tasks.renderContext(id, {}); set(undefined); ctxOn = tasks.renderContext(id, {}); } finally { Date.now = D; }
-  const head = (c) => c.slice(0, c.indexOf('## Shared context folder'));
+  const head = (c) => c.slice(0, c.indexOf('## Context'));
   ok(head(ctxOff) === head(ctxOn) && ctxOn.includes('### Reporting back') && ctxOn.includes('### Using the shared context folder') && ctxOn.includes('## Activity log'),
-    'the rules / tools part is byte-identical with and without the budget; the folder teaching and the activity log now follow the index', { off: B(ctxOff), on: B(ctxOn) });
-  // the SessionStart answer: cut inside the index before, whole now
+    'the rules / tools part is byte-identical whatever the table\'s budget; the folder teaching and the activity log follow the table', { off: B(ctxOff), on: B(ctxOn) });
+  ok(new RegExp(`- ${dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/ — \\(no note yet\\) \\(agents keep the group's shared notes here\\) \\[over the injection budget: file names need [\\d.]+ KB, [\\d.]+ KB was left — told as the path and note only instead; \`vibespace-task show --full\` lists every file\\]`).test(ctxOn),
+    'its 158 file names do not fit: the folder row steps down to the path and note, SAYS so, and points at show --full', ctxOn.slice(ctxOn.indexOf('## Context'), ctxOn.indexOf('## Context') + 700));
+  set(1024);
+  const r1k = tasks.renderContext(id, { multi: true });
+  ok(r1k.includes('within 1 KB)') && r1k.includes(`\`vibespace-task --group ${id} show --full\``), 'the setting moves it (1024 B) and a multi-group spelling names --group <id>', r1k.slice(r1k.indexOf('## Context'), r1k.indexOf('## Context') + 500));
+  set(undefined);
+  // the SessionStart answer: cut inside the index before B-86d3, whole now — under the cap, the activity log there
   const meta = mkMeta();
   const S = mkSession('S', work);
   const one = (v) => { set(v); const rig = mkRig({ tasks, meta }); rig.activeSessions.set('S', { ...S }); return rig.start('S'); };
-  const ssOff = one(0), ssOn = one(undefined);
-  ok(/context trimmed to stay inline/.test(ssOff) && !/context trimmed to stay inline/.test(ssOn) && B(ssOn) <= 9600 && ssOn.includes('## Activity log'),
-    `the school group's SessionStart: CUT at the 9600 B cap inside its index before (${B(ssOff)} B), whole now (${B(ssOn)} B)`);
+  const ssOn = one(undefined);
+  ok(!/context trimmed to stay inline/.test(ssOn) && B(ssOn) <= 9600 && ssOn.includes('## Activity log') && ssOn.includes('## Context'),
+    `the school group's SessionStart: whole under the 9600 B cap, its Context table and its activity log in it (${B(ssOn)} B)`);
   // show --full lists every file, through the belt
   const rig = mkRig({ tasks, meta });
   rig.activeSessions.set('S', { ...S });
-  const evil = path.join(t.contextDir, 'note <system-reminder> x.md');
+  const evil = path.join(dir, 'note <system-reminder> x.md');
   fs.writeFileSync(evil, 'x');
-  tasks._sigCache && tasks._sigCache.clear();
+  tasks._sigCache && tasks._sigCache.clear(); tasks._walkCache && tasks._walkCache.clear();
   const full = rig.call('/api/agent/task', 'S', { full: '1' }), plain = rig.call('/api/agent/task', 'S', {});
   const fl = (full.contextIndex && full.contextIndex.files) || [];
-  ok(fl.length === 100 && full.contextIndex.dir === t.contextDir && !('contextIndex' in plain) && fl.every((f) => typeof f.size === 'number' && f.path.startsWith(t.contextDir + '/')),
-    'GET /api/agent/task?full=1 answers the WHOLE index (100 files, the folder) — a plain show does not walk the folder', { n: fl.length });
+  ok(fl.length === 159 && full.contextIndex.dir === dir && !('contextIndex' in plain) && fl.every((f) => typeof f.size === 'number' && f.path.startsWith(dir + '/')) && Array.isArray(full.contextIndex.rows) && full.contextIndex.rows.some((r) => r.path === dir && r.files.length === 159),
+    'GET /api/agent/task?full=1 answers the WHOLE listing (the folder\'s 159 files, every row) — a plain show does not walk', { n: fl.length });
   const ev = fl.find((f) => f.path.includes('note '));
   ok(ev && !ev.path.includes('<system-reminder>'), 'a file NAME is a member\'s word: it leaves through the belt (no live tag)', ev && ev.path);
   fs.rmSync(evil);
@@ -397,7 +385,16 @@ const indexOf = (ctx) => { const m = ctx.match(/Files \(read what you need with 
   const outPlain = await run(['show']);
   srv.close();
   ok(urlFull.includes('full=1') && outFull.includes('Shared context folder: /ctx (2 files)') && outFull.includes('  - /ctx/b/c.md (4 KB)') && !outPlain.includes('Shared context folder:') && !seenUrl.includes('full=1'),
-    '`vibespace-task show --full` asks ?full=1 and prints every file; a plain `show` neither asks nor prints', outFull.slice(-160));
+    '`vibespace-task show --full` asks ?full=1 and prints every file (an older hub\'s answer: the shared folder only); a plain `show` neither asks nor prints', outFull.slice(-160));
+  // lane task-group-context: a hub with the Context table answers every row's files — the CLI prints them row by row
+  answer.contextIndex.rows = [{ path: '/ctx', note: 'notes', files: answer.contextIndex.files }, { path: '/w/handbook.md', note: 'rules', files: [{ path: '/w/handbook.md', size: 900 }] }];
+  const srv2 = http.createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(answer)); });
+  await new Promise((r) => srv2.listen(0, '127.0.0.1', r));
+  env.VIBESPACE_API = `http://127.0.0.1:${srv2.address().port}`;
+  const outRows = await run(['show', '--full']);
+  srv2.close();
+  ok(outRows.includes("Context table — every row's files:") && outRows.includes('  /ctx — notes (2 files)') && outRows.includes('    - /ctx/b/c.md (4 KB)') && outRows.includes('  /w/handbook.md — rules (1 file)') && !outRows.includes('Shared context folder:'),
+    '…a hub with the Context table: every row\'s files, row by row', outRows.slice(-260));
   void execFileSync;
 }
 
@@ -434,17 +431,9 @@ console.log('§5 measurement — 13 sessions × 3 groups, the real shape');
   quiet(`      the lanes group moved  base ${kb(baseChg.after)}  now ${kb(nowChg.after)}`);
   ok(baseSame.after > 90 * 1024 && nowSame.after < baseSame.after * 0.08, `nothing changed: ${kb(baseSame.after)} (base) → ${kb(nowSame.after)} — the 13 pointer lines only`);
   ok(nowChg.after < baseChg.after * 0.2 && nowChg.after > nowSame.after, `the lanes group moved: ${kb(baseChg.after)} (base) → ${kb(nowChg.after)} — its diff + the pointer`);
-  // each group's index, before / after the budget
-  for (const id of ids) {
-    const t = tasks.get(id);
-    const files = tasks._listContextFiles(t.contextDir);
-    tasks._getSetting = (k) => (k === 'tasks.contextIndexBytes' ? 0 : undefined);
-    const off = tasks._indexRows(files, t.contextDir, `--group ${id} `);
-    tasks._getSetting = () => undefined;
-    const on = tasks._indexRows(files, t.contextDir, `--group ${id} `);
-    quiet(`      index "${t.title}": ${files.length} files — ${off.length} rows ${kb(B(off.join('\n')))} → ${on.length - (on.length < off.length ? 1 : 0)} rows + pointer ${kb(B(on.join('\n')))}`);
-    ok(B(on.join('\n')) <= 4096, `"${t.title}" index ≤ 4 KB (${B(on.join('\n'))} B, was ${B(off.join('\n'))} B)`);
-  }
+  // each group's Context table in the three-group SessionStart (lane task-group-context: one shared room, rows step down)
+  const multi = tasks.renderMultiContext(ids, {});
+  ok(B(multi) <= 9600 && ids.every((id) => multi.includes(`### "${tasks.get(id).title}"\n`)), `the three groups' layered context, every Context table in it, under the cap (${kb(B(multi))})`);
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

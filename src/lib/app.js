@@ -28,7 +28,9 @@ import { installSessionLifecycle } from './session-lifecycle.js';
 import { installSetupFlows } from './setup-flows.js';
 import { MobileNav } from './mobile-nav.js';
 import { installMobileBack } from './mobile-back.js'; // lane mobile-back-guard: the phone's back gesture closes the open panel first
-import { setupDirAutocomplete } from './autocomplete.js';
+import { pathField, appGroups } from './path-field.js'; // lane path-field: THE path field at every door (src/path-candidates.js ranks)
+import { installNewSessionForm } from './new-session-form.js'; // lane new-session-form: the two columns, the fold, the right column, the footer
+import { nameHint } from './new-session-model.js'; // PURE: an empty name is the chosen folder's own name (the field's placeholder)
 import { getAvailableFonts } from './terminal.js';
 import { SettingsManager } from './settings.js';
 import { SETTINGS_SCHEMA, registerHarnessSettings } from './settings-schema.js';
@@ -80,6 +82,7 @@ import { noteVoicePlugins, followFocus } from './voice-input.js'; // lane voice-
 import { enterSubmits } from './chat-enter-keys.js';
 import { initVault, maybeNagVault, unlockFirst, placeVaultChip } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
 import { folderChips } from '../day-one.js'; // lane door-day-one-landing: the New Session dialog's folder chips, in order
+import { insideFolder } from '../task-membership.js'; // PURE (lane open-task-binds): THE Task Group folder rule (a folder includes itself)
 import { loadHomeFolders, recentLocalCwds, paintFolderChips } from './folder-chips.js'; // lane door-day-one-landing: the home's folders + the painter
 
 const BACKEND_SESSION_OPTIONS = {
@@ -1520,8 +1523,8 @@ class App {
     document.getElementById('dialog-new-session').addEventListener('keydown', (e) => {
       if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return;
       if (e.target.tagName !== 'INPUT') return;
-      // Let the cwd autocomplete accept its highlighted suggestion first
-      if (e.target.id === 'input-cwd' && !document.getElementById('cwd-suggestions')?.classList.contains('hidden')) return;
+      // Let the path field accept its highlighted candidate first (it prevents that Enter; a plain Enter commits AND submits)
+      if (e.target.id === 'input-cwd' && e.defaultPrevented) return;
       e.preventDefault();
       document.querySelector('#dialog-new-session .btn-create').click();
     });
@@ -1531,14 +1534,18 @@ class App {
       if (createBtn.dataset.busy) return; // Enter + click racing the async check
       const backend = document.getElementById('input-backend').value || 'claude';
       const hostId = document.getElementById('input-host')?.value || undefined;
-      const cwd = document.getElementById('input-cwd').value.trim();
+      // lane new-session-form: THE PATH FIELD COMMITS FIRST (the contract: Create awaits pf.commit() — a value that does not
+      // take is said under the field and in the footer, «Cannot create yet: …», and nothing spawns)
+      createBtn.dataset.busy = '1';
+      const picked = await Promise.resolve(this._cwdField?.commit()).catch(() => null);
+      if (!picked) { delete createBtn.dataset.busy; this._nsPaintFoot?.(); this._nsReveal?.('cwd'); return; }
+      const cwd = String(picked.path || '').trim();
       // A typo'd/nonexistent cwd used to fail opaquely at spawn time (pty chdir
       // error → instant "terminated"; remote silently fell back to $HOME).
       // Stat it first and offer to create the folder; on cancel the dialog
-      // stays open for correction.
-      if (cwd) {
-        createBtn.dataset.busy = '1';
-        const ok = await this._ensureCwdExists(cwd, hostId).finally(() => delete createBtn.dataset.busy);
+      // stays open for correction (the field's ensure: today's confirm under the stub, L1's ticked «create» road).
+      {
+        const ok = await Promise.resolve(this._cwdField.ensure()).catch(() => false).finally(() => delete createBtn.dataset.busy);
         if (!ok) return;
       }
       if (terminalOnly(backend)) {
@@ -1549,19 +1556,26 @@ class App {
       }
       // q-053 §3: the account's provider serves no model — the row says so with its door; Create says it too, never spawns
       if (document.querySelector('#row-model .ns-models-none:not(.hidden)')) { showToast(t('This account’s provider has no models — set them up first'), { type: 'error' }); return; }
+      // lane new-session-form: the groups (several, in the order picked), the 「可用工具」 pick, the accounts ticked for
+      // THIS conversation (written once its id exists — _nsCreated / _nsGrantPending); an empty name is the folder's own
+      const taskIds = this._nsTaskIds?.() || [];
+      const channels = this._nsChannelTicks?.() || [];
       this.createSession({
         backend,
         hostId,
         mode: document.getElementById('input-mode').value,
         cwd,
-        name: document.getElementById('input-session-name').value.trim(),
+        name: document.getElementById('input-session-name').value.trim() || nameHint(cwd) || '',
         model: document.getElementById('input-model').value === '__custom__'
           ? (document.getElementById('input-model-custom').value.trim() || '')
           : document.getElementById('input-model').value,
         permission: document.getElementById('input-permission').value,
         effort: document.getElementById('input-effort').value,
         extraArgs: document.getElementById('input-extra-args').value.trim(),
-        taskId: document.getElementById('input-task')?.value || undefined,
+        taskId: taskIds[0] || undefined,
+        taskIds,
+        tools: this._nsToolPick?.() || undefined,
+        onCreateResult: (ok, msg) => { if (ok) this._nsCreated?.(msg, { channels }); },
         accountId: document.getElementById('input-account')?.value || undefined,
         // agent browser P1 (§3.2.5): the row sends an EXPLICIT value, so the origin
         // the client computed (task-group / instance / chosen) rides along as a hint
@@ -1643,8 +1657,9 @@ class App {
    *  reads the account row this pass filled). Whatever applies a choice runs it; no row is filled before its choice. */
   _refillNewSessionRows() {
     this._updateAcctRow?.();
-    this._fillBrowserProfileRow?.(document.getElementById('input-task')?.value || '');
+    this._fillBrowserProfileRow?.(this._nsTaskIds?.() || []); // lane new-session-form: the groups picked (only the profiles they admit)
     this._refreshModelMenu?.();
+    this._nsRender?.(); // lane new-session-form: the switches, the tools row, the fold, the right column, the footer follow
   }
 
   _applySessionBackendOptions(backend, { applyDefaults = false } = {}) {
@@ -1788,6 +1803,7 @@ class App {
       sel.appendChild(o);
       ids.push(m.id);
     }
+    this._nsPaintFoot?.(); // the footer's model chip / its «no models» refusal
     if (ans.open) { // the harness judges its own spellings — Custom… stays; a closed provider offers exactly its rows
       const o = document.createElement('option');
       o.value = '__custom__';
@@ -1800,25 +1816,25 @@ class App {
     if (sel.value !== '__custom__') customRow?.classList.add('hidden');
   }
 
+  // lane new-session-form: THE New Session door of the ONE path field (lane path-field's contract §4): the picked groups in
+  // the order picked, the machine, the name typed so far (由名字), the chips row; its verdict is the footer's refusal and
+  // the name's placeholder. Create awaits pf.commit(), then pf.ensure() (a ticked missing folder is made there).
   _setupCwdAutocomplete() {
+    // lane path-field: THE path field (src/lib/path-field.js) — the selected Task Group's folders first (and one
+    // <group folder>/<name> per selected group from the Session Name), recent folders with counts, the listing, a few
+    // letters anywhere in the path; computed FOR THE MACHINE chosen (a host's candidates come from that host)
     const input = document.getElementById('input-cwd');
-    const dropdown = document.getElementById('cwd-suggestions');
-    // When a host is chosen, completion + recent chips come from that host
-    // over ssh instead of the local filesystem.
-    setupDirAutocomplete(input, dropdown, {
-      endpoint: () => {
-        const h = document.getElementById('input-host')?.value;
-        return h ? `/api/hosts/${h}/dir-complete` : null;
-      },
-      // #2: float the selected task's linked folders to the top of the cwd
-      // suggestions (highlighted), so starting a session "in" a task recommends
-      // its own folders first.
-      priorityPaths: () => {
-        const tid = document.getElementById('input-task')?.value;
-        const t = tid && this.sidebar?._taskById?.(tid);
-        return t ? this.sidebar._folderPaths(t) : [];
-      },
-    });
+    this._cwdField = pathField(input, {
+      // int346: the picked groups in the order picked (selected) — none picked ⇒ every group's folders as candidates (L1's door)
+      groupsOf: () => appGroups(this._nsTaskIds?.() || []),
+      host: () => document.getElementById('input-host')?.value || null,
+      name: () => document.getElementById('input-session-name')?.value || '',
+      // int346: the chips row stays _fillCwdRecent's (the day-one chips, filled THROUGH the field; L1 left `chips: true` to
+      // the form) — the field's own chips would paint the same #cwd-recent a second time
+      kind: 'folder', id: 'new-session-cwd',
+      createWhen: t('Create this folder when the session starts'),
+      onState: (v) => this._nsCwdState?.(v),
+    });   // the name row's input → pf.refresh() is the form's (src/lib/new-session-form.js)
   }
 
   // The selected Task Group's folder suggestions for the New Session dialog
@@ -1828,23 +1844,22 @@ class App {
   // sessions only; with a remote host selected we still pin the folder paths
   // themselves (remote cwds aren't reliably in _allSessions).
   _taskCwdSuggestions(hostId) {
-    const tid = document.getElementById('input-task')?.value;
-    const tg = tid ? this.sidebar?._taskById?.(tid) : null;
-    if (!tg) return [];
     const out = []; const seen = new Set();
-    const add = (path, tip) => { if (path && !seen.has(path)) { seen.add(path); out.push({ path, tip, color: tg.color || '' }); } };
-    for (const f of tg.folders || []) {
-      const rec = this.sidebar._folderRec(f);
-      add(rec.path, t('Task Group folder ({name})', { name: tg.title }));
-      if (rec.recursive && !hostId) {
-        const subs = new Map(); // session cwd strictly under the folder -> count
-        for (const s of this.sidebar?._allSessions || []) {
-          if (s.host || !s.cwd) continue;
-          const under = s.cwd.startsWith(rec.path + '/') || (s.realCwd && s.realCwd.startsWith(rec.path + '/'));
-          if (under) subs.set(s.cwd, (subs.get(s.cwd) || 0) + 1);
+    for (const tg of this._nsGroups?.() || []) { // lane new-session-form: every group picked, in the order picked
+      const add = (path, tip) => { if (path && !seen.has(path)) { seen.add(path); out.push({ path, tip, color: tg.color || '' }); } };
+      for (const f of tg.folders || []) {
+        const rec = this.sidebar._folderRec(f);
+        add(rec.path, t('Task Group folder ({name})', { name: tg.title }));
+        if (rec.recursive && !hostId) {
+          const subs = new Map(); // session cwd inside the folder (the folder itself included — its chip is already pinned above) -> count
+          for (const s of this.sidebar?._allSessions || []) {
+            if (s.host || !s.cwd) continue;
+            const under = insideFolder(s.cwd, rec) || (s.realCwd && insideFolder(s.realCwd, rec));
+            if (under) subs.set(s.cwd, (subs.get(s.cwd) || 0) + 1);
+          }
+          for (const [c, n] of [...subs.entries()].sort((a, b) => b[1] - a[1]))
+            add(c, t('In a Task Group folder — {n} session(s) here', { n }));
         }
-        for (const [c, n] of [...subs.entries()].sort((a, b) => b[1] - a[1]))
-          add(c, t('In a Task Group folder — {n} session(s) here', { n }));
       }
     }
     return out;
@@ -1856,12 +1871,13 @@ class App {
   // («work (23 files)»), «the last one you used», the rest (PURE src/day-one.js folderChips; src/lib/folder-chips.js
   // paints). A chip fills the field; nothing pre-fills it; typing stays possible.
   _fillCwdRecent(hostId) {
+    this._cwdField?.refresh(); // lane path-field: the field re-ranks for the machine / the Task Group now chosen
     const recentEl = document.getElementById('cwd-recent');
     if (!recentEl) return;
     const taskChips = this._taskCwdSuggestions(hostId);
     const cwdInput = document.getElementById('input-cwd');
     const paint = (folders, cwds) => paintFolderChips(recentEl, folderChips({ folders, recent: cwds, task: taskChips }), {
-      onPick: (c) => { if (cwdInput) cwdInput.value = c.path; },
+      onPick: (c) => { if (this._cwdField) this._cwdField.set(c.path, { commit: false }); else if (cwdInput) cwdInput.value = c.path; },
     });
     const stillThisHost = () => (document.getElementById('input-host')?.value || '') === (hostId || '');
     if (hostId) {
@@ -1903,7 +1919,7 @@ class App {
     announceModal(overlay); // lane dialog-keys: the static overlay says it opened too (a live view you drive judges who opened it)
   }
 
-  showNewSessionDialog({ cwd, backend, hostId, taskId } = {}) {
+  showNewSessionDialog({ cwd, backend, hostId, taskId, taskIds } = {}) {
     if (this.isMobile) this.sidebar.toggle(false); // close sidebar so dialog is visible
     this._showDialog('dialog-new-session');
     // THE CHOICES FIRST (lane new-session-account-follows-backend): every select still holds the PREVIOUS open's value
@@ -1913,31 +1929,10 @@ class App {
     const b = backend || 'claude';
     const hostSel = document.getElementById('input-host');
     if (hostSel) hostSel.value = hostId || '';
-    // Task dropdown — new sessions can start "in" a task: pre-selected when
-    // opened from the task board, freely pickable otherwise. Picking a task
-    // prefills the cwd from its first auto-include folder (never clobbers a
-    // path the user already typed); the created session is bound to the task
-    // and spawned into it (the server's _initialGroupId).
-    const taskSel = document.getElementById('input-task');
-    if (taskSel) {
-      taskSel.innerHTML = `<option value="">${t('None')}</option>`;
-      for (const tg of this.sidebar?._taskBoardOrder?.() || []) {
-        const o = document.createElement('option');
-        o.value = tg.id;
-        o.textContent = tg.title + (tg.archived ? ' ' + t('(archived)') : '');
-        taskSel.appendChild(o);
-      }
-      taskSel.value = taskId || ''; // agent browser P1: the profile row defaults to the group's default profile (applyBackend fills it)
-      taskSel.onchange = () => {
-        this._fillBrowserProfileRow(taskSel.value);
-        const tg = this.sidebar?._taskById?.(taskSel.value);
-        const cwdInput = document.getElementById('input-cwd');
-        const firstFolder = tg?.folders?.[0] && (typeof tg.folders[0] === 'string' ? tg.folders[0] : tg.folders[0].path);
-        if (firstFolder && !cwdInput.value.trim()) cwdInput.value = firstFolder;
-        // Re-render the quick-fill chips — the group's folders pin to the front
-        this._fillCwdRecent(document.getElementById('input-host')?.value || '');
-      };
-    }
+    // Task Groups — a new session can start "in" SEVERAL (lane new-session-form: the right column's 任务组 chips, in the
+    // order picked; the created session is spawned into all of them — taskIds — and bound to each). Pre-picked when
+    // opened from a group; the first group picked prefills an EMPTY folder with its first folder (never a typed one).
+    this._nsOpen({ taskIds: Array.isArray(taskIds) ? taskIds : (taskId ? [taskId] : []) });
     // Account dropdown (billing identity: subscription OAuth vs an API key).
     // Claude sessions only — remote hosts supported too (the key ships to the
     // remote over ssh stdin, never argv; 'Subscription' there means the
@@ -2091,8 +2086,9 @@ class App {
         if (hostSel.value !== was) this._refillNewSessionRows(); // the machine landed only now — a programmatic set fires no `change`
         // both terminal and chat supported on remote hosts (chat = ssh -T pipe)
         // switching host re-sources the path list + autocomplete target
-        hostSel.onchange = () => this._fillCwdRecent(hostSel.value);
+        hostSel.onchange = () => { this._fillCwdRecent(hostSel.value); try { this._cwdField?.refresh(); } catch { } };
         this._fillCwdRecent(hostSel.value);
+        this._nsRender?.(); // the machine list landed: the fold (a paired machine used lately), the header dot, the chips
       });
     }
     // lane L (the naive-user study, S6-01 / S12-02: the previous session's name
@@ -2105,8 +2101,12 @@ class App {
     // lane door-day-one-landing: the folder is the caller's (a folder's «+», a Task Group) or EMPTY — never the one the last
     // dialog held (it belonged to another area: testers retyped it 5/5 and 3/3 times); the chips offer the rest
     document.getElementById('input-cwd').value = cwd || '';
+    this._cwdField?.set(document.getElementById('input-cwd').value, { commit: false }); // lane path-field: the field's line + verdict start from what the line above put there (its list never pops on open)
     this._fillCwdRecent(hostId || '');
-    document.getElementById('input-cwd').focus();
+    try { this._cwdField?.refresh(); } catch { }
+    this._nsRender?.();
+    // the name comes first now (lane new-session-form: 会话名称 above 工作目录 — it feeds the folder's 由名字 rows)
+    (this.isMobile ? null : document.getElementById('input-session-name'))?.focus();
   }
   hideDialogs() { document.getElementById('dialog-overlay').classList.add('hidden'); document.getElementById('dialog-overlay').querySelectorAll('.dialog').forEach(d => d.classList.add('hidden')); }
 
@@ -2640,6 +2640,7 @@ class App {
       // A user-typed New Session name becomes the custom name once the backend
       // id exists (before that there is no stable key to attach it to). A
       // manual rename in the meantime wins — don't clobber it.
+      this._nsGrantPending?.(session.sessionId); // lane new-session-form: the ticked accounts' access rows + the tools pick, once the session's own id exists
       const pendingName = this._pendingCreateNames?.get(session.sessionId);
       if (pendingName && match.backendSessionId) {
         if (!this.sidebar.getCustomName?.(match)) {
@@ -2828,6 +2829,7 @@ installUsageMeter(App);
 installSessionLifecycle(App);
 installSetupFlows(App);
 installBrowserProfilePicker(App);
+installNewSessionForm(App); // lane new-session-form
 installBrowserLive(App); // agent browser P7 (§4.6): onBrowserDigestChanged → the live view born beside its session
 installBrowserSwitcher(App);
 installBrowserTrace(App);

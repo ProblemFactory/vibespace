@@ -30,6 +30,7 @@ function create(engineCtx) {
     refusedScopesOf, morePendingOf, tokensFor, adapterFor, refreshAuth, EMPTY_SCAN, pass, rejudgeConvCaps, conversationName, presetsOf, clientFieldDecls,
     customClientView, vendorNameOf, adapterView, notify, disarmPush, syncPushLanes, dropLive, retractUnsaved, retractFailure, wakeTimers, policyFor,
     accountGrainOf, patternsOf, convGrainOf, honestyLineFor, notifyOutbox,
+    CG,   // lane grants-unify: the channel doors' rows in THE grants store (src/server/channels-grants.js)
   } = engineCtx;
   /** THIS ACCOUNT'S CLIENT, as the resolver shape every adapter already
    *  reads (`{source, values, missing, why, whyCode, credentialKey, …}`):
@@ -879,19 +880,12 @@ function create(engineCtx) {
       if (en.adapterId === adapterId) {
         for (const r of convGrainOf(en).access) refs.push({ kind: 'access', key: en.key, convId: en.id, title: conversationName(en.adapterId, en.id) || en.id, scope: 'conversation', principal: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null } });
       }
-      for (const g of en.reachEntries || []) {
-        if (!g || !g.scope || g.scope.kind !== 'adapter' || g.scope.id !== adapterId) continue;
-        const gid = ACL.grantId(g);
-        if (seenGrant.has(gid)) continue;
-        seenGrant.add(gid);
-        refs.push({ kind: 'reach', grantId: gid, principal: { kind: g.principal.kind, id: g.principal.id, name: g.principal.name || null }, level: g.level, origin: g.origin });
-      }
     }
     // 2026-09-26: the ACCOUNT and PATTERN grains, and the account-scope grants
     const acct = accountGrainOf(adapterId);
     for (const r of acct ? F.grainOf(acct).access : []) refs.push({ kind: 'access', key: adapterId, scope: 'account', principal: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null } });
     for (const pa of patternsOf(adapterId)) for (const r of F.grainOf(pa).access) refs.push({ kind: 'access', key: pa.id, scope: 'pattern', title: F.patternSummary(pa.pattern), principal: { kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null } });
-    for (const g of store.index.table('accountGrants') || []) {
+    for (const g of CG.accountGrants(adapterId)) {   // lane grants-unify: the account-scope rows of the grants store
       if (!g || !g.scope || g.scope.kind !== 'adapter' || g.scope.id !== adapterId) continue;
       const gid = ACL.grantId(g);
       if (seenGrant.has(gid)) continue;
@@ -931,6 +925,10 @@ function create(engineCtx) {
    *  rows and its adapter record — through the two serialized doors, nothing
    *  else's. */
   async function removeRecord(rec) {
+    // lane grants-unify: its rows in THE grants store first (its grains, its conversations', its rules') — a refused write
+    // stops the removal before anything else is touched (a re-added account must never inherit the old grants)
+    const wr = CG.removeAccount(rec.id, { patternIds: patternsOf(rec.id).map((pa) => pa.id), by: 'user' });
+    if (!wr.ok) throw httpErr(500, wr.code || 'not_written', `the grants of ${rec.label || rec.id} could not be removed (${wr.error}) — nothing was removed`);
     dropLive(rec.id, 'removed');
     paceCarry.delete(rec.id);   // R5: nothing left to charge
     retractUnsaved(rec);   // R5 verify r6: the unsaved-sign-in item goes with the record (the disk holds no record to lag behind)
@@ -943,7 +941,6 @@ function create(engineCtx) {
       for (const k of Object.keys(ix.conversations)) if (ix.conversations[k] && ix.conversations[k].adapterId === rec.id) delete ix.conversations[k];
       if (ix.accountAssignments) delete ix.accountAssignments[rec.id];
       if (ix.patternAssignments) for (const [id, pa] of Object.entries(ix.patternAssignments)) if (pa && pa.adapterId === rec.id) delete ix.patternAssignments[id];
-      if (Array.isArray(ix.accountGrants)) ix.accountGrants = ix.accountGrants.filter((g) => !(g && g.scope && g.scope.id === rec.id));
     });
     await store.adapters.update((a) => { const i = a.adapters.indexOf(rec); if (i >= 0) a.adapters.splice(i, 1); });
     await purgeIfDeclared(rec);

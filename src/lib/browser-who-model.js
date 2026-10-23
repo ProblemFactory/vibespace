@@ -148,7 +148,43 @@ export function pickerRows(view, { sessions = [], groups = [], groupsOfSession =
     wire.set(key, { kind: 'session', key: cb.key });
     keyOfPick.set(key, cb.key);
   }
-  return { rows, selected, remote, wire, keyOfPick };
+  // lane grants-unify — «除了»: the members LEFT OUT (the view's `except`) as the picker's exception keys — a live
+  // conversation by its picker row (sent again as a live pick: the server names it by its conversation), one not running
+  // now / a deleted Task Group as an extra row of the exception list (sent back as the key / id it has)
+  const exceptSelected = [], exceptExtra = [], exceptWire = new Map();
+  for (const w of Array.isArray(use.except) ? use.except : []) {
+    if (!w || typeof w !== 'object') continue;
+    if (w.kind === 'task') {
+      const key = `task:${w.id}`;
+      if (!wire.has(key)) exceptExtra.push({ key, kind: 'group', id: w.id, name: w.title ? String(w.title) : t('a deleted Task Group'), hint: w.title ? '' : t('not in the list now'), groupIds: [], groupNames: [] });
+      exceptWire.set(key, { kind: 'task', id: w.id });
+      exceptSelected.push(key);
+      continue;
+    }
+    const live = rows.find((r) => r.kind === 'agent' && r.live && ((w.conversationId && String(r.id) === String(w.conversationId)) || (w.key && keyOfPick.get(r.key) === w.key)));
+    if (live) { exceptSelected.push(live.key); continue; }
+    const key = `session:x:${w.key}`;
+    const name = (w.name && w.live ? w.name : '') || (w.conversationId ? nameOfConversation(w.conversationId) : '') || t('A conversation that is not running now');
+    exceptExtra.push({ key, kind: 'agent', id: w.conversationId || w.key, name, live: false, hint: t('not running now'), groupIds: [], groupNames: [] });
+    exceptWire.set(key, { kind: 'session', key: w.key });
+    exceptSelected.push(key);
+  }
+  return { rows, selected, remote, wire, keyOfPick, exceptSelected, exceptExtra, exceptWire };
+}
+/** lane grants-unify — «除了»: the picker's exception keys → the PATCH's `except` rows (a live conversation as a live pick —
+ *  the server names it by its conversation, never giving it a browser key; a kept row as the key / id it has). */
+export function draftExcept(keys, model) {
+  const out = [];
+  const m = model || {};
+  for (const k of Array.isArray(keys) ? keys : []) {
+    const key = String(k);
+    const kept = m.exceptWire && m.exceptWire.get(key);
+    if (kept) { out.push({ ...kept }); continue; }
+    if (key.startsWith('task:')) { out.push({ kind: 'task', id: key.slice('task:'.length) }); continue; }
+    const row = (m.rows || []).find((r) => r.key === key);
+    if (row && row.webuiId) out.push({ kind: 'session', session: String(row.webuiId) });
+  }
+  return out;
 }
 
 /** The picker's selection → the PATCH's `who` rows (unknown keys dropped; ALL AGENTS is the mode, never a row). */
@@ -168,13 +204,15 @@ export function draftUse(selected, wire) {
 
 /** How many conversations USING it now (a lease) the draft takes it from: a holder whose key is not in the draft and
  *  none of whose Task Groups is either. "All my conversations" takes it from nobody. */
-export function loseCount(usedBy, { mode = 'all', keys = [], taskIds = [] } = {}) {
-  if (mode !== 'only') return 0;
+export function loseCount(usedBy, { mode = 'all', keys = [], taskIds = [], exceptKeys = [] } = {}) {
   const K = new Set((keys || []).map(String)), T = new Set((taskIds || []).map(String));
+  // lane grants-unify — «除了»: a holder LEFT OUT (and not picked by its own key) loses it, under All agents too
+  const X = new Set((exceptKeys || []).map(String));
+  if (mode !== 'only') return (Array.isArray(usedBy) ? usedBy : []).filter((u) => u && u.leased && X.has(String(u.key)) && !K.has(String(u.key))).length;
   // the keeper's re-judge, mirrored: a holder that is NOT running (`live: false`, no session carries its key) has no
   // readable Task Groups now — with a Task Group row in the draft it is kept undecided (judged at its next command), so
   // it is not one that loses it when you save
-  return (Array.isArray(usedBy) ? usedBy : []).filter((u) => u && u.leased && !K.has(String(u.key)) && !(u.taskIds || []).some((x) => T.has(String(x))) && !(u.live === false && T.size > 0)).length;
+  return (Array.isArray(usedBy) ? usedBy : []).filter((u) => u && u.leased && !K.has(String(u.key)) && (X.has(String(u.key)) || (!(u.taskIds || []).some((x) => T.has(String(x))) && !(u.live === false && T.size > 0)))).length;
 }
 
 /** The success toast: "Who can use work: all my conversations" / "Who can use work: A, B". */

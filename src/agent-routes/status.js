@@ -48,7 +48,24 @@ app.post('/api/agent/user-todo', async (req, res) => {
         if (j.bad.length) return res.status(422).json({ code: 'bad-artifact', refused: j.bad, error: `nothing was filed — ${j.bad.length} attachment${j.bad.length > 1 ? 's' : ''} would not open for the user: ${j.bad.map((b) => b.error).join(' | ')}` });
         artifacts = j.artifacts;
       }
-      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', origin: 'agent', sessionName: s.name || null, kind: add.kind || null, options: add.options == null ? null : add.options, artifacts, cwd: s.cwd || null, hostId: s.host && s.host !== 'local' ? s.host : null });
+      // lane controls-that-lie (naive study round 4, R1): `--grant browser:<label|id>` — an ask that names a GRANT carries the
+      // grant ITSELF as its action, resolved here from the keeper's own list (never the agent's words): the tray draws the
+      // owner's real control («Let this conversation use …»), which writes «Who can use it» and THEN answers the agent. A
+      // family with another road, an unknown / ambiguous / temporary profile ⇒ refused by name, NOTHING filed (PURE src/ask-grant.js)
+      let grantFields = null;
+      if (add.grant != null) {
+        const AG = require('../ask-grant.js');
+        const g = AG.parseGrantSpec(add.grant);
+        if (!g.ok) return res.status(400).json({ error: g.error, code: g.code });
+        if (s.host && s.host !== 'local') return res.status(400).json({ error: '--grant browser: this conversation runs on another machine — the Agent browser runs on the VibeSpace machine only; nothing was filed', code: 'bad-grant' });
+        let k = null;
+        try { k = require('../server/browser-keeper.js').keeper(); } catch { k = null; }
+        if (!k || typeof k.list !== 'function') return res.status(503).json({ error: '--grant browser: the Agent browser is not available on this instance; nothing was filed', code: 'grant-unavailable' });
+        const tg = AG.browserGrantTarget((k.list() || {}).profiles, g.ref);
+        if (!tg.ok) return res.status(tg.code === 'grant-not-found' ? 404 : 409).json({ error: tg.error, code: tg.code });
+        grantFields = AG.grantItemFields(tg.profile);
+      }
+      const item = userTodos.add(key, { text: add.text, detail: add.detail, urgency: add.urgency, by: 'agent', origin: 'agent', sessionName: s.name || null, kind: add.kind || null, options: add.options == null ? null : add.options, artifacts, cwd: s.cwd || null, hostId: s.host && s.host !== 'local' ? s.host : null, ...(grantFields || {}) });
       if (artifacts) require('../server/artifact-registry.js').presentAsk(s, item.artifacts, { id: item.id }); // the conversation's Artifacts list shows them (the one writer) // kind: 'notice' = FYI only (vibespace-ask --notice); options = one-click answers (--options "A|B|C") — both validated by the store, a bad shape refused by name
       bookkept(s);
       return res.json({ success: true, item, chars: cliText.chars(item.text), ...(item.detail ? { detailChars: cliText.chars(item.detail) } : {}), tray: (({ name, phrase }) => ({ name, phrase }))(OF.tray()) });   // lane cli-one-text-arg: what the store KEPT (a question past 500 is cut) · B-7960 b: WHERE it landed in the hub's words (its label + current place)

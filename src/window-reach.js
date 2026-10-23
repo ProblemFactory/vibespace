@@ -64,10 +64,19 @@
  * exposed by a guess nor read as revoked (`reachFor`'s `unreadable`); `principalsNow` reads the launcher's remembered
  * principals against the picker's roster (gone ⇒ `absent`, present ⇒ the CURRENT name).
  *
+ * ONE GRANT MODEL (lane grants-unify, 2026-10-23): a window's ROWS live in the ONE grants store (door `window`, the
+ * window id as the resource — src/server/grants-store.js), each row's `by` its entry's `origin`, its `grantedAt` the
+ * entry's `at`; the share MODE stays in data/window-reach.json (never a who). `recordOfRows` builds the record from
+ * them, `rowOfRecord` writes it back; `reachFor` is the model's `admits` (src/grant-model.js) over that row — and a
+ * window may leave members of a shared Task Group (or of All agents) OUT (`except`): refused `excepted` by name, the
+ * lease dropped as a revoke. A session is named by its conversation key in the model's ONE spelling (the conversation
+ * id; `webui:<id>` before it has one) — a pre-unify `<backend>:<cid>` key is mapped (`normPrincipal`).
+ *
  * Gate: scripts/test-window-reach.mjs (fast — the principal × scope table,
  * widen-only, the opener exception, the mode table, the pixel plan, a
  * patched-copy control).
  */
+const GM = require('./grant-model.js'); // PURE → PURE: THE grant model (lane grants-unify)
 
 const { capsOf } = require('./backend-caps.js'); // PURE → PURE: caps.terminalOnly (a plain shell has no agent to reach)
 const { defaultPinFor } = require('./desktop-pin.js'); // PURE → PURE: E2b's pixels-only default pin (lane e2c)
@@ -105,7 +114,10 @@ const REFUSALS = Object.freeze(['not_exposed', 'mode_pixels', 'window_not_visibl
   'fork_pending',   // lane channel-withdraw verify r6: "ask <agent> to take control" on a fork that still carries its parent's conversation id — ask again in a moment
   // lane E verify r2 (L4): the Task Group store could not be READ while a group row could have decided — the verb is
   // refused, the lease is KEPT (an unreadable store is not the user taking the window away)
-  'reach_unreadable']);
+  'reach_unreadable',
+  // lane grants-unify: the user left this conversation out of a group's / All agents' share (an exception) · a share that
+  // both names and leaves out one principal · a stored row the model cannot read
+  'excepted', 'except_conflicts', 'unknown_shape']);
 function refuse(code, why, extra = {}) {
   if (!REFUSALS.includes(code)) throw new Error(`window-reach: unknown refusal code ${code}`);
   return { ok: false, code, why, ...extra };
@@ -113,6 +125,8 @@ function refuse(code, why, extra = {}) {
 
 /** The owner's sentence for a tree verb in pixel mode (D7) — ONE spelling for the engine, the CLI and the manual. */
 const PIXELS_SENTENCE = 'the user shared this window in pixel mode — read it with screenshot, act with click --at x,y / type / key / scroll';
+/** lane grants-unify: the one spelling of `excepted` (engine, CLI, manual). */
+const EXCEPTED_SENTENCE = 'the user left this conversation out of who this window is shared with (an exception on its share, in the window\'s ⋯ → Share with agents…) — ask the user to lift the exception or to share it with this conversation itself';
 /** The CLI's remedy line for not_exposed (the manual quotes it). */
 const NOT_EXPOSED_SENTENCE = 'the user has not shared this window with you — ask them (they can share it from the window\'s ⋯ menu)';
 /** Lane E verify r2 (L4): the one spelling of reach_unreadable (engine, CLI, manual). */
@@ -133,26 +147,40 @@ function callerKeys(s, webuiId) {
   if (webuiId != null && webuiId !== '') { const w = `webui:${webuiId}`; if (!out.includes(w)) out.push(w); }
   return out;
 }
-/** A principal as stored, or null when it is not one (a closed kind, a key of the right shape, a clean name). */
+/** A session's key in the grant model's ONE spelling: the conversation id, or `webui:<id>` — a pre-unify
+ *  `<backend>:<cid>` key mapped to its conversation id; null when it is neither. */
+function sessionKeyNow(id) {
+  const k = String(id == null ? '' : id);
+  if (SESSION_KEY_RE.test(k)) return GM.keyFromSessionKey(k);
+  return GM.CONVERSATION_KEY_RE.test(k) && !k.includes(':') ? k : null;
+}
+/** A principal as stored, or null when it is not one (a closed kind, a key of the right shape, a clean name). A session
+ *  is named by its conversation key (lane grants-unify: the ONE spelling — `<backend>:<cid>` arrives mapped). */
 function normPrincipal(p) {
   if (!p || typeof p !== 'object') return null;
   const kind = String(p.kind || '');
-  const id = String(p.id == null ? '' : p.id);
+  let id = String(p.id == null ? '' : p.id);
   if (!PRINCIPAL_KINDS.includes(kind)) return null;
   if (kind === 'everyone') return { kind, id: EVERYONE_ID };   // ONE spelling, no name (the reader words it)
-  if (kind === 'session' ? !SESSION_KEY_RE.test(id) : !GROUP_ID_RE.test(id)) return null;
+  if (kind === 'session') { id = sessionKeyNow(id); if (!id) return null; }
+  else if (!GROUP_ID_RE.test(id)) return null;
   const name = cleanName(p.name);
   return name ? { kind, id, name } : { kind, id };
 }
+/** A record principal ⇄ the grant model's principal (`session` ⇄ `conversation`). */
+const toGrantPrincipal = (p) => (p.kind === 'session' ? { kind: 'conversation', key: p.id } : p.kind === 'group' ? { kind: 'group', id: p.id } : { kind: 'everyone' });
+const fromGrantPrincipal = (e) => (e.kind === 'conversation' ? { kind: 'session', id: e.key } : e.kind === 'group' ? { kind: 'group', id: e.id } : { kind: 'everyone', id: EVERYONE_ID });
 const principalKey = (p) => `${p.kind}\u0000${p.id}`;
 
 // ── the record + its transitions (every one returns a NEW record) ───────────
-function emptyRecord(windowId) { return { windowId: String(windowId || ''), mode: 'auto', rows: [] }; }
-/** A stored record read back tolerantly: unknown kinds / origins / modes are dropped or defaulted, never trusted. */
+function emptyRecord(windowId) { return { windowId: String(windowId || ''), mode: 'auto', rows: [], except: [] }; }
+/** A record read back tolerantly (the transitions' input — `recordOfRows` builds the live one): unknown kinds / origins /
+ *  modes are dropped or defaulted, never trusted; `except` kept (a malformed one makes the record `unknown` — never read wider). */
 function normRecord(r, windowId) {
   const out = emptyRecord(windowId != null ? windowId : r && r.windowId);
   if (!r || typeof r !== 'object') return out;
   if (MODES.includes(r.mode)) out.mode = r.mode;
+  if (r.unknown) out.unknown = true;
   const seen = new Set();
   for (const row of Array.isArray(r.rows) ? r.rows : []) {
     const p = normPrincipal(row && row.principal);
@@ -160,7 +188,49 @@ function normRecord(r, windowId) {
     seen.add(principalKey(p));
     out.rows.push({ principal: p, grantedAt: Number(row.grantedAt) || 0, by: GRANT_ORIGINS.includes(row.by) ? row.by : 'user' });
   }
+  for (const x of Array.isArray(r.except) ? r.except : []) {
+    const p = normPrincipal(x);
+    if (!p || p.kind === 'everyone') { out.unknown = true; continue; }
+    if (!out.except.some((e) => principalKey(e) === principalKey(p))) out.except.push(p);
+  }
   return out;
+}
+/** THE LIVE RECORD (lane grants-unify): the share mode (data/window-reach.json) + the window's grant row (`rows` =
+ *  `grants.rowsFor('window', windowId)`). A row the model cannot read ⇒ `unknown` (every caller refused by name). */
+function recordOfRows(windowId, mode, rows) {
+  const out = emptyRecord(windowId);
+  if (MODES.includes(mode)) out.mode = mode;
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return out;
+  const n = GM.normRow(list[0]);
+  if (!n.ok || n.row.door !== 'window') return { ...out, unknown: true };
+  for (const e of n.row.to) {
+    const p = normPrincipal({ ...fromGrantPrincipal(e), name: e.name });
+    if (!p || out.rows.some((r) => principalKey(r.principal) === principalKey(p))) continue;
+    out.rows.push({ principal: p, grantedAt: Number(e.at) || 0, by: GRANT_ORIGINS.includes(e.origin) ? e.origin : 'user' });
+  }
+  out.except = n.row.except.map((x) => normPrincipal({ ...fromGrantPrincipal(x), name: x.name })).filter(Boolean);
+  return out;
+}
+/** The record's row for the ONE writer: `{door:'window', resource, to, except}` (each entry its origin, at, name). */
+function rowOfRecord(record) {
+  const rec = normRecord(record);
+  return { door: 'window', resource: rec.windowId || '-', to: rec.rows.map((r) => ({ ...toGrantPrincipal(r.principal), ...(r.principal.name ? { name: r.principal.name } : {}), ...(r.grantedAt ? { at: r.grantedAt } : {}), origin: r.by })), except: rec.except.map(toGrantPrincipal) };
+}
+/** «除了»: the members left OUT of the share's Task Groups / All agents. A principal the share names itself cannot be left
+ *  out (`except_conflicts`); everyone never is (`bad_principal`). */
+function setExcept(record, list) {
+  const rec = normRecord(record);
+  const out = [];
+  for (const x of Array.isArray(list) ? list : []) {
+    const p = normPrincipal(x);
+    if (!p || p.kind === 'everyone') return { ...refuse('bad_principal', 'an exception names a conversation or a Task Group'), record: rec, changed: false };
+    if (rec.rows.some((r) => principalKey(r.principal) === principalKey(p))) return { ...refuse('except_conflicts', `${p.kind === 'session' ? 'that conversation' : 'that Task Group'} is shared with by name — it cannot also be left out`), record: rec, changed: false };
+    if (!out.some((e) => principalKey(e) === principalKey(p))) out.push(p);
+  }
+  const changed = JSON.stringify(rec.except.map(principalKey).sort()) !== JSON.stringify(out.map(principalKey).sort());
+  rec.except = out;
+  return { ok: true, record: rec, changed };
 }
 /** Grant one principal. ONE row per principal: an existing row is kept as it is (widen-only; its origin stays). */
 function grant(record, principal, { by = 'user', at = 0 } = {}) {
@@ -176,6 +246,7 @@ function grant(record, principal, { by = 'user', at = 0 } = {}) {
   }
   const row = { principal: p, grantedAt: Number(at) || 0, by };
   rec.rows.push(row);
+  rec.except = rec.except.filter((x) => principalKey(x) !== principalKey(p));   // a principal shared with by name is not left out too
   return { ok: true, record: rec, changed: true, row };
 }
 /** Revoke ONE principal: drops only that principal's row (every other row, group rows included, stays). */
@@ -212,20 +283,18 @@ function openerGrant(record, { key, name = '', at = 0 } = {}) { return grant(rec
  */
 function reachFor(record, ctx = {}) {
   const rec = normRecord(record);
-  const keys = new Set([...(Array.isArray(ctx.sessionKeys) ? ctx.sessionKeys : []), ...(ctx.sessionId ? [String(ctx.sessionId)] : [])].map(String));
-  const groups = new Set((Array.isArray(ctx.groupIds) ? ctx.groupIds : []).map(String));
-  let best = null;
-  // the more SPECIFIC row decides which row is named: a session's own > a group's > All agents
-  const SPECIFIC = { session: 2, group: 1, everyone: 0 };
-  const callerKnown = keys.size > 0;
-  for (const row of rec.rows) {
-    const k = row.principal.kind;
-    const hit = k === 'everyone' ? callerKnown : k === 'session' ? keys.has(row.principal.id) : groups.has(row.principal.id);
-    if (!hit) continue;
-    if (!best || SPECIFIC[k] > SPECIFIC[best.principal.kind]) best = row;
+  if (rec.unknown) return { level: 'hidden', via: null, row: null, unknown: true };
+  // the caller's keys in the ONE spelling (a pre-unify `<backend>:<cid>` key mapped; a bare `sessionId` is one more key)
+  const keys = [...(Array.isArray(ctx.conversationKeys) ? ctx.conversationKeys : (Array.isArray(ctx.sessionKeys) ? ctx.sessionKeys : []).map(sessionKeyNow)), ...(ctx.sessionId ? [sessionKeyNow(ctx.sessionId) || String(ctx.sessionId)] : [])].filter(Boolean);
+  // THE ONE ADMISSION (src/grant-model.js admits) — the most SPECIFIC admitting entry decides which row is named
+  const v = GM.admits([rowOfRecord(rec)], { conversationKeys: keys, groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], groupsUnreadable: !!ctx.unreadable });
+  if (!v.ok) {
+    if (v.code === 'groups_unreadable') return { level: 'hidden', via: null, row: null, unreadable: true };
+    if (v.code === 'excepted') return { level: 'hidden', via: null, row: null, excepted: true, except: v.entry ? fromGrantPrincipal(v.entry) : null };
+    return { level: 'hidden', via: null, row: null };
   }
-  if (!best) return ctx.unreadable && rec.rows.some((r) => r.principal.kind === 'group') ? { level: 'hidden', via: null, row: null, unreadable: true } : { level: 'hidden', via: null, row: null };
-  return { level: 'exposed', via: best.principal.kind === 'group' ? 'group' : best.principal.kind === 'everyone' ? 'everyone' : best.by === 'self-open' ? 'self-open' : 'session', row: best };
+  const best = rec.rows.find((r) => principalKey(r.principal) === principalKey(fromGrantPrincipal(v.entry))) || null;
+  return { level: 'exposed', via: v.via === 'group' ? 'group' : v.via === 'everyone' ? 'everyone' : best && best.by === 'self-open' ? 'self-open' : 'session', row: best };
 }
 const isExposed = (record, ctx) => RANK[reachFor(record, ctx).level] >= RANK.exposed;
 
@@ -386,7 +455,7 @@ function requestText({ label = '', handle = '', mode = 'auto', resolved = null, 
 // ── views for the UI ─────────────────────────────────────────────────────────
 function viewOf(record, { resolved = null } = {}) {
   const rec = normRecord(record);
-  return { windowId: rec.windowId, mode: rec.mode, rows: rec.rows.map((r) => ({ principal: { ...r.principal }, grantedAt: r.grantedAt, by: r.by })), resolved: resolved && RESOLVED_MODES.includes(resolved.mode) ? { mode: resolved.mode, why: resolved.why || null } : null };
+  return { windowId: rec.windowId, mode: rec.mode, rows: rec.rows.map((r) => ({ principal: { ...r.principal }, grantedAt: r.grantedAt, by: r.by })), except: rec.except.map((p) => ({ ...p })), ...(rec.unknown ? { unknown: true } : {}), resolved: resolved && RESOLVED_MODES.includes(resolved.mode) ? { mode: resolved.mode, why: resolved.why || null } : null };
 }
 /** The chip's facts: how many principals, and the mode (the resolved one when auto has resolved). */
 function shareSummary(record, resolved = null) {
@@ -407,11 +476,11 @@ function pickerModel({ sessions = [], groups = [], record = null, principals = n
   for (const p of Array.isArray(principals) ? principals : []) { const n = normPrincipal(p); if (n && !chosen.has(principalKey(n))) chosen.set(principalKey(n), { principal: n, by: 'user', grantedAt: 0 }); }
   const allRow = chosen.get(principalKey({ kind: 'everyone', id: EVERYONE_ID })) || null;
   // ALL AGENTS: its own entry (never an `other`), checked when the record names it
-  const out = { everyone: { checked: !!allRow, by: allRow ? allRow.by : null }, sessions: [], groups: [], others: [], mode: rec.mode };
+  const out = { everyone: { checked: !!allRow, by: allRow ? allRow.by : null }, sessions: [], groups: [], others: [], mode: rec.mode, except: rec.except.map((p) => ({ ...p })) };
   const seen = new Set([principalKey({ kind: 'everyone', id: EVERYONE_ID })]);
   for (const s of Array.isArray(sessions) ? sessions : []) {
     if (!s || !s.id || capsOf(s.backend).terminalOnly) continue;
-    const key = sessionKeyOf(s, s.id);
+    const key = GM.conversationKeyOf(s, s.id);   // lane grants-unify: the ONE spelling
     if (seen.has('session\u0000' + key)) continue;
     seen.add('session\u0000' + key);
     const row = chosen.get('session\u0000' + key) || chosen.get('session\u0000webui:' + s.id) || null;
@@ -476,7 +545,7 @@ function principalsNow(principals, roster) {
   const live = new Map();
   for (const s of roster && Array.isArray(roster.sessions) ? roster.sessions : []) {
     if (!s || !s.id || capsOf(s.backend).terminalOnly) continue;
-    for (const k of callerKeys(s, s.id)) if (!live.has(k)) live.set(k, s);
+    for (const k of GM.conversationKeysOf(s, s.id)) if (!live.has(k)) live.set(k, s);   // lane grants-unify: the ONE spelling
   }
   const listed = new Map();
   for (const g of roster && Array.isArray(roster.groups) ? roster.groups : []) if (g && g.id && !g.archived) listed.set(String(g.id), g);
@@ -536,9 +605,9 @@ function normShare(share) {
 
 module.exports = {
   unshownFrames, windowOfNode, // lane window-dialog-member
-  LEVELS, RANK, PRINCIPAL_KINDS, EVERYONE_ID, GRANT_ORIGINS, MODES, RESOLVED_MODES, REFUSALS, refuse, PIXELS_SENTENCE, NOT_EXPOSED_SENTENCE, REACH_UNREADABLE_SENTENCE, NOTE_MAX, CONTAINER_ROLES, TREE_VERBS,
-  sessionKeyOf, callerKeys, normPrincipal, principalKey,
-  emptyRecord, normRecord, grant, revoke, setMode, openerGrant, reachFor, isExposed,
+  LEVELS, RANK, PRINCIPAL_KINDS, EVERYONE_ID, GRANT_ORIGINS, MODES, RESOLVED_MODES, REFUSALS, refuse, PIXELS_SENTENCE, NOT_EXPOSED_SENTENCE, REACH_UNREADABLE_SENTENCE, EXCEPTED_SENTENCE, NOTE_MAX, CONTAINER_ROLES, TREE_VERBS,
+  sessionKeyOf, callerKeys, normPrincipal, principalKey, sessionKeyNow,
+  emptyRecord, normRecord, recordOfRows, rowOfRecord, setExcept, grant, revoke, setMode, openerGrant, reachFor, isExposed,
   usableNodes, resolveMode, REASON_MAX, verbGate, launchModeVerdict,
   pixelPlan, visibilityVerdict, mapPoint,
   requestText, viewOf, shareSummary, pickerModel, proposalOf, setProposal, launchShare, launchSummary, principalsNow, rememberedCount, normShare,

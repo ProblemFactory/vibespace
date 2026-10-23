@@ -108,7 +108,7 @@ const RECORD_FIELDS = ['id', 'convId', 'adapterId', 'vendorId', 'at', 'author', 
  *  record's thread / reply chain when the vendor names one and it is not this
  *  record). A record stored before either field existed carries neither, and
  *  every reader treats absence as "not said". */
-const OPTIONAL_FIELDS = ['blocks', 'root', 'facts', 'kind', 'systemKind'];   // + `facts` (lane message-facts, B-f066); + `kind` / `systemKind` (lane lark-system-records)
+const OPTIONAL_FIELDS = ['blocks', 'root', 'facts', 'kind', 'systemKind', 'draftState'];   // + `facts` (lane message-facts, B-f066); + `kind` / `systemKind` (lane lark-system-records); + `draftState` (lane gmail-draft-not-a-message)
 
 /** Bounds. A vendor body is peer-controlled and is synced to every client. */
 const MAX_TEXT = 64 * 1024;
@@ -124,8 +124,18 @@ const MENTION_KINDS = Object.freeze(['person', 'broadcast', 'group']);
  *  words an empty notice by it), `text` the vendor's own words ('' when it gave none — never a blank). No rule matches it
  *  (src/channel-filter.js), it is never unread (src/channel-focus.js `systemRead`), the window draws one dim line. A
  *  record without `kind` is a message (every record stored before). */
-const RECORD_KINDS = Object.freeze(['system']);
+const RECORD_KINDS = Object.freeze(['system', 'draft']);   // + `draft`: lane gmail-draft-not-a-message
 const SYSTEM_KINDS = Object.freeze(['recall', 'join', 'leave', 'rename', 'other']);
+/** lane gmail-draft-not-a-message (fleet feedback fb-9aa1d3bd1e: a Gmail thread showed an unsent draft at its top, dated and
+ *  addressed like a sent mail — "the user thought it had gone out"): A RECORD'S KIND IS READ OFF THE VENDOR'S LABELS, AND A
+ *  DRAFT IS NEVER A MESSAGE. Gmail lists the account's unsent DRAFT among a thread's messages; such a record says so:
+ *  `kind: 'draft'`, `draftState` one of DRAFT_STATES (CLOSED — `trashed`: the draft sits in the Trash / Spam, never drawn,
+ *  only counted). Nobody received it: no rule matches it, it is never unread and never the row's last line (the same
+ *  doors as a system notice), the window draws it apart at the END of the thread (`draftsOf`), the agent's read marks it.
+ *  A stored record carrying the vendor's DRAFT label is re-judged at read (`asDraftRecord` — no migration). */
+const DRAFT_STATES = Object.freeze(['saved', 'trashed']);
+/** The vendor labels that put a draft in the bin (Gmail's system label ids). */
+const DRAFT_BIN_LABELS = Object.freeze(['TRASH', 'SPAM']);
 const MAX_ATTACHMENTS = 64;
 const MAX_RAW_BYTES = 8 * 1024;
 
@@ -623,7 +633,8 @@ function makeRecord(input, opts = {}) {
   // lane lark-system-records: a SYSTEM notice has nobody behind it — an author id is a contradiction (refused), the rest of
   // the author is cleared to the one system shape
   const system = r.kind === 'system';
-  if (r.kind !== undefined && r.kind !== null && !system) throw new Error(`channel-record: kind must be one of ${RECORD_KINDS.join('|')} or absent`);
+  const draft = r.kind === 'draft';
+  if (r.kind !== undefined && r.kind !== null && !system && !draft) throw new Error(`channel-record: kind must be one of ${RECORD_KINDS.join('|')} or absent`);
   if (system && author.id) throw new Error('channel-record: a system record names no author (the vendor said it, nobody wrote it)');
   if (system) { delete author.alt; delete author.external; author.name = ''; author.isSelf = false; author.isBot = false; author.isSystem = true; }
 
@@ -695,6 +706,7 @@ function makeRecord(input, opts = {}) {
     if (v.ok && v.facts.length) out.facts = v.facts;
   }
   if (system) { out.kind = 'system'; out.systemKind = SYSTEM_KINDS.includes(r.systemKind) ? r.systemKind : 'other'; }
+  if (draft) { out.kind = 'draft'; out.draftState = DRAFT_STATES.includes(r.draftState) ? r.draftState : 'saved'; }
   return out;
 }
 
@@ -712,6 +724,44 @@ function asSystemRecord(r) {
   author.name = '';   // the one system author (makeRecord's shape), built field by field like makeRecord's
   Object.assign(author, { isSelf: false, isBot: false, isSystem: true });
   return { ...r, author, text: words, kind: 'system', systemKind: 'other' };
+}
+
+/** lane gmail-draft-not-a-message: is this record the account's unsent DRAFT (nobody's message)? */
+const isDraftRecord = (r) => !!r && typeof r === 'object' && r.kind === 'draft';
+/** A draft's state off the vendor's labels: in the bin (Trash / Spam) ⇒ `trashed`, else `saved`. */
+const draftStateOf = (labels) => (Array.isArray(labels) && labels.some((l) => DRAFT_BIN_LABELS.includes(l)) ? 'trashed' : 'saved');
+/** THE READ-SIDE RE-JUDGE for drafts (no migration): a record stored before `kind: 'draft'` existed whose vendor labels
+ *  (`raw.labelIds` — Gmail's, kept on every record it wrote) name DRAFT is served as the draft it was. Every other record
+ *  comes back as ITSELF (the same object). */
+function asDraftRecord(r) {
+  if (!r || typeof r !== 'object' || r.kind !== undefined || !r.raw || typeof r.raw !== 'object') return r;
+  const labels = Array.isArray(r.raw.labelIds) ? r.raw.labelIds : null;
+  if (!labels || !labels.includes('DRAFT')) return r;
+  return { ...r, kind: 'draft', draftState: draftStateOf(labels) };
+}
+/**
+ * A CONVERSATION'S DRAFTS, APART (PURE — the window and the agent's read ask this one rule). `records` oldest-first →
+ * `{messages, drafts, trashed, replaced}`: `messages` = every record that is not a draft, in order; `drafts` = the
+ * account's SAVED drafts still standing, oldest first (drawn after the last message, never at their date); `trashed` =
+ * how many drafts sit in the bin (never drawn — counted); `replaced` = saved drafts a LATER draft or a later SENT mail of
+ * the account's in the same thread stands for (Gmail replaces a draft's message on every save and deletes it on send —
+ * the stored copy is a version the vendor no longer holds; never drawn, never counted as unsent).
+ */
+function draftsOf(records) {
+  const list = Array.isArray(records) ? records.filter((r) => r && typeof r === 'object') : [];
+  const messages = [], saved = [];
+  let trashed = 0;
+  for (const r of list) {
+    if (!isDraftRecord(r)) { messages.push(r); continue; }
+    if (r.draftState === 'trashed') trashed++; else saved.push(r);
+  }
+  const at = (r) => Number(r.at) || 0;
+  const place = (r) => String(r.threadKey || r.convId || '');
+  // the newest draft-or-send instant per thread: a saved draft older than it was replaced (a later save, or the send)
+  const newest = new Map();
+  for (const r of list) if (isDraftRecord(r) || (r.author && r.author.isSelf === true && r.kind === undefined)) newest.set(place(r), Math.max(newest.get(place(r)) || 0, at(r)));
+  const drafts = saved.filter((d) => !((newest.get(place(d)) || 0) > at(d)));
+  return { messages, drafts, trashed, replaced: saved.length - drafts.length };
 }
 
 // ── REACTIONS + SIDE RECORDS (lane channel-threads, 2026-09-28) ─────────────
@@ -955,6 +1005,7 @@ function makeConversation(input) {
 
 module.exports = {
   RECORD_KINDS, SYSTEM_KINDS, isSystemRecord, asSystemRecord,   // lane lark-system-records
+  DRAFT_STATES, isDraftRecord, draftStateOf, asDraftRecord, draftsOf,   // lane gmail-draft-not-a-message
   RECORD_FIELDS, OPTIONAL_FIELDS, MAX_TEXT, MAX_RAW_BYTES, FRAME_TAG_RE, FRAME_TAGS, FRAME_PASSES, FRAME_WITHHELD, foldFrames, MENTION_KINDS,
   BLOCK_KINDS, RUN_KINDS, ATTACHMENT_ROLES, SYS_WHATS, BLOCK_LIMITS, LINK_SCHEMES,
   makeRecord, makeConversation, resolveMentions, inertFrames, inertFrameLine, inertOpeners, peerText, peerName, carriesFrame, recordKey, isSynthetic,

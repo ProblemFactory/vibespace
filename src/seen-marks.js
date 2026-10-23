@@ -16,7 +16,7 @@
 //     snapshot the diff;
 //   · the tools intro / manager intro → their mark is the BUILD VERSION that delivered them: a new build teaches once;
 //   · the user's preamble → its mark is already the hash of its text (a new build does not change what the agent saw).
-// The folder signature (path:size:mtime of up to 200 files, ~7 KB) is persisted as a DIGEST; the route trades a held
+// The Context table's signature (path:size:mtime of every told row's files) is persisted as a DIGEST; the route trades a held
 // digest for the live signature when they match (`liveSig`) and treats a mismatch as a changed folder (re-sent whole:
 // the file-level diff needs the old signature itself).
 // A meta with no marks (written before this lane) restores nothing: that session behaves as before — everything once.
@@ -57,7 +57,9 @@ function liteSnap(snap, key) {
   if (!key || !snap || typeof snap !== 'object' || typeof snap.objHash !== 'string') return null;
   const mine = (Array.isArray(snap.backlog) ? snap.backlog : []).filter((b) => b && (b.addedBy === key || (Array.isArray(b.claimedBy) && b.claimedBy.includes(key))));
   if (mine.length > SNAP_MAX_ITEMS) return null;
-  const out = { title: typeof snap.title === 'string' ? snap.title : '', objHash: snap.objHash, contextDir: snap.contextDir || null, backlog: mine, lastProgressAt: Number(snap.lastProgressAt) || 0, of: key };
+  // lane task-group-context: the Context table rides as its HASH only (the row-by-row list stays in memory) — a restored
+  // snapshot whose table changed is re-sent whole; a pre-table one (no hash) the same
+  const out = { title: typeof snap.title === 'string' ? snap.title : '', objHash: snap.objHash, ...(typeof snap.ctxHash === 'string' ? { ctxHash: snap.ctxHash } : {}), backlog: mine, lastProgressAt: Number(snap.lastProgressAt) || 0, of: key };
   return JSON.stringify(out).length <= SNAP_MAX_BYTES ? out : null;
 }
 const snapOk = (v) => !!v && typeof v === 'object' && typeof v.objHash === 'string' && typeof v.title === 'string' && Array.isArray(v.backlog) && v.backlog.length <= SNAP_MAX_ITEMS

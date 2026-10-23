@@ -34,6 +34,13 @@
 //    only while All holds access; window share: checked from the record), drawn the same way. Every permission
 //    surface passes it (scripts/test-everyone-principal.mjs is the census) — the caller maps the row to its own
 //    model's spelling.
+//  · «除了» (lane grants-unify, 2026-10-23 — the owner's two concepts, 「给谁」 and 「除了」): `except: {selected, extra?}`
+//    on a MULTI picker folds ONE more row under the chips once a Task Group or All agents is picked — «除了（可选）» —
+//    opening the SAME searchable list over the members to leave out (PURE `exceptCandidates`: a picked group's live
+//    members, under All every conversation); the chosen ones are chips «除了：Name ×»; a member picked ITSELF is greyed
+//    «有自己的授权» (its own grant counts). `api.except()` = what a save writes (PURE `exceptSaved`: none while no group /
+//    All is picked); the caller maps picks + exceptions to the grant model's row with `pickToRow` (and draws a stored
+//    row with `rowToPick`). Every door that draws this picker gets the row by passing `except`.
 import { t } from './i18n.js';
 import { createPopover } from './utils.js';
 import { icon, el, avatar } from './channel-chrome.js';
@@ -80,7 +87,7 @@ export function rosterFromApp(app, { agents = true, groups = true } = {}) {
  * the roster's broadcasts when `app` is given). Returns
  * `{el, selected(), setSelected(keys), refresh(), focus(), close()}`.
  */
-export function principalPicker({ items = [], app = null, multi = false, compact = false, selected = [], placeholder = '', label = '', emptyText = '', autofocus = false, onChange = null, cls = '', everyone = null } = {}) {
+export function principalPicker({ items = [], app = null, multi = false, compact = false, selected = [], placeholder = '', label = '', emptyText = '', autofocus = false, onChange = null, cls = '', everyone = null, except = null, chipPrefix = '' } = {}) {
   const id = `pp-${++seq}`;
   const raw = typeof items === 'function' ? items : () => items;
   // THE ALL-AGENTS ROW (the caller's key and words; the device's words by default) — first, unless the roster
@@ -123,6 +130,7 @@ export function principalPicker({ items = [], app = null, multi = false, compact
   function chipOf(r) {
     const c = el('span', 'pp-chip' + (PM.isEveryone(r) ? ' pp-chip-everyone' : ''));
     c.dataset.key = String(r.key);
+    if (chipPrefix) c.appendChild(el('span', 'pp-chip-prefix', chipPrefix));   // lane grants-unify: «除了：» on an exception chip
     c.appendChild(avatar({ name: r.name, key: PM.identityOf(r), glyph: glyphOf(r) }, 18, 'pp-chip-av'));
     c.appendChild(el('span', 'pp-chip-name', r.name));
     const x = document.createElement('button');
@@ -247,10 +255,10 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     if (multi) { if (sel.includes(k)) sel = sel.filter((x) => x !== k); else { sel = [...sel, k]; remember(r); } }
     else { sel = [k]; remember(r); }
     query = ''; box.value = '';
-    drawChips(); drawList(); fire(r);
+    drawChips(); drawList(); syncExcept(); fire(r);
     if (compact) closePop();
   }
-  function unpick(k) { sel = sel.filter((x) => x !== k); drawChips(); drawList(); fire(null); }
+  function unpick(k) { sel = sel.filter((x) => x !== k); drawChips(); drawList(); syncExcept(); fire(null); }
   box.addEventListener('input', () => { query = box.value; active = null; drawList(); });
   box.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -311,7 +319,40 @@ export function principalPicker({ items = [], app = null, multi = false, compact
   } else {
     root.append(chips, box, list);
   }
-  drawChips(); drawList();
+  // «除了» — the folded exception row (multi pickers that pass `except`; see the head)
+  let exSel = except && multi && !compact ? (except.selected || []).map(String) : [];
+  let exOpen = exSel.length > 0;
+  let exWrap = null, exToggle = null, exInner = null;
+  function syncExcept() {
+    if (!exWrap) return;
+    const offered = PM.exceptOffered(rows, sel);
+    // a member picked ITSELF leaves the exceptions (its own grant counts — it cannot be both)
+    const kept = exSel.filter((k) => !sel.includes(k));
+    if (kept.length !== exSel.length) { exSel = kept; exInner.setSelected(exSel); }
+    exInner.refresh();
+    exWrap.style.display = offered ? '' : 'none';
+    exInner.el.style.display = offered && (exOpen || exSel.length) ? '' : 'none';
+    exToggle.textContent = '';
+    exToggle.appendChild(icon(exOpen || exSel.length ? 'chevronDown' : 'chevronRight', 10));
+    exToggle.appendChild(el('span', 'pp-except-label', exSel.length ? t('Except: {n} left out', { n: exSel.length }) : t('Except (optional)')));
+    exToggle.setAttribute('aria-expanded', exOpen || exSel.length ? 'true' : 'false');
+  }
+  if (except && multi && !compact) {
+    const extra = () => (typeof except.extra === 'function' ? except.extra() : except.extra) || [];
+    exWrap = el('div', 'pp-except');
+    exToggle = document.createElement('button');
+    exToggle.type = 'button'; exToggle.className = 'pp-except-toggle';
+    exToggle.title = t('Leave members of the picked Task Groups (or of All agents) out');
+    exToggle.onclick = (ev) => { ev.preventDefault(); exOpen = !(exOpen || exSel.length) ; syncExcept(); if (exOpen) exInner.focus(); };
+    exInner = principalPicker({
+      items: () => { const cand = PM.exceptCandidates(source(), sel, { ownHint: t('has its own grant') }); const seen = new Set(cand.map((r) => String(r.key))); return [...cand, ...extra().filter((r) => r && !seen.has(String(r.key)) && exSel.includes(String(r.key)))]; },
+      multi: true, selected: exSel, placeholder: t('Search members to leave out…'), label: t('Except (optional)'), emptyText: t('No member of the picked Task Groups is running'),
+      cls: 'pp-except-picker', chipPrefix: t('Except: '), onChange: (keys) => { exSel = keys.slice(); syncExcept(); if (typeof except.onChange === 'function') { try { except.onChange(PM.exceptSaved(rows, sel, exSel)); } catch (e) { console.warn('[principal-picker] except.onChange', e); } } fire(null); },
+    });
+    exWrap.append(exToggle, exInner.el);
+    root.append(exWrap);
+  }
+  drawChips(); drawList(); syncExcept();
 
   // the ROSTER's broadcasts: re-read and patch in place (never while the root is gone)
   let off = null;
@@ -327,15 +368,20 @@ export function principalPicker({ items = [], app = null, multi = false, compact
     el: root,
     selected: () => sel.slice(),
     selectedRows: () => { const m = byKey(); return sel.map((k) => m.get(k)).filter(Boolean); },
-    setSelected: (keys) => { sel = (keys || []).map(String); drawChips(); drawList({ byPerson: false }); },
+    setSelected: (keys) => { sel = (keys || []).map(String); drawChips(); drawList({ byPerson: false }); syncExcept(); },
     // the roster's broadcast: rows patched in place, the highlight kept by KEY (gone ⇒ nothing highlighted)
-    refresh: () => { rows = source() || []; noteRows(); drawChips(); drawList({ byPerson: false }); },
+    refresh: () => { rows = source() || []; noteRows(); drawChips(); drawList({ byPerson: false }); syncExcept(); },
+    /** «除了»: the exceptions a save writes (none while no Task Group / All agents is picked) — PURE `exceptSaved`. */
+    except: () => PM.exceptSaved(rows, sel, exSel),
+    setExcept: (keys) => { exSel = (keys || []).map(String); if (exInner) exInner.setSelected(exSel); syncExcept(); },
+    /** The rows this picker has seen (live + the caller's extra) — what `PM.pickToRow` maps keys through. */
+    knownRows: () => { const m = new Map(known); if (exInner) for (const r of exInner.knownRows()) if (!m.has(String(r.key))) m.set(String(r.key), r); return [...m.values()]; },
     focus: () => { try { (trigger || box).focus({ preventScroll: true }); } catch {} },
     /** A write in flight: the box and every row stop taking input (the caller repaints after). */
     setBusy: (b) => { root.classList.toggle('pp-busy', !!b); box.disabled = !!b; if (trigger) trigger.disabled = !!b; for (const x of chips.querySelectorAll('button')) x.disabled = !!b; },
     /** The END of the picker: its popover closed, its roster listener removed — the dialog's `onClose` calls it
      *  (left alone the listener removes itself at the next broadcast it hears with the root gone). */
-    close: () => { closePop(); if (off) { off(); off = null; } },
+    close: () => { closePop(); if (exInner) exInner.close(); if (off) { off(); off = null; } },
     nameOf,
   };
   if (autofocus) setTimeout(() => api.focus(), 0);

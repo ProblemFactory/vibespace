@@ -110,7 +110,7 @@ execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 // refusal keeps a CLIENT-ONLY ghost (the server must NOT run it).
 const HAVE_DTACH = (() => { try { execFileSync('dtach', ['--help'], { stdio: 'ignore' }); return true; } catch (e) { return e.code !== 'ENOENT'; } })();
 const LANE_E = { id: 'w-lane-e', cid: 'a99e0003-0000-4000-8000-0000000000e5', name: 'lane-e agent', sockName: `cw-1-${Date.now()}` };
-const LANE_E_KEY = 'claude:' + LANE_E.cid;
+const LANE_E_KEY = LANE_E.cid;   // lane grants-unify: a conversation is named by its conversation id (the grants store's ONE spelling)
 const LANE_E_STUB = path.join(wt, 'stub-cli.cjs');
 if (HAVE_DTACH) {
   fs.writeFileSync(LANE_E_STUB, `'use strict';

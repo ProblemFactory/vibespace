@@ -159,9 +159,9 @@ export function installUsageMeter(App, ctx = {}) {
       try { acked = localStorage.getItem('vibespace.quotaRefreshAck') === '1'; } catch {}
       if (!acked) {
         const ok = await showConfirmDialog({
-          title: t('Fetch quota from Anthropic?'),
-          message: t('This makes ONE non-billable request to Anthropic’s usage endpoint with this account’s own login token — the same call the CLI makes when you run /usage. It only ever fires when you ask (never on a timer) and is throttled to ≥60s per account. Configure or disable it in Settings → “On-demand quota refresh”. This notice is shown once.'),
-          confirmText: t('Fetch'),
+          title: t('Check this account’s usage limits now?'),
+          message: t('VibeSpace asks Anthropic once how much of this account’s usage limits is left — the same check Claude Code makes when you type /usage. It costs nothing and uses no tokens. It runs only when you press refresh, at most once a minute per account. Turn it off in Settings → “On-demand quota refresh”. You see this note once.'),
+          confirmText: t('Check now'),
         });
         if (!ok) return;
         try { localStorage.setItem('vibespace.quotaRefreshAck', '1'); } catch {}

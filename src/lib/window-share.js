@@ -93,17 +93,26 @@ function pickerItemsOf(model, { roster = null, app = null } = {}) {
  * principal picker (chips = who is shared with; a pick shares, a chip's ✕ stops sharing), kept on the
  * container and PATCHED on every call — a repaint never re-creates the box the person is typing in.
  */
-export function renderPicker(container, { model, onToggle, onMode, busy = false, showMode = true, roster = null, app = null } = {}) {
+export function renderPicker(container, { model, onToggle, onMode, onExcept = null, busy = false, showMode = true, roster = null, app = null } = {}) {
   container.classList.add('wshare-picker');
   let st = container.__wshare;
   const items = pickerItemsOf(model, { roster, app });
+  // lane grants-unify — «除了»: the share's exceptions as picker keys (+ a row for one not running now)
+  const exceptKeys = (model.except || []).map((p) => `${p.kind === 'group' ? 'group' : 'session'}:${p.id}`);
+  const exceptExtra = (model.except || []).filter((p) => !items.some((r) => r.key === `${p.kind === 'group' ? 'group' : 'session'}:${p.id}`)).map((p) => ({ key: `${p.kind === 'group' ? 'group' : 'session'}:${p.id}`, kind: p.kind === 'group' ? 'group' : 'agent', id: p.id, name: p.name || String(p.id).slice(0, 8), hint: p.kind === 'group' ? t('not in the list now') : t('not running now'), groupIds: [], groupNames: [], ref: { kind: p.kind === 'group' ? 'group' : 'session', row: { id: p.id, key: p.id, name: p.name } } }));
   if (!st) {
     container.textContent = '';
-    st = { items, sel: [], onToggle: null };
+    st = { items, sel: [], onToggle: null, onExcept: null, exceptExtra };
     st.picker = principalPicker({
       items: () => st.items, multi: true, everyone: 'roster',   // the rows carry ALL AGENTS (checked from the record)
       placeholder: t('Search agents and Task Groups…'), label: t('Share with agents'),
       emptyText: t('No agent session is running'),
+      // «除了» (lane grants-unify): only where a save can take it — the window's Share dialog (`onExcept`)
+      except: onExcept ? { selected: exceptKeys, extra: () => st.exceptExtra, onChange: (keys) => {
+        const byKey = new Map([...st.items, ...st.exceptExtra].map((r) => [r.key, r]));
+        // a LIVE session by its webui id (the engine spells its key), one not running now by its key, a group by its id
+        st.onExcept?.(keys.map((k) => byKey.get(k)).filter(Boolean).map((r) => (r.ref.kind === 'group' ? { kind: 'group', id: r.ref.row.id } : { kind: 'session', id: r.ref.row.id || r.ref.row.key })));
+      } } : null,
       onChange: (keys) => {
         const before = new Set(st.sel), after = new Set(keys);
         st.sel = keys.slice();
@@ -121,8 +130,11 @@ export function renderPicker(container, { model, onToggle, onMode, busy = false,
   }
   st.items = items;
   st.onToggle = onToggle;
+  st.onExcept = onExcept;
+  st.exceptExtra = exceptExtra;
   st.sel = items.filter((r) => r.checked).map((r) => r.key);
   st.picker.setSelected(st.sel);
+  if (onExcept) st.picker.setExcept(exceptKeys);
   st.picker.refresh();
   st.picker.setBusy(busy);
   const root = container;
@@ -322,6 +334,7 @@ function failText(r, fallback) {
   if (c === 'no_conversation') return t('That agent has no conversation yet — say something to it first');
   if (c === 'fork_pending') return t('That agent is a fork that has not announced its own conversation yet — try again in a moment');
   if (c === 'not_live') return t('That agent session is not running any more');
+  if (c === 'except_conflicts') return t('That agent is shared with by name — remove it from the list before leaving it out');   // lane grants-unify
   return (r && r.error) || fallback;
 }
 
@@ -360,6 +373,15 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
         busy = false;
         if (!res || res.error) showToast(failText(res, on ? t('Could not share the window') : t('Could not stop sharing the window')), { type: 'error' });
         else { view = res; if (!on && res.revoked && res.revoked.leaseDropped) showToast(kind === 'everyone' ? t('The agent that held this window no longer reaches it') : t('{name} no longer holds this window', { name: r.name || r.id })); }
+        if (overlay.isConnected) draw();
+      },
+      // «除了» (lane grants-unify): the members left OUT of a shared Task Group / All agents — the whole list, one PUT
+      onExcept: async (except) => {
+        busy = true; draw();
+        const res = await fetchJson(`${base}/except`, { method: 'PUT', headers: JSON_HDR, body: JSON.stringify({ except }) });
+        busy = false;
+        if (!res || res.error) showToast(failText(res, t('Could not change who is left out')), { type: 'error' });
+        else { view = res; if (res.excepted && res.excepted.leaseDropped) showToast(t('The agent that held this window no longer reaches it')); }
         if (overlay.isConnected) draw();
       },
       onMode: async (m) => {

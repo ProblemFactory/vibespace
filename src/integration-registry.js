@@ -60,6 +60,15 @@
  *    defined HERE AND ONLY HERE: `src/oauth-loopback.js` (P1) imports it, and
  *    the registry suite asserts the literal appears in no other file — a URL
  *    that must match a vendor console byte for byte may not have two spellings.
+ *  · `redirect` (lane oauth-setup-instructions, the owner 2026-10-23: a self-hoster with their own vendor app met the
+ *    redirect URIs only after a refusal) — the vendor console facts the SETUP CARD (src/oauth-setup.js, PURE) and
+ *    deploy/README.md render, ONE source: `console {path, links[{label, url}]}` (where the addresses are registered),
+ *    `refusal` (the vendor's own error words for an address it does not list), `create` (the app to create, when the
+ *    vendor has one kind), `clientTypes: true` (Google: a Web application OR a Desktop app client — the card says
+ *    which), `loopback` (the kind's FIXED 127.0.0.1 callback — Lark's registered one, Gmail's for a Web client),
+ *    `also [{uri, for}]` (another consumer of the same client: Drive's rclone), `selfRegisters: true` (the product
+ *    registers its own client: Dropline — nothing for a person to do in a console; with its `vendor`, the brand it
+ *    registers at).
  *  · `clusterEnv` is a UNION: `{json, prefix}` (this layer parses the env
  *    itself) OR `delegate: {to:'drive-presets', prefer, multi}` (this layer asks
  *    the ALREADY-EXISTING reader, `MountManager.drivePresets()`). ONE env name
@@ -86,6 +95,9 @@
  */
 
 const TEST_KINDS = Object.freeze(['credential-exchange', 'shape-only', 'reachability']);
+/** lane oauth-setup-instructions: a `redirect` block's keys and its `also[].for` consumers — closed sets (checkRow) */
+const REDIRECT_KEYS = Object.freeze(['console', 'refusal', 'create', 'clientTypes', 'loopback', 'also', 'selfRegisters', 'vendor']);
+const REDIRECT_ALSO = Object.freeze(['drive']);
 /** lane dropline-connect-door: a `connect` block's words and its `connectWhy` codes — closed sets (checkRow) */
 const CONNECT_WORDS = Object.freeze(['expired', 'finish', 'done', 'disconnected']);
 const CONNECT_WHYS = Object.freeze(['self-hosted', 'operator']);
@@ -366,6 +378,8 @@ const ROWS = Object.freeze([
     ],
     clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_DROPLINE_' },
     setup: null,
+    // lane oauth-setup-instructions: the setup card's facts — Dropline registers ITS OWN client with the address it uses
+    redirect: { selfRegisters: true, vendor: 'Fish Audio' },
     // lane dropline-connect-door: THE OAUTH TIER AS A CARD BLOCK (src/routes/voice.js serves the four routes)
     connect: {
       label: i18nKey('Connect with Fish Audio'),
@@ -679,6 +693,27 @@ function groupOf(row) {
 }
 
 /** Registry-level self-checks the suite runs; kept here so the rules are one place. */
+/** lane oauth-setup-instructions: a row's `redirect` block (header) — every key closed, every address byte-exact. */
+function redirectErrors(row) {
+  const r = row.redirect, errs = [], str = (x) => typeof x === 'string' && !!x.trim();
+  const loop = (u) => typeof u === 'string' && /^http:\/\/127\.0\.0\.1:\d{2,5}\/[^\s?#]*$/.test(u);
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return ['redirect must be an object'];
+  for (const k of Object.keys(r)) if (!REDIRECT_KEYS.includes(k)) errs.push(`redirect.${k} is not a key of the redirect block (${REDIRECT_KEYS.join(', ')})`);
+  if (r.selfRegisters !== undefined) {
+    if (r.selfRegisters !== true || !str(r.vendor) || Object.keys(r).length !== 2) errs.push('redirect.selfRegisters: true stands with its `vendor` only (the product registers its own client — no console, no address to list)');
+    return errs;
+  }
+  const c = r.console;
+  if (!c || !str(c.path) || !Array.isArray(c.links) || !c.links.length || !c.links.every((l) => l && str(l.label) && /^https:\/\/[a-z0-9.-]+\//.test(String(l.url || '')))) errs.push('redirect.console = {path, links: [{label, url (https)}]}');
+  if (r.vendor !== undefined) errs.push('redirect.vendor belongs to a selfRegisters block (any other row\'s brand is its signinName / label)');
+  if (!str(r.refusal)) errs.push('redirect.refusal = the vendor\'s own words for an address it does not list');
+  if (r.clientTypes !== undefined && r.clientTypes !== true) errs.push('redirect.clientTypes is true (a Web application or a Desktop app client) or absent');
+  if (r.clientTypes !== true && !str(r.create)) errs.push('redirect.create = the app to create (a vendor with one kind of app)');
+  if (r.loopback !== undefined && !loop(r.loopback)) errs.push('redirect.loopback must be a fixed http://127.0.0.1:<port>/<path> callback');
+  if (row.setup && row.setup.callbackUrl && r.loopback !== row.setup.callbackUrl) errs.push('redirect.loopback is the row\'s setup.callbackUrl (one spelling)');
+  if (r.also !== undefined && (!Array.isArray(r.also) || !r.also.every((a) => a && loop(a.uri) && REDIRECT_ALSO.includes(a.for)))) errs.push(`redirect.also = [{uri (a 127.0.0.1 address), for (${REDIRECT_ALSO.join('|')})}]`);
+  return errs;
+}
 function checkRow(row) {
   const errs = [];
   if (row.bindsPerAccount !== undefined && typeof row.bindsPerAccount !== 'boolean') errs.push('bindsPerAccount must be a boolean');
@@ -731,6 +766,9 @@ function checkRow(row) {
   const lg = row.clusterEnv && row.clusterEnv.legacy;
   if (lg !== undefined && (!lg || !words(lg.jsonKeys) || !words(lg.prefixes) || lg.jsonKeys.length !== lg.prefixes.length || lg.jsonKeys.includes(row.id))) errs.push('clusterEnv.legacy = {jsonKeys, prefixes}: the old row ids and their old prefixes, one each, never the row\'s own id');
   if (row.delegate && row.delegate.to !== 'drive-presets') errs.push('delegate.to must be drive-presets');
+  // lane oauth-setup-instructions: a delegating row's readable preset values (Gmail's clientType) — its own non-secret fields
+  if (row.delegate && row.delegate.facts !== undefined && (!words(row.delegate.facts) || !row.delegate.facts.every((k) => (row.fields || []).some((f) => f.key === k && !f.secret)))) errs.push('delegate.facts is a list of the row\'s non-secret field keys (the preset values the account dialog may read)');
+  if (row.redirect !== undefined) errs.push(...redirectErrors(row));
   if (!row.test || !TEST_KINDS.includes(row.test.kind)) errs.push(`test.kind must be one of ${TEST_KINDS.join('|')}`);
   if (row.setup && Array.isArray(row.setup.prerequisites) && row.setup.prerequisites.length && !(row.test && row.test.caveat)) errs.push('a row with setup.prerequisites must declare test.caveat');
   if (row.setup && row.setup.callbackUrl && !/^http:\/\/127\.0\.0\.1:\d+\//.test(row.setup.callbackUrl)) errs.push('setup.callbackUrl must be a loopback URL (decision 4/21)');
@@ -740,7 +778,7 @@ function checkRow(row) {
 }
 
 module.exports = {
-  ROWS, TEST_KINDS, SIGNIN_KINDS, TEST_BUTTON_LABEL, MASK, MASK_TAIL_MIN, CONNECT_WORDS, CONNECT_WHYS,
+  ROWS, TEST_KINDS, SIGNIN_KINDS, REDIRECT_KEYS, REDIRECT_ALSO, TEST_BUTTON_LABEL, MASK, MASK_TAIL_MIN, CONNECT_WORDS, CONNECT_WHYS,
   rowById, rowIds, maskValue, validateValues, missingFields, resolvePrecedence, pickPreset,
   fieldDecls, checkRow, TRIM_NOTE, credentialWhyText, clientFieldsOf, bindsPerAccount, bindsPerMachine, oauthClientVendorOf,
   GROUPS, GROUP_WORDS, groupOf,

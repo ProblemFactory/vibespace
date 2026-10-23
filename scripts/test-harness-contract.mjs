@@ -543,6 +543,84 @@ console.log('— worktree caps (owner ruling 9)');
     "…and the saved pick SURVIVES as a TRI-STATE (sidebar-state persists an explicit false like autoResume — the truthy list would erase an untick; resumeSession reads it back)");
 }
 
+// ── THE 「可用工具」 ROW (lane new-session-form): `toolAllowlist` = the harness's OWN per-session tool switch — a flag
+// on its command line, never a VibeSpace rule. Re-derived per descriptor: the row's shape, the descriptor's caps IS the
+// row, the client mirror deep-equals it, and the adapter CONSUMES a pick exactly when the row exists (driven, never
+// grepped); then the PURE rule (closed vocabularies; a ✗ Bash never reaches argv) and each adapter's spelling.
+console.log('— toolAllowlist caps (the New Session form\'s 可用工具 row)');
+{
+  const { toolAllowlistCaps, toolAllowlistArgs } = require(path.join(REPO, 'src/backend-caps.js'));
+  const { toolAllowlistFor, toolAllowlistArgs: clientToolArgs } = await import(path.join(REPO, 'src/lib/agent-meta.js'));
+  const NSM = await import(path.join(REPO, 'src/lib/new-session-model.js'));
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const shapeOk = (r) => r === null || (!!r && (r.kind === 'tools'
+    ? Array.isArray(r.tools) && r.tools.length > 0 && Array.isArray(r.keep) && r.keep.every((k) => r.tools.includes(k)) && /^--/.test(r.allow) && /^--/.test(r.deny)
+    : r.kind === 'sandbox' && Array.isArray(r.sandbox) && r.sandbox.length > 0 && Array.isArray(r.approval) && r.approval.length > 0 && /^--/.test(r.sandboxFlag) && /^--/.test(r.approvalFlag)));
+  const pickFor = (r) => (!r ? { allow: ['Read'] } : r.kind === 'tools' ? { allow: [r.tools[0]], deny: [r.tools.find((x) => !r.keep.includes(x) && x !== r.tools[0])] } : { sandbox: r.sandbox[0], approval: r.approval[0] });
+  for (const id of harnessIds()) {
+    const h = harnessOf(id); const row = capsOf(id).toolAllowlist;
+    ok(Object.prototype.hasOwnProperty.call(capsOf(id), 'toolAllowlist') && shapeOk(row), `${id}: caps declares a toolAllowlist row of a known shape (${row ? row.kind : 'none'})`, JSON.stringify(row));
+    ok(same(h.caps?.toolAllowlist ?? null, row ?? null), `${id}: the descriptor's caps row IS the row capsOf answers`);
+    if (BACKEND_META[id]?.caps) ok(same(BACKEND_META[id].caps.toolAllowlist ?? null, row ?? null), `${id}: the client META mirror deep-equals the server row (no drift)`, JSON.stringify({ client: BACKEND_META[id].caps.toolAllowlist, server: row }));
+    ok(same(toolAllowlistFor(id), toolAllowlistCaps(id)), `${id}: the two readers agree (client toolAllowlistFor / server toolAllowlistCaps)`);
+    if (h.kind !== 'chat') continue;
+    const ad = registry.get(id);
+    const spawnOf = (o) => { const s = ad.buildSessionArgs(o); return JSON.stringify({ args: s.args, env: s.env || {} }); };
+    const consumed = ['chat', 'terminal'].some((mode) => { const base = { cwd: '/tmp', mode, permissionMode: 'default', settings: {} }; try { return spawnOf(base) !== spawnOf({ ...base, tools: pickFor(row) }); } catch { return false; } });
+    ok(consumed === !!row, `${id}: the adapter ${row ? 'CONSUMES a pick of its row' : 'never forwards a pick (it declares no row)'} — driven through buildSessionArgs`);
+  }
+  const TOOL_ROW_KIND = { claude: 'tools', codex: 'sandbox', shell: null, opencode: null, antigravity: null };   // every harness: its row's kind (null = no row)
+  ok(harnessIds().every((id) => id in TOOL_ROW_KIND && (capsOf(id).toolAllowlist?.kind ?? null) === TOOL_ROW_KIND[id]),
+    'claude: --allowedTools / --disallowedTools · codex: sandbox + approval · a plain shell, opencode, antigravity: no row', JSON.stringify(Object.fromEntries(harnessIds().map((id) => [id, capsOf(id).toolAllowlist?.kind ?? null]))));
+  ok(toolAllowlistCaps('gemini') === null && toolAllowlistFor('gemini') === null, 'an unknown backend has no row (never claude\'s by accident)');
+  ok(capsOf('claude').toolAllowlist.keep.includes('Bash'), 'the claude row KEEPS Bash: its ✗ is refused');
+  const A = (pick) => toolAllowlistArgs({ backend: 'claude', pick });
+  ok(same(A({ allow: ['Edit', 'Read'], deny: ['WebFetch'] }).args, ['--allowedTools', 'Read,Edit', '--disallowedTools', 'WebFetch']), 'claude: one comma list per flag, in the row\'s order');
+  const bash = A({ deny: ['Bash'] });
+  ok(bash.args.length === 0 && bash.dropped.includes('Bash') && bash.dirty === false && bash.pick === null, 'a ✗ Bash NEVER reaches argv — deny beats allow, it would block the Bash(vibespace-…:*) allow rules the reporting CLIs ride (named in `dropped`)');
+  ok(same(A({ allow: ['Bash'] }).args, ['--allowedTools', 'Bash']), 'a ✓ Bash is passed (it narrows nothing)');
+  const forged = A({ allow: ['Read', 'Bash(rm:*)', '--dangerously-skip-permissions'], deny: ['Read', 'Write'] });
+  ok(same(forged.allow, ['Read']) && same(forged.deny, ['Write']) && forged.dropped.includes('Bash(rm:*)') && forged.dropped.includes('--dangerously-skip-permissions') && forged.dropped.includes('Read'),
+    'outside the closed list ⇒ DROPPED (never a flag, never a rule pattern on argv); a tool both ✓ and ✗ stays ✓');
+  const C = (pick) => toolAllowlistArgs({ backend: 'codex', pick });
+  ok(same(C({ sandbox: 'read-only', approval: 'never' }).args, ['--ask-for-approval', 'never', '--sandbox', 'read-only']) && same(C({ sandbox: 'nope', approval: '' }).dropped, ['nope']) && C({}).dirty === false,
+    'codex: the closed words only (an empty half is no pick)');
+  ok(toolAllowlistArgs({ backend: 'shell', pick: { allow: ['Read'] } }).args.length === 0 && toolAllowlistArgs({ backend: 'shell', pick: { allow: ['Read'] } }).dropped[0] === 'unsupported', 'a harness without the row: nothing, said `unsupported`');
+  ok(clientToolArgs === toolAllowlistArgs, 'the form\'s command-line preview IS the function the spawn runs (re-exported through agent-meta)');
+  // the claude adapter's spelling — chat AND terminal; the flags sit before every later flag (a dash ends the variadic list)
+  const claude = registry.get('claude');
+  for (const mode of ['chat', 'terminal']) {
+    const a = claude.buildSessionArgs({ cwd: '/tmp', mode, permissionMode: 'bypassPermissions', effort: 'high', settings: {}, tools: { allow: ['Read'], deny: ['WebFetch', 'Bash'] } }).args;
+    const i = a.indexOf('--allowedTools'), j = a.indexOf('--disallowedTools');
+    ok(i > a.indexOf('--permission-mode') && a[i + 1] === 'Read' && j === i + 2 && a[j + 1] === 'WebFetch' && a.indexOf('--effort') === j + 2, `claude ${mode}: --allowedTools Read --disallowedTools WebFetch, right after the mode and before --effort (the ✗ Bash dropped)`, a.join(' '));
+  }
+  ok(!claude.buildSessionArgs({ cwd: '/tmp', mode: 'chat', permissionMode: 'default', settings: {} }).args.some((x) => /Tools$/.test(x)), 'claude: no pick ⇒ neither flag (the harness\'s own settings stand)');
+  const allowRules = (() => { const s = claude.buildSessionArgs({ cwd: '/tmp', mode: 'chat', permissionMode: 'default', settings: {}, tools: { deny: ['Bash', 'WebFetch'] } }).args; const k = s.indexOf('--settings'); try { return JSON.parse(s[k + 1]).permissions.allow; } catch { return []; } })();
+  ok(allowRules.some((r) => /^Bash\(vibespace-/.test(r)), 'with a ✗ attempted on Bash the spawn still carries the Bash(vibespace-…) allow rules');
+  // the codex adapter: terminal argv, chat env (the wrapper's withToolsPick), the degraded machine keeps its forced sandbox
+  const codex = registry.get('codex');
+  const ct = codex.buildSessionArgs({ cwd: '/tmp', mode: 'terminal', permissionMode: 'safe-yolo', settings: {}, tools: { sandbox: 'read-only' } });
+  ok(ct.args[ct.args.indexOf('--sandbox') + 1] === 'read-only' && ct.args[ct.args.indexOf('--ask-for-approval') + 1] === 'on-failure', 'codex terminal: the sandbox pick replaces the mode\'s, the approval half stays the mode\'s', ct.args.join(' '));
+  const cc = codex.buildSessionArgs({ cwd: '/tmp', mode: 'chat', permissionMode: '', settings: {}, tools: { approval: 'never' } });
+  ok(cc.env.CODEX_WEBUI_APPROVAL_POLICY === 'never' && cc.env.CODEX_WEBUI_SANDBOX === 'workspace-write' && same(JSON.parse(cc.env.CODEX_WEBUI_TOOLS_PICK || 'null'), { approval: 'never' }), 'codex chat: the pick rides CODEX_WEBUI_TOOLS_PICK (one JSON row) beside the resolved policy');
+  ok(codex.buildSessionArgs({ cwd: '/tmp', mode: 'chat', permissionMode: '', settings: {} }).env.CODEX_WEBUI_TOOLS_PICK === '', 'codex chat: no pick ⇒ the env is empty (the wrapper keeps the mode\'s own answer)');
+  const { CodexAdapter } = require(path.join(REPO, 'src/adapters/codex.js'));
+  const degraded = new CodexAdapter({ codexCmd: 'codex', codexSandboxSupported: false, ptyWrapper: '/w/pty', chatWrapper: '/w/codex' }).buildSessionArgs({ cwd: '/tmp', mode: 'terminal', permissionMode: '', settings: {}, tools: { sandbox: 'read-only', approval: 'never' } });
+  ok(degraded.args[degraded.args.indexOf('--sandbox') + 1] === 'danger-full-access' && degraded.args[degraded.args.indexOf('--ask-for-approval') + 1] === 'never', 'a machine without codex-linux-sandbox keeps its forced danger-full-access (a sandbox pick there would promise what it cannot enforce); the approval half still applies');
+  const wrap = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8');
+  ok(/let currentPermission = withToolsPick\(resolvePermissionMode\(permissionMode\), process\.env\.CODEX_WEBUI_TOOLS_PICK \|\| ''\);/.test(wrap)
+    && /const PICK_APPROVALS = \['untrusted', 'on-request', 'on-failure', 'never'\];/.test(wrap) && same(capsOf('codex').toolAllowlist.approval, ['untrusted', 'on-request', 'on-failure', 'never']),
+    'the codex chat wrapper applies the pick at start, re-checked against the row\'s own approval words');
+  // the form's preset mirror = what the adapter really resolves for every mode the dialog offers
+  for (const mode of ['', 'read-only', 'safe-yolo', 'yolo']) {
+    const p = codex.buildSessionArgs({ cwd: '/tmp', mode: 'terminal', permissionMode: mode, settings: {} }).permission;
+    ok(same(NSM.codexPreset(mode), { sandbox: p.sandbox, approval: p.approvalPolicy }), `the form's codex default for mode «${mode || 'default'}» is resolveCodexPermissionMode's (${p.sandbox} · ${p.approvalPolicy})`);
+  }
+  // the client row gates on the CAPS ROW, never an id
+  const formSrc = fs.readFileSync(path.join(REPO, 'src/lib/new-session-form.js'), 'utf8');
+  ok(/const row = terminalOnly\(be\) \? null : toolAllowlistFor\(be\);/.test(formSrc) && !/backend === 'claude'|be === 'claude'|be === 'codex'/.test(formSrc), 'the 可用工具 row exists exactly when toolAllowlistFor(backend) answers a row (no backend-id branch)');
+}
+
 const wsCreateSrc = fs.readFileSync(path.join(REPO, 'src/ws-create.js'), 'utf8');
 
 // ── THE PICK vs THE LIVE FACT (round-2 verifier, MAJOR + the untick it exposed)

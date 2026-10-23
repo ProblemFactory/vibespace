@@ -12,6 +12,7 @@
 //     left VERBATIM, because inventing a name for it is the mis-attribution
 //     this rule exists to stop.
 //  3. A body carrying OUR OWN frame markers comes out INERT.
+import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
@@ -29,7 +30,7 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   const r = R.makeRecord(base);
   ok(JSON.stringify(Object.keys(r)) === JSON.stringify(R.RECORD_FIELDS), 'the record carries exactly the declared fields, in order', JSON.stringify(Object.keys(r)));
   const rb = R.makeRecord({ ...base, blocks: [{ k: 'p', runs: [{ k: 't', text: 'hello' }] }] });
-  ok(JSON.stringify(Object.keys(rb)) === JSON.stringify([...R.RECORD_FIELDS, 'blocks']) && R.OPTIONAL_FIELDS.join() === 'blocks,root,facts,kind,systemKind', 'a record WITH a render tree carries the declared fields, then the optional `blocks` (§25) — nothing else; the optional set is exactly blocks + root (R4) + facts (lane message-facts, B-f066) + kind / systemKind (lane lark-system-records)', JSON.stringify(Object.keys(rb)));
+  ok(JSON.stringify(Object.keys(rb)) === JSON.stringify([...R.RECORD_FIELDS, 'blocks']) && R.OPTIONAL_FIELDS.join() === 'blocks,root,facts,kind,systemKind,draftState', 'a record WITH a render tree carries the declared fields, then the optional `blocks` (§25) — nothing else; the optional set is exactly blocks + root (R4) + facts (lane message-facts, B-f066) + kind / systemKind (lane lark-system-records) + draftState (lane gmail-draft-not-a-message)', JSON.stringify(Object.keys(rb)));
   const rr = R.makeRecord({ ...base, blocks: [{ k: 'p', runs: [{ k: 't', text: 'hello' }] }], replyTo: 'p1', threadKey: 't1', root: 'r1' });
   ok(JSON.stringify(Object.keys(rr)) === JSON.stringify([...R.RECORD_FIELDS, 'blocks', 'root']) && rr.root === 'r1', 'a record with a tree AND a root carries both optionals in their declared order (the stored-line census: 3 184 stored records keep their 12 fields)', JSON.stringify(Object.keys(rr)));
   ok(r.id === 'a:c:v1' && r.replyTo === null && r.threadKey === null, 'a missing id is derived from (adapter, conv, vendor); absent optionals are NULL, not undefined');
@@ -647,6 +648,59 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
   ok(v !== owner && v.kind === 'system' && v.systemKind === 'other' && v.author.isSystem === true && v.text === '' && owner.kind === undefined, "the owner's stored notice is SERVED as kind system (a copy; the stored line untouched)", JSON.stringify(v));
   const peerEmpty = { ...owner, raw: { msg_type: 'text' } };
   ok(R.asSystemRecord(peerEmpty) === peerEmpty && R.asSystemRecord(msg) === msg && R.asSystemRecord(s1) === s1, 'every other record comes back as ITSELF (an empty author on a text message stays a message — "(no sender)")');
+}
+
+// ── ⑨ lane gmail-draft-not-a-message (fleet feedback fb-9aa1d3bd1e, 2026-10-22: an unsent Gmail draft — labels DRAFT, later in
+// the Trash — sat at the TOP of its thread, dated and addressed like a sent mail; the user thought it had gone out). THE
+// INVARIANT: a record's kind is read off the vendor's labels, and a draft is never a message. `kind: 'draft'` +
+// `draftState` (saved | trashed, CLOSED); a record stored before the kind is re-judged at read off `raw.labelIds`;
+// `draftsOf` = the ONE rule the window and the agent's read ask (messages in order, the standing drafts after them, the
+// binned only counted, a save a later save or send replaced never shown). CONTROL: a copy without the draft kind ⇒ the
+// stored DRAFT-labelled record is served as a message (red). ──
+console.log('⑨ a draft is never a message (lane gmail-draft-not-a-message)');
+{
+  const J = JSON.stringify;
+  ok(J(R.RECORD_KINDS) === '["system","draft"]' && J(R.DRAFT_STATES) === '["saved","trashed"]' && Object.isFrozen(R.DRAFT_STATES), 'the CLOSED kinds: system | draft; a draft\'s states: saved | trashed');
+  const mine = { id: 'ada@example.com', name: 'Ada' };
+  const d = R.makeRecord({ ...base, vendorId: 'd1', kind: 'draft', author: mine, threadKey: 't1', text: 'we confirm Friday' });
+  ok(d.kind === 'draft' && d.draftState === 'saved' && d.author.name === 'Ada' && d.threadKey === 't1' && R.isDraftRecord(d) && !R.isSystemRecord(d), 'makeRecord: kind draft (state saved by default) keeps its author and its thread — a draft sits in a thread, unlike a notice', J(d));
+  const dt = R.makeRecord({ ...base, vendorId: 'd2', kind: 'draft', draftState: 'trashed', author: mine });
+  const dx = R.makeRecord({ ...base, vendorId: 'd3', kind: 'draft', draftState: 'sent', author: mine });
+  ok(dt.draftState === 'trashed' && dx.draftState === 'saved' && R.makeRecord({ ...base, draftState: 'trashed' }).draftState === undefined, 'trashed is kept; an unknown state is saved; a MESSAGE never carries a draftState');
+  ok(R.draftStateOf(['DRAFT', 'TRASH']) === 'trashed' && R.draftStateOf(['SPAM', 'DRAFT']) === 'trashed' && R.draftStateOf(['DRAFT']) === 'saved' && R.draftStateOf(null) === 'saved', 'draftStateOf: the bin labels (TRASH / SPAM) ⇒ trashed');
+  // the report's stored shape: a Gmail record written before the kind — labels DRAFT, To + Cc in its facts — re-judged at read
+  const stored = { id: 'gmail:t1:m-d0', convId: 't1', adapterId: 'gmail', vendorId: 'm-d0', at: 1000, author: { ...mine, isSelf: false, isBot: false }, text: 'we confirm Friday', mentions: [], attachments: [], replyTo: null, threadKey: 't1', raw: { subject: 'Offsite plan', labelIds: ['DRAFT'], messageId: null, to: 'erin@example.com' } };
+  const sv = R.asDraftRecord(stored);
+  ok(sv !== stored && sv.kind === 'draft' && sv.draftState === 'saved' && stored.kind === undefined, 'asDraftRecord: a stored record labelled DRAFT is SERVED as a draft (the stored line never rewritten)', J({ kind: sv.kind, st: sv.draftState }));
+  const binned = { ...stored, vendorId: 'm-t', raw: { ...stored.raw, labelIds: ['DRAFT', 'TRASH'] } };
+  ok(R.asDraftRecord(binned).draftState === 'trashed', 'a stored DRAFT + TRASH record is served as a binned draft');
+  const mail = { ...stored, vendorId: 'm-1', raw: { ...stored.raw, labelIds: ['INBOX', 'TRASH'] } };
+  ok(R.asDraftRecord(mail) === mail && R.asDraftRecord(d) === d && R.asDraftRecord({ ...stored, raw: {} }).kind === undefined && R.asDraftRecord(null) === null, 'every other record comes back as ITSELF (a trashed MAIL is the mail it was; a record that already says its kind is not re-judged)');
+  // draftsOf — the window's / the agent's one rule
+  const peer = (vid, at, th = 't1') => R.makeRecord({ ...base, vendorId: vid, at, threadKey: th, author: { id: 'erin@example.com', name: 'Erin' } });
+  const sent = (vid, at, th = 't1') => R.makeRecord({ ...base, vendorId: vid, at, threadKey: th, author: { ...mine, isSelf: true } });
+  const draft = (vid, at, st = 'saved', th = 't1') => R.makeRecord({ ...base, vendorId: vid, at, threadKey: th, kind: 'draft', draftState: st, author: mine });
+  const ids = (l) => l.map((r) => r.vendorId);
+  const v1 = R.draftsOf([draft('dt', 500, 'trashed'), draft('d0', 1000), peer('m1', 2000), peer('m2', 3000)]);
+  ok(J(ids(v1.messages)) === '["m1","m2"]' && J(ids(v1.drafts)) === '["d0"]' && v1.trashed === 1 && v1.replaced === 0, 'the report\'s thread: the two mails are the messages; the draft dated FIRST stands apart (drawn after them); the binned one only counted', J({ m: ids(v1.messages), d: ids(v1.drafts), t: v1.trashed }));
+  const v1b = R.draftsOf([draft('d0', 1000), peer('m1', 2000), draft('dt', 2500, 'trashed'), peer('m2', 3000)]);
+  ok(!v1b.drafts.length && v1b.trashed === 1 && v1b.replaced === 1, 'the report\'s own case — the draft\'s NEWEST version is in the Trash: nothing stands, one deleted draft counted (the older save is that draft\'s earlier version)', J({ d: ids(v1b.drafts), t: v1b.trashed, r: v1b.replaced }));
+  const v2 = R.draftsOf([draft('d0', 1000), peer('m1', 2000), draft('d1', 2600), peer('m2', 3000)]);
+  ok(J(ids(v2.drafts)) === '["d1"]' && v2.replaced === 1, 'a LATER save stands for the earlier one (Gmail replaced its message) — one draft, the newest', J(ids(v2.drafts)));
+  const v3 = R.draftsOf([peer('m1', 2000), draft('d1', 2600), sent('s1', 2700), peer('m2', 3000)]);
+  ok(!v3.drafts.length && v3.replaced === 1 && J(ids(v3.messages)) === '["m1","s1","m2"]', 'a later SEND of the account\'s in the thread stands for the draft (Gmail deletes a draft when it is sent) — never "not sent" over a sent mail', J(ids(v3.drafts)));
+  const v4 = R.draftsOf([draft('d1', 2600), peer('m2', 3000), sent('s9', 4000, 't2')]);
+  ok(J(ids(v4.drafts)) === '["d1"]', 'a peer\'s later mail, or a send in ANOTHER thread, replaces nothing', J(ids(v4.drafts)));
+  ok(J(R.draftsOf(null)) === '{"messages":[],"drafts":[],"trashed":0,"replaced":0}', 'no records ⇒ nothing apart');
+  // CONTROL: a copy without the draft kind (the base) — the stored DRAFT-labelled record is served as a MESSAGE
+  const SRC = fs.readFileSync(path.join(REPO, 'src/channel-record.js'), 'utf-8');
+  const K = "  const draft = r.kind === 'draft';\n", RJ = "  if (!labels || !labels.includes('DRAFT')) return r;\n";
+  ok(SRC.split(K).length === 2 && SRC.split(RJ).length === 2, 'control setup: the draft kind line and the re-judge line are present once each');
+  const M = mutantCopies('chan-record-draft', REPO);
+  const RX = M.load('src/channel-record.js', SRC.replace(K, "  const draft = false;\n").replace(RJ, '  return r;\n'), 'no-draft-kind');
+  const xs = RX.asDraftRecord(stored);
+  ok(xs.kind === undefined && J(ids(RX.draftsOf([xs, peer('m1', 2000)]).messages)) === '["m-d0","m1"]' && /kind must be one of/.test(throws(() => RX.makeRecord({ ...base, kind: 'draft' })) || ''), 'CONTROL: without the draft kind the stored draft is the thread\'s FIRST message again and makeRecord refuses the kind (red)', J({ kind: xs.kind }));
+  for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: '⑨ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

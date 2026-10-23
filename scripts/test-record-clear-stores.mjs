@@ -90,15 +90,16 @@ function fakeApp() {
 }
 
 // ── the five stores ──
-// a LEGACY task-groups.json (entries with no ids) — the constructor backfills them once
+// a LEGACY task-groups.json (entries with no ids) — the constructor backfills them once (the Context table's rows as the
+// one migration of lane task-group-context left them: the old contextDir kept beside its 记笔记 row)
 const T0 = Date.now() - 3600e3;
 fs.writeFileSync(path.join(DATA, 'task-groups.json'), J({ version: 1, tasks: {
-  'T-260928-work': { id: 'T-260928-work', title: '工作', kind: 'task', archived: false, attention: null, objective: 'ship the release', backlog: [], sessions: [ME, OTHER], folders: [], contextDir: CTX, color: null, createdAt: T0, updatedAt: T0, contentUpdatedAt: T0, injectContext: true,
+  'T-260928-work': { id: 'T-260928-work', title: '工作', kind: 'task', archived: false, attention: null, objective: 'ship the release', backlog: [], sessions: [ME, OTHER], folders: [], contextDir: CTX, ctx: [{ path: CTX, note: '', tell: 'names', tags: ['notes'], share: null }], color: null, createdAt: T0, updatedAt: T0, contentUpdatedAt: T0, injectContext: true,
     progress: [
       { at: T0 + 1000, note: 'legacy entry one', session: OTHER },
       { at: T0 + 2000, note: 'legacy entry two', session: null },
     ] },
-  'T-260928-side': { id: 'T-260928-side', title: 'side', kind: 'task', archived: false, attention: null, objective: '', backlog: [], sessions: [ME], folders: [], contextDir: CTX2, color: null, createdAt: T0 + 1, updatedAt: T0, contentUpdatedAt: T0, injectContext: true, progress: [] },
+  'T-260928-side': { id: 'T-260928-side', title: 'side', kind: 'task', archived: false, attention: null, objective: '', backlog: [], sessions: [ME], folders: [], contextDir: CTX2, ctx: [{ path: CTX2, note: '', tell: 'names', tags: ['notes'], share: null }], color: null, createdAt: T0 + 1, updatedAt: T0, contentUpdatedAt: T0, injectContext: true, progress: [] },
 } }, null, 2));
 let tasksBroadcasts = 0;
 const tasks = new TaskGroupManager({ dataDir: DATA, onChange: () => { tasksBroadcasts++; } });
@@ -180,6 +181,7 @@ console.log('§1 the Task Group Activity log');
   tasks.addProgress('T-260928-side', { note: `side group ${MARK}`, session: ME });
   const prog = tasks.get(W).progress;
   ok(prog.every((p) => /^P-[0-9a-f]{6}$/.test(p.id)) && new Set(prog.map((p) => p.id)).size === prog.length, 'addProgress mints a unique P- id for every new entry');
+  await tasks.mirrorIdle();   // lane cli-call-timeouts: TASK.md is mirrored OFF the store write (queued, bounded) — wait for the copy to land
   const md0 = fs.readFileSync(path.join(CTX, '.vibespace', 'TASK.md'), 'utf8');
   ok(has(md0), 'setup: TASK.md in the context folder carries the marker before the clear');
   // a session's injection snapshot taken BEFORE the clear (what `_groupSnap` holds)
@@ -201,6 +203,7 @@ console.log('§1 the Task Group Activity log');
   ok(!has(after), 'the Task Group\'s activity no longer carries the marker anywhere');
   const onDisk = fs.readFileSync(path.join(DATA, 'task-groups.json'), 'utf8');
   ok(!onDisk.includes(`filed the ${MARK}`) && !onDisk.includes(`summary of ${MARK}`) && onDisk.includes(`side group ${MARK}`), 'data/task-groups.json on disk: the cleared entries\' words are gone (the other group\'s own entry is not this group\'s)');
+  await tasks.mirrorIdle();
   const md1 = fs.readFileSync(path.join(CTX, '.vibespace', 'TASK.md'), 'utf8');
   ok(!has(md1) && md1.includes(CT), 'TASK.md (the context folder\'s mirror) is regenerated through the same save: the sentence, no marker');
   ok(!has(tasks.renderTaskMd(tasks.get(W))) && !has(tasks.renderContext(W, { sessionKey: ME })), 'renderTaskMd + renderContext (the injected single-group context) carry no marker');

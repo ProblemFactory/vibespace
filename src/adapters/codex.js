@@ -15,7 +15,7 @@ const crypto = require('crypto');
 // (the tiny module the daemon bundle and every discovery collector share)
 const { deriveCodexSessionName, classifyCodexThread, deriveCodexAgentName, ZSTD_SUPPORTED, isZstPath, isZstBuffer, zstdDecompressFrames, readHeadText, CODEX_ROLLOUT_RE } = require('../discovery-facts');
 const { turnPreviewOf } = require('../assistant-note.js'); // PURE (B-40f8): THE preview of a user turn — the huge-session minimap too
-const { capsOf } = require('../backend-caps');   // responseStyle enum — the ONE list, never a second copy here
+const { capsOf, toolAllowlistArgs } = require('../backend-caps');   // responseStyle enum — the ONE list, never a second copy here; the 「可用工具」 pick's PURE rule
 
 const CODEX_SESSIONS_DIR = path.join(os.homedir(), '.codex', 'sessions');
 
@@ -79,6 +79,19 @@ function plainJsonlPath(fp) {
 function pushCodexConfigOverride(args, key, value) {
   if (!Array.isArray(args) || !key || value === undefined || value === null || value === '') return;
   args.push('-c', `${key}=${JSON.stringify(String(value))}`);
+}
+
+/** THE 「可用工具」 PICK OVER THE MODE (lane new-session-form): `pick` = toolAllowlistArgs' answer for codex — its sandbox
+ *  and/or approval replace the mode's own (the rest of the resolved row stands). A DEGRADED row (no codex-linux-sandbox
+ *  here) keeps its forced danger-full-access: a sandbox pick there would promise what the machine cannot enforce. */
+const PICK_SANDBOX_POLICY = Object.freeze({ 'read-only': 'readOnly', 'workspace-write': 'workspaceWrite', 'danger-full-access': 'dangerFullAccess' });
+function withCodexToolPick(resolved, pick) {
+  if (!pick || !pick.dirty) return resolved;
+  const out = { ...resolved };
+  if (pick.approval) out.approvalPolicy = pick.approval;
+  if (pick.sandbox && !resolved.degraded) { out.sandbox = pick.sandbox; out.sandboxPolicy = { type: PICK_SANDBOX_POLICY[pick.sandbox] }; }
+  out.toolPick = { ...(pick.approval ? { approval: pick.approval } : {}), ...(pick.sandbox && !resolved.degraded ? { sandbox: pick.sandbox } : {}) };
+  return out;
 }
 
 function resolveCodexPermissionMode(mode = 'default', { sandboxSupported = true } = {}) {
@@ -1015,9 +1028,9 @@ class CodexAdapter extends BackendAdapter {
    */
   buildSessionArgs(options) {
     const { cwd, model, effort, permissionMode, resumeId, fork = false, extraArgs = [], mode = 'terminal', initialPrompt = '' } = options;
-    const resolvedPermission = resolveCodexPermissionMode(permissionMode, {
+    const resolvedPermission = withCodexToolPick(resolveCodexPermissionMode(permissionMode, {
       sandboxSupported: this.config.codexSandboxSupported !== false,
-    });
+    }), toolAllowlistArgs({ backend: 'codex', pick: options.tools }));
 
     if (mode === 'chat') {
       return {
@@ -1036,6 +1049,7 @@ class CodexAdapter extends BackendAdapter {
           CODEX_WEBUI_PERMISSION_FALLBACK: resolvedPermission.degradedReason || '',
           CODEX_WEBUI_APPROVAL_POLICY: resolvedPermission.approvalPolicy,
           CODEX_WEBUI_SANDBOX: resolvedPermission.sandbox,
+          CODEX_WEBUI_TOOLS_PICK: resolvedPermission.toolPick ? JSON.stringify(resolvedPermission.toolPick) : '', // the wrapper's withToolsPick
           CODEX_WEBUI_CWD: cwd || os.homedir(),
           CODEX_WEBUI_SESSION_NAME: options.sessionName || '',
           // RESPONSE STYLE (2.369.58): the per-session `outputStyle` slot,

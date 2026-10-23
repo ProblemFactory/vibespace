@@ -85,11 +85,13 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-stranded-'));
     isPathShadowed: (p) => (shadowOn && String(p).startsWith(shadowRoot)) ? { name: 'OneDrive' } : null });
   const a = tg.create({ title: 'stranded', contextDir: path.join(shadowRoot, 'Courses', 'AIContext') });
   const b = tg.create({ title: 'local', contextDir: okRoot });
+  await tg.mirrorIdle();   // lane cli-call-timeouts: TASK.md is mirrored OFF the store write (queued, bounded) — wait for the copy to land
   ok(!fs.existsSync(shadowRoot), 'a context folder on a DISCONNECTED storage gets NO TASK.md (the tree is not recreated on the bare mount point)');
   ok(fs.existsSync(path.join(okRoot, '.vibespace', 'TASK.md')), 'an ordinary context folder still gets its TASK.md');
   shadowOn = false; // storage came back
   fs.mkdirSync(path.join(shadowRoot, 'Courses', 'AIContext'), { recursive: true });
   tg.syncAllContextMd();
+  await tg.mirrorIdle();
   ok(fs.existsSync(path.join(shadowRoot, 'Courses', 'AIContext', '.vibespace', 'TASK.md')), 'syncAllContextMd() after the mount returns writes the skipped file (retry-on-mounts-updated)');
   ok(typeof a.id === 'string' && typeof b.id === 'string', 'task ops never break over a shadowed folder');
   fs.mkdirSync(path.join(tmp, 'data2'), { recursive: true });

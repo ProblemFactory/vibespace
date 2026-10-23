@@ -65,8 +65,9 @@ const ctxDir = path.join(os.homedir(), '.vs-test-ctx-' + Date.now());
 r = call({ create: { title: 'War room', objective: 'Test initiative', contextDir: ctxDir, folders: [path.join(os.homedir(), 'work')] } });
 check('create returns the group', r.code === 200 && r.out.group?.title === 'War room');
 const gid = r.out.group.id;
-const g = tasks.get(gid);
-check('contextDir + folders stored', g.contextDir === ctxDir && g.folders?.[0]?.path === path.join(os.homedir(), 'work'));
+const g = tasks.view(gid);   // lane task-group-context: the store's view — contextDir / folders DERIVED from the Context table's rows
+check('contextDir + folders stored (as the Context rows they mean)', g.contextDir === ctxDir && g.folders?.[0]?.path === path.join(os.homedir(), 'work')
+  && JSON.stringify(tasks.get(gid).ctx.map((x) => x.tags)) === JSON.stringify([['discover'], ['notes']]));
 check('create audited in activity log', (g.progress || []).some((p) => /group created by manager agent/.test(p.note) && p.session === 'claude:abc-123'));
 
 // path allowlist (default root = ~)

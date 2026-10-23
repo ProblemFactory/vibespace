@@ -4,6 +4,14 @@
 // host, a new agent pushed — is ONE audit line naming WHO asked (`by`: human:<a sign-in> / agent:<conversation> /
 // job:<id> / system:<module>). `audit` lists THIS conversation's own acts (the server answers nothing of another's — the
 // user reads every line on the machine card's Activity…). Self-contained: this file ships alone to every host.
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-remote: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-remote', flags: ['--timeout', '--call-timeout'] });
 'use strict';
 const api = process.env.VIBESPACE_API;
 const token = process.env.VIBESPACE_SESSION_TOKEN;
@@ -27,7 +35,7 @@ function fail(data, status) {
   process.exit(data && data.code === 'human_only' ? 3 : 1);
 }
 async function get(path) {
-  const res = await fetch(api + path, { headers: { Authorization: 'Bearer ' + token } });
+  const res = await CC.call(api + path, { headers: { Authorization: 'Bearer ' + token } });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) fail(data, res.status);
   return data;

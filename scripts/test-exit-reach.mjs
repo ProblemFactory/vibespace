@@ -21,7 +21,11 @@
 //     allow-exit route ⇒ 410, PATCH base ⇒ 409, a live-picked session resolved to its key
 //   · CONTROLS (mutant-copy): (a) unknown read as everyone, (b) group rows ignored, (c) unreadable folded into
 //     not_granted, (d) a PATCH ignoring base, (e) askState never expiring, (f) the manager without stillGranted,
-//     (g) refusalText interpolating the session name — each turns its leg red
+//     (g) refusalText interpolating the session name, (u) the door dropping its exceptions — each turns its leg red
+//   · ONE GRANT STORE (lane grants-unify): the lists are rows of the REAL grants store (src/server/grants-store.js) in
+//     the model's spelling; a pre-unify record reaches the reader the way the migration carries it (GM.fromHostExit →
+//     the two rows, `exit.run.ask` → `exit.ask`), so every cell of the table is the OLD shape judged by the NEW reader;
+//     «除了» cells: a member left out of a group's / everyone's list ⇒ `excepted`, its own row still counts
 // Run: node scripts/test-exit-reach.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -34,6 +38,8 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const E = require(path.join(REPO, 'src/exit-reach.js'));
 const { ExitProxyManager } = require(path.join(REPO, 'src/exit-proxy.js'));
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+const GM = require(path.join(REPO, 'src/grant-model.js'));
+const GS = require(path.join(REPO, 'src/server/grants-store.js'));
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
@@ -41,23 +47,34 @@ const eq = (a, b, n) => ok(JSON.stringify(a) === JSON.stringify(b), n, { got: a,
 const SCR = scratch('exitreach');
 fs.mkdirSync(SCR, { recursive: true });
 process.on('exit', () => { try { fs.rmSync(SCR, { recursive: true, force: true }); } catch { } });
+// lane grants-unify: a PRE-UNIFY host record → the rows the migration writes (GM.fromHostExit) + the record as the
+// migration leaves it (`exit.run.ask` → `exit.ask`; the old lists stay, unread) → the reader. An unmappable shape ⇒ a row
+// the model cannot read (`to` not a list) ⇒ the whole access unknown, as the old reader answered.
+const rowsOfLegacy = (h) => { const m = GM.fromHostExit(h); const row = (x) => (x === null ? [] : x.unknown ? [{ door: 'exit', resource: 'h:x', to: 'unreadable' }] : [{ door: 'exit', resource: 'h:x', to: x.to, except: [] }]); return { use: row(m.use), run: row(m.run) }; };
+const hostNow = (h) => { const e = h && h.exit && typeof h.exit === 'object' && !Array.isArray(h.exit) ? h.exit : {}; return { ...h, exit: { ...e, ask: !!(e.run && e.run.ask === true) } }; };
+const accessVia = (mod, h) => mod.exitAccessOf(hostNow(h), rowsOfLegacy(h));
+const legacyAccess = (h) => accessVia(E, h);
 
 // ── the reader ──
 console.log('exitAccessOf (every shape on disk)');
 {
-  const N = { mode: 'nobody', who: [] };
-  eq(E.exitAccessOf({ id: 'h' }).use, N, 'absent ⇒ nobody');
-  eq([E.exitAccessOf({ allowExit: true }).use.mode, E.exitAccessOf({ allowExit: true }).run.mode, E.exitAccessOf({ allowExit: true }).legacy], ['everyone', 'everyone', true], 'allowExit on (pre-migration) ⇒ everyone / everyone');
-  eq(E.exitAccessOf({ allowExit: false }).run.mode, 'nobody', 'allowExit off ⇒ nobody');
-  eq(E.exitAccessOf({ allowExit: true, exit: { use: { mode: 'nobody' }, run: { mode: 'nobody', ask: false } } }).use.mode, 'nobody', 'a hand-written allowExit is read ONLY when exit is absent (attack 15)');
-  const v1 = E.exitAccessOf({ exit: { use: { mode: 'only', who: [{ kind: 'session', id: 'claude:abc' }, { kind: 'group', id: 't-1' }, { kind: 'session', id: 'claude:abc' }, { kind: 'robot', id: 'x' }, { kind: 'session', id: 'no spaces allowed here' }, null] }, run: { mode: 'everyone', ask: true } } });
-  eq(v1.use.who, [{ kind: 'session', id: 'claude:abc' }, { kind: 'group', id: 't-1' }], 'unknown kinds / junk ids / duplicates are DROPPED, never trusted (attack 14)');
-  eq(v1.run, { mode: 'everyone', who: [], ask: true }, 'run carries its ask');
-  eq(E.exitAccessOf({ exit: { use: { mode: 'sometimes' }, run: { mode: 'nobody' } } }).mode, 'unknown', 'a bad mode ⇒ the WHOLE access is unknown');
-  eq(E.exitAccessOf({ exit: { use: 'everyone', run: { mode: 'nobody' } } }).mode, 'unknown', 'a non-object grant ⇒ unknown (fail closed for BOTH grants)');
-  eq(E.exitAccessOf({ exit: 'on' }).mode, 'unknown', 'a non-object exit ⇒ unknown');
-  const big = E.exitAccessOf({ exit: { use: { mode: 'only', who: Array.from({ length: 100 }, (_, i) => ({ kind: 'group', id: 'g' + i })) }, run: { mode: 'nobody' } } });
+  const N = { mode: 'nobody', who: [], except: [] };
+  eq(legacyAccess({ id: 'h' }).use, N, 'absent ⇒ nobody');
+  eq([legacyAccess({ allowExit: true }).use.mode, legacyAccess({ allowExit: true }).run.mode], ['everyone', 'everyone'], 'allowExit on (pre-migration) ⇒ everyone / everyone');
+  eq(legacyAccess({ allowExit: false }).run.mode, 'nobody', 'allowExit off ⇒ nobody');
+  eq(legacyAccess({ allowExit: true, exit: { use: { mode: 'nobody' }, run: { mode: 'nobody', ask: false } } }).use.mode, 'nobody', 'a hand-written allowExit is read ONLY when exit is absent (attack 15)');
+  const v1 = legacyAccess({ exit: { use: { mode: 'only', who: [{ kind: 'session', id: 'claude:abc' }, { kind: 'group', id: 't-1' }, { kind: 'session', id: 'claude:abc' }, { kind: 'robot', id: 'x' }, { kind: 'session', id: 'no spaces allowed here' }, null] }, run: { mode: 'everyone', ask: true } } });
+  eq(v1.use.who, [{ kind: 'conversation', key: 'abc' }, { kind: 'group', id: 't-1' }], 'unknown kinds / junk ids / duplicates are DROPPED, never trusted (attack 14); a `<backend>:<cid>` key reads in the ONE spelling (the conversation id)');
+  eq(v1.run, { mode: 'everyone', who: [], except: [], ask: true }, 'run carries its ask');
+  eq(legacyAccess({ exit: { use: { mode: 'sometimes' }, run: { mode: 'nobody' } } }).mode, 'unknown', 'a bad mode ⇒ the WHOLE access is unknown');
+  eq(legacyAccess({ exit: { use: 'everyone', run: { mode: 'nobody' } } }).mode, 'unknown', 'a non-object grant ⇒ unknown (fail closed for BOTH grants)');
+  eq(legacyAccess({ exit: 'on' }).mode, 'unknown', 'a non-object exit ⇒ unknown');
+  const big = legacyAccess({ exit: { use: { mode: 'only', who: Array.from({ length: 100 }, (_, i) => ({ kind: 'group', id: 'g' + i })) }, run: { mode: 'nobody' } } });
   eq(big.use.who.length, 64, 'the reader keeps at most 64 rows');
+  // lane grants-unify — the reader reads WHO from the store only: the record's own lists are never read
+  eq(E.exitAccessOf({ exit: { use: { mode: 'everyone' }, run: { mode: 'everyone' } }, allowExit: true }).use.mode, 'nobody', 'the record\'s own pre-unify lists (and allowExit) are never read — no row ⇒ nobody');
+  eq(E.exitAccessOf({ exit: { ask: true } }, { run: [{ door: 'exit', resource: 'h:run', to: [{ kind: 'group', id: 'G' }], except: [{ kind: 'conversation', key: 'B' }] }] }).run, { mode: 'only', who: [{ kind: 'group', id: 'G' }], except: [{ kind: 'conversation', key: 'B' }], ask: true }, 'a row ⇒ only + its exceptions; the ask from the record');
+  eq(E.exitAccessOf({}, { use: [{ door: 'exit', resource: 'h:use', to: [{ kind: 'group', id: 'G' }], except: [{ kind: 'robot' }] }] }).mode, 'unknown', 'a row whose exception cannot be read ⇒ the WHOLE access unknown (never read wider)');
 }
 
 // ── THE TABLE ──
@@ -91,7 +108,7 @@ const WANT = { // per access, per caller (the same for both grants — the OTHER
 const cellOf = (mod, grant, accessName, caller) => {
   const g = ACCESS[accessName];
   const h = g ? { exit: { use: grant === 'use' ? g : { mode: 'nobody' }, run: grant === 'run' ? { ...g, ask: false } : { mode: 'nobody', ask: false } } } : { exit: { use: { mode: '??' }, run: { mode: 'nobody' } } };
-  const v = mod.exitVerdict(mod.exitAccessOf(h), grant, CALLERS[caller]);
+  const v = mod.exitVerdict(accessVia(mod, h), grant, CALLERS[caller]);
   return v.ok ? v.via : v.code;
 };
 {
@@ -105,23 +122,69 @@ const cellOf = (mod, grant, accessName, caller) => {
   // one named cell per rule, for the record
   eq(cellOf(E, 'run', 'only[s:A]', "A's pending fork"), 'fork_pending', "run × only[s:A] × A's pending fork ⇒ fork_pending");
   eq(cellOf(E, 'use', 'only[g:G]', 'B unreadable'), 'groups_unreadable', 'use × only[g:G] × B unreadable ⇒ groups_unreadable (attack 8)');
-  eq(E.exitVerdict(E.exitAccessOf({ exit: { use: { mode: 'only', who: [{ kind: 'session', id: 'claude:B' }] }, run: { mode: 'nobody' } } }), 'use', CALLERS['B unreadable']).code, undefined, 'a session row decides on its own even while the store is unreadable');
+  eq(E.exitVerdict(legacyAccess({ exit: { use: { mode: 'only', who: [{ kind: 'session', id: 'claude:B' }] }, run: { mode: 'nobody' } } }), 'use', CALLERS['B unreadable']).code, undefined, 'a session row decides on its own even while the store is unreadable');
+}
+// ── «除了» (lane grants-unify): a member left out of a group's / everyone's list ──
+console.log('«除了» — the exceptions (grant × list × caller)');
+const XACCESS = {
+  'only[g:G] except B': { to: [{ kind: 'group', id: 'G' }], except: [{ kind: 'conversation', key: 'B' }] },
+  'everyone except B': { to: [{ kind: 'everyone' }], except: [{ kind: 'conversation', key: 'B' }] },
+  'everyone except g:G': { to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'G' }] },
+};
+const XWANT = { // A, A's fork, B, B∈G, B∈H, B unreadable
+  'only[g:G] except B': ['not_granted', 'fork_pending', 'excepted', 'excepted', 'excepted', 'excepted'],
+  'everyone except B': ['everyone', 'everyone', 'excepted', 'excepted', 'excepted', 'excepted'],
+  'everyone except g:G': ['everyone', 'everyone', 'everyone', 'excepted', 'everyone', 'groups_unreadable'],
+};
+const xcellOf = (mod, grant, name, caller) => {
+  const row = { door: 'exit', resource: `h:${grant}`, ...XACCESS[name] };
+  const v = mod.exitVerdict(mod.exitAccessOf({ exit: {} }, { [grant]: [row] }), grant, CALLERS[caller]);
+  return v.ok ? v.via : v.code;
+};
+const xtable = (mod) => { const bad = []; for (const grant of ['use', 'run']) for (const a of Object.keys(XACCESS)) Object.keys(CALLERS).forEach((c, i) => { const got = xcellOf(mod, grant, a, c); if (got !== XWANT[a][i]) bad.push(`${grant} × ${a} × ${c}: ${got} (want ${XWANT[a][i]})`); }); return bad; };
+{
+  const bad = xtable(E);
+  ok(bad.length === 0, `all ${2 * Object.keys(XACCESS).length * 6} exception cells as named (an exception beats the group AND everyone; a group exception undecidable while the store is unreadable refuses by name; nobody else moves)`, bad);
+  // a member's OWN row still counts (rows add): B named in the use list AND left out of run's group
+  const acc = E.exitAccessOf({ exit: {} }, { use: [{ door: 'exit', resource: 'h:use', to: [{ kind: 'conversation', key: 'B' }] }], run: [{ door: 'exit', resource: 'h:run', to: [{ kind: 'group', id: 'G' }], except: [{ kind: 'conversation', key: 'B' }] }] });
+  eq([E.exitVerdict(acc, 'use', CALLERS['B∈G']).via, E.exitVerdict(acc, 'run', CALLERS['B∈G']).code], ['session', 'excepted'], 'an exception subtracts only ITS list (B keeps its own use row, loses run through G)');
+  const ex = E.exitVerdict(acc, 'run', CALLERS['B∈G']);
+  eq(ex.except, { kind: 'conversation', key: 'B' }, 'the refusal names the exception that decided');
+  ok(/left this conversation out/.test(E.refusalText('excepted', { machine: 'Macbook', grant: 'run' })) && /lift the exception/.test(E.refusalText('excepted', { machine: 'Macbook', grant: 'run' })), 'the excepted sentence names the exception and where the user lifts it');
+}
+console.log('the SERVED view round-trips (GET /api/hosts → the row\'s summary, the dialog, the PATCH answer\'s toast)');
+{
+  const J = JSON.stringify;
+  // lane grants-unify: the page reads the served `exitView` back with `accessOfView` — every shape must come back as itself
+  // (a spelled-out default hub once read as unknown: «网络 — 无法读取» on every row and toast)
+  const row = (g, to, except = []) => [{ door: 'exit', resource: `h:${g}`, to, except }];
+  const shapes = [
+    E.exitAccessOf({ id: 'h' }, { use: [], run: [] }),
+    E.exitAccessOf({ id: 'h', exit: { ask: true } }, { use: row('use', [{ kind: 'everyone' }]), run: row('run', [{ kind: 'group', id: 'g1' }, { kind: 'conversation', key: 'c1' }], [{ kind: 'conversation', key: 'm1' }]) }),
+    E.exitAccessOf({ id: 'h', exit: { hub: { mode: 'ask' } } }, { use: row('use', [{ kind: 'conversation', key: 'c1' }]), run: [] }),
+  ];
+  const back = shapes.map((a) => E.accessOfView(E.exitView(a)));
+  ok(back.every((b, i) => !b.mode && J(E.summaryOf(b)) === J(E.summaryOf(shapes[i])) && E.exitStamp(b) === E.exitStamp(shapes[i])), 'exitView → accessOfView is the identity on every shape (summary and stamp alike) — a spelled-out default hub included', back.map((b) => b.mode || 'ok'));
+  const { hub: _h, ...noHub } = E.exitView(shapes[1]);
+  ok(J(E.summaryOf(E.accessOfView(noHub))) === J(E.summaryOf(shapes[1])) && E.accessOfView(noHub).hub.mode === 'default', 'a view WITHOUT a hub (the hosts row omits an unset one) reads back the same (the instance\'s default)');
 }
 console.log('agentView · stamp · base · patch');
 {
-  const acc = E.exitAccessOf({ exit: { use: { mode: 'only', who: [{ kind: 'session', id: 'claude:SECRET' }, { kind: 'group', id: 'G' }] }, run: { mode: 'everyone', ask: true } } });
+  const acc = legacyAccess({ exit: { use: { mode: 'only', who: [{ kind: 'session', id: 'claude:SECRET' }, { kind: 'group', id: 'G' }] }, run: { mode: 'everyone', ask: true } } });
   const v = E.agentView(acc, CALLERS['B∈G']);
   eq(v, { use: { you: true, via: 'group' }, run: { you: true, via: 'everyone', ask: true } }, 'agentView = the caller\'s own two answers');
   ok(!/SECRET|claude:|"G"/.test(JSON.stringify(v)), 'agentView carries no other principal, no key, no name');
   const s1 = E.exitStamp(acc);
-  const acc2 = E.exitAccessOf({ exit: { use: { mode: 'only', who: [{ kind: 'group', id: 'G' }, { kind: 'session', id: 'claude:SECRET' }] }, run: { mode: 'everyone', ask: true } } });
+  const acc2 = legacyAccess({ exit: { use: { mode: 'only', who: [{ kind: 'group', id: 'G' }, { kind: 'session', id: 'claude:SECRET' }] }, run: { mode: 'everyone', ask: true } } });
   eq(E.exitStamp(acc2), s1, 'row order is not a change');
   eq(E.exitBaseVerdict(acc, undefined), { ok: true }, 'no base ⇒ unconditional (a script)');
   eq(E.exitBaseVerdict(acc, s1), { ok: true }, 'the base it read ⇒ ok');
-  const acc3 = E.exitAccessOf({ exit: { use: { mode: 'only', who: [{ kind: 'group', id: 'G' }, { kind: 'group', id: 'X' }] }, run: { mode: 'everyone', ask: false } } });
+  const acc3 = legacyAccess({ exit: { use: { mode: 'only', who: [{ kind: 'group', id: 'G' }, { kind: 'group', id: 'X' }] }, run: { mode: 'everyone', ask: false } } });
   const bv = E.exitBaseVerdict(acc3, s1);
-  ok(!bv.ok && bv.code === 'list_changed' && bv.added.includes('use:group:X') && bv.removed.includes('use:session:claude:SECRET') && bv.added.includes('run:ask=0'), 'a stale base ⇒ list_changed naming what differs (attack 4)', bv);
-  const cur = E.exitAccessOf({ exit: { use: { mode: 'nobody' }, run: { mode: 'nobody', ask: false } } });
+  ok(!bv.ok && bv.code === 'list_changed' && bv.added.includes('use:group:X') && bv.removed.includes('use:conversation:SECRET') && bv.added.includes('run:ask=0'), 'a stale base ⇒ list_changed naming what differs (attack 4)', bv);
+  const accX = { ...acc, use: { ...acc.use, except: [{ kind: 'conversation', key: 'B' }] } };
+  ok(E.exitStamp(accX) !== s1 && E.exitBaseVerdict(accX, s1).added.includes('use:x=conversation:B'), 'an exception is a fact of the list: a stale base misses it ⇒ list_changed naming it');
+  const cur = legacyAccess({ exit: { use: { mode: 'nobody' }, run: { mode: 'nobody', ask: false } } });
   const P = (b) => E.patchVerdict(cur, b, { now: 5 });
   eq(P({ on: true }).code, 'bad_grant', 'the old {on} body ⇒ bad_grant (send use / run)');
   ok(/two lists now/.test(P({ on: true }).error), '…whose sentence says so');
@@ -132,11 +195,20 @@ console.log('agentView · stamp · base · patch');
   eq(P({ use: { mode: 'only', who: Array.from({ length: 65 }, (_, i) => ({ kind: 'group', id: 'g' + i })) } }).code, 'too_many', '65 rows ⇒ too_many');
   eq(P({ run: { mode: 'everyone', ask: 'yes' } }).code, 'bad_grant', 'ask non-boolean ⇒ bad_grant');
   const okv = P({ use: { mode: 'only', who: [{ kind: 'group', id: 'G' }, { kind: 'group', id: 'G' }] }, run: { mode: 'everyone', ask: true } });
-  eq([okv.ok, okv.access.use.who, okv.access.run, okv.changed, okv.access.updatedAt], [true, [{ kind: 'group', id: 'G' }], { mode: 'everyone', who: [], ask: true }, { use: true, run: true }, 5], 'a good PATCH: rows deduped, updatedAt = now');
+  eq([okv.ok, okv.access.use.who, okv.access.run, okv.changed, okv.access.updatedAt], [true, [{ kind: 'group', id: 'G' }], { mode: 'everyone', who: [], except: [], ask: true }, { use: true, run: true }, 5], 'a good PATCH: rows deduped, updatedAt = now');
+  // lane grants-unify — «除了» on the PATCH
+  const px = P({ use: { mode: 'only', who: [{ kind: 'group', id: 'G' }], except: [{ kind: 'conversation', key: 'B' }, { kind: 'conversation', key: 'B' }] } });
+  eq([px.ok, px.access.use.except], [true, [{ kind: 'conversation', key: 'B' }]], 'a PATCH with an exception keeps it (deduped)');
+  eq(P({ use: { mode: 'only', who: [{ kind: 'conversation', key: 'B' }, { kind: 'group', id: 'G' }], except: [{ kind: 'conversation', key: 'B' }] } }).code, 'except_conflicts', 'a member both picked and left out ⇒ except_conflicts');
+  eq(P({ use: { mode: 'everyone', except: [{ kind: 'everyone' }] } }).code, 'bad_principal', 'everyone can never be an exception');
+  eq(P({ use: { mode: 'only', who: [{ kind: 'group', id: 'G' }], except: 'B' } }).code, 'bad_principal', 'except must be a list');
+  eq(P({ use: { mode: 'nobody', except: [{ kind: 'conversation', key: 'B' }] } }).access.use.except, [], 'nobody keeps no exception');
+  eq(P({ use: { mode: 'only', who: [{ kind: 'session', id: 'codex:T1' }] } }).access.use.who, [{ kind: 'conversation', key: 'T1' }], 'a script\'s pre-unify `<backend>:<cid>` row is mapped to the ONE spelling');
+  eq(E.exitRows(px.access, 'host-1').map((r) => [r.resource, r.to, r.except]), [['host-1:use', [{ kind: 'group', id: 'G' }], [{ kind: 'conversation', key: 'B' }]], ['host-1:run', [], []]], 'exitRows: the two rows the ONE writer gets (nobody ⇒ an empty row, removed by the store)');
   eq(E.patchVerdict(cur, { use: { mode: 'everyone' } }).access.run, cur.run, 'a grant absent from the body is kept');
   eq(E.patchVerdict(cur, { use: { mode: 'everyone' }, base: 'stale' }).code, 'list_changed', 'a PATCH with a stale base ⇒ list_changed, nothing written');
   eq(E.patchVerdict({ mode: 'unknown' }, { use: { mode: 'everyone' } }).code, 'bad_grant', 'an unreadable stored access is replaced only by BOTH grants');
-  eq(E.storedExit(okv.access), { use: { mode: 'only', who: [{ kind: 'group', id: 'G' }] }, run: { mode: 'everyone', ask: true }, updatedAt: 5, updatedBy: 'user' }, 'the stored shape');
+  eq(E.storedExit(okv.access), { ask: true, updatedAt: 5, updatedBy: 'user' }, 'what the host record keeps: never a list (ask, the stamp; the hub only when set)');
 }
 console.log('askState · answerVerdict · runRecord · resolveMachine');
 {
@@ -214,13 +286,14 @@ function world({ Mgr = ExitProxyManager, Todos = UserTodoManager } = {}) {
   const hosts = {
     list: () => recs.map((h) => (h.transport === 'dial' ? { ...h, online: !!online[h.deviceId] } : { ...h })),
     get: (id) => { const h = recs.find((x) => x.id === id); if (!h) throw new Error('host not found'); return h; },
-    setExitAccess: (id, exit) => { const h = hosts.get(id); const keep = h.exit && h.exit.lastRun; h.exit = { ...exit, ...(keep && !exit.lastRun ? { lastRun: keep } : {}) }; delete h.allowExit; },
+    setExitAccess: (id, exit) => { const h = hosts.get(id); const was = h.exit || {}; const keep = {}; for (const k of ['lastRun', 'use', 'run']) if (was[k] !== undefined) keep[k] = was[k]; h.exit = { ...keep, ...exit }; },   // hosts.js's write (lane grants-unify)
     setLastRun: (id, rec) => { hosts.get(id).exit.lastRun = rec; },
     deviceBounded: async () => dm,
   };
   const dataDir = path.join(SCR, 'w' + Math.random().toString(36).slice(2, 8));
   fs.mkdirSync(dataDir, { recursive: true });
   const todos = new Todos({ dataDir, expirySweepMs: 0, now: () => clock });
+  const grants = GS.create({ dataDir, now: () => clock });   // lane grants-unify: THE store the lists live in
   const sessions = new Map([
     ['wa', { name: 'SECRET-NAME', backend: 'claude', claudeSessionId: 'A', cwd: '/w/a' }],
     ['wb', { name: 'Bee', backend: 'claude', claudeSessionId: 'B', cwd: '/w/b' }],
@@ -230,10 +303,10 @@ function world({ Mgr = ExitProxyManager, Todos = UserTodoManager } = {}) {
   let groupsThrow = false;
   const cards = [];
   const bc = [];
-  const mgr = new Mgr({ hosts, log: () => {}, dataDir, userTodos: todos, sessionsMap: () => sessions, bcastAll: (m) => bc.push(m), now: () => clock, timers: T,
+  const mgr = new Mgr({ hosts, grants, log: () => {}, dataDir, userTodos: todos, sessionsMap: () => sessions, bcastAll: (m) => bc.push(m), now: () => clock, timers: T,
     emitCard: (s, c) => { cards.push({ s: s.name, ...c }); return true; },
     groupsOf: (s) => { if (groupsThrow) throw new Error('task store unreadable'); return (membership[s.claudeSessionId] || []).map((id) => ({ id })); } });
-  return { mgr, recs, hosts, online, runs, dm, todos, sessions, membership, cards, bc, dataDir, advance, setGate: (p) => { runGate = p; }, setThrow: (b) => { groupsThrow = b; }, audit: () => fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) };
+  return { mgr, grants, recs, hosts, online, runs, dm, todos, sessions, membership, cards, bc, dataDir, advance, setGate: (p) => { runGate = p; }, setThrow: (b) => { groupsThrow = b; }, audit: () => fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) };
 }
 const tick = () => new Promise((r) => setImmediate(r));
 const settle = async (p) => { try { return { v: await p }; } catch (e) { return { e }; } };
@@ -250,7 +323,10 @@ const settle = async (p) => { try { return { v: await p }; } catch (e) { return 
   const set = await w.mgr.setAccess('host-dial-Macbook', { use: { mode: 'only', who: [{ kind: 'session', id: 'claude:A' }] }, run: { mode: 'only', who: [{ kind: 'session', id: 'claude:A' }, { kind: 'group', id: 'G' }], ask: true }, base: base0 });
   eq([set.changed, set.access.run.ask], [{ use: true, run: true }, true], 'setAccess with the base it read writes both lists');
   const stale = await settle(w.mgr.setAccess('host-dial-Macbook', { use: { mode: 'everyone' }, base: base0 }));
-  eq([stale.e && stale.e.code, w.recs[0].exit.use.mode], ['list_changed', 'only'], 'a second writer with the OLD base ⇒ list_changed, nothing written (attack 4)');
+  eq([stale.e && stale.e.code, w.mgr.access('host-dial-Macbook').use.mode], ['list_changed', 'only'], 'a second writer with the OLD base ⇒ list_changed, nothing written (attack 4)');
+  eq(w.grants.rowsFor('exit', 'host-dial-Macbook:run').map((r) => r.to), [[{ kind: 'conversation', key: 'A' }, { kind: 'group', id: 'G' }]], 'the lists are rows of the ONE grants store (the model\'s spelling)');
+  ok(w.recs[0].exit.ask === true && w.recs[0].exit.use.mode === 'nobody', 'the host record keeps the ask; its pre-unify lists are untouched (unread)');
+  ok(/"op":"set","door":"exit","resource":"host-dial-Macbook:run"/.test(fs.readFileSync(w.grants.auditFile, 'utf8')), 'one audit line per row written (grants-audit.jsonl)');
   eq(w.mgr.listFor(A, 'wa').map((m) => [m.name, m.grants]), [['Macbook', { use: true, run: true, runAsk: true }]], 'A lists the machine with network yes · commands ask');
   eq(w.mgr.listFor(B, 'wb').map((m) => m.grants), [{ use: false, run: true, runAsk: true }], 'B (in G) lists commands only');
   ok(!POISON.test(JSON.stringify(w.mgr.listFor(B, 'wb'))), 'B\'s list carries nothing of A');
@@ -341,7 +417,7 @@ const settle = async (p) => { try { return { v: await p }; } catch (e) { return 
   w.membership.B = ['G'];
   w.setThrow(true);
   const rb3 = await settle(w.mgr.run(B, 'wb', 'Macbook', 'id'));
-  eq([rb3.e && rb3.e.code, w.runs.length, w.recs[0].exit.run.mode], ['groups_unreadable', 2, 'only'], 'the Task Group store throws ⇒ groups_unreadable, nothing runs, nothing is revoked (attack 8)');
+  eq([rb3.e && rb3.e.code, w.runs.length, w.mgr.access('host-dial-Macbook').run.mode], ['groups_unreadable', 2, 'only'], 'the Task Group store throws ⇒ groups_unreadable, nothing runs, nothing is revoked (attack 8)');
   w.setThrow(false);
   // a revoke DURING the daemon's run (no cancel op)
   let open; w.setGate(new Promise((r) => { open = r; }));
@@ -688,9 +764,11 @@ console.log('the routes (real exit-routes.js)');
     const v = await call('GET', '/api/hosts/host-dial-Macbook/exit-access');
     ok(v.status === 200 && typeof v.j.base === 'string' && v.j.machine.name === 'Macbook', 'GET exit-access ⇒ the fresh view + its base');
     const pv = await call('PATCH', '/api/hosts/host-dial-Macbook/exit-access', { base: v.j.base, run: { mode: 'only', who: [{ kind: 'session', session: 'wb' }], ask: true } });
-    eq([pv.status, w.recs[0].exit.run.who, pv.j.resolved[0].key], [200, [{ kind: 'session', id: 'claude:B' }], 'claude:B'], 'a live pick {session:<webui id>} is resolved to its durable key');
+    eq([pv.status, w.mgr.access('host-dial-Macbook').run.who, pv.j.resolved[0].key], [200, [{ kind: 'conversation', key: 'B' }], 'B'], 'a live pick {session:<webui id>} is resolved to its conversation key (the ONE spelling)');
     const p409 = await call('PATCH', '/api/hosts/host-dial-Macbook/exit-access', { base: v.j.base, use: { mode: 'everyone' } });
-    eq([p409.status, p409.j.code, w.recs[0].exit.use.mode], [409, 'list_changed', 'nobody'], 'the second PATCH with the old base ⇒ 409, nothing written');
+    eq([p409.status, p409.j.code, w.mgr.access('host-dial-Macbook').use.mode], [409, 'list_changed', 'nobody'], 'the second PATCH with the old base ⇒ 409, nothing written');
+    const hl = await call('GET', '/api/hosts');
+    eq(hl.j.hosts.find((h) => h.id === 'host-dial-Macbook').exit.run.who, [{ kind: 'conversation', key: 'B' }], 'GET /api/hosts serves a machine\'s `exit` from the grants store (the row\'s summary reads it)');
     eq((await call('PATCH', '/api/hosts/host-dial-Macbook/exit-access', { run: { mode: 'only', who: [{ kind: 'session', session: 'gone' }] } })).status, 410, 'a picked session that is not live ⇒ 410 session-gone');
     eq((await call('PATCH', '/api/hosts/host-dial-Macbook/exit-access', { use: { mode: 'everyone' } }, { Authorization: 'Bearer vsst_A' })).j.code, 'human_only', 'an agent\'s bearer may not change who can use a machine');
     // B asks; the answer route refuses any bearer
@@ -782,12 +860,15 @@ console.log('controls (patched copies)');
   const table = (mod) => { const bad = []; for (const grant of ['use', 'run']) for (const a of Object.keys(ACCESS)) Object.keys(CALLERS).forEach((c, i) => { if (cellOf(mod, grant, a, c) !== WANT[a][i]) bad.push(`${grant}×${a}×${c}`); }); return bad; };
   const A = patch("if (isUnknown(access)) return refuse('unknown_shape', { grant });", "if (isUnknown(access)) return { ok: true, via: 'everyone', row: null };", 'unknown-everyone');
   ok(table(A).some((x) => x.includes('unknown')), 'CONTROL (a): exitAccessOf/exitVerdict reading unknown as everyone turns the unknown row red');
-  const B = patch("const grow = g.who.find((p) => p.kind === 'group' && gids.has(p.id));", 'const grow = null;', 'nogroups');
+  // lane grants-unify: the membership test is the model's — the DOOR's part is handing it the caller's groups and faults
+  const B = patch('groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], groupsUnreadable', 'groupIds: [], groupsUnreadable', 'nogroups');
   ok(table(B).some((x) => x.includes('B∈G')), 'CONTROL (b): exitVerdict ignoring group rows turns the B∈G cells red');
-  const C = patch("if (ctx && ctx.unreadable && g.who.some((p) => p.kind === 'group')) return refuse('groups_unreadable', { grant });", '', 'fold');
+  const C = patch('groupsUnreadable: !!ctx.unreadable', 'groupsUnreadable: false', 'fold');
   ok(table(C).some((x) => x.includes('unreadable')), 'CONTROL (c): unreadable folded into not_granted turns the unreadable cells red');
+  const U = patch("except: g.except || [] });", 'except: [] });', 'noexcept');
+  ok(xtable(U).some((x) => x.includes('excepted')), 'CONTROL (u): the door dropping its exceptions turns the «除了» cells red');
   const D = patch('const bv = exitBaseVerdict(cur, body.base);\n  if (!bv.ok) return bv;', 'const bv = { ok: true };', 'nobase');
-  ok(D.patchVerdict(E.exitAccessOf({ exit: { use: { mode: 'nobody' }, run: { mode: 'nobody' } } }), { use: { mode: 'everyone' }, base: 'stale' }).ok === true, 'CONTROL (d): a PATCH ignoring base lets the stale write through (the 409 leg goes red)');
+  ok(D.patchVerdict(legacyAccess({ exit: { use: { mode: 'nobody' }, run: { mode: 'nobody' } } }), { use: { mode: 'everyone' }, base: 'stale' }).ok === true, 'CONTROL (d): a PATCH ignoring base lets the stale write through (the 409 leg goes red)');
   const Ex = patch("return Number(now) - Number(askedAt) >= ASK_TTL_MS ? 'expired' : 'pending';", "return 'pending';", 'noexpire');
   ok(Ex.askState({ askedAt: 0, now: 60000 }) === 'pending', 'CONTROL (e): askState never expiring turns the 60 000 ms cell red');
   const G = patch("case 'ask_denied': return `the user did not allow \\`${head(cmd)}\\` on ${M}`;", "case 'ask_denied': return `the user did not allow ${arguments[1].sessionName} \\`${head(cmd)}\\` on ${M}`;", 'leakname');

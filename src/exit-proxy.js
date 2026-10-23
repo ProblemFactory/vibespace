@@ -24,6 +24,11 @@
  *     row's `lastRun`; a revoke that narrows `use` closes the live forward when no live conversation still
  *     holds it (the browser lane's §3.1 rule).
  * The device SOCKS binds the machine's loopback, so the tunnel stays loopback↔loopback.
+ *
+ * ONE GRANT STORE (lane grants-unify, 2026-10-23): the two lists are rows of the grants store (`grants` — door `exit`,
+ * resources `<hostId>:use` / `<hostId>:run`); `accessOf` reads them (+ the record's `ask` / hub / lastRun) and the save
+ * (`setAccess`) writes them through the ONE writer (`grants.setMany`, both lists in one landed write) — the host record
+ * keeps only `ask`, the hub list and the stamp.
  */
 'use strict';
 
@@ -37,6 +42,8 @@ const E = require('./exit-reach.js');
 const XS = require('./exit-shell.js');
 const R = require('./window-reach.js');
 const { addressableId, liveForkPending } = require('./claude-lock-capture.js');
+const GM = require('./grant-model.js');
+const GS = require('./server/grants-store.js');
 
 const AUDIT_FILE = 'exit-audit.jsonl';
 // verify r1 F2 (2026-10-01): the audit is a RING of two files (exit-audit.jsonl → .1 at AUDIT_MAX_BYTES, usage-probe-log's
@@ -99,7 +106,9 @@ function socksAuth(sock, check) {
 class ExitProxyManager {
   /** @param deps { hosts, log, groupsOf(session, webuiId), userTodos, emitCard(session, card), dataDir, now, sessionsMap(), bcastAll } */
   constructor({ hosts, log, groupsOf = null, userTodos = null, emitCard = null, dataDir = null, now = () => Date.now(), sessionsMap = null, bcastAll = null, auditMaxBytes = AUDIT_MAX_BYTES, settingOf = null,
+    grants = null,   // lane grants-unify: THE grants store (or a getter); absent ⇒ the instance's installed one
     timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) } } = {}) {
+    this._grants = typeof grants === 'function' ? grants : () => grants || GS.forDir(dataDir);
     this.timers = timers; // the ask's 60 s clock (a suite drives it with a fake one)
     this.hosts = hosts;
     this.log = log || (() => {});
@@ -148,12 +157,68 @@ class ExitProxyManager {
       try { groupIds = (this.groupsOf(s, sessionId) || []).map((g) => String(g && typeof g === 'object' ? g.id : g)); }
       catch (e) { unreadable = true; this.log(`group membership unreadable for ${sessionId}: ${e.message}`); }
     }
-    return { sessionKeys: keys, groupIds, ...(unreadable ? { unreadable: true } : {}), ...(liveForkPending(s) ? { forkPending: true } : {}) };
+    // lane grants-unify: the same keys in the grant model's ONE spelling (the conversation id; `webui:<id>` before it has one)
+    const conversationKeys = keys.map(GM.keyFromSessionKey).filter(Boolean);
+    return { sessionKeys: keys, conversationKeys, groupIds, ...(unreadable ? { unreadable: true } : {}), ...(liveForkPending(s) ? { forkPending: true } : {}) };
   }
   keyOf(session, sessionId) { return addressableId(session) ? R.sessionKeyOf(session, sessionId) : `webui:${sessionId}`; }
+  /** lane grants-unify: a live session's key in the grant model's ONE spelling — its own conversation id, a pending
+   *  fork's (or a not-yet-started conversation's) `webui:<id>`. */
+  conversationKeyOf(session, sessionId) { const cid = addressableId(session); return cid ? String(cid) : `webui:${sessionId}`; }
   _hosts() { try { return this.hosts.list?.() || []; } catch { return []; } }
   _raw(hostId) { try { return this.hosts.get(hostId); } catch { return null; } }
-  access(hostId) { return E.exitAccessOf(this._raw(hostId)); }
+  /** The rows of a machine's two lists (the grants store; no store ⇒ none ⇒ nobody — fail closed). */
+  _rowsOf(hostId) {
+    const g = this._grants();
+    if (!g || hostId == null) return { use: [], run: [] };
+    return { use: g.rowsFor('exit', `${hostId}:use`), run: g.rowsFor('exit', `${hostId}:run`) };
+  }
+  /** THE access of a host record (its lists from the store, the rest from the record). A machine that has no record
+   *  any more lends to nobody, whatever rows are left of it (the store's rows of a removed machine are pruned —
+   *  `pruneLists` — and never read meanwhile). */
+  accessOf(h) { return E.exitAccessOf(h, h && h.id != null ? this._rowsOf(h.id) : {}); }
+  access(hostId) { const h = this._raw(hostId); return E.exitAccessOf(h, h ? this._rowsOf(hostId) : {}); }
+  /** A machine that left hosts.json (a removal, an import without it, an un-pairing) takes its two lists with it — the
+   *  rows go through the ONE writer, so a machine re-added under the same id starts at nobody (never yesterday's list).
+   *  → the number of rows removed. Called by the re-judge of a hosts.json write; never throws. */
+  pruneLists() {
+    try {
+      const g = this._grants();
+      if (!g) return 0;
+      const ids = new Set(this._hosts().map((h) => String(h.id)));
+      const gone = g.rowsOfDoor('exit').filter((r) => !ids.has(String(r.resource).replace(/:(use|run)$/, '')));
+      if (!gone.length) return 0;
+      const w = g.setMany(gone.map((r) => ({ door: 'exit', resource: r.resource, to: [], except: [] })), 'machine-removed');
+      return w.ok ? gone.length : 0;
+    } catch (e) { this.log(`the lists of a removed machine were not pruned: ${e && e.message}`); return 0; }
+  }
+  /** What GET /api/hosts serves as a machine's `exit` (the row's summary and accent read it). */
+  publicExit(h) { const v = E.exitView(this.accessOf(h)); if (v.hub && v.hub.mode === 'default') delete v.hub; return v; }   // the hosts row: an unset hub is not served (the instance's default applies — as the record stored it)
+  /** CONFIG EXPORT (lane grants-unify): the two lists of these machines, as the rows the bundle carries (`hosts.grants`). */
+  exportLists(hostIds) {
+    const g = this._grants();
+    if (!g) return [];
+    const ids = new Set((Array.isArray(hostIds) ? hostIds : []).map(String));
+    return g.rowsOfDoor('exit').filter((r) => ids.has(String(r.resource).replace(/:(use|run)$/, ''))).map(GM.publicRow);
+  }
+  /** CONFIG IMPORT: every imported machine's two lists become the bundle's rows — `bundle.grants`, or (a bundle from
+   *  before the unify) its records' own lists mapped as the migration maps them; a machine with no row gets nobody.
+   *  ONE landed write through the ONE writer. → the store's answer (`{ok, changed}` | a refusal). */
+  importLists(bundle, { by = 'import' } = {}) {
+    const g = this._grants();
+    if (!g) return { ok: false, code: 'not_written', error: 'the grants store is not available — the lists were not imported' };
+    const recs = Array.isArray(bundle && bundle.hosts) ? bundle.hosts.filter((h) => h && typeof h.id === 'string' && h.id) : [];
+    const rows = Array.isArray(bundle && bundle.grants) ? bundle.grants.filter((r) => r && r.door === 'exit') : GM.rowsOfHosts(recs).rows;
+    const list = [];
+    for (const h of recs) for (const grant of E.GRANTS) {
+      const r = rows.find((x) => x.resource === `${h.id}:${grant}`);
+      list.push({ door: 'exit', resource: `${h.id}:${grant}`, to: r && Array.isArray(r.to) ? r.to : [], except: r && Array.isArray(r.except) ? r.except : [] });
+    }
+    // the import REPLACES the machines: a machine it does not carry has no list any more
+    const kept = new Set(list.map((x) => x.resource));
+    for (const r of g.rowsOfDoor('exit')) if (!kept.has(r.resource) && !recs.some((h) => String(r.resource).startsWith(`${h.id}:`))) list.push({ door: 'exit', resource: r.resource, to: [], except: [] });
+    return g.setMany(list, by);
+  }
   _online(h) { return h.transport === 'dial' ? !!h.online : true; } // ssh probed at use time
 
   // ── the audit ─────────────────────────────────────────────────────────────
@@ -263,7 +328,7 @@ class ExitProxyManager {
   /** Every machine for the cookie route (GET /api/exits): its summary + last run (words are the client's). */
   list() {
     return this._hosts().map((h) => {
-      const a = E.exitAccessOf(this._raw(h.id) || h);
+      const a = this.accessOf(this._raw(h.id) || h);
       return { id: h.id, name: h.name || h.id, transport: h.transport || 'ssh', online: this._online(h), active: this._live.has(h.id), localPort: this._live.get(h.id)?.localPort || null, summary: E.summaryOf(a), lastRun: a.lastRun || null };
     });
   }
@@ -272,9 +337,8 @@ class ExitProxyManager {
     const h = this._raw(hostId);
     if (!h) throw namedError('not-found', 'no such machine');
     const listed = this._hosts().find((x) => x.id === hostId) || h;
-    const a = E.exitAccessOf(h);
-    const withNames = (g) => (g && Array.isArray(g.who) ? { ...g, who: roster ? R.principalsNow(g.who, roster) : g.who } : g);
-    const access = a.mode === 'unknown' ? a : { ...a, use: withNames(a.use), run: withNames(a.run) };
+    const a = this.accessOf(h);
+    const access = E.exitView(a, { roster });   // the lists with the CURRENT names (GM.namesNow) — absent ones said
     const live = this._live.get(hostId);
     const sm = this.sessionsMap();
     const nameOf = (sid) => { const s = sm.get(sid); return s ? (s.name || s.webuiName || sid) : sid; };
@@ -300,17 +364,22 @@ class ExitProxyManager {
   async setAccess(hostId, body, { by = 'user' } = {}) {
     const h = this._raw(hostId);
     if (!h) throw namedError('not-found', 'no such machine');
-    const cur = E.exitAccessOf(h);
+    const cur = this.accessOf(h);
     const v = E.patchVerdict(cur, body, { now: this.now(), by });
     if (!v.ok) throw namedError(v.code, v.error || v.code, v.code === 'list_changed' ? { added: v.added, removed: v.removed } : { grant: v.grant });
+    const store = this._grants();
+    if (!store) throw namedError('not_written', 'the grants store is not available — nothing was changed');
     // what this machine lends RIGHT NOW (the report is the difference, whichever re-judge did the cutting: in server.js
     // the store's own write already calls rejudgeAll through hosts.onReachChange — verify-r3 A-r3a)
     const liveBefore = this._live.get(hostId);
     const heldBefore = liveBefore ? [...new Set([...liveBefore.users, ...(liveBefore.bySession ? liveBefore.bySession.keys() : [])])] : [];
     const asksBefore = [...this._asks.values()].filter((k) => k.hostId === hostId).map((k) => k.askId);
+    // THE ONE WRITER (lane grants-unify): both lists in one landed write, then the record's own fields (ask, hub, stamp)
+    const w = store.setMany(E.exitRows(v.access, hostId), by);
+    if (!w.ok) throw namedError(w.code, w.error || w.code);
     this.hosts.setExitAccess(hostId, E.storedExit(v.access));
     try { this.hosts.hubActs?.onPolicyChanged?.(hostId); } catch { } // lane hub-act-ask: the cards of this machine re-judged by its list
-    const now = E.exitAccessOf(this._raw(hostId));
+    const now = this.access(hostId);
     this.audit({ hostId, machine: h.name || h.id, verb: 'access-changed', by, ok: true, changed: v.changed, summary: E.summaryOf(now) });
     this.log(`${h.name || h.id}: who can use it changed by ${by} — network ${now.use.mode}${now.use.mode === 'only' ? ` (${now.use.who.length})` : ''}, commands ${now.run.mode}${now.run.mode === 'only' ? ` (${now.run.who.length})` : ''}${now.run.ask ? ' (ask)' : ''}`);
     // THE ONE RE-JUDGE (verify-r3 census) — never a second loop of its own
@@ -346,6 +415,7 @@ class ExitProxyManager {
   rejudgeAll(why = 'task-groups', { goneSessions = [], goneHosts = [] } = {}) {
     const out = { stopped: [], settled: [], asks: [], hosts: [] };
     const stopping = [];
+    if (/^hosts-/.test(String(why))) this.pruneLists();   // lane grants-unify: a hosts.json write that dropped a machine drops its lists
     try {
       const sm = this.sessionsMap();
       const endedS = new Set((goneSessions || []).filter((x) => x != null && x !== '').map(String));
@@ -380,7 +450,7 @@ class ExitProxyManager {
     const ctx = this.ctxFor(session, sessionId);
     const out = [];
     for (const h of this._hosts()) {
-      const v = E.agentView(E.exitAccessOf(this._raw(h.id) || h), ctx);
+      const v = E.agentView(this.accessOf(this._raw(h.id) || h), ctx);
       if (!v.use.you && !v.run.you) continue;
       out.push({ id: h.id, name: h.name || h.id, transport: h.transport || 'ssh', online: this._online(h), active: this._live.has(h.id), localPort: this._live.get(h.id)?.localPort || null, grants: { use: v.use.you, run: v.run.you, runAsk: v.run.ask } });
     }
@@ -391,11 +461,11 @@ class ExitProxyManager {
   _judge(session, sessionId, ref, grant) {
     const ctx = this.ctxFor(session, sessionId);
     const all = this._hosts();
-    const pool = (ref == null || ref === '') ? all.filter((h) => E.exitVerdict(E.exitAccessOf(this._raw(h.id) || h), grant, ctx).ok) : all;
+    const pool = (ref == null || ref === '') ? all.filter((h) => E.exitVerdict(this.accessOf(this._raw(h.id) || h), grant, ctx).ok) : all;
     const m = E.resolveMachine(ref, pool);
     if (!m.ok) return { refusal: { code: m.code, error: m.error } };
     const h = m.host;
-    const access = E.exitAccessOf(this._raw(h.id) || h);
+    const access = this.accessOf(this._raw(h.id) || h);
     const verdict = E.exitVerdict(access, grant, ctx);
     const other = grant === 'use' ? 'run' : 'use';
     const has = { [other]: !!E.exitVerdict(access, other, ctx).ok };

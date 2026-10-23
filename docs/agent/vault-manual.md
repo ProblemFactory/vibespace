@@ -24,6 +24,8 @@ vibespace-vault run [--env NAME=vault://…]… [--file NAME=vault://…|@<templ
 vibespace-vault list                what you may use in a run: entries the user opened for runs, or granted to you
 vibespace-vault request <vault://…> --for "<purpose>"
                                     ask the user for an entry, with what you will run with it
+vibespace-vault request "<what you need>" --purpose "<why>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>]
+                                    ask the user to PASTE a secret you do not have — a masked box in their For you tray
 vibespace-vault uses                your grants, your open requests, your own uses (entry, purpose, when, outcome, receipt)
 ```
 
@@ -70,6 +72,23 @@ command still shows the user its run card first. A lock ends every grant.
 `vibespace-vault uses` prints what you hold now and what you did: your live grants (entry, purpose, until), your requests
 still waiting, and your own uses newest first — entry, purpose, when, door, outcome, receipt. Never a value; never another
 conversation's.
+
+## A secret you do not have — `request "<what>"` (the paste box)
+
+Never ask for a password or a key in the chat. Ask the user to paste it into the vault:
+
+    vibespace-vault request "the OpenAI key for the judged rules" --purpose "judge your notification rules" --into llm.apiKey
+    vibespace-vault request "the sandbox's admin password" --purpose "log in to the sandbox and reset the demo data" --kind password --name "Sandbox admin"
+
+That files **one** item in the user's For you tray — what you need (your words), what for, and WHERE it goes — with a
+masked box, 「存入保险库」 and 「拒绝」. `--into <row>.<field>` names an Integrations card's secret field (`llm.apiKey`,
+`dropline.apiKey`, `cloud:browserbase.apiKey` …; VibeSpace uses it there itself); without it the value becomes a NEW vault
+entry of `--kind` (api-key · password · secret, default secret) labelled `--name` (default: your words). The CLI answers the
+request id; **nothing waits on it** — do other work. At your next turn you read the receipt: **STORED** and where (a field
+id, or the entry's `vault://secrets/secret:<id>/secret` — which this conversation may use in `run` for 8 hours: the user's
+paste is the grant), **REFUSED** (do not ask again for 10 minutes), or **WITHDRAWN** (the user locked the vault — ask again
+once it is unlocked). You never see the value. The same place asked twice while one is open answers the same id; at most 4
+open per conversation. `vibespace-vault uses` lists your paste boxes still waiting.
 
 ## Using a stored secret in a command — `run`
 

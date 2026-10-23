@@ -102,6 +102,9 @@ vibespace-api groups invite <g-…|group name> <target>
 - Only these choices cross: backend, mode, cwd, name (≤ 60 characters), model, effort, permission mode (the backend's own
   values — a refused one is named: `bad_model`, `bad_effort`, `bad_permission_mode`, …), Task Group, account or pool.
   A resume, a fork, a remote machine or extra CLI arguments are not an automation's to ask for.
+- **--task** makes the new conversation a MEMBER of that Task Group — it shows in the group's list with one activity line («session …
+  bound by …») the moment it has its own id, so no `bind` is needed after it. The Task Group must be one the calling conversation
+  is in (`not_granted` otherwise — the same rule as `bind`).
 - **The key's limits decide where and how** (judged first, in this order):
 
 | refusal | means |

@@ -219,6 +219,21 @@
 const NO_WORKTREE = Object.freeze({ supported: false, flag: null, named: false, requiresGitRepo: false, hookEscape: null, landsIn: null, branchPrefix: null });
 const CLAUDE_WORKTREE = Object.freeze({ supported: true, flag: '--worktree', named: true, requiresGitRepo: true, hookEscape: 'WorktreeCreate', landsIn: '.claude/worktrees/<name>', branchPrefix: 'worktree-' });
 
+// toolAllowlist (lane new-session-form — the New Session form's 「可用工具」 row) names the HARNESS'S OWN per-session
+// tool switch: a flag on its command line, never a VibeSpace rule. null = this harness has none and the row is never
+// offered (a plain shell, opencode, antigravity). The form, the spawn and the suites gate on THIS row, never on an id.
+//   kind 'tools'   (claude) — `allow` / `deny` = `--allowedTools` / `--disallowedTools` (2.1.281 --help: "Comma or
+//                  space-separated list of tool names"), `tools` = the closed list the row offers, one tick each:
+//                  default → ✓ allow (asks no more) → ✗ deny (removed) → default. `keep` = the tools whose ✗ is REFUSED:
+//                  deny beats allow in Claude Code (deny > ask > allow), so a ✗ Bash would also block the
+//                  Bash(vibespace-…:*) allow rules every reporting CLI rides (src/agent-tool-rules.js) — those rules
+//                  are kept, and the chip says so.
+//   kind 'sandbox' (codex) — `sandbox` / `approval` = the closed vocabularies of `--sandbox` / `--ask-for-approval`.
+//                  The default is what the permission mode maps to (src/adapters/codex.js resolveCodexPermissionMode);
+//                  a pick overrides that half only.
+const CLAUDE_TOOL_ALLOWLIST = Object.freeze({ kind: 'tools', allow: '--allowedTools', deny: '--disallowedTools', tools: Object.freeze(['Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'NotebookEdit']), keep: Object.freeze(['Bash']) });
+const CODEX_TOOL_ALLOWLIST = Object.freeze({ kind: 'sandbox', sandboxFlag: '--sandbox', approvalFlag: '--ask-for-approval', sandbox: Object.freeze(['read-only', 'workspace-write', 'danger-full-access']), approval: Object.freeze(['untrusted', 'on-request', 'on-failure', 'never']) });
+
 // permissionRules names WHERE this harness's permission rules can be READ from
 // and at which SCOPE — the read-only "where does this rule come from" view
 // (owner ruling 10 of design-harness-features §5.1) gates on THIS row, never
@@ -358,6 +373,7 @@ const BACKEND_CAPS = {
     // (gemini 0.33.2 does NOT: 0 hits in the package, correcting an earlier
     // draft; codex/opencode have no per-session worktree flag).
     worktree: CLAUDE_WORKTREE,
+    toolAllowlist: CLAUDE_TOOL_ALLOWLIST, // --allowedTools / --disallowedTools (essay at CLAUDE_TOOL_ALLOWLIST)
     // The documented settings hierarchy read straight off disk (managed /
     // user / project / local settings.json + permissions.allow|deny|ask).
     // No session needed and no live verb: the files ARE the answer.
@@ -414,6 +430,7 @@ const BACKEND_CAPS = {
     // instance'`; test-vendor-whitelist asserts THIS row and that entry agree,
     // so re-enabling it without re-measuring fails the build.
     permissionRules: { source: 'config-read', session: true, instance: false, liveVerb: true },
+    toolAllowlist: CODEX_TOOL_ALLOWLIST, // --sandbox + --ask-for-approval over the permission mode's default
     terminalOnly: false, oauthUsage: false, globalUsageKey: '__global_codex__',
     subagents: 'threads', // lane agy-subagent-cards: a collab card opens the child's own thread
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
@@ -429,6 +446,7 @@ const BACKEND_CAPS = {
     responseStyle: { live: false, closed: true, values: [] }, // terminal-only: no agent to style
     worktree: NO_WORKTREE,
     permissionRules: { source: null, session: false, instance: false, liveVerb: false }, // no agent ⇒ no rules
+    toolAllowlist: null, // no agent ⇒ no tools to switch
     terminalOnly: true, oauthUsage: false, globalUsageKey: null, // no agent: no chat, no window reach, no browser pin, no name prompt
     subagents: 'none', // lane agy-subagent-cards: no agent, no subagent
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it (shell has neither half)
@@ -472,6 +490,7 @@ const BACKEND_CAPS = {
     // OpenCode does not give. liveVerb:false — the wrapper is not the source
     // (it answers 'unsupported-by-protocol'; the serve is).
     permissionRules: { source: 'serve-config', session: false, instance: true, liveVerb: false },
+    toolAllowlist: null, // the serve holds one config for every session — no per-session tool flag
     terminalOnly: false, oauthUsage: false, globalUsageKey: null,
     subagents: 'none', // lane agy-subagent-cards: opencode's ACP stream shows no subagent's own steps — its row says so
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
@@ -494,6 +513,7 @@ const BACKEND_CAPS = {
     responseStyle: { live: false, closed: true, values: [] },
     worktree: NO_WORKTREE,
     permissionRules: { source: null, session: false, instance: false, liveVerb: false },
+    toolAllowlist: null, // agy has no per-session tool flag
     terminalOnly: false, oauthUsage: false, globalUsageKey: null,
     subagents: 'cards', // lane agy-subagent-cards: the wrapper reads agy's store — a card per sub + its timeline
     autoResume: NO_AUTO_RESUME, // placeholder — the registry derives it
@@ -505,7 +525,7 @@ const BACKEND_CAPS = {
 // row whose `steer` disagrees with its `queueVerbs`.
 for (const row of Object.values(BACKEND_CAPS)) row.inputModes = deriveInputModes(row.inputModes);
 
-const NO_CAPS = Object.freeze({ terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME });
+const NO_CAPS = Object.freeze({ terminalOnly: false, oauthUsage: false, globalUsageKey: null, subagents: 'none', pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null, streamProtocol: null, worktree: NO_WORKTREE, peerDelivery: 'stash-only', compactEnd: null, inputModes: deriveInputModes({ queue: false, queueVerbs: [] }), turnState: null, inProgressTools: false, permissionRules: Object.freeze({ source: null, session: false, instance: false, liveVerb: false }), responseStyle: Object.freeze({ live: false, closed: true, values: Object.freeze([]) }), autoResume: NO_AUTO_RESUME, toolAllowlist: null });
 
 // A CONTRIBUTED harness's row (src/harnesses/index.js register(), lane
 // dc-ws-create): the shipped table above stays the built-in truth; a register()ed
@@ -712,6 +732,47 @@ function worktreeSpawnArgs({ backend, want, resume, fork }) {
   return { args: [wt.flag], pass: true, why: fork ? 'fork' : 'new' };
 }
 
+// ── toolAllowlist: the PURE spawn rule (lane new-session-form) ───────────────
+function toolAllowlistCaps(backend) {
+  const row = capsOf(backend).toolAllowlist;
+  return row && (row.kind === 'tools' || row.kind === 'sandbox') ? row : null;
+}
+/** THE TOOL PICK A SPAWN CARRIES — the New Session form's 「可用工具」 ticks judged against the harness's own row (above).
+ *  `pick` = claude `{allow:[…], deny:[…]}` | codex `{sandbox, approval}`. Anything outside the row's closed vocabulary
+ *  is DROPPED and named in `dropped` — never forwarded to argv; so is a ✗ on a `keep` tool (deny beats allow: a ✗ Bash
+ *  would block the vibespace-* reporting CLIs' allow rules). The answer is the same on a new spawn and a resume (the
+ *  CLI records none of it: a resume re-passes the conversation's pick).
+ *  @returns {{kind:'tools'|'sandbox'|null, args:string[], allow:string[], deny:string[], sandbox:string|null,
+ *             approval:string|null, dropped:string[], dirty:boolean, pick:object|null}} */
+function toolAllowlistArgs({ backend, pick } = {}) {
+  const row = toolAllowlistCaps(backend);
+  const p = pick && typeof pick === 'object' && !Array.isArray(pick) ? pick : {};
+  const out = { kind: row ? row.kind : null, args: [], allow: [], deny: [], sandbox: null, approval: null, dropped: [], dirty: false, pick: null };
+  if (!row) { if (Object.keys(p).length) out.dropped.push('unsupported'); return out; }
+  if (row.kind === 'tools') {
+    const want = (v) => (Array.isArray(v) ? v : []).map((x) => String(x));
+    const allow = new Set(), deny = new Set();
+    for (const x of want(p.allow)) { if (row.tools.includes(x)) allow.add(x); else out.dropped.push(x); }
+    for (const x of want(p.deny)) { if (row.tools.includes(x) && !allow.has(x) && !row.keep.includes(x)) deny.add(x); else out.dropped.push(x); }
+    out.allow = row.tools.filter((x) => allow.has(x));   // the row's order, so one pick is one argv
+    out.deny = row.tools.filter((x) => deny.has(x));
+    if (out.allow.length) out.args.push(row.allow, out.allow.join(','));
+    if (out.deny.length) out.args.push(row.deny, out.deny.join(','));
+    out.dirty = !!(out.allow.length || out.deny.length);
+    out.pick = out.dirty ? { allow: out.allow, deny: out.deny } : null;
+    return out;
+  }
+  const one = (v, vocab) => { if (v === undefined || v === null || v === '') return null; if (vocab.includes(v)) return v; out.dropped.push(String(v)); return null; };
+  out.sandbox = one(p.sandbox, row.sandbox);
+  out.approval = one(p.approval, row.approval);
+  if (out.approval) out.args.push(row.approvalFlag, out.approval);
+  if (out.sandbox) out.args.push(row.sandboxFlag, out.sandbox);
+  out.dirty = !!(out.sandbox || out.approval);
+  out.pick = out.dirty ? { ...(out.sandbox ? { sandbox: out.sandbox } : {}), ...(out.approval ? { approval: out.approval } : {}) } : null;
+  return out;
+}
+
 module.exports = { BACKEND_CAPS, capsOf, SUBAGENT_VIEWS, subagentView, globalUsageKeyOf, oauthUsageAccount, contributeCaps, setVerifiedCap, QUEUE_VERBS, LEGACY_QUEUE_VERBS, deriveInputModes, notificationDelivery,
   AUTO_RESUME_FORMS, NO_AUTO_RESUME, deriveAutoResume,
-  NO_WORKTREE, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite };
+  NO_WORKTREE, worktreeCaps, worktreeRefusal, worktreeSpawnArgs, worktreePick, worktreeLatchWrite,
+  toolAllowlistCaps, toolAllowlistArgs };

@@ -229,6 +229,7 @@ const SECRETS_AT_REST = Object.freeze([
   { what: 'the relay token (per instance, vsrt_)', where: 'data/relay-token.json', exception: 'the owner\'s decision (design q-051, 2026-10-20): not in the vault — a restart re-publishes the instance\'s public mirrors without the second password; a stolen token reaches that one instance\'s public names only (the relay\'s login plugin binds them to its id), never the hub; revocable (Plugins › Public URLs › Revoke + relay-admin revoke)' },
   { what: 'the voice sign-in pair', where: 'data/dropline-oauth.json', entry: 'file:dropline-oauth.json (the sealed file\'s key)' },
   { what: 'VibeSpace\'s own automation keys (vsak_, design q-046)', where: 'data/automation-keys.json holds each key\'s sha256 digest + its grants', entry: 'apikey:<key id>' },
+  { what: 'the maintainer key (vsmk_, lane fleet-feedback-marks)', where: 'NOT on the instance — env VIBESPACE_MAINTAINER_KEY_SHA (the chart\'s maintainerKeySha)', holds: 'its sha256 only — the value is the maintainers\' (their triage job\'s 0600 file); it opens feedback.list / feedback.handled here and nothing else' },
   { what: 'the two-step (TOTP) seeds and their settings (design q-047)', where: 'the vault record only — data/vault-grants.json holds who may have the CODE, never a seed', entry: 'totp:<name>' },
   { what: 'the login tokens', where: 'data/auth.json tokens', holds: 'sha256 digests only' },
   { what: 'the pairing / agentd / mount tokens', where: 'data/hosts.json dialTokenHash · agentd-tokens.json · mount-tokens.json', holds: 'sha256 digests only' },

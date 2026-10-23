@@ -200,7 +200,9 @@ function census(dir) {
   ok(textWithAlt.length === 0, `④ no generated TEXT (letters) carries the empty alt (${textWithAlt.length} would vanish from the tree)`, textWithAlt.join('\n    '));
   // '⫿' left this list in 2.369.162: the split-member tab's generated `⫿ ` glyph was deleted (design-split-ux R3) —
   // the split mark is now the `.tab-split-glyph` ELEMENT, pinned aria-hidden in ③
-  const known = ['\\25B8', '\\25BE', '\\25B4', '\\00B7', '\\200e', '\\25C2', '\\1F464', '\\2699', '▸', '▾', '†'];
+  // '†' left it in 2.369.346 (lane task-group-context): the Task Group window's own Activity list (its `.task-detail-progress-exp`
+  // summary's generated ` †`) was deleted — the window's 活动记录 tab is the log viewer, whose † is a `.task-log-dagger` element
+  const known = ['\\25B8', '\\25BE', '\\25B4', '\\00B7', '\\200e', '\\25C2', '\\1F464', '\\2699', '▸', '▾'];
   ok(known.every((k) => glyphRules.some((g) => g.lit.includes(k))), `④ the census reaches every glyph family the design named (${known.join(' ')})`);
   ok(isGlyph("'\\25B8  '") && isGlyph("'▸ '") && isGlyph("'\\200e'") && !isGlyph("'Collapse'") && !isGlyph("'Extra row — drag elements here'") && !isGlyph("''"),
     '④ NEGATIVE CONTROL: the glyph classifier takes escapes / symbols / the LRM and refuses words, a sentence with a dash, and the empty string');

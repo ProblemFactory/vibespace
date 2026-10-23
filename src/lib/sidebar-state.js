@@ -489,6 +489,13 @@ export function installSidebarState(SidebarClass) {
     // re-checked itself on the next render while the run was isolated, and a
     // fork kept inheriting a preference the user had just revoked.
     if (config?.worktree === true || config?.worktree === false) clean.worktree = config.worktree;
+    // tools is OBJECT-valued (lane new-session-form): the conversation's 「可用工具」 pick — claude {allow, deny} lists or
+    // codex {sandbox, approval} words — kept by SHAPE (the spawn re-judges it against the harness row on every resume)
+    if (config?.tools && typeof config.tools === 'object' && !Array.isArray(config.tools)) {
+      const tl = config.tools, words = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x) : []);
+      const tc = { ...(words(tl.allow).length ? { allow: words(tl.allow) } : {}), ...(words(tl.deny).length ? { deny: words(tl.deny) } : {}), ...(typeof tl.sandbox === 'string' && tl.sandbox ? { sandbox: tl.sandbox } : {}), ...(typeof tl.approval === 'string' && tl.approval ? { approval: tl.approval } : {}) };
+      if (Object.keys(tc).length) clean.tools = tc;
+    }
     // poolPin is OBJECT-valued ({memberId, at}) — THE CONVERSATION'S POOL PIN (2026-09-28).
     // This map is the pin's RESUME CARRIER (session-lifecycle's billing submenu writes it,
     // resumeSession reads `savedCfg.poolPin`), and the whitelist above dropped it (verify r1,

@@ -136,11 +136,11 @@ console.log('④ the owner\'s finish line names who landed (DOM-free)');
   const esbuild = require('esbuild');
   const STUBS = {
     'utils.js': 'export const createModalShell = () => null, showToast = () => {}, copyText = () => {}, escHtml = (s) => String(s);',
-    'autocomplete.js': 'export const setupDirAutocomplete = () => {};',
+    'path-field.js': 'export const pathField = (el) => ({ el, input: el });',   // lane path-field: THE path field (was autocomplete.js)
     'i18n.js': 'export const t = (s, p) => { const v = (globalThis.__I18N && globalThis.__I18N[s]) || s; return p ? v.replace(/\\{(\\w+)\\}/g, (m, k) => (k in p ? String(p[k]) : m)) : v; };',
   };
   const stub = { name: 'stub-dom', setup(b) {
-    b.onResolve({ filter: /^\.\/(utils|autocomplete|i18n)\.js$/ }, (a) => (/mounts-dialog\.js$/.test(a.importer) ? { path: path.basename(a.path), namespace: 'stub' } : undefined));
+    b.onResolve({ filter: /^\.\/(utils|path-field|i18n)\.js$/ }, (a) => (/mounts-dialog\.js$/.test(a.importer) ? { path: path.basename(a.path), namespace: 'stub' } : undefined));
     b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' }));
   } };
   const out = path.join(DIR, 'mounts-dialog.mjs');

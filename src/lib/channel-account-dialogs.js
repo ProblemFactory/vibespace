@@ -53,6 +53,7 @@ import { icon, el, btn } from './channel-chrome.js';
 import { accountTitle } from './channel-avatar.js';   // lane channels-badges: the badge's hover title and the card's name are ONE spelling
 // PURE, bundled: the row's `signinName` (the brand of the sign-in page — Gmail signs in with Google)
 import * as R from '../integration-registry.js';
+import { setupFold, refusalNotes } from './oauth-setup-card.js';   // lane oauth-setup-instructions: the setup card (the client type, the exact addresses, the console)
 import * as CR from '../consent-road.js';   // lane oauth-relay-road (PURE): does a relay page send THIS page's browser back (the custom app's setup rows)
 
 /** The channel side's consent routes — the storage `/api/mounts/gdrive-auth/*`
@@ -152,7 +153,9 @@ const publicPasteHint = (flow, x) => {
  *  (`rerun` = the start again with `road: 'loopback'`). A paste row (Slack) keeps its own words and has no other road. */
 const routeTrouble = (flow, x, rerun, preset = null) => {
   // a loopback consent (a local hub, or the other road): the box's line and why, in a person's words
-  if (!(flow && flow.mode === 'public')) return isPasteSpec(x) || !flow ? {} : { pasteTitle: tr('The sign-in page ended on an address that would not load?'), pasteHint: tr('That happens when VibeSpace runs on another computer: the sign-in sends your browser to that computer’s own address (it starts with 127.0.0.1), which your browser cannot open. Copy the whole address from the address bar and paste it here — VibeSpace finishes the sign-in with it:') };
+  // lane oauth-setup-instructions: a FIXED loopback (Lark's, a Google Web client's) is an address the app must list too —
+  // the fold names it, the vendor's refusal words and the console path, as for a route
+  if (!(flow && flow.mode === 'public')) return isPasteSpec(x) || !flow ? {} : { pasteTitle: tr('The sign-in page ended on an address that would not load?'), pasteHint: tr('That happens when VibeSpace runs on another computer: the sign-in sends your browser to that computer’s own address (it starts with 127.0.0.1), which your browser cannot open. Copy the whole address from the address bar and paste it here — VibeSpace finishes the sign-in with it:'), ...(flow.mode === 'fixed' && flow.redirectUri ? { askAdmin: { text: tr('{provider} said this address is not allowed? Add it to the app’s redirect URLs — for a company app your admin does this:', { provider: signinOf(x) }), value: flow.redirectUri, notes: refusalNotes(x) } } : {}) };
   const pasteTitle = tr('The sign-in did not come back here by itself?');
   if (isPasteSpec(x)) return { pasteTitle };
   // lane oauth-relay-road: WHICH road and WHY, in the person's words — the relay page (one address registered once on the
@@ -166,7 +169,7 @@ const routeTrouble = (flow, x, rerun, preset = null) => {
     ...(relay
       ? { pasteHint: tr('This sign-in comes back through the relay page {host}: one address, registered once on the app, serves every VibeSpace — the page sends your browser back here and keeps nothing. If it shows a code instead, paste the code here:', { host }) }
       : flow.road === 'route' ? { pasteHint: bare ? tr('This company app has no relay page yet, so this sign-in comes back to this VibeSpace’s own address ({host}) — the app must list it, or your admin gives the app one relay page that serves every VibeSpace. If the last page does not come back here by itself, paste its address here:', { host }) : tr('This sign-in comes back to this VibeSpace’s own address ({host}) — no relay page can bring a browser back to it, so the app must list this address itself. If the last page does not come back here by itself, paste its address here:', { host }) } : {}),
-    ...(flow.redirectUri ? { askAdmin: { text: relay ? tr('{provider} said this address is not allowed? It is the relay page — add it ONCE to the app’s redirect URLs (for a company app your admin does this), and every VibeSpace signs in through it:', { provider: signinOf(x) }) : tr('{provider} said this address is not allowed? Add it to the app’s redirect URLs — for a company app your admin does this:', { provider: signinOf(x) }), value: flow.redirectUri } } : {}),
+    ...(flow.redirectUri ? { askAdmin: { text: relay ? tr('{provider} said this address is not allowed? It is the relay page — add it ONCE to the app’s redirect URLs (for a company app your admin does this), and every VibeSpace signs in through it:', { provider: signinOf(x) }) : tr('{provider} said this address is not allowed? Add it to the app’s redirect URLs — for a company app your admin does this:', { provider: signinOf(x) }), value: flow.redirectUri, notes: refusalNotes(x, { https: /^https:/.test(String(flow.redirectUri)) }) } } : {}),
     otherRoad: { label: tr('Sign in the other way: copy the last page’s address back here'), run: rerun },
   };
 };
@@ -255,7 +258,7 @@ export function clientValueOf(a, presets = (a && a.presets) || []) {
  *  (the setup block lives on the kind). */
 function specOf(x, kinds) {
   const k = (kinds || []).find((y) => y.kind === x.kind) || {};
-  return { kind: x.kind, integration: x.integration || k.integration || null, label: x.label || k.label || x.kind, presets: x.presets || k.presets || [], clientHint: x.clientHint || k.clientHint || null, clientFields: x.clientFields || k.clientFields || null, setup: k.setup || x.setup || null, optionsSchema: x.optionsSchema || k.optionsSchema || [], mountClients: x.mountClients || k.mountClients || [], consentRoute: x.consentRoute || k.consentRoute || null, relayPages: x.relayPages || k.relayPages || [] };
+  return { kind: x.kind, integration: x.integration || k.integration || null, label: x.label || k.label || x.kind, presets: x.presets || k.presets || [], clientHint: x.clientHint || k.clientHint || null, clientFields: x.clientFields || k.clientFields || null, setup: k.setup || x.setup || null, optionsSchema: x.optionsSchema || k.optionsSchema || [], mountClients: x.mountClients || k.mountClients || [], consentRoute: x.consentRoute || k.consentRoute || null, relayPages: x.relayPages || k.relayPages || [], oauthSetup: x.oauthSetup || k.oauthSetup || null };
 }
 /** The select value of a storage mount's client (`mount:<mountId>`). */
 const MOUNT_PREFIX = 'mount:';
@@ -319,6 +322,20 @@ function clientFieldSpecs(spec, { sfx = '', when = null, value, custom = null, s
   } else if (spec.setup && spec.setup.callbackUrl) {
     out.push({ key: `cb${sfx}`, label: tr('Callback URL (register it on your app first)'), type: 'copy', value: callbackOf(spec), when: isCustom, hint: setupHint });
   }
+  out.push(...setupFolds(spec, { sfx, on, isOwn: (vals) => isCustom(vals) || isMount(vals) }));
+  return out;
+}
+/** lane oauth-setup-instructions (the owner 2026-10-23: a self-hoster met the redirect URIs only after a refusal): THE SETUP
+ *  CARD, folded, BEFORE the first attempt — one for a person's own app (Custom, a borrowed storage client) and one per
+ *  company preset (its relay page or this instance's own address; never the public page). Label-less node rows. */
+function setupFolds(spec, { sfx = '', on = () => true, isOwn }) {
+  const out = [];
+  const own = setupFold(spec);
+  if (own) out.push({ key: `setup${sfx}`, type: 'node', node: own, when: isOwn });
+  (spec.presets || []).forEach((p, i) => {
+    const f = setupFold(spec, { preset: p });
+    if (f) out.push({ key: `psetup${i}${sfx}`, type: 'node', node: f, when: (vals) => on(vals) && vals[`client${sfx}`] === p.key });
+  });
   return out;
 }
 /** lane oauth-relay-road: does a sign-in started from THIS page ride a relay page — the server's own verdict
@@ -363,6 +380,7 @@ function workspaceClientSpecs(spec, { sfx = '', when = null, value, custom = nul
   if (presets.length) out.push({ key: `wpnote${sfx}`, type: 'note', value: tr(P.notes.preset), when: (vals) => isApp(vals) && !isCustom(vals) });
   if (value === PASTE_CHOICE) out.push({ key: `swnote${sfx}`, type: 'note', value: tr(P.notes.switchBack), when: isApp });
   if (!stepped) out.push(...pasteSteps(spec).map((s, i) => ({ key: `pnote${i}${sfx}`, type: 'note', value: s, when: isPaste })));
+  out.push(...setupFolds(spec, { sfx, on, isOwn: isCustom }));   // lane oauth-setup-instructions: a workspace app's setup card
   return out;
 }
 /** The client choice a set of values names, in the route's spelling. */
@@ -397,7 +415,9 @@ export function optionInUse(o, vals, sfx = '') {
 function sliceOptions(schema, only) {
   const list = schema || [];
   if (only == null) return list;
-  if (only === 1 && list[0]) return list.filter((o, i) => i === 0 || (o.usedWhen && Object.prototype.hasOwnProperty.call(o.usedWhen, list[0].key)));
+  // lane oauth-setup-instructions: + an option read at each sign-in (`signIn` — Gmail's OAuth client type decides the address
+  // Google is asked for, so the Connect / Re-authorize forms ask it before the sign-in starts)
+  if (only === 1 && list[0]) return list.filter((o, i) => i === 0 || o.signIn === true || (o.usedWhen && Object.prototype.hasOwnProperty.call(o.usedWhen, list[0].key)));
   return list.slice(0, only);
 }
 /** The type's DECLARED options as fields (`only` = the first N: the filter).

@@ -77,7 +77,7 @@
  * host is declared too — it is a literal in a file that makes requests, and
  * the census reads code.
  */
-const { makeRecord, makeConversation } = require('../channel-record.js');
+const { makeRecord, makeConversation, draftStateOf } = require('../channel-record.js');
 const { ChannelError, notConnectedError, vaultLockedWhy, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
 const { budgetOf, paceOf } = require('../channel-settings.js');   // B-df40 part 3: the budget + pace rows are DECLARED there (the schema row, the engine bound and this caps all read it)
 const MANIFEST = require('./gmail/manifest.js');   // lane dc-channels-manifest: this vendor's declarations (PURE) — its settings table, integration row, option rows
@@ -189,6 +189,14 @@ const OPTIONS = Object.freeze([
     help: i18nKey('The Cloud Pub/Sub topic Gmail publishes mailbox changes to (users.watch). Grant gmail-api-push@system.gserviceaccount.com the Publisher role on it. Only read when push is enabled.') },
   { key: 'pushSubscription', label: i18nKey('Pub/Sub subscription (push)'), default: '', placeholder: 'projects/<project>/subscriptions/<name>', maxLength: 300, relive: true,
     help: i18nKey('THIS instance\'s own pull subscription of that topic — one per instance is what makes push exclusive here. Only read when push is enabled.') },
+  // lane oauth-setup-instructions (the owner 2026-10-23: a self-hoster's own Google client): WHICH kind of client this account
+  // signs in through — it decides the address the sign-in asks Google for (src/consent-road.js `clientType`): a Web
+  // application client the relay page / this instance's https address / the FIXED 127.0.0.1 address (MANIFEST
+  // GMAIL_LOOPBACK_URL); a Desktop app client 127.0.0.1 on any port, never an https address. Empty = not said (as before);
+  // a company preset that says (its gdrive-clients entry's `clientType`) is the default. Read at each sign-in only.
+  { key: 'clientType', label: i18nKey('OAuth client type'), default: '', choices: Object.freeze(['', 'web', 'desktop']), rebuild: false, signIn: true,
+    choiceLabels: Object.freeze({ '': i18nKey('Not said'), web: i18nKey('Web application'), desktop: i18nKey('Desktop app') }),
+    help: i18nKey('The kind of Google OAuth client this account signs in through. Web application: the sign-in comes back through the relay page or this VibeSpace’s https address, and on this machine to the fixed 127.0.0.1 address. Desktop app: the sign-in comes back to 127.0.0.1 on any port — from another computer, paste the last page’s address back.') },
 ]);
 
 /**
@@ -255,11 +263,23 @@ const SEARCH_IDS_NARROW = 100;
  *  registered redirect. lane oauth-relay-road (the owner 2026-10-22: one registered address per app): THE RELAY PAGE
  *  first — the fleet's, the company preset's, else this setting (channels.gmailRelayUrl, default the project's public
  *  page; empty = none). */
+// lane oauth-setup-instructions: + the FIXED loopback (`fixed`, the registry row's `redirect.loopback`) — a Web application
+// client's address on this machine (it takes only exact addresses); a Desktop client keeps the ephemeral port.
 const CONSENT = Object.freeze({
-  mode: Object.freeze(['ephemeral', 'public']),
+  mode: Object.freeze(['ephemeral', 'fixed', 'public']),
+  callbackUrl: MANIFEST.GMAIL_LOOPBACK_URL,
   landing: Object.freeze({ stateVerdict: (s, o = {}) => CR.stateVerdict(s, { ...o, kind: KIND }), landingHtml: (r) => CR.landingHtml(r, { name: 'Google' }) }),
   relayUrlSetting: Object.freeze({ key: 'gmailRelayUrl', fallback: CR.RELAY_DEFAULT }),   // the server setting channels.<key>
 });
+
+/** lane oauth-setup-instructions: the account's Google client kind — its own `clientType` option, else its company preset's
+ *  (`values.clientType`, a gdrive-clients entry), else '' (not said). */
+function clientTypeOf(options, values) {
+  const own = options && typeof options.clientType === 'string' ? options.clientType : '';
+  if (CR.CLIENT_TYPES.includes(own)) return own;
+  const preset = values && typeof values.clientType === 'string' ? values.clientType : '';
+  return CR.CLIENT_TYPES.includes(preset) ? preset : '';
+}
 
 const caps = Object.freeze({
   receive: 'push',
@@ -523,10 +543,15 @@ function toRecord(adapterId, convId, m, { selfEmail = null, onBody = null, threa
   }
   const text = (parts.plain && parts.plain.trim()) ? parts.plain.trim() : (parts.html ? stripHtml(parts.html) : String(m.snippet || ''));
   const subject = header(headers, 'Subject') || null;
+  // lane gmail-draft-not-a-message (fb-9aa1d3bd1e): THE KIND IS READ OFF THE LABELS — a message Gmail labels DRAFT is the
+  // account's unsent draft, never a message of the thread (in the Trash / Spam: `draftState: 'trashed'`)
+  const labels = Array.isArray(m.labelIds) ? m.labelIds : [];
+  const draft = labels.includes('DRAFT');
   return makeRecord({
     adapterId, convId,
     vendorId: String(m.id || ''),
     at: Number(m.internalDate) || 0,
+    ...(draft ? { kind: 'draft', draftState: draftStateOf(labels) } : {}),
     // lane channel-reply-real (verify r3): the SENT label is the self witness — the owner's reply from a send-as ALIAS
     // (From ≠ the account address) is still the owner's, never a peer's answer (FO.selfRead skips it before any rule)
     author: { id: from.id, name: from.name, isSelf: sentLabel(m) === true || (!!selfEmail && from.id === String(selfEmail).toLowerCase() && sentLabel(m) !== false), isBot: false },
@@ -646,6 +671,9 @@ function anchorOf(msgs, keep = null) {
   for (let i = list.length - 1; i >= 0; i--) if (list[i] && list[i].id && !transientMessage(list[i])) return String(list[i].id);
   return keep == null ? null : String(keep);
 }
+/** lane gmail-draft-not-a-message: a thread's LAST MAIL instant — the newest message that is not the account's draft (a
+ *  draft saved last week dated the row as new mail); null when the thread holds only drafts. */
+const lastMailAt = (msgs) => (Array.isArray(msgs) ? msgs : []).reduce((a, m) => (m && !(Array.isArray(m.labelIds) && m.labelIds.includes('DRAFT')) ? Math.max(a, Number(m.internalDate) || 0) : a), 0) || null;
 /** A `history.list` messagesAdded[].message that is NEWS for its thread: not transient (a draft saved in the mail app is
  *  no new mail — the reply, once sent, arrives as its own add). Unknown labels are news (read, as before). */
 const addIsNews = (m) => !!(m && m.threadId) && !transientMessage(m);
@@ -1213,7 +1241,7 @@ function create(record = {}, deps = {}) {
       if (msgs.length) {
         const first = msgs[0] || {};
         const names = [...new Set(msgs.map((m) => parseAddress(header(m.payload && m.payload.headers, 'From')).name).filter(Boolean))];
-        meta.set(convId, { title: header(first.payload && first.payload.headers, 'Subject') || '(no subject)', participants: names.join(', '), lastAt: msgs.reduce((a, m) => Math.max(a, Number(m.internalDate) || 0), 0) || null, at: now() });
+        meta.set(convId, { title: header(first.payload && first.payload.headers, 'Subject') || '(no subject)', participants: names.join(', '), lastAt: lastMailAt(msgs), at: now() });
       }
     } catch { /* a title is a nicety */ }
     return t;
@@ -1227,7 +1255,7 @@ function create(record = {}, deps = {}) {
     const first = msgs[0] || {};
     const subject = header(first.payload && first.payload.headers, 'Subject') || '(no subject)';
     const names = [...new Set(msgs.map((m) => parseAddress(header(m.payload && m.payload.headers, 'From')).name).filter(Boolean))];
-    const lastAt = msgs.reduce((a, m) => Math.max(a, Number(m.internalDate) || 0), 0) || null;
+    const lastAt = lastMailAt(msgs);
     const out = { title: subject, participants: names.join(', '), lastAt, at: now() };
     meta.set(convId, out);
     return out;
@@ -1285,13 +1313,16 @@ function create(record = {}, deps = {}) {
         const cred = credential();
         if (!cred.values) throw new ChannelError('auth-expired', `cannot start a Gmail consent flow: ${cred.why}`, { retryable: false, detail: { needsCredentials: true, missing: cred.missing } });
         const { clientId, clientSecret } = cred.values;
+        // lane oauth-setup-instructions: WHICH kind of Google client — the account's own option, else what its company preset says
+        const clientType = clientTypeOf(record.options, cred.values);
         // lane pod-oauth-callback: THE ROAD — the instance's route (its https address, a browser elsewhere) or the ephemeral loopback;
-        // lane oauth-relay-road: the relay page first (the fleet's › the preset's › the setting's), when it sends this browser back
-        const way = CR.consentRoad({ kind: KIND, publicUrl: consent && typeof consent.publicUrl === 'function' ? consent.publicUrl() : '', origin, road, ...CR.relayOf(consent, cred) });
+        // lane oauth-relay-road: the relay page first (the fleet's › the preset's › the setting's), when it sends this browser back;
+        // lane oauth-setup-instructions: a Desktop client only the loopback (any port), a Web client's loopback the FIXED one
+        const way = CR.consentRoad({ kind: KIND, publicUrl: consent && typeof consent.publicUrl === 'function' ? consent.publicUrl() : '', origin, road, clientType, ...CR.relayOf(consent, cred) });
         const viaRoute = way.road !== 'loopback' && !!consent && typeof consent.sign === 'function';
         return oauth.begin({
           id: adapterId, label: 'Gmail',
-          ...(viaRoute ? { mode: 'public', redirectUri: way.redirectUri, stateFor: ({ flowId, issuedAt }) => CR.stateOf({ origin: way.u, flowId, issuedAt, kind: KIND }, consent.sign), road: way.road } : { mode: 'ephemeral' }),
+          ...(viaRoute ? { mode: 'public', redirectUri: way.redirectUri, stateFor: ({ flowId, issuedAt }) => CR.stateOf({ origin: way.u, flowId, issuedAt, kind: KIND }, consent.sign), road: way.road } : way.fixed ? { mode: 'fixed', registeredCallbackUrl: CONSENT.callbackUrl } : { mode: 'ephemeral' }),
           successText: 'VibeSpace: Gmail connected — you can close this tab.',
           buildConsentUrl: ({ redirectUri, state }) => AUTH_URL + '?' + new URLSearchParams({
             client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope: scopesFor().join(' '),
@@ -1821,7 +1852,7 @@ async function integrationTest({ resolved } = {}) {
 }
 
 module.exports = {
-  kind: KIND, caps, create, manifest: MANIFEST, api: API_ROW, API_ROW, consent: CONSENT, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
+  kind: KIND, caps, create, manifest: MANIFEST, api: API_ROW, API_ROW, consent: CONSENT, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK, clientTypeOf,
   EGRESS, SCOPE, SCOPE_SEND, SCOPE_COMPOSE, SCOPE_MODIFY, SCOPE_MAIL, sendVerbsOf, PROPOSAL_HEADER, PUBSUB_SCOPE, TOKEN_URL, AUTH_URL, API, MAILBOX_MEMO_MS, THREAD_MEMO_MS, META_PER_LIST, NAME_READ_UNITS, unitsFor, queryOf, scopeOf, effectiveOptions,
   toRecord, walkParts, parseAddress, addressList, stripHtml, typedFailure, buildMime, replyHeaders, encodeHeader, encodeAddressHeader,
   rawRequest, JSON_RAW_MAX, UPLOAD_API,   // design 005 §2.B: the upload form past the JSON body's cap

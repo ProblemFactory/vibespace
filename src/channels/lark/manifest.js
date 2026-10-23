@@ -104,6 +104,13 @@ function integrationRow({ V, okV, bad }) {
         i18nKey('The app has a PUBLISHED version'),
       ],
     },
+    // lane oauth-setup-instructions: the setup card's facts (src/oauth-setup.js) — and deploy/README.md's, generated from them
+    redirect: {
+      console: { path: i18nKey('Developer Console → your app → Security Settings → Redirect URLs'), links: [{ label: 'Lark', url: 'https://open.larksuite.com/app' }, { label: '飞书', url: 'https://open.feishu.cn/app' }] },
+      refusal: '20029',
+      create: i18nKey('Create a custom app in the Lark / Feishu Developer Console (Lark = open.larksuite.com, 飞书 = open.feishu.cn), with the scopes im:message and im:message.send_as_user and a published version.'),
+      loopback: LARK_CALLBACK_URL,
+    },
     test: {
       kind: 'credential-exchange',
       describe: i18nKey('Exchanges this app id / secret pair for a tenant token once. Reads no conversation, sends no message.'),

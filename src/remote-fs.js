@@ -612,6 +612,7 @@ class RemoteFs {
 
   // Directory autocomplete (delegated — HostManager already has it)
   dirComplete(id, input) { return this.hosts.dirComplete(id, input, { by: this._actBy }); }
+  dirSlice(id, opts) { return this.hosts.dirSlice(id, opts, { by: this._actBy }); }  // lane path-field: the path field's slice on that machine
 }
 
 module.exports = { RemoteFs, parseArchiveListing, FS_PORTABLE_CAP, WIN_REFUSED, filesOutdatedText, fsErrorBody };

@@ -16,6 +16,11 @@
 //   · publicRow(record)      → what the UI and the agent's `list` get (the harness by name only, no reporter list; a
 //                              forwarded report's `origin` — its instance + version, never the origin key's hash — lane
 //                              feedback-forward); isMine never counts a forwarded report (another instance's conversation)
+//   · handledNotice(record) / handledSentence(notice) / filerKey(record, liveKeyOf) — lane fleet-feedback-marks: a mark that
+//                              NAMES A RELEASE is told to the conversation that filed the report, at its next turn (a free
+//                              session-status notice, kind `feedback-handled`) in ONE sentence for every road — the hub's
+//                              feedback.handled, an instance's maintainer key (`handledBy` = MAINTAINER_BY: the sheet says
+//                              «the maintainers»), the forward's mark-back; the owner's own click names no release, tells nothing
 // Every string is TEXT for its readers: the owner's sheet draws it with textContent only (the XSS law), the agent's CLI
 // prints its own words back. PURE: imports nothing.
 
@@ -132,6 +137,34 @@ function publicRow(r) {
   };
 }
 
+// ── lane fleet-feedback-marks: THE MAINTAINERS' MARK, TOLD TO THE ONE WHO FILED IT ──
+/** `handledBy` of a mark the instance's MAINTAINER KEY made (src/automation-keys.js MAINTAINER_NAME — no conversation behind it) */
+const MAINTAINER_BY = 'the maintainer key';
+/** The notice a status change files → { kind: 'feedback-handled', id, about, version, note } | null: only a HANDLED record
+ *  that names the release that shipped its fix (a reopen, the owner's own click, a bare handled tell nothing). */
+function handledNotice(r) {
+  if (!r || r.status !== 'handled' || !RELEASE_RE.test(String(r.handledVersion || ''))) return null;
+  return { kind: 'feedback-handled', id: String(r.id), about: r.about || '', version: r.handledVersion, note: r.handledNote || null };
+}
+/** THE SENTENCE — one spelling for every road (the notice's renderer reads it; `note` arrives belted: another agent's words). */
+function handledSentence(n = {}) {
+  const about = cleanLine(n.about), note = cleanLine(n.note);
+  return `Your feedback report ${cleanLine(n.id)}${about ? ` (about ${about})` : ''} was handled in ${cleanLine(n.version)}${note ? `: ${note}` : '.'}`;
+}
+const renderHandledNotice = (n) => '<system-reminder>\n' + handledSentence(n || {}) + '\n</system-reminder>';
+/** The session-status key of the conversation that FILED `r` → `<harness>:<conversation id>` | null. `liveKeyOf(id)`
+ *  (injected) answers a RUNNING session's own key by its conversation or webui id first; a forwarded report (another
+ *  instance's conversation), a job's report and a webui id no session holds any more name nobody here. */
+function filerKey(r, liveKeyOf = () => null) {
+  if (!r || r.origin) return null;
+  const id = r.session && r.session.id;
+  if (!id || /^job:/.test(id)) return null;
+  let k = null;
+  try { k = liveKeyOf(id); } catch { k = null; }
+  if (k) return String(k);
+  return /^sess-/.test(id) ? null : `${harnessName(r.harness) || 'claude'}:${id}`;
+}
+
 /** a session's OWN reports (it filed the record, or repeated it): the agent's `list` */
 const isMine = (r, ids) => { const want = (ids || []).filter(Boolean); return !!r && !r.origin && want.some((id) => (r.session && r.session.id === id) || (Array.isArray(r.reporters) && r.reporters.includes(id))); };
 /** newest report first (a repeated report counts as new) */
@@ -146,4 +179,5 @@ function paceVerdict(lastAt, now) {
   return { code: 'paced', error: `one report per ${LIMITS.paceMs / 1000} s from a session — wait ${s} s and send it again`, retryAfterS: s };
 }
 
-module.exports = { KINDS, STATUSES, LIMITS, RELEASE_RE, chars, cleanText, cleanLine, validate, makeRecord, fold, setStatus, publicRow, isMine, byNewest, openCount, paceVerdict };
+module.exports = { KINDS, STATUSES, LIMITS, RELEASE_RE, chars, cleanText, cleanLine, validate, makeRecord, fold, setStatus, publicRow, isMine, byNewest, openCount, paceVerdict,
+  MAINTAINER_BY, handledNotice, handledSentence, renderHandledNotice, filerKey };   // lane fleet-feedback-marks

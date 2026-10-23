@@ -51,7 +51,8 @@ ok(require(path.join(REPO, 'src/hosts.js')).HostManager.AGENT_TOOLS.includes('vi
   // lane worker-dispatch: `dispatch --file` reads the brief with node's own fs — a BUILTIN needs no checkout; anything else does
   // lane cli-one-text-arg: …and the ONE-text rule the four free-text CLIs share — src/agent-cli-text.js in a checkout, its
   // boot-time copy ./agent-cli-text.js beside the CLI on a host (it ships in AGENT_TOOLS; PURE: it requires nothing itself)
-  const RULE = new Set(['../../src/agent-cli-text.js', './agent-cli-text.js']);
+  // lane cli-call-timeouts: …and THE ONE CALL every agent CLI makes to its hub (src/cli-call.js / its boot-time copy ./cli-call.js; node builtins only)
+  const RULE = new Set(['../../src/agent-cli-text.js', './agent-cli-text.js', '../../src/cli-call.js', './cli-call.js']);
   const deps = reqs.filter((r) => !require('node:module').isBuiltin(r) && !RULE.has(r));
   ok(deps.length === 0 && reqs.every((r) => r.startsWith('node:') || RULE.has(r)), 'it is dependency-free — node builtins only, spelled node:* (a host has no checkout) — but for the ONE-text rule it ships with', reqs.join(','));
   ok(require(path.join(REPO, 'src/hosts.js')).HostManager.AGENT_TOOLS.includes('agent-cli-text.js') && !/require\(/.test(fs.readFileSync(path.join(REPO, 'src/agent-cli-text.js'), 'utf8').replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')), 'the ONE-text rule it requires ships beside it (AGENT_TOOLS) and requires nothing itself');

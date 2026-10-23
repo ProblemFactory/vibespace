@@ -984,10 +984,11 @@ const SETTINGS_SCHEMA = {
     tier: 'advanced',
     category: t('Integration'), liveApply: true,
   },
+  // lane task-group-context: the key B-86d3 ② gave the old folder index, kept — it now budgets the whole Context table
   'tasks.contextIndexBytes': {
-    type: 'number', default: 4096, min: 0, max: 65536, step: 256,
-    label: t('Context-folder index budget per group (bytes)'),
-    description: t("How many bytes one Task Group's context-folder file list may take in an agent's injected context: the newest files that fit are listed, then one line counts the rest (vibespace-task show --full lists every file). 0 = no byte budget (at most 100 files)."),
+    type: 'number', default: 10240, min: 0, max: 65536, step: 256,
+    label: t('Context table budget per group (bytes)'),
+    description: t("How many bytes one Task Group's Context table may take in what a conversation is told. Rows are told in table order at the depth each one chose; a row that does not fit steps down (contents, then file names with key files, then file names, then only the path and note) and says so. The room the hook carries beside the tools and the standing instructions caps it too. 0 = only that room."),
     tier: 'advanced',
     category: t('Integration'), liveApply: true,
   },

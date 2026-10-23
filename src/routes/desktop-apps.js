@@ -237,7 +237,7 @@ function fail(res, e) {
     : code === 'cap' || code === 'no-backend' || code === 'backend-not-wired' || code === 'held' || code === 'not_taken' || code === 'no_lease' || code === 'not-xpra' || code === 'no_viewer' || code === 'not-ready' || code === 'relaunch-browser' || code === 'browser-absent' || code === 'snap-profile-unreachable'
       || code === 'host_needs_daemon' || code === 'no_x11' || code === 'no_apt' || code === 'no_repo' || code === 'no_sudo' || code === 'no_facts' || code === 'busy' || code === 'no_conversation' || code === 'fork_pending' || code === 'wake_paced'
       || code === 'machine-mismatch' || code === 'app-absent' || code === 'still-absent' || code === 'app-asked' || code === 'changed_outside' || code === 'lease' ? 409
-      : code === 'agent_forbidden' || code === 'not_your_window' || code === 'remoteapp_door' ? 403 : code === 'not_live' ? 404 : code === 'bad_principal' || code === 'bad_mode' || code === 'share_local_only' ? 400
+      : code === 'agent_forbidden' || code === 'not_your_window' || code === 'remoteapp_door' ? 403 : code === 'not_live' ? 404 : code === 'bad_principal' || code === 'bad_mode' || code === 'share_local_only' || code === 'except_conflicts' ? 400 : code === 'store_unreadable' ? 409
       : code === 'no-engine' || code === 'xpra-ui-unavailable' || code === 'host_unavailable' || code === 'install_link_lost' || code === 'host-unreachable' ? 503 : code === 'install_timeout' ? 504 : 500;
   res.status(D014_STATUS[code] || status).json({ error: String(e?.message || e), code, ...(e && e.plan ? { plan: e.plan } : {}), ...(e && e.remedy ? { remedy: e.remedy } : {}), ...(e && e.vnc ? { vnc: e.vnc, platform: e.platform || null } : {}) });
 }
@@ -979,6 +979,11 @@ router.post('/api/desktop/apps/:id/reach', (req, res) => {
 router.delete('/api/desktop/apps/:id/reach', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;
   try { res.json(engine.revokeReach(req.params.id, req.body && req.body.principal)); } catch (e) { fail(res, e); }
+});
+// lane grants-unify — «除了»: the members left OUT of the window's shared Task Groups / All agents (the whole list)
+router.put('/api/desktop/apps/:id/reach/except', (req, res) => {
+  const engine = reachGate(req, res); if (!engine) return;
+  try { res.json(engine.setReachExcept(req.params.id, req.body && req.body.except)); } catch (e) { fail(res, e); }
 });
 router.put('/api/desktop/apps/:id/reach/mode', (req, res) => {
   const engine = reachGate(req, res); if (!engine) return;

@@ -15,7 +15,7 @@
  *              null ⇒ the item's own cwd/hostId (the asker's, filed with the ask) — and a LOCAL conversation
  *              with neither has no transcript to resume (said, never guessed)
  *   cfg      — user-state `sessionConfigs[key]` (the gear popover the page's getSessionConfig reads: model,
- *              permission, effort, outputStyle, worktree, autoResume, account, modelLock, lockModel, poolPin)
+ *              permission, effort, outputStyle, worktree, autoResume, account, modelLock, lockModel, poolPin, tools)
  *   defaults — the harness's instance defaults a resume is filled with: {permission, extraArgs}
  * Always mode 'chat' — the reply is a chat turn. A continuation sends model / effort only when the conversation's own
  * config STATES one (resumeSpawnPick with resume:true, hasSource:false — the client's own call; the server's
@@ -25,7 +25,7 @@
 const { resumeSpawnPick } = require('./resume-continuity.js');
 
 /** The fields of a conversation's config a resume carries (session-lifecycle resumeSession's `savedCfg.*` reads). */
-const REOPEN_CFG_KEYS = Object.freeze(['model', 'permission', 'effort', 'outputStyle', 'worktree', 'autoResume', 'account', 'modelLock', 'lockModel', 'poolPin']);
+const REOPEN_CFG_KEYS = Object.freeze(['model', 'permission', 'effort', 'outputStyle', 'worktree', 'autoResume', 'account', 'modelLock', 'lockModel', 'poolPin', 'tools']);
 
 const str = (v) => (typeof v === 'string' ? v : '');
 /** "host: /path" (a merged record's display cwd) → the real path — the client's stripCwdHostLabel (src/lib/utils.js). */
@@ -62,6 +62,7 @@ function reopenCreate({ key, entry = null, item = null, cfg = null, defaults = n
     model: modelPick.value || undefined, permissionMode: str(permission) || undefined, effort: effortPick.value || undefined,
     outputStyle: str(c.outputStyle) || undefined, autoResume: c.autoResume, extraArgs: str(d.extraArgs) || undefined,
     worktree: c.worktree || undefined,
+    tools: c.tools && typeof c.tools === 'object' && !Array.isArray(c.tools) ? c.tools : undefined, // lane new-session-form: the 「可用工具」 pick (the spawn re-judges it)
     spawnOriginHint: { model: modelPick.origin, effort: effortPick.origin },
     resume: true, resumeId: conv.id, cols: 120, rows: 30, reqId: str(reqId) || undefined,
     taskId: str(taskId) || undefined,

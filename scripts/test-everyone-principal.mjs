@@ -78,7 +78,7 @@ const SURFACES = [
   { file: 'src/lib/channel-reach-editor.js', match: /placeholder: t\('Grant reach to…'\)/, surface: 'Channels · Reach & policy → Grant reach to…', model: 'channel-acl', before: 'no', spelled: "{kind:'everyone', id:'*'} grant" },
   { file: 'src/lib/window-share.js', match: /label: t\('Share with agents'\)/, surface: 'Desktop app · Share with agents (launcher row + window dialog)', model: 'window-reach', before: 'no', spelled: "{kind:'everyone', id:'*'} reach row" },
   { file: 'src/lib/exit-access-dialog.js', match: /label: grant === 'use'/, surface: 'Machine · Who can use <machine>? (network + commands)', model: 'exit-reach', before: 'yes — the "All my conversations" radio', spelled: "mode 'everyone' (the radio is gone; the picker's All row IS the mode, rows kept beside it)" },
-  { file: 'src/lib/browser-who-dialog.js', match: /label: t\('Who can use it'\)/, surface: 'Agent browser · Who can use <profile>?', model: 'browser-profiles who-list', before: 'yes — the "All my conversations" radio (the default)', spelled: "use.mode 'all' = owner {kind:'instance'} (rows kept as owner.who)" },
+  { file: 'src/lib/browser-who-dialog.js', match: /label: t\('Who can use it'\)/, surface: 'Agent browser · Who can use <profile>?', model: 'browser-profiles who-list', before: 'yes — the "All my conversations" radio (the default)', spelled: "use.mode 'all' = an `everyone` entry in the profile's grants row (the rows kept beside it)" },
   { file: 'src/lib/channel-api-dialog.js', match: /label: t\('Add an agent or group'\)/, surface: 'Channels · API access… (who may call the raw API, at which tier; B-2198)', model: 'channel-acl api tier rows (src/channel-api.js apiGrant)', before: 'yes — the dialog offered All from its first lane (channel-api-core)', spelled: "{kind:'everyone', id:'*'} tier row — Read at most by default; a write tier needs its own tick (allWrite)" },
   { file: 'src/lib/browser-new-profile.js', match: /label: t\('Who can use it'\)/, surface: 'Agent browser · New profile… → Who can use it (the .200 dialog, folded onto the one control at the 2.369.202 integration)', model: 'browser-profiles who-list', before: 'yes — the "All my conversations" radio (the default)', spelled: "use.mode 'all' (the create body sends no list)" },
 ];
@@ -86,6 +86,10 @@ const EXEMPT = [
   { file: 'src/lib/channel-group-dialogs.js', match: /label: t\('Members'\)/, surface: 'Agent group · New group / Invite…', why: 'MEMBERSHIP, not a permission: a group is its named members (design §22 D1, explicit); "every conversation" would be a broadcast channel, a different feature — reach to outsiders is msg-acl\'s (below)' },
   { file: 'src/lib/machine-desktop-handover.js', match: /label: t\('Agent'\)/, surface: 'Machine desktop · Hand to an agent', why: 'ONE driver of a machine\'s desktop (one pointer, one keyboard — lane desktop-handover): "all agents" would be many hands on one mouse; the owner picks the one conversation, and takes it back' },
   { file: 'src/lib/window-share.js', match: /label: t\('Agent'\)/, surface: 'Desktop app · Ask an agent to take control…', why: 'a REQUEST to ONE agent (it is told and may be woken — a billed turn): "all agents" would be a fan-out of billed turns nobody chose; the share above is where All is offered' },
+  { file: 'src/lib/channel-filter-editor.js', match: /cls: 'pp-except-only', label: t\('Who gets woken\?'\)/, surface: 'Channels · Notify… · «除了» (lane grants-unify — the members of a notified Task Group / All agents left out)', why: 'THE exception row of the Notify dialog: its main list is hidden (the rows above pick who is woken, All agents included) — All agents can never be left out (the grant model refuses it: `bad_except`)' },
+  { file: 'src/lib/vault-automation.js', match: /placeholder: t\('Search sessions and groups…'\), label: t\('Grant "\{name\}" to'/, surface: 'Vault · Automation keys · 授权给… (lane grants-unify: THE picker, it was a checkbox list)', why: 'a key is granted to conversations and Task Groups — its subjects; «the whole of VibeSpace» is the grant\'s REACH (the reach rows below the picker), and no grant model subject is every conversation (the 2026-10 census: subjects are session:<id> / group:<id>)' },
+  { file: 'src/lib/task-detail.js', match: /cls: 'pp-except-only'/, surface: 'Task Group · External visibility · «除了» (lane grants-unify — this group\'s members left out of what outsiders see)', why: 'the main list is THIS Task Group (picked, hidden) — only its exception row shows; who outsiders are is the visibility level itself (msg-acl: every outsider), so there is no All agents to offer' },
+  { file: 'src/lib/principal-picker.js', match: /cls: 'pp-except-picker'/, surface: 'Every picker · «除了（可选）» (lane grants-unify — the members left OUT of a picked Task Group / All agents)', why: 'the EXCEPTION list inside the picker itself: its rows are the picked groups\' members (under All, every conversation) — All agents can never be an exception (the grant model refuses it: `bad_except`)' },
 ];
 /** THE MODELS (grep-derived candidates must each be a row; `spelled(mod)` proves the spelling is really there). */
 const MODELS = [
@@ -94,7 +98,8 @@ const MODELS = [
   { file: 'src/channel-filter.js', model: 'channel ACCESS + WATCHERS per grain', before: 'no', spelled: "principal {kind:'everyone', id:'*'}; watcher fan-out everyone:*><cid>", check: (m) => m.PRINCIPAL_KINDS.includes('everyone') && m.principalKey({ kind: 'everyone', id: 'q' }) === 'everyone:*' },
   { file: 'src/window-reach.js', model: 'desktop-app window reach (hidden by default)', before: 'no', spelled: "row principal {kind:'everyone', id:'*'}, via 'everyone'", check: (m) => m.PRINCIPAL_KINDS.includes('everyone') && m.reachFor({ rows: [{ principal: { kind: 'everyone', id: '*' } }] }, { sessionKeys: ['claude:x'] }).level === 'exposed' },
   { file: 'src/exit-reach.js', model: 'machine exit reach (use / run)', before: 'yes', spelled: "mode 'everyone' (an everyone ROW refused — one spelling)", check: (m) => m.MODES.includes('everyone') },
-  { file: 'src/browser-profiles.js', model: 'agent-browser profile who-may-use', before: 'yes', spelled: "owner {kind:'instance'} ⇒ whoMayUse mode 'all'", check: (m) => m.whoMayUse({ owner: { kind: 'instance', id: null } }).mode === 'all' },
+  { file: 'src/browser-profiles.js', model: 'agent-browser profile who-may-use', before: 'yes', spelled: "an `everyone` entry in its grants row (grantUse) ⇒ whoMayUse mode 'all'", check: (m) => m.whoMayUse({ id: 'p', grantUse: { to: [{ kind: 'everyone' }], except: [] } }).mode === 'all' },
+  { file: 'src/grant-model.js', model: 'THE grant model (lane grants-unify): every door\'s rows {door, resource, to, except} judged by ONE admits()', before: 'no', spelled: "principal {kind:'everyone'} in a row's `to` (never in `except`)", check: (m) => m.PRINCIPAL_KINDS.includes('everyone') && m.admits([{ door: 'exit', resource: 'h:use', to: [{ kind: 'everyone' }] }], { conversationKey: 'c' }).via === 'everyone' && m.validateWrite('exit', 'h:use', { to: [], except: [{ kind: 'everyone' }] }).code === 'bad_except' },
   { file: 'src/msg-acl.js', model: 'agent ↔ agent messaging reach (Task Group / session levels)', before: 'yes', spelled: "externalVisibility / reachability 'visible' | 'messageable' — open to EVERY outsider (no principal list to add a row to)", check: (m) => m.levelFor({ groups: ['g'], reachability: 'inherit' }, ['other'], () => 'messageable') === 'messageable' },
 ];
 /** Informational rows the census prints (no picker, no principal list): what the brief named that is not a surface. */
@@ -275,35 +280,40 @@ const B = require(path.join(REPO, 'src/browser-profiles.js'));
   // exit-reach: All IS the everyone mode (no second spelling) and keeps the rows picked beside it
   const cur = E.exitAccessOf(null);
   const rows = [{ kind: 'group', id: 'tg-1' }, { kind: 'session', id: 'claude:abc' }];
+  const ONE = [{ kind: 'group', id: 'tg-1' }, { kind: 'conversation', key: 'abc' }];   // lane grants-unify: the ONE spelling
   const v1 = E.patchVerdict(cur, { use: { mode: 'everyone', who: rows } });
   ok(v1.ok && v1.access.use.mode === 'everyone' && v1.access.use.who.length === 2, 'exit-reach: everyone + the rows picked beside it — accepted, the rows KEPT', v1);
-  const stored = E.storedExit(v1.access);
-  const back = E.exitAccessOf({ exit: stored });
-  ok(J(stored.use.who) === J(rows) && back.use.mode === 'everyone' && J(back.use.who) === J(rows), 'exit-reach: stored and read back — the kept rows survive the disk');
+  // lane grants-unify: the lists are rows of the grants store — `everyone` an entry in `to`, the kept rows beside it
+  const [useRow] = E.exitRows(v1.access, 'h');
+  const back = E.exitAccessOf({ exit: E.storedExit(v1.access) }, { use: [useRow] });
+  ok(J(useRow.to) === J([{ kind: 'everyone' }, ...ONE]) && back.use.mode === 'everyone' && J(back.use.who) === J(ONE), 'exit-reach: written as a row and read back — the kept rows survive the store');
   ok(E.exitVerdict(back, 'use', { sessionKeys: ['claude:nobody'] }).ok && E.exitVerdict(back, 'use', { sessionKeys: ['claude:nobody'] }).via === 'everyone', 'exit-reach: everyone admits every caller (the kept rows decide nothing — no change to what a grant allows)');
   const v2 = E.patchVerdict(back, { use: { mode: 'only', who: back.use.who } });
-  ok(v2.ok && v2.access.use.mode === 'only' && J(v2.access.use.who) === J(rows) && !E.exitVerdict(v2.access, 'use', { sessionKeys: ['claude:nobody'] }).ok, 'exit-reach: taking All away restores EXACTLY the rows that were picked (the dialog sends them back)');
+  ok(v2.ok && v2.access.use.mode === 'only' && J(v2.access.use.who) === J(ONE) && !E.exitVerdict(v2.access, 'use', { sessionKeys: ['claude:nobody'] }).ok, 'exit-reach: taking All away restores EXACTLY the rows that were picked (the dialog sends them back)');
   const v3 = E.patchVerdict(cur, { use: { mode: 'only', who: [{ kind: 'everyone', id: '*' }] } });
   ok(!v3.ok && v3.code === 'bad_principal' && /mode "everyone"/.test(v3.error), 'exit-reach: an `everyone` ROW is refused bad_principal — All agents is the mode (one spelling)', v3);
-  ok(E.exitAccessOf({ exit: { use: { mode: 'only', who: [{ kind: 'everyone', id: '*' }, { kind: 'group', id: 'tg-1' }] }, run: { mode: 'nobody' } } }).use.who.length === 1, 'exit-reach: an `everyone` row on disk is dropped at the read (never consulted as a list row)');
+  const legacyUse = require(path.join(REPO, 'src/grant-model.js')).fromExitGrant({ mode: 'only', who: [{ kind: 'everyone', id: '*' }, { kind: 'group', id: 'tg-1' }] });   // lane grants-unify: the migration's mapper
+  const fromDisk = E.exitAccessOf({}, { use: [{ door: 'exit', resource: 'h:use', to: legacyUse.to }] });
+  ok(fromDisk.use.mode === 'only' && fromDisk.use.who.length === 1, 'exit-reach: an `everyone` row on disk is dropped when it is carried over (never consulted as a list row, never read as the mode)');
   ok(E.patchVerdict(cur, { use: { mode: 'everyone' } }).ok && E.patchVerdict(cur, { use: { mode: 'nobody', who: rows } }).access.use.who.length === 0, 'exit-reach: everyone with no rows is fine; nobody keeps none');
 }
 {
-  // browser-profiles: All IS `all` (owner instance) and keeps the rows
-  const p0 = { id: 'p-1', label: 'work', owner: { kind: 'only', who: [{ kind: 'task', id: 'tg-1' }] } };
+  // browser-profiles: All IS `all` (an `everyone` entry in the profile's grants row — lane grants-unify) and keeps the rows
   const K = 'bk-0a1b2c3d';
-  const v1 = B.usePatchVerdict({ profile: p0, use: { mode: 'all', who: [{ kind: 'task', id: 'tg-1' }, { kind: 'session', key: K }] }, knownTask: () => true, knownKey: () => true });
-  ok(v1.ok && v1.owner.kind === 'instance' && v1.owner.who.length === 2, 'browser-profiles: all + the rows picked beside it ⇒ owner {kind:instance, who:[…]}', v1);
-  const p1 = { ...p0, owner: v1.owner };
+  const p0 = { id: 'p-1', label: 'work', grantUse: { to: [{ kind: 'group', id: 'tg-1' }], except: [] } };
+  const convOf = (k) => (k === K ? 'cid-a1' : null);
+  const v1 = B.usePatchVerdict({ profile: p0, use: { mode: 'all', who: [{ kind: 'task', id: 'tg-1' }, { kind: 'session', key: K }] }, knownTask: () => true, knownKey: () => true, conversationOf: convOf });
+  ok(v1.ok && J(v1.row.to) === J([{ kind: 'everyone' }, { kind: 'group', id: 'tg-1' }, { kind: 'conversation', key: 'cid-a1' }]) && v1.now.mode === 'all' && v1.now.kept.length === 2, 'browser-profiles: all + the rows picked beside it ⇒ the row {to:[everyone, …the kept rows]}', v1);
+  const p1 = { ...p0, grantUse: B.useOfRows([{ door: 'browser-profile', resource: 'p-1', ...v1.row }], { browserKeyOf: (c) => (c === 'cid-a1' ? K : null) }) };
   const U = B.whoMayUse(p1);
   ok(U.mode === 'all' && U.kept.length === 2 && B.mayAttach(p1, { browserKey: 'bk-99999999' }).ok && B.mayAttach(p1, { browserKey: 'bk-99999999' }).via === 'all', 'browser-profiles: whoMayUse answers all (+ kept) — every conversation is admitted, the kept rows decide nothing');
-  ok(J(B.useDigestOf(p1)) === J({ mode: 'all', who: [{ kind: 'task', id: 'tg-1' }, { kind: 'session', key: K }] }) && /"s"/.test(B.useStamp(p1)) && B.useStamp(p1) !== B.useStamp({ ...p0, owner: { kind: 'instance', id: null } }), 'browser-profiles: the digest and the stamp carry the kept rows (a list written under All is still a list a stale dialog must not overwrite)');
+  ok(J(B.useDigestOf(p1)) === J({ mode: 'all', who: [{ kind: 'task', id: 'tg-1' }, { kind: 'session', key: K, conversationId: 'cid-a1' }] }) && /"s"/.test(B.useStamp(p1)) && B.useStamp(p1) !== B.useStamp({ ...p0, grantUse: { to: [{ kind: 'everyone' }], except: [] } }), 'browser-profiles: the digest and the stamp carry the kept rows (a list written under All is still a list a stale dialog must not overwrite)', B.useDigestOf(p1));
   const v2 = B.usePatchVerdict({ profile: p1, use: { mode: 'only', who: [{ kind: 'task', id: 'tg-1' }, { kind: 'session', key: K }] }, knownTask: () => false, knownKey: () => false });
-  ok(v2.ok && v2.owner.kind === 'only' && v2.owner.who.length === 2, 'browser-profiles: taking All away restores the kept rows — accepted as KNOWN even when the task / key would no longer be (they were in the list)', v2);
+  ok(v2.ok && v2.now.mode === 'only' && v2.row.to.length === 2 && !v2.row.to.some((e) => e.kind === 'everyone'), 'browser-profiles: taking All away restores the kept rows — accepted as KNOWN even when the task / key would no longer be (they were in the list)', v2);
   const sv = B.useShapeVerdict({ mode: 'only', who: [{ kind: 'everyone', id: '*' }] });
   ok(!sv.ok && /All agents is mode "all"/.test(sv.error), 'browser-profiles: an `everyone` ROW is refused — All agents is mode "all" (one spelling)', sv);
-  ok(B.useShapeVerdict({ mode: 'all' }).ok && B.usePatchVerdict({ profile: p0, use: { mode: 'all' } }).owner.kind === 'instance' && !('who' in B.usePatchVerdict({ profile: p0, use: { mode: 'all' } }).owner), 'browser-profiles: a bare all is the plain instance owner (no rows kept)');
-  ok(B.ownerWithConversation(p1, 'bk-12345678') === null, 'browser-profiles: a pick under All writes nothing (every conversation may already)');
+  ok(B.useShapeVerdict({ mode: 'all' }).ok && J(B.usePatchVerdict({ profile: p0, use: { mode: 'all' } }).row) === J({ to: [{ kind: 'everyone' }], except: [] }) && !('kept' in B.usePatchVerdict({ profile: p0, use: { mode: 'all' } }).now), 'browser-profiles: a bare all is the plain everyone row (no rows kept)');
+  ok(B.rowWithConversation(p1, 'cid-b2') === null, 'browser-profiles: a pick under All writes nothing (every conversation may already)');
 }
 {
   // browser-who-model: the dialog's picker ⇄ the wire
@@ -411,7 +421,8 @@ async function moneyLeg(ENGmod, name) {
   ok(J(per(w2.ladder.calls)) === J({ 'agent-1': 1, 'agent-2': 1 }), `agent-1 named AND covered by All: ONE wake for the batch (${J(per(w2.ladder.calls))}) — never billed twice for the same hits`);
   // removing All's access removes its watcher — and the named agent's rows stay
   const r2 = await w2.e.setAccess(w2.A, w2.OPSC, [{ principal: { kind: 'agent', id: 'agent-1', name: 'One' } }]);
-  ok(r2.ok && (w2.en().watchers || []).length === 1 && w2.en().watchers[0].principal.id === 'agent-1' && w2.en().access.length === 1, 'removing All\'s access removes the All notification; agent-1\'s own access + notification stay exactly as they were');
+  // lane grants-unify: the access list is the grants store's row — read back from the grain's answer
+  ok(r2.ok && (w2.en().watchers || []).length === 1 && w2.en().watchers[0].principal.id === 'agent-1' && r2.access.length === 1 && r2.access[0].principal.id === 'agent-1' && r2.watchers.length === 1, 'removing All\'s access removes the All notification; agent-1\'s own access + notification stay exactly as they were');
   // an ACCOUNT-grain All DIGEST: each running conversation holds its own window and gets its own digest (never one for all)
   const live3 = [{ cid: 'agent-1', name: 'One', groups: [] }, { cid: 'agent-2', name: 'Two', groups: [] }, { cid: 'agent-3', name: 'Three', groups: [] }];
   const w3 = await world(require(path.join(REPO, 'src/server/channels-engine.js')), 'digest', { live: live3 });
@@ -554,8 +565,9 @@ console.log('⑦ the reach table: four principal sets × six actors × read / re
     for (const [set, access] of Object.entries(SETS)) for (const [actor, ctx] of Object.entries(actors)) for (const grant of ['use', 'run']) {
       const v = E.exitVerdict(access, grant, { sessionKeys: ctx.id ? [`claude:${ctx.id}`] : [], groupIds: ctx.groups || [] });
       const named = actor === 'existed at the grant' || actor === 'fork (its source\'s id)';
-      // everyone admits every caller the route let in (the route refuses a job token and a token-less call before this)
-      const want = set === 'All only' || set === 'All + named' ? true : set === 'named only' ? !!ctx.id && (named || actor === 'Task Group member') : false;
+      // everyone admits every caller the route let in (the route refuses a job token and a token-less call before this) —
+      // lane grants-unify: THE one admission names a caller by a key, so an identity-less one is no principal here either
+      const want = set === 'All only' || set === 'All + named' ? !!ctx.id : set === 'named only' ? !!ctx.id && (named || actor === 'Task Group member') : false;
       cell('exit-reach', set, actor, grant, !!v.ok, want);
     }
   }
@@ -565,14 +577,15 @@ console.log('⑦ the reach table: four principal sets × six actors × read / re
     const KEYS = { 'cid-a1': 'bk-0a1b2c3d', 'cid-born-later': 'bk-0b0b0b0b', 'cid-member': 'bk-0c0c0c0c', 'cid-lonely': 'bk-0d0d0d0d' };
     const bk = (c) => (c.id ? KEYS[c.id] : null);
     const SETS = {
-      'All only': { owner: { kind: 'instance', id: null } },
-      'All + named': { owner: { kind: 'instance', id: null, who: [{ kind: 'session', id: bk(actors['existed at the grant']) }, { kind: 'task', id: TG }] } },
-      'named only': { owner: { kind: 'only', who: [{ kind: 'session', id: bk(actors['existed at the grant']) }, { kind: 'task', id: TG }] } },
-      'none': { owner: { kind: 'only', who: [{ kind: 'task', id: 'tg-nobody' }] } },
+      // lane grants-unify: the profile's grants row (the keeper's in-memory `grantUse`); a conversation by its id
+      'All only': { to: [{ kind: 'everyone' }], except: [] },
+      'All + named': { to: [{ kind: 'everyone' }, { kind: 'conversation', key: actors['existed at the grant'].id }, { kind: 'group', id: TG }], except: [] },
+      'named only': { to: [{ kind: 'conversation', key: actors['existed at the grant'].id }, { kind: 'group', id: TG }], except: [] },
+      'none': { to: [{ kind: 'group', id: 'tg-nobody' }], except: [] },
     };
-    for (const [set, p] of Object.entries(SETS)) for (const [actor, ctx] of Object.entries(actors)) {
-      const profile = { id: 'p-1', label: 'work', ...p };
-      const r = ctx.id ? B.mayAttach(profile, { browserKey: bk(ctx), taskIds: ctx.groups || [] }) : { ok: false };
+    for (const [set, grantUse] of Object.entries(SETS)) for (const [actor, ctx] of Object.entries(actors)) {
+      const profile = { id: 'p-1', label: 'work', grantUse };
+      const r = ctx.id ? B.mayAttach(profile, { browserKey: bk(ctx), conversationKeys: [ctx.id], taskIds: ctx.groups || [] }) : { ok: false };
       const named = actor === 'existed at the grant' || actor === 'fork (its source\'s id)';
       const want = !!ctx.id && (set === 'All only' || set === 'All + named' || (set === 'named only' && (named || actor === 'Task Group member')));
       cell('browser-profiles', set, actor, 'act (attach)', !!r.ok, want);
@@ -584,17 +597,20 @@ console.log('⑦ the reach table: four principal sets × six actors × read / re
   // CONTROLS: a model whose All row names nobody born later ⇒ the table is red
   {
     const wrSrc = read('src/window-reach.js');
-    const WR_LINE = "const hit = k === 'everyone' ? callerKnown : k === 'session' ? keys.has(row.principal.id) : groups.has(row.principal.id);";
-    const wrMut = wrSrc.includes(WR_LINE) ? M.load('src/window-reach.js', wrSrc.replace(WR_LINE, WR_LINE.replace("k === 'everyone' ? callerKnown", "k === 'everyone' ? false")), 'all-names-nobody') : null;
+    // lane grants-unify: window-reach hands the model its All row — the mutant hands it a row that names nobody instead
+    const WR_LINE = "p.kind === 'group' ? { kind: 'group', id: p.id } : { kind: 'everyone' });";
+    const wrMut = wrSrc.includes(WR_LINE) ? M.load('src/window-reach.js', wrSrc.replace(WR_LINE, "p.kind === 'group' ? { kind: 'group', id: p.id } : { kind: 'group', id: 'nobody' });"), 'all-names-nobody') : null;
     const rec = wrMut ? wrMut.grant(wrMut.emptyRecord('w1'), ALL, { by: 'user', at: 1 }).record : null;
     ok(!!wrMut && wrMut.reachFor(rec, { sessionKeys: [`claude:${A9}`] }).level === 'hidden', 'CONTROL (7a): window-reach whose All row names nobody ⇒ the born-after cell reads hidden — RED');
     const cfSrc = read('src/channel-filter.js');
-    const CF_LINE = "  if (p.kind === 'everyone') return ctx.kind === 'agent' && !!ctx.id && (!p.target || str(p.target) === str(ctx.id));";
-    const cfMut = cfSrc.includes(CF_LINE) ? M.load('src/channel-filter.js', cfSrc.replace(CF_LINE, "  if (p.kind === 'everyone') return false;"), 'all-names-nobody', { esm: false }) : null;
+    // lane grants-unify: rowNames hands THE model the row's principal — the mutant hands it a Task Group nobody is in for All
+    const CF_LINE = "  const e = GM.fromChannelPrincipal(p);\n  return !!e && GM.admits(";
+    const cfMut = cfSrc.includes(CF_LINE) ? M.load('src/channel-filter.js', cfSrc.replace(CF_LINE, "  const e = p.kind === 'everyone' ? { kind: 'group', id: 'nobody' } : GM.fromChannelPrincipal(p);\n  return !!e && GM.admits("), 'all-names-nobody', { esm: false }) : null;
     ok(!!cfMut && !cfMut.rowNames({ principal: ALL }, { kind: 'agent', id: A9 }), 'CONTROL (7b): channel-filter whose All row names nobody ⇒ the be-woken / act cells read false — RED');
     const aclSrc = read('src/channel-acl.js');
-    const ACL_LINE = "  if (p.kind === 'everyone') return !!ctx && ctx.kind === 'agent' && !!ctx.id;";
-    const aclMut = aclSrc.includes(ACL_LINE) ? M.load('src/channel-acl.js', aclSrc.replace(ACL_LINE, "  if (p.kind === 'everyone') return !!ctx && ctx.kind === 'agent' && ctx.id === 'cid-a1';"), 'all-names-the-first') : null;
+    // lane grants-unify: principalApplies hands THE model the grant's principal — the mutant turns All into the one conversation that existed
+    const ACL_LINE = "  const e = GM.fromChannelPrincipal(p);";
+    const aclMut = aclSrc.includes(ACL_LINE) ? M.load('src/channel-acl.js', aclSrc.replace(ACL_LINE, "  const e = p.kind === 'everyone' ? { kind: 'conversation', key: 'cid-a1' } : GM.fromChannelPrincipal(p);"), 'all-names-the-first') : null;
     const g = aclMut ? aclMut.validateGrant({ principal: ALL, scope: { kind: 'conversation', id: 'lark-1/c1' }, level: 'visible', origin: 'user' }).grant : null;
     ok(!!aclMut && aclMut.effective({ kind: 'agent', id: A1 }, { key: 'lark-1/c1', adapterId: 'lark-1' }, [g]).level === 'visible' && aclMut.effective({ kind: 'agent', id: A9 }, { key: 'lark-1/c1', adapterId: 'lark-1' }, [g]).level === 'hidden', 'CONTROL (7c): channel-acl whose All row names only the conversations that existed ⇒ the born-after cell reads hidden — RED (that is the point of the row)');
   }
@@ -620,13 +636,15 @@ console.log('⑤ wiring: every dialog maps the All row onto its model\'s own spe
   const WS = read('src/lib/window-share.js');
   ok(/out\.push\(\{ key: 'everyone:\*', kind: 'everyone', id: '\*', name: t\('All agents'\), checked: !!all\.checked/.test(WS) && /ref: \{ kind: 'everyone', row: \{ id: '\*'/.test(WS), 'window share: the All row comes from the model\'s `everyone` entry and toggles {kind:everyone, id:*}');
   const XD = read('src/lib/exit-access-dialog.js');
-  ok(/if \(all\) g\.mode = 'everyone';/.test(XD) && /const selected = g\.mode === 'everyone' \? \[EVERYONE_KEY\] : \[\];/.test(XD) && !/value: 'everyone'|\['nobody', 'everyone', 'only'\]/.test(XD), 'exit access: the picker\'s All row IS mode everyone (the radio is gone — one spelling); the rows beside it ride along');
+  // lane grants-unify: the stored list is drawn through the picker model's rowToPick (`everyone` an entry of `to` ⇒ the All key)
+  ok(/if \(all\) g\.mode = 'everyone';/.test(XD) && /rowToPick\(\{ to: \[\.\.\.\(g\.mode === 'everyone' \? \[\{ kind: 'everyone' \}\] : \[\]\)/.test(XD) && /everyoneKey: EVERYONE_KEY/.test(XD) && !/value: 'everyone'|\['nobody', 'everyone', 'only'\]/.test(XD), 'exit access: the picker\'s All row IS mode everyone (the radio is gone — one spelling); the rows beside it ride along');
   const BW = read('src/lib/browser-who-dialog.js');
-  ok(/everyone: \{ key: EVERYONE_KEY \}/.test(BW) && /const use = draftUse\(d\.sel, model\.wire\);/.test(BW) && !/bwho-radio|radiogroup/.test(BW), 'browser who-can-use: one picker, All first, mapped through draftUse (the radios are gone)');
+  ok(/everyone: \{ key: EVERYONE_KEY \}/.test(BW) && /const use0 = draftUse\(d\.sel, model\.wire\);/.test(BW) && !/bwho-radio|radiogroup/.test(BW), 'browser who-can-use: one picker, All first, mapped through draftUse (the radios are gone)');
   const RT = read('src/routes/browser-trace.js');
-  ok(/patch\.use = sv\.mode === 'all' \? \(rows\.length \? \{ mode: 'all', who: rows \} : \{ mode: 'all' \}\)/.test(RT), 'the browser PATCH route carries the rows kept beside All (resolved like a list\'s)');
+  ok(/patch\.use = sv\.mode === 'all' \? \(rows\.length \? \{ mode: 'all', who: rows, \.\.\.ex \} : \{ mode: 'all', \.\.\.ex \}\)/.test(RT), 'the browser PATCH route carries the rows kept beside All (resolved like a list\'s)');
   const WT = read('src/server/window-targets-engine.js');
-  ok(/if \(row\.principal\.kind === 'everyone'\) hit = true;/.test(WT), 'the window engine counts every live agent session as reached by an All row (the share view\'s "who it reaches")');
+  // lane grants-unify: «who it reaches» is the ONE admission over that row alone (All = an `everyone` entry ⇒ every live caller)
+  ok(/const one = \{ door: 'window', resource: '-', to: \[R\.rowOfRecord\(\{ windowId: '-', rows: \[row\] \}\)\.to\[0\]\]/.test(WT) && /const v = GM\.admits\(\[one\]/.test(WT), 'the window engine counts every live agent session as reached by an All row (the share view\'s "who it reaches")');
   const EN = ENGINE_SRC;
   const wakePaths = ['const eff = wakeEffOf(en);   // ALL AGENTS fanned out', 'const eff = wakeEffOf(store.index.peek(`${rec.id}/${convId}`));   // a fan-out target', 'const scopeFor = (rec, convId, pk) => { const eff = wakeEffOf(', 'const eff0 = wakeEffOf(en0);', 'const eff = wakeEffOf(en);   // a fan-out target\'s hits wait'];
   ok(wakePaths.every((p) => EN.includes(p)) && (EN.match(/wakeEffOf\(/g) || []).length >= 10, `every wake path reads the fan-out (wakeEffOf: ${(EN.match(/wakeEffOf\(/g) || []).length} sites)`);

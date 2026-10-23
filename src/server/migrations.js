@@ -48,7 +48,13 @@ const RUNAWAY_VOID_TEXT = 'stopped by the old resource guard (a per-process RSS 
 // writer's client); `integrations` (lane llm-plugin-rename) is the LIVE integration store (it holds
 // data/integrations.json in memory and saves it whole) — the 2026-10-llm-rename move goes through both, and FAILS by
 // name (retried next boot) when there is something to move and the store that holds it was not handed in.
-function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null, hosts = null, accounts = null, plugins = null, integrations = null }) {
+// `grants` (lane grants-unify) is THE grants store (src/server/grants-store.js, or a getter) the 2026-10-grants-unify
+// rows are seeded into; without one the store of this data dir (the installed one when it is this dir's). `note` (the
+// boot trace's — ⚙ Diagnostics) hears the grants store's boot check (grantsStoreBoot) by name.
+// `tasks` (lane task-group-context) is the LIVE TaskGroupManager (or a getter): it holds data/task-groups.json in memory
+// and saves it whole, so the Context-table migration goes THROUGH it (`migrateContextRows`), the file only when there is
+// none (a suite).
+function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null, hosts = null, accounts = null, plugins = null, integrations = null, grants = null, note = null, tasks = null }) {
   const dataDir = path.join(rootDir, 'data');
   const archiveDir = path.join(dataDir, 'archive');
 
@@ -665,7 +671,89 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         return rep;
       },
     },
+    {
+      id: '2026-10-grants-unify',
+      note: "EVERY PLACE YOU GIVE AGENTS ACCESS IS ONE ROW SHAPE (lane grants-unify, the owner 2026-10-23: 「权限系统要 unify 一下，不想引入太多复杂度」 — the only concepts are 给谁 and 除了). A browser profile's \"Who can use it\", an automation key's grant and its reach, a channel's access / reach / notification / raw-API tier, a machine's exit (use, run), a desktop window's share and a Task Group's outside visibility become rows {door, resource, to, except} of ONE store (data/grants.json, written by ONE writer, every change audited in data/grants-audit.jsonl), judged by ONE model (src/grant-model.js admits). Each row is carried over by the model's own legacy mapper and — before it is written — JUDGED: for every principal the old rows name (each conversation in its old spelling and the one spelling, a member of each named Task Group, an outsider), the old reader's verdict must equal the new one; a resource whose verdicts differ is NOT written (nobody may use it until it is given again) and is NAMED, and the run then fails by name (retried next boot) — every resource that agreed is written. A row the store already holds is kept. A machine whose run list asked each time keeps asking (exit.run.ask → exit.ask). The old fields stay on disk one release, UNREAD (the follow-up strips them). Exceptions (except) start empty — nothing anyone could do yesterday changes.",
+      run() { return grantsUnify(); },
+    },
+    {
+      id: '2026-10-task-group-context-rows',
+      note: "a Task Group's Context table (lane task-group-context, POC v2.2 + the owner's fourth level): ONE ordered list `ctx` of rows (path + note + how much the agent is told + verbs) replaces the two old folder bindings. Every group without a table gets its rows from its old fields — each folders[] entry becomes a row told 文件名 tagged 自动发现会话 (the membership by cwd it already had, now recursive), contextDir a row told 文件名 tagged agent 在这里记笔记 (one row when it IS one of the folders; the .vibespace/TASK.md mirror stays in it). The old fields stay in the file for one release (an older build still reads them) and are no longer read. THROUGH the live TaskGroupManager when there is one (it holds task-groups.json and saves it whole), else the file (atomic). A group that already has `ctx` is skipped (a second run finds nothing). An unreadable store fails the run by name (retried next boot, nothing touched).",
+      run() {
+        const tm = typeof tasks === 'function' ? tasks() : tasks;
+        const rep = tm && typeof tm.migrateContextRows === 'function' ? tm.migrateContextRows() : migrateContextRowsFile(path.join(dataDir, 'task-groups.json'));
+        console.log('[migrate] task-group-context-rows:', JSON.stringify(rep));
+        return rep;
+      },
+    },
   ];
+
+  /** 2026-10-grants-unify: every pre-unify who-list → rows of THE grants store (src/server/grants-migration.js). `ensure`
+   *  = leave data/grants.json on disk even when nothing was carried (false on the rollback re-run below). */
+  function grantsStoreOf() { const g = typeof grants === 'function' ? grants() : grants; return g || require('./grants-store.js').forDir(dataDir); }
+  function grantsUnify({ ensure = true } = {}) {
+    const eng = typeof channels === 'function' ? channels() : channels;
+    let channelIndex = null;
+    try { channelIndex = eng && eng.store && eng.store.index && typeof eng.store.index.snapshot === 'function' ? eng.store.index.snapshot() : null; } catch { channelIndex = null; }
+    let bindings = null;
+    try { bindings = require('./browser-bindings.js').create({ dataDir }); } catch { bindings = null; }
+    const rep = require('./grants-migration.js').migrate({ dataDir, store: grantsStoreOf(), hosts, channelIndex, ensure, resolveBrowserKey: (bk) => { try { return bindings ? bindings.conversationOf(bk) || null : null; } catch { return null; } } });
+    console.log('[migrate] grants-unify:', JSON.stringify(rep));
+    return rep;
+  }
+  /**
+   * THE ROLLBACK ROAD (verify F2): the ledger is keyed by id, so a data/grants.json deleted AFTER 2026-10-grants-unify ran
+   * left every door closed with nothing said (the owner's grants gone, the migration answering `already`). A boot whose
+   * ledger is stamped but finds NO store on disk:
+   *  · an old list is still on disk (they stay one release, unread) ⇒ the migration RUNS AGAIN — the same judge, a row
+   *    the store holds is kept — and the store comes back as the old lists say (what a downgrade would read); said by name
+   *    (`rearmed`) in the log and ⚙ Diagnostics;
+   *  · nothing is left to carry ⇒ `grants_store_missing` in the log, ⚙ Diagnostics and a notice — every door stays closed
+   *    (nobody, never everyone), and no file is made, so the next boot says it again until access is given.
+   * → what the ledger result gains (`{}` when the store is on disk).
+   */
+  function grantsStoreBoot() {
+    const id = '2026-10-grants-unify';
+    const st = grantsStoreOf();
+    if (!st || typeof st.onDisk !== 'function' || st.onDisk()) return {};
+    const say = (line) => { try { note?.(line); } catch { } };
+    try {
+      const rep = grantsUnify({ ensure: false });
+      if ((rep.seeded || 0) + (rep.kept || 0) > 0) {
+        const line = `[migrate] ${id} rearmed: data/grants.json was missing while the lists from before the upgrade are still on disk — ${rep.seeded} grant row(s) carried again (a grant changed since the upgrade reads as it did before it)`;
+        console.warn(line); say(line);
+        return { status: 'rearmed', report: rep };
+      }
+      const line = 'grants_store_missing: data/grants.json is missing and no list from before the upgrade is left to carry — every door is closed (nobody may use anything) until access is given again';
+      console.warn(`[grants] ${line}`); say(line);
+      try { serverNotice?.('grants_store_missing', `Access lists: ${line}.`, { level: 'warn' }); } catch { }
+      return { missing: 'grants_store_missing' };
+    } catch (e) {
+      const line = `[migrate] ${id} rearmed (data/grants.json was missing) and FAILED: ${e.message}`;
+      console.warn(line); say(line);
+      try { serverNotice?.('migration-failed:' + id, `Data migration ${id} ran again because data/grants.json was missing, and failed: ${e.message}`, { level: 'warn' }); } catch { }
+      return { status: 'failed', rearmed: true, error: e.message };
+    }
+  }
+
+  /** 2026-10-task-group-context-rows without a live store: the rows written into the file beside the old fields (kept,
+   *  one release), atomically. No file = nothing to do; an unparseable one throws (the runner retries next boot). */
+  function migrateContextRowsFile(file) {
+    let raw;
+    try { raw = fs.readFileSync(file, 'utf-8'); } catch (e) { if (e.code === 'ENOENT') return { skipped: 'no store' }; throw e; }
+    const doc = JSON.parse(raw);
+    const TC = require('../task-context.js');
+    const rep = { groups: 0, rows: 0, folders: 0, notes: 0, merged: 0, nonRecursive: 0, skipped: 0, via: 'file' };
+    for (const t of Object.values((doc && doc.tasks) || {})) {
+      if (!t || typeof t !== 'object') continue;
+      if (Array.isArray(t.ctx)) { rep.skipped++; continue; }
+      const m = TC.rowsFromLegacy({ folders: t.folders, contextDir: t.contextDir });
+      t.ctx = m.rows;
+      rep.groups++; rep.rows += m.rows.length; rep.folders += m.folders; rep.notes += m.notes; rep.merged += m.merged; rep.nonRecursive += m.nonRecursive;
+    }
+    if (rep.groups) { fs.writeFileSync(file + '.tmp', JSON.stringify(doc, null, 2)); fs.renameSync(file + '.tmp', file); }
+    return rep;
+  }
 
   /** 2026-10-llm-rename: what the DISK holds under the old id (read-only; an unreadable file counts as "may hold" — the
    *  run then needs the live store that owns it), then the move through the live PluginManager + integration store. */
@@ -845,8 +933,9 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     return { file: path.basename(file), via: 'file', records, stamped };
   }
 
-  function runLocalMigrations() {
-    const results = runMigrations({ ledgerPath: path.join(dataDir, 'migrations.json'), migrations: MIGRATIONS });
+  function runLocalMigrations({ only = null } = {}) {   // `only` = ids (a suite's one boot of one migration)
+    const results = runMigrations({ ledgerPath: path.join(dataDir, 'migrations.json'), migrations: Array.isArray(only) ? MIGRATIONS.filter((m) => only.includes(m.id)) : MIGRATIONS });
+    for (const r of results) if (r.id === '2026-10-grants-unify' && r.status === 'already') Object.assign(r, grantsStoreBoot());   // verify F2: the ledger stamped, the store deleted
     for (const r of results) {
       if (r.status === 'failed') {
         try { serverNotice?.('migration-failed:' + r.id, `Data migration ${r.id} failed (${r.error}) — will retry on next restart.`, { level: 'warn' }); } catch { }
@@ -855,7 +944,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     return results;
   }
 
-  return { runLocalMigrations, MIGRATIONS };
+  return { runLocalMigrations, MIGRATIONS, grantsStoreBoot };
 }
 
 module.exports = { create, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT };

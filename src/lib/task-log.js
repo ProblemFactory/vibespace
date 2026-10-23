@@ -8,6 +8,7 @@ import { PRIORITIES, normalizePriority, priorityMarker, sortBacklog } from '../b
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js';
 import { matchSnippet } from '../record-clear.js'; // PURE: why a Find matched a row whose note does not say it (the dialog's line)
 import { enterSubmits } from './chat-enter-keys.js';
+import { afterPointerUp, blurCommits } from './blur-commit.js'; // lane task-group-context: the add boxes save when left (after the release)
 import { whenOn, timeOn, pageZone } from './owner-facts.js'; // B-7960 a: the board's times = the agents' words (the owner's zone, named)
 
 /**
@@ -32,7 +33,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     return existing;
   }
 
-  let task = sidebar._taskById(taskId);
+  const task = sidebar._taskById(taskId);
   if (!task && sidebar._tasksLoaded) { showToast(t('Task Group not found'), { type: 'error' }); return null; }
 
   const openSpec = { action: 'openTaskLog', taskId, tab: tab === 'backlog' ? 'backlog' : 'activity' };
@@ -43,8 +44,29 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
   winInfo._taskLogId = taskId;
 
   const root = document.createElement('div');
-  root.className = 'task-log';
   winInfo.content.appendChild(root);
+  const view = mountTaskLog(app, taskId, root, {
+    tab, signal: winInfo._listenerCtl?.signal,
+    onTitle: (title) => app.wm.setTitle(winInfo.id, title + ' — ' + t('Log')),
+    onGone: () => app.wm.closeWindow(winInfo.id),
+    onTab: (tb) => { openSpec.tab = tb; },
+  });
+  winInfo._taskLogSetTab = view.setTab;
+  const prevClose = winInfo.onClose;
+  winInfo.onClose = () => { view.destroy(); prevClose?.(); };
+  return winInfo;
+}
+
+/** The Backlog / Activity viewer drawn into `root` — the log window above and the Task Group window's Backlog and 活动记录
+ *  tabs share it (lane task-group-context). `embedded` = the host draws the tabs (this one's strip is not drawn);
+ *  onTitle(title) / onGone() / onTab(tab) let a window follow it. → { setTab, render, destroy } */
+export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal = null, onTitle = null, onGone = null, onTab = null } = {}) {
+  const sidebar = app.sidebar;
+  let task = sidebar._taskById(taskId);
+  root.classList.add('task-log');
+  if (embedded) root.classList.add('task-log-embedded');
+  const ctl = new AbortController();
+  if (signal) signal.addEventListener('abort', () => ctl.abort(), { once: true });
 
   // View state survives re-renders (tasks-updated fires on every group edit).
   const state = {
@@ -62,7 +84,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     // until the Find text changes
     userClosed: new Set(),
   };
-  winInfo._taskLogSetTab = (tb) => { state.tab = tb === 'backlog' ? 'backlog' : 'activity'; openSpec.tab = state.tab; render(); };
+  const setTab = (tb) => { state.tab = tb === 'backlog' ? 'backlog' : 'activity'; onTab?.(state.tab); render(); };
 
   // ── Session attribution helpers ──
   // Keys are session-status keys (backend:backendSessionId) or 'user'.
@@ -93,10 +115,10 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     task = sidebar._taskById(taskId);
     if (!task) {
       if (!sidebar._tasksLoaded) { root.innerHTML = `<div class="empty-hint">${escHtml(t('Loading task…'))}</div>`; return; }
-      app.wm.closeWindow(winInfo.id);
+      onGone?.();
       return;
     }
-    app.wm.setTitle(winInfo.id, task.title + ' — ' + t('Log'));
+    onTitle?.(task.title);
 
     // Preserve focus/scroll across live re-renders (same guard as task-detail:
     // never clobber a field mid-typing — but here search text lives in state,
@@ -120,10 +142,10 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       const b = document.createElement('button');
       b.className = 'sidebar-subtab' + (state.tab === key ? ' active' : '');
       b.innerHTML = `${escHtml(label)} <span class="task-log-count">${escHtml(count)}</span>`;
-      b.onclick = () => { state.tab = key; openSpec.tab = key; render(); };
+      b.onclick = () => { state.tab = key; onTab?.(key); render(); };
       tabs.appendChild(b);
     }
-    head.appendChild(tabs);
+    if (!embedded) head.appendChild(tabs);
 
     const search = document.createElement('input');
     search.className = 'task-log-search';
@@ -182,6 +204,21 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     const body = document.createElement('div');
     body.className = 'task-log-body';
     root.appendChild(body);
+    // the Activity tab's own note box (it was the detail window's; lane task-group-context: leaving it saves it, like Enter)
+    if (state.tab === 'activity') {
+      const progAdd = document.createElement('input');
+      progAdd.className = 'task-detail-input task-log-add task-log-progadd';
+      progAdd.placeholder = t('+ Add activity note (Enter)');
+      blurCommits(progAdd, async (how) => {
+        const note = progAdd.value.trim();
+        if (!note) return;
+        progAdd.value = '';
+        const r = await sidebar._taskApi('POST', `/api/tasks/${encodeURIComponent(taskId)}/progress`, { note });
+        if (r && r.error) { progAdd.value = note; return; }
+        if (how === 'blur') showToast(t('Saved when you left the box — no Enter needed'));
+      });
+      root.appendChild(progAdd);
+    }
 
     const renderBody = () => {
       if (state.tab === 'activity') { paintActivity(body, selBar); return; } // KEYED: rows patched in place, never rebuilt
@@ -462,14 +499,14 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
       if (cb.checked) state.picked.add(keyOf(p)); else state.picked.delete(keyOf(p));
       repaintActivity();
     }
-  }, { signal: winInfo._listenerCtl?.signal });
+  }, { signal: ctl.signal });
   root.addEventListener('contextmenu', (e) => {
     if (state.tab !== 'activity') return;
     const p = entryOf(e.target);
     if (!p || !menuItemsFor(p).length) return;
     e.preventDefault(); e.stopPropagation();
     activityMenu(p, e.clientX, e.clientY);
-  }, { signal: winInfo._listenerCtl?.signal });
+  }, { signal: ctl.signal });
 
   // ── Backlog tab: open first (by priority, newest first — sortBacklog), then
   //    resolved; expandable detail + inline edit; a priority chip per row ──
@@ -689,14 +726,18 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     dToggle.textContent = '† ' + t('detail');
     dToggle.title = t('Attach full context to the new item');
     dToggle.onclick = () => addDetail.classList.toggle('hidden');
-    const commit = () => {
+    const commit = (how) => {
       if (!add.value.trim()) return;
       const item = { text: add.value.trim(), status: 'open', addedBy: 'user', addedAt: Date.now() };
       if (addDetail.value.trim()) item.detail = addDetail.value.trim();
       sidebar._taskUpdate(taskId, { backlog: [...(task.backlog || []), item] });
       add.value = ''; addDetail.value = '';
+      if (how === 'blur') showToast(t('Saved when you left the box — no Enter needed'));
     };
-    add.onkeydown = (e) => { if (enterSubmits(e)) commit(); };
+    // blur commits (lane task-group-context): leaving the box saves it like Enter; the detail box keeps it open while typed into
+    add.addEventListener('keydown', (e) => { if (enterSubmits(e)) { e.preventDefault(); commit('enter'); } });
+    add.addEventListener('blur', (e) => { if (add.value.trim() && e.relatedTarget !== addDetail && e.relatedTarget !== dToggle) afterPointerUp(() => commit('blur')); });
+    addDetail.addEventListener('blur', (e) => { if (add.value.trim() && e.relatedTarget !== add && e.relatedTarget !== dToggle) afterPointerUp(() => commit('blur')); });
     addLine.append(add, dToggle);
     addWrap.append(addLine, addDetail);
     body.appendChild(addWrap);
@@ -764,7 +805,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
     if (!task || state.tab !== 'activity' || !body) { render(); return; }
     const sessKeys = [...new Set((task.progress || []).map((p) => p.session).filter(Boolean))].sort().join('\u0000');
     if (root.dataset.sessKeys !== undefined && root.dataset.sessKeys !== sessKeys && document.activeElement?.classList?.contains('task-log-sessfilter') !== true) { render(); return; }
-    app.wm.setTitle(winInfo.id, task.title + ' — ' + t('Log'));
+    onTitle?.(task.title);
     const counts = root.querySelectorAll('.task-log-tabs .task-log-count');
     const bl = task.backlog || [];
     const want = [`${bl.filter((b) => b.status === 'open').length}/${bl.length}`, String((task.progress || []).length)];
@@ -773,10 +814,7 @@ export function openTaskLog(app, taskId, { tab, syncId } = {}) {
   };
   const onTasksMsg = (msg) => { if (msg.type === 'tasks-updated') refresh(); };
   app.ws.onGlobal(onTasksMsg);
-  const prevClose = winInfo.onClose;
-  winInfo.onClose = () => { app.ws.offGlobal(onTasksMsg); prevClose?.(); };
-
-  return winInfo;
+  return { setTab, render, destroy: () => { app.ws.offGlobal(onTasksMsg); ctl.abort(); } };
 }
 
 // ── openSpec ACTION REGISTRATION (Plugin Ph1) ── opens a 'task'-kind window (kind owned by task-detail.js)

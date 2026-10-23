@@ -10,7 +10,9 @@
 // through the shared module, and compares the two screenshots pixel-wise.
 // Never imported by product code.
 import { createModalShell, showToast, copyText, escHtml } from '../../../src/lib/utils.js';
-import { setupDirAutocomplete } from '../../../src/lib/autocomplete.js';
+// lane path-field: src/lib/autocomplete.js is gone (THE path field replaced it at every door) — the verbatim block below
+// still calls it; the suite draws both variants' path inputs as one canonical box before comparing (its entry)
+const setupDirAutocomplete = () => ({ hide() {} });
 import { t as tr } from '../../../src/lib/i18n.js';
 
 // BEGIN verbatim oauthLinkRow

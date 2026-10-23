@@ -106,6 +106,20 @@ function runTable(Rm) {
   ok(R.reachFor(joinedLater, { sessionKeys: [S_KEY], groupIds: [] }).level === 'hidden' && R.reachFor(joinedLater, { sessionKeys: [S_KEY], groupIds: [G] }).level === 'exposed', 'a Task Group row reaches a session the moment it belongs (membership is the caller\'s NOW — "live now or later")');
   ok(R.reachFor(build(R, [{ kind: 'session', id: S_KEY }]), { sessionId: S_KEY }).level === 'exposed', 'a bare `sessionId` is read as one more key');
 }
+// §2d lane grants-unify — «除了»: the share's rows live in the ONE grants store; a member left OUT of a group / All agents
+{
+  const rows = [{ door: 'window', resource: 'x', to: [{ kind: 'group', id: G }, { kind: 'everyone' }], except: [{ kind: 'conversation', key: R.sessionKeyNow(S_KEY) }] }];
+  const rec = R.recordOfRows('x', 'pixels', rows);
+  ok(rec.mode === 'pixels' && rec.rows.length === 2 && rec.except.length === 1 && rec.except[0].id === R.sessionKeyNow(S_KEY), 'recordOfRows: the mode from window-reach.json, the rows and the exception from the grants row');
+  const ex = R.reachFor(rec, { sessionKeys: [S_KEY], groupIds: [G] });
+  ok(ex.level === 'hidden' && ex.excepted === true && ex.except.id === R.sessionKeyNow(S_KEY), 'a member left out is HIDDEN and named `excepted` (never read as reached through its group or All agents)');
+  ok(R.reachFor(rec, { sessionKeys: ['claude:other'], groupIds: [] }).via === 'everyone', '…every other conversation still reaches it');
+  const own = R.grant(rec, { kind: 'session', id: S_KEY });
+  ok(own.record.except.length === 0 && R.reachFor(own.record, { sessionKeys: [S_KEY], groupIds: [G] }).via === 'session', 'sharing with the member BY NAME lifts its exception (its own row counts)');
+  ok(R.setExcept(own.record, [{ kind: 'session', id: S_KEY }]).code === 'except_conflicts' && R.setExcept(rec, [{ kind: 'everyone' }]).code === 'bad_principal', 'a principal shared with by name cannot be left out; everyone never is');
+  ok(JSON.stringify(R.rowOfRecord(rec)) === JSON.stringify({ door: 'window', resource: 'x', to: [{ kind: 'group', id: G, origin: 'user' }, { kind: 'everyone', origin: 'user' }], except: [{ kind: 'conversation', key: R.sessionKeyNow(S_KEY) }] }), 'rowOfRecord: the record back as the ONE writer\'s row (each entry its origin)');
+  ok(R.recordOfRows('x', 'auto', [{ door: 'window', resource: 'x', to: [{ kind: 'group', id: G }], except: [{ kind: 'robot' }] }]).unknown === true && R.reachFor(R.recordOfRows('x', 'auto', [{ door: 'window', resource: 'x', to: [{ kind: 'group', id: G }], except: 'B' }]), { sessionKeys: [S_KEY], groupIds: [G] }).unknown === true, 'a row the model cannot read (a malformed exception) ⇒ the record is `unknown` — every caller refused, never read wider');
+}
 // §2b lane E verify r2 (L4): the caller's Task Group membership could not be READ (the store threw)
 function unreadableMiss(Rm) {
   const miss = [];
@@ -150,7 +164,7 @@ function reachedMiss(Rm) {
   const eng = fs.readFileSync(path.join(REPO, 'src/server/window-targets-engine.js'), 'utf8');
   const fnBody = (name) => { const i = eng.indexOf(`function ${name}(`); return i < 0 ? '' : eng.slice(i, eng.indexOf('\n  }\n', i)); };
   ok(/R\.launchCounts\(/.test(fnBody('shareAtLaunch')) && /undecided: counts\.undecided/.test(fnBody('shareAtLaunch')) && /unmatched: counts\.unmatched/.test(fnBody('shareAtLaunch')), 'wiring: shareAtLaunch audits R.launchCounts — `unmatched` AND `undecided` (source pin)');
-  ok(/if \(c\.unreadable\) \{ unreadable\+\+; continue; \}/.test(fnBody('liveReached')) && /R\.reachedState\(/.test(eng.slice(eng.indexOf('function reachedOf('), eng.indexOf('function reachedOf(') + 400)), 'wiring: liveReached counts a membership read that threw (never "not in the group"), and one helper turns it into the state (source pin; the behaviour is test-window-targets §5\'s F5 leg + its control)');
+  ok(/if \(!v\.ok && v\.code === 'groups_unreadable'\) \{ unreadable\+\+; continue; \}/.test(fnBody('liveReached')) && /R\.reachedState\(/.test(eng.slice(eng.indexOf('function reachedOf('), eng.indexOf('function reachedOf(') + 400)), 'wiring: liveReached counts a membership read that threw (never "not in the group"), and one helper turns it into the state (source pin; the behaviour is test-window-targets §5\'s F5 leg + its control)');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -164,7 +178,7 @@ console.log('§3 the transitions — one row per principal, own-row revoke, wide
   rec = R.grant(g2.record, { kind: 'group', id: G, name: 'Ops' }, { at: 10 }).record;
   rec = R.grant(rec, { kind: 'session', id: 'codex:beta', name: 'beta' }, { at: 11 }).record;
   const rv = R.revoke(rec, { kind: 'session', id: S_KEY });
-  ok(rv.ok && rv.changed && rv.record.rows.length === 2 && rv.record.rows.every((r) => r.principal.id !== S_KEY) && rv.row.principal.id === S_KEY, 'revoke drops ONLY that principal\'s row (the group row and the other session\'s row stay)');
+  ok(rv.ok && rv.changed && rv.record.rows.length === 2 && rv.record.rows.every((r) => r.principal.id !== R.sessionKeyNow(S_KEY)) && rv.row.principal.id === R.sessionKeyNow(S_KEY), 'revoke drops ONLY that principal\'s row (the group row and the other session\'s row stay; a key in the ONE spelling — lane grants-unify)');
   ok(R.reachFor(rv.record, { sessionKeys: [S_KEY], groupIds: [G] }).level === 'exposed' && R.reachFor(rv.record, { sessionKeys: [S_KEY], groupIds: [G] }).via === 'group', 'widen-only: a caller whose own row was revoked is still reached by its group\'s row — and `via` names the group so the UI can say so');
   ok(!R.revoke(rv.record, { kind: 'session', id: S_KEY }).changed, 'revoking a principal with no row changes nothing');
   const bad = [R.grant(rec, { kind: 'agent', id: 'x' }), R.grant(rec, { kind: 'session', id: 'no colon' }), R.grant(rec, { kind: 'group', id: 'a b' }), R.grant(rec, null), R.revoke(rec, { kind: 'session' })];
@@ -344,7 +358,7 @@ const REM = { principals: [{ kind: 'session', id: 'claude:conv-a', name: 'alpha'
 function rosterMiss(Rm) {
   const miss = [];
   const ids = (sum) => JSON.stringify(sum.principals.map((p) => [p.kind, p.id]));
-  const want = JSON.stringify(REM.principals.map((p) => [p.kind, p.id]));
+  const want = JSON.stringify(REM.principals.map((p) => Rm.normPrincipal(p)).map((p) => [p.kind, p.id]));   // lane grants-unify: the ids in the ONE spelling
   const empty = Rm.launchSummary({ touched: false, proposal: REM, roster: { sessions: [], groups: [] } });
   if (!(empty.principals[0].absent === 'session' && empty.principals[1].absent === 'group')) miss.push(`an empty roster: ${JSON.stringify(empty.principals)} (want both absent)`);
   if (ids(empty) !== want) miss.push('the ids the launch applies changed');
@@ -405,7 +419,7 @@ console.log('§9 NEGATIVE CONTROLS — patched copies outside the tree');
   const file = path.join(REPO, 'src/window-reach.js');
   const src = fs.readFileSync(file, 'utf8');
   // (a) reachFor ignores group rows
-  const a = src.replace("const hit = k === 'everyone' ? callerKnown : k === 'session' ? keys.has(row.principal.id) : groups.has(row.principal.id);", "const hit = k === 'everyone' ? callerKnown : k === 'session' ? keys.has(row.principal.id) : false;");
+  const a = src.replace("groupIds: Array.isArray(ctx.groupIds) ? ctx.groupIds : [], groupsUnreadable: !!ctx.unreadable });", "groupIds: [], groupsUnreadable: !!ctx.unreadable });");   // lane grants-unify: the door no longer hands the model the caller's groups
   ok(a !== src, 'control (a): the patch applies (reachFor ignoring group rows)');
   const Ra = MUT.load('src/window-reach.js', a, 'nogroups');
   const ta = runTable(Ra);
@@ -435,7 +449,7 @@ console.log('§9 NEGATIVE CONTROLS — patched copies outside the tree');
   const te = rosterMiss(Re);
   ok(te.length > 0, `control (e) FAILS the §7b roster leg (${te.length} checks wrong — the remembered names stated as if present)`);
   // (f) lane E verify r2 (L4): reachFor forgetting `unreadable` (the store fault folded into "no groups")
-  const f = src.replace("if (!best) return ctx.unreadable && rec.rows.some((r) => r.principal.kind === 'group') ? { level: 'hidden', via: null, row: null, unreadable: true } : { level: 'hidden', via: null, row: null };", "if (!best) return { level: 'hidden', via: null, row: null };");
+  const f = src.replace("groupsUnreadable: !!ctx.unreadable });", "groupsUnreadable: false });");   // lane grants-unify: the door forgets to tell the model the store was unreadable
   ok(f !== src, 'control (f): the patch applies (reachFor without `unreadable`)');
   const Rf = MUT.load('src/window-reach.js', f, 'nounreadable');
   const tf = unreadableMiss(Rf);
@@ -480,8 +494,8 @@ console.log('§10 A PENDING FORK\'S KEY IS ITS PLACEHOLDER, NEVER ITS PARENT\'S 
     const out = { rowKey: g.rows[0].principal.id, parentBefore: await handles(W.engine, W.fP), forkBefore: await handles(W.engine, W.fF) };
     // the OPENER's own row: a pending fork launches an app
     let opened = null; try { opened = await W.engine.open({ appId: 'gedit' }, W.fF); } catch (e) { opened = { threw: e.code || e.message }; }
-    const st = JSON.parse(fs.readFileSync(W.engine.reachFile, 'utf8'));
-    out.openerKey = opened && opened.handle ? ((st.windows[opened.handle] || { rows: [] }).rows[0] || { principal: {} }).principal.id : `(open ${JSON.stringify(opened)})`;
+    // lane grants-unify: the share's rows are the grants store's — read through the engine's own view
+    out.openerKey = opened && opened.handle ? ((W.engine.reachOf(opened.handle) || { rows: [] }).rows[0] || { principal: {} }).principal.id : `(open ${JSON.stringify(opened)})`;
     // adoption: the fork announces its own id
     W.F.claudeSessionId = FOWN; W.F.backendSessionId = FOWN; W.F.forkedFrom = [P]; W.F._forkRequested = false;
     out.parentAfter = await handles(W.engine, W.fP); out.forkAfter = await handles(W.engine, W.fF);
@@ -499,7 +513,7 @@ console.log('§10 A PENDING FORK\'S KEY IS ITS PLACEHOLDER, NEVER ITS PARENT\'S 
   {
     const W = mkWorld(ENGINE, 'keyed');
     const g1 = W.engine.grantReach('da-key', { kind: 'session', id: 'claude:' + P });
-    ok(g1.rows[0].principal.id === 'claude:' + P, 'a key the parent answers to (it is live and addressable) stays the parent\'s');
+    ok(g1.rows[0].principal.id === P, 'a key the parent answers to (it is live and addressable) stays the parent\'s (its conversation id — the ONE spelling)');
     W.sessions.delete('w-P');
     W.records.set('da-key2', mkRec('da-key2'));
     const g2 = W.engine.grantReach('da-key2', { kind: 'session', id: 'claude:' + P });
@@ -518,7 +532,7 @@ console.log('§10 A PENDING FORK\'S KEY IS ITS PLACEHOLDER, NEVER ITS PARENT\'S 
   ok(esrc.split(K1).length === 2 && esrc.split(K2).length === 2 && !/R\.sessionKeyOf\(s0?, /.test(esrc.replace(K1, '')) && !/R\.callerKeys\(s, /.test(esrc.replace(K2, '')), 'the engine spells every session key through the two fork-aware helpers (no raw R.sessionKeyOf / R.callerKeys call remains)');
   const Ec = MUT.load('src/server/window-targets-engine.js', esrc.replace(K1, "const keyOf = (s, id) => R.sessionKeyOf(s, id);").replace(K2, "const keysOf = (s, id) => R.callerKeys(s, id);"), 'rawkey');
   const rc = await run(Ec, 'ctl');
-  ok(rc.rowKey === 'claude:' + P && rc.parentBefore === 'da-one' && rc.forkAfter === '' && /da-one/.test(rc.parentAfter) && /da-opened/.test(rc.parentAfter) && rc.openerKey === 'claude:' + P && rc.parentAttach === null, `CONTROL: keyed raw, the row is the PARENT's key — the parent reaches the window (and attaches) AND the app the fork opened, the fork loses both at adoption (${JSON.stringify(rc)}) — the legs would go red`);
+  ok(rc.rowKey === P && rc.parentBefore === 'da-one' && rc.forkAfter === '' && /da-one/.test(rc.parentAfter) && /da-opened/.test(rc.parentAfter) && rc.openerKey === P && rc.parentAttach === null, `CONTROL: keyed raw, the row is the PARENT's key — the parent reaches the window (and attaches) AND the app the fork opened, the fork loses both at adoption (${JSON.stringify(rc)}) — the legs would go red`);
   for (const r0 of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 8 })) ok(r0.pass, '§10 tree: ' + r0.name, r0.pass ? undefined : r0.detail);
 }
 

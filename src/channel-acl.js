@@ -1,7 +1,10 @@
 'use strict';
 /**
  * AGENT REACH — PURE (imports only src/msg-acl.js, PURE → PURE, for the
- * ordering discipline and the widen-only law; nothing else).
+ * ordering discipline and the widen-only law, and src/grant-model.js — THE
+ * one admission, lane grants-unify; nothing else). The rows themselves are
+ * rows of the grants store (src/server/channels-grants.js hands them here in
+ * this module's grant shape, each with its row's `except`).
  * docs/design-communication-panel.zh.md §8, §11, decision 16.
  *
  *  level : 'hidden' < 'requestable' < 'visible'
@@ -14,7 +17,9 @@
  *    effective level is the MAX over every applicable grant. Narrowing one
  *    member below its group is impossible BY CONSTRUCTION — the same rule as
  *    msg-acl's override, for the same reason: a widen-only model can be
- *    reasoned about, a mixed one cannot.
+ *    reasoned about, a mixed one cannot. (lane grants-unify: a member can be
+ *    LEFT OUT of one group row — that row's `except` — which removes it from
+ *    the set the row names; it never pushes it below its OWN rows.)
  *  · `requestable` is the middle: the agent may file a request; approving it
  *    writes EXACTLY ONE `visible` grant for (that principal, that scope) and
  *    touches no group default.
@@ -39,6 +44,7 @@
  *  is the ONE crosswalk from that ladder onto this one.
  */
 const msgAcl = require('./msg-acl.js');
+const GM = require('./grant-model.js'); // PURE → PURE: THE grant model (lane grants-unify — a row names a principal through `admits`)
 
 const LEVELS = Object.freeze(['hidden', 'requestable', 'visible']);
 const RANK = Object.freeze({ hidden: 0, requestable: 1, visible: 2 });
@@ -116,14 +122,15 @@ function validateGrant(input = {}) {
   return { ok: true, grant, id: grantId(grant) };
 }
 
-/** Does a grant name THIS principal (itself, one of its groups, or every agent)? */
+/** Does a grant name THIS principal (itself, one of its groups, or every agent)? lane grants-unify: THE model's
+ *  `admits` over the grant's principal alone, minus the grant row's `except` (the members of its Task Group / of All
+ *  agents the owner LEFT OUT — a left-out member is not named by this row; its own row still counts, rows add). */
 function principalApplies(ctx, grant) {
   const p = grant && grant.principal;
-  if (!p) return false;
-  if (p.kind === 'everyone') return !!ctx && ctx.kind === 'agent' && !!ctx.id;
-  if (p.kind === 'agent') return !!ctx && ctx.kind === 'agent' && ctx.id === p.id;
-  if (p.kind === 'group') return !!ctx && Array.isArray(ctx.groups) && ctx.groups.includes(p.id);
-  return false;
+  if (!p || !ctx || ctx.kind !== 'agent' || !ctx.id) return false;
+  const e = GM.fromChannelPrincipal(p);
+  if (!e) return false;
+  return GM.admits([{ door: 'channel-reach', resource: '-', to: [e], except: Array.isArray(grant.except) ? grant.except : [] }], { conversationKey: String(ctx.id), groupIds: Array.isArray(ctx.groups) ? ctx.groups : [] }).ok;
 }
 /** Does a grant's scope cover THIS target (`{key, adapterId}`)? */
 function scopeApplies(scope, target) {

@@ -81,6 +81,13 @@
 //     patch moved another row to the top grants access to nobody; typing
 //     re-arms; a highlight is kept by key; a vanished highlight disarms; a
 //     dead pick keeps its name
+//   ⑬c (lane gmail-draft-not-a-message, fleet feedback fb-9aa1d3bd1e) a Gmail thread whose
+//     OLDEST record is the account's unsent DRAFT (stored before `kind` existed, To + Cc
+//     headers — the report's exact shape) and which holds an older draft in the Trash: the rows
+//     are the two mails only, in order; the draft is ONE "草稿 · 未发送" row AFTER the last
+//     one (never at its date, no avatar, no To / Cc words, no facts line); the binned draft
+//     is only "1 条草稿已删除"; a newer save arriving by broadcast REPLACES it in place
+//     (one row, its words) — never a row between the mails; the ja words of the same keys
 //   ⑥ (it reloads at phone width) the fold toggle and Re-authorize are
 //     ≥ 36 px, nothing scrolls sideways
 //   ⑩h CONTROL (last — verify round 7; it rebuilds the scratch bundle on a patched
@@ -200,6 +207,7 @@ function picturePng(w = 200, h = 120) {
     conv('gmail', 't_attack', '====== Please reply above this line ======', 'thread', caps([], 'send-scope-not-granted'));
     conv('gmail', 't_fold', 'Fold thread', 'thread', caps([], 'send-scope-not-granted'));
     conv('gmail', 't_facts', 'Facts thread', 'thread', caps([], 'send-scope-not-granted'));   // ⑬ lane message-facts
+    conv('gmail', 't_draft', 'Offsite plan', 'thread', caps([], 'send-scope-not-granted'));   // ⑬c lane gmail-draft-not-a-message
     conv('lark', 'oc_facts', 'Facts room', 'group', caps(['user'], null));   // ⑬b lane message-facts-lark
     conv('gmail', 't_tidy', 'SMC follow-up', 'thread', caps([], 'send-scope-not-granted'));   // ⑥b lane channel-window-tidy
   });
@@ -219,6 +227,16 @@ function picturePng(w = 200, h = 120) {
   const factsTo = ['ada@example.com', '"Lee, Sam" <sam@example.com>', 'Bob <bob@example.com>', ...Array.from({ length: 8 }, (_, i) => `Peer ${i + 3} <p${i + 3}@example.com>`)].join(', ');
   const factMail = (id, at, extra) => gmail.toRecord('gmail', 't_facts', { id, threadId: 't_facts', internalDate: String(at), labelIds: ['INBOX'], payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'Dana Example <dana@example.com>' }, { name: 'Subject', value: 'Facts thread' }, ...extra], body: { data: b64u(`Mail ${id}\n`) } } }, { selfEmail: 'ada@example.com', threadSubject: 'Facts thread' });
   store.appendRecords('gmail', 't_facts', [factMail('m_x1', NOW - 20 * MIN, [{ name: 'To', value: factsTo }, { name: 'Cc', value: 'Carol <carol@example.com>' }, { name: 'Reply-To', value: 'desk@example.com' }, { name: 'List-Id', value: 'Dev <dev.lists.example.com>' }, { name: 'Importance', value: 'high' }])]);
+  // ⑬c lane gmail-draft-not-a-message (fb-9aa1d3bd1e): the report's thread — the account's DRAFT dated FIRST, with To + Cc,
+  // stored the way the base stored it (no `kind`: the read re-judges it off its labels), two mails after it, a draft in the Trash
+  const draftMail = (id, at, labelIds, from, text, extra = []) => gmail.toRecord('gmail', 't_draft', { id, threadId: 't_draft', internalDate: String(at), labelIds, payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: from }, { name: 'Subject', value: 'Offsite plan' }, ...extra], body: { data: b64u(text) } } }, { selfEmail: 'ada@example.com', threadSubject: 'Offsite plan' });
+  const asStoredBefore = (r) => { const x = { ...r }; delete x.kind; delete x.draftState; return x; };
+  store.appendRecords('gmail', 't_draft', [
+    draftMail('m_drt', NOW - 55 * MIN, ['DRAFT', 'TRASH'], 'Ada <ada@example.com>', 'Binned draft words\n'),   // an older draft, binned
+    asStoredBefore(draftMail('m_dr0', NOW - 50 * MIN, ['DRAFT'], 'Ada <ada@example.com>', 'Draft words: we confirm Friday\n', [{ name: 'To', value: 'Erin <erin@example.com>' }, { name: 'Cc', value: 'Finn <finn@example.com>' }])),
+    draftMail('m_dm1', NOW - 40 * MIN, ['INBOX'], 'Erin <erin@example.com>', 'Where do we meet?\n'),
+    draftMail('m_dm2', NOW - 30 * MIN, ['INBOX'], 'Erin <erin@example.com>', 'Room 4 it is.\n'),
+  ]);
   // ⑬b lane message-facts-lark: a Lark room whose messages carry their facts (an app, an edit, a merged forward, a recall, a plain one)
   const appNames = new Map([['cli_facts_app', 'Facts Bot']]);
   store.appendRecords('lark', 'oc_facts', [
@@ -743,6 +761,33 @@ console.log('⑬ a mail thread\'s facts: the summary, the chips, the details, ke
   const X4 = await p1.evaljs(`(async () => { const w = ${WIN('t_render')}; const b = w.content.querySelector('.chanmsg-facts-ask'); if (!b) return null; const t0 = b.textContent; b.click(); await new Promise((r) => setTimeout(r, 600)); const b2 = w.content.querySelector('.chanmsg-facts-ask'); return { t0, still: !!b2, disabled: b2 ? b2.disabled : null, sum: !!w.content.querySelector('.chanmsg-facts-sum') }; })()`);
   ok(X4 && X4.t0 === '详情' && X4.still && X4.disabled === false && !X4.sum, 'a mail stored before its facts shows "详情"; on a disabled account the ask is refused (a toast), nothing drawn, the button usable again', J(X4));
   await api('PUT', '/api/channels/gmail/t_facts/refresh', { every: null });
+}
+
+// ═══ ⑬c AN UNSENT DRAFT IS NO MESSAGE (lane gmail-draft-not-a-message, fleet feedback fb-9aa1d3bd1e) ═══════════════════
+console.log('⑬c a Gmail draft: one "草稿 · 未发送" row after the last mail, no To / Cc; a binned draft only counted; a newer save replaces it');
+{
+  await p1.evaljs(OPEN('gmail', 't_draft', "w.content.querySelector('.chandraft')"));
+  const look = `(() => { const w = ${WIN('t_draft')}; const list = w.content.querySelector('.chanwin-list') || w.content; const kids = [...list.children]; const ds = list.querySelector('.chandrafts'); const rows = [...list.querySelectorAll('.chanmsg')]; const last = rows[rows.length - 1]; const dr = [...list.querySelectorAll('.chandraft')]; return { vids: rows.map((r) => r.dataset.vid), drafts: dr.map((d) => ({ vid: d.dataset.draftVid, tag: (d.querySelector('.chandraft-tag') || {}).textContent, at: (d.querySelector('.chandraft-at') || {}).textContent, text: (d.querySelector('.chandraft-text') || {}).textContent, avatar: !!d.querySelector('.chanmsg-av'), facts: !!d.querySelector('.chanmsg-facts, .chanmsg-facts-sum') })), gone: (list.querySelector('.chandraft-gone') || {}).textContent || null, after: !!(ds && last && (last.compareDocumentPosition(ds) & Node.DOCUMENT_POSITION_FOLLOWING)), beforeOutbox: !!(ds && list.querySelector('.chanwin-outbox-slot') && (ds.compareDocumentPosition(list.querySelector('.chanwin-outbox-slot')) & Node.DOCUMENT_POSITION_FOLLOWING)), secText: ds ? ds.textContent : '', listText: list.textContent }; })()`;
+  const D0 = await p1.evaljs(look);
+  ok(eq(D0.vids, ['m_dm1', 'm_dm2']), 'the conversation rows are the two MAILS only, in order — the draft dated first is no row at the top, the binned one no row at all', J(D0.vids));
+  ok(D0.drafts.length === 1 && D0.drafts[0].vid === 'm_dr0' && D0.drafts[0].tag === '草稿 · 未发送' && /^保存于 /.test(D0.drafts[0].at || '') && D0.drafts[0].text === 'Draft words: we confirm Friday', 'ONE draft row: "草稿 · 未发送", "保存于 <time>", its own words (a record stored before `kind` — re-judged off its DRAFT label at read)', J(D0.drafts));
+  ok(D0.after && D0.beforeOutbox, 'the drafts section sits AFTER the last mail (and before the Outbox slot) — never at the draft\'s date', J({ after: D0.after, beforeOutbox: D0.beforeOutbox }));
+  ok(!D0.drafts[0].avatar && !D0.drafts[0].facts && !/erin@example\.com|finn@example\.com|Finn|发给|抄送/.test(D0.secText), 'no avatar, no facts line, no To / Cc words on the draft (it went to nobody)', D0.secText);
+  ok(D0.gone === '1 条草稿已删除' && !/Binned draft words/.test(D0.listText), 'the draft in the Trash is never drawn — one dim "1 条草稿已删除" line', J({ gone: D0.gone }));
+  await p1.shot('gmail-draft-end.png', await rectOf('t_draft'));
+  // a NEWER SAVE of the draft lands by broadcast (Gmail replaces a draft's message on every save): the section now holds the
+  // new version ONLY — the old one is replaced, no row lands between the mails, nothing redraws the mails
+  const keep = await p1.evaljs(`(() => { const w = ${WIN('t_draft')}; const r = w.content.querySelector('.chanmsg[data-vid="m_dm1"]'); r.__keep = 1; return true; })()`);
+  const draftMail = (id, at, labelIds, from, text, extra = []) => gmail.toRecord('gmail', 't_draft', { id, threadId: 't_draft', internalDate: String(at), labelIds, payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: from }, { name: 'Subject', value: 'Offsite plan' }, ...extra], body: { data: Buffer.from(text, 'utf-8').toString('base64url') } } }, { selfEmail: 'ada@example.com', threadSubject: 'Offsite plan' });
+  fs.appendFileSync(path.join(wt, 'data/channels/msgs/gmail/t_draft.ndjson'), JSON.stringify(draftMail('m_dr1', NOW - 20 * MIN, ['DRAFT'], 'Ada <ada@example.com>', 'Draft words v2: Friday at 10\n', [{ name: 'To', value: 'Erin <erin@example.com>' }])) + '\n');
+  await api('PUT', '/api/channels/gmail/t_draft/refresh', { every: 60 });
+  const D1 = await p1.evaljs(`(async () => { const w = ${WIN('t_draft')}; for (let i = 0; i < 60 && !w.content.querySelector('.chandraft[data-draft-vid="m_dr1"]'); i++) await new Promise((r) => setTimeout(r, 100)); const o = ${look}; o.kept = !!(w.content.querySelector('.chanmsg[data-vid="m_dm1"]') || {}).__keep; return o; })()`);
+  ok(keep && eq(D1.vids, ['m_dm1', 'm_dm2']) && D1.kept, 'the newer save arrives by broadcast: the mail rows are untouched (the same elements), none added', J({ vids: D1.vids, kept: D1.kept }));
+  ok(D1.drafts.length === 1 && D1.drafts[0].vid === 'm_dr1' && D1.drafts[0].text === 'Draft words v2: Friday at 10' && D1.after, 'the section holds the NEW version only (the older save is a version Gmail no longer holds), still after the last mail', J(D1.drafts));
+  await api('PUT', '/api/channels/gmail/t_draft/refresh', { every: null });
+  // ja: the same four keys in the Japanese table (the window speaks them through t())
+  const JA = (await import(path.join(wt, 'src/lib/i18n-ja.js'))).default;
+  ok(JA['Draft · not sent'] === '下書き · 未送信' && JA['saved {time}'] === '{time} に保存' && JA['1 deleted draft'] === '削除された下書き 1 件' && JA['{n} deleted drafts'] === '削除された下書き {n} 件', 'ja: 下書き · 未送信 / {time} に保存 / 削除された下書き N 件', J([JA['Draft · not sent'], JA['saved {time}'], JA['1 deleted draft']]));
 }
 
 // ═══ ⑬b LARK'S FACTS (lane message-facts-lark, B-f066 part 2) — chips beside the time, no line of their own ═══════════════
@@ -1352,7 +1397,9 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
   // turn-state change on a busy fleet); the rows are reconciled in place now, the untouched row keeps its click
   await p1.evaljs(`(async () => { const d = document.getElementById('chan-access-dialog'); const b = d.querySelector('.pp-input'); b.value = ''; b.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`);
   await sleep(120);
-  const CPT = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); const rows = [...d.querySelectorAll('.pp-row')].filter((r) => !r.classList.contains('pp-on')); const row = rows[rows.length - 1]; row.scrollIntoView({ block: 'center' }); const r = row.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), name: row.querySelector('.pp-name').textContent, chips: [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent), under: (document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)) || {}).className }; })()`);
+  // int346: lane grants-unify nests a SECOND picker in the dialog — «除了», folded and hidden — so the row is the MAIN list's
+  // (an except-list row has no box: the press landed at 0,0 on the overlay, 2/2 on the grants tip alone)
+  const CPT = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); const rows = [...d.querySelectorAll('.pp-row')].filter((r) => !r.classList.contains('pp-on') && !r.closest('.pp-except')); const row = rows[rows.length - 1]; row.scrollIntoView({ block: 'center' }); const r = row.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), name: row.querySelector('.pp-name').textContent, chips: [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent), under: (document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)) || {}).className }; })()`);
   await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: CPT.x, y: CPT.y });
   await p1.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: CPT.x, y: CPT.y, button: 'left', clickCount: 1 });
   await p1.evaljs(`(() => { for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'active-sessions', sessions: [] }); } catch {} } return 1; })()`);   // the broadcast lands between press and release

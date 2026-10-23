@@ -320,7 +320,8 @@ let flowState = null;
   ok(r2.options.query === 'label:INBOX', "'' restores the declared default");
   await eng.idle('gmail');   // lane R5: the pass that restore kicked is PACED (waits between its calls) — it ends here, not inside ⑤'s disconnect
   const sch = eng.digest().adapters.find((a) => a.id === 'gmail').optionsSchema;
-  ok(sch.map((o) => o.key).join() === 'scope,labels,query,pushTopic,pushSubscription' && sch[0].choiceLabels && sch[0].choiceLabels.all, 'the digest publishes the option schema the panel draws (the mailbox choices WITH their labels)', JSON.stringify(sch.map((o) => o.key)));
+  // lane oauth-setup-instructions: + clientType (the Google client's kind, read at each sign-in — `signIn`)
+  ok(sch.map((o) => o.key).join() === 'scope,labels,query,pushTopic,pushSubscription,clientType' && sch[0].choiceLabels && sch[0].choiceLabels.all && sch[5].signIn === true && !sch.slice(0, 5).some((o) => 'signIn' in o), 'the digest publishes the option schema the panel draws (the mailbox choices WITH their labels; the client type read at each sign-in)', JSON.stringify(sch.map((o) => o.key)));
 }
 
 // ── ⑤ typed failures, the refresh, invalid_grant, disconnect ──
@@ -1736,6 +1737,85 @@ console.log('\n㉒ lane gmail-anchor-churn: the anchor is a message the vendor w
   ok(wsN.length === 3, `CONTROL (no same-id note): the repeat is said every time (${wsN.length})`);
   for (const x of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 5, label: '㉒ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
   for (const e2 of RIGS) { try { e2.stop(); } catch {} }
+}
+
+// ── ㉓ lane gmail-draft-not-a-message (fleet feedback fb-9aa1d3bd1e, 2026-10-22: «Channels 的 Gmail 会话视图把一封从未发出的草稿
+// （labels DRAFT，今天已移 Trash）当成线程里的正式消息显示在顶部（带日期 Oct 8、To/Cc），用户误以为已发出»): THE KIND IS READ OFF THE
+// LABELS. A message Gmail labels DRAFT is the account's unsent draft (`kind: 'draft'`; in the Trash / Spam `draftState:
+// 'trashed'`), never a message: through the REAL engine the thread's row keeps its last MAIL (instant + line) — a draft saved
+// last (the reply being written) used to be the row's last line, dated as new mail.
+// CONTROL: a copy whose toRecord drops the kind ⇒ the draft is the row's last line again (red). ──
+console.log('\n㉓ lane gmail-draft-not-a-message: a DRAFT-labelled message is a draft record, never a message of the thread');
+{
+  const J = JSON.stringify, eq = (x, y) => J(x) === J(y);
+  const TBL = [
+    [['DRAFT'], 'draft', 'saved'], [['DRAFT', 'TRASH'], 'draft', 'trashed'], [['SPAM', 'DRAFT'], 'draft', 'trashed'],
+    [['INBOX'], undefined, undefined], [['SENT'], undefined, undefined], [['TRASH', 'INBOX'], undefined, undefined], [null, undefined, undefined],
+  ];
+  const one = (labelIds) => gmail.toRecord('gmail', 't', { id: 'x', threadId: 't', internalDate: String(T0), ...(labelIds ? { labelIds } : {}), payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'Ada <ada@example.com>' }], body: { data: Buffer.from('words').toString('base64url') } } }, { selfEmail: 'ada@example.com' });
+  const badK = TBL.filter(([l, k, st]) => { const r = one(l); return r.kind !== k || r.draftState !== st; }).map(([l]) => J(l));
+  ok(!badK.length, `labels → kind: ${TBL.length} shapes — DRAFT ⇒ draft (saved), DRAFT + TRASH / SPAM ⇒ draft (trashed), every other label set a message (a trashed MAIL stays the mail it was)`, badK.join('; '));
+
+  const CT = 'thr_draft_0001';
+  const PEER = 'Erin <erin@example.com>', SELF = 'Member A <member.a@example.com>';
+  const H1 = 800000;
+  const mk = (id, labelIds, at, from, words, extra = []) => ({ id, threadId: CT, labelIds, internalDate: String(at), snippet: words, payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: 'Offsite plan' }, { name: 'From', value: from }, ...extra], body: { data: Buffer.from(words).toString('base64url') } } });
+  const MSGS = () => [
+    mk('m-d0', ['DRAFT'], T0 - 9000e3, SELF, 'Draft: we confirm Friday', [{ name: 'To', value: PEER }, { name: 'Cc', value: 'Finn <finn@example.com>' }]),   // the report's draft: dated FIRST, To + Cc
+    mk('m-1', ['INBOX', 'UNREAD'], T0 - 7200e3, PEER, 'Where do we meet?'),
+    mk('m-t', ['DRAFT', 'TRASH'], T0 - 5000e3, SELF, 'a binned draft'),
+    mk('m-2', ['INBOX', 'UNREAD'], T0 - 3600e3, PEER, 'Room 4 it is.'),
+    mk('m-d1', ['DRAFT'], clock - 600e3, SELF, 'Draft v2: Friday at 10'),   // the reply being written — saved LAST
+  ];
+  const draftVendor = () => {
+    const calls = [];
+    const fetchFn = async (url, init = {}) => {
+      const u = new URL(String(url));
+      const form = init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null;
+      calls.push({ method: init.method || 'GET', path: u.pathname, q: Object.fromEntries(u.searchParams) });
+      if (u.hostname === 'oauth2.googleapis.com') return jsonRes(form && form.grant_type === 'authorization_code' ? FX.token : FX.tokenRefreshed);
+      if (u.hostname !== 'gmail.googleapis.com') return jsonRes({ error: { code: 404, message: 'unrouted host' } }, 404);
+      const p = u.pathname.replace('/gmail/v1/users/me', '');
+      if (p === '/profile') return jsonRes({ emailAddress: 'member.a@example.com', historyId: String(H1), messagesTotal: 5 });
+      if (p === '/threads') return jsonRes({ threads: [{ id: CT, snippet: 'offsite', historyId: String(H1) }], resultSizeEstimate: 1 });
+      if (p === '/history') return jsonRes({ historyId: String(H1) });
+      if (p === `/messages/${CT}`) return jsonRes(mk(CT, ['INBOX'], T0 - 9500e3, PEER, 'Offsite plan'));
+      if (p === `/threads/${CT}`) return jsonRes({ id: CT, historyId: String(H1), messages: MSGS() });
+      return jsonRes({ error: { code: 404, message: `unrouted ${p}` } }, 404);
+    };
+    return { calls, fetchFn };
+  };
+  const DRIGS = [];
+  async function draftRig(mod, tag) {
+    const dv = draftVendor();
+    const dir = path.join(ROOT, `draft-${tag}`); fs.mkdirSync(dir, { recursive: true });
+    const reg = CH.createChannelRegistry(); reg.register(mod.adapter);
+    const e2 = ENG.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations, fetch: dv.fetchFn, log: quiet, registry: reg, ...FAST_PACE });
+    DRIGS.push(e2);
+    const r = await e2.connect('gmail');
+    await get(`${r.flow.redirectUri}/?state=${new URL(r.flow.consentUrl).searchParams.get('state')}&code=auth-code-draft`);
+    const row = () => (e2.store.index.snapshot().conversations || {})[`gmail/${CT}`] || {};
+    for (let i = 0; i < 100 && !row().anchor; i++) await sleep(20);   // the pass connect() kicked: discovery + the first walk
+    return { e2, row: row(), stored: e2.messages('gmail', CT, { limit: 100 }) };
+  }
+  const D = await draftRig(gmail, 'fix');
+  const kinds = D.stored.map((m) => `${m.vendorId}:${m.kind || 'mail'}${m.draftState ? '/' + m.draftState : ''}`);
+  ok(eq(kinds, ['m-d0:draft/saved', 'm-1:mail', 'm-t:draft/trashed', 'm-2:mail', 'm-d1:draft/saved']), 'the REAL engine stores the thread with each record\'s kind off its labels (the binned draft trashed)', J(kinds));
+  ok(D.row.anchor === 'm-2', 'the anchor is the newest MAIL (never a draft — B-3081 holds)', J(D.row.anchor));
+  ok(D.row.lastText === 'Room 4 it is.' && Number(D.row.lastAt) === T0 - 3600e3, 'the row\'s last line + instant are the last MAIL\'s — never the draft saved after it', J({ lastText: D.row.lastText, lastAt: D.row.lastAt }));
+  const REC = require(path.join(REPO, 'src/channel-record.js'));
+  const dv0 = REC.draftsOf(D.stored);
+  ok(eq(dv0.messages.map((m) => m.vendorId), ['m-1', 'm-2']) && eq(dv0.drafts.map((m) => m.vendorId), ['m-d1']) && dv0.trashed === 1 && dv0.replaced === 1, 'the thread\'s MESSAGES are the two mails; its standing draft the newest save (the older one replaced), one binned', J({ m: dv0.messages.length, d: dv0.drafts.map((m) => m.vendorId), t: dv0.trashed, r: dv0.replaced }));
+  // CONTROL: the base adapter (no kind off the labels)
+  const DSRC = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
+  const KIND = "    ...(draft ? { kind: 'draft', draftState: draftStateOf(labels) } : {}),\n";
+  ok(DSRC.split(KIND).length === 2, 'control setup: the kind line is present once');
+  const MD = mutantCopies('chan-gmail-draft', REPO);
+  const gNoKind = MD.load('src/channels/gmail.js', DSRC.replace(KIND, ''), 'no-draft-kind');
+  const X = await draftRig(gNoKind, 'nokind');
+  ok(X.row.lastText === 'Draft v2: Friday at 10' && Number(X.row.lastAt) === clock - 600e3, 'CONTROL: a copy whose toRecord drops the kind ⇒ the unsent draft is the row\'s last line and instant again (red)', J({ lastText: X.row.lastText, lastAt: X.row.lastAt }));
+  for (const x of copiesCensus(MD.files, MD.dir, REPO, { minCopies: 1, label: '㉓ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+  for (const e2 of DRIGS) { try { e2.stop(); } catch {} }
 }
 
 eng.stop();

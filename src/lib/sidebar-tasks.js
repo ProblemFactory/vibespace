@@ -3,6 +3,7 @@ import { UI_ICONS } from './icons.js';
 import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 import { mergePendingBind, pendingBindVerdict, sweepPendingBinds } from './fork-groups.js';
+import { folderOf, insideFolder } from '../task-membership.js'; // PURE (lane open-task-binds): THE folder rule, the server's groupsForSession asks the same one
 
 /**
  * Sidebar tasks mixin — the task system's client (docs/design-task-system.md).
@@ -389,26 +390,38 @@ export function installSidebarTasks(SidebarClass) {
     if (!sessionKey) return;
     return this._taskApi('POST', `/api/tasks/${encodeURIComponent(id)}/unbind`, { sessionKey });
   };
-  // Folders are {path, recursive} records; tolerate legacy bare strings.
-  proto._folderRec = (f) => (typeof f === 'string' ? { path: f, recursive: true } : { path: f.path, recursive: f.recursive !== false });
-  proto._folderPaths = function(task) { return (task?.folders || []).map((f) => this._folderRec(f).path); };
-  proto._taskAddFolder = function(id, folderPath, recursive = true) {
+  // Folders are {path, recursive} records; tolerate legacy bare strings (and a
+  // glob tail `/x/**` = the recursive switch — PURE folderOf).
+  proto._folderRec = (f) => folderOf(f) || { path: typeof f === 'string' ? f : String(f?.path || ''), recursive: true };
+  // lane task-group-context: a group's folders ARE its Context table's 自动发现会话 rows — read off the rows (`ctx` +
+  // where the server resolved each, `ctxRes`), written as rows (a folder linked from the sidebar / the explorer is a
+  // row at the kind's default depth, auto-joining). A hub from before the table answers `folders` only.
+  proto._folderPaths = function(task) {
+    if (!Array.isArray(task?.ctx)) return (task?.folders || []).map((f) => this._folderRec(f).path);
+    const res = task.ctxRes || [];
+    return task.ctx.map((r, i) => (r && !r.ref && (r.tags || []).includes('discover') && res[i] && res[i].abs && res[i].kind !== 'file' ? res[i].abs : null)).filter(Boolean);
+  };
+  const ctxCopy = (t) => (t.ctx || []).map((r) => (r.ref ? { ...r } : { ...r, tags: [...(r.tags || [])] }));
+  const ctxRowOf = (t, rows, folderPath) => rows.findIndex((r, i) => !r.ref && (r.path === folderPath || ((t.ctxRes || [])[i] || {}).abs === folderPath));
+  proto._taskAddFolder = function(id, folderPath) {
     const t = this._taskById(id);
     if (!t || !folderPath) return;
-    const recs = (t.folders || []).map(this._folderRec);
-    if (recs.some((f) => f.path === folderPath)) return;
-    return this._taskUpdate(id, { folders: [...recs, { path: folderPath, recursive: !!recursive }] });
+    const rows = ctxCopy(t);
+    const i = ctxRowOf(t, rows, folderPath);
+    if (i >= 0) { if (rows[i].tags.includes('discover')) return; rows[i].tags.push('discover'); }
+    else rows.push({ path: folderPath, note: '', tell: null, tags: ['discover'], share: null });
+    return this._taskUpdate(id, { ctx: rows });
   };
   proto._taskRemoveFolder = function(id, folderPath) {
     const t = this._taskById(id);
     if (!t) return;
-    return this._taskUpdate(id, { folders: (t.folders || []).map(this._folderRec).filter((f) => f.path !== folderPath) });
-  };
-  proto._taskSetFolderRecursive = function(id, folderPath, recursive) {
-    const t = this._taskById(id);
-    if (!t) return;
-    const folders = (t.folders || []).map(this._folderRec).map((f) => (f.path === folderPath ? { ...f, recursive: !!recursive } : f));
-    return this._taskUpdate(id, { folders });
+    const rows = ctxCopy(t);
+    const i = ctxRowOf(t, rows, folderPath);
+    if (i < 0) return;
+    rows[i].tags = rows[i].tags.filter((x) => x !== 'discover');
+    // a row that was there only to auto-join (no other verb, no note) goes with it
+    if (!rows[i].tags.length && !rows[i].note) rows.splice(i, 1);
+    return this._taskUpdate(id, { ctx: rows });
   };
 
   // ── Resolvers ──
@@ -429,7 +442,7 @@ export function installSidebarTasks(SidebarClass) {
     const cwds = [stripCwdHostLabel(s.cwd), s.realCwd].filter(Boolean);
     for (const f of folderRecs) {
       for (const c of cwds) {
-        if (c === f.path || (f.recursive && c.startsWith(f.path + '/'))) return true;
+        if (insideFolder(c, f)) return true;
       }
     }
     return false;

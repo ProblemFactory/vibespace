@@ -132,6 +132,97 @@ const OPS = {
     return { result: { folders: out } };
   },
 
+  // THE PATH FIELD'S SLICE (lane path-field — GET /api/dir-complete): each asked folder listed ONCE with its facts — its
+  // folders (a symlink to a folder resolved: `link` = its target), its files (`files: true`, name/size/mtime; else only
+  // counted), `git` (a .git inside), the folder's own mtime; a folder whose mtime equals `known` answers `same` (the hub's
+  // listing cache keeps it). `probes` = paths stated only (a Task Group's folder, a recent one, a name-derived one):
+  // exists / isDir / git / mtime / fileCount. Bounded: `maxKids` entries per folder (`more`). Never walks.
+  dirSlice({ dirs = [], probes = [], files = false, maxKids = 400, pkg = false }) {
+    const gitOf = (d) => { try { fs.statSync(path.join(d, '.git')); return true; } catch { return false; } };
+    // `pkg` (the home's listing): a folder's package.json name — the instance's own checkout is the one named vibespace
+    const pkgOf = (d) => { try { const f = path.join(d, 'package.json'); if (fs.statSync(f).size > 65536) return {}; const n = JSON.parse(fs.readFileSync(f, 'utf8')).name; return typeof n === 'string' ? { pkg: n.slice(0, 80) } : {}; } catch { return {}; } };
+    const out = [];
+    for (const want of dirs) {
+      const d = want && want.path;
+      if (!d) continue;
+      let st = null;
+      try { st = fs.statSync(d); } catch { out.push({ path: d, exists: false }); continue; }
+      if (!st.isDirectory()) { out.push({ path: d, exists: true, isDir: false, size: st.size, mtime: st.mtimeMs }); continue; }
+      if (want.known != null && want.known === st.mtimeMs) { out.push({ path: d, exists: true, isDir: true, same: true, mtime: st.mtimeMs }); continue; }
+      let list = [];
+      try { list = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { out.push({ path: d, exists: true, isDir: true, mtime: st.mtimeMs, unreadable: String(e.code || e.message || e) }); continue; }
+      list.sort((a, b) => a.name.localeCompare(b.name));
+      const kids = []; const fl = []; let fileCount = 0; let more = false; let n = 0;
+      for (const e of list) {
+        if (++n > maxKids) { more = true; break; }
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) { kids.push({ name: e.name, git: gitOf(p), ...(pkg ? pkgOf(p) : {}) }); continue; }
+        if (e.isSymbolicLink()) {
+          let t = null; try { t = fs.statSync(p); } catch { continue; }   // a dangling link
+          if (t.isDirectory()) { let to = ''; try { to = fs.realpathSync(p); } catch { } kids.push({ name: e.name, git: gitOf(p), link: to }); continue; }
+          if (t.isFile()) { fileCount++; if (files) fl.push({ name: e.name, size: t.size, mtime: t.mtimeMs }); }
+          continue;
+        }
+        if (e.isFile()) {
+          fileCount++;
+          if (files) { let t = null; try { t = fs.statSync(p); } catch { } fl.push({ name: e.name, size: t ? t.size : 0, mtime: t ? t.mtimeMs : 0 }); }
+        }
+      }
+      out.push({ path: d, exists: true, isDir: true, mtime: st.mtimeMs, git: gitOf(d), kids, ...(files ? { files: fl } : {}), fileCount, more });
+    }
+    const pr = [];
+    for (const p of probes) {
+      if (!p) continue;
+      let st = null;
+      try { st = fs.statSync(p); } catch { pr.push({ path: p, exists: false }); continue; }
+      if (!st.isDirectory()) { pr.push({ path: p, exists: true, isDir: false, size: st.size, mtime: st.mtimeMs }); continue; }
+      let fileCount = 0;
+      try { for (const e of fs.readdirSync(p, { withFileTypes: true })) if (e.isFile()) fileCount++; } catch { fileCount = null; }
+      pr.push({ path: p, exists: true, isDir: true, mtime: st.mtimeMs, git: gitOf(p), fileCount });
+    }
+    return { result: { dirs: out, probes: pr } };
+  },
+
+  // THE PATH FIELD'S FOLDER INDEX (lane path-field — the whole-path fuzzy search): the folders under `roots`, breadth
+  // first, `depth` levels, at most `max`, stopping at `budgetMs` (`partial`). Dot-folders, dependency / cache folders and
+  // `skip` (the instance's own checkout + data dir, the mounts — a mount is named, never walked) are not entered; a
+  // folder on another device is not entered; a symlink to a folder is reported as a link (`links`), never followed.
+  dirIndex({ roots = [], depth = 4, max = 6000, budgetMs = 350, skip = [] }) {
+    const t0 = Date.now();
+    const SKIP = new Set(['node_modules', '__pycache__', 'snap', 'venv', 'site-packages', 'target', 'build', 'dist']);
+    const skipSet = new Set(skip);
+    const dirs = []; const links = []; let partial = false;
+    const seen = new Set();
+    let q = [];
+    for (const r of roots) { let st = null; try { st = fs.statSync(r); } catch { continue; } if (st.isDirectory() && !seen.has(r)) { seen.add(r); q.push({ p: r, level: 0, dev: st.dev }); } }
+    while (q.length) {
+      const next = [];
+      for (const { p, level, dev } of q) {
+        if (Date.now() - t0 > budgetMs || dirs.length >= max) { partial = true; break; }
+        let list;
+        try { list = fs.readdirSync(p, { withFileTypes: true }); } catch { continue; }
+        for (const e of list) {
+          if (e.name.startsWith('.') || SKIP.has(e.name)) continue;
+          const c = path.join(p, e.name);
+          if (skipSet.has(c) || seen.has(c)) continue;
+          if (e.isSymbolicLink()) { let t = null; try { t = fs.statSync(c); } catch { continue; } if (t.isDirectory()) { let to = ''; try { to = fs.realpathSync(c); } catch { } links.push({ from: c, to }); } continue; }
+          if (!e.isDirectory()) continue;
+          seen.add(c);
+          dirs.push(c);
+          if (dirs.length >= max) { partial = true; break; }
+          if (level + 1 < depth) {
+            let st = null; try { st = fs.statSync(c); } catch { continue; }
+            if (st.dev === dev) next.push({ p: c, level: level + 1, dev });
+          }
+        }
+        if (partial) break;
+      }
+      if (partial) break;
+      q = next;
+    }
+    return { result: { dirs, links, partial, ms: Date.now() - t0 } };
+  },
+
   // stat (+ optional dir entryCount) for GET /api/file/stat, and the fail-fast
   // guards on raw/download/excel. mode is returned raw; the route formats it.
   stat({ path: p, entryCount }) {

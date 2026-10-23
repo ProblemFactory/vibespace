@@ -3,6 +3,14 @@
 // Already scoped server-side to THIS session's context task (via the per-session
 // token in the env) — you NEVER pass a task id. Run with NO arguments to see the
 // usage AND the current state, so a wrong guess self-corrects in one call.
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-task: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-task', flags: ['--timeout', '--call-timeout'] });
 const api = process.env.VIBESPACE_API;
 const token = process.env.VIBESPACE_SESSION_TOKEN;
 if (!api || !token) { console.error('vibespace-task: not running inside a VibeSpace session (missing env)'); process.exit(2); }
@@ -115,7 +123,7 @@ async function call(method, url, body) {
   let full = api + url;
   if (method === 'GET' && group) full += (url.includes('?') ? '&' : '?') + 'group=' + encodeURIComponent(group);
   const payload = method !== 'GET' ? { ...(body || {}), ...(group ? { group } : {}) } : undefined;
-  const res = await fetch(full, {
+  const res = await CC.call(full, {
     method,
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
     body: payload ? JSON.stringify(payload) : undefined,
@@ -183,10 +191,18 @@ async function printShow() {
     }
     if (!full && task.progress.some((pr) => pr.detail)) console.log('  († = has detail — rerun with --full)');
   }
-  // the WHOLE context-folder index (≤ 100 files) — the injection lists only the newest that fit its byte budget and points here
-  if (full && contextIndex && Array.isArray(contextIndex.files)) {
+  // the WHOLE listing behind the Context table (lane task-group-context: every row's files — a row the injection told at
+  // a lower depth than chosen points here); an older hub answers only the shared folder's files
+  const sz = (n) => (n < 1024 ? n + ' B' : Math.round(n / 1024) + ' KB');
+  if (full && contextIndex && Array.isArray(contextIndex.rows) && contextIndex.rows.length) {
+    console.log('\nContext table — every row\'s files:');
+    for (const row of contextIndex.rows) {
+      console.log('  ' + row.path + (row.note ? ' — ' + row.note : '') + ' (' + row.files.length + (row.files.length === 1 ? ' file)' : ' files)'));
+      for (const f of row.files) if (f.path !== row.path) console.log('    - ' + f.path + ' (' + sz(f.size) + ')');
+    }
+  } else if (full && contextIndex && Array.isArray(contextIndex.files) && contextIndex.dir) {
     console.log('\nShared context folder: ' + contextIndex.dir + ' (' + contextIndex.files.length + (contextIndex.files.length === 1 ? ' file)' : ' files)'));
-    for (const f of contextIndex.files) console.log('  - ' + f.path + ' (' + (f.size < 1024 ? f.size + ' B' : Math.round(f.size / 1024) + ' KB') + ')');
+    for (const f of contextIndex.files) console.log('  - ' + f.path + ' (' + sz(f.size) + ')');
   }
 }
 async function main() {
@@ -202,6 +218,8 @@ async function main() {
     const pid = r && r.entry && r.entry.id ? ' as [' + r.entry.id + ']' : ''; // (an older server answers without the entry)
     console.log('progress recorded' + pid + (detail ? ' (with detail)' : ''));
     console.log('  ' + TX.sentLine(r, arg, detail));   // lane cli-one-text-arg: the route's count — a cut is visible here
+    // lane cli-call-timeouts: the route answers after the STORE write; the shared folder's copy follows it, bounded — said when behind
+    if (r && r.mirror && r.mirror.behind) console.log('  the shared folder copy (.vibespace/TASK.md) is behind — its write has not returned yet; the entry above is recorded and the copy catches up by itself');
     // Same class as vibespace-ask's mirror reminder (2.111.21): real agents
     // logged a deliverable (URL, path, result) here and ended the turn with a
     // reply that never contained it — the activity log is invisible to the
@@ -209,7 +227,7 @@ async function main() {
     console.log('REMINDER: the activity log is for OTHER AGENTS — anything the USER needs from this work (URLs, file paths, results, conclusions) must ALSO appear in your CHAT REPLY. Do not end the turn with this log as the only copy.');
   } else if (cmd === 'progress-redact') {
     if (!arg) { console.error('vibespace-task: progress-redact needs the entry\'s id, e.g. vibespace-task progress-redact P-1a2b3c (vibespace-task show prints the ids of your own entries)'); process.exit(1); }
-    const res = await fetch(api + '/api/agent/task/progress-redact', {
+    const res = await CC.call(api + '/api/agent/task/progress-redact', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
       body: JSON.stringify({ ref: arg.split(' ')[0], ...(group ? { group } : {}) }),

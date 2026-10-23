@@ -277,6 +277,12 @@ spec:
             {{- end }}
             - name: VIBESPACE_INSTANCE_NAME
               value: {{ .Values.user | quote }}
+            {{- with .Values.maintainerKeySha }}
+            # The maintainers' key, by its sha256 ONLY (lane fleet-feedback-marks):
+            # it opens feedback.list / feedback.handled here and nothing else.
+            - name: VIBESPACE_MAINTAINER_KEY_SHA
+              value: {{ . | quote }}
+            {{- end }}
             {{- if $appsys }}
             # App persistence Layer 1 (docs/design-app-persistence.zh.md §3.2):
             # the server installs its sudo helper + sudoers drop-in after listen

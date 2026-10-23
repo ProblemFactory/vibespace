@@ -37,6 +37,7 @@ const check = (name, cond, extra) => {
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-backlog-notrunc-'));
 // lane cli-one-text-arg: a CLI copy outside the checkout reads its ONE-text rule beside it (a host's layout: the boot-time copy)
 fs.copyFileSync(path.join(REPO, 'src/agent-cli-text.js'), path.join(tmp, 'agent-cli-text.js'));
+fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(tmp, 'cli-call.js'));   // lane cli-call-timeouts: THE ONE CALL rides beside it too
 const tasks = new TaskGroupManager({ dataDir: tmp, onChange: () => {} });
 const cwd = path.join(tmp, 'work'); fs.mkdirSync(cwd, { recursive: true });
 const g = tasks.create({ title: 'big', objective: 'obj', folders: [cwd] });

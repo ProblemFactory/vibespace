@@ -5,6 +5,7 @@ import { t } from './i18n.js';
 import { sessionDisplayName } from '../session-name.js'; // THE name ladder — a drift-ledger row names its conversation (lane record-oracle-2-1-296)
 import { diagnosticsSection } from './cli-registration-words.js'; // lane cli-2-1-308-records: a claude build this release has no record table for
 import { SIGN_IN, tourSteps, folderChips, firstFilesFolder } from '../day-one.js'; // lane door-day-one-landing: the tour's steps, its folder chips; a sign-in terminal is not a session row
+import { pathField } from './path-field.js'; // lane path-field: the first chat's folder is THE path field too
 import { loadHomeFolders, recentLocalCwds, paintFolderChips } from './folder-chips.js'; // lane door-day-one-landing: the folder chips' painter (the New Session dialog's too)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card inline in the tour's connect step
 import { capsOf } from '../backend-caps.js'; // PURE (lane signin-card-real-screen): the harness whose subscriptions the card signs in — its declared oauthUsage row, never an id
@@ -407,16 +408,20 @@ export function installSetupFlows(App) {
           <div class="ob-dots">${dots}</div>`;
         const cwdInput = content.querySelector('#ob-cwd');
         const chipsEl = content.querySelector('#ob-chips');
+        const cwdPf = pathField(cwdInput, { kind: 'folder', id: 'first-chat-cwd', createWhen: t('Create this folder when the chat starts') });
         cwdInput.addEventListener('input', () => { for (const x of chipsEl.querySelectorAll('.cwd-recent-chip.selected')) x.classList.remove('selected'); });
         loadHomeFolders().then((folders) => {
           if (!chipsEl.isConnected) return;
           const chips = folderChips({ folders, recent: recentLocalCwds(this) });
           const first = cwdInput.value.trim() ? null : firstFilesFolder(chips);
-          if (first) cwdInput.value = first;
-          paintFolderChips(chipsEl, chips, { selected: first, onPick: (c) => { cwdInput.value = c.path; } });
+          if (first) cwdPf.set(first, { commit: false });
+          paintFolderChips(chipsEl, chips, { selected: first, onPick: (c) => { cwdPf.set(c.path, { commit: false }); } });
         });
-        const go = (mode) => {
-          const cwd = cwdInput.value.trim() || undefined;
+        const go = async (mode) => {
+          // lane path-field: the field's resolution (a relative one / a few letters) — one that does not take stays here and says why
+          const v = cwdInput.value.trim() ? await cwdPf.commit() : null;
+          if (cwdInput.value.trim() && (!v || !(await cwdPf.ensure()))) return;
+          const cwd = v ? v.path : undefined;
           done();
           this.createSession({ cwd, mode, backend: 'claude' });
         };

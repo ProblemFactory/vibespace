@@ -2,13 +2,12 @@ import { hostParam } from './file-download.js';
 import { formatSize, attachPopoverClose, createPopover, createModalShell, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast, collectDroppedFiles, uiScale } from './utils.js';
 import { installExplorerUploads } from './file-explorer-uploads.js';
 import { installExplorerOps, fsErrorText } from './file-explorer-ops.js';
-import { setupDirAutocomplete } from './autocomplete.js';
+import { pathField } from './path-field.js'; // lane path-field: THE path field (the path bar)
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { FileViewer } from './file-viewer.js';
 import { t, tc } from './i18n.js';
-import { enterSubmits } from './chat-enter-keys.js';
 
 const DEFAULT_COLUMNS = { name: true, size: true, modified: true, created: false, type: false };
 const ALL_COLUMNS = [
@@ -74,8 +73,6 @@ class FileExplorer {
     this._hostSelect.onchange = () => this.setHost(this._hostSelect.value);
     this._refreshHostOptions();
     this.pathInput = document.createElement('input'); this.pathInput.className = 'file-path-input';
-    this.pathInput.addEventListener('keydown', e => { if (enterSubmits(e)) { if (this._hideAC) this._hideAC(); this.navigate(this.pathInput.value); } });
-    this._acDropdown = document.createElement('div'); this._acDropdown.className = 'path-autocomplete hidden';
     this._setupPathAutocomplete();
     const btnRefresh = this._btn('\u21BB', t('Refresh')); btnRefresh.onclick = () => this.refresh();
 
@@ -111,7 +108,7 @@ class FileExplorer {
     this._ringCircumference = 2 * Math.PI * 8;
 
     toolbar.style.position = 'relative';
-    toolbar.append(btnUp, this._hostSelect, this.pathInput, btnRefresh, btnView, btnNewFile, btnNewDir, btnUpload, this._acDropdown);
+    toolbar.append(btnUp, this._hostSelect, this._pathField.el, btnRefresh, btnView, btnNewFile, btnNewDir, btnUpload);
 
     // Bookmark panel
     this._bookmarkPanel = document.createElement('div'); this._bookmarkPanel.className = 'file-bookmark-panel';
@@ -1173,12 +1170,14 @@ class FileExplorer {
     return result;
   }
 
+  // lane path-field: the path bar is THE path field — Enter or a picked candidate goes there (Tab completes into a
+  // folder), leaving the bar with another folder typed goes there too; one that does not exist says so and stays put.
+  // The machine is the window's own (this._host). No folder button: this window IS the browser.
   _setupPathAutocomplete() {
-    const ac = setupDirAutocomplete(this.pathInput, this._acDropdown, {
-      onNavigate: (path) => this.navigate(path),
-      endpoint: () => this._host ? `/api/hosts/${this._host}/dir-complete` : null,
+    this._pathField = pathField(this.pathInput, {
+      host: () => this._host || null, kind: 'folder', create: 'never', picker: false, id: 'file-explorer-path',
+      onCommit: (info) => { if (info && info.path && info.path !== this.currentPath) this.navigate(info.path); },
     });
-    this._hideAC = ac.hide;
   }
 
   _autoFitColumns() {

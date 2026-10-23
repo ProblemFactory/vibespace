@@ -384,6 +384,9 @@ const NOTICE_RENDERERS = Object.freeze({
   // lane browser-admin 2a: the user's Change build… restarted a browser this conversation uses — the relaunch's own words
   // (browser-interrupt.relaunchText: what was interrupted, its tab reopened), free, at the agent's next turn
   'browser-relaunch': (n) => '<system-reminder>\n' + require('./browser-interrupt').relaunchText({ label: n && n.label, from: n && n.from, to: n && n.to, n: n && n.n, verbs: n && n.verbs, outcome: n && n.outcome }) + '\n</system-reminder>',
+  // lane fleet-feedback-marks: a mark that names the release which handled this conversation's feedback report — free, at its
+  // next turn, ONE sentence for every road (src/feedback-model.js handledSentence; the note belted by the store)
+  'feedback-handled': (n) => require('./feedback-model').renderHandledNotice(n),
 });
 
 module.exports = { SessionStatusManager, NOTICE_KINDS: Object.keys(NOTICE_RENDERERS) };

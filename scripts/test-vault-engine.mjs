@@ -605,6 +605,7 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     'src/server/vault-contents.js': { n: 1, ends: ['view'], why: 'every page\'s reveal window closes at once (the epoch would refuse it at its next use); a 验证是你 still checking opens none' },
     'src/server/vault-run-door.js': { n: 1, ends: ['asks', 'grants', 'runs'], why: 'every run card and every agent request withdrawn vault_locked; every grant, seen shape and 8-hour «always» ended; every running child ended whole (its group, its marked strays, its files)' },
     'src/server/automation-engine.js': { n: 1, ends: ['asks', 'grants'], why: 'every held automation call answers vault_locked; every once-grant no call spent is spent' },
+    'src/server/vault-paste-door.js': { n: 1, ends: ['asks'], why: 'lane vault-paste-request: every open paste request withdrawn (its item done vault_locked) and its asker told at its next turn; one filed while locked, or kept over a restart, waits — its box says vault_locked with 解锁… inline' },
     'src/server/vault-hooks.js': { n: 3, ends: ['logins', 'sealed', 'said'], why: 'r2: every login signed out (the vault\'s fifth consequence, the sign-in\'s); a sealed file forgets its decrypted copy; lane vault-locked-loud (int332): the lock act files THE urgent unlock prompt at once',
       item: 'the lock\'s OWN prompt (lane vault-locked-loud): an action row (the badge counts it) filed BY the lock and resolved by the unlock — not an ask a lock withdraws' },
   };
@@ -735,6 +736,33 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     if (loaded) { const w = await lockWorld(mods); w.v.lock('agent'); e = await ended(w); w.door.closeAll(); w.v.close(); }
     ok(loaded && e && e[c] === false && CONSEQUENCES.filter((x) => x !== c).every((x) => e[x] === true), `MUTANT «${name}»: the patch hits once and the census goes RED on ${c} alone — the shipped tree ends it`, JSON.stringify(e));
   }
+}
+
+console.log('Q  A FREE ENTRY (lane vault-paste-request — the owner: 「我压根没法添加啊」 / 「让我直接 paste 进去」): the write by kind');
+{
+  const d = path.join(ROOT, 'free-entry'); fs.mkdirSync(d, { recursive: true });
+  const frames = [];
+  const v = VE.create({ dataDir: d, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {} }, idleTimer: false, register: false, bcast: (m) => frames.push(JSON.stringify(m)) });
+  const PW = 'free entry second password';
+  const VAL = ['free', 'entry', 'value', crypto.randomBytes(6).toString('hex')].join('-');
+  ok(VE.isSecretName('secret:0a1b2c3d4e') && !VE.isSecretName('secret:') && !VE.isSecretName('secret:../x') && !VE.isSecretName('secrets:x'), 'the kind: `secret:<id>` is a secret name (the id one segment of [\\w.-], never a path, never another prefix)');
+  const nsu = v.secretPut('secret:0a1b2c3d4e', VAL, { prov: 'owner', label: 'Router admin', kind: 'password', note: 'x' });
+  ok(!nsu.ok && nsu.code === 'vault_not_set_up', 'NOT SET UP ⇒ refused by name (vault_not_set_up), nothing written', nsu);
+  await v.setup(PW);
+  const put = v.secretPut('secret:0a1b2c3d4e', VAL, { prov: 'owner', actor: 'Lane asker', label: 'Router admin', kind: 'password', note: 'Asked for by Lane asker: change the DNS' });
+  ok(put.ok, 'unlocked ⇒ sealed under its own entry');
+  const n = v.secretNames().find((x) => x.name === 'secret:0a1b2c3d4e');
+  ok(n && n.label === 'Router admin' && n.kind === 'password' && /change the DNS/.test(n.note) && n.prov === 'owner' && n.actor === 'Lane asker' && !Object.values(n).some((x) => String(x).includes(VAL)), 'its NAMES ride beside the box — label, kind, note, provenance, who asked — never the value', n);
+  const g = v.secretGet('secret:0a1b2c3d4e');
+  ok(g.ok && g.value.toString('utf8') === VAL && v.facts().secrets === 1, 'the hub\'s own read opens exactly it; facts count it among the secrets');
+  const rec = fs.readFileSync(path.join(d, 'vault.json'), 'utf8');
+  ok(!rec.includes(VAL) && /"label": "Router admin"/.test(rec), 'the record holds the label in the clear and the value only wrapped');
+  v.lock('door');
+  const lk = v.secretPut('secret:0b1b2c3d4e', VAL, { label: 'x' });
+  ok(!lk.ok && lk.code === 'key-unreadable:vault_locked' && v.blockedSummary().count >= 1 && /a stored password or key/.test(JSON.stringify(v.blockedSummary())), 'LOCKED ⇒ refused by name, and the refusal names what it stopped in words («a stored password or key» — never the id)', { lk, b: v.blockedSummary() });
+  ok(v.secretDrop('secret:0a1b2c3d4e').ok && !v.secretNames().some((x) => x.name === 'secret:0a1b2c3d4e'), 'its delete door forgets it — a locked vault forgets too (no key needed)');
+  ok(!frames.some((f) => f.includes(VAL)), 'no broadcast frame holds the value');
+  v.close();
 }
 
 fs.rmSync(ROOT, { recursive: true, force: true });

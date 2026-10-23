@@ -66,6 +66,7 @@ const { parsePin, defaultPinFor } = require('./desktop-pin.js'); // lane e2b: `-
 // (`vibespace-browser new <label>` — every conversation of the owner's may use it, the user pins it to another), so the
 // ONE label cleaner is THE belt (src/peer-text.js): bound, hidden characters folded, the frame rule after the cut
 const PT = require('./peer-text.js');
+const GM = require('./grant-model.js'); // lane grants-unify: THE grant model — "Who can use it" is a row of the ONE grants store
 
 // ── names ───────────────────────────────────────────────────────────────────
 /** The agent-browser session/namespace name for a browser key. ONE spelling:
@@ -1624,25 +1625,52 @@ function normalizeWho(rows) {
   return out;
 }
 /**
- * WHO MAY USE this record — THE ONE READER (every shape that can be on disk):
- *   no record ⇒ null · ephemeral ⇒ its conversation alone (`ephemeral:true`) · legacy ⇒ all
- *   {kind:'instance'} / owner missing or null ⇒ all
- *   {kind:'session', id} / {kind:'task', id} (the pre-list single shapes — the migration rewrites them; a failed run
- *     retries at the next boot, so the reader judges the file as it is) ⇒ only [that row]
- *   {kind:'only', who:[…]} ⇒ only [the rows, normalized — unknown rows dropped]
- *   anything else ⇒ {mode:'unknown'} (admission refuses by name — fail closed, never "everyone")
+ * lane grants-unify (2026-10-23): "Who can use it" is a ROW of the ONE grants store (door `browser-profile`, the profile
+ * id as the resource — src/server/grants-store.js), judged by the ONE model (src/grant-model.js admits). The keeper keeps
+ * each record's row mirrored in memory as `grantUse` (`useOfRows` — refreshed on every change of the store, never written to
+ * browser-profiles.json); the record's pre-unify `owner` lists stay on disk one release, never read (the migration
+ * `2026-10-grants-unify` carried them over). A conversation is the store's ONE spelling (its conversation id); the
+ * panel / the PATCH keep speaking its BROWSER KEY, mapped by the keeper (`browserKey` on each entry; `cid:<id>` for a
+ * conversation that has no browser key yet). A Task Group member may be LEFT OUT («除了» — `except`).
+ */
+/** The store's row of a profile → its in-memory `grantUse` (`{to, except}`, or `{unknown:true}`; no row ⇒ nobody). `browserKeyOf`
+ *  = the keeper's map conversation id → its browser key (null when it has none yet). */
+function useOfRows(rows, { browserKeyOf = () => null } = {}) {
+  const list = Array.isArray(rows) ? rows : [];
+  if (!list.length) return { to: [], except: [] };
+  const n = GM.normRow(list[0]);
+  if (!n.ok || n.row.door !== 'browser-profile') return { unknown: true, why: n.ok ? 'not a browser-profile row' : n.why };
+  const tag = (e) => { if (e.kind !== 'conversation') return { ...e }; let bk = null; try { bk = browserKeyOf(e.key) || null; } catch { bk = null; } return isBrowserKey(bk) ? { ...e, browserKey: bk } : { ...e }; };
+  return { to: n.row.to.map(tag), except: n.row.except.map(tag) };
+}
+/** A row entry in the panel's spelling: a conversation by its browser key (`cid:<id>` while it has none), a Task Group. */
+function whoOfEntry(e) {
+  if (e.kind === 'group') return { kind: 'task', id: e.id };
+  return { kind: 'session', id: isBrowserKey(e.browserKey) ? e.browserKey : `cid:${e.key}`, conversationKey: e.key };
+}
+/**
+ * WHO MAY USE this record — THE ONE READER (lane grants-unify: of the store's row, never of `owner`):
+ *   no record ⇒ null · ephemeral ⇒ its conversation alone (`ephemeral:true` — a conversation's own temporary browser is
+ *   no grant; its `owner` IS its identity) · an `everyone` entry ⇒ all (the rows beside it `kept`) · else only [the
+ *   rows]; `except` = the members left out (both modes) · a row the model cannot read ⇒ {mode:'unknown'} (admission
+ *   refuses by name — fail closed, never "everyone") · no row ⇒ only [] (nobody).
  */
 function whoMayUse(p) {
   if (!p) return null;
   if (isEphemeralProfile(p)) return { mode: 'only', who: [{ kind: 'session', id: parentKeyOf(p.owner.id) }], ephemeral: true };
-  if (p.legacy) return { mode: 'all' };
-  const o = p.owner;
-  if (o === undefined || o === null) return { mode: 'all' };
-  if (typeof o !== 'object' || Array.isArray(o)) return { mode: 'unknown' };
-  if (o.kind === 'instance') return Array.isArray(o.who) && o.who.length ? { mode: 'all', kept: normalizeWho(o.who) } : { mode: 'all' };
-  if (o.kind === 'session' || o.kind === 'task') { const w = whoRow(o); return w ? { mode: 'only', who: [w] } : { mode: 'unknown' }; }
-  if (o.kind === 'only' && Array.isArray(o.who)) return { mode: 'only', who: normalizeWho(o.who) };
-  return { mode: 'unknown' };
+  const u = p.grantUse && typeof p.grantUse === 'object' ? p.grantUse : { to: [], except: [] };
+  if (u.unknown) return { mode: 'unknown' };
+  const to = Array.isArray(u.to) ? u.to : [], except = (Array.isArray(u.except) ? u.except : []).map(whoOfEntry);
+  const rows = to.filter((e) => e && e.kind !== 'everyone').map(whoOfEntry);
+  if (to.some((e) => e && e.kind === 'everyone')) return { mode: 'all', ...(rows.length ? { kept: rows } : {}), except };
+  return { mode: 'only', who: rows, except };
+}
+/** The record's row as the model judges it (null = unreadable). */
+function grantRowOf(p) {
+  const u = p && p.grantUse && typeof p.grantUse === 'object' ? p.grantUse : { to: [], except: [] };
+  if (u.unknown) return null;
+  const bare = (e) => GM.bareOf(e);
+  return { door: 'browser-profile', resource: String((p && p.id) || '-'), to: (u.to || []).map(bare).filter(Boolean), except: (u.except || []).map(bare).filter(Boolean) };
 }
 /** The closed set of words the digest's `scope` speaks (derived from `owner`, never stored twice). */
 const SCOPES = Object.freeze(['all', 'only']);
@@ -1654,13 +1682,14 @@ function scopeOf(p) {
 }
 /** The digest's `use`: keys and ids only (it is the broadcast) — `{mode:'all'[, who: the kept rows]}` |
  *  `{mode:'only', who:[{kind,key|id}]}`. */
-const digestRow = (w) => (w.kind === 'session' ? { kind: 'session', key: w.id } : { kind: 'task', id: w.id });
+const digestRow = (w) => (w.kind === 'session' ? { kind: 'session', key: w.id, ...(w.conversationKey ? { conversationId: w.conversationKey } : {}) } : { kind: 'task', id: w.id });
 function useDigestOf(p) {
   const U = whoMayUse(p);
   if (!U) return null;
-  if (U.mode === 'all') return U.kept && U.kept.length ? { mode: 'all', who: U.kept.map(digestRow) } : { mode: 'all' };
+  const ex = U.except && U.except.length ? { except: U.except.map(digestRow) } : {};   // lane grants-unify: the members left out
+  if (U.mode === 'all') return U.kept && U.kept.length ? { mode: 'all', who: U.kept.map(digestRow), ...ex } : { mode: 'all', ...ex };
   if (U.mode === 'unknown') return { mode: 'unknown', who: [] };
-  return { mode: 'only', who: U.who.map(digestRow) };
+  return { mode: 'only', who: U.who.map(digestRow), ...ex };
 }
 /**
  * The refusal an agent gets for a profile the user kept to some conversations — ONE form (a list is a list): it names
@@ -1685,6 +1714,16 @@ function groupsUnreadableRefusal({ label = '' } = {}) {
     remedy: 'run the same command again once; if it repeats, tell the user',
   };
 }
+/** lane grants-unify — «除了»: the user LEFT THIS CONVERSATION OUT of a Task Group's (or All agents') grant of the profile —
+ *  refused BY NAME: the exception, and where the user lifts it; never another conversation or a group title. */
+function exceptedRefusal({ label = '' } = {}) {
+  const who = `"${label || 'this profile'}"`;
+  return {
+    ok: false, code: 'excepted',
+    error: `the user left this conversation out of who can use ${who} (an exception under "Who can use it" in the Agent browser panel) — ask the user to lift the exception, or to add this conversation itself; or pick another profile. Never create a second profile with the same login.`,
+    remedy: `ask the user: Agent browser panel → ${who} → Who can use it → Change… → lift the exception for this conversation`,
+  };
+}
 /**
  * THE ADMISSION (§3 of the spec — the table): `K` = the asker's conversation (a helper's key = its parent's),
  * `taskIds` = the Task Groups it belongs to NOW (asked at every command), `groupsUnreadable` = that read threw.
@@ -1694,7 +1733,7 @@ function groupsUnreadableRefusal({ label = '' } = {}) {
  *   an owner shape this release cannot judge ⇒ not_owner (fail closed)
  * A PIN IS NEVER AN INPUT HERE — the user's pick wrote the list (keeper.setPin); ruling A (4)'s dated pin is gone.
  */
-function mayAttach(profile, { browserKey, taskIds = [], groupsUnreadable = false } = {}) {
+function mayAttach(profile, { browserKey, conversationKeys = null, taskIds = [], groupsUnreadable = false } = {}) {
   if (!profile) return { ok: false, code: 'not-found', error: 'no such profile' };
   const K = parentKeyOf(String(browserKey || ''));
   const U = whoMayUse(profile);
@@ -1702,17 +1741,18 @@ function mayAttach(profile, { browserKey, taskIds = [], groupsUnreadable = false
     if (K && U.who[0].id === K) return { ok: true, via: 'own' };
     return { ok: false, code: 'not_attachable', error: `"${profile.label}" is another conversation's own temporary browser — it is never shared` };
   }
-  if (U.mode === 'all') return { ok: true, via: 'all' };
-  if (U.mode === 'only') {
-    if (K && U.who.some((w) => w.kind === 'session' && w.id === K)) return { ok: true, via: 'conversation' };
-    const mine = new Set((Array.isArray(taskIds) ? taskIds : []).map((x) => String(x)));
-    const hit = U.who.find((w) => w.kind === 'task' && mine.has(w.id));
-    if (hit) return { ok: true, via: 'task', taskId: hit.id };
-    if (groupsUnreadable && U.who.some((w) => w.kind === 'task')) return groupsUnreadableRefusal({ label: profile.label });
-    return notOwnerRefusal({ label: profile.label });
-  }
-  const kind = profile.owner && typeof profile.owner === 'object' ? String(profile.owner.kind) : typeof profile.owner;
-  return { ok: false, code: 'not_owner', error: `profile "${profile.label}" has an owner kind this release cannot judge (${kind}) — ask the user to set it to "All agents" in the Agent browser panel` };
+  const row = grantRowOf(profile);
+  if (!row) return { ok: false, code: 'not_owner', error: `profile "${profile.label}"'s "Who can use it" cannot be read by this release — ask the user to set it again (or to "All agents") in the Agent browser panel` };
+  // THE ONE ADMISSION (src/grant-model.js admits) over the store's row: the asker by its conversation key(s) — the keeper
+  // maps its browser key to them; one it cannot map is judged by its browser key itself (every conversation may ⇒ it may) —
+  // and its live Task Groups, minus the members the user left out
+  const keys = (Array.isArray(conversationKeys) ? conversationKeys : []).filter(Boolean).map(String);
+  const v = GM.admits([row], { conversationKeys: keys.length ? keys : [K || 'unknown-caller'], groupIds: Array.isArray(taskIds) ? taskIds : [], groupsUnreadable: !!groupsUnreadable });
+  if (v.ok) return v.via === 'everyone' ? { ok: true, via: 'all' } : v.via === 'conversation' ? { ok: true, via: 'conversation' } : { ok: true, via: 'task', taskId: v.entry.id };
+  if (v.code === 'groups_unreadable') return groupsUnreadableRefusal({ label: profile.label });
+  if (v.code === 'excepted') return exceptedRefusal({ label: profile.label });
+  if (v.code === 'unknown_shape') return { ok: false, code: 'not_owner', error: `profile "${profile.label}"'s "Who can use it" cannot be read by this release — ask the user to set it again (or to "All agents") in the Agent browser panel` };
+  return notOwnerRefusal({ label: profile.label });
 }
 /**
  * What the AGENT is told about a profile (`GET /api/agent/browser/profiles`, the CLI's `used by:` line): only whether
@@ -1722,10 +1762,13 @@ function mayAttach(profile, { browserKey, taskIds = [], groupsUnreadable = false
  */
 function agentUseOf(p, facts = {}) {
   const U = whoMayUse(p);
-  if (!U || U.mode === 'all') return { mode: 'all', you: true, via: 'all' };
+  if (!U) return { mode: 'all', you: true, via: 'all' };
   const v = mayAttach(p, facts);
+  // lane grants-unify: under All agents a conversation the user LEFT OUT is not "you" (it is told it was left out)
+  if (U.mode === 'all') return v.ok ? { mode: 'all', you: true, via: 'all' } : { mode: 'all', you: false, via: null, ...(v.code === 'excepted' ? { excepted: true } : {}), ...(v.code === 'groups_unreadable' ? { unreadable: true } : {}) };
   if (v.ok) return { mode: 'only', you: true, via: v.via === 'task' ? 'task' : 'conversation' };
   if (v.code === 'groups_unreadable') return { mode: 'only', you: false, via: null, unreadable: true };
+  if (v.code === 'excepted') return { mode: 'only', you: false, via: null, excepted: true };
   return { mode: 'only', you: false, via: null };
 }
 /** A digest row as an agent may see it: the record's public view MINUS `owner` / `createdBy` / `scopeAt` / the list,
@@ -1739,6 +1782,7 @@ function agentProfileView(p, facts = {}, extra = {}) {
   // BROWSE YOURSELF verify r1 (H1): `lastUsedAt` moves when the USER browses it (and when another conversation does — the
   // identity class) and `recordMine` is his own switch: neither is an agent's to read (the CLI prints neither)
   delete rest.lastUsedAt; delete rest.recordMine; delete ex.lastUsedAt; delete ex.recordMine;
+  delete rest.grantUse; delete ex.grantUse;   // lane grants-unify: the list's mirror names other conversations — never an agent's to read
   // verify r1 (F5, lane browser-admin): a build's PATH never reaches an agent — a chrome file the user named is a fact by
   // KIND only (versions cross, paths do not); a vanished one is named by kind too (the rule browser-builds.agentChoiceView
   // spells; kept inline here so this file stays import-free)
@@ -1907,6 +1951,7 @@ function useStamp(p) {
   const U = whoMayUse(p) || { mode: 'unknown' };
   const lines = [JSON.stringify(['m', U.mode === 'all' ? 'all' : U.mode === 'only' ? 'only' : 'unknown'])];
   for (const w of U.mode === 'only' ? U.who : U.mode === 'all' ? (U.kept || []) : []) lines.push(JSON.stringify([w.kind === 'session' ? 's' : 't', w.id]));
+  for (const w of U.except || []) lines.push(JSON.stringify(['x', `${w.kind === 'session' ? 's' : 't'}:${w.id}`]));   // lane grants-unify: an exception is a fact of the list
   return lines.sort().join('\n');
 }
 /** The write's verdict on its base: absent = unconditional (a script); the stamp of the list as it stands NOW = ok;
@@ -1916,7 +1961,7 @@ function useBaseVerdict(profile, base) {
   if (typeof base !== 'string') return { ok: false, code: 'bad-request', error: 'base must be the stamp the reader was given (a string)' };
   const now = useStamp(profile);
   if (now === base) return { ok: true };
-  const NAMES = { s: 'session', t: 'task', m: 'mode' };
+  const NAMES = { s: 'session', t: 'task', m: 'mode', x: 'except' };
   const keysOf = (stamp) => new Set(String(stamp).split('\n').map((l) => { try { const v = JSON.parse(l); return Array.isArray(v) && NAMES[v[0]] ? NAMES[v[0]] + ':' + v[1] : null; } catch { return null; } }).filter(Boolean));
   const was = keysOf(base), is = keysOf(now);
   return {
@@ -1925,34 +1970,53 @@ function useBaseVerdict(profile, base) {
     added: [...is].filter((k) => !was.has(k)), removed: [...was].filter((k) => !is.has(k)),
   };
 }
+/** A conversation's key in a `use` body / the panel: its browser key, or `cid:<conversation id>` for one that has none
+ *  yet (lane grants-unify: the store names conversations by their id; the panel and the PATCH still speak keys). */
+const isUseKey = (k) => isBrowserKey(k) || (/^cid:/.test(String(k)) && GM.CONVERSATION_KEY_RE.test(String(k).slice(4)));
 /**
  * The SHAPE of a `use` body (the panel's Save, PATCH /api/browser/profiles/:id) — PURE, before anything is resolved:
- *   {mode:'all'[, who]} | {mode:'only', who:[{kind:'task', id} | {kind:'session', key:'bk-…'} | {kind:'session', session:'<webui id>'}]}
- * `all` may carry the rows it KEEPS (All agents beside picked rows — restored when All is taken away; empty is fine).
- * → `{ok, mode, rows}` (rows as given, kind-checked) | a typed refusal (bad-request / empty_list / too_many).
+ *   {mode:'all'[, who][, except]} | {mode:'only', who:[{kind:'task', id} | {kind:'session', key:'bk-…'|'cid:…'} |
+ *   {kind:'session', session:'<webui id>'}][, except:[the same kinds]]}
+ * `all` may carry the rows it KEEPS (All agents beside picked rows — restored when All is taken away; empty is fine);
+ * `except` (lane grants-unify — «除了») = the members left out of the picked Task Groups / All agents.
+ * → `{ok, mode, rows, except}` (rows as given, kind-checked) | a typed refusal (bad-request / empty_list / too_many).
  */
 function useShapeVerdict(use) {
   const bad = (error) => ({ ok: false, code: 'bad-request', error });
   if (!use || typeof use !== 'object' || Array.isArray(use)) return bad('`use` must be {mode:"all"} or {mode:"only", who:[…]}');
-  if (use.mode === 'all' && (use.who === undefined || use.who === null)) return { ok: true, mode: 'all', rows: [] };
   if (use.mode !== 'only' && use.mode !== 'all') return bad(`use.mode "${String(use.mode)}" is not a value — one of all, only`);
+  const rowOf = (r, what) => {
+    if (!r || typeof r !== 'object') return { error: `every row of use.${what} is {kind:"task", id} or {kind:"session", key|session}` };
+    if (r.kind === 'task') { const id = String(r.id == null ? '' : r.id); if (!TASK_ID_RE.test(id)) return { error: `task id ${JSON.stringify(r.id)} is not an id` }; return { row: { kind: 'task', id } }; }
+    if (r.kind === 'session') {
+      if (typeof r.session === 'string' && r.session && r.key === undefined) return { row: { kind: 'session', session: r.session } };
+      const raw = String(r.key == null ? '' : r.key);
+      const k = /^cid:/.test(raw) ? raw : parentKeyOf(raw);
+      if (!isUseKey(k)) return { error: `session key ${JSON.stringify(r.key)} is not a conversation's browser key` };
+      return { row: { kind: 'session', key: k } };
+    }
+    return { error: `row kind ${JSON.stringify(r.kind)} is not a value — one of ${WHO_KINDS.join(', ')}${r.kind === 'everyone' ? (what === 'except' ? ' (All agents can never be left out)' : ' (All agents is mode "all")') : ''}` };
+  };
+  const listOf = (list, what) => {
+    const out = [];
+    for (const r of list) { const x = rowOf(r, what); if (x.error) return { error: x.error }; out.push(x.row); }
+    return { rows: out };
+  };
+  let except = [];
+  if (use.except !== undefined && use.except !== null) {
+    if (!Array.isArray(use.except)) return bad('use.except must be a list of conversations and Task Groups');
+    if (use.except.length > WHO_MAX * 4) return { ok: false, code: 'too_many', error: `at most ${WHO_MAX} exceptions` };
+    const x = listOf(use.except, 'except');
+    if (x.error) return bad(x.error);
+    except = x.rows;
+  }
+  if (use.mode === 'all' && (use.who === undefined || use.who === null)) return { ok: true, mode: 'all', rows: [], except };
   if (!Array.isArray(use.who)) return bad('use.who must be a list of conversations and Task Groups');
   if (!use.who.length && use.mode === 'only') return { ok: false, code: 'empty_list', error: 'Pick at least one conversation or Task Group, or choose All agents' };
   if (use.who.length > WHO_MAX * 4) return { ok: false, code: 'too_many', error: `at most ${WHO_MAX} conversations and Task Groups` };
-  const rows = [];
-  for (const r of use.who) {
-    if (!r || typeof r !== 'object') return bad('every row of use.who is {kind:"task", id} or {kind:"session", key|session}');
-    if (r.kind === 'task') { const id = String(r.id == null ? '' : r.id); if (!TASK_ID_RE.test(id)) return bad(`task id ${JSON.stringify(r.id)} is not an id`); rows.push({ kind: 'task', id }); continue; }
-    if (r.kind === 'session') {
-      if (typeof r.session === 'string' && r.session && r.key === undefined) { rows.push({ kind: 'session', session: r.session }); continue; }
-      const k = parentKeyOf(String(r.key == null ? '' : r.key));
-      if (!isBrowserKey(k)) return bad(`session key ${JSON.stringify(r.key)} is not a conversation's browser key`);
-      rows.push({ kind: 'session', key: k });
-      continue;
-    }
-    return bad(`row kind ${JSON.stringify(r.kind)} is not a value — one of ${WHO_KINDS.join(', ')}${r.kind === 'everyone' ? ' (All agents is mode "all")' : ''}`);
-  }
-  return { ok: true, mode: use.mode, rows };
+  const w = listOf(use.who, 'who');
+  if (w.error) return bad(w.error);
+  return { ok: true, mode: use.mode, rows: w.rows, except };
 }
 /**
  * THE WRITE'S VERDICT on the rows (after the route resolved every picked live session to its key — a `session` row
@@ -1960,56 +2024,88 @@ function useShapeVerdict(use) {
  * in the list (a KEPT dead row); a key must be in the current list, carried by a live session, the profile's
  * `createdBy`, or a lease / pin holder of THIS profile (`knownKey`) — else `unknown_conversation`; then dedup (a
  * helper's key → its conversation's) and the cap. The legacy and ephemeral records have no list.
- * → `{ok, owner, now}` | a typed refusal.
+ * lane grants-unify: the answer is THE ROW the ONE writer stores (`{to, except}` in the grant model's spelling — a
+ * browser key mapped to its conversation through the list as read, else `conversationOf(key)`; a `cid:` key is its
+ * conversation); a member both picked and left out ⇒ `except_conflicts`.
+ * → `{ok, row, now}` | a typed refusal.
  */
-function usePatchVerdict({ profile, use, knownTask = () => false, knownKey = () => false } = {}) {
+function usePatchVerdict({ profile, use, knownTask = () => false, knownKey = () => false, conversationOf = () => null } = {}) {
   if (!profile) return { ok: false, code: 'not-found', error: 'no such profile' };
   if (isEphemeralProfile(profile)) return { ok: false, code: 'not_editable', error: `"${profile.label}" is a conversation's own temporary browser — it has no "Who can use it"` };
   if (profile.legacy) return { ok: false, code: 'bad-request', error: 'the legacy shared profile is always usable by every conversation — adopt it as a new profile to keep it to some' };
   const sv = useShapeVerdict(use);
   if (!sv.ok) return sv;
-  if (sv.mode === 'all' && !sv.rows.length) return { ok: true, owner: { kind: 'instance', id: null }, now: { mode: 'all' } };
-  const cur = whoMayUse(profile);
-  const had = new Set(cur && cur.mode === 'only' ? cur.who.map((w) => w.kind + ':' + w.id) : cur && cur.mode === 'all' && cur.kept ? cur.kept.map((w) => w.kind + ':' + w.id) : []);
-  const who = [], seen = new Set();
-  for (const r of sv.rows) {
-    let w;
+  const cur = whoMayUse(profile) || { mode: 'unknown' };
+  const curRows = [...(cur.who || []), ...(cur.kept || []), ...(cur.except || [])];
+  const had = new Set(curRows.map((w) => w.kind + ':' + w.id));
+  const convOfCur = new Map(curRows.filter((w) => w.kind === 'session' && w.conversationKey).map((w) => [w.id, w.conversationKey]));
+  const entryOf = (r) => {
     if (r.kind === 'task') {
-      if (!had.has('task:' + r.id) && !knownTask(r.id)) return { ok: false, code: 'unknown_task', error: `there is no Task Group ${r.id}`, taskId: r.id };
-      w = { kind: 'task', id: r.id };
-    } else {
-      if (r.session !== undefined) return { ok: false, code: 'bad-request', error: 'a picked session must be resolved to its conversation before the list is written' };
-      if (!had.has('session:' + r.key) && !knownKey(r.key)) return { ok: false, code: 'unknown_conversation', error: `${r.key} is not a conversation this profile knows (not in its list, not running, not the one that made it, not using it)`, key: r.key };
-      w = { kind: 'session', id: r.key };
+      if (!had.has('task:' + r.id) && !knownTask(r.id)) return { refusal: { ok: false, code: 'unknown_task', error: `there is no Task Group ${r.id}`, taskId: r.id } };
+      return { entry: { kind: 'group', id: r.id }, wire: { kind: 'task', id: r.id } };
     }
-    const k = w.kind + ':' + w.id;
-    if (seen.has(k)) continue;
-    seen.add(k); who.push(w);
-  }
-  if (!who.length && sv.mode === 'only') return { ok: false, code: 'empty_list', error: 'Pick at least one conversation or Task Group, or choose All agents' };
-  if (who.length > WHO_MAX) return { ok: false, code: 'too_many', error: `at most ${WHO_MAX} conversations and Task Groups (${who.length} were sent)` };
+    if (r.session !== undefined) return { refusal: { ok: false, code: 'bad-request', error: 'a picked session must be resolved to its conversation before the list is written' } };
+    if (!had.has('session:' + r.key) && !knownKey(r.key)) return { refusal: { ok: false, code: 'unknown_conversation', error: `${r.key} is not a conversation this profile knows (not in its list, not running, not the one that made it, not using it)`, key: r.key } };
+    let key = /^cid:/.test(r.key) ? r.key.slice(4) : (convOfCur.get(r.key) || null);
+    if (!key) { try { key = conversationOf(r.key) || null; } catch { key = null; } }
+    if (!key || !GM.CONVERSATION_KEY_RE.test(String(key))) return { refusal: { ok: false, code: 'unknown_conversation', error: `${r.key} names no conversation this release can find — pick it again from the list`, key: r.key } };
+    return { entry: { kind: 'conversation', key: String(key) }, wire: { kind: 'session', id: r.key } };
+  };
+  const build = (list) => {
+    const out = [], wire = [], seen = new Set();
+    for (const r of list) {
+      const x = entryOf(r);
+      if (x.refusal) return { refusal: x.refusal };
+      const k = GM.principalKey(x.entry);
+      if (seen.has(k)) continue;
+      seen.add(k); out.push(x.entry); wire.push(x.wire);
+    }
+    return { out, wire };
+  };
+  const who = build(sv.rows);
+  if (who.refusal) return who.refusal;
+  const ex = build(sv.except || []);
+  if (ex.refusal) return ex.refusal;
+  if (!who.out.length && sv.mode === 'only') return { ok: false, code: 'empty_list', error: 'Pick at least one conversation or Task Group, or choose All agents' };
+  if (who.out.length > WHO_MAX) return { ok: false, code: 'too_many', error: `at most ${WHO_MAX} conversations and Task Groups (${who.out.length} were sent)` };
+  if (ex.out.length > WHO_MAX) return { ok: false, code: 'too_many', error: `at most ${WHO_MAX} exceptions (${ex.out.length} were sent)` };
+  const picked = new Set(who.out.map(GM.principalKey));
+  const clash = ex.out.find((e) => picked.has(GM.principalKey(e)));
+  if (clash) return { ok: false, code: 'except_conflicts', error: 'a conversation or Task Group cannot be both picked and left out — its own place in the list already counts' };
   // ALL AGENTS beside picked rows: every conversation may; the rows are KEPT for when All is taken away
-  if (sv.mode === 'all') return { ok: true, owner: { kind: 'instance', id: null, ...(who.length ? { who } : {}) }, now: { mode: 'all', ...(who.length ? { kept: who } : {}) } };
-  return { ok: true, owner: { kind: 'only', who }, now: { mode: 'only', who } };
+  if (sv.mode === 'all') return { ok: true, row: { to: [{ kind: 'everyone' }, ...who.out], except: ex.out }, now: { mode: 'all', ...(who.wire.length ? { kept: who.wire } : {}) } };
+  return { ok: true, row: { to: who.out, except: ex.out }, now: { mode: 'only', who: who.wire } };
 }
-/** THE PICK WRITES THE LIST: the owner a user's pick of this profile for conversation `browserKey` leaves — the list
- *  plus that conversation (a helper's key → its parent), or null when nothing needs writing (every conversation may,
- *  it is already listed, or the record has no list). */
-function ownerWithConversation(profile, browserKey) {
+/** THE PICK WRITES THE LIST: the row a user's pick of this profile for conversation `conversationKey` leaves — the list
+ *  plus that conversation (and, lane grants-unify, without it among the exceptions — the user's own pick lifts it), or
+ *  null when nothing needs writing (every conversation may, it is already listed, the record has no list / an unreadable
+ *  one). */
+function rowWithConversation(profile, conversationKey) {
   const U = whoMayUse(profile);
-  if (!U || U.mode === 'all' || U.ephemeral || profile.legacy) return null;
-  const K = parentKeyOf(String(browserKey || ''));
-  if (!isBrowserKey(K)) return null;
-  const who = U.mode === 'only' ? U.who.slice() : [];
-  if (who.some((w) => w.kind === 'session' && w.id === K)) return null;
-  who.push({ kind: 'session', id: K });
-  return { kind: 'only', who };
+  if (!U || U.ephemeral || profile.legacy || U.mode === 'unknown') return null;
+  const K = String(conversationKey || '');
+  if (!GM.CONVERSATION_KEY_RE.test(K)) return null;
+  const row = grantRowOf(profile);
+  if (!row) return null;
+  const excepted = row.except.some((e) => e.kind === 'conversation' && e.key === K);
+  if (U.mode === 'all' && !excepted) return null;
+  if (!excepted && row.to.some((e) => e.kind === 'conversation' && e.key === K)) return null;
+  return { to: row.to.some((e) => e.kind === 'conversation' && e.key === K) ? row.to : [...row.to, { kind: 'conversation', key: K }], except: row.except.filter((e) => !(e.kind === 'conversation' && e.key === K)) };
 }
-/** The owner a CREATE stores: `instance` unless a non-empty list (or a pre-list single row) is handed in. */
+/** The `owner` field a NEW record still carries (lane grants-unify: the record's pre-unify field — kept so a downgrade
+ *  reads something sane; never read by this release): `instance`, or a non-empty list handed in, normalized. The grant
+ *  itself is the store's row (`rowForCreate` / the PATCH's `usePatchVerdict`). */
 function ownerForWrite(owner) {
   if (!owner || typeof owner !== 'object' || owner.kind === 'instance') return { kind: 'instance', id: null };
-  const U = whoMayUse({ owner });
-  return U && U.mode === 'only' && U.who.length ? { kind: 'only', who: U.who } : { kind: 'instance', id: null };
+  const who = owner.kind === 'only' ? normalizeWho(owner.who) : (owner.kind === 'session' || owner.kind === 'task') ? normalizeWho([owner]) : [];
+  return who.length ? { kind: 'only', who } : { kind: 'instance', id: null };
+}
+/** The row a CREATE writes when no `use` was chosen (lane grants-unify): every conversation — or, from a caller that
+ *  still hands an `owner` (the pre-list `session` / `task` singles, a list), that owner mapped as the migration maps it. */
+function rowForCreate(owner, { conversationOf = () => null } = {}) {
+  if (!owner || typeof owner !== 'object' || owner.kind === 'instance') return { to: [{ kind: 'everyone' }], except: [] };
+  const m = GM.fromBrowserOwner({ owner }, { resolveBrowserKey: conversationOf });   // THE ONE spelling (verify F6): a key no conversation answers for stands for itself — never everyone
+  return m && Array.isArray(m.to) && m.to.length ? { to: m.to, except: [] } : { to: [{ kind: 'everyone' }], except: [] };
 }
 /**
  * The migration `2026-09-browser-profiles-all-conversations` (PURE over the registry document): every NAMED record that
@@ -2095,8 +2191,8 @@ function findLease(leases, profileId, browserKey) {
  * rewrites `sessionId` IN PLACE; it never creates a second lease. `input` has
  * exactly one holder (`agent` at attach; the live view flips it, P2).
  */
-function decideAttach({ profile, leases, browserKey, sessionId, now = 0, taskIds = [], groupsUnreadable = false } = {}) {
-  const may = mayAttach(profile, { browserKey, taskIds, groupsUnreadable });
+function decideAttach({ profile, leases, browserKey, sessionId, now = 0, taskIds = [], groupsUnreadable = false, conversationKeys = null } = {}) {
+  const may = mayAttach(profile, { browserKey, conversationKeys, taskIds, groupsUnreadable });   // lane grants-unify: the caller's conversation keys (the store names conversations by them)
   if (!may.ok) return may;
   if (!isBrowserKey(browserKey) && !isChildKey(browserKey)) return { ok: false, code: 'bad-request', error: 'a lease needs a browser key' };
   const existing = findLease(leases, profile.id, browserKey);
@@ -3448,6 +3544,7 @@ module.exports = {
   remoteSessionRefusal, ownRow, agentLeaseRow, agentDigestView, // identity verify r2 (2026-09-28): a remote session never uses a profile; the agent's digest
   freshBrowserKey, FRESH_KEY_TRIES, // identity verify r4 (2026-09-28): the fresh-key rule — a key the store still names is never minted again
   agentBrowserView, agentAnswerView, echoesOf, BELT_EXCEPTIONS, MASKED_KEY, MASKED_ID, KEY_IN_TEXT_RE, BELT_MAX_DEPTH, // identity verify r3 (2026-09-28): the browser record's view + THE SERVER BELT every agent answer passes
-  useStamp, useBaseVerdict, useShapeVerdict, usePatchVerdict, ownerWithConversation, ownerForWrite, migrateWhoList,
+  useStamp, useBaseVerdict, useShapeVerdict, usePatchVerdict, rowWithConversation, rowForCreate, ownerForWrite, migrateWhoList,
+  useOfRows, whoOfEntry, grantRowOf, exceptedRefusal, isUseKey,   // lane grants-unify
   ownsLiveBrowser, conversationOwnCount, ephemeralHolderRefusal,
 };

@@ -33,6 +33,7 @@ import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, deadPort } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { storeOf } from './grant-fixtures.mjs';   // lane grants-unify: "Who can use it" is a row of the ONE grants store
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname;
@@ -74,8 +75,9 @@ function keeperFunctions(src) {
 }
 /** Every write site of the admission class in the keeper's text (comment lines dropped) with its enclosing function. */
 const SITE_RES = [
-  ['lease-push', /reg\.leases\.push\(/g], ['lease-set', /reg\.leases = /g], ['pin-write', /reg\.pins\[[^\]]+\] = /g], ['owner-write', /\bp\.owner = /g],
-  ['owner-with-conversation', /B\.ownerWithConversation\(/g], ['decide-attach', /B\.decideAttach\(/g], ['grant', /mediator\.grantFor\(/g],
+  // lane grants-unify: a profile's list is written ONLY through the keeper's writeUseRow (the grants store's ONE writer)
+  ['lease-push', /reg\.leases\.push\(/g], ['lease-set', /reg\.leases = /g], ['pin-write', /reg\.pins\[[^\]]+\] = /g], ['list-write', /\bwriteUseRow\(/g], ['owner-write', /\bp\.owner = /g],
+  ['row-with-conversation', /B\.rowWithConversation\(/g], ['decide-attach', /B\.decideAttach\(/g], ['grant', /mediator\.grantFor\(/g],
 ];
 function admissionSites(src) {
   const clean = stripComments(src);
@@ -88,14 +90,17 @@ function admissionSites(src) {
 /** THE KNOWN TABLE: function → the fence evidence its text must carry, IN ORDER (each needle after the previous). */
 const KNOWN_KEEPER = {
   attach: { why: 'THE admission: the remote fence first, then the list (decideAttach → mayAttach), then the lease', order: ['isRemoteKey(browserKey)', 'B.remoteSessionRefusal(', 'B.decideAttach(', 'reg.leases.push(d.lease)', 'mediator.grantFor('] },
-  addConversation: { why: 'THE add: the remote fence, then the list judged, then the owner written', order: ['isRemoteKey(browserKey, remote)', 'B.mayAttach(', 'B.ownerWithConversation(', 'p.owner = owner'] },
-  setPin: { why: 'a USER pick writes the list through addConversation before the pin; an AGENT pin is judged by mayAttach', order: ["by === 'agent'", 'B.mayAttach(', 'addConversation(p, browserKey, facts, { remote })', 'reg.pins[browserKey] = '], never: ['B.ownerWithConversation(', 'p.owner ='] },
-  copyPin: { why: 'a fork\'s COPY of a pin: a preference carried, never an authorization', order: ['reg.pins[toKey] = '], never: ['B.ownerWithConversation(', 'p.owner =', 'reg.leases'] },
+  addConversation: { why: 'THE add: the remote fence, then the list judged, then the conversation written through the ONE writer', order: ['isRemoteKey(browserKey, remote)', 'B.mayAttach(', 'B.rowWithConversation(', 'writeUseRow(p, row'] },
+  setPin: { why: 'a USER pick writes the list through addConversation before the pin; an AGENT pin is judged by mayAttach', order: ["by === 'agent'", 'B.mayAttach(', 'addConversation(p, browserKey, facts, { remote })', 'reg.pins[browserKey] = '], never: ['B.rowWithConversation(', 'writeUseRow(', 'p.owner ='] },
+  copyPin: { why: 'a fork\'s COPY of a pin: a preference carried, never an authorization', order: ['reg.pins[toKey] = '], never: ['B.rowWithConversation(', 'writeUseRow(', 'p.owner =', 'reg.leases'] },
   // the .196 integration (lane-browser-key's late key): the spawn's WITNESSED pick restored under a late key — a preference
   // like copyPin's, so it writes the pin alone: never an owner (a witness widens nothing), never a lease
-  restorePin: { why: 'the late key restores the pick its spawn WITNESSED at the start: a preference, never an owner, never a lease', order: ['B.isPinWitness(witness)', 'reg.pins[browserKey] = '], never: ['B.ownerWithConversation(', 'p.owner =', 'reg.leases', 'addConversation('] },
+  restorePin: { why: 'the late key restores the pick its spawn WITNESSED at the start: a preference, never an owner, never a lease', order: ['B.isPinWitness(witness)', 'reg.pins[browserKey] = '], never: ['B.rowWithConversation(', 'writeUseRow(', 'p.owner =', 'reg.leases', 'addConversation('] },
   ensureEphemeral: { why: 'a conversation\'s OWN managed browser: the record it leases is the one whose owner is its key', order: ["isEph(x) && x.owner.id === bk", "owner: { kind: 'conversation', id: bk }", 'reg.leases.push(l)'] },
-  updateProfileNow: { why: 'the PATCH: a remote key is never a known key, the list is judged by usePatchVerdict, then the owner written, then the leases re-judged', order: ['knownKeysOf(p, opts.knownKeys)', 'B.usePatchVerdict(', 'p.owner = v.owner', 'rejudgeLeases('] },
+  updateProfileNow: { why: 'the PATCH: a remote key is never a known key, the list is judged by usePatchVerdict, then written through the ONE writer, then the leases re-judged', order: ['knownKeysOf(p, opts.knownKeys)', 'B.usePatchVerdict(', 'writeUseRow(p, v.row', 'rejudgeLeases('] },
+  // lane grants-unify: THE writer of a profile's list (the grants store's set, then the keeper's mirror) and a new record's list
+  writeUseRow: { why: 'THE ONE WRITER of a profile\'s list: the grants store\'s set (refused by name), then the mirror', order: ["g.set('browser-profile'", 'hydrateUse(p)'] },
+  bornWithRow: { why: 'a NEW record\'s list, written right after the record lands — a refused write takes the record back out', order: ['writeUseRow(rec, row', 'reg.profiles.splice('] },
   detach: { why: 'a removal', order: ['reg.leases = d.remaining'] },
   dropChild: { why: 'a removal (a helper\'s leases go with it)', order: ['reg.leases = reg.leases.filter('] },
   reconcile: { why: 'the boot sweep keeps what the PURE reconcile kept — never adds', order: ['reg.leases = r.kept'] },
@@ -136,7 +141,7 @@ const ksrc = read('src/server/browser-keeper.js');
   ok(noFence !== ksrc && vb.fence.some((x) => /^attach: "isRemoteKey\(browserKey\)"/.test(x)), 'CONTROL (b): a keeper copy whose `attach` lost the remote fence is RED (attach named, the missing needle named)', vb.fence);
   M.write('src/server/browser-keeper.js', noFence, 'no-remote-fence');
   // CONTROL (c): setPin writing the owner itself (the list written beside the ONE add) ⇒ RED
-  const pinWrites = ksrc.replace("    reg.pins[browserKey] = { profileId: p.id, origin, at: now(), by: by === 'agent' ? 'agent' : 'user' };", "    p.owner = B.ownerWithConversation(p, browserKey) || p.owner;\n    reg.pins[browserKey] = { profileId: p.id, origin, at: now(), by: by === 'agent' ? 'agent' : 'user' };");
+  const pinWrites = ksrc.replace("    reg.pins[browserKey] = { profileId: p.id, origin, at: now(), by: by === 'agent' ? 'agent' : 'user' };", "    { const rw = B.rowWithConversation(p, browserKey); if (rw) writeUseRow(p, rw, 'user'); }\n    reg.pins[browserKey] = { profileId: p.id, origin, at: now(), by: by === 'agent' ? 'agent' : 'user' };");
   const vc = judgeAdmission(pinWrites);
   ok(pinWrites !== ksrc && vc.fence.some((x) => /^setPin: must never contain/.test(x)), 'CONTROL (c): a keeper copy whose `setPin` writes the owner list itself (a second writer beside addConversation) is RED', vc.fence);
   M.write('src/server/browser-keeper.js', pinWrites, 'pin-writes-owner');
@@ -399,9 +404,14 @@ const API = `http://127.0.0.1:${srv.address().port}`;
 const jAt = (base) => async (method, p, body, headers = {}) => { const res = await fetch(base + p, { method, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers }, body: body !== undefined ? JSON.stringify(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
 const j = jAt(API);
 const as = (s) => ({ Authorization: 'Bearer ' + s.agentToken });
+const GM = require('../src/grant-model.js');
+/** lane grants-unify: a planted record's list = its row in the keeper's grants store (the migration's mapper; a key stands
+ *  for its conversation — this keeper is built without the conversation map) */
+const rowOfOwner = (owner) => { const m = GM.fromBrowserOwner({ owner }); return { to: m.to || [], except: [] }; };   // THE migration's spelling (GM.browserKeyResolver — a key stands for its conversation)
 const plant = (owner, label, extra = {}) => {
   const id = 'bp-' + Math.floor(Math.random() * 0xffffffff).toString(16).padStart(8, '0');
   k.reshapeStore((reg) => { reg.profiles.push(B.newProfileRecord({ id, label, dir: path.join(HOME, '.agent-browser', 'profiles', id), now: clock })); const p = reg.profiles[reg.profiles.length - 1]; p.owner = owner; Object.assign(p, extra); });
+  storeOf(DATA).set('browser-profile', id, rowOfOwner(owner), 'fixture');
   fs.mkdirSync(path.join(HOME, '.agent-browser', 'profiles', id), { recursive: true });
   return k.profile(id);
 };
@@ -692,7 +702,7 @@ console.log('— ⑤ THE SWITCH: an agent the list keeps out never switches a pr
   ok(vR.ok && vR.mode === 'proposal' && kw.profile(pw.id).provider === 'chromium', 'the keeper: a remote session\'s switch is a proposal too (never admitted)', vR);
   const vG = await sw(Bk, { taskIds: ['T-G'] });
   ok(vG.ok && vG.mode === 'proposal', 'the keeper: B in a Task Group the list does not name — still a proposal', vG);
-  kw.reshapeStore((reg) => { const p = reg.profiles.find((x) => x.id === pw.id); p.owner = { kind: 'only', who: [{ kind: 'task', id: 'T-G' }] }; });
+  storeOf(path.join(ROOT, 'data-sw')).set('browser-profile', pw.id, { to: [{ kind: 'group', id: 'T-G' }] }, 'user');   // lane grants-unify: the list is the store's row
   const vG2 = await sw(Bk, { taskIds: ['T-G'] });
   ok(vG2.ok && vG2.mode !== 'proposal' && kw.profile(pw.id).provider === 'cloak', 'the keeper: B admitted THROUGH its Task Group ⇒ the switch runs (provider now cloak)', vG2);
   try { await kw.stop(pw.id, { why: 'user' }); } catch { /* fake */ }
@@ -827,7 +837,7 @@ console.log('— ⑦ A TASK GROUP CHANGE (r4): a conversation removed from the T
   const noHookPath = M.write('server.js', noHook, 'no-rejudge-hook');
   ok(noHook !== read('server.js') && !hook.test(stripComments(fs.readFileSync(noHookPath, 'utf8'))), 'CONTROL (m): server.js with the hook line removed (a copy) fails the wiring pin — RED');
   const ksrc = read('src/server/browser-keeper.js');
-  const nk = "      if (!U || U.mode !== 'only' || !U.who.some((w) => w.kind === 'task')) continue;";
+  const nk = "      if (!row || ![...row.to, ...row.except].some((e) => e.kind === 'group')) continue;";   // lane grants-unify: the walk's filter reads the store's row
   ok(ksrc.split(nk).length === 2, '⑦ control setup: the walk\'s one filter line is found once');
   const Km = M.load('src/server/browser-keeper.js', ksrc.replace(nk, "      if (true) continue;"), 'no-task-walk');
   groupsOf.set(KT, ['T-G']); r = await j('POST', '/api/agent/browser/use', { profile: 'p-group-med' }, as(sT)); ok(r.status === 200, '⑦ T re-admitted for the control');

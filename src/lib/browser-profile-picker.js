@@ -147,8 +147,13 @@ export function installBrowserProfilePicker(App) {
    *  REMEMBERS which of those filled it (`dataset.origin`) so the wire can say
    *  it (B-6b6d r3: what the client filled in on the user's behalf must say so).
    *  A pick by the user is 'chosen'. Hidden when there is no digest or the
-   *  backend is a plain shell. */
-  App.prototype._fillBrowserProfileRow = function (taskId) {
+   *  backend is a plain shell.
+   *  lane new-session-form: the row lists ONLY the profiles the picked Task Groups ADMIT — the server's own mayAttach
+   *  (GET /api/browser/admits, asked again when the groups change; until it answers, the profiles every conversation may
+   *  use), the default = the FIRST picked group's default profile that is admitted; `dataset.hiddenCount` = how many more
+   *  are not open to it (the right column says so). The «picking adds this conversation to who can use it» road is the
+   *  Agent browser panel's alone now (ws-create judges the form's pick by the same verdict). */
+  App.prototype._fillBrowserProfileRow = function (taskIdOrIds) {
     const row = document.getElementById('row-browser-profile');
     const sel = document.getElementById('input-browser-profile');
     if (!row || !sel) return;
@@ -159,17 +164,39 @@ export function installBrowserProfilePicker(App) {
     const onHost = !!document.getElementById('input-host')?.value;
     const show = !!(d && Array.isArray(d.profiles) && !terminalOnly(backend) && !onHost);
     row.style.display = show ? '' : 'none'; // no global .hidden in this repo — display is the honest switch
-    if (!show) { sel.value = ''; sel.dataset.origin = ''; return; }
-    this._browserProfileRowTask = taskId || null; // lane S2: the digest broadcast re-fills an OPEN dialog with the same facts
+    if (!show) { sel.value = ''; sel.dataset.origin = ''; row.dataset.hiddenCount = '0'; return; }
+    const ids = Array.isArray(taskIdOrIds) ? taskIdOrIds.filter(Boolean) : (taskIdOrIds ? [taskIdOrIds] : (this._nsTaskIds?.() || []));
+    this._browserProfileRowTask = ids; // lane S2: the digest broadcast re-fills an OPEN dialog with the same facts
+    // the answer belongs to ONE group list and ONE registry (a profile made or changed while the dialog is open asks again);
+    // a profile the answer does not name yet stands on its own scope word until it does
+    const key = ids.join(','), sig = d.profiles.map((p) => p.id + ':' + JSON.stringify(p.use || p.scope || '')).join(',');
+    const adm = this._nsAdmits && this._nsAdmits.key === key ? this._nsAdmits : null;
+    if (!adm || adm.sig !== sig) this._loadNsAdmits(ids, sig);
+    const okOf = new Map(adm ? adm.profiles.map((x) => [x.id, !!x.ok]) : []);
+    const admitted = new Set(d.profiles.filter((p) => (okOf.has(p.id) ? okOf.get(p.id) : p.scope !== 'only')).map((p) => p.id));
+    const listed = d.profiles.filter((p) => admitted.has(p.id));
+    row.dataset.hiddenCount = String(Math.max(0, d.profiles.length - listed.length));
     sel.innerHTML = '';
-    for (const o of this.browserProfileOptions({ includeShared: true })) { const opt = document.createElement('option'); opt.value = o.value; opt.textContent = o.label; sel.appendChild(opt); }
-    const byRef = (ref) => { const r = String(ref || '').trim(); if (!r) return ''; const hit = d.profiles.find((p) => p.id === r) || d.profiles.filter((p) => String(p.label || '').toLowerCase() === r.toLowerCase()); return Array.isArray(hit) ? (hit.length === 1 ? hit[0].id : '') : hit.id; };
-    const group = taskId ? this.sidebar?._taskById?.(taskId) : null;
+    for (const o of [{ value: '', label: t('No profile (temporary browser)') }, ...listed.map((p) => ({ value: p.id, label: profilePickLabel(p) }))]) { const opt = document.createElement('option'); opt.value = o.value; opt.textContent = o.label; sel.appendChild(opt); }
+    const byRef = (ref) => { const r = String(ref || '').trim(); if (!r) return ''; const hit = listed.find((p) => p.id === r) || listed.filter((p) => String(p.label || '').toLowerCase() === r.toLowerCase()); return Array.isArray(hit) ? (hit.length === 1 ? hit[0].id : '') : hit.id; };
     let value = '', origin = '';
-    if (group && group.browserProfileId && byRef(group.browserProfileId)) { value = byRef(group.browserProfileId); origin = 'task-group'; }
+    const group = ids.map((id) => this.sidebar?._taskById?.(id)).find((g) => g && g.browserProfileId && byRef(g.browserProfileId));
+    if (group) { value = byRef(group.browserProfileId); origin = 'task-group'; }
     else { const inst = byRef(this.settings?.get?.('browser.defaultProfile')); if (inst) { value = inst; origin = 'instance'; } }
     sel.value = value; sel.dataset.origin = origin;
     sel.onchange = () => { sel.dataset.origin = 'chosen'; };
+  };
+  /** The server's admission for the picked groups (one answer kept per group list; the row refills when it lands). */
+  App.prototype._loadNsAdmits = function (ids, sig = '') {
+    const key = (ids || []).join(',');
+    if (this._nsAdmitsAsk === key + '\u0000' + sig) return;
+    this._nsAdmitsAsk = key + '\u0000' + sig;
+    fetchJson('/api/browser/admits?taskIds=' + encodeURIComponent(key)).then((r) => {
+      if (this._nsAdmitsAsk !== key + '\u0000' + sig) return;
+      if (!r || !Array.isArray(r.profiles)) return; // an older server / the feature off: the every-conversation profiles stay (asked once)
+      this._nsAdmits = { key, sig, profiles: r.profiles };
+      if (this._refillBrowserProfileRow()) this._nsPaintRight?.();
+    });
   };
   /** lane S2 (naive study 2, T4): the `browser-profiles-updated` broadcast re-fills the dialog's list while it is
    *  OPEN — the list is the registry's, never the one cached at first open; a user's pick survives (a pick of a

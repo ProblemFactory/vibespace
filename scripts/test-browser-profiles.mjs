@@ -1809,5 +1809,47 @@ console.log('— lane dc-browser-providers: every provider row carries THE launc
 }
 for (const r of copiesCensus(MUTB.files, MUTB.dir, REPO, { minCopies: 2 })) ok(r.pass, '㉑ ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
+// ㉓ lane new-session-form: THE NEW SESSION FORM'S ADMISSION — the 浏览器 row lists ONLY the profiles a conversation that does
+// not exist yet may use through the Task Groups it is about to join: the keeper's mayAttach over those groups (one verdict
+// for the form's list and the create), never a second rule; the create never ADDS the conversation to "Who can use it"
+// (the Agent browser panel keeps that road, with its toast).
+console.log('\n㉓ lane new-session-form: mayAttach at create (the form\'s profile list + the create\'s judge)');
+{
+  const K = require(path.join(REPO, 'src/server/browser-keeper.js'));
+  const D = path.join(ROOT, 'data-ns-admit'), H = path.join(ROOT, 'home-ns-admit');
+  for (const d of [D, path.join(H, '.agent-browser')]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+  const NS_PROFILES = [
+    { id: 'bp-0000a001', label: 'Default', owner: { kind: 'instance' } },
+    { id: 'bp-0000a002', label: 'IR portal', owner: { kind: 'only', who: [{ kind: 'task', id: 'T-261023-ir' }] } },
+    { id: 'bp-0000a003', label: 'Work', owner: { kind: 'only', who: [{ kind: 'task', id: 'T-261023-cd' }, { kind: 'task', id: 'T-261023-ir' }] } },
+    { id: 'bp-0000a004', label: 'Bank', owner: { kind: 'only', who: [{ kind: 'session', id: 'bk-7a1e90c2' }] } },
+    { id: 'bp-0000a005', label: 'Odd', owner: { kind: 'future-kind' } },
+  ];
+  fs.writeFileSync(path.join(D, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: NS_PROFILES, pins: {} }), { mode: 0o600 });
+  // int346 (lane grants-unify): "Who can use it" is a row of the ONE grants store — a pre-unify fixture seeds the rows the
+  // way the 2026-10-grants-unify migration carries them (scripts/grant-fixtures.mjs), so the keeper reads what the leg meant
+  const { seedBrowserProfiles } = await import(path.join(REPO, 'scripts/grant-fixtures.mjs'));
+  seedBrowserProfiles(D, NS_PROFILES);
+  const k = K.create({ dataDir: D, homeDir: H, env: () => ({ HOME: H }), serverSetting: () => undefined, log: { log() { }, warn() { }, error() { } } });
+  const okIds = (taskIds) => k.admitsAtCreate({ taskIds }).filter((x) => x.ok).map((x) => x.id).join(',');
+  ok(okIds([]) === 'bp-0000a001', 'no Task Group picked ⇒ only the profiles every conversation may use');
+  ok(okIds(['T-261023-ir']) === 'bp-0000a001,bp-0000a002,bp-0000a003', 'a group the profile lists admits it (its own list, read by B.mayAttach)');
+  ok(okIds(['T-261023-cd', 'T-261023-hr']) === 'bp-0000a001,bp-0000a003', 'two groups: the union of what each admits');
+  const bank = k.admitsAtCreate({ taskIds: ['T-261023-ir'] }).find((x) => x.id === 'bp-0000a004');
+  ok(bank && !bank.ok && bank.code === 'not_owner' && k.admitsAtCreate({ taskIds: [] }).find((x) => x.id === 'bp-0000a005').code === 'not_owner', 'a profile kept to one conversation is never offered to a new one; an owner shape this release cannot judge is refused (fail closed)');
+  const one = k.mayAttachAtCreate('bp-0000a002', { taskIds: ['T-261023-ir'] });
+  ok(one.ok && one.via === 'task' && one.taskId === 'T-261023-ir' && k.mayAttachAtCreate('bp-0000a002', { taskIds: [] }).code === 'not_owner' && k.mayAttachAtCreate('bp-ffffffff', {}).code === 'not-found', 'mayAttachAtCreate = B.mayAttach over the picked groups (no key: a new conversation is on no list by itself)');
+  ok(JSON.parse(fs.readFileSync(path.join(D, 'browser-profiles.json'), 'utf8')).profiles.find((p) => p.id === 'bp-0000a002').owner.who.length === 1, 'asking writes nothing (the who-list is untouched)');
+  try { k.stop?.(); } catch { }
+  const wc = read('src/ws-create.js');
+  ok(/if \(pin\.origin === 'chosen' && pin\.profileId && Array\.isArray\(data\.taskIds\) && typeof kp\.mayAttachAtCreate === 'function'\) \{\s*\n\s*const may = kp\.mayAttachAtCreate\(pin\.profileId, \{ taskIds: spawnGroups \}\);\s*\n\s*if \(!may\.ok\) \{[^\n]*pin = \{ profileId: '', dir: null, origin: 'harness', refused: may\.code \}; \}/.test(wc)
+    && wc.indexOf('kp.mayAttachAtCreate(') < wc.indexOf("keeper()?.setPin(bk.key, pin.profileId"), 'WIRING: ws-create judges the form\'s explicit pick (it sends taskIds) by the same verdict BEFORE the pin is written — a pick its groups do not admit starts without it, never added to the list');
+  const routes = read('src/routes/browser.js');
+  ok(/router\.get\('\/api\/browser\/admits', \(req, res\) => \{[\s\S]{0,400}k\.admitsAtCreate\(\{ taskIds \}\)/.test(routes), 'WIRING: GET /api/browser/admits answers the keeper\'s admitsAtCreate (the form\'s list)');
+  const picker = read('src/lib/browser-profile-picker.js');
+  ok(/fetchJson\('\/api\/browser\/admits\?taskIds=' \+ encodeURIComponent\(key\)\)/.test(picker) && /const listed = d\.profiles\.filter\(\(p\) => admitted\.has\(p\.id\)\);/.test(picker) && /p\.scope !== 'only'/.test(picker), 'the New Session row lists ONLY the admitted profiles (until the answer lands: those every conversation may use — the server\'s own scope word)');
+}
+
+
 console.log(`\n${fail ? fail + ' FAILED (' + pass + ' passed' + (skipped ? ', ' + skipped + ' skipped' : '') + ')' : 'ALL PASS (' + pass + (skipped ? ', ' + skipped + ' skipped' : '') + ')'}`);
 process.exit(fail ? 1 : 0);

@@ -196,9 +196,20 @@ const setSel = (key, v) => { const el = s._lastMountsDialog.inputs[key]; el.valu
       }
     }
     await sleep(150);
+    // lane path-field: a path input is THE path field now (src/lib/path-field.js — a deliberate change at every door, the
+    // storage dialogs' too); both variants draw each one as ONE canonical box before the compare (A's field, B's old
+    // wrap + list), and count them — the same rows hold one; the rest of the dialog stays identical
+    let pathInputs = 0;
+    window.__pathFieldSeen = !!document.querySelector('.path-field .pf-row input');
+    for (const n of [...document.querySelectorAll('.path-field, div:has(> .path-autocomplete)')]) {
+      const inp = n.querySelector('input'); const box = document.createElement('div');
+      box.className = 'canon-path'; box.style.cssText = 'height:30px;border:1px solid #888;'; box.textContent = inp ? (inp.value || inp.placeholder) : '';
+      n.replaceWith(box); pathInputs++;
+    }
+    window.__pathInputs = pathInputs;
     const dlg = scenario === 'edit-switch-drive-inflight' ? document.getElementById('mount-reauth-dialog')
       : scenario.startsWith('edit-') ? document.getElementById('mount-edit-dialog') : (document.getElementById('mounts-dialog-overlay') || document.getElementById('mount-reauth-dialog'));
-    window.__state = { html: dlg?.outerHTML || null, after, calls: window.__calls };
+    window.__state = { html: dlg?.outerHTML || null, after, calls: window.__calls, pathInputs: window.__pathInputs, fieldDrawn: !!window.__pathFieldSeen };
   } catch (e) { window.__state = { error: e.message + ' | ' + e.stack }; }
 })();
 `);
@@ -299,6 +310,7 @@ for (const sc of SCENARIOS) {
   if (sc === 'reauth-drive') ok(A.st.html.includes('mounts-oauth-link') && A.st.html.includes('127.0.0.1:53682') && A.st.html.includes('Sign in with Google'), `${sc}: the re-authorize consent is in flight — the sign-in button, the cross-browser link row and the paste-back box are drawn`);
   if (sc === 'connect-onedrive-consent') ok(A.st.html.includes('mounts-oauth-link') && A.st.html.includes('127.0.0.1:53682'), `${sc}: the consent is in flight — the cross-browser link row and the paste-back box are drawn`);
   ok(A.st.html === B.st.html, `${sc}: the dialog's outerHTML is identical (${A.st.html.length} chars)`);
+  if (sc === 'connect-s3-advanced') ok(A.st.pathInputs >= 1 && A.st.pathInputs === B.st.pathInputs && A.st.fieldDrawn, `${sc}: lane path-field — the advanced «Where to put it» row is THE path field in A, the old completion in B (${A.st.pathInputs} / ${B.st.pathInputs} path inputs)`);
   const pa = decodePng(A.png), pb = decodePng(B.png), pc = decodePng(C.png);
   const dAB = diffPixels(pa, pb), dAC = diffPixels(pa, pc);
   if (dAB) { fs.writeFileSync(path.join(keep, `${sc}.A.png`), A.png); fs.writeFileSync(path.join(keep, `${sc}.B.png`), B.png); }

@@ -15,6 +15,12 @@
 //      token) lands on top of BOTH open sheets live, named by the session; the Handled filter shows the handled one
 //      with Reopen; Esc closes the sheet; the gear row's count follows (2)
 //   ⑥ zh: 系统 ▸ 「Agent 反馈…」 and the sheet's words; PNGs of the gear row and the sheet (VS_UI_SHOTS_DIR keeps them)
+//   ⑦ THE FAKE POD'S MAINTAINER (lane fleet-feedback-marks): this scratch instance started with VIBESPACE_MAINTAINER_KEY_SHA;
+//      the REAL CLI on its shell (no session env — the key in VIBESPACE_MAINTAINER_KEY, the instance's own PORT) lists the
+//      open reports and marks the agent's report handled in 2.369.346 with a note ⇒ the sheet says «handled in 2.369.346 by
+//      the maintainers» + the note (live on B, and in zh 「维护者 于 … 标为已处理（2.369.346 修复）」); the FILING session's next
+//      prompt-context (the real injection route, its own token) carries «Your feedback report fb-… was handled in
+//      2.369.346: …» once; a wrong key and another verb are refused by name
 // Run: node scripts/test-feedback-ui.mjs   (SKIPs without chrome)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -64,10 +70,13 @@ fs.writeFileSync(path.join(BIN, 'claude'), `#!/bin/sh\ncase " $* " in *" --outpu
 fs.symlinkSync(process.execPath, path.join(BIN, 'node'));
 
 const [PORT, CDP] = await freePorts(2);
+// lane fleet-feedback-marks: this instance knows the maintainer key by its sha256 ONLY (the chart's maintainerKeySha)
+const MKEY = 'vsmk_' + require('node:crypto').randomBytes(32).toString('base64url');
+const MKSHA = require('node:crypto').createHash('sha256').update(MKEY).digest('hex');
 const env = {}; for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('AGENT_BROWSER_') && !k.startsWith('VIBESPACE_') && !['WAYLAND_DISPLAY', 'DISPLAY', 'XDG_RUNTIME_DIR'].includes(k)) env[k] = v;
 Object.assign(env, { PATH: `${BIN}:/usr/bin:/bin`, CLAUDE_CMD: path.join(BIN, 'claude'), HOME, XDG_RUNTIME_DIR: XDG, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', DBUS_SESSION_BUS_ADDRESS: 'disabled:' });
 let journal = '';
-const srv = spawn(process.execPath, ['server.js'], { cwd: INST, env: { ...env, ...(await vncEnv()), PORT: String(PORT) }, stdio: ['ignore', 'pipe', 'pipe'] });
+const srv = spawn(process.execPath, ['server.js'], { cwd: INST, env: { ...env, ...(await vncEnv()), PORT: String(PORT), VIBESPACE_MAINTAINER_KEY_SHA: MKSHA }, stdio: ['ignore', 'pipe', 'pipe'] });
 procs.add(srv);
 srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -219,6 +228,42 @@ try {
   ok(/ · VibeSpace 主开发 于 .+ 标为已处理（2\.369\.330 修复）$/.test(String(zMeta)), `zh: 「VibeSpace 主开发 于 … 标为已处理（2.369.330 修复）」 (${zMeta})`);
   await Z.shot('zh-sheet-handled-by-agent.png');
   Z.close();
+
+  console.log('— ⑦ the fake pod\'s maintainer: the real CLI with the key, no session (lane fleet-feedback-marks)');
+  const mcli = (args, extra) => new Promise((resolve) => execFile(process.execPath, [path.join(INST, 'data/bin/vibespace-feedback'), ...args], { env: { PATH: env.PATH, PORT: String(PORT), ...extra }, timeout: 20000 }, (err, out, e) => resolve({ code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, out: String(out), err: String(e) })));
+  const ml = await mcli(['list', '--open'], { VIBESPACE_MAINTAINER_KEY: MKEY });
+  ok(ml.code === 0 && /^2 open reports on this instance:\n/.test(ml.out) && ml.out.includes(newId) && ml.out.includes('fb-0000000003') && ml.out.includes('the sheet must show this as text'), `\`vibespace-feedback list --open\` on the instance's shell (the key, the instance's own PORT, no session): the two open reports with their ids and words (a terminal prints the planted tag as text) (${ml.out.split('\n')[0]})`, ml);
+  const mbad = await mcli(['list', '--open'], { VIBESPACE_MAINTAINER_KEY: 'vsmk_' + 'A'.repeat(43) });
+  ok(mbad.code === 1 && /this instance does not know that maintainer key/.test(mbad.err), 'a wrong key ⇒ exit 1, «this instance does not know that maintainer key»', mbad);
+  const scope = await fetch(BASE + '/api/agent/automation/conversations.open', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + MKEY }, body: JSON.stringify({ cwd: CWD }) });
+  const sj = await scope.json().catch(() => ({}));
+  ok(scope.status === 403 && sj.code === 'maintainer_key_scope', 'the key asking conversations.open on the real door ⇒ 403 maintainer_key_scope', sj);
+  const NOTE7 = 'the manual says For you now';
+  const mh = await mcli(['handled', newId, '--version', '2.369.346', '--note', NOTE7], { VIBESPACE_MAINTAINER_KEY: MKEY });
+  ok(mh.code === 0 && mh.out.includes(`marked handled: ${newId} in 2.369.346 (by the maintainer key)`), `\`vibespace-feedback handled ${newId} --version 2.369.346 --note …\`: exit 0 (${mh.out.trim()})`, mh);
+  const goneOnB = await until(() => B.js(`!document.querySelector('#feedback-sheet .fb-list .fb-row[data-id="${newId}"]')`), 6000);
+  ok(goneOnB, 'B: the marked report leaves its Open list LIVE (the same store call, the same mirror)');
+  ok(await openSystem(A), '(setup) A: System ▸');
+  await A.click(`${POP} [data-id="agent-feedback"]`);
+  await until(() => A.js(`!!document.querySelector('#feedback-sheet .fb-tab[data-filter="handled"]')`), 5000);
+  await A.click('#feedback-sheet .fb-tab[data-filter="handled"]');
+  const mrow = await until(async () => (await A.js(ROW_TEXTS)).find((r) => r.id === newId), 5000) || {};
+  ok(/ · handled in 2\.369\.346 by the maintainers, /.test(String(mrow.meta)) && mrow.note === NOTE7 && mrow.act === 'Reopen', `the sheet: «handled in 2.369.346 by the maintainers» + the note under it, like a hub record (${mrow.meta} | ${mrow.note})`, mrow);
+  await A.shot('sheet-handled-by-maintainers.png');
+  const Z2 = await page('Z2', { lang: 'zh' });
+  ok(await openSystem(Z2), '(setup) zh: ⚙ → 系统 ▸');
+  await Z2.click(`${POP} [data-id="agent-feedback"]`);
+  await until(() => Z2.js(`!!document.querySelector('#feedback-sheet .fb-tab[data-filter="handled"]')`), 5000);
+  await Z2.click('#feedback-sheet .fb-tab[data-filter="handled"]');
+  const zm = await until(() => Z2.js(`document.querySelector('#feedback-sheet .fb-row[data-id="${newId}"] .fb-meta')?.textContent || null`), 3000);
+  ok(/ · 维护者 于 .+ 标为已处理（2\.369\.346 修复）$/.test(String(zm)), `zh: 「维护者 于 … 标为已处理（2.369.346 修复）」 (${zm})`);
+  await Z2.shot('zh-sheet-handled-by-maintainers.png');
+  Z2.close();
+  // THE FILER IS TOLD: its next prompt — the real injection route with its own session token — carries the sentence, once
+  const pc = async () => { const r = await fetch(BASE + '/api/agent/prompt-context', { headers: { Authorization: 'Bearer ' + senv.VIBESPACE_SESSION_TOKEN } }); return r.ok ? String((await r.json()).context || '') : `HTTP ${r.status}`; };
+  const SAID = `Your feedback report ${newId} (about vibespace-ask) was handled in 2.369.346: ${NOTE7}`;
+  const c1 = await pc(), c2 = await pc();
+  ok(c1.includes(`<system-reminder>\n${SAID}\n</system-reminder>`) && !c2.includes(SAID), `the FILING session's next prompt-context carries «${SAID}» — once (the next prompt does not repeat it)`, { c1: c1.slice(-600), c2: c2.slice(-300) });
 } catch (e) {
   ok(false, 'the suite ran to its end', e && e.stack);
 } finally {

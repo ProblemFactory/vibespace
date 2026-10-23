@@ -307,9 +307,9 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   function ownerView() {
     const e = eng();
     const rows = e && typeof e.apiGrants === 'function' ? e.apiGrants() : [];
-    return { ok: true, creds: allCreds().map((c) => ({ ...c, grants: rows.filter((g) => g.scope && g.scope.id === c.id).map((g) => ({ principal: g.principal, tier: g.api, perDay: g.perDay || null })), shapes: state.shapes.filter((s) => s.cred === c.id), sensitive: (F.vendorRowOf(credentialOf(c.id)) || { sensitive: [] }).sensitive.map((re) => re.source) })), proposals: Object.values(state.proposals).sort((a, b) => b.at - a.at).slice(0, 50).map((p) => proposalView(p)) };
+    return { ok: true, creds: allCreds().map((c) => ({ ...c, grants: rows.filter((g) => g.scope && g.scope.id === c.id).map((g) => ({ principal: g.principal, tier: g.api, perDay: g.perDay || null })), except: e && typeof e.apiExceptOf === 'function' ? e.apiExceptOf(c.id) : [], shapes: state.shapes.filter((s) => s.cred === c.id), sensitive: (F.vendorRowOf(credentialOf(c.id)) || { sensitive: [] }).sensitive.map((re) => re.source) })), proposals: Object.values(state.proposals).sort((a, b) => b.at - a.at).slice(0, 50).map((p) => proposalView(p)) };
   }
-  async function setTiers(cred, list, { by = 'user' } = {}) {
+  async function setTiers(cred, list, { by = 'user', except = undefined } = {}) {
     const e = eng();
     if (!e || typeof e.setApiGrants !== 'function') return { ok: false, code: 'unavailable', error: 'Channels are not available' };
     if (!allCreds().some((c) => c.id === cred)) return { ok: false, code: 'not-found', error: 'no such credential' };
@@ -319,7 +319,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     const pk = (g) => `${g.principal.kind}:${g.principal.id}`;
     const was = new Map((typeof e.apiGrants === 'function' ? e.apiGrants() : []).filter((g) => g && g.scope && g.scope.id === cred && F.TIERS.includes(g.api)).map((g) => [pk(g), g]));
     const before = new Set([...was].filter(([, g]) => g.api === 'write-all').map(([k]) => k));
-    const r = await e.setApiGrants(cred, rows, { by });
+    const r = await e.setApiGrants(cred, rows, { by, except });   // lane grants-unify: «除了» — the members of a granted Task Group / All agents left out
     // a NEW 完全信任 writes its own line in the credential's API log: who holds it, when, by whom (the dialog shows it)
     if (r.ok) for (const g of rows) if (g.api === 'write-all' && !before.has(`${g.principal.kind}:${g.principal.id}`)) audit(cred, { at: now(), cred, principal: { kind: g.principal.kind, id: g.principal.id, name: g.principal.name || null }, conv: null, method: null, host: null, path: null, verdict: 'granted', tier: 'write-all', by: String(by).slice(0, 64) });
     // …and lowering one (any step down, a removal = none) writes the same-shaped `lowered` line (tier-verify L2)

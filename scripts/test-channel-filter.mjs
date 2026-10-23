@@ -1090,6 +1090,22 @@ console.log('⑱ lane lark-system-records (B-ef03): a vendor system notice is no
   const FX = M.load('src/channel-filter.js', FSRC.replace(G1, '').replace(G2, ''), 'no-system-guard');
   const xHits = F.RULE_KINDS.filter((k) => FX.matchRecord({ rules: [RULE_FOR[k]] }, sys, ctx).hit);
   ok(xHits.includes('keyword') && xHits.includes('not-contains') && xHits.includes('time-window'), 'CONTROL: a copy without the system guard lets the notice match (keyword / not-contains / time-window) — the census goes RED', xHits.join(','));
+  // lane gmail-draft-not-a-message (fb-9aa1d3bd1e): the account's unsent DRAFT is nobody's message either — the SAME census over a draft
+  // carrying the peer twin's very words, mention, file and place (a draft sits in its thread): NO kind hits it (no wake, no stash, no
+  // For-you, no judge), sentHit / placeHit / inferCandidate null, the estimate never counts it. CONTROL: a copy without the two draft
+  // guards lets the draft match ⇒ red.
+  const draft = makeRecord({ ...base, vendorId: 'om_draft', kind: 'draft', author: { id: 'ou_ada', name: 'Ada' }, replyTo: 'om_mine', threadKey: 'omt_t', root: 'om_mine' });
+  const dctx = { ...ctx, decisions: { ...decisions, [`${F.decisionKeyOf(RULE_FOR.decision)}|${draft.id}`]: { type: 'predicate', probability: 0.99 } } };
+  const draftHits = F.RULE_KINDS.filter((k) => F.matchRecord({ rules: [RULE_FOR[k]] }, draft, dctx).hit);
+  ok(draft.kind === 'draft' && !draftHits.length, 'RULE_KINDS × an unsent draft: NO kind hits it — the judge never treats a draft as a message to answer', draftHits.join(','));
+  ok(F.sentHit(draft, dctx) === null && F.PLACE_RULE_KINDS.every((k) => F.placeHit(RULE_FOR[k], draft, dctx) === null) && F.inferCandidate(draft, { ...dctx, convKind: 'dm' }) === null, 'sentHit / placeHit / inferCandidate answer null for a draft');
+  const estD = F.estimate(null, [draft, peer], { days: 7, now: NOW });
+  ok(estD && estD.matched === 1 && estD.total === 2, 'the estimate of "every message" counts the peer message, never the draft', J2(estD));
+  const DG1 = "  if (isDraftRecord(record)) return { hit: false, why: [] };\n", DG2 = "  if (isDraftRecord(rec)) return false;   // lane gmail-draft-not-a-message: an unsent draft went to nobody\n";
+  ok(FSRC.split(DG1).length === 2 && FSRC.split(DG2).length === 2, 'control setup: each draft guard is one line');
+  const FD = M.load('src/channel-filter.js', FSRC.replace(DG1, '').replace(DG2, ''), 'no-draft-guard');
+  const dHits = F.RULE_KINDS.filter((k) => FD.matchRecord({ rules: [RULE_FOR[k]] }, draft, dctx).hit);
+  ok(dHits.includes('keyword') && dHits.includes('mention') && dHits.includes('time-window'), 'CONTROL: a copy without the draft guards lets the draft match (keyword / mention / time-window) — the census goes RED', dHits.join(','));
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1 })) ok(x.pass, 'tree: ' + x.name, x.detail);
 }
 

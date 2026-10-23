@@ -13,6 +13,9 @@
 // (src/peer-text.js); the same origin's same report again is the record already made. A status change on a forwarded
 // report stamps `markedAt` (strictly increasing) and `marks` answers that origin — and only it — the marks since its
 // cursor; on the origin, `applyMarks` applies them to its OWN reports (the hub's note / name through the belt).
+// THE ONE WHO FILED IT IS TOLD (lane fleet-feedback-marks): a status change that names a release — setStatus (the hub's
+// feedback.handled, an instance's maintainer key) or an applied mark-back — hands `tell(notice, row)` the PURE
+// handledNotice (its note belted: another agent's words); the wiring queues it for the filing conversation's next turn.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -33,7 +36,7 @@ class FeedbackSync extends SyncStore {
   flush() { this.owner.flush(); }
 }
 
-function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(), log = () => { }, onNew = null }) {
+function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(), log = () => { }, onNew = null, tell = null }) {
   const file = path.join(dataDir, 'feedback.json');
   let state = { v: 1, records: [], dropped: 0, syncVersion: 0 };
   try {
@@ -49,6 +52,12 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
   let lastMark = state.records.reduce((m, r) => Math.max(m, Number(r.markedAt) || 0), 0);
   const nextMark = () => (lastMark = Math.max(now(), lastMark + 1));   // strictly increasing: the origin's cursor never skips a tie
   const belt = (s, max, kind = 'line') => (s == null || s === '' ? null : PT.toAgentText(s, { kind, max }));
+  /** lane fleet-feedback-marks: a mark naming a release → the filer's notice (never throws into the mark) */
+  const told = (rec) => {
+    const n = tell ? M.handledNotice(rec) : null;
+    if (!n) return;
+    try { tell({ ...n, note: belt(n.note, 2 * M.LIMITS.noteMax) }, M.publicRow(rec)); } catch (e) { log('[feedback] the filer of', rec.id, 'was not told:', e.message); }
+  };
 
   const save = () => {
     state.syncVersion = sync.version;
@@ -89,6 +98,7 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     state.records[i] = s.record;
     sync.set(id, M.publicRow(s.record));
     if (!save()) return { ok: false, code: 'write_failed', error: 'the change could not be written on the server — try again in a minute' };
+    told(s.record);
     return { ok: true, report: M.publicRow(s.record) };
   };
   /** THE HUB: a report another instance FORWARDED (POST /api/feedback/forward; `key` = its origin key's hash) → the record */
@@ -118,6 +128,7 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
   /** THE ORIGIN: the maintainer's marks (src/server/feedback-forward.js's pull), each applied to the OWN report it names */
   api.applyMarks = (marks) => {
     let applied = 0;
+    const done = [];
     for (const m of Array.isArray(marks) ? marks : []) {
       if (!m || typeof m !== 'object' || typeof m.id !== 'string') continue;
       const i = state.records.findIndex((r) => r.id === m.id && !r.origin);
@@ -127,8 +138,10 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
       state.records[i] = a.record;
       sync.set(m.id, M.publicRow(a.record));
       applied++;
+      done.push(a.record);
     }
     if (applied && !save()) return { ok: false, applied };
+    for (const rec of done) told(rec);   // lane fleet-feedback-marks: the mark-back tells the filer, once written
     return { ok: true, applied };
   };
   /** every report, newest first, as the owner reads them */
@@ -167,7 +180,8 @@ function automationVerbs({ store }) {
   });
   return {
     'feedback.handled': (args, { caller }) => {
-      const r = store.setStatus(args.id, 'handled', { by: caller.name || caller.sessionKey || caller.conversationId, version: args.version, note: args.note });
+      // lane fleet-feedback-marks: the maintainer key (no conversation) marks as THE MAINTAINERS — the sheet words it
+      const r = store.setStatus(args.id, 'handled', { by: caller.maintainer ? M.MAINTAINER_BY : caller.name || caller.sessionKey || caller.conversationId, version: args.version, note: args.note });
       // lane feedback-forward: a FORWARDED report's mark goes back to its origin on that instance's next pull (≤ 6 h)
       return r.ok ? { ok: true, id: r.report.id, status: r.report.status, version: r.report.handledVersion, by: r.report.handledBy, ...(r.report.origin ? { markBack: piece(r.report.origin.instance, 2 * M.LIMITS.name) } : {}) } : { ok: false, code: r.code, why: r.error };
     },

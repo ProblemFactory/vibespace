@@ -375,8 +375,8 @@ console.log('④ TWO-STEP CODES — the inventory row (design q-047 L1, lane vau
 
 console.log('⑧ THE PURPOSES AND THE PROVENANCE (lane vault-window-v2, design q-047 §3.1 / §3.2)');
 {
-  ok(VI.PURPOSE_IDS.join() === 'two-step,accounts,integrations,machines,storage,app-logins,passkeys,automation,agents,other' && new Set(VI.PURPOSE_IDS).size === VI.PURPOSES.length && VI.PURPOSES.filter((p) => p.onlyWhenAny).map((p) => p.id).join() === 'other',
-    'THE TABLE (pinned — a new purpose changes this line): nine purposes + Other (shown only when it holds a row), the rail\'s order, each id once', VI.PURPOSE_IDS);
+  ok(VI.PURPOSE_IDS.join() === 'two-step,accounts,integrations,machines,storage,app-logins,passkeys,automation,keys,agents,other' && new Set(VI.PURPOSE_IDS).size === VI.PURPOSES.length && VI.PURPOSES.filter((p) => p.onlyWhenAny).map((p) => p.id).join() === 'other',
+    'THE TABLE (pinned — a new purpose changes this line): ten purposes + Other (lane vault-paste-request: + Passwords & keys, the free `secret:` entries) (shown only when it holds a row), the rail\'s order, each id once', VI.PURPOSE_IDS);
   const onceIn = (V, rows) => { const groups = V.groupByPurpose(rows); const seen = new Map(); for (const g of groups) for (const r of g.rows) seen.set(r.id, (seen.get(r.id) || 0) + 1); return rows.filter((r) => seen.get(r.id) !== 1).map((r) => [r.id, seen.get(r.id) || 0]); };
   ok(inv.rows.length >= 15 && inv.rows.length === inv.stores.reduce((n, x) => n + x.count, 0) && onceIn(VI, inv.rows).length === 0 && inv.rows.every((r) => VI.PURPOSE_IDS.includes(VI.purposeOf(r))), `EVERY ROW of the real stores (${inv.rows.length}, all eight groups) lands in EXACTLY ONE purpose`, onceIn(VI, inv.rows));
   const P = (id) => VI.purposeOf(inv.rows.find((r) => r.id === id) || null);

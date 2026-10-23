@@ -7,6 +7,7 @@
 import { fetchJson, api, createModalShell, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
+import { rowToPick, principalOfRow } from './principal-picker-model.js';   // lane grants-unify: «除了» — a stored row drawn, a pick written
 import { renderApiCard } from './channel-api-card-view.js';   // B-2198 part 2: the ONE card (chat · Outbox · For you · here)
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
@@ -100,7 +101,11 @@ export async function showApiAccessDialog(app, cred) {
     // WHO, AT WHICH TIER
     const rows = (cur.grants || []).map((g) => ({ key: `${g.principal.kind}:${g.principal.id}`, principal: g.principal, tier: g.tier, perDay: g.perDay, allWrite: g.principal.kind === 'everyone' && g.tier !== 'read' }));
     const wire = () => rows.map((r) => ({ principal: r.principal, tier: r.tier, perDay: r.perDay, allWrite: !!r.allWrite }));
-    grantsNow = () => JSON.stringify(wire()); grantsBase = grantsNow();
+    // «除了» (lane grants-unify): with a Task Group or All agents granted, the members left OUT of this credential's tier
+    const exPick = rowToPick({ to: [], except: cur.except || [] }, rosterFromApp(app), { everyoneKey: 'everyone:*', notRunning: t('not running now'), deletedGroup: t('a deleted Task Group') });
+    let picker = null;
+    const exceptWire = () => { const all = [...rosterFromApp(app), ...exPick.extra]; return (picker ? picker.except() : exPick.except).map((k) => principalOfRow(all.find((x) => String(x.key) === String(k)))).filter(Boolean); };
+    grantsNow = () => JSON.stringify([wire(), exceptWire()]); grantsBase = grantsNow();
     if (!rows.length) body.appendChild(el('div', 'chan-api-none chat-status-dim', t('Agents cannot call this API until you grant it')));
     const list = el('div', 'chan-api-rows');
     const drawRows = () => {
@@ -131,8 +136,9 @@ export async function showApiAccessDialog(app, cred) {
         }
       }
     };
-    const picker = principalPicker({
+    picker = principalPicker({
       items: () => rosterFromApp(app), app, multi: true, selected: rows.map((r) => r.key), placeholder: t('Add an agent or group…'), label: t('Add an agent or group'), everyone: { key: 'everyone:*' },
+      except: { selected: exPick.except, extra: exPick.extra },
       onChange: (keys) => {
         for (let i = rows.length - 1; i >= 0; i--) if (!keys.includes(rows[i].key)) rows.splice(i, 1);
         for (const k of keys) if (!rows.some((r) => r.key === k)) { const i = k.indexOf(':'); rows.push({ key: k, principal: { kind: k.slice(0, i), id: k.slice(i + 1) }, tier: 'read', perDay: null }); }   // D1: a new principal starts at Read
@@ -164,7 +170,7 @@ export async function showApiAccessDialog(app, cred) {
     // a refused write is SAID and the dialog stays (fetchJson never throws — its answer's error was read as a success)
     saveGrants = async () => {
       let r;
-      try { r = await fetchJson(`/api/channels/api/${encodeURIComponent(cur.id)}/grants`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grants: wire() }) }); }
+      try { r = await fetchJson(`/api/channels/api/${encodeURIComponent(cur.id)}/grants`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grants: wire(), except: exceptWire() }) }); }
       catch (e) { r = { error: String((e && e.message) || e) }; }
       if (!r || r.error) { const why = (r && r.error) || t('server unreachable'); showToast(why, { type: 'error' }); return why; }
       close();

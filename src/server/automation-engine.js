@@ -38,11 +38,20 @@
  *     the next call (`verb_not_in_scope`, by name); a verb added rides the key's existing grants (a grant is per key ×
  *     conversation) — no new card. Audited `key.scopes` («scopes changed by the owner: +… -…») and `key.limits`. An open's
  *     card names the key's folders too (「所有路径」 for `/`).
+ *   · THE MAINTAINER KEY (lane fleet-feedback-marks): `useMaintainer({token, verb, args})` — PURE maintainerVerdict over
+ *     the instance's env sha (`maintainerSha()`, VIBESPACE_MAINTAINER_KEY_SHA; the compare is pairing-token's
+ *     tokenMatches), then the verb's OWN door with the maintainer as its caller (reach: the instance) — no store row, no
+ *     grant, no card, no vault entry, so the lock does not stop it. ONE audit line, subject `maintainer` (a mark's note:
+ *     «marked handled by the maintainer key · 2.369.NNN»); an unknown key is answered `maintainer_key_unknown`, not audited
+ *     (the agent door's own rule for an unknown token).
  */
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const A = require('../automation-keys.js');
+const { tokenMatches } = require('../pairing-token.js');   // lane fleet-feedback-marks: the maintainer key's sha, compared in constant time
+const GM = require('../grant-model.js');   // lane grants-unify: THE grant model (admits)
+const GS = require('./grants-store.js');   // lane grants-unify: a grant's WHO and REACH are rows of the ONE grants store
 const VB = require('../vault-blocked.js');   // PURE: a refusal's actor name (lane vault-locked-refusal-notice)
 
 const ACTION_TYPE = 'automation-ask';
@@ -65,13 +74,18 @@ function writeJsonAtomic(file, obj) {
  * @param {(token: string) => ({conversationId, sessionKey, name, live, groups: string[]} | null)} [o.callerOf]  a vsst_ → its conversation
  * @param {Object<string, (args: object, ctx: object) => (object|Promise<object>)>} [o.verbs]  the wired verbs' doors
  */
-function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date.now(), log = () => {}, randomBytes = crypto.randomBytes,
-  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, openFacts = {}, attention = null } = {}) {
+function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date.now(), log = () => {}, randomBytes = crypto.randomBytes, grants: grantsStore = null,
+  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, openFacts = {}, attention = null,
+  maintainerSha = () => process.env[A.MAINTAINER_SHA_ENV] } = {}) {   // lane fleet-feedback-marks: the instance's maintainer key, by its sha
   if (!dataDir || !vault) throw new TypeError('automation-engine: dataDir and vault are required');
   // lane automation-open-limits: the facts an open's limits are judged over — a folder's real path (null = missing) and the
   // hub's defaults for what an open does not name (the wiring hands the account store's and the instance's)
   const realpath = typeof openFacts.realpath === 'function' ? openFacts.realpath : (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
   const FILE = path.join(dataDir, A.STORE_FILE), AUDIT = path.join(dataDir, A.AUDIT_FILE);
+  // lane grants-unify: a grant's WHO (door automation-key-use) and its REACH (door automation-key-reach) are rows of the ONE grants
+  // store, resource = the grant's id; the record here keeps only what is no who (key, mode, stamps, a spent once)
+  const grantsOf = typeof grantsStore === 'function' ? grantsStore : () => grantsStore || GS.forDir(dataDir);
+  let frozen = new Map();   // grant id → its record as read (a pre-unify record's own `subject` / `reach` stay on disk one release, unread)
   const asks = new Map();      // askId → {askId, keyId, keyName, subject, sessionKey, who, verb, askedAt, waiters, todoId, timer}
   const byPair = new Map();    // `${keyId}|${subject}` → askId (ONE card per pair)
   const quiet = new Map();     // pair → until (a refusal / an expiry quiets it 10 minutes)
@@ -82,18 +96,44 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     let raw = null;
     try { raw = JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch (e) { if (!(e && e.code === 'ENOENT')) log(`automation-keys.json could not be read (${e.code || e.message}) — no key is usable until it is fixed`); return { keys: [], grants: [], opened: [], bad: !(e && e.code === 'ENOENT') }; }
     const keys = (raw && Array.isArray(raw.keys) ? raw.keys : []).map(A.keyOf).filter(Boolean);
-    const grants = (raw && Array.isArray(raw.grants) ? raw.grants : []).map(A.grantOf).filter((g) => g && g.id && keys.some((k) => k.id === g.keyId));
+    // lane grants-unify: each grant HYDRATED from the store — its use row (a conversation / a Task Group grant with no row is no
+    // grant: nobody), its reach row (none = 'opened'); an `external` grant (an outside caller, no conversation) keeps its mark
+    const st = grantsOf();
+    frozen = new Map();
+    const grants = [];
+    for (const r of raw && Array.isArray(raw.grants) ? raw.grants : []) {
+      if (!r || typeof r !== 'object' || typeof r.id !== 'string') continue;
+      frozen.set(r.id, r);
+      const reachRows = st ? st.rowsFor('automation-key-reach', r.id) : [];
+      const reachRow = reachRows.length ? reachRows[0] : null;
+      const { subject: _s, reach: _r, ...rest } = r;
+      let h;
+      if (r.subject === 'external') h = { ...rest, subject: 'external', reachRow };
+      else { const useRows = st ? st.rowsFor('automation-key-use', r.id) : []; if (!useRows.length) continue; h = { ...rest, use: useRows[0], reachRow }; }
+      const g = A.grantOf(h);
+      if (g && g.id && keys.some((k) => k.id === g.keyId)) grants.push(g);
+    }
     // lane conversations-archive-verb: the conversations each key OPENED (PURE reachVerdict's (a)) — persisted here, so the
     // opener still ends / archives its workers after a hub restart (a Map in memory lost them: the owner's hub, .331)
     const opened = (raw && Array.isArray(raw.opened) ? raw.opened : []).map(A.openedOf).filter((o) => o && keys.some((k) => k.id === o.keyId));
     return { keys, grants, opened, bad: false };
   }
   let db = read();
+  /** A grant as the file keeps it (lane grants-unify): never its who / reach — the store's rows are — except an outside
+   *  caller's `external` mark; a pre-unify record's own old fields are kept as they were (unread). */
+  const recordOf = (g) => ({ ...(frozen.get(g.id) || {}), id: g.id, keyId: g.keyId, mode: g.mode, at: g.at, by: g.by, spentAt: g.spentAt, ...(g.subject === 'external' ? { subject: 'external' } : {}) });
   function write(next) {
     const opened = Array.isArray(next.opened) ? next.opened : db.opened || [];
-    writeJsonAtomic(FILE, { v: 1, keys: next.keys, grants: next.grants, opened });
+    writeJsonAtomic(FILE, { v: 1, keys: next.keys, grants: next.grants.map(recordOf), opened });
     db = { keys: next.keys, grants: next.grants, opened, bad: false };
   }
+  /** THE ONE WRITER for a grant's rows (lane grants-unify): `use` / `reach` = {to, except} (an empty one removes the row). */
+  function writeRows(list, by) {
+    const st = grantsOf();
+    if (!st) return { ok: false, code: 'not_written', error: 'the grants store is not available' };
+    return st.setMany(list, String(by || 'user'));
+  }
+  const dropRows = (gs, by) => writeRows(gs.flatMap((g) => [{ door: 'automation-key-use', resource: g.id, to: [], except: [] }, { door: 'automation-key-reach', resource: g.id, to: [], except: [] }]), by);
   const OPENED_MAX = 2000;   // rows kept, newest last (a dispatcher's workers over months — a few hundred)
   /** A successful open's row — or the conversation id learned later for a row that had only the webui id. Never throws. */
   function noteOpened({ keyId, webuiId = null, conversationId = null }) {
@@ -133,8 +173,10 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     if (!k) return named('not_found');
     if (k.revokedAt) return { ok: true, already: true, key: A.publicKey(k) };
     const next = { ...k, revokedAt: now() };
+    const goneGrants = db.grants.filter((g) => g.keyId === k.id);
     try { write({ keys: db.keys.map((x) => (x.id === k.id ? next : x)), grants: db.grants.filter((g) => g.keyId !== k.id) }); }
     catch (e) { return named('failed', `the key list could not be written (${e.code || e.message})`); }
+    { const w = dropRows(goneGrants, by); if (!w.ok) log(`${k.id}: its grants' rows could not be removed (${w.code}) — the key is revoked all the same (a revoked key admits nobody)`); }
     try { const d = vault.secretDrop(A.entryOf(k.id)); if (d && !d.ok) log(`${k.id}: the vault entry could not be dropped (${d.code}) — the key is revoked all the same`); } catch { }
     for (const q of [...asks.values()]) if (q.keyId === k.id) settle(q, 'denied', { why: 'revoked' });
     audit({ keyId: k.id, subject: 'owner', verb: 'key.revoke', ok: true, by });
@@ -142,7 +184,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   }
   /** Grant a key to subjects (a conversation `session:<id>` / a Task Group `group:<id>`) — `always` unless a card's once.
    *  `reach` (lane key-instance-scope): 'opened' (the default) | 'instance' | {taskGroups: [ids]} — PURE reachOf, refused by name. */
-  function grant(keyId, subjects, { by = 'user', mode = 'always', fromAsk = false, reach = 'opened' } = {}) {
+  function grant(keyId, subjects, { by = 'user', mode = 'always', fromAsk = false, reach = 'opened', except = [] } = {}) {
     const k = keyById(keyId);
     if (!k) return named('not_found');
     if (k.revokedAt) return named('key_revoked');
@@ -153,19 +195,31 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     if (!A.MODES.includes(mode)) return named('bad_args', 'mode is always or once');
     const rch = A.reachOf(reach);
     if (rch === null) return named('bad_args', 'reach is opened, instance or {taskGroups: [task ids]}');
+    if (!Array.isArray(except)) return named('bad_args', 'except is a list of the conversations / Task Groups left out');
     const t = now(), added = [];
     const grants = db.grants.slice();
+    const rows = [];
     for (const s of list) {
       if (mode === 'always' && grants.some((g) => g.keyId === k.id && g.subject === s && g.mode === 'always')) continue;
-      const g = { id: newId('ag'), keyId: k.id, subject: s, mode, at: t, by: String(by).slice(0, 60), spentAt: null, reach: rch };
+      const id = newId('ag');
+      // lane grants-unify: the grant's WHO and REACH are rows of the ONE store (the record keeps the rest)
+      // «除了»: a Task Group grant may leave members out (a conversation grant names no members — none ride it)
+      const use0 = A.useRowForSubject(s), use = use0 && /^group:/.test(s) ? { ...use0, except } : use0, reachRow = A.reachRowFor(rch);
+      rows.push({ door: 'automation-key-use', resource: id, ...use });
+      if (reachRow) rows.push({ door: 'automation-key-reach', resource: id, ...reachRow });
+      const g = A.grantOf({ id, keyId: k.id, mode, at: t, by: String(by).slice(0, 60), spentAt: null, use: { door: 'automation-key-use', resource: id, ...use }, reachRow: reachRow ? { door: 'automation-key-reach', resource: id, ...reachRow } : null });
       grants.push(g); added.push(g);
     }
     if (!added.length) return { ok: true, added: [], already: true };
-    try { write({ keys: db.keys, grants }); } catch (e) { return named('failed', `the grants could not be written (${e.code || e.message})`); }
+    { const w = writeRows(rows, by); if (!w.ok) return named('failed', `the grants could not be written (${w.code}: ${w.error || ''})`); }
+    try { write({ keys: db.keys, grants }); } catch (e) { dropRows(added, 'rollback'); return named('failed', `the grants could not be written (${e.code || e.message})`); }
     for (const g of added) audit({ keyId: k.id, subject: g.subject, verb: 'key.grant', ok: true, by, ask: mode === 'once' ? 'once' : null, args: { reach: A.reachKind(g.reach) } });
     // a card up for a pair an ALWAYS grant now covers (the owner granted in the WINDOW meanwhile) settles allowed — a card's
     // own answer (once or always) settles only that card, in answer() (q-048 verify M3: one card per verb)
-    if (mode === 'always' && !fromAsk) for (const q of [...asks.values()]) if (q.keyId === k.id && added.some((g) => g.subject === q.subject || q.groups.includes(g.subject))) settle(q, 'always', { answeredBy: by, why: 'granted' });
+    // lane grants-unify: «covers» is THE model's answer over the new grant's use row (its own conversation, one of its
+    // Task Groups — minus the members the owner left out), never a hand-written membership test
+    const covers = (g, q) => GM.admits([A.useRowOf(g)].filter(Boolean), { conversationKeys: [String(q.subject).replace(/^session:/, '')], groupIds: (q.groups || []).map((x) => String(x).replace(/^group:/, '')) }).ok;
+    if (mode === 'always' && !fromAsk) for (const q of [...asks.values()]) if (q.keyId === k.id && added.some((g) => covers(g, q))) settle(q, 'always', { answeredBy: by, why: 'granted' });
     return { ok: true, added };
   }
   /** 编辑… (lane key-folder-picker-all — the owner's edit after minting): the key's verbs and limits become his pick through
@@ -197,10 +251,45 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     if (!k || k.revokedAt) return named('key_revoked');
     const rch = A.reachOf(reach);
     if (rch === null) return named('bad_args', 'reach is opened, instance or {taskGroups: [task ids]}');
-    const next = { ...g, reach: rch };
+    // lane grants-unify: the reach is the grant's reach row (the members it left out kept while the kind stays)
+    const was = g.reachRow ? GM.normRow(g.reachRow) : null;
+    const rr = A.reachRowFor(rch);
+    const keepExcept = rr && was && was.ok && A.reachKind(rch) === A.reachKind(g.reach) ? was.row.except : [];
+    { const w = writeRows([{ door: 'automation-key-reach', resource: g.id, to: rr ? rr.to : [], except: rr ? keepExcept : [] }], by); if (!w.ok) return named('failed', `the grants could not be written (${w.code}: ${w.error || ''})`); }
+    const next = A.grantOf({ ...g, reach: undefined, reachRow: rr ? { door: 'automation-key-reach', resource: g.id, to: rr.to, except: keepExcept } : null });
     try { write({ keys: db.keys, grants: db.grants.map((x) => (x.id === g.id ? next : x)) }); } catch (e) { return named('failed', `the grants could not be written (${e.code || e.message})`); }
     audit({ keyId: g.keyId, subject: g.subject, verb: 'key.reach', ok: true, by, args: { reach: A.reachKind(rch) } });
     return { ok: true, grant: { id: next.id, subject: next.subject, mode: next.mode, at: next.at, by: next.by, spentAt: next.spentAt, reach: next.reach } };
+  }
+  /** «除了» (lane grants-unify): the members a Task Group grant leaves OUT (`except` — they never use the key through it) and
+   *  the conversations its reach leaves out (`reachExcept`) — the grant's two rows rewritten through the ONE writer (a list
+   *  absent = the row as it is); audited `key.except`. → { ok, grant } | a named refusal. */
+  function setExcept(grantId, { except, reachExcept } = {}, { by = 'user' } = {}) {
+    const g = db.grants.find((x) => x.id === grantId);
+    if (!g) return named('not_found');
+    const k = keyById(g.keyId);
+    if (!k || k.revokedAt) return named('key_revoked');
+    for (const [f, v] of [['except', except], ['reachExcept', reachExcept]]) if (v !== undefined && !Array.isArray(v)) return named('bad_args', `${f} is a list of the conversations / Task Groups left out`);
+    if (except === undefined && reachExcept === undefined) return named('bad_args', 'name except and / or reachExcept');
+    const rows = [];
+    let use = g.use, reachRow = g.reachRow;
+    if (except !== undefined) {
+      const n = g.use ? GM.normRow(g.use) : null;
+      if (!n || !n.ok) return named('failed', 'this grant\'s row cannot be read — take it back and grant it again');
+      if (except.length && !n.row.to.some((e) => e.kind === 'group' || e.kind === 'everyone')) return named('bad_args', 'a grant to one conversation has no members to leave out');
+      use = { door: 'automation-key-use', resource: g.id, to: n.row.to, except };
+      rows.push(use);
+    }
+    if (reachExcept !== undefined) {
+      const n = g.reachRow ? GM.normRow(g.reachRow) : null;
+      if (!n || !n.ok) { if (reachExcept.length) return named('bad_args', 'this grant reaches only what it opened — nothing to leave out'); }
+      else { reachRow = { door: 'automation-key-reach', resource: g.id, to: n.row.to, except: reachExcept }; rows.push(reachRow); }
+    }
+    if (rows.length) { const w = writeRows(rows, by); if (!w.ok) return named(w.code === 'bad_except' || w.code === 'except_conflicts' ? 'bad_args' : 'failed', `the exceptions could not be written (${w.code}: ${w.error || ''})`); }
+    const next = A.grantOf({ ...g, reach: undefined, use, reachRow });
+    if (next) db = { ...db, grants: db.grants.map((x) => (x.id === g.id ? next : x)) };
+    audit({ keyId: g.keyId, subject: g.subject, verb: 'key.except', ok: true, by, args: { except: Array.isArray(except) ? except.length : null, reachExcept: Array.isArray(reachExcept) ? reachExcept.length : null } });
+    return { ok: true, grant: { id: g.id, subject: g.subject } };
   }
   /** 边界… (lane automation-open-limits): the limits alone — the edit with the key's own verbs (limits are required here). */
   const setLimits = (keyId, limits, opts = {}) => edit(keyId, { limits: limits === undefined ? null : limits }, opts);
@@ -208,6 +297,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   function ungrant(grantId, { by = 'user' } = {}) {
     const g = db.grants.find((x) => x.id === grantId);
     if (!g) return named('not_found');
+    { const w = dropRows([g], by); if (!w.ok) return named('failed', `the grants could not be written (${w.code}: ${w.error || ''})`); }   // lane grants-unify: nobody, at once
     try { write({ keys: db.keys, grants: db.grants.filter((x) => x.id !== grantId) }); } catch (e) { return named('failed', `the grants could not be written (${e.code || e.message})`); }
     audit({ keyId: g.keyId, subject: g.subject, verb: 'key.ungrant', ok: true, by });
     return { ok: true };
@@ -221,6 +311,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     if (!k) return named('not_found');
     const gone = db.grants.filter((g) => g.keyId === k.id && A.grantEnded(g, live));
     if (!gone.length) return { ok: true, removed: [] };
+    { const w = dropRows(gone, by); if (!w.ok) return named('failed', `the grants could not be written (${w.code}: ${w.error || ''})`); }
     try { write({ keys: db.keys, grants: db.grants.filter((g) => !gone.includes(g)) }); } catch (e) { return named('failed', `the grants could not be written (${e.code || e.message})`); }
     audit({ keyId: k.id, subject: 'owner', verb: 'key.prune', ok: true, by, note: A.pruneWords(gone.map((g) => g.subject)) });
     return { ok: true, removed: gone.map((g) => g.subject) };
@@ -228,7 +319,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   /** The window's list: every key (public fields) with its grants (never a value, never a digest). */
   function list() {
     db = read();
-    return { ok: true, state: vaultState(), keys: db.keys.map((k) => ({ ...A.publicKey(k), grants: db.grants.filter((g) => g.keyId === k.id).map((g) => ({ id: g.id, subject: g.subject, mode: g.mode, at: g.at, by: g.by, spentAt: g.spentAt, reach: g.reach })) })), asks: listAsks() };
+    // lane grants-unify: + each grant's exceptions (the members its Task Group grant / its reach leaves out), as the store keeps them
+    const exceptOf = (row) => { const n = row ? GM.normRow(row) : null; return n && n.ok ? n.row.except : []; };
+    return { ok: true, state: vaultState(), keys: db.keys.map((k) => ({ ...A.publicKey(k), grants: db.grants.filter((g) => g.keyId === k.id).map((g) => ({ id: g.id, subject: g.subject, mode: g.mode, at: g.at, by: g.by, spentAt: g.spentAt, reach: g.reach, except: exceptOf(g.use), reachExcept: exceptOf(g.reachRow) })) })), asks: listAsks() };
   }
   /** The Vault window's inventory rows (src/server/vault-contents.js, group «Automation keys»): one row per live key —
    *  names and dates only; `vaultReveal` = its value, ONE per reveal (the contents' door audits it `vault-reveal`). */
@@ -458,7 +551,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       verdict = A.useVerdict({ key: keyById(key.id), grants: liveGrants(), subject, subjectGroups: groups, subjectLive: caller.live !== false, verb, vaultState: vaultState() });
       // once: the grant the answer wrote — spent by THIS call (a joined call finds it spent and asks again)
     }
-    if (!verdict.ok) return done({ ...named(verdict.code, verdict.code === 'verb_not_in_scope' ? `the key "${key.name}" does not hold ${verb} — the owner adds it with Edit… in the Vault window` : null), args: v0.args }, key.id, asked ? { ask: asked } : {});
+    // lane grants-unify: a conversation the owner LEFT OUT of the key's Task Group grant is refused BY NAME — never a first-use card
+    // asking the owner again about the very conversation he excluded
+    if (!verdict.ok) return done({ ...named(verdict.code, verdict.code === 'verb_not_in_scope' ? `the key "${key.name}" does not hold ${verb} — the owner adds it with Edit… in the Vault window` : verdict.code === 'excepted' ? `the owner left this conversation out of the Task Group grant of the key "${key.name}" (an exception on the key's row in the Vault window) — ask the owner to lift it, or to grant the key to this conversation` : null), args: v0.args }, key.id, asked ? { ask: asked } : {});
     // THE LIMITS (lane automation-open-limits — the q-048 verify's M2): WHAT an open asks for, against its key's limits as
     // they stand NOW (re-read — the owner may have edited them while a card waited): AFTER the grant, BEFORE the grant is
     // spent, the spend authorizer runs and anything spawns (impl → conversation-ops openConversation). A refused open is
@@ -479,7 +574,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     // OPENED it (the store's rows), a grant of the key names it (the conversation or one of its Task Groups), or it is the
     // caller itself (A.reachVerdict) — the owner's grants and the key's own opens bound what it reaches, never the caller's say-so
     // + the GRANT'S REACH this use rides (lane key-instance-scope: the widest of the caller's always-grants, else the once-grant's — useVerdict)
-    const reach = (target) => { const v = A.reachVerdict({ keyId: key.id, caller: caller.conversationId, target, grants: db.grants, opened: db.opened, reach: verdict.reach }); if (v.ok && v.by === 'opener' && target && target.webuiId && target.conversationId) noteOpened({ keyId: key.id, webuiId: target.webuiId, conversationId: target.conversationId }); return v; };
+    const reach = (target) => { const v = A.reachVerdict({ keyId: key.id, caller: caller.conversationId, target, grants: db.grants, opened: db.opened, reach: verdict.reach, reachRows: verdict.reachRows }); if (v.ok && v.by === 'opener' && target && target.webuiId && target.conversationId) noteOpened({ keyId: key.id, webuiId: target.webuiId, conversationId: target.conversationId }); return v; };
     try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); }
     catch (e) { return done({ ...named('failed', String((e && e.message) || e).slice(0, 200)), args: v0.args }, key.id, asked ? { ask: asked } : {}); }
     // THE OPENER'S ROW: a successful open is remembered by the key that made it (the webui id now, the conversation id when known)
@@ -491,14 +586,38 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     return { ok: true, keyId: key.id, key: key.name, verb, result, ms: now() - t0 };
   }
 
+  // ── THE MAINTAINER KEY (lane fleet-feedback-marks — the header's last row) ──
+  const MAINTAINER = Object.freeze({ maintainer: true, name: A.MAINTAINER_NAME, conversationId: null, sessionKey: null, live: true, groups: Object.freeze([]) });
+  /** ONE maintainer call: the verdict (the key, then its two verbs), the args, the verb's own door. → use()'s answer shape. */
+  async function useMaintainer({ token = '', verb = '', args = {} } = {}) {
+    const t0 = now();
+    let sha = null;
+    try { sha = maintainerSha(); } catch { sha = null; }
+    const v = A.maintainerVerdict({ token, sha, verb, matches: tokenMatches });
+    if (!v.ok && v.code === 'maintainer_key_unknown') return named(v.code, v.why);   // an unknown bearer: answered, never audited
+    const done = (r, a = null) => { audit({ keyId: null, subject: A.MAINTAINER_SUBJECT, verb, args: a, ok: r.ok, code: r.code, note: r.ok ? A.maintainerNote(verb, a) : null }); return r; };
+    if (!v.ok) return done(named(v.code, v.why));
+    const v0 = A.scopeOf(verb).args(args);
+    if (!v0.ok) return done(v0);
+    const impl = verbs[verb];
+    if (typeof impl !== 'function') return done(named('verb_not_wired', `${verb} is not wired on this instance`), v0.args);
+    let result;
+    try { result = await impl(v0.args, { caller: MAINTAINER, keyId: null, identity: A.MAINTAINER_SUBJECT, grant: null, reach: () => ({ ok: true, by: 'instance' }) }); }
+    catch (e) { return done(named('failed', String((e && e.message) || e).slice(0, 200)), v0.args); }
+    if (!result || result.ok === false) return done(named((result && result.code) || 'failed', result && result.why), v0.args);
+    done({ ok: true }, v0.args);
+    return { ok: true, keyId: null, key: A.MAINTAINER_NAME, verb, result, ms: now() - t0 };
+  }
+
   /** The keys THIS caller may use now (names + scopes + how it holds each — never a value). */
   function keysFor(caller) {
     db = read();
     const subject = caller && caller.conversationId ? `session:${caller.conversationId}` : null;
     if (!subject) return [];
-    const mine = A.callerSubjects(caller.conversationId, caller.groups || []);
+    // lane grants-unify: THE ONE ADMISSION over each grant's use row (its own conversation, a Task Group — minus the members left out)
+    const facts = { conversationKeys: [String(caller.conversationId)], groupIds: caller.groups || [] };
     return db.keys.filter((k) => !k.revokedAt).map((k) => {
-      const gs = db.grants.filter((g) => g.keyId === k.id && mine.includes(g.subject) && !(g.mode === 'once' && g.spentAt));
+      const gs = db.grants.filter((g) => g.keyId === k.id && g.subject !== 'external' && GM.admits([A.useRowOf(g)].filter(Boolean), facts).ok && !(g.mode === 'once' && g.spentAt));
       const always = gs.filter((g) => g.mode === 'always');
       return gs.length ? { id: k.id, name: k.name, scopes: k.scopes.slice(), via: gs.map((g) => ({ subject: g.subject, mode: g.mode, reach: g.reach })), limits: k.limits,
         reach: always.length ? A.widestReach(always.map((g) => g.reach)) : gs[0].reach } : null;   // lane key-instance-scope: the reach a use would ride (useVerdict's)
@@ -527,7 +646,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     return { ok: true, lines: lines.slice(-Math.max(1, Math.min(200, Number(limit) || 50))).reverse() };
   }
 
-  return { list, mint, revoke, grant, ungrant, pruneEnded, setReach, edit, setLimits, use, answer, reconcile, keysFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
+  return { list, mint, revoke, grant, ungrant, pruneEnded, setReach, setExcept, edit, setLimits, use, useMaintainer, answer, reconcile, keysFor, auditFor, auditOfKey, vaultRows, vaultReveal, listAsks, ACTION_TYPE, _asks: asks };
 }
 
 module.exports = { create, ACTION_TYPE };

@@ -423,6 +423,8 @@ console.log('— A. New Session: the worktree checkbox at 375×667');
   const openWith = async (backend) => ev(`(() => {
     window.app.hideDialogs();
     window.app.showNewSessionDialog({ backend: ${JSON.stringify(backend)} });
+    // lane new-session-form: with no git folder chosen the tick lives under «More options» (the fleet census folds it) — open the fold to measure it
+    document.getElementById('ns-more-toggle')?.setAttribute('aria-expanded', 'true');
     const row = document.getElementById('row-worktree');
     const cb = document.getElementById('input-worktree');
     const dlg = document.getElementById('dialog-new-session');

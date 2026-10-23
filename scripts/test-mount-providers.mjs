@@ -267,7 +267,8 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
       for (const presets of [[], [{ key: 'acme', label: 'Acme' }]]) {
         globalThis.__presets = presets;
         await s._showAddMountDialog();
-        out['connect' + presets.length] = dlg.fields.map((f) => sorted({ ...f, when: f.when && TYPES.flatMap((t) => [f.when({ type: t }), f.when({ type: t, clientChoice: 'custom', gmailClientChoice: 'custom', driveMode: 'shared-drive' })]), autocomplete: typeof f.autocomplete === 'function' ? [f.autocomplete({ fromHost: { value: 'h1' } }), f.autocomplete({})] : f.autocomplete }));
+        // lane path-field: `pathKind` is a NEW cell (sftp's key path is a FILE for THE path field) — the base never had it
+        out['connect' + presets.length] = dlg.fields.map(({ pathKind, ...f }) => sorted({ ...f, when: f.when && TYPES.flatMap((t) => [f.when({ type: t }), f.when({ type: t, clientChoice: 'custom', gmailClientChoice: 'custom', driveMode: 'shared-drive' })]), autocomplete: typeof f.autocomplete === 'function' ? [f.autocomplete({ fromHost: { value: 'h1' } }), f.autocomplete({})] : f.autocomplete }));
         const all = Object.fromEntries(dlg.fields.map((f) => [f.key, f.key === 'params' || f.key === 'extraParams' ? 'a = 1\nb = 2' : f.key + '-v']));
         for (const t of TYPES) for (const ch of ['custom', '']) { calls.length = 0; try { await dlg.onSubmit({ ...all, type: t, clientChoice: ch, gmailClientChoice: ch }, { close() {} }); } catch {} out[`submit-${t}-${ch}-${presets.length}`] = sorted(calls.find((c) => c.url.endsWith('/api/mounts'))?.body); }
       }
@@ -283,6 +284,7 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     globalThis.fetch = async (url, opts) => (String(url).endsWith('/drive-defaults') ? { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({ presets: globalThis.__presets }), text: async () => JSON.stringify({ presets: globalThis.__presets }) } : fetch0(url, opts));
     const before = await facts(await bundle(baseSm, 'base')), after = await facts(await bundle(smSrc, 'tree2'));
     const diffs = Object.keys(before).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(after[k]));
+    ok(PROV.clientRows().find((r) => r.id === 'sftp')?.fields?.find?.((f) => f.key === 'keyPath')?.pathKind === 'file' || JSON.stringify(PROV.clientRows()).includes('"key":"keyPath","label":"Private key path (absolute) — or use password","placeholder":"~/.ssh/id_ed25519","autocomplete":"local","pathKind":"file"'), '⑤ lane path-field: sftp\'s key path declares pathKind file (THE path field takes a file there)');
     ok(diffs.length === 0 && Object.keys(before).length === Object.keys(after).length, `⑤ DIFFERENTIAL: the base client and this tree answer the same over every real provider (${Object.keys(before).length} facts: Connect fields ×2 preset sets, ${TYPES.length * 4} submit bodies, Edit top/child, names, D2)`, diffs.slice(0, 3).map((k) => { const a = [].concat(before[k]), b = [].concat(after[k]); const i = a.findIndex((x, n) => x !== b[n]); return `${k}[${i}]: ${String(a[i]).slice(0, 300)} ≠ ${String(b[i]).slice(0, 300)}`; }).join('\n    '));
   }
 }

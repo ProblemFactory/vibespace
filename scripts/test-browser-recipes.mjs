@@ -157,7 +157,7 @@ ok(!/exit machine/i.test(read('data/bin/vibespace-browser')), 'the CLI spells no
   const src = read('data/bin/vibespace-browser');
   const line = '    if (!set.length && r.recipe) console.log(r.recipe);\n';
   fs.writeFileSync(path.join(MUT, 'vibespace-browser'), src.replace(line, ''), { mode: 0o755 });
-  fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(MUT, 'vibespace-browser-verbs.js'));
+  fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(MUT, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(MUT, 'cli-call.js'));
   fs.copyFileSync(path.join(REPO, 'src/browser-stuck.js'), path.join(MUT, 'vibespace-browser-stuck.js'));
   const bad = await statusCensus(path.join(MUT, 'vibespace-browser'));
   ok(src.includes(line) && bad.length > 0 && bad.some((b) => b.startsWith('ephemeral ⇒ the pointer')), 'CONTROL: a CLI without the pointer FAILS ④', bad.join(' | ').slice(0, 300));

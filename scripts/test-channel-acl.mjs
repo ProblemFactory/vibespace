@@ -17,6 +17,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+// lane grants-unify: a conversation's OWN reach rows (its access, the owner's, approved requests) are rows of THE grants store —
+// read back through the engine's reach view (the account's and a rule's derived rows left out)
+const ownRows = (eng, key) => (eng.reachView(eng.store.index.peek(key)) || { entries: [] }).entries.filter((g) => g.scope && g.scope.kind === 'conversation' && !g.derived);
+
 import { engineSource } from './channels-engine-src.mjs';   // lane dc-channels-seams: the engine + its three family files as one text
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -139,13 +143,13 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   ok(JSON.stringify(hidden) === JSON.stringify(nowhere) && hidden.code === 'not-found', 'a HIDDEN conversation and a NONEXISTENT one give byte-identical answers');
   // THE §17 NEGATIVE CONTROL: user grant + assignment grant, un-assign
   await eng.setReach(A, C, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, level: 'visible' });
-  const userRow = () => eng.store.index.snapshot().conversations[KEY].reachEntries.find((g) => g.origin === 'user');
+  const userRow = () => ownRows(eng, KEY).find((g) => g.origin === 'user');
   const userBefore = JSON.stringify(userRow());
   await eng.setAssignment(A, C, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, mode: 'all' });
-  const rows = eng.store.index.snapshot().conversations[KEY].reachEntries;
+  const rows = ownRows(eng, KEY);
   ok(rows.length === 2 && rows.some((g) => g.origin === 'access') && rows.some((g) => g.origin === 'user'), 'access (the compatibility write) adds ITS OWN row beside the user\'s');
   await eng.setAssignment(A, C, null);
-  const rowsAfter = eng.store.index.snapshot().conversations[KEY].reachEntries;
+  const rowsAfter = ownRows(eng, KEY);
   ok(rowsAfter.length === 1 && JSON.stringify(rowsAfter[0]) === userBefore, 'NEGATIVE CONTROL: removing the access removes ONLY its own row — the user grant is byte-identical');
   ok(eng.reachFor(AG, eng.adapterRecords().adapters.find((r) => r.id === A), eng.store.index.snapshot().conversations[KEY]).level === 'visible', '…and the agent still sees the conversation');
   ok(eng.listFor(AG).conversations.some((c) => c.key === KEY && c.level === 'visible') && eng.readFor(AG, A, C, {}).ok, 'now listed and readable');
@@ -154,14 +158,14 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   // R4: TWO principals with access — removing ONE takes exactly its own row
   const B = { kind: 'agent', id: 'agent-2', name: 'Other' };
   await eng.setAccess(A, { kind: 'conversation', convId: C }, [{ principal: { kind: 'agent', id: 'agent-1', name: 'Worker' } }, { principal: B }]);
-  const two = eng.store.index.snapshot().conversations[KEY].reachEntries.filter((g) => g.origin === 'access').map((g) => g.principal.id).sort().join();
+  const two = ownRows(eng, KEY).filter((g) => g.origin === 'access').map((g) => g.principal.id).sort().join();
   await eng.setAccess(A, { kind: 'conversation', convId: C }, [{ principal: B }]);
-  const one = eng.store.index.snapshot().conversations[KEY].reachEntries.filter((g) => g.origin === 'access').map((g) => g.principal.id).join();
-  ok(two === 'agent-1,agent-2' && one === 'agent-2' && JSON.stringify(eng.store.index.snapshot().conversations[KEY].reachEntries.find((g) => g.origin === 'user')) === userBefore, `two access rows ⇒ two grants; removing ONE principal removes exactly its row (${two} → ${one}); the user\'s grant untouched`);
+  const one = ownRows(eng, KEY).filter((g) => g.origin === 'access').map((g) => g.principal.id).join();
+  ok(two === 'agent-1,agent-2' && one === 'agent-2' && JSON.stringify(ownRows(eng, KEY).find((g) => g.origin === 'user')) === userBefore, `two access rows ⇒ two grants; removing ONE principal removes exactly its row (${two} → ${one}); the user\'s grant untouched`);
   await eng.setAccess(A, { kind: 'conversation', convId: C }, []);
   // remove the user row
   await eng.setReach(A, C, { principal: { kind: 'agent', id: 'agent-1' }, level: null });
-  ok(eng.store.index.snapshot().conversations[KEY].reachEntries.length === 0 && eng.readFor(AG, A, C, {}).code === 'not-found', 'removing the user grant hides it again');
+  ok(ownRows(eng, KEY).length === 0 && eng.readFor(AG, A, C, {}).code === 'not-found', 'removing the user grant hides it again');
 
   // REQUEST flow: requestable → request → For-you item → approve ⇒ exactly ONE grant
   // lane channel-agent-watch W2: a group chat is in the account's directory by default (requestable by its title) — the
@@ -172,7 +176,7 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   ok(rq0.code === 'not-found', 'a HIDDEN conversation (the account lists no titles) cannot be requested (uniform not-found — no oracle)');
   await eng.setAgentDirectory(A, { groups: true });
   await eng.setReach(A, C, { principal: { kind: 'group', id: 'g1', name: 'Ops' }, level: 'requestable' });
-  const groupBefore = JSON.stringify(eng.store.index.snapshot().conversations[KEY].reachEntries);
+  const groupBefore = JSON.stringify(ownRows(eng, KEY));
   ok(eng.listFor(AG).conversations.some((c) => c.key === KEY && c.level === 'requestable') && eng.readFor(AG, A, C, {}).code === 'not-found', 'requestable: listed as such, still not readable');
   const rq = await eng.request(AG, A, C, 'I need to see the ops room to answer the alert');
   ok(rq.ok && rq.request.status === 'open' && rq.request.todoId, 'the request is filed with a For-you item');
@@ -181,7 +185,7 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   const rq2 = await eng.request(AG, A, C, 'again');
   ok(rq2.ok && rq2.already === true && rq2.request.id === rq.request.id, 'a second request from the same agent is the same open request (no spam)');
   const dec = await eng.decideRequest(rq.request.id, true);
-  const rowsNow = eng.store.index.snapshot().conversations[KEY].reachEntries;
+  const rowsNow = ownRows(eng, KEY);
   ok(dec.ok && dec.grant && dec.grant.origin === 'request' && dec.grant.level === 'visible' && dec.grant.principal.id === 'agent-1', 'approval writes EXACTLY ONE visible grant for (that agent, that conversation) with origin request');
   ok(rowsNow.length === 2 && JSON.stringify(rowsNow.filter((g) => g.origin !== 'request')) === groupBefore, 'NEGATIVE CONTROL: the group\'s requestable default is byte-identical after the approval');
   ok(userTodos.get(rq.request.todoId).status === 'done' && userTodos.get(rq.request.todoId).resolvedBy === 'system', 'the request\'s For-you item is resolved by the producer');
@@ -215,18 +219,48 @@ console.log('§2b account + pattern grants through the REAL engine');
   ok(seen.length === 2 && seen.every((c) => c.level === 'visible'), 'the account grant makes EVERY conversation of the account visible (both fake rooms)', JSON.stringify(seen.map((c) => c.key)));
   ok(eng.listFor(AG).conversations.every((c) => c.adapterId === A), 'NEGATIVE CONTROL: …and nothing of any OTHER account', JSON.stringify(eng.listFor(AG).conversations.map((c) => c.key)));
   await eng.setReach(A, C, { principal: W, level: 'visible' });
-  const userBefore = JSON.stringify(eng.store.index.snapshot().conversations[KEY].reachEntries);
+  const userBefore = JSON.stringify(ownRows(eng, KEY));
   await eng.setScopeAssignment(A, { kind: 'account' }, null);
   ok(eng.listFor(AG).conversations.filter((c) => c.adapterId === A).map((c) => c.key).join() === KEY, 'un-assigning the account removes ONLY its grant — the user\'s hand-written row on one room still stands');
-  ok(JSON.stringify(eng.store.index.snapshot().conversations[KEY].reachEntries) === userBefore, '…byte-identical');
+  ok(JSON.stringify(ownRows(eng, KEY)) === userBefore, '…byte-identical');
   await eng.setReach(A, C, { principal: W, level: null });
   const pr = await eng.setScopeAssignment(A, { kind: 'pattern' }, { principal: W, mode: 'all', pattern: { match: 'any', rules: [{ kind: 'title', value: 'announce' }] } });
   ok(pr.ok && pr.assignment && pr.assignment.scope && pr.assignment.scope.kind === 'pattern', 'a PATTERN assignment is accepted', JSON.stringify(pr));
   const pseen = eng.listFor(AG).conversations.filter((c) => c.adapterId === A).map((c) => c.key);
   ok(pseen.join() === `${A}/fake-poll-announce`, 'the pattern grant reaches EXACTLY the matching conversation (Announcements), not the Ops room', JSON.stringify(pseen));
-  ok(!(eng.store.index.snapshot().conversations[`${A}/fake-poll-announce`].reachEntries || []).length, 'the pattern grant is DERIVED at read — no row was written to the conversation');
+  ok(!ownRows(eng, `${A}/fake-poll-announce`).length, 'the pattern grant is DERIVED at read — no row was written to the conversation');
   await eng.setScopeAssignment(A, { kind: 'pattern', id: pr.assignment.scope.id }, null);
   ok(eng.listFor(AG).conversations.filter((c) => c.adapterId === A).length === 0, 'removing the pattern hides it again at once (nothing to clean up)');
+  eng.stop();
+}
+
+// ── §2d THE NEW SESSION FORM'S TICK (lane new-session-form): a tick in 「账号 · 以你的身份」 writes ONE access row
+// {principal: the new conversation, authority: draft} into the SAME account grain the Channels window writes, through the
+// same whole-list access write with the stamp it read (src/new-session-spec.js withCreateAccess) — no second store, and
+// the conversation then reaches the account through channel-acl's own effective() like any granted agent.
+console.log('§2d the New Session form\'s create-time access row (the same store, the same verdict)');
+{
+  const S = require(path.join(REPO, 'src/new-session-spec.js'));
+  const F = require(path.join(REPO, 'src/channel-filter.js'));
+  const dataDir = path.join(ROOT, 'e-ns');
+  const eng = ENG.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, log: { log() {}, warn() {}, error() {} }, liveSessions: () => [{ cid: 'cid-new', name: 'New one', groups: [] }, { cid: 'agent-1', name: 'Worker', groups: ['T-ir'] }] });
+  await eng.pass(A, { force: true });
+  const NEW = { kind: 'agent', id: 'cid-new', name: 'New one', groups: [], msgLevelFor: () => 'none' };
+  const GRP = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: ['T-ir'], msgLevelFor: () => 'none' };
+  const grain = () => eng.adapterView(eng.adapterRecords().adapters.find((r) => r.id === A)).accountGrain;
+  const g0 = await eng.setAccess(A, { kind: 'account' }, [{ principal: { kind: 'group', id: 'T-ir', name: 'IR' }, authority: 'draft' }]);
+  ok(g0.ok && eng.listFor(GRP).conversations.some((c) => c.adapterId === A) && !eng.listFor(NEW).conversations.some((c) => c.adapterId === A), 'before the tick: the group\'s member reaches the account, the new conversation does not (everything defaults to hidden)');
+  const before = grain();
+  const list = S.withCreateAccess(before.access, 'cid-new');
+  const w = await eng.setAccess(A, { kind: 'account' }, list, { base: F.grainStamp({ access: before.access, watchers: before.watchers }) });
+  ok(w.ok, 'the tick\'s whole list (the stored rows + ONE agent row) is accepted by the access write, the stamp it read as `base`', JSON.stringify(w));
+  const after = grain().access;
+  ok(after.length === 2 && after.some((r) => r.principal.kind === 'group' && r.principal.id === 'T-ir' && r.authority === 'draft') && after.some((r) => r.principal.kind === 'agent' && r.principal.id === 'cid-new' && r.authority === 'draft'), 'the grain now holds the group\'s row untouched beside the conversation\'s draft row', JSON.stringify(after));
+  const seen = eng.listFor(NEW).conversations.filter((c) => c.adapterId === A);
+  ok(seen.length > 0 && seen.every((c) => c.level === 'visible'), 'the new conversation now sees the account\'s conversations — channel-acl\'s own verdict, through its own row', JSON.stringify(seen.map((c) => c.key)));
+  ok(S.withCreateAccess(grain().access, 'cid-new') === null, 'a second tick writes nothing (the conversation already holds its row)');
+  const stale = await eng.setAccess(A, { kind: 'account' }, S.withCreateAccess(before.access, 'cid-other'), { base: F.grainStamp({ access: before.access, watchers: before.watchers }) });
+  ok(!stale.ok && stale.code === 'grain-changed', 'CONTROL: a tick built on a list that moved since its read is refused BY NAME (the page reads again once) — never written over', JSON.stringify(stale));
   eng.stop();
 }
 

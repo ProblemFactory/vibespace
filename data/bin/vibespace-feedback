@@ -6,9 +6,23 @@
 // usage and your own reports. The text is TEXT for its readers (drawn as text in the user's sheet); it is sent to this
 // VibeSpace only — which forwards it to the maintainers' instance when it has a telemetry forward target (lane
 // feedback-forward; the maintainer's «handled in 2.369.NNN» comes back to `list`).
-const API = process.env.VIBESPACE_API;
+// lane cli-call-timeouts: THE ONE CALL to the hub (src/cli-call.js in a checkout; its boot-time copy cli-call.js beside
+// this file on a host) — every wait bounded by its verb class, ONE line naming the wait on expiry (exit 124); --timeout <s> overrides
+const CC = (() => {
+  try { return require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/cli-call.js') : require('./cli-call.js'); } catch { }
+  try { return require('./cli-call.js'); } catch { return null; }
+})();
+if (!CC) { console.error('vibespace-feedback: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
+CC.cliStart({ tool: 'vibespace-feedback', flags: ['--timeout', '--call-timeout'] });
+// THE MAINTAINERS' MODE (lane fleet-feedback-marks): on a fleet instance's own shell — the maintainers' triage job runs
+// `kubectl exec … runuser -u <user> --` there, no session — env VIBESPACE_MAINTAINER_KEY (the maintainer key; this
+// instance knows its sha256 only, VIBESPACE_MAINTAINER_KEY_SHA) opens `list --open` (every OPEN report here, with its id)
+// and `handled fb-… --version <2.369.NNN> [--note "…"]`, through the automation door (the instance judges: the two
+// feedback verbs only). The API is this instance's own port when no session named it.
+const MKEY = String(process.env.VIBESPACE_MAINTAINER_KEY || '').trim();
+const API = process.env.VIBESPACE_API || (MKEY ? `http://127.0.0.1:${process.env.PORT || 3456}` : '');
 const TOKEN = process.env.VIBESPACE_SESSION_TOKEN || process.env.VIBESPACE_JOB_TOKEN;
-if (!API || !TOKEN) { console.error('vibespace-feedback: not running inside a VibeSpace session (missing env)'); process.exit(2); }
+if (!API || (!TOKEN && !MKEY)) { console.error('vibespace-feedback: not running inside a VibeSpace session (missing env)'); process.exit(2); }
 
 // THE ONE-TEXT RULE (lane cli-one-text-arg — src/agent-cli-text.js in a checkout, its boot-time copy beside this file on a
 // host): the report is ONE argument; a stray word after it is refused by name (exit 2, nothing sent); --text-file <path> /
@@ -40,11 +54,18 @@ const USAGE = [
   '      long or quoted text: --text-file <path> or --text - (stdin, a heredoc) — the report is ONE argument',
   '      (a word after it ⇒ exit 2, nothing sent); it answers sent: N characters',
   '  vibespace-feedback list         your own reports (open / handled, × how often reported) — check before you repeat one',
+  '  vibespace-feedback list --open  your own reports still open',
+].join('\n');
+// lane fleet-feedback-marks: the maintainers' two commands (VIBESPACE_MAINTAINER_KEY in the env — never an agent's)
+const MAINTAINER_USAGE = [
+  'the maintainers (env VIBESPACE_MAINTAINER_KEY — this instance\'s maintainer key; no session needed):',
+  '  vibespace-feedback list --open                                         every open report on this instance, with its id',
+  '  vibespace-feedback handled fb-… --version 2.369.NNN [--note "…"]        mark one handled, naming the release that shipped the fix',
 ].join('\n');
 
-async function call(method, route, body) {
-  const res = await fetch(API + route, {
-    method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + TOKEN },
+async function call(method, route, body, bearer = TOKEN) {
+  const res = await CC.call(API + route, {
+    method, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + bearer },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
@@ -62,8 +83,38 @@ function printReports(list) {
   }
 }
 
+// lane fleet-feedback-marks: the instance's OPEN reports as the maintainer key reads them (feedback.list — another agent's
+// words, belted by the instance) · one mark (feedback.handled — the release, the note)
+async function maintainerList() {
+  const r = (await call('POST', '/api/agent/automation/feedback.list', {}, MKEY)).result || {};
+  const list = Array.isArray(r.reports) ? r.reports : [];
+  console.log(`${list.length} open report${list.length === 1 ? '' : 's'} on this instance${list.length ? ':' : ''}`);
+  for (const x of list) {
+    const who = [x.session && x.session.name, x.harness, x.instance && x.instance.version ? 'v' + x.instance.version : ''].filter(Boolean).join(' · ');
+    console.log(`  ${x.id}  ${when(x.lastAt || x.at)}  [${x.kind}${x.about ? ' · ' + x.about : ''}]${who ? ' ' + who : ''}${x.count > 1 ? ' ×' + x.count : ''}`);
+    console.log('      ' + String(x.text).split('\n').join('\n      '));
+  }
+}
+async function maintainerHandled() {
+  const version = opt('version'), note = opt('note');
+  const [, id, ...rest] = rawArgs;
+  if (!id || rest.length || version === undefined) { console.error('vibespace-feedback: handled takes ONE report id and --version' + (rest.length ? ` (a stray word: ${JSON.stringify(rest[0])})` : '') + '\n' + MAINTAINER_USAGE); process.exit(2); }
+  const r = (await call('POST', '/api/agent/automation/feedback.handled', { id, version, ...(note !== undefined ? { note } : {}) }, MKEY)).result || {};
+  console.log(`marked handled: ${r.id} in ${r.version} (by ${r.by}) — the conversation that filed it is told at its next turn`);
+}
+
 async function main() {
   const [cmd] = rawArgs;
+  if (cmd === 'handled') {
+    if (!MKEY) { console.error('vibespace-feedback: handled is the maintainers\' (env VIBESPACE_MAINTAINER_KEY) — an agent\'s report is marked by them; `vibespace-feedback list` shows yours'); process.exit(2); }
+    return maintainerHandled();
+  }
+  if (cmd === 'list' && rawArgs.length === 2 && rawArgs[1] === '--open' && !DOORS.doors.text) {
+    if (MKEY) return maintainerList();
+    printReports(((await call('GET', '/api/agent/feedback/mine')).reports || []).filter((r) => r.status !== 'handled'));
+    return;
+  }
+  if (!TOKEN) { console.error('vibespace-feedback: filing a report and `list` run inside a VibeSpace session — the maintainer key opens `list --open` and `handled` only\n' + MAINTAINER_USAGE); process.exit(2); }
   if (cmd === 'help' || cmd === '-h' || cmd === '--help' || (cmd && cmd.startsWith('-'))) {
     console.log(USAGE);
     if (cmd.startsWith('-') && cmd !== '-h' && cmd !== '--help') process.exit(1);

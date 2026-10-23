@@ -700,6 +700,9 @@ function validateVendor(kind, mod) {
       if (typeof o.label !== 'string' || !o.label.trim()) bad(`${at}: label must be a non-empty string`);
       if (o.default === undefined) bad(`${at}: default is required`);
       if (o.choices !== undefined && !(Array.isArray(o.choices) && o.choices.length && o.choices.includes(o.default))) bad(`${at}: choices must be a non-empty list holding the default`);
+      // lane oauth-setup-instructions: `signIn: true` = the option is read at each sign-in (Gmail's clientType decides the
+      // address Google is asked for) — the Connect / Re-authorize forms show it beside the type's first option
+      if (o.signIn !== undefined && o.signIn !== true) bad(`${at}: signIn is true (read at each sign-in) or absent`);
     }
   }
   if (mod.manifest !== undefined && !(mod.manifest && typeof mod.manifest === 'object' && mod.manifest.kind === kind)) bad('manifest must be its own vendor manifest (manifest.kind === kind)');

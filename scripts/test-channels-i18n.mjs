@@ -54,7 +54,7 @@ const { LARK_CALLBACK_URL } = createRequire(import.meta.url)(path.join(repo, 'sr
 // product deliberately shows as a value (an enum a select offers).
 export const ALLOWED_WORDS = [
   // vendors, products, protocols
-  'lark', 'feishu', 'gmail', 'google', 'pub', 'sub', 'oauth', 'vibespace', 'cloakbrowser', 'cloak', 'claude', 'codex', 'webhook' /* lane webhook-l1-server: the protocol's own name, kept in zh / ja */,
+  'lark', 'feishu', 'gmail', 'google', 'pub', 'sub', 'oauth', 'vibespace', 'cloakbrowser', 'cloak', 'claude', 'codex', 'webhook' /* lane webhook-l1-server: the protocol's own name, kept in zh / ja */, 'slack' /* lane oauth-setup-instructions: the vendor's name on its setup card in ⚙ → Integrations */,
   'api', 'id', 'ids', 'url', 'http', 'https', 'json', 'utc', 'iana',
   // the product's own untranslated terms (the dictionaries map them to themselves)
   'agent', 'agents', 'turn',
@@ -102,6 +102,7 @@ export const DATA_PATH_CLASSES = [
   'integ-test-error',  // a Test verdict's words are the RUNNER'S / VENDOR'S own (our refusal sentence is `.integ-test-refusal`, censused)
   'window-title', 'win-title', 'titlebar', 'taskbar', 'rail-badge',
   'chan-reach-who',   // the principal's own name (a session / group title)
+  'chandraft-text',   // lane gmail-draft-not-a-message: an unsent draft's own words (the account's mail text; its tag + time are t()'d)
   'chan-cred-chip',   // r4: the account's client chip carries a PRESET's label (the cluster's own words) after the translated "Preset:"
   // g3 (design §22, the IM-first panel): an agent GROUP's name, its last line and a source's label are
   // AGENT / vendor data; so are member names (the detail + the New group picker), an invite's context,

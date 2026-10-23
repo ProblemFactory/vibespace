@@ -394,7 +394,7 @@ async function h1Leg(KK, tag, { cliSrc = null } = {}) {
   const srv = await new Promise((r) => { const s2 = app.listen(0, '127.0.0.1', () => r(s2)); });
   const BIN = path.join(D, 'bin'); fs.mkdirSync(BIN, { recursive: true });
   fs.writeFileSync(path.join(BIN, 'vibespace-browser'), cliSrc || read('data/bin/vibespace-browser'), { mode: 0o755 });
-  fs.copyFileSync(path.join(REPO, 'src', 'browser-verbs.js'), path.join(BIN, 'vibespace-browser-verbs.js'));
+  fs.copyFileSync(path.join(REPO, 'src', 'browser-verbs.js'), path.join(BIN, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(BIN, 'cli-call.js'));
   fs.copyFileSync(path.join(REPO, 'src', 'browser-stuck.js'), path.join(BIN, 'vibespace-browser-stuck.js'));
   const agent = (argv) => new Promise((resolve) => { const c = spawn(process.execPath, ['--require', H1_PRELOAD, path.join(BIN, 'vibespace-browser'), ...argv], { env: { PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: TOKEN }, stdio: ['ignore', 'pipe', 'pipe'] }); kids.add(c.pid); let so = '', se = ''; c.stdout.on('data', (d) => { so += d; }); c.stderr.on('data', (d) => { se += d; }); c.on('exit', (code) => { kids.delete(c.pid); resolve({ code, so, se }); }); });
   try {
@@ -456,7 +456,7 @@ async function sameVersionLeg(KK, RR, tag) {
   const srv = await new Promise((r) => { const s2 = app.listen(0, '127.0.0.1', () => r(s2)); });
   const BIN = path.join(D, 'bin'); fs.mkdirSync(BIN, { recursive: true });
   fs.writeFileSync(path.join(BIN, 'vibespace-browser'), read('data/bin/vibespace-browser'), { mode: 0o755 });
-  fs.copyFileSync(path.join(REPO, 'src', 'browser-verbs.js'), path.join(BIN, 'vibespace-browser-verbs.js'));
+  fs.copyFileSync(path.join(REPO, 'src', 'browser-verbs.js'), path.join(BIN, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(BIN, 'cli-call.js'));
   fs.copyFileSync(path.join(REPO, 'src', 'browser-stuck.js'), path.join(BIN, 'vibespace-browser-stuck.js'));
   const agent = (argv) => new Promise((resolve) => { const c = spawn(process.execPath, ['--require', H1_PRELOAD, path.join(BIN, 'vibespace-browser'), ...argv], { env: { PATH: `${PB}:${PATH_ENV}`, HOME, FAKE_AB_STATE: AB, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: TOKEN }, stdio: ['ignore', 'pipe', 'pipe'] }); kids.add(c.pid); let so = '', se = ''; c.stdout.on('data', (d) => { so += d; }); c.stderr.on('data', (d) => { se += d; }); c.on('exit', (code) => { kids.delete(c.pid); resolve({ code, so, se }); }); });
   try {

@@ -580,6 +580,7 @@
    (_getVisibleColumns answers Name only there) fills the width. ── */
 @media (max-width: 768px) {
   .file-toolbar { flex-wrap: wrap; gap: 4px; padding: 6px 8px; }
+  .file-toolbar .path-field { flex: 1 1 100%; order: 10; } /* lane path-field: the path bar is THE path field — its wrapper is the toolbar's item */
   .file-toolbar .file-path-input { flex: 1 1 100%; order: 10; min-height: 36px; font-size: 14px; padding: 4px 10px; }
   .file-toolbar .file-tool-btn { width: 36px; height: 36px; font-size: 16px; }
   .file-toolbar .file-tool-btn svg { width: 16px !important; height: 16px !important; }

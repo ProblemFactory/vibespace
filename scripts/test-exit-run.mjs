@@ -55,6 +55,11 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const XS = require(path.join(REPO, 'src/exit-shell.js'));
 const E = require(path.join(REPO, 'src/exit-reach.js'));
 const { ExitProxyManager } = require(path.join(REPO, 'src/exit-proxy.js'));
+const GS = require(path.join(REPO, 'src/server/grants-store.js'));
+// lane grants-unify: a machine's two lists are rows of THE grants store (door `exit`, `<hostId>:use|run`), never fields of its
+// record — every world writes them through its own store (the ONE writer) and hands that store to the manager
+const listRows = (hid, { use = 'nobody', run = 'nobody' } = {}) => [['use', use], ['run', run]].map(([g, m]) => ({ door: 'exit', resource: `${hid}:${g}`, to: m === 'everyone' ? [{ kind: 'everyone' }] : [], except: [] }));
+const grantLists = (grants, hid, lists) => { const w = grants.setMany(listRows(hid, lists), 'test'); if (!w.ok) throw new Error(`the lists of ${hid} were not written: ${w.code}`); };
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
@@ -527,7 +532,7 @@ await section('§2e verify r5: the quote scanners, the differentials, the order,
 
 // ── §3 ──
 function world({ Mgr = ExitProxyManager, caps = ['run-shell'], platform = 'linux', reply = null, tag = 'w', mgrOpts = {} } = {}) {
-  const recs = [{ id: 'host-dial-win1', name: 'WINDOWS-PC', transport: 'dial', deviceId: 'WINDOWS-PC', online: true, exit: { use: { mode: 'nobody' }, run: { mode: 'everyone', ask: false } }, dial: { lastAccept: { platform } } }];
+  const recs = [{ id: 'host-dial-win1', name: 'WINDOWS-PC', transport: 'dial', deviceId: 'WINDOWS-PC', online: true, exit: { ask: false }, dial: { lastAccept: { platform } } }];
   const calls = [];
   let answer = reply || (async () => ({ code: 0, stdout: 'pong\n', stderr: '', timedOut: false, signal: null, truncated: false, interpreter: 'sh' }));
   const dm = {
@@ -548,9 +553,11 @@ function world({ Mgr = ExitProxyManager, caps = ['run-shell'], platform = 'linux
   const sessions = new Map([['wa', { name: 'agent A', backend: 'claude', claudeSessionId: 'A', cwd: '/w/a' }], ['wb', { name: 'agent B', backend: 'claude', claudeSessionId: 'B', cwd: '/w/b' }]]);
   const dataDir = path.join(SCR, tag + '-' + Math.random().toString(36).slice(2, 8));
   fs.mkdirSync(dataDir, { recursive: true });
+  const grants = GS.create({ dataDir });
+  grantLists(grants, 'host-dial-win1', { use: 'nobody', run: 'everyone' });
   const cards = [], bc = [];
-  const mgr = new Mgr({ hosts, log: () => {}, dataDir, sessionsMap: () => sessions, bcastAll: (m) => bc.push(m), emitCard: (s, c) => { cards.push({ s: s.name, ...c }); return true; }, ...mgrOpts });
-  return { mgr, recs, hosts, sessions, calls, cards, bc, dataDir, dm, setAnswer: (fn) => { answer = fn; }, audit: () => { try { return fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } } };
+  const mgr = new Mgr({ hosts, log: () => {}, dataDir, grants, sessionsMap: () => sessions, bcastAll: (m) => bc.push(m), emitCard: (s, c) => { cards.push({ s: s.name, ...c }); return true; }, ...mgrOpts });
+  return { mgr, recs, hosts, grants, sessions, calls, cards, bc, dataDir, dm, setAnswer: (fn) => { answer = fn; }, audit: () => { try { return fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } } };
 }
 const settle = async (p) => { try { return { v: await p }; } catch (e) { return { e }; } };
 await section('§3 the manager over fake daemons: the capability picks the form; a spawn failure, the heads, the broadcast, the history', async () => {
@@ -638,7 +645,7 @@ await section('§3 the manager over fake daemons: the capability picks the form;
   // another machine's storm of 8 KiB-head lines (pre-fix: the last 2 MiB read whole and filtered after ⇒ 0 of 1; the
   // file grew 8 MB per thousand runs for ever)
   const wR = world({ mgrOpts: { auditMaxBytes: 256 * 1024 }, reply: async () => ({ code: 0, stdout: 'x'.repeat(4000) + '\n', stderr: 'y'.repeat(4000) + '\n', timedOut: false, signal: null, truncated: false, interpreter: 'sh' }) });
-  wR.recs.push({ id: 'host-quiet', name: 'QUIET', transport: 'dial', deviceId: 'QUIET', online: true, exit: { use: { mode: 'nobody' }, run: { mode: 'everyone', ask: false } }, dial: { lastAccept: { platform: 'linux' } } });
+  wR.recs.push({ id: 'host-quiet', name: 'QUIET', transport: 'dial', deviceId: 'QUIET', online: true, exit: { ask: false }, dial: { lastAccept: { platform: 'linux' } } }); grantLists(wR.grants, 'host-quiet', { use: 'nobody', run: 'everyone' });
   const rQ = await settle(wR.mgr.run(wR.sessions.get('wb'), 'wb', 'QUIET', 'echo only-run-on-quiet'));
   ok(rQ.v && rQ.v.code === 0, 'the quiet machine\'s one run (agent B)');
   for (let i = 0; i < 60; i++) await wR.mgr.run(wR.sessions.get('wa'), 'wa', 'WINDOWS', 'echo storm-' + i);
@@ -1080,7 +1087,7 @@ await section('§8 exit-see-whole: the card and the owner\'s list carry the WHOL
 const crypto8 = require('crypto');
 const sha8 = (b) => crypto8.createHash('sha256').update(b).digest('hex');
 function xworld({ caps = ['run-shell', 'fs-portable', E.PUSH_CAP], hashes = true, ask = false, settingMb, Mgr = ExitProxyManager, hooks = {} } = {}) {
-  const recs = [{ id: 'host-box', name: 'BOX', transport: 'dial', deviceId: 'BOX', online: true, exit: { use: { mode: 'nobody' }, run: { mode: 'everyone', ask } } }];
+  const recs = [{ id: 'host-box', name: 'BOX', transport: 'dial', deviceId: 'BOX', online: true, exit: { ask } }];
   const files = new Map(); // the machine's disk: path → { data } | { dir } | { dev }
   const reads = [], writes = [];
   const dm = {
@@ -1115,10 +1122,12 @@ function xworld({ caps = ['run-shell', 'fs-portable', E.PUSH_CAP], hashes = true
   const proj = path.join(SCR, 'proj-' + Math.random().toString(36).slice(2, 8)); fs.mkdirSync(proj, { recursive: true });
   const sessions = new Map([['wa', { name: 'agent A', backend: 'claude', claudeSessionId: 'A', cwd: proj }]]);
   const dataDir = path.join(SCR, 'xdata-' + Math.random().toString(36).slice(2, 8)); fs.mkdirSync(dataDir, { recursive: true });
+  const grants = GS.create({ dataDir });
+  grantLists(grants, 'host-box', { use: 'nobody', run: 'everyone' });
   const cards = [], items = [];
   const userTodos = { add: (key, it) => { const x = { id: 'todo' + items.length, status: 'open', ...it }; items.push(x); return x; }, onStatus: () => {}, get: (id) => items.find((x) => x.id === id), setStatus: (id, st) => { const x = items.find((y) => y.id === id); if (x) x.status = st; } };
-  const mgr = new Mgr({ hosts, log: () => {}, dataDir, sessionsMap: () => sessions, emitCard: (s2, c) => { cards.push(c); return true; }, userTodos, settingOf: (k) => (k === E.TRANSFER_SETTING ? settingMb : undefined) });
-  return { mgr, recs, files, reads, writes, dm, sessions, A: sessions.get('wa'), proj, cards, items, dataDir, audit: () => { try { return fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } } };
+  const mgr = new Mgr({ hosts, log: () => {}, dataDir, grants, sessionsMap: () => sessions, emitCard: (s2, c) => { cards.push(c); return true; }, userTodos, settingOf: (k) => (k === E.TRANSFER_SETTING ? settingMb : undefined) });
+  return { mgr, recs, grants, files, reads, writes, dm, sessions, A: sessions.get('wa'), proj, cards, items, dataDir, audit: () => { try { return fs.readFileSync(path.join(dataDir, 'exit-audit.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } } };
 }
 const MiB8 = 1024 * 1024;
 // fix r1: each pull's part is its OWN fresh name (`<target>.<8 hex>.vs-part`) — "no part left" = no part of any name
@@ -1149,7 +1158,7 @@ await section('§8 lane exit-transfer: pull / push over a fake device — window
   const rd = await settle(wd.mgr.pull(wd.A, 'wa', 'BOX', { remote: '/srv/d.bin', local: path.join(wd.proj, 'd.bin') }));
   ok(rd.e && rd.e.code === 'transfer_failed' && /read-range stalled/.test(rd.e.message) && /nothing was kept/.test(rd.e.message) && partsIn(wd.proj).length === 0, 'a stall in the second window ⇒ transfer_failed, the part removed', rd.e && rd.e.message);
   // (e) `run` revoked mid-transfer ⇒ the next window refuses, the part removed
-  const we = xworld({ hooks: { read: async (n) => { if (n === 1) we.recs[0].exit = { use: { mode: 'nobody' }, run: { mode: 'nobody', ask: false } }; } } }); we.files.set('/srv/e.bin', { data: crypto8.randomBytes(20 * MiB8) });
+  const we = xworld({ hooks: { read: async (n) => { if (n === 1) grantLists(we.grants, 'host-box', { use: 'nobody', run: 'nobody' }); } } }); we.files.set('/srv/e.bin', { data: crypto8.randomBytes(20 * MiB8) });
   const re = await settle(we.mgr.pull(we.A, 'wa', 'BOX', { remote: '/srv/e.bin', local: path.join(we.proj, 'e.bin') }));
   ok(re.e && re.e.code === 'not_granted' && we.reads.length === 1 && !fs.existsSync(path.join(we.proj, 'e.bin')) && partsIn(we.proj).length === 0, '`run` revoked during the first window ⇒ refused before the second, nothing kept', { e: re.e && re.e.message, reads: we.reads.length });
   // (f) a file that changes size between windows ⇒ transfer_failed
@@ -1330,7 +1339,8 @@ await section('§8b the routes + the CLI: pull / push end to end, a refusal befo
     const cliMut = cliSrc.replace("await postLong('/api/agent/exit/pull'", "await post('/api/agent/exit/pull'");
     ok(cliMut !== cliSrc, '(x8) the patch applies');
     const c10 = await cli(['pull', 'BOX', '/srv/slow.bin', 'slow-x8.bin'], ['--require', warp], MC.write('data/bin/vibespace-exit', cliMut, 'fetchpull'));
-    ok(c10.code === 1 && /fetch failed/.test(c10.err), 'CONTROL (x8): the pull through global fetch gives up at its 300 s headers deadline (here ×1000) — the verify r2 leg goes red', { code: c10.code, err: c10.err.slice(0, 300) });
+    // lane cli-call-timeouts: the short road is now THE ONE CALL's write bound (30 s, exit 124, the wait named) — before it, global fetch's 300 s headers deadline («fetch failed», exit 1)
+    ok(c10.code === 124 && /vibespace-exit: the hub did not answer in 30 s/.test(c10.err), 'CONTROL (x8): the pull through the short road (a write\'s 30 s bound; before lane cli-call-timeouts global fetch\'s 300 s) gives up (here ×1000) and says what it waited on — the verify r2 leg goes red', { code: c10.code, err: c10.err.slice(0, 300) });
     for (const r of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 1, label: 'mutant-copy (exit-transfer §8b): ' })) ok(r.pass, r.name, r.detail);
   } finally { srv.close(); }
 });
@@ -1346,7 +1356,7 @@ await section('§8c controls (patched copies of exit-proxy.js)', async () => {
   ok(r1.v && fs.existsSync(path.join(w1.proj, 'c.bin')), 'CONTROL (x1): without the window hash compare a corrupted pull LANDS — §8 (c) goes red', r1.e && r1.e.message);
   // (x2) the between-windows re-judge removed ⇒ a revoke mid-transfer does not stop it
   const X2 = load('nostill', '          await stillOn();\n', '');
-  const w2 = xworld({ Mgr: X2, hooks: { read: async (n) => { if (n === 1) w2.recs[0].exit = { use: { mode: 'nobody' }, run: { mode: 'nobody', ask: false } }; } } }); w2.files.set('/srv/e.bin', { data: crypto8.randomBytes(20 * MiB8) });
+  const w2 = xworld({ Mgr: X2, hooks: { read: async (n) => { if (n === 1) grantLists(w2.grants, 'host-box', { use: 'nobody', run: 'nobody' }); } } }); w2.files.set('/srv/e.bin', { data: crypto8.randomBytes(20 * MiB8) });
   const r2 = await settle(w2.mgr.pull(w2.A, 'wa', 'BOX', { remote: '/srv/e.bin', local: path.join(w2.proj, 'e.bin') }));
   ok(r2.v && w2.reads.length === 3, 'CONTROL (x2): without the re-judge between windows the revoked transfer runs to the end — §8 (e) goes red', r2.e && r2.e.message);
   // (x3) the local fence removed (its judge answers yes — asked at the verdict AND again where the bytes are written) ⇒ /proc is attempted (nothing can be written there): not local_path_refused

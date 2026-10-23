@@ -4,7 +4,7 @@
 // prompt. The intro became ONE pointer line per surface + the rules every session needs; the teaching moved to the
 // manuals `vibespace-docs <topic>` serves. Legs: ① the census (scripts/measure-prompt-context.mjs) printed, bytes per
 // block; ② the intro ≤ 4 096 B in every variant; ③ every shape with 4 notices + a 1 KB stash entry fits whole with
-// ≥ 1 KB room, the three-group shape ≤ 7 KB; ④ every pointer names a topic vibespace-docs serves, every surface has
+// ≥ 1 KB room, the three-group shape ≤ 7.5 KB (lane task-group-context: every Context row told); ④ every pointer names a topic vibespace-docs serves, every surface has
 // one; ⑤ every line the cut dropped is in its manual and not in the intro; ⑥ CONTROL: the dropped lines put back ⇒
 // the same judge is red. lane channels-teach: ③ and ④ also judge a session whose channel REACH teaches `vibespace-channels`
 // (the tools section's paragraph, the reminder's segment). Run: node scripts/test-prompt-budget.mjs

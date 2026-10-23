@@ -39,7 +39,7 @@ function agentOr401(req, res) {
   if (!e) { res.status(401).json({ error: 'missing or unknown session token', code: 'session_token_required' }); return null; }
   return e;
 }
-const STATUS = { not_granted: 403, ask_denied: 403, ask_changed: 409, ask_expired: 403, ask_unfiled: 409, groups_unreadable: 409, fork_pending: 409, ask_pending: 409, no_machine: 404, no_exits: 404, ambiguous: 400, offline: 503, run_failed: 502, spawn_failed: 502, bad_command: 400, unknown_shape: 409, conversation_gone: 410, remote_session: 409,
+const STATUS = { not_granted: 403, excepted: 403, ask_denied: 403, ask_changed: 409, ask_expired: 403, ask_unfiled: 409, groups_unreadable: 409, fork_pending: 409, ask_pending: 409, no_machine: 404, no_exits: 404, ambiguous: 400, offline: 503, run_failed: 502, spawn_failed: 502, bad_command: 400, unknown_shape: 409, conversation_gone: 410, remote_session: 409,
   // lane exit-transfer: pull / push refusals
   too_big: 413, not_a_file: 409, local_path_refused: 403, exists: 409, hash_mismatch: 502, transfer_failed: 502, bad_path: 400, target_busy: 409,
   // lane device-allow-flags: the machine's OWN allow list refused it (the sentence names the flag + the re-run)
@@ -99,7 +99,7 @@ app.post('/api/agent/exit/push', async (req, res) => {
   } catch (err) { agentFail(res, err); try { if (!req.readableEnded) req.resume(); } catch { } } // the unread rest is drained; the CLI stops on the answer
 });
 // ── the user's side (cookie) ──
-const COOKIE_STATUS = { 'not-found': 404, list_changed: 409, bad_mode: 400, bad_grant: 400, bad_principal: 400, empty_list: 400, too_many: 400, 'session-gone': 410, human_only: 403, ask_unknown: 404, ask_settled: 409, ask_changed: 409, ask_expired: 410, conversation_gone: 410 };
+const COOKIE_STATUS = { 'not-found': 404, list_changed: 409, bad_mode: 400, bad_grant: 400, bad_principal: 400, empty_list: 400, too_many: 400, except_conflicts: 400, not_written: 500, store_unreadable: 409, 'session-gone': 410, human_only: 403, ask_unknown: 404, ask_settled: 409, ask_changed: 409, ask_expired: 410, conversation_gone: 410 };
 const cookieFail = (res, e) => res.status(COOKIE_STATUS[e && e.code] || 400).json({ error: (e && e.message) || 'failed', code: (e && e.code) || 'failed', ...(e && e.added ? { added: e.added, removed: e.removed } : {}), ...(e && e.grant ? { grant: e.grant } : {}) });
 app.get('/api/exits', (req, res) => res.json({ exits: exitProxy.list() }));
 app.post('/api/hosts/:id/allow-exit', (req, res) => res.status(410).json({ error: 'use PATCH /api/hosts/:id/exit-access — exit access is two lists now', code: 'retired' }));
@@ -120,19 +120,22 @@ app.patch('/api/hosts/:id/exit-access', async (req, res) => {
   if (isAnyBearer(req)) return res.status(403).json({ error: 'the user decides who can use a machine — an agent token may not read or change it', code: 'human_only' });
   const b = req.body && typeof req.body === 'object' ? { ...req.body } : req.body;
   // a row picked LIVE names the session by its webui id ({kind:'session', session:'<id>'}): resolved HERE to its
-  // durable key through addressableId (a pending fork ⇒ its `webui:<id>` key, said in `resolved`) — never trusted
+  // conversation key — the grant model's ONE spelling (lane grants-unify): its own conversation id through addressableId,
+  // a pending fork ⇒ its `webui:<id>` key, said in `resolved` — never trusted. The same for a member left out (`except`).
   const resolved = [];
+  const live = (row) => {
+    if (!row || row.kind !== 'session' || typeof row.session !== 'string') return row;
+    const s = activeSessions.get(row.session);
+    if (!s) throw Object.assign(new Error(`"${String(row.name || row.session).slice(0, 60)}" is not running any more — pick it again when it is`), { code: 'session-gone' });
+    const key = exitProxy.conversationKeyOf(s, row.session);
+    resolved.push({ session: row.session, key, forkPending: key.startsWith('webui:') && !!(s.claudeSessionId || s.backendSessionId) });
+    return { kind: 'conversation', key };
+  };
   try {
     for (const g of ['use', 'run']) {
-      if (!b || !b[g] || !Array.isArray(b[g].who)) continue;
-      b[g] = { ...b[g], who: b[g].who.map((row) => {
-        if (!row || row.kind !== 'session' || typeof row.session !== 'string') return row;
-        const s = activeSessions.get(row.session);
-        if (!s) throw Object.assign(new Error(`"${String(row.name || row.session).slice(0, 60)}" is not running any more — pick it again when it is`), { code: 'session-gone' });
-        const key = exitProxy.keyOf(s, row.session);
-        resolved.push({ session: row.session, key, forkPending: key.startsWith('webui:') && !!(s.claudeSessionId || s.backendSessionId) });
-        return { kind: 'session', id: key };
-      }) };
+      if (!b || !b[g] || typeof b[g] !== 'object') continue;
+      if (Array.isArray(b[g].who)) b[g] = { ...b[g], who: b[g].who.map(live) };
+      if (Array.isArray(b[g].except)) b[g] = { ...b[g], except: b[g].except.map(live) };
     }
     const out = await exitProxy.setAccess(req.params.id, b, { by: 'user' });
     res.json({ ...out, resolved });
@@ -227,7 +230,10 @@ const { RemoteFs } = require('../remote-fs');
 const remoteFs = new RemoteFs(hosts);
 app.get('/api/hosts', (req, res) => {
   const k = hosts.keyInfo();
-  res.json({ hosts: hosts.list(), key: { exists: k.exists, path: k.path, publicKey: k.publicKey } });
+  // lane grants-unify: a machine's `exit` as the page reads it — its two lists from the ONE grants store (the record's
+  // own `exit` keeps only ask / hub / lastRun; its pre-unify lists are never served)
+  const list = hosts.list().map((h) => { if (!h || typeof h !== 'object') return h; let exit; try { exit = exitProxy.publicExit(h); } catch { exit = { mode: 'unknown' }; } return { ...h, exit }; });
+  res.json({ hosts: list, key: { exists: k.exists, path: k.path, publicKey: k.publicKey } });
 });
 app.post('/api/hosts', async (req, res) => {
   // A pasted key may be passphrase-protected: unlock it HERE (ssh-keygen -p,
@@ -302,7 +308,14 @@ app.post('/api/hosts/:id/bootstrap', async (req, res) => {
 app.get('/api/hosts/bootstrap-steps', (req, res) => res.json({ steps: hosts.bootstrapSteps() }));
 // Remote directory autocomplete (New Session dialog when a host is chosen) —
 // mirrors /api/dir-complete but runs ls over ssh on the target.
+// lane path-field: with `bases` / `q` / `probe` / `kind` (the path field asks) the answer is the machine's listing slice
+// (hosts.dirSlice — one sh round trip there; the same listing /api/dir-complete builds here) + `self` + `took`.
+const jsonList = (v) => { if (Array.isArray(v)) return v.map(String); if (typeof v !== 'string' || !v) return []; try { const a = JSON.parse(v); return Array.isArray(a) ? a.map(String) : []; } catch { return [v]; } };
 app.get('/api/hosts/:id/dir-complete', async (req, res) => {
+  if (req.query.bases != null || req.query.q != null || req.query.probe != null || req.query.kind != null) {
+    try { return res.json(await hosts.dirSlice(req.params.id, { text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder') }, { by: DAU.byOfReq(req) })); }
+    catch (e) { return res.json({ suggestions: [], error: String((e && e.message) || e).slice(0, 120) }); }
+  }
   try { res.json({ suggestions: await hosts.dirComplete(req.params.id, req.query.path || '', { by: DAU.byOfReq(req) }) }); }
   catch { res.json({ suggestions: [] }); }
 });
@@ -348,8 +361,10 @@ app.get('/api/hosts/:id/recent-cwds', async (req, res) => {
     const sessions = await hosts.discoverSessions(req.params.id);
     const seen = [];
     for (const s of sessions) { if (s.cwd && !seen.includes(s.cwd)) seen.push(s.cwd); if (seen.length >= 8) break; }
-    res.json({ cwds: seen });
-  } catch { res.json({ cwds: [] }); }
+    // lane path-field: COUNTS — how many conversations started in each folder there, and the newest (ms) — the path
+    // field's ③ «最近» says «3 个会话 · 昨天» for a remote machine the same as here
+    res.json({ cwds: seen, recent: require('../path-candidates.js').recentCounts(sessions) });
+  } catch { res.json({ cwds: [], recent: [] }); }
 });
 
   return { exitAgentSession, remoteFs, sshKey };

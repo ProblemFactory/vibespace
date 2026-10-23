@@ -273,6 +273,7 @@ console.log('⑤ MUTANTS (patched copies outside the tree)');
     const dir = scratch('convops-mut-' + name); // ended at exit (scratch.mjs)
     fs.mkdirSync(path.join(dir, 'src', 'server'), { recursive: true });
     fs.copyFileSync(path.join(ROOT, 'src/conversation-spec.js'), path.join(dir, 'src/conversation-spec.js'));
+    fs.copyFileSync(path.join(ROOT, 'src/task-membership.js'), path.join(dir, 'src/task-membership.js')); // PURE (lane open-task-binds): the birth bind's verdict
     fs.writeFileSync(path.join(dir, 'src/backend-caps.js'), 'module.exports = { capsOf: () => ({}) };\n'); // the rename body's one import
     if (!src.includes(from)) return { dir, missing: true };
     fs.writeFileSync(path.join(dir, 'src/server/conversation-ops.js'), src.replace(from, to));

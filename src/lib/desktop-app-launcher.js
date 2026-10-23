@@ -79,7 +79,7 @@
 import { t, resolveLang } from './i18n.js';
 import { copyText, createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, uiScale } from './utils.js';
 import { registerCommand, registerMenuItem, runCommand } from './contributions.js';
-import { setupDirAutocomplete } from './autocomplete.js';
+import { pathField } from './path-field.js'; // lane path-field: THE path field
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { validateBrowserUrl } from '../desktop-browser-app.js';
 import { launchVerdict } from '../desktop-fit.js'; // lane app-launch-singleton: a running app is OPENED, never launched again (PURE)
@@ -799,7 +799,7 @@ export async function showLaunchDialog(app, opts = {}) {
             <h4>${escHtml(t('Run a command'))}</h4>
             <label class="desktop-launch-field"><span>${escHtml(t('Command'))}</span><input type="text" class="desktop-launch-exec" placeholder="xterm" autocomplete="off" spellcheck="false"></label>
             <label class="desktop-launch-field"><span>${escHtml(t('Arguments'))}</span><input type="text" class="desktop-launch-args" placeholder="-fa Monospace -fs 12" autocomplete="off" spellcheck="false"></label>
-            <label class="desktop-launch-field"><span>${escHtml(t('Working directory'))}</span><div class="autocomplete-wrapper"><input type="text" class="desktop-launch-cwd" placeholder="~" autocomplete="off" spellcheck="false"><div class="autocomplete-dropdown hidden"></div></div></label>
+            <label class="desktop-launch-field"><span>${escHtml(t('Working directory'))}</span><input type="text" class="desktop-launch-cwd" placeholder="~" autocomplete="off" spellcheck="false"></label>
             <div class="desktop-launch-actions"><button class="btn-create desktop-launch-run">${escHtml(t('Launch'))}</button></div>
           </div>
           <div class="desktop-launch-col">
@@ -831,7 +831,7 @@ export async function showLaunchDialog(app, opts = {}) {
   const machineOf = (id) => machines.find((m) => m.hostId === id) || { hostId: id, label: id };
   const advToggle = $('.desktop-launch-adv-toggle'), advBody = $('.desktop-launch-adv-body');
   const execIn = $('.desktop-launch-exec'), argsIn = $('.desktop-launch-args'), cwdIn = $('.desktop-launch-cwd'), runBtn = $('.desktop-launch-run');
-  setupDirAutocomplete(cwdIn, $('.autocomplete-dropdown'));
+  pathField(cwdIn, { host: () => (host && host !== 'local' ? host : null), kind: 'folder', create: 'never', id: 'desktop-launch-cwd', onCommit: (info) => { if (info && info.path && cwdIn.value !== info.path) cwdIn.value = info.path; } }); // lane path-field: the launch's machine
 
   // §7.9 FILE MODE: the intro names the document; browsers + "Advanced" are not for a document (a document is not a command)
   if (doc) {

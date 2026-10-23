@@ -30,6 +30,8 @@ import { SCOPES, ALL_PATHS, limitSetView, verbFamilies, grantOrder } from '../au
 import { BACKEND_META } from './agent-meta.js';
 import { enterSubmits } from './chat-enter-keys.js'; // an Enter that ends an IME composition never submits
 import { vaultWaitLine } from './vault-unlock.js'; // lane vault-slow-load: the audit says it is reading
+import { principalPicker } from './principal-picker.js'; // lane grants-unify: 授权给… is THE picker (with its «除了» row)
+import { rowToPick, principalOfRow } from './principal-picker-model.js'; // lane grants-unify: a stored exception drawn, a pick written
 import { REACH_CHOICES, reachWord, reachTitle, kindOf, groupsOf } from './automation-reach.js'; // lane key-instance-scope: ONE spelling of the reach's words
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -344,6 +346,7 @@ function grantRow(g, key, data, { refresh } = {}) {
   nm.title = isGroup ? `${t('Task group')} · ${g.name}` : g.name === String(g.subject).replace(/^session:/, '') ? g.name : `${g.name} · ${String(g.subject).replace(/^session:/, '')}`;
   r.append(glyph(isGroup ? GROUP_GLYPH : CHAT_GLYPH), nm);
   if (!isGroup) r.append(el('span', `vw-ak-gstate${g.ended ? ' vw-ak-gstate-ended' : ''}`, g.ended ? t('ended') : t('Live')));
+  if (isGroup && Array.isArray(g.except) && g.except.length) r.append(el('span', 'vw-ak-gexcept', t('Except: {n} left out', { n: g.except.length })));   // lane grants-unify: «除了» (授权给… edits it)
   const kind = kindOf(g.reach), ids = groupsOf(g.reach);
   const rc = el('button', `vw-ak-reach vw-ak-reach-${kind}`, reachWord(kind));
   rc.type = 'button'; rc.dataset.reach = kind;
@@ -553,35 +556,43 @@ export function showReachDialog(key, g, data, { refresh } = {}) {
   body.parentNode.append(f);
 }
 
-/** 授权给…: every live conversation and Task Group, multi-select; checked = granted (unchecking takes a grant back). */
+/** 授权给…: THE principal picker (lane grants-unify — it was a hand-made checkbox list) over every live conversation and
+ *  Task Group, multi-select; picked = granted (a chip removed takes that grant back). With a Task Group picked, its
+ *  folded «除了» row leaves members OUT — they never use the key through that group (each Task Group grant's row of the
+ *  ONE grants store; a member's own grant still counts). */
 export function showGrantPicker(key, data, { refresh } = {}) {
-  // lane dialog-unsaved-guard: a tick or the new grants' reach changed and not saved ⇒ ✕ / Esc / the backdrop asks
+  // lane dialog-unsaved-guard: a pick or the new grants' reach changed and not saved ⇒ ✕ / Esc / the backdrop asks
+  let picker = null;
   const { body, close } = createModalShell({ id: 'vault-ak-grant', title: t('Grant "{name}" to', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
-    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() } });
+    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() }, onClose: () => { if (picker) picker.close(); } });
   const subjects = (data && data.subjects) || { sessions: [], groups: [] };
-  const had = new Map(key.grants.filter((g) => g.mode === 'always').map((g) => [g.subject, g.id]));
-  const boxes = [];
-  const section = (title, list) => {
-    if (!list.length) return;
-    body.append(el('div', 'vw-ak-sec', title));
-    for (const s of list) {
-      const lab = el('label', 'vw-ak-pick');
-      const cb = el('input');
-      cb.type = 'checkbox'; cb.value = s.subject; cb.checked = had.has(s.subject);
-      lab.append(cb, el('span', null, s.name));
-      body.append(lab);
-      boxes.push(cb);
-    }
-  };
-  section(t('Conversations'), subjects.sessions || []);
-  section(t('Task groups'), subjects.groups || []);
-  if (!boxes.length) body.append(el('div', 'vw-empty', t('Nothing to pick: no conversation is running and there is no task group')));
+  const always = key.grants.filter((g) => g.mode === 'always');
+  const had = new Map(always.map((g) => [g.subject, g.id]));
+  // the picker's rows: the Task Groups, the running conversations (with their groups — the «除了» row offers a picked
+  // group's members), and every subject a grant names that is not running now (kept, said so)
+  const live = [
+    ...(subjects.groups || []).map((g) => ({ key: g.subject, kind: 'group', id: String(g.subject).replace(/^group:/, ''), name: g.name, groupIds: [], groupNames: [] })),
+    ...(subjects.sessions || []).map((x) => ({ key: x.subject, kind: 'agent', id: String(x.subject).replace(/^session:/, ''), name: x.name, backend: x.backend, groupIds: x.groupIds || [], groupNames: [] })),
+  ];
+  for (const g of always) if (!live.some((r) => r.key === g.subject) && /^(session|group):/.test(g.subject)) {
+    const grp = g.subject.startsWith('group:');
+    live.push({ key: g.subject, kind: grp ? 'group' : 'agent', id: g.subject.replace(/^(session|group):/, ''), name: grantName(g, data), hint: grp ? t('a deleted Task Group') : t('not running now'), groupIds: [], groupNames: [] });
+  }
+  const storedExcept = [];
+  for (const g of always) for (const x of g.except || []) if (!storedExcept.some((y) => JSON.stringify(y) === JSON.stringify(x))) storedExcept.push(x);
+  const exPick = rowToPick({ to: [], except: storedExcept }, live, { notRunning: t('not running now'), deletedGroup: t('a deleted Task Group') });
+  const exRows = () => [...live, ...exPick.extra];
+  picker = principalPicker({ items: () => live, multi: true, selected: [...had.keys()].filter((k) => live.some((r) => r.key === k)), autofocus: true,
+    placeholder: t('Search sessions and groups…'), label: t('Grant "{name}" to', { name: key.name }), emptyText: t('Nothing to pick: no conversation is running and there is no task group'),
+    except: { selected: exPick.except, extra: exPick.extra } });
+  body.append(picker.el);
   // lane key-instance-scope: the reach of the grants this save ADDS (an existing grant's reach is its chip's)
   body.append(el('div', 'vw-ak-sec', t('Reach of the grants you add')));
   const rows = reachRows(null, data, { id: 'picker' });
   body.append(rows.node);
   body.append(el('div', 'vw-ak-hint', t('A conversation granted the key uses it with its own session — it never sees the key\'s value.')));
-  const drawn = () => JSON.stringify([boxes.map((b) => b.checked), rows.value()]);
+  const exceptNow = () => picker.except().map((k) => principalOfRow(exRows().find((r) => String(r.key) === String(k)))).filter(Boolean);
+  const drawn = () => JSON.stringify([picker.selected().slice().sort(), rows.value(), exceptNow()]);
   const base = drawn();
   const f = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));
@@ -589,13 +600,18 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   cancel.type = save.type = 'button';
   cancel.onclick = () => close();
   const doSave = async () => {
-    const add = boxes.filter((b) => b.checked && !had.has(b.value)).map((b) => b.value);
-    const drop = boxes.filter((b) => !b.checked && had.has(b.value)).map((b) => had.get(b.value));
+    const sel = new Set(picker.selected());
+    const add = [...sel].filter((k) => !had.has(k));
+    const drop = [...had.keys()].filter((k) => !sel.has(k)).map((k) => had.get(k));
     const reach = rows.value();
+    const except = exceptNow();
     if (add.length && reach === null) { showToast(t('Pick at least one Task Group'), { type: 'error' }); return false; }
     let bad = null;
-    if (add.length) { const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/grants`, { subjects: add, reach }); if (!r || !r.ok) bad = r || {}; }
+    if (add.length) { const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/grants`, { subjects: add, reach, except }); if (!r || !r.ok) bad = r || {}; }
     for (const gid of drop) { const r = await fetchJson(`/api/automation/grants/${encodeURIComponent(gid)}`, { method: 'DELETE' }); if (!r || !r.ok) bad = r || {}; }
+    // «除了» on the Task Group grants this save keeps — written only where it changed
+    const wire = JSON.stringify(except);
+    for (const g of always) if (sel.has(g.subject) && g.subject.startsWith('group:') && JSON.stringify(g.except || []) !== wire) { const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/except`, { except }); if (!r || !r.ok) bad = r || {}; }
     if (bad) showToast(failWords(bad), { type: 'error' }); else showToast(t('Saved'));
     close();
     refresh?.();

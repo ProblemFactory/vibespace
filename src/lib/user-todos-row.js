@@ -35,6 +35,7 @@ import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; //
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
+import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
 export function agoText(ts, t) {
@@ -67,6 +68,7 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'ask-changed') return t('not run — it changed after it was shown'); // verify-r6 W1
   if (by === 'ask-over') return t('this request is over — the agent can ask again'); // verify-r6 W2: a reopened ask that is over
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
+  if (by === 'stored') return t('saved to the vault'); // lane vault-paste-request: a paste request answered by its paste
   // B-2198 part 2: a raw-API proposal's item is answered BY its outcome (the card's words: Ran · 200 · 1.2 KB / Rejected by you)
   if (by === 'channel-api' && item && item.resolvedFact && item.resolvedFact.apiOutcome) return t(item.resolvedFact.apiOutcome.key, item.resolvedFact.apiOutcome.params || {});
   // lane exit-item-heal: an unexpected-exit item answered by the conversation running again (its new session's start, this device's clock)
@@ -135,6 +137,11 @@ const hubAskHtml = (i, t, detail) => (i && i.action && HELD_ASKS.includes(i.acti
     + (i.action.askId ? `<div class="ut-exit-answer ut-hub-answer">${heldAnswers(i).map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}</div>` : '')
   : '');
 
+/** lane vault-paste-request: an agent's REQUEST FOR A SECRET — its words (what, what for, where it goes, what the paste does)
+ *  shown whole ABOVE its paste box (the exit-ask lesson: never folded below the answer); the box itself is DOM nodes the
+ *  row appends (renderRow / patchRow — never markup: it holds a field the owner pastes into). */
+const secretAskHtml = (i, t, detail) => (isSecretAsk(i) ? `<div class="ut-proposal-plan ut-secret-plan">${escHtml(detail || '')}</div>` : '');
+
 /** lane browser-propose (2026-09-30): the agent's PROPOSAL, answered where it appears — its words (the card's, line for
  *  line: what Approve runs) ABOVE Approve / Reject, never folded (the exit-ask lesson: a folded detail below the button
  *  read as the whole story). ONE primary (Approve), a quiet Reject; open items only. */
@@ -164,6 +171,17 @@ const proposalAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'b
  *  the press there), Not now declines it (the agent is told on its next turn); open items only. */
 const appAskHtml = (i, t) => (i && i.action && i.action.type === 'app-install' && i.action.id
   ? `<div class="ut-exit-answer ut-app-answer"><button type="button" class="ut-act ut-action-app ut-app-install" data-answer="install" title="${escHtml(t('Shows the plan first — nothing runs until you confirm'))}">${escHtml(t('Install…'))}</button><button type="button" class="ut-act ut-action-app ut-app-reject" data-answer="reject">${escHtml(t('Not now'))}</button></div>` : '');
+
+/** lane controls-that-lie (naive study round 4, R1): an ask that names a GRANT (`vibespace-ask --grant browser:<profile>`)
+ *  carries the grant itself — ONE button that DOES it: «Who can use it» gains this conversation (the owner's own door,
+ *  the model's runAction), then the agent is answered. Its words name the profile; the title says both halves. */
+export const grantAskOf = (i) => (i && !i.clearedAt && i.action && i.action.type === 'browser-grant' && typeof i.action.profileId === 'string' && i.action.profileId ? { profileId: i.action.profileId, label: String(i.action.label || i.action.profileId) } : null);
+const grantAskHtml = (i, t) => {
+  const g = grantAskOf(i);
+  return g ? `<div class="ut-exit-answer ut-grant-answer"><button type="button" class="ut-act ut-action-grant ut-grant-go" data-answer="grant" title="${escHtml(t('Adds this conversation under “Who can use it” for {label}, then tells the agent', { label: g.label }))}">${escHtml(t('Let this conversation use {label}', { label: g.label }))}</button></div>` : '';
+};
+/** An --options label is a REPLY the person sends — it reads as one («Reply: …»), never as the act it names. */
+export const optionWords = (label, t) => t('Reply: {label}', { label: String(label) });
 
 /** design 009 §2 A: an app install's ONE CARD — the engine's view (`item.card`, src/app-card.js) worded by
  *  app-card-model: who asks and why, where it comes from and how big, what the click gives; TWO buttons (Install / Not
@@ -214,11 +232,11 @@ function partsOf(entry, ctx) {
   // (an exit ask's detail IS its command — shown whole above its Allow / Deny, never again folded below them)
   const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${linkedHtml(detail, { escape: escHtml })}</div></details>` : '';
   // lane browser-propose: an open proposal's words are shown whole ABOVE its Approve (proposalAskHtml) — never folded again below
-  const detailFold = i && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-api-proposal' || HELD_ASKS.includes(i.action.type)) && !resolved ? '' : detailHtml; // lane hub-act-ask: shown whole above its answers (design q-046: an automation ask too)
+  const detailFold = i && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-api-proposal' || HELD_ASKS.includes(i.action.type) || isSecretAsk(i)) && !resolved ? '' : detailHtml; // lane hub-act-ask: shown whole above its answers (design q-046: an automation ask too; lane vault-paste-request: a paste request's words above its box)
   // OPTION CHIPS (design-user-inbox-reply D3a): one click = a reply whose text
   // IS the label. Addressed by INDEX — the label never rides an attribute.
   const opts = !resolved && rs.show && Array.isArray(i.options) && i.options.length
-    ? `<div class="ut-opts">${i.options.map((o, k) => `<button type="button" class="ut-opt" data-idx="${k}">${escHtml(o)}</button>`).join('')}</div>` : '';
+    ? `<div class="ut-opts">${i.options.map((o, k) => `<button type="button" class="ut-opt" data-idx="${k}">${escHtml(optionWords(o, t))}</button>`).join('')}</div>` : ''; // lane controls-that-lie: a reply reads as a reply
   let meta;
   if (resolved) {
     const by = resolvedByText(i.resolvedBy, t, i);
@@ -236,7 +254,7 @@ function partsOf(entry, ctx) {
     meta = (notice || entry.band ? `<span class="ut-sess">${dot}${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
       + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '');
   }
-  const body = `<div class="ut-text">${card ? escHtml(words) : linkedHtml(words, { escape: escHtml })}</div>${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
+  const body = `<div class="ut-text">${card ? escHtml(words) : linkedHtml(words, { escape: escHtml })}</div>${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}">⤢</button>`;
   // design 009: a card's Reply / Mark done / Ignore / Copy / Clear content… live behind its ⋯ (two buttons on its face)
@@ -396,6 +414,7 @@ export function renderRow(entry, ctx) {
   // wrap beside them and then use the full width below — a sibling column reserved
   // the right third of every tall row for four buttons (owner 2026-09-25 screenshot)
   el.innerHTML = p.dot + `<div class="ut-body">${p.actions}${p.body}</div>`;
+  if (!entry.resolved && isSecretAsk(entry.item)) el.querySelector(':scope > .ut-body').append(secretBoxEl(entry.item));   // lane vault-paste-request: the paste box (DOM nodes)
   el.dataset.sig = p.sig;
   applyLive(el, entry.item, ctx);
   return el;
@@ -415,19 +434,25 @@ export function patchRow(el, entry, ctx) {
     const box = body && body.querySelector(':scope > .ut-reply');
     // an open row keeps its box; a resolved row keeps it only while in use
     const keep = box && (!entry.resolved || boxInUse(box)) ? box : null;
+    // lane vault-paste-request: a PASTE box lives exactly while its request is open — never rebuilt by a repaint (what the
+    // owner pasted and the focus survive a broadcast, a minute's «3min ago»), gone the moment the row resolves
+    const sbox = body && body.querySelector(':scope > .ut-secret');
+    const keepS = sbox && !entry.resolved && isSecretAsk(entry.item) ? sbox : null;
+    const keeps = [keep, keepS].filter(Boolean);
     el.className = p.cls;
-    if (!keep) {
+    if (!keeps.length) {
       el.innerHTML = p.dot + `<div class="ut-body">${p.actions}${p.body}</div>`;
       body = el.querySelector(':scope > .ut-body');
     } else {
       for (const c of [...el.children]) if (c !== body) c.remove();
-      for (const c of [...body.children]) if (c !== keep) c.remove();
+      for (const c of [...body.children]) if (!keeps.includes(c)) c.remove();
       const tmp = document.createElement('div');
       tmp.innerHTML = p.dot + `<div class="ut-body">${p.actions}${p.body}</div>`;
       const [dotEl, freshBody] = [...tmp.children];
       el.insertBefore(dotEl, body);
-      keep.before(...freshBody.childNodes);
+      keeps[0].before(...freshBody.childNodes);
     }
+    if (!keepS && !entry.resolved && isSecretAsk(entry.item)) body.append(secretBoxEl(entry.item));
     if (detailOpen) { const d = body.querySelector(':scope > .ut-detail-exp'); if (d) d.open = true; }
     if (reachPicked) { const r = body.querySelector(`.ut-ak-reach input[value="${reachPicked}"]`); if (r) r.checked = true; }
     el.dataset.sig = p.sig;

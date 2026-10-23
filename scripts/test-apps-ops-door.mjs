@@ -203,7 +203,7 @@ await leg('§5', async () => {
   await door.open();
   const cliSrc = fs.readFileSync(CLI, 'utf8');
   const noRule = cliSrc.replace("  if (TOKEN) { console.error('vibespace-app refresh: the machine OPERATOR", "  if (false) { console.error('vibespace-app refresh: the machine OPERATOR");
-  const cliCopy = path.join(MUT.dir, 'vibespace-app-no-rule'); fs.writeFileSync(cliCopy, noRule);
+  const cliCopy = path.join(MUT.dir, 'vibespace-app-no-rule'); fs.writeFileSync(cliCopy, noRule); fs.copyFileSync(path.join(repo, 'src/cli-call.js'), path.join(MUT.dir, 'cli-call.js'));   // lane cli-call-timeouts: a copy outside the checkout reads THE ONE CALL beside it
   const n0 = w.runs.length;
   const c = await cli(home, ['refresh', '--all'], { VIBESPACE_API: 'http://127.0.0.1:9', VIBESPACE_SESSION_TOKEN: CONV_TOKEN }, cliCopy);
   ok(noRule !== cliSrc && c.code === 0 && w.runs.length === n0 + 1, 'CONTROL: a CLI without the conversation rule reaches the door from a conversation and runs — §2\'s refusal is that line', { code: c.code, runs: w.runs.length - n0 });

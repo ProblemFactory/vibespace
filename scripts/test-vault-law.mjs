@@ -148,6 +148,23 @@ ok(red0.length === 0, 'no auto-unlock shape; the vault doors are called only fro
   const missing = [...names].filter((x) => !rows.has(x)), stale = [...rows].filter((x) => !names.has(x));
   ok(!missing.length && !stale.length && rows.size === 6, `every store key name in src/ is a vault row and every row is named (${[...rows].join(', ')})`, { missing, stale });
   ok(VE.STORE_KEYS.filter((k) => k.raw).map((k) => k.name).join() === 'browser-passkeys.key', 'the one raw-bytes key is the passkey store\'s (the rest are 64 hex)');
+  // lane vault-paste-request (the owner's ⑥ 「其他密钥或密码…」): THE SECRET KINDS — every entry-name prefix the engine's SECRET_RE
+  // names is a row here with who holds it and who may read it back; a kind without its row (or a row with no kind) is RED
+  const SECRET_KINDS = {
+    host: 'a paired machine\'s link token — host-tokens; the link-token door is the ONE named exception (its own machine\'s attach child); never shown',
+    frp: 'the relay token — the frp plugin; the owner reveals it',
+    file: 'a sealed file\'s key — sealed-json; never shown',
+    apikey: 'VibeSpace\'s own automation key (design q-046) — automation-engine; the owner reveals it to hand it out, an agent uses it by grant',
+    totp: 'a two-step code\'s seed (design q-047 L1) — vault-totp; an agent gets the current code by grant, never the seed',
+    secret: 'a FREE entry (lane vault-paste-request) — pasted by the owner into For you at an agent\'s request, or added in the Vault window; the owner reveals it (验证是你), an agent uses it by purpose (a run by reference — never its bytes)',
+  };
+  const kindsOf = (src) => { const m = /const SECRET_RE = \/\^\(\?:([a-z|]+)\):/.exec(src); return m ? m[1].split('|') : []; };
+  const engSrc = tree.get('src/server/vault-engine.js') || '';
+  const kinds = kindsOf(engSrc);
+  const noRow = kinds.filter((k) => !SECRET_KINDS[k]), noKind = Object.keys(SECRET_KINDS).filter((k) => !kinds.includes(k));
+  ok(kinds.length >= 6 && !noRow.length && !noKind.length && VE.isSecretName('secret:0a1b2c3d4e') && !VE.isSecretName('secret:') && !VE.isSecretName('secrets:x'), `every secret kind of the engine is a row here — ${kinds.join(', ')} (+ agent:<scope>/<name>, lane vault-mint-put) — none unclassified, none dead`, { noRow, noKind });
+  const planted = kindsOf(engSrc.replace('|totp|secret):', '|totp|secret|note):'));
+  ok(planted.includes('note') && planted.filter((k) => !SECRET_KINDS[k]).join() === 'note', 'CONTROL: a planted kind (`note:`) in SECRET_RE is a kind with no row — RED');
 }
 
 console.log('④ the agent side has no unlock');
@@ -158,7 +175,9 @@ console.log('④ the agent side has no unlock');
   const agentDoors = [...routes.matchAll(/app\.(get|post)\('(\/api\/agent\/vault\/[^']+)'/g)].map((m) => m[2]);
   // lane vault-e2e-password-fix-r2: + the LINK TOKEN door — a remote session's attach child asks for ITS machine's device
   // token (its own session token names the session; the engine is never asked to unlock: LOCKED ⇒ 423 vault_locked)
-  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/mint,/api/agent/vault/put,/api/agent/vault/link-token,/api/agent/vault/run,/api/agent/vault/runnable,/api/agent/vault/request,/api/agent/vault/uses', `the agent doors are the two-step code, state, lock, mint, put, the session's own link token, run and runnable only (${agentDoors.join(', ')})`);
+  // lane vault-paste-request: + the PASTE REQUEST door — an agent asks the owner to paste a secret (ONE For-you item; the answer
+  // is the request's id, never a value — the owner's paste goes to the one writer of its place through a person's door)
+  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/mint,/api/agent/vault/put,/api/agent/vault/link-token,/api/agent/vault/secret-request,/api/agent/vault/run,/api/agent/vault/runnable,/api/agent/vault/request,/api/agent/vault/uses', `the agent doors are the two-step code, state, lock, mint, put, the session's own link token, the paste request, run and runnable only (${agentDoors.join(', ')})`);
   // design q-047 L1 (lane vault-totp): + the TWO-STEP CODE door — a GET answering a granted entry's CURRENT code (never the
   // seed: its answer is built from named fields only — test-vault-routes ⑨ plants a seed and ⑩'s mutant leaks it ⇒ RED)
   const codeDoor = (() => { const i = routes.indexOf("app.get('/api/agent/vault/totp/:name'"); const j = routes.indexOf('\n    });', i); return i > 0 && j > i ? routes.slice(i, j) : ''; })();
@@ -374,6 +393,9 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     'POST /api/agent/vault/run': ['purpose-door', 'run: the masked output + a receipt', SIB('vault-run-door')],
     'GET /api/agent/vault/runnable': ['receipt', 'runnable: the entries a run may reference — names and references, never a value', SIB('vault-run-door')],
     'POST /api/agent/vault/request': ['purpose-door', 'request: a For-you question to the owner — the answer is its id, never a value'],
+    // lane vault-paste-request: the agent ASKS the owner to paste a secret it does not have — one For-you item with a masked box;
+    // the answer is the request's id and the place it names; the value goes to its writer through the owner's cookie door only
+    'POST /api/agent/vault/secret-request': ['purpose-door', 'secret-request: a For-you paste box for the owner — the answer is the request\'s id and its place, never a value (the receipt at the next turn names where, never what)'],
     'GET /api/agent/vault/uses': ['receipt', 'uses: this conversation\'s grants, requests and vault-use lines — names, codes, receipts'],
   };
   const ENGINE_KEYS = {
@@ -500,12 +522,12 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
   const ht8 = HT8.create({ dataDir: d8, nameOf: () => 'the law machine', log: quiet8 });
   const OWN = ht8.tokenFor('dial-devA'), OTHER = ht8.tokenFor('host-0123abcd');
   sentinels.push(['link token (own machine)', Buffer.from(OWN)], ['link token (another machine)', Buffer.from(OTHER)]);
-  for (const [entry, label] of [['frp:token', 'relay token'], ['file:law-pair', 'sealed file key'], ['apikey:ak-law', 'automation key']]) {
+  for (const [entry, label] of [['frp:token', 'relay token'], ['file:law-pair', 'sealed file key'], ['apikey:ak-law', 'automation key'], ['secret:0a1b2c3d4e', 'free entry']]) {   // lane vault-paste-request: + a free entry (the owner's paste)
     const v = `law-${label.replace(/\W/g, '')}-${crypto.randomBytes(12).toString('hex')}`;
     ok(eng8.secretPut(entry, v).ok, `the sweep's sentinel sealed: ${label}`);
     sentinels.push([label, Buffer.from(v)]);
   }
-  ok(sentinels.length === VE8.STORE_KEYS.length + 5, `${sentinels.length} sentinels: every store key, two machines' link tokens, the relay token, a sealed file key, an automation key`);
+  ok(sentinels.length === VE8.STORE_KEYS.length + 6, `${sentinels.length} sentinels: every store key, two machines' link tokens, the relay token, a sealed file key, an automation key, a free entry`);
   const formsOf = (b) => [b.toString('hex'), b.toString('base64'), b.toString('base64url'), ...(/^[\x20-\x7e]+$/.test(b.toString('latin1')) ? [b.toString('latin1')] : [])].filter((x) => x.length >= 12);
   const hitsOf = (text) => sentinels.filter(([, b]) => formsOf(b).some((f) => text.includes(f))).map(([l]) => l);
   const T = (p) => p + crypto.randomBytes(16).toString('hex');
@@ -539,7 +561,9 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
   /** ONE sweep: the routes `register` puts on a fresh app × every bearer × every method; the CLI's verbs (`cli`) → leaks */
   async function sweep(register, { cli = path.join(REPO, 'data/bin/vibespace-vault'), verbs = null } = {}) {
     const app = express8(); app.use(express8.json());
-    register(app, { vault: eng8, activeSessions: sessions8, getJobs: () => jobs8, linkTokenFor: (hostKey, who) => ht8.tokenFor(hostKey, who), auditLink: () => {} });
+    // lane vault-paste-request: the paste door too (its agent route is swept like every other; a real For-you store under it)
+    const paste8 = require(path.join(REPO, 'src/server/vault-paste-door.js')).create({ vault: eng8, userTodos: new (require(path.join(REPO, 'src/user-todos.js')).UserTodoManager)({ dataDir: d8, expirySweepMs: 0 }), deliver: { stashFor: (cid, e) => { frames.push(JSON.stringify(e)); return { stored: true }; } } });
+    register(app, { vault: eng8, activeSessions: sessions8, getJobs: () => jobs8, linkTokenFor: (hostKey, who) => ht8.tokenFor(hostKey, who), auditLink: () => {}, paste: paste8 });
     const srv = await listen(app); const port = srv.address().port;
     const routes = app._router.stack.filter((l) => l.route && ROUTE_RE.test(l.route.path)).flatMap((l) => Object.keys(l.route.methods).map((m) => [m.toUpperCase(), l.route.path]));
     const leaks = [], seen = { own: false, calls: 0 }, bodies = [];   // bodies: every answer, re-read below against what the sweep itself made
@@ -600,7 +624,7 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
   const mc = new Map(tree); mc.set('data/bin/vibespace-vault', plantedCli);
   const m3 = useCensus(mc);
   ok(m3.red.some((l) => /the verb "peek" is not classified/.test(l)), `MUTANT RED (a): a planted CLI verb, unclassified ⇒ ${m3.red[0] || 'GREEN'}`);
-  const cliCopy = path.join(ROOT8, 'vibespace-vault-peek'); fs.writeFileSync(cliCopy, plantedCli, { mode: 0o700 });
+  const cliCopy = path.join(ROOT8, 'vibespace-vault-peek'); fs.writeFileSync(cliCopy, plantedCli, { mode: 0o700 }); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(ROOT8, 'cli-call.js'));   // lane cli-call-timeouts: a copy outside the checkout reads THE ONE CALL beside it
   const s2 = await sweep(reg8, { cli: cliCopy });
   ok(s2.leaks.some((l) => /vibespace-vault peek ⇒ link token \(own machine\)/.test(l)), `MUTANT RED (c): the planted verb run against the real doors prints the machine's link token ⇒ ${s2.leaks[0] || 'GREEN'}`);
   eng8.close();

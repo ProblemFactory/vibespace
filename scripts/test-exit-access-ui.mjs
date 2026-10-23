@@ -198,7 +198,8 @@ try {
   ok(await P.waitFor(`[...document.querySelectorAll('.global-toast')].some((t) => /^谁能使用 exmac：网络 — 所有 agent；命令 — 已选 2 个（每次问我）✕?$/.test(t.textContent.trim()))`, 4000), 'the toast: 谁能使用 exmac：网络 — 所有 agent；命令 — 已选 2 个（每次问我）', await P.evalJs(`[...document.querySelectorAll('.global-toast')].map((t) => t.textContent).join(' | ')`));
   ok(body && !('hub' in body), 'lane hub-act-ask: Hub 自动化 untouched ⇒ not in the PATCH (not set stays the instance\'s default)', body);
   const stored = (await W.hostRow('exmac')).exit;
-  ok(stored.run.mode === 'only' && stored.run.ask === true && stored.run.who.some((w) => w.kind === 'session' && w.id === 'claude:' + S[1].cid), 'the server resolved the live pick to its durable key (claude:<conversation id>)', stored.run);
+  // lane grants-unify: the grants store names a conversation by its conversation id (the ONE spelling)
+  ok(stored.run.mode === 'only' && stored.run.ask === true && stored.run.who.some((w) => w.kind === 'conversation' && w.key === S[1].cid), 'the server resolved the live pick to its durable key (the conversation id)', stored.run);
   const P2 = await W.openPage({ width: 1280, height: 820, lang: 'zh' });
   await openRemote(P2);
   ok(await P2.waitFor(`/^出口：网络 — 所有 agent · 命令 — 已选 2 个（每次问我）$/.test(${rowOf}?.querySelector('.mounts-exit-line')?.textContent || '')`, 10000), 'a SECOND page\'s row shows the summary 出口：网络 — 所有 agent · 命令 — 已选 2 个（每次问我）');
