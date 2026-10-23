@@ -405,6 +405,45 @@ console.log('\n§2e no fast suite asserts a wall-clock bound on its own run');
   }
 }
 
+// ── shared by §2g and §2h: a red names what it saw; a workflow's jobs → steps, line-based (no YAML parser in this tree) ──
+const okd = (c, n, d) => ok(c, c || !d ? n : `${n}\n      ${String(d).trim().split('\n').join('\n      ')}`);
+// a step is a `- ` item under a `steps:` key, up to the next item at its indent; each job's step list also carries the
+// job's key (`job`) and its own timeout-minutes (`bound`), read between the job's key line and its `steps:`
+const jobsOf = (text) => {
+  const lines = text.split('\n'), jobs = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\s*)steps:\s*$/.exec(lines[i]);
+    if (!m) continue;
+    const steps = [];
+    let at = -1;
+    for (let j = i + 1; j < lines.length; j++) {
+      const l = lines[j], ind = l.length - l.trimStart().length, note = !l.trim() || /^\s*#/.test(l);
+      if (!note && ind <= m[1].length) break;
+      if (!note && /^\s*- /.test(l) && (at < 0 || ind === at)) { at = ind; steps.push([l.slice(0, ind) + '  ' + l.slice(ind + 2)]); continue; }
+      if (steps.length) steps[steps.length - 1].push(l);
+    }
+    let h = i - 1;
+    while (h > 0 && !new RegExp(`^ {${Math.max(0, m[1].length - 2)}}[\\w-]+:\\s*$`).test(lines[h])) h--;
+    const jobBound = lines.slice(h + 1, i).map((l) => new RegExp(`^ {${m[1].length}}timeout-minutes:\\s*(\\S+)`).exec(l)).find(Boolean);
+    jobs.push(Object.assign(steps.map((ls) => {
+      const ind = ls[0].length - ls[0].trimStart().length, key = (k) => ls.findIndex((l) => new RegExp(`^ {${ind}}${k}:`).test(l));
+      const val = (k) => { const at = key(k); return at < 0 ? null : ls[at].slice(ind + k.length + 1).trim(); };
+      const r = key('run');
+      let run = r < 0 ? null : ls[r].slice(ind + 'run:'.length).trim();
+      if (r >= 0 && /^[|>][-+]?$/.test(run)) { // a block scalar: every line deeper than its key (a `#` line too), then the next key
+        const body = [];
+        for (const l of ls.slice(r + 1)) { if (l.trim() && l.length - l.trimStart().length <= ind) break; body.push(l); }
+        const cut = Math.min(...body.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length));
+        run = body.map((l) => l.slice(cut)).join('\n').trim();
+      }
+      const bound = val('timeout-minutes');
+      return { text: ls.filter((l) => l.trim() && !/^\s*#/.test(l)).join('\n'), run, uses: key('uses') >= 0, cont: key('continue-on-error') >= 0,
+        action: val('uses'), bound: bound === null ? null : Number(bound), label: val('name') || val('uses') || (run || '').split('\n')[0] };
+    }), { job: (/^\s*([\w-]+):/.exec(lines[h]) || [])[1] || '?', bound: jobBound ? Number(jobBound[1]) : null }));
+  }
+  return jobs;
+};
+
 // ── §2f THE MIRROR'S ONE APT DOOR (lane mirror-flake-hardening: rel269's heavy 2/4 died in `apt-get update`, exit 100,
 // on packages.microsoft.com — a repository the runner ships and we never install from — answering only over IPv6) ──
 console.log('\n§2f ci.yml installs through scripts/ci-apt.sh (a repository we do not need never fails a job)');
@@ -413,9 +452,11 @@ console.log('\n§2f ci.yml installs through scripts/ci-apt.sh (a repository we d
   const runs = wf.split('\n').filter((l) => /^\s*run:/.test(l));
   const bare = runs.filter((l) => /\bapt(?:-get)?\b/.test(l) && !/scripts\/ci-apt\.sh/.test(l));
   const door = runs.filter((l) => /scripts\/ci-apt\.sh/.test(l));
-  ok(!bare.length && door.length >= 3, `every apt step in ci.yml goes through scripts/ci-apt.sh (${door.length} steps${bare.length ? '; BARE: ' + bare.map((l) => l.trim()).join(' | ') : ''})`);
+  ok(!bare.length && door.length >= 2, `every apt step in ci.yml goes through scripts/ci-apt.sh (${door.length} steps${bare.length ? '; BARE: ' + bare.map((l) => l.trim()).join(' | ') : ''})`);
   const sh = fs.readFileSync(path.join(REPO, 'scripts', 'ci-apt.sh'), 'utf-8');
   ok(/Acquire::ForceIPv4=true/.test(sh) && /--no-install-recommends/.test(sh), 'the door speaks IPv4 and installs only the packages named');
+  ok(/-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30/.test(sh) && /timeout -k \d+ "\$BOUND" \$SUDO/.test(sh) && /^BOUND=\$\{CI_APT_BOUND:-80\}$/m.test(sh),
+    'the door is BOUNDED (lane ci-cjk-fonts): a stalled connection gives up after 30 s, every apt call runs under `timeout` (80 s, sized for dtach)');
   // the selection over a fixture sources.list.d: the runner's microsoft lists moved aside (printed), ubuntu.sources kept
   const dir = path.join(mktmp('apt'), 'sources.list.d');
   fs.mkdirSync(dir, { recursive: true });
@@ -426,9 +467,17 @@ console.log('\n§2f ci.yml installs through scripts/ci-apt.sh (a repository we d
   const left = fs.readdirSync(dir).sort().join(), aside = fs.existsSync(dir + '.off') ? fs.readdirSync(dir + '.off').sort().join() : '';
   ok(r.status === 0 && left === 'ubuntu.sources' && aside === 'azure-cli.sources,microsoft-prod.list' && /moved aside microsoft-prod\.list — https:\/\/packages\.microsoft\.com/.test(r.stdout) && /kept ubuntu\.sources/.test(r.stdout),
     `the runner's packages.microsoft.com lists are moved aside BY NAME, the Ubuntu archive kept (left: ${left}; aside: ${aside})`);
-  ok(/apt-get -o Acquire::ForceIPv4=true -o Acquire::Retries=3 update\n/.test(r.stdout) && /install -y --no-install-recommends dtach\n?$/.test(r.stdout), 'then update + install of exactly the named package, IPv4 forced', r.stdout);
-  const noUpd = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), '--no-update', 'fonts-noto-cjk'], { encoding: 'utf-8', env: { PATH: process.env.PATH, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_ECHO: '1' } });
-  ok(noUpd.status === 0 && !/ update\n/.test(noUpd.stdout) && /install -y --no-install-recommends fonts-noto-cjk/.test(noUpd.stdout), '--no-update installs on the index the first step fetched');
+  const OPTS = '-o Acquire::ForceIPv4=true -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30';
+  okd(r.stdout.includes(`\ntimeout 80 apt-get ${OPTS} update\n`) && r.stdout.endsWith(`timeout 80 apt-get ${OPTS} install -y --no-install-recommends dtach\n`), 'then update + install of exactly the named package, IPv4 forced, each call bounded', r.stdout);
+  const noUpd = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), '--no-update', 'dtach'], { encoding: 'utf-8', env: { PATH: process.env.PATH, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_ECHO: '1', CI_APT_BOUND: '200' } });
+  ok(noUpd.status === 0 && !/ update\n/.test(noUpd.stdout) && /^timeout 200 apt-get .* install -y --no-install-recommends dtach$/m.test(noUpd.stdout), '--no-update installs on the index the first step fetched; CI_APT_BOUND sizes the bound for a larger package');
+  // the bound itself, over a stub apt-get that never answers (a stalled mirror): the call is killed, the step red BY NAME
+  const stub = path.join(mktmp('aptstub'), 'bin');
+  fs.mkdirSync(stub);
+  fs.writeFileSync(path.join(stub, 'apt-get'), '#!/bin/bash\nexec sleep 30\n', { mode: 0o755 });
+  const hung = spawnSync('bash', [path.join(REPO, 'scripts', 'ci-apt.sh'), 'dtach'], { encoding: 'utf-8', env: { PATH: `${stub}:${process.env.PATH}`, CI_APT_SOURCES_DIR: dir, CI_APT_SUDO: '', CI_APT_BOUND: '0.3' } });
+  okd(hung.status === 124 && /^::error::ci-apt: apt-get … update passed its 0\.3 s bound \(a stalled mirror\)$/m.test(hung.stderr) && !/install -y/.test(hung.stdout + hung.stderr),
+    `an apt call past its bound is killed and the step goes red naming it — the install never starts (exit ${hung.status})`, hung.stdout + hung.stderr);
 }
 
 // ── §2g AN INSTALL MAY BE RETRIED, A SUITE NEVER (lane ci-npm-retry, B-fa5e: .330's heavy 6/6 — run 39462417012 — died in
@@ -441,37 +490,7 @@ console.log('\n§2f ci.yml installs through scripts/ci-apt.sh (a repository we d
 // values with the `yaml` package); the controls are mutant copies of ci.yml.
 console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never');
 {
-  const okd = (c, n, d) => ok(c, c || !d ? n : `${n}\n      ${String(d).trim().split('\n').join('\n      ')}`); // a red names what it saw
   const WF_DIR = path.join(REPO, '.github', 'workflows');
-  // a workflow's jobs → steps, line-based: a step is a `- ` item under a `steps:` key, up to the next item at its indent
-  const jobsOf = (text) => {
-    const lines = text.split('\n'), jobs = [];
-    for (let i = 0; i < lines.length; i++) {
-      const m = /^(\s*)steps:\s*$/.exec(lines[i]);
-      if (!m) continue;
-      const steps = [];
-      let at = -1;
-      for (let j = i + 1; j < lines.length; j++) {
-        const l = lines[j], ind = l.length - l.trimStart().length, note = !l.trim() || /^\s*#/.test(l);
-        if (!note && ind <= m[1].length) break;
-        if (!note && /^\s*- /.test(l) && (at < 0 || ind === at)) { at = ind; steps.push([l.slice(0, ind) + '  ' + l.slice(ind + 2)]); continue; }
-        if (steps.length) steps[steps.length - 1].push(l);
-      }
-      jobs.push(steps.map((ls) => {
-        const ind = ls[0].length - ls[0].trimStart().length, key = (k) => ls.findIndex((l) => new RegExp(`^ {${ind}}${k}:`).test(l));
-        const r = key('run');
-        let run = r < 0 ? null : ls[r].slice(ind + 'run:'.length).trim();
-        if (r >= 0 && /^[|>][-+]?$/.test(run)) { // a block scalar: every line deeper than its key (a `#` line too), then the next key
-          const body = [];
-          for (const l of ls.slice(r + 1)) { if (l.trim() && l.length - l.trimStart().length <= ind) break; body.push(l); }
-          const cut = Math.min(...body.filter((l) => l.trim()).map((l) => l.length - l.trimStart().length));
-          run = body.map((l) => l.slice(cut)).join('\n').trim();
-        }
-        return { text: ls.filter((l) => l.trim() && !/^\s*#/.test(l)).join('\n'), run, uses: key('uses') >= 0, cont: key('continue-on-error') >= 0 };
-      }));
-    }
-    return jobs;
-  };
   const DOOR = /^bash scripts\/ci-npm\.sh (?:ci|install -g(?: [@\w./-]+)+)$/;
   const INSTALL = /\bnpm\s+(?:ci|i|install|add)\b/;
   const SUITE_LINE = /^node scripts\/ci\.mjs(?: [^;&|<>`()\n]*)?$/;
@@ -514,7 +533,7 @@ console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never
     ['a second ci.mjs step if: failure()', (t) => t.replace(FAST_RUN, FAST_RUN + '        env:\n          VIBESPACE_CI_OAT: x\n      - if: failure()\n        run: node scripts/ci.mjs\n'), /job 1: scripts\/ci\.mjs runs in 2 steps/],
     ['continue-on-error on the suite step', (t) => t.replace(FAST_RUN, FAST_RUN + '        continue-on-error: true\n'), /not ONE plain line: run: node scripts\/ci\.mjs ⏎ continue-on-error: true/],
     ['ci.mjs handed to the door', (t) => t.replace(FAST_RUN, '      - run: bash scripts/ci-npm.sh node scripts/ci.mjs\n'), /not ONE plain line: run: bash scripts\/ci-npm\.sh node scripts\/ci\.mjs/],
-    ['the door\'s npm ci moved after ci.mjs', (t) => t.replace('      - name: npm ci (3 attempts on a registry blip)\n        run: bash scripts/ci-npm.sh ci\n      - run: node scripts/ci.mjs\n', '      - run: node scripts/ci.mjs\n      - name: npm ci (3 attempts on a registry blip)\n        run: bash scripts/ci-npm.sh ci\n'), /job 1: scripts\/ci\.mjs with no `scripts\/ci-npm\.sh ci` before it/],
+    ['the door\'s npm ci moved after ci.mjs', (t) => t.replace(/( {6}- name: npm ci \(3 attempts on a registry blip\)\n(?: {8}.*\n)+)( {6}- run: node scripts\/ci\.mjs\n)/, '$2$1'), /job 1: scripts\/ci\.mjs with no `scripts\/ci-npm\.sh ci` before it/],
   ];
   const reds = MUTANTS.map(([label, edit, why]) => {
     const t = edit(ci), mv = verdictOf(files.map(([f, x]) => [f, f === 'ci.yml' ? t : x]));
@@ -551,6 +570,115 @@ console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never
   ok(refused.every(({ r }) => r.status === 2 && !r.npm.length && /usage: ci-npm\.sh ci \| install -g/.test(r.out)),
     `the door runs only \`npm ci\` or a global install — a local \`npm install\`, extra flags or anything else is refused before npm runs (${refused.map(({ a, r }) => `[${a.join(' ')}] ${r.status}`).join(', ')})`);
 }
+// ── §2h EVERY SETUP STEP IS BOUNDED, THE FONTS HAVE ONE ROAD (lane ci-cjk-fonts, 2.369.346: .345's master mirror was
+// CANCELLED at 45 min — heavy 4/6 sat 21 min in `apt install fonts-noto-cjk`, the azure mirror serving 61 MB at 45.8 kB/s,
+// and 4 of the branch run's 6 shards spent 11–21 min there) ──
+// Every ci.yml job carries its own timeout-minutes and every step but its suite step one under it (the suite step's
+// bound is its job's): a stall is a red that names its step. The heavy tier's zh / ja fonts come from ONE road — ONE plain
+// `bash scripts/ci-fonts.sh --system` step, bounded ≤ 6 min, an actions/cache of its dir in front keyed on that file (the
+// pins), a stalled restore a miss — and never from apt, in any step, in any form (no fallback: a second road hides the
+// first one's failure). ci-fonts.sh pins its tag and a sha256 per file, bounds curl, and is run here over a fixture (a
+// file:// base serving the wrong bytes: red by name, nothing installed). The controls are mutant copies of both files.
+console.log('\n§2h every setup step is bounded; the fonts have one road (scripts/ci-fonts.sh, cached, pinned)');
+{
+  const FONTS_SH = path.join(REPO, 'scripts', 'ci-fonts.sh'), CACHE_DIR = '~/.local/share/fonts/noto-cjk';
+  const verdictOf = (yml, sh) => {
+    const bad = [], jobs = jobsOf(yml);
+    let bounded = 0, roads = 0;
+    for (const steps of jobs) {
+      if (!(steps.bound > 0)) bad.push(`job ${steps.job}: no timeout-minutes of its own`);
+      for (const st of steps) {
+        if (/fonts-noto-cjk/.test(st.run || '')) bad.push(`job ${steps.job}: fonts through apt: ${st.run.split('\n')[0]}`);
+        if (/scripts\/ci\.mjs/.test(st.text)) continue; // the suite step: its job's bound is its bound
+        if (!(st.bound > 0)) bad.push(`job ${steps.job}: «${st.label}» has no timeout-minutes`);
+        else if (st.bound >= steps.bound) bad.push(`job ${steps.job}: «${st.label}» is bounded at ${st.bound}, not under its job's ${steps.bound}`);
+        else bounded++;
+      }
+      const suite = steps.findIndex((st) => /^node scripts\/ci\.mjs --heavy\b/.test(st.run || ''));
+      if (suite < 0) continue; // only the heavy tier drives the chrome suites that measure zh / ja text
+      const road = steps.findIndex((st) => /scripts\/ci-fonts\.sh/.test(st.run || ''));
+      if (road < 0) { bad.push(`job ${steps.job}: runs the heavy tier with no scripts/ci-fonts.sh step`); continue; }
+      roads++;
+      const r = steps[road], cache = steps.findIndex((st) => /^actions\/cache@v\d+$/.test(st.action || '') && new RegExp(`^\\s*path:\\s*${CACHE_DIR.replace(/[.]/g, '\\.')}\\s*$`, 'm').test(st.text));
+      if (r.run !== 'bash scripts/ci-fonts.sh --system' || r.cont || r.uses) bad.push(`job ${steps.job}: the fonts step is not ONE plain \`bash scripts/ci-fonts.sh --system\`: ${r.text.split('\n').map((l) => l.trim()).join(' ⏎ ')}`);
+      if (!(r.bound > 0 && r.bound <= 6)) bad.push(`job ${steps.job}: the fonts step's bound is ${r.bound} (≤ 6 min)`);
+      if (road > suite) bad.push(`job ${steps.job}: the fonts step runs after the suites`);
+      if (cache < 0) { bad.push(`job ${steps.job}: no actions/cache of ${CACHE_DIR} in front of the fonts step`); continue; }
+      const c = steps[cache], key = (/^\s*key:\s*(.+)$/m.exec(c.text) || [])[1] || '', seg = Number((/SEGMENT_DOWNLOAD_TIMEOUT_MINS:\s*(\d+)/.exec(c.text) || [])[1]);
+      if (cache > road) bad.push(`job ${steps.job}: the fonts cache comes after the fonts step`);
+      if (!key.includes("hashFiles('scripts/ci-fonts.sh')")) bad.push(`job ${steps.job}: the fonts cache is not keyed on scripts/ci-fonts.sh (the pins): key ${key}`);
+      if (/^\s*restore-keys:/m.test(c.text)) bad.push(`job ${steps.job}: the fonts cache has restore-keys (another pin set's files)`);
+      if (!(seg > 0 && seg < c.bound)) bad.push(`job ${steps.job}: a stalled fonts-cache restore is no miss before the step's bound (SEGMENT_DOWNLOAD_TIMEOUT_MINS ${seg || 'unset'}, bound ${c.bound})`);
+    }
+    if (!roads) bad.push('no job takes the fonts road');
+    // ci-fonts.sh: a tag, a 64-hex sha256 on every PINS entry (the two Sans TTCs at least), curl bounded, no apt anywhere
+    const code = sh.replace(/^\s*#.*$/gm, '');
+    const tag = (/^TAG=(\S+)$/m.exec(code) || [])[1];
+    const entries = ((/^PINS=\(\n([\s\S]*?)\n\)$/m.exec(code) || [])[1] || '').split('\n').filter((l) => l.trim());
+    const pins = entries.map((l) => /^\s*'([0-9a-f]{64}) ((?:Sans|Serif)\/OTC\/Noto(?:Sans|Serif)CJK-(?:Regular|Bold)\.ttc)'$/.exec(l)).filter(Boolean).map((m) => m[2]);
+    if (!tag) bad.push('ci-fonts.sh pins no tag');
+    for (const f of ['Sans/OTC/NotoSansCJK-Regular.ttc', 'Sans/OTC/NotoSansCJK-Bold.ttc']) if (!pins.includes(f)) bad.push(`ci-fonts.sh pins no sha256 for ${f}`);
+    if (entries.length !== pins.length) bad.push(`ci-fonts.sh: ${entries.length - pins.length} PINS entr${entries.length - pins.length === 1 ? 'y' : 'ies'} without a 64-hex sha256`);
+    if (!/\bBASE=\$\{CI_FONTS_BASE:-https:\/\/raw\.githubusercontent\.com\/notofonts\/noto-cjk\/\$TAG\}/.test(code)) bad.push('ci-fonts.sh does not fetch from the pinned tag');
+    if (!/^dir=\$\{CI_FONTS_DIR:-\$HOME\/\.local\/share\/fonts\/noto-cjk\}$/m.test(code)) bad.push(`ci-fonts.sh installs somewhere the cache (${CACHE_DIR}) does not keep`);
+    if (!/curl [^\n]*--retry 5 [^\n]*--max-time \d+/.test(code)) bad.push('ci-fonts.sh: curl is not bounded (--retry 5 … --max-time)');
+    if (/\bapt(?:-get)?\b|ci-apt/.test(code)) bad.push('ci-fonts.sh: an apt road inside the fonts road');
+    return { bad, bounded, roads, pins, tag };
+  };
+  const yml = fs.readFileSync(path.join(REPO, '.github', 'workflows', 'ci.yml'), 'utf-8'), sh = fs.readFileSync(FONTS_SH, 'utf-8');
+  const v = verdictOf(yml, sh);
+  okd(!v.bad.length && v.bounded >= 14 && v.roads === 1 && v.pins.length === 4,
+    `every ci.yml job and every setup step is bounded (${v.bounded} steps; the 2 suite steps by their job), the heavy job takes ONE fonts road — a cache keyed on scripts/ci-fonts.sh in front, ≤ 6 min, no apt — and ci-fonts.sh pins ${v.tag} + a sha256 per file (${v.pins.length})`, v.bad.join('\n'));
+  // the controls: mutant copies of ci.yml and ci-fonts.sh, each RED for its own reason
+  const FONTS_RUN = '        run: bash scripts/ci-fonts.sh --system\n';
+  const STEP = (head) => `( {6}- name: ${head}[^\\n]*\\n(?: {8}.*\\n)+)`;
+  const MUTANTS = [
+    ['the fonts back on apt', 'yml', (t) => t.replace('run: bash scripts/ci-fonts.sh --system', 'run: bash scripts/ci-apt.sh --no-update fonts-noto-cjk'), /fonts through apt: bash scripts\/ci-apt\.sh --no-update fonts-noto-cjk/],
+    ['an apt fallback after the road', 'yml', (t) => t.replace('run: bash scripts/ci-fonts.sh --system', 'run: bash scripts/ci-fonts.sh --system || bash scripts/ci-apt.sh fonts-noto-cjk'), /fonts through apt: bash scripts\/ci-fonts\.sh --system \|\| bash scripts\/ci-apt\.sh fonts-noto-cjk/],
+    ['the road without --system (one HOME\'s fonts)', 'yml', (t) => t.replace(FONTS_RUN, '        run: bash scripts/ci-fonts.sh\n'), /the fonts step is not ONE plain `bash scripts\/ci-fonts\.sh --system`: name: Install CJK fonts .* ⏎ run: bash scripts\/ci-fonts\.sh ⏎/],
+    ['the road continue-on-error', 'yml', (t) => t.replace(FONTS_RUN, FONTS_RUN + '        continue-on-error: true\n'), /the fonts step is not ONE plain .* ⏎ continue-on-error: true/],
+    ['the cache step gone', 'yml', (t) => t.replace(new RegExp(STEP('Cache the pinned CJK fonts')), ''), /no actions\/cache of ~\/\.local\/share\/fonts\/noto-cjk in front of the fonts step/],
+    ['the cache after the road', 'yml', (t) => t.replace(new RegExp(STEP('Cache the pinned CJK fonts') + STEP('Install CJK fonts')), '$2$1'), /the fonts cache comes after the fonts step/],
+    ['the cache keyed on a constant', 'yml', (t) => t.replace("key: noto-cjk-${{ hashFiles('scripts/ci-fonts.sh') }}", 'key: noto-cjk-v1'), /the fonts cache is not keyed on scripts\/ci-fonts\.sh \(the pins\): key noto-cjk-v1/],
+    ['restore-keys on the cache', 'yml', (t) => t.replace("          key: noto-cjk-${{ hashFiles('scripts/ci-fonts.sh') }}\n", "          key: noto-cjk-${{ hashFiles('scripts/ci-fonts.sh') }}\n          restore-keys: noto-cjk-\n"), /the fonts cache has restore-keys/],
+    ['a cache restore that may stall to its bound', 'yml', (t) => t.replace('          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 2\n', ''), /a stalled fonts-cache restore is no miss .*unset/],
+    ['the fonts step unbounded', 'yml', (t) => t.replace(FONTS_RUN + '        timeout-minutes: 6\n', FONTS_RUN), /job heavy-shards: «Install CJK fonts [^»]*» has no timeout-minutes/],
+    ['the fonts step bounded at 30', 'yml', (t) => t.replace(FONTS_RUN + '        timeout-minutes: 6\n', FONTS_RUN + '        timeout-minutes: 30\n'), /the fonts step's bound is 30 \(≤ 6 min\)/],
+    ['dtach unbounded', 'yml', (t) => t.replace('        run: bash scripts/ci-apt.sh dtach\n        timeout-minutes: 3\n', '        run: bash scripts/ci-apt.sh dtach\n'), /job fast: «Install dtach [^»]*» has no timeout-minutes/],
+    ['checkout unbounded', 'yml', (t) => t.replace('      - uses: actions/checkout@v4\n        timeout-minutes: 3\n', '      - uses: actions/checkout@v4\n'), /job fast: «actions\/checkout@v4» has no timeout-minutes/],
+    ['npm ci bounded at the job\'s 45', 'yml', (t) => t.replace(/(run: bash scripts\/ci-npm\.sh ci\n {8}timeout-minutes: )6\n([\s\S]*run: bash scripts\/ci-npm\.sh ci\n {8}timeout-minutes: )6\n/, '$16\n$245\n'), /job heavy-shards: «npm ci \(3 attempts on a registry blip\)» is bounded at 45, not under its job's 45/],
+    ['a job with no bound of its own', 'yml', (t) => t.replace('    timeout-minutes: 5\n    steps:', '    steps:'), /job heavy: no timeout-minutes of its own/],
+    ['a Sans pin dropped', 'sh', (t) => t.replace(/^ {2}'[0-9a-f]{64} Sans\/OTC\/NotoSansCJK-Bold\.ttc'\n/m, ''), /ci-fonts\.sh pins no sha256 for Sans\/OTC\/NotoSansCJK-Bold\.ttc/],
+    ['a pin without its sha256', 'sh', (t) => t.replace(/'[0-9a-f]{64} (Serif\/OTC\/NotoSerifCJK-Bold\.ttc)'/, "'$1'"), /ci-fonts\.sh: 1 PINS entry without a 64-hex sha256/],
+    ['the tag unpinned (a branch)', 'sh', (t) => t.replace('/notofonts/noto-cjk/$TAG}', '/notofonts/noto-cjk/main}'), /ci-fonts\.sh does not fetch from the pinned tag/],
+    ['curl unbounded', 'sh', (t) => t.replace(/ --max-time \d+/, ''), /ci-fonts\.sh: curl is not bounded/],
+    ['an apt fallback inside the script', 'sh', (t) => t.replace('  mv -f "$f.part" "$f"\n', '  mv -f "$f.part" "$f"\n  bash scripts/ci-apt.sh --no-update fonts-noto-cjk || true\n'), /ci-fonts\.sh: an apt road inside the fonts road/],
+  ];
+  const reds = MUTANTS.map(([label, which, edit, why]) => {
+    const t = edit(which === 'yml' ? yml : sh), mv = which === 'yml' ? verdictOf(t, sh) : verdictOf(yml, t);
+    return { label, applied: t !== (which === 'yml' ? yml : sh), red: mv.bad.some((b) => why.test(b)), bad: mv.bad };
+  });
+  const missed = reds.filter((r) => !r.applied || !r.red);
+  okd(!missed.length, `CONTROL: ${reds.length} mutant copies of ci.yml / ci-fonts.sh each go RED for their own reason (${reds.map((r) => r.label).join(' · ')})`,
+    missed.map((r) => `${r.label}: ${r.applied ? 'GREEN — ' + JSON.stringify(r.bad) : 'the edit did not apply'}`).join('\n'));
+  // THE ROAD ITSELF over a fixture: a file:// base that serves the wrong bytes under the pinned name, a cached file from
+  // another pin set — the cached one is refetched, the fetched one fails its sha256: red BY NAME, nothing unverified installed
+  const fx = mktmp('fonts'), base = path.join(fx, 'base'), dest = path.join(fx, 'dest');
+  fs.mkdirSync(path.join(base, 'Sans', 'OTC'), { recursive: true });
+  fs.mkdirSync(dest);
+  const WRONG = 'not the pinned font\n', STALE = 'a cached file of another pin set\n';
+  fs.writeFileSync(path.join(base, 'Sans', 'OTC', 'NotoSansCJK-Regular.ttc'), WRONG);
+  fs.writeFileSync(path.join(dest, 'NotoSansCJK-Regular.ttc'), STALE);
+  const road = (args) => spawnSync('bash', [FONTS_SH, ...args], { encoding: 'utf-8', env: { PATH: process.env.PATH, HOME: fx, CI_FONTS_BASE: `file://${base}`, CI_FONTS_DIR: dest, CI_FONTS_SUDO: '', CI_FONTS_CONF: path.join(fx, 'conf') } });
+  const wrong = road(['--system']), sha = crypto.createHash('sha256').update(WRONG).digest('hex'), pin = sh.match(/'([0-9a-f]{64}) Sans\/OTC\/NotoSansCJK-Regular\.ttc'/)?.[1];
+  okd(wrong.status === 1 && /^::warning::ci-fonts: the cached NotoSansCJK-Regular\.ttc is not the pinned file — fetching it again$/m.test(wrong.stdout)
+    && wrong.stderr.includes(`::error::ci-fonts: NotoSansCJK-Regular.ttc sha256 ${sha}, pinned ${pin} (`)
+    && fs.readdirSync(dest).join() === 'NotoSansCJK-Regular.ttc' && fs.readFileSync(path.join(dest, 'NotoSansCJK-Regular.ttc'), 'utf-8') === STALE && !fs.existsSync(path.join(fx, 'conf')),
+  'the wrong bytes under a pinned name: a red naming the file, its sha256 and the pin — nothing installed, no .part left, no fontconfig registered', wrong.stdout + wrong.stderr);
+  const refused = [['--user'], ['--system', 'x'], ['x']].map((a) => ({ a, r: road(a) }));
+  ok(refused.every(({ r }) => r.status === 2 && /usage: ci-fonts\.sh \[--system\]/.test(r.stderr)), `the road takes only [--system] (${refused.map(({ a, r }) => `[${a.join(' ')}] ${r.status}`).join(', ')})`);
+}
+
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }

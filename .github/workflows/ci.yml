@@ -31,16 +31,24 @@ jobs:
     # suites (was ≈ 845 s), ≈ 215 s at this runner's 1.3× plus ~35 s of
     # setup — about 4 min, under a third of this budget.
     timeout-minutes: 15
+    # EVERY SETUP STEP IS BOUNDED (lane ci-cjk-fonts, 2.369.346): a stall is a red that names its step in minutes, never
+    # a silence until the job's limit (.345's heavy 4/6 sat 21 min in one apt fetch). Each bound is a few times the
+    # step's measured worst (2026-10-23, 13 jobs: checkout 6–10 s, setup-node 0–3 s, dtach 7–67 s, claude CLI 3–6 s,
+    # npm ci 8–14 s); the suite step's bound is its job's. test-ci-gate §2h holds every job to it.
     steps:
       - uses: actions/checkout@v4
+        timeout-minutes: 3
       - uses: actions/setup-node@v4
+        timeout-minutes: 3
         with:
           node-version: 22
       - name: Install dtach (session persistence layer the boot smoke needs)
         run: bash scripts/ci-apt.sh dtach
+        timeout-minutes: 3
       - name: Install claude CLI (chat E2E; subscription oat auth is the
           officially documented CI channel — docs/en/github-actions)
         run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code
+        timeout-minutes: 5
       # THE ONE NPM DOOR (lane ci-npm-retry, B-fa5e): .330's heavy 6/6 died in
       # `npm ci` on a registry reset MID-DOWNLOAD — a blip npm's own
       # fetch-retries never covers (it retries a request until its headers).
@@ -49,6 +57,7 @@ jobs:
       # a race (test-ci-gate §2g holds both).
       - name: npm ci (3 attempts on a registry blip)
         run: bash scripts/ci-npm.sh ci
+        timeout-minutes: 6
       - run: node scripts/ci.mjs
         env:
           # claude setup-token secret; absent on fork PRs → chat E2E SKIPs
@@ -83,13 +92,17 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6]
     timeout-minutes: 45
+    # every setup step bounded — the fast job's rule and numbers
     steps:
       - uses: actions/checkout@v4
+        timeout-minutes: 3
       - uses: actions/setup-node@v4
+        timeout-minutes: 3
         with:
           node-version: 22
       - name: Install dtach (session persistence layer the boot smokes need)
         run: bash scripts/ci-apt.sh dtach
+        timeout-minutes: 3
       # CJK fonts (lane-mirror-197, 2.369.198): the runner image ships DejaVu +
       # Liberation and NO CJK family, so every zh / ja glyph the chrome suites
       # measure was DejaVu's fallback box — narrower than the glyph a Chinese or
@@ -99,13 +112,31 @@ jobs:
       # "the pre-fix rule cuts this ja line at 360 px" went red for the font
       # alone. Users have CJK fonts; the runner gets the same family. The
       # controls stay font-independent regardless (test-channel-threads-ui ⑥).
+      # THE ONE FONTS ROAD (lane ci-cjk-fonts, 2.369.346): `apt install fonts-noto-cjk` took 3–6 s where the azure mirror
+      # served it and 11–21 min where it did not (2026-10-23: 4 of 6 shards on a branch run, 2 of 6 on the .345 master
+      # mirror — its heavy 4/6 cancelled at 45 with 22 min left for 25 min of suites).
+      # scripts/ci-fonts.sh fetches the SAME bytes — the four TTCs at the noto-cjk tag the runner's .deb repacks, each
+      # sha256-pinned and verified before install; this cache keeps them, keyed on that file, so a hit is a sha256 check
+      # (a stalled restore is a miss after 2 min, never a wait). --system makes them every HOME's, as apt's were (the
+      # suites' servers run under scratch HOMEs). No apt fallback: a second road would hide the first one's failure.
+      - name: Cache the pinned CJK fonts
+        uses: actions/cache@v4
+        timeout-minutes: 3
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 2
+        with:
+          path: ~/.local/share/fonts/noto-cjk
+          key: noto-cjk-${{ hashFiles('scripts/ci-fonts.sh') }}
       - name: Install CJK fonts (the runner measures zh / ja text as users see it)
-        run: bash scripts/ci-apt.sh --no-update fonts-noto-cjk
+        run: bash scripts/ci-fonts.sh --system
+        timeout-minutes: 6
       - name: Install claude CLI
         run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code
+        timeout-minutes: 5
       # the ONE npm door (see the fast job): installs retried, suites never
       - name: npm ci (3 attempts on a registry blip)
         run: bash scripts/ci-npm.sh ci
+        timeout-minutes: 6
       # Runner images ship Chrome; the chrome suites SKIP with a reason if a
       # future image drops it, so this never becomes a silent pass.
       #
@@ -137,6 +168,7 @@ jobs:
       - name: Upload the failed suites' whole logs + chrome-suite screenshots (failure only)
         if: failure()
         uses: actions/upload-artifact@v4
+        timeout-minutes: 5
         with:
           name: chrome-suite-shots-${{ github.sha }}-${{ matrix.shard }}
           path: |
@@ -154,6 +186,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: every heavy shard green
+        timeout-minutes: 1
         run: |
           echo "heavy shards: ${{ needs.heavy-shards.result }}"
           test "${{ needs.heavy-shards.result }}" = success
