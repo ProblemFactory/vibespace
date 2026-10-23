@@ -147,7 +147,8 @@ function mkEngine(opts = {}) {
     forget(cid) { held.delete(cid); },
   };
   let offset = 0;
-  const now = () => Date.now() + offset;
+  // `opts.now` — the engine's clock (ci-346-reds: the collect window's legs judge the hold on a clock they hold still)
+  const now = typeof opts.now === 'function' ? opts.now : () => Date.now() + offset;
   const userTodos = opts.userTodos === null ? null : (opts.userTodos || new UserTodoManager({ dataDir, now }));
   const e = (opts.engine || ENG).create({
     dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry: opts.registry, broadcast: (m) => events.push(m),
@@ -713,6 +714,11 @@ async function receiptLegs(ENGmod, name) {
 // handed; a failed send the decider asked to hear NOW still wakes once; the concurrency counts ──
 console.log('§5v verify: the TTL sweep vs a replace in flight; the legacy fate; one billed turn per proposal');
 const sleep = (ms) => new Promise((z) => setTimeout(z, ms));
+// ci-346-reds: the collect window's legs — a clock that stands still from its first read (the send takes no engine time:
+// the window is open when the receipt is ready, whatever the box's load), and the fallback timer's delivery waited for
+// (bounded at 5 s), never a fixed sleep
+const heldClock = () => { const t = Date.now(); return () => t; };
+const untilDelivered = async (delivered, ms = 5000) => { const t0 = Date.now(); while (!delivered.length && Date.now() - t0 < ms) await sleep(20); await sleep(40); };
 /** THE WINDOW: two due proposals; the sweep is busy with the FIRST (its receipt parked in the ladder) when a
  *  replace of the SECOND passes its check and makes the new draft; the sweep's write on the second then lands
  *  BETWEEN the replace's check and its withdrawal unless the hold is asked at apply time. */
@@ -2627,12 +2633,15 @@ async function primeDirect(eng) {
 }
 {
   // the CLI never collects ⇒ after the collect window the receipt falls back to the MESSAGE road
-  const W = mkEngine({ name: 'collect-timeout', settings: { 'channels.collectWindowMs': 30 } });
+  // ci-346-reds: the hold is judged on the ENGINE's clock (`now() − p.at ≤ window`) — a 30 ms window on the wall clock is
+  // outlasted by the send itself on a loaded runner (load 5: compose's twin went red). The clock stands still through the
+  // send (the window is open, deterministically); the fallback is the real one-shot timer, waited for (bounded), never slept
+  const W = mkEngine({ name: 'collect-timeout', settings: { 'channels.collectWindowMs': 30 }, now: heldClock() });
   const { eng, delivered, stash } = W;
   await primeDirect(eng);
   const r = await eng.propose(AGENT, A, C, { text: 'nobody collects me' }, { collect: true });
   ok(delivered.length === 0 && stash.length === 0, 'held at first — the window is open');
-  await new Promise((z) => setTimeout(z, 160));
+  await untilDelivered(delivered);
   ok(delivered.length === 1 && delivered[0].opts.spendReason === 'channel-receipt' && delivered[0].opts.noWake === true, 'the CLI timed out / died before collecting ⇒ the receipt fell back to the MESSAGE road (noWake, its own spend reason)', JSON.stringify(delivered.map((d) => d.opts && d.opts.spendReason)));
   const q = eng.store.outbox.snapshot().proposals[r.proposal.id];
   ok(q.receiptDelivery && q.receiptDelivery.road !== 'inline' && q.receiptDelivery.collected !== true, 'the fallback is a real message delivery, not an inline collection');
@@ -2742,14 +2751,24 @@ async function primeCompose(eng, authority = 'send') {
 }
 {
   // a NEW mail whose CLI never reads it ⇒ after the window the receipt falls back to the MESSAGE road (reply's fallback)
-  const W = mkEngine({ name: 'compose-timeout', settings: { 'channels.collectWindowMs': 30 } });
+  // ci-346-reds (red on the runner only, load 5): the clock held still through the compose — see collect-timeout above
+  const W = mkEngine({ name: 'compose-timeout', settings: { 'channels.collectWindowMs': 30 }, now: heldClock() });
   const { eng, delivered } = W;
   await primeCompose(eng);
   const r = await eng.compose(AGENT, A, MAIL, { collect: true });
   ok(r.ok && delivered.length === 0, 'compose: held at first — the window is open');
-  await new Promise((z) => setTimeout(z, 160));
+  await untilDelivered(delivered);
   ok(delivered.length === 1 && delivered[0].opts.spendReason === 'channel-receipt' && delivered[0].opts.noWake === true, 'compose: the CLI timed out / died before reading ⇒ the receipt fell back to the MESSAGE road (noWake, its own spend reason)', JSON.stringify(delivered.map((d) => d.opts && d.opts.spendReason)));
   eng.stop();
+  // RED CONTROL (the runner's red, made deterministic): a clock that moves 100 ms at every read — a send slower than the
+  // 30 ms window — finds the window SHUT when the receipt is ready: it is a message during the compose, and the judge
+  // above ("held at first") reads it red
+  let tSlow = Date.now();
+  const S = mkEngine({ name: 'compose-timeout-slow', settings: { 'channels.collectWindowMs': 30 }, now: () => (tSlow += 100) });
+  await primeCompose(S.eng);
+  const rs = await S.eng.compose(AGENT, A, MAIL, { collect: true });
+  ok(rs.ok && S.delivered.length === 1 && S.delivered[0].opts.spendReason === 'channel-receipt', 'CONTROL: a compose slower than the window (every clock read 100 ms on) delivers its receipt inside the compose — "held at first" is RED on it', JSON.stringify({ ok: rs.ok, code: rs.code, delivered: S.delivered.length }));
+  S.eng.stop();
 }
 {
   // no collect (a Background Work job / another door) ⇒ the message road; a REVIEW compose ⇒ never held, its receipt messages

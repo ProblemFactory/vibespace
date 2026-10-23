@@ -754,11 +754,15 @@ await (async () => {
 })();
 
 // ═══ ⑦ verify r2 (B5): the REAL agent-browser + Chrome — a new build that starts, then closes within seconds ═══
-// Change build… to a build that launches and dies at 3 s (a scratch build folder whose `chrome` runs the account's newest
-// measured Chrome under `timeout -s KILL 3`): the conversation is told "changed", then — the keeper's tick sees the loss
-// inside the settle window — the browser falls back to the build it replaced, "fell-back" is told, ONE For-you notice names
-// the build, the tab reopened once per launch (the journal's own count). Measured before the fix: healed 3× on the dead
-// build, browser_unstable, the conversation told only "changed".
+// Change build… to a build that launches, then dies (a scratch build folder whose `chrome` runs the account's newest
+// measured Chrome; the leg KILLs that Chrome once the change answered): the conversation is told "changed", then — the
+// keeper's tick sees the loss inside the settle window — the browser falls back to the build it replaced, "fell-back" is
+// told, ONE For-you notice names the build, the tab reopened once per launch (the journal's own count). Measured before the
+// fix: healed 3× on the dead build, browser_unstable, the conversation told only "changed".
+// ci-346-reds: the death was a 3 s `timeout -s KILL` from the build's start — a race with the change's own launch + reopen:
+// on a loaded box (the hub's chain; here 3 copies on 2 cores, 1 of 3) the change took 3.3 s and the KILL landed inside its
+// reopen ("CDP connection closed" ⇒ 0/1 tabs). The build now dies when the leg says — after the change answered (its tab
+// reopened), still seconds after its start and inside the 30 s settle window.
 console.log('— ⑦ the real agent-browser: a Chrome build that starts and closes within seconds falls back, and says so (verify r2, B5)');
 await (async () => {
   const V = require('../src/browser-verbs.js');
@@ -768,13 +772,12 @@ await (async () => {
   const BBm = require('../src/browser-builds.js');
   const L = BBm.listBuilds({ homeDir: os.homedir() });
   const usable = L.ok ? L.builds.filter((b) => b.usable) : [];
-  let timeoutBin = null; for (const d of ['/usr/bin', '/bin']) { if (fs.existsSync(path.join(d, 'timeout'))) { timeoutBin = path.join(d, 'timeout'); break; } }
-  if (!usable.length || !timeoutBin) { skip(`needs a measured Chrome build in the account's browsers/ (${usable.length}) and coreutils timeout (${timeoutBin || 'none'})`); return; }
+  if (!usable.length) { skip(`needs a measured Chrome build in the account's browsers/ (${usable.length})`); return; }
   const chromeOf = path.join(os.homedir(), '.agent-browser', 'browsers', 'chrome-' + usable[0].version, 'chrome');
   const H = path.join(ROOT, 'b5-home'); const HB = path.join(H, '.agent-browser', 'browsers'); fs.mkdirSync(HB, { recursive: true });
   fs.writeFileSync(path.join(H, '.agent-browser', 'config.json'), JSON.stringify({ args: '--no-sandbox' }));
   const BAD = '999.0.0.1'; fs.mkdirSync(path.join(HB, 'chrome-' + BAD), { recursive: true });
-  fs.writeFileSync(path.join(HB, 'chrome-' + BAD, 'chrome'), `#!/bin/sh\nexec ${timeoutBin} -s KILL 3 ${chromeOf} "$@"\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(HB, 'chrome-' + BAD, 'chrome'), `#!/bin/sh\nexec ${chromeOf} "$@"\n`, { mode: 0o755 });
   const XDG = path.join(ROOT, 'b5-xdg'); fs.mkdirSync(XDG, { recursive: true, mode: 0o700 });
   const RH = path.join(ROOT, 'b5-runhome'); fs.mkdirSync(path.join(RH, '.agent-browser'), { recursive: true }); fs.symlinkSync(path.join(os.homedir(), '.agent-browser', 'browsers'), path.join(RH, '.agent-browser', 'browsers'));
   const env = { ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('AGENT_BROWSER_'))), HOME: RH, XDG_RUNTIME_DIR: XDG, PATH: `${path.dirname(real.path)}:${path.dirname(process.execPath)}:/usr/bin:/bin` };
@@ -789,11 +792,14 @@ await (async () => {
     await k.attach({ profileId: p.id, browserKey: KEY, sessionId: 'sess-b5', by: 'user' });
     k.onRelaunch((ev) => told.push(ev.outcome));
     const r = await k.setBrowserChoice({ profileId: p.id, choice: { kind: 'build', version: BAD }, by: 'user' });
-    ok(r.ok && r.restarted && told.join() === 'changed', `Change build… to ${BAD} (it starts, then closes at 3 s): restarted, the conversation told "changed"`, { r: r.restarted, told });
+    // the build closes NOW — its launch and the change's reopen have answered (the 3 s timer raced them under load)
+    const pidBad = (k.browserOf(p.id) || {}).browser?.pid;
+    let killed = false; try { process.kill(pidBad, 'SIGKILL'); killed = true; } catch { }
+    ok(r.ok && r.restarted && told.join() === 'changed' && killed, `Change build… to ${BAD} (it starts, then its Chrome pid ${pidBad} is KILLed once the change answered): restarted, the conversation told "changed"`, { r: r.restarted, told, pidBad, reopened: r.reopened });
     const done = await until(() => told.length >= 2, 30000, 200);
     ok(!!done && told.join() === 'changed,fell-back' && !(k.profile(p.id).browser) && k.list().browsers[p.id].state === 'ready', '…its loss inside the settle window FALLS BACK: "fell-back" told, the choice back on the default build, the browser running again', { told, choice: k.profile(p.id).browser || 'default', state: k.list().browsers[p.id].state });
     const reopenLines = lines.filter((l) => /tab\(s\) reopened/.test(l));
-    ok(reopenLines.length === 2 && reopenLines.every((l) => /1\/1 tab\(s\) reopened/.test(l)), '…the conversation\'s tab reopened ONCE per launch (the change\'s, the fall-back\'s)', reopenLines);
+    ok(reopenLines.length === 2 && reopenLines.every((l) => /1\/1 tab\(s\) reopened/.test(l)), '…the conversation\'s tab reopened ONCE per launch (the change\'s, the fall-back\'s)', { reopenLines, change: r.reopened });
     ok(todos.length === 1 && new RegExp(`Chrome ${BAD.replace(/\./g, '\\.')} closed within seconds of starting — it is back on the default build`).test(todos[0]) && !lines.some((l) => /browser_unstable|keeps closing/.test(l)), '…ONE For-you notice names the build that closed; never healed on it until browser_unstable', { todos, unstable: lines.filter((l) => /unstable/.test(l)) });
   } catch (e) { ok(false, 'the real B5 leg ran', String(e && e.stack || e).slice(0, 400)); }
   finally { try { if (p) await k.stop(p.id, { why: 'user' }); } catch { } try { k.shutdown?.(); } catch { } }

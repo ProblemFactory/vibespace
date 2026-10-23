@@ -26,6 +26,8 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const E = require(path.join(REPO, 'src/exit-reach.js'));
 const { ExitProxyManager } = require(path.join(REPO, 'src/exit-proxy.js'));
+const GM = require(path.join(REPO, 'src/grant-model.js'));
+const GS = require(path.join(REPO, 'src/server/grants-store.js'));
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
@@ -73,7 +75,12 @@ const REM = path.join(SCR, 'machine'); fs.mkdirSync(REM, { recursive: true });
 const A = { name: 'agent A', backend: 'claude', claudeSessionId: 'A', cwd: PROJ };
 const sessions = new Map([['wa', A]]);
 const cards = [];
-const mgr = new ExitProxyManager({ hosts, log: () => {}, dataDir: path.join(SCR, 'hubdata'), sessionsMap: () => sessions, emitCard: (s, c) => { cards.push(c); return true; } });
+// lane grants-unify: a machine's two lists are rows of the ONE grants store (the record keeps only `ask`) — seeded from
+// the record the way the migration does; a manager over an empty store lends the machine to nobody (fail closed)
+const hubData = path.join(SCR, 'hubdata'); fs.mkdirSync(hubData, { recursive: true });
+const grants = GS.create({ dataDir: hubData });
+grants.seed(GM.rowsOfHosts(recs).rows);
+const mgr = new ExitProxyManager({ hosts, grants, log: () => {}, dataDir: hubData, sessionsMap: () => sessions, emitCard: (s, c) => { cards.push(c); return true; } });
 
 // THE MEMORY JUDGE (lane test-judges, 2026-10-03): the bytes of the file INSIDE the hub at its worst instant, counted
 // at the hub's two edges, never sampled — IN: what came off the link (Node's own count, the socket's bytesRead) or, for

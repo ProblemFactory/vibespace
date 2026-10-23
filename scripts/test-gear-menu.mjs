@@ -21,8 +21,10 @@
 //   member runs a stubbed openUsage and closes the popover.
 //   INTEGRATIONS… UNDER SYSTEM ▸ (lane integrations-menu-home, owner 2026-10-13): Communication no longer holds it;
 //   System holds it between Backup & migrate… and the password; a click opens THE window with its cards grouped
-//   by what uses the key (the registry's groupOf, read off the registry); the phone reaches it under System; a zh
-//   pass takes the owner's PNGs (⚙ → 系统 ▸ 集成与密钥…, the 浏览器 / 插件 heads, the phone).
+//   by what uses the key (the registry's groupOf, read off the registry) — Communication holds the SETUP CARDS (lane
+//   oauth-setup-instructions: one per account type whose row declares a `redirect` its user registers), every card in
+//   a group (a CONTROL: a card moved outside every group is RED); the phone reaches it under System, grouped the same;
+//   a zh pass takes the owner's PNGs (⚙ → 系统 ▸ 集成与密钥…, the 通讯 / 浏览器 / 插件 heads, the phone).
 //   THE VAULT'S ONE ROW (lane vault-one-door, owner 2026-10-19 「这个没必要分成两个按钮吧」): the System rows read off the
 //   SOURCE hold ONE vault row, 「Vault…」 (a MUTANT tree with the old second row Vault contents… is RED — runs before the
 //   chrome, so no SKIP hides it); in the page System ▸ shows that one row (zh 「保险库…」) and a click opens the Vault WINDOW.
@@ -191,6 +193,10 @@ const tap = async (sel) => {
   await sleep(250);
 };
 const POP = '.global-settings-popover';
+// the Integrations window's cards (a registry row's; lane oauth-setup-instructions: a setup card) and THE GROUPING JUDGE
+// (the desktop leg, its CONTROLS and the zh phone): every card is a child of a group, and every group stands over a card
+const CARD = '.integ-card, .integ-setup-card';
+const GROUPED = `(() => { const b = document.querySelector('.integ-win .integ-body'); return !!b && [...b.querySelectorAll('${CARD}')].every((c) => c.parentElement.matches('.integ-group')) && [...b.querySelectorAll('.integ-group')].every((s) => [...s.children].some((c) => c.matches('${CARD}'))); })()`;
 // screenshots for the mandatory human look (test-ui-scale's habit): kept in
 // their own scratch dir, NOT removed by cleanup, swept by the gate's reaper
 const SHOTS = process.env.VS_UI_SHOTS_DIR || scratch('gear-menu-shots'); // VS_UI_SHOTS_DIR keeps them (a scratch dir is removed at exit)
@@ -341,12 +347,20 @@ try {
   await evalJs(`[...document.querySelectorAll('${POP} [data-id="system"] .gs-flyout .gs-menu-item')].find((x) => x.textContent.trim() === 'Integrations…').id = 'gs-smoke-integ'; true`);
   await click('#gs-smoke-integ');
   check('a click on System ▸ Integrations… closes the popover', !(await evalJs(`!!document.querySelector('${POP}')`)));
-  const groupsWant = (() => { const by = []; for (const g of [...REG.GROUPS]) { const ids = REG.ROWS.filter((r) => !r.bindsPerAccount && REG.groupOf(r) === g).map((r) => r.id); if (ids.length) by.push({ g, head: REG.GROUP_WORDS[g], ids }); } return by; })();
+  // lane oauth-setup-instructions (the owner 2026-10-23: a self-hoster sees which app to create and the exact redirect
+  // URIs): a group holds first the SETUP CARD of each row in it that declares a `redirect` its user registers (registry
+  // order; never a self-registering row's — Dropline's own card says so), then its rows' cards. Today no communication
+  // row is a card (an account picks its own client) — Communication holds the Lark / Gmail / Slack setup cards.
+  const setupOf = (g) => REG.ROWS.filter((r) => r.redirect && !r.redirect.selfRegisters && REG.groupOf(r) === g).map((r) => 'setup:' + r.id);
+  const groupsWant = (() => { const by = []; for (const g of [...REG.GROUPS]) { const ids = [...setupOf(g), ...REG.ROWS.filter((r) => !r.bindsPerAccount && REG.groupOf(r) === g).map((r) => r.id)]; if (ids.length) by.push({ g, head: REG.GROUP_WORDS[g], ids }); } return by; })();
   const nCards = groupsWant.reduce((n, x) => n + x.ids.length, 0);
-  await until(`document.querySelectorAll('.integ-win .integ-card').length >= ${nCards}`, { timeout: 10000, step: 100 });
-  const groupsGot = await evalJs(`[...document.querySelectorAll('.integ-win .integ-body > .integ-group')].map((s) => ({ g: s.dataset.group, head: s.querySelector(':scope > .integ-group-head')?.textContent, ids: [...s.querySelectorAll(':scope > .integ-card')].map((c) => c.dataset.integ) }))`);
+  await until(`document.querySelectorAll('.integ-win .integ-card, .integ-win .integ-setup-card').length >= ${nCards}`, { timeout: 10000, step: 100 });
+  const groupsGot = await evalJs(`[...document.querySelectorAll('.integ-win .integ-body > .integ-group')].map((s) => ({ g: s.dataset.group, head: s.querySelector(':scope > .integ-group-head')?.textContent, ids: [...s.children].filter((c) => c.matches('${CARD}')).map((c) => c.dataset.integ || 'setup:' + c.dataset.integSetup) }))`);
   check(`…and opens THE window with its cards in groups, in order, by what uses the key (${groupsGot.map((x) => x.head + ': ' + x.ids.join(',')).join(' | ')})`, JSON.stringify(groupsGot) === JSON.stringify(groupsWant), JSON.stringify(groupsWant));
-  check('no card sits outside a group, and no head stands over nothing (today no communication row is a card: an account picks its own client)', await evalJs(`!document.querySelector('.integ-body > .integ-card') && [...document.querySelectorAll('.integ-group')].every((s) => s.querySelector('.integ-card')) && !document.querySelector('.integ-group[data-group="communication"]')`));
+  check(`no card sits outside a group, and no head stands over nothing — Communication holds the ${setupOf('communication').length} setup cards (${setupOf('communication').join(', ')})`, setupOf('communication').length > 0 && await evalJs(GROUPED), groupsGot);
+  const ctlOut = await evalJs(`(() => { const c = document.querySelector('.integ-win .integ-setup-card'); if (!c) return null; const home = c.parentElement, next = c.nextSibling; c.closest('.integ-body').appendChild(c); const v = ${GROUPED}; home.insertBefore(c, next); return v; })()`);
+  const ctlBare = await evalJs(`(() => { const s = document.createElement('div'); s.className = 'integ-group'; document.querySelector('.integ-win .integ-body').appendChild(s); const v = ${GROUPED}; s.remove(); return v; })()`);
+  check('CONTROL: a setup card moved outside every group is RED on the same judge, and so is a head over nothing — both put back, green again', ctlOut === false && ctlBare === false && await evalJs(GROUPED), { ctlOut, ctlBare });
   check('the window is still the one singleton', await evalJs(`[...app.wm.windows.values()].filter((w) => w.type === 'integrations').length === 1`));
   await shot('desktop-integrations-window.png');
   await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'integrations') app.wm.closeWindow(w.id); true`);
@@ -470,7 +484,7 @@ await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); localStorag
     await click('#gs-smoke-integ-zh');
     await until(`document.querySelectorAll('.integ-win .integ-card').length >= 8`, { timeout: 10000, step: 100 });
     const zHeads = await evalJs(`[...document.querySelectorAll('.integ-win .integ-group-head')].map((h) => h.textContent)`);
-    check(`zh: the window's heads are the plain nouns (${zHeads.join(' / ')})`, JSON.stringify(zHeads) === JSON.stringify(['浏览器', '插件']));
+    check(`zh: the window's heads are the plain nouns (${zHeads.join(' / ')})`, JSON.stringify(zHeads) === JSON.stringify(['通讯', '浏览器', '插件']));
     await shot('zh-desktop-integrations-window.png');
     await evalJs(`document.querySelector('.integ-group[data-group="plugins"]').scrollIntoView({ block: 'start' }); true`);
     await sleep(150);
@@ -490,7 +504,7 @@ await evalJs(`localStorage.removeItem('vibespace.settingsNavFolds'); localStorag
     await shot('zh-phone-system-integrations.png');
     await tap('#gs-smoke-integ-phone');
     await until(`document.querySelectorAll('.integ-win .integ-card').length >= 8`, { timeout: 10000, step: 100 });
-    check('zh phone: the tap opens the window, grouped', await evalJs(`!document.querySelector('${POP}') && document.querySelectorAll('.integ-win .integ-group').length >= 2`));
+    check('zh phone: the tap opens the window, grouped as on the desktop (通讯 / 浏览器 / 插件, every card in a group)', await evalJs(`!document.querySelector('${POP}') && [...document.querySelectorAll('.integ-win .integ-group-head')].map((h) => h.textContent).join('/') === '通讯/浏览器/插件' && ${GROUPED}`));
     await shot('zh-phone-integrations-window.png');
     await evalJs(`for (const w of [...app.wm.windows.values()]) if (w.type === 'integrations') app.wm.closeWindow(w.id); true`);
   } catch (e) {
