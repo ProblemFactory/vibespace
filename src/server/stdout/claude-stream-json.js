@@ -24,7 +24,8 @@
 // branch kept it; the subagent maps and every _field are on the session
 // object (src/session-schema.js rows, owner 'stdout') — boot-restore re-arms
 // watchers through session._startSubagentWatcher as before.
-const { notifyCompactionEnd } = require('../../server/compaction-watch.js');   // lane worker-dispatch: endCompaction notifies the ONE observer (spelled from src/ like every require here — patched copies rebase '../../')
+const { notifyCompactionEnd } = require('../../server/compaction-watch.js');
+const { liveWallOf } = require('../../signin-model.js'); // PURE (lane signin-card-real-screen): the CLI's live login refusal, a table row   // lane worker-dispatch: endCompaction notifies the ONE observer (spelled from src/ like every require here — patched copies rebase '../../')
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -1242,6 +1243,11 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // runs the per-turn pool eval, arms/disarms — one owner.
           if (msg.type === 'command_lifecycle' && msg.state === 'started' && typeof msg.command_uuid === 'string' && msg.command_uuid && !session.host) peerCommandCard(msg.command_uuid);
           if (msg.type === 'result') { try { noteTurnEnd?.(session, msg); } catch { } }
+          // THE LIVE LOGIN WALL (lane signin-card-real-screen, real 2.1.308): the CLI no longer DIES not-logged-in —
+          // it answers each turn with a synthetic «Not logged in · Please run /login» record and waits, so the death
+          // classifier (classifyCliDeath, untouched) never ran and the chat never showed the card. The PURE table
+          // row names the record; the chat shows the sign-in card (or, Codex / remote, the terminal road).
+          if (msg.type === 'assistant') { const wall = liveWallOf(msg); if (wall) { try { broadcastToSession(session, id, { type: 'signin-wall', sessionId: id, reason: wall.reason, detail: wall.detail }); } catch { } } }
           // error results carry ban/credit/oauth text the retry path never
           // sees (the CLI gives up without a final api_retry record)
           if (msg.type === 'result' && msg.is_error) { try { notePoolAuthFailure?.(session, id, { message: String(msg.result || msg.error || '') }); } catch { } }

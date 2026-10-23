@@ -997,6 +997,7 @@ class ChatView {
         }
       },
       onInterrupt: () => this.ws.send({ type: 'interrupt', sessionId: this.sessionId }),
+      onLogin: () => this._onSlashLogin(), // lane signin-card-real-screen: «/login» opens the sign-in card
       // lane door-healthy-chat: PageUp / PageDown in the message box page the CONVERSATION — a positioning act like the list's own keys
       onPageKey: (dir) => { this._notePositioning('key'); this._messageList.scrollBy({ top: dir * Math.max(40, Math.round(this._messageList.clientHeight * 0.9)) }); },
       getCwd: () => this._getSessionIds().cwd,
@@ -1236,13 +1237,19 @@ class ChatView {
         // stage takes its place (§2.11). The spinner label itself rides the
         // normal streaming-label broadcast.
         this._onCompactProgress(msg);
+      } else if (msg.type === 'signin-wall' && msg.sessionId === sessionId) {
+        this._onSigninWall(msg); // lane signin-card-real-screen: the CLI's LIVE «Not logged in» answer (it no longer dies on it)
       } else if (msg.type === 'exited' && msg.sessionId === sessionId) {
         this._hideTyping();
+        this._signinLive = false; // the wall's CLI is gone: a re-send resumes at once
         // THE THIRD EXIT of every "right now" claim this view holds — the
         // compaction stage, the harness's turn-state chip, the executing-tool
         // run set. One owner, because round 7 retired only the first of them.
         this._retireLiveClaims();
-        if (msg.reason === 'not_logged_in' && this._signinWall() === 'card') {
+        if (msg.reason === 'not_logged_in' && this._signInCard && this._signInHost?.isConnected) {
+          // the live wall already shows the card (lane signin-card-real-screen) — the same wall, said once
+          this._setReadOnly();
+        } else if (msg.reason === 'not_logged_in' && this._signinWall() === 'card') {
           // lane door-signin-card: the chat's «Not logged in» message IS the humane sign-in
           // card now — no "/login" dead end. On sign-in it offers «Send my message again»,
           // re-sending the waiting message in ONE press (no retyping).
@@ -6502,6 +6509,9 @@ class ChatView {
       hasWaiting: () => !!this._waitingText,
       onResend: () => this._resendWaiting(),
       onAdvanced: () => this._openLoginTerminal(),
+      // a LIVE wall's CLI runs on the login it started with: once signed in with nothing waiting, the conversation
+      // restarts on the new one (stop → resume, no message — no turn billed) so the next message is answered
+      onConnected: () => { if (this._signinLive && !this._waitingText) this._resendWaiting(); },
     });
     this._signInCard.mount(host);
     if (this._statusBar?.element && this._statusBar.element.parentNode === container) container.insertBefore(host, this._statusBar.element);
@@ -6557,9 +6567,43 @@ class ChatView {
     this.app.createSession({ cwd, mode: 'terminal', backend: ids.backend || 'claude' });
   }
 
+  // THE LIVE LOGIN WALL (lane signin-card-real-screen, real 2.1.308): the CLI answers each turn «Not logged in ·
+  // Please run /login» and STAYS ALIVE — the death road (`exited` not_logged_in) never came, so the chat showed the
+  // CLI's words and no card. The server names the record (signin-model liveWallOf → `signin-wall`); the chat makes
+  // it the same wall as a death: the composer hidden, the card (or, Codex / a remote host, the terminal road).
+  _onSigninWall(msg) {
+    if (msg.reason !== 'not_logged_in' || (this._signinLive && this._signInHost?.isConnected)) return; // every refused turn re-says it: one wall
+    this._signinLive = true;
+    this._hideTyping();
+    this._setReadOnly();
+    if (this._signinWall() === 'card') this._showSignInCard();
+    else this._showLoginBar();
+  }
+  // «/login» typed in the chat: the CLI only says it «isn't available in this environment» — open the card instead
+  // (Codex / a remote host: false, the CLI's own answer)
+  _onSlashLogin() {
+    if (this._signinWall() !== 'card') return false;
+    this._signinLive = true;
+    this._showSignInCard();
+    return true;
+  }
+  // the wall's CLI still runs on the signed-out login: stop it, wait for its exit (the transcript flushed), then go on
+  _afterLiveCli(then) {
+    const sid = this.sessionId;
+    const backendSessionId = this._getSessionIds().backendSessionId || this.winInfo?.backendSessionId || null;
+    let done = false;
+    const onExit = (m) => { if (m?.type === 'exited' && m.sessionId === sid) setTimeout(go, 400); };
+    const go = () => { if (done) return; done = true; try { this.ws.offGlobal(onExit); } catch { } then(); };
+    this.ws.onGlobal(onExit);
+    try { this.app.killSession?.(sid, backendSessionId); } catch { }
+    setTimeout(go, 15000); // a lost exited must not strand the re-send
+  }
+
   // ONE press: resume this conversation with the waiting message as its first
   // message (createSession's initialMessage, forwarded through resumeSession).
+  // lane signin-card-real-screen: a LIVE wall's CLI is stopped first (resuming beside it = two writers).
   _resendWaiting() {
+    if (this._signinLive) { this._signinLive = false; this._afterLiveCli(() => this._resendWaiting()); return; }
     const ids = this._getSessionIds();
     const backend = ids.backend || 'claude';
     const backendSessionId = ids.backendSessionId || this.winInfo?.backendSessionId || null;

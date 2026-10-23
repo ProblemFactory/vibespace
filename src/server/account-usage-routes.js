@@ -8,6 +8,7 @@
 const fs = require('fs');
 const os = require('os');
 const { oauthUsageAccount } = require('../backend-caps.js'); // PURE: caps.oauthUsage — the OAuth usage-poll accounts
+const { firstSigninDefault } = require('../signin-model.js'); // PURE (lane signin-card-real-screen): the card's first sign-in becomes the default only where nothing else could serve
 const path = require('path');
 const { spawn } = require('child_process');
 
@@ -779,8 +780,22 @@ app.post('/api/accounts/:id/relogin-finalize', (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// THE FIRST SIGN-IN BECOMES THE DEFAULT (lane signin-card-real-screen): a card's row (signinPending, read before
+// finalize clears it) that logs in on a VibeSpace with no Claude default and a signed-out machine login becomes the
+// default through the ONE default road (accounts.setDefault) — said on the card, shown in Manage agents; a default
+// that exists is never swapped (PURE verdict: src/signin-model.js firstSigninDefault).
+const adoptFirstSignin = (cardRow, fin, id) => {
+  try {
+    const l = accounts.list();
+    if (!firstSigninDefault({ cardRow, loggedIn: !!(fin && fin.loggedIn), hasDefault: !!l.defaultAccountId, globalLoggedIn: !!accounts.subscriptionStatus().loggedIn, platform: process.platform, envKey: !!process.env.ANTHROPIC_API_KEY })) return {};
+    accounts.setDefault(id, 'claude');
+    console.log(`[accounts] ${id}: the first Claude sign-in here is now the default account (no default, no machine login)`);
+    return { madeDefault: true };
+  } catch { return {}; }
+};
 app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
   try {
+    const cardRow = !!(accounts.get(req.params.id) || {}).signinPending;
     const fin = accounts.finalizeSubscription(req.params.id);
     if (fin?.loggedIn) sweepLoginExpiry('subscription login'); // ONCE, above BOTH res.json paths (the merge branch returns early)
     // attempt identity for the re-login watcher (2.332.0): which helper RUN
@@ -843,7 +858,7 @@ app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
         // credentials now live in; the throwaway above is about to stop
         // existing.
         wakeOnLoginSuccess(dup.id, merged, 'subscription login merge', merged?.id || dup.id);
-        return res.json({ success: true, ...fin, merged: true, account: merged });
+        return res.json({ success: true, ...fin, merged: true, account: merged, ...adoptFirstSignin(cardRow, fin, (merged && merged.id) || dup.id) });
       } catch (me) {
         // THE FOLD DID NOT HAPPEN, SO THIS RECORD IS STILL THE ONE HOLDING
         // THE LOGIN (r3) — it gets the edge the gate above deferred. Above
@@ -856,7 +871,7 @@ app.post('/api/accounts/subscription/:id/finalize', (req, res) => {
         return res.json({ success: true, ...fin, merged: false, mergeBlocked: 'a session using one of these accounts is running — stop it to auto-merge the duplicate' });
       }
     }
-    res.json({ success: true, ...fin });
+    res.json({ success: true, ...fin, ...adoptFirstSignin(cardRow, fin, req.params.id) });
   }
   catch (e) { res.status(400).json({ error: e.message }); }
 });

@@ -96,32 +96,70 @@ try {
     check(`zoom ${z}: the fixed screen is the same visual size as the raw one (±3 %)`, Math.abs(fixed.screen[0] - raw.screen[0]) / raw.screen[0] < 0.03 && Math.abs(fixed.screen[1] - raw.screen[1]) / raw.screen[1] < 0.03, { raw: raw.screen, fixed: fixed.screen });
   }
 
-  // lane door-signin-card (D3 / C2): the terminal's links open through the product in a NEW TAB,
-  // never xterm's default native "WARNING: This link could potentially be dangerous" confirm that
-  // scared 3 of 7 naive testers off the Claude sign-in link. Run terminal.js's REAL WebLinksAddon
-  // handler, with the REAL @xterm/addon-web-links, in this browser.
+  // lane door-signin-card (D3 / C2) + lane signin-card-real-screen: the terminal's links open through the product in a
+  // NEW TAB, never xterm's default native "WARNING: This link could potentially be dangerous" confirm. door-signin-card
+  // gave the WebLinksAddon (plain-text links) a handler — but the CLI's sign-in URL is an OSC-8 HYPERLINK, which goes
+  // through xterm's OWN `linkHandler` option (its default IS that confirm): the naive testers still met it on 2.369.344
+  // in the «Log in to Claude Code» terminal. ONE opener (src/lib/terminal-links.js) for both roads, run here for real.
   {
-    const termSrc = fs.readFileSync(path.join(repo, 'src/lib/terminal.js'), 'utf8');
-    const handlerSrc = (termSrc.match(/new WebLinksAddon\((\(event, uri\) => \{[\s\S]*?\})\)/) || [])[1];
-    check('terminal.js wires a WebLinksAddon handler that window.open()s http(s)', !!handlerSrc && /window\.open/.test(handlerSrc) && /https\?/.test(handlerSrc), handlerSrc ? handlerSrc.slice(0, 90) : null);
+    // THE CENSUS: every xterm the client builds passes the opener on both roads
+    const libDir = path.join(repo, 'src/lib');
+    const sites = { term: [], addon: [] };
+    for (const f of fs.readdirSync(libDir).filter((x) => x.endsWith('.js'))) {
+      const src = fs.readFileSync(path.join(libDir, f), 'utf8').replace(/^\s*\/\/.*$/gm, ''); // code, not the comments naming the rule
+      for (const m of src.matchAll(/new Terminal\(\{[\s\S]*?\}\);/g)) sites.term.push({ f, ok: /linkHandler: TERMINAL_LINK_HANDLER\b/.test(m[0]) });
+      for (const m of src.matchAll(/new WebLinksAddon\(([^\n]*)/g)) sites.addon.push({ f, ok: /^\(event, uri\) => openTerminalLink\(uri\)\)/.test(m[1]) });
+    }
+    check(`census: every \`new Terminal(\` in src/lib passes linkHandler: TERMINAL_LINK_HANDLER (${sites.term.map((x) => x.f).join(', ')})`, sites.term.length >= 2 && sites.term.every((x) => x.ok) && sites.term.some((x) => x.f === 'terminal.js') && sites.term.some((x) => x.f === 'raw-screen.js'), sites.term);
+    check(`census: every \`new WebLinksAddon(\` in src/lib passes openTerminalLink (${sites.addon.map((x) => x.f).join(', ')})`, sites.addon.length >= 2 && sites.addon.every((x) => x.ok), sites.addon);
+    const linksSrc = fs.readFileSync(path.join(libDir, 'terminal-links.js'), 'utf8');
+    const openerSrc = (linksSrc.match(/export function openTerminalLink\(uri\) \{[\s\S]*?\n\}/) || [])[0];
+    check('terminal-links.js: openTerminalLink window.open()s http(s) in a new tab, noopener', !!openerSrc && /window\.open\(u, '_blank', 'noopener,noreferrer'\)/.test(openerSrc) && /https\?/.test(openerSrc), openerSrc);
+    const opener = openerSrc.replace('export function', 'function');
     const WL = path.join(repo, 'node_modules/@xterm/addon-web-links/lib/addon-web-links.js');
     await evalJs(`new Promise((res,rej)=>{const s=document.createElement('script');s.src=${JSON.stringify('file://' + WL)};s.onload=()=>res(true);s.onerror=()=>rej(new Error('addon load failed'));document.head.appendChild(s);})`);
+    await evalJs('setup(1, "raw")');
     const R = JSON.parse(await evalJs(`(() => {
+      ${opener}
       const W = window.WebLinksAddon && (window.WebLinksAddon.WebLinksAddon || window.WebLinksAddon);
-      const opens = []; let confirms = 0;
-      window.open = (...a) => { opens.push(a); return {}; };
-      window.confirm = () => { confirms++; return true; };
-      const H = ${handlerSrc};
+      window.__opens = []; window.__confirms = 0;
+      window.open = (...a) => { window.__opens.push(a); return { opener: null, location: {} }; };
+      window.confirm = () => { window.__confirms++; return false; };
+      const H = (event, uri) => openTerminalLink(uri);
       const host = document.createElement('div'); document.body.appendChild(host);
       const term2 = new Terminal({ rows: 4, cols: 80 }); term2.open(host);
       let ctorOk = true; try { term2.loadAddon(new W(H)); } catch (e) { ctorOk = false; }
       H({ preventDefault(){} }, 'https://claude.com/oauth/authorize?code=true');
       H({ preventDefault(){} }, 'ftp://evil.example/x');
-      return JSON.stringify({ ctorOk, opens, confirms });
+      const out = JSON.stringify({ ctorOk, opens: window.__opens.slice(), confirms: window.__confirms });
+      term2.dispose(); host.remove(); window.__opens = [];
+      return out;
     })()`));
-    check('the real WebLinksAddon accepts the product handler', R.ctorOk, R);
-    check('an http(s) link opens in a NEW TAB via window.open, with no native confirm', R.opens.length === 1 && R.opens[0][0] === 'https://claude.com/oauth/authorize?code=true' && R.opens[0][1] === '_blank' && /noopener/.test(R.opens[0][2] || '') && R.confirms === 0, R);
+    check('the real WebLinksAddon accepts the product opener', R.ctorOk, R);
+    check('a plain-text http(s) link opens in a NEW TAB via window.open, with no native confirm', R.opens.length === 1 && R.opens[0][0] === 'https://claude.com/oauth/authorize?code=true' && R.opens[0][1] === '_blank' && /noopener/.test(R.opens[0][2] || '') && R.confirms === 0, R);
     check('a non-http(s) link is ignored (never auto-opened)', R.opens.length === 1, R);
+    // THE OSC-8 ROAD, clicked for real (CDP mouse): the CLI's own hyperlink — with the product's linkHandler, and the
+    // CONTROL without it (xterm's default = the native confirm the testers met)
+    const OSC_URL = 'https://claude.com/cai/oauth/authorize?code=true&state=osc8';
+    const clickOsc = async (withHandler) => {
+      const g = JSON.parse(await evalJs(`(() => {
+        ${opener}
+        window.__opens = []; window.__confirms = 0;
+        const host = document.createElement('div'); host.id = 'osc'; host.style.cssText = 'position:absolute;left:40px;top:700px'; document.body.appendChild(host);
+        const t3 = new Terminal(Object.assign({ rows: 3, cols: 80, fontSize: 14, fontFamily: 'monospace' }, ${withHandler} ? { linkHandler: { activate: (e, uri) => openTerminalLink(uri), allowNonHttpProtocols: false } } : {}));
+        t3.open(host); window.__t3 = t3;
+        t3.write('visit: \\x1b]8;;${OSC_URL}\\x07CLICKME-LINK-TEXT\\x1b]8;;\\x07\\r\\n');
+        return new Promise((r) => setTimeout(() => { const s = host.querySelector('.xterm-screen').getBoundingClientRect(); const cw = s.width / 80, ch = s.height / 3; r(JSON.stringify({ x: s.left + cw * 12.5, y: s.top + ch * 0.5 })); }, 200));
+      })()`));
+      await mouse('mouseMoved', g.x - 2, g.y); await sleep(80);
+      await mouse('mouseMoved', g.x, g.y); await sleep(120);
+      await mouse('mousePressed', g.x, g.y, { buttons: 1 }); await mouse('mouseReleased', g.x, g.y); await sleep(150);
+      return JSON.parse(await evalJs(`(() => { const o = JSON.stringify({ opens: window.__opens.slice(), confirms: window.__confirms }); window.__t3.dispose(); document.getElementById('osc').remove(); return o; })()`));
+    };
+    const ctl = await clickOsc(false);
+    check('CONTROL (the 2.369.344 terminal): an OSC-8 link clicked with no linkHandler → xterm\'s native «dangerous link» confirm', ctl.confirms === 1 && ctl.opens.length === 0, ctl);
+    const fixed = await clickOsc(true);
+    check('an OSC-8 link (the CLI\'s sign-in URL) clicked with the product\'s linkHandler → a NEW TAB, no native confirm', fixed.confirms === 0 && fixed.opens.length === 1 && fixed.opens[0][0] === OSC_URL && fixed.opens[0][1] === '_blank' && /noopener/.test(fixed.opens[0][2] || ''), fixed);
   }
 } catch (e) { failed++; console.error('  ✗ harness error: ' + e.message); }
 ws.close();

@@ -9,6 +9,8 @@
 //   ③ readiness (_obReady: a terminal login or a named account/pool) is computed from backend-status;
 //   ④ the terminal road is kept, folded under «Advanced» (ob-advanced);
 //   ⑤ the old dead-end pitch line is gone.
+//   ⑥ (lane signin-card-real-screen) the guided modal's terminal re-attaches on a socket reconnect (the naive41 dead modal);
+//   ⑦ the Advanced road's Claude «Log in» = the card's own login run on its raw screen (one run per account).
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -36,6 +38,44 @@ ok(/class="ob-advanced"/.test(step1) && /<summary>/.test(step1) && /id="ob-backe
 
 ok(!/VibeSpace drives the official CLIs — log in once, credentials persist/.test(s), '⑤ the old dead-end pitch line is gone');
 ok(/the humane sign-in card inline/.test(step1), '⑤ the step carries the lane comment');
+
+// ⑥ lane signin-card-real-screen — the naive41 DEAD «Log in to Claude Code» modal (2.369.344): its terminal answered keys,
+//    then stopped echoing, while its HTTP done-poll kept working and flipped it to ✓ by itself. ROOT: app.js re-attaches
+//    every terminal in `this.sessions` when the socket reconnects; the guided modal's terminal lives in the modal, not
+//    there — after the first reconnect (the tab in the background while the person signs in elsewhere) it was attached
+//    to nothing. (主开发's TTL hypothesis is refuted by test-claude-signin ⑰: a run's TTL kills its own helper tree only.)
+{
+  const at = s.indexOf('    runGuidedCli({ title, cmd, hint, checkDone }) {');
+  let body = null;
+  if (at > 0) { const i0 = s.indexOf('{', s.indexOf(')', at)); let d = 0; for (let k = i0; k < s.length; k++) { if (s[k] === '{') d++; else if (s[k] === '}' && --d === 0) { body = s.slice(i0 + 1, k); break; } } }
+  ok(!!body, '⑥ (setup) runGuidedCli read off setup-flows.js');
+  const sent = [], states = [], globals = new Set(); let fits = 0, closed = 0;
+  const el = () => ({ innerHTML: '', isConnected: true, querySelector: () => el(), appendChild() { } });
+  const modalBody = el();
+  class TerminalSession { constructor(win, ws, sid) { this.sid = sid; } fit() { fits++; } dispose() { } }
+  const app = { ws: { send: (m) => sent.push(m), onGlobal: (f) => globals.add(f), offGlobal: (f) => globals.delete(f), onStateChange: (h) => states.push(h), offStateChange: (h) => { const k = states.indexOf(h); if (k >= 0) states.splice(k, 1); } }, killSession: () => { }, themeManager: {}, settings: {} };
+  const fn = new Function('createModalShell', 'escHtml', 't', 'TerminalSession', 'SIGN_IN', 'MutationObserver', 'document', 'requestAnimationFrame', 'setTimeout', 'setInterval', 'clearInterval',
+    'return function ({ title, cmd, hint, checkDone }) {' + (body || '') + '}')(
+    () => ({ body: modalBody, close: () => { closed++; } }), (x) => String(x), (x) => x, TerminalSession, 'sign-in',
+    class { observe() { } disconnect() { } }, { body: {}, createElement: () => el() }, (f) => f(), () => 0, () => 0, () => { });
+  fn.call(app, { title: 'Log in to Claude Code', cmd: 'the-login-command', checkDone: async () => false });
+  const create = sent.find((m) => m.type === 'create');
+  [...globals].forEach((f) => f({ type: 'created', reqId: create && create.reqId, sessionId: 'gc-s1' }));
+  const before = sent.length;
+  states.slice().forEach((h) => h(true)); // the socket reconnects
+  const attach = sent.slice(before).find((m) => m.type === 'attach');
+  ok(attach && attach.sessionId === 'gc-s1' && fits >= 1, '⑥ a socket reconnect RE-ATTACHES the guided modal\'s terminal (attach {sessionId}) and re-fits it — it never goes deaf', sent.slice(before));
+  states.slice().forEach((h) => h(false));
+  ok(sent.slice(before).filter((m) => m.type === 'attach').length === 1, '⑥ a disconnect attaches nothing');
+}
+// ⑦ the tour's «Advanced → terminal» for the card's harness IS the card's own login run on its raw screen (one run per
+//    account — a live one is joined, never a second TUI beside it); Codex keeps its guided terminal
+{
+  ok(/if \(capsOf\(key\)\.oauthUsage === true && !isInstall && typeof this\._openSignInCard === 'function'\) \{ this\._openSignInCard\(\{ rawFirst: true, onClose: \(\) => refresh\(\) \}\); return; \}/.test(s), '⑦ the Claude «Log in» of the Advanced road opens the sign-in card on its raw screen (rawFirst) — a declared caps row, never an id');
+  ok(s.indexOf("this._openSignInCard({ rawFirst: true") < s.indexOf('await this.runGuidedCli({', s.indexOf("this._openSignInCard({ rawFirst: true")), '⑦ …before the guided terminal (which the other harnesses keep)');
+  const MA = fs.readFileSync(path.join(ROOT, 'src/lib/manage-agents.js'), 'utf8');
+  ok(/_openSignInCard\(\{ rawFirst = false, onClose = null \} = \{\}\) \{/.test(MA) && /new SignInCard\(\{ ws: this\.ws, hasWaiting: \(\) => false, rawFirst,/.test(MA), '⑦ Manage agents\' sign-in modal takes rawFirst + onClose (the same card)');
+}
 
 console.log(`\ntest-setup-flows: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -7,6 +7,7 @@ import { diagnosticsSection } from './cli-registration-words.js'; // lane cli-2-
 import { SIGN_IN, tourSteps, folderChips, firstFilesFolder } from '../day-one.js'; // lane door-day-one-landing: the tour's steps, its folder chips; a sign-in terminal is not a session row
 import { loadHomeFolders, recentLocalCwds, paintFolderChips } from './folder-chips.js'; // lane door-day-one-landing: the folder chips' painter (the New Session dialog's too)
 import { SignInCard } from './signin-card.js'; // lane door-signin-card: the humane sign-in card inline in the tour's connect step
+import { capsOf } from '../backend-caps.js'; // PURE (lane signin-card-real-screen): the harness whose subscriptions the card signs in — its declared oauthUsage row, never an id
 
 /**
  * App setup/config flows mixin — the onboarding wizard, Backup & migrate
@@ -36,8 +37,16 @@ export function installSetupFlows(App) {
         const statusEl = body.querySelector('.guided-cli-status');
         const termBox = body.querySelector('.guided-cli-term');
         let term = null, sid = null, poll = null, settled = false;
+        // A RECONNECT RE-ATTACHES THE MODAL'S TERMINAL (lane signin-card-real-screen, naive41 2.369.344: the guided
+        // «Log in to Claude Code» terminal went DEAD — keys never echoed — while its HTTP done-poll kept working and
+        // flipped it to ✓ by itself). app.js re-attaches every terminal in `this.sessions` on a socket's reconnect;
+        // this one lives in a modal, not there, so after the first reconnect (a tab in the background while the person
+        // signs in in another one) its socket was attached to nothing. It re-attaches itself now.
+        const onState = (connected) => { if (!connected || !sid || !term || settled) return; try { this.ws.send({ type: 'attach', sessionId: sid }); } catch {} requestAnimationFrame(() => { try { term?.fit(); } catch {} }); };
+        try { this.ws.onStateChange(onState); } catch {}
         const cleanup = (killSession) => {
           clearInterval(poll);
+          try { this.ws.offStateChange?.(onState); } catch {}
           try { term?.dispose(); } catch {}
           if (sid && killSession) { try { this.killSession(sid); } catch {} }
         };
@@ -314,6 +323,9 @@ export function installSetupFlows(App) {
             // replaced the old pause-the-wizard + detached-terminal flow.
             btn.onclick = async () => {
               const key = btn.dataset.key, isInstall = btn.dataset.kind === 'install', label = btn.dataset.label;
+              // lane signin-card-real-screen (the naive41 dead modal): Claude's terminal road is the card's OWN login
+              // run shown as its raw screen — one run per account (a live one is joined), never a second TUI beside it
+              if (capsOf(key).oauthUsage === true && !isInstall && typeof this._openSignInCard === 'function') { this._openSignInCard({ rawFirst: true, onClose: () => refresh() }); return; }
               await this.runGuidedCli({
                 title: isInstall ? t('Install {name}', { name: label }) : t('Log in to {name}', { name: label }),
                 cmd: btn.dataset.cmd,

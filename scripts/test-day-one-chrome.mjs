@@ -245,6 +245,38 @@ try {
     const wins = await evalJs(`[...app.wm.windows.values()].filter((w) => /echo/.test(w.title || '')).length`);
     check('… both are windows the person sees', wins === 2, wins);
   }
+
+  // ⑩ lane signin-card-real-screen — the DEAD guided modal (naive41 R2 + naive42 R3, 2.369.344): the tester opened the sign-in
+  //    link, sat on the claude.ai tab, came back to «Browser suspended this page for 68s — caught up now» and typed: NO echo,
+  //    while a terminal WINDOW survived the same suspension. app.js re-attaches every terminal in app.sessions on a socket's
+  //    reconnect; the guided modal's terminal is not one of them. Freeze the page 60 s (CDP Page.setWebLifecycleState — the
+  //    browser's own suspension), drop its socket as the suspension did, resume, type → the echo comes back.
+  console.log('⑩ the guided modal\'s terminal answers after the page was suspended');
+  if (!DTACH) check('SKIP-leg: no dtach (the guided shell cannot spawn)', true);
+  else {
+    await evalJs(`(() => { try { app.settings.set('terminal.webgl', false); } catch { } app.runGuidedCli({ title: 'Guided leg', cmd: 'echo GUIDED-READY', checkDone: async () => false }); return true; })()`);
+    const rows = `(document.querySelector('.guided-cli-term .xterm-rows')?.textContent || '')`;
+    const ready = await until(`${rows}.includes('GUIDED-READY')`, { timeout: 20000 });
+    check('(setup) the guided modal\'s terminal runs its command', !!ready, await evalJs(rows));
+    // the suspension as the page lived it: its socket lost and no way back for 60 s (the network cut, so every
+    // reconnect attempt fails meanwhile), then the network back — the page reconnects by itself
+    await cdp('Network.enable');
+    await cdp('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    await evalJs(`(() => { try { app.ws.ws.close(); } catch { } return true; })()`);
+    await sleep(Number(process.env.GUIDED_FREEZE_MS) || 60000); // (an override only to iterate on the leg; the gate runs 60 s)
+    check('(setup) the page lost its socket for the whole suspension', (await evalJs('app.ws.connected')) === false);
+    await cdp('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    const back = await until(`app.ws.connected === true`, { timeout: 20000 });
+    check('(setup) the page is back and its socket reconnected after the suspension', !!back);
+    await sleep(800);
+    await evalJs(`(() => { const ta = document.querySelector('.guided-cli-term textarea'); if (ta) ta.focus(); return !!ta; })()`);
+    await cdp('Input.insertText', { text: 'echo AFTER-RESUME-$((40+2))' });
+    await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' });
+    await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    const echoed = await until(`${rows}.includes('AFTER-RESUME-42')`, { timeout: 15000 });
+    check('THE FINDING (naive41/42): after the suspension the modal\'s terminal still answers — typed keys echo, the command\'s output arrives', !!echoed, (await evalJs(rows)).slice(-200));
+    await evalJs(`(() => { document.querySelector('#guided-cli-dialog .modal-close, #guided-cli-dialog [data-close], #guided-cli-dialog .dialog-close')?.click(); document.getElementById('guided-cli-dialog')?.remove(); return true; })()`);
+  }
   await evalJs(`localStorage.setItem('vibespace.lang', 'zh'); localStorage.removeItem('vs-onboarded'); true`);
   await cdp('Page.reload', { ignoreCache: true }); await loaded();
   await until(`!!document.getElementById('ob-next')`, { timeout: 15000 });

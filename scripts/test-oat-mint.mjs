@@ -76,7 +76,7 @@ console.log('§1 the PURE screen reader');
   ok(M.mintStep(null, 'https://claude.example/a?b=c').steps.length === 0, 'a URL with no line after it is not yet a URL (never half a link)');
   ok(M.lastLine('real failure here\n✻\n *\n·\n') === 'real failure here' && M.lastLine('x ' + TOKEN) === ['x sk', '-ant-…'].join(''), 'lastLine skips spinner frames and masks a token');
   const pub = M.publicMint({ id: 'om-1', accountId: 'sub-1', phase: 'url', url: 'https://x', token: TOKEN, _p: {}, code: CODE, error: 'bad ' + TOKEN });
-  ok(!JSON.stringify(pub).includes(['sk', '-ant-oat01'].join('')) && !JSON.stringify(pub).includes(CODE) && Object.keys(pub).join() === 'id,accountId,phase,rev,url,localUrl,error,startedAt,endedAt,mintedAt,reason,signedInAs,other,choices', 'publicMint is a whitelist (token / code / handles dropped, error masked)', pub);
+  ok(!JSON.stringify(pub).includes(['sk', '-ant-oat01'].join('')) && !JSON.stringify(pub).includes(CODE) && Object.keys(pub).join() === 'id,accountId,phase,rev,url,localUrl,error,startedAt,endedAt,mintedAt,reason,signedInAs,other,choices,rawHint', 'publicMint is a whitelist (token / code / handles dropped, error masked)', pub);
   // lane heavy3-flake-races: THE verdict before a repaint — an older publication of the SAME run is stale (a late HTTP
   // answer after the WS push of a later phase); another run keeps the older-run rule; equal revisions show
   {
@@ -87,6 +87,36 @@ console.log('§1 the PURE screen reader');
   }
   ok(M.codeVerdict(' a#b ').ok && M.codeVerdict(' a#b ').code === 'a#b' && !M.codeVerdict('').ok && !M.codeVerdict('a\nb').ok && !M.codeVerdict('x'.repeat(2001)).ok, 'codeVerdict: one printable line ≤ 2000');
   ok(!/require\(|^import /m.test(fs.readFileSync(path.join(REPO, 'src/oat-mint-model.js'), 'utf8')), 'the model imports nothing (PURE)');
+  // lane signin-card-real-screen: THE ONE READER serves both roads — the REAL `claude auth login --claudeai` screen
+  // (2.1.308, byte-exact: the prompt on the VERY NEXT line, no blank line) reads here exactly as on the sign-in card
+  const auth = fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-signin/cli-2.1.308-auth-login.pty'), 'utf8');
+  const authUrl = /\x1b\]8;;(https:[^\x07]+)\x07/.exec(auth)[1];
+  for (const size of [1, 7, 4096]) {
+    const { steps } = feedAll(auth, size);
+    ok(steps.map((x) => x.kind).join(',') === 'url,code-prompt' && steps[0].url === authUrl, `the REAL 2.1.308 auth-login capture in ${size}-byte chunks → url then code-prompt (the base blank-line rule read code-prompt only)`, steps.map((x) => x.kind));
+  }
+  const atPrompt = auth.slice(0, auth.indexOf('Session terminated'));
+  const unk = (t, size) => { let s = null, any = false; for (let i = 0; i < t.length; i += size) { const r = M.mintStep(s, t.slice(i, i + size)); s = r.state; any = any || r.unknown; } return any; };
+  ok(['cli-2.1.296-url-80col.raw', 'cli-2.1.296-url-400col.raw'].every((f) => [1, 3, 7, 64, 4096].every((n) => !unk(fx(f), n))) && [1, 7, 4096].every((n) => !unk(atPrompt, n)),
+    'the raw-screen flip never fires on a REAL screen (2.1.296 setup-token at 80 / 400 columns, 2.1.308 auth-login), in any chunking — every line is a known row');
+  ok(M.mintStep(null, 'Opening browser to sign in…\r\nSomething new arriv').unknown === false && M.mintStep(null, 'Opening browser to sign in…\r\nA screen never seen\r\n').unknown === true && M.mintStep(null, 'A screen never seen\r\n' + fx('cli-2.1.296-url-400col.raw')).unknown === false,
+    'screenUnknown: a complete line it cannot place, standing LAST, flips; a line still arriving is no verdict; a recognised screen after it flips back');
+  ok([1, 13, 61, 9999].every((n) => !unk(fx('cli-2.1.296-url-400col.raw') + 'Paste code here if prompted > code#s\r\r\n' + succ, n)),
+    'the token\'s success screen never flips to the raw screen — its wrapped pieces read as unknown lines until «Store this token» lands (test-oat-mint-ui: the dialog flashed its raw view mid-mint)');
+  const echo = 'Paste code here if prompted >\r\r\nlatecode#S0\r\r\n';
+  ok(M.mintStep(null, echo).unknown === true && M.mintStep(null, echo, { typed: 'latecode#S0' }).unknown === false,
+    'the tty\'s echo of the pasted code on its own line (the prompt ended its line) is a line the reader knows — given the code typed (test-oat-mint-ui: the raw view flashed while minting)');
+  // the raw screen: bytes as written, offsets, the 64 KB ring, and the freeze BEFORE a stop line lands
+  let scr = M.initialRawScreen();
+  scr = M.rawAppend(scr, 'abc'); scr = M.rawAppend(scr, 'def');
+  const all = M.rawSince(scr, 0), tail = M.rawSince(scr, 4), bad = M.rawSince(scr, 99);
+  ok(all.data === 'abcdef' && all.to === 6 && !all.reset && tail.data === 'ef' && tail.from === 4 && bad.reset && bad.data === 'abcdef', 'rawSince: what a reader at `from` lacks; a stale offset resets to the whole ring', { all, tail, bad });
+  let big = M.initialRawScreen(); for (let i = 0; i < 70; i++) big = M.rawAppend(big, 'x'.repeat(1024));
+  ok(big.data.length === M.RAW_MAX && big.start === 70 * 1024 - M.RAW_MAX && M.rawSince(big, 0).reset, 'the ring keeps the last 64 KB (an older offset reads from its start)');
+  const STOP = /token created successfully|your\s+oauth\s+token|sk-ant-/i;
+  let fr = M.rawAppend(M.initialRawScreen(), 'Paste code here > ', { stopRe: STOP });
+  fr = M.rawAppend(fr, succ.slice(0, 30), { stopRe: STOP }); fr = M.rawAppend(fr, succ.slice(30), { stopRe: STOP }); fr = M.rawAppend(fr, 'more', { stopRe: STOP });
+  ok(fr.frozen && !fr.data.includes(TOKEN.slice(13, 40)) && !/sk-ant/.test(fr.data) && fr.data.startsWith('Paste code here'), 'a stop line FREEZES the raw screen before its chunk lands — the token\'s success screen never enters it, whatever the chunking', fr.data);
 }
 
 // ── the spy: every outbound path of one ORCH instance ────────────────────
@@ -164,9 +194,11 @@ async function saveFlow(O, accountId) {
     const id = st.mint.id;
     await until(() => mint.get(id)?.phase === 'waiting-code');
     out.answers.push(JSON.stringify(mint.get(id)));
+    if (mint.screen) out.screenBefore = mint.screen(id, 0); // lane signin-card-real-screen: the raw screen is a GET answer too
     out.answers.push(JSON.stringify(mint.sendCode(id, CODE)));
     await until(() => ['saved', 'failed'].includes(mint.get(id)?.phase));
     out.answers.push(JSON.stringify(mint.get(id)), JSON.stringify(mint.forAccount(accountId)));
+    if (mint.screen) out.answers.push(JSON.stringify(mint.screen(id, 0)), JSON.stringify(mint.screen(id, 7)));
     res = { mint, out, id };
   } finally { res && (res.std = restore()); if (!res) restore(); const files = unspy(); if (res) res.files = files; }
   const leaks = [];
@@ -241,6 +273,38 @@ console.log('§2 the ORCH over the fake claude, through the REAL AccountManager'
   ok(fs.readdirSync(scratchRoot).length === 0, 'every ending wiped its scratch dir');
 }
 
+console.log('§2b the raw screen — the owner\'s fallback (lane signin-card-real-screen)');
+{
+  // a screen the reader cannot place (no link it reads, no known prompt): the raw screen within N, the code still mints
+  const O = loadOrch();
+  am.clearOat(sub);
+  const { mint, out } = spyOn(mk(O, 'unknown', { rawAfterMs: 300 }));
+  const st = mint.start({ accountId: sub });
+  const id = st.mint.id;
+  const t0 = Date.now();
+  await until(() => mint.get(id)?.rawHint === 'stalled', 4000);
+  const g = mint.get(id), took = Date.now() - t0;
+  ok(g.phase === 'starting' && g.rawHint === 'stalled' && !g.url && took >= 300, `no link read 300 ms (N) after the CLI's first output → rawHint 'stalled' (said after ${took} ms — never before N)`, g);
+  const scr = mint.screen(id, 0);
+  ok(scr && scr.id === id && /never\x1b\[1Cseen/.test(scr.data) && /Your\x1b\[1Canswer:/.test(scr.data) && !scr.reset, 'GET …/screen answers the bytes the CLI wrote (the person reads them)', scr && scr.data.slice(0, 80));
+  ok(out.casts.every((c) => !c.includes('never') && !c.includes('answer:')) && out.logs.every((l) => !l.includes('never')), 'the raw screen is never broadcast or logged — only its cue (rawHint) rides the snapshot');
+  const sc = mint.sendCode(id, CODE);
+  ok(sc.ok && mint.get(id).phase === 'minting', 'the code box on the raw screen: a code is taken while the reader placed nothing (starting + the cue)', sc);
+  await until(() => ['saved', 'failed', 'confirm'].includes(mint.get(id)?.phase), 8000);
+  ok(['saved', 'confirm'].includes(mint.get(id).phase), 'the pasted code still completes the mint (the token reached the save path)', mint.get(id));
+  const after = mint.screen(id, 0);
+  ok(!after.data.includes(TOKEN.slice(13, 40)) && !after.data.includes(CODE), 'the raw screen after: the token\'s screen never entered it, the echoed code reads as •', after.data.slice(-120));
+  if (mint.get(id).phase === 'confirm') mint.confirm(id, { save: false });
+  am.clearOat(sub);
+  // the reader recognises a state later ⇒ the cue clears (the parsed view comes back); a real screen never raises it
+  const r2 = spyOn(mk(O, 'code', { rawAfterMs: 300 }));
+  const s2 = r2.mint.start({ accountId: sub2 });
+  await until(() => r2.mint.get(s2.mint.id)?.phase === 'waiting-code');
+  await sleep(450);
+  ok(r2.mint.get(s2.mint.id).rawHint === null && r2.out.casts.every((c) => JSON.parse(c).mint.rawHint === null), 'a screen the reader knows never raises the cue (the 2.1.296-shaped fake, past N)', r2.out.casts.map((c) => JSON.parse(c).mint.rawHint));
+  r2.mint.cancel(s2.mint.id);
+}
+
 console.log('§3 the routes');
 {
   const express = require(path.join(REPO, 'node_modules/express'));
@@ -307,13 +371,15 @@ console.log('§4 RED mutants — the spy catches each leak');
     ['the token logged', src.replace(anchor, anchor + "      log('[oat-mint] saved ' + token);\n"), 'log'],
     ['the token in the GET state', src.replace(anchor, anchor + '      m.lastToken = token;\n').replace('return m ? publicMint(m) : null; }', 'return m ? { ...publicMint(m), lastToken: m.lastToken } : null; }'), 'GET/answer'],
     ['the token in the WS broadcast', src.replace(anchor, anchor + "      broadcastAll({ type: 'oat-mint', mint: publicMint(m), token });\n"), 'broadcast'],
+    ['the raw screen kept past the token (lane signin-card-real-screen: no freeze)', src.replace('{ stopRe: RAW_STOP_RE }', '{}'), 'GET/answer'],
+    ['the raw screen answered unmasked (the echoed code)', src.replace('{ mask: m.typed }', '{}'), 'GET/answer:code'],
     ['the token written to a tmp file (oat-verify F4)', src.replace(anchor, anchor + "      try { fs.appendFileSync(path.join(os.tmpdir(), 'oatv-leak-' + process.pid + '.txt'), token + '\\n'); } catch { }\n"), 'file'],
   ];
   for (const [what, msrc, where] of mutants) {
     ok(msrc !== src, `mutant applies: ${what}`);
     am.clearOat(sub);
     const r = await saveFlow(loadOrch(msrc), sub);
-    ok(r.mint.get(r.id).phase === 'saved' && r.leaks.includes(where + ':token'), `RED: ${what} ⇒ the spy names it (${where})`, r.leaks);
+    ok(r.mint.get(r.id).phase === 'saved' && r.leaks.includes(where.includes(':') ? where : where + ':token'), `RED: ${what} ⇒ the spy names it (${where})`, r.leaks);
     fs.rmSync(path.join(os.tmpdir(), 'oatv-leak-' + process.pid + '.txt'), { force: true });
   }
   am.clearOat(sub);

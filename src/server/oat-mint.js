@@ -43,7 +43,10 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { agentEnv } = require('../agent-env.js');
-const { mintStep, initialMintParse, publicMint, codeVerdict, identityVerdict, mintEnvOf, MINT_DONE } = require('../oat-mint-model.js');
+const { mintStep, initialMintParse, publicMint, codeVerdict, identityVerdict, mintEnvOf, MINT_DONE, initialRawScreen, rawAppend, rawSince } = require('../oat-mint-model.js');
+// the raw screen (lane signin-card-real-screen) freezes BEFORE the token's success screen — the token's one road holds
+const RAW_STOP_RE = /token created successfully|your\s+oauth\s+token|sk-ant-/i;
+const RAW_AFTER_MS = 4000; // the owner's N — the sign-in card's (src/signin-model.js RAW_AFTER_MS)
 const { machineOauthAccount } = require('./usage-probe-log.js');
 const readingLag = require('../reading-lag.js');
 const { anchorFromProbe, anchorWriteVerdict, probeAgainstAnchor, identityWindows, isIdentityAnchor } = require('../oat-identity-model.js');
@@ -53,7 +56,7 @@ const SCRATCH_PREFIX = 'vs-oat-mint-';
 
 function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spawnPty = null, env = process.env,
   tmpRoot = os.tmpdir(), ttlMs = MINT_TTL_MS, now = () => Date.now(), log = (...a) => console.log(...a),
-  probePanel = null, windows = () => ({}), journal = () => { }, exitHook = false, sweepAgeMs = MINT_TTL_MS + 5 * 60e3 } = {}) {
+  probePanel = null, windows = () => ({}), journal = () => { }, exitHook = false, sweepAgeMs = MINT_TTL_MS + 5 * 60e3, rawAfterMs = RAW_AFTER_MS } = {}) {
   const mints = new Map(); // id → { id, accountId, phase, url, localUrl, error, verdict, signedInAs, other, choices, startedAt, endedAt, mintedAt, pty, dir, parse, lastLine, timer } — publicMint whitelists what leaves
   // a token waiting for the person's pick (F1 `confirm`): hub memory only, keyed
   // by mint id — never a field of a mint, so no copy of one can carry it
@@ -70,6 +73,7 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
   const end = (m, phase, error = null) => {
     if (!live(m)) return;
     m.phase = phase; m.error = error; m.endedAt = now();
+    if (m.rawTimer) { clearTimeout(m.rawTimer); m.rawTimer = null; }
     kill(m); wipe(m); held.delete(m.id); m.choices = null;
     log(`[oat-mint] ${m.id} ${m.accountId} → ${phase}`);
     emit(m);
@@ -155,11 +159,21 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
   };
   const feed = (m, chunk, opts) => {
     if (!live(m) || !m.parse) return;
-    const r = mintStep(m.parse, chunk, opts);
+    // THE RAW SCREEN (lane signin-card-real-screen, the owner's fallback — the sign-in card's twin): hub memory
+    // only, read by the person's own dialog; frozen for good before the token's screen lands
+    if (chunk) {
+      m.screen = rawAppend(m.screen, chunk, { stopRe: RAW_STOP_RE });
+      if (!m.outputAt) {
+        m.outputAt = now();
+        m.rawTimer = setTimeout(() => { m.rawTimer = null; if (live(m) && !m.url && m.phase !== 'minting') { m.stalled = true; m.rawHint = 'stalled'; emit(m); } }, rawAfterMs);
+        if (m.rawTimer.unref) m.rawTimer.unref();
+      }
+    }
+    const r = mintStep(m.parse, chunk, { ...(opts || {}), typed: m.typed || null }); // the echoed code is a line the reader knows
     m.parse = r.state; m.lastLine = r.lastLine;
     let moved = false;
     for (const st of r.steps) {
-      if (st.kind === 'token') { m.parse = null; decide(m, st.token); return; }
+      if (st.kind === 'token') { m.parse = null; m.rawHint = null; decide(m, st.token); return; }
       if (st.kind === 'error') { end(m, 'failed', st.line); return; }
       if (st.kind === 'url') { m.url = st.url; m.localUrl = readLocalUrl(m); if (m.phase === 'starting') m.phase = 'url'; moved = true; }
       if (st.kind === 'code-prompt' && (m.phase === 'starting' || m.phase === 'url')) { m.phase = m.url ? 'waiting-code' : m.phase; m.prompted = true; moved = true; }
@@ -167,6 +181,8 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
     if (m.prompted && m.url && m.phase === 'url') { m.phase = 'waiting-code'; moved = true; }
     // $BROWSER may land a beat after the screen's URL — pick it up then
     if (m.url && !m.localUrl && m.dir) { const l = readLocalUrl(m); if (l) { m.localUrl = l; moved = true; } }
+    const hint = r.unknown ? 'unknown' : (m.stalled && !m.url ? 'stalled' : null); // the parser keeps watching
+    if (hint !== (m.rawHint || null)) { m.rawHint = hint; moved = true; }
     if (moved) emit(m);
   };
 
@@ -188,7 +204,7 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
     const opener = path.join(dir, 'open-url');
     fs.writeFileSync(opener, '#!/bin/sh\nprintf \'%s\\n\' "$1" > "$(dirname "$0")/browser-url"\nexit 0\n', { mode: 0o700 });
     const e = childEnv(dir);
-    const m = { id, accountId, phase: 'starting', url: null, localUrl: null, error: null, startedAt: now(), endedAt: null, mintedAt: null, pty: null, dir: dir, parse: initialMintParse(), lastLine: '' };
+    const m = { id, accountId, phase: 'starting', url: null, localUrl: null, error: null, startedAt: now(), endedAt: null, mintedAt: null, pty: null, dir: dir, parse: initialMintParse(), lastLine: '', screen: initialRawScreen(), outputAt: 0, rawTimer: null, stalled: false, rawHint: null };
     mints.set(id, m);
     try {
       m.pty = spawn(claudeCmd, ['setup-token'], { name: 'xterm-256color', cols: 400, rows: 50, cwd: dir, env: e });
@@ -217,9 +233,11 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
   function sendCode(mid, code) {
     const m = mints.get(mid);
     if (!m) return { ok: false, status: 404, error: 'no such sign-in', code: 'unknown_mint' };
-    if (!live(m) || !m.pty || !(m.phase === 'url' || m.phase === 'waiting-code')) return { ok: false, status: 409, error: 'this sign-in is not waiting for a code', code: 'not_waiting', mint: publicMint(m) };
+    const rawWaiting = m.phase === 'starting' && !!m.rawHint; // the raw screen's code box: the person read the prompt themselves
+    if (!live(m) || !m.pty || !(m.phase === 'url' || m.phase === 'waiting-code' || rawWaiting)) return { ok: false, status: 409, error: 'this sign-in is not waiting for a code', code: 'not_waiting', mint: publicMint(m) };
     const v = codeVerdict(code);
     if (!v.ok) return { ok: false, status: 400, error: v.error, code: v.code };
+    m.typed = v.code; // memory only: the raw screen reads its tty echo as • (never a field of a mint)
     try { m.pty.write(v.code); m.pty.write('\r'); } catch { end(m, 'failed', 'the sign-in command is gone'); return { ok: true, mint: publicMint(m) }; }
     m.phase = 'minting';
     emit(m);
@@ -265,6 +283,8 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
   }
 
   function get(mid) { const m = mints.get(mid); return m ? publicMint(m) : null; }
+  // the raw screen since `from` (the dialog's «原始画面») — never past the token's screen (RAW_STOP_RE)
+  function screen(mid, from) { const m = mints.get(mid); return m ? { id: m.id, ...rawSince(m.screen, from, { mask: m.typed }) } : null; }
   function stopAll() { for (const m of mints.values()) { end(m, 'cancelled'); if (m.timer) clearTimeout(m.timer); } held.clear(); }
 
   // F3: a hub killed mid-mint (SIGKILL, a crash) leaves its 0700 scratch dir —
@@ -289,7 +309,7 @@ function create({ accounts, claudeCmd = 'claude', broadcastAll = () => { }, spaw
   sweep();
   if (exitHook) process.on('exit', stopAll);
 
-  return { start, sendCode, cancel, confirm, get, forAccount: (aid) => publicMint(forAccount(aid)), stopAll, sweep, _mints: mints, _held: held };
+  return { start, sendCode, cancel, confirm, get, screen, forAccount: (aid) => publicMint(forAccount(aid)), stopAll, sweep, _mints: mints, _held: held };
 }
 
 /** The production `probePanel`: ONE /usage panel read through the auto-cli
@@ -312,6 +332,8 @@ function registerMintRoutes(app, { mint, isAgentBearer }) {
   app.post('/api/accounts/:id/oat/mint', (req, res) => { if (refuse(req, res)) return; try { answer(res, mint.start({ accountId: req.params.id })); } catch (e) { res.status(500).json({ error: e.message }); } });
   app.get('/api/accounts/:id/oat/mint', (req, res) => { if (refuse(req, res)) return; res.json({ mint: mint.forAccount(req.params.id) }); });
   app.get('/api/accounts/:id/oat/mint/:mid', (req, res) => { if (refuse(req, res)) return; const m = own(req, res); if (m) res.json({ mint: m }); });
+  // the raw screen (lane signin-card-real-screen): answered to the asking page only — never broadcast, logged or stored
+  app.get('/api/accounts/:id/oat/mint/:mid/screen', (req, res) => { if (refuse(req, res)) return; if (!own(req, res)) return; res.set('Cache-Control', 'no-store'); res.json({ screen: mint.screen(req.params.mid, req.query && req.query.from) }); });
   app.post('/api/accounts/:id/oat/mint/:mid/code', (req, res) => { if (refuse(req, res)) return; if (!own(req, res)) return; answer(res, mint.sendCode(req.params.mid, req.body && req.body.code)); });
   app.delete('/api/accounts/:id/oat/mint/:mid', (req, res) => { if (refuse(req, res)) return; if (!own(req, res)) return; answer(res, mint.cancel(req.params.mid)); });
   app.post('/api/accounts/:id/oat/mint/:mid/confirm', (req, res) => { if (refuse(req, res)) return; if (!own(req, res)) return; const b = req.body || {}; answer(res, mint.confirm(req.params.mid, { save: b.save === true, accountId: typeof b.accountId === 'string' ? b.accountId : null })); });

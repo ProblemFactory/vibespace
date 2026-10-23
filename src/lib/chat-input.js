@@ -24,8 +24,9 @@ export class ChatInput {
    * @param {function} opts.getStateSync - returns StateSync instance
    * @param {function} opts.onInterrupt - called when user clicks Stop
    */
-  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getVoiceFacts, openPlugins, getUploadDir, isTouch, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onSteerSend, onPageKey }) {
+  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getVoiceFacts, openPlugins, getUploadDir, isTouch, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onSteerSend, onPageKey, onLogin }) {
     this._ws = ws;
+    this._onLogin = onLogin || null; // lane signin-card-real-screen: a typed «/login» opens the sign-in card (the CLI answers «isn't available»)
     this._onPageKey = onPageKey || null; // lane door-healthy-chat: PageUp / PageDown page the conversation
     this._sessionId = sessionId;
     this._onSend = onSend;
@@ -1289,6 +1290,15 @@ export class ChatInput {
         this._resolvePendingEdit(false, t('The edit was not confirmed — the session may be unresponsive.'));
       }, 20000);
       this._dispatchQueueOp('edit', id, { text });
+      return true;
+    }
+
+    // Intercept /login (lane signin-card-real-screen): the CLI answers «/login isn't available in this environment»
+    // (real 2.1.308, local_command_outcome unavailable_headless) — the chat opens its sign-in card instead. A
+    // conversation the card cannot sign in (Codex, a remote host) says no (false) and the line goes to the CLI.
+    if (/^\/login\s*$/i.test(text) && !hasAttachments && this._onLogin && this._onLogin() === true) {
+      this._textarea.value = '';
+      this._textarea.style.height = '';
       return true;
     }
 

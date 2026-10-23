@@ -170,6 +170,7 @@ export const CENSUS = [
   ['plugins-ui.js', 'input', 'text+control', 'install location; the list rows\' on/off switches (role=switch checkboxes); the file picker'],
   ['plugins-ui.js', 'select', 'choice', 'the source / mode'],
   ['principal-picker.js', 'input', 'text', 'the picker\'s search box (type=search)'],
+  ['raw-screen.js', 'xterm', 'host', 'a driven CLI login\'s own screen, read-only (disableStdin) — lane signin-card-real-screen: the card\'s code box is the input'],
   ['reaction-picker.js', 'input', 'text', 'the reaction picker\'s search box (type=search, lane channel-threads)'],
   ['record-clear-ui.js', 'tabindex', 'dialog', 'the "Clear content…" confirm\'s overlay (-1, lane redact)'],
   ['refresh-live.js', 'textarea', 'text', 'Refresh all live sessions…: the confirm\'s note (editable, pre-filled; lane refresh-live-sessions — composed at the 2.369.279 integration)'],

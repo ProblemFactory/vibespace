@@ -10249,4 +10249,11 @@ export default {
   "This company app’s redirect URL — its relay page, registered once by your admin": "这个公司应用的重定向 URL——它的中转页，由管理员登记一次",
   "This company app has no relay page yet: a sign-in comes back to this VibeSpace’s own address. Your admin can give the app one relay page that serves every VibeSpace.": "这个公司应用还没有中转页：登录会回到这个 VibeSpace 自己的地址。管理员可以给应用配一个服务所有 VibeSpace 的中转页。",
   "A public relay page you may register if this VibeSpace has no https address": "公共中转页——如果这个 VibeSpace 没有 https 地址，你可以登记它",
+  // lane signin-card-real-screen: the raw-screen fallback + the first sign-in made default
+  "Show the raw screen": "切换原始画面",
+  "Show the simple view": "切换回简洁视图",
+  "VibeSpace could not read the sign-in link — here is the sign-in screen itself. Open the link, sign in, then paste the code below.": "VibeSpace 没能读出登录链接——下面就是登录画面本身。打开里面的链接登录，再把代码粘贴到下方。",
+  "The sign-in screen says something VibeSpace does not know yet — here it is. Paste the code below when it asks for one.": "登录画面出现了 VibeSpace 还不认识的内容——原样显示在下面。它要代码时，把代码粘贴到下方。",
+  "The sign-in screen itself. Open the link, sign in, then paste the code below.": "这就是登录画面本身。打开里面的链接登录，再把代码粘贴到下方。",
+  "Set as your default account · change it in Manage agents": "已设为默认账号 · 在「管理 agent」里更改",
 };

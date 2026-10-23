@@ -34,6 +34,17 @@
 //      grandchild gone ≤ 1.5 s, scratch removed; the holder's socket closing → the same; a fake
 //      that READS the code on a real tty (echoed by the line discipline) and exits 1 silently →
 //      the published error holds no code.
+//   (lane signin-card-real-screen, 2.369.345 — the card never showed a link on a real CLI)
+//   ⑮ a stub PTY that prints the REAL 2.1.308 `claude auth login --claudeai` capture (byte-exact,
+//      scripts/fixtures/claude-signin/) → waiting-code with the exact URL (base: «starting» forever);
+//   ⑯ the raw screen (the owner's fallback): an UNKNOWN screen → rawHint 'stalled' within N of the
+//      first output, GET screen = the bytes (never broadcast), the code box takes a code, the login
+//      completes; a recognised state later flips the cue off; the echoed code reads as •;
+//   ⑰ REAL node-pty + the REAL helper: a fake `claude` that IS the capture (prints its bytes, reads
+//      the code, writes the credential) → url → code → connected; an unknown-screen fake → the raw
+//      cue within N, the code still logs in; ONE run per account (a second start JOINS); a run's TTL
+//      kills its own helper tree only — another PTY on the SAME account dir (the tour's terminal)
+//      and another account's run live on.
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';
@@ -153,8 +164,10 @@ function newOrch({ echo = false, ...extra } = {}) {
   const { orch, getFake } = newOrch();
   orch.start({ accountId: 'acc-1' });
   getFake().emit(S_URL);
+  const first = getFake();
   const again = orch.start({ accountId: 'acc-1' });
-  ok(!again.ok && again.status === 409 && again.code === 'signin_running', '⑦ a second start while live → 409', again);
+  // lane signin-card-real-screen: ONE run per account — a second press / card / the tour's terminal road JOINS it
+  ok(again.ok && again.joined === true && again.signin.id === orch.get('acc-1').id && getFake() === first, '⑦ a second start while live JOINS the run (same id, no second helper)', again);
 }
 
 // ⑧ cancel kills the PTY
@@ -280,7 +293,8 @@ await leg('⑬', async () => {
   // a live run on the pending row: the next card gets a row of its own, never the busy one
   const busyId = am.pendingSignin({ busy: () => false }).id; orch.start({ accountId: busyId }); fake.emit(S_URL);
   const second = am.pendingSignin({ busy: (aid) => orch.isLive(aid) });
-  ok(second.id !== busyId, '⑬ a row with a sign-in running is never handed to another attempt', { busyId, second: second.id });
+  const rowsBefore = subs().length;
+  ok(second.id === busyId && second.joined === true && subs().length === rowsBefore, '⑬ (lane signin-card-real-screen — the fleet pods: a row per press) a row with a sign-in running is JOINED by the next press, never a new row', { busyId, second });
   orch.cancel(busyId);
   // a success converts it: finalize with a login clears the mark — the next attempt makes a NEW row
   fs.writeFileSync(path.join(am.subDir(busyId), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'at-x', refreshToken: 'rt', expiresAt: Date.now() + 3600e3, email: 'me@co.example' } }));
@@ -357,6 +371,137 @@ printf 'Paste code here if prompted > '
     o.sendCode('acc-p3', CODE);
     const s = await waitPhase(bc, 'failed');
     ok(s && s.phase === 'failed' && !bc.some((b) => carries(b, CODE)) && !carries(o.get('acc-p3'), CODE), '⑭ CLAIM 2 on a real tty: the code echoed by the line discipline, a silent exit 1 → failed, no broadcast / GET answer holds the code', { error: s && s.error });
+  }
+});
+
+// ⑮ THE REAL SCREEN through the ORCH (a stub PTY replaying the capture byte-exact, in chunks)
+const CAP = fs.readFileSync(path.join(ROOT, 'scripts/fixtures/claude-signin/cli-2.1.308-auth-login.pty'), 'utf8');
+const CAP_SCREEN = CAP.slice(0, CAP.indexOf('Session terminated')); // the CLI's bytes (the rest is the capture tool's)
+const CAP_URL = /\x1b\]8;;(https:[^\x07]+)\x07/.exec(CAP)[1];
+await leg('⑮', async () => {
+  for (const size of [1, 64, 4096]) {
+    const { orch, broadcasts, getFake } = newOrch();
+    orch.start({ accountId: 'acc-1' });
+    for (let i = 0; i < CAP_SCREEN.length; i += size) getFake().emit(CAP_SCREEN.slice(i, i + size));
+    const g = orch.get('acc-1');
+    ok(g.phase === 'waiting-code' && g.url === CAP_URL && broadcasts.some((b) => b.signin.phase === 'waiting-code' && b.signin.url === CAP_URL) && g.rawHint === null, `⑮ the REAL 2.1.308 screen in ${size}-byte chunks → waiting-code with its exact URL, no raw cue (base: «starting», url null, for 10 minutes)`, g);
+    orch.cancel('acc-1');
+  }
+});
+
+// ⑯ the raw screen over a stub PTY: unknown → stalled within N, the code taken, connected; flip-back; mask
+await leg('⑯', async () => {
+  const N = 150;
+  const { orch, broadcasts, getFake } = newOrch({ rawAfterMs: N, echo: true });
+  orch.start({ accountId: 'acc-1' });
+  const t0 = Date.now();
+  getFake().emit('A sign-in screen this VibeSpace has never seen\r\nGo to claude dot example and type what it shows\r\nYour answer: ');
+  ok(orch.get('acc-1').rawHint === 'unknown', '⑯ a complete line the reader cannot place → the cue at once (\'unknown\')', orch.get('acc-1'));
+  while (Date.now() - t0 < 2000 && orch.get('acc-1').rawHint !== 'stalled') await sleep(10);
+  const g = orch.get('acc-1');
+  ok(g.rawHint === 'stalled' && g.phase === 'starting' && !g.url && Date.now() - t0 >= N, `⑯ no link N (${N} ms) after the CLI's first output → 'stalled' (the raw screen), said after ${Date.now() - t0} ms — never before N`, g);
+  const scr = orch.screen('acc-1', 0);
+  ok(scr && /never seen/.test(scr.data) && scr.to === scr.data.length && !scr.reset, '⑯ GET …/signin/screen = the bytes the CLI wrote', scr && scr.data.slice(0, 60));
+  const tail = orch.screen('acc-1', scr.to - 7);
+  ok(tail.data === scr.data.slice(-7) && tail.from === scr.to - 7, '⑯ …from an offset: only what the page lacks');
+  ok(broadcasts.every((b) => !JSON.stringify(b).includes('never seen')), '⑯ the screen itself is never broadcast — only its cue');
+  const sc = orch.sendCode('acc-1', CODE);
+  ok(sc.ok && orch.get('acc-1').phase === 'connecting' && getFake().writes.join('') === CODE + '\r', '⑯ the raw screen\'s code box: a code is taken while the reader placed nothing (starting + the cue) and reaches the PTY', sc);
+  const after = orch.screen('acc-1', 0);
+  ok(!after.data.includes(CODE) && after.data.includes('•'.repeat(CODE.length)), '⑯ the tty echoes the code onto the screen — the raw screen reads it as •', after.data.slice(-60));
+  getFake().emit(S_OK);
+  ok(orch.get('acc-1').phase === 'connected', '⑯ the pasted code still completes the login (connected)', orch.get('acc-1'));
+  // flip-back: an unknown line, then the reader recognises the screen ⇒ the cue clears
+  const r2 = newOrch({ rawAfterMs: 5000 });
+  r2.orch.start({ accountId: 'acc-1' });
+  r2.getFake().emit('Some new notice from the CLI\r\n');
+  const was = r2.orch.get('acc-1').rawHint;
+  r2.getFake().emit(CAP_SCREEN);
+  ok(was === 'unknown' && r2.orch.get('acc-1').rawHint === null && r2.orch.get('acc-1').phase === 'waiting-code', '⑯ the parser keeps watching: a state it recognises later flips the parsed view back (cue null)', { was, now: r2.orch.get('acc-1') });
+  r2.orch.cancel('acc-1');
+  // the route: human-only, no-store, the publicSignin whitelist never carries the screen
+  const routes = {}; registerSigninRoutes({ post: () => { }, get: (p, h) => { routes[p] = h; }, delete: () => { } }, { signin: orch, isAgentBearer: (req) => !!req.agent });
+  let code = 0, body = null, hdr = {}; const res = { status: (c) => { code = c; return res; }, json: (b) => { body = b; return res; }, set: (k, v) => { hdr[k] = v; return res; } };
+  routes['/api/accounts/:id/signin/screen']({ params: { id: 'acc-1' }, query: { from: '0' } }, res);
+  ok(body && body.screen && hdr['Cache-Control'] === 'no-store', '⑯ GET …/signin/screen answers the page (no-store)');
+  routes['/api/accounts/:id/signin/screen']({ params: { id: 'acc-1' }, query: {}, agent: true }, res);
+  ok(code === 403, '⑯ …an agent token is refused by name (the screen is the person\'s own)');
+  ok(!('screen' in orch.get('acc-1')) && !JSON.stringify(orch.get('acc-1')).includes('never'), '⑯ publicSignin never carries the screen');
+});
+
+// ⑰ REAL node-pty + the REAL helper: a fake claude that IS the capture; an unknown-screen fake; one run; the TTL's scope
+await leg('⑰', async () => {
+  const alive = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return st.split(') ')[1][0] !== 'Z' ? 'alive' : 'zombie'; } catch { return 'gone'; } };
+  const childrenOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
+  const descendants = (pid) => { const out = []; const walk = (p) => { for (const c of childrenOf(p)) { out.push(c); walk(c); } }; walk(pid); return out; };
+  const dir = fs.mkdtempSync(path.join(tmpRoot, 'real-'));
+  const capFile = path.join(dir, 'screen.bin'); fs.writeFileSync(capFile, CAP_SCREEN);
+  // the fake `claude auth login --claudeai`: prints the capture (or an unknown screen), reads the code, writes the credential, exits 0
+  const fakeJs = path.join(dir, 'fake-claude.js');
+  fs.writeFileSync(fakeJs, `const fs = require('fs'), path = require('path');
+const unknown = process.argv.includes('--unknown-screen');
+process.stdout.write(unknown ? 'A sign-in screen this VibeSpace has never seen\\r\\nType what the page shows: ' : fs.readFileSync(${JSON.stringify(capFile)}, 'utf8'));
+let buf = '';
+process.stdin.on('data', (d) => { buf += d; if (!/[\\r\\n]/.test(buf)) return;
+  const dir = process.env.CLAUDE_CONFIG_DIR; fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'at-fake', refreshToken: 'rt-fake', expiresAt: Date.now() + 3600e3, scopes: ['user:inference'], subscriptionType: 'max' } }));
+  process.stdout.write('\\r\\nLogin successful.\\r\\n'); setTimeout(() => process.exit(0), 50); });
+`);
+  const REAL = path.join(dir, 'claude-real'); fs.writeFileSync(REAL, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeJs)} "$@"\n`, { mode: 0o755 });
+  const UNK = path.join(dir, 'claude-unknown'); fs.writeFileSync(UNK, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(fakeJs)} "$@" --unknown-screen\n`, { mode: 0o755 });
+  const HANG = path.join(dir, 'claude-hang'); fs.writeFileSync(HANG, `#!/bin/sh\ncat ${JSON.stringify(capFile)}\nexec sleep 1000\n`, { mode: 0o755 });
+  const HELPER = path.join(ROOT, 'data/bin/vibespace-claude-subscription-login.mjs');
+  const accts = path.join(dir, 'accts');
+  const acc = { get: (id) => ({ id }), subDir: (id) => path.join(accts, id) };
+  const mk = (claudeCmd, extra = {}) => { const bc = []; const o = create({ accounts: acc, claudeCmd, nodeCmd: process.execPath, helperPath: HELPER, broadcastAll: (m) => bc.push(m), env: { PATH: process.env.PATH, HOME: os.homedir(), LANG: 'C.UTF-8' }, tmpRoot: dir, log: () => { }, ...extra }); return { o, bc }; };
+  const until = async (fn, ms = 8000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = fn(); if (v) return v; await sleep(25); } return fn(); };
+  // the capture through a REAL tty: url → code → connected
+  {
+    const { o, bc } = mk(REAL);
+    o.start({ accountId: 'acc-r1' });
+    const s = await until(() => o.get('acc-r1').phase === 'waiting-code' && o.get('acc-r1'));
+    ok(s && s.url === CAP_URL && s.rawHint === null, '⑰ a REAL tty + the REAL helper over a fake that prints the 2.1.308 capture → waiting-code, the exact URL', o.get('acc-r1'));
+    o.sendCode('acc-r1', CODE);
+    const c = await until(() => o.get('acc-r1').phase === 'connected' && o.get('acc-r1'));
+    ok(c && c.phase === 'connected' && !bc.some((b) => carries(b, CODE)), '⑰ …the code typed into it → the helper saves the credential → connected (no broadcast holds the code)', o.get('acc-r1'));
+  }
+  // an UNKNOWN screen through a REAL tty: the cue within N, the code still logs in
+  {
+    const N = 400;
+    const { o } = mk(UNK, { rawAfterMs: N });
+    const t0 = Date.now();
+    o.start({ accountId: 'acc-r2' });
+    const s = await until(() => o.get('acc-r2').rawHint === 'stalled' && o.get('acc-r2'), 5000);
+    ok(s && s.phase === 'starting' && Date.now() - t0 >= N, `⑰ an unknown screen on a real tty → the raw cue ('stalled') ${Date.now() - t0} ms after start (N = ${N} ms after the first output)`, o.get('acc-r2'));
+    ok(/never seen/.test((o.screen('acc-r2', 0) || {}).data || ''), '⑰ …its raw screen holds what the CLI printed');
+    o.sendCode('acc-r2', CODE);
+    const c = await until(() => o.get('acc-r2').phase === 'connected' && o.get('acc-r2'));
+    ok(c && c.phase === 'connected', '⑰ …and the code pasted under the raw screen completes the login', o.get('acc-r2'));
+  }
+  // ONE run per account + the TTL's scope (主开发's hypothesis for the naive41 dead terminal): a run's TTL kills its OWN
+  // helper tree only — a second PTY on the SAME account dir (the tour's terminal road) and another account's run live on
+  {
+    const { o } = mk(HANG, { ttlMs: 700 });
+    const { o: other } = mk(HANG);
+    o.start({ accountId: 'acc-t1' });
+    const j = o.start({ accountId: 'acc-t1' });
+    other.start({ accountId: 'acc-t2' });
+    await until(() => o.get('acc-t1').phase === 'waiting-code' && other.get('acc-t2').phase === 'waiting-code');
+    ok(j.ok && j.joined === true, '⑰ a second start on the live account JOINS (one helper, one PTY)');
+    const pty = require('node-pty');
+    const twin = pty.spawn(process.execPath, [HELPER, '--config-dir', acc.subDir('acc-t1'), '--claude', HANG], { name: 'xterm-256color', cols: 120, rows: 30, cwd: dir, env: { PATH: process.env.PATH, HOME: dir, LANG: 'C.UTF-8', TERM: 'xterm-256color' } });
+    let twinOut = ''; twin.onData((d) => { twinOut += d; });
+    await until(() => /Paste code here/.test(twinOut), 5000);
+    const mine = o._runs.get('acc-t1').pty.pid, mineKids = descendants(mine);
+    const theirs = other._runs.get('acc-t2').pty.pid, theirKids = descendants(theirs);
+    const twinKids = descendants(twin.pid);
+    await until(() => o.get('acc-t1').phase === 'failed', 3000);
+    await sleep(400);
+    ok(o.get('acc-t1').phase === 'failed' && [mine, ...mineKids].every((p) => alive(p) !== 'alive'), '⑰ the TTL ends its own run: its helper + grandchild gone', [mine, ...mineKids].map(alive));
+    ok([twin.pid, ...twinKids].every((p) => alive(p) === 'alive') && twinKids.length >= 1, '⑰ a TTL never kills another PTY on the SAME account dir (the same helper script, the same config dir)', [twin.pid, ...twinKids].map(alive));
+    ok([theirs, ...theirKids].every((p) => alive(p) === 'alive') && other.get('acc-t2').phase === 'waiting-code', '⑰ …nor another account\'s run', [theirs, ...theirKids].map(alive));
+    try { twin.kill('SIGKILL'); } catch { }
+    other.cancel('acc-t2');
   }
 });
 

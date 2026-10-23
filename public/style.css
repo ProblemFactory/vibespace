@@ -8012,6 +8012,10 @@ button.vw-chip { cursor: pointer; }
 .signin-advanced { margin-top: 10px; }
 .signin-link-btn { background: none; border: none; padding: 0; color: var(--text-dim); font-size: 11px; text-decoration: underline; cursor: pointer; }
 .signin-link-btn:hover { color: var(--text-secondary); }
+/* lane signin-card-real-screen: the raw screen (the owner's fallback) — the CLI's own login screen, read-only, inside the card / the token dialog */
+.raw-screen { margin: 8px 0; padding: 6px; border-radius: 6px; background: var(--bg-root); border: 1px solid var(--border); max-width: 100%; overflow-x: auto; }
+.signin-advanced .signin-link-btn + .signin-link-btn { margin-left: 12px; }
+.signin-default-note { margin-top: 6px; }
 
 /* lane door-signin-card: the tour's «Connect your agents» — the terminal road folds under Advanced. */
 .ob-advanced { margin: 10px 0; text-align: left; }

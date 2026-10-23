@@ -5,6 +5,7 @@ import { Unicode11Addon } from '@xterm/addon-unicode11';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { THEMES } from './themes.js';
 import { attachPopoverClose, showToast, uiScale, COUNTER_ZOOM, copyText } from './utils.js';
+import { openTerminalLink, TERMINAL_LINK_HANDLER } from './terminal-links.js'; // lane signin-card-real-screen: ONE opener for both link roads (plain text + OSC-8)
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
 import { keyboardOwned } from './keyboard-owner.js'; // lane J r2: a driven live view owns the keyboard — focus() stands down
@@ -111,6 +112,7 @@ class TerminalSession {
       lineHeight: 1.15, scrollback: 10000, allowProposedApi: true,
       theme: effectiveTheme,
       minimumContrastRatio: mcr,
+      linkHandler: TERMINAL_LINK_HANDLER, // lane signin-card-real-screen: an OSC-8 link (the CLI's sign-in URL) opens with no native «dangerous link» confirm
     });
     this.fitAddon = new FitAddon();
     this.terminal.loadAddon(this.fitAddon);
@@ -119,9 +121,7 @@ class TerminalSession {
     // native "WARNING: This link could potentially be dangerous" confirm — D3 / C2,
     // which scared 3 of 7 naive testers off the sign-in link. http(s) only; noopener
     // so the opened tab cannot reach window.opener.
-    this.terminal.loadAddon(new WebLinksAddon((event, uri) => {
-      if (/^https?:\/\//i.test(uri)) window.open(uri, '_blank', 'noopener,noreferrer');
-    }));
+    this.terminal.loadAddon(new WebLinksAddon((event, uri) => openTerminalLink(uri)));
     const unicode11 = new Unicode11Addon();
     this.terminal.loadAddon(unicode11);
     this.terminal.unicode.activeVersion = '11';

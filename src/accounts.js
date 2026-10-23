@@ -404,7 +404,11 @@ class AccountManager {
   // `signinPending` (cleared by finalize once it logs in); the next attempt
   // REUSES an idle marked row (`busy` = a sign-in is running on it), and
   // src/server/claude-signin.js sweeps a marked row past the sign-in TTL.
+  // lane signin-card-real-screen (the fleet pods: 2–3 presses on a card stuck at «starting» left 2–3 rows): a row
+  // whose sign-in is RUNNING (`busy`) is JOINED by the next press — one login run per account, never a second row
   pendingSignin({ busy = () => false } = {}) {
+    const running = this._state.accounts.find((a) => a.signinPending && this._acctType(a) === 'subscription' && busy(a.id) && !this.readSubCreds(a.id).loggedIn);
+    if (running) return { id: running.id, dir: this.subDir(running.id), reused: true, joined: true };
     const idle = this._state.accounts.find((a) => a.signinPending && this._acctType(a) === 'subscription' && !busy(a.id) && !this.readSubCreds(a.id).loggedIn);
     if (idle) return { id: idle.id, dir: this.subDir(idle.id), reused: true };
     return this.createSubscription({ signinPending: true });

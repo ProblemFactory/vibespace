@@ -1,0 +1,4 @@
+claude: 2.1.309 (Claude Code) — captured on a fresh fleet pod 2026-10-23 11:1xZ, `claude auth login --claudeai` in a PTY (TERM=xterm, COLUMNS=400), ANSI stripped, URL query redacted
+Opening browser to sign in…
+If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?<REDACTED>
+Paste code here if prompted > 

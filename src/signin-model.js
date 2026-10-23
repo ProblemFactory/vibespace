@@ -29,7 +29,7 @@
 // login prints no token; the credential bytes are the helper's, read in-process
 // at finalize and never seen here.
 
-const { cleanPty, redact, lastLine, findUrl, codeVerdict } = require('./oat-mint-model.js');
+const { cleanPty, redact, lastLine, findUrl, screenUnknown, KNOWN_LINES, codeVerdict } = require('./oat-mint-model.js');
 
 const MAX_RAW = 256 * 1024;
 const PROMPT_RE = /paste\s+(?:the\s+)?code\s+here/i;
@@ -40,6 +40,9 @@ const ERROR_RE = /^\s*(?:[✗×!]\s*)?((?:OAuth|Login|Authentication)\s+(?:error
 
 const SIGNIN_PHASES = Object.freeze(['starting', 'url', 'waiting-code', 'connecting', 'connected', 'failed', 'cancelled']);
 const SIGNIN_DONE = Object.freeze(['connected', 'failed', 'cancelled']);
+const RAW_HINTS = Object.freeze(['stalled', 'unknown']);
+// the owner's N (2026-10-23 04:2x, recommended 4 s): no link read this long after the CLI's first output ⇒ the raw screen
+const RAW_AFTER_MS = 4000;
 
 // A SECRET TYPED INTO A PTY NEVER RIDES ITS FAILURE TEXT (lane door-signin-fixes,
 // the verify's claim 2): the tty echoes the pasted code onto the prompt's line,
@@ -59,18 +62,18 @@ function initialSigninParse() { return { raw: '', seen: { url: false, prompt: fa
 // signinStep(state, chunk[, {final}]) → { state, steps, lastLine }. steps are
 // { kind: 'url', url } | { kind: 'code-prompt' } | { kind: 'connected' } |
 // { kind: 'error', line }. `state` is the parser's own (the screen so far).
-function signinStep(state, chunk, { final = false } = {}) {
+function signinStep(state, chunk, { final = false, typed = null } = {}) {
   const s = state && typeof state.raw === 'string' ? state : initialSigninParse();
   let raw = s.raw + String(chunk || '');
   if (raw.length > MAX_RAW) raw = raw.slice(raw.length - MAX_RAW);
   const seen = { ...s.seen };
   const text = cleanPty(raw);
   const steps = [];
-  if (!seen.url) { const url = findUrl(text); if (url) { seen.url = true; steps.push({ kind: 'url', url }); } }
+  if (!seen.url) { const url = findUrl(text, raw); if (url) { seen.url = true; steps.push({ kind: 'url', url }); } }
   if (!seen.prompt && PROMPT_RE.test(text)) { seen.prompt = true; steps.push({ kind: 'code-prompt' }); }
   if (!seen.done && DONE_RE.test(text)) { seen.done = true; steps.push({ kind: 'connected' }); }
   if (!seen.done && !seen.error) { const e = ERROR_RE.exec(text); if (e) { seen.error = true; steps.push({ kind: 'error', line: redact(e[1]).slice(0, 300) }); } }
-  return { state: { raw, seen }, steps, lastLine: cutAtPrompt(lastLine(text)) };
+  return { state: { raw, seen }, steps, lastLine: cutAtPrompt(lastLine(text)), unknown: screenUnknown(text, KNOWN_LINES, { typed }) };
 }
 
 // THE CARD, from the live flow — ONE verdict for all three walls (the chat's
@@ -81,14 +84,21 @@ function signinStep(state, chunk, { final = false } = {}) {
 // each state with its own t()) — PURE stays language-free. States are exactly
 // the brief's five: no-login / url-shown / waiting-code / connected / failed+why.
 function signinCardView(flow = {}, { hasWaiting = false } = {}) {
-  const phase = SIGNIN_PHASES.includes(flow.phase) ? flow.phase : 'starting';
+  const phase = SIGNIN_PHASES.includes(flow.phase) ? flow.phase : null;
   const url = typeof flow.url === 'string' && /^https:\/\//.test(flow.url) ? flow.url : null;
+  // lane signin-card-real-screen: the raw screen's cue — the reader saw no link within RAW_AFTER_MS of the
+  // CLI's first output ('stalled') or the screen ends on a line it cannot place ('unknown'); null = the parsed view
+  const rawHint = RAW_HINTS.includes(flow.rawHint) && phase && !SIGNIN_DONE.includes(phase) ? flow.rawHint : null;
   switch (phase) {
-    case 'connected': return { state: 'connected', email: typeof flow.email === 'string' && flow.email ? flow.email : null, canResend: !!hasWaiting };
+    case 'connected': return { state: 'connected', email: typeof flow.email === 'string' && flow.email ? flow.email : null, canResend: !!hasWaiting, madeDefault: flow.madeDefault === true };
     case 'failed': return { state: 'failed', why: flow.error ? redact(String(flow.error)).slice(0, 300) : null };
-    case 'connecting': return { state: 'waiting-code', url, submitting: true };
-    case 'waiting-code': return { state: 'waiting-code', url, submitting: false };
-    case 'url': return url ? { state: 'url-shown', url } : { state: 'no-login' };
+    case 'cancelled': return { state: 'no-login' };
+    case 'connecting': return { state: 'waiting-code', url, submitting: true, rawHint };
+    case 'waiting-code': return { state: 'waiting-code', url, submitting: false, rawHint };
+    // a LIVE run never shows a pressable «Sign in» again (the debris: each press made a row) — it is starting,
+    // and says so; a code box opens on the raw screen, where the person reads the prompt themselves
+    case 'url': return url ? { state: 'url-shown', url, rawHint } : { state: 'starting', rawHint };
+    case 'starting': return { state: 'starting', rawHint };
     default: return { state: 'no-login' };
   }
 }
@@ -131,6 +141,43 @@ function waitingTurnOf(messages) {
 // one, keeps the terminal road and its words. 'card' | 'terminal'.
 function signinWallOf({ oauthSubscription = false, host = null } = {}) { return oauthSubscription === true && !host ? 'card' : 'terminal'; }
 
+// THE CLI'S LIVE LOGIN REFUSAL (lane signin-card-real-screen, measured on the
+// real 2.1.308 in stream-json mode with a credential-less config dir — fixture
+// scripts/fixtures/claude-signin/cli-2.1.308-not-logged-in.jsonl): the CLI no
+// longer DIES not-logged-in. It answers each turn with a synthetic assistant
+// record — model `<synthetic>`, zero usage, `error: "authentication_failed"`,
+// `is_api_error_message: true`, text «Not logged in · Please run /login» — and
+// waits for the next one, so the death classifier (classifyCliDeath, untouched:
+// it still names real deaths) never ran and the chat never showed the card.
+// A TABLE: each row names a live record that means «this conversation cannot go
+// on until someone signs in», read by the claude stream consumer.
+const LIVE_WALLS = Object.freeze([
+  Object.freeze({ reason: 'not_logged_in', record: 'assistant', error: 'authentication_failed', text: /Not logged in|Please run \/login/ }),
+]);
+function liveWallOf(rec) {
+  if (!rec || typeof rec !== 'object' || rec.parent_tool_use_id) return null;
+  const msg = rec.message || {};
+  const text = (Array.isArray(msg.content) ? msg.content : []).filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n').trim();
+  for (const w of LIVE_WALLS) {
+    // the CLI's OWN words on its own record (never a model's text quoting them, never an API 401 a pool routes around)
+    if (rec.type !== w.record || msg.model !== '<synthetic>' || !w.text.test(text) || (rec.error != null && rec.error !== w.error)) continue;
+    return { reason: w.reason, detail: text.replace(/[\x00-\x1f\x7f]+/g, ' ').slice(0, 200) };
+  }
+  return null;
+}
+
+// THE FIRST SIGN-IN BECOMES THE DEFAULT (lane signin-card-real-screen, 主开发
+// 2026-10-23 04:27): a fresh fleet pod has no default Claude account and no
+// global login, so a chat started after the card's sign-in still ran on the
+// signed-out global login. The card's own row becomes the default ONLY when
+// nothing else could serve: no Claude default, the machine's global login
+// signed out (read off its file — unknowable where the CLI keeps it in the
+// macOS Keychain, so never there), no ANTHROPIC_API_KEY. A default that exists
+// is never swapped. → true | false.
+function firstSigninDefault({ cardRow = false, loggedIn = false, hasDefault = true, globalLoggedIn = true, platform = '', envKey = false } = {}) {
+  return cardRow === true && loggedIn === true && hasDefault === false && globalLoggedIn === false && platform !== 'darwin' && envKey !== true;
+}
+
 // What leaves the server about a sign-in (GET + the WS `claude-signin`
 // broadcast): a whitelist. No credential, no scratch path — only the URL to
 // open, the phase, the account's email on success and a one-line error.
@@ -144,6 +191,7 @@ function publicSignin(m) {
     error: m.error ? redact(m.error).slice(0, 300) : null,
     email: typeof m.email === 'string' && m.email ? redact(m.email).slice(0, 120) : null,
     startedAt: Number(m.startedAt) || 0, endedAt: Number(m.endedAt) || null,
+    rawHint: RAW_HINTS.includes(m.rawHint) ? m.rawHint : null, // lane signin-card-real-screen: the raw screen's cue (never the screen itself)
   };
 }
 
@@ -158,6 +206,6 @@ function signinShowVerdict(shown, incoming) {
 
 module.exports = {
   initialSigninParse, signinStep, signinCardView, publicSignin, signinShowVerdict, codeVerdict,
-  cutAtPrompt, waitingTurnOf, signinWallOf,
-  SIGNIN_PHASES, SIGNIN_DONE, PROMPT_RE, DONE_RE, ERROR_RE, ENDED_AFTER_CODE,
+  cutAtPrompt, waitingTurnOf, signinWallOf, liveWallOf, firstSigninDefault,
+  SIGNIN_PHASES, SIGNIN_DONE, RAW_HINTS, RAW_AFTER_MS, LIVE_WALLS, PROMPT_RE, DONE_RE, ERROR_RE, ENDED_AFTER_CODE,
 };

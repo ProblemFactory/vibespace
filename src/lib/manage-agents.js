@@ -614,12 +614,15 @@ export function installManageAgents(App, ctx = {}) {
   // theme picker, method menu or trust prompt — and finalises through the normal
   // Add road (so signing in again folds into the existing account by e-mail). The
   // terminal and long-lived-token roads stay under «Add subscription…» (advanced).
-  _openSignInCard() {
+  // lane signin-card-real-screen: `rawFirst` = the tour's «Advanced → sign in from a terminal» — the SAME login run
+  // the tour's card drives (a live one is JOINED: one run per account, never a second helper on its dir), shown as
+  // its raw screen; `onClose` tells the opener (the tour re-checks its cards).
+  _openSignInCard({ rawFirst = false, onClose = null } = {}) {
     let card = null;
-    const { body, close } = createModalShell({ id: 'signin-dialog', title: t('Sign in with Claude'), minWidth: 'min(460px, 92vw)', escapeToClose: true, onClose: () => { try { card?.destroy(); } catch { } } });
+    const { body, close } = createModalShell({ id: 'signin-dialog', title: t('Sign in with Claude'), minWidth: rawFirst ? 'min(640px, 94vw)' : 'min(460px, 92vw)', escapeToClose: true, onClose: () => { try { card?.destroy(); } catch { } try { onClose?.(); } catch { } } });
     const host = document.createElement('div');
     body.appendChild(host);
-    card = new SignInCard({ ws: this.ws, hasWaiting: () => false, onConnected: () => { try { this.refresh?.(); } catch { } setTimeout(() => { try { close(); } catch { } }, 1500); } });
+    card = new SignInCard({ ws: this.ws, hasWaiting: () => false, rawFirst, onConnected: () => { try { this.refresh?.(); } catch { } setTimeout(() => { try { close(); } catch { } }, 1500); } });
     card.mount(host);
   },
 
@@ -837,10 +840,12 @@ export function installManageAgents(App, ctx = {}) {
     const name = a?.name || '';
     const enc = encodeURIComponent(id);
     let mint = null, closeTimer = null, gone = false;
+    // lane signin-card-real-screen: the raw screen (the owner's fallback, the sign-in card's twin) — the toggle, the reader's cue, ONE xterm
+    let rawOverride = null, rawCue = null, rawScr = null, rawHostEl = null, rawLoading = null; // src/lib/raw-screen.js loads the first time it shows (it carries xterm)
     // lane dialog-unsaved-guard: a token PASTED and not saved ⇒ ✕ / Esc / the backdrop asks; Discard clears it from the page
     // (a minted token waits on the hub — a reopened dialog shows its phase again — so the mint asks nothing here)
     const pasted = () => body.querySelector('#oat-paste');
-    const { overlay, body, close: shut, dismiss } = createModalShell({ id: 'oat-dialog', title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); },
+    const { overlay, body, close: shut, dismiss } = createModalShell({ id: 'oat-dialog', title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); try { rawScr?.destroy(); } catch { } rawScr = null; },
       unsaved: { isDirty: () => !!(pasted() && pasted().value.trim()), save: () => savePasted(), discard: () => { if (pasted()) pasted().value = ''; } } });
     const live = () => mint && !['saved', 'failed', 'cancelled'].includes(mint.phase);
     // 改绑 (lane oat-identity-postcheck): the rows the token may move to — Claude subscriptions holding no live token
@@ -888,7 +893,20 @@ export function installManageAgents(App, ctx = {}) {
       const ph = mint?.phase || 'idle';
       box.dataset.phase = ph;
       let h = '';
-      if (ph === 'idle' || ph === 'cancelled') {
+      // THE RAW SCREEN: the reader saw no link 4 s after the CLI's first output ('stalled') or the screen ends on a line
+      // it cannot place ('unknown') ⇒ setup-token's own screen, read-only, the code box below; the toggle is always
+      // there while a run lives; a state recognised later flips the parsed view back (the cue changed ⇒ the toggle resets)
+      const liveRun = !!mint && ['starting', 'url', 'waiting-code', 'minting'].includes(ph);
+      if ((mint?.rawHint || null) !== rawCue) { rawCue = mint?.rawHint || null; rawOverride = null; }
+      const raw = liveRun && (rawOverride != null ? rawOverride : !!rawCue);
+      const rawToggle = liveRun ? `<div class="oat-row"><button class="signin-link-btn" id="oat-raw">${escHtml(raw ? t('Show the simple view') : t('Show the raw screen'))}</button></div>` : '';
+      if (raw) {
+        h = `<div class="oat-who"><b>${t('Sign in as “{name}”', { name: escHtml(name) })}</b></div>`
+          + `<div class="usage-note">${escHtml(rawCue === 'stalled' ? t('VibeSpace could not read the sign-in link — here is the sign-in screen itself. Open the link, sign in, then paste the code below.') : t('The sign-in screen itself. Open the link, sign in, then paste the code below.'))}</div>`
+          + `<div class="oat-raw-host"></div>`
+          + (ph === 'minting' ? `<div class="oat-wait"><span class="oat-spin"></span> ${t('Creating the token…')}</div>`
+            : `<div class="oat-row oat-code-row"><input type="text" id="oat-code" class="settings-input-text" spellcheck="false" autocomplete="off" autocapitalize="off"><button class="btn-create" id="oat-send">${t('Send')}</button></div>`);
+      } else if (ph === 'idle' || ph === 'cancelled') {
         h = (ph === 'cancelled' ? `<div class="usage-note">${t('Sign-in cancelled.')}</div>` : '')
           + `<div class="usage-warn">${t('The BROWSER account you sign in with decides which account the token bills — sign in as “{name}”.', { name: escHtml(name) })}</div>`
           + startBtn(t('Start: sign in in your browser'));
@@ -929,7 +947,20 @@ export function installManageAgents(App, ctx = {}) {
         h = `<div class="usage-warn oat-failed">${said}</div>` + startBtn(t('Retry'));
       }
       const keep = body.querySelector('#oat-code')?.value || '';
-      box.innerHTML = h;
+      box.innerHTML = h + rawToggle;
+      const slot = box.querySelector('.oat-raw-host');
+      if (slot) {
+        if (!rawHostEl) rawHostEl = document.createElement('div');
+        slot.appendChild(rawHostEl);
+        if (rawScr) rawScr.start();
+        else if (!rawLoading) rawLoading = import('./raw-screen.js').then(({ RawScreen }) => {
+          if (gone || rawScr) return;
+          rawScr = new RawScreen({ screenUrl: () => (mint && mint.id ? `/api/accounts/${enc}/oat/mint/${encodeURIComponent(mint.id)}/screen` : null) }).mount(rawHostEl);
+          if (box.querySelector('.oat-raw-host')) rawScr.start();
+        }).catch(() => { rawLoading = null; });
+      } else rawScr?.stop();
+      const rawBtn = box.querySelector('#oat-raw');
+      if (rawBtn) rawBtn.onclick = () => { rawOverride = !raw; render(mint); };
       const code = box.querySelector('#oat-code'); if (code && keep) code.value = keep;
       const run = box.querySelector('#oat-run');
       if (run) run.onclick = async () => {

@@ -10248,4 +10248,11 @@ export default {
   "This company app’s redirect URL — its relay page, registered once by your admin": "この会社アプリのリダイレクト URL——その中継ページ（管理者が一度登録します）",
   "This company app has no relay page yet: a sign-in comes back to this VibeSpace’s own address. Your admin can give the app one relay page that serves every VibeSpace.": "この会社アプリにはまだ中継ページがありません：サインインはこの VibeSpace 自身のアドレスに戻ります。管理者はすべての VibeSpace で使える中継ページをアプリに設定できます。",
   "A public relay page you may register if this VibeSpace has no https address": "公開中継ページ——この VibeSpace に https アドレスがなければ登録できます",
+  // lane signin-card-real-screen: the raw-screen fallback + the first sign-in made default
+  "Show the raw screen": "元の画面に切り替え",
+  "Show the simple view": "シンプル表示に戻す",
+  "VibeSpace could not read the sign-in link — here is the sign-in screen itself. Open the link, sign in, then paste the code below.": "VibeSpace はサインインのリンクを読み取れませんでした — 以下がサインイン画面そのものです。リンクを開いてサインインし、コードを下に貼り付けてください。",
+  "The sign-in screen says something VibeSpace does not know yet — here it is. Paste the code below when it asks for one.": "サインイン画面に VibeSpace がまだ知らない表示があります — そのまま下に表示します。コードを求められたら下に貼り付けてください。",
+  "The sign-in screen itself. Open the link, sign in, then paste the code below.": "サインイン画面そのものです。リンクを開いてサインインし、コードを下に貼り付けてください。",
+  "Set as your default account · change it in Manage agents": "デフォルトのアカウントに設定しました · 「エージェントを管理」で変更できます",
 };

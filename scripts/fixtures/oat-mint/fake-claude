@@ -7,7 +7,8 @@
 // localhost-callback URL, waits for a code line, prints a token wrapped at
 // 60 columns. Never dials anything. FAKE_OAT_MODE: code (default) | error
 // (OAuth error after the code) | exit (dies after the URL) | hang (never
-// prompts) | local (the localhost callback completes it, no code).
+// prompts) | local (the localhost callback completes it, no code) | unknown (lane signin-card-real-screen: a
+// screen the reader cannot place — no link it can read, no known prompt — that still takes a code and succeeds).
 // FAKE_OAT_RECORD: a file that gets one JSON line of facts about the run
 // (never the token; env NAMES only). FAKE_OAT_IDENTITY (JSON, or a file named
 // by FAKE_OAT_IDENTITY_FILE): an oauthAccount the success writes into
@@ -50,6 +51,7 @@ const success = () => {
 };
 const draw = (localUrl) => {
   if (process.env.BROWSER) spawnSync(process.env.BROWSER, [localUrl], { stdio: 'ignore' });
+  if (mode === 'unknown') { out(sp('A sign-in screen this VibeSpace has never seen') + '\n' + sp('Go to claude dot example, then type what it shows') + '\n' + sp('Your answer:') + ' '); return; }
   out('\x1b7\x1b8' + sp('Welcome to Claude Code v2.1.296 (fake)') + '\n\n' + sp('This will guide you through long-lived (1-year) auth token setup for your') + '\n' + sp('Claude account. Claude subscription required.') + '\n\n· ' + sp('Opening browser to sign in…') + '\n');
   for (const f of ['✢', '*', '✶', '✻']) out('\r' + f + '\n');
   const url = 'https://claude.example/cai/oauth/authorize?code=true&client_id=fake&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.example%2Foauth%2Fcode%2Fcallback&scope=user%3Ainference&state=FAKESTATE' + process.pid;

@@ -41,8 +41,8 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { agentEnv } = require('../agent-env.js');
-const { initialSigninParse, signinStep, publicSignin, codeVerdict, SIGNIN_DONE, ENDED_AFTER_CODE } = require('../signin-model.js');
-const { mintEnvOf } = require('../oat-mint-model.js');
+const { initialSigninParse, signinStep, publicSignin, codeVerdict, SIGNIN_DONE, ENDED_AFTER_CODE, RAW_AFTER_MS } = require('../signin-model.js');
+const { mintEnvOf, initialRawScreen, rawAppend, rawSince } = require('../oat-mint-model.js');
 
 const SIGNIN_TTL_MS = 10 * 60e3;
 // how long a run outlives its last holder's socket (a page reconnecting, a
@@ -56,7 +56,7 @@ const LOGIN_STATUS_FILE = '.vibespace-login-status.json';
 function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, helperPath,
   broadcastAll = () => { }, spawnPty = null, env = process.env, tmpRoot = os.tmpdir(),
   ttlMs = SIGNIN_TTL_MS, now = () => Date.now(), log = (...a) => console.log(...a),
-  exitHook = false, sweepAgeMs = SIGNIN_TTL_MS + 5 * 60e3, orphanMs = SIGNIN_ORPHAN_MS, hub = false } = {}) {
+  exitHook = false, sweepAgeMs = SIGNIN_TTL_MS + 5 * 60e3, orphanMs = SIGNIN_ORPHAN_MS, hub = false, rawAfterMs = RAW_AFTER_MS } = {}) {
   const runs = new Map(); // accountId -> { id, accountId, dir, scratch, phase, url, email, error, rev, startedAt, endedAt, pty, parse, lastLine, timer, codeSent, holders, orphanTimer }
   const spawn = spawnPty || ((file, args, opts) => require('node-pty').spawn(file, args, opts));
   const live = (m) => m && !SIGNIN_DONE.includes(m.phase);
@@ -67,7 +67,9 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
     if (!live(m)) return;
     m.phase = phase; m.error = error; m.endedAt = now();
     if (m.orphanTimer) { clearTimeout(m.orphanTimer); m.orphanTimer = null; }
+    if (m.rawTimer) { clearTimeout(m.rawTimer); m.rawTimer = null; }
     m.holders = null;
+    if (phase === 'connected') m.screen = initialRawScreen(); // a landed sign-in's screen (the echoed code) is dropped at once
     kill(m); wipe(m);
     log(`[claude-signin] ${m.id} ${m.accountId} -> ${phase}`);
     emit(m);
@@ -87,7 +89,18 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
 
   const feed = (m, chunk, opts) => {
     if (!live(m) || !m.parse) return;
-    const r = signinStep(m.parse, chunk, opts);
+    // THE RAW SCREEN (lane signin-card-real-screen, the owner's fallback): every byte the CLI wrote, in this
+    // run's memory only — the person's own card reads it (GET …/signin/screen), nothing broadcasts or logs it
+    if (chunk) {
+      m.screen = rawAppend(m.screen, chunk);
+      if (!m.outputAt) {
+        m.outputAt = now();
+        // N s after the CLI's first output and still no link read ⇒ the card shows the raw screen (the code box stays)
+        m.rawTimer = setTimeout(() => { m.rawTimer = null; if (live(m) && !m.url && m.phase !== 'connecting') { m.stalled = true; m.rawHint = 'stalled'; emit(m); } }, rawAfterMs);
+        if (m.rawTimer.unref) m.rawTimer.unref();
+      }
+    }
+    const r = signinStep(m.parse, chunk, { ...(opts || {}), typed: m.typed || null }); // the echoed code is a line the reader knows
     m.parse = r.state; m.lastLine = r.lastLine;
     let moved = false;
     for (const st of r.steps) {
@@ -97,6 +110,9 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
       if (st.kind === 'code-prompt') { if ((m.phase === 'starting' || m.phase === 'url') && m.url) m.phase = 'waiting-code'; moved = true; }
     }
     if (m.url && m.phase === 'url' && r.state.seen && r.state.seen.prompt) { m.phase = 'waiting-code'; moved = true; }
+    // the parser keeps watching: a recognised state flips the card back to the parsed view
+    const hint = r.unknown ? 'unknown' : (m.stalled && !m.url ? 'stalled' : null);
+    if (hint !== (m.rawHint || null)) { m.rawHint = hint; moved = true; }
     if (moved) emit(m);
   };
 
@@ -123,7 +139,9 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
     const a = accounts.get(accountId);
     if (!a) return { ok: false, status: 404, error: 'unknown account: ' + accountId, code: 'unknown_account' };
     const running = forAccount(accountId);
-    if (live(running)) return { ok: false, status: 409, error: 'a sign-in for this account is already running', code: 'signin_running', signin: publicSignin(running) };
+    // ONE login run per account (lane signin-card-real-screen — a second press, a second card, the tour's terminal
+    // road): a press on a live run JOINS it, never a second helper on the same config dir
+    if (live(running)) return { ok: true, joined: true, signin: publicSignin(running) };
     sweepPending({ except: accountId });
     let dir;
     try { dir = accounts.subDir(accountId); } catch (e) { return { ok: false, status: 400, error: String((e && e.message) || e), code: 'no_dir' }; }
@@ -135,7 +153,7 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
     const opener = path.join(scratch, 'open-url');
     try { fs.writeFileSync(opener, '#!/bin/sh\nexit 0\n', { mode: 0o700 }); } catch { }
     const e = mintEnvOf(agentEnv(env), { home: scratch, configDir: dir, browser: opener });
-    const m = { id, accountId, dir, scratch, phase: 'starting', url: null, email: null, error: null, rev: 0, startedAt: now(), endedAt: null, pty: null, parse: initialSigninParse(), lastLine: '', timer: null, codeSent: false, holders: null, orphanTimer: null };
+    const m = { id, accountId, dir, scratch, phase: 'starting', url: null, email: null, error: null, rev: 0, startedAt: now(), endedAt: null, pty: null, parse: initialSigninParse(), lastLine: '', timer: null, codeSent: false, holders: null, orphanTimer: null, screen: initialRawScreen(), outputAt: 0, rawTimer: null, stalled: false, rawHint: null };
     runs.set(accountId, m);
     if (!helperPath) { end(m, 'failed', 'the sign-in helper is not configured'); return { ok: true, signin: publicSignin(m) }; }
     try {
@@ -169,10 +187,13 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
   function sendCode(accountId, code) {
     const m = runs.get(accountId);
     if (!m) return { ok: false, status: 404, error: 'no sign-in is running', code: 'unknown_signin' };
-    if (!live(m) || !m.pty || !(m.phase === 'url' || m.phase === 'waiting-code')) return { ok: false, status: 409, error: 'this sign-in is not waiting for a code', code: 'not_waiting', signin: publicSignin(m) };
+    // the raw screen's code box (lane signin-card-real-screen): the reader placed no link, the person read the prompt themselves
+    const rawWaiting = m.phase === 'starting' && !!m.rawHint;
+    if (!live(m) || !m.pty || !(m.phase === 'url' || m.phase === 'waiting-code' || rawWaiting)) return { ok: false, status: 409, error: 'this sign-in is not waiting for a code', code: 'not_waiting', signin: publicSignin(m) };
     const v = codeVerdict(code);
     if (!v.ok) return { ok: false, status: 400, error: v.error, code: v.code };
     m.codeSent = true;
+    m.typed = v.code; // memory only: the raw screen reads its tty echo as • (never a field of a run's snapshot)
     try { m.pty.write(v.code); m.pty.write('\r'); } catch { end(m, 'failed', 'the sign-in command is gone'); return { ok: true, signin: publicSignin(m) }; }
     m.phase = 'connecting';
     emit(m);
@@ -187,6 +208,8 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
   }
 
   function get(accountId) { const m = runs.get(accountId); return m ? publicSignin(m) : null; }
+  // the raw screen since `from` (the card's «原始画面») — the run's own memory, null when there is no run
+  function screen(accountId, from) { const m = runs.get(accountId); return m ? { id: m.id, ...rawSince(m.screen, from, { mask: m.typed }) } : null; }
   function stopAll() { for (const m of runs.values()) { end(m, 'cancelled'); if (m.timer) clearTimeout(m.timer); } }
 
   // THE RUN IS THE STARTING PAGE'S: the card holds it over its socket (and again
@@ -228,7 +251,7 @@ function create({ accounts, claudeCmd = 'claude', nodeCmd = process.execPath, he
   sweepPending();
   if (exitHook) process.on('exit', stopAll);
 
-  const api = { start, sendCode, cancel, get, forAccount: (aid) => publicSignin(forAccount(aid)), isLive: (aid) => live(runs.get(aid)), hold, releaseSocket, stopAll, sweep, sweepPending, _runs: runs };
+  const api = { start, sendCode, cancel, get, screen, forAccount: (aid) => publicSignin(forAccount(aid)), isLive: (aid) => live(runs.get(aid)), hold, releaseSocket, stopAll, sweep, sweepPending, _runs: runs };
   if (hub) HUB = api;
   return api;
 }
@@ -247,6 +270,8 @@ function registerSigninRoutes(app, { signin, isAgentBearer }) {
   const answer = (res, r) => (r.ok ? res.json({ success: true, signin: r.signin }) : res.status(r.status || 400).json({ error: r.error, code: r.code, signin: r.signin || null }));
   app.post('/api/accounts/:id/signin', (req, res) => { if (refuse(req, res)) return; try { answer(res, signin.start({ accountId: req.params.id })); } catch (e) { res.status(500).json({ error: e.message }); } });
   app.get('/api/accounts/:id/signin', (req, res) => { if (refuse(req, res)) return; res.json({ signin: signin.get(req.params.id) }); });
+  // the raw screen (lane signin-card-real-screen): answered to the asking page only — never broadcast, logged or stored
+  app.get('/api/accounts/:id/signin/screen', (req, res) => { if (refuse(req, res)) return; res.set('Cache-Control', 'no-store'); res.json({ screen: signin.screen(req.params.id, req.query && req.query.from) }); });
   app.post('/api/accounts/:id/signin/code', (req, res) => { if (refuse(req, res)) return; answer(res, signin.sendCode(req.params.id, req.body && req.body.code)); });
   app.delete('/api/accounts/:id/signin', (req, res) => { if (refuse(req, res)) return; answer(res, signin.cancel(req.params.id)); });
 }

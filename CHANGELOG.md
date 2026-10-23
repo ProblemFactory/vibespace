@@ -2,6 +2,23 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.345 — 2026-10-23
+
+### Added
+- When the Claude sign-in card or the long-lived token dialog cannot read the sign-in screen, it shows that screen itself, with the code box below it.
+- A switch on the sign-in card and the token dialog shows the sign-in screen itself at any time, and back.
+
+### Changed
+- In the tour, Advanced: sign in from a terminal now shows the card's own sign-in as its screen instead of starting a second one.
+- The first Claude account you sign in to on the card becomes your default when you had none, and the card says so.
+
+### Fixed
+- The Claude sign-in card now shows the sign-in link; it could read only an older sign-in screen and waited ten minutes with nothing.
+- Pressing Sign in with Claude again while it is starting no longer adds another account; the button waits instead.
+- A Claude chat's "not logged in" message is the sign-in card again, and typing /login opens that card instead of "isn't available".
+- A link in a sign-in terminal opens in a new tab without a warning.
+- The tour's Log in to Claude Code terminal keeps answering your keys after the page was asleep or reconnected.
+
 ## 2.369.344 — 2026-10-22
 
 ### Changed

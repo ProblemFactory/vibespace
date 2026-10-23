@@ -72,17 +72,108 @@ function lastLine(text) {
   return redact(lines.length ? lines[lines.length - 1] : '').slice(0, 300);
 }
 
-/** The sign-in URL: from https:// to the first blank line, wrapped pieces
- *  joined (a narrow PTY breaks it mid-query). Complete only once the line
- *  after it has arrived — never a half URL. */
-function findUrl(text) {
+/** The sign-in URL (lane signin-card-real-screen: the blank-line rule read only
+ *  the 2.1.296 setup-token screen — `claude auth login --claudeai` (2.1.308 /
+ *  2.1.309, measured) prints the prompt on the VERY NEXT line, so the card sat
+ *  at «starting» for 10 minutes on every fleet pod). Two reads, ONE reader for
+ *  both roads:
+ *   · the OSC-8 hyperlink's TARGET in the raw stream — the whole URL in one
+ *     piece however the visible text wraps, complete once its terminator
+ *     arrived (both CLIs wrap the URL in one);
+ *   · else the visible text: from https:// to the end of its line, wrapped
+ *     pieces (a line of URL characters only) joined, ended by a blank line, a
+ *     line of words or the code prompt. Complete only once the line after it
+ *     has begun — never a half URL. */
+const OSC8_URL_RE = /\x1b\]8;[^;\x07\x1b]*;(https:\/\/[^\x07\x1b\s]+)(?:\x07|\x1b\\)/;
+const URL_OK_RE = /^https:\/\/[^\s"'<>]+$/;
+const URL_PIECE_RE = /^[^\s"'<>]+$/;
+const urlOk = (u) => (URL_OK_RE.test(u) && u.length <= 4096 ? u : null);
+function findUrl(text, raw) {
+  if (raw) { const o = OSC8_URL_RE.exec(String(raw)); if (o && urlOk(o[1])) return o[1]; }
   const m = URL_START_RE.exec(text);
   if (!m) return null;
-  const rest = text.slice(m.index);
-  const end = rest.search(/\n[ \t]*\n/);
-  if (end < 0) return null;
-  const url = rest.slice(0, end).replace(/\s+/g, '');
-  return /^https:\/\/[^\s"'<>]+$/.test(url) && url.length <= 4096 ? url : null;
+  const lines = text.slice(m.index).split('\n');
+  const head = lines[0].replace(/\s+$/, '');
+  let url = head.match(/^\S+/)[0];
+  if (url.length < head.length) return urlOk(url); // words after it on its line: the URL ended there
+  for (let i = 1; i < lines.length; i++) {
+    const l = lines[i].trim();
+    if (i === lines.length - 1) return l && (PROMPT_RE.test(l) || /\s/.test(l)) ? urlOk(url) : null; // the next line still arriving
+    if (!l || /\s/.test(l) || PROMPT_RE.test(l) || !URL_PIECE_RE.test(l)) return urlOk(url); // a blank line, words, the prompt
+    url += l; // a wrapped piece
+  }
+  return null;
+}
+
+// THE SCREEN THE READER KNOWS (lane signin-card-real-screen, owner 2026-10-23
+// 04:2x: 「其实你应该提供兜底的，如果解析不出来还能切换成旧模式查看」). Every line
+// either road's REAL screen prints (the 2.1.296 setup-token captures, the
+// 2.1.308 / 2.1.309 auth-login captures) matches a row; a line that matches
+// none, standing after everything recognised, flips the card to the raw screen
+// until the reader recognises a state again. Spinner frames and blank lines
+// are no lines.
+const KNOWN_LINES = Object.freeze([
+  /^welcome to claude code\b/i, /long-lived|auth token setup|subscription required/i,
+  /opening browser/i, /browser didn.t open/i, /https:\/\//, PROMPT_RE,
+  /token created successfully|your oauth token|store this token|sk-ant-/i,
+  /^(?:[✗×!]\s*)?(?:oauth error|invalid code|error:)/i,
+  /^vibespace:/i, /subscription credentials saved|login\s+success|logged\s+in/i,
+  /hold shift while selecting/i, // 2.1.296's copy hint under the URL
+  /^[^\p{L}\p{N}]+$/u, // a line without a word or a digit: the banner's drawing, a rule
+]);
+/** Does the screen end on a line the reader cannot place? (the raw-view flip)
+ *  `typed` = the code the person pasted: the tty echoes it, on its own line when the prompt ended its line. */
+function screenUnknown(text, known = KNOWN_LINES, { typed = null } = {}) {
+  const lines = String(text || '').split('\n');
+  let unknown = false, inUrl = false;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i].trim();
+    const last = i === lines.length - 1;
+    if (!l) { inUrl = false; continue; }
+    if (SPINNER_LINE_RE.test(l)) continue;
+    const isKnown = known.some((re) => re.test(l)) || (inUrl && URL_PIECE_RE.test(l)) || (typeof typed === 'string' && typed.length >= 4 && l.includes(typed));
+    if (last && !isKnown) break; // a line still arriving is not yet a verdict
+    unknown = !isKnown;
+    inUrl = /https:\/\/\S+$/.test(l) || (inUrl && URL_PIECE_RE.test(l));
+  }
+  return unknown;
+}
+
+// THE RAW SCREEN (the owner's fallback): the bytes as the CLI wrote them, in
+// hub memory only — answered to the person's own card on request, never
+// broadcast, logged or written. `stopRe` freezes it for good before a matching
+// chunk lands (the mint road: nothing from the token's success screen on is
+// ever kept — the token's one road holds). Offsets count characters appended.
+const RAW_MAX = 64 * 1024;
+function initialRawScreen() { return { start: 0, data: '', frozen: false }; }
+function rawAppend(scr, chunk, { stopRe = null } = {}) {
+  const s = scr && typeof scr.data === 'string' ? scr : initialRawScreen();
+  if (s.frozen) return s;
+  const d = String(chunk || '');
+  if (!d) return s;
+  if (stopRe && stopRe.test(cleanPty(s.data.slice(-1024) + d))) return { ...s, frozen: true };
+  let data = s.data + d, start = s.start;
+  if (data.length > RAW_MAX) { start += data.length - RAW_MAX; data = data.slice(data.length - RAW_MAX); }
+  return { start, data, frozen: false };
+}
+/** What a card that has `from` characters lacks: { from, to, data, reset }.
+ *  `mask` = the code the person pasted: the tty ECHOES it onto the prompt's
+ *  line, and a typed secret never rides out of the hub (the door-signin-fixes
+ *  law, test-oat-mint §4) — it reads as • of the same length (offsets kept),
+ *  a half-arrived echo at the end too. Nothing else is touched. */
+function rawSince(scr, from, { mask = null } = {}) {
+  const s = scr && typeof scr.data === 'string' ? scr : initialRawScreen();
+  const end = s.start + s.data.length;
+  let data = s.data;
+  const m = typeof mask === 'string' && mask.length >= 4 ? mask : null;
+  if (m) {
+    const dots = (n) => '•'.repeat(n);
+    data = data.split(m).join(dots(m.length));
+    for (let k = Math.min(m.length - 1, data.length); k >= 4; k--) if (data.endsWith(m.slice(0, k))) { data = data.slice(0, data.length - k) + dots(k); break; }
+  }
+  const f = Number(from);
+  if (!Number.isFinite(f) || f < s.start || f > end) return { from: s.start, to: end, data, reset: true };
+  return { from: f, to: end, data: data.slice(f - s.start), reset: false };
 }
 
 /** The token: after "Your OAuth token" (whitespace-joined, the CLI wraps it)
@@ -104,14 +195,14 @@ function findToken(text, final) {
 
 function initialMintParse() { return { raw: '', seen: { url: false, prompt: false, token: false, error: false } }; }
 
-function mintStep(state, chunk, { final = false } = {}) {
+function mintStep(state, chunk, { final = false, typed = null } = {}) {
   const s = state && typeof state.raw === 'string' ? state : initialMintParse();
   let raw = s.raw + String(chunk || '');
   if (raw.length > MAX_RAW) raw = raw.slice(raw.length - MAX_RAW);
   const seen = { ...s.seen };
   const text = cleanPty(raw);
   const steps = [];
-  if (!seen.url) { const url = findUrl(text); if (url) { seen.url = true; steps.push({ kind: 'url', url }); } }
+  if (!seen.url) { const url = findUrl(text, raw); if (url) { seen.url = true; steps.push({ kind: 'url', url }); } }
   if (!seen.prompt && PROMPT_RE.test(text)) { seen.prompt = true; steps.push({ kind: 'code-prompt' }); }
   if (!seen.token) {
     const token = findToken(text, final);
@@ -121,7 +212,10 @@ function mintStep(state, chunk, { final = false } = {}) {
     const e = ERROR_RE.exec(text);
     if (e) { seen.error = true; steps.push({ kind: 'error', line: redact(e[1]).slice(0, 300) }); }
   }
-  return { state: { raw: seen.token ? '' : raw, seen }, steps, lastLine: lastLine(text) };
+  // the token's success screen (its wrapped pieces read as unknown lines until «Store this token» lands) is never the
+  // raw-screen flip — the mint's raw screen is frozen there, and the token rides only its step
+  const tokenScreen = /token created successfully|your\s+oauth\s+token/i.test(text);
+  return { state: { raw: seen.token ? '' : raw, seen }, steps, lastLine: lastLine(text), unknown: !seen.token && !tokenScreen && screenUnknown(text, KNOWN_LINES, { typed }) };
 }
 
 // `confirm` (oat-verify F1): the CLI printed a token but nothing PROVED whose it
@@ -150,6 +244,7 @@ function publicMint(m) {
     reason: MINT_REASONS.includes(m.verdict) ? m.verdict : null,
     signedInAs: word(m.signedInAs, 120), other: word(m.other, 120),
     choices: m.phase === 'confirm' && Array.isArray(m.choices) ? m.choices.filter((c) => c && c.id).slice(0, 50).map((c) => ({ id: String(c.id), name: word(c.name, 60) || String(c.id) })) : null,
+    rawHint: (m.rawHint === 'stalled' || m.rawHint === 'unknown') && !MINT_DONE.includes(m.phase) ? m.rawHint : null, // lane signin-card-real-screen: the raw screen's cue
   };
 }
 
@@ -202,4 +297,4 @@ function mintEnvOf(base, { home, configDir, browser } = {}) {
   return Object.assign(out, { HOME: String(home), CLAUDE_CONFIG_DIR: String(configDir), BROWSER: String(browser), TERM: 'xterm-256color', DISABLE_AUTOUPDATER: '1' });
 }
 
-module.exports = { cleanPty, redact, lastLine, findUrl, findToken, initialMintParse, mintStep, publicMint, mintShowVerdict, codeVerdict, identityVerdict, mintEnvOf, MINT_ENV_ALLOW, MINT_PHASES, MINT_DONE, MINT_REASONS };
+module.exports = { cleanPty, redact, lastLine, findUrl, screenUnknown, KNOWN_LINES, initialRawScreen, rawAppend, rawSince, RAW_MAX, findToken, initialMintParse, mintStep, publicMint, mintShowVerdict, codeVerdict, identityVerdict, mintEnvOf, MINT_ENV_ALLOW, MINT_PHASES, MINT_DONE, MINT_REASONS };
