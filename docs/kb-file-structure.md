@@ -1214,6 +1214,8 @@ src/agy-store.js conversationRecords / historySplice (lane agy-harness-fixes, PU
 src/agy-store-fs.js linesFrom (lane agy-harness-fixes) — the SAME gate awaited (realpaths + O_NOFOLLOW open), complete lines from an offset in 512 KB awaited chunks, ≤ maxBytes → {lines, next, size, capped}; the hub's read of a conversation's transcript
 src/server/stdout/acp-events.js ring cut (lane agy-harness-fixes) — the live buffer keeps its last 800 000 bytes FROM THE FIRST '\n' after the bound (never a half record first) ⇒ test-agy-store ⑬ + the byte-cut CONTROL
 data/bin/agy-wrapper.js savePicture / normalizeChatInput (lane agy-harness-fixes) — a composer picture → written once under <cwd>/.vibespace-uploads/ (sha256 name, 0700/0600, `*` .gitignore), its path FIRST in the text (the upload's quoting); a notice only for a picture not written; no bytes logged
+data/bin/agy-wrapper.js steer / Stop (lane agy-harness-fixes) — QUEUE_VERBS + 'steer': the item to the head, stopRunningTurn restarts on the same conversation BEFORE ending the turn, the new process runs it first; Stop still clears the queue (owner law), its line counts the person's drops
+src/adapters/agy.js formatQueueOp + src/backend-caps.js antigravity row (lane agy-harness-fixes) — agy declares and builds 'steer' (stop the turn, run it first); steer-all / run-now / run-all stay refused; the ACP adapter's steer refusal unchanged for opencode ⇒ test-queue-steer ②
 
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 

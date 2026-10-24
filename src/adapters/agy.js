@@ -48,6 +48,16 @@ class AgyAdapter extends AcpAdapter {
     if (refused) throw refused;
     return super.formatSetEffort(effort);
   }
+  /** THE STEER (lane agy-harness-fixes, bug 4): agy's wrapper serves it — the message to the head of its queue, the
+   *  running turn stopped, the message run first on the same conversation. Every other queue op (and the refusal of
+   *  steer-all / run-now / run-all) is the ACP adapter's. */
+  formatQueueOp(o = {}) {
+    if (o && o.op === 'steer') {
+      if (!o.id) throw new Error('queue op "steer" needs an item id');
+      return JSON.stringify({ type: 'queue-op', op: 'steer', id: String(o.id) });
+    }
+    return super.formatQueueOp(o);
+  }
   buildSessionArgs(options = {}) {
     const { cwd, model, effort, permissionMode, resumeId, extraArgs = [], mode = 'chat', sessionName = '', initialPrompt = '' } = options;
     const refused = agyEffortRefusal(effort);

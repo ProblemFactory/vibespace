@@ -69,7 +69,9 @@
 //   'steer'     — INJECT it into the running turn so the agent sees it at its
 //                 next reply (codex `turn/steer`; measured on 0.153.4: several
 //                 steers per turn are accepted, and a steer does NOT remove
-//                 the queued copy — the wrapper deletes it).
+//                 the queued copy — the wrapper deletes it). agy takes no input
+//                 mid-turn: its wrapper's steer stops the running turn and runs
+//                 the message first (lane agy-harness-fixes).
 //   'steer-all' — the same, for every queued item in order.
 //   'reorder'   — move an item (ws frame: RELATIVE `afterId`; the wrapper
 //                 translates it into the app-server's absolute full-order
@@ -498,7 +500,9 @@ const BACKEND_CAPS = {
   // Antigravity CLI (`agy`, lane antigravity-harness): NOT an ACP agent, but its chat wrapper
   // (data/bin/agy-wrapper.js) journals the SAME 'acp-events' records, so the protocol rows are
   // opencode's for the same reasons: the wrapper owns the queue (agy runs one turn per stdin line and
-  // has no steer), a turn ends on agy's own `result` event (authoritative), no persona verb, no
+  // takes no input mid-turn — so its 'steer', lane agy-harness-fixes, STOPS the running turn (a restart on
+  // the same conversation, what it did stays) and runs the steered message first; 'steer-all' / run-now /
+  // run-all stay false), a turn ends on agy's own `result` event (authoritative), no persona verb, no
   // per-session worktree flag. No pool / quota probe in commit 1 (the machine login only; the
   // `-p /usage` reading and the per-account HOME root follow). hotSwitch 'unverified' = cold.
   antigravity: {
@@ -507,7 +511,7 @@ const BACKEND_CAPS = {
     peerDelivery: 'stash-only',
     compactEnd: null,
     frameFile: true,
-    inputModes: { queue: true, queueVerbs: ['remove', 'reorder', 'edit'] },
+    inputModes: { queue: true, queueVerbs: ['remove', 'steer', 'reorder', 'edit'] },
     turnState: 'authoritative',
     inProgressTools: false,
     responseStyle: { live: false, closed: true, values: [] },

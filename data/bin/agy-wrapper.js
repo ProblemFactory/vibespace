@@ -53,7 +53,9 @@ const MAX_BUFFER = 800000;
 // our permission modes onto agy's: '' = agy's own setting (request-review), the three --mode values, and bypass
 const MODES = Object.freeze(['', 'accept-edits', 'auto', 'plan', 'bypassPermissions']);
 const EFFORTS = Object.freeze(['', 'low', 'medium', 'high', 'xhigh', 'max']);
-const QUEUE_VERBS = ['remove', 'reorder', 'edit'];
+// lane agy-harness-fixes (bug 4): + 'steer' — agy takes no input mid-turn, so a steer stops the running turn (a restart on
+// the same conversation; what it did stays) and runs the steered message first. 'steer-all' stays refused.
+const QUEUE_VERBS = ['remove', 'steer', 'reorder', 'edit'];
 // THE AUTH GATE: an unauthenticated agy prints its OAuth URL at once and then reads a pasted code on its STDIN, so a
 // user line written before that URL shows would be swallowed as the code. The first line waits until agy has said
 // anything on stdout (init) or AUTH_GRACE_MS passed with no sign-in request on stderr.
@@ -627,6 +629,21 @@ function drainPromptQueue() {
   publishQueue();
   runPrompt(next.text, next.opts).catch((e) => log('queued prompt failed: ' + e.message));
 }
+/** THE STEER's stop (lane agy-harness-fixes, bug 4): ends the RUNNING turn and KEEPS the queue (the steered message at
+ *  its head) — agy's stream has no cancel, so a dispatched turn's process is restarted on the same conversation (what
+ *  the turn did stays) and the new process drains the queue first (startChild); a turn not yet dispatched is dropped by
+ *  runPrompt itself and the queue drains after it. The restart starts BEFORE the turn ends: `restarting` holds
+ *  endPrompt's own drain, so nothing queued is written to the old process. → true when a dispatched turn was stopped
+ *  (the caller says so); an idle wrapper just drains. (Stop is another verb: it clears the queue — the owner's law.) */
+function stopRunningTurn(why) {
+  const mine = activePrompt;
+  if (!mine) { drainPromptQueue(); return false; }
+  mine.cancelled = true;
+  if (!mine.dispatched) return false;
+  restartChild(why);
+  endPrompt(mine, 'cancelled', null, mine.opts || {});
+  return true;
+}
 function endPrompt(mine, stopReason, error, opts) {
   record('prompt_end', { promptId: mine.id, stopReason, error: error || null });
   if (activePrompt === mine) activePrompt = null;
@@ -767,16 +784,22 @@ async function handleInput(msg) {
       for (const q of dropped) { if (q.opts?.peer && q.opts.peerText) record('peer_result', { ok: false, reason: 'dropped by Stop before it was delivered', text: q.opts.peerText, fromName: q.opts.peerFrom || null, peerKind: q.opts.peerKind || null }); if (q.opts?.nudge) nudgeTurnActive = false; }
       // a retry dropped before it ran must not leave its one-turn bypass on the process the next turn uses
       if (retryBypass && !activePrompt?.opts?.retry) { retryBypass = false; restartChild('stop: the dropped retry\'s bypass ends'); }
+      // STOP CLEARS THE QUEUE (the owner's law, 2026-09-07 — codex-chat-wrapper / acp-wrapper), and the drop is SAID
+      // (lane agy-harness-fixes, bug 4): the person's messages it dropped are counted in the Stop line — never a silent loss
+      const mine = (dropped.filter((q) => !q.opts?.peer && !q.opts?.nudge)).length;
+      const droppedWords = mine ? ` Stop also cleared the queue: your ${mine} queued message${mine === 1 ? ' was' : 's were'} not sent — send again what should still run.` : '';
       if (activePrompt) {
-        const mine = activePrompt;
-        mine.cancelled = true;
-        if (mine.dispatched) {
+        const cur = activePrompt;
+        cur.cancelled = true;
+        if (cur.dispatched) {
           // no cancel in agy's stream: the process is restarted on the same conversation (what it already did is kept)
-          endPrompt(mine, 'cancelled', null, mine.opts || {});
-          notice('info', 'Stopped — Antigravity has no cancel in its stream, so its process was restarted on the same conversation; what the turn already did stays.', 'stop-restart');
+          endPrompt(cur, 'cancelled', null, cur.opts || {});
+          notice('info', `Stopped — Antigravity has no cancel in its stream, so its process was restarted on the same conversation; what the turn already did stays.${droppedWords}`, 'stop-restart');
           restartChild('stop');
+          return;
         }
       }
+      if (droppedWords) notice('info', `Stopped.${droppedWords}`, 'stop-restart');
       return;
     }
     case 'read-permission-rules':
@@ -808,9 +831,18 @@ async function handleInput(msg) {
 }
 function handleQueueOp(msg) {
   const op = String(msg?.op || ''), id = String(msg?.id || '');
-  if (!QUEUE_VERBS.includes(op)) { record('queue_op_result', { op, id, ok: false, reason: /^steer/.test(op) ? 'not-steerable' : /^run-/.test(op) ? 'not-startable' : 'unknown-op', detail: /^steer/.test(op) ? 'Antigravity cannot take input into a running turn — the message runs after it' : `this agent has no queue action "${op}"` }); return; }
+  if (!QUEUE_VERBS.includes(op)) { record('queue_op_result', { op, id, ok: false, reason: /^steer/.test(op) ? 'not-steerable' : /^run-/.test(op) ? 'not-startable' : 'unknown-op', detail: /^steer/.test(op) ? 'Antigravity steers one message at a time — steer the one to run next' : `this agent has no queue action "${op}"` }); return; }
   const idx = promptQueue.findIndex((q) => q.id === id);
   if (idx < 0) { record('queue_op_result', { op, id, ok: false, reason: 'gone', detail: 'it is no longer queued' }); publishQueue(); return; }
+  if (op === 'steer') {
+    // THE STEER (lane agy-harness-fixes, bug 4): to the HEAD of the queue, then the running turn stops (agy takes no input
+    // mid-turn — the restart keeps the conversation and what the turn did) and the new process runs it first
+    const [moved] = promptQueue.splice(idx, 1);
+    promptQueue.unshift(moved);
+    record('queue_op_result', { op, id, ok: true, msg_id: moved.opts?.msgId || '' }); publishQueue();
+    if (stopRunningTurn('steer')) notice('info', 'Steered — Antigravity takes no new message mid-turn, so the running turn was stopped (what it already did stays) and your message runs now on the same conversation.', 'steer-restart');
+    return;
+  }
   if (op === 'reorder') {
     const afterId = msg?.afterId == null ? null : String(msg.afterId);
     const [moved] = promptQueue.splice(idx, 1);

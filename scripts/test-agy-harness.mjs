@@ -364,11 +364,60 @@ console.log('— ⑥ Stop and the queue');
     ok('a turn runs, later lines queue in the WRAPPER; edit / remove are served', w.all('queue_op_result').every((r) => r.ok) && w.all('queued_input').length === 2);
     w.send({ type: 'interrupt' });
     const end = await w.until(() => w.find('prompt_end'), 5000, 'end');
-    ok('Stop ends the running turn as cancelled and drops the queue', end.stopReason === 'cancelled' && w.find('notice', (r) => r.noticeKind === 'stop-restart'), end);
+    const stopLine = w.find('notice', (r) => r.noticeKind === 'stop-restart');
+    ok('Stop ends the running turn as cancelled and drops the queue (the owner\'s law, 2026-09-07 — every harness)', end.stopReason === 'cancelled' && stopLine && w.find('queue_op_result', (r) => r.op === 'remove' && r.reason === 'stopped' && r.msg_id === 'q1'), end);
+    ok('…and the drop is SAID (lane agy-harness-fixes, bug 4): the Stop line counts the person\'s queued message it cleared', /Stop also cleared the queue: your 1 queued message was not sent/.test(stopLine.text), stopLine.text);
     await w.until(() => w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).length >= 2, 8000, 'restart after stop');
     const starts = w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).map((x) => x.argv);
     ok('…by restarting agy on the same conversation (its stream has no cancel)', starts[1].includes('--conversation') && starts[1][starts[1].indexOf('--conversation') + 1] === ses.sessionId);
   } finally { await w.stop(); }
+}
+
+console.log('— ⑥b THE STEER (lane agy-harness-fixes, bug 4): a queued message jumps the queue — the running turn stops, it runs next');
+{
+  const lines = (w) => w.stub().filter((x) => x.stdin).map((x) => JSON.parse(x.stdin).message.content);
+  const starts = (w) => w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).map((x) => x.argv);
+  const w = startWrapper({ env: { AGY_STUB_SLOW_MS: '2500' } });
+  try {
+    const ses = await w.until(() => w.find('session'), 8000, 'session');
+    w.send({ type: 'chat-input', text: 'a slow one', msgId: 'v0' });
+    await w.until(() => w.find('prompt_start'), 5000, 'start');
+    w.send({ type: 'chat-input', text: 'first queued', msgId: 'v1' });
+    w.send({ type: 'chat-input', text: 'second queued', msgId: 'v2' });
+    w.send({ type: 'chat-input', text: 'third queued', msgId: 'v3' });
+    const q3 = await w.until(() => w.all('queue_changed').find((r) => r.items.length === 3), 5000, 'a queue of 3');
+    const meta = JSON.parse(fs.readFileSync(path.join(w.dir, 's.json'), 'utf8'));
+    ok('the wrapper serves steer: its queue publication and its caps advert name it (the strip shows ⚡ for agy)', q3.verbs.includes('steer') && meta.caps.queueVerbs.includes('steer'), { verbs: q3.verbs, caps: meta.caps.queueVerbs });
+    w.send({ type: 'queue-op', op: 'steer-all' });
+    w.send({ type: 'queue-op', op: 'steer', id: 'q-nope' });
+    w.send({ type: 'queue-op', op: 'steer', id: q3.items[2].id });
+    const res = await w.until(() => w.find('queue_op_result', (r) => r.op === 'steer' && r.ok), 5000, 'the steer');
+    const head = w.all('queue_changed').find((r) => r.items.length === 3 && r.items[0].msgId === 'v3');
+    ok('steer #3 ⇒ ok, and it is at the HEAD of the queue (#1, #2 behind it, in order)', res.msg_id === 'v3' && head && head.items.map((i) => i.msgId).join() === 'v3,v1,v2', head && head.items.map((i) => i.msgId));
+    ok('steer-all stays refused (one message at a time); a steer of an id no longer queued says so', w.find('queue_op_result', (r) => r.op === 'steer-all' && r.reason === 'not-steerable') && w.find('queue_op_result', (r) => r.op === 'steer' && r.reason === 'gone'));
+    const end = await w.until(() => w.find('prompt_end'), 5000, 'the stopped turn');
+    const said = w.find('notice', (r) => r.noticeKind === 'steer-restart');
+    ok('the running turn ENDS (cancelled) — agy takes no input mid-turn — and the line says why (what it did stays)', end.stopReason === 'cancelled' && said && /Steered/.test(said.text), { end, said: said && said.text });
+    await w.until(() => lines(w).length >= 4, 20000, 'the queue drained');
+    ok('…agy restarts on the SAME conversation and runs the steered message FIRST, then the rest in order', starts(w).length >= 2 && starts(w)[1].includes('--conversation') && starts(w)[1].includes(ses.sessionId) && lines(w).join(' | ') === 'a slow one | third queued | first queued | second queued', lines(w));
+    ok('…nothing queued was lost or run twice: the queue ends empty, four turns started, three ended normally', w.all('queue_changed').pop().items.length === 0 && w.all('prompt_start').length === 4 && w.all('prompt_end', (r) => r.stopReason === 'end_turn').length === 3, w.all('prompt_end').map((r) => r.stopReason));
+  } finally { await w.stop(); }
+  // RED control: the pre-fix wrapper (no steer verb) refuses it — the message waits behind the running turn
+  const src = fs.readFileSync(WRAPPER, 'utf8');
+  const verbs = "const QUEUE_VERBS = ['remove', 'steer', 'reorder', 'edit'];";
+  const mutated = path.join(MUTBIN, 'agy-wrapper-nosteer.js');
+  fs.writeFileSync(mutated, src.replace(verbs, "const QUEUE_VERBS = ['remove', 'reorder', 'edit'];"));
+  const m = startWrapper({ wrapper: mutated, env: { AGY_STUB_SLOW_MS: '1500' } });
+  try {
+    await m.until(() => m.find('session'), 8000, 'session');
+    m.send({ type: 'chat-input', text: 'a slow one', msgId: 'r0' });
+    await m.until(() => m.find('prompt_start'), 5000, 'start');
+    m.send({ type: 'chat-input', text: 'jump me', msgId: 'r1' });
+    const q = await m.until(() => m.all('queue_changed').find((r) => r.items.length === 1), 5000, 'queued');
+    m.send({ type: 'queue-op', op: 'steer', id: q.items[0].id });
+    const refused = await m.until(() => m.find('queue_op_result', (r) => r.op === 'steer'), 5000, 'refusal');
+    ok('RED control: a wrapper copy without the steer verb (the pre-fix) refuses it «not-steerable» and the turn runs on — the ⑥b asserts see it', src.includes(verbs) && refused.ok === false && refused.reason === 'not-steerable' && !m.find('notice', (r) => r.noticeKind === 'steer-restart'));
+  } finally { await m.stop(); }
 }
 
 console.log('— ⑦ resume, an agent error, text only');

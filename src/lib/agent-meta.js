@@ -184,7 +184,7 @@ export const BACKEND_META = {
     brandColor: '#4285F4',
     fallbackModels: ['gemini-4-argon-high', 'gemini-3.8-flash-medium'],
     modelsFromAgent: true,
-    caps: { fork: false, forkAtMessage: false, review: false, renameWriteback: false, autoResume: { signal: false, resume: 'prompt', supported: false }, accounts: true, peerDelivery: 'stash-only', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'reorder', 'edit'] }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: true, values: [] }, worktree: NO_WORKTREE, permissionRules: { source: null, session: false, instance: false, liveVerb: false }, toolAllowlist: null },
+    caps: { fork: false, forkAtMessage: false, review: false, renameWriteback: false, autoResume: { signal: false, resume: 'prompt', supported: false }, accounts: true, peerDelivery: 'stash-only', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'steer', 'reorder', 'edit'] }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: true, values: [] }, worktree: NO_WORKTREE, permissionRules: { source: null, session: false, instance: false, liveVerb: false }, toolAllowlist: null },
     settingsPrefix: 'antigravity',
     permissionModes: ['accept-edits', 'auto', 'plan', 'bypassPermissions'],
     // THE DECLARED UI ROW — mirrors src/harnesses/antigravity.js key for key (test-harness-contract deep-compares).
