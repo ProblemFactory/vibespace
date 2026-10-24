@@ -51,7 +51,7 @@ await bundle('paragraph.js', { from: '  const pp = pushNoticeParts(a, kinds);\n'
 // ── the stub server (synthesized — never anyone's data; SHAPED like the owner's accounts)
 const LARK_MOD = require(path.join(repo, 'src/channels/lark.js'));
 const NOW = Date.now(), H = 3600e3, D = 86400e3;
-const at0714 = (() => { const d = new Date(NOW); d.setHours(7, 14, 0, 0); return d.getTime() > NOW ? NOW - H : d.getTime(); })();
+const at0714 = (() => { const d = new Date(NOW); d.setHours(7, 14, 0, 0); if (d.getTime() <= NOW) return d.getTime(); const sod = new Date(NOW); sod.setHours(0, 0, 0, 0); return Math.max(sod.getTime(), NOW - H); })(); // ci-350-red: a moment on TODAY'S calendar day, always — before 07:14 the old fallback NOW − 1 h crossed midnight (00:00–01:00) and the product rightly said «始于 昨天» while the pin expected a clock time
 const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const acct = (id, kind, label, extra = {}) => ({ id, kind, label, connectable: true, enabled: true, auth: { state: 'connected' }, authState: 'ok', authCause: null, authSince: null, presets: [], credentials: [], lastPass: { at: NOW - 30e3, ok: true, code: null }, consecutiveFailures: 0, ...extra });
 const more = (o) => ({ what: 'more', scopes: [], missing: [], refused: [], console: false, wanted: true, next: null, pages: null, families: [], api: false, ...o });

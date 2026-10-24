@@ -6,6 +6,8 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.350 — 2026-10-24
 
+### ci-350-red-2 — two heavy pins the combined tree exposed: test-channel-row-notices' fixture fell back to «NOW − 1 h» before 07:14, which after midnight is yesterday — the product rightly said «始于 昨天» while the pin expected a clock time (now a moment on today's calendar day, always); test-desktop-serve's shared-module require allowlist gained ./storage-path.js (PURE — the storage roots the sync-fs witness classifies by). Test wording only; no product change.
+
 ### ci-350-red — the sync-fs census row for src/server/migrations.js spelled the retired kit's folder; test-design-docs ⑥ (the kit census over the tracked tree) is red on any tree that carries both — the row now names it as the folder the 2026-10 migration removes. Test wording only; no product change.
 
 ### lane hub-fuse-sync-guard — the main thread never waits on a storage mount, and a held loop names its call (主开发's brief after the 6.5-min hold of 2026-10-23 21:56 PT; base c1dfc1af = 2.369.348; a .350 pick)
