@@ -13,7 +13,7 @@ import { paintVaultLine } from './vault-window.js'; // lane vault-contents-windo
 import { badgeCounts, badgeText, heldText } from './jobs-layout.js';
 import { renderChannelsPanel } from './channels-panel.js';
 // lane attention-predicate-shared (design q-044 decision 7): the Channels badge = the attention list's bands 1–4 (PURE)
-import { channelsBadge, attentionPolicy } from '../channel-focus.js';
+import { channelsBadge, attentionPolicy, signinAccounts } from '../channel-focus.js';
 import { needsMe, settingsPolicy } from '../attention-model.js';
 import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog, absUrl } from './utils.js';
 import { registerMenuItem } from './contributions.js';
@@ -288,10 +288,28 @@ export function installSidebarRail(Sidebar) {
       const get = (k) => this.app?.settings?.get?.(k);
       return channelsBadge(0, this._railGroups || [], Date.now(), { policy: attentionPolicy(get), bands: settingsPolicy(get), needsMe });
     },
+    /** lane channel-reauth-visible (the owner 2026-10-23: 「在 inbox 或者 sidebar 高亮出来这里需要处理」): the DEAD SIGN-INS — an
+     *  account view list (a broadcast's `digest.adapters`, totals' `signin`) ⇒ their band-1 count (PURE channelsBadge: the
+     *  owner's band switches) and their names, kept for the badge's tooltip */
+    _railSigninFrom(accounts) {
+      if (!Array.isArray(accounts)) return;
+      const get = (k) => this.app?.settings?.get?.(k);
+      this._railSignin = signinAccounts(accounts);
+      this._railChanBadge('acct', channelsBadge(0, [], Date.now(), { policy: attentionPolicy(get), bands: settingsPolicy(get), needsMe, accounts }));
+    },
     _railChanBadge(part, n) {
       this._chanBadgeParts = { ...(this._chanBadgeParts || {}), [part]: Number(n) || 0 };
       const p = this._chanBadgeParts;
-      this._railSetBadge('channels', ((p.ch || 0) + (p.grp || 0)) || '');
+      const total = (p.ch || 0) + (p.grp || 0) + (p.acct || 0);
+      // a dead sign-in turns the badge RED with ⚠ and names the accounts (the tip + the accessible name)
+      this._railSetBadge('channels', p.acct ? `⚠${total}` : (total || ''));
+      const b = this._railEl?.querySelector('.rail-item[data-rail="channels"]');
+      if (!b) return;
+      if (b.dataset.tipBase === undefined) b.dataset.tipBase = b.dataset.tip || tr('Channels');
+      b.classList.toggle('rail-danger', !!p.acct);
+      const names = p.acct ? (this._railSignin || []).map((x) => x.name) : [];
+      const tip = names.length ? `${b.dataset.tipBase} — ${tr('Sign-in expired: {accounts}', { accounts: names.join(', ') })}` : b.dataset.tipBase;
+      if (b.dataset.tip !== tip) { b.dataset.tip = tip; b.setAttribute('aria-label', tip); }
     },
 
     /** Badge sources (design: tasks=⚠, remote=offline machines, ports=active
@@ -308,6 +326,7 @@ export function installSidebarRail(Sidebar) {
         // signal, one computation (the cache-invalidation law).
         if (msg.type === 'channels-updated') {
           if (msg.digest) this._railChanBadge('ch', Number(msg.digest.needsMe) || 0);   // lane attention-predicate-shared: the conversations in bands 1–4
+          if (msg.digest) this._railSigninFrom(msg.digest.adapters);   // lane channel-reauth-visible: the dead sign-ins, live
           // The open Channels panel is NOT torn down here: its own broadcast
           // handler redraws in place from this very digest (a1 D12 — the
           // remove + re-render + refetch emptied the list for the fetch's
@@ -319,7 +338,7 @@ export function installSidebarRail(Sidebar) {
         // lane attention-predicate-shared: a rule / band switch or the cap changed (the server stored it, then said so) ⇒
         //  the server's count is re-read and the groups' half recounted
         if (msg.type === 'settings-updated') {
-          fetchJson('/api/channels?scope=totals').then((r) => { if (r && !r.error) this._railChanBadge('ch', Number(r.needsMe) || 0); }).catch(() => {});
+          fetchJson('/api/channels?scope=totals').then((r) => { if (r && !r.error) { this._railChanBadge('ch', Number(r.needsMe) || 0); this._railSigninFrom(r.signin); } }).catch(() => {});
           this._railChanBadge('grp', this._railGroupsNeed());
         }
         if (msg.type === 'jobs-updated') {
@@ -348,7 +367,7 @@ export function installSidebarRail(Sidebar) {
       fetchJson('/api/sysinfo').then((r) => this._railSysBadge(r?.mem?.pct)).catch(() => {});
       // channels: one probe at load; live updates ride 'channels-updated'
       // design 008: the badge reads two numbers — `?scope=totals`, never the first screen's rows
-      fetchJson('/api/channels?scope=totals').then((r) => this._railChanBadge('ch', Number(r?.needsMe) || 0)).catch(() => {});
+      fetchJson('/api/channels?scope=totals').then((r) => { this._railChanBadge('ch', Number(r?.needsMe) || 0); this._railSigninFrom(r?.signin); }).catch(() => {});
       fetchJson('/api/channel-groups').then((r) => { if (r && Array.isArray(r.groups)) this._railChanBadge('grp', this._railGroupsNeed(r.groups)); }).catch(() => {});
     },
 
@@ -361,7 +380,7 @@ export function installSidebarRail(Sidebar) {
         const off = (ho?.hosts || []).filter((h) => h.transport === 'dial' && !h.online).length;
         this._railSetBadge('mounts', off ? off + '⏻' : '');
         const ch = await fetchJson('/api/channels?scope=totals').catch(() => null);
-        if (ch && !ch.error) this._railChanBadge('ch', Number(ch.needsMe) || 0);   // lane attention-predicate-shared
+        if (ch && !ch.error) { this._railChanBadge('ch', Number(ch.needsMe) || 0); this._railSigninFrom(ch.signin); }   // lane attention-predicate-shared; lane channel-reauth-visible
         const jb = await fetchJson('/api/jobs').catch(() => null);
         if (jb?.jobs) {
           // TRIAGE (design §13 rule 2): the badge counts awaiting-user +

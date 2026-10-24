@@ -1167,7 +1167,7 @@ function createChannelRegistry({ channelSettings } = {}) {
  *  (`consent`, beside `API_ROW`). The engine keeps ONE consent machine (the per-boot state signer, the relay setting's
  *  reader, the landing route's dispatch on `:kind`'s row) and names no vendor:
  *   · mode            — the oauth-loopback mode its sign-ins use: one of CONSENT_MODES, or a list of them
- *   · landing         — null, or {stateVerdict(state, {sign, now, ttlMs}) → {ok, why, parts: {flowId}}, landingHtml(r)}:
+ *   · landing         — null, or {stateVerdict(state, {sign, now, ttlMs}) → {ok, why, parts: {flowId}}, landingHtml(r, {lang})}:
  *                       the vendor sends the browser to `GET /api/channels/oauth/cb/<kind>` (needs mode 'public')
  *   · relayUrlSetting — (optional, with a landing) {key, fallback}: the server setting `channels.<key>` naming its relay
  *                       page (the settings schema's row), and its default

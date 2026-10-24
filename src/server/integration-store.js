@@ -596,6 +596,18 @@ function create(deps = {}) {
    *  at once; the same ONE re-derive as a presets move (every card's view re-broadcast, the listeners once: the channels
    *  engine re-asks every account's auth and re-pushes its digest — a locked account reads 「保险库已锁定」 by name). */
   const vaultChanged = () => presetsChanged('vault');
+  /** THE FLEET'S SIGN-IN RELAY PAGE — ONE road (lane oauth-relay-one-source, 2026-10-23 — the owner: «你为啥搞了两套分发
+   *  auth client 的方案»): the presets directory's fleet.json `relayUrl` (the release's override/ over the cluster's,
+   *  hot-reloaded with the client rows — a Secret patch reaches every running pod within a minute); for ONE release the
+   *  .344 chart's env VIBESPACE_OAUTH_RELAY_URL when the presets name none (said once at boot); else ''. A preset row's
+   *  own `relayUrl` still outranks it (consent-road relayPick). The channels engine's `fleetRelayUrl()` asks this. */
+  const relayEnv = String((env && env.VIBESPACE_OAUTH_RELAY_URL) || '').trim();
+  if (relayEnv) log.warn('[integrations] VIBESPACE_OAUTH_RELAY_URL is read for the last time: move it to the presets\' fleet.json (the chart does)');
+  function fleetRelayUrl() {
+    let f = null;
+    try { f = presets && typeof presets.fleet === 'function' ? presets.fleet() : null; } catch { f = null; }
+    return f && typeof f.relayUrl === 'string' ? f.relayUrl : relayEnv;
+  }
   /** Value-free counts of the integration presets IN EFFECT, by where they
    *  came from: the directory's layers (from the reader's own status) or the
    *  env — `[{kind: rowId, source, n}]` for the summary (P3). */
@@ -879,7 +891,7 @@ function create(deps = {}) {
     resolveMachine, machineView, setMachineValues, clearMachineValues, // lane remoteapp-r1b: the per-machine rows' only doors
     vaultRows, vaultReveal, // lane vault-contents-window: the Vault window's masked rows + its one-value reveal
     test, registerTest, hasTestRunner: (id) => runners.has(id),
-    onChange, presetsChanged, vaultChanged, presetItems, file, keyFile: box.keyFile,
+    onChange, presetsChanged, vaultChanged, presetItems, fleetRelayUrl, file, keyFile: box.keyFile,
     keyRefusal: () => box.refusal(), // lane desktop-vnc-remember: the key's state as a fact (`key-unreadable:vault_locked` while the vault is locked) — never throws, never mints
     IntegrationError, TEST_TIMEOUT_MS,
   };

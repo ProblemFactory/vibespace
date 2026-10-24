@@ -29,6 +29,7 @@ function create(engineCtx) {
     store, box, flows, signState, consentRowOf, consentDepsOf, resolveIntegration, rowOf, live, paceCarry, adapterRecords, saveAdapters,
     refusedScopesOf, morePendingOf, tokensFor, adapterFor, refreshAuth, EMPTY_SCAN, pass, rejudgeConvCaps, conversationName, presetsOf, clientFieldDecls,
     customClientView, vendorNameOf, adapterView, notify, disarmPush, syncPushLanes, dropLive, retractUnsaved, retractFailure, wakeTimers, policyFor,
+    speakSignin, retractSignin,   // lane channel-reauth-visible: an unfinished consent re-asserts the dead sign-in's item; a removal / a disconnect ends it
     accountGrainOf, patternsOf, convGrainOf, honestyLineFor, notifyOutbox,
     CG,   // lane grants-unify: the channel doors' rows in THE grants store (src/server/channels-grants.js)
   } = engineCtx;
@@ -521,6 +522,7 @@ function create(engineCtx) {
     if (!p.ok) {
       await store.adapters.update(() => { rec.lastAuthError = p.error; rec.lastAuthAt = now(); });
       log.warn(`[channels] ${rec.id}: re-authorize under ${p.choice.credentialKey} failed: ${p.error} — the account keeps its client and token`);
+      if (rec.signinDead && !engineCtx.stopped) await speakSignin(rec, 'consent-unfinished', { reassert: true, vendorWords: String(p.error || '') });   // lane channel-reauth-visible
       if (!engineCtx.stopped) notify([]);
       return;
     }
@@ -534,6 +536,7 @@ function create(engineCtx) {
       p.ok = false; p.error = s;   // slack-workspace-app verify r1: the pending says it too (the GET landing page / a paste-back answer read it — they said "connected" over this refusal)
       await store.adapters.update(() => { rec.lastAuthError = s; rec.lastAuthAt = now(); });
       log.warn(`[channels] ${rec.id}: re-authorize under ${p.choice.credentialKey} refused: ${s} — the account keeps its client and token`);
+      if (rec.signinDead && !engineCtx.stopped) await speakSignin(rec, 'consent-unfinished', { reassert: true, vendorWords: s });   // lane channel-reauth-visible
       if (!engineCtx.stopped) notify([]);
       return;
     }
@@ -837,6 +840,9 @@ function create(engineCtx) {
     if (r && r.ok) { e.failures = 0; e.nextAt = 0; e.rateStrikes = 0; e.backoffKind = null; }
     if (r && r.ok) log.log(`[channels] ${rec.id}: connected${rec.auth && rec.auth.user ? ` as ${rec.auth.user}` : ''}`);
     else log.warn(`[channels] ${rec.id}: consent flow failed: ${(r && r.error) || 'unknown'}`);
+    // lane channel-reauth-visible: a consent that ended without a sign-in on a DEAD account re-asserts its item (the same one,
+    // the words say the sign-in was not finished); one that landed retracts nothing — the next pass that goes through does
+    if (!(r && r.ok) && rec.signinDead) await speakSignin(rec, 'consent-unfinished', { reassert: true, vendorWords: String((r && r.error) || '') });
     // inc-muk9jj0j-rel3: A CONSENT CHANGES WHAT EVERY CONVERSATION MAY DO — re-judged HERE, at the write, for the whole
     // account (the pass below visits only what is due), then ONE whole digest carries the fresh verdicts
     if (r && r.ok) await rejudgeConvCaps(rec, 'connected');
@@ -859,6 +865,7 @@ function create(engineCtx) {
     await tokensFor(rec).clear();
     await store.adapters.update(() => { rec.lastAuthError = null; rec.state = {}; rec.lastPass = null; delete rec.lastOkAt; rec.consecutiveFailures = 0; });
     await retractFailure(rec);
+    await retractSignin(rec, 'the owner disconnected it');   // lane channel-reauth-visible: «not connected» is the owner's own act, never «expired»
     const e = adapterFor(rec);   // rebuilt at once (its buckets carried) so the card answers the adapter's own `unknown`
     e.failures = 0; e.nextAt = 0; e.rateStrikes = 0; e.backoffKind = null; await refreshAuth(e);
     await rejudgeConvCaps(rec, 'disconnected');   // inc-muk9jj0j-rel3: no credential ⇒ nothing sends, said everywhere at once
@@ -916,6 +923,7 @@ function create(engineCtx) {
     const running = flows.runningFor(rec.id);
     if (running) { flows.cancel(running.flowId, 'cancelled'); pendingFlows.delete(running.flowId); }
     await retractFailure(rec);
+    await retractSignin(rec, 'the account was removed');   // lane channel-reauth-visible
     await removeRecord(rec);
     log.log(`[channels] ${rec.id}: removed`);
     notify([]);

@@ -223,7 +223,7 @@ console.log('④ CONTROLS: each leg can go red');
 { // a tools section without the paragraph: a copy of the registry whose channels row teaches nothing at session start (lane
   // cli-registry: the paragraph is that row's), required by a copy of task-groups
   const src = fs.readFileSync(path.join(REPO, 'src/agent-cli-registry.js'), 'utf8');
-  const cut = src.replace("      sessionStart: ({ reach }) => channelsByReach(CHANNELS_SECTION_LINES, reach),\n", '      sessionStart: null,\n');
+  const cut = src.replace("      sessionStart: ({ reach, expired }) => channelsByReach(CHANNELS_SECTION_LINES, reach) + expiredSentence(expired),\n", '      sessionStart: null,\n');   // lane channel-reauth-visible: + the dead sign-ins' sentence
   const regCopy = MUT.write('src/agent-cli-registry.js', cut, 'no-paragraph-reg');
   const tsrc = fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8');
   const tcut = tsrc.replace("require('./agent-cli-registry.js')", `require(${JSON.stringify(regCopy)})`);
@@ -233,7 +233,7 @@ console.log('④ CONTROLS: each leg can go red');
 }
 { // a route that teaches without asking reach
   const src = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
-  const cut = src.replace("  if (!integrationOnMaster()) return false;\n  const eng = channelsEngine();\n  if (!eng || typeof eng.reachCountFor !== 'function') return false;\n  const t = Date.now();", "  return 'read';\n  const eng = channelsEngine();\n  const t = Date.now();");
+  const cut = src.replace("  if (!integrationOnMaster()) return null;\n  const eng = channelsEngine();\n  if (!eng || typeof eng.reachCountFor !== 'function') return null;\n  const t = Date.now();", "  return { at: 0, v: 'read', x: [] };\n  const eng = channelsEngine();\n  const t = Date.now();");   // lane channel-reauth-visible: the memo answers {v, x}
   const ARX = MUT.load('src/agent-routes.js', cut, 'teach-anyway');
   const m = await legsOf({ AGR: ARX }, 'teach-anyway');
   ok(cut !== src && taught(m.out.none.p1) && taught(m.out.noEngine.start), 'CONTROL: a route that teaches without reach ⇒ the NO REACH and NO ENGINE legs are RED');

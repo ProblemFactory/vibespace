@@ -154,7 +154,7 @@ console.log('② the first read: the attention list, the heads, the counts');
   eng.digest();
   const viewed = eng.digestStats().rowViews - stats0;
   ok(viewed <= FO.ATTENTION_MAX + FO.HEAD_ROWS * 3 && viewed < whole.conversations.length, `a first read builds ${viewed} rowViews (candidates + heads) for ${whole.conversations.length} rows`);
-  ok(JSON.stringify(Object.keys(eng.digest({ scope: 'totals' })).sort()) === JSON.stringify(['at', 'awaitingTotal', 'needsMe', 'scope', 'unreadTotal']) && !('conversations' in eng.digest({ scope: 'accounts' })), 'the slivers: ?scope=totals is the numbers (+ needsMe, the rail badge since lane attention-predicate-shared), ?scope=accounts carries no row');
+  ok(JSON.stringify(Object.keys(eng.digest({ scope: 'totals' })).sort()) === JSON.stringify(['at', 'awaitingTotal', 'needsMe', 'scope', 'signin', 'unreadTotal']) && !('conversations' in eng.digest({ scope: 'accounts' })), 'the slivers: ?scope=totals is the numbers (+ signin — the dead sign-ins, lane channel-reauth-visible; + needsMe, the rail badge since lane attention-predicate-shared), ?scope=accounts carries no row');
   // the focus view of rows(): the attention rows past a cut, paged in the same order
   const fp = eng.rows({ view: 'focus', limit: 5 });
   ok(fp.ok && fp.total === focus.length && fp.rows.every((r) => FO.statusTag(r, clock)) && JSON.stringify(fp.rows.map((r) => r.key)) === JSON.stringify(first.conversations.filter((c) => !c.unlisted && FO.statusTag(c, clock)).sort(FO.pageOrder).slice(0, 5).map((c) => c.key)), `rows({view:'focus'}) pages the attention list in the first read's order (${fp.total})`);

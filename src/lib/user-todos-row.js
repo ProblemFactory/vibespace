@@ -89,8 +89,13 @@ const actionBtnHtml = (i, t) => (i && i.action && i.action.type === 'reset-credi
   ? `<button class="ut-act ut-action-reset" title="${escHtml(t('Use a reset credit…'))}">${UI_ICONS.refresh || ''}</button>` : '');
 // lane channel-names-readable: a channel account's sign-in lacks a permission — ITS Re-authorize dialog (the same
 // producer-action click: the model maps the type)
-const reauthBtnHtml = (i, t) => (i && i.action && i.action.type === 'channel-reauth' && i.action.adapterId
+// lane channel-reauth-visible: a DEAD sign-in (`signin: 'expired'`) says its verb in WORDS on its own line instead — Reconnect
+// (the same click: the model opens the account's Re-authorize dialog)
+const signinItem = (i) => !!(i && i.action && i.action.type === 'channel-reauth' && i.action.adapterId && i.action.signin === 'expired');
+const reauthBtnHtml = (i, t) => (i && i.action && i.action.type === 'channel-reauth' && i.action.adapterId && !signinItem(i)
   ? `<button class="ut-act ut-action-reset ut-action-reauth" title="${escHtml(t('Re-authorize'))}">${UI_ICONS.refresh || ''}</button>` : '');
+const reconnectHtml = (i, t) => (signinItem(i)
+  ? `<div class="ut-reconnect-row"><button type="button" class="ut-action-reset ut-action-reauth ut-reconnect" title="${escHtml(t('Open the account\'s Re-authorize'))}">${escHtml(t('Reconnect'))}</button></div>` : '');
 /** The command an exit ask names, in mono, then its ANSWER — Allow / Deny on their own line — and the rule (open items
  *  only). lane-pairing ⑥: answered right here (the popup, the mini inbox and the phone paint this row). naive-user
  *  N-ask: the two buttons rode the floated `.ut-actions` bar — at 35 % opacity until the row is hovered (a 60-second
@@ -254,7 +259,7 @@ function partsOf(entry, ctx) {
     meta = (notice || entry.band ? `<span class="ut-sess">${dot}${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
       + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '');
   }
-  const body = `<div class="ut-text">${card ? escHtml(words) : linkedHtml(words, { escape: escHtml })}</div>${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
+  const body = `<div class="ut-text">${card ? escHtml(words) : linkedHtml(words, { escape: escHtml })}</div>${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}">⤢</button>`;
   // design 009: a card's Reply / Mark done / Ignore / Copy / Clear content… live behind its ⋯ (two buttons on its face)

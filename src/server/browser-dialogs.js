@@ -67,6 +67,7 @@ let WS = null; try { WS = require('ws').WebSocket; } catch { WS = null; }
 const ANSWERED_KEEP = 32;
 const OUTCOMES_KEEP = 16;
 const VERB_RUNNING_MAX_MS = 5 * 60 * 1000;   // a /resolve without its audit is forgotten after this (a crashed CLI)
+const SAW_SETTLE_MS = 2000;                  // int347: the audit's wait for a dialog the verb's daemon saw (waitSettled) — bounds only a watch that never sees it
 const RE_ENABLE_MS = 30 * 1000;              // a held tab's Page.enable is asked again (it answers once the hold ends)
 const STOP_RETRIES = 4, STOP_RETRY_MS = 120; // verify r4 #5: Page.stopLoading under "Not attached to an active page" (a page mid-swap) is asked again — ≤ 0.5 s
 
@@ -825,6 +826,34 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (t.unref) t.unref();
       // the asker went away (the CLI's verb ended, its request aborted) ⇒ the waiter goes too
       if (signal) { if (signal.aborted) { waiters.delete(x); clearTimeout(t); resolve(null); } else signal.addEventListener('abort', () => { if (waiters.delete(x)) { clearTimeout(t); resolve(null); } }, { once: true }); }
+    });
+  }
+  /** int347 (the alert race, test-browser-dialog-chrome ⑤ / test-browser-hidden-paint d): the verb's OWN daemon printed a
+   *  page dialog (its «… dialog is blocking the page» line) — resolve once THIS watch has that dialog's fact in the
+   *  conversation's scope: a dialog of that type opened at or after this verb's start (`verbKey`'s running record, on
+   *  THIS watch's clock — call it before the verb is ended), held open or closed and not yet told. The watch's own open / closed event ends the wait (an alert is accepted, then recorded at
+   *  Page.javascriptDialogClosed — one CDP round trip after the daemon already saw it open, the window the audit used to
+   *  read an empty fact in, the note then told to the NEXT verb). `ms` bounds only a watch that never sees it. */
+  function waitSettled({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, { type = null, verbKey = '' } = {}, ms = SAW_SETTLE_MS) {
+    const pid = String(profileId || '');
+    const rv = running.get(String(verbKey || browserKey || ''));
+    const since = (rv && rv.on && rv.on[pid] && Number(rv.on[pid].at)) || 0; // the verb's own start (verbStarted at its /resolve)
+    const fits = (d) => !!d && (!type || d.type === type) && (Number(d.openedAt) || 0) >= since;
+    const has = () => {
+      const w = watches.get(pid);
+      if (!w || w.state !== 'open') return true; // no watch ⇒ nothing to wait for (the CLI reads its daemon's line)
+      const scope = scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
+      if ((scope instanceof Set && scope.size === 0) || blindIn(pid, scope)) return true; // what this watch cannot see is never awaited
+      if (fits(openIn(pid, scope))) return true;
+      const seen = told.get(browserKey);
+      return w.answered.some((a) => fits(a.dialog) && inScope(scope, a.targetId) && !(seen && seen.has(a.id)));
+    };
+    if (has()) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let t = null;
+      const off = onChange((ev) => { if (ev && ev.profileId === pid && (ev.kind === 'open' || ev.kind === 'closed' || ev.kind === 'down') && has()) { off(); if (t) clearTimeout(t); resolve(true); } });
+      t = setTimeout(() => { off(); resolve(false); }, Math.max(0, Math.min(Number(ms) || 0, SAW_SETTLE_MS)));
+      if (t.unref) t.unref();
     });
   }
   function verbStarted(browserKey, { profileId = null, verb = null } = {}) {
@@ -1650,7 +1679,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     });
   }
 
-  return { arm, disarm, factFor, openOn, stuckForKey, pageStuckMap, waitForOpen, answer, noteOutcome, resetOutcomes, verbStarted, verbEnded, verbRunning, scopeFor, onChange, setTabsOf, stats, bindTab, orphansOf, // verify r4 #1: the `tab new` ack binds
+  return { arm, disarm, factFor, openOn, stuckForKey, pageStuckMap, waitForOpen, waitSettled /* int347: the alert race */, answer, noteOutcome, resetOutcomes, verbStarted, verbEnded, verbRunning, scopeFor, onChange, setTabsOf, stats, bindTab, orphansOf, // verify r4 #1: the `tab new` ack binds
     ownsTab, pickTab, stopTab, closeTab, captureTab, noteCut, busyFor, // lane site-reset: a looping tab never disables the browser
     pageAnswers, // lane browser-shared-profile-freeze: the verb's own tab asked first, bounded (a silent page answered page_busy by name)
     ownTabs, clearSite, // lane site-reset step 2: one site's stored login, cleared

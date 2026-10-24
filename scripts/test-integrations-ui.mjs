@@ -695,14 +695,16 @@ const p2 = await newPage();
   await api('PATCH', '/api/user-state', { channelsPanelFolds: { [`acct:${A.id}`]: false, [`acct:${B.id}`]: false } });   // lane channels-fold-default: opened by the person
   ok(await p1.evaljs(panelWait(`() => !!${card(B.id)} && !document.querySelector('#mounts-dialog-overlay')`)), 'Create & connect closed the dialog; the SIBLING card appears');
 
-  // (l) the dead sign-in: the storage error line + Re-authorize, and the dialog heals it
-  ok(await p1.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && c.querySelector('.mounts-errline')); }`)), 'the copy\'s first refresh was refused (invalid_grant) ⇒ its card draws the storage error line');
-  const bad = await p1.evaljs(`(() => { const c = ${card(B.id)}; const e = c.querySelector('.mounts-errline'); const b = e.querySelector('.mounts-reauth-btn'); return { text: e.firstChild.textContent, btn: b && b.textContent, btnCls: b && b.className, chip: c.querySelector('.chan-cred-chip').textContent, dot: c.querySelector('.chan-sec-head .chan-dot').dataset.state }; })()`);
+  // (l) the dead sign-in: the red line + Reconnect under the account (lane channel-reauth-visible — the owner 2026-10-23:
+  // 「进来之后账号行下方显示登录失效需要 reauth」; it replaces D8's «Couldn't connect: …» sentence for a sign-in that died:
+  // ONE sentence, one verb), and the dialog heals it
+  ok(await p1.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && c.querySelector('.chan-sec-reauth')); }`)), 'the copy\'s first refresh was refused (invalid_grant) ⇒ its card draws the dead sign-in\'s red line');
+  const bad = await p1.evaljs(`(() => { const c = ${card(B.id)}; const e = c.querySelector('.chan-sec-reauth'); const b = e.querySelector('.chan-sec-reauth-btn'); return { text: e.querySelector('.chan-sec-reauth-text').textContent, errline: !!c.querySelector('.mounts-errline'), btn: b && b.textContent, btnCls: b && b.className, chip: c.querySelector('.chan-cred-chip').textContent, dot: c.querySelector('.chan-sec-head .chan-dot').dataset.state }; })()`);
   const whyB = (((await accounts()).find((a) => a.id === B.id) || {}).auth || {}).why;
-  ok(/^(refresh-refused|last-pass-refused)$/.test(whyB || '') && bad.text === `Couldn’t connect: connected but the sign-in has expired or been revoked — conversations come from cache while every fetch fails; re-authorize to fix (${whyB})`, `D8: the mounts' sentence VERBATIM (its nouns the channel's) + the channel's why code in brackets (${JSON.stringify(bad.text)})`);
-  ok(bad.btn === 'Re-authorize Gmail…' && bad.btnCls === 'mounts-btn mounts-btn-primary mounts-reauth-btn' && bad.chip === 'Custom client' && bad.dot === 'bad', `the primary Re-authorize Gmail… button (the storage class), the "Custom client" chip, a bad dot (${JSON.stringify(bad)})`);
-  await p1.probe('the error line + Re-authorize button', `.rail-panel-channels .chan-account[data-adapter="${B.id}"] .mounts-errline`);
-  await p1.evaljs(`${card(B.id)}.querySelector('.mounts-reauth-btn').click(); 1`);
+  ok(/^(refresh-refused|last-pass-refused)$/.test(whyB || '') && /^Sign-in expired — re-authorize · the vendor refused the refresh token · since \d\d:\d\d$/.test(bad.text) && !bad.errline, `the red line says what, why (Google's invalid_grant) and since when — and no second «Couldn't connect» sentence beside it (lane channel-reauth-visible; was D8's mounts' sentence + the why code in brackets (${JSON.stringify(bad.text)})`);
+  ok(bad.btn === 'Reconnect' && bad.btnCls === 'mounts-btn mounts-btn-primary chan-sec-reauth-btn' && bad.chip === 'Custom client' && bad.dot === 'bad', `the primary Reconnect button inline (the storage button class), the "Custom client" chip, a bad dot (${JSON.stringify(bad)})`);
+  await p1.probe('the red line + Reconnect button', `.rail-panel-channels .chan-account[data-adapter="${B.id}"] .chan-sec-reauth`);
+  await p1.evaljs(`${card(B.id)}.querySelector('.chan-sec-reauth-btn').click(); 1`);
   ok(await p1.evaljs(WAIT_DLG('reauth')), 'the button opens Re-authorize');
   const re1 = await p1.evaljs(`(() => { const d = ${DLG('reauth')}; const kids = [...d.children].filter((e) => e.style.display !== 'none').map((e) => e.tagName === 'LABEL' ? 'label:' + e.textContent : e.tagName === 'SELECT' ? 'select' : e.tagName === 'BUTTON' ? 'button:' + e.textContent : e.tagName === 'INPUT' ? 'input' : e.className); const inputs = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none'); return { order: kids, client: d.querySelector(':scope > select').value, hint: d.firstElementChild.textContent, id: inputs.map((i) => i.value)[0], secret: inputs.map((i) => i.value)[1] }; })()`);
   ok(re1.client === 'custom' && re1.id === CUSTOM_ID && re1.secret === CUSTOM_SECRET, `the OAuth client select on top carries the account's OWN custom client, prefilled (${JSON.stringify({ client: re1.client, id: re1.id })})`);
@@ -715,7 +717,7 @@ const p2 = await newPage();
   ok(await p1.evaljs(`!!document.querySelector('#chan-reauth-dialog input[placeholder^="http://127.0.0.1"]')`), 'and the paste-back box');
   ok((await followConsent(url3)) === 200, 'the redirect lands on the loopback');
   ok(await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if (!document.querySelector('#chan-reauth-dialog')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'the dialog closes when the new sign-in lands');
-  ok(await p1.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && !c.querySelector('.mounts-errline') && c.querySelector('.chan-sec-health')); }`)), 'the card heals: the error line is gone, the health line is back');
+  ok(await p1.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && !c.querySelector('.mounts-errline') && !c.querySelector('.chan-sec-reauth') && c.querySelector('.chan-sec-health')); }`)), 'the card heals (lane channel-reauth-visible: the red line too — the good pass after the consent retracts it): the error line is gone, the health line is back');
 
   // (m) Edit on the custom account prefills the SECRET (D3)
   await p1.evaljs(`${card(B.id)}.querySelector('.chan-sec-head .mounts-icon-btn').click(); 1`);

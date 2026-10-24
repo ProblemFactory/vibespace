@@ -389,6 +389,74 @@ function authState(adapterRecord, now, { lastPass = undefined, adapterState = nu
 const CONV_CAPS_FAIL_WHYS = Object.freeze(['rate-limited', 'backoff', 'not-connected', 'vendor-error', 'auth-expired', 'vault-locked']);
 
 /**
+ * A DEAD SIGN-IN, SAID WHERE THE PERSON LOOKS (lane channel-reauth-visible — userW inc-mvl9qdru-dlew, B-f1bb: every Gmail
+ * account's refresh was refused at 07:14 PT and the person saw no standing sign; a hub Lark sign-in revoked at 06:46 PT sat
+ * behind a LOW "3 consecutive failed passes (vendor-error)" line for 7 h). The engine keeps `rec.signinDead = {cause,
+ * since, item, at}` from the FIRST pass the vendor refuses as `auth-expired` until the first pass that goes through; the
+ * account view carries the three facts below, and every surface (the rail badge, the For-you row, the account's red line,
+ * the agent's list / read) words them from here.
+ *
+ * SIGNIN_CAUSES — why the sign-in died, a closed set the adapters name in `err.detail.cause` (or the facts it reads):
+ *   refresh-refused     the vendor refused the refresh token (Google `invalid_grant`, a Lark refusal of the grant)
+ *   revoked-elsewhere   Lark 20064: the same user signed in to the same app elsewhere (another VibeSpace) — this one retired
+ *   token-expired       the refresh token's own lifetime ended / none was granted
+ *   client-refused      the vendor refused the OAuth client itself (Google `invalid_client`)
+ *   client-missing      the account's OAuth client is no longer configured on this instance
+ *   consent-unfinished  the person's re-authorize ended without a sign-in (timed out, cancelled, refused)
+ */
+const SIGNIN_CAUSES = Object.freeze(['refresh-refused', 'revoked-elsewhere', 'token-expired', 'client-refused', 'client-missing', 'consent-unfinished']);
+/** Is this vendor failure a DEAD SIGN-IN? `auth-expired`, except the engine's own race words (a disconnect that landed
+ *  while the request waited — `tokenDropped`: the owner's act, said by the disconnect itself). A vault-locked read is
+ *  `vault-locked` (the vault's own banner), never this. */
+function signinDeadOf(err) {
+  if (!err || err.code !== 'auth-expired') return false;
+  return !(err.detail && err.detail.tokenDropped);
+}
+/** The cause a dead sign-in's failure names (null = not known — the words say only that it expired). */
+function signinCauseOf(err) {
+  const d = (err && err.detail) || {};
+  if (SIGNIN_CAUSES.includes(d.cause)) return d.cause;
+  if (d.clientRefused || d.reason === 'invalid_client') return 'client-refused';
+  if (d.needsCredentials) return 'client-missing';
+  if (d.reason === 'invalid_grant') return 'refresh-refused';
+  return null;
+}
+/** THE ACCOUNT VIEW'S THREE FACTS: `authState` = 'expired' (a dead sign-in) | 'pending' (dead, and a consent is in
+ *  flight now) | 'ok' (no dead sign-in is known); `authCause` = a SIGNIN_CAUSES code or null; `authSince` = when the
+ *  first refused pass landed (ms) or null. `running` = a consent flow of this account is in flight. */
+function signinView(rec, { running = false } = {}) {
+  const d = rec && rec.signinDead && typeof rec.signinDead === 'object' ? rec.signinDead : null;
+  if (!d) return { authState: 'ok', authCause: null, authSince: null };
+  return { authState: running ? 'pending' : 'expired', authCause: SIGNIN_CAUSES.includes(d.cause) ? d.cause : null, authSince: num(d.since) };
+}
+/** The cause in the person's words (an English t() key; '' = none known). */
+function signinCauseText(cause, { t = defaultT } = {}) {
+  switch (String(cause || '')) {
+    case 'refresh-refused': return t('the vendor refused the refresh token');
+    case 'revoked-elsewhere': return t('your account signed in to this app from another VibeSpace');
+    case 'token-expired': return t('the sign-in reached the end of its lifetime');
+    case 'client-refused': return t('the vendor refused the OAuth client');
+    case 'client-missing': return t('its OAuth client is no longer set up here');
+    case 'consent-unfinished': return t('the sign-in was not finished');
+    default: return '';
+  }
+}
+/** THE ACCOUNT'S RED LINE (the Channels window, under its row): «Sign-in expired — re-authorize · <cause> · since
+ *  <time>», or, while a consent is in flight, «Re-authorizing… (in the tab that opened)». `when` words an instant (the
+ *  client's own clock words); '' for an account that is not dead. */
+function signinLineText(a, { t = defaultT, when = null } = {}) {
+  const st = a && a.authState;
+  if (st === 'pending') return t('Re-authorizing… (in the tab that opened)');
+  if (st !== 'expired') return '';
+  const bits = [t('Sign-in expired — re-authorize')];
+  const c = signinCauseText(a.authCause, { t });
+  if (c) bits.push(c);
+  const w = num(a.authSince) !== null && typeof when === 'function' ? when(num(a.authSince)) : '';
+  if (w) bits.push(t('since {time}', { time: w }));
+  return bits.join(' · ');
+}
+
+/**
  * THE per-conversation capability cache, resolved against its own age
  * (design §4, r4). Past the TTL it degrades to `unknown` — which `offers()`
  * already renders as "not offered + a reason", so the degrade needs no new
@@ -1339,6 +1407,7 @@ module.exports = {
   CONV_CAPS_TTL_MS, HOST_FACTS_TTL_MS, PUSH_HEARTBEAT_MS, SCAN_SOURCE_ORDER, OFFER_WHAT,
   PUSH_MISS_THRESHOLD, PUSH_MISS_MIN_SAMPLES, PUSH_MISS_WINDOW_MS, PUSH_MISS_MIN_KEEP, PUSH_CLAIMS,
   laneState, scanState, convCapsState, offers, authState, recallRowOf,
+  SIGNIN_CAUSES, signinDeadOf, signinCauseOf, signinView, signinCauseText, signinLineText,   // lane channel-reauth-visible
   identityWarning, identityWarningText, freshnessClaim, freshnessText, humanAge,
   // 2026-09-26: the per-conversation cadence, the override choices, the vendor budget + push remedies
   TIER_DEFAULTS, COLD_MAX_SEC, REFRESH_CHOICES, validRefresh, pollTier, tierUntil, cadenceFor, budgetText, learnedBudgetText, passStateText, firstReadText, pushUnavailableText,

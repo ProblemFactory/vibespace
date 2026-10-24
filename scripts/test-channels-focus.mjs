@@ -888,5 +888,35 @@ console.log('⑮ the first screen splits (lane attention-predicate-shared): the 
   e2.stop();
 }
 
+// lane channel-reauth-visible (the owner 2026-10-23: 「在 inbox 或者 sidebar 高亮出来这里需要处理」): a DEAD SIGN-IN is a band-1 row of the
+// Channels badge — one per account whose view says authState 'expired' | 'pending' (PURE signinRowOf over the account views
+// the broadcast already carries), counted through the SAME needsMe, so the owner's band switch moves it like any row.
+console.log('\nlane channel-reauth-visible: a dead sign-in is a band-1 row of the Channels badge');
+{
+  const A = require(path.join(REPO, 'src/attention-model.js'));
+  const CF = require(path.join(REPO, 'src/channel-focus.js'));
+  const NOW = Date.parse('2026-10-23T21:30:00Z');
+  const acct = (id, authState, extra = {}) => ({ id, label: 'Gmail', enabled: true, authState, authCause: authState === 'ok' ? null : 'refresh-refused', authSince: NOW - 3600e3, auth: { state: 'expired', user: `${id}@example.test` }, ...extra });
+  const accounts = [acct('g1', 'expired'), acct('g2', 'pending'), acct('g3', 'ok'), acct('g4', 'expired', { enabled: false })];
+  const rows = accounts.map(CF.signinRowOf).filter(Boolean);
+  ok(rows.length === 2 && rows.every((r) => A.bandOfRow(r, NOW) === 1 && r.urgency === 'urgent' && r.action === 'channel-reauth') && rows.map((r) => r.key).join() === 'signin/g1,signin/g2',
+    'an expired account and one whose consent is in flight are band-1 rows; an account that works and a disabled one are none', JSON.stringify(rows.map((r) => [r.key, A.bandOfRow(r, NOW)])));
+  ok(CF.channelsBadge(0, [], NOW, { needsMe: A.needsMe, accounts }) === 2 && CF.channelsBadge(3, [], NOW, { needsMe: A.needsMe, accounts }) === 5 && CF.channelsBadge(3, [], NOW, { needsMe: A.needsMe }) === 3,
+    'the badge counts them beside the conversations (0 + 2, 3 + 2); without accounts the number is the base\'s');
+  const off = A.settingsPolicy((k) => (k === 'attention.band.urgent' ? false : undefined));
+  ok(CF.channelsBadge(0, [], NOW, { needsMe: A.needsMe, accounts, bands: off }) === 0, 'the owner\'s band-1 switch OFF ⇒ they fall to band 5, outside the badge (the one policy, never a channel-only rule)');
+  const names = CF.signinAccounts(accounts);
+  ok(names.length === 2 && names[0].name === 'Gmail · g1@example.test' && names[1].state === 'pending', 'the rail names them by label + login (its tooltip)', JSON.stringify(names));
+  const CC = require(path.join(REPO, 'src/channel-caps.js'));
+  const zh = { 'Sign-in expired — re-authorize': '登录失效 — 需要重新授权', 'the vendor refused the refresh token': '服务方拒绝了刷新令牌', 'since {time}': '始于 {time}', 'Re-authorizing… (in the tab that opened)': '正在重新授权…（在打开的那个标签页里）' };
+  const tz = (k, p) => (zh[k] || k).replace(/\{(\w+)\}/g, (m, x) => (p && x in p ? String(p[x]) : m));
+  ok(CC.signinLineText(accounts[0], { t: tz, when: () => '13:30' }) === '登录失效 — 需要重新授权 · 服务方拒绝了刷新令牌 · 始于 13:30' && CC.signinLineText(accounts[1], { t: tz }) === '正在重新授权…（在打开的那个标签页里）' && CC.signinLineText(accounts[2]) === '',
+    'the account\'s red line in the person\'s words (zh): what, why, since when — «re-authorizing…» while the consent runs; nothing for an account that works');
+  ok(CC.signinCauseOf({ code: 'auth-expired', detail: { reason: 'invalid_grant' } }) === 'refresh-refused' && CC.signinCauseOf({ code: 'auth-expired', detail: { cause: 'revoked-elsewhere', code: 20064 } }) === 'revoked-elsewhere' && CC.signinCauseOf({ code: 'auth-expired', detail: { needsCredentials: true } }) === 'client-missing' && CC.signinCauseOf({ code: 'auth-expired' }) === null,
+    'the cause table: Google invalid_grant, Lark 20064, a missing client, none known');
+  ok(CC.signinDeadOf({ code: 'auth-expired', detail: { cause: 'refresh-refused' } }) && !CC.signinDeadOf({ code: 'auth-expired', detail: { tokenDropped: true } }) && !CC.signinDeadOf({ code: 'vault-locked' }) && !CC.signinDeadOf({ code: 'vendor-error' }),
+    'a dead sign-in is auth-expired — never the disconnect race (tokenDropped), never a vault lock, never a vendor error');
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

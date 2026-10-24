@@ -424,10 +424,15 @@ else await (async () => {
     ok(e0 && e0.code === 'not_owner' && chromesOn(bankDir) === 0, '⑥ CONTROL: before the fold, conversation 2\'s pin on the pre-list "bank" (yesterday\'s authorization) opens nothing — a pin never authorizes now (not_owner), nothing starts', e0 && e0.message);
     const { runMigrations } = require('../src/migration-runner.js');
     const mm = require('../src/server/migrations.js').create({ rootDir: R2, homeDir: KH, serverNotice: () => { } });
-    const res = runMigrations({ ledgerPath: path.join(D2, 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === '2026-09-browser-profiles-who-list'), log: () => { }, warn: () => { } })[0];
+    // int347: the boot's ORDER — the who-list fold (2026-09), then lane grants-unify's carry of every who-list into THE grants
+    // store (2026-10, .346) that the keeper's admission reads; the fold alone reaches no reader any more
+    const ran = runMigrations({ ledgerPath: path.join(D2, 'migrations.json'), migrations: mm.MIGRATIONS.filter((x) => x.id === '2026-09-browser-profiles-who-list' || x.id === '2026-10-grants-unify'), log: () => { }, warn: () => { } });
+    const res = ran[0];
     const k2 = K.create({ dataDir: D2, homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => live, runtime: F.createBrowserRuntime({ env: kenv }), facts, log: quiet, install: false });
     let a2 = null, e2 = null; try { a2 = await k2.attach({ profileId: 'bp-0000d0b1', browserKey: KB, sessionId: 'sess-2', by: 'pin' }); } catch (e) { e2 = e; }
     ok(res && res.status === 'ran' && res.report.migrated.length === 1 && res.report.migrated[0].folded.join() === KB && !e2 && a2 && B.whoMayUse(k2.profile('bp-0000d0b1')).who.map((w) => w.id).join() === [KA, KB].join() && chromesOn(bankDir) === 1, '⑥ the migration folds conversation 2\'s pin into bank\'s LIST: it opens it — ONE real Chrome on its directory', e2 ? e2.message : res && res.report);
+    const gRows = require('../src/server/grants-store.js').forDir(D2).rowsFor('browser-profile', 'bp-0000d0b1');
+    ok(ran.length === 2 && ran[1] && ran[1].status === 'ran' && gRows.length === 1 && gRows[0].to.map((e) => e.key).join() === [KA, KB].join(), '⑥ …the fold reached the reader: the 2026-10-grants-unify carry wrote ONE browser-profile row in the grants store naming both conversations (a key no binding names stands for its conversation)', { ran: ran.map((x) => x && x.status), gRows });
     await k2.stop('bp-0000d0b1').catch(() => { });
     k2.shutdown();
 

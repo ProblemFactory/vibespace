@@ -814,7 +814,7 @@ function create(record = {}, deps = {}) {
           const c = workspaceClient();
           const own = Manifest.originOf(origin);
           // lane oauth-relay-road addendum 1 (the owner 2026-10-22: the public page is never a company app's): a preset rides
-          // its own relay page, else the fleet's (VIBESPACE_OAUTH_RELAY_URL) — never the setting; a custom app the setting
+          // its own relay page, else the fleet's (the presets' fleet.json) — never the setting; a custom app the setting
           const fleet = typeof consent.fleetRelayUrl === 'function' ? String(consent.fleetRelayUrl() || '').trim() : '';
           const relay = c.source === 'cluster' ? (c.relayUrl || fleet) : (typeof consent.relayUrl === 'function' ? String(consent.relayUrl() || '') : '');
           const to = Manifest.redirectFor({ relayUrl: relay, origin: own });

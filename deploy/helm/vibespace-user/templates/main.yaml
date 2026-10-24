@@ -8,6 +8,9 @@
 {{- $gd := .Values.gdrive | default dict -}}
 {{- $ovG := $ov.gdriveClients | default $gd.clients -}}
 {{- $ovI := $ov.integrations | default .Values.integrations -}}
+{{- /* THE FLEET'S SIGN-IN RELAY PAGE (lane oauth-relay-one-source): presets.relayUrl, else the deprecated oauthRelayUrl —
+     rendered as this release's override/fleet.json beside the rows, never an env (an env moves only at a pod restart) */ -}}
+{{- $relay := $presets.relayUrl | default .Values.oauthRelayUrl -}}
 {{- if and $vol (not $ovG) $gd.clientId $gd.clientSecret -}}
 {{- $ovG = list (dict "key" "default" "label" "Default" "clientId" $gd.clientId "clientSecret" $gd.clientSecret) -}}
 {{- end -}}
@@ -70,13 +73,16 @@ metadata:
   name: {{ $name }}-preset-override
   labels: {{- include "vs.labels" . | nindent 4 }}
 type: Opaque
-{{- if or $ovG $ovI }}
+{{- if or $ovG $ovI $relay }}
 data:
   {{- if $ovG }}
   gdriveClients: {{ $ovG | toJson | b64enc | quote }}
   {{- end }}
   {{- if $ovI }}
   integrations: {{ $ovI | toJson | b64enc | quote }}
+  {{- end }}
+  {{- if $relay }}
+  fleet: {{ dict "relayUrl" $relay | toJson | b64enc | quote }}
   {{- end }}
 {{- else }}
 data: {}
@@ -242,13 +248,6 @@ spec:
             # A user-set agentd.publicUrl in Settings overrides it.
             - name: VIBESPACE_PUBLIC_URL
               value: {{ printf "https://%s" $host | quote }}
-            {{- with .Values.oauthRelayUrl }}
-            # The fleet's sign-in relay page (lane oauth-relay-road): every
-            # Lark / Gmail sign-in of this pod names it as the redirect — ONE
-            # address per vendor app for the whole fleet, never one per pod.
-            - name: VIBESPACE_OAUTH_RELAY_URL
-              value: {{ . | quote }}
-            {{- end }}
             {{- if and .Values.frp .Values.frp.addr (or .Values.frp.token .Values.frp.clusterToken) }}
             # frp relay defaults (B-0b60 public URLs) — the plugin reads these
             # as DEFAULTS; a user can override any of them in ⚙ → Plugins. When
@@ -393,12 +392,14 @@ spec:
                   items:
                     - { key: gdriveClients, path: gdrive-clients.json }
                     - { key: integrations, path: integrations.json }
+                    - { key: fleet, path: fleet.json }
               - secret:
                   name: {{ $name }}-preset-override
                   optional: true
                   items:
                     - { key: gdriveClients, path: override/gdrive-clients.json }
                     - { key: integrations, path: override/integrations.json }
+                    - { key: fleet, path: override/fleet.json }
         {{- end }}
         {{- if and .Values.tun .Values.tun.enabled (eq (.Values.tun.mode | default "hostpath") "hostpath") }}
         - name: nettun

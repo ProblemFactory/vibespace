@@ -108,7 +108,8 @@ const LANDING = Object.freeze({
   'too-many': ['Too many sign-in pages were opened from this address in the last minute. Wait a minute, then reload this page — the sign-in is still waiting.', '这个地址在一分钟内打开了太多登录页面。请等一分钟后刷新本页——登录仍在等待。', 'このアドレスから直近 1 分間に開かれたサインインページが多すぎます。1 分待ってからこのページを再読み込みしてください — サインインはまだ待機中です。'],
   failed: ['Slack did not finish the sign-in: {error}', 'Slack 没有完成登录：{error}', 'Slack でサインインが完了しませんでした：{error}'],
 });
-const LANDING_WHY = Object.freeze({ 'bad-shape': 'malformed', 'bad-hmac': 'not signed by this VibeSpace', 'wrong-flow': 'no such sign-in is running', expired: 'expired', used: 'already used' });
+// lane oauth-landing-words: a flow's end by its cause (oauth-loopback ENDED_WHY) — an end is no longer read as `expired`
+const LANDING_WHY = Object.freeze({ 'bad-shape': 'malformed', 'bad-hmac': 'not signed by this VibeSpace', 'wrong-flow': 'no such sign-in is running', expired: 'expired', 'timed-out': 'not finished in time', superseded: 'a newer sign-in was started — finish that one', cancelled: 'cancelled in VibeSpace', 'over-limit': 'too many sign-ins were open at once', used: 'already used' });
 const escHtml = (x) => String(x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function landingHtml(r = {}) {
   const kind = r.ok ? 'ok' : r.why === 'denied' ? 'denied' : r.why === 'failed' ? 'failed' : r.why === 'too-many' ? 'too-many' : 'refused';   // verify r1: 429 = wait + reload, never "start again"

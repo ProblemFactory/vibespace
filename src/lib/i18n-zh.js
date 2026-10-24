@@ -10632,4 +10632,19 @@ export default {
   "「{path}」 is too big to tell as 「{chosen}」 → told as 「{level}」 (the agent still knows where it is and what it is for)": "「{path}」太大，无法按「{chosen}」告诉 → 退到「{level}」（agent 仍然知道它在哪、管什么）", // lane task-group-context
   // lane chat-live-tail-pin (inc-mvl02dkn-gop0): a wheel-up at the start of a conversation
   "No earlier messages": "没有更早的消息",
+  // lane channel-reauth-visible (userW inc-mvl9qdru-dlew): a dead sign-in, said where the person looks
+  "{account} ({kind}): sign-in expired — re-authorize ({cause})": "{account}（{kind}）登录失效，需要重新授权（{cause}）",
+  "{account} ({kind}): sign-in expired — re-authorize": "{account}（{kind}）登录失效，需要重新授权",
+  "{account}: sign-in expired — re-authorize ({cause})": "{account} 登录失效，需要重新授权（{cause}）",
+  "{account}: sign-in expired — re-authorize": "{account} 登录失效，需要重新授权",
+  "the vendor refused the refresh token": "服务方拒绝了刷新令牌",
+  "your account signed in to this app from another VibeSpace": "你的账号在另一个 VibeSpace 上登录了这个应用",
+  "the sign-in reached the end of its lifetime": "登录已到期",
+  "the vendor refused the OAuth client": "服务方拒绝了 OAuth 客户端",
+  "its OAuth client is no longer set up here": "这里已不再配置它的 OAuth 客户端",
+  "the sign-in was not finished": "重新授权没有完成",
+  "Re-authorizing… (in the tab that opened)": "正在重新授权…（在打开的那个标签页里）",
+  "Sign-in expired — re-authorize": "登录失效 — 需要重新授权",
+  "Sign-in expired: {accounts}": "登录失效：{accounts}",
+  "Open the account's Re-authorize": "打开这个账号的重新授权",
 };

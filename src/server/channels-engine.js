@@ -576,11 +576,11 @@ function create(deps = {}) {
   }
   /** The consent facts an adapter whose row declares a LANDING is handed (`deps.consent`): `sign` = the per-boot state
    *  HMAC, `relayUrl()` = its row's relay setting, `publicUrl()` = this instance's address (lane pod-oauth-callback: the
-   *  route a redirect consent lands on), `fleetRelayUrl()` = the fleet's relay page (lane oauth-relay-road: the chart's
-   *  VIBESPACE_OAUTH_RELAY_URL — the admin host's /relay/, one registered address for every pod and kind); every other
-   *  adapter gets none. */
+   *  route a redirect consent lands on), `fleetRelayUrl()` = the fleet's relay page (lane oauth-relay-road: the admin
+   *  host's /relay/, one registered address for every pod and kind — lane oauth-relay-one-source: the integration store's
+   *  ONE reader, the presets' fleet.json, live; this engine reads no env for it); every other adapter gets none. */
   const instanceAddress = () => { try { return publicUrl() || null; } catch { return null; } };
-  const fleetRelayUrl = () => String((env && env.VIBESPACE_OAUTH_RELAY_URL) || '').trim();
+  const fleetRelayUrl = () => { try { return integrations && typeof integrations.fleetRelayUrl === 'function' ? String(integrations.fleetRelayUrl() || '').trim() : ''; } catch { return ''; } };
   const consentDepsOf = (kind) => { const row = consentRowOf(kind); return row && row.landing ? Object.freeze({ sign: signState, relayUrl: () => relayUrlOf(row), publicUrl: instanceAddress, fleetRelayUrl }) : null; };
 
   // Built-ins. The three fakes exercise BOTH axes; the real adapters register
@@ -2371,7 +2371,12 @@ function create(deps = {}) {
         // RETRACT it on the first passing pass (`retractFailure`). A RATE
         // refusal is said on the card from the first strike ("Google is
         // limiting the rate · resuming in N s") and filed only when it PERSISTS.
-        if (!rate && e.failures === FAILURES_BEFORE_LOUD) {
+        // lane channel-reauth-visible (userW inc-mvl9qdru-dlew, B-f1bb): A DEAD SIGN-IN is said at its FIRST refused pass —
+        // ONE standing urgent item per account with its Reconnect (`speakSignin`), never the 3-strike ladder's item. Only a
+        // sign-in the record HOLDS can die: a Connect never finished / a disconnected account (no token) keeps the ladder
+        const deadSignin = caps.signinDeadOf(err instanceof ChannelError ? err : null) && !!(rec.auth && rec.auth.tokenEnc);
+        if (deadSignin) await speakSignin(rec, caps.signinCauseOf(err), { vendorWords: String((err && err.message) || '') });
+        else if (!rate && e.failures === FAILURES_BEFORE_LOUD) {
           log.warn(`[channels] ${rec.id}: ${e.failures} consecutive failures (${code}): ${(err && err.message) || err}`);
           await speakFailure(rec, code, err);
         }
@@ -2515,6 +2520,7 @@ function create(deps = {}) {
         await store.adapters.update(() => { rec.lastPass = { at: now(), ok: true, code: null }; rec.lastOkAt = rec.lastPass.at; rec.consecutiveFailures = 0; if (quiet && quiet.changed) rec.budgetLearned = quiet.state; });
         if (quiet && quiet.full) await retractSlowed(rec);
         await retractFailure(rec);
+        if (rec.signinDead && !(st && (st.state === 'needs-reauth' || st.state === 'needs-credentials'))) await retractSignin(rec, 'a pass went through');   // lane channel-reauth-visible
         retractUnsaved(rec);   // verify r6: that write landed the whole file — the sign-in is on disk
         retryHotConvCaps(rec);   // lane gmail-reply-known: an open window's refused send row asks again now
         notify(changed.filter((k) => !early.has(k)), { full: false });
@@ -2811,7 +2817,8 @@ function create(deps = {}) {
    *              {total, cut}`) + each account's newest FO.HEAD_ROWS listed rows (`heads: {[adapterId]: [keys]}`,
    *              each row once) — built by `firstRead`: one pass, a rowView only for a candidate or a head;
    *   'accounts' everything but the rows (the window's Re-authorize reads);
-   *   'totals'   `{unreadTotal, awaitingTotal, needsMe, at}` (the rail badge reads `needsMe` — lane attention-predicate-shared).
+   *   'totals'   `{unreadTotal, awaitingTotal, needsMe, signin, at}` (the rail badge reads `needsMe` — lane attention-predicate-shared — and
+   *              `signin`, the dead sign-ins — lane channel-reauth-visible).
    * `keys` = the partial broadcast's changed rows, unchanged. Every other row is read by key from `rows()`
    * (GET /api/channels/rows).
    */
@@ -2904,7 +2911,17 @@ function create(deps = {}) {
     const byId = new Map(recs.adapters.map((r) => [r.id, r]));
     let awaitingTotal = 0;
     for (const p of Object.values(store.outbox.live().proposals || {})) if (p && p.key && p.state === 'awaiting-approval') awaitingTotal++;
-    return { unreadTotal: unreadTotalOf(store.index.live(), byId, false), awaitingTotal, needsMe: attnCount(t), at: t };
+    return { unreadTotal: unreadTotalOf(store.index.live(), byId, false), awaitingTotal, needsMe: attnCount(t), signin: signinList(recs.adapters), at: t };
+  }
+  /** lane channel-reauth-visible: the accounts whose sign-in is dead — what the rail's red badge counts and names. */
+  function signinList(adapters) {
+    const out = [];
+    for (const rec of adapters) {
+      if (!rec || !rec.signinDead || rec.enabled === false || !listedAccount(rec)) continue;
+      const v = caps.signinView(rec, { running: !!(flows.runningFor(rec.id) || {}).running });
+      out.push({ id: rec.id, label: rec.label || rec.id, user: (rec.auth && rec.auth.user) || null, ...v });
+    }
+    return out;
   }
   // lane attention-predicate-shared (design q-044 decision 7 — the owner accepted it 2026-10-19): THE CHANNELS BADGE COUNTS WHAT
   // NEEDS THE OWNER — the conversations the attention list puts in bands 1–4 (src/attention-model.js `needsMe` over
@@ -3683,8 +3700,8 @@ function create(deps = {}) {
     return ROAD.consentRoad({ kind: m.kind, publicUrl: instanceAddress() || '', origin: null }).redirectUri;
   }
   /** lane oauth-relay-road (the owner 2026-10-22: one registered address per app, never one per instance): the RELAY PAGES
-   *  a person's OWN app of this type registers ONCE — `{url, who}`: the fleet's (`fleet`, this pod's
-   *  VIBESPACE_OAUTH_RELAY_URL) and the instance's relay setting (`page`, default the project's public page); [] for a
+   *  a person's OWN app of this type registers ONCE — `{url, who}`: the fleet's (`fleet`, the presets' fleet.json —
+   *  fleetRelayUrl) and the instance's relay setting (`page`, default the project's public page); [] for a
    *  type with no relay setting or one that signs in by paste (Slack keeps its own steps). A company preset's page is
    *  its own (presetsView). */
   const ridesRelays = (m, row) => { const cr = consentRowOf(m.kind); return !!(cr && cr.landing && cr.relayUrlSetting && !(row && row.signin === 'paste')); };
@@ -3863,6 +3880,8 @@ function create(deps = {}) {
       lastAuthError: rec.lastAuthError || null, lastAuthAt: rec.lastAuthAt || null,
       lastAuthNote: rec.lastAuthNote && rec.lastAuthNote.code ? { code: String(rec.lastAuthNote.code), at: rec.lastAuthNote.at || null } : null,   // lane slack-grid-identity: what the last sign-in learned (a code the card words)
       failureItem: rec.failureItem ? { id: rec.failureItem.id, code: rec.failureItem.code, at: rec.failureItem.at } : null,
+      // lane channel-reauth-visible: THE DEAD SIGN-IN — authState 'expired' | 'pending' (a consent in flight) | 'ok', its cause, since when
+      ...caps.signinView(rec, { running: !!(flows.runningFor(rec.id) || {}).running }),
       // P1b: the push lane's public half (null = no push lane); the panel
       // composes the sentence with `pushLaneText` in the device's language.
       push: pushView(rec, t),
@@ -6836,6 +6855,7 @@ function create(deps = {}) {
   }
   async function speakFailure(rec, code, err, n = FAILURES_BEFORE_LOUD) {
     if (!userTodos || typeof userTodos.add !== 'function') return;
+    if (rec.signinDead) return;   // lane channel-reauth-visible: while the sign-in is dead ITS item is the account's one item
     // ONE OPEN ITEM PER ACCOUNT (lane R5 verify r2): the two ladders — the rate
     // one (loud at RATE_STRIKES_LOUD) and the failure one (loud at
     // FAILURES_BEFORE_LOUD) — are independent, so a transport failure after a
@@ -6938,6 +6958,72 @@ function create(deps = {}) {
       const it = userTodos.get(ni.id);
       if (it && it.status === 'open' && it.sessionKey === INBOX_KEY && it.text === ni.text) { userTodos.setStatus(ni.id, 'done', RESOLVED_BY); log.log(`[channels] ${rec.id}: ${why} — resolved the names item`); }
     } catch (e) { log.warn(`[channels] ${rec.id}: could not resolve the names item: ${(e && e.message) || e}`); }
+  }
+  /** lane channel-reauth-visible (the owner 2026-10-23: 「对于需要 reauth 的 channel 应该需要更明显的提示，在 inbox 或者 sidebar 高亮出来这里
+   *  需要处理」; userW inc-mvl9qdru-dlew, B-f1bb — every Gmail account's refresh refused at 07:14 PT, the 3-strike items
+   *  retracted as `superseded` and nothing standing; a revoked hub Lark behind a LOW vendor-error line for 7 h). A DEAD
+   *  SIGN-IN IS ONE STANDING ITEM until the account works again: `rec.signinDead = {cause, since, item: {id, text}, at}` is
+   *  kept ON THE RECORD (a restart, a vault lock, a supersede, a started consent never touch it) and the item is urgent
+   *  (band 1 — the top of For you), worded «<login> (<the account's label>): sign-in expired — re-authorize (<cause>)», with the
+   *  `channel-reauth` action (its Reconnect opens the account's Re-authorize dialog). A failing pass with nothing new says
+   *  nothing again (no write, no reopen: the person's own dismissal stands); a NEW cause — or `reassert` (a consent that
+   *  ended unfinished) — re-files the SAME item (same text ⇒ same id, its words updated, reopened). Retracted only by
+   *  `retractSignin`: the first pass that went through, the account's removal, the owner's own disconnect. */
+  const SIGNIN_KEYS = Object.freeze({
+    kc: i18nKey('{account} ({kind}): sign-in expired — re-authorize ({cause})'), k: i18nKey('{account} ({kind}): sign-in expired — re-authorize'),
+    c: i18nKey('{account}: sign-in expired — re-authorize ({cause})'), n: i18nKey('{account}: sign-in expired — re-authorize'),
+  });
+  /** «<login> (<the account's label>)» — the person's words for WHICH account (several Gmail accounts share the label 'Gmail');
+   *  an account that names no login is its label alone */
+  const signinWho = (rec) => {
+    const label = String(rec.label || rec.id);
+    const user = rec.auth && typeof rec.auth.user === 'string' && rec.auth.user && !label.includes(rec.auth.user) ? rec.auth.user : '';
+    return { account: user || label, kind: user ? label : '' };
+  };
+  async function speakSignin(rec, cause0, { reassert = false, vendorWords = '' } = {}) {
+    const prev = rec.signinDead && typeof rec.signinDead === 'object' ? rec.signinDead : null;
+    // a failure that names no cause keeps the one already known (Lark's stamped grant says only "refused" after 20064)
+    const cause = caps.SIGNIN_CAUSES.includes(cause0) ? cause0 : prev && caps.SIGNIN_CAUSES.includes(prev.cause) ? prev.cause : null;
+    const held = prev && prev.item && userTodos && typeof userTodos.get === 'function' ? userTodos.get(prev.item.id) : null;
+    if (prev && !reassert && (prev.cause || null) === cause && (held ? !held.clearedAt : !userTodos)) return;   // nothing new: the item stands as it is
+    const since = prev && Number(prev.since) ? Number(prev.since) : now();
+    if (!prev) log.warn(`[channels] ${rec.id}: the sign-in expired${cause ? ` (${cause})` : ''} — a "For you" item asks the owner to re-authorize: ${String(vendorWords).slice(0, 300)}`);
+    let item = prev && prev.item ? prev.item : null;
+    if (userTodos && typeof userTodos.add === 'function') {
+      const { account, kind } = signinWho(rec);
+      const text = `${kind ? `${account} (${kind})` : account}: sign-in expired — re-authorize`;
+      const key = SIGNIN_KEYS[(kind ? 'k' : '') + (cause ? 'c' : '') || 'n'];
+      const causeWords = caps.signinCauseText(cause);
+      try {
+        if (rec.failureItem) await retractFailure(rec, 'the dead sign-in item took over');   // ONE item per account: the ladder's goes
+        const it = userTodos.add(INBOX_KEY, {
+          origin: 'channels', kind: 'action',
+          text,
+          detail: `Account: ${account}${kind ? ` (${kind})` : ''} — ${rec.id}\nSince: ${new Date(since).toISOString()}${causeWords ? `\nWhy: ${causeWords}` : ''}${vendorWords ? `\nVendor said: ${String(vendorWords).slice(0, 600)}` : ''}\n\nWhat to do: ${remedyFor(rec, 'auth-expired')} Re-authorizing keeps the account's options, access and history.\n\nNothing new arrives from this account until then. This item stays until a pass of the account goes through again — then it is retracted automatically.`,
+          urgency: 'urgent', by: 'agent', sessionName: 'Channels',
+          action: { type: 'channel-reauth', adapterId: rec.id, signin: 'expired' },
+          // ONE open item per account row: the producer's own bound (the agents' cap of 20 is shared by every account's items under one key)
+          openCap: Math.max(20, 4 * (adapterRecords().adapters.length + 1)),
+          i18n: { text: { key: i18nKey(key), params: { account, ...(kind ? { kind } : {}), ...(cause ? { cause: { key: causeWords } } : {}) } }, source: INBOX_SOURCE },   // the cause: channel-caps signinCauseText's own key
+        });
+        if (it && it.id) item = { id: it.id, text };
+      } catch (e) { log.warn(`[channels] ${rec.id}: could not file the dead sign-in in the inbox: ${(e && e.message) || e}`); }
+    }
+    await store.adapters.update(() => { rec.signinDead = { cause, since, item, at: now() }; });
+    notify([], { full: false });   // the account views (the rail badge, the red line) carry it at once
+  }
+  async function retractSignin(rec, why = 'a pass went through') {
+    const d = rec.signinDead && typeof rec.signinDead === 'object' ? rec.signinDead : null;
+    if (!d) return;
+    await store.adapters.update(() => { delete rec.signinDead; });
+    log.log(`[channels] ${rec.id}: the sign-in works again (${why})`);
+    if (d.item && userTodos && typeof userTodos.get === 'function') {
+      try {
+        const it = userTodos.get(d.item.id);
+        if (it && it.status === 'open' && it.sessionKey === INBOX_KEY && it.text === d.item.text) { userTodos.setStatus(d.item.id, 'done', RESOLVED_BY); log.log(`[channels] ${rec.id}: ${why} — retracted the dead sign-in item`); }
+      } catch (e) { log.warn(`[channels] ${rec.id}: could not retract the dead sign-in item: ${(e && e.message) || e}`); }
+    }
+    notify([], { full: false });
   }
   /** The retraction: ONLY the item this engine filed (same id, same text),
    *  only while it is still open — the user's own resolution stands. */
@@ -8101,6 +8187,7 @@ function create(deps = {}) {
     dropLive, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, withView, offerNow, NOT_A_THREAD, threadRead, threadRefresh,
     rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, recallMessage, vendorSearch, aroundFor, refreshConvCaps, retractUnsaved,
     retractFailure, track, wakeTimers, clearWakeTimer, coalesceSeconds, billedWake, pathBudgetVerdict,
+    speakSignin, retractSignin,   // lane channel-reauth-visible: the dead sign-in's ONE item (an unfinished consent re-asserts it; a removal / a disconnect ends it)
     judgedRoadFor,   // lane judged-watch-state: the watch answers' judged-road line (channels-access)
     CG,              // lane grants-unify: the channel doors' rows (src/server/channels-grants.js)
     get stopped() { return stopped; },
@@ -8111,7 +8198,7 @@ function create(deps = {}) {
     accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets, wakeEffOf,
     storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession, convFor,
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
-    setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
+    setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
     previewRule, membersNow, wakeAdmitOf,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
@@ -8533,6 +8620,7 @@ function create(deps = {}) {
     listFor, readFor, statusFor,
     proposalsListFor, proposeRecall,   // lane channels-proposals-recall: the agent's own proposals as a list; a recall of the user's message, proposed
     reachCountFor,   // lane channels-teach: the hook teaches vibespace-channels on this (a count, never a render)
+    signinExpiredFor, speakSignin, retractSignin, retractFailure,   // lane channel-reauth-visible: the hook's dead-sign-in names; the items' doors (suites drive them)
     connectOffer, connectOffers, connectTaught,   // lane pod-oauth-callback: the agent's `connect` verb, `list`'s not-connected line, the 'connect' reach word
     flushPending: (adapterId, convId, opts) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? flushPending(rec, convId, opts || {}) : Promise.resolve({ ok: false, why: 'no-such-adapter' }); },
     // R4: a window is per (conversation | scope, WATCHER) — `key` names the conversation (or `scope:acct:<id>` / `scope:pat:<id>`), `principal` the watcher

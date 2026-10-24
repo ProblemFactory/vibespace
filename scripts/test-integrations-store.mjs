@@ -18,6 +18,10 @@
 //    through the injected drivePresets with no restart.
 // §3 a MALFORMED file: the previous presets stay in effect, ONE journal line,
 //    no throw, the summary says it; fixed ⇒ it serves again.
+// §4 THE FLEET'S RELAY PAGE (lane oauth-relay-one-source): fleet.json added by a
+//    `..data` swap ⇒ `store.fleetRelayUrl()` answers it with no restart, the
+//    store listeners run ONCE (the channels engine re-pushes its digest — the
+//    setup card's relay pages), every client gets the summary; withdrawn ⇒ ''.
 // CONTROL: a store copy without the file rung (env only — today's boot-time
 // reader) never sees the swap.
 import fs from 'node:fs';
@@ -62,7 +66,7 @@ function project(dir, files) {
   try { fs.unlinkSync(path.join(dir, '..data_tmp')); } catch {}
   fs.symlinkSync(ts, path.join(dir, '..data_tmp'));
   fs.renameSync(path.join(dir, '..data_tmp'), path.join(dir, '..data'));
-  for (const top of ['integrations.json', 'gdrive-clients.json', 'override']) { try { fs.lstatSync(path.join(dir, top)); } catch { fs.symlinkSync(`..data/${top}`, path.join(dir, top)); } }
+  for (const top of ['integrations.json', 'gdrive-clients.json', 'fleet.json', 'override']) { try { fs.lstatSync(path.join(dir, top)); } catch { fs.symlinkSync(`..data/${top}`, path.join(dir, top)); } }
   if (old) fs.rmSync(path.join(dir, old), { recursive: true, force: true });
 }
 const lines = [];
@@ -160,6 +164,26 @@ console.log('§3 malformed');
   project(DIR, { 'integrations.json': [{ id: 'cloak', values: { licenseKey: CLOAK_A } }], 'gdrive-clients.json': [g('org1', G_B, 'Org')] });
   await until(() => frames.some((f) => f.type === 'integrations-updated'));
   ok(store.resolveIntegration('cloak').values.licenseKey === CLOAK_A && (await get('/api/integrations')).presets.errors.length === 0, 'fixed: it serves again and the error is gone from the summary');
+}
+
+// ═══ §4 the fleet's relay page (lane oauth-relay-one-source) ════════════
+console.log('§4 fleet.json — the relay page, live');
+{
+  const RELAY = 'https://admin.fleet.example.test/relay/';
+  ok(store.fleetRelayUrl() === '', 'no fleet.json and no relay env ⇒ no fleet relay page');
+  const listened = []; const off = store.onChange((id, why) => listened.push([id, why]));
+  frames.length = 0; lines.length = 0;
+  project(DIR, { 'integrations.json': [{ id: 'cloak', values: { licenseKey: CLOAK_A } }], 'gdrive-clients.json': [g('org1', G_B, 'Org')], 'fleet.json': { relayUrl: RELAY } });
+  const ms = await until(() => frames.some((f) => f.type === 'cluster-presets-updated'));
+  ok(ms >= 0 && store.fleetRelayUrl() === RELAY, `a fleet.json added by a Secret edit answers at the store\'s fleetRelayUrl() ${ms} ms after the rename — no restart`);
+  ok(listened.length === 1 && listened[0][0] === null && listened[0][1] === 'presets', 'the store listeners run ONCE (the channels engine re-asks its adapters and re-pushes its digest: the setup card\'s relay pages follow)');
+  const jl = lines.filter((l) => /\[presets\] changed/.test(l));
+  ok(jl.length === 1 && jl[0].endsWith(`relay page changed (now ${RELAY})`) && !SECRETS.some((x) => JSON.stringify(frames).includes(x)), `ONE journal line, no secret in any frame: ${jl[0]}`);
+  frames.length = 0;
+  project(DIR, { 'integrations.json': [{ id: 'cloak', values: { licenseKey: CLOAK_A } }], 'gdrive-clients.json': [g('org1', G_B, 'Org')] });
+  await until(() => frames.some((f) => f.type === 'cluster-presets-updated'));
+  ok(store.fleetRelayUrl() === '', 'fleet.json withdrawn ⇒ no fleet relay page again (no env here)');
+  off();
 }
 
 // CONTROL: today's store (no file rung) never sees the swap

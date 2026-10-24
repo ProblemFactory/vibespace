@@ -597,7 +597,23 @@ console.log('design 018: public mode');
   const d = await mk('d', { timeoutMs: 50 });
   await new Promise((r) => setTimeout(r, 120));
   const ex = await ol.finishByState(`v1.${d.flowId}.sigsigsigsigsigsig`, 'C4');
-  ok(dn.why === 'denied' && /did not grant/.test(ol.status(c.flowId).error) && ex.why === 'expired' && seen.length === 2, 'error=access_denied ends the flow by name (denied); a code after the timeout is `expired` and never exchanged');
+  ok(dn.why === 'denied' && /did not grant/.test(ol.status(c.flowId).error) && ex.why === 'timed-out' && seen.length === 2, 'error=access_denied ends the flow by name (denied); a code after the flow\'s own timeout is `timed-out` (lane oauth-landing-words: no longer the catch-all `expired`) and never exchanged');
+  // lane oauth-landing-words (B-24d8): EVERY end read `expired` — a sign-in the person cancelled, or replaced by pressing
+  // Connect again, told them it had run out of time. Each end is its own why now; the base answered ONE word for all five.
+  const ends = {};
+  const s1 = await mk('sup'); await mk('sup');   // a second begin of the same id supersedes the first
+  ends.superseded = (await ol.finishByState(`v1.${s1.flowId}.sigsigsigsigsigsig`, 'C5')).why;
+  const c1 = await mk('can'); ol.cancel(c1.flowId, 'cancelled');   // the dialog's Cancel / a Disconnect
+  ends.cancelled = (await ol.finishByState(`v1.${c1.flowId}.sigsigsigsigsigsig`, 'C6')).why;
+  const e1 = await mk('swp'); ol.cancel(e1.flowId, 'expired');   // the engine's sweep at the state's age
+  ends.expired = (await ol.finishByState(`v1.${e1.flowId}.sigsigsigsigsigsig`, 'C7')).why;
+  const h1 = await mk('shut'); ol.cancel(h1.flowId, 'shutdown');
+  ends.shutdown = (await ol.finishByState(`v1.${h1.flowId}.sigsigsigsigsigsig`, 'C8')).why;
+  const o1 = await mk('over-0');
+  for (let i = 1; !ol.status(o1.flowId).cancelled && i <= 2 * OL.MAX_RUNNING_FLOWS; i++) await mk(`over-${i}`);   // past the cap the oldest running ends
+  ends.overLimit = (await ol.finishByState(`v1.${o1.flowId}.sigsigsigsigsigsig`, 'C9')).why;
+  ok(ends.superseded === 'superseded' && ends.cancelled === 'cancelled' && ends.expired === 'expired' && ends.shutdown === 'cancelled' && ends.overLimit === 'over-limit' && ex.why === 'timed-out' && seen.length === 2,
+    'an ended flow lands with ITS end: replaced by a newer sign-in = superseded, Cancel = cancelled, the engine\'s sweep = expired, a shutdown = cancelled, past the cap = over-limit, its own time limit = timed-out — never exchanged', ends);
   const nf = await threw(() => ol.begin({ id: 'e', mode: 'public', buildConsentUrl: () => 'x', exchange: async () => ({}) }));
   ok(nf && nf.code === 'bad-request', 'a public flow without stateFor is refused by name');
   ol.stopAll();

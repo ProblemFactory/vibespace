@@ -276,8 +276,11 @@ function useViewOf(p, live, cache = {}) {
   function rowView(w) {
     if (w.kind === 'session') {
       const l = live.get(w.id) || null;
-      // lane grants-unify: a conversation with no browser key yet is `cid:<id>` — its conversation id is the key's own
-      return { kind: 'session', key: w.id, conversationId: (l && l.conversationId) || w.conversationKey || convOf(w.id), live: !!l, sessionId: l ? l.sessionId : null, name: l ? l.name : null, backend: l ? l.backend : null };
+      // lane grants-unify: a conversation with no browser key yet is `cid:<id>` — its conversation id is the key's own;
+      // int347: a row keyed by the browser key ITSELF (a key no binding named when it was written — the migration's carry,
+      // a keeper with no conversation map) holds no conversation id: the bindings store's is its name, as before the unify
+      const own = w.conversationKey && w.conversationKey !== w.id ? w.conversationKey : null;
+      return { kind: 'session', key: w.id, conversationId: (l && l.conversationId) || own || convOf(w.id) || w.conversationKey || null, live: !!l, sessionId: l ? l.sessionId : null, name: l ? l.name : null, backend: l ? l.backend : null };
     }
     const f = k && typeof k.taskInfo === 'function' ? k.taskInfo(w.id) : undefined;
     return { kind: 'task', id: w.id, title: f ? String(f.title || '') || null : null, deleted: f === null, archived: !!(f && f.archived), unreadable: f === undefined };

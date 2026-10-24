@@ -760,7 +760,8 @@ if (tracked.length) {
 // alone — the store and MountManager ask its instance, never the directory.
 // Comment lines are stripped (the consumers' essays name the file); a code
 // spelling anywhere else is RED, with a planted offender as the control.
-const FILE_RE = /VIBESPACE_PRESETS_DIR|['"`]\/etc\/vibespace\/presets|['"`]gdrive-clients\.json['"`]/;
+// lane oauth-relay-one-source: + fleet.json (the fleet facts — the sign-in relay page) — the same one reader
+const FILE_RE = /VIBESPACE_PRESETS_DIR|['"`]\/etc\/vibespace\/presets|['"`](?:gdrive-clients|fleet)\.json['"`]/;
 const FILE_ALLOW = new Map([
   ['src/server/cluster-presets.js', 'THE reader of the presets directory'],
   ['deploy/helm/vibespace-user/templates/main.yaml', 'renders the projected volume + VIBESPACE_PRESETS_DIR'],
@@ -792,8 +793,9 @@ if (tracked.length) {
   const direct = path.join(dir, 'direct-read.js'); fs.writeFileSync(direct, "const list = JSON.parse(require('fs').readFileSync('/etc/vibespace/presets/gdrive-clients.json', 'utf-8'));\n");
   const viaEnv = path.join(dir, 'via-env.js'); fs.writeFileSync(viaEnv, 'const d = process.env.VIBESPACE_PRESETS_DIR;\n');
   const noted = path.join(dir, 'noted.js'); fs.writeFileSync(noted, "// reads the presets directory's `gdrive-clients.json` through the shared reader\nconst x = 1;\n");
-  const fc = fileRungCensus([...tracked, direct, viaEnv, noted], readAny);
-  ok(fc.offenders.includes(direct) && fc.offenders.includes(viaEnv) && !fc.offenders.includes(noted) && fc.offenders.length === 2, 'CONTROLS: a direct read of the default path and an env read of VIBESPACE_PRESETS_DIR are RED; a comment naming the file is not');
+  const fleetRead = path.join(dir, 'fleet-read.js'); fs.writeFileSync(fleetRead, "const relay = JSON.parse(require('fs').readFileSync(require('path').join(dir, 'fleet.json'), 'utf-8')).relayUrl;\n");
+  const fc = fileRungCensus([...tracked, direct, viaEnv, noted, fleetRead], readAny);
+  ok(fc.offenders.includes(direct) && fc.offenders.includes(viaEnv) && fc.offenders.includes(fleetRead) && !fc.offenders.includes(noted) && fc.offenders.length === 3, 'CONTROLS: a direct read of the default path, an env read of VIBESPACE_PRESETS_DIR and a second reader of fleet.json are RED; a comment naming the file is not');
 }
 
 // (a′) THE NAME MAY NOT BE BUILT OUTSIDE THE RESOLVER EITHER (r3, the round-2

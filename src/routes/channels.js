@@ -243,8 +243,10 @@ function landingAllowed(ip, t = Date.now()) {
 }
 // lane pod-oauth-callback: a connected page closes the tab VibeSpace opened — the ONE inline script it may run, allowed by
 // its sha256 (src/consent-road.js CLOSE_SCRIPT); nothing else runs on a landing page
-const CLOSE_SCRIPT_HASH = require('crypto').createHash('sha256').update(require('../consent-road.js').CLOSE_SCRIPT).digest('base64');
-const LANDING_HEADERS = Object.freeze({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-${CLOSE_SCRIPT_HASH}'` });
+const ConsentRoad = require('../consent-road.js');
+const CLOSE_SCRIPT_HASH = require('crypto').createHash('sha256').update(ConsentRoad.CLOSE_SCRIPT).digest('base64');
+// lane oauth-landing-words: the page speaks the request's language (Accept-Language) — `Vary` says so to any cache
+const LANDING_HEADERS = Object.freeze({ 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Vary': 'Accept-Language', 'Referrer-Policy': 'no-referrer', 'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-${CLOSE_SCRIPT_HASH}'` });
 /** design 018: THE CONSENT LANDING — the vendor (or its relay page) sends the member's browser here with `code` +
  *  `state` (`error=access_denied` when they declined). 2.369.214: NO COOKIE IS ASKED — the browser that pressed Allow
  *  is often another profile (the person's identity at the vendor lives apart from their VibeSpace login), the normal
@@ -252,14 +254,17 @@ const LANDING_HEADERS = Object.freeze({ 'Content-Type': 'text/html; charset=utf-
  *  used once; the landing only moves a pending flow to done — the record is still made by the owner's tab (Connect
  *  {flowId}). lane dc-channels-consent: the page is `:kind`'s declared consent row's (`landing.landingHtml`, the
  *  engine's `consentLandingOf`) — a kind with no landing row is 404 by name. Never the code, the state, a stack or a
- *  secret. */
+ *  secret. lane oauth-landing-words: the page is drawn in ONE language — the browser's own (consent-road landingLang over
+ *  Accept-Language, the app's rule) — handed to every page as `page(r, {lang})`. */
 router.get('/api/channels/oauth/cb/:kind', async (req, res) => {
   const q = req.query || {};
   const one = (v) => (typeof v === 'string' ? v.slice(0, 2048) : null);
   const kind = String(req.params.kind || '').slice(0, 20);
   // lane voice-p1-oauth-teach: a NON-channel kind (Dropline voice input) lands through its registered door
   const door = OAUTH_DOORS.doorOf(kind);
-  const pageOf = () => { if (door) return door.page; try { return engine().consentLandingOf(kind); } catch { return null; } };
+  const lang = ConsentRoad.landingLang(req.get('accept-language'));
+  const inLang = (p) => (typeof p === 'function' ? (r) => p(r, { lang }) : null);
+  const pageOf = () => { if (door) return inLang(door.page); try { return inLang(engine().consentLandingOf(kind)); } catch { return null; } };
   // the door limit judges the ADDRESS before anything else is looked at; its page is :kind's own (the refused words for
   // 'too-many' — wait a minute, reload), a kind with no landing row answers JSON
   if (!landingAllowed(req.socket.remoteAddress || '?')) { const p = pageOf(); return p ? res.status(429).set(LANDING_HEADERS).send(p({ ok: false, why: 'too-many' })) : res.status(429).json({ error: 'too many sign-in landings from this address in the last minute — wait a minute', code: 'too-many' }); }

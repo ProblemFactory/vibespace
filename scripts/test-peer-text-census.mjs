@@ -984,7 +984,7 @@ const PRINTS = {
     'TX.searchSaid': `${V}:the agent search answer's words (src/agent-cli-text.js searchSaid words the saidKind KEY with the caller's OWN q — the ONE place; the same sentences the server used to send)`,
     'l': `${V}:one line of TX.searchSaid's answer (the said helper's loop)`, 'r.match': `${V}:the stored copy's match enum (SR.STORE_MATCH)`, 'full': `${O}:the caller's own --full flag`,
     'f.results': `${V}:the --full additions (m.* — rows)`, 'f.note': `${V}:the route's note (no account you can see offers its own search)`, 'f.adds': `${V}:the search row's adds enum (older / unsaved)`,
-    'r.covered': `${V}:a count (design 010: the conversations the free search read)`, 'r.namesNote': `${V}:the server's sentence naming the owner's account labels (lane channel-names-readable)`, 'r.fullOffered': `${V}:a flag (design 010)`,
+    'r.covered': `${V}:a count (design 010: the conversations the free search read)`, 'r.namesNote': `${V}:the server's sentence naming the owner's account labels (lane channel-names-readable)`, 'r.signinNote': `${V}:the server's sentence naming the owner's account labels whose sign-in is dead (lane channel-reauth-visible)`, 'r.fullOffered': `${V}:a flag (design 010)`,
     // design 008 S6 (lane channels-followups): the bounded `list` — how many more it may see / request, the bound
     'r.more': `${V}:a count (only of what the caller may see)`, 'r.moreRequestable': `${V}:a count (directory titles it may request)`, 'r.max': `${V}:the list's bound (200)`,
     'more': `${V}:Number(r.more) — a count`, 'moreReq': `${V}:Number(r.moreRequestable) — a count`, 'max': `${V}:Number(r.max) || 200 — the bound`,

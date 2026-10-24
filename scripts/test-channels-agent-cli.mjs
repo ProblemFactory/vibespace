@@ -87,6 +87,8 @@ let listAnswer = null;   // design 008 S6: the REAL engine's listFor answer, ser
 let proposalsAnswer = null, recallAnswer = null;
 // lane channels-search-says-hidden (㉒): the search answered by the REAL engine (its searchFor, the route's own arguments)
 let searchAnswer = null;
+// lane channel-reauth-visible (㉔): `read` answered by the REAL engine (its readFor, the route's own arguments)
+let readAnswer = null;
 // lane judged-watch-state (㉓): `watch` / `watch --show` / `watches` answered by the REAL engine (agentWatch / agentWatchesFor)
 // with the route's own answer rule (a refused spec = 400, any other refusal 4xx — the CLI prints the words + [code])
 let watchAnswer = null, watchesAnswer = null;
@@ -102,6 +104,7 @@ const server = http.createServer((req, res) => {
     if (req.headers.authorization !== 'Bearer vsst_test') return send(401, { error: 'unknown session token' });
     if (url.pathname === '/api/agent/channels/list') return send(200, listAnswer ? listAnswer(url) : { ok: true, conversations: [VISIBLE, READONLY] });
     if (url.pathname === '/api/agent/channels/read') {
+      if (readAnswer) { const r = readAnswer(url); return send(r && r.ok ? 200 : 404, r); }
       // lane channel-threads: the server's PLACE words + reactions line (spec §5.1), and a thread never walked here
       if (url.searchParams.get('conv') === 'fake-poll/threads') {
         const conversation = { key: 'fake-poll/threads', adapterId: 'fake-poll', id: 'threads', title: 'Weekly sync', polledAt: 1000 };
@@ -983,6 +986,76 @@ console.log('\n㉓ lane judged-watch-state (B-f42e): a judged rule\'s `watch` an
   }
   watchAnswer = null; watchesAnswer = null;
   for (const x of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 1, label: '㉓ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
+}
+
+// ── ㉔ lane channel-reauth-visible (userW inc-mvl9qdru-dlew: every Gmail link «失效», nothing said where an agent looks): an account
+// whose sign-in is DEAD is NAMED by `list`, `read` and `search` — what it shows is what was stored before, nothing new arrives —
+// never an empty answer it cannot explain; the hook's channels line names it too. The REAL engine (fake-poll + the REAL For-you
+// store), the dead sign-in filed by its real producer; the CLI over the stub that hands its routes to that engine. ──
+console.log('\n㉔ lane channel-reauth-visible: a dead sign-in is named by list / read / search and by the hook\'s channels line');
+{
+  const ROOT = scratch('chan-agent-cli-signin');
+  fs.rmSync(ROOT, { recursive: true, force: true });
+  process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} });
+  const ENGP = 'src/server/channels-engine.js';
+  const ENG = require(path.join(REPO, ENGP));
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const REG = require(path.join(REPO, 'src/agent-cli-registry.js'));
+  const MUTE = mutantCopies('chan-agent-cli-signin', REPO);
+  const esrc = engineSource(REPO);
+  const AG = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLevelFor: () => 'none' };
+  const A = 'fake-poll';
+  const quiet = { log() {}, warn() {}, error() {} };
+  const mk = async (M, tag) => {
+    const dataDir = path.join(ROOT, tag);
+    const eng = M.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, userTodos: new UserTodoManager({ dataDir, expirySweepMs: 0 }), log: quiet, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }] });
+    await eng.pass(A, { force: true });
+    const conv = Object.values(eng.store.index.live()).find((en) => en && en.adapterId === A);
+    await eng.setReach(A, conv.id, { principal: { kind: 'agent', id: 'agent-1' }, level: 'visible' });
+    return { eng, conv };
+  };
+  const drive = async (eng, conv) => {
+    listAnswer = () => eng.listFor(AG, {});
+    readAnswer = (url) => { const k = String(url.searchParams.get('conv') || ''); const i = k.indexOf('/'); return eng.readFor(AG, k.slice(0, i), k.slice(i + 1), { limit: 20 }); };
+    searchAnswer = (url) => eng.searchFor(AG, String(url.searchParams.get('q') || ''), { limit: 20 });
+    const list = await run(['list']), read = await run(['read', conv.key]), search = await run(['search', 'zzz-nothing-matches']);
+    listAnswer = null; readAnswer = null; searchAnswer = null;
+    return { list, read, search };
+  };
+  const note = (label) => `note: "${label}": sign-in expired — the owner must re-authorize it in Channels (rail → Channels → the account's Reconnect); nothing new arrives from it until then — what you read is what was stored before`;
+  const { eng, conv } = await mk(ENG, 'real');
+  const rec = eng.adapterRecords().adapters.find((r) => r.id === A);
+  const label = rec.label || rec.id;
+  const alive = await drive(eng, conv);
+  await eng.speakSignin(rec, 'refresh-refused');
+  const dead = await drive(eng, conv);
+  const named = eng.signinExpiredFor(AG);
+  await eng.retractSignin(rec, 'a pass went through');
+  const back = await drive(eng, conv);
+  const lines = (o) => o.out.split('\n');
+  ok(alive.list.code === 0 && !/sign-in expired/.test(alive.list.out + alive.read.out + alive.search.out), 'a live account: list / read / search say nothing of a sign-in');
+  ok(dead.list.code === 0 && lines(dead.list).includes(note(label)) && lines(dead.list).some((l) => l.startsWith(`${conv.key}  — `)),
+    `a DEAD sign-in: \`list\` still lists what was stored AND names the account by its label (${JSON.stringify(label)})`, dead.list.out.slice(-600));
+  ok(dead.read.code === 0 && lines(dead.read).includes(note(label)) && lines(dead.search).includes(note(label)), '…`read <conv>` and `search` name it the same way (never an empty answer the agent cannot explain)', (dead.read.out + dead.read.err).slice(-500));
+  ok(named.length === 1 && named[0] === String(label).slice(0, 60) && eng.signinExpiredFor({ kind: 'agent', id: 'stranger', name: 'X', groups: [], msgLevelFor: () => 'none' }).length === 0,
+    'the hook\'s names: the dead account this agent READS (a stranger with no reach hears nothing of it)', JSON.stringify(named));
+  ok(!/sign-in expired/.test(back.list.out + back.read.out) && eng.signinExpiredFor(AG).length === 0, 'the sign-in works again ⇒ nothing is said');
+  const T = { status: true, ask: true, task: true, jobs: true, channels: 'read' };
+  const plainLine = REG.renderReminderLine(T), plainStart = REG.renderSessionStartTools(T).join('\n');
+  const deadLine = REG.renderReminderLine({ ...T, channelsExpired: [String(label)] }), deadStart = REG.renderSessionStartTools({ ...T, channelsExpired: [String(label)] }).join('\n');
+  ok(deadLine.includes(`(sign-in expired: "${label}" — the owner re-authorizes in Channels)`) && deadStart.includes(`Sign-in expired: "${label}" — the owner must re-authorize it in Channels; nothing new arrives from it until then.`)
+    && REG.renderReminderLine({ ...T, channelsExpired: [] }) === plainLine && REG.renderSessionStartTools({ ...T, channelsExpired: null }).join('\n') === plainStart,
+    'the hook\'s channels line: the reminder AND the SessionStart paragraph name it; none dead ⇒ byte-identical to the base', deadLine);
+  eng.stop();
+  // CONTROL — an engine copy whose list forgets the dead sign-in: the list leg goes RED
+  const FROM = "    const dead = adapterRecords().adapters.filter((r) => seen.has(r.id) && signinDead(r)).map((r) => r.label || r.id);   // lane channel-reauth-visible\n";
+  ok(esrc.split(FROM).length === 2, 'CONTROL fixture: the list\'s dead-sign-in line is found once');
+  const c = await mk(MUTE.load(ENGP, esrc.replace(FROM, '    const dead = [];\n'), 'no-signin-note'), 'ctl');
+  await c.eng.speakSignin(c.eng.adapterRecords().adapters.find((r) => r.id === A), 'refresh-refused');
+  const cd = await drive(c.eng, c.conv);
+  ok(!lines(cd.list).includes(note(label)), 'CONTROL: without it a dead account\'s list says nothing of it — the leg above would be RED');
+  c.eng.stop();
+  for (const x of copiesCensus(MUTE.files, MUTE.dir, REPO, { minCopies: 1, label: '㉔ ' })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));
 }
 
 server.close();

@@ -178,17 +178,36 @@ let target = await until(async () => (await cdpTargets()).find((t) => t.type ===
 async function page(t) {
   const ws = new WebSocket(t.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => ws.on('open', r));
-  let seq = 0; const pend = new Map();
-  ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+  let seq = 0; const pend = new Map(); const evWait = []; // evWait: who waits on the NEXT CDP event of a method (openPage: DOMContentLoaded)
+  ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } else if (m.method) { for (let i = evWait.length - 1; i >= 0; i--) if (evWait[i].method === m.method) evWait.splice(i, 1)[0].res(m.params || {}); } });
+  const next = (method) => new Promise((res) => evWait.push({ method, res }));
   const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); ws.send(JSON.stringify({ id, method, params })); });
   const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || JSON.stringify(r.exceptionDetails))); return r.result.value; };
   await cdp('Page.enable');
-  return { ws, cdp, evalJs, close: () => { try { ws.close(); } catch {} } };
+  return { ws, cdp, evalJs, next, close: () => { try { ws.close(); } catch {} } };
 }
 // layout.js holds `_restoring` for 5 s after a load (autosave dropped meanwhile,
 // for every window type) — wait it out like a human's first click does, so a
 // window opened here is persisted and replayed on the other clients
-const openPage = async (p) => { await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await p.cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` }); await sleep(1500); await p.evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })' /* in-page poll (2.369.118): the heavy tier went red with "no app" in two chrome lanes at once — one probe 1.5 s after navigate is a bet on load speed */); await until(() => p.evalJs('app.layoutManager && app.layoutManager._restoring === false'), 12000, 250); };
+// A PAGE BOOT IS WAITED ON BY ITS EVENTS, NEVER A BET ON LOAD SPEED (lane int347 — the 196-suite heavy run on 908828bb went
+// red once with «no app after 20s» at load 7.8→9.9, green on its retry and alone): the navigate's own answer (a failed
+// navigation says why at once), the NEW document's DOMContentLoaded (CDP Page.domContentEventFired, armed BEFORE the
+// navigate — client.js builds window.app in its DOMContentLoaded listener, so a missing app after it is a boot CRASH, said as
+// one), app.ready, then layout.js's 5 s restore hold. Measured: the first load of the 14 MB bundle took 2.1 s alone and 5–8 s
+// with three copies on one core; the old in-page poll (2.369.118) gave it 20 s and the restore wait (12 s) ran out SILENTLY.
+// Only HANG_MS (a page that never loads — a hang, not a slow box) fails, naming what never came.
+const HANG_MS = 180000;
+const within = (pr, what) => { let tm; return Promise.race([pr, new Promise((_, rej) => { tm = setTimeout(() => rej(new Error(`${what} — not after ${HANG_MS / 1000} s: a hang, not a slow load`)), HANG_MS); })]).finally(() => clearTimeout(tm)); };
+const waitFor = async (fn, what, step = 200) => { const v = await until(fn, HANG_MS, step); if (!v) throw new Error(`${what} — not after ${HANG_MS / 1000} s: a hang, not a slow load`); return v; };
+const openPage = async (p) => {
+  await p.cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+  const dcl = p.next('Page.domContentEventFired');
+  const nav = await p.cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+  if (nav && nav.errorText) throw new Error(`openPage: the navigation failed (${nav.errorText})`);
+  await within(dcl, 'openPage: the new document\'s DOMContentLoaded');
+  await within(p.evalJs('new Promise((res, rej) => { const go = () => (window.app ? res(app.ready) : rej(new Error("DOMContentLoaded ran and window.app is missing — the App constructor threw (a boot crash, not a slow load)"))); if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => setTimeout(go, 0), { once: true }); else setTimeout(go, 0); })'), 'openPage: app.ready');
+  await waitFor(() => p.evalJs('app.layoutManager && app.layoutManager._restoring === false'), 'openPage: layout.js\'s restore hold (_restoring) never ended');
+};
 // the canvas noVNC paints: is it non-black? (sample the pixels)
 const CANVAS_SAMPLE = `(() => { const c = document.querySelector('.window .desktop-app-canvas-probe') || [...document.querySelectorAll('.window canvas')].find((x) => x.width > 50 && x.height > 50); if (!c) return { found: false }; const ctx = c.getContext('2d'); const d = ctx.getImageData(0, 0, c.width, c.height).data; let bright = 0, n = 0; for (let i = 0; i < d.length; i += 64) { n++; if (d[i] + d[i + 1] + d[i + 2] > 60) bright++; } return { found: true, w: c.width, h: c.height, brightFrac: bright / n }; })()`;
 // a TRUSTED click (CDP Input) at an element's centre: the layout autosave only
@@ -210,9 +229,12 @@ const launchCardSel = async (p, id) => { const again = `#desktop-launch-dialog .
 // decided + the 0 ms focus fired) before anyone measures it
 const openDialog = async (p) => {
   await p.evalJs(`(() => { document.getElementById('desktop-launch-dialog')?.remove(); document.getElementById('btn-desktop-apps').click(); return true; })()`);
-  const ok = await until(() => p.evalJs(`!!document.querySelector('#desktop-launch-dialog .desktop-launch-card, #desktop-launch-dialog .desktop-launch-empty')`), 8000, 100);
-  await sleep(400);
-  return !!ok;
+  // ANSWERED = the dialog's own LAST step ran: desktop-app-launcher.js holds its body aria-busy until both reads (/api/user-state
+  // + the apps list) are in, the catalog is rendered, the disclosure is decided and its 0 ms focus is given (lane int347). The
+  // old 8 s poll returned false SILENTLY when the apps list answered later (three copies on one core: «Checking display
+  // backends…» was then read as the ladder verdict), its `.desktop-launch-empty` also matched the desk section's own early
+  // line, and a fixed 400 ms stood for the rest. The focus is no signal: a card re-render (a running app's state) drops it.
+  return !!(await waitFor(() => p.evalJs(`(() => { const d = document.getElementById('desktop-launch-dialog'); const b = d && d.querySelector('.dialog-body'); return !!b && !b.hasAttribute('aria-busy') && !!d.querySelector('.desktop-launch-registry .desktop-launch-card, .desktop-launch-registry .desktop-launch-empty'); })()`), 'openDialog: the launch dialog never answered (its body still aria-busy, or no catalog)', 100));
 };
 // the geometry of the open dialog, as the page computes it
 const GEOM = `(() => {

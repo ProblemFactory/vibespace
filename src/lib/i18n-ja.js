@@ -10631,4 +10631,19 @@ export default {
   "「{path}」 is too big to tell as 「{chosen}」 → told as 「{level}」 (the agent still knows where it is and what it is for)": "「{path}」は「{chosen}」で伝えるには大きすぎます → 「{level}」で伝えます（エージェントは場所と用途を引き続き知っています）", // lane task-group-context
   // lane chat-live-tail-pin (inc-mvl02dkn-gop0): a wheel-up at the start of a conversation
   "No earlier messages": "これより前のメッセージはありません",
+  // lane channel-reauth-visible (userW inc-mvl9qdru-dlew): a dead sign-in, said where the person looks
+  "{account} ({kind}): sign-in expired — re-authorize ({cause})": "{account}（{kind}）のサインインが切れました — 再認証してください（{cause}）",
+  "{account} ({kind}): sign-in expired — re-authorize": "{account}（{kind}）のサインインが切れました — 再認証してください",
+  "{account}: sign-in expired — re-authorize ({cause})": "{account} のサインインが切れました — 再認証してください（{cause}）",
+  "{account}: sign-in expired — re-authorize": "{account} のサインインが切れました — 再認証してください",
+  "the vendor refused the refresh token": "サービス側が更新トークンを拒否しました",
+  "your account signed in to this app from another VibeSpace": "あなたのアカウントが別の VibeSpace からこのアプリにサインインしました",
+  "the sign-in reached the end of its lifetime": "サインインの有効期限が切れました",
+  "the vendor refused the OAuth client": "サービス側が OAuth クライアントを拒否しました",
+  "its OAuth client is no longer set up here": "この環境にはその OAuth クライアントがもう設定されていません",
+  "the sign-in was not finished": "サインインが完了しませんでした",
+  "Re-authorizing… (in the tab that opened)": "再認証中…（開いたタブで続けてください）",
+  "Sign-in expired — re-authorize": "サインインが切れました — 再認証が必要です",
+  "Sign-in expired: {accounts}": "サインイン切れ：{accounts}",
+  "Open the account's Re-authorize": "このアカウントの再認証を開く",
 };

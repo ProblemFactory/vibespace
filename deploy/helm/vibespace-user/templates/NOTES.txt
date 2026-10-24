@@ -1,0 +1,14 @@
+{{- /* Install / upgrade notes — warnings only (lane oauth-relay-one-source). Rendered by helm install / upgrade, never by helm template. */ -}}
+{{- $presets := .Values.presets | default dict -}}
+{{- $vol := ne (toString (index $presets "volume")) "false" -}}
+{{- $relay := $presets.relayUrl | default .Values.oauthRelayUrl -}}
+{{- if .Values.oauthRelayUrl }}
+WARNING: oauthRelayUrl is deprecated and this chart is the last that reads it. Move the
+sign-in relay page to presets.relayUrl — or, for the whole fleet, to the cluster Secret's
+`fleet` key (deploy/README.md, "One sign-in redirect per vendor app"). It is rendered as this
+release's override/fleet.json{{ if $presets.relayUrl }} (presets.relayUrl is set too and wins){{ end }}, no longer as an env.
+{{- end }}
+{{- if and $relay (not $vol) }}
+WARNING: presets.volume=false — the sign-in relay page rides the company presets volume only,
+so this pod gets none. Switch to the volume form (presets.volume=true, deploy/README.md).
+{{- end }}

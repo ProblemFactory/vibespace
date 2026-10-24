@@ -268,7 +268,7 @@ const SEARCH_IDS_NARROW = 100;
 const CONSENT = Object.freeze({
   mode: Object.freeze(['ephemeral', 'fixed', 'public']),
   callbackUrl: MANIFEST.GMAIL_LOOPBACK_URL,
-  landing: Object.freeze({ stateVerdict: (s, o = {}) => CR.stateVerdict(s, { ...o, kind: KIND }), landingHtml: (r) => CR.landingHtml(r, { name: 'Google' }) }),
+  landing: Object.freeze({ stateVerdict: (s, o = {}) => CR.stateVerdict(s, { ...o, kind: KIND }), landingHtml: (r, o = {}) => CR.landingHtml(r, { lang: o.lang, name: 'Google' }) }),
   relayUrlSetting: Object.freeze({ key: 'gmailRelayUrl', fallback: CR.RELAY_DEFAULT }),   // the server setting channels.<key>
 });
 
@@ -882,7 +882,7 @@ function typedFailure(status, body, what, retryAfterSec = null) {
   // the login", the owner re-authorized under the same held copy and hit the same 401. Named here so every carrier
   // of the sentence (lastPass, lastAuthError, the For-you item) says what to do: re-enter the secret or pick the mount again
   if (body && body.error === 'invalid_client') return new ChannelError('auth-expired', `${what}: ${msg} — Google refused the OAuth client itself (invalid_client: the client id is unknown or its secret is wrong; if the client came from a storage mount whose secret was re-entered, pick that mount again in Re-authorize, else re-enter the client secret) (${status})`, { retryable: false, detail: { status, reason: 'invalid_client', clientRefused: true } });
-  if (status === 401 || body && body.error === 'invalid_grant') return new ChannelError('auth-expired', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason: reason || (body && body.error) || null } });
+  if (status === 401 || body && body.error === 'invalid_grant') return new ChannelError('auth-expired', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason: reason || (body && body.error) || null, ...(body && body.error === 'invalid_grant' ? { cause: 'refresh-refused' } : {}) } });
   if (status === 429 || RATE_REASONS.includes(reason) || (status === 403 && (domain === 'usageLimits' || RATE_WORDS.test(String(msg))))) return new ChannelError('rate-limited', `${what}: ${msg} (${status})`, { retryable: true, detail: { status, reason: reason || null, retryAfterSec: Number.isFinite(retryAfterSec) ? retryAfterSec : null } });
   if (status === 403) return new ChannelError('forbidden', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason } });
   if (status === 404) return new ChannelError('not-found', `${what}: ${msg} (${status})`, { retryable: false, detail: { status, reason } });
@@ -1013,10 +1013,10 @@ function create(record = {}, deps = {}) {
     if (!cred.values) throw vaultLockedWhy(cred.why) ? notConnectedError('Gmail', cred.why) : new ChannelError('auth-expired', `Google OAuth client missing: ${cred.why}`, { retryable: false, detail: { needsCredentials: true } });
     const { token, why } = readToken();
     if (!token) throw notConnectedError('Gmail', why);   // lane vault-e2e-password-fix-r2: a LOCKED vault is `vault-locked`, never "expired"
-    if (token.invalidGrantAt) throw new ChannelError('auth-expired', 'Gmail refresh token was refused — re-authorize', { retryable: false });
+    if (token.invalidGrantAt) throw new ChannelError('auth-expired', 'Gmail refresh token was refused — re-authorize', { retryable: false, detail: { cause: 'refresh-refused' } });
     if (unsaved && unsaved.token === token) await persistToken(token, unsaved.supersedes);   // verify r5: the store's next chance at a token it could not persist
     if (token.access_token && Number(token.expiresAt) > now() + REFRESH_MARGIN_MS) return token.access_token;
-    if (!token.refresh_token) throw new ChannelError('auth-expired', 'Gmail access token expired and no refresh token is held — re-authorize', { retryable: false });
+    if (!token.refresh_token) throw new ChannelError('auth-expired', 'Gmail access token expired and no refresh token is held — re-authorize', { retryable: false, detail: { cause: 'token-expired' } });
     if (refreshing) { await refreshing; return accessToken(depth + 1); }   // a sibling's refresh: wait for it, then read what it wrote
     refreshing = refreshAccessToken(cred, token).finally(() => { refreshing = null; });
     const got = await refreshing;

@@ -26,6 +26,10 @@
  * verbatim so the file and the env can never parse one block two ways).
  * Nothing here ever prints a value: `diffEntries` compares values to say
  * ROTATED, and names keys only.
+ *
+ * THE FLEET FACTS (lane oauth-relay-one-source): `fleet.json` — a company fact
+ * that is not a credential list (the fleet's sign-in relay page) rides the same
+ * two layers, merged per FIELD (`parseFleet` / `mergeFleet` below).
  */
 const R = require('./integration-registry.js');
 
@@ -60,6 +64,39 @@ function parseDriveClients(arr) {
   return out;
 }
 const PARSERS = Object.freeze({ integrations: parseIntegrations, gdrive: parseDriveClients });
+
+// ── THE FLEET FACTS (lane oauth-relay-one-source, 2026-10-23 — the owner: «你为啥搞了两套分发 auth client 的方案») ──
+// A company fact that is not a credential list — today ONE: the fleet's sign-in relay page — rides the SAME layers as the
+// rows: `<presets dir>/fleet.json` (the cluster) and `override/fleet.json` (the release), each ONE JSON object. The merge
+// is PER FIELD (a field the release names replaces the cluster's, '' included — "this release has no relay page"); a
+// field neither layer names is ABSENT (the caller's fallback). It used to be a chart value rendered as an env, which
+// changes only at a pod restart, while the client rows beside it changed live: two roads for one fact.
+const FLEET_FIELDS = Object.freeze(['relayUrl']);
+/** `{relayUrl?}` → the known fields, trimmed strings (a field of another type is not named). Throws on a non-object. */
+function parseFleet(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new TypeError('not an object');
+  const out = {};
+  for (const k of FLEET_FIELDS) if (typeof obj[k] === 'string') out[k] = obj[k].trim();
+  return out;
+}
+/** THE FLEET MERGE, per field. `layers` = `{cluster, release}`, each a parsed object or `null` (that file is absent).
+ *  `null` when both are absent, else `{facts, layerOf}` (`layerOf[field]` = the layer the value in effect came from). */
+function mergeFleet(layers = {}) {
+  if (!LAYERS.some((l) => layers[l] && typeof layers[l] === 'object')) return null;
+  const facts = {}; const layerOf = {};
+  for (const layer of LAYERS) {
+    const f = layers[layer];
+    if (!f || typeof f !== 'object') continue;
+    for (const k of FLEET_FIELDS) if (typeof f[k] === 'string') { facts[k] = f[k]; layerOf[k] = layer; }
+  }
+  return { facts, layerOf };
+}
+/** The fields whose value in effect moved between two merges (absent ≠ ''). */
+const diffFleet = (prev, next) => FLEET_FIELDS.filter((k) => (prev && k in prev.facts ? prev.facts[k] : null) !== (next && k in next.facts ? next.facts[k] : null));
+/** The journal's words for the moved fields (English; a relay page is an address every vendor app lists — not a secret). */
+function fleetWords(fields, next) {
+  return fields.map((k) => (k === 'relayUrl' ? `relay page changed (now ${next && next.facts.relayUrl ? next.facts.relayUrl : next && 'relayUrl' in next.facts ? 'none' : 'unset — the environment is the fallback'})` : `${k} changed`)).join(' · ');
+}
 
 /** An entry's identity inside its kind (what an override replaces). */
 const identityOf = (kind, e) => (kind === 'integrations' ? `${e.id}\u0000${e.key}` : String(e.key));
@@ -187,6 +224,7 @@ function presetsLine(summary, { t = (s, p) => fill(s, p), ago = null, now = Date
 module.exports = {
   KINDS, LAYERS, SOURCES, PARSERS,
   parseIntegrations, parseDriveClients,
+  FLEET_FIELDS, parseFleet, mergeFleet, diffFleet, fleetWords,
   identityOf, nameOf, mergeLayers, diffEntries, diffEmpty, diffWords,
   summarize, countItems, itemWords, presetsLine,
 };

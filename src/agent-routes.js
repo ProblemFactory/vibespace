@@ -1903,22 +1903,25 @@ const channelsEngine = () => { try { const c = getChannels(); return c && typeof
 // 20 000), so a prompt reads it from a per-session memo of CHANNELS_REACH_TTL_MS; SessionStart asks fresh. A grant the
 // owner gives or takes reaches the reminder within that minute.
 const CHANNELS_REACH_TTL_MS = 60e3;
-const channelsReachMemo = new WeakMap();   // session object → { at, v } (a verdict word, never a row)
+const channelsReachMemo = new WeakMap();   // session object → { at, v, x } (a verdict word + the dead sign-ins' labels, never a row)
 const channelsTaughtFor = (s, id, { fresh = false } = {}) => {
-  if (!integrationOnMaster()) return false;
+  if (!integrationOnMaster()) return null;
   const eng = channelsEngine();
-  if (!eng || typeof eng.reachCountFor !== 'function') return false;
+  if (!eng || typeof eng.reachCountFor !== 'function') return null;
   const t = Date.now();
   const m = channelsReachMemo.get(s);
-  if (!fresh && m && t - m.at < CHANNELS_REACH_TTL_MS) return m.v;
-  let v = false;
+  if (!fresh && m && t - m.at < CHANNELS_REACH_TTL_MS) return m;
+  let v = false, x = [];
   // lane pod-oauth-callback (study 1 L1): nothing connected yet on an instance whose admin offers a company app ⇒ 'connect'
   // (the agent learns `vibespace-channels connect <kind>` — a Connect button in the chat, never a vendor's web login)
   try { v = eng.reachCountFor(channelPrincipal(s, id)) || (typeof eng.connectTaught === 'function' && eng.connectTaught() ? 'connect' : false); } catch { v = false; }
-  channelsReachMemo.set(s, { at: t, v });
-  return v;
+  // lane channel-reauth-visible: the accounts it reads whose sign-in is DEAD — named on the same line (none ⇒ the line is byte-identical)
+  try { x = v === 'read' && typeof eng.signinExpiredFor === 'function' ? eng.signinExpiredFor(channelPrincipal(s, id)) : []; } catch { x = []; }
+  const out = { at: t, v, x };
+  channelsReachMemo.set(s, out);
+  return out;
 };
-const toolsFor = (s, id, o) => ({ ...enabledTools(), channels: channelsTaughtFor(s, id, o) });
+const toolsFor = (s, id, o) => { const m = channelsTaughtFor(s, id, o); return { ...enabledTools(), channels: m ? m.v : false, ...(m && m.x && m.x.length ? { channelsExpired: m.x } : {}) }; };
 // lane stash-pending-live: a member's OWN TURN carries what its channel watchers parked while none of the group ran (the
 // free road only: the engine queues each carry on the conversation's chain, into this session's stash — it rides this
 // member's next injection; at SessionStart that is its first prompt). Asked at the stash drain; never a timer.

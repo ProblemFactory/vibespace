@@ -2,6 +2,18 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.348 — 2026-10-23
+
+### Changed
+- On a company deployment, the sign-in relay address lives with the other company presets: a change reaches every running VibeSpace within a minute, no restart.
+
+### Fixed
+- When a connected mail or chat account's sign-in stops working, Channels in the left bar turns red and names it, and For you shows it at the top.
+- Under that account in Channels a red line says the sign-in expired, why and since when, with a Reconnect button; it stays until the account works again.
+- A Lark account signed in again on another VibeSpace is now shown this way at once, instead of after many failed refreshes.
+- The page you land on after signing in to Google or Lark shows your address as you typed it and speaks one language: yours.
+- When that sign-in did not finish, the page says why: cancelled, replaced by a newer sign-in, too slow, or started before VibeSpace restarted.
+
 ## 2.369.347 — 2026-10-23
 
 ### Fixed

@@ -1820,7 +1820,9 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     // verify r4 #1 (site-reset): a `tab new` that succeeded NAMES its tab (the CLI read the binary's own ack) — the watch binds it
     // to THIS conversation before the fact after the verb is read (never "the verb that happened to be in flight")
     const tabAck = req.body?.tab && typeof req.body.tab === 'object' && typeof req.body.tab.targetId === 'string' ? req.body.tab.targetId.slice(0, 64) : null;
-    const dlg = profileId ? await dialogAnswerFor(k, f, profileId, { arm: false, outcome: req.body?.dialog ? 'held-by-dialog' : req.body?.loop ? 'loop' : req.body?.timedOut ? 'timeout' : 'ok', ended: true, bind: tabAck }) : (endVerb(f), {}); // lane site-reset: a verb cut at a navigation loop is not a timeout (the loop explains it)
+    // int347: `daemonSaw` = the dialog type the verb's own daemon printed (its «… dialog is blocking the page» line) — awaited on the watch
+    const saw = req.body?.daemonSaw && typeof req.body.daemonSaw === 'object' && typeof req.body.daemonSaw.type === 'string' ? { type: req.body.daemonSaw.type.slice(0, 24) } : null;
+    const dlg = profileId ? await dialogAnswerFor(k, f, profileId, { arm: false, outcome: req.body?.dialog ? 'held-by-dialog' : req.body?.loop ? 'loop' : req.body?.timedOut ? 'timeout' : 'ok', ended: true, bind: tabAck, saw }) : (endVerb(f), {}); // lane site-reset: a verb cut at a navigation loop is not a timeout (the loop explains it)
     // lane site-reset: a verb the loop CUT keeps its session's daemon waiting until 0.38.1's own timeout — remembered, said
     if (req.body?.loop === 'cut' && since > 0) { try { ctx.dialogs?.noteCut?.(f.browserKey, since); } catch { /* optional */ } }
     if (dlg.dialog && ctx.dialogs && typeof ctx.dialogs.busyFor === 'function') { const b = ctx.dialogs.busyFor(f.browserKey); if (b > 0) dlg.dialog.busy = require('../browser-stuck.js').busyText(b); }
@@ -1875,8 +1877,13 @@ function endVerb(f, profileId = null) { try { ctx.dialogs?.verbEnded?.(f.browser
 /** `{dialog: {watched, open, text, notes, stuck}}` for a resolve / audit answer ({} without a watch). A resolve ARMS the
  *  watch first (bounded — it must be on the tab before the verb can open a dialog) and marks the verb running; an
  *  audit ends it and notes its outcome. Notes are told ONCE (consumed here). Never throws. */
-async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, ended = false, verb = null, bind = null } = {}) {
+async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, ended = false, verb = null, bind = null, saw = null } = {}) {
   const D = ctx.dialogs;
+  // int347 (the alert race): the verb's OWN daemon printed a page dialog ⇒ the watch's fact of it is AWAITED (its open /
+  // close event, bounded) before the fact is read — never raced: an alert it accepted was told to the NEXT verb, and this
+  // one printed the daemon's «blocking the page» line under a dialog that was already gone. Before the verb is ended: the
+  // watch dates "this verb's dialog" from the verb's own start.
+  if (saw && D && profileId && typeof D.waitSettled === 'function') { const t0 = dialogTargetFor(k, f, profileId); if (t0.ok) { try { await D.waitSettled(t0, { type: saw.type, verbKey: f.browserKey }); } catch { /* the fact as it stands */ } } }
   if (ended) endVerb(f, profileId);
   if (!D || !profileId) return {};
   const t = dialogTargetFor(k, f, profileId);

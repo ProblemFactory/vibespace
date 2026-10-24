@@ -58,10 +58,10 @@ const AGENT = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLev
 
 const logLines = [];
 const capture = { log: (...a) => logLines.push(a.join(' ')), warn: (...a) => logLines.push(a.join(' ')), error: (...a) => logLines.push(a.join(' ')) };
-async function mkEngine(name, { registry = undefined, mode = {}, storeEnv = {}, env = {} } = {}) {
+async function mkEngine(name, { registry = undefined, mode = {}, storeEnv = {}, env = {}, presets = null } = {}) {
   const v = createSlackVendor({ mode: { tsShift: SHIFT, ...mode } });
   const dir = path.join(ROOT, name); fs.mkdirSync(dir, { recursive: true });
-  const integrations = STORE.create({ dataDir: path.join(dir, 'store'), env: storeEnv, now, broadcast: () => {}, drivePresets: () => [], log: capture });
+  const integrations = STORE.create({ dataDir: path.join(dir, 'store'), env: storeEnv, presets, now, broadcast: () => {}, drivePresets: () => [], log: capture });
   const frames = [];
   const eng = ENG.create({ dataDir: path.join(dir, 'eng'), env, now, broadcast: (m) => frames.push(m), integrations, fetch: v.fetchFn, log: capture, ...(registry ? { registry } : {}), ...FAST_PACE });
   engines.push(eng);
@@ -361,7 +361,8 @@ console.log('⑧ two pastes through the engine');
 //      steps; a preset without a relay on an http origin → refused `no-https`, on an https origin → its own callback;
 //      the custom rung → the relay page setting's default; lane oauth-relay-road addendum 1 (the owner 2026-10-22: the public
 //      page is never a company app's): a preset without its own page on a fleet pod rides the FLEET's
-//      (VIBESPACE_OAUTH_RELAY_URL) — an http hub too — and its own page outranks the fleet's; the custom rung keeps the setting
+//      (the presets' fleet.json — lane oauth-relay-one-source; the engine reads no env for it) — an http hub too — and its
+//      own page outranks the fleet's; the custom rung keeps the setting
 console.log('⑨ the workspace app through the engine');
 {
   const vm = require('vm');
@@ -469,9 +470,14 @@ console.log('⑨ the workspace app through the engine');
   const sh = await W11.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: 'https://pod-7.example.test' });
   const cu = await W11.eng.startOAuth({ kind: 'slack', clientPreset: 'custom', clientId: WS_CLIENT_ID, clientSecret: WS_CLIENT_SECRET, origin: ORIGIN });
   {
-    const FLEET_RELAY = 'https://admin.fleet.example.test/relay/', FLEET_ENV = { VIBESPACE_OAUTH_RELAY_URL: FLEET_RELAY };
-    const W12 = await mkEngine('no-relay-fleet', { storeEnv: preset({ relayUrl: '' }), env: FLEET_ENV });
-    const W13 = await mkEngine('own-relay-fleet', { storeEnv: preset(), env: FLEET_ENV });
+    const FLEET_RELAY = 'https://admin.fleet.example.test/relay/';
+    // lane oauth-relay-one-source: the fleet's page rides the presets directory (a scratch one holding only fleet.json)
+    const CP = require(path.join(REPO, 'src/server/cluster-presets.js'));
+    const pdir = path.join(ROOT, 'presets-fleet'); fs.mkdirSync(pdir, { recursive: true });
+    fs.writeFileSync(path.join(pdir, CP.FILES.fleet), JSON.stringify({ relayUrl: FLEET_RELAY }));
+    const fleetPresets = CP.create({ dir: pdir, log: capture });
+    const W12 = await mkEngine('no-relay-fleet', { storeEnv: preset({ relayUrl: '' }), presets: fleetPresets });
+    const W13 = await mkEngine('own-relay-fleet', { storeEnv: preset(), presets: fleetPresets });
     const rOf = (s) => new URL(s.url).searchParams.get('redirect_uri');
     const fh = await W12.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: ORIGIN });
     const fp = await W12.eng.startOAuth({ kind: 'slack', clientPreset: 'acme', origin: 'https://pod-7.fleet.example.test' });

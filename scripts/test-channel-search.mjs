@@ -664,7 +664,7 @@ console.log('§S the agent\'s answer: every word anywhere, a hidden match = exis
   const b2 = await kb.eng.searchFor(AH, 'Acmenet install');
   ok(b2.saidKind === 'none', 'CONTROL (the base\'s answer): an engine that never looks where the caller cannot read keys «nothing matches» (none) while the mail is stored — the ALL HIDDEN leg (none-readable) would be RED', JSON.stringify(b2.saidKind));
   kb.eng.stop && kb.eng.stop();
-  const RET = '    return { ok: true, results, truncated, covered, fullOffered, match: SR.STORE_MATCH, hiddenMatch: hidden.match, saidKind, ...namesNoteOf(blind) };\n';
+  const RET = '    return { ok: true, results, truncated, covered, fullOffered, match: SR.STORE_MATCH, hiddenMatch: hidden.match, saidKind, ...namesNoteOf(blind), ...signinNoteOf(dead) };\n';   // lane channel-reauth-visible: + the dead sign-ins' note
   const km = await rig('eng-said-count', engCopy([[HID, HID + '        if (hidden.match) hidden.leak = `${h.results.length} hit in 1 conversation you cannot read (account ${rec.label}: ${(store.index.live()[`${rec.id}/${h.results[0].convId}`] || {}).title})`;\n'], [RET, RET.replace('saidKind, ', 'saidKind, leak: hidden.leak, ')]], 'count-leak'));
   const m2a = await km.eng.searchFor(AH, 'Acmenet install');
   ok(m2a.hiddenMatch === true && !noLeak(m2a, 'Acmenet install'), 'MUTANT: a copy that puts the hidden match\'s count, account and title in the body fails the NO LEAK leg (RED)', JSON.stringify(m2a.leak));

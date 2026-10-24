@@ -33,6 +33,12 @@ const CHANNELS_REMINDER_SEG = Object.freeze({
   connect: 'vibespace-channels connect <kind> — nothing connected yet: a Connect button for the user in this chat',
 });
 const channelsByReach = (map, reach) => map[reach === 'request' || reach === 'connect' ? reach : 'read'];
+/** lane channel-reauth-visible (userW inc-mvl9qdru-dlew): an account this session reads whose sign-in is DEAD is NAMED where
+ *  the hook teaches the door — `expired` = its labels (the engine's signinExpiredFor: ≤ 3, each ≤ 60 characters). Only
+ *  while one is dead: the widest NORMAL shape (the caps below) is unchanged. */
+const expiredNames = (expired) => (Array.isArray(expired) ? expired.filter((x) => typeof x === 'string' && x).slice(0, 3).map((x) => `"${x.slice(0, 60)}"`).join(', ') : '');
+const expiredSentence = (expired) => { const n = expiredNames(expired); return n ? ` Sign-in expired: ${n} — the owner must re-authorize ${expired.length > 1 ? 'them' : 'it'} in Channels; nothing new arrives from ${expired.length > 1 ? 'them' : 'it'} until then.` : ''; };
+const expiredSeg = (expired) => { const n = expiredNames(expired); return n ? ` (sign-in expired: ${n} — the owner re-authorizes in Channels)` : ''; };
 /** the tray in the hub's words (tray-words phrase: its label and its current place); a caller that has none says only
  *  that it is theirs — never a guessed place */
 const trayOf = (tray) => (typeof tray === 'string' && tray ? tray : 'their tray');
@@ -89,8 +95,8 @@ const ROWS = Object.freeze([
     name: 'vibespace-channels', topic: 'channels', manual: 'channels-manual.md', gate: 'channels',
     summary: 'the mail, chats and threads the user connected and lets you see: list, search, read; a reply is a proposal the user approves',
     teach: {
-      sessionStart: ({ reach }) => channelsByReach(CHANNELS_SECTION_LINES, reach),
-      reminder: ({ reach }) => channelsByReach(CHANNELS_REMINDER_SEG, reach),
+      sessionStart: ({ reach, expired }) => channelsByReach(CHANNELS_SECTION_LINES, reach) + expiredSentence(expired),
+      reminder: ({ reach, expired }) => channelsByReach(CHANNELS_REMINDER_SEG, reach) + expiredSeg(expired),
     },
   },
   {
@@ -178,7 +184,7 @@ const teachOf = (row, surface) => (row.teach && typeof row.teach[surface] === 'f
  *  generic '--group <id> ' in the shared multi-group section). */
 function renderSessionStartTools(T, { gid = '', multi = false, tray = null } = {}, rows = ROWS) {
   const F = T || { status: true, ask: true, task: true, jobs: true };
-  const ctx = { g: gid || '', multi: !!multi, reach: F.channels || false, tray };
+  const ctx = { g: gid || '', multi: !!multi, reach: F.channels || false, expired: F.channelsExpired || null, tray };
   const on = rows.map((r) => ({ r, fn: teachOf(r, 'sessionStart') })).filter((x) => x.fn && gateOpen(x.r.gate, F))
     .map((x) => ({ r: x.r, text: x.fn(ctx) })).filter((x) => x.text);
   if (!on.some((x) => x.r.gate !== 'always')) return [];
@@ -202,7 +208,7 @@ function pointerTopics(T, rows = ROWS) {
  *  a Group MANAGER session — the clause naming the group verbs of vibespace-task (a mode of that CLI, not a CLI). */
 function renderReminderLine(T, { multi = false, manager = false, tray = null } = {}, rows = ROWS) {
   const F = T || {};
-  const ctx = { multi: !!multi, reach: F.channels || false, topics: pointerTopics(F, rows), tray };
+  const ctx = { multi: !!multi, reach: F.channels || false, expired: F.channelsExpired || null, topics: pointerTopics(F, rows), tray };
   const segs = rows.map((r) => ({ r, fn: teachOf(r, 'reminder') })).filter((x) => x.fn && gateOpen(x.r.gate, F))
     .map((x) => x.fn(ctx)).filter(Boolean);
   const mgrClause = manager ? ' · you are a Group MANAGER: `vibespace-task group-list` + group-create/-update/-bind organize ALL groups (any verb takes --group <id>)' : '';

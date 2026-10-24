@@ -1456,6 +1456,11 @@ button.ut-notice-head:hover { color: var(--accent); }
 /* a producer's action (design-reset-credits p2: the ask-mode reset-credit item) — the one accent button */
 .ut-action-reset { color: var(--accent); display: inline-flex; align-items: center; justify-content: center; padding: 0; }
 .ut-action-reset svg { width: 12px; height: 12px; }
+/* lane channel-reauth-visible: a dead sign-in's item says its verb in words, on its own line under the sentence */
+.ut-reconnect-row { display: flex; margin: 4px 0 2px; }
+.ut-reconnect { font: inherit; font-size: 12px; font-weight: 600; padding: 3px 12px; border-radius: var(--radius-sm); border: 1px solid var(--red, #e55); background: var(--red, #e55); color: #fff; cursor: pointer; }
+.ut-reconnect:hover, .ut-reconnect:focus-visible { filter: brightness(1.1); outline: none; }
+@media (max-width: 480px) { .ut-reconnect { min-height: 36px; } }
 .ut-resolved-head { font-size: 10px; color: var(--text-dim); margin: 8px 0 2px; text-transform: uppercase; letter-spacing: .03em; }
 .ut-item-resolved { opacity: 0.55; }
 .ut-item-inplace .ut-text { text-decoration: line-through; } /* a row resolved while the popup is open keeps its slot (inc-mtw02kbq-kj96) */
@@ -5858,6 +5863,17 @@ button.chan-attn-head:hover { background: var(--bg-hover); }
   .chan-grow-sub .chan-grow-last { flex-basis: 40px; }
 }
 .chan-sec-health-text { min-width: 0; overflow-wrap: anywhere; }
+/* lane channel-reauth-visible (the owner 2026-10-23: 「进来之后账号行下方显示登录失效需要 reauth」): THE DEAD SIGN-IN'S RED LINE, first under
+   the account's head — its own class, so a FOLDED section still shows it; the words wrap (a phone stacks the Reconnect
+   under them); the section's left edge carries the same red */
+.chan-sec-reauth { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; margin: 2px 6px 4px 8px; padding: 4px 6px; border-radius: var(--radius-sm); font-size: 11px; line-height: 1.45; color: var(--red, #e55); background: color-mix(in srgb, var(--red, #e55) 10%, transparent); }
+.chan-sec-reauth > svg { flex-shrink: 0; }
+.chan-sec-reauth-text { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.chan-sec-reauth-btn { font-size: 11px; padding: 2px 9px; flex-shrink: 0; }
+.chan-sec.chan-sec-dead { box-shadow: inset 3px 0 0 var(--red, #e55); }
+@media (max-width: 480px) {
+  .chan-sec-reauth-btn { min-height: 36px; }
+}
 .chan-grow-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text); }
 .chan-grow-unread-on .chan-grow-title { font-weight: 600; }
 /* B-5fe1: WHICH account, in small text, when a vendor holds ≥ 2 */

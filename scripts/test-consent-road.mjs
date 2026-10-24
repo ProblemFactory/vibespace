@@ -31,7 +31,8 @@
 //      relay ⇒ the route; the order relay › route › loopback (the person's own road beats every relay); relayPick /
 //      relayOf (the fleet's › the preset's › the setting's; a preset's only for a preset account)
 //   ⑦ THE REAL ENGINE THROUGH THE REAL RELAY PAGE (docs/slack-relay/relay.js `decide`, run as shipped in a vm): a fleet
-//      pod's Lark (VIBESPACE_OAUTH_RELAY_URL; the admin copy's data-allow = the fleet's domain) and a local hub's Gmail and
+//      pod's Lark (the deprecated env VIBESPACE_OAUTH_RELAY_URL — read by the store for one release; ⑩ the presets road;
+//      the admin copy's data-allow = the fleet's domain) and a local hub's Gmail and
 //      Lark (the public page, data-allow empty) — redirect_uri = the relay page, the page sends the browser to
 //      <u>/api/channels/oauth/cb/<kind> with the vendor's query VERBATIM, the landing says connected, the fake vendor saw
 //      the exchange with the relay page as its redirect; a preset's own relay page (Lark JSON entry, a Google drive
@@ -63,6 +64,25 @@
 //      no registry row's relayUrl field defaults to it
 //   ⑥ + RED CONTROL = 8725b131 (a preset falls through to the setting: fleet › preset › setting) — the preset on the
 //      local hub rides the PUBLIC page — red on ① and ⑦'s hub preset leg
+// lane oauth-relay-one-source (the owner 2026-10-23: «你为啥搞了两套分发 auth client 的方案» — the Google client rows were presets
+// FILES, live; the relay page a chart ENV, at restart: a pod never restarted got the new rows and no relay ⇒ Google's
+// redirect_uri_mismatch):
+//   ⑩ ONE SOURCE, the REAL engine + store + presets reader (a scratch directory): the fleet's page from fleet.json (Lark,
+//      Gmail, the digest's relayPages / presets[].relayPage); a fleet.json edit reaches the NEXT Connect with no restart
+//      (the journal says «relay page changed»); fleet.json › the deprecated env (said once at boot, by its exact words)
+//      › none; the release's override/fleet.json wins over the cluster's, its '' = none even with the env set; a preset's
+//      own relayUrl wins over both. RED CONTROL = ffc8b1ff (the engine reading the env): the presets carry the page, the
+//      env does not ⇒ Gmail's consent names the POD's own route — the incident, reproduced
+// lane oauth-landing-words (the owner 2026-10-23 14:3x PT: 「这个提示里为啥把 email 打码了」 — Cloudflare's Email Address
+// Obfuscation rewrote the address on the hub's landing into «[email protected]» and the CSP blocked its decoder — + B-24d8:
+// three languages stacked, «(expired)» for a cancelled or replaced sign-in):
+//   ⑪ PURE — landingLang (a 27-row Accept-Language table + PARITY with the shipped src/lib/i18n.js resolveLang over each
+//      browser's navigator.language); one paragraph per page in one language, never the other two; landingUser (escaped,
+//      `&#64;`, inside <!--email_off--> … <!--/email_off-->) — nothing Cloudflare's pattern matches, in any language; a
+//      verdict × language matrix (each its own sentence, none of the others'); RED CONTROLS = the bare print (the base),
+//      every refusal reading «expired», a language-deaf page
+//   ⑪ the REAL engine + routes — Google from a ja browser (the mailbox marked, Vary), Lark from zh, a cancelled
+//      Re-authorize (zh), the first of two presses (ja), no language (en), a state from before a restart (en)
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -201,13 +221,116 @@ console.log('① PURE src/consent-road.js');
   };
   ok(verdicts.hmac === 'bad-hmac' && verdicts.kind === 'wrong-kind' && verdicts.old === 'expired' && verdicts.future === 'expired' && verdicts.tampered === 'bad-hmac' && verdicts.shape === 'bad-shape' && verdicts.long === 'bad-shape',
     'refused by name: another boot\'s HMAC, another kind, past its age, from the future, a tampered clear part, a broken shape, an oversized one', verdicts);
-  // the page
+  // the page (lane oauth-landing-words: ONE language — English when none is said)
   const okPage = CR.landingHtml({ ok: true, user: '<b>Ada</b>' }, { name: 'Lark' });
   const deny = CR.landingHtml({ ok: false, why: 'denied' }, { name: 'Lark' });
   const used = CR.landingHtml({ ok: false, why: 'used' }, { name: 'Google' });
-  ok(/data-landing="ok"/.test(okPage) && okPage.includes(`<script>${CR.CLOSE_SCRIPT}</script>`) && (okPage.match(/<p lang=/g) || []).length === 3 && okPage.includes('&lt;b&gt;Ada&lt;/b&gt;') && !okPage.includes('<b>Ada'),
-    'a connected page: three languages, the person escaped, the close script (and only it)');
-  ok(/data-landing="denied"/.test(deny) && !/<script/.test(deny) && /data-landing="failed"/.test(used) && /already used/.test(used) && /Google/.test(used) && !/<script/.test(used), 'a declined / a used sign-in says so and closes nothing');
+  ok(/data-landing="ok"/.test(okPage) && okPage.includes(`<script>${CR.CLOSE_SCRIPT}</script>`) && (okPage.match(/<p[ >]/g) || []).length === 1 && /<html lang="en">/.test(okPage) && okPage.includes('&lt;b&gt;Ada&lt;/b&gt;') && !okPage.includes('<b>Ada'),
+    'a connected page: one paragraph in one language (en when none is said), the person escaped, the close script (and only it)');
+  ok(/data-landing="denied"/.test(deny) && !/<script/.test(deny) && /data-landing="failed"/.test(used) && /already finished/.test(used) && /Google/.test(used) && !/<script/.test(used), 'a declined / a used sign-in says so and closes nothing');
+}
+
+// ── lane oauth-landing-words (the owner 2026-10-23 14:3x PT 「这个提示里为啥把 email 打码了」 + B-24d8) ──
+console.log('⑪ the landing speaks ONE language, shows the address as typed, and names its verdict (PURE)');
+{
+  // (a) THE LANGUAGE PICK — the browser's first language (the highest q), by the app's own rule (src/lib/i18n.js)
+  //     [Accept-Language as a browser sends it, that browser's navigator.language, the page's language]
+  const PICK = [
+    [undefined, undefined, 'en'], ['', undefined, 'en'], [42, undefined, 'en'], [['zh-CN'], undefined, 'en'],
+    ['zh-CN,zh;q=0.9,en;q=0.8', 'zh-CN', 'zh'], ['zh-TW,zh;q=0.9', 'zh-TW', 'zh'], ['ZH-hk', 'ZH-hk', 'zh'], ['zh', 'zh', 'zh'], ['zh-Hant-TW', 'zh-Hant-TW', 'zh'],
+    ['ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7', 'ja-JP', 'ja'], ['ja', 'ja', 'ja'],
+    ['en-US,en;q=0.9,zh-CN;q=0.8', 'en-US', 'en'], ['en-GB', 'en-GB', 'en'],
+    ['fr-FR,fr;q=0.9,zh-CN;q=0.8', 'fr-FR', 'en'], ['de-DE', 'de-DE', 'en'], ['ko-KR,ko;q=0.9,ja;q=0.8', 'ko-KR', 'en'],
+    ['de;q=0.5, ja;q=0.9', 'ja', 'ja'], ['en;q=0.8,zh-CN', 'zh-CN', 'zh'], ['zh;q=0, ja;q=0.4', 'ja', 'ja'],
+    ['*', undefined, 'en'], ['*;q=1, zh;q=0.5', 'zh', 'zh'], ['zh;q=0', undefined, 'en'], ['zh;q=abc,ja', 'ja', 'ja'], ['zh_CN', undefined, 'en'], ['<script>', undefined, 'en'],
+    ['x'.repeat(600) + ',zh', undefined, 'en'], [',,;;,', undefined, 'en'],
+  ];
+  const pickBad = PICK.filter(([h, , want]) => CR.landingLang(h) !== want);
+  ok(!pickBad.length, `the language pick table (${PICK.length} rows): zh* → zh, ja* → ja, anything else → en; the highest q wins, q=0 never counts, a header past ${512} characters is read no further`, pickBad);
+  // (a') PARITY with the app: src/lib/i18n.js resolveLang() over navigator.language (the browser's first language), run as shipped
+  const had = { nav: Object.getOwnPropertyDescriptor(globalThis, 'navigator'), ls: Object.getOwnPropertyDescriptor(globalThis, 'localStorage') };
+  const navStub = { language: 'en' };
+  Object.defineProperty(globalThis, 'navigator', { value: navStub, configurable: true, writable: true });
+  Object.defineProperty(globalThis, 'localStorage', { value: { getItem: () => null, setItem() {} }, configurable: true, writable: true });
+  let parity = [];
+  // the shipped file as an .mjs copy with its two 1 MB dictionaries stubbed (resolveLang never reads them) — every other byte as shipped
+  const i18nSrc = fs.readFileSync(path.join(REPO, 'src/lib/i18n.js'), 'utf8');
+  const DICT_IMPORTS = ["import zh from './i18n-zh.js';", "import ja from './i18n-ja.js';"];
+  ok(DICT_IMPORTS.every((x) => i18nSrc.split(x).length === 2) && /export function resolveLang\(\)/.test(i18nSrc), 'src/lib/i18n.js still imports its two dictionaries and exports resolveLang (the parity copy\'s two stubs land)');
+  try {
+    const I18N = await import(new URL(`file://${MUT.write('src/lib/i18n.js', DICT_IMPORTS.reduce((t, x) => t.replace(x, `const ${x.split(' ')[1]} = {};`), i18nSrc), 'parity', { esm: true })}`).href);
+    parity = PICK.filter(([h]) => typeof h === 'string').map(([h, nav]) => { navStub.language = nav || 'en'; return { h, nav, app: I18N.resolveLang(), page: CR.landingLang(h) }; });
+  } finally {
+    for (const [k, d] of [['navigator', had.nav], ['localStorage', had.ls]]) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; }
+  }
+  const parityBad = parity.filter((x) => x.app !== x.page);
+  ok(parity.length >= 20 && !parityBad.length, `the page's language = the app's own: src/lib/i18n.js resolveLang() over the same browser's navigator.language, row for row (${parity.length} rows)`, parityBad);
+  ok(CR.LANGS.join() === 'en,zh,ja' && Object.values(CR.LANDING).every((row) => CR.LANGS.every((l) => typeof row[l] === 'string' && row[l])) && Object.values(CR.LANDING_WHY).every((row) => CR.LANGS.every((l) => typeof row[l] === 'string' && row[l])),
+    'every page and every verdict has its sentence in each of the three languages');
+  // (b) ONE language per page: its sentence, and NEITHER of the other two languages' sentences
+  const OTHER = (l) => CR.LANGS.filter((x) => x !== l);
+  const fillName = (t, nm) => t.split('{name}').join(nm).replace('{user}', '').replace('{why}', '');
+  const one = [];
+  for (const [kind, r] of [['ok', { ok: true, user: 'Ada Road' }], ['denied', { ok: false, why: 'denied' }], ['too-many', { ok: false, why: 'too-many' }], ['failed', { ok: false, why: 'expired' }]]) {
+    for (const l of CR.LANGS) {
+      const page = CR.landingHtml(r, { name: 'Lark', lang: l });
+      const head = (t) => fillName(t, 'Lark').split(/[{(（]/)[0].trim().slice(0, 18);
+      const mine = page.includes(head(CR.LANDING[kind][l])) && new RegExp(`<html lang="${l}">`).test(page) && (page.match(/<p[ >]/g) || []).length === 1;
+      const others = OTHER(l).filter((o) => page.includes(head(CR.LANDING[kind][o])) || page.includes(CR.LANDING_WHY.expired[o]));
+      if (!mine || others.length) one.push({ kind, l, mine, others });
+    }
+  }
+  ok(!one.length, 'every page × every language: ONE paragraph, its own sentence and <html lang>, never the other two languages (the base printed en + zh + ja stacked)', one);
+  ok(CR.landingHtml({ ok: true }, { name: 'Lark', lang: 'fr' }).includes('<html lang="en">') && CR.landingHtml({ ok: true }, { name: 'Lark', lang: '<x>' }).includes('<html lang="en">'), 'a language outside the three is English (never written into the page)');
+  ok(CR.landingHtml({ ok: true }, { name: 'Lark', lang: 'zh' }).includes(`<script>${CR.CLOSE_SCRIPT}</script>`) && /自己关闭/.test(CR.landingHtml({ ok: true }, { name: 'Lark', lang: 'zh' })) && /自動で閉じます/.test(CR.landingHtml({ ok: true }, { name: 'Lark', lang: 'ja' })),
+    'a connected page in zh / ja still closes its tab by itself and says so in that language');
+  // (c) THE ADDRESS — what Cloudflare's Email Address Obfuscation rewrites (an address in the HTML) never appears bare
+  const CF = /[\w.+-]+@[\w-]+\.[\w.-]+/;
+  const ADDR = 'ada.road+x@example.test';
+  ok(CF.test(`signed in to Google (${ADDR})`), 'CONTROL: the obfuscation pattern catches the address as the base page printed it (escaped text, a bare @)');
+  ok(CR.landingUser(ADDR) === '<!--email_off-->ada.road+x&#64;example.test<!--/email_off-->' && CR.landingUser('') === '' && CR.landingUser(null) === '' && CR.landingUser('<b>a@b.c</b>') === '<!--email_off-->&lt;b&gt;a&#64;b.c&lt;/b&gt;<!--/email_off-->',
+    'landingUser: the address escaped as text, its @ as &#64;, inside Cloudflare\'s <!--email_off--> … <!--/email_off--> markers; nothing for no address');
+  const addrBad = CR.LANGS.map((l) => ({ l, page: CR.landingHtml({ ok: true, user: ADDR }, { name: 'Google', lang: l }) })).filter(({ page }) => CF.test(page) || page.includes('@') || !page.includes('<!--email_off-->ada.road+x&#64;example.test<!--/email_off-->'));
+  ok(!addrBad.length, 'a connected Google page in each language: the address between both markers with the @ as an entity — no bare @ anywhere, nothing the obfuscation pattern matches', addrBad.map((x) => x.l));
+  ok(CR.landingHtml({ ok: true, user: "a$'b$&<i>" }, { name: 'Lark' }).includes("(<!--email_off-->a$&#39;b$&amp;&lt;i&gt;<!--/email_off-->)"), 'a person whose name holds $\' / $& / markup prints it as typed (escaped; no replacement pattern is expanded)');
+  // (d) THE VERDICTS — each says what happened in the one language; no sentence stands in for another's
+  const WHYS_SEEN = ['bad-hmac', 'expired', 'timed-out', 'bad-shape', 'wrong-kind', 'wrong-flow', 'superseded', 'cancelled', 'over-limit', 'used', 'failed'];
+  ok(WHYS_SEEN.every((w) => Object.prototype.hasOwnProperty.call(CR.LANDING_WHY, w)) && Object.keys(CR.LANDING_WHY).every((w) => w === 'refused' || WHYS_SEEN.includes(w)), 'LANDING_WHY covers every refusal the state, the engine and the flow name (+ refused for anything else)', Object.keys(CR.LANDING_WHY));
+  const sentence = (w, l) => CR.LANDING_WHY[w][l].split('{name}').join('Lark');
+  const matrix = [];
+  for (const l of CR.LANGS) for (const w of [...WHYS_SEEN, 'nonsense', undefined]) {
+    const page = CR.landingHtml({ ok: false, why: w }, { name: 'Lark', lang: l });
+    const own = Object.prototype.hasOwnProperty.call(CR.LANDING_WHY, w) ? w : 'refused';
+    const wrong = Object.keys(CR.LANDING_WHY).filter((x) => x !== own && page.includes(CR.LANDING_WHY[x][l].split('{name}').join('Lark').replace(/&/g, '&amp;')));
+    if (!page.includes(sentence(own, l)) || wrong.length || !/data-landing="failed"/.test(page)) matrix.push({ l, w, own, wrong });
+  }
+  ok(!matrix.length, `per verdict × language (${3 * (WHYS_SEEN.length + 2)} pages): its own sentence and NONE of the others' — the «expired» words only for an expired state; an unknown why reads «refused», which claims nothing`, matrix);
+  ok(/before VibeSpace restarted/.test(sentence('bad-hmac', 'en')) && /重启之前/.test(sentence('bad-hmac', 'zh')) && /再起動する前/.test(sentence('bad-hmac', 'ja')) && /longer than 30 minutes/.test(sentence('expired', 'en')) && /30 分钟/.test(sentence('expired', 'zh')) && /30 分以上/.test(sentence('expired', 'ja')) && CR.STATE_TTL_MS === 30 * 60e3,
+    'a state signed before a restart (bad-hmac) says VibeSpace restarted; an expired one says it took longer than the state\'s 30 minutes (the number IS STATE_TTL_MS)');
+  // the REAL verdicts, end to end through the page: another boot's HMAC after a restart, an old state, a broken one, another kind
+  const rst = CR.stateOf({ origin: POD, flowId: 'abcdef0123456789', issuedAt: 1_800_000_000_000, kind: 'lark' }, sign);
+  const otherBoot = (c) => crypto.createHmac('sha256', 'the-boot-before').update(String(c)).digest('base64url');
+  const real = {
+    'bad-hmac': CR.stateVerdict(rst, { sign: otherBoot, now: 1_800_000_060_000, kind: 'lark' }).why,
+    expired: CR.stateVerdict(rst, { sign, now: 1_800_000_000_000 + CR.STATE_TTL_MS + 1000, kind: 'lark' }).why,
+    'bad-shape': CR.stateVerdict(rst.slice(0, 20), { sign, now: 1_800_000_060_000, kind: 'lark' }).why,
+    'wrong-kind': CR.stateVerdict(rst, { sign, now: 1_800_000_060_000, kind: 'gmail' }).why,
+  };
+  const realBad = Object.entries(real).filter(([want, got]) => got !== want || !CR.landingHtml({ ok: false, why: got }, { name: 'Lark', lang: 'zh' }).includes(sentence(want, 'zh')));
+  ok(!realBad.length, 'the state\'s own verdicts reach the page as their own words (zh): a restart, past 30 minutes, a cut address, another kind', real);
+  // (e) RED CONTROLS (mutant copies of src/consent-road.js)
+  const roadSrc = fs.readFileSync(path.join(REPO, 'src/consent-road.js'), 'utf8');
+  const USER = "  const user = x.ok && typeof x.user === 'string' && x.user ? ` (${landingUser(x.user)})` : '';";
+  const bare = MUT.load('src/consent-road.js', roadSrc.replace(USER, "  const user = x.ok && typeof x.user === 'string' && x.user ? ` (${escHtml(x.user.slice(0, 200))})` : '';"), 'bare-user');
+  const bp = bare.landingHtml({ ok: true, user: ADDR }, { name: 'Google' });
+  ok(roadSrc.split(USER).length === 2 && CF.test(bp) && !bp.includes('email_off'), 'RED CONTROL: the address printed as escaped text alone (the base) is what Cloudflare rewrites into «[email protected]» — red on (c)', bp.match(CF) && bp.match(CF)[0]);
+  const WHY = "  const why = (Object.prototype.hasOwnProperty.call(LANDING_WHY, x.why) ? LANDING_WHY[x.why] : LANDING_WHY.refused)[l];";
+  const catchAll = MUT.load('src/consent-road.js', roadSrc.replace(WHY, '  const why = LANDING_WHY.expired[l];'), 'catch-all');
+  const caught = WHYS_SEEN.filter((w) => w !== 'expired' && catchAll.landingHtml({ ok: false, why: w }, { name: 'Lark', lang: 'en' }).includes(sentence('expired', 'en')));
+  ok(roadSrc.split(WHY).length === 2 && caught.length === WHYS_SEEN.length - 1, `RED CONTROL: a page whose every refusal reads «expired» (the owner's B-24d8) — red on (d) for each of the ${WHYS_SEEN.length - 1} other verdicts`, caught);
+  const LANG_PICK = "  const l = LANGS.includes(lang) ? lang : 'en';";
+  const stacked = MUT.load('src/consent-road.js', roadSrc.replace(LANG_PICK, "  const l = 'en';"), 'deaf');
+  ok(roadSrc.split(LANG_PICK).length === 2 && !stacked.landingHtml({ ok: true }, { name: 'Lark', lang: 'zh' }).includes(CR.LANDING.ok.zh.split('{')[0].slice(0, 12)), 'RED CONTROL: a page deaf to the language answers a zh browser in English — red on (b)');
 }
 
 // ── the loopback fake vendor (Lark both brands, Google) ──
@@ -240,13 +363,16 @@ const fetchFn = (url, opts) => {
 const hostOf = (p) => Object.entries(HOSTS).find(([, pre]) => p.startsWith(pre + '/'))?.[0] || null;
 
 // ── the world: the real store, engine and routes ──
-async function world(tag, { fixedPath = 'lark/cb', publicUrl = POD, larkPreset = { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' }, env = {}, serverSetting = () => undefined, drive = { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1' } } = {}) {
+// lane oauth-relay-one-source: `env` is the process env handed to the STORE (the fleet relay's one reader — the engine reads
+// no env for it) and to the engine; `presets` = a presets-directory reader (src/server/cluster-presets.js) or null; `eng` =
+// the engine module (a RED control hands a mutant copy)
+async function world(tag, { fixedPath = 'lark/cb', publicUrl = POD, larkPreset = { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark' }, env = {}, presets = null, eng = ENG, serverSetting = () => undefined, drive = { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1' } } = {}) {
   const dir = path.join(ROOT, tag);
   fs.mkdirSync(dir, { recursive: true });
-  const integrations = STORE.create({ dataDir: path.join(dir, 'store'), env: { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'co', label: 'Company app', values: larkPreset }]) }, now: () => Date.now(), broadcast: () => {}, drivePresets: () => [drive], log: quiet });
+  const integrations = STORE.create({ dataDir: path.join(dir, 'store'), env: { ...env, VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'co', label: 'Company app', values: larkPreset }]) }, presets, now: () => Date.now(), broadcast: () => {}, drivePresets: () => [drive], log: quiet });
   const fixed = `http://127.0.0.1:${await freePort()}/${fixedPath}`;
   const oauth = OL.createOAuthLoopback({ log: quiet, fixedCallbackUrl: fixed });
-  const e = ENG.create({ dataDir: path.join(dir, 'eng'), env, serverSetting, broadcast: () => {}, integrations, log: quiet, fetch: fetchFn, oauth, publicUrl: () => publicUrl });
+  const e = eng.create({ dataDir: path.join(dir, 'eng'), env, serverSetting, broadcast: () => {}, integrations, log: quiet, fetch: fetchFn, oauth, publicUrl: () => publicUrl });
   RT.setup({ getEngine: () => e });
   const app = express(); app.use(express.json()); app.use(RT.router);
   const srv = http.createServer(app);
@@ -640,6 +766,129 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
   ok(roadSrc.split(DESK).length === 2 && was.road === 'relay' && was.redirectUri === PUBLIC_RELAY, 'RED CONTROL = c8aa8820: a verdict that never asks the client\'s kind sends a Desktop client through the https relay page — Google refuses it (redirect_uri_mismatch) — red on (a)', was);
 }
 
+// ── lane oauth-landing-words: the REAL route ──
+console.log('⑪ the landing route: the browser\'s language, the address as typed, a cancelled / replaced / restarted sign-in by name (the REAL engine + routes)');
+{
+  const CF = /[\w.+-]+@[\w-]+\.[\w.-]+/;   // what Cloudflare's Email Address Obfuscation rewrites
+  const w = await world('landing-words');
+  let w2 = null;
+  const land = (on, p, al) => fetch(`${on.origin}${p}`, { headers: al ? { 'accept-language': al } : {} }).then(async (r) => ({ status: r.status, vary: r.headers.get('vary') || '', csp: r.headers.get('content-security-policy') || '', body: await r.text() }));
+  const said = (page, why, l) => page.includes(CR.LANDING_WHY[why][l].split('{name}').join('Lark')) && new RegExp(`<html lang="${l}">`).test(page) && (page.match(/<p[ >]/g) || []).length === 1;
+  try {
+    // Google from a ja browser: one language, the mailbox as typed (markers + &#64;), the close script, Vary
+    const g = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD });
+    const gl = await land(w, landOn(g.url, 'words-google-code'), 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7');
+    ok(gl.status === 200 && /data-landing="ok"/.test(gl.body) && /<html lang="ja">/.test(gl.body) && gl.body.includes(CR.LANDING.ok.ja.split('{name}')[0]) && !gl.body.includes('signed in to') && !gl.body.includes('已登录')
+      && gl.body.includes('<!--email_off-->ada.road&#64;example.test<!--/email_off-->') && !CF.test(gl.body) && !gl.body.includes('@') && gl.body.includes(`<script>${CR.CLOSE_SCRIPT}</script>`) && gl.csp.includes(`sha256-${HASH}`) && /accept-language/i.test(gl.vary),
+      'Google lands from a ja browser: the page is Japanese only, the mailbox is printed inside <!--email_off--> with its @ as &#64; (nothing for a proxy to mask), the tab still closes itself; Vary: Accept-Language', { status: gl.status, vary: gl.vary, body: gl.body.slice(-420) });
+    // Lark connected from a zh browser, then its Re-authorize CANCELLED (zh), REPLACED by a newer one (ja), and a state from before a RESTART (en)
+    const st = await w.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: POD });
+    const ll = await land(w, landOn(st.url, 'words-lark-code'), 'zh-CN,zh;q=0.9,en;q=0.8');
+    ok(ll.status === 200 && /<html lang="zh">/.test(ll.body) && /已登录 Lark/.test(ll.body) && /Ada Road/.test(ll.body) && !/signed in to|サインインしました/.test(ll.body), 'Lark lands from a zh browser: the page is Chinese only', ll.body.slice(-300));
+    await waitDone(w.e, st.flowId);
+    const made = await w.e.connect('lark', { flowId: st.flowId });
+    const id = made && made.adapter && made.adapter.id;
+    const c1 = await w.e.reauthorize(id, { origin: POD });
+    await w.e.cancelAuth(id);
+    const cl = await land(w, landOn(c1.flow.consentUrl, 'words-cancelled'), 'zh-CN,zh;q=0.9');
+    ok(cl.status === 400 && said(cl.body, 'cancelled', 'zh') && !cl.body.includes(CR.LANDING_WHY.expired.zh) && !/<script/.test(cl.body), 'a Re-authorize the person CANCELLED lands as «cancelled» in their language (zh) — the base said «(expired)»', cl.body.slice(-300));
+    const a1 = await w.e.reauthorize(id, { origin: POD });
+    const a2 = await w.e.reauthorize(id, { origin: POD });   // the person pressed Re-authorize again
+    const sl = await land(w, landOn(a1.flow.consentUrl, 'words-superseded'), 'ja');
+    ok(sl.status === 400 && said(sl.body, 'superseded', 'ja') && !sl.body.includes(CR.LANDING_WHY.expired.ja), 'the FIRST of two Re-authorize presses lands as «a newer sign-in was started — finish that one» (ja), never «expired»', sl.body.slice(-300));
+    const nl = await land(w, landOn(a2.flow.consentUrl, 'words-no-language'));
+    ok(nl.status === 200 && /<html lang="en">/.test(nl.body) && /signed in to Lark/.test(nl.body), 'no language said (fetch\'s own `*`) ⇒ English; the live Re-authorize still lands connected', nl.body.slice(-200));
+    // A RESTART: the same route now answers for a NEW engine (a new boot, a new state key — world() rebinds the routes);
+    // the state is the first press's, signed by the boot before (the state is judged before any flow is looked up)
+    w2 = await world('landing-words-reboot');
+    const rl = await land(w, landOn(a1.flow.consentUrl, 'words-restarted'), 'en-US,en;q=0.9');
+    ok(rl.status === 400 && said(rl.body, 'bad-hmac', 'en') && /before VibeSpace restarted/.test(rl.body) && !rl.body.includes(CR.LANDING_WHY.expired.en), 'a sign-in started before a restart (the boot before\'s state key) lands as «started before VibeSpace restarted — start it again» (en)', rl.body.slice(-300));
+  } finally { await w.close(); if (w2) await w2.close(); }
+}
+
 await new Promise((r) => vendor.close(r));
+// ── ⑩ lane oauth-relay-one-source: the fleet's relay page has ONE source — the presets' fleet.json ──
+console.log('⑩ one source: the fleet\'s relay page from the presets\' fleet.json (live) › the deprecated env › none');
+{
+  const CP = require(path.join(REPO, 'src/server/cluster-presets.js'));
+  const NEW_RELAY = 'https://admin2.fleet.example.test/relay/', MINE_RELAY = 'https://mine.fleet.example.test/relay/';
+  const pdir = path.join(ROOT, 'presets-fleet');
+  fs.mkdirSync(path.join(pdir, CP.OVERRIDE_DIR), { recursive: true });
+  /** a plain presets directory (self-hosting's shape): write / remove one layer's fleet file, then ONE re-read */
+  const put = async (r, layer, body) => { const f = layer === 'release' ? path.join(pdir, CP.OVERRIDE_DIR, CP.FILES.fleet) : path.join(pdir, CP.FILES.fleet); if (body === null) fs.rmSync(f, { force: true }); else fs.writeFileSync(f, JSON.stringify(body)); await r.reload(); };
+  const said = []; const plog = { log: (...a) => said.push(a.join(' ')), warn: (...a) => said.push('W ' + a.join(' ')), error: (...a) => said.push('E ' + a.join(' ')) };
+  fs.writeFileSync(path.join(pdir, CP.FILES.fleet), JSON.stringify({ relayUrl: ADMIN_RELAY }));
+  const reader = CP.create({ dir: pdir, log: plog, debounceMs: 20, pollMs: 60000 });
+  await reader.start();
+  const rd = (st) => new URL(st.url).searchParams.get('redirect_uri');
+  const w = await world('one-source', { publicUrl: FLEET, presets: reader });
+  try {
+    const l = await w.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: FLEET });
+    const g = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: FLEET });
+    const kinds = w.e.digest({ scope: 'accounts' }).kinds || [];
+    const presetPages = ['lark', 'gmail'].map((k) => ((kinds.find((x) => x.kind === k) || {}).presets || []).map((x) => x.relayPage).join());
+    const fleetPage = (((kinds.find((x) => x.kind === 'lark') || {}).relayPages) || []).find((x) => x.who === 'fleet');
+    ok(rd(l) === ADMIN_RELAY && rd(g) === ADMIN_RELAY && l.flow.road === 'relay' && presetPages.join('|') === `${ADMIN_RELAY}|${ADMIN_RELAY}` && fleetPage && fleetPage.url === ADMIN_RELAY && said.some((x) => x.includes(`relay page ${ADMIN_RELAY}`)),
+      'a pod with NO relay env: the presets\' fleet.json names the fleet\'s page — Lark and Gmail consents, the digest\'s relayPages and each company preset\'s relayPage all carry it; the boot line names it', { lark: rd(l), gmail: rd(g), presetPages, boot: said[0] });
+    said.length = 0;
+    await put(reader, 'cluster', { relayUrl: NEW_RELAY });
+    const l2 = await w.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: FLEET });
+    const g2 = await w.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: FLEET });
+    const line = said.filter((x) => /\[presets\] changed/.test(x));
+    ok(rd(l2) === NEW_RELAY && rd(g2) === NEW_RELAY && line.length === 1 && line[0].includes(`relay page changed (now ${NEW_RELAY})`),
+      `a fleet.json edit reaches the NEXT Connect of the RUNNING instance — no restart; ONE journal line: ${line[0]}`, { lark: rd(l2), gmail: rd(g2), said });
+    await put(reader, 'release', { relayUrl: MINE_RELAY });
+    const l3 = await w.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: FLEET });
+    ok(rd(l3) === MINE_RELAY && reader.fleet().relayUrl === MINE_RELAY, 'the release\'s override/fleet.json wins over the cluster\'s (like the rows)', rd(l3));
+    await put(reader, 'release', { relayUrl: '' });
+    const l4 = await w.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: FLEET });
+    ok(rd(l4) === `${FLEET}/api/channels/oauth/cb/lark` && l4.flow.road === 'route', 'an override relayUrl "" = this release has NO relay page (the presets answered): the pod\'s own route', rd(l4));
+    await put(reader, 'release', null);
+  } finally { await w.close(); }
+  // fleet.json › the deprecated env › none
+  {
+    const both = await world('one-source-env', { publicUrl: FLEET, presets: reader, env: FLEET_ENV });
+    try { const st = await both.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: FLEET }); ok(rd(st) === NEW_RELAY, 'fleet.json AND the old env both set: the presets\' page (the env is only the fallback)', rd(st)); } finally { await both.close(); }
+    const bare = CP.create({ dir: path.join(ROOT, 'presets-none'), log: quiet });
+    const envOnly = await world('one-source-envonly', { publicUrl: FLEET, presets: bare, env: FLEET_ENV });
+    try { const st = await envOnly.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: FLEET }); ok(rd(st) === ADMIN_RELAY, 'no fleet.json, the old env set: the env\'s page — for ONE release (the deprecated fallback)', rd(st)); } finally { await envOnly.close(); }
+    const none = await world('one-source-none', { publicUrl: FLEET, presets: bare });
+    try { const st = await none.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: FLEET }); ok(rd(st) === `${FLEET}/api/channels/oauth/cb/lark`, 'neither: no fleet relay page — the pod\'s own route', rd(st)); } finally { await none.close(); }
+    const lines = []; const cap = { log: (...a) => lines.push(a.join(' ')), warn: (...a) => lines.push(a.join(' ')), error: (...a) => lines.push(a.join(' ')) };
+    const sOld = STORE.create({ dataDir: path.join(ROOT, 'one-source-said', 'a'), env: FLEET_ENV, presets: reader, log: cap });
+    const sNew = STORE.create({ dataDir: path.join(ROOT, 'one-source-said', 'b'), env: {}, presets: reader, log: cap });
+    const dep = lines.filter((x) => x.includes('VIBESPACE_OAUTH_RELAY_URL'));
+    ok(dep.length === 1 && dep[0].endsWith("VIBESPACE_OAUTH_RELAY_URL is read for the last time: move it to the presets' fleet.json (the chart does)") && sOld.fleetRelayUrl() === NEW_RELAY && sNew.fleetRelayUrl() === NEW_RELAY,
+      'the old env set ⇒ ONE boot line, by its words; unset ⇒ none', dep);
+    await put(reader, 'release', { relayUrl: '' });
+    const blank = sOld.fleetRelayUrl();
+    await put(reader, 'release', null);
+    ok(blank === '' && sOld.fleetRelayUrl() === NEW_RELAY, 'an override relayUrl "" answers NONE even where the old env is set — a field the presets name is their answer; removed, the cluster\'s page is back', { blank });
+  }
+  // a preset's own relayUrl wins over the fleet's (both sources)
+  {
+    const own = await world('one-source-own', { publicUrl: FLEET, presets: reader, env: FLEET_ENV, larkPreset: { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', relayUrl: CO_RELAY }, drive: { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1', relayUrl: CO_RELAY } });
+    try {
+      const l = await own.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin: FLEET });
+      const g = await own.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: FLEET });
+      ok(rd(l) === CO_RELAY && rd(g) === CO_RELAY, 'a company preset naming its own relayUrl rides it over fleet.json AND the env (relayPick: its own › the fleet\'s)', { lark: rd(l), gmail: rd(g) });
+    } finally { await own.close(); }
+  }
+  // RED CONTROL = ffc8b1ff: the engine read the env — the presets carried the page, the env did not (a pod never restarted)
+  {
+    const engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+    const NOW = "  const fleetRelayUrl = () => { try { return integrations && typeof integrations.fleetRelayUrl === 'function' ? String(integrations.fleetRelayUrl() || '').trim() : ''; } catch { return ''; } };";
+    const WAS = "  const fleetRelayUrl = () => String((env && env.VIBESPACE_OAUTH_RELAY_URL) || '').trim();";
+    const base = MUT.load('src/server/channels-engine.js', engSrc.replace(NOW, WAS), 'env-relay');
+    const b = await world('one-source-base', { publicUrl: FLEET, presets: reader, eng: base });
+    try {
+      const g = await b.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: FLEET });
+      ok(engSrc.split(NOW).length === 2 && rd(g) === `${FLEET}/api/channels/oauth/cb/gmail`,
+        'RED CONTROL = ffc8b1ff: an engine that reads the relay from its env sends a pod whose presets name the page (and whose env does not) to its OWN route — the redirect_uri_mismatch of 2026-10-23 — red on ⑩\'s first leg', rd(g));
+    } finally { await b.close(); }
+  }
+  reader.stop();
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

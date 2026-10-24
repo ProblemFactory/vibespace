@@ -29,6 +29,14 @@ const { draftsOf } = require('../channel-record.js');   // lane gmail-draft-not-
 function namesNoteOf(labels) {
   return labels.length ? { namesNote: `note: people's names cannot be read on ${labels.map((l) => `"${l}"`).join(', ')} (its sign-in lacks the contact permission — the user can re-authorize the account), so a person shows by the vendor's name and a search by their nickname or other name finds nothing.` } : {};
 }
+/** lane channel-reauth-visible (userW inc-mvl9qdru-dlew): an account whose sign-in is DEAD is named by the agent's list / search /
+ *  read — what it lists is what was stored before, nothing new arrives — never an empty answer it cannot explain. */
+function signinNoteOf(labels) {
+  if (!labels.length) return {};
+  const names = labels.map((l) => `"${l}"`).join(', ');
+  return { signinNote: `note: ${names}: sign-in expired — the owner must re-authorize ${labels.length > 1 ? 'them' : 'it'} in Channels (rail → Channels → the account's Reconnect); nothing new arrives from ${labels.length > 1 ? 'them' : 'it'} until then — what you read is what was stored before` };
+}
+const signinDead = (rec) => !!(rec && rec.signinDead && rec.enabled !== false);
 function create(engineCtx) {
   const {
     agentTitle, agentId, INBOX_KEY, i18nKey, INBOX_SOURCE, RESOLVED_BY, RECONCILE_SECONDS, ESTIMATE_CAP, registry, liveSessions, log, now, userTodos,
@@ -528,7 +536,7 @@ function create(engineCtx) {
     if (full) return searchFullFor(ctx, query, { adapterId, limit: n, saved });
     let covered = 0, accounts = 0;
     const results = [];
-    const blind = [];
+    const blind = [], dead = [];
     const hidden = { match: false, capped: false };
     let truncated = false;
     for (const rec of adapterRecords().adapters) {
@@ -548,6 +556,7 @@ function create(engineCtx) {
       accounts++;
       if (visible.size) {
         if (rec.namesReadable && rec.namesReadable.ok === false) blind.push(rec.label || rec.id);   // lane channel-names-readable
+        if (signinDead(rec)) dead.push(rec.label || rec.id);   // lane channel-reauth-visible
         // only the VISIBLE conversations' logs are read for what it is shown
         const r = await store.search(rec.id, query, { limit: 200, convIds: [...visible.keys()] });
         truncated = truncated || !!r.truncated;
@@ -574,7 +583,7 @@ function create(engineCtx) {
     results.sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
     const fullOffered = adapterRecords().adapters.some((r) => r.enabled !== false && (!adapterId || r.id === adapterId) && searchRowOf(registry.capsOf(r.kind)));
     const saidKind = SR.searchSaidKind({ hitsSeen: results.length, hiddenMatch: hidden.match, capped: hidden.capped && !hidden.match, accounts });   // lane search-no-group-log: a KEY, never the caller's query
-    return { ok: true, results, truncated, covered, fullOffered, match: SR.STORE_MATCH, hiddenMatch: hidden.match, saidKind, ...namesNoteOf(blind) };
+    return { ok: true, results, truncated, covered, fullOffered, match: SR.STORE_MATCH, hiddenMatch: hidden.match, saidKind, ...namesNoteOf(blind), ...signinNoteOf(dead) };
   }
   /** The built-in Agents adapter answers reach with msg-acl (other sessions — `vibespace-msg`'s door): not a channel the
    *  user shares through Channels, so a search never answers that something matched in its conversations. */
@@ -1100,7 +1109,8 @@ function create(engineCtx) {
     }
     const seen = new Set(out.map((c) => c.adapterId));
     const blind = adapterRecords().adapters.filter((r) => seen.has(r.id) && r.namesReadable && r.namesReadable.ok === false).map((r) => r.label || r.id);
-    if (blind.length) return { ok: true, conversations: out, more, moreRequestable, max: LIST_FOR_MAX, ...namesNoteOf(blind) };
+    const dead = adapterRecords().adapters.filter((r) => seen.has(r.id) && signinDead(r)).map((r) => r.label || r.id);   // lane channel-reauth-visible
+    if (blind.length || dead.length) return { ok: true, conversations: out, more, moreRequestable, max: LIST_FOR_MAX, ...namesNoteOf(blind), ...signinNoteOf(dead) };
     return { ok: true, conversations: out, more, moreRequestable, max: LIST_FOR_MAX };
   }
   /** THE REACH THE HOOK TEACHES ON (lane channels-teach, a fleet user's incident 2026-10-18: a session whose four
@@ -1132,6 +1142,24 @@ function create(engineCtx) {
     }
     return request ? 'request' : null;
   }
+  /** lane channel-reauth-visible: THE HOOK'S DEAD SIGN-INS — the labels (≤ 3, each ≤ 60 characters) of the accounts whose
+   *  sign-in is dead and that hold a conversation this principal may READ (listFor's reach, walked only for a dead
+   *  account — none dead ⇒ one pass over the records, no index walk). */
+  function signinExpiredFor(ctx) {
+    const dead = adapterRecords().adapters.filter((r) => signinDead(r) && !msgAclAdapter(r));
+    if (!dead.length) return [];
+    const out = [];
+    const live = store.index.live();
+    for (const rec of dead) {
+      for (const k in live) {
+        const en = live[k];
+        if (!en || en.adapterId !== rec.id || en.unlistedAt) continue;
+        if (ACL.canSee(reachFor(ctx, rec, en).level)) { out.push(String(rec.label || rec.id).slice(0, 60)); break; }
+      }
+      if (out.length >= 3) break;
+    }
+    return out;
+  }
   function readFor(ctx, adapterId, convId, { limit = 50, since = null } = {}) {
     const { en, rec } = convFor(adapterId, convId);
     if (!en || !rec || rec.enabled === false) return ACL.notFound();
@@ -1159,7 +1187,7 @@ function create(engineCtx) {
     const heldIds = new Set((Array.isArray(en.pending) ? en.pending : []).map((p) => p && p.record && (typeof p.record === 'string' ? p.record : p.record.id)).filter((x) => typeof x === 'string'));
     const budget = bv.lim ? { used: bv.used, lim: bv.lim, held: heldIds.size, spent: !bv.ok, text: agentId(`path ${convId}: ${bv.used} / ${bv.lim} wakes this hour (${heldIds.size} held)`, 300) } : null;
     const heldText = agentId(bv.ok ? 'held — it rides the next wake' : `held — ${bv.why}; it rides the next wake`, 300);
-    return { ok: true, conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId), polledAt: laneOf(en).lastPollAt || null }, ...(Array.isArray(callers) ? { callers: callers.map((c) => ({ id: agentId(c.id, 40), name: agentId(c.name, 80), kind: c.kind, delivery: c.delivery, lastCallAt: c.lastCallAt, generation: c.generation })) } : {}), ...(budget ? { budget } : {}), ...(dv.trashed ? { draftsTrashed: dv.trashed } : {}), records: withView(rec, records, { convId, agent: true }).map((r) => (r && heldIds.has(String(r.id)) ? { ...r, heldText } : r)) };   // verify r1 F2: the title through the belt; r3 F6: the key + id
+    return { ok: true, conversation: { key: agentId(en.key), adapterId, id: agentId(convId), title: agentTitle(en, convId), polledAt: laneOf(en).lastPollAt || null }, ...(Array.isArray(callers) ? { callers: callers.map((c) => ({ id: agentId(c.id, 40), name: agentId(c.name, 80), kind: c.kind, delivery: c.delivery, lastCallAt: c.lastCallAt, generation: c.generation })) } : {}), ...(budget ? { budget } : {}), ...(dv.trashed ? { draftsTrashed: dv.trashed } : {}), ...signinNoteOf(signinDead(rec) ? [rec.label || rec.id] : []), records: withView(rec, records, { convId, agent: true }).map((r) => (r && heldIds.has(String(r.id)) ? { ...r, heldText } : r)) };   // verify r1 F2: the title through the belt; r3 F6: the key + id
   }
   /**
    * STAMP AN AGENT'S READ (R3 §23 — the owner: "某个agent刚刚读取了的"): `en.
@@ -1856,7 +1884,7 @@ function create(engineCtx) {
     statsView, wakeLatencyFor, accountGrainOf, patternsOf, patternById, pkOf, legacyConvAssignment, convGrainOf, convFacts, effectiveFor, fanTargets,
     wakeEffOf, storedWatcherFor, itemIs, scopeKeyOf, watcherRef, accessRowView, watcherView, eligibleAboveView, grainView, reachFor, groupsOfSession,
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
-    directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
+    directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
     previewRule, membersNow, wakeAdmitOf,
   };

@@ -154,9 +154,15 @@ try {
   const tg = await (await fetch(`http://127.0.0.1:${PORT}/api/agent/window/targets`, { headers: { Authorization: `Bearer ${token}` } })).json();
   const row = (tg.targets || []).find((t) => t.handle === H);
   check('the opener grant: the agent\'s own targets list shows the window (hidden from every agent unless shared)', !!row, (tg.targets || []).map((t) => t.handle));
+  // int347 (lane grants-unify, .346, moved a window's share ROWS into the ONE grants store — door `window`; data/window-reach.json
+  // keeps only the share's MODE): the opener's own row is read where it lives now
+  const grantsFile = path.join(wt, 'data', 'grants.json');
+  const gj = fs.existsSync(grantsFile) ? JSON.parse(fs.readFileSync(grantsFile, 'utf8')) : {};
+  const wrows = (gj.rows || []).filter((r) => r && r.door === 'window' && String(r.resource) === String(H));
+  check('the reach record: ONE row by self-open (the grants store, door window: the opener alone, origin self-open)', wrows.length === 1 && (wrows[0].to || []).length === 1 && wrows[0].to[0].origin === 'self-open', wrows);
   const reachFile = path.join(wt, 'data', ENG.REACH_FILE);
   const reach = fs.existsSync(reachFile) ? JSON.parse(fs.readFileSync(reachFile, 'utf8')) : {};
-  check('the reach record: ONE row by self-open', ((reach.windows || {})[H] || { rows: [] }).rows.length === 1 && reach.windows[H].rows[0].by === 'self-open', reach.windows && reach.windows[H]);
+  check('…and window-reach.json keeps only its mode (no rows of its own)', !!(reach.windows || {})[H] && !('rows' in reach.windows[H]), reach.windows && reach.windows[H]);
 
   // ② the window verbs read it; the CDP verb is refused by name; the human row stays the user's
   const snap = await until(async () => { const r = await cli('vibespace-window', ['snapshot', H]); return r.code === 0 && /Press me|Hello rung/.test(r.out) ? r : null; }, 120000, 2000);

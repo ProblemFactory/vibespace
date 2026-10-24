@@ -205,6 +205,7 @@ function accountDot(a) {
   const auth = a.auth || { state: 'unknown' };
   if (a.enabled === false) return 'idle';
   if (a.flow && a.flow.running) return 'attn';
+  if (a.authState === 'expired') return 'bad';   // lane channel-reauth-visible: the dead sign-in, red until a pass goes through
   if (auth.state === 'connected') return a.consecutiveFailures >= 3 ? 'warn' : 'ok';
   if (auth.state === 'expired') return 'bad';
   if (auth.state === 'needs-credentials' || auth.state === 'vault-locked') return 'warn';
@@ -250,6 +251,33 @@ function errLine(app, a, sentence, kinds) {
   err.appendChild(fix);
   return err;
 }
+/** lane channel-reauth-visible (the owner 2026-10-23: 「进来之后账号行下方显示登录失效需要 reauth」): THE DEAD SIGN-IN'S RED LINE,
+ *  first under the account's head — «Sign-in expired — re-authorize · <cause> · since <time>» + Reconnect (THE account's
+ *  Re-authorize dialog: the same record — options, access rows, history kept); while a consent is in flight
+ *  «Re-authorizing… (in the tab that opened)» + Cancel. Its own class (`.chan-sec-reauth`): a FOLDED section still shows
+ *  it. A source with no login of its own (`verb: false`) says the words without a verb. null = the sign-in is not dead. */
+function signinLine(app, a, kinds, { verb = true } = {}) {
+  const text = chanCaps.signinLineText(a, { t, when: (ms) => rowTime(ms) });
+  if (!text) return null;
+  const el = document.createElement('div');
+  el.className = 'chan-sec-reauth';
+  el.dataset.chanReauth = a.id;
+  el.dataset.state = a.authState;
+  el.appendChild(icon('alert', 11));
+  const s = document.createElement('span');
+  s.className = 'chan-sec-reauth-text';
+  s.textContent = text;
+  s.title = text;
+  el.appendChild(s);
+  if (verb) {
+    const b = a.authState === 'pending'
+      ? btn(t('Cancel'), () => post(`/api/channels/adapters/${encodeURIComponent(a.id)}/auth/cancel`, {}))
+      : btn(t('Reconnect'), () => showReauthAccountDialog(app, a, { kinds }), 'mounts-btn-primary');
+    b.classList.add('chan-sec-reauth-btn');
+    el.appendChild(b);
+  }
+  return el;
+}
 /** THE LINES UNDER AN ACCOUNT'S HEAD — the health line when it is well, the
  *  error line + button when its sign-in died or its client is gone, a
  *  consent in flight, the countdown to a due re-authorization, a failing
@@ -266,8 +294,10 @@ function accountLines(app, a, kinds) {
     out.push(n);
     return out;
   }
+  const dead = signinLine(app, a, kinds);   // lane channel-reauth-visible: the dead sign-in, said first (its own Cancel while a consent runs)
+  if (dead) out.push(dead);
   if (a.flow && a.flow.running) {
-    out.push(healthLine(a, t('Signing in…'), { verbs: [btn(t('Cancel'), () => post(`/api/channels/adapters/${encodeURIComponent(a.id)}/auth/cancel`, {}))] }));
+    if (!dead) out.push(healthLine(a, t('Signing in…'), { verbs: [btn(t('Cancel'), () => post(`/api/channels/adapters/${encodeURIComponent(a.id)}/auth/cancel`, {}))] }));
   } else if (auth.state === 'vault-locked') {
     out.push(vaultLine(a));
   } else if (auth.state === 'connected') {
@@ -367,8 +397,9 @@ function accountLines(app, a, kinds) {
     // a failing pass BEFORE the third failure (the "For you" line below takes over from there)
     if (ps.note && !(a.consecutiveFailures >= 3)) out.push(noteLine('chan-sec-note', ps.note, { warn: true }));
   } else if (auth.state === 'expired') {
-    // D8: the mounts' auth-death sentence VERBATIM (its nouns the channel's), the channel's why CODE in brackets
-    out.push(errLine(app, a, `${t('connected but the sign-in has expired or been revoked — conversations come from cache while every fetch fails; re-authorize to fix')} (${auth.why || 'needs-reauth'})`, kinds));
+    // D8: the mounts' auth-death sentence VERBATIM (its nouns the channel's), the channel's why CODE in brackets — unless the
+    // red line above already says it (lane channel-reauth-visible: one sentence, one Reconnect)
+    if (!dead) out.push(errLine(app, a, `${t('connected but the sign-in has expired or been revoked — conversations come from cache while every fetch fails; re-authorize to fix')} (${auth.why || 'needs-reauth'})`, kinds));
   } else if (auth.state === 'needs-credentials') {
     const cred = a.credential || {};
     const why = R.credentialWhyText({ whyCode: cred.whyCode || auth.whyCode || null, whyParams: cred.whyParams || auth.whyParams || null }, { t }) || chanCaps.authWhyText('no-credentials', { t });
@@ -805,6 +836,7 @@ function adapterDot(a) {
   const auth = a.auth || { state: 'unknown' };
   if (a.enabled === false) return 'idle';
   if (a.flow && a.flow.running) return 'attn';
+  if (a.authState === 'expired') return 'bad';   // lane channel-reauth-visible
   if (a.consecutiveFailures >= 3) return 'warn';
   if (auth.state === 'connected') return 'ok';
   if (auth.state === 'expired' || auth.state === 'needs-credentials' || auth.state === 'vault-locked') return 'warn';
@@ -825,6 +857,8 @@ function adapterNotes(app, a) {
     for (const v of verbs) { v.classList.add('chan-sec-verb'); n.appendChild(v); }
     notes.push(n);
   };
+  const dead = a.enabled === false ? null : signinLine(app, a, [], { verb: false });   // lane channel-reauth-visible
+  if (dead) notes.push(dead);
   if (a.enabled === false) {
     line(t('disabled'), { verbs: [btn(t('Enable'), () => put(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { enabled: true }))] });
   } else if (auth.state === 'connected') {
@@ -1864,7 +1898,7 @@ export function renderChannelsPanel(app, c) {
     const sec = { appendChild: (x) => { secKids.push(x); return x; }, classList: secEl.classList };
     const fo = curFolds.get(a.id) || { folded: false, virtual: false, needN: 0, matchRows: [] };
     const folded = fo.folded;
-    secEl.className = 'chan-sec chan-account' + (folded ? ' chan-collapsed' : '');
+    secEl.className = 'chan-sec chan-account' + (folded ? ' chan-collapsed' : '') + (a.authState === 'expired' || a.authState === 'pending' ? ' chan-sec-dead' : '');   // lane channel-reauth-visible: the red left edge
     secEl.dataset.fold = fo.virtual ? 'filter' : folded ? 'folded' : 'open';
     // THE HEAD IS A KEPT NODE, PATCHED IN PLACE (verify round 6, 2026-09-27): round 5 kept a head rebuilt EQUAL, but
     //  the count's title ("{n} conversations · {k} unread") changes on every message a broadcast brings, so on a busy
@@ -2002,7 +2036,7 @@ export function renderChannelsPanel(app, c) {
     // lane channels-fold-default: every other source folds like an account (curFolds); the agents watcher keeps its rule
     const fo = builtinAgents ? null : (curFolds.get(a.id) || { folded: false, virtual: false, needN: 0, matchRows: [] });
     const folded = fo ? fo.folded : EXPANDED.has(a.id) ? false : (COLLAPSED.has(a.id) || nothingAssigned);
-    secEl.className = 'chan-sec' + (folded ? ' chan-collapsed' : '');
+    secEl.className = 'chan-sec' + (folded ? ' chan-collapsed' : '') + (a.authState === 'expired' || a.authState === 'pending' ? ' chan-sec-dead' : '');   // lane channel-reauth-visible
     if (fo) secEl.dataset.fold = fo.virtual ? 'filter' : folded ? 'folded' : 'open';
     const h = document.createElement('div');
     h.className = 'chan-sec-head folder-header';

@@ -15,6 +15,14 @@
  *   <dir>/gdrive-clients.json          the cluster layer (the Google clients env's JSON)
  *   <dir>/override/integrations.json   the release layer (the user's own release values)
  *   <dir>/override/gdrive-clients.json
+ *   <dir>/fleet.json, <dir>/override/fleet.json   THE FLEET FACTS (lane oauth-relay-one-source, 2026-10-23 — the
+ *                                      owner: «你为啥搞了两套分发 auth client 的方案»): ONE JSON object per layer,
+ *                                      today `{"relayUrl": "https://…/relay/"}` — the fleet's sign-in relay page.
+ *                                      It was a chart value rendered as env VIBESPACE_OAUTH_RELAY_URL, which moves
+ *                                      only at a pod restart while the client rows beside it moved live: a pod never
+ *                                      restarted got the new Google clients and no relay page ⇒ redirect_uri_mismatch.
+ *                                      Now one road: merged per FIELD (src/preset-layers.js mergeFleet), watched
+ *                                      with the rest, the journal says «relay page changed»; `fleet()` reads it.
  *
  * `<dir>` = `VIBESPACE_PRESETS_DIR` (set and empty = off), else
  * /etc/vibespace/presets when it exists (the server's own instance only —
@@ -51,9 +59,11 @@ const fs = require('fs');
 const path = require('path');
 const P = require('../preset-layers.js');
 const { describeJsonError } = require('../secret-box.js');
+const ROAD = require('../consent-road.js');   // PURE: relayPageOf — whether fleet.json's relayUrl is a relay page address at all
 
 const DEFAULT_DIR = '/etc/vibespace/presets';
-const FILES = Object.freeze({ integrations: 'integrations.json', gdrive: 'gdrive-clients.json' });
+const FILES = Object.freeze({ integrations: 'integrations.json', gdrive: 'gdrive-clients.json', fleet: 'fleet.json' });
+const FLEET = 'fleet';            // the slot kind of fleet.json (an object, merged per field) beside the two list kinds
 const OVERRIDE_DIR = 'override';
 const MAX_BYTES = 1024 * 1024;
 const POLL_MS = 30 * 1000;
@@ -71,9 +81,9 @@ function resolveDir(env = process.env, { useDefault = false, isDir = (p) => { tr
 
 function create({ dir = null, log = console, now = () => Date.now(), pollMs = POLL_MS, debounceMs = DEBOUNCE_MS } = {}) {
   const fileOf = (layer, kind) => (layer === 'release' ? path.join(dir, OVERRIDE_DIR, FILES[kind]) : path.join(dir, FILES[kind]));
-  const slots = [];                       // {layer, kind, file, list:null|[], mtimeMs, said}
-  for (const layer of P.LAYERS) for (const kind of P.KINDS) slots.push({ layer, kind, list: null, mtimeMs: null, said: null });
-  let merged = { integrations: null, gdrive: null };
+  const slots = [];                       // {layer, kind, file, list:null|[] (fleet: null|{…}), mtimeMs, said}
+  for (const layer of P.LAYERS) for (const kind of [...P.KINDS, FLEET]) slots.push({ layer, kind, list: null, mtimeMs: null, said: null });
+  let merged = { integrations: null, gdrive: null, fleet: null };
   let loadedAt = null;
   let signature = null;
   const listeners = new Set();
@@ -91,6 +101,7 @@ function create({ dir = null, log = console, now = () => Date.now(), pollMs = PO
     let parsed;
     // never `e.message`: V8 quotes the bytes around a JSON error (a secret's tail)
     try { parsed = JSON.parse(text); } catch (e) { return { error: { code: 'unparseable', detail: describeJsonError(e) } }; }
+    if (slot.kind === FLEET) { try { return { list: P.parseFleet(parsed), mtimeMs: st.mtimeMs }; } catch (e) { return { error: { code: 'not-an-object', detail: 'the top level must be a JSON object' } }; } }
     try { return { list: P.PARSERS[slot.kind](parsed), mtimeMs: st.mtimeMs }; } catch (e) { return { error: { code: 'not-an-array', detail: 'the top level must be a JSON array' } }; }
   }
   /** Apply one outcome to its slot; a failure keeps the slot's previous list and is said ONCE per transition. */
@@ -112,7 +123,19 @@ function create({ dir = null, log = console, now = () => Date.now(), pollMs = PO
       for (const s of slots) if (s.kind === kind) layers[s.layer] = s.list;
       next[kind] = P.mergeLayers(kind, layers);
     }
+    const fl = {};
+    for (const s of slots) if (s.kind === FLEET) fl[s.layer] = s.list;
+    next.fleet = P.mergeFleet(fl);
     return next;
+  }
+  /** A relayUrl that is not a relay page address (https, no credentials / query / fragment, never a loopback host) gives
+   *  NO relay page — said once per transition, never the value (a mistyped field could hold anything). */
+  let relaySaid = '';
+  function sayRelay(m) {
+    const v = m && typeof m.facts.relayUrl === 'string' ? m.facts.relayUrl : '';
+    const line = v && !ROAD.relayPageOf(v) ? `[presets] ${m.layerOf.relayUrl === 'release' ? `${OVERRIDE_DIR}/${FILES.fleet}` : FILES.fleet}: relayUrl is not a relay page address (https, no credentials / query / fragment, never a loopback host) — no fleet relay page until it is fixed` : '';
+    if (line && line !== relaySaid) log.warn(line);
+    relaySaid = line;
   }
 
   /** A file in the directory (or override/) the reader does not know — a
@@ -129,7 +152,7 @@ function create({ dir = null, log = console, now = () => Date.now(), pollMs = PO
       for (const n of names) if (!n.startsWith('.') && !keep.has(n)) strays.push(sub ? `${sub}/${n}` : n);
     }
     const key = strays.join('|');
-    if (key && key !== saidStrays) log.warn(`[presets] ${dir}: ignored ${strays.join(', ')} — the files read are ${Object.values(FILES).join(', ')} (and the same two under ${OVERRIDE_DIR}/)`);
+    if (key && key !== saidStrays) log.warn(`[presets] ${dir}: ignored ${strays.join(', ')} — the files read are ${Object.values(FILES).join(', ')} (and the same under ${OVERRIDE_DIR}/)`);
     saidStrays = key;
   }
 
@@ -146,7 +169,9 @@ function create({ dir = null, log = console, now = () => Date.now(), pollMs = PO
     loadedAt = now();
     lastErrKey = slots.map((s) => (s.error ? `${s.layer}:${s.kind}:${s.error.code}` : '')).join('|');
     const n = P.KINDS.map((k) => `${k === 'gdrive' ? 'Google clients' : 'integrations'} ${merged[k] ? merged[k].entries.length : 'absent'}`).join(', ');
-    log.log(`[presets] ${dir}: ${n} (the environment is the fallback for an absent kind)`);
+    const relay = merged.fleet && 'relayUrl' in merged.fleet.facts ? (merged.fleet.facts.relayUrl || 'none') : 'absent';
+    log.log(`[presets] ${dir}: ${n}, relay page ${relay} (the environment is the fallback for an absent kind)`);
+    sayRelay(merged.fleet);
     sayStrays();
   }
 
@@ -198,14 +223,17 @@ function create({ dir = null, log = console, now = () => Date.now(), pollMs = PO
     const errorsMoved = errKey !== lastErrKey; lastErrKey = errKey;
     const diffs = Object.fromEntries(P.KINDS.map((k) => [k, P.diffEntries(k, merged[k] && merged[k].entries, next[k] && next[k].entries)]));
     const rungMoved = P.KINDS.filter((k) => !!merged[k] !== !!next[k]);
-    const kinds = P.KINDS.filter((k) => !P.diffEmpty(diffs[k]) || rungMoved.includes(k));
-    const sources = P.KINDS.filter((k) => attributionOf(merged[k]) !== attributionOf(next[k]));   // B-8145: the same values from another layer
+    const fleetMoved = P.diffFleet(merged.fleet, next.fleet);   // lane oauth-relay-one-source: the relay page, per field
+    const kinds = [...P.KINDS.filter((k) => !P.diffEmpty(diffs[k]) || rungMoved.includes(k)), ...(fleetMoved.length ? [FLEET] : [])];
+    const sources = [...P.KINDS, FLEET].filter((k) => attributionOf(merged[k]) !== attributionOf(next[k]));   // B-8145: the same values from another layer
+    sayRelay(next.fleet);
     if (!kinds.length && !sources.length && !errorsMoved) return null;
     const prev = merged; merged = next;
     if (kinds.length) {
       const words = P.KINDS.map((k) => P.diffWords(k, diffs[k])).filter(Boolean);
       const moved = rungMoved.map((k) => `${k === 'gdrive' ? 'Google clients' : 'integrations'} ${next[k] ? 'now from the presets directory' : 'no longer in the presets directory (the environment is the fallback)'}`);
-      log.log(`[presets] changed (${dir}): ${[...words, ...moved].join(' · ')}`);
+      const fleetSaid = fleetMoved.length ? [P.fleetWords(fleetMoved, next.fleet)] : [];
+      log.log(`[presets] changed (${dir}): ${[...words, ...moved, ...fleetSaid].join(' · ')}`);
     }
     // `kinds` empty = only a file's readability or a key's layer moved (`sources`): no line, the summary still changes
     const change = { kinds, sources, prev, at: loadedAt };
@@ -254,18 +282,21 @@ function create({ dir = null, log = console, now = () => Date.now(), pollMs = PO
     const m = merged[kind];
     return m ? m.entries.map((e) => (kind === 'integrations' ? { ...e, values: { ...e.values } } : { ...e })) : null;
   }
+  /** THE FLEET FACTS in effect (a copy: `{relayUrl?}` — a field present is the presets' answer, '' = none), or `null` =
+   *  neither layer has a fleet.json (the caller's fallback). lane oauth-relay-one-source. */
+  const fleet = () => (merged.fleet ? { ...merged.fleet.facts } : null);
   /** Value-free facts for the summary: per kind the counted items by layer,
    *  the newest file's mtime (when the admin's edit landed here) and the errors. */
   function status() {
     const items = [];
     for (const k of P.KINDS) items.push(...P.countItems(k, merged[k]));
     const times = slots.map((s) => s.mtimeMs).filter((x) => Number.isFinite(x));
-    return { dir, items, updatedAt: times.length ? Math.round(Math.max(...times)) : null, loadedAt, errors: slots.filter((s) => s.error).map((s) => s.error), present: Object.fromEntries(P.KINDS.map((k) => [k, !!merged[k]])) };
+    return { dir, items, updatedAt: times.length ? Math.round(Math.max(...times)) : null, loadedAt, errors: slots.filter((s) => s.error).map((s) => s.error), present: Object.fromEntries([...P.KINDS, FLEET].map((k) => [k, !!merged[k]])) };
   }
   const onChange = (fn) => { listeners.add(fn); return () => listeners.delete(fn); };
 
   bootRead();
-  return { dir, entries, status, onChange, start, stop, reload, FILES };
+  return { dir, entries, fleet, status, onChange, start, stop, reload, FILES };
 }
 
 // ── the process-wide instance (MountManager.drivePresets is static) ───────

@@ -185,16 +185,18 @@ change up within ~2 min, with no helm upgrade and no restart**:
 kubectl -n vibespace create secret generic vibespace-cluster-presets \
   --from-file=gdriveClients=gdrive-clients.json \
   --from-file=integrations=integrations.json \
+  --from-file=fleet=fleet.json \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Both keys are optional (omit a `--from-file` you do not use). The files hold
+Every key is optional (omit a `--from-file` you do not use). The files hold
 the same JSON the chart always took:
 
 | Secret key | File shape | Read by |
 |---|---|---|
 | `gdriveClients` | `[{key, label, clientId, clientSecret}, …]` — Google OAuth clients (Drive mounts, Gmail mounts and Gmail channel accounts). Name the one channels should default to `channels` when you provide more than one | `src/mounts.js` (`drivePresets`) |
 | `integrations` | `[{id, key?, label?, values: {…}}, …]` — one entry per registry row id (`src/integration-registry.js`); `values` keys are that row's field keys | `src/server/integration-store.js` |
+| `fleet` | `{"relayUrl": "https://admin.<domain>/relay/"}` — the fleet's sign-in relay page (below, "One sign-in redirect per vendor app") | `src/server/integration-store.js` (`fleetRelayUrl`) |
 
 How it works: Kubernetes updates a mounted Secret in place by atomically
 swapping the volume's `..data` link (within the kubelet's sync period — 1 min
@@ -225,7 +227,8 @@ from the values leaves that Secret on the same upgrade.
 
 Chart values: `presets.volume` (default `true`), `presets.clusterSecret`
 (default `vibespace-cluster-presets`), `presets.mountPath` (default
-`/etc/vibespace/presets`), `presets.override`. Both projected sources are
+`/etc/vibespace/presets`), `presets.override`, `presets.relayUrl` (this
+release's own relay page — the override's `fleet` key). Both projected sources are
 `optional`: a missing Secret or key projects nothing (the instance then says
 "Company presets: none — ask your admin"), never a pod that cannot start.
 
@@ -280,8 +283,8 @@ cluster.
   Secret (the projected volume, or `secretKeyRef` in the env form). A
   `value:` prints the credential in `kubectl get deploy -o yaml`.
 - **Self-hosting without Kubernetes**: point `VIBESPACE_PRESETS_DIR` at a
-  local directory holding `integrations.json` / `gdrive-clients.json` (and
-  `override/…`), or keep the env: `VIBESPACE_GDRIVE_CLIENTS`,
+  local directory holding `integrations.json` / `gdrive-clients.json` /
+  `fleet.json` (and `override/…`), or keep the env: `VIBESPACE_GDRIVE_CLIENTS`,
   `VIBESPACE_INTEGRATIONS`, and the single-field form
   `VIBESPACE_INTEGRATION_<ID>_<FIELD>` (id and field upper-cased, `-` → `_`,
   e.g. `VIBESPACE_INTEGRATION_LARK_APPSECRET`) for docker-compose. The
@@ -320,21 +323,56 @@ may come back to. Never list one per pod: every pod's sign-in under a company
 app rides ONE relay page, which sends the browser back to the pod it started
 from.
 
+**The relay page is a company preset — ONE road, the same Secret as the
+clients.** Put it in the cluster Secret's `fleet` key (`fleet.json`, the
+table above):
+
 ```bash
-helm upgrade u-<user> . --reuse-values --set oauthRelayUrl=https://admin.<domain>/relay/
+echo '{"relayUrl": "https://admin.<domain>/relay/"}' > fleet.json
+kubectl -n vibespace create secret generic vibespace-cluster-presets \
+  --from-file=gdriveClients=gdrive-clients.json \
+  --from-file=integrations=integrations.json \
+  --from-file=fleet=fleet.json \
+  --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-- `oauthRelayUrl` → `VIBESPACE_OAUTH_RELAY_URL` (every kind). The fleet admin
-  (vibespace-admin ≥ 2.11.0) serves the page at `/relay/`, allowing the fleet's
-  domain; any https host serving `docs/slack-relay/` with
+**A relay change is a Secret patch; every running pod follows within a
+minute — no helm upgrade, no restart.** The server logs
+`[presets] changed (…): relay page changed (now https://…/relay/)`.
+
+- Until 2.369.347 it was a chart value rendered as the env
+  `VIBESPACE_OAUTH_RELAY_URL` (`oauthRelayUrl`), which changes only when a pod
+  restarts — while the client rows beside it changed live. A pod that was
+  never restarted got the new Google clients and no relay page, so its sign-in
+  came back to its own address and Google answered `redirect_uri_mismatch`
+  (2026-10-23). The env is read ONE more release as a fallback when the
+  presets name no relay page (the server says
+  `VIBESPACE_OAUTH_RELAY_URL is read for the last time: move it to the presets' fleet.json (the chart does)`
+  at boot), then not at all.
+- The chart no longer renders the env. `presets.relayUrl` (one release's own
+  page) renders into that release's override Secret as `fleet`
+  (`override/fleet.json`, which wins over the cluster's, like the rows) — a
+  Secret-only upgrade, the pod does not roll. The old `oauthRelayUrl` is still
+  rendered the same way for one release (a values file or `--reuse-values`
+  from the 2.369.344 chart keeps working) and the install / upgrade NOTES say
+  to move it. The FIRST upgrade onto this chart rolls the pod once (the
+  projected volume gains the `fleet.json` items, the env line goes); after it,
+  a relay change never does. With `presets.volume=false` no relay page reaches
+  the pod (the NOTES say so). An app older than 2.369.348 reads only the env,
+  which this chart no longer renders: upgrade the chart once that release is
+  out (the roll's boot auto-update brings it), or keep a `relayUrl` on the
+  company's preset entries until then — a preset's own page wins anyway.
+- `"relayUrl": ""` in an override = that release has no relay page.
+- The fleet admin (vibespace-admin ≥ 2.11.0) serves the page at `/relay/`,
+  allowing the fleet's domain; any https host serving `docs/slack-relay/` with
   `data-allow="<your pods' domain>"` works the same.
 - Register, ONCE per company app: that address — and only that. A company
   preset never uses VibeSpace's public relay page (the owner, 2026-10-22): its
   relay is its own `"relayUrl"` (an `integrations.json` Lark or Slack entry's
-  values, a `gdrive-clients.json` entry), else the fleet's
-  `VIBESPACE_OAUTH_RELAY_URL`, else none. Every instance on the preset rides
-  it — a local hub too. A Google client must be a **Web application** client:
-  a Desktop client cannot take an https address.
+  values, a `gdrive-clients.json` entry), else the fleet's (`fleet.json`),
+  else none. Every instance on the preset rides it — a local hub too. A Google
+  client must be a **Web application** client: a Desktop client cannot take an
+  https address.
 - The public page (`https://problemfactory.github.io/vibespace/slack/`, the
   default of Settings → Channels → relay page) is only for a person's OWN app
   on a VibeSpace with no https address; a company app's setup never shows it.

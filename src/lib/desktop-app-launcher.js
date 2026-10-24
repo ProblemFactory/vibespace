@@ -749,6 +749,7 @@ export async function showLaunchDialog(app, opts = {}) {
   const doc = opts && opts.file && typeof opts.file === 'object' && opts.file.path ? opts.file : null;
   const refusal = doc && opts.refusal && opts.refusal.code ? opts.refusal : null;
   const { overlay, body, close } = createModalShell({ id: 'desktop-launch-dialog', title: doc ? t('Open with LibreOffice') : t('Apps'), dialogClass: 'desktop-launch', escapeToClose: true });
+  body.setAttribute('aria-busy', 'true'); // ANSWERING until its last step below (both reads in, the disclosure decided, the focus given) — a screen reader waits, and so can a suite
   // design 009 §B3: apps first — the head row (machines + "Install an app…"), Running, Apps, Browsers, Your installed
   // apps, Advanced; the intro, the sharing default, the backend's line and the real-desktop line live in the FOOTER
   body.innerHTML = `
@@ -1409,6 +1410,7 @@ export async function showLaunchDialog(app, opts = {}) {
     if (!overlay.isConnected) return;
     if (advancedOpen) focusQuiet(execIn);
     else focusQuiet(regEl.querySelector('.desktop-launch-card:not(:disabled)') || regEl.querySelector('.desktop-launch-office-install') || advToggle);
+    body.removeAttribute('aria-busy'); // ANSWERED (lane int347: the one signal of it — a card re-render drops the focus, so the focus is none)
   }, 0);
   return { overlay, close };
 }

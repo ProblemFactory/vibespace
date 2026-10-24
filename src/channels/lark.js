@@ -340,7 +340,7 @@ const RATE_OK = Object.freeze([
 // company preset's, else this setting (channels.larkRelayUrl, default the project's public page; empty = none).
 const CONSENT = Object.freeze({
   mode: Object.freeze(['fixed', 'public']),
-  landing: Object.freeze({ stateVerdict: (s, o = {}) => CR.stateVerdict(s, { ...o, kind: KIND }), landingHtml: (r) => CR.landingHtml(r, { name: 'Lark' }) }),
+  landing: Object.freeze({ stateVerdict: (s, o = {}) => CR.stateVerdict(s, { ...o, kind: KIND }), landingHtml: (r, o = {}) => CR.landingHtml(r, { lang: o.lang, name: 'Lark' }) }),
   callbackUrl: require('../integration-registry.js').rowById(INTEGRATION).setup.callbackUrl,
   relayUrlSetting: Object.freeze({ key: 'larkRelayUrl', fallback: CR.RELAY_DEFAULT }),   // the server setting channels.<key>
 });
@@ -952,6 +952,21 @@ const nextToken = (d) => (d && d.has_more !== false && (d.next_page_token || d.p
 // ── typed failures ─────────────────────────────────────────────────────
 /** Lark's own error codes that mean "this token is dead" / "slow down" / "no permission". */
 const CODE_AUTH = new Set([99991661, 99991663, 99991664, 99991665, 99991667, 99991668, 99991669, 99991670, 99991671, 20001, 20003, 20005, 20007, 20008, 20026, 20027, 20050]);
+/** lane channel-reauth-visible (the hub's Lark, 2026-10-23 06:46 PT: `20064` — the same user signed in to the same app on
+ *  another instance — arrived as `vendor-error`, so 30 passes re-POSTed a dead grant behind a LOW "3 consecutive failed
+ *  passes" line for 7 h): the token endpoint's own codes for a DEAD refresh token, each with its cause (channel-caps
+ *  SIGNIN_CAUSES), and its words for one — a refresh refused this way is `auth-expired` at the FIRST answer. */
+const REFRESH_DEAD = new Map([[20037, 'token-expired'], [20064, 'revoked-elsewhere'], [20073, 'refresh-refused']]);
+const REFRESH_DEAD_WORDS = /refresh[ _-]?token[^.]{0,80}?\b(revoked|refused|expired|invalid|used|not exist)/i;
+/** A token-refresh failure as the sign-in fact it is: a dead grant ⇒ `auth-expired` + its cause; a rate refusal, a 5xx or
+ *  a network failure stays what it was (the ladder retries those). */
+function refreshFailure(e) {
+  if (!(e instanceof ChannelError) || e.code === 'rate-limited' || e.code === 'transport' || (e.detail && (e.detail.tokenDropped || e.detail.paceAborted))) return e;
+  const code = e.detail && Number(e.detail.code);
+  const cause = REFRESH_DEAD.get(code) || (e.code === 'auth-expired' || REFRESH_DEAD_WORDS.test(String(e.message || '')) ? 'refresh-refused' : null);
+  if (!cause) return e;
+  return new ChannelError('auth-expired', e.message, { retryable: false, detail: { ...(e.detail || {}), cause } });
+}
 const CODE_RATE = new Set([99991400, 99991401, 99991402, 99991403, 11232, 230020]);
 const CODE_FORBIDDEN = new Set([99991672, 99991679, 230002, 230006, 230011, 230013, 230014]);
 const CODE_NOT_FOUND = new Set([230001, 230003, 230026]);
@@ -1191,11 +1206,11 @@ function create(record = {}, deps = {}) {
     if (!cred.values) throw vaultLockedWhy(cred.why) ? notConnectedError('Lark', cred.why) : new ChannelError('auth-expired', `Lark app credential missing: ${cred.why}`, { retryable: false, detail: { needsCredentials: true } });
     const { token, why } = readToken();
     if (!token) throw notConnectedError('Lark', why);   // lane vault-e2e-password-fix-r2: a LOCKED vault is `vault-locked`, never "expired"
-    if (token.invalidGrantAt) throw new ChannelError('auth-expired', 'Lark refresh token was refused — re-authorize', { retryable: false });   // verify r5: a dead grant is not POSTed again per request (auth.state already said needs-reauth)
+    if (token.invalidGrantAt) throw new ChannelError('auth-expired', 'Lark refresh token was refused — re-authorize', { retryable: false, detail: { cause: token.invalidGrantCause || 'refresh-refused' } });   // verify r5: a dead grant is not POSTed again per request (auth.state already said needs-reauth)
     if (unsaved && unsaved.token === token) await persistToken(token, unsaved.supersedes);   // verify r5: the store's next chance at a token it could not persist
     if (token.access_token && Number(token.expiresAt) > now() + REFRESH_MARGIN_MS) return token.access_token;
-    if (!token.refresh_token) throw new ChannelError('auth-expired', 'Lark access token expired and no refresh token is held — re-authorize', { retryable: false });
-    if (Number(token.refreshExpiresAt) && Number(token.refreshExpiresAt) <= now()) throw new ChannelError('auth-expired', 'Lark refresh token expired — re-authorize', { retryable: false });
+    if (!token.refresh_token) throw new ChannelError('auth-expired', 'Lark access token expired and no refresh token is held — re-authorize', { retryable: false, detail: { cause: 'token-expired' } });
+    if (Number(token.refreshExpiresAt) && Number(token.refreshExpiresAt) <= now()) throw new ChannelError('auth-expired', 'Lark refresh token expired — re-authorize', { retryable: false, detail: { cause: 'token-expired' } });
     if (refreshing) { await refreshing; return accessToken(depth + 1); }   // a sibling's refresh: wait for it, then read what it wrote
     refreshing = refreshAccessToken(cred, token).finally(() => { refreshing = null; });
     const got = await refreshing;
@@ -1248,6 +1263,7 @@ function create(record = {}, deps = {}) {
         body: { grant_type: 'refresh_token', client_id: cred.values.appId, client_secret: cred.values.appSecret, refresh_token: token.refresh_token },
       });
     } catch (e) {
+      e = refreshFailure(e);   // lane channel-reauth-visible: 20064 & co. are a dead grant at the FIRST answer, never 3 vendor-errors
       // A refresh the vendor REFUSES is a fact about the token record, so it
       // is stamped on it: `auth.state()` answers `needs-reauth` from now on
       // (the row's re-authorize control), instead of retrying a dead grant
@@ -1259,7 +1275,7 @@ function create(record = {}, deps = {}) {
         // verify r5: a refusal for a token the store has since REPLACED (a re-authorize, a sibling entry's rotation
         // that landed first — the straggler of a rotation) is superseded, not a fact about the account
         if (cur && !cur.invalidGrantAt && String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;
-        if (cur && String(cur.refresh_token || '') === String(token.refresh_token || '')) await tokens.write({ ...cur, invalidGrantAt: now() }, { expiresAt: cur.refreshExpiresAt || null, scopes: cur.scopes || [], supersedes: String(cur.refresh_token || '') });
+        if (cur && String(cur.refresh_token || '') === String(token.refresh_token || '')) await tokens.write({ ...cur, invalidGrantAt: now(), invalidGrantCause: (e.detail && e.detail.cause) || 'refresh-refused' }, { expiresAt: cur.refreshExpiresAt || null, scopes: cur.scopes || [], supersedes: String(cur.refresh_token || '') });
       }
       throw e;
     }

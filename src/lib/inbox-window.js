@@ -337,7 +337,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     producer: () => actBtn('producer', UI_ICONS.refresh, t('Use a reset credit…'), t('Use a reset credit…'), 'iw-act-producer'),
     // "Clear content…" (verify r2: the verb had no visible door, only a right-click) — THE model's verb, the one dialog
     clear: () => actBtn('clear', UI_ICONS.eraser, t('Clear content…'), t('Replace this item’s text — it keeps its place and time'), 'iw-act-clear'),
-    'channel-reauth': () => actBtn('channel-reauth', UI_ICONS.check, t('Re-authorize'), t('Re-authorize'), 'iw-act-primary'), // lane channel-names-readable: the account's Re-authorize dialog
+    'channel-reauth': (it) => (it && it.action && it.action.signin === 'expired'   // lane channel-reauth-visible: a dead sign-in's verb is Reconnect (the same dialog)
+      ? actBtn('channel-reauth', UI_ICONS.refresh, t('Reconnect'), t('Open the account\'s Re-authorize'), 'iw-act-primary')
+      : actBtn('channel-reauth', UI_ICONS.check, t('Re-authorize'), t('Re-authorize'), 'iw-act-primary')), // lane channel-names-readable: the account's Re-authorize dialog
     'desktop-app-show': () => actBtn('desktop-app-show', UI_ICONS.check, t('Show window'), t('Show the app’s window'), 'iw-act-primary'), // lane app-display-notify-sink
     // lane controls-that-lie: an ask that names a grant — the button DOES it («Who can use it» gains the conversation, then the agent is told)
     'browser-grant': (it) => { const g = grantAskOf(it) || { label: '' }; return actBtn('browser-grant', UI_ICONS.check, t('Let this conversation use {label}', { label: g.label }), t('Adds this conversation under “Who can use it” for {label}, then tells the agent', { label: g.label }), 'iw-act-primary'); },

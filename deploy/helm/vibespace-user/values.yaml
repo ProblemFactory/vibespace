@@ -160,15 +160,13 @@ telemetry:
 # no maintainer key.
 maintainerKeySha: ""
 
-# The fleet's SIGN-IN RELAY PAGE (lane oauth-relay-road): a pod's Lark / Gmail
-# sign-in names this ONE address as its redirect — every pod and every kind —
-# and the page sends the browser back to the pod it started from
-# (/api/channels/oauth/cb/<kind>). Each vendor app then registers it ONCE,
-# never one address per pod. The fleet's admin serves the page at
-#   https://admin.<domain>/relay/
-# (vibespace-admin ≥ 2.11.0; its data-allow = the fleet's domain). Empty = no
-# fleet relay: a pod's sign-in comes back to its own https address, which each
-# vendor app must then list per pod. Injected as VIBESPACE_OAUTH_RELAY_URL.
+# DEPRECATED (one release) — the fleet's sign-in relay page is `presets.relayUrl`
+# now (below), or better the cluster Secret's `fleet` key (deploy/README.md):
+# a company fact rides the presets, which every running pod follows within a
+# minute. This old key is still rendered exactly as presets.relayUrl (the
+# override's fleet.json; presets.relayUrl wins when both are set) and the
+# install / upgrade NOTES say to move it. It is no longer an env: an env
+# changes only at a pod restart (lane oauth-relay-one-source).
 oauthRelayUrl: ""
 
 # frp relay for PUBLIC URLs (B-0b60). Set addr+token to inject the relay as the
@@ -248,6 +246,23 @@ presets:
   override:
     gdriveClients: []    # [{key, label, clientId, clientSecret}, …]
     integrations: []     # [{id, key?, label?, values: {…}}, …]
+  # THE FLEET'S SIGN-IN RELAY PAGE (lane oauth-relay-one-source; was
+  # `oauthRelayUrl` → env VIBESPACE_OAUTH_RELAY_URL): a pod's Lark / Gmail /
+  # Slack sign-in under a company app names this ONE address as its redirect —
+  # every pod, every kind — and the page sends the browser back to the pod it
+  # started from (/api/channels/oauth/cb/<kind>). Each vendor app registers it
+  # ONCE, never one address per pod. The fleet's admin serves the page at
+  #   https://admin.<domain>/relay/
+  # (vibespace-admin ≥ 2.11.0; its data-allow = the fleet's domain). For the
+  # whole fleet put it in the CLUSTER Secret instead (key `fleet`, JSON
+  # {"relayUrl": "…"} — deploy/README.md): one patch, every pod. Set here it is
+  # THIS release's own, rendered into the override Secret as `fleet`
+  # (override/fleet.json, wins over the cluster's) — changing it touches only
+  # that Secret: no pod roll, the server re-reads it live. Empty = the
+  # cluster's, else none (each pod's sign-in comes back to its own https
+  # address, which each vendor app must then list per pod). The volume form
+  # only: with volume=false no relay page reaches the pod (the NOTES say so).
+  relayUrl: ""
 
 # LEGACY per-release preset blocks — with presets.volume (the default) they are
 # this release's OVERRIDE (the same as presets.override, which wins when set);

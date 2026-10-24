@@ -1013,8 +1013,10 @@ and restored at boot.
   `clientPreset: '<preset>'` / `'custom'` + `clientId`/`clientSecret` start Slack's consent (`flow.mode: 'public'`,
   `url` = slack.com/oauth/v2/authorize). `GET /api/channels/oauth/cb/:kind?code&state[&error]` = the landing (NO cookie —
   2.369.214: src/auth.js exempts exactly this GET, another browser profile is the normal case; the signed state is the
-  credential; ≤ 30 landings / address / minute, then 429 html): an html page in en/zh/ja — 200 connected / declined, 400 refused
-  (`bad-shape`, `bad-hmac`, `wrong-flow`, `expired`, `used`, `failed`); never echoes the code or the state. The POST
+  credential; ≤ 30 landings / address / minute, then 429 html): an html page in ONE language — the request's Accept-Language
+  (zh* → zh, ja* → ja, else en; `Vary: Accept-Language`; lane oauth-landing-words, .348) — 200 connected / declined, 400 refused
+  (`bad-shape`, `bad-hmac`, `wrong-kind`, `wrong-flow`, `expired`, `timed-out`, `superseded`, `cancelled`, `over-limit`, `used`,
+  `failed`), each in its own words; an address is printed inside `<!--email_off-->` with `@` as `&#64;`; never echoes the code or the state. The POST
   callback of a `public` flow takes the landed address, its query, or the bare code a relay page showed (a foreign
   state = 400 `state-mismatch`). A preset without `relayUrl` on an http origin = refused `no-https`.
   lane pod-oauth-callback (.344): Lark (`/cb/lark`) and Gmail (`/cb/gmail`) land here too when their consent took the
@@ -1026,14 +1028,15 @@ and restored at boot.
   (`'route'` for the instance's own route, null for a loopback), `redirect_uri` = the relay page, the state's clear `u` =
   the dialog POST's Origin (the browser's own origin, its port included). The relay of a COMPANY PRESET account = its
   own `relayUrl` (a Lark JSON entry / `VIBESPACE_INTEGRATION_LARK_RELAYURL`; a `VIBESPACE_GDRIVE_CLIENTS` entry's
-  `relayUrl`) › `VIBESPACE_OAUTH_RELAY_URL` (the fleet's) › none — never the setting (addendum 1); of a person's own
-  client = `VIBESPACE_OAUTH_RELAY_URL` › the setting `channels.larkRelayUrl` / `channels.gmailRelayUrl` (default
+  `relayUrl`) › the fleet's (the presets' `fleet.json`, the integration store's `fleetRelayUrl()` — lane
+  oauth-relay-one-source, 2.369.348; the env `VIBESPACE_OAUTH_RELAY_URL` one more release) › none — never the setting
+  (addendum 1); of a person's own client = the fleet's › the setting `channels.larkRelayUrl` / `channels.gmailRelayUrl` (default
   `https://problemfactory.github.io/vibespace/slack/`; `''` = none). It is ridden only when that page sends this origin
   back (slack-manifest `relayTargetVerdict`: a private origin — Tailscale's 100.64/10 and *.ts.net included — or, for the
   cluster's own page, this instance's own https host). The kinds digest adds `relayPages` — `[{url, who: 'fleet' |
   'page'}]`, the addresses a person's own app of the type registers once ([] for a paste type) — and, for those types,
   `presets[].relayPage` (a preset's own page › the fleet's; `null` = it has none: the route / the loopback). A Slack
-  preset with no `relayUrl` rides `VIBESPACE_OAUTH_RELAY_URL` too.
+  preset with no `relayUrl` rides the fleet's too.
   Lane oauth-setup-instructions (2.369.346): the kinds digest adds `oauthSetup` for a type whose registry row declares
   `redirect` (Lark, Gmail, Slack; null otherwise) — `{base, relayPages, presets: [{key, relayPage, clientType}]}`:
   this instance's https base (`''` = none), a person's own app's relay pages (the fleet's, the type's relay setting —

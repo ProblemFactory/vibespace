@@ -406,7 +406,9 @@ try {
   const useOf = async () => j('GET', `/api/browser/profiles/${work.id}/use`);
   const u0 = await useOf();
   ok(u0.status === 200 && u0.json.use.mode === 'all' && typeof u0.json.base === 'string' && u0.json.usedBy.filter((x) => x.leased).length === 4 && (u0.json.usedBy.find((x) => x.key === KB) || {}).taskIds.join() === 'T-G' && u0.json.createdBy && u0.json.createdBy.key === KA, 'GET …/use (FRESH): everyone\'s, the base stamp, who uses it now with each holder\'s Task Groups, the conversation that made it', u0.json);
-  const staleBase = B.useStamp({ owner: { kind: 'only', who: [{ kind: 'session', id: KA }] } });
+  // int347: since lane grants-unify (.346) the reader reads the record's ROW (`grantUse`, the grants store's mirror) — a base
+  // built from `owner` stamps "nobody"; the stale base is spelled the way the reader reads a list kept to First chat
+  const staleBase = B.useStamp({ grantUse: { to: [{ kind: 'conversation', key: KA, browserKey: KA }], except: [] } });
   r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }] }, base: staleBase });
   ok(r.status === 409 && r.json.code === 'list-changed' && r.json.added.includes('mode:all') && r.json.removed.includes('session:' + KA) && B.whoMayUse(k.profile(work.id)).mode === 'all' && leasesOn(work.id).length === 4, 'a stale base (the dialog read another list): 409 list-changed naming what differs — NOTHING written, nobody detached', r.json);
   r = await j('PATCH', `/api/browser/profiles/${work.id}`, { scope: 'one', conversation: KA });
@@ -423,7 +425,9 @@ try {
   ok(rk.status === 409 && rk.json.code === 'no_browser_key' && rk.json.name === 'Keyless chat' && /has no browser of its own yet — restart it \(Terminate → Resume\), then add it/.test(rk.json.error) && rr.status === 409 && rr.json.code === 'no_browser_key' && rr.json.why === 'remote' && B.whoMayUse(k.profile(work.id)).mode === 'all', 'the resolver: a key-less live session ⇒ no_browser_key naming it ("restart it, then add it"), a session on another machine ⇒ no_browser_key why remote — and First chat, resolvable, was NOT written either (one refusal, nothing saved)', [rk.json, rr.json]);
   active.delete('sess-nokey'); active.delete('sess-remote');
   r = await j('PATCH', `/api/browser/profiles/${work.id}`, { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', session: 'sess-1' }] }, base: u0.json.base });
-  ok(r.status === 200 && r.json.profile.scope === 'only' && JSON.stringify(r.json.profile.use.who) === JSON.stringify([{ kind: 'task', id: 'T-G' }, { kind: 'session', key: KA }]) && r.json.detached.map((d) => d.browserKey).join() === KD && r.json.undecided.join() === KC && leasesOn(work.id).join() === [KA, KB, KC].sort().join(), '"Only these: Task Group G, First chat" (First chat picked as a live session — the ONE resolver gives its key): First chat and Second chat (in G) KEEP their tabs; Fourth chat (in H) is detached; Third chat — its Task Groups unreadable — is KEPT and reported undecided', r.json);
+  // int347: lane grants-unify's digest row names the conversation key the store holds (`conversationId`; a keeper built
+  // alone judges a browser key as its own conversation)
+  ok(r.status === 200 && r.json.profile.scope === 'only' && JSON.stringify(r.json.profile.use.who) === JSON.stringify([{ kind: 'task', id: 'T-G' }, { kind: 'session', key: KA, conversationId: KA }]) && r.json.detached.map((d) => d.browserKey).join() === KD && r.json.undecided.join() === KC && leasesOn(work.id).join() === [KA, KB, KC].sort().join(), '"Only these: Task Group G, First chat" (First chat picked as a live session — the ONE resolver gives its key): First chat and Second chat (in G) KEEP their tabs; Fourth chat (in H) is detached; Third chat — its Task Groups unreadable — is KEPT and reported undecided', r.json);
   ok(notices.slice(n0).some((x) => x.sid === 'sess-4' && x.n.kind === 'browser-profile') && !notices.slice(n0).some((x) => x.sid === 'sess-2' || x.sid === 'sess-3' || x.sid === 'sess-1'), '…the detached conversation hears it on its next message; the kept ones hear nothing', notices.slice(n0));
   for (let i = 0; i < 40 && logOf('closes.log').filter((x) => x.sess === 'vs-' + KD).length < 2; i++) await sleep(50);
   ok(logOf('closes.log').filter((x) => x.sess === 'vs-' + KD && x.ns === 'vs-' + work.id && /^ws:/.test(x.cdp || '')).map((x) => x.verb).join() === 'tab close,close' && !logOf('closes.log').some((x) => [KA, KB, KC].some((kk) => x.sess === 'vs-' + kk)), '…and its TAB closes: the lease session\'s own `tab close` (its bound tab) then `close` (its connection), under its session over the shared browser\'s CDP url — never the browser, never a kept conversation\'s session', logOf('closes.log'));
@@ -833,7 +837,9 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
     const keepBankTo = (key) => k2.updateProfile(PB, { use: { mode: 'only', who: [{ kind: 'session', key }] } }, { knownKeys: [key] });
     const openBank = () => k2.updateProfile(PB, { use: { mode: 'all' } });
     /** every profile's "Who can use it", byte for byte */
-    const owners = (kk) => JSON.stringify(kk.list().profiles.map((p) => [p.id, (kk.profile(p.id) || {}).owner || null]));
+    // int347: "Who can use it" is the record's ROW since lane grants-unify (.346) — `owner` never changes any more, so a
+    // comparison of it was blind; the list as THE reader reads it (useStamp) is what must stay byte-identical
+    const owners = (kk) => JSON.stringify(kk.list().profiles.map((p) => [p.id, B.useStamp(kk.profile(p.id))]));
     R.setup(ctx2(mkEngine2(BK)));
     clock = T0;
     const made = await j('POST', '/api/browser/profiles', { label: 'Bank' });
@@ -971,7 +977,8 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
     if (ok(ksrcR.split(RP).length === 2 && widens !== ksrcR, 'CONTROL ③f (2.369.196) setup: restorePin\'s pin write is found exactly once; the patched copy also ADDS the conversation (a witness read as an authorization)')) {
       const DATA3 = path.join(ROOT, 'data-late-pin-ctl'); fs.mkdirSync(DATA3, { recursive: true, mode: 0o700 });
       const kW = M.load('src/server/browser-keeper.js', widens, 'restore-widens').create({ ...keeperOpts2, dataDir: DATA3 });
-      kW.reshapeStore((doc) => { const rec = B.newProfileRecord({ id: 'bp-0000f1e1', label: 'Bank', dir: path.join(DATA3, 'p'), now: 1 }); rec.owner = { kind: 'only', who: [{ kind: 'session', id: KEPT }] }; doc.profiles.push(rec); });
+      kW.reshapeStore((doc) => { doc.profiles.push(B.newProfileRecord({ id: 'bp-0000f1e1', label: 'Bank', dir: path.join(DATA3, 'p'), now: 1 })); });
+      kW.updateProfile('bp-0000f1e1', { use: { mode: 'only', who: [{ kind: 'session', key: KEPT }] } }, { knownKeys: [KEPT] }); // int347: the ONE writer (a row of the grants store)
       const mutR = restoreJudge(kW, 'bp-0000f1e1', 'bk-0000f1d2');
       ok(mutR.pin && mutR.widened && mutR.admits, 'CONTROL ③f (2.369.196): that copy WIDENS "Who can use it" on a restore (the owner changes, the list now admits the key) — the same judge is RED on it; the real restorePin is what keeps a witness a preference', mutR);
       kW.shutdown();
@@ -1030,20 +1037,27 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
 {
   const bsrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
   const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const P = (owner) => ({ id: 'bp-0000c0c1', label: 'work', owner });
-  const PROFS = [P({ kind: 'instance', id: null }), P({ kind: 'only', who: [{ kind: 'session', id: KA }] }), P({ kind: 'only', who: [{ kind: 'task', id: 'T-G' }] }), P({ kind: 'everyone' })];
+  // int347: since lane grants-unify (.346) a record's "Who can use it" is its ROW (`grantUse`, mirrored from the grants
+  // store) and the admission is src/grant-model.js `admits` over it — THE TABLE is spelled in rows (All agents · First chat ·
+  // Task Group G · a shape this release cannot read), and it is pinned cell by cell (a table of refusals would let any
+  // control "go red" against nothing); the controls cut the browser side's two rules: grantRowOf's fail-closed unknown, and
+  // mayAttach handing the asker's Task Groups to the model
+  const P = (grantUse) => ({ id: 'bp-0000c0c1', label: 'work', grantUse });
+  const PROFS = [P({ to: [{ kind: 'everyone' }], except: [] }), P({ to: [{ kind: 'conversation', key: KA, browserKey: KA }], except: [] }), P({ to: [{ kind: 'group', id: 'T-G' }], except: [] }), P({ unknown: true, why: 'a shape this release cannot read' })];
   const ASK = [{ browserKey: KA }, { browserKey: KB }, { browserKey: KB, taskIds: ['T-G'] }, { browserKey: KB, groupsUnreadable: true }];
   const sig = (Bm) => PROFS.flatMap((p) => ASK.map((a) => { const v = Bm.mayAttach(p, a); return v.ok ? 'ok' : v.code; })).join(',');
   const real = sig(B);
-  // (a) a whoMayUse that reads an unknown shape as "all"
-  const aNeedle = "  if (o.kind === 'only' && Array.isArray(o.who)) return { mode: 'only', who: normalizeWho(o.who) };\n  return { mode: 'unknown' };\n";
-  ok(bsrc.split(aNeedle).length === 2, 'control (a) setup: the fall-through of whoMayUse is found exactly once');
-  const Ba = M.load('src/browser-profiles.js', bsrc.replace(aNeedle, "  if (o.kind === 'only' && Array.isArray(o.who)) return { mode: 'only', who: normalizeWho(o.who) };\n  return { mode: 'all' };\n"), 'who-unknown-all');
-  ok(sig(Ba) !== real && Ba.mayAttach(P({ kind: 'everyone' }), { browserKey: KB }).ok, 'CONTROL (a): a whoMayUse reading an unknown shape as "all" admits everyone — THE TABLE\'s unknown row goes red', sig(Ba));
+  const TABLE = ['ok,ok,ok,ok', 'ok,not_owner,not_owner,not_owner', 'not_owner,not_owner,ok,groups_unreadable', 'not_owner,not_owner,not_owner,not_owner'].join(',');
+  ok(real === TABLE, 'THE TABLE (the real admission): All agents admits every asker; First chat only First chat; Task Group G a member of G, an unreadable store groups_unreadable; an unreadable shape nobody (fail closed)', real);
+  // (a) an admission that reads an unknown shape as "all"
+  const aNeedle = "  if (u.unknown) return null;\n  const bare = (e) => GM.bareOf(e);\n";
+  ok(bsrc.split(aNeedle).length === 2, 'control (a) setup: the fail-closed unknown of grantRowOf (the row the admission judges) is found exactly once');
+  const Ba = M.load('src/browser-profiles.js', bsrc.replace(aNeedle, "  if (u.unknown) return { door: 'browser-profile', resource: String((p && p.id) || '-'), to: [{ kind: 'everyone' }], except: [] };\n  const bare = (e) => GM.bareOf(e);\n"), 'who-unknown-all');
+  ok(sig(Ba) !== real && Ba.mayAttach(PROFS[3], { browserKey: KB }).ok, 'CONTROL (a): an admission reading an unknown shape as "all" admits everyone — THE TABLE\'s unknown row goes red', sig(Ba));
   // (b) a mayAttach that ignores Task Group rows
-  const bNeedle = "    if (hit) return { ok: true, via: 'task', taskId: hit.id };\n";
-  ok(bsrc.split(bNeedle).length === 2, 'control (b) setup: the Task Group admission is found exactly once');
-  const Bb = M.load('src/browser-profiles.js', bsrc.replace(bNeedle, ''), 'no-task-rows');
+  const bNeedle = "groupIds: Array.isArray(taskIds) ? taskIds : [], groupsUnreadable: !!groupsUnreadable });\n";
+  ok(bsrc.split(bNeedle).length === 2, 'control (b) setup: the Task Group admission (the asker\'s groups handed to the model) is found exactly once');
+  const Bb = M.load('src/browser-profiles.js', bsrc.replace(bNeedle, "groupIds: [], groupsUnreadable: !!groupsUnreadable });\n"), 'no-task-rows');
   ok(sig(Bb) !== real && Bb.mayAttach(PROFS[2], ASK[2]).code === 'not_owner', 'CONTROL (b): a mayAttach ignoring task rows refuses a conversation in the listed Task Group — THE TABLE\'s "B in G" cells go red', sig(Bb));
   // a scratch keeper world seeded straight into its registry (no browser needed: the re-judge and the write are registry acts)
   const seedKeeper = (Kmod, tag, keys = [KA, KB, KC]) => {
@@ -1053,6 +1067,9 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
       doc.profiles.push(B.newProfileRecord({ id: 'bp-0000c0d1', label: 'Ctl', dir: path.join(dd, 'p'), now: 1 }));
       for (const bk of keys) doc.leases.push({ profileId: 'bp-0000c0d1', browserKey: bk, sessionId: null, targetId: null, since: 1, input: 'agent', viewers: 0, carrierLostAt: null });
     });
+    // int347: lane grants-unify (.346) — a record with no row of the grants store is nobody's; the world these controls
+    // start from is the record createProfile makes (All agents), written by the ONE writer
+    kk.updateProfile('bp-0000c0d1', { use: { mode: 'all' } });
     return kk;
   };
   // (c) a re-judge that detaches on groups_unreadable
@@ -1070,7 +1087,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   // (d) a PATCH that ignores `base`
   const dNeedle = "      if (!bv.ok) throw namedError(bv.code, bv.error, { added: bv.added || [], removed: bv.removed || [] });\n";
   ok(ksrc.split(dNeedle).length === 2, 'control (d) setup: the keeper\'s re-asked base check is found exactly once');
-  const stale = B.useStamp({ owner: { kind: 'only', who: [{ kind: 'session', id: KC }] } });
+  const stale = B.useStamp({ grantUse: { to: [{ kind: 'conversation', key: KC, browserKey: KC }], except: [] } }); // int347: the reader's spelling (lane grants-unify)
   const kReal2 = seedKeeper(K, 'real-d');
   const ed = await threw(() => kReal2.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'session', key: KA }] }, base: stale }));
   ok(ed && ed.code === 'list-changed' && B.whoMayUse(kReal2.profile('bp-0000c0d1')).mode === 'all', 'the keeper RE-ASKS the base (after the route\'s awaits): a stale one is list-changed, nothing written');
@@ -1418,6 +1435,9 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
       const ro = await readOnly(kL, roll, 'product');
       ok(ro.err === 'profile_locked' && /could not remove the lock \(EACCES\)/.test(ro.msg) && new RegExp(`rm -f '${roll.dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/SingletonLock'`).test(ro.msg) && ro.launched === 0 && ro.left === 3 && ro.said.some((l) => /could NOT be removed \(EACCES\)/.test(l)) && !ro.said.some((l) => /taken over/.test(l)), '④b THE LOCK THAT CANNOT BE REMOVED: a takeover whose unlink fails is refused by name (the errno, the one command), nothing launched, the journal never says "taken over"', ro);
     }
+    // int347: lane grants-unify (.346) — a registry from before the unify boots through `2026-10-grants-unify` (the boot runs
+    // the migrations before the keeper): its records' lists are carried into THE grants store the admission reads
+    const carryGrants = (dd) => require('../src/server/grants-migration.js').migrate({ dataDir: dd, store: require('../src/server/grants-store.js').forDir(dd) });
     // (c) THE LEGACY WITNESS: a registry file written by the old pod (its `host` stamp) holding a record from before the
     // per-launch stamp — the lock naming that pod is taken over; the same file without the stamp refuses by name
     for (const [tag, fileHost, expectOk] of [['stamped', 'pod-old', true], ['unstamped', null, false]]) {
@@ -1426,6 +1446,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
       const dir = path.join(HOME, '.agent-browser', B.profileDirName(id)); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       const legacy = { version: 1, ...(fileHost ? { host: fileHost } : {}), profiles: [B.newProfileRecord({ id, label: 'Legacy ' + tag, dir, now: 1 })], leases: [], browsers: { [id]: { profileId: id, ns: 'vs-' + id, pid: null, starttime: null, cdpUrl: null, state: 'stopped', startedAt: 1, endedAt: 2, lastError: null, mark: id } } };
       fs.writeFileSync(path.join(DATA_X, 'browser-profiles.json'), JSON.stringify(legacy));
+      carryGrants(DATA_X);
       plant(dir, 'pod-old');
       const kX = mkKeeper(K, { dataDir: DATA_X, log: klog });
       const Lx = logOf('launches.log').length;
@@ -1445,6 +1466,7 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
       const dir = path.join(HOME, '.agent-browser', B.profileDirName(id)); fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
       const legacy = { version: 1, host: 'pod-old', profiles: [B.newProfileRecord({ id, label: 'Legacy2 ' + tag, dir, now: 1 })], leases: [], browsers: { [id]: { profileId: id, ns: 'vs-' + id, pid: null, starttime: null, cdpUrl: null, state: 'stopped', startedAt: 1, endedAt: 2, lastError: null, mark: id } } };
       fs.writeFileSync(path.join(DATA_X, 'browser-profiles.json'), JSON.stringify(legacy));
+      carryGrants(DATA_X);
       plant(dir, 'pod-old');
       const k1 = mkKeeper(Kmod, { dataDir: DATA_X, log: klog });
       await k1.boot(); k1.createProfile({ label: 'Other' }); // a boot, a save, no launch

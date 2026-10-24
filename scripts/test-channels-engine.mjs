@@ -6441,7 +6441,7 @@ console.log('\n§ design 008: the first read\'s scopes, the paged rows, their bo
   const first = await get8('/api/channels');
   ok(first.status === 200 && first.body.scope === 'first' && first.body.counts.all === listed().length && first.body.conversations.length < 100 && first.body.heads[A8].length === 30, `GET /api/channels = the first read: ${first.body && first.body.conversations.length} rows of ${listed().length}, ${(first.bytes / 1024).toFixed(1)} KB, counts.all ${first.body && first.body.counts.all}, ${A8}'s head 30`);
   const tot = await get8('/api/channels?scope=totals'), acc = await get8('/api/channels?scope=accounts'), bad = await get8('/api/channels?scope=everything');
-  ok(tot.status === 200 && Object.keys(tot.body).sort().join() === 'at,awaitingTotal,needsMe,scope,unreadTotal' && acc.status === 200 && Array.isArray(acc.body.adapters) && !('conversations' in acc.body) && bad.status === 400 && bad.body.code === 'bad-request' && /scope must be first, accounts or totals/.test(bad.body.error), `?scope=totals → the numbers (+ needsMe — the rail badge, lane attention-predicate-shared); ?scope=accounts → no row; an unknown scope → 400 by name ("${bad.body && bad.body.error}")`);
+  ok(tot.status === 200 && Object.keys(tot.body).sort().join() === 'at,awaitingTotal,needsMe,scope,signin,unreadTotal' && Array.isArray(tot.body.signin) && acc.status === 200 && Array.isArray(acc.body.adapters) && !('conversations' in acc.body) && bad.status === 400 && bad.body.code === 'bad-request' && /scope must be first, accounts or totals/.test(bad.body.error), `?scope=totals → the numbers (+ needsMe — the rail badge, lane attention-predicate-shared; + signin — the dead sign-ins, lane channel-reauth-visible); ?scope=accounts → no row; an unknown scope → 400 by name ("${bad.body && bad.body.error}")`);
   const refusals = {
     'limit=201': await get8('/api/channels/rows?limit=201'), 'limit=0': await get8('/api/channels/rows?limit=0'), 'limit=abc': await get8('/api/channels/rows?limit=abc'),
     'q×101': await get8('/api/channels/rows?q=' + 'x'.repeat(101)), 'view=bogus': await get8('/api/channels/rows?view=bogus'),
@@ -6872,6 +6872,142 @@ console.log('\n㉗ lane reply-infer-owner-between (fb-377439b167): the judge is 
   const before = DM.buildInput('reply-infer', r0.parts || {});
   ok(src.split(PART_).length === 2 && cut !== src && red.first.length === 1 && JSON.stringify(Object.keys(r0.parts || {})) === JSON.stringify(['sent', 'reply', 'gap']) && !/\nbetween: /.test(before.text), 'RED CONTROL (the base\'s engine — a patched copy without the part): the judge gets sent / reply / gap ONLY — the voice note 3 min before the reply is invisible to it (the incident\'s 0.90) — the leg above goes RED', JSON.stringify(r0.parts));
   console.log('    judge input (base):\n' + before.text.split('\n').map((l) => '      | ' + l).join('\n'));
+}
+
+// ── ㉘ lane channel-reauth-visible (the owner 2026-10-23: 「对于需要 reauth 的 channel 应该需要更明显的提示」; userW inc-mvl9qdru-dlew,
+// B-f1bb): A DEAD SIGN-IN IS ONE STANDING URGENT ITEM — raised at the FIRST refused pass (never the 3-strike ladder), never
+// retracted by a supersede, a restart, a vault lock or a consent that ended unfinished (that RE-ASSERTS it: the same item,
+// its words updated, reopened), retracted ONLY by the first pass that goes through. Over the REAL engine + the REAL For-you
+// store; the account view carries authState / authCause / authSince and the rail's band-1 row is derived from it. ──
+console.log('\n㉘ lane channel-reauth-visible: a dead sign-in is ONE standing urgent item until a pass of the account goes through');
+{
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const AM = require(path.join(REPO, 'src/attention-model.js'));
+  const world = { fail: null, st: { state: 'connected', expiresAt: null, scopes: ['x'], why: null } };
+  const refused = () => new CH.ChannelError('auth-expired', 'gmail token refresh: Token has been expired or revoked. (400)', { retryable: false, detail: { status: 400, reason: 'invalid_grant', cause: 'refresh-refused' } });
+  const mkMod = (kind) => {
+    const m = fake.makeFakeAdapter({ kind, receive: 'poll', sendAs: ['user'] });
+    const inner = m.create;
+    return { kind, caps: { ...m.caps, vendorName: 'Gmail' }, create(rec, deps) {
+      const impl = inner(rec, deps);
+      const lc = impl.listConversations;
+      impl.listConversations = async (...a) => { if (world.fail) throw world.fail(); return lc(...a); };
+      impl.auth = { ...(impl.auth || {}), async state() { return world.st; } };
+      return impl;
+    } };
+  };
+  const seed = (dir, tokenless = false) => {
+    fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{
+      id: 'dead', kind: 'dead', label: 'Gmail', enabled: true, auth: { tokenEnc: tokenless ? null : 'held-sign-in', expiresAt: null, scopes: [], user: 'alice@example.test' },
+      lastPass: null, consecutiveFailures: 0, push: { enabled: false, claimedExclusive: 'unknown', state: null, lastEventAt: null, missRate: 0, demotedAt: null, demotedWhy: null }, scan: null,
+    }] }, null, 1));
+  };
+  const boot = (dir, EM = ENG) => {
+    const registry = CH.createChannelRegistry(); registry.register(mkMod('dead'));
+    const userTodos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
+    const frames = [];
+    const e = EM.create({ dataDir: dir, registry, env: {}, broadcast: (m) => frames.push(m), log: { log() {}, warn() {}, error() {} }, userTodos, serverSetting: () => undefined });
+    engines.push(e);
+    return { e, userTodos, frames };
+  };
+  const mine = (ut) => ut.snapshot().open.filter((i) => i.sessionKey === 'channels');
+  const view = (e) => e.digest({ scope: 'accounts' }).adapters.find((a) => a.id === 'dead') || {};
+  const disk = (dir) => (JSON.parse(fs.readFileSync(path.join(dir, 'channels', 'adapters.json'), 'utf-8')).adapters.find((a) => a.id === 'dead') || {});
+  const run = async (EM, tag) => {
+    const dir = path.join(ROOT, `signin-${tag}`); seed(dir);
+    let { e, userTodos, frames } = boot(dir, EM);
+    const out = {};
+    world.fail = null;
+    await e.pass('dead', { force: true });
+    out.healthy = view(e).authState;
+    world.fail = refused;
+    await e.pass('dead', { force: true });
+    out.first = mine(userTodos).map((i) => ({ id: i.id, text: i.text, urgency: i.urgency, action: i.action, key: i.i18n && i.i18n.text.key, params: i.i18n && i.i18n.text.params, cause: i.i18n && i.i18n.text.params.cause, band: AM.rowOf(i, Date.now()).band }));
+    out.view1 = (({ authState, authCause, authSince }) => ({ authState, authCause, authSince }))(view(e));
+    out.frame = (() => { const f = frames.filter((m) => m.type === 'channels-updated').pop(); return f && f.digest ? ((f.digest.adapters || []).find((a) => a.id === 'dead') || {}).authState : null; })();
+    out.totals = e.digest({ scope: 'totals' }).signin;
+    for (let i = 0; i < 5; i++) await e.pass('dead', { force: true });
+    out.after6 = mine(userTodos).map((i) => i.id);
+    out.ladder = userTodos.snapshot().open.filter((i) => /consecutive failed passes/.test(i.text)).length;
+    // a supersede: the ladder's retraction (any producer's) and a transport ladder behind it never touch it
+    await e.retractFailure(e.adapterRecords().adapters.find((r) => r.id === 'dead'), 'superseded');
+    world.fail = () => new CH.ChannelError('transport', 'ECONNRESET', { retryable: true });
+    for (let i = 0; i < 3; i++) await e.pass('dead', { force: true });
+    out.superseded = mine(userTodos).map((i) => i.id);
+    // a vault lock: no request is built, the item stands
+    world.st = { state: 'vault-locked', why: 'vault-locked', expiresAt: null };
+    await e.pass('dead', { force: true });
+    out.locked = mine(userTodos).map((i) => i.id);
+    out.lockedView = view(e).authState;
+    world.st = { state: 'connected', expiresAt: null, scopes: ['x'], why: null };
+    // a RESTART: the record and the item outlive the process
+    e.stop(); userTodos.stop();
+    out.disk = disk(dir).signinDead || null;
+    ({ e, userTodos, frames } = boot(dir, EM));
+    out.rebootView = view(e).authState;
+    world.fail = refused;
+    await e.pass('dead', { force: true });
+    out.reboot = mine(userTodos).map((i) => i.id);
+    // the person dismisses it — the next refused pass leaves the dismissal standing …
+    const id0 = (out.first[0] || {}).id;
+    if (id0) userTodos.setStatus(id0, 'dismissed');
+    await e.pass('dead', { force: true });
+    out.dismissed = mine(userTodos).length;
+    // … a consent that ended UNFINISHED re-asserts it: the same item, reopened, its words say so
+    await e.speakSignin(e.adapterRecords().adapters.find((r) => r.id === 'dead'), 'consent-unfinished', { reassert: true });
+    out.reasserted = mine(userTodos).map((i) => ({ id: i.id, cause: i.i18n && i.i18n.text.params.cause }));
+    out.viewCause = view(e).authCause;
+    // the first pass that goes through retracts it, live
+    world.fail = null;
+    const nb = frames.length;
+    await e.pass('dead', { force: true });
+    out.recovered = mine(userTodos).length;
+    const done = (id0 && userTodos.get(id0)) || {};
+    out.done = { status: done.status, by: done.resolvedBy };
+    out.recoveredView = view(e).authState;
+    out.recoveredFrame = (() => { const f = frames.slice(nb).filter((m) => m.type === 'channels-updated').pop(); return f && f.digest ? ((f.digest.adapters || []).find((a) => a.id === 'dead') || {}).authState : null; })();
+    out.diskAfter = disk(dir).signinDead || null;
+    e.stop(); userTodos.stop();
+    return out;
+  };
+  const r = await run(ENG, 'real');
+  const f = r.first[0] || {};
+  ok(r.healthy === 'ok' && r.first.length === 1 && f.text === 'alice@example.test (Gmail): sign-in expired — re-authorize' && f.params && f.params.kind === 'Gmail' && f.urgency === 'urgent' && f.band === 1,
+    `the FIRST refused pass files ONE urgent item, band 1 (the top of For you), worded by the login and the account's label (${JSON.stringify(f.text)})`, JSON.stringify(r.first));
+  ok(f.action && f.action.type === 'channel-reauth' && f.action.adapterId === 'dead' && f.action.signin === 'expired' && f.key === '{account} ({kind}): sign-in expired — re-authorize ({cause})' && f.cause && f.cause.key === 'the vendor refused the refresh token',
+    'its action is the account\'s Reconnect (channel-reauth + signin: expired); the person\'s words carry the cause as a key the client words', JSON.stringify(f));
+  ok(r.view1.authState === 'expired' && r.view1.authCause === 'refresh-refused' && r.view1.authSince > 0 && r.frame === 'expired' && Array.isArray(r.totals) && r.totals.length === 1 && r.totals[0].authState === 'expired' && r.totals[0].user === 'alice@example.test',
+    'the account view says authState expired + its cause + since (the broadcast AND the rail\'s totals carry it)', JSON.stringify({ v: r.view1, frame: r.frame, totals: r.totals }));
+  ok(r.after6.length === 1 && r.after6[0] === f.id && r.ladder === 0, `six refused passes: still that ONE item (same id), never the 3-strike "consecutive failed passes" line (${r.ladder})`);
+  ok(r.superseded.length === 1 && r.superseded[0] === f.id, 'a supersede (the ladder\'s retraction, a transport ladder behind it) never retracts it');
+  ok(r.locked.length === 1 && r.locked[0] === f.id && r.lockedView === 'expired', 'a vault lock (no request built) leaves it standing and the view expired');
+  ok(r.disk && r.disk.cause === 'refresh-refused' && r.disk.item && r.disk.item.id === f.id && r.rebootView === 'expired' && r.reboot.length === 1 && r.reboot[0] === f.id,
+    'a RESTART: the record keeps it on disk, the view says expired before any pass, the next refused pass files nothing new', JSON.stringify({ disk: r.disk, reboot: r.reboot }));
+  ok(r.dismissed === 0, 'the person\'s own dismissal stands across a refused pass that says nothing new');
+  ok(r.reasserted.length === 1 && r.reasserted[0].id === f.id && r.reasserted[0].cause && r.reasserted[0].cause.key === 'the sign-in was not finished' && r.viewCause === 'consent-unfinished',
+    'a consent that ended unfinished RE-ASSERTS it: the same item reopened, its words «the sign-in was not finished»', JSON.stringify(r.reasserted));
+  ok(r.recovered === 0 && r.done.status === 'done' && r.done.by === 'system' && r.recoveredView === 'ok' && r.recoveredFrame === 'ok' && r.diskAfter === null,
+    'the FIRST pass that goes through retracts it (done by the engine), the view and the broadcast say ok at once, the record forgets it', JSON.stringify({ done: r.done, v: r.recoveredView, f: r.recoveredFrame }));
+  {
+    const dir = path.join(ROOT, 'signin-tokenless'); seed(dir, true);
+    const { e, userTodos } = boot(dir);
+    world.fail = refused; world.st = { state: 'connected', expiresAt: null, scopes: ['x'], why: null };
+    for (let i = 0; i < 3; i++) await e.pass('dead', { force: true });
+    const open = mine(userTodos);
+    ok(view(e).authState === 'ok' && open.length === 1 && /3 consecutive failed passes \(auth-expired\)/.test(open[0].text) && open[0].urgency === 'high',
+      'a record that holds NO sign-in (a Connect never finished, a disconnected account) is never «expired»: the base\'s 3-strike line, as before', JSON.stringify(open.map((i) => [i.text, i.urgency])));
+    e.stop(); userTodos.stop(); world.fail = null;
+  }
+  // CONTROLS — the base's shape: the 3-strike ladder files the dead sign-in, a supersede retracts it
+  const esrcS = engineSource(REPO);
+  const NEW = "        if (deadSignin) await speakSignin(rec, caps.signinCauseOf(err), { vendorWords: String((err && err.message) || '') });\n        else if (!rate && e.failures === FAILURES_BEFORE_LOUD) {";
+  const OLD = "        if (!rate && e.failures === FAILURES_BEFORE_LOUD) {";
+  ok(esrcS.split(NEW).length === 2, 'CONTROL fixture: the dead sign-in\'s producer line is found once in the shipped engine');
+  const C1 = MUTE.load('src/server/channels-engine.js', esrcS.replace(NEW, OLD), 'signin-ladder');
+  const c = await run(C1, 'ctl-ladder').catch((err) => ({ err: String(err && err.message) }));
+  ok(!c.err && (c.first.length === 0 || c.first[0].urgency !== 'urgent') && c.superseded.length === 0,
+    `CONTROL: the base's ladder files nothing urgent at the first refusal (${c.first && c.first.length} item${c.first && c.first[0] ? ` ${c.first[0].urgency}` : ''}) and the supersede leaves nothing standing (${c.superseded && c.superseded.length}) — the legs above would go red`, JSON.stringify(c.err || { first: c.first, superseded: c.superseded }));
 }
 
 console.log('\ntree: the patched copies never touch the tree');

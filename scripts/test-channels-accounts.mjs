@@ -1135,6 +1135,54 @@ console.log('⑫ verify r5: refresh races + the identity door');
 // src/server/.channels-engine.prefix-*, that every src/ scanner running beside
 // this suite read as a second engine. Five are unconditional (the pre-r4
 // copies SKIP on a shallow clone).
+// ── ⑬ lane channel-reauth-visible (userW inc-mvl9qdru-dlew: every Gmail account's refresh refused at 07:14 PT, nothing
+// standing; his re-connect ended «not finished in time» and nothing was raised again): THE REAL GMAIL ADAPTER over the fake
+// Google — a refused refresh files ONE urgent item at the first pass; Re-authorize in flight says `pending` and retracts
+// nothing; a consent that fails re-asserts the SAME item; a good consent + the pass after it retract it. ──
+console.log('⑬ lane channel-reauth-visible: a dead Gmail sign-in, end to end');
+{
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const v13 = mkVendor();
+  let refuse = false;
+  const fetch13 = async (url, init = {}) => {
+    const u = new URL(String(url));
+    if (refuse && u.hostname === 'oauth2.googleapis.com' && /grant_type=refresh_token/.test(String(init.body || ''))) return jsonRes({ error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }, 400);
+    return v13.fetchFn(url, init);
+  };
+  const st13 = STORE.create({ dataDir: path.join(ROOT, 'store13'), env: {}, now, broadcast: () => {}, drivePresets: () => PRESETS, log: quiet });
+  const d13 = path.join(ROOT, 'eng13'); fs.mkdirSync(d13, { recursive: true });
+  const ut13 = new UserTodoManager({ dataDir: d13, expirySweepMs: 0 });
+  const e13 = ENG.create({ dataDir: d13, env: {}, now, serverSetting: (k) => (/^channels\.(lark|gmail)RelayUrl$/.test(k) ? '' : undefined), broadcast: () => {}, integrations: st13, fetch: fetch13, log: quiet, userTodos: ut13, ...FAST_PACE });
+  engines.push(e13);
+  const items = () => ut13.snapshot().open.filter((i) => i.sessionKey === 'channels' && i.action && i.action.type === 'channel-reauth');
+  const A13 = await consent(e13, 'gmail', { credentialKey: 'cluster:org1' }, 'c-a');
+  const view = () => rowOf(e13, A13.id) || {};
+  ok(view().auth && view().auth.state === 'connected' && view().authState === 'ok' && items().length === 0, 'fixture: member.a connected under org1, nothing to say');
+  refuse = true; clock += 3600e3;
+  await e13.pass(A13.id, { force: true });
+  const it1 = items();
+  ok(it1.length === 1 && it1[0].urgency === 'urgent' && it1[0].text === 'member.a@example.com (Gmail): sign-in expired — re-authorize' && it1[0].i18n.text.params.cause.key === 'the vendor refused the refresh token' && view().authState === 'expired' && view().authCause === 'refresh-refused',
+    `Google's invalid_grant at the FIRST pass ⇒ ONE urgent item naming the login (${JSON.stringify(it1.map((i) => i.text))}), the view expired / refresh-refused`, JSON.stringify(view().authState));
+  const r1 = await e13.reauthorize(A13.id, {});
+  ok(r1.flow && view().authState === 'pending' && items().length === 1 && items()[0].id === it1[0].id, 'Re-authorize in flight: the view says pending, the item stands (a started consent retracts nothing)');
+  await land(r1.flow, 'c-unknown');
+  const it2 = items();
+  ok(it2.length === 1 && it2[0].id === it1[0].id && it2[0].i18n.text.params.cause.key === 'the sign-in was not finished' && view().authState === 'expired' && view().authCause === 'consent-unfinished',
+    'a consent that FAILED re-asserts the SAME item — its words «the sign-in was not finished»', JSON.stringify(it2.map((i) => i.i18n && i.i18n.text)));
+  ut13.setStatus(it1[0].id, 'dismissed');
+  const r2 = await e13.reauthorize(A13.id, {});
+  await land(r2.flow, 'c-unknown');
+  ok(items().length === 1 && items()[0].id === it1[0].id, 'dismissed, then another unfinished consent: the item is back (the account still cannot sign in)');
+  refuse = false;
+  const r3 = await e13.reauthorize(A13.id, {});
+  await land(r3.flow, 'c-a');
+  await sleep(50);
+  const done = ut13.get(it1[0].id) || {};
+  ok(items().length === 0 && done.status === 'done' && done.resolvedBy === 'system' && view().authState === 'ok' && view().auth.state === 'connected',
+    'a good consent + the pass after it: the item is done by the engine, the view ok', JSON.stringify({ status: done.status, by: done.resolvedBy, a: view().authState }));
+  e13.oauth.stopAll(); e13.stop(); ut13.stop();
+}
+
 console.log('tree: the patched copies never touch the tree');
 for (const r of copiesCensus(MUTA.files, MUTA.dir, REPO, { minCopies: 5 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
 cleanup();

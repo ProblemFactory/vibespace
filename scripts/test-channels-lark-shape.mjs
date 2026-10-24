@@ -608,6 +608,38 @@ function gateCensus(src, { gateRe, ungatedIds }) {
     const c = await raceReauthL(rg4);
     ok(c.held === 'ur-rot-1', `CONTROL: the r4 write REVERTS the re-authorize to the old family's rotated token (held ${c.held})`);
   }
+  // lane channel-reauth-visible (the hub's Lark, 2026-10-23 06:46 PT): `20064` — the same user signed in to the same app on
+  // another instance — arrived as `vendor-error`, so 30 passes re-POSTed a dead grant for 7 h. A dead refresh token is
+  // `auth-expired` AT THE FIRST ANSWER, with its cause; the grant is stamped (no second POST); a rate refusal stays a rate one.
+  {
+    const deadRefresh = async (rg, answer) => {
+      const v = mkVendor(); const f0 = v.fetchFn; let posts = 0;
+      const fetchFn = async (url, init) => { const body = init && init.body ? JSON.parse(init.body) : null; if (body && body.grant_type === 'refresh_token') { posts++; return jsonRes(answer.body, answer.status); } return f0(url, init); };
+      const tokens = mkTokens(); tokens.st.token = expiredL();
+      const a = rg.create('lark', { id: 'lark' }, { now, fetch: fetchFn, tokens, resolveIntegration: () => CRED, log: { warn() {} } });
+      const first = await a.listConversations({ limit: 10 }).then(() => null, (e) => e);
+      const second = await a.listConversations({ limit: 10 }).then(() => null, (e) => e);
+      const st = await a.auth.state();
+      return { first, second, posts, st, stamp: tokens.st.token || {} };
+    };
+    const R20064 = { status: 400, body: { code: 20064, error: 'invalid_grant', error_description: 'The refresh token has been revoked (signed in elsewhere)' } };
+    const r = await deadRefresh(reg, R20064);
+    ok(r.first && r.first.code === 'auth-expired' && r.first.detail.cause === 'revoked-elsewhere' && r.stamp.invalidGrantAt && r.stamp.invalidGrantCause === 'revoked-elsewhere',
+      `20064 ⇒ auth-expired at the FIRST answer, its cause «revoked-elsewhere», the grant stamped (${r.first && r.first.code}/${r.first && r.first.detail && r.first.detail.cause})`);
+    ok(r.second && r.second.code === 'auth-expired' && r.second.detail.cause === 'revoked-elsewhere' && r.posts === 1 && r.st.state === 'needs-reauth',
+      `…the next call keeps the cause and POSTs nothing (${r.posts} refresh POST), auth.state says needs-reauth`);
+    const w = await deadRefresh(reg, { status: 400, body: { code: 20099, msg: 'refresh_token has been revoked by the user' } });
+    ok(w.first && w.first.code === 'auth-expired' && w.first.detail.cause === 'refresh-refused' && w.posts === 1, `a code the table does not know, worded «refresh_token … revoked» ⇒ auth-expired, cause refresh-refused (${w.first && w.first.code})`);
+    const g = await deadRefresh(reg, { status: 400, body: FX.tokenInvalidGrant });
+    ok(g.first && g.first.code === 'auth-expired' && g.first.detail.cause === 'refresh-refused', 'the recorded invalid_grant (20003, already auth-expired) carries its cause too');
+    const rl = await deadRefresh(reg, { status: 429, body: { code: 99991400, msg: 'request trigger frequency limit' } });
+    ok(rl.first && rl.first.code === 'rate-limited' && !rl.stamp.invalidGrantAt, `CONTROL: a RATE refusal of the refresh stays rate-limited, nothing stamped (${rl.first && rl.first.code})`);
+    const cut = src.replace('      e = refreshFailure(e);   // lane channel-reauth-visible: 20064 & co. are a dead grant at the FIRST answer, never 3 vendor-errors\n', '');
+    ok(cut !== src, 'CONTROL fixture: the dead-refresh mapping removed from a copy');
+    const rgC = CH.createChannelRegistry(); rgC.register(M.load('src/channels/lark.js', cut, 'no-dead-refresh').adapter);
+    const c = await deadRefresh(rgC, R20064);
+    ok(c.first && c.first.code === 'vendor-error' && c.posts === 2 && !c.stamp.invalidGrantAt, `CONTROL: without it 20064 is a vendor-error and every call re-POSTs the dead grant (${c.first && c.first.code}, ${c.posts} POSTs) — the incident; the legs above would go red`);
+  }
   // (e) a DISCONNECT that lands while the refresh is in flight
   {
     const v = rotating(); v.hold(); const tokens = mkTokens(); tokens.st.token = expiredL();

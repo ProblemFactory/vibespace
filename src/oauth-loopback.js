@@ -106,6 +106,10 @@ const MAX_RUNNING_FLOWS = 32;
 /** verify r4: the causes of the two ends that are this machine's OWN act (each reported once through `onDone`). */
 const CAUSE_TIMEOUT = 'timeout';
 const CAUSE_OVER_LIMIT = 'over-limit';
+/** lane oauth-landing-words: an ended flow's cause → the landing's why (src/consent-road.js LANDING_WHY says each in
+ *  words). `expired` = the engine's sweep at the state's age; `timed-out` = this flow's own limit; any other end (a
+ *  Cancel, a Disconnect, a shutdown) = `cancelled`. */
+const ENDED_WHY = Object.freeze({ [CAUSE_TIMEOUT]: 'timed-out', expired: 'expired', superseded: 'superseded', [CAUSE_OVER_LIMIT]: 'over-limit' });
 const PORT_BUSY_CODE = 'port-busy';
 /** The vendor's `error` query parameter is PEER-WRITTEN: bounded and reduced to a code's alphabet before it is said. */
 const VENDOR_ERROR_MAX = 64;
@@ -441,13 +445,15 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
   }
   const sameState = (a, b) => typeof a === 'string' && typeof b === 'string' && a.length === b.length && crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
   /** design 018: THE LANDING ROUTE's door — the flow is found by its WHOLE state (a public flow only); a code for a
-   *  flow that is over is never exchanged. → `{ok, why, result, error}`: why ∈ wrong-flow | used | expired | denied | failed. */
+   *  flow that is over is never exchanged. → `{ok, why, result, error}`: why ∈ wrong-flow | used | denied | failed, or
+   *  the flow's END by its cause (lane oauth-landing-words, B-24d8: every end used to read `expired`, so a sign-in the
+   *  person cancelled or replaced told them it had run out of time) — ENDED_WHY. */
   async function finishByState(state, code, { error = null } = {}) {
     sweep();
     const st = [...flows.values()].find((x) => x.mode === 'public' && sameState(String(state || ''), x.state)) || null;
     if (!st) return { ok: false, why: 'wrong-flow', result: null, error: 'no sign-in with that state is known here' };
     if (st.done) return { ok: false, why: 'used', result: null, error: `the ${st.label} sign-in already finished — its code is used once` };
-    if (st.cancelled) return { ok: false, why: 'expired', result: null, error: st.error || `the ${st.label} sign-in was ${st.cancelled === CAUSE_TIMEOUT ? 'not finished in time' : st.cancelled}` };
+    if (st.cancelled) return { ok: false, why: ENDED_WHY[st.cancelled] || 'cancelled', result: null, error: st.error || `the ${st.label} sign-in was ${st.cancelled === CAUSE_TIMEOUT ? 'not finished in time' : st.cancelled}` };
     if (st.exchanging) return { ok: false, why: 'used', result: null, error: `the ${st.label} sign-in is already exchanging its code` };
     if (!code && error) { await declined(st, vendorErrorOf(error)); return { ok: false, why: 'denied', result: null, error: st.error }; }
     if (!code || typeof code !== 'string' || code.length > 300) return { ok: false, why: 'failed', result: null, error: `no ${st.label} code arrived` };

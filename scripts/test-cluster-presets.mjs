@@ -36,6 +36,14 @@
 //    override returns; a later cluster rotation then reaches the user (with the
 //    override still projected it is shadowed — the field symptom). CONTROL:
 //    a copy that compares the values only leaves the summary on "release".
+// §5 THE FLEET FACTS — fleet.json (lane oauth-relay-one-source, 2026-10-23 — the owner: «你为啥搞了两套分发 auth client
+//    的方案»: the Google client rows were presets files, live; the relay page a chart env, at restart): PURE parseFleet /
+//    mergeFleet (per FIELD: the release's field wins, '' included; a field neither names is absent) / diffFleet /
+//    fleetWords; ORCH over the kubelet's shape: the boot read + its line, a swap seen ONCE with «relay page changed (now
+//    …)», the override wins, a same-content swap fires nothing, a malformed or non-object file keeps the previous facts
+//    (one line), a relayUrl that is no relay page address said ONCE (never the value), the file withdrawn ⇒ null (the
+//    env fallback), fleet.json no longer a stray. CONTROL: a merge reading the layers in the wrong order lets the
+//    cluster win.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -547,7 +555,7 @@ console.log('§4 a key changes layer with identical values (B-8145)');
   ok(m.shadowed === SECRET_A && m.rotated === SECRET_B, 'a cluster rotation of org1 is SHADOWED while the equal override is projected (the field symptom) and in effect once the override is gone');
   // CONTROL: the reader before B-8145 — the values compared, the layers not
   const srcR = fs.readFileSync(path.join(REPO, 'src/server/cluster-presets.js'), 'utf-8');
-  const a6 = '    const sources = P.KINDS.filter((k) => attributionOf(merged[k]) !== attributionOf(next[k]));';
+  const a6 = '    const sources = [...P.KINDS, FLEET].filter((k) => attributionOf(merged[k]) !== attributionOf(next[k]));';
   ok(srcR.includes(a6), 'control anchor: the attribution comparison');
   const valuesOnly = M.load('src/server/cluster-presets.js', srcR.replace(a6, '    const sources = [];'), 'valuesonly');
   const c = await migrate(valuesOnly, 'ctl');
@@ -604,6 +612,81 @@ console.log('§4 a key changes layer with identical values (B-8145)');
   ok(!!h && h.st.resolveIntegration('llm').source === 'none' && h.eng.status().configured === false, 'RED CONTROL: a store copy WITHOUT the legacy read leaves an old-prefix cluster unconfigured (the leg above proves the read)');
   const none = mk({});
   ok(none.eng.status().configured === false, 'no prefix (new or old), no own key ⇒ the engine is not configured (no key)');
+}
+
+// ═══ §5 THE FLEET FACTS (lane oauth-relay-one-source) ═══════════════════
+console.log('§5 fleet.json — the fleet\'s relay page rides the presets');
+{
+  const RELAY1 = 'https://admin.fleet.example.test/relay/', RELAY2 = 'https://admin2.fleet.example.test/relay/', MINE = 'https://mine.example.test/relay/';
+  // PURE
+  ok(JSON.stringify(PL.parseFleet({ relayUrl: `  ${RELAY1} `, other: 'x', n: 3 })) === JSON.stringify({ relayUrl: RELAY1 }) && JSON.stringify(PL.parseFleet({ relayUrl: 7 })) === '{}', 'parseFleet: the known field, trimmed; an unknown field or a non-string value is not named');
+  let threw = 0; for (const bad of [[], 'abc', 3, null, [{ relayUrl: RELAY1 }]]) { try { PL.parseFleet(bad); } catch { threw++; } }
+  ok(threw === 5, 'parseFleet THROWS on a top level that is not an object (the reader turns it into a named error)');
+  ok(PL.mergeFleet({ cluster: null, release: null }) === null && PL.mergeFleet({}) === null, 'both layers absent ⇒ null (the caller\'s fallback)');
+  const mC = PL.mergeFleet({ cluster: { relayUrl: RELAY1 }, release: null });
+  const mR = PL.mergeFleet({ cluster: { relayUrl: RELAY1 }, release: { relayUrl: MINE } });
+  const mE = PL.mergeFleet({ cluster: { relayUrl: RELAY1 }, release: {} });
+  const mB = PL.mergeFleet({ cluster: { relayUrl: RELAY1 }, release: { relayUrl: '' } });
+  ok(mC.facts.relayUrl === RELAY1 && mC.layerOf.relayUrl === 'cluster' && mR.facts.relayUrl === MINE && mR.layerOf.relayUrl === 'release' && mE.facts.relayUrl === RELAY1 && mE.layerOf.relayUrl === 'cluster' && mB.facts.relayUrl === '' && mB.layerOf.relayUrl === 'release',
+    'mergeFleet per FIELD: the release\'s field wins (its "" = none), a release file naming no field keeps the cluster\'s');
+  const mN = PL.mergeFleet({ cluster: {}, release: null });
+  ok(mN && !('relayUrl' in mN.facts), 'a present fleet.json naming no relayUrl: the field is ABSENT (not "")');
+  ok(PL.diffFleet(mC, PL.mergeFleet({ cluster: { relayUrl: RELAY1 } })).length === 0 && PL.diffFleet(mC, mR).join() === 'relayUrl' && PL.diffFleet(mN, mB).join() === 'relayUrl' && PL.diffFleet(null, mC).join() === 'relayUrl', 'diffFleet: equal ⇒ [], a moved value / absent vs "" / null vs set ⇒ the field');
+  ok(PL.fleetWords(['relayUrl'], mR) === `relay page changed (now ${MINE})` && PL.fleetWords(['relayUrl'], mB) === 'relay page changed (now none)' && /unset — the environment is the fallback/.test(PL.fleetWords(['relayUrl'], null)), 'fleetWords: «relay page changed (now <page> | none | unset — the environment is the fallback)»');
+
+  // ORCH over the kubelet's shape
+  const dir = path.join(ROOT, 'fleet');
+  const ROWS = { 'gdrive-clients.json': [g('org1', SECRET_A, 'Org')] };
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY1 } });
+  const cap = capture();
+  const r = CP.create({ dir, log: cap.log, debounceMs: 30, pollMs: 250 });
+  ok(JSON.stringify(r.fleet()) === JSON.stringify({ relayUrl: RELAY1 }) && r.status().present.fleet === true, 'boot read: fleet() = the cluster\'s facts (a copy), status().present.fleet');
+  ok(cap.lines.length === 1 && cap.lines[0].includes(`relay page ${RELAY1}`) && !cap.lines.some((l) => /ignored/.test(l)), `boot says the relay page beside the rows; fleet.json is NOT a stray: ${cap.lines[0]}`);
+  const f0 = r.fleet(); f0.relayUrl = 'mutated';
+  ok(r.fleet().relayUrl === RELAY1, 'fleet() hands out a copy');
+  const changes = []; r.onChange((c) => changes.push(c));
+  await r.start();
+  cap.lines.length = 0;
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY2 } });
+  await until(() => changes.length >= 1, 3000);
+  const ln = cap.lines.filter((l) => /\[presets\] changed/.test(l));
+  ok(changes.length === 1 && changes[0].kinds.join() === 'fleet' && r.fleet().relayUrl === RELAY2 && ln.length === 1 && ln[0].endsWith(`relay page changed (now ${RELAY2})`), `a Secret edit of fleet.json is seen ONCE, the change names kind fleet, ONE journal line: ${ln[0]}`);
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY2 }, 'override/fleet.json': { relayUrl: MINE } });
+  await until(() => changes.length >= 2, 3000);
+  ok(r.fleet().relayUrl === MINE && changes[1].kinds.join() === 'fleet' && changes[1].sources.includes('fleet'), 'the release\'s override/fleet.json wins over the cluster\'s (like the rows)');
+  const n2 = changes.length;
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY2 }, 'override/fleet.json': { relayUrl: MINE } });
+  await r.reload();                                   // single flight: answers once the swapped tree has been read
+  ok(changes.length === n2, 'a swap with the same content fires nothing');
+  cap.lines.length = 0;
+  project(dir, { ...ROWS, 'fleet.json': '{"relayUrl": "https://x/",', 'override/fleet.json': { relayUrl: MINE } });
+  await until(() => cap.lines.some((l) => /could not be read/.test(l)), 3000);
+  ok(r.fleet().relayUrl === MINE && cap.lines.filter((l) => /fleet\.json could not be read \(unparseable/.test(l)).length === 1 && r.status().errors.some((e) => e.file === 'fleet.json' && e.kept === true), 'a malformed fleet.json keeps the previous facts, ONE line, the typed error (kept)');
+  cap.lines.length = 0;
+  project(dir, { ...ROWS, 'fleet.json': '[]' });
+  await until(() => cap.lines.some((l) => /not-an-object/.test(l)), 3000);
+  ok(cap.lines.some((l) => /fleet\.json could not be read \(not-an-object: the top level must be a JSON object\)/.test(l)), 'a fleet.json whose top level is not an object: named not-an-object');
+  cap.lines.length = 0;
+  const BAD = 'http://admin.fleet.example.test/relay/?k=SECRETISH';
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: BAD } });
+  await until(() => cap.lines.some((l) => /not a relay page address/.test(l)), 3000);
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: BAD }, 'integrations.json': '[]' });
+  await r.reload();
+  const badL = cap.lines.filter((l) => /not a relay page address/.test(l));
+  ok(badL.length === 1 && !badL[0].includes('SECRETISH') && /\[presets\] fleet\.json: relayUrl is not a relay page address/.test(badL[0]), `a relayUrl that is no relay page address is said ONCE across swaps, never its value: ${badL[0]}`);
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: RELAY1 } });
+  await until(() => r.fleet() && r.fleet().relayUrl === RELAY1, 3000);
+  cap.lines.length = 0;
+  project(dir, { ...ROWS });
+  await until(() => r.fleet() === null, 3000);
+  ok(r.fleet() === null && r.status().present.fleet === false && cap.lines.some((l) => /relay page changed \(now unset — the environment is the fallback\)/.test(l)), 'the Secret lost its fleet key ⇒ fleet() null (the caller\'s fallback), said');
+  r.stop();
+  // CONTROL: a merge reading the layers in the wrong order — the cluster wins over the release
+  const srcP = fs.readFileSync(path.join(REPO, 'src/preset-layers.js'), 'utf-8');
+  const a5 = "    for (const k of FLEET_FIELDS) if (typeof f[k] === 'string') { facts[k] = f[k]; layerOf[k] = layer; }";
+  ok(srcP.includes(a5), 'control anchor: the per-field write');
+  const rev = M.load('src/preset-layers.js', srcP.replace(a5, "    for (const k of FLEET_FIELDS) if (typeof f[k] === 'string' && !(k in facts)) { facts[k] = f[k]; layerOf[k] = layer; }"), 'fleet-first-wins');
+  ok(rev.mergeFleet({ cluster: { relayUrl: RELAY1 }, release: { relayUrl: MINE } }).facts.relayUrl === RELAY1, 'CONTROL: a merge where the first layer read keeps its field lets the CLUSTER win — the override assert above is red on it');
 }
 
 for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(row.pass, row.name, row.detail);

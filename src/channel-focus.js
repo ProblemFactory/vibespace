@@ -444,11 +444,37 @@ function firstScreenSplit(rows, now = Date.now(), { policy = null, bands = null,
   return { needs: typeof needsMe === 'function' ? needsMe(wait, now, bands) : null, rows: wait, byKey, related };
 }
 
+/** lane channel-reauth-visible (the owner 2026-10-23: 「在 inbox 或者 sidebar 高亮出来这里需要处理」): A DEAD SIGN-IN IS AN
+ *  ATTENTION ROW — band 1 by its FACT (urgency `urgent`: a login that ended, like every band-1 producer), one per account
+ *  whose view says `authState` 'expired' | 'pending' (channel-caps signinView; a consent in flight is not alive yet).
+ *  `a` = an account view (the digest's `adapters[]` or totals' `signin[]`) → the row, or null. */
+function signinRowOf(a) {
+  if (!a || !a.id || a.enabled === false || (a.authState !== 'expired' && a.authState !== 'pending')) return null;
+  return {
+    id: `signin/${a.id}`, key: `signin/${a.id}`, source: 'channels', band: null, at: num(a.authSince), due: null, urgency: 'urgent', origin: 'channels', kind: 'action',
+    options: 0, action: 'channel-reauth', card: false, plugin: null, judged: null, reasks: 0, blocked: false, waitedBy: null, deadlineMoney: false,
+    answered: false, notice: false, until: null,
+  };
+}
+/** The dead sign-ins of an account list, as the rail names them: `[{id, name}]` (the login when the view names one, else the label). */
+function signinAccounts(accounts) {
+  const out = [];
+  for (const a of Array.isArray(accounts) ? accounts : []) {
+    if (!signinRowOf(a)) continue;
+    const user = a.user || (a.auth && !a.auth.self && a.auth.user) || '';
+    const label = String(a.label || a.id);
+    out.push({ id: String(a.id), name: user && !label.includes(user) ? `${label} · ${user}` : label, state: a.authState });
+  }
+  return out;
+}
 /** THE CHANNELS RAIL BADGE (decision 7): `convs` = the server's count of conversations in bands 1–4 (`digest.needsMe`, kept
  *  — the client never holds every row) + the non-archived agent groups the attention list puts in bands 1–4 (an @ of the
- *  owner) — `groups` = `/api/channel-groups`' list, `needsMe` injected. Never unread, never the outbox's arithmetic. */
-function channelsBadge(convs, groups, now = Date.now(), { policy = null, bands = null, needsMe = null } = {}) {
+ *  owner) — `groups` = `/api/channel-groups`' list, `needsMe` injected. Never unread, never the outbox's arithmetic.
+ *  lane channel-reauth-visible: + `accounts` (the account views) — each dead sign-in is a band-1 row (`signinRowOf`), so a
+ *  band the owner switched off moves it like any row. */
+function channelsBadge(convs, groups, now = Date.now(), { policy = null, bands = null, needsMe = null, accounts = null } = {}) {
   const rows = [];
+  for (const a of Array.isArray(accounts) ? accounts : []) { const r = signinRowOf(a); if (r) rows.push(r); }
   for (const g of Array.isArray(groups) ? groups : []) {
     if (!g || !g.id || g.archivedAt) continue;
     const a = attentionRowOf({ kind: 'group', group: g, key: `groups/${g.id}`, atYou: num(g.atYou), lastAt: num(g.lastAt || g.createdAt), archived: false }, now, policy);
@@ -592,4 +618,5 @@ module.exports = {
   selfRead, readAdvance, systemRead,   // + systemRead: B-ef03
   AT_YOU_MAX, mentionsSelf, keepAtYou, atYouOf,   // lane attention-rule-at-you
   ATTENTION_FACTS, RELATED_RULES, attentionRowOf, firstScreenSplit, channelsBadge,   // lane attention-predicate-shared (decision 7)
+  signinRowOf, signinAccounts,   // lane channel-reauth-visible: a dead sign-in is a band-1 row of the Channels badge
 };

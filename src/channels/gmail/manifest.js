@@ -37,7 +37,7 @@ const settings = {
   options: [
     // lane oauth-relay-road (the owner 2026-10-22: one registered redirect per app, never one per instance): the relay page
     // a sign-in with a person's OWN Google client comes back through on THIS instance (a fleet pod rides the fleet's first,
-    // VIBESPACE_OAUTH_RELAY_URL); addendum 1: a company preset never reads it — its own relayUrl › the fleet's, or none.
+    // the presets' fleet.json — lane oauth-relay-one-source); addendum 1: a company preset never reads it — its own relayUrl › the fleet's, or none.
     // Read by the hub (serverSetting, the consent row's relayUrlSetting).
     {
       key: 'gmailRelayUrl', role: 'relayUrl', type: 'string', default: RELAY_DEFAULT,
