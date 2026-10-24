@@ -435,5 +435,47 @@ console.log('ANTIGRAVITY (lane agy-status-bar-facts) — agy\'s own write / edit
   ok(none === 0, 'CONTROL (the base): the ACP reader produces NOTHING from these records — why the owner saw no chip');
 }
 
+console.log('⑫ an ACP / agy rebuild reads its records\' own `ts` — an old card sits at its time, not at the bottom (lane agy-harness-fixes)');
+{
+  // the wrappers stamp `ts` (ISO; agy-wrapper / acp-wrapper record()), never `timestamp` — before, recordAt read only
+  // `timestamp` ⇒ every ACP/agy slab was clockless ⇒ cardPlacement 'tail' for every rebuilt card (the owner's pile)
+  const ACWD = '/home/u/agyproj', TA = Date.UTC(2026, 9, 20, 9, 0, 0);
+  const at = (m) => new Date(TA + m * MIN).toISOString();
+  const userA = (text, m) => ({ ts: at(m), type: 'acp', kind: 'user', msgId: 'u' + m, content: [{ type: 'text', text }], peer: null });
+  const sayA = (text, m) => ({ ts: at(m), type: 'acp', kind: 'update', sessionId: 'conv-demo-1', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } } });
+  const RECS = [userA('agy slab starts', 0), sayA('agy before the doc', 8), userA('agy after the doc', 12), sayA('agy later still', 20)];
+  const oldKey = ':' + ACWD + '/old-report.md', midKey = ':' + ACWD + '/mid-report.md';
+  const rows12 = { ...AF.fold({}, { path: ACWD + '/old-report.md', op: 'write', at: TA - 3 * 3600000, id: 'a-old' }), ...AF.fold({}, { path: ACWD + '/mid-report.md', op: 'write', at: TA + 10 * MIN, id: 'a-mid' }) };
+  STORE.pages = []; STORE.designs = [];
+  N.setArtifactStoreSource(REG.storeRowsOf); N.setArtifactServiceSource(() => ({}));
+  const s12 = { backend: 'antigravity', cwd: ACWD, host: '', _artifacts: { ...rows12 }, _normalizer: null };
+  await N.rebuildHistory(s12, 's12', RECS);
+  const l12 = s12._normalizer.messages, k12 = l12.map((m) => (m.noticeKind === 'artifact' ? keyOfCard(m) : textOf(m)));
+  ok(s12._normalizer.artifactSlab.slabFirstAt === TA && s12._normalizer.artifactSlab.slabLastAt === TA + 20 * MIN, 'an agy slab is STAMPED by its records\' `ts` (first / last instant non-zero)', s12._normalizer.artifactSlab);
+  const iMid12 = k12.indexOf(midKey);
+  ok(iMid12 > 0 && k12[iMid12 - 1] === 'agy before the doc' && k12[iMid12 + 1] === 'agy after the doc' && k12[k12.length - 1] === 'agy later still' && !k12.includes(oldKey),
+    'the doc written 10 min into the slab: its card at ITS time (between the two messages), the doc older than the slab: no card (the chip is its home), nothing after the last message', k12);
+  ok(['at', 'none'].every((w, i) => AF.cardPlacement([rows12[midKey], rows12[oldKey]][i], s12._normalizer.artifactSlab) === w), 'cardPlacement over the agy slab: the mid doc ⇒ at, the old doc ⇒ none (never tail)');
+  // a ms-number `ts` reads the same; a claude record carrying BOTH reads its `timestamp` (claude / codex unchanged)
+  const s12n = { backend: 'antigravity', cwd: ACWD, host: '', _artifacts: {}, _normalizer: null };
+  await N.rebuildHistory(s12n, 's12n', RECS.map((r) => ({ ...r, ts: Date.parse(r.ts) })));
+  const s12c = { backend: 'claude', cwd: CWD, host: '', _artifacts: {}, _normalizer: null };
+  await N.rebuildHistory(s12c, 's12c', [{ ...userAt('both stamps', 0), ts: TA }, { ...sayAt('both stamps 2', 20), ts: 'not a time' }]);
+  ok(s12n._normalizer.artifactSlab.slabFirstAt === TA && s12c._normalizer.artifactSlab.slabFirstAt === T0 && s12c._normalizer.artifactSlab.slabLastAt === T0 + 20 * MIN,
+    'a ms-number `ts` stamps the slab the same; a record with a `timestamp` is read by it (claude / codex placement unchanged)', [s12n._normalizer.artifactSlab, s12c._normalizer.artifactSlab]);
+  // CONTROL: the old timestamp-only recordAt ⇒ the agy slab is clockless ⇒ BOTH old cards pile after the last message
+  const nsrc12 = (await import('node:fs')).readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
+  const readTs = "  const v = typeof raw.timestamp === 'string' ? raw.timestamp : raw.ts;\n";
+  ok(nsrc12.includes(readTs), 'control anchor: recordAt falls back to the record\'s `ts`');
+  const MB = M.load('src/normalizers.js', nsrc12.replace(readTs, "  const v = raw.timestamp;\n"), 'tsblind');
+  MB.setArtifactStoreSource(REG.storeRowsOf); MB.setArtifactServiceSource(() => ({}));
+  const s12b = { backend: 'antigravity', cwd: ACWD, host: '', _artifacts: { ...rows12 }, _normalizer: null };
+  await MB.rebuildHistory(s12b, 's12', RECS);
+  const k12b = s12b._normalizer.messages.map((m) => (m.noticeKind === 'artifact' ? keyOfCard(m) : textOf(m)));
+  const last12b = k12b.indexOf('agy later still');
+  ok(s12b._normalizer.artifactSlab.slabFirstAt === 0 && [oldKey, midKey].every((k) => k12b.indexOf(k) > last12b), 'CONTROL: reading only `timestamp` — the agy slab is clockless and BOTH cards pile after the last message (the owner\'s bug; the ⑫ asserts see it)', k12b);
+  N.setArtifactServiceSource(REG.servicesOf);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

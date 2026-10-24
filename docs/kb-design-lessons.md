@@ -391,6 +391,8 @@ What survives for codex is the SESSION scope, which asks the session's OWN alrea
 
 **Window blink**: Chat windows trigger waiting blink animation (same as terminal idle detection) when a `result` message arrives and the window is not focused.
 
+**ACP / agy records and history (lane agy-harness-fixes, 2.369.352):** a record's time is the field its harness writes — claude / codex `timestamp`, the ACP / agy wrappers `ts` (ISO; ms accepted); every shared reader (normalizers.js `recordAt`, acp-message-manager `toTs`) names both, so an ACP slab is stamped and a rebuilt deliverable card lands at its own time.
+
 ### 12. Font Discovery
 **Priority**: Client-side `queryLocalFonts()` API (Chrome 103+) → server-side `fc-list :spacing=mono` fallback → always includes Google Web Fonts.
 

@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.352 — 2026-10-24
+
+### Fixed
+- Files and pictures an Antigravity assistant made earlier sit where they were made in the conversation, not all piled up at the bottom when you reopen it.
+
 ## 2.369.351 — 2026-10-24
 
 ### Added

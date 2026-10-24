@@ -4,6 +4,11 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.352 — 2026-10-24
+
+### agy-harness-fixes — four Antigravity harness / normalizer bugs the owner hit in one long agy conversation (FIX; fixtures synthetic, no real conversation read)
+- **Old deliverable cards piled at the bottom after a rebuild (every ACP / agy conversation):** src/normalizers.js:423 `recordAt` read only `raw.timestamp`; the ACP / agy wrappers stamp `ts` (data/bin/agy-wrapper.js:113, data/bin/acp-wrapper.js:192 — acp-message-manager.js:232 already reads `ts || timestamp`) ⇒ 0 for every record ⇒ `slabOf` {0, 0} ⇒ src/artifacts.js:199 `if (!slabFirstAt) return 'tail'` ⇒ every card settle placed went to the tail. FIX: recordAt = `timestamp` (ISO) else `ts` (ISO or ms); a record carrying a `timestamp` reads exactly as before (claude / codex unchanged — test-artifacts ⑩ and every rebuild suite green as they were). Also by this: an ACP conversation's browser / group cards are placed by time between its records, and its derived rows carry their record's instant instead of 0. GATE test-artifacts ⑫ (6 asserts: the agy slab stamped, the in-slab doc at its time, the older doc none, a ms `ts`, a claude record with both stamps, the timestamp-only CONTROL ⇒ both cards after the last message).
+
 ## 2.369.351 — 2026-10-24
 
 ### new-session-group-folder-link — the folder follows its Task Group until the person edits; the name's chips under the field (FIX, the owner 2026-10-23 21:0x PT on the .346 form)

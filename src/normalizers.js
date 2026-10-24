@@ -419,8 +419,16 @@ function placeBrowserCard(mm, card, { emit = false } = {}) {
   if (emit && typeof mm._emit === 'function') mm._emit({ op: 'create', message: msg });
   return msg;
 }
-/** A record's own instant (the transcripts' ISO `timestamp`; a stdout-ring record has none — it never moves a card). */
-function recordAt(raw) { const t = raw && typeof raw.timestamp === 'string' ? Date.parse(raw.timestamp) : NaN; return Number.isFinite(t) ? t : 0; }
+/** A record's own instant, read by the field its harness WRITES (lane agy-harness-fixes): the transcripts' ISO
+ *  `timestamp`, else the ACP / agy wrappers' `ts` (ISO or ms — acp-message-manager's toTs reads the same field). Before,
+ *  only `timestamp` was read ⇒ every ACP/agy record said 0 ⇒ an unstamped slab ⇒ every rebuilt deliverable card at the
+ *  tail. A record with neither (a stdout-ring record) never moves a card. */
+function recordAt(raw) {
+  if (!raw) return 0;
+  const v = typeof raw.timestamp === 'string' ? raw.timestamp : raw.ts;
+  const t = typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) : NaN;
+  return Number.isFinite(t) && t > 0 ? t : 0;
+}
 /** The loaded slab's instants (lane artifacts-settle-position): its first and last STAMPED record — a big conversation
  *  loads a tail-only slab, so a row written before `slabFirstAt` has no place in it. 0 = no stamped record. */
 function slabOf(records) {

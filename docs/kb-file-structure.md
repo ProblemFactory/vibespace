@@ -1208,6 +1208,7 @@ src/server/grants-migration.js — ORCH 2026-10-grants-unify (lane grants-unify)
 scripts/grant-fixtures.mjs — the suites' grant fixtures (lane grants-unify): a pre-unify store seeded the way the migration carries it (withUse, seedBrowserProfiles, seedAutomationGrants, seedHosts, seedChannelIndex); not a test-*.mjs
 scripts/test-grant-model.mjs + scripts/test-grants-store.mjs — lane grants-unify gates (fast): the model (every legacy mapper differential) and the store + EVERY door honouring an exception (the real channel engine's wake), each with a patched-copy RED control
 scripts/test-brand-svg.mjs — lane backend-icons gate (fast, PURE): every brand SVG drawn (served ∪ BACKEND_META iconSrc ∪ /brand/ paths in src/ + TEMPLATES) exists + passes a strict in-test XML checker; RED controls (shipped .348 antigravity.svg, a fixture per rule); browser leg: test-sidebar-scroll
+src/normalizers.js recordAt (lane agy-harness-fixes) — a record's instant = `timestamp` (ISO) else the ACP / agy wrappers' `ts` (ISO or ms); 0 only with neither ⇒ an ACP slab is stamped and a rebuilt card lands at its time (cardPlacement), never piled at the tail ⇒ test-artifacts ⑫
 
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 
