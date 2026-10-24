@@ -7120,9 +7120,13 @@ class ChatView {
           // line (chat-renderers _machineLine; a failed one too, on screen while the group is closed); a lone card stays whole
           const compact = machineCompact(machineCards);
           members.forEach((el, i) => { if (machineCards[i]) el.classList.toggle('chat-machine-compact', compact || machineCards[i].verb === 'info'); }); // lane exit-calls-in-history: a lookup (list / runs / use / url) is always the one row
+          // lane chat-proposal-card: the proposals the run's calls filed — each call row's keyed box says its count
+          const proposals = { n: 0, awaiting: 0 };
+          for (const el of members) { const pb = el.querySelector('.chat-chan-props'); if (pb) { proposals.n += Number(pb.dataset.n) || 0; proposals.awaiting += Number(pb.dataset.awaiting) || 0; } }
           const mkLabel = ({ now = Date.now(), live = false, time = true } = {}) => runSummaryLabel({
             byKind, mcpServers, files, nErr, running, notes, machinePart: machinePart ? machinePart.text : '',
             linked: linked.size, // lane run-fold-channel-compact: "· 4 条带会话入口" — what the closed fold keeps on screen
+            proposals, // lane chat-proposal-card: "· 1 条提案待批准" — the cards its calls filed (channel-outbox chatProposalCards)
             machineTime: time && machinePart ? machinePart.time : '', // lane machine-card-compact: the span closes the label (the head draws it apart)
             collabPart: collabRunPart(collabStats, { now, live, t }),
           }, t);

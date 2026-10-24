@@ -1111,14 +1111,16 @@ function answer3(res, r) {
   return res.status(status).json({ ...(r && typeof r === 'object' ? r : {}), error: (r && r.error) || 'refused', code });
 }
 /** The OUTBOX — every proposal (newest first, bounded), optionally ONE
- *  conversation's (`?conv=<adapterId>/<convId>`). What both approval surfaces
- *  render (§9.2: one store, two places). */
+ *  conversation's (`?conv=<adapterId>/<convId>`), or the ones a CHAT's call rows filed (`?ids=<id>,<id>` — lane
+ *  chat-proposal-card: each only while its drafter still sees where it was filed). What the three approval surfaces
+ *  render (§9.2: one store — the conversation window, the Outbox window, the agent's chat). */
 router.get('/api/channels/outbox', (req, res) => {
   try {
     forHost(req);
     const key = req.query.conv ? String(req.query.conv) : null;
     const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
-    res.json(engine().outboxView({ key, limit }));
+    const ids = typeof req.query.ids === 'string' ? req.query.ids.split(',').map((s) => s.trim()).filter(Boolean) : null;
+    res.json(engine().outboxView({ key, limit, ...(ids ? { ids } : {}) }));
   } catch (e) { fail(res, e); }
 });
 /** The USER's own draft from the composer: a proposal drafted by the user

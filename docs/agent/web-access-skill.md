@@ -92,8 +92,9 @@ vibespace-browser detach                    # drop your tab when done
 Don't preemptively worry about login. Open the page and try to get the target content. Only if content is inaccessible AND a login would fix it:
 
 - If the job needs the login again later, work in a **named profile** (above), so the login survives.
-- Then tell the user which page needs them and stop:
-  > "This page needs a login for [specific content]. Please open my browser (Agent browser → Take over), log in to [site], and hand it back."
+- Then ask the user for it and stop — ONE request they see at the top of the Agent browser window and in For you:
+  `vibespace-browser ask-human "Log in to [site] for [specific content], then hand back"`
+  (say the same in your reply: "This page needs a login — the request is in your Agent browser window; take over, log in, and hand it back.")
 - Continue after the handback message — it names the page they left you on; re-orient first.
 - Never type a password you were not given for this purpose, and never put one on a command line.
 

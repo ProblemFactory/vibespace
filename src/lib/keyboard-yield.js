@@ -157,19 +157,21 @@ export function yieldKindOf(el) {
  * judged (absent ⇒ never: the view's press rules only while it drives, as before).
  */
 export function createKeyboardYield({ root, sink, drives, mine = () => false, now = () => Date.now(), ownChrome = () => false, picture = null }) {
+  // lane browser-x-in-window: `sink` / `picture` may be GETTERS — a live view showing the X picture hands its keys to that view's own field
+  const sinkEl = () => { try { return typeof sink === 'function' ? sink() : sink; } catch { return null; } };
   // lane dialog-keys: `opener` = the user's last TRUSTED act on the app {at, trusted, picture}; `holds` = the dialogs that
   // took the keys [{overlay, back}] (newest last); `base` = where the keys were before the first ({to: 'sink'|'yield', el})
   const s = { yielded: false, kind: null, press: null, last: null, cue: null, lastCueAt: null, drove: null, opener: null, holds: [], base: null, dialogWhy: null, home: null }; // (`home` = the text box the keys were yielded to — a dialog opened from a yield gives them back there)
   const inView = (el) => { try { return !!el && !!root && (el === root || root.contains(el)); } catch { return false; } };
   /** lane dialog-keys: the press landed on the view's PICTURE (`picture` = the element the page's pointer is forwarded from) */
-  const onPicture = (el) => { try { return !!el && !!picture && (el === picture || picture.contains(el)); } catch { return false; } };
+  const onPicture = (el) => { try { const pic = typeof picture === 'function' ? picture() : picture; return !!el && !!pic && (el === pic || pic.contains(el)); } catch { return false; } };
   const heldOpen = () => s.holds.filter((h) => modalOpen(h.overlay));
   const namesView = (el) => { if (inView(el)) return true; try { return !!el && !!ownChrome(el); } catch { return false; } };
   const driving = () => { try { return !!drives(); } catch { return false; } };
   const isMine = () => { try { return !!mine(); } catch { return false; } };
   /** verify r2 (H1): does a text box — or a FRAME (its document takes the keys the view's listeners never see) — outside
    *  this view hold the caret? */
-  const caretOutside = (el) => !!el && el !== sink && !inView(el) && (takesKeys(el) || isFrame(el));
+  const caretOutside = (el) => !!el && el !== sinkEl() && !inView(el) && (takesKeys(el) || isFrame(el));
   return {
     get yielded() { return s.yielded; },
     get kind() { return s.kind; },
@@ -200,7 +202,7 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
     /** → 'yield' | 'reclaim' | 'allow' (the view reclaims only when it is THE owner of this client) */
     onFocusIn(e) {
       const el = e.target;
-      const editable = takesKeys(el), insideView = el === sink; // verify r2 (N1): a picture's keyboard surface counts
+      const editable = takesKeys(el), insideView = el === sinkEl(); // verify r2 (N1): a picture's keyboard surface counts
       if (s.holds.length) return 'allow'; // lane dialog-keys: a dialog the user opened holds the keys — every focus is his to move (the dialog's own, Tab)
       if (s.yielded) { if (editable && !inView(el)) { s.kind = yieldKindOf(el); s.home = el; } return 'allow'; }
       const p = s.press;
@@ -221,7 +223,7 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
      *  typing went to the PAGE (userW's report, one state later). The same PURE verdicts as a focusin on `active`, called
      *  right after onPointerDown noted the press; never a reclaim (a press moves no focus). → 'yield' | null */
     onPressFocused(active) {
-      if (s.holds.length || s.yielded || !s.press || !active || active === sink || inView(active) || !takesKeys(active)) return null; // (lane dialog-keys: a press inside a dialog that holds the keys is the dialog's, never a yield)
+      if (s.holds.length || s.yielded || !s.press || !active || active === sinkEl() || inView(active) || !takesKeys(active)) return null; // (lane dialog-keys: a press inside a dialog that holds the keys is the dialog's, never a yield)
       const byUserPress = userPressFocus({ press: s.press, sameInput: sameInput(s.press.target, active), focusAt: now() }).byUserPress;
       if (focusVerdict({ owns: driving(), mine: isMine(), editable: true, insideView: false, byUserPress }) !== 'yield') return null;
       s.press = null; s.yielded = yieldAfter(s.yielded, 'yield'); s.kind = yieldKindOf(active); s.home = active;
@@ -260,7 +262,7 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
       if (v !== 'take') return v;
       // the base: the page (the view owned the keys) or the yield's HOME — the text box focused now, else the one the keys were
       // yielded to (he may have pressed a button beside it: the button is not where he typed)
-      if (!held) s.base = s.yielded ? { to: 'yield', el: active && active !== sink && !inView(active) && takesKeys(active) ? active : s.home } : { to: 'sink', el: null };
+      if (!held) s.base = s.yielded ? { to: 'yield', el: active && active !== sinkEl() && !inView(active) && takesKeys(active) ? active : s.home } : { to: 'sink', el: null };
       s.holds.push({ overlay: ov, back: held ? active : null });
       s.opener = null;
       return v;
@@ -285,7 +287,7 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
       const back = all.filter((h) => !open.includes(h)).reverse().map((h) => h.back).find(inOpen) || null;
       const base = s.base;
       if (!open.length) s.base = null;
-      const home = !!(base && base.to === 'yield' && base.el && base.el !== sink && !inView(base.el) && takesKeys(base.el) && isVisible(base.el));
+      const home = !!(base && base.to === 'yield' && base.el && base.el !== sinkEl() && !inView(base.el) && takesKeys(base.el) && isVisible(base.el));
       const to = dialogReturn({ left: open.length, back: { valid: !!back }, base: base ? { to: base.to, valid: home } : null });
       return { to, el: to === 'back' ? back : to === 'older' ? open[open.length - 1].overlay : to === 'yield' ? base.el : null };
     },
@@ -306,7 +308,7 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
     whereNow(active) {
       if (s.holds.length) return 'dialog'; // lane dialog-keys: a dialog the user opened holds the keys ("…it goes back when you answer it")
       if (!s.yielded) return null;
-      if (active && active !== sink && !inView(active)) { if (takesKeys(active)) return yieldKindOf(active); if (isFrame(active)) return 'other'; }
+      if (active && active !== sinkEl() && !inView(active)) { if (takesKeys(active)) return yieldKindOf(active); if (isFrame(active)) return 'other'; }
       return 'none';
     },
     /** verify r2 (H1b'): the view may have come back to driving — a yield whose home is gone (the box the user pressed is not
@@ -314,7 +316,7 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
     settle({ drives = false, active = null } = {}) {
       const drovePrev = s.drove === null ? true : s.drove; s.drove = !!drives;
       if (s.holds.length) return 'keep'; // lane dialog-keys: a dialog the user opened holds the keys — the caret is in it, not homeless
-      const homeVisible = !!active && active !== sink && !inView(active) && takesKeys(active) && isVisible(active);
+      const homeVisible = !!active && active !== sinkEl() && !inView(active) && takesKeys(active) && isVisible(active);
       const v = yieldHomeVerdict({ yielded: s.yielded, drivesNow: !!drives, drovePrev, homeVisible });
       if (v === 'end') { s.yielded = yieldAfter(s.yielded, 'homeless'); s.kind = null; s.press = null; s.home = null; }
       return v;

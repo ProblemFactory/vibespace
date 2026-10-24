@@ -3,6 +3,7 @@ import { maybeNagVault } from './vault-unlock.js'; // lane vault-e2e-password: t
 import { TerminalSession } from './terminal.js';
 import { t } from './i18n.js';
 import { sessionDisplayName } from '../session-name.js'; // THE name ladder — a drift-ledger row names its conversation (lane record-oracle-2-1-296)
+import * as chanCaps from '../channel-caps.js'; // lane channel-row-notices: a parked push lane's whole sentence (the row says one line)
 import { diagnosticsSection } from './cli-registration-words.js'; // lane cli-2-1-308-records: a claude build this release has no record table for
 import { SIGN_IN, tourSteps, folderChips, firstFilesFolder } from '../day-one.js'; // lane door-day-one-landing: the tour's steps, its folder chips; a sign-in terminal is not a session row
 import { pathField } from './path-field.js'; // lane path-field: the first chat's folder is THE path field too
@@ -495,7 +496,7 @@ export function installSetupFlows(App) {
   },
 
     async _openDiagnostics() {
-    const [d, c, ci, bt, csp, rt, reg] = await Promise.all([
+    const [d, c, ci, bt, csp, rt, reg, ch] = await Promise.all([
       fetchJson('/api/telemetry/summary?days=14&drift=1'),
       fetchJson('/api/telemetry/central-summary?days=14'),
       fetchJson('/api/ci-heavy'),
@@ -503,6 +504,7 @@ export function installSetupFlows(App) {
       fetchJson('/api/csp-reports'), // lane app-page-csp: the page security policy's count (the chip below the title)
       fetchJson('/api/runtime'), // lane runtime-floor: the node this server runs against THE floor table (src/runtime-floor.js)
       fetchJson('/api/cli-registration'), // lane cli-2-1-308-records: the claude builds seen with no record table in this release
+      fetchJson('/api/channels?scope=accounts'), // lane channel-row-notices: the accounts whose push lane is parked or demoted
     ]);
     if (!d) { showToast(t('Could not load diagnostics'), { type: 'error' }); return; }
     const esc = escHtml;
@@ -542,6 +544,19 @@ export function installSetupFlows(App) {
       else if (rt.check && rt.check.ok) more.push(t('The boot check provisioned {version} — the next restart runs on it.', { version: rt.check.version }));
       else if (rt.check) more.push(t('The boot check did not provision {version} ({code}).', { version: rt.check.wanted, code: rt.check.code }));
       return `<h2>${esc(t('Node runtime'))}</h2><p><b>${esc(t('This server runs Node {node}.', { node: rt.node }))}</b> ${esc(state)}</p>${more.map((l) => `<p class="dim">${esc(l)}</p>`).join('')}`;
+    })()}
+    ${(() => {
+      // lane channel-row-notices: a channel account's parked / demoted push lane said WHOLE — the cause, the install command,
+      // the console steps the Channels row no longer carries (its ⓘ points here and to the setup card)
+      const accts = ch && !ch.error && Array.isArray(ch.adapters) ? ch.adapters : [];
+      const kinds = ch && !ch.error && Array.isArray(ch.kinds) ? ch.kinds : [];
+      const rows = accts.filter((a) => a && a.push && chanCaps.pushLaneNotice(a.push, a.lane, { t, now: Date.now() }));
+      if (!rows.length) return '';
+      return `<h2>${esc(t('Channels — real-time push'))}</h2>` + rows.map((a) => {
+        const k = kinds.find((x) => x && x.kind === a.kind);
+        const steps = k && k.pushSetup && Array.isArray(k.pushSetup.steps) ? `<ol>${k.pushSetup.steps.map((s) => `<li>${esc(t(s.words))}${s.code ? ` <code>${esc(s.code)}</code>` : ''}</li>`).join('')}</ol>` : '';
+        return `<p data-diag-push="${esc(a.id)}"><b>${esc(a.label || a.id)}</b> — ${esc(chanCaps.pushLaneText(a.push, a.lane, { t, now: Date.now() }))}</p>${steps}`;
+      }).join('');
     })()}
     <h2>${esc(t('Errors'))}</h2>${errs}
     <h2>${esc(t('Performance metrics'))}</h2>${(() => {

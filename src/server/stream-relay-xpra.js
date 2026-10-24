@@ -225,8 +225,10 @@ function xpraInputSieve({ maxPacket = XPRA_MAX_PACKET_BYTES } = {}) {
     if (b.length && !st.oversize) { st.parts = [Buffer.from(b)]; st.held = b.length; } else st.need = 0;
   }
   function feed(chunk) { let got = 0; walk(chunk, (u, input) => { if (input) got++; }); return got; }
-  /** `hold` (x5): a BLOCKED viewer — nothing is relayed at all; its hello and the held kinds are kept for `release()`. */
-  function strip(chunk, allowInput = true, { hold = false, pinned = false } = {}) {
+  /** `hold` (x5): a BLOCKED viewer — nothing is relayed at all; its hello and the held kinds are kept for `release()`.
+   *  `geometry` (lane browser-x-in-window): a SIZING viewer — its input is refused, its window geometry and display size PASS
+   *  (an agent browser's ruling pane sizes Chrome's window while nobody drives — xpra's own configure, never a CDP resize). */
+  function strip(chunk, allowInput = true, { hold = false, pinned = false, geometry = false } = {}) {
     let inputs = 0, dropped = 0, lifecycle = 0, pinCut = 0;
     const keep = [];
     if (hold) allowInput = false;
@@ -239,12 +241,13 @@ function xpraInputSieve({ maxPacket = XPRA_MAX_PACKET_BYTES } = {}) {
       if (life) lifecycle++;
       const pin = pinned && type !== null && (XPRA_DISPLAY_TYPES.has(type) || XPRA_GEOMETRY_TYPES.has(type));
       if (pin) pinCut++;
-      if (life || pin || (!allowInput && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);
+      const sizing = geometry && type !== null && (XPRA_GEOMETRY_TYPES.has(type) || XPRA_DISPLAY_TYPES.has(type));
+      if (life || pin || (!allowInput && !sizing && !(type !== null && XPRA_WATCH_TYPES.has(type)))) dropped++; else keep.push(u);
       // x5: a BLOCKED viewer relays NOTHING — what the allowlist kept comes back out; its hello is held for the moment it becomes active
       if (hold && keep[keep.length - 1] === u) { keep.pop(); if (type === 'hello' && u.length <= XPRA_HELLO_HOLD_BYTES) st.heldHello = Buffer.from(u); else dropped++; }
       // THE KEYMAP + DISPLAY-SIZE FENCES' other half: a refused viewer's keymap / display size is cut above and HELD
       // here (the last one of each) for its takeover
-      if (!allowInput && type !== null && !pin) for (const h of XPRA_HELD_KINDS) if (h.types.has(type)) st[h.key] = u.length <= h.cap ? Buffer.from(u) : null;
+      if (!allowInput && type !== null && !pin && !sizing) for (const h of XPRA_HELD_KINDS) if (h.types.has(type)) st[h.key] = u.length <= h.cap ? Buffer.from(u) : null;
     });
     const replayedKinds = [];
     if (hold) return { inputs, dropped, lifecycle, pinCut, replayed: 0, replayedKinds, oversize: st.oversize, relay: null };
@@ -263,8 +266,15 @@ function xpraInputSieve({ maxPacket = XPRA_MAX_PACKET_BYTES } = {}) {
     for (const h of XPRA_HELD_KINDS) if (st[h.key]) { out.push(st[h.key]); kinds.push(h.words); st[h.key] = null; }
     return { relay: out.length ? Buffer.concat(out) : null, kinds };
   }
+  /** lane browser-x-in-window: watch → SIZE — the geometry and display size held while refused, as ONE buffer (null = none), cleared. */
+  function releaseGeometry() {
+    if (st.oversize) return { relay: null, kinds: [] };
+    const out = [], kinds = [];
+    for (const h of XPRA_HELD_KINDS) if (h.key !== 'heldKeymap' && st[h.key]) { out.push(st[h.key]); kinds.push(h.words); st[h.key] = null; }
+    return { relay: out.length ? Buffer.concat(out) : null, kinds };
+  }
   const state = () => { const { parts, held, group, heldKeymap, heldDisplay, heldGeometry, heldHello, ...rest } = st; return { ...rest, pending: held, group: group.length, heldKeymap: heldKeymap ? heldKeymap.length : 0, heldDisplay: heldDisplay ? heldDisplay.length : 0, heldGeometry: heldGeometry ? heldGeometry.length : 0, heldHello: heldHello ? heldHello.length : 0 }; };
-  return { feed, strip, release, state };
+  return { feed, strip, release, releaseGeometry, state };
 }
 
 /** The bridge of this kind over the ONE bridge's shared state (`ctx` — see src/server/desktop-stream.js create()). */
@@ -369,6 +379,7 @@ function bridgeOf(ctx) {
       if (s === 'blocked') { if (upstream) cut(why); return; }
       if (!upstream) openUpstream(why === 'refresh' ? 'this viewer is active now' : why);
       else if (s === 'active') replayHeld();
+      else if (s === 'size') { const g = sieve.releaseGeometry(); if (g.relay) { relayUp(g.relay); log.log?.(`[desktop-stream] ${id}: ${viewerId ? `viewer ${viewerId}` : 'a viewer'} sizes the window now — the ${g.kinds.join(' and the ')} it sent while refused ${g.kinds.length > 1 ? 'reach' : 'reaches'} xpra`); } } // lane browser-x-in-window
     };
     conn.cut = cut;
     if (seatState(id, seatRef.seat) !== 'blocked') openUpstream();
@@ -387,8 +398,9 @@ function bridgeOf(ctx) {
         if (s !== 'blocked') conn.reconcile('message');
         return;
       }
-      let allow = true;
+      let allow = true, sizes = false;
       if (s === 'watch') { allow = false; lastRefusal = 'watch-mode'; }
+      else if (s === 'size') { allow = false; sizes = true; lastRefusal = 'size-only'; } // lane browser-x-in-window: the ruling pane sizes the window, never types
       else if (s === 'free' && inputPolicy) { try { const p = inputPolicy(id, viewerId); if (p && p.relay === false) { allow = false; lastRefusal = p.code || 'refused'; } } catch (e) { log.warn?.(`[desktop-stream] ${id}: inputPolicy threw — relaying: ${e && e.message}`); } }
       // THE POLICY PER PACKET (2026-09-22): a refused viewer's packets reach xpra only when XPRA_WATCH_TYPES names
       // them — its hello, ping echoes, damage acks, map-window, so the picture never
@@ -396,7 +408,7 @@ function bridgeOf(ctx) {
       // every control packet are cut out (round 2: a relayed `shutdown-server` from a Watch viewer ended the session).
       // Its keymap, display-size and (x5) configure-window packets are cut and the last of each HELD for its takeover
       // (r7 / r8 / x5: shared state). shutdown-server / exit-server are cut from EVERY viewer: the server's lifecycle is the keeper's.
-      const r = sieve.strip(buf, allow, { pinned: pinnedNow() });
+      const r = sieve.strip(buf, allow, { pinned: pinnedNow(), geometry: sizes });
       if (r.dropped) { dropped += r.dropped; stats.dropped += r.dropped; }
       if (r.oversize && !oversized) { oversized = true; closedBy = closedBy || closeOversize(ws, id, viewerId, r.oversize, 'xpra'); }
       if (r.replayed) log.log?.(`[desktop-stream] ${id}: ${viewerId ? `viewer ${viewerId}` : 'a viewer'} may type now — the ${r.replayedKinds.join(' and the ')} it sent while refused ${r.replayed > 1 ? 'reach' : 'reaches'} xpra first`);

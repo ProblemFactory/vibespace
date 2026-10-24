@@ -267,8 +267,14 @@ function create(engineCtx) {
     }
     return { drop: true };
   }
-  function outboxView({ key = null, limit = OUTBOX_LIST_CAP } = {}) {
-    const list = proposalsFor(key).slice(0, Math.max(1, limit)).map(proposalView);
+  /** lane chat-proposal-card: THE CHAT'S READ (`ids` = the proposals its call rows filed, the witness's touches) — each
+   *  only while its DRAFTER still sees where it was filed (`drafterSees`, the receipt's rule): a conversation whose agent
+   *  is no longer admitted to the channel never draws the card. ONE record, three places: the same `proposalView`. */
+  const CHAT_IDS_MAX = 100;
+  function outboxView({ key = null, limit = OUTBOX_LIST_CAP, ids = null } = {}) {
+    const snap = Array.isArray(ids) ? store.outbox.snapshot().proposals : null;
+    const list = snap ? [...new Set(ids.map(String))].slice(0, CHAT_IDS_MAX).map((id) => snap[id]).filter((p) => p && drafterSees(p)).map(proposalView)
+      : proposalsFor(key).slice(0, Math.max(1, limit)).map(proposalView);
     const all = proposalsFor();
     return {
       proposals: list,

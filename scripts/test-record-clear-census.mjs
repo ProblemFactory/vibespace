@@ -490,6 +490,8 @@ const ROUTES = {
   'GET /api/agent/browser/backend': 'meta',
   'POST /api/agent/browser/backend': 'meta',
   'POST /api/agent/browser/blocked': 'meta',
+  'POST /api/agent/browser/takeover-request': 'meta',       // lane browser-takeover-queue: the agent's OWN request (its words answered back to it) + its For-you item through the keeper's listener
+  'GET /api/agent/browser/takeover-request': 'meta',        // lane browser-takeover-queue: the CLI's wait — the agent's OWN request's state (its words), never another's
   'POST /api/agent/browser/site-hint': 'meta',
   'POST /api/browser/cli/install': 'meta',             // refuseAgentBearer: an agent's token (a jbt_ through jobByToken) refused by name before anything runs
   'GET /api/browser/session/:sessionId': 'exception: a job window\'s helper row names the JOB, its name read live off the jobs store at each GET (lane jobs-browser) — a cleared job (clearedAt) answers its id, so the clear is honoured at the read and nothing keeps the old name; the walk boots no browser keeper to list a job\'s window',
@@ -902,6 +904,7 @@ console.log('§H the client (verify r5): storage · titles · the belt · caches
 const USER_STATE = {
   'src/lib/jobs-panel.js|jobsPanelFolds': ['ids', 'session keys + a DIGEST of each job family (familyKey) — never the job\'s name; an older build\'s <session>|<name> key is dropped at load'],
   'src/lib/channels-panel.js|channelsPanelFolds': ['pref', 'the Channels panel\'s section folds (fixed part names)'],
+  'src/lib/channels-panel.js|channelsNoticesSeen': ['pref', 'lane channel-row-notices: the account notices the person put away — account id → the state\'s sig (a code, a time; no words)'],
   'src/lib/desktop-app-prefs.js|[key]': ['pref', 'the per-app frame / scale maps (catalog keys)'],
   'src/lib/desktop-app-launcher.js|patch': ['pref', 'the launcher\'s advanced-open flag + recent catalog ids'],
   'src/lib/sidebar-state.js|delta': ['owner', 'stars / archives (ids), the names the owner typed, modes, configs, legacy groups — the changed top-level keys'],
@@ -1181,6 +1184,7 @@ const CACHES = {
   'src/lib/channels-panel.js|COLLAPSED': 'folded section keys',
   'src/lib/channels-panel.js|EXPANDED': 'expanded section keys',
   'src/lib/channels-panel.js|NEEDS_OPEN': 'lane attention-predicate-shared: the 「需要我」 band numbers the person opened (numbers — no words)',
+  'src/lib/channels-panel.js|INFO_OPEN': 'lane channel-row-notices: the account ids whose ⓘ fold the person opened (ids — no words)',
   'src/lib/channels-panel.js|ends': 'list name → its end element (a sentinel / skeleton row — no words of a row)',
   'src/lib/channels-panel.js|aroundCache': 'design 010: the search dialog\'s around sheets — the vendor\'s records per found message, a local of ONE dialog (gone with it; never stored)',
   'src/lib/channels-panel.js|curSystems': 'lane webhook-l2-ui: the account ids whose capability row declares an inbound door (pushTransport http-inbound) of the last build — ids, no words',
@@ -1831,6 +1835,8 @@ const I_RECV = {
   // ── the five kinds and their carriers ──
   'src/agent-routes.js|e': ['carrier', 'a stash entry drained into the agent\'s next turn (the ladder\'s and the jobs engine\'s) — drawn as the chat card of what the agent received'],
   'src/agent-routes/status.js|add': ['todo', 'the agent\'s OWN For-you item (vibespace-ask) — the record itself'],
+  'src/browser-takeover-request.js|rec': ['takeover request', 'a takeover request (lane browser-takeover-queue) — its own store (data/browser-takeovers.json), not one of the five kinds a clear reaches: the agent\'s words answered back to the agent'],
+  'src/lib/browser-takeover-queue.js|req': ['takeover request', 'a takeover request a «Waiting for you» row / the Reply dialog draws (lane browser-takeover-queue) — the request store\'s record, never a For-you item\'s words'],
   'src/agent-routes/status.js|s': ['session', 'the filing session\'s own name (a For-you item\'s label)'],
   'src/agent-routes.js|req.body': ['activity', 'the agent\'s OWN Activity note (vibespace-task progress) — the record itself'],
   'src/agentd/agentd.js|msg': ['carrier', 'the delivered text of the device\'s peer-post op (the ladder\'s rung ③)'],

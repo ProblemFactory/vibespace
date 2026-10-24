@@ -240,6 +240,23 @@ Exit codes: `0` ok · `1` a typed refusal, or the page command itself failed ·
   driving it, control comes back to you too (a note rides your next message):
   its pages are gone, and your next command starts it again for you to drive.
   `vibespace-browser watch` prints this contract.
+* **Ask a person to take over: `vibespace-browser ask-human "<what you need, in their words>"`.**
+  A login, a captcha, a payment, a choice only they can make: ONE request,
+  listed at the top of the user's **Agent browser** window («Waiting for you» —
+  every conversation's requests in one place, however many tasks run) and as
+  ONE urgent item in their For you tray; they press **Take over** there (your
+  live view opens with the controls theirs), **Done** (they did it elsewhere)
+  or **Reply** (a line to you, no takeover). It is about the browser your
+  command lands on (`--profile <handle>` names another of yours). After
+  asking, END YOUR TURN: the handback arrives as a message naming the current
+  URL and the request it answers. A page verb you run meanwhile WAITS for it
+  (up to 90 s, then it says `[human_asked]`, nothing ran — end your turn);
+  asking again on the same browser re-asserts the SAME request with your new
+  words (never a second one). `ask-human --status` reads it,
+  `ask-human --withdraw` ends it when it is moot. A dismissal in their tray
+  never ends it; their Hand back, their Done, your withdraw, or your lease
+  ending does. A `vibespace-ask` is a question, not a takeover — use this verb
+  when the person must act IN the browser.
 * **Everything you do is on the record — and on screen.** Each page verb writes
   one audit line (who, when, which browser, the verb — never a `fill`'s text),
   and every action is kept in an action trace the user can page through (the
@@ -796,8 +813,8 @@ default with `*`.
   own words ("add this conversation to 'work' under Who can use it in the
   Agent browser panel"); never offer the user a `vibespace-browser` command line, and never
   create a second profile to get around a refusal.
-* **A login or a captcha is the user's.** Tell them which page needs them and
-  stop; continue after the handback. When the SITE refuses the browser itself
+* **A login or a captcha is the user's.** Ask for it (`vibespace-browser
+  ask-human "<which page, what to do>"`) and stop; continue after the handback. When the SITE refuses the browser itself
   (a sign-in page saying the browser may not be secure, an anti-bot wall), file
   `blocked --url <u> --why <code> --tier 2` first — the user's Approve on that
   card is the way through, never a workaround of yours.

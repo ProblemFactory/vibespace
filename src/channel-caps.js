@@ -177,6 +177,116 @@ function pushUnavailableText(code, { t = defaultT, words = null } = {}) {
   return typeof k === 'string' && k ? t(k) : '';
 }
 
+// ── lane channel-row-notices (the owner 2026-10-23, on his Channels window: 「这个提示最好不要常驻了，很丑陋；然后为啥我这里提示
+// 需要重新授权，重新授权干啥？」) — THE NOTICE GRAMMAR OF AN ACCOUNT ROW: a standing state is ONE short line that can be put
+// away (its details behind ⓘ, the steps on the setup card and in Diagnostics — the row never carries commands); a line that
+// suggests a re-authorization names what it adds and what works meanwhile — never a bare "needs re-authorization".
+/** THE PUSH LANE'S ROW NOTICE — null while the lane is healthy, switched off or not started (the row says nothing); else
+ *  `{sig, line, details, verb}`: `sig` = the state a dismissal remembers (a CHANGED state is shown again — another code, a
+ *  new demotion; a restart that parks the lane with the same code is not a change), `line` = the one short line, `details`
+ *  = the ⓘ fold's lines (the cause in words, the numbers — never a command), `verb` = 'redeclare' for a demotion (cleared
+ *  by the party that made the claim), else null. `steps` = this account type declares its setup steps (the setup card). */
+function pushLaneNotice(push, lane, { t = defaultT, now = null, steps = false } = {}) {
+  const p = push || {};
+  if (p.enabled === false) return null;
+  if (p.demotedAt) {
+    return { sig: `demoted:${Number(p.demotedAt) || 0}`, line: t('Real-time push fell back to cursor kicks — polling is back at the fast cadence'), details: [pushLaneText(p, lane, { t, now })], verb: 'redeclare' };
+  }
+  if (p.state !== 'unavailable') return null;
+  const code = String(p.lastStateCode || '');
+  // the lane's own CAUSE words (short, no command), else its declared remedy, else its log sentence verbatim
+  const cause = pushUnavailableText(code, { t, words: p.unavailableCauses }) || pushUnavailableText(code, { t, words: p.unavailableWords }) || (p.lastStateWhy ? t('push unavailable: {why}', { why: p.lastStateWhy }) : '');
+  const details = [cause, t('Nothing is lost: every message still arrives by polling.')].filter(Boolean);
+  if (steps) details.push(t('How to turn it on: ⚙ → Integrations, the account type’s setup card under «Real-time push — optional» — and the Diagnostics report.'));
+  return { sig: `unavailable:${code || 'unknown'}`, line: t('Real-time push is off — messages are polled (every 30 s – 15 min)'), details, verb: null };
+}
+/** THE CASES a re-authorization line is drawn for — each with the reasons (codes) its words know (reauthWhyText's table). */
+const REAUTH_WHYS = Object.freeze({
+  'read-only': Object.freeze(['send-scope-not-granted']),
+  'more-pending': Object.freeze(['paged-consent']),
+  expiring: Object.freeze(['expires', 'renewals-stopped', 'overdue']),
+});
+/** THE FEATURE FAMILIES a vendor's permission belongs to (its module's `scopeFamily(scope)` answers one of these) — the words
+ *  a re-authorization line names its gain by. */
+const SCOPE_FAMILIES = Object.freeze(['calendar', 'docs', 'contacts', 'mail', 'approval', 'attendance', 'tasks', 'meetings', 'minutes', 'messages', 'okr', 'hr', 'search', 'other']);
+function scopeFamilyText(family, { t = defaultT } = {}) {
+  switch (String(family || '')) {
+    case 'calendar': return t('calendar');
+    case 'docs': return t('docs and sheets');
+    case 'contacts': return t('contacts');
+    case 'mail': return t('mail');
+    case 'approval': return t('approvals');
+    case 'attendance': return t('attendance');
+    case 'tasks': return t('tasks');
+    case 'meetings': return t('meetings');
+    case 'minutes': return t('Minutes');
+    case 'messages': return t('messages');
+    case 'okr': return t('OKRs');
+    case 'hr': return t('HR');
+    case 'search': return t('search');
+    default: return t('other');
+  }
+}
+/** `[{family, n}]` — the families of `scopes` by the vendor's `familyOf`, most permissions first (a tie in table order). */
+function scopeFamilies(scopes, familyOf) {
+  const by = new Map();
+  for (const s of Array.isArray(scopes) ? scopes : []) {
+    let k = null;
+    try { k = typeof familyOf === 'function' ? familyOf(String(s)) : null; } catch { k = null; }
+    const fam = SCOPE_FAMILIES.includes(k) ? k : 'other';
+    by.set(fam, (by.get(fam) || 0) + 1);
+  }
+  return [...by].map(([family, n]) => ({ family, n })).sort((a, b) => b.n - a.n || SCOPE_FAMILIES.indexOf(a.family) - SCOPE_FAMILIES.indexOf(b.family));
+}
+/** A permission as a person reads it — one that is a URL (Google's) is said by its last part. */
+function scopeWord(scope) {
+  const s = String(scope || '');
+  const m = /^https?:\/\/\S+\/([^/\s]+)$/.exec(s);
+  return m ? m[1] : s;
+}
+/** THE RE-AUTHORIZATION LINE'S WORDS — what one more consent ADDS and what works MEANWHILE; never a bare "needs
+ *  re-authorization". `kind` = the case, `reason` = its code (REAUTH_WHYS), `facts`:
+ *    read-only / send-scope-not-granted   {scopes} the send permission the sign-in lacks (it still reads)
+ *    more-pending / paged-consent          Lark's paged consent: {n} permissions left in all, {next} the NEXT page's size
+ *                                          (one Re-authorize asks one page — the owner, 2026-10-23: «继续授权以获取应用下一组权限
+ *                                          （xxx 个），总计剩余 yyy 个权限»), {pages} pages left, {chain} one press walks them
+ *                                          all (lane lark-consent-chain), {families} [{family, n}] the next page's gain,
+ *                                          {api} the account's raw API is granted to an agent (the road that uses them)
+ *    expiring / expires | renewals-stopped | overdue   {eta} worded by the caller's clock
+ *  → `{text, warn, fold}`: warn only once overdue; `fold` = the line lives under the row's ⓘ (an optional consent nothing
+ *  shipped is known to need). A case or reason the table does not know says '' — nowhere rather than bare. */
+function reauthWhyText(kind, reason, facts = {}, { t = defaultT } = {}) {
+  const f = facts && typeof facts === 'object' ? facts : {};
+  const none = { text: '', warn: false, fold: true };
+  const k = String(kind || ''), r = String(reason || '');
+  if (!Object.prototype.hasOwnProperty.call(REAUTH_WHYS, k) || !REAUTH_WHYS[k].includes(r)) return none;
+  const count = (v) => Math.max(0, Math.floor(Number(v) || 0));
+  if (k === 'read-only') {
+    const s = (Array.isArray(f.scopes) ? f.scopes : []).filter((x) => typeof x === 'string' && x).map(scopeWord);
+    return { text: s.length ? t('Readable — replying needs one more re-authorization (the {scopes} permission is missing)', { scopes: s.join(' + ') }) : t('Readable — replying needs one more re-authorization (the send permission is missing)'), warn: false, fold: false };
+  }
+  if (k === 'more-pending') {
+    const n = count(f.n), next = count(f.next), pages = count(f.pages);
+    if (!n) return none;
+    const fams = (Array.isArray(f.families) ? f.families : []).filter((x) => x && SCOPE_FAMILIES.includes(x.family) && Number(x.n) > 0);
+    const named = fams.filter((x) => x.family !== 'other').slice(0, 4).map((x) => scopeFamilyText(x.family, { t }));
+    const what = named.length ? named.join(t(', ')) + (fams.length > named.length ? '…' : '') : '';
+    const paged = !f.chain && !(next && next >= n);   // one Re-authorize asks ONE page and more are (or may be) left
+    const head = f.chain && pages > 1 ? t('Re-authorize once to add the remaining {n} permissions ({pages} pages, one agreement each)', { n, pages })
+      : next && next < n ? t('Re-authorize to get the app\'s next group of permissions ({next}) — {n} left in all', { next, n })
+      : next ? t('Re-authorize to get the app\'s remaining {n} permissions', { n })
+      : t('Re-authorize to get the app\'s next group of permissions — {n} left in all', { n });
+    const gain = !what ? t('{head} (which ones is learned at that re-authorization)', { head })
+      : f.api ? t('{head} — with it an agent can use {what} through the API', { head, what })
+      : paged ? t('{head} — the next group: {what}', { head, what }) : t('{head} — {what}', { head, what });
+    // ADDENDUM 1: LED (shown) when an agent holds the account's raw API and the gain is known; else under ⓘ
+    return { text: t('{line}; sending and receiving messages work as they do now', { line: gain }), warn: false, fold: !(f.api && what) };
+  }
+  if (r === 'overdue') return { text: t('The sign-in has expired — one re-authorization brings it back'), warn: true, fold: false };
+  const eta = String(f.eta || '');
+  if (!eta) return none;
+  return { text: r === 'renewals-stopped' ? t('Renewals stopped — the sign-in expires in {eta}; one re-authorization before then keeps it', { eta }) : t('The sign-in expires in {eta} — one re-authorization before then keeps it', { eta }), warn: false, fold: false };
+}
 /** A number, or `null` for ANYTHING that is not one. `Number(null)` is 0 and
  *  `Number('')` is 0, so a bare `Number.isFinite(Number(v))` turns "we were
  *  never told" into the epoch — which then renders as an age of 56 years and,
@@ -1330,6 +1440,8 @@ function grantsText(grants, { t = defaultT, vendor = '' } = {}) {
   const kept = Array.isArray(grants) ? grants.find((g) => g && g.what === 'files' && g.wanted !== false && Array.isArray(g.missing) && !g.missing.length && Array.isArray(g.dropped) && g.dropped.length) : null;
   const keptText = kept ? t('{vendor} refused {scopes} — sending files still works', { vendor: vendor || t('The vendor'), scopes: kept.dropped.join(' + ') }) : '';
   if (!list.length && !more) return { text: keptText, warn: false };
+  // lane channel-row-notices: ONLY the paged consent's rest — an optional line that says it is optional (the owner's Lark row)
+  if (!list.length && !keptText) return reauthWhyText('more-pending', 'paged-consent', { n: more.n, next: more.next, pages: more.pages, chain: more.chain, families: more.families, api: more.api }, { t });
   const refused = [];
   const adds = [];
   let filesOff = null;
@@ -1343,11 +1455,13 @@ function grantsText(grants, { t = defaultT, vendor = '' } = {}) {
   // lane lark-threads (B1/B5, MEASURED): `people` = reading people's profiles (who left a chat, the nickname, the department)
   if (more) adds.push('more');
   // lane lark-minutes-scopes: `minutes` = reading 妙记 (a minute, its transcript, its recording) — Lark's own name in each language
-  const words = { reactions: t('reading reactions'), feed: t('new-message search and single chats'), people: t('reading people\'s profiles'), files: t('sending files'), minutes: t('reading Minutes and their recordings'), more: more ? t('{n} more of the permissions your app has enabled', { n: Number(more.n) }) : '' };
+  // lane channel-row-notices (the owner: one Re-authorize asks ONE page — never «另外 N 项» when more pages are left)
+  const moreWords = (m) => { const n = Number(m.n) || 0, next = Number(m.next) || 0; return m.chain || (next && next >= n) ? t('{n} more of the permissions your app has enabled', { n }) : next ? t('the app\'s next group of permissions ({next} of the {n} left)', { next, n }) : t('the app\'s next group of permissions ({n} left in all)', { n }); };
+  const words = { reactions: t('reading reactions'), feed: t('new-message search and single chats'), people: t('reading people\'s profiles'), files: t('sending files'), minutes: t('reading Minutes and their recordings'), more: more ? moreWords(more) : '' };
   const parts = [];
   if (refused.length) parts.push(refusedScopeText([...new Set(refused)], { t, vendor }));
   if (filesOff) parts.push(t('Sending files is off: {vendor} refused {scopes} — enable it in the app console and Re-authorize', { vendor: vendor || t('The vendor'), scopes: filesOff.join(' + ') }));
-  if (adds.length) parts.push(t('One Re-authorize adds: {what}', { what: adds.map((w) => words[w] || String(w)).join(' · ') }));
+  if (adds.length) parts.push(t('One more re-authorization adds: {what} — sending and receiving work without it', { what: adds.map((w) => words[w] || String(w)).join(' · ') }));
   if (keptText) parts.push(keptText);
   return { text: parts.join(' · '), warn: refused.length > 0 || !!filesOff };
 }
@@ -1402,7 +1516,34 @@ function humanAge(s) {
   return `${Math.round(n / 86400)}d`;
 }
 
+/** lane lark-consent-chain (the owner 2026-10-23: 「不能一次性打开所有吗？」): the account row's words while ONE press walks a
+ *  vendor's consent pages — «Authorizing page 2/3… (in the tab that opened)»; '' for no chain (`chain` = the engine's
+ *  adapterView().consentChain {page, total}). */
+function consentChainText(chain, { t = defaultT } = {}) {
+  const c = chain && typeof chain === 'object' ? chain : null;
+  const page = c ? num(c.page) : null, total = c ? num(c.total) : null;
+  if (!(page >= 1 && total >= 2 && page <= total)) return '';
+  return t('Authorizing page {page}/{total}… (in the tab that opened)', { page, total });
+}
+/** lane lark-consent-chain, ADDENDUM 1 (the owner: 「lark 授权窗口那个什么 11 项权限的提示没用了吧？」): may the sign-in dialog offer
+ *  THE NARROWING ROW («Sign in without …» — a vendor that refuses a WHOLE consent naming a scope its app has not enabled:
+ *  Lark 20027, said on the vendor's own page only) for the press that drops `scopes`? Only where that refusal CAN happen:
+ *  the consent asks the built-in floor because the app's own list could not be read (`scopesFrom: 'floor'`, `why` = what
+ *  the read answered), or the list WAS read and the floor still names a scope it lacks (`lacking`) that this press drops.
+ *  A consent asking only what the app enabled (`scopesFrom: 'app'`, nothing of it lacking) is never refused that way — no
+ *  row. A flow that says neither (another vendor, an older server) keeps the row. → {show, from, why}. */
+function narrowRowVerdict(flow, scopes = []) {
+  const f = flow && typeof flow === 'object' ? flow : {};
+  const list = Array.isArray(scopes) ? scopes : [];
+  const from = f.scopesFrom === 'app' || f.scopesFrom === 'floor' ? f.scopesFrom : null;
+  if (!list.length) return { show: false, from, why: null };
+  if (from === 'floor') return { show: true, from, why: typeof f.scopesWhy === 'string' && f.scopesWhy ? f.scopesWhy.slice(0, 300) : null };
+  if (from === 'app') { const lacking = new Set(Array.isArray(f.lacking) ? f.lacking : []); return { show: list.some((x) => lacking.has(x)), from, why: null }; }
+  return { show: true, from: null, why: null };
+}
+
 module.exports = {
+  consentChainText, narrowRowVerdict,   // lane lark-consent-chain
   sendWhyText, threadWhyText, reactWhyText, reactReadText, refusedScopeText,
   CONV_CAPS_TTL_MS, HOST_FACTS_TTL_MS, PUSH_HEARTBEAT_MS, SCAN_SOURCE_ORDER, OFFER_WHAT,
   PUSH_MISS_THRESHOLD, PUSH_MISS_MIN_SAMPLES, PUSH_MISS_WINDOW_MS, PUSH_MISS_MIN_KEEP, PUSH_CLAIMS,
@@ -1413,6 +1554,8 @@ module.exports = {
   TIER_DEFAULTS, COLD_MAX_SEC, REFRESH_CHOICES, validRefresh, pollTier, tierUntil, cadenceFor, budgetText, learnedBudgetText, passStateText, firstReadText, pushUnavailableText,
   authWhyText, laneWhyText, errorCodeText, deliveryLaneText, scanSourceText, wakeRefusalText,
   pushWindow, pushSamplesAdd, pushMissRate, pushDemotionVerdict, pushLaneText,
+  // lane channel-row-notices: the push lane's one-line notice + the re-authorization line's words
+  pushLaneNotice, REAUTH_WHYS, SCOPE_FAMILIES, scopeFamilies, reauthWhyText,
   // lane lark-search-poll: the change feed's one lane answer + its words
   FEED_MODES, FEED_DEFAULTS, feedState, FEED_AUTHORITIES, feedAuthoritative, feedText, feedFactsText, missClassWord, feedCatchUpText, grantsText, untitledText, credentialChangedAt, feedBoundSec, feedFreshMs, changeFeedRow,
   // lane lark-p2p: a shape park's bounded field lists + the unreadable-hits line; verify r1: the lone-miss bound

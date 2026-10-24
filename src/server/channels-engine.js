@@ -691,6 +691,8 @@ function create(deps = {}) {
    *  the wide one) lost the feed's search scope from the record, and the card named only half of what Lark refused. */
   /** lane lark-minutes-scopes: how many of the app's enabled permissions a consent's token still lacks (the next pages). */
   const morePendingOf = (n) => Math.max(0, Math.min(10000, Math.floor(Number(n) || 0)));
+  // lane channel-row-notices: WHICH permissions are left (names, bounded) — the row names their feature families
+  const pendingScopesOf = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter((x) => typeof x === 'string' && x && x.length <= 200))].slice(0, 1000);
   const refusedScopesOf = (xs) => [...new Set((Array.isArray(xs) ? xs : []).filter((x) => typeof x === 'string' && x && x.length <= 200))].slice(0, OPTIONAL_SCOPES_MAX);
   function tokensFor(rec) {
     const read = () => {
@@ -753,6 +755,9 @@ function create(deps = {}) {
             // refused an optional scope on its page); a refresh keeps the evidence of the consent it renews
             if (consent) rec.auth.refusedScopes = refusedScopesOf(meta.refusedScopes);
             if (consent) rec.auth.morePending = morePendingOf(meta.morePending);   // lane lark-minutes-scopes: the pages left
+            if (consent) rec.auth.morePendingScopes = pendingScopesOf(meta.morePendingScopes);   // lane channel-row-notices: which,
+            if (consent) rec.auth.nextPageCount = morePendingOf(meta.nextPageCount);   // …the next page's size
+            if (consent) rec.auth.morePendingPages = morePendingOf(meta.morePendingPages);   // …and the pages left
             // lane slack-grid-identity: THE ONE STAMP RULE (src/channel-identity.js `stampIdentity`) — a fact the vendor
             // names later (the organisation a workspace joined) is LEARNED once, never a different person; an unchanged
             // identity is not rewritten. A consent's card line says what it learned (`lastAuthNote`), the next one clears it.
@@ -2243,7 +2248,20 @@ function create(deps = {}) {
     // …and the app's enabled permissions the last consent's page did not reach ("One Re-authorize adds: 85 more of the
     // permissions your app has enabled") — a count the consent wrote, never a list
     const more = morePendingOf(rec.auth && rec.auth.morePending);
-    if (more) out.push({ what: 'more', n: more, scopes: [], missing: [], refused: [], console: false, wanted: true });
+    if (more) {
+      // lane channel-row-notices (ADDENDUM 1): the pending permissions BY FEATURE FAMILY (the module's `scopeFamily`; [] for a
+      // consent that predates the names) and whether an agent holds this account's raw API (the road that would use them)
+      let mod = null;
+      try { mod = registry.get(rec.kind); } catch { mod = null; }
+      // ADDENDUM 2 (the owner): one Re-authorize asks ONE page — `next` its size, `pages` how many are left (0 = not known: a
+      // consent that predates them); the families are the NEXT page's (the whole rest while the next is not known)
+      const next = morePendingOf(rec.auth && rec.auth.nextPageCount), pages = morePendingOf(rec.auth && rec.auth.morePendingPages);
+      const names = pendingScopesOf(rec.auth && rec.auth.morePendingScopes);
+      const families = names.length && mod && typeof mod.scopeFamily === 'function' ? caps.scopeFamilies(next ? names.slice(0, next) : names, mod.scopeFamily) : [];
+      let api = false;
+      try { api = apiGrants().some((g) => g && g.scope && g.scope.id === rec.id && g.api && g.api !== 'none'); } catch { api = false; }
+      out.push({ what: 'more', n: more, next: next || null, pages: pages || null, families, api, scopes: [], missing: [], refused: [], console: false, wanted: true });
+    }
     return out;
   }
 
@@ -3755,6 +3773,8 @@ function create(deps = {}) {
       consentRoute: consentRouteOf(m, row),
       relayPages: relayPagesOf(m, row),   // lane oauth-relay-road: the addresses an app of this type registers once
       oauthSetup: oauthSetupOf(m, row),   // lane oauth-setup-instructions: the setup card's facts (src/oauth-setup.js)
+      // lane channel-row-notices: the push lane's setup steps (the setup card's «Real-time push (optional)», Diagnostics)
+      pushSetup: m.pushSetup && Array.isArray(m.pushSetup.steps) ? { steps: m.pushSetup.steps.map((s) => ({ words: s.words, code: s.code || null })), after: m.pushSetup.after || null } : null,
       optionsSchema: (m.OPTIONS || []).map((o) => ({ key: o.key, label: o.label, help: o.help || '', default: o.default === undefined ? '' : o.default, placeholder: o.placeholder || '', choices: Array.isArray(o.choices) ? o.choices.slice() : null, choiceLabels: o.choiceLabels && typeof o.choiceLabels === 'object' ? { ...o.choiceLabels } : null, usedWhen: o.usedWhen && typeof o.usedWhen === 'object' ? JSON.parse(JSON.stringify(o.usedWhen)) : null, ...(o.signIn === true ? { signIn: true } : {}) })),   // lane oauth-setup-instructions: `signIn` = read at each sign-in
       receive: m.caps.receive, sendAs: m.caps.sendAs, pushOptIn: !!m.caps.pushOptIn,
     };
@@ -3805,7 +3825,9 @@ function create(deps = {}) {
       // `renews` (2026-09-26): the adapter says its refresh token is RE-ISSUED
       // on every automatic refresh (Lark: 7 days, sliding) — the card then
       // says nothing until renewals have actually stopped
-      auth: { ...auth, self: !!(decl && decl.consent === null), user: decl && decl.consent === null ? null : ((st && st.user) || (rec.auth && rec.auth.user) || null), scopes: (rec.auth && rec.auth.scopes) || [], credentialSource: (st && st.credentialSource) || null, credentialKey: (st && st.credentialKey) || rec.credentialKey || null, tokenHeld: !!(rec.auth && rec.auth.tokenEnc), renews: !!(st && st.renews), renewWindowMs: (st && Number(st.renewWindowMs)) || null },
+      auth: { ...auth, self: !!(decl && decl.consent === null), user: decl && decl.consent === null ? null : ((st && st.user) || (rec.auth && rec.auth.user) || null), scopes: (rec.auth && rec.auth.scopes) || [], credentialSource: (st && st.credentialSource) || null, credentialKey: (st && st.credentialKey) || rec.credentialKey || null, tokenHeld: !!(rec.auth && rec.auth.tokenEnc), renews: !!(st && st.renews), renewWindowMs: (st && Number(st.renewWindowMs)) || null,
+        // lane channel-row-notices (ADDENDUM 2): a paged consent's numbers — the permissions left in all and the NEXT page's size
+        morePending: morePendingOf(rec.auth && rec.auth.morePending), nextPageCount: morePendingOf(rec.auth && rec.auth.nextPageCount) || null },
       lastPass: rec.lastPass || null, consecutiveFailures: rec.consecutiveFailures || 0,
       // 2026-09-26 (lane R2 verify): "last sync" is the last GOOD pass — a
       // failed one stamps `lastPass` too, and the card used to print it as a
@@ -3841,6 +3863,7 @@ function create(deps = {}) {
       // lane lark-search-poll: the change feed (its state, mode, measurement, catch-up) + THE ONE GRANT LIST (§5.3)
       feed: feedView(rec, t),
       grants: grantsView(rec),
+      consentChain: consentChainOf(rec.id),   // lane lark-consent-chain: the consent pages one press is walking ({page, total}) or null
       // lane channel-names-readable: whether this sign-in may read people's profiles (the kept fact) + the caps row word
       namesReadable: caps.namesView(rec.namesReadable),
       names: caps.namesRow(rec.namesReadable),
@@ -4380,6 +4403,12 @@ function create(deps = {}) {
     try { mod = registry.get(rec.kind); } catch { mod = null; }
     return mod && mod.unavailableWords && typeof mod.unavailableWords === 'object' ? { ...mod.unavailableWords } : null;
   }
+  /** lane channel-row-notices: the live lane's CAUSE words for its parked codes (the row's ⓘ — never a command). */
+  function unavailableCausesOf(rec) {
+    let mod = null;
+    try { mod = registry.get(rec.kind); } catch { mod = null; }
+    return mod && mod.unavailableCauses && typeof mod.unavailableCauses === 'object' ? { ...mod.unavailableCauses } : null;
+  }
   function pushView(rec, t = now()) {
     const c = registry.capsOf(rec.kind);
     if (c.receive !== 'push') return null;
@@ -4393,6 +4422,7 @@ function create(deps = {}) {
       contentSince: p.contentSince || null, lastStateCode: p.lastStateCode || null,
       // lane dc-channels-blocks (C6): the live lane's OWN words for its parked codes, while it is parked
       unavailableWords: p.state === 'unavailable' ? unavailableWordsOf(rec) : null,
+      unavailableCauses: p.state === 'unavailable' ? unavailableCausesOf(rec) : null,   // lane channel-row-notices
     };
   }
 
@@ -8181,7 +8211,7 @@ function create(deps = {}) {
     agentTitle, agentId, agentEnvelope, KEY_FILE, CUSTOM_KEY, PENDING_FLOW_TTL_MS, DUPLICATE_FIELDS, INBOX_KEY, i18nKey, INBOX_SOURCE, RESOLVED_BY,
     RECONCILE_SECONDS, ESTIMATE_CAP, registry, liveSessions, log, now, userTodos, serverSetting, broadcast, deliver, integrations, mountClients,
     fetchFn, store, box, flows, signState, consentRowOf, consentDepsOf, agentsWanted, resolveIntegration, rowOf, live, paceCarry, BOOT_ID,
-    adapterRecords, saveAdapters, refusedScopesOf, morePendingOf, tokensFor, adapterFor, refreshAuth, tiers, agentShareRefusal, affordable, vendor, isWatched,
+    adapterRecords, saveAdapters, refusedScopesOf, morePendingOf, pendingScopesOf, tokensFor, adapterFor, refreshAuth, tiers, agentShareRefusal, affordable, vendor, isWatched,
     laneOf, EMPTY_SCAN, pass, effectiveConvCaps, rejudgeConvCaps, rawFactsOf, ownRecordOf, viewOf, agentCopy, humanNameOf, accountsBrief, conversationName,
     presetsOf, clientFieldDecls, customClientView, vendorNameOf, adapterView, notify, disarmPush, syncPushLanes, kick, known, budgetRefusal,
     dropLive, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, withView, offerNow, NOT_A_THREAD, threadRead, threadRefresh,
@@ -8213,7 +8243,7 @@ function create(deps = {}) {
     recordOrThrow, safeFlow, finishAuth, narrowAuth, oauthNarrow, cancelAuth, onAuthDone, disconnect, referencesOf, remove, setupView, duplicate,
     setLabel, setCustomSecret, adapterConfig, inlineLegacyClient, scheduleInline, inlineLegacyClients, stampIdentities, stampCredentialKeys,
     setEnabled, setAccountPolicy, setSenderHonesty, setOptions,
-    connectOffer, connectOffers, connectTaught,
+    connectOffer, connectOffers, connectTaught, consentChainOf,
   } = Object.assign(engineCtx, ChannelsAuth.create(engineCtx));
 
   const EXPIRY_SWEEP_MS = 60e3;

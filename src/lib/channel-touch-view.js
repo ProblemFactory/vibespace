@@ -41,6 +41,7 @@ import { toolCommandText } from '../browser-trace.js';
 import * as T from '../channel-touch.js';
 import { showApiAccessDialog } from './channel-api-dialog.js';   // B-2198
 import { chatApiCards } from './channel-api-card-view.js';   // B-2198 part 2: the proposal's card at its call row
+import { chatProposalCards, refreshChatProposals } from './channel-outbox.js';   // lane chat-proposal-card: a reply / compose / react / recall's card at its call row — the Outbox's own card
 
 
 const REBIND_MS = 80;
@@ -146,6 +147,7 @@ export function createChannelTouchView(view) {
     const box = boxOf(cardEl, false);
     if (box && !box.hidden) { box.hidden = true; box.replaceChildren(); }
     chatApiCards(null, cardEl, []);
+    chatProposalCards(null, cardEl, []);
   }
   /** ONE box per card, rows KEYED by conversation and patched in place. */
   function renderBox(cardEl, touches) {
@@ -210,6 +212,9 @@ export function createChannelTouchView(view) {
       if (box.lastElementChild !== more) box.appendChild(more);
     } else if (more) more.remove();
     chatApiCards(view.app, cardEl, rows.filter((r) => r.ops && r.ops.api && r.proposalId).map((r) => r.proposalId));
+    // lane chat-proposal-card: the proposals THIS call filed — the card after the rows, a chip on its row; a decision
+    // moves the run fold's count («· 1 条提案待批准»), so the ChatView re-words its heads
+    chatProposalCards(view.app, cardEl, T.filedProposals(touches), { onCount: () => { if (typeof view._updateRuns === 'function') view._updateRuns(); } });
   }
   function turnAt() { return Math.max(st.turnAtServer, st.turnAtLocal); }
   function updateChip() {
@@ -242,6 +247,7 @@ export function createChannelTouchView(view) {
     if (!live || st.disposed) return;
     if (st.refetch) clearTimeout(st.refetch);
     st.refetch = setTimeout(() => { st.refetch = null; st.loaded = false; ensureLoaded(); }, REFETCH_MS);
+    refreshChatProposals();   // lane chat-proposal-card: a decision taken while this page was away is read again
   }
   /** A live user message = a new turn: the chip keeps only what this turn touches. */
   function noteTurn(ts) {

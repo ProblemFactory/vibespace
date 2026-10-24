@@ -278,12 +278,66 @@ function signinLine(app, a, kinds, { verb = true } = {}) {
   }
   return el;
 }
+/** lane channel-row-notices (the owner 2026-10-23: 「这个提示最好不要常驻了，很丑陋；然后为啥我这里提示需要重新授权，重新授权干啥？」):
+ *  THE ACCOUNT'S ⓘ FOLD — the lines that only inform (a parked push lane's cause and where its steps are, an optional
+ *  re-authorization's gain) live here, closed by default, opened by ⓘ (per page session). null when there is nothing. */
+function infoFold(a, lines) {
+  if (!lines.length) return null;
+  const f = document.createElement('div');
+  f.className = 'chan-sec-details';
+  f.dataset.chanMore = a.id;
+  f.hidden = !INFO_OPEN.has(a.id);
+  for (const l of lines) f.appendChild(l);
+  return f;
+}
+/** The ⓘ that opens / closes the account's fold (its lines are already drawn — no redraw). */
+function infoToggle(a, fold) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'mounts-icon-btn chan-sec-info';
+  b.dataset.chanInfo = a.id;
+  b.title = t('Details');
+  b.setAttribute('aria-label', t('Details'));
+  b.setAttribute('aria-expanded', String(!fold.hidden));
+  b.appendChild(icon('info', 12));
+  b.onclick = (ev) => {
+    ev.stopPropagation();
+    // the fold IN THE DOCUMENT (a redraw may have kept the section's old nodes and moved this button into them)
+    const sec = b.closest('.chan-sec');
+    const f = (sec && sec.querySelector(`.chan-sec-details[data-chan-more="${CSS.escape(a.id)}"]`)) || fold;
+    const open = f.hidden;
+    f.hidden = !open;
+    if (open) INFO_OPEN.add(a.id); else INFO_OPEN.delete(a.id);
+    for (const x of (sec || document).querySelectorAll(`.chan-sec-info[data-chan-info="${CSS.escape(a.id)}"]`)) x.setAttribute('aria-expanded', String(open));
+  };
+  return b;
+}
+/** THE PUSH LANE'S STANDING STATE — `{line, details}`: ONE short plain line (null once the person said 「知道了」 to this very
+ *  state — a changed state is shown again) + the fold's lines (the cause, the numbers, where the steps are — never a command).
+ *  null = a healthy / off / unstarted lane says nothing. `kinds` = the digest's kinds (whose setup card has the steps). */
+function pushNoticeParts(a, kinds) {
+  const k = (kinds || []).find((x) => x && x.kind === a.kind) || null;
+  const pn = a.push ? chanCaps.pushLaneNotice(a.push, a.lane, { t, now: Date.now(), steps: !!(k && k.pushSetup) }) : null;
+  if (!pn) return null;
+  const details = pn.details.map((s) => { const n = noteLine('chan-sec-note', s); n.dataset.chanPushDetail = a.id; return n; });
+  if ((SEEN || {})[a.id] === pn.sig) return { line: null, details, verb: pn.verb };
+  const n = noteLine('chan-sec-note', pn.line);
+  n.dataset.chanPush = a.id;
+  n.dataset.sig = pn.sig;
+  if (pn.verb === 'redeclare') { const v = btn(t('Re-declare exclusive and retry'), () => put(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { push: { claimedExclusive: 'exclusive' } })); v.classList.add('chan-sec-verb'); n.appendChild(v); }
+  const ack = btn(t('Got it'), (ev) => { setSeen(a.id, pn.sig); ((ev && ev.target && ev.target.closest('[data-chan-push]')) || n).remove(); });   // the line in the document
+  ack.classList.add('chan-sec-verb', 'chan-push-ack');
+  n.appendChild(ack);
+  return { line: n, details, verb: pn.verb };
+}
 /** THE LINES UNDER AN ACCOUNT'S HEAD — the health line when it is well, the
  *  error line + button when its sign-in died or its client is gone, a
  *  consent in flight, the countdown to a due re-authorization, a failing
  *  lane. Returns zero or more elements. */
 function accountLines(app, a, kinds) {
   const out = [];
+  const info = [];   // lane channel-row-notices: the ⓘ fold's lines
+  let hl = null;
   const auth = a.auth || { state: 'unknown' };
   const provider = providerOf(a);
   const reauth = () => showReauthAccountDialog(app, a, { kinds });
@@ -296,8 +350,12 @@ function accountLines(app, a, kinds) {
   }
   const dead = signinLine(app, a, kinds);   // lane channel-reauth-visible: the dead sign-in, said first (its own Cancel while a consent runs)
   if (dead) out.push(dead);
-  if (a.flow && a.flow.running) {
-    if (!dead) out.push(healthLine(a, t('Signing in…'), { verbs: [btn(t('Cancel'), () => post(`/api/channels/adapters/${encodeURIComponent(a.id)}/auth/cancel`, {}))] }));
+  // lane lark-consent-chain: ONE press walking the vendor's consent pages — «Authorizing page 2/3…» + Cancel; a CONNECTED
+  // account keeps its health line (what the earlier pages granted already works)
+  const chainWords = chanCaps.consentChainText(a.consentChain, { t });
+  const chainLine = () => { const n = noteLine('chan-sec-note', chainWords); n.dataset.chanChain = a.id; const v = btn(t('Cancel'), () => post(`/api/channels/adapters/${encodeURIComponent(a.id)}/auth/cancel`, {})); v.classList.add('chan-sec-verb'); n.appendChild(v); return n; };
+  if (a.flow && a.flow.running && !(chainWords && auth.state === 'connected')) {
+    if (!dead) out.push(healthLine(a, chainWords || t('Signing in…'), { verbs: [btn(t('Cancel'), () => post(`/api/channels/adapters/${encodeURIComponent(a.id)}/auth/cancel`, {}))] }));
   } else if (auth.state === 'vault-locked') {
     out.push(vaultLine(a));
   } else if (auth.state === 'connected') {
@@ -319,11 +377,12 @@ function accountLines(app, a, kinds) {
     // from the FIRST one, with the retry (lane R2 verify, 2026-09-26)
     const ps = chanCaps.passStateText(a, { t, now: Date.now() });
     if (ps.lastOkAt) bits.push(t('last sync {ago}', { ago: agoText(ps.lastOkAt) }));
-    const hl = healthLine(a, bits.join(' · '));
+    hl = healthLine(a, bits.join(' · '));
     // a refresh token that is RE-ISSUED at every automatic refresh (Lark) needs
     // no countdown while the instance runs — said here, on hover, once
     if (auth.renews) hl.title = t('The sign-in renews itself while this instance runs — re-authorize only if the instance is off for more than {days} days.', { days: Math.round((Number(auth.renewWindowMs) || 7 * 86400e3) / 86400e3) });
     out.push(hl);
+    if (chainWords) out.push(chainLine());   // lane lark-consent-chain
     // owner ruling (2026-09-28): the HELD sign-in lacks the reactions read scope — "can be read after one Re-authorize",
     // or (the last consent was narrowed because the vendor refused it) the vendor's refusal BY NAME; one verb.
     // lane lark-search-poll (§5.3): ONE line for EVERY declared grant the sign-in lacks — an account predating both lanes
@@ -333,13 +392,16 @@ function accountLines(app, a, kinds) {
     // lane channel-names-readable: a sign-in KNOWN not to read people's profiles says it on its own line below — the
     // grants line does not say "reading people's profiles" a second time
     const nl = chanCaps.namesText(a.namesReadable, { t });
-    const gl = Array.isArray(a.grants) ? chanCaps.grantsText(nl ? a.grants.filter((g) => !(g && g.what === 'people')) : a.grants, { t, vendor: vendorW }) : { text: chanCaps.reactReadText(a.reactionsGrant, { t, vendor: vendorW }), warn: !!(a.reactionsGrant && a.reactionsGrant.refused && a.reactionsGrant.refused.length) };
+    // lane lark-consent-chain: while a chain walks, its pages ARE the «N more» — that line waits for the chain's end
+    const grantsNow = Array.isArray(a.grants) && chainWords ? a.grants.filter((g) => !(g && g.what === 'more')) : a.grants;
+    const gl = Array.isArray(grantsNow) ? chanCaps.grantsText(nl ? grantsNow.filter((g) => !(g && g.what === 'people')) : grantsNow, { t, vendor: vendorW }) : { text: chanCaps.reactReadText(a.reactionsGrant, { t, vendor: vendorW }), warn: !!(a.reactionsGrant && a.reactionsGrant.refused && a.reactionsGrant.refused.length) };
     if (gl.text) {
       const n = noteLine('chan-sec-note', gl.text, { warn: gl.warn });
       n.dataset.chanRxRead = a.id;
       n.dataset.chanGrants = a.id;
       const v = btn(t('Re-authorize'), reauth); v.classList.add('chan-sec-verb'); n.appendChild(v);
-      out.push(n);
+      // lane channel-row-notices (ADDENDUM 1): an optional re-authorization nothing shipped needs lives under ⓘ
+      (gl.fold ? info : out).push(n);
     }
     // lane channel-names-readable (userW: "Channels cannot find my conversation with" a colleague): the sign-in holds no
     // permission to read people's profiles — said HERE with its one verb, never only in the server's log
@@ -384,7 +446,10 @@ function accountLines(app, a, kinds) {
     const eta = auth.expiresAt ? reauthEta(auth.expiresAt) : null;
     // a sliding token shows its countdown only once renewals have STOPPED (<1 day left)
     if (eta && left < (auth.renews ? 86400e3 : REAUTH_SOON_MS)) {
-      const n = noteLine('chan-sec-note', auth.renews ? t('renewals stopped — re-authorize in {eta}', { eta }) : t('re-authorize in {eta}', { eta }), { warn: left <= (auth.renews ? 86400e3 : 0) });
+      // lane channel-row-notices: when it expires and that one re-authorization before then keeps it — warn only once overdue
+      const rw = chanCaps.reauthWhyText('expiring', left <= 0 ? 'overdue' : auth.renews ? 'renewals-stopped' : 'expires', { eta }, { t });
+      const n = noteLine('chan-sec-note', rw.text, { warn: rw.warn });
+      n.dataset.chanExpiring = a.id;
       const v = btn(t('Re-authorize'), reauth); v.classList.add('chan-sec-verb'); n.appendChild(v);
       out.push(n);
     }
@@ -416,12 +481,18 @@ function accountLines(app, a, kinds) {
     const retry = a.lastPass.ok === false ? chanCaps.passStateText(a, { t, now: Date.now() }).note : '';
     out.push(noteLine('chan-sec-note', s + (a.lastPass.error ? ` — ${a.lastPass.error}` : '') + (retry ? ` — ${retry}` : '') + (a.failureItem ? ` — ${t('a "For you" item was filed')}` : ''), { warn: true }));
   }
-  if (a.push && (a.push.demotedAt || a.push.state === 'unavailable')) {
-    // the lane's CODE worded as its remedy (2026-09-26: e.g. the Lark SDK is
-    // not installed — the exact command, the console steps, "polled meanwhile")
-    const n = noteLine('chan-sec-note', chanCaps.pushLaneText(a.push, a.lane, { t, now: Date.now() }), { warn: true });
-    if (a.push.demotedAt) { const v = btn(t('Re-declare exclusive and retry'), () => put(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { push: { claimedExclusive: 'exclusive' } })); v.classList.add('chan-sec-verb'); n.appendChild(v); }
-    out.push(n);
+  // lane channel-row-notices: a parked / demoted push lane is ONE short plain line the person can put away (「知道了」, kept
+  // per instance until the state changes); its cause, its numbers and where the steps are wait under ⓘ — the install
+  // command and the console steps live on the setup card (⚙ → Integrations) and in Diagnostics, never on the row
+  const pp = pushNoticeParts(a, kinds);
+  if (pp && pp.line) out.push(pp.line);
+  if (pp) info.push(...pp.details);
+  // its ⓘ rides the health line and the standing line (a row with neither — not connected, the line put away — has no fold)
+  const fold = infoFold(a, info);
+  if (fold && (hl || (pp && pp.line))) {
+    if (hl) hl.appendChild(infoToggle(a, fold));
+    if (pp && pp.line) pp.line.insertBefore(infoToggle(a, fold), pp.line.querySelector('.chan-push-ack'));
+    out.push(fold);
   }
   return out;
 }
@@ -868,7 +939,8 @@ function adapterNotes(app, a) {
     const soon = auth.expiresAt && (Number(auth.expiresAt) - Date.now()) < (auth.renews ? 86400e3 : REAUTH_SOON_MS);
     if (soon && eta) {
       const who = auth.self ? t('connected — this instance') : auth.user ? t('connected as {user}', { user: auth.user }) : t('connected');
-      line(`${who} · ${t('re-authorize in {eta}', { eta })}`, { warn: Number(auth.expiresAt) - Date.now() <= 0 });
+      const rw = chanCaps.reauthWhyText('expiring', Number(auth.expiresAt) - Date.now() <= 0 ? 'overdue' : auth.renews ? 'renewals-stopped' : 'expires', { eta }, { t });   // lane channel-row-notices
+      line(`${who} · ${rw.text}`, { warn: rw.warn });
     }
   } else if (auth.state === 'vault-locked') {
     line(t('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)'), { warn: true, verbs: [btn(t('Unlock'), () => window.dispatchEvent(new CustomEvent('vs-vault-door')))] });   // r2: the door
@@ -904,9 +976,11 @@ function adapterNotes(app, a) {
   // retry" verb beside it: a demotion is cleared by the party that made the
   // claim, never by the counters. A healthy push lane says nothing here (the
   // rows' `live` chips are its evidence; the sentence lives in Push…).
-  if (a.push && (a.push.demotedAt || a.push.state === 'unavailable')) {
-    line(chanCaps.pushLaneText(a.push, a.lane, { t, now: Date.now() }), { warn: true, verbs: a.push.demotedAt ? [btn(t('Re-declare exclusive and retry'), () => put(`/api/channels/adapters/${encodeURIComponent(a.id)}`, { push: { claimedExclusive: 'exclusive' } }))] : [] });
-  }
+  // lane channel-row-notices: the same one short line + 「知道了」 + ⓘ as an account's (a source has no setup card)
+  const pp = pushNoticeParts(a, []);
+  if (pp && pp.line) notes.push(pp.line);
+  const fold = pp ? infoFold(a, pp.details) : null;
+  if (fold && pp.line) { pp.line.insertBefore(infoToggle(a, fold), pp.line.querySelector('.chan-push-ack')); notes.push(fold); }
   return notes;
 }
 
@@ -1098,6 +1172,8 @@ export function registerChannelsGearRow() {
 const COLLAPSED = new Set();
 /** Sections a user EXPLICITLY OPENED (overrides a default fold). */
 const EXPANDED = new Set();
+/** lane channel-row-notices: the accounts whose ⓘ fold the person opened — per page session, like the folds. */
+const INFO_OPEN = new Set();
 /** lane attention-predicate-shared: the 「需要我」 bands the person opened (「还有 N 条 — 展开」) — per page session, like the folds. */
 const NEEDS_OPEN = new Set();
 /** lane channels-fold-default: each ACCOUNT section's default fold, decided at its first draw on this page and HELD
@@ -1133,6 +1209,15 @@ let VIEW = 'focus';
 // `user-state-updated` broadcast. ──
 let FOLDS = null;
 let foldsWired = false;
+/** lane channel-row-notices: THE NOTICES PUT AWAY — user state `channelsNoticesSeen` {accountId: the state's sig}, loaded with the
+ *  folds (one GET), written whole (PATCH merge-only), kept to the live accounts; a notice whose state changed is shown again. */
+let SEEN = null;
+const seenFrom = (st) => { const s = st && st.channelsNoticesSeen; return s && typeof s === 'object' && !Array.isArray(s) ? Object.fromEntries(Object.entries(s).filter(([k, v]) => typeof k === 'string' && typeof v === 'string' && v.length <= 200)) : {}; };
+function setSeen(id, sig) {
+  const next = { ...(SEEN || {}), [id]: sig };
+  SEEN = LIVE_ACCOUNTS ? Object.fromEntries(Object.entries(next).filter(([k]) => k === id || LIVE_ACCOUNTS.has(k))) : next;
+  fetch('/api/user-state', { method: 'PATCH', headers: JSON_HDR, body: JSON.stringify({ channelsNoticesSeen: SEEN }) }).catch(() => {});
+}
 /** lane channels-fold-default: this page's fold PATCHes in flight — the broadcast echo of an EARLIER one is older than
  *  FOLDS (two quick presses: fold, open — the first echo would fold the section again under the person's hand) */
 let FOLD_WRITES = 0;
@@ -1142,11 +1227,13 @@ const FOLD_LISTENERS = new Set();
 async function loadFolds(app) {
   if (!foldsWired) {
     foldsWired = true;
+    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.channelsNoticesSeen) SEEN = seenFrom(msg.state); });   // lane channel-row-notices
     app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.channelsPanelFolds) { if (FOLD_WRITES > 0) return; FOLDS = foldsFrom(msg.state); for (const l of [...FOLD_LISTENERS]) { if (!l.c.isConnected) { FOLD_LISTENERS.delete(l); continue; } try { l.draw(); } catch {} } } });
   }
   if (FOLDS) return FOLDS;
   const st = await fetchJson('/api/user-state');
   FOLDS = foldsFrom(st && !st.error ? st : {});
+  SEEN = seenFrom(st && !st.error ? st : {});   // lane channel-row-notices
   return FOLDS;
 }
 function setFold(part, folded) {

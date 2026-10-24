@@ -938,20 +938,29 @@ function promptFromCdp(type, params, { targetId = null, now = 0, seq = 0 } = {})
 function promptText(p) {
   if (!p) return '';
   if (p.type === 'file') return `The page opened a file chooser (${p.multiple ? 'several files allowed' : 'one file'}${p.accept ? `, accepts ${quoted(p.accept)}` : ''}) — no file window shows in this browser and nothing was picked. Upload it: vibespace-browser upload <selector of the file input> <path> (a file in your conversation's folder). The page keeps running meanwhile.`;
+  if (p.type === 'http-auth' && p.native) return nativeSheetText(p); // lane browser-x-in-window (B2): Chrome's OWN sheet, in the window the person sees
   if (p.type === 'http-auth') return `The page asked for an HTTP sign-in (${p.proxy ? 'a proxy, ' : ''}${p.scheme}, realm ${quoted(p.realm)}, ${quoted(p.origin)}) and waits — only the user can answer it: they type the username and password in the live view, and you never see them. Tell the user which site asks; do not retry the page in a loop.`;
   return '';
+}
+/** lane browser-x-in-window (B2, design q-026 §2.1): on the X road (the keeper's Chrome on its display session) an HTTP sign-in is
+ *  answered `Default` — Chrome draws its OWN sheet ("Sign in", the origin, Username / Password, Cancel / Sign in) INSIDE the
+ *  browser window (measured: no X window of its own), which the live view now shows and a person who takes over types into.
+ *  The agent's verbs are answered `dialog_open` with THIS sentence while it stands (the ways out: PAGE_BUSY_PASS_VERBS). */
+function nativeSheetText(p) {
+  return `Chrome's own sign-in sheet ("Sign in", ${quoted(p.origin)}${p.realm ? `, realm ${quoted(p.realm)}` : ''}) is open on your browser window and holds the page — only a person can answer it: they type the username and password into it in the live view, and you never see them. Ask the user to sign in there; do not retry the page in a loop. Your next page commands are answered with this until it closes — \`vibespace-browser tab …\`, \`close\`, \`stop\`, \`dialog status\` and \`open <another site>\` still run.`;
 }
 /** The machine-readable block beside the sentence (the routes' answers, the stuck fact). */
 function promptBlock(p, { now = 0 } = {}) {
   if (!p || !PROMPT_TYPES.includes(p.type)) return null;
   const b = { id: str(p.id), type: p.type, openedAt: Number(p.openedAt) || 0, openForMs: Number(now) > 0 && p.openedAt ? Math.max(0, Number(now) - Number(p.openedAt)) : 0, text: promptText(p) };
   if (p.type === 'file') Object.assign(b, { multiple: !!p.multiple, accept: str(p.accept), url: str(p.url) });
-  else Object.assign(b, { origin: str(p.origin), realm: str(p.realm), scheme: str(p.scheme) || 'basic', proxy: !!p.proxy });
+  else Object.assign(b, { origin: str(p.origin), realm: str(p.realm), scheme: str(p.scheme) || 'basic', proxy: !!p.proxy }, p.native ? { native: true, title: 'Sign in' } : {}); // lane browser-x-in-window: Chrome's own sheet, by its own title
   return b;
 }
 /** The ONE line the agent's next result carries once a sign-in was answered — who and how, NEVER the credential. */
 function promptAnsweredNote(a) {
   if (!a || !a.prompt || a.prompt.type !== 'http-auth') return '';
+  if (a.how === 'window') return `the sign-in sheet Chrome showed for ${quoted(a.prompt.origin)} closed in its window at ${hhmm(a.at)} (the page moved on) — read the page to see whether it signed in`; // lane browser-x-in-window: answered in Chrome's own sheet — VibeSpace saw only the page move on
   const how = a.how === 'signed-in' ? 'the user signed in' : a.how === 'expired' ? `nobody answered it within ${AUTH_HOLD_MAX_MS / 60000} min, so VibeSpace cancelled it` : 'it was cancelled (the page got its 401)';
   return `the HTTP sign-in the page asked for (${quoted(a.prompt.origin)}) was answered: ${how} at ${hhmm(a.at)}`;
 }
@@ -960,6 +969,7 @@ function promptWords(p, tIn) {
   if (!p) return null;
   const t = typeof tIn === 'function' ? (s, q) => tIn(s, q) : fill;
   if (p.type === 'file') return { title: t('The page asks for a file'), body: t('No file window opens here — the agent uploads it with vibespace-browser upload'), form: false, dismiss: t('Dismiss') };
+  if (p.type === 'http-auth' && p.native) return { title: t('Chrome asks you to sign in — in its window below'), body: `${pageText(p.origin, URL_MAX)}${p.realm ? ` — ${pageText(p.realm, 200)}` : ''}`, form: false, native: true, hint: t('Take over and type the username and password into Chrome’s sheet — the agent never sees them'), dismiss: null }; // lane browser-x-in-window: Chrome's own sheet is IN the picture
   if (p.type === 'http-auth') return { title: t('The page asks you to sign in'), body: `${pageText(p.origin, URL_MAX)}${p.realm ? ` — ${pageText(p.realm, 200)}` : ''}`, form: true, user: t('Username'), password: t('Password'), accept: t('Sign in'), dismiss: t('Cancel'), hint: t('Sent to this page only — never to the agent, never written down') };
   return null;
 }
@@ -1045,7 +1055,7 @@ module.exports = {
   PAGE_BUSY_PASS_VERBS, busyPasses, pageBusyVerdict, pageBusyText, busyCloseText, closePendingText, // lane browser-shared-profile-freeze: a silent page is answered by name before the driver gets the verb
   restartedCardText, unresponsiveLine, answeredAgainLine, unresponsiveNotice, unresponsiveWords,
   // lane browser-ui-prompts: the browser's own prompts (a file chooser, an HTTP sign-in) — one record, one sentence, one bar
-  PROMPT_TYPES, PROMPT_ASK_MS, AUTH_HOLD_MAX_MS, promptFromCdp, promptText, promptBlock, promptAnsweredNote, promptWords,
+  PROMPT_TYPES, PROMPT_ASK_MS, AUTH_HOLD_MAX_MS, promptFromCdp, promptText, promptBlock, promptAnsweredNote, promptWords, nativeSheetText /* lane browser-x-in-window */,
   // lane browser-ui-prompts-r2: permissions decided ahead (the agent's per-origin flip) + the print preview released and told
   PERMISSION_KINDS, PERMISSION_DEFAULT, permissionPlan, permissionVerdict, permissionNote, permissionWords, PRINT_PREVIEW_RE, printTargetVerdict, PRINT_RELEASE_EXPR, PRINT_TEXT, printNote, printWords,
 };

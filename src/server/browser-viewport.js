@@ -282,6 +282,27 @@ async function windowOf(cdpUrl, targetId, { timeoutMs = READ_MS, WebSocketImpl =
   return w.ok && w.result ? require('../browser-windows.js').windowIdOf(w.result.windowId) : null; // verify r3 ⑥: the ONE reader of a window id
 }
 
+/** lane browser-x-in-window (B2): ONE window's id + bounds (CDP's bounds ARE its X geometry — measured) — by the window's id
+ *  (`Browser.getWindowBounds`) or a tab in it (`Browser.getWindowForTarget`). → {windowId, bounds} | null */
+async function windowBoundsOf(cdpUrl, { windowId = null, targetId = null } = {}, { timeoutMs = READ_MS, WebSocketImpl = WebSocket } = {}) {
+  if (!cdpUrl) return null;
+  const W = require('../browser-windows.js');
+  const id = W.windowIdOf(windowId);
+  if (id != null) { const r = await pageCommand(String(cdpUrl), 'Browser.getWindowBounds', { windowId: id }, timeoutMs, WebSocketImpl); return r.ok && r.result && r.result.bounds ? { windowId: id, bounds: r.result.bounds } : null; }
+  if (!targetId) return null;
+  const r = await pageCommand(String(cdpUrl), 'Browser.getWindowForTarget', { targetId: String(targetId) }, timeoutMs, WebSocketImpl);
+  return r.ok && r.result && W.windowIdOf(r.result.windowId) != null ? { windowId: W.windowIdOf(r.result.windowId), bounds: r.result.bounds || null } : null;
+}
+/** lane browser-x-in-window (B2): size / move ONE window — `windowState: normal` first (Chrome refuses a size on a maximized or
+ *  minimized window), then the bounds asked (left / top / width / height, whole px). → {ok, error?} */
+async function setWindowBounds(cdpUrl, windowId, bounds = {}, { timeoutMs = READ_MS, WebSocketImpl = WebSocket } = {}) {
+  const id = require('../browser-windows.js').windowIdOf(windowId);
+  if (!cdpUrl || id == null) return { ok: false, error: 'no window' };
+  const b = {}; for (const k of ['left', 'top', 'width', 'height']) if (bounds && Number.isFinite(Number(bounds[k]))) b[k] = Math.round(Number(bounds[k]));
+  const r = await pageCommands(String(cdpUrl), [{ method: 'Browser.setWindowBounds', params: { windowId: id, bounds: { windowState: 'normal' } } }, { method: 'Browser.setWindowBounds', params: { windowId: id, bounds: b } }], timeoutMs, WebSocketImpl);
+  return r.ok ? { ok: true } : { ok: false, error: r.error };
+}
+
 /**
  * lane site-reset-windows: NAVIGATE a tab VibeSpace opened, waiting for NOTHING the page does after — `Page.navigate` on the
  * tab's own socket answers at the navigation's commit (the binary's own `tab new <url>` waits for nothing: 0.38.1, lane
@@ -520,4 +541,4 @@ async function openTabByActivate(cdpUrl, { anchorTargetId, windowId = null, time
   return { ok: false, code: 'window_mismatch', error: `the tab opened in window ${last == null ? '(unknown)' : last}, not the holder's window ${wantWin} — ${n} tr${n === 1 ? 'y' : 'ies'}, every stray closed at once`, leaks, tries: n };
 }
 
-module.exports = { readViewport, captureFrame, watchCopies, copyWatchSource, browserTargets, pageAnswers, openWindow, windowOf, closeTarget, openTabInWindow, openTabByActivate, navigateTarget, OPENER_WORLD, captureTarget, visibilityOf, watchTarget, pageUrlOf, COPY_TEXT_MAX, READ_MS };
+module.exports = { readViewport, captureFrame, watchCopies, copyWatchSource, browserTargets, pageAnswers, openWindow, windowOf, windowBoundsOf, setWindowBounds /* lane browser-x-in-window */, closeTarget, openTabInWindow, openTabByActivate, navigateTarget, OPENER_WORLD, captureTarget, visibilityOf, watchTarget, pageUrlOf, COPY_TEXT_MAX, READ_MS };

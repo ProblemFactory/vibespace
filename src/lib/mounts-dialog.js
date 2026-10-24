@@ -76,7 +76,10 @@ export function narrowRow({ provider, narrow, onUrl }) {
   // lane lark-search-poll (owner decision 5): ONE optional scope per press, least valuable first — a later press says
   // it drops this one TOO (the earlier ones stay dropped)
   const again = Array.isArray(narrow.dropped) && narrow.dropped.length > 0;
-  row.appendChild(document.createTextNode((again ? tr('If {provider} still refuses the sign-in (error 20027):', { provider }) : tr('If {provider} refuses the sign-in because the app has not enabled {scopes} (error 20027):', { provider, scopes })) + ' '));
+  // lane lark-consent-chain ADDENDUM 1: the row exists because the app's own list could not be read — said, with what it answered
+  const floor = narrow.from === 'floor' && !again;
+  if (floor) row.dataset.from = 'floor';
+  row.appendChild(document.createTextNode((again ? tr('If {provider} still refuses the sign-in (error 20027):', { provider }) : floor ? tr('The app’s list of permissions could not be read ({why}), so this sign-in asks the built-in list. If {provider} refuses it (error 20027), retry without {scopes}:', { provider, scopes, why: String(narrow.floorWhy || tr('no answer')).slice(0, 160) }) : tr('If {provider} refuses the sign-in because the app has not enabled {scopes} (error 20027):', { provider, scopes })) + ' '));
   const b = document.createElement('button');
   b.type = 'button'; b.className = 'mounts-btn';
   b.textContent = again ? tr('Sign in without {scopes} too', { scopes }) : tr('Sign in without {scopes}', { scopes });

@@ -90,6 +90,9 @@ const RESIZE_DEBOUNCE_MS = 150;
  *  (a)): GTK apps snap to their own size ~650 ms after the map and the belt re-fits them in the SAME task — a backing
  *  shrunk and regrown in between lost the rows past the snapped size, a band of the pane's background until the app
  *  repainted (~110 ms, measured on every GNOME Calculator connect). The element's box still follows at once (it clips). */
+/** THE upstream worker asset of ONE display session (the html5 protocol worker, served from the installed package behind our
+ *  auth) — the desktop app window and the agent browser's live view (lane browser-x-in-window: the X picture) both ask here. */
+export const workerUrlFor = (id) => `/api/desktop/${encodeURIComponent(id)}/xpra-ui/js/Protocol.js`;
 /** The stream KIND this view shows (a record's `stream`) — desktop-app-window.js registers the view under it. */
 export const STREAM_KIND = 'xpra';
 export const BACKING_SHRINK_MS = 1000;
@@ -142,6 +145,7 @@ export function startingText(ms) {
  *   onFixedSize({w,h}|null) — the pane (CSS px) the app's FIXED window needs (lane app-fit-fixed); null = none
  *   onFront({wid,title,kind,main}|null) — the FRONT window (the topmost non-popup; `main` false = an app's second window)
  *   onSatellite({wid,title}) — S2: a secondary top-level got its slot — open (or re-bind) a satellite window for it
+ *   admit(win, ctx) — lane browser-x-in-window: ONE window of a shared display (xpra-client's `admit`: the others never drawn)
  *   fixedFollows  — () => true when the window adopts that size (then the picture is never scaled); default true
  *   dpi           — the DISPLAY's font dpi (the record's `dpi`) — the client's hello/display dpi (a number or a function)
  *   onMain(meta|null) / onState(changed) — the main window's metadata; the app's own maximize / minimize (seamless)
@@ -156,7 +160,7 @@ export function startingText(ms) {
  * Returns { container, bar, mount, pane, status, connect, disconnect, setStatus, addControl,
  *           focus, dispose, setViewOnly, get client, get state, get wanted, windows() }.
  */
-export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, mayFocus = () => true, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, viewerPlatform = navigatorPlatform, hostPlatform = null, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
+export function createXpraView(host, { url, workerUrl, before = null, labels = {}, autoReconnect = false, admit = null, onStatus = null, onTitle = null, onIcon = null, onMinSize = null, onMain = null, onState = null, onMoveResize = null, onFixedSize = null, onFront = null, onSatellite = null, mayFocus = () => true, fixedFollows = () => true, dpi = 96, pixelRatio = () => (typeof devicePixelRatio === 'number' ? devicePixelRatio : 1), pictureScale = () => 1, viewerPlatform = navigatorPlatform, hostPlatform = null, Worker: WorkerCtor = undefined, decode = defaultDecode, now = undefined, secure = null, clipboardApi = null, log = console } = {}) {
   const shell = createPictureShell(host, { labels: { starting: t('Starting application…'), unavailable: t('Desktop app unavailable'), ...labels }, autoReconnect, onStatus, background: 'var(--bg-primary)', focus: () => focus() });
   const { container, bar, mount, status, pasteBtn, reBtn, labels: L, setStatus, addControl, emit } = shell;
   /** lane xpra-mac-modifiers: the primary-modifier map of THIS viewer and THIS app's machine, asked per event (the one table). */
@@ -580,6 +584,7 @@ export function createXpraView(host, { url, workerUrl, before = null, labels = {
       workerUrl: typeof workerUrl === 'function' ? workerUrl() : workerUrl,
       screen: s, ratio: () => drawRatio, cover: () => drawK !== 1, dpi: typeof dpi === 'function' ? dpi() : dpi, Worker: WorkerCtor, decode, now, log, mac: () => viewerPlatform() === 'mac',
       slots: () => typeof onSatellite === 'function', // S2: a window per top-level only where the caller can open one
+      admit, // lane browser-x-in-window: the live view draws its conversation's Chrome window (+ its dialogs and menus) only
       on: {
         status: (st, detail) => {
           if (shell.closed) return;

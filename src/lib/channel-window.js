@@ -1042,7 +1042,8 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
         // account's sign-in lacks the send permission — ONE short sentence and
         // the fix RIGHT THERE (the account's own re-authorize dialog)
         ro.dataset.channelReadonly = 'reauth';
-        ro.appendChild(el('span', '', t('Read-only — this account needs a re-authorization to reply')));
+        // lane channel-row-notices: what the re-authorization adds (the permission by name) and what works now (reading)
+        ro.appendChild(el('span', '', chanCaps.reauthWhyText('read-only', why, { scopes: a.sendGrant && Array.isArray(a.sendGrant.missing) ? a.sendGrant.missing : [] }, { t }).text));
         const fix = btn(t('Re-authorize'), async () => {
           const d = await fetchJson('/api/channels?scope=accounts');   // design 008: the accounts, never the rows
           if (!d || d.error) { showToast(routeErrorText(d), { type: 'error' }); return; }

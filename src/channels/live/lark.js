@@ -49,6 +49,23 @@ const UNAVAILABLE_WORDS = Object.freeze({
   'sdk-not-installed': i18nKey('Real-time push is off: the official Lark SDK is not installed on this instance — run `npm install @larksuiteoapi/node-sdk` in the VibeSpace folder and restart; enable the event subscription (long-connection mode), grant `im:message.group_msg` and add the bot to the chats you want pushed. Until then messages are polled (every 30 s – 15 min).'),
   'needs-credentials': i18nKey('Real-time push is off: this account has no usable app credential — fix the client in Edit. Until then messages are polled.'),
 });
+/** lane channel-row-notices (the owner 2026-10-23: 「这个提示最好不要常驻了，很丑陋」): the SAME codes' CAUSE in a few words —
+ *  the account row's ⓘ fold says it; no command (the steps live on the setup card and in Diagnostics). */
+const UNAVAILABLE_CAUSES = Object.freeze({
+  'sdk-not-installed': i18nKey('The official Lark SDK is not installed on this instance.'),
+  'needs-credentials': i18nKey('This account has no usable app credential (fix the client in Edit).'),
+});
+/** …and THE STEPS that turn the push lane on — the account type's setup card draws them under «Real-time push (optional)»,
+ *  the Diagnostics report beside a parked lane; `code` = the exact text a step types or names (drawn with Copy). */
+const PUSH_SETUP = Object.freeze({
+  steps: Object.freeze([
+    Object.freeze({ words: i18nKey('Install the official Lark SDK on this instance: run this in the VibeSpace folder, then restart VibeSpace.'), code: `npm install ${SDK_NAME}` }),
+    Object.freeze({ words: i18nKey('In the app\'s developer console, turn on Event Subscriptions in long-connection mode and add the message event.'), code: 'im.message.receive_v1' }),
+    Object.freeze({ words: i18nKey('Grant the app the permission to receive group messages, then publish a version.'), code: 'im:message.group_msg' }),
+    Object.freeze({ words: i18nKey('Add the bot to the chats you want pushed.') }),
+  ]),
+  after: i18nKey('Optional — until then every message arrives by polling (every 30 s – 15 min).'),
+});
 /** The message event (a v2 event; enable it in the app's Event
  *  Subscriptions with the long-connection mode). */
 const EVENT = 'im.message.receive_v1';
@@ -182,4 +199,4 @@ function createLarkLive({ adapterId, brand = 'feishu', credential, toRecord, now
   };
 }
 
-module.exports = { UNAVAILABLE_WORDS, createLarkLive, eventToItem, eventToSide, eventIdOf, EVENT, EVENTS, REACTION_CREATED, REACTION_DELETED, EGRESS, SDK_NAME, NAMES_WAIT_MS };
+module.exports = { UNAVAILABLE_WORDS, UNAVAILABLE_CAUSES, PUSH_SETUP, createLarkLive, eventToItem, eventToSide, eventIdOf, EVENT, EVENTS, REACTION_CREATED, REACTION_DELETED, EGRESS, SDK_NAME, NAMES_WAIT_MS };

@@ -103,6 +103,27 @@ export function renderSetupCard(model, { provider = '' } = {}) {
   return card;
 }
 
+/** lane channel-row-notices (the owner 2026-10-23: the Channels row's five-line install paragraph «很丑陋»): THE PUSH LANE'S
+ *  STEPS under «Real-time push — optional» — the kinds digest's `pushSetup` (the live lane's own declaration): each step's
+ *  words and its exact text with Copy, then the line after them. The account row's ⓘ points here. null without steps. */
+export function pushSetupFold(spec) {
+  const s = spec && spec.pushSetup;
+  if (!s || !Array.isArray(s.steps) || !s.steps.length) return null;
+  const fold = el('details', 'oauth-setup-fold push-setup-fold');
+  fold.dataset.kind = spec.kind; fold.dataset.who = 'push';
+  fold.appendChild(el('summary', 'plugin-detail', t('Real-time push — optional')));
+  const list = el('ol', 'oauth-setup-rows push-setup-steps');
+  for (const x of s.steps) {
+    const li = el('li', 'oauth-setup-row push-setup-step');
+    li.appendChild(el('div', 'mounts-field-hint', t(x.words)));
+    if (x.code) li.appendChild(copyRow(x.code));
+    list.appendChild(li);
+  }
+  fold.appendChild(list);
+  if (s.after) fold.appendChild(el('div', 'mounts-field-hint push-setup-after', t(s.after)));
+  return fold;
+}
+
 /** The Connect dialog's FOLD — closed, one line naming what is inside; the card on open (drawn once, on the first open). */
 export function setupFold(spec, opts = {}) {
   const model = setupModelOf(spec, opts);

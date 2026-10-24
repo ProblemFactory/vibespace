@@ -103,6 +103,7 @@ const KA = require('../ws-keepalive.js'); // lane stream-ping: the ONE keepalive
 const S = require('../browser-stream.js');
 const T = require('../browser-takeover.js');
 const FIT = require('../browser-fit.js');
+const crypto = require('crypto'); // lane browser-x-in-window: the X picture's ticket (a per-viewer secret)
 const WIN = require('../browser-windows.js'); // lane browser-windows (U3/U0b): a background tab is said and polled; a watched tab's frames // lane S4: the pane → page viewport rules, the agent-set flag, the fresh-frame clocks
 /** lane S4: a page size the keeper could not set is not asked for again for this long (a new pane size is). */
 const FIT_RETRY_MS = 30000;
@@ -320,12 +321,12 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (browse && /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''))) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, (ws) => {
       // BROWSE YOURSELF (B-6ae8): a third query shape — the user's own browsing window (cookie auth as above)
-      const go = browse ? attachHumanViewer(ws, { key: browse, fresh }) : attachViewer(ws, { sessionId, profileRef });
+      const go = browse ? attachHumanViewer(ws, { key: browse, fresh }) : attachViewer(ws, { sessionId, profileRef, agent: /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || '')) }); // lane browser-x-in-window: an agent's token never gets the X picture's ticket
       go.catch((e) => { log.warn?.(`[browser-live] viewer attach failed: ${e && e.message}`); refuse(ws, 'internal', String(e && e.message)); });
     });
   }
 
-  async function attachViewer(ws, { sessionId, profileRef }) {
+  async function attachViewer(ws, { sessionId, profileRef, agent = false }) {
     const f = sessionFacts(sessionId);
     if (!f) return refuse(ws, 'not-found', `no such live session ${JSON.stringify(sessionId)}`);
     if (f.host) return refuse(ws, 'unsupported-host', `the live view is local-only in this release — session ${sessionId} runs on host ${JSON.stringify(f.host)}`);
@@ -336,7 +337,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const key = relayKeyFor(sessionId, target);
     let relay = relays.get(key);
     if (!relay) { relay = createRelay(key, sessionId, target); relays.set(key, relay); }
-    const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null, watch: null, watchSeq: 0 };
+    const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null, watch: null, watchSeq: 0, agent: !!agent }; // lane browser-x-in-window: + whether an agent's token opened it
     relay.viewers.set(viewer.id, viewer);
     armBg(relay); // lane browser-windows (U0b): a view of a tab that paints nothing is never silent
     noteViewers(relay);
@@ -553,6 +554,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     // lane S4: the holder's pane rules while somebody drives. builder r2: AT ONCE (no 250 ms debounce) — a mode change is one
     // discrete act, and the resize then lands while the hand is still on the Take over button, not under its first press
     if (relay.fits.size) scheduleFit(relay, 'mode', { delay: 0 });
+    noteXSeats(relay); // lane browser-x-in-window: the X picture's input side follows the takeover at once
   }
   function lastUrlOf(relay) {
     try { const u = relay.last.url ? JSON.parse(relay.last.url) : null; if (u && typeof u.url === 'string') return u.url; } catch { /* */ }
@@ -799,6 +801,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   async function runFit(relay, why) {
     if (relays.get(relay.key) !== relay || !canFit()) return;
     if (relay.fitBusy) { relay.fitAgain = why; return; }
+    if (xRoadOf(relay)) return runXFit(relay, why); // lane browser-x-in-window: the WINDOW is the pane's size, never an emulated page
     const fs = fitStateOf(relay);
     const open = !!(relay.upstream && relay.upstream.readyState === 1);
     if (!fs.baseline && open && relay.picture && (relay.viewport || now() - relay.firstFrameAt >= 1500)) fs.baseline = pageSizeOf(relay);
@@ -1307,10 +1310,69 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       if (live() && seq === viewer.watchSeq) w.stop = r.close; else { try { r.close(); } catch { /* ended */ } }
     });
   }
+  // ── LANE BROWSER-X-IN-WINDOW (design q-026 r1 §2.1 / §3 row B2): THE X PICTURE'S TICKET + THE WINDOW'S FIT ──
+  // A live view of a browser on the X road (the keeper's Chrome on its display session) draws the browser's OWN WINDOW through the
+  // display session's xpra stream — the ONE desktop bridge. That socket names itself with a TICKET minted here for ONE viewer of
+  // THIS relay (never an agent's token): the desktop bridge's browser-display source asks `xSeat(dsId, ticket)` — 'active' only
+  // while that viewer holds the browser's input side (THE takeover: the keeper's lease, unchanged), 'watch' otherwise (its input
+  // cut, its keymap / display size / window geometry held for its takeover — the bridge's x5 machinery). The agent's verbs stay CDP.
+  const xTickets = new Map(); // ticket → { relayKey, viewerId, profileId, dsId, at }
+  const xSeatListeners = new Set();
+  const xRoadOf = (relay) => { try { const pid = relay && relay.target && relay.target.profileId; return !!(pid && keeper && typeof keeper.pictureSourceFor === 'function' && keeper.pictureSourceFor(pid).source === 'x'); } catch { return false; } };
+  const holderKeyOf = (relay) => (isHuman(relay) ? String(relay.target.key || '') : String(relay.browserKey || ''));
+  async function xTicketFor(relay, viewer) {
+    const say = (m) => { if (relay.viewers.get(viewer.id) === viewer) send(viewer.ws, { type: 'x-ticket', ...m }); };
+    if (viewer.agent) return say({ ok: false, code: 'not_yours', error: 'an agent never draws the browser window — its verbs are its own' });
+    const pid = relay.target && relay.target.profileId;
+    if (!pid || !keeper || typeof keeper.xWindowFor !== 'function') return say({ ok: false, code: 'screencast', why: 'not-running' });
+    let x = null; try { x = await keeper.xWindowFor(pid, { browserKey: holderKeyOf(relay), targetId: relay.activeTarget || null }); } catch (e) { x = { wid: null, why: 'unreadable', error: String(e && e.message) }; }
+    const src = x && x.source;
+    if (!src || src.source !== 'x') return say({ ok: false, code: 'screencast', why: (src && src.why) || (x && x.why) || 'not-running', source: src || null });
+    if (x.wid == null) { log.log?.(`[browser-live] ${relay.key}: its window on display session ${src.displaySession} could not be told (${x.why}) — the page's picture`); return say({ ok: false, code: 'screencast', why: x.why || 'no-window', source: src }); }
+    dropXTickets(relay, viewer, { quiet: true }); // ONE ticket per viewer: a new ask replaces its old one
+    const ticket = 'xt-' + crypto.randomBytes(18).toString('hex');
+    if (xTickets.size > 256) { const oldest = xTickets.keys().next().value; xTickets.delete(oldest); }
+    xTickets.set(ticket, { relayKey: relay.key, viewerId: viewer.id, profileId: String(pid), dsId: String(src.displaySession), at: now() });
+    say({ ok: true, ticket, displaySession: src.displaySession, wid: x.wid, source: src, seat: xSeatOf(relay, viewer.id) });
+    noteXSeats(relay); // the bridge (re)judges its sockets; every viewer of this relay hears its seat
+  }
+  function dropXTickets(relay, viewer, { quiet = false } = {}) {
+    let n = 0; for (const [k, t] of xTickets) if (t.relayKey === relay.key && t.viewerId === viewer.id) { xTickets.delete(k); n++; }
+    if (n && !quiet) noteXSeats(relay);
+  }
+  /** The ruling pane of the X picture while nobody drives (FIT.fitTarget: a claim, else the largest visible one) — its viewer id. */
+  const xRulerOf = (relay) => { const v = FIT.fitTarget({ fits: [...relay.fits.values()], holder: null, mode: 'watch', claim: relay.fitClaim, fixed: null }); return v ? v.viewerId : null; };
+  /** The seat of ONE viewer of a relay on the X picture: 'active' (it drives: input + the window's geometry), 'size' (nobody drives
+   *  and its pane rules: the geometry only — xpra's own configure-window sizes Chrome's window to it), else 'watch'. */
+  const xSeatOf = (relay, viewerId) => (relay.mode === 'takeover' ? (relay.holder === viewerId ? 'active' : 'watch') : xRulerOf(relay) === viewerId ? 'size' : 'watch');
+  /** The desktop bridge's per-packet question for a display-for-browser socket: its ticket's viewer's seat ('watch' for a stranger). */
+  function xSeat(dsId, ticket) {
+    const t = xTickets.get(String(ticket || ''));
+    if (!t || t.dsId !== String(dsId || '')) return 'watch';
+    const relay = relays.get(t.relayKey);
+    if (!relay || !relay.viewers.has(t.viewerId)) return 'watch';
+    return xSeatOf(relay, t.viewerId);
+  }
+  /** Every display session a relay's tickets draw re-applies its seats (a takeover, a handback, a view gone, a new ruling pane) —
+   *  and each ticket's viewer is told ITS seat (its X view sizes the window only as the ruler). */
+  function noteXSeats(relay) {
+    const ds = new Set(); for (const t of xTickets.values()) if (t.relayKey === relay.key) { ds.add(t.dsId); const v = relay.viewers.get(t.viewerId); if (v) send(v.ws, { type: 'x-seat', seat: xSeatOf(relay, t.viewerId) }); }
+    for (const id of ds) for (const fn of [...xSeatListeners]) { try { fn(id); } catch (e) { log.warn?.(`[browser-live] the X seat listener threw — ${e && e.message}`); } }
+  }
+  /** THE WINDOW'S FIT on the X road: the ruling pane's OWN X view sizes Chrome's window with xpra's configure-window (the desktop
+   *  app window's fit ladder and DPR rule — MEASURED: a CDP resize moves Chrome's window but not xpra's corral, which then went
+   *  back to the window's first geometry); here only WHO rules is decided and said. Never `set viewport`. */
+  async function runXFit(relay, why) {
+    const ruler = relay.mode === 'takeover' ? relay.holder : xRulerOf(relay);
+    if (relay.xRuler !== ruler) { relay.xRuler = ruler; noteXSeats(relay); log.log?.(`[browser-live] ${relay.key}: the X picture's ruling pane is viewer ${ruler === null ? 'none' : ruler} (${why})`); }
+    const v = FIT.fitTarget({ fits: [...relay.fits.values()], holder: relay.holder, mode: relay.mode, claim: relay.fitClaim, fixed: null });
+    if (v && relays.get(relay.key) === relay) { const k = `${v.viewerId}|${v.width}x${v.height}`; if (relay.xFitAt !== k) { relay.xFitAt = k; broadcastFit(relay, { state: 'fitted', width: v.width, height: v.height, viewerId: v.viewerId, rule: v.rule, x: true }); } }
+  }
   function onViewerMessage(relay, viewer, d) {
     let msg = null; try { msg = JSON.parse(typeof d === 'string' ? d : d.toString()); } catch { send(viewer.ws, { type: 'refused', code: 'bad-message', error: 'not JSON' }); return; }
     if (msg && msg.type === 'passkey-cancel') { cancelPasskeyFor(relay, viewer); return; } // lane browser-passkey: the banner's ONE button
     if (msg && msg.type === 'prompt-answer') { answerPromptFor(relay, viewer, msg); return; } // lane browser-ui-prompts: the sign-in boxes / Dismiss — the message is never kept, traced or logged
+    if (msg && msg.type === 'x-ticket') { xTicketFor(relay, viewer); return; } // lane browser-x-in-window (B2): the X picture's ticket for THIS viewer
     if (msg && msg.type === 'dialog-answer') { answerDialog(relay, viewer, msg); return; } // lane browser-stuck: the user's Accept / Dismiss on a page dialog (any viewer — the user's own chrome, not a forwarded page input)
     const v = S.viewerMessageVerdict(msg, { holder: relay.holder, viewerId: viewer.id, mode: relay.mode });
     if (v.kind === 'config') { if (v.maxFps !== undefined) { viewer.maxFps = v.maxFps; pushMaxFps(relay); armTrail(relay, viewer); } send(viewer.ws, { type: 'config-ack', maxFps: viewer.maxFps, upstreamMaxFps: relay.upstreamMaxFps }); return; } // lane S4: a viewer back from 2 fps (a hidden tab) catches up on the latest frame
@@ -1560,6 +1622,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (viewer.trailTimer) { clearTimeout(viewer.trailTimer); viewer.trailTimer = null; }
     if (relay.fitClaim === viewer.id) relay.fitClaim = null; // lane live-input: a claim leaves with its view
     if (relay.fits.delete(viewer.id)) scheduleFit(relay, 'viewer-left'); // lane S4: the next pane rules (or nobody: the restore clock)
+    dropXTickets(relay, viewer); // lane browser-x-in-window: its X picture's ticket leaves with it
     noteViewers(relay);
     // P3: the holder's window closed ⇒ the controls go back to the agent
     // (`viewer-left`: zero-spend unless browser.announceIdleHandback says so).
@@ -1680,7 +1743,8 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   return { handleUpgrade, closeForSession, viewerCount, stats, shutdown, setFixed, STREAM_PATH: S.STREAM_PATH, _relays: relays, _fitStates: fitStates,
     viewportRuling, agentViewport, // lane browser-viewport-answer: a pin rules an agent's raw set; the set answers with the page's size + one trace row
     tap, tapHuman, broadcastTo, TAP_FPS, viewerAlive, // P5: the recorder's seam (+ BROWSE YOURSELF: the user's own relay)
-    activeTargetsFor, tapDialogAct }; // lane browser-stuck: the watch's scope (the tab each relay shows) + the agent's dialog act on the trace
+    activeTargetsFor, tapDialogAct, // lane browser-stuck: the watch's scope (the tab each relay shows) + the agent's dialog act on the trace
+    xSeat, onXSeats: (fn) => { if (typeof fn === 'function') xSeatListeners.add(fn); return () => xSeatListeners.delete(fn); } }; // lane browser-x-in-window: the desktop bridge's seat for an X picture's socket, and its refresh
 }
 
 module.exports = { create, MAX_PAYLOAD, LIVE_CHECK_MS, RESUME_POLL_MS, TAP_FPS, INPUT_WINDOW, COPY_DEDUP_MS };

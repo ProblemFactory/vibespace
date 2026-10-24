@@ -94,6 +94,15 @@ check('files/errors/running composition', S.runSummaryLabel({ byKind: S.countKin
   check('linked part: the owner\'s run reads "5 Bash · 1 ✗ · 4 with a conversation link" / 「5 条 Bash · 1 ✗ · 4 条带会话入口」 / 「Bash 5 件 · 1 ✗ · 会話リンク付き 4 件」',
     JSON.stringify(words) === JSON.stringify(['5 Bash · 1 ✗ · 4 with a conversation link', '5 条 Bash · 1 ✗ · 4 条带会话入口', 'Bash 5 件 · 1 ✗ · 会話リンク付き 4 件']), words);
   check('…no linked member ⇒ no part (every other run\'s label byte-identical)', S.runSummaryLabel({ ...owner, linked: 0 }, t) === '5 Bash · 1 ✗' && S.runSummaryLabel({ ...owner, linked: undefined }, t) === '5 Bash · 1 ✗');
+  // lane chat-proposal-card (the owner, 2026-10-23: 「最下面那个是 outbox 请求吗？」): the proposals the run's calls filed are
+  // counted BESIDE the conversation links — the cards the closed fold keeps on screen; decided, the count stays, the wait goes
+  const filed = (n, awaiting) => [S.runSummaryLabel({ ...owner, proposals: { n, awaiting } }, t), S.runSummaryLabel({ ...owner, proposals: { n, awaiting } }, tr(ZH)), S.runSummaryLabel({ ...owner, proposals: { n, awaiting } }, tr(JA))];
+  const waits = filed(1, 1), done = filed(1, 0), two = filed(3, 2);
+  check('proposals part: «5 Bash · 1 ✗ · 4 with a conversation link · 1 proposal awaiting approval» / 「… · 4 条带会话入口 · 1 条提案待批准」 / ja; decided ⇒ «1 proposal» / 「1 条提案」; several waiting ⇒ «2 proposals awaiting approval»',
+    JSON.stringify(waits) === JSON.stringify(['5 Bash · 1 ✗ · 4 with a conversation link · 1 proposal awaiting approval', '5 条 Bash · 1 ✗ · 4 条带会话入口 · 1 条提案待批准', 'Bash 5 件 · 1 ✗ · 会話リンク付き 4 件 · 承認待ちの提案 1 件'])
+    && JSON.stringify(done) === JSON.stringify(['5 Bash · 1 ✗ · 4 with a conversation link · 1 proposal', '5 条 Bash · 1 ✗ · 4 条带会话入口 · 1 条提案', 'Bash 5 件 · 1 ✗ · 会話リンク付き 4 件 · 提案 1 件'])
+    && two[0] === '5 Bash · 1 ✗ · 4 with a conversation link · 2 proposals awaiting approval' && two[1].endsWith('· 2 条提案待批准'), { waits, done, two });
+  check('…no proposal ⇒ no part (every other run\'s label byte-identical)', S.runSummaryLabel({ ...owner, proposals: { n: 0, awaiting: 0 } }, t) === '5 Bash · 1 ✗ · 4 with a conversation link' && S.runSummaryLabel({ ...owner, proposals: null }, t) === '5 Bash · 1 ✗ · 4 with a conversation link');
   check('commandHeadWords: the first non-blank line, whitespace folded, capped at HEAD_WORDS_MAX code points with "…"; "" for no command',
     S.commandHeadWords('\n  vibespace-channels   search "季度"\t--all\nsecond line') === 'vibespace-channels search "季度" --all'
     && [...S.commandHeadWords('词'.repeat(300))].length === S.HEAD_WORDS_MAX && S.commandHeadWords('词'.repeat(300)).endsWith('…')
@@ -141,6 +150,7 @@ check('chat-view imports the classifier + composer from chat-run-summary.js', ['
 // the floating bar and the footer.
 // the ONE call hands over the run's counts + the pre-composed collab part (extra parts — notes, machinePart — may ride along)
 const labelCalls = [...cv.matchAll(/runSummaryLabel\(\{([\s\S]*?)\}, t\)/g)].map((m) => m[1]);
+check('chat-view hands the run\'s filed proposals to the ONE composer (each call row\'s keyed box counts its own — lane chat-proposal-card)', /\n\s*proposals, \/\/ lane chat-proposal-card/.test(labelCalls[0] || '') && /const pb = el\.querySelector\('\.chat-chan-props'\); if \(pb\) \{ proposals\.n \+= Number\(pb\.dataset\.n\) \|\| 0; proposals\.awaiting \+= Number\(pb\.dataset\.awaiting\) \|\| 0; \}/.test(cv));
 check('chat-view builds the label ONLY through runSummaryLabel (no inline per-kind t() lines left)', labelCalls.length === 1
   && /^\s*byKind, mcpServers, files, nErr, running,/.test(labelCalls[0])
   && /\bcollabPart: collabRunPart\(collabStats, \{ now, live, t \}\),\s*$/.test(labelCalls[0])
@@ -202,8 +212,9 @@ check('_withViewportAnchor + the seek gap anchor skip run chrome (header/footer 
   && /chat-run-header'\) \|\| gapA\.classList\?\.contains\('chat-run-footer'\)/.test(read('src/lib/chat-view-seek.js')));
 check('no Esc binding for the run chrome (data-popover owns Esc)', !/Escape/.test(barBody) && !/key === 'Escape'[\s\S]{0,200}chat-run/.test(cv));
 const css = read('public/chat.css');
-check('chat.css (lane run-fold-channel-compact): a compact card hides every body but its head, its rows and an API card (a raw call awaiting the person is never folded away); the command words draw only while compact',
-  /\.chat-msg\.chat-channel-compact \.chat-tool-use > :not\(\.chat-tool-label\):not\(\.chat-channel-touches\):not\(\.chat-api-cards\) \{ display: none; \}/.test(css)
+check('chat.css (lane run-fold-channel-compact): a compact card hides every body but its head, its rows, an API card and a proposal the call filed (lane chat-proposal-card — a card awaiting the person is never folded away); the command words draw only while compact',
+  /\.chat-msg\.chat-channel-compact \.chat-tool-use > :not\(\.chat-tool-label\):not\(\.chat-channel-touches\):not\(\.chat-api-cards\):not\(\.chat-chan-props\) \{ display: none; \}/.test(css)
+  && /\.chat-msg\.chat-channel-compact \.chat-tool-use > \.chat-api-cards, \.chat-msg\.chat-channel-compact \.chat-tool-use > \.chat-chan-props \{ flex: 1 1 100%; \}/.test(css)
   && /\.chat-channel-compact-cmd \{ display: none; \}/.test(css) && /\.chat-msg\.chat-channel-compact \.chat-channel-compact-cmd \{ display: inline;/.test(css));
 check('chat.css: rail on members in BOTH role-indicator families, footer + bar styled with theme vars only', /\.chat-msg\.chat-run-member \{/.test(css) && /\[data-role-indicator="border"\] \.chat-msg\.chat-run-member \{/.test(css)
   && /\.chat-run-footer \{/.test(css) && /\.chat-run-bar \{/.test(css) && /\.chat-run-bar\.hidden \{ display: none; \}/.test(css)

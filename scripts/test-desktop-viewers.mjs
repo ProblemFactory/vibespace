@@ -333,7 +333,7 @@ console.log('§4 the route + the wiring pins');
   await new Promise((r) => srv.close(r));
   // WIRING PINS — code at the start of a line, never text after a mid-line // (the 2.369.134 lesson)
   const code = read('src/server/window-live-wiring.js').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).map((l) => l.replace(/\s\/\/.*$/, '')).join('\n');
-  ok(/viewerSeats: \{/.test(code) && /state: \(id, viewerId\) => \(governed\(id\) \? DV\.viewerState\(\{ active: keeper\.activeViewer\(id\) \}, viewerId, engine\.leaseInput\(id\)\) : 'free'\)/.test(code), 'WIRING PIN: the bridge\'s seat state IS the PURE rule over the keeper\'s election and the engine\'s lease');
+  ok(/viewerSeats: \{/.test(code) && /state: \(id, viewerId\) => \(src\(id\)\.seat \? src\(id\)\.seat\(id, viewerId\) : governed\(id\) \? DV\.viewerState\(\{ active: keeper\.activeViewer\(id\) \}, viewerId, engine\.leaseInput\(id\)\) : 'free'\)/.test(code), 'WIRING PIN: the bridge\'s seat state IS the PURE rule over the keeper\'s election and the engine\'s lease');
   ok(/keeper\.onViewers\?\.\(\(id\) => stream\.refresh\(id\)\)/.test(code) && /m\.type === 'window-leases-updated'\) \{ try \{ streamRef\?\.refreshAll\(\)/.test(code), 'WIRING PIN: a viewer change and every lease broadcast re-apply the sockets (refresh / refreshAll)');
   const rsrc = read('src/routes/desktop-apps.js');
   ok(/const v = ctx\.keeper\.takeoverViewer \? ctx\.keeper\.takeoverViewer\(req\.params\.id, viewerId\) : null;/.test(rsrc), 'WIRING PIN: the lease takeover route makes the taker the active viewer too');

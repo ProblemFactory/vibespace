@@ -266,6 +266,10 @@ async function makeWorld(name, { patches = [] } = {}) {
   W.inner = (n) => reports.get(n) || null;
   W.innerUntil = (n, pred, ms = 6000) => until(() => { const r = reports.get(n); return r && pred(r) ? r : null; }, ms, 40);
   W.api = async (method, p, body) => { const res = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}, body: body !== undefined ? JSON.stringify(body) : undefined }); let json = null; try { json = await res.json(); } catch { } return { status: res.status, json }; };
+  // int349 (lane browser-x-in-window, B2): this suite's legs drive the page's PICTURE — the screencast's img and its keyboard
+  // sink; on a machine with xpra the keeper's attach road now draws Chrome's own X window instead (test-browser-x-picture),
+  // so every browser of this world takes the driver road (Settings: browser.headed off), the screencast these legs prove
+  await W.api('PATCH', '/api/settings', { 'browser.headed': false });
   W.createSession = async (sname) => {
     const envBefore = new Set(fs.readdirSync(ENVS));
     const n0 = msgs.filter((m) => m.type === 'created').length;
@@ -1607,7 +1611,7 @@ if (want('r3')) {
   const w3 = await makeWorld('r3c', { patches: [
     { name: 'F1 pre-fix: a <select> is taken back like any other focus', file: 'src/lib/keyboard-yield.js', from: "  if (isEditable(a) || isChoiceControl(a)) return 'keep';", to: "  if (isEditable(a)) return 'keep';" },
     { name: 'F2 pre-fix: a box already gone is announced', file: 'src/lib/keyboard-yield.js', from: '    takeCue(el) { const c = !!el && s.cue === el && el.isConnected !== false; if (s.cue === el) s.cue = null; if (c) s.lastCueAt = now(); return c; },', to: '    takeCue() { const c = !!s.cue; s.cue = null; if (c) s.lastCueAt = now(); return c; },' },
-    { name: 'r2 held pre-fix: the chip names the box the keys were given to', file: 'src/lib/keyboard-yield.js', from: "      if (active && active !== sink && !inView(active)) { if (takesKeys(active)) return yieldKindOf(active); if (isFrame(active)) return 'other'; }\n      return 'none';", to: '      return s.kind;' },
+    { name: 'r2 held pre-fix: the chip names the box the keys were given to', file: 'src/lib/keyboard-yield.js', from: "      if (active && active !== sinkEl() && !inView(active)) { if (takesKeys(active)) return yieldKindOf(active); if (isFrame(active)) return 'other'; }\n      return 'none';" /* int349: browser-x-in-window's sink getter */, to: '      return s.kind;' },
     { name: 'lane dialog-keys pre-fix: every modal judged as opening by itself (taken back, said)', file: 'src/lib/keyboard-yield.js', from: "const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: o.byUserPress, opener: 'app' });", to: "const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: false, opener: 'app' });" },
     { name: 'r4 pre-fix: the chip written on every re-read', file: 'src/lib/browser-live-window.js', from: '    if (kbdText.textContent !== text) kbdText.textContent = text;\n    if (kbdChip.title !== title) kbdChip.title = title;', to: '    kbdText.textContent = text;\n    kbdChip.title = title;' },
   ] });

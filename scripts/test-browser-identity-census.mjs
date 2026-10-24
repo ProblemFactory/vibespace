@@ -254,6 +254,10 @@ const AGENT_ROUTES = {
   // lane launch-picture-size: `size <WxH|auto>` — THIS conversation's own browser only (agentFacts' session; a body naming
   // another session ⇒ not_your_window); the answer is the fixed size + how it applied, no record
   'POST /api/agent/browser/size': null,
+  // lane browser-takeover-queue: `ask-human` — THIS conversation's own request only (its key from the token: the handle names
+  // one of ITS browsers, the wait's id must be its own — another conversation's is 404); the answer is the PURE agent view
+  'POST /api/agent/browser/takeover-request': 'TQ.agentRequestView(',
+  'GET /api/agent/browser/takeover-request': 'TQ.agentRequestView(',
 };
 function judgeAgentRoutes(src) {
   const clean = stripComments(src);
@@ -488,6 +492,9 @@ const WALK = (eph, helper) => [
   // lane browser-resume C: the agent's own tab verbs (a shared profile, a helper's handle, its own browser, A's key named in the body)
   ['POST', '/api/agent/browser/tab', { handle: 'p-all', argv: ['tab', 'list', '--json'] }], ['POST', '/api/agent/browser/tab', { handle: 'p-all', argv: ['tab', 'close', 't1'] }],
   ['POST', '/api/agent/browser/tab', { handle: helper, argv: ['tab', 'list'] }], ['POST', '/api/agent/browser/tab', { argv: ['tab'] }], ['POST', '/api/agent/browser/tab', { handle: 'p-secret', argv: ['tab', 'new', 'https://x.example/'], browserKey: A }],
+  // lane browser-takeover-queue: ask a person (another conversation's profile, its own browser, a shared one), read it, wait on an id that is not its own, withdraw
+  ['POST', '/api/agent/browser/takeover-request', { text: 'Log in, please', handle: 'p-secret' }], ['POST', '/api/agent/browser/takeover-request', { text: 'Log in, please', handle: 'p-all' }], ['POST', '/api/agent/browser/takeover-request', { status: true, handle: 'p-all' }],
+  ['GET', '/api/agent/browser/takeover-request?id=tr-00000000&wait=0'], ['POST', '/api/agent/browser/takeover-request', { withdraw: true, handle: 'p-all' }], ['POST', '/api/agent/browser/takeover-request', { text: 'Solve the captcha' }], ['POST', '/api/agent/browser/takeover-request', { withdraw: true }],
 ];
 async function walkAs(jj, s, { eph = aEph && aEph.profileId, helper = helperKey } = {}) {
   const leaks = [], exceptions = [], routes = new Set();

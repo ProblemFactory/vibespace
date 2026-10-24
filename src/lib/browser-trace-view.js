@@ -57,6 +57,7 @@ import { displayFactText } from './browser-display-words.js';
 import { rowLine, rowFold, rowMenu, gridNeed, orphanOrder, usageLine as usageCell, diskFold } from './browser-panel-model.js'; // design 015 (lane browser-panel-tidy): the row's line / fold / menu (PURE)
 import { createPasskeysSection, isPhoneWidth } from './browser-passkeys-view.js'; // lane passkey-ui: a profile's Passkeys table
 import { barLayout } from './live-bar-layout.js'; // design 015 §2b: a cell's line never wraps — what does not fit folds by width (the bar-fold rule) // lane headless-fallback: a browser that runs headless because the machine has no desktop session says so
+import { createTakeoverSection, takeoverWindowTitle } from './browser-takeover-queue.js'; // lane browser-takeover-queue: «Waiting for you» — the takeover requests, above Profiles
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const STRIP_MAX = 12;
@@ -786,6 +787,12 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   cliRow.style.display = 'none';
   const body = el('div', 'bprof-body');
   root.append(bar, body);
+  // lane browser-takeover-queue: «Waiting for you» ABOVE Profiles — every request the person may see (the app's ONE copy:
+  // GET /api/browser/takeovers + `browser-takeovers-updated`), keyed rows patched in place; the window's title says the count
+  const tq = createTakeoverSection(app);
+  const tqRender = (list) => { if (st.closed) return; const r = tq.render(list); try { app.wm.setTitle(winInfo.id, takeoverWindowTitle(r.n)); } catch { /* window gone */ } };
+  const tqOff = typeof app.onBrowserTakeovers === 'function' ? app.onBrowserTakeovers(tqRender) : () => {};
+  const tqTick = setInterval(() => tqRender(app._browserTakeovers || []), 60000); // «在等你 · 3 分钟前» moves with the clock (a row's signature carries the minute: only its words patch)
   winInfo.content.appendChild(root);
   info.onclick = (ev) => {
     ev.stopPropagation();
@@ -1102,7 +1109,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
     return row;
   }
   function render() {
-    body.replaceChildren();
+    body.replaceChildren(tq.el); // lane browser-takeover-queue: the queue first — kept (keyed) across every render, even an error's
     if (st.error) { body.appendChild(el('div', 'bprof-error', t('Browser profiles unavailable: {why}', { why: String(st.error) }))); return; }
     const v = st.view; if (!v) return;
     renderHint(v); renderSummary(v);
@@ -1260,8 +1267,8 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   app.ws?.onGlobal?.(onGlobal);
   sweepBtn.onclick = async () => { sweepBtn.disabled = true; const r = await act('/api/browser/housekeeping/sweep', jsonInit('POST'), t('Sweep failed')); sweepBtn.disabled = false; if (r) showToast(t('Sweep: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes})', { n: r.removed || 0, bytes: bytesText(r.bytesRemoved || 0), r: r.recordingsRemoved || 0, rbytes: bytesText(r.recordingBytesRemoved || 0) }), { duration: 6000 }); load(); };
   refreshBtn.onclick = () => load();
-  winInfo.onClose = () => { st.closed = true; if (st.timer) clearTimeout(st.timer); try { ro?.disconnect(); } catch { /* optional */ } try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } };
-  winInfo._browserProfiles = { focusRow, load, layout, whoCell: (id) => whoCells.get(id) || null, keptRow: (bk) => (keptRows.get(bk) || {}).row || null, state: () => ({ error: st.error, profiles: (st.view?.profiles || []).length, orphans: (st.view?.orphans || []).length, forgotten: (st.view?.forgotten || []).length, kept: (st.view?.kept || []).map((k) => ({ browserKey: k.browserKey, tabs: (k.tabs || []).length, kind: k.kind, live: !!k.live })) }) };
+  winInfo.onClose = () => { st.closed = true; clearInterval(tqTick); try { tqOff(); tq.dispose(); } catch { /* optional */ } if (st.timer) clearTimeout(st.timer); try { ro?.disconnect(); } catch { /* optional */ } try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } };
+  winInfo._browserProfiles = { takeovers: () => tq.rows(), focusRow, load, layout, whoCell: (id) => whoCells.get(id) || null, keptRow: (bk) => (keptRows.get(bk) || {}).row || null, state: () => ({ error: st.error, profiles: (st.view?.profiles || []).length, orphans: (st.view?.orphans || []).length, forgotten: (st.view?.forgotten || []).length, kept: (st.view?.kept || []).map((k) => ({ browserKey: k.browserKey, tabs: (k.tabs || []).length, kind: k.kind, live: !!k.live })) }) };
   load();
   return winInfo;
 }

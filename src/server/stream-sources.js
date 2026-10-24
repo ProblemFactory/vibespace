@@ -7,16 +7,21 @@
  *                     input still counts as the person's activity (the keeper's and the window engine's clocks)
  *   machine-desktop — a paired Windows / macOS machine's whole desktop (design 014 D1), resolved by the ACCESS layer,
  *                     never the keeper; the person's own, and its input never reaches the keeper's idle clock
+ *   browser-display — an agent browser's display-only session (lane browser-x-in-window, design q-026 §2.1 B2: the
+ *                     keeper's Chrome on its `display-for-browser` xpra session, the live view's X picture): its SEAT is
+ *                     the browser's — `seat(id, viewerId)` = the live-view relay's ticket verdict ('active' only for the
+ *                     viewer holding the browser's input side, else 'watch'); never the desktop keeper's viewer election
  *   keeper          — every desktop-app session (the keeper says null for an id it has no record of) — governed
- * A source: { name, owns(id), target(id), onInput(id) | null, upstreamWhy(id) | null, personal }. The FIRST that owns
- * an id answers for it; the keeper owns the rest. A new source is one entry here.
+ * A source: { name, owns(id), target(id), onInput(id) | null, upstreamWhy(id) | null, personal, seat?(id, viewerId) }. The
+ * FIRST that owns an id answers for it; the keeper owns the rest. A new source is one entry here.
  */
 const M = require('../desktop-apps.js');
 
-function create({ vnc, keeper, engine, access = null, singletonId = M.DESKTOP_SINGLETON_ID }) {
+function create({ vnc, keeper, engine, access = null, singletonId = M.DESKTOP_SINGLETON_ID, browserSeat = null }) {
   const noteInput = (id) => { keeper.noteInput(id); engine.noteUserInput(id); };
   const sources = [{ name: 'singleton', owns: (id) => id === singletonId, target: () => ({ kind: 'rfb', port: vnc.port }), onInput: noteInput, upstreamWhy: null, personal: true }];
   if (access) sources.push({ name: 'machine-desktop', owns: (id) => !!M.machineDesktopHost(id), target: (id) => access.machineDesktopTarget(id), onInput: null, upstreamWhy: (id) => access.machineDesktopGone(id), personal: true });
+  if (typeof browserSeat === 'function') sources.push({ name: 'browser-display', owns: (id) => { let r = null; try { r = typeof keeper.get === 'function' ? keeper.get(id) : null; } catch { r = null; } return M.isDisplayForBrowser(r); }, target: (id) => keeper.streamTarget(id), onInput: (id) => keeper.noteInput(id), upstreamWhy: null, personal: false, seat: (id, viewerId) => browserSeat(id, viewerId) }); // lane browser-x-in-window
   sources.push({ name: 'keeper', owns: () => true, target: (id) => keeper.streamTarget(id), onInput: noteInput, upstreamWhy: null, personal: false });
   return Object.freeze(sources.map((s) => Object.freeze(s)));
 }

@@ -72,6 +72,7 @@ import { installSessionPalette } from './session-palette.js';
 import { installUserTodos } from './user-todos-panel.js';
 import { openInboxWindow } from './inbox-window.js'; // design-user-inbox-reply §9: THE For-you window (the popup's / a row's / the mini inbox's ⤢, ⚙ Communication ▸ For you…)
 import { installBrowserProfilePicker } from './browser-profile-picker.js'; // agent browser P1 (§3.2.5): the pin's one entry point + the profile digest
+import { installBrowserTakeovers } from './browser-takeover-queue.js'; // lane browser-takeover-queue: the ONE client copy of the takeover requests
 import { installBrowserSwitcher } from './browser-switcher.js'; // agent browser P4 (§7.4/§7.5): the backend switcher, the chip, the blocked claims
 import { installBrowserTrace } from './browser-trace-view.js'; // agent browser P5 (§4.5/§8 step 3): the profiles panel (the trace surfaces install themselves)
 import { installBrowserReplay } from './browser-replay-window.js'; // 2026-09-27: a browser session's replay (window type browser-replay)
@@ -324,6 +325,7 @@ class App {
       }
       // agent browser P1: the profile registry digest (every commit broadcasts it — the multi-client law)
       if (msg.type === 'browser-profiles-updated') this._onBrowserProfilesUpdated(msg);
+      if (msg.type === 'browser-takeovers-updated') this._onBrowserTakeoversUpdated(msg); // lane browser-takeover-queue: the queue (every surface reads the one copy)
       if (msg.type === 'pool-auto-switched' && Array.isArray(msg.affected)) {
         // B-6217 v2 auto+COLD: the server re-pointed a pool and picked THIS
         // client (exactly one) to restart the affected conversations — every
@@ -390,6 +392,7 @@ class App {
     this._accounts = { accounts: [], ...accountDefaultsOf(null), subscription: {}, cliKey: {} };
     this.refreshAccounts();
     this.refreshBrowserProfiles(); // agent browser P1: null when the server has no keeper ⇒ every pin surface hides itself
+    this.refreshBrowserTakeovers(); // lane browser-takeover-queue: the requests waiting for the person (the Agent browser window, the rail, the live views)
 
     // Load custom themes from server
     this._loadCustomThemes();
@@ -2829,6 +2832,7 @@ installUsageMeter(App);
 installSessionLifecycle(App);
 installSetupFlows(App);
 installBrowserProfilePicker(App);
+installBrowserTakeovers(App);
 installNewSessionForm(App); // lane new-session-form
 installBrowserLive(App); // agent browser P7 (§4.6): onBrowserDigestChanged → the live view born beside its session
 installBrowserSwitcher(App);

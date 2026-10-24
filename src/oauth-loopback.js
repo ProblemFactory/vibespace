@@ -92,9 +92,18 @@
  * VENDOR'S ERROR REDIRECT (`?error=…&state=`,
  * the right state and no code) ENDS the flow by name and the tab says nothing was connected — it used to answer
  * "connected — you can close this tab" and leave the flow running until its timeout.
+ *
+ * A CHAIN OF PAGES (lane lark-consent-chain, the owner 2026-10-23: 「不能一次性打开所有吗？」 — a vendor bounds one consent
+ * page, so «every permission» is several): a flow begun with `chain` ({page, total}, src/consent-road.js chainOf) is ONE
+ * page of a chain. A code that lands IN A TAB (this listener, the landing route's `finishByState`) is reported with
+ * `tab: true`, and the caller's `onDone` may answer `{next: {url, page, total}}` — the next page it began; the tab is sent
+ * on to it (the listener draws consent-road's chain landing; `finishByState` hands it to the route). A paste-back is
+ * never chained (no tab waits on it). `scopeSource` = where the consent's scope list came from ({from: 'app' | 'floor',
+ * why, lacking}) — said on status() for the dialog's narrowing row (it is only offered where the vendor can refuse).
  */
 const http = require('http');
 const crypto = require('crypto');
+const CR = require('./consent-road.js');   // PURE: the chain's position rule + its landing page
 
 /** gmail-sync's own budget for a consent flow, carried over. */
 const FLOW_TIMEOUT_MS = 10 * 60 * 1000;
@@ -159,6 +168,15 @@ function stepFactsOf(facts) {
   return out;
 }
 
+/** lane lark-consent-chain (ADDENDUM 1): where a consent's scope list came from — `app` (the vendor's own list of what the
+ *  app enabled was READ: it cannot name a scope the app lacks, except `lacking` — ones the caller asks whatever the list
+ *  says) or `floor` (the list could not be read — `why`; the caller's built-in list may name one the app lacks). */
+const SCOPE_SOURCES = Object.freeze(['app', 'floor']);
+function sourceOf(x) {
+  if (!x || typeof x !== 'object' || !SCOPE_SOURCES.includes(x.from)) return null;
+  return { from: x.from, why: typeof x.why === 'string' && x.why ? x.why.slice(0, 300) : null, lacking: scopeList(x.lacking) };
+}
+
 /** The fixed mode's target, parsed ONCE from the caller's registered callback (lane dc-channels-consent: its adapter's
  *  consent row `callbackUrl` — this machine holds no vendor's default). */
 function fixedTarget(callbackUrl) {
@@ -196,8 +214,10 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
    *  together (they are created in one scope and share one context: a kept `onDone` kept the secret `exchange`
    *  captured). Returns the `onDone` it dropped, for the ONE report an end may still owe. */
   function forget(st) { const cb = st.onDone; st.exchange = null; st.onDone = null; st.build = null; if (st.endedAt == null) st.endedAt = now(); return cb; }
+  /** …answering what `onDone` answered (lane lark-consent-chain: the next page of a chain). */
   async function report(cb, r) {
-    if (typeof cb === 'function') { try { await cb(r); } catch (e) { log.warn && log.warn('[oauth-loopback] onDone threw:', e && e.message); } }
+    if (typeof cb === 'function') { try { return await cb(r); } catch (e) { log.warn && log.warn('[oauth-loopback] onDone threw:', e && e.message); } }
+    return null;
   }
   /** verify r4: what an end that is this machine's own act says (the flow's status and its one report). */
   const endSentence = (st, why) => (why === CAUSE_TIMEOUT
@@ -223,9 +243,12 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
   }
 
   /** Exchange ONCE. A second code (a replayed callback, or the loopback AND a
-   *  paste-back of the same URL) is ignored: the first exchange is the flow. */
-  async function finish(st, code) {
-    if (st.done || st.exchanging) return;
+   *  paste-back of the same URL) is ignored: the first exchange is the flow.
+   *  lane lark-consent-chain: `tab` = a browser tab waits on this landing — answers the chain's next page (nextOf) when
+   *  this flow is a page of a chain and the caller's `onDone` began one, else null. */
+  async function finish(st, code, { tab = false } = {}) {
+    if (st.done || st.exchanging) return null;
+    let next = null;
     // verify r3: a code landing on a flow that ENDED (cancelled / timed out / over the cap) is never exchanged —
     // the vendor is not called for a consent nobody can keep. verify r4: its closures went at the end (both of
     // them), so the landing is SAID on the flow (status() reads it by name) and in the log, not through `onDone`
@@ -233,7 +256,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       if (!st.error) st.error = `the ${st.label} sign-in was ${st.cancelled === CAUSE_TIMEOUT ? 'past its time limit' : st.cancelled} before its code arrived — sign in again`;
       st.result = null; st.done = true; st.finishedAt = now(); forget(st);
       log.warn && log.warn(`[oauth-loopback] ${st.id}: a code landed on a sign-in that had ended (${st.cancelled}) — not exchanged`);
-      return;
+      return null;
     }
     st.exchanging = true;
     try {
@@ -258,8 +281,10 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       release(st);
       const cb = forget(st);   // verify r3: the exchange has returned — its closure (the client secret) is dropped here; r4: `onDone` with it
       if (byId.get(st.id) === st.flowId) byId.delete(st.id);
-      await report(cb, { ok: !st.error, result: st.result, error: st.error, cancelled: st.cancelled || null, flowId: st.flowId, id: st.id });
+      const ans = await report(cb, { ok: !st.error, result: st.result, error: st.error, cancelled: st.cancelled || null, flowId: st.flowId, id: st.id, ...(tab ? { tab: true } : {}) });
+      if (tab && st.chain && !st.error) next = CR.nextOf(ans && ans.next);
     }
+    return next;
   }
 
   /** THE VENDOR'S ERROR REDIRECT (`?error=<code>&state=<ours>`, no code — Lark's `access_denied` when the user
@@ -305,7 +330,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
    *                   beside ok:true = a cancel that arrived AFTER the exchange resolved (carried for a consumer
    *                   whose durable write is still ahead; the record's own door reads ok as landed)
    */
-  async function begin({ id, mode, callbackUrl = null, registeredCallbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null, optionalScopes = [], redirectUri = null, stateFor = null, road = null } = {}) {
+  async function begin({ id, mode, callbackUrl = null, registeredCallbackUrl = null, buildConsentUrl, exchange, successText = 'VibeSpace: connected — you can close this tab.', timeoutMs = FLOW_TIMEOUT_MS, onDone = null, label = null, optionalScopes = [], redirectUri = null, stateFor = null, road = null, chain = null, scopeSource = null } = {}) {
     if (!id || typeof id !== 'string') throw new OAuthFlowError('bad-request', 'oauth-loopback: `id` is required');
     if (!MODES.includes(mode)) throw new OAuthFlowError('bad-request', `oauth-loopback: mode must be one of ${MODES.join('|')} (got ${JSON.stringify(mode)})`);
     if (typeof buildConsentUrl !== 'function' || typeof exchange !== 'function') throw new OAuthFlowError('bad-request', 'oauth-loopback: buildConsentUrl and exchange are required');
@@ -333,6 +358,7 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       server: null, listening: false, refusal: null,
       result: null, error: null, why: null, done: false, exchanging: false, cancelled: null, step: null, stepFacts: null,
       startedAt: now(), finishedAt: null, expiresAt: now() + timeoutMs, timer: null,
+      chain: CR.chainOf(chain), source: sourceOf(scopeSource),   // lane lark-consent-chain
     };
     flows.set(flowId, st);
     byId.set(id, flowId);
@@ -347,8 +373,19 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
         const code = u.searchParams.get('code');
         const verr = !code && u.searchParams.has('error') ? vendorErrorOf(u.searchParams.get('error')) : null;
         if (verr) {
-          res.writeHead(200, { 'Content-Type': 'text/html' }).end(`<h3>${escapeHtml(`VibeSpace: ${st.label} did not grant the sign-in (${verr}) — nothing was connected. Close this tab and sign in again.`)}</h3>`);
+          // lane lark-consent-chain: a LATER page of a chain the person declined — what the earlier pages granted stays (said so)
+          if (st.chain && st.chain.page >= 2) res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', Connection: 'close' }).end(CR.landingHtml({ ok: false, why: 'denied', chain: st.chain }, { name: st.label, lang: CR.landingLang(req.headers['accept-language']) }));
+          else res.writeHead(200, { 'Content-Type': 'text/html' }).end(`<h3>${escapeHtml(`VibeSpace: ${st.label} did not grant the sign-in (${verr}) — nothing was connected. Close this tab and sign in again.`)}</h3>`);
           await declined(st, verr);
+          return;
+        }
+        // lane lark-consent-chain: a page of a CHAIN answers AFTER its exchange — the next page (if the caller began one)
+        // takes this same tab on; else the words of how it ended
+        if (code && st.chain) {
+          const next = await finish(st, code, { tab: true });
+          // `Connection: close` — the browser must not carry this connection (this flow's listener) to the next page's landing
+          if (next) { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', Connection: 'close' }).end(CR.landingHtml({ ok: true, user: (st.result && st.result.user) || null, next }, { name: st.label, lang: CR.landingLang(req.headers['accept-language']) })); return; }
+          res.writeHead(200, { 'Content-Type': 'text/html', Connection: 'close' }).end(`<h3>${escapeHtml(st.error ? `VibeSpace: this ${st.label} sign-in did not finish — the VibeSpace window where you started it says why.` : successText)}</h3>`);
           return;
         }
         res.writeHead(200, { 'Content-Type': 'text/html' }).end(`<h3>${escapeHtml(successText)}</h3>`);
@@ -457,8 +494,8 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
     if (st.exchanging) return { ok: false, why: 'used', result: null, error: `the ${st.label} sign-in is already exchanging its code` };
     if (!code && error) { await declined(st, vendorErrorOf(error)); return { ok: false, why: 'denied', result: null, error: st.error }; }
     if (!code || typeof code !== 'string' || code.length > 300) return { ok: false, why: 'failed', result: null, error: `no ${st.label} code arrived` };
-    await finish(st, code);
-    return { ok: !st.error, why: st.error ? 'failed' : null, result: st.result, error: st.error, flowId: st.flowId, id: st.id };
+    const next = await finish(st, code, { tab: true });   // lane lark-consent-chain: the route's tab — a chain's next page goes back with it
+    return { ok: !st.error, why: st.error ? 'failed' : null, result: st.result, error: st.error, flowId: st.flowId, id: st.id, next, chain: st.chain ? { ...st.chain } : null };
   }
 
   /** design 012: THE PASTE (a `paste` flow's callback). The exchange runs once at a time; a refusal is SAID on the flow
@@ -527,6 +564,8 @@ function createOAuthLoopback({ now = () => Date.now(), log = console, fixedCallb
       listening: st.listening, refusal: st.refusal,
       optional: st.optional.slice(), narrowed: st.narrowed ? st.narrowed.slice() : null,
       groups: st.groups.map((g) => g.slice()), nextNarrow: st.narrowedGroups < st.groups.length ? st.groups[st.narrowedGroups].slice() : null,
+      chain: st.chain ? { ...st.chain } : null,   // lane lark-consent-chain: this page's place in a chain
+      scopesFrom: st.source ? st.source.from : null, scopesWhy: st.source ? st.source.why : null, lacking: st.source ? st.source.lacking.slice() : [],
       pasteBack: true,                       // ALWAYS offered — remote browsers take it whatever the port did
       startedAt: st.startedAt, expiresAt: st.expiresAt, finishedAt: st.finishedAt,
     };

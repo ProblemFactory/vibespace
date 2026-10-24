@@ -135,11 +135,16 @@ export function defaultDecode(bytes, mime) {
  *   on.fixed(size|null)        {wid, w, h} (device px) — the app FIXED this window's size (min = max); null = no such window
  *   on.front(win|null)         the FRONT window (the topmost non-popup by z) — on a new window, a raise, a loss, its title
  *   on.slot(wid, rect|null)    S2 (`slots` on): a secondary top-level's slot of the root (device px) — gained, moved, lost
+ * admit(win, {admitted})       lane browser-x-in-window (B2): a client that draws ONE window of a SHARED display (an agent
+ *                              browser's live view: its conversation's Chrome window, that window's dialogs and menus) answers
+ *                              per announced top-level `{wid, kind, meta, x, y, w, h, transientFor}`; a refused one is never
+ *                              drawn, mapped, focused or elected main — its draws are acked unpainted, its metadata dropped
  * Returns the session handle (see the tail).
  */
-export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, cover = false, slots = false, pin = null, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, imeGapMs = IME_GAP_MS, mac = false, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS, refreshDelaysMs = REFRESH_DELAYS_MS } = {}) {
+export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, cover = false, slots = false, pin = null, admit = null, layout = 'us', uuid = null, on = {}, Worker: WorkerCtor = (typeof Worker !== 'undefined' ? Worker : null), decode = defaultDecode, now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()), log = null, helloTimeoutMs = HELLO_TIMEOUT_MS, pasteKeyDelayMs = PASTE_KEY_DELAY_MS, imeGapMs = IME_GAP_MS, mac = false, beltGapMs = BELT_GAP_MS, beltFightMs = BELT_FIGHT_MS, beltMaxFights = BELT_MAX_FIGHTS, refreshDelaysMs = REFRESH_DELAYS_MS } = {}) {
   const emit = (name, ...args) => { try { on[name]?.(...args); } catch (e) { log?.warn?.(`[xpra] on.${name} threw: ${e && e.message}`); } };
   const windows = new Map();
+  const refused = new Set(); // lane browser-x-in-window: the top-levels `admit` refused (another conversation's window) — wid
   // lane xpra-title-election: facts (a fresh title, metadata) that reach us for a window NOT in `windows` yet — a
   // reused wid re-announced under load while its new-window is still in flight — are kept here (bounded, keyed by
   // wid) and merged by newWindow BEFORE its first emit, so a title update is never lost at window-metadata's `if
@@ -369,6 +374,11 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     const held = pending.get(wid); // lane xpra-title-election: facts that reached us before this record existed
     if (held) { pending.delete(wid); Object.assign(meta, held); } // the later facts (a fresh title / type) win over the new-window snapshot
     const kind = P.windowKind(meta, overrideRedirect);
+    if (typeof admit === 'function') { // lane browser-x-in-window: ONE window of a shared display — another's is never drawn
+      let ok = false; try { ok = !!admit({ wid, kind, meta, x: p[2], y: p[3], w: p[4], h: p[5], transientFor: Number(meta['transient-for']) || 0 }, { admitted: (id) => windows.has(id), geometry: (id) => { const w = windows.get(id); return w ? { x: w.x, y: w.y, w: w.w, h: w.h } : null; } }); } catch { ok = false; }
+      if (!ok) { refused.add(wid); return; }
+      refused.delete(wid);
+    }
     let g = { x: p[2], y: p[3], w: Math.max(1, p[4]), h: Math.max(1, p[5]) };
     const isMain = kind === 'main' && !(mainWid && windows.has(mainWid));
     const win = { wid, ...g, meta, kind, title: winTitle(meta), z: ++zTop, mapped: !overrideRedirect, q: Promise.resolve(), premap: isMain && !watch };
@@ -396,6 +406,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
     if (!overrideRedirect) { send(P.mapWindow(wid, g)); focusWindow(wid); }
   };
   const lostWindow = (wid) => {
+    refused.delete(wid); // lane browser-x-in-window
     const win = windows.get(wid);
     if (!win) return;
     windows.delete(wid);
@@ -442,6 +453,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
   const draw = (p) => {
     const d = P.parseDraw(p);
     const win = windows.get(d.wid);
+    if (!win && refused.has(d.wid)) { send(P.damageAck(d.seq, d.wid, d.w, d.h, 0, '')); return; } // lane browser-x-in-window: another conversation's window — acked, never painted (xpra keeps its pace)
     if (!win) { send(P.damageAck(d.seq, d.wid, d.w, d.h, -1, 'no such window')); return; }
     win.q = win.q.then(async () => {
       const t0 = now();
@@ -512,6 +524,7 @@ export function createXpraClient({ url, workerUrl, screen, dpi = 96, ratio = 1, 
       case 'window-metadata': {
         const win = windows.get(p[1]);
         const meta = p[2] && typeof p[2] === 'object' ? p[2] : {};
+        if (!win && refused.has(p[1])) return; // lane browser-x-in-window: a refused window's facts are nobody's here
         if (!win) { // lane xpra-title-election: a fact for a window not yet (re)created — STASH it (bounded); newWindow merges it before its first emit, so a title that raced ahead of new-window is never dropped
           const slot = pending.get(p[1]) || {};
           Object.assign(slot, meta);

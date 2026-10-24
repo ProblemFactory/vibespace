@@ -60,6 +60,19 @@
  *                  the landing's CSP blocks, so the person saw the mask instead of their own address.
  *   LANDING_WHY[why][lang] — every refusal in its own words (a restart, past the state's 30 minutes, past the flow's own
  *                  limit, cancelled, replaced by a newer sign-in, …); none of them is a catch-all for another.
+ *   lane lark-consent-chain (the owner 2026-10-23, on Lark's «另外 248 项权限»: 「不能一次性打开所有吗？」 — a vendor bounds ONE
+ *   consent page (Lark: 200 scopes, and an authorize URL its sign-in host answers 431 past ~3 KB), so «every permission» is
+ *   several pages; ONE press of the person walks all of them):
+ *   CHAIN_PAGES_MAX — the most pages one chain walks (more means the app enabled something absurd; the adapter says so).
+ *   chainOf(x) → {page, total} | null — a chain position: integers, 1 ≤ page ≤ total ≤ CHAIN_PAGES_MAX, total ≥ 2.
+ *   stateOf({…, chain}) carries it SIGNED (`c: [page, total]` in the clear part — the relay pages read only `u` and `k`
+ *                  and forward the whole state verbatim); stateVerdict answers it as `parts.chain` (malformed = bad-shape).
+ *   nextOf(x) → {url, page, total} | null — the NEXT page a landing sends its tab to (an http(s) authorize URL).
+ *   landingHtml(r) with `r.next` — page k landed and page k+1 is waiting: «page k/N granted — continuing…» for a second,
+ *                  then the SAME tab goes on to the next authorize URL (a meta refresh: no script, the route's CSP stands;
+ *                  a plain link if the browser holds it); the close script is never on it. With `r.chain` (this page's
+ *                  position, page ≥ 2) and a declined page: what the earlier pages granted STAYS — said so, never
+ *                  «nothing was connected».
  */
 
 const SM = require('./channels/slack-manifest.js');   // PURE → PURE: relayTargetVerdict — THE relay rule (docs/slack-relay/relay.js holds the same table)
@@ -75,6 +88,22 @@ const KIND_RE = /^[a-z][a-z0-9-]{1,19}$/;
 const STATE_MAX = 1200;
 const STATE_TTL_MS = 30 * 60e3;
 const URL_MAX = 300;
+/** lane lark-consent-chain: the most consent pages ONE press walks. */
+const CHAIN_PAGES_MAX = 5;
+const NEXT_URL_MAX = 4096;
+const chainInt = (n) => (Number.isInteger(n) && n >= 1 && n <= CHAIN_PAGES_MAX ? n : null);
+/** A chain position `{page, total}` (1 ≤ page ≤ total ≤ CHAIN_PAGES_MAX, total ≥ 2), or null. */
+function chainOf(x) {
+  if (!x || typeof x !== 'object') return null;
+  const page = chainInt(x.page), total = chainInt(x.total);
+  return page && total && total >= 2 && page <= total ? { page, total } : null;
+}
+/** The next page a landing sends its tab to — `{url, page, total}` (an http(s) URL, page ≥ 2), or null. */
+function nextOf(x) {
+  const c = chainOf(x);
+  if (!c || c.page < 2 || typeof x.url !== 'string' || x.url.length > NEXT_URL_MAX || !/^https?:\/\/[^\s"'<>]+$/.test(x.url)) return null;
+  return { url: x.url, page: c.page, total: c.total };
+}
 
 /** A bare `http(s)://host[:port]` origin, canonical, or null. */
 function originOf(o) {
@@ -162,11 +191,13 @@ function consentRoad({ kind, publicUrl = '', origin = null, road = null, relayUr
 }
 
 const b64u = (s) => Buffer.from(String(s), 'utf8').toString('base64url');
-/** The signed state of a route consent. `origin` = the instance address the browser comes back to (the relay page's `u`). */
-function stateOf({ origin = '', flowId, issuedAt, kind }, sign) {
+/** The signed state of a route consent. `origin` = the instance address the browser comes back to (the relay page's `u`);
+ *  lane lark-consent-chain: `chain` = this page's place in a chain (`c`, signed with the rest). */
+function stateOf({ origin = '', flowId, issuedAt, kind, chain = null }, sign) {
   if (typeof sign !== 'function') throw new Error('consent-road: stateOf needs the instance\'s signer');
   if (typeof kind !== 'string' || !KIND_RE.test(kind)) throw new Error(`consent-road: a bad kind ${JSON.stringify(kind)}`);
-  const clear = `v1.${b64u(JSON.stringify({ u: originOf(origin) || '', f: String(flowId), t: Math.floor(Number(issuedAt) / 1000), k: kind }))}`;
+  const c = chainOf(chain);
+  const clear = `v1.${b64u(JSON.stringify({ u: originOf(origin) || '', f: String(flowId), t: Math.floor(Number(issuedAt) / 1000), k: kind, ...(c ? { c: [c.page, c.total] } : {}) }))}`;
   return `${clear}.${sign(clear)}`;
 }
 /** Equal text, compared over the whole length (no early exit on the first differing character). */
@@ -176,18 +207,21 @@ function sameText(a, b) {
   for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return d === 0;
 }
-/** `{ok, why: bad-shape | bad-hmac | wrong-kind | expired, parts: {flowId, origin}}` — the shape, THIS boot's HMAC, the
- *  kind, the age. The clear part is PEER-WRITTEN once it has left: bounded, parsed, every key checked. */
+/** `{ok, why: bad-shape | bad-hmac | wrong-kind | expired, parts: {flowId, origin, chain}}` — the shape, THIS boot's HMAC,
+ *  the kind, the age. The clear part is PEER-WRITTEN once it has left: bounded, parsed, every key checked (lane
+ *  lark-consent-chain: `c`, when present, is a chain position or the state is bad-shape). */
 function stateVerdict(s, { sign, now = Date.now(), ttlMs = STATE_TTL_MS, kind } = {}) {
   const m = typeof s === 'string' && s.length <= STATE_MAX ? /^v1\.([A-Za-z0-9_-]{8,800})\.([A-Za-z0-9_-]{16,128})$/.exec(s) : null;
   if (!m) return { ok: false, why: 'bad-shape', parts: null };
   let j = null;
   try { j = JSON.parse(Buffer.from(m[1], 'base64url').toString('utf8')); } catch { j = null; }
   if (!j || typeof j !== 'object' || Array.isArray(j) || typeof j.f !== 'string' || !/^[a-f0-9]{8,64}$/.test(j.f) || !Number.isInteger(j.t) || j.t <= 0 || typeof j.u !== 'string') return { ok: false, why: 'bad-shape', parts: null };
+  const chain = j.c === undefined ? null : (Array.isArray(j.c) && j.c.length === 2 ? chainOf({ page: j.c[0], total: j.c[1] }) : null);
+  if (j.c !== undefined && !chain) return { ok: false, why: 'bad-shape', parts: null };
   if (typeof sign !== 'function' || !sameText(String(sign(`v1.${m[1]}`)), m[2])) return { ok: false, why: 'bad-hmac', parts: null };
   if (j.k !== kind) return { ok: false, why: 'wrong-kind', parts: null };
   if (!(now - j.t * 1000 <= ttlMs) || j.t * 1000 - now > 60e3) return { ok: false, why: 'expired', parts: null };
-  return { ok: true, why: null, parts: { flowId: j.f, origin: j.u || null } };
+  return { ok: true, why: null, parts: { flowId: j.f, origin: j.u || null, chain } };
 }
 
 /** lane oauth-landing-words: the landing's languages — the app's own three (src/lib/i18n.js), in its order. */
@@ -229,6 +263,11 @@ const LANDING = Object.freeze({
   denied: Object.freeze({ en: 'VibeSpace: the {name} sign-in was declined — nothing was connected. Close this tab and try again in VibeSpace.', zh: 'VibeSpace：{name} 登录被拒绝——什么也没连接。关掉这个标签页，回到 VibeSpace 再试一次。', ja: 'VibeSpace：{name} のサインインは拒否されました — 何も接続していません。このタブを閉じて、VibeSpace でもう一度お試しください。' }),
   'too-many': Object.freeze({ en: 'Too many sign-in pages were opened from this address in the last minute. Wait a minute, then reload this page — the sign-in is still waiting.', zh: '这个地址在一分钟内打开了太多登录页面。请等一分钟后刷新本页——登录仍在等待。', ja: 'このアドレスから直近 1 分間に開かれたサインインページが多すぎます。1 分待ってからこのページを再読み込みしてください — サインインはまだ待機中です。' }),
   failed: Object.freeze({ en: 'VibeSpace: this {name} sign-in did not finish. {why}', zh: 'VibeSpace：这次 {name} 登录没有完成。{why}', ja: 'VibeSpace：この {name} サインインは完了しませんでした。{why}' }),
+  // lane lark-consent-chain: a page of a chain landed and the next one is waiting (`{page}` = the one just granted)
+  chain: Object.freeze({ en: 'VibeSpace: page {page}/{total} of the {name} permissions granted{user}. Page {next}/{total} comes next — continuing…', zh: 'VibeSpace：{name} 第 {page}/{total} 页权限已授予{user}。接下来是第 {next}/{total} 页——继续…', ja: 'VibeSpace：{name} の権限 {page}/{total} ページ目を許可しました{user}。次は {next}/{total} ページ目です — 続けます…' }),
+  'chain-go': Object.freeze({ en: 'Continue to page {next}/{total}', zh: '继续第 {next}/{total} 页', ja: '{next}/{total} ページ目へ進む' }),
+  // …and a later page the person declined: the earlier pages' grants stay (Lark's grants accumulate)
+  'chain-stopped': Object.freeze({ en: 'VibeSpace: page {page}/{total} of the {name} permissions was not granted. What you granted on the earlier pages stays — press Re-authorize in VibeSpace any time to add the rest.', zh: 'VibeSpace：{name} 第 {page}/{total} 页权限没有授予。前面各页已授予的权限都保留着——以后随时在 VibeSpace 里按「重新授权」补上其余的。', ja: 'VibeSpace：{name} の権限 {page}/{total} ページ目は許可されませんでした。それまでのページで許可した権限はそのまま残ります — 残りはいつでも VibeSpace で「再認可」を押して追加できます。' }),
 });
 /** What happened, per verdict — the state's (stateVerdict: bad-shape | bad-hmac | wrong-kind | expired), the engine's
  *  (wrong-flow), the flow's (oauth-loopback finishByState: used | timed-out | superseded | cancelled | over-limit |
@@ -250,17 +289,22 @@ const LANDING_WHY = Object.freeze({
   refused: Object.freeze({ en: 'VibeSpace refused it — start it again in VibeSpace.', zh: 'VibeSpace 没有接受它——请回到 VibeSpace 重新开始。', ja: 'VibeSpace が受け付けませんでした — VibeSpace でもう一度始めてください。' }),
 });
 /** `r` = the engine's landing answer `{ok, why, user, error}`; `lang` = landingLang of the request (one paragraph, the
- *  page's own `lang`). Every piece escaped (the address through landingUser); the code and the state never appear. */
+ *  page's own `lang`). Every piece escaped (the address through landingUser); the code and the state never appear.
+ *  lane lark-consent-chain: `r.next` (nextOf) on a landed page = the chain goes on — the sentence, then the same tab to
+ *  the next authorize URL; `r.chain` (chainOf, page ≥ 2) on a declined page = the earlier pages' grants stay. */
 function landingHtml(r = {}, { name = 'the account', lang = 'en' } = {}) {
   const x = r && typeof r === 'object' ? r : {};
   const l = LANGS.includes(lang) ? lang : 'en';
-  const kind = x.ok ? 'ok' : x.why === 'denied' ? 'denied' : x.why === 'too-many' ? 'too-many' : 'failed';
+  const next = x.ok ? nextOf(x.next) : null, here = chainOf(x.chain);
+  const kind = next ? 'chain' : x.ok ? 'ok' : x.why === 'denied' ? (here && here.page >= 2 ? 'chain-stopped' : 'denied') : x.why === 'too-many' ? 'too-many' : 'failed';
   const user = x.ok && typeof x.user === 'string' && x.user ? ` (${landingUser(x.user)})` : '';
   const nm = escHtml(String(name || 'the account').slice(0, 40));
   const why = (Object.prototype.hasOwnProperty.call(LANDING_WHY, x.why) ? LANDING_WHY[x.why] : LANDING_WHY.refused)[l];
   // the words are escaped as text FIRST, then the escaped pieces go in (the address is already HTML: landingUser)
-  const fill = (t) => escHtml(t).replace('{why}', () => escHtml(why)).split('{name}').join(nm).replace('{user}', () => user);
-  return `<!doctype html><html lang="${l}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="referrer" content="no-referrer"><title>VibeSpace · ${nm}</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em}</style></head><body data-landing="${kind}"><p>${fill(LANDING[kind][l])}</p>${kind === 'ok' ? `<script>${CLOSE_SCRIPT}</script>` : ''}</body></html>`;
+  const pos = next ? { page: next.page - 1, next: next.page, total: next.total } : here ? { page: here.page, next: here.page, total: here.total } : null;
+  const fill = (t) => { let s = escHtml(t).replace('{why}', () => escHtml(why)).split('{name}').join(nm).replace('{user}', () => user); if (pos) s = s.replace('{page}', String(pos.page)).replace('{next}', String(pos.next)).split('{total}').join(String(pos.total)); return s; };
+  const go = next ? escHtml(next.url) : '';
+  return `<!doctype html><html lang="${l}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="referrer" content="no-referrer">${next ? `<meta http-equiv="refresh" content="1;url=${go}">` : ''}<title>VibeSpace · ${nm}</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:36em;margin:3em auto;padding:0 1em}</style></head><body data-landing="${kind}"${next ? ` data-chain="${next.page}/${next.total}"` : ''}><p>${fill(LANDING[kind][l])}</p>${next ? `<p><a href="${go}" rel="noreferrer">${fill(LANDING['chain-go'][l])}</a></p>` : ''}${kind === 'ok' ? `<script>${CLOSE_SCRIPT}</script>` : ''}</body></html>`;
 }
 
-module.exports = { CALLBACK_BASE, RELAY_DEFAULT, ROADS, WHYS, CLIENT_TYPES, KIND_RE, STATE_MAX, STATE_TTL_MS, CLOSE_SCRIPT, LANDING, LANDING_WHY, LANGS, originOf, loopbackHost, loopbackOrigin, httpsBaseOf, relayPageOf, relayPick, relayOf, consentRoad, stateOf, stateVerdict, landingLang, landingUser, landingHtml };
+module.exports = { CALLBACK_BASE, RELAY_DEFAULT, ROADS, WHYS, CLIENT_TYPES, KIND_RE, STATE_MAX, STATE_TTL_MS, CLOSE_SCRIPT, LANDING, LANDING_WHY, LANGS, CHAIN_PAGES_MAX, originOf, loopbackHost, loopbackOrigin, httpsBaseOf, relayPageOf, relayPick, relayOf, consentRoad, stateOf, stateVerdict, landingLang, landingUser, landingHtml, chainOf, nextOf };

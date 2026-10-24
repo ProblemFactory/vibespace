@@ -5581,7 +5581,7 @@ button.am-cap { cursor: pointer; }
 .chan-sec-head:hover { background: var(--bg-hover); }
 .chan-sec-chev { font-size: 10px; color: var(--text-dim); transition: transform var(--transition); }
 .chan-sec.chan-collapsed .chan-sec-chev { transform: rotate(-90deg); }
-.chan-sec.chan-collapsed .chan-rows, .chan-sec.chan-collapsed .chan-sec-note, .chan-sec.chan-collapsed .chan-sec-empty, .chan-sec.chan-collapsed .chan-sec-health, .chan-sec.chan-collapsed .mounts-errline { display: none; }
+.chan-sec.chan-collapsed .chan-rows, .chan-sec.chan-collapsed .chan-sec-note, .chan-sec.chan-collapsed .chan-sec-empty, .chan-sec.chan-collapsed .chan-sec-health, .chan-sec.chan-collapsed .mounts-errline, .chan-sec.chan-collapsed .chan-sec-details { display: none; }
 /* lane channels-fold-default: a FOLDED section's head says what is inside — what needs the person (the accent), the
    unread, a dot — on one line that gives way before the buttons do */
 .chan-sec-fold { display: none; }
@@ -5671,6 +5671,13 @@ button.am-cap { cursor: pointer; }
 .chan-sec-note > span:not(.chan-ic) { flex: 1 1 120px; min-width: 0; overflow-wrap: anywhere; }
 .chan-sec-note .chan-ic { font-size: 11px; flex: 0 0 auto; }
 .chan-sec-verb { font-size: 10px; padding: 1px 7px; flex-shrink: 0; }
+/* lane channel-row-notices: the account's ⓘ (beside the health line / a standing state's line) and the fold it opens —
+   lines that only inform, a hair dimmer and indented under the row's words */
+.chan-sec-info { width: 18px; height: 18px; padding: 0; flex-shrink: 0; color: var(--text-dim); }
+.chan-sec-info[aria-expanded="true"] { color: var(--accent); }
+.chan-sec-details { margin: 0 6px 4px 14px; padding: 2px 0 0 6px; border-left: 2px solid var(--border); }
+.chan-sec-details[hidden] { display: none; }
+.chan-sec-details .chan-sec-note { padding-left: 2px; }
 .chan-sec-empty { padding: 2px 8px 4px !important; text-align: left; }
 .chan-rows { padding-left: 6px; }
 .chan-row { padding: 5px 8px; margin: 2px 0; border-radius: var(--radius-sm); border: 1px solid var(--border); cursor: pointer; transition: all var(--transition); position: relative; overflow: hidden; }
@@ -6645,6 +6652,7 @@ label.chan-cap-row { cursor: default; }
   .chanmsg > .chanmsg-av { --av-size: 32px; }
   a.chanmsg-file { min-height: 44px; }
   .chan-find-input, .chan-find .mounts-btn, .chan-view-seg .chan-view-btn, .chan-sec-verb, .chan-connect-btn, .chan-more-btn { min-height: 36px; }
+  .chan-sec-info { width: 36px; height: 36px; }   /* lane channel-row-notices: the ⓘ at the touch size */
   .chan-find .chan-attn-door { width: 36px; }   /* lane chan-attn-door-icon: the cog's square at the touch size */
   .chan-sec-edit, .chan-window .mounts-icon-btn { min-width: 36px; min-height: 36px; }
   /* the principal picker on a phone: every row, chip, the box and the trigger ≥ 36 px */
@@ -6771,6 +6779,9 @@ label.chan-cap-row { cursor: default; }
 .browser-live-viewers { color: var(--text-dim); white-space: nowrap; }
 .browser-live-body { display: flex; flex: 1; min-height: 0; }
 .browser-live-canvas { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+/* lane browser-x-in-window (B2): the X picture (the desktop app window's xpra view) takes the screencast canvas's place — SIZED BY THE PANE, never by its window (a pane that grew with the window it sizes ran away: 1050×980 → 2033×2284) */
+.browser-live-xpicture { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; }
+.browser-live.driving .browser-live-xpicture { outline: 2px solid var(--yellow, #e5c07b); outline-offset: -2px; }
 .browser-live-img { width: 100%; height: 100%; object-fit: contain; object-position: 50% 0; display: block; user-select: none; } /* lane J r2: TOP-aligned — the spare pixels sit below the page, never a band above and below (browser-stream.js LIVE_ALIGN: every conversion reads the same word) */
 .browser-live-status { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 12px; color: var(--text-secondary); background: var(--bg-dialog); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 12px; max-width: 80%; text-align: center; }
 .browser-live-status.error { color: var(--red, #e55); border-color: var(--red, #e55); }
@@ -7024,6 +7035,17 @@ label.chan-cap-row { cursor: default; }
 .chat-channel-touch:hover .cct-name { color: var(--accent); }
 .chat-channel-touch .cct-words { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-channel-touch .cct-time { flex-shrink: 0; font-variant-numeric: tabular-nums; }
+/* lane chat-proposal-card: the proposal a call filed — a chip on its conversation's row (its state, in words; the
+   state colour = the card's pill), and the Outbox's own card in ONE box after the rows (a decided one is its line) */
+.chat-channel-touch.has-prop { flex-wrap: wrap; row-gap: 2px; }
+.chat-channel-touch .cct-prop { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 600; line-height: 1.5; padding: 0 7px; border-radius: 999px; color: var(--text-secondary); background: color-mix(in srgb, var(--text) 8%, transparent); }
+.chat-channel-touch .cct-prop[data-state="awaiting-approval"], .chat-channel-touch .cct-prop[data-state="proposed"], .chat-channel-touch .cct-prop[data-state="sending"] { color: var(--attn-text); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.chat-channel-touch .cct-prop[data-state="sent"] { color: var(--ok-text); background: color-mix(in srgb, var(--green, #3fb950) 13%, transparent); }
+.chat-channel-touch .cct-prop[data-state="failed"] { color: var(--bad-text); background: color-mix(in srgb, var(--red, #e55) 12%, transparent); }
+.chat-channel-touch .cct-prop[data-state="unknown"], .chat-channel-touch .cct-prop[data-state="partly"] { color: var(--warn-text); background: color-mix(in srgb, var(--yellow, #e5c07b) 15%, transparent); }
+.chat-chan-props { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; min-width: 0; }
+.chat-chan-props[hidden] { display: none; }
+.chat-chan-props > .chan-prop { min-width: 0; box-sizing: border-box; background: color-mix(in srgb, var(--text) 3%, transparent); } /* the API card's ground (.chan-api-card) */
 .chat-channel-touches-more { align-self: flex-start; padding: 0 8px; font: inherit; font-size: 11px; background: transparent; border: none; cursor: pointer; }
 .chat-channel-touches-more:hover { color: var(--accent); }
 .browser-trace-row { display: flex; flex-direction: column; gap: 3px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
@@ -7144,6 +7166,25 @@ label.chan-cap-row { cursor: default; }
 .bprof-row.bprof-kept { grid-template-columns: minmax(180px, 1.6fr) minmax(70px, .5fr) 90px minmax(140px, 1.2fr) auto auto; } /* lane browser-resume (§3.9): the kept conversation browsers (B: Resume | its hint, then Forget) */
 .bprof-kept-live { font-size: 11px; }
 .bprof-kept-resume-hint { font-size: 11px; } /* lane browser-resume B: a stopped conversation's kept row says how to reopen it (no dead Resume) */
+/* lane browser-takeover-queue: «Waiting for you» — the takeover requests ABOVE Profiles (one keyed row each: conversation ·
+   browser · since · the agent's words · the page · Take over / Done / Reply, or Hand back while you drive) */
+.btq-list { display: flex; flex-direction: column; gap: 6px; }
+.btq-row { display: flex; flex-direction: column; gap: 3px; padding: 7px 8px; border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.btq-row.btq-taken { border-left-color: var(--text-secondary); background: transparent; }
+.btq-row.btq-gone { opacity: .7; }
+.btq-top { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.btq-conv { all: unset; cursor: pointer; font-weight: 600; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.btq-conv:hover, .btq-conv:focus-visible { text-decoration: underline; }
+.btq-profile { font-size: 11px; }
+.btq-state { font-size: 11px; margin-left: auto; white-space: nowrap; }
+.btq-words { color: var(--text); overflow-wrap: anywhere; }
+.btq-page { font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btq-acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
+.file-tool-btn.bprof-btn.btq-primary { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.btq-note { font-size: 11px; }
+@media (max-width: 768px) { .btq-state { margin-left: 0; white-space: normal; } .file-tool-btn.bprof-btn.btq-act { min-height: 36px; padding: 0 14px; } .btq-page { white-space: normal; overflow-wrap: anywhere; } }
+/* lane browser-takeover-queue: the live view's line while its takeover request is open — «The agent asks you: …» */
+.browser-live-ask-line { padding: 3px 8px; flex-shrink: 0; font-size: 12px; line-height: 1.4; color: var(--text); background: color-mix(in srgb, var(--accent) 14%, transparent); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 .bprof-row.focus { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 /* design 015 §2b (lane browser-panel-tidy): THE PROFILE TABLE — ONE template; the column titles and every row are
    SUBGRIDS of it, so a cell's left edge is the table's track, never a per-row result. The four sized tracks' minimums

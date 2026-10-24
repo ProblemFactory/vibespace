@@ -145,6 +145,39 @@ ch.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'R4' }); await sleep(40);
 ok(w.factFor({ ...tgt, consume: false }).prompt.type === 'http-auth', 'one prompt per tab: the newer one is said');
 w.shutdown(); await ch.close();
 
+// ═══ ③x lane browser-x-in-window (B2): THE X ROAD — Chrome's OWN sheet, in the window the live view now shows ═══
+// MEASURED (Chrome 154, tools/probe-auth2.sh of the lane): answered `Default`, Chrome commits chrome-error://chromewebdata/ and
+// draws its sheet over it; a typed answer is a NEW navigation (the page commits — signed in — or Cancel commits the 401's body);
+// a wrong password raises authRequired again
+console.log('③x the X road: the sign-in is Chrome\'s own sheet');
+{
+  const chx = await fakeChrome().listen();
+  let road = 'x';
+  const wx = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: chx.url }), pictureSourceFor: () => ({ source: road, why: road === 'x' ? 'attach' : 'driver' }) }, log, forYou: { add: () => 'todo-x', resolve() { } }, promptAskMs: 5000, authHoldMaxMs: 400 });
+  const NX = 'bp-a0000003', KX = 'bk-0000d1a2';
+  const tx = { profileId: NX, browserKey: KX };
+  await wx.arm(NX); await sleep(80);
+  const cwaX = () => chx.calls.filter((m) => m.method === 'Fetch.continueWithAuth');
+  chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X1' }); await sleep(40);
+  let fx = wx.factFor({ ...tx, consume: false });
+  ok(cwaX().length === 1 && cwaX()[0].params.requestId === 'X1' && cwaX()[0].params.authChallengeResponse.response === 'Default', 'X road: the sign-in is answered `Default` AT ONCE — Chrome draws its own sheet (the request is never held for a form of ours)', cwaX());
+  ok(fx.prompt && fx.prompt.native === true && fx.prompt.title === 'Sign in' && /^Chrome's own sign-in sheet \("Sign in"/.test(fx.prompt.text), "…and it STANDS as Chrome's native sheet, said by its title", fx.prompt);
+  ok((await wx.answerPrompt(tx, { username: 'ann', password: PW })).code === 'native_sheet' && cwaX().length === 1, '…the live view\'s form cannot answer it (no credential ever passes through VibeSpace on this road)');
+  chx.emit('Page.frameNavigated', { frame: { id: 'T1', url: 'chrome-error://chromewebdata/' } }); await sleep(30);
+  ok(wx.factFor({ ...tx, consume: false }).prompt && wx.factFor({ ...tx, consume: false }).prompt.native, 'the chrome-error://chromewebdata/ commit UNDER the sheet leaves it standing (measured: the sheet shows over it)');
+  chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X2' }); await sleep(40);
+  ok(cwaX().some((m) => m.params.requestId === 'X2' && m.params.authChallengeResponse.response === 'Default') && wx.factFor({ ...tx, consume: false }).prompt.native, 'a wrong password (authRequired again) ⇒ Default again, the sheet stands');
+  chx.emit('Page.frameNavigated', { frame: { id: 'T1', url: 'http://127.0.0.1:9/' } }); await sleep(30);
+  fx = wx.factFor({ ...tx, consume: true });
+  ok(fx.prompt === null && fx.notes.length === 1 && /closed in its window/.test(fx.notes[0]), 'a commit of the page itself (signed in, or the 401 body after Cancel) ⇒ the sheet is gone, told ONCE', fx.notes);
+  chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X3' }); await sleep(450);
+  ok(wx.factFor({ ...tx, consume: false }).prompt === null && !cwaX().some((m) => m.params.requestId === 'X3' && m.params.authChallengeResponse.response === 'CancelAuth'), 'past the hold clock a native sheet is FORGOTTEN, never cancelled by the watch (it is Chrome\'s)');
+  road = 'screencast';
+  chx.emit('Fetch.authRequired', { ...AUTH_P, requestId: 'X4' }); await sleep(40);
+  ok(!cwaX().some((m) => m.params.requestId === 'X4') && wx.factFor({ ...tx, consume: false }).prompt && !wx.factFor({ ...tx, consume: false }).prompt.native, 'CONTROL: the SCREENCAST road holds the sign-in for the live view\'s form exactly as before (no Default)');
+  wx.shutdown(); await chx.close();
+}
+
 // ═══ ④ the credential census ═══
 console.log('④ the typed password reaches Chrome and nothing else');
 const surfaces = { lines, events, forYou: fy, facts: w.factFor({ ...tgt, consume: false }), ans };

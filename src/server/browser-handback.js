@@ -76,6 +76,7 @@
  * `vibespace-window`, and nothing queued there acts on a page.
  */
 const T = require('../browser-takeover.js');
+const TQ = require('../browser-takeover-request.js'); // lane browser-takeover-queue: the request record — its For-you item and its words
 const INT = require('../browser-interrupt.js'); // lane browser-admin 2a: the relaunch's words (Change build…)
 const { addressableId } = require('../claude-lock-capture.js');   // verify r6 (lane channel-withdraw): the ONE own-id predicate
 const VERBS = require('../browser-verbs.js'); // the CLI's own verb table: a pending `vibespace-browser status` is never stale, `click` is
@@ -151,7 +152,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
       log.log?.(`[browser] handback (${cause}) for ${sess.id}: not delivered — ${verdict.why}${out.noticed ? '; the notice rides the next message' : ''}${out.inbox ? '; one inbox item filed' : ''}`);
       return out;
     }
-    const text = T.handbackText(args);
+    const text = T.handbackText(args) + (ev.request && ev.request.state === 'done' ? ' ' + TQ.handbackLine(ev.request) : ''); // lane browser-takeover-queue: the request this handback answers, said in the same delivery
     const cid = conversationIdOf(sess.s);
     if (!cid || !deliver || typeof deliver.deliverToConversation !== 'function') {
       out.noticed = queueNotice(sess, T.handbackNotice({ ...args, at: Date.now() }));
@@ -421,9 +422,75 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     });
     return true;
   }
+
+  // ── lane browser-takeover-queue: THE REQUEST'S FOR-YOU ITEM (ONE record: the item IS the request) ──
+  // The keeper writes the record; this module files its ONE item (urgent ⇒ band 1; parked ⇒ band 4), resolves it when the
+  // request ends, and answers the item's doors: a dismissal PARKS the request (still listed — never resolved by it alone), a
+  // reply reopens the item (the request still stands; the agent's wait is told), the ✓ is the person's Done. The person's
+  // Done without a takeover is TOLD to the agent through this module's ONE ladder site (a takeover's Done is the explicit
+  // handback — its delivery above names the request).
+  let unsubRequests = null, unsubStatus = null;
+  const isRequestItem = (it) => !!(it && it.action && it.action.type === TQ.ACTION_TYPE && TQ.ID_RE.test(String(it.action.requestId || '')));
+  function fileRequestItem(rec) {
+    const sess = sessionFor(rec.sessionId, rec.browserKey);
+    if (!sess || !userTodos || !sessionKeyFor) return null;
+    const key = sessionKeyFor(sess.s, sess.id);
+    if (!key) return null;
+    let it = null;
+    try { it = userTodos.add(key, { ...TQ.itemOf(rec), by: 'agent', origin: 'browser', sessionName: sess.s.name || sess.s.webuiName || null }); } catch (e) { log.warn?.(`[browser] takeover request ${rec.id}: its For-you item was not filed — ${e && e.message}`); return null; }
+    if (it && it.id && keeper && typeof keeper.noteRequestItem === 'function') keeper.noteRequestItem(rec.id, { itemId: it.id, conversationKey: key });
+    return it;
+  }
+  function resolveRequestItem(rec) {
+    if (!userTodos || !rec || !rec.itemId) return false;
+    const it = typeof userTodos.get === 'function' ? userTodos.get(rec.itemId) : null;
+    if (!it || it.status !== 'open') return false;
+    try { userTodos.setStatus(rec.itemId, 'done', TQ.resolvedByOf(rec)); return true; } catch (e) { log.warn?.(`[browser] takeover request ${rec.id}: its For-you item was not resolved — ${e && e.message}`); return false; }
+  }
+  /** The person's Done WITHOUT a takeover reaches the agent ONCE (a wake: they pressed it; the stash when refused). */
+  async function tellDone(rec) {
+    const sess = sessionFor(rec.sessionId, rec.browserKey);
+    const text = TQ.doneText(rec);
+    const cid = sess ? conversationIdOf(sess.s) : null;
+    if (!sess || !cid || !deliver || typeof deliver.deliverToConversation !== 'function') { if (sess) queueNotice(sess, { kind: 'browser-handback', cause: 'explicit', text, at: Date.now() }); return { told: sess ? 'noticed' : 'failed' }; }
+    let r = null;
+    try { r = await viaLadder(cid, text); } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
+    if (r && r.ok) return { told: 'delivered' };
+    try { if (typeof deliver.stashFor === 'function') { deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, text }); return { told: 'stashed' }; } } catch (e) { log.warn?.(`[browser] takeover request ${rec.id}: the Done was not stashed — ${e && e.message}`); }
+    return { told: queueNotice(sess, { kind: 'browser-handback', cause: 'explicit', text, at: Date.now() }) ? 'noticed' : 'failed' };
+  }
+  function onRequest(ev) {
+    const rec = ev && ev.request;
+    if (!rec || !rec.id) return;
+    if (ev.kind === 'asked' || ev.kind === 'reasserted' || ev.kind === 'parked') { fileRequestItem(rec); return; }
+    if (rec.state === 'done' || rec.state === 'withdrawn') {
+      resolveRequestItem(rec);
+      if (rec.how === 'done') tellDone(rec).then((o) => log.log?.(`[browser] takeover request ${rec.id}: marked done by the person — the agent ${o.told === 'delivered' ? 'is told now' : o.told === 'stashed' ? 'is told with its next turn' : o.told === 'noticed' ? 'reads it at its next turn' : 'could not be told'}`)).catch(() => { });
+    }
+  }
+  /** The item left 'open' by one of ITS doors while the request still stands: a reply reopens it (and wakes the agent's
+   *  wait); a dismissal / a batch «Mark all seen» parks the request (band 4, still listed); the ✓ is the person's Done. */
+  function onItemStatus(it, { status, by, batch } = {}) {
+    if (!isRequestItem(it) || status === 'open' || !keeper || typeof keeper.takeoverRequest !== 'function') return;
+    const rec = keeper.takeoverRequest(it.action.requestId);
+    if (!rec || !TQ.isOpen(rec)) return;
+    if (by === 'reply') { try { userTodos.setStatus(it.id, 'open', 'system'); } catch { /* gone */ } keeper.noteRequestItem(rec.id, { replied: true }); return; }
+    if (status === 'done' && by === 'user' && !batch) {
+      if (rec.state === 'taken' && keeper.inputStateFor(rec.browserKey, rec.profileId).input === 'user') { const r = keeper.handback({ browserKey: rec.browserKey, profileId: rec.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: rec.sessionId || null }); if (r && r.ok) return; }
+      keeper.resolveTakeoverRequest(rec.id, 'done');
+      return;
+    }
+    keeper.noteRequestItem(rec.id, { parked: true }); // the 'parked' event re-files it at band 4 (the same item, reopened)
+  }
+  function installRequests() {
+    if (keeper && !unsubRequests && typeof keeper.onTakeoverRequest === 'function') unsubRequests = keeper.onTakeoverRequest((ev) => { try { onRequest(ev); } catch (e) { log.warn?.(`[browser] takeover request item failed — ${e && e.message}`); } });
+    if (userTodos && !unsubStatus && typeof userTodos.onStatus === 'function') unsubStatus = userTodos.onStatus((it, o) => { try { onItemStatus(it, o); } catch (e) { log.warn?.(`[browser] takeover request item door failed — ${e && e.message}`); } });
+    return !!unsubRequests;
+  }
   /** Hang on the keeper's seams. Idempotent. */
   function install() {
     if (!keeper) return false;
+    installRequests(); // lane browser-takeover-queue
     if (!unsubInput && typeof keeper.onInput === 'function') unsubInput = keeper.onInput((ev) => {
       // BROWSE YOURSELF (B-6ae8, the owner 2026-09-28): the user's OWN browsing window taking / letting go of HIS tab is
       // nobody's takeover — no card, no notice, no delivery, no stale sweep, no inbox item (it is no conversation's)
@@ -446,9 +513,10 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     if (!unsubConfirm && typeof keeper.onConfirmation === 'function') unsubConfirm = keeper.onConfirmation((ev) => { try { noteConfirmation(ev); } catch (e) { log.warn?.(`[browser] confirmation inbox failed — ${e && e.message}`); } });
     return true;
   }
-  function shutdown() { try { unsubInput?.(); unsubConfirm?.(); unsubWindow?.(); unsubRelaunch?.(); } catch { /* */ } unsubInput = null; unsubConfirm = null; unsubWindow = null; unsubRelaunch = null; }
+  function shutdown() { try { unsubInput?.(); unsubConfirm?.(); unsubWindow?.(); unsubRelaunch?.(); unsubRequests?.(); unsubStatus?.(); } catch { /* */ } unsubInput = null; unsubConfirm = null; unsubWindow = null; unsubRelaunch = null; unsubRequests = null; unsubStatus = null; }
 
-  return { announce, announceTakeover, announceDriveEnded, announceRelaunch, tellProposal, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, continueFor, FROM_NAME };
+  return { announce, announceTakeover, announceDriveEnded, announceRelaunch, tellProposal, noteConfirmation, install, installWindow, shutdown, announceIdle, sweepStale, takenFor, continueFor, FROM_NAME,
+    installRequests, fileRequestItem, tellDone }; // lane browser-takeover-queue
 }
 
 module.exports = { create, FROM_NAME };

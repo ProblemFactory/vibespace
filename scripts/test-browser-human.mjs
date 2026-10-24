@@ -1305,6 +1305,9 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
       ['POST', '/api/browser/proposals/:id/approve', '/api/browser/proposals/bl-0000abcd/approve', { shown: 'pd-00000000' }],
       ['POST', '/api/browser/proposals/:id/reject', '/api/browser/proposals/bl-0000abcd/reject', {}],
       ['GET', '/api/browser/proposals/:id', '/api/browser/proposals/bl-0000abcd'],
+      // lane browser-takeover-queue: the person's queue — reading it and its Done are the user's (TAKEOVERS_ARE_USERS)
+      ['GET', '/api/browser/takeovers', '/api/browser/takeovers'],
+      ['POST', '/api/browser/takeovers/:id/done', '/api/browser/takeovers/tr-0000abcd/done', {}],
       // lane browser-admin 2a: which Chrome build a profile runs is the user's choice — Change build… (it restarts the browser
       // under HIS page too: refused `browsing_yourself` while he browses), and a create / adopt that names a build (BUILD_IS_USERS)
       ['POST', '/api/browser/profiles/:id/build', `/api/browser/profiles/${liveP.id}/build`, { choice: { kind: 'build', version: '151.0.7922.34' } }],
@@ -1421,6 +1424,7 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   const CONVERSATION = { ephEventFields: 1, ephemerals: 1, leasesFor: 1, leasesOn: 1, removeVerdict: 1, updateProfileNow: 1, knownKeysOf: 1, rejudgeLeases: 1, ceilingNow: 1, ownsLive: 1, ownLive: 1, ensureEphemeral: 2, retireEphemeral: 1,
     keepRebound: 1, takeRebound: 1, // verify r3 (F4): the rebound note rides the CONVERSATION's lease until an answer carries it (his row binds no tab of ours)
     attach: 7 /* lane browser-resume C: + the rebind's new tab as its lease's root; verify r2 F2: the queued rebind re-asks for ITS OWN lease after the wait (conversation-only) */, detach: 3, stop: 1, releaseAll: 1, browse: 1, endHuman: 1, quitHuman: 1, navigateHuman: 1, mirrorLeaseInput: 1, takeover: 1, siblingLeases: 1, noteLeaseUrl: 1, inputSummaryFor: 1, handBackOnStop: 1, statusFor: 3 /* + lane jobs-browser: a job's window is its conversation's helper row (the 2.369.202 integration) */, liveHoldingFor: 1, setFor: 1, driveHolderFacts: 1, noteDrive: 1, dropChild: 3, switcherView: 1, switchBackend: 1, reconcile: 3, boot: 1, tick: 1, ensureTimer: 1, api: 1,
+    requestLeaseHeld: 1, // lane browser-takeover-queue: does the conversation that asked still hold that browser (its own lease — his row is no request's)
     releaseJobHandle: 1, // lane jobs-browser (the 2.369.202 integration): a job's handle lets go of the leases IT holds — a job is a conversation's child, never his row
     rejudgeAll: 1, // the .197 integration: identity r4's Task Group re-judge asks "does a CONVERSATION lease this profile" (his row belongs to no Task Group)
     // lane browser-propose: a proposal's plan counts the OTHER conversations on the profile it would switch; the approved
@@ -1468,6 +1472,9 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
     // lane browser-tabs-by-window (the 2.369.240 integration): the tab groups' holder windows — a CONVERSATION lease's stamped
     // `windowId` while it is of this browser run (`windowIn`); his window is read off his own tab (`h.ownTab`) before this loop
     holderWindowsOf: 1,
+    // int349 (lane browser-x-in-window, B2): the X picture's CDP window — a CONVERSATION lease's own window found by its browser
+    // key (`l.windowId`); his key names no lease, so his window is read off his own tab (holderTabs) after it
+    holderWindowOf: 1,
     // lane browser-shared-profile-freeze: the scope road's url is minted only for a CONVERSATION lease that stands (an agent's
     // key — the user's own Browse-yourself key keeps the raw url, leaseRoadVerdict's `human` row)
     leaseUrlFor: 1,

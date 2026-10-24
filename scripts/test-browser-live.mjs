@@ -441,6 +441,15 @@ if (process.env.BROWSER_LIVE_ONLY === 'b1') { await legAttach(); done(); }
 
 // ═══ ① PURE ═══════════════════════════════════════════════════════════════
 console.log('— ① the PURE rules over the captured 0.32.0 shapes');
+// lane browser-x-in-window (design q-026 r1 §2.1 B2): THE PICTURE SOURCE — the attach road's record (the keeper's Chrome on its
+// own display session) is drawn as its own window; every other browser keeps THIS suite's screencast (the bar's two phrases)
+{
+  const PIC = require('../src/browser-picture.js');
+  const x = PIC.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'da-1', display: ':2' } });
+  const sc = PIC.pictureSourceOf({ launch: 'driver', state: 'ready', launchWhy: require('../src/browser-attach.js').HIDDEN_WINDOW_WHY });
+  ok(x.source === 'x' && x.words === "the browser's own window" && sc.source === 'screencast' && sc.words === "the page's picture — this machine has no display", `the source verdict: the attach road ⇒ "${x.words}", no display ⇒ "${sc.words}"`);
+  ok(['driver', 'remote', 'not-running', 'no-display-session'].every((why) => PIC.SOURCE_WORDS[why] && PIC.SOURCE_WORDS[why].startsWith("the page's picture")), 'every other road says it shows the page\'s picture (the screencast, as before)');
+}
 {
   const st = S.parseStreamStatus(FIX.cli['stream status --json'].json);
   ok(st.ok && st.enabled && st.port === FIX.cli['stream status --json'].json.data.port, `stream status → enabled with the port (${st.port})`);
@@ -962,6 +971,10 @@ else await (async () => {
   ok(drawn, 'frames are DRAWN (the <img> decoded the 1280×720 JPEG through the cookie-authed bridge)');
   const st = await q('return L.state()');
   ok(st.target && st.target.profileId === work.id && st.target.chosen === 'default' && st.mode === 'watch', 'the pane shows the DEFAULT (pinned) attachment, Watch mode', JSON.stringify(st).slice(0, 300));
+  // lane browser-x-in-window: THE SCREENCAST LEG UNCHANGED — this suite's fake driver (≤ 0.38.1) keeps the driver road, so the
+  // picture is the page's frames: no X view mounted, the screencast canvas shown, the badge's tooltip says which picture
+  const px = await q("return { x: L.x(), canvas: L.el().querySelector('.browser-live-canvas').style.display, xHost: L.el().querySelector('.browser-live-xpicture').style.display };");
+  ok(px && px.x && px.x.source && px.x.source.source === 'screencast' && !px.x.mounted && px.x.wid === null && px.canvas !== 'none' && px.xHost === 'none' && /the page's picture/.test(px.x.badgeTitle || ''), `the SCREENCAST stays this browser's picture (${px && px.x && px.x.source && px.x.source.why}): no X view, the canvas shown, the badge says "${px && px.x && px.x.words}"`, JSON.stringify(px));
   ok(st.url === 'https://example.com/first' && st.tabs.length === 1 && st.tabs[0].tabId === 't1', 'the URL line and the tab list are filled from the stream');
   ok(await q("return L.el().querySelector('.browser-live-url').textContent.includes('example.com/first') && L.el().querySelectorAll('.browser-live-tab').length === 1"), 'the URL pane and the tabs pane render them (text, escaped)');
   // MULTIVIEW §2 A1: the strip lists EVERY browser of the session — two attachments, its own, its helper's

@@ -69,6 +69,7 @@ const F = require('../browser-facts.js');
 const T = require('../browser-takeover.js');
 const BF = require('../browser-fact.js'); // lane S2: THE browser fact (one answer per conversation) + the delete's refuse-or-warn
 const M = require('../browser-mediation.js'); // P6: the per-session url + env of a MEDIATED lease
+const TQ = require('../browser-takeover-request.js'); // lane browser-takeover-queue: a request for a human is a RECORD (one per lease, written here)
 const INT = require('../browser-interrupt.js'); // the owner's ruling (2026-09-27): a takeover interrupts, tells, and the handback reminds
 const VERBS = require('../browser-verbs.js'); // takeover r3: the ONE config rule (sanctionedConfig)
 const BS = require('../browser-stuck.js'); // lane browser-unresponsive: THE hung-browser verdict (PURE) + its words
@@ -90,6 +91,7 @@ const TBS = require('../browser-tabs.js'); // lane browser-resume C (§3.9, ruli
 const AT = require('../browser-attach.js'); // lane one-browser-b1: THE ATTACH ROAD — the argv, the port file, the socket dir per config, the road (PURE)
 const ATL = require('./browser-attach-launch.js'); // lane one-browser-b1: …its I/O half (the executable, the socket dir, the spawn + the port poll)
 const DA = require('../desktop-apps.js'); // lane one-browser-b1: the desktop keeper's display-only kind (isDisplayForBrowser)
+const PIC = require('../browser-picture.js'); // lane browser-x-in-window (B2): THE PICTURE SWITCH — the source verdict, the holder's X window, Chrome's own dialog windows (PURE)
 
 const STORE_FILE = 'browser-profiles.json';
 const AUDIT_FILE = 'browser-audit.jsonl';
@@ -148,6 +150,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   probeLadder = null, // B-0b8c (lane browser-probe-transient): the gate's `{retryMs, timeoutMs, timers}` for the version probe's ladder (production: F.PROBE_RETRY_MS / F.PROBE_TIMEOUT_MS)
   // lane H: how long a verb waits for the lease seam's listeners (the recorder ARMING its tap) before it runs
   armWaitMs = ARM_WAIT_MS,
+  askWaitMs = null, // lane browser-takeover-queue: how long ONE agent verb waits for the person (the gate's short one; production: the PURE module's WAIT_MS)
   daemonTable = null, endIdentity = null, orphanScanMs = O.SCAN_MS, /* lane daemon-orphan-end: the gate's process table (rows) + ending seam */
   pageAsk = null, pageAnswerMs = null, browserEndedMs = O.BROWSER_ENDED_MS, /* lane browser-daemon-survives-update: the gate's page ask (default browser-viewport pageAnswers), its bound, the ended-browser bound */
   taskGroupDefault = null, access = null, hostKnown = null,
@@ -4187,6 +4190,66 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     emitLease({ kind: 'browser-ready', profileId, why, local: true });
     return browserView(rec);
   }
+  // ── LANE BROWSER-X-IN-WINDOW (design q-026 r1 §2.1 / §3 row B2, 2026-10-23; the owner: 「目前 chrome 还是没有被放进 browser 窗口里面」):
+  // THE PICTURE SWITCH — a profile on the attach road is SEEN and DRIVEN through its display session's X picture ──
+  /** Which picture a profile's live view shows (PURE PIC.pictureSourceOf over its record): 'x' = its window on the display
+   *  session (the attach road on this machine), else 'screencast' (the page's frames, as before) — with why + words. */
+  function pictureSourceFor(profileId) {
+    ensureLoaded();
+    const rec = reg.browsers[String(profileId || '')] || null;
+    return PIC.pictureSourceOf(rec, { remote: !!rec && !isLocalRec(rec) });
+  }
+  /** The display session's window rows — the desktop keeper's OWN `windows(id)` (its two bounded children, its census rows: no
+   *  spawn site here), kept XROWS_MS so a verb's /resolve and a picture's ask in one burst read X once. */
+  const XROWS_MS = 750;
+  const xRows = new Map(); // display session id → {at, p}
+  function xRowsOf(dsId, { fresh = false } = {}) {
+    if (!dsId || !displayKeeper || typeof displayKeeper.windows !== 'function') return Promise.resolve([]);
+    const c = xRows.get(dsId);
+    if (!fresh && c && now() - c.at < XROWS_MS) return c.p;
+    const p = Promise.resolve().then(() => displayKeeper.windows(dsId)).then((r) => (r && r.ok && Array.isArray(r.windows) ? r.windows : []), () => []);
+    xRows.set(dsId, { at: now(), p });
+    return p;
+  }
+  /** The CDP window a holder's picture is about: the lease's OWN window (lane browser-windows: one per holder), else the window
+   *  of the tab named (the live view's active tab), else of its first holder tab (a human's own tab included). → {windowId, bounds} | null */
+  async function holderWindowOf(rec, profileId, browserKey, targetId = null) {
+    if (!rec || !rec.cdpUrl) return null;
+    const VP = require('./browser-viewport.js');
+    const l = browserKey ? B.findLease(reg.leases, profileId, String(browserKey)) : null;
+    const own = l && WIN.hasOwnWindow(l, WIN.instanceOf(rec)) ? WIN.windowIdOf(l.windowId) : null;
+    if (own != null) { const b = await VP.windowBoundsOf(rec.cdpUrl, { windowId: own }); if (b) return b; }
+    for (const tid of [targetId, ...(browserKey ? holderTabs(profileId, browserKey) : [])].filter(Boolean)) { const b = await VP.windowBoundsOf(rec.cdpUrl, { targetId: tid }); if (b) return b; }
+    return null;
+  }
+  /** THE HOLDER'S X WINDOW — the wid its live view draws: its CDP window's bounds matched against the display's rows (PURE
+   *  PIC.xWindowOf — measured: CDP bounds ARE the X geometry); two rows with those very bounds ⇒ its window is moved one pixel
+   *  right and asked once more. Off the X road ⇒ {wid: null, why: <the source's why>}. */
+  async function xWindowFor(profileId, { browserKey = null, targetId = null } = {}) {
+    const v = pictureSourceFor(profileId);
+    if (!PIC.isX(v)) return { wid: null, why: v.why, windowId: null, source: v };
+    const pid = String(profileId), rec = reg.browsers[pid], p = profile(pid);
+    const win = await holderWindowOf(rec, pid, browserKey, targetId);
+    let m = PIC.xWindowOf({ bounds: win && win.bounds, rows: await xRowsOf(v.displaySession), profileDir: p && p.dir });
+    if (m.why === 'ambiguous' && win && win.bounds) {
+      const VP = require('./browser-viewport.js');
+      await VP.setWindowBounds(rec.cdpUrl, win.windowId, { left: Number(win.bounds.left) + 1, top: Number(win.bounds.top) });
+      const again = await VP.windowBoundsOf(rec.cdpUrl, { windowId: win.windowId });
+      m = PIC.xWindowOf({ bounds: again && again.bounds, rows: await xRowsOf(v.displaySession, { fresh: true }), profileDir: p && p.dir });
+    }
+    return { ...m, windowId: win ? win.windowId : null, source: v };
+  }
+  /** Chrome's own dialog WINDOWS over ONE holder's window (a GTK file chooser, a print dialog — PURE PIC.dialogsOver over the
+   *  display's rows); [] off the X road or while its window cannot be told. The sign-in sheet is drawn INSIDE the window
+   *  (measured) — the dialog watch's native prompt says that one. */
+  async function nativeDialogsFor(profileId, { browserKey = null, targetId = null } = {}) {
+    const v = pictureSourceFor(profileId);
+    if (!PIC.isX(v)) return [];
+    const xw = await xWindowFor(profileId, { browserKey, targetId });
+    if (xw.wid == null) return [];
+    const p = profile(String(profileId));
+    return PIC.dialogsOver(xw.wid, await xRowsOf(v.displaySession), { profileDir: p && p.dir });
+  }
   async function stop(profileId, { why = 'user' } = {}) {
     ensureLoaded();
     const rec = reg.browsers[profileId];
@@ -4933,7 +4996,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (!live0) { turnIdleSince.delete(p.id); continue; }
       const f = convFacts(p.owner.id);
       const v = B.idleReleaseVerdict({ live: true, turn: f.turn === undefined ? null : f.turn, idleSince: turnIdleSince.has(p.id) ? turnIdleSince.get(p.id) : null, now: t, releaseMs,
-        takenOver: inputStateFor(p.owner.id, null).input === 'user', watched: (watchers.get(inputKey(p.owner.id, null)) || 0) > 0 });
+        takenOver: inputStateFor(p.owner.id, null).input === 'user' || !!openRequestFor(p.owner.id, null), watched: (watchers.get(inputKey(p.owner.id, null)) || 0) > 0 });
       if (v.idleSince === null) turnIdleSince.delete(p.id); else turnIdleSince.set(p.id, v.idleSince);
       if (!v.release) continue;
       turnIdleSince.delete(p.id);
@@ -4958,7 +5021,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const l = B.findLease(reg.leases, profileId, browserKey);
     if (l && l.input !== input) { l.input = input; commit(); }
   }
-  function emitInput(ev) { for (const fn of inputListeners) { try { fn(ev); } catch (e) { log.warn?.(`[browser] input listener failed: ${e && e.message}`); } } }
+  function emitInput(ev) { requestOnInput(ev); for (const fn of inputListeners) { try { fn(ev); } catch (e) { log.warn?.(`[browser] input listener failed: ${e && e.message}`); } } }
   /** Subscribe to every takeover/handback (the bridge flips its relays, the
    *  announcer decides what to deliver, server.js re-publishes live facts). */
   function onInput(fn) { inputListeners.add(fn); return () => inputListeners.delete(fn); }
@@ -5327,6 +5390,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** A lease that goes away takes its input state with it (never a delivery). */
   function dropInputsFor(browserKey, profileId = null) {
+    endLeaseRequest(browserKey, profileId); // lane browser-takeover-queue: the request on a lease that goes away is withdrawn ('lease-gone')
     const k = inputKey(browserKey, profileId);
     const s = inputs.get(k);
     if (!s) return;
@@ -5336,6 +5400,138 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     lastClosed.delete(k);
     pending.delete(k);
   }
+
+  // ── lane browser-takeover-queue: THE TAKEOVER REQUESTS (PURE src/browser-takeover-request.js) ──
+  // A request for a human is a RECORD: ONE per lease (browserKey × profileId — null = the conversation's own browser), written
+  // HERE only — `requestTakeover` (the agent's `vibespace-browser ask-human`), `resolveTakeoverRequest` (its withdraw, the
+  // person's Done) and the lease's own input events (`requestOnInput`: a takeover ⇒ taken, an explicit handback ⇒ done, a
+  // handback nobody chose ⇒ waiting again) and its end (`endLeaseRequest`) — persisted (data/browser-takeovers.json,
+  // writeJsonAtomic) and broadcast (`browser-takeovers-updated`) with the takeover / handback that moved it. A restart is a
+  // handback by construction: a request `taken` at load waits again (nobody said it is done).
+  const REQUESTS_FILE = path.join(dataDir, 'browser-takeovers.json');
+  const requests = new Map(); // id → record
+  let requestsLoaded = false;
+  const requestListeners = new Set();
+  function loadRequests() {
+    if (requestsLoaded) return;
+    requestsLoaded = true;
+    let j = null;
+    try { j = JSON.parse(fs.readFileSync(REQUESTS_FILE, 'utf8')); } catch (e) { if (e && e.code !== 'ENOENT') log.warn?.(`[browser] ${path.basename(REQUESTS_FILE)} unreadable — no takeover requests loaded: ${e && e.message}`); }
+    for (const r of Array.isArray(j && j.requests) ? j.requests : []) {
+      if (!r || !TQ.ID_RE.test(String(r.id || '')) || !TQ.STATES.includes(r.state)) continue;
+      requests.set(r.id, r.state === 'taken' ? { ...r, state: 'waiting', takenBy: null } : r);
+    }
+  }
+  function saveRequests() {
+    // the closed ones keep a short tail (the CLI's after-the-fact question), the open ones all
+    const all = [...requests.values()];
+    const closed = all.filter((r) => !TQ.isOpen(r)).sort((a, b) => (Number(b.doneAt) || 0) - (Number(a.doneAt) || 0));
+    for (const r of closed.slice(TQ.LIMITS.closedKept)) requests.delete(r.id);
+    try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(REQUESTS_FILE, { version: 1, requests: [...requests.values()] }); return true; }
+    catch (e) { log.warn?.(`[browser] could not write ${path.basename(REQUESTS_FILE)}: ${e && e.message}`); return false; }
+  }
+  /** Does the conversation still hold the browser a request is about (the live view's own rule)? */
+  function requestLeaseHeld(r) {
+    if (!r) return false;
+    if (r.profileId) return !!B.findLease(reg.leases, r.profileId, r.browserKey);
+    return reg.profiles.some((p) => isEph(p) && p.owner && p.owner.id === r.browserKey);
+  }
+  const requestLive = (r) => { try { return B.keyCarried(r.browserKey, sessionLiveKeys()); } catch { return true; } };
+  /** THE QUEUE as the viewer may see it (PURE queueOf over the keeper's facts). */
+  function takeoverRequests({ viewer = { kind: 'owner' } } = {}) { ensureLoaded(); loadRequests(); return TQ.queueOf([...requests.values()], { viewer, leaseHeld: requestLeaseHeld, live: requestLive }); }
+  function takeoverRequest(id) { loadRequests(); const r = requests.get(String(id || '')); return r ? { ...r } : null; }
+  function openRequestFor(browserKey, profileId = null) {
+    loadRequests();
+    const lk = TQ.leaseKeyOf({ browserKey, profileId });
+    for (const r of requests.values()) if (TQ.isOpen(r) && TQ.leaseKeyOf(r) === lk) return r;
+    return null;
+  }
+  function onTakeoverRequest(fn) { requestListeners.add(fn); return () => requestListeners.delete(fn); }
+  /** ONE write, ONE broadcast, then the listeners (the For-you item, the agent's telling) — per change of a record. */
+  function requestChanged(rec, ev) {
+    saveRequests();
+    try { broadcast?.({ type: 'browser-takeovers-updated', requests: takeoverRequests() }); } catch (e) { log.warn?.(`[browser] takeover requests not broadcast: ${e && e.message}`); }
+    for (const fn of requestListeners) { try { fn({ ...ev, request: { ...rec } }); } catch (e) { log.warn?.(`[browser] takeover-request listener failed: ${e && e.message}`); } }
+  }
+  /**
+   * THE AGENT ASKS (`vibespace-browser ask-human`): a NEW request on that lease, or the open one RE-ASSERTED (the same id).
+   * → {ok:true, request, reasserted, cut} | {ok:false, code, error, remedy}
+   */
+  function requestTakeover({ browserKey, profileId = null, sessionId = null, conversationKey = null, conversationName = '', text = '', url = '', title = '' } = {}) {
+    ensureLoaded(); loadRequests();
+    const p = profileId ? profile(profileId) : null;
+    const lease = { browserKey: String(browserKey || ''), profileId: p && !isEph(p) ? p.id : null };
+    const v = TQ.askVerdict({ text, lease: lease.browserKey ? lease : null });
+    if (!v.ok) return v;
+    if (!requestLeaseHeld({ browserKey: lease.browserKey, profileId: lease.profileId })) return { ok: false, code: 'no_browser', error: lease.profileId ? `this conversation holds no lease on "${p ? p.label : profileId}"` : 'this conversation has no browser of its own yet — a person takes over a page that is open', remedy: 'open the page first (`vibespace-browser open <url>`), then ask' };
+    const at = now();
+    const open = openRequestFor(lease.browserKey, lease.profileId);
+    if (open) {
+      const r = TQ.reassert(open, { text: v.text, url, title, at, sessionId, conversationName });
+      requests.set(open.id, r.rec);
+      log.log?.(`[browser] ${lease.browserKey}${lease.profileId ? ' on ' + lease.profileId : ' (its own browser)'}: takeover request ${open.id} asked again (${r.rec.asks} asks) — the same row`);
+      requestChanged(r.rec, { kind: 'reasserted' });
+      return { ok: true, request: { ...r.rec }, reasserted: true, cut: v.cut };
+    }
+    if ([...requests.values()].filter(TQ.isOpen).length >= TQ.LIMITS.openMax) return { ok: false, code: 'too_many', error: `${TQ.LIMITS.openMax} requests already wait for a person on this instance`, remedy: 'withdraw one you no longer need (`vibespace-browser ask-human --withdraw`)' };
+    let id; do { id = 'tr-' + crypto.randomBytes(4).toString('hex'); } while (requests.has(id));
+    const input = inputStateFor(lease.browserKey, lease.profileId);
+    let rec = TQ.newRequest({ id, browserKey: lease.browserKey, profileId: lease.profileId, conversationKey, sessionId, conversationName, profileLabel: p && !isEph(p) ? p.label : '', text: v.text, url, title, at });
+    if (input.input === 'user') rec = TQ.transition(rec, 'take', { at, viewerId: input.takenBy ? input.takenBy.viewerId : null }).rec; // already driven: it is taken now
+    requests.set(id, rec);
+    log.log?.(`[browser] ${lease.browserKey}${lease.profileId ? ' on ' + lease.profileId : ' (its own browser)'}: takeover request ${id} filed (${rec.state}) — the Agent browser window lists it`);
+    requestChanged(rec, { kind: 'asked' });
+    return { ok: true, request: { ...rec }, reasserted: false, cut: v.cut };
+  }
+  /** Move a record by `how` (PURE transition) — the ONE place a record changes after its birth. */
+  function moveRequest(rec, how, { viewerId = null, cause = null } = {}) {
+    const t = TQ.transition(rec, how, { at: now(), viewerId });
+    if (!t.ok || !t.changed) return t;
+    requests.set(rec.id, t.rec);
+    log.log?.(`[browser] takeover request ${rec.id}: ${rec.state} → ${t.rec.state} (${how}${cause ? ', ' + cause : ''})`);
+    requestChanged(t.rec, { kind: t.to, how, cause, from: t.from });
+    return t;
+  }
+  /** The agent's withdraw / the person's Done (without a takeover) / a parked flag — by id. `how` ∈ withdraw | done. */
+  function resolveTakeoverRequest(id, how) {
+    loadRequests();
+    const rec = requests.get(String(id || ''));
+    if (!rec) return { ok: false, code: 'not_found', error: 'no such takeover request' };
+    if (!TQ.isOpen(rec)) return { ok: false, code: 'closed', error: `request ${rec.id} is already ${rec.state}`, request: { ...rec } };
+    if (how !== 'withdraw' && how !== 'done') return { ok: false, code: 'bad_how', error: 'a request is withdrawn (the agent) or done (the person)' };
+    const t = moveRequest(rec, how);
+    return t.ok ? { ok: true, request: { ...t.rec } } : { ok: false, code: t.code, error: `request ${rec.id} did not move`, request: { ...rec } };
+  }
+  /** The For-you item that carries a request (its id, the conversation key it is filed under), its parking (a dismissal:
+   *  band 4, still listed) and a reply the person sent through it (`replied` — the CLI's wait wakes and says so). */
+  function noteRequestItem(id, { itemId, parked, conversationKey, replied = false } = {}) {
+    loadRequests();
+    const rec = requests.get(String(id || ''));
+    if (!rec) return null;
+    const next = { ...rec, ...(itemId !== undefined ? { itemId: itemId || null } : {}), ...(parked !== undefined ? { parked: !!parked } : {}), ...(conversationKey ? { conversationKey: String(conversationKey).slice(0, 200) } : {}), ...(replied ? { repliedAt: now() } : {}) };
+    if (!replied && next.itemId === rec.itemId && next.parked === rec.parked && next.conversationKey === rec.conversationKey) return { ...rec };
+    requests.set(rec.id, next);
+    if (replied) requestChanged(next, { kind: 'replied' });
+    else if (next.parked !== rec.parked) requestChanged(next, { kind: 'parked', parked: next.parked });
+    else saveRequests();
+    return { ...next };
+  }
+  /** Every takeover / handback event (the primary, a mate taken WITH it, a pass, a detach's) moves the request on its lease. */
+  function requestOnInput(ev) {
+    if (!ev || ev.human || ev.target === 'window' || (ev.kind !== 'takeover' && ev.kind !== 'handback')) return;
+    const rec = openRequestFor(ev.browserKey, ev.profileId || null);
+    if (!rec) return;
+    if (ev.kind === 'takeover') moveRequest(rec, 'take', { viewerId: ev.state && ev.state.takenBy ? ev.state.takenBy.viewerId : null, cause: ev.cause || null });
+    else ev.request = { ...moveRequest(rec, TQ.howOfHandback(ev.cause), { cause: ev.cause || null }).rec }; // the announcer's handback words carry the request it ended
+  }
+  function endLeaseRequest(browserKey, profileId = null) { const rec = openRequestFor(browserKey, profileId); if (rec) moveRequest(rec, 'lease-gone'); }
+  /** `human_asked` while a request WAITS on this lease (nobody took over yet) — null otherwise. */
+  function askedVerdictFor(browserKey, profileId = null, { handles = [] } = {}) {
+    const rec = openRequestFor(browserKey, profileId);
+    return rec && rec.state === 'waiting' ? TQ.humanAskedRefusal(rec, { handles, now: now(), ...(askWaitMs ? { waitMs: askWaitMs } : {}) }) : null;
+  }
+  /** A paused refusal on a lease whose request is open carries it (the CLI then waits for the handback). */
+  function withOpenRequest(paused, browserKey, profileId = null) { const rec = openRequestFor(browserKey, profileId); return rec ? { ...paused, request: TQ.agentRequestView(rec, now(), askWaitMs ? { waitMs: askWaitMs } : {}) } : paused; }
 
   // ── P3 (§4.3): --confirm-actions — pending confirmations, answered through upstream's own verbs ──
   function emitConfirmation(ev) { for (const fn of confirmListeners) { try { fn(ev); } catch (e) { log.warn?.(`[browser] confirmation listener failed: ${e && e.message}`); } } }
@@ -5683,7 +5879,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // P4 (§7.4): mid-switch the gap is a NAMED refusal, not a timeout
       if (v.kind === 'attachment' && switching.has(v.attachment.profileId)) { const rr = SW.restartingRefusal(profile(v.attachment.profileId)); return { ...rr, handles: v.handles || [] }; }
       const paused = pausedVerdictFor(bk, v.kind === 'attachment' ? v.attachment.profileId : null, { handles: v.handles || [], verb }); // the refused verb goes on the handback's re-run list
-      if (paused) { log.log?.(`[browser] ${bk}: refused with browser_paused (the user drives${v.kind === 'attachment' ? ' ' + v.attachment.profileId : ' the ephemeral browser'})`); return paused; }
+      if (paused) { log.log?.(`[browser] ${bk}: refused with browser_paused (the user drives${v.kind === 'attachment' ? ' ' + v.attachment.profileId : ' the ephemeral browser'})`); return withOpenRequest(paused, bk, v.kind === 'attachment' ? v.attachment.profileId : null); }
+      { const asked = askedVerdictFor(bk, v.kind === 'attachment' ? v.attachment.profileId : null, { handles: v.handles || [] }); if (asked) { log.log?.(`[browser] ${bk}: refused with human_asked (request ${asked.request.id} waits for a person)`); return asked; } } // lane browser-takeover-queue
       // lane browser-windows: no `browser_busy` between conversations any more (owner ruling A (2) retired) — another
       // conversation's agent works in its OWN window of this browser and never holds this one up (measured: one daemon each)
     }
@@ -6993,6 +7190,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     configFileFor, machineConfigFile, // takeover r3: the config a command on a browser this keeper runs is NAMED with
     setOtherHolders: (fn) => { othersFn = typeof fn === 'function' ? fn : null; },
     setDisplaySessions: (dk) => { displayKeeper = dk && typeof dk === 'object' ? dk : null; }, // lane one-browser-b1: the desktop keeper (the attach road's display sessions)
+    pictureSourceFor, xWindowFor, nativeDialogsFor, // lane browser-x-in-window (B2): the picture switch — the source verdict, the holder's X window, Chrome's own dialog windows over it
     streamPortFor, // P2: the live view's port (attachment or ephemeral; MULTIVIEW: a helper's — a view never STARTS any of them: released / stopped / not-started are said)
     noteStreamClosed, // VERIFY r1 H2: the bridge's upstream closed on an ephemeral relay — judge the process now
     leaseCliOpts, // naive study 2: the ONE way a CLI call under a lease's session reaches the keeper's browser (CDP, never the directory)
@@ -7021,6 +7219,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     browse, humanOf, humanTargetFor, humanInputState, humanAttach, humanTake, humanPass, humanRelease, noteHumanInput, navigateHuman, closeHuman, quitHuman, endHuman, holdersOn, setViewerAlive, humanKeepOf: (id) => { const h = humans.get(String(id || '')); return h ? humanKeepOf(h) : null; },
     // P3 (§4.3 / §4.3.1): the input side — takeover/handback/idle, the typed paused refusal, the confirmation registry
     takeoverIdleMs, inputStateFor, inputsFor, inputSummaryFor, takeover, handback, handbackWakesFor, passControl, noteUserInput, noteUserUrl, pausedVerdictFor, onInput,
+    requestTakeover, resolveTakeoverRequest, takeoverRequests, takeoverRequest, openRequestFor, onTakeoverRequest, noteRequestItem, // lane browser-takeover-queue: the request record's ONE writer
     interruptionFor, interruptionOf, setInFlightReader, awaitInterruptionSettled, // the owner's ruling (2026-09-27): a takeover interrupts, tells, and the handback reminds
     clock: () => now(), // the ONE clock a takeover's instant and a /resolve's instant are compared on (the route stamps with it)
     notePending, resolvePending, pendingFor, pendingAllFor, answerConfirmation, onConfirmation,

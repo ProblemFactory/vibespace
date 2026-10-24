@@ -6377,7 +6377,7 @@ console.log('\n㉔ lane lark-threads PART B: the owner\'s names for authors, at 
   const view = eng.adapterView(eng.adapterRecords().adapters[0]);
   const g = (view.grants || []).find((x) => x.what === 'people');
   const CC = require(path.join(REPO, 'src/channel-caps.js'));
-  ok(g && JSON.stringify(g.missing) === JSON.stringify(['contact:contact.base:readonly']) && CC.grantsText(view.grants, { vendor: 'Lark' }).text === 'One Re-authorize adds: reading people\'s profiles', 'the account card says it while the sign-in lacks the measured scope: "One Re-authorize adds: reading people\'s profiles" — never a silent refusal per person', JSON.stringify(view.grants));
+  ok(g && JSON.stringify(g.missing) === JSON.stringify(['contact:contact.base:readonly']) && CC.grantsText(view.grants, { vendor: 'Lark' }).text === 'One more re-authorization adds: reading people\'s profiles — sending and receiving work without it', 'the account card says it while the sign-in lacks the measured scope: "One more re-authorization adds: reading people\'s profiles" — never a silent refusal per person', JSON.stringify(view.grants));
   eng.stop();
 }
 

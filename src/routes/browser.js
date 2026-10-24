@@ -43,6 +43,11 @@
  *                                             from OUTSIDE the live view (the card / Session Properties) — an EXPLICIT handback,
  *                                             announced through the gated ladder; 409 not_taken when nobody drives it;
  *                                             r6 A-F9: optional `expectWakes` (the count shown) — 409 wake_count_changed {wakes}
+ *   GET    /api/browser/takeovers             lane browser-takeover-queue: every OPEN takeover request the owner may see (PURE
+ *                                             src/browser-takeover-request.js queueOf — the live view's rule) → {requests}; agent 403
+ *   POST   /api/browser/takeovers/:id/done    the person's Done / Hand back on a request: a TAKEN one is handed back (the explicit
+ *                                             handback — its delivery names the request), a waiting one resolved `done` (the agent is
+ *                                             told once) → {ok, how: handback|done, request}; 404 not_found · 409 closed; agent 403
  *   POST   /api/browser/confirm               { sessionId, profile?, id, decision: confirm|deny, shown }   P3: answer a pending
  *                                             --confirm-actions confirmation through upstream's own verb; 404 no_confirmation
  *                                             (r6 A-F8: also when the id is not pending for THIS browser — nothing sent); a
@@ -99,6 +104,13 @@
  *   POST   /api/agent/browser/blocked         { url, why?, evidence?, tier?, profile?, remember? }   a CLAIM, not a
  *                                             detection: recorded with who made it; the UI's one-click button is the user's act
  *   POST   /api/agent/browser/site-hint       { site|url, tier|backend, why }   per-site memory, by 'agent'
+ *   POST   /api/agent/browser/takeover-request       { text, handle?, withdraw?, status? }   lane browser-takeover-queue: ASK A PERSON to take
+ *                                             over this browser — ONE request per lease (a second ask re-asserts it), listed at
+ *                                             the top of the Agent browser window + ONE urgent For-you item → {ok, request, line};
+ *                                             `withdraw` ends it, `status` reads it; while it waits a page verb's /resolve answers
+ *                                             `human_asked` (the CLI waits); refusals empty 400 · no_browser / no_request / job_ask 409
+ *   GET    /api/agent/browser/takeover-request?id=&wait=ms   the CLI's wait: answers when the request closes (or the person
+ *                                             replies) within `wait` (≤ POLL_MS), else its state → {ok, request, open, line?, replied?}
  *
  * Every agent-route MUTATION ends in `keeper.tell(browserKey)`: the answer
  * itself names the set, so the agent's own `use`/`detach`/`pin` never earns
@@ -156,6 +168,8 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   profile_required: 409, profile_changed: 409, not_attached: 404, profile_path_refused: 400, bad_alias: 400, alias_taken: 409, adopt_failed: 409,
   // P3 (§4.3): the user drives ⇒ the agent's command is refused typed; the control verbs' own refusals
   browser_paused: 409, held: 409, not_taken: 409, no_confirmation: 404, 'no-browser': 409, refused: 409,
+  // lane browser-takeover-queue: a request for a person — its refusals by name (human_asked = a page verb while it waits)
+  human_asked: 409, no_browser: 409, no_request: 409, closed: 409, empty: 400, too_many: 409, job_ask: 409, bad_how: 400, not_found: 404,
   // r6 A-F8 / A-F9: a Confirm must name the card it was pressed on; a card that is not what runs; a Hand back whose count moved
   shown_required: 400, confirmation_changed: 409, wake_count_changed: 409,
   // the owner's ruling (2026-09-27): a command the takeover caught in flight (the audit's answer names it; never a route refusal of its own)
@@ -236,7 +250,7 @@ function rulingExtras(v) {
     ...(v && Number.isFinite(v.retryAfterMs) ? { retryAfterMs: v.retryAfterMs } : {}), ...(v && v.pinned ? { pinned: true, pinnedProfile: v.pinnedProfile || null } : {}) };
 }
 /** A typed `{ok:false, code, …}` verdict → the same wire shape a thrown refusal gets, with its extras kept. */
-function failVerdict(res, v) { return res.status(STATUS[v.code] || 409).json({ error: String(v.error || v.code), code: v.code, handles: v.handles || [], ...(v.default !== undefined ? { default: v.default } : {}), ...(v.was !== undefined ? { was: v.was } : {}), ...(v.now !== undefined ? { now: v.now } : {}), ...(v.takenAt !== undefined ? { takenAt: v.takenAt, lastUserInputAt: v.lastUserInputAt || 0 } : {}), ...(v.remedy ? { remedy: v.remedy } : {}), ...(Number.isInteger(v.holderPid) ? { holderPid: v.holderPid } : {}), ...(Number.isInteger(v.wakes) ? { wakes: v.wakes } : {}), ...(typeof v.digest === 'string' ? { digest: v.digest } : {}), ...rulingExtras(v), ...(res.locals && res.locals.viewport ? { viewport: res.locals.viewport } : {}), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}), ...(res.locals && res.locals.recipe ? { recipe: res.locals.recipe } : {}) }); } // B-f7ab verify r2: + the key this call minted (LOW)
+function failVerdict(res, v) { return res.status(STATUS[v.code] || 409).json({ error: String(v.error || v.code), code: v.code, handles: v.handles || [], ...(v.request && typeof v.request === 'object' ? { request: v.request } : {}), ...(v.default !== undefined ? { default: v.default } : {}), ...(v.was !== undefined ? { was: v.was } : {}), ...(v.now !== undefined ? { now: v.now } : {}), ...(v.takenAt !== undefined ? { takenAt: v.takenAt, lastUserInputAt: v.lastUserInputAt || 0 } : {}), ...(v.remedy ? { remedy: v.remedy } : {}), ...(Number.isInteger(v.holderPid) ? { holderPid: v.holderPid } : {}), ...(Number.isInteger(v.wakes) ? { wakes: v.wakes } : {}), ...(typeof v.digest === 'string' ? { digest: v.digest } : {}), ...rulingExtras(v), ...(res.locals && res.locals.viewport ? { viewport: res.locals.viewport } : {}), ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}), ...(res.locals && res.locals.recipe ? { recipe: res.locals.recipe } : {}) }); } // B-f7ab verify r2: + the key this call minted (LOW)
 /** P3 (§4.3): resolve the browser a takeover/handback/confirm names — a handle,
  *  a profile id, or (nothing) the set's default / only member / the ephemeral one. */
 function inputTargetFor(k, f, ref) {
@@ -1035,6 +1049,36 @@ router.post('/api/browser/handback', (req, res) => {
     const r = k.handback({ browserKey: f.browserKey, profileId: t.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: f.sessionId, ...(Number.isInteger(req.body?.expectWakes) ? { expectWakes: req.body.expectWakes } : {}) });
     if (!r.ok) return failVerdict(res, r);
     res.json({ ok: true, cause: r.cause, heldMs: r.heldMs, profileId: t.profileId, input: k.inputSummaryFor(f.browserKey) });
+  } catch (e) { fail(res, e); }
+});
+/** lane browser-takeover-queue: THE QUEUE — every open takeover request the owner may see (the live view's rule: the
+ *  conversation still holds that browser), keyed rows the Agent browser window patches in place; an agent's bearer 403. */
+const TAKEOVERS_ARE_USERS = 'the takeover queue is the person\'s — an agent reads its own request with `vibespace-browser ask-human --status`';
+router.get('/api/browser/takeovers', (req, res) => {
+  if (refuseAgentBearer(req, res, TAKEOVERS_ARE_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  try { res.json({ requests: typeof k.takeoverRequests === 'function' ? k.takeoverRequests({ viewer: { kind: 'owner' } }) : [] }); } catch (e) { fail(res, e); }
+});
+/** The person's Done / Hand back on a request: TAKEN ⇒ the explicit handback of its lease (the keeper moves the request to
+ *  done in the same event; the handback's ONE delivery names it); WAITING ⇒ resolved `done` (the announcer tells the agent once). */
+router.post('/api/browser/takeovers/:id/done', (req, res) => {
+  if (refuseAgentBearer(req, res, TAKEOVERS_ARE_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  try {
+    const TQ = require('../browser-takeover-request.js');
+    const id = String(req.params.id || '');
+    if (!TQ.ID_RE.test(id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+    const rec = k.takeoverRequest(id);
+    if (!rec) return res.status(404).json({ error: `no takeover request ${id}`, code: 'not_found' });
+    if (!TQ.isOpen(rec)) return res.status(409).json({ error: `that request is already ${rec.state}`, code: 'closed', request: TQ.viewOf(rec) });
+    if (rec.state === 'taken' && k.inputStateFor(rec.browserKey, rec.profileId).input === 'user') {
+      const r = k.handback({ browserKey: rec.browserKey, profileId: rec.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: rec.sessionId || null });
+      if (!r.ok) return failVerdict(res, r);
+      return res.json({ ok: true, how: 'handback', request: TQ.viewOf(k.takeoverRequest(id)) });
+    }
+    const r = k.resolveTakeoverRequest(id, 'done');
+    if (!r.ok) return failVerdict(res, r);
+    res.json({ ok: true, how: 'done', request: TQ.viewOf(r.request) });
   } catch (e) { fail(res, e); }
 });
 /** P3 (§4.3): answer a pending --confirm-actions confirmation from the
@@ -1905,7 +1949,12 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, en
     // A named lease's tab is its own (`targetId`); on its ephemeral browser every tab of the conversation is asked.
     let pageBusy = null;
     const pkStands = !!(fct.passkey && ['passkey_open', 'passkey_ask'].includes(fct.passkey.state)); // (its own door, said first — the CLI's rule)
-    if (arm && verb && !fct.open && !fct.loop && !pkStands && !fct.prompt && typeof D.pageAnswers === 'function' && !require('../browser-stuck.js').busyPasses(verb)) {
+    // lane browser-x-in-window (B2): WHAT THE AGENT CANNOT SEE, SAID BY NAME — on the X road Chrome's own sign-in sheet (the
+    // watch's native prompt: drawn inside the window, measured) or a dialog WINDOW of Chrome's over this conversation's window
+    // (the display's rows: a GTK chooser, a print dialog) stands ⇒ the CLI answers its page verbs `dialog_open` with the title
+    let native = null;
+    try { native = require('../browser-picture.js').nativeDialogFact({ prompt: fct.prompt && fct.prompt.native ? fct.prompt : null, windows: !fct.open && !t.ephemeral && typeof k.nativeDialogsFor === 'function' ? await k.nativeDialogsFor(t.profileId, { browserKey: t.browserKey }) : [] }); } catch { native = null; }
+    if (arm && verb && !fct.open && !fct.loop && !pkStands && !fct.prompt && !native && typeof D.pageAnswers === 'function' && !require('../browser-stuck.js').busyPasses(verb)) {
       // the lease's pinned tab when the keeper knows it, else the conversation's own tabs (the watch's scope: its holder tabs,
       // the live view's, the ones its verbs created) — page_busy only when NONE of them answers
       let cur = null; if (!t.ephemeral) { try { const l = (k.leasesFor(f.browserKey) || []).find((x) => x && x.profileId === t.profileId); cur = l && l.targetId ? String(l.targetId) : null; } catch { cur = null; } }
@@ -1924,7 +1973,7 @@ async function dialogAnswerFor(k, f, profileId, { arm = true, outcome = null, en
     const fresh = outcome ? D.factFor({ ...t, consume: false }) : fct;
     const loop = fresh.loop;
     // verify r1: `loopShared` — some tab of a shared browser loops and this conversation's cannot be told apart (a kind only)
-    return { dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, prompt: fct.prompt || null /* lane browser-ui-prompts */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}), ...(pageBusy ? { pageBusy } : {}) } };
+    return { dialog: { watched: fct.watched, profileId: t.profileId, passkey: fct.passkey || null /* lane browser-passkey */, prompt: fct.prompt || null /* lane browser-ui-prompts */, open: fct.open, text: fct.text || '', notes: fct.notes, stuck: stuck ? stuck.text : null, blind: !!fct.blind, unattributed: !!fct.unattributed, loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null, loop: loop || null, loopShared: !!fresh.loopShared, ...(bound ? { tabBound: { ok: !!bound.ok, code: bound.code || null } } : {}), ...(pageBusy ? { pageBusy } : {}), ...(native ? { native } : {}) } };
   } catch (e) { console.warn(`[browser-dialog] ${f.browserKey}: the dialog fact was not read — ${e && e.message}`); return {}; }
 }
 /** The CLI's long-poll while its verb runs: answers at the first HELD dialog in this conversation's scope (the event),
@@ -2371,6 +2420,71 @@ router.post('/api/agent/browser/backend', async (req, res) => {
     if (r.mode === 'proposal') return res.json({ ...r, filed: fileProposal(f, r, { by: 'agent' }) });
     k.tell(f.browserKey);
     res.json(r);
+  } catch (e) { fail(res, e); }
+});
+/**
+ * lane browser-takeover-queue: `vibespace-browser ask-human "<what you need>"` — THE AGENT ASKS A PERSON to take over the
+ * browser its command lands on (the handle, else the default attachment / its own browser — the takeover/handback's own
+ * target rule). ONE request per lease: a second ask re-asserts it (the same id). `withdraw` ends it; `status` reads it.
+ * The words the CLI prints are composed HERE (the CLI ships without src/): `line`. A job never asks (its conversation can).
+ */
+function askTabOf(k, f, profileId) {
+  try {
+    let pid = profileId || null;
+    if (!pid) { const st = k.statusFor(f.browserKey); pid = st && st.ephemeral ? st.ephemeral.profileId : null; }
+    const t = pid ? dialogTargetFor(k, f, pid) : null;
+    const tabs = t && t.ok && ctx.dialogs && typeof ctx.dialogs.ownTabs === 'function' ? ctx.dialogs.ownTabs(t) : [];
+    if (tabs.length) return { url: String(tabs[0].url || ''), title: String(tabs[0].title || '') };
+  } catch { /* no watch: the lease's last url below */ }
+  let l = null; try { l = profileId ? (k.leasesFor(f.browserKey) || []).find((x) => x.profileId === profileId) || null : null; } catch { l = null; }
+  return { url: (l && l.lastUrl) || '', title: '' };
+}
+router.post('/api/agent/browser/takeover-request', (req, res) => {
+  const k = keeperOr503(res); if (!k) return;
+  const f = agentFacts(req, res); if (!f) return;
+  const TQ = require('../browser-takeover-request.js');
+  if (f.job) return res.status(409).json({ error: 'a Background Work job does not ask a person to take over its browser — its conversation can, or file `vibespace-ask`', code: 'job_ask' });
+  if (f.remote) return res.status(409).json({ error: 'this conversation runs on another machine — the live view a person takes over runs on this one only', code: 'remote_session' });
+  try {
+    const t = inputTargetFor(k, f, req.body?.handle);
+    if (!t.ok) return failVerdict(res, t);
+    const at = typeof k.clock === 'function' ? k.clock() : Date.now();
+    if (req.body?.withdraw === true || req.body?.status === true) {
+      const open = k.openRequestFor(f.browserKey, t.profileId);
+      if (req.body?.status === true) return res.json({ ok: true, request: open ? TQ.agentRequestView(open, at) : null, line: TQ.statusAnswer(open, at) });
+      if (!open) return res.status(409).json({ error: 'no request is open on this browser — nothing to withdraw', code: 'no_request' });
+      const r = k.resolveTakeoverRequest(open.id, 'withdraw');
+      if (!r.ok) return failVerdict(res, r);
+      return res.json({ ok: true, request: TQ.agentRequestView(r.request, at), line: TQ.withdrawAnswer(r.request) });
+    }
+    const r = k.requestTakeover({ browserKey: f.browserKey, profileId: t.profileId, sessionId: f.sessionId, conversationName: sessionNameOf(f), text: String(req.body?.text || ''), ...askTabOf(k, f, t.profileId) });
+    if (!r.ok) return failVerdict(res, r);
+    res.json({ ok: true, request: TQ.agentRequestView(r.request, at), reasserted: !!r.reasserted, line: TQ.askAnswer(r.request, { reasserted: r.reasserted, cut: r.cut }) });
+  } catch (e) { fail(res, e); }
+});
+router.get('/api/agent/browser/takeover-request', (req, res) => {
+  const k = keeperOr503(res); if (!k) return;
+  const f = agentFacts(req, res); if (!f) return;
+  const TQ = require('../browser-takeover-request.js');
+  const id = String(req.query.id || '');
+  const wait = Math.max(0, Math.min(TQ.POLL_MS, Math.floor(Number(req.query.wait) || 0)));
+  const mine = (r) => !!r && TQ.seeVerdict({ request: r, viewer: { kind: 'agent', browserKey: f.browserKey } }).ok;
+  const answer = (replied = false) => {
+    const r = k.takeoverRequest(id);
+    if (!mine(r)) return res.status(404).json({ error: 'no such request of this conversation', code: 'not_found' });
+    const open = TQ.isOpen(r);
+    res.json({ ok: true, request: TQ.agentRequestView(r, typeof k.clock === 'function' ? k.clock() : Date.now()), open, ...(open ? {} : { line: TQ.endedLine(r) }), ...(replied ? { replied: true, line: `the person replied to your request ${r.id} — their message is in this conversation; read it before you go on (the request is still open: withdraw it with \`vibespace-browser ask-human --withdraw\` if it is moot)` } : {}) });
+  };
+  try {
+    if (!TQ.ID_RE.test(id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
+    const r0 = k.takeoverRequest(id);
+    if (!wait || !mine(r0) || !TQ.isOpen(r0)) return answer();
+    let done = false, timer = null, off = () => {};
+    const finish = (replied = false) => { if (done) return; done = true; clearTimeout(timer); off(); answer(replied); };
+    off = k.onTakeoverRequest((ev) => { if (ev && ev.request && ev.request.id === id && (!TQ.isOpen(ev.request) || ev.kind === 'replied')) finish(ev.kind === 'replied' && TQ.isOpen(ev.request)); });
+    timer = setTimeout(() => finish(false), wait);
+    if (timer.unref) timer.unref();
+    req.on('close', () => { if (!done) { done = true; clearTimeout(timer); off(); } });
   } catch (e) { fail(res, e); }
 });
 router.post('/api/agent/browser/blocked', (req, res) => {

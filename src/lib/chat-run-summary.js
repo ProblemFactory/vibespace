@@ -270,7 +270,7 @@ export function runSummaryParts(byKind, mcpServers, t, notes = []) {
  *   notes = the `what` of every note member (assistantNoteOf), in render order
  *   files = display names in render order (writes already prefixed '✎ '), deduped by the caller
  */
-export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, running = false, collabPart = '', notes = [], machinePart = '', machineTime = '', linked = 0 }, t) {
+export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, running = false, collabPart = '', notes = [], machinePart = '', machineTime = '', linked = 0, proposals = null }, t) {
   const kindParts = runSummaryParts(byKind, mcpServers, t, notes);
   if (machinePart) kindParts.unshift(machinePart); // lane machine-card-fold: the machine part (machineRunPart) leads — it names what the run is
   if (collabPart) kindParts.push(collabPart);
@@ -287,6 +287,11 @@ export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, runn
   // lane run-fold-channel-compact: the members a closed fold keeps on screen (one line each — their conversation rows)
   // are SAID, so the fold's effect is legible: "5 条 Bash · 1 ✗ · 4 条带会话入口"
   if (linked) label += ' · ' + t('{n} with a conversation link', { n: linked });
+  // lane chat-proposal-card: …and the proposals its calls filed beside them — the cards the closed fold keeps on screen
+  // («· 1 条提案待批准»; once decided «· 1 条提案»)
+  const pn = proposals ? Math.max(0, Number(proposals.n) || 0) : 0, pw = proposals ? Math.max(0, Number(proposals.awaiting) || 0) : 0;
+  if (pw) label += ' · ' + (pw === 1 ? t('1 proposal awaiting approval') : t('{n} proposals awaiting approval', { n: pw }));
+  else if (pn) label += ' · ' + (pn === 1 ? t('1 proposal') : t('{n} proposals', { n: pn }));
   // live state on the fold: a running member shows through the header
   if (running && !machinePart) label += ' · ' + t('running…'); // a machine part already says "still running"
   if (machineTime) label += ' · ' + machineTime; // lane machine-card-compact: a machine run's time span closes the label

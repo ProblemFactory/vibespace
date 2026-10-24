@@ -66,7 +66,7 @@ import * as PL from '../preset-layers.js';
 import { routeErrorText } from './channel-words.js';
 import { enterSubmits } from './chat-enter-keys.js';
 import { renderConnectRow } from './oauth-connect-row.js'; // lane dropline-connect-door: a row's declared OAuth tier, drawn by shape
-import { setupModelOf, renderSetupCard, providerOfRow } from './oauth-setup-card.js'; // lane oauth-setup-instructions: the setup card
+import { setupModelOf, renderSetupCard, providerOfRow, pushSetupFold } from './oauth-setup-card.js'; // lane oauth-setup-instructions: the setup card
 import * as OS from '../oauth-setup.js'; // PURE: a self-registering row's card (Dropline)
 
 const ICON = svgIcon16('<circle cx="5" cy="11" r="3"/><path d="M7.5 8.5L13 3M11 5l2 2M9 7l1.5 1.5"/>');
@@ -480,6 +480,9 @@ export function openIntegrationsWindow(app, opts = {}) {
         pf.append(el('summary', 'plugin-detail', t('Company app: {name}', { name: p.label || p.key })), renderSetupCard(pm, { provider }));
         card.appendChild(pf);
       }
+      // lane channel-row-notices: the push lane's steps (an account row's ⓘ points here) — the type's own declaration
+      const pushFold = pushSetupFold(k);
+      if (pushFold) card.appendChild(pushFold);
       out.push(card);
     }
     return out;

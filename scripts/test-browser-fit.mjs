@@ -550,7 +550,7 @@ console.log('— ③ the keeper: setViewportFor never starts a browser; captureF
 console.log('— ④ the client wiring: the pane reported, the transformed rect, the phone\'s auto-open and its sticky chip');
 {
   const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(/function paneNow\(\) \{ const r = canvas\.getBoundingClientRect\(\);/.test(live) && !/paneNow[^\n]*devicePixelRatio/.test(live), 'the pane is the canvas\'s box off getBoundingClientRect (CSS px at net zoom 1) — never multiplied by devicePixelRatio');
+  ok(/function paneNow\(\) \{ const r = \(xp\.view \? xp\.view\.pane : canvas\)\.getBoundingClientRect\(\);/.test(live) && !/paneNow[^\n]*devicePixelRatio/.test(live), 'the pane is the canvas\'s box (lane browser-x-in-window: the X picture\'s pane while it shows) off getBoundingClientRect (CSS px at net zoom 1) — never multiplied by devicePixelRatio');
   ok(/st\.fitSent = null; reportFit\(\); renderFit\(\);/.test(live) && /new ResizeObserver\(\(\) => \{ scheduleReport\(\);/.test(live) && /cro\.observe\(canvas\)/.test(live), 'the pane is reported on every hello and on every settled resize of the canvas');
   ok(/document\.addEventListener\('visibilitychange', scheduleReport,/.test(live) && /const vis = allowed && onScreen\(\) && p\.width >= 1 && p\.height >= 1;/.test(live), 'a hidden view reports itself hidden (it never votes)');
   ok(/const allowed = app\.settings\?\.get\('browser\.fitPageToView'\) !== false;/.test(live) && /app\.settings\?\.on\?\.\('browser\.fitPageToView', onFitSetting\)/.test(live), '`browser.fitPageToView` off: the view never votes (it says it is gone — the page goes back after the grace), live-applied');

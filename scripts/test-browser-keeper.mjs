@@ -327,6 +327,72 @@ const R = (o) => AT.launchRoad({ local: true, starts: true, ownLaunch: false, he
 ok(R({}).launch === 'attach' && R({ headed: true }).launch === 'attach' && R({ driverVersion: '0.39.0' }).launch === 'attach', 'the road: xpra + a Chrome + the display keeper + the measured driver (0.38.2, or newer) ⇒ attach');
 ok([R({ xpra: false }), R({ exe: null }), R({ wired: false }), R({ headed: false }), R({ ownLaunch: true }), R({ local: false }), R({ starts: false }), R({ driverVersion: '0.38.1' }), R({ driverVersion: null })].every((x) => x.launch === 'driver' && x.why), 'everything else ⇒ the driver road, each with its why (an older or unknown driver too: the attach facts are 0.38.2\'s)');
 ok(/older than 0\.38\.2, the version the attach road was measured on/.test(R({ driverVersion: '0.38.1' }).why) && AT.driverAtLeast('agent-browser 0.38.2') && !AT.driverAtLeast('0.38.1') && AT.driverAtLeast('1.0.0') && !AT.driverAtLeast(''), 'the driver gate says the version it saw and the one it needs');
+// ═══ ⑥ LANE BROWSER-X-IN-WINDOW (design q-026 r1 §2.1 / §3 row B2): THE PICTURE SWITCH's verdict wiring ═══
+// The keeper's three doors over a FAKE CDP (the window calls the keeper makes — Browser.getWindowBounds / getWindowForTarget /
+// setWindowBounds, answered from a window map) and a FAKE display keeper whose `windows(id)` rows ARE that map (MEASURED: CDP
+// bounds = the X geometry): the source verdict from the record, the holder's X window by its OWN window's bounds, the
+// two-twins ambiguity resolved by a one-pixel move, Chrome's own dialog window said to the holder it is over and to no other.
+console.log('— ⑥ lane browser-x-in-window: the picture source, the holder\'s X window, Chrome\'s own dialog windows');
+{
+  const { WebSocketServer } = require('ws');
+  const net = require('net');
+  const freeP = () => new Promise((r) => { const s0 = net.createServer(); s0.listen(0, '127.0.0.1', () => { const pt = s0.address().port; s0.close(() => r(pt)); }); });
+  const PDIR = path.join(S, 'pic-profile');
+  const INSTX = `google-chrome (${PDIR})`;
+  // windowId → { xid, bounds }; two holders' windows + the launch window
+  const wins = new Map([[11, { xid: 0x400003, bounds: { left: 10, top: 10, width: 1050, height: 980, windowState: 'normal' } }], [12, { xid: 0x40000c, bounds: { left: 20, top: 20, width: 1050, height: 980, windowState: 'normal' } }], [13, { xid: 0x40000f, bounds: { left: 300, top: 120, width: 900, height: 700, windowState: 'normal' } }]]);
+  const tabWin = { 'TAB-A': 12, 'TAB-B': 13 };
+  const cdpCalls = [];
+  const port = await freeP();
+  const wss = new WebSocketServer({ port, host: '127.0.0.1' }); await new Promise((r) => wss.on('listening', r));
+  wss.on('connection', (ws) => ws.on('message', (d) => {
+    const m = JSON.parse(d); cdpCalls.push(m); const reply = (o) => ws.send(JSON.stringify({ id: m.id, ...o }));
+    if (m.method === 'Browser.getWindowBounds') { const w = wins.get(m.params.windowId); return reply(w ? { result: { bounds: { ...w.bounds } } } : { error: { message: 'no window' } }); }
+    if (m.method === 'Browser.getWindowForTarget') { const id = tabWin[m.params.targetId]; return reply(id ? { result: { windowId: id, bounds: { ...wins.get(id).bounds } } } : { error: { message: 'no target' } }); }
+    if (m.method === 'Browser.setWindowBounds') { const w = wins.get(m.params.windowId); if (w) Object.assign(w.bounds, m.params.bounds); return reply({ result: {} }); }
+    return reply({ result: {} });
+  }));
+  const CHOOSER_X = { id: 0x60000a, title: 'Open File', instance: 'chrome', cls: 'Chrome', x: 330, y: 160, w: 700, h: 500, depth: 2, frame: 0x20002a };
+  let dialogs = [];
+  const rowsNow = () => [...dialogs, ...[...wins.values()].reverse().map((w) => ({ id: w.xid, title: 'x - Google Chrome', instance: INSTX, cls: 'Google-chrome', x: w.bounds.left, y: w.bounds.top, w: w.bounds.width, h: w.bounds.height, depth: 2, frame: w.xid + 1 })), { id: 0x600001, title: 'chrome', instance: 'chrome', cls: 'Chrome', x: 10, y: 10, w: 10, h: 10, depth: 1 }];
+  const winCalls = [];
+  const DKP = { facts: async () => ({ bins: { xpra: '/usr/bin/xpra', xauth: '/usr/bin/xauth' } }), launchDisplay: async () => null, x11EnvFor: () => null, stop: async () => null, liveRecords: () => [], windows: async (id) => { winCalls.push(id); return { ok: true, windows: rowsNow() }; } };
+  const kP = mk({ dataDir: path.join(S, 'data-pic'), displaySessions: DKP });
+  const pP = kP.createProfile({ label: 'Pic' }, { owner: { kind: 'instance', id: null } });
+  const prof = kP._reg().profiles.find((x) => x.id === pP.id); prof.dir = PDIR;
+  const startedAt = Date.now();
+  kP._reg().browsers[pP.id] = { profileId: pP.id, state: 'ready', launch: 'attach', launchWhy: 'Google Chrome on its own display (xpra)', displaySession: { id: 'da-pic', display: ':93' }, cdpUrl: `ws://127.0.0.1:${port}/devtools/browser/fake-pic`, startedAt, host: 'this-box' };
+  kP._reg().leases.push({ profileId: pP.id, browserKey: 'bk-0000pa01', sessionId: 'sA', windowId: 12, windowIn: String(startedAt), targetId: 'TAB-A', since: startedAt });
+  kP._reg().leases.push({ profileId: pP.id, browserKey: 'bk-0000pb02', sessionId: 'sB', targetId: 'TAB-B', since: startedAt });
+  const v = kP.pictureSourceFor(pP.id);
+  ok(v.source === 'x' && v.why === 'attach' && v.displaySession === 'da-pic', `the keeper's verdict: the attach record ⇒ 'x' on its display session (${JSON.stringify(v)})`);
+  const xa = await kP.xWindowFor(pP.id, { browserKey: 'bk-0000pa01' });
+  ok(xa.wid === 0x40000c && xa.why === 'bounds' && xa.windowId === 12 && cdpCalls.some((m) => m.method === 'Browser.getWindowBounds' && m.params.windowId === 12), `A's X window = its OWN window's bounds matched against the display's rows (${xa.wid && xa.wid.toString(16)})`, xa);
+  const xb = await kP.xWindowFor(pP.id, { browserKey: 'bk-0000pb02' });
+  ok(xb.wid === 0x40000f && xb.windowId === 13 && cdpCalls.some((m) => m.method === 'Browser.getWindowForTarget' && m.params.targetId === 'TAB-B'), "B (no window of its own stamped): the window of its tab (getWindowForTarget) ⇒ its X window", xb);
+  ok(winCalls.length >= 1 && winCalls.every((id) => id === 'da-pic'), "the rows are the desktop keeper's own windows(id) of the record's display session (no spawn of the keeper's)", winCalls);
+  // two windows with the very bounds ⇒ A's moved one pixel, asked again
+  Object.assign(wins.get(13).bounds, { left: 20, top: 20, width: 1050, height: 980 });
+  const set0 = cdpCalls.filter((m) => m.method === 'Browser.setWindowBounds').length;
+  await new Promise((r) => setTimeout(r, 800)); // past the rows' 750 ms memo
+  const xa2 = await kP.xWindowFor(pP.id, { browserKey: 'bk-0000pa01' });
+  const nudge = cdpCalls.filter((m) => m.method === 'Browser.setWindowBounds').slice(set0);
+  ok(xa2.wid === 0x40000c && nudge.length >= 1 && nudge.some((m) => m.params.windowId === 12 && m.params.bounds.left === 21) && wins.get(12).bounds.left === 21, 'TWINS (two windows, one geometry) ⇒ its window is moved ONE pixel and told apart', { xa2, nudge });
+  // Chrome's own dialog window over B's window: said to B, never to A
+  dialogs = [{ ...CHOOSER_X, x: 300 + 100, y: 20 + 100 }];
+  Object.assign(wins.get(13).bounds, { left: 300, top: 120, width: 900, height: 700 });
+  await new Promise((r) => setTimeout(r, 800));
+  const dB = await kP.nativeDialogsFor(pP.id, { browserKey: 'bk-0000pb02' });
+  const dA = await kP.nativeDialogsFor(pP.id, { browserKey: 'bk-0000pa01' });
+  ok(dB.length === 1 && dB[0].title === 'Open File' && dA.length === 0, `Chrome's own "Open File" over B's window is B's (${dB.map((x) => x.title)}) — never A's (${dA.length})`, { dA, dB });
+  kP._reg().browsers[pP.id] = { ...kP._reg().browsers[pP.id], launch: 'driver', launchWhy: AT.HIDDEN_WINDOW_WHY, displaySession: null };
+  const xd = await kP.xWindowFor(pP.id, { browserKey: 'bk-0000pa01' });
+  ok(kP.pictureSourceFor(pP.id).source === 'screencast' && xd.wid === null && xd.why === 'no-display' && (await kP.nativeDialogsFor(pP.id, { browserKey: 'bk-0000pa01' })).length === 0, "a driver-road record: the screencast, no X window, no dialog window asked", xd);
+  kP._reg().browsers[pP.id] = { ...kP._reg().browsers[pP.id], launch: 'attach', displaySession: { id: 'da-pic', display: ':93' }, hostId: 'h-mac' };
+  ok(kP.pictureSourceFor(pP.id).why === 'remote', 'a paired machine\'s record keeps the screencast (remote)');
+  wss.close();
+}
+
 fs.rmSync(S, { recursive: true, force: true });
 console.log(`\n${fail ? '✗' : '✓'} test-browser-keeper: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

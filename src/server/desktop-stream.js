@@ -334,7 +334,7 @@ function create({ auth, resolveTarget, forwardPort = null, onInput = () => { }, 
     if (!viewerSeats || !seat) return 'free';
     // LOW-3 (2.369.156): an anonymous socket is never elected — on a governed stream it WATCHES (the picture, nothing else)
     if (seat === ANON) { try { return viewerSeats.state(id, null) === 'free' ? 'free' : 'watch'; } catch { return 'watch'; } }
-    try { const s = viewerSeats.state(id, seat); return s === 'active' || s === 'blocked' || s === 'watch' ? s : 'free'; } catch (e) { log.warn?.(`[desktop-stream] ${id}: seats.state threw — relaying as before: ${e && e.message}`); return 'free'; }
+    try { const s = viewerSeats.state(id, seat); return s === 'active' || s === 'blocked' || s === 'watch' || s === 'size' ? s : 'free'; } /* lane browser-x-in-window: + 'size' (the geometry only) — an unknown seat read as 'free' fell to the window engine's no-lease relay and let a sizing pane TYPE (measured: the RED control's forced keys reached Chrome) */ catch (e) { log.warn?.(`[desktop-stream] ${id}: seats.state threw — relaying as before: ${e && e.message}`); return 'free'; }
   };
   /** Re-applies every socket's state for `id` (the keeper / the lease moved). A socket whose bridge has not wired
    *  its reconcile yet is skipped (LOW-1, 2.369.156: the join's own broadcast refreshes while the joining socket is

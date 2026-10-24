@@ -1821,6 +1821,44 @@ async function ccReachLeg(engine, tag) {
   ok(PC.validateCompose({ ...base, to: 'a​@example.com' }).ok, 'CONTROL: without the refusal `a<U+200B>@example.com` passes the address rule (the plain-address regex does not see it) — the leg above would go red');
 }
 
+// ── lane chat-proposal-card (the owner, 2026-10-23: 「最下面那个是 outbox 请求吗？我视觉上完全看不出来啊」): THE CHAT'S READ —
+//    `outboxView({ ids })` (the route's `?ids=`): the proposals a chat's call rows filed, each only while its DRAFTER still
+//    sees where it was filed (drafterSees, the receipt's rule) — the same proposalView the two windows draw ──
+async function chatReadLegs(ENGmod, name) {
+  const W = mkEngine({ name, engine: ENGmod }); const { eng } = W;
+  await prime(eng);
+  await eng.setGrain(A, { kind: 'account' }, { access: [{ principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, authority: 'draft' }] });
+  const pa = await eng.propose(AGENT, A, C, { text: 'chat card' });
+  const pu = await eng.propose({ kind: 'user' }, A, C, { text: 'my own draft' });
+  const ids = [pa.proposal && pa.proposal.id, pu.proposal && pu.proposal.id];
+  const v1 = eng.outboxView({ ids: [...ids, 'p-none', ids[0]] }).proposals;
+  const w1 = eng.outboxView({ key: KEY }).proposals.find((p) => p.id === ids[0]);
+  await eng.setGrain(A, { kind: 'account' }, { access: [] });
+  await eng.setReach(A, C, { principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, level: null });   // …and prime's reach on the conversation: the owner took it all back
+  const v2 = eng.outboxView({ ids }).proposals;
+  const listed = eng.outboxView().proposals.some((p) => p.id === ids[0]) && eng.outboxView({ key: KEY }).proposals.some((p) => p.id === ids[0]);
+  eng.stop();
+  return { ok: pa.ok && pu.ok, ids, v1, w1, v2, listed };
+}
+{
+  const r = await chatReadLegs(ENG, 'cpc');
+  const { ids, v1, w1, v2 } = r;
+  ok(r.ok && v1.length === 2 && v1.map((p) => p.id).join() === ids.join() && v1[0].state === 'awaiting-approval' && v1[0].text === 'chat card' && !!w1 && ['state', 'text', 'updatedAt', 'title', 'adapterLabel', 'canDecide'].every((k) => JSON.stringify(v1[0][k]) === JSON.stringify(w1[k])),
+    'CPC engine: the chat\'s read answers the named ids (each once, an unknown id dropped) — the SAME proposalView the conversation window reads', JSON.stringify({ ids, got: v1.map((p) => [p.id, p.state]) }));
+  ok(v2.length === 1 && v2[0].id === ids[1], 'CPC engine: the agent no longer admitted to the conversation ⇒ its proposal leaves the chat\'s read (no card where it was filed); the user\'s own draft stays', JSON.stringify(v2.map((p) => p.id)));
+  ok(r.listed, 'CPC CONTROL: the Outbox and the conversation window (no ids) still list it — the rule is the chat\'s');
+  const OB = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8');
+  ok(/const ids = typeof req\.query\.ids === 'string' \? req\.query\.ids\.split\(','\)/.test(OB) && /engine\(\)\.outboxView\(\{ key, limit, \.\.\.\(ids \? \{ ids \} : \{\}\) \}\)/.test(OB), 'CPC wiring: the owner route hands `?ids=` to outboxView');
+  // RED CONTROL: the read without its drafter rule (an engine copy) answers the revoked proposal — the leg above goes red
+  const esrc = engineSource(REPO);
+  const RULE = '.map((id) => snap[id]).filter((p) => p && drafterSees(p)).map(proposalView)';
+  ok(esrc.split(RULE).length === 2, 'CPC CONTROL setup: the drafter rule is applied once');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('chan-outbox-cpc', REPO);
+  const rc = await chatReadLegs(MC.load('src/server/channels-engine.js', esrc.replace(RULE, '.map((id) => snap[id]).filter(Boolean).map(proposalView)'), 'no-drafter-rule'), 'cpc-ctl');
+  ok(rc.v2.length === 2 && rc.v2.some((p) => p.id === rc.ids[0]), 'CPC RED CONTROL: without drafterSees the revoked agent\'s proposal is still answered to its chat (the leg above would be red)', JSON.stringify(rc.v2.map((p) => p.id)));
+}
+
 // ── the REAL card (esbuild → node over a minimal DOM): F4 envelope lines, F1/F3 what it answers + who receives it,
 //    O1 the reveal, F6 the arming + the digest on the wire ──
 {
@@ -2388,6 +2426,80 @@ async function ccReachLeg(engine, tag) {
         const noShrink = (c) => /\n\.chan-outbox-list > \* \{ flex-shrink: 0; \}/.test(c) && /\n\.chan-outbox > \.jobs-toolbar \{ flex-shrink: 0; \}/.test(c);
         ok(lst && /flex: 1/.test(lst[1]) && /min-height: 0/.test(lst[1]) && /overflow-y: auto/.test(lst[1]) && noShrink(cssNow) && !noShrink(cssBase),
           '§OW ⑪ CSS: the list flexes (min-height 0, overflow-y auto) and none of its sections shrinks; the toolbar keeps its height — CONTROL: without the two rules (the base) the census is red');
+      }
+      // ═══ lane chat-proposal-card: THE THIRD PLACE — the agent's chat, the call row that filed it (chatProposalCards) ═══
+      {
+        const P0 = { id: 'p-cpc1', adapterId: 'gmail', adapterLabel: 'Gmail', convId: 't-cpc', title: 'Room access', kind: 'message', state: 'awaiting-approval', text: 'Approved — see you Tuesday', at: 1000, updatedAt: 1000,
+          draftedBy: { kind: 'agent', id: 'a-1', name: 'Mail agent' }, sendAs: 'user', identity: { sentAs: 'user', marking: 'none' }, policy: { mode: 'review', reasons: ['authority'] },
+          replyEnvelope: { anchorId: 'm-1', to: '"Lee, Sam" <sam@example.com>, b@example.com', cc: 'c@example.com', subject: 'Re: access', all: true } };
+        let answer = [P0];
+        const asked = [], heard = [];
+        const fetch0 = globalThis.fetch;
+        def('fetch', async (url, opts = {}) => { const u = String(url); if (u.startsWith('/api/channels/outbox?ids=')) { asked.push(decodeURIComponent(u.slice('/api/channels/outbox?ids='.length))); return { json: async () => ({ proposals: answer.map((p) => ({ ...p })) }) }; } return fetch0(url, opts); });
+        const capp = { ...app, ws: { onGlobal: (fn) => heard.push(fn), offGlobal() {} } };
+        const tick = () => new Promise((r) => setTimeout(r, 120));
+        const span = (c) => { const s = new N('span'); s.className = c; return s; };
+        // a call row as the chat draws it: .chat-tool-use > [the label, the witness's rows box > the conversation's row]
+        const card = new N('div'); card.className = 'chat-msg';
+        const use = new N('div'); use.className = 'chat-tool-use'; card.appendChild(use);
+        const label = new N('div'); label.className = 'chat-tool-label'; use.appendChild(label);
+        const rows = new N('div'); rows.className = 'chat-channel-touches'; use.appendChild(rows);
+        const row = new N('button'); row.className = 'chat-channel-touch'; row.dataset.key = 'gmail/t-cpc'; row.append(span('cct-glyph'), span('cct-name'), span('cct-words'), span('cct-time')); rows.appendChild(row);
+        body.appendChild(card);
+        let counted = 0;
+        CO.chatProposalCards(capp, card, [{ id: 'p-cpc1', key: 'gmail/t-cpc' }], { onCount: () => { counted++; } });
+        await tick();
+        const box = card.querySelector('.chat-chan-props');
+        const c1 = box && box.querySelector('.chan-prop[data-proposal="p-cpc1"]');
+        ok(asked.length === 1 && asked[0] === 'p-cpc1' && !!box && box.parentNode === use && use.children.indexOf(box) === use.children.indexOf(rows) + 1 && !!c1 && c1._cls.has('chan-prop-awaiting-approval')
+          && !!c1.querySelector('.chan-prop-actions button[data-approve]') && !c1._cls.has('chan-prop-lined') && box.dataset.n === '1' && box.dataset.awaiting === '1' && counted === 1,   // a box born empty counts nothing; its first record moves it once
+          'CPC ① the call row\'s ONE box (right after its conversation rows) holds THE card of the id its touch named — read through `?ids=` (the store), awaiting, whole, its Approve; the row\'s count moved once', JSON.stringify({ asked, n: box && box.dataset.n, counted }));
+        const chip = row.querySelector('.cct-prop');
+        ok(!!chip && chip.textContent === 'Proposal · Reply all to Lee, Sam +2 · awaiting approval' && chip.dataset.state === 'awaiting-approval' && row.children.indexOf(chip) === row.children.length - 2 && row._cls.has('has-prop'),
+          'CPC ① the chip on the conversation\'s row, before its time: «Proposal · Reply all to Lee, Sam +2 · awaiting approval» (the first To by name — a quoted comma is the name\'s —, the rest counted)', chip && chip.textContent);
+        // ② ONE RECORD, THREE PLACES — the conversation window's inline card and the Outbox row draw the same record
+        const sec = CO.renderInlineProposals(capp, [P0], null, {});
+        const inl = sec && sec.querySelector('.chan-prop[data-proposal="p-cpc1"]');
+        const orow = CO.renderProposalRow(capp, P0, {});
+        ok(!!inl && inl.querySelector('.chan-prop-text').textContent === c1.querySelector('.chan-prop-text').textContent && orow.dataset.orow === 'p-cpc1' && orow.querySelector('.chan-orow-text').textContent === P0.text,
+          'CPC ② ONE RECORD, THREE PLACES: the conversation window\'s card and the Outbox row draw the same id and text as the chat\'s card (one renderer, one record)');
+        // ③ a decision elsewhere: the broadcast names it ⇒ re-read; the SAME box keeps ONE card, now its line; the chip the outcome
+        answer = [{ ...P0, state: 'sent', updatedAt: 2000, result: { at: new Date(2026, 9, 23, 12, 14).getTime(), sentAs: 'user', vendorMessageId: 'v-1' } }];
+        heard.forEach((fn) => fn({ type: 'channel-outbox-updated', changed: ['p-cpc1'] }));
+        await tick();
+        const c2 = box.querySelector('.chan-prop[data-proposal="p-cpc1"]');
+        ok(asked.length === 2 && card.querySelector('.chat-chan-props') === box && box.querySelectorAll('.chan-prop').length === 1 && !!c2 && c2._cls.has('chan-prop-sent') && c2._cls.has('chan-prop-lined') && c2._cls.has('chan-prop-shut') && box.dataset.awaiting === '0' && counted === 2,
+          'CPC ③ a decision broadcast naming it ⇒ the SAME box, ONE card for the id (patched in place, never re-appended), folded to its ONE line; the waiting count moved (the fold re-words)', JSON.stringify({ asked: asked.length, n: box.querySelectorAll('.chan-prop').length, counted }));
+        ok(row.querySelectorAll('.cct-prop').length === 1 && row.querySelector('.cct-prop') === chip && /^Proposal · Reply all to Lee, Sam \+2 · sent · (12:14|\d\d-\d\d 12:14)$/.test(chip.textContent) && chip.dataset.state === 'sent',
+          'CPC ③ the SAME chip says what became of it: «… · sent · 12:14»', chip.textContent);
+        heard.forEach((fn) => fn({ type: 'channel-outbox-updated', changed: ['p-someone-else'] }));
+        await tick();
+        ok(asked.length === 2, 'CPC ③ a broadcast naming only other proposals re-reads nothing');
+        // the chip's words, state by state and kind by kind (the device's language — en here)
+        const W = (q) => CO.proposalChipText({ ...P0, ...q });
+        const table = [
+          [W({ state: 'rejected' }), 'Proposal · Reply all to Lee, Sam +2 · you rejected it'],
+          [W({ state: 'expired' }), 'Proposal · Reply all to Lee, Sam +2 · expired'],
+          [W({ state: 'failed' }), 'Proposal · Reply all to Lee, Sam +2 · failed'],
+          [W({ replyEnvelope: { to: 'Ada <ada@example.com>' } }), 'Proposal · Reply to Ada · awaiting approval'],
+          [W({ replyEnvelope: null }), 'Proposal · Reply in Room access · awaiting approval'],
+          [W({ replyEnvelope: null, compose: { to: ['b@example.com'], cc: [], subject: 's' } }), 'Proposal · New message to b@example.com · awaiting approval'],
+          [W({ kind: 'reaction', reaction: { msg: 'm-1', key: 'thumbsup', op: 'add' } }), 'Proposal · a reaction · awaiting approval'],
+          [W({ kind: 'recall', recall: { msg: 'm-2' } }), 'Proposal · taking back your message · awaiting approval'],
+        ];
+        const offT = table.filter(([got, want]) => got !== want);
+        ok(!offT.length, 'CPC the chip\'s words: rejected «you rejected it», expired, failed; a reply to one person by name, a chat reply by its room, a new message, a reaction, a recall', JSON.stringify(offT));
+        // ④ THE ACCESS RULE: the read answers nothing (the drafter no longer sees) ⇒ no card, no chip
+        answer = [];
+        heard.forEach((fn) => fn({ type: 'channel-outbox-updated', changed: [] }));   // an account-wide change names none: every chat card re-reads
+        await tick();
+        ok(asked.length === 3 && box.querySelectorAll('.chan-prop').length === 0 && box.hidden === true && !row.querySelector('.cct-prop') && !row._cls.has('has-prop') && box.dataset.n === '0',
+          'CPC ④ the read answers nothing (its drafter no longer sees the conversation) ⇒ the card and the chip are gone; an account-wide broadcast (no ids) re-reads');
+        // ⑤ the row filed nothing any more ⇒ the box goes
+        CO.chatProposalCards(null, card, []);
+        ok(!card.querySelector('.chat-chan-props') && !row.querySelector('.cct-prop'), 'CPC ⑤ a call row with no filed proposal has no box and no chip');
+        card.remove();
+        def('fetch', fetch0);
       }
     } finally { Date.now = realNow; }
   }

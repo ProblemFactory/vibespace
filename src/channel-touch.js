@@ -52,6 +52,9 @@
 const OPS = Object.freeze(['reply', 'compose', 'react', 'recall', 'read', 'search', 'refresh', 'request', 'status', 'api', 'connect']);   // + lane channels-proposals-recall; + lane pod-oauth-callback: `connect` = the agent asked the person to connect an account TYPE (the row opens the Connect dialog on it)
 /** The ops that make a row a DRAFT row (sorted first; the reverse link says "Drafted by"). */
 const DRAFT_OPS = Object.freeze(['reply', 'compose']);
+/** lane chat-proposal-card: the ops that FILE a proposal (its card is drawn at the call row that filed it); `status` and
+ *  `api` name one too, but a status check files nothing and an API call's card is channel-api-card-view's. */
+const FILED_OPS = Object.freeze(['reply', 'compose', 'react', 'recall']);
 /** The per-session ring (the witness keeps the newest). */
 const RING_MAX = 200;
 /** A repeat of the same op on the same conversation inside this window folds into the previous touch. */
@@ -260,6 +263,21 @@ function foldTouches(touches) {
   return [...rows.values()].sort((a, b) => (drafted(b) - drafted(a)) || (b.last - a.last) || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 }
 
+/** lane chat-proposal-card (the owner, 2026-10-23: 「最下面那个是 outbox 请求吗？我视觉上完全看不出来啊」): THE PROPOSALS
+ *  ONE CALL FILED — its touches of a FILED_OPS op that carry a proposal id, once per id, in the order filed, each with
+ *  the row it belongs to (`key` = touchKey: the conversation, or the composed message's own key). PURE. */
+function filedProposals(touches) {
+  const out = [], seen = new Set();
+  const list = (Array.isArray(touches) ? touches : []).filter((t) => t && FILED_OPS.includes(t.op) && t.proposalId).slice().sort((a, b) => num(a.at) - num(b.at));
+  for (const t of list) {
+    const id = String(t.proposalId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, key: touchKey(t), op: t.op, at: num(t.at) });
+  }
+  return out;
+}
+
 /** The fold: the first `max` rows shown, the rest counted behind "+N more" (all shown when expanded). */
 function foldView(rows, { max = FOLD_SHOWN, expanded = false } = {}) {
   const list = Array.isArray(rows) ? rows : [];
@@ -403,7 +421,7 @@ function searchTouches(results, { max = SEARCH_MAX_CONVS, query = '', memo = nul
 }
 
 module.exports = {
-  OPS, DRAFT_OPS, RING_MAX, MERGE_MS, SKEW_MS, BATCH_MS, FOLD_SHOWN, SEARCH_MAX_CONVS, SEARCH_HITS_MAX, QUERY_MAX, TITLE_MAX, LABEL_MAX, TOUCH_PLACEMENTS,
-  touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, bindToCall, foldTouches, foldView, rowWords, replyWords, rowName,
+  OPS, DRAFT_OPS, FILED_OPS, RING_MAX, MERGE_MS, SKEW_MS, BATCH_MS, FOLD_SHOWN, SEARCH_MAX_CONVS, SEARCH_HITS_MAX, QUERY_MAX, TITLE_MAX, LABEL_MAX, TOUCH_PLACEMENTS,
+  touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, bindToCall, foldTouches, filedProposals, foldView, rowWords, replyWords, rowName,
   GLYPHS, glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, tailVerdict,
 };

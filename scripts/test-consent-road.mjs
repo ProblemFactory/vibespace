@@ -83,6 +83,15 @@
 //      every refusal reading «expired», a language-deaf page
 //   ⑪ the REAL engine + routes — Google from a ja browser (the mailbox marked, Vary), Lark from zh, a cancelled
 //      Re-authorize (zh), the first of two presses (ja), no language (en), a state from before a restart (en)
+// lane lark-consent-chain (the owner 2026-10-23, on Lark's «另外 248 项权限»: 「不能一次性打开所有吗？」 — Lark bounds ONE consent page,
+// so every permission is pages; ONE press walks them):
+//   ⑫ PURE — a chain position (chainOf), the state carries it SIGNED (`c`, round trip; tampered ⇒ bad-hmac; malformed ⇒
+//      bad-shape; a state without one is the old shape byte for byte); the landing's chain page (the sentence in each
+//      language, a 1 s meta refresh + a link to the NEXT authorize URL, no close script, a non-http next refused) and a
+//      declined later page («what you granted on the earlier pages stays»); THE RELAY PAGE (docs/slack-relay/relay.js, as
+//      shipped) forwards a chained state VERBATIM; THE REAL ENGINE + ROUTES on the route road (a pod) and the relay road (a
+//      fleet pod through the admin's page): one Re-authorize, every page landed in the same tab, the route's CSP unchanged,
+//      each next page's state signed with its place, the last page closes the tab, the token holds every permission
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -335,6 +344,7 @@ console.log('⑪ the landing speaks ONE language, shows the address as typed, an
 
 // ── the loopback fake vendor (Lark both brands, Google) ──
 const seen = [];
+let chainFake = null;   // lane lark-consent-chain: (path, body) → an answer, or null for the fake's own
 const vendor = http.createServer((req, res) => {
   let body = '';
   req.on('data', (c) => { body += c; });
@@ -344,6 +354,7 @@ const vendor = http.createServer((req, res) => {
     try { parsed = /json/.test(String(req.headers['content-type'] || '')) ? JSON.parse(body) : Object.fromEntries(new URLSearchParams(body)); } catch { parsed = body; }
     seen.push({ method: req.method, path: u.pathname, body: parsed });
     const j = (code, o) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
+    if (chainFake) { const a = chainFake(u.pathname, parsed); if (a) return j(200, a); }   // lane lark-consent-chain: an app with many permissions
     if (/\/open-apis\/authen\/v2\/oauth\/token$/.test(u.pathname)) return j(200, { code: 0, access_token: 'u-road-access', expires_in: 7200, refresh_token: 'ur-road-refresh', refresh_token_expires_in: 604800, scope: 'im:message im:message.send_as_user im:chat:readonly' });
     if (/\/open-apis\/authen\/v1\/user_info$/.test(u.pathname)) return j(200, { code: 0, data: { open_id: 'ou_road_ada', name: 'Ada Road', union_id: 'on_road', user_id: 'road01', tenant_key: 'tk_road' } });
     if (u.pathname === '/google-oauth/token') return j(200, { access_token: 'ya29.road', expires_in: 3600, refresh_token: '1//road-refresh', scope: 'https://www.googleapis.com/auth/gmail.modify' });
@@ -806,6 +817,94 @@ console.log('⑪ the landing route: the browser\'s language, the address as type
   } finally { await w.close(); if (w2) await w2.close(); }
 }
 
+// ── ⑫ lane lark-consent-chain: ONE press, every consent page ──
+console.log('⑫ a chain of consent pages: the signed place, the landing that sends the tab on, the relay, the real routes');
+{
+  const F16 = 'ab'.repeat(8), T0 = Date.now();
+  const s2 = CR.stateOf({ origin: POD, flowId: F16, issuedAt: T0, kind: 'lark', chain: { page: 2, total: 3 } }, sign);
+  const v2 = CR.stateVerdict(s2, { sign, kind: 'lark' });
+  const s0 = CR.stateOf({ origin: POD, flowId: F16, issuedAt: T0, kind: 'lark' }, sign);
+  ok(v2.ok && v2.parts.chain && v2.parts.chain.page === 2 && v2.parts.chain.total === 3 && CR.stateVerdict(s0, { sign, kind: 'lark' }).parts.chain === null && !JSON.parse(Buffer.from(s0.split('.')[1], 'base64url').toString()).c && s0 === CR.stateOf({ origin: POD, flowId: F16, issuedAt: T0, kind: 'lark', chain: null }, sign),
+    'the state carries the page\'s place SIGNED (`c` = [2, 3] → parts.chain); a state without a chain is the old shape, byte for byte');
+  const clearOf = (o) => `v1.${Buffer.from(JSON.stringify(o), 'utf8').toString('base64url')}`;
+  const base = { u: POD, f: F16, t: Math.floor(T0 / 1000), k: 'lark' };
+  const tampered = `${clearOf({ ...base, c: [1, 3] })}.${s2.split('.')[2]}`;
+  ok(CR.stateVerdict(tampered, { sign, kind: 'lark' }).why === 'bad-hmac', 'a page\'s place changed on the way (page 2 → 1, the old signature) ⇒ bad-hmac');
+  const bad = [[0, 3], [4, 3], [1, 9], [2], 'x', [1, 1], [2.5, 3]].map((c) => { const cl = clearOf({ ...base, c }); return CR.stateVerdict(`${cl}.${sign(cl)}`, { sign, kind: 'lark' }).why; });
+  ok(bad.every((w) => w === 'bad-shape'), `a malformed place, even signed (${bad.length} shapes: page 0, page > total, total > ${CR.CHAIN_PAGES_MAX}, one number, a word, a chain of one, a fraction) ⇒ bad-shape`, bad);
+  ok(CR.CHAIN_PAGES_MAX === 5 && CR.chainOf({ page: 5, total: 5 }) && !CR.chainOf({ page: 6, total: 6 }) && !CR.chainOf({ page: 1, total: 1 }) && CR.nextOf({ url: 'https://a.example.test/x?y=1', page: 2, total: 2 }) && !CR.nextOf({ url: 'https://a.example.test/', page: 1, total: 2 }) && !CR.nextOf({ url: 'javascript:alert(1)', page: 2, total: 3 }),
+    'a chain is ≤ 5 pages (more means the app enabled something absurd); the NEXT page is page ≥ 2 at an http(s) address — nothing else');
+  const NEXT = 'https://accounts.larksuite.com/open-apis/authen/v1/authorize?client_id=cli_a&redirect_uri=x&scope=a+b&state=v1.s';
+  const words = { en: 'VibeSpace: page 1/3 of the Lark permissions granted', zh: 'VibeSpace：Lark 第 1/3 页权限已授予', ja: 'VibeSpace：Lark の権限 1/3 ページ目を許可しました' };
+  for (const lang of CR.LANGS) {
+    const h = CR.landingHtml({ ok: true, user: 'ada.road@example.test', next: { url: NEXT, page: 2, total: 3 } }, { name: 'Lark', lang });
+    const esc = NEXT.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    ok(/data-landing="chain"/.test(h) && h.includes(`<meta http-equiv="refresh" content="1;url=${esc}">`) && h.includes(`<a href="${esc}" rel="noreferrer">`) && !h.includes('<script') && h.includes(words[lang]) && h.includes('2/3') && !/[\w.+-]+@[\w-]+\.[\w.-]+/.test(h) && h.includes(`lang="${lang}"`),
+      `${lang}: page 1 landed ⇒ «${words[lang]}… 2/3…», then the SAME tab to the next authorize URL after 1 s (a meta refresh — no script, the route's CSP stands; a link too), the address marked, the URL escaped`, h.slice(0, 500));
+  }
+  const evil = CR.landingHtml({ ok: true, next: { url: 'javascript:alert(1)', page: 2, total: 3 } }, { name: 'Lark', lang: 'en' });
+  ok(/data-landing="ok"/.test(evil) && !/refresh/.test(evil) && evil.includes(`<script>${CR.CLOSE_SCRIPT}</script>`), 'a next page at a non-http address is never followed — the page is the plain «connected» one');
+  const stop = { en: 'page 2/3 of the Lark permissions was not granted. What you granted on the earlier pages stays', zh: 'Lark 第 2/3 页权限没有授予。前面各页已授予的权限都保留着', ja: 'Lark の権限 2/3 ページ目は許可されませんでした。それまでのページで許可した権限はそのまま残ります' };
+  for (const lang of CR.LANGS) {
+    const h = CR.landingHtml({ ok: false, why: 'denied', chain: { page: 2, total: 3 } }, { name: 'Lark', lang });
+    ok(/data-landing="chain-stopped"/.test(h) && h.includes(stop[lang]) && !/nothing was connected|什么也没连接|何も接続していません/.test(h), `${lang}: a declined page 2 says the earlier pages' grants stay — never «nothing was connected»`, h.slice(0, 300));
+  }
+  ok(/data-landing="denied"/.test(CR.landingHtml({ ok: false, why: 'denied', chain: { page: 1, total: 3 } }, { name: 'Lark', lang: 'en' })), 'a declined FIRST page is the plain «declined — nothing was connected» (nothing was granted yet)');
+  // THE RELAY PAGE, as shipped: a chained state rides it VERBATIM (it reads `u` and `k` only)
+  const sR = CR.stateOf({ origin: FLEET, flowId: F16, issuedAt: T0, kind: 'lark', chain: { page: 2, total: 3 } }, sign);
+  const q = `code=road-chain-code&state=${encodeURIComponent(sR)}`;
+  const d1 = relayPage.decide(`?${q}`, [new URL(FLEET).hostname]);
+  ok(d1.act === 'redirect' && d1.to === `${FLEET}/api/channels/oauth/cb/lark?${q}` && new URL(d1.to).searchParams.get('state') === sR && CR.stateVerdict(new URL(d1.to).searchParams.get('state'), { sign, kind: 'lark' }).parts.chain.page === 2,
+    'the relay page (docs/slack-relay/relay.js — the admin\'s copy is the same bytes) sends a chained state on to the instance\'s landing VERBATIM — its place still verifies there', d1);
+  // THE REAL ENGINE + ROUTES — a fake Lark whose app enabled many permissions (Lark's grants accumulate across pages)
+  const granted = new Map(); let grants = new Set(), appList = [], codeN = 0;
+  chainFake = (p, body) => {
+    if (/\/open-apis\/auth\/v3\/tenant_access_token\/internal$/.test(p)) return { code: 0, tenant_access_token: 't-road-0001', expire: 7200 };
+    if (/\/open-apis\/application\/v6\/applications\/me$/.test(p)) return { code: 0, data: { app: { app_id: 'cli_road0001', scopes: appList.map((scope) => ({ scope, token_types: ['user'] })) } } };
+    if (/\/open-apis\/authen\/v2\/oauth\/token$/.test(p)) { for (const x of granted.get(body && body.code) || []) grants.add(x); return { code: 0, access_token: `u-chain-${codeN}`, expires_in: 7200, refresh_token: `ur-chain-${codeN}`, refresh_token_expires_in: 604800, scope: [...grants].join(' ') }; }
+    return null;
+  };
+  /** Lark's consent page, pressed «同意»: the code it mints grants exactly what the page asked */
+  const agree = (consentUrl) => { const code = `road-chain-${++codeN}`; granted.set(code, new URL(consentUrl).searchParams.get('scope').split(' ')); return code; };
+  const refreshOf = (body) => { const m = /<meta http-equiv="refresh" content="1;url=([^"]+)">/.exec(String(body || '')); return m ? m[1].replace(/&amp;/g, '&') : null; };
+  const MANY = Array.from({ length: 248 }, (_, i) => `zz:scope${String(i).padStart(3, '0')}:readonly`);
+  const walk = async (w, consentUrl, land) => {
+    const steps = [];
+    for (let u = consentUrl, i = 0; u && i < 6; i++) { const r = await land(u, agree(u)); steps.push({ url: u, ...r }); u = refreshOf(r.body); }
+    return steps;
+  };
+  for (const [tag, opts, origin, viaRelay] of [['chain-route', {}, POD, false], ['chain-relay', { publicUrl: FLEET, env: FLEET_ENV }, FLEET, true]]) {
+    grants = new Set(); appList = [];
+    const w = await world(tag, opts);
+    try {
+      const land = viaRelay
+        ? async (u, code) => { const d = throughRelay(u, `code=${encodeURIComponent(code)}`, [new URL(FLEET).hostname]); return d.act === 'redirect' ? w.get(new URL(d.to).pathname + new URL(d.to).search) : { status: 0, body: JSON.stringify(d), csp: '' }; }
+        : (u, code) => w.get(landOn(u, code));
+      const st = await w.e.startOAuth({ kind: 'lark', clientPreset: 'co', origin });
+      const FLOOR_R = new URL(st.url).searchParams.get('scope').split(' ');
+      await land(st.url, agree(st.url));
+      await waitDone(w.e, st.flowId);
+      const id = (await w.e.connect('lark', { flowId: st.flowId })).adapter.id;
+      appList = [...FLOOR_R, ...MANY];   // the owner enables 248 more on the app
+      const r = await w.e.reauthorize(id, { origin });
+      const steps = await walk(w, r.flow.consentUrl, land);
+      const rec = w.e.adapterRecords().adapters.find((x) => x.id === id);
+      const places = steps.slice(1).map((s) => CR.stateVerdict(new URL(s.url).searchParams.get('state'), { sign: (c) => c, kind: 'lark' }));
+      const n = r.flow.chain ? r.flow.chain.total : 0;
+      const redirect = viaRelay ? ADMIN_RELAY : ROUTE_LARK;
+      ok(n >= 3 && steps.length === n && steps.slice(0, -1).every((s, i) => s.status === 200 && /data-landing="chain"/.test(s.body) && s.body.includes(`data-chain="${i + 2}/${n}"`) && !s.body.includes('<script') && s.csp.includes(`script-src 'sha256-${HASH}'`) && /default-src 'none'/.test(s.csp))
+        && steps.every((s) => new URL(s.url).searchParams.get('redirect_uri') === redirect && Buffer.byteLength(s.url) <= 3000),
+        `${tag}: ONE Re-authorize, ${n} pages in the same tab — each landing sends it on (data-chain 2/${n} … ${n}/${n}) under the route's unchanged CSP; every page rides ${viaRelay ? 'the admin\'s relay page' : 'the instance\'s route'} and is ≤ 3 000 bytes`, steps.map((s) => [s.status, (/data-landing="([a-z-]+)"/.exec(s.body) || [])[1], Buffer.byteLength(s.url)]));
+      const last = steps[steps.length - 1] || {};
+      ok(/data-landing="ok"/.test(last.body || '') && (last.body || '').includes(`<script>${CR.CLOSE_SCRIPT}</script>`) && appList.every((x) => rec.auth.scopes.includes(x)) && rec.auth.morePending === 0 && !rec.lastAuthError && w.e.adapterView(rec).consentChain === null,
+        `${tag}: the last page says connected and closes its tab; the token holds all ${appList.length}; nothing pending, no chain`, { more: rec.auth.morePending, chain: w.e.adapterView(rec).consentChain });
+      ok(places.length === n - 1 && places.every((v, i) => v.why === 'bad-hmac') && steps.slice(1).every((s, i) => { const c = JSON.parse(Buffer.from(new URL(s.url).searchParams.get('state').split('.')[1], 'base64url').toString()).c; return Array.isArray(c) && c[0] === i + 2 && c[1] === n; }),
+        `${tag}: each next page's state names its place (c = [k, ${n}]) under THIS boot's signature (a stranger's signer refuses it)`);
+    } finally { await w.close(); }
+  }
+  chainFake = null;
+}
+
 await new Promise((r) => vendor.close(r));
 // ── ⑩ lane oauth-relay-one-source: the fleet's relay page has ONE source — the presets' fleet.json ──
 console.log('⑩ one source: the fleet\'s relay page from the presets\' fleet.json (live) › the deprecated env › none');
@@ -889,6 +988,7 @@ console.log('⑩ one source: the fleet\'s relay page from the presets\' fleet.js
   }
   reader.stop();
 }
+
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

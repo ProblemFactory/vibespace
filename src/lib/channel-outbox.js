@@ -1,10 +1,12 @@
 // THE OUTBOX (docs/design-communication-panel.zh.md §9.2, §9.5, §10.1; P3;
 // the a4 UI design docs/design-communication-panel-ui.md §4.2 / §4.3).
 //
-// ONE RECORD, TWO PLACES: the approval card below is rendered INLINE in the
-// conversation window (context lives there) and in this Outbox window (the
-// queue lives there) — both from the same server store, so they cannot
-// disagree. Every fact on the card is the digest's STRUCTURE and the words
+// ONE RECORD, THREE PLACES: the approval card below is rendered INLINE in the
+// conversation window (context lives there), in this Outbox window (the
+// queue lives there) and — lane chat-proposal-card — in the AGENT'S CHAT at
+// the call row that filed it (where it was made; `chatProposalCards`, at the
+// end) — all from the same server store, so they cannot disagree. Every
+// fact on the card is the digest's STRUCTURE and the words
 // are composed here in the device's language (the identity warning through
 // `chanCaps.identityWarningText`, exactly as the composer does).
 //
@@ -746,16 +748,35 @@ function fateStamp(ms) {
 /** lane channel-window-tidy: WHO receives a decided proposal, in a few words — "Reply all · 7 people", "Reply · Ada",
  *  "New message · 3 people"; '' for a reply whose recipients are the conversation itself (a chat). */
 export function lineGist(p) {
+  const g = gistOf(p);
+  if (!g) return '';
+  const verb = g.verb === 'compose' ? t('New message') : g.verb === 'reply-all' ? t('Reply all') : t('Reply');
+  return g.who ? `${verb} · ${g.who}` : verb;
+}
+/** The FIRST mailbox of an address header as a card names a person — its display name, else its address (a comma
+ *  inside a quoted name is the name's). */
+function firstMailbox(v) {
+  const s = String(v || '');
+  let q = false, cut = s.length;
+  for (let i = 0; i < s.length; i++) { const c = s[i]; if (q && c === '\\') { i++; continue; } if (c === '"') q = !q; else if (c === ',' && !q) { cut = i; break; } }
+  const one = s.slice(0, cut).trim();
+  const nm = /^\s*"?((?:[^"\\<]|\\.)*?)"?\s*<([^<>]*)>\s*$/.exec(one);
+  return nm ? (nm[1].trim() || nm[2].trim()) : one;
+}
+/** WHO receives it, as parts — `{verb: compose | reply-all | reply, who, first, n}` (who = one display name / address,
+ *  or "N people"; first = the first one's name, To before Cc; n = how many); null for a reply whose recipients are the
+ *  conversation itself. lineGist and the chat's chip say them. */
+function gistOf(p) {
   const e = p && p.replyEnvelope && typeof p.replyEnvelope === 'object' ? p.replyEnvelope : null;
   const cp = p && p.compose && typeof p.compose === 'object' ? p.compose : null;
-  if (!e && !cp) return '';
+  if (!e && !cp) return null;
   const heads = cp ? [...(cp.to || []), ...(cp.cc || [])].map(String) : [e.to, e.cc].filter(Boolean).map(String);
   const n = P.envelopeAddresses(heads.join(', ')).size;
   const one = heads.find((h) => P.envelopeAddresses(h).size) || heads[0] || '';
   const nm = /^\s*"?((?:[^"\\<]|\\.)*?)"?\s*<([^<>]*)>\s*$/.exec(one);   // one mailbox: its display name, else the address
+  const first = firstMailbox(one);
   const who = n > 1 ? t('{n} people', { n }) : nm ? (nm[1].trim() || nm[2].trim()) : one.trim();
-  const verb = cp ? t('New message') : e.all ? t('Reply all') : t('Reply');
-  return who ? `${verb} · ${who}` : verb;
+  return { verb: cp ? 'compose' : e.all ? 'reply-all' : 'reply', who, first, n };
 }
 /** lane channel-window-tidy: THE LINE of a decided proposal — chip · drafter · when · recipients · first words; a click
  *  (or Enter / Space) asks the window to open / close the card (`onLine(id)`). Every string textContent. */
@@ -1043,6 +1064,157 @@ export function renderInlineProposals(app, proposals, prev = null, { ui = null, 
     ...settled.map((p) => lineOf(p, folding)),
   ]);
   return sec;
+}
+
+// ── lane chat-proposal-card: THE THIRD PLACE — the agent's chat, at the call row that filed it ──
+// The owner (2026-10-23, reading his agent's chat): 「最下面那个是 outbox 请求吗？我视觉上完全看不出来啊」 — the agent ran
+// `vibespace-channels reply` and said «Channels 里放了一条 reply-all 提案»; nothing in the chat WAS the proposal. Now the
+// call row that filed it (the §26 witness binds the reply / compose / react / recall touch — its `proposalId` — to that
+// row; PURE src/channel-touch.js `filedProposals`) carries:
+//  · a CHIP on the conversation's row — «提案 · 回复 Ada · 待批准»; once decided, the OUTCOME in words
+//    («已发送 · 12:14» / «你拒绝了» / «已过期»), so a chat read later still says what became of it;
+//  · THE CARD — `renderProposalCard`, the one implementation — in ONE keyed box after the row's conversation rows (the
+//    raw-API card's place, B-2198 part 2: the call row's expanded body, which the run fold keeps on screen): while it
+//    waits the whole card (Approve / Edit / Reject exactly as in the Outbox — the same routes, the same arming, the same
+//    `shown` digest); decided, its ONE line (the conversation window's rule above), which opens the card in place.
+// The records are the SAME store's — `GET /api/channels/outbox?ids=…`, each only while its drafter still sees where it
+// was filed (a conversation whose agent is no longer admitted never draws the card) — re-read on a
+// `channel-outbox-updated` naming one of them; cards are keyed by proposal id and patched in place, never re-appended.
+const CHAT_REFETCH_MS = 60;
+const chatProps = { recs: new Map(), asked: new Set(), boxes: new Set(), timer: null, inflight: null, again: false, wired: false };
+const waitsOn = (p) => !!p && (p.state === 'awaiting-approval' || p.state === 'proposed' || p.state === 'sending');
+/** The chip's words: «Proposal · <what> · <state>» — what = who receives it (gistOf), the state the outcome in words. */
+export function proposalChipText(p) {
+  return `${t('Proposal')} · ${chipWhat(p)} · ${chipState(p)}`;
+}
+function chipWhat(p) {
+  if (p.kind === 'reaction') return t('a reaction');
+  if (p.kind === 'recall') return t('taking back your message');
+  const g = gistOf(p);
+  const who = g && g.first ? (g.n > 1 ? `${g.first} +${g.n - 1}` : g.first) : '';   // «Ada +2» — the card lists them all
+  if (g && g.verb === 'compose') return who ? t('New message to {who}', { who }) : t('New message');
+  if (who) return g.verb === 'reply-all' ? t('Reply all to {who}', { who }) : t('Reply to {who}', { who });
+  return t('Reply in {conv}', { conv: convNameOf(p) || p.adapterLabel || p.adapterId || '' });
+}
+function chipState(p) {
+  if (p.state === 'awaiting-approval' || p.state === 'proposed') return t('awaiting approval');
+  if (p.state === 'sent') return partlySent(p) ? t('partly sent') : t('sent · {time}', { time: fateStamp((p.result && p.result.at) || p.updatedAt || p.at) });
+  if (p.state === 'rejected') return t('you rejected it');
+  return stateLabel(p.state);
+}
+function chatWanted() {
+  const ids = new Set();
+  for (const b of [...chatProps.boxes]) {
+    if (b.isConnected) b._seen = true;
+    else if (b._seen) { chatProps.boxes.delete(b); continue; }
+    for (const id of b._ids || []) ids.add(id);
+  }
+  return ids;
+}
+function chatFetchSoon() {
+  if (chatProps.timer) return;
+  chatProps.timer = setTimeout(() => { chatProps.timer = null; chatFetch(); }, CHAT_REFETCH_MS);
+}
+function chatFetch() {
+  if (chatProps.inflight) { chatProps.again = true; return chatProps.inflight; }
+  const ids = [...chatWanted()];
+  if (!ids.length) return Promise.resolve();
+  for (const id of ids) chatProps.asked.add(id);
+  chatProps.inflight = fetchJson(`/api/channels/outbox?ids=${encodeURIComponent(ids.join(','))}`).then((r) => {
+    if (!r || r.error || !Array.isArray(r.proposals)) return;
+    const got = new Map(r.proposals.map((p) => [p.id, p]));
+    for (const id of ids) { if (got.has(id)) chatProps.recs.set(id, got.get(id)); else chatProps.recs.delete(id); }
+    for (const b of [...chatProps.boxes]) paintChatBox(b);
+  }).catch(() => {}).finally(() => { chatProps.inflight = null; if (chatProps.again) { chatProps.again = false; chatFetchSoon(); } });
+  return chatProps.inflight;
+}
+function wireChat(app) {
+  if (chatProps.wired || !app || !app.ws || typeof app.ws.onGlobal !== 'function') return;
+  chatProps.wired = true;
+  app.ws.onGlobal((msg) => {
+    if (!msg || msg.type !== 'channel-outbox-updated' || !chatProps.boxes.size) return;
+    const ch = Array.isArray(msg.changed) ? msg.changed.map(String) : [];
+    if (ch.length && !ch.some((id) => [...chatProps.boxes].some((b) => (b._ids || []).includes(id)))) return;   // an account-wide change names none: re-read
+    chatFetchSoon();
+  });
+}
+/** A reconnect / restarted server: every chat card's record is read again (the store is the server's). */
+export function refreshChatProposals() { chatProps.asked.clear(); if (chatProps.boxes.size) chatFetchSoon(); }
+/** The row's chip, keyed by proposal id inside the conversation row it was filed on (textContent; patched in place). */
+function paintChips(box) {
+  const card = box._cardEl;
+  if (!card) return;
+  const rows = [...card.querySelectorAll('.chat-channel-touches > .chat-channel-touch')];
+  const want = new Map();
+  for (const f of box._filed || []) { const p = chatProps.recs.get(f.id); if (p) want.set(f.key, p); }   // the newest filed on a row wins
+  for (const row of rows) {
+    const p = want.get(row.dataset.key) || null;
+    let chip = row.querySelector(':scope > .cct-prop');
+    if (!p) { if (chip) chip.remove(); row.classList.remove('has-prop'); continue; }
+    if (!chip) { chip = el('span', 'cct-prop'); row.insertBefore(chip, row.querySelector(':scope > .cct-time')); }
+    const text = proposalChipText(p);
+    if (chip.textContent !== text) chip.textContent = text;
+    chip.dataset.proposal = p.id;
+    chip.dataset.state = partlySent(p) ? 'partly' : p.state;
+    row.classList.add('has-prop');
+  }
+}
+function paintChatBox(box) {
+  if (!box || !box._ids) return;
+  const app = box._app;
+  const recs = box._ids.map((id) => chatProps.recs.get(id)).filter(Boolean);
+  paintChips(box);
+  const have = new Map([...box.children].filter((c) => c.dataset && c.dataset.proposal).map((c) => [c.dataset.proposal, c]));
+  const open = box._open;
+  const onLine = (id) => {
+    if (open.has(id)) open.delete(id); else open.add(id);
+    const c = [...box.children].find((x) => x.dataset && x.dataset.proposal === id);
+    if (c) setLineOpen(c, open.has(id));
+    if (c && open.has(id)) reveal(c, c.querySelector(':scope > .chan-prop-line'));
+  };
+  const nodes = recs.map((p) => {
+    const line = !waitsOn(p);
+    const onJump = (vid) => { if (app && typeof app.openChannel === 'function' && p.convId) app.openChannel(p.adapterId, p.convId, { jump: { vid } }); };
+    const c = keyedCard(app, p, have.get(p.id) || null, { line, onLine, onJump });
+    if (line) setLineOpen(c, open.has(p.id));
+    return c;
+  });
+  placeArmed(box, nodes);
+  box.hidden = !nodes.length;
+  const n = String(recs.length), w = String(recs.filter(waitsOn).length);
+  if (box.dataset.n !== n || box.dataset.awaiting !== w) {
+    box.dataset.n = n; box.dataset.awaiting = w;
+    if (typeof box._onCount === 'function') box._onCount();   // the run fold's head counts them («· 1 条提案待批准»)
+  }
+}
+/**
+ * THE CHAT'S CARDS for ONE call row: `filed` = [{id, key}] (PURE `filedProposals` over the touches bound to the row) —
+ * ONE keyed `.chat-chan-props` box after the row's conversation rows (and its API cards), the chips on those rows.
+ * `onCount()` = the row's count of proposals / waiting ones moved (the ChatView re-words its run fold).
+ */
+export function chatProposalCards(app, cardEl, filed, { onCount = null } = {}) {
+  if (!cardEl) return;
+  let box = cardEl.querySelector('.chat-chan-props');
+  const list = (Array.isArray(filed) ? filed : []).filter((f) => f && f.id);
+  if (!list.length) {
+    for (const c of cardEl.querySelectorAll('.chat-channel-touch > .cct-prop')) { c.parentNode.classList.remove('has-prop'); c.remove(); }
+    if (box) { chatProps.boxes.delete(box); box.remove(); if (typeof onCount === 'function') onCount(); }
+    return;
+  }
+  if (!box) {
+    box = el('div', 'chat-chan-props');
+    box.setAttribute('aria-label', t('Proposals this call filed'));
+    box.hidden = true;
+    box.dataset.n = '0'; box.dataset.awaiting = '0';   // born empty: only a record moves the count (the fold re-words)
+    box._open = new Set();
+    const after = cardEl.querySelector('.chat-api-cards') || cardEl.querySelector('.chat-channel-touches');
+    if (after) after.after(box); else (cardEl.querySelector('.chat-tool-use') || cardEl).appendChild(box);
+  }
+  box._app = app; box._cardEl = cardEl; box._filed = list; box._ids = list.map((f) => String(f.id)); box._onCount = onCount;
+  chatProps.boxes.add(box);
+  wireChat(app);
+  paintChatBox(box);
+  if (box._ids.some((id) => !chatProps.asked.has(id))) chatFetchSoon();
 }
 
 /** Open (or focus) THE Outbox window — a singleton kind. */

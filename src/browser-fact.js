@@ -155,7 +155,7 @@ function browserFactFor(session, view) {
   const fact = { v: 1, key: bk, pinned, pinGone, pinCleared, using, own, lastUsed, differs, input, live: !!liveRef, liveRef: liveRef || null };
   // lane browser-stuck (2026-09-28): the page is held by a dialog / not responding — the dialog watch's fact, carried as
   // the view gives it (`{state: dialog|unresponsive, dialog?, why?, count?, since, profileId}`); null when all is well
-  if (v.stuck && typeof v.stuck === 'object' && (v.stuck.state === 'dialog' || v.stuck.state === 'unresponsive' || v.stuck.state === 'loop' || v.stuck.state === 'blind')) fact.stuck = v.stuck; // lane site-reset: + the navigation loop; lane browser-held-not-hung: + the blind watch
+  if (v.stuck && typeof v.stuck === 'object' && (v.stuck.state === 'dialog' || v.stuck.state === 'unresponsive' || v.stuck.state === 'loop' || v.stuck.state === 'blind' || v.stuck.state === 'prompt')) fact.stuck = v.stuck; // lane site-reset: + the navigation loop; lane browser-held-not-hung: + the blind watch; lane browser-x-in-window: + the browser's own PROMPT (an HTTP sign-in / a file chooser — the live view's bar read `stuck.state === 'prompt'`, which this list never let through: measured, the bar stayed empty)
   fact.digest = factDigest(fact);
   return fact;
 }
@@ -183,7 +183,7 @@ function factDigest(f) {
     `${u.kind}:${u.id || ''}:${u.label || ''}:${u.state}:${u.locked ? 'L' : ''}:${u.count || ''}:${u.error ? u.error.length : 0}`,
     f.own ? `${f.own.label || ''}:${f.own.state}${f.own.kept ? `:k${f.own.kept.tabs}/${f.own.kept.kind}/${f.own.kept.why || ''}/${f.own.kept.restoreBy || ''}${f.own.kept.handedBack ? 'h' : ''}/${f.own.kept.waiting}` : ''}` : '-', // lane browser-resume B
     f.lastUsed ? `${f.lastUsed.kind}:${f.lastUsed.id || ''}:${f.lastUsed.label || ''}` : '-', f.differs || '-', f.input || '-', f.liveRef || '-',
-    f.stuck ? `${f.stuck.state}:${f.stuck.dialog ? f.stuck.dialog.id || '' : ''}:${f.stuck.why || ''}:${f.stuck.count || 0}:${f.stuck.loop && Array.isArray(f.stuck.loop.urls) ? f.stuck.loop.urls.join(' ') : ''}${f.stuck.state === 'blind' ? `:${f.stuck.targetId || ''}/${f.stuck.title || ''}` : ''}` : '-'].join('|'); // lane browser-stuck (+ lane site-reset: a loop's cycle, never its hop count)
+    f.stuck ? `${f.stuck.state}:${f.stuck.dialog ? f.stuck.dialog.id || '' : ''}:${f.stuck.why || ''}:${f.stuck.count || 0}:${f.stuck.loop && Array.isArray(f.stuck.loop.urls) ? f.stuck.loop.urls.join(' ') : ''}${f.stuck.state === 'blind' ? `:${f.stuck.targetId || ''}/${f.stuck.title || ''}` : ''}${f.stuck.state === 'prompt' && f.stuck.prompt ? `:${f.stuck.prompt.id || ''}${f.stuck.prompt.native ? '/native' : ''}` : ''}` : '-'].join('|'); // lane browser-stuck (+ lane site-reset: a loop's cycle, never its hop count)
 }
 
 /** `{name}` placeholders, for a `t` that is not given (the server's journal, a test). */

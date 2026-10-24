@@ -15,6 +15,7 @@ import { renderChannelsPanel } from './channels-panel.js';
 // lane attention-predicate-shared (design q-044 decision 7): the Channels badge = the attention list's bands 1–4 (PURE)
 import { channelsBadge, attentionPolicy, signinAccounts } from '../channel-focus.js';
 import { needsMe, settingsPolicy } from '../attention-model.js';
+import { takeoverBadge } from '../browser-takeover-request.js'; // lane browser-takeover-queue: the Browser badge = the waiting takeover requests in bands 1–4 (PURE)
 import { copyText, escHtml, showToast, fetchJson, showContextMenu, showConfirmDialog, showInputDialog, absUrl } from './utils.js';
 import { registerMenuItem } from './contributions.js';
 import { pluginProvides, pluginState } from './plugins-ui.js';
@@ -297,6 +298,14 @@ export function installSidebarRail(Sidebar) {
       this._railSignin = signinAccounts(accounts);
       this._railChanBadge('acct', channelsBadge(0, [], Date.now(), { policy: attentionPolicy(get), bands: settingsPolicy(get), needsMe, accounts }));
     },
+    /** lane browser-takeover-queue: the Browser badge (channelsBadge's sibling) = the takeover requests WAITING for the person that
+     *  the attention list puts in bands 1–4 (urgent: band 1; one set aside in For you: band 4) — the app's ONE copy of the queue. */
+    _railTakeoverBadge(list) {
+      const get = (k) => this.app?.settings?.get?.(k);
+      const n = takeoverBadge(Array.isArray(list) ? list : (this.app?._browserTakeovers || []), Date.now(), { bands: settingsPolicy(get), needsMe });
+      this._railSetBadge('browser', n > 99 ? '99+' : (n || ''));
+      return n;
+    },
     _railChanBadge(part, n) {
       this._chanBadgeParts = { ...(this._chanBadgeParts || {}), [part]: Number(n) || 0 };
       const p = this._chanBadgeParts;
@@ -316,8 +325,9 @@ export function installSidebarRail(Sidebar) {
      *  forwards, diagnostics=recent errors). Wired once per rail build; ws
      *  handlers self-guard on the rail element still being alive. */
     _railWireBadges() {
-      if (this._railBadgesWired) { this._railRefreshBadges(); return; }
+      if (this._railBadgesWired) { this._railRefreshBadges(); this._railTakeoverBadge(); return; }
       this._railBadgesWired = true;
+      if (typeof this.app?.onBrowserTakeovers === 'function') this.app.onBrowserTakeovers((list) => { if (this._railEl) this._railTakeoverBadge(list); }); // lane browser-takeover-queue
       this.app.ws.onGlobal((msg) => {
         if (!this._railEl) return;
         if (msg.type === 'port-forwards-updated' || msg.type === 'hosts-updated') this._railRefreshBadges();
@@ -338,6 +348,7 @@ export function installSidebarRail(Sidebar) {
         // lane attention-predicate-shared: a rule / band switch or the cap changed (the server stored it, then said so) ⇒
         //  the server's count is re-read and the groups' half recounted
         if (msg.type === 'settings-updated') {
+          this._railTakeoverBadge(); // lane browser-takeover-queue: a band switch moves the Browser badge too
           fetchJson('/api/channels?scope=totals').then((r) => { if (r && !r.error) { this._railChanBadge('ch', Number(r.needsMe) || 0); this._railSigninFrom(r.signin); } }).catch(() => {});
           this._railChanBadge('grp', this._railGroupsNeed());
         }

@@ -2,6 +2,28 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.349 — 2026-10-23
+
+### Added
+- When an assistant proposes a reply or new message in Channels, its approval card now also appears in that chat, at the step that proposed it: approve it there.
+- Later that step says what became of the proposal — sent and when, rejected by you, or expired — so a chat you read afterwards still tells you.
+- When an assistant needs you in its browser, the Agent browser window now lists every such request at the top, under Waiting for you, however many tasks run.
+- From there you take over (its live view opens with the controls yours), mark it done, or reply in one line; handing back tells the assistant.
+- For you shows the same request; the window's title and the Browser icon count what is waiting, and the live view shows what the assistant asked.
+
+### Changed
+- On a machine with a display, the live view of an assistant's browser now shows the browser's own window, its sign-in sheets and file windows included.
+- When you take over, you type and click in that window itself; the assistant waits, and is told by name when such a sheet is open.
+- Channels no longer shows a standing paragraph of install steps under an account: one short line says the state, ⓘ opens the details, Got it puts it away.
+- A line suggesting a re-authorization now says what it adds and that the account keeps working; for Lark, the next group of permissions and how many are left.
+- The steps to turn on Lark's real-time push are on its setup card in ⚙ → Integrations and in the Diagnostics report, not on the account row.
+- Re-authorizing Lark now asks for every permission the app has enabled in one go: one press walks you through the consent pages Lark requires, in the same tab.
+- What you grant on each page stays even if you stop midway; Channels shows which page you are on, and how many permissions are left once you stop.
+- The Lark sign-in no longer offers a useless retry without extra permissions; it shows only when the app's permission list could not be read, and says why.
+
+### Fixed
+- When a page asks for an HTTP sign-in, the live view now says so under its bar.
+
 ## 2.369.348 — 2026-10-23
 
 ### Changed

@@ -27,7 +27,7 @@ function create(engineCtx) {
   const {
     KEY_FILE, CUSTOM_KEY, PENDING_FLOW_TTL_MS, DUPLICATE_FIELDS, registry, integrations, mountClients, now, log, fetchFn, deliver, liveSessions,
     store, box, flows, signState, consentRowOf, consentDepsOf, resolveIntegration, rowOf, live, paceCarry, adapterRecords, saveAdapters,
-    refusedScopesOf, morePendingOf, tokensFor, adapterFor, refreshAuth, EMPTY_SCAN, pass, rejudgeConvCaps, conversationName, presetsOf, clientFieldDecls,
+    refusedScopesOf, morePendingOf, pendingScopesOf, tokensFor, adapterFor, refreshAuth, EMPTY_SCAN, pass, rejudgeConvCaps, conversationName, presetsOf, clientFieldDecls,
     customClientView, vendorNameOf, adapterView, notify, disarmPush, syncPushLanes, dropLive, retractUnsaved, retractFailure, wakeTimers, policyFor,
     speakSignin, retractSignin,   // lane channel-reauth-visible: an unfinished consent re-asserts the dead sign-in's item; a removal / a disconnect ends it
     accountGrainOf, patternsOf, convGrainOf, honestyLineFor, notifyOutbox,
@@ -443,6 +443,7 @@ function create(engineCtx) {
   function sweepPending() {
     const t = now();
     for (const [id, p] of pendingFlows) if (t - p.startedAt > PENDING_FLOW_TTL_MS) { try { flows.cancel(id, 'expired'); } catch {} pendingFlows.delete(id); }
+    for (const [id] of chainPending) { const s = flows.status(id); if (!s || s.cancelled || s.done) chainPending.delete(id); }   // lane lark-consent-chain
   }
   /** lane pod-oauth-callback: the option values a company PRESET names (its `facts` — the Lark app's brand): each a
    *  declared option of the type whose value is one of its choices; {} for a custom / mount / paste choice. */
@@ -479,15 +480,25 @@ function create(engineCtx) {
         try { return { token: JSON.parse(box.dec(p.tokenEnc)), why: null }; } catch (e) { return { token: null, why: e && e.reason === 'key-unreadable:vault_locked' ? 'vault-locked' : `token-undecryptable: ${(e && e.message) || e}` }; }   // r2
       },
       async write(token, meta = {}) {
+        // lane lark-consent-chain: a LATER page of a Connect's chain that lands after Connect made the account writes THE
+        // ACCOUNT's token — through the account's own door (its identity, a cancel, the stop are judged there)
+        if (p.connectedId) {
+          const made = adapterRecords().adapters.find((x) => x.id === p.connectedId);
+          if (!made) throw new ChannelError('auth-expired', `the account this sign-in connected (${p.connectedId}) is gone — nothing was written`, { retryable: false });
+          return tokensFor(made).write(token, meta);
+        }
         // verify r7: a consent cancelled meanwhile writes nothing; a consent naming nobody is refused here too
         // (verify r8: the engine's stop is a cancel too; the sentence says whether the TARGET keeps a sign-in)
         const c = (meta.consent && typeof meta.consent.cancelled === 'function' ? meta.consent.cancelled() : null) || (engineCtx.stopped ? 'shutdown' : null);
         if (c) throw new ChannelError('auth-expired', cancelledSentence(rec.label || rec.id, String(c), targetHolds(p)), { retryable: false, detail: { cancelled: String(c) } });
         const offered = identityOf(token);
         if (meta.consent && !Object.keys(offered).length) throw new ChannelError('forbidden', namelessSentence(rec.label || rec.id, 'the sign-in named no account'), { retryable: false, detail: { nameless: true } });
+        // lane lark-consent-chain: a later page names the SAME person as the pages before it (the pending holds who they named)
+        const mmChain = p.identity && Object.keys(p.identity).length ? identityMismatch(p.identity, offered) : null;
+        if (mmChain) throw new ChannelError('forbidden', mismatchSentence(rec.label || rec.id, mmChain), { retryable: false, detail: { identityMismatch: mmChain } });
         p.tokenEnc = box.enc(JSON.stringify(token));
         p.identity = offered;   // verify r5: judged against the target's held identity when the rebind lands
-        p.tokenMeta = { expiresAt: meta.expiresAt == null ? null : Number(meta.expiresAt), scopes: Array.isArray(meta.scopes) ? meta.scopes.slice() : [], user: meta.user || token.name || token.email || token.openId || null, refusedScopes: refusedScopesOf(meta.refusedScopes), morePending: morePendingOf(meta.morePending) };
+        p.tokenMeta = { expiresAt: meta.expiresAt == null ? null : Number(meta.expiresAt), scopes: Array.isArray(meta.scopes) ? meta.scopes.slice() : [], user: meta.user || token.name || token.email || token.openId || null, refusedScopes: refusedScopesOf(meta.refusedScopes), morePending: morePendingOf(meta.morePending), morePendingScopes: pendingScopesOf(meta.morePendingScopes), nextPageCount: morePendingOf(meta.nextPageCount), morePendingPages: morePendingOf(meta.morePendingPages) };
       },
       async clear() { p.tokenEnc = null; p.tokenMeta = null; },
     };
@@ -496,11 +507,13 @@ function create(engineCtx) {
     const flow = await p.adapter.auth.begin({ origin, road });   // design 018: the browser's own origin rides the Slack state (the relay's way back); lane pod-oauth-callback: it decides the route vs the loopback, `road` = the person's last resort
     p.flowId = flow.flowId;
     pendingFlows.set(p.flowId, p);
+    noteChain(flow, origin, road);   // lane lark-consent-chain: a first page of a chain — its next pages ride this road
     return { flowId: p.flowId, kind: mod.kind, credentialKey: choice.credentialKey, flow: safeFlow(flow) };
   }
   async function onPendingDone(p, r) {
     // verify r8: NOTHING is written after stop — the pending's durable write (applyRebind / Connect) is dropped
     if (engineCtx.stopped) { pendingFlows.delete(p.flowId); log.log(`[channels] ${p.targetId || p.kind}: a sign-in completed after the engine stopped — nothing is written after stop (${r && r.ok ? 'its consent is not applied' : (r && r.error) || 'the consent flow failed'}); sign in again after the restart`); return; }
+    if (r && r.flowId && p.flowId && r.flowId !== p.flowId) return onChainPage(p, r);   // lane lark-consent-chain: a Connect's LATER page
     p.done = true;
     p.cancelled = (r && r.cancelled) || null;
     // verify r7: a flow cancelled mid-exchange is not a consent. verify r8: HERE the durable write is still ahead
@@ -510,9 +523,79 @@ function create(engineCtx) {
     p.error = p.ok ? null : (p.cancelled && !(r && r.error) ? cancelledSentence(p.rec.label || p.targetId || p.kind, p.cancelled, targetHolds(p)) : String((r && r.error) || 'the consent flow failed'));
     p.user = (p.tokenMeta && p.tokenMeta.user) || (r && r.result && r.result.user) || null;
     if (p.targetId && r && r.cancelled === 'superseded') { pendingFlows.delete(p.flowId); log.log(`[channels] ${p.targetId}: an older re-authorize completed after a newer one and was refused — the newer sign-in stands`); return; }   // verify r7
-    if (p.targetId) return applyRebind(p);
+    // lane lark-consent-chain: a rebind that landed goes on with its next page under the account's (new) client
+    if (p.targetId) { const made = await applyRebind(p); return made ? chainNext(r, (o) => adapterFor(made).adapter.auth.begin(o)) : null; }
     if (p.ok) log.log(`[channels] ${p.kind}: signed in${p.user ? ` as ${p.user}` : ''} (${p.choice.credentialKey}) — waiting for Connect`);
     else log.warn(`[channels] ${p.kind}: consent flow failed: ${p.error}`);
+    // lane lark-consent-chain: a Connect's first page landed — its next page begins on the pending's own adapter (the account
+    // is made by Connect, whenever the person presses it — before or after the later pages land)
+    return p.ok ? chainNext(r, (o) => beginChainPage(p, o)) : null;
+  }
+  // ── lane lark-consent-chain (the owner 2026-10-23, on Lark's «另外 248 项权限»: 「不能一次性打开所有吗？」): ONE PRESS, EVERY PAGE ──
+  // A vendor bounds one consent page (Lark: 200 scopes, a ~3 KB authorize URL), so every permission the app enabled is
+  // several pages. The adapter cuts them (its flow carries `chain` {page, total}); when a page LANDS IN A TAB with
+  // permissions still pending, the next page begins here over the SAME road and the tab is sent on to it (the landing
+  // route / the loopback listener draw src/consent-road.js's chain page). A later page that does not land (the tab closed,
+  // declined, its time ran out) is no failed sign-in: what the earlier pages granted stays (Lark's grants accumulate) and
+  // the row counts the rest.
+  /** flowId → {origin, road, last} of a chain page in flight (`last` = the permissions pending before it: a page that granted
+   *  none ends the chain — a page is never asked twice). */
+  const chainRoads = new Map();
+  const CHAIN_ROADS_MAX = 64;
+  /** flowId → the pending of a Connect's LATER page (begun on the pending's own adapter). */
+  const chainPending = new Map();
+  function noteChain(flow, origin, road, last = Infinity) {
+    if (!(flow && flow.flowId && flow.chain && flow.chain.page < flow.chain.total)) return;
+    chainRoads.set(flow.flowId, { origin: origin || null, road: road || null, last });
+    while (chainRoads.size > CHAIN_ROADS_MAX) chainRoads.delete(chainRoads.keys().next().value);
+  }
+  /** A page of a chain past its first (`r` = the consent machine's report of its end). */
+  const laterPage = (r) => { const s = r && r.flowId ? flows.status(r.flowId) : null; return !!(s && s.chain && s.chain.page >= 2); };
+  /** THE NEXT PAGE: a chain page that landed in a TAB (`r.tab` — a paste-back is never chained) with permissions still
+   *  pending begins the next one on `begin` and answers it for the tab (`{next: {url, page, total}}`), else null. */
+  async function chainNext(r, begin) {
+    const road = r && r.flowId ? chainRoads.get(r.flowId) : null;
+    if (road) chainRoads.delete(r.flowId);
+    const st = road ? flows.status(r.flowId) : null;
+    const at = st && st.chain;
+    if (!at || !r.ok || !r.tab || at.page >= at.total || engineCtx.stopped) return null;
+    const more = morePendingOf(r.result && r.result.morePending);
+    if (!more) return null;
+    if (!(more < road.last)) { log.warn(`[channels] ${r.id}: page ${at.page}/${at.total} of the sign-in granted none of the permissions it asked — the chain stops (a page is never asked twice); ${more} stay for a later Re-authorize`); return null; }
+    let flow;
+    try { flow = await begin({ origin: road.origin, road: road.road, chain: { page: at.page + 1, total: at.total } }); }
+    catch (e) { log.warn(`[channels] ${r.id}: page ${at.page + 1}/${at.total} of the sign-in could not start (${(e && e.message) || e}) — ${more} permissions stay for a later Re-authorize`); return null; }
+    // a page whose own callback cannot listen (the fixed loopback port held elsewhere) is never sent to: its consent would
+    // land where nobody hears it — ended, said, the rest counted on the row
+    if (flow && flow.refusal) { flows.cancel(flow.flowId, 'cancelled'); chainPending.delete(flow.flowId); log.warn(`[channels] ${r.id}: page ${at.page + 1}/${at.total} of the sign-in cannot listen for its answer (${flow.refusal.message || flow.refusal.code}) — the chain stops; ${more} permissions stay for a later Re-authorize`); return null; }
+    noteChain(flow, road.origin, road.road, more);
+    log.log(`[channels] ${r.id}: page ${at.page}/${at.total} of the sign-in landed — page ${flow && flow.chain ? flow.chain.page : at.page + 1}/${flow && flow.chain ? flow.chain.total : at.total} opens in the same tab (${more} permissions to go)`);
+    if (!engineCtx.stopped) notify([]);
+    return flow && flow.consentUrl && flow.chain ? { next: { url: flow.consentUrl, page: flow.chain.page, total: flow.chain.total } } : null;
+  }
+  /** A Connect's later page, on the pending's own adapter (its tokens: the pending's, or the account Connect made). */
+  async function beginChainPage(p, o) {
+    const flow = await p.adapter.auth.begin(o);
+    chainPending.set(flow.flowId, p);
+    return flow;
+  }
+  /** …its end: a page that did not land changes nothing; one that landed after Connect is the account's (its done path —
+   *  re-judged, a pass, its next page on the account's adapter); before Connect the pending holds the fuller token. */
+  async function onChainPage(p, r) {
+    chainPending.delete(r.flowId);
+    if (!(r && r.ok)) { chainRoads.delete(r.flowId); log.log(`[channels] ${p.connectedId || p.kind}: a later page of the sign-in ended without its consent (${(r && (r.cancelled || r.error)) || 'not granted'}) — the pages granted before it stand`); if (!engineCtx.stopped) notify([]); return null; }
+    if (p.connectedId) return onAuthDone(p.connectedId, r);
+    return chainNext(r, (o) => beginChainPage(p, o));
+  }
+  /** A Connect's later pages still running for the account it made — ended with the account's own sign-in verbs. */
+  function cancelChainOf(recId) {
+    for (const [id, p] of chainPending) if (p.connectedId === recId) { flows.cancel(id, 'cancelled'); chainPending.delete(id); chainRoads.delete(id); }
+  }
+  /** The chain an account's sign-in is walking: `{page, total}` of its running page, or null (the row's «第 2/3 页»). */
+  function consentChainOf(recId) {
+    let st = flows.runningFor(recId);
+    if (!(st && st.chain)) for (const [id, p] of chainPending) { if (p.connectedId !== recId) continue; const s = flows.status(id); if (s && s.running && s.chain) { st = s; break; } }
+    return st && st.running && st.chain ? { page: st.chain.page, total: st.chain.total } : null;
   }
   /** The switched-client re-authorize LANDS: client + token in ONE write. */
   async function applyRebind(p) {
@@ -544,7 +627,7 @@ function create(engineCtx) {
     await store.adapters.update(() => {
       rec.credentialKey = p.choice.credentialKey;
       if (p.choice.credential) rec.credential = p.choice.credential; else delete rec.credential;
-      rec.auth = { ...(rec.auth || {}), tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || (rec.auth && rec.auth.user) || null, updatedAt: now(), scopesAt: now(), refusedScopes: p.tokenMeta.refusedScopes || [], morePending: p.tokenMeta.morePending || 0 };
+      rec.auth = { ...(rec.auth || {}), tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || (rec.auth && rec.auth.user) || null, updatedAt: now(), scopesAt: now(), refusedScopes: p.tokenMeta.refusedScopes || [], morePending: p.tokenMeta.morePending || 0, morePendingScopes: p.tokenMeta.morePendingScopes || [], nextPageCount: p.tokenMeta.nextPageCount || 0, morePendingPages: p.tokenMeta.morePendingPages || 0 };
       // lane slack-grid-identity: the one stamp rule, as at the token door — an organisation the consent names is learned once
       const st = stampIdentity(rec.identity, p.identity);
       if (st.changed) rec.identity = st.identity;
@@ -562,6 +645,7 @@ function create(engineCtx) {
     if (!engineCtx.stopped) notify([]);
     if (!engineCtx.stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after re-authorize failed:', err && err.message));
     if (!engineCtx.stopped && engineCtx.timer) syncPushLanes().catch(() => {});
+    return rec;   // lane lark-consent-chain: the rebind landed (its next page rides the account)
   }
   /** START a consent for an account that does not exist yet:
    *  `{kind, clientPreset | credentialKey | clientId + clientSecret |
@@ -610,7 +694,7 @@ function create(engineCtx) {
     const v = row.landing.stateVerdict(state, { sign: signState, now: now(), ttlMs: PENDING_FLOW_TTL_MS });
     if (!v.ok) { log.warn(`[channels] ${String(kind).slice(0, 20)}: a consent landing was refused (${v.why})`); return { ok: false, why: v.why, user: null, error: null }; }
     const st = flows.status(v.parts.flowId);
-    const p = pendingFlows.get(v.parts.flowId) || null;
+    const p = pendingFlows.get(v.parts.flowId) || chainPending.get(v.parts.flowId) || null;   // lane lark-consent-chain: a Connect's later page
     const owner = p ? p.kind : (st ? ((adapterRecords().adapters.find((r) => r.id === st.id) || {}).kind || null) : null);
     if (!st || owner !== kind) { log.warn(`[channels] ${String(kind).slice(0, 20)}: a consent landing named no running ${String(kind).slice(0, 20)} sign-in (wrong-flow)`); return { ok: false, why: 'wrong-flow', user: null, error: null }; }
     const r = await flows.finishByState(state, code, { error });
@@ -623,7 +707,11 @@ function create(engineCtx) {
     // stranger's — a re-authorize's refusal names the account it guards (its label, the HELD Slack identity beside the
     // offered one), so a landing on an EXISTING account's flow says fixed words; the owner's window keeps the sentence
     const onRecord = p ? !!p.targetId : true;
-    return { ok, why: ok ? null : (refused ? 'failed' : (r.why || 'failed')), user: ok && r.result ? (r.result.user || null) : null, error: ok ? null : (onRecord ? 'the account was not changed — the VibeSpace window where you pressed Re-authorize says why' : (refused ? (p.error || 'the sign-in was refused') : (r.error || null))) };
+    // lane lark-consent-chain: THE SIGNED STATE says this page is one of a chain with pages after it — the next page the engine
+    // began (r.next) goes back with the page, which sends this tab on; a declined later page keeps its place (`chain`)
+    const chain = v.parts.chain || null;
+    const next = ok && chain && chain.page < chain.total && r.next ? r.next : null;
+    return { ok, why: ok ? null : (refused ? 'failed' : (r.why || 'failed')), user: ok && r.result ? (r.result.user || null) : null, error: ok ? null : (onRecord ? 'the account was not changed — the VibeSpace window where you pressed Re-authorize says why' : (refused ? (p.error || 'the sign-in was refused') : (r.error || null))), next, chain };
   }
   /** PASTE-BACK for a pending flow: the redirect URL the browser landed on. design 017: `box` = which box of a
    *  stepped paste card it came from; a STEP that landed (`step`) answers its public facts and NO token — the sign-in
@@ -671,7 +759,7 @@ function create(engineCtx) {
     assertResolvable(mod, rec);
     const e = adapterFor(rec);
     let flow;
-    try { flow = await e.adapter.auth.begin(); }
+    try { flow = await e.adapter.auth.begin(); noteChain(flow, null, null); }
     catch (err) { dropLive(rec.id, 'connect refused'); paceCarry.delete(rec.id); throw err; }   // a refused begin on a fresh record leaves nothing behind (not even its ghost bucket)
     await store.adapters.update((a) => { a.adapters.push(rec); });
     auditMountCopy(choice, mod, rec.id);
@@ -717,10 +805,13 @@ function create(engineCtx) {
     if (p.choice.credential) rec.credential = p.choice.credential;
     rec.options = options;
     if (b.name) rec.label = cleanLabel(b.name) || rec.label;
-    rec.auth = { tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || null, updatedAt: now(), refusedScopes: p.tokenMeta.refusedScopes || [], morePending: p.tokenMeta.morePending || 0 };
+    rec.auth = { tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, user: p.tokenMeta.user || null, updatedAt: now(), refusedScopes: p.tokenMeta.refusedScopes || [], morePending: p.tokenMeta.morePending || 0, morePendingScopes: p.tokenMeta.morePendingScopes || [], nextPageCount: p.tokenMeta.nextPageCount || 0, morePendingPages: p.tokenMeta.morePendingPages || 0 };
     if (p.identity && Object.keys(p.identity).length) rec.identity = { ...p.identity };   // verify r5: whose account this record is, from its first consent
     rec.lastAuthAt = now();
-    await store.adapters.update((a) => { a.adapters.push(rec); });
+    // lane lark-consent-chain: a later page still walking — in the SAME synchronous step the account is made, it takes the
+    // pending's newest token and becomes where the later pages write (memTokens forwards to the account's own door)
+    const chained = [...chainPending.values()].includes(p);
+    await store.adapters.update((a) => { if (chained) { Object.assign(rec.auth, { tokenEnc: p.tokenEnc, expiresAt: p.tokenMeta.expiresAt, scopes: p.tokenMeta.scopes, morePending: p.tokenMeta.morePending || 0, morePendingScopes: p.tokenMeta.morePendingScopes || [], nextPageCount: p.tokenMeta.nextPageCount || 0, morePendingPages: p.tokenMeta.morePendingPages || 0 }); p.connectedId = rec.id; } a.adapters.push(rec); });   // int349: the newest page's counts too (channel-row-notices' row)
     const e = adapterFor(rec);
     await refreshAuth(e);
     log.log(`[channels] ${rec.id}: connected${rec.auth.user ? ` as ${rec.auth.user}` : ''} (${rec.credentialKey})`);
@@ -748,6 +839,7 @@ function create(engineCtx) {
       if (ev.key) await store.adapters.update(() => { rec.credentialKey = ev.key; });
     }
     if (rec.enabled === false) await store.adapters.update(() => { rec.enabled = true; });
+    cancelChainOf(rec.id);   // lane lark-consent-chain: a newer press is the sign-in (a Connect's later pages end)
     if (choice && !sameClient(rec, choice)) {
       const r = await beginPending(mod, choice, { target: rec, origin, road });
       auditMountCopy(choice, mod, rec.id);
@@ -761,6 +853,7 @@ function create(engineCtx) {
     const e = adapterFor(rec);
     assertResolvable(mod, rec);
     const flow = await e.adapter.auth.begin({ origin, road });
+    noteChain(flow, origin, road);   // lane lark-consent-chain: the first page of a chain
     await store.adapters.update(() => { rec.lastAuthError = null; });
     notify([]);
     return withMount({ adapter: adapterView(rec), flow: safeFlow(flow) }, choice);
@@ -774,7 +867,9 @@ function create(engineCtx) {
    *  secret, never the exchange result. */
   function safeFlow(st) {
     if (!st) return null;
-    return { flowId: st.flowId, mode: st.mode, running: !!st.running, done: !!st.done, ok: st.ok, error: st.error || null, why: st.why || null, cancelled: st.cancelled || null, step: st.step || null, stepFacts: st.stepFacts && typeof st.stepFacts === 'object' ? { ...st.stepFacts } : null, consentUrl: st.consentUrl, redirectUri: st.redirectUri, road: st.road || null, port: st.port, listening: !!st.listening, refusal: st.refusal || null, pasteBack: true, startedAt: st.startedAt, expiresAt: st.expiresAt, optional: Array.isArray(st.optional) ? st.optional.slice() : [], narrowed: Array.isArray(st.narrowed) ? st.narrowed.slice() : null, groups: Array.isArray(st.groups) ? st.groups.map((g) => (Array.isArray(g) ? g.slice() : [])) : [], nextNarrow: Array.isArray(st.nextNarrow) ? st.nextNarrow.slice() : null };
+    return { flowId: st.flowId, mode: st.mode, running: !!st.running, done: !!st.done, ok: st.ok, error: st.error || null, why: st.why || null, cancelled: st.cancelled || null, step: st.step || null, stepFacts: st.stepFacts && typeof st.stepFacts === 'object' ? { ...st.stepFacts } : null, consentUrl: st.consentUrl, redirectUri: st.redirectUri, road: st.road || null, port: st.port, listening: !!st.listening, refusal: st.refusal || null, pasteBack: true, startedAt: st.startedAt, expiresAt: st.expiresAt, optional: Array.isArray(st.optional) ? st.optional.slice() : [], narrowed: Array.isArray(st.narrowed) ? st.narrowed.slice() : null, groups: Array.isArray(st.groups) ? st.groups.map((g) => (Array.isArray(g) ? g.slice() : [])) : [], nextNarrow: Array.isArray(st.nextNarrow) ? st.nextNarrow.slice() : null,
+      // lane lark-consent-chain: this page's place in a chain; ADDENDUM 1: where its scopes came from (the narrowing row's verdict)
+      chain: st.chain && typeof st.chain === 'object' ? { page: st.chain.page, total: st.chain.total } : null, scopesFrom: st.scopesFrom || null, scopesWhy: st.scopesWhy || null, lacking: Array.isArray(st.lacking) ? st.lacking.slice() : [] };
   }
   /** Paste-back (§12.4): the user pastes the redirect URL their browser
    *  landed on; the adapter's own `auth.finish` runs the state check. A
@@ -815,6 +910,7 @@ function create(engineCtx) {
     const running = flows.runningFor(rec.id);
     const cancelled = running ? flows.cancel(running.flowId, 'cancelled') : false;
     if (running) pendingFlows.delete(running.flowId);
+    cancelChainOf(rec.id);   // lane lark-consent-chain
     notify([]);
     return { ok: true, cancelled };
   }
@@ -827,6 +923,9 @@ function create(engineCtx) {
     // verify r8: NOTHING is written after stop — the door refused the late exchange by name (`shutdown`) or its
     // consent had already landed; either way the record is left as it is and the next boot reads it
     if (engineCtx.stopped) { log.log(`[channels] ${rec.id}: a sign-in completed after the engine stopped — nothing is written after stop (${r && r.ok ? 'its consent had landed and stands' : (r && r.error) || 'the consent flow failed'})`); return; }
+    // lane lark-consent-chain: a LATER page of a chain that ended without its consent (the tab closed, declined, its time
+    // ran out) is no failed sign-in — the earlier pages' grants stand; said in the journal, the row counts what is left
+    if (!(r && r.ok) && laterPage(r)) { chainRoads.delete(r.flowId); log.log(`[channels] ${rec.id}: a later page of the sign-in ended without its consent (${(r && (r.cancelled || r.error)) || 'not granted'}) — the pages granted before it stand`); if (!engineCtx.stopped) notify([]); return null; }
     // verify r7: a flow a NEWER sign-in superseded and REFUSED reports its end AFTER the newer one landed — its refusal
     // is not the record's last sign-in line (the connected record used to wear "replaced by a newer sign-in" as an
     // error). verify r8: one whose consent LANDED before the newer began is a landed consent — the write is the fact
@@ -849,6 +948,8 @@ function create(engineCtx) {
     if (!engineCtx.stopped) notify([]);
     if (r && r.ok && !engineCtx.stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after connect failed:', err && err.message));
     if (r && r.ok && !engineCtx.stopped && engineCtx.timer) syncPushLanes().catch(() => {});   // a fresh consent may be what the lane was waiting for
+    // lane lark-consent-chain: a chain's page landed in a tab with permissions still pending — the next page, same tab
+    return r && r.ok ? chainNext(r, (o) => adapterFor(rec).adapter.auth.begin(o)) : null;
   }
   /** DISCONNECT = drop the token, for EVERY account (r4 §4: the pre-r4
    *  "a further account's disconnect removes it" special case is gone —
@@ -859,6 +960,7 @@ function create(engineCtx) {
     const rec = recordOrThrow(adapterId);
     const running = flows.runningFor(rec.id);
     if (running) { flows.cancel(running.flowId, 'cancelled'); pendingFlows.delete(running.flowId); }
+    cancelChainOf(rec.id);   // lane lark-consent-chain: a later page never re-connects what the owner disconnected
     // verify r4: THE exit, BEFORE the token goes — every queued paced call is aborted by name (18 × 20 units used to leave
     // with the Bearer captured before the wait), the pass in flight ends at its next step, the lane cannot outlive its credential
     dropLive(rec.id, 'disconnected');
@@ -922,6 +1024,7 @@ function create(engineCtx) {
     }
     const running = flows.runningFor(rec.id);
     if (running) { flows.cancel(running.flowId, 'cancelled'); pendingFlows.delete(running.flowId); }
+    cancelChainOf(rec.id);   // lane lark-consent-chain
     await retractFailure(rec);
     await retractSignin(rec, 'the account was removed');   // lane channel-reauth-visible
     await removeRecord(rec);
@@ -1260,6 +1363,7 @@ function create(engineCtx) {
     setLabel, setCustomSecret, adapterConfig, inlineLegacyClient, scheduleInline, inlineLegacyClients, stampIdentities, stampCredentialKeys,
     setEnabled, setAccountPolicy, setSenderHonesty, setOptions,
     connectOffer, connectOffers, connectTaught,   // lane pod-oauth-callback: the chat's Connect row
+    consentChainOf,   // lane lark-consent-chain: the account row's «第 2/3 页»
   };
 }
 

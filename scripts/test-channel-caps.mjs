@@ -528,9 +528,9 @@ const rec = (push) => ({ push: { enabled: true, state: 'live', lastEventAt: NOW 
     refused: g([{ what: 'reactions', missing: [RX], refused: [RX], wanted: true }, { what: 'feed', missing: [S], refused: [], wanted: true }]),
     none: g([]),
   };
-  ok(G.both.text === 'One Re-authorize adds: reading reactions · new-message search and single chats' && !G.both.warn, 'grantsText: an account predating both lanes says ONE line with ONE Re-authorize', JSON.stringify(G.both));
-  ok(G.one.text === 'One Re-authorize adds: new-message search and single chats' && G.off.text === '' && G.none.text === '', 'grantsText: only what is missing and WANTED (an option switched off says nothing)', JSON.stringify([G.one, G.off]));
-  ok(G.refused.text === `Lark refused ${RX} — enable it in the app console and Re-authorize · One Re-authorize adds: new-message search and single chats` && G.refused.warn, 'grantsText: a scope the vendor refused at the consent is named with the console step, the rest still one Re-authorize', JSON.stringify(G.refused));
+  ok(G.both.text === 'One more re-authorization adds: reading reactions · new-message search and single chats — sending and receiving work without it' && !G.both.warn, 'grantsText: an account predating both lanes says ONE line with ONE Re-authorize', JSON.stringify(G.both));
+  ok(G.one.text === 'One more re-authorization adds: new-message search and single chats — sending and receiving work without it' && G.off.text === '' && G.none.text === '', 'grantsText: only what is missing and WANTED (an option switched off says nothing)', JSON.stringify([G.one, G.off]));
+  ok(G.refused.text === `Lark refused ${RX} — enable it in the app console and Re-authorize · One more re-authorization adds: new-message search and single chats — sending and receiving work without it` && G.refused.warn, 'grantsText: a scope the vendor refused at the consent is named with the console step, the rest still one Re-authorize', JSON.stringify(G.refused));
   ok(C.untitledText('dm') === 'Single chat' && C.untitledText('group') === 'New conversation' && C.laneWhyText('feed') === 'new-message search', 'a born conversation without a title is worded ("Single chat"), never its raw id; the lane reason "feed" has words');
 }
 
@@ -594,7 +594,7 @@ console.log('lane lark-upload-preflight: the send-attachment offer table');
   const m = C.offers({ sendAttachments: row }, cc(LK.capsOfScopes(SEND).files), 'send-attachment', NOW);
   ok(JSON.stringify(m.requiredScopes) === JSON.stringify(['im:resource']), 'the refusal names the scope to enable (requiredScopes = im:resource — lane lark-upload-scope-split: never the deprecated V2 of the 99991679 pair)', JSON.stringify(m));
   ok(C.OFFER_WHAT.includes('send-attachment') && JSON.stringify(C.convCapsState(cc({ send: false, why: 'attachments-not-sendable', requiredScopes: ['im:resource'] }), NOW).files) === JSON.stringify({ send: false, why: 'attachments-not-sendable', requiredScopes: ['im:resource'] }), 'OFFER_WHAT lists it; the cached state carries the files row');
-  ok(C.grantsText([{ what: 'files', missing: ['im:resource:upload', 'im:resource'], refused: [], wanted: true }]).text === 'One Re-authorize adds: sending files', 'the account row: "One Re-authorize adds: sending files"');
+  ok(C.grantsText([{ what: 'files', missing: ['im:resource:upload', 'im:resource'], refused: [], wanted: true }]).text === 'One more re-authorization adds: sending files — sending and receiving work without it', 'the account row: "One more re-authorization adds: sending files — sending and receiving work without it"');
   // lane lark-upload-scope-split: the consent asks im:resource only (V2 is deprecated); a narrowed consent that dropped it
   // while a HELD legacy V2 still carries files says so (no warning); none held ⇒ files are off, naming im:resource
   const V2 = 'im:resource:upload', V1 = 'im:resource';
@@ -603,7 +603,7 @@ console.log('lane lark-upload-preflight: the send-attachment offer table');
   const mix = C.grantsText([{ what: 'feed', missing: ['search:message'], refused: [], wanted: true }, { what: 'files', missing: [], refused: [], dropped: [V1], wanted: true }], { vendor: 'Lark' });
   ok(kept.text === 'Lark refused im:resource — sending files still works' && !kept.warn, 'files carried by a held legacy V2, im:resource refused: "Lark refused im:resource — sending files still works", no warning', JSON.stringify(kept));
   ok(both.text === 'Sending files is off: Lark refused im:resource — enable it in the app console and Re-authorize' && both.warn, 'none held, im:resource refused: sending files is off, by name, a warning', JSON.stringify(both));
-  ok(mix.text === 'One Re-authorize adds: new-message search and single chats · Lark refused im:resource — sending files still works' && C.grantsText([{ what: 'files', missing: [], refused: [], dropped: [V1], wanted: false }]).text === '', 'the kept line follows another grant\'s; an unwanted grant says nothing', JSON.stringify(mix));
+  ok(mix.text === 'One more re-authorization adds: new-message search and single chats — sending and receiving work without it · Lark refused im:resource — sending files still works' && C.grantsText([{ what: 'files', missing: [], refused: [], dropped: [V1], wanted: false }]).text === '', 'the kept line follows another grant\'s; an unwanted grant says nothing', JSON.stringify(mix));
   ok(LK.capsOfScopes([...SEND, V1]).files.send === true && LK.capsOfScopes([...SEND, V2]).files.send === true && LK.capsOfScopes(SEND).files.send === false, 'caps.files.send: V1 alone ⇒ true, V2 alone ⇒ true, neither ⇒ false');
 }
 
@@ -651,6 +651,64 @@ console.log('lane composer-file-only-send: the sendAttachments row\'s `alone` ce
   const accepted = [{ ...ROW, alone: true }, ROW, { ...ROW, alone: false }, { ...ROW, withText: false, alone: true }, { images: { ...SPLIT.images, alone: true }, files: { ...SPLIT.files, alone: false } }].map(reg);
   const refused = [{ ...ROW, alone: 'yes' }, { ...ROW, withText: false, alone: false }, { images: { ...SPLIT.images, alone: 1 } }].map(reg);
   ok(accepted.every((x) => x === null) && refused.every((x) => x && /alone/.test(x)), 'the registry contract: `alone` is a boolean on the row or a group (absent allowed); a non-boolean, or alone:false on a withText:false group (it could carry nothing), is refused by name', JSON.stringify({ accepted, refused }));
+}
+
+// ── lane channel-row-notices (the owner 2026-10-23, his Channels window: 「这个提示最好不要常驻了，很丑陋；然后为啥我这里提示需要
+// 重新授权，重新授权干啥？」 + ADDENDUM 1/2): THE NOTICE GRAMMAR — a standing push state is ONE short line with a sig a dismissal
+// remembers (its cause under ⓘ, never a command); a re-authorization line names its gain and what works meanwhile, in
+// zh / en / ja; the paged consent says the NEXT page and the total («继续授权以获取应用下一组权限（xxx 个），总计剩余 yyy 个权限»).
+console.log('lane channel-row-notices: the push notice + the re-authorization words table');
+{
+  const ZHd = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, JAd = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+  const tOf = (d) => (s, p) => String(d ? (d[s] || s) : s).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
+  const T = { en: tOf(null), zh: tOf(ZHd), ja: tOf(JAd) };
+  const lark = require(path.join(REPO, 'src/channels/lark.js'));
+  const LIVE = require(path.join(REPO, 'src/channels/live/lark.js'));
+  // ① the owner's Lark push lane (adapters.json: state 'unavailable', code sdk-not-installed, the lane's words + causes)
+  const OWNER_PUSH = { enabled: true, claimedExclusive: 'unknown', state: 'unavailable', lastStateCode: 'sdk-not-installed', lastStateWhy: 'the official Lark SDK (@larksuiteoapi/node-sdk) is not installed on this instance — `npm install @larksuiteoapi/node-sdk` and restart; until then the poll carries everything', unavailableWords: lark.unavailableWords, unavailableCauses: lark.unavailableCauses };
+  const pz = C.pushLaneNotice(OWNER_PUSH, { via: 'poll' }, { t: T.zh, steps: true });
+  ok(pz && pz.line === '实时推送未开启 — 消息靠轮询（30 秒–15 分钟）' && pz.sig === 'unavailable:sdk-not-installed' && pz.verb === null, `① the owner's parked Lark lane is ONE short line «${pz && pz.line}» (sig ${pz && pz.sig}), no verb`, JSON.stringify(pz));
+  const ALL = (n) => [n.line, ...n.details].join('\n');
+  ok(pz && !/npm|install @|im:message|`/.test(ALL(pz)) && pz.details[0] === '本实例没有安装飞书官方 SDK。' && pz.details.some((d) => /实时推送（可选）|设置卡/.test(d)), '① …its ⓘ lines say the CAUSE and where the steps are — never a command (no npm, no scope, no backtick)', JSON.stringify(pz && pz.details));
+  for (const [lang, t] of Object.entries(T)) {
+    const n = C.pushLaneNotice(OWNER_PUSH, { via: 'poll' }, { t, steps: true });
+    ok(n && n.line && n.line.length <= 72 && n.details.length === 3 && (lang === 'en' || n.line !== C.pushLaneNotice(OWNER_PUSH, { via: 'poll' }, {}).line), `① ${lang}: «${n && n.line}» (${n && n.line.length} chars)`);
+  }
+  const healthy = [{ enabled: true, state: 'live' }, { enabled: false, state: 'unavailable' }, { enabled: true, state: null }, null].map((p) => C.pushLaneNotice(p, { via: 'push', live: true }, { t: T.zh }));
+  ok(healthy.every((x) => x === null), '① a healthy, switched-off or unstarted push lane says NOTHING on the row');
+  const later = C.pushLaneNotice({ ...OWNER_PUSH, lastStateCode: 'needs-credentials', lastStateAt: 9 }, { via: 'poll' }, { t: T.zh });
+  const restart = C.pushLaneNotice({ ...OWNER_PUSH, lastStateAt: 12345 }, { via: 'poll' }, { t: T.zh });
+  const dem = C.pushLaneNotice({ enabled: true, state: 'live', demotedAt: 1700, demoted: { missed: 3, total: 40, rate: 0.075 } }, { via: 'poll' }, { t: T.zh });
+  ok(later.sig !== pz.sig && restart.sig === pz.sig && dem.sig === 'demoted:1700' && dem.verb === 'redeclare' && /40/.test(dem.details[0]) && /3/.test(dem.details[0]), '① the sig: a CHANGED state (another code, a demotion) is shown again; a restart parking the same code is not; a demotion keeps its numbers under ⓘ and its verb', JSON.stringify([later.sig, restart.sig, dem]));
+  ok(C.pushLaneNotice({ ...OWNER_PUSH, unavailableCauses: null }, { via: 'poll' }, { t: T.en }).details[0] === T.en(lark.unavailableWords['sdk-not-installed']) && Object.keys(LIVE.UNAVAILABLE_CAUSES).every((k) => k in LIVE.UNAVAILABLE_WORDS), '① a code without a declared cause falls back to the lane\'s words; every cause names a declared code');
+  // ② the re-authorization words table — every case, every language; the RED control: never a bare "needs re-authorization"
+  const FAM = C.scopeFamilies(['calendar:calendar:readonly', 'docx:document', 'bitable:app', 'contact:user.base:readonly', 'approval:approval', 'zz:unknown'], lark.scopeFamily);
+  ok(JSON.stringify(FAM) === JSON.stringify([{ family: 'docs', n: 2 }, { family: 'calendar', n: 1 }, { family: 'contacts', n: 1 }, { family: 'approval', n: 1 }, { family: 'other', n: 1 }]) && FAM.every((f) => C.SCOPE_FAMILIES.includes(f.family)), '② Lark\'s permissions by FEATURE FAMILY (docx + bitable = docs and sheets; an unknown namespace = other), most first', JSON.stringify(FAM));
+  const CASES = [
+    ['read-only', 'send-scope-not-granted', { scopes: ['https://www.googleapis.com/auth/gmail.send'] }, { zh: '可读，回复需要再授权一次（缺 gmail.send 权限）' }],
+    ['more-pending', 'paged-consent', { n: 248 }, { zh: '继续授权以获取应用下一组权限，总计剩余 248 个权限（具体是哪些，授权时才知道）；现在的收发消息不受影响' }],
+    ['more-pending', 'paged-consent', { n: 248, next: 115, families: FAM }, { zh: '继续授权以获取应用下一组权限（115 个），总计剩余 248 个权限 — 下一组：云文档、日历、通讯录、审批…；现在的收发消息不受影响' }],
+    ['more-pending', 'paged-consent', { n: 248, next: 115, families: FAM, api: true }, { zh: '继续授权以获取应用下一组权限（115 个），总计剩余 248 个权限 — 授权后 agent 可通过 API 使用云文档、日历、通讯录、审批…；现在的收发消息不受影响' }],
+    ['more-pending', 'paged-consent', { n: 248, next: 115, pages: 3, chain: true, families: FAM }, { zh: '继续授权一次补齐剩余 248 项权限（共 3 页，逐页同意） — 云文档、日历、通讯录、审批…；现在的收发消息不受影响' }],
+    ['expiring', 'expires', { eta: '3d' }, { zh: '登录将在 3d 后到期 — 到期前再授权一次即可' }],
+    ['expiring', 'renewals-stopped', { eta: '5h' }, { zh: '自动续期已停止 — 登录将在 5h 后到期，到期前再授权一次即可' }],
+    ['expiring', 'overdue', {}, { zh: '登录已到期 — 再授权一次即可恢复' }],
+  ];
+  for (const [kind, reason, facts, want] of CASES) {
+    const got = Object.fromEntries(Object.entries(T).map(([l, t]) => [l, C.reauthWhyText(kind, reason, facts, { t })]));
+    ok(got.zh.text === want.zh && got.en.text && got.ja.text && got.en.text !== got.zh.text && got.ja.text !== got.en.text && !/\{\w+\}/.test(got.en.text + got.zh.text + got.ja.text), `② ${kind}/${reason}: «${got.zh.text}»`, JSON.stringify(got));
+  }
+  const W = (k, r, f) => C.reauthWhyText(k, r, f, { t: T.zh });
+  ok(W('more-pending', 'paged-consent', { n: 248 }).fold && W('more-pending', 'paged-consent', { n: 248, next: 115, families: FAM }).fold && !W('more-pending', 'paged-consent', { n: 248, next: 115, families: FAM, api: true }).fold && W('more-pending', 'paged-consent', { n: 248, api: true }).fold, '② ADDENDUM 1: the paged consent is LED (shown) only when an agent holds the raw API and the gain is known; else it waits under ⓘ');
+  ok(!W('expiring', 'expires', { eta: '3d' }).warn && !W('expiring', 'renewals-stopped', { eta: '5h' }).warn && W('expiring', 'overdue', {}).warn && !W('read-only', 'send-scope-not-granted', {}).warn && !W('more-pending', 'paged-consent', { n: 1 }).warn, '② no warn colour until it is overdue (a countdown, a read-only reply gate, an optional consent are plain)');
+  ok(C.grantsText([{ what: 'more', n: 248, scopes: [], missing: [], refused: [], wanted: true }], { t: T.zh }).text === CASES[1][3].zh && C.grantsText([{ what: 'more', n: 248, next: 115 }, { what: 'files', missing: ['im:resource'], refused: [], wanted: true }], { t: T.zh }).text === '再授权一次可开启：发送文件 · 应用的下一组权限（剩余 248 个中的 115 个） — 现在不做也能照常收发', '② the account row\'s grants line: the paged consent alone is the case above; beside a feature it says the NEXT group, never «另外 248 项»');
+  // RED CONTROL: every case × every reason × every language, and a case / reason the table does not know — never bare
+  const BARE = /^(needs re-authorization|需要重新授权|再認証が必要です|re-authorize|重新授权)\s*[.。]?$/i;
+  const words = [];
+  for (const [k, rs] of Object.entries(C.REAUTH_WHYS)) for (const r of [...rs, 'zz-unknown']) for (const t of Object.values(T)) for (const f of [{}, { n: 3 }, { eta: '1h' }, { scopes: ['x'] }]) words.push(C.reauthWhyText(k, r, f, { t }).text);
+  for (const t of Object.values(T)) words.push(C.reauthWhyText('zz', 'needs-reauth', { n: 1 }, { t }).text, C.reauthWhyText('', '', null, { t }).text);
+  ok(words.length > 100 && words.every((w) => !BARE.test(String(w).trim())) && C.reauthWhyText('zz', 'needs-reauth', {}).text === '' && C.reauthWhyText('expiring', 'zz', { eta: '1h' }).text === '', `② RED CONTROL: ${words.length} words over every case, reason and language — none is a bare «needs re-authorization»; an unknown case or reason says '' (nowhere), never bare`);
+  ok(BARE.test('需要重新授权') && BARE.test('needs re-authorization'), '② …the control\'s own pattern catches the bare words it bans (a pattern that matched nothing would prove nothing)');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

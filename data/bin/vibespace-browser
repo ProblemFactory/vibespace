@@ -200,6 +200,10 @@ YOURS:
   vibespace-browser blocked --url <u> [--why <code>] [--evidence <text>] [--tier 2|3] [--remember]
                                                   I was blocked on this page — a CLAIM, not a detection; tier 2 puts ONE
                                                   proposal card (switch to CloakBrowser) in the user's chat for their Approve
+  vibespace-browser ask-human "<what you need>"  [--withdraw | --status]   ASK A PERSON to take over this browser (a login, a
+                                                  captcha, a payment): ONE request they see at the top of the Agent browser
+                                                  window and in For you; your next page verb WAITS until they hand back (or
+                                                  you --withdraw) — end your turn after asking: the handback arrives as a message
   vibespace-browser watch                         how the user's live view / takeover works (browser_paused,
                                                   browser_interrupted)
   --profile <handle> (any command) names one attachment; ≥2 attachments ⇒ required (or VIBESPACE_BROWSER)
@@ -611,6 +615,22 @@ function daemonCwd() {
 /** Read all of stdin (a batch whose lines arrive there). */
 function readStdin() { try { return fs.readFileSync(0, 'utf8'); } catch { return ''; } }
 
+/** lane browser-takeover-queue: A PERSON IS ASKED to take over this browser (`ask-human`) — the verb WAITS for their
+ *  handback, bounded: the server's own wait (`request.waitMs`, under the agent harness's tool cap) in long-polls of
+ *  `request.pollMs`; every line printed is the server's (this CLI ships without src/). → {ended, replied, line}. */
+async function waitForHuman(q) {
+  console.error(q.waitLine || `waiting for the person (request ${q.id})`);
+  const until = Date.now() + (Number(q.waitMs) > 0 ? Number(q.waitMs) : 90000);
+  while (Date.now() < until) {
+    const hold = Math.max(1000, Math.min(Number(q.pollMs) > 0 ? Number(q.pollMs) : 20000, until - Date.now()));
+    const a = await peek(`/api/agent/browser/takeover-request?id=${encodeURIComponent(q.id)}&wait=${hold}`);
+    if (!a) { await new Promise((ok) => setTimeout(ok, 1000)); continue; } // a miss: ask again (the hub restarting, a dropped poll)
+    if (a._failed) return { ended: true, line: `request ${q.id} is gone — your command runs now` };
+    if (a.replied) return { ended: false, replied: true, line: a.line };
+    if (!a.open) return { ended: true, line: a.line };
+  }
+  return { ended: false, line: q.stillLine || `still waiting for the person (request ${q.id}) — end your turn; their handback arrives as a message` };
+}
 /** A PAGE verb (or an escape): the ONE /resolve call, the real binary, the audit. */
 async function runPage(c) {
   let cls = c;
@@ -680,7 +700,15 @@ async function runPage(c) {
   // the audit answers the page's resulting size
   const vpSet = isViewportSet(rest);
   const vpInBatch = cls.verb === 'batch' && batchCommands(cls, framed).some(isViewportSet);
-  const r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(vpSet || vpInBatch ? { viewportSet: true } : {}) }, { soft: true });
+  let r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(vpSet || vpInBatch ? { viewportSet: true } : {}) }, { soft: true });
+  // lane browser-takeover-queue: a person is asked to take over this browser (`ask-human`) — the verb WAITS for their
+  // handback (bounded), then asks again ONCE; still waiting / a reply ⇒ nothing ran, said by the server's words
+  if (r._failed && (r.code === 'human_asked' || r.code === 'browser_paused') && r.request && r.request.id) {
+    const w = await waitForHuman(r.request);
+    if (!w.ended) { console.error(`${r.error || r.code} [${r.code}]`); console.error(`  ${w.line}`); process.exit(1); }
+    console.error(`note: ${w.line}`);
+    r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(vpSet || vpInBatch ? { viewportSet: true } : {}) }, { soft: true });
+  }
   if (r._failed) {
     // lane browser-viewport-answer: a set refused while the user drives says the page's size first (their pane rules it)
     if (r.viewport && r.viewport.line) (rest.includes('--json') ? console.error : console.log)(r.viewport.line);
@@ -852,6 +880,26 @@ async function runPage(c) {
     for (const h of head) console.error(h);
     console.error('[page_busy]');
     await call('POST', '/api/agent/browser/audit', { profile: dlg.profileId, verb: words0[0] || null, ok: false, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
+    process.exit(1);
+  }
+  // lane browser-x-in-window (B2): CHROME'S OWN DIALOG stands on your browser window — its sign-in sheet, or a dialog window of
+  // its own (the X road: the server read it off the display) — a page verb is answered `dialog_open` BY NAME at once and never
+  // handed to the browser CLI; the ways out run (the page-busy set). `dialog status` names it; accept / dismiss cannot answer
+  // it (only a person can, in the live view). An older copy of the rules beside this file: none judged.
+  const nativeStand = dlg && dlg.native && typeof dlg.native === 'object' ? dlg.native : null;
+  if (nativeStand && dialogVerb) {
+    const at = cls.argv.indexOf('dialog');
+    const sub = cls.argv[at + 1] && !cls.argv[at + 1].startsWith('--') ? cls.argv[at + 1] : 'status';
+    for (const h of head) console.error(h);
+    if (sub === 'status') { if (wantsJson) console.log(JSON.stringify({ success: true, data: { hasDialog: true, type: 'native', kind: nativeStand.kind || 'window', title: nativeStand.title || '' }, error: null })); else console.log(nativeStand.text || ''); process.exit(0); }
+    if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: 'native_dialog', error: nativeStand.text || '' })); else console.log(nativeStand.text || '');
+    console.error('[native_dialog]');
+    process.exit(1);
+  }
+  if (nativeStand && DS && typeof DS.busyPasses === 'function' && !DS.busyPasses(words0[0] || '')) {
+    printDialogOpen({ open: { type: 'native', kind: nativeStand.kind || 'window', title: nativeStand.title || '' }, text: nativeStand.text || '' });
+    for (const h of head) console.error(h);
+    await call('POST', '/api/agent/browser/audit', { profile: dlg.profileId, verb: words0[0] || null, ok: false, dialog: true, ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}) }, { soft: true }).catch(() => null);
     process.exit(1);
   }
   // `dialog status | accept [text] | dismiss` — answered through the watch (the one client that saw the dialog open; the
@@ -1033,6 +1081,12 @@ async function runPage(c) {
     // lane browser-passkey: the verb met a page waiting for a passkey (the long-poll's hit, or a timeout while one stands) ⇒ THE SENTENCE first
     const pkHit = passkeyHit || (timedOut && after && after.passkey && ['passkey_open', 'passkey_ask'].includes(after.passkey.state) ? after.passkey : null);
     if (open) printDialogOpen(open);
+    else if (promptHit && promptHit.native) { // lane browser-x-in-window (B2): Chrome's OWN sign-in sheet opened in the window — dialog_open by its title
+      printDialogOpen({ open: { type: 'native', kind: 'http-auth', title: promptHit.title || 'Sign in', origin: promptHit.origin || '' }, text: promptHit.text || '' });
+      for (const h of head) console.error(h);
+      for (const n of notes) console.error(`note: ${n} [page_dialog]`);
+      process.exit(1);
+    }
     else if (promptHit) { // lane browser-ui-prompts-r2: the page asked for an HTTP sign-in and waits — THE SENTENCE first, the verb's own timeout never
       if (wantsJson) console.log(JSON.stringify({ success: false, data: null, code: 'page_prompt', prompt: promptHit, error: promptHit.text || '' }));
       else console.log(promptHit.text || 'The page asked for an HTTP sign-in and waits — only the user can answer it in the live view.');
@@ -1423,7 +1477,16 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
     return;
   }
 
-  if (verb === 'watch') { console.log('the live view is the user\'s: they open "Agent browser" from your session card or the status bar, watch what you do, and can Take over. Taking over INTERRUPTS you: the command you had running there ends with browser_interrupted (on a shared, mediated profile its CDP calls in flight are cut and a script it was running is asked to stop — one awaiting a timer or a fetch may still finish), a notice in the conversation lists what was interrupted, and every `vibespace-browser` page verb you run is refused with browser_paused until they Hand back. The handback arrives as a message naming the current URL and what to re-run: re-read the page, then run it again. When a page needs a login or a captcha, tell the user which page needs them and stop.'); return; }
+  if (verb === 'ask-human') { // lane browser-takeover-queue: ask a PERSON to take over this browser — ONE request per browser
+    const withdraw = has('--withdraw'), status = has('--status');
+    const text = args.slice(1).filter((a) => a !== '--withdraw' && a !== '--status').join(' ').trim();
+    if (!withdraw && !status && !text) { console.error('usage: vibespace-browser ask-human "<what you need the person to do, in their words>"   (--withdraw ends it · --status reads it · --profile <handle> names the browser)'); process.exit(2); }
+    const r = await call('POST', '/api/agent/browser/takeover-request', { text, handle: handle || undefined, ...(withdraw ? { withdraw: true } : {}), ...(status ? { status: true } : {}) }, { soft: true });
+    if (r._failed) { printRefusal(r); process.exit(1); }
+    console.log(r.line);
+    return;
+  }
+  if (verb === 'watch') { console.log('the live view is the user\'s: they open "Agent browser" from your session card or the status bar, watch what you do, and can Take over. Taking over INTERRUPTS you: the command you had running there ends with browser_interrupted (on a shared, mediated profile its CDP calls in flight are cut and a script it was running is asked to stop — one awaiting a timer or a fetch may still finish), a notice in the conversation lists what was interrupted, and every `vibespace-browser` page verb you run is refused with browser_paused until they Hand back. The handback arrives as a message naming the current URL and what to re-run: re-read the page, then run it again. When a page needs a login, a captcha or anything only the person can do, ask them: `vibespace-browser ask-human "<what, in their words>"` (ONE request they see in the Agent browser window and For you), then end your turn — the handback arrives as a message; a page verb you run meanwhile waits for it.'); return; }
 
   console.error(`unknown verb "${verb}"\n` + USAGE);
   process.exit(2);

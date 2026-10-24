@@ -1568,7 +1568,8 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
     `THE OWNER'S APP with N = ${N} enabled user permissions ⇒ the consent asks exactly those ${all.scopes.length} (the ${FLOOR.length}-scope floor + ${N - FLOOR.length} the hand list never named) — read with ONE tenant token + ONE applications/me`);
   { const MP = mutantCopies('chan-lark-noread', REPO);
     const srcP = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
-    const READ = '        const app = await appUserScopes();\n';
+    // lane lark-consent-chain: a chain's later page reuses the list its first page read (the read is still this one line)
+    const READ = '        const app = at && at.page > 1 && appRead && now() - appRead.at < CHAIN_APP_READ_REUSE_MS ? appRead.v : await appUserScopes();\n';
     ok(srcP.split(READ).length === 2, 'CONTROL setup: the consent\'s read of the app\'s list is spelled once');
     const np = await capture(require(MP.write('src/channels/lark.js', srcP.replace(READ, "        const app = { scopes: [], why: 'the pre-lane consent' };\n"), 'noread')), {}, vOwn);
     ok(JSON.stringify(np.scopes) === JSON.stringify(FLOOR) && np.scopes.length < N, `CONTROL — the consent without the read (every release before): ${np.scopes.length} of the app's ${N} — the assert above would be red`);
@@ -1660,6 +1661,7 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
   let userGrants = new Set();              // Lark: "最新生成的 user_access_token 将包含用户历史上已授予的所有权限"
   let codeN = 0, exchanges = 0;
   const pages = [];
+  let grantFilter = null;                  // lane lark-consent-chain: a Lark that grants less than its page asked (a page granting nothing)
   const fakeAuth = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
     pages.push(Buffer.byteLength(req.url));
@@ -1667,7 +1669,7 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
     const scopes = String(u.searchParams.get('scope') || '').split(' ').filter(Boolean);
     const missing = scopes.filter((x) => !enabled().has(x));
     if (missing.length) { res.writeHead(200, { 'Content-Type': 'text/html' }).end(`<p>错误码 20027: scope 参数中包含当前应用未开通的权限 ${missing.join(' ')}</p>`); return; }
-    const code = `cm-${++codeN}`; granted.set(code, stripMinutes ? scopes.filter((x) => !/^minutes:/.test(x)) : scopes);
+    const code = `cm-${++codeN}`; const g0 = stripMinutes ? scopes.filter((x) => !/^minutes:/.test(x)) : scopes; granted.set(code, grantFilter ? grantFilter(g0) : g0);
     const to = new URL(u.searchParams.get('redirect_uri')); to.searchParams.set('code', code); to.searchParams.set('state', u.searchParams.get('state'));
     res.writeHead(302, { Location: to.toString() }).end();
   });
@@ -1739,7 +1741,7 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
     const id = c0.id;
     ok(c0.p.status === 302 && c0.asked.length === APP.scopes.length && APP.scopes.every((x) => c0.asked.includes(x)) && JSON.stringify(recOf(eng, id).auth.refusedScopes || []) === '[]' && recOf(eng, id).auth.morePending === 0, `the owner's app (every permission enabled, ${APP.scopes.length} user ones): the FIRST page grants the consent that asked all ${c0.asked.length} — no 20027, no press, nothing left for a later page`);
     const g0 = (eng.adapterView(recOf(eng, id)).grants || []).find((g) => g.what === 'minutes');
-    ok(!recOf(eng, id).auth.scopes.some((x) => /^minutes:/.test(x)) && g0 && JSON.stringify(g0.missing) === JSON.stringify([...MIN, ...MED]) && JSON.stringify(g0.refused) === '[]' && said(eng, id) === 'One Re-authorize adds: reading Minutes and their recordings' && said(eng, id, tr(zh)) === '重新授权一次即可开启：读取妙记及其音视频' && said(eng, id, tr(ja)) === '一度再認可すると追加されます：Minutes とその音声・動画の読み取り',
+    ok(!recOf(eng, id).auth.scopes.some((x) => /^minutes:/.test(x)) && g0 && JSON.stringify(g0.missing) === JSON.stringify([...MIN, ...MED]) && JSON.stringify(g0.refused) === '[]' && said(eng, id) === 'One more re-authorization adds: reading Minutes and their recordings — sending and receiving work without it' && said(eng, id, tr(zh)) === '再授权一次可开启：读取妙记及其音视频 — 现在不做也能照常收发' && said(eng, id, tr(ja)) === 'もう一度再認可すると追加されます：Minutes とその音声・動画の読み取り — しなくても送受信できます',   // lane channel-row-notices: the gain + what works meanwhile
       `a held token WITHOUT 妙记 (every token minted before this release): the account card says "${said(eng, id)}" · "${said(eng, id, tr(zh))}" · "${said(eng, id, tr(ja))}"`, JSON.stringify(g0));
     const api = ORCH.create({ dataDir: path.join(ROOTB, 'api'), engine: eng, fetchFn: vendor, broadcast: () => {} });
     await api.setTiers(id, [{ principal: { kind: 'agent', id: AG.id, name: AG.name }, tier: 'read' }]);
@@ -1786,16 +1788,21 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
     const { eng: e4, ol: ol4 } = await mkEngine('pages');
     try {
       const c = await connect(e4);
-      const steps = [{ asked: c.asked.length, left: recOf(e4, c.id).auth.morePending, said: said(e4, c.id) }];
+      const at = () => { const a = recOf(e4, c.id).auth; return { next: a.nextPageCount, pagesLeft: a.morePendingPages, names: (a.morePendingScopes || []).length }; };   // lane channel-row-notices
+      const steps = [{ asked: c.asked.length, left: recOf(e4, c.id).auth.morePending, said: said(e4, c.id), ...at() }];
       for (let i = 0; i < 6 && recOf(e4, c.id).auth.morePending > 0; i++) {
         const before = recOf(e4, c.id).auth.morePending;
         const r = await reauth(e4, c.id, () => recOf(e4, c.id).auth.morePending < before);
-        steps.push({ asked: r.asked.length, left: recOf(e4, c.id).auth.morePending, said: said(e4, c.id), status: r.p.status });
+        steps.push({ asked: r.asked.length, left: recOf(e4, c.id).auth.morePending, said: said(e4, c.id), status: r.p.status, ...at() });
       }
       const fin = recOf(e4, c.id);
       ok(c.p.status === 302 && steps.length >= 2 && pages.every((b) => b <= lark.CONSENT_URL_MAX_BYTES) && steps.every((x, i) => i === 0 || x.status === 302) && APP.scopes.every((x) => fin.auth.scopes.includes(x)) && fin.auth.morePending === 0 && steps[steps.length - 1].said === '',
         `${steps.length} consents (${pages.join(' / ')} bytes, each ≤ ${lark.CONSENT_URL_MAX_BYTES}) hold all ${APP.scopes.length}: asked ${steps.map((x) => x.asked).join(' → ')}, left ${steps.map((x) => x.left).join(' → ')}`);
-      ok(steps[0].left > 0 && steps[0].said === `One Re-authorize adds: ${steps[0].left} more of the permissions your app has enabled` && CC.grantsText(e4.adapterView(recOf(e4, c.id)).grants, { vendor: 'Lark', t: tr(zh) }).text === '' && tr(zh)('{n} more of the permissions your app has enabled', { n: 85 }) === '应用已开通的另外 85 项权限',
+      // lane channel-row-notices (ADDENDUM 2, the owner: one Re-authorize asks ONE page): each consent writes the NEXT page's
+      // size, the pages left and the names; the next consent takes exactly that page off what is left, the last says nothing
+      ok(steps.slice(0, -1).every((x, i) => x.next > 0 && x.next <= x.left && x.names === x.left && x.pagesLeft === steps.length - 1 - i) && steps.slice(0, -1).every((x, i) => steps[i + 1].left === x.left - x.next) && steps[steps.length - 1].next === 0 && steps[steps.length - 1].pagesLeft === 0,
+        `every page writes its successor: next ${steps.map((x) => x.next).join(' → ')}, pages left ${steps.map((x) => x.pagesLeft).join(' → ')}, names ${steps.map((x) => x.names).join(' → ')}`, JSON.stringify(steps));
+      ok(steps[0].left > 0 && (steps[0].next < steps[0].left ? steps[0].said.startsWith(`Re-authorize to get the app's next group of permissions (${steps[0].next}) — ${steps[0].left} left in all`) : steps[0].said.startsWith(`Re-authorize to get the app's remaining ${steps[0].left} permissions`)) && /sending and receiving messages work as they do now$/.test(steps[0].said) && CC.grantsText(e4.adapterView(recOf(e4, c.id)).grants, { vendor: 'Lark', t: tr(zh) }).text === '' && tr(zh)('Re-authorize to get the app\'s next group of permissions ({next}) — {n} left in all', { next: 115, n: 248 }) === '继续授权以获取应用下一组权限（115 个），总计剩余 248 个权限',
         `between pages the card counts what is left: "${steps[0].said}"`);
     } finally { e4.stop(); ol4.stopAll(); }
     // CONTROL — a copy paging at 6 KB: the first consent's URL passes the owner's header budget ⇒ Lark answers 431, nothing is granted
@@ -1825,6 +1832,122 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
       ok(!recOf(e3, c.id).auth.scopes.some((x) => /^minutes:/.test(x)) && said(e3, c.id) === '', 'CONTROL — without the row the same token draws NO line on the card — the card assert above would be red');
     } finally { e3.stop(); ol3.stopAll(); }
     for (const r of copiesCensus(MG.files, MG.dir, REPO, { minCopies: 1, label: 'chan-lark-nominrow: ' })) ok(r.pass, r.name, r.detail); }
+  // lane lark-consent-chain (the owner 2026-10-23, on the row's «重新授权一次即可开启：应用已开通的另外 248 项权限»: 「不能一次性打开所有
+  //吗？」): Lark bounds ONE consent page (200 scopes; the owner's sign-in host answers a 3 KB+ authorize URL 431), so «every
+  // permission» is pages — and ONE press walks them: the landing of page k sends the SAME tab on to page k+1 (a meta refresh),
+  // the last landing closes it. The owner's shape: an account signed in before the app enabled the rest; the app enables 248
+  // more (242 of the long tail + 6 a shipped feature reaches — calendar, docx, bitable, approval, drive — LAST in the app's own
+  // order) ⇒ ONE Re-authorize = 3 pages
+  const CHAIN_FEAT = ['calendar:calendar.event:read', 'calendar:calendar.free_busy:read', 'docx:document.block:convert', 'bitable:app:readonly', 'approval:instance:read', 'drive:drive.metadata:readonly'];
+  const CHAIN_LATER = [...MANY.slice(0, 242), ...CHAIN_FEAT];
+  ok(!CHAIN_LATER.some((x) => FLOOR.includes(x)) && CHAIN_LATER.length === 248, 'setup: the 248 the app enables later are all beyond the floor (none of them asked before)');
+  const extrasOf = (u) => new URL(u).searchParams.get('scope').split(' ').filter((x) => !FLOOR.includes(x));
+  const refreshOf = (body) => { const m = /<meta http-equiv="refresh" content="1;url=([^"]+)">/.exec(String(body || '')); return m ? m[1].replace(/&amp;/g, '&') : null; };
+  const chainOwner = async (tag, E = ENG, extra = {}) => {
+    APP.scopes = [...FLOOR]; stripMinutes = false; grantFilter = null;
+    const w = await mkEngine(tag, E, extra);
+    const c = await connect(w.eng);
+    APP.scopes = [...FLOOR, ...CHAIN_LATER];   // the owner enables 248 more on the app
+    return { ...w, id: c.id };
+  };
+  const viewOf = (eng, id) => eng.adapterView(recOf(eng, id));
+  console.log('  ⑪c lane lark-consent-chain: ONE Re-authorize walks every consent page, in the same tab');
+  { const { eng: e7, ol: ol7, id } = await chainOwner('chain');
+    try {
+      pages.length = 0; const ex0 = exchanges;
+      const r = await e7.reauthorize(id, {});
+      ok(r.flow.chain && r.flow.chain.page === 1 && r.flow.chain.total === 3 && viewOf(e7, id).consentChain && viewOf(e7, id).consentChain.total === 3,
+        `the app enabled ${CHAIN_LATER.length} more: the press starts a CHAIN of ${r.flow && r.flow.chain && r.flow.chain.total} pages (the flow and the row both say page 1/3)`, r.flow.chain);
+      const p1 = await browse(r.flow.consentUrl);
+      const next2 = refreshOf(p1.back && p1.back.body);
+      const v1 = viewOf(e7, id), rec1 = recOf(e7, id);
+      ok(p1.status === 302 && p1.back.status === 200 && /data-landing="chain"/.test(p1.back.body) && /data-chain="2\/3"/.test(p1.back.body) && /page 1\/3 of the Lark permissions granted/.test(p1.back.body) && !p1.back.body.includes('<script') && next2 && new URL(next2).searchParams.get('state') !== new URL(r.flow.consentUrl).searchParams.get('state'),
+        'page 1 lands: the tab reads «page 1/3 of the Lark permissions granted … Page 2/3 comes next — continuing…» and is SENT ON to page 2 (its own consent, a new state; no close script)', (p1.back && p1.back.body || '').slice(0, 400));
+      ok(CHAIN_FEAT.every((x) => rec1.auth.scopes.includes(x)) && CHAIN_FEAT.every((x) => extrasOf(r.flow.consentUrl).includes(x)) && rec1.auth.morePending > 0 && v1.consentChain && v1.consentChain.page === 2 && v1.consentChain.total === 3 && !rec1.lastAuthError,
+        `rule 4: page 1 carries every scope a shipped feature reaches (the app listed them LAST) — the account holds them now; the row says page 2/3 (${rec1.auth.morePending} still to go)`, { chain: v1.consentChain, more: rec1.auth.morePending });
+      ok(CC.consentChainText(v1.consentChain, { t: tr(zh) }) === '正在授权 第 2/3 页…（在打开的那个标签页里）' && CC.consentChainText(v1.consentChain) === 'Authorizing page 2/3… (in the tab that opened)' && CC.consentChainText(v1.consentChain, { t: tr(ja) }) === '2/3 ページ目を認可中…（開いたタブで）',
+        `the row's words while it walks: «${CC.consentChainText(v1.consentChain, { t: tr(zh) })}»`);
+      const p2 = await browse(next2);
+      const next3 = refreshOf(p2.back && p2.back.body);
+      ok(p2.status === 302 && /data-chain="3\/3"/.test(p2.back.body) && next3 && viewOf(e7, id).consentChain && viewOf(e7, id).consentChain.page === 3, 'page 2 lands: the same tab goes on to page 3/3', (p2.back && p2.back.body || '').slice(0, 300));
+      const p3 = await browse(next3);
+      const fin = recOf(e7, id), vf = viewOf(e7, id);
+      ok(p3.status === 302 && p3.back.status === 200 && /Lark connected — you can close this tab/.test(p3.back.body) && !refreshOf(p3.back.body) && APP.scopes.every((x) => fin.auth.scopes.includes(x)) && fin.auth.morePending === 0 && vf.consentChain === null && said(e7, id) === '' && !fin.lastAuthError,
+        `page 3 lands: the tab says connected and goes no further; the token holds ALL ${APP.scopes.length} the app enabled, the row says nothing more (no «N more», no chain)`, { more: fin.auth.morePending, chain: vf.consentChain, said: said(e7, id) });
+      const asked = [r.flow.consentUrl, next2, next3].map(extrasOf);
+      const seenX = new Set(); let twice = 0; for (const xs of asked) for (const x of xs) { if (seenX.has(x)) twice++; seenX.add(x); }
+      ok(pages.length === 3 && pages.every((b) => b <= lark.CONSENT_URL_MAX_BYTES) && twice === 0 && CHAIN_LATER.every((x) => seenX.has(x)) && exchanges - ex0 === 3,
+        `3 authorize URLs (${pages.join(' / ')} bytes, each ≤ ${lark.CONSENT_URL_MAX_BYTES}), extras ${asked.map((x) => x.length).join(' + ')} — no permission asked twice, 3 token exchanges, ONE press`);
+    } finally { e7.stop(); ol7.stopAll(); } }
+  // ABORT: the person closes the tab after page 1 — what page 1 granted STAYS (Lark's grants accumulate), the row says how
+  // many remain once the chain is over; a declined later page says the same on its landing; the next press asks only the rest
+  { const { eng: e8, ol: ol8, id } = await chainOwner('chain-abort');
+    try {
+      const r = await e8.reauthorize(id, {});
+      const p1 = await browse(r.flow.consentUrl);
+      const next2 = refreshOf(p1.back && p1.back.body);
+      const held1 = recOf(e8, id).auth.scopes.slice(), left1 = recOf(e8, id).auth.morePending;
+      ok(next2 && viewOf(e8, id).consentChain && viewOf(e8, id).consentChain.page === 2, 'page 1 landed; the tab was closed before page 2 (the chain waits on page 2)');
+      await e8.cancelAuth(id);   // the row's Cancel (or the page's own time limit): the chain ends
+      const rec = recOf(e8, id);
+      ok(viewOf(e8, id).consentChain === null && JSON.stringify(rec.auth.scopes) === JSON.stringify(held1) && rec.auth.morePending === left1 && !rec.lastAuthError && rec.auth.nextPageCount > 0 && rec.auth.nextPageCount < left1 && said(e8, id) === `Re-authorize to get the app's next group of permissions (${rec.auth.nextPageCount}) — ${left1} left in all (which ones is learned at that re-authorization); sending and receiving messages work as they do now` && CC.grantsText(viewOf(e8, id).grants, { vendor: 'Lark', t: tr(zh) }).text === `继续授权以获取应用下一组权限（${rec.auth.nextPageCount} 个），总计剩余 ${left1} 个权限（具体是哪些，授权时才知道）；现在的收发消息不受影响`,   /* int349: the row's words are channel-row-notices' (the next page + what is left), not .348's «another N» */
+        `abandoned after page 1: page 1's grants STAY (${held1.length} held), no failed sign-in, and the row's line comes back: «${said(e8, id)}»`);
+      // a declined LATER page (Lark's «拒绝» on page 2): the landing says the earlier pages' grants stay — never «nothing was connected»
+      const r2 = await e8.reauthorize(id, {});
+      ok(r2.flow.chain && r2.flow.chain.total === 2 && !extrasOf(r2.flow.consentUrl).some((x) => held1.includes(x)), 'the NEXT press asks only what is left: a chain of 2, nothing page 1 granted asked again', r2.flow.chain);
+      const q1 = await browse(r2.flow.consentUrl);
+      const n2 = refreshOf(q1.back && q1.back.body);
+      const held2 = recOf(e8, id).auth.scopes.length;
+      const cb = new URL(new URL(n2).searchParams.get('redirect_uri')); cb.searchParams.set('error', 'access_denied'); cb.searchParams.set('state', new URL(n2).searchParams.get('state'));
+      const dn = await get(cb.toString());
+      await sleep(60);
+      const recD = recOf(e8, id);
+      ok(/data-landing="chain-stopped"/.test(dn.body) && /page 2\/2 of the Lark permissions was not granted\. What you granted on the earlier pages stays/.test(dn.body) && !/nothing was connected/.test(dn.body) && recD.auth.scopes.length === held2 && !recD.lastAuthError && viewOf(e8, id).consentChain === null,
+        'a declined page 2: «page 2/2 … was not granted. What you granted on the earlier pages stays» — the account keeps page 1, no failed sign-in', dn.body.slice(0, 300));
+    } finally { e8.stop(); ol8.stopAll(); } }
+  // A PAGE THAT GRANTS NOTHING (a Lark that answers the page's code with only what was held): the chain STOPS by name — a
+  // page is never asked twice
+  { const { eng: e9, ol: ol9, id } = await chainOwner('chain-none');
+    try {
+      const r = await e9.reauthorize(id, {});
+      const p1 = await browse(r.flow.consentUrl);
+      const next2 = refreshOf(p1.back && p1.back.body);
+      grantFilter = (xs) => xs.filter((x) => FLOOR.includes(x));   // page 2 grants none of its extras
+      pages.length = 0;
+      const p2 = await browse(next2);
+      grantFilter = null;
+      ok(next2 && p2.back && !refreshOf(p2.back.body) && pages.length === 1 && viewOf(e9, id).consentChain === null && recOf(e9, id).auth.morePending > 0,
+        'page 2 granted none of its permissions ⇒ the chain stops there (its landing goes nowhere, page 2 is not asked again); the row counts what is left', (p2.back && p2.back.body || '').slice(0, 200));
+    } finally { e9.stop(); ol9.stopAll(); } }
+  // RED CONTROLS: (1) a copy paging WITHOUT the byte bound — its page is REFUSED by name before Lark ever sees it (never a 431
+  // in the middle of a chain); (2) an engine copy that never chains — ONE press holds page 1 only (the walk above would be red)
+  { const MX = mutantCopies('chan-lark-nobound', REPO);
+    const srcX = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+    const BOUND = 'if (floor.length + page.length >= CONSENT_SCOPES_MAX || bytesOf([...floor, ...page, x]) > CONSENT_URL_MAX_BYTES) break;';
+    ok(srcX.split(BOUND).length === 2, 'CONTROL setup: the page bound is spelled once in consentPage');
+    const LX = require(MX.write('src/channels/lark.js', srcX.replace(BOUND, 'if (floor.length + page.length >= CONSENT_SCOPES_MAX) break;'), 'nobound'));
+    const regX = CH.createChannelRegistry(); regX.register(LX.adapter);
+    const { eng: eX, ol: olX, id } = await chainOwner('chain-nobound', ENG, { registry: regX });
+    try {
+      pages.length = 0;
+      let refused = null;
+      try { await eX.reauthorize(id, {}); } catch (e) { refused = e; }
+      ok(refused && /authorize URL is \d+ bytes — over the 3000 Lark's sign-in host takes \(it answers 431\); the page is not sent/.test(refused.message) && pages.length === 0,
+        `CONTROL — paging without the byte bound: the oversized page is REFUSED by name («${refused && String(refused.message).slice(0, 110)}…»), nothing sent to Lark`);
+    } finally { eX.stop(); olX.stopAll(); }
+    for (const r of copiesCensus(MX.files, MX.dir, REPO, { minCopies: 1, label: 'chan-lark-nobound: ' })) ok(r.pass, r.name, r.detail);
+    const MN = mutantCopies('chan-lark-nochain', REPO);
+    const srcN = engineSource(REPO);
+    const GATE = '    if (!at || !r.ok || !r.tab || at.page >= at.total || engineCtx.stopped) return null;\n';
+    ok(srcN.split(GATE).length === 2, 'CONTROL setup: the chain\'s gate is spelled once in the engine');
+    const { eng: eN, ol: olN, id: idN } = await chainOwner('chain-nochain', MN.load('src/server/channels-engine.js', srcN.replace(GATE, '    return null;\n'), 'nochain'));
+    try {
+      const r = await eN.reauthorize(idN, {});
+      const p1 = await browse(r.flow.consentUrl);
+      ok(!refreshOf(p1.back && p1.back.body) && recOf(eN, idN).auth.morePending > 0 && !APP.scopes.every((x) => recOf(eN, idN).auth.scopes.includes(x)),
+        `CONTROL — an engine that never chains: ONE press holds page 1 only (${recOf(eN, idN).auth.morePending} left, the tab stops) — the walk above would be red`);
+    } finally { eN.stop(); olN.stopAll(); }
+    for (const r of copiesCensus(MN.files, MN.dir, REPO, { minCopies: 1, label: 'chan-lark-nochain: ' })) ok(r.pass, r.name, r.detail); }
   await new Promise((r) => fakeAuth.close(r));
   fs.rmSync(ROOTB, { recursive: true, force: true });
 }

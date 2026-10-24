@@ -48,6 +48,7 @@ import { t as tr, deviceLocale } from './i18n.js';
 import { mountsDialog, wireOAuthConnect, reauthDialog, wireStepPaste, api as mountsApi } from './mounts-dialog.js';
 import { routeErrorText, policyModeText } from './channel-words.js';
 import * as P from '../channel-policy.js';
+import { narrowRowVerdict } from '../channel-caps.js';   // lane lark-consent-chain ADDENDUM 1: the narrowing row only where the vendor can refuse
 import { ownerPolicyModel, guardRowsEl } from './channel-reach-editor.js';   // lanes account-policy-door + guards-door: the policy row's model and guard rows
 import { icon, el, btn } from './channel-chrome.js';
 import { accountTitle } from './channel-avatar.js';   // lane channels-badges: the badge's hover title and the card's name are ONE spelling
@@ -466,8 +467,12 @@ function narrowOf(flow, run) {
   if (!flow) return null;
   const legacy = !Array.isArray(flow.groups) || !flow.groups.length;
   const scopes = legacy ? (flow.narrowed ? [] : (Array.isArray(flow.optional) ? flow.optional : [])) : (Array.isArray(flow.nextNarrow) ? flow.nextNarrow : []);
-  if (!scopes.length) return null;
+  // lane lark-consent-chain ADDENDUM 1: only where the vendor CAN refuse (the built-in floor was asked, or the app's own list
+  // lacks what this press drops) — a consent asking what the app enabled draws no row
+  const v = narrowRowVerdict(flow, scopes);
+  if (!scopes.length || !v.show) return null;
   return {
+    from: v.from, floorWhy: v.why,
     scopes: scopes.slice(), dropped: Array.isArray(flow.narrowed) ? flow.narrowed.slice() : [],
     run: async () => { const x = await run(); const url = x && x.flow && x.flow.consentUrl; if (!url) throw new Error(tr('Failed')); return { url, next: narrowOf(x.flow, run) }; },
   };

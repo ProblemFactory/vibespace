@@ -60,6 +60,7 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'system') return t('automatically');
   if (by === 'expired') return t('expired');
   if (by === 'reply') return t('by your reply');
+  if (by === 'handed-back') return t('handed back'); // lane browser-takeover-queue: a takeover request answered by the handback
   // lane-pairing ⑥: an exit's "ask me each time" item is resolved BY its outcome
   if (by === 'allowed') return t('allowed');
   if (by === 'denied') return t('denied');
@@ -96,6 +97,9 @@ const reauthBtnHtml = (i, t) => (i && i.action && i.action.type === 'channel-rea
   ? `<button class="ut-act ut-action-reset ut-action-reauth" title="${escHtml(t('Re-authorize'))}">${UI_ICONS.refresh || ''}</button>` : '');
 const reconnectHtml = (i, t) => (signinItem(i)
   ? `<div class="ut-reconnect-row"><button type="button" class="ut-action-reset ut-action-reauth ut-reconnect" title="${escHtml(t('Open the account\'s Re-authorize'))}">${escHtml(t('Reconnect'))}</button></div>` : '');
+// lane browser-takeover-queue: an assistant needs the person in its browser — its live view (the same producer-action click)
+const takeoverBtnHtml = (i, t) => (i && i.action && i.action.type === 'browser-takeover' && i.action.requestId
+  ? `<button class="ut-act ut-action-reset ut-action-takeover" title="${escHtml(t('Open its live view — take over there'))}">${UI_ICONS.browserLive || ''}</button>` : '');
 /** The command an exit ask names, in mono, then its ANSWER — Allow / Deny on their own line — and the rule (open items
  *  only). lane-pairing ⑥: answered right here (the popup, the mini inbox and the phone paint this row). naive-user
  *  N-ask: the two buttons rode the floated `.ut-actions` bar — at 35 % opacity until the row is hovered (a 60-second
@@ -267,7 +271,7 @@ function partsOf(entry, ctx) {
   const actions = resolved
     ? `<span class="ut-actions">${view}<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}">↺</button></span>`
     : card ? `<span class="ut-actions">${view}${more}</span>`
-    : `<span class="ut-actions">${actionBtnHtml(i, t)}${reauthBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
+    : `<span class="ut-actions">${actionBtnHtml(i, t)}${reauthBtnHtml(i, t)}${takeoverBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
       + `<button class="ut-act ut-done" title="${escHtml(i.open && i.open.done ? t(i.open.done) : t('Handled — mark done'))}">✓</button>` // lane foryou-plugin-notices: a door's `done` = what this ✓ does (the plugin applies it)
       + `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}">✕</button></span>`;
   return { cls, dot, body, actions, sig: cls + '\u0000' + dot + '\u0000' + body + '\u0000' + actions };

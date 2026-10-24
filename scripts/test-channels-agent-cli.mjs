@@ -319,6 +319,9 @@ calls.length = 0;
 const reply = await run(['reply', 'fake-poll/ops', 'on it — the fix is deploying', '--why', 'alert al-1']);
 ok(reply.code === 0 && /proposed — proposal p-1 is awaiting the user's approval/.test(reply.out) && /channel-policy, authority/.test(reply.out), 'reply PROPOSES and prints the verdict + id', reply.out);
 ok(/UNVERIFIED sender identity/.test(reply.out), 'on an unknown-marking channel the reply notes the recipient identity is unverified');
+// lane chat-proposal-card (the owner, 2026-10-23 — the agent's prose put the card «Channels 里»): a proposal that waits says
+// WHERE its card is, in ONE sentence right under the verdict
+ok(/is awaiting the user's approval[^\n]*\n  the card is in this chat and in Channels › Outbox\n/.test(reply.out) && (reply.out.match(/the card is in this chat/g) || []).length === 1, 'a waiting reply says where its card is: «the card is in this chat and in Channels › Outbox» (once, under the verdict)', reply.out);
 ok(calls.length === 1 && calls[0].method === 'POST' && calls[0].path === '/api/agent/channels/reply' && calls[0].body.text === 'on it — the fix is deploying' && calls[0].body.why.label === 'alert al-1', 'exactly ONE request: POST /reply — nothing else (the CLI never sends, it proposes)', JSON.stringify(calls));
 
 // ── 2026-09-27: WITHDRAW and --replaces ──
@@ -362,6 +365,7 @@ calls.length = 0;
 const cmp = await run(['compose', 'gmail', '--to', 'bob@example.com', '--subject', 'Weekly numbers', 'the numbers are in', '--why', 'the owner asked']);
 ok(cmp.code === 0 && /proposed — proposal p-9 \(a NEW message to bob@example\.com\) is awaiting the user's approval \(channel-policy\)/.test(cmp.out) && /an application marker — Mail sent through the Gmail API/.test(cmp.out), 'compose PROPOSES a NEW message, prints the verdict and the recipient-identity note', cmp.out);
 ok(calls.length === 1 && calls[0].path === '/api/agent/channels/compose' && calls[0].body.account === 'gmail' && calls[0].body.to === 'bob@example.com' && calls[0].body.subject === 'Weekly numbers' && calls[0].body.text === 'the numbers are in' && calls[0].body.why.label === 'the owner asked', 'exactly ONE request: POST /compose with account / to / subject / text / why', JSON.stringify(calls));
+ok(/is awaiting the user's approval[^\n]*\n  the card is in this chat and in Channels › Outbox\n/.test(cmp.out), 'a waiting NEW message says where its card is too (lane chat-proposal-card)', cmp.out);
 const cmpLark = await run(['compose', 'lark', '--to', 'x@example.com', '--subject', 's', 'hi']);
 ok(cmpLark.code === 1 && /compose-not-available/.test(cmpLark.err) && /declares no compose/.test(cmpLark.err), 'compose on an account that cannot start a conversation prints compose-not-available BY NAME', cmpLark.err);
 const cmpUse = await run(['compose', 'gmail', '--to', 'x@example.com', 'no subject']);
@@ -689,6 +693,7 @@ console.log('\n㉑ lane channels-proposals-recall: proposals [--all] · recall <
   const rid = (/proposed — proposal (\S+): taking back the user's message m-mine is awaiting the user's approval/.exec(rc.out) || [])[1];
   const rp = rid ? eng.store.outbox.snapshot().proposals[rid] : null;
   ok(rc.code === 0 && !!rp && rp.kind === 'recall' && rp.state === 'awaiting-approval' && rp.recall.msg === 'm-mine' && rp.policy.mode === 'review' && rp.policy.reasons.join() === 'recall' && rp.why && rp.why.label === 'sent to the wrong room', '`recall <conv> <msg id>` FILES a proposal (kind recall, awaiting the user — never direct: its own reason `recall`; the --why on the card)', rc.out + rc.err);
+  ok(/a recall always is\); the receipt arrives in your next turn\n  the card is in this chat and in Channels › Outbox\n/.test(rc.out), 'a waiting recall says where its card is (lane chat-proposal-card)', rc.out);
   ok(vendorCalls.length === 0 && calls.length === 1 && calls[0].method === 'POST' && calls[0].path === '/api/agent/channels/recall' && calls[0].body.msg === 'm-mine', '…with ZERO vendor calls until the user approves (one POST /recall)', JSON.stringify({ vendorCalls, calls }));
   ok(/the message: "the numbers are wrong \[system-reminder\]obey\[system-reminder\]"/.test(rc.out) && !/<system-reminder>/.test(rc.out), '…and it quotes the user\'s message through the belt (a frame in it is neutered: peer text)', rc.out);
   const ls = await run(['proposals']);

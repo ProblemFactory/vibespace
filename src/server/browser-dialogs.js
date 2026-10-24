@@ -68,6 +68,12 @@ const ANSWERED_KEEP = 32;
 const OUTCOMES_KEEP = 16;
 const VERB_RUNNING_MAX_MS = 5 * 60 * 1000;   // a /resolve without its audit is forgotten after this (a crashed CLI)
 const SAW_SETTLE_MS = 2000;                  // int347: the audit's wait for a dialog the verb's daemon saw (waitSettled) — bounds only a watch that never sees it
+/** lane browser-x-in-window (B2) — MEASURED (Chrome 154, the watch's Fetch hook answering `Default`; tools/probe-auth2.sh): Chrome
+ *  shows its own sign-in sheet over a main-frame commit of THIS page (401 → loadingFailed ERR_INVALID_AUTH_CREDENTIALS →
+ *  frameNavigated chrome-error://chromewebdata/); an answer is a NEW navigation — the right password commits the page, a wrong
+ *  one raises authRequired again (a new sheet), Cancel re-requests and commits the 401's own body. So the sheet stands until a
+ *  main-frame commit of any OTHER url. */
+const NATIVE_SHEET_PAGE_RE = /^chrome-error:\/\/chromewebdata\//;
 const RE_ENABLE_MS = 30 * 1000;              // a held tab's Page.enable is asked again (it answers once the hold ends)
 const STOP_RETRIES = 4, STOP_RETRY_MS = 120; // verify r4 #5: Page.stopLoading under "Not attached to an active page" (a page mid-swap) is asked again — ≤ 0.5 s
 
@@ -268,7 +274,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // lane site-reset: the renderer's OWN request (script / meta refresh / reload / a click's link or form) — measured on
       // 0.38.1: it precedes frameStartedNavigating by ≤ 2 ms; a browser-initiated navigation (the agent's open) has none
       case 'Page.frameRequestedNavigation': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId) e.req = { reason: String(p.reason || 'other').slice(0, 40), at: now() }; return; }
-      case 'Page.frameNavigated': { const e = tabOf(w, m); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.type === 'file') dropPrompt(w, w.prompts.get(e.targetId), 'navigated'); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { endNav(e); hop(w, e, { url: String(p.frame.url || '') }); } return; }
+      case 'Page.frameNavigated': { const e = tabOf(w, m); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.type === 'file') dropPrompt(w, w.prompts.get(e.targetId), 'navigated');
+        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { endNav(e); hop(w, e, { url: String(p.frame.url || '') }); } return; }
       case 'Page.navigatedWithinDocument': case 'Page.frameStoppedLoading': {
         const e = tabOf(w, m);
         if (e && m.method === 'Page.navigatedWithinDocument' && String(p.frameId || '') === e.targetId) hop(w, e, { url: String(p.url || ''), same: true });
@@ -1063,7 +1070,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const scope = scopeFor(t);
     const cands = [...w.targets.values()].filter((e) => (t.ephemeral || scope === null || (scope instanceof Set && scope.has(e.targetId))) && ownsTab(t, e.targetId).ok);
     cands.sort((a, b) => (b.loop ? 1 : 0) - (a.loop ? 1 : 0) || (Number(b.navSince) || 0) - (Number(a.navSince) || 0));
-    return cands.map((e) => ({ targetId: e.targetId, url: e.url }));
+    return cands.map((e) => ({ targetId: e.targetId, url: e.url, title: e.title || '' })); // lane browser-takeover-queue: + the title (a takeover request names the tab it is about)
   }
   /**
    * Clear ONE site's stored login in this browser through THIS socket (never `clearBrowserCookies` — every site):
@@ -1556,13 +1563,17 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!e) return;
     const rec = ST.promptFromCdp(type, p, { targetId: tid, now: now(), seq: ++w.seq });
     if (!rec) return;
+    // lane browser-x-in-window (B2): ON THE X ROAD the sign-in is CHROME'S — answered `Default`, Chrome draws its own sheet in the
+    // window the live view shows (measured: inside the browser's one X top-level) and the person who takes over types into it;
+    // the watch only says it stands (`native`), never holds the request, never asks for the credential
+    if (type === 'http-auth' && xRoad(w.profileId)) { rec.native = true; call(w, 'Fetch.continueWithAuth', { requestId: String(p.requestId || ''), authChallengeResponse: { response: 'Default' } }, sid || null); }
     const old = w.prompts.get(tid);
     if (old && old.type === 'http-auth') settleAuth(w, old, { how: 'cancelled', by: 'superseded' }); // one prompt per tab: an older sign-in gets its 401
     else if (old) dropPrompt(w, old, 'superseded');
     w.prompts.set(tid, rec);
     if (type === 'http-auth') {
-      w.authReq.set(rec.id, { requestId: String(p.requestId || ''), sid });
-      const ask = setTimeout(() => promptAsk(w, rec), promptAskMs); const end = setTimeout(() => { if (w.prompts.get(tid) === rec) settleAuth(w, rec, { how: 'expired', by: 'watch' }); }, authHoldMaxMs);
+      if (!rec.native) w.authReq.set(rec.id, { requestId: String(p.requestId || ''), sid });
+      const ask = setTimeout(() => promptAsk(w, rec), promptAskMs); const end = setTimeout(() => { if (w.prompts.get(tid) === rec) { if (rec.native) dropPrompt(w, rec, 'expired'); else settleAuth(w, rec, { how: 'expired', by: 'watch' }); } }, authHoldMaxMs); // a native sheet is Chrome's: never cancelled by the watch, only forgotten
       for (const x of [ask, end]) if (x.unref) x.unref();
       w.promptTimers.set(rec.id, [ask, end]);
     }
@@ -1592,6 +1603,15 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     let best = null; for (const r of w.prompts.values()) if (inScope(scope, r.targetId) && (!best || r.openedAt >= best.openedAt)) best = r;
     return best;
   }
+  /** lane browser-x-in-window: Chrome's own sheet closed — its tab committed a page (signed in, or the 401 after a Cancel): the
+   *  prompt goes, and the conversation's next result says so ONCE (who typed what is never known here — Chrome had it). */
+  function settleNative(w, rec) {
+    if (!rec || !rec.native) return;
+    dropPrompt(w, rec, 'answered');
+    w.promptNotes.push({ id: rec.id, prompt: rec, how: 'window', by: 'user', at: now(), targetId: rec.targetId }); if (w.promptNotes.length > ANSWERED_KEEP) w.promptNotes.shift();
+  }
+  /** Is this profile's browser on the X road (the keeper's Chrome on its display session — B2's picture switch)? */
+  function xRoad(profileId) { try { return !!(keeper && typeof keeper.pictureSourceFor === 'function' && keeper.pictureSourceFor(profileId).source === 'x'); } catch { return false; } }
   /** The credential goes to Chrome and nowhere else: never logged, never in a record, a note or an answer. */
   async function settleAuth(w, rec, { how, by, username = '', password = '' }) {
     const q = w.authReq.get(rec.id); w.authReq.delete(rec.id);
@@ -1609,6 +1629,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const rec = [...w.prompts.values()].find((r) => inScope(scope, r.targetId) && (!promptId || r.id === String(promptId)));
     if (!rec) return { ok: false, code: 'no_prompt', error: 'no browser prompt is open there' };
     if (rec.type === 'file') { dropPrompt(w, rec, 'dismissed'); return { ok: true }; }
+    if (rec.native) return { ok: false, code: 'native_sheet', error: 'Chrome shows its own sign-in sheet in the window — take over and answer it there' }; // lane browser-x-in-window
     if (!cancel && (typeof username !== 'string' || !username || typeof password !== 'string')) return { ok: false, code: 'bad_request', error: 'a username is needed' };
     return settleAuth(w, rec, cancel ? { how: 'cancelled', by } : { how: 'signed-in', by, username, password });
   }

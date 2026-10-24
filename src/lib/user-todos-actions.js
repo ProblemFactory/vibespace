@@ -30,6 +30,7 @@ import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // 
 import { revealLeftMs, revealHeaders, askRevealPassword, forgetReveal } from './vault-reveal.js'; // lane vault-run-door: a held run's «always» asks 验证是你 FIRST, in the press's own task
 import { replyBoxView } from '../inbox-reply.js'; // PURE (lane inbox-reply-dead-session): THE reply box both surfaces draw — never disabled
 import { grantUseBody, grantReplyText } from '../ask-grant.js'; // PURE (lane controls-that-lie): an ask that names a grant — the PATCH it plans, the answer the agent reads
+import { openTakeover } from './browser-takeover-queue.js'; // lane browser-takeover-queue: a takeover request's item opens its live view
 import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «Who can use it»'s own refusal words (the dialog's)
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
@@ -287,6 +288,12 @@ export function inboxModel(app) {
    *  `action.type` to a verb it owns. Today: the reset-credit confirm dialog. */
   const runAction = async (rec, answer = null, extra = {}) => {   // `extra.reach` (lane key-instance-scope): an automation card's picked reach
     if (rec && rec.action && rec.action.type === 'browser-grant') return grantBrowser(rec);
+    if (rec && rec.action && rec.action.type === 'browser-takeover') {
+      // lane browser-takeover-queue: ONE record — the item IS the request: its live view, the input side offered (the view's
+      // Take over; the agent's words in its bar); the request as the app's queue holds it (else the item's own facts)
+      const req = (app._browserTakeovers || []).find((r) => r && r.id === rec.action.requestId) || { id: rec.action.requestId, browserKey: rec.action.browserKey, profileId: rec.action.profileId || null, sessionId: null };
+      return !!openTakeover(app, req, { take: false });
+    }
     if (rec && rec.action && rec.action.type === 'channel-reauth') {
       // lane channel-names-readable: the account's sign-in lacks a permission — ITS Re-authorize dialog (the channels
       // engine resolves the item once the permission works)

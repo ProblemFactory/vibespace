@@ -1960,7 +1960,11 @@ console.log('§4 the census (grep over src/lib + style.css)');
   ok(same(where(/className = 'desktop-bar'/), ['picture-shell.js']), 'the .desktop-bar is built in ONE file (picture-shell.js) — vnc-view and xpra-view stand on it', where(/className = 'desktop-bar'/));
   const code = (f) => read(`src/lib/${f}`).replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
   const whereCode = (re) => files.filter((f) => re.test(code(f)));
-  ok(same(whereCode(/xpra-ui\/js\/Protocol\.js/), ['desktop-app-window.js']), 'the upstream worker asset is spelled ONCE in code (desktop-app-window.js hands the url to the view)', whereCode(/xpra-ui\/js\/Protocol\.js/));
+  ok(same(whereCode(/xpra-ui\/js\/Protocol\.js/), ['xpra-view.js']), 'the upstream worker asset is spelled ONCE in code (xpra-view.js workerUrlFor — the desktop app window and the agent browser\'s X picture ask it)', whereCode(/xpra-ui\/js\/Protocol\.js/));
+  // lane browser-x-in-window (B2): THE VIEW IS REUSED — no second client: the live view's X picture is createXpraView over the
+  // desktop app window's worker asset (workerUrlFor) with its `admit` (one window of a shared display); no Worker, no protocol of its own
+  { const lv = code('browser-live-window.js'); ok(/import \{[^}]*\bcreateXpraView\b[^}]*\bworkerUrlFor\b[^}]*\} from '\.\/xpra-view\.js'/.test(lv) && /createXpraView\(xHost, \{/.test(lv) && /workerUrl: workerUrlFor\(ds\)/.test(lv) && /admit: admitX/.test(lv) && !/new (?:Worker|WebSocket)\(/.test(lv.replace(/new WebSocket\(`\$\{proto\}:\/\/\$\{location\.host\}\$\{STREAM_PATH\}\?\$\{q\}`\)/, '')), 'lane browser-x-in-window: the agent browser\'s live view draws its X picture with THIS view (createXpraView + workerUrlFor + admit) — no second xpra client, no worker of its own'); }
+  { const dw = code('desktop-app-window.js'); ok(/workerUrl: workerUrlFor\(id\)/.test(dw), 'the desktop app window asks the same workerUrlFor'); }
   ok(/\.xpra-pane \{[^}]*background: var\(--/.test(read('public/style.css')) && !/#000/.test(read('src/lib/xpra-view.js')) && !/#000/.test(read('src/lib/xpra-client.js')), 'the pane is a THEME colour and no xpra file spells #000 (no root, no black — owner acceptance 1)');
   ok(/isSecureContext/.test(read('src/lib/xpra-view.js')) && /execCommand\('copy'\)/.test(read('src/lib/picture-shell.js')) && /addEventListener\('paste'/.test(read('src/lib/xpra-view.js')), 'the view consults isSecureContext and listens to the paste event; the shell copies through execCommand on plain http');
   ok(same(whereCode(/desktop-copied-chip/), ['picture-shell.js']) && same(whereCode(/vnc-paste-box/), ['picture-shell.js']) && same(whereCode(/execCommand\('copy'\)/).filter((f) => /^(picture|vnc|xpra|desktop)/.test(f)), ['picture-shell.js']), 'the copy chip, the paste box and the picture views\' execCommand copy are built in ONE file (picture-shell.js) — both views stand on them, never a twin (utils.copyText / terminal.js keep their own, result-less fallbacks)', { chip: whereCode(/desktop-copied-chip/), box: whereCode(/vnc-paste-box/), exec: whereCode(/execCommand\('copy'\)/) });
@@ -2104,6 +2108,74 @@ console.log('§T lane xpra-title-election — the main-window title reaches the 
     ['new-window', 9, 0, 0, 300, 200, { title: 'Untitled', 'window-type': ['NORMAL'] }],
   ]);
   ok(mc.rec === 'Untitled' && mc.rec !== 'Page', '(f) RED CONTROL (c): on the pre-fix handler the reused-wid race ends on the stale Untitled — the real B-a566 bug', mc);
+}
+
+console.log('§X lane browser-x-in-window (B2): ONE window of a SHARED display — `admit` (an agent browser\'s live view draws its conversation\'s Chrome window, that window\'s dialogs and menus; never another conversation\'s)');
+{
+  FakeWorker.instances.length = 0;
+  const OWN = 0x400007, OTHER = 0x400003, DLG = 0x60000a, DLG_OTHER = 0x60000c, MENU = 0x400011, MENU_FAR = 0x400013;
+  const asked = [];
+  // the live view's rule (browser-live-window.js admitX), spelled here as the client sees it: its window, a dialog transient for an
+  // admitted window (or untyped and centred over it), a menu whose origin lies inside it
+  const admit = (win, ctx) => {
+    asked.push(win.wid);
+    if (win.wid === OWN) return true;
+    const g = ctx.geometry(OWN);
+    if (win.kind === 'dialog') return win.transientFor === OWN || (!!win.transientFor && ctx.admitted(win.transientFor));
+    if (win.kind === 'popup') return !!g && win.x >= g.x && win.y >= g.y && win.x < g.x + g.w && win.y < g.y + g.h;
+    return false;
+  };
+  const evs = { new: [], paint: [] };
+  const c = C.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 1200, height: 800 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null, admit, on: { window: (k, w) => { if (k === 'new') evs.new.push(w.wid); }, paint: (w) => evs.paint.push(w.wid) } });
+  c.connect();
+  const w = await until(() => FakeWorker.instances[0]);
+  await until(() => w.sent('hello').length);
+  w.feed(['hello', { 'packet-types': [] }]);
+  // the SHARED display: another conversation's Chrome window FIRST (the launch window), then this one, a GTK chooser over each
+  w.feed(['new-window', OTHER, 10, 10, 1050, 980, { title: 'other - Google Chrome', 'window-type': ['NORMAL'] }]);
+  w.feed(['new-window', OWN, 20, 20, 1050, 980, { title: 'mine - Google Chrome', 'window-type': ['NORMAL'] }]);
+  w.feed(['new-window', DLG, 40, 40, 900, 700, { title: 'Open File', 'window-type': ['DIALOG'], modal: true, 'transient-for': OWN }]);
+  w.feed(['new-window', DLG_OTHER, 40, 40, 900, 700, { title: 'Save File', 'window-type': ['DIALOG'], modal: true, 'transient-for': OTHER }]);
+  w.feed(['new-override-redirect', MENU, 200, 200, 220, 132, { 'window-type': ['MENU'] }]);
+  await sleep(30);
+  const own = c.windows.get(OWN);
+  w.feed(['new-override-redirect', MENU_FAR, own.x + own.w + 40, 10, 100, 50, { 'window-type': ['MENU'] }]);
+  await sleep(30);
+  const kept = [...c.windows.keys()].sort();
+  ok(same(kept, [OWN, DLG, MENU].sort()), `admit: the client KEEPS this conversation\'s window, the dialog transient for it and the menu opened inside it — never the other window, its dialog, a menu outside (${kept.map((x) => x.toString(16)).join(', ')})`, kept);
+  ok(c.mainWid === OWN, `admit: THIS window is the main even though another was announced first (main ${Number(c.mainWid).toString(16)})`);
+  const maps = w.sent('map-window').map((p) => p[1]);
+  ok(!maps.includes(OTHER) && !maps.includes(DLG_OTHER) && maps.includes(OWN) && maps.includes(DLG), `admit: a refused window is never MAPPED by this client (map-window sent for ${maps.map((x) => x.toString(16)).join(', ')})`, maps);
+  ok(!evs.new.includes(OTHER) && !evs.new.includes(DLG_OTHER) && !w.sent('focus').some((p) => p[1] === OTHER), 'admit: a refused window is never handed to the view and never focused');
+  // its draws: acked as painted (xpra keeps its pace for this client), never painted; its metadata: dropped (nothing stashed)
+  const acks0 = w.sent('damage-sequence').length;
+  w.feed(['draw', OTHER, 0, 0, 10, 10, 'png', new Uint8Array([1, 2, 3]), 77, 0, {}]);
+  w.feed(['window-metadata', OTHER, { title: 'other page - Google Chrome' }]);
+  w.feed(['draw', OWN, 0, 0, 10, 10, 'png', new Uint8Array([1, 2, 3]), 78, 0, {}]);
+  await sleep(50);
+  const acks = w.sent('damage-sequence').slice(acks0);
+  const ackOther = acks.find((p) => p[1] === 77), ackOwn = acks.find((p) => p[1] === 78);
+  ok(!!ackOther && ackOther[2] === OTHER && ackOther[5] === 0 && ackOther[6] === '' && !evs.paint.includes(OTHER), `admit: a refused window\'s draw is ACKED as painted (decode 0 ms, no error — never "no such window", which makes xpra back off) and never painted (${JSON.stringify(ackOther)})`, acks);
+  ok(!!ackOwn && evs.paint.includes(OWN), 'admit: this window\'s draw is painted and acked as before');
+  ok(!c.windows.has(OTHER), 'admit: a refused window\'s metadata reaches nothing');
+  // lost: a refused window that goes and a NEW window under its wid is judged afresh
+  w.feed(['lost-window', OTHER]);
+  w.feed(['new-window', OTHER, 20, 20, 1050, 980, { title: 'reused - Google Chrome', 'window-type': ['DIALOG'], 'transient-for': OWN }]);
+  await sleep(20);
+  ok(c.windows.has(OTHER) && asked.filter((x) => x === OTHER).length === 2, 'admit: a wid lost and announced again is asked again (a dialog of this window now ⇒ kept)');
+  c.close();
+  // CONTROL (RED): the client WITHOUT the filter keeps the other conversation\'s window and makes it the main (the leak admit closes)
+  FakeWorker.instances.length = 0;
+  const c2 = C.createXpraClient({ url: 'ws://x/s', workerUrl: '/w.js', screen: { width: 1200, height: 800 }, Worker: FakeWorker, decode: async () => ({ close() {} }), log: null });
+  c2.connect();
+  const w2 = await until(() => FakeWorker.instances[0]);
+  await until(() => w2.sent('hello').length);
+  w2.feed(['hello', { 'packet-types': [] }]);
+  w2.feed(['new-window', OTHER, 10, 10, 1050, 980, { title: 'other - Google Chrome', 'window-type': ['NORMAL'] }]);
+  w2.feed(['new-window', OWN, 20, 20, 1050, 980, { title: 'mine - Google Chrome', 'window-type': ['NORMAL'] }]);
+  await sleep(30);
+  ok(c2.windows.has(OTHER) && c2.mainWid === OTHER, 'CONTROL (RED): without `admit` the other conversation\'s window is drawn and made the main — the filter is load-bearing');
+  c2.close();
 }
 
 for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 10 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));

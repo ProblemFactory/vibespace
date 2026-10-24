@@ -353,5 +353,41 @@ console.log('⑥ a search touch carries its query + bounded hit refs; a search r
     'the dialog: the saved search scoped by `conv`, the vendor hits filtered to it, a hit opens the window AT the message (the window\'s jump, open or new)');
 }
 
+// ═══ ⑦ THE PROPOSALS ONE CALL FILED (lane chat-proposal-card — the owner, 2026-10-23: 「最下面那个是 outbox 请求吗？我视觉上
+// 完全看不出来啊」): the chat draws each one's card at the call row whose touches name it (channel-outbox chatProposalCards) ═══
+console.log('⑦ the proposals a call filed — their card at that call row (lane chat-proposal-card)');
+{
+  const ts = [
+    touch({ id: 'a1', op: 'read', convId: 'c1', at: 1000 }),
+    touch({ id: 'a2', op: 'reply', convId: 'c1', proposalId: 'p-2', at: 3000 }),
+    touch({ id: 'a3', op: 'compose', convId: null, proposalId: 'p-1', at: 2000 }),
+    touch({ id: 'a4', op: 'status', convId: 'c1', proposalId: 'p-9', at: 4000 }),
+    touch({ id: 'a5', op: 'api', convId: null, proposalId: 'p-api', at: 4500 }),
+    touch({ id: 'a6', op: 'reply', convId: 'c1', proposalId: 'p-2', at: 5000 }),
+    touch({ id: 'a7', op: 'react', convId: 'c2', proposalId: 'p-3', at: 6000 }),
+    touch({ id: 'a8', op: 'recall', convId: 'c2', proposalId: 'p-4', at: 7000 }),
+    touch({ id: 'a9', op: 'reply', convId: 'c3', at: 7500 }),
+  ];
+  const f = T.filedProposals(ts);
+  ok(JSON.stringify(f) === JSON.stringify([
+    { id: 'p-1', key: 'gmail/~compose/p-1', op: 'compose', at: 2000 }, { id: 'p-2', key: 'gmail/c1', op: 'reply', at: 3000 },
+    { id: 'p-3', key: 'gmail/c2', op: 'react', at: 6000 }, { id: 'p-4', key: 'gmail/c2', op: 'recall', at: 7000 },
+  ]), 'TABLE filedProposals: reply / compose / react / recall touches that carry an id, each id ONCE, in the order filed, each with its row\'s key (a composed message\'s own key); a status check (it files nothing), an API call (its card is the API card\'s) and a touch with no id add none', JSON.stringify(f));
+  ok(T.filedProposals([]).length === 0 && T.filedProposals(null).length === 0 && JSON.stringify(T.FILED_OPS) === '["reply","compose","react","recall"]', 'TABLE filedProposals: nothing in ⇒ nothing out; FILED_OPS is the closed set of filing verbs');
+  // CONTROL: a copy that lets a status check file ⇒ the row that only ASKED would draw a card it never filed
+  const MUT = mutantCopies('channel-touch-cpc', REPO);
+  const src = read('src/channel-touch.js');
+  const FROM = "const FILED_OPS = Object.freeze(['reply', 'compose', 'react', 'recall']);";
+  ok(src.split(FROM).length === 2, 'CONTROL setup: FILED_OPS is declared once');
+  const st = MUT.load('src/channel-touch.js', src.replace(FROM, "const FILED_OPS = Object.freeze(['reply', 'compose', 'react', 'recall', 'status']);"), 'status-files');
+  ok(st.filedProposals(ts).some((x) => x.id === 'p-9') && !f.some((x) => x.id === 'p-9'), 'CONTROL: with `status` among the filing verbs a status check\'s proposal id joins the list (the table above would go red)');
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 1, label: '⑦ ' })) ok(c.pass, c.name, c.detail);
+  // the wiring: the card row draws them through the Outbox's ONE card module; a card with no touches clears them; a reattach re-reads
+  const tv = read('src/lib/channel-touch-view.js');
+  ok(/^import \{ chatProposalCards, refreshChatProposals \} from '\.\/channel-outbox\.js';/m.test(tv) && /chatProposalCards\(view\.app, cardEl, T\.filedProposals\(touches\), \{ onCount: \(\) => \{ if \(typeof view\._updateRuns === 'function'\) view\._updateRuns\(\); \} \}\);/.test(tv)
+    && /chatApiCards\(null, cardEl, \[\]\);\n    chatProposalCards\(null, cardEl, \[\]\);/.test(tv) && /ensureLoaded\(\); \}, REFETCH_MS\);\n    refreshChatProposals\(\);/.test(tv),
+    'wiring: renderBox hands the call\'s filed proposals to channel-outbox chatProposalCards (a decision re-words the run fold), clearBox clears them, every attach re-reads them');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

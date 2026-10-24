@@ -743,6 +743,18 @@ function createChannelRegistry({ channelSettings } = {}) {
       if (!w || typeof w !== 'object' || !Object.keys(w).length || !Object.entries(w).every(([k, v]) => /^[a-z][a-z0-9-]{0,63}$/.test(k) && typeof v === 'string' && v)) throw new Error(`channel adapter '${kind}': unavailableWords must be {code: words} (non-empty strings)`);
       if (mod.caps.receive !== 'push') throw new Error(`channel adapter '${kind}': unavailableWords on an adapter with no push lane`);
     }
+    // lane channel-row-notices: the parked codes' CAUSES (a code the words do not declare is refused), the push lane's setup
+    // steps ({steps: [{words, code?}], after?}) and a permission's feature family (a function → one of SCOPE_FAMILIES)
+    if (mod.unavailableCauses !== undefined) {
+      const w = mod.unavailableCauses;
+      if (!w || typeof w !== 'object' || !Object.entries(w).every(([k, v]) => mod.unavailableWords && Object.prototype.hasOwnProperty.call(mod.unavailableWords, k) && typeof v === 'string' && v)) throw new Error(`channel adapter '${kind}': unavailableCauses must be {code: words} for codes its unavailableWords declare`);
+    }
+    if (mod.pushSetup !== undefined) {
+      const s = mod.pushSetup;
+      if (!s || !Array.isArray(s.steps) || !s.steps.length || !s.steps.every((x) => x && typeof x.words === 'string' && x.words && (x.code === undefined || (typeof x.code === 'string' && x.code))) || (s.after !== undefined && !(typeof s.after === 'string' && s.after))) throw new Error(`channel adapter '${kind}': pushSetup must be {steps: [{words, code?}], after?}`);
+      if (mod.caps.receive !== 'push') throw new Error(`channel adapter '${kind}': pushSetup on an adapter with no push lane`);
+    }
+    if (mod.scopeFamily !== undefined && typeof mod.scopeFamily !== 'function') throw new Error(`channel adapter '${kind}': scopeFamily must be a function(scope) → family`);
     // what unlocks SENDING (the window's read-only line): {scopes: [...], console: boolean}
     if (mod.sendGrant !== undefined) {
       const g = mod.sendGrant;

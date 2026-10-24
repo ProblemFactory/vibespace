@@ -599,7 +599,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const defaulted = p.placementDefaulted === 'parent-in-thread' ? ' — the default: that message is already in a thread' : p.placementDefaulted === 'root' ? ' — this channel\'s default for a reply' : '';
     if (placeWords && p.placement !== 'chat') console.log(`(lands ${placeWords}${p.replyTo ? `, answering ${p.replyTo}` : ''}${p.inThread && p.threadKey ? ` — thread ${p.threadKey}` : ''}${defaulted})`);
     if (p.state === 'sent') console.log(`sent directly (policy: direct) — proposal ${p.id}, sent as ${(p.result && p.result.sentAs) || p.sendAs}`);
-    else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
+    else if (p.state === 'awaiting-approval') { console.log(`proposed — proposal ${p.id} is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`); console.log('  the card is in this chat and in Channels › Outbox'); }   // lane chat-proposal-card: WHERE the card is — the agent's prose stopped inventing a place («Channels 里放了一条…»)
     else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
     console.log('  ' + TX.sentLine(r, text));   // lane cli-one-text-arg: the route's count — a cut is visible here
     const attLine = attachmentLine(p);
@@ -632,7 +632,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const what = `${x.op === 'remove' ? 'removing the reaction' : 'reacting'} ${em} on ${x.msg || msg}`;
     if (j.already) console.log(`already proposed — proposal ${p.id} (${what}) is ${p.state}`);
     else if (p.state === 'sent') console.log(`done directly (the account's reaction policy is direct) — ${what}; proposal ${p.id}`);
-    else if (p.state === 'awaiting-approval') console.log(`proposed — ${what} is awaiting the user's approval (proposal ${p.id}); the receipt arrives in your next turn`);
+    else if (p.state === 'awaiting-approval') { console.log(`proposed — ${what} is awaiting the user's approval (proposal ${p.id}); the receipt arrives in your next turn`); console.log('  the card is in this chat and in Channels › Outbox'); }
     else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
     return;
   }
@@ -682,7 +682,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const p = j.proposal || {};
     const x = p.recall || {};
     if (j.already) console.log(`already proposed — proposal ${p.id} (taking back ${x.msg || msg}) is ${p.state}`);
-    else console.log(`proposed — proposal ${p.id}: taking back the user's message ${x.msg || msg} is awaiting the user's approval (a recall always is); the receipt arrives in your next turn`);
+    else { console.log(`proposed — proposal ${p.id}: taking back the user's message ${x.msg || msg} is awaiting the user's approval (a recall always is); the receipt arrives in your next turn`); console.log('  the card is in this chat and in Channels › Outbox'); }
     if (x.quote && x.quote.text) console.log(`  the message: "${x.quote.text}"`);
     return;
   }
@@ -733,7 +733,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
         const p = x.proposal || {};
         if (x.ok === false) console.log(`${x.recipient}: refused — ${x.error || x.code}`);
         else if (p.state === 'sent') console.log(`sent directly (policy: direct) — proposal ${p.id} to ${x.recipient}`);
-        else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} to ${x.recipient} is awaiting the user's approval (${((p.policy && p.policy.reasons) || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
+        else if (p.state === 'awaiting-approval') { console.log(`proposed — proposal ${p.id} to ${x.recipient} is awaiting the user's approval (${((p.policy && p.policy.reasons) || []).join(', ') || 'review'}); the receipt arrives in your next turn`); console.log('  the card is in this chat and in Channels › Outbox'); }
         else console.log(`proposal ${p.id} to ${x.recipient}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
         if (x.ok !== false) await showInlineReceipt(x, p);
       }
@@ -755,7 +755,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const r = await call('POST', '/api/agent/channels/compose', body);
     const p = r.proposal;
     if (p.state === 'sent') console.log(`sent directly (policy: direct) — proposal ${p.id}, a NEW message to ${(p.compose && p.compose.to || []).join(', ')}`);
-    else if (p.state === 'awaiting-approval') console.log(`proposed — proposal ${p.id} (a NEW message to ${(p.compose && p.compose.to || []).join(', ')}) is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`);
+    else if (p.state === 'awaiting-approval') { console.log(`proposed — proposal ${p.id} (a NEW message to ${(p.compose && p.compose.to || []).join(', ')}) is awaiting the user's approval (${(p.policy.reasons || []).join(', ') || 'review'}); the receipt arrives in your next turn`); console.log('  the card is in this chat and in Channels › Outbox'); }
     else console.log(`proposal ${p.id}: ${p.state}${p.reason ? ' — ' + p.reason : ''}`);
     console.log('  ' + TX.sentLine(r, text));   // lane cli-one-text-arg: the route's count
     const attLine = attachmentLine(p);

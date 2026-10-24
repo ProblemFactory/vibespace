@@ -1551,7 +1551,7 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
    first words of its command) and its conversation rows as chips (the same row buttons); the bodies are hidden and
    return when the run opens. An API card stays drawn (its own line): a raw call awaiting the person is never folded. */
 .chat-msg.chat-channel-compact .chat-tool-use { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; padding-top: 2px; padding-bottom: 2px; }
-.chat-msg.chat-channel-compact .chat-tool-use > :not(.chat-tool-label):not(.chat-channel-touches):not(.chat-api-cards) { display: none; }
+.chat-msg.chat-channel-compact .chat-tool-use > :not(.chat-tool-label):not(.chat-channel-touches):not(.chat-api-cards):not(.chat-chan-props) { display: none; }
 .chat-msg.chat-channel-compact .chat-tool-use > .chat-tool-label { flex: 0 1 auto; min-width: 5em; max-width: 38%; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-msg.chat-channel-compact .chat-tool-use > .chat-channel-touches { flex: 1 1 0; min-width: 0; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 4px; margin: 0; overflow: hidden; }
 .chat-msg.chat-channel-compact .chat-channel-touch { width: auto; flex: 0 1 auto; min-width: 4em; max-width: 22em; padding-top: 1px; padding-bottom: 1px; }
@@ -1560,7 +1560,10 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-msg.chat-channel-compact .chat-channel-touch .cct-name { flex: 0 1 auto; min-width: 2.5em; }
 .chat-msg.chat-channel-compact .chat-channel-touch .cct-words { flex: 0 1000 auto; min-width: 0; }
 .chat-msg.chat-channel-compact .chat-channel-touches-more { flex: none; white-space: nowrap; }
-.chat-msg.chat-channel-compact .chat-tool-use > .chat-api-cards { flex: 1 1 100%; }
+.chat-msg.chat-channel-compact .chat-tool-use > .chat-api-cards, .chat-msg.chat-channel-compact .chat-tool-use > .chat-chan-props { flex: 1 1 100%; }
+.chat-msg.chat-channel-compact .chat-tool-use > .chat-chan-props[hidden] { display: none; }
+.chat-msg.chat-channel-compact .chat-channel-touch.has-prop { max-width: 100%; flex-wrap: wrap; }
+.chat-msg.chat-channel-compact .chat-channel-touch.has-prop .cct-words { display: none; } /* the chip says it — and its STATE is never the part cut */
 .chat-channel-compact-cmd { display: none; }
 .chat-msg.chat-channel-compact .chat-channel-compact-cmd { display: inline; margin-left: 6px; font-weight: 400; font-family: 'SF Mono','Fira Code','JetBrains Mono',monospace; font-size: 11px; color: var(--text-secondary); }
 

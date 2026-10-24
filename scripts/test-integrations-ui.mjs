@@ -1100,6 +1100,16 @@ const p2 = await newPage();
   ok(copied && copied.toast === `Copied: ${PUBLIC}` && copied.mark === '1', `Copy copies the exact address — the toast names it (${JSON.stringify(copied)})`);
   const lark = await p1.evaljs(`(() => { const d = ${SETUP('lark')}.querySelector('details.oauth-setup-fold[data-who="custom"]'); d.open = true; return { create: d.querySelector('.oauth-setup-create').dataset.create, loop: (d.querySelector('.oauth-setup-row[data-row="loopback"] code') || {}).textContent || null, refusal: d.querySelector('.oauth-setup-refusal').textContent, links: [...d.querySelectorAll('a.oauth-setup-console')].map((a) => a.textContent) }; })()`);
   ok(lark.create === 'app' && lark.loop === LARK_CB && /^If Lark says “20029”/.test(lark.refusal) && JSON.stringify(lark.links) === JSON.stringify(['Lark', '飞书']), `the Lark card: its one kind of app, its registered loopback, 20029, both consoles (${JSON.stringify(lark)})`);
+  // lane channel-row-notices (the owner: the Channels row's five-line install paragraph «很丑陋»): the push lane's STEPS live on the
+  // account type's setup card under «Real-time push — optional» (the live lane's own declaration) — Lark's only; opened here
+  // so the viewport check below measures its Copy buttons too
+  const push = await p1.evaljs(`(() => {
+    const d = ${SETUP('lark')}.querySelector('details.push-setup-fold[data-who="push"]'); if (!d) return null; const closed = !d.open; d.open = true;
+    return { closed, summary: d.querySelector('summary').textContent, steps: [...d.querySelectorAll('.push-setup-step')].map((li) => ({ words: li.querySelector('.mounts-field-hint').textContent, code: (li.querySelector('code') || {}).textContent || null, copy: !!li.querySelector('button.integ-copy') })), after: (d.querySelector('.push-setup-after') || {}).textContent || null,
+      others: ['gmail', 'slack'].map((k) => !!document.querySelector('.integ-setup-card[data-integ-setup="' + k + '"] details.push-setup-fold')) };
+  })()`);
+  ok(push && push.closed && push.summary === 'Real-time push — optional' && push.steps.length === 4 && push.steps[0].code === 'npm install @larksuiteoapi/node-sdk' && push.steps[0].copy && /restart VibeSpace/.test(push.steps[0].words) && push.steps[2].code === 'im:message.group_msg' && push.steps[3].code === null && /polling/.test(push.after || '') && push.others.every((x) => !x),
+    `the Lark card carries the push lane's steps, folded under «Real-time push — optional»: the install command with Copy, the console steps, the scope, the bot — none on Gmail / Slack (${JSON.stringify(push)})`);
   await p1.probe('⚙ → Integrations: the Gmail setup card, opened', `.integ-setup-card[data-integ-setup="gmail"] .oauth-setup`);
   const fit = await p1.evaljs(`(() => { const bad = []; for (const el of document.querySelectorAll('.integ-setup-card button, .integ-setup-card a, .integ-setup-card code')) { const r = el.getBoundingClientRect(); if (r.width === 0 && r.height === 0) continue; if (r.right > 376 || r.left < -1) bad.push((el.className || el.tagName) + ':' + Math.round(r.left) + '-' + Math.round(r.right)); } return bad; })()`);
   ok(!fit.length, `375×667: every Copy button, console link and address of the setup cards inside the viewport (offenders: ${fit.join(', ') || 'none'})`);

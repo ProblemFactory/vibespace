@@ -528,7 +528,8 @@ ok(G.title === 'RE: Quarterly numbers' && G.barTitle === 'RE: Quarterly numbers'
 ok(G.banner === 'Please reply above this line' && !/======/.test(G.body), 'the ticket banner is ONE dim line; its ====== rules are gone', J([G.banner]));
 ok(G.folded && !G.inner && G.tog === '显示引用内容（6 行）' && G.expanded === 'false' && !/Revenue is up/.test(G.body), 'the quoted history is FOLDED behind "显示引用内容（6 行）" — its lines not drawn', J([G.tog, G.expanded]));
 ok(/On Sat, Sep 19, 2026 at 3:14 PM Ada Example <ada@example.com> wrote:/.test(G.attribution || ''), 'the folded quote still says who wrote it (the attribution beside the toggle)', G.attribution);
-ok(G.ro && G.ro.kind === 'reauth' && G.ro.text === '只读 —— 这个账号需要重新授权才能回复' && G.ro.btn && G.ro.btn.text === '重新授权' && G.ro.btn.adapter === 'gmail' && G.ro.oneLine && !G.ro.step && !G.composer, 'the read-only footer is ONE line — "只读 —— 这个账号需要重新授权才能回复" + a 重新授权 button — no Lark clause, no composer', J(G.ro));
+// lane channel-row-notices: the line says what works (reading) and what the re-authorization adds (the send permission)
+ok(G.ro && G.ro.kind === 'reauth' && G.ro.text === '可读，回复需要再授权一次（缺发送权限）' && G.ro.btn && G.ro.btn.text === '重新授权' && G.ro.btn.adapter === 'gmail' && G.ro.oneLine && !G.ro.step && !G.composer, 'the read-only footer is ONE line — "可读，回复需要再授权一次（缺发送权限）" + a 重新授权 button — no Lark clause, no composer', J(G.ro));
 await p1.shot('gmail-folded.png', await rectOf('t_render'));
 const opened = await p1.evaljs(`(async () => {
   const w = ${WIN('t_render')};
@@ -571,7 +572,7 @@ const R3 = await p1.evaljs(`(() => {
   const step = ro.querySelector('[data-channel-console-step]');
   return { text: ro.querySelector(':scope > span').textContent, btn: ro.querySelector('[data-channel-reauth]') ? ro.querySelector('[data-channel-reauth]').dataset.channelReauth : null, step: step ? step.textContent : null };
 })()`);
-ok(R3.text === '只读 —— 这个账号需要重新授权才能回复' && R3.btn === 'lark:2' && /im:message\.send_as_user/.test(R3.step || '') && !/im:message \+/.test(R3.step || '') && /飞书/.test(R3.step || ''), 'the SAME line + Re-authorize, and — only on this account (its adapter declares a console step) — the step naming exactly the missing scope', J(R3));
+ok(/^可读，回复需要再授权一次（缺 im:message\.send_as_user(?: \+ [\w:.]+)* 权限）$/.test(R3.text) && R3.btn === 'lark:2' && /im:message\.send_as_user/.test(R3.step || '') && !/im:message \+/.test(R3.step || '') && /飞书/.test(R3.step || ''), 'the SAME line naming the missing send permission + Re-authorize, and — only on this account (its adapter declares a console step) — the step naming exactly the missing scope', J(R3));
 
 // ═══ ④ hostile ══════════════════════════════════════════════════════════
 console.log('④ a hostile record renders as text');
@@ -1522,7 +1523,8 @@ console.log('⑦ a credential change reaches the open windows (inc-muk9jj0j-rel3
     const ro = w.content.querySelector('.chanwin-readonly');
     return { id: w.id, open: document.body.contains(w.element), composer: !!w.content.querySelector('[data-channel-send]'), ro: ro ? ro.querySelector(':scope > span').textContent : null, btn: !!w.content.querySelector('[data-channel-reauth="lark"]') };
   })()`);
-  ok(before.composer && dis.status === 200 && after.open && after.id === before.id && !after.composer && after.ro === '只读 —— 这个账号需要重新授权才能回复' && after.btn, 'LIVE: the open Lark window\'s footer follows the credential change IN PLACE (the whole digest re-rendered it — the composer gone, the read-only line + Re-authorize), no reopen', JSON.stringify([before, dis.status, after]));
+  // lane channel-row-notices: the read-only line names the missing send permissions
+  ok(before.composer && dis.status === 200 && after.open && after.id === before.id && !after.composer && after.ro === '可读，回复需要再授权一次（缺 im:message + im:message.send_as_user 权限）' && after.btn, 'LIVE: the open Lark window\'s footer follows the credential change IN PLACE (the whole digest re-rendered it — the composer gone, the read-only line + Re-authorize), no reopen', JSON.stringify([before, dis.status, after]));
   // the verify round: the reply typed before the flip is HELD (not dropped) and NOT sendable — the server refuses by name
   const held = await p1.evaljs(`(() => { const ro = ${WIN('oc_render')}.content.querySelector('.chanwin-readonly'); return { held: ro ? ro.dataset.channelDraftHeld : null, textarea: !!${WIN('oc_render')}.content.querySelector('textarea') }; })()`);
   const refused = await api('POST', '/api/channels/lark/oc_render/send', { text: 'half a sentence' });

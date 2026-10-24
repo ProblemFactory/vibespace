@@ -59,7 +59,7 @@ const { makeRecord, makeConversation, peerName, validateFacts } = require('../ch
 const { ChannelError, notConnectedError, vaultLockedWhy, retryAfterSeconds, sentSecrets, withoutSent } = require('./index.js');
 const Holds = require('./vendor-hold.js');   // lane lark-send-hold: the ACCOUNT's send hold (the one shape Slack's per-method hold uses)
 const { namelessSentence } = require('../channel-identity.js');   // verify r6: a consent must name its account
-const { createLarkLive, NAMES_WAIT_MS, UNAVAILABLE_WORDS } = require('./live/lark.js');
+const { createLarkLive, NAMES_WAIT_MS, UNAVAILABLE_WORDS, UNAVAILABLE_CAUSES, PUSH_SETUP } = require('./live/lark.js');
 // §25 (2026-09-27): THE RENDER RUNGS — a vendor item → the typed block tree
 // the window draws (a post's rich text kept, mentions as chips, a picture as
 // the picture); `text` stays the agent-facing string.
@@ -216,9 +216,46 @@ function consentPage(floor, todo, bytesOf) {
   }
   return page;
 }
+/** lane lark-consent-chain (the owner 2026-10-23, on «另外 248 项权限»: 「不能一次性打开所有吗？」): the pages cannot be one — but
+ *  ONE press walks them all (src/consent-road.js CHAIN_PAGES_MAX: the landing of page k sends the same tab on to page
+ *  k+1). THE PLAN: the pages `consentPage` cuts from `todo`, in order (counted to CONSENT_PLAN_MAX). */
+const CONSENT_PLAN_MAX = 50;
+function consentPlan(floor, todo, bytesOf) {
+  const pages = [];
+  for (let rest = todo; rest.length && pages.length < CONSENT_PLAN_MAX;) { const pg = consentPage(floor, rest, bytesOf); if (!pg.length) break; pages.push(pg); rest = rest.slice(pg.length); }
+  return pages;
+}
+/** …in this ORDER (rule 4): the namespaces whose scopes a SHIPPED feature reaches beyond the floor — an agent's raw Lark
+ *  API over messages, people, calendar, docs, drive, bitable, 妙记, approval — come FIRST, so the first page alone carries
+ *  them and a chain stopped after it costs nothing the product uses; the long tail (the app's other permissions) fills
+ *  the later pages, each part in the app's own order. A MINIMAL map (lane channel-row-notices' feature families had not
+ *  landed when this was cut). */
+const CHAIN_FIRST_NAMESPACES = Object.freeze(['im', 'contact', 'calendar', 'docx', 'docs', 'wiki', 'sheets', 'drive', 'bitable', 'minutes', 'approval']);
+function chainOrder(todo) {
+  const first = [], rest = [];
+  for (const x of todo) (CHAIN_FIRST_NAMESPACES.includes(String(x).split(':')[0]) ? first : rest).push(x);
+  return [...first, ...rest];
+}
+/** A chain's later page reuses the app's permission list its first page read this long (one press, one read). */
+const CHAIN_APP_READ_REUSE_MS = 10 * 60e3;
 const APP_SCOPES_READ_MAX = 2000;
 const APP_SCOPES_WAIT_MS = 8000;
 const SCOPE_SHAPE = /^[a-z][a-z0-9_.-]{0,63}(?::[a-z0-9_.-]{1,64}){0,4}$/;
+/** lane channel-row-notices (ADDENDUM 1 — the owner: «重新授权干啥？»): WHICH FEATURE FAMILY a Lark permission unlocks (the
+ *  shared vocabulary is src/channel-caps.js SCOPE_FAMILIES) — by the namespace before its first colon, Lark's own grouping
+ *  (calendar:calendar:readonly, docx:document, bitable:app, contact:user.base:readonly …); the row names the pending
+ *  permissions' gain by these, never a bare count. */
+const SCOPE_FAMILY_OF = Object.freeze({
+  calendar: 'calendar', docx: 'docs', docs: 'docs', doc: 'docs', drive: 'docs', sheets: 'docs', bitable: 'docs', base: 'docs', wiki: 'docs', board: 'docs', slides: 'docs', space: 'docs',
+  contact: 'contacts', directory: 'contacts', mail: 'mail', approval: 'approval', attendance: 'attendance', task: 'tasks', todo: 'tasks',
+  vc: 'meetings', meeting_room: 'meetings', minutes: 'minutes', im: 'messages', okr: 'okr', corehr: 'hr', ehr: 'hr', hire: 'hr', payroll: 'hr', search: 'search',
+});
+function scopeFamily(scope) {
+  const ns = String(scope || '').split(':')[0];
+  return Object.prototype.hasOwnProperty.call(SCOPE_FAMILY_OF, ns) ? SCOPE_FAMILY_OF[ns] : 'other';
+}
+/** …and at most this many of the pending permissions' NAMES are kept on the account (the consent writes them). */
+const PENDING_NAMES_MAX = 600;
 // lane lark-upload-preflight: the upload scopes come right after the wide group — an app that has not enabled one loses
 // only it, never the reactions / profiles / search after it.
 // lane lark-upload-scope-split: the upload group is `im:resource` ALONE (V2 is deprecated — never asked); the ladder is
@@ -1530,6 +1567,8 @@ function create(record = {}, deps = {}) {
       return { scopes: [], why: String((e && e.message) || e).slice(0, 300) };
     }
   }
+  /** lane lark-consent-chain: the last list read (a chain's later pages reuse it — CHAIN_APP_READ_REUSE_MS). */
+  let appRead = null;
   /** …within APP_SCOPES_WAIT_MS — a human is waiting for the consent page; a late answer is the floor's. */
   async function appUserScopes() {
     let timer = null;
@@ -1920,14 +1959,18 @@ function create(record = {}, deps = {}) {
        *  this boot signs; `road: 'loopback'` = the person asked for the copy-the-address way (src/consent-road.js).
        *  lane oauth-relay-road: a RELAY page that sends this browser back comes first — redirect_uri = the relay page, the
        *  state's `u` = the browser's own origin (the relay sends it on to <u>/api/channels/oauth/cb/lark). */
-      async begin({ origin = null, road = null } = {}) {
+      async begin({ origin = null, road = null, chain = null } = {}) {
         if (!oauth) throw new ChannelError('not-supported', 'lark.auth.begin: no OAuth loopback was handed to this adapter', { retryable: false });
         const cred = credential();
         if (!cred.values) throw new ChannelError('auth-expired', `cannot start a Lark consent flow: ${cred.why}`, { retryable: false, detail: { needsCredentials: true, missing: cred.missing } });
         const { appId, appSecret } = cred.values;
         // lane lark-minutes-scopes: EVERY user permission the app has enabled (read now) beyond the floor, never one the
-        // owner's options keep out, a page at a time (consentPage); a read that failed asks the floor alone, said once
-        const app = await appUserScopes();
+        // owner's options keep out, a page at a time (consentPage); a read that failed asks the floor alone, said once.
+        // lane lark-consent-chain: `chain` = this begin is page k of a chain (the engine begins it when page k-1 lands) —
+        // its list is the one page 1 read moments ago
+        const at = CR.chainOf(chain);
+        const app = at && at.page > 1 && appRead && now() - appRead.at < CHAIN_APP_READ_REUSE_MS ? appRead.v : await appUserScopes();
+        if (!app.why) appRead = { at: now(), v: app };
         if (app.why) log.warn && log.warn(`[channels] lark: the app's permission list could not be read (${app.why}) — this consent asks the built-in list; granting the app application:application:self_manage lets a consent ask every permission it has enabled`);
         const floor = consentScopes(), out = optedOut();
         const enabled = app.scopes.filter((x) => !floor.includes(x) && !out.includes(x));
@@ -1939,16 +1982,45 @@ function create(record = {}, deps = {}) {
         // lane oauth-relay-road: the relay page first (the fleet's › the preset's › the setting's), when it sends this browser back
         const way = CR.consentRoad({ kind: KIND, publicUrl: consent && typeof consent.publicUrl === 'function' ? consent.publicUrl() : '', origin, road, ...CR.relayOf(consent, cred) });
         const viaRoute = way.road !== 'loopback' && !!consent && typeof consent.sign === 'function';
-        const stateFor = ({ flowId, issuedAt }) => CR.stateOf({ origin: way.u, flowId, issuedAt, kind: KIND }, consent.sign);
-        // the page is measured with the redirect this consent names and a state as long as any it carries
-        const sampleState = viaRoute ? stateFor({ flowId: '0'.repeat(16), issuedAt: now() }) : '';
-        const extras = consentPage(floor, enabled.filter((x) => !heldNow.has(x)), (sc) => Buffer.byteLength(urlOf(sc, viaRoute ? way.redirectUri : CONSENT.callbackUrl, 'x'.repeat(Math.max(64, sampleState.length)))));
+        // lane lark-consent-chain: THE PLAN, measured the way every page is (below) — its first page is this consent's; the
+        // chain's place (`here`, signed into the state with the rest) is this page of the pages done + the pages to go,
+        // ≤ CR.CHAIN_PAGES_MAX — an app whose permissions need more is said once, and the row counts what the chain left
+        const pageNo = at ? at.page : 1;
+        const bytesWith = (stateLen) => (sc) => Buffer.byteLength(urlOf(sc, viaRoute ? way.redirectUri : CONSENT.callbackUrl, 'x'.repeat(Math.max(64, stateLen))));
+        // the page is measured with the redirect this consent names and a state as long as any it carries (a chain's place
+        // included — one digit each, so the real state is never longer)
+        const sampleState = viaRoute ? CR.stateOf({ origin: way.u, flowId: '0'.repeat(16), issuedAt: now(), kind: KIND, chain: { page: 1, total: 2 } }, consent.sign) : '';
+        // int349 (channel-row-notices × lark-consent-chain): the pages a consent LEAVES (the row's «下一组 N 个») are measured
+        // and cut the way the next consent cuts them — this plan's measure, its feature-first order
+        const pageBytes = bytesWith(sampleState.length);
+        const lacked = enabled.filter((x) => !heldNow.has(x));
+        // the feature-first order only where there are pages to order (one page asks them all, in the app's order as before)
+        const plan0 = consentPlan(floor, lacked, bytesWith(sampleState.length));
+        const todo = plan0.length > 1 ? chainOrder(lacked) : lacked;
+        const plan = plan0.length > 1 ? consentPlan(floor, todo, bytesWith(sampleState.length)) : plan0;
+        const extras = plan[0] || [];
+        const total = Math.min(CR.CHAIN_PAGES_MAX, pageNo - 1 + Math.max(1, plan.length));
+        const here = CR.chainOf({ page: Math.min(pageNo, total), total });
+        const stateFor = ({ flowId, issuedAt }) => CR.stateOf({ origin: way.u, flowId, issuedAt, kind: KIND, chain: here }, consent.sign);
+        if (pageNo === 1 && plan.length > CR.CHAIN_PAGES_MAX) log.warn && log.warn(`[channels] lark: the app has enabled ${todo.length} user permissions this sign-in does not hold — ${plan.length} consent pages (Lark: ≤ ${CONSENT_SCOPES_MAX} scopes and a ${CONSENT_URL_MAX_BYTES}-byte authorize URL a page); one press walks ${CR.CHAIN_PAGES_MAX}, the account counts the rest for a later Re-authorize`);
         const asked = (without = []) => [...consentScopes(without), ...extras.filter((x) => !(Array.isArray(without) && without.includes(x)))];
+        // ADDENDUM 1: where the list came from — the app's own (a scope Lark would refuse, 20027, can only be one of the floor's
+        // the list LACKS) or the floor (the read failed: any of the floor may be one the app lacks)
+        const listed = new Set(app.scopes);
+        const scopeSource = { from: app.why ? 'floor' : 'app', why: app.why || null, lacking: app.why ? [] : floor.filter((x) => !listed.has(x)) };
         return oauth.begin({
           id: adapterId, label: 'Lark',
           ...(viaRoute ? { mode: 'public', redirectUri: way.redirectUri, stateFor, road: way.road } : { mode: 'fixed', registeredCallbackUrl: CONSENT.callbackUrl }),
           successText: 'VibeSpace: Lark connected — you can close this tab.',
-          buildConsentUrl: ({ redirectUri, state, without = [] }) => urlOf(asked(without), redirectUri, state),
+          chain: here, scopeSource,
+          // lane lark-consent-chain: a page whose authorize URL passes CONSENT_URL_MAX_BYTES is REFUSED by name, never sent
+          // (Lark's sign-in host answers it 431 — the person would see an error page in the middle of a chain)
+          buildConsentUrl: ({ redirectUri, state, without = [] }) => {
+            const u = urlOf(asked(without), redirectUri, state);
+            const n = Buffer.byteLength(u);
+            if (n > CONSENT_URL_MAX_BYTES) throw new ChannelError('vendor-error', `lark: this consent page's authorize URL is ${n} bytes — over the ${CONSENT_URL_MAX_BYTES} Lark's sign-in host takes (it answers 431); the page is not sent`, { retryable: false, detail: { why: 'consent-url-too-long', bytes: n } });
+            return u;
+          },
           // the ORDERED groups this consent actually names (a group whose scopes the owner's options leave out is not offered)
           // lane lark-minutes-scopes: when the app's own list was read, a group naming a scope that list LACKS goes first (that
           // is what Lark refuses with 20027 — an app without 妙记 loses only the 妙记 group on the first press), the groups it
@@ -1985,8 +2057,17 @@ function create(record = {}, deps = {}) {
             const refusedScopes = (Array.isArray(narrowed) ? narrowed : []).filter((x) => (OPTIONAL_SCOPES.includes(x) || extras.includes(x)) && !(tok.scopes || []).includes(x));
             // lane lark-minutes-scopes: the app's enabled permissions this token still lacks (the next pages) — never one this
             // consent dropped (the refusal names it)
-            const morePending = enabled.filter((x) => !(tok.scopes || []).includes(x) && !refusedScopes.includes(x)).length;
-            if (tokens) await tokens.write(tok, { expiresAt: tok.refreshExpiresAt, scopes: tok.scopes, consent: { cancelled }, refusedScopes, morePending });
+            const pending = enabled.filter((x) => !(tok.scopes || []).includes(x) && !refusedScopes.includes(x));
+            const morePending = pending.length;
+            // lane channel-row-notices: and WHICH ones (bounded) — the row names their feature families — and the PAGES they
+            // fill (the owner: «继续授权以获取应用下一组权限（xxx 个），总计剩余 yyy 个权限» — one Re-authorize asks ONE page):
+            // the next page's size and how many pages are left, by the same `consentPage` the next consent runs
+            const morePendingScopes = pending.slice(0, PENDING_NAMES_MAX);
+            // int349: …the plan the next consent runs (lark-consent-chain's consentPlan + chainOrder over what is left)
+            const pages0 = consentPlan(floor, pending, pageBytes);
+            const pageSizes = (pages0.length > 1 ? consentPlan(floor, chainOrder(pending), pageBytes) : pages0).map((pg) => pg.length);
+            const nextPageCount = pageSizes[0] || 0, morePendingPages = pageSizes.length;
+            if (tokens) await tokens.write(tok, { expiresAt: tok.refreshExpiresAt, scopes: tok.scopes, consent: { cancelled }, refusedScopes, morePending, morePendingScopes, nextPageCount, morePendingPages });
             return { ok: true, user: tok.name || tok.openId || null, scopes: tok.scopes, refusedScopes, morePending };
           },
           onDone: deps.onAuthDone ? (r) => deps.onAuthDone(adapterId, r) : null,
@@ -2564,6 +2645,8 @@ module.exports = {
   SEND_GRANT, blocksOf: Blocks.larkStoredBlocks, sendCapsOf,
   // lane dc-channels-blocks: the record's vendor facts by name + the live lane's words for its parked codes
   rawFacts, unavailableWords: UNAVAILABLE_WORDS,
+  // lane channel-row-notices: the parked codes' causes (the row's ⓘ), the push lane's setup steps, a permission's feature family
+  unavailableCauses: UNAVAILABLE_CAUSES, pushSetup: PUSH_SETUP, scopeFamily,
   // D3 (lane channel-rich): the ONE bot-name resolver's module half + the read-time view
   recordView, botFallbackName, appNameOf, knownAppName, rememberAppName, APP_NAMES,
   // lane channel-threads: the reaction vocabulary (L9), the scope verdict, what unlocks reading
@@ -2573,7 +2656,7 @@ module.exports = {
   // lane slack-scopes-lark-reauth: every usable scope, asked once (the first optional group)
   WIDE_SCOPES, UPLOAD_SCOPES, UPLOAD_CONSENT_SCOPES, FILES_GRANT,
   // lane lark-minutes-scopes: 妙记's two scopes + their grant, the closed scopes, the consent's read of the app's own list
-  MINUTES_SCOPES, MINUTES_MEDIA_SCOPES, MINUTES_GRANT, CLOSED_SCOPES, CONSENT_SCOPES_MAX, CONSENT_URL_MAX_BYTES, consentPage, APP_SCOPES_READ_MAX, APP_SCOPES_WAIT_MS, SCOPE_SHAPE,
+  MINUTES_SCOPES, MINUTES_MEDIA_SCOPES, MINUTES_GRANT, CLOSED_SCOPES, CONSENT_SCOPES_MAX, CONSENT_URL_MAX_BYTES, consentPage, consentPlan, chainOrder, CHAIN_FIRST_NAMESPACES, CONSENT_PLAN_MAX, CHAIN_APP_READ_REUSE_MS, APP_SCOPES_READ_MAX, APP_SCOPES_WAIT_MS, SCOPE_SHAPE, SCOPE_FAMILY_OF, PENDING_NAMES_MAX,
   // lane lark-p2p: THE ONE search-hit reader (the measured shape) + the probe's value-form words
   readSearchHit, valueFormOf,
   // lane lark-threads (A4): the by-id answer's verdict

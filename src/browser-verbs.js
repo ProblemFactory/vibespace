@@ -9,7 +9,7 @@
  * WHAT IS DECIDED HERE:
  *   · `classify(argv, {ours})` — what one `vibespace-browser …` command IS:
  *       ours     a VibeSpace verb (profiles new providers use detach status pin
- *                watch backend blocked new-child help) — ours always wins;
+ *                watch backend blocked new-child help ask-human) — ours always wins;
  *       page     a verb that acts on a page of THIS conversation's browser —
  *                it runs through `/api/agent/browser/resolve` (the lease, the
  *                one-time `profile_changed`, `browser_paused`, the audit);
@@ -45,7 +45,7 @@ const SHIM_MARKER = 'VIBESPACE-AGENT-BROWSER-SHIM';
 // lane browser-resume B (§3.9): + `resume` (its conversation's own browser, started again with its kept tabs — the collision
 // census reads the binary's own words: `resume` is none of 0.38.1's)
 // lane launch-picture-size: + `size <WxH|auto>` (the conversation's FIXED picture size — 0.38.1 has no `size` verb)
-const OURS = Object.freeze(['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help', 'resume', 'restart', 'size']); // lane browser-unresponsive: + restart (a hung browser's way out)
+const OURS = Object.freeze(['profiles', 'new', 'providers', 'use', 'detach', 'status', 'pin', 'watch', 'backend', 'blocked', 'new-child', 'help', 'resume', 'restart', 'size', 'ask-human']); // lane browser-unresponsive: + restart (a hung browser's way out); lane browser-takeover-queue: + ask-human (a person takes over)
 /** lane site-reset (2026-09-30): VibeSpace's own verbs that act on the conversation's CURRENT PAGE — they take the page verbs'
  *  road (the one /resolve: which browser, the lease, the refusals, the audit) but never reach the binary as a verb: `stop`
  *  (Page.stopLoading through the watch — a looping tab never disables the browser) and `site-reset <host>` (one site's

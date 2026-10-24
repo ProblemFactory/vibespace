@@ -39,7 +39,7 @@
  * missing dependency of its OWN (a programming error).
  */
 
-function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, netemEnabled = false, access = null, deliver = null, groupsOf = null, log = console } = {}) {
+function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, activeSessions, serverSetting, broadcast, browserHandback = null, netemEnabled = false, access = null, deliver = null, groupsOf = null, browserStream = null, log = console } = {}) {
   if (!app || !auth || !keeper || !vnc) throw new Error('window-live wiring: app, auth, vnc and keeper are required');
   const DV = require('../desktop-viewers.js');
   let streamRef = null;
@@ -53,28 +53,32 @@ function install({ app, auth, vnc, keeper, DESKTOP_SINGLETON_ID, dataDir, env, a
   // (design 014 D1 — the access layer resolves it), the keeper's sessions. Each owns its ids, its target, its input
   // rule and its upstream words; a PERSONAL source (the person's own desktop) is never governed, never an agent target
   const SS = require('./stream-sources.js');
-  const sources = SS.create({ vnc, keeper, engine, access, singletonId: DESKTOP_SINGLETON_ID });
+  // lane browser-x-in-window (B2): an agent browser's display session is SEATED by the live view's relay (its ticket: the viewer
+  // holding the browser's takeover drives, everyone else watches) — never the desktop keeper's one-active-viewer election
+  const browserSeat = browserStream && typeof browserStream.xSeat === 'function' ? (id, viewerId) => browserStream.xSeat(id, viewerId) : null;
+  const sources = SS.create({ vnc, keeper, engine, access, singletonId: DESKTOP_SINGLETON_ID, browserSeat });
   const src = (id) => SS.sourceOf(sources, id);
   const own = (id) => src(id).personal;
-  const governed = (id) => !own(id) && typeof keeper.viewerJoined === 'function';
+  const governed = (id) => !own(id) && !src(id).seat && typeof keeper.viewerJoined === 'function'; // lane browser-x-in-window: a seated source is never the election's
   const stream = require('./desktop-stream.js').create({
     auth, onInput: (id) => { src(id).onInput?.(id); },
     onDesktopSize: (id, w, h) => keeper.noteDesktopSize?.(id, w, h), // P8-2 x4 (a machine desktop never asks — its view runs resizeSession off): the client asked the display to follow its pane ⇒ the keeper fits the app to it
     resolveTarget: (id) => src(id).target(id),
     upstreamWhy: sources.some((s) => s.upstreamWhy) ? (id) => src(id).upstreamWhy?.(id) ?? null : null, // design 014 D1: "<machine> went offline"
     forwardPort: access ? (hostId, port) => access.forwardPort(hostId, port) : null, // lane C2: a paired machine's picture port, forwarded (src/server/desktop-access.js)
-    inputPolicy: (id, viewerId) => (own(id) ? { relay: true } : engine.inputPolicy(id, viewerId)), // the singleton desktop is the user's own — never gated
+    inputPolicy: (id, viewerId) => (own(id) ? { relay: true } : src(id).seat ? (src(id).seat(id, viewerId) === 'active' ? { relay: true } : { relay: false, code: 'watch-mode', why: 'only the viewer driving this browser types into it' }) : engine.inputPolicy(id, viewerId)), // the singleton desktop is the user's own — never gated; lane browser-x-in-window: a SEATED source (an agent browser's display) relays input for its driver only — never the window engine's no-lease relay
     pinned: (id) => (!own(id) && keeper.get(id) && keeper.get(id).pin) || null, // lane e2b: the record's pin {w,h} — the keeper owns that window's geometry; r3: the xpra bridge asks xpra for it
-    onViewerLeft: (id, viewerId) => { if (!own(id)) engine.viewerLeft(id, viewerId); },
+    onViewerLeft: (id, viewerId) => { if (!own(id) && !src(id).seat) engine.viewerLeft(id, viewerId); }, // lane browser-x-in-window: an X picture's socket leaving hands nothing back (the takeover is the live view's)
     viewerSeats: { // x5: the singleton desktop is the user's own and never governed ('free')
       join: (id, { viewerId, pane, prev, ua }) => { if (governed(id)) keeper.viewerJoined(id, { viewerId, pane, prev, label: DV.viewerLabel(ua) }); },
       leave: (id, viewerId) => { if (governed(id)) keeper.viewerLeft(id, viewerId); },
-      state: (id, viewerId) => (governed(id) ? DV.viewerState({ active: keeper.activeViewer(id) }, viewerId, engine.leaseInput(id)) : 'free'),
+      state: (id, viewerId) => (src(id).seat ? src(id).seat(id, viewerId) : governed(id) ? DV.viewerState({ active: keeper.activeViewer(id) }, viewerId, engine.leaseInput(id)) : 'free'), // lane browser-x-in-window: the browser's seat first
     },
     netemEnabled, // P8-2 validation slice: VIBESPACE_DESKTOP_NETEM=1 on a dev server only, never on by default
     log,
   });
   streamRef = stream;
+  browserStream?.onXSeats?.((id) => stream.refresh(id)); // lane browser-x-in-window: a takeover / handback / view gone re-seats that display's sockets at once
   keeper.onViewers?.((id) => stream.refresh(id)); // x5: join / leave / Resume here / the session ended ⇒ every socket of that window re-applied
   engine.setViewerProbe((id, viewerId) => stream.viewerAlive(id, viewerId));
   engine.setViewerCount?.((id) => stream.connections(id)); // lane e2a r3: an agent browser's end waits while a viewer has it open
