@@ -26,7 +26,9 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
     ptyProcess.onData((output) => {
       if (session._reattachAttempts) session._reattachAttempts = 0;
       session.buffer += output;
-      if (session.buffer.length > 1200000) session.buffer = session.buffer.slice(-800000);
+      // the ring keeps the last 800 000 bytes FROM A WHOLE LINE (lane agy-harness-fixes): a cut mid-line left a corrupt
+      // half record as the history's first line
+      if (session.buffer.length > 1200000) { const cut = session.buffer.indexOf('\n', session.buffer.length - 800000); session.buffer = cut >= 0 ? session.buffer.slice(cut + 1) : ''; }
       lineBuf += output;
       let nlIdx;
       while ((nlIdx = lineBuf.indexOf('\n')) !== -1) {

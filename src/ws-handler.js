@@ -1185,7 +1185,7 @@ function registerWsHandler(wss, ctx) {
                 // MISSING rollout (B-21e4 item 5, local only — the local
                 // app-server knows no remote thread); a harness without the
                 // hook skips. Never throws, never blocks the loop (child process).
-                try { const warm = harnessOf(session.backend || 'claude').store?.warmTranscript; if (warm) await warm(session.claudeSessionId || session.backendSessionId, session.cwd, { remote: !!session.host }); } catch {}
+                try { const warm = harnessOf(session.backend || 'claude').store?.warmTranscript; if (warm) await warm(session.claudeSessionId || session.backendSessionId, session.cwd, { remote: !!session.host, session }); } catch {} // lane agy-harness-fixes: + the session (agy reads its account's transcript)
                 // TIME-SLICED + single-flight (2.369.16, userW inc-mtndq0vb):
                 // the old sync convertHistory blocked the loop for seconds per
                 // multi-MB transcript — after a restart, a reconnect storm of

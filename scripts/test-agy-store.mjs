@@ -381,5 +381,133 @@ console.log('— ⑫ card details (the arg normalizer, link-by-id, a killed sub 
     'withCards: the history gets BOTH subs’ cards (A-L and N-Z), each stopped — never one card for two subs', cards.map((c) => c.subId));
 }
 
+// ── ⑬ THE CONVERSATION'S WHOLE HISTORY (lane agy-harness-fixes, bug 1 — the owner: a long agy conversation said
+// «没有更早的消息» a few hundred messages back). SYNTHETIC: a 301-step transcript (~1.7 MB — a long conversation's size)
+// and a journal ring holding only steps 220..300 (the wrapper's 800 KB ring after the cut, opened by a half line).
+console.log('— ⑬ the whole history: the steps before the journal\'s 800 KB ring come from agy\'s own transcript (lane agy-harness-fixes)');
+{
+  const BF = require(path.join(REPO, 'src/agy-backfill.js'));
+  const { AcpMessageManager, AcpSessionMessages, parseAcpBufferRecords } = require(path.join(REPO, 'src/acp-message-manager.js'));
+  const C = 'c0de0000-0000-4000-8000-00000000c0de', SUBX = 'c0de0000-0000-4000-8000-0000000005b1', C2 = 'c0de0000-0000-4000-8000-00000000c0d2';
+  const T0 = Date.UTC(2026, 9, 24, 8, 0, 0), at = (i) => new Date(T0 + i * 1000).toISOString();
+  const NUDGE_T = 10, CTX = '<vibespace-context>\nTask group: demo\n</vibespace-context>\n', PAD = 'x'.repeat(20000);
+  const stepLine = (i) => {
+    const t = Math.floor(i / 4), k = i % 4, base = { step_index: i, status: 'DONE', created_at: at(i) };
+    if (k === 0) return { ...base, source: 'USER_EXPLICIT', type: 'USER_INPUT', content: t === NUDGE_T ? '<vibespace-reminder>finish the list</vibespace-reminder>' : (t % 5 === 1 ? CTX : '') + `question ${t}` };
+    if (k === 1) return { ...base, source: 'MODEL', type: 'PLANNER_RESPONSE', content: `answer ${t} begins`, thinking: `thinking ${t}`, tool_calls: [{ name: t === 3 ? 'invoke_subagent' : 'run_command', args: { CommandLine: `"echo ${t}"` } }] };
+    if (k === 2) return { ...base, source: 'MODEL', type: 'GENERIC', content: t === 3 ? `Created At: ${at(i)}\nCreated the following subagent: {\n  "conversationId": "${SUBX}"\n}` : `Created At: ${at(i)}\nCompleted At: ${at(i)}\nCommand exited with code 0.\n\nCommand output:\n${t} ${PAD}\n` };
+    return { ...base, source: 'MODEL', type: 'PLANNER_RESPONSE', content: `answer ${t} done` };
+  };
+  // the LIVE journal the wrapper writes for turn t (its record shapes; keys `<conversation>:<step_index>`)
+  const ringOf = (t) => {
+    const out = [{ ts: at(4 * t), type: 'acp', kind: 'user', msgId: `m${t}`, content: [{ type: 'text', text: `question ${t}` }], peer: null }];
+    const up = (i, u) => out.push({ ts: at(i), type: 'acp', kind: 'update', sessionId: C, update: u });
+    if (4 * t + 1 <= 300) up(4 * t + 1, { sessionUpdate: 'agent_message_chunk', messageId: `${C}:${4 * t + 1}`, content: { type: 'text', text: `answer ${t} begins` } });
+    if (4 * t + 2 <= 300) { up(4 * t + 2, { sessionUpdate: 'tool_call', toolCallId: `${C}:${4 * t + 2}`, title: 'run_command', kind: 'execute', status: 'in_progress', rawInput: { command: `echo ${t}` } }); up(4 * t + 2, { sessionUpdate: 'tool_call_update', toolCallId: `${C}:${4 * t + 2}`, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: `${t}` } }] }); }
+    if (4 * t + 3 <= 300) up(4 * t + 3, { sessionUpdate: 'agent_message_chunk', messageId: `${C}:${4 * t + 3}`, content: { type: 'text', text: `answer ${t} done` } });
+    return out;
+  };
+  const H13 = path.join(ROOT, 'h13'), TR = path.join(H13, '.gemini', 'antigravity-cli', 'brain', C, SG, 'logs', 'transcript.jsonl');
+  fs.mkdirSync(path.dirname(TR), { recursive: true });
+  fs.writeFileSync(TR, Array.from({ length: 301 }, (_, i) => JSON.stringify(stepLine(i))).join('\n') + '\n');
+  const ringRecs = []; for (let t = 55; t <= 75; t++) ringRecs.push(...ringOf(t));
+  const HALF = '":"answer 54 done"}}}\n'; // the old slice's corrupt first line
+  const RING = HALF + ringRecs.map((r) => JSON.stringify(r)).join('\n') + '\n';
+  const sess = (o = {}) => ({ backend: 'antigravity', backendSessionId: C, host: 'local', _accountId: null, buffer: RING, ...o });
+  const preHome = process.env.HOME; process.env.HOME = H13;
+  try {
+    // the loop while the warm reads ~1.5 MB: a sampler counts the loop turns that ran while the warm was still pending
+    // (the proof is the mechanism — awaited reads + parse slices — never a wall-clock bound; the gap is only printed)
+    let maxGap = 0, last = performance.now(), sampling = true, turnsWhilePending = 0;
+    const tick = () => { const n = performance.now(); maxGap = Math.max(maxGap, n - last); last = n; if (sampling) { turnsWhilePending++; setImmediate(tick); } };
+    setImmediate(tick);
+    const t0 = performance.now();
+    const warmed = await require(path.join(REPO, 'src/harnesses/antigravity.js')).store.warmTranscript(C, '/home/u/proj', { remote: false, session: sess() });
+    const warmMs = performance.now() - t0; sampling = false;
+    const e = BF.historyOf(sess()), size = fs.statSync(TR).size;
+    ok(warmed === true && e && e.steps.length === 301 && e.steps[0].idx === 0 && e.steps[300].idx === 300 && e.bytes === size && !e.capped && e.created.get(14) === SUBX,
+      `the descriptor's warmTranscript reads the transcript ONCE, async, through the gate: 301 steps, ${size} B (≈ ${(size / 1048576).toFixed(2)} MB) in ${warmMs.toFixed(1)} ms — the sub step 14 created is named`, e && { steps: e.steps.length, bytes: e.bytes, capped: e.capped });
+    ok(turnsWhilePending >= 3, `…and the loop ran through it: ${turnsWhilePending} loop turns while the warm was pending (awaited 512 KB reads + parse slices; measured longest gap ${maxGap.toFixed(1)} ms)`, turnsWhilePending);
+    // THE SYMPTOM (the base reader): the history begins at the ring
+    const plain = new AcpMessageManager('p13'); plain.convertHistory(new AcpSessionMessages(sess(), 'p13').raw());
+    const userTexts = (mm) => mm.messages.filter((m) => m.role === 'user').map((m) => (m.content || []).map((b) => b.text || '').join(''));
+    ok(userTexts(plain)[0] === 'question 55', 'RED (the measured symptom): the plain ACP reader\'s history begins at the ring (question 55 — nothing earlier)', userTexts(plain).slice(0, 2));
+    const t1 = performance.now();
+    const sm = new BF.AgySessionMessages(sess(), 'p13'), raw = sm.raw();
+    const spliceMs = performance.now() - t1;
+    const ringParsed = parseAcpBufferRecords(RING);
+    ok(ringParsed.length === ringRecs.length, 'the ring\'s corrupt first half line is no record (parse drops it)', ringParsed.length);
+    const pre = raw.length - ringParsed.length;
+    ok(raw[0].kind === 'user' && raw[0].msgId === `${C}:0` && raw[0].content[0].text === 'question 0' && raw[0].ts === at(0) && sm.total === raw.length && pre > 0,
+      `the antigravity reader's history starts at STEP 0 (+${pre} records before the ring, spliced in ${spliceMs.toFixed(1)} ms, no disk read): total = the whole conversation`, { first: raw[0], total: sm.total, pre });
+    const mm = new AcpMessageManager('a13'); mm.convertHistory(raw);
+    const users = userTexts(mm);
+    ok(users.length === 75 && users[0] === 'question 0' && users[54] === 'question 55' && users[users.length - 1] === 'question 75' && new Set(users).size === 75,
+      'the rendered conversation: 75 user turns in order 0..75 (the stop-time nudge never a bubble, the ring\'s own bubble of turn 55 not twice)', { n: users.length, first: users[0], at54: users[54], last: users[users.length - 1] });
+    ok(!users.some((u) => u.includes('vibespace-context') || u.includes('vibespace-reminder')) && users[1] === 'question 1', 'a user bubble is what the person typed: the wrapper\'s task-context prefix stripped (turns 1, 6, 11 …)', users.slice(0, 3));
+    const preRecs = raw.slice(0, pre);
+    ok(!preRecs.some((r) => r.update && r.update.sessionUpdate === 'agent_thought_chunk') && preRecs.every((r) => !r.update || /^c0de0000-0000-4000-8000-00000000c0de:\d+$/.test(r.update.messageId || r.update.toolCallId)) && preRecs.every((r) => r.ts),
+      'the steps drawn as the LIVE journal draws them: keys `<conversation>:<step>`, every record its step\'s time, no thought (the live journal has none)');
+    const tool14 = preRecs.filter((r) => r.update && r.update.toolCallId === `${C}:14`);
+    ok(tool14.length === 2 && tool14[0].update.title === 'invoke_subagent' && AS.unlinkedSpawns(raw).some((x) => x.toolCallId === `${C}:14` && x.step === 14),
+      'a tool row sits at its GENERIC step (the stream\'s tool step): the invoke_subagent row before the ring is a spawn withCards links by the kept sub id', tool14.map((r) => r.update.sessionUpdate));
+    const tool6 = preRecs.filter((r) => r.update && r.update.toolCallId === `${C}:6`);
+    ok(tool6.length === 2 && tool6[0].update.rawInput.command === 'echo 1' && tool6[1].update.status === 'completed' && tool6[1].update.content[0].content.text.length <= 20001,
+      'the tool row\'s input through THE arg normalizer (the store\'s JSON-encoded CommandLine → command), its output clipped at the live journal\'s 20 000', tool6[0]?.update?.rawInput);
+    // the cut rules
+    const msgFirst = ringRecs.slice(1); // the ring opens on step 221 (its bubble fell out)
+    const r2 = AS.historySplice(msgFirst, e.steps, C);
+    ok(r2.cut === 221 && r2.records[r2.prepended - 1].msgId === `${C}:220` && r2.records.filter((r) => r.kind === 'user' && r.content[0].text === 'question 55').length === 1,
+      'a ring that opens mid-turn (no bubble before its first step): the steps up to it, incl. that turn\'s USER_INPUT, are drawn — the bubble once', { cut: r2.cut, prepended: r2.prepended });
+    const whole = []; for (let t = 0; t <= 3; t++) whole.push(...ringOf(t));
+    ok(AS.historySplice(whole, e.steps, C).prepended === 0 && AS.historySplice([], e.steps, C).prepended > 0 && AS.historySplice(ringRecs, e.steps, 'not-an-id').prepended === 0,
+      'a ring that holds the conversation\'s start adds nothing; an EMPTY ring (a stopped conversation\'s view) is the transcript whole; a non-id adds nothing');
+    ok(BF.historyOf(sess({ _accountId: 'agy-0123456789ab' })) === null && new BF.AgySessionMessages(sess({ _accountId: 'agy-0123456789ab' }), 'x').raw().length === ringParsed.length && BF.historyOf(sess({ backendSessionId: C2 })) === null,
+      'another account\'s conversation / a conversation never warmed: the ring alone (no read, no other login\'s steps)');
+    // the cache: a later warm reads only what agy APPENDED (a byte-identical rewrite of step 0 is NOT re-read); a shrunk file is read again
+    const all = fs.readFileSync(TR, 'utf8');
+    fs.writeFileSync(TR, all.replace('"question 0"', '"QUESTION 0"') + [301, 302, 303, 304].map((i) => JSON.stringify(stepLine(i))).join('\n') + '\n');
+    await BF.warmHistory(C, { session: sess() });
+    const e2 = BF.historyOf(sess());
+    ok(e2.steps.length === 305 && e2.steps[0].content === 'question 0' && e2.bytes === fs.statSync(TR).size, 'a second warm reads only the appended lines (305 steps; step 0 as first read — the bytes before the old end are not read again)', { n: e2.steps.length, s0: e2.steps[0].content });
+    fs.writeFileSync(TR, all.split('\n').slice(0, 100).join('\n') + '\n');
+    await BF.warmHistory(C, { session: sess() });
+    ok(BF.historyOf(sess()).steps.length === 100, 'a transcript that SHRANK is read again from the start (100 steps)', BF.historyOf(sess()).steps.length);
+    // the budget
+    const TR2 = path.join(H13, '.gemini', 'antigravity-cli', 'brain', C2, SG, 'logs', 'transcript.jsonl');
+    fs.mkdirSync(path.dirname(TR2), { recursive: true }); fs.writeFileSync(TR2, all);
+    await BF.warmHistory(C2, { session: sess({ backendSessionId: C2 }), maxBytes: 64 * 1024 });
+    const e3 = BF.historyOf(sess({ backendSessionId: C2 }));
+    ok(e3 && e3.capped && e3.bytes <= 64 * 1024 && e3.steps.length > 0 && e3.steps.length < 301, `BOUNDED: a read budget of 64 KB stops the read (${e3 && e3.steps.length} steps, ${e3 && e3.bytes} B, capped) — never the whole file`, e3 && { n: e3.steps.length, bytes: e3.bytes });
+    ok(await BF.warmHistory(C, { remote: true }) === false && await BF.warmHistory('../x', {}) === false && await BF.warmHistory(C, { session: sess({ host: 'mac-1' }) }) === false, 'a remote / another machine\'s / a non-id conversation is never read here');
+    let warmedN = 0;
+    for (let i = 0; i < BF.HISTORY_CACHE_MAX + 3; i++) {
+      const id = `c0de0000-0000-4000-8000-${String(i).padStart(12, '0')}`, f = path.join(H13, '.gemini', 'antigravity-cli', 'brain', id, SG, 'logs', 'transcript.jsonl');
+      fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(stepLine(0)) + '\n');
+      if (await BF.warmHistory(id, { session: sess({ backendSessionId: id }) })) warmedN++;
+    }
+    ok(warmedN === BF.HISTORY_CACHE_MAX + 3 && BF._historyCache.size === BF.HISTORY_CACHE_MAX, `the kept transcripts are bounded: ${warmedN} conversations warmed, ${BF._historyCache.size} kept (the oldest dropped)`);
+  } finally { process.env.HOME = preHome; }
+  // the base ACP reader is UNCHANGED (only agy has a transcript)
+  ok(!/historySplice|warmHistory|transcript/.test(fs.readFileSync(path.join(REPO, 'src/acp-message-manager.js'), 'utf8').split('class AcpSessionMessages')[1].split('\nAcpMessageManager._seen')[0]), 'the base AcpSessionMessages is unchanged (no transcript read — the backfill lives in the agy subclass)');
+  ok(!/openSync|readdirSync|readFileSync/.test(fs.readFileSync(path.join(REPO, 'src/agy-backfill.js'), 'utf8')), 'the backfill reads through the ONE gate (agy-store-fs linesFrom), never fs itself');
+  // THE RING CUT (acp-events): the live buffer's 800 000-byte bound starts on a whole line
+  const evSrc = fs.readFileSync(path.join(REPO, 'src/server/stdout/acp-events.js'), 'utf8');
+  const feedRing = (mod) => {
+    const s = { backend: 'antigravity', buffer: '' }; let onData;
+    mod.create({ engine: { noteTurnEnd() { } } }).attach(s, 'r13', { onData: (cb) => { onData = cb; } }, { feedLive() { }, broadcastToSession() { }, broadcastActiveSessions() { }, readSessionMeta: () => null, writeSessionMeta() { }, updateSessionTodos() { } });
+    let txt = ''; for (let i = 0; txt.length < 1400000; i++) txt += JSON.stringify({ ts: at(i), type: 'acp', kind: 'notice', level: 'info', text: `line ${i} ` + 'y'.repeat(300 + (i % 97)), noticeKind: 'test' }) + '\n';
+    for (let o = 0; o < txt.length; o += 65521) onData(txt.slice(o, o + 65521)); // chunks that never align with a line
+    const lines13 = s.buffer.split('\n').filter(Boolean);
+    return { len: s.buffer.length, bad: lines13.filter((l) => { try { JSON.parse(l); return false; } catch { return true; } }).length, n: lines13.length };
+  };
+  const good = feedRing(require(path.join(REPO, 'src/server/stdout/acp-events.js')));
+  ok(good.bad === 0 && good.len <= 1200000 && good.n > 100, `acp-events: after > 1.2 MB of journal the live buffer starts on a WHOLE line — ${good.n} lines, 0 corrupt`, good);
+  const cutLine = "if (session.buffer.length > 1200000) { const cut = session.buffer.indexOf('\\n', session.buffer.length - 800000); session.buffer = cut >= 0 ? session.buffer.slice(cut + 1) : ''; }";
+  ok(evSrc.includes(cutLine), 'control anchor: the newline-aligned cut is in acp-events');
+  const bad = feedRing(MUTH.load('src/server/stdout/acp-events.js', evSrc.replace(cutLine, 'if (session.buffer.length > 1200000) session.buffer = session.buffer.slice(-800000);'), 'halfline'));
+  ok(bad.bad === 1, 'CONTROL: the byte cut (the pre-fix slice) leaves ONE corrupt half record as the buffer\'s first line', bad);
+}
+
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);
 process.exit(fail ? 1 : 0);

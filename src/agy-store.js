@@ -258,6 +258,80 @@ function artifactRecordsOf(line) {
   });
 }
 
+// ── THE CONVERSATION'S OWN HISTORY (lane agy-harness-fixes, bug 1) ──
+// The wrapper's journal is an 800 KB ring (agy-wrapper MAX_BUFFER): a long conversation's early steps fall out of it, and
+// the history the hub rebuilds stopped there («没有更早的消息» with only the tail). agy keeps EVERY step from 0 in its own
+// transcript.jsonl; the steps BEFORE the ring's first one are drawn from it, as the records the LIVE journal writes for
+// them (the wrapper's keys: `<conversation>:<step_index>` for a message and a tool row — the stream's step_index IS the
+// transcript's, measured by lane agy-card-details — so an invoke_subagent row links its card exactly as a live one).
+const VS_CONTEXT = /^<vibespace-context>\n[\s\S]*?\n<\/vibespace-context>\n/;
+const isNudge = (t) => /^<vibespace-reminder>/.test(str(t));
+/** A USER_INPUT step's text as the person typed it (the wrapper's own task-context prefix stripped); '' = not the
+ *  person's (the stop-time nudge — the live journal never shows it either). */
+function userTextOf(step) { const t = str(step && step.content); return isNudge(t) ? '' : t.replace(VS_CONTEXT, ''); }
+/** Steps (transcriptStepOf) → the ACP journal records the live wrapper writes for them: a USER_INPUT = the user's
+ *  bubble, a delivered [Message] = a peer bubble, a PLANNER_RESPONSE's text = the agent message (its thinking and its
+ *  tool calls are not journaled live — the calls become rows at their GENERIC step, the stream's tool step), a GENERIC
+ *  = the tool row + its result; anything else draws nothing. Every record carries its step's `ts`. `max` clips a
+ *  message, `maxSide` a tool's output (the live journal's 20 000). */
+function conversationRecords(steps, { convId, max = 100000, maxSide = 20000 } = {}) {
+  const out = [], pending = [];
+  for (const step of steps || []) {
+    if (!step) continue;
+    const key = `${convId}:${step.idx}`, ts = step.at ? new Date(step.at).toISOString() : null;
+    if (step.type === 'USER_INPUT') { const text = userTextOf(step); if (text) out.push({ ts, type: 'acp', kind: 'user', msgId: key, content: [{ type: 'text', text: clip(text, max) }], peer: null }); continue; }
+    if (step.type === 'SYSTEM_MESSAGE') {
+      const d = deliveredMessageOf(step.content);
+      if (d) out.push({ ts, type: 'acp', kind: 'user', msgId: key, peer: { name: d.sender.slice(0, 8), kind: 'peer', body: clip(d.content, max) }, content: [{ type: 'text', text: clip(d.content, max) }] });
+      continue;
+    }
+    if (step.type === 'PLANNER_RESPONSE') {
+      if (step.content) out.push({ ts, type: 'acp', kind: 'update', sessionId: convId, update: { sessionUpdate: 'agent_message_chunk', messageId: key, content: { type: 'text', text: clip(step.content, max) } } });
+      for (const c of step.toolCalls) pending.push(c);
+      continue;
+    }
+    if (step.type === 'GENERIC') {
+      const c = pending.shift() || { name: step.verb || 'tool', args: {} };
+      const status = step.status === 'ERROR' ? 'failed' : step.status === 'RUNNING' ? 'in_progress' : 'completed';
+      const body = resultBody(step.content) || step.error;
+      out.push({ ts, type: 'acp', kind: 'update', sessionId: convId, update: { sessionUpdate: 'tool_call', toolCallId: key, title: c.name, kind: kindOfTool(c.name), status: 'in_progress', rawInput: clipArgs(normalizeAgyToolArgs(c.args), max) } });
+      out.push({ ts, type: 'acp', kind: 'update', sessionId: convId, update: { sessionUpdate: 'tool_call_update', toolCallId: key, status, ...(body ? { content: [{ type: 'content', content: { type: 'text', text: clip(body, maxSide) } }] } : {}) } });
+    }
+  }
+  return out;
+}
+/** The ring's first step: the lowest `<convId>:<n>` a message / tool row of `records` names (Infinity = none), and how
+ *  many of the person's bubbles stand before that row (their USER_INPUT steps are already in the ring). */
+function ringStart(records, convId) {
+  const re = new RegExp(`^${String(convId).replace(/[^0-9a-fA-F-]/g, '')}:(\\d{1,7})$`);
+  let first = Infinity, firstAt = -1;
+  (records || []).forEach((r, i) => {
+    const u = r && r.kind === 'update' && r.update;
+    const m = u && re.exec(String(u.messageId || u.toolCallId || ''));
+    if (!m) return;
+    first = Math.min(first, Number(m[1]));
+    if (firstAt < 0) firstAt = i;
+  });
+  const head = firstAt < 0 ? (records || []) : records.slice(0, firstAt);
+  return { first, leadUsers: head.filter((r) => r && r.kind === 'user' && !r.peer).length };
+}
+/** THE SPLICE: `records` (the ring) with the transcript's steps that come BEFORE it prepended — none when the ring holds
+ *  the conversation's start. The cut: the ring's first step, or (the ring opens with the person's own bubbles) the first
+ *  of those bubbles' USER_INPUT steps. → {records, prepended (records added), cut (the first step NOT prepended)}. */
+function historySplice(records, steps, convId) {
+  const list = Array.isArray(records) ? records : [];
+  if (!isId(convId) || !Array.isArray(steps) || !steps.length) return { records: list, prepended: 0, cut: 0 };
+  const { first, leadUsers } = ringStart(list, convId);
+  let cut = first;
+  const below = steps.filter((s) => s && s.idx < first).sort((a, b) => a.idx - b.idx);
+  if (leadUsers) {
+    const users = below.filter((s) => s.type === 'USER_INPUT' && userTextOf(s));
+    cut = users.length >= leadUsers ? users[users.length - leadUsers].idx : -1;
+  }
+  const add = conversationRecords(below.filter((s) => s.idx < cut), { convId });
+  return add.length ? { records: add.concat(list), prepended: add.length, cut } : { records: list, prepended: 0, cut: 0 };
+}
+
 // ── THE SUBAGENT ROWS ──
 /** subagents/<id>.json → {id, typeName, role, state, alive, spawnStep, workspaces} | null. */
 function subagentRowOf(j) {
@@ -364,11 +438,11 @@ function subIdForStep(read, parentId, step) {
  *  machine's gated reader (src/agy-store-fs.js: rows / allLines; a `dbRows` only where a db may be opened — never the
  *  hub's main thread, so the hub draws a sub with no transcript as its card alone); → {subId, card, subs, final} | null
  *  (no sub of `parentId` whose task names `step` — another login's store, an older agy). `subs` = the `sub` records' bodies. */
-function snapshotOf(read, { parentId, toolCallId, step, now = 0, max = 4000, maxSteps = 4000 } = {}) {
+function snapshotOf(read, { parentId, toolCallId, step, now = 0, max = 4000, maxSteps = 4000, subId = null } = {}) {
   const pp = read && storePaths(parentId);
   if (!pp || !Number.isFinite(Number(step))) return null;
   let row = null, task = null;
-  const byId = subIdForStep(read, parentId, Number(step)); // lane agy-card-details gap 4: the invoke_subagent output names the sub (link by ID, never the stream step alone)
+  const byId = (isId(subId) && subId) || subIdForStep(read, parentId, Number(step)); // lane agy-card-details gap 4: the invoke_subagent output names the sub (link by ID, never the stream step alone); lane agy-harness-fixes: a sub id the conversation's cached transcript already named skips the parent transcript's whole read
   if (byId) { const r = subagentRowOf(parseJson(read.read(`${pp.subagents}/${byId}.json`))); if (r) { row = r; task = taskOf(read.rows(storePaths(r.id).messages, messageRowOf), { parentId, subId: r.id }); } }
   if (!row) for (const r of read.rows(pp.subagents, subagentRowOf)) {
     const t = taskOf(read.rows(storePaths(r.id).messages, messageRowOf), { parentId, subId: r.id, step: Number(step) });
@@ -400,5 +474,6 @@ module.exports = {
   transcriptStepOf, resultBody, deliveredMessageOf, kindOfTool, stepRecords, writesOf, artifactRecordsOf,
   subagentRowOf, messageRowOf, taskOf, answersOf, createdSubagentOf, subagentInfoIds, subPhaseOf, cardOf,
   unlinkedSpawns, snapshotOf, subIdForStep, closePendingRecords, SUB_TERMINATED,
+  conversationRecords, ringStart, historySplice, userTextOf,
   decodeScalar, normalizeAgyToolArgs,
 };

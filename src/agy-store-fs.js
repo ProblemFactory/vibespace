@@ -73,7 +73,40 @@ function storeReader(home, { log = () => { } } = {}) {
       if (off >= maxBytes) return out;
     }
   }
-  return { home: String(home || ''), root, path: storePath, open, read, list, rows, lines, allLines };
+  /** THE ASYNC READ (lane agy-harness-fixes — a conversation's whole transcript, read for the history the hub rebuilds:
+   *  never a synchronous read on the loop): the SAME gate (verdict, no link past the root, O_NOFOLLOW) through awaited
+   *  calls, then the complete lines from `offset` in awaited 512 KB chunks, ≤ `maxBytes` → {lines, next, size, capped}
+   *  | null (no such file / refused). `capped` = the budget stopped the read before the end. */
+  async function linesFrom(rel, offset = 0, maxBytes = 16 * 1024 * 1024) {
+    if (!AS.storeReadable(rel)) { log(`store read refused: ${rel}`); return null; }
+    const abs = path.join(root, ...String(rel).split('/'));
+    let fh = null;
+    try {
+      const want = path.join(await fs.promises.realpath(root), ...String(rel).split('/'));
+      if (await fs.promises.realpath(abs) !== want) { log(`store read refused (a link in the store): ${rel}`); return null; }
+      fh = await fs.promises.open(abs, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      const st = await fh.stat();
+      if (!st.isFile()) return null;
+      const out = [];
+      let off = Math.max(0, Math.min(Number(offset) || 0, st.size)), carry = Buffer.alloc(0);
+      const stop = Math.min(st.size, off + maxBytes);
+      let next = off;
+      while (off < stop) {
+        const n = Math.min(stop - off, 512 * 1024), buf = Buffer.alloc(n);
+        const { bytesRead } = await fh.read(buf, 0, n, off);
+        if (!bytesRead) break;
+        off += bytesRead;
+        const chunk = carry.length ? Buffer.concat([carry, buf.subarray(0, bytesRead)]) : buf.subarray(0, bytesRead);
+        const end = chunk.lastIndexOf(10);
+        if (end < 0) { carry = chunk; continue; }
+        for (const l of chunk.subarray(0, end).toString('utf8').split('\n')) if (l.trim()) out.push(l);
+        carry = chunk.subarray(end + 1);
+        next = off - carry.length;
+      }
+      return { lines: out, next, size: st.size, capped: stop < st.size };
+    } catch { return null; } finally { if (fh) { try { await fh.close(); } catch { } } }
+  }
+  return { home: String(home || ''), root, path: storePath, open, read, list, rows, lines, allLines, linesFrom };
 }
 
 module.exports = { storeReader };

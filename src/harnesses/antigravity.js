@@ -234,9 +234,13 @@ module.exports = {
   store: {
     // agy keeps conversations in its own sqlite (~/.gemini/antigravity-cli/conversation_summaries.db) — no per-
     // conversation file to locate; the wrapper journal is the history (the ACP rule) — read with the cards of subs that
-    // already ran under a wrapper older than the cards (src/agy-backfill.js, the cards' addendum)
+    // already ran under a wrapper older than the cards (src/agy-backfill.js, the cards' addendum) and, before the
+    // journal's 800 KB ring, the conversation's own steps from agy's transcript.jsonl (lane agy-harness-fixes)
     locate: () => null,
     SessionMessages: AGY_BACKFILL.AgySessionMessages,
+    // the pre-read hook (S3): the conversation's transcript read ONCE, async, kept bounded — the reader splices the steps
+    // before the ring from it (never a synchronous read on the attach path); opts.session names the account's root
+    warmTranscript: (id, cwd, opts) => AGY_BACKFILL.warmHistory(id, { session: (opts && opts.session) || null, remote: !!(opts && opts.remote) }),
     // the turn end of a conversation an OLD wrapper still serves (dtach kept its code across the update): the cards of
     // its card-less invoke_subagent rows, read from the store — records acp-events routes as if journaled
     afterTurn: (session) => AGY_BACKFILL.afterTurn(session),

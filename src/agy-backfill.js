@@ -20,6 +20,9 @@ const { storeReader } = require('./agy-store-fs');
 const { AcpSessionMessages, parseAcpBufferRecords } = require('./acp-message-manager');
 
 const REREAD_MS = 5000;        // a working sub's store, at most this often
+const HISTORY_MAX_BYTES = 16 * 1024 * 1024; // the transcript read budget per conversation (lane agy-harness-fixes)
+const HISTORY_CACHE_MAX = 8;   // conversations whose read transcript is kept (codex-thread-read's cache pattern)
+const PARSE_SLICE_MS = 8;      // the transcript's lines are parsed in slices this long — the loop runs between them
 const LIVE_AFTER_MS = 60000;   // a live row's grace: the new wrapper's own look (AGY_WEBUI_SUB_LOOK_MS) ends first
 const MAX_SPAWNS = 64;         // per session (acp-subagents MAX_SUBS)
 
@@ -47,7 +50,7 @@ function refresh(session, spawns, { dataDir = null, now = Date.now(), log } = {}
     if (was && (was.final || now - was.readAt < REREAD_MS)) { if (was.card) out.push({ ...was, fresh: false }); continue; }
     if (reader === undefined) { const home = homeOf(session, { dataDir: dataDir || memo.dataDir }); reader = home ? storeReader(home, { log }) : null; }
     if (!reader) return out;
-    const snap = AS.snapshotOf(reader, { parentId: sp.parentId, toolCallId: sp.toolCallId, step: sp.step, now });
+    const snap = AS.snapshotOf(reader, { parentId: sp.parentId, toolCallId: sp.toolCallId, step: sp.step, now, subId: createdSub(sp.parentId, sp.step) });
     if (!snap) { memo.set(sp.toolCallId, { toolCallId: sp.toolCallId, subId: null, card: null, subs: [], final: false, readAt: now, fed: 0 }); continue; }
     const card = { type: 'acp', kind: 'subagent', ...snap.card, home: reader.home, ts: sp.ts || null };
     const fresh = !was || !was.card || JSON.stringify({ ...was.card, elapsedMs: null, endedAt: null }) !== JSON.stringify({ ...card, elapsedMs: null, endedAt: null }) || was.subs.length !== snap.subs.length;
@@ -103,14 +106,85 @@ function afterTurn(session, { dataDir = null, now = Date.now(), log } = {}) {
   return late;
 }
 
+// ── THE CONVERSATION'S OWN HISTORY (lane agy-harness-fixes, bug 1 — the owner: a long agy conversation said «没有更早的
+// 消息» a few hundred messages back) ──
+// The journal is an 800 KB ring, so the history the hub rebuilt began mid-conversation. agy's transcript.jsonl holds
+// every step from 0: the WARM (the descriptor's store.warmTranscript, awaited before the attach's rebuild and the history
+// page's read) reads it ONCE through the gate's ASYNC read, parses it in slices, and keeps the steps per conversation
+// (bounded: HISTORY_MAX_BYTES read, HISTORY_CACHE_MAX conversations); a later warm reads only the lines agy appended
+// since. The reader (AgySessionMessages, synchronous) never reads the disk for it — it splices the KEPT steps that come
+// before the ring's first one (agy-store historySplice). Only agy has this store: the base ACP reader is unchanged.
+const historyCache = new Map();    // conversation id → {home, account, next, size, steps, created, capped, ms, bytes, at}
+const historyInflight = new Map();
+const accountOf = (session) => (session && session._accountId) || null;
+const convIdOf = (session) => { const id = session && (session.backendSessionId || session.claudeSessionId); return AS.isId(id) ? id : null; };
+const yieldTurn = () => new Promise((r) => setImmediate(r));
+/** The sub a step of a conversation's kept transcript created («Created the following subagent: …»), or null. */
+function createdSub(convId, step) { const e = historyCache.get(convId); return (e && e.created.get(Number(step))) || null; }
+function pruneHistory() {
+  if (historyCache.size <= HISTORY_CACHE_MAX) return;
+  const aged = [...historyCache.entries()].sort((a, b) => a[1].at - b[1].at);
+  for (const [id] of aged.slice(0, historyCache.size - HISTORY_CACHE_MAX)) historyCache.delete(id);
+}
+/** THE WARM: `id` = the agy conversation, `session` = whose account root holds it (none ⇒ this machine's login).
+ *  → true when its steps are kept (now or already). Never throws; a remote conversation / another machine ⇒ false. */
+function warmHistory(id, { session = null, dataDir = null, remote = false, log, maxBytes = HISTORY_MAX_BYTES } = {}) {
+  if (remote || !AS.isId(id) || (session && session.host && session.host !== 'local')) return Promise.resolve(false);
+  if (historyInflight.has(id)) return historyInflight.get(id);
+  const p = (async () => {
+    const t0 = Date.now();
+    const home = homeOf(session || {}, { dataDir });
+    if (!home) return false;
+    const reader = storeReader(home, { log });
+    const rel = AS.storePaths(id).transcript;
+    const was = historyCache.get(id);
+    let same = !!(was && was.home === home);
+    if (same && was.capped) { was.at = Date.now(); return true; }
+    let got = await reader.linesFrom(rel, same ? was.next : 0, maxBytes - (same ? was.next : 0));
+    if (got && same && got.size < was.next) { same = false; got = await reader.linesFrom(rel, 0, maxBytes); } // rewritten: read again
+    if (!got) { historyCache.delete(id); return false; }
+    const steps = same ? was.steps : [], created = same ? was.created : new Map();
+    let last = steps.length ? steps[steps.length - 1].idx : -1, mark = Date.now();
+    for (let i = 0; i < got.lines.length; i++) {
+      if ((i & 63) === 63 && Date.now() - mark > PARSE_SLICE_MS) { await yieldTurn(); mark = Date.now(); }
+      const st = AS.transcriptStepOf(got.lines[i]);
+      if (!st || st.idx <= last) continue;
+      st.thinking = ''; // not journaled live — never drawn from here
+      steps.push(st); last = st.idx;
+      if (st.type === 'GENERIC') { const sub = AS.createdSubagentOf(st.content); if (sub) created.set(st.idx, sub); }
+    }
+    historyCache.set(id, { home, account: accountOf(session), next: got.next, size: got.size, steps, created, capped: got.capped, ms: Date.now() - t0, bytes: got.next, at: Date.now() });
+    pruneHistory();
+    if (got.capped && typeof log === 'function') log(`agy history ${id}: the transcript is over the ${maxBytes} B read budget — steps after ${last} are drawn from the journal only`);
+    return true;
+  })().catch(() => false).finally(() => historyInflight.delete(id));
+  historyInflight.set(id, p);
+  return p;
+}
+/** The kept steps of a conversation — {steps, ms, bytes, capped} or null (never warmed, another account's). */
+function historyOf(session) {
+  const id = convIdOf(session), e = id && historyCache.get(id);
+  return e && e.account === accountOf(session) ? e : null;
+}
+/** THE HISTORY, WHOLE: the ring's records with the conversation's earlier steps (kept by the warm) before them. */
+function withHistory(session, records) {
+  const e = historyOf(session);
+  if (!e) return records;
+  e.at = Date.now();
+  return AS.historySplice(records, e.steps, convIdOf(session)).records;
+}
+
 /** The antigravity conversation's reader (the descriptor's store.SessionMessages): the ACP journal reader whose records
- *  carry the cards of subs that already ran. */
+ *  begin at the conversation's first step (the kept transcript before the ring — lane agy-harness-fixes) and carry the
+ *  cards of subs that already ran. */
 class AgySessionMessages extends AcpSessionMessages {
   _ensureParsed() {
     if (this._all) return;
     super._ensureParsed();
+    try { this._all = withHistory(this._session, this._all); } catch { /* the ring alone */ }
     try { this._all = withCards(this._session, this._all, { dataDir: this._buffersDir ? path.dirname(this._buffersDir) : null }); } catch { /* the plain journal */ }
   }
 }
 
-module.exports = { homeOf, refresh, withCards, afterTurn, AgySessionMessages, REREAD_MS, LIVE_AFTER_MS, MAX_SPAWNS };
+module.exports = { homeOf, refresh, withCards, afterTurn, AgySessionMessages, REREAD_MS, LIVE_AFTER_MS, MAX_SPAWNS,
+  warmHistory, historyOf, withHistory, HISTORY_MAX_BYTES, HISTORY_CACHE_MAX, _historyCache: historyCache };

@@ -1209,6 +1209,10 @@ scripts/grant-fixtures.mjs — the suites' grant fixtures (lane grants-unify): a
 scripts/test-grant-model.mjs + scripts/test-grants-store.mjs — lane grants-unify gates (fast): the model (every legacy mapper differential) and the store + EVERY door honouring an exception (the real channel engine's wake), each with a patched-copy RED control
 scripts/test-brand-svg.mjs — lane backend-icons gate (fast, PURE): every brand SVG drawn (served ∪ BACKEND_META iconSrc ∪ /brand/ paths in src/ + TEMPLATES) exists + passes a strict in-test XML checker; RED controls (shipped .348 antigravity.svg, a fixture per rule); browser leg: test-sidebar-scroll
 src/normalizers.js recordAt (lane agy-harness-fixes) — a record's instant = `timestamp` (ISO) else the ACP / agy wrappers' `ts` (ISO or ms); 0 only with neither ⇒ an ACP slab is stamped and a rebuilt card lands at its time (cardPlacement), never piled at the tail ⇒ test-artifacts ⑫
+src/agy-backfill.js warmHistory / withHistory (lane agy-harness-fixes) — THE WHOLE HISTORY: the descriptor's store.warmTranscript reads agy's transcript.jsonl ONCE, async (gate linesFrom), bounded 16 MB / 8 kept, incremental; AgySessionMessages splices the kept steps before the journal's ring
+src/agy-store.js conversationRecords / historySplice (lane agy-harness-fixes, PURE) — transcript steps → the LIVE journal's records (`<conv>:<step>` keys, context prefix stripped, no nudge / thought, tool rows at their GENERIC step); the cut = the ring's first step or its lead bubbles' USER_INPUT
+src/agy-store-fs.js linesFrom (lane agy-harness-fixes) — the SAME gate awaited (realpaths + O_NOFOLLOW open), complete lines from an offset in 512 KB awaited chunks, ≤ maxBytes → {lines, next, size, capped}; the hub's read of a conversation's transcript
+src/server/stdout/acp-events.js ring cut (lane agy-harness-fixes) — the live buffer keeps its last 800 000 bytes FROM THE FIRST '\n' after the bound (never a half record first) ⇒ test-agy-store ⑬ + the byte-cut CONTROL
 
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 
