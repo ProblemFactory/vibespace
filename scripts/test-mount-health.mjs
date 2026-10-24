@@ -14,6 +14,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MH = require(path.join(ROOT, 'src/mount-health.js'));
 const { createFsCanary } = require(path.join(ROOT, 'src/server/fs-canary.js'));
 const MHW = require(path.join(ROOT, 'src/server/mount-health-watch.js'));
+// lane hub-fuse-sync-guard: + MH.heldItem — the HOLD item's words (③), the watch's onHeld runs in test-fs-canary §8
 const { UsageHistory } = require(path.join(ROOT, 'src/usage-history.js'));
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; } else { fail++; console.log('  ✗ ' + m); } };
@@ -82,6 +83,21 @@ try {
   const missing = keys.filter((k) => !zh[k] || !ja[k]);
   ok(keys.length >= 10 && !missing.length, `every key has zh + ja (${keys.length} keys; missing: ${missing.join(' | ')})`);
   ok(MH.canaryEndLine({ mountpoint: MP, wedgedMs: 207400 }) === 'the mount /mnt/data answers again — 207 s wedged', 'the end line');
+  // lane hub-fuse-sync-guard: THE HOLD item — a sync fs call that held the main loop on a mount path (the witness's entry)
+  const NAS = '/home/u/vibespace-mounts/NAS';
+  const hi = MH.heldItem({ mountpoint: NAS, kind: 'storage', fn: 'statSync', path: NAS + '/Courses/x', ms: 313000, caller: 'src/task-groups.js:606 TaskGroupManager._kindOf', stack: ['TaskGroupManager._kindOf (src/task-groups.js:606:25)', 'TaskGroupManager._res (src/task-groups.js:618:30)'], suspects: sus });
+  ok(hi.text === `VibeSpace's server waited 313 s on the folder ${NAS} — statSync on ${NAS}/Courses/x from src/task-groups.js:606 TaskGroupManager._kindOf`, `the hold item names the call — fn on path from file:line: ${hi.text}`);
+  ok(/Nothing else on this server ran while it waited/.test(hi.detail) && /The call came from:\n- TaskGroupManager\._kindOf \(src\/task-groups\.js:606:25\)\n- TaskGroupManager\._res/.test(hi.detail) && /Who is using the folder/.test(hi.detail) && hi.detail.includes(MH.HELD_TAIL.storage),
+    'its detail: what stalled, the call\'s hub frames, who presses the folder, why it ran (the guard was off or the server starting)');
+  const home = MH.heldItem({ mountpoint: '/home/u/workspace', kind: 'home', fn: 'readFileSync', path: '/home/u/workspace/x', ms: 6000, suspects: [] });
+  const net = MH.heldItem({ mountpoint: '/mnt/nas_public', kind: 'network', fn: 'readdirSync', path: '/mnt/nas_public/a', ms: 6000, caller: null, suspects: [] });
+  ok(home.detail.includes(MH.HELD_TAIL.home) && net.detail.includes(MH.HELD_TAIL.network) && /from code outside VibeSpace$/.test(net.text) && /No process has a file open there\./.test(net.detail) && !/The call came from/.test(net.detail),
+    'the folder VibeSpace lives on / a network folder: watched, never refused (said); no caller ⇒ code outside VibeSpace; no stack ⇒ no frames');
+  const hl = MH.heldItem({ mountpoint: '/m/' + 'x'.repeat(900), fn: 'statSync', path: '/m/' + 'y'.repeat(900), ms: 9000, stack: Array.from({ length: 40 }, (_, i) => 'f' + i + ' (src/a.js:1:1)'), suspects: Array.from({ length: 50 }, (_, i) => ({ kind: 'unknown', key: 'u' + i, name: 'p', pids: [i], n: 1, hits: 1 })) });
+  ok(hl.text.length <= 500 && hl.detail.length <= 8000 && (hl.detail.match(/^- f\d+ /gm) || []).length === 6, `the hold item's bounds hold, 6 frames at most (${hl.text.length} / ${hl.detail.length})`);
+  const hkeys = [hi, home, net].flatMap((x) => [x.i18n.text.key, ...x.i18n.detail.map((r) => r.key)]);
+  const hmiss = [...new Set(hkeys)].filter((k) => !zh[k] || !ja[k]);
+  ok(hkeys.length >= 12 && !hmiss.length, `every hold-item key has zh + ja (${new Set(hkeys).size} keys; missing: ${hmiss.join(' | ')})`);
 
   console.log('④ the pause verdict per kind (a person\'s read is NEVER paused)');
   const on = { on: true, mountpoint: MP }, off = { on: false, mountpoint: MP };

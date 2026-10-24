@@ -9,6 +9,9 @@
  *     onBudget, the /api/sessions discovery sweep's schedule) — MH.shouldPause answers per kind; a person's read is
  *     never paused. A journal line per pause (first ask of a kind) and per resume;
  *   · at its end: the item resolves itself and the journal says "the mount <mp> answers again — N s wedged".
+ *   · onHeld(entry) — lane hub-fuse-sync-guard: the sync fs witness's call that HELD the main loop ≥ 5 s on a mount path
+ *     (handed over by the canary's held()) → ONE For-you item per mount while it stays open (MH.heldItem: the call — fn
+ *     on path from file:line — beside the processes pressing THAT mount, read by the same child); a repeat is a line.
  * The process table is read by a CHILD (this file, --suspects): /proc reads in the server would queue behind the very
  * threadpool the canary says is wedged — spawning needs no pool thread.
  */
@@ -70,7 +73,8 @@ function create({ file, mountpoint = null, getUserTodos = () => null, ownerIds =
   let itemId = null;
   let filing = null;
   const pausedNow = new Set();
-  const counts = { strikes: 0, clean: 0, episodes: 0, filed: 0, resolved: 0, paused: {}, ran: {} };
+  const counts = { strikes: 0, clean: 0, episodes: 0, filed: 0, resolved: 0, paused: {}, ran: {}, held: 0, heldFiled: 0, heldRepeat: 0 };
+  const heldItems = new Map(); // mount root → its open hold item id
 
   async function open(episode) {
     let suspects = [];
@@ -109,7 +113,28 @@ function create({ file, mountpoint = null, getUserTodos = () => null, ownerIds =
     if (!pausedNow.has(kind)) { pausedNow.add(kind); log.warn?.(`[mount-health] paused ${kind} on ${mp} until it answers`); }
     return true;
   }
-  return { onProbe, paused, counts, mountpoint: mp, settled: () => filing || Promise.resolve(), state: () => ({ ...(state || {}), itemId }) };
+  /** A hold on a mount path (the witness's entry: {fn, path, ms, caller, stack, mount: {root, kind}}) → ONE item per mount. */
+  async function onHeld(e) {
+    if (!e || !e.mount || typeof e.mount.root !== 'string') return null;
+    counts.held++;
+    const root = e.mount.root, todos = getUserTodos && getUserTodos();
+    const prev = heldItems.get(root);
+    if (prev && todos) {
+      let open = false; try { const it = todos.get(prev); open = !!(it && it.status === 'open'); } catch { }
+      if (open) { counts.heldRepeat++; log.warn?.(`[mount-health] ${root} held the main loop again (${Math.round(e.ms / 1000)} s, ${e.fn} ← ${e.caller || '?'}) — its For-you item is still open`); return prev; }
+    }
+    let suspects = [];
+    try { const procs = await procTable(root); suspects = MH.suspectsOf(procs, root, await ownerIds(procs)); } catch (x) { log.warn?.(`[mount-health] who presses ${root}: not read — ${x && x.message}`); }
+    const it = MH.heldItem({ mountpoint: root, kind: e.mount.kind, fn: e.fn, path: e.path, ms: e.ms, caller: e.caller, stack: e.stack, suspects });
+    let id = null;
+    if (todos) {
+      try { const r = todos.add(INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Storage', text: it.text, detail: it.detail, i18n: it.i18n }); id = (r && (r.id || (r.item && r.item.id))) || null; if (id) { heldItems.set(root, id); counts.heldFiled++; } }
+      catch (x) { log.warn?.(`[mount-health] ${root}: the hold's For-you item was not filed — ${x && x.message}`); }
+    }
+    log.warn?.(`[mount-health] ${root} held the main loop ${Math.round(e.ms / 1000)} s (${e.fn} ← ${e.caller || '?'}): For-you item ${id ? 'filed' : 'NOT filed'}, ${suspects.length} process groups press it`);
+    return id;
+  }
+  return { onProbe, onHeld, paused, counts, mountpoint: mp, settled: () => filing || Promise.resolve(), state: () => ({ ...(state || {}), itemId }) };
 }
 
 if (require.main === module && process.argv[2] === '--suspects') process.stdout.write(JSON.stringify(scanProc(process.argv[3] || '/')));

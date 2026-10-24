@@ -30,7 +30,7 @@
  *  - equal sha ⇒ skip both directions (fsWrite can't preserve mtimes, so
  *    content equality is what makes echo ping-pong impossible).
  */
-const fs = require('fs');
+const fsp = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
@@ -69,38 +69,41 @@ async function syncGroupCtxOverDevice({ hosts, hostId, group, remoteDir, onSkip 
     const rel = parts.slice(2).join('\t').replace(/^\.\//, '');
     if (rel) remote.set(rel, { mt: parseInt(parts[0]) || 0, sha: parts[1] || '' });
   }
+  // lane hub-fuse-sync-guard: the LOCAL half is async fs — the context folder is often on a storage mount (a 60 s timer
+  // and every member prompt run this): a slow mount holds this sync's own await (one per host:group, server.js's
+  // in-flight guard), never the main loop
   const localFiles = [];
   let overCount = false;
-  const walk = (dir, rel) => {
-    let ents = []; try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  const walk = async (dir, rel) => {
+    let ents = []; try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
     for (const e of ents) {
       if (e.name === '.vibespace') continue;
       const p = path.join(dir, e.name), r = rel ? rel + '/' + e.name : e.name;
-      if (e.isDirectory()) walk(p, r);
+      if (e.isDirectory()) await walk(p, r);
       else if (e.isFile()) {
         if (localFiles.length >= MAX_FILES) { if (!overCount) { overCount = true; onSkip(r, 'count', 0); } continue; }
         try {
-          const st = fs.statSync(p);
+          const st = await fsp.stat(p);
           if (st.size > FILE_CAP) { onSkip(r, 'size', st.size); continue; }
           localFiles.push({ p, r, mt: Math.floor(st.mtimeMs / 1000), size: st.size });
         } catch { }
       }
     }
   };
-  walk(local, '');
-  const shaOf = (p) => { try { return crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'); } catch { return null; } };
+  await walk(local, '');
+  const shaOf = async (p) => { try { return crypto.createHash('sha256').update(await fsp.readFile(p)).digest('hex'); } catch { return null; } };
   const mkdirs = new Set();
   const localByRel = new Map(localFiles.map((f) => [f.r, f]));
   let pushed = 0, pulled = 0;
   for (const f of localFiles) {
     const rm = remote.get(f.r);
-    f.sha = shaOf(f.p);
+    f.sha = await shaOf(f.p);
     if (!f.sha) continue;
     if (rm && rm.sha === f.sha) continue;      // identical — nothing to move either way
     if (rm && rm.mt > f.mt + 1) continue;      // remote strictly newer — the pull pass owns it
     const dir = path.posix.dirname(`${remoteDir}/${f.r}`);
     if (dir !== remoteDir && !mkdirs.has(dir)) { try { await dm.fsMkdir(dir, { by: BY }); } catch { } mkdirs.add(dir); }
-    try { await dm.fsWrite(`${remoteDir}/${f.r}`, fs.readFileSync(f.p), { by: BY }); pushed++; } catch { }
+    try { await dm.fsWrite(`${remoteDir}/${f.r}`, await fsp.readFile(f.p), { by: BY }); pushed++; } catch { }
   }
   for (const [rel, rm] of remote) {
     const lf = localByRel.get(rel);
@@ -112,8 +115,8 @@ async function syncGroupCtxOverDevice({ hosts, hostId, group, remoteDir, onSkip 
       const r = await dm.fsReadRange(`${remoteDir}/${rel}`, 0, FILE_CAP + 1);
       if (!r?.data) continue;
       if (r.data.length > FILE_CAP) { onSkip(rel, 'size', r.data.length); continue; }
-      fs.mkdirSync(path.dirname(lp), { recursive: true });
-      fs.writeFileSync(lp, r.data);
+      await fsp.mkdir(path.dirname(lp), { recursive: true });
+      await fsp.writeFile(lp, r.data);
       pulled++;
     } catch { }
   }

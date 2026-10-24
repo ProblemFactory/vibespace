@@ -203,9 +203,9 @@ function workerCensus(texts) {
 }
 const TEXTS = Object.fromEntries([...walk('src'), 'server.js'].map((f) => [f, read(f)]));
 const wc = workerCensus(TEXTS);
-ok(wc.sites.join() === 'src/safe-fs.js,src/server/search-index.js,src/server/usage-index.js,src/usage-history.js' /* + B-9428 r2: the ledger's cold fold */, `the server process's new Worker( sites (${wc.sites.join(', ')}); the device daemon's are its own process`);
-ok(wc.scripts.join() === 'src/safe-fs-worker.js,src/search-index-worker.js,src/server/fs-canary-worker.js,src/server/incident-freeze-worker.js,src/transcript-worker.js,src/usage-cold-worker.js,src/usage-index-worker.js' /* + lane vault-slow-load: the incident freeze's own SafeFs worker */,
-  `every script those sites start (7): ${wc.scripts.join(', ')}`);
+ok(wc.sites.join() === 'src/safe-fs.js,src/server/search-index.js,src/server/sync-fs-witness.js,src/server/usage-index.js,src/usage-history.js' /* + B-9428 r2: the ledger's cold fold; + lane hub-fuse-sync-guard: the witness's watchdog thread */, `the server process's new Worker( sites (${wc.sites.join(', ')}); the device daemon's are its own process`);
+ok(wc.scripts.join() === 'src/safe-fs-worker.js,src/search-index-worker.js,src/server/fs-canary-worker.js,src/server/incident-freeze-worker.js,src/server/sync-fs-witness-worker.js,src/transcript-worker.js,src/usage-cold-worker.js,src/usage-index-worker.js' /* + lane vault-slow-load: the incident freeze's own SafeFs worker; + lane hub-fuse-sync-guard: the witness's watchdog */,
+  `every script those sites start (8): ${wc.scripts.join(', ')}`);
 ok(!wc.bad.length, `each site tracks + skips the answer, each script answers first (${wc.bad.join('; ') || 'clean'})`);
 {
   const noHandler = { ...TEXTS, 'src/usage-index-worker.js': TEXTS['src/usage-index-worker.js'].replace(/\n\s*if \(answerMemory\(msg, parentPort\)\) return;[^\n]*/, '') };

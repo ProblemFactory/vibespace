@@ -21,6 +21,7 @@
  */
 
 const fs = require('fs');
+const fsp = require('fs').promises;
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
@@ -166,7 +167,10 @@ ${isDir ? '' : `<D:getcontentlength>${st.size}</D:getcontentlength>`}
 function registerWebdav(app, { tokens }) {
   const WRITE_METHODS = new Set(['PUT', 'MKCOL', 'DELETE', 'MOVE', 'COPY', 'PROPPATCH', 'LOCK']);
 
-  app.use('/dav', (req, res) => {
+  // lane hub-fuse-sync-guard: the share is any folder a person picked — a storage mount too — and a mounted client asks
+  // continuously: every read and write below is ASYNC fs (a slow mount holds this request, never the server's loop)
+  const exists = (p) => fsp.access(p).then(() => true, () => false);
+  app.use('/dav', async (req, res) => {
     // ── auth: Bearer mount token (rclone) OR Basic with the token as the
     // password (macOS Finder / Windows Explorer WebDAV clients only speak
     // Basic — Cmd+K → https://…/dav, any username, password = vsmt_…). Same
@@ -196,16 +200,16 @@ function registerWebdav(app, { tokens }) {
     if (target !== tok.root && !target.startsWith(tok.root + path.sep)) return res.status(403).end();
     if (DOOR.blocked(target)) return res.status(503).type('text/plain').send(DOOR.SENTENCE);   // B-afc4: answered, never read
     // symlink escape: the closest EXISTING ancestor's realpath must stay inside
-    const containedReal = (p) => {
+    const containedReal = async (p) => {
       let probe = p;
       for (;;) {
         try {
-          const real = fs.realpathSync(probe);
+          const real = await fsp.realpath(probe);
           return real === tok.root || real.startsWith(tok.root + path.sep);
         } catch { const up = path.dirname(probe); if (up === probe) return false; probe = up; }
       }
     };
-    if (!containedReal(target)) return res.status(403).end();
+    if (!(await containedReal(target))) return res.status(403).end();
 
     const davBase = '/dav';
     const relFromRoot = path.relative(tok.root, target);
@@ -239,13 +243,13 @@ function registerWebdav(app, { tokens }) {
         }
         case 'PROPFIND': {
           let st;
-          try { st = fs.statSync(target); } catch { return res.status(404).end(); }
+          try { st = await fsp.stat(target); } catch { return res.status(404).end(); }
           const depth = req.headers.depth === '0' ? 0 : 1;
           const out = [propfindEntry(hrefFor(davBase, relFromRoot, st.isDirectory()), path.basename(target) || '/', st)];
           if (depth === 1 && st.isDirectory()) {
-            for (const name of fs.readdirSync(target)) {
+            for (const name of await fsp.readdir(target)) {
               try {
-                const cst = fs.statSync(path.join(target, name));
+                const cst = await fsp.stat(path.join(target, name));
                 out.push(propfindEntry(hrefFor(davBase, path.join(relFromRoot, name), cst.isDirectory()), name, cst));
               } catch { /* dangling entry */ }
             }
@@ -256,7 +260,7 @@ function registerWebdav(app, { tokens }) {
         case 'HEAD':
         case 'GET': {
           let st;
-          try { st = fs.statSync(target); } catch { return res.status(404).end(); }
+          try { st = await fsp.stat(target); } catch { return res.status(404).end(); }
           if (st.isDirectory()) return res.status(403).end(); // clients list via PROPFIND
           res.set({ 'Content-Type': 'application/octet-stream', 'Accept-Ranges': 'bytes', 'Last-Modified': new Date(st.mtimeMs).toUTCString() });
           const range = req.headers.range && /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
@@ -275,29 +279,29 @@ function registerWebdav(app, { tokens }) {
         }
         case 'PUT': {
           let st = null;
-          try { st = fs.statSync(target); } catch { /* new file */ }
+          try { st = await fsp.stat(target); } catch { /* new file */ }
           if (st?.isDirectory()) return res.status(409).end();
-          if (!fs.existsSync(path.dirname(target))) return res.status(409).end(); // WebDAV: parent must exist
+          if (!(await exists(path.dirname(target)))) return res.status(409).end(); // WebDAV: parent must exist
           const tmp = target + '.vsdav-' + crypto.randomBytes(4).toString('hex');
           const w = fs.createWriteStream(tmp, { mode: 0o644 });
           req.pipe(w);
           w.on('finish', () => {
-            try { fs.renameSync(tmp, target); res.status(st ? 204 : 201).end(); }
-            catch (e) { try { fs.unlinkSync(tmp); } catch {} res.status(500).end(); }
+            fsp.rename(tmp, target).then(() => res.status(st ? 204 : 201).end(),
+              () => { fsp.unlink(tmp).catch(() => {}); res.status(500).end(); });
           });
-          w.on('error', () => { try { fs.unlinkSync(tmp); } catch {} res.status(500).end(); });
-          req.on('aborted', () => { try { w.destroy(); fs.unlinkSync(tmp); } catch {} });
+          w.on('error', () => { fsp.unlink(tmp).catch(() => {}); res.status(500).end(); });
+          req.on('aborted', () => { try { w.destroy(); } catch {} fsp.unlink(tmp).catch(() => {}); });
           return;
         }
         case 'MKCOL': {
-          if (fs.existsSync(target)) return res.status(405).end();
-          if (!fs.existsSync(path.dirname(target))) return res.status(409).end();
-          fs.mkdirSync(target);
+          if (await exists(target)) return res.status(405).end();
+          if (!(await exists(path.dirname(target)))) return res.status(409).end();
+          await fsp.mkdir(target);
           return res.status(201).end();
         }
         case 'DELETE': {
-          if (!fs.existsSync(target)) return res.status(404).end();
-          fs.rmSync(target, { recursive: true, force: true });
+          if (!(await exists(target))) return res.status(404).end();
+          await fsp.rm(target, { recursive: true, force: true });
           return res.status(204).end();
         }
         case 'MOVE':
@@ -309,14 +313,14 @@ function registerWebdav(app, { tokens }) {
           const destRel = destPath.slice(davBase.length).replace(/\/+$/, '');
           const dest = path.resolve(tok.root, '.' + (destRel || '/'));
           if (dest !== tok.root && !dest.startsWith(tok.root + path.sep)) return res.status(403).end();
-          if (!containedReal(dest)) return res.status(403).end();
-          if (!fs.existsSync(target)) return res.status(404).end();
+          if (!(await containedReal(dest))) return res.status(403).end();
+          if (!(await exists(target))) return res.status(404).end();
           const overwrite = (req.headers.overwrite || 'T').toUpperCase() !== 'F';
-          const existed = fs.existsSync(dest);
+          const existed = await exists(dest);
           if (existed && !overwrite) return res.status(412).end();
-          if (existed) fs.rmSync(dest, { recursive: true, force: true });
-          if (req.method === 'MOVE') fs.renameSync(target, dest);
-          else fs.cpSync(target, dest, { recursive: true });
+          if (existed) await fsp.rm(dest, { recursive: true, force: true });
+          if (req.method === 'MOVE') await fsp.rename(target, dest);
+          else await fsp.cp(target, dest, { recursive: true });
           return res.status(existed ? 204 : 201).end();
         }
         case 'LOCK':

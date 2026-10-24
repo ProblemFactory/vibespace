@@ -1032,21 +1032,19 @@ router.delete('/api/file/transfer-status', (req, res) => {
 // du-based byte totals/progress. Portable: GNU `du -sb`, BSD falls back to
 // -sk × 1024 (macOS hosts have no -b).
 const DU_SH = (p) => { const q = `'${String(p).replace(/'/g, `'\\''`)}'`; return `du -sb ${q} 2>/dev/null | cut -f1 | grep . || du -sk ${q} 2>/dev/null | awk '{print $1*1024}'`; };
+// lane hub-fuse-sync-guard: the destination is wherever the person copies to — a storage mount too — and this runs every
+// 1.2 s for the whole copy: an async stat (never the loop), the walk in a child
 function localDuBytes(p) {
-  return new Promise((resolve) => {
-    try {
-      const st = fs.statSync(p);
-      if (!st.isDirectory()) return resolve(st.size);
-    } catch { return resolve(0); }
-    execFile('sh', ['-c', DU_SH(p)], { timeout: 30000 }, (e, out) => resolve(parseInt(out, 10) || 0));
-  });
+  return fs.promises.stat(p).then((st) => (!st.isDirectory() ? st.size
+    : new Promise((resolve) => execFile('sh', ['-c', DU_SH(p)], { timeout: 30000 }, (e, out) => resolve(parseInt(out, 10) || 0)))), () => 0);
 }
 function remoteDuBytes(inst, host, p) {
   return inst._run(host, DU_SH(p)).then((r) => parseInt(r.stdout ?? r, 10) || 0).catch(() => 0);
 }
 // Poll dest size into op.done while a branch we can't instrument runs.
 function attachDuPoll(op, duFn) {
-  const t = setInterval(async () => { const b = await duFn(); if (b > op.done) op.done = b; }, 1200);
+  let busy = false; // one measurement at a time: a slow mount never stacks a stat per tick
+  const t = setInterval(async () => { if (busy) return; busy = true; try { const b = await duFn(); if (b > op.done) op.done = b; } finally { busy = false; } }, 1200);
   t.unref?.();
   return () => clearInterval(t);
 }

@@ -7,6 +7,7 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 **Long entries are truncated here; the ⇒ marker means the full essay (invariants, incidents) is in kb-file-structure.md under that filename. READ IT before editing the file.**
 
 ```
+src/server/sync-fs-witness.js (+worker) · src/mount-path-class.js (PURE) · src/storage-path.js (SHARED) · src/storage-facts.js (lane hub-fuse-sync-guard) — THE WITNESS + THE MOUNT GUARD: each main-thread sync fs call witnessed, a storage mount refused, its readers off the loop ⇒ kb-file-structure.md
 src/server/cluster-presets.js fleet.json (lane oauth-relay-one-source) — THE FLEET FACTS: <dir>/fleet.json + override/fleet.json, one object each, merged per FIELD (PURE preset-layers mergeFleet), watched with the rows («relay page changed»), fleet() ⇒ kb-file-structure.md
 src/server/integration-store.js fleetRelayUrl (lane oauth-relay-one-source) — THE one reader of the fleet's relay page: fleet.json › env VIBESPACE_OAUTH_RELAY_URL (ONE release, said once at boot) › ''; the channels engine asks it ⇒ kb-file-structure.md
 src/consent-road.js relayOf (lane oauth-relay-one-source) · landingLang/landingUser (lane oauth-landing-words) — the fleet's page (`fleetRelayUrl()`) is the presets' fleet.json through the store, live; the landing in ONE language, the address as typed ⇒ kb-file-structure.md
@@ -1257,6 +1258,18 @@ scripts/test-grant-model.mjs + scripts/test-grants-store.mjs — lane grants-uni
 | `broadcastActiveSessions()` | server.js | Pushes session list to all WebSocket clients |
 
 ## ESSAYS (one `### path` section per file)
+
+### src/server/sync-fs-witness.js + src/server/sync-fs-witness-worker.js (ORCH) + src/mount-path-class.js (PURE) + src/storage-path.js (SHARED) + src/storage-facts.js — THE WITNESS AND THE MOUNT GUARD (lane hub-fuse-sync-guard, 2026-10-23)
+
+The production hub held 6.5 min in a sync fs call on an rclone mount and nothing named it (kb-bugfix-invariants; kb-design-lessons §19's storage-mount clause).
+- **src/server/loop-blame.js** — THE ONE wrapper of the main thread's sync fs calls (installed by boot-trace `start()`, server.js's 6th line): `SYNC_FNS` = every `*Sync` of `Object.keys(fs)` + `watch`, plus `realpathSync.native` and `Dir.prototype.readSync`; a throwing call is timed; `setHook({before, after})` — ONE hook (the witness's): `before(fn, args, self)` may throw to refuse, before any syscall. The 20 ms ring + `blame()` / `blameWords()` stay its own.
+- **src/server/sync-fs-witness.js** — `create({rootDir, dataDir, readMountinfo, registry, guardOn, record, …}).start()` (boot-trace; server.js `wire()`s telemetry, the setting and `mounts.storageRoots()` after the canary; mounts-plugins-wiring refreshes on `mounts-updated`). The in-flight slot (a SharedArrayBuffer seqlock: Int32 seq / fn index / path bytes / heartbeat / in flight + Float64 startedAt + 1 KB path), the fd → path map of openSync, the 50 ms ring (`heldIn(from, to)`), the hold hand-over (`setOnHeld`, ≥ 1 s), THE GUARD (a storage root ⇒ `EVSMOUNTSYNC`, journal once per call site, `srv-mount-guard-refused`; log-only when the setting is false; not armed before the first loop turn). PURE words `callWords` / `heldLine`.
+- **src/server/sync-fs-witness-worker.js** — the watchdog THREAD: every 1 s reads the slot; a call in flight ≥ liveMs (10 s) ⇒ one `fs.writeSync(2, …)` line (again every 60 s), the heartbeat stale with nothing in flight ⇒ «held outside any synchronous fs call»; the kernel's answer from /proc/self/task/<pid>/wchan + syscall (PURE `kernelWords`, x86_64 names). Answers the memory census first in its message loop.
+- **src/mount-path-class.js (PURE)** — `parseMountinfo`, `rootsOf({mounts, registry, rootDir, dataDir})` → [{root, kind: storage|home|network, name, fstype, id}] longest first, `rootOf` / `pathClass` (resolve rules only; `~`, a relative path with a cwd, a Buffer, a file: URL; a descriptor = unknown); the instance's own rootDir / dataDir subtree is local.
+- **src/storage-path.js (SHARED)** — the process's one answer: `setRoots` (the witness), `rootOf`, `storageRootOf`; nobody set ⇒ null.
+- **src/storage-facts.js** — `create({safeFs, ttlMs, onLanded}).get(op, payload)` → `{pending}` | `{ok, result}` | `{ok:false, code, timedOut}`: the last off-thread answer, one read per key in flight, re-read past ttlMs. task-groups' Context table is its caller (new SafeFs ops `contextFiles` / `textHead` in src/safe-fs-worker.js — the same walk / read as `_listContextFiles` / `_readText`, test-sync-fs-census ④ compares).
+- **The canary + mount-health** — fs-canary `held(e, loopMs)` (the line, `srv-sync-fs-held-ms`, ≥ 5 s on a mount ⇒ `onHeld`); mount-health-watch `onHeld(e)` → ONE For-you item per mount root while open (PURE mount-health `heldItem`). **The census** — scripts/test-sync-fs-census.mjs (+ scripts/sync-fs-census.mjs, the acorn scanner): a NEW main-thread sync fs call with a non-constant path is red until its row says why.
+
 
 ### src/path-candidates.js (PURE) + src/lib/path-field.js (CLIENT) + src/server/dir-slice.js (ORCH) + src/dir-slice-script.js (PURE) — THE PATH FIELD (lane path-field, 2026-10-23)
 

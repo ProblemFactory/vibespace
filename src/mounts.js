@@ -587,6 +587,19 @@ class MountManager {
    *  itself then fails "not empty" (real incident — a generated TASK.md
    *  recreated a whole folder tree under a disconnected OneDrive). Every
    *  server-side writer consults this before touching a path. */
+  /** lane hub-fuse-sync-guard: THE STORAGE ROWS' MOUNT POINTS for the mount guard (src/server/sync-fs-witness.js →
+   *  src/mount-path-class.js rootsOf) — every filesystem row (a sync worker's folder and a credential are not mounts),
+   *  mounted or not: the main thread never waits on one, and an unmounted one is the bare folder shadowedBy guards. */
+  storageRoots() {
+    const out = [];
+    for (const m of this._state?.mounts || []) {
+      if (rowFor(this, m).filesystem === false || this._kindOf(m) === 'credential') continue;
+      let mp; try { mp = this.pathOf(m); } catch { continue; }
+      out.push({ mountpoint: mp, name: m.name, id: m.id });
+    }
+    return out;
+  }
+
   shadowedBy(p) {
     if (!p || !this._state?.mounts?.length) return null;
     const rp = String(p);

@@ -16,6 +16,12 @@
 //      thread (call, file, bytes, ms, the src/ frame); a loop held by a sync read of a FIFO a child fills after 1.3 s ⇒ the
 //      canary's line names readFileSync, the file, the bytes and the caller; a CPU block ⇒ the line says CPU work; the PURE
 //      words; server.js installs it before anything; CONTROL: the canary without the blame (the base) names nothing
+//   §8 THE WITNESS NAMES THE HOLD (lane hub-fuse-sync-guard — 6.5 min held on an rclone mount, named by nothing): a 300 ms
+//      sync call on a MOUNT path ⇒ the canary names fn + path + ms + mount + caller with no probe in flight and the For-you
+//      fact carries the call site beside who presses the mount (one item per mount); a LOCAL path ⇒ named, no item; a probe
+//      in flight ⇒ the same call, one line; THE GUARD: a storage row refused by name before the syscall, said once per
+//      site, log-only by the setting, never before the first loop turn; CONTROL: the base-shaped canary names nothing;
+//      the watchdog thread names a call still in flight (a child), with the kernel's wchan + syscall
 // Run: node scripts/test-fs-canary.mjs
 // before the first pool use: §3 saturates a pool of TWO — PINNED, never inherited (lane race-sweep, B-2d49: a VibeSpace agent
 // session's env carries UV_THREADPOOL_SIZE=32, the 12-job saturation then never queued the stat — fs 0 ms, 3 FAILED)
@@ -192,11 +198,13 @@ console.log('§7 the blocked loop names its blocker (lane vault-slow-load)');
   // int343 — A WRAPPER OVER A LIBRARY FUNCTION CARRIES THAT FUNCTION'S OWN PROPERTIES. The first wrapper dropped
   // fs.realpathSync.native: on a hub every automation-key open was refused «does not exist» (automation-engine's folder
   // judge) and browser-facts' real paths read null. THE CENSUS: every fs call the wrapper touches keeps every own property.
-  const lost = (mod, before) => Object.entries(before).flatMap(([fn, props]) => Object.entries(props).filter(([k, v]) => mod[fn][k] !== v).map(([k]) => `${fn}.${k}`));
+  // lane hub-fuse-sync-guard: realpathSync.native is a synchronous call of its own — the wrapper now WITNESSES it too (a
+  // wrapper of the same function, which answers the same): kept = present and the same value, or that value wrapped
+  const lost = (mod, before) => Object.entries(before).flatMap(([fn, props]) => Object.entries(props).filter(([k, v]) => !(k in mod[fn]) || (mod[fn][k] !== v && !(typeof v === 'function' && LB.isWrapped(mod[fn][k])))).map(([k]) => `${fn}.${k}`));
   ok(Object.keys(BEFORE).length === LB.SYNC_FNS.length && Object.values(BEFORE).some((p) => Object.keys(p).length) && !lost(fs, BEFORE).length,
     `CENSUS: every one of the ${LB.SYNC_FNS.length} wrapped fs calls keeps its own properties (${Object.entries(BEFORE).filter(([, p]) => Object.keys(p).length).map(([fn, p]) => `${fn}.${Object.keys(p).join('/')}`).join(', ')})`, lost(fs, BEFORE));
-  ok(typeof fs.realpathSync.native === 'function' && fs.realpathSync.native === nativeBefore && fs.realpathSync.native(ROOT) === nativeBefore(ROOT),
-    'fs.realpathSync.native still answers after the install (the automation keys\' folder judge, browser-facts)');
+  ok(typeof fs.realpathSync.native === 'function' && LB.isWrapped(fs.realpathSync.native) && fs.realpathSync.native(ROOT) === nativeBefore(ROOT),
+    'fs.realpathSync.native still answers after the install — witnessed like every sync call (the automation keys\' folder judge, browser-facts)');
   { // THE RED CONTROL: the wrapper as it first shipped (the property copy cut) ⇒ the census names realpathSync.native lost
     const SRC = fs.readFileSync(path.join(REPO, 'src/server/loop-blame.js'), 'utf8');
     const CUT = /\n    for \(const k of Reflect\.ownKeys\(orig\)\)[^\n]*\n/;
@@ -256,6 +264,103 @@ console.log('§7 the blocked loop names its blocker (lane vault-slow-load)');
   ok(!!cl && !/in that window|readFileSync/.test(cl), `CONTROL: the base canary's line for the same block names nothing (the owner's journal): ${cl}`);
   C.c.close();
   fs.rmSync(ROOT, { recursive: true, force: true });
+}
+
+console.log('§8 THE WITNESS NAMES THE HOLD — and the guard refuses a storage mount (lane hub-fuse-sync-guard)');
+{ // 2026-10-23 21:56 PT: 6.5 min held in a sync fs call on an rclone mount, and the canary named nothing (no probe was in
+  // flight; the call was outside loop-blame's 18). The witness rides loop-blame's ONE wrapper (installed in §7).
+  const SW = require(path.join(REPO, 'src/server/sync-fs-witness.js'));
+  const LB = require(path.join(REPO, 'src/server/loop-blame.js'));
+  const MHW = require(path.join(REPO, 'src/server/mount-health-watch.js'));
+  const { spawn } = await import('node:child_process');
+  const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'fscan-witness-'));
+  fs.mkdirSync(path.join(ROOT, 'src'));
+  fs.writeFileSync(path.join(ROOT, 'src', 'row-reader.js'), "'use strict';\nconst fs = require('fs');\nfunction readRow(p) { return fs.readFileSync(p); }\nfunction peek(p) { return fs.statSync(p); }\nmodule.exports = { readRow, peek };\n");
+  const MNTS = fs.mkdtempSync(path.join(os.tmpdir(), 'fscan-mounts-'));   // outside the instance's own tree (that is never a mount path)
+  const NAS = path.join(MNTS, 'NAS'), LOC = path.join(MNTS, 'local'), STORE = path.join(MNTS, 'OneDrive');
+  for (const d of [NAS, LOC, STORE]) fs.mkdirSync(d);
+  fs.writeFileSync(path.join(STORE, 'row.md'), 'x');
+  const reader = require(path.join(ROOT, 'src', 'row-reader.js'));
+  let n = 0;
+  // a sync call that takes ~300 ms: a FIFO read a child fills 0.3 s later (the "stub sync call sleeps 300 ms")
+  const hold = (dir, ms = 300) => { const p = path.join(dir, `pipe${++n}`); execFileSync('mkfifo', [p]); spawn('sh', ['-c', `sleep ${ms / 1000}; printf 'row' > '${p}'`], { stdio: 'ignore' }); reader.readRow(p); return p; };
+  const tick = (ms) => new Promise((r) => setTimeout(r, ms));
+  const wlog = [];
+  // the NAS is a hand-made network mount (witnessed, never refused: the hold HAPPENS); OneDrive a product storage row
+  const w = SW.create({ rootDir: ROOT, dataDir: path.join(ROOT, 'data'), fresh: true, armed: true, live: false, heldMs: 200, log: { warn: (l) => wlog.push(l) },
+    readMountinfo: () => `900 42 0:73 / ${NAS} rw,relatime - nfs4 192.0.2.10:/v rw\n`, registry: () => [{ mountpoint: STORE, name: 'OneDrive', id: 'mnt-1' }] });
+  w.start();
+  const filed = [], mlog = [];
+  const todos = { add: (k, it) => { filed.push({ k, ...it }); return { id: `u-${filed.length}` }; }, get: () => ({ status: 'open' }) };
+  const who = [{ pid: 4242, ppid: 1, comm: 'localsearch-3', argv: ['/usr/libexec/localsearch-3'], cwd: null, fdHits: 3 }];
+  const mh = MHW.create({ file: FILE, getUserTodos: () => todos, procTable: async () => who, ownerIds: async () => ({}), log: { warn: (l) => mlog.push(l) }, mountinfo: () => '' });
+  const H = harness(createFsCanary, { witness: w, onHeld: (e) => mh.onHeld(e), episodeMs: 250 });
+  const p1 = hold(NAS);
+  await tick(150);
+  const line = H.lines.find((l) => /the main loop was held/.test(l)) || '';
+  ok(new RegExp(`^\\[canary\\] the main loop was held (\\d+) ms — the sync fs call that returned as it resumed: readFileSync\\(${p1.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\) \\d{3,} ms, under the network mount «${NAS.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}» \\(witnessed, never refused\\) ← src/row-reader\\.js:3 (Object\\.)?readRow$`).test(line),
+    `a 300 ms hold on a MOUNT path: the canary names the call, its path, its ms, its mount and the caller — no probe in flight: ${line}`);
+  ok(H.recs.some((r) => r.name === 'srv-sync-fs-held-ms' && r.value >= 250 && /fn=readFileSync class=mount/.test(r.detail)), 'counted: srv-sync-fs-held-ms (fn + class)');
+  ok(filed.length === 1 && filed[0].origin === 'server' && filed[0].k === MHW.INBOX_KEY && new RegExp(`waited \\d+ s on the folder .*NAS — readFileSync on .*pipe1 from src/row-reader\\.js:3`).test(filed[0].text)
+    && /localsearch-3|1 process/.test(filed[0].detail) && /The call came from:/.test(filed[0].detail) && filed[0].i18n && filed[0].i18n.text.params.call === 'readFileSync',
+    `the For-you fact (origin server, «This machine») carries the call site beside who presses the mount: ${filed[0] && filed[0].text}`, filed[0]);
+  hold(NAS);
+  await tick(150);
+  ok(filed.length === 1 && mlog.some((l) => /held the main loop again .* its For-you item is still open/.test(l)), 'a second hold on the same mount while its item is open: ONE item, a journal line');
+  H.lines.length = 0;
+  const p2 = hold(LOC);
+  await tick(150);
+  const l2 = H.lines.find((l) => /the main loop was held/.test(l)) || '';
+  ok(l2.includes(`readFileSync(${p2})`) && /, not under a mount ← src\/row-reader\.js:3/.test(l2) && filed.length === 1, `a LOCAL path: named, not under a mount, no For-you item: ${l2}`);
+  // the late probe: a probe in flight across the hold names the SAME call once (the witness's hand-over said it)
+  H.lines.length = 0;
+  const pr = H.c.tick();
+  hold(NAS, 1200);
+  const facts = await pr;
+  await tick(100);
+  const said = H.lines.filter((l) => /the main loop was held/.test(l));
+  ok(facts && facts.loopMs > 100 && /^readFileSync\(.*pipe\d+\) \d+ ms, under the network mount/.test(facts.blockedBy || '') && said.length === 1, `a probe in flight across the hold: its facts name the call, ONE line for the hold (${said.length})`, said);
+  // THE GUARD: a storage row is refused BEFORE the syscall, said once per call site, counted; the setting turns it to log-only
+  let err = null;
+  try { reader.peek(path.join(STORE, 'row.md')); } catch (e) { err = e; }
+  try { reader.peek(path.join(STORE, 'row.md')); } catch { }
+  ok(err && err.code === 'EVSMOUNTSYNC' && err.path === path.join(STORE, 'row.md') && err.mount === STORE && err.message === SW.REFUSAL, `a sync call on a STORAGE row is refused by name: ${err && err.code} ${err && err.mount}`);
+  ok(wlog.filter((l) => l.startsWith('[mount-guard] statSync(')).length === 1 && /from src\/row-reader\.js:4 (Object\.)?peek refused — use SafeFs\/async; the mount «.*OneDrive»$/.test(wlog.find((l) => l.startsWith('[mount-guard]')) || '') && w.counts.refused === 2,
+    `said ONCE per call site (refused twice): ${wlog.find((l) => l.startsWith('[mount-guard]'))}`);
+  w.setGuard(() => false);
+  ok(reader.peek(path.join(STORE, 'row.md')).size === 1 && w.counts.allowed === 1 && wlog.some((l) => /mounts\.mainThreadSyncGuard is off \(log only\)/.test(l)), 'mounts.mainThreadSyncGuard = false: the call runs and is said (log only)');
+  w.setGuard(() => true);
+  ok(fs.statSync(LOC).isDirectory() && fs.statSync(path.join(ROOT, 'data', '..')).isDirectory(), 'a local path and the instance\'s own tree are never refused');
+  { let threw = null, got;   // a fault inside the witness (here: a path-like whose toString throws) never reaches the caller
+    try { got = fs.existsSync({ length: 1, toString() { throw new Error('witness fault'); } }); } catch (e) { threw = e; }
+    ok(!threw && got === false, `a witness fault never breaks the call: the call runs unwitnessed (${threw ? threw.message : 'existsSync → ' + got})`); }
+  { const w2 = SW.create({ rootDir: ROOT, dataDir: path.join(ROOT, 'data'), fresh: true, armed: false, live: false, registry: () => [{ mountpoint: STORE }], readMountinfo: () => '' });
+    w2.start(); let e2 = null; try { reader.peek(path.join(STORE, 'row.md')); } catch (e) { e2 = e; } w2.stop();
+    ok(!e2, 'before the first loop turn (the main-module evaluation) the guard only witnesses — a refusal there would stop every boot'); }
+  w.start();
+  // RED CONTROL: the canary as the base wired it — no witness — over the same hold says NOTHING (the owner's journal)
+  LB.setHook(null);
+  const C = harness(createFsCanary);
+  hold(NAS);
+  await tick(150);
+  ok(!C.lines.length && filed.length === 1, `CONTROL: the base-shaped canary (no witness) names nothing for the same hold (${C.lines.length} lines)`);
+  C.c.close(); H.c.close(); w.stop();
+  // THE WATCHDOG THREAD: a call still in flight is named WHILE it holds (a child: the witness's own thread writes fd 2)
+  const kid = path.join(ROOT, 'kid.js');
+  fs.writeFileSync(kid, `const fs = require('fs'), path = require('path'), { spawn } = require('child_process');
+require(${JSON.stringify(path.join(REPO, 'src/server/loop-blame.js'))}).install({ root: ${JSON.stringify(ROOT)} });
+const w = require(${JSON.stringify(path.join(REPO, 'src/server/sync-fs-witness.js'))}).create({ rootDir: ${JSON.stringify(ROOT)}, armed: true, liveMs: 700, readMountinfo: () => '' }).start();
+const p = path.join(${JSON.stringify(ROOT)}, 'kidpipe'); require('child_process').execFileSync('mkfifo', [p]);
+spawn('sh', ['-c', "sleep 2.2; printf x > '" + p + "'"], { stdio: 'ignore' });
+setTimeout(() => { fs.readFileSync(p); w.stop(); }, 300);
+`);
+  const out = await new Promise((r) => { const c = spawn(process.execPath, [kid], { stdio: ['ignore', 'ignore', 'pipe'] }); let e = ''; c.stderr.on('data', (d) => { e += d; }); c.on('exit', () => r(e)); });
+  ok(/\[sync-fs\] the main thread has waited [12] s in readFileSync\(.*kidpipe\) — the kernel: \S+ in (openat|open|syscall \d+)/.test(out), `a hold still in flight is named by the watchdog thread while it holds, with the kernel's wchan + syscall: ${out.trim().split('\n')[0]}`);
+  const KW = require(path.join(REPO, 'src/server/sync-fs-witness-worker.js'));
+  ok(KW.kernelWords('request_wait_answer\n', '262 0xffffff9c 0x7f 0x7ffd 0x0 0x0 0x0 0x0 0x0\n', 'x64') === 'request_wait_answer in newfstatat' && KW.kernelWords('0', 'running', 'x64') === 'on the CPU (JavaScript or native work)'
+    && KW.kernelWords('do_epoll_wait', '232 0x3', 'arm64') === 'do_epoll_wait in syscall 232', 'the kernel words: a FUSE wait in newfstatat, on the CPU, an unknown architecture by number');
+  fs.rmSync(ROOT, { recursive: true, force: true });
+  fs.rmSync(MNTS, { recursive: true, force: true });
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

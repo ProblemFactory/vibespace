@@ -7,6 +7,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const DOOR = require('../mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
+const SP = require('../storage-path.js'); // lane hub-fuse-sync-guard: is this path on a storage mount (the witness's roots)
 const os = require('os');
 
 const router = express.Router();
@@ -42,6 +43,7 @@ function realCwdOf(cwd) {
   if (!cwd) return null;
   if (_realCwdCache.has(cwd)) return _realCwdCache.get(cwd);
   if (DOOR.blocked(cwd)) return null;   // B-afc4: a sync realpath into a dead FUSE would hang the event loop (not cached)
+  if (SP.storageRootOf(cwd)) return null;   // lane hub-fuse-sync-guard: nor into a live storage mount — this runs on every /api/sessions rebuild
   let rp = null;
   try { const r = fs.realpathSync(cwd); if (r && r !== cwd) rp = r; } catch { /* gone/unreadable */ }
   _realCwdCache.set(cwd, rp);

@@ -265,7 +265,7 @@ async function deviceFolderMount({ device, remotePath, mountpoint, rcloneBin, vf
       } catch { }
     }
   } catch { } // non-Linux: the fusermount pass alone
-  fs.mkdirSync(mountpoint, { recursive: true });
+  await fs.promises.mkdir(mountpoint, { recursive: true }); // lane hub-fuse-sync-guard: a stale FUSE mount point right after the lazy unmount — never a sync call from the loop
   // /proc fd links name the REAL path; resolve it before the mount covers it
   let realMp = mountpoint; try { realMp = await fs.promises.realpath(mountpoint); } catch { }
   // the mount daemon's env is BUILT (lane spawn-env-debts): the rclone rule of src/mounts.js — never the hub's whole env

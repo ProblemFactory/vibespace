@@ -215,6 +215,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const SP = require('./storage-path.js'); // lane hub-fuse-sync-guard: the witness's storage roots
 const M = require('./desktop-apps');
 const { parsePin, pinOf, pinSupportVerdict } = require('./desktop-pin'); // lane e2b (§E2.2): the record's fact `pin` (PURE); lane launch-picture-size: which rungs can be born pinned
 const O = require('./office-open'); // §7.9: the LibreOffice rows as a machine serves them, the open-with verdict, the argv
@@ -435,10 +436,13 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   function registry(hostFacts) {
     const bins = (hostFacts && hostFacts.bins) || {};
     const binOf = (name) => (bins[name] !== undefined ? bins[name] : display.binOnPath(name, { env: env() }));
+    // lane hub-fuse-sync-guard: a program path on a STORAGE mount is listed as it reads (this runs on every GET of the
+    // catalog) — never a stat from the loop; its launch says by name if it is not there
+    const execHere = (x) => (SP.storageRootOf(x) ? x : fs.existsSync(x) ? x : null);
     // the apps the user installed (Layer 0): one row per .desktop file root recorded for an entry — `app.<entry>`;
     // absent ⇒ greyed with its code (the hub's apps engine words it: restoring… after a rebuild, or why not)
     const appRows = (apps && typeof apps.catalogRows === 'function' ? apps.catalogRows() : []).filter((r) => !registryRows.some((x) => x.id === r.id)).map((row) => {
-      const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : binOf(row.exec);
+      const p = row.exec.includes('/') ? execHere(row.exec) : binOf(row.exec);
       // Layer 1: an app-system row is greyed while its app system cannot run here (not enabled, another architecture, no helper…)
       if (row.changed) return { ...row, args: [...row.args], available: false, path: p, reason: `${row.label}: this entry was changed outside VibeSpace and is not runnable: ${row.changed}`, reasonCode: 'changed_outside' }; // rel254 verify F4/F8: shown, never run
       if (row.blocked) return { ...row, args: [...row.args], available: false, path: p, reason: row.blocked === 'shim-not-ours' ? `${row.label}: its launcher in ~/.vibespace/sysroot/bin is not VibeSpace's — it is not run` : `${row.label} lives in the app system, which cannot run here (${row.blocked})`, reasonCode: 'app-system' };
@@ -454,7 +458,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     return registryRows.map((row) => {
       if (row.browser) return browserRegistryRow(row, binOf);
       if (row.office) return { ...O.officeRowFor(row, officeFactsOf(hostFacts, binOf)), args: [...(row.args || [])] }; // §7.9: presence = the binary AND the module's library
-      const p = row.exec.includes('/') ? (fs.existsSync(row.exec) ? row.exec : null) : binOf(row.exec);
+      const p = row.exec.includes('/') ? execHere(row.exec) : binOf(row.exec);
       return { ...row, args: [...row.args], available: !!p, path: p, reason: p ? null : `${row.exec} not on PATH` };
     }).concat(appRows, seenRows).map(launchFacts);
   }

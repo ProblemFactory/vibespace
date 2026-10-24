@@ -119,6 +119,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const SP = require('../storage-path.js'); // lane hub-fuse-sync-guard: the witness's storage roots
 const os = require('os');
 const crypto = require('crypto');
 const B = require('../browser-profiles.js');
@@ -253,6 +254,9 @@ function create({ dataDir, serverSetting = () => undefined, serverNotice = null,
     if (typeof cwd === 'string' && cwd && path.isAbsolute(cwd)) {
       const p = path.join(cwd, B.PROJECT_CONFIG_NAME);
       let raw = null;
+      // lane hub-fuse-sync-guard: a session folder on a STORAGE mount is never read from the main loop (this runs at every
+      // spawn) — the file is reported as not read, never silently skipped
+      if (SP.storageRootOf(p)) { project.path = p; project.error = 'on a storage mount — not read from the server\'s main loop (put the keys in the user config to apply them)'; return { config: B.layerProjectConfig(user, null), user, project, projectFile: null }; }
       try { raw = fs.readFileSync(p, 'utf8'); } catch { raw = null; }
       if (raw !== null) {
         project.path = p;

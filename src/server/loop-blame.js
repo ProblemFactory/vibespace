@@ -5,16 +5,21 @@
 // call, the file, the bytes, the ms and the first src/ frame that made it (installed by src/server/boot-trace.js start()). The canary's «blocked loop» line (and anything
 // else that saw a gap) asks blame(from, to) for the calls inside its window, worded by blameWords — the file, the bytes, the
 // caller. A window with no slow sync call is CPU work and is said so. Main thread only; a worker's fs is its own.
+// lane hub-fuse-sync-guard (the 6.5-min hold of 2026-10-23, NAMED BY NOTHING: the call that held the loop was outside the
+// 18 calls wrapped here): the wrapper now covers EVERY synchronous call of the fs module (`*Sync`, fs.watch — its
+// inotify_add_watch walks the path on the main thread — Dir#readSync and realpathSync.native), times a call that THROWS
+// too (a mount answering ENOTCONN after minutes is a hold), and carries ONE hook (setHook) the sync fs witness owns
+// (src/server/sync-fs-witness.js): before(fn, args, self) may refuse the call before any syscall; after(…) sees its time.
 const fs = require('fs');
 const path = require('path');
 
 const SLOW_CALL_MS = 20;
 const KEPT = 60;
-const SYNC_FNS = Object.freeze(['readFileSync', 'readSync', 'writeFileSync', 'writeSync', 'appendFileSync', 'copyFileSync', 'readdirSync',
-  'statSync', 'lstatSync', 'fstatSync', 'existsSync', 'openSync', 'closeSync', 'renameSync', 'rmSync', 'mkdirSync', 'unlinkSync', 'realpathSync']);
+// every synchronous call the fs module has (Node 24: ~50) + fs.watch, never a hand list (the hand list of 18 missed the hold)
+const SYNC_FNS = Object.freeze([...Object.keys(fs).filter((k) => /^[a-z][A-Za-z]*Sync$/.test(k) && typeof fs[k] === 'function'), 'watch']);
 const ring = [];
 const WRAPPED = new WeakSet();   // the wrappers this module made (never a property on fs's functions)
-let installed = false, rootDir = null;
+let installed = false, rootDir = null, hook = null;
 
 /** PURE: the bytes a sync call moved (a read's result, a write's data), else null. */
 function bytesOf(fn, args, result) {
@@ -26,7 +31,7 @@ function bytesOf(fn, args, result) {
 /** PURE: the first frame of `stack` inside the hub's own code (src/ or server.js under `root`), never this module's. */
 function callerOf(stack, root) {
   for (const l of String(stack || '').split('\n').slice(1)) {
-    if (l.includes('loop-blame.js')) continue;
+    if (l.includes('loop-blame.js') || l.includes('sync-fs-witness.js')) continue; // the wrapper and its hook are never the caller
     const m = /\(?((?:\/|[A-Za-z]:\\)[^():]+):(\d+):\d+\)?\s*$/.exec(l);
     if (!m) continue;
     const rel = root ? path.relative(root, m[1]) : m[1];
@@ -37,6 +42,8 @@ function callerOf(stack, root) {
   return null;
 }
 const pathOf = (a) => (typeof a === 'string' ? a : Buffer.isBuffer(a) ? a.toString() : a instanceof URL ? a.pathname : typeof a === 'number' ? `fd ${a}` : '?');
+/** THE hook (one, the sync fs witness's): { before(fn, args, self) — may throw to refuse; after(fn, args, ms, at, result, failed, self) }. */
+function setHook(h) { hook = h && typeof h.before === 'function' && typeof h.after === 'function' ? h : null; return !!hook; }
 /** One slow call into the ring (the wrapper's, and a suite's seam). */
 function note(rec) { ring.push(rec); if (ring.length > KEPT) ring.splice(0, ring.length - KEPT); return rec; }
 
@@ -47,24 +54,38 @@ function install({ root = null, fsMod = fs, slowMs = SLOW_CALL_MS, now = () => D
   if (!isMain || (installed && fsMod === fs)) return false;
   if (fsMod === fs) { installed = true; rootDir = root; }
   let depth = 0;   // a call another wrapped call makes (readFileSync's own openSync) is the outer one's, never a second row
-  for (const fn of SYNC_FNS) {
-    const orig = fsMod[fn];
-    if (typeof orig !== 'function' || WRAPPED.has(orig)) continue;
+  const wrap = (orig, fn) => {
     const wrapped = function (...args) {
+      const outer = depth === 0;
+      if (outer && hook) hook.before(fn, args, this);   // the mount guard: a refusal throws HERE, before any syscall
       const t0 = hr(), at = now();
-      let r;
+      let r, failed = false, err;
       depth++;
-      try { r = orig.apply(this, args); } finally { depth--; }
-      const ms = Number(hr() - t0) / 1e6;
-      if (ms >= slowMs && depth === 0) { try { note({ at, ms: Math.round(ms), fn, path: pathOf(args[0]), bytes: bytesOf(fn, args, r), caller: callerOf(new Error().stack, root) }); } catch { } }
+      try { r = orig.apply(this, args); } catch (e) { failed = true; err = e; } finally { depth--; }
+      if (outer) {
+        const ms = Number(hr() - t0) / 1e6;
+        if (ms >= slowMs) { try { note({ at, ms: Math.round(ms), fn, path: fn.startsWith('Dir.') ? String(this && this.path) : pathOf(args[0]), bytes: failed ? null : bytesOf(fn, args, r), caller: callerOf(new Error().stack, root) }); } catch { } }
+        if (hook) { try { hook.after(fn, args, ms, at, r, failed, this); } catch { } }
+      }
+      if (failed) throw err;
       return r;
     };
     // int343: the wrapper carries EVERY own property of what it wraps — fs.realpathSync.native is one (the automation
     // keys' folder judge and browser-facts call it); a bare wrapper dropped it and every such call threw
     for (const k of Reflect.ownKeys(orig)) if (!Object.prototype.hasOwnProperty.call(wrapped, k)) Object.defineProperty(wrapped, k, Object.getOwnPropertyDescriptor(orig, k));
     WRAPPED.add(wrapped);
-    fsMod[fn] = wrapped;
+    return wrapped;
+  };
+  for (const fn of SYNC_FNS) {
+    const orig = fsMod[fn];
+    if (typeof orig !== 'function' || WRAPPED.has(orig)) continue;
+    fsMod[fn] = wrap(orig, fn);
   }
+  // the two synchronous calls that are not fs.<x>Sync: realpathSync.native (its own syscall) and a Dir's readSync
+  const rp = fsMod.realpathSync;
+  if (rp && typeof rp.native === 'function' && !WRAPPED.has(rp.native)) Object.defineProperty(rp, 'native', { ...Object.getOwnPropertyDescriptor(rp, 'native'), value: wrap(rp.native, 'realpathSync.native') });
+  const DirP = fsMod.Dir && fsMod.Dir.prototype;
+  if (DirP && typeof DirP.readSync === 'function' && !WRAPPED.has(DirP.readSync)) DirP.readSync = wrap(DirP.readSync, 'Dir.readSync');
   return true;
 }
 
@@ -86,4 +107,4 @@ function blameWords(entries, root = rootDir) {
 /** Is `fn` one of this module's wrappers. */
 const isWrapped = (fn) => WRAPPED.has(fn);
 
-module.exports = { install, blame, blameWords, note, bytesOf, callerOf, isWrapped, SLOW_CALL_MS, KEPT, SYNC_FNS };
+module.exports = { install, setHook, blame, blameWords, note, bytesOf, callerOf, pathOf, isWrapped, SLOW_CALL_MS, KEPT, SYNC_FNS };

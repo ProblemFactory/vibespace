@@ -358,6 +358,44 @@ const OPS = {
     return { result: { exists: fs.existsSync(p) } };
   },
 
+  // lane hub-fuse-sync-guard: the Task Group context table's reads of a row on a STORAGE mount, off the main thread —
+  // the SAME walk and read as src/task-groups.js _listContextFiles / _readText (scripts/test-sync-fs-census.mjs ④ runs
+  // both over one folder and compares)
+  contextFiles({ path: dir, cap = 100 }) {
+    const out = [];
+    const walk = (d, rel, depth) => {
+      if (out.length >= cap || depth > 4) return;
+      let entries = [];
+      try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        if (out.length >= cap) return;
+        if (e.name === '.vibespace' || e.name === '.git' || e.name === 'node_modules') continue;
+        const p = path.join(d, e.name);
+        const r = rel ? rel + '/' + e.name : e.name;
+        if (e.isDirectory()) walk(p, r, depth + 1);
+        else {
+          let st; try { st = fs.statSync(p); } catch { continue; }
+          out.push({ path: r, size: st.size, mtime: st.mtimeMs });
+        }
+      }
+    };
+    walk(dir, '', 0);
+    return { result: out };
+  },
+  textHead({ path: p, cap }) {
+    const st = fs.statSync(p);
+    const size = st.size;
+    if (size > cap) return { result: { text: '', size, binary: false, big: true } };
+    const fd = fs.openSync(p, 'r');
+    try {
+      const b = Buffer.alloc(size);
+      const n = fs.readSync(fd, b, 0, size, 0);
+      const buf = b.subarray(0, n);
+      if (buf.subarray(0, 8192).includes(0)) return { result: { text: '', size, binary: true, big: false } };
+      return { result: { text: buf.toString('utf-8'), size, binary: false, big: false } };
+    } finally { try { fs.closeSync(fd); } catch { } }
+  },
+
   // the frame host's preview folder (lane frame-host-preview): a file's REAL path — a symlink out of the folder is judged
   // by where it lands, never by its name
   realpath({ path: p }) {

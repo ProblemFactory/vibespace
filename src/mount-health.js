@@ -16,6 +16,8 @@
  *     a person's read (`user-read`) never does — it runs and, if it stalls, the canary says so. An undeclared kind is
  *     never paused.
  *   · canaryItem(...) / canaryEndLine(...) — the words (text ≤ 500, detail ≤ 8000: user-todos' bounds) + their i18n keys.
+ *   · heldItem(...) — lane hub-fuse-sync-guard: a synchronous fs call that HELD the main loop ≥ 5 s on a mount path (the
+ *     sync fs witness's entry) — the item names the call (fn on path from file:line) beside the processes pressing it.
  * ORIGIN RULE (one, lane browser-resource-care's): the item is origin `server` ("This machine").
  */
 const MP = require('./memory-pressure.js');
@@ -146,9 +148,46 @@ function canaryItem({ mountpoint, strikes, latencyMs, suspects = [], pausing = P
   return { text: head.text.slice(0, TEXT_MAX), detail: lines.join('\n').slice(0, DETAIL_MAX), i18n: { text: { key: head.key, params: head.params }, detail: rows } };
 }
 
+const HELD_TAIL = Object.freeze({
+  storage: 'VibeSpace refuses to wait on a storage folder from its main loop; this call ran because the guard was off (mounts.mainThreadSyncGuard) or the server was still starting.',
+  home: 'This is the network folder VibeSpace itself lives on: its calls there are watched, never refused.',
+  network: 'Calls on a network folder are watched, never refused.',
+});
+
+/** lane hub-fuse-sync-guard: the For-you item of a HOLD — a synchronous fs call that held the server's main loop on a
+ *  mount path. `stack` = the hub frames of the call (the witness keeps them for mount paths). → { text, detail, i18n }. */
+function heldItem({ mountpoint, kind = 'storage', fn, path: p, ms, caller = null, stack = null, suspects = [] } = {}) {
+  const mount = String(mountpoint || '?');
+  const s = secs(ms);
+  const call = String(fn || '?'), where = String(p || '?'), from = String(caller || 'code outside VibeSpace');
+  const head = { text: `VibeSpace's server waited ${s} s on the folder ${mount} — ${call} on ${where} from ${from}`, key: i18nKey("VibeSpace's server waited {s} s on the folder {mount} — {call} on {path} from {from}"), params: { s, mount, call, path: where, from } };
+  const lines = [], rows = [];
+  const say = (text, key, params) => { lines.push(text); rows.push(params ? { key, params } : { key }); };
+  say('Nothing else on this server ran while it waited: pages, paired machines and every running conversation stalled.', i18nKey('Nothing else on this server ran while it waited: pages, paired machines and every running conversation stalled.'));
+  const frames = (Array.isArray(stack) ? stack : []).slice(0, 6);
+  if (frames.length) {
+    lines.push('');
+    say('The call came from:', i18nKey('The call came from:'));
+    for (const f of frames) say(`- ${f}`, i18nKey('- {frame}'), { frame: String(f) });
+  }
+  const top = (Array.isArray(suspects) ? suspects : []).slice(0, TOP_SUSPECTS);
+  lines.push('');
+  if (top.length) {
+    say('Who is using the folder (open files, working folders and command lines under it):', i18nKey('Who is using the folder (open files, working folders and command lines under it):'));
+    for (const g of top) {
+      const w = g.who || MP.whoOf(g);
+      say(`- ${g.hits} · ${w.text} · ${g.n} process${g.n === 1 ? '' : 'es'}`, i18nKey('- {hits} · {who} · {n} processes'), { hits: g.hits, who: w.text, n: g.n });
+    }
+  } else say('No process has a file open there.', i18nKey('No process has a file open there.'));
+  lines.push('');
+  const tail = HELD_TAIL[kind] || HELD_TAIL.storage;
+  say(tail, i18nKey(tail));
+  return { text: head.text.slice(0, TEXT_MAX), detail: lines.join('\n').slice(0, DETAIL_MAX), i18n: { text: { key: head.key, params: head.params }, detail: rows } };
+}
+
 /** The journal's end-of-episode words. */
 function canaryEndLine({ mountpoint, wedgedMs } = {}) {
   return `the mount ${String(mountpoint || '?')} answers again — ${secs(wedgedMs)} s wedged`;
 }
 
-module.exports = { canaryStep, suspectsOf, shouldPause, canaryItem, canaryEndLine, mountOf, underMount, WINDOW_MS, STRIKES_TO_OPEN, CLEAN_TO_END, TOP_SUSPECTS, PAUSE_KINDS, NEVER_PAUSED, TEXT_MAX, DETAIL_MAX };
+module.exports = { canaryStep, suspectsOf, shouldPause, canaryItem, heldItem, HELD_TAIL, canaryEndLine, mountOf, underMount, WINDOW_MS, STRIKES_TO_OPEN, CLEAN_TO_END, TOP_SUSPECTS, PAUSE_KINDS, NEVER_PAUSED, TEXT_MAX, DETAIL_MAX };

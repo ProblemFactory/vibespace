@@ -93,7 +93,8 @@ function normAbs(p) {
 
 /**
  * Where each row points. `kindOf(abs)` → 'dir' | 'file' | 'missing' | 'blocked' (the caller's stat, behind its mount
- * door). Returns one entry per row: { abs, kind, via } — via 'abs' | 'home' (a ~ path) | 'prev' (the previous row's
+ * door) | 'reading' (lane hub-fuse-sync-guard: on a storage mount, read off the main thread — its first answer has not
+ * landed). Returns one entry per row: { abs, kind, via } — via 'abs' | 'home' (a ~ path) | 'prev' (the previous row's
  * folder) | 'first' (the group's first folder) | 'homerel' (a relative path found under home) | 'host' | null.
  * A RELATIVE path resolves against the previous path row's folder, then the group's first folder (the first rooted row
  * that is a folder), then home — the first candidate that exists; none ⇒ { abs: null, kind: 'missing', tried }.
@@ -121,7 +122,7 @@ function resolveRows(rows, { home = '/', kindOf = () => 'missing' } = {}) {
         const a = normAbs(joinPath(base, r.path));
         const k = kindOf(a);
         tried.push({ base, via });
-        if (k === 'dir' || k === 'file' || k === 'blocked') { res = { abs: a, kind: k, via }; break; }
+        if (k === 'dir' || k === 'file' || k === 'blocked' || k === 'reading') { res = { abs: a, kind: k, via }; break; }
       }
       if (!res) res = { abs: null, kind: 'missing', via: null, tried: tried.map((t) => t.via) };
     }

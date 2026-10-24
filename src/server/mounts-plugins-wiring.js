@@ -595,6 +595,7 @@ const mounts = new MountManager({
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
     // Mount state changed ⇒ context folders skipped as shadowed may be back.
     if (msg?.type === 'mounts-updated') { try { onMountsUpdated?.(); } catch (e) { console.warn('[mounts] onMountsUpdated failed:', e.message); } }
+    if (msg?.type === 'mounts-updated') { try { require('./sync-fs-witness.js').create().refresh(); } catch { } } // lane hub-fuse-sync-guard: the guard's roots follow the registry (a row added / removed / mounted)
   },
 });
 // The task store regenerated TASK.md at boot BEFORE mounts existed (its shadow

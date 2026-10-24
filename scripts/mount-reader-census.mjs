@@ -45,7 +45,7 @@ export const ROWS = [
   ['src/ctx-sync.js', 'user-path', 4, 'DOOR\\.blocked\\(', 'the group context folder walk: refused by name before the device is dialled'],
   ['src/design-fs.js', 'user-path', 7, 'DOOR\\.blocked\\(', 'the design folder read: storage_blocked by name'],
   ['src/desktop-display.js', 'own-tree', 27, null, PROC], // +2 lane remoteapp-r1b: the first connection's OWN fresh config dir (readdir + the one stored certificate, read for its sha256); +3 lane app-display-portal: portal binaries stat'd in /usr/libexec, the app dir's bus socket, /proc/self/mountinfo; +1 lane app-display-notify-sink: the sink file; +1 lane remoteapp-r1a: the RDP client binary stat'd (its build facts' memo key) beside the module; +1 lane app-launch-singleton: the holder of a browser's default profile (/proc/<pid>/stat — its SingletonLock is a readlink in the browser's own tree under ~)
-  ['src/desktop-serve.js', 'own-tree', 15, null, DATA], // +2 lane remoteapp-r1b: a RemoteApp session's own app.log re-read at its teardown (stat + read) for the password-shape scrub; +2 lane app-display-notify-sink: the app's notification journal (stat + read) in its own 0700 portal dir; +1 lane remoteapp-r1a: the tail of a RemoteApp session's own app.log (why it ended)
+  ['src/desktop-serve.js', 'own-tree', 14, null, DATA], // lane hub-fuse-sync-guard −1: the catalog's two program-path checks are ONE (execHere: a storage-mount path is listed as it reads) // +2 lane remoteapp-r1b: a RemoteApp session's own app.log re-read at its teardown (stat + read) for the password-shape scrub; +2 lane app-display-notify-sink: the app's notification journal (stat + read) in its own 0700 portal dir; +1 lane remoteapp-r1a: the tail of a RemoteApp session's own app.log (why it ended)
   ['src/device-audit.js', 'own-tree', 3, null, `${DATA} — lane device-act-audit: the hub's device-act audit ring (data/device-audit.jsonl: the size before an append, the backwards tail read)`],
   ['src/device-mount.js', 'exempt', 5, null, 'the device pull mount: /proc scans + its own mount point (its owner’s liveness)'],
   ['src/discovery-facts.js', 'own-tree', 5, null, PROC],
@@ -80,7 +80,7 @@ export const ROWS = [
   ['src/routes/persistence.js', 'own-tree', 15, null, DATA],
   ['src/routes/sessions.js', 'user-path', 27, 'DOOR\\.blocked\\(', 'a session cwd realpath (sync, main thread): null, not cached'],
   ['src/routes/window-targets.js', 'own-tree', 1, null, DATA],
-  ['src/safe-fs-worker.js', 'exempt', 39, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked)'],
+  ['src/safe-fs-worker.js', 'exempt', 43, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked); lane hub-fuse-sync-guard +4: the Task Group context table\'s walk + text read of a row on a storage mount (contextFiles / textHead)'],
   ['src/search-index-worker.js', 'own-tree', 5, null, CLI],
   ['src/secret-box.js', 'own-tree', 13, null, DATA], // lane key-file-law-stores: +3 — THE KEY-FILE LAW's reads (the key file raw/hex, each store's ciphertext files + their dirs); lane vault-e2e-password: +4 — data/vault.json and the `.sealed` markers beside a key file (is this dir's vault set up?); lane vault-e2e-password-fix-r2: +1 — sealedDir (data/vault.json's presence, for a process with no engine)
   ['src/app-secrets.js', 'own-tree', 7, null, DATA], // lane app-display-secrets: the service/sealer files beside it, the key file (secret-box), the app dir's sealed store + bus socket; lane vault-contents-window +3 — the Vault window lists data/desktop-apps/*, asks each app dir for its sealed store and reads it (own data dir)
@@ -154,6 +154,8 @@ export const ROWS = [
   ['src/server/memory-sampler.js', 'own-tree', 1, null, PROC],
   ['src/server/migrations.js', 'own-tree', 39, null, DATA], // lane llm-plugin-rename: +1 — 2026-10-llm-rename reads settings / plugins / integrations.json (own data dir) to know which live store it needs; lane task-group-context: +1 — 2026-10-task-group-context-rows reads task-groups.json (own data dir) when no live store was handed in
   ['src/server/mount-health-watch.js', 'exempt', 6, null, 'the server-tree watch: /proc + mountinfo, never a user path (the judge’s P4)'],
+  ['src/server/sync-fs-witness.js', 'own-tree', 1, null, 'lane hub-fuse-sync-guard: /proc/self/mountinfo (procfs — the storage roots, every 30 s)'],
+  ['src/server/sync-fs-witness-worker.js', 'own-tree', 2, null, 'lane hub-fuse-sync-guard: the watchdog thread reads the main thread\'s /proc/self/task/<pid>/wchan + syscall (procfs)'],
   ['src/server/mounts-plugins-wiring.js', 'own-tree', 8, null, DATA], // lane passkey-store-core: +3 — data/browser-passkeys.json + its key file (own data dir); lane key-file-law-stores: −2 — the key file reads through secret-box lawfulKey
   ['src/server/oat-mint.js', 'own-tree', 3, null, 'its own 0700 scratch dir per mint (the $BROWSER URL file) + the boot sweep of its own orphaned vs-oat-mint-* dirs (readdir + lstat of tmpRoot)'],
   ['src/server/claude-signin.js', 'own-tree', 4, null, 'lane door-signin-card: the account\'s own pre-seeded creds dir (ensureSeed existsSync + the helper\'s .vibespace-login-status.json read — a member dir under data/subs) + the boot sweep of its own orphaned vs-signin-* scratch dirs (readdir + lstat of tmpRoot); nothing a person names'],
@@ -177,7 +179,7 @@ export const ROWS = [
   ['src/server/window-targets-engine.js', 'own-tree', 4, null, DATA],
   ['src/server/wrapper-files.js', 'own-tree', 4, null, PROC],
   ['src/session-status.js', 'own-tree', 1, null, DATA],
-  ['src/session-store.js', 'own-tree', 29, null, CLI],
+  ['src/session-store.js', 'own-tree', 27, null, `${CLI}; lane hub-fuse-sync-guard −2: the project-dir decode's three probes are ONE (probeCandidate: never below a storage mount)`],
   ['src/slot-transitions.js', 'own-tree', 4, null, DATA],
   ['src/sock-path.js', 'own-tree', 4, null, DATA],
   ['src/ssh-key.js', 'own-tree', 1, null, DATA],
@@ -199,7 +201,7 @@ export const ROWS = [
   ['src/usage-walker.js', 'user-path', 12, 'DOOR\\.blocked\\(', 'the usage walk: a blocked project folder skipped this pass, said once'],
   ['src/user-todos.js', 'own-tree', 1, null, DATA],
   ['src/vnc.js', 'own-tree', 3, null, PROC],
-  ['src/webdav.js', 'user-path', 16, 'DOOR\\.blocked\\(', 'a WebDAV share root: 503 by name'],
+  ['src/webdav.js', 'user-path', 11, 'DOOR\\.blocked\\(', 'a WebDAV share root: 503 by name; lane hub-fuse-sync-guard: the /dav verbs are async fs (exists() = one fsp.access) — −5 sites'],
   ['src/weekly-lanes-unfold.js', 'own-tree', 8, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
   ['src/window-stamp.js', 'own-tree', 1, null, DATA], // lane oat-identity-fix-r3: the `.window-` sidecar's ONE reader (data/usage-cache)
   ['src/window-targets.js', 'own-tree', 2, null, PROC],

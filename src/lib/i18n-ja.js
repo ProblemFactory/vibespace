@@ -8229,6 +8229,16 @@ export default {
   "- the age-based buffer and meta sweeps": "- 期限によるバッファーとメタデータの掃除",
   "- the mount cache scan": "- マウントキャッシュのスキャン",
   "A file you open yourself is never paused. This item resolves itself when the folder answers again.": "ご自身で開くファイルは一時停止されません。フォルダーが応答を取り戻すと、この項目は自動で解決します。",
+  "Never let the server wait on a storage mount": "サーバーがストレージマウントを待たないようにする", // lane hub-fuse-sync-guard
+  "The server refuses any synchronous file call on a storage mount (rclone, SMB, WebDAV, a storage you added) from its main loop, so a slow or stuck mount can no longer freeze VibeSpace. Turn it off only if a refusal breaks something you need: the call then runs and is only logged. Either way the journal names any file call that holds the server.": "サーバーはメインループからストレージマウント（rclone、SMB、WebDAV、追加したストレージ）への同期ファイル呼び出しをすべて拒否するため、遅い・止まったマウントで VibeSpace 全体が固まることはもうありません。拒否のせいで必要な機能が動かないときだけオフにしてください。その場合、呼び出しは実行され、ログに記録されるだけになります。どちらの設定でも、サーバーを止めたファイル呼び出しはジャーナルに記録されます。", // lane hub-fuse-sync-guard
+  "VibeSpace's server waited {s} s on the folder {mount} — {call} on {path} from {from}": "VibeSpace のサーバーがフォルダー {mount} で {s} 秒待ちました——{from} が {path} に {call} を呼び出しました", // lane hub-fuse-sync-guard
+  "Nothing else on this server ran while it waited: pages, paired machines and every running conversation stalled.": "待っている間、このサーバーでは何も動きませんでした。ページ、ペアリングしたマシン、実行中のすべての会話が止まりました。", // lane hub-fuse-sync-guard
+  "The call came from:": "呼び出し元：", // lane hub-fuse-sync-guard
+  "- {frame}": "- {frame}", // lane hub-fuse-sync-guard
+  "Who is using the folder (open files, working folders and command lines under it):": "このフォルダーを使っているもの（開いているファイル、作業フォルダー、配下のコマンドライン）：", // lane hub-fuse-sync-guard
+  "VibeSpace refuses to wait on a storage folder from its main loop; this call ran because the guard was off (mounts.mainThreadSyncGuard) or the server was still starting.": "VibeSpace はメインループからストレージフォルダーを待つことを拒否します。この呼び出しが実行されたのは、保護がオフ（mounts.mainThreadSyncGuard）だったか、サーバーの起動中だったためです。", // lane hub-fuse-sync-guard
+  "This is the network folder VibeSpace itself lives on: its calls there are watched, never refused.": "ここは VibeSpace 自身が置かれているネットワークフォルダーです。ここでの呼び出しは記録されるだけで、拒否されることはありません。", // lane hub-fuse-sync-guard
+  "Calls on a network folder are watched, never refused.": "ネットワークフォルダーでの呼び出しは記録されるだけで、拒否されることはありません。", // lane hub-fuse-sync-guard
   "page asks for a sign-in": "ページがサインインを要求", // lane browser-ui-prompts
   "Permission {kind} granted to {origin} by the agent": "エージェントが {origin} に {kind} の権限を許可しました", // lane browser-ui-prompts-r2
   "Permission {kind} denied for {origin} by the agent": "エージェントが {origin} の {kind} の権限を拒否しました", // lane browser-ui-prompts-r2

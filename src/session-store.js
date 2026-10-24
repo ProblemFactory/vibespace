@@ -15,6 +15,7 @@ const { readJsonlTail } = require('./adapters/codex');
 // A test suite's synthetic transcript is never a conversation (see the essay
 // in src/fixture-guard.js — one declaration, shared with the usage walk).
 const { isFixtureProjectDir, isFixtureSid } = require('./fixture-guard.js');
+const SP = require('./storage-path.js'); // lane hub-fuse-sync-guard: SHARED — the witness's storage roots (none in a process nobody set)
 
 const SESSIONS_DIR = path.join(os.homedir(), '.claude', 'sessions');
 
@@ -28,6 +29,10 @@ function cwdToProjectDir(cwd) {
   return cwd.replace(/[/._]/g, '-');
 }
 
+// lane hub-fuse-sync-guard: the decode probes the disk one candidate at a time — on a STORAGE mount (src/storage-path.js)
+// it never does (GET /api/sessions runs it on the main thread): a mount point itself is taken as there, anything below
+// it is not probed and the rest of the name is kept as it reads.
+const probeCandidate = (p) => { const r = SP.storageRootOf(p); return r ? p === r.root : fs.existsSync(p); };
 function recoverCwdFromProjDir(projDir) {
   const parts = projDir.replace(/^-/, '').split('-');
   let current = '/';
@@ -36,14 +41,14 @@ function recoverCwdFromProjDir(projDir) {
     let found = false;
     for (let j = parts.length; j > i; j--) {
       const segment = parts.slice(i, j).join('-');
-      if (fs.existsSync(path.join(current, segment))) {
+      if (probeCandidate(path.join(current, segment))) {
         current = path.join(current, segment); i = j - 1; found = true; break;
       }
-      if (fs.existsSync(path.join(current, '.' + segment))) {
+      if (probeCandidate(path.join(current, '.' + segment))) {
         current = path.join(current, '.' + segment); i = j - 1; found = true; break;
       }
       const underscored = parts.slice(i, j).join('_');
-      if (underscored !== segment && fs.existsSync(path.join(current, underscored))) {
+      if (underscored !== segment && probeCandidate(path.join(current, underscored))) {
         current = path.join(current, underscored); i = j - 1; found = true; break;
       }
     }

@@ -44,6 +44,7 @@ function queueVerbRefusal(op, label) {
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const SP = require('./storage-path.js'); // lane hub-fuse-sync-guard: the witness's storage roots
 const { execFile } = require('child_process');
 const { createWsCreateHandler } = require('./ws-create');
 // Remote twin of the LOCAL ambient-oat strip (B-211a AGENT_ENV_DROP): a host
@@ -1437,7 +1438,7 @@ function registerWsHandler(wss, ctx) {
               const pe = session._pendingEditor;
               if (pe) {
                 let live = true;
-                if (!pe.host) { try { live = fs.existsSync(pe.filePath); } catch { live = false; } }
+                if (!pe.host && !SP.storageRootOf(pe.filePath)) { try { live = fs.existsSync(pe.filePath); } catch { live = false; } } // lane hub-fuse-sync-guard: on a storage mount best-effort like remote (never a stat from the loop)
                 if (Date.now() - (pe.at || 0) > 24 * 3600 * 1000) live = false;
                 if (live) {
                   ws.send(JSON.stringify({ type: 'editor-open', filePath: pe.filePath, signalPath: pe.signalPath, sessionId: data.sessionId, host: pe.host || null }));

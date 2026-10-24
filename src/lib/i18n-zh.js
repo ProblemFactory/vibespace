@@ -8230,6 +8230,16 @@ export default {
   "- the age-based buffer and meta sweeps": "- 按时间清理缓冲区和元数据",
   "- the mount cache scan": "- 挂载缓存扫描",
   "A file you open yourself is never paused. This item resolves itself when the folder answers again.": "你自己打开文件从不会被暂停。文件夹恢复响应时，这一条会自动结束。",
+  "Never let the server wait on a storage mount": "绝不让服务器等存储挂载", // lane hub-fuse-sync-guard
+  "The server refuses any synchronous file call on a storage mount (rclone, SMB, WebDAV, a storage you added) from its main loop, so a slow or stuck mount can no longer freeze VibeSpace. Turn it off only if a refusal breaks something you need: the call then runs and is only logged. Either way the journal names any file call that holds the server.": "服务器在主循环里拒绝对存储挂载（rclone、SMB、WebDAV、你添加的存储）做任何同步文件调用，慢的或卡住的挂载再也不能冻结整个 VibeSpace。只有当某次拒绝妨碍了你需要的功能时才关掉：那时调用照常执行，只记一行日志。无论开关，卡住服务器的文件调用都会在日志里写明。", // lane hub-fuse-sync-guard
+  "VibeSpace's server waited {s} s on the folder {mount} — {call} on {path} from {from}": "VibeSpace 服务器在文件夹 {mount} 上等了 {s} 秒——{from} 对 {path} 调用了 {call}", // lane hub-fuse-sync-guard
+  "Nothing else on this server ran while it waited: pages, paired machines and every running conversation stalled.": "等待期间这台服务器上什么都没有运行：页面、已配对的机器和每个正在进行的对话都停住了。", // lane hub-fuse-sync-guard
+  "The call came from:": "调用来自：", // lane hub-fuse-sync-guard
+  "- {frame}": "- {frame}", // lane hub-fuse-sync-guard
+  "Who is using the folder (open files, working folders and command lines under it):": "谁在用这个文件夹（其中打开的文件、工作目录和命令行）：", // lane hub-fuse-sync-guard
+  "VibeSpace refuses to wait on a storage folder from its main loop; this call ran because the guard was off (mounts.mainThreadSyncGuard) or the server was still starting.": "VibeSpace 拒绝在主循环里等待存储文件夹；这次调用之所以执行，是因为保护开关已关闭（mounts.mainThreadSyncGuard）或服务器还在启动。", // lane hub-fuse-sync-guard
+  "This is the network folder VibeSpace itself lives on: its calls there are watched, never refused.": "这是 VibeSpace 自身所在的网络文件夹：这里的调用只会被记录，从不拒绝。", // lane hub-fuse-sync-guard
+  "Calls on a network folder are watched, never refused.": "网络文件夹上的调用只会被记录，从不拒绝。", // lane hub-fuse-sync-guard
   "page asks for a sign-in": "网页要求登录", // lane browser-ui-prompts
   "Permission {kind} granted to {origin} by the agent": "agent 已允许 {origin} 使用 {kind} 权限", // lane browser-ui-prompts-r2
   "Permission {kind} denied for {origin} by the agent": "agent 已拒绝 {origin} 的 {kind} 权限", // lane browser-ui-prompts-r2

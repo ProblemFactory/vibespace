@@ -900,7 +900,7 @@ const telemetry = new Telemetry({
 });
 // Server-side fatals land in the same ledger (journald has them too, but the
 // diagnostics report should show one unified picture).
-process.on('uncaughtException', (e) => {
+process.on('uncaughtException', (e) => { if (e && e.code === 'EVSMOUNTSYNC') { console.error(`[mount-guard] a refused ${e.syscall} on ${e.path} unwound a callback — the hub keeps serving (the call never reached the mount)`); return; } // lane hub-fuse-sync-guard: the guard's refusal throws BEFORE any syscall — exiting would trade a refused call for a whole-hub restart
   try { if (e && (e.code === 'EMFILE' || e.code === 'ENFILE')) console.error('[fd] ' + fdGauge.blame(e, e.path).words); } catch {} // lane-dead-bridge: NAME an EMFILE before dying — this process, the mount's FUSE daemon (12:03) or the machine
   try { bridgeWatch.endAttachPtys(); } catch {} // …and end the attach clients like the clean shutdown does: a crash that left them alive left ORPHANS whose stuck socket kept the next server's attach dead for 3 h (lane-dead-bridge)
   try { telemetry.record({ kind: 'server-error', name: e.message || 'uncaughtException', stack: e.stack }); telemetry.flush(); } catch {}
@@ -968,10 +968,10 @@ global.__vsEvent = (name, detail) => { try { telemetry.record({ kind: 'event', n
 // ── Threadpool canary (2.108.6; off the main thread since design 011 lane 1) ── src/server/fs-canary.js says why: the
 // stat is timed in its own SafeFs worker and the main loop's delay is a second fact, so a blocked loop never reads as
 const mountHealth = require('./src/server/mount-health-watch.js').create({ file: path.join(__dirname, 'package.json'), getUserTodos: () => userTodos, ownerIds: (procs) => memoryPressure.ownerIds(procs), log: console }); // a slow mount. Three stats past 5 s in a row still kick the mount health sweep; lane fuse-canary-notice (B-b327): every answered probe drives the mount-health EPISODE — ONE For-you item naming the mount + who presses it, the server's own scans paused on it (src/server/mount-health-watch.js)
-{
+{ const syncFs = require('./src/server/sync-fs-witness.js').create().wire({ record: (ev) => telemetry.record(ev), guardOn: () => serverSetting('mounts.mainThreadSyncGuard') !== false, registry: () => mounts.storageRoots() }); // lane hub-fuse-sync-guard: the witness boot-trace started gets telemetry, the setting and the storage rows (mounts exists later: a ReferenceError until then = no rows)
   const fsCanary = require('./src/server/fs-canary.js').createFsCanary({
     file: path.join(__dirname, 'package.json'),
-    record: (ev) => telemetry.record(ev),
+    record: (ev) => telemetry.record(ev), witness: syncFs, onHeld: (e) => mountHealth.onHeld(e), // a held loop is named by the witness's call; ≥ 5 s on a mount ⇒ the For-you item names it
     onWedged: () => { try { mounts._healthSweep().catch(() => {}); } catch {} }, onProbe: (p) => mountHealth.onProbe(p),
   });
   setInterval(() => { fsCanary.tick().catch(() => {}); }, 10000).unref();

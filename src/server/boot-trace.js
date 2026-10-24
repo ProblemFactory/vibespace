@@ -38,6 +38,10 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
   // lane vault-slow-load addendum: the main thread's slow SYNC fs calls are kept from here (server.js's 5th line — before the
   // modules that destructure fs): a blocked loop names its blocker (src/server/loop-blame.js)
   try { if (dataDir) require('./loop-blame.js').install({ root: path.dirname(dataDir) }); } catch { }
+  // lane hub-fuse-sync-guard: THE WITNESS + THE MOUNT GUARD ride that wrapper from here (src/server/sync-fs-witness.js) —
+  // a held loop names its call, and the main thread never waits on a storage mount (server.js wires the canary, the
+  // mounts registry and the setting once they exist)
+  try { if (dataDir) require('./sync-fs-witness.js').create({ rootDir: path.dirname(dataDir), dataDir }).start(); } catch (e) { console.warn('[sync-fs] the witness did not start —', e && e.message); }
   if (one) return one;
   const startAt = now(), steps = [], spans = [], gaps = [], ops = [], notes = [];
   let label = null, sticky = null, last = startAt, mainMs = null, mainEndAt = null, listenAt = null, closed = false, resolveDone;

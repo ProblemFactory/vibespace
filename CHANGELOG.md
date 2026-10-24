@@ -2,6 +2,17 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.350 — 2026-10-24
+
+### Added
+- A new setting, Settings → Session → «Never let the server wait on a storage mount», is on from the start; turn it off only if a refusal blocks you.
+
+### Fixed
+- A slow or stuck storage mount (a NAS, OneDrive, any rclone or SMB folder) can no longer freeze the whole VibeSpace server: it never waits on one.
+- When a file operation does hold the server, the journal and a For you item name the operation, its path and the folder, beside the programs using that folder.
+- A Task Group whose Context folders sit on a storage mount is read in the background, so a slow mount no longer stalls every prompt.
+- Conversations, the WebDAV share and the file browser's copy progress on a storage mount no longer make the server wait on that mount.
+
 ## 2.369.349 — 2026-10-23
 
 ### Added

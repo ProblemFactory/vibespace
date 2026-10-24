@@ -153,7 +153,7 @@ function create({ dataDir, requestAuthed = () => true, publicUrl = () => null, l
     const abs = path.resolve(String(srcPath || ''));
     if (DOOR.blocked(abs)) return { error: DOOR.SENTENCE };   // B-afc4: a file on a storage that is not answering
     let st;
-    try { st = fs.statSync(abs); } catch { return { error: 'file not found: ' + abs }; }
+    try { st = fs.statSync(abs); } catch (e) { return { error: e && e.code === 'EVSMOUNTSYNC' ? `${e.message} (${e.mount}) — copy the page to a local folder to publish it` : 'file not found: ' + abs }; } // lane hub-fuse-sync-guard: a refusal by name
     if (!st.isFile()) return { error: 'not a file: ' + abs };
     if (st.size > MAX_BYTES) return { error: `file too large (${Math.round(st.size / 1024 / 1024)}MB > ${MAX_BYTES / 1024 / 1024}MB)` };
     if (!/\.html?$/i.test(abs)) return { error: 'only .html pages can be published' };

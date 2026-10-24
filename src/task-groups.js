@@ -39,6 +39,11 @@
 const fs = require('fs');
 const path = require('path');
 const DOOR = require('./mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
+// lane hub-fuse-sync-guard: a context row on a STORAGE mount (src/storage-path.js) is never read on the main thread — the
+// production hub's 6.5-min hold of 2026-10-23 had this store's _kindOf statSync on a OneDrive row in its window (the
+// journal, 21:44: 1209 ms). Its stat / walk / text come from SafeFs facts (src/storage-facts.js: the last off-thread
+// answer, re-read in the background past 4 s — the same TTL as the caches below); a local row keeps its sync road.
+const SP = require('./storage-path.js');
 const GM = require('./grant-model.js'); // lane grants-unify: the group's outside visibility is a row of the ONE grants store
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const crypto = require('crypto');
@@ -246,6 +251,8 @@ class TaskGroupManager {
     // app.locals.safeFs: a worker with a deadline, a blocked mount refused at its door; fs.promises when none) and BOUNDED
     // by MIRROR_BOUND_MS. A route answers after the store write; mirrorStateOf(id) says when the copy is behind.
     this._mirrorFs = typeof mirrorFs === 'function' ? mirrorFs : (mirrorFs ? () => mirrorFs : () => null);
+    // a landed storage fact that differs from the kept one drops the derived caches (the next ask re-derives)
+    this._facts = require('./storage-facts.js').create({ safeFs: () => this._mirrorFs(), onLanded: () => { for (const c of [this._resCache, this._walkCache, this._sigCache]) if (c) c.clear(); } });
     this._mirror = new Map(); // groupId → { want: {dir, content}|null, inflight, since, startedAt, failedAt, why, retry }
     this._mirrorBoundMs = Number(mirrorBoundMs) > 0 ? Number(mirrorBoundMs) : MIRROR_BOUND_MS;   // (a suite shortens it)
     this._getSetting = getSetting || null; // tasks.autoStyleOrder for the allocator
@@ -548,6 +555,7 @@ class TaskGroupManager {
   }
 
   _listContextFiles(dir, cap = 100) {
+    if (SP.storageRootOf(dir)) { const f = this._facts.get('contextFiles', { path: dir, cap }); return f.ok && Array.isArray(f.result) ? f.result : []; }
     const out = [];
     const walk = (d, rel, depth) => {
       if (out.length >= cap || depth > 4) return;
@@ -603,6 +611,12 @@ class TaskGroupManager {
   _kindOf(abs) {
     if (typeof abs !== 'string' || !path.isAbsolute(abs)) return 'missing';
     if (DOOR.blocked(abs)) return 'blocked';
+    if (SP.storageRootOf(abs)) {
+      const f = this._facts.get('stat', { path: abs });
+      if (f.pending) return 'reading';
+      if (f.ok) return f.result.isDirectory ? 'dir' : f.result.isFile ? 'file' : 'missing';
+      return f.code === 'ENOENT' || f.code === 'ENOTDIR' ? 'missing' : 'blocked';
+    }
     try { const st = fs.statSync(abs); return st.isDirectory() ? 'dir' : st.isFile() ? 'file' : 'missing'; } catch { return 'missing'; }
   }
 
@@ -629,6 +643,7 @@ class TaskGroupManager {
   // a row's stat, behind the mount door (B-afc4: a blocked mount is answered, never read) — null when blocked / gone
   _stat(abs) {
     if (DOOR.blocked(abs)) return null;
+    if (SP.storageRootOf(abs)) { const f = this._facts.get('stat', { path: abs }); return f.ok ? { size: f.result.size, mtimeMs: f.result.mtimeMs, isDirectory: () => !!f.result.isDirectory, isFile: () => !!f.result.isFile } : null; }
     try { return fs.statSync(abs); } catch { return null; }
   }
 
@@ -648,6 +663,11 @@ class TaskGroupManager {
 
   // a told file's text: { text, size, binary, big } — never past READ_CAP (a bigger file is `big`, never read whole)
   _readText(abs) {
+    if (SP.storageRootOf(abs) && !DOOR.blocked(abs)) {
+      const f = this._facts.get('textHead', { path: abs, cap: READ_CAP });
+      if (f.ok) return f.result;
+      return { text: '', size: 0, binary: false, big: false, reading: !!f.pending, missing: f.code === 'ENOENT', blocked: !f.pending && f.code !== 'ENOENT' };
+    }
     const st = this._stat(abs);   // the mount door is asked there, BEFORE any read
     if (!st) return { text: '', size: 0, binary: false, big: false, blocked: DOOR.blocked(abs), missing: !DOOR.blocked(abs) };
     let fd = null;
@@ -712,6 +732,7 @@ class TaskGroupManager {
     if (!x || (!x.abs && x.kind === 'missing')) state = ' — not there now';
     else if (x.kind === 'missing') state = ' — not there now';
     else if (x.kind === 'blocked') state = ' — its storage is not answering, not read';
+    else if (x.kind === 'reading') state = ' — on a storage mount, read off the main loop: its first answer has not landed yet';
     else if (x.kind === 'remote') state = ` — a folder on the machine "${agentLine(x.host)}": told only to conversations opened there`;
     const told = full ? ` [told: ${TELL_WORDS[TC.chosenTell(r, x && x.kind)]}]` : '';
     return `- ${where} — ${r.note ? agentLine(r.note) : '(no note yet)'}${verbs.length ? ` (${verbs.join(' · ')})` : ''}${state}${told}`;
@@ -731,7 +752,7 @@ class TaskGroupManager {
     if (x.kind === 'file') {
       if (level === 'names') { const st = this._stat(x.abs); const l = `${head} — ${kb(st ? st.size : 0)}`; return { lines: [l], bytes: B([l]) }; }
       const f = this._readText(x.abs);
-      if (f.big || f.missing || f.blocked) return { lines: [head], bytes: Infinity };
+      if (f.big || f.missing || f.blocked || f.reading) return { lines: [head], bytes: Infinity };
       if (f.binary) { const l = `${head} — ${kb(f.size)}, binary (not shown)`; return { lines: [l], bytes: B([l]) }; }
       const ls = [`${head} — contents below (${kb(f.size)}):`, ...quote(f.text)];
       return { lines: ls, bytes: B(ls) };
@@ -749,7 +770,7 @@ class TaskGroupManager {
       const body = [];
       for (const [k, f] of hits.entries()) {
         const c = this._readText(path.join(x.abs, f.path));
-        if (c.big || c.missing || c.blocked) return { lines: [head], bytes: Infinity };
+        if (c.big || c.missing || c.blocked || c.reading) return { lines: [head], bytes: Infinity };
         body.push(`  ${agentLine(f.path)} (${kb(c.size)})${c.binary ? ' — binary (not shown)' : ':'}`, ...(c.binary ? [] : quote(c.text)));
         if (B(body) > cap) return { lines: [head], bytes: Infinity, need: B([head, ...names, ...body]) + estimate(hits.slice(k + 1)) };   // past the room: what it WOULD need, read no further
       }
@@ -760,7 +781,7 @@ class TaskGroupManager {
     let total = 0;
     for (const [k, f] of w.files.entries()) {
       const c = this._readText(path.join(x.abs, f.path));
-      if (c.big || c.missing || c.blocked) return { lines: [head], bytes: Infinity };
+      if (c.big || c.missing || c.blocked || c.reading) return { lines: [head], bytes: Infinity };
       total += c.size;
       body.push(`  ${agentLine(f.path)} (${kb(c.size)})${c.binary ? ' — binary (not shown)' : ':'}`, ...(c.binary ? [] : quote(c.text)));
       if (B(body) > cap) return { lines: [head], bytes: Infinity, need: B([head, ...body]) + estimate(w.files.slice(k + 1)) };   // past the room: what it WOULD need, read no further
@@ -1476,6 +1497,7 @@ class TaskGroupManager {
       if (!this._realCache) this._realCache = new Map();
       if (this._realCache.has(cwd)) real = this._realCache.get(cwd);
       else if (DOOR.blocked(cwd)) real = null;   // B-afc4: a sync realpath into a dead FUSE — not cached, resolved once it answers
+      else if (SP.storageRootOf(cwd)) real = null;   // lane hub-fuse-sync-guard: never a sync walk into a storage mount — the cwd itself matches
       else {
         try { real = fs.realpathSync(cwd); } catch { real = null; }
         this._realCache.set(cwd, real);
@@ -2153,7 +2175,7 @@ class TaskGroupManager {
   importFromFile(absPath) {
     if (typeof absPath !== 'string' || !path.isAbsolute(absPath)) throw new Error('an absolute file path is required');
     let text;
-    try { text = fs.readFileSync(absPath, 'utf-8'); } catch { throw new Error('cannot read ' + absPath); }
+    try { text = fs.readFileSync(absPath, 'utf-8'); } catch (e) { if (e && e.code === 'EVSMOUNTSYNC') throw e; throw new Error('cannot read ' + absPath); } // lane hub-fuse-sync-guard: a refusal is said by name, never as a missing file
     text = text.replace(/\r\n/g, '\n'); // tolerate CRLF (Windows / git autocrlf checkouts)
     const m = text.match(/^---\n([\s\S]*?)\n---\n?/);
     if (!m) throw new Error('not a VibeSpace task file (missing frontmatter)');
