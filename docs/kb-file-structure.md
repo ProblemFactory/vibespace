@@ -1213,6 +1213,7 @@ src/agy-backfill.js warmHistory / withHistory (lane agy-harness-fixes) — THE W
 src/agy-store.js conversationRecords / historySplice (lane agy-harness-fixes, PURE) — transcript steps → the LIVE journal's records (`<conv>:<step>` keys, context prefix stripped, no nudge / thought, tool rows at their GENERIC step); the cut = the ring's first step or its lead bubbles' USER_INPUT
 src/agy-store-fs.js linesFrom (lane agy-harness-fixes) — the SAME gate awaited (realpaths + O_NOFOLLOW open), complete lines from an offset in 512 KB awaited chunks, ≤ maxBytes → {lines, next, size, capped}; the hub's read of a conversation's transcript
 src/server/stdout/acp-events.js ring cut (lane agy-harness-fixes) — the live buffer keeps its last 800 000 bytes FROM THE FIRST '\n' after the bound (never a half record first) ⇒ test-agy-store ⑬ + the byte-cut CONTROL
+data/bin/agy-wrapper.js savePicture / normalizeChatInput (lane agy-harness-fixes) — a composer picture → written once under <cwd>/.vibespace-uploads/ (sha256 name, 0700/0600, `*` .gitignore), its path FIRST in the text (the upload's quoting); a notice only for a picture not written; no bytes logged
 
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 

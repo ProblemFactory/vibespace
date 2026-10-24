@@ -381,10 +381,47 @@ console.log('— ⑦ resume, an agent error, text only');
     w.send({ type: 'chat-input', text: 'this will fail', msgId: 'f1' });
     const end = await w.until(() => w.find('prompt_end'), 8000, 'end');
     ok('agy\'s ERROR result ends the turn as an error with its words; the AGY_ERROR line is said', end.stopReason === 'error' && /model unavailable/.test(end.error.message) && w.find('notice', (r) => r.noticeKind === 'agy-error' && /model unavailable/.test(r.text)), end);
-    w.send({ type: 'chat-input', text: JSON.stringify({ type: 'user', message: { content: [{ type: 'image', source: { data: 'AAAA', media_type: 'image/png' } }, { type: 'text', text: 'see this' }] } }), msgId: 'i1' });
+    // lane agy-harness-fixes, bug 3: a PASTED picture reaches agy — written once under <cwd>/.vibespace-uploads/, its path
+    // FIRST in the text (the composer's upload road); agy's stream still gets text only (another block ends it, exit 1)
+    const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const pic = (data = PNG, media_type = 'image/png') => ({ type: 'image', source: { type: 'base64', media_type, data } });
+    const sendBlocks = (content, msgId) => w.send({ type: 'chat-input', text: JSON.stringify({ type: 'user', message: { role: 'user', content } }), msgId });
+    const agyLines = () => w.stub().filter((x) => x.stdin).map((x) => JSON.parse(x.stdin).message.content);
+    const upDir = path.join(w.dir, '.vibespace-uploads');
+    const want = path.join(upDir, 'pasted-' + crypto.createHash('sha256').update(Buffer.from(PNG, 'base64')).digest('hex').slice(0, 16) + '.png');
+    sendBlocks([pic(), { type: 'text', text: 'see this' }], 'i1');
     await w.until(() => w.all('prompt_end').length === 2, 8000, 'image turn');
-    ok('an image is not sent (agy\'s stream takes text only — another block ends it, exit 1); the text is, and it says so', w.find('notice', (r) => r.noticeKind === 'unsupported' && /text only/.test(r.text)) && w.stub().filter((x) => x.stdin).every((x) => typeof JSON.parse(x.stdin).message.content === 'string') && w.exited === null);
+    const l1 = agyLines().pop();
+    ok('a pasted picture + words: the picture is written ONCE under <cwd>/.vibespace-uploads/ (its content hash, .png) and agy reads its absolute path FIRST, then the words — never dropped',
+      l1 === `${want} see this` && fs.readFileSync(want).equals(Buffer.from(PNG, 'base64')) && !w.find('notice', (r) => r.noticeKind === 'unsupported') && w.find('user', (r) => r.msgId === 'i1')?.content[0].text === l1 && w.exited === null, { l1, want });
+    ok('…the folder is the person\'s (0700, the file 0600) and a repo never sees it (a `*` .gitignore)', (fs.statSync(upDir).mode & 0o777) === 0o700 && (fs.statSync(want).mode & 0o777) === 0o600 && fs.readFileSync(path.join(upDir, '.gitignore'), 'utf8') === '*\n');
+    sendBlocks([pic()], 'i2');
+    await w.until(() => w.all('prompt_end').length === 3, 8000, 'picture-only turn');
+    ok('a message that is ONLY a picture is sent (its text is the path) — the same picture again is the same file, not a second one', agyLines().pop() === want && fs.readdirSync(upDir).filter((n) => n.startsWith('pasted-')).length === 1);
+    sendBlocks([pic('JVBERi0xLjQK', 'application/pdf'), pic(), { type: 'text', text: 'and this' }], 'i3');
+    await w.until(() => w.all('prompt_end').length === 4, 8000, 'one bad picture');
+    const bad = w.find('notice', (r) => r.noticeKind === 'unsupported');
+    ok('a picture that cannot be written (not an image type) is the ONLY thing said as not sent — the rest of the message goes', agyLines().pop() === `${want} and this` && bad && /1 attached picture was not sent/.test(bad.text), bad);
+    const readOr = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+    const journal = readOr(path.join(w.dir, 's.buf')) + JSON.stringify(w.records) + w.stderr + readOr(path.join(w.dir, 'agy-wrapper.log'));
+    ok('no picture byte in the journal, the stdout records, stderr or the wrapper log (only its path)', !journal.includes(PNG.slice(0, 40)) && !journal.includes('JVBERi0xLjQK'));
+    ok('agy\'s stream got TEXT only, every line (another block type would end it)', agyLines().every((c) => typeof c === 'string'));
   } finally { await w.stop(); }
+}
+{
+  // RED control (lane agy-harness-fixes): the pre-fix wrapper DROPPED every picture — a picture-only message never reached agy
+  const src = fs.readFileSync(WRAPPER, 'utf8');
+  const keep = "      if (b.type === 'image') { images++; try { const fp = quotePath(savePicture(b)); if (!paths.includes(fp)) paths.push(fp); } catch (e) { failed.push(e && e.message ? e.message : String(e)); } }\n";
+  const mutated = path.join(MUTBIN, 'agy-wrapper-nopicture.js');
+  fs.writeFileSync(mutated, src.replace(keep, "      if (b.type === 'image') { images++; failed.push('text only'); }\n"));
+  const m = startWrapper({ wrapper: mutated });
+  try {
+    await m.until(() => m.find('session'), 8000, 'session');
+    m.send({ type: 'chat-input', text: JSON.stringify({ type: 'user', message: { content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }] } }), msgId: 'r1' });
+    await m.until(() => m.find('notice', (r) => r.noticeKind === 'unsupported'), 8000, 'the dropped picture');
+    await sleep(600);
+    ok('RED control: a wrapper copy that drops pictures (the pre-fix) sends a picture-only message NOWHERE — the ⑦ asserts see it', src.includes(keep) && !m.find('prompt_start') && !m.stub().some((x) => x.stdin));
+  } finally { await m.stop(); }
 }
 
 console.log('— ⑧ THE AUTH GATE: an unauthenticated agy');

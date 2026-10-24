@@ -671,15 +671,47 @@ async function runPrompt(text, opts = {}) {
 
 // ── stdin verbs (the AcpAdapter's frames) ──
 let pendingRestart = null;
+// THE COMPOSER'S PICTURES (lane agy-harness-fixes, bug 3 — the owner could not send a pasted image.png): agy's stream
+// takes text only, but agy reads a picture from disk (read_file — the composer's upload road, test-agy-attach-chrome).
+// Each base64 image block is written ONCE (named by its content hash) under <cwd>/.vibespace-uploads/ (0700, a `*`
+// .gitignore so a repo never sees it) and its absolute path goes FIRST in the text — exactly as the upload puts a file's
+// path — so a picture alone is a message too. Only a picture that could not be written is said as not sent. The
+// picture's bytes never reach the journal, the log or argv.
+const UPLOAD_DIR = '.vibespace-uploads';
+const PICTURE_MAX = 20 * 1024 * 1024;
+const PICTURE_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/bmp': 'bmp', 'image/heic': 'heic', 'image/heif': 'heif', 'image/tiff': 'tiff' };
+const quotePath = (p) => (/[\s'"$`\\()]/.test(p) ? `'${p.replace(/'/g, "'\\''")}'` : p); // the composer's _insertUploadedPaths quoting
+function savePicture(b) {
+  const src = b && b.source;
+  if (!src || (src.type && src.type !== 'base64') || typeof src.data !== 'string') throw new Error('not a base64 picture');
+  const mt = String(src.media_type || '').toLowerCase(), ext = PICTURE_EXT[mt];
+  if (!ext) throw new Error(`a ${mt || 'typeless'} picture`);
+  const bytes = Buffer.from(src.data, 'base64');
+  if (!bytes.length) throw new Error('an empty picture');
+  if (bytes.length > PICTURE_MAX) throw new Error(`a picture over ${PICTURE_MAX / 1048576} MB`);
+  const dir = path.join(baseCwd, UPLOAD_DIR);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try { fs.writeFileSync(path.join(dir, '.gitignore'), '*\n', { flag: 'wx' }); } catch { }
+  const fp = path.join(dir, `pasted-${require('crypto').createHash('sha256').update(bytes).digest('hex').slice(0, 16)}.${ext}`);
+  if (!fs.existsSync(fp)) fs.writeFileSync(fp, bytes, { mode: 0o600 });
+  return fp;
+}
+/** A chat-input → {text, images, failed}: `text` = the pictures' paths first, then the typed text (the last text block,
+ *  as before); `failed` = why each picture that could not be written was not. */
 function normalizeChatInput(raw) {
   let text = typeof raw === 'string' ? raw : '';
   let images = 0;
+  const paths = [], failed = [];
   const parsed = safeJsonParse(text);
   if (parsed?.type === 'user' && parsed.message) {
     text = '';
-    for (const b of asArray(parsed.message.content)) { if (b.type === 'text' && b.text) text = b.text; if (b.type === 'image') images++; }
+    for (const b of asArray(parsed.message.content)) {
+      if (b.type === 'text' && b.text) text = b.text;
+      if (b.type === 'image') { images++; try { const fp = quotePath(savePicture(b)); if (!paths.includes(fp)) paths.push(fp); } catch (e) { failed.push(e && e.message ? e.message : String(e)); } }
+    }
   }
-  return { text, images };
+  if (paths.length) text = paths.join(' ') + (text ? ' ' + text : '');
+  return { text, images, failed };
 }
 function loadFrameFile(msg) {
   const fp = typeof msg.path === 'string' ? msg.path : '';
@@ -719,7 +751,7 @@ async function handleInput(msg) {
   switch (msg.type) {
     case 'chat-input': {
       const n = normalizeChatInput(msg.text || '');
-      if (n.images) notice('error', `Antigravity's stream takes text only — ${n.images} attached image${n.images === 1 ? ' was' : 's were'} not sent (any text in the message was).`, 'unsupported');
+      if (n.failed.length) { notice('error', `${n.failed.length} attached picture${n.failed.length === 1 ? ' was' : 's were'} not sent to Antigravity (${n.failed[0]}); any other part of the message was sent.`, 'unsupported'); log(`pictures not written: ${n.failed.join('; ')}`); }
       if (!n.text) return;
       record('user', { msgId: msg.msgId || '', content: [{ type: 'text', text: n.text }], peer: null });
       if (slashRefused(n.text)) return;
