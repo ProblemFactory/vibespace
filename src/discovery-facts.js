@@ -49,16 +49,32 @@ const NAME_MAX = 80;
 // never inflate a whole archive.
 const ZSTD_SUPPORTED = typeof zlib.zstdDecompressSync === 'function';
 const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+/** The flush mode that reads a CUT zstd stream to the bytes it covers instead of throwing Z_BUF_ERROR (zlib's
+ *  ZSTD_e_continue; the finishFlush of every frame read below — a complete input decodes exactly as under the default). */
+const ZSTD_CUT_OK = (zlib.constants && typeof zlib.constants.ZSTD_e_continue === 'number') ? zlib.constants.ZSTD_e_continue : undefined;
 const isZstPath = (fp) => /\.zst$/i.test(String(fp || ''));
 const isZstBuffer = (buf) => Buffer.isBuffer(buf) && buf.length >= 4 && buf.subarray(0, 4).equals(ZSTD_MAGIC);
 /** Skippable frames (magic 0x184D2A5?) carry no data — step over them. */
 const isSkippableFrame = (buf, at) => buf.length - at >= 8 && (buf[at] & 0xf0) === 0x50 && buf[at + 1] === 0x2a && buf[at + 2] === 0x4d && buf[at + 3] === 0x18;
 
-/** Decompress EVERY frame of a zstd buffer (zlib.zstdDecompressSync stops
- *  after the first — a rollout appended frame-by-frame would silently lose
- *  its tail). Output capped at maxOutputLength: exceeding it throws a coded
- *  error (EZSTBIG) instead of a >512MB string. A truncated final frame (a
- *  bounded prefix read, or a file mid-write) yields its partial text. */
+/** Decompress EVERY frame of a zstd buffer. Output capped at maxOutputLength:
+ *  exceeding it throws a coded error (EZSTBIG) instead of a >512MB string. A
+ *  truncated final frame (a bounded prefix read, or a file mid-write) yields
+ *  its partial text.
+ *  THE RUNTIME FACT (ci-352-red, measured): how many frames ONE
+ *  zlib.zstdDecompressSync call decodes is the node's, not ours — node 24.12
+ *  stops after the first frame (the loop below walks the rest), node 24.22
+ *  decodes every frame in that one call and, under its default finishFlush
+ *  (ZSTD_e_end), THROWS Z_BUF_ERROR for the whole input when the last frame is
+ *  cut — so the old catch-and-break returned '' for every bounded prefix read
+ *  and readHeadText raised EZSTHEAD (a codex .zst thread "failed to extract"
+ *  on that node; the fast gate's test-codex-zst was red on this box since the
+ *  node update). `finishFlush: ZSTD_e_continue` is zlib's documented way to
+ *  read a cut stream: a truncated frame answers the text it covers (0 bytes
+ *  when the cut lands inside a compressed block, the covered bytes of a raw
+ *  block) and `bytesWritten` says how much input was consumed; a complete
+ *  input decodes exactly as before on both nodes. A frame that is CORRUPT
+ *  (not cut) still throws on both; the loop keeps what earlier calls gave. */
 function zstdDecompressFrames(buf, { maxOutputLength = 256 * 1024 * 1024 } = {}) {
   if (!ZSTD_SUPPORTED) throw Object.assign(new Error('zstd unsupported on this node (need ≥22.15)'), { code: 'EZSTUNSUPPORTED' });
   const parts = [];
@@ -67,10 +83,10 @@ function zstdDecompressFrames(buf, { maxOutputLength = 256 * 1024 * 1024 } = {})
     if (isSkippableFrame(buf, at)) { at += 8 + buf.readUInt32LE(at + 4); continue; }
     if (!isZstBuffer(buf.subarray(at))) break; // trailing garbage / cut mid-header
     let r;
-    try { r = zlib.zstdDecompressSync(buf.subarray(at), { info: true, maxOutputLength: maxOutputLength - total }); }
+    try { r = zlib.zstdDecompressSync(buf.subarray(at), { info: true, maxOutputLength: maxOutputLength - total, finishFlush: ZSTD_CUT_OK }); }
     catch (e) {
       if (e && e.code === 'ERR_BUFFER_TOO_LARGE') throw Object.assign(new Error(`zstd output exceeds ${maxOutputLength} bytes`), { code: 'EZSTBIG' });
-      break; // truncated frame: keep what earlier frames gave us
+      break; // a corrupt frame: keep what earlier calls gave us (a CUT frame no longer throws — see the runtime fact above)
     }
     parts.push(r.buffer);
     total += r.buffer.length;

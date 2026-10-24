@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - Files and pictures an Antigravity assistant made earlier sit where they were made in the conversation, not all piled up at the bottom when you reopen it.
+- A Codex conversation with a long compressed transcript no longer vanishes from the list on a newer Node.js: its head is read as far as it goes.
 - A long Antigravity conversation's history no longer stops a few hundred messages back: you can scroll up to its very first message.
 - You can paste or attach a picture in an Antigravity chat and Antigravity reads it; a message that is only a picture is sent too.
 - In an Antigravity chat, ⚡ on a queued message runs it next: the running turn stops (what it did stays) and your message goes first.

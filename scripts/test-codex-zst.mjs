@@ -25,6 +25,7 @@
 //      (typed verdict + the movement outliving its rung + "grow only what we
 //      stamped"), the fallback logs whatever it does swallow VERBATIM, and the
 //      whole `cat` stamps the bytes it fetched — pre-fix repro + leg isolation
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -70,6 +71,20 @@ ok(DF.ZSTD_SUPPORTED === true, `this node (${process.versions.node}) has zlib zs
 ok(DF.isZstBuffer(zstBuf) && !DF.isZstBuffer(Buffer.from(plainText)) && DF.isZstPath(zstPath) && !DF.isZstPath(plainPath), 'zstd detection by magic bytes and by extension');
 ok(DF.zstdDecompressFrames(zstBuf).toString() === zstText, 'zstdDecompressFrames concatenates EVERY frame and steps over skippable frames (zstdDecompressSync alone stops after the first)');
 ok(DF.zstdDecompressFrames(zstBuf.subarray(0, frame1.length + 20)).toString() === zstText.slice(0, 300), 'a truncated trailing frame yields the earlier frames\' text (bounded prefix reads work)');
+// ci-352-red — THE RUNTIME FACT: how many frames ONE zlib.zstdDecompressSync call decodes is the node's (24.12: the first
+// only; 24.22: every frame, and a cut last frame threw Z_BUF_ERROR for the whole input under the default finishFlush —
+// the loop broke out EMPTY and readHeadText raised EZSTHEAD on every bounded prefix read). The readers pass
+// ZSTD_e_continue: a cut frame answers the bytes it covers on either node. Printed, never asserted: a suite may not pin the runtime.
+{ const one = zlib.zstdDecompressSync(zstBuf, { info: true });
+  console.log(`  · this node's zstdDecompressSync decodes ${one.buffer.length === Buffer.byteLength(zstText) ? 'EVERY frame' : 'ONE frame'} per call (${one.engine.bytesWritten} of ${zstBuf.length} B consumed)`);
+  const rawTail = crypto.randomBytes(4000), rawFrame = zlib.zstdCompressSync(rawTail);     // incompressible ⇒ raw blocks: a cut answers covered bytes
+  const cut = Buffer.concat([frame1, skippable, rawFrame]).subarray(0, frame1.length + skippable.length + 2000);
+  const got = DF.zstdDecompressFrames(cut);
+  ok(got.subarray(0, 300).toString() === zstText.slice(0, 300) && got.length >= 300 && got.length <= 4300 && got.subarray(300).equals(rawTail.subarray(0, got.length - 300)),
+    `a last frame cut mid-way (raw blocks) answers the earlier frames' text plus the bytes it covers, never '' (${got.length - 300} B of the cut frame)`);
+  ok(DF.zstdDecompressFrames(frame2.subarray(0, 20)).length === 0 && DF.readHeadText(zstPath, 100000) === zstText,
+    'a lone cut frame answers 0 bytes without throwing; the whole-file head read is unchanged by the flush mode');
+}
 let big = null; try { DF.zstdDecompressFrames(zstBuf, { maxOutputLength: 100 }); } catch (e) { big = e.code; }
 ok(big === 'EZSTBIG', 'exceeding maxOutputLength throws the coded EZSTBIG error (never a giant string)');
 const headZ = DF.readHeadText(zstPath, 100000), headP = DF.readHeadText(plainPath, 100000);
