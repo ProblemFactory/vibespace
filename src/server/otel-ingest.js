@@ -64,7 +64,12 @@ const { spawnOf } = require('../harnesses'); // the spawn.otelExport row: whose 
 const MAX_TRUTH = 60000;      // in-memory rid map cap (~a week of heavy storms)
 const FILE_MAX = 12 * 1024 * 1024; // boot-time trim threshold for the stash
 const KEEP_MS = 30 * 86400e3; // trim horizon
-const REPLAY_SLICE = 20000; // boot-replay lines per tick (B-1319: ~20 ms here)
+// boot-replay slice (lane ci-351-reds, 2026-10-24): a TIME bound — the 20 000-line count (B-1319: ~20 ms here) took 31 ms
+// on the measured boot and its first slice rode the listen tick (the read resolves in a poll-phase callback; ONE
+// setImmediate from there runs in that same loop iteration). Lines are taken until REPLAY_SLICE_MS of the real clock;
+// the next slice is TWO immediates away (past the next timers phase).
+const REPLAY_SLICE_MS = 20;
+const nextTurn = () => new Promise((r) => setImmediate(() => setImmediate(r)));
 const NL = Buffer.from('\n');
 
 function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, serverSetting }) {
@@ -110,13 +115,14 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   // survive restarts or a reboot mid-race re-bakes with link-intent again.
   // OFF THE LOOP SINCE B-1319 (measured 2026-10-13: production's stash is 163 MB — every boot read it, parsed 353 k
   // lines and REWROTE it whole in main-module evaluation, the rewrite firing on size alone with nothing to trim; 0.5 s
-  // in a lane on local disk): the bytes come through fs.promises, REPLAY_SLICE lines are taken per tick, the trim rewrite
+  // in a lane on local disk): the bytes come through fs.promises, REPLAY_SLICE_MS slices of lines are taken, the trim rewrite
   // is written off the loop and only when it changes the file. A reader before the replay is done (ingest's dedupe,
   // observedOrgForRid) finishes it in its own tick — the map is never answered half-replayed.
   const replay = { buf: null, at: 0, cutoff: Date.now() - KEEP_MS, kept: [], keptBytes: 0, done: false };
-  const replayTake = (lines) => { // the next `lines` lines; true when the stash is read to its end
+  const replayTake = (untilMs = Infinity) => { // the next lines until the real clock passes `untilMs` (checked every 256); true when the stash is read to its end
     const b = replay.buf;
-    for (let n = 0; n < lines && replay.at < b.length; n++) {
+    for (let n = 0; replay.at < b.length; n++) {
+      if ((n & 255) === 255 && performance.now() >= untilMs) break;
       let nl = b.indexOf(10, replay.at); if (nl < 0) nl = b.length;
       const a = replay.at; replay.at = nl + 1;
       if (nl === a) continue;
@@ -144,14 +150,15 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   const finishReplay = () => {
     if (replay.done) return;
     if (!replay.buf) { try { replay.buf = fs.existsSync(file) ? timedSync('otel-truth.read', () => fs.readFileSync(file)) : Buffer.alloc(0); } catch (e) { replay.buf = Buffer.alloc(0); console.warn('[otel] truth stash load failed:', e.message); } }
-    replayTake(Infinity); replayEnd();
+    replayTake(); replayEnd();
   };
   const replayed = (async () => {
     let b = Buffer.alloc(0);
     try { b = await fs.promises.readFile(file); } catch (e) { if (e.code !== 'ENOENT') console.warn('[otel] truth stash load failed:', e.message); }
     if (replay.done) return;
     if (!replay.buf) replay.buf = b;
-    while (!replay.done && !replayTake(REPLAY_SLICE)) await new Promise((r) => setImmediate(r));
+    await nextTurn();   // never on the tick the read resolved on
+    while (!replay.done && !replayTake(performance.now() + REPLAY_SLICE_MS)) await nextTurn();
     if (!replay.done) replayEnd();
   })();
 

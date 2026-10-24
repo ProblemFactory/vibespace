@@ -4430,6 +4430,7 @@ class ChatView {
     const textDiv = oldEl.querySelector('.chat-text');
     if (textDiv && msg.content[0]?.type === 'text') {
       textDiv.innerHTML = this._renderers.renderMarkdown(stripAnsi(msg.content[0].text));
+      this._renderers.addDiagrams(textDiv); // lane chat-mermaid: a fence closed mid-stream draws (from the cache on every later frame)
     } else if (msg.content[0]?.type === 'thinking') {
       const summaryEl = oldEl.querySelector('.chat-thinking summary');
       const preEl = oldEl.querySelector('.chat-thinking pre');

@@ -327,6 +327,47 @@ const mutant = (rel, from, to) => {
   ok(n === 1 && uh._cursors[LIVE] && !uh._cursors[DEAD], 'mounted again: the key whose file left its directory is dropped, the live one kept');
 }
 {
+  // lane ci-351-reds — THE PRUNE IN SLICES IS THE SAME PRUNE. The walk's hourly prune stats every cursor key: 8 587 on the
+  // measured boot = one 105 ms tick (243–268 ms on the hosted runners — the boot's second red). The walk now runs the
+  // prune's steps in CURSOR_SLICE_MS slices through its own yield, BEFORE its commit point, and drops at the commit as
+  // before. CONTROLS: the sync prune (the same steps straight through) and a copy whose walk never runs the sliced pass
+  // (= the .350 walk: the sync prune inside the commit).
+  const H = path.join(root, 'sl', 'home'), proj = path.join(H, '.claude', 'projects');
+  const slugs = [0, 1, 2, 3].map((k) => path.join(proj, '-w-s' + k)); for (const d of slugs) fs.mkdirSync(d, { recursive: true });
+  const keys = [];
+  slugs.forEach((d, j) => { for (let k = 0; k < 40; k++) { const f = path.join(d, `live-${k}.jsonl`); fs.writeFileSync(f, '{}\n'); keys.push(f); } for (let k = 0; k < 5000; k++) keys.push(path.join(d, `gone-${j}-${k}.jsonl`)); });
+  for (let k = 0; k < 30; k++) keys.push(path.join(proj, '-w-unmounted', `x-${k}.jsonl`), path.join(root, 'elsewhere', `y-${k}.jsonl`));
+  const seedAll = (uh) => { uh._cursors = {}; for (const k of keys) uh._cursors[k] = { offset: 2, lastRid: null }; return uh; };
+  const gapOf = async (fn) => { let last = performance.now(), max = 0; const iv = setInterval(() => { const t = performance.now(); max = Math.max(max, t - last); last = t; }, 1); last = performance.now(); const r = await fn(); await new Promise((q) => setTimeout(q, 5)); clearInterval(iv); return { r, gap: Math.round(max) }; };
+  const uS = seedAll(new UsageHistory({ dataDir: path.join(root, 'sl', 'data-s'), homeDir: H }));
+  const S = await gapOf(() => uS._pruneDeadCursors());
+  const uL = seedAll(new UsageHistory({ dataDir: path.join(root, 'sl', 'data-l'), homeDir: H }));
+  const L = await gapOf(async () => uL._dropDeadCursors(await uL._deadCursorsSliced(uL._cursors)));
+  ok(S.r === 20000 && L.r === S.r && JSON.stringify(uL._cursors) === JSON.stringify(uS._cursors) && Object.keys(uS._cursors).length === keys.length - 20000,
+    `SLICED PRUNE: the same ${S.r} dead keys dropped and the same cursors kept (the live, the unmounted root's, the foreign) as the prune in one go`);
+  ok(L.gap * 2 < S.gap, `SLICED PRUNE: it hands the loop back — its longest loop gap ${L.gap} ms vs ${S.gap} ms for the prune in one go over the same ${keys.length} keys`);
+  // through the REAL walk: a scan whose prune is due, vs the copy whose walk prunes inside the commit (the .350 walk)
+  const tline = (k) => JSON.stringify({ type: 'assistant', uuid: 'u' + k, parentUuid: null, sessionId: '33333333-4444-4555-8666-77777777777' + k, timestamp: new Date(Date.UTC(2026, 9, 1, 10, k)).toISOString(), requestId: 'req_sl' + k, cwd: '/w/s', message: { id: 'msg_sl' + k, model: 'claude-opus-5-5', role: 'assistant', type: 'message', content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 5 + k, output_tokens: 7, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } } });
+  const usrc = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8');
+  const SLICED = 'const deadFacts = Date.now() - (this._cursorsPrunedAt || 0) >= CURSOR_PRUNE_MS ? await this._deadCursorsSliced(walk.cursors) : undefined;';
+  ok(usrc.split(SLICED).length === 2, 'SLICED PRUNE premise: the walk\'s sliced pass is one line of the module');
+  const { UsageHistory: UHcommit } = require(mutant('src/usage-history.js', SLICED, 'const deadFacts = undefined;'));
+  const walkOn = async (UH, tag) => {
+    const w = path.join(root, 'slw-' + tag), home = path.join(w, 'home'), slug = path.join(home, '.claude', 'projects', '-w-s'), data = path.join(w, 'data');
+    fs.mkdirSync(slug, { recursive: true }); fs.mkdirSync(path.join(data, 'usage-history'), { recursive: true });
+    for (let k = 0; k < 3; k++) fs.writeFileSync(path.join(slug, `t${k}.jsonl`), tline(k) + '\n');
+    const cur = {}; for (let k = 0; k < 3000; k++) cur[path.join(slug, `gone-${k}.jsonl`)] = { offset: 5, lastRid: null };
+    fs.writeFileSync(path.join(data, 'usage-history', '_cursors.json'), JSON.stringify(cur));
+    const r = await new UH({ dataDir: data, homeDir: home }).scan(true);
+    const hist = path.join(data, 'usage-history');
+    return { r, files: fs.readdirSync(hist).filter((f) => f === '_cursors.json' || /^events-/.test(f)).sort().map((f) => [f, fs.readFileSync(path.join(hist, f), 'utf8').split(w).join('<W>')]) };
+  };
+  const WS = await walkOn(UsageHistory, 's'), WC = await walkOn(UHcommit, 'c');
+  const curOf = (x) => JSON.parse((x.files.find(([f]) => f === '_cursors.json') || [])[1] || '{}');
+  ok(JSON.stringify(WS.files) === JSON.stringify(WC.files) && WS.r.added === 3 && Object.keys(curOf(WS)).length === 3,
+    `SLICED PRUNE through the real walk: the same ledger shards and the same cursor file, byte for byte, as the walk that prunes inside its commit (${WS.r.added} events added, 3000 dead cursors dropped: ${WS.files.map(([f]) => f).join(', ')})`, JSON.stringify(WS.files.map(([f, x]) => [f, x.length])) + ' vs ' + JSON.stringify(WC.files.map(([f, x]) => [f, x.length])));
+}
+{
   // a full disk: the disabled index gives the room back
   const files = (d) => fs.readdirSync(d).filter((f) => f.startsWith('usage.db'));
   const L = ledger('full2', 3000);

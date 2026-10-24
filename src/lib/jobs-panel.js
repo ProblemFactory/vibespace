@@ -8,6 +8,7 @@ import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a family of cleared 
 import { t } from './i18n.js';
 import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js';
+import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: a panel's ```mermaid fence draws
 import { registerWindowType } from './window-types.js';
 import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey } from './jobs-layout.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
@@ -520,7 +521,7 @@ function renderPanelBlocks(app, root, jobId, pending, { onAnswered } = {}) {
   const title = document.createElement('div'); title.style.cssText = 'font-weight:600;font-size:13px'; title.textContent = p.title || ''; if (title.textContent) root.appendChild(title);
   const values = {};
   for (const b of p.blocks || []) {
-      if (b.type === 'md') { const el = document.createElement('div'); el.className = 'markdown-preview'; el.innerHTML = sanitizeHtml(marked.parse(String(b.text || ''))); root.appendChild(el); }
+      if (b.type === 'md') { const el = document.createElement('div'); el.className = 'markdown-preview'; el.innerHTML = sanitizeHtml(marked.parse(String(b.text || ''))); mountDiagrams(el); root.appendChild(el); }
       else if (b.type === 'image') { const img = document.createElement('img'); img.style.cssText = 'max-width:100%;border-radius:var(--radius-sm)'; img.src = '/api/file/raw?path=' + encodeURIComponent(b.path); root.appendChild(img); }
       else if (b.type === 'progress') { const pr = document.createElement('progress'); pr.max = 100; pr.value = Number(b.value) || 0; pr.style.width = '100%'; root.appendChild(pr); }
       else if (b.type === 'input' || b.type === 'textarea') {

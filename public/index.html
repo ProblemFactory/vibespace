@@ -17,6 +17,8 @@
        for users behind national firewalls — the hosted CSS never arrived and the first
        terminal stayed on the canvas fallback forever (real onboarding reports). -->
   <link rel="stylesheet" href="/fonts.css">
+  <!-- the LAZY diagram library (src/lib/mermaid-render.js imports it on the first diagram): an unknown rel fetches nothing; the index route stamps its ?v= like every asset here -->
+  <link rel="vs-lazy-bundle" href="/mermaid.js">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%235eead4'/><stop offset='1' stop-color='%232dd4bf'/></linearGradient></defs><rect x='6' y='2' width='16' height='12' rx='1.5' fill='%230f766e' opacity='0.35'/><rect x='4' y='5' width='16' height='12' rx='1.5' fill='%232dd4bf' opacity='0.7'/><rect x='2' y='8' width='16' height='12' rx='1.5' fill='url(%23g)'/><rect x='4' y='10' width='5' height='3' rx='0.5' fill='%23fff' opacity='0.9'/><rect x='10' y='10' width='6' height='8' rx='0.5' fill='%23fff' opacity='0.6'/><rect x='4' y='14.5' width='5' height='3.5' rx='0.5' fill='%23fff' opacity='0.6'/></svg>">
 </head>
 <body>
@@ -119,6 +121,7 @@
     <!-- Mobile nav bar (hidden on desktop) -->
     <div id="mobile-nav">
       <button id="mobile-nav-menu" title="Sessions" data-i18n-attr="title">&#9776;</button>
+      <button id="mobile-nav-files" title="Files" aria-label="Files" data-i18n-attr="title,aria-label"><svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h4l2 2h6v8H2V3z"/></svg><span class="mnav-word" aria-hidden="true" data-i18n>Files</span></button>
       <span id="mobile-nav-title" title="Switch window" data-i18n-attr="title">VibeSpace</span>
       <button id="mobile-nav-usage" class="hidden" title="Usage &amp; quota" data-i18n-attr="title"></button>
       <button id="mobile-nav-todos" title="Items waiting on you" data-i18n-attr="title"></button>
@@ -172,34 +175,40 @@
     <!-- New Session Dialog — lane new-session-form: TWO COLUMNS (≥ 1100 px; the phone stacks left then right). LEFT = where
          and how it runs (the harness's own flags; the rare rows fold under «More options», their values on the footer
          chips); RIGHT = what it may use (#ns-right, drawn by src/lib/new-session-form.js from VibeSpace's own stores).
-         Every control keeps its id; #input-backend / #input-mode stay the values the segmented switches set. -->
+         Every control keeps its id; #input-backend / #input-mode stay the values the segmented switches set.
+         lane new-session-layout-v3-build (the owner nodded the v3 POC, 2026-10-23): the LEFT column reads name → 任务组 →
+         工作目录 → 后端 → 模型·强度 → 权限模式 → 可用工具 → 更多选项 (#row-task-groups is drawn by the form); the header's
+         Agent | Terminal is the ONE mode door (Terminal = a login shell, no harness: #input-backend = shell, the backend card
+         is not drawn); the harness's own terminal UI is the fold's tick #input-tui (→ #input-mode terminal); the phone
+         (≤ 768 px) is a full-screen sheet with the header and the footer fixed, the backend a native select. -->
     <div id="dialog-new-session" class="dialog ns-dialog hidden">
       <div class="dialog-header ns-head">
-        <h3 data-i18n>New Agent Session</h3>
+        <h3 data-i18n>New Session</h3>
         <span class="ns-be-chip" id="ns-be-chip" title="Backend" data-i18n-attr="title"></span>
         <span class="ns-host-dot" id="ns-host-dot" title="Machine" data-i18n-attr="title"><i></i><span class="ns-host-name"></span></span>
         <span class="ns-head-sp"></span>
-        <span class="ns-seg ns-kind-seg" id="ns-kind-seg" role="group" aria-label="Session kind" data-i18n-attr="aria-label"><button type="button" data-kind="chat" data-i18n>Agent</button><button type="button" data-kind="terminal" data-i18n>Terminal</button></span>
+        <span class="ns-seg ns-kind-seg" id="ns-kind-seg" role="group" aria-label="Session kind" data-i18n-attr="aria-label"><button type="button" data-kind="chat"><span class="ns-kind-ic" aria-hidden="true"></span><span data-i18n>Agent</span></button><button type="button" data-kind="terminal"><span class="ns-kind-ic" aria-hidden="true"></span><span data-i18n>Terminal</span></button></span>
         <button class="dialog-close">✕</button>
       </div>
       <div class="dialog-body ns-body">
         <div class="ns-cols">
           <section class="ns-col ns-left" aria-label="Where and how it runs" data-i18n-attr="aria-label">
-            <div class="ns-col-h"><b data-i18n>Where and how it runs</b><span data-i18n>Prefilled from last time · the harness’s own flags go on its command line</span></div>
-            <div class="ns-card-h" data-i18n>Machine and folder</div>
+            <div class="ns-col-h"><b data-i18n>Where and how it runs</b><span id="ns-left-sub"></span></div>
+            <div class="ns-card-h" data-i18n>Name, Task Groups, folder</div>
             <div class="ns-card" id="ns-card-where">
               <label id="row-host" data-fold="host"><span data-i18n>Host</span><select id="input-host"><option value="">Local</option></select></label>
-              <label id="row-session-name"><span data-i18n>Session Name</span><input type="text" id="input-session-name" placeholder="My Project" data-i18n-attr="placeholder" autocomplete="off"></label>
-              <label id="row-cwd"><span data-i18n>Working Directory</span>
+              <label id="row-session-name"><span class="ns-lab"><span data-i18n>Session Name</span><span class="ns-lab-hint" data-i18n>also the name the folder suggestions are built from</span></span><input type="text" id="input-session-name" placeholder="My Project" data-i18n-attr="placeholder" autocomplete="off"></label>
+              <div class="ns-row ns-tg-row hidden" id="row-task-groups"></div>
+              <label id="row-cwd"><span class="ns-lab"><span data-i18n>Working Directory</span><span class="ns-lab-hint" data-i18n>an absolute path, ~/…, a relative path or a few letters</span></span>
                 <div class="autocomplete-wrapper">
                   <input type="text" id="input-cwd" placeholder="/home/user/project" autocomplete="off">
                 </div>
                 <div id="cwd-recent" class="cwd-recent"></div>
               </label>
             </div>
-            <div class="ns-card-h" data-i18n>Backend and model</div>
+            <div class="ns-card-h" id="ns-card-backend-h" data-i18n>Backend and model</div>
             <div class="ns-card" id="ns-card-backend">
-              <div class="ns-row" id="row-backend"><span class="ns-lab" data-i18n>Backend</span><span class="ns-seg ns-be-seg" id="ns-be-seg" role="group" aria-label="Backend" data-i18n-attr="aria-label"></span>
+              <div class="ns-row" id="row-backend"><span class="ns-lab"><span data-i18n>Backend</span><span class="ns-lab-hint" data-i18n>the harness the agent runs in — the Terminal mode has no such row</span></span><span class="ns-seg ns-be-seg" id="ns-be-seg" role="group" aria-label="Backend" data-i18n-attr="aria-label"></span><select id="ns-be-phone" class="ns-be-phone" aria-label="Backend" data-i18n-attr="aria-label"></select>
                 <select id="input-backend" class="ns-backing"><option value="claude">Claude</option><option value="codex">Codex</option><option value="opencode" hidden>OpenCode</option><option value="antigravity" hidden>Antigravity CLI</option><option value="shell" data-i18n>Terminal (plain shell)</option></select></div>
               <div class="ns-pair" id="ns-model-pair">
                 <label id="row-model"><span data-i18n>Model</span><select id="input-model"></select></label>
@@ -211,6 +220,7 @@
               <label id="row-account" data-fold="account"><span data-i18n>Account</span><select id="input-account"><option value="">Default (Subscription)</option></select></label>
               <label id="row-worktree" class="dialog-check-row hidden" data-fold="worktree"><input type="checkbox" id="input-worktree"><span data-i18n>Run in a git worktree</span><span class="dialog-check-hint" id="worktree-hint" data-i18n>The agent gets its own checkout under .claude/worktrees/ on a new branch, so it never touches your working tree. Needs a git repository.</span></label>
               <label id="row-extra-args" data-fold="args"><span data-i18n>Additional Arguments</span><input type="text" id="input-extra-args" placeholder="--verbose"></label>
+              <label id="row-tui" class="dialog-check-row" data-fold="tui"><input type="checkbox" id="input-tui"><span data-i18n>Run in the harness’s own terminal UI</span><span class="dialog-check-hint" data-i18n>The harness’s own screen in a terminal window, instead of VibeSpace’s chat view.</span></label>
             </div>
             <div class="ns-more hidden" id="ns-more">
               <button type="button" class="ns-more-toggle" id="ns-more-toggle" aria-expanded="false"><span class="ns-chev" aria-hidden="true">›</span><b data-i18n>More options</b><span class="ns-more-names" id="ns-more-names"></span></button>

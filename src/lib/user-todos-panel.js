@@ -34,6 +34,7 @@ import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toa
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
 import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文件 card under the phone page's bands
 import { BACK_DISMISS_EVENT } from './back-guard.js'; // lane mobile-back-guard: the phone's back closes this sheet through hidePopup
 import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: an Allow counts only once it sat still where it was read
 import { applySecretBox, submitSecretBox } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its paste box's presses + state
@@ -979,6 +980,9 @@ export function installUserTodos(app) {
     if (!homeShown()) return;
     let root = home.querySelector(':scope > .ut-inbox');
     if (!root) { root = mk('div', 'ut-inbox ut-home'); root.append(mk('div', 'ut-groups ut-bands'), noticesEl()); home.append(root); }
+    // THE 文件 CARD (lane phone-files-door): home, the last folder, the folders with files, the mounts — one tap opens the
+    // explorer there. AFTER the bands: the first screen is the attention list's (test-mobile-gaps measures it to the pixel)
+    if (!home.querySelector(':scope > .ph-files')) home.append(filesCard(app));
     const now = Date.now();
     H.layout = H.layout ? nextLayout(H.layout, todos) : openLayout(sortGroups(todos.open)); // the notices' slots (the popup's rule)
     H.bands = bandLayout(todos, { now, prev: H.bands, policy: attnPolicy() });

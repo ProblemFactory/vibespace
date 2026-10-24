@@ -728,6 +728,70 @@ try {
     await ev(`HTMLAnchorElement.prototype.click = HTMLAnchorElement.prototype.__vsClick0; return true;`);
   }
 
+  // ── A⑪ the focused view shows a screen WHOLE (lane design-focus-whole) ──
+  section('A⑪ the focused view shows a fixed-size screen WHOLE (lane design-focus-whole; owner 2026-10-23 「预览和演示（放大）图周边差了一圈」): a 951×585 board that cannot scroll keeps its 44 px bottom row in the pane');
+  {
+    const { pathToFileURL } = await import('node:url');
+    const CM = await import(pathToFileURL(path.join(REPO, 'src/lib/design-canvas-model.js')).href);
+    const P = CM.FOCUS_PAD;
+    const DUO = path.join(fs.realpathSync(PROJ), 'designs', 'duo');
+    const W2 = `[...app.wm.windows.values()].find((x) => x._design && x._design.dir === ${S(DUO)})`;
+    // the owner's board in miniature: html/body overflow hidden, a fixed box, a 44 px row at the very bottom (rgb 255 0 170)
+    const BOARD = '<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;overflow:hidden;background:#fff}.vp{height:100%;display:flex;flex-direction:column}.grow{flex:1;padding:12px;font:16px sans-serif}#row{flex:none;height:44px;background:rgb(255,0,170)}</style></head><body><div class="vp"><div class="grow">DUO-MARK a screen that cannot scroll</div><div id="row"></div></div></body></html>';
+    ok(await ev(focusComposer), 'the person is in the conversation (an agent\'s Design opens beside a chat only there)');
+    const rDuo = await stub({ kind: 'sh', cmd: 'vibespace-design', args: ['new', 'duo', '--title', 'Duo'], cwd: PROJ });
+    ok(rDuo.status === 0, 'vibespace-design new duo — exit 0', rDuo);
+    await stub({ kind: 'write', files: [[path.join(DUO, 'Duo.html'), BOARD], [path.join(DUO, 'design.json'), S({ title: 'Duo', artboards: [{ file: 'Duo.html', x: 0, y: 0, w: 951, h: 585, title: 'Duo', print: 'fixed' }] })]] });
+    const got = await until(() => ev(`const w = ${W2}; const f = w && w._designCanvas.frames().find((x) => x.file === 'Duo.html'); return f && f.w === 951 && f.h === 585 && typeof f.html === 'string' ? true : null;`), 20000, 200);
+    ok(!!got, 'the duo Design window opened and draws Duo.html at 951×585 (print fixed)');
+    // a window wider than tall, like the owner's: at fit-width this board would overflow the pane's height
+    await ev(`const w = ${W2}; Object.assign(w.element.style, { left: '20px', top: '40px', width: '1240px', height: '640px' }); app.wm.focusWindow(w.id); return true;`);
+    await sleep(500);
+    const pane = await ev(`const r = ${W2}.element.querySelector('.dc-viewport').getBoundingClientRect(); return { w: r.width, h: r.height };`);
+    const z348 = Math.min((pane.w - 2 * P) / 951, 2);
+    ok(585 * z348 > pane.h - 2 * P, `PRECONDITION: in this ${Math.round(pane.w)}×${Math.round(pane.h)} pane the .348 rule (fit-width) cuts the board — its frame would be ${Math.floor((pane.h - 2 * P) / z348)} of 585 px`, pane);
+    const fr0 = await ev(`const w = ${W2}; const r = w.element.querySelector('.dc-frame[data-file="Duo.html"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 };`);
+    for (const c of [1, 2]) { await mouse('mousePressed', fr0.x, fr0.y, { clickCount: c }); await mouse('mouseReleased', fr0.x, fr0.y, { clickCount: c }); }
+    ok(!!(await until(() => ev(`return ${W2}._designCanvas.focused() === 'Duo.html';`), 4000)), 'a real double-click on the board opens it ENLARGED (the focused view)');
+    await sleep(400);
+    const look = () => ev(`const w = ${W2}; const vp = w.element.querySelector('.dc-viewport').getBoundingClientRect(); const wrap = w.element.querySelector('.dc-frame[data-file="Duo.html"]'); const r = wrap.querySelector('iframe').getBoundingClientRect(); return { vp: { l: vp.left, t: vp.top, w: vp.width, h: vp.height }, f: { l: r.left, t: r.top, w: r.width, h: r.height }, cssH: wrap.style.height, z: w._designCanvas.view().z };`);
+    const a = await look();
+    const zWant = Math.min((a.vp.w - 2 * P) / 951, (a.vp.h - 2 * P) / 585, 2);
+    const top = a.f.t - a.vp.t, bottom = a.vp.t + a.vp.h - (a.f.t + a.f.h), left = a.f.l - a.vp.l, right = a.vp.l + a.vp.w - (a.f.l + a.f.w);
+    evidence.focusWhole = { pane, a, zWant, ring: { top, bottom, left, right } };
+    ok(Math.abs(a.z - zWant) < 1e-6 && a.cssH === '585px' && Math.abs(a.f.w - 951 * a.z) < 1 && Math.abs(a.f.h - 585 * a.z) < 1, `the board is CONTAINED: z ${a.z.toFixed(3)} = min of both ratios at FOCUS_PAD ${P}, its frame the artboard's own 585 px (${Math.round(a.f.w)}×${Math.round(a.f.h)} on screen)`, evidence.focusWhole);
+    ok(top >= P - 0.5 && bottom >= P - 0.5 && Math.abs(top - bottom) < 1 && Math.abs(left - right) < 1, `…whole inside the pane with a ring all round (top ${top.toFixed(1)}, bottom ${bottom.toFixed(1)}, left ${left.toFixed(1)}, right ${right.toFixed(1)} px)`, evidence.focusWhole);
+    const dctx = await until(() => frameCtxByText('DUO-MARK'), 10000, 300);
+    const inner = dctx ? await evalInCtx(dctx, 'JSON.stringify({ ih: innerHeight, rowBottom: document.getElementById("row").getBoundingClientRect().bottom, scroll: document.scrollingElement.scrollHeight })').then(JSON.parse).catch(() => null) : null;
+    ok(!!inner && inner.ih === 585 && inner.rowBottom === 585 && inner.scroll === 585, 'inside the frame: its viewport is the artboard\'s 585 px and the bottom row ends there — nothing to scroll, nothing cut', inner);
+    // the bottom row SEEN: a screenshot pixel 22 px (artboard) above the frame's bottom edge is the row's colour
+    const px = async (x, y) => {
+      const shot = await call('Page.captureScreenshot', { format: 'png', clip: { x: Math.round(x), y: Math.round(y), width: 1, height: 1, scale: 1 } });
+      const buf = Buffer.from(shot.data, 'base64');
+      let o = 8, ct = 0; const idat = [];
+      while (o + 8 <= buf.length) { const n = buf.readUInt32BE(o), ty = buf.toString('latin1', o + 4, o + 8); if (ty === 'IHDR') ct = buf[o + 8 + 9]; else if (ty === 'IDAT') idat.push(buf.subarray(o + 8, o + 8 + n)); o += 12 + n; }
+      const raw = (await import('node:zlib')).inflateSync(Buffer.concat(idat)); // one pixel, one row: filter byte then RGB(A) (filters 0-4 all reduce to the bytes for a 1×1 image)
+      return [raw[1], raw[2], raw[3], ct];
+    };
+    const rowAt = { x: a.f.l + a.f.w / 2, y: a.f.t + a.f.h - 22 * a.z };
+    const rowPx = await until(async () => { const p = await px(rowAt.x, rowAt.y); return Math.abs(p[0] - 255) < 12 && p[1] < 24 && Math.abs(p[2] - 170) < 12 ? p : null; }, 5000, 250) || await px(rowAt.x, rowAt.y);
+    evidence.focusWhole.rowPx = rowPx;
+    ok(Math.abs(rowPx[0] - 255) < 12 && rowPx[1] < 24 && Math.abs(rowPx[2] - 170) < 12, `the bottom row is VISIBLE: the screenshot pixel at its middle is rgb(${rowPx.slice(0, 3).join(', ')}) — the row's own rgb(255, 0, 170)`, { rowAt, rowPx });
+    // zoom in (past contain) then out: the frame keeps the artboard's height; Fit = the whole board again
+    for (const sel of ['.design-btn-in', '.design-btn-out']) { const b = await rectOf(sel, W2 + '.element'); ok(!!b, `the duo window's bar carries ${sel}`); if (b) await click(b); await sleep(250); if (sel === '.design-btn-in') evidence.focusWhole.zoomedIn = await look(); }
+    const zi = evidence.focusWhole.zoomedIn, b2 = await look();
+    ok(!!zi && zi.z > a.z && zi.cssH === '585px' && Math.abs(zi.f.h - 585 * zi.z) < 1, `zoom in past contain (${a.z.toFixed(2)} → ${zi ? zi.z.toFixed(2) : '?'}): the frame stays the artboard's 585 px — never cut again`, zi);
+    ok(b2.z < zi.z && b2.cssH === '585px' && b2.f.t >= b2.vp.t - 0.5 && b2.f.t + b2.f.h <= b2.vp.t + b2.vp.h + 0.5 && b2.f.l >= b2.vp.l - 0.5 && b2.f.l + b2.f.w <= b2.vp.l + b2.vp.w + 0.5, `…and back out (${b2.z.toFixed(2)}): the whole board inside the pane again`, b2);
+    const fb = await rectOf('.design-btn-fit', W2 + '.element');
+    if (fb) await click(fb);
+    await sleep(250);
+    const c = await look();
+    ok(!!fb && Math.abs(b2.z - a.z) > 1e-6 && Math.abs(c.z - a.z) < 1e-6 && Math.abs(c.f.t - a.f.t) < 1 && Math.abs(c.f.l - a.f.l) < 1, `Fit in the focused view (from ${b2.z.toFixed(2)}) = exactly the contained view again`, { c, a });
+    // the window closes (its watch ends) before B③ counts this socket's watches
+    await ev(`window.__acks.length = 0; const w = ${W2}; if (w) app.wm.closeWindow(w.id); return true;`);
+    ok(!!(await until(() => ev(`return window.__acks.some((m) => m.op === 'unwatch' && m.dir === ${S(DUO)});`), 10000, 200)), 'the duo window closed and unwatched its folder');
+  }
+
   // ── A⑤ publish ──
   section('A⑤ Publish…: the same URL and visibility as the agent\'s publish; /p/<id> under the CSP header');
   const rPub = await stub({ kind: 'sh', cmd: 'vibespace-design', args: ['publish', '--public'], cwd: DIR });

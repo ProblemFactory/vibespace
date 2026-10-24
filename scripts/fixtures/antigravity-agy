@@ -25,6 +25,8 @@
 //                                   with an output that names no subagent
 //       text naming `write the summary` / `edit the summary` → a write_file / edit_file step on <cwd>/reports/summary.md (the
 //                                   file is written) — the MEASURED stream names + an absolute `Path` (lane agy-status-bar-facts)
+//       text naming `read the summary` → a read_file step on <cwd>/reports/summary.md whose output is agy's ONE-LINE summary
+//                                   «N lines, M bytes» — the measured live shape, never the file's text (lane ci-351-reds)
 //       otherwise                 → agent_response deltas "Antigravity (<model>, <mode>): <text>", a checkpoint, result SUCCESS
 //     USAGE (lane agy-status-bar-facts) = the MEASURED semantics: every model call (one per agent_response, one more per
 //     tool step) counts input / cache_read (the previous call's context) / output, and result.usage is the CONVERSATION'S
@@ -101,6 +103,14 @@ async function turn(text) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     if (wm[1] === 'write') fs.writeFileSync(file, '# Summary\n\nWritten by the fake agy.\n'); else fs.appendFileSync(file, '\nEdited.\n');
     out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'tool', tool_name: name, duration_seconds: 0.02, tool_info: { name, parameters: { Path: file }, output: 'ok' } } });
+  }
+  if (/\bread the summary\b/.test(text)) {
+    const i = step++, file = path.join(process.cwd(), 'reports', 'summary.md');
+    let body = ''; try { body = fs.readFileSync(file, 'utf8'); } catch { }
+    const said = `${body ? body.replace(/\n$/, '').split('\n').length : 0} lines, ${Buffer.byteLength(body)} bytes`;
+    modelCall(i);
+    out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'tool', tool_name: 'read_file', tool_info: { name: 'read_file', parameters: { Path: file } } } });
+    out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'tool', tool_name: 'read_file', duration_seconds: 0.01, tool_info: { name: 'read_file', parameters: { Path: file }, output: said } } });
   }
   if (/\btool\b/.test(text)) {
     const i = step++;

@@ -73,7 +73,8 @@ const RENDERER = path.join(ROOT, 'src/lib/chat-renderers.js');
 let built = 0;
 const URI_RULE = String.raw`^(?:(?:(?:f|ht)tps?|mailto|tel|callto|sms|cid|xmpp|matrix):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))`;
 const SANITIZE_STUB = `const OK = new RegExp(${JSON.stringify(URI_RULE)}, 'i');
-export const sanitizeHtml = (h) => h.replace(/(<a\\b[^>]*?)\\shref="([^"]*)"/gi, (m, pre, v) => (OK.test(v.replace(/[\\u0000-\\u0020]/g, '')) ? m : pre));`;
+export const sanitizeHtml = (h) => h.replace(/(<a\\b[^>]*?)\\shref="([^"]*)"/gi, (m, pre, v) => (OK.test(v.replace(/[\\u0000-\\u0020]/g, '')) ? m : pre));
+export const sanitizeDiagramSvg = () => ''; // lane chat-mermaid: the diagram door's wall (chat-renderers → mermaid-render), never reached here`;
 async function renderer(patch, opts = {}) {
   const out = path.join(SCR, `chat-renderers-${built++}.mjs`);
   const plug = { name: 'tpl', setup(b) {

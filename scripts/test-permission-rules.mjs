@@ -1274,7 +1274,7 @@ if (!CHROME) {
       !remote.error && (remote.paths || []).length === 0, JSON.stringify(remote.paths));
 
     // ── THE WINDOW'S OWN RE-RENDER MUST NOT EAT THE ANSWER (round 3) ──
-    // `render()` opens with `root.innerHTML = ''` and re-runs on every
+    // `render()` opens with `body.innerHTML = ''` and re-runs on every
     // 'active-sessions' broadcast — which fires on every session
     // create/exit/attach AND on every agent TodoWrite (coalesced to 500ms
     // server-side), i.e. continuously while the very session you opened
@@ -1307,7 +1307,7 @@ if (!CHROME) {
         out.readsAfterClick = out.reads;
         const sentinel = document.createElement('i');
         sentinel.id = 'pr-rerender-sentinel';
-        w.content.querySelector('.session-props').appendChild(sentinel);
+        w.content.querySelector('.session-props > .task-detail-body').appendChild(sentinel);   // the body is what a render rebuilds (lane session-props-scroll)
         // byte-identical to WsManager's own dispatch (src/lib/ws.js onmessage)
         [...window.app.ws.globalHandlers].forEach((h) => { try { h({ type: 'active-sessions', sessions: [] }); } catch (e) { } });
         await sleep(900);                                   // past the 300ms trailing-edge debounce

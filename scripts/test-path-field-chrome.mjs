@@ -308,6 +308,56 @@ console.log('\n── ⑨ two Task Groups + a name ⇒ one 新建 per group ─�
   await key('Escape'); await reset();
 }
 
+console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-session-group-folder-link) ──');
+{
+  await load();
+  const homeFolders = () => ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/home-folders')).length`);
+  ok('a field built while the page boots asks nothing for its chips row (it paints on refresh())', (await homeFolders()) === 0, await homeFolders());
+  await ev('window.pf.refresh(); true');
+  ok('CONTROL: refresh() paints it (the home\'s folders asked once)', await until(async () => (await homeFolders()) >= 1, 3000), await homeFolders());
+  const IR = HOME + '/work/investor-relations';
+  await ev(`window.sel = ['g-ir']; window.pf.refresh(); window.pf.setDerived(${JSON.stringify(IR)}, { note: '（来自任务组「投资者关系」）' }); true`);
+  const u1 = await until(async () => { const u = await under(); return u.includes('来自任务组') && u.includes('个文件') ? u : null; }, 4000);
+  ok('setDerived fills the field and its line says «= ~/work/investor-relations（来自任务组「投资者关系」）»', (await cwd()) === IR && !!u1 && u1.includes('= ~/work/investor-relations（来自任务组「投资者关系」）'), u1 || (await under()));
+  ok('…the list did not pop, nothing was committed', !(await listOpen()) && !(await log()).some((x) => x.ev === 'commit'), await log());
+  const c1 = await ev('window.pf.commit().then((i) => i && { path: i.path, derived: i.derived, how: i.how })');
+  ok('a commit of that untouched text says derived: true', !!c1 && c1.derived === true && c1.path === IR, c1);
+  await press('#cwd'); await ev(`(() => { const i = document.getElementById('cwd'); i.setSelectionRange(i.value.length, i.value.length); return true; })()`);
+  await type('/草稿'); await sleep(450);
+  const u2 = await under();
+  const c2 = await ev('window.pf.commit().then((i) => i && { path: i.path, derived: i.derived })');
+  ok('the person types on ⇒ the note is gone and the commit is theirs (derived: false)', !u2.includes('来自任务组') && !!c2 && c2.derived === false && c2.path === IR + '/草稿', { u2, c2 });
+  await key('Escape');
+  await ev(`window.pf.setDerived(${JSON.stringify(IR)}, { note: 'n' }); window.pf.set(${JSON.stringify(IR)}, { commit: false }); true`);
+  const c3 = await ev('window.pf.commit().then((i) => i && i.derived)');
+  ok('set() from outside (a chip, a restore) ends it too — the same text, now the person\'s', c3 === false, c3);
+  // the 由名字 chips under the field follow the name as it is typed
+  const nameChips = () => ev(`[...document.querySelectorAll('#cwd-recent .cwd-name-chip')].map((c) => ({ path: c.dataset.path, isNew: c.dataset.new === '1', text: c.textContent }))`);
+  ok('the name empty ⇒ no 由名字 chip', (await nameChips()).length === 0, await nameChips());
+  await ev(`document.getElementById('name').focus(); true`);
+  await type('测');
+  const k1 = await until(async () => { const c = await nameChips(); return c.length === 2 && c[0].path === IR + '/测' ? c : null; }, 3000);
+  ok('one keystroke of the name ⇒ the chips under the field: <IR>/测, ~/测 (no list opened)', !!k1 && k1[1].path === HOME + '/测' && !(await listOpen()), k1 || (await nameChips()));
+  await type('试');
+  const k2 = await until(async () => { const c = await nameChips(); return c.length === 2 && c[0].path === IR + '/测试' && c.every((x) => x.isNew) ? c : null; }, 4000);
+  ok('the next keystroke ⇒ they follow (<IR>/测试) and, once the machine said so, read 新建', !!k2 && /^新建/.test(k2[0].text), k2 || (await nameChips()));
+  ok('…the field\'s own line never moved while the name was typed (no «asking the machine»)', !(await under()).includes('询问'), await under());
+  await ev(`(() => { const n = document.getElementById('name'); n.value = '草稿'; n.dispatchEvent(new Event('input')); return true; })()`);
+  const k3 = await until(async () => { const c = await nameChips(); return c.length === 2 && c[0].path === IR + '/草稿' && c[1].isNew && !c[0].isNew ? c : null; }, 4000);
+  ok('a folder that is there (<IR>/草稿) is no 新建; ~/草稿 is', !!k3, k3 || (await nameChips()));
+  await ev(`(() => { const n = document.getElementById('name'); n.value = '测试'; n.dispatchEvent(new Event('input')); return true; })()`);
+  await until(async () => { const c = await nameChips(); return c.length === 2 && c[0].path === IR + '/测试' && c[0].isNew; }, 4000);
+  {
+    await ev(`window.__log.length = 0; window.pf.setDerived(${JSON.stringify(IR)}, { note: 'n' }); true`);
+    await press('#cwd-recent .cwd-name-chip');
+    const got = await until(async () => { const l = await log(); return l.find((x) => x.ev === 'commit') || null; }, 4000);
+    ok('a press on the 新建 chip fills the field and commits it as a pick with the tick (made at use — create: true)', !!got && got.how === 'pick' && got.create === true && got.path === IR + '/测试' && (await cwd()) === '~/work/investor-relations/测试', { got, cwd: await cwd() });
+    ok('…it made nothing yet', !fs.existsSync(IR + '/测试'));
+  }
+  await shot('09b-derived-and-name-chips');
+  await reset();
+}
+
 console.log('\n── ⑩ a remote machine (my-mac): the same recommendations, computed for it ──');
 {
   await ev(`window.sel = ['g-ir', 'g-cd']; document.getElementById('host').value = 'h-mac'; window.pf.refresh(); true`);

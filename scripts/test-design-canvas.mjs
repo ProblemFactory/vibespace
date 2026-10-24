@@ -5,7 +5,9 @@
 // pick channel's fence (an artboard is agent-written HTML inside the owner's logged-in page) is a census over the
 // sources and a functional run of the picker under a mini DOM.
 //
-//   ① the view — clampZoom, the zoom ladder, zoomAt keeps the anchor, pinchView, fitView, focusView
+//   ① the view — clampZoom, the zoom ladder, zoomAt keeps the anchor, pinchView, fitView, focusView (lane
+//      design-focus-whole: a SCREEN shown whole with the same ring on all four sides, a TALL PAGE at fit-width scrolling
+//      inside — the line PAGE_RATIO from the hub's design.json census; a declared "fixed" is a screen at any size)
 //   ② the world — framesOf (= the hub's validateManifest + layoutOf, imported since int201), pagesOf / pageOf, notesOn,
 //      launchOf
 //   ③ what the hub's read and a published page carry — normalizeRead (every spelling + every failure LOUD), normalizeDoc
@@ -103,15 +105,41 @@ const TABLES = {
     ];
   },
   focusView: (m) => {
-    const r = { x: 1360, y: 0, w: 1280, h: 3000 };
-    const f = m.focusView(r, { w: 672, h: 500 });
-    const tall = m.focusView({ x: 0, y: 0, w: 390, h: 844 }, { w: 1000, h: 4000 });
+    const P = m.FOCUS_PAD;
+    // THE OWNER'S CASE (2026-10-23): the iPhone Duo board A2 (951×585, print fixed) in the owner's pane — at fit-width it
+    // was 1.76× and its frame cut to 487 px (the composer row gone); contained it is whole, a ring on all four sides
+    const duo = { x: 1011, y: 0, w: 951, h: 585 };
+    const own = m.focusView(duo, { w: 1706, h: 891 }, { declared: 'fixed' });
+    const tl = m.toScreen(own.view, { x: 1011, y: 0 }), br = m.toScreen(own.view, { x: 1011 + 951, y: 585 });
+    const wide = m.focusView({ x: 0, y: 0, w: 951, h: 585 }, { w: 1000, h: 700 }); // width-bound: fit-width IS contain here
+    const wtl = m.toScreen(wide.view, { x: 0, y: 0 }), wbr = m.toScreen(wide.view, { x: 951, y: 585 });
+    const page = m.focusView({ x: 0, y: 0, w: 390, h: 2400 }, { w: 1000, h: 700 });
+    const pinned = m.focusView({ x: 0, y: 0, w: 390, h: 2400 }, { w: 1000, h: 700 }, { declared: 'fixed' });
+    const phone = m.focusView({ x: 0, y: 0, w: 390, h: 844 }, { w: 390, h: 787 }); // a phone screen on a phone's pane
+    const big = m.focusView({ x: 0, y: 0, w: 390, h: 844 }, { w: 1000, h: 4000 });
+    const kind = (w, h, d) => m.focusFit({ x: 0, y: 0, w, h }, d);
+    const man = { artboards: [{ file: 'A.html', print: 'fixed' }, { file: 'B.html' }, { file: 'C.html', print: 'flow' }, { file: 'D.html', print: 'odd' }] };
     return [
-      [near(f.view.z, (672 - 2 * m.FOCUS_PAD) / 1280), true, 'fit-width: the pane minus the pad on both sides over the artboard'],
-      [near(m.toScreen(f.view, { x: 1360, y: 0 }).x, m.FOCUS_PAD) && near(m.toScreen(f.view, { x: 1360, y: 0 }).y, m.FOCUS_PAD), true, 'its top-left at the pad'],
-      [f.frameH, Math.floor((500 - 2 * m.FOCUS_PAD) / f.view.z), 'an artboard taller than the pane takes the pane\'s height — its document scrolls inside'],
-      [tall.view.z, 2, 'a phone artboard in a big pane: fit-width capped at 2×'],
-      [tall.frameH, 844, '…and a short artboard keeps its own height'],
+      [near(own.view.z, (891 - 2 * P) / 585), true, 'a screen too wide for the pane at fit-width is CONTAINED: z = (pane h − 2·pad) / its height'],
+      [near(tl.y, P) && near(br.y, 891 - P), true, '…its top and its BOTTOM land on the pad — the bottom row is inside the pane'],
+      [near(tl.x, (1706 - 951 * own.view.z) / 2) && near(1706 - br.x, tl.x), true, '…centred across (equal rings left and right)'],
+      [own.frameH, 585, '…its frame keeps the artboard\'s own height — never cut'],
+      [own.fit, 'screen', '…and it is named a screen'],
+      [eq(own.view, m.fitView(duo, { w: 1706, h: 891 }, { pad: P, maxZ: 2 })), true, 'a screen\'s focused view IS fitView\'s rule (contain, centred) at FOCUS_PAD, never past 2×'],
+      [near(wide.view.z, (1000 - 2 * P) / 951) && near(wtl.x, P) && near(1000 - wbr.x, P), true, 'the same board in a 1000×700 pane is width-bound: fit-width, its sides on the pad'],
+      [near((wtl.y + wbr.y) / 2, 350) && wide.frameH === 585, true, '…centred down, its frame whole'],
+      [page.fit === 'page' && page.view.z === 2 && near(m.toScreen(page.view, { x: 0, y: 0 }).y, P), true, 'a TALL PAGE (390×2400, h/w 6.2): fit-width (capped at 2×), its top at the pad'],
+      [page.frameH, Math.floor((700 - 2 * P) / 2), '…its frame cut to the pane — its document scrolls inside (the one artboard that can)'],
+      [pinned.fit === 'screen' && pinned.frameH === 2400 && near(pinned.view.z, (700 - 2 * P) / 2400), true, 'the same size DECLARING print "fixed" is a screen at any height: whole, never cut'],
+      [phone.fit === 'screen' && near(phone.view.z, (787 - 2 * P) / 844) && phone.frameH === 844, true, 'a 390×844 phone screen on a phone\'s 390×787 pane: whole (fit-width cut its bottom 22 px)'],
+      [big.view.z === 2 && big.frameH === 844, true, 'a phone screen in a big pane: capped at 2×, its own height'],
+      [[kind(390, 844), kind(375, 812), kind(360, 800), kind(411, 960), kind(951, 585), kind(1280, 800)].join(), 'screen,screen,screen,screen,screen,screen', 'THE CENSUS LINE: the tallest screens seen (390×844, 375×812) and a 20:9 / 21:9 phone (360×800, 411×960) are screens'],
+      [[kind(390, 960), kind(390, 1920), kind(390, 2500)].join(), 'page,page,page', '…the shortest page seen (390×960, h/w 2.462) and the long phone pages are pages'],
+      [m.PAGE_RATIO > 844 / 390 && m.PAGE_RATIO < 960 / 390, true, `PAGE_RATIO (${m.PAGE_RATIO}) lies between the tallest screen (2.165) and the shortest page (2.462) of the census`],
+      [[kind(390, 2500, 'fixed'), kind(390, 844, 'flow'), kind(390, 2500, 'flow')].join(), 'screen,screen,page', 'a declared "fixed" is always a screen; "flow" alone makes nothing a page (the height does)'],
+      [[m.declaredPrint(man, 'A.html'), m.declaredPrint(man, 'B.html'), m.declaredPrint(man, 'C.html'), m.declaredPrint(man, 'D.html'), m.declaredPrint(man, 'Z.html'), m.declaredPrint(null, 'A.html')], ['fixed', null, 'flow', null, null, null], 'declaredPrint reads the manifest ROW\'s own word (silence, an unknown word, no row, no manifest ⇒ null — never the hub\'s default)'],
+      [eq(m.focusView(null, { w: 1000, h: 700 }), { view: { x: P, y: P, z: 1 }, frameH: m.LAYOUT.defaultH, fit: 'screen' }) && eq(m.focusView(duo, { w: 0, h: 0 }).view, { x: P, y: P, z: 1 }), true, 'no artboard / a pane with no size yet ⇒ the identity at the pad, never NaN'],
+      [eq(m.presentView(duo, { w: 1706, h: 891 }), m.fitView(duo, { w: 1706, h: 891 }, { pad: m.PRESENT_PAD, maxZ: m.ZOOM_MAX })) && [m.FIT_PAD, m.FOCUS_PAD, m.PRESENT_PAD].every((x) => typeof x === 'number'), true, 'EACH VIEW\'S RING IS ONE CONSTANT: fitView FIT_PAD, focusView FOCUS_PAD, presentView PRESENT_PAD'],
     ];
   },
   framesOf: (m) => {
@@ -559,6 +587,8 @@ console.log('⑥ wiring pins — the canvas core');
     ok(srcdocs.length === 0, 'no srcdoc in the Design window or its present module — the app page\'s design frames all go through the host', srcdocs.join(', '));
     ok(!/writeFrame|frame-host/.test(viewer), 'the published page passes no writer: its artboards stay srcdoc frames under the published page\'s OWN sandbox policy (the hub\'s host needs the sign-in)');
   }
+  ok(/function refocus\(\) \{[\s\S]{0,160}?const fv = focusView\(f, paneSize\(\), \{ declared: declaredPrint\(st\.manifest, f\.file\) \}\);\n\s+rec\.focusH = fv\.frameH;/.test(code) && (code.match(/focusView\(/g) || []).length === 1, 'lane design-focus-whole: the focused view is ONE call of the rule, handed the manifest row\'s own print declaration (a frame\'s print is the hub\'s default) — its frameH is the frame\'s height');
+  ok(read('docs/agent/design-manual.md').includes(`taller than ${M.PAGE_RATIO} × its width, which is taken for a page that scrolls`) && read('docs/kb-features.md').includes(`PAGE_RATIO ${M.PAGE_RATIO}`), `the agent manual and kb-features name the tall-page line by the model's own number (${M.PAGE_RATIO})`);
   ok(/setPointerCapture\(e\.pointerId\)/.test(code) && /'pointercancel', end/.test(code) && /'lostpointercapture', end/.test(code), 'a drag captures its pointer at the door and ends on up / cancel / lost capture');
   ok(/vp\.addEventListener\('dblclick', \(e\) => \{[\s\S]{0,200}?toWorld\(st\.view, local\(e\)\)[\s\S]{0,200}?onActivate\?\.\(hit\.file, 'dblclick'\)/.test(code) && !/shield\.addEventListener\('dblclick'/.test(code), 'a dblclick is read on the VIEWPORT by the world point under it (the drag\'s pointer capture retargets the click pair away from the shield — measured in Chrome: a shield listener never fired)');
 }
@@ -676,7 +706,13 @@ console.log('⑧ controls — a patched copy of each rule turns its table red');
     ['zoom', 'a between-rungs zoom steps past its neighbour', 'if (dir > 0) { for (const s of ZOOM_STEPS) if (s > cur * 1.001) return s; return ZOOM_MAX; }', 'if (dir > 0) { for (const s of ZOOM_STEPS) if (s > cur * 1.3) return s; return ZOOM_MAX; }'],
     ['zoomAt', 'the anchor is not kept (zoom about the origin)', 'return { x: ax - wx * nz, y: ay - wy * nz, z: nz };', 'return { x: v.x, y: v.y, z: nz };'],
     ['fitView', 'a lone artboard blown up past 100%', 'const z = clampZoom(Math.min((pw - 2 * pad) / bounds.w, (ph - 2 * pad) / bounds.h, maxZ));', 'const z = clampZoom(Math.min((pw - 2 * pad) / bounds.w, (ph - 2 * pad) / bounds.h));'],
-    ['focusView', 'a tall artboard keeps its full height (nothing scrolls inside)', 'Math.min(rect.h, Math.floor((ph - 2 * pad) / z))', 'rect.h'],
+    ['focusView', 'a tall page keeps its full height (nothing scrolls inside)', 'Math.min(rect.h, Math.floor((ph - 2 * pad) / z))', 'rect.h'],
+    // lane design-focus-whole — THE RED CONTROL is the shipped .348 rule: every artboard at fit-width, cut to the pane
+    ['focusView', 'THE .348 RULE: a screen too wide for the pane at fit-width, its frame cut — the Duo board loses its bottom 98 px', "  if (focusFit(rect, declared) === 'screen') return { view: fitView(rect, pane, { pad, maxZ }), frameH: rect.h, fit: 'screen' };\n", ''],
+    ['focusView', 'the declared "fixed" ignored (a tall screen that cannot scroll cut to the pane)', "  if (declared === 'fixed') return 'screen';\n", ''],
+    ['focusView', 'no tall-page line (a 390×2400 page shown whole at 28 %)', "rect.h / rect.w > PAGE_RATIO ? 'page' : 'screen'", "false ? 'page' : 'screen'"],
+    ['focusView', 'the declaration read as the hub\'s default (every row "fixed" — no page ever scrolls)', "return row && (row.print === 'fixed' || row.print === 'flow') ? row.print : null;", "return 'fixed';"],
+    ['focusView', 'one ring for the screen, another for the page (the screen at the canvas\'s FIT_PAD)', 'return { view: fitView(rect, pane, { pad, maxZ }), frameH: rect.h,', 'return { view: fitView(rect, pane, { pad: FIT_PAD, maxZ }), frameH: rect.h,'],
     ['framesOf', 'a manifest the hub refuses half-applied (the validation dropped)', 'const m = v.ok ? v.manifest : null;', 'const m = isObj(manifest) ? manifest : null;'],
     ['normalizeRead', 'a failed read becomes an empty canvas', "if (!isObj(r)) return { error: { code: 'unreachable', why: '', refusals: [] } };", "if (!isObj(r)) r = {};"],
     ['pickFence', 'the closed kind set opened', "if (!isObj(data) || !PICK_KINDS.includes(data.kind) || !frame || !isArtboardName(frame.file)) return null;", "if (!isObj(data) || !frame || !isArtboardName(frame.file)) return null;"],

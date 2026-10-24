@@ -8,11 +8,13 @@
 // (_lazyHeights in _render → minHeight in _observeFolder). This drives the
 // REAL render/observer/clamp machinery in a throwaway worktree server +
 // headless chrome (raw CDP), feeding _renderGrouped synthetic folders.
+// + (lane backend-icons) the 后端 filter popover's backend marks seen PAINTED at 1×/2× DPR, every BACKEND_META
+// iconSrc loading as an image — with RED controls (the section at the end).
 // Run: node scripts/test-sidebar-scroll.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
@@ -130,6 +132,71 @@ check('deep scroll actually landed (content tall enough)', result.landed > 500, 
 check('scrollTop survives the expand re-render (sync)', Math.abs(result.immediatelyAfter - result.before) < 80, `before=${result.before} after-sync=${result.immediatelyAfter}`);
 check('scrollTop stays after observer settles', Math.abs(result.after - result.before) < 120, `before=${result.before} after=${result.after}`);
 check('rebuilt scrollHeight holds (reserved heights)', result.rebuiltHeight > result.fullHeight * 0.8, `full=${result.fullHeight} rebuilt=${result.rebuiltHeight}`);
+
+// ── THE 后端 FILTER'S MARKS, SEEN (lane backend-icons, the owner 2026-10-23: Claude and Codex with their marks,
+// «Antigravity CLI» with none — 「图标补一下」). public/brand/{antigravity,opencode}.svg opened with an XML comment
+// holding a double hyphen; Chrome refused the whole file, so the mask painted nothing. The browser is the oracle the
+// owner saw fail: (a) every BACKEND_META iconSrc loads as an image (naturalWidth > 0), and a double-hyphen comment
+// prepended to today's antigravity.svg is a load ERROR (the oracle sees the defect); (b) with one session per backend
+// the popover opened by a real click holds a row per backend whose .backend-icon-mark PAINTS — pixels of the mark's
+// box that change when the mark is hidden, at 1× and 2× DPR — and the same mark pointed at the defective file paints
+// nothing (the measure sees the owner's symptom). The drift guard is test-brand-svg (fast). PNGs → $VS_BACKEND_FILTER_PNG_DIR.
+const { BACKEND_META } = await import(pathToFileURL(path.join(repo, 'src/lib/agent-meta.js')).href);
+const MARKED = Object.values(BACKEND_META).filter((m) => m.iconSrc);
+const agSvg = fs.readFileSync(path.join(repo, 'public/brand/antigravity.svg'), 'utf8'), svgUrl = (t) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(t);
+const goodUrl = svgUrl(agSvg), brokenUrl = svgUrl('<!-- recolored by --backend-icon-color -->\n' + agSvg);   // the same bytes, one comment apart
+const imgVerdict = (src) => evaljs(`new Promise((r) => { const i = new Image(); i.onload = () => r(i.naturalWidth); i.onerror = () => r('error'); i.src = ${JSON.stringify(src)}; })`);
+for (const m of MARKED) { const w = await imgVerdict(m.iconSrc); check(`${m.id}'s mark ${m.iconSrc} loads as an image in Chrome`, w > 0, `naturalWidth=${w}`); }
+const [goodW, brokenW] = [await imgVerdict(goodUrl), await imgVerdict(brokenUrl)];
+check('RED CONTROL: a double-hyphen comment prepended to antigravity.svg is a load error in Chrome; the same bytes without it load', brokenW === 'error' && goodW > 0, `broken=${brokenW} good=${goodW}`);
+const PNG_DIR = process.env.VS_BACKEND_FILTER_PNG_DIR || null;
+const clipShot = async (r) => (await cdp('Page.captureScreenshot', { format: 'png', clip: { x: r.x, y: r.y, width: r.w, height: r.h, scale: 1 } })).result.data;
+const markSel = (id) => `document.querySelector('.backend-filter-menu .backend-icon[data-backend="${id}"] .backend-icon-mark')`;
+const painted = async (id) => {   // pixels of the mark's box (device px) that change when the mark is hidden
+  const q = await evaljs(`(() => { const m = ${markSel(id)}; if (!m) return null; const r = m.getBoundingClientRect(); return { x: Math.floor(r.x) - 1, y: Math.floor(r.y) - 1, w: Math.ceil(r.width) + 2, h: Math.ceil(r.height) + 2 }; })()`);
+  if (!q) return -1;
+  const on = await clipShot(q);
+  await evaljs(`${markSel(id)}.style.visibility = 'hidden'`); await sleep(60);
+  const off = await clipShot(q);
+  await evaljs(`${markSel(id)}.style.visibility = ''`);
+  return evaljs(`(async () => { const load = (s) => new Promise((r, j) => { const i = new Image(); i.onload = () => r(i); i.onerror = j; i.src = 'data:image/png;base64,' + s; });
+    const [A, B] = await Promise.all([load(${JSON.stringify(on)}), load(${JSON.stringify(off)})]); const c = document.createElement('canvas'); c.width = A.width; c.height = A.height; const x = c.getContext('2d');
+    x.drawImage(A, 0, 0); const a = x.getImageData(0, 0, c.width, c.height).data; x.clearRect(0, 0, c.width, c.height); x.drawImage(B, 0, 0); const b = x.getImageData(0, 0, c.width, c.height).data;
+    let n = 0; for (let k = 0; k < a.length; k += 4) if (Math.abs(a[k] - b[k]) + Math.abs(a[k + 1] - b[k + 1]) + Math.abs(a[k + 2] - b[k + 2]) > 24) n++; return n; })()`);
+};
+const SESSIONS = JSON.stringify(MARKED.map((m, i) => ({ sessionId: 'bi-' + m.id, claudeSessionId: 'bi-' + m.id, status: 'stopped', backend: m.id, cwd: '/tmp/proj-icons', name: m.id, startedAt: Date.now() - i * 60e3, mtime: Date.now() - i * 60e3 })));
+for (const dpr of [1, 2]) {
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: dpr, mobile: false });
+  await evaljs(`document.querySelector('.backend-filter-menu')?.remove()`);
+  let rows = [];
+  for (let attempt = 0; attempt < 3 && rows.length < MARKED.length; attempt++) {   // an active-sessions frame may land between the seed and the press
+    const b = await evaljs(`(() => { const sb = window.app.sidebar; sb._webuiSessions = ${SESSIONS}; sb._systemSessions = []; document.querySelector('.backend-filter-menu')?.remove();
+      const r = document.getElementById('backend-filter').getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x: b.x, y: b.y, button: 'left', clickCount: 1 });
+    await sleep(300);
+    rows = await evaljs(`[...document.querySelectorAll('.backend-filter-menu .status-filter-item .backend-icon[data-backend]')].map((e) => ({ id: e.dataset.backend, mark: !!e.querySelector('.backend-icon-mark'), label: e.closest('.status-filter-item').textContent.trim() }))`);
+  }
+  check(`${dpr}×: the 后端 popover, opened by a real click, lists one row per marked backend`, MARKED.every((m) => rows.some((r) => r.id === m.id && r.mark)), JSON.stringify(rows));
+  const px = {};
+  for (let t = 0; t < 20; t++) {   // the masks fetch on first paint: settle on evidence, not a fixed sleep
+    for (const m of MARKED) if (!(px[m.id] > 0)) px[m.id] = await painted(m.id);
+    if (MARKED.every((m) => px[m.id] > 0)) break;
+    await sleep(150);
+  }
+  for (const m of MARKED) check(`${dpr}×: «${m.label}» row's mark paints (${px[m.id]} px)`, px[m.id] > 0, `painted=${px[m.id]}`);
+  if (PNG_DIR) { const r = await evaljs(`(() => { const r = document.querySelector('.backend-filter-menu').getBoundingClientRect(); return { x: r.x - 4, y: r.y - 4, w: r.width + 8, h: Math.min(r.height + 8, 480) }; })()`); fs.mkdirSync(PNG_DIR, { recursive: true }); fs.writeFileSync(path.join(PNG_DIR, `backend-filter-${dpr}x.png`), Buffer.from(await clipShot(r), 'base64')); }
+  if (dpr === 1) {
+    const ag = MARKED.find((m) => m.id === 'antigravity') || MARKED[MARKED.length - 1];
+    await evaljs(`${markSel(ag.id)}.style.setProperty('--backend-icon-mask', ${JSON.stringify(`url("${brokenUrl}")`)})`); await sleep(300);
+    const dead = await painted(ag.id);
+    await evaljs(`${markSel(ag.id)}.style.setProperty('--backend-icon-mask', ${JSON.stringify(`url("${goodUrl}")`)})`); await sleep(300);
+    const twin = await painted(ag.id);   // the same data: road with the good bytes paints — so a 0 above is the parse, not the road
+    await evaljs(`${markSel(ag.id)}.style.setProperty('--backend-icon-mask', ${JSON.stringify(`url("${ag.iconSrc}")`)})`);
+    check(`RED CONTROL: the «${ag.label}» mark pointed at the double-hyphen file paints nothing (the owner's symptom, measured the same way); the same bytes without the comment paint`, dead === 0 && twin > 0, `broken=${dead} good=${twin}`);
+  }
+  await evaljs(`document.querySelector('.backend-filter-menu')?.remove()`);
+}
+await cdp('Emulation.clearDeviceMetricsOverride');
 
 ws.close();
 console.log(failed === 0 ? 'ALL PASS' : `${failed} FAILED`);

@@ -2024,6 +2024,9 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .pf-tickrow input { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
 .pf-bad { color: var(--text-dim); }
 .cwd-name-chip { border-style: dashed; border-color: color-mix(in srgb, var(--yellow) 60%, var(--border)); color: var(--text); }
+/* lane new-session-group-folder-link: a derived folder's line says where it came from; a 由名字 chip the machine lacks says 新建 */
+.pf-from { font-family: system-ui, sans-serif; color: var(--attn-text); margin-left: .25em; }
+.cwd-chip-new { font-size: 10px; font-weight: 600; color: var(--warn-text); margin-right: .4em; }
 .pf-list { background: var(--bg-dialog); border: 1px solid var(--border-active); border-radius: var(--radius-sm); padding: 2px 0 4px; overflow-y: auto; }
 .pf-list[hidden] { display: none; }
 .pf-list.pf-float { position: fixed; z-index: 99999; box-shadow: 0 8px 24px rgba(0,0,0,0.4); max-height: 360px; }
@@ -2293,6 +2296,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   padding: 0 12px; background: var(--bg-toolbar); border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+#mobile-nav-files { display: none; } /* a phone's (the media block below) */
 #mobile-nav-menu, #mobile-nav-new, #mobile-nav-close {
   background: none; border: none; color: var(--text); font-size: 22px;
   cursor: pointer; padding: 4px 8px; flex-shrink: 0;
@@ -2478,6 +2482,26 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
     min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px;
   }
   #mobile-nav-gear svg { width: 20px; height: 20px; }
+  /* 文件 (lane phone-files-door): the files one tap away — the folder icon beside ☰; its word under it for the first
+     week (the rail's day-one record, .labelled), never wider than the word */
+  #mobile-nav-files {
+    background: none; border: none; color: var(--text); cursor: pointer; flex-shrink: 0;
+    min-width: 36px; min-height: 36px; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 0 4px;
+  }
+  #mobile-nav-files .mnav-word { display: none; font-size: 9px; line-height: 10px; white-space: nowrap; color: var(--text-secondary); }
+  #mobile-nav-files.labelled .mnav-word { display: block; }
+  #mobile-nav-files.labelled svg { width: 16px; height: 16px; }
+  /* the 文件 card under the For-you page's bands (the first screen stays the attention list's) */
+  #phone-home .ph-files { margin: 16px 0 4px; padding: 10px 12px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-window); }
+  #phone-home .ph-files-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--text); }
+  #phone-home .ph-files-head svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--accent); }
+  #phone-home .ph-files-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  #phone-home .ph-files-chip {
+    min-height: 36px; max-width: 100%; padding: 6px 12px; font-size: 13px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--bg-input); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer;
+  }
+  #phone-home .ph-files-chip.home { border-color: var(--accent); color: var(--accent); }
+  #phone-home .ph-files-chip:active { background: var(--bg-hover); }
   /* "+" long-press sheet (#3): a context menu laid out full-width under the
      nav; !important beats showContextMenu's inline left/top like .usage-popup */
   .context-menu.mobile-sheet {
@@ -2752,6 +2776,63 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 .ns-chip.folded { border-style: dashed; }
 .ns-refuse { color: var(--red); font-size: 12px; }
 .ns-flash { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+/* ── lane new-session-layout-v3-build (the owner nodded the v3 POC, 2026-10-23): the 任务组 row on the LEFT under the name;
+   the header's Agent | Terminal is the ONE mode door (Terminal: the backend card is not drawn); 频道 carries one tick per
+   account (a group grant ticked + locked, its 「除了」); the folder chips in sections. The phone (≤ 768 px) is below. ── */
+.ns-kind-seg button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.ns-kind-ic { display: inline-grid; place-items: center; } .ns-kind-ic svg { width: 13px; height: 13px; }
+.ns-card.hidden, .ns-card-h.hidden, .ns-tg-row.hidden { display: none; }
+.ns-be-phone { display: none; }
+.ns-tg-row .ns-tg-box { padding: 5px 6px; gap: 5px; border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); background: color-mix(in srgb, var(--accent) 4%, var(--bg-input)); }
+.ns-tg-row .ns-tg-chip { font-size: 12px; padding: 2px 5px 2px 8px; }
+.ns-tg-chip .tvg-dot { flex: none; }
+.ns-tg-row .ns-tg-add { font-size: 11.5px; padding: 2px 10px; }
+.ns-tg-reason { font-size: 10.5px; font-weight: 400; color: var(--attn-text); line-height: 1.5; }
+.ns-tg-reason.dim { color: var(--text-dim); }
+.ns-tg-it { display: flex; flex-direction: column; min-width: 0; text-align: left; }
+.ns-tg-it small { font-size: 10.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ns-right .ns-acc { display: grid; grid-template-columns: 16px auto minmax(0, 1fr) auto; align-items: center; column-gap: 7px; font-size: 11.5px; font-weight: 400; color: var(--text); padding: 2px 0; cursor: pointer; }
+#ns-right .ns-acc.granted { cursor: default; }
+#ns-right .ns-acc input { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
+#ns-right .ns-acc .ns-acc-n { font-weight: 500; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; }
+.ns-exc { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; color: var(--text-secondary); border: 1px dashed var(--border-active); border-radius: 8px; padding: 0 6px; line-height: 16px; }
+.ns-exc b { font-weight: 500; color: var(--text); }
+.ns-plain { font-size: 11.5px; color: var(--text-secondary); line-height: 1.5; padding: 8px 10px; }
+.ns-badge { font-size: 11px; border-radius: 10px; padding: 2px 8px; border: 1px solid var(--border-active); white-space: nowrap; }
+.ns-badge.todo { color: var(--warn-text); border-color: color-mix(in srgb, var(--yellow) 55%, transparent); background: color-mix(in srgb, var(--yellow) 8%, transparent); }
+.cwd-recent .pf-chipline { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; width: 100%; min-width: 0; }
+.cwd-recent .pf-chipk { font-size: 10px; color: var(--text-dim); flex: none; min-width: 64px; font-weight: 500; }
+/* the right column as an ACCORDION (the phone draws .ns-res rows: one line per resource — what is settled + what is left) */
+.ns-res-list { border: 1px solid var(--border); border-radius: var(--radius); background: color-mix(in srgb, var(--bg-input) 45%, transparent); overflow: hidden; }
+.ns-res { border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.ns-res:last-child { border-bottom: 0; }
+.ns-res-h { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 16px; column-gap: 8px; align-items: center; width: 100%; min-height: 50px; padding: 8px 12px; background: transparent; border: 0; text-align: left; cursor: pointer; color: var(--text); font-family: inherit; }
+.ns-res-ic { color: var(--text-dim); display: grid; place-items: center; }
+.ns-res.locked .ns-res-ic { color: var(--green); }
+.ns-res-t { min-width: 0; }
+.ns-res-t b { font-weight: 500; font-size: 13.5px; display: block; }
+.ns-res-t small { display: block; font-size: 11.5px; color: var(--text-secondary); line-height: 1.4; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ns-res.open .ns-res-t small { white-space: normal; }
+.ns-res-chev { color: var(--text-dim); transition: transform var(--transition); font-size: 14px; }
+.ns-res.open .ns-res-chev { transform: rotate(90deg); }
+.ns-res-body { display: none; padding: 0 12px 12px 42px; font-size: 12.5px; flex-direction: column; gap: 6px; min-width: 0; }
+.ns-res.open .ns-res-body { display: flex; }
+.ns-res-body .ns-builtin .ns-prov { grid-template-columns: 18px minmax(0, 1fr) auto; }
+.ns-res-body .ns-builtin .ns-prov .ns-pv-what { grid-column: 2 / -1; }
+#ns-right .ns-res-body .ns-acc { grid-template-columns: 20px minmax(0, 1fr); row-gap: 2px; padding: 6px 0; font-size: 13px; min-height: 32px; }
+#ns-right .ns-res-body .ns-acc input { width: 18px; height: 18px; }
+#ns-right .ns-res-body .ns-acc .ns-pv-via { grid-column: 2; font-size: 12px; }
+#ns-right .ns-res-body .ns-acc .ns-acc-end { grid-column: 2; justify-self: start; }
+.ns-res-body .ns-pv-subrow select { width: 100%; }
+/* the group picker as a BOTTOM SHEET on the phone (full-width rows under the thumb, ✓, 完成 — not a 220 px popover) */
+.ns-tg-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.38); z-index: 99999; }
+.ns-tg-menu.ns-tg-sheet { left: 0 !important; right: 0; bottom: 0; top: auto !important; max-width: none; min-width: 0; max-height: 70vh; border-radius: 16px 16px 0 0; padding: 6px 8px calc(14px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -8px 32px rgba(0,0,0,.35); }
+.ns-tg-sheet .ns-tg-item { min-height: 50px; font-size: 14px; }
+.ns-tg-sheet .ns-tg-item small { font-size: 11.5px; }
+.ns-tg-tick { margin-left: auto; color: var(--accent); font-weight: 700; width: 22px; text-align: center; flex: none; }
+.ns-sheet-h { display: flex; align-items: center; justify-content: space-between; padding: 6px 6px 4px 10px; font-size: 12.5px; color: var(--text-secondary); }
+.ns-sheet-h b { font-size: 14px; color: var(--text); font-weight: 600; }
+.ns-sheet-h button { border: 0; background: transparent; color: var(--accent); font-size: 14px; font-weight: 600; min-height: 36px; padding: 0 10px; cursor: pointer; font-family: inherit; }
 @media (max-width: 768px) {
   /* the phone: the kind switch is a full-width row under the title (the close button stays at the top right) */
   .ns-head { flex-wrap: wrap; row-gap: 8px; }
@@ -2764,6 +2845,41 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   .ns-dialog .ns-cols { display: grid; grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr); gap: 0; align-items: start; }
   .ns-dialog .ns-col.ns-left { padding-right: 16px; }
   .ns-dialog .ns-col.ns-right { padding-left: 16px; padding-top: 0; border-top: 0; border-left: 1px solid var(--border); }
+}
+/* THE PHONE (lane new-session-layout-v3-build, the design lane's phone addendum — measured on the .348 form at 390×844: a
+   floating card with 3.8–5.3 screens of inner scroll, a 119 px footer, 40–49 targets under 32 px, 12 px inputs iOS zooms
+   into): a FULL-SCREEN SHEET — the header (title · backend chip · machine dot, then Agent | Terminal across) and the footer
+   fixed, the middle scrolls; the footer ONE line (the value chips scroll sideways); 16 px / 42 px inputs; every tap
+   target ≥ 32 px (a group chip's × 30 px); the backend a native select; model / effort / permission one per row. */
+@media (max-width: 768px) {
+  #dialog-new-session.ns-dialog { width: 100vw !important; max-width: none; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; border: 0; overflow: hidden; }
+  #dialog-new-session .ns-head, #dialog-new-session .ns-foot { flex: none; }
+  #dialog-new-session .ns-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px; }
+  #dialog-new-session .ns-head { padding: 10px 12px; }
+  #dialog-new-session .ns-kind-seg button { min-height: 38px; font-size: 14px; }
+  #dialog-new-session .dialog-close { min-width: 36px; min-height: 36px; font-size: 16px; }
+  #dialog-new-session .ns-foot { flex-wrap: nowrap; gap: 8px; padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom, 0px)); }
+  #dialog-new-session .ns-foot-info { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  #dialog-new-session .ns-foot-info::-webkit-scrollbar { display: none; }
+  #dialog-new-session .ns-chip { min-height: 32px; flex: none; font-size: 12px; padding: 0 10px; }
+  #dialog-new-session .ns-refuse { white-space: nowrap; font-size: 13px; }
+  #dialog-new-session .ns-foot .btn-cancel, #dialog-new-session .ns-foot .btn-create { min-height: 40px; flex: none; font-size: 14px; padding: 0 14px; }
+  #dialog-new-session .dialog-body input:not([type="checkbox"]):not([type="radio"]), #dialog-new-session .dialog-body select { font-size: 16px; min-height: 42px; }
+  #dialog-new-session .pf-pick { width: 42px; }
+  #dialog-new-session .ns-be-seg { display: none; }
+  #dialog-new-session .ns-be-phone { display: block; width: 100%; }
+  #dialog-new-session .ns-pair { grid-template-columns: 1fr; }
+  #dialog-new-session .ns-tool-chip, #dialog-new-session .cwd-recent-chip, #dialog-new-session .ns-tg-add, #dialog-new-session .ns-seg button, #dialog-new-session .ns-more-toggle, #dialog-new-session .pf-item, #dialog-new-session .pf-link { min-height: 32px; }
+  #dialog-new-session .ns-tool-chip { font-size: 12.5px; padding: 0 10px; }
+  #dialog-new-session .ns-link { min-height: 32px; display: inline-flex; align-items: center; font-size: 12.5px; padding: 0 4px; }
+  #dialog-new-session .ns-tg-chip { min-height: 32px; font-size: 13px; }
+  #dialog-new-session .ns-tg-chip button { min-width: 30px; min-height: 30px; font-size: 15px; }
+  #dialog-new-session .ns-tg-add { min-width: 44px; }
+  #dialog-new-session .dialog-check-row, #dialog-new-session .pf-tickrow { min-height: 32px; }
+  #dialog-new-session .cwd-recent .pf-chipline { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  #dialog-new-session .cwd-recent .pf-chipline::-webkit-scrollbar { display: none; }
+  #dialog-new-session .cwd-recent .pf-chipk { position: sticky; left: 0; z-index: 1; background: var(--bg-dialog); padding-right: 4px; }
+  #dialog-new-session .cwd-recent-chip { flex: none; }
 }
 
 /* Recent working-directory chips in the New Session dialog */
@@ -3930,7 +4046,6 @@ label.cfg-row {
 /* Manage Agents: host selector row */
 /* (the .agents-host-row machine selector was retired by the 2.245.0
    machine-sectioned overview — sections replaced the dropdown) */
-.cwd-recent-loading { font-size: 10px; color: var(--text-dim); }
 
 /* Sidebar manage mode: mark-then-apply batch management */
 #manage-toggle.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
@@ -4354,8 +4469,11 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .win-auth-badge.sub.wab-icon .wab-glyph { display: inline-flex; }
 .win-auth-badge.wab-icon { padding: 0 3px; }
 /* Session Properties window */
-.session-props .session-detail-row { padding: 2px 0; display: flex; align-items: center; gap: 8px; }
-.session-props .session-detail-label { flex-shrink: 0; width: 72px; color: var(--text-dim); font-size: 10px; }
+/* ONE declared label column (the sidebar card's min-width:42px rule never decides it): a label longer than the column
+   ("Browsers at once", 「同時に動かせるブラウザ数」) wraps, and the row aligns on the FIRST line's
+   baseline so its value sits beside the label's first line — never centred between two of them */
+.session-props .session-detail-row { padding: 2px 0; display: flex; align-items: baseline; gap: 8px; }
+.session-props .session-detail-label { flex: 0 0 72px; min-width: 0; overflow-wrap: break-word; color: var(--text-dim); font-size: 10px; }
 /* A filesystem path inside a properties row: monospace, and the row opts out
    of the one-line ellipsis (a worktree path is long by construction — the
    default .session-detail-value is nowrap/ellipsis, which would hide the end
@@ -8402,3 +8520,23 @@ button.vw-chip { cursor: pointer; }
 .ob-advanced { margin: 10px 0; text-align: left; }
 .ob-advanced > summary { cursor: pointer; color: var(--text-dim); font-size: 12px; list-style: revert; }
 .ob-advanced[open] > summary { margin-bottom: 8px; }
+
+/* ── THE DIAGRAM CARD (lane chat-mermaid, 2.369.351 — src/lib/mermaid-render.js): a ```mermaid fence in the chat, the
+   editor's preview, the file viewer, a job panel, a For-you item. data-view = diagram | source; data-diagram = loading |
+   ok | failed. The figure is `contain: paint` — the picture never paints outside its own box (safe-html.js's rule). */
+.chat-diagram { margin: 8px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-input); overflow: hidden; max-width: 100%; }
+.chat-diagram-bar { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.chat-diagram-seg { display: inline-flex; margin-right: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.chat-diagram-seg button { font: inherit; font-size: 12px; padding: 2px 10px; border: 0; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.chat-diagram-seg button + button { border-left: 1px solid var(--border); }
+.chat-diagram-seg button[aria-pressed="true"] { background: var(--accent-dim); color: var(--text); }
+.chat-diagram-seg button:hover { color: var(--text); }
+.chat-diagram[data-diagram="failed"] .chat-diagram-seg button[data-v="diagram"], .chat-diagram[data-diagram="failed"] .chat-diagram-zoom { opacity: 0.45; cursor: default; }
+.chat-diagram-figure { contain: paint; overflow: auto; padding: 10px; display: flex; justify-content: center; color: var(--text-dim); font-size: 12px; }
+.chat-diagram-figure > svg { display: block; flex: 0 1 auto; height: auto; max-width: 100%; max-height: min(70vh, 720px); } /* a tall one fits (its aspect kept); 放大 shows it full size */
+.chat-diagram[data-view="source"] > .chat-diagram-figure, .chat-diagram[data-view="diagram"] > pre.chat-diagram-source { display: none; }
+.chat-diagram > pre.chat-diagram-source { margin: 0; border: 0; border-radius: 0; }
+.chat-diagram-error { padding: 6px 10px; border-bottom: 1px solid var(--border); color: var(--red); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-diagram-line { display: block; min-height: 1lh; }
+.chat-diagram-line-bad { background: rgba(239, 68, 68, 0.22); box-shadow: inset 3px 0 0 var(--red); }
+.file-viewer-diagram .media-content { background: var(--bg-window); }

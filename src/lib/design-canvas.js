@@ -14,7 +14,8 @@
 //     without one (the published page) it is the srcdoc. `updateFrame` swaps ONE document in place (the element, the
 //     view and every other frame untouched); a frame the read refused draws a NAMED card, never a blank box.
 //   · NAVIGATING vs USING: on the canvas a transparent SHIELD lies over every frame, so wheel / drag / pinch move the
-//     canvas wherever the pointer is; the focused view (one artboard, fit-width) and the pick mode lift the shields —
+//     canvas wherever the pointer is; the focused view (one artboard enlarged — a screen whole, a tall page at fit-width:
+//     design-canvas-model.js focusView) and the pick mode lift the shields —
 //     the artboard is then live (its own scroll, its own clicks, the picker's outline).
 //   · THE PICK CHANNEL: one `message` listener per canvas (bound to the caller's AbortSignal) believes a message only
 //     from one of ITS frames (`routeMessage`: event.source IS the frame's window), a kind in the closed set, every
@@ -26,7 +27,7 @@
 //     for fullscreen on the user's press (a refusal leaves it filling its pane); the frames stay SHIELDED meanwhile.
 //   · Lifecycle: every listener on the caller's signal; `dispose()` aborts them and drops the DOM.
 import {
-  zoomStep, zoomAt, panBy, pinchView, fitView, focusView, boundsOf, normView, toScreen, toWorld,
+  zoomStep, zoomAt, panBy, pinchView, fitView, focusView, declaredPrint, boundsOf, normView, toScreen, toWorld,
   pagesOf, pageOf, notesOn, launchOf, NOTE_COLOR_VARS, routeMessage, frameSrcdoc, clampZoom, frameKeyGate, frameSay,
   EDIT_GRACE_MS, presentOrder, presentView, presentKey, presentGesture, presentStep,
 } from './design-canvas-model.js';
@@ -287,12 +288,13 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
     const f = st.frames.find((x) => x.file === st.focused);
     const rec = f && els.get(f.file);
     if (!f || !rec) return;
-    const fv = focusView(f, paneSize());
+    const fv = focusView(f, paneSize(), { declared: declaredPrint(st.manifest, f.file) });
     rec.focusH = fv.frameH;
     placeFrame(rec, f);
     setView(fv.view);
   }
-  /** THE FOCUSED VIEW: one artboard at fit-width, live (shield lifted), the others hidden. null = back to the canvas. */
+  /** THE FOCUSED VIEW: one artboard enlarged (a screen whole, a tall page at fit-width), live (shield lifted), the others
+   *  hidden. null = back to the canvas. */
   function focus(file) {
     if (!file) { unfocus(); return true; }
     const f = st.frames.find((x) => x.file === file);

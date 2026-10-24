@@ -4,7 +4,7 @@
   "description": "VibeSpace — a backend-agnostic web workspace for coding agents (Claude Code, Codex, …) with a multi-session tiling window manager",
   "main": "server.js",
   "scripts": {
-    "build": "node scripts/i18n-check.mjs && node -e \"require('fs').writeFileSync('src/lib/build-version.js','// GENERATED at build (gitignored) — the bundle\\'s own version, compared against /api/version on ws reconnect (stale-tab auto-reload)\\nexport const BUILD_VERSION = '+JSON.stringify(require('./package.json').version)+';\\n')\" && esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify && node scripts/build-novnc.mjs && esbuild src/design-viewer-entry.js --bundle --outfile=public/design-viewer.js --format=iife --platform=browser --target=es2020 --minify && esbuild src/doc-editor-entry.js --bundle --outfile=public/doc-editor.js --format=esm --platform=browser --target=es2020 --minify && npm run build:agentd && node scripts/test-bundle-globals.mjs && node scripts/test-architecture.mjs && node scripts/test-ws-contract.mjs && node scripts/test-session-schema.mjs",
+    "build": "node scripts/i18n-check.mjs && node -e \"require('fs').writeFileSync('src/lib/build-version.js','// GENERATED at build (gitignored) — the bundle\\'s own version, compared against /api/version on ws reconnect (stale-tab auto-reload)\\nexport const BUILD_VERSION = '+JSON.stringify(require('./package.json').version)+';\\n')\" && esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify && node scripts/build-novnc.mjs && esbuild src/design-viewer-entry.js --bundle --outfile=public/design-viewer.js --format=iife --platform=browser --target=es2020 --minify && esbuild src/doc-editor-entry.js --bundle --outfile=public/doc-editor.js --format=esm --platform=browser --target=es2020 --minify && esbuild src/mermaid-entry.js --bundle --outfile=public/mermaid.js --format=esm --platform=browser --target=es2020 --minify --log-level=error && npm run build:agentd && node scripts/test-bundle-globals.mjs && node scripts/test-architecture.mjs && node scripts/test-ws-contract.mjs && node scripts/test-session-schema.mjs",
     "start": "npm run build && node server.js",
     "dev": "npm run build && node server.js",
     "build:agentd": "node -e \"const v=require('./package.json').version;require('fs').writeFileSync('src/agentd/version.js','module.exports = { VERSION: '+JSON.stringify(v)+' };\\n')\" && esbuild src/agentd/agentd.js --bundle --platform=node --external:node-pty --preserve-symlinks --outfile=data/bin/vibespace-agentd.js && esbuild src/agentd/attach-cli.js --bundle --platform=node --outfile=data/bin/vibespace-agentd-attach.js && node scripts/agentd-release.mjs",
@@ -55,6 +55,7 @@
     "highlight.js": "^11.11.1",
     "mammoth": "^1.8.0",
     "marked": "^12.0.0",
+    "mermaid": "^11.17.2",
     "multer": "^1.4.5-lts.1",
     "node-pty": "^1.0.0",
     "pptx-preview": "^1.0.7",

@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { createRequire } from 'node:module';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
@@ -201,6 +202,43 @@ const PAYLOAD = (recs) => ({
   fs.appendFileSync(stash3, JSON.stringify({ rid: 'req_old', ts: Date.now() - 40 * 86400e3, acct: 'sub-true', acctKnown: true }) + '\n');
   await mk3().replayed; for (let k = 0; k < 50 && fs.statSync(stash3).ino === st0.ino; k++) await new Promise((r) => setTimeout(r, 50));
   ok(fs.statSync(stash3).ino !== st0.ino && !fs.readFileSync(stash3, 'utf8').includes('req_old') && fs.readFileSync(stash3, 'utf8').includes('req_011TESTTRUTH000000000001'), 'B-1319: …one past the 30-day horizon is trimmed — the rewrite lands off the loop (a new file renamed in), the fresh rows kept');
+
+  // lane ci-351-reds — THE REPLAY IN TIME SLICES IS THE SAME REPLAY. Its 20 000-line slice took 31 ms on the measured boot
+  // and the first one rode the listen tick (the read resolves in a poll-phase callback; ONE setImmediate from there stays
+  // in that loop iteration). Now: a later turn first, then REPLAY_SLICE_MS slices. The ONE-PASS copy (the slice bound
+  // cut) is the control. Two copies of one 12 MB+ stash (in-horizon rows, rows to trim, unknown-account rows, a blank and
+  // a torn line): the same map, the same counts, the same rewritten bytes — and the sliced one hands the loop back.
+  {
+    const oisrc = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8');
+    const FIRST = "    await nextTurn();   // never on the tick the read resolved on\n", BOUND = 'replayTake(performance.now() + REPLAY_SLICE_MS)';
+    ok(oisrc.split(FIRST).length === 2 && oisrc.split(BOUND).length === 2, 'SLICED REPLAY premise: the first hop and the time bound are each one site of the module');
+    const OnePass = mutantCopies('otel-truth-slice', REPO).load('src/server/otel-ingest.js', oisrc.replace(FIRST, '').replace(BOUND, 'replayTake()'), 'one-pass');
+    const now = Date.now(), rows = [];
+    for (let k = 0; k < 90000; k++) {
+      const old = k % 7 === 3, known = k % 5 !== 1;
+      rows.push(JSON.stringify({ rid: `req_slice${String(k).padStart(6, '0')}`, ts: old ? now - 40 * 86400e3 : now - k * 1000, acct: known ? `sub-${k % 3}` : null, acctKnown: known, pad: 'q'.repeat(90) }));
+      if (k === 4000) rows.push(''); if (k === 9000) rows.push('{"rid":"req_torn","ts":');
+    }
+    const body = rows.join('\n') + '\n';
+    const mkDir = (tag) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), `vs-otel-slice-${tag}-`)); fs.mkdirSync(path.join(d, 'usage-history')); fs.writeFileSync(path.join(d, 'usage-history', 'otel-truth.ndjson'), body); return d; };
+    const replayOn = async (mod, tag) => {
+      const d = mkDir(tag), f = path.join(d, 'usage-history', 'otel-truth.ndjson'), ino = fs.statSync(f).ino;
+      let last = performance.now(), maxGap = 0; const iv = setInterval(() => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); last = t; }, 1);
+      const oi = mod.create({ dataDir: d, PORT: 0, getUsageHistory: () => fakeUH, identityGroups: () => groups, listAccounts: () => [], serverSetting: () => undefined });
+      await oi.replayed;
+      await new Promise((r) => setTimeout(r, 5));
+      clearInterval(iv);
+      for (let k = 0; k < 100 && fs.statSync(f).ino === ino; k++) await new Promise((r) => setTimeout(r, 50));   // the trim's rewrite, off the loop
+      const map = []; for (let k = 0; k < 90000; k += 97) map.push(oi.observedOrgForRid(`req_slice${String(k).padStart(6, '0')}`));
+      const out = { stats: JSON.stringify(oi.stats()), map: JSON.stringify(map), bytes: fs.readFileSync(f, 'utf8'), rewritten: fs.statSync(f).ino !== ino, maxGap: Math.round(maxGap) };
+      fs.rmSync(d, { recursive: true, force: true });
+      return out;
+    };
+    const S = await replayOn(require(REPO + '/src/server/otel-ingest.js'), 's'), O = await replayOn(OnePass, 'o');
+    ok(body.length > 12 * 1048576 && S.rewritten && O.rewritten && S.stats === O.stats && S.map === O.map && S.bytes === O.bytes && !S.bytes.includes('req_torn') && S.bytes.length < body.length,
+      `SLICED REPLAY: the same observation map (${S.stats}), the same counts and the same trimmed stash, byte for byte (${(S.bytes.length / 1048576).toFixed(1)} of ${(body.length / 1048576).toFixed(1)} MB kept) as the one-pass replay`);
+    ok(S.maxGap * 2 < O.maxGap, `SLICED REPLAY: it hands the loop back — its longest loop gap ${S.maxGap} ms vs ${O.maxGap} ms for the one-pass replay of the same stash`);
+  }
   srv.close();
 }
 

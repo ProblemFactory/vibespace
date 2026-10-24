@@ -6,7 +6,9 @@
 //
 //   · THE VIEW is `{x, y, z}`: a world point (wx, wy) is drawn at screen (x + wx·z, y + wy·z) inside the canvas
 //     viewport (local px — the viewport sits at NET zoom 1, so local px = viewport px). `zoomAt` keeps the world
-//     point under an anchor fixed; `fitView` frames a bounds box; `focusView` = one artboard at fit-width.
+//     point under an anchor fixed; `fitView` frames a bounds box; `focusView` = one artboard enlarged — a screen WHOLE,
+//     a tall page at fit-width (lane design-focus-whole). Each view's ring is ONE constant: FIT_PAD / FOCUS_PAD /
+//     PRESENT_PAD.
 //   · FRAMES are the artboards placed on the world: `framesOf(manifest, names)` IS the hub's design-model.js
 //     `validateManifest` + `layoutOf` (int201: L2's reader-side twin became the import) — a manifest the hub would
 //     refuse is laid out WITHOUT it, as the hub's read does — for a reader that has only the manifest (the published
@@ -37,8 +39,15 @@ export const ZOOM_MAX = 4;
 export const ZOOM_STEPS = Object.freeze([0.05, 0.1, 0.15, 0.2, 0.25, 0.33, 0.5, 0.67, 0.75, 1, 1.25, 1.5, 2, 3, 4]);
 /** Pane margin around a fitted world (room for the artboard name strips above the frames). */
 export const FIT_PAD = 40;
-/** The focused view's margin. */
+/** The focused view's margin — the ring around ONE artboard, the same on all four sides (its name strip is hidden). */
 export const FOCUS_PAD = 16;
+/** The presented view's margin: none — a slide fills the screen. */
+export const PRESENT_PAD = 0;
+/** THE TALL-PAGE LINE (lane design-focus-whole, the census of every design.json on the hub, 2026-10-23: 63 artboards in
+ *  11 designs — the tallest SCREEN 390×844 / 375×812 at h/w 2.165, the shortest PAGE 390×960 at 2.462): an artboard
+ *  taller than PAGE_RATIO × its width is a page whose document scrolls; every other artboard is a screen. A 20:9 / 21:9
+ *  phone (2.22 / 2.33) stays a screen; a taller screen declares `"print": "fixed"`. */
+export const PAGE_RATIO = 2.4;
 /** The hub's layout constants — read off design-model.js LIMITS (one home for the numbers). */
 export const LAYOUT = Object.freeze(Object.fromEntries(['defaultW', 'defaultH', 'gapRow', 'gapRows', 'rowMaxW', 'minSize', 'maxSize', 'coord', 'noteMinW', 'noteMaxW', 'noteText', 'artboards', 'notes', 'pages'].map((k) => [k, DM_LIMITS[k]])));
 export const ENTRY_FILE = DM_ENTRY_FILE;
@@ -141,14 +150,31 @@ export function fitView(bounds, pane, { pad = FIT_PAD, maxZ = 1 } = {}) {
   return { x: (pw - bounds.w * z) / 2 - bounds.x * z, y: (ph - bounds.h * z) / 2 - bounds.y * z, z };
 }
 
-/** THE FOCUSED VIEW: one artboard at fit-width (never past 2×), its top at the pad; `frameH` = the height its frame
- *  takes — the artboard's own, or the pane's when the artboard is taller (its document then scrolls inside). */
-export function focusView(rect, pane, { pad = FOCUS_PAD, maxZ = 2 } = {}) {
+/** How the focused view shows an artboard: 'page' (a TALL PAGE — taller than PAGE_RATIO × its width: a document that
+ *  scrolls) or 'screen' (every other one — a fixed-size screen, shown whole). `declared` = the `print` its manifest row
+ *  DECLARES (`declaredPrint`): a row that declares "fixed" is a screen at any size. */
+export function focusFit(rect, declared = null) {
+  if (declared === 'fixed') return 'screen';
+  return rect && rect.w > 0 && rect.h > 0 && rect.h / rect.w > PAGE_RATIO ? 'page' : 'screen';
+}
+/** The `print` an artboard's manifest row DECLARES ('fixed' | 'flow'), or null when it declares none — a frame's own
+ *  `print` is the hub's default 'fixed' and cannot tell a declaration from silence. */
+export function declaredPrint(manifest, file) {
+  const rows = isObj(manifest) && Array.isArray(manifest.artboards) ? manifest.artboards : [];
+  const row = rows.find((a) => isObj(a) && a.file === file);
+  return row && (row.print === 'fixed' || row.print === 'flow') ? row.print : null;
+}
+/** THE FOCUSED VIEW: one artboard enlarged (never past 2×). A SCREEN is shown WHOLE — contained and centred both ways
+ *  with the same `pad` ring on all four sides (fitView's rule), its frame its own height; a TALL PAGE (`focusFit`) is
+ *  shown at fit-width with its top at the pad, its frame cut to the pane — its document scrolls inside, the one artboard
+ *  that can. → {view, frameH, fit}. */
+export function focusView(rect, pane, { pad = FOCUS_PAD, maxZ = 2, declared = null } = {}) {
   const pw = pane && isNum(pane.w) ? pane.w : 0, ph = pane && isNum(pane.h) ? pane.h : 0;
-  if (!rect || !(rect.w > 0) || !(rect.h > 0) || pw <= 0 || ph <= 0) return { view: { x: pad, y: pad, z: 1 }, frameH: rect && rect.h > 0 ? rect.h : LAYOUT.defaultH };
+  if (!rect || !(rect.w > 0) || !(rect.h > 0) || pw <= 0 || ph <= 0) return { view: { x: pad, y: pad, z: 1 }, frameH: rect && rect.h > 0 ? rect.h : LAYOUT.defaultH, fit: 'screen' };
+  if (focusFit(rect, declared) === 'screen') return { view: fitView(rect, pane, { pad, maxZ }), frameH: rect.h, fit: 'screen' };
   const z = clampZoom(Math.min((pw - 2 * pad) / rect.w, maxZ));
   const frameH = Math.max(Math.min(LAYOUT.minSize, rect.h), Math.min(rect.h, Math.floor((ph - 2 * pad) / z)));
-  return { view: { x: (pw - rect.w * z) / 2 - rect.x * z, y: pad - rect.y * z, z }, frameH };
+  return { view: { x: (pw - rect.w * z) / 2 - rect.x * z, y: pad - rect.y * z, z }, frameH, fit: 'page' };
 }
 
 export const zoomPercent = (z) => `${Math.round(clampZoom(z) * 100)}%`;
@@ -444,8 +470,8 @@ export function presentOrder(frames, pageId) {
   return rows.flatMap((r) => r.items.sort((a, b) => a.f.x - b.f.x || a.i - b.i).map(({ f }) => f.file)).filter((f) => !seen.has(f) && seen.add(f));
 }
 /** THE PRESENTED VIEW: one artboard whole and centred in the pane — scaled UP to fill it (a slide on a big screen, up
- *  to ZOOM_MAX) or down to fit; no margin unless asked. */
-export function presentView(rect, pane, { pad = 0 } = {}) {
+ *  to ZOOM_MAX) or down to fit; no margin unless asked (PRESENT_PAD). */
+export function presentView(rect, pane, { pad = PRESENT_PAD } = {}) {
   return fitView(rect, pane, { pad, maxZ: ZOOM_MAX });
 }
 /** A key while presenting → 'next' | 'prev' | 'first' | 'last' | 'exit' | null (not ours — the browser keeps it). */

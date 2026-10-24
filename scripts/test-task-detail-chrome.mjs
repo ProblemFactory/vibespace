@@ -13,8 +13,13 @@
 //            objective's blur saves it and the preview says it verbatim; Backlog / 活动记录 are the full viewers with their
 //            boxes saving on blur / Enter; 成员 lists the members, ★ marks, 「在这里开始对话」 opens New Session for the group;
 //            a fold chip opens 更多选项 on its row
+//   desk · Session Properties (lane session-props-scroll) — the OTHER window on the .task-detail root class: at 440 × 620 in
+//            the owner's shape (every Task Group, config overrides, a browser block, a history) its sections sit in ONE
+//            .task-detail-body that scrolls (scrollTop and a real wheel), inside the padding (label, «更改…», 任务组 boxes),
+//            ≥ 8 px between sections, one 72 px label column; a broadcast re-render keeps the reader's place; a control
+//            with the body class off (the 2.369.348 shape) fails the same measures
 //   phone 390 (zh) · the same window: one card per Context row, nothing wider than the viewport
-// PNGs: $VIBESPACE_TGC_PNG_DIR/{desk-settings,desk-stepped,desk-ref,desk-backlog,desk-members,phone}.png
+// PNGs: $VIBESPACE_TGC_PNG_DIR/{desk-settings,desk-stepped,desk-ref,desk-backlog,desk-members,desk-session-props,phone}.png
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -255,6 +260,94 @@ try {
   await press(D, `JS:(${W(ir.id)}).element.querySelector('.task-detail-member .task-detail-unbind')`);
   const unbound = await until(async () => !(await groupOf(ir.id)).sessions.length, 10000);
   check('移出 unbinds the member', !!unbound);
+
+  // ════ desk: Session Properties — the OTHER window on the .task-detail root class, the same body ════
+  // (lane session-props-scroll, the owner on 2.369.348: 「这个界面目前也不能滚动了，而且 margin 很奇怪」 — int346 moved the root's
+  // padding / gap / scroll into .task-detail-body and this window kept its sections on the bare root)
+  console.log('── desk: Session Properties on the shared body (440 × 620, the owner\'s shape) ──');
+  for (const title of ['学校', '家庭事务']) await api('POST', '/api/tasks', { title });
+  const sp = await D.ev(`(async () => {
+    const sb = app.sidebar;
+    const s = { backend: 'claude', sessionId: 'aaaaaaaa-3333-4000-8000-000000000003', backendSessionId: 'aaaaaaaa-3333-4000-8000-000000000003', cwd: ${JSON.stringify(H('work/ir'))},
+      name: '属性窗口', status: 'live', webuiId: 'sess-props-1', webuiMode: 'chat', startedAt: Date.now() - 3600e3, pid: 4242, auth: { source: 'subscription' },
+      model: 'claude-opus-4-1', effort: 'high', modelOrigin: 'chosen', effortOrigin: 'chosen', browserCap: 3,
+      browserFact: { using: { kind: 'profile', label: '工作', state: 'running' }, pinned: { id: 'bp-1234abcd', label: '工作', origin: 'chosen' } } };
+    const key = sb._getSessionStateKey(s);
+    if (!app._browserProfiles) app._browserProfiles = { profiles: [{ id: 'bp-1234abcd', label: '工作', scope: 'all' }], leases: [] };
+    sb.setSessionConfig(s, { ...(sb.getSessionConfig(s) || {}), model: 'opus', effort: 'high', permission: 'acceptEdits' });
+    const gs = ((await (await fetch('/api/tasks')).json()).tasks || []).filter((g) => !g.archived);
+    for (const g of gs) await fetch('/api/tasks/' + g.id + '/bind', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionKey: key }) });
+    for (const [state, reason] of [['working', '读简报'], ['blocked', '等回复'], ['working', '量尺寸'], ['review', '等验证'], ['working', '修 body'], ['done', '已提交']])
+      await fetch('/api/session-status', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionKey: key, state, reason }) });
+    window.__spw = app.openSessionProps(s);
+    return { groups: gs.length, win: !!window.__spw };
+  })()`);
+  check('setup: a live session in every Task Group (≥ 4), config overrides, a browser block and a status history', !!sp && sp.win && sp.groups >= 4, sp);
+  const SPB = `window.__spw.content.querySelector('.session-props > .task-detail-body')`;
+  await until(() => D.ev(`(() => { const b = ${SPB}; return !!b && b.querySelectorAll('.session-history-item').length >= 3 && b.querySelectorAll('.session-props-group input:checked').length >= 4 && !!b.querySelector('.session-props-browser'); })()`), 15000);
+  await sleep(600);
+  const spGeo = () => D.ev(`(() => { const w = window.__spw; const root = w.content.querySelector('.session-props'); const b = root.querySelector(':scope > .task-detail-body');
+    const c = w.content.getBoundingClientRect(); const e = w.element.getBoundingClientRect();
+    const sc = b || root; const secs = [...root.querySelectorAll('.task-detail-section')].map((n) => n.getBoundingClientRect());
+    const head = root.querySelector('.task-detail-label').getBoundingClientRect();
+    const chg = [...root.querySelectorAll('.task-detail-btn')].find((n) => /更改/.test(n.textContent));
+    const cbs = [...root.querySelectorAll('.session-props-group input')].map((n) => Math.round(n.getBoundingClientRect().left - c.left));
+    const labels = [...root.querySelectorAll('.session-detail-label')].map((n) => Math.round(n.getBoundingClientRect().width));
+    const values = [...root.querySelectorAll('.session-detail-row > .session-detail-value')].map((n) => Math.round(n.getBoundingClientRect().left - c.left));
+    return { win: [Math.round(e.width), Math.round(e.height)], onBody: b ? b.querySelectorAll(':scope > .task-detail-section').length : 0, onRoot: root.querySelectorAll(':scope > .task-detail-section').length,
+      sH: sc.scrollHeight, cH: sc.clientHeight, cw: Math.round(c.width), headL: Math.round(head.left - c.left), headT: Math.round(head.top - c.top),
+      chgR: chg ? Math.round(c.right - chg.getBoundingClientRect().right) : null, cbs, gaps: secs.slice(1).map((r, i) => Math.round(r.top - secs[i].bottom)),
+      labels: [...new Set(labels)], values: [...new Set(values)] }; })()`);
+  const g0 = await spGeo();
+  check('Session Properties opens at 440 × 620 with EVERY section in ONE .task-detail-body under the .task-detail root (none on the root)', !!g0 && g0.win[0] === 440 && g0.win[1] === 620 && g0.onBody >= 8 && g0.onRoot === 0, g0);
+  check(`the owner's shape is taller than the window and the body scrolls (scrollHeight ${g0 && g0.sH} > clientHeight ${g0 && g0.cH})`, !!g0 && g0.sH > g0.cH + 200, g0);
+  check(`the first section label sits inside the padding (${g0 && g0.headL} px from the content's left edge, ${g0 && g0.headT} px from its top; ≥ 10 / ≥ 8)`, !!g0 && g0.headL >= 10 && g0.headT >= 8, g0);
+  check(`«更改…» ends inside the padding (${g0 && g0.chgR} px from the content's right edge, ≥ 10) and the 任务组 checkboxes start ≥ 10 px in (${g0 && g0.cbs.join(',')})`, !!g0 && g0.chgR >= 10 && g0.cbs.length >= 4 && g0.cbs.every((x) => x >= 10), g0);
+  check(`consecutive sections are ≥ 8 px apart (${g0 && g0.gaps.join(',')})`, !!g0 && g0.gaps.length >= 7 && g0.gaps.every((x) => x >= 8), g0);
+  check(`the label column is ONE declared width (${g0 && g0.labels.join(',')} px) and every value starts on one line x (${g0 && g0.values.join(',')})`, !!g0 && g0.labels.length === 1 && g0.labels[0] === 72 && g0.values.length === 1, g0);
+  const st400 = await D.ev(`(() => { const b = ${SPB}; b.scrollTop = 400; return b.scrollTop; })()`);
+  check(`setting scrollTop = 400 moves it (${st400})`, st400 === 400, st400);
+  // a REAL wheel over the body (the pointer moved there first)
+  const wpt = await D.ev(`(() => { const b = ${SPB}; b.scrollTop = 0; const r = b.getBoundingClientRect(); const x = r.left + 40, y = r.bottom - 60; const hit = document.elementFromPoint(x, y); return { x, y, inside: !!hit && b.contains(hit) }; })()`);
+  await D.S('Input.dispatchMouseEvent', { type: 'mouseMoved', x: wpt.x, y: wpt.y });
+  await D.S('Input.dispatchMouseEvent', { type: 'mouseWheel', x: wpt.x, y: wpt.y, deltaX: 0, deltaY: 300 });
+  const wheeled = await until(() => D.ev(`${SPB}.scrollTop > 0 ? ${SPB}.scrollTop : null`), 3000, 100);
+  check(`a real mouse wheel over the body scrolls it (scrollTop ${wheeled})`, wpt.inside && wheeled >= 100, { wpt, wheeled });
+  await shot(D.S, 'desk-session-props.png');
+  // the window re-renders on every broadcast (a working session ⇒ every few seconds): the reader keeps their place
+  const spKept = await D.ev(`(async () => { const b = ${SPB}; b.scrollTop = 400; const i = document.createElement('i'); i.id = 'sp-body-sentinel'; b.appendChild(i);
+    [...app.ws.globalHandlers].forEach((h) => { try { h({ type: 'tasks-updated' }); } catch { } });
+    await new Promise((r) => setTimeout(r, 900));
+    const at = b.scrollTop; await new Promise((r) => setTimeout(r, 1200));
+    return { rebuilt: !document.getElementById('sp-body-sentinel'), at, later: b.scrollTop, same: b === ${SPB} }; })()`);
+  check(`a broadcast re-render rebuilds the body (the sentinel is gone) and keeps the reader at 400 (${spKept && spKept.at} → ${spKept && spKept.later})`, !!spKept && spKept.rebuilt && spKept.same && Math.abs(spKept.at - 400) <= 1 && Math.abs(spKept.later - 400) <= 1, spKept);
+  // …and when the history answers SLOWLY (the rebuilt window is laid out before the list refills — on .345 the list shrank to
+  // «Loading history…» at that moment and the view under it jumped by the list's height, 160 px in ja): the old height is held
+  const spSlow = await D.ev(`(async () => {
+    const b = ${SPB}; const realFetch = window.fetch; let slowed = 0;
+    window.fetch = function (u) { if (String(u).includes('/api/session-status/history')) { slowed++; const args = arguments, self = this; return new Promise((r) => setTimeout(r, 700)).then(() => realFetch.apply(self, args)); } return realFetch.apply(this, arguments); };
+    const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const mark = () => { const n = [...b.querySelectorAll('.task-detail-section > .task-detail-label')].find((l) => /任务组|Task Groups|タスクグループ/.test(l.textContent)); return Math.round(n.getBoundingClientRect().top - b.getBoundingClientRect().top); };
+    const histH = () => { const h = b.querySelector('.session-history-list'); return h ? Math.round(h.getBoundingClientRect().height) : null; };
+    try {
+      b.scrollTop = 400; await frames();
+      const before = mark(), h0 = histH();
+      [...app.ws.globalHandlers].forEach((h) => { try { h({ type: 'tasks-updated' }); } catch { } });
+      await new Promise((r) => setTimeout(r, 650)); await frames();
+      const mid = mark(), hMid = histH(), loading = /Loading|加载|読み込み/.test(b.querySelector('.session-history-list').textContent);
+      await new Promise((r) => setTimeout(r, 1200)); await frames();
+      return { slowed, before, mid, after: mark(), top: b.scrollTop, h0, hMid, loading, held: (b.querySelector('.session-history-list').style.minHeight || '') };
+    } finally { window.fetch = realFetch; }
+  })()`);
+  check(`a re-render whose history answers 700 ms late keeps the view still (the 任务组 header ${spSlow && spSlow.before} → ${spSlow && spSlow.mid} → ${spSlow && spSlow.after} px): the refilling list holds its old height (${spSlow && spSlow.h0} → ${spSlow && spSlow.hMid}) and lets go once it paints`,
+    !!spSlow && spSlow.slowed >= 1 && spSlow.loading && spSlow.mid === spSlow.before && Math.abs(spSlow.after - spSlow.before) <= 1 && spSlow.hMid === spSlow.h0 && spSlow.held === '', spSlow);
+  // NEGATIVE CONTROL: the same window with the body's class taken off — the 2.369.348 shape — fails the same measures
+  const ctl = await D.ev(`(async () => { const b = ${SPB}; b.className = ''; await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const root = window.__spw.content.querySelector('.session-props'); const c = window.__spw.content.getBoundingClientRect();
+    b.scrollTop = 400; root.scrollTop = 400; const out = { bodyTop: b.scrollTop, rootTop: root.scrollTop, headL: Math.round(root.querySelector('.task-detail-label').getBoundingClientRect().left - c.left) };
+    b.className = 'task-detail-body'; return out; })()`);
+  check(`NEGATIVE CONTROL: without the body class (the 2.369.348 shape) nothing scrolls and the first label touches the edge (${JSON.stringify(ctl)})`, !!ctl && ctl.bodyTop === 0 && ctl.rootTop === 0 && ctl.headL < 10, ctl);
+  await D.ev(`(app.wm.closeWindow(window.__spw.id), true)`);
 
   // ════ phone 390 ════
   console.log('── phone 390 (zh) ──');

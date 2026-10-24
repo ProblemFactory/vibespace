@@ -658,8 +658,8 @@
 .chat-diff > summary { list-style: none; cursor: pointer; }
 .chat-diff > summary::-webkit-details-marker { display: none; }
 .chat-diff-summary { font-size: 11px; color: var(--text-dim); padding: 2px 0; }
-.chat-diff-summary:hover { color: var(--text-secondary); }
-.chat-diff-summary::before { content: '\25B8  '; content: '\25B8  ' / ""; }
+.chat-diff > .chat-diff-summary:hover { color: var(--text-secondary); }
+.chat-diff > .chat-diff-summary::before { content: '\25B8  '; content: '\25B8  ' / ""; } /* ci-351-reds: the caret only on a summary that opens something (a <details class="chat-diff">) — a static «N lines · size» or «stopped» line wears none (the owner 2026-10-24: 「这俩为啥无法展开」) */
 .chat-diff[open] > .chat-diff-summary::before { content: '\25BE  '; content: '\25BE  ' / ""; }
 .chat-diff-body { font-family: 'SF Mono','Fira Code','JetBrains Mono',monospace; font-size: 11px; line-height: 1.5; overflow-x: auto; margin-top: 4px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .chat-diff-body > div { display: flex; padding: 0 10px; white-space: pre; min-height: 18px; }

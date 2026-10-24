@@ -24,6 +24,7 @@ import { t, tc, resolveLang } from './i18n.js';
 import { cardWords } from './app-card-model.js'; // design 009: THE words of an app install's one card
 import { Marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js';
+import { mountDiagrams } from './mermaid-render.js';
 import { copyText, escHtml, showContextMenu, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { pressVerdict } from './press-arm.js'; // verify-r6 V1: an Allow counts only once its pane has been shown ARM_MS
@@ -51,6 +52,7 @@ function mdInto(el, src, { inline = false } = {}) {
   el.innerHTML = sanitizeHtml(inline ? md.parseInline(s) : md.parse(s));
   // a link opens beside the workspace, never in place of it
   for (const a of el.querySelectorAll('a[href]')) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+  if (!inline) mountDiagrams(el); // lane chat-mermaid: an item's ```mermaid fence draws
 }
 
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };

@@ -7,6 +7,7 @@ import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag do
 import { getFileIcon, hasDedicatedViewer, getCategory } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { FileViewer } from './file-viewer.js';
+import { explorerPhoneBits } from './phone-files.js'; // lane phone-files-door: ‹ home, the breadcrumbs, «New session here» (phone only)
 import { t, tc } from './i18n.js';
 
 const DEFAULT_COLUMNS = { name: true, size: true, modified: true, created: false, type: false };
@@ -109,6 +110,10 @@ class FileExplorer {
 
     toolbar.style.position = 'relative';
     toolbar.append(btnUp, this._hostSelect, this._pathField.el, btnRefresh, btnView, btnNewFile, btnNewDir, btnUpload);
+    // THE PHONE'S EXPLORER (lane phone-files-door): the window IS the screen there; ‹ returns to the phone's home, the
+    // breadcrumbs scroll sideways under the path bar, «New session here» heads the listing. Built only on a phone.
+    this._phone = app.isMobile ? explorerPhoneBits(this) : null;
+    if (this._phone) toolbar.prepend(this._phone.back);
 
     // Bookmark panel
     this._bookmarkPanel = document.createElement('div'); this._bookmarkPanel.className = 'file-bookmark-panel';
@@ -147,7 +152,7 @@ class FileExplorer {
     this._selectBar = document.createElement('div');
     this._selectBar.className = 'file-select-bar';
     this._selectBar.style.display = 'none';
-    mainPane.append(this.sortHeader, this._selectBar, this.listEl);
+    mainPane.append(...(this._phone ? [this._phone.newHere] : []), this.sortHeader, this._selectBar, this.listEl);
 
     // Browse area keeps bookmarks + main pane always side-by-side
     const browseArea = document.createElement('div');
@@ -193,7 +198,7 @@ class FileExplorer {
     this._renderOrder = [];      // current sorted order (for shift ranges / select-all)
     this._selectMode = false;    // touch multi-select (long-press → Select…)
 
-    el.append(toolbar, contentArea, this.uploadInput, this._folderInput);
+    el.append(toolbar, ...(this._phone ? [this._phone.crumbs] : []), contentArea, this.uploadInput, this._folderInput);
     winInfo.content.appendChild(el);
 
     // Drag and drop (upload)
@@ -702,6 +707,7 @@ class FileExplorer {
       const hostName = this._host ? (this._hostSelect.selectedOptions[0]?.textContent || this._host) : '';
       this.app.wm.setTitle(this.winInfo.id, (hostName ? hostName + ': ' : '') + frontTruncate(data.path));
       this._renderItems();
+      this._phone?.paint(data.path);
     } catch (err) {
       if (seq !== this._navSeq) return; // superseded — its error is not this view's truth
       this.listEl.innerHTML = `<div class="empty-hint" style="color:var(--red)">${escHtml(err.message)}</div>`;
@@ -1172,10 +1178,12 @@ class FileExplorer {
 
   // lane path-field: the path bar is THE path field — Enter or a picked candidate goes there (Tab completes into a
   // folder), leaving the bar with another folder typed goes there too; one that does not exist says so and stays put.
-  // The machine is the window's own (this._host). No folder button: this window IS the browser.
+  // The machine is the window's own (this._host). No folder button: this window IS the browser. A RELATIVE name resolves
+  // against the folder on show first (B-d027, lane phone-files-door: `payments` typed at ~/work stayed 「未生效」).
   _setupPathAutocomplete() {
     this._pathField = pathField(this.pathInput, {
       host: () => this._host || null, kind: 'folder', create: 'never', picker: false, id: 'file-explorer-path',
+      bases: () => (this.currentPath ? [{ path: this.currentPath, label: t('this folder') }] : []),
       onCommit: (info) => { if (info && info.path && info.path !== this.currentPath) this.navigate(info.path); },
     });
   }

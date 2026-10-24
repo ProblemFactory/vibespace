@@ -92,6 +92,14 @@ const READ_MAX = 200;
 const LAST_TEXT_MAX = 160;
 const WAITING_NAMED = 3;        // the trailer names at most this many waiting groups, then counts
 const PENDING_TEXT_MAX = 400;   // a waiting message's words as the strip previews them (its first line is what shows)
+// lane ci-351-reds (2026-10-24 — the boot's listen tick measured 255 ms of main-thread CPU against the 250 ms law): the boot
+// asks the ended-sweep INSIDE the listen callback (server.js noteUserState); its per-member liveness pass (a transcript
+// lookup each) was 68 ms of that one tick. It now starts on a LATER loop turn and hands the loop back every
+// SWEEP_SLICE_MS (the real clock, never the injected `now`); the verdicts are the same. TWO immediates: one queued from a
+// poll-phase callback runs in that same loop iteration (no timer between) — the second lands past the next timers phase.
+const SWEEP_SLICE_MS = 20;
+const nextTurn = () => new Promise((r) => setImmediate(() => setImmediate(r)));
+const sliceClock = () => performance.now();
 const WAITING_NAME_BYTES = 40;
 // a log read asks for this many records more than it shows when the group holds cleared
 // records (their replacement records are dropped by the fold) — bounded, so a group
@@ -865,13 +873,16 @@ function create({
   }
   /** THE STANDING RULE (boot, after restoreSessions, and every archive): every member of a live group is asked the
    *  wiring's `liveness` — archived / gone ⇒ `onConversationEnded`; a ledger row whose archive was lifted ⇒ revived.
-   *  Idempotent (a closed group is never re-logged). */
+   *  Idempotent (a closed group is never re-logged). Never on the caller's tick, in SWEEP_SLICE_MS slices (lane ci-351-reds). */
   async function sweepEnded() {
+    await nextTurn();   // never on the caller's tick (the boot's listen callback)
     const seen = new Set();
     const out = { closed: [], marked: [], revived: [] };
     for (const g of Object.values(all())) for (const m of g.members) seen.add(m.member);
     for (const cid of Object.keys(store.groups.live().ended || {})) seen.add(cid);
+    let sliceAt = sliceClock();
     for (const cid of seen) {
+      if (sliceClock() - sliceAt >= SWEEP_SLICE_MS) { await nextTurn(); sliceAt = sliceClock(); }
       let lv = null;
       try { lv = liveness(cid); } catch { lv = null; }
       const st = lv && lv.state;

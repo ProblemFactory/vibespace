@@ -91,8 +91,14 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
   });
   winInfo._sessionPropsKey = refKey;
 
+  // The Task Group window's shape (task-detail.js): the `.task-detail` root is only the flex column, and ONE scrolling
+  // `.task-detail-body` holds every section — the padding, the gap between sections and the scroll live on the body
+  // class since 2.369.346, so a root that held its sections directly lost all three (lane session-props-scroll)
   const root = document.createElement('div');
   root.className = 'task-detail session-props';
+  const body = document.createElement('div');
+  body.className = 'task-detail-body';
+  root.appendChild(body);
   winInfo.content.appendChild(root);
 
   /** The "Now" value — the CURRENT status record's state, reason (a cleared one in this device's words) and detail. */
@@ -114,6 +120,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       return r.json();
     }).then(d => {
       if (!histList.isConnected || histList._fill !== my) return;
+      histList.style.minHeight = '';
       const hist = (d?.history || []).slice(-20).reverse();
       const histKey = d?.key || refKey; // the key the entries sit under — a "Clear content…" addresses an entry by it + its time
       histList.innerHTML = hist.length ? '' : `<div class="empty-hint" style="padding:2px 0">${escHtml(t('No status changes recorded yet'))}</div>`;
@@ -169,13 +176,14 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       // in progress — terminate the section honestly and let the broadcast-
       // driven re-render be the retry.
       if (!histList.isConnected || histList._fill !== my) return;
+      histList.style.minHeight = '';
       histList.innerHTML = `<div class="usage-warn" style="padding:2px 0">${escHtml(t('Couldn’t load the status history — {reason}', { reason: e?.message || t('server unreachable') }))}</div>`;
     });
   };
 
   const render = () => {
     const s = findSession();
-    if (!s) { root.innerHTML = `<div class="empty-hint">${escHtml(t('Session no longer known (transcript gone from discovery).'))}</div>`; return; }
+    if (!s) { body.innerHTML = `<div class="empty-hint">${escHtml(t('Session no longer known (transcript gone from discovery).'))}</div>`; return; }
     // Don't clobber an open native select the user is interacting with — but the STATUS the window shows is a record's
     // words, never the select: its "Now" line and its history are repainted in place from the store (lane-redact verify r5,
     // reproduced in chrome: a window whose select kept the focus showed a cleared history entry's words for good — every
@@ -187,7 +195,12 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       if (hl) fillHistory(hl, s);
       return;
     }
-    root.innerHTML = '';
+    // a rebuild keeps the reader's place: the scroll offset is put back below, and the two lists that refill
+    // asynchronously hold their old height until their answer paints (else the content under them jumps by it)
+    const keepTop = body.scrollTop;
+    const heldHeight = (sel) => { const n = body.querySelector(sel); return n ? n.offsetHeight : 0; };
+    const histHeld = heldHeight('.session-history-list'), stepsHeld = heldHeight('.session-steps-list');
+    body.innerHTML = '';
     const customName = sidebar.getCustomName(s);
     const displayName = customName || s.name || s.webuiName || (s.cwd || '').split('/').pop() || s.sessionId;
     app.wm.setTitle(winInfo.id, displayName + t(' — Properties'));
@@ -196,7 +209,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
       const el = document.createElement('div');
       el.className = 'task-detail-section';
       el.innerHTML = `<div class="task-detail-label">${escHtml(label)}</div>`;
-      root.appendChild(el);
+      body.appendChild(el);
       return el;
     };
     const row = (parent, label, valueHtml, { copy, wrap } = {}) => {
@@ -250,6 +263,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     histList.className = 'session-history-list';
     histList.style.marginTop = '4px';
     histList.innerHTML = `<div class="empty-hint" style="padding:2px 0">${escHtml(t('Loading history…'))}</div>`;
+    if (histHeld) histList.style.minHeight = histHeld + 'px';
     stSec.appendChild(histList);
     fillHistory(histList, s);
 
@@ -596,7 +610,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     //
     // …WHICH IS EXACTLY WHY THE LOADED RECORD IS KEPT ON THE WINDOW (round-3
     // verifier, reproduced at 375×667): `render()` starts with
-    // `root.innerHTML = ''` and re-runs on every 'active-sessions' broadcast —
+    // `body.innerHTML = ''` and re-runs on every 'active-sessions' broadcast —
     // i.e. continuously while the session you opened Properties for is
     // working. The tree the user just paid an agent round trip for vanished
     // within a second and the button went back to "Show rules…". The record is
@@ -800,6 +814,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     const stepList = document.createElement('div');
     stepList.className = 'session-steps-list';
     stepList.innerHTML = `<div class="empty-hint" style="padding:2px 0">${escHtml(t('Loading…'))}</div>`;
+    if (stepsHeld) stepList.style.minHeight = stepsHeld + 'px';
     stepSec.appendChild(stepList);
     const rid = s.backendSessionId || s.sessionId;
     fetch(`/api/session-todos?backend=${encodeURIComponent(s.backend || 'claude')}&backendSessionId=${encodeURIComponent(rid)}&cwd=${encodeURIComponent(s.cwd || '')}${s.host ? `&host=${encodeURIComponent(s.host)}` : ''}`)
@@ -808,6 +823,7 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
         return r.json();
       }).then(d => {
         if (!stepList.isConnected) return;
+        stepList.style.minHeight = '';
         const todos = (d?.todos || []).filter(t => (t.content || t.step || '').trim());
         stepList.innerHTML = todos.length ? '' : `<div class="empty-hint" style="padding:2px 0">${escHtml(t("The agent hasn't kept a todo list"))}</div>`;
         const mkStep = (t) => {
@@ -838,10 +854,12 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
         // Remote sessions read the steps out of an ssh-fetched transcript — a
         // slow/dead host used to leave this section on 'Loading…' forever.
         if (!stepList.isConnected) return;
+        stepList.style.minHeight = '';
         stepList.innerHTML = `<div class="usage-warn" style="padding:2px 0">${escHtml(s.host
           ? t('Couldn’t load the steps from {host} — {reason}', { host: sidebar._hostsData?.hosts?.find(h => h.id === s.host)?.name || s.host, reason: e?.message || t('unreachable') })
           : t('Couldn’t load the steps — {reason}', { reason: e?.message || t('server unreachable') }))}</div>`;
       });
+    body.scrollTop = keepTop;
   };
 
   render();

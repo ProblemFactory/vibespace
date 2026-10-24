@@ -5,6 +5,7 @@ import { showWindowContextMenu } from './taskbar.js';
 import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { getCommand, runCommand } from './contributions.js';
 import { openDesktopPicker } from './desktop-picker.js';
+import { installNavFilesDoor } from './phone-files.js'; // lane phone-files-door: the nav's 文件 — one tap to the files
 
 const SHOWN_KEY = 'vibespace.phoneShown'; // { [desktopId]: winId } — this tab's window on show per desktop (§6b guard 10)
 function readShown() {
@@ -54,6 +55,9 @@ export class MobileNav {
     this._shownBooted = false;
 
     document.getElementById('mobile-nav-menu').onclick = () => app.sidebar.toggle(true);
+    // 文件 (lane phone-files-door): the files were reachable only through the «+» long-press sheet — a person looking for
+    // their files never looks under «new». One tap: the explorer this phone showed last, else a new one at home
+    installNavFilesDoor(app);
     const newBtn = document.getElementById('mobile-nav-new');
     newBtn.onclick = () => app.showNewSessionDialog();
     // "+" LONG-PRESS SHEET (docs/design-mobile-gaps.md #3): #toolbar is

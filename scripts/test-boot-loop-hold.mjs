@@ -8,6 +8,12 @@
 //     (the main-module evaluation before it is the code loading, said apart: the port is not open, nothing waits) until
 //     the boot's deferred steps are done (the ledger warm settled, 8 s after listen + the walk), NO gap ≥ 250 ms;
 //     monitorEventLoopDelay's max beside it (it never sees a boot's first interval — the hold the incident was).
+//     lane ci-351-reds (2026-10-24, red on two hosted runs at 253 / 258 ms): EVERY gap says its cause in three numbers —
+//     the main thread's CPU in it (process.threadCpuUsage), its run-queue wait (ready, given no CPU: /proc/thread-self/
+//     schedstat) and a SAME-BOX CONTROL's stall over it (an idle node process on the same 10 ms clock, started beside the
+//     boot). A gap's HOLD = its ms − max(wait, control): what the boot itself did (CPU, or a call it blocked in); the law
+//     judges the hold and never moves. The hosted reds were the product — the listen tick measured 255 ms of main-thread
+//     CPU here — so the groups sweep, the OTel replay and the usage cursor prune were sliced off it (kb-design-lessons §19).
 //   ② non-vacuous: the N sessions reconnected, the stash replay / identity repair / ledger warm ran (the warm loaded the
 //     shape's rows in > 100 slices), and the server's own boot clock (GET /api/boot-trace) agrees with this one.
 //   ③ RED CONTROL: the same boot with VIBESPACE_BOOT_TRACE_SYNC=1 (the warm the old way, in one tick) is red by the
@@ -33,16 +39,28 @@ let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** THE JUDGE (PURE): the clock's gaps past the first loop turn → the holds at or over the law. */
-function judge(clock, law = LAW_MS) {
-  const gaps = (clock && clock.gaps) || [];
-  const over = gaps.filter((g) => g.ms >= law);
-  return { ok: !!clock && clock.first != null && !over.length, over, maxMs: gaps.reduce((m, g) => Math.max(m, g.ms), 0), firstMs: clock ? clock.first : null };
+/** The control's stall over [at, at + ms] (absolute ms): the longest overlap of one of its own gaps with that span. */
+const stallOver = (control, at, ms) => ((control && control.gaps) || []).reduce((m, x) => Math.max(m, Math.min(at + ms, x.at + x.ms) - Math.max(at, x.at)), 0);
+/** THE JUDGE (PURE): the clock's gaps past the first loop turn, each with what the BOX can be shown to have done to it —
+ *  `wait` (the main thread's run-queue wait in the gap) and `ctl` (the same-box control's stall over it) — and the HOLD,
+ *  what the boot did: ms − max(wait, ctl). A hold at or over the law is red. A gap with no run-queue reading and no
+ *  control is all hold (strict). `cpu` rides each gap for the words. */
+function judge(clock, law = LAW_MS, control = null) {
+  const gaps = ((clock && clock.gaps) || []).map((g) => { const ctl = Math.round(stallOver(control, (clock.origin || 0) + g.at, g.ms)); return { ...g, ctl, held: Math.max(0, g.ms - Math.max(g.wait || 0, ctl)) }; });
+  const over = gaps.filter((g) => g.held >= law);
+  const top = gaps.reduce((m, g) => (!m || g.ms > m.ms ? g : m), null);
+  return { ok: !!clock && clock.first != null && !over.length, over, gaps, top, maxMs: top ? top.ms : 0, maxHeld: gaps.reduce((m, g) => Math.max(m, g.held), 0), firstMs: clock ? clock.first : null };
 }
+/** A gap in words: «listen 226 ms (cpu 223 · run-queue wait 3 · control 0 ⇒ held 223)». */
+const gapWords = (g, names = []) => g ? `${(names.find((h) => Math.abs(h.at - g.at) <= 50) || {}).name || '—'} ${g.ms} ms (cpu ${g.cpu ?? '?'} · run-queue wait ${g.wait ?? '?'} · control ${g.ctl} ⇒ held ${g.held})` : 'none';
 console.log('① the judge');
 check('a 300 ms gap past the first turn is red', !judge({ first: 900, gaps: [{ at: 2000, ms: 300 }] }).ok);
 check('a 249 ms gap is green; the first turn (the code loading) is never judged', judge({ first: 5000, gaps: [{ at: 2000, ms: 249 }] }).ok);
 check('no clock answer is red (an unread clock proves nothing)', !judge(null).ok && !judge({ first: null, gaps: [] }).ok);
+check('a 300 ms gap that was 300 ms of main-thread CPU is red — with or without a control beside it', !judge({ first: 900, gaps: [{ at: 2000, ms: 300, cpu: 300, wait: 0 }] }).ok && !judge({ first: 900, origin: 1e6, gaps: [{ at: 2000, ms: 300, cpu: 300, wait: 0 }] }, LAW_MS, { gaps: [{ at: 1e6 + 2100, ms: 30 }] }).ok);
+check('a 300 ms gap the box made wait 120 ms for a CPU holds 180 ms: green, and said', judge({ first: 900, gaps: [{ at: 2000, ms: 300, cpu: 175, wait: 120 }] }).ok && judge({ first: 900, gaps: [{ at: 2000, ms: 300, cpu: 175, wait: 120 }] }).maxHeld === 180);
+check('a 300 ms gap the same-box control stalled 200 ms over is green (the whole box was held); a stall elsewhere excuses nothing', judge({ first: 900, origin: 1e6, gaps: [{ at: 2000, ms: 300, cpu: 90, wait: 0 }] }, LAW_MS, { gaps: [{ at: 1e6 + 2050, ms: 200 }] }).ok && !judge({ first: 900, origin: 1e6, gaps: [{ at: 2000, ms: 300, cpu: 90, wait: 0 }] }, LAW_MS, { gaps: [{ at: 1e6 + 5000, ms: 200 }] }).ok);
+check('no run-queue reading and no control ⇒ the whole gap is the hold (strict)', !judge({ first: 900, gaps: [{ at: 2000, ms: 260, cpu: 100, wait: null }] }).ok);
 
 // ── the scratch server: this tree's code in a worktree, the shape in its data/, HOME a scratch home ──
 const wt = scratch('blh-wt'), HOME = scratch('blh-home'), FIX = scratch('blh-canonical'), OUT = scratch('blh-out');
@@ -51,9 +69,10 @@ try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore'
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
-let srv = null;
+let srv = null, ctl = null; // the server, and the same-box control beside a measured boot
 const cleanup = () => {
   try { srv && srv.kill('SIGKILL'); } catch { }
+  try { ctl && ctl.kill('SIGKILL'); } catch { }
   try { endRootedProcesses(wt); endRootedProcesses(HOME); } catch { } // the dtach sessions + the device daemon the scratch server started
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
 };
@@ -64,16 +83,32 @@ const shape = writeBootShape({ dataDir: path.join(wt, 'data'), homeDir: HOME, re
 console.log(`  shape: ${(shape.bytes / 1e6).toFixed(0)} MB in ${Date.now() - t0} ms — ${JSON.stringify(shape.rows)}`);
 const [PORT] = await freePorts(1);
 const VNC = await vncEnv();
-// the suite's own loop clock, independent of the server's: a preload ticking every 10 ms from process start
+// the suite's own loop clock, independent of the server's: a preload ticking every 10 ms from process start; each gap
+// carries the main thread's CPU in it and its run-queue wait (schedstat's 2nd field, ns; read by pread — never a reopen);
+// every gap ≥ 20 ms is kept, so the listen tick is measured even when it is short
 const PRELOAD = path.join(OUT, 'clock.cjs');
 fs.writeFileSync(PRELOAD, `if (require('worker_threads').isMainThread) { // a Worker inherits -r: its own clock would overwrite the main thread's
 const { performance, monitorEventLoopDelay } = require('perf_hooks'); const fs = require('fs');
 const out = process.env.BOOT_GATE_OUT, gaps = []; let last = performance.now(), first = null;
+let sfd = -1; try { sfd = fs.openSync('/proc/thread-self/schedstat', 'r'); } catch { }
+const sb = Buffer.alloc(96), facts = () => { const c = process.threadCpuUsage(); let w = null; if (sfd >= 0) { try { const n = fs.readSync(sfd, sb, 0, 96, 0); w = Number(sb.toString('latin1', 0, n).split(' ')[1]) / 1e6; } catch { } } return { cpu: (c.user + c.system) / 1000, wait: w }; };
+let lastF = facts();
 const h = monitorEventLoopDelay({ resolution: 10 }); h.enable();
-setInterval(() => { const t = performance.now(); if (first === null) first = Math.round(t); else if (t - last - 10 >= 100) gaps.push({ at: Math.round(last), ms: Math.round(t - last - 10) }); last = t; }, 10).unref();
-setInterval(() => { try { fs.writeFileSync(out + '.tmp', JSON.stringify({ first, gaps, eldMax: Math.round(h.max / 1e6) })); fs.renameSync(out + '.tmp', out); } catch { } }, 250).unref();
+setInterval(() => { const t = performance.now(), f = facts(); if (first === null) first = Math.round(t); else if (t - last - 10 >= 20) gaps.push({ at: Math.round(last), ms: Math.round(t - last - 10), cpu: Math.round(f.cpu - lastF.cpu), wait: f.wait == null || lastF.wait == null ? null : Math.round(f.wait - lastF.wait) }); last = t; lastF = f; }, 10).unref();
+setInterval(() => { try { fs.writeFileSync(out + '.tmp', JSON.stringify({ origin: performance.timeOrigin, first, gaps, eldMax: Math.round(h.max / 1e6) })); fs.renameSync(out + '.tmp', out); } catch { } }, 250).unref();
 }
 `);
+const CONTROL = path.join(OUT, 'control.cjs');
+fs.writeFileSync(CONTROL, `const { performance, monitorEventLoopDelay } = require('perf_hooks'); const fs = require('fs');
+const out = process.argv[2], gaps = []; let last = performance.now();
+const h = monitorEventLoopDelay({ resolution: 10 }); h.enable();
+setInterval(() => { const t = performance.now(); if (t - last - 10 >= 20) gaps.push({ at: Math.round(performance.timeOrigin + last), ms: Math.round(t - last - 10) }); last = t; }, 10);
+const save = () => { try { fs.writeFileSync(out + '.tmp', JSON.stringify({ gaps, eldMax: Math.round(h.max / 1e6) })); fs.renameSync(out + '.tmp', out); } catch { } };
+setInterval(save, 250); process.on('SIGTERM', () => { save(); process.exit(0); });
+`);
+// THE SAME-BOX CONTROL: an idle node process on the same 10 ms clock (gaps in absolute ms) — the whole box held shows here
+const ctlStart = (tag) => { ctl = spawn(process.execPath, [CONTROL, path.join(OUT, `control-${tag}.json`)], { stdio: 'ignore' }); };
+const ctlStop = async (tag) => { const p = ctl; ctl = null; if (!p) return null; p.kill('SIGTERM'); await Promise.race([new Promise((r) => (p.exitCode !== null ? r() : p.once('exit', r))), sleep(5000)]); try { return JSON.parse(fs.readFileSync(path.join(OUT, `control-${tag}.json`), 'utf8')); } catch { return null; } };
 const logFd = fs.openSync(path.join(OUT, 'server.log'), 'a');
 const boot = (tag, extra = {}, clock = true) => {
   const env = { ...process.env, ...VNC, HOME, PORT: String(PORT), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANGELOG_FIXTURE_DIR: FIX, BOOT_GATE_OUT: path.join(OUT, `clock-${tag}.json`), ...extra };
@@ -109,32 +144,43 @@ await stop('SIGKILL');
 
 // ── boot 1: THE MEASURED BOOT ──
 console.log('③ the measured boot: production-shaped stores + the restore');
+ctlStart('measured');
 boot('measured');
 const b1 = await ready();
 await warmDone();
 await sleep(600); // the clocks' next ticks past the warm's last slice (a hold is recorded when the loop turns again)
 const rep1 = await getJson('/api/boot-trace');
-const c1 = readClock('measured'), j1 = judge(c1), log1 = logOf('measured');
+const c1 = readClock('measured'), log1 = logOf('measured');
+const k1 = await ctlStop('measured');
 await stop();
+const j1 = judge(c1, LAW_MS, k1), names1 = (rep1 && rep1.holds) || [];
+const ctlMax1 = ((k1 && k1.gaps) || []).reduce((m, x) => Math.max(m, x.ms), 0);
+console.log(`  the gaps ≥ 100 ms: ${j1.gaps.filter((g) => g.ms >= 100).map((g) => gapWords(g, names1)).join(' · ') || 'none'}; the control's own longest stall ${ctlMax1} ms (monitorEventLoopDelay ${k1 && k1.eldMax} ms)`);
+// the listen tick = the gap that holds the server's own listenAt (the same process clock); none ≥ 20 ms = a short tick
+const listen1 = rep1 && rep1.listenAt != null ? j1.gaps.find((g) => g.at <= rep1.listenAt && rep1.listenAt <= g.at + g.ms + 10) : null;
+console.log(`  the listen tick: ${listen1 ? `${listen1.ms} ms on the clock, ${listen1.cpu} ms of main-thread CPU (run-queue wait ${listen1.wait ?? '?'}, control ${listen1.ctl})` : 'under 20 ms on the clock'} (kb-design-lessons §19: re-measured each release)`);
 const reconnected = (log1.match(/✓ Reconnected:/g) || []).length;
 check(`the ${SESSIONS} sessions were restored (the restore really ran)`, !!b1 && reconnected === SESSIONS, reconnected);
 const span = (r, n) => ((r && r.spans) || []).find((s) => s.name === n) || null;
 const warm1 = span(rep1, 'usage-ledger-warm');
 check('the ledger warm ran in slices and loaded the shape\'s ledger', !!warm1 && warm1.slices > 100 && warm1.rows > shape.rows.ledger * 0.5, warm1);
 check('the OTel stash replay, the identity repair and the restore probes ran off the loop (each a span that ended)', ['otel-replay', 'identity-repair', 'restore-probes'].every((n) => span(rep1, n) && span(rep1, n).ms != null), rep1 && rep1.spans);
-check(`THE LAW: no gap ≥ ${LAW_MS} ms from the first loop turn to the warm's end (max ${j1.maxMs} ms; code loading ${j1.firstMs} ms, not judged; monitorEventLoopDelay max ${c1 && c1.eldMax} ms)`, j1.ok, { over: j1.over, named: rep1 && rep1.holds });
-check('the server\'s own boot clock agrees: its longest hold is under the law and its code-loading time is this clock\'s first turn (±150 ms)', !!rep1 && rep1.maxHoldMs < LAW_MS && Math.abs((rep1.mainMs || 0) - (c1 ? c1.first : 0)) <= 150 + (rep1.startAt || 0), rep1 && { mainMs: rep1.mainMs, startAt: rep1.startAt, first: c1 && c1.first, maxHoldMs: rep1.maxHoldMs });
+check(`THE LAW: no hold ≥ ${LAW_MS} ms from the first loop turn to the warm's end — the longest gap ${gapWords(j1.top, names1)}; the longest hold ${j1.maxHeld} ms; code loading ${j1.firstMs} ms, not judged; monitorEventLoopDelay max ${c1 && c1.eldMax} ms`, j1.ok, { over: j1.over.map((g) => gapWords(g, names1)), named: names1 });
+// the server's own clock by the same rule: each of its holds at or over the law is a gap this clock judged the BOX's
+const serverOver = names1.filter((h) => h.ms >= LAW_MS).filter((h) => { const g = j1.gaps.find((x) => Math.abs(x.at - h.at) <= 50); return !g || g.held >= LAW_MS; });
+check(`the server's own boot clock agrees: its longest hold ${rep1 && rep1.maxHoldMs} ms (${serverOver.length ? 'held by the boot' : rep1 && rep1.maxHoldMs >= LAW_MS ? 'the box\'s, by the same three numbers' : 'under the law'}) and its code-loading time is this clock's first turn (±150 ms)`, !!rep1 && !serverOver.length && Math.abs((rep1.mainMs || 0) - (c1 ? c1.first : 0)) <= 150 + (rep1.startAt || 0), rep1 && { mainMs: rep1.mainMs, startAt: rep1.startAt, first: c1 && c1.first, maxHoldMs: rep1.maxHoldMs, serverOver });
 
 // ── boot 2: THE RED CONTROL — the warm the old way (one tick), with the sync-op tracer on ──
 console.log('④ RED control: VIBESPACE_BOOT_TRACE_SYNC=1 (+ VIBESPACE_BOOT_TRACE=1)');
+ctlStart('control');
 boot('control', { VIBESPACE_BOOT_TRACE_SYNC: '1', VIBESPACE_BOOT_TRACE: '1' });
 await ready();
 await until(async () => { const r = await getJson('/api/boot-trace'); return r && (r.steps || []).some((s) => s.name === 'usage-ledger-warm') ? r : null; }, 150000);
 await sleep(600);
 const rep2 = await getJson('/api/boot-trace');
-const c2 = readClock('control'), j2 = judge(c2);
+const c2 = readClock('control'), k2 = await ctlStop('control'), j2 = judge(c2, LAW_MS, k2);
 await stop();
-check(`the same judge is RED on the old warm (max ${j2.maxMs} ms)`, !j2.ok && j2.over.length > 0, j2);
+check(`the same judge (law + the same-box control) is RED on the old warm: ${gapWords(j2.top, (rep2 && rep2.holds) || [])}`, !j2.ok && j2.over.length > 0, j2);
 const named = rep2 && (rep2.holds || []).find((h) => h.name === 'usage-ledger-warm');
 check('…the server names the hold: the step usage-ledger-warm, and the tracer its sync sites in src/usage-history.js', !!named && named.ms >= LAW_MS && (named.sites || []).some((x) => /usage-history\.js/.test(x.what)), named || (rep2 && rep2.holds));
 

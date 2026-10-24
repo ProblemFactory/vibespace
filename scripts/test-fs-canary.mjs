@@ -233,9 +233,24 @@ console.log('§7 the blocked loop names its blocker (lane vault-slow-load)');
   ok(/; in that window: readFileSync 4 B pipe \d{4,} ms ← src\/slow-reader\.js:3 (Object\.)?readAll$/.test(line), `the canary's line names the call, the bytes, the file and the caller: ${line}`);
   ok(r.blockedBy && r.blockedBy.startsWith('readFileSync'), 'the probe\'s facts carry the same words (blockedBy)');
   B.lines.length = 0;
+  // ci-351-reds — THE CPU-BLOCK LEG STARTS FROM A QUIESCENT WITNESS. The read above is kept as { at, ms } in whole
+  // milliseconds and the canary's window opens at the next probe's doneAt, its edge inclusive: on a fast runner that probe
+  // answered inside the very millisecond the read was recorded as ending, the window kept the read, and the canary named
+  // readFileSync for a CPU block (master run 40075417901 and its re-run; 2 of 20 runs here). So the leg waits — a poll of
+  // the witness against the clock, never a sleep — until no recorded call ends at or after now: its window cannot reach
+  // back into the previous leg. It then judges on the witness's own facts (nothing recorded DURING the block) beside the line.
+  const CPU_WORDS = /^no sync fs call over 20 ms in that window — CPU work on the main thread$/;
+  const leg1 = LB.blame(0, Infinity, { k: Infinity }).find((e) => e.fn === 'readFileSync' && e.path === fifo);
+  ok(!!leg1 && /readFileSync/.test(LB.blameWords(LB.blame(leg1.at + leg1.ms, leg1.at + leg1.ms + 1300, { entries: [leg1] }))),
+    'CONTROL (the hosted red, without the race): a window that opens in the millisecond the previous leg\'s read was recorded as ending still keeps that read — the window\'s edge is inclusive');
+  while (LB.blame(Date.now(), Infinity).length) await new Promise((r) => setImmediate(r));
+  const t2 = Date.now();
+  ok(!LB.blame(t2, Infinity).length, 'the CPU-block leg starts from a quiescent witness: no recorded sync call ends at or after its start');
   const p2 = B.c.tick();
   spin(1300);
-  await p2;
+  const r2 = await p2;
+  ok(!LB.blame(t2, Infinity, { k: Infinity }).some((e) => e.at >= t2), 'the witness recorded no sync fs call DURING the block (its own fact: the block is CPU)');
+  ok(r2 && r2.loopMs >= 1000 && CPU_WORDS.test(r2.blockedBy || ''), `the probe's facts carry the CPU words (${r2 && r2.loopMs} ms: ${r2 && r2.blockedBy})`);
   ok(/; in that window: no sync fs call over 20 ms in that window — CPU work on the main thread/.test(B.lines.find((l) => /a blocked loop/.test(l)) || ''), `a CPU block is said as CPU work: ${B.lines[0]}`);
   B.c.close();
   // PURE

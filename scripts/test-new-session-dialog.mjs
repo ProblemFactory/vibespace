@@ -63,6 +63,16 @@
 //      H9 a REAL create: the spawn's --allowedTools / --disallowedTools, and the ticked fake account holds ONE access row
 //      {agent: that conversation, draft} once its id exists (the tools pick latched as its config), 无 | 已选 | 全部, H10 the
 //      phone stacks LEFT then RIGHT
+//   K  THE v3 FORM (lane new-session-layout-v3-build — the owner nodded the POC 2026-10-23): K1 the LEFT order (name → 任务组
+//      → folder → backend → model·effort → permission → tools → more) and Agent | Terminal at the header's right; K2 the 任务组
+//      row none / one / two (its sentence; the chips keyed and patched in place) and the right column's 「会话」 READING it (no
+//      picker there; «Change on the left ↖»); K3 Terminal = a login shell (the backend card not drawn, the fold = the
+//      machine, the right column 「会话」 + one sentence, Create opens a shell); K4 the harness's own terminal UI = the fold's
+//      tick (default folded; ticked ⇒ mode terminal; the Settings default ticks + unfolds it); K5 the removals; K6 频道's
+//      ticks with a group grant's 除了; K7 zh / ja; K8 THE PHONE at 390×844 (a full-screen sheet with the header and the footer
+//      fixed, the footer one line, the right column an accordion with summaries, the picker a bottom sheet, the census — no
+//      input under 16 px / 42 px, no tap target under 32 px — with planted RED controls, the list in the flow, the backend a
+//      native select)
 //   I  A PAIRED MACHINE THAT CANNOT BE REACHED (lane hub-dies-dead-ssh-host — the .346 verify round's HIGH: picking it
 //      killed the hub): a machine record added over the API (my-mac @ mac.example.test) and a stub `ssh` first on the
 //      server's PATH that exits 255 at once (never a real machine). I1 picked in the host row ⇒ the folder field's own
@@ -291,7 +301,10 @@ try {
     const chips = await evalJs(`[...document.querySelectorAll('#cwd-recent .cwd-recent-chip')].map((c) => ({ kind: c.dataset.kind, text: c.textContent, path: c.dataset.path }))`);
     const work = (chips || []).find((c) => c.path === path.join(fakeHome, 'work'));
     check('the home\u2019s folder with files is a chip: «work (3 files)»', !!work && work.kind === 'files' && work.text === 'work (3 files)', chips);
-    check('… the folders WITH files lead the row', !!chips && chips.findIndex((c) => c.kind !== 'files') > chips.findIndex((c) => c.kind === 'files'), chips && chips.map((c) => c.kind));
+    // lane new-session-group-folder-link: ONE row — the name typed above (A1) gives its 由名字 chip first, then the day-one chips
+    const day = (chips || []).filter((c) => c.kind !== 'name');
+    check('… the folders WITH files lead the day-one chips', day.findIndex((c) => c.kind !== 'files') > day.findIndex((c) => c.kind === 'files'), chips && chips.map((c) => c.kind));
+    check('… after the name\u2019s own chip (the name typed above: ~/S12 first (example.com))', !!chips && chips[0].kind === 'name' && chips[0].path === path.join(fakeHome, 'S12 first (example.com)') && chips.filter((c) => c.kind === 'name').length === 1, chips && chips.slice(0, 2));
     await evalJs(`document.querySelector('#cwd-recent .cwd-recent-chip[data-path=' + JSON.stringify(${JSON.stringify(path.join(fakeHome, 'work'))}) + ']').click(); true`);
     check('a chip fills the field', (await evalJs(`document.getElementById('input-cwd').value`)) === path.join(fakeHome, 'work'));
     await evalJs(`document.getElementById('input-cwd').value = ''; true`);
@@ -705,20 +718,21 @@ try {
     // H1 both columns
     const cols = await evalJs(`(() => { const L = document.querySelector('#dialog-new-session .ns-left').getBoundingClientRect(), R = document.getElementById('ns-right').getBoundingClientRect(), d = document.getElementById('dialog-new-session').getBoundingClientRect(); return { L: [L.left, L.right, L.top], R: [R.left, R.right, R.top], dw: d.width, grid: getComputedStyle(document.querySelector('#dialog-new-session .ns-cols')).display, heads: [...document.querySelectorAll('#dialog-new-session .ns-col-h b')].map((b) => b.textContent), cards: [...document.querySelectorAll('#ns-right .ns-card-h')].map((h) => h.textContent.trim()) }; })()`);
     check('H1 two columns at 1280 px: LEFT «Where and how it runs» beside RIGHT «What it may use»', cols.grid === 'grid' && cols.R[0] >= cols.L[1] - 1 && Math.abs(cols.R[2] - cols.L[2]) < 40 && cols.heads[0] === 'Where and how it runs' && cols.heads[1] === 'What it may use', cols);
-    check('H1 the right column: built-in (always on) · VibeSpace · Accounts · as you · MCP servers', ['Built in · always on', 'VibeSpace', 'Accounts · as you', 'MCP servers'].every((h, i) => (cols.cards[i] || '').startsWith(h)), cols.cards);
+    check('H1 the right column: built-in (always on) · VibeSpace — v3: no separate «Accounts · as you» card, no MCP empty row', cols.cards.length === 2 && ['Built in · always on', 'VibeSpace'].every((h, i) => (cols.cards[i] || '').startsWith(h)), cols.cards);
     const order = await evalJs(`[...document.querySelectorAll('#ns-card-where > label')].map((l) => l.id).filter((id) => id !== 'row-host')`);
     check('H1 会话名称 sits above 工作目录 (the name first)', order[0] === 'row-session-name' && order[1] === 'row-cwd', order);
     const builtins = await evalJs(`[...document.querySelectorAll('#ns-right [data-builtin]')].map((r) => r.dataset.builtin + ':' + r.classList.contains('locked') + ':' + !!r.querySelector('.ns-on'))`);
     check('H1 built-in rows are locked on: Artifacts · Feedback · Page publishing', builtins.join() === 'artifacts:true:true,feedback:true:true,pages:true:true', builtins);
     // H2 the kind switch (Agent | Terminal) — it replaces the Mode row; a plain shell has no Agent
-    const kind = () => evalJs(`({ mode: document.getElementById('input-mode').value, on: [...document.querySelectorAll('#ns-kind-seg button')].filter((b) => b.classList.contains('on')).map((b) => b.dataset.kind), agentDisabled: document.querySelector('#ns-kind-seg [data-kind="chat"]').disabled, rowMode: getComputedStyle(document.getElementById('row-mode')).display, kinds: [...document.querySelectorAll('#ns-kind-seg button')].map((b) => b.dataset.kind) })`);
+    const kind = () => evalJs(`({ mode: document.getElementById('input-mode').value, backend: document.getElementById('input-backend').value, on: [...document.querySelectorAll('#ns-kind-seg button')].filter((b) => b.classList.contains('on')).map((b) => b.dataset.kind), agentDisabled: document.querySelector('#ns-kind-seg [data-kind="chat"]').disabled, rowMode: getComputedStyle(document.getElementById('row-mode')).display, kinds: [...document.querySelectorAll('#ns-kind-seg button')].map((b) => b.dataset.kind) })`);
     const k0 = await kind();
     check('H2 the header\'s kind switch: Agent | Terminal (no «Browser»: no New Session road to a browser-only session), Agent on, the Mode row gone', k0.mode === 'chat' && k0.on.join() === 'chat' && k0.kinds.join() === 'chat,terminal' && k0.rowMode === 'none', k0);
     await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; document.getElementById('input-cwd').dispatchEvent(new Event('input')); true`);   // a folder: the footer shows the run's chips, not the refusal
     await realClick('#ns-kind-seg [data-kind="terminal"]');
     const k1 = await kind();
-    check('H2 one real click on Terminal ⇒ mode terminal (the footer says it)', k1.mode === 'terminal' && k1.on.join() === 'terminal' && await evalJs(`!!document.querySelector('#ns-foot-info [data-chip="kind"]')`), k1);
+    check('H2 one real click on Terminal ⇒ a login shell (v3: Terminal = no harness — the backing select holds the shell), mode terminal, the footer says «Terminal · login shell»', k1.mode === 'terminal' && k1.on.join() === 'terminal' && k1.backend === 'shell' && /Terminal · login shell/.test(await evalJs(`document.querySelector('#ns-foot-info [data-chip="backend"]')?.textContent || ''`)), k1);
     await realClick('#ns-kind-seg [data-kind="chat"]');
+    check('H2 …and Agent brings the harness back (Claude)', (await kind()).backend === 'claude', await kind());
     // H3 the 可用工具 row per backend
     const tools = () => evalJs(`(() => { const r = document.getElementById('row-tools'); return { shown: !r.classList.contains('hidden') && r.offsetParent !== null, kind: r.dataset.kind, chips: [...r.querySelectorAll('[data-tool]')].map((c) => c.dataset.tool), keep: [...r.querySelectorAll('[data-tool]')].filter((c) => c.querySelector('.ns-keep')).map((c) => c.dataset.tool), codex: [...r.querySelectorAll('[data-codex]')].map((b) => b.dataset.codex + '=' + b.dataset.v + (b.classList.contains('on') ? '*' : '')), flags: document.getElementById('ns-tool-flags')?.textContent || '' }; })()`);
     const t0 = await tools();
@@ -731,9 +745,11 @@ try {
     await pickBackend('codex'); await sleep(300);
     const t2 = await tools();
     check('H3 Codex: sandbox + approval, the permission mode\'s default marked on', t2.shown && t2.kind === 'sandbox' && t2.codex.includes('sandbox=workspace-write*') && t2.codex.includes('approval=on-request*') && /--sandbox workspace-write/.test(t2.flags), t2);
-    await pickBackend('shell'); await sleep(300);
+    await realClick('#ns-kind-seg [data-kind="terminal"]'); await sleep(300);
     const t3 = await tools(); const k3 = await kind();
-    check('H3 a plain shell: no 可用工具 row, and Terminal is the only kind', !t3.shown && k3.agentDisabled && k3.mode === 'terminal', { t3, k3 });
+    check('H3 Terminal (a login shell): no 可用工具 row, Terminal on (v3: the Agent door stays pressable — it brings the harness back)', !t3.shown && !k3.agentDisabled && k3.mode === 'terminal' && k3.on.join() === 'terminal', { t3, k3 });
+    await realClick('#ns-kind-seg [data-kind="chat"]'); await sleep(300);
+    check('H3 Agent after Codex → Terminal ⇒ Codex again (the harness picked is kept for the way back)', (await kind()).backend === 'codex', await kind());
     await pickBackend('claude'); await sleep(300);
     check('H3 back to Claude: the pick made on Claude is still the one shown', JSON.stringify(await evalJs('app._nsToolPick()')) === JSON.stringify({ allow: ['Read'], deny: ['WebFetch'] }));
     // H4 the fold, by the person's own data
@@ -761,19 +777,19 @@ try {
     check('H4 the fold\'s open state is remembered on this device: a chip\'s peek is not, the toggle is (the next open: still open)', closedAgain && await evalJs(`document.getElementById('ns-more-toggle').getAttribute('aria-expanded') === 'true' && localStorage.getItem('vs.newSession.moreOpen') === '1'`));
     await realClick('#ns-more-toggle');
     // H5 several Task Groups, in the order picked
-    await realClick('#ns-right [data-tg-add]'); await sleep(200);
+    await realClick('#row-task-groups [data-tg-add]'); await sleep(200);
     await realClick(`.ns-tg-menu [data-tg="${gPay}"]`); await sleep(150);
     await realClick(`.ns-tg-menu [data-tg="${gIR}"]`); await sleep(300);
-    await evalJs(`document.querySelectorAll('.ns-tg-menu').forEach((m) => m.remove()); true`);
-    const tg = await evalJs(`[...document.querySelectorAll('#ns-right .ns-tg-chip')].map((c) => c.querySelector('.ns-tg-n').textContent + ' ' + c.querySelector('.ns-tg-name').textContent)`);
-    check('H5 real clicks pick two Task Groups; the chips show the order picked', tg.join(' | ') === '1 Payments | 2 Investor relations', tg);
+    await evalJs(`document.querySelectorAll('.ns-tg-menu, .ns-tg-scrim').forEach((m) => m.remove()); true`);
+    const tg = await evalJs(`[...document.querySelectorAll('#row-task-groups .ns-tg-chip')].map((c) => c.querySelector('.ns-tg-n').textContent + ' ' + c.querySelector('.ns-tg-name').textContent)`);
+    check('H5 real clicks pick two Task Groups (v3: on the LEFT, under the name); the chips show the order picked', tg.join(' | ') === '1 Payments | 2 Investor relations', tg);
     const reach = await evalJs(`[...document.querySelectorAll('#ns-right [data-row="sessions"] .ns-pv-via')].map((x) => x.textContent)`);
-    check('H5 the sessions row says the reach through each group', reach.length === 2 && reach.every((r) => /^Through Task Group/.test(r)), reach);
+    check('H5 the sessions row READS the left: one sentence naming both groups (v3)', reach.length === 1 && /^Joined “Payments”, “Investor relations” — can see and message/.test(reach[0]), reach);
     // H6 the profiles the picked groups admit (the server's mayAttach)
     const profs = () => evalJs(`({ opts: [...document.querySelectorAll('#input-browser-profile option')].map((o) => o.value), line: document.querySelector('#ns-right [data-row="bprof"] .ns-pv-via')?.textContent || '' })`);
     await waitFor(`[...document.querySelectorAll('#input-browser-profile option')].some((o) => o.value === ${JSON.stringify(pIR)})`, 6000);
     const pWith = await profs();
-    await realClick(`#ns-right .ns-tg-chip[data-tg-chip="${gIR}"] [data-tg-x]`);
+    await realClick(`#row-task-groups .ns-tg-chip[data-tg-chip="${gIR}"] [data-tg-x]`);
     await waitFor(`![...document.querySelectorAll('#input-browser-profile option')].some((o) => o.value === ${JSON.stringify(pIR)})`, 6000);
     const pWithout = await profs();
     check('H6 with «Investor relations» picked the profile kept to it is offered; without it, it is not — and the row says one more is not open to it', pWith.opts.includes(pIR) && pWith.opts.includes(pAll) && !pWithout.opts.includes(pIR) && pWithout.opts.includes(pAll) && /1 more are not open to it/.test(pWithout.line), { pWith, pWithout });
@@ -800,12 +816,8 @@ try {
     await waitFor(`!!document.querySelector('#ns-right input[data-acc="fake-poll"]')`, 8000);
     const acc0 = await evalJs(`document.querySelector('#ns-right input[data-acc="fake-poll"]').checked`);
     await realClick('#ns-right input[data-acc="fake-poll"]'); await sleep(200);
-    const tick = await evalJs(`({ ticks: app._nsChannelTicks().map((x) => x.id), seg: [...document.querySelectorAll('#ns-right [data-tick-all]')].filter((b) => b.classList.contains('on')).map((b) => b.dataset.tickAll), words: document.querySelector('#ns-right [data-acc-row="fake-poll"] .ns-pv-via')?.textContent || '' })`);
-    check('H9 the fake account is unticked by default; one real click ticks it (the switch reads 已选) and says what create will write', !acc0 && tick.ticks.join() === 'fake-poll' && tick.seg.join() === 'some' && /Written into the channel assignment at create/.test(tick.words), tick);
-    await realClick('#ns-right [data-tick-all="none"]'); await sleep(150);
-    check('H9 无 unticks every tickable row', (await evalJs('app._nsChannelTicks().length')) === 0);
-    await realClick('#ns-right [data-tick-all="some"]'); await sleep(150);
-    check('H9 已选 restores the selection made by hand', (await evalJs('app._nsChannelTicks().map((x) => x.id).join()')) === 'fake-poll');
+    const tick = await evalJs(`({ ticks: app._nsChannelTicks().map((x) => x.id), inChan: !!document.querySelector('#ns-right [data-row="chan"] [data-acc-row="fake-poll"]'), words: document.querySelector('#ns-right [data-acc-row="fake-poll"] .ns-pv-via')?.textContent || '' })`);
+    check('H9 the fake account is unticked by default; one real click ticks it (one tick per account, inside 频道 — v3) and says what create will write', !acc0 && tick.ticks.join() === 'fake-poll' && tick.inChan && /Written into the channel assignment at create/.test(tick.words), tick);
     await realClick('#row-tools [data-tool="Read"]');
     await realClick('#row-tools [data-tool="WebFetch"]'); await realClick('#row-tools [data-tool="WebFetch"]');
     const winsBefore = await evalJs(`JSON.stringify([...app.sessions.keys()])`);
@@ -834,6 +846,290 @@ try {
     check('H no page error during the form\'s legs', pageErrors.length === 0, pageErrors);
   }
 
+  // ═══ J the folder follows the Task Group until the person edits; the 由名字 chips under the field, live ═════════════════
+  // (lane new-session-group-folder-link — the owner, 2026-10-23: 「选了一个任务组会自动填充一个 path，但此时我删掉重新选择其他
+  // 任务组，这个 path 不会改变。另外之前说的自动在下面按照任务名推荐 path 也没有，必须点开 path autocomplete 列表才行」)
+  console.log('J the folder follows the Task Group until the person edits; the name\'s chips under the field (lane new-session-group-folder-link)');
+  {
+    const api = async (method, p, body) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }); try { return await r.json(); } catch { return null; } };
+    const STUDIO = path.join(fakeHome, 'workspace', 'studio'), OTHER = path.join(fakeHome, 'other-area');
+    for (const d of [STUDIO, OTHER]) fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(STUDIO, 'notes.md'), '# lane fixture\n');
+    const gWork = (await api('POST', '/api/tasks', { title: '工作', folders: [STUDIO] }))?.task?.id;
+    const gOther = (await api('POST', '/api/tasks', { title: 'Other area', folders: [OTHER] }))?.task?.id;
+    check('J0 the fixtures: two Task Groups, each with its own folder', !!gWork && !!gOther, { gWork, gOther });
+    await waitFor(`!!app.sidebar._taskById(${JSON.stringify(gWork)}) && !!app.sidebar._taskById(${JSON.stringify(gOther)}) && app.sidebar._folderPaths(app.sidebar._taskById(${JSON.stringify(gOther)}))[0] === ${JSON.stringify(OTHER)}`, 10000);
+    await stubCreate();
+    const field = `document.getElementById('input-cwd')`;
+    const facts = `(() => { const i = ${field}, w = i.closest('.path-field'); return { value: i.value, line: (w?.querySelector('.pf-under')?.innerText || '').trim(), state: w?.dataset.state || '' }; })()`;
+    const pick = async (id) => { await realClick('#row-task-groups [data-tg-add]'); await sleep(200); const ok = await realClick(`.ns-tg-menu [data-tg="${id}"]`); await sleep(250); await evalJs(`document.querySelectorAll('.ns-tg-menu, .ns-tg-scrim').forEach((m) => m.remove()); true`); return ok; };
+    const unpick = (id) => realClick(`#row-task-groups .ns-tg-chip[data-tg-chip="${id}"] [data-tg-x]`);   // lane new-session-layout-v3-build: the 任务组 row is on the LEFT
+    const FROM = (n) => `(from Task Group «${n}»)`;
+    await openNs(); await sleep(400);
+    check('J1 opened from nowhere: the folder is empty', (await evalJs(facts)).value === '', await evalJs(facts));
+    // J1 the owner's sequence: pick 工作 → its folder; × 工作; pick another → the folder changes with it
+    await pick(gWork);
+    const j1 = await waitFor(`(() => { const f = ${facts}; return f.value === ${JSON.stringify(STUDIO)} && f.line.includes(${JSON.stringify('= ~/workspace/studio' + FROM('工作'))}); })()`, 6000);
+    check('J1 real clicks pick 工作 ⇒ the folder is its folder, and the line says where it came from «= ~/workspace/studio(from Task Group «工作»)»', j1, await evalJs(facts));
+    await unpick(gWork);
+    check('J1 × 工作 ⇒ the folder it gave goes with it (the field is empty again)', await waitFor(`(${facts}).value === ''`, 4000), await evalJs(facts));
+    await pick(gOther);
+    check('J1 THE FINDING: then picking another group ⇒ the folder is THAT group\'s (was: 工作\'s stayed)', await waitFor(`(() => { const f = ${facts}; return f.value === ${JSON.stringify(OTHER)} && f.line.includes(${JSON.stringify(FROM('Other area'))}); })()`, 4000), await evalJs(facts));
+    // J2 two groups: the first picked gives the folder; removing it hands over to the next
+    await pick(gWork);
+    check('J2 two groups ⇒ the FIRST picked one\'s folder stays (Other area\'s)', await waitFor(`(${facts}).value === ${JSON.stringify(OTHER)}`, 3000) && (await evalJs(facts)).value === OTHER, await evalJs(facts));
+    await unpick(gOther);
+    check('J2 × the first ⇒ the next picked group\'s folder (工作\'s), said so', await waitFor(`(() => { const f = ${facts}; return f.value === ${JSON.stringify(STUDIO)} && f.line.includes(${JSON.stringify(FROM('工作'))}); })()`, 4000), await evalJs(facts));
+    // J3 the person types a folder ⇒ the groups never move it again
+    await evalJs(`(() => { const i = ${field}; i.focus(); i.select(); return true; })()`);
+    await cdp('Input.insertText', { text: CWD }); await sleep(300); await escape();
+    await realClick('#input-session-name'); await sleep(700);
+    const typed = await evalJs(facts);
+    check('J3 a folder typed over it is the person\'s: the line no longer names a group', typed.value === CWD && !typed.line.includes('from Task Group'), typed);
+    await pick(gOther); await unpick(gWork); await sleep(500);
+    check('J3 then adding and removing groups never moves it', (await evalJs(facts)).value === CWD, await evalJs(facts));
+    // J4 cleared and left empty ⇒ the groups fill it again (never under the caret)
+    await evalJs(`(() => { const i = ${field}; i.focus(); i.select(); return true; })()`);
+    await key('Backspace', 'Backspace', 8); await sleep(250);
+    check('J4 cleared: nothing refills while the caret is in it', (await evalJs(facts)).value === '', await evalJs(facts));
+    await escape(); await realClick('#input-session-name');
+    check('J4 …leaving it empty ⇒ the picked group\'s folder again, said so', await waitFor(`(() => { const f = ${facts}; return f.value === ${JSON.stringify(OTHER)} && f.line.includes(${JSON.stringify(FROM('Other area'))}); })()`, 4000), await evalJs(facts));
+    // J5 the 由名字 chips: under the field, live with the name, 新建 for a folder not there; a press is a pick
+    await unpick(gOther); await pick(gWork); await sleep(300);
+    const nameChips = `[...document.querySelectorAll('#cwd-recent .cwd-name-chip')].map((c) => ({ path: c.dataset.path, isNew: c.dataset.new === '1', text: c.textContent }))`;
+    const oneRow = await evalJs(`(() => { const r = document.querySelectorAll('#dialog-new-session .cwd-recent'); return { n: r.length, inField: !!document.getElementById('cwd-recent')?.closest('.path-field') }; })()`);
+    check('J5 ONE chips row, inside the field (the path field\'s own — #cwd-recent adopted)', oneRow.n === 1 && oneRow.inField, oneRow);
+    check('J5 the name empty ⇒ no 由名字 chip', (await evalJs(nameChips)).length === 0, await evalJs(nameChips));
+    await realClick('#input-session-name');
+    for (const ch of ['测', '试']) { await cdp('Input.insertText', { text: ch }); await sleep(120); }
+    const c1 = await waitFor(`(() => { const c = ${nameChips}; return c.length === 2 && c[0].path === ${JSON.stringify(path.join(STUDIO, '测试'))} && c[1].path === ${JSON.stringify(path.join(fakeHome, '测试'))} && c.every((x) => x.isNew); })()`, 6000);
+    check('J5 typing the name 测试 ⇒ under the field, without opening the list: «New ~/workspace/studio/测试», «New ~/测试»', c1 && !(await evalJs(`!!document.querySelector('.pf-list:not([hidden]) .pf-item')`)), await evalJs(nameChips));
+    await evalJs(`document.getElementById('row-cwd').scrollIntoView({ block: 'center' }); true`); await shot('j5-name-chips'); // the owner's screen: 工作 picked, its folder named on the line, the name's chips under the field
+    await cdp('Input.insertText', { text: '2' });
+    check('J5 one more keystroke ⇒ the chips follow it (…/测试2)', await waitFor(`(${nameChips})[0]?.path === ${JSON.stringify(path.join(STUDIO, '测试2'))}`, 4000), await evalJs(nameChips));
+    check('J5 the field itself still holds the group\'s folder (the name never moves the folder)', (await evalJs(facts)).value === STUDIO, await evalJs(facts));
+    await realClick('#cwd-recent .cwd-name-chip');
+    const picked = await waitFor(`(() => { const f = ${facts}; return f.value === '~/workspace/studio/测试2' && f.state === 'missing'; })()`, 5000);
+    check('J5 a press on the chip fills the field with it — a pick (no group named on the line), ticked to be made at Create', picked && !(await evalJs(facts)).line.includes('from Task Group') && await evalJs(`!!document.querySelector('#dialog-new-session .pf-under input[data-act="tick"]')?.checked`), await evalJs(facts));
+    await pick(gOther); await sleep(400);
+    check('J5 …so a group change leaves it alone', (await evalJs(facts)).value === '~/workspace/studio/测试2', await evalJs(facts));
+    check('J5 nothing was made before Create', !fs.existsSync(path.join(STUDIO, '测试2')));
+    const n0 = await evalJs('window.__nsCreated.length');
+    await realClick('#dialog-new-session .btn-create');
+    await waitFor(`window.__nsCreated.length > ${n0}`, 6000);
+    const made = await evalJs('window.__nsCreated.at(-1)');
+    check('J5 Create makes the folder and starts the session there, in both groups (the order picked)', made?.cwd === path.join(STUDIO, '测试2') && fs.existsSync(path.join(STUDIO, '测试2')) && JSON.stringify(made?.taskIds) === JSON.stringify([gWork, gOther]), made && { cwd: made.cwd, taskIds: made.taskIds });
+    // J6 opened FROM a group (the sidebar's «New session in this task»): derived — it follows
+    await openNs({ taskId: gWork, cwd: STUDIO }); await sleep(500);
+    check('J6 opened from 工作 ⇒ its folder, named on the line', await waitFor(`(() => { const f = ${facts}; return f.value === ${JSON.stringify(STUDIO)} && f.line.includes(${JSON.stringify(FROM('工作'))}); })()`, 4000), await evalJs(facts));
+    await unpick(gWork); await pick(gOther);
+    check('J6 × 工作, + Other area ⇒ Other area\'s folder', await waitFor(`(${facts}).value === ${JSON.stringify(OTHER)}`, 4000), await evalJs(facts));
+    // J7 opened on a folder (a folder's «+»): the person's place — a group pick never replaces it
+    await openNs({ cwd: CWD }); await sleep(400);
+    await pick(gWork); await sleep(400);
+    check('J7 opened on a folder ⇒ picking a group keeps that folder (the place the person opened it on)', (await evalJs(facts)).value === CWD, await evalJs(facts));
+    // J8 the phone: the same linkage, the chips under the field
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await openNs({ taskId: gWork, cwd: STUDIO }); await sleep(500);
+    await evalJs(`(() => { const n = document.getElementById('input-session-name'); n.value = 'phone'; n.dispatchEvent(new Event('input')); return true; })()`);
+    const ph = await waitFor(`(() => { const c = document.querySelector('#cwd-recent .cwd-name-chip'); if (!c) return false; const r = c.getBoundingClientRect(), f = document.getElementById('input-cwd').getBoundingClientRect(); return r.width > 0 && r.top >= f.bottom && r.right <= innerWidth + 1 && c.dataset.path === ${JSON.stringify(path.join(STUDIO, 'phone'))}; })()`, 5000);
+    check('J8 the phone: the name\'s chip sits under the field, inside the screen', ph, await evalJs(nameChips));
+    await evalJs(`document.getElementById('row-cwd').scrollIntoView({ block: 'center' }); true`); await shot('j8-phone-field');
+    await unpick(gWork);
+    check('J8 the phone: × 工作 ⇒ the folder it gave goes with it', await waitFor(`(${facts}).value === ''`, 4000), await evalJs(facts));
+    await shot('j8-phone');
+    await evalJs('app.hideDialogs(); true');
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
+    check('J no page error during the folder legs', pageErrors.length === 0, pageErrors);
+  }
+
+  // ═══ K THE v3 FORM (lane new-session-layout-v3-build — the owner nodded the POC, 2026-10-23 「都按你推荐吧 没啥问题了 手机版
+  // 也顺便研究下优化」): the LEFT column's order with 任务组 under the name; ONE mode door (Agent | Terminal) — Terminal = a
+  // login shell (the backend card not drawn, the fold keeps the machine, the right column 「会话」 + one sentence); the
+  // harness's own terminal UI = the fold's tick (mode terminal); the right column READS the left; the removals; 频道's
+  // ticks with a group grant's 除了; zh / ja; THE PHONE (390×844: a full-screen sheet, the footer one line, the accordion,
+  // the picker as a bottom sheet, no input under 16 px, no tap target under 32 px — a census with planted RED controls)
+  console.log('K the v3 form: the order, one mode door, the terminal-UI tick, the right column reads the left, the phone (lane new-session-layout-v3-build)');
+  {
+    const api = async (method, p, body) => { const r = await fetch(`http://127.0.0.1:${PORT}${p}`, { method, headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }); try { return await r.json(); } catch { return null; } };
+    const WK = path.join(fakeHome, 'k-roadshow'); fs.mkdirSync(WK, { recursive: true });
+    const gA = (await api('POST', '/api/tasks', { title: 'Roadshow', folders: [WK] }))?.task?.id;
+    const gB = (await api('POST', '/api/tasks', { title: 'Contracts', folders: [] }))?.task?.id;
+    const grant = await api('PUT', '/api/channels/adapters/fake-push/access', { access: [{ principal: { kind: 'group', id: gA }, authority: 'draft' }], except: [{ kind: 'conversation', key: 'claude:0e1a0000-0000-4000-8000-00000000beef', name: 'Q3 board pack' }] });
+    check('K0 the fixtures: two Task Groups, the fake-push account granted to «Roadshow» with one member left out (除了)', !!gA && !!gB && grant?.ok === true, { gA, gB, grant: grant && (grant.ok || grant.error) });
+    await waitFor(`!!app.sidebar._taskById(${JSON.stringify(gA)}) && !!app.sidebar._taskById(${JSON.stringify(gB)})`, 10000);
+    await stubCreate();
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
+    const pickL = async (id) => { await realClick('#row-task-groups [data-tg-add]'); await sleep(200); const ok = await realClick(`.ns-tg-menu [data-tg="${id}"]`); await sleep(250); await evalJs(`document.querySelectorAll('.ns-tg-menu, .ns-tg-scrim').forEach((m) => m.remove()); true`); return ok; };
+    const left = `(() => { const ids = ['row-session-name', 'row-task-groups', 'row-cwd', 'row-backend', 'row-model', 'row-effort', 'row-permission', 'row-tools', 'ns-more']; return ids.map((id) => { const e = document.getElementById(id); const r = e && e.offsetParent !== null ? e.getBoundingClientRect() : null; return r ? [id, Math.round(r.top), Math.round(r.left)] : [id, null]; }); })()`;
+    await openNs(); await sleep(600);
+    // K1 the order (each row below the one before; effort beside model) and the switch in the header's top right
+    const L = await evalJs(left);
+    const tops = L.filter(([id]) => id !== 'row-effort').map((x) => x[1]);
+    check('K1 the LEFT column at 1280: 会话名称 → 任务组 → 工作目录 → 后端 → 模型·强度 → 权限模式 → 可用工具 → 更多选项 (each below the one before)', tops.every((t, i) => t != null && (i === 0 || t > tops[i - 1])), L);
+    const eff = L.find((x) => x[0] === 'row-effort'), mod = L.find((x) => x[0] === 'row-model');
+    check('K1 推理强度 sits beside 模型 (one row)', eff[1] === mod[1] && eff[2] > mod[2], { mod, eff });
+    const sw = await evalJs(`(() => { const k = document.getElementById('ns-kind-seg').getBoundingClientRect(), h = document.querySelector('#dialog-new-session .ns-head').getBoundingClientRect(), x = document.querySelector('#dialog-new-session .dialog-close').getBoundingClientRect(), t = document.querySelector('#dialog-new-session .ns-head h3').getBoundingClientRect(); return { inHead: k.top >= h.top && k.bottom <= h.bottom, right: Math.round(x.left - k.right), titleLeft: k.left > t.right, words: [...document.querySelectorAll('#ns-kind-seg button')].map((b) => b.textContent.trim()), icons: document.querySelectorAll('#ns-kind-seg .ns-kind-ic svg').length }; })()`);
+    check('K1 Agent | Terminal is in the header, at its right (just left of ×), with its icons', sw.inHead && sw.titleLeft && sw.right >= 0 && sw.right < 24 && sw.words.join() === 'Agent,Terminal' && sw.icons === 2, sw);
+    check('K1 the title says «New Session» (not «New Agent Session»: Terminal is a session too)', await evalJs(`document.querySelector('#dialog-new-session .ns-head h3').textContent`) === 'New Session');
+    // K2 the 任务组 row: none / one / two; the right column READS it
+    const tgFacts = `(() => { const r = document.getElementById('row-task-groups'); const why = r.querySelector('.ns-tg-reason'); return { shown: r.offsetParent !== null, chips: [...r.querySelectorAll('.ns-tg-chip')].map((c) => c.querySelector('.ns-tg-n').textContent + ' ' + c.querySelector('.ns-tg-name').textContent), why: why.textContent, dim: why.classList.contains('dim'), reach: document.querySelector('#ns-right [data-reach]')?.textContent || '', rightPicker: document.querySelectorAll('#ns-right [data-tg-add], #ns-right .ns-tg-chip, #ns-right [data-tg-x]').length }; })()`;
+    const n0 = await evalJs(tgFacts);
+    check('K2 none picked: the row says «No Task Group: listed only under «Sessions», with its own folder and context» in grey (no warning)', n0.shown && n0.chips.length === 0 && n0.dim && n0.why === 'No Task Group: listed only under «Sessions», with its own folder and context', n0);
+    check('K2 …and the right column\'s 「会话」 reads it — no picker on the right', /^No Task Group — it only reaches the sessions it starts itself/.test(n0.reach) && /Pick Task Groups on the left ↖/.test(n0.reach) && n0.rightPicker === 0, n0);
+    await shot('k2-none-1280');
+    await pickL(gA);
+    const n1 = await evalJs(tgFacts);
+    check('K2 one picked: «It will be listed in this group and get its context; the folder below is suggested from its folders ↓»', n1.chips.join() === '1 Roadshow' && !n1.dim && /^It will be listed in this group/.test(n1.why), n1);
+    check('K2 …the right column: «Joined “Roadshow” — can see and message the N session(s) in this group…» + «Change on the left ↖»', /^Joined “Roadshow” — can see and message the \d+ session\(s\) in this group; groups it did not join only reach the sessions it starts itself/.test(n1.reach) && /Change on the left ↖/.test(n1.reach), n1.reach);
+    check('K2 one group picked ⇒ the folder is its folder (the link lane\'s model, fed from the LEFT row)', await waitFor(`document.getElementById('input-cwd').value === ${JSON.stringify(WK)}`, 4000), await evalJs(`document.getElementById('input-cwd').value`));
+    await shot('k2-one-1280');
+    await evalJs(`(() => { const c = [...document.querySelectorAll('#row-task-groups .ns-tg-chip')].find((x) => x.dataset.tgChip === ${JSON.stringify(gA)}); c.__kept = 'yes'; return true; })()`);
+    await pickL(gB);
+    const n2 = await evalJs(tgFacts);
+    check('K2 two picked: chips in the order picked, «…these 2 groups…»; the right column names both', n2.chips.join() === '1 Roadshow,2 Contracts' && /^It will be listed in these 2 groups/.test(n2.why) && /^Joined “Roadshow”, “Contracts” — can see and message the \d+ session\(s\) in these 2 groups/.test(n2.reach), n2);
+    await shot('k2-two-1280');
+    await realClick(`#row-task-groups .ns-tg-chip[data-tg-chip="${gA}"] [data-tg-x]`); await sleep(250);
+    await pickL(gA);
+    const kept = await evalJs(`(() => { const c = [...document.querySelectorAll('#row-task-groups .ns-tg-chip')]; return { order: c.map((x) => x.dataset.tgChip + ':' + x.querySelector('.ns-tg-n').textContent), keptB: c[0]?.dataset.tgChip === ${JSON.stringify(gB)} }; })()`);
+    check('K2 × «Roadshow», + «Roadshow» ⇒ Contracts 1, Roadshow 2 (renumbered in place)', kept.keptB && kept.order.join() === `${gB}:1,${gA}:2`, kept);
+    await realClick('#ns-right [data-goto-groups]'); await sleep(300);
+    check('K2 «Change on the left ↖» takes the person to the 任务组 row (its «+» focused)', await evalJs(`!!document.activeElement?.matches('#row-task-groups [data-tg-add]')`));
+    // the chips are KEYED and patched in place: a group still picked keeps its node through other picks
+    await openNs(); await sleep(400); await pickL(gA);
+    await evalJs(`(() => { document.querySelector('#row-task-groups .ns-tg-chip').__kept = 'yes'; return true; })()`);
+    await pickL(gB);
+    check('K2 the chips are keyed and patched in place (a picked group\'s chip is the SAME node after another pick)', await evalJs(`document.querySelector('#row-task-groups .ns-tg-chip').__kept === 'yes'`));
+    // K3 one mode door: Terminal = a login shell
+    await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; document.getElementById('input-cwd').dispatchEvent(new Event('input')); true`);
+    await realClick('#ns-kind-seg [data-kind="terminal"]'); await sleep(400);
+    const T = await evalJs(`(() => { const vis = (id) => { const e = document.getElementById(id); return !!e && e.offsetParent !== null; }; return { card: vis('ns-card-backend'), cardH: vis('ns-card-backend-h'), model: vis('row-model'), perm: vis('row-permission'), tools: vis('row-tools'), more: document.getElementById('ns-more-names').textContent, right: [...document.querySelectorAll('#ns-right .ns-pv-name')].map((e) => e.textContent), plain: document.querySelector('#ns-right .ns-plain')?.textContent || '', chip: document.getElementById('ns-be-chip').textContent, foot: [...document.querySelectorAll('#ns-foot-info [data-chip]')].map((c) => c.textContent), sub: document.getElementById('ns-left-sub').textContent, groups: vis('row-task-groups') }; })()`);
+    check('K3 Terminal: the backend card is not drawn (no backend / model / permission / tools), 更多选项 keeps only the machine', !T.card && !T.cardH && !T.model && !T.perm && !T.tools && T.more === 'Machine', T);
+    check('K3 Terminal: the right column keeps 「会话」 + one sentence (no channels / browser / vault)', T.right.join() === 'Sessions' && /^A Terminal has no agent/.test(T.plain), T);
+    check('K3 Terminal: no backend chip in the header; the footer says «Terminal · login shell»; the 任务组 row stays', T.chip === '' && T.foot[0] === 'Terminal · login shell' && T.groups && T.sub === 'Prefilled from last time · a login shell, no harness', T);
+    await shot('k3-terminal-1280');
+    await evalJs(`window.__nsShell = []; app.__realShell = app.__realShell || app.openShellTerminal; app.openShellTerminal = (cwd, o) => { window.__nsShell.push({ cwd, hostId: o && o.hostId }); }; true`);
+    const c0 = await evalJs('window.__nsCreated.length');
+    await realClick('#dialog-new-session .btn-create');
+    await waitFor(`window.__nsShell.length > 0`, 6000);
+    check('K3 Create in Terminal ⇒ a login shell in that folder (openShellTerminal), no agent created', JSON.stringify(await evalJs('window.__nsShell')) === JSON.stringify([{ cwd: CWD }]) && await evalJs('window.__nsCreated.length') === c0, await evalJs('window.__nsShell'));
+    await evalJs(`app.openShellTerminal = app.__realShell; true`);
+    // K4 the harness's own terminal UI = the fold's tick (the owner's ①: default folded)
+    await openNs(); await sleep(400);
+    const tui0 = await evalJs(`({ fold: !!document.getElementById('row-tui').closest('#ns-more-body'), on: document.getElementById('input-tui').checked, names: document.getElementById('ns-more-names').textContent })`);
+    check('K4 «Run in the harness’s own terminal UI» is folded by default, unticked, and named on the fold', tui0.fold && !tui0.on && /Terminal UI/.test(tui0.names), tui0);
+    await realClick('#ns-more-toggle'); await sleep(200);
+    await realClick('#row-tui'); await sleep(300);
+    await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; document.getElementById('input-cwd').dispatchEvent(new Event('input')); true`);   // a folder: the footer shows the run's chips
+    await realClick('#input-session-name'); await waitFor(`!!document.querySelector('#ns-foot-info [data-chip]')`, 6000);   // the field's list closed, its verdict in
+    const tui1 = await evalJs(`({ on: document.getElementById('input-tui').checked, mode: document.getElementById('input-mode').value, chip: !!document.querySelector('#ns-foot-info [data-chip="tui"]'), kind: [...document.querySelectorAll('#ns-kind-seg button.on')].map((b) => b.dataset.kind).join() })`);
+    check('K4 one real click ticks it ⇒ mode terminal (the backing value), a «Harness terminal UI» chip, and the header still says Agent', tui1.on && tui1.mode === 'terminal' && tui1.chip && tui1.kind === 'chat', tui1);
+    await shot('k4-tui-1280');
+    const c1 = await evalJs('window.__nsCreated.length');
+    await realClick('#dialog-new-session .btn-create'); await waitFor(`window.__nsCreated.length > ${c1}`, 6000);
+    const madeT = await evalJs('window.__nsCreated.at(-1)');
+    check('K4 Create sends mode «terminal» with the harness (ws-create\'s pty-wrapper road — the server contract unchanged)', madeT?.mode === 'terminal' && madeT?.backend === 'claude', madeT && { mode: madeT.mode, backend: madeT.backend });
+    await evalJs(`app.settings.set('session.defaultMode', 'terminal'); true`);
+    await openNs(); await sleep(400);
+    const tui2 = await evalJs(`({ on: document.getElementById('input-tui').checked, up: !!document.getElementById('row-tui').closest('#ns-card-backend'), note: document.querySelector('#row-tui .ns-auto-note')?.textContent || '' })`);
+    check('K4 the person\'s default (Settings: sessions start in the terminal) ⇒ ticked AND standing in the card, saying why', tui2.on && tui2.up && /start in the terminal by default/.test(tui2.note), tui2);
+    await evalJs(`app.settings.set('session.defaultMode', 'chat'); true`);
+    await openNs(); await sleep(300);
+    check('K4 the default back to chat ⇒ unticked and folded again', await evalJs(`!document.getElementById('input-tui').checked && !!document.getElementById('row-tui').closest('#ns-more-body')`));
+    // K5 the removals
+    const gone = await evalJs(`({ tickAll: document.querySelectorAll('#dialog-new-session [data-tick-all], #dialog-new-session .ns-tick-seg').length, mcp: /MCP/.test(document.getElementById('ns-right').innerText), outside: document.querySelectorAll('#ns-right [data-fact="group"]').length + (/Outside · notifications/.test(document.getElementById('ns-right').innerText) ? 1 : 0), accCard: document.querySelectorAll('#ns-right [data-card="accounts"]').length + (/Accounts · as you/.test(document.getElementById('ns-right').innerText) ? 1 : 0), shellChip: [...document.querySelectorAll('#ns-be-seg button, #ns-be-phone option')].filter((b) => b.dataset?.backend === 'shell' || b.value === 'shell' || /plain shell/i.test(b.textContent)).length })`);
+    check('K5 gone: 无 | 已选 | 全部, the MCP empty row, 「对外 · 通知」, the separate 「账号 · 以你的身份」 card, the «Terminal (plain shell)» backend chip', gone.tickAll === 0 && !gone.mcp && gone.outside === 0 && gone.accCard === 0 && gone.shellChip === 0, gone);
+    // K6 频道: one tick per account; a group grant ticked + locked with its 除了
+    await pickL(gA);
+    await waitFor(`!!document.querySelector('#ns-right [data-row="chan"] [data-acc-row="fake-push"] .ns-exc')`, 8000);
+    const notLive = await evalJs(`document.querySelector('#ns-right [data-acc-row="fake-push"] .ns-exc')?.textContent || ''`);
+    check('K6 a 除了 member that is not live is said so («Except: a conversation not live now» — the access store keeps no names)', notLive === 'Except: a conversation not live now', notLive);
+    await evalJs(`(() => { app.sidebar._allSessions.push({ sessionId: 'k-q3', backendSessionId: '0e1a0000-0000-4000-8000-00000000beef', backend: 'claude', name: 'Q3 board pack', cwd: '/tmp/q3' }); app._nsPaintRight(); return true; })()`);
+    const ch = await evalJs(`(() => { const r = document.querySelector('#ns-right [data-acc-row="fake-push"]'); const x = r.querySelector('input'); return { inChan: !!r.closest('[data-row="chan"]'), checked: x.checked, disabled: x.disabled, via: r.querySelector('.ns-pv-via').textContent, door: r.querySelector('[data-door="chan"]')?.textContent || '' }; })()`);
+    check('K6 a group-granted account: ticked + locked inside 频道, says «Through Task Group “Roadshow” · draft only» and its 除了 «Except: Q3 board pack»', ch.inChan && ch.checked && ch.disabled && /^Through Task Group “Roadshow” · draft only/.test(ch.via) && /Except: Q3 board pack/.test(ch.via) && /^Except… ›/.test(ch.door), ch);
+    await shot('k6-chan-1280');
+    await evalJs(`(() => { app.sidebar._allSessions = app.sidebar._allSessions.filter((s) => s.sessionId !== 'k-q3'); return true; })()`);
+    // K7 zh / ja
+    for (const [lang, words] of [['zh', { title: '新建会话', term: '终端', tg: '任务组', none: '不加入任务组：只列在「会话」里，用自己的文件夹和上下文', tui: '终端界面', nameHint: '也是「由名字」推荐文件夹的那个名字' }], ['ja', { title: '新規セッション', term: 'ターミナル', tg: 'タスクグループ', none: 'タスクグループに入れない：「セッション」にだけ並び、自分のフォルダと文脈を使います', tui: 'ターミナル画面', nameHint: 'フォルダの「名前から」提案にも使う名前' }]]) {
+      await evalJs(`localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); true`);
+      await cdp('Page.reload'); await waitApp(); await sleep(800); await stubCreate();
+      await openNs(); await sleep(600);
+      const w = await evalJs(`({ title: document.querySelector('#dialog-new-session .ns-head h3').textContent, term: document.querySelector('#ns-kind-seg [data-kind="terminal"]').textContent.trim(), tg: document.querySelector('#row-task-groups .ns-tg-lab')?.textContent, none: document.querySelector('#row-task-groups .ns-tg-reason')?.textContent, more: document.getElementById('ns-more-names').textContent, nameHint: document.querySelector('#row-session-name .ns-lab-hint')?.textContent })`);
+      check(`K7 ${lang}: the header, the switch, the 任务组 row and its sentence, the fold\'s 终端界面, the name\'s hint in ${lang}`, w.title === words.title && w.term === words.term && w.tg === words.tg && w.none === words.none && w.more.includes(words.tui) && w.nameHint === words.nameHint, w);
+      await shot(`k7-${lang}-1280`);
+    }
+    await evalJs(`localStorage.setItem('vibespace.lang', 'en'); true`);
+    // K8 THE PHONE at 390×844 (the page loaded AT phone width: app.isMobile is read once, at boot — as on a real phone)
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await cdp('Page.reload'); await waitApp(); await sleep(800); await stubCreate();
+    await openNs(); await sleep(600);
+    await evalJs(`(() => { const n = document.getElementById('input-session-name'); n.value = 'roadshow-q3'; n.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await pickL(gA); await pickL(gB); await sleep(400);
+    await shot('k8-phone-top-390');
+    const geo = () => evalJs(`(() => { const d = document.getElementById('dialog-new-session').getBoundingClientRect(), h = document.querySelector('#dialog-new-session .ns-head').getBoundingClientRect(), f = document.querySelector('#dialog-new-session .ns-foot').getBoundingClientRect(), b = document.querySelector('#dialog-new-session .ns-body'); return { d: [Math.round(d.left), Math.round(d.top), Math.round(d.width), Math.round(d.height)], headTop: Math.round(h.top), footBottom: Math.round(f.bottom), footH: Math.round(f.height), scrolls: b.scrollHeight > b.clientHeight + 50, chipTops: [...new Set([...document.querySelectorAll('#ns-foot-info .ns-chip')].map((c) => Math.round(c.getBoundingClientRect().top)))], nChips: document.querySelectorAll('#ns-foot-info .ns-chip').length, vw: innerWidth, vh: innerHeight }; })()`);
+    const g0 = await geo();
+    check('K8 phone: a FULL-SCREEN sheet (0, 0, 390 × 844), its middle scrolls', g0.d.join() === `0,0,${g0.vw},${g0.vh}` && g0.scrolls, g0);
+    await evalJs(`(() => { const b = document.querySelector('#dialog-new-session .ns-body'); b.scrollTop = b.scrollHeight; return true; })()`); await sleep(200);
+    const g1 = await geo();
+    check('K8 phone: scrolled to the end, the header is still at the top and the footer at the bottom (fixed)', g1.headTop === 0 && g1.footBottom === g1.vh, g1);
+    check('K8 phone: the footer is ONE line — its value chips in one row (they scroll sideways), never taller than a line', g1.footH <= 60 && g1.chipTops.length === 1 && g1.nChips >= 4, g1);
+    await evalJs(`document.querySelector('#dialog-new-session .ns-body').scrollTop = 0; true`);
+    // the right column as an accordion with a summary per resource
+    const acc = () => evalJs(`[...document.querySelectorAll('#ns-right .ns-res')].map((r) => ({ k: r.querySelector('[data-res-tog]').dataset.resTog, open: r.classList.contains('open'), sum: r.querySelector('.ns-res-t small').textContent, badge: r.querySelector('.ns-badge, .ns-on')?.textContent || '', body: r.querySelector('.ns-res-body').offsetParent !== null }))`);
+    const a0 = await acc();
+    const A = Object.fromEntries(a0.map((x) => [x.k, x]));
+    check('K8 phone: the right column is an ACCORDION — built-in · sessions · channels · browser · vault · keys, each one line, all closed', ['builtin', 'sessions', 'chan', 'vault', 'keys'].every((k) => A[k] && !A[k].open && !A[k].body) && a0[0].k === 'builtin' && a0[1].k === 'sessions', a0);
+    check('K8 phone: the lines summarize — «Joined “Roadshow”, “Contracts” · N session(s)», «1 account(s) through Task Groups · N more to tick» with its yellow mark', /^Joined “Roadshow”, “Contracts” · \d+ session\(s\)$/.test(A.sessions.sum) && /^1 account\(s\) through Task Groups · \d+ more to tick$/.test(A.chan.sum) && /^\d+ to tick$/.test(A.chan.badge), { s: A.sessions, c: A.chan });
+    await realClick('#ns-right [data-res-tog="chan"]'); await sleep(300);
+    const a1 = Object.fromEntries((await acc()).map((x) => [x.k, x]));
+    check('K8 phone: one tap opens 频道 — its account rows (the granted one with its 除了) and its door', a1.chan.open && a1.chan.body && await evalJs(`!!document.querySelector('#ns-right .ns-res.open [data-acc-row="fake-push"] .ns-exc') && !!document.querySelector('#ns-right .ns-res.open [data-door="chan"]')`), a1.chan);
+    await shot('k8-phone-chan-390');
+    // the picker as a bottom sheet
+    await evalJs(`document.querySelector('#dialog-new-session .ns-body').scrollTop = 0; true`);
+    await realClick('#row-task-groups [data-tg-add]'); await sleep(400);
+    const sh = await evalJs(`(() => { const m = document.querySelector('.ns-tg-menu'); if (!m) return null; const r = m.getBoundingClientRect(); const items = [...m.querySelectorAll('[data-tg]')]; return { sheet: m.classList.contains('ns-tg-sheet'), l: Math.round(r.left), w: Math.round(r.width), bottom: Math.round(r.bottom), minH: Math.min(...items.map((i) => Math.round(i.getBoundingClientRect().height))), ticks: items.filter((i) => i.querySelector('.ns-tg-tick')?.textContent === '✓').map((i) => i.dataset.tg), scrim: !!document.querySelector('.ns-tg-scrim'), done: !!m.querySelector('[data-tg-done]') }; })()`);
+    check('K8 phone: the 任务组 picker is a BOTTOM SHEET — full width, at the bottom, 50 px rows, ✓ on the picked, 完成', sh && sh.sheet && sh.l === 0 && sh.w === 390 && sh.bottom === 844 && sh.minH >= 50 && sh.ticks.includes(gA) && sh.ticks.includes(gB) && sh.scrim && sh.done, sh);
+    await shot('k8-phone-picker-390');
+    await realClick('.ns-tg-menu [data-tg-done]'); await sleep(250);
+    check('K8 phone: 完成 closes the sheet (and its scrim)', await evalJs(`!document.querySelector('.ns-tg-menu') && !document.querySelector('.ns-tg-scrim')`));
+    // the census: every input ≥ 16 px (iOS never zooms), every tap target ≥ 32 px (a group chip's × 30 px) — the fold and
+    // every accordion row open, so nothing hides from it
+    await evalJs(`(() => { document.getElementById('ns-more-toggle').setAttribute('aria-expanded', 'true'); for (const k of ['builtin', 'sessions', 'chan', 'browser', 'vault', 'keys']) app._ns.open[k] = true; app._nsPaintRight(); return true; })()`); await sleep(300);
+    const CENSUS = `(() => { const dlg = document.getElementById('dialog-new-session'); const vis = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' && !e.closest('[hidden]'); };
+      const name = (e) => (e.id || e.dataset.chip || e.dataset.tool || e.dataset.tg || e.dataset.resTog || e.className || e.tagName) + ':' + (e.innerText || e.value || '').slice(0, 24);
+      const inputs = [...dlg.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]), select')].filter(vis).filter((e) => parseFloat(getComputedStyle(e).fontSize) < 16 || e.getBoundingClientRect().height < 41.5).map(name);
+      const taps = [...dlg.querySelectorAll('button, select, input:not([type="checkbox"]):not([type="radio"]), label.dialog-check-row, label.ns-acc, .pf-tickrow, [role="option"]')].filter(vis).filter((e) => { const r = e.getBoundingClientRect(); return e.matches('[data-tg-x]') ? (r.height < 30 || r.width < 30) : r.height < 31.5; }).map((e) => name(e) + '@' + Math.round(e.getBoundingClientRect().height));
+      const n = dlg.querySelectorAll('button, select, input, [role="option"]').length; return { inputs, taps, n }; })()`;
+    const cen = await evalJs(CENSUS);
+    check(`K8 phone census: no input or select under 16 px / 42 px (${cen.n} controls)`, cen.inputs.length === 0, cen.inputs);
+    check('K8 phone census: no tap target under 32 px (a group chip\'s × ≥ 30 px)', cen.taps.length === 0, cen.taps);
+    await shot('k8-phone-open-390');
+    // RED CONTROLS: the census must be able to say no — a planted 18 px button and a planted 12 px input are caught
+    await evalJs(`(() => { const b = document.createElement('button'); b.id = 'k8-plant-btn'; b.textContent = 'x'; b.style.cssText = 'height:18px;min-height:0;padding:0;font-size:10px'; const i = document.createElement('input'); i.id = 'k8-plant-in'; i.type = 'text'; i.setAttribute('style', 'font-size:12px !important;min-height:0 !important;height:24px'); document.querySelector('#dialog-new-session .ns-body').prepend(b, i); return true; })()`);
+    const red = await evalJs(CENSUS);
+    check('K8 RED CONTROL: a planted 18 px button and a planted 12 px input are caught by the census', red.taps.some((x) => x.startsWith('k8-plant-btn')) && red.inputs.some((x) => x.startsWith('k8-plant-in')), red);
+    await evalJs(`document.getElementById('k8-plant-btn')?.remove(); document.getElementById('k8-plant-in')?.remove(); true`);
+    // the recommendation list sits IN THE FLOW under the field (L1's phone rule), the backend is a native select
+    await realClick('#input-cwd'); await cdp('Input.insertText', { text: 'k-r' }); await sleep(900);
+    const fl = await evalJs(`(() => { const l = document.querySelector('#row-cwd .pf-list'); const f = document.getElementById('input-cwd').getBoundingClientRect(); if (!l || l.hidden) return { list: false }; const r = l.getBoundingClientRect(); return { list: true, float: l.classList.contains('pf-float'), pos: getComputedStyle(l).position, below: r.top >= f.bottom - 1, inField: !!l.closest('#row-cwd') }; })()`);
+    check('K8 phone: the folder suggestions sit IN THE FLOW under the field (not floating)', fl.list && !fl.float && fl.pos !== 'fixed' && fl.below && fl.inField, fl);
+    await escape();
+    const be = await evalJs(`({ seg: document.getElementById('ns-be-seg').offsetParent !== null, sel: document.getElementById('ns-be-phone').offsetParent !== null, opts: [...document.querySelectorAll('#ns-be-phone option')].map((o) => o.value), pair: (() => { const m = document.getElementById('row-model').getBoundingClientRect(), e = document.getElementById('row-effort').getBoundingClientRect(); return e.top > m.top; })() })`);
+    check('K8 phone: the backend is a native select of harnesses (no shell), model / effort / permission one per row', !be.seg && be.sel && !be.opts.includes('shell') && be.opts.includes('claude') && be.pair, be);
+    await evalJs(`(() => { const s = document.getElementById('ns-be-phone'); s.value = 'codex'; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`); await sleep(300);
+    check('K8 phone: picking Codex in the native select is the backend (the ONE road)', await evalJs(`document.getElementById('input-backend').value === 'codex'`));
+    await evalJs(`(() => { const s = document.getElementById('ns-be-phone'); s.value = 'claude'; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`); await sleep(200);
+    // the phone in Terminal: the same rules, the accordion keeps 「会话」 + the sentence
+    await realClick('#ns-kind-seg [data-kind="terminal"]'); await sleep(400);
+    check('K8 phone Terminal: the backend card is not drawn; the right column keeps 「会话」 + one sentence', await evalJs(`document.getElementById('ns-card-backend').offsetParent === null && [...document.querySelectorAll('#ns-right .ns-res')].map((r) => r.querySelector('[data-res-tog]').dataset.resTog).join() === 'sessions' && /^A Terminal has no agent/.test(document.querySelector('#ns-right .ns-plain')?.textContent || '')`));
+    await shot('k8-phone-terminal-390');
+    await realClick('#ns-kind-seg [data-kind="chat"]'); await sleep(200);
+    await evalJs('app.hideDialogs(); true');
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
+    await cdp('Page.reload'); await waitApp(); await sleep(800);
+    check('K no page error during the v3 legs', pageErrors.length === 0, pageErrors);
+  }
+
   // ═══ I a paired machine that cannot be reached: the refusal in the field, the hub lives ══════════════════════════
   console.log('I the host row with a machine that cannot be reached (lane hub-dies-dead-ssh-host)');
   {
@@ -844,8 +1140,12 @@ try {
     await evalJs(`(() => { const s = document.getElementById('input-host'); if (![...s.options].some((o) => o.value === ${JSON.stringify(hid)})) s.add(new Option('my-mac (me@mac.example.test)', ${JSON.stringify(hid)})); s.value = ${JSON.stringify(hid)}; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
     await realClick('#input-cwd');
     const WORDS = 'my-mac cannot be reached — use a path on this machine or try again later';
-    const said = await waitFor(`(document.querySelector('#input-cwd').closest('[data-state]')?.dataset.state === 'unreachable') && (document.querySelector('#input-cwd').closest('[data-state]').querySelector('.pf-under')?.textContent || '').includes(${JSON.stringify(WORDS)})`, 10000);
-    const listNow = await evalJs(`(() => { const l = document.querySelector('.pf-list'); return { rows: l ? l.querySelectorAll('.pf-item').length : -1, empty: (l?.querySelector('.pf-empty')?.textContent || '').trim() }; })()`);
+    // the press OPENS the list (a timer after the pointerdown) — wait for it: the verdict alone can be in before the press (the
+    // machine's recent-folders answer says «unreachable» at the host change), and a read before the open counted the rows a
+    // CLOSED list still held from an earlier leg (lane new-session-group-folder-link: measured 1 run in 4 under load, the
+    // press's setTimeout(0) not yet run at the read)
+    const said = await waitFor(`(document.querySelector('#input-cwd').closest('[data-state]')?.dataset.state === 'unreachable') && (document.querySelector('#input-cwd').closest('[data-state]').querySelector('.pf-under')?.textContent || '').includes(${JSON.stringify(WORDS)}) && document.getElementById('input-cwd').getAttribute('aria-expanded') === 'true'`, 10000);
+    const listNow = await evalJs(`(() => { const l = document.querySelector('.pf-list'); return { rows: l ? l.querySelectorAll('.pf-item').length : -1, empty: (l?.querySelector('.pf-empty')?.textContent || '').trim(), hidden: !!l?.hidden, expanded: document.getElementById('input-cwd').getAttribute('aria-expanded'), focus: document.activeElement?.id || document.activeElement?.className || '' }; })()`);
     check('I1 picked in the host row ⇒ the folder field\'s own line says «my-mac cannot be reached — …» (state unreachable); its list offers nothing there', !!said && listNow.rows === 0, { said, listNow, under: await evalJs(`(document.querySelector('.pf-under')?.textContent || '').trim()`) });
     check('I2 the footer refuses Create with the same words', await waitFor(`document.getElementById('ns-foot-info').innerText.includes(${JSON.stringify('Cannot create yet: ' + WORDS)})`, 5000), await evalJs(`document.getElementById('ns-foot-info').innerText`));
     await sleep(1500); const s1 = sshCalls();

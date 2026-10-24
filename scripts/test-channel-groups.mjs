@@ -2105,5 +2105,52 @@ console.log('§verify r1 — `later` names only who is handed it; the @ scan kee
   fc.close();
 }
 
+
+// lane ci-351-reds — THE SWEEP IN SLICES IS THE SAME SWEEP. The boot asks the ended-sweep inside the listen callback
+// (server.js noteUserState); its per-member liveness pass was 68 ms of a 255 ms tick (the law is 250). The shipped engine
+// starts on a later loop turn and hands the loop back every SWEEP_SLICE_MS; the ONE-TICK copy (its two slice lines cut =
+// the .350 sweep) is the control. Over two COPIES of one store, the same injected clock and the same liveness: the same
+// verdicts and the same bytes on disk; and the sliced sweep asks nothing on the caller's tick.
+{
+  const gsrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
+  const CUT1 = "    await nextTurn();   // never on the caller's tick (the boot's listen callback)\n";
+  const CUT2 = "      if (sliceClock() - sliceAt >= SWEEP_SLICE_MS) { await nextTurn(); sliceAt = sliceClock(); }\n";
+  ok(gsrc.split(CUT1).length === 2 && gsrc.split(CUT2).length === 2, 'SLICED SWEEP premise: the two slice lines are each one line of the engine');
+  const MUTS = mutantCopies('chan-groups-slice', REPO);
+  const OneTick = MUTS.load('src/server/groups-engine.js', gsrc.replace(CUT1, '').replace(CUT2, ''), 'one-tick');
+  const f0 = fixture('slice-src');
+  for (const [from, to] of [[A, B], [A, C], [A, D], [E, B], [D, E], [C, E]]) await f0.eng.sendToAgent({ from, to, text: 'hello ' + to.slice(0, 4) });
+  f0.close();
+  const FACTS = { running: { live: true }, stopped: { transcript: true }, archived: { archived: true }, gone: { owner: 'local', dirReadable: true } };
+  const filesOf = (d) => fs.readdirSync(d, { recursive: true }).filter((f) => fs.statSync(path.join(d, f)).isFile()).sort().map((f) => [f, fs.readFileSync(path.join(d, f), 'utf-8')]);
+  const sweepOn = async (name, ge, states, spinMs = 0) => {
+    fs.cpSync(path.join(ROOT, 'slice-src'), path.join(ROOT, name), { recursive: true });
+    const f = fixture(name);
+    const calls = []; let last = performance.now(), maxGap = 0;
+    const iv = setInterval(() => { const t = performance.now(); maxGap = Math.max(maxGap, t - last); last = t; }, 1);
+    let t = T0 + 5e6;
+    const eng = ge.create({ store: f.store, deliver: f.deliver, roster: () => f.roster, now: () => (t += 1000), groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} },
+      liveness: (cid) => { calls.push(cid); const s0 = performance.now(); while (performance.now() - s0 < spinMs); return G.livenessFrom(FACTS[states[cid]]); } });
+    last = performance.now(); maxGap = 0;
+    const pending = eng.sweepEnded(), onCallerTick = calls.length;
+    const sw = await pending;
+    await new Promise((r) => setTimeout(r, 5));   // the clock's next tick records the last stretch
+    clearInterval(iv);
+    f.close();
+    return { sw, onCallerTick, calls: calls.length, maxGap: Math.round(maxGap), files: filesOf(path.join(ROOT, name, 'channels')) };
+  };
+  const MIX = { [A]: 'running', [B]: 'gone', [C]: 'archived', [D]: 'stopped', [E]: 'running' };
+  const S = await sweepOn('slice-sliced', GE, MIX), O = await sweepOn('slice-onetick', OneTick, MIX);
+  ok(JSON.stringify(S.sw) === JSON.stringify(O.sw) && S.sw.closed.length >= 3 && S.calls === O.calls, `SLICED SWEEP: the same verdicts as the one-tick sweep, in order (${S.sw.closed.length} closed, ${S.sw.marked.length} marked, ${S.calls} members asked)`, JSON.stringify({ S: S.sw, O: O.sw }));
+  const diff = S.files.length !== O.files.length ? ['file list'] : S.files.filter(([f, x], i) => O.files[i][0] !== f || O.files[i][1] !== x).map(([f]) => f);
+  ok(!diff.length && S.files.length >= 2, `SLICED SWEEP: …and the same bytes on disk — groups.json and every group log (${S.files.length} files)`, diff.join(', '));
+  ok(S.onCallerTick === 0 && O.onCallerTick > 0, `SLICED SWEEP: it asks no member's liveness on the caller's tick (the boot's listen callback); CONTROL: the one-tick copy asked ${O.onCallerTick} there`);
+  // the slices: every member alive (no closing write to await) and each liveness read 25 ms — the one-tick sweep holds
+  // the loop for all of them in one stretch, the sliced one hands it back between them (a ratio of two in-run spans)
+  const LIVE = { [A]: 'running', [B]: 'stopped', [C]: 'running', [D]: 'stopped', [E]: 'running' };
+  const S2 = await sweepOn('slice-sliced-t', GE, LIVE, 25), O2 = await sweepOn('slice-onetick-t', OneTick, LIVE, 25);
+  ok(S2.calls === O2.calls && S2.calls >= 5 && S2.maxGap * 2 < O2.maxGap, `SLICED SWEEP: it hands the loop back between members — its longest loop gap ${S2.maxGap} ms vs ${O2.maxGap} ms for the one-tick sweep over the same ${S2.calls} members`);
+}
+
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

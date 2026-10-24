@@ -571,6 +571,8 @@
 .file-select-btn.file-select-done { border-color: var(--accent); color: var(--accent); }
 /* the bookmark strip's fold chevron exists only on the phone layout below */
 .file-bookmark-toggle { display: none; }
+/* lane phone-files-door: the phone's furniture (built only on a phone) — shown by the phone layout below */
+.file-phone-back, .file-crumbs, .file-new-here { display: none; }
 
 /* ── File explorer phone layout (docs/design-mobile-gaps.md #6, measured at
    390×844: the bookmarks pane took 130 of 390 px, the Size/Modified header
@@ -581,7 +583,7 @@
 @media (max-width: 768px) {
   .file-toolbar { flex-wrap: wrap; gap: 4px; padding: 6px 8px; }
   .file-toolbar .path-field { flex: 1 1 100%; order: 10; } /* lane path-field: the path bar is THE path field — its wrapper is the toolbar's item */
-  .file-toolbar .file-path-input { flex: 1 1 100%; order: 10; min-height: 36px; font-size: 14px; padding: 4px 10px; }
+  .file-toolbar .file-path-input { flex: 1 1 100%; order: 10; min-height: 36px; font-size: 16px; padding: 4px 10px; } /* 16 px: a smaller field zooms the page on focus in iOS Safari (lane phone-files-door; was 14) */
   .file-toolbar .file-tool-btn { width: 36px; height: 36px; font-size: 16px; }
   .file-toolbar .file-tool-btn svg { width: 16px !important; height: 16px !important; }
   .file-toolbar .file-host-select { height: 36px; font-size: 13px; }
@@ -598,10 +600,29 @@
   .file-sort-header { padding: 2px 8px; }
   .file-sort-header .file-sort-col { width: auto !important; flex: 1 1 auto; min-height: 28px; display: flex; align-items: center; }
   .file-col-resize-handle { display: none; }
-  .file-item { width: 100%; min-width: 0; min-height: 40px; padding: 4px 6px; font-size: 13px; }
+  .file-item { width: 100%; min-width: 0; min-height: 44px; padding: 4px 6px; font-size: 13px; } /* lane phone-files-door: a finger's row (was 40) */
   .file-item .file-name { width: auto; flex: 1 1 auto; min-width: 0; }
   .file-icon { font-size: 16px; width: 20px; }
   .file-icon svg { width: 16px; height: 16px; }
+  /* lane phone-files-door: the explorer is the screen — ‹ back to the phone's home, breadcrumbs that scroll sideways,
+     «New session here» heading the listing */
+  .file-toolbar .file-phone-back { display: flex; align-items: center; justify-content: center; }
+  .file-toolbar .file-phone-back svg { width: 18px !important; height: 18px !important; }
+  .file-crumbs {
+    display: flex; align-items: center; gap: 2px; flex-shrink: 0; padding: 0 6px 4px; overflow-x: auto; overflow-y: hidden;
+    white-space: nowrap; overscroll-behavior-x: contain; scrollbar-width: none; border-bottom: 1px solid var(--border); background: var(--bg-panel, var(--bg-titlebar));
+  }
+  .file-crumbs::-webkit-scrollbar { display: none; }
+  .file-crumb { flex-shrink: 0; min-height: 36px; padding: 0 8px; border: none; border-radius: var(--radius-sm); background: none; color: var(--text-secondary); font-size: 14px; cursor: pointer; }
+  .file-crumb.here { color: var(--text); font-weight: 600; }
+  .file-crumb:active { background: var(--bg-hover); }
+  .file-crumb-sep { flex-shrink: 0; color: var(--text-dim); font-size: 13px; }
+  .file-new-here {
+    display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 0 12px; flex-shrink: 0;
+    border: none; border-bottom: 1px solid var(--border); background: none; color: var(--accent); font-size: 14px; text-align: left; cursor: pointer;
+  }
+  .file-new-here svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .file-new-here:active { background: var(--bg-hover); }
 }
 
 /* File explorer host selector (Files cross-host) */

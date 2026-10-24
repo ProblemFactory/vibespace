@@ -10,7 +10,12 @@
 //   ② a RELOAD shows the same facts (the attach's chatStatus replays the journal's `usage` record);
 //   ③ a claude chat on the same page: its context + cache, and ONE «not reported» chip naming what claude's stream does
 //     not give the bar (the token total, the turn time) — never a blank, never a Σ it does not have.
-// PNG: $VS_AGY_BAR_PNG (the bar after ①). Run: node scripts/test-agy-status-bar-chrome.mjs   (SKIPs without chrome)
+//   ④ A CARD SHOWS AN EXPANDER ONLY WHERE THERE IS SOMETHING TO OPEN (lane ci-351-reds — the owner 2026-10-24 on two agy
+//     Read cards: 「这俩为啥无法展开」): agy's read answers the ONE-LINE «N lines, M bytes» (the fake's `read the summary`,
+//     through the real wrapper), its card a static status line — not inside a <details>, no ▸, a REAL click opens nothing,
+//     the path still a link; the claude Read card (the file's text) keeps its ▸ and a real click opens it (▾, the text
+//     shown). CONTROL: the shipped caret rule as it was (on every .chat-diff-summary) puts the ▸ back on the agy line.
+// PNG: $VS_AGY_BAR_PNG (the bar after ①); $VS_READ_CARDS_DIR ⇒ agy-read.png, claude-read-open.png, agy-read-control.png (④). Run: node scripts/test-agy-status-bar-chrome.mjs   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -60,6 +65,18 @@ process.stdin.on('data', (d) => {
     const line = buf.slice(0, i); buf = buf.slice(i + 1);
     let m = null; try { m = JSON.parse(line); } catch {}
     if (!m || m.type !== 'user') continue;
+    const said = typeof m.message?.content === 'string' ? m.message.content : (m.message?.content || []).map((b) => (b && b.text) || '').join(' ');
+    if (/read the summary/.test(said)) { // ④ (lane ci-351-reds): a real Read — the tool_use, its tool_result (the file's text, numbered), the answer
+      setTimeout(() => {
+        const U = { input_tokens: 2100, cache_read_input_tokens: 48000, cache_creation_input_tokens: 0, output_tokens: 30 };
+        let body = ''; try { body = require('fs').readFileSync(${JSON.stringify(SUMMARY)}, 'utf8'); } catch {}
+        out({ type: 'assistant', session_id: SID, uuid: 'cl-r1', message: { id: 'msg_clr1', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id: 'toolu_clr1', name: 'Read', input: { file_path: ${JSON.stringify(SUMMARY)} } }], stop_reason: 'tool_use', usage: U } });
+        out({ type: 'user', session_id: SID, uuid: 'cl-r2', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_clr1', content: body.replace(/\\n$/, '').split('\\n').map((l, i) => String(i + 1).padStart(6) + '\\t' + l).join('\\n'), is_error: false }] } });
+        out({ type: 'assistant', session_id: SID, uuid: 'cl-r3', message: { id: 'msg_clr2', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Claude read the summary.' }], usage: U } });
+        out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 400, num_turns: 1, result: 'done', session_id: SID, total_cost_usd: 0, usage: { input_tokens: 2100, output_tokens: 30 }, modelUsage: { 'claude-fable-5': { inputTokens: 2100, outputTokens: 30, cacheReadInputTokens: 48000, cacheCreationInputTokens: 0, contextWindow: 200000, costUSD: 0 } } });
+      }, 120);
+      continue;
+    }
     setTimeout(() => {
       out({ type: 'assistant', session_id: SID, uuid: 'cl-a1', message: { id: 'msg_cl1', type: 'message', role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'Claude answered.' }], usage: { input_tokens: 2000, cache_read_input_tokens: 48000, cache_creation_input_tokens: 0, output_tokens: 40 } } });
       out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 900, num_turns: 1, result: 'done', session_id: SID, total_cost_usd: 0, usage: { input_tokens: 2000, output_tokens: 40 }, modelUsage: { 'claude-fable-5': { inputTokens: 2000, outputTokens: 40, cacheReadInputTokens: 48000, cacheCreationInputTokens: 0, contextWindow: 200000, costUSD: 0 } } });
@@ -172,6 +189,64 @@ try {
   const c = await facts('__cl');
   check('claude: context 25% of the window its result names, ⚡96%', c?.ctx && /25%/.test(c.ctx.text) && c?.cache && /96%/.test(c.cache.text), c);
   check('claude: ONE «not reported» chip naming the token total and the turn time — no Σ, no time chip', c?.unreported?.text === 'not reported' && c.unreported.title === 'Not reported by this harness: token total, turn time' && !c.odometer && !c.time, c);
+
+  console.log('④ a card shows an expander only where there is something to open (the owner 2026-10-24: 「这俩为啥无法展开」)');
+  // the newest Read card of a chat over summary.md, as a person meets it: its status line, where it sits, its caret
+  const readCard = (sidVar) => evalJs(`(() => { const v = ${viewOf(sidVar)}; if (!v) return null;
+    const cards = [...v._messageList.querySelectorAll('.chat-tool-use')].filter((c) => /\\bRead\\b/.test((c.querySelector('.chat-tool-label') || {}).textContent || '') && /summary\\.md/.test(c.textContent));
+    const c = cards[cards.length - 1]; if (!c) return { n: 0 };
+    const s = c.querySelector('.chat-diff-summary'); if (!s) return { n: cards.length };
+    s.scrollIntoView({ block: 'center', behavior: 'instant' });
+    const r = s.getBoundingClientRect(), d = s.closest('details'), body = d && d.querySelector(':scope > :not(summary)');
+    const px = r.left + Math.min(12, r.width / 2), py = r.top + r.height / 2, at = document.elementFromPoint(px, py);
+    const cr = c.getBoundingClientRect();
+    return { n: cards.length, tag: s.tagName, text: s.textContent.replace(/\\s+/g, ' ').trim(), inDetails: !!d, open: !!(d && d.open), details: c.querySelectorAll('details').length,
+      caret: getComputedStyle(s, '::before').content, cursor: getComputedStyle(s).cursor, x: px, y: py, hit: !!at && s.contains(at),
+      bodyH: body ? body.getBoundingClientRect().height : 0, html: c.outerHTML, link: !!c.querySelector('.chat-tool-label .chat-link-path[data-path$="summary.md"]'),
+      box: { x: Math.max(0, cr.left - 6), y: Math.max(0, cr.top - 6), width: Math.min(cr.width + 12, 1400), height: Math.min(cr.height + 12, 600) } }; })()`);
+  const press = async (x, y) => { for (const type of ['mousePressed', 'mouseReleased']) await cdp('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 }); await sleep(300); };
+  const shot = async (name, box) => { if (!process.env.VS_READ_CARDS_DIR || !box) return; const r = await cdp('Page.captureScreenshot', { format: 'png', clip: { ...box, scale: 1 } }); fs.writeFileSync(path.join(process.env.VS_READ_CARDS_DIR, name), Buffer.from(r.data, 'base64')); };
+  const CARET = /\u25B8|\u25BE/;
+  // as a person gets to the card: its chat's window raised, and the run fold it sits in opened by a REAL click on the fold's head
+  const reveal = async (sidVar) => {
+    await evalJs(`(() => { const v = ${viewOf(sidVar)}; for (const [id, w] of app.wm.windows) if (w.element && w.element.contains(v._messageList)) { app.wm.focusWindow(id); break; } return true; })()`);
+    await sleep(250);
+    const h = await evalJs(`(() => { const v = ${viewOf(sidVar)}; const cards = [...v._messageList.querySelectorAll('.chat-tool-use')].filter((c) => /summary\\.md/.test(c.textContent)); let el = cards[cards.length - 1]; if (!el) return null;
+      while (el.parentElement && el.parentElement !== v._messageList) el = el.parentElement;
+      if (!el.classList.contains('chat-run-collapsed')) return null;
+      let h = el.previousElementSibling; while (h && !h.classList.contains('chat-run-header')) h = h.previousElementSibling; if (!h) return null;
+      h.scrollIntoView({ block: 'center', behavior: 'instant' }); const r = h.getBoundingClientRect(); return { x: r.left + Math.min(30, r.width / 2), y: r.top + r.height / 2 }; })()`);
+    if (h) await press(h.x, h.y);
+    let prev = '';   // the fold opens with a re-layout: wait until the card's box is the same on two reads (never a guess)
+    for (let i = 0; i < 40; i++) { const b = JSON.stringify((await readCard(sidVar))?.box || null); if (b === prev && b !== 'null') break; prev = b; await sleep(100); }
+    return !!h;
+  };
+  check('agy: the read turn played (the fake agy\'s read_file through the real wrapper)', await turn(agySid, '__agy', 'please read the summary', /Antigravity \([^)]*\): [\s\S]*read the summary/));
+  await waitFor(`(() => { const v = ${viewOf('__agy')}; return !!v && [...v._messageList.querySelectorAll('.chat-tool-use .chat-diff-summary')].some((e) => /\\d+ lines · \\d+ B/.test(e.textContent)); })()`, 15000);
+  const foldedA = await reveal('__agy');
+  const g1 = await readCard('__agy');
+  const lines = fs.readFileSync(SUMMARY, 'utf8').replace(/\n$/, '').split('\n').length, bytes = Buffer.byteLength(fs.readFileSync(SUMMARY, 'utf8'));
+  check(`agy Read (its window raised${foldedA ? ', its run fold opened by a click' : ''}): ONE status line «✓ ${lines} lines · ${bytes} B» over the clickable path — ON SCREEN (the press point is the line itself), a line, not inside a <details>, no ▸ (caret: ${g1 && g1.caret}), no pointer`,
+    !!g1 && g1.box.width > 100 && g1.hit && g1.text === `✓ ${lines} lines · ${bytes} B` && !g1.inDetails && g1.details === 0 && !CARET.test(g1.caret || '') && g1.cursor !== 'pointer' && g1.link, g1 && { ...g1, html: g1.html.slice(0, 600) });
+  await shot('agy-read.png', (await readCard('__agy'))?.box);
+  if (g1 && g1.x) await press(g1.x, g1.y);
+  const g2 = await readCard('__agy');
+  check('agy Read: a REAL click on that line opens nothing — the card is the same markup, still no <details>, no caret', !!g2 && g2.html === g1.html && g2.details === 0 && !CARET.test(g2.caret || ''), g2 && g2.html.slice(0, 400));
+  // CONTROL: the caret rule as it shipped (every .chat-diff-summary) — the static line wears the ▸ again: the leg above can go red
+  await evalJs(`(() => { const st = document.createElement('style'); st.id = '__caret_control'; st.textContent = ".chat-diff-summary::before { content: '\\\\25B8  '; }"; document.head.appendChild(st); return true; })()`);
+  const gc = await readCard('__agy');
+  check(`CONTROL: the pre-fix caret rule (on every .chat-diff-summary) puts a ▸ on the agy line that opens nothing (caret: ${gc && gc.caret})`, !!gc && CARET.test(gc.caret || '') && !gc.inDetails, gc && gc.caret);
+  await shot('agy-read-control.png', (await readCard('__agy'))?.box);
+  await evalJs(`document.getElementById('__caret_control').remove(); true`);
+  check('claude: the read turn played (a stub Read tool_use + its tool_result through the real chat-wrapper)', await turn(clSid, '__cl', 'please read the summary', /Claude read the summary/));
+  await waitFor(`(() => { const v = ${viewOf('__cl')}; return !!v && !!v._messageList.querySelector('.chat-tool-use details.chat-diff > summary.chat-diff-summary'); })()`, 15000);
+  const foldedC = await reveal('__cl');
+  const k1 = await readCard('__cl');
+  check(`claude Read (its window raised${foldedC ? ', its run fold opened by a click' : ''}): its «✓ N lines» is the summary of a <details> — ON SCREEN (the press point is the summary itself), closed, with ▸ (caret: ${k1 && k1.caret})`, !!k1 && k1.box.width > 100 && k1.hit && k1.tag === 'SUMMARY' && k1.inDetails && !k1.open && /\u25B8/.test(k1.caret || '') && /^✓ \d+ lines$/.test(k1.text), k1 && { ...k1, html: k1.html.slice(0, 600) });
+  if (k1 && k1.x) await press(k1.x, k1.y);
+  const k2 = await readCard('__cl');
+  check(`claude Read: a REAL click opens it — ▾ and the file's text shown (${k2 && Math.round(k2.bodyH)} px)`, !!k2 && k2.open && /\u25BE/.test(k2.caret || '') && k2.bodyH > 10 && /Written by the fake agy/.test(k2.html), k2 && { open: k2.open, caret: k2.caret, bodyH: k2.bodyH });
+  await shot('claude-read-open.png', (await readCard('__cl'))?.box);
   check('no page error on the way', pageErrors.length === 0, pageErrors);
 } catch (e) {
   failed++; console.error('✗ threw: ' + (e && e.stack || e));

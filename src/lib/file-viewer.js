@@ -6,12 +6,13 @@ import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag do
 import { hasDedicatedViewer, getViewerType, getFileIcon, urlViewerKind, parseDelimited } from './file-types.js';
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { sanitizeHtml } from './safe-html.js';
+import { mountDiagrams, diagramPicture } from './mermaid-render.js'; // lane chat-mermaid
 import { renderDocxViewer, showDocxRefusal } from './docx-viewer.js';
 import { viewerVerdict, refusalText } from './docx-viewer-model.js';
 import { openWithVerdict } from '../office-open.js'; // §7.9: the viewer's "Open in LibreOffice" — the ONE open-with verdict names the app
 import { init as initPptx } from 'pptx-preview';
 import { t } from './i18n.js';
-import { registerWindowType, svgIcon16 } from './window-types.js';
+import { registerWindowType, registerOpenAction, svgIcon16 } from './window-types.js';
 import { fsErrorText } from './file-explorer-ops.js'; // verify-r2: a Files refusal in the reader's language
 import { wireFileDownload } from './file-download.js'; // lane viewer-download: every file window's Download
 import { writeFrame, hostAddress } from './frame-host.js'; // lane frame-host-preview: the .eml body's frame
@@ -130,6 +131,34 @@ class FileViewer {
     dl.innerHTML = UI_ICONS.download; dl.title = t('Download'); dl.setAttribute('aria-label', t('Download'));
     await FileViewer.renderInto(container, '', name, app, '', { rawUrl, mime });
     FileViewer._seatDownload(container, dl, winInfo.content);
+    return winInfo;
+  }
+
+  /** lane chat-mermaid: 「放大」 — a diagram at full size in a `viewer` window, the image viewer's zoom + pan over the
+   *  picture as an IMAGE (an <img> of the sanitized SVG: it runs nothing, fetches nothing). Drawn from its SOURCE: the
+   *  openSpec carries the text, so a reload / another client re-draws it through the one sanitizing door; a theme change
+   *  re-draws it. */
+  static async openDiagram(app, { code, title = '', syncId, quiet = false } = {}) {
+    const src = String(code ?? '');
+    const openSpec = { action: 'openDiagram', code: src, ...(title ? { title } : {}) };
+    const winInfo = app.wm.createWindow({ title: title || t('Diagram'), type: 'viewer', syncId, openSpec, quiet: !!quiet });
+    const container = document.createElement('div'); container.className = 'file-viewer file-viewer-diagram';
+    winInfo.content.appendChild(container);
+    const ctl = container._viewerCtl = new AbortController();
+    winInfo.onClose = () => { try { ctl.abort(); } catch {} };
+    let url = '';
+    ctl.signal.addEventListener('abort', () => { if (url) URL.revokeObjectURL(url); }, { once: true });
+    const paint = async () => {
+      const pic = await diagramPicture(src, container);
+      if (ctl.signal.aborted) { if (pic.ok) URL.revokeObjectURL(pic.url); return; }
+      if (url) URL.revokeObjectURL(url);
+      url = pic.ok ? pic.url : '';
+      container.textContent = '';
+      if (!pic.ok) { const d = document.createElement('div'); d.className = 'empty-hint'; d.textContent = t('Rendering failed') + (pic.message ? ' — ' + pic.message : ''); container.appendChild(d); return; }
+      FileViewer._renderImage(container, '', '', url);
+    };
+    window.addEventListener('theme-colors-changed', () => requestAnimationFrame(() => { paint(); }), { signal: ctl.signal });
+    await paint();
     return winInfo;
   }
 
@@ -291,6 +320,7 @@ class FileViewer {
         const body = document.createElement('div'); body.className = 'markdown-preview file-viewer-md';
         body.innerHTML = sanitizeHtml(marked.parse(text)); // an attachment's markdown is PEER text: THE one sanitizer
         for (const a of body.querySelectorAll('a[href]')) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+        mountDiagrams(body); // lane chat-mermaid: a ```mermaid fence draws (THE one diagram door)
         container.appendChild(body);
       } else if (kind === 'csv') {
         const wrap = document.createElement('div'); wrap.className = 'sheet-table-wrap';
@@ -923,6 +953,8 @@ registerWindowType({
   icon: svgIcon16('<path d="M4 1h6l4 4v9H4V1z"/><path d="M10 1v4h4"/>'),
   action: 'openFile', replay: (app, spec, { syncId } = {}) => (spec.rawUrl ? app.openFile({ rawUrl: spec.rawUrl, fileName: spec.name, title: spec.title, mime: spec.mime, syncId }) : app.openFile(spec.path, spec.name, { syncId, host: spec.host })),
 });
+// lane chat-mermaid: 「放大」's window — a `viewer` over a diagram's source (openSpec {action:'openDiagram', code, title})
+registerOpenAction({ action: 'openDiagram', type: 'viewer', replay: (app, spec, { syncId } = {}) => app.openDiagram(spec.code, { title: spec.title, syncId }) });
 registerWindowType({
   type: 'hex-viewer', label: 'Hex viewer',
   icon: svgIcon16('<path d="M2 2h12v12H2z"/><path d="M2 6h12M6 2v12"/>'),

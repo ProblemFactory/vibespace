@@ -59,7 +59,7 @@ fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
   fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT, 'node_modules'));
   const sub = (rel, from, to) => { const f = path.join(MUT, rel); const s = fs.readFileSync(f, 'utf8'); if (s.split(from).length !== 2) throw new Error(`mutant anchor ${rel}: ${from.slice(0, 60)}`); fs.writeFileSync(f, s.replace(from, to)); };
   sub('src/lib/vault-unlock.js', "if (!vaultSetupAsk({ facts, snoozedUntil, now: Date.now() })) return;", "if (!facts || facts.state !== 'not_set_up' || snoozedUntil > Date.now()) return;");
-  sub('src/lib/app.js', "document.getElementById('input-cwd').value = cwd || '';", "if (cwd) document.getElementById('input-cwd').value = cwd;");
+  sub('src/lib/app.js', "this._nsFolderOpen(cwd || '');", "if (cwd) this._nsFolderOpen(cwd);"); // lane new-session-group-folder-link: every open goes through folderOnOpen now — the base set the field only when a cwd came
   execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT });
 }
 const MUT_BUNDLE = fs.readFileSync(path.join(MUT, 'bundle-mut.js'));

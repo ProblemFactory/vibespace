@@ -3,7 +3,15 @@
 // app launcher, the Files path bar, the first chat, the session palette's /path) — it replaces setupDirAutocomplete.
 // The contract the other lanes embed is frozen:
 //   pathField(input, { bases, groupsOf, host, kind: 'folder'|'file', onCommit, name, onState, create, createWhen, picker,
-//                      chips, id }) → { el, input, value, verdict, commit, set, refresh, open, close, ensure, destroy }
+//                      chips, id }) → { el, input, value, verdict, commit, set, refresh, open, close, ensure, destroy,
+//                      setDerived }
+// ADDED (lane new-session-group-folder-link — additive, nothing renamed): `pf.setDerived(text, { note, commit = false })`
+//   fills the field FOR the door (a value derived from something else — New Session: the first picked Task Group's folder)
+//   without counting as the person's: the line says where it came from (`= ~/work/x（来自任务组「X」）`), and `info.derived`
+//   is true while that text stands untouched (typing, a pick, a chip, the picker or `set()` end it). A groupsOf row may
+//   carry `chips: () => [{ path, tip, color }]`, the door's own chips for that group (default: its folders + its notes).
+//   `chips: true` paints on `refresh()` (never at construction — no fetch while the page boots); the 由名字 chips
+//   (PURE nameChips) lead the row, 新建 only for a folder the machine was asked about and does not have.
 // What every door gets (PURE src/path-candidates.js decides what to offer; this file only shows it and says it):
 //   · grouped candidates with reason chips — ① the Task Groups' folders (one absent on the chosen machine greyed «not on
 //     <machine> · create?», never dropped) ② 由名字 <group folder>/<name> per selected group + ~/<name> ③ recent folders with
@@ -26,11 +34,29 @@ import { getFileIcon } from './file-types.js';
 import { imeOwnsKey } from './chat-enter-keys.js';
 import { folderChips } from '../day-one.js';
 import { loadHomeFolders, paintFolderChips } from './folder-chips.js';
-import { rankCandidates, groupOn, mergeListing, missingVerdict, isExcludedPath, toTilde, fromTilde, parentOf, baseName, HOST_ROW } from '../path-candidates.js';
+import { rankCandidates, groupOn, mergeListing, missingVerdict, isExcludedPath, toTilde, fromTilde, parentOf, baseName, HOST_ROW, nameChips } from '../path-candidates.js';
 
 const DEBOUNCE_MS = 110;
 const RECENT_TTL_MS = 30e3;
 const TAB_OPENS_MS = 400;
+const PROBE_MS = 250;   // the 由名字 chips ask about their folders once the name rests this long
+/** The chips row in SECTIONS, each a line with its label pinned left (lane new-session-layout-v3-build — the v3 design:
+ *  任务组的文件夹 / 由名字 / the person's own folders; on the phone each line scrolls sideways). Only the grouping: the chips,
+ *  their order inside a section and their presses are the painters' own. */
+const CHIP_SECTIONS = [['group', 'Task Group folders'], ['name', 'From the name'], ['own', 'Your folders']];
+function sectionChips(el) {
+  const chips = [...el.querySelectorAll(':scope > .cwd-recent-chip')];
+  if (!chips.length) return;
+  const sec = (c) => (c.dataset.kind === 'task' ? 'group' : c.dataset.kind === 'name' ? 'name' : 'own');
+  el.replaceChildren(...CHIP_SECTIONS.map(([k, label]) => {
+    const items = chips.filter((c) => sec(c) === k);
+    if (!items.length) return null;
+    const line = document.createElement('div'); line.className = 'pf-chipline'; line.dataset.sec = k;
+    const lab = document.createElement('span'); lab.className = 'pf-chipk'; lab.textContent = t(label);
+    line.append(lab, ...items);
+    return line;
+  }).filter(Boolean));
+}
 
 /* ── the machines as far as the fields have seen them (shared by every field of the page) ── */
 const WORLD = new Map(); // hostKey ('' = here) → { L, self, recent, error, unreachable }
@@ -177,7 +203,7 @@ export function pathField(input, opts = {}) {
   const createMode = o.create === 'never' || o.create === 'ask' ? o.create : (kind === 'folder' ? 'ask' : 'never');
   const fid = o.id || input.id || 'path-field';
   const call = (fn, dflt) => { try { const v = typeof fn === 'function' ? fn() : fn; return v == null ? dflt : v; } catch { return dflt; } };
-  const st = { open: false, active: -1, err: '', errBest: '', tick: false, flash: false, committed: null, answered: null, seq: 0, ctl: null, timer: null, verdict: null, destroyed: false, chipsAt: '' };
+  const st = { open: false, active: -1, err: '', errBest: '', tick: false, flash: false, committed: null, answered: null, seq: 0, ctl: null, timer: null, verdict: null, destroyed: false, chipsAt: '', derived: null, probeTimer: null };
 
   /* ── DOM ── */
   const wrap = document.createElement('div');
@@ -220,6 +246,7 @@ export function pathField(input, opts = {}) {
       id: g.id, name: String(g.name || g.title || ''), color: g.color || '', selected: !!g.selected,
       folders: (g.folders || []).map((f) => (typeof f === 'string' ? f : f && f.path)).filter(Boolean).map((f) => (HOST_ROW.test(f) ? f : toTilde(home, stripSlash(f)))),
       context: g.context ? toTilde(home, stripSlash(g.context)) : null,
+      chips: typeof g.chips === 'function' ? g.chips : null,
     }));
   }
   function inputsNow() {
@@ -266,6 +293,9 @@ export function pathField(input, opts = {}) {
     return memo.m;
   }
   const abs = (p) => fromTilde(world(hk()).L.home || LOCAL.home, p);
+  /* the door's derived text (setDerived), while it stands untouched — its note says where it came from */
+  const derivedNow = () => (st.derived && st.derived.text === input.value ? st.derived : null);
+  const fromHTML = () => { const d = derivedNow(); return d && d.note ? `<span class="pf-from">${escHtml(d.note)}</span>` : ''; };
 
   /* ── asking the machine ── */
   function ask(text = textNow(), { force = false } = {}) {
@@ -296,6 +326,7 @@ export function pathField(input, opts = {}) {
           if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs);
           if (d.self) W.self = d.self;
         }
+        if (d && d.listing) { W.asked = W.asked || new Map(); for (const p of probe) W.asked.set(p, Date.now()); }
         W.error = (d && d.error) || (d ? '' : t('the machine did not answer'));
         W.unreachable = (d && d.unreachable) || null;
         st.answered = { text, h, at: Date.now() };
@@ -373,13 +404,13 @@ export function pathField(input, opts = {}) {
       if (x.all.length > 1) {
         h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('{n} places have this — the first is used; press another to switch:', { n: x.all.length }))}</span>${x.all.map((rr, i) => `<button type="button" class="pf-alt${i === 0 ? ' used' : ''}" data-act="alt" data-path="${escHtml(rr.path)}" title="${escHtml(i === 0 ? t('This one is used') : t('Use this one'))}">= ${escHtml(rr.path)} <span class="pf-who">${escHtml(rr.relative ? t('relative to {base}', { base: rr.base }) : baseWord(rr.base))}${i === 0 ? ' · ' + escHtml(t('used')) : ''}</span></button>`).join('')}</div>`;
       } else {
-        const same = text.replace(/\/+$/, '') === r.path;
-        h += `<div class="pf-res"><div class="pf-ln">${same ? '' : `<span class="pf-eq">= <b>${escHtml(r.path)}</b></span>`}${r.kind === 'complete' ? `<span class="pf-tag">${escHtml(t('completed from the start · Tab'))}</span>` : ''}${r.kind === 'link' ? `<span class="pf-tag">${escHtml(t('through the link {via}', { via: r.via }))}</span>` : ''}${r.relative && !same ? `<span class="pf-meta">${escHtml(t('relative to {base}', { base: r.base }))}</span>` : ''}${facts ? `<span class="pf-meta ok">${UI_ICONS.check} ${escHtml(facts)}</span>` : ''}</div></div>`;
+        const same = text.replace(/\/+$/, '') === r.path && !derivedNow();
+        h += `<div class="pf-res"><div class="pf-ln">${same ? '' : `<span class="pf-eq">= <b>${escHtml(r.path)}</b>${fromHTML()}</span>`}${r.kind === 'complete' ? `<span class="pf-tag">${escHtml(t('completed from the start · Tab'))}</span>` : ''}${r.kind === 'link' ? `<span class="pf-tag">${escHtml(t('through the link {via}', { via: r.via }))}</span>` : ''}${r.relative && !same ? `<span class="pf-meta">${escHtml(t('relative to {base}', { base: r.base }))}</span>` : ''}${facts ? `<span class="pf-meta ok">${UI_ICONS.check} ${escHtml(facts)}</span>` : ''}</div></div>`;
       }
     } else if (x.missing) {
       if (x.file && kind === 'folder') h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('{path} is a file — this needs a folder.', { path: x.path }))}</span></div>`;
       else if (createMode === 'never') h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('{path} does not exist.', { path: x.path }))}</span></div>`;
-      else h += `<div class="pf-new${st.flash ? ' appear' : ''}"><div class="pf-q"><b>${escHtml(t('Does not exist — create it?'))}</b><code>${escHtml(x.path)}</code>${x.base && x.base !== 'home' && x.base !== 'abs' ? `<span class="pf-meta">(${escHtml(t('relative to {base}', { base: x.base }))})</span>` : ''}</div>`
+      else h += `<div class="pf-new${st.flash ? ' appear' : ''}"><div class="pf-q"><b>${escHtml(t('Does not exist — create it?'))}</b><code>${escHtml(x.path)}</code>${fromHTML()}${x.base && x.base !== 'home' && x.base !== 'abs' ? `<span class="pf-meta">(${escHtml(t('relative to {base}', { base: x.base }))})</span>` : ''}</div>`
         + (x.parentOk ? `<label class="pf-tickrow"><input type="checkbox" data-act="tick"${st.tick ? ' checked' : ''}> ${escHtml(o.createWhen || t('Create this folder'))}</label>` : `<span class="pf-bad">${escHtml(t('The folder above, {parent}, does not exist either — pick another, or press the folder button.', { parent: x.parent || '' }))}</span>`) + '</div>';
     } else if (!st.err && model().rows.length) {
       h += `<div class="pf-res"><span class="pf-hint">${escHtml(isPhone() ? t('No path called «{text}» — press a suggestion above.', { text }) : t('No path called «{text}» — choose a suggestion with ↑↓, Enter picks it.', { text }))}</span></div>`;
@@ -416,44 +447,80 @@ export function pathField(input, opts = {}) {
     else if (!st.open && st.outside) { st.outside(); st.outside = null; }
     input.setAttribute('aria-expanded', st.open ? 'true' : 'false');
     emitState();
+    if (st.chipsAt) paintChips();   // a 新建 mark the machine's answer moved (keyed: nothing else repaints)
   }
   function open() { if (st.destroyed || st.open) return; st.open = true; st.active = -1; ask(); paint(); }
   function close() { if (!st.open) return; st.open = false; st.active = -1; paint(); }
 
-  /* ── the chips row (New Session): 由名字 per selected group, then the day-one folders (src/day-one.js folderChips) ── */
+  /* ── the chips row (New Session): 由名字 per selected group + home (PURE nameChips), then the day-one folders (src/day-one.js
+     folderChips) — painted on refresh() (never at construction: no fetch while the page boots), again when an answer moves a
+     新建 mark; a chip is the person's pick ── */
+  const knownAbsent = (W, p) => {
+    const L = W.L; if (L.dirs[p]) return false;
+    if (W.asked && W.asked.has(p)) return true;   // asked, and not answered as a folder
+    const up = L.dirs[parentOf(p)];
+    return !!(up && Array.isArray(up.kids) && !up.kids.includes(baseName(p)));
+  };
   function paintChips(force = false) {
     if (!chipsEl || st.destroyed) return;
-    const h = hk();
+    const h = hk(); const W = world(h);
     const inp = inputsNow();
-    const key = JSON.stringify([h, inp.name, inp.groups.map((g) => [g.id, g.selected, g.folders]), inp.recent.map((r) => r.path), Object.keys(inp.listing.dirs).length > 0]);
+    const names = nameChips(inp).map((n) => ({ ...n, isNew: n.isNew && knownAbsent(W, n.path) }));
+    const key = JSON.stringify([h, inp.name, inp.groups.map((g) => [g.id, g.selected, g.folders]), inp.recent.map((r) => r.path), Object.keys(inp.listing.dirs).length > 0, names.map((n) => [n.path, n.isNew])]);
     if (!force && key === st.chipsAt) return;
     st.chipsAt = key;
-    const m = rankCandidates('', inp);
     const home = h ? inp.listing.home : LOCAL.home;
-    const task = inp.groups.filter((g) => g.selected).flatMap((g) => g.folders.concat(g.context ? [g.context] : []).map((f) => ({ path: fromTilde(home, f), tip: t('Task Group folder ({name})', { name: g.name }), color: g.color })));
+    const task = inp.groups.filter((g) => g.selected).flatMap((g) => {
+      const own = g.chips ? call(g.chips, null) : null;   // the door's own chips for this group (New Session: its folders + the sub-folders that hold sessions)
+      return Array.isArray(own) ? own : g.folders.concat(g.context ? [g.context] : []).map((f) => ({ path: fromTilde(home, f), tip: t('Task Group folder ({name})', { name: g.name }), color: g.color }));
+    });
     const recent = inp.recent.map((r) => fromTilde(home, r.path));
     const draw = (folders) => {
       if (!chipsEl.isConnected && !wrap.isConnected) return;
       paintFolderChips(chipsEl, folderChips({ folders, recent, task }), { onPick: (c) => set(c.path, { commit: true, how: 'set' }) });
       const first = chipsEl.firstChild;
-      for (const n of m.nameRows.filter((x) => x.chip.key !== 'name-same')) {
+      for (const n of names) {
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'cwd-recent-chip cwd-name-chip'; b.dataset.path = fromTilde(home, n.path); b.dataset.kind = 'name';
-        b.title = whyText(n.why);
-        if (n.g && n.g.color) { const dot = document.createElement('span'); dot.className = 'tvg-dot'; dot.style.setProperty('--g-color', n.g.color); b.appendChild(dot); }
-        b.appendChild(document.createTextNode(n.path + (inp.listing.dirs[n.path] ? '' : ' · ' + t('New'))));
-        b.onclick = () => { st.tick = !inp.listing.dirs[n.path]; set(n.path, { commit: true, how: 'pick' }); };
+        if (n.isNew) b.dataset.new = '1';
+        b.title = whyText(n.why) + '\n' + b.dataset.path;
+        if (n.group && n.group.color) { const dot = document.createElement('span'); dot.className = 'tvg-dot'; dot.style.setProperty('--g-color', n.group.color); b.appendChild(dot); }
+        if (n.isNew) b.appendChild(Object.assign(document.createElement('span'), { className: 'cwd-chip-new', textContent: t('New') }));
+        b.appendChild(document.createTextNode(n.path));
+        b.onclick = () => { st.tick = !world(hk()).L.dirs[n.path]; set(n.path, { commit: true, how: 'pick' }); };   // a 新建 chip picked IS the consent (made at use)
         chipsEl.insertBefore(b, first);
       }
+      sectionChips(chipsEl);
     };
     if (!h) { draw([]); loadHomeFolders().then((folders) => { if (folders.length && st.chipsAt === key) draw(folders); }); }
     else draw([]);
+    probeNames(names.filter((n) => !inp.listing.dirs[n.path]).map((n) => n.path));
+  }
+  /* the 由名字 chips ask the machine about their own folders — never through ask(): the field's verdict and line stay still
+     while the name is typed; once per path, when the name rests; the answer repaints the marks */
+  function probeNames(paths) {
+    const h = hk(); const W = world(h);
+    clearTimeout(st.probeTimer);
+    const want = paths.filter((p) => !(W.asked && Date.now() - (W.asked.get(p) || 0) < RECENT_TTL_MS)).slice(0, 12);   // asked again after a while (made elsewhere meanwhile?)
+    if (!want.length || W.unreachable) return;
+    st.probeTimer = setTimeout(() => {
+      if (st.destroyed || hk() !== h) return;
+      const go = () => fetchJson((h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + `?path=&bases=${encodeURIComponent('[]')}&probe=${encodeURIComponent(JSON.stringify(want))}&q=&kind=folder`).then((d) => {
+        if (!d || !d.listing || st.destroyed) return;
+        mergeListing(W.L, d.listing);
+        if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs);
+        if (d.self) W.self = d.self;
+        W.asked = W.asked || new Map(); for (const p of want) W.asked.set(p, Date.now());
+        paintChips();
+      }).catch(() => { });
+      return !h && !LOCAL.home ? localHome().then(go) : go();
+    }, PROBE_MS);
   }
 
   /* ── taking effect ── */
   function infoOf(path, extra) {
     const h = hk();
-    return { path: abs(path), display: path, text: input.value, host: h || null, isFile: false, exists: true, create: false, via: { base: '', relative: false, kind: 'exact', alias: '' }, how: 'api', ...extra };
+    return { path: abs(path), display: path, text: input.value, host: h || null, isFile: false, exists: true, create: false, via: { base: '', relative: false, kind: 'exact', alias: '' }, how: 'api', derived: !!derivedNow(), ...extra };
   }
   const bestOf = () => { const m = model(); const b = m.best || m.rows.find((r) => !r.isNew); return b && !b.isNew ? b.path : ''; };
   async function commit(how = 'api') {
@@ -482,8 +549,9 @@ export function pathField(input, opts = {}) {
     else { paint(); st.flash = false; }
     return info;
   }
-  function set(text, { commit: c = true, how = 'set' } = {}) {
+  function set(text, { commit: c = true, how = 'set', derived = null } = {}) {
     input.value = String(text == null ? '' : text);
+    st.derived = derived && input.value.trim() ? { text: input.value, note: String(derived.note || '') } : null;   // setDerived: the door's, not the person's
     st.err = ''; st.errBest = ''; st.answered = null;
     if (st.open) close(); else paint();
     if (c) return commit(how);
@@ -492,6 +560,7 @@ export function pathField(input, opts = {}) {
   }
   function pickRow(r, how) {
     if (!r) return;
+    st.derived = null;
     const L = world(hk()).L;
     if (how === 'tab' && !r.file && L.dirs[r.path]) {
       input.value = r.path === '~' ? '~/' : r.path + '/';
@@ -521,7 +590,7 @@ export function pathField(input, opts = {}) {
   /* ── events ── */
   const onInput = (e) => {
     if (e && (e.isComposing || input._pfComposing)) return;
-    st.err = ''; st.errBest = '';
+    st.err = ''; st.errBest = ''; st.derived = null;   // the person's text now
     const x = target(); if (!x.missing) st.tick = false;
     if (!st.open) st.open = true;
     st.active = -1;
@@ -708,16 +777,17 @@ export function pathField(input, opts = {}) {
   pickBtn?.addEventListener('click', (e) => { e.preventDefault(); openPicker(); });
 
   /* ── the handle ── */
-  function refresh() { memo = { key: '', m: null }; st.answered = null; if (st.open) ask(); paint(); paintChips(); }
+  function refresh() { memo = { key: '', m: null }; st.answered = null; if (st.open) ask(); st.chipsAt = ''; paint(); paintChips(true); }   // the chips drawn once, forced
   function destroy() {
-    st.destroyed = true; clearTimeout(st.timer); st.ctl?.abort?.();
+    st.destroyed = true; clearTimeout(st.timer); clearTimeout(st.probeTimer); st.ctl?.abort?.();
     st.outside?.(); st.outside = null;
     window.removeEventListener('resize', onReflow); window.removeEventListener('scroll', onReflow, true);
     input.removeEventListener('input', onInput);
     list.remove();
   }
-  paint(); paintChips();
-  const handle = { el: wrap, input, value: () => st.committed, verdict: () => { emitState(); return st.verdict; }, commit: () => commit('api'), set, refresh, open, close, ensure, destroy };
+  paint();   // the chips row waits for refresh() (a field is built while the page boots — no fetch then)
+  const setDerived = (text, { note = '', commit: c = false } = {}) => set(text, { commit: c, how: 'derived', derived: { note } });
+  const handle = { el: wrap, input, value: () => st.committed, verdict: () => { emitState(); return st.verdict; }, commit: () => commit('api'), set, setDerived, refresh, open, close, ensure, destroy };
   input._pathField = handle;
   return handle;
 }

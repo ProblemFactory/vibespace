@@ -6,8 +6,8 @@
 //   · It reads the page's state block `<script type="application/json" id="vibespace-design-doc">` ({v:1, title,
 //     manifest, files}) through the PURE `normalizeDoc`, and draws it with THE SAME canvas core as the Design window
 //     (src/lib/design-canvas.js): pan / zoom / fit / pages / notes, one `sandbox="allow-scripts"` srcdoc frame per
-//     artboard, a double-click (a tap) = one artboard at fit-width and live, Esc = back. No picker, no comment, no ws:
-//     a published page is for looking at.
+//     artboard, a double-click (a tap) = one artboard enlarged (a screen whole) and live, Esc = back. No picker, no
+//     comment, no ws: a published page is for looking at.
 //   · It is NOT the app: no VibeSpace stylesheet and no i18n runtime (the dictionaries are 1.5 MB — forty times this
 //     file). Its few words come in en / zh / ja from the reader's own browser language (`WORDS`), its colours are
 //     the canvas's theme tokens defined here on the root (light / dark by the reader's system), its chrome is built with

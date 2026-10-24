@@ -10,6 +10,8 @@
 //     bare typed word plays the name when the name is empty) ③ recent folders with counts ④ the listing under the typed
 //     prefix / the whole-path fuzzy hits ⑤ mounts. Fuzzy over the WHOLE path: 片段前缀 (each word starts a segment, a word
 //     in it, its initials, or an alias) > 子序列 > 词匹配, case-insensitive, CJK characters plain
+//   · nameChips — the 由名字 chips under a field (`chips: true`, lane new-session-group-folder-link): the ② rows of the
+//     Session Name alone, each marked 新建 when the machine does not have it; no name ⇒ none
 //   · missingVerdict — «不存在 — 创建？»: a definite path that is not there; its parent missing ⇒ said, no create
 //   · groupOn — a Task Group AS SEEN FROM ONE MACHINE: the folders that exist there (probed) or are declared for it
 //     (`host::/path`), and the ones that are not (absent)
@@ -482,9 +484,21 @@ function recentCounts(sessions, limit = 20) {
   return [...by.values()].sort((a, b) => b.last - a.last || b.count - a.count).slice(0, limit);
 }
 
+/** THE 由名字 CHIPS under a field (lane new-session-group-folder-link — the owner: 「按照任务名推荐 path 也没有，必须点开 path
+ *  autocomplete 列表才行」): one `<group folder>/<name>` per SELECTED group in selection order, then `~/<name>` — the ② rows
+ *  of the Session Name alone (a typed word never plays the name here; the same-name folder stays a list row), each `isNew`
+ *  when the machine does not have it (made only at use, with the tick). o = rankCandidates' { groups, listing, name, machine }.
+ *  → [{ path, isNew, group: { id, name, color } | null, why }] — the name empty ⇒ []. */
+function nameChips(o = {}) {
+  const L = o.listing || { dirs: {} };
+  const m = rankCandidates('', { ...o, bases: [], recent: [], listing: L });
+  return m.nameRows.filter((n) => n.chip.key !== 'name-same')
+    .map((n) => ({ path: n.path, isNew: !(L.dirs || {})[n.path], group: n.g ? { id: n.g.id, name: n.g.name, color: n.g.color || '' } : null, why: n.why }));
+}
+
 module.exports = {
   SEC, TIER, HOST_ROW, SELF_PACKAGE,
   baseName, parentOf, under, joinPath, toTilde, fromTilde, isExcludedPath,
   resolveRelative, missingVerdict, groupOn, rankCandidates, fuzzyMatch, fuzzyFilter, fuzzyTokens, subseq,
-  sliceListing, mergeListing, sliceAsk, legacySuggestions, recentCounts,
+  sliceListing, mergeListing, sliceAsk, legacySuggestions, recentCounts, nameChips,
 };

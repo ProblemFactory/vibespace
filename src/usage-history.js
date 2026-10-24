@@ -207,6 +207,7 @@ const REBUILD_RETRY_MS = 60e3, REBUILD_RETRY_MAX_MS = 15 * 60e3;
 // transcript is gone — one stat per key (~45 ms for production's 37 024 keys,
 // measured 2026-10-03), so at most hourly, and on the first walk after boot.
 const CURSOR_PRUNE_MS = 3600 * 1000;
+const CURSOR_SLICE_MS = 20;   // lane ci-351-reds: the walk's prune pass hands the loop back after this much of the real clock
 
 class UsageHistory {
   // resolveAccount(acctId) → { type:'subscription'|'api'|'codex-subscription', name, tail } | null
@@ -215,10 +216,11 @@ class UsageHistory {
   // the label survives even if the account is later deleted.
   // scanBudgetBytes / scanYield (2.369.167, perf ⑥): the in-process walk
   // yields to `scanYield()` every `scanBudgetBytes` of consumed transcript
-  // bytes (default 1 MiB / setImmediate). Injected only by the parity suite,
+  // bytes (default 1 MiB / two setImmediate hops — lane ci-351-reds: ONE immediate queued from a poll-phase callback
+  // runs in that same loop iteration, no timer between; the second lands past the next timers phase). Injected only by the parity suite,
   // which holds the yield shut to prove no reader sees a half-walked ledger.
   constructor({ dataDir, homeDir = os.homedir(), resolveAccount = () => null,
-    scanBudgetBytes = SCAN_BUDGET_BYTES, scanYield = () => new Promise(setImmediate), paused = () => false }) {
+    scanBudgetBytes = SCAN_BUDGET_BYTES, scanYield = () => new Promise((r) => setImmediate(() => setImmediate(r))), paused = () => false }) {
     this._scanBudgetBytes = scanBudgetBytes;
     this._scanYield = scanYield;
     // lane fuse-canary-notice (B-b327): `paused(roots)` = the mount-health gate (src/server/mount-health-watch.js) —
@@ -607,6 +609,11 @@ class UsageHistory {
       // repair dropped (the 2.369.85 class). Drop this walk whole — the next
       // scan re-walks from the repaired cursors; nothing was appended yet.
       if (this._cursors !== cursorsAtStart) return { added: 0, filesTouched, dropped: 'cursors-reloaded' };
+      // lane ci-351-reds (2026-10-24): the hourly prune's stat pass — one stat per cursor, 8 587 on the measured boot = a
+      // 105 ms tick, 243–268 ms on the hosted runners — runs HERE in CURSOR_SLICE_MS slices through the walk's own yield,
+      // before the commit point (the reload check below covers its turns too); its drops land AT the commit, as before
+      const deadFacts = Date.now() - (this._cursorsPrunedAt || 0) >= CURSOR_PRUNE_MS ? await this._deadCursorsSliced(walk.cursors) : undefined;
+      if (this._cursors !== cursorsAtStart) return { added: 0, filesTouched, dropped: 'cursors-reloaded' };
       this._cursors = walk.cursors;
 
       // THE ONE COMMIT POINT — synchronous, so no reader interleaves between
@@ -614,7 +621,7 @@ class UsageHistory {
       for (const [shard, lines] of Object.entries(shardBuffers)) {
         if (lines.length) { const text = lines.join('\n') + '\n'; timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); this._pushIndex(shard, text); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
       }
-      this._writeCursors();
+      this._writeCursors(deadFacts);
       this._lastScan = Date.now();
     } catch (e) {
       if (e && e.paused) return { added: 0, filesTouched: 0, paused: true }; // the mount-health gate stopped it mid-walk
@@ -733,20 +740,28 @@ class UsageHistory {
     this._cursorsJson = text;
     return obj;
   }
-  _writeCursors() {
+  _writeCursors(deadFacts) {   // deadFacts: the walk's sliced prune pass (undefined = not run ⇒ the hourly sync prune when due)
     const now = Date.now();
-    if (now - (this._cursorsPrunedAt || 0) >= CURSOR_PRUNE_MS) { this._cursorsPrunedAt = now; this._pruneDeadCursors(); }
+    if (deadFacts !== undefined) { this._cursorsPrunedAt = now; this._dropDeadCursors(deadFacts); }
+    else if (now - (this._cursorsPrunedAt || 0) >= CURSOR_PRUNE_MS) { this._cursorsPrunedAt = now; this._pruneDeadCursors(); }
     const json = JSON.stringify(this._cursors);
     if (json === this._cursorsJson) return false;
     timedSync('usage-cursors.write', () => this._writeAtomic(this.cursorsFile, json));   // store-timing's row; its site = this function since usage-index-shadow L0
     this._cursorsJson = json;
     return true;
   }
-  _pruneDeadCursors() {
+  _pruneDeadCursors() {   // the prune in one go (the hourly fallback, and a suite's seam): the same steps, driven straight through
+    const steps = this._deadCursorSteps(this._cursors);
+    let r; do { r = steps.next(); } while (!r.done);
+    return this._dropDeadCursors(r.value);
+  }
+  /** THE PRUNE'S FACTS, one cursor key per step (a generator, like the walk: driven straight through by the sync form, in
+   *  slices by the walk) → { dead: [[key, root]], live: Set<root> }, or null when no root is a readable directory. */
+  *_deadCursorSteps(cursors) {
     const roots = [this.projectsDir, this.codexSessionsDir].filter((r) => { try { return fs.statSync(r).isDirectory(); } catch { return false; } });
-    if (!roots.length) return 0;
+    if (!roots.length) return null;
     const dirOk = new Map(), dead = [], live = new Set();
-    for (const k of Object.keys(this._cursors)) {
+    for (const k of Object.keys(cursors)) {
       const r = roots.find((x) => k.startsWith(x + path.sep));
       if (!r) continue;
       try { fs.statSync(k); live.add(r); } catch (e) {
@@ -755,9 +770,23 @@ class UsageHistory {
         if (!dirOk.has(d)) { let ok = false; try { ok = fs.statSync(d).isDirectory(); } catch { } dirOk.set(d, ok); }
         if (dirOk.get(d)) dead.push([k, r]);
       }
+      yield;
     }
+    return { dead, live };
+  }
+  async _deadCursorsSliced(cursors) {   // the steps in CURSOR_SLICE_MS slices (the real clock) across the walk's own yield
+    const steps = this._deadCursorSteps(cursors);
+    let at = performance.now();
+    for (;;) {
+      const r = steps.next();
+      if (r.done) return r.value;
+      if (performance.now() - at >= CURSOR_SLICE_MS) { if (typeof this._scanYield === 'function') await this._scanYield(); at = performance.now(); }
+    }
+  }
+  _dropDeadCursors(facts) {   // a dead key goes only while its root still holds a live one (an emptied mount point drops nothing)
+    if (!facts) return 0;
     let dropped = 0;
-    for (const [k, r] of dead) if (live.has(r)) { delete this._cursors[k]; dropped++; }
+    for (const [k, r] of facts.dead) if (facts.live.has(r)) { delete this._cursors[k]; dropped++; }
     return dropped;
   }
 

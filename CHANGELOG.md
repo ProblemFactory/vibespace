@@ -2,6 +2,34 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.351 — 2026-10-24
+
+### Added
+- On a phone your files are one tap away: the folder button beside ☰ in the top bar opens the file manager as a full page.
+- The For you page on a phone ends with a Files card — home, the last folder you used, your folders with files and your mounts; a tap opens one.
+- On a phone the file manager has finger-sized rows, a path you can tap and scroll sideways, and ‹ to go back to For you.
+- “New session here” at the top of a folder on a phone starts a session in the folder you are looking at.
+- A Mermaid flowchart or sequence diagram in an agent's reply now draws as a diagram, with Diagram | Source, Copy and Enlarge above it.
+- The same diagrams draw in the editor's Markdown preview and in the file viewer; nothing is fetched from the internet to draw them.
+- A diagram that cannot be drawn shows its source with the line that went wrong marked, never a blank.
+
+### Changed
+- New Session puts your Task Groups right under the session name, above the folder, so the folder suggestions come from the groups you pick.
+- New Session has one Agent | Terminal switch at the top: Terminal opens a plain shell; running an agent in its own terminal screen is a tick in More options.
+- The right side of New Session shows what the session may use and reads your Task Groups from the left; rows that said nothing are gone.
+- On a phone, New Session fills the screen with the switch and Create always in reach, and what the session may use folds into one line per kind.
+- VibeSpace answers its first requests sooner after a restart; nothing else changes.
+
+### Fixed
+- In New Session, the folder a Task Group fills in now follows your group choice until you type one yourself, and says which group it came from.
+- The folders suggested from the session name now show under the folder field as you type the name, each marked New when it does not exist yet.
+- A folder name typed in the file manager's path bar now opens that folder inside the one you are looking at.
+- OpenCode and Antigravity CLI show their icons in the backend filter and everywhere backends are listed — their icon files held a comment browsers refuse.
+- The Session Properties window scrolls again and keeps its margins; it had lost both when the Task Group window got its tabs in 2.369.346.
+- Opening an artboard enlarged in the Design window now shows the whole board with a margin around it, like the canvas preview.
+- A phone or tablet screen design no longer loses its bottom rows there; only a long page that scrolls is still shown at full width.
+- A file an assistant only summarised (an Antigravity read) no longer shows an arrow that opens nothing.
+
 ## 2.369.350 — 2026-10-24
 
 ### Added

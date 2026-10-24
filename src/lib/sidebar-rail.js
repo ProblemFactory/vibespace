@@ -154,6 +154,16 @@ const keepRailRecord = (r) => { try { localStorage.setItem(RAIL_LABELS_KEY, r ==
  *  the sidebar's floor while they show (ci-344-reds). */
 const LABELLED_RAIL_EXTRA = 24;
 
+/** The same first week for a door OUTSIDE the rail (lane phone-files-door: the phone's nav 文件 — a phone builds no rail):
+ *  does `doors`' word still show? (the record is kept as railLabels answers it — the first sight starts the week) */
+export function dayOneWords(doors) {
+  const v = railLabels({ record: readRailRecord(), now: Date.now(), doors });
+  keepRailRecord(v.record);
+  return v.show;
+}
+/** …and such a door was used once. */
+export function dayOneUsed(door) { keepRailRecord(railUsed(readRailRecord(), door)); }
+
 export function installSidebarRail(Sidebar) {
   Object.assign(Sidebar.prototype, {
 

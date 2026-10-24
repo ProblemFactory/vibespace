@@ -234,8 +234,11 @@ console.log('⑩ wiring');
   ok(/firstFilesFolder\(chips\)/.test(sf) && /paintFolderChips\(chipsEl, chips, \{ selected: first/.test(sf), 'the start step: the home’s folders as chips, the one with files chosen');
   ok(/purpose: SIGN_IN \}\);/.test(sf), 'the tour’s guided login is a sign-in terminal');
   const app = read('src/lib/app.js');
-  ok(/document\.getElementById\('input-cwd'\)\.value = cwd \|\| '';/.test(app) && !/if \(cwd\) document\.getElementById\('input-cwd'\)\.value = cwd;/.test(app), 'THE FINDING (D8): the dialog’s folder is the caller’s or EMPTY — never the last dialog’s');
-  ok(/paintFolderChips\(recentEl, folderChips\(\{ folders, recent: cwds, task: taskChips \}\)/.test(app) && /loadHomeFolders\(\)\.then/.test(app), 'the dialog’s chips: folderChips over the home’s folders');
+  // lane new-session-group-folder-link: every open goes through PURE folderOnOpen (the caller's folder, a picked group's — derived —
+  // or EMPTY), and the chips row is THE path field's own (chips: true — src/lib/path-field.js paints it through folderChips)
+  const form = read('src/lib/new-session-form.js'), pf = read('src/lib/path-field.js');
+  ok(/this\._nsFolderOpen\(cwd \|\| ''\);/.test(app) && /folderOnOpen\(\{ cwd, groups: this\._nsGroupFolders\(\)/.test(form) && !/if \(cwd\) document\.getElementById\('input-cwd'\)\.value = cwd;/.test(app), 'THE FINDING (D8): the dialog’s folder is the caller’s, the picked group’s or EMPTY — never the last dialog’s');
+  ok(/kind: 'folder', chips: true, id: 'new-session-cwd'/.test(app) && /paintFolderChips\(chipsEl, folderChips\(\{ folders, recent, task \}\)/.test(pf) && /loadHomeFolders\(\)\.then/.test(pf), 'the dialog’s chips: folderChips over the home’s folders (the path field’s own row)');
   ok(/sessionGivenName\(match, this\.sidebar\.getCustomName\?\.\(match\)\) \|\| match\.name \|\| match\.webuiName/.test(app), 'THE FINDING (D10): the window title takes the first message before the generated «Session N»');
   const vu = read('src/lib/vault-unlock.js');
   ok(/vaultSetupAsk\(\{ facts, snoozedUntil, now: Date\.now\(\) \}\)/.test(vu) && !/sessionStorage\.(?:get|set)Item\('vs-vault-later'/.test(vu), 'THE FINDING (D7): the setup ask asks vaultSetupAsk; «Later» is per device (no per-tab snooze)');

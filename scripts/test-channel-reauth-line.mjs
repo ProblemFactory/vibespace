@@ -46,7 +46,7 @@ await bundle('noline.js', { from: '  const dead = signinLine(app, a, kinds);', t
 
 // ── the stub server (synthesized — never anyone's data)
 const NOW = Date.now(), H = 3600e3;
-const at0714 = (() => { const d = new Date(NOW); d.setHours(7, 14, 0, 0); return d.getTime() > NOW ? NOW - H : d.getTime(); })();
+const at0714 = (() => { const d = new Date(NOW); d.setHours(7, 14, 0, 0); if (d.getTime() <= NOW) return d.getTime(); const sod = new Date(NOW); sod.setHours(0, 0, 0, 0); return Math.max(sod.getTime(), NOW - H); })(); // ci-351-reds (test-channel-row-notices' ci-350-red-2 fixture): a moment on TODAY'S calendar day, always — before 07:14 the old fallback NOW − 1 h crossed midnight (00:00–01:00) and the product rightly said «始于 昨天» while the pin expected a clock time
 const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
 const acct = (id, kind, label, extra = {}) => ({ id, kind, label, connectable: true, enabled: true, auth: { state: 'connected' }, authState: 'ok', authCause: null, authSince: null, presets: [], credentials: [], ...extra });
 const DEAD = acct('gmail:a', 'gmail', 'Gmail', { auth: { state: 'expired', why: 'refresh-refused', user: 'alice@example.test' }, authState: 'expired', authCause: 'refresh-refused', authSince: at0714, lastPass: { at: NOW - 60e3, ok: false, code: 'auth-expired', error: 'gmail token refresh: Token has been expired or revoked. (400)' }, consecutiveFailures: 6 });

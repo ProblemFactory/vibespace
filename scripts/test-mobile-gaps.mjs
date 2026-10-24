@@ -40,6 +40,13 @@
 //       + the notices' line fit without scrolling (a CONTROL with whole words does not); a row's tap opens its
 //       conversation, the back gesture returns to the list; every ask answered ⇒ the next back lands on the
 //       conversation list and a boot draws no page; the 1280×800 desktop draws none
+//   THE FILES DOOR (lane phone-files-door, the owner 2026-10-23: 「手机上好像不是很容易找到文件管理器」): from the cold first
+//       screen ONE tap on the nav's 文件 lists the home (CONTROL = the base's screen: without the lane's two doors nothing on
+//       it says Files — the only road was a long-press on «+»); the explorer IS the screen; a second tap reveals the same
+//       explorer; ‹ returns to the For-you page, whose 文件 card sits AFTER the bands (chips ≥ 36 px, home first) and opens
+//       the explorer THERE; on the explorer: rows ≥ 44 px, the path bar at 16 px, a RELATIVE name resolves against the
+//       folder on show (B-d027), the breadcrumbs scroll sideways (the folder in view, a crumb navigates), a long-press on a
+//       row's name is its menu with nothing selected, «New session here» opens New Session with the folder
 // Requires google-chrome (SKIP without). Run: node scripts/test-mobile-gaps.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -102,6 +109,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 fs.mkdirSync(CWD, { recursive: true });
 fs.writeFileSync(path.join(fakeHome, 'notes.txt'), 'hello\n');
 fs.writeFileSync(path.join(fakeHome, 'todo.md'), '- one\n');
+// lane phone-files-door: ~/work/payments (the relative name B-d027 types at ~/work) and a deep folder for the breadcrumbs
+const DEEP = path.join(fakeHome, 'work', 'payments', 'src', 'a-rather-long-folder-name', 'another-long-folder-name', 'and-one-more-level');
+fs.mkdirSync(DEEP, { recursive: true });
+fs.writeFileSync(path.join(fakeHome, 'work', 'payments', 'ledger.md'), '# ledger\n');
 {
   const lines = [];
   let ts0 = Date.now() - 3600e3; let n = 0;
@@ -340,6 +351,44 @@ try {
   await tap('#sidebar-close'); await sleep(250);
   check('…its ✕ closes it — back on the page', await evalJs(`!app.sidebar.isOpen && !document.getElementById('phone-home').classList.contains('hidden') && document.getElementById('phone-home').contains(document.elementFromPoint(innerWidth / 2, innerHeight / 2))`));
 
+  // ── THE FILES DOOR (lane phone-files-door): taps from a cold open to a listing of ~/ ──
+  console.log('the files door (lane phone-files-door): taps from a cold open to a listing of ~/');
+  // a DOOR = a button ON TOP at its centre whose label or own words say Files (the word a person looks for). CONTROL = the
+  // base's first screen: the same finder without the lane's two doors (the nav's 文件, the page's card) finds none — the
+  // only road there was a 500 ms press on «+», whose tap opens New Session (a press is not a tap; nothing said Files)
+  const filesDoors = (without) => evalJs(`(() => {
+    const skip = ${JSON.stringify(without)};
+    const says = (el) => /^Files$/.test((el.getAttribute('aria-label') || el.title || [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.nodeValue).join('') || '').trim());
+    const onTop = (el) => { const r = el.getBoundingClientRect(); if (!r.width || !r.height || r.bottom <= 0 || r.top >= innerHeight) return false; const h = document.elementFromPoint(Math.min(innerWidth - 1, r.left + r.width / 2), Math.min(innerHeight - 1, r.top + r.height / 2)); return !!h && (h === el || el.contains(h)); };
+    return [...document.querySelectorAll('button, [role=button], a')].filter((el) => !skip.some((s) => el.closest(s)) && says(el) && onTop(el)).map((el) => el.id ? '#' + el.id : String(el.className));
+  })()`);
+  const doorsNow = await filesDoors([]), doorsBase = await filesDoors(['#mobile-nav-files', '.ph-files']);
+  check(`the cold first screen holds a door that says Files (${doorsNow.join(', ')}) — CONTROL (the base's screen, without the lane's two doors): none (${doorsBase.length})`, doorsNow.includes('#mobile-nav-files') && doorsBase.length === 0, { doorsNow, doorsBase });
+  const navFiles = await evalJs(rectsOf('#mobile-nav-files, #mobile-nav-menu'));
+  check(`the nav's 文件 is ≥ 36×36 and sits right after ☰ (${navFiles.map((r) => r.w + '×' + r.h + '@' + r.l).join(', ')})`, navFiles.length === 2 && allAtLeast(navFiles) && navFiles[1].l > navFiles[0].l && navFiles[1].l - navFiles[0].r < 12, navFiles);
+  const homeDir = await evalJs('app._localHome');
+  await tap('#mobile-nav-files');
+  const oneTap = await waitFor(`(() => { const w = app.wm.windows.get(app.wm.activeWindowId); return w?.type === 'files' && w._explorer?.currentPath === ${JSON.stringify(homeDir)} && w.element.querySelectorAll('.file-item').length >= 3 && document.getElementById('phone-home').classList.contains('hidden'); })()`, 8000);
+  check('ONE tap on it lists the home (taps from a cold open: 1 ≤ 2 — the base: a long-press on «+» and a tap, behind no word)', oneTap, await evalJs(`({ active: app.wm.windows.get(app.wm.activeWindowId)?.type, path: app.wm.windows.get(app.wm.activeWindowId)?._explorer?.currentPath, rows: document.querySelectorAll('.file-explorer .file-item').length })`));
+  const sheetGeo = await evalJs(`(() => { const w = app.wm.windows.get(app.wm.activeWindowId); const r = w.element.getBoundingClientRect(); const nb = document.getElementById('mobile-nav').getBoundingClientRect(); return { l: Math.round(r.left), t: Math.round(r.top), w: Math.round(r.width), b: Math.round(r.bottom), nav: Math.round(nb.bottom), titlebar: getComputedStyle(w.titleBar).display }; })()`);
+  check(`the explorer IS the screen: under the nav (top ${sheetGeo.t} = ${sheetGeo.nav}), the whole width (${sheetGeo.w}) and height (bottom ${sheetGeo.b}), no title bar`, sheetGeo.l === 0 && sheetGeo.t === sheetGeo.nav && sheetGeo.w === VW && sheetGeo.b === VH && sheetGeo.titlebar === 'none', sheetGeo);
+  await tap('#mobile-nav-files');
+  check('a second tap on 文件 reveals the same explorer — never a second one', await evalJs(`[...app.wm.windows.values()].filter((w) => w.type === 'files').length === 1 && app.wm.windows.get(app.wm.activeWindowId)?.type === 'files'`));
+  await tap('.window.window-active .file-phone-back');
+  const backHome = await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.getElementById('mobile-nav-title').textContent === 'For you'`, 5000);
+  check('‹ in the explorer returns to the phone\'s home (the For-you page while it has rows — the back gesture\'s rule)', backHome);
+  await waitFor(`document.querySelectorAll('#phone-home .ph-files-chip').length >= 3`, 8000);
+  const card = await evalJs(`(() => { const p = document.getElementById('phone-home'); const c = p.querySelector(':scope > .ph-files'); if (!c) return null; const list = p.querySelector(':scope > .ut-inbox').getBoundingClientRect(); const r = c.getBoundingClientRect();
+    return { top: Math.round(r.top), listBottom: Math.round(list.bottom), after: c.previousElementSibling?.classList.contains('ut-inbox'), head: c.querySelector('.ph-files-head').textContent.trim(), chips: [...c.querySelectorAll('.ph-files-chip')].map((b) => { const q = b.getBoundingClientRect(); return { kind: b.dataset.kind, path: b.dataset.path, text: b.textContent, h: Math.round(q.height), r: Math.round(q.right) }; }) }; })()`);
+  check(`the For-you page carries a 文件 card AFTER its list (card top ${card?.top} ≥ list bottom ${card?.listBottom}) headed «${card?.head}», home first, every chip ≥ 36 px and inside the screen (${card?.chips.map((x) => x.kind + ':' + x.text).join(' · ')})`,
+    card && card.after && card.top >= card.listBottom && card.head === 'Files' && card.chips[0].kind === 'home' && card.chips[0].path === homeDir && card.chips.some((x) => x.kind === 'files' && /\/work$/.test(x.path)) && card.chips.every((x) => x.h >= 36 && x.r <= VW), card);
+  await tap('#phone-home .ph-files-chip[data-kind="files"]');
+  const chipPath = card?.chips.find((x) => x.kind === 'files')?.path;
+  check(`one tap on a chip opens the explorer THERE (${chipPath})`, await waitFor(`(() => { const w = app.wm.windows.get(app.wm.activeWindowId); return w?.type === 'files' && w._explorer?.currentPath === ${JSON.stringify(chipPath)} && document.getElementById('phone-home').classList.contains('hidden'); })()`, 8000));
+  for (const id of await evalJs(`[...app.wm.windows.keys()]`)) await evalJs(`app.wm.requestClose(${JSON.stringify(id)}); true`);
+  await waitFor('app.wm.windows.size === 0', 5000);
+  await evalJs('app.phoneHome.show(); true'); await sleep(200); // where the legs below start (the page, no window)
+
   // ── #8 touch targets: the nav bar ──
   console.log('#8 touch targets');
   const navRects = await evalJs(rectsOf('#mobile-nav-menu, #mobile-nav-new, #mobile-nav-gear, #mobile-nav-todos'));
@@ -430,6 +479,43 @@ try {
   await tapTwice(dirSel, 150);
   const dbl2 = await waitFor(`document.querySelector('.file-path-input').value === ${JSON.stringify(dbl0.path.replace(/\/$/, '') + '/' + dbl0.name)}`, 8000);
   check(`negative control: outside Select mode a double-tap on the folder row navigates into it (${dbl0.path}/${dbl0.name})`, dbl2, await evalJs(`document.querySelector('.file-path-input').value`));
+
+  // ── THE EXPLORER ON A PHONE (lane phone-files-door) ──
+  console.log('the explorer on a phone (lane phone-files-door)');
+  const EXP = `app.wm.windows.get(app.wm.activeWindowId)._explorer`;
+  const home2 = await evalJs('app._localHome');
+  await evalJs(`(async () => { await ${EXP}.navigate(${JSON.stringify(home2 + '/work')}); return true; })()`);
+  await waitFor(`document.querySelectorAll('.file-explorer .file-item').length >= 1`);
+  const fp = await evalJs(`(() => { const ex = document.querySelector('.file-explorer'); const rows = [...ex.querySelectorAll('.file-item')].map((r) => Math.round(r.getBoundingClientRect().height)); const inp = ex.querySelector('.file-path-input'); const back = ex.querySelector('.file-toolbar > .file-phone-back'); const b = back.getBoundingClientRect();
+    return { rows, font: getComputedStyle(inp).fontSize, backFirst: ex.querySelector('.file-toolbar').firstElementChild === back, back: [Math.round(b.width), Math.round(b.height)] }; })()`);
+  check(`the file rows are ≥ 44 px (${fp.rows.join('/')}), the path bar is 16 px (no focus zoom on iOS), ‹ is the toolbar's first button (${fp.back.join('×')})`, fp.rows.length >= 1 && fp.rows.every((h) => h >= 44) && fp.font === '16px' && fp.backFirst && fp.back[0] >= 36 && fp.back[1] >= 36, fp);
+  // B-d027: `payments` typed in the bar at ~/work goes to ~/work/payments (the field's base 1 = the folder on show)
+  await evalJs(`(() => { const i = document.querySelector('.file-explorer .file-path-input'); i.focus(); i.select(); return true; })()`);
+  await cdp('Input.insertText', { text: 'payments' }); await sleep(900);
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+  const rel = await waitFor(`${EXP}.currentPath === ${JSON.stringify(home2 + '/work/payments')}`, 6000);
+  check('B-d027: a RELATIVE name typed in the path bar resolves against the folder on show (`payments` at ~/work ⇒ ~/work/payments)', rel, await evalJs(`({ path: ${EXP}.currentPath, line: document.querySelector('.file-explorer .pf-under')?.textContent })`));
+  // the breadcrumbs: a deep folder scrolls them sideways — the folder itself in view, a crumb navigates
+  await evalJs(`(async () => { await ${EXP}.navigate(${JSON.stringify(DEEP)}); return true; })()`); await sleep(400);
+  const cb = await evalJs(`(() => { const c = document.querySelector('.file-explorer .file-crumbs'); const items = [...c.querySelectorAll('.file-crumb')]; const last = items[items.length - 1].getBoundingClientRect(); const cr = c.getBoundingClientRect();
+    return { items: items.map((b) => b.textContent), ox: getComputedStyle(c).overflowX, sw: c.scrollWidth, cw: c.clientWidth, sl: Math.round(c.scrollLeft), lastIn: last.right <= cr.right + 1 && last.left >= cr.left - 1, here: items[items.length - 1].classList.contains('here'), h: Math.min(...items.map((b) => Math.round(b.getBoundingClientRect().height))), exScroll: document.querySelector('.file-explorer').scrollWidth }; })()`);
+  check(`the breadcrumbs (${cb.items.join(' › ')}) scroll sideways (${cb.sw} > ${cb.cw}, overflow-x ${cb.ox}) with the folder itself in view (scrollLeft ${cb.sl}), crumbs ≥ 36 px, the explorer itself never wider than the screen`,
+    cb.items[0] === '~' && cb.items[cb.items.length - 1] === 'and-one-more-level' && cb.ox === 'auto' && cb.sw > cb.cw && cb.lastIn && cb.here && cb.sl > 0 && cb.h >= 36 && cb.exScroll <= VW + 1, cb);
+  await tap('.file-explorer .file-crumb[data-path="' + home2 + '/work"]');
+  check('a tap on the «work» crumb (scrolled into view) opens ~/work', await waitFor(`${EXP}.currentPath === ${JSON.stringify(home2 + '/work')}`, 6000), await evalJs(`${EXP}.currentPath`));
+  // a long-press on a row's NAME is the row's menu — never a text selection
+  await evalJs(`getSelection().removeAllRanges(); true`);
+  await longPress('.file-explorer .file-item .file-name');
+  const lp = await evalJs(`({ menu: [...document.querySelectorAll('.context-menu .context-menu-item')].map((el) => el.textContent.trim()).slice(0, 3), sel: String(getSelection()) })`);
+  check(`a long-press on a row's name opens the row's menu (${lp.menu.join(' / ')}…) and selects no text`, lp.menu[0] === 'Select…' && lp.sel === '', lp);
+  await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
+  // «New session here» at the top of the listing → the New Session dialog with this folder
+  const nh = await evalJs(`(() => { const b = document.querySelector('.file-explorer .file-new-here'); const r = b.getBoundingClientRect(); const first = document.querySelector('.file-explorer .file-item').getBoundingClientRect(); return { text: b.textContent.trim(), h: Math.round(r.height), above: r.bottom <= first.top + 1 }; })()`);
+  check(`«${nh.text}» heads the listing (above the first row, ${nh.h} px)`, nh.text === 'New session here' && nh.above && nh.h >= 44, nh);
+  await tap('.file-explorer .file-new-here');
+  const ns = await waitFor(`!!document.getElementById('input-cwd')?.offsetParent && document.getElementById('input-cwd').value === ${JSON.stringify(home2 + '/work')}`, 5000);
+  check('…a tap opens New Session with the folder filled in', ns, await evalJs(`({ cwd: document.getElementById('input-cwd')?.value, shown: !!document.getElementById('input-cwd')?.offsetParent })`));
+  await evalJs('app.hideDialogs(); true'); await sleep(200);
 
   // ── #4 / #5 chat: search chip, chips ≥ 36, hover buttons gone, message long-press ──
   console.log('#4/#5 chat');

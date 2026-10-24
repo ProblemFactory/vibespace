@@ -6,6 +6,8 @@
 
 import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js'; // THE one sanitizer for agent / peer / file HTML (no CSS, no product classes, no forms)
+import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: THE one door that draws a ```mermaid fence (self-hosted, sanitized)
+import { diagramFences, mayHoldDiagram, isMermaidLang } from './mermaid-model.js';
 import { escHtml, copyText, showContextMenu, showToast, absUrl, onOutsidePress, fetchJson } from './utils.js';
 import { track } from './telemetry-client.js';
 import { renderCodeBlock, rehighlightCodeBlock, stripAnsi, getHljsLanguages } from './highlight.js';
@@ -2427,11 +2429,31 @@ class ChatRenderers {
       let html = sanitizeHtml(this._fileHrefs(marked.parse(text || '')));
       html = conversationLinksHtml(html, { known: (id) => (this._subagentKnown ? this._subagentKnown(id) : true), t, escHtml }); // lane agy-subagent-cards: [x](conversation://<id>) opens that subagent
       html = this._wrapTables(html);
+      html = this._markOpenFences(text, html); // lane chat-mermaid: a fence still being streamed stays code
       return this.linkify(html);
     } catch {
       return escHtml(text || '');
     }
   }
+
+  /** lane chat-mermaid: a ```mermaid fence still OPEN (a reply mid-stream — its closing fence not written yet) stays a
+   *  code block: its <pre> is marked `data-fence-open`, which mountDiagrams leaves alone; a CLOSED one becomes the
+   *  diagram card (addDiagrams). Open/closed is read off marked's own tokens (diagramFences), matched to the drawn
+   *  <pre>s in order; a count that disagrees keeps every one code (never a half-written diagram). */
+  _markOpenFences(text, html) {
+    if (!mayHoldDiagram(text)) return html;
+    let fences;
+    try { fences = diagramFences(marked.lexer(text || '')); } catch { return html; }
+    if (!fences.some((f) => !f.closed)) return html;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html; // html = sanitizeHtml's output (renderMarkdown); only an attribute of ours is added
+    const pres = [...tpl.content.querySelectorAll('pre > code')].filter((c) => [...c.classList].some((x) => x.startsWith('language-') && isMermaidLang(x.slice(9)))).map((c) => c.parentElement);
+    pres.forEach((pre, i) => { if (pres.length !== fences.length || !fences[i].closed) pre.setAttribute('data-fence-open', ''); });
+    return tpl.innerHTML;
+  }
+
+  /** lane chat-mermaid: every closed ```mermaid fence under `el` → its diagram card (src/lib/mermaid-render.js). */
+  addDiagrams(el) { return mountDiagrams(el, { app: this.app }); }
 
   /** Wrap each <table> in a horizontally-scrollable container so wide tables
    *  scroll instead of overflowing (critical on mobile — no scroll otherwise). */
@@ -3140,9 +3162,11 @@ class ChatRenderers {
     // Memoized — this ran (registry + sort) for every message create/edit
     if (!ChatRenderers._LANGS) ChatRenderers._LANGS = ['plain', ...getHljsLanguages().sort()];
     const LANGS = ChatRenderers._LANGS;
+    this.addDiagrams(el); // lane chat-mermaid: every site that adds the code toolbar draws the closed diagram fences first
 
     for (const block of el.querySelectorAll('pre, .chat-diff-body, .chat-code-block')) {
       if (block.parentNode?.classList?.contains('chat-pre-wrap')) continue;
+      if (block.closest('.chat-diagram')) continue; // a diagram card's source has the card's own toolbar
       const wrapper = document.createElement('div');
       wrapper.className = 'chat-pre-wrap';
       block.parentNode.insertBefore(wrapper, block);
