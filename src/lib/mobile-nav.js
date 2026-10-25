@@ -80,7 +80,16 @@ export class MobileNav {
       if (activeId) app.wm.requestClose(activeId);
     };
 
-    this._titleEl.onclick = () => { if (app.viewportClass?.() !== 'regular') this._showWindowSwitcher(); }; // the regular class's list IS the switcher (SPEC-v3 §2.2)
+    // HOTFIX 2.369.356 (userW on his Duo, 2026-10-25): the switcher's DESKTOP TABS are the only desktop door where the taskbar is
+    // not drawn — the regular class had switched the title tap off (SPEC-v3 §2.2 «the list IS the switcher»), which left no way
+    // to switch a virtual desktop on the inner display. The title tap opens the switcher in EVERY class; at landscape the
+    // conversation's own title bar (the active window's title) is the tap target (this nav's title is not drawn there).
+    this._titleEl.onclick = () => this._showWindowSwitcher();
+    (document.getElementById('workspace') || document.getElementById('main-wrapper'))?.addEventListener('click', (e) => { // the windows' container, never the document (test-architecture §59a)
+      if (app.viewportClass?.() !== 'regular') return;
+      const t = e.target && e.target.closest && e.target.closest('.window.window-active > .window-titlebar .window-title');
+      if (t) { e.preventDefault(); this._showWindowSwitcher(); }
+    });
     this._setupGestures();
     this.bar = installTrailingBar(app); // the regular class's buttons (shown by the stylesheet there only)
   }
@@ -188,7 +197,9 @@ export class MobileNav {
     pop.className = 'mobile-win-switcher';
     pop.style.cssText = 'position:fixed;left:0;right:0;z-index:90001;background:var(--bg-dialog);border-bottom:1px solid var(--border);box-shadow:0 4px 16px rgba(0,0,0,0.3);max-height:60vh;overflow-y:auto;-webkit-overflow-scrolling:touch';
     const navRect = anchor.closest('#mobile-nav').getBoundingClientRect();
-    pop.style.top = navRect.bottom + 'px';
+    // HOTFIX 2.369.356: at the regular class's landscape the nav is the VERTICAL trailing bar (full height) — its bottom is the
+    // viewport's bottom; the sheet then hangs from the top of the page, not from the bar.
+    pop.style.top = (navRect.height > navRect.width ? 0 : navRect.bottom) + 'px';
 
     const wm = this.app.wm;
     const dm = this.app.desktopManager;

@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.356 — 2026-10-25
+
+### Fixed
+- On a foldable’s inner screen you can switch desktops again: tap the conversation’s title for the switcher’s desktop tabs; ☰ hides the list in landscape too.
+
 ## 2.369.355 — 2026-10-25
 
 ### Added

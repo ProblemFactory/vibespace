@@ -4,6 +4,12 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.356 — 2026-10-25
+
+### hotfix-356 — the regular class had no desktop door and no list collapse at landscape
+
+- userW (iPhone Duo, 2.369.355, hours after the release): «如何在这个界面下切换桌面？» + «展开横屏状态这个没法收起来». The virtual-desktop switcher lives in the taskbar (`#desktop-previews`), which the compact and regular classes do not draw; the compact class had the title-tap door to the window switcher (`.mobile-desk-tabs`, design-mobile-gaps #7) but duo-build-1 switched that tap OFF in the regular class (SPEC-v3 §2.2), and at landscape the ☰ was hidden with the nav title. Hotfix: the title tap opens the switcher in every class; at landscape the active window’s title bar is the tap target (a delegated click in mobile-nav.js); `#mobile-nav-menu` is shown at the top of the trailing bar at landscape and toggles the list column (`sidebar.toggleList`, the existing `vs-list-hidden` rules are not orientation-scoped). Tested by hand on the demo hub at 951×585 and 382×580 (the owner asked for a ten-minute hotfix — the full fast tier ran in the pre-push hook; the chrome suites run in CI). The proper door (a «Desktops» button in both classes, the sheet, the ⧉ cross-desktop group) is lane desktop-switch-phone, 2.369.357.
+
 ## 2.369.355 — 2026-10-25
 
 ### custom-browser-design — the custom browser kernel plugin's VibeSpace side, five lane contracts (DESIGN lane on 2.369.353; docs only, no product code)

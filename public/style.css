@@ -2651,6 +2651,10 @@ html[data-vc="regular"] #workspace { flex: 1; min-height: 0; }
   html[data-vc="regular"] #mobile-nav .mnav-bar-btn, html[data-vc="regular"] #mobile-nav .mnav-dest, html[data-vc="regular"] #mobile-nav-gear {
     width: 44px !important; height: 44px !important; min-width: 44px; min-height: 44px; padding: 0 !important;
   }
+  /* HOTFIX 2.369.356 (userW's Duo, landscape): the list column can be hidden / shown here too — the ☰ stands at the top of the
+     trailing bar (portrait already had it in the head); and the active window's title is the switcher's door (desktop tabs). */
+  html[data-vc="regular"] #mobile-nav-menu { display: inline-flex !important; order: 0; align-items: center; justify-content: center; }
+  html[data-vc="regular"] .window.window-active > .window-titlebar .window-title { cursor: pointer; }
   html[data-vc="regular"] #mobile-nav-viewer-close { order: 1; }
   html[data-vc="regular"] #mobile-nav-artifacts { order: 2; }
   html[data-vc="regular"] #mobile-nav-more { order: 3; }
