@@ -1361,6 +1361,12 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 .chat-compact-content .chat-text { line-height: 1.35; }
 .chat-compact-content .chat-text p { margin: 0 0 2px; }
 .chat-compact-content .chat-text p:last-child { margin-bottom: 0; }
+/* P2-15 (lane phone-refusal-wrap; ci-355-red): WHAT YOU TYPED KEEPS ITS LINE BREAKS — marked leaves «a⏎b⏎c» as
+   `<p>a\nb\nc</p>` and the user's own paragraph preserves those newlines (three lines, innerText «a\nb\nc»). Never a
+   `<br>` per line: each is a LineBreak + a StaticText + 2 InlineTextBoxes in the platform tree (4 nodes, pre-wrap's
+   newline 2) — test-ax-budget ④c's fence. The bubble face (.chat-bubble-user) already pre-wraps; the agent's paragraphs
+   keep markdown's convention (a single newline is a space); code blocks and lists are untouched */
+.chat-msg-user .chat-text p { white-space: pre-wrap; }
 .chat-compact-content .chat-text ul, .chat-compact-content .chat-text ol { margin: 2px 0; padding-left: 18px; }
 .chat-compact-content .chat-text li { margin: 1px 0; }
 .chat-compact-content .chat-text h1, .chat-compact-content .chat-text h2,

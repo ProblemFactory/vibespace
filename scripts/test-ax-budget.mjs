@@ -49,10 +49,14 @@
 //     middle (a 600-line slab) and TWO gap page-ups (2,000 lines each — the §1
 //     worst case, "gap slab … 单窗 50–71k") — cards in view and within 2
 //     viewports carry no aria-hidden, cards beyond 2 viewports (the band's own
-//     edge, spans by the product's own rule) do; the GROWTH INVARIANT: the second slab moves NON-IGNORED by
-//     ≤ 10 % (the platform tree is bounded by the band; the serialised TOTAL
+//     edge, spans by the product's own rule) do; the GROWTH INVARIANT: the second slab never GROWS NON-IGNORED
+//     by > 10 % (the platform tree is bounded by the band; the serialised TOTAL
 //     keeps ≈ 5 ignored nodes per hidden card — a0's OQ1 floor, the DOM's
-//     business, 5b's); the per-window pin at measured ×1.25.
+//     business, 5b's); the per-window pin at measured ×1.25. ONE-SIDED since ci-355-red (2.369.355): the
+//     two-sided «moves by ≤ 10 %» went red on a SHRINK (1029 → 629) once the user's line breaks showed —
+//     a fixture-landing fact, not a band law (the facts at ④c below); a shrink prints the edge census.
+//     The per-break cost, measured beside it: a <br> = LineBreak + StaticText + 2 InlineTextBox (4 nodes),
+//     CSS pre-wrap's preserved newline = its own InlineTextBox (2) — why P2-15 is CSS, not the red's cause.
 //   ⑤ THE SETTING'S TWO MEANINGS: false ⇒ the LIST is aria-hidden (2.369.144);
 //     true ⇒ the band, re-derived on the flip (stale per-card state repaired),
 //     with the view taken OUT of app.sessions for the flip (a sub-agent viewer
@@ -60,8 +64,9 @@
 //   ⑥ NEGATIVE CONTROL: the band neutered at SOURCE in the scratch worktree
 //     (string-exact marker, the test-desktop-resume-paging idiom), the bundle
 //     rebuilt, the same window / teleport / slabs — TOTAL and NON-IGNORED must
-//     GROW by > 30 %, every card beyond the band must be exposed, and a card
-//     added outside the band must cost < half of its exposed serialisation.
+//     GROW by > 30 %, every card beyond the band must be exposed, a card
+//     added outside the band must cost < half of its exposed serialisation, and
+//     ④c's own predicate must be RED on it (the one-sided growth check still bites).
 //   ⑦ FOCUS (verifier finding on a1): a focus landing inside a band-hidden card
 //     exposes that card in the focus event's OWN task (the list's focusin), not
 //     on the next ≥ 150 ms pass — an in-page control (the handler blocked: the
@@ -488,9 +493,26 @@ const bandCensus = () => evaljs(`(() => {
   }
   return out;
 })()`);
-const within = (a, b, frac) => Math.abs(a - b) <= frac * Math.max(1, b);
+// ④c's predicate — ONE-SIDED (a growth invariant): the second slab never adds > 10 % to the platform tree
+const noGrowth = (from, to) => to <= 1.10 * Math.max(1, from);
+// THE BAND'S EDGES (ci-355-red): the zero-height cards (content-visibility:auto rows laid out at 0 px — 742 of the 1,310
+// here) whose span — the nearest visible card above, the product's own rule — lies within 16 px INSIDE the band's top or
+// bottom edge, exposed. A heap of them riding a 2 px row just inside an edge is what moves NON-IGNORED between two landings.
+const edgeCensus = () => evaljs(`(() => {
+  const v = window.__v, l = v._messageList, els = l.querySelectorAll(':scope > .chat-msg'), b = v._axBand || {}, pos = v._cardPositions(els);
+  const out = { bandTop: b.top, bandBottom: b.bottom, st: Math.round(l.scrollTop), exposed: 0, zeroHeightAtTop: 0, zeroHeightAtBottom: 0, anchors: [] };
+  for (let i = 0; i < els.length; i++) {
+    const e = els[i]; if (e.getAttribute('aria-hidden') === 'true' || e.offsetParent === null) continue;
+    out.exposed++;
+    if (e.offsetHeight > 0) continue;
+    const atTop = pos[i].bottom >= b.top && pos[i].bottom - b.top <= 16, atBottom = pos[i].top <= b.bottom && b.bottom - pos[i].top <= 16;
+    if (atTop) out.zeroHeightAtTop++; if (atBottom) out.zeroHeightAtBottom++;
+    if ((atTop || atBottom) && !out.anchors.includes(pos[i].top + '..' + pos[i].bottom)) out.anchors.push(pos[i].top + '..' + pos[i].bottom);
+  }
+  return out;
+})()`);
 const ratio = (a, b) => (b > 0 ? (a / b).toFixed(2) + '×' : 'n/a');
-let T1 = null, T2 = null, census = null;
+let T1 = null, T2 = null, census = null, edge1 = null;
 if (!midTurn) check('④ the fixture has a user turn past its midpoint', false);
 else {
   const tp = await teleport();
@@ -502,6 +524,8 @@ else {
   const p1 = await gapPageUp();
   console.log(`  gap page-up 1: ${JSON.stringify(p1)}`);
   T1 = await measure('teleport + 1 slab');
+  edge1 = await edgeCensus();
+  console.log(`  band edges at slab 1: ${JSON.stringify(edge1)}`);
   const p2 = await gapPageUp();
   console.log(`  gap page-up 2: ${JSON.stringify(p2)}`);
   T2 = await measure('teleport + 2 slabs');
@@ -518,10 +542,21 @@ else {
   // ≈ 5 serialised nodes (MEASURED +3115 on +576 cards at a1; +2689 = 4.7 per card at a2) against
   // ≈ 14 exposed (11.5 at a2) — the TOTAL's growth is the DOM's card count × that floor, bounded by the
   // trim / the gap caps (design §3 row 5b, deliberately not this round). Asserted: the platform tree
-  // ≤ 10 %; the marginal serialised cost of a card outside the band < half the neutered copy's (⑥,
-  // same run, same gestures).
-  check(`④c GROWTH INVARIANT (the platform tree): the second 2,000-line slab (${T1.page.rendered} → ${T2.page.rendered} rendered cards) moves NON-IGNORED by ≤ 10 % (${T1.live} → ${T2.live}); TOTAL ${T1.total} → ${T2.total} = ${((T2.total - T1.total) / Math.max(1, T2.page.rendered - T1.page.rendered)).toFixed(1)} serialised nodes per added card (ignored — see ⑥ for the exposed cost)`,
-    within(T2.live, T1.live, 0.10));
+  // never GROWS by > 10 %; the marginal serialised cost of a card outside the band < half the neutered
+  // copy's (⑥, same run, same gestures); ⑥'s neutered copy is RED on this very predicate.
+  // ONE-SIDED, MEASURED (ci-355-red, 2.369.355, Chrome 154): the two-sided form («moves by ≤ 10 %») held
+  // 651 → 632 on the .354 layout and went RED 1074 → 637 once the user's typed line breaks showed
+  // (phone-refusal-wrap P2-15) — red as a SHRINK. Not the nodes: a <br> costs 4 (LineBreak + StaticText
+  // + 2 InlineTextBox), CSS pre-wrap's preserved newline 2 (its own InlineTextBox), and pre-wrap read
+  // 1029 → 629 all the same. The LAYOUT: taller user cards (the 50-card baseline sh 1565 → 1864, the
+  // same for both) landed slab 1 at st 1539 (not 1606), where the band's top edge (223) sat 2–14 px
+  // above a heap of zero-height rows riding 2 px hook rows (225–237), ≈ 11 live nodes each — exposed
+  // by the rule, a fixture-landing fact (the band was not stale: a dry pass changed 0 cards; a 12 px
+  // nudge either way read 840 / 851). The second slab's landing left the heap behind. A growth the
+  // band let through would still be red here — and ⑥ proves the predicate bites.
+  const shrank = T2.live < 0.90 * T1.live;
+  check(`④c GROWTH INVARIANT (the platform tree): the second 2,000-line slab (${T1.page.rendered} → ${T2.page.rendered} rendered cards) never GROWS NON-IGNORED by > 10 % (${T1.live} → ${T2.live}${shrank ? ` — a SHRINK: slab 1's landing exposed ${edge1?.zeroHeightAtTop || 0} + ${edge1?.zeroHeightAtBottom || 0} zero-height rows within 16 px of the band's edges, anchors ${JSON.stringify(edge1?.anchors || [])}` : ''}); TOTAL ${T1.total} → ${T2.total} = ${((T2.total - T1.total) / Math.max(1, T2.page.rendered - T1.page.rendered)).toFixed(1)} serialised nodes per added card (ignored — see ⑥ for the exposed cost)`,
+    noGrowth(T1.live, T2.live));
   // the design's §4 per-window ceiling (5,000) assumed aria-hidden removes a hidden card's serialisation
   // entirely; it removes ≈ 60–70 % of it (11.5 → 4.7 per card at a2). Pinned at the measured number
   // ×1.25 on THIS deterministic state (the design's rule: measure, then pin; tighten as each step
@@ -688,6 +723,8 @@ if (T2 && census) {
       const mBand = (T2.total - T1.total) / Math.max(1, T2.page.rendered - T1.page.rendered), mCtrl = (C2.total - C1.total) / Math.max(1, C2.page.rendered - C1.page.rendered);
       check(`⑥ …and a card added OUTSIDE the band costs less than half of what it costs exposed: ${mBand.toFixed(1)} vs ${mCtrl.toFixed(1)} serialised nodes per added card (the second slab, band vs neutered)`,
         mBand < 0.5 * mCtrl);
+      check(`⑥ …and ④c's one-sided predicate is RED on the neutered copy: NON-IGNORED ${C1.live} → ${C2.live} (${ratio(C2.live, C1.live)} — a growth the band would have stopped)`,
+        !noGrowth(C1.live, C2.live));
     }
   }
 }

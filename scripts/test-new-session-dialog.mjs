@@ -79,10 +79,13 @@
 //      line says «my-mac cannot be reached — use a path on this machine or try again later» (state `unreachable`), its
 //      list offers nothing there; I2 the footer refuses Create with the same words; I3 typing on spawns nothing; the rung asks ONE
 //      ssh for the whole walk (the verdict kept a minute); I4 back to This machine ⇒ the field is usable again; I5 the hub
-//      answers the next request
+//      answers the next request; I6 (ci-355-red — the 2.369.355 runner's I1/I2 red, both tries) the machine picked while the
+//      dialog's machine list is STILL IN FLIGHT stays picked when the list lands: CDP Fetch holds GET /api/hosts until after the
+//      pick and the machine's own answers (recent-cwds / dir-complete) until after the landing — the slow runner's order, every run
 //   RED CONTROL = the base's open order (the account row filled from the select's previous value, then a programmatic
 //      set; the machine set only when the list lands), rebuilt from a PATCHED COPY of today's app.js in the throwaway
-//      worktree (one esbuild — never the repository's history): F2 / F3 / G1 red; the real bundle back ⇒ F2 green
+//      worktree (one esbuild — never the repository's history): F2 / F3 / G1 red; the real bundle back ⇒ F2 green; the same
+//      copy's landing puts the open's machine back (the .355 line) ⇒ I6 red: the pick becomes This machine, «Choose a folder first»
 // Requires google-chrome + dtach (SKIP without). Run: node scripts/test-new-session-dialog.mjs
 import { execSync, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -627,6 +630,38 @@ try {
     return evalJs(`window.__nsCreated.length > ${n} ? window.__nsCreated.at(-1) : null`);
   };
   const openNs = async (args = {}) => { await evalJs(`app.hideDialogs(); app.showNewSessionDialog(${JSON.stringify(args)}); true`); await waitFor(dialogVisible, 5000); };
+  // I6 (ci-355-red): the machine picked while the dialog's machine list is in flight. The runner's order, made deterministic —
+  // CDP Fetch holds GET /api/hosts until AFTER the pick (and the press on the folder field), and the machine's own answers
+  // (recent-cwds / dir-complete) until AFTER the list landed; the base's landing put the open's machine (This machine) back
+  const heldPick = async (hid, words) => {
+    const held = { list: [], verdict: [] }, order = [];
+    const onPaused = (d) => {
+      const m = JSON.parse(d); if (m.method !== 'Fetch.requestPaused') return;
+      const u = new URL(m.params.request.url).pathname, id = m.params.requestId;
+      if (u === '/api/hosts' && m.params.request.method === 'GET') { held.list.push(id); order.push('list'); }
+      else if (/^\/api\/hosts\/[^/]+\/(recent-cwds|dir-complete)$/.test(u)) { held.verdict.push(id); order.push('verdict'); }
+      else cdp('Fetch.continueRequest', { requestId: id }).catch(() => {});
+    };
+    const release = async (ids) => { for (const id of ids.splice(0)) await cdp('Fetch.continueRequest', { requestId: id }).catch(() => {}); };
+    sock.on('message', onPaused);
+    await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/api/hosts*', requestStage: 'Request' }] });
+    try {
+      await evalJs('app._nsHosts = null; true'); // the landing's own record (an earlier open left one)
+      await openNs();
+      const t0 = Date.now(); while (!held.list.length && Date.now() - t0 < 5000) await sleep(20);
+      await evalJs(`(() => { const s = document.getElementById('input-host'); if (![...s.options].some((o) => o.value === ${JSON.stringify(hid)})) s.add(new Option('my-mac (me@mac.example.test)', ${JSON.stringify(hid)})); s.value = ${JSON.stringify(hid)}; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+      await realClick('#input-cwd'); await sleep(300);
+      const premise = { listHeld: held.list.length, landedBeforePick: await evalJs(`(app._nsHosts || []).some((h) => h.id === ${JSON.stringify(hid)})`) };
+      await release(held.list);
+      const landed = await waitFor(`(app._nsHosts || []).some((h) => h.id === ${JSON.stringify(hid)})`, 5000);
+      await sleep(200); await release(held.verdict);
+      await cdp('Fetch.disable'); await release(held.verdict);
+      const said = await waitFor(`(document.querySelector('#input-cwd').closest('[data-state]')?.dataset.state === 'unreachable') && (document.querySelector('#input-cwd').closest('[data-state]').querySelector('.pf-under')?.textContent || '').includes(${JSON.stringify(words)})`, 6000);
+      const foot = await evalJs(`document.getElementById('ns-foot-info').innerText`);
+      const host = await evalJs(`document.getElementById('input-host').value`);
+      return { premise: { ...premise, landed, order: [...new Set(order)] }, said, host: host === hid ? 'my-mac' : (host || 'This machine'), foot };
+    } finally { sock.off('message', onPaused); await cdp('Fetch.disable').catch(() => {}); }
+  };
   // the owner's sequence: a conversation on Antigravity, then the next dialog (F1 + F2); the inverse (F3)
   const ownerSequence = async (tag) => {
     const out = {};
@@ -1134,6 +1169,7 @@ try {
 
   // ═══ I a paired machine that cannot be reached: the refusal in the field, the hub lives ══════════════════════════
   console.log('I the host row with a machine that cannot be reached (lane hub-dies-dead-ssh-host)');
+  let iHost = null, iWords = null; // I6's machine + words, for the RED CONTROL's run of the same leg
   {
     const add = await (await fetch(`http://127.0.0.1:${PORT}/api/hosts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'my-mac', user: 'me', host: 'mac.example.test', port: 22 }) })).json();
     const hid = add.id;
@@ -1160,6 +1196,11 @@ try {
     const next = await fetch(`http://127.0.0.1:${PORT}/api/home`).then((r) => r.status, (e) => 'NO ANSWER ' + e.message);
     check('I5 the hub answers the next request', next === 200, next);
     await evalJs('app.hideDialogs(); true');
+    const h6 = await heldPick(hid, WORDS);
+    check('I6 premise: the machine list was held until after the pick, the machine\'s answers until after the list landed', h6.premise.listHeld >= 1 && !h6.premise.landedBeforePick && h6.premise.landed, h6.premise);
+    check('I6 a machine picked while the list is in flight STAYS picked when it lands — the field says «my-mac cannot be reached — …» and the footer refuses with the same words (the runner\'s I1 / I2)', h6.host === 'my-mac' && h6.said && h6.foot.includes('Cannot create yet: ' + WORDS), h6);
+    iHost = hid; iWords = WORDS;
+    await evalJs('app.hideDialogs(); true');
   }
 
   // ═══ RED CONTROL: the base's open order, from a patched copy of today's app.js (one esbuild) ═══════════════════════
@@ -1173,8 +1214,10 @@ try {
         "    this._fillBrowserProfileRow(document.getElementById('input-task')?.value || ''); updateAcctRow(); document.getElementById('input-backend').value = b; this._applySessionBackendOptions(b, { applyDefaults: true });\n"],
       ["    if (hostSel) hostSel.value = hostId || '';\n", ''], // the base set the machine only when the list landed…
       ["        if (hostSel.value !== was) this._refillNewSessionRows(); // the machine landed only now — a programmatic set fires no `change`\n", ''], // …and its rows never followed
+      // ci-355-red (I6): the .355 landing put the open's machine back over the person's pick
+      ["        hostSel.value = this._nsHostPicked ? was : (hostId || '');\n        if (hostSel.selectedIndex < 0) hostSel.value = hostId || '';\n", "        hostSel.value = hostId || '';\n"],
     ];
-    check('the three edits the control makes are each spelled exactly once in app.js', EDITS.every(([a]) => src.split(a).length === 2), EDITS.map(([a]) => src.split(a).length - 1));
+    check('the four edits the control makes are each spelled exactly once in app.js', EDITS.every(([a]) => src.split(a).length === 2), EDITS.map(([a]) => src.split(a).length - 1));
     fs.writeFileSync(A, EDITS.reduce((x, [a, b]) => x.replace(a, b), src));
     const esbuild = path.join(repo, 'node_modules', '.bin', 'esbuild');
     const rebuild = () => execFileSync(esbuild, ['src/client.js', '--bundle', '--outfile=public/bundle.js', '--format=iife', '--platform=browser', '--target=es2020', '--loader:.css=css', '--minify', '--log-level=error'], { cwd: wt, stdio: 'ignore' });
@@ -1189,6 +1232,11 @@ try {
     await evalJs(`(() => { const f = window.fetch; window.fetch = (u, x) => (String(u) === '/api/hosts' ? Promise.resolve(new Response(JSON.stringify({ hosts: [{ id: 'h-lane', name: 'lanebox', user: 'lane', host: 'lanebox.invalid', transport: 'ssh' }] }), { headers: { 'Content-Type': 'application/json' } })) : f(u, x)); return true; })()`);
     const g = await machineSequence();
     check('CONTROL G1 the base: an open on a machine keeps THIS machine\'s words after the list lands', g.g1.host === 'h-lane' && g.g1.label === 'Subscription (Pro/Max login)', g.g1);
+    if (iHost) {
+      await reboot(); // the G leg's fetch stub off: the real machine list, held by CDP as in I6
+      const c6 = await heldPick(iHost, iWords);
+      check('CONTROL I6 the base: the same held order loses the pick — This machine, «Choose a folder first», never the machine\'s words', c6.premise.listHeld >= 1 && !c6.premise.landedBeforePick && c6.premise.landed && c6.host === 'This machine' && !c6.said && /Choose a folder first/.test(c6.foot), c6);
+    } else check('CONTROL I6 ran (the I leg gave it its machine)', false);
     fs.writeFileSync(A, src);
     fs.copyFileSync(path.join(repo, 'public', 'bundle.js'), path.join(wt, 'public', 'bundle.js'));
     await reboot();

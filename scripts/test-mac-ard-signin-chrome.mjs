@@ -18,6 +18,11 @@
 // window opened, so its first word is whatever the connect gate left — 连接中… when the gate answered first, 正在启动桌面… when it
 // had not (a loaded runner) — and the old `slice(1)` read the gate's own 连接中… as a re-ask. §3 holds the gate until the record
 // is armed (that order, always) and judges "never 连接中… again" from the sign-in on; RED CONTROL: the old predicate.
+// ci-355-red (the 2.369.355 runner: the control read ["连接中…","正在登录…",…]): ARMED = the record holds its first word. WATCH
+// only STARTS it — its first look polls on 5 ms timers until the chip exists — and the gate used to answer the moment its POST
+// arrived, so on a loaded page the answer outran that first look. §3 now holds the gate until the record's first word is in;
+// §3b starves the first look (400 ms) and runs both release rules: on the POST's arrival ⇒ 连接中… first (the runner's
+// record); on the armed record ⇒ 正在启动桌面… first.
 // PNGs (when `--shots <dir>`): signin.png, connected.png, failed.png (desk 1100), phone.png (390).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -250,23 +255,28 @@ async function page(w, h, url) {
 const M = { hostId: 'mac-a', label: 'MacBook', code: 'desktop_ready', auth: 'ard', setup: 'darwin', desktop: true };
 const STATUS = '.vs-win[data-type="machine-desktop"] .desktop-status';
 // the status chip's every word, in order (a MutationObserver from the window's first paint)
-const WATCH = `(() => { window.__st = []; const go = () => { const s = document.querySelector(${JSON.stringify(STATUS)}); if (!s) return setTimeout(go, 5); window.__st.push(s.textContent); new MutationObserver(() => { if (window.__st[window.__st.length - 1] !== s.textContent) window.__st.push(s.textContent); }).observe(s, { childList: true, characterData: true, subtree: true }); }; go(); return true; })()`;
+const watchJs = (firstLookMs = 0) => `(() => { window.__st = []; const go = () => { const s = document.querySelector(${JSON.stringify(STATUS)}); if (!s) return setTimeout(go, 5); window.__st.push(s.textContent); new MutationObserver(() => { if (window.__st[window.__st.length - 1] !== s.textContent) window.__st.push(s.textContent); }).observe(s, { childList: true, characterData: true, subtree: true }); }; ${firstLookMs ? `setTimeout(go, ${firstLookMs})` : 'go()'}; return true; })()`;
+const WATCH = watchJs();
 const press = (text) => `(() => { const b = [...document.querySelectorAll('#machine-desktop-dialog button')].find((x) => x.textContent === ${JSON.stringify(text)}); if (!b) return false; b.click(); return true; })()`;
 const typeSignIn = (user, pass) => `(() => { const f = document.querySelector('#machine-desktop-signin form'); if (!f) return false; const i = f.querySelectorAll('input'); i[0].value = ${JSON.stringify(user)}; i[1].value = ${JSON.stringify(pass)}; f.requestSubmit(); return true; })()`;
 const statusText = `document.querySelector(${JSON.stringify(STATUS)})?.textContent || ''`;
 const deskPixel = `(() => { const c = document.querySelector('.vs-win[data-type="machine-desktop"] canvas'); if (!c || !c.width) return null; return [c.width, c.height, ...c.getContext('2d').getImageData(20, 20, 1, 1).data.slice(0, 3)]; })()`;
-async function openAndAsk(p, { holdGate = false } = {}) {
+async function openAndAsk(p, { holdGate = false, firstLookMs = 0, releaseOnArrival = false } = {}) {
   if (holdGate) ghold.on = true;
   await p.ev('window.__openApps(), window.__open(' + JSON.stringify(M) + '), true');
   await p.until(`!!document.querySelector('#machine-desktop-dialog')`);
   const before = await p.ev(`[document.querySelectorAll('.dialog-overlay').length, !!document.getElementById('desktop-launch-dialog'), !!document.getElementById('machine-desktop-dialog')]`);
   const pressed = await p.ev(press(Z('Open its desktop → Desktop'))); // lane desktop-v2-entry: the dialog's link to the Desktop (it still opens the window at once)
   const after = await p.ev(`[document.querySelectorAll('.dialog-overlay').length, !!document.getElementById('desktop-launch-dialog'), !!document.getElementById('machine-desktop-dialog'), document.querySelectorAll('.vs-win[data-type="machine-desktop"]').length]`);
-  await p.ev(WATCH);
-  let held = 0;
-  if (holdGate) { const t0 = Date.now(); while (!ghold.held.length && Date.now() - t0 < 10000) await sleep(50); held = ghold.held.length; gRelease(); } // the record is armed; the gate answers now
+  await p.ev(firstLookMs ? watchJs(firstLookMs) : WATCH);
+  let held = 0, armed = null;
+  if (holdGate) {
+    const t0 = Date.now(); while (!ghold.held.length && Date.now() - t0 < 10000) await sleep(50); held = ghold.held.length;
+    if (!releaseOnArrival) armed = (await p.until('window.__st.length > 0', 10000)) ? await p.ev('window.__st[0]') : null; // the record ARMED (its first word in)
+    gRelease(); // the gate answers now
+  }
   const asked = await p.until(`!!document.querySelector('#machine-desktop-signin form input[type=password]')`, 15000);
-  return { before, pressed, after, asked, held };
+  return { before, pressed, after, asked, held, armed };
 }
 const closeWins = (p) => p.ev(`(() => { for (const id of [...window.__wm.windows.keys()]) window.__wm.closeWindow(id); document.getElementById('machine-desktop-signin')?.remove(); return true; })()`);
 
@@ -308,7 +318,7 @@ console.log('§3 a Mac that never answers the sign-in ⇒ the named status with 
   ard.st.mode = 'silent';
   const r = await openAndAsk(desk, { holdGate: true });
   ok(r.asked, 'the sign-in is asked again for the second window');
-  ok(r.held === 1, 'its connect gate was held until the status record was armed (the loaded runner\'s order, every run)', r.held);
+  ok(r.held === 1 && r.armed === Z('Starting desktop…'), `its connect gate was held until the status record was ARMED — its first word in, ${Z('Starting desktop…')} (the loaded runner's order, every run)`, { held: r.held, armed: r.armed });
   const t0 = Date.now();
   await desk.ev(typeSignIn(USER, PASS));
   ok(await desk.until(`${JSON.stringify(Z('Signing in…'))} === (${statusText})`, 5000), `${Z('Signing in…')} while the Mac is silent`, await desk.ev(statusText));
@@ -323,6 +333,17 @@ console.log('§3 a Mac that never answers the sign-in ⇒ the named status with 
   ok(st3[0] === Z('Starting desktop…') && st3.slice(1).includes(Z('Connecting…')), 'RED CONTROL (the old predicate): a record armed while the gate was out starts at 正在启动桌面…, and "everything after its first word" counts the gate\'s own 连接中… as a re-ask', st3);
   await desk.shot('failed.png', '.vs-win');
   await closeWins(desk);
+}
+
+console.log('§3b the armed moment, proven: the record\'s first look starved 400 ms (a loaded page), the gate held both ways');
+{
+  ard.st.mode = 'silent';
+  const early = await openAndAsk(desk, { holdGate: true, firstLookMs: 400, releaseOnArrival: true });
+  await sleep(300); const stE = await desk.ev('window.__st'); await closeWins(desk);
+  ok(early.held === 1 && stE[0] === Z('Connecting…') && !stE.includes(Z('Starting desktop…')), `RED CONTROL (the gate answered on its POST's arrival — §3's old rule): the starved record begins at ${Z('Connecting…')}, the runner's record`, stE);
+  const bounded = await openAndAsk(desk, { holdGate: true, firstLookMs: 400 });
+  await sleep(300); const stB = await desk.ev('window.__st'); await closeWins(desk);
+  ok(bounded.held === 1 && bounded.armed === Z('Starting desktop…') && stB[0] === Z('Starting desktop…') && stB.includes(Z('Connecting…')), `…the gate held until the record is armed: the same starved record begins at ${Z('Starting desktop…')}, then ${Z('Connecting…')}`, stB);
 }
 await desk.close();
 

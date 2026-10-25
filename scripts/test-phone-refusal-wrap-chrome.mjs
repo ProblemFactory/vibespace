@@ -12,7 +12,9 @@
 //     real New Session sheet = the static #dialog-overlay; a tall confirm = createModalShell) it stands in the room the dialog
 //     made — off every row of the dialog — and is painted on top at its centre; its ✕ ≥ 44 × 44; plain words, the plug SVG
 //   ③ ✕ (#mobile-nav-close, a real tap) on the running conversation ⇒ «Closed the window — the conversation keeps running» ONCE
-//   ④ «a⏎b⏎c» sent from the composer ⇒ the user bubble holds two <br> (three lines); the agent's «one⏎two» stays one line
+//   ④ «a⏎b⏎c» sent from the composer ⇒ the user bubble's paragraph shows THREE line boxes (innerText «a⏎b⏎c») and holds NO
+//     <br> — CSS pre-wrap on the user's own paragraph (ci-355-red: a <br> per line is a LineBreak + a StaticText + 2 inline
+//     text boxes in the accessibility tree, the .355 runner's test-ax-budget red); the agent's «one⏎two» stays one line
 //   ⑤ the model chip's picker: inside the viewport under the top bar, it SCROLLS (a finger drag moves scrollTop), and its
 //     first row, its current model and its last row each come into view
 // PNGs: PHONE_WRAP_PNG_DIR (default: the scratch root) <tree>-<w>x<h>-<leg>.png. Requires google-chrome (SKIP without).
@@ -92,7 +94,7 @@ const CONTROL = [
   ['src/lib/utils.js', '  _placeToastStack(); _queueToastPlace();', ''],
   ['src/lib/sidebar-mounts.js', "showToast(said + ' — ' + tr('to open it here, use the plug button on its row under Remote'), { icon: MI.ports });", "showToast(tr('New port on \"{name}\": {ports} — 🔌 on its machine row forwards it', { name: msg.hostId === '__local__' ? tr('This machine') : name, ports }));"],
   ['src/lib/window.js', '    if (said) sayClosedKeepsRunning(said);', ''],
-  ['src/lib/chat-renderers.js', '${this.renderUserMarkdown(b.text)}', '${this.renderMarkdown(b.text)}'],
+  ['public/chat.css', '.chat-msg-user .chat-text p { white-space: pre-wrap; }\n', ''],
   ['public/chat.css', 'min-width: 130px; overflow-x: hidden;', 'min-width: 130px; overflow: hidden;'],
   ['public/chat.css', '  max-height: var(--dd-room, none); overflow-y: auto; overscroll-behavior: contain;', ''],
 ];
@@ -248,9 +250,11 @@ const runTree = async (label, srv) => {
     await waitFor(`document.querySelectorAll('.chat-view .chat-msg-assistant').length > 0`, 8000); await sleep(400);
     const bub = await evalJs(`(() => { const m = [...document.querySelectorAll('.chat-view .chat-msg-user')].filter((x) => x.textContent.includes('a${w}')).pop(); if (!m) return null; const tx = m.querySelector('.chat-text');
       const ag = [...document.querySelectorAll('.chat-view .chat-msg-assistant .chat-text')].pop();
-      return { br: tx.querySelectorAll('br').length, lines: tx.innerText.split('\\n').filter(Boolean), html: tx.innerHTML.slice(0, 160), agentBr: ag ? ag.querySelectorAll('br').length : null, agent: ag ? ag.innerText.trim() : null }; })()`);
-    want('④ «a⏎b⏎c» sent ⇒ the bubble holds two <br> — three lines, as typed', !!bub && bub.br === 2 && bub.lines.join('|') === `a${w}|b|c`, { bub, before });
-    if (!RED) check(`${V} ④ the agent's «one⏎two» keeps the markdown convention (one line, no <br>)`, !!bub && bub.agentBr === 0 && bub.agent === 'one two', bub);
+      const boxes = (el) => { if (!el) return null; const rg = document.createRange(); rg.selectNodeContents(el); return new Set([...rg.getClientRects()].filter((q) => q.width > 0).map((q) => Math.round(q.top))).size; };
+      const p = tx.querySelector('p');
+      return { boxes: boxes(p), br: tx.querySelectorAll('br').length, lines: tx.innerText.split('\\n').filter(Boolean), ws: p ? getComputedStyle(p).whiteSpace : null, html: tx.innerHTML.slice(0, 160), agentBoxes: boxes(ag && ag.querySelector('p')), agentBr: ag ? ag.querySelectorAll('br').length : null, agent: ag ? ag.innerText.trim() : null }; })()`);
+    want('④ «a⏎b⏎c» sent ⇒ the bubble shows it as typed — THREE line boxes, innerText «a⏎b⏎c», and not one <br> node', !!bub && bub.boxes === 3 && bub.lines.join('|') === `a${w}|b|c` && bub.br === 0, { bub, before });
+    if (!RED) check(`${V} ④ the agent's «one⏎two» keeps the markdown convention (one line box, no <br>)`, !!bub && bub.agentBr === 0 && bub.agentBoxes === 1 && bub.agent === 'one two', bub);
 
     // ③ ✕ ON THE RUNNING CONVERSATION (P2-2)
     await clearToasts();

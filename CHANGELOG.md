@@ -23,6 +23,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a phone, notes appear above the message box or under an open dialog’s title instead of covering them, and their ✕ is easier to tap.
 - A message you send with line breaks keeps them in the chat.
 - The model menu in a chat’s status bar now fits on the screen and scrolls, so Effort and the model lock can always be reached.
+- In New Session, a machine you pick right after the dialog opens now stays picked when the list of machines finishes loading.
 
 ## 2.369.354 — 2026-10-25
 

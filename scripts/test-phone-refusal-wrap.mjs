@@ -8,8 +8,9 @@
 //   ② PURE taskbar.js `closeKeepsWord`: a running conversation's (or shell's) window close says it keeps running; an
 //      ended one / a non-session window says nothing; the window menu's Close of a running session reads apart from its
 //      Terminate (its own words, not red)
-//   ③ marked `breaks: true` is the USER's road (renderUserMarkdown, the user bubble + a For-you reply): «a⏎b⏎c» = two <br>;
-//      the agent's road (renderMarkdown) keeps the markdown convention; CONTROL: the base road gives none
+//   ③ what you typed keeps its line breaks through CSS, never a <br> (ci-355-red): the user bubble + a For-you reply take the
+//      ONE markdown road (renderMarkdown — «a⏎b⏎c» stays `<p>a\nb\nc</p>`) and chat.css pre-wraps the USER's paragraphs only;
+//      CONTROL: marked `breaks: true` (P2-15's first cut) writes two <br> — 4 accessibility nodes per break, test-ax-budget's fence
 //   ④ PURE chat-status-bar.js `dropdownRoom`: the room above a status-bar chip under the container / the phone's top bar;
 //      CONTROL: the walk's 621 px picker over a 529 px chip top stands at y −96 unbounded
 //   ⑤ the wiring: the stylesheet rules (no sideways door in the New Session footer, the 44 px ✕, --dd-room), the port
@@ -58,14 +59,15 @@ ok(/const said = this\._app \? closeKeepsWord\(sessionForWin\(this\._app, win\)\
 ok(/_closedSaid\.el\.isConnected && now - _closedSaid\.at < 1500/.test(tb) && /t\('Closed \{n\} windows — what ran in them keeps running', \{ n: _closedSaid\.n \}\)/.test(tb), 'ONE toast per close burst: a group\'s Close re-words the toast already up («Closed {n} windows — …»)');
 
 console.log('③ what you typed is what the bubble shows');
-const cr = read('src/lib/chat-renderers.js');
-ok(/const USER_MARKDOWN = Object\.freeze\(\{ breaks: true \}\);/.test(cr) && /renderUserMarkdown\(text\) \{[\s\S]{0,200}sanitizeHtml\(this\._fileHrefs\(marked\.parse\(text \|\| '', USER_MARKDOWN\)\)\)/.test(cr), 'renderUserMarkdown = marked with breaks: true, through the ONE sanitizer (and the _fileHrefs road)');
-ok(/if \(b\.type === 'text'\) return `<div class="chat-text">\$\{this\.renderUserMarkdown\(b\.text\)\}<\/div>`;/.test(cr) && /<div class="chat-text">\$\{this\.renderUserMarkdown\(r\.reply \|\| ''\)\}<\/div>/.test(cr), 'the user bubble\'s text blocks and a For-you reply\'s body take the user road');
-ok(/let html = sanitizeHtml\(this\._fileHrefs\(marked\.parse\(text \|\| ''\)\)\);\n\s*return this\._markdownTail\(text, html\);/.test(cr), 'the agent\'s road (renderMarkdown) is unchanged — a single newline stays a space');
-const user = marked.parse('a\nb\nc', { breaks: true }), agent = marked.parse('a\nb\nc');
-ok((user.match(/<br>/g) || []).length === 2, '«a⏎b⏎c» on the user road: two <br>', user);
-ok(!/<br>/.test(agent) && /<p>a\nb\nc<\/p>/.test(agent), 'CONTROL: the base road (no breaks) — `<p>a\\nb\\nc</p>`, the walk\'s one paragraph', agent);
-ok((marked.parse('```\nx\ny\n```', { breaks: true }).match(/<br>/g) || []).length === 0, 'a fenced block keeps its newlines as newlines (breaks touches prose only)');
+const cr = read('src/lib/chat-renderers.js'), chatCss = read('public/chat.css');
+ok(/if \(b\.type === 'text'\) return `<div class="chat-text">\$\{this\.renderMarkdown\(b\.text\)\}<\/div>`;/.test(cr) && /<div class="chat-text">\$\{this\.renderMarkdown\(r\.reply \|\| ''\)\}<\/div>/.test(cr), 'the user bubble\'s text blocks and a For-you reply\'s body take the ONE markdown road (renderMarkdown)');
+ok(!/renderUserMarkdown|breaks: true/.test(cr), 'no second markdown road and no `breaks: true` in chat-renderers.js (a <br> per line grew the accessibility tree)');
+const rules = chatCss.split('\n').filter((l) => /white-space: pre-wrap/.test(l) && /\.chat-text/.test(l));
+ok(rules.length === 1 && rules[0] === '.chat-msg-user .chat-text p { white-space: pre-wrap; }', 'chat.css: ONE pre-wrap rule over a .chat-text, scoped to the USER\'s paragraphs (the agent\'s markdown, lists, code untouched)', rules);
+const para = marked.parse('a\nb\nc');
+ok(!/<br>/.test(para) && /<p>a\nb\nc<\/p>/.test(para), '«a⏎b⏎c» on the ONE road: `<p>a\\nb\\nc</p>` — the two newlines stay in the paragraph\'s text for pre-wrap to show (no node per line)', para);
+ok(/<ul>\n<li>a<\/li>\n<li>b<\/li>\n<\/ul>/.test(marked.parse('- a\n- b')) && /<pre><code>x\ny\n<\/code><\/pre>/.test(marked.parse('```\nx\ny\n```')), 'a list is still a list and a fence still a <pre> (no paragraph — the rule never reaches them)');
+ok((marked.parse('a\nb\nc', { breaks: true }).match(/<br>/g) || []).length === 2, 'CONTROL: marked `breaks: true` (P2-15\'s first cut, 2.369.355) writes two <br> for the same words');
 
 console.log('④ the room above a status-bar chip (dropdownRoom)');
 const { dropdownRoom } = SB;

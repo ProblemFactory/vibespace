@@ -1922,6 +1922,7 @@ class App {
     const b = backend || 'claude';
     const hostSel = document.getElementById('input-host');
     if (hostSel) hostSel.value = hostId || '';
+    this._nsHostPicked = false; // set by the person's own pick in the host row (below) — the list's landing keeps it
     // Task Groups — a new session can start "in" SEVERAL (lane new-session-form: the right column's 任务组 chips, in the
     // order picked; the created session is spawned into all of them — taskIds — and bound to each). Pre-picked when
     // opened from a group; a folder the groups give FOLLOWS them until the person edits it (new-session-model folderOn*).
@@ -2060,6 +2061,7 @@ class App {
       // stored freshest updater. (A backend pick is wired once at setup: applyBackend.)
       this._acctListenersWired = true;
       document.getElementById('input-host')?.addEventListener('change', () => this._refillNewSessionRows()); // identity r3: a host pick hides the profile row
+      document.getElementById('input-host')?.addEventListener('change', () => { this._nsHostPicked = true; }); // ci-355-red: a programmatic set fires no `change` — this is the person's pick
       document.getElementById('input-account')?.addEventListener('change', () => this._refreshModelMenu?.()); // q-053 §3: the menu follows the account's provider
     }
     this.applyBackend(b, { why: 'open' }); // THIS open's backend: the session options, the account row, the profile row, the model menu
@@ -2075,7 +2077,10 @@ class App {
           o.value = h.id; o.textContent = h.transport === 'dial' ? `${h.name} (${t('device')})` : `${h.name} (${h.user}@${h.host})`;
           hostSel.appendChild(o);
         }
-        hostSel.value = hostId || '';
+        // a machine the person picked while this list was in flight STAYS picked (ci-355-red: the landing put the open's machine
+        // back — a pick in the first moments became This machine, its field and footer with it); gone from the list ⇒ the open's
+        hostSel.value = this._nsHostPicked ? was : (hostId || '');
+        if (hostSel.selectedIndex < 0) hostSel.value = hostId || '';
         if (hostSel.value !== was) this._refillNewSessionRows(); // the machine landed only now — a programmatic set fires no `change`
         // both terminal and chat supported on remote hosts (chat = ssh -T pipe)
         // switching host re-sources the path list + autocomplete target
