@@ -97,6 +97,8 @@ console.log('⑥ wiring pins');
     'the sheet reads the model — one count, one set of words (no second count in the bundle)');
   ok(/const menu = showContextMenu\(/.test(sh) && /menu\.classList\.add\('mobile-sheet'\)/.test(sh) && !/createModalShell|document\.createElement\('dialog'\)/.test(sh),
     'the sheet is the product\'s own (showContextMenu + the phone\'s .mobile-sheet) — no new component');
+  ok(/else placeOverColumn\(menu, ar\);/.test(sh) && /const w = Math\.max\(0, Math\.min\(480, right - \(colL \+ 4\)\)\);/.test(sh) && /menu\.style\.width = \(w \/ Z\) \+ 'px'; menu\.style\.minWidth = '0'; menu\.style\.maxWidth = 'none';/.test(sh),
+    'the regular class places the sheet OVER THE CONVERSATION COLUMN with an explicit width (≤ 480 px, the column\'s less 4 px a side) — never its rows\' max-content width (主开发\'s 8fda0ac8 defect: ~1790 px, off the left edge; the geometry is test-duo-layout ⑧\'s)');
   ok(/const ctl = new AbortController\(\);/.test(sh) && /\}, \{ signal: ctl\.signal \}\);/.test(sh) && /openCtl\?\.abort\(\);/.test(sh), 'the rows\' long-press listeners hang on the sheet\'s own AbortController (a reopen aborts the last)');
   ok(/const v = switchVerdict\(\{ from: dm\.activeDesktopId, to: r\.id, name: r\.name, rows: sheetRows\(app\) \}\);/.test(sh) && /if \(v\.act === 'refused'\) \{ showToast\(/.test(sh), 'a tap asks the verdict over the rows as they are NOW (a desktop deleted elsewhere is said, never switched to)');
   ok(/label: t\('Rename'\), action: \(\) => dm\._startRename\(desk\)/.test(sh) && /await dm\.deleteDesktop\(desk\.id\);/.test(sh), 'a long press = the manager\'s own Rename / Delete (its dialog; its delete moves the windows to the next desktop)');

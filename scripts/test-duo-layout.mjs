@@ -439,6 +439,13 @@ try {
     const DOOR = `(() => { const b = document.getElementById('mobile-nav-desktops'); if (!b) return null; const r = b.getBoundingClientRect(), bar = document.getElementById('mobile-nav').getBoundingClientRect(); const y = (s) => { const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().top) : null; }; const badge = b.querySelector('.mnav-badge');
       return { shown: getComputedStyle(b).display !== 'none' && r.width > 0, l: Math.round(r.left), t: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), barL: Math.round(bar.left), gapT: y('#mobile-nav .mnav-gap'), tasksT: y('#mobile-nav-dest-tasks'), badge: badge && !badge.classList.contains('hidden') ? badge.textContent : '', label: b.getAttribute('aria-label') }; })()`;
     const MENU = `(() => { const m = document.querySelector('.context-menu.mdesk-menu'); if (!m) return null; const b = m.getBoundingClientRect(); return { left: Math.round(b.left), right: Math.round(b.right), rows: [...m.querySelectorAll('.context-menu-item')].map((r) => ({ id: r.dataset.desktopId || null, active: r.classList.contains('active'), name: r.querySelector('.mdesk-name')?.textContent || '', count: r.querySelector('.mdesk-count')?.textContent || '', titles: r.querySelector('.mdesk-titles')?.textContent || '', h: Math.round(r.getBoundingClientRect().height) })) }; })()`;
+    /** THE SHEET'S GEOMETRY (主开发's defect on 8fda0ac8: at 951 the menu took its rows' max-content width — ~1790 px with long
+     *  titles — and ran off the LEFT edge; the content legs passed, nothing measured where it stood). */
+    const GEOM = `(() => { const m = document.querySelector('.context-menu.mdesk-menu'); if (!m) return null; const b = m.getBoundingClientRect(); const ws = document.getElementById('workspace').getBoundingClientRect();
+      const vis = (e) => { if (!e) return 0; const r = e.getBoundingClientRect(); return Math.max(0, Math.min(r.right, innerWidth, b.right) - Math.max(r.left, 0, b.left)); };
+      return { l: Math.round(b.left), r: Math.round(b.right), t: Math.round(b.top), btm: Math.round(b.bottom), w: Math.round(b.width), vw: innerWidth, vh: innerHeight, colL: Math.round(ws.left), colR: Math.round(ws.right),
+        names: [...m.querySelectorAll('.context-menu-item')].map((it) => { const n = it.querySelector('.mdesk-name'); return { text: n ? n.textContent : '', vis: Math.round(vis(n)), w: n ? Math.round(n.getBoundingClientRect().width) : 0 }; }) }; })()`;
+    const inside = (g, { col = false } = {}) => !!g && g.l >= 0 && g.r <= g.vw && g.t >= 0 && g.btm <= g.vh && (!col || (g.l >= g.colL && g.r <= g.colR && g.w <= 480)) && g.names.length >= 2 && g.names.every((n) => n.vis > 0 && n.vis >= Math.min(n.w, 40));
     const SHOWN = `(() => { const w = app.wm.windows.get(app.wm.activeWindowId); const el = w && w.element; const r = el && el.getBoundingClientRect(); const sb = document.getElementById('sidebar'); const sr = sb.getBoundingClientRect();
       return { desk: app.desktopManager.activeDesktopId, type: w ? w.type : null, onDesk: w ? w._desktopId : null, visible: !!el && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none', l: r ? Math.round(r.left) : null, w: r ? Math.round(r.width) : null, list: getComputedStyle(sb).display !== 'none' ? { l: Math.round(sr.left), w: Math.round(sr.width) } : null, badge: document.querySelector('#mobile-nav-desktops .mnav-badge')?.textContent || '' }; })()`;
     const d0 = await evalJs(DOOR);
@@ -447,6 +454,8 @@ try {
     const m0 = await evalJs(MENU);
     check('⑧ …a tap: a menu INTO the conversation column (left of the bar) — every desktop by name with its window count, the active one marked, then «New desktop»; 44 px rows',
       !!m0 && m0.right <= d0.barL && m0.rows.length === 3 && m0.rows[0].active && /\b2 windows/.test(m0.rows[0].count) && m0.rows[1].name === 'Desk B' && !m0.rows[1].active && /^1 window$/.test(m0.rows[1].count) && /New desktop/.test(m0.rows[2].name) && !m0.rows[2].id && m0.rows.every((r) => r.h >= 44), m0);
+    const g0 = await evalJs(GEOM);
+    check('⑧ …and WHERE it stands: inside the viewport AND over the conversation column (≤ 480 px, right of the list, left of the bar); every row\'s name visible on screen', inside(g0, { col: true }), g0);
     check('⑧ …each row\'s window titles under its name, greyed (the two conversations; the explorer)', /^Session \d.* · Session \d/.test(m0.rows[0].titles) && /vs-duo-layout-home|~|Files/.test(m0.rows[1].titles), m0.rows.map((r) => r.titles));
     { // a long press on a row = the desktop's own verbs (Rename · Delete — the switcher tab's long press)
       const at = await evalJs(`(() => { const r = document.querySelector('.mdesk-menu .context-menu-item[data-desktop-id="${deskB}"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
@@ -492,7 +501,8 @@ try {
     const c0 = await evalJs(`(() => { const b = document.getElementById('mobile-nav-desktops'); const r = b.getBoundingClientRect(); const nav = document.getElementById('mobile-nav').getBoundingClientRect(); return { shown: getComputedStyle(b).display !== 'none' && r.width >= 36 && r.height >= 36, inNav: r.top >= nav.top - 0.5 && r.bottom <= nav.bottom + 0.5 && r.right <= 382, badge: b.querySelector('.mnav-badge')?.textContent || '', toggle: getComputedStyle(document.getElementById('list-column-toggle')).display }; })()`);
     check('⑧ 382 (the cover, compact): the Desktops door on the top bar (≥ 36 px), badge «1»; the regular class\'s list ☰ not there', c0.shown && c0.inNav && c0.badge === '1' && c0.toggle === 'none', c0);
     await tap('#mobile-nav-desktops');
-    const m1 = await evalJs(MENU);
+    const m1 = await evalJs(MENU), g1 = await evalJs(GEOM);
+    check('⑧ 382: the sheet inside the viewport, every row\'s name visible', inside(g1), g1);
     check('⑧ …a tap: the phone\'s sheet under the bar lists both desktops with their counts + «New desktop»', !!m1 && m1.rows.length === 3 && m1.rows[0].active && m1.rows[1].name === 'Desk B' && /^1 window$/.test(m1.rows[1].count) && m1.left <= 10 && m1.right >= 372, m1);
     check('⑧ …Desk B\'s explorer is in its held record only (this page booted on the first desktop): its row says so', /1 not opened on this screen yet/.test(m1.rows[1].titles), m1.rows[1]);
     await tap(`.mdesk-menu .context-menu-item[data-desktop-id="${deskB}"]`);
@@ -504,6 +514,13 @@ try {
     check('⑧ …§6b guard 10: every desktop\'s noted window on show is a window OF that desktop (the switch\'s in-between noted none)', noted.length >= 1 && noted.every((x) => !x.wd || x.wd === x.d) && noted.some((x) => x.d === deskB), noted);
     await sleep(1100);
     await evalJs(`(async () => { await app.desktopManager.switchTo(${JSON.stringify(desk1)}); return 1; })()`); await sleep(1300);
+    await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
+    await device(669, 867); await settle(669);
+    await tap('#mobile-nav-desktops');
+    const g2 = await evalJs(GEOM), nav2 = await evalJs(`Math.round(document.getElementById('mobile-nav').getBoundingClientRect().bottom)`);
+    await shot('desktops-door-669.png');
+    check('⑧ 669 (the inner portrait): the menu under the bar lying over the conversation, inside the conversation column, every row\'s name visible', inside(g2, { col: true }) && g2.t >= nav2, { g2, nav2 });
+    await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
   }
   console.log('⑨ the ⧉ window list\'s «Other desktops» group (1280×800, a mouse) + THE DOOR CENSUS (every phone-chrome control that opens desktop rows)');
   {

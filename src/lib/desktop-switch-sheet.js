@@ -33,6 +33,24 @@ export function sheetRows(app) {
 
 let openCtl = null;
 
+/** The regular class: the sheet stands INSIDE the viewport over the conversation column (主开发's defect on 8fda0ac8 — it took
+ *  its rows' max-content width, ~1790 px with long titles, anchored at the bar's edge, and ran off the LEFT of the screen):
+ *  its width = the column's (less 4 px each side), at most 480 px; its right edge at the trailing bar's left edge (landscape)
+ *  or at the column's right under the bar lying over it (portrait); its top at the button's (clamped). The rows ellipsize. */
+export function placeOverColumn(menu, ar) {
+  const Z = uiScale(), nav = document.getElementById('mobile-nav');
+  const nr = nav?.getBoundingClientRect?.(), col = document.getElementById('workspace')?.getBoundingClientRect?.();
+  const vertical = !!nav && getComputedStyle(nav).flexDirection === 'column';
+  const colL = col && col.width ? Math.max(0, col.left) : 0, colR = col && col.width ? Math.min(innerWidth, col.right) : innerWidth;
+  const right = Math.min(colR, vertical && nr ? nr.left : innerWidth) - 4;
+  const w = Math.max(0, Math.min(480, right - (colL + 4)));
+  menu.style.width = (w / Z) + 'px'; menu.style.minWidth = '0'; menu.style.maxWidth = 'none';
+  menu.style.left = ((right - w) / Z) + 'px'; menu.style.right = '';
+  const h = menu.getBoundingClientRect().height;
+  const want = vertical ? ar.top : ar.bottom + 4;
+  menu.style.top = (Math.max(4, Math.min(want, innerHeight - h - 4)) / Z) + 'px'; menu.style.bottom = '';
+}
+
 /** Open the sheet from `anchor` (the nav's Desktops button). `onSwitch(id)` = the switch road (MobileNav.switchDesktop). */
 export function openDesktopSheet(app, anchor, { onSwitch } = {}) {
   const dm = app.desktopManager;
@@ -61,11 +79,7 @@ export function openDesktopSheet(app, anchor, { onSwitch } = {}) {
   const menu = showContextMenu(regular ? ar.left : 0, regular ? ar.top : 0, items);
   menu.classList.add('mdesk-menu');
   if (!regular) menu.classList.add('mobile-sheet'); // the phone's sheet under the nav (mobile-nav.js _sheet's own two lines)
-  else {
-    const Z = uiScale(), nav = document.getElementById('mobile-nav');
-    if (nav && getComputedStyle(nav).flexDirection === 'column') { menu.style.left = 'auto'; menu.style.right = ((innerWidth - ar.left + 8) / Z) + 'px'; }
-    else { menu.style.top = ((ar.bottom + 4) / Z) + 'px'; menu.style.bottom = ''; menu.style.left = 'auto'; menu.style.right = (Math.max(4, innerWidth - ar.right) / Z) + 'px'; }
-  }
+  else placeOverColumn(menu, ar);
   menu.querySelectorAll('.context-menu-item').forEach((el, i) => {
     const r = rows[i];
     if (!r) { el.classList.add('mdesk-new'); return; }
