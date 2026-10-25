@@ -4136,7 +4136,7 @@ class ChatView {
     const b = msg?.content?.[0];
     if (!live || !b || !b.autoOpen || this._loadingHistory || this._suspended) return;
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-    const verdict = quietOpenVerdict({ auto: true, phone: !!this.app.isMobile || window.innerWidth <= 768, setting: this.app.settings?.get('artifacts.autoOpenDocs') ?? true });
+    const verdict = quietOpenVerdict({ auto: true, phone: !!this.app.isMobile, setting: this.app.settings?.get('artifacts.autoOpenDocs') ?? true });
     if (verdict !== 'quiet') return;
     this._openArtifact(b, { quiet: true });
     let taught = true; try { taught = !!localStorage.getItem(TAUGHT_KEY); } catch { }

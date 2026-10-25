@@ -5,6 +5,7 @@ import { NATIVE_PRESS_SELECTOR, PRESS_CHROME_SELECTOR, effectiveUserSelect, poin
 import { enterSubmits } from './chat-enter-keys.js';
 import { arrivalVerdict } from '../sync-arrival.js'; // PURE: StateSync's arrival rule (lane statesync-last-arrival)
 import { VOICE_UI } from '../voice-focus.js'; // PURE: the voice UI outside every box — never an outside press (lane phone-tray-voice-done)
+import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
@@ -352,13 +353,94 @@ export function stripLegacyRecordToasts(heads) {
     return n;
   } catch { return 0; }
 }
+/** P2-1 (lane phone-refusal-wrap — the duo walk measured the centred strip, `bottom: taskbar + 14 px`, ON the phone composer's
+ *  row at 382×580, 594×368, 669×420 and 669×867, and over the bottom row of the Backup / Restore dialogs). PURE: WHERE THE
+ *  TOAST STACK STANDS on the phone / touch tier (`tier`) — never on the composer, never on an open modal's content.
+ *  A modal open ⇒ `{ room: true }`: the dialog makes ROOM for the stack under its head (an empty `.gt-room` as tall as
+ *  the stack) and the stack stands over it — the dialog's rows move down, none is covered. Else a composer on screen
+ *  (`composerTop`, viewport px) ⇒ `{ bottom }` = the stack's bottom edge `gap` px above it (layout px: ÷ `scale`). Else
+ *  null = the stylesheet's own place. The desktop tier and a stack anchored at the inbox button: null (as before). */
+export function toastSpot({ tier = false, anchored = false, modal = false, composerTop = null, vh = 0, scale = 1, gap = 8 } = {}) {
+  if (!tier || anchored) return null;
+  if (modal) return { room: true };
+  if (typeof composerTop === 'number' && Number.isFinite(composerTop) && composerTop > 0 && composerTop <= vh) return { bottom: (vh - composerTop + gap) / (scale || 1) };
+  return null;
+}
+const _toastTier = () => { try { return matchMedia(VC_PHONE_MEDIA).matches || isTouchDevice(); } catch { return false; } }; // int355: the phone paths' ONE media list (duo-build-1's law, test-viewport-class)
+/** the dialog of the topmost open app modal (createModalShell's overlay or the static #dialog-overlay), else null */
+function _openModalDialog() {
+  const ovs = [...document.querySelectorAll('.dialog-overlay')].filter((o) => !o.classList.contains('hidden') && o.getClientRects().length);
+  const ov = ovs[ovs.length - 1];
+  return ov ? [...ov.children].find((d) => d.classList.contains('dialog') && !d.classList.contains('hidden') && d.getClientRects().length) || null : null;
+}
+/** the highest composer on screen (a chat window's .chat-input-area), viewport px; null when none shows */
+function _composerTop() {
+  let top = null;
+  for (const el of document.querySelectorAll('.chat-input-area')) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height || r.bottom <= 0 || r.top >= window.innerHeight) continue;
+    if (top === null || r.top < top) top = r.top;
+  }
+  return top;
+}
+let _toastWatch = null, _toastPlaceQueued = false;
+const _queueToastPlace = () => {
+  if (_toastPlaceQueued) return;
+  _toastPlaceQueued = true;
+  const frame = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : (f) => setTimeout(f, 16);
+  frame(() => { _toastPlaceQueued = false; _placeToastStack(); });
+};
+/** Put the stack where toastSpot says; re-run (one frame later) whenever a toast comes or goes, a modal opens or closes
+ *  (a shell overlay added to / removed from <body>, the static #dialog-overlay's classes) or the viewport resizes.
+ *  A placement that cannot run (a page without the DOM it reads) leaves the stack where the stylesheet put it. */
+function _placeToastStack() {
+  try { _placeToastStackNow(); } catch { /* the toast still shows — in the stylesheet's place */ }
+}
+function _placeToastStackNow() {
+  const stack = document.getElementById('global-toasts');
+  const live = !!stack && stack.isConnected && stack.children.length > 0 && !stack.classList.contains('gt-anchored');
+  const dlg = live ? _openModalDialog() : null;
+  const spot = live ? toastSpot({ tier: _toastTier(), modal: !!dlg, composerTop: dlg ? null : _composerTop(), vh: window.innerHeight, scale: uiScale() }) : null;
+  let room = spot && spot.room ? dlg.querySelector(':scope > .gt-room') : null;
+  for (const r of document.querySelectorAll('.gt-room')) if (r !== room) r.remove();
+  if (!live || !spot) {
+    if (live) { stack.style.top = ''; stack.style.bottom = ''; }
+    if (!live && _toastWatch) { _toastWatch.disconnect(); _toastWatch = null; }
+    return;
+  }
+  if (!_toastWatch) {
+    _toastWatch = new MutationObserver(_queueToastPlace);
+    _toastWatch.observe(document.body, { childList: true });
+    const st = document.getElementById('dialog-overlay');
+    if (st) _toastWatch.observe(st, { attributes: true, attributeFilter: ['class'], subtree: true });
+  }
+  _toastWatch.observe(stack, { childList: true });
+  if (spot.room) {
+    if (!room) {
+      room = document.createElement('div');
+      room.className = 'gt-room';
+      room.setAttribute('aria-hidden', 'true');
+      const head = dlg.querySelector(':scope > .dialog-header, :scope > .ns-head');
+      if (head) head.after(room); else dlg.prepend(room);
+    }
+    room.style.height = (stack.offsetHeight + 12) + 'px';   // layout px, like offsetHeight
+    stack.style.bottom = 'auto';
+    stack.style.top = ((room.getBoundingClientRect().top + 6) / uiScale()) + 'px';
+    return;
+  }
+  stack.style.top = '';
+  stack.style.bottom = spot.bottom + 'px';
+}
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('resize', () => { if (document.getElementById('global-toasts')) _queueToastPlace(); });
 // `action: { label, run }` (split UX R5, 2026-09-23) = ONE button inside the
 // toast (Undo / Show side by side): a click runs it and dismisses the toast; an
 // action toast lives 5 s unless the user's toast-seconds setting says otherwise.
 // lane dialog-unsaved-guard: while an unsaved sheet's Save runs, an error the dialog's own save says (a toast) is ALSO the
 // sheet's reason — «Not saved: <the same words>» stays beside the choices after the toast fades
 let unsavedSaySink = null;
-export function showToast(message, { type = 'info', duration, action, actions, history = null } = {}) {
+// `icon` (lane phone-refusal-wrap) = an SVG string of OURS (a module constant — never words) drawn before the words: a
+// toast that names a control shows the control's own icon (UI convention: SVG, no emoji)
+export function showToast(message, { type = 'info', duration, action, actions, history = null, icon = '' } = {}) {
   if (unsavedSaySink && type === 'error') unsavedSaySink.push(String(message));
   let stack = document.getElementById('global-toasts');
   if (!stack) {
@@ -392,6 +474,7 @@ export function showToast(message, { type = 'info', duration, action, actions, h
   x.setAttribute('aria-label', 'Dismiss');
   x.textContent = '✕';
   x.onclick = (e) => { e.stopPropagation(); el.remove(); if (!stack.children.length) stack.remove(); };
+  if (icon) { const ic = document.createElement('span'); ic.className = 'global-toast-icon'; ic.innerHTML = String(icon); el.append(ic); }
   el.append(body);
   // `action` = one button; `actions` = several, in order (split tabs v2: Undo · Unsplit) — each runs once and closes the toast
   const acts = (Array.isArray(actions) ? actions : action ? [action] : []).filter((a) => a && typeof a.run === 'function');
@@ -407,6 +490,7 @@ export function showToast(message, { type = 'info', duration, action, actions, h
   _recordToast(history && typeof history.m === 'string' ? history.m : message, type, history && history.ref);   // a record's toast keeps its head + a ref, never its words (above)
   // Cap the stack so a burst of errors doesn't fill the screen
   while (stack.children.length > 4) stack.firstChild.remove();
+  _placeToastStack(); _queueToastPlace();   // P2-1: off the phone composer / an open modal's rows — now, and once the act that showed it is done
   const secs = Number(_toastCfg.getSeconds?.());
   const ttl = duration ?? (secs > 0 ? secs * 1000 : (type === 'error' ? 6000 : (acts.length ? 5000 : 3000)));
   setTimeout(() => {
@@ -1402,7 +1486,7 @@ export function getUiPref(key, def = 100) {
   return Number.isFinite(v) ? v : def;
 }
 export function applyUiPrefs() {
-  const mobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+  const mobile = window.matchMedia && window.matchMedia(VC_PHONE_MEDIA).matches;
   const sp = Math.max(UI_SCALE_MIN, Math.min(UI_SCALE_MAX, getUiPref('vibespace.uiScale')));
   const fp = Math.max(UI_FONT_MIN, Math.min(UI_FONT_MAX, getUiPref('vibespace.uiFontScale')));
   const s = mobile ? 1 : sp / 100;

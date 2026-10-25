@@ -71,7 +71,8 @@ export function installUserTodos(app) {
   // THE PHONE'S FIRST SCREEN (lane phone-first-screen): the SAME bands drawn as a PAGE (#phone-home) — while it is on show
   // it holds its own slots, folds, notice order and per-band open ids (the popup's rules: null on every show); hidden, it
   // keeps nothing but the drafts. Phone only (null on a desktop — nothing below runs there).
-  const home = app.isMobile ? document.getElementById('phone-home') : null;
+  // (lane duo-build-1: wired on every page — a desktop boot folded to the phone has it — and shown only while app.isMobile)
+  const home = document.getElementById('phone-home');
   const H = { layout: null, bands: null, open: new Map(), noticesOpen: false, noticeOrder: null };
   // NOTICES BY ORIGIN (B-328d): the filter is per DEVICE (like the language) and
   // survives a close; the group ORDER is append-only while the popup is open
@@ -693,6 +694,64 @@ export function installUserTodos(app) {
   app.openMiniInbox = openMiniInbox;
   app._syncInboxBadges = scheduleBadges;
 
+  // THE LIST COLUMN'S INLINE ANSWERS (lane duo-build-1 — SPEC-v3 §2.3: a question is a property of its conversation's
+  // row, answerable where it appears): the regular class's list rows (src/lib/sidebar-column.js) ask here for their
+  // session's open items and get THE mini inbox's rows — the same miniInboxEntries, the same reconcileRows, the same
+  // rowClick (a chip answers, Reply opens the box, ✓ / ✕ resolve). Every row asked once is repainted on each snapshot
+  // until it leaves the DOM; a press inside never reaches the row (selecting the conversation is the row's own tap).
+  const colAsks = new Set();
+  const keysForRow = (s) => {
+    if (!s) return null;
+    const keys = [];
+    const add = (k) => { if (k && typeof k === 'string' && !keys.includes(k)) keys.push(k); };
+    if (s.webuiId) add(model.keyForWebui(s.webuiId));
+    const bsid = s.backendSessionId || s.claudeSessionId || s.sessionId;
+    if (bsid && !String(bsid).startsWith('sess-')) add(`${s.backend || 'claude'}:${bsid}`);
+    if (s.webuiId) add(`webui:${s.webuiId}`);
+    return keys.length ? keys : null;
+  };
+  const paintAsks = (box) => {
+    const keys = keysForRow(box._utRow);
+    // a FRESH layout on every paint (never the mini inbox's append-only one): an answered question leaves the row — the
+    // row becomes an ordinary row again (SPEC-v3 §2.3)
+    const { entries } = keys ? miniInboxEntries(null, todos, keys) : { entries: [] };
+    box.hidden = !entries.length;
+    let rows = box.querySelector(':scope > .ut-mini-rows');
+    if (!entries.length) { if (rows) rows.replaceChildren(); return 0; }
+    if (!rows) { rows = mk('div', 'ut-mini-rows'); box.appendChild(rows); }
+    reconcileRows(rows, entries, null, miniCtx);
+    return entries.length;
+  };
+  app.sessionAsks = {
+    /** How many open items this sidebar row's session holds (the column ranks those rows first). */
+    count: (s) => { const keys = keysForRow(s); return keys ? miniInboxEntries(null, todos, keys).entries.length : 0; },
+    /** Paint the session's open items into `box` (and keep it painted on every snapshot while it is in the DOM). */
+    render: (box, s) => {
+      box._utRow = s;
+      if (!box._utWired) {
+        box._utWired = true;
+        box.classList.add('ut-col-asks');
+        box.addEventListener('click', (e) => {
+          e.stopPropagation(); // the row's own tap selects the conversation; a press in its question answers it
+          if (fyPress(e, () => { })) return;
+          if (e.target.closest('.ut-detail-exp')) return;
+          const item = e.target.closest('.ut-item');
+          if (item) rowClick(e, item, { mini: true });
+        });
+        box.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && !e.isComposing) { const b = e.target?.closest?.('.ut-reply'); if (b) { foldBox(b); e.preventDefault(); e.stopPropagation(); } return; }
+          replyKeys(e);
+        });
+        box.addEventListener('input', growOnInput);
+        box.addEventListener('contextmenu', (e) => { e.stopPropagation(); rowMenu(e); });
+      }
+      colAsks.add(box);
+      return paintAsks(box);
+    },
+  };
+  // after the panel's own listener stored the snapshot (registered below — a microtask later every listener has run)
+  model.on('todos', () => queueMicrotask(() => { for (const box of colAsks) { if (!box.isConnected) colAsks.delete(box); else paintAsks(box); } }));
+
   const togglePopup = (anchor) => {
     notePopupHide('button'); // its own button again (an open popup only: an open says nothing)
     popup.classList.toggle('hidden');
@@ -997,7 +1056,7 @@ export function installUserTodos(app) {
   /** Show the page (a fresh layout from its first screen, scrolled to the top) → true; false = nothing on its first
    *  screen (the caller shows the conversation list). Already on show: repainted where it stands. */
   const showHome = () => {
-    if (!home) return false;
+    if (!home || !app.isMobile || app.viewportClass?.() === 'regular') return false; // the regular class: its list column IS the attention list
     if (!homeShown()) {
       if (!homeHasRows()) return false;
       Object.assign(H, { layout: null, bands: null, noticesOpen: false, noticeOrder: null });

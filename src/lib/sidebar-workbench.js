@@ -622,6 +622,8 @@ export function installSidebarWorkbench(Sidebar) {
     },
 
     _renderWorkbench(sessions) {
+      if (this._columnListWanted?.()) { this._renderColumnList(sessions); return; } // the regular class: ONE stream of rows (src/lib/sidebar-column.js)
+      this._columnObserver?.disconnect?.(); this._columnObserver = null;
       this.listEl.innerHTML = '';
       // Manage mode batch bar — both the "you're in batch management" marker
       // and the apply/clear controls. Marks are collected on the cards; this

@@ -9,6 +9,7 @@ import { installSidebarMounts } from './sidebar-mounts.js';
 import { installSidebarRail, PANEL_TABS } from './sidebar-rail.js';
 import { isSignInRow } from '../day-one.js'; // lane door-day-one-landing: a sign-in terminal is not a session row
 import { installSidebarWorkbench } from './sidebar-workbench.js';
+import { installSidebarColumn } from './sidebar-column.js'; // lane duo-build-1: the regular class's list column (one stream of rows)
 import { installSidebarTasks } from './sidebar-tasks.js';
 import { openRefreshLive, REFRESH_ICON } from './refresh-live.js'; // lane refresh-live-sessions: the list's ⋯ menu entry 「刷新所有活着的会话」
 import { UI_ICONS } from './icons.js';
@@ -324,9 +325,15 @@ class Sidebar {
       listMenuBtn.onclick = (e) => {
         e.stopPropagation();
         const r = listMenuBtn.getBoundingClientRect();
-        showContextMenu(r.left, r.bottom + 2, [
+        const rows = [
           { labelHtml: `${REFRESH_ICON} ${escHtml(tr('Refresh all live sessions…'))}`, label: tr('Refresh all live sessions…'), action: () => openRefreshLive(this.app) },
-        ]);
+        ];
+        // the regular class's head has no room for sort / manage: they are rows of this ⋯ there (SPEC-v3 §2.3)
+        if (this._regularMode) rows.push(
+          { label: tr('Sort by'), action: () => document.getElementById('sort-toggle')?.click() },
+          { label: tr('Manage mode — show quick terminate buttons'), action: () => document.getElementById('manage-toggle')?.click() },
+        );
+        showContextMenu(r.left, r.bottom + 2, rows);
       };
     }
     // Apply defaultStatusFilter once after async settings load (setting may differ from schema default)
@@ -840,7 +847,62 @@ class Sidebar {
     }
   }
 
+  /** A VIEWPORT CLASS SWITCH (lane duo-build-1; src/lib/viewport-switch.js): the sidebar becomes what a fresh load at the
+   *  new class builds — the phone's closed overlay with its two-level list and three tabs (B-f5ec: the desktop rail
+   *  stayed drawn over the phone layout after a fold), or the desktop's rail (sidebar.activityRail) beside a closed
+   *  sidebar. The person's width, sort, filters and Task Group view stay theirs. */
+  setPhoneMode(phone) {
+    if (this._mobileMode === !!phone) return;
+    this._mobileMode = !!phone;
+    this._mobileDrilldown = null;
+    if (this.isOpen) this.toggle(false);
+    if (phone) this._removeRail?.(); else this._railInit?.();
+    this._applySidebarLayoutWidth();
+    this._render();
+  }
+
+  /** THE REGULAR CLASS (lane duo-build-1 slice 2, SPEC-v3 §2.3 / §4): the list is a static COLUMN beside the conversation,
+   *  never an overlay — so the phone's «close the drawer» calls (a window's focus, a dialog) leave it; its head becomes
+   *  «Sessions» · filter · + · ⋯ (the + of the list, Mail's Compose; Sort and Manage move into the ⋯). Entered and left
+   *  by the class switch (src/lib/viewport-switch.js). */
+  setRegularMode(on) {
+    on = !!on;
+    if (this._regularMode === on) return;
+    if (on && this.isOpen) { this.isOpen = false; this.el.classList.remove('open'); document.getElementById('main-wrapper')?.classList.remove('sidebar-open'); }
+    this._regularMode = on;
+    this.setListHidden(false);
+    const head = this.el.querySelector('.sidebar-header'), closeBtn = document.getElementById('sidebar-close');
+    if (!head) return;
+    if (!this._regularNew) {
+      const b = document.createElement('button');
+      b.id = 'sidebar-new'; b.type = 'button'; b.className = 'icon-btn'; b.textContent = '+';
+      b.title = tr('New session'); b.setAttribute('aria-label', b.title);
+      b.onclick = () => this.app.showNewSessionDialog();
+      // a long press (touch: the synthesized contextmenu) = the phone's «+» sheet: Agent session / Terminal / Files / …
+      b.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); this.app._mobileNav?._showCreateSheet?.(); });
+      head.insertBefore(b, closeBtn);
+      this._regularNew = b;
+    }
+    for (const id of ['backend-filter', 'session-list-menu']) {
+      const el = document.getElementById(id);
+      if (!el) continue;
+      if (on) { if (!el._listHome) el._listHome = { parent: el.parentNode, next: el.nextSibling }; head.insertBefore(el, id === 'backend-filter' ? this._regularNew : closeBtn); }
+      else if (el._listHome) { const h = el._listHome; if (h.next && h.next.parentNode === h.parent) h.parent.insertBefore(el, h.next); else h.parent.appendChild(el); }
+    }
+  }
+
+  /** The regular class's list column: shown, or hidden by the person (portrait's ☰, a swipe from it) — a view state of
+   *  this page and this orientation only, never persisted (SPEC-v3 §4: no third state, no overlay, no memory). */
+  setListHidden(hidden) {
+    this._listHidden = !!hidden && !!this._regularMode;
+    document.documentElement.classList.toggle('vs-list-hidden', this._listHidden);
+    this.app?._mobileNav?.bar?.update?.();
+  }
+  toggleList() { this.setListHidden(!this._listHidden); }
+
   toggle(force) {
+    // the regular class's COLUMN: only an explicit «show» shows it (a hidden list); nothing a phone does to its drawer closes it
+    if (this._regularMode) { if (force === true) this.setListHidden(false); return; }
     this.isOpen = force !== undefined ? force : !this.isOpen;
     this.el.classList.toggle('open', this.isOpen);
     const wrapper = document.getElementById('main-wrapper');
@@ -1320,5 +1382,6 @@ installSidebarRenderMobile(Sidebar);
 installSidebarMounts(Sidebar);
 installSidebarRail(Sidebar);
 installSidebarWorkbench(Sidebar);
+installSidebarColumn(Sidebar);
 installSidebarTasks(Sidebar);
 export { Sidebar };

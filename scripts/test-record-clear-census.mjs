@@ -1164,6 +1164,7 @@ const CACHES = {
   'src/lib/user-todos-actions.js|fullById': 'the whole details this client saw — restoreDetails prunes to the ids the snapshot lists and a cleared item carries no detail (r3 + test-user-todos-layout ⑫)',
   'src/lib/user-todos-actions.js|detailLoads': 'id → an in-flight load (deleted on answer; ensureDetail re-checks isCleared after its GET)',
   'src/lib/user-todos-actions.js|replyFailures': 'id → THIS page\'s last refused reply {code, why} — the route\'s / the create\'s own reason (lane inbox-reply-dead-session), never an item\'s words; deleted on the next sent reply',
+  'src/lib/user-todos-panel.js|colAsks': 'the list column\'s inline-answer boxes painted so far (DOM elements; each repaints from the CURRENT snapshot on every broadcast and leaves the set when it leaves the DOM — lane duo-build-1; no words kept)',
   'src/lib/user-todos-panel.js|bandOpen': 'band number → its open ids the last paint listed, folded ones included — what that band\'s Mark all seen resolves (lane foryou-folds; ids only)',
   'src/lib/task-log.js|picked': 'selected entry ids',
   'src/lib/task-log.js|openIds': 'expanded entry ids',

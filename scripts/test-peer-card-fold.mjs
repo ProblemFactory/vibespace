@@ -120,7 +120,7 @@ console.log('⑤ wiring: the card, the view state, the phone target');
     ['a VibeSpace notice shown whole (a job report) folds the same way', /const whole = (?:!runWords && )?view\.body && !view\.folded(?: && !ref)? \? this\._peerBodyHtml\(msg, view\.body, 'VibeSpace'\) : null;/.test(R)],
     ['the view owns the state ({isOpen, set} over _peerOpen) and re-renders on the setting', /peerFold: \{ isOpen: \(id\) => this\._peerOpen\.has\(id\), set: \(id, open, el\) => this\._setPeerOpen\(id, open, el\) \}/.test(V) && /onSetting\('chat\.foldPeerMessages', \(\) => this\._rerenderVisible\(\)\);/.test(V)],
     ['the open set is bounded (500)', /if \(this\._peerOpen\.size > 500\) this\._peerOpen\.delete/.test(V)],
-    ['a 44 px target on the phone (the head row, the switch); the preview never wraps', /@media \(max-width: 768px\) \{ \.chat-peer-fold-head \{ min-height: 44px; \} \}/.test(C) && /\.chat-peer-preview \{[^}]*white-space: nowrap/.test(C)],
+    ['a 44 px target on the phone (the head row, the switch); the preview never wraps', /@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{ \.chat-peer-fold-head \{ min-height: 44px; \} \}/.test(C) && /\.chat-peer-preview \{[^}]*white-space: nowrap/.test(C)],
   ];
   for (const [n, c] of pins) ok(c, n);
 }

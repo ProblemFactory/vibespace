@@ -618,6 +618,14 @@ agent 于是自己建了一个多余的 profile，最后静默退回一个临时
 2. **一个 profile 一个浏览器；第二个对话 JOIN。** keeper 仍是唯一启动者（naive study 2）；`joinOrLaunch`：活着的记录被
    **加入**（同一进程、同一 CDP 端点、同一流目标）、在途的启动被**等待**（两个对话同时的第一条命令过去会拿到半启动的
    记录然后 `browser_no_cdp`）、只有死的记录才**启动**（启动前照旧做 lane H 的锁判定）。
+   **它的显示窗口也是 AGENT 的（lane browser-display-holders，2.369.355，主人 2026-10-25 「可以」）：** attach 路上
+   keeper 给 Chrome 开的仅显示 xpra 会话（lane one-browser-b1）只要有**任何**对话附着在这个 profile 上，就属于这些对话——
+   桌面记录带 `holders`（附着的对话数，`attachedHolders` 每个对话一行，从不算人自己的浏览行）+ `profileId`；窗口的 ✕
+   只关视图（PURE `outerCloseVerdict` 的 `holders` 行，不问 Chrome、不出「再按一次停止」）。人在这个窗口上按 Stop
+   （或桌面列表的「关闭」）是一个**事实**，不是崩溃：记录盖 `userStopped`，每个 holder 下一条消息听到一次「the person
+   stopped the browser … your next browser command starts it again」，tick 的 `healAttach` 拒绝自愈（`user-stopped` 门，
+   不计入 HEAL_BUDGET）；某个对话的下一条命令启动一条新记录——那是它自己的行为，不是自愈。修复前：两个概念的「被持有」
+   从不相遇——窗口自己的 `lease`（lane E 的应用租约）是 null，✕ 走了用户应用的 A2，keeper 又把人的 Stop 当崩溃拉起。
 3. **钉子是这个对话的默认附着，绝不是一个目录。** ws-create 交 `pinnedDir: null`；pin 路由不再 `repointPin(dir)`；
    钉住的对话在**没有附着**时的第一条裸命令经 keeper 附着它（`resolveHandle` 的 `kind:'pin'` → `attachPin`，随后按
    附着再解析一次，所以 paused / busy 照常判定）；agent 自己建的附着从不被挤掉。打不开 ⇒ 带 `pinned:true` 的具名拒绝

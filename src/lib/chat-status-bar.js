@@ -9,7 +9,9 @@ import { windowOf, unreportedRows } from '../status-bar-facts.js'; // PURE (lane
 import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
 // THE PHONE BAR (lane phone-chat-composer): ≤ 768 px the bar is ONE 40-px row — see _fold
-const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(max-width: 768px)') : null;
+const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(VC_PHONE_MEDIA) : null;
+/** The regular class's one-row bar keeps these (the model, the billing icon, a dropped ssh pipe's amber chip); the rest fold behind ﹀. */
+const REGULAR_BAR_KEEP = new Set(['model', 'billing', 'remote']);
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
 import { billingAuthKey, placementNote } from './pool-priority-model.js'; // PURE: THE ONE billing re-render key + the placement note (the title chip's twin)
 import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
@@ -18,6 +20,7 @@ import { attachDictation, voiceField } from './voice-input.js'; // lane voice-ev
 import { enterSubmits } from './chat-enter-keys.js';
 import { MENU_EMPTY, resolvePick, sourceOf } from '../model-providers.js'; // PURE (q-053 §3, lane models-at-session): the badge's list is THIS conversation's provider's
 import { openAccountModelsDialog } from './account-models.js';
+import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 
 /** Alias-tolerant model identity ('fable' vs 'claude-fable-5', a [1m] suffix) — the mismatch and the refusal chip (B-c643) ask the same. */
 const modelCore = (v) => String(v || '').replace(/\[1m\]$/, '').trim().replace(/^claude-/, '');
@@ -30,6 +33,15 @@ const CHANNEL_GLYPH = { mail: UI_ICONS.mail, chat: UI_ICONS.chat, robot: UI_ICON
  *  (layout px). The panel is positioned OUT of the ≤768px bar's horizontal
  *  scroller, so whatever lands past the edge is unreachable, not merely ugly. */
 const DROPDOWN_EDGE_PAD = 8;
+/** P2-17 PURE: how tall a status-bar panel may grow (LAYOUT px) — it opens UPWARD from its chip (bottom edge 4 px above
+ *  the chip's top), so its room is the chip's top less the highest edge it must stay under: its container's top (a chat
+ *  window clips what rises past it), the phone's top bar, the viewport — less the edge pad. Viewport px in, ÷ `scale`;
+ *  never under `min` (a chip at a tiny window's top still opens a panel that scrolls). */
+export function dropdownRoom({ anchorTop, containerTop = 0, barBottom = 0, scale = 1, pad = DROPDOWN_EDGE_PAD, min = 120 } = {}) {
+  const ceiling = Math.max(0, Number(containerTop) || 0, Number(barBottom) || 0);
+  const room = ((Number(anchorTop) || 0) - 4 - ceiling) / (scale || 1) - pad;
+  return Math.max(min, Math.floor(room));
+}
 
 /** Width INTENT of the three panels that are more than a list of rows (layout
  *  px). They are arguments to showDropdown — never inline styles written after
@@ -197,6 +209,7 @@ export class ChatStatusBar {
   /** §26 (B-099e): the turn's touched conversations `{rows, latest}` (PURE chipView) or null. */
   setArtifacts(v) {
     this._artifacts = v && v.ok && ((v.count || 0) + (v.codeCount || 0)) > 0 ? v : null;
+    this._app?._mobileNav?.bar?.update?.(); // the regular class's trailing bar wears the count (lane duo-build-1)
     this.render();
     this._refillDesignList(); // lane pages-chip-groups: the presented pages ride this feed — an open Pages popover follows
     const open = this._artifacts && (this._popupContainer || this._element?.parentElement)?.querySelector?.('.chat-artifacts-panel'); // lane artifacts-list-scale: an open list follows, patched in place
@@ -1067,7 +1080,8 @@ export class ChatStatusBar {
       if (kw) chip('kinds', 'chat-status-kinds chat-status-clickable', kw.title, escHtml(kw.text));
     }
 
-    if (PHONE_MQ?.matches) chip('more', `chat-status-more chat-status-clickable${this._foldOpen ? ' active' : ''}`, this._foldOpen ? t('Close') : t('More'), this._foldOpen ? '\u2715' : '\u22EF');
+    // the regular class (SPEC-v3 §2.4, lane duo-build-1): the bar's own expander wears ﹀ — this conversation's ONE ⋯ is the trailing bar's
+    if (PHONE_MQ?.matches) chip('more', `chat-status-more chat-status-clickable${this._foldOpen ? ' active' : ''}`, this._foldOpen ? t('Close') : t('More'), this._foldOpen ? '\u2715' : (document.documentElement.dataset.vc === 'regular' ? (UI_ICONS.chevronDown || '\u22EF') : '\u22EF'));
     this._reconcile(chips);
     this._fitBilling();
     this._fold();
@@ -1171,6 +1185,12 @@ export class ChatStatusBar {
       if (el === more) continue;
       const key = el.getAttribute('data-chip');
       chips.push(key === 'billing' && bw ? { key, w: el.offsetWidth, forms: { full: bw.full / bw.k, compact: bw.compact / bw.k, icon: bw.icon / bw.k } } : { key, w: el.offsetWidth });
+    }
+    // the regular class (SPEC-v3 §2.4): THREE items — the model, the billing chip as its icon, ﹀; everything else behind ﹀
+    if (document.documentElement.dataset.vc === 'regular') {
+      for (const el of bar.children) if (el !== more && !REGULAR_BAR_KEEP.has(el.getAttribute('data-chip'))) el.classList.add('chat-status-folded');
+      if (bill && bill.el.dataset.mode !== 'icon') bill.el.dataset.mode = 'icon';
+      return;
     }
     const plan = phoneBarFold({ chips, room, gap });
     for (const el of bar.children) if (plan.folded.has(el.getAttribute('data-chip'))) el.classList.add('chat-status-folded');
@@ -1430,6 +1450,13 @@ export class ChatStatusBar {
       dropdown.style.left = left + 'px';
       const cap = bounded ? Math.min(maxWidth, Math.max(minW, containerW - left - DROPDOWN_EDGE_PAD)) : maxWidth;
       if (Number.isFinite(cap)) dropdown.style.maxWidth = cap + 'px';
+      // P2-17 (lane phone-refusal-wrap — the duo walk: the model picker 621 px tall, max-height none, overflow hidden; at
+      // 385×571 its top stood at y −92, Effort / Output style / Lock off the screen; at 594×368 nine rows unreachable):
+      // AND ITS HEIGHT — the room above the chip, under the top of its container, the phone's top bar and the viewport
+      // (dropdownRoom, PURE); the panel scrolls inside it (chat.css max-height: var(--dd-room)). LAYOUT px.
+      const nav = typeof document.getElementById === 'function' ? document.getElementById('mobile-nav') : null;
+      const navR = nav && typeof nav.getClientRects === 'function' && nav.getClientRects().length ? nav.getBoundingClientRect() : null;
+      if (typeof dropdown.style.setProperty === 'function') dropdown.style.setProperty('--dd-room', dropdownRoom({ anchorTop: rect.top, containerTop: containerRect.top, barBottom: navR ? navR.bottom : 0, scale }) + 'px');
       // an outside press closes it — THE ONE closer (utils.js onOutsidePress: capture-phase pointerdown, so a press
       // into an app's picture counts too); its own rule kept: a press ON the anchor element is the toggle's, and a
       // press in another [data-popover] still closes it (it never honoured the chained-popover rule)

@@ -686,7 +686,7 @@ export function installSessionLifecycle(App, ctx = {}) {
   },
 
   _closeSidebarOnMobile() {
-    if (window.innerWidth <= 768 && this.sidebar.isOpen) this.sidebar.toggle(false);
+    if (this.isMobile && this.sidebar.isOpen) this.sidebar.toggle(false); // the class's answer (lane duo-build-1); a regular class's column ignores it
   },
 
   // Transition-state note for a window whose contents only exist once a ws

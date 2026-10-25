@@ -11,6 +11,12 @@
 //     dialog keeps everything, a second ✕ within 5 s = Stop; a blocked pane's ✕
 //     never asks the app; a dead record replayed from the layout never paints;
 //     CONTROL = a copy whose window never closes itself (the dead picture).
+//   • §10h (lane browser-display-holders, the owner 2026-10-25) A BROWSER THE AGENTS HOLD IS HELD FOR ITS DISPLAY WINDOW TOO:
+//     a REAL profile browser on the attach road (real Chrome on its own xpra display) that a live conversation (fake claude)
+//     uses — its display window's ✕ closes the VIEW only (verdict holders, Chrome untouched, no «press ✕ again» toast); the
+//     window's Stop is the person's: Chrome goes and the keeper's tick does NOT start it again (user-stopped), the holder's
+//     notice is queued, the Desktop list says «You stopped it · 1 conversation starts it again…»; the conversation's next
+//     command starts it (a new display, the stamp gone). The user-held app's A2 stays the legs above (unchanged).
 // The boot (the worktree server on the real xpra rung, headless chrome, §5's fake claude, the private runtime dir) and the
 // teardown are scripts/xpra-window-boot.mjs's, ONCE for this part; the measures the §§ share live there too.
 // Run: node scripts/test-desktop-xpra-window-close.mjs
@@ -20,9 +26,9 @@ import path from 'node:path';
 import { freePorts, scratch, scratchHome } from './scratch.mjs';
 import { bootXpraWindow } from './xpra-window-boot.mjs';
 
-const { bin, bootedCopy, CDP_PORT, check, crashed, ctlServers, D, dropPage, ensureActive, fakeHome, finish, launchOn, mkPage, openPage, page, PORT,
-  R2, reach7, readyOn, rebaseline, repo, revealBars, SEAT, sizeWinOn, skip, sleep, spawnCopy, srvEnv, target, threw, trustedClickAt, until, VNC_ENV,
-  WIN, worktrees, wt, XTERM } = await bootXpraWindow('test-desktop-xpra-window-close');
+const { agentTokens, bin, bootedCopy, CDP_PORT, check, crashed, ctlServers, D, dropPage, ensureActive, FAKE_CLAUDE, fakeHome, finish, launchOn, mkPage, openPage, page, PORT,
+  R2, reach7, readyOn, rebaseline, repo, revealBars, SEAT, sizeWinOn, skip, sleep, spawnCopy, srvEnv, srvLog, target, threw, trustedClickAt, until, VNC_ENV,
+  WebSocket, WIN, worktrees, wt, XTERM } = await bootXpraWindow('test-desktop-xpra-window-close');
 let p1 = await page(target);
 try {
   await openPage(p1, `http://127.0.0.1:${PORT}`);
@@ -316,6 +322,86 @@ try {
     finally {
       for (const id of ids10) await fetch(`http://127.0.0.1:${PORT}/api/desktop/apps/${id}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).catch(() => {});
       await dropPage(A); await dropPage(B);
+    }
+  }
+
+  // ── §10h LANE BROWSER-DISPLAY-HOLDERS (the owner 2026-10-25, «可以»): ONE NOTION OF HELD. The owner pressed ✕ on the app window
+  // «W8N3 · Screeps live - Google Chrome» — the display of profile personal-life, two conversations attached: the toast said «Asked …
+  // to close — press ✕ again within 5 s to stop it», the second ✕ stopped it, and the keeper healed the person's Stop 4 s later ──
+  console.log('§10h browser-display-holders — a held browser display: the ✕ closes the view only; the person\'s Stop is never healed; the holder told; the Desktop list says who starts it');
+  if (!fs.existsSync(FAKE_CLAUDE)) skip('§10h', 'no fake claude');
+  else {
+    const O = `http://127.0.0.1:${PORT}`;
+    const api = (u, o = {}) => fetch(O + u, { method: o.method || 'GET', headers: { 'Content-Type': 'application/json', ...(o.token ? { Authorization: `Bearer ${o.token}` } : {}) }, ...(o.body !== undefined ? { body: JSON.stringify(o.body) } : {}) }).then(async (r) => ({ status: r.status, j: await r.json().catch(() => null) }));
+    const H = await mkPage(O, { width: 1200, height: 850, deviceScaleFactor: 1, mobile: false });
+    let pid = null, token = null;
+    const browserOf = async () => ((await api('/api/browser/profiles')).j || {}).browsers?.[pid] || null;
+    const displayOf = async (live = true) => ((await api('/api/desktop/apps?records=1')).j?.apps || []).filter((a) => a.profileId === pid && (!live || a.state === 'ready')).sort((a, b) => b.startedAt - a.startedAt)[0] || null;
+    const hasWin = (id) => H.p.evalJs(`!![...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(id)})`);
+    try {
+      // a LIVE conversation (fake claude + its vsst_ token) and the profile it uses (the user creates it; the conversation's `use`)
+      const wsMain = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+      const msgs = []; wsMain.on('message', (d) => { try { msgs.push(JSON.parse(d)); } catch {} });
+      await new Promise((r, e) => { wsMain.on('open', r); wsMain.on('error', e); });
+      wsMain.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: fakeHome, cols: 80, rows: 24, reqId: 'h10', name: 'held-display-agent' }));
+      const created = await until(() => msgs.find((m) => m.type === 'created' && m.reqId === 'h10'), 20000, 100);
+      token = created && await until(() => { for (const f of fs.readdirSync(path.join(wt, 'data', 'session-meta'))) { try { const j = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'session-meta', f), 'utf8')); if (j.agentToken && j.webuiSessionId === created.sessionId) return j.agentToken; } catch {} } return null; }, 15000, 200);
+      wsMain.close();
+      if (token) agentTokens.push(token);
+      const pr = await api('/api/browser/profiles', { method: 'POST', body: { label: 'vs-held-display' } });
+      pid = pr.j && pr.j.profile ? pr.j.profile.id : null;
+      check('§10h: a live conversation (fake claude, its vsst_ token) and a browser profile the user created', !!created && /^vsst_/.test(token || '') && !!pid, { created: !!created, pr: pr.status });
+      const use = pid && token ? await api('/api/agent/browser/use', { method: 'POST', token, body: { profile: pid } }) : null;
+      const b0 = pid ? await until(async () => { const b = await browserOf(); return b && b.state === 'ready' ? b : null; }, 30000, 300) : null;
+      if (!b0 || b0.launch !== 'attach') skip('§10h the held-display legs', `the profile did not start on the ATTACH road here (use ${use && use.status} ${JSON.stringify(use && use.j && (use.j.error || use.j.code))}; launch ${b0 && b0.launch}: ${b0 && b0.launchWhy})`);
+      else {
+        const d0 = await until(() => displayOf(), 15000, 250);
+        check(`§10h: the conversation's \`use\` started the profile on the ATTACH road — real Chrome pid ${b0.pid} on its display session ${d0 && d0.id}, whose record says holders ${d0 && d0.holders}`, !!d0 && d0.holders === 1 && d0.id === b0.displaySession.id && D.pidAlive(b0.pid), d0 && { holders: d0.holders, profileId: d0.profileId });
+        // (a) THE ✕ of the held display: the view closes, nothing is asked of Chrome, no «press ✕ again» toast
+        await H.p.evalJs(`app.openDesktopApp(${JSON.stringify(d0.id)}); true`);
+        await ensureActive(H.p, d0.id);
+        const up = await until(async () => { const v = await H.p.evalJs(R2(d0.id)); return v && v.status === 'Connected' && v.main ? v : null; }, 40000, 300);
+        check('§10h (a): the display window shows Chrome\'s own X window on the active pane (connected, a main window — the A2 road would ASK it)', !!up, await H.p.evalJs(R2(d0.id)));
+        await H.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(d0.id)}); const orig = w.onCloseRequest; w.onCloseRequest = () => { const r = orig(); window.__vsHeldVerdict = w._desktopCloseVerdict; return r; }; return true; })()`);
+        await revealBars(H.p, d0.id);
+        const xb = await H.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(d0.id)}); app.wm.focusWindow(w.id); const b = w.element.querySelector('.win-close').getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; })()`);
+        await trustedClickAt(H.p, xb.x, xb.y);
+        const gone = await until(async () => !(await hasWin(d0.id)), 5000, 50);
+        await sleep(1500);
+        const vd = await H.p.evalJs('window.__vsHeldVerdict || null');
+        const tH = await H.p.evalJs(`[...document.querySelectorAll('#global-toasts > *')].map((e) => e.textContent)`);
+        const b1 = await browserOf(), d1 = await displayOf(false);
+        check(`§10h (a): the ✕ of a display a conversation holds ⇒ verdict ${JSON.stringify(vd)} — the VIEW closed, the display record still ready (${d1 && d1.state}), the same Chrome pid alive (${b1 && b1.pid}), no «Asked … to close» toast`, gone && vd && vd.act === 'close' && vd.why === 'holders' && d1 && d1.id === d0.id && d1.state === 'ready' && b1 && b1.pid === b0.pid && D.pidAlive(b0.pid) && !tH.some((x) => /Asked .* to close/.test(x)), { vd, toasts: tH, d1: d1 && d1.state });
+        // (b) THE PERSON'S STOP (the window's Stop): Chrome goes with the display and is NEVER started again by the tick
+        await H.p.evalJs(`app.openDesktopApp(${JSON.stringify(d0.id)}); true`);
+        await until(() => hasWin(d0.id), 8000, 100);
+        const tStop = Date.now();
+        await H.p.evalJs(`(() => { const w = [...app.wm.windows.values()].find((w) => w._desktopAppId === ${JSON.stringify(d0.id)}); w._desktopAppStop(); return true; })()`);
+        const chromeGone = await until(() => (!D.pidAlive(b0.pid) ? Date.now() : null), 15000, 100);
+        await sleep(12000); // two and more of the keeper's 5 s ticks — the owner's journal healed it 4 s after the stop
+        const b2 = await browserOf(), dLive = await displayOf(true), dOld = (await api(`/api/desktop/apps/${d0.id}`)).j;
+        const logTxt = srvLog.join('');
+        check(`§10h (b): the window's Stop ends Chrome (${chromeGone ? chromeGone - tStop : null} ms) and 12 s later — past two ticks — it is NOT started again: the record says the person stopped it (state ${b2 && b2.state}, stoppedBy ${b2 && b2.stoppedBy}, «${b2 && b2.note}»), no live display for the profile`, !!chromeGone && b2 && b2.state === 'stopped' && b2.stoppedBy === 'user' && /you stopped its display window/.test(b2.note || '') && !dLive && dOld && dOld.state === 'exited' && dOld.stoppedBy === 'user', { b2: b2 && { state: b2.state, stoppedBy: b2.stoppedBy, note: b2.note, err: b2.lastError }, live: dLive && dLive.id });
+        check('§10h (b): the journal names the gate (user-stopped) and never «started again on the attach road»', /NOT started again \(user-stopped, never a heal\)/.test(logTxt) && !/its Chrome exited under a holder .* started again on the attach road/.test(logTxt), logTxt.split('\n').filter((l) => /\[browser\]/.test(l) && l.includes(pid)).slice(-6));
+        // (c) THE HOLDER IS TOLD — one browser-profile notice queued for its next message
+        const sst = (() => { try { return JSON.parse(fs.readFileSync(path.join(wt, 'data', 'session-status.json'), 'utf8')); } catch { return null; } })();
+        const told = sst ? Object.values(sst.statuses || {}).flatMap((r) => (r && r.pendingNotices) || []).filter((n) => n && n.kind === 'browser-profile' && n.event === 'user-stopped' && n.profileId === pid) : [];
+        check(`§10h (c): the holding conversation's next message carries ONE notice — the person stopped "vs-held-display" (${told.length} queued)`, told.length === 1 && told[0].was === 'vs-held-display', told);
+        // (d) THE DESKTOP LIST says who starts it again
+        await H.p.evalJs(`document.getElementById('btn-desktop').click(); true`);
+        const row = await until(() => H.p.evalJs(`(() => { const r = [...document.querySelectorAll('.desktop-picker-app-stopped .desktop-picker-row')].find((b) => b.dataset.host === ${JSON.stringify(d0.id)}); return r ? r.textContent : null; })()`), 8000, 200);
+        check(`§10h (d): the Desktop list keeps the stopped display's row: «${row}»`, !!row && /You stopped it · 1 conversation starts it again when it next uses it/.test(row), row);
+        await H.p.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+        // (e) THE CONVERSATION'S NEXT COMMAND starts it — its own act: a new record, a new display, the stamp gone
+        const use2 = await api('/api/agent/browser/use', { method: 'POST', token, body: { profile: pid } });
+        const b3 = await until(async () => { const b = await browserOf(); return b && b.state === 'ready' && b.pid !== b0.pid ? b : null; }, 30000, 300);
+        const d3 = b3 ? await until(() => displayOf(), 15000, 250) : null;
+        check(`§10h (e): the conversation's next \`use\` starts it again (${use2.status}; startedBy «${b3 && b3.startedBy}», a new Chrome ${b3 && b3.pid} on ${d3 && d3.id}) — no stamp, the new display reads holders ${d3 && d3.holders}`, !!b3 && !b3.userStopped && !!d3 && d3.id !== d0.id && d3.holders === 1 && !d3.userStopped, b3 && { startedBy: b3.startedBy, stamp: b3.userStopped });
+      }
+    } catch (e) { threw('§10h', e); }
+    finally {
+      if (pid) await api(`/api/browser/profiles/${pid}/stop`, { method: 'POST', body: {} }).catch(() => {}); // a named browser outlives its server: ended here
+      await dropPage(H);
     }
   }
 } catch (e) {

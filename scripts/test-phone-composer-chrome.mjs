@@ -79,7 +79,7 @@ app.use(require(path.join(REPO, 'src/routes/voice.js')).create({ client, prefs: 
 // chat.css variants for the desk proof: as shipped · the lane's phone block stripped · the same block un-gated (RED control)
 const chatCss = fs.readFileSync(path.join(REPO, 'public/chat.css'), 'utf8');
 const BLOCK = /\/\* ── THE PHONE COMPOSER[\s\S]*?\/\* ── end THE PHONE COMPOSER ── \*\//;
-const cssVariant = { real: chatCss, stripped: chatCss.replace(BLOCK, ''), leak: chatCss.replace(BLOCK, (b) => b.replace(/@media \(max-width: 768px\)/g, '@media all')) };
+const cssVariant = { real: chatCss, stripped: chatCss.replace(BLOCK, ''), leak: chatCss.replace(BLOCK, (b) => b.replace(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\)/g, '@media all')) };
 for (const n of ['style', 'fonts']) if (fs.existsSync(path.join(REPO, `public/${n}.css`))) app.get(`/${n}.css`, (q, s) => s.type('text/css').send(fs.readFileSync(path.join(REPO, `public/${n}.css`))));
 app.get('/chat.css', (q, s) => s.type('text/css').send(cssVariant[q.query.v] || chatCss));
 app.get('/page.js', (q, s) => s.type('text/javascript').send(fs.readFileSync(path.join(root, 'page.js'))));

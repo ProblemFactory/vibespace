@@ -1,7 +1,8 @@
 import { startFileDownload } from './file-download.js';
-import { createPopover, showContextMenu, uiScale } from './utils.js';
+import { createPopover, showContextMenu, showToast, uiScale } from './utils.js';
 import { groupClickVerdict, hoverVerdict, hoverStep, groupKeyVerdict, inFrontOf, GROUP_HOVER_INTENT_MS, GROUP_HOVER_LEAVE_MS } from './taskbar-group.js';
 import { t } from './i18n.js';
+import { terminalOnly } from './agent-meta.js'; // the harness table's own word for a plain shell (§78: no id branch here)
 import { visualTabOrder } from './chain-layout.js'; // the chooser lists a group in its STRIP order (split tabs v2: left half, then right)
 import { registerCommand, registerMenuItem, menuItems as contribMenuItems } from './contributions.js';
 
@@ -9,13 +10,35 @@ import { registerCommand, registerMenuItem, menuItems as contribMenuItems } from
 // — identity kept fresh in _openSpec by syncSessionIdentity. Non-session
 // windows (files/editor/browser) return null: Rename/Task-Groups are
 // session-level concepts.
-function sessionForWin(app, win) {
+export function sessionForWin(app, win) { // exported: the trailing bar's live-view button asks the same row (lane duo-build-1)
   if (!win || (win.type !== 'chat' && win.type !== 'terminal')) return null;
   const spec = win._openSpec || {};
   const all = app.sidebar?._allSessions || [];
   return all.find((s) =>
     (spec.backendSessionId && s.sessionId === spec.backendSessionId)
     || (spec.serverId && s.webuiId === spec.serverId)) || null;
+}
+
+/** P2-2 (lane phone-refusal-wrap — the duo walk: ✕ closed a working conversation's window without a word, the list still
+ *  said working; a newcomer could not tell «closed the window» from «ended the conversation»). PURE: what a user's close
+ *  of a session window says — the session still RUNNING (live on the hub, or in tmux) ⇒ it keeps running (a plain shell:
+ *  the terminal does); ended, or not a session window ⇒ null (nothing to say). The window close stays ONE tap, no ask. */
+export function closeKeepsWord(s) {
+  if (!s || (s.status !== 'live' && s.status !== 'tmux')) return null;
+  return terminalOnly(s.backend) ? 'Closed the window — the terminal keeps running' : 'Closed the window — the conversation keeps running';
+}
+// ONE toast per close burst: a group's Close (each member through requestClose) re-words the toast already up
+let _closedSaid = null;
+export function sayClosedKeepsRunning(word) {
+  const now = Date.now();
+  if (_closedSaid && _closedSaid.el.isConnected && now - _closedSaid.at < 1500) {
+    _closedSaid.n++; _closedSaid.at = now;
+    const b = _closedSaid.el.querySelector('.global-toast-body');
+    if (b) b.textContent = t('Closed {n} windows — what ran in them keeps running', { n: _closedSaid.n });
+    return _closedSaid.el;
+  }
+  _closedSaid = { el: showToast(t(word)), n: 1, at: now };
+  return _closedSaid.el;
 }
 
 // "Switch window" submenu items (2.212.0, title-bar right-click). Scope from
@@ -197,17 +220,22 @@ export function registerWindowMenu() {
   const M = 'window';
   const hasSess = (c) => !!c.s;
   const live = (c) => hasSess(c) && c.s.status === 'live';
+  // the regular class (lane duo-build-1, SPEC-v3 §2.4): a column is a level of the list, not a window — no window-manager
+  // verbs (move, minimize, side by side, find, desktops) and no Close (leave = pick another row; end = terminate / archive)
+  const wmVerbs = (c) => c.app._vc !== 'regular';
   registerCommand({ id: 'window.move', title: () => t('Move'), run: (c) => c.app.wm.startMoveMode(c.id) });
   registerCommand({ id: 'window.minimizeOrRestore', title: (c) => (c.win.isMinimized ? t('Restore') : t('Minimize')), run: (c) => { c.app.wm.witnessGeometry?.(c.id); c.win.isMinimized ? c.app.wm.restore(c.id) : c.app.wm.minimize(c.id); } }); // the user's act: witnessed (verify r4 ③)
   registerCommand({ id: 'window.renameSession', title: () => t('Rename…'), run: (c) => c.app.sidebar?.renameSession?.(c.s, c.s.name) });
   registerCommand({ id: 'window.terminateSession', title: () => t('Terminate session'), run: (c) => c.app.killSession(c.s.webuiId) });
   registerCommand({ id: 'window.close', title: () => t('Close'), run: (c) => (c.group ? c.app.wm.requestCloseGroup(c.id) : c.app.wm.requestClose(c.id)) }); // ctx.group = a WHOLE group's menu (the frame's, the taskbar group's): asked first (B-a67c)
+  // P2-2: Close and Terminate never read alike — a running session's window Close says it keeps running and is not red
+  const closeStyle = (c) => (c.closeKeeps ? '' : 'color:var(--red, #e55)');
   // Title-bar variant (2.212.0): the whole right-click used to BE the overlap
   // switcher — now it's a submenu whose scope is user-configurable.
   registerMenuItem({ menu: M, group: 'navigation', order: 10, id: 'window/switch-window', when: (c) => !!c.switchSubmenu, label: () => t('Switch window'), children: (c) => switchWindowItems(c.app, c.id) });
   registerMenuItem({ menu: M, group: 'navigation', order: 20, when: (c) => !!c.switchSubmenu, separator: true });
-  registerMenuItem({ menu: M, group: '1_window', order: 10, command: 'window.move', kind: 'move', label: (c, title) => '✥ ' + title });
-  registerMenuItem({ menu: M, group: '1_window', order: 20, command: 'window.minimizeOrRestore', kind: 'minimize', label: (c, title) => (c.win.isMinimized ? '□ ' : '– ') + title });
+  registerMenuItem({ menu: M, group: '1_window', order: 10, command: 'window.move', kind: 'move', when: wmVerbs, label: (c, title) => '✥ ' + title });
+  registerMenuItem({ menu: M, group: '1_window', order: 20, command: 'window.minimizeOrRestore', kind: 'minimize', when: wmVerbs, label: (c, title) => (c.win.isMinimized ? '□ ' : '– ') + title });
   // Session windows: rename + Task Group binding straight from the window
   // chrome (2.212.0, user request) — same semantics as the session card menu.
   registerMenuItem({ menu: M, group: '1_window', order: 30, command: 'window.renameSession', kind: 'rename', when: hasSess });
@@ -238,11 +266,11 @@ export function registerWindowMenu() {
   registerCommand({ id: 'window.unsplit', title: () => t('Unsplit'), run: (c) => c.app.wm.unbindSplit(chainOf(c)) });
   registerCommand({ id: 'window.swapSides', title: () => t('Swap left and right'), run: (c) => c.app.wm.swapSplit(chainOf(c)) });
   registerMenuItem({
-    menu: M, group: '1_window', order: 50, id: 'window/side-by-side', kind: 'split', when: inTabsGroup, label: () => t('Show side by side'),
+    menu: M, group: '1_window', order: 50, id: 'window/side-by-side', kind: 'split', when: (c) => inTabsGroup(c) && wmVerbs(c), label: () => t('Show side by side'),
     children: (c) => chainOf(c).tabs.filter((tid) => tid !== c.id).map((tid) => c.app.wm.windows.get(tid)).filter(Boolean)
       .map((w) => ({ label: t('Beside {name} (on the right)', { name: nameOfWin(w) }), action: () => c.app.wm.bindSplit(c.win, w, { side: 'right', announce: true, focus: 'anchor' }) })), // the focus stays on the window right-clicked (split r1)
   });
-  registerMenuItem({ menu: M, group: '1_window', order: 50, command: 'window.unsplit', kind: 'split', when: inSplit });
+  registerMenuItem({ menu: M, group: '1_window', order: 50, command: 'window.unsplit', kind: 'split', when: (c) => inSplit(c) && wmVerbs(c) });
   registerMenuItem({ menu: M, group: '1_window', order: 55, command: 'window.swapSides', kind: 'split', when: (c) => inSplit(c) && !c.app.isMobile });
   // a window that shows ONE file (every viewer kind, the hex viewer, the code editor) downloads it — the same helper as its button (lane viewer-download)
   registerCommand({ id: 'window.download', title: () => t('Download'), run: (c) => startFileDownload(c.win._fileDownload) });
@@ -253,7 +281,7 @@ export function registerWindowMenu() {
   registerMenuItem({ menu: M, group: '2_session', order: 10, id: 'window/restart-session', command: 'session.restart', kind: 'restart', when: live, label: () => '⟳ ' + t('Restart session') });
   registerMenuItem({ menu: M, group: '2_session', order: 20, command: 'window.terminateSession', kind: 'terminate', when: live, style: 'color:var(--red, #e55)' });
   registerMenuItem({ menu: M, group: '2_session', order: 10, id: 'window/resume-session', command: 'session.restart', kind: 'resume', when: (c) => hasSess(c) && c.s.status !== 'live' && !!c.s.sessionId, label: () => t('Resume session') });
-  registerMenuItem({ menu: M, group: '2_session', order: 30, command: 'session.locate', kind: 'locate', when: hasSess });
+  registerMenuItem({ menu: M, group: '2_session', order: 30, command: 'session.locate', kind: 'locate', when: (c) => hasSess(c) && wmVerbs(c) });
   // AGENT BROWSER — the live view from the session's OWN window (lane I, 2026-09-25: the owner was told to open it "from
   // the menu" and looked here; only the sidebar card had it). Offered on a live local session whose conversation HAS a
   // browser — one running now (`browserInput`) or used since its start (`browserProfileActive`: null = never) — and it
@@ -264,8 +292,8 @@ export function registerWindowMenu() {
   registerMenuItem({ menu: M, group: '2_session', order: 35, command: 'window.browserLive', kind: 'browser-live', when: hasBrowser });
   registerMenuItem({ menu: M, group: '2_session', order: 40, command: 'session.properties', kind: 'props', when: hasSess, label: () => t('Session properties…') });
   registerMenuItem({ menu: M, group: '2_session', order: 50, when: hasSess, separator: true });
-  registerMenuItem({ menu: M, group: '3_close', order: 10, id: 'window/move-to-desktop', kind: 'desktop', label: () => '➤ ' + t('Move to Desktop'), children: (c) => c.app.desktopManager?.getDesktopMenuItems(c.id) || [] });
-  registerMenuItem({ menu: M, group: '3_close', order: 20, command: 'window.close', kind: 'close', label: (c) => c.closeLabel, style: 'color:var(--red, #e55)' });
+  registerMenuItem({ menu: M, group: '3_close', order: 10, id: 'window/move-to-desktop', kind: 'desktop', when: wmVerbs, label: () => '➤ ' + t('Move to Desktop'), children: (c) => c.app.desktopManager?.getDesktopMenuItems(c.id) || [] });
+  registerMenuItem({ menu: M, group: '3_close', order: 20, command: 'window.close', kind: 'close', when: wmVerbs, label: (c) => c.closeLabel, style: closeStyle });
 }
 registerWindowMenu();
 // end registerWindowMenu (scripts/test-contributions.mjs extracts the block above)
@@ -273,12 +301,14 @@ registerWindowMenu();
 export function showWindowContextMenu(app, id, x, y, { closeLabel = null, onAction, switchSubmenu = false, group = false } = {}) {
   const win = app.wm.windows.get(id);
   if (!win) return;
-  closeLabel = closeLabel || '✕ ' + t('Close');
   // Items come from the 'window' MENU REGISTRY (registerWindowMenu above; a
   // plugin adds rows through the same call). Every kinded action — and each
   // child of a kinded submenu — reports onAction(kind) after it runs.
   const sess = sessionForWin(app, win);
+  const closeKeeps = !closeLabel && !group && !!closeKeepsWord(sess);   // P2-2: a running session's window — its Close is not its Terminate
+  closeLabel = closeLabel || '✕ ' + (closeKeeps ? t('Close window — it keeps running') : t('Close'));
   const ctx = { app, id, win, s: sess, switchSubmenu, closeLabel, group: !!group };
+  ctx.closeKeeps = closeKeeps;   // closeStyle reads it (the line above is test-tab-close-confirm's pin)
   const wrapAct = (item, kind = item.kind) => {
     const out = { ...item };
     if (kind && typeof item.action === 'function') out.action = () => { item.action(); onAction?.(kind); };

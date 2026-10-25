@@ -43,7 +43,7 @@ export function protoChip(proto, { over = false } = {}) {
 // Self-contained 18px icons (UI_ICONS lacks several shapes; MI is module-local
 // to sidebar-mounts) — consistent stroke style, currentColor.
 const R = (d) => `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
-const RAIL_ICONS = {
+export const RAIL_ICONS = { // exported: the regular class's trailing bar (src/lib/trailing-bar.js) wears the rail's own icons for the same doors
   folders: R('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
   tasks: R('<rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="11" width="12" height="4" rx="1"/><rect x="3" y="18" width="15" height="3" rx="1"/>'),
   mounts: R('<rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><circle cx="6.5" cy="6.5" r="0.9" fill="currentColor"/><circle cx="6.5" cy="17.5" r="0.9" fill="currentColor"/>'),
@@ -168,14 +168,17 @@ export function installSidebarRail(Sidebar) {
   Object.assign(Sidebar.prototype, {
 
     _railInit() {
-      if (this.app.isMobile) return; // mobile keeps its own two-level nav
-      const apply = () => {
-        const on = this.app.settings?.get('sidebar.activityRail');
-        if (on === false) this._removeRail(); else this._buildRail();
-      };
-      this.app.settings?.on?.('sidebar.activityRail', apply);
-      this.app.settings?.on?.('sidebar.railPersistent', () => { this._railApplyCollapsed(); this._applySidebarLayoutWidth(); });
-      apply();
+      if (this.app.isMobile) return; // mobile keeps its own two-level nav (a switch to the desktop class calls this again — src/lib/viewport-switch.js)
+      if (!this._railApplySetting) { // wired once: a phone boot that unfolds to the desktop comes here first at the switch
+        this._railApplySetting = () => {
+          if (this.app.isMobile) return;
+          const on = this.app.settings?.get('sidebar.activityRail');
+          if (on === false) this._removeRail(); else this._buildRail();
+        };
+        this.app.settings?.on?.('sidebar.activityRail', this._railApplySetting);
+        this.app.settings?.on?.('sidebar.railPersistent', () => { this._railApplyCollapsed(); this._applySidebarLayoutWidth(); });
+      }
+      this._railApplySetting();
     },
 
     _buildRail() {
@@ -426,7 +429,8 @@ export function installSidebarRail(Sidebar) {
       try { this._panelDispose?.(); } catch (e) { try { track('event', 'rail-dispose-failed'); } catch {} console.warn('[rail] panel dispose failed:', e); }
       this._panelDispose = null;
       this._railEl.remove(); this._railEl = null;
-      this.el.classList.remove('rail-on', 'rail-collapsed');
+      this.el.classList.remove('rail-on', 'rail-collapsed', 'rail-labelled'); // the words' 68 px strip + 224 px floor leave with the rail (a fold to the phone: B-f5ec)
+      if (this._resizer && this._resizer._floorMin != null) this._resizer.min = this._resizer._floorMin;
       const title = this.el.querySelector('.sidebar-title');
       if (title) title.textContent = tr('Sessions');
       this._applySidebarLayoutWidth();

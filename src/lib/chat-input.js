@@ -1,4 +1,4 @@
-import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMenu, showToast, uploadFilesBatched, showImageOverlay, onOutsidePress } from './utils.js';
+import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMenu, showToast, uploadFilesBatched, showImageOverlay, onOutsidePress, isTouchDevice } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { composerSendModes, slashCompletionList } from './agent-meta.js';
 import { t } from './i18n.js';
@@ -8,8 +8,25 @@ import { keyboardOwned, keyboardYielded, onKeyboardChange } from './keyboard-own
 import { EnterGuard, imeOwnsKey, IME_HINT_MS, sendKeyName } from './chat-enter-keys.js'; // lane chat-enter-ime: an Enter meant for the input method never sends
 import { createVoiceInput } from './voice-input.js'; // Dropline voice input (q-029 P0): the microphone beside attach
 import { createStashStrip } from './stash-strip.js'; // 2026-09-27: what waits for this agent's next turn + Hand over now
-import { landDraftPrepend, PUTBACK_SEP } from '../queue-putback.js'; // PURE (lane stop-refills-composer): a Stop put-back lands as a prefix over the live box
+import { landDraft, PUTBACK_SEP } from '../queue-putback.js'; // PURE (lane stop-refills-composer): a Stop put-back lands as a prefix over the live box; lane draft-focus-guard: landDraft = THE verdict for every draft another client saved
 import { createAgentCards } from './agent-card.js'; // lane agent-window-no-pop: the card an agent's window leaves where nothing opened
+import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
+
+// A PRESS IN PROGRESS (lane draft-focus-guard): a draft held while the box was being typed in is judged again at its blur —
+// but a press on Send blurs the box BEFORE its click sends, so the judge waits until no pointer is down, then one task (the
+// click, and what it sent, has run). One pair of window capture listeners per page; a release the page never saw (it ended
+// over another frame) holds nothing past 10 s.
+let pressDown = false;
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('pointerdown', () => { pressDown = true; }, true);
+  for (const type of ['pointerup', 'pointercancel']) window.addEventListener(type, () => { pressDown = false; }, true);
+}
+function afterPress(fn) {
+  if (!pressDown) { setTimeout(fn, 0); return; }
+  const go = () => { clearTimeout(cap); for (const type of ['pointerup', 'pointercancel']) window.removeEventListener(type, go, true); setTimeout(fn, 0); };
+  for (const type of ['pointerup', 'pointercancel']) window.addEventListener(type, go, true);
+  const cap = setTimeout(go, 10000);
+}
 
 /**
  * ChatInput — input area for chat mode sessions.
@@ -176,10 +193,41 @@ export class ChatInput {
       // `_editDraftBefore` / `_pendingEdit.draftBefore` and restored from
       // there; the store keeps whatever it had.
       if (this._editingQueueId || this._pendingEdit) return;
-      this._draftTimer = setTimeout(() => saveDraft('chat', this._sessionId, this._textarea.value), 300);
+      this._draftTimer = setTimeout(() => { this._draftTimer = null; saveDraft('chat', this._sessionId, this._textarea.value); this._judgeHeldDraft(); }, 300);
     });
 
     // Sync draft from other clients via StateSync
+    // A DRAFT ANOTHER CLIENT SAVED NEVER REPLACES WHAT YOU ARE TYPING (lane draft-focus-guard, B-b0fa — landDraft in
+    // src/queue-putback.js is THE verdict, the put-back prefix its first row): two clients on one conversation, the other's
+    // 300 ms autosave landed in this FOCUSED box mid-typing and the mix was what got sent — then this box's own pending
+    // autosave wrote the overwritten value back, and the typing was lost on both sides. A value the verdict HOLDS waits in
+    // `_heldDraft` (the store already has it — no new frame; only this box waits) and is judged again when the box lets go:
+    // its blur (after the press that moved the focus — afterPress), an emptied box (a send) and its own autosave (which
+    // supersedes it). `_draftTaken` = what the box last took from the store: a held value never deletes words typed since.
+    this._heldDraft = null;
+    this._draftTaken = this._textarea.value;
+    this._landDraft = (value, op, held = false) => {
+      const active = typeof document !== 'undefined' && document.activeElement === this._textarea;
+      const focused = active && typeof document.hasFocus === 'function' && document.hasFocus();
+      const v = landDraft({ focused, dirty: this._draftTimer !== null, current: this._textarea.value, incoming: value, prepended: op && op.prepended,
+        selStart: this._textarea.selectionStart, selEnd: this._textarea.selectionEnd, held, stored: held ? loadDraft('chat', this._sessionId) : undefined, taken: this._draftTaken });
+      this._heldDraft = v.act === 'hold' ? value : null;
+      if (v.act !== 'replace') return v;
+      // the box now shows the store's value: no autosave still pending may write back what it replaced (the belt under the verdict)
+      clearTimeout(this._draftTimer); this._draftTimer = null;
+      this._textarea.value = v.value;
+      // STOP PUT THE DROPPED QUEUE BACK (lane stop-refills-composer): only the op's PREFIX lands, in front of the LIVE box — the
+      // op's whole value was merged against a store that can be seconds stale while a person keeps typing — and the caret
+      // moves with the text. Then ONE save, and only where the box held something unsaved — no synthetic 'input' (N clients
+      // would each autosave their own box).
+      if (v.why === 'putback') { if (active) { try { this._textarea.setSelectionRange(v.selStart, v.selEnd); } catch { } } }
+      else this._draftTaken = v.value;
+      this._autoSize?.();
+      if (v.save) saveDraft('chat', this._sessionId, v.value);
+      return v;
+    };
+    this._judgeHeldDraft = () => { if (this._heldDraft !== null && !this._pendingEdit && !this._editingQueueId) this._landDraft(this._heldDraft, null, true); };
+    this._textarea.addEventListener('blur', () => { if (this._heldDraft !== null) afterPress(() => this._judgeHeldDraft()); });
     this._draftSyncHandler = (value, key, op) => {
       // …and the same wall in the other direction: another client's draft must
       // not overwrite a rewrite in progress (the next send would then save the
@@ -187,22 +235,7 @@ export class ChatInput {
       // restore when the edit finishes instead of on the live textarea.
       if (this._pendingEdit) { this._pendingEdit.draftBefore = value || ''; return; }
       if (this._editingQueueId) { this._editDraftBefore = value || ''; return; }
-      // STOP PUT THE DROPPED QUEUE BACK (lane stop-refills-composer — src/queue-putback.js): the server's op carries
-      // `prepended`, and only its PREFIX lands, in front of the LIVE box — the op's whole value was merged against a
-      // store that can be seconds stale while a person keeps typing (the 300 ms autosave never fires mid-typing), so
-      // overwriting would delete exactly the words typed since. The caret moves with the text. Then ONE save, and only
-      // where the box held something unsaved — no synthetic 'input' (N clients would each autosave their own box).
-      if (op && Number.isSafeInteger(op.prepended) && op.prepended > 0) {
-        const focused = typeof document !== 'undefined' && document.activeElement === this._textarea;
-        const r = landDraftPrepend({ current: this._textarea.value, selStart: this._textarea.selectionStart, selEnd: this._textarea.selectionEnd, value: value || '', prepended: op.prepended });
-        this._textarea.value = r.value;
-        if (focused) { try { this._textarea.setSelectionRange(r.selStart, r.selEnd); } catch { } }
-        this._autoSize?.();
-        if (r.value !== (value || '')) { clearTimeout(this._draftTimer); this._draftTimer = null; saveDraft('chat', this._sessionId, r.value); }
-        return;
-      }
-      this._textarea.value = value || '';
-      this._autoSize?.();
+      this._landDraft(value || '', op);
     };
     const sync = getStateSync();
     if (sync) sync.on('drafts', 'chat:' + this._sessionId, this._draftSyncHandler);
@@ -420,7 +453,7 @@ export class ChatInput {
       else inputWrap.replaceChildren(...deskKids);
       inputWrap.classList.toggle('chat-input-phone', on);
     };
-    const phoneMq = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(max-width: 768px)') : null;
+    const phoneMq = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(VC_PHONE_MEDIA) : null;
     if (phoneMq) { phoneFace(phoneMq.matches); phoneMq.addEventListener?.('change', (e) => phoneFace(e.matches)); }
     this._textarea.addEventListener('input', tall);
 
@@ -1159,6 +1192,10 @@ export class ChatInput {
     // lane J r2: while a live view drives the agent's browser it OWNS the keyboard — an attach / reconnect / window
     // focus must not put the caret back in this composer (the study's "tomsmithtomsmith…": a password one Enter from sent)
     if (keyboardOwned()) return;
+    // lane duo-build-1 (slice 1 — the iPhone Duo simulator: a restored chat raised a 60 %-high keyboard on load): on a TOUCH
+    // screen a programmatic focus — an attach / restore / reconnect answer, a window raised, a row picked — never puts the
+    // caret here, because on a phone the caret IS the keyboard; the person's own tap in the box focuses it
+    if (isTouchDevice()) return;
     if (this._textarea) this._textarea.focus();
   }
 
@@ -1177,6 +1214,7 @@ export class ChatInput {
     if (this._queueDrag) { try { this._queueDrag.ctl.abort(); } catch { } this._queueDrag = null; }
     if (this._stopPendingTimer) { clearTimeout(this._stopPendingTimer); this._stopPendingTimer = null; }
     if (this._offKbdLine) { this._offKbdLine(); this._offKbdLine = null; } // lane takeover-keyboard: the keyboard owner's signal
+    this._heldDraft = null;   // a blur judge still pending finds nothing (the store keeps the value)
     if (this._draftSyncHandler) {
       const sync = getStateSync();
       if (sync) sync.off('drafts', 'chat:' + this._sessionId, this._draftSyncHandler);
@@ -1199,6 +1237,9 @@ export class ChatInput {
   //     live box with its PREFIX in front of what is there (nothing typed is
   //     replaced) and saves that once. The abandon paths keep the rewrite
   //     first and the stash below it (`_withStash`), never one for the other.
+  //     With no editor open any other value lands only where nobody is typing
+  //     (lane draft-focus-guard, landDraft): a focused box or unsaved typing
+  //     HOLDS it until the box lets go.
   //   · `_insertUploadedPaths` (upload button, folder picker, ChatView's
   //     drag-drop) — the writer that lands LATE (round-6 verifier): it runs
   //     after an await, so the editor it must respect may have been opened
@@ -1375,6 +1416,7 @@ export class ChatInput {
     // kept draft — cancel it and pin the draft to exactly what was sent (the
     // debounced autosave can lag behind fast typing).
     clearTimeout(this._draftTimer);
+    this._draftTimer = null;
     // WHAT THIS SEND DISPLACED IN THE STORE, so the deferred clear below can
     // tell "my own pin is still there" from "the user has since typed
     // something else" WITHOUT assuming the pin exists: an attachments-only
@@ -1383,9 +1425,11 @@ export class ChatInput {
     // debounce window survives in the store as a permanent zombie draft,
     // because `clearTimeout` above cancelled the autosave that would have
     // written the deletion).
-    const storeBefore = loadDraft('chat', this._sessionId);
+    // A HELD draft (lane draft-focus-guard) is another client's, never shown here: the pinless clear may not take it.
+    const storeBefore = this._heldDraft !== null ? null : loadDraft('chat', this._sessionId);
     if (text) saveDraft('chat', this._sessionId, text);
     this._pendingSend = { text, storeBefore };
+    this._judgeHeldDraft();   // the emptied box: this send's pin supersedes a held draft; a send without text lets it land
     if (this._expanded) {
       this._expanded = false;
       this._textarea.classList.remove('chat-input-expanded');

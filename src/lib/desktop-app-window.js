@@ -85,7 +85,10 @@
 // MAIN window (the app may show its own save dialog — nothing closes then), a
 // second ✕ within OUTER_CLOSE_AGAIN_MS is the Stop; everywhere the app cannot be
 // asked (a blocked / Watch pane, an agent lease, the RFB rung, no main window, an
-// ended record) the ✕ closes the pane as it always did.
+// ended record) the ✕ closes the pane as it always did. A browser profile's display
+// that conversations are attached to (the record's `holders`, lane browser-display-
+// holders) is theirs: its ✕ closes this view only — never an ask, never a Stop — so
+// the «press ✕ again to stop it» toast appears only with no holder and no lease.
 // AN APP'S SECOND WINDOW (design 016 S1, lane app-guest-window, 2026-10-03 — WeChat's
 // Moments drawn over its main window, cut at the bottom): this window's minimum is the
 // union of every app window's (the view's onMinSize), the title names the FRONT window
@@ -179,6 +182,7 @@ import { SCALE_PREF_KEY, scaleChoiceOf, setScaleChoice, appDefaultModel } from '
 import { wireAppPrefs, appPrefs, onAppPrefs, saveAppPrefs, SATELLITE_PREF_KEY, satellitePlacement, setSatelliteOffset } from './desktop-app-prefs.js';
 import { openShareDialog, openAskDialog, shareChipText } from './window-share.js';
 import { appSecretsKeyWords } from './key-file-words.js'; // lane key-file-law-stores: the stored logins' key file, said
+import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 /** int267 seam: how long the outer ✕ waits for the hub's `close-asked` stamp before it sends close-window anyway. */
 const CLOSE_STAMP_WAIT_MS = 1500;
 
@@ -455,7 +459,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   let revealState = revealInitial(), revealTimer = null;
   let lastPointer = null;       // the last pointer point over this window (a header-bar drag continues from it)
   let idleWarned = false;
-  const phoneMq = typeof matchMedia === 'function' ? matchMedia('(max-width: 768px)') : null;
+  const phoneMq = typeof matchMedia === 'function' ? matchMedia(VC_PHONE_MEDIA) : null;
   const frameKey = () => frameKeyOf(rec);
   const frameChoice = () => frameChoiceOf(appPrefs('desktopAppFrame'), frameKey());
   /** int243: the record's state only moves launching → ready → ended (a relaunch is a NEW id): an answer that says `launching`
@@ -825,7 +829,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   winInfo.onCloseRequest = () => {
     const now = Date.now();
     const v = outerCloseVerdict({
-      state: rec ? rec.state : null, perWindow: cap(rec, 'perWindow'), seat: seatState(), leased: !!lease,
+      state: rec ? rec.state : null, perWindow: cap(rec, 'perWindow'), seat: seatState(), leased: !!lease, holders: rec ? Number(rec.holders) || 0 : 0, // lane browser-display-holders: a browser the agents hold — the ✕ closes this view only
       connected: !!view && view.state === 'connected', mainWid: view && view.client ? view.client.mainWid : 0, frontWid: front ? front.wid : 0, askedAt: closeAskedAt, now,
     });
     winInfo._desktopCloseVerdict = v; // the raw handle the heavy suite reads

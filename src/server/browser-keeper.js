@@ -618,6 +618,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // lane S2: every registry change (a start, a failure, a pin, a removal, a label) may move a conversation's
     // BROWSER FACT — the wiring re-computes the facts and re-publishes active-sessions when a digest moved
     for (const fn of changeListeners) { try { fn(); } catch (e) { log.warn?.(`[browser] change listener failed: ${e && e.message}`); } }
+    // lane browser-display-holders: a lease taken / dropped / re-judged, a person's stop stamped — the display records follow
+    if (displayKeeper && typeof displayKeeper.browserHoldersMoved === 'function') { try { displayKeeper.browserHoldersMoved(); } catch (e) { log.warn?.(`[browser] the display records' holders were not re-read: ${e && e.message}`); } }
   }
   function onChange(fn) { changeListeners.add(fn); return () => changeListeners.delete(fn); }
   // ONE WRITE, ONE BROADCAST PER USER ACT (verifier 2026-09-28): a narrowing of "Who can use it" detaches every lease the
@@ -1705,7 +1707,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const v = livenessOf(rec);
     rec.state = 'stopped'; rec.endedAt = now();
     rec.lastError = v === 'recycled' ? `the browser daemon exited (pid ${rec.pid} is another process now)` : 'the browser daemon exited';
-    if (rec.launch === 'attach') { rec.lastError = v === 'recycled' ? `the browser exited (pid ${rec.pid} is another process now)` : 'the browser exited (its window was closed, or it crashed)'; endDisplay(rec, 'its browser exited'); tabsWentWithBrowser(rec, seenBy); } // lane one-browser-b1: Chrome IS the record's process — the user's own browsing went with it (the driver heal's rule)
+    if (rec.launch === 'attach') { rec.lastError = v === 'recycled' ? `the browser exited (pid ${rec.pid} is another process now)` : 'the browser exited (its window was closed, or it crashed)'; if (userStoppedRec(rec)) { rec.lastError = null; rec.stoppedBy = 'user'; rec.note = USER_STOPPED_NOTE; } endDisplay(rec, 'its browser exited'); tabsWentWithBrowser(rec, seenBy); } // lane one-browser-b1: Chrome IS the record's process — the user's own browsing went with it (the driver heal's rule)
     guard.delete(rec.profileId); live.delete(rec.profileId);
     dirty = true;
     log.log?.(`[browser] ${rec.profileId} daemon gone (pid ${rec.pid}${v === 'recycled' ? ', now another process' : ''}, seen by ${seenBy}) — recorded stopped`);
@@ -2064,6 +2066,51 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    *  refusal that attempted nothing (another browser holds the directory, a cloak record) carries none — the tick re-reads
    *  the lock every pass (a /proc read), so the heal follows the human's close within one tick. */
   const healGated = (rec) => !!(rec && rec.closed && Number.isFinite(rec.closed.retryAt) && now() < rec.closed.retryAt);
+  // ── LANE BROWSER-DISPLAY-HOLDERS (the owner 2026-10-25, «可以»): A PERSON'S STOP IS A FACT THE KEEPER KEEPS, NEVER A CRASH ──
+  // The owner stopped the display window of a profile two conversations were attached to («W8N3 · Screeps live»); its Chrome
+  // died with the display and the tick read that as a crash under a holder — `started again on the attach road`, 4 s later,
+  // twice (the heal budget would have called the person "unstable" on the third). Now the desktop keeper tells this keeper
+  // of a PERSON's stop of a browser's display BEFORE its teardown (`userStoppedDisplay`): the record is stamped
+  // `userStopped: {at, by: 'user', displayId}`, every holding conversation is told once (a `browser-user-stopped` lease event
+  // → the wiring's notice), and NO heal runs while it stands (`userStoppedRec` — a named gate, never a budget hit). It ends
+  // with the record: a conversation's next browser command starts a NEW record (its own act, `startedBy` its verb, no stamp).
+  const USER_STOPPED_NOTE = 'you stopped its display window — the next browser command starts it again';
+  const userStoppedRec = (rec) => !!(rec && rec.userStopped && rec.userStopped.by === 'user');
+  /** The desktop keeper's hook: the person stopped display session `displayId` of `profileId`'s browser (the route's
+   *  `why: 'user'` — the window's Stop, a second ✕, the Desktop list's Close). → the stamped record's view | null. */
+  function userStoppedDisplay({ profileId, displayId } = {}) {
+    ensureLoaded();
+    const rec = reg.browsers[String(profileId || '')];
+    if (!rec || rec.launch !== 'attach' || !rec.displaySession || rec.displaySession.id !== displayId || !B.isLiveBrowser(rec) || !isLocalRec(rec)) return null;
+    const p = profile(rec.profileId);
+    const label = p ? p.label : rec.profileId;
+    rec.userStopped = { at: now(), by: 'user', displayId };
+    dirty = true;
+    const holders = B.attachedHolders(leasesOn(rec.profileId));
+    log.log?.(`[browser] ${rec.profileId} "${label}": the person stopped its display window (${displayId}) — its Chrome goes with it and is NOT started again by itself (user-stopped); ${holders.length} holding conversation(s) told: their next browser command starts it`);
+    emitLease({ kind: 'browser-user-stopped', profileId: rec.profileId, label, holders, displayId, local: true });
+    commit();
+    return browserView(rec);
+  }
+  /** The desktop keeper's reader: who holds the browser whose display record is `displayId` — the conversations attached
+   *  to its profile, and the person's stop while it stands for THAT display (a newer start's display carries none). */
+  function displayHoldersOf(profileId, displayId = null) {
+    ensureLoaded();
+    const id = String(profileId || '');
+    const rec = reg.browsers[id] || null;
+    const stamp = userStoppedRec(rec) && (!displayId || rec.userStopped.displayId === displayId) ? rec.userStopped : null;
+    return { holders: B.attachedHolders(leasesOn(id)).length, ...(stamp ? { userStopped: { at: stamp.at, by: 'user' } } : {}) };
+  }
+  /** The two halves meet through the desktop keeper the attach road already holds: its record view asks
+   *  displayHoldersOf, its stop tells userStoppedDisplay (wired at create and again by setDisplaySessions). */
+  let displayStopOff = null;
+  function wireDisplayKeeper() {
+    try { if (displayStopOff) displayStopOff(); } catch { /* the old keeper is gone */ }
+    displayStopOff = null;
+    if (!displayKeeper) return;
+    if (typeof displayKeeper.setBrowserHolders === 'function') displayKeeper.setBrowserHolders(displayHoldersOf);
+    if (typeof displayKeeper.onBrowserDisplayStop === 'function') displayStopOff = displayKeeper.onBrowserDisplayStop(userStoppedDisplay);
+  }
   /** r5: record a close verdict on a live record. `at` is when this close was FIRST seen (kept while the same code and holder
    *  recur — a re-judged refusal never re-writes the store); `retry` (a relaunch attempt made it) arms the gate from NOW.
    *  → true when the verdict is new (said once). */
@@ -2233,6 +2280,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (!rec || !p || rec.state !== 'ready' || !isLocalRec(rec) || starting.has(p.id) || stopping.has(p.id) || switching.has(p.id)) return Promise.resolve(null);
     if (livenessOf(rec) !== 'ours') return Promise.resolve(null); // never under a daemon we cannot prove ours (the tick marks it gone)
     if (healing.has(p.id)) return healing.get(p.id);
+    if (userStoppedRec(rec)) { if (!force) return Promise.resolve(null); rec.userStopped = null; dirty = true; } // lane browser-display-holders: the person's stop is never healed — only a verb's own start ends it
     // r5 MAJOR 1: an UNSTABLE browser is never started again by itself — not by a verb's force either; only a stop ends it
     if (rec.closed && rec.closed.code === 'browser_unstable') {
       if (noticeUnstable(rec, p)) commit();
@@ -4113,6 +4161,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const attachHeals = new Map(); // profileId → the times of its attach heals
   function healAttach(rec, seenBy) {
     if (!rec || rec.launch !== 'attach' || !leasedNow(rec.profileId) || starting.has(rec.profileId) || stopping.has(rec.profileId)) return null;
+    if (userStoppedRec(rec)) { log.log?.(`[browser] ${rec.profileId}: its Chrome exited after the person stopped its display window (seen by ${seenBy}) — NOT started again (user-stopped, never a heal); the next browser command starts it`); return null; } // lane browser-display-holders
     const t = now();
     const bud = B.healBudgetVerdict({ attempts: attachHeals.get(rec.profileId) || [], now: t });
     if (!bud.ok) {
@@ -7189,7 +7238,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     socketRootOf, // takeover r2: the root every command of a browser this keeper runs must land under
     configFileFor, machineConfigFile, // takeover r3: the config a command on a browser this keeper runs is NAMED with
     setOtherHolders: (fn) => { othersFn = typeof fn === 'function' ? fn : null; },
-    setDisplaySessions: (dk) => { displayKeeper = dk && typeof dk === 'object' ? dk : null; }, // lane one-browser-b1: the desktop keeper (the attach road's display sessions)
+    setDisplaySessions: (dk) => { displayKeeper = dk && typeof dk === 'object' ? dk : null; wireDisplayKeeper(); }, // lane one-browser-b1: the desktop keeper (the attach road's display sessions); lane browser-display-holders: its records read the holders, its person's stop reaches the keeper
     pictureSourceFor, xWindowFor, nativeDialogsFor, // lane browser-x-in-window (B2): the picture switch — the source verdict, the holder's X window, Chrome's own dialog windows over it
     streamPortFor, // P2: the live view's port (attachment or ephemeral; MULTIVIEW: a helper's — a view never STARTS any of them: released / stopped / not-started are said)
     noteStreamClosed, // VERIFY r1 H2: the bridge's upstream closed on an ephemeral relay — judge the process now
@@ -7248,7 +7297,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // lane browser-resume B (§3.9, ruling 2): Resume, the reopen, the hand-back's two halves
     factsMoved: () => { for (const fn of changeListeners) { try { fn(); } catch (e) { log.warn?.(`[browser] change listener failed: ${e && e.message}`); } } }, // lane B: the kept store moved a fact (no registry write)
     resumeFor, resumeAttachment, restoreTabs: (profileId, plan, o) => restoreTabs(profile(String(profileId || '')), plan, o), continueState, noteContinue,
+    displayHoldersOf, userStoppedDisplay, // lane browser-display-holders: a browser display's holders; the person's stop of it
   };
+  wireDisplayKeeper(); // lane browser-display-holders: a display keeper handed in at create is wired like a late one
   if (install) installed = api;
   return api;
 }

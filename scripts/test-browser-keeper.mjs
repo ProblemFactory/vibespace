@@ -7,10 +7,14 @@
 //   ③ the socket dir per config (the rule, the owned-dir check, the call shape) + RED: a shared dir lets close --all cross
 //   ④ the keeper: start on the attach road, every driver call `--cdp` in the config's own root, stop, Chrome's own exit, the
 //     driver road without xpra (said), a display that never came up, cdp_port_missing at the keeper, the boot, the reconcile
+//   ⑦ lane browser-display-holders: the display record reads the conversations attached (holders); a PERSON's stop of the
+//     display stamps the record, tells each holder once, and is NEVER healed (RED control: the keeper without the gate heals
+//     it on the next tick); the next command starts a new record with no stamp
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch, deadPort } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const AT = require('../src/browser-attach.js');
@@ -280,6 +284,69 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   process.kill(pidU, 'SIGKILL'); await sleep(250); await kh.tick(); await sleep(400);
   ok(kh._reg().browsers[pU.id].state === 'stopped' && !kh._reg().browsers[pU.id].displaySession === false && !dlive.has(kh._reg().browsers[pU.id].displaySession.id), 'nobody holds it ⇒ no heal (stopped, its display gone; the next command starts it)');
   await kh.stop(pH.id, { why: 'user' }).catch(() => { });
+}
+// ═══ ⑦ LANE BROWSER-DISPLAY-HOLDERS (the owner 2026-10-25): ONE NOTION OF HELD — a person's stop is a fact, never a crash ═══
+console.log('— ⑦ lane browser-display-holders: the display record carries its holders; a person\'s stop is never healed, its holders told once');
+{
+  const MK = mutantCopies('bkr-holders', REPO);
+  /** the owner's journal, replayed: two conversations hold an attach browser; the PERSON stops its display window (the desktop
+   *  keeper's hook), the display goes and Chrome dies with its X; two ticks. `Kmod` = the keeper module under test. The heal
+   *  is DECIDED inside the tick (healAttach journals its verdict and calls start() before the tick returns — the control's
+   *  new Chrome is up ~150 ms later), so a gated run waits only `settleMs` for a start that must not come. */
+  const replay = async (Kmod, tag, { settleMs }) => {
+    const DU = isolatedDisplays(tag);
+    const hooks = { stop: [], holders: [], moved: 0 };
+    const DKU = { ...DU.DK, onBrowserDisplayStop: (fn) => { hooks.stop.push(fn); return () => { hooks.stop = hooks.stop.filter((x) => x !== fn); }; }, setBrowserHolders: (fn) => { hooks.holders.push(fn); }, browserHoldersMoved: () => { hooks.moved++; return false; } };
+    const liveU = new Set(['bk-00000021', 'bk-00000022']);
+    const jr = [];
+    const ku = Kmod.create({ dataDir: path.join(S, 'data-' + tag), homeDir: HOME, env: () => rtEnv, serverSetting: (x) => settings[x], serverNotice: () => 1, liveKeys: () => liveU, runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: { log(m) { jr.push(String(m)); }, warn(m) { jr.push(String(m)); }, error() { } }, install: false, tickMs: 3600e3, displaySessions: DKU, attachSocketBase: SOCKBASE });
+    const evs = []; ku.onLease((ev) => { if (ev && ev.kind === 'browser-user-stopped') evs.push(ev); });
+    const pP = ku.createProfile({ label: 'personal-life' }, { owner: { kind: 'instance', id: null } });
+    setMode('ok');
+    await ku.attach({ profileId: pP.id, browserKey: 'bk-00000021', sessionId: 'sess-a', by: 'agent' });
+    await ku.attach({ profileId: pP.id, browserKey: 'bk-00000022', sessionId: 'sess-b', by: 'agent' });
+    const r0 = ku._reg().browsers[pP.id];
+    const ds0 = r0 && r0.displaySession ? r0.displaySession.id : null;
+    const before = { holders: ku.displayHoldersOf(pP.id, ds0), moved: hooks.moved };
+    const sv = hooks.stop.length ? hooks.stop[0]({ profileId: pP.id, displayId: ds0, by: 'user' }) : null;
+    const stamped = { rec: ku._reg().browsers[pP.id].userStopped || null, view: ku.displayHoldersOf(pP.id, ds0) };
+    DU.live.delete(ds0); // the desktop keeper tears the display down…
+    process.kill(r0.pid, 'SIGKILL'); await until(() => !alive(r0.pid)); // …and Chrome dies with its X
+    const t0 = Date.now();
+    await ku.tick(); await until(() => { const r = ku._reg().browsers[pP.id]; return r && r !== r0 && r.state === 'ready'; }, settleMs); await ku.tick();
+    const after = ku._reg().browsers[pP.id];
+    return { ku, pP, r0, ds0, DU, hooks, evs, jr, sv, before, stamped, after, launches: DU.calls.filter((c) => c[0] === 'launch').length, healMs: after !== r0 ? Date.now() - t0 : null };
+  };
+  const R = await replay(K, 'ustop', { settleMs: 300 });
+  ok(R.hooks.stop.length === 1 && R.hooks.holders.length === 1 && R.hooks.holders[0] === R.ku.displayHoldersOf, 'a display keeper handed in at create is wired: its records read the holders (setBrowserHolders), its person\'s stop reaches the keeper (onBrowserDisplayStop)');
+  ok(R.r0 && R.r0.launch === 'attach' && R.before.holders.holders === 2 && !R.before.holders.userStopped && R.before.moved > 0, `two conversations attached ⇒ the display record reads holders 2 — the desktop keeper re-read them on every commit (${R.before.moved} calls)`, R.before);
+  ok(R.sv && R.stamped.rec && R.stamped.rec.by === 'user' && R.stamped.rec.displayId === R.ds0 && R.stamped.view.userStopped && R.stamped.view.holders === 2 && R.ku.displayHoldersOf(R.pP.id, 'da-another').userStopped === undefined, 'the person\'s stop stamps the record userStopped {at, by: user, displayId} — that display reads it, another display of the profile does not', R.stamped);
+  ok(R.evs.length === 1 && R.evs[0].holders.map((h) => h.sessionId).sort().join() === 'sess-a,sess-b' && R.evs[0].label === 'personal-life' && R.evs[0].profileId === R.pP.id, 'ONE browser-user-stopped event naming BOTH holding conversations (the wiring tells each once)', R.evs);
+  ok(R.after === R.r0 && R.after.state === 'stopped' && R.after.stoppedBy === 'user' && R.after.lastError === null && /you stopped its display window/.test(R.after.note || '') && R.launches === 1, `the tick saw Chrome gone under two holders and did NOT start it again: the record says the person stopped it (launches ${R.launches})`, { state: R.after.state, stoppedBy: R.after.stoppedBy, note: R.after.note, err: R.after.lastError });
+  ok(R.jr.some((l) => /NOT started again \(user-stopped, never a heal\)/.test(l)) && !R.jr.some((l) => /started again on the attach road/.test(l)), 'the journal names the gate (user-stopped) — never "started again on the attach road", never a heal-budget line');
+  // the next command of a holding conversation starts it — the conversation's own act: a NEW record, its verb named, no stamp
+  await R.ku.attach({ profileId: R.pP.id, browserKey: 'bk-00000021', sessionId: 'sess-a', by: 'agent' });
+  const r2 = R.ku._reg().browsers[R.pP.id];
+  ok(r2 !== R.r0 && r2.state === 'ready' && alive(r2.pid) && !r2.userStopped && /^attach bk-00000021/.test(r2.startedBy || '') && r2.displaySession.id !== R.ds0 && R.ku.displayHoldersOf(R.pP.id, r2.displaySession.id).holders === 2 && !R.ku.displayHoldersOf(R.pP.id, R.ds0).userStopped, 'the next command starts it (startedBy "attach bk-00000021", a new display) and the stamp is gone with the old record', { startedBy: r2.startedBy, stamp: r2.userStopped });
+  // a stop that is not the person's (no hook call) or of another display: no stamp
+  ok(R.ku.userStoppedDisplay({ profileId: R.pP.id, displayId: R.ds0 }) === null && !R.ku._reg().browsers[R.pP.id].userStopped, 'a stop naming an old display (not the record\'s) stamps nothing');
+  await R.ku.stop(R.pP.id, { why: 'user' }).catch(() => { });
+  // THE NOTICE each holder hears (session-status layer ②: a browser-profile notice naming the event)
+  const { SessionStatusManager } = require('../src/session-status.js');
+  const nt = SessionStatusManager.renderNotice(B.userStoppedNotice({ label: 'personal-life', profileId: R.pP.id, at: 1 }));
+  ok(B.userStoppedNotice({ label: 'x' }).kind === 'browser-profile' && /^<system-reminder>\nthe person stopped the browser "personal-life" \(its display window's Stop\) — every tab of it is gone; your next `vibespace-browser` command starts it again/.test(nt) && /browser profile changed/.test(SessionStatusManager.renderNotice(B.profileChangeNotice({ was: 'a', now: 'b' }))), 'the notice: «the person stopped the browser "personal-life" … your next vibespace-browser command starts it again» (a profile change renders as before)', nt);
+  ok(JSON.stringify(B.attachedHolders([{ browserKey: 'bk-1', sessionId: 's1' }, { browserKey: 'bk-2', sessionId: 's1' }, { browserKey: 'hu-00000001', human: true }, { browserKey: 'bk-3', sessionId: null }, null])) === JSON.stringify([{ sessionId: 's1', browserKey: 'bk-1' }, { sessionId: null, browserKey: 'bk-3' }]), 'attachedHolders: one row per conversation (two keys of one session = one), never the person\'s own browsing row');
+  // RED CONTROL — today's behaviour: the keeper without the gate heals the person's stop on the next tick (the owner's journal)
+  const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const GATE = "    if (userStoppedRec(rec)) { log.log?.(`[browser] ${rec.profileId}: its Chrome exited after the person stopped its display window";
+  ok(src.split(GATE).length === 2, 'CONTROL: the heal gate is spelled once in browser-keeper.js');
+  const Kc = MK.load('src/server/browser-keeper.js', src.replace(GATE, '    if (false) { log.log?.(`[browser] ${rec.profileId}: its Chrome exited after the person stopped its display window'), 'nogate');
+  const C = await replay(Kc, 'ustop-ctl', { settleMs: 3000 });
+  ok(C.after !== C.r0 && C.after.state === 'ready' && C.launches === 2 && C.jr.some((l) => /started again on the attach road \(1 in the window\)/.test(l)), `CONTROL: without the gate the person's stop is healed — a new Chrome on a new display ${C.healMs} ms after the tick (the owner's «started again on the attach road»)`, { state: C.after.state, launches: C.launches });
+  await C.ku.stop(C.pP.id, { why: 'user' }).catch(() => { });
+  // the wiring: the person's stop is told to each LIVE holder once (a second stop before it reads the first replaces it)
+  const mpw = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  ok(/if \(!ev \|\| ev\.kind !== 'browser-user-stopped' \|\| !Array\.isArray\(ev\.holders\)\) return null;/.test(mpw) && /st\.dropNotices\(key, \(x\) => x && x\.kind === 'browser-profile' && x\.event === 'user-stopped' && x\.profileId === ev\.profileId\); st\.pushNotice\(key, n\);/.test(mpw), 'WIRING PIN: the browser-user-stopped event pushes ONE browser-profile notice per live holding conversation (the earlier one of the same profile withdrawn)');
 }
 // THE DRIVER ROAD: no xpra on the machine ⇒ today's launch, said on the record
 fakeXpra = false;

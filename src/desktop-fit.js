@@ -470,9 +470,13 @@ function exitCloseVerdict(rec, { leased = false } = {}) {
  *  running, a rung with no per-window protocol, an agent lease, a pane that is not the
  *  active viewer, no main window to ask). 'ask-front' (design 016 S1c) = close-window to the FRONT
  *  window when it is not the main (`frontWid` — WeChat's Moments over its main): that window
- *  closes, the app and the pane stay; the app is asked only when its main is in front. */
-function outerCloseVerdict({ state, perWindow = false, seat, connected, mainWid, frontWid = 0, leased = false, askedAt = 0, now = 0, againMs = OUTER_CLOSE_AGAIN_MS } = {}) {
+ *  closes, the app and the pane stay; the app is asked only when its main is in front.
+ *  `holders` (lane browser-display-holders, the owner 2026-10-25): the conversations attached to the browser PROFILE this
+ *  display shows (the desktop keeper's record of a browser's display session) — the agents' browser: the ✕ closes the
+ *  VIEW only, before the second-✕ Stop (one attached between the two presses still gets the pane-only close). */
+function outerCloseVerdict({ state, perWindow = false, seat, connected, mainWid, frontWid = 0, leased = false, holders = 0, askedAt = 0, now = 0, againMs = OUTER_CLOSE_AGAIN_MS } = {}) {
   if (state !== 'ready') return { act: 'close', why: 'not-running' };
+  if (Number(holders) > 0) return { act: 'close', why: 'holders' };
   if (askedAt > 0 && now >= askedAt && now - askedAt <= againMs) return { act: 'stop', why: 'again' };
   if (!perWindow) return { act: 'close', why: 'no-window-protocol' };
   if (leased) return { act: 'close', why: 'lease' };
@@ -518,8 +522,16 @@ function launchVerdict({ row, apps = [], host = 'local' } = {}) {
   if (foreign && !(row && row.runsTwice)) return { act: 'held', target: null, running: [], again: false, lock: foreign };
   return { act: 'launch', target: null, running: [], again: false, lock: foreign };
 }
+/** lane browser-display-holders (the owner 2026-10-25): a browser display the PERSON stopped while conversations still hold
+ *  its profile (the keeper's view carries `profileId` / `holders` / `userStopped` on a browser's display record only) — the
+ *  Desktop list keeps a row for it («You stopped it · N conversations start it again when they next use it») until a
+ *  conversation's next command starts the browser (the stamp ends with its record) or the last holder leaves. */
+function userStoppedHeld(rec) {
+  return !!(rec && rec.profileId && rec.userStopped && Number(rec.holders) > 0 && rec.state === 'exited' && !rec.replacedBy);
+}
 
 module.exports = {
   RUNNING_STATES, sameAppRecord, launchVerdict, // lane app-launch-singleton
+  userStoppedHeld, // lane browser-display-holders
   fitPolicyOf, keeperFits, topLevelWindows, appWindows, appFitPlan, appMainWindow, APP_TITLE_MAX, windowTitleOf, APP_SCALES, EXPLICIT_SCALES, SCALE_CHOICES, SCALE_ORIGINS, parseScaleChoice, SCALE_MAX, UI_SCALE_RANGE, normalizeDpr, normalizeUiScale, effectiveScale, appScaleFor, scalePick, normalizeScale, SCALE_RULES, round4, scaleKnobs, scaleRuleOf, renderOf, relaunchPaneCss, validateRelaunchRequest, relaunchLeaseVerdict, askCloseVerdict, relaunchVerdict, relaunchBodyOf, scaleMenuModel, OUTER_CLOSE_AGAIN_MS, windowsLeftCount, exitCloseVerdict, outerCloseVerdict,
 };

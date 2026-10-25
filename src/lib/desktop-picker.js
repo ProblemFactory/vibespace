@@ -11,7 +11,7 @@ import { fetchJson } from './utils.js';
 import { pickerRows, recentChoice } from '../desktop-screens.js';
 import { openMachineDesktop, showMachineDesktopDialog } from './machine-desktop.js';
 import { runningWhereText } from './desktop-app-words.js'; // lane app-launch-singleton: where it runs / who started it (a leaf)
-import { RUNNING_STATES } from '../desktop-fit.js';
+import { RUNNING_STATES, userStoppedHeld } from '../desktop-fit.js';
 import { probeAge } from '../desktop-machines-cache.js'; // lane desktop-picker-instant: a row's 技术细节 (PURE)
 
 const RECENT_KEY = 'vibespace.desktopRecent';     // { hostId, display } — this browser's last Desktop choice
@@ -136,7 +136,8 @@ export function openDesktopPicker(app, { anchor = null, focusHost = null } = {})
     // lane app-launch-singleton (the reporter: 「那个 agent 说启动了 Chrome，我本来也找不到它启动的 Chrome 到底在哪儿」): EVERY running app
     // window, whoever started it — where, who, Open (its window), Close
     const live = apps.filter((a) => a && RUNNING_STATES.includes(a.state) && !a.replacedBy);
-    if (live.length) { const g = node('g|apps', () => el('div', 'desktop-picker-group')); g.textContent = t('Running apps'); kids.push(g); }
+    const stoppedHeld = apps.filter(userStoppedHeld); // lane browser-display-holders: a browser display the person stopped while conversations hold it
+    if (live.length || stoppedHeld.length) { const g = node('g|apps', () => el('div', 'desktop-picker-group')); g.textContent = t('Running apps'); kids.push(g); }
     for (const a of live) {
       const line = node('a|' + a.id, () => {
         const l = el('div', 'desktop-picker-app');
@@ -157,6 +158,15 @@ export function openDesktopPicker(app, { anchor = null, focusHost = null } = {})
       s.title = t('Close {app}', { app: String(a.label || a.exec || a.id) });
       // the ONE stop (LibreOffice asked first) — loaded when pressed: the launcher is the whole Apps dialog, this popover is not
       s.onclick = async (e) => { e.stopPropagation(); s.disabled = true; const { stopDesktopApp } = await import('./desktop-app-launcher.js'); await stopDesktopApp(a.id, { name: a.label || a.exec }); };
+      kids.push(line);
+    }
+    // lane browser-display-holders: nothing runs (no Open, no Close) — the row says who starts it again
+    for (const a of stoppedHeld) {
+      const line = node('s|' + a.id, () => { const l = el('div', 'desktop-picker-app desktop-picker-app-stopped'); const b = el('button', 'desktop-picker-row desktop-picker-app-open'); b.type = 'button'; b.disabled = true; l.append(b); return l; });
+      const b = line.firstChild;
+      b.dataset.group = 'apps'; b.dataset.host = a.id; b.dataset.state = 'user-stopped';
+      const n = Number(a.holders) || 0;
+      b.replaceChildren(el('span', 'desktop-picker-name', String(a.appTitle || a.label || a.id)), el('span', 'desktop-picker-state', n === 1 ? t('You stopped it · 1 conversation starts it again when it next uses it') : t('You stopped it · {n} conversations start it again when they next use it', { n })));
       kids.push(line);
     }
     for (const k of [...keep.keys()]) if (!seen.has(k)) keep.delete(k);

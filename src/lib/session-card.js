@@ -125,7 +125,9 @@ export function registerSessionCardMenu() {
   });
   // ── the card's right-click menu, group by group (explicit separators) ──
   // 0_primary: open / resume / history / fork
-  registerMenuItem({ menu: M, group: '0_primary', order: 10, command: 'session.focusWindow', when: live });
+  // the regular class (lane duo-build-1, SPEC-v3 §2.3): a tap on the row IS the window's focus — no window verbs in its menu
+  const wmVerbs = (c) => c.app._vc !== 'regular';
+  registerMenuItem({ menu: M, group: '0_primary', order: 10, command: 'session.focusWindow', when: (c) => live(c) && wmVerbs(c) });
   registerMenuItem({ menu: M, group: '0_primary', order: 20, command: 'session.restart', when: live, label: (c, title) => '⟳ ' + title });
   registerMenuItem({ menu: M, group: '0_primary', order: 10, command: 'session.viewTmux', when: (c) => c.s.status === 'tmux' });
   registerMenuItem({ menu: M, group: '0_primary', order: 10, command: 'session.resumeChat', when: stopped });
@@ -157,8 +159,8 @@ export function registerSessionCardMenu() {
   registerMenuItem({ menu: M, group: '2_locate', order: 10, command: 'session.copyId' });
   registerMenuItem({ menu: M, group: '2_locate', order: 20, command: 'session.copyPath' });
   registerMenuItem({ menu: M, group: '2_locate', order: 30, command: 'session.openCwd', when: (c) => !!c.s.cwd });
-  registerMenuItem({ menu: M, group: '2_locate', order: 40, command: 'session.findWindow', when: (c) => !!c.s.webuiId });
-  registerMenuItem({ menu: M, group: '2_locate', order: 50, command: 'session.goToWindow', when: (c) => !!c.s.webuiId });
+  registerMenuItem({ menu: M, group: '2_locate', order: 40, command: 'session.findWindow', when: (c) => !!c.s.webuiId && wmVerbs(c) });
+  registerMenuItem({ menu: M, group: '2_locate', order: 50, command: 'session.goToWindow', when: (c) => !!c.s.webuiId && wmVerbs(c) });
   registerMenuItem({ menu: M, group: '2_locate', order: 60, command: 'session.moveWindow', when: (c) => !!c.s.webuiId && !c.app.isMobile });
   // 3_admin: billing / rescue / properties / terminate
   registerMenuItem({ menu: M, group: '3_admin', order: 0, separator: true });

@@ -2,6 +2,28 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.355 — 2026-10-25
+
+### Added
+- On a foldable's inner screen the conversation list stays beside the open conversation, with a side bar for its actions, Task Groups, Files and Channels.
+- Half-folded like a book, the list and the conversation each take one half; like a laptop, the conversation's bar moves down to the message box.
+
+### Changed
+- Closing the window of a conversation that is still running now says it keeps running, and the window menu’s Close no longer looks like Terminate session.
+- The note about a program that started listening on a port now says so in plain words and shows the icon of the button that forwards it.
+
+### Fixed
+- Pressing ✕ on the window of a browser a conversation is using now closes only that view — Chrome keeps running and no “press ✕ again” note appears.
+- A browser you stop from its window stays stopped: the conversations using it are told, and the Desktop list says their next command starts it again.
+- Folding or unfolding a foldable phone now switches to the phone or desktop layout cleanly: no leftover sidebar strip, no chat cut off at the left edge.
+- A fold keeps what you were doing: the conversation on screen and the message you were typing stay as they were.
+- On a touch screen, opening or restoring a conversation no longer pops up the keyboard; tap the message box when you want to type.
+- A draft saved on another device no longer replaces what you are typing in the input box — what you send is what you typed.
+- On a phone, the New Session footer shows its whole reason, such as “Choose a folder first”, and every value chip, wrapping them instead of cutting them off.
+- On a phone, notes appear above the message box or under an open dialog’s title instead of covering them, and their ✕ is easier to tap.
+- A message you send with line breaks keeps them in the chat.
+- The model menu in a chat’s status bar now fits on the screen and scrolls, so Effort and the model lock can always be reached.
+
 ## 2.369.354 — 2026-10-25
 
 ### Changed

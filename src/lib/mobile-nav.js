@@ -6,6 +6,7 @@ import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { getCommand, runCommand } from './contributions.js';
 import { openDesktopPicker } from './desktop-picker.js';
 import { installNavFilesDoor } from './phone-files.js'; // lane phone-files-door: the nav's 文件 — one tap to the files
+import { installTrailingBar } from './trailing-bar.js'; // lane duo-build-1: the regular class's trailing bar (this nav, standing)
 
 const SHOWN_KEY = 'vibespace.phoneShown'; // { [desktopId]: winId } — this tab's window on show per desktop (§6b guard 10)
 function readShown() {
@@ -54,7 +55,8 @@ export class MobileNav {
     this._shown = readShown();
     this._shownBooted = false;
 
-    document.getElementById('mobile-nav-menu').onclick = () => app.sidebar.toggle(true);
+    // ☰: the phone's drawer; in the regular class (the Duo's inner portrait) the list COLUMN's show / hide (lane duo-build-1)
+    document.getElementById('mobile-nav-menu').onclick = () => (app.viewportClass?.() === 'regular' ? app.sidebar.toggleList() : app.sidebar.toggle(true));
     // 文件 (lane phone-files-door): the files were reachable only through the «+» long-press sheet — a person looking for
     // their files never looks under «new». One tap: the explorer this phone showed last, else a new one at home
     installNavFilesDoor(app);
@@ -78,8 +80,9 @@ export class MobileNav {
       if (activeId) app.wm.requestClose(activeId);
     };
 
-    this._titleEl.onclick = () => this._showWindowSwitcher();
+    this._titleEl.onclick = () => { if (app.viewportClass?.() !== 'regular') this._showWindowSwitcher(); }; // the regular class's list IS the switcher (SPEC-v3 §2.2)
     this._setupGestures();
+    this.bar = installTrailingBar(app); // the regular class's buttons (shown by the stylesheet there only)
   }
 
   /** A context menu laid out as a full-width sheet under the nav bar (the
@@ -167,8 +170,12 @@ export class MobileNav {
     const count = [...wm.windows.values()].filter(w => !w._hiddenByDesktop && !minimizedOf(wm, w)).length;
     // lane phone-first-screen: the attention page covers the window area — the bar names the page, never a window it hides
     // (a tap on the title still lists the windows; the ✕ that closes the active one is hidden meanwhile — style.css)
-    this._titleEl.textContent = this.app.phoneHome?.shown?.() ? t('For you') : (win?.title || 'VibeSpace') + (count > 1 ? ` (${count})` : '');
+    // the regular class (lane duo-build-1): the conversation's NAME (never its folder, never a window count — its list is beside it)
+    this._titleEl.textContent = this.app.phoneHome?.shown?.() ? t('For you')
+      : this.app.viewportClass?.() === 'regular' ? String(win?.title || 'VibeSpace').split(' — ')[0]
+      : (win?.title || 'VibeSpace') + (count > 1 ? ` (${count})` : '');
     this._titleEl.classList.toggle('arrived', [...wm.windows.values()].some((w) => w.element.classList.contains('window-arrived'))); // an agent placed a window (never shown in front of this one)
+    this.bar?.update?.();
   }
 
   _showWindowSwitcher() {
@@ -355,8 +362,14 @@ export class MobileNav {
       startY = e.touches[0].clientY;
     }, { passive: true });
     document.addEventListener('touchend', (e) => {
+      if (!app.isMobile) return; // built at a fold (lane duo-build-1): unfolded to the desktop, an edge swipe is no drawer
       const dx = e.changedTouches[0].clientX - startX;
       const dy = e.changedTouches[0].clientY - startY;
+      if (Math.abs(dx) > 80 && Math.abs(dy) < 50 && app.viewportClass?.() === 'regular') { // the list column (SPEC-v3 §4): the left edge shows it, a swipe left FROM it hides it
+        if (dx > 0 && startX < 30) app.sidebar.setListHidden(false);
+        else if (dx < 0 && startX < 320 && matchMedia('(orientation: portrait)').matches) app.sidebar.setListHidden(true);
+        return;
+      }
       if (Math.abs(dx) > 80 && Math.abs(dy) < 50) {
         if (dx > 0 && startX < 30) app.sidebar.toggle(true);
         else if (dx < 0 && app.sidebar.isOpen) app.sidebar.toggle(false);

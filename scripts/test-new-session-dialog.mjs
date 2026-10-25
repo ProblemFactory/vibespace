@@ -70,7 +70,7 @@
 //      machine, the right column 「会话」 + one sentence, Create opens a shell); K4 the harness's own terminal UI = the fold's
 //      tick (default folded; ticked ⇒ mode terminal; the Settings default ticks + unfolds it); K5 the removals; K6 频道's
 //      ticks with a group grant's 除了; K7 zh / ja; K8 THE PHONE at 390×844 (a full-screen sheet with the header and the footer
-//      fixed, the footer one line, the right column an accordion with summaries, the picker a bottom sheet, the census — no
+//      fixed, the footer's chips on their own wrapping row above the buttons (P1-5), the right column an accordion with summaries, the picker a bottom sheet, the census — no
 //      input under 16 px / 42 px, no tap target under 32 px — with planted RED controls, the list in the flow, the backend a
 //      native select)
 //   I  A PAIRED MACHINE THAT CANNOT BE REACHED (lane hub-dies-dead-ssh-host — the .346 verify round's HIGH: picking it
@@ -1066,13 +1066,15 @@ try {
     await evalJs(`(() => { const n = document.getElementById('input-session-name'); n.value = 'roadshow-q3'; n.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
     await pickL(gA); await pickL(gB); await sleep(400);
     await shot('k8-phone-top-390');
-    const geo = () => evalJs(`(() => { const d = document.getElementById('dialog-new-session').getBoundingClientRect(), h = document.querySelector('#dialog-new-session .ns-head').getBoundingClientRect(), f = document.querySelector('#dialog-new-session .ns-foot').getBoundingClientRect(), b = document.querySelector('#dialog-new-session .ns-body'); return { d: [Math.round(d.left), Math.round(d.top), Math.round(d.width), Math.round(d.height)], headTop: Math.round(h.top), footBottom: Math.round(f.bottom), footH: Math.round(f.height), scrolls: b.scrollHeight > b.clientHeight + 50, chipTops: [...new Set([...document.querySelectorAll('#ns-foot-info .ns-chip')].map((c) => Math.round(c.getBoundingClientRect().top)))], nChips: document.querySelectorAll('#ns-foot-info .ns-chip').length, vw: innerWidth, vh: innerHeight }; })()`);
+    const geo = () => evalJs(`(() => { const d = document.getElementById('dialog-new-session').getBoundingClientRect(), h = document.querySelector('#dialog-new-session .ns-head').getBoundingClientRect(), f = document.querySelector('#dialog-new-session .ns-foot').getBoundingClientRect(), b = document.querySelector('#dialog-new-session .ns-body'); return { d: [Math.round(d.left), Math.round(d.top), Math.round(d.width), Math.round(d.height)], headTop: Math.round(h.top), footBottom: Math.round(f.bottom), footH: Math.round(f.height), scrolls: b.scrollHeight > b.clientHeight + 50, chipTops: [...new Set([...document.querySelectorAll('#ns-foot-info .ns-chip')].map((c) => Math.round(c.getBoundingClientRect().top)))], nChips: document.querySelectorAll('#ns-foot-info .ns-chip').length, vw: innerWidth, vh: innerHeight, info: (() => { const i = document.getElementById('ns-foot-info'), r = i.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width), sideways: i.scrollWidth > i.clientWidth + 1 }; })(), btnTops: ['.btn-cancel', '.btn-create'].map((s) => Math.round(document.querySelector('#dialog-new-session .ns-foot ' + s).getBoundingClientRect().top)), chipsOut: [...document.querySelectorAll('#ns-foot-info .ns-chip')].filter((c) => { const r = c.getBoundingClientRect(); return r.left < 0 || r.right > innerWidth + 0.5 || c.scrollWidth > c.clientWidth + 1; }).length }; })()`);
     const g0 = await geo();
     check('K8 phone: a FULL-SCREEN sheet (0, 0, 390 × 844), its middle scrolls', g0.d.join() === `0,0,${g0.vw},${g0.vh}` && g0.scrolls, g0);
     await evalJs(`(() => { const b = document.querySelector('#dialog-new-session .ns-body'); b.scrollTop = b.scrollHeight; return true; })()`); await sleep(200);
     const g1 = await geo();
     check('K8 phone: scrolled to the end, the header is still at the top and the footer at the bottom (fixed)', g1.headTop === 0 && g1.footBottom === g1.vh, g1);
-    check('K8 phone: the footer is ONE line — its value chips in one row (they scroll sideways), never taller than a line', g1.footH <= 60 && g1.chipTops.length === 1 && g1.nChips >= 4, g1);
+    // lane phone-refusal-wrap (P1-5): the footer was ONE line whose chips scrolled sideways behind a hidden bar — at 382 / 385 px the
+    // refusal read «✕ Cannot create yet: Ch». Now the chips / the refusal take the footer's own full-width row above Cancel / Create and WRAP
+    check('K8 phone: the footer\'s chips take their OWN full-width row above Cancel / Create and wrap — nothing scrolls sideways, every chip whole on the screen (P1-5)', g1.nChips >= 4 && g1.info.w >= g1.vw - 24 && g1.btnTops.every((t) => t >= g1.info.bottom) && !g1.info.sideways && g1.chipsOut === 0, g1);
     await evalJs(`document.querySelector('#dialog-new-session .ns-body').scrollTop = 0; true`);
     // the right column as an accordion with a summary per resource
     const acc = () => evalJs(`[...document.querySelectorAll('#ns-right .ns-res')].map((r) => ({ k: r.querySelector('[data-res-tog]').dataset.resTog, open: r.classList.contains('open'), sum: r.querySelector('.ns-res-t small').textContent, badge: r.querySelector('.ns-badge, .ns-on')?.textContent || '', body: r.querySelector('.ns-res-body').offsetParent !== null }))`);

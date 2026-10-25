@@ -132,6 +132,10 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   const titleReads = new Map(); // id -> { at, inflight } (x5: the xpra rung's app title for a blocked pane)
   let dirty = false;            // the report's live row changed (the machine's end-of-tick commit carries it)
   let timer = null;
+  // lane browser-display-holders: a browser display's holders (declared before the machine is installed — its hooks call view)
+  let browserHoldersOf = null;            // (profileId, displayId) => { holders, userStopped? } — the browser keeper's (setBrowserHolders)
+  const holdersSeen = new Map();          // display record id → the holders digest the last browserHoldersMoved sent (a move ⇒ one broadcast)
+  const displayStopListeners = new Set(); // ({ profileId, displayId, by }) => void — a person stopping a browser's display
 
   // THE MACHINE KEEPER of device #0 — in-process, ONE store shared with this registry; the policy is handed in as hooks
   const machine = DS.install({ dataDir, env, serverSetting, singleton, display, limits, registryRows, backends, log, now, tickMs, guardSampleMs, geometry, hostId, fitSlowBeltMs,
@@ -352,11 +356,44 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   function onViewers(fn) { if (typeof fn !== 'function') return () => {}; viewerListeners.add(fn); return () => viewerListeners.delete(fn); }
 
   // ── views ──
-  /** The machine's view + the POLICY's rows: the resource report's live row and the idle verdict (same key order as ever). */
+  /** The machine's view + the POLICY's rows: the resource report's live row and the idle verdict (same key order as ever);
+   *  a browser's display session also carries its profile's holders (lane browser-display-holders — an app's view unchanged). */
   function view(rec) {
     const l = live.get(rec.id) || null;
-    return { ...machine.machineView(rec), live: l ? { ...l } : null, idle: M.isLiveState(rec.state) ? M.idleState(rec, now(), rec.idleTimeoutMs) : null };
+    return { ...machine.machineView(rec), live: l ? { ...l } : null, idle: M.isLiveState(rec.state) ? M.idleState(rec, now(), rec.idleTimeoutMs) : null, ...holdersView(rec) };
   }
+  // ── lane browser-display-holders (the owner 2026-10-25, «可以»): ONE NOTION OF HELD ──
+  // The owner's ✕ on a browser profile's display window («W8N3 · Screeps live - Google Chrome») asked Chrome to close and a
+  // second ✕ stopped it, while TWO conversations were attached to that profile: the window's own `lease` (lane E's app lease)
+  // was null, so the close verdict took the user-held road, and the browser keeper then healed the person's Stop as a crash.
+  // The browser keeper's attached conversations now ride the display record (`holders`, `profileId`; `userStopped` while the
+  // person's stop stands) — read from the keeper at every view, broadcast when they move (`browserHoldersMoved`, called on
+  // every browser registry commit); a PERSON's stop of a browser's display is told to the browser keeper BEFORE the teardown
+  // (`onBrowserDisplayStop`) — Chrome dies with the display, and the keeper must know who ended it before its tick sees that.
+  function holdersView(rec) {
+    if (!M.isDisplayForBrowser(rec) || typeof browserHoldersOf !== 'function') return {};
+    let h = null;
+    try { h = browserHoldersOf(rec.forBrowser, rec.id); } catch (e) { log.warn?.(`[desktop] ${rec.id}: the holders of ${rec.forBrowser} could not be read (${e.message})`); }
+    return { profileId: rec.forBrowser, holders: h && Number.isInteger(h.holders) && h.holders > 0 ? h.holders : 0, ...(h && h.userStopped ? { userStopped: { at: Number(h.userStopped.at) || 0, by: 'user' } } : {}) };
+  }
+  const holdersDigest = (v) => `${v.holders}|${v.userStopped ? 1 : 0}`;
+  /** The browser keeper's reader of a profile's holders (late-bound by its setDisplaySessions). */
+  function setBrowserHolders(fn) { browserHoldersOf = typeof fn === 'function' ? fn : null; holdersSeen.clear(); }
+  /** A browser registry write may have moved who holds a profile: re-read every browser display record's holders and
+   *  broadcast ONCE when any digest moved (the cache-invalidation-must-notify law); nothing moved ⇒ nothing sent. */
+  function browserHoldersMoved() {
+    if (typeof browserHoldersOf !== 'function') return false;
+    let moved = false;
+    for (const rec of Object.values(store.apps)) {
+      if (!M.isDisplayForBrowser(rec)) continue;
+      const d = holdersDigest(holdersView(rec));
+      if (holdersSeen.get(rec.id) !== d) { holdersSeen.set(rec.id, d); moved = true; }
+    }
+    for (const id of [...holdersSeen.keys()]) if (!store.apps[id]) holdersSeen.delete(id);
+    if (moved) notify();
+    return moved;
+  }
+  function onBrowserDisplayStop(fn) { if (typeof fn !== 'function') return () => {}; displayStopListeners.add(fn); return () => displayStopListeners.delete(fn); }
   /** Every record of the registry: device #0's, then every paired machine's (lane C2) — newest first. With no
    *  remote record the answer is the machine's own list, untouched (local behaviour byte-identical). */
   function listApps() {
@@ -396,10 +433,16 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   }
   async function stop(id, opts = {}) {
     const ro = store.apps[id] ? null : remoteOf(id);
-    if (!ro) return machine.stop(id, opts);
+    if (!ro) { userStoppedDisplay(store.apps[id], opts); return machine.stop(id, opts); }
     const r = await acc().call(ro.hostId, 'stop', { id, why: opts.why || 'user', ...(opts.force === true ? { force: true } : {}) }); // B-04da ④
     ingestOne(ro.hostId, r.app);
     return remoteGet(id) || r.app;
+  }
+  /** lane browser-display-holders: a PERSON's stop (the window's Stop, the second ✕, the Desktop list's Close — the route's
+   *  `why: 'user'`) of a live browser's display session is told to the browser keeper before the teardown starts. */
+  function userStoppedDisplay(rec, opts) {
+    if (!rec || !M.isDisplayForBrowser(rec) || !M.isLiveState(rec.state) || !opts || opts.why !== 'user') return;
+    for (const fn of displayStopListeners) { try { fn({ profileId: rec.forBrowser, displayId: rec.id, by: 'user' }); } catch (e) { log.warn?.(`[desktop] ${rec.id}: the browser keeper was not told of the person's stop (${e.message})`); } }
   }
   /** lane e2b (§E2.2): the window's pinned pixel size — the machine's record writer (a paired machine's through its `pin` op). */
   function setPin(id, pin) {
@@ -773,7 +816,8 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
     machine, // lane C1: device #0's machine keeper — src/server/desktop-access.js runs its local rung against THIS object (never a second keeper on the same store)
     storeFile: machine.storeFile, logRoot: machine.logRoot, STORE_FILE: DS.STORE_FILE, LOG_DIR: DS.LOG_DIR, SESSION_ENV: DS.SESSION_ENV, _store: machine._store,
     remoteFile, REMOTE_FILE, _remote: () => remote, // lane C2
-    installedOf, noteInstalled }; // the installed-apps list, owner 2026-10-11
+    installedOf, noteInstalled, // the installed-apps list, owner 2026-10-11
+    setBrowserHolders, browserHoldersMoved, onBrowserDisplayStop }; // lane browser-display-holders: a browser's display carries its holders; a person's stop is told
   // lane app-display-secrets: the logins an app's Secret Service keeps (device #0's apps) — the ⋯ menu's count + its door
   keeper.appSecrets = (id) => displayFacts.appSecretsOf({ rec: machine.get(id), dir: path.join(machine.logRoot, id) });
   keeper.forgetAppSecrets = (id) => displayFacts.forgetAppSecrets({ rec: machine.get(id), dir: path.join(machine.logRoot, id) });

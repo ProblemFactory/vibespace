@@ -5,7 +5,7 @@ import { minOf, clampToMin, raiseToMin, keepInside, zoneBox, wholePx, rescaleBox
 import { fixedWindowPlacement } from './desktop-app-placement.js'; // lane app-window-fit-topleft (B-1f0b): where a window whose app fixed its size stands (PURE)
 import { track } from './telemetry-client.js';
 import { t } from './i18n.js';
-import { showWindowContextMenu } from './taskbar.js';
+import { showWindowContextMenu, sessionForWin, closeKeepsWord, sayClosedKeepsRunning } from './taskbar.js';
 import { installTabGroupMixin } from './tab-group.js';
 import { windowTypeIcon } from './window-types.js';
 import { createAgentKindIcon, createBackendIcon, createModeBackendIcon, getAgentKindMeta } from './agent-meta.js';
@@ -15,6 +15,7 @@ import { chipMode, chipWords, titleMinText, CHIP_MODES } from './title-chips.js'
 import { stageRefusalWords, stageWindowKind } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal in words (PURE)
 import { STAGE_ID } from './stage-manager.js';
 import { displayedPanes, revealTab, pressTab } from './chain-layout.js'; // agent browser P7 (§4.6): a split's displayed panes on a narrow layout // PURE: which hiders hold a window's content off-screen (inc-mu6bfv1t-4drq)
+import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 
 /** Show one of the billing chip's three forms (lane G): a class per form + data-mode. */
 function setChipMode(chip, mode) {
@@ -112,6 +113,7 @@ class WindowManager {
     const iconSpan = document.createElement('span'); iconSpan.className = 'window-type-icon'; iconSpan.innerHTML = windowTypeIcon(type);
     iconWrap.append(backendIconSlot, agentKindSlot, iconSpan);
     const titleSpan = document.createElement('span'); titleSpan.className = 'window-title'; titleSpan.textContent = title;
+    titleSpan.dataset.name = String(title || '').split(' — ')[0]; // the regular class's head shows the name alone (style.css)
     const controls = document.createElement('div'); controls.className = 'window-controls';
     // the four titlebar tooltips are human-visible chrome (a3 i18n: they were the last untranslated words on every window)
     controls.innerHTML = `<button class="win-btn win-overlap-btn no-overlap" title="${escHtml(t('Overlapping windows'))}">□</button><button class="win-btn win-minimize" title="${escHtml(t('Minimize'))}">─</button><button class="win-btn win-maximize" title="${escHtml(t('Maximize'))}">□</button><button class="win-btn win-close" title="${escHtml(t('Close'))}">✕</button>`;
@@ -250,8 +252,8 @@ class WindowManager {
 
   _reflowWindows() {
     if (this._suppressReflow) return;
-    // Skip on mobile — windows are position:fixed via CSS
-    if (window.innerWidth <= 768) return;
+    // Skip on the phone paths (compact + regular) — the stylesheet places the window on show (lane duo-build-1: one rule)
+    if (this._mobileLayout()) return;
     for (const win of this.windows.values()) {
       // Skip grouped guests — they share the host's element
       if (win._tabChain && win._tabChain.tabs[0] !== win.id) continue;
@@ -264,6 +266,34 @@ class WindowManager {
       if (win.gridBounds && !win.isMaximized) this._applyGridBounds(win);
       if (win.minWidth || win.minHeight) this._applyOwnMin(win); // the workspace cap follows the workspace (r2)
     }
+  }
+
+  /** A VIEWPORT CLASS SWITCH (lane duo-build-1 — a fold / unfold / rotation across the phone line; src/lib/viewport-switch.js):
+   *  every window takes the new class's rule, exactly as a fresh load at this size places it. The phone: ONE window on
+   *  show — the active one, else the most recently used — and the stylesheet fills the workspace with it. The desktop:
+   *  each window back on its gridBounds (a window never moved has none: its own box, kept inside this workspace — the
+   *  phone's stylesheet only overrode it). Then every view re-measures — a ChatView laid out at the old width wraps at the new one (B-1d40: the
+   *  desktop's geometry outlived a fold, the transcript ran off the left edge). Writes no layout. */
+  refitForViewport(phone) {
+    if (phone) {
+      const a = this.windows.get(this.activeWindowId);
+      if (!a || a.isMinimized || a._hiddenByDesktop || a._hiddenByStage) this._focusMostRecent();
+    } else {
+      for (const win of this.windows.values()) {
+        if (win._tabChain && win._tabChain.tabs[0] !== win.id) continue; // a guest is drawn by its host
+        if (win.gridBounds || win.isMaximized || win.fixedSize || win._hiddenByDesktop) continue;
+        const own = this._layoutBoxOf(win.element);
+        if (own) this._placeWindow(win, own);
+      }
+      this._reflowWindows();
+    }
+    this.syncHiddenViews();
+    requestAnimationFrame(() => {
+      for (const w of this.windows.values()) {
+        if (!w.onResize || w.isMinimized || w._hiddenByDesktop) continue;
+        try { w.onResize(); } catch (e) { console.warn('[viewport] a window did not re-measure:', e); }
+      }
+    });
   }
 
   _scheduleReflowWindows() {
@@ -1713,7 +1743,7 @@ class WindowManager {
   _mobileLayout() {
     if (!this._hideMq && typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
       try {
-        this._hideMq = window.matchMedia('(max-width: 768px)');
+        this._hideMq = window.matchMedia(VC_PHONE_MEDIA);
         this._hideMq.addEventListener?.('change', () => this.syncHiddenViews());
       } catch { this._hideMq = null; }
     }
@@ -1797,7 +1827,9 @@ class WindowManager {
       try { go = win.onCloseRequest() !== false; } catch (e) { console.warn('[window] onCloseRequest threw — closing', e); }
       if (!go) return false;
     }
+    const said = this._app ? closeKeepsWord(sessionForWin(this._app, win)) : null;   // read BEFORE the window goes (it names its session)
     this.closeWindow(id);
+    if (said) sayClosedKeepsRunning(said);   // P2-2: ✕ on a running conversation's window says it keeps running — one toast, no ask
     return true;
   }
   /** THE ONE RETIREMENT of a closing window (inc-mukeyzpt-lpou). Every register that can bring a window back
@@ -1832,7 +1864,7 @@ class WindowManager {
   setTitle(id, t) {
     const win = this.windows.get(id); if (!win) return;
     if (win.title === t) return; // no-op guard: called per 5s identity sync for every window
-    win.title = t; win.titleSpan.textContent = t;
+    win.title = t; win.titleSpan.textContent = t; if (win.titleSpan.dataset) win.titleSpan.dataset.name = String(t || '').split(' — ')[0];
     // Update tab label if in a chain
     if (win._tabChain) {
       const host = this.windows.get(win._tabChain.tabs[0]);

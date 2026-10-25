@@ -1297,7 +1297,7 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
   position: relative; z-index: 1; margin-top: -3px;
 }
 #toolbar-resize-handle:hover, #toolbar-resize-handle.active { background: var(--accent-dim); }
-@media (max-width: 768px) { #toolbar-resize-handle { display: none; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { #toolbar-resize-handle { display: none; } }
 #taskbar {
   height: var(--taskbar-height); background: var(--bg-taskbar);
   border-top: 1px solid var(--border); display: flex; align-items: center;
@@ -1533,7 +1533,7 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .voice-follow[hidden], html.voice-absent .voice-follow { display: none; }
 .voice-follow > .voice-btn { position: static; }
 .voice-follow > .voice-btn:hover { color: var(--text); }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .voice-btn { min-width: 40px; height: 40px; right: 2px; bottom: 2px; border-radius: 20px; }
   .voice-btn svg { width: 20px; height: 20px; }
   html:not(.voice-absent) .voice-field > textarea { padding-right: 46px; min-height: 44px; }
@@ -2108,7 +2108,7 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .pf-pk-l b { font-family: 'SF Mono','Fira Code',monospace; color: var(--text); font-weight: 500; }
 .pf-pk-r { display: flex; gap: 8px; flex: none; }
 .pf-pk-r .btn-create svg { width: 12px; height: 12px; vertical-align: -1px; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .dialog.pf-picker { width: 100vw; max-width: 100vw; height: 100vh; border-radius: 0; }
   .pf-pk-main { flex-direction: column; }
   .pf-pk-left { width: auto; border-right: 0; border-bottom: 1px solid var(--border); max-height: 55%; }
@@ -2303,7 +2303,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 }
 #mobile-nav-new { color: var(--accent); font-weight: 700; }
 #mobile-nav-close { font-size: 16px; color: var(--text-dim); display: none; }
-@media (max-width: 768px) { #mobile-nav-close { display: block; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { #mobile-nav-close { display: block; } }
 /* ⚙ + quota chip — the taskbar (gear, pies, popup anchors) is hidden ≤768px,
    so these are the phone's only entry points to the gs-menu / usage popup */
 #mobile-nav-gear, #mobile-nav-todos {
@@ -2352,7 +2352,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 }
 #mobile-nav-title:active { opacity: 0.6; }
 
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   /* Sidebar: full-width overlay (z-index must beat window z-index which can be 10000+) */
   .sidebar {
     width: calc(100vw / var(--ui-scale, 1)) !important; max-width: calc(100vw / var(--ui-scale, 1)); z-index: 90000;
@@ -2475,7 +2475,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
    lane's (docs/design-gear-menu-hierarchy.md) and are deliberately NOT lifted
    here — design-mobile-gaps #8 hands them over by name. Selectors carry a parent where a later
    stylesheet (chat.css) restates the same property at (0,1,0). ── */
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   /* nav bar */
   #mobile-nav { gap: 2px; padding: 0 6px; }
   #mobile-nav-menu, #mobile-nav-new, #mobile-nav-close, #mobile-nav-gear, #mobile-nav-usage, #mobile-nav-todos {
@@ -2585,6 +2585,187 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   .mobile-win-row.mobile-win-minimized { opacity: 0.6; }
 }
 
+/* ── THE REGULAR CLASS (lane duo-build-1 slice 2 — SPEC-v3 rev 3.3 §2 / §4 / §8; src/viewport-class.js) ──
+   A coarse pointer 640–1023 px wide: the iPhone Duo's inner display (951×585 landscape, 669×867 portrait). The phone's
+   own pieces side by side, never the desktop's: the LIST COLUMN (#sidebar as a static 320 px column — never an overlay,
+   never closed by a window's focus) | the CONVERSATION COLUMN (the window on show fills it) | in landscape the TRAILING
+   BAR (#mobile-nav standing vertically on the right edge, 56 px = 44 px buttons + 6 + 6; src/lib/trailing-bar.js), in
+   portrait the same bar lying horizontally over the conversation column only. The phone's stylesheet blocks apply here
+   too (their media list includes the class — VC_PHONE_MEDIA); these rules only re-ARRANGE. html[data-vc] is written by
+   the App before the loading screen lifts (src/lib/app.js), so the first painted frame is already arranged. */
+html[data-vc="regular"] .sidebar {
+  position: fixed !important; top: 0; left: 0; bottom: 0;
+  width: 320px !important; min-width: 320px !important; max-width: 320px !important;
+  height: calc(100vh / var(--ui-scale, 1)) !important; height: calc(100dvh / var(--ui-scale, 1)) !important;
+  transform: none !important; transition: none; z-index: 20; border-right: 1px solid var(--border);
+}
+html[data-vc="regular"] #main-wrapper { margin-left: 321px !important; margin-right: 0 !important; }
+html[data-vc="regular"].vs-list-hidden .sidebar { display: none !important; }
+html[data-vc="regular"].vs-list-hidden #main-wrapper { margin-left: 0 !important; }
+html[data-vc="regular"] #sidebar-close, html[data-vc="regular"] .sidebar .resizer { display: none !important; }
+html[data-vc="regular"] #phone-home { display: none !important; } /* the list column IS the attention list here (SPEC-v3 §9) */
+
+/* the list column's head (44): «Sessions» · filter · + · ⋯ — the + lives in the list (Mail's Compose), not on the bar */
+html[data-vc="regular"] .sidebar-header { min-height: 44px; padding: 0 4px 0 12px; gap: 0; }
+html[data-vc="regular"] .sidebar-title { flex: 1; font-size: 15px; font-weight: 600; }
+html[data-vc="regular"] .sidebar-header .icon-btn { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+html[data-vc="regular"] #sidebar-new { color: var(--accent); font-size: 22px; font-weight: 700; }
+#sidebar-new { display: none; }
+html[data-vc="regular"] #sidebar-new { display: inline-flex; }
+html[data-vc="regular"] #manage-toggle, html[data-vc="regular"] #sort-toggle { display: none !important; } /* in the list's ⋯ here (SPEC-v3 §2.3) */
+html[data-vc="regular"] .sidebar-tab { min-height: 44px; font-size: 13px; }
+html[data-vc="regular"] #session-filter.filter-input { min-height: 36px; font-size: 16px; } /* 16 px: iOS never zooms the field */
+html[data-vc="regular"] #session-filter-row { padding: 4px 12px; min-height: 44px; }
+/* selection = the whole row's tint, no left accent bar (SPEC-v3 §2.3 / §8: Mail, Messages, Lark) */
+html[data-vc="regular"] .session-item-card.highlighted { border-left-width: 1px !important; border-left-color: var(--border) !important; background: var(--bg-hover); }
+html[data-vc="regular"] .session-item-card { min-height: 44px; }
+
+/* the conversation column: the window on show fills it */
+html[data-vc="regular"] #workspace { flex: 1; min-height: 0; }
+
+/* the bar's buttons: built on every phone page, shown only in the regular class */
+.mnav-bar-btn, .mnav-gap { display: none; }
+#mobile-nav .mnav-bar-btn, #mobile-nav .mnav-dest {
+  position: relative; background: none; border: none; color: var(--text-secondary); cursor: pointer;
+  border-radius: var(--radius); flex-shrink: 0; align-items: center; justify-content: center; padding: 0;
+}
+#mobile-nav .mnav-bar-btn svg, #mobile-nav .mnav-dest svg { width: 20px; height: 20px; }
+#mobile-nav .mnav-dest.selected { color: var(--accent); background: var(--bg-hover); }
+.mnav-badge { position: absolute; top: 3px; right: 2px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: var(--accent-fg); font-size: 11px; line-height: 16px; font-weight: 700; text-align: center; }
+.mnav-badge.hidden { display: none; }
+.mnav-tip { display: none; position: fixed; z-index: 99999; pointer-events: none; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--bg-dialog); border: 1px solid var(--border-active); color: var(--text); font-size: 13px; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+
+/* ── landscape: the TRAILING BAR (SPEC-v3 §2.2 + the owner's bottom section) ── */
+@media (orientation: landscape) {
+  html[data-vc="regular"] #main-wrapper { margin-right: 56px !important; }
+  html[data-vc="regular"] #mobile-nav {
+    position: fixed; top: 0; right: 0; bottom: 0; width: 56px; height: auto; z-index: 20;
+    flex-direction: column; align-items: center; gap: 8px; padding: 8px 6px max(8px, env(safe-area-inset-bottom));
+    border-bottom: none; border-left: 1px solid var(--border); overflow: hidden;
+  }
+  html[data-vc="regular"] #mobile-nav > * { order: 50; }
+  html[data-vc="regular"] #mobile-nav-menu, html[data-vc="regular"] #mobile-nav-title, html[data-vc="regular"] #mobile-nav-usage,
+  html[data-vc="regular"] #mobile-nav-todos, html[data-vc="regular"] #mobile-nav-close, html[data-vc="regular"] #mobile-nav-new,
+  html[data-vc="regular"] #mobile-nav-vault { display: none !important; }
+  html[data-vc="regular"] #mobile-nav .mnav-bar-btn.on { display: inline-flex; }
+  html[data-vc="regular"] #mobile-nav .mnav-bar-btn, html[data-vc="regular"] #mobile-nav .mnav-dest, html[data-vc="regular"] #mobile-nav-gear {
+    width: 44px !important; height: 44px !important; min-width: 44px; min-height: 44px; padding: 0 !important;
+  }
+  html[data-vc="regular"] #mobile-nav-viewer-close { order: 1; }
+  html[data-vc="regular"] #mobile-nav-artifacts { order: 2; }
+  html[data-vc="regular"] #mobile-nav-more { order: 3; }
+  html[data-vc="regular"] #mobile-nav-live { order: 4; }
+  html[data-vc="regular"] #mobile-nav .mnav-gap { display: block; order: 10; flex: 1 1 auto; min-height: 8px; align-self: stretch; }
+  html[data-vc="regular"] #mobile-nav .mnav-dest { display: inline-flex; }
+  html[data-vc="regular"] #mobile-nav-dest-tasks { order: 11; }
+  html[data-vc="regular"] #mobile-nav-files { order: 12; }
+  html[data-vc="regular"] #mobile-nav-dest-channels { order: 13; }
+  html[data-vc="regular"] #mobile-nav-dest-browser { order: 14; }
+  html[data-vc="regular"] #mobile-nav-dest-jobs { order: 15; }
+  html[data-vc="regular"] #mobile-nav-gear { order: 20; display: inline-flex !important; align-items: center; justify-content: center; }
+  html[data-vc="regular"] #mobile-nav-files .mnav-word { display: none !important; }
+  /* the conversation's head: its title + its state word, no buttons (SPEC-v3 §2.4 — the ⋯ is on the bar) */
+  html[data-vc="regular"] .window.window-active > .window-titlebar {
+    display: flex; height: 44px; cursor: default; padding: 0 16px; touch-action: auto; background: var(--bg-titlebar-active);
+  }
+  html[data-vc="regular"] .window.window-active > .window-titlebar .window-controls,
+  html[data-vc="regular"] .window.window-active > .window-titlebar .window-icon-stack { display: none !important; }
+  html[data-vc="regular"] .window.window-active > .window-titlebar .window-title { font-size: 15px; font-weight: 600; color: var(--text); }
+}
+
+/* ── portrait: list 320 | conversation 348 side by side; the bar lies over the conversation column only (SPEC-v3 §4) ── */
+@media (orientation: portrait) {
+  html[data-vc="regular"] #mobile-nav { height: 44px; }
+  html[data-vc="regular"] #mobile-nav-files, html[data-vc="regular"] #mobile-nav-usage, html[data-vc="regular"] #mobile-nav-todos,
+  html[data-vc="regular"] #mobile-nav-close, html[data-vc="regular"] #mobile-nav-new, html[data-vc="regular"] #mobile-nav-vault { display: none !important; }
+  html[data-vc="regular"] #mobile-nav > * { order: 50; }
+  html[data-vc="regular"] #mobile-nav-menu { order: 1; }
+  html[data-vc="regular"] #mobile-nav-viewer-close { order: 2; }
+  html[data-vc="regular"] #mobile-nav-title { order: 3; cursor: default; }
+  html[data-vc="regular"] #mobile-nav-artifacts { order: 4; }
+  html[data-vc="regular"] #mobile-nav-more { order: 5; }
+  html[data-vc="regular"] #mobile-nav-gear { order: 6; }
+  html[data-vc="regular"] #mobile-nav #mobile-nav-viewer-close.on, html[data-vc="regular"] #mobile-nav #mobile-nav-artifacts.on, html[data-vc="regular"] #mobile-nav #mobile-nav-more.on { display: inline-flex; }
+  html[data-vc="regular"] #mobile-nav .mnav-bar-btn, html[data-vc="regular"] #mobile-nav-menu, html[data-vc="regular"] #mobile-nav-gear { min-width: 44px; min-height: 44px; }
+}
+
+/* ── THE POSTURE LADDER'S ARRANGEMENTS (lane duo-build-1 slice 4 — SPEC-v3 rev 3.3 §3 / §5; src/lib/fold-ladder.js writes
+   <html data-fold>, --seg-edge, --fold-seam; only the regular class reaches book / laptop; `pending` has NO rule here —
+   it changes nothing) ── */
+/* BOOK (horizontal-viewport-segments: 2): the two columns snap to the two segments, 50 / 50 around the shared edge; the
+   design seam (20 px, --bg-root) holds nothing interactive; each column keeps 24 px of padding toward the seam, so no
+   tappable element lies in edge − 34 … edge + 34 (441–509 at 475.5); the conversation's viewer stays in its column */
+html[data-vc="regular"][data-fold="book"] .sidebar {
+  width: calc(var(--seg-edge, 475.5px) - var(--fold-seam, 20px) / 2) !important;
+  min-width: 0 !important; max-width: none !important; padding-right: 24px; box-sizing: border-box; border-right: none;
+  transition: width 0.2s ease;
+}
+html[data-vc="regular"][data-fold="book"] #main-wrapper {
+  margin-left: calc(var(--seg-edge, 475.5px) + var(--fold-seam, 20px) / 2) !important; padding-left: 24px; box-sizing: border-box;
+}
+html[data-vc="regular"][data-fold="book"] body::after {
+  content: ''; position: fixed; top: 0; bottom: 0; z-index: 30; pointer-events: none; background: var(--bg-root);
+  left: calc(var(--seg-edge, 475.5px) - var(--fold-seam, 20px) / 2); width: var(--fold-seam, 20px);
+}
+/* sheets and menus land in the conversation's segment, never resting on the seam (111466) */
+html[data-vc="regular"][data-fold="book"] .context-menu.mobile-sheet { left: calc(var(--seg-edge, 475.5px) + var(--fold-seam, 20px) / 2 + 24px) !important; right: 64px !important; }
+@media (prefers-reduced-motion: reduce) { html[data-vc="regular"][data-fold="book"] .sidebar { transition: none; } }
+
+/* LAPTOP (vertical-viewport-segments: 2) — NOT another layout (SPEC-v3 §5): the two columns as in portrait, the transcript
+   and the list scroll through the band; the ONLY move: the conversation's bar leaves the top for the lower segment, just
+   above the composer (--composer-h, measured by the ladder's owner); under a keyboard the yielding order (laptopYield)
+   sets html.vs-kb-nobar when even the bar no longer fits */
+html[data-vc="regular"][data-fold="laptop"] #mobile-nav {
+  position: fixed; left: 321px; right: 0; top: auto; z-index: 95000; /* above the window on show (its inline z-index), below menus / dialogs */
+  bottom: calc(var(--kb-inset, 0px) + var(--composer-h, 104px)); border-top: 1px solid var(--border); border-bottom: none;
+}
+html[data-vc="regular"].vs-list-hidden[data-fold="laptop"] #mobile-nav { left: 0; }
+html[data-vc="regular"][data-fold="laptop"] .window.window-active .chat-message-list { padding-bottom: 52px; }
+html[data-vc="regular"][data-fold="laptop"].vs-kb-nobar #mobile-nav { display: none !important; }
+
+/* the list column's rows: the phone's shape (SPEC-v3 §2.3 / §8) — name 15 px · state as a coloured word · the folder as
+   the second line; star / archive / details live in the row's long-press menu; selection = the whole row's tint */
+html[data-vc="regular"] .col-list { display: flex; flex-direction: column; }
+html[data-vc="regular"] .col-card { border: none !important; border-radius: 0; margin: 0; padding: 8px 12px 8px 14px; border-bottom: 1px solid var(--border) !important; min-height: 56px; }
+html[data-vc="regular"] .col-card .session-side-controls, html[data-vc="regular"] .col-card .session-expand-btn,
+html[data-vc="regular"] .col-card .session-card-badge, html[data-vc="regular"] .col-card .session-todo-pill { display: none !important; }
+html[data-vc="regular"] .col-card .session-card-name { font-size: 15px; font-weight: 600; }
+html[data-vc="regular"] .col-card .sess-state-chip { border: none !important; background: none !important; padding: 0 !important; font-size: 13px; color: var(--chip-color); }
+html[data-vc="regular"] .col-card .sess-state-chip .chip-icon { display: none; }
+html[data-vc="regular"] .col-card .sess-state-chip .chip-text { display: inline !important; }
+html[data-vc="regular"] .col-card .col-card-path { font-size: 13px; color: var(--text-dim); padding: 2px 0 0; } /* the head ellipsizes, the tail stays (.wb-card-path-text) */
+html[data-vc="regular"] .col-card.highlighted { background: var(--bg-hover); border-left: none !important; }
+html[data-vc="regular"] .col-sentinel { height: 1px; }
+/* the inline answers (SPEC-v3 §2.3): the row's question in two lines + its reply chips (outlined, 44 px) under its folder */
+html[data-vc="regular"] .col-card .col-asks { margin: 6px 0 2px; }
+html[data-vc="regular"] .col-card .col-asks[hidden] { display: none; }
+html[data-vc="regular"] .col-asks .ut-item { padding: 0; border: none; background: none; display: flex; gap: 8px; align-items: flex-start; }
+html[data-vc="regular"] .col-asks .ut-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+html[data-vc="regular"] .col-asks .ut-text { order: 1; }
+html[data-vc="regular"] .col-asks .ut-opts { order: 2; }
+html[data-vc="regular"] .col-asks .ut-actions { order: 3; float: none !important; position: static !important; display: flex !important; gap: 4px; margin-top: 4px; opacity: 1; }
+html[data-vc="regular"] .col-asks .ut-meta { order: 4; font-size: 12px; color: var(--text-dim); }
+html[data-vc="regular"] .col-asks .ut-opt { max-width: 100%; padding: 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+html[data-vc="regular"] .col-asks .ut-text { font-size: 13px; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+html[data-vc="regular"] .col-asks .ut-opt, html[data-vc="regular"] .col-asks .ut-reply-btn { min-height: 44px; font-size: 14px; border: 1px solid var(--border); background: var(--bg-input); border-radius: var(--radius); }
+html[data-vc="regular"] .col-asks .ut-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+html[data-vc="regular"] .col-asks .ut-act { min-width: 44px; min-height: 44px; }
+
+/* one scroll: the search row scrolls with the rows (SPEC-v3 §2.3) */
+html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex: none !important; padding: 0; }
+/* the conversation's head: its name + its state word (src/lib/trailing-bar.js writes data-state) */
+@media (orientation: landscape) {
+  html[data-vc="regular"] .window.window-active > .window-titlebar .window-title { font-size: 0 !important; overflow: hidden; }
+  html[data-vc="regular"] .window.window-active > .window-titlebar .window-title::before { content: attr(data-name); font-size: 15px; font-weight: 600; color: var(--text); }
+  html[data-vc="regular"] .window.window-active > .window-titlebar .window-title::after { content: attr(data-state); margin-left: 10px; font-size: 13px; font-weight: 500; color: var(--state-color, var(--text-dim)); }
+  html[data-vc="regular"] .window.window-active > .window-titlebar > :not(.window-title) { display: none !important; }
+}
+.mnav-state { display: none; }
+@media (orientation: portrait) {
+  html[data-vc="regular"] #mobile-nav-title { flex: 0 1 auto; min-width: 0; text-align: left; padding-left: 4px; }
+  html[data-vc="regular"] #mobile-nav .mnav-state { display: inline; order: 3; flex: 1 1 auto; min-width: max-content; padding: 0 6px; font-size: 13px; font-weight: 500; color: var(--state-color, var(--text-dim)); white-space: nowrap; }
+}
+
 /* Mobile terminal key toolbar (hidden on desktop) */
 /* Mobile paste pad: visible long-press → Paste target (HTTP fallback where the
    async Clipboard API is unavailable). Routes into the same paste pipeline. */
@@ -2663,6 +2844,16 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 .global-toast-wide .global-toast-action { order: 2; }
 .global-toast-out { opacity: 0; transition: opacity 0.25s; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* lane phone-refusal-wrap: a toast that names a control shows the control's own SVG (the port notice: the plug of the
+   machine row's Forward button — it said 🔌) */
+.global-toast-icon { flex: none; display: inline-flex; align-items: center; color: var(--accent); margin-top: 1px; }
+.global-toast-icon svg { width: 14px; height: 14px; }
+/* P2-1: on a phone / touch screen the stack never stands on the composer or on an open modal's rows (utils.js toastSpot):
+   a modal makes this ROOM under its head and the stack stands over it; the ✕ is a 44 px target (it was 14×12) */
+.gt-room { flex: none; }
+@media (hover: none) and (pointer: coarse) {
+  .global-toast-x { min-width: 44px; min-height: 44px; margin: -9px -10px -9px 0; display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }
+}
 
 /* ── THE NEW SESSION FORM IN TWO COLUMNS (lane new-session-form; POC v2.2) ──
    LEFT «where and how it runs» = the harness's own flags; RIGHT «what it may use» = VibeSpace's own stores (#ns-right,
@@ -2833,7 +3024,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 .ns-sheet-h { display: flex; align-items: center; justify-content: space-between; padding: 6px 6px 4px 10px; font-size: 12.5px; color: var(--text-secondary); }
 .ns-sheet-h b { font-size: 14px; color: var(--text); font-weight: 600; }
 .ns-sheet-h button { border: 0; background: transparent; color: var(--accent); font-size: 14px; font-weight: 600; min-height: 36px; padding: 0 10px; cursor: pointer; font-family: inherit; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   /* the phone: the kind switch is a full-width row under the title (the close button stays at the top right) */
   .ns-head { flex-wrap: wrap; row-gap: 8px; }
   .ns-head .dialog-close { order: 4; }
@@ -2849,20 +3040,23 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 /* THE PHONE (lane new-session-layout-v3-build, the design lane's phone addendum — measured on the .348 form at 390×844: a
    floating card with 3.8–5.3 screens of inner scroll, a 119 px footer, 40–49 targets under 32 px, 12 px inputs iOS zooms
    into): a FULL-SCREEN SHEET — the header (title · backend chip · machine dot, then Agent | Terminal across) and the footer
-   fixed, the middle scrolls; the footer ONE line (the value chips scroll sideways); 16 px / 42 px inputs; every tap
+   fixed, the middle scrolls; the footer's value chips / its refusal WRAP (P1-5 below — they scrolled sideways once); 16 px / 42 px inputs; every tap
    target ≥ 32 px (a group chip's × 30 px); the backend a native select; model / effort / permission one per row. */
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   #dialog-new-session.ns-dialog { width: 100vw !important; max-width: none; height: 100vh; height: 100dvh; max-height: none; border-radius: 0; border: 0; overflow: hidden; }
   #dialog-new-session .ns-head, #dialog-new-session .ns-foot { flex: none; }
   #dialog-new-session .ns-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px; }
   #dialog-new-session .ns-head { padding: 10px 12px; }
   #dialog-new-session .ns-kind-seg button { min-height: 38px; font-size: 14px; }
   #dialog-new-session .dialog-close { min-width: 36px; min-height: 36px; font-size: 16px; }
-  #dialog-new-session .ns-foot { flex-wrap: nowrap; gap: 8px; padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom, 0px)); }
-  #dialog-new-session .ns-foot-info { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
-  #dialog-new-session .ns-foot-info::-webkit-scrollbar { display: none; }
-  #dialog-new-session .ns-chip { min-height: 32px; flex: none; font-size: 12px; padding: 0 10px; }
-  #dialog-new-session .ns-refuse { white-space: nowrap; font-size: 13px; }
+  /* P1-5 (lane phone-refusal-wrap — the duo walk at 382 / 385 px read «✕ Cannot create yet: Ch»: a 147 px box, nowrap, the
+     rest behind a hidden sideways scroll): THE REFUSAL AND THE CHIPS WRAP, nothing scrolls sideways — beside Cancel /
+     Create while they fit in a line (594 px: the sentence on one line, the chips in two), on their OWN full-width row
+     above the buttons on a narrow phone (≤ 480 px, below) */
+  #dialog-new-session .ns-foot { flex-wrap: wrap; gap: 8px; padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom, 0px)); }
+  #dialog-new-session .ns-foot-info { flex-wrap: wrap; min-width: 0; }
+  #dialog-new-session .ns-chip { min-height: 32px; flex: none; max-width: 100%; font-size: 12px; padding: 0 10px; white-space: normal; overflow-wrap: anywhere; text-align: start; }
+  #dialog-new-session .ns-refuse { white-space: normal; overflow-wrap: anywhere; font-size: 13px; line-height: 1.35; }
   #dialog-new-session .ns-foot .btn-cancel, #dialog-new-session .ns-foot .btn-create { min-height: 40px; flex: none; font-size: 14px; padding: 0 14px; }
   #dialog-new-session .dialog-body input:not([type="checkbox"]):not([type="radio"]), #dialog-new-session .dialog-body select { font-size: 16px; min-height: 42px; }
   #dialog-new-session .pf-pick { width: 42px; }
@@ -2880,6 +3074,10 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   #dialog-new-session .cwd-recent .pf-chipline::-webkit-scrollbar { display: none; }
   #dialog-new-session .cwd-recent .pf-chipk { position: sticky; left: 0; z-index: 1; background: var(--bg-dialog); padding-right: 4px; }
   #dialog-new-session .cwd-recent-chip { flex: none; }
+}
+/* P1-5: a narrow phone — the refusal / the chips take the footer's whole first row, Cancel / Create the row under it */
+@media (max-width: 480px) {
+  #dialog-new-session .ns-foot-info { flex: 1 1 100%; }
 }
 
 /* Recent working-directory chips in the New Session dialog */
@@ -3084,7 +3282,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-launch-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 0 0 6px; }
 .desktop-launch-head > .desktop-launch-machines { flex: 1 1 auto; margin: 0; }
 .desktop-launch-install-app { margin-left: auto; width: auto; padding: 0 12px; min-height: 30px; }
-@media (max-width: 768px) { .desktop-launch-install-app { min-height: 36px; } } /* one tap on a phone */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .desktop-launch-install-app { min-height: 36px; } } /* one tap on a phone */
 /* lane launch-picture-size: the head's Picture size select — beside Run on on a desk, its OWN full row on a phone (the
    install button keeps its row end); the one-line hint under the head; a card's remembered size under its label */
 /* `.dialog-body label.desktop-launch-size` out-ranks `.dialog-body label` (0,1,1), whose column flex would stack the words above the select */
@@ -3092,7 +3290,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .dialog-body select.desktop-launch-size-select { padding: 3px 6px; font-size: 11px; min-height: 26px; cursor: pointer; }
 .desktop-launch-size-hint { font-size: 11px; color: var(--text-dim); margin: -2px 0 6px; }
 .desktop-launch-card .desktop-launch-card-size { grid-column: 2; font-size: 10px; line-height: 1.3; color: var(--text-secondary); min-width: 0; }
-@media (max-width: 768px) { .dialog-body label.desktop-launch-size { flex: 1 1 100%; order: 3; } .dialog-body select.desktop-launch-size-select { flex: 1 1 auto; min-height: 36px; font-size: 13px; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .dialog-body label.desktop-launch-size { flex: 1 1 100%; order: 3; } .dialog-body select.desktop-launch-size-select { flex: 1 1 auto; min-height: 36px; font-size: 13px; } }
 .desktop-launch-avail-head:empty { display: none; }
 .desktop-launch-foot { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
 .desktop-launch-foot .desktop-launch-intro { font-size: 11px; color: var(--text-secondary); }
@@ -3275,7 +3473,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .app-install-details { margin: 6px 0 8px; }
 .app-install-root { margin: 6px 0 4px; font-size: 12px; }
 .desktop-install-app .desktop-install-note:empty { display: none; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .ut-app-answer .ut-action-app { min-height: 36px; min-width: 72px; }
   .app-sec-row { flex-wrap: wrap; }
 }
@@ -3452,7 +3650,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-launch-field { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; font-size: 11px; color: var(--text-secondary); }
 .desktop-launch-field input { width: 100%; box-sizing: border-box; }
 .desktop-launch-actions { margin: 4px 0 10px; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .desktop-launch-cols { grid-template-columns: 1fr; }
   .desktop-launch-grid { grid-template-columns: 1fr; }
 }
@@ -3809,7 +4007,7 @@ body.cz-picking, body.cz-picking * { cursor: crosshair !important; }
 /* Two columns — the dialog is wide and one row per line made it scroll past
    the sensitive section (real report). Falls to one column on phones. */
 .cfg-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }
-@media (max-width: 768px) { .cfg-rows { grid-template-columns: 1fr; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .cfg-rows { grid-template-columns: 1fr; } }
 /* label.cfg-row: must out-rank `.dialog-body label` (0,1,1), whose
    flex-direction:column stacked the checkbox ABOVE the text (the layout bug). */
 label.cfg-row {
@@ -4058,7 +4256,7 @@ label.cfg-row {
 .refresh-live-meta { display: flex; align-items: baseline; gap: 8px; min-height: 16px; }
 .refresh-live-meta .refresh-live-error { flex: 1; margin: 0; }
 .refresh-live-chars { margin: 0 0 0 auto; font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
-@media (max-width: 768px) { .refresh-live-dialog .dialog-footer button { min-height: 44px; min-width: 72px; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .refresh-live-dialog .dialog-footer button { min-height: 44px; min-width: 72px; } }
 /* Manage-mode MARK toggles: a bordered box reads as "checkable state" (not a
    one-shot action), gives a bigger hit target, and a clearer boundary. */
 .session-mark-toggle {
@@ -4140,7 +4338,7 @@ label.cfg-row {
 /* Mobile: desktop chrome customization does not apply (arrangement is skipped
    in app.js) — hide the extra bar rows outright as a belt-and-braces so a
    populated row can never render on phones. */
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   #toolbar-row2, #taskbar-row2 { display: none !important; }
 }
 
@@ -4599,7 +4797,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   .udash-span2 { grid-column: auto; }
 }
 /* Fallback for browsers without container queries: at least phones fold. */
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .udash-grid { grid-template-columns: minmax(0, 1fr); }
   .udash-span2 { grid-column: auto; }
 }
@@ -5001,7 +5199,7 @@ button.plugin-chip-primary:hover { background: color-mix(in srgb, var(--accent) 
 .integ-test-error { overflow-wrap: anywhere; }
 .integ-caveat { font-style: italic; }
 .integ-used { border-top: 1px solid var(--border); padding-top: 6px; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .integ-body { padding: 6px 8px 12px; }
   .integ-cb-row .integ-cb-url { flex: 1 1 100%; }   /* the URL takes its own row rather than breaking mid-path beside the label (round 2, 375px) */
   .integ-choice { flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -5253,7 +5451,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
 /* Ephemeral CLI install warning row (Manage Agents, 2.229.0) */
 .ob-cli-ephemeral { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; flex-wrap: wrap; }
 .ob-cli-ephemeral { min-width: 0; }
-@media (max-width: 768px) { .agents-dialog-body .ob-backend { flex-wrap: wrap; } } /* the phone modal's status row wraps like the rail panel's (3560): the warning row gets the full width instead of a 131 px column beside the buttons */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .agents-dialog-body .ob-backend { flex-wrap: wrap; } } /* the phone modal's status row wraps like the rail panel's (3560): the warning row gets the full width instead of a 131 px column beside the buttons */
 /* the warning quotes the install PATH — one unbreakable token (the Actions runner's is 80+ chars) made the row's
    min-content 357 px inside a 352 px phone section (the last mirror red since 2.369.75, named by the roster suite's
    rightmost-element diagnostic); a path may break anywhere */
@@ -5540,7 +5738,7 @@ button.am-cap { cursor: pointer; }
 .oracle-note { font-size: 10px; color: var(--text-dim); margin: 6px 0 2px; }
 .oracle-body { margin: 0; padding: 8px; max-height: 46vh; overflow: auto; font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.5;
   background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   /* One column: the count chip moves under the name instead of pushing it, and
      the path button is a full-width tap target. */
   .perm-layer-count { margin-left: 0; }
@@ -6135,7 +6333,7 @@ button.chan-attn-head:hover { background: var(--bg-hover); }
 .chanmsg-head .chanmsg-who-btn { cursor: pointer; border-radius: var(--radius-sm); }
 .chanmsg-head .chanmsg-who-btn:hover, .chanmsg-head .chanmsg-who-btn:focus-visible { text-decoration: underline; outline: none; }
 /* …and on a phone it is a 36 px target like every other one (the comm-panel rule) — the head grows, nothing overlaps */
-@media (max-width: 768px) { .chanmsg-head .chanmsg-who-btn { display: inline-flex; align-items: center; min-height: 36px; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chanmsg-head .chanmsg-who-btn { display: inline-flex; align-items: center; min-height: 36px; } }
 .chanmsg-at { font-size: 10px; color: var(--text-dim); flex-shrink: 0; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* verify r1 #14 (int248 r2): a webhook call's "raw cut at 8 KiB" note under its head */
 .chanmsg-rawcut { font-size: 11px; color: var(--text-dim); margin: 2px 0 0; }
@@ -6216,7 +6414,7 @@ div.chanblk-attribution { white-space: normal; }
 .chanmail-box { min-width: 0; max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--paper); }
 .chanmail-frame { display: block; width: 100%; border: 0; background: var(--paper); }
 .chanmail-ph { width: 100%; background: color-mix(in srgb, var(--text) 3%, var(--paper)); }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .chanmail-mode, .chanmail-pictures, .chanmail-retry { min-height: 36px; padding-top: 8px; padding-bottom: 8px; }
 }
 /* 2026-09-26: a message's attachments — thumbnails through our own route, chips for files */
@@ -6295,7 +6493,7 @@ a.chanmsg-file:hover .chanmsg-att-dl { color: var(--accent); }
 .chanmsg-fact-val { color: var(--text-secondary); margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .chanmsg-fact-more { font: inherit; font-size: 10px; color: var(--accent); background: transparent; border: 1px solid var(--border); border-radius: 999px; padding: 0 5px; margin-left: 4px; cursor: pointer; }
 .chanmsg-fact-note, .chanmsg-facts-none { color: var(--text-dim); font-size: 11px; margin-left: 4px; }
-@media (max-width: 768px) { .chanmsg-facts-sum, .chanmsg-facts-ask, .chanmsg-fact-more { min-height: 36px; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chanmsg-facts-sum, .chanmsg-facts-ask, .chanmsg-fact-more { min-height: 36px; } }
 .chanmsg-replyq { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-width: 0; font: inherit; font-size: 11px; line-height: 1.5; color: var(--text-secondary); background: transparent; border: none; border-left: 2px solid var(--border); border-radius: 0; padding: 0 6px; cursor: pointer; text-align: left; }
 .chanmsg-replyq:hover { color: var(--accent); border-left-color: var(--accent); }
 .chanmsg-replyq-who { font-weight: 600; flex-shrink: 0; }
@@ -6999,11 +7197,11 @@ label.chan-cap-row { cursor: default; }
 /* builder r2 (lane live-input): the COPY chip is a button to press — drawn like an actionable fit chip, never a status label */
 .browser-live-bar > .file-tool-btn.browser-live-copy { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
 .browser-live.zoomed .browser-live-img { will-change: transform; }
-@media (max-width: 768px) { .browser-live-side { width: 55%; max-width: 55%; } .browser-live-confirm-text { white-space: normal; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .browser-live-side { width: 55%; max-width: 55%; } .browser-live-confirm-text { white-space: normal; } }
 /* a phone looking at a browser that is NOT running (stopped / closed / released / not started) with its past open: the
    picture has nothing live to show, so the sessions list gets the full width and the status sits above it (the naive-user
    verifier, 2026-09-28: a 198 px pane cut every row and squeezed the status into an 86 px column over six lines) */
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .browser-live.side-past .browser-live-body { flex-direction: column; }
   .browser-live.side-past .browser-live-canvas { flex: 0 0 auto; height: 120px; }
   .browser-live.side-past .browser-live-side { width: 100%; max-width: 100%; flex: 1 1 auto; min-height: 0; border-left: none; border-top: 1px solid var(--border); }
@@ -7194,7 +7392,7 @@ label.chan-cap-row { cursor: default; }
 .browser-trace-dialog-k { flex: 0 0 64px; color: var(--text-secondary); }
 .browser-trace-dialog-v { min-width: 0; overflow-wrap: anywhere; font-family: var(--font-mono, monospace); }
 .browser-trace-dialog-note { margin-top: 8px; font-size: 11px; }
-@media (max-width: 768px) { .browser-trace-dialog-pics { grid-template-columns: 1fr; } .browser-trace-thumb-img, .browser-trace-thumb-empty { width: 72px; height: 40px; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .browser-trace-dialog-pics { grid-template-columns: 1fr; } .browser-trace-thumb-img, .browser-trace-thumb-empty { width: 72px; height: 40px; } }
 .browser-live-trace { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .browser-live-trace-head { padding: 5px 8px; border-bottom: 1px solid var(--border); color: var(--text-secondary); font-size: 11px; }
 .browser-live-trace-list { flex: 1; min-height: 0; overflow: auto; }
@@ -7261,7 +7459,7 @@ label.chan-cap-row { cursor: default; }
 .brp.narrow .brp-session, .brp.narrow .brp-action { min-height: 44px; }
 .brp.narrow .brp-bar .mounts-btn { min-height: 44px; min-width: 44px; padding: 6px 10px; font-size: 12px; justify-content: center; }
 .brp.narrow .brp-main { flex: 1 0 auto; min-height: 320px; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .browser-live-session-replay { min-height: 44px; padding: 6px 12px; font-size: 12px; }
   .session-props-browser-replay { min-height: 44px; padding: 6px 12px; font-size: 12px; }
 }
@@ -7269,7 +7467,7 @@ label.chan-cap-row { cursor: default; }
 .bprof { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); font-size: 12px; }
 .bprof-bar { display: flex; align-items: center; gap: 6px; padding: 5px 10px; border-bottom: 1px solid var(--border); background: var(--bg-secondary); flex-shrink: 0; }
 .bprof-summary { color: var(--text-secondary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 768px) { .bprof-summary { white-space: normal; overflow: visible; } } /* the panel head on a phone: the line wraps, never "… 11 个已记录…" (the naive-user verifier, 2026-09-28) */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .bprof-summary { white-space: normal; overflow: visible; } } /* the panel head on a phone: the line wraps, never "… 11 个已记录…" (the naive-user verifier, 2026-09-28) */
 .file-tool-btn.bprof-btn { width: auto; padding: 0 9px; font-size: 11px; white-space: nowrap; flex-shrink: 0; } /* lane I: (0,2,0) — at (0,1,0) viewers.css's later `.file-tool-btn` (24×24) won the tie and this fix never applied */ /* 2.369.145: a CJK label's min-content is ONE glyph — without nowrap the grid's auto track stacked 收编…/搁置 vertically */
 .bprof-hint { padding: 6px 10px; font-size: 11px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .bprof-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 0 12px; }
@@ -7300,7 +7498,7 @@ label.chan-cap-row { cursor: default; }
 .btq-acts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
 .file-tool-btn.bprof-btn.btq-primary { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .btq-note { font-size: 11px; }
-@media (max-width: 768px) { .btq-state { margin-left: 0; white-space: normal; } .file-tool-btn.bprof-btn.btq-act { min-height: 36px; padding: 0 14px; } .btq-page { white-space: normal; overflow-wrap: anywhere; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .btq-state { margin-left: 0; white-space: normal; } .file-tool-btn.bprof-btn.btq-act { min-height: 36px; padding: 0 14px; } .btq-page { white-space: normal; overflow-wrap: anywhere; } }
 /* lane browser-takeover-queue: the live view's line while its takeover request is open — «The agent asks you: …» */
 .browser-live-ask-line { padding: 3px 8px; flex-shrink: 0; font-size: 12px; line-height: 1.4; color: var(--text); background: color-mix(in srgb, var(--accent) 14%, transparent); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
 .bprof-row.focus { background: color-mix(in srgb, var(--accent) 12%, transparent); }
@@ -7471,7 +7669,7 @@ label.chan-cap-row { cursor: default; }
 .bprof-row.deleted { opacity: .6; }
 .bprof-empty, .bprof-sweep { padding: 6px 4px; font-size: 11px; }
 .bprof-error { padding: 12px; color: var(--red, #e55); }
-@media (max-width: 768px) { .bprof-row, .bprof-row.bprof-orphan, .bprof-row.bprof-forgotten, .bprof-row.bprof-kept { grid-template-columns: 1fr 1fr; } .bprof-row:not(.bprof-profile) > .bprof-ident { grid-column: 1 / -1; } } /* design 015: a profile row is the table's subgrid (or the stacked re-flow) — never this two-column fallback */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .bprof-row, .bprof-row.bprof-orphan, .bprof-row.bprof-forgotten, .bprof-row.bprof-kept { grid-template-columns: 1fr 1fr; } .bprof-row:not(.bprof-profile) > .bprof-ident { grid-column: 1 / -1; } } /* design 015: a profile row is the table's subgrid (or the stacked re-flow) — never this two-column fallback */
 
 /* ── TAB CHAIN SPLIT (agent browser P7, docs/design-agent-browser-v2.md §4.6) ──
    A split is a RENDERING of the chain: the host's element becomes a grid — the
@@ -7571,7 +7769,7 @@ label.chan-cap-row { cursor: default; }
    lane S4 verify r1: the ACTIVE split host only — unscoped, every split host was displayed (2 classes beat the phone's
    `.window { display:none !important }`) and, the phone's windows being `position: relative`, the active window flowed
    BELOW an earlier split host: a second browsing conversation's live view opened at y = 844 on an 844 px phone. */
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .window.tab-split.window-active { display: flex !important; }
   .window.tab-split > .window-content.tab-split-pane:not(.tab-split-focus) { display: none !important; }
   .window.tab-split > .tab-split-divider { display: none !important; }
@@ -7723,7 +7921,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .exit-runs-cmdbox { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
 .exit-runs-cmd-all { align-self: stretch; margin: 0; padding: 5px 8px; font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.45; color: var(--text); background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; user-select: text; }
 .exit-runs-copy { font-size: 11px; padding: 2px 8px; }
-@media (max-width: 768px) { .exit-runs-sum { min-height: 36px; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .exit-runs-sum { min-height: 36px; } }
 .ut-action-exit { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); }
 /* naive-user N-ask: the answer is its own line under the command, at full strength (never inside the hover-dimmed .ut-actions) */
 .ut-exit-answer { display: flex; gap: 6px; margin-top: 4px; clear: none; }
@@ -7758,13 +7956,13 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .vault-secret-label { color: var(--text-dim); }
 .vault-secret-kind { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
 .vault-secret-error { min-height: 1em; font-size: 12px; color: var(--attn-text); }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .ut-secret-row { flex-wrap: wrap; }
   .ut-secret-input.vault-pw { flex: 1 1 100%; min-height: 40px; font-size: 16px; }
   .ut-secret .ut-act { min-height: 36px; flex: 1 1 0; }
   .ut-secret-state button { min-height: 36px; }
 }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .dialog-body label.dap-row, .dap-row { min-height: 44px; }
   .device-pair-copy { flex: 1 1 100%; }
   .dialog-body label.exit-access-mode, .dialog-body label.exit-access-ask, .exit-access-mode, .exit-access-ask { min-height: 44px; }
@@ -7859,7 +8057,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .design-sheet-name { font-size: 12px; font-weight: 600; }
 .design-sheet-meta { font-size: 10px; color: var(--text-dim); }
 /* the phone (≤ 768): full-screen window (the WM's phone layout), 44 px targets, the lists and the composer as bottom sheets */
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .design-bar { padding: 4px 6px; gap: 4px; }
   .design-bar > .design-btn, .design-bar > .design-pages { min-height: 44px; min-width: 44px; justify-content: center; }
   .design-bar > .design-stamp { display: none; }
@@ -7901,7 +8099,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .design-ask-skip { margin-right: auto; padding: 4px 0; border: none; background: none; color: var(--text-secondary); font: inherit; font-size: 12px; text-decoration: underline; cursor: pointer; }
 .design-ask-skip:hover { color: var(--accent); }
 .design-ask-reopen { position: absolute; top: calc(10px + var(--design-top-dock, 0px)); right: 10px; z-index: 4; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--accent); background: var(--bg-dialog); color: var(--accent); font: inherit; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); cursor: pointer; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .design-ask { align-items: flex-end; padding: 0; }
   .design-ask-card { width: 100%; max-height: 88%; overflow: auto; border-radius: var(--radius) var(--radius) 0 0; border-bottom: none; }
   .design-ask-pill { min-height: 44px; padding: 6px 14px; }
@@ -7948,7 +8146,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .design-tweaks-ask { width: 100%; height: 28px; padding: 0 8px; font: inherit; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .design-tweaks-ask:focus { outline: none; border-color: var(--accent); }
 .design-tweaks-request { align-self: flex-end; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .design-tweaks { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-width: none; max-height: 55%; border-radius: var(--radius) var(--radius) 0 0; border-bottom: none; }
   .design-tweaks-foot { display: none; }
   .design-tweak-ctl { min-height: 44px; }
@@ -7986,7 +8184,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .chat-design-system-select { max-width: 160px; font: inherit; font-size: 12px; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .chat-design-all { align-self: flex-start; padding: 2px 0; border: none; background: none; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; }
 .chat-design-all:hover { text-decoration: underline; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .design-home-row { padding: 10px 8px; }
   .design-home-open, .design-home-more { min-height: 44px; min-width: 44px; }
   .design-bar > .design-home-find { height: 36px; font-size: 16px; }
@@ -8235,7 +8433,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .fb-meta { font-size: 10px; color: var(--text-dim); overflow-wrap: anywhere; }
 .fb-meta:empty { display: none; }
 .fb-handled-note { font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; white-space: pre-wrap; }
-@media (max-width: 768px) { .fb-act { min-height: 32px; } .fb-tab { min-height: 32px; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .fb-act { min-height: 32px; } .fb-tab { min-height: 32px; } }
 
 /* THE VAULT (lane vault-e2e-password): the unlock / setup / change modals, the Vault window's header (lane vault-one-door), the taskbar lock chip */
 .vault-dialog-box .dialog-body { display: flex; flex-direction: column; gap: 10px; }

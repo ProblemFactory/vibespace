@@ -140,7 +140,7 @@ const pins = (src) => ({
   oneRecorder: (src.match(/new MediaRecorder\(/g) || []).length === 1 && (src.match(/fetch\('\/api\/voice\/dictate'/g) || []).length === 1,
   noFocus: !/\.focus\(/.test(src),
   pressHeld: /btn\.addEventListener\('pointerdown', hold\);/.test(src) && /btn\.addEventListener\('mousedown', hold\);/.test(src) && /const hold = \(e\) => e\.preventDefault\(\);/.test(src),
-  phoneTab: /if \(followed \|\| \(window\.matchMedia && window\.matchMedia\('\(max-width: 768px\)'\)\.matches\)\) btn\.tabIndex = -1/.test(src),
+  phoneTab: /if \(followed \|\| \(window\.matchMedia && window\.matchMedia\(VC_PHONE_MEDIA\)\.matches\)\) btn\.tabIndex = -1/.test(src),
   escWhileRecording: (src.match(/document\.addEventListener\('keydown', onKey, true\)/g) || []).length === 1 && /rec\.start\(250\);\n\s*document\.addEventListener\('keydown', onKey, true\)/.test(src) && /function release\(\) \{\n\s*document\.removeEventListener\('keydown', onKey, true\);/.test(src),
   docListeners: (src.match(/document\.addEventListener\(/g) || []).length === 4 && /document\.addEventListener\('visibilitychange'/.test(src) && /document\.addEventListener\('focusin', /.test(src) && /document\.addEventListener\('focusout', /.test(src),
   absentClass: /classList\.toggle\('voice-absent', !voiceOn\)/.test(src),

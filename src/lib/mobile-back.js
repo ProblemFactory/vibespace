@@ -30,7 +30,7 @@ function layersOf(app) {
     sheet: sheets.length > 0,
     sidebarOpen: !!sb?.isOpen,
     drilldown: !!backRow,
-    home: !!home?.shown?.(),
+    home: !!home?.shown?.() || app.viewportClass?.() === 'regular', // the regular class (lane duo-build-1): list + conversation on screen = home
     homeRows: !!home?.hasRows?.(),
   };
   const close = {
@@ -73,7 +73,7 @@ export function installMobileBack(app) {
     clearTimeout(restand); restand = null;
     const { snap, close } = layersOf(app);
     const target = backTarget(snap), now = Date.now();
-    const v = backVerdict({ phone: true, enabled: enabled(), target, lastBackAt, now, deepLinkFirst: deepLink && backs === 0 });
+    const v = backVerdict({ phone: app.isMobile !== false, enabled: enabled(), target, lastBackAt, now, deepLinkFirst: deepLink && backs === 0 }); // unfolded to the desktop (lane duo-build-1) the back is the browser's
     backs++;
     if (v.action === 'close') {
       try { close[target](); } catch (err) { console.warn('back gesture: closing the', target, 'failed', err); }
@@ -89,6 +89,6 @@ export function installMobileBack(app) {
     }
   });
   // turned on later (the boot saw it off): stand a sentinel now; turned off: the next back leaves (backVerdict)
-  app.settings?.on?.(BACK_SETTING, (on) => { if (on !== false && !isSentinel(history.state)) push(); });
+  app.settings?.on?.(BACK_SETTING, (on) => { if (on !== false && app.isMobile !== false && !isSentinel(history.state)) push(); });
   return { layers: () => layersOf(app).snap };
 }

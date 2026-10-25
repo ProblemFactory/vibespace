@@ -2208,6 +2208,55 @@ console.log('§portal — lane app-display-portal: the real keeper starts an app
   await nk.stop(n0.id); nk.shutdown();
 }
 
+console.log('§holders — lane browser-display-holders: a browser\'s display record carries its profile\'s holders (broadcast when they move), and a PERSON\'s stop of it is told before the teardown');
+{
+  // the owner's case (2026-10-25): «W8N3 · Screeps live» was the display of profile personal-life, two conversations attached — the
+  // window's own lease was null, so its ✕ took the user-held road. No process here: a seeded store (a live display record + an app)
+  const hd = path.join(root, 'holders'); fs.mkdirSync(hd, { recursive: true });
+  const rec0 = (id, extra) => ({ ...M.newRecord({ id, label: 'x', exec: null, args: [], cwd: null, env: null, source: 'browser', backend: 'xpra', via: 'xpra', fallbackWhy: null, idleTimeoutMs: 0, now: Date.now() }), ...extra });
+  fs.writeFileSync(path.join(hd, K.STORE_FILE), JSON.stringify({ apps: {
+    'da-held1': rec0('da-held1', { kind: M.DISPLAY_FOR_BROWSER, forBrowser: 'bp-11111111', label: M.displayForBrowserLabel('personal-life'), state: 'ready', recipe: 'xpra-seamless' }),
+    'da-calc1': rec0('da-calc1', { label: 'Calculator', exec: '/usr/bin/true', state: 'ready', source: 'registry' }),
+  } }));
+  const hev = [];
+  const hk = K.create({ ...PINNED, dataDir: hd, env: baseEnv, broadcast: (m) => hev.push(m), log: { log() {}, warn() {}, error() {} } }); keepers.push(hk);
+  const appKeys0 = Object.keys(hk.get('da-calc1')).join();
+  ok(!('holders' in hk.get('da-held1')) && !('holders' in hk.get('da-calc1')), 'no browser keeper wired ⇒ no holders field on any record (nothing guessed)');
+  let answer = { holders: 2 };
+  const asked = [];
+  hk.setBrowserHolders((profileId, displayId) => { asked.push([profileId, displayId]); return answer; });
+  const v1 = hk.get('da-held1'), a1 = hk.get('da-calc1');
+  ok(v1.holders === 2 && v1.profileId === 'bp-11111111' && v1.userStopped === undefined && asked.some(([p, d]) => p === 'bp-11111111' && d === 'da-held1'), 'a browser\'s display record reads its profile\'s holders from the browser keeper: holders 2, profileId bp-11111111', { holders: v1.holders, profileId: v1.profileId });
+  ok(Object.keys(a1).join() === appKeys0 && !asked.some(([, d]) => d === 'da-calc1'), 'an app\'s record is untouched (same keys, never asked)');
+  const n0 = hev.length;
+  const m1 = hk.browserHoldersMoved(), m2 = hk.browserHoldersMoved();
+  const cast = hev.slice(n0).filter((e) => e.type === 'desktop-apps-updated');
+  ok(m1 === true && m2 === false && cast.length === 1 && (cast[0].apps.find((x) => x.id === 'da-held1') || {}).holders === 2, 'browserHoldersMoved: the first read broadcasts ONE desktop-apps-updated carrying holders 2; nothing moved ⇒ nothing sent', { m1, m2, casts: cast.length });
+  answer = { holders: 1 };
+  const m3 = hk.browserHoldersMoved();
+  answer = { holders: 1, userStopped: { at: 1234, by: 'user', displayId: 'da-held1' } };
+  const m4 = hk.browserHoldersMoved();
+  const last = hev.filter((e) => e.type === 'desktop-apps-updated').pop().apps.find((x) => x.id === 'da-held1');
+  ok(m3 && m4 && last.holders === 1 && last.userStopped && last.userStopped.at === 1234 && last.userStopped.by === 'user' && !('displayId' in last.userStopped), 'a conversation detaching (2 → 1) and the person\'s stop each broadcast once — the record says userStopped {at, by: user}', last);
+  // the PERSON's stop (the route's why: 'user') of a live browser display is told BEFORE the machine tears it down
+  const told = [];
+  hk.onBrowserDisplayStop((ev) => told.push({ ...ev, stateThen: hk.get(ev.displayId).state }));
+  await hk.stop('da-calc1', { why: 'user' });
+  ok(told.length === 0, 'an app\'s Stop tells nobody (only a browser\'s display)');
+  const sv = await hk.stop('da-held1', { why: 'user' });
+  ok(told.length === 1 && told[0].profileId === 'bp-11111111' && told[0].displayId === 'da-held1' && told[0].by === 'user' && told[0].stateThen === 'ready' && sv.state === 'exited' && sv.stoppedBy === 'user', 'the person\'s Stop of the display: the browser keeper is told {profileId, displayId, by: user} while the record is still ready (before the teardown), then it ends stoppedBy user', told);
+  await hk.stop('da-held1', { why: 'user' });
+  ok(told.length === 1, 'a stop of an ended record tells nothing again');
+  // a stop that is not the person's (the browser keeper's own endDisplay = why 'browser') tells nothing
+  const hd2 = path.join(root, 'holders2'); fs.mkdirSync(hd2, { recursive: true });
+  fs.writeFileSync(path.join(hd2, K.STORE_FILE), JSON.stringify({ apps: { 'da-held2': rec0('da-held2', { kind: M.DISPLAY_FOR_BROWSER, forBrowser: 'bp-22222222', label: M.displayForBrowserLabel('work'), state: 'ready', recipe: 'xpra-seamless' }) } }));
+  const hk2 = K.create({ ...PINNED, dataDir: hd2, env: baseEnv, broadcast: () => {}, log: { log() {}, warn() {}, error() {} } }); keepers.push(hk2);
+  const told2 = []; hk2.onBrowserDisplayStop((ev) => told2.push(ev));
+  await hk2.stop('da-held2', { why: 'browser' });
+  ok(told2.length === 0 && hk2.get('da-held2').stoppedBy === 'browser', 'the browser keeper\'s own end of the display (why browser) is not a person\'s stop — nobody told');
+  hk.shutdown(); hk2.shutdown();
+}
+
 for (const r of copiesCensus(MUTK.files, MUTK.dir, repo, { minCopies: 1 })) ok(r.pass, '§tree ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log(`${fail ? `\n${fail} FAILED (${pass} passed` : `\nALL PASS (${pass}`}${skipped ? `, ${skipped} skipped` : ''})`);

@@ -37,6 +37,7 @@ import { copyText, uiScale } from './utils.js';
 import { VOICE_LIMITS, RECORDER_MIME, dictationContext, dictationMessagesOf, voiceWords } from '../voice-model.js';
 import { dictationTarget, followPlace, followCandidates, followFacts, VOICE_UI } from '../voice-focus.js'; // lane voice-follows-focus: the ONE predicate + placement + facts
 import { teachAfterDictation } from './voice-teach-ui.js'; // P1: teach / context — only when the person turned them on
+import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 
 const MIC_SVG = '<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2M5.5 14.5h5"/></svg>';
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -168,7 +169,7 @@ export function attachDictation(textarea, { getFacts = () => ({}), getCwd = () =
   btn.className = chat ? 'chat-attach-btn chat-voice-btn' : 'voice-btn chat-voice-btn';
   btn.title = t('Voice input (Dropline)');
   btn.innerHTML = MIC_SVG;
-  try { if (followed || (window.matchMedia && window.matchMedia('(max-width: 768px)').matches)) btn.tabIndex = -1; } catch { } // the phone: never a focus stop (the desk keeps Tab); a follower's mic never is (a Tab onto it would blur its field)
+  try { if (followed || (window.matchMedia && window.matchMedia(VC_PHONE_MEDIA).matches)) btn.tabIndex = -1; } catch { } // the phone: never a focus stop (the desk keeps Tab); a follower's mic never is (a Tab onto it would blur its field)
   const chip = document.createElement('div');
   chip.className = chat ? 'voice-chip hidden' : 'voice-chip voice-chip-float hidden';
   chip.setAttribute('role', 'status');

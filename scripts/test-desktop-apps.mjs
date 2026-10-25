@@ -951,6 +951,16 @@ console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app 
     [{ frontWid: 9, seat: 'watch' }, 'close', 'not-active'],
     [{ frontWid: 9, leased: true }, 'close', 'lease'],
     [{ frontWid: 9, mainWid: 0 }, 'close', 'no-main-window'],           // no main (a lone dialog): today's pane-only close
+    // lane browser-display-holders (the owner 2026-10-25): a browser profile's display that conversations are attached to is THEIRS
+    [{ holders: 2 }, 'close', 'holders'],                                // the owner's case: two conversations on "personal-life" — the view only, nothing asked
+    [{ holders: 1 }, 'close', 'holders'],
+    [{ holders: 2, askedAt: 100000 - 1 }, 'close', 'holders'],           // one attached between the two presses: never the Stop
+    [{ holders: 2, frontWid: 9 }, 'close', 'holders'],                   // Chrome's own sheet in front: still not asked
+    [{ holders: 2, leased: true }, 'close', 'holders'],
+    [{ holders: 2, state: 'exited' }, 'close', 'not-running'],
+    [{ holders: 0 }, 'ask-app', 'close-window'],                         // nobody attached: A2 — ask the app, then Stop on a second press
+    [{ holders: 0, askedAt: 100000 - 1 }, 'stop', 'again'],
+    [{ holders: 'x' }, 'ask-app', 'close-window'],                       // not a count: no holder
   ];
   const obad = otable.map(([o, act, why]) => ({ o, want: [act, why], got: O(o) })).filter((x) => x.got.act !== x.want[0] || x.got.why !== x.want[1]);
   ok(M.OUTER_CLOSE_AGAIN_MS === 5000 && obad.length === 0, `outerCloseVerdict: ${otable.length} rows — ask the app first, a second ✕ within ${M.OUTER_CLOSE_AGAIN_MS} ms stops it, today's pane-only close everywhere the app cannot be asked`, obad);
@@ -961,11 +971,26 @@ console.log('§12 round 3 A2 (docs/design-desktop-apps-seamless §3.2): the app 
     const Mc = require(MUTD.write('src/desktop-fit.js', srcV.replace(FR, ''), 'front'));
     ok(Mc.outerCloseVerdict({ ...base, frontWid: 9 }).act === 'ask-app', 'CONTROL: pre-fix the ✕ with Moments in front asks WeChat ITSELF to close (close-window to its main) — the whole app, not the window in front');
   }
+  { // lane browser-display-holders CONTROL: the pre-lane verdict (no holders rule) — the owner's ✕ on a browser display two
+    // conversations held asked Chrome to close, and the second ✕ within 5 s stopped it
+    const srcV = read('src/desktop-fit.js');
+    const HR = "  if (Number(holders) > 0) return { act: 'close', why: 'holders' };\n";
+    ok(srcV.split(HR).length === 2, 'CONTROL: the holders rule is spelled once in desktop-fit.js');
+    const Mh = require(MUTD.write('src/desktop-fit.js', srcV.replace(HR, ''), 'holders'));
+    const first = Mh.outerCloseVerdict({ ...base, holders: 2 }), second = Mh.outerCloseVerdict({ ...base, holders: 2, askedAt: 100000 - 1500 });
+    ok(first.act === 'ask-app' && second.act === 'stop', `CONTROL: pre-lane the ✕ of a display two conversations hold asks the app (${first.act}) and the second ✕ 1.5 s later stops it (${second.act}) — the owner's report`);
+    // the Desktop list's «you stopped it» rows (PURE userStoppedHeld over the keeper's view)
+    const ex = { id: 'da-1', state: 'exited', profileId: 'bp-1', holders: 2, userStopped: { at: 1, by: 'user' } };
+    const urows = [[ex, true], [{ ...ex, holders: 0 }, false], [{ ...ex, userStopped: undefined }, false], [{ ...ex, state: 'ready' }, false], [{ ...ex, profileId: undefined }, false], [{ ...ex, replacedBy: 'da-2' }, false], [null, false]];
+    const ubad = urows.filter(([r, want]) => M.userStoppedHeld(r) !== want);
+    ok(ubad.length === 0, `userStoppedHeld: ${urows.length} rows — only a browser display the person stopped, still held, keeps its «you stopped it» row`, ubad);
+  }
   // (d) WIRING PINS — the keeper stamps the census BEFORE the teardown; the window decides with the PURE verdicts; every
   // user close of a window goes through the ONE veto point (programmatic closes — layout sync, the auto-close — do not)
   const keeper = keeperSrc(), win = read('src/lib/desktop-app-window.js'), wm = read('src/lib/window.js');
   ok(/rec\.windowsAtExit = await windowsLeftAtExit\(rec\);/.test(keeper) && /return M\.windowsLeftCount\(rows\);/.test(keeper) && /rec\.windowsAtExit = await windowsLeftAtExit\(rec\);(?:\s*\/\/[^\n]*)*\s*commit\(\);\s*await teardown\(rec, handles\);\s*commit\(\);/.test(keeper), 'WIRING PIN: the keeper counts the windows left at an app exit through M.windowsLeftCount, BEFORE the teardown (X is still up), and the commit that broadcasts it comes BEFORE the teardown too (lane exit-close-cadence: the exit is the verdict), which commits again');
   ok(/import \{ exitCloseVerdict, outerCloseVerdict, OUTER_CLOSE_AGAIN_MS[, \w]*\} from '\.\.\/desktop-fit\.js';/.test(win) && /exitCloseVerdict\(r, \{ leased: !!lease \}\)/.test(win) && /outerCloseVerdict\(\{/.test(win) && /winInfo\.onCloseRequest = /.test(win) && /frontWid: front \? front\.wid : 0/.test(win) && /if \(v\.act === 'ask-front'\) return !view\.closeFront\(\);/.test(win), 'WIRING PIN: the window decides its close with the PURE verdicts and answers the WM\'s close request');
+  ok(/leased: !!lease, holders: rec \? Number\(rec\.holders\) \|\| 0 : 0,/.test(win) && /import \{ RUNNING_STATES, userStoppedHeld \} from '\.\.\/desktop-fit\.js';/.test(read('src/lib/desktop-picker.js')) && /const stoppedHeld = apps\.filter\(userStoppedHeld\);/.test(read('src/lib/desktop-picker.js')), 'WIRING PIN (lane browser-display-holders): the window hands the record\'s holders to the verdict; the Desktop list keeps the «you stopped it» rows');
   ok(/requestClose\(id\) \{/.test(wm) && /\.win-close'\)\.onclick = \(e\) => \{ e\.stopPropagation\(\); this\.requestCloseGroup\(winInfo\.id\); \}/.test(wm) && /return Promise\.resolve\(this\.requestClose\(id\)\);/.test(read('src/lib/tab-group.js')) && /for \(const tid of doomed\) if \(this\.windows\.has\(tid\)\) this\.requestClose\(tid\);/.test(read('src/lib/tab-group.js')), 'WIRING PIN: the title bar ✕ asks requestCloseGroup (B-a67c: a group is asked first), whose every close — a lone window, each member of a confirmed group — is WindowManager.requestClose (the veto point), never closeWindow directly');
   const userCloses = { 'src/lib/taskbar.js': /run: \(c\) => \(c\.group \? c\.app\.wm\.requestCloseGroup\(c\.id\) : c\.app\.wm\.requestClose\(c\.id\)\)/, 'src/lib/command-mode.js': /wm\.requestClose\(wm\.activeWindowId\)/, 'src/lib/mobile-nav.js': /app\.wm\.requestClose\(activeId\)/, 'src/lib/tab-group.js': /closeBtn\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); this\.requestClose\(tabWinId\); \}\)/ };
   const missing = Object.entries(userCloses).filter(([f, re]) => !re.test(read(f))).map(([f]) => f);

@@ -241,7 +241,7 @@ console.log('§4 wiring pins');
   ok(/\.win-auth-badge\.wab-compact \.wab-name, \.win-auth-badge\.wab-compact \.wab-pool-tgt,\n\.win-auth-badge\.wab-icon \.wab-name, \.win-auth-badge\.wab-icon \.wab-pool-tgt \{ display: none; \}/.test(css) && /\.win-auth-badge\.wab-compact \.wab-short \{ display: inline; \}/.test(css) && /\.win-auth-badge \.wab-short \{ display: none;/.test(css), 'the CSS draws exactly the picked form (full: name + → member; compact: the short member; icon: the glyph)');
   ok(/\.win-auth-badge\.sub \.wab-glyph \{ display: none; \}/.test(css) && /\.win-auth-badge\.sub\.wab-icon \.wab-glyph \{ display: inline-flex; \}/.test(css), 'a subscription chip keeps its name-only face and shows its crown only as an icon');
   ok(/\.win-inbox-badge \{\n  display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; flex: none; white-space: nowrap;/.test(css) && /num\.textContent = inboxCountText\(n\);/.test(tg) && /import \{ inboxCountText \} from '\.\/title-chips\.js';/.test(tg), 'the inbox chip keeps its number and never grows past its minimal width (flex: none, 99+)');
-  ok(/@media \(max-width: 768px\)[\s\S]*?\.window-titlebar \{ display: none; \}/.test(css), 'the phone rule is as it was: no title bars ≤ 768 px (the switcher rows keep their own chip)');
+  ok(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\)[\s\S]*?\.window-titlebar \{ display: none; \}/.test(css), 'the phone rule is as it was: no title bars ≤ 768 px (the switcher rows keep their own chip)');
   ok(!/wab-(full|compact|icon)/.test(read('src/lib/session-card.js')) && !/wab-(full|compact|icon)/.test(read('src/lib/mobile-nav.js')), 'the sidebar card and the phone nav are untouched (they have room)');
 }
 

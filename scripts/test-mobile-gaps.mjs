@@ -669,7 +669,7 @@ try {
   await sleep(300);
   const denv = await desk.evalJs(`({ mobile: app.isMobile, rail: !!app.sidebar._railEl, tab: app.sidebar._activeTab, iw: innerWidth, wins: app.wm.windows.size, seq: app.layoutManager._lastRemoteSeq })`);
   check(`a desktop client (${denv.iw} px, activity rail ${denv.rail ? 'on' : 'OFF'}, tab '${denv.tab}') joins the same instance (${denv.wins} windows restored from the shared record)`, !denv.mobile && denv.rail && denv.iw === 1280, denv);
-  check('lane phone-first-screen: the 1280×800 desktop draws no attention page (its first screen is the desktop\'s own; the seeded ask stays in its tray)', await desk.evalJs(`!app.phoneHome && getComputedStyle(document.getElementById('phone-home')).display === 'none' && document.getElementById('phone-home').childElementCount === 0`));
+  check('lane phone-first-screen: the 1280×800 desktop draws no attention page (its first screen is the desktop\'s own; the seeded ask stays in its tray)', await desk.evalJs(`!app.phoneHome?.shown?.() && !app.phoneHome?.show?.() && getComputedStyle(document.getElementById('phone-home')).display === 'none' && document.getElementById('phone-home').childElementCount === 0`)); // lane duo-build-1: the page is wired on every page (a fold to the phone reaches it) — a desktop never shows it, even asked
 
   // ── #9 ⚙ System… / Ports… / Channels… land in windows (no rail on a phone) ──
   console.log('#9 gear rows → windows on the phone, WINDOWS on the desktop');

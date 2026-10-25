@@ -40,6 +40,7 @@ import { openVaultWindow } from './vault-window.js';
 import { withCreateAccess } from '../new-session-spec.js';
 import { pendingBindVerdict } from './fork-groups.js'; // PURE: the task binds' rule — the session's OWN id, once announced
 import { FOLD_ROWS, unfoldReasons, foldPlan, footerChips, createRefusal, toolCycle, toolPickOf, codexPreset, toolChipText, accountRows, toggleGroup, groupReach, resourceSummary, nameHint, folderOnOpen, folderOnGroups, folderOnEdit, folderOnCommit, folderOnLeave, folderShows } from './new-session-model.js';
+import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 
 const FOLD_KEY = 'vs.newSession.moreOpen';   // a per-device UI pref: '1' = the fold is open
 const FOLD_IDS = { host: 'row-host', account: 'row-account', args: 'row-extra-args', worktree: 'row-worktree', tui: 'row-tui' };
@@ -49,7 +50,7 @@ const ic = (k) => UI_ICONS[k] || '';
 /** A Task Group's own name (the store always holds a title; the id is its last word) — never a channel conversation. */
 const groupName = (g) => String(g.title || g.id);
 /** The phone sheet — the stylesheet's own breakpoint, asked live (app.isMobile is read once, at boot). */
-const narrow = () => !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
+const narrow = () => !!(window.matchMedia && window.matchMedia(VC_PHONE_MEDIA).matches);
 /** Names in quotes, the language's way (「X」「Y」 · “X”, “Y”). */
 const quoted = (names) => names.map((n) => t('“{name}”', { name: n })).join(resolveLang() === 'en' ? ', ' : '');
 
@@ -79,7 +80,7 @@ export function installNewSessionForm(App) {
     });
     $('input-tui')?.addEventListener('change', () => this._nsRender());   // → #input-mode (the backing value Create reads)
     $('row-task-groups')?.addEventListener('click', (e) => this._nsGroupsClick(e));
-    try { window.matchMedia?.('(max-width: 768px)').addEventListener('change', () => { if (!$('dialog-new-session')?.classList.contains('hidden')) this._nsRender(); }); } catch { /* an old engine: the next open draws for the width */ }
+    try { window.matchMedia?.(VC_PHONE_MEDIA).addEventListener('change', () => { if (!$('dialog-new-session')?.classList.contains('hidden')) this._nsRender(); }); } catch { /* an old engine: the next open draws for the width */ }
     $('ns-be-seg')?.addEventListener('click', (e) => {
       const b = e.target.closest('button[data-backend]'); if (!b) return;
       const sel = $('input-backend'); if (!sel || sel.value === b.dataset.backend) return;

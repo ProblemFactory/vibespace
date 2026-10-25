@@ -130,7 +130,12 @@ export function installSidebarMounts(Sidebar) {
         if (msg.type === 'machine-ports-new' && Array.isArray(msg.ports) && msg.ports.length) {
           const head = msg.ports.slice(0, 3).map((p) => `${p.port}${p.proc ? ' (' + p.proc + ')' : ''}`).join(', ');
           const extra = msg.ports.length > 3 ? ` +${msg.ports.length - 3}` : '';
-          showToast(tr('New port on "{name}": {ports} — 🔌 on its machine row forwards it', { name: msg.hostId === '__local__' ? tr('This machine') : (msg.hostName || msg.hostId), ports: head + extra }));
+          // P2-1 (lane phone-refusal-wrap): plain words — what started, where — and the Forward button's own SVG (it said 🔌)
+          const ports = head + extra, name = msg.hostName || msg.hostId, many = msg.ports.length > 1;
+          const said = msg.hostId === '__local__'
+            ? (many ? tr('Programs on this machine started listening on ports {ports}', { ports }) : tr('A program on this machine started listening on port {ports}', { ports }))
+            : (many ? tr('Programs on "{name}" started listening on ports {ports}', { name, ports }) : tr('A program on "{name}" started listening on port {ports}', { name, ports }));
+          showToast(said + ' — ' + tr('to open it here, use the plug button on its row under Remote'), { icon: MI.ports });
           this._portsDialogRefresh?.(msg.hostId);
         }
         // B-16d9: a listener running from a DELETED working directory — a

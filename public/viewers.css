@@ -437,7 +437,7 @@
 }
 .editor-toolbar-right { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 /* lane viewer-download: on a phone the right group no longer runs off the screen — Download leads it, the rest scrolls */
-@media (max-width: 768px) { .editor-toolbar-right { flex-shrink: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; } .editor-toolbar-right .file-download-btn { order: -1; flex: none; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .editor-toolbar-right { flex-shrink: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; } .editor-toolbar-right .file-download-btn { order: -1; flex: none; } }
 .editor-toolbar-sep {
   width: 1px; height: 16px; background: var(--border); margin: 0 2px; flex-shrink: 0;
 }
@@ -580,7 +580,7 @@
    toolbar wraps with the path on its own line, buttons are 36 px, the
    bookmarks pane is a strip above the list that folds, and the ONE column
    (_getVisibleColumns answers Name only there) fills the width. ── */
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .file-toolbar { flex-wrap: wrap; gap: 4px; padding: 6px 8px; }
   .file-toolbar .path-field { flex: 1 1 100%; order: 10; } /* lane path-field: the path bar is THE path field — its wrapper is the toolbar's item */
   .file-toolbar .file-path-input { flex: 1 1 100%; order: 10; min-height: 36px; font-size: 16px; padding: 4px 10px; } /* 16 px: a smaller field zooms the page on focus in iOS Safari (lane phone-files-door; was 14) */

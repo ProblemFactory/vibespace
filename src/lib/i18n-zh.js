@@ -2456,7 +2456,6 @@ export default {
   "Not mounted on the machine anymore (unmounted there?) — ↻ re-mounts it": "机器上已不再挂载（在那边手动卸载了？）—— ↻ 可重新挂载",
   "gone on machine": "机器上已卸载",
   "Re-mount on the machine": "重新挂载到机器上",
-  "New port on \"{name}\": {ports} — 🔌 on its machine row forwards it": "\"{name}\" 上有新端口: {ports} —— 点它机器行上的 🔌 即可转发",
   "Set VIBESPACE_FRPS_ADDR / _PORT / _TOKEN (the shared relay) to enable public URLs.": "设置 VIBESPACE_FRPS_ADDR / _PORT / _TOKEN（共享中继）以启用公网 URL。",
   "Subdomain host (optional)": "子域主机（可选）",
   "shared secret": "共享密钥",
@@ -8974,6 +8973,8 @@ export default {
   "Open the running one": "打开正在运行的那个",
   "Close this window": "关闭此窗口",
   "Running apps": "正在运行的应用",
+  "You stopped it · 1 conversation starts it again when it next uses it": "你已停止 · 1 个对话下次使用时会重新启动",
+  "You stopped it · {n} conversations start it again when they next use it": "你已停止 · {n} 个对话下次使用时会重新启动",
   "Close {app}": "关闭 {app}",
   // lane rule-learning (design q-037 P0): 「从我的判定起草」 — the drafter's card, its model row, the readout
   "the drafter needs an OpenRouter key on the Language model card": "起草需要在「语言模型」卡片上填 OpenRouter key",
@@ -10805,4 +10806,14 @@ export default {
   "{k} other attachment(s) were not put back — attach them again": "另有 {k} 个附件没有放回 — 请重新附加",
   "{m} message(s) came back shortened": "{m} 条消息放回时被截短",
   "{k} more queued message(s) were too long to put back": "另有 {k} 条排队的消息太长，没有放回",
+  // lane phone-refusal-wrap: the port notice in plain words (P2-1); ✕ on a running conversation says it keeps running (P2-2)
+  "A program on this machine started listening on port {ports}": "这台电脑上有程序开始监听端口 {ports}",
+  "Programs on this machine started listening on ports {ports}": "这台电脑上有程序开始监听端口 {ports}",
+  "A program on \"{name}\" started listening on port {ports}": "“{name}”上有程序开始监听端口 {ports}",
+  "Programs on \"{name}\" started listening on ports {ports}": "“{name}”上有程序开始监听端口 {ports}",
+  "to open it here, use the plug button on its row under Remote": "要在这里打开，点“远程”里它那一行的插头按钮",
+  "Closed the window — the conversation keeps running": "已关闭窗口 — 对话仍在继续运行",
+  "Closed the window — the terminal keeps running": "已关闭窗口 — 终端仍在继续运行",
+  "Closed {n} windows — what ran in them keeps running": "已关闭 {n} 个窗口 — 里面的对话和终端仍在继续运行",
+  "Close window — it keeps running": "关闭窗口 — 它仍在继续运行",
 };

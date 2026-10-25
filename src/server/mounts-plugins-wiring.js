@@ -1219,6 +1219,21 @@ function createSessionMessages(session, sessionId) {
         return null;
       });
     }
+    // lane browser-display-holders (the owner 2026-10-25): the PERSON stopped a browser's display window — each conversation
+    // holding that profile hears it ONCE at its next message (layer ②, zero billed turns; a second stop before it reads the
+    // first replaces it): «the person stopped the browser "<label>"; your next browser command starts it again»
+    browserKeeper.onLease((ev) => {
+      if (!ev || ev.kind !== 'browser-user-stopped' || !Array.isArray(ev.holders)) return null;
+      const st = getSessionStatus ? getSessionStatus() : null;
+      if (!st || !sessionStatusKey) return null;
+      const n = require('../browser-profiles.js').userStoppedNotice({ label: ev.label, profileId: ev.profileId, at: Date.now() });
+      for (const h of ev.holders) {
+        const s = h && h.sessionId ? activeSessions.get(h.sessionId) : null;
+        if (!s) continue; // a stopped conversation: its next command says browser_stopped itself
+        try { const key = sessionStatusKey(s, h.sessionId); st.dropNotices(key, (x) => x && x.kind === 'browser-profile' && x.event === 'user-stopped' && x.profileId === ev.profileId); st.pushNotice(key, n); } catch (e) { console.warn('[browser] the person\'s stop was not told to ' + h.sessionId + ' — ' + (e && e.message)); }
+      }
+      return null;
+    });
     // lane S2 (naive study 2 — three answers to "which browser"): THE browser fact of each live conversation is
     // computed at ONE choke point (keeper.factFor over its registry view) and published as active-sessions'
     // `browserFact`. Any registry change (a start, a failure, a pin, a removal, a label, a lease) may move it — the

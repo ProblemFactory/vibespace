@@ -1118,7 +1118,8 @@ console.log('— wiring + docs pins');
   // ⓓ THE CLEAR MUST KNOW WHAT THE SEND DISPLACED, or a send with no text of
   // its own can never clear anything again.
   ok('round-7: the send records what it displaced in the store, and the deferred clear accepts EITHER its pin or that value',
-    /const storeBefore = loadDraft\('chat', this\._sessionId\);\n\s*if \(text\) saveDraft\('chat', this\._sessionId, text\);\n\s*this\._pendingSend = \{ text, storeBefore \};/.test(cinput)
+    // (lane draft-focus-guard: a HELD draft — another client's, never shown in this box — is not what the send displaced)
+    /const storeBefore = this\._heldDraft !== null \? null : loadDraft\('chat', this\._sessionId\);\n\s*if \(text\) saveDraft\('chat', this\._sessionId, text\);\n\s*this\._pendingSend = \{ text, storeBefore \};/.test(cinput)
     && /if \(stored && stored !== pending\.text && !\(pending\.text === '' && stored === pending\.storeBefore\)\) return;/.test(cinput));
   // ── ROUND-8: `sendText` HAS TWO KINDS OF CALLER, and round-7 released for
   // both. The design request is a message BUILT AROUND THE USER'S OWN BRIEF,
@@ -1236,8 +1237,8 @@ console.log('— wiring + docs pins');
   ok('the send→steer conversion reuses the ONE queue-op sender (no second wire shape anywhere)', /this\._sendQueueOp\('steer', it\.id\);/.test(cv2) && (cv2.match(/type: 'queue-op'/g) || []).length === 1);
   ok('the ≤768px button carries an SVG icon and an aria-label, never a glyph (§17)', /this\._steerBtn\.innerHTML = UI_ICONS\.bolt;/.test(cinput2) && /setAttribute\('aria-label'/.test(cinput2));
   ok('the two surfaces are split by VIEWPORT in CSS, theme vars only (§17)',
-    /@media \(max-width: 768px\) \{ \.chat-send-hint \{ display: none; \} \}/.test(read('public/chat.css'))
-    && /@media \(max-width: 768px\) \{ \.chat-steer-btn:not\(\.hidden\) \{ display: inline-flex; \} \}/.test(read('public/chat.css'))
+    /@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{ \.chat-send-hint \{ display: none; \} \}/.test(read('public/chat.css'))
+    && /@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{ \.chat-steer-btn:not\(\.hidden\) \{ display: inline-flex; \} \}/.test(read('public/chat.css'))
     && /\.chat-steer-btn\.hidden \{ display: none; \}/.test(read('public/chat.css'))
     && !/chat-(send-hint|steer-btn)[^}]*#[0-9a-f]{3,6}/i.test(read('public/chat.css')));
   { const zh2 = read('src/lib/i18n-zh.js'), ja2 = read('src/lib/i18n-ja.js');

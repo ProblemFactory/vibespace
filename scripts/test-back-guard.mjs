@@ -322,7 +322,8 @@ console.log('\n§4 wiring pins');
 const app = read('src/lib/app.js');
 ok((app.match(/installMobileBack\(/g) || []).length === 1 && app.includes('this._mobileBack = this.isMobile ? installMobileBack(this) : null;'), 'app.js installs the guard once, only when app.isMobile (a desktop\'s back is never touched)');
 const importers = fs.readdirSync(path.join(repo, 'src/lib')).filter((f) => f.endsWith('.js') && /from '\.\/mobile-back\.js'/.test(read('src/lib/' + f)));
-ok(importers.join() === 'app.js', 'mobile-back.js has ONE importer (app.js)', importers);
+ok(importers.join() === 'app.js,viewport-switch.js' && read('src/lib/viewport-switch.js').includes('if (!app._mobileBack) app._mobileBack = installMobileBack(app);'),
+  'mobile-back.js has TWO importers: app.js (a phone boot) and viewport-switch.js (the first fold to the phone, once — lane duo-build-1)', importers);
 ok((wiringSrc.match(/history\.pushState\(/g) || []).length === 1 && /const push = \(\) => \{ baseHref = location\.href; history\.pushState\(\{ vs: 1 \}, ''\); \};/.test(wiringSrc) && wiringSrc.includes('history.go(1);'), 'the wiring has ONE pushState (the sentinel) and re-arms by traversal (history.go(1))');
 ok(!/from '\.\/|import /.test(bgSrc.replace(/^\/\/.*$/gm, '')), 'back-guard.js imports nothing (PURE)');
 const todos = read('src/lib/user-todos-panel.js');

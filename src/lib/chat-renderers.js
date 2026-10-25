@@ -61,6 +61,7 @@ import { renderProposalCard, patchProposalCard } from './browser-proposal-card.j
 import { peerCore, peerCardFold, demoteHeadings, PEER_FOLD_SETTING } from './peer-card-model.js'; // lane peer-card-fold: the ONE fold verdict + preview + demoted headings
 import { parseReply as parseInboxReply } from '../inbox-reply.js'; // PURE: the For-you reply's marker + quote block (design-user-inbox-reply D1.8) — text-derived, so live and history agree
 
+const USER_MARKDOWN = Object.freeze({ breaks: true }); // P2-15: the user's own words — a single newline is a line break (renderUserMarkdown)
 // An href or a link's text read back out of HTML (marked's and the sanitizer's entities, a numeric one) — escHtml'd again
 // wherever it is written.
 const HTML_ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' };
@@ -759,7 +760,7 @@ class ChatRenderers {
     el.className = 'chat-msg chat-msg-user';
     el._rawMsg = msg;
     const parts = content.map(b => {
-      if (b.type === 'text') return `<div class="chat-text">${this.renderMarkdown(b.text)}</div>`;
+      if (b.type === 'text') return `<div class="chat-text">${this.renderUserMarkdown(b.text)}</div>`;   // P2-15: what you typed keeps its line breaks
       // harness-supplied inline image (ACP/claude user attachment): same media
       // wrapper + zoom as the tool cards; the data: URL stays (small, no path on disk)
       if (b.type === 'image') return imageMediaHtml({ dataUrl: `data:${b.mediaType || 'image/png'};base64,${b.data}`, mediaType: b.mediaType || 'image/png', name: t('Image') });
@@ -784,7 +785,7 @@ class ChatRenderers {
     const gist = (qLines[1] || r.id).slice(0, 120);
     const html = `<div class="chat-peer-head chat-inbox-reply-head">${UI_ICONS.inbox || ''} ${escHtml(t('For you · reply to #{id}', { id: r.id }))}</div>`
       + `<details class="chat-inbox-quote"><summary>${escHtml(gist)}</summary><div class="chat-inbox-quote-body">${escHtml(r.quote)}</div></details>`
-      + `<div class="chat-text">${this.renderMarkdown(r.reply || '')}</div>`;
+      + `<div class="chat-text">${this.renderUserMarkdown(r.reply || '')}</div>`;
     this.wrapMsg(el, 'user', t('You'), html);
     ChatRenderers.applyQueueChip(el, msg, this._canSteerQueue() ? this._onQueueChipClick : null);
     return el;
@@ -2430,13 +2431,31 @@ class ChatRenderers {
       // file: href, and that is how Antigravity writes its file links.
       text = markConversationLinks(text); // agy-subagent-cards
       let html = sanitizeHtml(this._fileHrefs(marked.parse(text || '')));
-      html = conversationLinksHtml(html, { known: (id) => (this._subagentKnown ? this._subagentKnown(id) : true), t, escHtml }); // lane agy-subagent-cards: [x](conversation://<id>) opens that subagent
-      html = this._wrapTables(html);
-      html = this._markOpenFences(text, html); // lane chat-mermaid: a fence still being streamed stays code
-      return this.linkify(html);
+      return this._markdownTail(text, html);
     } catch {
       return escHtml(text || '');
     }
+  }
+
+  /** P2-15 (lane phone-refusal-wrap — the duo walk: «a⏎b⏎c» typed with real Enters came back as ONE paragraph, `<p>a\nb\nc</p>`,
+   *  innerText "a b c"): THE USER'S OWN WORDS KEEP THEIR LINE BREAKS — a single newline is a <br> (marked `breaks: true`,
+   *  the choice inbox-window.js already made). An agent's markdown keeps the markdown convention (renderMarkdown: a single
+   *  newline is a space — a model wraps prose at will). The same road otherwise: the one sanitizer, links, tables. */
+  renderUserMarkdown(text) {
+    try {
+      text = markConversationLinks(text);
+      return this._markdownTail(text, sanitizeHtml(this._fileHrefs(marked.parse(text || '', USER_MARKDOWN))));
+    } catch {
+      return escHtml(text || '');
+    }
+  }
+
+  /** renderMarkdown's / renderUserMarkdown's shared tail, over html the sanitizer already returned */
+  _markdownTail(text, html) {
+    html = conversationLinksHtml(html, { known: (id) => (this._subagentKnown ? this._subagentKnown(id) : true), t, escHtml }); // lane agy-subagent-cards: [x](conversation://<id>) opens that subagent
+    html = this._wrapTables(html);
+    html = this._markOpenFences(text, html); // lane chat-mermaid: a fence still being streamed stays code
+    return this.linkify(html);
   }
 
   /** lane chat-mermaid: a ```mermaid fence still OPEN (a reply mid-stream — its closing fence not written yet) stays a

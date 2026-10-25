@@ -161,6 +161,8 @@
   "test-discovery-interpret": 516,
   "test-doc-window": 206945,
   "test-docx-viewer": 100562,
+  "test-duo-layout": 54000,
+  "test-draft-focus-chrome": 60000,
   "test-eml": 31,
   "test-exit-access-ui": 118131,
   "test-exit-forensics": 86440,
@@ -319,7 +321,8 @@
   "test-worktree-userchan-ui": 4172,
   "test-writer-sweep": 11579,
   "test-path-field-chrome": 20000,
-  "test-claude-wrapper-queue": 30000
+  "test-claude-wrapper-queue": 30000,
+  "test-phone-refusal-wrap-chrome": 76000
  },
  "desktop": {
   "about": "the self-hosted DESKTOP batch's walls the tree knows before the box does (lane xpra-window-split): each suite measured ALONE on the hub under a private XDG_RUNTIME_DIR, no inherited display — ci-remote --batch orders a suite the box has no marker time for by this (ci.mjs batchTimings); test-ci-gate §8d holds the xpra window family's rows to it",

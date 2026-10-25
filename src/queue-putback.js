@@ -9,6 +9,7 @@
 //   · the SERVER's ONE writer (src/server/queue-putback.js, at session-stdout's feedLive gate) prepends the texts to the
 //     session's draft as an ABSOLUTE value whose op carries `prepended` (the prefix's length);
 //   · every CLIENT lands that op as a prefix over its LIVE box (landDraftPrepend — unsaved typing kept, caret shifted)
+//     — the first row of landDraft, THE verdict for every draft another client saved (lane draft-focus-guard)
 //     and the arrival rule always applies it (src/sync-arrival.js, the delta row); a toast says how many (putbackNotice).
 // A codex row the app-server had DRAINED under the sweep, whose own turn is the one Stop interrupts, comes back too,
 // marked `started: true` (lane codex-interrupted-putback — the owner, 2026-10-25: «可以 按照你推荐来»: a duplicate send
@@ -105,6 +106,49 @@ function landDraftPrepend({ current, selStart, selEnd, value, prepended } = {}) 
   return { value: prefix + cur, selStart: at(selStart) + prefix.length, selEnd: at(selEnd) + prefix.length };
 }
 
+/** THE DRAFT LANDING VERDICT (lane draft-focus-guard, B-b0fa — the naive-user walk 2026-10-25: two clients on one conversation,
+ *  the other's 300 ms autosave landed in the box being typed in, «oko好，退款那条…\nk» was SENT, and the box's own pending
+ *  autosave then wrote the overwritten value back): what a draft ANOTHER client saved does to this box. ONE rule for every
+ *  arrival and every re-judge (src/lib/chat-input.js `_landDraft`); the put-back prefix is its first row. A value lands only
+ *  on a box NOBODY IS TYPING IN; otherwise it is HELD (the store already has it — only the box waits) and judged again when
+ *  the box lets go (a blur, an emptied box) or this client saves (which supersedes it: the box's own typing is the newer
+ *  fact). focused = the page has focus and the box is its active element; dirty = typing the 300 ms autosave has not saved;
+ *  held = a re-judge of a held value, stored = the store's value now, taken = what the box last took from the store. A held
+ *  value never deletes words typed here since: it replaces a non-empty box only when it keeps every character of it.
+ *  → {act:'replace', why, value, selStart?, selEnd?, save?} | {act:'hold', why} | {act:'drop', why}; DRAFT_LANDING_TABLE
+ *  lists the rows in their order. */
+const DRAFT_LANDING_TABLE = Object.freeze([
+  Object.freeze({ why: 'putback', act: 'replace', when: 'the op carries `prepended` > 0 (Stop put the dropped queue back)', then: 'the PREFIX lands in front of the live box (landDraftPrepend), saved once where that differs from the op' }),
+  Object.freeze({ why: 'superseded', act: 'drop', when: 'a held value the store no longer holds', then: 'this client saved since — its own typing is the newer fact' }),
+  Object.freeze({ why: 'same', act: 'drop', when: 'the value equals the box', then: 'nothing to land (a held value goes too)' }),
+  Object.freeze({ why: 'focused', act: 'hold', when: 'the box is focused', then: 'a person is in it — judged again at the blur' }),
+  Object.freeze({ why: 'typing', act: 'hold', when: 'the box holds typing not saved yet', then: 'judged again after the box\'s own autosave (which supersedes it)' }),
+  Object.freeze({ why: 'typed-here', act: 'hold', when: 'a held value over a non-empty box typed here that it does not keep', then: 'landing would delete words the store no longer has' }),
+  Object.freeze({ why: 'free', act: 'replace', when: 'otherwise (unfocused, nothing unsaved)', then: 'the box takes the value, as before the rule' }),
+]);
+
+/** Does `whole` keep every character of `part`, in order (a continuation of it, nothing deleted)? */
+function keepsText(whole, part) {
+  let i = 0;
+  for (let j = 0; i < part.length && j < whole.length; j++) if (whole[j] === part[i]) i++;
+  return i === part.length;
+}
+
+function landDraft({ focused, dirty, current, incoming, prepended, selStart, selEnd, held, stored, taken } = {}) {
+  const cur = typeof current === 'string' ? current : '';
+  const inc = typeof incoming === 'string' ? incoming : '';
+  if (Number.isSafeInteger(prepended) && prepended > 0) {
+    const r = landDraftPrepend({ current: cur, selStart, selEnd, value: inc, prepended });
+    return { act: 'replace', why: 'putback', value: r.value, selStart: r.selStart, selEnd: r.selEnd, save: r.value !== inc };
+  }
+  if (held === true && typeof stored === 'string' && stored !== inc) return { act: 'drop', why: 'superseded' };
+  if (inc === cur) return { act: 'drop', why: 'same' };
+  if (focused === true) return { act: 'hold', why: 'focused' };
+  if (dirty === true) return { act: 'hold', why: 'typing' };
+  if (held === true && cur !== '' && cur !== taken && !keepsText(inc, cur)) return { act: 'hold', why: 'typed-here' };
+  return { act: 'replace', why: 'free', value: inc };
+}
+
 /** The toast's facts: n = rows whose text came back, images / others = attachments named but not restored, cut = rows
  *  shortened to 20000, omitted = rows past the record's 100000 chars (not carried at all), started = those of the n that
  *  had already started and were stopped (`started: true`, codex — the toast names them). */
@@ -154,4 +198,5 @@ function noteBelt(belt, entry) {
 module.exports = {
   PUTBACK_ITEM_MAX_CHARS, PUTBACK_TOTAL_MAX_CHARS, PUTBACK_SEP, PUTBACK_MAX_ITEMS, PUTBACK_BELT_MAX,
   droppedRecordFor, queueDroppedOf, mergeDraft, landDraftPrepend, putbackNotice, drainedWasStopped, beltValue, noteBelt,
+  DRAFT_LANDING_TABLE, landDraft,
 };

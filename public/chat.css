@@ -116,7 +116,10 @@
 .chat-status-dropdown {
   position: absolute; bottom: calc(100% + 4px); left: 0;
   background: var(--bg-panel, var(--bg-dialog)); border: 1px solid var(--border); border-radius: var(--radius);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.35); z-index: 200; min-width: 130px; overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35); z-index: 200; min-width: 130px; overflow-x: hidden;
+  /* P2-17 (lane phone-refusal-wrap): BOUNDED and it SCROLLS — --dd-room = the room above its chip under the container's
+     top / the phone's top bar (chat-status-bar.js dropdownRoom); the model picker stood 621 px tall at y −92 before */
+  max-height: var(--dd-room, none); overflow-y: auto; overscroll-behavior: contain;
 }
 /* WRAP, NEVER CLIP (round 5 r2 — the health rows learned this in round 4, and
    the measurement that generalised the clamp found the same harm on the rows
@@ -348,7 +351,7 @@
 /* a peer's "# Report" is bold text in a card, never a page-level heading (peer-card-model demoteHeadings) */
 .chat-msg .chat-peer-h { font-weight: 700; font-size: inherit; line-height: inherit; margin: 8px 0 2px; }
 .chat-msg .chat-peer-h:first-child { margin-top: 0; }
-@media (max-width: 768px) { .chat-peer-fold-head { min-height: 44px; } } /* a phone: the switch (the head row) is a 44 px target */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-peer-fold-head { min-height: 44px; } } /* a phone: the switch (the head row) is a 44 px target */
 /* A GROUP MESSAGE (lane group-report-card): "<sender> → <group>" — the group a link to its window; a dim line under
    the text when the agent was shown it cut short, or "… and N more" on a report's oldest card */
 .chat-peer-group { text-decoration: underline dotted; cursor: pointer; overflow-wrap: anywhere; }
@@ -406,7 +409,7 @@
 .chat-mline-err { margin: 0 0 6px 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; font-size: 11px; color: var(--red); unicode-bidi: isolate; }
 .chat-machine-compact.chat-mline-open > .chat-exit-run { margin-top: 0; }
 .chat-vs-notice.chat-machine-compact.chat-mline-open { padding-bottom: 8px; }
-@media (max-width: 768px) { .chat-mline { min-height: 40px; } } /* a phone row: a tap target that still reads as a list */
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-mline { min-height: 40px; } } /* a phone row: a tap target that still reads as a list */
 /* r2 (主开发 03:24Z: "整个组只有一个外框，组内每条是一行，行与行之间用细分隔线"): an OPEN group's compact rows are ONE framed
    list — the rows touch (the list's gap undone: --chat-list-gap mirrors the three .chat-message-list gap rules), the frame
    runs round the whole, a thin divider between rows; rows ~30 px on a desktop, ~40 px on a phone */
@@ -425,7 +428,7 @@
 .chat-browser-session .chat-vs-notice-head svg { flex: 0 0 auto; }
 .chat-browser-session-note { font-size: 11px; margin-top: 4px; }
 .chat-browser-session-actions { display: flex; gap: 6px; margin-top: 6px; }
-@media (max-width: 768px) { .chat-browser-session-replay { min-height: 44px; padding: 6px 14px; font-size: 12px; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-browser-session-replay { min-height: 44px; padding: 6px 14px; font-size: 12px; } }
 /* lane browser-propose (2026-09-30): the agent's PROPOSAL card — what Approve runs, word for word; ONE primary Approve + a quiet Reject */
 .chat-browser-proposal .chat-browser-proposal-ic { display: inline-flex; flex: 0 0 auto; }
 .chat-browser-proposal-claim { font-size: 13px; overflow-wrap: anywhere; }
@@ -438,7 +441,7 @@
 .chat-browser-proposal-state[data-state="done"] { color: var(--green); }
 .chat-browser-proposal-state[data-state="rejected"] { color: var(--text-dim); font-weight: 400; }
 .chat-browser-proposal-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-@media (max-width: 768px) { .chat-browser-proposal-actions .mounts-btn { min-height: 44px; padding: 6px 16px; font-size: 13px; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-browser-proposal-actions .mounts-btn { min-height: 44px; padding: 6px 16px; font-size: 13px; } }
 .chat-peer-name:hover { text-decoration: underline; }
 
 /* ── Codex multi-agent collab rows (B-7473) ──
@@ -704,7 +707,7 @@
 .chat-account-bar .chat-resume-btn.secondary:hover { background: var(--bg-hover, rgba(127,127,127,.12)); border-color: var(--border); }
 .chat-account-bar .chat-resume-btn:disabled { opacity: .5; cursor: default; }
 .chat-account-none { flex-basis: 100%; font-size: 12px; color: var(--text-dim); }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .chat-account-doors { flex-basis: 100%; }
   .chat-account-doors .chat-resume-btn, .chat-account-pick .chat-resume-btn { flex: 1 1 auto; justify-content: center; min-height: 44px; }
   .chat-account-pick select { flex-basis: 100%; max-width: none; min-height: 44px; }
@@ -752,7 +755,7 @@
 .chat-stash-held { flex-shrink: 0; color: var(--text-dim); white-space: nowrap; } /* what one hand-over would leave — beside the button, never inside it */
 .chat-stash-parts { unicode-bidi: isolate; } /* a peer's name is its own — isolated so an RTL override in it never re-orders the head or the button */
 /* the phone folds the parts and the held count — NEVER the money word on the button (verify r4: a press that bills says so where it is pressed) */
-@media (max-width: 768px) { .chat-stash-parts, .chat-stash-held { display: none; } .chat-stash-go { min-height: 32px; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-stash-parts, .chat-stash-held { display: none; } .chat-stash-go { min-height: 32px; } }
 /* THE AGENT'S CARDS (lane agent-window-no-pop, src/lib/agent-card.js): an agent's Design for a chat the person is not looking at
    opened NO window — its card waits above the composer, the title + Open (the person's door) + ✕ */
 .chat-agent-cards { width: 100%; display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
@@ -774,7 +777,7 @@
 .chat-agent-card-x { flex-shrink: 0; display: inline-flex; padding: 3px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-dim); cursor: pointer; }
 .chat-agent-card-x:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); }
 .chat-agent-card-x svg { width: 12px; height: 12px; }
-@media (max-width: 768px) { .chat-agent-card-open, .chat-agent-card-x { min-height: 32px; min-width: 32px; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-agent-card-open, .chat-agent-card-x { min-height: 32px; min-width: 32px; } }
 @media (prefers-reduced-motion: reduce) { .chat-agent-card.arrived { animation: none; } }
 
 /* ── WHERE THE KEYS ARE (lane takeover-keyboard, userW inc-mum339id-1zsb): you drive the agent's browser and pressed
@@ -815,7 +818,7 @@
   display: flex; flex-direction: column; gap: 3px; min-height: 0;
   max-height: min(40vh, 216px); overflow-y: auto; overscroll-behavior: contain;
 }
-@media (max-width: 768px) { .chat-queue-body { max-height: 35vh; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-queue-body { max-height: 35vh; } }
 .chat-queue-toggle {
   background: none; border: none; color: var(--text-dim); cursor: pointer;
   padding: 1px 3px; border-radius: var(--radius-sm); display: inline-flex; align-items: center;
@@ -921,7 +924,7 @@
 }
 .chat-send-hint.hidden { display: none; }
 .chat-send-hint-sep { color: var(--border); }
-@media (max-width: 768px) { .chat-send-hint { display: none; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-send-hint { display: none; } }
 /* inc-muukd9oq-qyc3: an Enter the input-method guard turned into a newline says so here for 2 s (the hint's row) */
 .chat-ime-hint { width: 100%; font-size: 11px; color: var(--text-dim); padding: 3px 2px 0; }
 .chat-ime-hint[hidden] { display: none; }
@@ -934,12 +937,12 @@
 .chat-steer-btn.hidden { display: none; }
 .chat-steer-btn:active { background: var(--bg-hover); color: var(--text); }
 .chat-steer-btn svg { width: 16px; height: 16px; display: block; }
-@media (max-width: 768px) { .chat-steer-btn:not(.hidden) { display: inline-flex; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-steer-btn:not(.hidden) { display: inline-flex; } }
 /* Chat search, phone face (docs/design-mobile-gaps.md #4): the status bar's
    magnifier is Ctrl+F's touch equivalent — same split as the steer bolt. */
 .chat-status-search { display: none; }
 .chat-status-search svg { width: 16px; height: 16px; display: block; }
-@media (max-width: 768px) { .chat-view .chat-status-bar .chat-status-search { display: inline-flex; min-width: 36px; justify-content: center; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-view .chat-status-bar .chat-status-search { display: inline-flex; min-width: 36px; justify-content: center; } }
 
 .chat-input-wrap { flex: 1; position: relative; min-width: 0; display: flex; align-items: flex-end; gap: 6px; }
 .chat-attach-btn {
@@ -950,7 +953,7 @@
 }
 .chat-attach-btn:active { background: var(--bg-hover); }
 .chat-attach-btn svg { display: block; }
-@media (max-width: 768px) { .chat-attach-btn { display: flex; } }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-attach-btn { display: flex; } }
 /* Dropline voice input (q-029 D5): the microphone shows on desk AND phone; recording = the capsule "● 0:12 ▮▮▮ ✕" */
 .chat-input-wrap .chat-voice-btn { display: flex; gap: 6px; border-radius: 18px; }
 .chat-voice-btn:hover { color: var(--text); background: var(--bg-hover); }
@@ -1469,7 +1472,7 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 
 /* Mobile: status bar stays ONE swipeable line instead of wrapping into 2-3
    rows that eat the space above the input */
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .chat-status-bar { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 8px; }
   .chat-status-bar::-webkit-scrollbar { display: none; }
   .chat-status-bar > * { flex-shrink: 0; }
@@ -1628,7 +1631,7 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
    below it while it is shown; paging up INSIDE an open run shows both at once */
 .chat-view.chat-run-bar-on .chat-pos-indicator,
 .chat-view.chat-run-bar-on .chat-history-status { top: 34px; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .chat-run-bar-btn { min-width: 34px; height: 28px; }
   .chat-run-footer { padding: 6px 12px; }
   /* taller touch targets ⇒ a taller bar */
@@ -1844,7 +1847,7 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .af-trow[data-state="stopped"] { opacity: 0.55; }
 .af-window .chat-artifact-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .af-window .chat-artifact-name mark { background: var(--accent-dim); color: inherit; border-radius: 2px; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .af-window { flex-direction: column; }
   .af-win-rail { width: auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 6px; gap: 6px; }
   .af-rail-item { flex: none; border: 1px solid var(--border); border-radius: var(--radius); padding: 4px 10px; }
@@ -1936,7 +1939,7 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
    the bar. Everything below is phone-gated; test-phone-composer-chrome renders the desk with this block stripped and
    gets the same PNG. ── */
 .chat-plus-btn { display: none; }
-@media (max-width: 768px) {
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .chat-view .chat-input-area { padding: 8px 12px; gap: 8px; }
   .chat-input-area > .chat-todo-display, .chat-input-area > .chat-stream-status { padding: 0; white-space: nowrap; overflow: hidden; }
   .chat-input-wrap.chat-input-phone { gap: 8px; }

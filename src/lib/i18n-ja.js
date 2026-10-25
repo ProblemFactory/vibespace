@@ -2456,7 +2456,6 @@ export default {
   "Not mounted on the machine anymore (unmounted there?) — ↻ re-mounts it": "マシン上でマウント解除されています —— ↻ で再マウント",
   "gone on machine": "マシン側で解除済み",
   "Re-mount on the machine": "マシンに再マウント",
-  "New port on \"{name}\": {ports} — 🔌 on its machine row forwards it": "\"{name}\" に新しいポート: {ports} —— マシン行の 🔌 で転送できます",
   "Set VIBESPACE_FRPS_ADDR / _PORT / _TOKEN (the shared relay) to enable public URLs.": "VIBESPACE_FRPS_ADDR / _PORT / _TOKEN（共有リレー）を設定すると公開URLが有効になります。",
   "Subdomain host (optional)": "サブドメインホスト（任意）",
   "shared secret": "共有シークレット",
@@ -8973,6 +8972,8 @@ export default {
   "Open the running one": "動いているものを開く",
   "Close this window": "このウィンドウを閉じる",
   "Running apps": "実行中のアプリ",
+  "You stopped it · 1 conversation starts it again when it next uses it": "停止しました · 1 件の会話が次に使うときに再起動します",
+  "You stopped it · {n} conversations start it again when they next use it": "停止しました · {n} 件の会話が次に使うときに再起動します",
   "Close {app}": "{app} を閉じる",
   // lane rule-learning (design q-037 P0): 「从我的判定起草」 — the drafter's card, its model row, the readout
   "the drafter needs an OpenRouter key on the Language model card": "下書きには言語モデルのカードに OpenRouter のキーが必要です",
@@ -10804,4 +10805,14 @@ export default {
   "{k} other attachment(s) were not put back — attach them again": "ほかの添付 {k} 件は戻せません — もう一度添付してください",
   "{m} message(s) came back shortened": "{m} 件のメッセージは短縮して戻しました",
   "{k} more queued message(s) were too long to put back": "さらに {k} 件のキュー待ちメッセージは長すぎて戻せませんでした",
+  // lane phone-refusal-wrap: the port notice in plain words (P2-1); ✕ on a running conversation says it keeps running (P2-2)
+  "A program on this machine started listening on port {ports}": "このマシンでプログラムがポート {ports} で待ち受けを始めました",
+  "Programs on this machine started listening on ports {ports}": "このマシンでプログラムがポート {ports} で待ち受けを始めました",
+  "A program on \"{name}\" started listening on port {ports}": "「{name}」でプログラムがポート {ports} で待ち受けを始めました",
+  "Programs on \"{name}\" started listening on ports {ports}": "「{name}」でプログラムがポート {ports} で待ち受けを始めました",
+  "to open it here, use the plug button on its row under Remote": "ここで開くには「リモート」のその行にあるプラグのボタンを使います",
+  "Closed the window — the conversation keeps running": "ウィンドウを閉じました — 会話は動き続けています",
+  "Closed the window — the terminal keeps running": "ウィンドウを閉じました — ターミナルは動き続けています",
+  "Closed {n} windows — what ran in them keeps running": "{n} 個のウィンドウを閉じました — 中で動いていたものは動き続けています",
+  "Close window — it keeps running": "ウィンドウを閉じる — 動き続けます",
 };

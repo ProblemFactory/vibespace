@@ -767,7 +767,7 @@ console.log('②e verify r4: the cap under claim (both stores), the memory on di
   ok(wb.cost === 'starts a turn' && /starts a billed turn/.test(wb.title), 'a billed lane says "starts a turn" — the money word is never blank on either lane');
   // THE PHONE: the money word is on the BUTTON and the ≤768px rule folds only the parts and the held count
   const css = read('public/chat.css');
-  const phone = css.match(/@media \(max-width: 768px\) \{ ([^}]*)\}/g).filter((m) => /chat-stash/.test(m));
+  const phone = css.match(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{ ([^}]*)\}/g).filter((m) => /chat-stash/.test(m));
   ok(phone.length === 1 && /\.chat-stash-parts, \.chat-stash-held \{ display: none; \}/.test(phone[0]) && !/chat-stash-cost/.test(phone[0]) && !/chat-stash-go\b[^{]*\{[^}]*display: none/.test(phone[0]),
     'the phone rule hides the parts and the held count and NEVER the money word on the button (was: `.chat-stash-cost { display: none }` — a press that bills said nothing where it was pressed)', phone);
   const strip = SS.createStashStrip({ sessionId: 'w1' });
@@ -1922,8 +1922,8 @@ console.log('⑤ negative controls (patched scratch copies)');
   }
   // the phone rule that hid the money word: the pin catches the pre-r4 css (a string control — no copy)
   {
-    const oldCss = read('public/chat.css').replace('@media (max-width: 768px) { .chat-stash-parts, .chat-stash-held { display: none; }', '@media (max-width: 768px) { .chat-stash-parts, .chat-stash-cost { display: none; }');
-    const phone = oldCss.match(/@media \(max-width: 768px\) \{ ([^}]*)\}/g).filter((m) => /chat-stash/.test(m));
+    const oldCss = read('public/chat.css').replace('@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-stash-parts, .chat-stash-held { display: none; }', '@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-stash-parts, .chat-stash-cost { display: none; }');
+    const phone = oldCss.match(/@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{ ([^}]*)\}/g).filter((m) => /chat-stash/.test(m));
     ok(phone.length === 1 && /chat-stash-cost/.test(phone[0]), 'CONTROL the pre-r4 phone rule (`.chat-stash-cost { display: none }`) is what the ②e pin refuses');
   }
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 17, label: '⑤ ' })) ok(c.pass, c.name, c.detail);

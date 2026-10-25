@@ -24,6 +24,11 @@
 //   §7 THE STARTED ROW (lane codex-interrupted-putback — the owner, 2026-10-25): a codex row the app-server drained under
 //      the sweep whose own turn Stop interrupts comes back too (`started: true`) — counted, merged, named in the toast and
 //      on its chip; a row whose turn ENDED stays `gone` (drainedWasStopped + its wrapper twin; RED controls)
+//   §8 THE DRAFT LANDING (lane draft-focus-guard, B-b0fa): landDraft — the ONE verdict for every draft another client saved
+//      (the put-back prefix its first row): its rows, a grid of every combination (a focused or typing box is never replaced,
+//      a held value never deletes words typed here), and two composers over the same world with the REAL autosave callback —
+//      the verifier's «x» vs «hel», a×8 / b×8 interleaved at two cadences, the blur legs; RED CONTROL = the 2.369.354 rule
+//      (the box overwritten, then its own pending autosave writes the overwritten value back)
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -38,7 +43,7 @@ const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name);
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const S = JSON.stringify;
 const QP = require('../src/queue-putback.js');
-const { PUTBACK_ITEM_MAX_CHARS, PUTBACK_TOTAL_MAX_CHARS, PUTBACK_SEP, PUTBACK_BELT_MAX, droppedRecordFor, queueDroppedOf, mergeDraft, landDraftPrepend, putbackNotice, drainedWasStopped, beltValue, noteBelt } = QP;
+const { PUTBACK_ITEM_MAX_CHARS, PUTBACK_TOTAL_MAX_CHARS, PUTBACK_SEP, PUTBACK_BELT_MAX, droppedRecordFor, queueDroppedOf, mergeDraft, landDraftPrepend, putbackNotice, drainedWasStopped, beltValue, noteBelt, landDraft, DRAFT_LANDING_TABLE } = QP;
 const { SyncStore } = require('../src/sync-store.js');
 const { arrivalVerdict, ARRIVAL_TABLE } = require('../src/sync-arrival.js');
 const DOOR = require('../src/server/queue-putback.js');
@@ -51,19 +56,41 @@ const utils = read('src/lib/utils.js');
 const c0 = utils.indexOf('class StateSync {'), c1 = utils.indexOf('\nlet _stateSync = null;');
 const CLASS = c0 > 0 && c1 > c0 ? utils.slice(c0, c1) : '';
 const ci = read('src/lib/chat-input.js');
-const d0 = ci.indexOf('    this._draftSyncHandler = (value, key, op) => {'), d1 = ci.indexOf('\n    };\n', d0);
+// the landing block: the held draft, the ONE landing (landDraft), its re-judge + the blur listener, the sync handler
+const d0 = ci.indexOf('    this._heldDraft = null;\n'), d1 = ci.indexOf('\n    };\n', ci.indexOf('    this._draftSyncHandler = (value, key, op) => {'));
 const HANDLER = d0 > 0 && d1 > d0 ? ci.slice(d0, d1 + 7) : '';
+// the input listener's autosave callback, cut verbatim (the timer nulls itself, saves, judges a held draft again)
+const TIMER = (ci.match(/this\._draftTimer = setTimeout\((\(\) => \{[^\n]*?\}), 300\);/) || [])[1] || '';
+const LAND_RE = /    this\._landDraft = \(value, op, held = false\) => \{\n[\s\S]*?\n    \};\n/;
 // the pre-fix pair (CONTROL): a client whose arrival rule has no delta row, a store whose state-set has no belt, a
 // composer that overwrites the box with the op's value (no landing)
 const PRE_FIX_ARRIVAL = (input) => arrivalVerdict({ ...input, remote: input && input.remote ? { ...input.remote, prepended: undefined } : input && input.remote });
 const NO_BELT = (belt, value) => value;
-const PRE_FIX_HANDLER = HANDLER.replace(/      if \(op && Number\.isSafeInteger\(op\.prepended\)[\s\S]*?\n      \}\n/, '');
+const PRE_FIX_HANDLER = HANDLER.replace(LAND_RE, "    this._landDraft = (value) => { this._textarea.value = value || ''; this._autoSize?.(); };\n");
+// THIS LANE'S RED CONTROL = the 2.369.354 composer: the put-back prefix, otherwise the box OVERWRITTEN; its autosave reads
+// the box when it fires (so it writes back whatever landed) and never nulls itself
+const BASE_354_HANDLER = HANDLER.replace(LAND_RE, `    this._landDraft = (value, op) => {
+      if (op && Number.isSafeInteger(op.prepended) && op.prepended > 0) {
+        const focused = typeof document !== 'undefined' && document.activeElement === this._textarea;
+        const r = landDraftPrepend({ current: this._textarea.value, selStart: this._textarea.selectionStart, selEnd: this._textarea.selectionEnd, value: value || '', prepended: op.prepended });
+        this._textarea.value = r.value;
+        if (focused) { try { this._textarea.setSelectionRange(r.selStart, r.selEnd); } catch { } }
+        this._autoSize?.();
+        if (r.value !== (value || '')) { clearTimeout(this._draftTimer); this._draftTimer = null; saveDraft('chat', this._sessionId, r.value); }
+        return;
+      }
+      this._textarea.value = value || '';
+      this._autoSize?.();
+    };
+`);
+const BASE_354_TIMER = "() => saveDraft('chat', this._sessionId, this._textarea.value)";
 
 console.log('§0 the cuts');
 ok(/case 'state-set'/.test(CASES) && /putbackBelt\(belt, data\.value, data\.basedOn\)/.test(CASES) && /store\.set\(data\.key, value, ws, data\.basedOn\)/.test(CASES), 'src/ws-handler.js: the state-set case cut verbatim — the belt judges the value before the store writes it');
 ok(CLASS.includes('this._notify(s, op.key, op.op === \'delete\' ? \'\' : op.value, op);') && /_notify\(s, key, value, op\)/.test(CLASS), 'src/lib/utils.js: the client StateSync cut verbatim — its listeners get (value, key, op)');
-ok(/landDraftPrepend\(/.test(HANDLER) && /saveDraft\('chat', this\._sessionId, r\.value\)/.test(HANDLER) && !/dispatchEvent/.test(HANDLER), 'src/lib/chat-input.js: the composer\'s draft handler cut verbatim — lands the prefix, saves once, dispatches NO synthetic input');
-ok(PRE_FIX_HANDLER !== HANDLER && !/op\.prepended|landDraftPrepend/.test(PRE_FIX_HANDLER) && /this\._textarea\.value = value \|\| '';/.test(PRE_FIX_HANDLER), 'control target present: the landing branch (the pre-fix composer overwrites)');
+ok(/landDraft\(\{ focused, dirty: this\._draftTimer !== null,/.test(HANDLER) && /if \(v\.save\) saveDraft\('chat', this\._sessionId, v\.value\);/.test(HANDLER) && /this\._landDraft\(value \|\| '', op\);/.test(HANDLER) && !/dispatchEvent/.test(HANDLER), 'src/lib/chat-input.js: the composer\'s landing block cut verbatim — ONE verdict (landDraft) for every arrival, the prefix saved once, NO synthetic input');
+ok(/this\._draftTimer = null; saveDraft\('chat', this\._sessionId, this\._textarea\.value\); this\._judgeHeldDraft\(\);/.test(TIMER), 'src/lib/chat-input.js: the autosave callback cut verbatim — it nulls its timer, saves, judges a held draft again', TIMER);
+ok(PRE_FIX_HANDLER !== HANDLER && BASE_354_HANDLER !== HANDLER && !/landDraft\(\{|op\.prepended/.test(PRE_FIX_HANDLER) && /this\._textarea\.value = value \|\| '';/.test(PRE_FIX_HANDLER) && /landDraftPrepend\(/.test(BASE_354_HANDLER), 'control targets present: the landing (the pre-.353 composer overwrites; the .354 one prepends a put-back, overwrites the rest)');
 
 // ── §1 THE PURE RULES ──
 console.log('§1 the PURE rules');
@@ -144,7 +171,7 @@ function makeClock() {
 }
 const SID = 'e2e00000-0000-4000-8000-00000000c0de';
 const KEY = 'chat:' + SID;
-function world({ cls = CLASS, cases = CASES, handlerSrc = HANDLER, belt = beltValue, arrival = arrivalVerdict, filePath = null, storeUp = true } = {}) {
+function world({ cls = CLASS, cases = CASES, handlerSrc = HANDLER, timerSrc = TIMER, land = landDraft, belt = beltValue, arrival = arrivalVerdict, filePath = null, storeUp = true } = {}) {
   const clock = makeClock();
   const wss = { clients: new Set() };
   const store = new SyncStore('drafts', filePath, wss, { saveDelay: 60000 });
@@ -169,12 +196,15 @@ function world({ cls = CLASS, cases = CASES, handlerSrc = HANDLER, belt = beltVa
     const wm = { onGlobal: (h) => globals.push(h), onStateChange: (h) => states.push(h), send: (d) => { events.push({ kind: 'sent', t: clock.now, d: JSON.parse(S(d)) }); const txt = S(d); const t = Math.max(lastUp, clock.now + up); lastUp = t; clock.at(t, () => handle(JSON.parse(txt), sock)); } };
     const sync = new StateSync(wm);
     // the composer: a fake box + the handler cut verbatim, bound to this client's saveDraft
-    const ta = { value: '', selectionStart: 0, selectionEnd: 0, setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b; } };
-    const doc = { activeElement: ta };
+    const ta = { value: '', selectionStart: 0, selectionEnd: 0, setSelectionRange(a, b) { this.selectionStart = a; this.selectionEnd = b; }, _on: {}, addEventListener(t, f) { (this._on[t] ||= []).push(f); } };
+    const doc = { activeElement: ta };   // no hasFocus() ⇒ the page is not focused (the §2–§3 composers); §8's call focus()
     const timers = new Set();
     const composer = { _sessionId: SID, _textarea: ta, _pendingEdit: null, _editingQueueId: null, _editDraftBefore: null, _draftTimer: null, _autoSize() { } };
     const saveDraft = (type, id, value) => sync.set('drafts', type + ':' + id, value);
-    new Function('landDraftPrepend', 'saveDraft', 'document', 'clearTimeout', `return function install() {\n${handlerSrc}\n};`)(landDraftPrepend, saveDraft, doc, (h) => { timers.delete(h); }).call(composer);
+    const loadDraft = (type, id) => sync.get('drafts', type + ':' + id) || '';
+    // afterPress: no pointer in this world — the judge runs one event later (the product: one task later)
+    new Function('landDraft', 'landDraftPrepend', 'saveDraft', 'loadDraft', 'document', 'clearTimeout', 'afterPress', `return function install() {\n${handlerSrc}\n};`)(land, landDraftPrepend, saveDraft, loadDraft, doc, (h) => { timers.delete(h); }, (fn) => clock.at(clock.now, fn)).call(composer);
+    const autosave = new Function('saveDraft', `return ${timerSrc};`).call(composer, saveDraft);
     const C = {
       name, events, sync, ta, composer, timers,
       async init() { await sync.init('drafts'); sync.on('drafts', KEY, composer._draftSyncHandler); },
@@ -182,8 +212,14 @@ function world({ cls = CLASS, cases = CASES, handlerSrc = HANDLER, belt = beltVa
       syncs() { return events.filter((e) => e.kind === 'frame' && e.d.type === 'state-sync'); },
       acks() { return events.filter((e) => e.kind === 'frame' && e.d.type === 'state-ack'); },
       // the person types: the box changes and the 300 ms autosave is armed (a fake timer the test fires by hand)
-      type(text) { ta.value += text; ta.selectionStart = ta.selectionEnd = ta.value.length; const h = { fire: () => { if (timers.has(h)) { timers.delete(h); saveDraft('chat', SID, ta.value); } } }; timers.add(h); composer._draftTimer = h; return h; },
+      // (the input listener: the previous timer cleared, a new one armed; its callback = the product's, cut verbatim)
+      type(text) { ta.value += text; ta.selectionStart = ta.selectionEnd = ta.value.length; timers.clear(); const h = { fire: () => { if (timers.has(h)) { timers.delete(h); autosave(); } } }; timers.add(h); composer._draftTimer = h; return h; },
       autosaveNow() { for (const h of [...timers]) h.fire(); },
+      // a keystroke on the world's clock: the 300 ms debounce fires unless another keystroke re-arms it first
+      key(text) { const h = C.type(text); clock.at(clock.now + 300, () => h.fire()); },
+      focus() { doc.activeElement = ta; doc.hasFocus = () => true; },
+      blur() { doc.activeElement = null; doc.hasFocus = () => false; for (const f of ta._on.blur || []) f(); },
+      sentValues() { return C.sets().map((e) => e.d.value); },
       close() { closed = true; sock.readyState = 3; wss.clients.delete(sock); },   // the tab closed: what is in flight TO it is lost, what it sent still lands
     };
     return C;
@@ -559,6 +595,156 @@ console.log('§7 the started row (codex: drained, then cut off by Stop)');
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = [', {n} had already started and was stopped — put back too', 'Started, then stopped', 'It had already started when Stop cut it off — its words are back in the input box'];
   ok(keys.every((k) => (view + rend).includes(`t('${k}'`) && zh.includes(`"${k}":`) && ja.includes(`"${k}":`)), 'the three new strings go through t() with zh AND ja entries');
+}
+
+// ── §8 THE DRAFT LANDING (lane draft-focus-guard) ──
+console.log('§8 the draft landing — a draft another client saved never replaces what you are typing (B-b0fa)');
+// the 2.369.354 verdict, as landDraft's shape (CONTROL): a put-back prepends, everything else replaces
+const BASE_354_LAND = (o) => (o && Number.isSafeInteger(o.prepended) && o.prepended > 0 ? landDraft(o) : { act: 'replace', why: 'free', value: typeof o.incoming === 'string' ? o.incoming : '' });
+const keeps = (whole, part) => { let i = 0; for (const ch of whole) if (i < part.length && ch === part[i]) i++; return i === part.length; };
+{
+  const ROWS = [
+    ['the report: A focused mid-typing, B\'s autosave «oko…k» arrives', { focused: true, dirty: true, current: '好，退款那条也改成同样的策略', incoming: 'oko…k' }, 'hold', 'focused'],
+    ['the verifier: B focused, «x» typed and not saved yet, A\'s «hel» arrives', { focused: true, dirty: true, current: 'x', incoming: 'hel' }, 'hold', 'focused'],
+    ['…the same box unfocused, «x» still unsaved', { focused: false, dirty: true, current: 'x', incoming: 'hel' }, 'hold', 'typing'],
+    ['focused, nothing unsaved (a pause past the autosave)', { focused: true, dirty: false, current: 'saved words', incoming: 'other words' }, 'hold', 'focused'],
+    ['focused, an empty box', { focused: true, current: '', incoming: 'from B' }, 'hold', 'focused'],
+    ['unfocused and clean — as before the rule', { focused: false, dirty: false, current: 'old', incoming: 'new' }, 'replace', 'free'],
+    ['unfocused and clean, a clear from another client (it sent)', { current: 'sent elsewhere', incoming: '' }, 'replace', 'free'],
+    ['the value equals the box', { focused: true, dirty: true, current: 'same', incoming: 'same' }, 'drop', 'same'],
+    ['re-judge: the store no longer holds it (this client saved since)', { held: true, stored: 'x', current: 'x', incoming: 'hel', taken: '' }, 'drop', 'superseded'],
+    ['re-judge at the blur, the box empty', { held: true, stored: 'from B', current: '', incoming: 'from B', taken: 'old' }, 'replace', 'free'],
+    ['re-judge at the blur, words typed here it would delete', { held: true, stored: 'other words', current: 'my words', incoming: 'other words', taken: '' }, 'hold', 'typed-here'],
+    ['re-judge at the blur, the other client CONTINUED the words', { held: true, stored: 'hello world', current: 'hello', incoming: 'hello world', taken: '' }, 'replace', 'free'],
+    ['re-judge at the blur, the box shows what it took from the store', { held: true, stored: '', current: 'shared', incoming: '', taken: 'shared' }, 'replace', 'free'],
+    ['re-judge, the box still focused', { held: true, stored: 'v', focused: true, current: '', incoming: 'v', taken: '' }, 'hold', 'focused'],
+    ['the put-back, focused mid-typing', { focused: true, dirty: true, current: 'typing', incoming: 'Q\n\nold', prepended: 3, selStart: 6, selEnd: 6 }, 'replace', 'putback'],
+  ];
+  for (const [name, input, act, why] of ROWS) { const v = landDraft(input); ok(v.act === act && v.why === why, `landDraft: ${name} ⇒ ${act} (${why})`, v); }
+  const pb = landDraft(ROWS.at(-1)[1]);
+  ok(pb.value === 'Q\n\ntyping' && pb.selStart === 9 && pb.selEnd === 9 && pb.save === true, 'landDraft: the put-back row IS landDraftPrepend (prefix + live box, caret moved, saved once — it differs from the op)', pb);
+  const strs = ['', 'mine', 'mine and more', 'theirs'];
+  const bad = [], whys = [];
+  let n = 0;
+  for (const focused of [false, true]) for (const dirty of [false, true]) for (const held of [false, true]) for (const current of strs) for (const incoming of strs)
+    for (const stored of [incoming, 'elsewhere']) for (const taken of [current, '']) for (const prepended of [undefined, 0, 2]) {
+      const v = landDraft({ focused, dirty, held, current, incoming, stored, taken, prepended });
+      n++; if (!whys.includes(v.why)) whys.push(v.why);
+      const putback = prepended > 0;
+      if (!putback && (focused || dirty) && v.act === 'replace') bad.push(['a focused or typing box replaced', { focused, dirty, current, incoming }]);
+      if (putback && !(v.act === 'replace' && v.value === incoming.slice(0, 2) + current)) bad.push(['a put-back that is not prefix + the live box', { current, incoming, v }]);
+      if (!putback && v.act === 'replace' && v.value !== incoming) bad.push(['a replace that is not the value', { current, incoming, v }]);
+      if (!putback && held && v.act === 'replace' && current !== '' && current !== taken && !keeps(incoming, current)) bad.push(['a held value deleted words typed here', { current, incoming, taken }]);
+      if (v.why === 'superseded' && !(held && stored !== incoming)) bad.push(['superseded outside a re-judge', { held, stored, incoming }]);
+      if (v.act !== 'replace' && 'value' in v) bad.push(['a hold / drop carries a value', v]);
+    }
+  ok(bad.length === 0, `landDraft over ${n} combinations: a focused or typing box is never replaced, a put-back is prefix + the live box, a replace is the value, a held value never deletes words typed here`, bad.slice(0, 3));
+  ok(S(whys.slice().sort()) === S(DRAFT_LANDING_TABLE.map((r) => r.why).sort()) && DRAFT_LANDING_TABLE.length === 7 && DRAFT_LANDING_TABLE.every((r) => ['replace', 'hold', 'drop'].includes(r.act) && r.when && r.then), 'DRAFT_LANDING_TABLE: its seven rows are exactly the verdicts the grid reaches (replace / hold / drop, each with when + then)', whys);
+  ok(BASE_354_LAND(ROWS[0][1]).act === 'replace' && BASE_354_LAND(ROWS[1][1]).act === 'replace', 'RED CONTROL (PURE): the 2.369.354 rule replaces the report\'s focused, typing box and the verifier\'s');
+}
+// two composers on one conversation over the §3 world: the real StateSync + ws cases + the landing block + the autosave callback
+const frameTypes = (...cs) => [...new Set(cs.flatMap((c) => c.events.map((e) => (e.kind === 'sent' ? 'sent:' : '') + e.d.type)))].sort();
+async function verifierRun(opts = {}) {
+  const w = world(opts);
+  const A = w.client('A'), B = w.client('B');
+  await A.init(); await B.init();
+  A.focus(); B.focus();
+  w.clock.at(0, () => A.key('h')); w.clock.at(40, () => A.key('e')); w.clock.at(80, () => A.key('l'));   // A's «hel» is saved at 380
+  w.clock.at(200, () => B.key('x'));                                                                      // B's «x» is due at 500
+  w.clock.run();
+  return { w, A, B, srv: w.store.get(KEY) };
+}
+{
+  const r = await verifierRun();
+  ok(r.A.ta.value === 'hel' && r.B.ta.value === 'x', `⑧ the verifier's case: B focused with «x» unsaved when A's «hel» arrives — each box keeps what was typed in it (A «${r.A.ta.value}», B «${r.B.ta.value}»)`, { A: r.A.ta.value, B: r.B.ta.value });
+  ok(S(r.B.sentValues()) === S(['x']) && S(r.A.sentValues()) === S(['hel']) && r.srv === 'x', '⑧ …B\'s autosave saved «x» — never a value it did not type — and the store holds the last save', { A: r.A.sentValues(), B: r.B.sentValues(), srv: r.srv });
+  ok(r.B.composer._heldDraft === null && r.A.composer._heldDraft === 'x', '⑧ …B\'s own save SUPERSEDED the «hel» it held; A, still focused, holds «x» (not dropped: the store has it)', { A: r.A.composer._heldDraft, B: r.B.composer._heldDraft });
+  r.A.blur(); r.w.clock.run();
+  ok(r.A.ta.value === 'hel' && r.A.composer._heldDraft === 'x' && r.A.sentValues().length === 1, '⑧ …A blurs: «hel» was typed here and «x» does not keep it ⇒ still held, nothing sent (typed words are never deleted by a held draft)', { A: r.A.ta.value, held: r.A.composer._heldDraft });
+  ok(S(frameTypes(r.A, r.B)) === S(['sent:state-set', 'state-ack', 'state-sync']), '⑧ …no new frame: holding, re-judging and superseding use the store\'s own set / sync / ack', frameTypes(r.A, r.B));
+  const base = await verifierRun({ handlerSrc: BASE_354_HANDLER, timerSrc: BASE_354_TIMER });
+  ok(base.B.ta.value === 'hel' && base.B.sentValues().includes('hel') && base.srv === 'hel' && !base.A.ta.value.includes('x') && !base.B.ta.value.includes('x'), `⑧ RED CONTROL (the 2.369.354 composer): B's focused box became «${base.B.ta.value}», its own pending autosave then SAVED «hel» — «x» lost on both sides (server «${base.srv}»)`, { A: base.A.ta.value, B: base.B.ta.value, Bsent: base.B.sentValues(), srv: base.srv });
+}
+async function interleave(gap, opts = {}) {
+  const w = world(opts);
+  const A = w.client('A'), B = w.client('B');
+  await A.init(); await B.init();
+  A.focus(); B.focus();
+  for (let i = 0; i < 8; i++) { w.clock.at(i * 2 * gap, () => A.key('a')); w.clock.at(i * 2 * gap + gap, () => B.key('b')); }
+  w.clock.run();
+  const kept = (A.ta.value.match(/a/g) || []).length + (B.ta.value.match(/b/g) || []).length;
+  const own = (c, ch) => c.sentValues().every((v) => v === ch.repeat(v.length));
+  return { A, B, kept, lost: 16 - kept, ownOnly: own(A, 'a') && own(B, 'b'), srv: w.store.get(KEY), saves: A.sets().length + B.sets().length };
+}
+for (const gap of [120, 200]) {
+  const r = await interleave(gap), base = await interleave(gap, { handlerSrc: BASE_354_HANDLER, timerSrc: BASE_354_TIMER });
+  ok(r.A.ta.value === 'aaaaaaaa' && r.B.ta.value === 'bbbbbbbb' && r.lost === 0 && r.ownOnly, `⑧ a×8 / b×8 interleaved every ${gap} ms, both boxes focused (${r.saves} autosaves): 0 of 16 characters lost — each box holds exactly its own typing, each client saved only what it typed`, { A: r.A.ta.value, B: r.B.ta.value, sent: [r.A.sentValues(), r.B.sentValues()] });
+  ok(base.lost > 0 && !base.ownOnly, `⑧ RED CONTROL (2.369.354) at ${gap} ms: ${base.lost} of 16 characters lost (A «${base.A.ta.value}», B «${base.B.ta.value}»), a client saved the other's characters`, { A: base.A.ta.value, B: base.B.ta.value, sent: [base.A.sentValues(), base.B.sentValues()] });
+}
+{
+  // A blurs with an EMPTY box ⇒ the remote draft lands; nothing is sent by the landing
+  const w = world();
+  const A = w.client('A'), B = w.client('B');
+  await A.init(); await B.init();
+  A.focus(); B.focus();
+  w.clock.at(0, () => B.key('draft typed on B'));
+  w.clock.run();
+  const heldWhileFocused = A.ta.value === '' && A.composer._heldDraft === 'draft typed on B';
+  A.blur(); w.clock.run();
+  ok(heldWhileFocused && A.ta.value === 'draft typed on B' && A.composer._heldDraft === null && A.sets().length === 0, '⑧ A focused with an EMPTY box holds B\'s draft; A blurs ⇒ it lands — and the landing sends nothing (the store already has it)', { A: A.ta.value, held: A.composer._heldDraft, sets: A.sets().length });
+}
+{
+  // a blur over words typed here: held (typed-here) until A's own next save supersedes it; CONTROL: without that row they go
+  const run = async (land) => {
+    const w = world({ land });
+    const A = w.client('A'), B = w.client('B');
+    await A.init(); await B.init();
+    A.focus(); w.clock.at(0, () => A.key('my words')); w.clock.run();              // saved at 300 — clean, still focused
+    B.focus(); w.clock.at(w.clock.now + 10, () => B.key(' other words')); w.clock.run();   // B's box took «my words» unfocused, B typed on
+    const held = A.composer._heldDraft;
+    A.blur(); w.clock.run();
+    return { w, A, B, held, afterBlur: A.ta.value };
+  };
+  const r = await run(landDraft);
+  ok(r.held === 'my words other words' && r.afterBlur === 'my words other words' && r.A.composer._heldDraft === null && r.A.sets().length === 1, '⑧ B continued A\'s words while A was focused ⇒ held; A blurs ⇒ «my words other words» keeps every character of «my words» ⇒ it lands, and A sends nothing for it', { held: r.held, afterBlur: r.afterBlur, sets: r.A.sets().length });
+}
+{
+  const run = async (land) => {
+    const w = world({ land });
+    const A = w.client('A'), B = w.client('B');
+    await A.init(); await B.init();
+    A.focus(); B.focus();
+    w.clock.at(0, () => A.key('my words')); w.clock.at(5, () => B.key('other words')); w.clock.run();   // both saved, each box focused
+    A.blur(); w.clock.run();
+    const afterBlur = A.ta.value, heldAfterBlur = A.composer._heldDraft;
+    A.focus(); w.clock.at(w.clock.now + 10, () => A.key('!')); w.clock.run();
+    return { w, A, B, afterBlur, heldAfterBlur };
+  };
+  const r = await run(landDraft);
+  ok(r.afterBlur === 'my words' && r.heldAfterBlur === 'other words', '⑧ A and B typed different words at once; A blurs ⇒ «other words» would delete «my words» (typed here, saved nowhere now) ⇒ STILL HELD', { afterBlur: r.afterBlur, held: r.heldAfterBlur });
+  ok(r.A.ta.value === 'my words!' && r.A.composer._heldDraft === null && r.w.store.get(KEY) === 'my words!' && r.B.ta.value === 'other words', '⑧ …A types on ⇒ its own save supersedes the held draft; B, focused, keeps its own words (it holds A\'s)', { A: r.A.ta.value, B: r.B.ta.value, srv: r.w.store.get(KEY) });
+  const noRow = await run((o) => { const v = landDraft(o); return v.why === 'typed-here' ? { act: 'replace', why: 'free', value: o.incoming } : v; });
+  ok(noRow.afterBlur === 'other words', `⑧ RED CONTROL: without the typed-here row A's blur puts «${noRow.afterBlur}» over the words A typed — gone from every box and the store`, { afterBlur: noRow.afterBlur });
+}
+{
+  // the box shows what it TOOK from the store (nothing typed here): a clear from the client that sent it lands at the blur
+  const w = world();
+  const A = w.client('A'), B = w.client('B');
+  await A.init(); await B.init();
+  B.focus(); w.clock.at(0, () => B.key('shared draft')); w.clock.run();        // A, unfocused and clean, took it at arrival
+  const took = A.ta.value;
+  A.focus();
+  w.clock.at(w.clock.now + 10, () => B.sync.set('drafts', KEY, '')); w.clock.run();   // B sent it: its deferred clear
+  const heldClear = A.composer._heldDraft === '' && A.ta.value === 'shared draft';
+  A.blur(); w.clock.run();
+  ok(took === 'shared draft' && heldClear && A.ta.value === '', '⑧ an unfocused clean box takes a draft at arrival (as before); focused, it holds B\'s clear; at the blur the box only showed what it took from the store ⇒ the clear lands', { took, heldClear, A: A.ta.value });
+}
+{
+  // the chat-input wiring the legs above cannot see (the page-level press wait, the send, dispose)
+  const at = (re) => re.test(ci);
+  ok(at(/function afterPress\(fn\) \{\n  if \(!pressDown\) \{ setTimeout\(fn, 0\); return; \}/) && at(/window\.addEventListener\('pointerdown', \(\) => \{ pressDown = true; \}, true\);/) && at(/this\._textarea\.addEventListener\('blur', \(\) => \{ if \(this\._heldDraft !== null\) afterPress\(\(\) => this\._judgeHeldDraft\(\)\); \}\);/), 'chat-input: the blur judges a held draft only after the press that moved the focus has ended (afterPress — a press on Send sends what the box held)');
+  ok(at(/const storeBefore = this\._heldDraft !== null \? null : loadDraft\('chat', this\._sessionId\);/) && at(/this\._pendingSend = \{ text, storeBefore \};\n    this\._judgeHeldDraft\(\);/) && at(/    clearTimeout\(this\._draftTimer\);\n    this\._draftTimer = null;\n    \/\/ WHAT THIS SEND DISPLACED/), 'chat-input: a send nulls the autosave timer, never lets the pinless clear take a HELD draft, and judges it again in the emptied box');
+  ok(at(/this\._heldDraft = null;   \/\/ a blur judge still pending finds nothing/) && (ci.match(/this\._textarea\.value = value \|\| '';/g) || []).length === 0, 'chat-input: dispose forgets the held draft; no overwrite of the box outside landDraft is left');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

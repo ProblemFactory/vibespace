@@ -30,7 +30,7 @@ function judgeInput(src) {
     deskFirst: src.indexOf('const deskKids = [...inputWrap.childNodes];') > src.indexOf(`inputWrap.append(${DESK_ROW});`),
     mic: /field\.append\(this\._textarea, this\._voice\.btn, expandBtn\)/.test(src),
     sheet: /label: t\('Image'\), action: \(\) => attachInput\.click\(\) \},\s*\{ label: t\('File'\), action: \(\) => fileInput\.click\(\) \},\s*\{ label: t\('Folder'\), action: \(\) => dirInput\.click\(\) \}/.test(src),
-    gated: /window\.matchMedia\('\(max-width: 768px\)'\)/.test(src) && /phoneFace\(phoneMq\.matches\)/.test(src),
+    gated: /window\.matchMedia\(VC_PHONE_MEDIA\)/.test(src) && /phoneFace\(phoneMq\.matches\)/.test(src),
   };
 }
 function judgeBar(src) {
@@ -44,7 +44,7 @@ function judgeCss(css) {
   const m = /\/\* ── THE PHONE COMPOSER[\s\S]*?\*\/([\s\S]*?)\/\* ── end THE PHONE COMPOSER ── \*\//.exec(css);
   if (!m) return { block: false };
   // outside the ≤ 768 px query the block may only hide the door
-  let body = m[1], i = body.indexOf('@media (max-width: 768px) {'), rest = body;
+  let body = m[1], i = body.indexOf('@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {'), rest = body;
   if (i >= 0) { let d = 0, j = body.indexOf('{', i); for (; j < body.length; j++) { if (body[j] === '{') d++; else if (body[j] === '}' && --d === 0) break; } rest = body.slice(0, i) + body.slice(j + 1); }
   return { block: true, gated: i >= 0 && rest.replace(/\/\*[\s\S]*?\*\//g, '').trim() === '.chat-plus-btn { display: none; }' };
 }
@@ -72,7 +72,7 @@ console.log('③ RED controls (planted copies)');
 const deskLine = `inputWrap.append(${DESK_ROW});`;
 ok('RED: the desk row gaining the + door', !judgeInput(ci.replace(deskLine, `inputWrap.append(plusBtn, ${DESK_ROW});`)).desk);
 ok('RED: the phone face keeping the desk mic beside the field', !judgeInput(ci.replace(PHONE_ROW, 'plusBtn, attachInput, this._voice.btn, fileInput, dirInput, field, this._slashDropdown, this._voice.chip')).phone);
-ok('RED: the phone CSS un-gated', !judgeCss(css.replace(/(THE PHONE COMPOSER[\s\S]*?)@media \(max-width: 768px\) \{/, '$1@media all {')).gated);
+ok('RED: the phone CSS un-gated', !judgeCss(css.replace(/(THE PHONE COMPOSER[\s\S]*?)@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{/, '$1@media all {')).gated);
 ok('RED: ⋯ on the desk', !judgeBar(sb.replace("if (PHONE_MQ?.matches) chip('more', ", "chip('more', ")).more);
 
 console.log('④ the fold table (PURE phoneBarFold; lane phone-bar-billing-nofold — mirror-262: the runner\'s fonts folded the billing chip)');

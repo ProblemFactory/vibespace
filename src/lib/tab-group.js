@@ -7,6 +7,7 @@ import { showWindowContextMenu } from './taskbar.js';
 import { dragEndVerdict } from './drag-end.js';
 import { captureOn, setDragShield, attachDragFeed, startPointerDrag } from './drag-feed.js'; // ONE feed for every drag door (lane-drag-release verify r1)
 import { normalizeChain, displayedPanes, clampRatio, splitColumns, paneMinPx, visualTabOrder, splitPartner, splitSideFor, chainFocusOf, ownerColor, chainSyncKey, showTab, enterSplit, insertTab, moveTab, removeTab, swapSides, SPLIT_RATIO_DEFAULT, holdRatio, heldRatio, releaseRatio, ratioDiffers, followFor, foldBackTarget, tabDragMode, closeAsks, groupCloseList } from './chain-layout.js';
+import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 
 /**
  * Tab grouping — mixin methods for WindowManager.
@@ -660,7 +661,7 @@ const tabGroupMethods = {
    *  under prefers-reduced-motion) and a toast offers the second step. */
   _afterUserMerge(chain, { dragged = null, from = null, before = null } = {}) {
     if (!chain || !Array.isArray(chain.tabs) || chain.tabs.length < 2) return;
-    if (typeof matchMedia === 'function' && matchMedia('(max-width: 768px)').matches) return; // the phone shows one pane — nothing to offer
+    if (typeof matchMedia === 'function' && matchMedia(VC_PHONE_MEDIA).matches) return; // the phone shows one pane — nothing to offer
     const draggedWin = dragged && chain.tabs.includes(dragged.id) ? dragged : this.windows.get(chain.tabs[chain.active]);
     if (chain.layout === 'split') { this._announceSplitJoin(chain, { dragged: draggedWin, from, before }); return; } // the target was ALREADY split (either setting)
     if ((this._settings?.get('window.mergeDropLayout') ?? 'tabs') === 'split' && draggedWin) {
@@ -1101,7 +1102,7 @@ const tabGroupMethods = {
   },
   /** The partner the OTHER side should show after `id` was shown, or null (never on a narrow layout). */
   _followPartner(chain, id) {
-    if (typeof matchMedia === 'function' && matchMedia('(max-width: 768px)').matches) return null;
+    if (typeof matchMedia === 'function' && matchMedia(VC_PHONE_MEDIA).matches) return null;
     try { return followFor(chain, id, (x) => this._paneFacts(x)); } catch { return null; }
   },
 
@@ -1141,7 +1142,7 @@ const tabGroupMethods = {
   /** Is a horizontal tab drag a REORDER here? Not ≤768px (R6: the phone's one
    *  strip keeps today's gestures). */
   _stripReorderable() {
-    return !(typeof matchMedia === 'function' && matchMedia('(max-width: 768px)').matches);
+    return !(typeof matchMedia === 'function' && matchMedia(VC_PHONE_MEDIA).matches);
   },
 
   /** THE TAB DRAG. The first 8 px of movement decide (split tabs v2):

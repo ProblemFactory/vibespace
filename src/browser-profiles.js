@@ -3233,7 +3233,30 @@ function profileChangedRefusal({ was, now } = {}) {
 function profileChangeNotice({ was = '', now = '', at = 0, by = 'user', handles = [] } = {}) {
   return { kind: 'browser-profile', was: was || null, now: now || null, at: Number(at) || 0, by, handles: Array.isArray(handles) ? handles.map((h) => (typeof h === 'string' ? h : h.handle)) : [] };
 }
+/** lane browser-display-holders (the owner 2026-10-25): THE CONVERSATIONS HOLDING a profile — one row per conversation
+ *  (a lease's session, else its key), never the person's own browsing row (`human`). A browser display's `holders` is
+ *  this count; the person's stop of that display tells each of them once. → [{ sessionId, browserKey }] */
+function attachedHolders(leases) {
+  const seen = new Set(), out = [];
+  for (const l of Array.isArray(leases) ? leases : []) {
+    if (!l || l.human || !l.browserKey) continue;
+    const who = l.sessionId || l.browserKey;
+    if (seen.has(who)) continue;
+    seen.add(who); out.push({ sessionId: l.sessionId || null, browserKey: l.browserKey });
+  }
+  return out;
+}
+/** lane browser-display-holders: the free notice a HOLDING conversation gets when the person stops the browser's display
+ *  window (its Stop, a second ✕, the Desktop list's Close) — a `browser-profile` notice naming the event. */
+function userStoppedNotice({ label = '', profileId = null, at = 0 } = {}) {
+  return { kind: 'browser-profile', event: 'user-stopped', was: label || null, now: null, profileId: profileId || null, at: Number(at) || 0, by: 'user', handles: [] };
+}
 function renderProfileChangeNotice(n) {
+  if (n.event === 'user-stopped') { // lane browser-display-holders: a person's stop, never a crash — the next command starts it
+    return '<system-reminder>\n'
+      + `the person stopped the browser "${n.was || 'agent browser'}" (its display window's Stop) — every tab of it is gone; your next \`vibespace-browser\` command starts it again (a new browser: open your page again).\n`
+      + '</system-reminder>';
+  }
   const was = n.was || 'ephemeral (no profile)';
   const now = n.now || 'ephemeral (no profile)';
   const list = n.handles && n.handles.length ? ` Attached now: ${n.handles.join(', ')}.` : '';
@@ -3535,6 +3558,7 @@ module.exports = {
   // P1 second half (§3.7/§3.8): the attachment set, handles, the two refusals, the audit line
   ALIAS_RE, aliasFor, isAlias, childHandleFor, looksLikePath, attachmentsFor, handlesText, resolveHandle,
   profileChangedRefusal, profileChangeNotice, renderProfileChangeNotice, auditVerbOf, auditLine,
+  attachedHolders, userStoppedNotice, // lane browser-display-holders: who holds a profile's display; a person's stop told once to each
   toldView, blindnessVerdict, nextChildN, childEnvFor, childPairsOver, adoptDirVerdict, normAbsPath,
   // OWNER RULING A (2026-09-26): who may use a profile (one field), one browser per profile, one driver at a time, the cap
   SCOPES, scopeOf, notOwnerRefusal, migrateScopeAll, joinOrLaunch,

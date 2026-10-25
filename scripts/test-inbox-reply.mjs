@@ -658,7 +658,11 @@ console.log('§8b the ROUTE with a reopen dep');
   const { wrote: lw0 } = H0.addSession('live-8');
   const liveIt0 = H0.userTodos.add('claude:sid-live-8', { origin: 'agent', text: 'live one' });
   H0.call(liveIt0.id, { text: 'plain answer' });
-  const strip = (w) => { const f = JSON.parse(w); return JSON.stringify({ ...f, uuid: undefined, message: { ...f.message, content: [{ ...f.message.content[0], text: f.message.content[0].text.replace(/#ut-\w+/, '#ID') }] } }); };
+  // ci-354-red (2026-10-25): the frame carries TWO per-call clock stamps — the item id and `webui_msg_id` (`Date.now()`-reply);
+  // the two harnesses build their frames a millisecond apart often enough (2 of 6 runs under TZ=UTC here; 2 of 2 on the
+  // master runner) that the byte-compare went red on the stamp alone. Both stamps are normalized; the frame's SHAPE and
+  // TEXT are what this leg pins.
+  const strip = (w) => { const f = JSON.parse(w); return JSON.stringify({ ...f, uuid: undefined, webui_msg_id: typeof f.webui_msg_id === 'string' ? f.webui_msg_id.replace(/^\d+/, 'TS') : f.webui_msg_id, message: { ...f.message, content: [{ ...f.message.content[0], text: f.message.content[0].text.replace(/#ut-\w+/, '#ID') }] } }); };
   ok(lw0.length === 1 && strip(lw0[0]) === strip(lw[0]), 'BYTE-IDENTICAL live path: the frame with the reopen wired === the frame without it (the item id aside)', [lw0[0] && strip(lw0[0]).slice(0, 160), lw[0] && strip(lw[0]).slice(0, 160)]);
   H0.userTodos.stop(); H0.userTodos.flush();
   H.addSession('term-8', { mode: 'terminal' });

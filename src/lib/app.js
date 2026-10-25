@@ -69,6 +69,10 @@ import { registerWindowType, svgIcon16 } from './window-types.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
 import { installToolbarFold } from './toolbar-fold.js'; // lane toolbar-fold: the toolbar never overlaps — words go first, then a ⋯
 import { installSessionPalette } from './session-palette.js';
+import { installViewportSwitch, readViewportClass } from './viewport-switch.js'; // lane duo-build-1: the viewport class, live
+import { isPhoneClass } from '../viewport-class.js';
+import { installFoldLadder } from './fold-ladder.js'; // lane duo-build-1 slice 4: the posture ladder (book / laptop on segments:2 only)
+import { installKeyboardInset } from './keyboard-inset.js'; // lane duo-build-1 slice 3: the keyboard read from the visual viewport
 import { installUserTodos } from './user-todos-panel.js';
 import { openInboxWindow } from './inbox-window.js'; // design-user-inbox-reply §9: THE For-you window (the popup's / a row's / the mini inbox's ⤢, ⚙ Communication ▸ For you…)
 import { installBrowserProfilePicker } from './browser-profile-picker.js'; // agent browser P1 (§3.2.5): the pin's one entry point + the profile digest
@@ -189,8 +193,12 @@ const CLIENT_PREF_KEYS = [
 
 class App {
   constructor() {
-    /** Centralized mobile detection — all code should use app.isMobile instead of matchMedia */
-    this.isMobile = window.matchMedia('(max-width: 768px)').matches;
+    /** Centralized mobile detection — all code should use app.isMobile instead of matchMedia. THE VIEWPORT CLASS (PURE
+     *  src/viewport-class.js) decides it, and a crossing at runtime (a fold, a rotation) switches it — src/lib/viewport-switch.js
+     *  (lane duo-build-1: frozen at boot, a Duo folded to its cover kept the desktop's rail and window geometry) */
+    this._vc = readViewportClass();
+    this.isMobile = isPhoneClass(this._vc);
+    document.documentElement.dataset.vc = this._vc;
     /** Touch-primary device (phones AND tablets) — hover/right-click unavailable */
     this.isTouch = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
     // Long-press = right-click on touch devices (iOS never fires contextmenu natively)
@@ -400,7 +408,7 @@ class App {
     this._setupWelcome();
     this._setupGlobalSettings();
     this._setupChromeContextMenus();
-    if (!this.isMobile) installSessionPalette(this);
+    if (!this.isMobile) { installSessionPalette(this); this._paletteInstalled = true; } // a phone boot installs it at its first switch to the desktop class
     // THE document-level keybinding dispatcher for registry chords
     // (contributions.js registerKeybinding, Plugin Ph1): ONE bubble-phase
     // listener bound for the app's lifetime under an AbortController. Core
@@ -623,7 +631,17 @@ class App {
     // THE PHONE'S FIRST SCREEN (lane phone-first-screen, design q-044 decision 5): after the boot's restore the phone opens
     // on the attention list (user-todos-panel.js `app.phoneHome`); an empty list leaves the restore's own screen
     if (this.isMobile) this.ready.then(() => this.phoneHome?.boot?.());
+    // A CROSSING AT RUNTIME (lane duo-build-1): a fold / rotation across the phone line rebuilds the chrome a fresh load
+    // at the new size would build — never a reload, never a frozen boot-time answer
+    this._viewportSwitch = installViewportSwitch(this);
+    // THE POSTURE LADDER (slice 4, SPEC-v3 §1.6): <html data-fold> from the six posture / segment media queries — a
+    // half-fold arranges only on segments:2; and THE KEYBOARD from the visual viewport (slice 3, SPEC-v3 §7 / §5)
+    this._foldLadder = installFoldLadder(this);
+    this._keyboardInset = installKeyboardInset();
   }
+
+  /** The viewport class this page shows: 'compact' (the phone page) | 'desktop' (src/viewport-class.js). */
+  viewportClass() { return this._vc; }
 
   /** The reconnect queue's order key for a (suspended) ChatView: [desktop rank, window rank].
    *  Desktop rank 0 = the active desktop (a minimized window / tab guest the user is next to),
@@ -725,6 +743,7 @@ class App {
       placeVaultChip(); // lane vault-chip-zone-errors: the vault's lock chip follows For-you into whichever zone it now sits
     };
     applyArr();
+    this._applyChromeArrangement = applyArr; // a switch to the desktop class re-applies it (src/lib/viewport-switch.js)
     this.settings.on('chrome.arrangement', applyArr);
     this.settings.on('chrome.springs', applyArr);
     // lane toolbar-fold: after the arrangement — the fold reads the zones in their arranged order at every layout
