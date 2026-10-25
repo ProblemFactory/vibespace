@@ -97,9 +97,10 @@ export function installViewportSwitch(app) {
   const settle = () => {
     timer = null;
     applyViewportClass(app, readViewportClass(app._vc));
-    // a rotation shows the list again: a hidden list is a view of one orientation, never a memory (SPEC-v3 §4 / §7)
+    // a rotation starts the list as that orientation does: portrait shows it (a hidden list there is a view of one
+    // orientation, SPEC-v3 §4 / §7), landscape takes this tab's own choice back (lane desktop-switch-phone)
     let p = null; try { p = window.matchMedia('(orientation: portrait)').matches; } catch { }
-    if (portrait !== null && p !== portrait) app.sidebar?.setListHidden?.(false);
+    if (portrait !== null && p !== portrait) app.sidebar?.restoreListHidden?.();
     portrait = p;
   };
   const kick = () => { clearTimeout(timer); timer = setTimeout(settle, VC_SETTLE_MS); };

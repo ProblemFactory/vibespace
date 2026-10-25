@@ -10815,4 +10815,9 @@ export default {
   "Closed the window — the terminal keeps running": "ウィンドウを閉じました — ターミナルは動き続けています",
   "Closed {n} windows — what ran in them keeps running": "{n} 個のウィンドウを閉じました — 中で動いていたものは動き続けています",
   "Close window — it keeps running": "ウィンドウを閉じる — 動き続けます",
+  // lane desktop-switch-phone: the phone classes' Desktops door
+  "Desktops": "デスクトップ",
+  "Desktops — {name} ({k}/{n})": "デスクトップ — {name}（{k}/{n}）",
+  "1 window": "1 ウィンドウ",
+  "New desktop": "新しいデスクトップ",
 };

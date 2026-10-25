@@ -2888,7 +2888,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/window.js': [9, 2, 'the door\'s own raise (revealWindow: its replay branch + the raise), restore\'s raise, createWindow\'s focus of a NEW window, the POINTER (_focusFromPointer ×2, beginDragFromPointer), startMoveMode, _focusMostRecent (the close / minimize handoff)'],
     'src/lib/tab-group.js': [3, 0, 'a detach and the two close handoffs — machine'],
     'src/lib/layout.js': [5, 2, 'boot restore / remote apply / preset re-apply — the RECORD decides the tab (§6b) + a phone handing the focus a remote replay took back to ITS window on show (§6b guard 10)'],
-    'src/lib/mobile-nav.js': [1, 0, 'restoreShown: a reload shows the window this tab showed before it (the phone\'s own view state, §6b guard 10) — nobody names it'],
+    'src/lib/mobile-nav.js': [2, 0, 'restoreShown: a reload shows the window this tab showed before it + _showOnDesk: a switch from the Desktops door shows the window this tab showed on that desktop (the phone\'s own view state, §6b guard 10) — nobody names it'],
     'src/lib/stage-manager.js': [3, 0, 'the stage raising its own hero (_stageBypass ×2) + materialize named a guest of the hero\'s own group: its plain raise-only focus (verify r2 of inc-munl8jkl-gaih — shouldIntercept says no, so focusWindow never re-enters materialize)'],
     'src/lib/command-mode.js': [1, 1, 'the Tab cycle steps FRAMES (each group on the tab it shows) — it names no tab'],
     'src/lib/desktop-app-window.js': [2, 0, 'the capture pointerdowns of the main window and of a satellite (design 016 S2) — a PRESS keeps the tab'],

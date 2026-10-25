@@ -1,6 +1,6 @@
 import { chipMode, titleMinText, billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the row's billing pill folds, never cuts
 import { t } from './i18n.js';
-import { escHtml, onOutsidePress, showContextMenu } from './utils.js';
+import { escHtml, onOutsidePress, showContextMenu, uiScale } from './utils.js';
 import { showWindowContextMenu } from './taskbar.js';
 import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { getCommand, runCommand } from './contributions.js';
@@ -46,6 +46,16 @@ function fitRowPill(label, chip) {
 /** Is `w` minimized? A tab group is minimized as ONE frame — the HOST carries the flag, its guests are hidden with it. */
 const minimizedOf = (wm, w) => !!((w._tabChain && wm.windows.get(w._tabChain.tabs[0])) || w).isMinimized;
 
+/** A desktop's windows (the Desktops menu's count): the ones this page built there + the ones its held record lists that
+ *  the page has not built (a desktop not opened since the page loaded holds nothing else). */
+function deskWindowCount(app, deskId) {
+  const wm = app.wm, held = app.desktopManager?._savedStates?.get(deskId)?.windows || [];
+  let n = 0;
+  for (const w of wm.windows.values()) if (w._desktopId === deskId && !w._isStagePlaceholder) n++;
+  for (const ws of held) { const id = ws && (ws.winId || ws.id); if (id && !wm.windows.has(id)) n++; }
+  return n;
+}
+
 export class MobileNav {
   constructor(app) {
     this.app = app;
@@ -80,18 +90,115 @@ export class MobileNav {
       if (activeId) app.wm.requestClose(activeId);
     };
 
-    // HOTFIX 2.369.356 (userW on his Duo, 2026-10-25): the switcher's DESKTOP TABS are the only desktop door where the taskbar is
-    // not drawn — the regular class had switched the title tap off (SPEC-v3 §2.2 «the list IS the switcher»), which left no way
-    // to switch a virtual desktop on the inner display. The title tap opens the switcher in EVERY class; at landscape the
-    // conversation's own title bar (the active window's title) is the tap target (this nav's title is not drawn there).
+    // the title = the window switcher with its desktop tabs — in the regular class too (lane desktop-switch-phone: SPEC-v3
+    // §2.2 had turned it off there, «the list IS the switcher» — but the list lists conversations, never desktops, and a
+    // person with many desktops could reach none but the one the page booted on); in its landscape the conversation's
+    // head is the window's own title bar, so a tap on it opens the same switcher
     this._titleEl.onclick = () => this._showWindowSwitcher();
-    (document.getElementById('workspace') || document.getElementById('main-wrapper'))?.addEventListener('click', (e) => { // the windows' container, never the document (test-architecture §59a)
-      if (app.viewportClass?.() !== 'regular') return;
-      const t = e.target && e.target.closest && e.target.closest('.window.window-active > .window-titlebar .window-title');
-      if (t) { e.preventDefault(); this._showWindowSwitcher(); }
+    document.getElementById('workspace')?.addEventListener('click', (e) => {
+      if (app.viewportClass?.() !== 'regular' || getComputedStyle(document.getElementById('mobile-nav')).flexDirection !== 'column') return;
+      const head = e.target.closest?.('.window.window-active > .window-titlebar');
+      if (head && !e.target.closest('button, input, textarea, select, .window-controls')) this._showWindowSwitcher(head);
     });
     this._setupGestures();
+    this.desktopsBtn = this._buildDesktopsDoor();
     this.bar = installTrailingBar(app); // the regular class's buttons (shown by the stylesheet there only)
+    // the regular class's landscape: the list column's ☰ at the conversation's head (the owner 2026-10-25, 与原文不同 —
+    // SPEC-v3 §4 kept the landscape list static; userW wants the conversation to take the width) — the portrait ☰'s act
+    const listBtn = document.createElement('button');
+    listBtn.id = 'list-column-toggle'; listBtn.type = 'button'; listBtn.textContent = '\u2630';
+    listBtn.title = t('Sessions'); listBtn.setAttribute('aria-label', listBtn.title);
+    listBtn.onclick = (e) => { e.stopPropagation(); app.sidebar.toggleList(); };
+    document.body.appendChild(listBtn);
+    this.listBtn = listBtn;
+  }
+
+  /** THE DESKTOPS DOOR (lane desktop-switch-phone, 2026-10-25 — userW on the Duo's inner display: «如何在这个界面下切换桌面？»).
+   *  The virtual-desktop switcher lives in the taskbar's corner (desktop-manager.js _renderSwitcher) and neither phone class
+   *  shows the taskbar: the regular class had no way to another desktop, the compact one only a tap on the title nobody
+   *  finds. One button on this nav — the compact bar beside the title, the regular class's trailing bar first in its bottom
+   *  section (the stylesheet orders it) — with the active desktop's number as its badge when there are two or more. */
+  _buildDesktopsDoor() {
+    const nav = document.getElementById('mobile-nav');
+    if (!nav) return null;
+    const b = document.createElement('button');
+    b.id = 'mobile-nav-desktops'; b.type = 'button'; b.className = 'mnav-dest mnav-desktops';
+    b.innerHTML = UI_ICONS.desktops;
+    const badge = document.createElement('span'); badge.className = 'mnav-badge hidden'; b.appendChild(badge);
+    b.onclick = (e) => { e.stopPropagation(); this._showDesktops(b); };
+    const usage = document.getElementById('mobile-nav-usage');
+    if (usage && usage.parentNode === nav) nav.insertBefore(b, usage); else nav.appendChild(b);
+    return b;
+  }
+
+  /** The door's words and badge follow the desktops: every switch / create / rename / delete / remote change (they all
+   *  re-render the taskbar's switcher — desktop-manager.js _renderSwitcher calls this) and every window change. */
+  updateDesktopsDoor() {
+    const b = this.desktopsBtn, dm = this.app.desktopManager;
+    if (!b) return;
+    const desks = dm?.desktops || [], k = desks.findIndex((d) => d.id === dm?.activeDesktopId) + 1;
+    const label = k ? t('Desktops — {name} ({k}/{n})', { name: desks[k - 1].name, k, n: desks.length }) : t('Desktops');
+    if (b.title !== label) { b.title = label; b.setAttribute('aria-label', label); }
+    const badge = b.querySelector('.mnav-badge'), num = desks.length > 1 && k ? String(k) : '';
+    if (badge && badge.textContent !== num) { badge.textContent = num; badge.classList.toggle('hidden', !num); }
+  }
+
+  /** The Desktops menu: every desktop by name with its window count, the active one marked; a tap = the manager's own
+   *  switch road (the taskbar preview's click — the Stage left first); the last row «+ New desktop» = the taskbar's «+».
+   *  The compact class lays it out as the phone's sheet under the nav (the «+» long-press sheet's pattern); the regular
+   *  class opens it beside the button, into the conversation column (the ⋯'s placement). */
+  _showDesktops(anchor) {
+    const app = this.app, dm = app.desktopManager;
+    if (!dm) return null;
+    const mark = (svg) => `<span class="mdesk-mark">${svg || ''}</span>`;
+    const items = dm.desktops.map((d) => {
+      const n = deskWindowCount(app, d.id);
+      return { labelHtml: `${mark(d.id === dm.activeDesktopId ? UI_ICONS.check : '')}<span class="mdesk-name">${escHtml(d.name)}</span><span class="mdesk-count">${escHtml(n === 1 ? t('1 window') : t('{n} windows', { n }))}</span>`,
+        action: () => this.switchDesktop(d.id) };
+    });
+    items.push({ labelHtml: `${mark(UI_ICONS.plus)}<span class="mdesk-name">${escHtml(t('New desktop'))}</span>`, action: () => this.switchDesktop(dm.createDesktop()) });
+    const regular = app.viewportClass?.() === 'regular';
+    const r = anchor.getBoundingClientRect();
+    const menu = regular ? showContextMenu(r.left, r.top, items) : this._sheet(items);
+    menu.classList.add('mdesk-menu');
+    menu.querySelectorAll('.context-menu-item').forEach((el, i) => {
+      const d = dm.desktops[i];
+      if (!d) { el.classList.add('mdesk-new'); return; }
+      el.dataset.desktopId = d.id;
+      el.classList.toggle('active', d.id === dm.activeDesktopId);
+    });
+    if (regular) {
+      const Z = uiScale(), nav = document.getElementById('mobile-nav');
+      if (getComputedStyle(nav).flexDirection === 'column') { menu.style.left = 'auto'; menu.style.right = ((innerWidth - r.left + 8) / Z) + 'px'; }
+      else { menu.style.top = ((r.bottom + 4) / Z) + 'px'; menu.style.bottom = ''; menu.style.left = 'auto'; menu.style.right = (Math.max(4, innerWidth - r.right) / Z) + 'px'; }
+    }
+    return menu;
+  }
+
+  /** Switch this tab to desktop `id` by the manager's road (the Stage left first, as the taskbar's preview does), then show
+   *  that desktop's window on show (§6b guard 10): the one this tab showed there, else its topmost — a lazy replay lands
+   *  later, so it looks again for a few seconds unless the person picked a window meanwhile. */
+  switchDesktop(id) {
+    const app = this.app, dm = app.desktopManager;
+    if (!dm || !id) return Promise.resolve();
+    const go = app.stage?.isActive ? app.stage.leave(id) : id === dm.activeDesktopId ? null : dm.switchTo(id);
+    return Promise.resolve(go).then(() => this._showOnDesk(id), () => this._showOnDesk(id));
+  }
+
+  _showOnDesk(desk) {
+    const app = this.app, wm = app.wm, dm = app.desktopManager;
+    const wantId = this._shown[desk], since = app.layoutManager?._lastUserInputAt || 0;
+    const here = (w) => !!w && w._desktopId === desk && !w._hiddenByDesktop && !w._hiddenByStage;
+    let tries = 0;
+    const look = () => {
+      if (dm.activeDesktopId !== desk) return; // another switch since
+      const want = wantId && wm.windows.get(wantId);
+      if (here(want)) { if (wm.activeWindowId !== wantId) wm.focusWindow(wantId); this.updateTitle(); return; }
+      if (!here(wm.windows.get(wm.activeWindowId))) wm._focusMostRecent();
+      this.updateTitle();
+      if ((wantId || !here(wm.windows.get(wm.activeWindowId))) && ++tries < 16 && (app.layoutManager?._lastUserInputAt || 0) === since) setTimeout(look, 250);
+    };
+    look();
   }
 
   /** A context menu laid out as a full-width sheet under the nav bar (the
@@ -151,6 +258,8 @@ export class MobileNav {
   _noteShown() {
     const desk = this.app.desktopManager?.activeDesktopId || '', id = this.app.wm.activeWindowId;
     if (!this._shownBooted || !id || this._shown[desk] === id) return;
+    const w = this.app.wm.windows.get(id);
+    if (desk && w?._desktopId && w._desktopId !== desk) return; // a switch's in-between: the old desktop's window is still the active one
     this._shown[desk] = id;
     try { sessionStorage.setItem(SHOWN_KEY, JSON.stringify(this._shown)); } catch { }
   }
@@ -185,10 +294,10 @@ export class MobileNav {
       : (win?.title || 'VibeSpace') + (count > 1 ? ` (${count})` : '');
     this._titleEl.classList.toggle('arrived', [...wm.windows.values()].some((w) => w.element.classList.contains('window-arrived'))); // an agent placed a window (never shown in front of this one)
     this.bar?.update?.();
+    this.updateDesktopsDoor();
   }
 
-  _showWindowSwitcher() {
-    const anchor = this._titleEl;
+  _showWindowSwitcher(anchor = this._titleEl) {
     if (!anchor) return;
     const existing = document.querySelector('.mobile-win-switcher');
     if (existing) { existing.remove(); return; }
@@ -196,10 +305,14 @@ export class MobileNav {
     const pop = document.createElement('div');
     pop.className = 'mobile-win-switcher';
     pop.style.cssText = 'position:fixed;left:0;right:0;z-index:90001;background:var(--bg-dialog);border-bottom:1px solid var(--border);box-shadow:0 4px 16px rgba(0,0,0,0.3);max-height:60vh;overflow-y:auto;-webkit-overflow-scrolling:touch';
-    const navRect = anchor.closest('#mobile-nav').getBoundingClientRect();
-    // HOTFIX 2.369.356: at the regular class's landscape the nav is the VERTICAL trailing bar (full height) — its bottom is the
-    // viewport's bottom; the sheet then hangs from the top of the page, not from the bar.
-    pop.style.top = (navRect.height > navRect.width ? 0 : navRect.bottom) + 'px';
+    const navRect = (anchor.closest('#mobile-nav') || anchor).getBoundingClientRect();
+    // at the regular class's landscape the nav is the VERTICAL trailing bar (full height) — its bottom is the viewport's bottom;
+    // the sheet then hangs from the top (HOTFIX 2.369.356), and from the conversation's head when that is the anchor
+    const top = navRect.height > navRect.width ? 0 : navRect.bottom;
+    pop.style.top = top + 'px';
+    // the regular class: over the conversation column only (the list column and the trailing bar stay)
+    const col = this.app.viewportClass?.() === 'regular' && document.getElementById('workspace')?.getBoundingClientRect();
+    if (col && col.width) { pop.style.left = col.left + 'px'; pop.style.right = Math.max(0, innerWidth - col.right) + 'px'; pop.style.top = Math.max(top, col.top) + 'px'; }
 
     const wm = this.app.wm;
     const dm = this.app.desktopManager;
@@ -241,7 +354,7 @@ export class MobileNav {
           const deskWindows = allWindows.filter(w => w._desktopId === desk.id);
           tab.textContent = `${desk.name} (${deskWindows.length + savedCount(desk.id)})`;
           tab.style.cssText = tabCss(isActive);
-          tab.onclick = () => { dm.switchTo(desk.id).then(afterSwitch); };
+          tab.onclick = () => { this.switchDesktop(desk.id).then(afterSwitch); }; // the window on show follows the desktop (§6b guard 10)
           tab.addEventListener('contextmenu', (e) => {
             e.preventDefault(); e.stopPropagation();
             const items = [{ label: t('Rename'), action: async () => { await dm._startRename(desk); rerender(); } }];
@@ -255,7 +368,7 @@ export class MobileNav {
         addTab.textContent = '+';
         addTab.title = t('Add desktop');
         addTab.style.cssText = tabCss(false) + ';font-size:16px;padding:6px 14px';
-        addTab.onclick = () => { const id = dm.createDesktop(); dm.switchTo(id).then(afterSwitch); };
+        addTab.onclick = () => { const id = dm.createDesktop(); this.switchDesktop(id).then(afterSwitch); };
         tabBar.appendChild(addTab);
         pop.insertBefore(tabBar, winList);
       }
@@ -298,7 +411,7 @@ export class MobileNav {
     // TAP, so a scroll outside the list no longer dismisses it). Chained-popover rule (same as attachPopoverClose): a
     // context menu or dialog opened FROM a row (billing switcher + its confirm) is a child interaction, not a
     // dismissal of the list; a press ON the nav button itself is its toggle's.
-    onOutsidePress(pop, () => pop.remove(), { ignore: (t) => t === anchor || !!t?.closest?.('.dialog-overlay, #dialog-overlay') });
+    onOutsidePress(pop, () => pop.remove(), { ignore: (t) => t === anchor || !!anchor.contains?.(t) || !!t?.closest?.('.dialog-overlay, #dialog-overlay') });
   }
 
   _buildWindowItem(win, wm, pop, rerender) {

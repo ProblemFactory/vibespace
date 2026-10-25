@@ -34,6 +34,12 @@
 //     (its content from 509), NOTHING tappable in 441–509 (an elementFromPoint census), the draft kept; segments back to 1
 //     = flat again after the leave settle; the cover's tent (594×368, folded, one segment) = none, every box unchanged;
 //     a laptop (669×867, the horizontal pair at 391) = the bar moves down onto the composer, the list stays
+//   ⑧ THE DESKTOPS DOOR (lane desktop-switch-phone — userW on the Duo: «如何在这个界面下切换桌面？»): two desktops with windows;
+//     951 touch: the bar's bottom section starts with Desktops (badge 1, «(1/2)»), its menu lists both with their window
+//     counts + «New desktop», a tap on the second shows its window in the conversation column (the list column stays); the
+//     conversation's head (its title bar) opens the window switcher with both desktop tabs; the landscape list column's ☰
+//     hides it (the conversation 0–895), a reload keeps the choice, ☰ again shows it; 382 touch: the same door on the top
+//     bar, the phone's sheet, a tap on the second desktop shows its window (a lazy replay on this page)
 //   ⑥ RED CONTROL — a bundle built from this source with the base's four rules put back (no switch: the class frozen at
 //     boot; the composer focused on touch; no regular class: the Duo's 951 is the window manager; no ladder): (b) and (c)
 //     red on the cover, (a) red on the inner portrait, the composer focused on the touch Duo's attach, the 951 Duo's
@@ -402,6 +408,70 @@ try {
     const closeRow = (deskRows || []).find((x) => /Close/.test(x.t));
     check('⑤ int355: one Close row, two picks — regular: no Close, Terminate red; 951 with a mouse: «✕ Close window — it keeps running», not red, Terminate red',
       !(regRows || []).some((x) => /Close/.test(x.t)) && term(regRows)?.red === true && closeRow?.t === '✕ Close window — it keeps running' && closeRow.red === false && term(deskRows)?.red === true, { regRows, deskRows });
+  }
+  console.log('⑧ THE DESKTOPS DOOR (lane desktop-switch-phone — userW on the Duo\'s inner display: «如何在这个界面下切换桌面？»; 951×585 + 382×580, touch) + the landscape list column\'s ☰');
+  {
+    await device(951, 585); await load(); await attachBoth();
+    // a second desktop holding one window (the explorer), then back to the first — the server keeps both
+    const deskB = await evalJs(`(async () => { const dm = app.desktopManager; const id = dm.createDesktop('Desk B'); await dm.switchTo(id); app.openFileExplorer(); return id; })()`);
+    await waitFor(`[...app.wm.windows.values()].some((w) => w.type === 'files' && w._desktopId === ${JSON.stringify(deskB)})`, 8000); await sleep(1300);
+    const desk1 = await evalJs(`app.desktopManager.desktops[0].id`);
+    await evalJs(`(async () => { await app.desktopManager.switchTo(${JSON.stringify(desk1)}); return 1; })()`); await sleep(1300);
+    const DOOR = `(() => { const b = document.getElementById('mobile-nav-desktops'); if (!b) return null; const r = b.getBoundingClientRect(), bar = document.getElementById('mobile-nav').getBoundingClientRect(); const y = (s) => { const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().top) : null; }; const badge = b.querySelector('.mnav-badge');
+      return { shown: getComputedStyle(b).display !== 'none' && r.width > 0, l: Math.round(r.left), t: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), barL: Math.round(bar.left), gapT: y('#mobile-nav .mnav-gap'), tasksT: y('#mobile-nav-dest-tasks'), badge: badge && !badge.classList.contains('hidden') ? badge.textContent : '', label: b.getAttribute('aria-label') }; })()`;
+    const MENU = `(() => { const m = document.querySelector('.context-menu.mdesk-menu'); if (!m) return null; const b = m.getBoundingClientRect(); return { left: Math.round(b.left), right: Math.round(b.right), rows: [...m.querySelectorAll('.context-menu-item')].map((r) => ({ id: r.dataset.desktopId || null, active: r.classList.contains('active'), name: r.querySelector('.mdesk-name')?.textContent || '', count: r.querySelector('.mdesk-count')?.textContent || '', h: Math.round(r.getBoundingClientRect().height) })) }; })()`;
+    const SHOWN = `(() => { const w = app.wm.windows.get(app.wm.activeWindowId); const el = w && w.element; const r = el && el.getBoundingClientRect(); const sb = document.getElementById('sidebar'); const sr = sb.getBoundingClientRect();
+      return { desk: app.desktopManager.activeDesktopId, type: w ? w.type : null, onDesk: w ? w._desktopId : null, visible: !!el && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none', l: r ? Math.round(r.left) : null, w: r ? Math.round(r.width) : null, list: getComputedStyle(sb).display !== 'none' ? { l: Math.round(sr.left), w: Math.round(sr.width) } : null, badge: document.querySelector('#mobile-nav-desktops .mnav-badge')?.textContent || '' }; })()`;
+    const d0 = await evalJs(DOOR);
+    check('⑧ 951: the trailing bar\'s bottom section starts with Desktops (after the gap, before Task Groups), 44 × 44, badge «1», «(1/2)» in its label', !!d0 && d0.shown && d0.w === 44 && d0.h === 44 && d0.l >= d0.barL && d0.t > d0.gapT && d0.t < d0.tasksT && d0.badge === '1' && /\(1\/2\)/.test(d0.label || ''), d0);
+    await tap('#mobile-nav-desktops');
+    const m0 = await evalJs(MENU);
+    check('⑧ …a tap: a menu INTO the conversation column (left of the bar) — every desktop by name with its window count, the active one marked, then «New desktop»; 44 px rows',
+      !!m0 && m0.right <= d0.barL && m0.rows.length === 3 && m0.rows[0].active && /\b2 windows/.test(m0.rows[0].count) && m0.rows[1].name === 'Desk B' && !m0.rows[1].active && /^1 window$/.test(m0.rows[1].count) && /New desktop/.test(m0.rows[2].name) && !m0.rows[2].id && m0.rows.every((r) => r.h >= 44), m0);
+    await tap(`.mdesk-menu .context-menu-item[data-desktop-id="${deskB}"]`);
+    await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(deskB)} && (app.wm.windows.get(app.wm.activeWindowId) || {})._desktopId === ${JSON.stringify(deskB)}`, 6000); await sleep(500);
+    const s1 = await evalJs(SHOWN);
+    await shot('desktops-door-951.png');
+    check('⑧ …a tap on «Desk B»: that desktop is on show — its window (the explorer) fills the conversation column, the list column stays, the badge says 2', s1.desk === deskB && s1.type === 'files' && s1.onDesk === deskB && s1.visible && s1.l === 321 && !!s1.list && s1.list.l === 0 && s1.list.w === 320 && s1.badge === '2', s1);
+    // the conversation's head (in landscape the window's own title bar) = the window switcher with its desktop tabs (主开发: the regular class gets the compact class's door too)
+    await sleep(1100); // the manager's switch guard
+    const head = await evalJs(`(() => { const t = document.querySelector('.window.window-active > .window-titlebar'); const b = t.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+    await tapAt(head.x, head.y);
+    const sw = await evalJs(`(() => { const p = document.querySelector('.mobile-win-switcher'); if (!p) return null; const b = p.getBoundingClientRect(); return { l: Math.round(b.left), r: Math.round(b.right), t: Math.round(b.top), tabs: [...p.querySelectorAll('.mobile-desk-tab:not(.mobile-desk-add)')].map((x) => x.textContent) }; })()`);
+    check('⑧ the conversation\'s head (its title bar): the window switcher with both desktop tabs, over the conversation column only', !!sw && sw.tabs.length === 2 && sw.l >= 321 && sw.r <= 895 && sw.t >= 40, sw);
+    await tap('.mobile-win-switcher .mobile-desk-tab');
+    await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(desk1)} && (app.wm.windows.get(app.wm.activeWindowId) || {})._desktopId === ${JSON.stringify(desk1)}`, 6000);
+    const s2 = await evalJs(SHOWN);
+    check('⑧ …its first tab: back on the first desktop, a conversation of it on show', s2.desk === desk1 && s2.type === 'chat' && s2.visible && s2.l === 321, s2);
+    await evalJs(`document.querySelector('.mobile-win-switcher')?.remove(); 1`); await sleep(1100);
+    // the list column's ☰ in landscape (the owner 2026-10-25, 与原文不同 — SPEC-v3 §4 had it static there)
+    const LT = `(() => { const b = document.getElementById('list-column-toggle'); const r = b && b.getBoundingClientRect(); const sb = document.getElementById('sidebar'); const w = document.querySelector('.window.window-active'); const wr = w && w.getBoundingClientRect();
+      return { btn: b && getComputedStyle(b).display !== 'none' ? { l: Math.round(r.left), t: Math.round(r.top), w: Math.round(r.width) } : null, hidden: document.documentElement.classList.contains('vs-list-hidden'), list: getComputedStyle(sb).display !== 'none' && sb.getBoundingClientRect().width > 0, win: wr ? { l: Math.round(wr.left), w: Math.round(wr.width) } : null }; })()`;
+    const l0 = await evalJs(LT);
+    check('⑧ landscape: the list column\'s ☰ at the conversation\'s head (its left edge), the list shown by default', !!l0.btn && l0.btn.l === 321 && l0.btn.t === 0 && l0.btn.w === 44 && !l0.hidden && l0.list, l0);
+    await tap('#list-column-toggle'); await sleep(300);
+    const l1 = await evalJs(LT);
+    check('⑧ ☰: the list column is gone, the conversation takes 0–895 (951 − the 56 px bar), the ☰ at its new left', l1.hidden && !l1.list && !!l1.win && l1.win.l === 0 && l1.win.w === 895 && !!l1.btn && l1.btn.l === 0, l1);
+    await load(); await waitFor(`!!document.querySelector('.window.window-active')`, 10000); await sleep(400);
+    const l2 = await evalJs(LT);
+    check('⑧ …a reload keeps this tab\'s choice (the list stays hidden, the conversation wide)', l2.hidden && !l2.list && (!l2.win || l2.win.l === 0), l2);
+    await tap('#list-column-toggle'); await sleep(300);
+    const l3 = await evalJs(LT);
+    check('⑧ ☰ again: the list column is back (0–320), the conversation 321–895', !l3.hidden && l3.list && (!l3.win || (l3.win.l === 321 && l3.win.w === 574)), l3);
+    // the cover (compact): the same door on the top bar, the phone's sheet
+    await device(382, 580); await settle(382);
+    const c0 = await evalJs(`(() => { const b = document.getElementById('mobile-nav-desktops'); const r = b.getBoundingClientRect(); const nav = document.getElementById('mobile-nav').getBoundingClientRect(); return { shown: getComputedStyle(b).display !== 'none' && r.width >= 36 && r.height >= 36, inNav: r.top >= nav.top - 0.5 && r.bottom <= nav.bottom + 0.5 && r.right <= 382, badge: b.querySelector('.mnav-badge')?.textContent || '', toggle: getComputedStyle(document.getElementById('list-column-toggle')).display }; })()`);
+    check('⑧ 382 (the cover, compact): the Desktops door on the top bar (≥ 36 px), badge «1»; the regular class\'s list ☰ not there', c0.shown && c0.inNav && c0.badge === '1' && c0.toggle === 'none', c0);
+    await tap('#mobile-nav-desktops');
+    const m1 = await evalJs(MENU);
+    check('⑧ …a tap: the phone\'s sheet under the bar lists both desktops with their counts + «New desktop»', !!m1 && m1.rows.length === 3 && m1.rows[0].active && m1.rows[1].name === 'Desk B' && /^1 window$/.test(m1.rows[1].count) && m1.left <= 10 && m1.right >= 372, m1);
+    await tap(`.mdesk-menu .context-menu-item[data-desktop-id="${deskB}"]`);
+    await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(deskB)} && (app.wm.windows.get(app.wm.activeWindowId) || {})._desktopId === ${JSON.stringify(deskB)}`, 8000); await sleep(500);
+    const s3 = await evalJs(SHOWN);
+    await shot('desktops-door-382.png');
+    check('⑧ …a tap on «Desk B»: the phone shows that desktop\'s window (the explorer — never built on this page before: the lazy replay), filling the screen, badge 2', s3.desk === deskB && s3.type === 'files' && s3.visible && s3.l === 0 && s3.w >= 380 && s3.badge === '2', s3);
+    await sleep(1100);
+    await evalJs(`(async () => { await app.desktopManager.switchTo(${JSON.stringify(desk1)}); return 1; })()`); await sleep(1300);
   }
   console.log('⑦ the posture ladder (folded alone moves nothing; segments:2 arranges; the cover ignores folded)');
   {

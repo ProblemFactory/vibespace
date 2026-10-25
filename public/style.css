@@ -2297,6 +2297,7 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   flex-shrink: 0;
 }
 #mobile-nav-files { display: none; } /* a phone's (the media block below) */
+#list-column-toggle { display: none; } /* the regular class's landscape only (below) */
 #mobile-nav-menu, #mobile-nav-new, #mobile-nav-close {
   background: none; border: none; color: var(--text); font-size: 22px;
   cursor: pointer; padding: 4px 8px; flex-shrink: 0;
@@ -2491,6 +2492,20 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   #mobile-nav-files .mnav-word { display: none; font-size: 9px; line-height: 10px; white-space: nowrap; color: var(--text-secondary); }
   #mobile-nav-files.labelled .mnav-word { display: block; }
   #mobile-nav-files.labelled svg { width: 16px; height: 16px; }
+  /* the Desktops door (lane desktop-switch-phone): the virtual desktops, which only the taskbar's corner listed — beside
+     the title; the active desktop's number as its badge when there are two or more */
+  #mobile-nav-desktops {
+    position: relative; background: none; border: none; color: var(--text); cursor: pointer; flex-shrink: 0;
+    min-width: 36px; min-height: 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0 4px;
+  }
+  #mobile-nav-desktops svg { width: 20px; height: 20px; }
+  .context-menu.mdesk-menu { min-width: 240px; }
+  .mdesk-menu .context-menu-item { min-height: 44px; display: flex; align-items: center; gap: 10px; }
+  .mdesk-menu .mdesk-mark { width: 18px; flex-shrink: 0; display: inline-flex; align-items: center; color: var(--accent); }
+  .mdesk-menu .mdesk-mark svg { width: 16px; height: 16px; }
+  .mdesk-menu .mdesk-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mdesk-menu .mdesk-count { flex-shrink: 0; color: var(--text-dim); font-size: 12px; }
+  .mdesk-menu .context-menu-item.active .mdesk-name { font-weight: 600; color: var(--accent); }
   /* the 文件 card under the For-you page's bands (the first screen stays the attention list's) */
   #phone-home .ph-files { margin: 16px 0 4px; padding: 10px 12px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-window); }
   #phone-home .ph-files-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--text); }
@@ -2640,9 +2655,17 @@ html[data-vc="regular"] #workspace { flex: 1; min-height: 0; }
   html[data-vc="regular"] #main-wrapper { margin-right: 56px !important; }
   html[data-vc="regular"] #mobile-nav {
     position: fixed; top: 0; right: 0; bottom: 0; width: 56px; height: auto; z-index: 20;
-    flex-direction: column; align-items: center; gap: 8px; padding: 8px 6px max(8px, env(safe-area-inset-bottom));
+    flex-direction: column; align-items: center; gap: 6px; padding: 8px 6px max(8px, env(safe-area-inset-bottom));
     border-bottom: none; border-left: 1px solid var(--border); overflow: hidden;
   }
+  /* the list column's ☰ at the conversation's head (lane desktop-switch-phone — the owner, 与原文不同: SPEC-v3 kept the
+     landscape list static): above the window on show (its inline z-index), below menus / dialogs, like the laptop bar */
+  html[data-vc="regular"] #list-column-toggle {
+    display: inline-flex; position: fixed; top: 0; left: 321px; width: 44px; height: 44px; z-index: 95000; align-items: center; justify-content: center;
+    background: none; border: none; padding: 0; color: var(--text-secondary); font-size: 20px; cursor: pointer;
+  }
+  html[data-vc="regular"].vs-list-hidden #list-column-toggle { left: 0; }
+  html[data-vc="regular"][data-fold="book"] #list-column-toggle { display: none; } /* the book's two halves are the posture's */
   html[data-vc="regular"] #mobile-nav > * { order: 50; }
   html[data-vc="regular"] #mobile-nav-menu, html[data-vc="regular"] #mobile-nav-title, html[data-vc="regular"] #mobile-nav-usage,
   html[data-vc="regular"] #mobile-nav-todos, html[data-vc="regular"] #mobile-nav-close, html[data-vc="regular"] #mobile-nav-new,
@@ -2651,9 +2674,9 @@ html[data-vc="regular"] #workspace { flex: 1; min-height: 0; }
   html[data-vc="regular"] #mobile-nav .mnav-bar-btn, html[data-vc="regular"] #mobile-nav .mnav-dest, html[data-vc="regular"] #mobile-nav-gear {
     width: 44px !important; height: 44px !important; min-width: 44px; min-height: 44px; padding: 0 !important;
   }
-  /* HOTFIX 2.369.356 (userW's Duo, landscape): the list column can be hidden / shown here too — the ☰ stands at the top of the
-     trailing bar (portrait already had it in the head); and the active window's title is the switcher's door (desktop tabs). */
-  html[data-vc="regular"] #mobile-nav-menu { display: inline-flex !important; order: 0; align-items: center; justify-content: center; }
+  /* HOTFIX 2.369.356 (userW's Duo, landscape): the active window's title is the switcher's door (desktop tabs). Its ☰ at the
+     top of the trailing bar moved to the conversation's head (#list-column-toggle below — lane desktop-switch-phone: SPEC-v3
+     §2.2's own rule, a ☰ on the right edge acting on the left column is §0.7's opposite). */
   html[data-vc="regular"] .window.window-active > .window-titlebar .window-title { cursor: pointer; }
   html[data-vc="regular"] #mobile-nav-viewer-close { order: 1; }
   html[data-vc="regular"] #mobile-nav-artifacts { order: 2; }
@@ -2661,16 +2684,17 @@ html[data-vc="regular"] #workspace { flex: 1; min-height: 0; }
   html[data-vc="regular"] #mobile-nav-live { order: 4; }
   html[data-vc="regular"] #mobile-nav .mnav-gap { display: block; order: 10; flex: 1 1 auto; min-height: 8px; align-self: stretch; }
   html[data-vc="regular"] #mobile-nav .mnav-dest { display: inline-flex; }
-  html[data-vc="regular"] #mobile-nav-dest-tasks { order: 11; }
-  html[data-vc="regular"] #mobile-nav-files { order: 12; }
-  html[data-vc="regular"] #mobile-nav-dest-channels { order: 13; }
-  html[data-vc="regular"] #mobile-nav-dest-browser { order: 14; }
-  html[data-vc="regular"] #mobile-nav-dest-jobs { order: 15; }
+  html[data-vc="regular"] #mobile-nav-desktops { order: 11; } /* lane desktop-switch-phone: the bottom section starts with Desktops */
+  html[data-vc="regular"] #mobile-nav-dest-tasks { order: 12; }
+  html[data-vc="regular"] #mobile-nav-files { order: 13; }
+  html[data-vc="regular"] #mobile-nav-dest-channels { order: 14; }
+  html[data-vc="regular"] #mobile-nav-dest-browser { order: 15; }
+  html[data-vc="regular"] #mobile-nav-dest-jobs { order: 16; }
   html[data-vc="regular"] #mobile-nav-gear { order: 20; display: inline-flex !important; align-items: center; justify-content: center; }
   html[data-vc="regular"] #mobile-nav-files .mnav-word { display: none !important; }
   /* the conversation's head: its title + its state word, no buttons (SPEC-v3 §2.4 — the ⋯ is on the bar) */
   html[data-vc="regular"] .window.window-active > .window-titlebar {
-    display: flex; height: 44px; cursor: default; padding: 0 16px; touch-action: auto; background: var(--bg-titlebar-active);
+    display: flex; height: 44px; cursor: pointer; padding: 0 16px 0 52px; touch-action: auto; background: var(--bg-titlebar-active);
   }
   html[data-vc="regular"] .window.window-active > .window-titlebar .window-controls,
   html[data-vc="regular"] .window.window-active > .window-titlebar .window-icon-stack { display: none !important; }
@@ -2685,7 +2709,8 @@ html[data-vc="regular"] #workspace { flex: 1; min-height: 0; }
   html[data-vc="regular"] #mobile-nav > * { order: 50; }
   html[data-vc="regular"] #mobile-nav-menu { order: 1; }
   html[data-vc="regular"] #mobile-nav-viewer-close { order: 2; }
-  html[data-vc="regular"] #mobile-nav-title { order: 3; cursor: default; }
+  html[data-vc="regular"] #mobile-nav-title { order: 3; cursor: pointer; }
+  html[data-vc="regular"] #mobile-nav-desktops { order: 3; min-width: 44px; min-height: 44px; } /* after the title (lane desktop-switch-phone) */
   html[data-vc="regular"] #mobile-nav-artifacts { order: 4; }
   html[data-vc="regular"] #mobile-nav-more { order: 5; }
   html[data-vc="regular"] #mobile-nav-gear { order: 6; }
@@ -2704,6 +2729,7 @@ html[data-vc="regular"][data-fold="book"] .sidebar {
   min-width: 0 !important; max-width: none !important; padding-right: 24px; box-sizing: border-box; border-right: none;
   transition: width 0.2s ease;
 }
+html[data-vc="regular"][data-fold="book"].vs-list-hidden .sidebar { display: flex !important; } /* the book's halves: a landscape «hide» waits for flat */
 html[data-vc="regular"][data-fold="book"] #main-wrapper {
   margin-left: calc(var(--seg-edge, 475.5px) + var(--fold-seam, 20px) / 2) !important; padding-left: 24px; box-sizing: border-box;
 }

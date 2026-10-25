@@ -17,6 +17,11 @@
 //     installs it, the For-you page appends the card AFTER its list (the first screen is the attention list's), the explorer
 //     passes its folder as the bar's base, builds the phone furniture only on a phone, the ‹ is the back gesture's home rule,
 //     the card's chips and the nav reveal through app.goToWinId (no new revealWindow door), i18n zh / ja
+//   ⑥ THE DESKTOPS DOOR (lane desktop-switch-phone) — wiring pins: one Desktops button on the nav (both phone classes), its
+//     rows = the manager's switch road + createDesktop, the phone's sheet / the regular class's anchored menu, the door
+//     follows every desktop change, the title tap is no longer off in the regular class (RED CONTROL: the base's guard),
+//     §6b guard 10 holds across a switch, the bar's bottom section starts with Desktops, i18n zh / ja (the chrome legs:
+//     test-duo-layout ⑧)
 // Run: node scripts/test-phone-doors.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -144,6 +149,29 @@ console.log('⑤ wiring pins');
   const KEYS = ['Files', 'Home', 'Back', 'this folder', 'New session here'];
   const miss = KEYS.filter((k) => !zh.includes(`  ${JSON.stringify(k)}:`) || !ja.includes(`  ${JSON.stringify(k)}:`));
   ok(miss.length === 0 && /"Files": "文件"/.test(zh), `i18n: every word the doors say is in zh + ja (${KEYS.length}; «文件»)`, miss);
+}
+
+console.log('⑥ THE DESKTOPS DOOR (lane desktop-switch-phone — userW on the Duo\'s inner display: «如何在这个界面下切换桌面？»; the chrome legs are test-duo-layout ⑧ at 951 and 382)');
+{
+  const mn = read('src/lib/mobile-nav.js'), dm = read('src/lib/desktop-manager.js'), css = read('public/style.css');
+  ok(/\n    this\.desktopsBtn = this\._buildDesktopsDoor\(\);\n    this\.bar = installTrailingBar\(app\);/.test(mn) && /b\.id = 'mobile-nav-desktops'; b\.type = 'button'; b\.className = 'mnav-dest mnav-desktops';/.test(mn) && /b\.innerHTML = UI_ICONS\.desktops;/.test(mn),
+    'MobileNav builds ONE Desktops button on its nav (both phone classes), an SVG icon (UI_ICONS.desktops) — no new nav, no new sheet component');
+  ok(/action: \(\) => this\.switchDesktop\(d\.id\) \};/.test(mn) && /action: \(\) => this\.switchDesktop\(dm\.createDesktop\(\)\) \}\);/.test(mn) && /const go = app\.stage\?\.isActive \? app\.stage\.leave\(id\) : id === dm\.activeDesktopId \? null : dm\.switchTo\(id\);/.test(mn),
+    'its menu: one row per desktop = the manager\'s own switch road (the Stage left first, as the taskbar preview\'s click), the last row «New desktop» = createDesktop — no hand-rolled switch');
+  ok(/const menu = regular \? showContextMenu\(r\.left, r\.top, items\) : this\._sheet\(items\);/.test(mn),
+    'the compact class lays the menu out as the phone\'s sheet (the «+» long-press sheet\'s _sheet), the regular class beside the button (showContextMenu — the existing infra)');
+  ok(/\n  _renderSwitcher\(\) \{\n    this\.app\._mobileNav\?\.updateDesktopsDoor\?\.\(\);/.test(dm) && /\n    this\.bar\?\.update\?\.\(\);\n    this\.updateDesktopsDoor\(\);\n/.test(mn),
+    'the door follows every desktop change (the manager\'s _renderSwitcher — switch / create / rename / delete / a remote update) and every window change (updateTitle)');
+  ok(/this\._titleEl\.onclick = \(\) => this\._showWindowSwitcher\(\);/.test(mn) && !/if \(app\.viewportClass\?\.\(\) !== 'regular'\) this\._showWindowSwitcher\(\)/.test(mn),
+    'the title tap opens the window switcher (its desktop tabs) in the regular class too — RED CONTROL: the base\'s `if (app.viewportClass?.() !== \'regular\')` guard is gone');
+  ok(/if \(desk && w\?\._desktopId && w\._desktopId !== desk\) return;/.test(mn),
+    '§6b guard 10: a switch\'s in-between (the old desktop\'s window still active) is never noted as the new desktop\'s window on show');
+  const tasksOrder = /html\[data-vc="regular"\] #mobile-nav-dest-tasks \{ order: (\d+); \}/.exec(css), deskOrder = /html\[data-vc="regular"\] #mobile-nav-desktops \{ order: (\d+); \}/.exec(css), gapOrder = /#mobile-nav \.mnav-gap \{ display: block; order: (\d+);/.exec(css);
+  ok(!!(tasksOrder && deskOrder && gapOrder) && +gapOrder[1] < +deskOrder[1] && +deskOrder[1] < +tasksOrder[1], 'the regular class\'s trailing bar: the bottom section starts with Desktops (after the gap, before Task Groups)', { gap: gapOrder?.[1], desk: deskOrder?.[1], tasks: tasksOrder?.[1] });
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  const KEYS = ['Desktops', 'Desktops — {name} ({k}/{n})', '1 window', '{n} windows', 'New desktop', 'Sessions'];
+  const miss = KEYS.filter((k) => !zh.includes(`  ${JSON.stringify(k)}:`) || !ja.includes(`  ${JSON.stringify(k)}:`));
+  ok(miss.length === 0 && /"New desktop": "新桌面"/.test(zh), `i18n: every word the door says is in zh + ja (${KEYS.length}; «新桌面»)`, miss);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

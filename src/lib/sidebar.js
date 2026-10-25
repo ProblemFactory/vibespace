@@ -163,6 +163,10 @@ const liveFactsDigestPart = (s) => {
   return out;
 };
 
+/** The regular class's landscape list column, hidden or not — this tab's choice (lane desktop-switch-phone). */
+const LIST_HIDDEN_KEY = 'vibespace.listHidden';
+const landscapeNow = () => { try { return window.matchMedia('(orientation: landscape)').matches; } catch { return false; } };
+
 class Sidebar {
   constructor(app) {
     this.app = app; this.el = document.getElementById('sidebar');
@@ -870,7 +874,7 @@ class Sidebar {
     if (this._regularMode === on) return;
     if (on && this.isOpen) { this.isOpen = false; this.el.classList.remove('open'); document.getElementById('main-wrapper')?.classList.remove('sidebar-open'); }
     this._regularMode = on;
-    this.setListHidden(false);
+    this.restoreListHidden();
     const head = this.el.querySelector('.sidebar-header'), closeBtn = document.getElementById('sidebar-close');
     if (!head) return;
     if (!this._regularNew) {
@@ -891,14 +895,24 @@ class Sidebar {
     }
   }
 
-  /** The regular class's list column: shown, or hidden by the person (portrait's ☰, a swipe from it) — a view state of
-   *  this page and this orientation only, never persisted (SPEC-v3 §4: no third state, no overlay, no memory). */
+  /** The regular class's list column: shown, or hidden by the person (the ☰, a swipe from it). Portrait: a view state of
+   *  this page and this orientation only, never kept (SPEC-v3 §4). Landscape (the owner 2026-10-25, 与原文不同 — SPEC-v3
+   *  kept it static there; userW wants the conversation to take the width): this TAB's choice, kept for a reload and a
+   *  rotation back (sessionStorage, like the phone's window on show) — shown until the person hides it. */
   setListHidden(hidden) {
     this._listHidden = !!hidden && !!this._regularMode;
+    if (this._regularMode && landscapeNow()) { try { sessionStorage.setItem(LIST_HIDDEN_KEY, this._listHidden ? '1' : '0'); } catch { } }
     document.documentElement.classList.toggle('vs-list-hidden', this._listHidden);
     this.app?._mobileNav?.bar?.update?.();
   }
   toggleList() { this.setListHidden(!this._listHidden); }
+  /** The list column as this orientation starts it (the class entered, a rotation): landscape = this tab's last choice,
+   *  portrait = shown. */
+  restoreListHidden() {
+    let hidden = false;
+    if (this._regularMode && landscapeNow()) { try { hidden = sessionStorage.getItem(LIST_HIDDEN_KEY) === '1'; } catch { } }
+    this.setListHidden(hidden);
+  }
 
   toggle(force) {
     // the regular class's COLUMN: only an explicit «show» shows it (a hidden list); nothing a phone does to its drawer closes it

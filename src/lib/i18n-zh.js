@@ -10816,4 +10816,9 @@ export default {
   "Closed the window — the terminal keeps running": "已关闭窗口 — 终端仍在继续运行",
   "Closed {n} windows — what ran in them keeps running": "已关闭 {n} 个窗口 — 里面的对话和终端仍在继续运行",
   "Close window — it keeps running": "关闭窗口 — 它仍在继续运行",
+  // lane desktop-switch-phone: the phone classes' Desktops door
+  "Desktops": "桌面",
+  "Desktops — {name} ({k}/{n})": "桌面 — {name}（{k}/{n}）",
+  "1 window": "1 个窗口",
+  "New desktop": "新桌面",
 };

@@ -117,6 +117,8 @@ export const UI_ICONS = {
   eraser:    _s('<path d="M9.4 2.9l3.9 3.9-6.1 6.1H4.1L2.3 11.1a1 1 0 010-1.4z"/><path d="M5.9 6.4l3.9 3.9"/><path d="M8.4 12.9h5.3"/>'),
   globe:     _s('<circle cx="8" cy="8" r="6.5"/><path d="M1.5 8h13M8 1.5c2 2.2 2 10.8 0 13M8 1.5c-2 2.2-2 10.8 0 13"/>'),
   monitor:   _s('<rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5.5 14h5M8 11.5V14"/>'),
+  // THE VIRTUAL DESKTOPS (lane desktop-switch-phone): four screens — the phone classes' Desktops door
+  desktops:  _s('<rect x="1.5" y="2.5" width="5.5" height="4.5" rx="0.8"/><rect x="9" y="2.5" width="5.5" height="4.5" rx="0.8"/><rect x="1.5" y="9" width="5.5" height="4.5" rx="0.8"/><rect x="9" y="9" width="5.5" height="4.5" rx="0.8"/>'),
   // THE AGENT BROWSER'S GLYPH (design-browser-faces direction B, 2.369.168): a
   // browser window with a dot — the ⚙ row, the status-bar chip, the card menu,
   // the phone sheet and the live view's window kind all read THIS one

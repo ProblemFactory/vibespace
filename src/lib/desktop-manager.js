@@ -771,6 +771,7 @@ export class DesktopManager {
   }
 
   _renderSwitcher() {
+    this.app._mobileNav?.updateDesktopsDoor?.(); // the phone classes' Desktops door follows every desktop change (lane desktop-switch-phone)
     const container = document.getElementById('desktop-previews');
     if (!container) return;
     // Digest guard (audit round-2, high): updateTaskbar funnels EVERY window
