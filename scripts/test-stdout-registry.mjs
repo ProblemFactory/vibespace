@@ -1817,7 +1817,10 @@ console.log('— the put-back door at the feedLive gate (lane stop-refills-compo
     ['codex', 'w-pb-codex', (dropId, text) => J({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'queue_dropped', dropId, by: 'stop', turnId: 't1', items: [item(text)], omitted: 0 } })],
     ['opencode', 'w-pb-acp', (dropId, text) => J({ ts: Date.now(), type: 'acp', kind: 'queue_dropped', dropId, by: 'stop', turnId: 'p1', items: [item(text)], omitted: 0 })],
   ];
-  for (const [backend, wid, line] of legs) {
+  // claude (lane claude-wrapper-queue, .354): the chat-wrapper's TOP-LEVEL record, through the stream-json consumer —
+  // the same three asserts (kept out of `legs`, which is not a table of every harness)
+  const claudeDrop = (dropId, text) => J({ type: 'queue_dropped', dropId, by: 'stop', turnId: null, items: [item(text)], omitted: 0 });
+  for (const [backend, wid, line] of legs.concat([[String('claude'), 'w-pb-claude', claudeDrop]])) {
     const s = mkSession(backend, wid); const p = fakePty();
     const pl = s._normalizer.processLive.bind(s._normalizer);
     s._normalizer.processLive = (m) => { order.push('fed:' + wid + ':' + (m.kind || m.payload?.type || m.type)); return pl(m); };
@@ -1830,6 +1833,26 @@ console.log('— the put-back door at the feedLive gate (lane stop-refills-compo
     const iSet = order.indexOf('set:chat:' + wid), iFed = order.indexOf('fed:' + wid + ':queue_dropped');
     ok(`${backend}: the door runs BEFORE the normalizer at the ONE gate (the draft op precedes the record's meta op)`, iSet >= 0 && iFed > iSet, { iSet, iFed });
     ok(`${backend}: …and the normalizer still gets the record (ONE queue-putback meta op, no unknown-record card)`, s._ops.filter((o) => o.op === 'meta' && o.subtype === 'queue-putback').length === 1 && !s._normalizer.messages.some((m) => m.noticeKind === 'unknown-record'), s._ops.filter((o) => o.op === 'meta').map((o) => o.subtype));
+  }
+  {
+    // claude's whole queue wire through the stream-json consumer (lane claude-wrapper-queue, .354): the wrapper's
+    // queued_input / queue_changed / queue_op_result reach the claude normalizer untouched (the chip, the strip's meta op,
+    // the result) — and server.js lists all four records in CLAUDE_STREAM_TYPES, so none cries 'unhandled'
+    const s = mkSession('claude', 'w-q-claude'); const p = fakePty();
+    so3.setupSessionPty(s, 'w-q-claude', p);
+    p.data(J({ type: 'user', message: { role: 'user', content: 'held words' }, msgId: 'm-held', _fromWebui: true, timestamp: new Date().toISOString() }));
+    p.data(J({ type: 'queue_changed', items: [{ id: 'q1-1', msgId: 'm-held', preview: 'held words', text: 'held words', ts: 1, kind: 'user', from: null }], turn_id: null, verbs: ['remove', 'reorder', 'edit'] }));
+    p.data(J({ type: 'queued_input', msg_id: 'm-held', turn_id: null }));
+    p.data(J({ type: 'queue_op_result', op: 'remove', id: 'q1-1', ok: true, msg_id: 'm-held' }));
+    p.data(J({ type: 'queue_changed', items: [], turn_id: null, verbs: ['remove', 'reorder', 'edit'] }));
+    const metas = s._ops.filter((o) => o.op === 'meta').map((o) => o.subtype);
+    const bubble = s._normalizer.messages.find((m) => m.role === 'user');
+    ok('claude: the wrapper\'s queue records pass the stream-json consumer to the normalizer — the strip\'s meta ops, the result, the chip queued → removed, no unknown-record card',
+      JSON.stringify(metas.filter((m) => /^queue/.test(m))) === JSON.stringify(['queue', 'queue-result', 'queue']) && bubble?.webuiMsgId === 'm-held' && bubble?.queueState === 'removed'
+      && s._ops.some((o) => o.op === 'edit' && o.fields?.queueState === 'queued') && !s._normalizer.messages.some((m) => m.noticeKind === 'unknown-record'), { metas, chip: bubble?.queueState });
+    const srvSrc = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+    const lit = /const CLAUDE_STREAM_TYPES = new Set\(\[([\s\S]*?)\]\);/.exec(srvSrc);
+    ok('server.js CLAUDE_STREAM_TYPES lists the wrapper\'s four queue records (the unknown-type breadcrumb stays quiet for a handled record)', !!lit && ['queued_input', 'queue_changed', 'queue_op_result', 'queue_dropped'].every((t) => lit[1].includes(`'${t}'`)));
   }
   const s0 = mkSession('codex', 'w-pb-none'); const p0 = fakePty();
   so.setupSessionPty(s0, 'w-pb-none', p0);   // the suite's own engine: no getSyncStore (the null default every other create() caller relies on)

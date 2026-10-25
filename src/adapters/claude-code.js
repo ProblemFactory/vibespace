@@ -376,12 +376,21 @@ class ClaudeCodeAdapter extends BackendAdapter {
 
   // ── Protocol formatting (called by ws-handler) ──
 
-  formatChatInput(text, msgId) {
+  // THE FRAME NAMES ITS MESSAGE (2.369.354, lane claude-wrapper-queue): the wrapper HOLDS a frame that arrives mid-turn
+  // and publishes it as a queue row, so the row must carry the bubble it belongs to (`webui_msg_id` — the queue chip's
+  // join) and, for a frame VibeSpace typed (`origin`: 'auto-resume' | 'dispatch'), who typed it (`webui_origin`: never
+  // editable, never put back into the composer on Stop). Two TOP-LEVEL keys the CLI does not know — MEASURED on
+  // 2.1.308 with a local mock API: it runs the frame and strips them (the transcript never holds them), so a wrapper
+  // spawned before 2.369.354 that forwards this frame verbatim loses nothing. A client-built frame (an image paste) is
+  // spliced, never re-serialized: the keys go in front of its first key (a 38 MB paste is copied once, not re-encoded).
+  formatChatInput(text, msgId, { origin = null } = {}) {
     let stdinPayload, userMsg;
     let parsed = null;
     try { parsed = JSON.parse(text); if (!(parsed.type === 'user' && parsed.message)) parsed = null; } catch {}
+    const marks = { ...(msgId ? { webui_msg_id: String(msgId) } : {}), ...(origin ? { webui_origin: String(origin) } : {}) };
+    const markJson = JSON.stringify(marks).slice(1, -1);
     if (parsed) {
-      stdinPayload = text;
+      stdinPayload = markJson ? text.replace(/^\s*\{/, '{' + markJson + ',') : text;
       userMsg = { ...parsed, msgId, timestamp: new Date().toISOString() };
     } else {
       // POISON GUARD (2.360.0, the 79928a2b 38MB incident): a huge
@@ -392,7 +401,7 @@ class ClaudeCodeAdapter extends BackendAdapter {
       if (text.length > 512 * 1024 && /^\s*\{"type"\s*:\s*"user"/.test(text)) {
         throw new Error(`image message corrupted in transit (${Math.round(text.length / 1024)}KB fragment) — refused to protect the conversation; try again or send fewer/smaller images`);
       }
-      stdinPayload = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } });
+      stdinPayload = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] }, ...marks });
       userMsg = { type: 'user', message: { role: 'user', content: text }, msgId, timestamp: new Date().toISOString() };
     }
     userMsg._fromWebui = true;
@@ -553,13 +562,34 @@ class ClaudeCodeAdapter extends BackendAdapter {
     });
   }
 
-  // QUEUE OPS: the CLI queues stdin messages ITSELF and publishes no queue
-  // state — there is nothing to enumerate, remove or steer (inputModes
-  // {queue:true, steer:false, queueOps:false}). Refuse WITH THE REASON rather
-  // than invent a control_request the CLI would ignore (accept-and-ignore is
-  // the 2.361.4 failure).
-  formatQueueOp() {
-    throw new Error('Claude Code owns its own input queue: a message sent mid-turn runs after it, but the CLI reports no queue and takes no queue commands');
+  // QUEUE OPS (2.369.354, lane claude-wrapper-queue): the mid-turn queue is the WRAPPER's (data/bin/chat-wrapper.js
+  // holds a frame that arrives while a turn runs — the CLI's own queue is never used), so a queue op is a frame for the
+  // wrapper — the acp/agy shape verbatim: remove / reorder (afterId null = the front) / edit. NOT steer: the CLI takes
+  // no input into a running turn (a frame sent there is queued by the CLI itself, the queue the wrapper replaced), and
+  // NOT run-now / run-all: a held message only exists while a turn runs and goes the moment it ends. Refused HERE with
+  // the reason, before a frame exists (accept-and-ignore is the 2.361.4 failure).
+  formatQueueOp({ op, id, afterId, text } = {}) {
+    if (op === 'steer' || op === 'steer-all') throw new Error('Claude Code takes no input into a running turn — the message runs when this turn ends, or you can remove it');
+    if (op === 'run-now' || op === 'run-all') throw new Error('a held message starts as soon as the current turn ends — it cannot start before it');
+    if (op !== 'remove' && op !== 'reorder' && op !== 'edit') throw new Error(`unknown queue op "${op}"`);
+    if (!id) throw new Error(`queue op "${op}" needs an item id`);
+    if (op === 'reorder') {
+      if (afterId === undefined) throw new Error('queue op "reorder" needs an anchor (afterId, or null for the front of the queue)');
+      const anchor = afterId === null ? null : String(afterId);
+      if (anchor === id) throw new Error('queue op "reorder" cannot anchor an item to itself');
+      return JSON.stringify({ type: 'queue-op', op, id, afterId: anchor });
+    }
+    if (op === 'edit') {
+      if (typeof text !== 'string' || !text.trim()) throw new Error('queue op "edit" needs the new message text');
+      return JSON.stringify({ type: 'queue-op', op, id, text });
+    }
+    return JSON.stringify({ type: 'queue-op', op, id });
+  }
+
+  // "state your queue again" — the wrapper answers with its whole queue (an empty one too); the ws attach asks only a
+  // wrapper whose sidecar adverts queueResync (a pre-2.369.354 wrapper would forward the line to the CLI).
+  formatQueueResync() {
+    return JSON.stringify({ type: 'queue-resync' });
   }
 
   // B-7edc: ask the CLI ITSELF for usage over the control channel (subtype

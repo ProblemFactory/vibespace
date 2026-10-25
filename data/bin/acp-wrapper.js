@@ -398,7 +398,7 @@ function droppedRecordFor(rows, { dropId, turnId } = {}) {
     total += text.length;
     const attachments = (Array.isArray(r.attachments) ? r.attachments : []).filter((a) => a && typeof a.type === 'string' && a.type).slice(0, 32)
       .map((a) => ({ type: a.type.slice(0, 32), mime: typeof a.mime === 'string' && a.mime ? a.mime.slice(0, 100) : null, name: typeof a.name === 'string' && a.name ? a.name.slice(0, 200) : null }));
-    items.push({ id: String(r.id || ''), msgId: String(r.msgId || ''), ts: Number.isFinite(r.ts) ? r.ts : null, text, cut: text.length < full.length, attachments });
+    items.push({ id: String(r.id || ''), msgId: String(r.msgId || ''), ts: Number.isFinite(r.ts) ? r.ts : null, text, cut: text.length < full.length, attachments, ...(r.started === true ? { started: true } : {}) });
   }
   return { dropId: String(dropId || ''), by: 'stop', turnId: typeof turnId === 'string' && turnId ? turnId : null, items, omitted };
 }

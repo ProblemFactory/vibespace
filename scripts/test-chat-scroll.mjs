@@ -134,6 +134,9 @@ process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n'
   if (!line.trim()) continue;
   fs.appendFileSync(${JSON.stringify(STDIN_LOG)}, line + '\\n');
   let m = null; try { m = JSON.parse(line); } catch {} if (!m) continue;
+  // ⑪'s busy turn ends on the composer's Stop (2.369.354: a message typed mid-turn is HELD by the chat-wrapper, so it can
+  // no longer be what ends a running turn — the interrupt is): the same LIVE-END line + result the third message wrote
+  if (m.type === 'control_request' && m.request && m.request.subtype === 'interrupt' && NTH && lturn === 2 && !stopLive) { stopLive = true; setTimeout(() => { out({ type: 'assistant', message: { id: 'msg_lv_end', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [{ type: 'text', text: 'LIVE-END' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }, session_id: SID, uuid: 'lv-end' }); result(0.02); }, 300); continue; }
   if (m.type === 'user' && NTH) { // ⑪'s chat: turn 1 one line (a one-screen chat), turn 2 the busy stream, turn 3 ends it
     lturn++;
     if (lturn === 1) setTimeout(() => { out({ type: 'assistant', message: { id: 'msg_lv_hello', type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [{ type: 'text', text: 'HELLO-LIVE ready.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }, session_id: SID, uuid: 'lv-hello' }); result(0.01); }, 150);
@@ -471,7 +474,7 @@ try {
   const gNow = await geo2();
   check(`a history page of the created chat is served by its LIVE normalizer (ids ${JSON.stringify((pg.messages || []).map((m) => String(m.id).split(':')[0]))}, total ${pg.total} vs the view's ${gNow.total}) — the base re-converted the transcript under other ids every page`,
     Array.isArray(pg.messages) && pg.messages.length === 3 && pg.messages.every((m) => String(m.id).startsWith(sid2 + ':')) && Math.abs(pg.total - gNow.total) <= 8, { ids: (pg.messages || []).map((m) => m.id), total: pg.total, view: gNow.total });
-  say2('stop');
+  ws.send(JSON.stringify({ type: 'interrupt', sessionId: sid2 }));   // Stop (a typed message mid-turn is held by the wrapper since 2.369.354)
   check('the turn ends (LIVE-END) and the view is still pinned at the bottom', await waitFor(`/LIVE-END/.test(${L2}.textContent)`, 15000) && (await sleep(800), (await geo2()).pin === true));
 
   check('no page exception in the whole run', pageErrors.length === 0, pageErrors.slice(0, 3));

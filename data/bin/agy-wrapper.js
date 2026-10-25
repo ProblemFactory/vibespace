@@ -120,9 +120,34 @@ function record(kind, fields = {}) { writeRecord({ ts: now(), type: 'acp', kind,
 function notice(level, text, noticeKind = null) { record('notice', { level, text, noticeKind }); log(`${level}: ${text}`); }
 
 const modeValues = () => ['accept-edits', 'auto', 'plan', 'bypassPermissions'];
+const modesOf = () => ({ availableModes: modeValues().map((id) => ({ id, name: id })), currentModeId: state.mode || null });
 function configSnapshot() {
-  return { configOptions: [], modes: { availableModes: modeValues().map((id) => ({ id, name: id })), currentModeId: state.mode || null }, models: [], modeValues: modeValues(), model: state.model, mode: state.mode, effort: state.effort };
+  return { configOptions: [], modes: modesOf(), models: [], modeValues: modeValues(), model: state.model, mode: state.mode, effort: state.effort };
 }
+// THE CONVERSATION'S MODE IS A SIDECAR FACT, NEVER A JOURNAL LINE (lane agy-harness-fixes-2, the owner 2026-10-25): the
+// mode + its values rode only the journal's `session` / `config` records — the FIRST lines the MAX_BUFFER ring cuts — and
+// the hub deletes this session's sidecar (<wid>.json) when the session ends, while a Resume is a NEW session on the same
+// conversation started with the client's per-conversation pick or nothing (a mode picked in the chat's chip is saved
+// nowhere else). So the mode lives outside the ring twice: meta.modes / meta.agentMode in this session's sidecar (at start
+// and at every change — chatStatus reads them when the ring has cut the records), and ONE small file per conversation
+// beside the buffers, <buffers>/agy-conversation-modes/<conversation>.json {mode, at}: a wrapper that RESUMES a
+// conversation with NO stated mode runs in that one (a stated mode wins, and is what the file says from then on).
+const CONV_MODES_DIR = path.join(path.dirname(bufferFile || '/tmp/agy-wrapper'), 'agy-conversation-modes');
+const convModeFile = (id) => (typeof id === 'string' && /^[\w-]{1,128}$/.test(id) ? path.join(CONV_MODES_DIR, id + '.json') : null);
+function conversationMode(id) {
+  const f = convModeFile(id);
+  if (!f) return null;
+  const j = safeJsonParse((() => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } })());
+  return j && typeof j.mode === 'string' && MODES.includes(j.mode) ? j.mode : null;
+}
+function recordConversationMode() {
+  const f = convModeFile(meta.sessionId);
+  if (!f) return;
+  const tmp = `${f}.${process.pid}.tmp`;
+  try { fs.mkdirSync(CONV_MODES_DIR, { recursive: true, mode: 0o700 }); fs.writeFileSync(tmp, JSON.stringify({ mode: state.mode, at: Date.now() }), { mode: 0o600 }); fs.renameSync(tmp, f); }
+  catch (e) { try { fs.unlinkSync(tmp); } catch { } log(`the conversation's mode was not recorded: ${e.message}`); }
+}
+function noteModes() { meta.agentMode = state.mode; meta.modes = modesOf(); scheduleMeta(); recordConversationMode(); }
 
 // ── the agy child ──
 let child = null, shuttingDown = false, restarting = false, sessionRecorded = false, authFailed = false, childSpokeAt = 0, childStartedAt = 0;
@@ -166,13 +191,13 @@ function startChild() {
   child.stdout.on('data', (chunk) => {
     outBuf = outBuf.length ? Buffer.concat([outBuf, chunk]) : chunk;
     let i;
-    while ((i = outBuf.indexOf(10)) !== -1) { const line = outBuf.subarray(0, i).toString('utf8').trim(); outBuf = outBuf.subarray(i + 1); if (line) { if (!childSpokeAt) childSpokeAt = Date.now(); handleEvent(line); } }
+    while ((i = outBuf.indexOf(10)) !== -1) { const line = outBuf.subarray(0, i).toString('utf8').trim(); outBuf = outBuf.subarray(i + 1); if (line) { if (!childSpokeAt) childSpokeAt = Date.now(); handleEvent(line, mine); } }
   });
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk) => {
     errBuf += chunk;
     let i;
-    while ((i = errBuf.indexOf('\n')) !== -1) { const line = errBuf.slice(0, i).replace(/\r/g, ''); errBuf = errBuf.slice(i + 1); if (line.trim()) handleStderr(line); }
+    while ((i = errBuf.indexOf('\n')) !== -1) { const line = errBuf.slice(0, i).replace(/\r/g, ''); errBuf = errBuf.slice(i + 1); if (line.trim()) handleStderr(line, mine); }
   });
   child.on('error', (err) => { notice('error', `Antigravity process error: ${err.message}`, 'child-error'); });
   setImmediate(drainPromptQueue); // what queued behind a restart runs on the new process
@@ -363,9 +388,15 @@ function adoptConversation(id, how) {
   if (!id || typeof id !== 'string') return;
   if (meta.sessionId === id && sessionRecorded) return;
   meta.sessionId = id; sessionRecorded = true; scheduleMeta();
+  recordConversationMode();   // a NEW conversation's mode (or a resumed one's) is its own from here — the Resume reads it
   record('session', { sessionId: id, cwd: baseCwd, how, sessionName: sessionName || null, agentInfo: meta.acp.agentInfo, capabilities: meta.acp.capabilities, protocolVersion: null, authMethods: [], ...configSnapshot() });
 }
-function handleEvent(line) {
+/** A STOPPED CHILD (lane agy-harness-fixes-2, bug 5): Steer, Stop and every switch restart agy — the old process is asked
+ *  to stop (stdin closed, SIGTERM after 300 ms) and says `result ERROR "interrupted"` / "context canceled" on its way
+ *  out, while `restarting` holds or after the next process took over. A process that was asked to stop is never an
+ *  error: its result neither raises «Antigravity: interrupted» nor ends the turn now running on the new process. */
+const stoppedChild = (from) => !!from && (from !== child || restarting);
+function handleEvent(line, from = null) {
   const ev = safeJsonParse(line);
   if (!ev || typeof ev !== 'object' || typeof ev.event !== 'string') { log(`agy stdout non-event: ${clip(line, 200)}`); return; }
   if (ev.event === 'init') {
@@ -386,6 +417,7 @@ function handleEvent(line) {
     } else if (s.step_type === 'tool') {
       const ti = s.tool_info || {};
       const name = s.tool_name || ti.name || 'tool';
+      if (!stoppedChild(from) && lastTurn && !lastTurn.tools.has(key)) lastTurn.tools.set(key, false); // bug 4: this turn's tool steps
       if (!toolSeen.has(key)) {
         toolSeen.set(key, true);
         record('update', { sessionId: sid, update: { sessionUpdate: 'tool_call', toolCallId: key, title: name, kind: kindOfTool(name), status: 'in_progress', rawInput: ti.parameters != null ? AS.normalizeAgyToolArgs(ti.parameters) : null } }); // lane agy-card-details: ONE card shape (the same normalizer the store uses)
@@ -395,6 +427,7 @@ function handleEvent(line) {
       if (s.state === 'DONE') {
         const err = ti.error && (ti.error.message || ti.error.type) ? `${ti.error.type ? ti.error.type + ': ' : ''}${ti.error.message || ''}` : '';
         const out = err || (typeof ti.output === 'string' ? ti.output : (ti.output != null ? JSON.stringify(ti.output) : ''));
+        if (lastTurn && lastTurn.tools.has(key)) lastTurn.tools.set(key, !err);
         record('update', { sessionId: sid, update: { sessionUpdate: 'tool_call_update', toolCallId: key, status: err ? 'failed' : 'completed', ...(out ? { content: [{ type: 'content', content: { type: 'text', text: clip(out, 20000) } }] } : {}) } });
       }
     } else if (Array.isArray(s.subagent_info?.subagents) || Array.isArray(s.subagent_info)) {
@@ -406,6 +439,7 @@ function handleEvent(line) {
       }
       // the row's own end: the stream's DONE for an invoke_subagent step rides THIS update, never a tool step (measured:
       // the owner's journal had no tool_call_update for either row — they spun for ever); the card says the rest
+      if (s.state === 'DONE' && lastTurn && lastTurn.tools.has(key)) lastTurn.tools.set(key, true);
       if (s.state === 'DONE' && spawns.has(key) && !spawns.get(key).closed) { spawns.get(key).closed = true; record('update', { sessionId: sid, update: { sessionUpdate: 'tool_call_update', toolCallId: key, status: 'completed' } }); }
       for (const subId of AS.subagentInfoIds(s.subagent_info)) { const k = spawns.has(key) ? key : [...spawns.keys()].reverse().find((x) => !spawns.get(x).subId); if (k) adoptSub(k, subId); }
       if (spawns.size) armSubTail();
@@ -417,6 +451,7 @@ function handleEvent(line) {
     const r = ev.result || {};
     if (r.conversation_id && !sessionRecorded) adoptConversation(r.conversation_id, resumeId ? 'load' : 'new');
     if (r.usage && typeof r.usage === 'object') { meta.usage = { ...r.usage, at: Date.now() }; scheduleMeta(); noteTurnUsage(r); }
+    if (stoppedChild(from)) { log(`the stopped agy's result ignored (it was asked to stop): ${clip(r.status || '', 40)}${r.error ? ' — ' + clip(r.error, 200) : ''}`); return; }
     if (!activePrompt) { if (r.status && r.status !== 'SUCCESS') notice('error', `Antigravity: ${r.error || r.status}`, 'agent-error'); return; }
     const st = String(r.status || 'SUCCESS');
     const stop = st === 'SUCCESS' ? 'end_turn' : (st === 'CANCELED' || st === 'INTERRUPTED') ? 'cancelled' : 'error';
@@ -477,9 +512,22 @@ function noteTurnUsage(r) {
 const AUTH_URL_RE = /^\s*https:\/\/accounts\.google\.com\/o\/oauth2\/auth\?/;
 const AUTH_HEAD_RE = /Authentication required|paste the authorization code|You are not logged into Antigravity|Please sign in/i;
 const SOFT_DENY_RE = /permissions\.allow|dangerously-skip-permissions|soft-denied|requires approval|needs approval|not allowed without approval/i;
+// jetski's line when a turn printed no text (lane agy-harness-fixes-2, bug 4): «jetski: no output produced — a tool required
+// the "command" permission that headless mode cannot prompt for…» — its GUESS at why, said too after a nudge turn that only
+// ran tools, every one of them completed. Nothing was skipped when nothing could be: the conversation runs with every tool
+// approved (bypass, or the retry's one turn), or the turn was VibeSpace's stop-check nudge and each of its tool steps
+// completed. A tool step left without completion, outside bypass, is a real skip: the card still comes.
+const NO_OUTPUT_RE = /^\s*jetski: no output produced\b/i;
+function noOutputSkippedNothing() {
+  if (state.mode === 'bypassPermissions' || childRetryBypass) return 'every tool is approved';
+  const t = lastTurn;
+  if (t && t.opts?.nudge && t.tools.size && [...t.tools.values()].every(Boolean)) return `the stop-check nudge turn completed its ${t.tools.size} tool step${t.tools.size === 1 ? '' : 's'}`;
+  return null;
+}
 let authUrl = null;
-function handleStderr(line) {
+function handleStderr(line, from = null) {
   log(`[stderr] ${clip(line, 2000)}`);
+  if (stoppedChild(from)) return;   // bug 5: a process asked to stop says nothing to the chat (logged above)
   if (AUTH_URL_RE.test(line)) authUrl = line.trim();
   if (AUTH_URL_RE.test(line) || AUTH_HEAD_RE.test(line)) {
     if (authFailed) return;
@@ -496,6 +544,8 @@ function handleStderr(line) {
   }
   const m = /^AGY_ERROR:\s*(\{.*\})\s*$/.exec(line.trim());
   if (m) { const j = safeJsonParse(m[1], {}); notice('error', `Antigravity: ${j.short_error || j.message || m[1].slice(0, 300)}`, 'agy-error'); return; }
+  const nothing = NO_OUTPUT_RE.test(line) ? noOutputSkippedNothing() : null;
+  if (nothing) { log(`no soft-deny card: ${nothing}`); return; }
   if (SOFT_DENY_RE.test(line)) { softDenyCard(line); }
 }
 
@@ -515,7 +565,9 @@ const accountRoot = (() => { try { return homeDir && fs.lstatSync(path.join(home
 let denySeq = 0, retryBypass = false, childRetryBypass = false;
 const pendingDenies = new Map();
 function toolOfDeny(line) {
-  const m = /\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b/.exec(line) || /\b(?:tool|command)\s+[“"'`]?([\w.:-]+)/i.exec(line);
+  // jetski's «a tool required the "command" permission…» names the tool in quotes; the verb after «tool» is never one
+  // (lane agy-harness-fixes-2, bug 3: the card said «agy skipped required»)
+  const m = /required the [“"'`]([\w.:-]+)[”"'`] permission/i.exec(line) || /\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b/.exec(line) || /\b(?:tool|command)\s+(?!required\b)[“"'`]?([\w.:-]+)/i.exec(line);
   return m ? m[1] : null;
 }
 /** The rule the notice names, quoted: `"command(rm)"`, `'write_file(src/)'` … (the docs' action(target) syntax). */
@@ -596,6 +648,7 @@ function resolveSoftDeny(msg) {
 
 // ── turns ──
 let promptSeq = 0, activePrompt = null, nudgeTurnActive = false, stopEpoch = 0, stopCheckAbort = null, queueSeq = 0;
+let lastTurn = null; // the last DISPATCHED prompt + its tool steps (key → completed) — kept past its result (bug 4: stderr lags stdout)
 const promptQueue = [];
 async function fetchContextPrefix() {
   const api = process.env.VIBESPACE_API, token = process.env.VIBESPACE_SESSION_TOKEN;
@@ -639,7 +692,7 @@ function droppedRecordFor(rows, { dropId, turnId } = {}) {
     total += text.length;
     const attachments = (Array.isArray(r.attachments) ? r.attachments : []).filter((a) => a && typeof a.type === 'string' && a.type).slice(0, 32)
       .map((a) => ({ type: a.type.slice(0, 32), mime: typeof a.mime === 'string' && a.mime ? a.mime.slice(0, 100) : null, name: typeof a.name === 'string' && a.name ? a.name.slice(0, 200) : null }));
-    items.push({ id: String(r.id || ''), msgId: String(r.msgId || ''), ts: Number.isFinite(r.ts) ? r.ts : null, text, cut: text.length < full.length, attachments });
+    items.push({ id: String(r.id || ''), msgId: String(r.msgId || ''), ts: Number.isFinite(r.ts) ? r.ts : null, text, cut: text.length < full.length, attachments, ...(r.started === true ? { started: true } : {}) });
   }
   return { dropId: String(dropId || ''), by: 'stop', turnId: typeof turnId === 'string' && turnId ? turnId : null, items, omitted };
 }
@@ -725,6 +778,7 @@ async function runPrompt(text, opts = {}) {
   if (!child?.stdin?.writable) { endPrompt(mine, 'error', { message: 'Antigravity is not running' }, opts); return { mode: null, reason: 'Antigravity is not running' }; }
   record('prompt_start', { promptId, blocks: 1 });
   mine.dispatched = true;
+  mine.tools = new Map(); lastTurn = mine;
   child.stdin.write(JSON.stringify({ event: 'user', message: { content: body } }) + '\n');
   return { mode: 'turn' };
 }
@@ -800,6 +854,7 @@ function applySetting(key, value, label) {
   if (state[key] === v) return;
   state[key] = v;
   meta.model = state.model; meta.agentMode = state.mode; meta.effort = state.effort; scheduleMeta();
+  if (key === 'mode') noteModes();
   record('config', { ...configSnapshot(), source: 'set_' + key });
   const words = `${label} → ${v || 'Antigravity default'} — Antigravity restarts its process on the same conversation to apply it`;
   if (activePrompt) { pendingRestart = `${key} ${v}`; notice('info', words + ' (after the running turn).', 'command_applied'); }
@@ -931,6 +986,11 @@ function finalizeExit(code) {
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { shuttingDown = true; try { child?.stdin.end(); } catch { } setTimeout(() => { try { child?.kill('SIGTERM'); } catch { } finalizeExit(0); }, 500).unref(); });
 
 function boot() {
+  // a RESUMED conversation started with no stated mode runs in its OWN mode (THE CONVERSATION'S MODE above) — never
+  // silently in agy's default (the owner's bypass conversation resumed without --dangerously-skip-permissions)
+  const own = resumeId && !state.mode ? conversationMode(resumeId) : null;
+  if (own) state.mode = own;
+  noteModes();
   persistMeta();
   const refused = commandRefusal(cmd);
   if (refused) { notice('error', refused, 'spawn-failed'); finalizeExit(1); return; }
@@ -964,6 +1024,7 @@ function boot() {
   // a RESUMED conversation is known before agy says anything; a new one is adopted from agy's first event
   if (resumeId) adoptConversation(resumeId, 'load');
   else record('config', { ...configSnapshot(), source: 'spawn' });
+  if (own) notice('info', `Resumed in this conversation's own mode: ${own} (no mode was asked for this start).`, 'mode-resumed');
   markReadyDone = true;
   markReady?.();
 }

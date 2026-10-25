@@ -66,7 +66,9 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     // never by rewriting the user's input — modifying the message stream
     // is unstable and bypasses the CLI's mechanisms (user directive).
     let stdinPayload, userMsg;
-    try { ({ stdinPayload, userMsg } = adapter.formatChatInput(text, msgId)); }
+    // a dispatch's frame names its origin: should the wrapper hold it mid-turn (2.369.354), it is never the person's
+    // to edit and never comes back into their composer on Stop
+    try { ({ stdinPayload, userMsg } = adapter.formatChatInput(text, msgId, human ? {} : { origin: 'dispatch' })); }
     catch (e) {
       // POISON GUARD tripped (2.360.0): a shredded frame must reach
       // the USER as an error, never the transcript as text. The ws caller

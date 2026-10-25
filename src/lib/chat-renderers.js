@@ -799,7 +799,9 @@ class ChatRenderers {
 
   /** THE QUEUE CHIP on a user bubble — 'queued' (waiting behind the running
    *  turn, clickable to steer where the harness allows it), 'steered' (injected
-   *  into the running turn) or 'removed'. Idempotent: called on first render
+   *  into the running turn), 'removed' or 'stopped' (it had started when Stop
+   *  cut it off, and its words went back into the input box — codex, lane
+   *  codex-interrupted-putback). Idempotent: called on first render
    *  AND on the queueState edit op, so the chip never doubles.
    *  STATIC + injected click handler: the DOM-free render test drives it
    *  without a ChatRenderers instance, and the chip text is the ONE place the
@@ -809,18 +811,19 @@ class ChatRenderers {
     const prev = el.querySelector(':scope > .chat-queue-chip');
     if (prev) prev.remove();
     const state = msg?.queueState;
-    if (state !== 'queued' && state !== 'steered' && state !== 'removed') return null;
+    if (state !== 'queued' && state !== 'steered' && state !== 'removed' && state !== 'stopped') return null;
     const chip = document.createElement('button');
     chip.className = `chat-queue-chip chat-queue-chip-${state}`;
     chip.type = 'button';
     chip.dataset.queueState = state;
-    const icon = state === 'queued' ? UI_ICONS.clock : state === 'steered' ? UI_ICONS.bolt : UI_ICONS.close;
-    const label = state === 'queued' ? t('Queued') : state === 'steered' ? t('Steered') : t('Removed');
+    const icon = state === 'queued' ? UI_ICONS.clock : state === 'steered' ? UI_ICONS.bolt : state === 'stopped' ? UI_ICONS.reply : UI_ICONS.close;
+    const label = state === 'queued' ? t('Queued') : state === 'steered' ? t('Steered') : state === 'stopped' ? t('Started, then stopped') : t('Removed');
     chip.innerHTML = `${icon}<span>${escHtml(label)}</span>`;
     chip.title = state === 'queued'
       ? t('Waiting behind the running turn — steering it injects it now, at the agent’s next reply')
       : state === 'steered' ? t('Injected into the running turn')
-        : t('Removed from the queue — it will not run');
+        : state === 'stopped' ? t('It had already started when Stop cut it off — its words are back in the input box')
+          : t('Removed from the queue — it will not run');
     if (state === 'queued' && typeof onSteer === 'function') {
       chip.onclick = (e) => { e.stopPropagation(); onSteer(msg); };
     } else {

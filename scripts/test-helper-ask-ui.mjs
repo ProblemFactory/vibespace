@@ -92,6 +92,16 @@ const ask = (h) => {
 const finish = (h, status) => {
   if (h.bg) { out({ type: 'system', subtype: 'task_updated', task_id: h.agent, patch: { status: status === 'stopped' ? 'killed' : 'completed', end_time: Date.now() }, uuid: U() }); out({ type: 'system', subtype: 'task_notification', task_id: h.agent, tool_use_id: h.call, status, summary: h.desc, uuid: U() }); }
 };
+const stopBoth = () => {
+  for (const k of ['C', 'D']) if (pending.has(k)) { pending.delete(k); out({ type: 'control_cancel_request', request_id: helpers[k].req }); }
+  out({ type: 'system', subtype: 'background_tasks_changed', tasks: [], uuid: U() });
+  finish(helpers.D, 'stopped');
+  user([{ type: 'tool_result', tool_use_id: helpers.C.toolId, content: REJECT, is_error: true }], helpers.C.call);
+  user([{ type: 'tool_result', tool_use_id: helpers.C.call, content: REJECT, is_error: true }]);
+  user([{ type: 'text', text: '[Request interrupted by user for tool use]' }]);
+  turnEnd('Both helpers were stopped.');
+  state('idle');
+};
 const turnEnd = (text) => { asst([{ type: 'text', text }]); out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 5, num_turns: 1, result: text, total_cost_usd: 0, usage, uuid: U() }); };
 out({ type: 'system', subtype: 'init', model: 'claude-sonnet-5', cwd: process.cwd(), tools: ['Agent', 'Bash', 'WebFetch'], permissionMode: 'default', claude_code_version: '2.1.281', uuid: U() });
 let userN = 0, buf = '';
@@ -105,6 +115,9 @@ process.stdin.on('data', (d) => {
     fs.appendFileSync(${JSON.stringify(STDIN_LOG)}, line + '\\n');
     let m = null; try { m = JSON.parse(line); } catch {}
     if (!m) continue;
+    // C6's STOP is the composer's Stop — an interrupt (2.369.354: a message typed while the foreground helper keeps the
+    // turn open is HELD by the chat-wrapper, so a typed «stop» never reaches the CLI mid-turn): it withdraws both asks
+    if (m.type === 'control_request' && m.request && m.request.subtype === 'interrupt' && (pending.has('C') || pending.has('D'))) { stopBoth(); continue; }
     if (m.type === 'user' && /ping-([0-9]+)/.test(JSON.stringify(m.message))) { const k = JSON.stringify(m.message).match(/ping-([0-9]+)/)[1]; turnEnd('pong-' + k); continue; } // the suite's bridge-liveness probe (never counted as a turn of the scenario)
     if (m.type === 'user') {
       userN++;
@@ -120,16 +133,7 @@ process.stdin.on('data', (d) => {
         out({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: helpers.D.agent, task_type: 'local_agent', description: helpers.D.desc }], uuid: U() });
         setTimeout(() => { ask(helpers.D); pending.add('D'); }, 200);
         setTimeout(() => { launch(helpers.C); ask(helpers.C); pending.add('C'); }, 500); // a FOREGROUND helper: the turn stays open on its Agent call
-      } else if (/stop/i.test(JSON.stringify(m.message))) {
-        for (const k of ['C', 'D']) if (pending.has(k)) { pending.delete(k); out({ type: 'control_cancel_request', request_id: helpers[k].req }); }
-        out({ type: 'system', subtype: 'background_tasks_changed', tasks: [], uuid: U() });
-        finish(helpers.D, 'stopped');
-        user([{ type: 'tool_result', tool_use_id: helpers.C.toolId, content: REJECT, is_error: true }], helpers.C.call);
-        user([{ type: 'tool_result', tool_use_id: helpers.C.call, content: REJECT, is_error: true }]);
-        user([{ type: 'text', text: '[Request interrupted by user for tool use]' }]);
-        turnEnd('Both helpers were stopped.');
-        state('idle');
-      }
+      } else if (/stop/i.test(JSON.stringify(m.message))) stopBoth();
       continue;
     }
     if (m.type === 'control_response' && m.response) {
@@ -353,7 +357,7 @@ try {
   check('a background (D) and a foreground (C) helper ask', await waitFor(`!!(${ROW(sid, 'req-ui-D')})?.querySelector('.chat-perm-allow') && !!(${ROW(sid, 'req-ui-C')})?.querySelector('.chat-perm-allow')`, 15000),
     await evalJs(`(() => { const views = [...app.sessions.values()].filter((v) => v && v.sessionId === ${JSON.stringify(sid)}); return views.map((v) => ({ n: v._messages?.length, pong: (v._messages || []).some((m) => /pong/.test(JSON.stringify(m.content || ''))), connected: !!v._messageList?.isConnected, disposed: !!v._disposed, epoch: v._normEpoch, tools: (v._messages || []).filter((m) => m.toolCallId).map((m) => m.toolCallId) })); })()`));
   check('the foreground helper\'s ask sits in its (still running) Agent card', await evalJs(`(${ROW(sid, 'req-ui-C')})?.closest('[data-tool-id]')?.dataset.toolId === 'toolu_ui_C'`));
-  liveWs.send(JSON.stringify({ type: 'chat-input', sessionId: sid, text: 'stop both helpers' }));
+  liveWs.send(JSON.stringify({ type: 'interrupt', sessionId: sid }));   // Stop (a message typed mid-turn is held by the chat-wrapper since 2.369.354)
   check('THE FINDING: both asks say "No longer waiting — the helper was stopped" (no buttons)', await waitFor(`['req-ui-C', 'req-ui-D'].every((rid) => { const r = (${LIST(sid)})?.querySelector('.chat-helper-ask[data-request-id="' + rid + '"]'); return !!r && !r.querySelector('.chat-perm-btn') && /No longer waiting — the helper was stopped/.test(r.textContent); })`, 10000));
   const c6 = await evalJs(`(() => { const d = ${CARD(sid, 'toolu_ui_D')}, c = ${CARD(sid, 'toolu_ui_C')}; return { dChip: d?.querySelector('.chat-tool-label .chat-task-status-chip')?.textContent || '', dChipTitle: d?.querySelector('.chat-tool-label .chat-task-status-chip')?.title || '', dLabel: d?.querySelector('.chat-tool-label')?.textContent || '', cText: c?.textContent || '' }; })()`);
   check('THE FINDING: the stopped background helper\'s title chip reads "stopped" (was "⟳ running")', c6.dChip === 'stopped' && c6.dChipTitle === 'Stopped before it finished' && !/running/.test(c6.dLabel), c6);

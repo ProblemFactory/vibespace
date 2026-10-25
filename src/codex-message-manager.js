@@ -2024,6 +2024,8 @@ class CodexMessageManager extends MessageWindow {
       case 'no-active-turn':
         return 'The turn ended before the message could be steered — it stays queued and will simply run next.';
       case 'gone':
+        // lane codex-interrupted-putback: drained, then cut off by this very Stop — its words came back (`started`)
+        if (event.started === true) return 'That message had already started — Stop stopped it and put it back into the input box.';
         return 'That message is no longer queued — it already ran.';
       case 'no-thread':
         return 'The session has no thread yet — the queue is not available.';

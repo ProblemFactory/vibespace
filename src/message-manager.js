@@ -315,6 +315,13 @@ class MessageManager extends MessageWindow {
     this.taskMsgByToolUse = new Map();   // toolUseId → msgId (tasks only)
     this.taskMsgByTaskId = new Map();    // task_id  → msgId
     this._peerMsgIds = new Set(); // cross-session msg_ids already rendered (dedup across the three peer sites)
+    // THE WRAPPER'S QUEUE (2.369.354, lane claude-wrapper-queue): data/bin/chat-wrapper.js HOLDS a frame sent mid-turn
+    // and says so on the acp/codex wire — queued_input / queue_changed / queue_op_result / queue_dropped, top-level lines
+    this.userMessageIds = new Map();      // webui msgId → message id (the bubble a queue row belongs to)
+    this._queue = [];                     // the wrapper's promptQueue, as published
+    this._queuedMsgIds = new Set();       // bubbles currently wearing a 'queued' chip
+    this._queuePublished = false;         // has this wrapper ever published a queue? (in-band capability signal)
+    this._queueVerbs = null;              // …and the verb list that publication named
     // A HELPER's own view (`sub-<tool_use_id>` / `sub-agent-<id>`, lane S1): its
     // asks attach to its own tool cards; the PARENT's normalizer instead hangs a
     // helper's ask on the helper's Agent card (the helper's tool is never here).
@@ -832,6 +839,11 @@ class MessageManager extends MessageWindow {
       // A previously-yielded message was RETRACTED upstream (§2.10). We render
       // AND persist the stream, so without this the orphan lived forever.
       case 'tombstone': return this._processTombstone(raw, emit);
+      // the WRAPPER's own records (2.369.354 — the CLI never writes these): its mid-turn queue
+      case 'queued_input': return this._processQueuedInput(raw, emit);
+      case 'queue_changed': return this._processQueueChanged(raw, emit);
+      case 'queue_op_result': return this._processQueueOpResult(raw, emit);
+      case 'queue_dropped': return this._processQueueDropped(raw, emit); // Stop's put-back (the base's one method)
       // the transcript's persisted PR pointer {prNumber, prUrl, prRepository} =
       // the same fact as system/code_change_published (design-unknown-records)
       case 'pr-link': return this._processCodeChange({ provider: null, url: raw.prUrl, repo: raw.prRepository, identifier: raw.prNumber != null ? String(raw.prNumber) : null, action: null }, emit);
@@ -1578,9 +1590,73 @@ class MessageManager extends MessageWindow {
   }
 
   // goalState / queueState / queuePublished / queueVerbsPublished =
-  // MessageWindow's: claude publishes NO queue (the CLI queues stdin itself;
-  // backend-caps inputModes {queue:true, queueVerbs:[]}), so they answer [] /
-  // false / null — null = "named no verb list", not "serves none".
+  // MessageWindow's, over the wrapper's published queue (2.369.354): a session
+  // whose wrapper predates it never publishes, so they answer [] / false / null
+  // — null = "named no verb list", not "serves none".
+
+  /** Stamp the queue chip on the bubble a held message belongs to; false when there is no such bubble (the acp / codex
+   *  rule — the caller then draws a visible notice, so a held message is never silent). */
+  _stampQueueChip(msgId, state, emit) {
+    if (!msgId) return false;
+    const id = this.userMessageIds.get(String(msgId));
+    const msg = id ? this.messageIndex.get(id) : null;
+    if (!msg) return false;
+    if (msg.queueState === state) return true;
+    msg.queueState = state;
+    if (state === 'queued') this._queuedMsgIds.add(String(msgId)); else this._queuedMsgIds.delete(String(msgId));
+    if (emit) this._emit({ op: 'edit', id: msg.id, fields: { queueState: state } });
+    return true;
+  }
+
+  /** `queued_input` — the chip on the bubble IS the notice; the card is the fallback for a held frame with no bubble. */
+  _processQueuedInput(raw, emit) {
+    if (this._queuePublished && this._stampQueueChip(raw.msg_id || raw.msgId, 'queued', emit)) return;
+    const msg = this._create({ role: 'system', content: [{ type: 'system_info', text: 'Queued — runs after the current turn' }], noticeKind: 'notice' });
+    if (emit) this._emit({ op: 'create', message: msg });
+  }
+
+  /** `queue_changed` — the WHOLE queue: the strip's meta op, and every bubble that left it without a result reads ran. */
+  _processQueueChanged(raw, emit) {
+    const items = Array.isArray(raw.items) ? raw.items : [];
+    this._queue = items;
+    this._queuePublished = true;
+    if (Array.isArray(raw.verbs)) this._queueVerbs = raw.verbs.map((v) => String(v));
+    const live = new Set(items.map((it) => String(it.msgId || '')).filter(Boolean));
+    for (const it of items) this._stampQueueChip(it.msgId, 'queued', emit);
+    for (const msgId of [...this._queuedMsgIds]) if (!live.has(msgId)) this._stampQueueChip(msgId, null, emit);
+    if (emit) this._emit({ op: 'meta', subtype: 'queue', items, supported: true, verbs: this._queueVerbs || null });
+  }
+
+  /** `queue_op_result` — a meta op for the strip (a pending row always ends), 'removed' on the bubble for a removal
+   *  (Stop's per-item results included), and a visible card for every failure. */
+  _processQueueOpResult(raw, emit) {
+    const ok = raw.ok !== false;
+    const text = ok ? '' : MessageManager.queueOpFailureText(raw);
+    if (emit) this._emit({ op: 'meta', subtype: 'queue-result', queueOp: raw.op, id: String(raw.id || ''), ok, reason: raw.reason || null, text: text || null });
+    if (ok) {
+      if (raw.op === 'remove') this._stampQueueChip(raw.msg_id || raw.msgId, 'removed', emit);
+      return;
+    }
+    const msg = this._create({ role: 'system', content: [{ type: 'system_info', text }], noticeKind: 'notice' });
+    if (emit) this._emit({ op: 'create', message: msg });
+  }
+
+  /** PURE: the sentence for a failed queue op on claude (every branch says what is true for the message NOW). */
+  static queueOpFailureText(rec) {
+    switch (rec.reason) {
+      case 'gone': return 'That message is no longer queued — it already ran.';
+      case 'not-steerable': return 'Claude Code takes no input into a running turn — the message runs when this turn ends.';
+      case 'not-startable': return 'A queued message starts as soon as the current turn ends.';
+      case 'not-editable': return 'That message is not yours to rewrite — you can remove it instead.';
+      case 'anchor-gone': return 'The message it was dropped after is no longer queued — nothing was moved.';
+      case 'empty-text': return 'An edited message needs some text — remove it instead.';
+      case 'unknown-op': return `Unsupported queue action "${rec.op}".`;
+      default: {
+        const what = rec.op === 'remove' ? 'remove' : rec.op === 'reorder' ? 'move' : rec.op === 'edit' ? 'edit' : 'change';
+        return `Could not ${what} the queued message${rec.detail ? `: ${rec.detail}` : ''}.`;
+      }
+    }
+  }
 
   _processUser(raw, emit) {
     this._finalizeStreaming(emit);
@@ -1794,6 +1870,9 @@ class MessageManager extends MessageWindow {
       else if (raw.originKind === 'auto-resume') { msg.originKind = 'auto-resume'; msg.typed = false; if (typeof raw.originNote === 'string' && raw.originNote) msg.originNote = raw.originNote; } // VibeSpace's own continue prompt (auto-resume) — labelled, never a "you typed this" bubble (2.369.32)
       else if (raw.promptSource || raw._fromWebui) msg.typed = true;
       if (raw.isSynthetic) msg.synthetic = true;
+      // THE BUBBLE'S IDENTITY (2.369.354): a frame the wrapper holds names this msgId in its queue row — stamped ON the
+      // message (the client joins its chip by it; a server-only map is not an identity it can see), the acp/codex stamp
+      if (raw._fromWebui && raw.msgId) { msg.webuiMsgId = String(raw.msgId); this.userMessageIds.set(String(raw.msgId), msg.id); }
       if (emit) this._emit({ op: 'create', message: msg });
     }
   }

@@ -59,6 +59,13 @@ function sidecarTotals(u) {
   const n = (v) => (Number.isFinite(Number(v)) && Number(v) >= 0 ? Number(v) : 0);
   return { total_tokens: n(u.total_tokens), input_tokens: n(u.input_tokens), cached_input_tokens: n(u.cache_read_tokens), output_tokens: n(u.output_tokens), reasoning_output_tokens: n(u.thinking_tokens) };
 }
+/** The permission modes the SIDECAR names (lane agy-harness-fixes-2): its configOptions' mode select, else meta.modes'
+ *  availableModes (agy-wrapper / acp-wrapper keep both current) — the journal's `session` record that also carries them is
+ *  the first line the wrapper's 800 KB ring cuts, and an empty list made the bar's mode chip open nothing. */
+function sidecarModes(meta) {
+  const opts = asArray(meta?.configOptions).filter((o) => o && (o.category === 'mode' || o.id === 'mode')).flatMap((o) => flattenSelect(o).map((v) => String(v.value)));
+  return opts.length ? opts : asArray(meta?.modes?.availableModes).map((m) => String(m?.id ?? '')).filter(Boolean);
+}
 function parseAcpBufferRecords(buffer) {
   const out = [];
   for (const line of String(buffer || '').split('\n')) {
@@ -762,8 +769,12 @@ class AcpSessionMessages {
   get isStreaming() { return !!this.wrapperMeta()?.streaming; }
   wrapperMeta() {
     if (this._wrapperMeta !== undefined) return this._wrapperMeta;
-    if (!this._buffersDir || !this._sessionId) { this._wrapperMeta = null; return null; }
-    try { this._wrapperMeta = JSON.parse(fs.readFileSync(path.join(this._buffersDir, `${this._sessionId}.json`), 'utf-8')); }
+    // the sidecar is named by the SESSION's id: a caller that knows only the conversation (the Resume's own
+    // GET /api/session-messages?withStatus=1, by conversation id) hands the live session, which carries it (lane
+    // agy-harness-fixes-2: a resumed agy chat's chip said «default» — its boot records not yet in the hub's journal)
+    const wid = this._sessionId || this._session?._webuiId || null;
+    if (!this._buffersDir || !wid) { this._wrapperMeta = null; return null; }
+    try { this._wrapperMeta = JSON.parse(fs.readFileSync(path.join(this._buffersDir, `${wid}.json`), 'utf-8')); }
     catch { this._wrapperMeta = null; }
     return this._wrapperMeta;
   }
@@ -774,8 +785,8 @@ class AcpSessionMessages {
     const st = mm.status();
     const status = {
       model: st.model || meta?.model || '',
-      permissionMode: st.permissionMode || meta?.agentMode || '',
-      permissionModes: st.permissionModes?.length ? st.permissionModes : asArray(meta?.configOptions).filter((o) => o && (o.category === 'mode' || o.id === 'mode')).flatMap((o) => flattenSelect(o).map((v) => String(v.value))),
+      permissionMode: st.permissionMode || meta?.agentMode || meta?.modes?.currentModeId || '',
+      permissionModes: st.permissionModes?.length ? st.permissionModes : sidecarModes(meta),
       contextWindow: st.contextWindow || meta?.usage?.size || 0,
       lastUsage: st.lastUsage || (meta?.usage?.used != null ? { input_tokens: meta.usage.used, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } : null),
       // agy's `usage` records (lane agy-status-bar-facts); before the first one — a conversation whose wrapper predates

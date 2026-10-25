@@ -840,7 +840,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     Promise.race([stamped, new Promise((r) => setTimeout(r, CLOSE_STAMP_WAIT_MS))]).then(() => {
       if (closed) return;
       if (!view || !view.closeApp()) { closeAskedAt = 0; closed = true; app.wm.closeWindow(winInfo.id); return; } // the socket refused the packet: today's pane-only close, never a dead button
-      showToast(t('Asked {app} to close — press ✕ again within {n} s to stop it', { app: titleText(), n: Math.round(OUTER_CLOSE_AGAIN_MS / 1000) }), { duration: OUTER_CLOSE_AGAIN_MS });
+      showToast(t('Asked {app} to close — no agent is using it, so pressing ✕ again within {n} s stops the app', { app: titleText(), n: Math.round(OUTER_CLOSE_AGAIN_MS / 1000) }), { duration: OUTER_CLOSE_AGAIN_MS });
     });
     return false;
   };

@@ -128,7 +128,9 @@ const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 setTimeout(() => out({ type: 'system', subtype: 'init', session_id: SID, cwd: process.cwd(), model: 'claude-fable-5', apiKeySource: 'none', tools: [], mcp_servers: [], permissionMode: 'default' }), 50);
 let buf = '';
 process.stdin.setEncoding('utf8');
-process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); fs.appendFileSync(ROOT + '/stub-stdin.ndjson', line + '\\n'); } });
+// every user frame ENDS its turn with a result, as the real CLI's does (since 2.369.354 the chat-wrapper holds a frame
+// that arrives while a turn runs — a stub that never ends one would hold every later send)
+process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); fs.appendFileSync(ROOT + '/stub-stdin.ndjson', line + '\\n'); let m = null; try { m = JSON.parse(line); } catch {} if (m && m.type === 'user') out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 1, num_turns: 1, result: '', session_id: SID, total_cost_usd: 0 }); } });
 const done = new Set((() => { try { return fs.readdirSync(ROOT + '/cmds'); } catch { return []; } })()); // a stub started later never replays earlier commands (§16: a resumed stub replayed §5's prompt-context and drained its own stash)
 setInterval(() => {
   let names = [];

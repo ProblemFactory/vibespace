@@ -10,6 +10,9 @@
 //     session's draft as an ABSOLUTE value whose op carries `prepended` (the prefix's length);
 //   · every CLIENT lands that op as a prefix over its LIVE box (landDraftPrepend — unsaved typing kept, caret shifted)
 //     and the arrival rule always applies it (src/sync-arrival.js, the delta row); a toast says how many (putbackNotice).
+// A codex row the app-server had DRAINED under the sweep, whose own turn is the one Stop interrupts, comes back too,
+// marked `started: true` (lane codex-interrupted-putback — the owner, 2026-10-25: «可以 按照你推荐来»: a duplicate send
+// is cheaper than a lost message); drainedWasStopped is the rule, judged by the TURN's state, never by a clock.
 // The person's rows only: a peer / nudge / retry / system row goes back through its own ladder. Attachments are named
 // (descriptors), never restored — the draft is a string. PURE — imports nothing: the bundle (src/lib/chat-input.js),
 // the server door, ws-handler's belt and the normalizer base (src/message-window.js) share it.
@@ -24,7 +27,8 @@ const isVersion = (v) => Number.isSafeInteger(v) && v > 0;
 const IMAGE_TYPES = new Set(['image', 'localImage']);
 
 /** THE RECORD's payload — the person's rows Stop removed, oldest first, each text cut at 20000 (never inside a
- *  surrogate pair), rows past 100000 chars of text in one record counted as `omitted`, attachments as descriptors.
+ *  surrogate pair), rows past 100000 chars of text in one record counted as `omitted`, attachments as descriptors;
+ *  a row that had started and was stopped carries `started: true` (absent otherwise — the older shape, unchanged).
  *  Each wrapper carries a BYTE-IDENTICAL inline twin of this function (they cannot require src/); test-queue-putback
  *  pins every twin's text to this one and drives them on one fixture. */
 function droppedRecordFor(rows, { dropId, turnId } = {}) {
@@ -39,7 +43,7 @@ function droppedRecordFor(rows, { dropId, turnId } = {}) {
     total += text.length;
     const attachments = (Array.isArray(r.attachments) ? r.attachments : []).filter((a) => a && typeof a.type === 'string' && a.type).slice(0, 32)
       .map((a) => ({ type: a.type.slice(0, 32), mime: typeof a.mime === 'string' && a.mime ? a.mime.slice(0, 100) : null, name: typeof a.name === 'string' && a.name ? a.name.slice(0, 200) : null }));
-    items.push({ id: String(r.id || ''), msgId: String(r.msgId || ''), ts: Number.isFinite(r.ts) ? r.ts : null, text, cut: text.length < full.length, attachments });
+    items.push({ id: String(r.id || ''), msgId: String(r.msgId || ''), ts: Number.isFinite(r.ts) ? r.ts : null, text, cut: text.length < full.length, attachments, ...(r.started === true ? { started: true } : {}) });
   }
   return { dropId: String(dropId || ''), by: 'stop', turnId: typeof turnId === 'string' && turnId ? turnId : null, items, omitted };
 }
@@ -70,7 +74,7 @@ function queueDroppedOf(record) {
       attachments.push({ type: a.type.slice(0, 32), mime: typeof a.mime === 'string' && a.mime ? a.mime.slice(0, 100) : null, name: typeof a.name === 'string' && a.name ? a.name.slice(0, 200) : null });
     }
     if (!text && !attachments.length) continue;
-    items.push({ id: typeof it.id === 'string' ? it.id : '', msgId: typeof it.msgId === 'string' ? it.msgId : '', ts: Number.isFinite(it.ts) ? it.ts : null, text, cut: it.cut === true || text.length < raw.length, attachments });
+    items.push({ id: typeof it.id === 'string' ? it.id : '', msgId: typeof it.msgId === 'string' ? it.msgId : '', ts: Number.isFinite(it.ts) ? it.ts : null, text, cut: it.cut === true || text.length < raw.length, attachments, ...(it.started === true ? { started: true } : {}) });
   }
   const omitted = Number.isSafeInteger(p.omitted) && p.omitted > 0 ? p.omitted : 0;
   return { dropId, by: typeof p.by === 'string' && p.by ? p.by.slice(0, 32) : 'stop', turnId: typeof p.turnId === 'string' && p.turnId ? p.turnId : null, items, omitted };
@@ -102,17 +106,28 @@ function landDraftPrepend({ current, selStart, selEnd, value, prepended } = {}) 
 }
 
 /** The toast's facts: n = rows whose text came back, images / others = attachments named but not restored, cut = rows
- *  shortened to 20000, omitted = rows past the record's 100000 chars (not carried at all). */
+ *  shortened to 20000, omitted = rows past the record's 100000 chars (not carried at all), started = those of the n that
+ *  had already started and were stopped (`started: true`, codex — the toast names them). */
 function putbackNotice(d) {
   const items = d && Array.isArray(d.items) ? d.items : [];
-  let n = 0, images = 0, others = 0, cut = 0;
+  let n = 0, images = 0, others = 0, cut = 0, started = 0;
   for (const it of items) {
     if (!it) continue;
-    if (typeof it.text === 'string' && it.text.trim()) n++;
+    if (typeof it.text === 'string' && it.text.trim()) { n++; if (it.started === true) started++; }
     if (it.cut) cut++;
     for (const a of Array.isArray(it.attachments) ? it.attachments : []) { if (a && IMAGE_TYPES.has(a.type)) images++; else if (a) others++; }
   }
-  return { n, images, others, cut, omitted: d && Number.isSafeInteger(d.omitted) && d.omitted > 0 ? d.omitted : 0 };
+  return { n, images, others, cut, omitted: d && Number.isSafeInteger(d.omitted) && d.omitted > 0 ? d.omitted : 0, started };
+}
+
+/** A row the app-server DRAINED under codex's Stop sweep (`{deleted:false}` — it left the queue to run): was it STOPPED?
+ *  Its TURN decides, never a clock. turnId = the turn its `userMessage` entered (the app-server's own witness), stopTurnId =
+ *  the turn Stop interrupts, ended = that turn has already ended. The same turn, still running ⇒ true: the person's
+ *  message was cut off before it answered — it goes back into the composer (`started: true`). Its turn ended ⇒ it RAN to
+ *  the end (stays `gone`); no witness ⇒ nothing proves it was stopped (stays `gone`, as before). The codex wrapper carries
+ *  a BYTE-IDENTICAL inline twin (test-queue-putback pins it). */
+function drainedWasStopped({ turnId, stopTurnId, ended } = {}) {
+  return typeof turnId === 'string' && turnId !== '' && turnId === stopTurnId && ended !== true;
 }
 
 /** THE SERVER BELT (ws-handler's `state-set` on drafts/chat:<id>): a client set whose `basedOn` is BELOW a put-back's
@@ -138,5 +153,5 @@ function noteBelt(belt, entry) {
 
 module.exports = {
   PUTBACK_ITEM_MAX_CHARS, PUTBACK_TOTAL_MAX_CHARS, PUTBACK_SEP, PUTBACK_MAX_ITEMS, PUTBACK_BELT_MAX,
-  droppedRecordFor, queueDroppedOf, mergeDraft, landDraftPrepend, putbackNotice, beltValue, noteBelt,
+  droppedRecordFor, queueDroppedOf, mergeDraft, landDraftPrepend, putbackNotice, drainedWasStopped, beltValue, noteBelt,
 };

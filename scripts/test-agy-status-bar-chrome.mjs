@@ -15,6 +15,12 @@
 //     through the real wrapper), its card a static status line — not inside a <details>, no ▸, a REAL click opens nothing,
 //     the path still a link; the claude Read card (the file's text) keeps its ▸ and a real click opens it (▾, the text
 //     shown). CONTROL: the shipped caret rule as it was (on every .chat-diff-summary) puts the ▸ back on the agy line.
+//   ⑤ THE MODE CHIP THROUGH THE RING AND A RESUME (lane agy-harness-fixes-2 — the owner 2026-10-25): a REAL press opens the
+//     🔒 chip's four agy modes, a real press picks «bypassPermissions» (the wrapper restarts on it), a 1.2 MB reply cuts the
+//     journal's head (no `session` record left), a reload over it still shows the mode and a press still opens the four; a
+//     status saying `permissionModes: []` leaves the declared list; then the page's own restart (kill → resume with the
+//     conversation's saved config — none for the mode) ⇒ the resumed chat says bypassPermissions, says why in one line,
+//     and agy replies under always-proceed (--dangerously-skip-permissions).
 // PNG: $VS_AGY_BAR_PNG (the bar after ①); $VS_READ_CARDS_DIR ⇒ agy-read.png, claude-read-open.png, agy-read-control.png (④). Run: node scripts/test-agy-status-bar-chrome.mjs   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -247,6 +253,70 @@ try {
   const k2 = await readCard('__cl');
   check(`claude Read: a REAL click opens it — ▾ and the file's text shown (${k2 && Math.round(k2.bodyH)} px)`, !!k2 && k2.open && /\u25BE/.test(k2.caret || '') && k2.bodyH > 10 && /Written by the fake agy/.test(k2.html), k2 && { open: k2.open, caret: k2.caret, bodyH: k2.bodyH });
   await shot('claude-read-open.png', (await readCard('__cl'))?.box);
+
+  console.log('⑤ THE MODE CHIP (lane agy-harness-fixes-2): picked in the chip, through a reply that cuts the journal\'s head, a reload, a Resume');
+  const BUFS = path.join(wt, 'data', 'session-buffers');
+  const FOUR = ['accept-edits', 'auto', 'plan', 'bypassPermissions'];
+  const sideOf = (sid) => { try { return JSON.parse(fs.readFileSync(path.join(BUFS, sid + '.json'), 'utf8')); } catch { return null; } };
+  // the chip as a person meets it: its window raised, its box on screen; a REAL press opens the menu
+  const permChip = (sidVar) => evalJs(`(() => { const v = ${viewOf(sidVar)}; const el = v && v._statusBar && v._statusBar.element; const c = el && el.querySelector('[data-chip="perm"]'); if (!c) return null;
+    for (const [id, w] of app.wm.windows) if (w.element && w.element.contains(v._messageList)) { app.wm.focusWindow(id); break; }
+    c.scrollIntoView({ block: 'nearest' }); const r = c.getBoundingClientRect(); return { text: c.textContent.replace(/\\s+/g, ' ').trim(), x: r.left + r.width / 2, y: r.top + r.height / 2, w: r.width }; })()`);
+  const openMenu = async (sidVar) => {
+    await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); true`);
+    const c = await permChip(sidVar);
+    if (!c || !c.w) return { chip: c, items: null };
+    await press(c.x, c.y);
+    await waitFor(`!!document.querySelector('.chat-status-dropdown')`, 3000);
+    return { chip: c, items: await evalJs(`(() => { const d = document.querySelector('.chat-status-dropdown'); return d ? [...d.querySelectorAll('.chat-status-dropdown-item')].map((i) => i.textContent.trim()) : null; })()`) };
+  };
+  const chipSays = (sidVar, re) => waitFor(`(() => { const v = ${viewOf(sidVar)}; const c = v && v._statusBar && v._statusBar.element && v._statusBar.element.querySelector('[data-chip="perm"]'); return !!c && ${re}.test(c.textContent); })()`, 20000);
+  const mSid = await createChat('__agym', { cwd: CWD, name: 'agy-mode', mode: 'chat', backend: 'antigravity', model: 'gemini-4-argon-high' });
+  check('an Antigravity chat for the mode (the fake agy behind the real agy-wrapper)', !!mSid);
+  await waitFor(`(() => { const v = ${viewOf('__agym')}; return !!v && !!v._statusBar?.element?.querySelector('[data-chip="perm"]') && !!${JSON.stringify(mSid)} && true; })()`, 15000);
+  for (let i = 0; i < 40 && !sideOf(mSid)?.sessionId; i++) await sleep(250); // the wrapper adopted agy's conversation
+  const m1 = await openMenu('__agym');
+  check(`a REAL press on the 🔒 chip («${m1.chip && m1.chip.text}») opens agy's FOUR modes`, JSON.stringify(m1.items) === JSON.stringify(FOUR), m1);
+  const row = await evalJs(`(() => { const it = [...document.querySelectorAll('.chat-status-dropdown .chat-status-dropdown-item')].find((i) => i.textContent.trim() === 'bypassPermissions'); if (!it) return null; const r = it.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  if (row) await press(row.x, row.y);
+  for (let i = 0; i < 60 && sideOf(mSid)?.agentMode !== 'bypassPermissions'; i++) await sleep(250);
+  const s1 = sideOf(mSid);
+  check('…a real press on «bypassPermissions» reaches the wrapper: its sidecar says agentMode + meta.modes {the four, current bypassPermissions}', s1?.agentMode === 'bypassPermissions' && s1?.modes?.currentModeId === 'bypassPermissions' && JSON.stringify((s1.modes.availableModes || []).map((m) => m.id)) === JSON.stringify(FOUR), s1 && { agentMode: s1.agentMode, modes: s1.modes });
+  check('a 1.2 MB reply played (300 bubbles) under always-proceed', await turn(mSid, '__agym', 'a bulk reply', /always-proceed\): [\s\S]*a bulk reply/));
+  let cutBuf = '';
+  for (let i = 0; i < 40; i++) { try { cutBuf = fs.readFileSync(path.join(BUFS, mSid + '.buf'), 'utf8'); } catch { } if (cutBuf.length > 700000 && !cutBuf.includes('"kind":"session"') && cutBuf.includes('"kind":"prompt_end"')) break; await sleep(250); }
+  check(`the wrapper's journal lost its head to the ring (${cutBuf.length} chars ≤ 800 000): no \`session\` and no \`config\` record — the mode is in no journal line any more`, cutBuf.length > 700000 && cutBuf.length <= 800000 && !cutBuf.includes('"kind":"session"') && !cutBuf.includes('"kind":"config"'), cutBuf.length);
+  await cdp('Page.reload', {});
+  await waitApp();
+  await sleep(1000);
+  await evalJs(`window.__agym = ${JSON.stringify(mSid)}; if (!${viewOf('__agym')}) app.attachSession(${JSON.stringify(mSid)}, 'agy-mode', ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'antigravity' }); true`);
+  await chipSays('__agym', '/bypassPermissions/');
+  const m2 = await openMenu('__agym');
+  check(`after a RELOAD over the cut journal: the chip says «${m2.chip && m2.chip.text}» and a real press opens the four (the attach's chatStatus reads the sidecar)`, /bypassPermissions/.test(m2.chip?.text || '') && JSON.stringify(m2.items) === JSON.stringify(FOUR), m2);
+  await evalJs(`(() => { const v = ${viewOf('__agym')}; v._statusBar.applyStatus({ permissionModes: [] }); v._statusBar.render(); return true; })()`);
+  const m3 = await openMenu('__agym');
+  check('a status saying permissionModes: [] (what a cut journal used to send) leaves the declared list: a real press still opens the four', JSON.stringify(m3.items) === JSON.stringify(FOUR), m3);
+  await evalJs(`document.querySelectorAll('.chat-status-dropdown').forEach((d) => d.remove()); true`);
+  // THE RESUME, by the page's own road: restartConversationInPlace = kill → (exited) → resumeSession with the conversation's
+  // saved config — which holds no mode (the chip's pick is saved nowhere), so the create carries the instance default ''
+  const cid = sideOf(mSid)?.sessionId || null;
+  const before = await evalJs(`[...app.sessions.values()].filter((v) => v && v._messageList).map((v) => v.sessionId)`);
+  await evalJs(`app.restartConversationInPlace({ webuiId: ${JSON.stringify(mSid)}, backendSessionId: ${JSON.stringify(cid)}, backend: 'antigravity', cwd: ${JSON.stringify(CWD)}, webuiMode: 'chat' }); true`);
+  let rSid = null;
+  for (let i = 0; i < 120 && !rSid; i++) { rSid = await evalJs(`([...app.sessions.values()].find((v) => v && v._messageList && !${JSON.stringify(before)}.includes(v.sessionId))?.sessionId) || null`); if (!rSid) await sleep(250); }
+  if (rSid) await evalJs(`window.__agyr = ${JSON.stringify(rSid)}; true`);
+  check('RESUME through the page\'s own restart (a NEW session on the same conversation)', !!cid && !!rSid && rSid !== mSid, { cid, rSid });
+  let fact = null; try { fact = JSON.parse(fs.readFileSync(path.join(BUFS, 'agy-conversation-modes', cid + '.json'), 'utf8')); } catch { }
+  for (let i = 0; i < 40 && sideOf(rSid)?.agentMode !== 'bypassPermissions'; i++) await sleep(250);
+  // the old session's sidecar is NOT the source (another wid; the hub's teardown deletes it — measured here: an agy one can
+  // still be on disk after the restart); the resumed session's OWN sidecar says the mode, from the conversation's fact file
+  check('…a NEW session (its own sidecar, another wid) whose sidecar says bypassPermissions — read from the conversation\'s mode file {mode: bypassPermissions}, never from the old session', rSid !== mSid && sideOf(rSid)?.agentMode === 'bypassPermissions' && sideOf(rSid)?.sessionId === cid && fact?.mode === 'bypassPermissions', { resumed: sideOf(rSid) && { agentMode: sideOf(rSid).agentMode, sessionId: sideOf(rSid).sessionId }, fact, oldSidecarOnDisk: fs.existsSync(path.join(BUFS, mSid + '.json')) });
+  await chipSays('__agyr', '/bypassPermissions/');
+  const rc = await permChip('__agyr');
+  const said = /bypassPermissions/.test(rc?.text || '') ? null : await evalJs(`fetch('/api/session-messages?backend=antigravity&backendSessionId=' + encodeURIComponent(${JSON.stringify(cid)}) + '&cwd=' + encodeURIComponent(${JSON.stringify(CWD)}) + '&withStatus=1').then((r) => r.json()).then((j) => ({ status: j.chatStatus, n: (j.messages || []).length, bar: (() => { const v = ${viewOf('__agyr')}; return v ? { perm: v._statusBar._statusPermMode, list: v._statusBar._permissionModes } : null; })() })).catch((e) => String(e))`);
+  check(`the resumed chat's chip says «${rc && rc.text}» — its own mode, never «default»`, /bypassPermissions/.test(rc?.text || ''), { rc, said, sidecars: fs.readdirSync(BUFS).filter((f) => f.endsWith('.json')).map((f) => [f, sideOf(f.slice(0, -5))?.agentMode, sideOf(f.slice(0, -5))?.sessionId === cid]) });
+  check('…and agy really runs with every tool approved: the next reply comes under always-proceed (--dangerously-skip-permissions)', await turn(rSid, '__agyr', 'after the resume', /always-proceed\): [\s\S]*after the resume/));
+  check('…and the chat says why, ONE line: «Resumed in this conversation\'s own mode: bypassPermissions»', await waitFor(`(() => { const v = ${viewOf('__agyr')}; return !!v && (v._messageList.textContent.match(/Resumed in this conversation's own mode: bypassPermissions/g) || []).length === 1; })()`, 8000));
   check('no page error on the way', pageErrors.length === 0, pageErrors);
 } catch (e) {
   failed++; console.error('✗ threw: ' + (e && e.stack || e));

@@ -27,6 +27,15 @@
 //                                   file is written) — the MEASURED stream names + an absolute `Path` (lane agy-status-bar-facts)
 //       text naming `read the summary` → a read_file step on <cwd>/reports/summary.md whose output is agy's ONE-LINE summary
 //                                   «N lines, M bytes» — the measured live shape, never the file's text (lane ci-351-reds)
+//       text naming `bulk`        → 300 agent_response steps of 4 000 chars (1.2 MB, 300 bubbles): the wrapper's journal passes its
+//                                   800 KB ring, whose cut takes the `session` record first (lane agy-harness-fixes-2)
+//       text naming `quiet`       → a turn that only runs a tool and prints NO text (the stop-check nudge's shape): the
+//                                   run_command step ACTIVE then DONE (with `skipped` too: never DONE — a real skip), the
+//                                   result SUCCESS, then jetski's guess on stderr «jetski: no output produced — a tool
+//                                   required the "command" permission that headless mode cannot prompt for…» (lane
+//                                   agy-harness-fixes-2; the head is the owner's report, the tail a stand-in naming
+//                                   permissions.allow, as agy's soft-deny lines do)
+//       text naming `stray`       → after the turn's result, ANOTHER result ERROR "interrupted" from this same process
 //       otherwise                 → agent_response deltas "Antigravity (<model>, <mode>): <text>", a checkpoint, result SUCCESS
 //     USAGE (lane agy-status-bar-facts) = the MEASURED semantics: every model call (one per agent_response, one more per
 //     tool step) counts input / cache_read (the previous call's context) / output, and result.usage is the CONVERSATION'S
@@ -34,7 +43,8 @@
 //     <HOME>/.gemini/antigravity-cli/brain/<conversation>/.system_generated/logs/transcript.jsonl (agy's own shape: a
 //     USER_INPUT row per turn, a MODEL PLANNER_RESPONSE row with the call's counts), and a restart on --conversation
 //     re-reads the sums from it (agy rehydrates its steps).
-//     stdin EOF → exit 0 ($AGY_STUB_EXIT_DELAY_MS: after that long, SIGTERM ignored — a slow restart, made deterministic).  The --model / --effort / --mode / --dangerously-skip-permissions it was started with are echoed.
+//     stdin EOF → exit 0 ($AGY_STUB_EXIT_DELAY_MS: after that long, SIGTERM ignored — a slow restart, made deterministic).
+//     $AGY_STUB_SIGTERM_RESULT=1: a SIGTERM prints result ERROR "interrupted" before the exit (what agy says when a restart stops it).  The --model / --effort / --mode / --dangerously-skip-permissions it was started with are echoed.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -133,6 +143,18 @@ async function turn(text) {
     if (/\bold\b/.test(text)) out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'tool', tool_name: 'invoke_subagent', tool_info: { name: 'invoke_subagent', parameters: { Role: role, TypeName: 'self' }, output: 'Started.' } } });
     else out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'subagent', subagent_info: { subagents: [{ type_name: 'self', role }] } } });
   }
+  if (/\bquiet\b/.test(text)) {
+    const i = step++, p = { CommandLine: 'vibespace-status done' };
+    modelCall(i);
+    out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command', tool_info: { name: 'run_command', parameters: p } } });
+    if (!/\bskipped\b/.test(text)) out({ event: 'step_update', step_update: { conversation_id: cid, step_index: i, state: 'DONE', step_type: 'tool', tool_name: 'run_command', duration_seconds: 0.05, tool_info: { name: 'run_command', parameters: p, output: 'status set: done' } } });
+    out({ event: 'result', result: { conversation_id: cid, status: 'SUCCESS', response: '', duration_seconds: 0.1, num_turns: turns, usage: running() } });
+    await sleep(30); // stderr lags the result (its own pipe)
+    process.stderr.write('jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for; allow it under permissions.allow in ~/.gemini/antigravity-cli/settings.json\n');
+    return;
+  }
+  if (/\bbulk\b/.test(text)) { const chunk = 'x'.repeat(4000); for (let k = 0; k < 300; k++) out({ event: 'step_update', step_update: { conversation_id: cid, step_index: step++, state: 'DONE', step_type: 'agent_response', text_delta: chunk } }); }
+  if (/\bstray\b/.test(text)) setTimeout(() => out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'interrupted', duration_seconds: 0, num_turns: turns, usage: running() } }), 80);
   if (/\bslow\b/.test(text)) await sleep(Number(process.env.AGY_STUB_SLOW_MS || 1500));
   if (/\bfail\b/.test(text)) { process.stderr.write('AGY_ERROR: {"short_error":"model unavailable","status":"UNAVAILABLE","code":503,"retryable":true}\n'); out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'model unavailable', duration_seconds: 0.1, num_turns: turns, usage: usage(turns) } }); return; }
   const reply = `Antigravity (${model}${effort ? ', ' + effort : ''}, ${mode}): ${text}`;
@@ -166,5 +188,6 @@ process.stdin.on('data', (d) => {
   }
 });
 const EXIT_DELAY = Number(process.env.AGY_STUB_EXIT_DELAY_MS || 0);
+if (process.env.AGY_STUB_SIGTERM_RESULT === '1') process.on('SIGTERM', () => { out({ event: 'result', result: { conversation_id: cid, status: 'ERROR', response: '', error: 'interrupted', duration_seconds: 0, num_turns: turns, usage: running() } }); process.exit(143); });
 if (EXIT_DELAY) process.on('SIGTERM', () => { });
 process.stdin.on('end', () => { busy.then(() => setTimeout(() => process.exit(0), EXIT_DELAY)); });

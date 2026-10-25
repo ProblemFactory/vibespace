@@ -45,8 +45,9 @@ fs.writeFileSync(path.join(stateDir, 'token'), TOKEN, { mode: 0o600 });
 const fakeSsh = path.join(tmp, 'fake-ssh');
 fs.writeFileSync(fakeSsh, `#!/bin/sh\nwhile [ "$1" = "--" ]; do shift; done\nexec sh -c "$1"\n`, { mode: 0o755 });
 
-// stub "claude": stream-json-ish — emits lines, echoes input, exits on quit
-const STUB = 'let n=0;process.stdin.setEncoding("utf8");let b="";process.stdin.on("data",d=>{b+=d;let i;while((i=b.indexOf("\\n"))!==-1){const l=b.slice(0,i);b=b.slice(i+1);if(l.includes("quit"))process.exit(7);console.log(JSON.stringify({type:"echo",line:l}))}});const t=setInterval(()=>{console.log(JSON.stringify({type:"tick",n}));n++;if(n>=30)clearInterval(t)},60);';
+// stub "claude": stream-json-ish — emits lines, echoes input (and ENDS that turn with a `result`, as the real CLI ends
+// every frame — since 2.369.354 the wrapper holds a user frame while a turn runs), exits on quit
+const STUB = 'let n=0;process.stdin.setEncoding("utf8");let b="";process.stdin.on("data",d=>{b+=d;let i;while((i=b.indexOf("\\n"))!==-1){const l=b.slice(0,i);b=b.slice(i+1);if(l.includes("quit"))process.exit(7);console.log(JSON.stringify({type:"echo",line:l}));console.log(JSON.stringify({type:"result",subtype:"success"}))}});const t=setInterval(()=>{console.log(JSON.stringify({type:"tick",n}));n++;if(n>=30)clearInterval(t)},60);';
 
 // lane vault-e2e-password-fix-r2: THE ONE ROAD — the attach config carries NO token; the attach asks the hub
 // (GET /api/agent/vault/link-token, its session token as the bearer) at every (re)start. A stand-in hub answers it here,

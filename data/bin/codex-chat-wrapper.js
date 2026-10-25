@@ -1437,6 +1437,7 @@ function handleNotification(method, params) {
     const itemId = params?.itemId || params?.item_id || item.id;
     if (!itemId) return;
     itemCtx = { threadId: asString(params?.threadId || params?.thread_id) || meta.threadId || null, turnId: asString(params?.turnId || params?.turn_id) || currentTurnId || null };
+    if (item.type === 'userMessage') noteCidTurn(item.clientId || item.client_id, itemCtx.turnId);   // the turn a drained submission entered (the Stop sweep's witness)
     try {
       if (method === 'item/started') handleItemStarted(item, itemId);
       else handleItemCompleted(item, itemId);
@@ -1726,6 +1727,9 @@ let queueResyncOwed = false;
 // interrupt (round-2 review: 15s per RPC × N items before the user's Stop).
 const STOP_SWEEP_RPC_MS = 2500;
 const STOP_SWEEP_TOTAL_MS = 6000;
+// …and inside that cap, how long the sweep waits for the app-server to NAME the turn a drained row entered (its
+// `userMessage` item) before judging that row (lane codex-interrupted-putback). No name in time ⇒ `gone`, as before.
+const STOP_DRAIN_WITNESS_MS = 1000;
 
 // ── WHO WROTE THE BUBBLE (owner 2026-09-07) ──────────────────────────────
 // A user message gets its bubble from the record THIS wrapper writes as the
@@ -1884,6 +1888,10 @@ function queuedFullText(input) {
   for (const item of asArray(input)) if (item?.type === 'text' && item.text) parts.push(String(item.text));
   return parts.join('\n');
 }
+/** A queued input's attachments as the put-back's DESCRIPTORS (type / mime / name) — never bytes, a data URL or a path. */
+function attachmentDescriptors(input) {
+  return asArray(input).filter((e) => e && e.type !== 'text').map((e) => ({ type: String(e.type || ''), mime: /^data:([^;,]+)/.exec(typeof e.url === 'string' ? e.url : '')?.[1] || null, name: typeof e.name === 'string' ? e.name : null }));
+}
 
 /** STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer, owner 2026-10-24) — the `queue_dropped` record's payload.
  *  The BYTE-IDENTICAL inline twin of src/queue-putback.js droppedRecordFor (a wrapper cannot require src/):
@@ -1900,11 +1908,41 @@ function droppedRecordFor(rows, { dropId, turnId } = {}) {
     total += text.length;
     const attachments = (Array.isArray(r.attachments) ? r.attachments : []).filter((a) => a && typeof a.type === 'string' && a.type).slice(0, 32)
       .map((a) => ({ type: a.type.slice(0, 32), mime: typeof a.mime === 'string' && a.mime ? a.mime.slice(0, 100) : null, name: typeof a.name === 'string' && a.name ? a.name.slice(0, 200) : null }));
-    items.push({ id: String(r.id || ''), msgId: String(r.msgId || ''), ts: Number.isFinite(r.ts) ? r.ts : null, text, cut: text.length < full.length, attachments });
+    items.push({ id: String(r.id || ''), msgId: String(r.msgId || ''), ts: Number.isFinite(r.ts) ? r.ts : null, text, cut: text.length < full.length, attachments, ...(r.started === true ? { started: true } : {}) });
   }
   return { dropId: String(dropId || ''), by: 'stop', turnId: typeof turnId === 'string' && turnId ? turnId : null, items, omitted };
 }
 let dropSeq = 0;   // the put-back record's id: `${pid}-${n}` — the server's idempotency key
+
+/** The BYTE-IDENTICAL inline twin of src/queue-putback.js drainedWasStopped (lane codex-interrupted-putback): a row the
+ *  app-server drained under the Stop sweep was STOPPED iff the turn it entered is the turn Stop interrupts and has not
+ *  ended. test-queue-putback pins this text to that one. */
+function drainedWasStopped({ turnId, stopTurnId, ended } = {}) {
+  return typeof turnId === 'string' && turnId !== '' && turnId === stopTurnId && ended !== true;
+}
+
+/** WHICH TURN a queued submission entered (lane codex-interrupted-putback): the app-server's own witness — its
+ *  `userMessage` item carries the submission's clientId, its notification the turnId. The Stop sweep reads it for a
+ *  row drained under it; bounded FIFO (one turn's worth matters, like recordedUserCids). */
+const cidTurns = new Map();   // clientUserMessageId → turnId
+let cidTurnWaiters = [];
+function noteCidTurn(cid, turnId) {
+  const c = asString(cid), t = asString(turnId);
+  if (!c || !t) return;
+  cidTurns.delete(c); cidTurns.set(c, t);
+  if (cidTurns.size > 200) cidTurns.delete(cidTurns.keys().next().value);
+  for (const w of cidTurnWaiters.splice(0)) w();
+}
+/** Resolves when every cid has a witnessed turn, or at `until` (epoch ms), whichever comes first. Never rejects. */
+async function awaitCidTurns(cids, until) {
+  while (cids.some((c) => !cidTurns.has(c)) && Date.now() < until) {
+    await new Promise((res) => {
+      const w = () => { clearTimeout(timer); res(); };
+      const timer = setTimeout(() => { cidTurnWaiters = cidTurnWaiters.filter((x) => x !== w); res(); }, Math.max(0, until - Date.now()));
+      cidTurnWaiters.push(w);
+    });
+  }
+}
 
 function queueItemsFrom(data) {
   return asArray(data).map((q) => {
@@ -2194,7 +2232,11 @@ async function deleteQueuedItem(id, timeoutMs = 15000) {
  *   (c) the app-server's OWN verdict decides what we claim: {deleted:false}
  *       means it drained the item first, so that message is RUNNING — it is
  *       reported ok:false reason 'gone', never a `Removed` chip, and a peer
- *       entry on that path is NOT handed back to the delivery ladder;
+ *       entry on that path is NOT handed back to the delivery ladder. If its
+ *       turn is the one this Stop interrupts, the person's row comes back
+ *       into the composer too (`started: true`, lane codex-interrupted-putback);
+ *       a row whose turn already ENDED ran, and stays `gone` — judged by the
+ *       turn (the app-server's `userMessage` witness), never by a clock;
  *   (d) the sweep is BUDGETED (per-RPC + overall): Stop is a safety control,
  *       so a wedged app-server gets the interrupt anyway and whatever is still
  *       queued is REPORTED instead of the button hanging (round-2 review).
@@ -2251,6 +2293,8 @@ async function _clearQueueForStop() {
   queueSweepActive = true;
   let removed = 0;
   const putBack = [];   // lane stop-refills-composer: the person's rows this sweep REALLY deleted (deleted:true) — they come back into the composer
+  const drained = [];   // lane codex-interrupted-putback: rows the app-server drained under the sweep ({deleted:false}) — judged after the loop
+  let stopTurn = null;  // the turn this Stop interrupts, as the record names it
   try {
     for (let i = 0; i < data.length; i++) {
       const q = data[i];
@@ -2280,11 +2324,14 @@ async function _clearQueueForStop() {
       queueMeta.delete(cid);
       if (!ours) {
         // {deleted:false}: the app-server drained it between our list and this
-        // call, so it is RUNNING. `gone` renders "no longer queued — it already
-        // ran"; a `Removed` chip here would be a lie, and re-stashing a peer
-        // message that really ran would deliver it a second time.
-        log(`interrupt: ${id} had already left the queue (deleted:false) — it RAN, it was not stopped`);
-        emitTaskEvent('queue_op_result', { op: 'remove', id, ok: false, reason: 'gone', msg_id: known?.msgId || '' });
+        // call, so it is RUNNING (or already ran). `gone` renders "no longer
+        // queued — it already ran"; a `Removed` chip here would be a lie, and
+        // re-stashing a peer message that really ran would deliver it a second
+        // time. Its result waits for the loop's end: whether Stop is about to
+        // cut its turn off is that turn's state (below).
+        log(`interrupt: ${id} had already left the queue (deleted:false) — the app-server drained it`);
+        drained.push({ id, cid, msgId: known?.msgId || '', at: putBack.length,
+          row: (known ? known.kind !== 'peer' : !/^(peer|notif)-\d+-\d+$/.test(cid)) ? { id, msgId: known?.msgId || cid, ts: known?.ts || null, text: queuedFullText(q?.input), attachments: attachmentDescriptors(q?.input) } : null });
         continue;
       }
       removed++;
@@ -2294,8 +2341,7 @@ async function _clearQueueForStop() {
       // wrapper this one replaced — no queueMeta) is judged by this wrapper's own cid convention, the only witness: a
       // `peer-<pid>-<n>` / `notif-<pid>-<n>` submission is never put into the owner's composer.
       if (known ? known.kind !== 'peer' : !/^(peer|notif)-\d+-\d+$/.test(cid)) {
-        putBack.push({ id, msgId: known?.msgId || cid, ts: known?.ts || null, text: queuedFullText(q?.input),
-          attachments: asArray(q?.input).filter((e) => e && e.type !== 'text').map((e) => ({ type: String(e.type || ''), mime: /^data:([^;,]+)/.exec(typeof e.url === 'string' ? e.url : '')?.[1] || null, name: typeof e.name === 'string' ? e.name : null })) });
+        putBack.push({ id, msgId: known?.msgId || cid, ts: known?.ts || null, text: queuedFullText(q?.input), attachments: attachmentDescriptors(q?.input) });
       }
       // A queued PEER/job message was already reported delivered (peer_message_result
       // ok:'queued'), so dropping it silently would lose a promised message —
@@ -2303,12 +2349,34 @@ async function _clearQueueForStop() {
       // for next-turn injection (the explicit `remove` path's rule, verbatim).
       if (known?.kind === 'peer' && known.text) emitTaskEvent('peer_message_result', { ok: false, reason: 'dropped by Stop before it was delivered', text: known.text, fromName: known.from || null, kind: known.via || null });
     }
+    // THE DRAINED ROWS (lane codex-interrupted-putback — the owner, 2026-10-25 «可以 按照你推荐来»): a row the app-server
+    // drained opened its own turn. If that turn is the one this Stop interrupts, the person's message was cut off before
+    // it answered — it comes back into the composer like a deleted row (`started: true`; a duplicate send is cheaper than
+    // a lost message). If its turn already ENDED it ran, and stays `gone`. The TURN decides (the app-server's
+    // `userMessage` witness, waited for inside the budget, latch still held), never a clock; no witness ⇒ `gone`.
+    if (drained.length) {
+      const mine = drained.filter((d) => d.row).map((d) => d.cid);
+      if (mine.some((c) => !cidTurns.has(c))) await awaitCidTurns(mine, Math.min(deadline, Date.now() + STOP_DRAIN_WITNESS_MS));
+      stopTurn = meta.activeTurnId || null;
+      const stopped = drained.map((d) => !!d.row && drainedWasStopped({ turnId: cidTurns.get(d.cid) || null, stopTurnId: stopTurn, ended: completedTurns.has(cidTurns.get(d.cid)) }));
+      drained.forEach((d, k) => {
+        if (stopped[k]) {
+          log(`interrupt: ${d.id} had started turn ${stopTurn}, which this Stop interrupts — its words go back into the composer`);
+          emitTaskEvent('queue_op_result', { op: 'remove', id: d.id, ok: false, reason: 'gone', started: true, detail: 'it had started and was stopped — put back', msg_id: d.msgId });
+        } else {
+          log(`interrupt: ${d.id} ${cidTurns.has(d.cid) ? `ran in turn ${cidTurns.get(d.cid)}` : 'never named its turn'} — it is not put back`);
+          emitTaskEvent('queue_op_result', { op: 'remove', id: d.id, ok: false, reason: 'gone', msg_id: d.msgId });
+        }
+      });
+      for (let k = drained.length - 1; k >= 0; k--) if (stopped[k]) putBack.splice(drained[k].at, 0, { ...drained[k].row, started: true });   // queue order, oldest first
+    }
   } finally { queueSweepActive = false; }
   // STOP PUTS THE DROPPED QUEUE BACK (owner 2026-10-24, amends 2026-09-07 — lane stop-refills-composer): ONE record of
   // what the sweep deleted for the person, after every result and BEFORE the republish (the order law). Built locally
-  // (no RPC — the budget is untouched); emitTaskEvent is not publishQueue, so the latch never swallows it. A `gone` /
-  // `timeout` / `error` row RAN or is STILL queued — never put back.
-  if (putBack.length) emitTaskEvent('queue_dropped', droppedRecordFor(putBack, { dropId: `${process.pid}-${++dropSeq}`, turnId: meta.activeTurnId || null }));
+  // (no RPC — the budget is untouched); emitTaskEvent is not publishQueue, so the latch never swallows it. A `timeout` /
+  // `error` row is STILL queued and a `gone` row whose turn ended RAN — never put back; a drained row whose turn this Stop
+  // interrupts is (above, `started: true`).
+  if (putBack.length) emitTaskEvent('queue_dropped', droppedRecordFor(putBack, { dropId: `${process.pid}-${++dropSeq}`, turnId: stopTurn || meta.activeTurnId || null }));
   // The republish comes AFTER every result above — the truth, not an assumed
   // empty: an item whose delete failed is still there and must still be listed.
   // Budgeted like the rest of the sweep: `turn/interrupt` is the caller's very

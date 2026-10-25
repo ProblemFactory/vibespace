@@ -208,18 +208,20 @@ class MessageWindow {
    *  harness. The wrapper's `queue_dropped` record (any of its envelopes — the subclass hands the raw record, the ONE
    *  extractor validates it) marks each put-back row's bubble 'removed' (already so on codex/acp from the per-item
    *  results — idempotent; it is what marks acp/agy's undispatched active prompt, whose chip had cleared when the drain
-   *  shifted it) and, live only, emits ONE meta op the client turns into the toast. The draft itself is written by the
+   *  shifted it) — or 'stopped' for a row that had started and was stopped (`started`, codex; it reached the agent, so
+   *  'Removed' would be false — lane codex-interrupted-putback) — and, live only, emits ONE meta op the client turns
+   *  into the toast. The draft itself is written by the
    *  server's door at the feedLive gate, never here; a history convert emits nothing. */
   _processQueueDropped(record, emit) {
     const d = queueDroppedOf(record);
     if (!d) return;
-    for (const it of d.items) this._stampQueueChip(it.msgId, 'removed', emit);
+    for (const it of d.items) this._stampQueueChip(it.msgId, it.started ? 'stopped' : 'removed', emit);
     // ONE toast per Stop: the same record fed twice (the door's own idempotency key, bounded) says nothing new
     const seen = this._putbackToasted || (this._putbackToasted = []);
     if (seen.includes(d.dropId)) return;
     seen.push(d.dropId); if (seen.length > 32) seen.shift();
     const facts = putbackNotice(d);
-    if (emit && (facts.n || facts.images || facts.others || facts.cut || facts.omitted)) this._emit({ op: 'meta', subtype: 'queue-putback', dropId: d.dropId, ...facts }); // nothing to say ⇒ no toast
+    if (emit && (facts.n || facts.images || facts.others || facts.cut || facts.omitted)) this._emit({ op: 'meta', subtype: 'queue-putback', dropId: d.dropId, ...facts }); // nothing to say ⇒ no toast (started ⊆ n)
   }
 
   // Session-state reads the attach payload asks every normalizer for; a

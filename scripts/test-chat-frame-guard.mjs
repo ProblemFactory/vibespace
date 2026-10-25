@@ -43,7 +43,10 @@ const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Dat
   const { ClaudeCodeAdapter } = require(REPO + '/src/adapters/claude-code.js');
   const ad = new ClaudeCodeAdapter({ buffersDir: '/tmp' });
   const good = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } });
-  ok(ad.formatChatInput(good, 'm1').stdinPayload === good, 'valid frame passes through verbatim');
+  // 2.369.354 (lane claude-wrapper-queue): the frame names its message for the wrapper's queue row — spliced in FRONT of
+  // the client's first key, never re-serialized (the CLI strips the unknown key: measured on 2.1.308)
+  ok(ad.formatChatInput(good, 'm1').stdinPayload === '{"webui_msg_id":"m1",' + good.slice(1), 'valid frame passes through, only its msgId spliced in front (never re-encoded)');
+  ok(JSON.parse(ad.formatChatInput(good, 'm1', { origin: 'auto-resume' }).stdinPayload).webui_origin === 'auto-resume' && JSON.parse(ad.formatChatInput('typed', 'm4').stdinPayload).webui_msg_id === 'm4', 'a frame VibeSpace typed names its origin; a typed text frame names its msgId');
   const shred = '{"type":"user","message":{"role":"user","content":[{"type":"image","source":{"data":"' + 'A'.repeat(600 * 1024) + '{"type":"user","message":{}}';
   let threw = null; try { ad.formatChatInput(shred, 'm2'); } catch (e) { threw = e.message; }
   ok(/corrupted in transit/.test(threw || ''), 'shredded 600KB frame THROWS instead of poisoning', threw);
@@ -56,10 +59,11 @@ const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Dat
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-framefile-'));
   const SID = 'sess-9-1700000000000'; // wrapper files follow <BUFFERS_DIR>/<id>.{buf,json}
   const buf = path.join(dir, SID + '.buf'), meta = path.join(dir, SID + '.json');
-  // fake claude: echo stdin lines to a capture file
+  // fake claude: echo stdin lines to a capture file — and END each turn as the real CLI does (every frame ends in a
+  // `result`, measured on 2.1.308): since 2.369.354 the wrapper HOLDS a user frame that arrives while a turn runs
   const cap = path.join(dir, 'child-got.txt');
   const fake = path.join(dir, 'fake-claude.sh');
-  fs.writeFileSync(fake, `#!/bin/bash\nwhile IFS= read -r l; do printf '%s\\n' "$l" >> ${cap}; done\n`, { mode: 0o755 });
+  fs.writeFileSync(fake, `#!/bin/bash\nwhile IFS= read -r l; do printf '%s\\n' "$l" >> ${cap}; printf '{"type":"result","subtype":"success"}\\n'; done\n`, { mode: 0o755 });
   const w = spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), buf, meta, fake], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, VIBESPACE_SKIP_AGENT_HOOKS: '1' } });
   const capLines = () => (fs.existsSync(cap) ? fs.readFileSync(cap, 'utf8').trim().split('\n').filter(Boolean) : []);
   await until(() => fs.existsSync(meta));   // the wrapper's boot sidecar (written before it reads stdin)

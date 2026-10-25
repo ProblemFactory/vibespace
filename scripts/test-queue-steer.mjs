@@ -79,7 +79,7 @@ console.log('— ① the capability row (backend-caps ⇄ client META)');
   ok('deriveInputModes IS the law (the same function the client mirror uses), and it drops a verb outside the closed set', JSON.stringify(deriveInputModes({ queue: true, queueVerbs: ['steer', 'teleport'] })) === shape(true, ['steer']));
   ok('codex serves ALL SEVEN verbs (add/list/delete/update/reorder/start + turn/steer, every shape dumped from the 0.153.4 schema)', JSON.stringify(capsOf('codex').inputModes) === shape(true, ['remove', 'steer', 'steer-all', 'reorder', 'edit', 'run-now', 'run-all']), capsOf('codex').inputModes);
   ok('opencode (ACP v1) removes/reorders/edits its own local queue but cannot steer, and cannot start one early (that queue only exists while a prompt runs)', JSON.stringify(capsOf('opencode').inputModes) === shape(true, ['remove', 'reorder', 'edit']), capsOf('opencode').inputModes);
-  ok("claude queues (the CLI's own stdin queue) but publishes NO queue state ⇒ an HONEST EMPTY verb table", JSON.stringify(capsOf('claude').inputModes) === shape(true, []));
+  ok("claude (2.369.354): its WRAPPER holds a mid-turn frame — remove / reorder / edit on its own array, NO steer (the CLI takes no input into a running turn), NO run-now / run-all (a held frame goes the moment the turn ends)", JSON.stringify(capsOf('claude').inputModes) === shape(true, ['remove', 'reorder', 'edit']), capsOf('claude').inputModes);
   ok('shell (terminal-only) has no input queue at all', JSON.stringify(capsOf('shell').inputModes) === shape(false, []));
   ok('an unknown backend gets the all-false NO_CAPS row (never codex\'s by accident)', JSON.stringify(capsOf('gemini').inputModes) === shape(false, []));
   // the client gates its chrome on META; a drifted copy would offer a control
@@ -92,7 +92,7 @@ console.log('— ① the capability row (backend-caps ⇄ client META)');
   ok('every CHAT harness answers queueState() on its normalizer (one question, one answer everywhere)',
     chatHarnessIds().every((id) => typeof new HARNESSES[id].Normalizer('q').queueState === 'function'),
     chatHarnessIds().filter((id) => typeof new HARNESSES[id].Normalizer('q').queueState !== 'function'));
-  ok('claude\'s queueState() is empty by construction (the CLI publishes nothing)', new HARNESSES.claude.Normalizer('q').queueState().length === 0);
+  ok('claude\'s queueState() is empty until its wrapper publishes (a wrapper spawned before 2.369.354 never does)', new HARNESSES.claude.Normalizer('q').queueState().length === 0 && new HARNESSES.claude.Normalizer('q').queuePublished() === false);
 }
 
 console.log('— ② the adapter verb (formatQueueOp)');
@@ -147,8 +147,14 @@ console.log('— ② the adapter verb (formatQueueOp)');
     ok('opencode STEER is refused WITH THE REASON and what happens instead', /no steer/i.test(msg) && /runs after this turn|after this turn|remove it/i.test(msg), msg);
   }
   {
-    const msg = threw(() => reg.get('claude').formatQueueOp({ op: 'remove', id: 'q1' })) || '';
-    ok('claude refuses every queue op, naming WHY (its CLI owns the queue and reports nothing)', /owns its own input queue/.test(msg) && /reports no queue/.test(msg), msg);
+    // 2.369.354: the queue is the WRAPPER's — the acp frame vocabulary verbatim; steer / run-now refused HERE, with the reason
+    const cl = reg.get('claude');
+    ok('claude remove / reorder (afterId null = the front) / edit → the SAME frames as the ACP wrapper reads', JSON.stringify(JSON.parse(cl.formatQueueOp({ op: 'remove', id: 'q1' }))) === JSON.stringify({ type: 'queue-op', op: 'remove', id: 'q1' })
+      && JSON.parse(cl.formatQueueOp({ op: 'reorder', id: 'q1', afterId: null })).afterId === null && JSON.parse(cl.formatQueueOp({ op: 'edit', id: 'q1', text: 'x' })).text === 'x');
+    const msg = threw(() => cl.formatQueueOp({ op: 'steer', id: 'q1' })) || '';
+    ok('claude STEER is refused WITH THE REASON and what happens instead (the CLI takes no input into a running turn)', /no input into a running turn/.test(msg) && /runs when this turn ends/.test(msg), msg);
+    ok('claude run-now is refused with its reason (a held frame goes the moment the turn ends)', /as soon as the current turn ends/.test(threw(() => cl.formatQueueOp({ op: 'run-now', id: 'q1' })) || ''));
+    ok('claude formats the resync ASK (its wrapper serves queue-resync)', cl.formatQueueResync() === JSON.stringify({ type: 'queue-resync' }));
   }
   ok('shell inherits the base refusal (a terminal has no input queue)', /no input-queue operations/.test(threw(() => reg.get('shell').formatQueueOp({ op: 'remove', id: 'x' })) || ''));
 }
@@ -378,7 +384,7 @@ console.log('— ④ the normalizer: session state + chips + multi-queue semanti
   ok("ACP: a removed entry's bubble wears 'removed'", am.messages.find((m) => m.role === 'user')?.queueState === 'removed');
   ok('ACP: the user bubble carries its webui msgId too (one join, both harnesses)', am.messages.find((m) => m.role === 'user')?.webuiMsgId === 'a1');
   ok("the meta op CARRIES the wrapper's advert, so a window created before the sidecar existed turns its controls on", aops.some((o) => o.op === 'meta' && o.subtype === 'queue' && o.supported === true) && ops.some((o) => o.op === 'meta' && o.subtype === 'queue' && o.supported === true));
-  ok('every CHAT normalizer answers queuePublished() (the same question everywhere, claude says never)', [mm, am].every((n) => typeof n.queuePublished === 'function') && require(path.join(REPO, 'src/message-manager.js')).MessageManager.prototype.queuePublished() === false);
+  ok('every CHAT normalizer answers queuePublished() (the same question everywhere; a fresh claude normalizer says not yet — its wrapper has not spoken)', [mm, am].every((n) => typeof n.queuePublished === 'function') && require(path.join(REPO, 'src/message-manager.js')).MessageManager.prototype.queuePublished() === false);
 }
 
 // ⑨ THE Alt+Enter STEER CHORD (2026-09-07 owner ask: "顺便加入一个queue的快捷键,
@@ -395,7 +401,7 @@ console.log('— ⑨a the PURE send-mode predicate (caps → {showHint, allowSte
   const oc = m('opencode');
   ok('opencode (queue+queueOps, NO steer): the hint mentions Enter only, and Alt+Enter is not a chord', oc.showHint === true && oc.queueSegment === true && oc.steerSegment === false && oc.allowSteerChord === false, oc);
   const cl = m('claude');
-  ok('claude (queues but publishes NO queue): NO hint and NO chord — the owner\'s rule, and there is nothing on screen a "it is queued" line could point at', cl.showHint === false && cl.queueSegment === false && cl.allowSteerChord === false, cl);
+  ok('claude (2.369.354 — the wrapper holds a mid-turn frame, NO steer): the hint says Enter queues, and Alt+Enter is not a chord (the opencode answer)', cl.showHint === true && cl.queueSegment === true && cl.steerSegment === false && cl.allowSteerChord === false, cl);
   const sh = m('shell');
   ok('shell (no input queue at all): nothing', sh.showHint === false && sh.allowSteerChord === false, sh);
   ok('an unknown backend / missing caps object is the all-false row (never codex\'s by accident)', [composerSendModes(undefined), composerSendModes(null), composerSendModes({}), m('gemini')].every((r) => r.showHint === false && r.allowSteerChord === false));
@@ -580,7 +586,8 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
   const hint = (id) => ChatInput.sendHintHtml(modesOf(srvCaps(id).inputModes));
   ok('codex: BOTH segments, separated', /Enter queues/.test(hint('codex')) && /Alt\+Enter injects now/.test(hint('codex')) && /chat-send-hint-sep/.test(hint('codex')), hint('codex'));
   ok('opencode: the queue segment only — the line never teaches a key that does nothing here', /Enter queues/.test(hint('opencode')) && !/Alt\+Enter/.test(hint('opencode')) && !/chat-send-hint-sep/.test(hint('opencode')), hint('opencode'));
-  ok('claude / shell: the hint is EMPTY markup (and _updateSendModes never unhides it)', hint('claude') === '' && hint('shell') === '');
+  ok('claude: the queue segment only (the opencode line) — never a key that does nothing here', /Enter queues/.test(hint('claude')) && !/Alt\+Enter/.test(hint('claude')) && !/chat-send-hint-sep/.test(hint('claude')), hint('claude'));
+  ok('shell: the hint is EMPTY markup (and _updateSendModes never unhides it)', hint('shell') === '');
   ok('the hint carries no raw glyph icon and every phrase is a t() key (zh+ja pinned below)', !/[⚡✕]/.test(hint('codex')));
 
   // …and the capability plumbing, on the REAL prototype (chat-view's own
@@ -1176,6 +1183,13 @@ console.log('— wiring + docs pins');
   const aw = read('data/bin/acp-wrapper.js');
   ok('BOTH wrappers serve the new stdin verb in the same batch (the frame-file lesson)', /msg\.type === 'queue-op'/.test(cw) && /case 'queue-op':/.test(aw));
   ok('both adverts caps.inputQueue in the sidecar THEY write', /inputQueue: true/.test(cw) && /inputQueue: true/.test(aw));
+  {
+    // 2.369.354: the claude chat-wrapper serves the same verbs and adverts them (the server never asks a process that
+    // does not — a pre-.354 claude wrapper would forward a queue-op line to the CLI verbatim)
+    const clw = read('data/bin/chat-wrapper.js');
+    ok('the claude chat-wrapper serves queue-op AND queue-resync, never forwarding either to the CLI', /if \(parsed\.type === 'queue-op'\) \{ handleQueueOp\(parsed\); continue; \}/.test(clw) && /if \(parsed\.type === 'queue-resync'\) \{ publishQueue\(\); continue; \}/.test(clw));
+    ok('…and adverts inputQueue + its verb list + queueResync in the sidecar it writes', /caps: \{ frameFile: true, inputQueue: true, queueVerbs: CLAUDE_QUEUE_VERBS, queueResync: true \}/.test(clw) && /const CLAUDE_QUEUE_VERBS = \['remove', 'reorder', 'edit'\];/.test(clw));
+  }
   ok('the ACP unknown-verb message lists queue-op (the wrapper tells the truth about what it serves)', /chat-input\/interrupt\/queue-op\//.test(aw));
   // DISTINCT phrases per file (a loose grep matched 'queue-operation' in an
   // unrelated essay and the docs pin passed while the docs were empty)
@@ -1745,11 +1759,11 @@ console.log('— ⑨e the chord in a REAL browser (trusted keystrokes) + the 375
       ok('CTRL+ENTER still means send/queue — the chord did not redefine it', st.sent === 3 && st.chord === 1 && st.steers.length === 1, st);
       await evaljs(`window.__ci._expanded = false; true`);
 
-      // ── DESKTOP, a claude session mid-turn: no hint, and Alt+Enter is a PLAIN send ──
+      // ── DESKTOP, a claude session mid-turn (2.369.354): «Enter queues» only, and Alt+Enter is a PLAIN send ──
       ok('a real ChatInput mounts with claude caps', (await mount(claudeCaps)) === true);
       await evaljs(`window.__ci.showTyping('thinking...'); true`);
       st = await state();
-      ok('CLAUDE: no hint at all (the owner\'s rule: 不支持queue的就不显示)', st.hintDisplay === 'none' && st.btnDisplay === 'none', st);
+      ok('CLAUDE: the hint says «Enter queues» and nothing about Alt+Enter; no steer button (claude has no steer)', st.hintDisplay !== 'none' && /Enter queues/.test(st.hintText) && !/Alt\+Enter/.test(st.hintText) && st.btnDisplay === 'none', st);
       await type('alt on claude');
       await key(ALT);
       st = await state();
@@ -1857,7 +1871,7 @@ console.log('— ⑨e the chord in a REAL browser (trusted keystrokes) + the 375
       ok('opencode: only the send-modes row is lazy here, and it still gets exactly one header', sp.headers === 1 && sp.rows[0].includes('Sending during a turn') && !sp.rows[0].includes('Response style'), sp);
 
       sp = await props('claude', {});
-      ok('claude: one header for the response style — and NO "Sending during a turn" row (the owner\'s rule, 不支持queue的就不显示)', sp.headers === 1 && sp.rows[0].includes('Response style') && !sp.rows[0].includes('Sending during a turn'), sp);
+      ok('claude (2.369.354 — its wrapper holds a mid-turn message): one header for the response style AND the "Sending during a turn" row', sp.headers === 1 && sp.rows[0].includes('Response style') && sp.rows[0].includes('Sending during a turn'), sp);
 
       sp = await props('shell', {});
       ok('shell: no row wants it ⇒ the section is never created at all (the lazy header stays lazy)', sp.headers === 0 && !sp.allSections.includes('Config overrides'), sp);
@@ -3816,15 +3830,15 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         await evaljs(`(() => { window.__ci.setQueue(window.__items, ${CODEX_VERBS}); document.querySelector('textarea').value = ''; window.__ci._pendingSend = null; document.getElementById('global-toasts')?.replaceChildren(); })()`);
       }
       // THE HEADER CONTROL is per harness, from the verb table — codex has
-      // run-all, an ACP harness does not, and claude has no strip at all.
+      // run-all, an ACP harness does not, and claude (2.369.354) gets the ACP answer.
       {
         const codexHead = await evaljs(`(() => { window.__ci.setQueue(window.__items, ${CODEX_VERBS}); return { runAll: !!document.querySelector('[data-queue-op="run-all"]'), steerAll: !!document.querySelector('[data-queue-op="steer-all"]'), runNow: document.querySelectorAll('[data-queue-op="run-now"]').length, grips: document.querySelectorAll('.chat-queue-grip').length }; })()`);
         ok(`codex: the header carries "Run all now" AND "Steer all", every row a run-now and a grip (${JSON.stringify(codexHead)})`, codexHead.runAll && codexHead.steerAll && codexHead.runNow === 3 && codexHead.grips === 3);
         const acpHead = await evaljs(`(() => { window.__ci.setQueue(window.__items, ${OPENCODE_VERBS}); return { runAll: !!document.querySelector('[data-queue-op="run-all"]'), steerAll: !!document.querySelector('[data-queue-op="steer-all"]'), runNow: document.querySelectorAll('[data-queue-op="run-now"]').length, grips: document.querySelectorAll('.chat-queue-grip').length, edits: document.querySelectorAll('[data-queue-op="edit"]').length }; })()`);
         ok(`an ACP harness gets NO run-all / steer-all / run-now (${JSON.stringify(acpHead)})`, !acpHead.runAll && !acpHead.steerAll && acpHead.runNow === 0);
         ok('…but it does get the reorder grips and the edit controls it really serves (peer excluded)', acpHead.grips === 3 && acpHead.edits === 2, JSON.stringify(acpHead));
-        const claudeHead = await evaljs(`(() => { window.__ci.setQueue(window.__items, ${CLAUDE_VERBS}); const s = document.querySelector('.chat-queue-strip'); return { hidden: s.classList.contains('hidden'), html: s.innerHTML.length }; })()`);
-        ok(`claude publishes no queue ⇒ NO STRIP AT ALL, not an empty one (${JSON.stringify(claudeHead)})`, claudeHead.hidden && claudeHead.html === 0);
+        const claudeHead = await evaljs(`(() => { window.__ci.setQueue(window.__items, ${CLAUDE_VERBS}); const s = document.querySelector('.chat-queue-strip'); return { hidden: s.classList.contains('hidden'), runAll: !!document.querySelector('[data-queue-op="run-all"]'), steerAll: !!document.querySelector('[data-queue-op="steer-all"]'), runNow: document.querySelectorAll('[data-queue-op="run-now"]').length, steers: document.querySelectorAll('[data-queue-op="steer"]').length, grips: document.querySelectorAll('.chat-queue-grip').length, edits: document.querySelectorAll('[data-queue-op="edit"]').length, removes: document.querySelectorAll('[data-queue-op="remove"]').length }; })()`);
+        ok(`claude (2.369.354): the strip shows, with the ACP controls — grips, ✎ edit (peer excluded), ✕ remove — and NO run-all / steer-all / run-now / steer (${JSON.stringify(claudeHead)})`, !claudeHead.hidden && !claudeHead.runAll && !claudeHead.steerAll && claudeHead.runNow === 0 && claudeHead.steers === 0 && claudeHead.grips === 3 && claudeHead.edits === 2 && claudeHead.removes === 3);
       }
       // STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer, owner 2026-10-24): the server's draft op carries
       // `prepended`; the REAL ChatInput over the REAL StateSync lands only its prefix, in front of the LIVE box
@@ -5967,6 +5981,126 @@ process.stdin.on('data', (d) => {
   process.removeListener('exit', cleanup);
 }
 
+
+// ── ⑯ CLAUDE: THE WRAPPER OWNS THE MID-TURN QUEUE (lane claude-wrapper-queue, 2.369.354) ──
+// The REAL data/bin/chat-wrapper.js over the stand-in CLI (scripts/fixtures/claude-stand-in-cli.cjs — the turn shape
+// measured on 2.1.308: running → result → idle per frame; it QUEUES a mid-turn frame itself and runs it after an
+// interrupt). Every declared verb driven against a held row, the refusals, the resync, the drain order, a frame
+// VibeSpace typed, a frame with an image held WHOLE, and Stop's order law — then nothing runs after it.
+console.log('— ⑯ claude: the wrapper holds a mid-turn frame (remove / reorder / edit / steer refused / resync / drain / Stop)');
+{
+  const { spawn } = require('child_process');
+  const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
+  const ad = new ClaudeCodeAdapter({ buffersDir: os.tmpdir() });
+  const sleep16 = (ms) => new Promise((r) => setTimeout(r, ms));
+  const until16 = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await sleep16(20); } return fn(); };
+  const dir16 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-qs-claude-'));
+  const cap = path.join(dir16, 'cli-got.jsonl');
+  const w = spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), path.join(dir16, 's.buf'), path.join(dir16, 's.json'), process.execPath, path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs')],
+    { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STUB_CAPTURE: cap, STAND_IN_LONG_MS: '4000', VIBESPACE_SKIP_AGENT_HOOKS: '1' } });
+  const recs = []; let lb = '';
+  w.stdout.setEncoding('utf8');
+  w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { recs.push(JSON.parse(l)); } catch { } } });
+  const got = () => (fs.existsSync(cap) ? fs.readFileSync(cap, 'utf8').trim().split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } }) : []);
+  const gotTexts = () => got().filter((f) => f.type === 'user').map((f) => (Array.isArray(f.message.content) ? f.message.content.filter((b) => b.type === 'text').map((b) => b.text).join(' ') : f.message.content));
+  const lastQueue = () => [...recs].reverse().find((r) => r.type === 'queue_changed') || null;
+  const results = (op) => recs.filter((r) => r.type === 'queue_op_result' && (!op || r.op === op));
+  const send = (line) => w.stdin.write(line + '\n');
+  const running = () => recs.filter((r) => r.type === 'system' && r.state === 'running').length;
+  try {
+    await until16(() => fs.existsSync(path.join(dir16, 's.json')) && !!lastQueue());
+    const side = JSON.parse(fs.readFileSync(path.join(dir16, 's.json'), 'utf8'));
+    ok('⑯ the sidecar adverts the queue (inputQueue, the three verbs, queueResync) and the BASELINE publication is an empty queue with its verbs', side.caps?.inputQueue === true && JSON.stringify(side.caps.queueVerbs) === JSON.stringify(['remove', 'reorder', 'edit']) && side.caps.queueResync === true && lastQueue().items.length === 0 && JSON.stringify(lastQueue().verbs) === JSON.stringify(['remove', 'reorder', 'edit']), side.caps);
+    send(ad.formatChatInput('LONG-1 the running turn', 'm-1').stdinPayload);
+    await until16(() => running() >= 1);
+    // an image paste (the client's own frame shape) is held WHOLE; a typed text; a frame VibeSpace typed (auto-resume)
+    const IMG = 'iVBORw0KGgo' + 'A'.repeat(400);
+    send(ad.formatChatInput(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: IMG } }, { type: 'text', text: 'what is in this picture' }] } }), 'm-img').stdinPayload);
+    send(ad.formatChatInput('typed second', 'm-2').stdinPayload);
+    send(ad.formatChatInput('continue', 'm-auto', { origin: 'auto-resume' }).stdinPayload);
+    await until16(() => (lastQueue()?.items || []).length === 3);
+    const q0 = lastQueue();
+    ok('⑯ three frames sent mid-turn are HELD — the CLI got only the running one', q0.items.length === 3 && gotTexts().length === 1, { items: q0.items, cli: gotTexts() });
+    ok('⑯ each row names its bubble (the frame\'s webui_msg_id), its preview ([image] for the picture), and only a PERSON\'s row offers the edit text', JSON.stringify(q0.items.map((i) => [i.msgId, i.kind, typeof i.text])) === JSON.stringify([['m-img', 'user', 'string'], ['m-2', 'user', 'string'], ['m-auto', 'system', 'undefined']]) && /^\[image\] what is in this picture$/.test(q0.items[0].preview), q0.items);
+    ok('⑯ queued_input names each held bubble (the chip\'s join)', JSON.stringify(recs.filter((r) => r.type === 'queued_input').map((r) => r.msg_id)) === JSON.stringify(['m-img', 'm-2', 'm-auto']));
+    const [rImg, r2, rAuto] = q0.items.map((i) => i.id);
+    // reorder: the typed one to the FRONT (afterId null), then the picture after the auto row
+    send(ad.formatQueueOp({ op: 'reorder', id: r2, afterId: null }));
+    await until16(() => results('reorder').length === 1);
+    send(ad.formatQueueOp({ op: 'reorder', id: rImg, afterId: rAuto }));
+    await until16(() => results('reorder').length === 2);
+    ok('⑯ reorder: afterId null = the front, an anchor = right after it', JSON.stringify(lastQueue().items.map((i) => i.msgId)) === JSON.stringify(['m-2', 'm-auto', 'm-img']) && results('reorder').every((r) => r.ok), lastQueue().items.map((i) => i.msgId));
+    send(ad.formatQueueOp({ op: 'reorder', id: r2, afterId: 'q-gone' }));
+    await until16(() => results('reorder').length === 3);
+    ok('⑯ reorder onto an anchor that left the queue puts the row BACK and says anchor-gone', results('reorder')[2].ok === false && results('reorder')[2].reason === 'anchor-gone' && JSON.stringify(lastQueue().items.map((i) => i.msgId)) === JSON.stringify(['m-2', 'm-auto', 'm-img']));
+    // edit: the picture's words change, the picture stays; the auto row is not the person's to rewrite
+    send(ad.formatQueueOp({ op: 'edit', id: rImg, text: 'describe it in one line' }));
+    send(ad.formatQueueOp({ op: 'edit', id: rAuto, text: 'something else' }));
+    await until16(() => results('edit').length === 2);
+    ok('⑯ edit rewrites the first text block only (the image stays — BY EXCLUSION, the acp/codex rule)', results('edit')[0].ok === true && lastQueue().items.find((i) => i.id === rImg).text === 'describe it in one line' && /^\[image\] describe it in one line$/.test(lastQueue().items.find((i) => i.id === rImg).preview));
+    ok('⑯ a frame VibeSpace typed (webui_origin) is not-editable', results('edit')[1].ok === false && results('edit')[1].reason === 'not-editable');
+    // the verbs this harness does NOT serve are reported, never silent (the adapter refuses them first; this is the
+    // arm for a frame that reaches the wrapper anyway)
+    send(JSON.stringify({ type: 'queue-op', op: 'steer', id: r2 }));
+    send(JSON.stringify({ type: 'queue-op', op: 'run-now', id: r2 }));
+    send(JSON.stringify({ type: 'queue-op', op: 'remove', id: 'q-nobody' }));
+    await until16(() => results().length >= 8);
+    ok('⑯ steer ⇒ not-steerable, run-now ⇒ not-startable, an unknown id ⇒ gone — each a result, nothing changed', results('steer')[0]?.reason === 'not-steerable' && results('run-now')[0]?.reason === 'not-startable' && results('remove').find((r) => r.id === 'q-nobody')?.reason === 'gone' && lastQueue().items.length === 3);
+    // resync: the same queue, stated again (an empty one too, below)
+    const nQ = recs.filter((r) => r.type === 'queue_changed').length;
+    send(ad.formatQueueResync());
+    await until16(() => recs.filter((r) => r.type === 'queue_changed').length === nQ + 1);
+    ok('⑯ queue-resync re-states the WHOLE queue, out loud (a rebuilt server\'s `queue: []` is a guess)', JSON.stringify(lastQueue().items.map((i) => i.msgId)) === JSON.stringify(['m-2', 'm-auto', 'm-img']));
+    ok('⑯ none of the queue verbs ever reached the CLI', !got().some((f) => f.type === 'queue-op' || f.type === 'queue-resync'));
+    // remove the auto row; then the DRAIN: one frame per turn end, in the strip's order
+    send(ad.formatQueueOp({ op: 'remove', id: rAuto }));
+    await until16(() => lastQueue().items.length === 2);
+    await until16(() => gotTexts().length === 3, 8000);
+    const order = gotTexts();
+    ok('⑯ the drain: when the running turn ends, ONE held frame goes; the next waits for the end of the turn it started — in the strip\'s order', JSON.stringify(order) === JSON.stringify(['LONG-1 the running turn', 'typed second', 'describe it in one line']), order);
+    const imgFrame = got().find((f) => f.type === 'user' && Array.isArray(f.message.content) && f.message.content.some((b) => b.type === 'image'));
+    ok('⑯ the picture reached the CLI WHOLE (its base64 untouched, the edited words beside it)', !!imgFrame && imgFrame.message.content.find((b) => b.type === 'image').source.data === IMG);
+    await until16(() => lastQueue().items.length === 0);
+    // Stop's order law: a new running turn + two held (one the person's, one VibeSpace's)
+    send(ad.formatChatInput('LONG-2 a second long turn', 'm-3').stdinPayload);
+    await until16(() => gotTexts().length === 4);
+    send(ad.formatChatInput('held, then Stop', 'm-4').stdinPayload);
+    send(ad.formatChatInput('/compact', 'm-5', { origin: 'dispatch' }).stdinPayload);
+    await until16(() => lastQueue().items.length === 2);
+    const atStop = recs.length;
+    send(ad.formatInterrupt());
+    await until16(() => got().some((f) => f.type === 'control_request'));
+    await sleep16(300);
+    const after = recs.slice(atStop).filter((r) => r.type !== '_stdin_ack').map((r) => r.type + (r.reason ? ':' + r.reason : ''));
+    const iRes = after.indexOf('queue_op_result:stopped'), iDrop = after.indexOf('queue_dropped'), iQ = after.indexOf('queue_changed'), iCtl = after.indexOf('control_response');
+    ok('⑯ Stop: a stopped result PER held row → ONE queue_dropped → the emptied queue_changed — all before the CLI answers the interrupt', after.filter((t) => t === 'queue_op_result:stopped').length === 2 && iRes === 0 && iDrop > iRes && iQ > iDrop && iCtl > iQ, after);
+    const drop = recs.find((r) => r.type === 'queue_dropped');
+    ok('⑯ …the put-back carries the PERSON\'s row only (a dispatch\'s /compact is dropped, never put into the composer)', drop && drop.items.length === 1 && drop.items[0].msgId === 'm-4' && drop.items[0].text === 'held, then Stop', drop);
+    ok('⑯ …and NOTHING ran after Stop: neither held frame ever reached the CLI', gotTexts().length === 4 && !gotTexts().includes('held, then Stop') && !gotTexts().includes('/compact'), gotTexts());
+    // A BACKGROUND HELPER (measured on 2.1.308): the turn that launched it ends in `result`, but the session stays
+    // 'running' — no idle — until the helper ends, and the CLI takes a new prompt at once. The gate ends the turn at its
+    // result, so a message typed while the helper works goes to the CLI at once (never held behind background work)
+    await until16(() => [...recs].reverse().find((r) => r.type === 'system' && r.subtype === 'session_state_changed')?.state === 'idle', 6000);
+    const bgMark = recs.length;
+    send(ad.formatChatInput('BGAGENT-1 launch a background helper', 'm-bg').stdinPayload);
+    await until16(() => recs.slice(bgMark).some((r) => r.type === 'result'));
+    await sleep16(200);
+    const stillRunning = !recs.slice(bgMark).some((r) => r.type === 'system' && r.state === 'idle');
+    const nQueued = recs.filter((r) => r.type === 'queued_input').length;
+    const sentAt = Date.now();
+    send(ad.formatChatInput('typed while the helper works', 'm-during').stdinPayload);
+    const reached = await until16(() => gotTexts().includes('typed while the helper works'), 1500);
+    ok('⑯ a background helper keeps the session running past the turn\'s result (no idle) — and a message typed then reaches the CLI at once, never held behind the helper', stillRunning && reached && Date.now() - sentAt < 1500 && recs.filter((r) => r.type === 'queued_input').length === nQueued, { stillRunning, reached, ms: Date.now() - sentAt });
+    // …and the turn the CLI starts by itself when the helper ends (its notification — an init, no state change) closes
+    // the gate again: a message typed during it IS held, and goes when that turn ends
+    await until16(() => gotTexts().length >= 6 && recs.slice(bgMark).filter((r) => r.type === 'system' && r.subtype === 'init').length >= 3, 8000);
+    await until16(() => recs.slice(bgMark).some((r) => r.type === 'system' && r.state === 'idle'), 8000);
+    ok('⑯ …and once the helper ends, its notification turn runs and only THEN the session says idle (the stand-in\'s measured shape)', recs.slice(bgMark).some((r) => r.type === 'system' && r.state === 'idle'));
+  } finally {
+    try { w.kill('SIGKILL'); } catch { }
+    fs.rmSync(dir16, { recursive: true, force: true });
+  }
+}
 
 // ── ⑮ THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ──
 // Measured HERE, while every patched copy this run made still exists (the exit

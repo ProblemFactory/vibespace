@@ -230,7 +230,9 @@ export class ChatStatusBar {
     }
     if (status.total_cost_usd) this._statusCost = status.total_cost_usd;
     if (status.permissionMode) this._statusPermMode = status.permissionMode;
-    if (status.permissionModes) this._permissionModes = status.permissionModes;
+    // a told list REPLACES the seed only when it names a mode (lane agy-harness-fixes-2): `[]` is truthy, and a status whose
+    // journal head the ring cut said `[]` — the chip then opened an empty menu; the harness's declared modes stay
+    if (status.permissionModes?.length) this._permissionModes = status.permissionModes;
     // TWO effort facts (2.369.62): the chip shows what applies GOING FORWARD
     // (`effortNext` — which is also what the optimistic click below sets), the
     // tooltip names the running turn's own value when it differs. A store that
@@ -2044,7 +2046,7 @@ export class ChatStatusBar {
     const el = e.target.closest('.chat-status-perm');
     if (!el) return;
     e.stopPropagation();
-    const modes = this._permissionModes || ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'];
+    const modes = this._permissionModes?.length ? this._permissionModes : ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'];
     const dropdown = showDropdown(el);
     if (!dropdown) return;
     for (const mode of modes) {

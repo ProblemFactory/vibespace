@@ -154,7 +154,7 @@ try {
           await titleClose(A.p, r3.id);
           const dlg = await until(async () => { const v = await A.p.evalJs(WIN(r3.id)); return v && v.windows.some((w) => w.kind === 'dialog' || /Save\?/.test(w.title || '')) ? v : null; }, 4000, 50);
           const tA = await toasts(A.p);
-          check('§10 (3): the first ✕ ⇒ the APP answers with its own "Save?" dialog (drawn in the pane) and the VibeSpace window stays on both pages, with the toast naming the second ✕', !!dlg && await has(A.p, r3.id) && await has(B.p, r3.id) && tA.some((x) => /press ✕ again within 5 s to stop it/.test(x)), { dlg: dlg && dlg.windows, tA });
+          check('§10 (3): the first ✕ ⇒ the APP answers with its own "Save?" dialog (drawn in the pane) and the VibeSpace window stays on both pages, with the toast naming the second ✕', !!dlg && await has(A.p, r3.id) && await has(B.p, r3.id) && tA.some((x) => /no agent is using it, so pressing ✕ again within 5 s stops the app/.test(x)), { dlg: dlg && dlg.windows, tA });
           // the dialog closes by itself (after 1 s): a lost DIALOG is not the app exiting
           const dlgGone = await until(async () => { const v = await A.p.evalJs(WIN(r3.id)); return v && !v.windows.some((w) => /Save\?/.test(w.title || '') || w.kind === 'dialog') ? v : null; }, 4000, 50);
           await sleep(300);
@@ -211,7 +211,7 @@ try {
             const mid = await A.p.evalJs(`fetch('/api/desktop/apps/${r6.id}').then((r) => r.json())`);
             const tA = await toasts(A.p);
             const stays = vd && vd.act === 'ask-app' && mid.state === 'ready' && D.pidAlive(r6.pids.app) && await has(A.p, r6.id) && await has(B.p, r6.id);
-            check(`§10 (3b): the first ✕ ASKS (verdict ${JSON.stringify(vd)}) and a child that survives xterm's hangup keeps it running — record ${mid.state} 2 s later, the window on both pages, and the toast names the second ✕ (never silent)`, stays && tA.some((x) => /Asked .* to close — press ✕ again within 5 s to stop it/.test(x)), { vd, mid: mid.state, tA });
+            check(`§10 (3b): the first ✕ ASKS (verdict ${JSON.stringify(vd)}) and a child that survives xterm's hangup keeps it running — record ${mid.state} 2 s later, the window on both pages, and the toast names the second ✕ (never silent)`, stays && tA.some((x) => /Asked .* to close — no agent is using it, so pressing ✕ again within 5 s stops the app/.test(x)), { vd, mid: mid.state, tA });
             if (stays) {
             const t0 = Date.now();
             await titleClose(A.p, r6.id);

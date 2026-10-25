@@ -4554,7 +4554,7 @@ class ChatView {
     // the bubbles already read Removed.
     if (op.subtype === 'queue-putback') {
       const parts = [];
-      if (op.n > 0) parts.push(t('Stop put {n} queued message(s) back into the input box', { n: op.n }));
+      if (op.n > 0) parts.push(t('Stop put {n} queued message(s) back into the input box', { n: op.n }) + (op.started > 0 ? t(', {n} had already started and was stopped — put back too', { n: op.started }) : '')); // codex: a drained row this Stop cut off (lane codex-interrupted-putback)
       if (op.images > 0) parts.push(t('{k} attached image(s) were not put back — attach them again', { k: op.images }));
       if (op.others > 0) parts.push(t('{k} other attachment(s) were not put back — attach them again', { k: op.others }));
       if (op.cut > 0) parts.push(t('{m} message(s) came back shortened', { m: op.cut }));
@@ -7362,6 +7362,12 @@ class ChatView {
       const isLast = this._runs?.length ? this._runs[this._runs.length - 1] === run : false;
       const sticky = run.open && !isLast;
       for (const el of run.members) { if (sticky) this._runStickyOpen.add(el); else this._runStickyOpen.delete(el); }
+      // A person's toggle while PINNED keeps the pin (the owner, 13:21:59 — test-chat-scroll ⑪): the view goes back to
+      // the live bottom in the SAME task, whatever the browser's scroll anchoring did to scrollTop when the run grew or
+      // shrank, so the scroll event that follows reads at-bottom. Without it the unpin was a matter of geometry: an
+      // 11 px shorter list (the composer's «Enter queues» hint while a turn streams, lane claude-wrapper-queue) moved
+      // the anchor and the press read as «scrolled away».
+      if (this._pinned) this._scrollToBottom();
     }
     this._scheduleRunBar();
   }

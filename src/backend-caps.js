@@ -55,9 +55,9 @@
 // queue/steer surface (ws 'queue-op', the client's queue strip and the bubble
 // chip all gate on THIS, never on a backend id). A row declares TWO facts:
 //   queue      — a message sent mid-turn is HELD and runs after the turn, and
-//                the harness REPORTS that state back to us (a CLI that queues
-//                silently still counts: claude's own stdin queue is real, it
-//                just has no readable state — see queueVerbs).
+//                the harness REPORTS that state back to us (claude's is held by
+//                VibeSpace's own wrapper since 2.369.354 — the CLI's stdin queue
+//                ran a held frame right after Stop, so it is never used).
 //   queueVerbs — THE VERB TABLE (design-harness-features §3.1): the closed set
 //                of queue actions this harness actually SERVES. Adding a verb
 //                is one array entry + its three implementations (adapter
@@ -365,9 +365,15 @@ const BACKEND_CAPS = {
     titleRecord: 'session_title_changed', // 2.1.288: the CLI names the session itself (session-brain noteSessionTitle → cliTitle)
     streamProtocol: 'stream-json',
     peerDelivery: 'cli-inbox',
-    // The CLI queues stdin messages itself and reports nothing about it —
-    // an HONEST EMPTY verb table, not a missing feature.
-    inputModes: { queue: true, queueVerbs: [] },
+    // THE WRAPPER OWNS THE MID-TURN QUEUE (2.369.354, lane claude-wrapper-queue — the owner, 2026-10-25): a frame sent
+    // while a turn runs is held by data/bin/chat-wrapper.js (never written to the CLI's stdin), published as
+    // queue_changed and dropped on Stop with ONE queue_dropped (the words go back into the composer). Until .353 this
+    // row was an honest EMPTY table — the CLI queued stdin itself and reported nothing — and MEASURED on 2.1.308 that
+    // queue RAN a frame right after `control_request interrupt` (+27 ms): VibeSpace holds what it must be able to drop.
+    // remove / reorder / edit are splices on the wrapper's array; NO steer (the CLI takes no input into a running turn)
+    // and NO run-now / run-all (a held frame goes the moment the turn ends). The ws layer still asks the RUNNING
+    // wrapper's sidecar advert (a claude session spawned before .354 serves none).
+    inputModes: { queue: true, queueVerbs: ['remove', 'reorder', 'edit'] },
     // system/session_state_changed (env-gated at spawn) — VERIFIED on our
     // stdout in the wrapper's spawn shape (running → idle around a real turn).
     // inProgressTools is false because the record it would need is swallowed by

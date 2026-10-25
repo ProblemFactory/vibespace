@@ -2,6 +2,21 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.354 — 2026-10-25
+
+### Changed
+- When you close an app window that no agent is using, the note now says so and that pressing ✕ again within 5 seconds stops the app.
+- In a Claude conversation, a message you send while it is working now waits in the queue above the input box, where you can edit, reorder or remove it.
+- A Codex message that had just started when you pressed Stop now comes back into the input box too, and the note says so — no need to type it again.
+
+### Fixed
+- Pressing Stop in a Claude conversation now really stops it: nothing you queued runs afterwards, and what you typed comes back into the input box.
+- Opening or closing a group of tool cards while the agent works no longer stops the chat from following the newest messages.
+- Resuming an Antigravity conversation keeps the permission mode it ran in, such as “Never ask”, instead of falling back to the default, and a line says so.
+- The permission mode chip of a long Antigravity conversation opens its list of modes again instead of an empty menu.
+- An Antigravity card for a skipped tool names the tool, not “required”, and no such card appears when nothing was skipped.
+- Steering or stopping an Antigravity turn no longer leaves an “Antigravity: interrupted” error behind.
+
 ## 2.369.353 — 2026-10-24
 
 ### Changed

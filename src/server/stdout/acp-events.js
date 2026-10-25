@@ -9,11 +9,30 @@
 // (lineBuf) lives in the attach closure as before; everything else is on the
 // session object.
 const protocol = 'acp-events';
+/** dtach's clear-screen kickoff to an attaching client — the SAME burst claude-stream-json.js strips
+ *  (DTACH_CLEAR_PREAMBLE) — arrives in front of the wrapper's FIRST line. Unstripped, that line failed JSON.parse and
+ *  went out as terminal output (lane agy-harness-fixes-2: for a Resume it is the `session` record that carries the mode —
+ *  the hub never learned it, the resumed window's chip said «default» while agy ran «Never ask»). */
+const DTACH_CLEAR_PREAMBLE = /^(?:\x1b\[H|\x1b\[[0-3]?J)+/;
 
 function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
   const { noteTurnEnd } = engine;
   function attach(session, id, ptyProcess, { feedLive, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta, updateSessionTodos }) {
     let lineBuf = '';
+    // THE MODE THE WRAPPER RUNS IN (lane agy-harness-fixes-2): its `session` / `config` record says it, and the hub's copy
+    // follows — session-meta, the attach / status merges — and every open window's chip is told, as a confirmed claude
+    // set_permission_mode is (claude-stream-json `permission-mode-ack`). agy adopts a RESUMED conversation's own mode at
+    // ITS boot: after the creator's `created`, before this session's normalizer exists (feedLive drops the record, so no
+    // init card says it) — the resumed window's chip said «default» while agy ran «Never ask». (That record is the stream's
+    // FIRST line, behind dtach's clear preamble — stripped above.)
+    const noteMode = (rec) => {
+      if (typeof rec.mode !== 'string') return;
+      const m = rec.mode || null;
+      if ((session._permissionMode || null) === m) return;
+      session._permissionMode = m;
+      if (session.sockName) { try { writeSessionMeta(session.sockName, { ...(readSessionMeta(session.sockName) || {}), permissionMode: m }); } catch { } }
+      broadcastToSession(session, id, { type: 'permission-mode-ack', sessionId: id, ok: true, mode: m || '' });
+    };
     // ACP v1 harnesses (S8, docs/design-harness-plugins.md §2.3): the
     // generic wrapper (data/bin/acp-wrapper.js) journals ONE JSON record per
     // line ({type:'acp', kind, …}; shape documented at its top). This
@@ -32,7 +51,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
       lineBuf += output;
       let nlIdx;
       while ((nlIdx = lineBuf.indexOf('\n')) !== -1) {
-        const line = lineBuf.substring(0, nlIdx).replace(/\r/g, '').trim();
+        const line = lineBuf.substring(0, nlIdx).replace(/\r/g, '').trim().replace(DTACH_CLEAR_PREAMBLE, '').trim();
         lineBuf = lineBuf.substring(nlIdx + 1);
         if (!line) continue;
         let msg;
@@ -44,6 +63,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
           if (msg.kind === 'sub') { require('../acp-subagents.js').feed(session, id, msg, broadcastToSession); continue; }
           let newLabel = null;
           if (msg.kind === 'session') {
+            noteMode(msg);
             // The agent's session id IS the conversation id (resume = session/load with it)
             let changed = false;
             if (msg.sessionId && session.backendSessionId !== msg.sessionId) {
@@ -71,6 +91,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             if (Array.isArray(msg.models) && msg.models.length) { try { noteHarnessModels?.(session.backend, msg.models); } catch {} }
             if (msg.how === 'load' || msg.how === 'resume') newLabel = '';
           } else if (msg.kind === 'config') {
+            noteMode(msg);
             if (Array.isArray(msg.models) && msg.models.length) { try { noteHarnessModels?.(session.backend, msg.models); } catch {} }
           } else if (msg.kind === 'prompt_start') {
             session._isStreaming = true; newLabel = 'thinking...';

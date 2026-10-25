@@ -18,6 +18,20 @@
 // missed bytes. Input typed while disconnected is queued and flushed after
 // reconnect. The session truly ends only when the keeper's
 // {"type":"_remote_exit","code":N} sentinel arrives (claude exited remotely).
+//
+// THE PROMPT QUEUE IS OURS (2.369.354, lane claude-wrapper-queue — the owner,
+// 2026-10-25: «可以 按照你推荐来»). A user frame that arrives while a turn runs is
+// HELD here (promptQueue — never written to the CLI's stdin), published as
+// `queue_changed` (the strip: remove / reorder / edit), and forwarded ONE per
+// turn end, in order. Stop drops what is held: per-item `queue_op_result
+// {reason:'stopped'}` → ONE `queue_dropped` (the person's words go back into
+// the composer, src/queue-putback.js) → the emptied `queue_changed` → THEN the
+// interrupt reaches the CLI. Why: measured on 2.1.308 with a local mock API,
+// the CLI RUNS a frame it queued itself right after `control_request
+// interrupt` (+27 ms) — a queue the harness owns cannot be stopped by
+// VibeSpace, so VibeSpace holds what it must be able to drop (the 2026-09-07
+// law «Stop means stop»). The CLI's own queued-message bookkeeping is never
+// used for a VibeSpace-driven session.
 
 const fs = require('fs');
 const path = require('path');
@@ -74,7 +88,18 @@ try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); } catch {}
 // a 2.360.0 server sent _frame_file pointers to a pre-2.360.0 wrapper, which
 // forwarded them verbatim to claude = message silently dropped). Wrappers are
 // LONG-LIVED: sessions spawned before an update run old code forever.
-const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true } };
+// inputQueue / queueVerbs / queueResync (2.369.354): THIS process owns the
+// mid-turn queue (see the head of this file) — it publishes `queue_changed`,
+// serves `queue-op` (three splices on a local array: remove / reorder / edit;
+// NOT steer — the CLI takes no input into a running turn, a frame sent there
+// is queued by the CLI itself, which is exactly the queue this file replaced)
+// and `queue-resync` (state the queue again, out loud — a rebuilt server's
+// `queue: []` is a guess). The server gates every queue frame on THIS advert
+// (wrapperCaps), never on the harness row alone: a claude session spawned
+// before 2.369.354 runs an older wrapper that would forward a `queue-op` line
+// to the CLI verbatim.
+const CLAUDE_QUEUE_VERBS = ['remove', 'reorder', 'edit'];
+const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true, inputQueue: true, queueVerbs: CLAUDE_QUEUE_VERBS, queueResync: true }, queue: [] };
 let metaTimer = null;
 
 function persistMeta() {
@@ -123,6 +148,211 @@ function sendChild(line) { // line WITHOUT trailing \n
   }
 }
 
+// ── THE PROMPT QUEUE (2.369.354 — the head of this file says why) ──
+// A record THIS wrapper says: a top-level JSON line into the history buffer AND
+// onto stdout, exactly like a CLI line (the server's claude consumer passes it
+// to the normalizer; the put-back door reads `queue_dropped` at its gate).
+function record(type, fields = {}) {
+  const line = JSON.stringify({ type, ...fields });
+  buffer += line + '\n';
+  schedulePersist();
+  try { process.stdout.write(line + '\n'); } catch {}
+}
+
+// THE TURN GATE — the predicate that decides held vs forwarded (every number measured on 2.1.308, a local mock):
+//   · OPENED by the wrapper itself the moment it writes a user frame to the CLI — a second frame one millisecond later
+//     is held: there is no echo to race (in stream-json the CLI never echoes a prompt on stdout);
+//   · OPENED by the CLI's own turn start — a top-level `system/init` said while the CLI's last state word is 'running'
+//     or 'requires_action' (every turn has an init — a typed prompt, a local slash command, and the turn the CLI starts
+//     by itself for a background task's notification, which has ONLY an init: the session never went idle). A STATE word
+//     alone opens nothing: after the turn's result a BACKGROUND helper's permission ask says 'requires_action' (and its
+//     work 'running') — no turn is running then, and the CLI takes a new prompt. An init said while idle or before any
+//     state (the real CLI says nothing before its first input, fresh or resumed — measured; a stand-in may) opens
+//     nothing either: a gate it opened would never close;
+//   · CLOSED by the turn's top-level `result`, or 'idle'. NOT by 'idle' alone: while a BACKGROUND AGENT works the
+//     session stays 'running' past the turn's result (idle comes only when that agent ends, 12 s later in the probe)
+//     and the CLI takes a new prompt at once (+114 ms) — holding until idle would keep the person waiting behind
+//     background work. Every user frame ends in `result` (then `idle` when nothing runs in the background);
+//   · an 'idle' that arrives AFTER we wrote a frame and BEFORE that frame's turn started belongs to the turn before it
+//     (`awaitingStart`): the drain writes the next frame on a result, and that turn's idle follows 1–2 ms later. A
+//     `result` always ends the turn in flight (it comes before its idle, and the drain fires on it).
+// A frame whose `message.content` is neither a string nor an array never opens it: the CLI ignores that frame without
+// a word (no running, no result), and a gate it opened would never close.
+let turnBusy = false;
+let awaitingStart = false;
+let cliState = null;     // the CLI's last session_state_changed word ('running' | 'requires_action' | 'idle'), null = none yet
+const opensTurn = (o) => !!(o && o.type === 'user' && o.message && (typeof o.message.content === 'string' || Array.isArray(o.message.content)));
+const promptQueue = [];  // [{id, ts, line (the WHOLE stdin frame — images included), msgId, origin, text, preview, attachments, buffered}]
+let queueSeq = 0;
+let dropSeq = 0;         // the put-back record's id: `${pid}-${n}` — the server's idempotency key
+const QUEUE_EDIT_MAX_CHARS = 20000;   // = codex/acp: a longer text offers no edit control (the server refuses a longer edit)
+
+const frameBlocks = (o) => {
+  const c = o && o.message ? o.message.content : null;
+  return typeof c === 'string' ? [{ type: 'text', text: c }] : (Array.isArray(c) ? c : []);
+};
+/** The FULL text of a held frame (its text blocks) — what the edit control opens and what Stop puts back. */
+const frameText = (o) => frameBlocks(o).filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n');
+function framePreview(o) {
+  const parts = [];
+  for (const b of frameBlocks(o)) {
+    if (b && b.type === 'text' && b.text) parts.push(String(b.text));
+    else if (b && typeof b.type === 'string') parts.push(`[${b.type}]`);
+  }
+  const t = parts.join(' ').replace(/\s+/g, ' ').trim();
+  return t.length > 120 ? t.slice(0, 119) + '…' : t;
+}
+/** Attachments are NAMED on a put-back (descriptors), never restored — the draft is a string. */
+const frameAttachments = (o) => frameBlocks(o).filter((b) => b && typeof b.type === 'string' && b.type !== 'text')
+  .map((b) => ({ type: b.type, mime: (b.source && typeof b.source.media_type === 'string' && b.source.media_type) || null, name: (typeof b.title === 'string' && b.title) || null }));
+
+/** STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer, owner 2026-10-24) — the `queue_dropped` record's payload.
+ *  The BYTE-IDENTICAL inline twin of src/queue-putback.js droppedRecordFor (a wrapper cannot require src/):
+ *  test-queue-putback pins this text to that one and drives both on one fixture. */
+function droppedRecordFor(rows, { dropId, turnId } = {}) {
+  const ITEM_MAX = 20000, TOTAL_MAX = 100000;
+  const items = []; let total = 0, omitted = 0;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r !== 'object') continue;
+    const full = typeof r.text === 'string' ? r.text : '';
+    let text = full.length > ITEM_MAX ? full.slice(0, ITEM_MAX) : full;
+    if (text.length < full.length && /[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);
+    if (total + text.length > TOTAL_MAX) { omitted++; continue; }
+    total += text.length;
+    const attachments = (Array.isArray(r.attachments) ? r.attachments : []).filter((a) => a && typeof a.type === 'string' && a.type).slice(0, 32)
+      .map((a) => ({ type: a.type.slice(0, 32), mime: typeof a.mime === 'string' && a.mime ? a.mime.slice(0, 100) : null, name: typeof a.name === 'string' && a.name ? a.name.slice(0, 200) : null }));
+    items.push({ id: String(r.id || ''), msgId: String(r.msgId || ''), ts: Number.isFinite(r.ts) ? r.ts : null, text, cut: text.length < full.length, attachments, ...(r.started === true ? { started: true } : {}) });
+  }
+  return { dropId: String(dropId || ''), by: 'stop', turnId: typeof turnId === 'string' && turnId ? turnId : null, items, omitted };
+}
+
+/** THE WHOLE QUEUE, on every change (the strip and the bubble chips read it — the acp/agy/codex wire). `kind` 'system'
+ *  = a frame VibeSpace typed (auto-resume's continue, a dispatch's /compact — `webui_origin` on the frame): never
+ *  editable, never put back. claude has no turn id on its stream: `turn_id` is null. */
+function publishQueue() {
+  const items = promptQueue.map((q) => ({
+    id: q.id,
+    msgId: q.msgId,
+    preview: q.preview,
+    ...(!q.origin && q.text && q.text.length <= QUEUE_EDIT_MAX_CHARS ? { text: q.text } : {}),
+    ts: q.ts,
+    kind: q.origin ? 'system' : 'user',
+    from: null,
+  }));
+  meta.queue = items;
+  scheduleMeta();
+  // `verbs` rides every publication — the in-band twin of the sidecar advert.
+  record('queue_changed', { items, turn_id: null, verbs: CLAUDE_QUEUE_VERBS });
+}
+
+/** A frame goes to the CLI: the gate opens (when the frame can open a turn) and a frame-file body joins the history
+ *  buffer here — at the moment it really reaches the CLI, so a frame Stop dropped never reads as a sent one. */
+function forwardUser(line, o, buffered) {
+  if (opensTurn(o)) { turnBusy = true; awaitingStart = true; }
+  sendChild(line);
+  if (buffered) { buffer += line + '\n'; schedulePersist(); }
+}
+
+/** A user frame from the server: forwarded when no turn runs, else HELD (published + `queued_input` for its bubble). */
+function submitUser(line, o, { buffered = false } = {}) {
+  if (!turnBusy || !opensTurn(o)) { forwardUser(line, o, buffered); return; }
+  const msgId = typeof o.webui_msg_id === 'string' ? o.webui_msg_id : '';
+  const origin = typeof o.webui_origin === 'string' && o.webui_origin ? o.webui_origin : null;
+  promptQueue.push({ id: `q${++queueSeq}-${process.pid}`, ts: Date.now(), line, msgId, origin, text: frameText(o), preview: framePreview(o), attachments: frameAttachments(o), buffered });
+  publishQueue();
+  record('queued_input', { msg_id: msgId, turn_id: null });
+  log(`held a mid-turn frame (${promptQueue.length} held${origin ? ', ' + origin : ''})`);
+}
+
+/** The turn ended: ONE held frame goes, the next waits for the end of the turn it starts (order = the strip's order). */
+function drainPromptQueue() {
+  if (turnBusy || !promptQueue.length) return;
+  const next = promptQueue.shift();
+  publishQueue();
+  let o = null; try { o = JSON.parse(next.line); } catch {}
+  forwardUser(next.line, o, next.buffered);
+  log(`drained a held frame at the turn end (${promptQueue.length} still held)`);
+}
+
+/** STOP MEANS STOP (the 2026-09-07 law) AND PUTS IT BACK (2026-10-24): every held frame is dropped — its own
+ *  `queue_op_result {reason:'stopped'}` FIRST (the normalizer clears a chip that left the queue without a result as
+ *  "it ran"), then ONE `queue_dropped` of the person's rows (none ⇒ no record), then the emptied `queue_changed` —
+ *  all BEFORE the interrupt reaches the CLI, so nothing held can run after it. */
+function dropHeldForStop() {
+  if (!promptQueue.length) return;
+  const dropped = promptQueue.splice(0, promptQueue.length);
+  for (const q of dropped) record('queue_op_result', { op: 'remove', id: q.id, ok: true, msg_id: q.msgId, reason: 'stopped' });
+  const putBack = dropped.filter((q) => !q.origin);
+  if (putBack.length) record('queue_dropped', droppedRecordFor(putBack.map((q) => ({ id: q.id, msgId: q.msgId, ts: q.ts, text: q.text, attachments: q.attachments })), { dropId: `${process.pid}-${++dropSeq}`, turnId: null }));
+  publishQueue();
+  log(`interrupt: dropped ${dropped.length} held frame(s) (put back=${putBack.length})`);
+}
+
+/** queue-op stdin verb — remove / reorder / edit (CLAUDE_QUEUE_VERBS): splices on the local array. The adapter and the
+ *  ws layer refuse steer / run-now / run-all before a frame is built; the arm below REPORTS one that reaches us anyway
+ *  (never a silent drop). `afterId` null = the front of the queue (the codex vocabulary verbatim). */
+function handleQueueOp(msg) {
+  const op = String(msg?.op || '');
+  const id = String(msg?.id || '');
+  if (!CLAUDE_QUEUE_VERBS.includes(op)) {
+    record('queue_op_result', {
+      op, id, ok: false,
+      reason: /^steer/.test(op) ? 'not-steerable' : /^run-/.test(op) ? 'not-startable' : 'unknown-op',
+      detail: /^steer/.test(op) ? 'Claude Code takes no input into a running turn — the message runs when this turn ends'
+        : /^run-/.test(op) ? 'a held message starts as soon as the current turn ends' : `this agent has no queue action "${op}"`,
+    });
+    return;
+  }
+  const idx = promptQueue.findIndex((q) => q.id === id);
+  if (idx < 0) { record('queue_op_result', { op, id, ok: false, reason: 'gone', detail: 'it is no longer queued' }); publishQueue(); return; }
+  if (op === 'reorder') {
+    const afterId = msg?.afterId === null || msg?.afterId === undefined ? null : String(msg.afterId);
+    const [moved] = promptQueue.splice(idx, 1);
+    if (afterId === null) promptQueue.unshift(moved);
+    else {
+      const at = promptQueue.findIndex((q) => q.id === afterId);
+      if (at < 0) {
+        promptQueue.splice(idx, 0, moved);
+        record('queue_op_result', { op, id, ok: false, reason: 'anchor-gone', detail: 'the message it was dropped after is no longer queued', msg_id: moved.msgId });
+        publishQueue();
+        return;
+      }
+      promptQueue.splice(at + 1, 0, moved);
+    }
+    record('queue_op_result', { op, id, ok: true, msg_id: moved.msgId });
+    publishQueue();
+    return;
+  }
+  if (op === 'edit') {
+    const entry = promptQueue[idx];
+    if (entry.origin) { record('queue_op_result', { op, id, ok: false, reason: 'not-editable', detail: 'it is a VibeSpace bookkeeping message, not yours to rewrite', msg_id: entry.msgId }); return; }
+    const text = typeof msg?.text === 'string' ? msg.text : '';
+    if (!text.trim()) { record('queue_op_result', { op, id, ok: false, reason: 'empty-text', detail: 'an edited message needs some text — remove it instead', msg_id: entry.msgId }); return; }
+    let o = null; try { o = JSON.parse(entry.line); } catch {}
+    if (!opensTurn(o)) { record('queue_op_result', { op, id, ok: false, reason: 'not-editable', detail: 'the held frame could not be read back', msg_id: entry.msgId }); return; }
+    // BY EXCLUSION (the codex / acp rule): the first text block takes the new words, every other block (an image, a
+    // document) stays where it is — a whitelist would delete a content type this file does not know yet.
+    if (typeof o.message.content === 'string') o.message.content = text;
+    else {
+      const out = []; let replaced = false;
+      for (const b of o.message.content) {
+        if (b && b.type === 'text') { if (!replaced) { replaced = true; out.push({ ...b, text }); } continue; }
+        out.push(b);
+      }
+      if (!replaced) out.push({ type: 'text', text });
+      o.message.content = out;
+    }
+    entry.line = JSON.stringify(o);
+    entry.text = frameText(o); entry.preview = framePreview(o);
+    record('queue_op_result', { op, id, ok: true, msg_id: entry.msgId });
+    publishQueue();
+    return;
+  }
+  const [dropped] = promptQueue.splice(idx, 1);
+  record('queue_op_result', { op, id, ok: true, msg_id: dropped.msgId });
+  publishQueue();
+}
+
 function processLine(line) {
   if (!line) return;
   let msg;
@@ -165,6 +395,18 @@ function processLine(line) {
       delete meta.tasks[msg.tool_use_id];
       scheduleMeta();
     }
+  }
+
+  // THE TURN GATE (the prompt queue above): a turn starts at the CLI's init / running, ends at its result / idle — never
+  // a helper's record (parent_tool_use_id), and never an idle that belongs to the turn before a frame we just wrote
+  let turnEnded = false;
+  if (!msg.parent_tool_use_id && !msg.isSidechain) {
+    if (msg.type === 'system' && msg.subtype === 'session_state_changed' && typeof msg.state === 'string') cliState = msg.state;
+    const busyWord = cliState === 'running' || cliState === 'requires_action';
+    const starts = msg.type === 'system' && msg.subtype === 'init' && busyWord;
+    const idle = msg.type === 'system' && msg.subtype === 'session_state_changed' && msg.state === 'idle';
+    if (starts) { turnBusy = true; awaitingStart = false; }
+    else if (msg.type === 'result' || (idle && !awaitingStart)) { turnBusy = false; awaitingStart = false; turnEnded = true; }
   }
 
   // Track streaming state. Local-command echoes ("<local-command-stdout>...")
@@ -214,6 +456,8 @@ function processLine(line) {
   // Append to buffer and tee to stdout
   buffer += line + '\n';
   try { process.stdout.write(line + '\n'); } catch {}
+  // …and only THEN the next held frame: the turn end is on the wire before the queue that follows it
+  if (turnEnded) drainPromptQueue();
 }
 
 function startChild() {
@@ -465,14 +709,19 @@ try {
         if (parsed.type === '_frame_file' && typeof parsed.path === 'string') {
           try {
             const body = fs.readFileSync(parsed.path, 'utf8').trim();
-            JSON.parse(body); // must be ONE valid frame — never forward shreds
-            sendChild(body);
-            buffer += body + '\n';
-            schedulePersist();
+            const frame = JSON.parse(body); // must be ONE valid frame — never forward shreds
+            // the WHOLE frame (its images) is what a mid-turn hold keeps; recorded into the buffer when it reaches the CLI
+            submitUser(body, frame, { buffered: true });
           } catch (e) { log('frame-file failed (' + e.message + ') — dropped, NOT wrapped as text'); }
           try { fs.unlinkSync(parsed.path); } catch {}
           continue;
         }
+        // THE QUEUE'S OWN VERBS (2.369.354) — never forwarded to the CLI
+        if (parsed.type === 'queue-op') { handleQueueOp(parsed); continue; }
+        if (parsed.type === 'queue-resync') { publishQueue(); continue; }
+        // Stop: what is held is dropped (and put back) BEFORE the interrupt reaches the CLI — then the interrupt goes
+        // through as it always did (the server's 2 s SIGINT fallback is unchanged)
+        if (parsed.type === 'control_request' && parsed.request && parsed.request.subtype === 'interrupt') dropHeldForStop();
         // Handle goal commands from WebUI
         if (parsed.type === 'set-goal') {
           // Forward to the CLI's NATIVE /goal (dispatched as a command in
@@ -485,22 +734,19 @@ try {
           meta.goalSetAt = meta.goal ? Date.now() : null;
           scheduleMeta();
           const cmdText = meta.goal ? `/goal ${meta.goal}` : '/goal clear';
-          sendChild(JSON.stringify({
-            type: 'user',
-            message: { role: 'user', content: [{ type: 'text', text: cmdText }] },
-          }));
+          // straight to the CLI, as before (a goal set MID-TURN still rides the CLI's own queue) — and it opens the gate
+          const goalFrame = { type: 'user', message: { role: 'user', content: [{ type: 'text', text: cmdText }] } };
+          forwardUser(JSON.stringify(goalFrame), goalFrame, false);
           log(`Goal ${meta.goal ? 'set (native): ' + meta.goal.substring(0, 80) : 'cleared (native)'}`);
           continue;
         }
-        // Pass through as-is to claude
-        void parsed;
+        // A user frame: forwarded, or HELD while a turn runs (the prompt queue). Anything else passes through as-is.
+        if (parsed.type === 'user') { submitUser(line, parsed); continue; }
         sendChild(line);
       } catch {
         // Plain text — wrap as stream-json user message
-        sendChild(JSON.stringify({
-          type: 'user',
-          message: { role: 'user', content: [{ type: 'text', text: line }] }
-        }));
+        const wrapped = { type: 'user', message: { role: 'user', content: [{ type: 'text', text: line }] } };
+        submitUser(JSON.stringify(wrapped), wrapped);
       }
     }
   });
@@ -509,5 +755,6 @@ try {
 }
 
 startChild();
+publishQueue();   // the BASELINE (an empty queue, said once at boot — the acp wrapper's rule)
 
 process.on('uncaughtException', (err) => { log(`Uncaught: ${err.message}\n${err.stack}`); });

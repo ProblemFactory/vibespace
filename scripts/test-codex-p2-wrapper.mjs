@@ -595,8 +595,14 @@ process.stdin.on('data', (d) => {
         // THE RACE: this one was drained a moment ago and is RUNNING now, so
         // the delete is refused — and the drained item's own turn/started
         // arrives before the reply, i.e. while the sweep is mid-flight.
-        queue.splice(at, 1);
-        if (!announced) { announced = true; turns++; activeTurn = 'turn-' + turns; send({ method: 'turn/started', params: { turn: { id: activeTurn } } }); }
+        const [dq] = queue.splice(at, 1);
+        if (!announced) {
+          announced = true; turns++; activeTurn = 'turn-' + turns; send({ method: 'turn/started', params: { turn: { id: activeTurn } } });
+          // the app-server's own witness of WHICH turn the drained submission entered — its userMessage item — sent
+          // LATE here (after the delete's reply), so the sweep has to wait for it (lane codex-interrupted-putback)
+          const tid = activeTurn;
+          setTimeout(() => send({ method: 'item/completed', params: { threadId: 'th-race', turnId: tid, item: { type: 'userMessage', id: 'u-' + dq.id, clientId: dq.clientUserMessageId, content: dq.input } } }), 300);
+        }
         send({ id: m.id, result: { deleted: false } });
         send({ method: 'thread/queue/changed', params: { threadId: 'th-race' } });
         continue;
@@ -629,8 +635,11 @@ process.stdin.on('data', (d) => {
   // queue on its own = it RAN, and the chip must not read `Removed`.
   const rRun = A.ops().find((r) => r.id === runaway.id);
   ok(rRun && rRun.ok === false && rRun.reason === 'gone' && rRun.msg_id === 'a1', `a {deleted:false} reply is reported ok:false reason 'gone' — never a fake 'stopped' removal (${JSON.stringify(rRun)})`);
+  // lane codex-interrupted-putback: …and since its turn (turn-2) is the one this Stop interrupts, it was cut off before it
+  // answered — the result says so (the witness came 300 ms AFTER the delete's reply: the sweep waited for the turn's name)
+  ok(rRun && rRun.started === true && /started and was stopped/.test(rRun.detail || ''), `…its turn is the one Stop interrupts, so the result says it STARTED and was stopped (${JSON.stringify(rRun)})`);
   const rPeer = A.ops().find((r) => r.id === peerItem.id);
-  ok(rPeer && rPeer.ok === false && rPeer.reason === 'gone', `…the same verdict for a peer item the app-server drained (${JSON.stringify(rPeer)})`, JSON.stringify(A.ops()));
+  ok(rPeer && rPeer.ok === false && rPeer.reason === 'gone' && rPeer.started !== true, `…the same verdict for a peer item the app-server drained — never 'started' (a peer row is not the person's to put back) (${JSON.stringify(rPeer)})`, JSON.stringify(A.ops()));
   // …and a peer message that really RAN must NOT go back to the delivery
   // ladder: it was delivered, re-stashing it would deliver it a second time.
   const peersA = A.msgs().filter((m) => m.type === 'peer_message_result').slice(peersBeforeA);
@@ -652,13 +661,87 @@ process.stdin.on('data', (d) => {
   mmA.convertHistory(A.events());
   const userA = (needle) => mmA.messages.find((m) => m.role === 'user' && JSON.stringify(m.content).includes(needle));
   ok(userA('runaway') && userA('runaway').queueState !== 'removed', `the bubble of a message that RAN never reads 'Removed' (${userA('runaway')?.queueState || 'no chip'})`);
+  ok(userA('runaway')?.queueState === 'stopped', `…it reads 'stopped': it reached the agent, and Stop cut its turn off (${userA('runaway')?.queueState || 'no chip'})`);
   ok(userA('really stopped')?.queueState === 'removed', `…while the one Stop really dropped does (${userA('really stopped')?.queueState})`);
   const sysA = mmA.messages.filter((m) => m.role === 'system').map((m) => m.content?.[0]?.text || '');
-  ok(sysA.some((t) => /no longer queued — it already ran/.test(t)), 'and the user is TOLD that one already ran (nothing silent)', sysA.join(' | '));
-  // lane stop-refills-composer: only a row the sweep REALLY deleted comes back — a `gone` row RAN (a1, the peer)
+  ok(sysA.some((t) => /no longer queued — it already ran/.test(t)), 'and the user is TOLD that one already ran (the drained peer — nothing silent)', sysA.join(' | '));
+  ok(sysA.some((t) => /had already started — Stop stopped it and put it back into the input box/.test(t)), '…and that a1 had started, was stopped and came back', sysA.join(' | '));
+  // lane stop-refills-composer + codex-interrupted-putback: a row the sweep REALLY deleted comes back, and so does the
+  // drained a1 whose turn this Stop interrupts (`started: true`, in queue order); the drained peer never does
   const dropsA = A.msgs().filter((m) => m.type === 'queue_dropped');
-  ok(dropsA.length === 1 && dropsA[0].items.length === 1 && dropsA[0].items[0].msgId === 'a3' && dropsA[0].items[0].text === 'really stopped', `the put-back carries a3 only — the {deleted:false} a1 (it RAN) and the peer are absent (${JSON.stringify(dropsA)})`);
+  ok(dropsA.length === 1 && dropsA[0].items.length === 2 && dropsA[0].items[0].msgId === 'a1' && dropsA[0].items[0].text === '[ran] runaway' && dropsA[0].items[0].started === true && dropsA[0].items[1].msgId === 'a3' && dropsA[0].items[1].text === 'really stopped' && !('started' in dropsA[0].items[1]) && dropsA[0].turnId === 'turn-2', `the put-back carries a1 (started: true) then a3, naming turn-2 — the drained peer is absent (${JSON.stringify(dropsA)})`);
+  ok(A.rpc().filter((m) => m.method === 'turn/interrupt').map((m) => m.params.turnId).join() === 'turn-2', `…and turn-2 is the turn Stop interrupted (${JSON.stringify(A.rpc().filter((m) => m.method === 'turn/interrupt'))})`);
+  ok(/interrupt: \S+ had started turn turn-2, which this Stop interrupts — its words go back into the composer/.test(A.journal()), 'the wrapper journal says which turn it judged by');
   await A.stop();
+}
+
+// lane codex-interrupted-putback (the owner, 2026-10-25 «可以 按照你推荐来»): two rows the app-server DRAINED under the sweep,
+// judged by their TURN. The running turn ends by itself as Stop's sweep starts deleting: d1 drains, runs and its turn
+// COMPLETES; then d2 drains and its turn is still running — the one Stop interrupts. The witness (each userMessage item)
+// arrives BEFORE the delete's reply here. d2 comes back (`started: true`), d1 RAN and stays `gone`, d3 was deleted.
+const STUB_DRAIN_DONE = `
+const fs = require('fs');
+let b = ''; let turns = 0; let queue = []; let qseq = 0; let activeTurn = null; const drainedIds = new Set();
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+const enter = (q) => { turns++; activeTurn = 'turn-' + turns; send({ method: 'turn/started', params: { turn: { id: activeTurn } } }); send({ method: 'item/completed', params: { threadId: 'th-done', turnId: activeTurn, item: { type: 'userMessage', id: 'u-' + q.id, clientId: q.clientUserMessageId, content: q.input } } }); };
+const end = (status) => { const e = activeTurn; activeTurn = null; send({ method: 'turn/completed', params: { turn: { id: e }, status } }); };
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (d) => {
+  b += d; let i;
+  while ((i = b.indexOf('\\n')) !== -1) {
+    const line = b.slice(0, i); b = b.slice(i + 1);
+    if (!line.trim()) continue;
+    let m; try { m = JSON.parse(line); } catch { continue; }
+    if (m.id === undefined || !m.method) continue;
+    fs.appendFileSync(__RPCLOG__, line + '\\n');
+    if (m.method === 'thread/start') { send({ id: m.id, result: { thread: { id: 'th-done' } } }); continue; }
+    if (m.method === 'turn/start') { turns++; const tid = 'turn-' + turns; activeTurn = tid; send({ id: m.id, result: { turn: { id: tid } } }); send({ method: 'turn/started', params: { turn: { id: tid } } }); continue; }
+    if (m.method === 'thread/queue/add') { const q = { id: 'q' + (++qseq), input: m.params.input, clientUserMessageId: m.params.clientUserMessageId }; queue.push(q); send({ id: m.id, result: { queuedSubmission: q } }); send({ method: 'thread/queue/changed', params: { threadId: 'th-done' } }); continue; }
+    if (m.method === 'thread/queue/list') { send({ id: m.id, result: { data: queue.slice(), nextCursor: null } }); continue; }
+    if (m.method === 'thread/queue/delete') {
+      const qid = m.params.queuedSubmissionId;
+      if (!drainedIds.size && queue[0] && qid === queue[0].id) {
+        // the running turn ends ON ITS OWN as the first delete lands: the app-server drains d1, which runs to the end,
+        // then drains d2, whose turn is still running — both left the queue before their deletes
+        end('completed');
+        const d1 = queue.shift(); drainedIds.add(d1.id); enter(d1); end('completed');
+        const d2 = queue.shift(); drainedIds.add(d2.id); enter(d2);
+      }
+      if (drainedIds.has(qid)) { send({ id: m.id, result: { deleted: false } }); continue; }
+      const at = queue.findIndex((q) => q.id === qid);
+      if (at < 0) { send({ id: m.id, result: { deleted: false } }); continue; }
+      queue.splice(at, 1); send({ id: m.id, result: { deleted: true } }); send({ method: 'thread/queue/changed', params: { threadId: 'th-done' } }); continue;
+    }
+    if (m.method === 'turn/interrupt') { send({ id: m.id, result: {} }); if (activeTurn === m.params.turnId) end('interrupted'); continue; }
+    send({ id: m.id, result: {} });
+  }
+});
+`;
+{
+  const D = spawnStub('drain-done', STUB_DRAIN_DONE);
+  ok(await waitFor(() => D.meta()?.threadId === 'th-done'), 'drain-done stub: the wrapper has a thread');
+  D.send({ type: 'chat-input', text: 'go', msgId: 'd0' });
+  ok(await waitFor(() => D.meta()?.activeTurnId === 'turn-1'), 'drain-done stub: a turn is running');
+  D.send({ type: 'chat-input', text: 'a quick one', msgId: 'd1' });
+  D.send({ type: 'chat-input', text: 'cut off mid-turn', msgId: 'd2' });
+  D.send({ type: 'chat-input', text: 'never started', msgId: 'd3' });
+  ok(await waitFor(() => D.lastQueue().length === 3), `drain-done stub: three messages queued (${JSON.stringify(D.lastQueue().map((i) => i.preview))})`);
+  const ids = Object.fromEntries(D.lastQueue().map((i) => [i.msgId, i.id]));
+  D.send({ type: 'interrupt' });
+  ok(await waitFor(() => D.ops().filter((r) => r.op === 'remove').length >= 3 && D.msgs().some((m) => m.type === 'queue_dropped')), `drain-done stub: Stop reports all three and puts back (${JSON.stringify(D.ops())})`);
+  const r = (msgId) => D.ops().find((x) => x.id === ids[msgId]);
+  ok(r('d1')?.ok === false && r('d1').reason === 'gone' && r('d1').started !== true, `d1's turn (turn-2) COMPLETED before Stop — it RAN: plain gone, not started (${JSON.stringify(r('d1'))})`);
+  ok(r('d2')?.ok === false && r('d2').reason === 'gone' && r('d2').started === true, `d2's turn (turn-3) is the one Stop interrupts — gone + started (${JSON.stringify(r('d2'))})`);
+  ok(r('d3')?.ok === true && r('d3').reason === 'stopped', `d3 was really deleted — stopped (${JSON.stringify(r('d3'))})`);
+  const drops = D.msgs().filter((m) => m.type === 'queue_dropped');
+  ok(drops.length === 1 && drops[0].items.map((x) => `${x.msgId}:${x.started === true}`).join() === 'd2:true,d3:false' && drops[0].turnId === 'turn-3', `ONE record: d2 (started) then d3 — d1, which ran to the end, is NOT put back (${JSON.stringify(drops)})`);
+  ok(await waitFor(() => D.rpc().some((m) => m.method === 'turn/interrupt')) && D.rpc().filter((m) => m.method === 'turn/interrupt').map((m) => m.params.turnId).join() === 'turn-3', `Stop interrupted turn-3 — the turn the record names (${JSON.stringify(D.rpc().filter((m) => m.method === 'turn/interrupt'))})`);
+  ok(await waitFor(() => !D.meta()?.activeTurnId), 'and nothing runs after Stop', JSON.stringify(D.meta()?.activeTurnId));
+  const mm = new CodexMessageManager('p2-drain-done');
+  mm.convertHistory(D.events());
+  const chip = (needle) => mm.messages.find((m) => m.role === 'user' && JSON.stringify(m.content).includes(needle))?.queueState || null;
+  ok(chip('a quick one') == null && chip('cut off mid-turn') === 'stopped' && chip('never started') === 'removed', `the chips through the REAL normalizer: d1 none (it ran), d2 'stopped', d3 'removed' (${[chip('a quick one'), chip('cut off mid-turn'), chip('never started')].join(' / ')})`);
+  await D.stop();
 }
 
 // lane stop-refills-composer: an INHERITED queue (rows a PREVIOUS wrapper queued — this one holds no queueMeta for them):

@@ -14,10 +14,13 @@
 //   ③ THE CLIENT BUILDER per backend — effortOptions(backend, answer) = the harness's rows; hasEffortMenu; the seed.
 //   ④ THE REAL BAR (a fake DOM, no chrome) — the chip per backend: antigravity shows the COMMANDED effort «as asked at
 //      start», «?» only when nothing was asked; opencode has NO effort chip; the menu asks with its backend.
+//   ④b THE PERMISSION CHIP OPENS THE HARNESS'S MODES (lane agy-harness-fixes-2, the owner 2026-10-25): a status that names NO
+//      modes (`[]` — an agy journal whose head the ring cut) keeps the declared list, and the bar's own delegated click opens
+//      it (a fake container that measures); a told list still replaces the seed.
 //   ⑤ THE REFUSAL BY NAME — agyFlags / the chat spawn / the mid-session pick throw effort_not_supported with agy's
 //      levels, and the REAL ws-create (a stub pty) answers an antigravity create asking ultracode by name, spawning nothing.
 //   ⑥ MUTANTS — the route answering claude's rows to every backend (the base) ⇒ ② RED; the agy adapter dropping
-//      instead of refusing (the base) ⇒ ⑤ RED.
+//      instead of refusing (the base) ⇒ ⑤ RED; the bar's base guards (`[]` is truthy) ⇒ ④b RED (an empty menu).
 // The menu itself, opened in a real document: scripts/test-effort-menu-chrome.mjs (heavy).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -111,7 +114,7 @@ console.log('— ③ THE CLIENT BUILDER per backend: effortOptions(backend, the 
 
 console.log('— ④ THE REAL BAR (a fake DOM): the effort chip per backend');
 class FakeEl {
-  constructor(tag) { this.tagName = String(tag).toUpperCase(); this.attrs = new Map(); this.childNodes = []; this.parentNode = null; this._html = ''; }
+  constructor(tag) { this.tagName = String(tag).toUpperCase(); this.attrs = new Map(); this.childNodes = []; this.parentNode = null; this._html = ''; this.style = {}; this.dataset = {}; }
   get children() { return this.childNodes.filter((n) => n instanceof FakeEl); }
   setAttribute(k, v) { this.attrs.set(k, String(v)); }
   getAttribute(k) { return this.attrs.has(k) ? this.attrs.get(k) : null; }
@@ -123,6 +126,7 @@ class FakeEl {
   get innerHTML() { return this._html; }
   set innerHTML(h) { this._html = String(h); }
   get textContent() { return this._html.replace(/<[^>]*>/g, ''); }
+  set textContent(v) { this._html = String(v); }
   appendChild(n) { return this.insertBefore(n, null); }
   insertBefore(n, ref) { if (n.parentNode) n.parentNode.removeChild(n); const i = ref ? this.childNodes.indexOf(ref) : -1; if (i < 0) this.childNodes.push(n); else this.childNodes.splice(i, 0, n); n.parentNode = this; return n; }
   removeChild(n) { const i = this.childNodes.indexOf(n); if (i >= 0) this.childNodes.splice(i, 1); n.parentNode = null; return n; }
@@ -152,6 +156,35 @@ class FakeEl {
   ok(bar.includes("fetch(`/api/session-options?backend=${encodeURIComponent(this._backend || 'claude')}`)") && !bar.includes("fetch('/api/session-options')")
     && bar.includes('addItems(ladder(effortSeedLevels(this._backend)));'),
     'the bar\'s menu asks /api/session-options WITH its backend; a failed ask falls back to THIS harness\'s seed (never claude\'s five + ultracode)');
+}
+
+console.log('— ④b THE PERMISSION CHIP OPENS THE HARNESS\'S MODES: a status naming no modes (`[]`) keeps the declared list');
+// the chip's menu, opened through the bar's OWN delegated click (_onClick) under the fake DOM: a container that measures,
+// the dropdown it fills — returns the chip's label, the menu's rows, the bar's list
+async function permMenu(mod, backend, status) {
+  globalThis.document = { createElement: (t) => new FakeEl(t), addEventListener() {}, removeEventListener() {} };
+  globalThis.getComputedStyle = () => ({ position: 'relative', minWidth: '0' });
+  const bar = new mod.ChatStatusBar({ send() {} }, 'sid-perm', { backend, getToolMsg: () => null, openSubagentViewer() {}, openInTempEditor() {} });
+  if (status) bar.applyStatus(status);
+  const box = new FakeEl('div');
+  box.getBoundingClientRect = () => ({ left: 0, top: 0, right: 800, bottom: 40, width: 800, height: 40 });
+  box.querySelector = (sel) => box.children.find((c) => ('.' + c.className.split(' ').join('.')).includes(sel)) || null;
+  bar._popupContainer = box;
+  const chip = bar.element.children.find((c) => c.getAttribute('data-chip') === 'perm');
+  if (!chip) return null;
+  chip.getBoundingClientRect = () => ({ left: 100, top: 0, right: 180, bottom: 30, width: 80, height: 30 });
+  bar._onClick({ target: { closest: (sel) => (sel === '.chat-status-perm' ? chip : null) }, stopPropagation() {} });
+  const dd = box.children.find((c) => c.className === 'chat-status-dropdown');
+  return { label: chip.textContent.trim(), items: dd ? dd.children.map((i) => i.textContent) : null, active: dd ? dd.children.filter((i) => /\bactive\b/.test(i.className)).map((i) => i.textContent) : null, list: bar.permissionModes };
+}
+{
+  const mod = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-status-bar.js')).href);
+  const FOUR = am.BACKEND_META.antigravity.permissionModes;
+  const cut = await permMenu(mod, 'antigravity', { model: 'gemini-4-argon-high', permissionMode: 'bypassPermissions', permissionModes: [] });
+  ok(!!cut && J(FOUR) === J(['accept-edits', 'auto', 'plan', 'bypassPermissions']) && J(cut.items) === J(FOUR) && J(cut.active) === J(['bypassPermissions']) && /bypassPermissions$/.test(cut.label),
+    'antigravity, a status with permissionModes [] (its journal head cut): the chip still says bypassPermissions and its click opens agy\'s FOUR declared modes, the current one marked', cut);
+  const told = await permMenu(mod, 'antigravity', { permissionMode: 'plan', permissionModes: ['plan', 'auto'] });
+  ok(!!told && J(told.items) === J(['plan', 'auto']) && J(told.list) === J(['plan', 'auto']), 'a status that NAMES modes still replaces the seed (the live list wins)', told);
 }
 
 console.log('— ⑤ THE REFUSAL BY NAME: agy cannot take it ⇒ effort_not_supported with its levels, never dropped');
@@ -235,6 +268,14 @@ console.log('— ⑥ MUTANTS: each restores the base shape in a copy ⇒ the leg
   const mutAgy = new mut.AgyAdapter(real.config);
   const x = await drive(wsCreate, { backend: 'antigravity', effort: 'ultracode' }, { ...reg, get: (id) => (id === 'antigravity' ? mutAgy : reg.get(id)) });
   ok(/^SPAWNED \(AGY_WEBUI_EFFORT=""\)/.test(refusedByName(x)), 'MUTANT the agy adapter dropping instead of refusing (2.369.336) ⇒ ⑤ RED: it spawns with no effort, without a word', refusedByName(x));
+  const bsrc = read('src/lib/chat-status-bar.js');
+  const G1 = '    if (status.permissionModes?.length) this._permissionModes = status.permissionModes;\n';
+  const G2 = "    const modes = this._permissionModes?.length ? this._permissionModes : ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'];\n";
+  ok(bsrc.split(G1).length === 2 && bsrc.split(G2).length === 2, 'setup: the bar\'s two `[]` guards are ONE identifiable line each in src/lib/chat-status-bar.js');
+  const baseBar = await import(pathToFileURL(M.write('src/lib/chat-status-bar.js', bsrc.replace(G1, '    if (status.permissionModes) this._permissionModes = status.permissionModes;\n')
+    .replace(G2, "    const modes = this._permissionModes || ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'auto'];\n"), 'perm-empty', { esm: true })).href);
+  const e = await permMenu(baseBar, 'antigravity', { model: 'gemini-4-argon-high', permissionMode: 'bypassPermissions', permissionModes: [] });
+  ok(!!e && Array.isArray(e.items) && e.items.length === 0 && J(e.list) === '[]', 'MUTANT the base guards (2.369.353: `[]` is truthy) ⇒ ④b RED: the status\'s [] replaced the declared list and the chip opens an EMPTY menu', e);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

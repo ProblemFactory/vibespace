@@ -32,6 +32,15 @@
 //     head, busy ⇒ queued (a notification says steer:'unsupported'), no text ⇒ nothing, while agy restarts ⇒ queued and
 //     delivered to the new process, not signed in ⇒ ok:false with its words, the queue at exit ⇒ back with its words; the
 //     advert (peerMessage + notificationSteer:false) and the census of the answers (started early, run beside the rest)
+// ⑮–⑲ lane agy-harness-fixes-2 (the owner 2026-10-25 — five linked bugs; started early, run beside the rest, each leg with
+//   its RED copy): ⑮ THE MODE THROUGH THE RING — a chip-picked mode + a 1.2 MB reply: the journal's head (the `session`
+//   record) is cut, the sidecar keeps meta.modes, chatStatus answers the mode AND its list (the base reader: an empty list);
+//   ⑯ THE RESUME — the session's sidecar deleted (the hub's teardown), a new wrapper on the same conversation with no stated
+//   mode runs in the conversation's own (--dangerously-skip-permissions), a stated mode wins (the base: agy's default);
+//   ⑰ «required» is no tool: jetski's «a tool required the "command" permission» names `command` on the card and the retry;
+//   ⑱ NO FALSE CARD on a nudge turn whose tool steps all completed, nor under bypass — a step never completed still gets
+//   it; ⑲ A STOPPED PROCESS IS NEVER AN ERROR — steer / Stop: the old agy's «interrupted» raises nothing, while one from the
+//   CURRENT process (no restart) is still said
 // Run: node scripts/test-agy-harness.mjs
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -39,6 +48,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratchDir } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const WRAPPER = path.join(REPO, 'data/bin/agy-wrapper.js');
@@ -119,9 +129,11 @@ console.log('— ①b agy\'s OWN slash commands: ONE closed list (the measured f
     modSrc.includes(cut) && base('/home/u/x.zip 这里是…') === '/home' && base('/tmp/a.txt') === '/tmp' && base('/notacommand hello') === '/notacommand' && base('/model') === '/model', [base('/home/u/x.zip 这里是…'), base('/tmp/a.txt'), base('/notacommand hello')]);
 }
 
-function startWrapper({ env = {}, wrapper = WRAPPER } = {}) {
-  const dir = fs.mkdtempSync(path.join(ROOT, 'w-'));
-  const buf = path.join(dir, 's.buf'), meta = path.join(dir, 's.json'), log = path.join(dir, 'stub.log');
+let stubSeq = 0;
+function startWrapper({ env = {}, wrapper = WRAPPER, dir: inDir = null } = {}) {
+  // `dir`: a second wrapper in the SAME buffers dir (lane agy-harness-fixes-2 ⑯ — a Resume beside the earlier session's files)
+  const dir = inDir || fs.mkdtempSync(path.join(ROOT, 'w-'));
+  const buf = path.join(dir, 's.buf'), meta = path.join(dir, 's.json'), log = path.join(dir, inDir ? `stub-${++stubSeq}.log` : 'stub.log');
   const child = spawn(process.execPath, [wrapper, buf, meta, STUB], { env: { ...CLEAN_ENV, AGY_WEBUI_CWD: dir, AGY_WEBUI_BACKEND: 'antigravity', AGY_STUB_LOG: log, AGY_WEBUI_AUTH_GRACE_MS: '400', ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
   const h = { child, dir, records: [], stderr: '', exited: null, log };
   let lb = '';
@@ -227,6 +239,210 @@ const peerLane = (async () => {
     em.length === 4 && em.filter((e) => /ok: true/.test(e)).length === 1 && em.filter((e) => /ok: true/.test(e)).every((e) => /mode: ran\.mode/.test(e))
     && em.filter((e) => /ok: false, mode: 'undelivered'/.test(e) && /\btext\b/.test(e)).length === 2 && back.length === 1 && !/mode:/.test(back[0])
     && (src.match(/peerBack\(/g) || []).length === 7, em);   // its definition + Stop, remove, the drain (then / catch), agy's exit, the wrapper's exit
+  return R;
+})();
+
+// ⑮–⑲ (lane agy-harness-fixes-2) run TOGETHER with the sections below; their asserts are printed at the end
+const fixes2 = (async () => {
+  const R = [];
+  const ck = (n, c, e) => R.push([n, c, e]);
+  const src = fs.readFileSync(WRAPPER, 'utf8');
+  const mutant = (name, cut, put) => { if (src.split(cut).length !== 2) return null; const f = path.join(MUTBIN, `agy-wrapper-${name}.js`); fs.writeFileSync(f, src.replace(cut, put)); return f; };
+  const starts = (w) => w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).map((x) => x.argv);
+  const agyLines = (w) => w.stub().filter((x) => x.stdin).map((x) => JSON.parse(x.stdin).message.content);
+  const ended = async (w) => { await w.stop(); await w.until(() => w.exited, 5000, 'the wrapper exit').catch(() => null); }; // its finalize persists the files 500 ms after SIGTERM
+  const wlog = (w) => { try { return fs.readFileSync(path.join(w.dir, 'agy-wrapper.log'), 'utf8'); } catch { return ''; } };
+  const { AcpSessionMessages } = require(path.join(REPO, 'src/acp-message-manager.js'));
+  const { createTranscriptService } = require(path.join(REPO, 'src/transcript-service.js'));
+  const AgyReader = g.store.SessionMessages; // the agy descriptor's reader (AgySessionMessages over AcpSessionMessages)
+  let baseReader = null; // ⑯ RED: the base wrapperMeta (the sidecar only by the caller's session id) — set in ⑮
+  // ⑯ the HUB's consumer (src/server/stdout/acp-events.js) over the resumed wrapper's own stdout: what the creator's window is told
+  const evSrc = fs.readFileSync(path.join(REPO, 'src/server/stdout/acp-events.js'), 'utf8');
+  const NOTE = '            noteMode(msg);\n';
+  const baseEvents = evSrc.split(NOTE).length === 3 ? mutantCopies('agy-harness-events', REPO).load('src/server/stdout/acp-events.js', evSrc.split(NOTE).join(''), 'base-events') : null;
+  const STRIP = ".trim().replace(DTACH_CLEAR_PREAMBLE, '').trim();\n";
+  const noStrip = evSrc.split(STRIP).length === 2 ? mutantCopies('agy-harness-events', REPO).load('src/server/stdout/acp-events.js', evSrc.replace(STRIP, '.trim();\n'), 'no-strip') : null;
+  const hubOf = (records, mod = require(path.join(REPO, 'src/server/stdout/acp-events.js'))) => {
+    const S = { backend: 'antigravity', mode: 'chat', buffer: '', sockName: 'cw-x', _permissionMode: null }, told = [], metas = [];
+    let onData = null;
+    mod.create({ engine: { noteTurnEnd() { } }, noteHarnessModels() { }, deliverRef: null, permissionRulesRef: null })
+      .attach(S, 's', { onData: (cb) => { onData = cb; } }, { feedLive() { }, broadcastToSession: (_s, _id, m) => told.push(m), broadcastActiveSessions() { }, readSessionMeta: () => ({}), writeSessionMeta: (_k, m) => metas.push(m), updateSessionTodos() { } });
+    onData('\x1b[H\x1b[J' + records.map((r) => JSON.stringify(r)).join('\r\n') + '\r\n'); // what the hub's dtach client reads: the clear preamble, then CRLF lines
+    return { mode: S._permissionMode, acks: told.filter((m) => m.type === 'permission-mode-ack').map((m) => [m.ok, m.mode]), meta: metas.map((m) => m.permissionMode).filter(Boolean).pop() || null };
+  };
+  const statusOf = (Cls, dir) => new Cls({ buffer: fs.readFileSync(path.join(dir, 's.buf'), 'utf8') }, 's', { buffersDir: dir }).chatStatus();
+  const FOUR = 'accept-edits,auto,plan,bypassPermissions';
+  const http = await import('node:http');
+  const reasons = new Map(); // session token → the stop-check nudge's reason (⑱)
+  const srv = http.createServer((req, res) => {
+    const tok = String(req.headers.authorization || '').replace(/^Bearer /, '');
+    res.writeHead(200, { 'content-type': 'application/json' });
+    if (req.url.startsWith('/api/agent/stop-check')) { const r = reasons.get(tok); reasons.delete(tok); res.end(JSON.stringify(r ? { block: true, reason: r } : { block: false })); return; }
+    res.end('{"context":""}');
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const API = `http://127.0.0.1:${srv.address().port}`;
+
+  // ⑮ + ⑯ — ONE conversation: its mode picked in the chip, a reply that pushes the journal past the 800 KB ring
+  const ring = async () => {
+    const a = startWrapper();
+    const dir = a.dir;
+    let cid = null;
+    try {
+      cid = (await a.until(() => a.find('session'), 8000, 'session')).sessionId;
+      a.send({ type: 'set-mode', mode: 'bypassPermissions' });
+      await a.until(() => starts(a).length >= 2, 8000, 'the mode restart');
+      a.send({ type: 'chat-input', text: 'a bulk reply', msgId: 'b1' });
+      await a.until(() => a.find('prompt_end'), 15000, 'the bulk turn');
+      const cut = await a.until(() => { try { const b = fs.readFileSync(path.join(dir, 's.buf'), 'utf8'); return b.length > 700000 && b.includes('"kind":"prompt_end"') ? b : null; } catch { return null; } }, 6000, 'the persisted journal').catch(() => '');
+      ck('⑮ the ring cut the journal\'s HEAD: the persisted journal (800 KB) has no `session` record and no `config` record — the mode + its values went with them',
+        cut.length > 700000 && cut.length <= 800000 && !cut.includes('"kind":"session"') && !cut.includes('"kind":"config"') && a.find('session')?.modeValues?.join() === FOUR, { len: cut.length, session: cut.includes('"kind":"session"') });
+      const side = await a.until(() => { try { const m = JSON.parse(fs.readFileSync(path.join(dir, 's.json'), 'utf8')); return m.modes?.currentModeId === 'bypassPermissions' ? m : null; } catch { return null; } }, 3000, 'the sidecar').catch(() => null);
+      ck('⑮ …the SIDECAR keeps the mode outside the ring: agentMode + meta.modes {availableModes: the four, currentModeId} (was modes: null)',
+        !!side && side.agentMode === 'bypassPermissions' && side.modes.availableModes.map((m) => m.id).join() === FOUR, side && { agentMode: side.agentMode, modes: side.modes });
+      const st = statusOf(AcpSessionMessages, dir);
+      ck('⑮ …chatStatus over the cut journal + that sidecar (the attach / a reload): the mode AND the four (the chip opens them)', st?.permissionMode === 'bypassPermissions' && st.permissionModes.join() === FOUR, st && { mode: st.permissionMode, modes: st.permissionModes });
+      // RED (the base reader: the list from configOptions only — agy's sidecar has none) over the SAME files
+      const amm = fs.readFileSync(path.join(REPO, 'src/acp-message-manager.js'), 'utf8');
+      const NEW = '      permissionModes: st.permissionModes?.length ? st.permissionModes : sidecarModes(meta),\n';
+      const OLD = "      permissionModes: st.permissionModes?.length ? st.permissionModes : asArray(meta?.configOptions).filter((o) => o && (o.category === 'mode' || o.id === 'mode')).flatMap((o) => flattenSelect(o).map((v) => String(v.value))),\n";
+      const base = amm.split(NEW).length === 2 ? mutantCopies('agy-harness-ring', REPO).load('src/acp-message-manager.js', amm.replace(NEW, OLD), 'base-list') : null;
+      const bst = base ? statusOf(base.AcpSessionMessages, dir) : null;
+      const WID = "    const wid = this._sessionId || this._session?._webuiId || null;\n";
+      if (amm.split(WID).length === 2) baseReader = mutantCopies('agy-harness-wid', REPO).load('src/acp-message-manager.js', amm.replace(WID, '    const wid = this._sessionId || null;\n'), 'base-wid').AcpSessionMessages;
+      ck('⑮ RED copy (the base reader): the label survives (meta.agentMode) but the list is EMPTY — the chip opened nothing', !!bst && bst.permissionMode === 'bypassPermissions' && bst.permissionModes.length === 0, bst && { mode: bst.permissionMode, modes: bst.permissionModes });
+    } finally { await ended(a); }
+    // the hub's teardown (src/server/session-stdout.js cleanupOnExit) deletes the session's journal + sidecar: a Resume is a NEW session
+    const gone = () => { for (const f of ['s.json', 's.buf']) fs.rmSync(path.join(dir, f), { force: true }); };
+    gone();
+    const factFile = path.join(dir, 'agy-conversation-modes', `${cid}.json`);
+    let fact = null; try { fact = JSON.parse(fs.readFileSync(factFile, 'utf8')); } catch { }
+    ck('⑯ the durable fact outlives the session: <buffers>/agy-conversation-modes/<conversation>.json {mode} (0600, its dir 0700)',
+      fact?.mode === 'bypassPermissions' && (fs.statSync(factFile).mode & 0o777) === 0o600 && (fs.statSync(path.dirname(factFile)).mode & 0o777) === 0o700, fact);
+    const factText = fs.readFileSync(factFile, 'utf8');
+    const resume = async (wrapper, at, env = {}) => {
+      const b = startWrapper({ wrapper, dir: at, env: { AGY_WEBUI_RESUME_ID: cid, ...env } });
+      try {
+        await b.until(() => b.find('session'), 8000, 'session');
+        const argv = await b.until(() => starts(b)[0], 8000, 'agy start');
+        b.send({ type: 'chat-input', text: 'after the resume', msgId: 'r1' });
+        await b.until(() => b.find('prompt_end'), 8000, 'the resumed turn');
+        await b.until(() => { try { return JSON.parse(fs.readFileSync(path.join(at, 's.json'), 'utf8')).sessionId === cid && fs.readFileSync(path.join(at, 's.buf'), 'utf8').includes('"kind":"prompt_end"'); } catch { return false; } }, 4000, 'its sidecar + journal (persisted on their timers)').catch(() => null);
+        // the Resume's own status road: the client's GET /api/session-messages?withStatus=1 → transcript-service.status(),
+        // by CONVERSATION id, over the live session — whose hub journal may not hold the wrapper's boot records yet
+        const route = async (Cls) => createTranscriptService({ activeSessions: new Map([['s', { backend: 'antigravity', backendSessionId: cid, buffer: '', _webuiId: 's' }]]), createSessionMessages: (sess, sid) => new Cls(sess, sid, { buffersDir: at }) })
+          .status({ backend: 'antigravity', sessionId: cid, cwd: at }).then((x) => x.chatStatus).catch((e) => ({ err: e.message }));
+        return { argv, text: b.text(), st: statusOf(AcpSessionMessages, at), said: b.find('notice', (r) => r.noticeKind === 'mode-resumed')?.text || null, routeSt: await route(AgyReader), routeBase: baseReader ? await route(baseReader) : undefined, hub: hubOf(b.records), hubBase: baseEvents ? hubOf(b.records, baseEvents) : undefined, hubNoStrip: noStrip ? hubOf(b.records, noStrip) : undefined, first: b.records[0]?.kind };
+      } finally { await ended(b); }
+    };
+    const r = await resume(WRAPPER, dir);
+    gone();
+    ck('⑯ a RESUME with no stated mode runs in the conversation\'s OWN mode: agy started with --dangerously-skip-permissions on --conversation <it>, the reply under always-proceed',
+      r.argv.includes('--dangerously-skip-permissions') && r.argv[r.argv.indexOf('--conversation') + 1] === cid && /always-proceed\): after the resume/.test(r.text), { argv: r.argv, text: r.text.slice(-80) });
+    ck('⑯ …and the Resume\'s OWN status road says it: transcript-service.status() by conversation id, over the live session with an EMPTY hub journal ⇒ the sidecar (by the session\'s _webuiId): bypassPermissions + the four',
+      r.routeSt?.permissionMode === 'bypassPermissions' && (r.routeSt.permissionModes || []).join() === FOUR, r.routeSt);
+    ck('⑯ RED copy (the base reader: the sidecar only by the caller\'s id, which this road never passes): null — the resumed chip said «default»', !!baseReader && r.routeBase === null, r.routeBase);
+    ck('⑯ …and the HUB is told: acp-events over the resumed wrapper\'s stdout sets session._permissionMode, writes it to session-meta and tells the windows (permission-mode-ack {ok, bypassPermissions}) — the creator\'s chip, which no init card reaches',
+      r.hub?.mode === 'bypassPermissions' && JSON.stringify(r.hub.acks) === JSON.stringify([[true, 'bypassPermissions']]) && r.hub.meta === 'bypassPermissions', r.hub);
+    ck('⑯ RED copy (the base consumer: the record\'s mode is never read): no ack, the hub\'s mode stays null — the resumed window\'s chip said «default»', !!baseEvents && r.hubBase?.mode === null && r.hubBase.acks.length === 0, r.hubBase);
+    ck('⑯ RED copy (dtach\'s clear preamble left on the line, the base reader): the FIRST record — a Resume\'s `session` record, the one carrying the mode — fails to parse, so the hub never hears the mode (heavy-measured: «\\e[H\\e[J{"ts"…"kind":"session"…})', !!noStrip && r.first === 'session' && r.hubNoStrip?.mode === null && r.hubNoStrip.acks.length === 0, { first: r.first, hub: r.hubNoStrip });
+    ck('⑯ …its status says so (chatStatus → bypassPermissions + the four), and ONE line says why', r.st?.permissionMode === 'bypassPermissions' && r.st.permissionModes.join() === FOUR && /own mode: bypassPermissions \(no mode was asked/.test(r.said || ''), { st: r.st && [r.st.permissionMode, r.st.permissionModes], said: r.said });
+    // RED copy (the base boot: AGY_WEBUI_MODE alone), in a copy of the buffers dir holding the same fact
+    const redDir = fs.mkdtempSync(path.join(ROOT, 'w-'));
+    fs.mkdirSync(path.join(redDir, 'agy-conversation-modes'), { recursive: true });
+    fs.writeFileSync(path.join(redDir, 'agy-conversation-modes', `${cid}.json`), factText);
+    const noAdopt = mutant('no-own-mode', '  const own = resumeId && !state.mode ? conversationMode(resumeId) : null;\n', '  const own = null;\n');
+    const red = noAdopt ? await resume(noAdopt, redDir) : null;
+    ck('⑯ RED copy (the base: the Resume reads AGY_WEBUI_MODE only): agy starts WITHOUT the bypass, the reply under request-review, the status «default» (mode \'\')',
+      !!red && !red.argv.includes('--dangerously-skip-permissions') && /request-review\): after the resume/.test(red.text) && !(red.st?.permissionMode), red && { argv: red.argv, text: red.text.slice(-60), st: red.st && red.st.permissionMode }); // null status / '' ⇒ the chip's «default»
+    const p = await resume(WRAPPER, dir, { AGY_WEBUI_MODE: 'plan' });
+    let after = null; try { after = JSON.parse(fs.readFileSync(factFile, 'utf8')); } catch { }
+    ck('⑯ a STATED mode wins (AGY_WEBUI_MODE=plan ⇒ --mode plan, no line) and is the conversation\'s from then on', p.argv.includes('--mode') && p.argv[p.argv.indexOf('--mode') + 1] === 'plan' && !p.argv.includes('--dangerously-skip-permissions') && !p.said && after?.mode === 'plan', { argv: p.argv, said: p.said, after });
+    ck('⑯ the fact file takes only a conversation id (no path): the wrapper builds <dir>/<id>.json from [\\w-] alone', src.includes("const convModeFile = (id) => (typeof id === 'string' && /^[\\w-]{1,128}$/.test(id) ? path.join(CONV_MODES_DIR, id + '.json') : null);"));
+  };
+
+  // ⑰ «required» is no tool (bug 3): a user turn that left a tool step uncompleted, jetski's line ⇒ the card + the retry
+  const required = async (wrapper) => {
+    const w = startWrapper({ wrapper });
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      w.send({ type: 'chat-input', text: 'quiet skipped', msgId: 'j1' });
+      const card = await w.until(() => w.find('permission_request'), 8000, 'the card');
+      w.send({ type: 'permission-response', sessionId: 's', requestId: card.requestId, approved: true, optionId: 'retry' });
+      const retry = await w.until(() => agyLines(w).find((c) => /^The user allowed /.test(c)), 8000, 'the retry line');
+      return { title: card.toolCall.title, tool: card.toolCall.rawInput.tool, notice: card.toolCall.rawInput.notice, retry };
+    } finally { await ended(w); }
+  };
+  const OLD_TOOL = "  const m = /required the [“\"'`]([\\w.:-]+)[”\"'`] permission/i.exec(line) || /\\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\\b/.exec(line) || /\\b(?:tool|command)\\s+(?!required\\b)[“\"'`]?([\\w.:-]+)/i.exec(line);\n";
+  const baseTool = mutant('tool-required', OLD_TOOL, "  const m = /\\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\\b/.exec(line) || /\\b(?:tool|command)\\s+[“\"'`]?([\\w.:-]+)/i.exec(line);\n");
+
+  // ⑱ no false card (bug 4): the stop-check nudge turn — one tool step, completed, no text — and jetski's line after it
+  const nudge = async (wrapper, reason, env = {}) => {
+    const tok = `vsst_${crypto.randomUUID().slice(0, 8)}`;
+    if (reason) reasons.set(tok, reason);
+    const w = startWrapper({ wrapper, env: { VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: tok, ...env } });
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      w.send({ type: 'chat-input', text: reason ? 'hello' : 'quiet skipped', msgId: 'n1' });
+      await w.until(() => wlog(w).includes('[stderr] jetski: no output produced'), 8000, 'jetski\'s line');
+      await sleep(200); // the card (if any) is recorded in the same call; its stdout line lands after
+      return { cards: w.all('permission_request').map((r) => r.toolCall.title), nudged: agyLines(w).some((c) => /^<vibespace-reminder>/.test(c)), why: (/no soft-deny card: ([^\n]*)/.exec(wlog(w)) || [])[1] || null };
+    } finally { await ended(w); }
+  };
+  const GUARD = "  if (nothing) { log(`no soft-deny card: ${nothing}`); return; }\n";
+  const noGuard = mutant('nudge-card', GUARD, '');
+
+  // ⑲ a stopped process is never an error (bug 5): agy prints result ERROR «interrupted» when the restart's SIGTERM lands
+  const stopped = async (wrapper, how) => {
+    const w = startWrapper({ wrapper, env: { AGY_STUB_SLOW_MS: '1500', AGY_STUB_SIGTERM_RESULT: '1' } });
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      if (how === 'stray') {
+        w.send({ type: 'chat-input', text: 'a stray one', msgId: 's1' });
+        await w.until(() => w.find('prompt_end'), 8000, 'the turn');
+        await w.until(() => w.find('notice', (r) => r.noticeKind === 'agent-error'), 3000, 'the stray result').catch(() => null);
+        return { errors: w.all('notice', (r) => r.noticeKind === 'agent-error').map((r) => r.text), ends: w.all('prompt_end').map((r) => r.stopReason) };
+      }
+      w.send({ type: 'chat-input', text: 'a slow one', msgId: 's1' });
+      await w.until(() => w.find('prompt_start'), 5000, 'start');
+      if (how === 'steer') {
+        w.send({ type: 'chat-input', text: 'steered next', msgId: 's2' });
+        const q = await w.until(() => w.all('queue_changed').find((r) => r.items.length === 1), 5000, 'queued');
+        w.send({ type: 'queue-op', op: 'steer', id: q.items[0].id });
+        await w.until(() => w.all('prompt_end').length === 2, 10000, 'the steered turn');
+      } else {
+        w.send({ type: 'interrupt' });
+        await w.until(() => starts(w).length >= 2, 8000, 'the restart');
+      }
+      // the old agy prints its «interrupted» (the stub's SIGTERM line) on its way out: wait for the wrapper to have judged it
+      await w.until(() => wlog(w).includes("the stopped agy's result ignored") || w.find('notice', (r) => r.noticeKind === 'agent-error'), 4000, 'the old agy\'s result').catch(() => null);
+      await sleep(150);
+      return { errors: w.all('notice', (r) => r.noticeKind === 'agent-error').map((r) => r.text), ends: w.all('prompt_end').map((r) => r.stopReason), ignored: /the stopped agy's result ignored \(it was asked to stop\): ERROR — interrupted/.test(wlog(w)) };
+    } finally { await ended(w); }
+  };
+  const STOP_GUARD = "    if (stoppedChild(from)) { log(`the stopped agy's result ignored (it was asked to stop): ${clip(r.status || '', 40)}${r.error ? ' — ' + clip(r.error, 200) : ''}`); return; }\n";
+  const noStop = mutant('stopped-child', STOP_GUARD, '');
+
+  const [, t, tb, n1, n2, n3, nr, s1, s2, s3, sr] = await Promise.all([
+    ring().catch((e) => ck('⑮/⑯ ran', false, e.message)),
+    required(WRAPPER).catch((e) => ({ err: e.message })), baseTool ? required(baseTool).catch((e) => ({ err: e.message })) : null,
+    nudge(WRAPPER, 'Before you stop, run vibespace-status done quietly — quiet please'), nudge(WRAPPER, 'quiet skipped please'),
+    nudge(WRAPPER, null, { AGY_WEBUI_MODE: 'bypassPermissions' }), noGuard ? nudge(noGuard, 'Before you stop, run vibespace-status done quietly — quiet please') : null,
+    stopped(WRAPPER, 'steer').catch((e) => ({ err: e.message })), stopped(WRAPPER, 'stop').catch((e) => ({ err: e.message })), stopped(WRAPPER, 'stray').catch((e) => ({ err: e.message })),
+    noStop ? stopped(noStop, 'stop').catch((e) => ({ err: e.message })) : null,
+  ].map((p) => Promise.resolve(p).catch((e) => ({ err: e && e.message }))));
+  srv.close();
+  ck('⑰ jetski\'s «a tool required the "command" permission…» names the tool `command` — the card «agy skipped command: it needs approval», its words kept', t?.title === 'agy skipped command: it needs approval' && t.tool === 'command' && /^jetski: no output produced/.test(t.notice || ''), t);
+  ck('⑰ …and Allow once retries naming it: «The user allowed command, which you skipped…»', /^The user allowed command, which you skipped because it needed approval/.test(t?.retry || ''), t?.retry);
+  ck('⑰ RED copy (the base regexes): the VERB is the tool — «agy skipped required», «The user allowed required…»', !!baseTool && tb?.title === 'agy skipped required: it needs approval' && /^The user allowed required, /.test(tb.retry || ''), tb);
+  ck('⑱ the stop-check NUDGE turn (one tool step, completed, no text): jetski\'s line raises NO card — the log says why', n1 && n1.nudged && n1.cards.length === 0 && /stop-check nudge turn completed its 1 tool step/.test(n1.why || ''), n1);
+  ck('⑱ CONTROL — a nudge turn whose tool step never completed (a real skip, not bypass): the card still comes', n2 && n2.nudged && n2.cards.length === 1 && n2.cards[0] === 'agy skipped command: it needs approval', n2);
+  ck('⑱ under bypass (every tool approved) jetski\'s line raises no card, even with a step left open', n3 && n3.cards.length === 0 && /every tool is approved/.test(n3.why || ''), n3);
+  ck('⑱ RED copy (the guard cut): the completed nudge turn raises «agy skipped command» — the false card the owner saw', !!noGuard && nr?.nudged && nr.cards.length === 1, nr);
+  ck('⑲ STEER: the old agy\'s result ERROR «interrupted» (its SIGTERM) raises NO error line, and the steered turn ends normally', s1 && !s1.err && s1.errors.length === 0 && s1.ignored && s1.ends.join() === 'cancelled,end_turn', s1);
+  ck('⑲ STOP: the same — no «Antigravity: interrupted» after Stop (the log names the ignored result)', s2 && !s2.err && s2.errors.length === 0 && s2.ignored && s2.ends.join() === 'cancelled', s2);
+  ck('⑲ CONTROL — an «interrupted» from the CURRENT process (no restart, idle) is still said: «Antigravity: interrupted»', s3 && s3.errors.length === 1 && s3.errors[0] === 'Antigravity: interrupted' && s3.ends.join() === 'end_turn', s3);
+  ck('⑲ RED copy (the guard cut): Stop leaves the stale «Antigravity: interrupted» error line', !!noStop && sr && sr.errors.includes('Antigravity: interrupted'), sr);
   return R;
 })();
 
@@ -526,6 +742,7 @@ console.log('— ⑥b THE STEER (lane agy-harness-fixes, bug 4): a queued messag
     ok('the running turn ENDS (cancelled) — agy takes no input mid-turn — and the line says why (what it did stays)', end.stopReason === 'cancelled' && said && /Steered/.test(said.text), { end, said: said && said.text });
     await w.until(() => lines(w).length >= 4, 20000, 'the queue drained');
     ok('…agy restarts on the SAME conversation and runs the steered message FIRST, then the rest in order', starts(w).length >= 2 && starts(w)[1].includes('--conversation') && starts(w)[1].includes(ses.sessionId) && lines(w).join(' | ') === 'a slow one | third queued | first queued | second queued', lines(w));
+    await w.until(() => w.all('prompt_end').length >= 4, 8000, 'the last turn\'s end').catch(() => null); // its stdin line lands before its end (lane agy-harness-fixes-2: ⑮–⑲ beside it made that race show)
     ok('…nothing queued was lost or run twice: the queue ends empty, four turns started, three ended normally', w.all('queue_changed').pop().items.length === 0 && w.all('prompt_start').length === 4 && w.all('prompt_end', (r) => r.stopReason === 'end_turn').length === 3, w.all('prompt_end').map((r) => r.stopReason));
   } finally { await w.stop(); }
   // RED control: the pre-fix wrapper (no steer verb) refuses it — the message waits behind the running turn
@@ -926,6 +1143,9 @@ console.log('— ⑬ THE TURN\'S USAGE (lane agy-status-bar-facts; ⑫ is lane a
 
 console.log('— ⑭ THE LIVE LANE (lane agy-peer-wake): the peer-message frame idle / busy / empty / restarting / not signed in / at exit, the advert, the census');
 for (const [n, c, e] of await peerLane) ok(n, c, e);
+
+console.log('— ⑮–⑲ (lane agy-harness-fixes-2): the mode through the ring + a Resume, «required» is no tool, no false card on a nudge turn, a stopped process is never an error');
+for (const [n, c, e] of await fixes2) ok(n, c, e);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

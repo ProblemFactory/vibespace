@@ -3288,6 +3288,8 @@ export default {
   "Waiting behind the running turn — steering it injects it now, at the agent’s next reply": "実行中のターンの後ろで待機中 —— 投入するとエージェントは次の返信時に読みます",
   "Injected into the running turn": "実行中のターンに投入済み",
   "Removed from the queue — it will not run": "キューから削除 —— 実行されません",
+  "Started, then stopped": "開始後に停止",
+  "It had already started when Stop cut it off — its words are back in the input box": "停止したときにはすでに実行が始まっていました —— 停止し、内容を入力欄に戻しました",
   "That message is no longer queued — it already ran.": "そのメッセージはもうキューにありません —— すでに実行されました。",
   // the Alt+Enter chord (2026-09-07)
   "Enter queues": "Enter でキュー",
@@ -4571,7 +4573,7 @@ export default {
   "{app} stopped": "{app} を停止しました",
   "{app} stopped after {n} min without input": "{app} を停止しました（{n} 分間入力なし）",
   "{app} stopped: {why}": "{app} を停止しました：{why}",
-  "Asked {app} to close — press ✕ again within {n} s to stop it": "{app} に閉じるよう要求しました — {n} 秒以内にもう一度 ✕ を押すと停止します",
+  "Asked {app} to close — no agent is using it, so pressing ✕ again within {n} s stops the app": "{app} に閉じるよう要求しました — 使用中のエージェントはいないため、{n} 秒以内にもう一度 ✕ を押すとこのアプリを停止します",
   "Custom client": "カスタムクライアント",
   "Custom App ID": "カスタム App ID",
   "Custom App Secret": "カスタム App Secret",
@@ -10797,6 +10799,7 @@ export default {
   "Your folders": "あなたのフォルダ",
   // lane stop-refills-composer: Stop puts the dropped queue back into the composer (the toast)
   "Stop put {n} queued message(s) back into the input box": "停止 — キュー待ちの {n} 件のメッセージを入力欄に戻しました",
+  ", {n} had already started and was stopped — put back too": "（うち {n} 件はすでに実行が始まっていて停止されました —— それも戻しました）",
   "{k} attached image(s) were not put back — attach them again": "添付画像 {k} 件は戻せません — もう一度添付してください",
   "{k} other attachment(s) were not put back — attach them again": "ほかの添付 {k} 件は戻せません — もう一度添付してください",
   "{m} message(s) came back shortened": "{m} 件のメッセージは短縮して戻しました",

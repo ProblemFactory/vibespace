@@ -3288,6 +3288,8 @@ export default {
   "Waiting behind the running turn — steering it injects it now, at the agent’s next reply": "正在等待当前这一轮结束 —— 插入后 agent 在下一次回复时就会看到",
   "Injected into the running turn": "已插入正在进行的这一轮",
   "Removed from the queue — it will not run": "已从队列移除 —— 不会运行",
+  "Started, then stopped": "已开始，被停止",
+  "It had already started when Stop cut it off — its words are back in the input box": "按下停止时它已开始运行 —— 已被停止，内容放回了输入框",
   "That message is no longer queued — it already ran.": "这条消息已不在队列中 —— 它已经运行了。",
   // the Alt+Enter chord (2026-09-07): the OTHER send mode by keyboard, plus
   // its composer hint and the ≤768px button that stands in for the chord
@@ -4572,7 +4574,7 @@ export default {
   "{app} stopped": "{app} 已停止",
   "{app} stopped after {n} min without input": "{app} 已停止（{n} 分钟无输入）",
   "{app} stopped: {why}": "{app} 已停止：{why}",
-  "Asked {app} to close — press ✕ again within {n} s to stop it": "已请求 {app} 关闭 — {n} 秒内再按一次 ✕ 即停止它",
+  "Asked {app} to close — no agent is using it, so pressing ✕ again within {n} s stops the app": "已请求 {app} 关闭 — 没有 agent 在使用它，{n} 秒内再按一次 ✕ 即停止该应用",
   "Custom client": "自定义客户端",
   "Custom App ID": "自定义 App ID",
   "Custom App Secret": "自定义 App Secret",
@@ -10798,6 +10800,7 @@ export default {
   "Your folders": "你的文件夹",
   // lane stop-refills-composer: Stop puts the dropped queue back into the composer (the toast)
   "Stop put {n} queued message(s) back into the input box": "已停止 — {n} 条排队的消息已放回输入框",
+  ", {n} had already started and was stopped — put back too": "，{n} 条已开始运行、被停止，也放回了",
   "{k} attached image(s) were not put back — attach them again": "{k} 张附带的图片没有放回 — 请重新附加",
   "{k} other attachment(s) were not put back — attach them again": "另有 {k} 个附件没有放回 — 请重新附加",
   "{m} message(s) came back shortened": "{m} 条消息放回时被截短",
