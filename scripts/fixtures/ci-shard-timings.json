@@ -184,6 +184,7 @@
   "test-harness-settings": 328,
   "test-helm-render": 3634,
   "test-helper-ask-ui": 78358,
+  "test-hook-loop-hold": 8000,
   "test-host-stale-dialer-ui": 18651,
   "test-https-hub-chrome": 20718,
   "test-inbox-reply-ui": 25221,

@@ -47,6 +47,7 @@ import { icon, el, avatar } from './channel-chrome.js';
 import { createBackendIcon } from './agent-meta.js';
 import * as PM from './principal-picker-model.js';
 import { enterSubmits } from './chat-enter-keys.js';
+import { metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): a roster move, not an Activity line
 
 const RECENT_KEY = 'vibespace.principalPicker.recent';
 let seq = 0;
@@ -359,7 +360,7 @@ export function principalPicker({ items = [], app = null, multi = false, compact
   if (app && app.ws && typeof app.ws.onGlobal === 'function' && typeof items === 'function') {
     const onMsg = (m) => {
       if (!root.isConnected && !pop) { try { app.ws.offGlobal(onMsg); } catch {} return; }
-      if (m && (m.type === 'active-sessions' || m.type === 'tasks-updated')) setTimeout(() => api.refresh(), 0);   // after the sidebar applied it
+      if (m && (m.type === 'active-sessions' || (m.type === 'tasks-updated' && metaChanged(m)))) setTimeout(() => api.refresh(), 0);   // after the sidebar applied it (lane task-group-fanout: a roster move only — never an Activity line)
     };
     app.ws.onGlobal(onMsg);
     off = () => { try { app.ws.offGlobal(onMsg); } catch {} };

@@ -8,6 +8,7 @@ import { keyboardOwned, keyboardYielded, onKeyboardChange } from './keyboard-own
 import { EnterGuard, imeOwnsKey, IME_HINT_MS, sendKeyName } from './chat-enter-keys.js'; // lane chat-enter-ime: an Enter meant for the input method never sends
 import { createVoiceInput } from './voice-input.js'; // Dropline voice input (q-029 P0): the microphone beside attach
 import { createStashStrip } from './stash-strip.js'; // 2026-09-27: what waits for this agent's next turn + Hand over now
+import { landDraftPrepend, PUTBACK_SEP } from '../queue-putback.js'; // PURE (lane stop-refills-composer): a Stop put-back lands as a prefix over the live box
 import { createAgentCards } from './agent-card.js'; // lane agent-window-no-pop: the card an agent's window leaves where nothing opened
 
 /**
@@ -179,13 +180,27 @@ export class ChatInput {
     });
 
     // Sync draft from other clients via StateSync
-    this._draftSyncHandler = (value) => {
+    this._draftSyncHandler = (value, key, op) => {
       // …and the same wall in the other direction: another client's draft must
       // not overwrite a rewrite in progress (the next send would then save the
       // FOREIGN text into the queued message). Land it on the draft we will
       // restore when the edit finishes instead of on the live textarea.
       if (this._pendingEdit) { this._pendingEdit.draftBefore = value || ''; return; }
       if (this._editingQueueId) { this._editDraftBefore = value || ''; return; }
+      // STOP PUT THE DROPPED QUEUE BACK (lane stop-refills-composer — src/queue-putback.js): the server's op carries
+      // `prepended`, and only its PREFIX lands, in front of the LIVE box — the op's whole value was merged against a
+      // store that can be seconds stale while a person keeps typing (the 300 ms autosave never fires mid-typing), so
+      // overwriting would delete exactly the words typed since. The caret moves with the text. Then ONE save, and only
+      // where the box held something unsaved — no synthetic 'input' (N clients would each autosave their own box).
+      if (op && Number.isSafeInteger(op.prepended) && op.prepended > 0) {
+        const focused = typeof document !== 'undefined' && document.activeElement === this._textarea;
+        const r = landDraftPrepend({ current: this._textarea.value, selStart: this._textarea.selectionStart, selEnd: this._textarea.selectionEnd, value: value || '', prepended: op.prepended });
+        this._textarea.value = r.value;
+        if (focused) { try { this._textarea.setSelectionRange(r.selStart, r.selEnd); } catch { } }
+        this._autoSize?.();
+        if (r.value !== (value || '')) { clearTimeout(this._draftTimer); this._draftTimer = null; saveDraft('chat', this._sessionId, r.value); }
+        return;
+      }
       this._textarea.value = value || '';
       this._autoSize?.();
     };
@@ -1179,6 +1194,11 @@ export class ChatInput {
   //     no editor can be open.
   //   · another client's draft sync — lands on the STASH (`_editDraftBefore` /
   //     `_pendingEdit.draftBefore`), never on the live box (round-2 finding 5).
+  //     Stop's PUT-BACK (an op carrying `prepended`, lane stop-refills-composer)
+  //     takes the same stash while an editor is open; otherwise it writes the
+  //     live box with its PREFIX in front of what is there (nothing typed is
+  //     replaced) and saves that once. The abandon paths keep the rewrite
+  //     first and the stash below it (`_withStash`), never one for the other.
   //   · `_insertUploadedPaths` (upload button, folder picker, ChatView's
   //     drag-drop) — the writer that lands LATE (round-6 verifier): it runs
   //     after an await, so the editor it must respect may have been opened
@@ -1470,7 +1490,7 @@ export class ChatInput {
   /** The outcome of ONE queue op (the normalizer's `queue-result` meta op).
    *  Ends the row's pending state either way; a refusal MARKS the row and
    *  keeps the sentence on it, because the system card scrolls away. */
-  setQueueOpResult(id, ok, text) {
+  setQueueOpResult(id, ok, text, queueOp) {
     const key = String(id || '');
     if (!key) {
       // A BATCH verb (run-all / steer-all) names no item: its result ends the
@@ -1501,7 +1521,13 @@ export class ChatInput {
     else this._queueRowState.set(key, { state: 'refused', title: text || '' });
     // THE EDIT'S OWN ANSWER: ok puts the pre-edit draft back, a refusal hands
     // the rewrite back to the user (never the moment it is thrown away).
-    if (this._pendingEdit && this._pendingEdit.id === key) this._resolvePendingEdit(ok, text || '');
+    // OP-AWARE (lane stop-refills-composer): only the EDIT's result answers the
+    // edit. Another verb's result for the edited row — Stop's `remove ok:true`
+    // (another client, or racing the edit frame on the wrapper's stdin) — means
+    // the rewrite was never applied: that is the gone outcome (the rewrite is
+    // kept and merged with the put-back), never "saved". A result with no verb
+    // named (an older normalizer) keeps the old reading.
+    if (this._pendingEdit && this._pendingEdit.id === key) this._resolvePendingEdit(queueOp == null || queueOp === 'edit' ? ok : false, text || '');
     this._renderQueue();
   }
 
@@ -1522,12 +1548,25 @@ export class ChatInput {
     // Untouched (or emptied) editor ⇒ there is nothing of the user's in the
     // box; the pre-edit draft is what belongs there.
     if (typed === null) { this._cancelQueueEdit({ silent: true }); return; }
+    // …and the pre-edit draft is no longer thrown away for it (lane
+    // stop-refills-composer): after a Stop it holds the put-back — every message
+    // Stop dropped, this row's ORIGINAL text among them. The rewrite comes first,
+    // the stash below it; the person deletes what they do not want.
+    const next = this._withStash(typed, this._editDraftBefore);
     this._editingQueueId = null;
     this._editOriginalText = null;
     this._editDraftBefore = null;          // the rewrite IS this session's draft now
-    saveDraft('chat', this._sessionId, typed);
+    if (next !== typed) { this._textarea.value = next; this._autoSize?.(); }
+    saveDraft('chat', this._sessionId, next);
     this._renderQueue();
     showToast(t('That queued message could not be edited — your rewritten text was kept in the input.'), { type: 'error' });
+  }
+
+  /** The rewrite + the stash it borrowed the box from, when the stash holds
+   *  words of its own (lane stop-refills-composer: a put-back lands there while
+   *  an edit is open) — the rewrite first, a blank line, then the stash. */
+  _withStash(typed, stash) {
+    return typeof stash === 'string' && stash.trim() && stash !== typed ? typed + PUTBACK_SEP + stash : typed;
   }
 
   /** THE ONE DISCRIMINATOR every "this edit is ending for a reason the user
@@ -1607,7 +1646,11 @@ export class ChatInput {
     // explanation is the silent failure wearing a full textarea. The DRAFT is
     // what is in the box (raw), so the store and the textarea agree — saving
     // the trimmed twin desynced them by exactly the whitespace the user typed.
-    saveDraft('chat', this._sessionId, this._textarea.value);
+    // The pre-edit draft is kept below the rewrite (lane stop-refills-composer:
+    // after a Stop it holds the put-back), never discarded.
+    const next = this._withStash(this._textarea.value, p.draftBefore);
+    if (next !== this._textarea.value) { this._textarea.value = next; this._autoSize?.(); }
+    saveDraft('chat', this._sessionId, next);
     bail();
     showToast(t('That queued message could not be edited — your rewritten text was kept in the input.'), { type: 'error' });
   }

@@ -4,6 +4,7 @@ import { track } from './telemetry-client.js';
 import { t as tr } from './i18n.js';
 import { mergePendingBind, pendingBindVerdict, sweepPendingBinds } from './fork-groups.js';
 import { folderOf, insideFolder } from '../task-membership.js'; // PURE (lane open-task-binds): THE folder rule, the server's groupsForSession asks the same one
+import { applyTasksDelta, applyStatusDelta, frameStep, fetchVerdict, metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): a broadcast is a DELTA in the hub's order
 
 /**
  * Sidebar tasks mixin — the task system's client (docs/design-task-system.md).
@@ -12,7 +13,7 @@ import { folderOf, insideFolder } from '../task-membership.js'; // PURE (lane op
  * tasks render exactly like the old groups; kind:'task' adds status /
  * objective / attention. Data lives in data/tasks.json on the server
  * (AUTHORITATIVE — never derived from agent output); this mixin holds a
- * client mirror (`_tasks`), synced via `tasks-updated` WS broadcasts, and
+ * client mirror (`_tasks`), synced via `tasks-updated` WS broadcasts (DELTAS since lane task-group-fanout — `_onTasksDelta`), and
  * writes through /api/tasks (granular bind/unbind so concurrent clients
  * can't clobber each other).
  */
@@ -63,36 +64,83 @@ export function installSidebarTasks(SidebarClass) {
     this._fetchTasks();
     this._fetchStatuses();
     this.app.ws.onGlobal((msg) => {
-      if (msg.type === 'tasks-updated' && Array.isArray(msg.tasks)) {
-        // THE BROADCAST IS NEWER THAN ANY FETCH IN FLIGHT (R4 verify r1,
-        // 2026-09-27, the e2e ⑮ flake): every write of the mirror bumps a
-        // generation; a fetch issued before it must not overwrite it.
-        this._tasksGen = (this._tasksGen || 0) + 1;
-        this._tasks = msg.tasks;
-        this._tasksLoaded = true;
-        if (this._activeTab === 'tasks') this._render();
-        this._lastAttnSig = null; // declared attention may have changed
-        this.refreshTaskAttention();
-        this.app.onTasksUpdated?.(msg.tasks);
-      } else if (msg.type === 'session-status-updated' && msg.statuses) {
-        this._statusGen = (this._statusGen || 0) + 1; // a status fetch issued before this frame never replaces it (_fetchStatuses)
-        // Change-guard (audit round-2): every agent's vibespace-status call
-        // broadcasts to every client — identical snapshots must not trigger a
-        // full sidebar rebuild (folder grouping over ~5k sessions).
-        // …EXCEPT a history clear (lane-redact verify r5, reproduced in chrome): a cleared entry that is not the current
-        // status leaves the snapshot identical, and the expanded card's history (fetched at render) kept the words — the
-        // broadcast names what it cleared (`cleared`, ids only) and that is a change
-        const sig = JSON.stringify(msg.statuses);
-        const changed = sig !== this._statusSig || (Array.isArray(msg.cleared) && msg.cleared.length > 0);
-        this._statusSig = sig;
-        this._sessionStatuses = msg.statuses;
-        if (changed) {
-          this._render();
-          this._lastAttnSig = null; // blocked counts feed task attention
-          this.refreshTaskAttention();
-        }
-      }
+      if (msg.type === 'tasks-updated' && !msg.local) this._onTasksDelta(msg);
+      else if (msg.type === 'session-status-updated' && msg.statuses) this._onStatusDelta(msg);
     });
+  };
+
+  // ── THE TWO BROADCAST MIRRORS (lane task-group-fanout, 2026-10-24) ──
+  // Measured on the owner's instance: every Activity line sent EVERY Task Group whole (1.57 MB to every client, 267 a
+  // day) and every `vibespace-status` all 500 status records (106 KB). A frame is now a DELTA (src/task-delta.js) with
+  // its place in the hub's order ({epoch, base, seq}); the mirror takes it only when it follows exactly — not loaded yet
+  // ⇒ held until the fetch lands; already in ⇒ dropped; a gap, another boot, a frame too big ⇒ fetched again (and held
+  // meanwhile) — never a stale mirror (the StateSync reconnect law).
+  const HELD_MAX = 50;
+  const hold = (list, msg) => { list.push(msg); if (list.length > HELD_MAX) list.shift(); };
+
+  proto._onTasksDelta = function(msg, { replayed = false } = {}) {
+    this._tasksHeld = this._tasksHeld || [];
+    const step = frameStep(this._tasksMark, msg, { replayed });
+    // an unordered frame (a suite's synthetic one) / a REPLAYED frame that still does not follow: a fetch covers it, the
+    // frame is never held (held and replayed it would ask again for ever); a frame held while no fetch is on its way (the
+    // last one failed) asks again — a mirror never waits for a reconnect
+    if (step === 'refresh' || step === 'cover') { if (!this._tasksFetching) this._fetchTasks(); return; }
+    if (step === 'hold') { hold(this._tasksHeld, msg); if (!this._tasksFetching) this._fetchTasks(); return; }
+    if (step === 'drop') return;
+    const r = step === 'apply' ? applyTasksDelta(this._tasks, msg) : null;
+    if (!r && replayed) { if (!this._tasksFetching) this._fetchTasks(); return; }
+    if (!r) { this._tasksMark = null; hold(this._tasksHeld, msg); this._fetchTasks(); return; }
+    // THE BROADCAST IS NEWER THAN ANY FETCH IN FLIGHT (R4 verify r1,
+    // 2026-09-27, the e2e ⑮ flake): every write of the mirror bumps a
+    // generation; a fetch issued before it must not overwrite it.
+    this._tasksGen = (this._tasksGen || 0) + 1;
+    this._tasks = r.tasks;
+    this._tasksMark = { loaded: true, epoch: msg.epoch, seq: msg.seq };
+    this._tasksLoaded = true;
+    this._afterTasksChange(msg);
+  };
+  /** after the mirror moved: the board repaints only when something it draws moved (an Activity line, a Backlog item, a
+   *  clock leave it as it is); the windows reading the mirror heard the frame itself — a FETCHED list is announced to them
+   *  as a local `tasks-updated` ({local, refetch}: every window re-reads) */
+  proto._afterTasksChange = function(msg) {
+    if (this._activeTab === 'tasks' && metaChanged(msg)) this._render();
+    this._lastAttnSig = null; // declared attention may have changed
+    this.refreshTaskAttention();
+    this.app.onTasksUpdated?.(this._tasks);
+    if (msg && msg.local) for (const h of [...(this.app.ws?.globalHandlers || [])]) { try { h(msg); } catch { } }
+  };
+
+  proto._onStatusDelta = function(msg, { replayed = false } = {}) {
+    // a frame without its place in the order (a suite's synthetic frame) is a whole map, as before
+    if (typeof msg.seq !== 'number') { this._statusGen = (this._statusGen || 0) + 1; this._takeStatuses(msg.statuses, msg, null); return; }
+    this._statusHeld = this._statusHeld || [];
+    const v = frameStep(this._statusMark, msg, { replayed });
+    if (v === 'hold') { hold(this._statusHeld, msg); if (!this._statusFetching) this._fetchStatuses(); return; }
+    if (v === 'drop') return;
+    if (v === 'cover') { if (!this._statusFetching) this._fetchStatuses(); return; }   // a replayed frame: covered by a fetch, never held again
+    if (v !== 'apply') { this._statusMark = null; hold(this._statusHeld, msg); this._fetchStatuses(); return; }
+    this._statusGen = (this._statusGen || 0) + 1; // a status fetch issued before this frame never replaces it (_fetchStatuses)
+    this._statusMark = { loaded: true, epoch: msg.epoch, seq: msg.seq };
+    this._takeStatuses(applyStatusDelta(this._sessionStatuses, msg), msg, msg);
+  };
+  /** the status mirror takes a map. Change-guard (audit round-2): every agent's vibespace-status call broadcasts to every
+   *  client — a frame that changes nothing must not trigger a full sidebar rebuild (folder grouping over ~5k sessions)…
+   *  EXCEPT a history clear (lane-redact verify r5, reproduced in chrome): a cleared entry that is not the current status
+   *  leaves the records identical, and the expanded card's history (fetched at render) kept the words — the broadcast
+   *  names what it cleared (`cleared`, ids only) and that is a change. `delta` = the frame's own keys (the guard reads
+   *  only those), null = a whole map (the guard compares it whole). */
+  proto._takeStatuses = function(next, msg, delta) {
+    const prev = this._sessionStatuses || {};
+    let changed = Array.isArray(msg && msg.cleared) && msg.cleared.length > 0;   // a history clear IS a change (verify r5)
+    if (!delta) { const sig = JSON.stringify(next); changed = changed || sig !== this._statusSig; this._statusSig = sig; }
+    else changed = changed || (delta.removed || []).some((k) => k in prev) || Object.entries(delta.statuses || {}).some(([k, v]) => JSON.stringify(prev[k]) !== JSON.stringify(v));
+    if (delta) this._statusSig = null;
+    this._sessionStatuses = next;
+    if (changed) {
+      this._render();
+      this._lastAttnSig = null; // blocked counts feed task attention
+      this.refreshTaskAttention();
+    }
   };
 
   // ── Session status (state/urgency chips on cards) ──
@@ -104,14 +152,22 @@ export function installSidebarTasks(SidebarClass) {
    *  later frame equal to the cleared map, so it stayed until some other status changed. The generation taken before
    *  the request says whether a broadcast landed meanwhile; if so the answer is dropped (the broadcast is newer). */
   proto._fetchStatuses = function() {
+    this._statusFetching = true;   // lane task-group-fanout: a frame held meanwhile does not ask again
     const gen = this._statusGen || 0;
     return fetch('/api/session-status').then(r => r.ok ? r.json() : null).then(d => {
-      if (!d?.statuses || (this._statusGen || 0) !== gen) return;
+      // lane task-group-fanout: the answer says where it sits in the hub's order ({epoch, seq}) — dropped only when a
+      // broadcast NEWER than it landed meanwhile; the frames held while it was in flight are replayed after it
+      if (!d?.statuses || ((this._statusGen || 0) !== gen && fetchVerdict(this._statusMark, d) === 'drop')) return;
+      this._statusGen = (this._statusGen || 0) + 1;
       this._sessionStatuses = d.statuses;
+      this._statusSig = null;
+      this._statusMark = { loaded: true, epoch: Number(d.epoch) || 0, seq: Number(d.seq) || 0 };
       this._render();
       this._lastAttnSig = null; // declared attention may have changed while we were away
       this.refreshTaskAttention();
-    }).catch(() => { });
+      this._statusFetching = false;
+      for (const m of (this._statusHeld || []).splice(0)) this._onStatusDelta(m, { replayed: true });
+    }).catch(() => { }).finally(() => { this._statusFetching = false; });
   };
 
   proto._sessionStatusKeyFor = function(sessionOrKey) {
@@ -258,27 +314,31 @@ export function installSidebarTasks(SidebarClass) {
     // Reach & policy) was empty. The generation taken before the request
     // says whether a broadcast landed meanwhile; if so the answer is only
     // an "I loaded" signal.
+    this._tasksFetching = true;   // lane task-group-fanout: a frame held meanwhile does not ask again
     const gen = this._tasksGen || 0;
     try {
       const res = await fetch('/api/tasks');
       if (!res.ok) throw new Error(`${res.status} ${res.statusText || 'request failed'}`);
       const data = await res.json();
       if (data?.error) throw new Error(String(data.error));
-      if ((this._tasksGen || 0) !== gen) { this._tasksLoaded = true; this._tasksLoadErr = null; return; }
+      // lane task-group-fanout: …in the hub's order — the answer says where it sits ({epoch, seq}); it is dropped only when
+      // a broadcast NEWER than it is already in the mirror, and the frames held while it was in flight are replayed after it
+      if ((this._tasksGen || 0) !== gen && fetchVerdict(this._tasksMark, data) === 'drop') { this._tasksLoaded = true; this._tasksLoadErr = null; return; }
+      this._tasksGen = (this._tasksGen || 0) + 1;
       this._tasks = Array.isArray(data.tasks) ? data.tasks : [];
+      this._tasksMark = { loaded: true, epoch: Number(data.epoch) || 0, seq: Number(data.seq) || 0 };
       this._tasksLoaded = true;
       this._tasksLoadErr = null;
-      if (this._activeTab === 'tasks') this._render();
-      this._lastAttnSig = null;
-      this.refreshTaskAttention();
-      this.app.onTasksUpdated?.(this._tasks);
+      this._afterTasksChange({ type: 'tasks-updated', local: true, refetch: true });
+      this._tasksFetching = false;
+      for (const m of (this._tasksHeld || []).splice(0)) this._onTasksDelta(m, { replayed: true });
     } catch (e) {
       this._tasksLoadErr = String(e?.message || e);
       if (!this._tasksLoadWarned) {
         this._tasksLoadWarned = true; // once per page — the reconnect retry is silent
         try { showToast(tr('Couldn’t load Task Groups — retrying on reconnect'), { type: 'error' }); } catch { }
       }
-    }
+    } finally { this._tasksFetching = false; }
   };
 
   proto._taskById = function(id) { return (this._tasks || []).find(t => t.id === id) || null; };
@@ -362,7 +422,10 @@ export function installSidebarTasks(SidebarClass) {
     if (!task?.id) return;
     if (!Array.isArray(this._tasks)) this._tasks = [];
     const i = this._tasks.findIndex((x) => x.id === task.id);
-    if (i >= 0) this._tasks[i] = task; else this._tasks.push(task);
+    // MERGED, never replaced (lane task-group-fanout): the API answers the stored record, the mirror holds the wire view
+    // (+ the derived ctxRes / folders / contextDir / visibility) — a broadcast is a delta now and carries only what MOVED,
+    // so a replaced entry would lose the derived fields for good
+    if (i >= 0) this._tasks[i] = { ...this._tasks[i], ...task }; else this._tasks.push(task);
     this._tasksLoaded = true;
   };
   proto._taskCreate = async function(fields) {

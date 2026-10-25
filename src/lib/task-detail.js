@@ -2,6 +2,7 @@ import { escHtml, showConfirmDialog, showToast, autoTaskColor, showContextMenu }
 import { t, tc } from './i18n.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { mountTaskLog } from './task-log.js'; // the Backlog / 活动记录 tabs ARE the log viewer
+import { touches, metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): what a tasks-updated delta moved
 import { blurCommits, afterPointerUp } from './blur-commit.js'; // a box saves when left, after the release
 import { pathField } from './path-field.js'; // lane path-field's component — the Context table's path cells, the export file
 import { KEY_FILES } from '../task-context.js'; // PURE: the Context table's default key files (the store's rules)
@@ -780,7 +781,9 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
 
   if (task) { paintTabs(); paintFooter(); mountTab(); } else render();
 
-  const onTasksMsg = (msg) => { if (msg.type === 'tasks-updated') render(); };
+  // lane task-group-fanout: this group's own change, or another group's title / membership / table (a reference row, the
+  // members) — never another group's Activity line
+  const onTasksMsg = (msg) => { if (msg.type === 'tasks-updated' && (touches(msg, taskId) || metaChanged(msg))) render(); };
   app.ws.onGlobal(onTasksMsg);
   // tasks.autoStyleOrder is render-time-read (Auto swatch + texture chip
   // previews show the group's CURRENT auto style) — re-render on change

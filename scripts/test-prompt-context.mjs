@@ -57,11 +57,14 @@ const c2 = call();
 check('no change → reminder only', !c2.includes('task-context') && !c2.includes('task-update') && c2.includes('vibespace-reminder'), c2);
 
 await sleep(3);
-tasks.addProgress(g1.id, { note: 'made progress here', session: 'claude:sess1' });
+tasks.addProgress(g1.id, { note: 'made progress here', session: 'codex:elsewhere' });
+tasks.addProgress(g1.id, { note: 'my own step logged', session: 'claude:sess1' });
 tasks.update(g1.id, { objective: 'obj one, refined' });
 const c3 = call();
 check('change → diff only (no full re-inject)', c3.includes('<vibespace-task-update>') && !c3.includes('<vibespace-task-context>'), c3.slice(0, 300));
 check('diff carries the actual deltas', c3.includes('Objective UPDATED to:') && c3.includes('obj one, refined') && c3.includes('made progress here'), c3);
+// lane injection-relevance: the member's OWN line is counted, never repeated back (the route hands diffChanges its key)
+check('…its own line counted, not repeated', c3.includes('- New activity (2, 1 of them yours — not repeated):') && !c3.includes('my own step logged'), c3);
 check('diff omits the tools teaching (already known)', !c3.includes('Reporting back —'), c3);
 const c4 = call();
 check('after diff → quiet again', !c4.includes('task-update') && !c4.includes('task-context'), c4);
@@ -71,7 +74,8 @@ check('after diff → quiet again', !c4.includes('task-update') && !c4.includes(
 await sleep(3);
 tasks.update(g1.id, { backlog: [{ text: 'parked by someone else', status: 'open', addedBy: 'codex:elsewhere', claimedBy: ['codex:elsewhere'], addedAt: Date.now() }] });
 const cBl0 = call();
-check('unrelated parked item → NO injection (targeted diff)', !cBl0.includes('task-update') && !cBl0.includes('parked by someone else'), cBl0.slice(0, 200));
+// lane injection-relevance F2: the item's EVENT stays targeted (no text) — the member hears ONE count line of what others parked
+check('unrelated parked item → no event, only the others\' count line (targeted diff + F2)', !cBl0.includes('parked by someone else') && cBl0.includes('- Backlog: 1 parked by others since your last update — `vibespace-task backlog`'), cBl0.slice(0, 400));
 await sleep(3);
 {
   const bl = tasks.get(g1.id).backlog.map((b) => ({ ...b, claimedBy: [...b.claimedBy, 'claude:sess1'] }));
@@ -140,8 +144,10 @@ const c9bHead = c9b.split('\n').slice(0, 2).join('\n');
 check('combined HEADER enumerates both groups with summaries', c9bHead.includes('2 of your Task Groups changed') && c9bHead.includes(`"alpha" (${g1.id}): 1 new activity`) && c9bHead.includes(`"beta" (${g2.id}): 1 new activity`), c9bHead);
 check('per-group sections carry the deltas', c9b.includes(`## "alpha" (${g1.id})`) && c9b.includes('alpha combined news') && c9b.includes(`## "beta" (${g2.id})`) && c9b.includes('beta combined news'), c9b);
 
-// flood BOTH groups: the combined block stays bounded, truncates details from
-// the tail, and the enumeration header still names both groups
+// flood BOTH groups: the combined block stays bounded, and the enumeration header
+// still names both groups. lane injection-relevance F1: it fits by RE-PICKING the
+// activity (the biggest group first — the oldest lines go, every left-out session
+// named), so no tail truncation is needed here
 await sleep(3);
 for (const g of [g1, g2]) {
   // multi-line objective renders its full ~1800B budget (a single huge line is
@@ -153,7 +159,7 @@ const c10 = call();
 check('flooded combined block stays bounded (≤ ~6.6KB)', Buffer.byteLength(c10, 'utf-8') <= 6600, `bytes=${Buffer.byteLength(c10, 'utf-8')}`);
 const c10head = c10.split('\n').slice(0, 2).join('\n');
 check('flood: header still names BOTH groups', c10head.includes(`"${'alpha'}" (${g1.id})`) && c10head.includes(`"beta" (${g2.id})`), c10head.slice(0, 300));
-check('flood: truncation pointer present', c10.includes('truncated — per-group'), c10.slice(-200));
+check('flood: fitted by re-picking the activity (no tail truncation; the sessions left out still named)', !c10.includes('truncated — per-group') && /more below by session:\n {2}- unattributed logged \d+ more/.test(c10), c10.slice(-300));
 
 // ── backlog agent endpoints (2.122.0) ──
 function hitRoute(method, path, { query = {}, body = {} } = {}) {

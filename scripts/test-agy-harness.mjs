@@ -28,6 +28,10 @@
 //     records, the row's own end, the card ending on the sub's answer (elapsed, files), the tail ON only while a sub
 //     works and OFF after + its RED copy; an older agy (no subagent_info, no store) ⇒ no card, no error; no transcript ⇒
 //     the db's rows (node:sqlite read-only) are the timeline; the ACP normalizer draws the card and the virtual session
+//   ⑭ THE LIVE LANE (lane agy-peer-wake): the 'peer-message' frame — idle ⇒ a turn (the wake) with the «Message from»
+//     head, busy ⇒ queued (a notification says steer:'unsupported'), no text ⇒ nothing, while agy restarts ⇒ queued and
+//     delivered to the new process, not signed in ⇒ ok:false with its words, the queue at exit ⇒ back with its words; the
+//     advert (peerMessage + notificationSteer:false) and the census of the answers (started early, run beside the rest)
 // Run: node scripts/test-agy-harness.mjs
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -134,6 +138,97 @@ function startWrapper({ env = {}, wrapper = WRAPPER } = {}) {
   h.stop = async () => { try { child.kill('SIGTERM'); } catch { } await sleep(150); };
   return h;
 }
+
+// ⑭ THE LIVE LANE (lane agy-peer-wake) runs its four wrappers TOGETHER with the sections below (the suite's 10 s
+// tier): started here, its asserts are printed in order at ⑭ at the end
+const peerLane = (async () => {
+  const R = [];
+  const ck = (n, c, e) => R.push([n, c, e]);
+  const lines = (w) => w.stub().filter((x) => x.stdin).map((x) => JSON.parse(x.stdin).message.content);
+  const starts = (w) => w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).length;
+  const idleBusy = async () => {
+    const w = startWrapper({ env: { AGY_STUB_SLOW_MS: '700' } });
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      const meta = JSON.parse(fs.readFileSync(path.join(w.dir, 's.json'), 'utf8'));
+      const { wrapperCaps } = require(path.join(REPO, 'src/server/wrapper-files.js'));
+      const wc = wrapperCaps(w.dir, 's', null);
+      ck('THE ADVERT: the sidecar says peerMessage:true (the frame is served) and notificationSteer:false (its steer is a stop + a new turn) beside a verb list naming steer', meta.caps.peerMessage === true && meta.caps.notificationSteer === false && meta.caps.queueVerbs.includes('steer'), meta.caps);
+      ck('…and the hub reads it so: wrapperCaps → peerMessage true, notificationSteer FALSE (the explicit field beats the list\'s derived true)', wc.peerMessage === true && wc.notificationSteer === false, wc);
+      const t0 = Date.now();
+      w.send({ type: 'peer-message', text: 'hello from B', fromName: 'session B', cardText: 'hello from B', kind: 'peer' });
+      const r1 = await w.until(() => w.find('peer_result'), 8000, 'peer_result (idle)');
+      const ms = Date.now() - t0;
+      await w.until(() => w.find('prompt_end'), 8000, 'the peer turn');
+      ck(`IDLE ⇒ THE WAKE: peer_result {ok:true, mode:'turn'} (frame → answer ${ms} ms), and agy's stdin carries the «Message from session B:» head + the words`, r1.ok === true && r1.mode === 'turn' && !('steer' in r1) && lines(w)[0] === 'Message from session B:\nhello from B', { r1, lines: lines(w) });
+      const u1 = w.find('user', (r) => r.peer);
+      ck('…the user record carries the peer marker (name, the card text, kind peer) — the ACP normalizer draws the labelled card', !!u1 && u1.peer.name === 'session B' && u1.peer.kind === 'peer' && u1.peer.body === 'hello from B', u1);
+      w.send({ type: 'chat-input', text: 'a slow one', msgId: 'p1' });
+      await w.until(() => w.all('prompt_start').length === 2, 5000, 'the slow turn');
+      w.send({ type: 'peer-message', text: '   ', fromName: 'session C', kind: 'peer' });
+      w.send({ type: 'peer-message', text: 'while you work', fromName: 'session C', kind: 'peer' });
+      w.send({ type: 'peer-message', text: 'task "nightly" (job-1): done.', fromName: 'Background Work · nightly', kind: 'notification' });
+      await w.until(() => w.all('peer_result').length >= 3, 5000, 'two answers while busy');
+      const [, r2, r3] = w.all('peer_result');
+      ck('BUSY ⇒ queued in the wrapper: a peer\'s message answers {ok:true, mode:\'queued\'} (no steer claim — a person\'s message is its own turn)', r2.ok === true && r2.mode === 'queued' && !('steer' in r2), r2);
+      ck('…a NOTIFICATION while busy answers mode \'queued\' + steer:\'unsupported\' — agy folds nothing into a running turn (the hub logs it and charges it)', r3.ok === true && r3.mode === 'queued' && r3.steer === 'unsupported', r3);
+      await w.until(() => w.all('prompt_end').length === 4, 10000, 'the queue drained');
+      ck('…both run AFTER the running turn, in order, each a turn of its own', JSON.stringify(lines(w)) === JSON.stringify(['Message from session B:\nhello from B', 'a slow one', 'Message from session C:\nwhile you work', 'Message from Background Work · nightly:\ntask "nightly" (job-1): done.']), lines(w));
+      ck('A frame with NO text is nothing: no answer, no card, no line (three answers and three peer cards for four frames)', w.all('peer_result').length === 3 && w.all('user', (r) => r.peer).length === 3, { answers: w.all('peer_result').length, cards: w.all('user', (r) => r.peer).length });
+    } finally { await w.stop(); }
+  };
+  const restarting = async () => {
+    const w = startWrapper({ env: { AGY_STUB_EXIT_DELAY_MS: '600' } });
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      w.send({ type: 'set-model', model: 'gemini-3.8-flash-medium' });
+      await w.until(() => w.find('notice', (r) => r.noticeKind === 'command_applied'), 5000, 'the restart begins');
+      w.send({ type: 'peer-message', text: 'during the restart', fromName: 'session D', kind: 'peer' });
+      const r = await w.until(() => w.find('peer_result'), 5000, 'the answer');
+      const startsAtAnswer = starts(w);
+      await w.until(() => lines(w).length === 1, 8000, 'delivered after the restart');
+      const log = w.stub();
+      const second = log.findIndex((x, i) => x.argv && x.argv.includes('--input-format') && log.slice(0, i).some((y) => y.argv && y.argv.includes('--input-format')));
+      ck('WHILE AGY RESTARTS ⇒ {ok:true, mode:\'queued\'} answered before the new process is up, and the words reach the NEW agy (after its start, on the new model) — never a silent drop, never a false "turn"',
+        r.ok === true && r.mode === 'queued' && startsAtAnswer === 1 && second >= 0 && log.findIndex((x) => x.stdin) > second && log[second].argv.includes('gemini-3.8-flash-medium') && lines(w)[0] === 'Message from session D:\nduring the restart', { r, startsAtAnswer, second, lines: lines(w) });
+    } finally { await w.stop(); }
+  };
+  const notSignedIn = async () => {
+    const w = startWrapper({ env: { AGY_STUB_AUTH: 'wait', AGY_STUB_AUTH_WAIT_MS: '20000' } });
+    try {
+      w.send({ type: 'peer-message', text: 'are you there, agy', fromName: 'session E', kind: 'peer' });
+      await w.until(() => w.exited, 6000, 'the wrapper exit');
+      const rs = w.all('peer_result');
+      ck('NOT SIGNED IN ⇒ ONE honest answer {ok:false} carrying the words + the sender (the hub re-stashes them) and its reason; agy never got the line', rs.length === 1 && rs[0].ok === false && rs[0].text === 'are you there, agy' && rs[0].fromName === 'session E' && /not signed in|exited/.test(rs[0].reason) && !w.stub().some((x) => x.stdin), rs);
+    } finally { await w.stop(); }
+  };
+  const exitWithQueue = async () => {
+    const w = startWrapper({ env: { AGY_STUB_SLOW_MS: '3000' } });
+    try {
+      await w.until(() => w.find('session'), 8000, 'session');
+      w.send({ type: 'chat-input', text: 'a slow one', msgId: 'x1' });
+      await w.until(() => w.find('prompt_start'), 5000, 'busy');
+      w.send({ type: 'peer-message', text: 'still waiting', fromName: 'session F', kind: 'peer' });
+      await w.until(() => w.find('peer_result', (r) => r.mode === 'queued'), 5000, 'queued');
+      w.child.kill('SIGTERM');
+      await w.until(() => w.exited, 6000, 'the wrapper exit');
+      const back = w.all('peer_result', (r) => r.ok === false);
+      ck('THE QUEUE DIES WITH THE PROCESS ⇒ its peer goes back with its words (ok:false, NO mode — about an earlier frame: the settle must not take it for the last one)', back.length === 1 && back[0].text === 'still waiting' && back[0].fromName === 'session F' && !('mode' in back[0]) && /ended before it was delivered/.test(back[0].reason), back);
+    } finally { await w.stop(); }
+  };
+  await Promise.all([idleBusy(), restarting(), notSignedIn(), exitWithQueue()].map((p) => p.catch((e) => ck('a ⑭ leg threw', false, e.message))));
+  // THE CENSUS of the answers (the settle's rule is the PRODUCER's — test-spend-paths §5b's twin): an answer ABOUT the
+  // frame just written carries a mode (ok:true 'turn'|'queued', ok:false 'undelivered'); one about an EARLIER frame (Stop,
+  // remove, a drain that failed, the exit) is the one peerBack emitter, mode-less
+  const src = fs.readFileSync(WRAPPER, 'utf8');
+  const em = [...src.matchAll(/record\('peer_result', \{([^}]*)\}/g)].map((m) => m[1]);
+  const back = em.filter((e) => /q\.opts\.peerText/.test(e));
+  ck('THE CENSUS: four peer_result emitters — ok:true carries mode, the two own-frame ok:false carry mode \'undelivered\' + text, and ONE mode-less peerBack (every earlier-frame site calls it)',
+    em.length === 4 && em.filter((e) => /ok: true/.test(e)).length === 1 && em.filter((e) => /ok: true/.test(e)).every((e) => /mode: ran\.mode/.test(e))
+    && em.filter((e) => /ok: false, mode: 'undelivered'/.test(e) && /\btext\b/.test(e)).length === 2 && back.length === 1 && !/mode:/.test(back[0])
+    && (src.match(/peerBack\(/g) || []).length === 7, em);   // its definition + Stop, remove, the drain (then / catch), agy's exit, the wrapper's exit
+  return R;
+})();
 
 console.log('— ② one chat turn through the REAL wrapper against the fake agy');
 let firstCid = null;
@@ -350,7 +445,12 @@ console.log('— ⑤ a model / mode switch restarts agy on the same conversation
 
 console.log('— ⑥ Stop and the queue');
 {
-  const w = startWrapper({ env: { AGY_STUB_SLOW_MS: '1500' } });
+  // the context prefix is a real HTTP round trip (lane stop-refills-composer ⑥c holds it to land a Stop inside it)
+  const http = await import('node:http');
+  let holdCtx = false, held = 0;
+  const srv = http.createServer((req, res) => { if (req.url.startsWith('/api/agent/prompt-context')) { const hold = holdCtx; if (hold) held++; setTimeout(() => { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"context":""}'); }, hold ? 500 : 0); return; } res.writeHead(404); res.end(); });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const w = startWrapper({ env: { AGY_STUB_SLOW_MS: '1500', VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_test' } });
   try {
     const ses = await w.until(() => w.find('session'), 8000, 'session');
     w.send({ type: 'chat-input', text: 'a slow one', msgId: 'q0' });
@@ -366,11 +466,37 @@ console.log('— ⑥ Stop and the queue');
     const end = await w.until(() => w.find('prompt_end'), 5000, 'end');
     const stopLine = w.find('notice', (r) => r.noticeKind === 'stop-restart');
     ok('Stop ends the running turn as cancelled and drops the queue (the owner\'s law, 2026-09-07 — every harness)', end.stopReason === 'cancelled' && stopLine && w.find('queue_op_result', (r) => r.op === 'remove' && r.reason === 'stopped' && r.msg_id === 'q1'), end);
-    ok('…and the drop is SAID (lane agy-harness-fixes, bug 4): the Stop line counts the person\'s queued message it cleared', /Stop also cleared the queue: your 1 queued message was not sent/.test(stopLine.text), stopLine.text);
+    // lane agy-harness-fixes (bug 4) SAID the drop in the Stop line («send again what should still run»); since lane
+    // stop-refills-composer the words come BACK (the queue_dropped record below → the composer + the client's toast), so
+    // the line no longer tells the person to re-send what is already back in their box
+    ok('…and the Stop line no longer says «send again» — the dropped words come back into the composer instead (the record below)', !/send again|not sent/.test(stopLine.text) && /Stopped — Antigravity has no cancel in its stream/.test(stopLine.text), stopLine.text);
     await w.until(() => w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).length >= 2, 8000, 'restart after stop');
     const starts = w.stub().filter((x) => x.argv && x.argv.includes('--input-format')).map((x) => x.argv);
     ok('…by restarting agy on the same conversation (its stream has no cancel)', starts[1].includes('--conversation') && starts[1][starts[1].indexOf('--conversation') + 1] === ses.sessionId);
-  } finally { await w.stop(); }
+    // STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer): ONE record of the person's rows, the CURRENT text
+    const drops = w.all('queue_dropped');
+    const iStop = w.records.findLastIndex((r) => r.type === 'acp' && r.kind === 'queue_op_result' && r.reason === 'stopped');
+    const iDrop = w.records.findIndex((r) => r.type === 'acp' && r.kind === 'queue_dropped');
+    const iEmpty = w.records.findIndex((r, i) => i > iStop && r.type === 'acp' && r.kind === 'queue_changed' && r.items.length === 0);
+    ok('…and what Stop dropped comes back: ONE queue_dropped carrying [{msgId q1, the EDITED text}] (q2 was removed before Stop), a `${pid}-${n}` dropId', drops.length === 1 && drops[0].items.length === 1 && drops[0].items[0].msgId === 'q1' && drops[0].items[0].text === 'queued one, edited' && /^\d+-\d+$/.test(drops[0].dropId) && drops[0].by === 'stop' && drops[0].omitted === 0, drops);
+    ok('…in ORDER: the per-item stopped results → queue_dropped → the emptied republish', iStop > 0 && iDrop > iStop && iEmpty > iDrop, { iStop, iDrop, iEmpty });
+    // ⑥c a Stop inside the context-prefix await cancels a prompt agy never received — and puts it back
+    const stdinBefore = w.stub().filter((x) => x.stdin).length, endsBefore = w.all('prompt_end').length;
+    holdCtx = true;
+    w.send({ type: 'chat-input', text: 'claimed, never sent', msgId: 'u1' });
+    await w.until(() => held >= 1, 5000, 'the prompt-context request in flight');
+    w.send({ type: 'interrupt' });
+    const end2 = await w.until(() => w.all('prompt_end')[endsBefore], 5000, 'the cancelled claim');
+    holdCtx = false;
+    const drops2 = w.all('queue_dropped');
+    ok('⑥c Stop inside the context-prefix await: the claimed prompt ends cancelled and NOTHING more reached agy\'s stdin (lane stop-refills-composer)', end2.stopReason === 'cancelled' && w.stub().filter((x) => x.stdin).length === stdinBefore, { end2, stdin: w.stub().filter((x) => x.stdin).length - stdinBefore });
+    ok('⑥c …and that UNDISPATCHED prompt comes back: ONE more queue_dropped, its row the prompt\'s text and msgId', drops2.length === 2 && drops2[1].items.length === 1 && drops2[1].items[0].text === 'claimed, never sent' && drops2[1].items[0].msgId === 'u1' && drops2[1].dropId !== drops2[0].dropId, drops2);
+    w.send({ type: 'interrupt' });
+    w.send({ type: 'queue-resync' });
+    const nQc = w.all('queue_changed').length;
+    await w.until(() => w.all('queue_changed').length > nQc, 5000, 'the resync after an idle Stop');
+    ok('⑥c a Stop with nothing of the person\'s queued (idle) writes NO queue_dropped', w.all('queue_dropped').length === 2);
+  } finally { await w.stop(); srv.close(); }
 }
 
 console.log('— ⑥b THE STEER (lane agy-harness-fixes, bug 4): a queued message jumps the queue — the running turn stops, it runs next');
@@ -797,6 +923,9 @@ console.log('— ⑬ THE TURN\'S USAGE (lane agy-status-bar-facts; ⑫ is lane a
   ok('THE GATE: a brain dir that LINKS out of agy\'s store is never read — `last` null, the stream\'s total still recorded', viaLink.last === null && viaLink.total.total > 0 && viaLink.total.input !== 777777, viaLink);
   ok('RED copy (the realpath check cut): the link is followed and its counts become the context (777 777 tokens)', src.split(cut).length === 2 && leaked.last && leaked.last.input === 777777, leaked);
 }
+
+console.log('— ⑭ THE LIVE LANE (lane agy-peer-wake): the peer-message frame idle / busy / empty / restarting / not signed in / at exit, the advert, the census');
+for (const [n, c, e] of await peerLane) ok(n, c, e);
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -278,7 +278,7 @@ console.log('④ WIRING + census');
   ok(/import \{ mergePendingBind, pendingBindVerdict, sweepPendingBinds \} from '\.\/fork-groups\.js';/.test(tasksSrc)
     && /import \{ forkGroupPlan \} from '\.\/fork-groups\.js';/.test(lifeSrc), 'both consumers import the ONE pure module');
   ok(!/^import|require\(/m.test(fs.readFileSync(FG_PATH, 'utf8')), 'fork-groups.js imports nothing (PURE)');
-  ok(/if \(!t\.sessions\.includes\(key\)\) \{[\s\S]{0,120}this\._notify\(\);/.test(rd('src/task-groups.js')),
+  ok(/if \(!t\.sessions\.includes\(key\)\) \{[\s\S]{0,120}this\._notify\(id\);/.test(rd('src/task-groups.js')),   // lane task-group-fanout: it names the group (the delta's)
     'multi-client: a bind goes through the store\'s bind(), which notifies (tasks-updated broadcast) — nothing new needed');
 }
 

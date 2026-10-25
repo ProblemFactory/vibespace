@@ -2,7 +2,12 @@
 // Unit tests for TaskGroupManager.snapshotForDiff / renderContextDiff — the
 // diff-based Task Group update injection (2.113.0). Pure store-level tests
 // (no server): create a group in a temp data dir, snapshot, mutate, assert
-// the rendered delta. Run: node scripts/test-context-diff.mjs
+// the rendered delta. lane injection-relevance (2.369.353): what a member is
+// told first (addressed → group-wide → newest), its own lines counted not
+// repeated, every session left out NAMED above the picked lines, others'
+// backlog parks as ONE count line, and every cut (the 5000 / 6500 B blocks,
+// a full context's cap) dropping the OLDEST lines — each with a RED control of
+// the pop-from-the-end it replaced. Run: node scripts/test-context-diff.mjs
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -81,7 +86,8 @@ console.log('— backlog (parking lot 2.122.0; claim model 2.123.0) —');
   const dMine = mgr.renderContextDiff(t.id, snap2, { sessionKey: ME });
   check('RESOLVED reaches the claimer (with resolver + id)', dMine.includes(`Backlog RESOLVED [${idA}]: user will pick a DB later`) && dMine.includes(`_(by ${OTHER})_`), dMine);
   const dThird = mgr.renderContextDiff(t.id, snap2, { sessionKey: 'claude:third' });
-  check('unrelated session gets NO backlog event (empty diff)', dThird === '', JSON.stringify(dThird && dThird.slice(0, 120)));
+  // lane injection-relevance F2: no EVENT line (no item text) — only the one count line of what others resolved
+  check('unrelated session gets NO backlog event — only the count line of what others did (F2)', !dThird.includes('user will pick a DB later') && !dThird.includes('RESOLVED') && dThird.includes('- Backlog: 1 resolved by others since your last update — `vibespace-task backlog`'), dThird);
 
   // CLAIMED / UNCLAIMED events notify the other holders
   const snap3 = mgr.snapshotForDiff(t.id);
@@ -243,6 +249,157 @@ console.log('— "Clear content…" (2026-09-28): a cleared entry — the inject
   const d = m.diffChanges(g.id, snap, { sessionKey: 'claude:s1' });
   check('a diff from the pre-clear snapshot produces NO update block (a clear is not news to a member agent)', d && d.lines.length === 0 && m.renderContextDiff(g.id, snap, {}) === '', JSON.stringify(d));
   fs.rmSync(tmp3, { recursive: true, force: true });
+}
+
+console.log('— relevance first, existence always, a cut drops the oldest (lane injection-relevance) —');
+{
+  const tmpR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ctxrel-'));
+  const m = new TaskGroupManager({ dataDir: tmpR, onChange: () => {} });
+  const ME = 'claude:7c3e9a51-0000-4000-8000-000000000001', NAME = 'lane alpha-relay';
+  const peer = (i) => `claude:${String(i).padStart(8, '0')}-1111-4111-8111-000000000000`;
+  // the store's own entries, at strictly rising instants (an update tells what is newer than the snapshot's last line)
+  const seed = (id, rows) => {
+    const g = m._state.tasks[id];
+    let at = Math.max(Date.now(), ((g.progress[g.progress.length - 1] || {}).at || 0) + 1);
+    for (const r of rows) g.progress.push({ id: 'P-' + (at++).toString(36), at: at - 1, note: r.note, ...(r.detail ? { detail: r.detail } : {}), session: r.session === undefined ? null : r.session });
+    g.contentUpdatedAt = at;
+  };
+  const sectionOf = (lines) => { const i = lines.findIndex((l) => l.startsWith('- New activity')); return i < 0 ? null : { head: lines[i], rest: lines.slice(i + 1) }; };
+  const isDigest = (l) => / logged \d+ more/.test(l) || /^ {2}- … \d+ more from \d+ other session/.test(l);
+  const B8 = (t) => Buffer.byteLength(t, 'utf-8');
+
+  const g = m.create({ title: 'relevance', objective: 'obj' });
+  seed(g.id, [{ note: 'baseline', session: peer(1) }]);
+  m.update(g.id, { backlog: [{ id: 'B-a1a1', text: 'mine', status: 'open', addedBy: ME, claimedBy: [ME] }, { id: 'B-b2b2', text: 'a high one', status: 'open', priority: 'high', addedBy: peer(2), claimedBy: [peer(2)] }] });
+  const snap = m.snapshotForDiff(g.id);
+  // the OLDEST four are the ones that matter: addressed by its uuid head, by a word of its name, by a backlog id it
+  // claims, and a group-wide «blocked»; then 4 of its own lines; then 20 plain lines from 10 sessions, all newer
+  seed(g.id, [
+    { note: 'review for 7c3e9a51: the pick looks right', session: peer(3) },
+    { note: 'alpha-relay: please rebase on the new base', session: peer(4) },
+    { note: 'touched B-a1a1 while fixing the census', session: peer(5) },
+    { note: 'blocked on the runner image', session: peer(6) },
+    ...[0, 1, 2, 3].map((k) => ({ note: `my own step ${k}`, session: ME })),
+    ...Array.from({ length: 20 }, (_, k) => ({ note: `plain news ${k} from a busy lane`, session: peer(10 + (k % 10)) })),
+  ]);
+  const d = m.diffChanges(g.id, snap, { sessionKey: ME, sessionName: NAME });
+  const sec = sectionOf(d.lines);
+  const digest = sec.rest.filter(isDigest), picked = sec.rest.filter((l) => !isDigest(l));
+  check('the header counts every new line, its own, the told, the addressed-first and the rest by session', sec.head === '- New activity (28, 4 of them yours — not repeated) — 8 told (3 addressed to you first), 16 more below by session:', sec.head);
+  check('its OWN lines are counted, never repeated', !d.lines.join('\n').includes('my own step'), d.lines.join('\n'));
+  check('the lines ADDRESSED to it are told first inside the 8 — by its uuid head, a word of its name, its backlog id — and the group-wide «blocked» next, though they are the OLDEST', ['review for 7c3e9a51', 'alpha-relay: please rebase', 'touched B-a1a1', 'blocked on the runner image'].every((n) => picked.some((l) => l.includes(n))), picked.join('\n'));
+  check('…the rest of the 8 is the NEWEST of the others (news 16–19), news 15 not', [16, 17, 18, 19].every((k) => picked.some((l) => l.includes(`plain news ${k} `))) && !picked.some((l) => l.includes('plain news 15 ')) && picked.length === 8, picked.join('\n'));
+  const at = (n) => picked.findIndex((l) => l.includes(n));
+  check('…printed in TIME order', at('review for') < at('alpha-relay') && at('alpha-relay') < at('touched B-a1a1') && at('blocked on') < at('plain news 16') && at('plain news 16') < at('plain news 19'), picked.join('\n'));
+  check('≤ 6 digest lines, one per session left out, + ONE overflow line', digest.length === 7 && digest.slice(0, 6).every((l) => / logged \d+ more/.test(l)) && digest[6] === '  - … 4 more from 4 other sessions', digest.join('\n'));
+  check('…newest session first, its count, the first ≤ 48 chars of its newest note left out', digest[0] === `  - ${peer(15)} logged 2 more — newest: "plain news 15 from a busy lane"`, digest[0]);
+  check('the digest sits ABOVE the picked lines (existence before text — a cut takes text first)', sec.rest.indexOf(digest[digest.length - 1]) < sec.rest.indexOf(picked[0]), sec.rest.join('\n'));
+  check('every left-out line is in the digest\'s counts (8 told + 16 counted = the 24 others)', digest.reduce((n, l) => n + Number((/logged (\d+) more|… (\d+) more/.exec(l) || []).slice(1).find(Boolean)), 0) === 16, digest.join('\n'));
+  check('bits stays «N new activity»', d.bits.includes('28 new activity'), JSON.stringify(d.bits));
+  check('the result\'s shape stays { lines, bits } (the re-pick rides unenumerated)', JSON.stringify(Object.keys(d)) === '["lines","bits"]' && typeof d.act.pick === 'function', JSON.stringify(Object.keys(d)));
+  // only its own lines new ⇒ nothing to tell
+  const snapOwn = m.snapshotForDiff(g.id);
+  seed(g.id, [{ note: 'my own step 9', session: ME }]);
+  check('only its own lines new ⇒ no activity section (an empty update: nothing is news)', m.diffChanges(g.id, snapOwn, { sessionKey: ME }).lines.length === 0, '');
+  check('…without a session key (legacy callers) the same line is told', m.renderContextDiff(g.id, snapOwn, {}).includes('my own step 9'), '');
+
+  console.log('  · a line that does not fit is SKIPPED, never a stop');
+  const gs = m.create({ title: 'skip', objective: 'o' });
+  seed(gs.id, [{ note: 'baseline', session: peer(1) }]);
+  const snapS = m.snapshotForDiff(gs.id);
+  seed(gs.id, [...[0, 1, 2, 3].map((k) => ({ note: `small ${k}`, session: peer(2) })), ...[0, 1, 2, 3].map((k) => ({ note: `big${k} ` + '大'.repeat(194), session: peer(3) }))]);
+  const pS = sectionOf(m.diffChanges(gs.id, snapS, { sessionKey: ME }).lines).rest.filter((l) => !isDigest(l));
+  check('three ~660 B lines fill the room, the fourth is skipped, the OLDER short ones still ride (a `break` stopped at three)', pS.filter((l) => / big\d /.test(l)).length === 3 && pS.some((l) => l.includes('small 3')) && !pS.some((l) => l.includes(' big0 ')), pS.join('\n'));
+
+  console.log('  · a 460-line burst');
+  const gb = m.create({ title: 'burst', objective: 'o' });
+  seed(gb.id, [{ note: 'baseline', session: peer(1) }]);
+  const snapB = m.snapshotForDiff(gb.id);
+  seed(gb.id, Array.from({ length: 460 }, (_, k) => (k % 23 === 0 ? { note: `my own ${k}`, session: ME } : { note: (k % 3 ? `lane ${k % 12} step ${k} ` : `车道 ${k % 12} 第 ${k} 步 `) + 'detail words '.repeat(k % 5 ? 3 : 20), detail: k % 4 ? undefined : 'more', session: peer(20 + (k % 12)) })));
+  const dB = m.diffChanges(gB_id(), snapB, { sessionKey: ME });
+  function gB_id() { return gb.id; }
+  const blockB = m.renderDiffBlock(gb.id, dB, {});
+  const secB = sectionOf(dB.lines);
+  const actBytes = B8([secB.head, ...secB.rest].join('\n'));
+  check(`a 460-line burst from 12 sessions: the activity section ${actBytes} B ≤ 3 600 B, the block ${B8(blockB)} B ≤ 5 000 B, nothing popped`, actBytes <= 3600 && B8(blockB) <= 5000 && !/more lines/.test(blockB), secB.head);
+  check('…every one of the 12 sessions is named or counted (6 digest lines + the overflow)', secB.rest.filter(isDigest).length === 7, secB.rest.filter(isDigest).join('\n'));
+
+  console.log('  · F1: every cut drops the OLDEST (RED controls: the pop from the end it replaced)');
+  // the 5000 B block: a smaller cap re-picks the activity — the lowest-ranked, oldest picked line goes
+  const told = (text, k) => text.includes(`plain news ${k} from a busy lane _(`);   // a PICKED line (a digest quote ends in a quote mark)
+  const full = m.renderDiffBlock(g.id, d, {});
+  const capped = m.renderDiffBlock(g.id, d, { cap: B8(full) - 120 });
+  check(`renderDiffBlock over its cap (${B8(full)} → ≤ ${B8(full) - 120} B) RE-PICKS: the newest line stays, the oldest plain one goes, the addressed stay, the digest stays, no pointer`, B8(capped) <= B8(full) - 120 && told(capped, 19) && !told(capped, 16) && capped.includes('review for 7c3e9a51') && capped.includes(`${peer(15)} logged 2 more`) && !/more lines/.test(capped), capped);
+  const popped = m.renderDiffBlock(g.id, { lines: d.lines, bits: d.bits }, { cap: B8(full) - 120 });
+  check('CONTROL (RED): the same block without its re-pick (the pop from the end) loses the NEWEST line', !told(popped, 19) && told(popped, 16), popped.slice(-400));
+  // the 6500 B several-groups block: the biggest group re-picked first
+  const dS = m.diffChanges(gs.id, snapS, { sessionKey: ME });
+  const multiFull = m.renderContextDiffMulti([{ id: g.id, changes: d }, { id: gs.id, changes: dS }]);
+  const multiCut = m.renderContextDiffMulti([{ id: g.id, changes: d }, { id: gs.id, changes: dS }], { cap: B8(multiFull) - 700 });
+  check(`renderContextDiffMulti over its cap (${B8(multiFull)} → ≤ ${B8(multiFull) - 700} B) RE-PICKS the biggest group's activity: its newest line stays, its oldest goes, no truncation pointer`, B8(multiCut) <= B8(multiFull) - 700 && multiCut.includes(' big3 ') && !multiCut.includes(' big1 ') && !/truncated/.test(multiCut), multiCut.slice(-900));
+  const multiPop = m.renderContextDiffMulti([{ id: g.id, changes: { lines: d.lines, bits: d.bits } }, { id: gs.id, changes: { lines: dS.lines, bits: dS.bits } }], { cap: B8(multiFull) - 700 });
+  check('CONTROL (RED): without the re-pick the biggest group loses its NEWEST lines', !multiPop.includes(' big3 '), multiPop.slice(-400));
+  // a FULL context's cap (the route's fit; capInline's tail cut took the newest)
+  const gf = m.create({ title: 'full', objective: 'o' });
+  seed(gf.id, Array.from({ length: 12 }, (_, k) => ({ note: `entry ${String(k).padStart(2, '0')} ` + 'w'.repeat(150), session: peer(40) })));
+  const ctx0 = m.renderContext(gf.id, {});
+  const ctxCap = m.renderContext(gf.id, { cap: B8(ctx0) - 500 });
+  check(`renderContext over its cap (${B8(ctx0)} → ≤ ${B8(ctx0) - 500} B) RE-PICKS the log: the newest entry stays, the oldest picked goes, the header still counts them`, B8(ctxCap) <= B8(ctx0) - 500 && ctxCap.includes('entry 11 ') && !ctxCap.includes('entry 00 ') && /## Activity log {2}_\(last \d+ of 12/.test(ctxCap) && ctxCap.trimEnd().endsWith('</vibespace-task-context>'), ctxCap.slice(-600));
+  const tailCut = (text, cap) => { let h = Buffer.from(text, 'utf-8').subarray(0, cap).toString('utf-8'); const nl = h.lastIndexOf('\n'); if (nl > cap * 0.5) h = h.slice(0, nl); return h; };   // capInline's cut (src/agent-routes.js)
+  check('CONTROL (RED): capInline\'s tail cut of the same context to the same bytes loses the NEWEST entry', !tailCut(ctx0, B8(ctx0) - 500).includes('entry 11 ') && tailCut(ctx0, B8(ctx0) - 500).includes('entry 05 '), '');
+  const many = m.renderMultiContext([gf.id, g.id, gb.id], {});
+  const manyCap = m.renderMultiContext([gf.id, g.id, gb.id], { cap: B8(many) - 900 });
+  const lastNote = (id) => { const p = m.get(id).progress; return p[p.length - 1].note.slice(0, 40); };
+  check(`renderMultiContext over its cap (${B8(many)} → ≤ ${B8(many) - 900} B): every group keeps its NEWEST line`, B8(manyCap) <= B8(many) - 900 && [gf.id, g.id, gb.id].every((id) => manyCap.includes(lastNote(id))), manyCap.slice(-700));
+  check('CONTROL (RED): the tail cut loses the last group\'s newest line', !tailCut(many, B8(many) - 900).includes(lastNote(gb.id)), '');
+
+  console.log('  · F2: other sessions\' parks — one count line');
+  const gk = m.create({ title: 'parks', objective: 'o' });
+  seed(gk.id, [{ note: 'baseline', session: peer(1) }]);
+  m.update(gk.id, { backlog: [{ id: 'B-c3c3', text: 'old other item', status: 'open', addedBy: peer(2), claimedBy: [peer(2)], addedAt: 1 }, { id: 'B-d4d4', text: 'my item', status: 'open', addedBy: ME, claimedBy: [ME], addedAt: 1 }] });
+  const snapK = m.snapshotForDiff(gk.id);
+  const blK = () => m.get(gk.id).backlog.map((b) => ({ ...b }));
+  m.update(gk.id, { backlog: [...blK().map((b) => (b.id === 'B-c3c3' ? { ...b, status: 'done', resolvedBy: peer(2), resolvedAt: Date.now() } : b)),
+    { id: 'B-e5e5', text: 'URGENT-WORDS a high park', status: 'open', priority: 'high', addedBy: peer(3), claimedBy: [peer(3)], addedAt: Date.now() },
+    { id: 'B-f6f6', text: 'NORMAL-WORDS a normal park', status: 'open', addedBy: peer(4), claimedBy: [peer(4)], addedAt: Date.now() },
+    { id: 'B-a7a7', text: 'MY-NEW-WORDS my own park', status: 'open', addedBy: ME, claimedBy: [ME], addedAt: Date.now() }] });
+  const dK = m.diffChanges(gk.id, snapK, { sessionKey: ME });
+  const f2 = dK.lines.filter((l) => l.startsWith('- Backlog: '));
+  check('others\' parks + resolves since the snapshot: ONE line, the HIGH id named, the rest counted, no item text', f2.length === 1 && f2[0] === '- Backlog: 2 parked (1 HIGH [B-e5e5]), 1 resolved by others since your last update — `vibespace-task backlog`' && !dK.lines.join('\n').includes('URGENT-WORDS') && !dK.lines.join('\n').includes('NORMAL-WORDS') && dK.bits.includes('backlog by others'), dK.lines.join('\n'));
+  check('…its OWN park keeps its event line (not counted as others\')', dK.lines.some((l) => l.startsWith('- Backlog PARKED [B-a7a7]: MY-NEW-WORDS')), dK.lines.join('\n'));
+  check('…~100 B', B8(f2[0] || '') <= 120, `${B8(f2[0] || '')} B`);
+  const snapK2 = m.snapshotForDiff(gk.id);
+  seed(gk.id, [{ note: 'quiet turn', session: peer(1) }]);
+  check('…only on a turn where it changed (no backlog move ⇒ no line)', !m.diffChanges(gk.id, snapK2, { sessionKey: ME }).lines.some((l) => l.startsWith('- Backlog')), '');
+  check('…never without a session key (a legacy caller hears every event already)', !m.diffChanges(gk.id, snapK, {}).lines.some((l) => l.startsWith('- Backlog: ')), '');
+  // a restored LITE snapshot (seen-marks keeps only this session's items, `of`): the others' are judged by time
+  const lite = { ...snapK2, backlog: snapK2.backlog.filter((b) => b.addedBy === ME), of: ME, lastProgressAt: m.get(gk.id).progress[0].at };
+  const tParked = Date.now() + 5;
+  m.update(gk.id, { backlog: [...blK(), { id: 'B-b8b8', text: 'after the snapshot', status: 'open', addedBy: peer(5), claimedBy: [peer(5)], addedAt: tParked }] });
+  const f2L = m.diffChanges(gk.id, lite, { sessionKey: ME }).lines.filter((l) => l.startsWith('- Backlog: '));
+  check('…a restored LITE snapshot counts only what others parked after its last activity line (not every item it does not hold)', f2L.length === 1 && /^- Backlog: \d+ parked /.test(f2L[0]) && !/ 4 parked /.test(f2L[0]), f2L.join('\n'));
+
+  console.log('  · a cleared entry is never quoted');
+  const gc = m.create({ title: 'clears', objective: 'o' });
+  m.addProgress(gc.id, { note: 'baseline', session: peer(1) });
+  const snapC = m.snapshotForDiff(gc.id);
+  await sleep(3);
+  m.addProgress(gc.id, { note: 'kept older words', session: peer(61) });
+  for (let k = 0; k < 9; k++) m.addProgress(gc.id, { note: `kept ${k} news`, session: peer(50 + k) });
+  m.addProgress(gc.id, { note: 'SECRET-WORDS the owner cleared', session: peer(60) });
+  m.addProgress(gc.id, { note: 'SECRET-WORDS-2 also cleared', session: peer(61) });
+  const gp = m.get(gc.id).progress;
+  m.clearProgress(gc.id, [gp[gp.length - 2].id, gp[gp.length - 1].id], { by: 'owner' });   // the two SECRET entries
+  // the cleared lines rank LAST and the newest 8 kept lines fill the picks, so the digest names peer 60 (only a cleared
+  // line left out) and peer 61 (its kept OLDEST line + its cleared newest)
+  const secC = sectionOf(m.diffChanges(gc.id, snapC, { sessionKey: ME }).lines);
+  const dC = secC.rest.filter(isDigest).join('\n');
+  check('a session whose only left-out line was cleared is counted, never quoted; a session\'s cleared newest is skipped for its newest UNCLEARED note', !/SECRET-WORDS/.test(dC) && !/cleared at the user/.test(dC) && dC.includes(`${peer(60)} logged 1 more`) && !new RegExp(`${peer(60)} logged 1 more —`).test(dC) && dC.includes(`${peer(61)} logged 2 more — newest: "kept older words"`), dC);
+
+  console.log('  · the route passes the session\'s name');
+  const routes = fs.readFileSync(new URL('../src/agent-routes.js', import.meta.url), 'utf-8');
+  check('PIN: prompt-context hands diffChanges the session\'s name', /tasks\.diffChanges\(g\.id, snap, \{ gid: .*, sessionKey: key, sessionName: s\.name \}\)/.test(routes), '');
+  fs.rmSync(tmpR, { recursive: true, force: true });
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

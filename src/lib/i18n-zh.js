@@ -10796,4 +10796,10 @@ export default {
   "The harness’s own screen in a terminal window, instead of VibeSpace’s chat view.": "harness 自己的界面开在终端窗口里，不用 VibeSpace 的聊天视图。",
   "From the name": "由名字",
   "Your folders": "你的文件夹",
+  // lane stop-refills-composer: Stop puts the dropped queue back into the composer (the toast)
+  "Stop put {n} queued message(s) back into the input box": "已停止 — {n} 条排队的消息已放回输入框",
+  "{k} attached image(s) were not put back — attach them again": "{k} 张附带的图片没有放回 — 请重新附加",
+  "{k} other attachment(s) were not put back — attach them again": "另有 {k} 个附件没有放回 — 请重新附加",
+  "{m} message(s) came back shortened": "{m} 条消息放回时被截短",
+  "{k} more queued message(s) were too long to put back": "另有 {k} 条排队的消息太长，没有放回",
 };

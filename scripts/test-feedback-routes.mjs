@@ -151,7 +151,7 @@ try {
     const ws = read('src/ws-handler.js');
     const a = ws.indexOf("        case 'state-set': {"), b = ws.indexOf("        case 'state-resync': {");
     const CASE = a > 0 && b > a ? ws.slice(a, b) : '';
-    ok(/store\.clientWrites !== false/.test(CASE) && /store\.set\(data\.key, data\.value, ws, data\.basedOn\)/.test(CASE), 'src/ws-handler.js: the state-set case cut verbatim (it reads clientWrites)');
+    ok(/store\.clientWrites !== false/.test(CASE) && /store\.set\(data\.key, value, ws, data\.basedOn\)/.test(CASE) && /const value = belt \? putbackBelt\(belt, data\.value, data\.basedOn\) : data\.value;/.test(CASE), 'src/ws-handler.js: the state-set case cut verbatim (it reads clientWrites; the value is data.value off the drafts belt — lane stop-refills-composer)');
     const run = (stores) => new Function('getSyncStore', 'activeSessions', `return function handle(data, ws) { switch (data.type) {\n${CASE}\n} };`)((n) => stores[n], new Map());
     const before = JSON.stringify(store.sync.getSnapshot());
     run({ feedback: store.sync })({ type: 'state-set', store: 'feedback', key: target.id, value: { ...snap.data[target.id], text: 'forged', status: 'open' } }, {});

@@ -27,6 +27,7 @@ const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const S = JSON.stringify;
 const { SyncStore } = require('../src/sync-store.js');
 const { ARRIVAL_TABLE, arrivalVerdict } = require('../src/sync-arrival.js');
+const { beltValue } = require('../src/queue-putback.js'); // the drafts belt the state-set case calls (identity on every other store)
 
 // ── the real code, cut verbatim ──
 const handler = read('src/ws-handler.js');
@@ -41,11 +42,13 @@ const PER_KEY = 'own: { ackedVersion: s.acked.get(op.key), pending: s.pending.ha
 const PRE_FIX = CLASS.replace(CALL, "const verdict = 'apply';");
 // a per-STORE verdict: any own set pending holds every key's op, the store's newest ack drops them
 const PER_STORE = CLASS.replace(PER_KEY, 'own: { ackedVersion: Math.max(0, ...s.acked.values()), pending: s.pending.size > 0 }');
+// the pre-delta client (lane stop-refills-composer CONTROL): the op reaches the rule without its `prepended` stamp
+const PRE_DELTA = CLASS.replace(CALL, "const verdict = arrivalVerdict({ remote: { ...op, prepended: undefined }, own: { ackedVersion: s.acked.get(op.key), pending: s.pending.has(op.key) } });");
 
 console.log('§0 the cuts');
-ok(/case 'state-set'/.test(CASES) && /case 'state-resync'/.test(CASES) && /store\.set\(data\.key, data\.value, ws, data\.basedOn\)/.test(CASES) && /store\.delete\(data\.key, ws, data\.basedOn\)/.test(CASES), 'src/ws-handler.js: the state-set + state-resync cases cut verbatim (a set hands the store its socket + basedOn)');
+ok(/case 'state-set'/.test(CASES) && /case 'state-resync'/.test(CASES) && /store\.set\(data\.key, value, ws, data\.basedOn\)/.test(CASES) && /store\.delete\(data\.key, ws, data\.basedOn\)/.test(CASES) && /const value = belt \? putbackBelt\(belt, data\.value, data\.basedOn\) : data\.value;/.test(CASES), 'src/ws-handler.js: the state-set + state-resync cases cut verbatim (a set hands the store its socket + basedOn; the value is data.value unless a drafts chat key carries a Stop put-back — test-queue-putback drives that belt)');
 ok(CLASS.includes(CALL) && /_applyAck\(storeName, ack\)/.test(CLASS) && /msg\.type === 'state-ack'/.test(CLASS), 'src/lib/utils.js: the client StateSync class cut verbatim (the arrival rule\'s call, the ack)');
-ok(PRE_FIX !== CLASS && PER_STORE !== CLASS, 'control targets present: the rule\'s call, its per-key facts');
+ok(PRE_FIX !== CLASS && PER_STORE !== CLASS && PRE_DELTA !== CLASS, 'control targets present: the rule\'s call, its per-key facts');
 
 // ── a discrete-event clock: the next event by (time, order) ──
 function makeClock() {
@@ -65,7 +68,7 @@ function world({ cls = CLASS, maxOps } = {}) {
   const log = []; // every op the store produced, unbounded (the ring keeps maxOps): value → version
   const push = store._pushOp.bind(store); store._pushOp = (op) => { log.push(op); push(op); };
   const stores = { stage: store };
-  const handle = new Function('getSyncStore', 'activeSessions', `return function handle(data, ws) { switch (data.type) {\n${CASES}\n} };`)((n) => stores[n], new Map());
+  const handle = new Function('getSyncStore', 'activeSessions', 'putbackBelt', `return function handle(data, ws) { switch (data.type) {\n${CASES}\n} };`)((n) => stores[n], new Map(), beltValue);
   const fetchFake = async (url) => { const st = stores[String(url).split('/').pop()]; return { ok: !!st, json: async () => JSON.parse(S(st ? st.getSnapshot() : {})) }; };
   const StateSync = new Function('fetch', 'arrivalVerdict', cls + '\nreturn StateSync;')(fetchFake, arrivalVerdict);
   const versionOf = (key, value) => { if (value === undefined) return 0; for (let i = log.length - 1; i >= 0; i--) if (log[i].key === key && log[i].op === 'set' && log[i].value === value) return log[i].version; return null; };
@@ -159,9 +162,13 @@ console.log('§1 the PURE verdict');
     [{ remote: { version: 8 }, own: { ackedVersion: 7 } }, 'apply', 'version > the own acked set\'s ⇒ apply'],
     [{ remote: { version: 8, from: 'c1' }, own: { ackedVersion: 7, pending: false } }, 'apply', '`from` does not decide (the server\'s version does)'],
     [{}, 'apply', 'no input ⇒ apply'],
+    [{ remote: { version: 7, prepended: 12 }, own: { pending: true, ackedVersion: 3 } }, 'apply', 'the delta row: an op carrying prepended > 0 (a Stop put-back) is applied even while an own set is pending'],
+    [{ remote: { version: 6, prepended: 12 }, own: { ackedVersion: 7 } }, 'apply', 'the delta row: …and even under a higher own acked set (it is a prefix no own set could contain)'],
+    [{ remote: { version: 7, prepended: 0 }, own: { pending: true } }, 'queue', 'prepended 0 is no delta ⇒ the ordinary rule (queue)'],
+    [{ remote: { version: 7, prepended: '12' }, own: { ackedVersion: 9 } }, 'drop', 'a non-integer prepended is no delta ⇒ the ordinary rule (drop)'],
   ];
   for (const [input, want, name] of cases) ok(arrivalVerdict(input) === want, name, { input, got: arrivalVerdict(input) });
-  ok(ARRIVAL_TABLE.length === 5 && ARRIVAL_TABLE.every((x) => ['apply', 'drop', 'queue'].includes(x.verdict) && x.when && x.why), 'the table: five rows, each a case + a verdict + why');
+  ok(ARRIVAL_TABLE.length === 6 && ARRIVAL_TABLE.every((x) => ['apply', 'drop', 'queue'].includes(x.verdict) && x.when && x.why) && /prepended/.test(ARRIVAL_TABLE[1].when), 'the table: six rows (the delta row second, lane stop-refills-composer), each a case + a verdict + why');
   for (const x of ARRIVAL_TABLE) console.log(`    · ${x.verdict.padEnd(5)} ${x.when} — ${x.why}`);
   const calls = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).reduce((n, f) => n + (read('src/lib/' + f).match(/arrivalVerdict\(/g) || []).length, 0);
   ok(calls === 1 && (CLASS.match(/arrivalVerdict\(/g) || []).length === 1, 'the client asks the verdict at ONE place (StateSync._applyOp)', { calls });
@@ -242,6 +249,28 @@ async function inFlight(cls, { loseInFlight }) {
   ok(r.srv === 'B' && r.A === 'B' && r.B === 'B', `④c B's socket drops with its set in flight (it lands, the ack is lost): the held op is judged at the drop, the resync replays B's own op — all on ${r.srv} (B heard ${r.heardB})`, r);
   const l = await inFlight(CLASS, { loseInFlight: true });
   ok(l.srv === 'A' && l.A === 'A' && l.B === 'A', `④d …the set is lost with the socket: the held op lands at the drop — all on ${l.srv} (B heard ${l.heardB})`, l);
+}
+
+console.log('§4e the delta row (lane stop-refills-composer): a put-back op lands over a pending own set, and the ack does not take it back');
+{
+  const w = world();
+  const A = w.client('A', { up: 30, down: 5 });
+  await A.sync.init('stage'); A.listen();
+  w.store.set('note', 'base'); w.clock.run();
+  w.clock.at(w.clock.now + 1, () => A.sync.set('stage', 'note', 'mine'));            // A's own set: pending for 30 ms
+  w.clock.at(w.clock.now + 5, () => w.store.set('note', 'P\n\nbase', null, undefined, { prepended: 3 }));   // the server's put-back, ordered BEFORE A's set
+  w.clock.run();
+  const heard = A.heard('note');
+  const putback = w.log.find((o) => o.prepended === 3), own = w.log.find((o) => o.from);
+  ok(putback && own && putback.version < own.version && heard.includes('P\n\nbase') && A.sync.stores.stage.acked.get('note') === own.version, `④e the put-back (v${putback && putback.version}) is HEARD at once although A's own set is pending (v${own && own.version} acked after it) — never held, never dropped at the ack (heard ${S(heard)})`, { heard, putback, own });
+  const pre = world({ cls: PRE_DELTA });
+  const P = pre.client('A', { up: 30, down: 5 });
+  await P.sync.init('stage'); P.listen();
+  pre.store.set('note', 'base'); pre.clock.run();
+  pre.clock.at(pre.clock.now + 1, () => P.sync.set('stage', 'note', 'mine'));
+  pre.clock.at(pre.clock.now + 5, () => pre.store.set('note', 'P\n\nbase', null, undefined, { prepended: 3 }));
+  pre.clock.run();
+  ok(!P.heard('note').includes('P\n\nbase'), '§6 CONTROL: a client whose rule has no delta row holds the put-back behind its set and DROPS it at the ack — ④e would be red', P.heard('note'));
 }
 
 console.log('§5 the frames');

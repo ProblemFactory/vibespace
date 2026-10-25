@@ -905,6 +905,28 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     return null;
   }
 
+  // THE MISS SAYS WHICH (lane agy-peer-wake, 2026-10-24 — the owner's wake of a LIVE Antigravity conversation answered
+  // «no live inbox … on any reachable machine», read everywhere as "not running"): a conversation that IS running here
+  // with no live lane is said as running — its harness takes no message mid-session (a stash-only row), or its RUNNING
+  // process predates the lane (a wrapper whose own sidecar adverts no peerMessage — an agy wrapper started before the
+  // lane existed): only that one is cured by a restart. Off the caps row + the process's own advert, never a backend id;
+  // a cli-inbox harness keeps the old words (no registration = its CLI is not there). null = say nothing new.
+  function liveWithoutLane(cid) {
+    const s = localSessionFor(cid);   // THE addressing predicate (verify r6) — this only asks how that session is reachable
+    if (!s || s.host) return null;
+    try {
+      const lane = capsOf(s.backend).peerDelivery;
+      if (lane === 'stash-only') return "this conversation is running, but its agent takes no message mid-session";
+      if (lane !== 'rpc-queue' || !s.pty) return null;
+      if (s.mode !== 'chat') return "this conversation is running in a terminal, where its agent takes no message mid-session";
+      let wid = null;
+      for (const [w, x] of activeSessions) if (x === s) { wid = w; break; }
+      const wc = wid ? wrapperCaps(path.join(dataDir, 'session-buffers'), wid, s.socketPath) : null;
+      if (wc && wc.reason !== 'no-sidecar' && !wc.peerMessage) return "this conversation is running, but its agent's process predates live messages — restart the session to receive them at once";
+    } catch { }
+    return null;
+  }
+
   // rung 2 helper: which registered machine owns this conversation? null =
   // local/unknown (the local rung already ran by the time this is asked).
   function ownerHostOf(cid) {
@@ -1215,7 +1237,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         const steersIntoRunningTurn = steerLane;
         // no free lane right now ⇒ noWake refuses here rather than opening a
         // turn (the frame is not written; the hold goes back in `finally`)
-        if (noWake && !steersIntoRunningTurn) return { ok: false, lane: 'rpc-queue', reason: 'no turn is running to join — a delivery now would open a billed turn', refused: 'no-wake' };
+        if (noWake && !steersIntoRunningTurn) return { ok: false, lane: 'rpc-queue', reason: rpc.s._isStreaming ? 'this message would not join the running turn — a delivery now would open a billed turn after it' : 'no turn is running to join — a delivery now would open a billed turn', refused: 'no-wake' };
         try {
           rpc.s.pty.write(JSON.stringify({ type: 'peer-message', text, fromName: opts.fromName || null, cardText: opts.cardText || null, kind, ...(opts.channel ? { channel: opts.channel } : {}), ...(opts.group ? { group: opts.group } : {}) }) + '\n');   // `group`: the wrapper's marker carries it (lane group-report-card) — an older wrapper ignores it and draws the fromName card
           // EVERY frame joins the settle queue, charged or not — the wrapper
@@ -1252,6 +1274,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           return { ok: false, lane: 'remote-message', hostId: hid, reason: e.message };
         }
       }
+      const live = liveWithoutLane(cid);
+      if (live) return { ok: false, reason: live };   // RUNNING, so never `notRunning` (lane agy-peer-wake): the stash keeps it for the next turn
       return { ok: false, reason: 'no live inbox for this conversation on any reachable machine', notRunning: true };   // typed: the conversation is not running (lane notify-retry — `not-reachable` is reserved for an agent that did not accept)
     } finally {
       // …AND THIS IS THE ONLY PLACE IT IS GIVEN BACK. `money.settled` is raised

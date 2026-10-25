@@ -218,7 +218,7 @@ Day one asks ONE thing — what to work on — and lands in a chat on the folder
 - Expandable input (floating button inside textarea)
 - Send: Enter (normal), Ctrl+Enter (expanded mode)
 - Chat font size follows global A-/A+ via CSS zoom
-- Draft persistence: chat input auto-saved every 300ms to server, synced across clients (Telegram-style), restored on refresh/resume
+- Draft persistence: chat input auto-saved every 300ms to server, synced across clients (Telegram-style), restored on refresh/resume; what Stop drops from the queue comes back into it, in front of the draft (lane stop-refills-composer — the STOP block under the input queue)
 - Upload to chat: drag-drop files/folders onto the chat (desktop) or the paperclip button → Files/Folder menu (mobile) → saved into the session's working directory and the path(s) inserted into the input box
 - File-explorer icons colored by category (`fic-<category>` class → CSS tint; folders amber, images purple, video red, audio cyan, code green, …) so types are distinguishable
 - **Sidebar scroll preservation is DUAL-HOST + height-reserved (2.228.3, recurring "expand a card → list jumps to top")**: the actual scrolling element MOVED over time (.sidebar-section classically → #all-sessions-list in the rail-era layout), so any preserve anchored on ONE element rots silently into a no-op when CSS evolves — `_render()` and the poll-digest path capture/restore BOTH candidates (non-scroller restore = harmless). Equally load-bearing: lazy folders RESERVE their previous height while `pending` (`_lazyHeights` map captured per render → minHeight in `_observeFolder`, card-count estimate on first render) — without it the rebuilt list's scrollHeight collapses to a stack of headers and the restore CLAMPS to top before the async IntersectionObserver materializes anything. Observer card builds are per-card try/caught (one garbage record — e.g. bad timestamp → RangeError in date format — used to abort the whole batch and leave half-cleared empty folder husks). Smoke: scripts/test-sidebar-scroll.mjs (worktree+CDP, negative-controlled).
@@ -455,6 +455,21 @@ impossible rather than a review promise.
   notification that does reach a busy ACP wrapper queues and answers
   `steer:'unsupported'` instead of accepting and ignoring it. Any harness with
   no live lane stashes for the next turn the same way.
+  **Which harness rides which rung (lane agy-peer-wake, 2026-10-24):** the ladder
+  (src/server/conversation-deliver.js) has rung 1 = the CLI's own inbox, rung 1.5 =
+  a live local chat wrapper whose row declares `peerDelivery:'rpc-queue'` and whose
+  sidecar adverts `peerMessage`, rung 2 = the owning machine's daemon, rung 3 = the
+  stash. **claude** rides `cli-inbox` (rung 1); **codex** and **antigravity** ride
+  `rpc-queue` (rung 1.5 — idle ⇒ the message opens a billed turn, the wake; busy ⇒
+  it runs right after the current turn); **opencode / ACP v1** stays `stash-only`
+  (rung 3). For a VibeSpace notification the lanes differ: codex steers it into
+  the running turn (free); antigravity's steer verb STOPS the turn and starts a new
+  one, so its row declares `steerJoinsTurn:false` and a notification for a busy
+  agy is QUEUED as its own billed turn (charged when written, never predicted free).
+  A conversation that is running here but cannot be reached live is now SAID as
+  running — «its agent takes no message mid-session» (stash-only) or «its agent's
+  process predates live messages — restart the session» (an older wrapper) — and
+  only a conversation running nowhere reads «no live inbox … any reachable machine».
   A steered notification is a submission ENTERING THE TURN like any other, so it
   goes in under a NAME (`notifCid`): the wrapper registers that id as one whose
   bubble already exists before it writes the labelled card, and carries it on
@@ -741,7 +756,36 @@ impossible rather than a review promise.
   turn ending on its own* is a different thing and still clears its chip — it
   ran. (codex-side difference kept deliberately: no extra "send it again" notice
   — every dropped codex item has its own bubble whose chip flips to `Removed`,
-  while ACP's notice also covers entries with no bubble.)
+  while ACP's notice also covers entries with no bubble.) **Superseded by the
+  2026-10-24 amendment below: ACP's notice is retired, the toast is the one
+  notice on every harness.**
+- **…AND WHAT STOP DROPPED COMES BACK INTO THE INPUT BOX (owner 2026-10-24,
+  «可以丢弃但是把内容回填到输入框» — lane stop-refills-composer, .353).**
+  The queue is still dropped — nothing queued runs after Stop — but every word
+  the person queued is put back into the composer, once, on every open window,
+  in queue order (oldest first, a blank line between messages, IN FRONT of
+  whatever draft was there), and ONE toast says it: «Stop put N queued
+  message(s) back into the input box», plus «K attached image(s) were not put
+  back — attach them again» (attachments are named, never restored — the draft
+  is text; the bubble still shows the picture), «M message(s) came back
+  shortened» (a message over 20 000 characters) and «K more queued message(s)
+  were too long to put back» (past 100 000 characters in one Stop). What the
+  person was typing when Stop landed is never lost: the words land in front of
+  the LIVE box (unsaved keystrokes kept, the caret moves with the text), and a
+  save already on its way to the server keeps them too (the server belt). An
+  ACP / Antigravity message that the turn had claimed but not yet sent (Stop
+  inside the context fetch) comes back as the oldest row and its bubble reads
+  `Removed`. A peer / Background Work / notification message is never put into
+  the box — it goes back through its own delivery ladder. ACP's «Stop also
+  dropped N queued messages — send them again» notice is retired (it is no
+  longer true). The ONE case the person must re-send: a codex row the
+  app-server drained mid-sweep (its chip reads «no longer queued — it already
+  ran»). If a queued message was being EDITED when Stop landed, the rewrite
+  stays first in the box and the put-back (the original text among it) sits
+  below it — the person deletes whichever they do not want. **Claude Code is
+  not part of this**: measured on CLI 2.1.308, the CLI runs a message it
+  queued mid-turn right after Stop, so nothing is dropped there (an open owner
+  question — kb-bugfix-invariants).
 - **Stop only claims what Stop actually did (round-2 review, three fixes).**
   ① The app-server can DRAIN an item between the sweep's `thread/queue/list` and
   its `thread/queue/delete`; it answers `{deleted:false}` (a verdict, not an
@@ -904,6 +948,8 @@ impossible rather than a review promise.
   - **A session belongs to 0..N Task Groups, derived LIVE** (`TaskGroupManager.groupsForSession({sessionKey,cwd,initialGroupId})` = explicit `sessions[]` tag ∪ auto-include folder match ∪ spawned-into group; archived excluded). A UI bind/drag/folder change reaches the agent on its NEXT turn with no respawn — the old single `session._taskId` is GONE (replaced by `_initialGroupId`, which only covers the pre-bind window). `VIBESPACE_TASK_ID` spawn env + the hook `?taskId=` were removed — belonging is resolved server-side from the `vsst_` token alone. **A conversation opened INTO a group is a MEMBER (lane open-task-binds, .346):** ws-create's `_birthBind` → conversation-ops `settleBirthGroups` binds it into `sessions[]` through the one bind writer once it has its own id (every opener: New Session, an automation's `--task`, a fork's first group), and a folder includes itself (PURE src/task-membership.js `insideFolder`; a stored `<path>/**` is the recursive switch).
   - **Injection covers every belonged group** (`renderMultiContext`), gated per-group by `session._groupSeenAt[groupId]` + a `contextDirSignature` (so a UI edit, another session's `vibespace-task`, OR user-written files in a group's contextDir all re-inject that group next turn). Per-group **`injectContext`** toggle (task-detail checkbox) opts a group out of injection while keeping belonging/board/vibespace-task working. Baseline `vibespace-status` intro still goes to sessions in NO group.
   - **The seen marks persist; the index is budgeted (B-86d3, lane hook-seen-marks).** The gate's marks (`_groupSeenAt`, `_ctxSig` as a DIGEST, a LITE `_groupSnap` — only the items this session parked or claimed, the only ones a diff speaks of — `_preambleSeen`, the intros' build, `_jobsEventsSeenTs`) live in the session meta's `seenMarks` (src/seen-marks.js), written by `persistSeenMarks` beside each hook route's answer (when SENT, only on a change) and restored by boot-restore `sessionFromMeta`. A restart's first prompt therefore re-sends only what changed: unchanged groups are named in ONE `<vibespace-task-unchanged>` line (decided before the blocks), a moved group arrives as its diff, a changed folder (digest mismatch) or a session holding > 24 items re-sends that group whole, the tools / manager intros come again only under a new build. No marks in the meta ⇒ everything once (as before). SessionStart always sends the full context (its source — startup / resume / compact — is not passed). Each group's context-folder INDEX spends at most `tasks.contextIndexBytes` (default 4096; 0 = the 100-file cap only): the newest files that fit in path order + one `… +M more (older) — vibespace-task [--group <id>] show --full` line; `show --full` (GET /api/agent/task?full=1 → `contextIndex`, belted) lists every file. Measured 13 sessions × 3 real-shape groups: restart 121.4 KB → 3.8 KB (nothing moved) / 10.9 KB (the busy group moved); the 158-file group's SessionStart is no longer cut inside its index.
+  - **Live sync is a DELTA, the model's facts are read off the loop (lane task-group-fanout).** A store write names its groups; ONE broadcaster (src/server/task-fanout.js) sends, coalesced over 400 ms, only what moved per group (the fields, the Activity entries added / cleared, the Backlog items by id, the members in / out) numbered `{epoch, base, seq}`; the sidebar's mirror takes a frame only when it follows exactly, else fetches GET /api/tasks again (never a stale board); an open Task Group window / log repaints only for its own group (another group's member / title move for the window), the board, Session Properties, the pickers and the browser trace view only when something but a log moved. `session-status-updated` carries the touched keys only. An ARCHIVED conversation leaves every group's `sessions[]` (the one unbind writer; one still RUNNING keeps its groups until it ends — its next turn needs their context; the 2026-10-task-group-archived-members migration pruned the old ones, archived first). The hook's Context signature is read OFF the main thread each turn (≤ 1 s); a group whose folders did not answer in time is deferred whole to the next turn — never told from a fact that was not read, never dropped.
+  - **★ WHAT A MEMBER IS TOLD PER TURN — relevance first, existence always, a cut drops the oldest (lane injection-relevance, 2.369.353; the injection audit of 2026-10-24: half of the other sessions' lines logged inside a member's span never reached it — 97 % to the 8-line count — the lines addressed to it among them, a third of the 8 slots its own lines, others' parks never named mid-session).** An update's activity (`diffChanges` → `renderNewActivity`) reads `- New activity (23, 4 of them yours — not repeated) — 8 told (2 addressed to you first), 11 more below by session:`, then ≤ 6 digest lines `  - <session> logged N more — newest: "<first ≤ 48 chars>"` (+ `(K addressed to you)`) and ONE `  - … N more from M other sessions`, THEN the picked lines in time order — existence before text. Inside the same 8 lines / 2200 B: the member's own lines are counted, never repeated (only its own new ⇒ no section, no delivery); the others' rank 0 addressed (its key or uuid head, its NAME — whole or an identifier-like word of it — or a backlog id it parked or claims) · 1 group-wide (ask / blocked / needs-input / waiting on / for-you / urgent, 待你 / 阻塞 / 卡住 / 需要你 / 请你 / 等你, or an open HIGH id) · 2 the rest · 3 a cleared entry (counted, never quoted), newest first inside a rank, a line that does not fit SKIPPED. `bits` stays `N new activity`. **Others' backlog (F2):** `- Backlog: 3 parked (1 HIGH [B-…]), 2 resolved by others since your last update — \`vibespace-task backlog\`` on a turn where they moved it (a restored LITE snapshot judges the others' items by time — after its last activity line). **Every cut drops the oldest (F1):** `renderDiffBlock` (5000 B) and `renderContextDiffMulti` (6500 B, the biggest group first) re-pick through the result's unenumerated `act.pick(room)` before any pop; `renderContext` / `renderMultiContext` take a `cap` and re-pick their logs (the header still counts); prompt-context fits its group blocks into the room left by re-rendering them (the last first) and SessionStart caps its context beside the preamble — capInline's tail cut (it took the NEWEST: every log prints oldest → newest) is the last resort. No persisted-shape change (seen-marks, the LITE snapshot untouched).
   - **`vibespace-task --group <id>` + enforced isolation** (`resolveAgentGroup`): one group → inferred; several → required; an explicit `--group` must be one the session belongs to (403 otherwise), 0 groups → 403. (P5's `plan-check` by-attribution retired with the checklist in 2.121.0.)
   - **Rename (P0):** `src/tasks.js`→`src/task-groups.js`, `TaskManager`→`TaskGroupManager`, `data/tasks.json`→`data/task-groups.json` (one-time forward migration in `_load`, legacy file left in place). User-visible UI strings say "Task Group". **KEPT for data/contract compatibility (do NOT assume renamed):** the internal `_state.tasks` map key, the JSON field `progress` (+ dormant `plan`), API paths `/api/tasks*` + `/api/agent/task*`, the `tasks-updated` WS event, and the CLI command name `progress`. So below, "task" often means Task Group and "progress" means Activity log.
   - **Review fixes (2.44.0 — do not regress):** (a) client membership has ONE folder-match implementation `_sessionFolderMatch(s, folderRecs)` (cwd|realCwd) used by the board's `_getTaskSessionKeys`, Task View's `_getSessionTaskGroups` and the expanded card — mirroring the server's `groupsForSession`; (b) **`contentUpdatedAt` gates agent re-injection** (bumped only by title/objective/contextDir edits + addProgress; `updatedAt` still bumps on everything for the UI) — bind/color/injectContext/archived changes must NOT re-inject; (c) the baseline `vibespace-status` intro fires whenever a session has NO injectable group (including belongs-but-all-inject-off); (d) **stale-state decay**: a non-live session's declared working/needs-input is dropped (`_synthSessionState` + the card chip; done/review/blocked persist, rendered dashed) and `_sessionSortRank` bumps blocked/needs-input only for LIVE sessions with `done → -1` (sinks); (e) `contextDirSignature` is TTL-cached (4s) and `groupsForSession` caches realpath — both run per prompt on the hook's 3s-timeout path. REMAINING BACKLOG (accepted): seen-state persistence across restarts, hook-timeout vs seen-bump loss window, host-scoped folders (remote cwd can string-match a local folder), `kind` retirement, explicit `?src=` consumer lock for codex.

@@ -7,6 +7,7 @@ import { loadInto, renderInto } from './permission-rules-view.js';
 import { t, deviceLocale } from './i18n.js';
 import { placementNote } from './pool-priority-model.js'; // 2026-09-28 (PURE)
 import { registerOpenAction } from './window-types.js';
+import { metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): did a tasks-updated delta move anything but a log
 import { ownedJobsView } from '../job-model.js'; // B-70f9 ② (PURE): the jobs this conversation owns, attention first
 import { btn as textBtn } from './channel-chrome.js'; // the house text button (`mounts-btn`)
 
@@ -867,10 +868,19 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
   // every broadcast — an open Properties window re-rendered its whole body
   // (plus a /api/session-todos fetch) each time. 300ms trailing-edge coalesce.
   let renderTimer = null;
+  const statusNamesMe = (msg) => {
+    const s = findSession();
+    const mine = new Set([refKey, s && s.webuiId ? 'webui:' + s.webuiId : null].filter(Boolean));
+    return [...Object.keys(msg.statuses || {}), ...(msg.removed || []), ...(msg.cleared || []).map((c) => c && c.key)].some((k) => mine.has(k));
+  };
   const onMsg = (msg) => {
     // G2 (verify r1): the owned-jobs list follows every job change (a clear's jobs-updated included) — dropped, re-asked
     if (msg.type === 'jobs-updated') { dropOwnedJobs(); clearTimeout(renderTimer); renderTimer = setTimeout(() => { renderTimer = null; render(); }, 300); return; }
     if (!['tasks-updated', 'session-status-updated', 'active-sessions', 'accounts-updated', 'user-state-updated'].includes(msg.type)) return;
+    // lane task-group-fanout: a delta that moves nothing this window draws (an Activity line, a Backlog item; another
+    // conversation's status) repaints nothing — and refetches no history
+    if (msg.type === 'tasks-updated' && !metaChanged(msg)) return;
+    if (msg.type === 'session-status-updated' && typeof msg.seq === 'number' && !statusNamesMe(msg)) return;
     clearTimeout(renderTimer);
     renderTimer = setTimeout(() => { renderTimer = null; render(); }, 300);
   };

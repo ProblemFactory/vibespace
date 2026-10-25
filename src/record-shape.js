@@ -379,6 +379,7 @@ Object.assign(SHAPES, {
   'codex:rollout:event/patch_apply_end': sh(['type', 'call_id', 'output', 'success', 'changes', 'error', 'status', 'stdout', 'stderr']),
   'codex:rollout:event/goal_updated': sh(['type', 'goal']),
   'codex:rollout:event/queue_changed': sh(['type', 'items', 'turn_id', 'verbs']),
+  'codex:rollout:event/queue_dropped': sh(['type', 'dropId', 'by', 'turnId', 'items', 'omitted']), // lane stop-refills-composer: ONE per Stop — the person's rows it dropped, put back into the draft (src/queue-putback.js)
   'codex:rollout:item/CommandExecution': sh(['type', 'id', 'process_id', 'command', 'cwd', 'parsed_cmd', 'source', 'status', 'stdout', 'stderr', 'aggregated_output', 'exit_code', 'duration', 'formatted_output']),
   'codex:rollout:item/FileChange': sh(['type', 'id', 'changes', 'status', 'stdout', 'stderr']),
   'codex:rollout:item/Reasoning': sh(['type', 'id', 'summary_text', 'raw_content']),

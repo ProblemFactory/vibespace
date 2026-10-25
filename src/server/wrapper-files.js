@@ -105,7 +105,13 @@ const QUEUE_OP_MAX_BYTES = 64 * 1024;
  *  verb-less advert (the legacy three are only this module's DEFAULT for such
  *  a process, not something it said) does not — it QUEUES. Never guessed yes:
  *  no sidecar = false here; the attach payload's `notificationSteerOf` keeps
- *  "unknown" (null) apart for a remote wrapper. */
+ *  "unknown" (null) apart for a remote wrapper.
+ *  EXPLICIT BEATS DERIVED (lane agy-peer-wake): a process that writes
+ *  `caps.notificationSteer` as a BOOLEAN is taken at its word — the agy wrapper
+ *  serves 'steer' for the person's own queued message (a stop + a new billed
+ *  turn) and says `notificationSteer: false`, so its verb list can never make
+ *  a mid-turn notification look free. A sidecar without the field (every codex
+ *  build) keeps the derived rule above. */
 function wrapperCaps(BUFFERS_DIR, id, sockPath) {
   const { sidecar } = resolveWrapperFiles(BUFFERS_DIR, id, sockPath);
   let m;
@@ -115,7 +121,8 @@ function wrapperCaps(BUFFERS_DIR, id, sockPath) {
   const queueVerbs = Array.isArray(caps && caps.queueVerbs)
     ? caps.queueVerbs.map((v) => String(v))
     : (inputQueue ? LEGACY_QUEUE_VERBS.slice() : []);
-  const notificationSteer = !!(caps && Array.isArray(caps.queueVerbs) && caps.queueVerbs.map((v) => String(v)).includes('steer'));
+  const notificationSteer = caps && typeof caps.notificationSteer === 'boolean' ? caps.notificationSteer
+    : !!(caps && Array.isArray(caps.queueVerbs) && caps.queueVerbs.map((v) => String(v)).includes('steer'));
   return { frameFile: !!(caps && caps.frameFile), peerMessage: !!(caps && caps.peerMessage), inputQueue, queueVerbs, notificationSteer, queueResync: !!(caps && caps.queueResync), responseStyle: !!(caps && caps.responseStyle), permissionRules: !!(caps && caps.permissionRules), caps, reason: caps ? 'ok' : 'no-caps', startedAt: (m && m.startedAt) || null, pid: (m && m.pid) || null };
 }
 

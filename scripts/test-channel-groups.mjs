@@ -1266,6 +1266,55 @@ console.log('§4d2 three groups\' reports fill the held room beside a 6 KB pream
   ok(rode === rows && over === 0, `three groups' reports beside a 6 KB preamble ride on the restart's first USER turn in every row (${rode}/${rows}; was 0/4: the cut's cap fell under its own pointer), each delivery ≤ 9600 B (${over} over)`, seen.join(' · '));
 }
 
+console.log('§4d4 the re-delivered FULL context gives up its OLDEST activity lines beside the held report, never its newest (lane injection-relevance F1)');
+{
+  // The injection audit (2026-10-24): beside a held report the B-c198 cut (capInline at the room left) took the NEWEST 5 of
+  // a first delivery's 9 picked log lines — the log prints oldest → newest, the cut ate its tail. Now the route
+  // RE-RENDERS the block under the room left and renderContext re-picks its log (the oldest go); the real store here.
+  const { TaskGroupManager } = require(path.join(REPO, 'src/task-groups.js'));
+  const AR = require(path.join(REPO, 'src/agent-routes.js'));
+  const arSrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
+  const fitLine = 'for (let i = blocks.length - 1; i >= 0 && blocksOver() > 0; i--) if (fitters[i]) blocks[i] = fitters[i](Math.max(1, B(blocks[i]) - blocksOver()));';
+  ok(arSrc.includes(fitLine), 'PIN: prompt-context fits its blocks into the room left by re-rendering them, the last first');
+  const MUTF = mutantCopies('chan-groups-f1', REPO);
+  const NoFit = MUTF.load('src/agent-routes.js', arSrc.replace(fitLine, ''), 'nofit');
+  const run = async (Mod, tag) => {
+    const f = fixture('e4d4-' + tag);
+    const made = await f.eng.create({ by: A, name: 'house', members: [B], quiet: true });
+    for (let i = 0; i < 12; i++) await f.eng.post({ group: made.group.id, from: A, text: `news ${i} ` + '群消息内容'.repeat(20) });
+    const tdir = path.join(ROOT, 'e4d4-tasks-' + tag);
+    fs.mkdirSync(tdir, { recursive: true });
+    const tasks = new TaskGroupManager({ dataDir: tdir, onChange() {} });
+    const g = tasks.create({ title: '3D house', objective: 'the house model ' + 'o'.repeat(1500), sessions: ['claude:' + B] });
+    for (let i = 0; i < 40; i++) tasks.addProgress(g.id, { note: `activity entry ${String(i).padStart(2, '0')} ` + 'x'.repeat(170), session: 'claude:' + A });
+    const routes = {};
+    const app = { get: (p, h) => { routes['GET ' + p] = h; }, post: (p, h) => { routes['POST ' + p] = h; }, put() {}, delete() {}, use() {} };
+    const wB = [...f.sessions.keys()].find((k) => f.sessions.get(k).claudeSessionId === B);
+    const tok = 'vsst_e4d4_' + tag;
+    const sB = Object.assign(f.sessions.get(wB), { agentToken: tok, cwd: '/tmp', _toolsIntroSeen: true, _mgrIntroSeen: true });
+    Mod.setupAgentRoutes({
+      app, activeSessions: f.sessions, tasks,
+      sessionStatus: { consumeNotices: () => [], pendingNotices: () => [], dropNotices: () => {}, get: () => null, rekey() {} }, SessionStatusManager: { renderNotices: () => '' },
+      userTodos: {}, sessionStatusKey: (s) => 'claude:' + s.claudeSessionId, serverSetting: (k) => (k === 'agents.perTurnToolReminder' ? false : undefined),
+      integrationEnabled: () => true, scheduleCtxSync() {}, remoteCtxBaseFor: () => null, readUserState: () => ({}), getJobs: () => null, deliver: null,
+      getGroups: () => f.eng,
+    });
+    sB._userInputAt = Date.now();   // the restart's first prompt: no seen marks ⇒ the group's FULL context re-delivered
+    const ctx = await new Promise((resolve) => { routes['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer ' + tok }, query: {} }, { json: (o) => resolve(String(o.context || '')), status() { return this; } }); });
+    f.close();
+    return ctx;
+  };
+  const B8 = (t) => Buffer.byteLength(t, 'utf-8');
+  const repWhole = (ctx) => ctx.includes('### Group messages since your last turn') && ctx.includes('news 11 ') && /Reply: vibespace-msg send g-[0-9a-f]{8} "\.\.\."/.test(ctx);
+  const first = await run(AR, 'fit');
+  const log = (first.match(/activity entry \d\d/g) || []);
+  ok(B8(first) <= AR.INLINE_CAP && repWhole(first) && first.includes('activity entry 39') && !first.includes('activity entry 28') && /## Activity log {2}_\(last \d+ of 40/.test(first) && !/context trimmed/.test(first),
+    `the full context beside the held ${B8(first.slice(first.indexOf('### Group messages since your last turn')))} B report keeps its NEWEST line (entry 39) and gives up its OLDEST picked ones, the report WHOLE, no cut pointer — ${B8(first)} B (${log.join(', ')})`, first.slice(-1200));
+  const control = await run(NoFit, 'nofit');
+  ok(repWhole(control) && !control.includes('activity entry 39') && /context trimmed to stay inline/.test(control),
+    'CONTROL (RED): the route copy without the fit (capInline\'s tail cut at the room left) loses the NEWEST line', control.slice(-700));
+}
+
 console.log('§4d3 a 4 KB report rides WHOLE beside a 3.4 KB tools section + a task context + two notices — the first prompt AND a mid-session one; a 5th KB waits, never cut (lane group-report-whole)');
 {
   // The owner, 2026-10-07 ("按照建议来吧"): at LINE_MAX 400 / REPORT_BUDGET 2 KB every 1–2 KB integrator progress message

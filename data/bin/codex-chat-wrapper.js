@@ -1885,6 +1885,27 @@ function queuedFullText(input) {
   return parts.join('\n');
 }
 
+/** STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer, owner 2026-10-24) — the `queue_dropped` record's payload.
+ *  The BYTE-IDENTICAL inline twin of src/queue-putback.js droppedRecordFor (a wrapper cannot require src/):
+ *  test-queue-putback pins this text to that one and drives both on one fixture. */
+function droppedRecordFor(rows, { dropId, turnId } = {}) {
+  const ITEM_MAX = 20000, TOTAL_MAX = 100000;
+  const items = []; let total = 0, omitted = 0;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r !== 'object') continue;
+    const full = typeof r.text === 'string' ? r.text : '';
+    let text = full.length > ITEM_MAX ? full.slice(0, ITEM_MAX) : full;
+    if (text.length < full.length && /[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);
+    if (total + text.length > TOTAL_MAX) { omitted++; continue; }
+    total += text.length;
+    const attachments = (Array.isArray(r.attachments) ? r.attachments : []).filter((a) => a && typeof a.type === 'string' && a.type).slice(0, 32)
+      .map((a) => ({ type: a.type.slice(0, 32), mime: typeof a.mime === 'string' && a.mime ? a.mime.slice(0, 100) : null, name: typeof a.name === 'string' && a.name ? a.name.slice(0, 200) : null }));
+    items.push({ id: String(r.id || ''), msgId: String(r.msgId || ''), ts: Number.isFinite(r.ts) ? r.ts : null, text, cut: text.length < full.length, attachments });
+  }
+  return { dropId: String(dropId || ''), by: 'stop', turnId: typeof turnId === 'string' && turnId ? turnId : null, items, omitted };
+}
+let dropSeq = 0;   // the put-back record's id: `${pid}-${n}` — the server's idempotency key
+
 function queueItemsFrom(data) {
   return asArray(data).map((q) => {
     const cid = asString(q?.clientUserMessageId);
@@ -2229,6 +2250,7 @@ async function _clearQueueForStop() {
   queueSweepSeq++;
   queueSweepActive = true;
   let removed = 0;
+  const putBack = [];   // lane stop-refills-composer: the person's rows this sweep REALLY deleted (deleted:true) — they come back into the composer
   try {
     for (let i = 0; i < data.length; i++) {
       const q = data[i];
@@ -2268,6 +2290,13 @@ async function _clearQueueForStop() {
       removed++;
       retractUserRecord(cid, 'dropped by Stop before it ran');   // same rule as the explicit remove above
       emitTaskEvent('queue_op_result', { op: 'remove', id, ok: true, msg_id: known?.msgId || '', reason: 'stopped' });
+      // The PERSON's row only: a peer / job row goes back through its own ladder (below). An INHERITED row (queued by the
+      // wrapper this one replaced — no queueMeta) is judged by this wrapper's own cid convention, the only witness: a
+      // `peer-<pid>-<n>` / `notif-<pid>-<n>` submission is never put into the owner's composer.
+      if (known ? known.kind !== 'peer' : !/^(peer|notif)-\d+-\d+$/.test(cid)) {
+        putBack.push({ id, msgId: known?.msgId || cid, ts: known?.ts || null, text: queuedFullText(q?.input),
+          attachments: asArray(q?.input).filter((e) => e && e.type !== 'text').map((e) => ({ type: String(e.type || ''), mime: /^data:([^;,]+)/.exec(typeof e.url === 'string' ? e.url : '')?.[1] || null, name: typeof e.name === 'string' ? e.name : null })) });
+      }
       // A queued PEER/job message was already reported delivered (peer_message_result
       // ok:'queued'), so dropping it silently would lose a promised message —
       // ok:false hands the text back to the delivery ladder, which re-stashes it
@@ -2275,6 +2304,11 @@ async function _clearQueueForStop() {
       if (known?.kind === 'peer' && known.text) emitTaskEvent('peer_message_result', { ok: false, reason: 'dropped by Stop before it was delivered', text: known.text, fromName: known.from || null, kind: known.via || null });
     }
   } finally { queueSweepActive = false; }
+  // STOP PUTS THE DROPPED QUEUE BACK (owner 2026-10-24, amends 2026-09-07 — lane stop-refills-composer): ONE record of
+  // what the sweep deleted for the person, after every result and BEFORE the republish (the order law). Built locally
+  // (no RPC — the budget is untouched); emitTaskEvent is not publishQueue, so the latch never swallows it. A `gone` /
+  // `timeout` / `error` row RAN or is STILL queued — never put back.
+  if (putBack.length) emitTaskEvent('queue_dropped', droppedRecordFor(putBack, { dropId: `${process.pid}-${++dropSeq}`, turnId: meta.activeTurnId || null }));
   // The republish comes AFTER every result above — the truth, not an assumed
   // empty: an item whose delete failed is still there and must still be listed.
   // Budgeted like the rest of the sweep: `turn/interrupt` is the caller's very

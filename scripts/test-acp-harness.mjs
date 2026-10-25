@@ -204,6 +204,10 @@ console.log('— Stop means stop (the cancel race + the local queue)');
     await sleep(400);
     ok('Stop during the context round trip: NOTHING reaches the agent — no session/prompt, and no session/cancel for a turn it never saw (a latched cancel would eat the NEXT turn)', !w.mockCalls().some((c) => c.method === 'session/prompt' || c.method === 'session/cancel'), w.mockCalls().map((c) => c.method));
     ok('…and the turn ends honestly: prompt_end cancelled, no prompt_start, streaming cleared in the sidecar', w.findAll('prompt_end').length === 1 && w.find('prompt_end').stopReason === 'cancelled' && !w.find('prompt_start') && w.metaJson()?.streaming === false && w.metaJson()?.activePromptId === null, { ends: w.findAll('prompt_end'), meta: w.metaJson() });
+    // STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer): the claimed prompt never reached the agent — the
+    // drain had already taken it off the strip (its chip cleared = "it ran"), so the record is the only place it lives
+    const undispatched = w.findAll('queue_dropped');
+    ok('…and that UNDISPATCHED prompt comes back into the composer: ONE queue_dropped, its row the prompt\'s own text + msgId (no context prefix), a `${pid}-${n}` dropId', undispatched.length === 1 && undispatched[0].items.length === 1 && undispatched[0].items[0].text === 'please read the file' && undispatched[0].items[0].msgId === 'c1' && /^\d+-\d+$/.test(undispatched[0].dropId) && undispatched[0].turnId && undispatched[0].by === 'stop', undispatched);
     // POSITIVE CONTROL: the same path with no Stop still prefixes the context
     hits = 0;
     w.send({ type: 'chat-input', text: 'please read the file', msgId: 'c2' });
@@ -242,13 +246,13 @@ console.log('— Stop means stop (the cancel race + the local queue)');
     await w.waitFor(() => w.find('prompt_end'), 8000, 'prompt_end');
     await sleep(1500); // long enough for a drained queue prompt to reach the agent
     ok('Stop with messages queued behind the turn: the queue is DROPPED — one prompt on the wire, one prompt_start, one cancelled prompt_end', w.mockCalls().filter((c) => c.method === 'session/prompt').length === 1 && w.findAll('prompt_start').length === 1 && w.findAll('prompt_end').length === 1 && w.find('prompt_end').stopReason === 'cancelled', { wire: w.mockCalls().map((c) => c.method), starts: w.findAll('prompt_start').length, ends: w.findAll('prompt_end').map((e) => e.stopReason) });
-    const cleared = w.find('notice', (r) => r.noticeKind === 'queue-cleared');
-    ok('…the drop is LOUD and counts what was dropped (never a silent discard)', !!cleared && /dropped 1 queued message —/.test(cleared.text), cleared);
-    // B-7638: the PEER entry dropped alongside it is NOT the user's to re-send.
-    // It goes straight back to the delivery ladder (peer_result ok:false, below)
-    // and arrives again on its own, so counting it here told the user to
-    // re-send a message they never sent and could not reach.
-    ok('…and a dropped PEER message is not counted in the "send it again" hint (it returns via the delivery ladder, the user never sent it)', !/2 queued/.test(cleared?.text || '') && !/queued messages/.test(cleared?.text || ''), cleared);
+    // STOP PUTS THE DROPPED QUEUE BACK (owner 2026-10-24, lane stop-refills-composer): the drop is no longer a «send
+    // them again» notice — the person's words come back into the composer (ONE record → the server's draft write → the
+    // client toast). B-7638 still holds: the PEER / NOTIFICATION entries dropped alongside are not the person's — they
+    // go back to the delivery ladder (below), never into the owner's composer.
+    const putBack = w.findAll('queue_dropped');
+    ok('…what the person queued comes back: ONE queue_dropped whose items are [q2\'s text] ONLY (the peer + notification rows are absent), a `${pid}-${n}` dropId', putBack.length === 1 && putBack[0].items.length === 1 && putBack[0].items[0].msgId === 'q2' && putBack[0].items[0].text === 'please read the file' && /^\d+-\d+$/.test(putBack[0].dropId) && putBack[0].omitted === 0, putBack);
+    ok('…and the «send them again» queue-cleared notice is retired (the toast is the ONE notice on every harness)', !w.find('notice', (r) => r.noticeKind === 'queue-cleared'), w.find('notice', (r) => r.noticeKind === 'queue-cleared'));
     const pr = w.findAll('peer_result');
     const dropped = pr.filter((r) => r.ok === false);
     ok('…a dropped PEER message goes back to the delivery ladder (peer_result ok:false with its text — the consumer re-stashes it)', dropped.some((r) => r.text === 'ping from B' && r.fromName === 'B' && /Stop/.test(r.reason || '')), pr);
@@ -264,6 +268,8 @@ console.log('— Stop means stop (the cancel race + the local queue)');
       const lastRm = at((r) => r.kind === 'queue_op_result');
       const emptyQ = at((r) => r.kind === 'queue_changed' && (r.items || []).length === 0);
       ok('…and the removals are recorded BEFORE the emptied queue is republished (order is the whole fix)', lastRm >= 0 && emptyQ > lastRm, { lastRm, emptyQ });
+      const dropAt = at((r) => r.kind === 'queue_dropped');
+      ok('…THE ORDER LAW (lane stop-refills-composer): the last removal result < queue_dropped < the emptied republish', lastRm >= 0 && dropAt > lastRm && emptyQ > dropAt, { lastRm, dropAt, emptyQ });
     }
     ok('…and the session stays usable: streaming cleared, no pending permission left', w.metaJson()?.streaming === false && Object.keys(w.metaJson()?.pendingRequests || {}).length === 0, w.metaJson());
   } finally { await w.stop(); }
@@ -464,7 +470,7 @@ console.log('— the stop-time bookkeeping nudge survives a Stop that drops it f
     w.send({ type: 'interrupt' });                                               // ← Stop drops the QUEUED nudge
     await w.waitFor(() => w.find('prompt_end', (r) => r.stopReason === 'cancelled'), 8000, 'the running turn ends cancelled');
     await sleep(300);
-    ok('…Stop drops it without sending it, and never tells the user to re-send a message they did not queue (the nudge is ours, not theirs)', reminders(w).length === 0 && !w.find('notice', (r) => r.noticeKind === 'queue-cleared'), { reminders: reminders(w).length, cleared: w.find('notice', (r) => r.noticeKind === 'queue-cleared') });
+    ok('…Stop drops it without sending it, and puts NOTHING into the person\'s composer (the nudge is ours, not theirs — no queue_dropped when nothing of the user\'s was queued)', reminders(w).length === 0 && !w.find('queue_dropped') && !w.find('notice', (r) => r.noticeKind === 'queue-cleared'), { reminders: reminders(w).length, putBack: w.findAll('queue_dropped') });
     w.send({ type: 'chat-input', text: 'fs check', msgId: 'n3' });                // a later turn that ends end_turn
     const again = await settle(() => stopChecks === 2 && reminders(w).length === 1);
     ok('THE FIX: the dropped queue entry takes its latch with it — the NEXT completed turn asks stop-check again and the reminder goes out (before: nudgeTurnActive stayed true for the rest of the session)', again && /vibespace-reminder>fs/.test(JSON.stringify(reminders(w)[0]?.params?.prompt || '')), { stopChecks, reminders: reminders(w).length, ends: w.findAll('prompt_end').map((e) => e.stopReason) });
@@ -520,7 +526,7 @@ console.log('— Stop lands INSIDE the stop-check round trip: no billed nudge tu
     await sleep(holdMs + 900);                                                   // let the held answer land
     ok('a Stop inside the stop-check round trip discards its answer — NO nudge turn is dispatched afterwards', reminders(w).length === 0 && w.findAll('prompt_start').length === 1, { reminders: reminders(w).length, starts: w.findAll('prompt_start').length, stopChecks });
     ok('…and the drop is recorded, not silent (the reason names the race)', /stop nudge dropped: Stop landed while the stop-check was in flight/.test(wlog(w)), wlog(w).split('\n').filter((l) => /stop nudge/.test(l)).join(' | '));
-    ok('…the latch is not stranded either: nothing is queued and no phantom "send it again" notice', !w.find('notice', (r) => r.noticeKind === 'queue-cleared') && !w.findAll('queue_changed').some((r) => (r.items || []).length), w.findAll('queue_changed').map((r) => r.items?.length));
+    ok('…the latch is not stranded either: nothing is queued and nothing is put back (no queue_dropped mid round trip)', !w.find('queue_dropped') && !w.find('notice', (r) => r.noticeKind === 'queue-cleared') && !w.findAll('queue_changed').some((r) => (r.items || []).length), w.findAll('queue_changed').map((r) => r.items?.length));
     // and the session still nudges LATER — the discarded answer is not a latch
     const later = await (async () => { const t0 = Date.now(); w.send({ type: 'chat-input', text: 'fs again', msgId: 's2' }); while (Date.now() - t0 < 9000) { if (reminders(w).length === 1) return true; await sleep(20); } return false; })();
     ok('…and the NEXT completed turn nudges normally (the discarded answer left no latch behind)', later && stopChecks === 2, { stopChecks, reminders: reminders(w).length });

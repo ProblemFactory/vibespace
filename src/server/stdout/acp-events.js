@@ -106,17 +106,30 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
             // codex-events.js: these lazy refs are mk() Proxies over `{}`, so
             // `ref()` throws TypeError and the answer never lands.
             try { permissionRulesRef?.onWrapperRecord?.(id, msg); } catch (e) { console.warn(`[permission-rules] ${id}: answer handling failed: ${e.message}`); }
-          } else if (msg.kind === 'peer_result' && msg.ok === false && msg.text) {
-            // same honesty rule as the codex rpc-queue lane: a promised message never silently dies
+          } else if (msg.kind === 'peer_result') {
+            // THE CODEX TWIN'S THREE HANDLERS (src/server/stdout/codex-events.js, peer_message_result — lane agy-peer-wake: the
+            // antigravity row rides the rpc-queue rung, whose answer is this record). PROPERTY ACCESS on the lazy refs, never
+            // a call (the twin note there: these are mk() Proxies over `{}`, `ref()` throws and the bare catch ate it).
             const cid = session.backendSessionId;
-            console.log(`[deliver] acp wrapper delivery failed (${msg.reason || 'unknown'}) — re-stashing for ${cid}`);
-            // the codex twin's rule (channel-jump verify r2): a frame naming a remembered hand-over restores its originals
-            let restored = 0;
-            try { if (cid) restored = deliverRef?.restoreFrame?.(cid, String(msg.text), { kind: msg.peerKind || null }) || 0; } catch (e) { console.warn(`[deliver] ${id}: hand-over restore failed: ${e.message}`); }   // kind = the frame's PATH as the wrapper echoes it (verify r4)
-            if (!restored) {
-              try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.peerKind || null, fromName: msg.fromName || null, text: String(msg.text) }); } // kind = the wrapper's echo (S3 verify F3)
-              catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }
+            // ① same honesty rule as the codex rpc-queue lane: a promised message never silently dies
+            if (msg.ok === false && msg.text) {
+              console.log(`[deliver] acp wrapper delivery failed (${msg.reason || 'unknown'}) — re-stashing for ${cid}`);
+              // the codex twin's rule (channel-jump verify r2): a frame naming a remembered hand-over restores its originals
+              let restored = 0;
+              try { if (cid) restored = deliverRef?.restoreFrame?.(cid, String(msg.text), { kind: msg.peerKind || null }) || 0; } catch (e) { console.warn(`[deliver] ${id}: hand-over restore failed: ${e.message}`); }   // kind = the frame's PATH as the wrapper echoes it (verify r4)
+              if (!restored) {
+                try { if (cid) deliverRef?.stashFor?.(cid, { source: 'agent', kind: msg.peerKind || null, fromName: msg.fromName || null, text: String(msg.text) }); } // kind = the wrapper's echo (S3 verify F3)
+                catch (e) { console.warn(`[deliver] ${id}: re-stash failed: ${e.message}`); }
+              }
             }
+            // ② a notification this harness could not fold into the running turn took another lane — said, like codex's
+            // `turn/steer refused` line (an ACP / agy wrapper has no free steer: it waits for its own turn after this one)
+            if (msg.ok === true && msg.steer === 'unsupported') console.log(`[deliver] rpc-queue: no steer into the running turn on ${session.backend || 'this harness'} — the notification took the '${msg.mode || '?'}' lane instead`);
+            // ③ THE SPEND SETTLEMENT for EVERY answer (conversation-deliver settleRpcDelivery): the wrapper's own verdict
+            // settles the frame the ladder wrote — 'queued'/'turn' charges a withheld charge, a mode-less answer is about an
+            // earlier frame and settles nothing
+            try { if (cid) deliverRef?.settleRpcDelivery?.(cid, { ok: msg.ok !== false, mode: msg.mode || null }); }
+            catch (e) { console.warn(`[deliver] ${id}: spend settle failed: ${e.message}`); }
           }
           if (newLabel !== null && session._streamingLabel !== newLabel) {
             session._streamingLabel = newLabel;

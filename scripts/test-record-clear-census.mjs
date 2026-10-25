@@ -523,9 +523,9 @@ console.log('§C the reader surfaces: every store-touching route is classified, 
 // §D THE BROADCASTS
 // ═══════════════════════════════════════════════════════════════════════════════════════════════════
 const BROADCASTS = [
-  { type: 'tasks-updated', file: 'server.js', how: 'the whole list (in place)' },
+  { type: 'tasks-updated', file: 'src/server/task-fanout.js', how: 'a DELTA of the groups a write named — the fields that moved, the Activity entries added / changed in place, the Backlog items by id (lane task-group-fanout; the whole list only on GET /api/tasks)' },
   { type: 'user-todos-updated', file: 'server.js', how: 'the snapshot (open items whole, resolved previews derived per snapshot)' },
-  { type: 'session-status-updated', file: 'server.js', how: 'the current records (the history is fetched)' },
+  { type: 'session-status-updated', file: 'server.js', how: 'the records of the keys a write touched (+ the keys gone; lane task-group-fanout — the history is fetched)' },
   { type: 'jobs-updated', file: 'src/server/jobs-wiring.js', how: 'a dirty signal + the held digest (counts, kinds — no text)' },
   { type: 'channel-groups-updated', file: 'src/server/groups-engine.js', how: 'the group list (lastText), fresh records as posted, the cleared records as cleared' },
 ];
@@ -567,6 +567,9 @@ const HOLDERS = [
   // [holder, file, the statement that rewrites / feeds it]
   ['TASK.md in every context folder', 'src/task-groups.js', 'this._syncTaskMd(t)'],
   ['the Activity diff snapshot holds no note text', 'src/task-groups.js', 'lastProgressAt:'],
+  // lane injection-relevance: an update names every session it leaves out with the first words of its newest note — a
+  // cleared entry is counted there, never quoted (a clear is not news; its sentence is no session's words)
+  ['an update\'s digest quotes a left-out session\'s newest UNCLEARED note only', 'src/task-groups.js', 'if (!r.p.clearedAt) g.quote = r;'],
   ['the For-you resolved preview is derived per snapshot', 'src/user-todos.js', 'resolved.map(previewOf)'],
   ['the status CURRENT record follows its history entry', 'src/session-status.js', 'clearHistory('],
   ['the status-override notice queued for the next turn', 'src/session-status.js', 'pendingNotices'],
@@ -1242,21 +1245,21 @@ const cacheCensus = (srcs) => {
 }
 // ── H5 ──
 const REPAINT = [
-  ['the Task Group log window', 'src/lib/task-log.js', /const onTasksMsg = \(msg\) => \{ if \(msg\.type === 'tasks-updated'\) refresh\(\); \};/],
+  ['the Task Group log window', 'src/lib/task-log.js', /const onTasksMsg = \(msg\) => \{ if \(msg\.type === 'tasks-updated' && touches\(msg, taskId\)\) refresh\(\); \};/],   // lane task-group-fanout: its own group's delta (a clear's included)
   // verify r6: a row names EVERY statement its label claims — a list of patterns, each of which must hold (r5 wrote ③ as ONE
   // pattern `listener[\s\S]*|guard` — a top-level alternation that passed on the listener alone, so reverting the guard
   // kept H5 green; ④ and ⑤ pinned the listener only)
   // lane task-group-context: the window's Backlog / 活动记录 tabs ARE the log viewer (mountTaskLog — the row above); its 设置 tab
   // repaints on the broadcast — the 「新对话会收到」 preview at once (fetched again even while a box is typed in), the rest the
   // moment the typed-in box is left
-  ['the Task Group window (its 设置 tab: the preview at once, the rest when the box typed in is left)', 'src/lib/task-detail.js', [/const onTasksMsg = \(msg\) => \{ if \(msg\.type === 'tasks-updated'\) render\(\); \};/, /if \(typing\) \{ settingsDirty = true; fetchPreview\(\); return; \}/, /root\.addEventListener\('focusout', \(\) => \{ if \(settingsDirty\) afterPointerUp\(\(\) => \{ if \(settingsDirty && state\.tab === 'settings'\) renderSettings\(\); \}\); \}\);/]],
+  ['the Task Group window (its 设置 tab: the preview at once, the rest when the box typed in is left)', 'src/lib/task-detail.js', [/const onTasksMsg = \(msg\) => \{ if \(msg\.type === 'tasks-updated' && \(touches\(msg, taskId\) \|\| metaChanged\(msg\)\)\) render\(\); \};/, /if \(typing\) \{ settingsDirty = true; fetchPreview\(\); return; \}/, /root\.addEventListener\('focusout', \(\) => \{ if \(settingsDirty\) afterPointerUp\(\(\) => \{ if \(settingsDirty && state\.tab === 'settings'\) renderSettings\(\); \}\); \}\);/]],
   ['the For-you model (every surface over it)', 'src/lib/user-todos-actions.js', /app\.ws\.onGlobal\(\(msg\) => \{ if \(msg\.type === 'user-todos-updated' && msg\.todos\) \{ liveSeen = true; setTodos\(msg\.todos\); \} \}\);/],
   ['the For-you popup + mini inbox (+ a live arrival toast, r5 ⑤)', 'src/lib/user-todos-panel.js', [/model\.on\('todos', \(next\) => apply\(next\)\);/, /for \(const el of document\.querySelectorAll\('#global-toasts > \.global-toast\[data-todo-id\]'\)\) \{\s*const it = byId\(el\.dataset\.todoId\);[\s\S]{0,240}?const want = `\$\{el\.dataset\.todoHead\} · \$\{nameFor\(it\.sessionKey, \[it\]\)\}: \$\{wordsOf\(it\)\}`;\s*if \(b\.textContent !== want\) b\.textContent = want;/]],
   ['the For-you window', 'src/lib/inbox-window.js', /model\.on\('todos', \(\) => render\(\), \{ signal \}\);/],
   // verify r7: a CLOSED popup holds no rows — every closer drops them (a draft kept first) and a render while closed drops them
   ['the For-you popup CLOSED (its rows leave with the close, verify r7)', 'src/lib/user-todos-panel.js', [/const hidePopup = \(why\) => \{ notePopupHide\(why\); popup\.classList\.add\('hidden'\); layout = null; dropRows\(\); \};/, /const dropRows = \(\) => \{ if \(!popup\.firstChild\) return; stashDrafts\(popup\); popup\.replaceChildren\(\); \};/, /onOutsidePress\(popup, \(e\) => hidePopup\(e\?\.type === 'blur' \? 'frame' : 'outside'\), \{/, /if \(popup\.classList\.contains\('hidden'\)\) \{ layout = null; dropRows\(\); return; \}/]],
   ['Session Properties (+ Now + history under the select guard, r5 ④)', 'src/lib/session-props.js', [/if \(!\['tasks-updated', 'session-status-updated', 'active-sessions', 'accounts-updated', 'user-state-updated'\]\.includes\(msg\.type\)\) return;/, /if \(root\.contains\(document\.activeElement\) && document\.activeElement\.tagName === 'SELECT'\) \{\s*const nv = root\.querySelector\('\.sp-now-value'\);\s*if \(nv\) \{ const h = nowHtml\(s\); if \(nv\.innerHTML !== h\) nv\.innerHTML = h; \}\s*const hl = root\.querySelector\('\.session-history-list'\);\s*if \(hl\) fillHistory\(hl, s\);\s*return;\s*\}/]],
-  ['the sidebar session card\'s history (a named clear passes the change guard, r5 ②)', 'src/lib/sidebar-tasks.js', /const changed = sig !== this\._statusSig \|\| \(Array\.isArray\(msg\.cleared\) && msg\.cleared\.length > 0\);/],
+  ['the sidebar session card\'s history (a named clear passes the change guard, r5 ②)', 'src/lib/sidebar-tasks.js', /let changed = Array\.isArray\(msg && msg\.cleared\) && msg\.cleared\.length > 0;/],
   ['the Background Work window', 'src/lib/jobs-panel.js', /const off = app\.ws\.onGlobal\(\(msg\) => \{ if \(msg\.type === 'jobs-updated'\) render\(\); \}\);/],
   ['the Background Work rail panel (rebuilt on every jobs-updated)', 'src/lib/sidebar-rail.js', /if \(msg\.type === 'jobs-updated'\) \{\s*this\._railRefreshBadges\(\);\s*if \(this\._activeTab === 'jobs'\) \{ this\.listEl\.querySelector\('\.rail-panel-jobs'\)\?\.remove\(\); this\._renderRailPanel\(\); \}/],
   ['the Job input window (r5 ①)', 'src/lib/jobs-panel.js', /if \(msg\.type === 'jobs-updated' && \(msg\.id === jobId \|\| \(Array\.isArray\(msg\.cleared\) && msg\.cleared\.includes\(jobId\)\)\)\) render\(\);/],
@@ -1303,10 +1306,10 @@ const ORDER = [
   ['src/lib/channels-panel.js', "const [d, g] = await Promise.all([fetchJson('/api/channels'), fetchJson('/api/channel-groups'), loadFolds(app)]);", [/const g0 = groupsGen;\s*const \[d, g\] = await Promise\.all\(\[fetchJson\('\/api\/channels'\), $/, /^[^\n]*\n(?:(?![^\n]*groups = )[^\n]*\n){0,6}?\s*if \(groupsGen !== g0\) \{/], 'generation', 'the Channels panel: a refresh keeps its group list only when no broadcast landed while it waited (verify r6 ②)'],
   ['src/lib/session-card.js', 'fetch(`/api/session-status/history?sessionKey=${encodeURIComponent(keys)}`)', /^[^\n]*\n\s*\.then\(r => r\.json\(\)\)\.then\(d => \{\s*const hist = [^\n]*\n\s*if \(!hist\.length \|\| !histWrap\.isConnected\) return;/, 'own-container', 'the sidebar card\'s history: its container is made by the card render that fetched it, and a status frame (a clear\'s named one included, r5 ②) re-renders the card'],
   ['src/lib/session-props.js', 'fetch(`/api/session-status/history?sessionKey=${encodeURIComponent(keys)}`).then(r => {', /^[^\n]*\n(?:[^\n]*\n){0,3}?\s*\}\)\.then\(d => \{\s*if \(!histList\.isConnected \|\| histList\._fill !== my\) return;/, 'latest', 'Session Properties\' history: the latest fill paints (r5 ④)'],
-  ['src/lib/sidebar-tasks.js', "return fetch('/api/session-status').then(", [/const gen = this\._statusGen \|\| 0;\s*return $/, /^fetch\('\/api\/session-status'\)\.then\(r => r\.ok \? r\.json\(\) : null\)\.then\(d => \{\s*if \(!d\?\.statuses \|\| \(this\._statusGen \|\| 0\) !== gen\) return;/], 'generation', 'the status mirror (the page load + the reconnect resync): dropped when a status frame landed meanwhile (verify r6 ②)'],
+  ['src/lib/sidebar-tasks.js', "return fetch('/api/session-status').then(", [/const gen = this\._statusGen \|\| 0;\s*return $/, /^fetch\('\/api\/session-status'\)\.then\(r => r\.ok \? r\.json\(\) : null\)\.then\(d => \{\s*(?:\/\/[^\n]*\n\s*){0,3}if \(!d\?\.statuses \|\| \(\(this\._statusGen \|\| 0\) !== gen && fetchVerdict\(this\._statusMark, d\) === 'drop'\)\) return;/], 'generation', 'the status mirror (the page load + the reconnect resync): dropped when a status frame landed meanwhile (verify r6 ②) and the answer is older than it (lane task-group-fanout: the hub\'s order, fetchVerdict)'],
   ['src/lib/task-log.js', 'const r = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/progress?before=${encodeURIComponent(before)}&limit=100`).then((x) => (x.ok ? x.json() : null));', /^[^\n]*\n\s*if \(g0 !== older\.gen\) return;/, 'generation', 'the Task log\'s older entries (2.369.204): a clear that reached the archive bumps older.gen (the group\'s archiveClearedAt moved) and re-reads the held rows — a page begun before it is dropped'],
   ['src/lib/task-detail.js', 'const r = await fetch(`/api/tasks/${encodeURIComponent(taskId)}/context`);', /^[^\n]*\n\s*if \(!r\.ok \|\| seq !== previewSeq\) return;/, 'latest', 'lane task-group-context: the Task Group window\'s 「新对话会收到」 preview — every request bumps previewSeq and an answer older than the newest request is dropped (a clear\'s tasks-updated asks again)'],
-  ['src/lib/sidebar-tasks.js', "const res = await fetch('/api/tasks');", [/const gen = this\._tasksGen \|\| 0;\s*try \{\s*const res = await $/, /^[^\n]*\n(?:(?![^\n]*this\._tasks = )[^\n]*\n){0,3}?\s*if \(\(this\._tasksGen \|\| 0\) !== gen\) \{/], 'generation', 'the Task Group mirror: dropped when a tasks-updated landed meanwhile (R4 verify r1)'],
+  ['src/lib/sidebar-tasks.js', "const res = await fetch('/api/tasks');", [/const gen = this\._tasksGen \|\| 0;\s*try \{\s*const res = await $/, /^[^\n]*\n(?:(?![^\n]*this\._tasks = )[^\n]*\n){0,6}?\s*if \(\(this\._tasksGen \|\| 0\) !== gen && fetchVerdict\(this\._tasksMark, data\) === 'drop'\) \{/], 'generation', 'the Task Group mirror: dropped when a tasks-updated landed meanwhile (R4 verify r1) and the answer is older than it (lane task-group-fanout: the hub\'s order, fetchVerdict)'],
 ];
 const callArgs = (text, open) => { let d = 0; for (let i = open; i < text.length; i++) { const c = text[i]; if (c === '(') d++; else if (c === ')') { d--; if (d === 0) return text.slice(open + 1, i); } } return ''; };
 const orderSites = (srcs) => {
@@ -1407,7 +1410,7 @@ console.log('§H6 controls: one client-side copy per class, each RED on its leg'
     ['src/lib/jobs-panel.js', "    const r = await fetchJson(`/api/jobs/${jobId}`);\n    if (seq !== renderSeq) return;\n", "    const r = await fetchJson(`/api/jobs/${jobId}`);\n", 'order-interact-seq'],
     ['src/lib/jobs-panel.js', "    const [r] = await Promise.all([fetchJson('/api/jobs'), loadFolds(app)]);\n    if (seq !== renderSeq) return;\n", "    const [r] = await Promise.all([fetchJson('/api/jobs'), loadFolds(app)]);\n", 'order-jobswin-seq'],
     ['src/lib/user-todos-actions.js', "if (d?.todos && gen === g0) setTodos(d.todos);", 'if (d?.todos) setTodos(d.todos);', 'order-resync-gen'],
-    ['src/lib/sidebar-tasks.js', "if (!d?.statuses || (this._statusGen || 0) !== gen) return;", 'if (!d?.statuses) return;', 'order-status-gen'],
+    ['src/lib/sidebar-tasks.js', "if (!d?.statuses || ((this._statusGen || 0) !== gen && fetchVerdict(this._statusMark, d) === 'drop')) return;", 'if (!d?.statuses) return;', 'order-status-gen'],
     ['src/lib/inbox-window.js', "  const textOf = (i) => [", "  fetchJson('/api/user-todos').then((d) => { if (d && d.todos) model.replace?.(d.todos); });\n  const textOf = (i) => [", 'order-new-painter'],
   ];
   {

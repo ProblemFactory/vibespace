@@ -243,7 +243,7 @@ console.log('⑤ the wiring pins + THE CENSUS (one folder rule, one bind writer)
     'conversation-ops: the verdict is the PURE one, the bind is bindConversation (the owner\'s route\'s writer), the verb hands who bound it to the headless create');
   ok((ops.match(/\[automation\] session \$\{/g) || []).length === 1 && (ops.match(/boundNote\(/g) || []).length === 2, 'ONE spelling of the automation bind line (boundNote — conversations.bind and the --task open)');
   ok(/import \{ folderOf, insideFolder \} from '\.\.\/task-membership\.js';/.test(read('src/lib/sidebar-tasks.js')) && /import \{ insideFolder \} from '\.\.\/task-membership\.js';/.test(read('src/lib/app.js'))
-    && /const \{ folderOf, insideFolder \} = require\('\.\/task-membership\.js'\);/.test(read('src/task-groups.js')), 'the store, the panel and the New Session chips import THE folder rule');
+    && /const \{ folderOf, insideFolder, membersWithout \} = require\('\.\/task-membership\.js'\);/.test(read('src/task-groups.js')), 'the store, the panel and the New Session chips import THE folder rule (lane task-group-fanout: + THE unbind rule)');
   // THE CENSUS: a Task Group folder file (it reads a group's folders) never hand-rolls the prefix test
   const HAND = /startsWith\(\s*[\w$.]*\.path\s*\+\s*'\/'\s*\)/;
   const FOLDER_FILE = /_folderRec\b|_sanitizeFolders\b|\b(?:t|task|tg|g|group)\.folders\b/;

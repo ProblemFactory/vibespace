@@ -2,6 +2,23 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.353 — 2026-10-24
+
+### Changed
+- Pressing Stop still drops the messages queued behind the running turn, but what you typed now comes back into the input box, in every open window.
+- A note says how many came back; attached images are named, not restored, and a message Stop caught before the agent received it comes back too.
+- Typing when you press Stop is safe: your words stay where they are and the returned messages go in front of them.
+- The one message to send again is a Codex queued message that had already started — it reads “That message is no longer queued — it already ran.”
+- Archiving a conversation takes it out of its Task Groups' member lists.
+- An agent in a busy Task Group is told first what is addressed to it, and hears which conversations posted what it was not shown, not only the newest lines.
+
+### Fixed
+- Adding an Activity line or a status no longer re-sends every Task Group to every tab and phone; only the change travels and only the windows it concerns redraw.
+- An agent's turn no longer waits on a slow network folder in its Task Group's Context table; a folder that answers late is told on the next turn.
+- When an agent's Task Group update has to be shortened, the oldest activity is left out now, never the newest.
+- A message sent with “wake” to an Antigravity conversation now reaches it at once, as with Claude or Codex; while it is busy, the message runs right after.
+- When a running conversation cannot be woken, the answer now says it is running and why (an older Antigravity session needs a restart), not “no live inbox”.
+
 ## 2.369.352 — 2026-10-24
 
 ### Fixed

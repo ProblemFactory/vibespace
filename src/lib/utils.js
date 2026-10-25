@@ -1284,7 +1284,7 @@ class StateSync {
     s.acked.delete(op.key); // a newer op superseded the own set — every later op is newer still
     if (op.op === 'set') s.data[op.key] = op.value;
     else if (op.op === 'delete') delete s.data[op.key];
-    this._notify(s, op.key, op.op === 'delete' ? '' : op.value);
+    this._notify(s, op.key, op.op === 'delete' ? '' : op.value, op); // the op rides along: a put-back's `prepended` (lane stop-refills-composer)
   }
 
   // The server's answer to an own set: the version it produced. The key's last outstanding ack releases its held ops.
@@ -1346,11 +1346,13 @@ class StateSync {
     }
   }
 
-  _notify(s, key, value) {
+  // handlers get (value, key, op): `op` = the remote op that changed the key (undefined from a snapshot) — every listener
+  // but the composer's ignores it; the composer lands a put-back (`op.prepended`) as a prefix (src/lib/chat-input.js)
+  _notify(s, key, value, op) {
     const specific = s.listeners.get(key);
     const wildcard = s.listeners.get('*');
-    if (specific) for (const h of specific) h(value, key);
-    if (wildcard) for (const h of wildcard) h(value, key);
+    if (specific) for (const h of specific) h(value, key, op);
+    if (wildcard) for (const h of wildcard) h(value, key, op);
   }
 }
 

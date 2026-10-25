@@ -13,6 +13,9 @@
 //      cap, the rules part untouched, the setting, the 9600 B cap, `show --full` lists every file (belted)
 //   §5 the measurement: 13 sessions × 3 groups in the real shape — bytes on the first turn after a restart, base vs
 //      now, and each group's index bytes before / after the budget (printed; the report quotes it)
+//   §6 lane task-group-fanout (the owner's constraint: what the model is told must not change): the Context read OFF the
+//      main thread (a real SafeFs pool) vs the old synchronous walk — the same folder edits + turns, byte-identical
+//      deliveries; the stale path (a read past its bound tells nothing new and moves no mark; the next turn tells all)
 // Run: node scripts/test-seen-marks.mjs
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
@@ -434,6 +437,109 @@ console.log('§5 measurement — 13 sessions × 3 groups, the real shape');
   // each group's Context table in the three-group SessionStart (lane task-group-context: one shared room, rows step down)
   const multi = tasks.renderMultiContext(ids, {});
   ok(B(multi) <= 9600 && ids.every((id) => multi.includes(`### "${tasks.get(id).title}"\n`)), `the three groups' layered context, every Context table in it, under the cap (${kb(B(multi))})`);
+}
+
+// ════════ §6 THE OWNER'S CONSTRAINT (lane task-group-fanout, 2026-10-24): what the model is told must not change ════════
+// The hook path's Context-table signature moved OFF the main thread (a SafeFs read per told row, awaited ≤ the bound). ONE
+// store, ONE folder tree, two rigs over the same routes: the CONTROL with no off-thread reader — the old synchronous walk,
+// the base's own road — and the NEW road (a real SafeFs pool). The same sequence of folder edits + turns; every delivery
+// compared BYTE FOR BYTE. Then the stale path: a read that misses its bound tells nothing new at that turn and moves no
+// mark; the next turn tells all of it — exactly the control's delivery of the turn before (never dropped).
+console.log('§6 the Context read off the main thread (lane task-group-fanout): byte-identical deliveries, the stale path');
+{
+  const { SafeFs } = require('../src/safe-fs.js');
+  const pool = new SafeFs({ poolSize: 2, name: 'seenmarks-fanout' });
+  const ops = { contextFiles: 0, stat: 0 };
+  const counted = { call: (op, payload, o) => { if (op in ops) ops[op]++; return pool.call(op, payload, o); } };
+  let road = null;   // the off-thread reader the store sees — null = the CONTROL (the old synchronous signature)
+  const root6 = path.join(tmp, 'f6'), work6 = path.join(root6, 'work'), dirA = path.join(root6, 'notes'), dirC = path.join(root6, 'handbook'), fileB = path.join(root6, 'brief.md');
+  let clock = T0;
+  const put = (p, text) => { fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, text); const t = new Date(clock += 60000); fs.utimesSync(p, t, t); };
+  fs.mkdirSync(work6, { recursive: true });
+  for (let i = 0; i < 6; i++) put(path.join(dirA, `note-${i}.md`), textOf(200 + i * 40, i));
+  put(path.join(dirC, 'HANDOFF.md'), textOf(600, 3)); put(path.join(dirC, 'guide', 'part-1.md'), textOf(300, 4)); put(fileB, textOf(900, 7));
+  const dataDir6 = path.join(root6, 'data'); fs.mkdirSync(dataDir6, { recursive: true });
+  const tasks = new TaskGroupManager({ dataDir: dataDir6, onChange: () => {}, getSetting: () => undefined, mirrorFs: () => road, sigBoundMs: 150 });
+  const g1 = tasks.create({ title: 'Fanout notes', objective: textOf(120, 1), ctx: [{ path: work6, tags: ['discover'], tell: 'note' }, { path: dirA, tell: 'names' }, { path: fileB, tell: 'contents' }] }).id;
+  const g2 = tasks.create({ title: 'Fanout handbook', objective: textOf(90, 2), ctx: [{ path: work6, tags: ['discover'], tell: 'note' }, { path: dirC, tell: 'index' }, { ref: g1 }] }).id;
+  const rigC = mkRig({ tasks, meta: mkMeta() }), rigN = mkRig({ tasks, meta: mkMeta() });
+  for (const rig of [rigC, rigN]) rig.activeSessions.set('A', mkSession('A', work6));
+  const fresh = () => { for (const c of [tasks._sigCache, tasks._walkCache, tasks._resCache]) if (c) c.clear(); };   // every turn reads (the 4 s TTL is not the subject)
+  // the new road's call, awaited (the route re-enters itself once the read settled); main-thread readdir under the fixture counted
+  const callN = (route, id) => new Promise((resolve) => {
+    const s = rigN.activeSessions.get(id);
+    const req = { headers: { authorization: 'Bearer ' + s.agentToken }, query: {}, body: {} };
+    const l = console.log, w = console.warn;
+    console.log = (...a) => routeLog.push(a.join(' ')); console.warn = (...a) => routeLog.push(a.join(' '));
+    const res = { json: (o) => { console.log = l; console.warn = w; resolve(o || {}); }, status: () => res };
+    rigN.routes[`GET ${route}`](req, res);
+  });
+  let mainWalks = 0;
+  const realReaddir = fs.readdirSync;
+  fs.readdirSync = function (p, ...a) { if (String(p).startsWith(root6 + '/') && !String(p).startsWith(dataDir6)) mainWalks++; return realReaddir.call(this, p, ...a); };
+  const turn = async (route) => {
+    road = null; fresh(); const w0 = mainWalks;
+    const c = (route === 'task-context' ? rigC.start('A') : rigC.prompt('A'));
+    const cWalks = mainWalks - w0;
+    road = counted; fresh(); const w1 = mainWalks;
+    const n = ((await callN(`/api/agent/${route}`, 'A')).context) || '';
+    return { c, n, cWalks, nWalks: mainWalks - w1 };
+  };
+  const STEPS = [
+    ['SessionStart', null, 'task-context'],
+    ['the first prompt', null],
+    ['nothing changed', null],
+    ['a listed note edited (size + mtime)', () => put(path.join(dirA, 'note-2.md'), textOf(500, 9))],
+    ['a note added', () => put(path.join(dirA, 'note-9.md'), textOf(250, 11))],
+    ['the contents-told brief rewritten', () => put(fileB, textOf(700, 12))],
+    ['a key file edited', () => put(path.join(dirC, 'HANDOFF.md'), textOf(650, 13))],
+    ['a nested file removed', () => fs.rmSync(path.join(dirC, 'guide', 'part-1.md'))],
+    ['an Activity line (no file moved)', () => tasks.addProgress(g1, { note: 'a peer finished the index', session: 'claude:P1' })],
+    ['a note removed + an Activity line', () => { fs.rmSync(path.join(dirA, 'note-0.md')); tasks.addProgress(g2, { note: 'the handbook moved', session: 'claude:P2' }); }],
+  ];
+  const QUIET = new Set(['the first prompt', 'nothing changed']);   // SessionStart told both groups whole; then nothing moved
+  const diffs = [];
+  let told = 0, cWalks = 0, nWalks = 0;
+  for (const [name, mutate, route = 'prompt-context'] of STEPS) {
+    if (mutate) mutate();
+    const r = await turn(route);
+    if (r.c !== r.n) diffs.push({ step: name, control: r.c.slice(0, 300), road: r.n.slice(0, 300) });
+    const t = /<vibespace-task-(?:context|update)\b/.test(r.c);
+    if (t) told++;
+    if (QUIET.has(name) === t) diffs.push({ step: name, why: t ? 'told on a turn where nothing changed' : 'a change was not told' });
+    cWalks += r.cWalks; nWalks += r.nWalks;
+  }
+  ok(!diffs.length && told === STEPS.length - QUIET.size, `BYTE-IDENTICAL: ${STEPS.length} turns over ${STEPS.length - 3} folder / store edits — every delivery of the off-thread road equals the old synchronous walk's, byte for byte (${told} told the groups; the ${QUIET.size} quiet turns told nothing)`, diffs);
+  ok(cWalks > 0 && nWalks === 0 && ops.contextFiles > 0 && ops.stat > 0, `the control walked the fixture ON the main thread (${cWalks} readdirSync), the new road never did (${nWalks}) — its facts came from the SafeFs pool (${ops.contextFiles} contextFiles, ${ops.stat} stat)`, { cWalks, nWalks, ops });
+  // ── THE STALE PATH: a reader that answers only when released ──
+  const held = [];
+  const slow = { call: (op, payload, o) => new Promise((resolve, reject) => { held.push(() => pool.call(op, payload, o).then(resolve, reject)); }) };
+  const release = async () => { while (held.length) held.shift()(); await new Promise((r) => setTimeout(r, 60)); };
+  put(path.join(dirA, 'note-5.md'), textOf(333, 21)); tasks.addProgress(g1, { note: 'the stale-path line', session: 'claude:P3' });
+  road = null; fresh(); const cN = rigC.prompt('A');
+  const sA = rigN.activeSessions.get('A');
+  const marks0 = JSON.stringify([sA._groupSeenAt, sA._ctxSig]);
+  road = slow; fresh();
+  const nN = (await callN('/api/agent/prompt-context', 'A')).context || '';
+  ok(cN.includes('<vibespace-task-update') && !nN.includes('<vibespace-task-update') && !nN.includes('the stale-path line') && JSON.stringify([sA._groupSeenAt, sA._ctxSig]) === marks0 && sA._sigStale && g1 in sA._sigStale,
+    'turn N, the read missed its bound: NOTHING new told (the control told the update), no seen mark moved, the session holds the group sigStale', { control: cN.slice(0, 160), road: nN.slice(0, 300), stale: sA._sigStale });
+  await release();
+  const nN1 = (await callN('/api/agent/prompt-context', 'A')).context || '';
+  ok(nN1 === cN && !sA._sigStale, 'turn N+1: EVERYTHING told — byte for byte the control\'s turn-N delivery (the read that landed after the mark answers; never dropped) — and the mark is gone', { want: cN.slice(0, 200), got: nN1.slice(0, 200) });
+  await release();
+  road = null; fresh(); const cN1 = rigC.prompt('A');
+  road = counted; fresh(); const nN2 = (await callN('/api/agent/prompt-context', 'A')).context || '';
+  ok(cN1 === nN2 && !nN2.includes('<vibespace-task-update'), 'turn N+2: nothing told twice (both roads quiet again)', { control: cN1.slice(0, 160), road: nN2.slice(0, 160) });
+  // SessionStart on a read that misses its bound: no group is told there, every group waits whole for the first prompt
+  rigC.activeSessions.set('B', mkSession('B', work6)); rigN.activeSessions.set('B', mkSession('B', work6));
+  road = null; fresh(); const cS = rigC.start('B'); const cP = rigC.prompt('B');
+  road = slow; fresh(); const nS = (await callN('/api/agent/task-context', 'B')).context || '';
+  await release();
+  road = counted; fresh(); const nP = (await callN('/api/agent/prompt-context', 'B')).context || '';
+  ok(cS.includes(g1) && cS.includes(g2) && !nS.includes(g1) && !nS.includes(g2) && nP.includes(g1) && nP.includes(g2) && !rigN.activeSessions.get('B')._sigStale && !cP.includes(g1),
+    'SessionStart on a read that missed its bound tells no group (nothing marked seen) — the first prompt tells both whole', { start: nS.slice(0, 160), first: nP.slice(0, 160) });
+  fs.readdirSync = realReaddir;
+  pool.close();
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

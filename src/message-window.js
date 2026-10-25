@@ -12,6 +12,7 @@
 // same ids; `seq` only names creates outside any record context.
 const { sliceTextWindow } = require('./text-window.js'); // PURE: the attach slab counted in text cards (perf lane A)
 const { turnPreviewOf, COMPACT_PREVIEW } = require('./assistant-note.js'); // PURE (B-40f8): THE preview of a user turn
+const { queueDroppedOf, putbackNotice } = require('./queue-putback.js'); // PURE (lane stop-refills-composer): Stop's put-back record + its toast facts
 
 const asArray = (v) => (Array.isArray(v) ? v : []);
 
@@ -198,6 +199,28 @@ class MessageWindow {
 
   /** Process a single live record. Emits create/edit ops via listeners. */
   processLive(record) { this._feedRecord(record, true); }
+
+  /** The queue chip on the bubble a queued message belongs to — false when there is no such bubble. A harness whose
+   *  normalizer keeps the chip (codex / acp) overrides this; the base stamps nothing. */
+  _stampQueueChip() { return false; }
+
+  /** STOP PUT THE DROPPED QUEUE BACK (lane stop-refills-composer — src/queue-putback.js): ONE implementation for every
+   *  harness. The wrapper's `queue_dropped` record (any of its envelopes — the subclass hands the raw record, the ONE
+   *  extractor validates it) marks each put-back row's bubble 'removed' (already so on codex/acp from the per-item
+   *  results — idempotent; it is what marks acp/agy's undispatched active prompt, whose chip had cleared when the drain
+   *  shifted it) and, live only, emits ONE meta op the client turns into the toast. The draft itself is written by the
+   *  server's door at the feedLive gate, never here; a history convert emits nothing. */
+  _processQueueDropped(record, emit) {
+    const d = queueDroppedOf(record);
+    if (!d) return;
+    for (const it of d.items) this._stampQueueChip(it.msgId, 'removed', emit);
+    // ONE toast per Stop: the same record fed twice (the door's own idempotency key, bounded) says nothing new
+    const seen = this._putbackToasted || (this._putbackToasted = []);
+    if (seen.includes(d.dropId)) return;
+    seen.push(d.dropId); if (seen.length > 32) seen.shift();
+    const facts = putbackNotice(d);
+    if (emit && (facts.n || facts.images || facts.others || facts.cut || facts.omitted)) this._emit({ op: 'meta', subtype: 'queue-putback', dropId: d.dropId, ...facts }); // nothing to say ⇒ no toast
+  }
 
   // Session-state reads the attach payload asks every normalizer for; a
   // normalizer that never publishes one answers the empty value.

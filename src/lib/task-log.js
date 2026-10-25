@@ -6,6 +6,7 @@ import { registerOpenAction } from './window-types.js';
 import { PRIORITIES, normalizePriority, priorityMarker, sortBacklog } from '../backlog-select.js';
 // "Clear content…" (2026-09-28): the ONE confirm dialog + request path, and the cleared sentence's words
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js';
+import { touches } from '../task-delta.js'; // PURE (lane task-group-fanout): does a tasks-updated delta concern this group
 import { matchSnippet } from '../record-clear.js'; // PURE: why a Find matched a row whose note does not say it (the dialog's line)
 import { enterSubmits } from './chat-enter-keys.js';
 import { afterPointerUp, blurCommits } from './blur-commit.js'; // lane task-group-context: the add boxes save when left (after the release)
@@ -812,7 +813,7 @@ export function mountTaskLog(app, taskId, root, { tab, embedded = false, signal 
     counts.forEach((c, i) => { if (want[i] !== undefined && c.textContent !== want[i]) c.textContent = want[i]; });
     paintActivity(body, root.querySelector('.task-log-selbar'));
   };
-  const onTasksMsg = (msg) => { if (msg.type === 'tasks-updated') refresh(); };
+  const onTasksMsg = (msg) => { if (msg.type === 'tasks-updated' && touches(msg, taskId)) refresh(); };   // lane task-group-fanout: another group's write repaints nothing here
   app.ws.onGlobal(onTasksMsg);
   return { setTab, render, destroy: () => { app.ws.offGlobal(onTasksMsg); ctl.abort(); } };
 }

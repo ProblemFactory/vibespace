@@ -29,7 +29,8 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   noteModelSeen, noteHarnessModels, recordUsageAttribution, daemonPtyShim, sbSeenFirst, getDeviceMgr,
   agentEnv, // the SANITIZED spawn env (spawn-hygiene law) — the ONE local re-attach uses it, as ws-handler's detector always did
   onLocalReattach = null, // lane-dead-bridge: told after EVERY local re-attach (the watch, the broken-stdin detector, the probe) — ends the socket's orphans, counts the catch-up
-  getHosts, getUsageHistory, getTelemetry, getNoConvoRef, getDeliver, getPages, getPermissionRules, getBrain = () => null, getExitProxy = () => null }) {
+  getHosts, getUsageHistory, getTelemetry, getNoConvoRef, getDeliver, getPages, getPermissionRules, getBrain = () => null, getExitProxy = () => null,
+  getSyncStore = () => null }) {   // lane stop-refills-composer: the drafts store, read at record time (server.js builds it later); every other create() caller relies on the null default
   const hosts = mk(getHosts);
   const exitProxyRef = mk(getExitProxy);                // verify-r2 A3-r2 / ask-a: a dead conversation's exit pairs + waiting asks end with it
   const usageHistory = mk(getUsageHistory);
@@ -49,6 +50,10 @@ function create({ rootDir, BUFFERS_DIR, META_DIR, DTACH_CMD, USAGE_SCANNER_PATH,
   // lane global-search: the ONE live gate every consumer feeds the normalizer through also tells the search index (debounced, never throws)
   const stdoutHelpers = { feedLive: (s, m) => { feedLive(s, m); SEARCH.noteLive(s); }, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta,
     updateSessionTodos, applyTaskToolUpdate, emitTaskListTodos };
+  // lane stop-refills-composer: THE ONE WRITER of a Stop put-back (src/server/queue-putback.js) rides that same gate, per
+  // attach (it writes the draft of THIS webui id) and BEFORE the normalizer — the draft op precedes the record's meta op
+  const putback = require('./queue-putback.js').create({ getSyncStore });
+  const helpersFor = (id) => ({ ...stdoutHelpers, feedLive: (s, m) => { putback.onLiveRecord(s, id, m); stdoutHelpers.feedLive(s, m); } });
 // ── PTY setup helper (onData + onExit wiring) ──
 // Live TODO capture — the agent's own TodoWrite (claude) / plan tool (codex)
 // IS the session's (活儿's) checklist; VibeSpace only OBSERVES it (never a
@@ -128,7 +133,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
       global.__vsEvent?.('chat-protocol-no-consumer', `${session.backend}/${streamProto}`);
     }
     if (consumer) {
-      consumer.attach(session, id, ptyProcess, stdoutHelpers);
+      consumer.attach(session, id, ptyProcess, helpersFor(id));
     } else {
       // Chat backend with NO registered protocol (reported loudly above):
       // raw passthrough — visible garbage beats silently mis-parsed claude.

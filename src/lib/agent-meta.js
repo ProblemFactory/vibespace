@@ -184,7 +184,7 @@ export const BACKEND_META = {
     brandColor: '#4285F4',
     fallbackModels: ['gemini-4-argon-high', 'gemini-3.8-flash-medium'],
     modelsFromAgent: true,
-    caps: { fork: false, forkAtMessage: false, review: false, renameWriteback: false, autoResume: { signal: false, resume: 'prompt', supported: false }, accounts: true, peerDelivery: 'stash-only', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'steer', 'reorder', 'edit'] }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: true, values: [] }, worktree: NO_WORKTREE, permissionRules: { source: null, session: false, instance: false, liveVerb: false }, toolAllowlist: null },
+    caps: { fork: false, forkAtMessage: false, review: false, renameWriteback: false, autoResume: { signal: false, resume: 'prompt', supported: false }, accounts: true, peerDelivery: 'rpc-queue', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'steer', 'reorder', 'edit'], steerJoinsTurn: false }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: true, values: [] }, worktree: NO_WORKTREE, permissionRules: { source: null, session: false, instance: false, liveVerb: false }, toolAllowlist: null },
     settingsPrefix: 'antigravity',
     permissionModes: ['accept-edits', 'auto', 'plan', 'bypassPermissions'],
     // THE DECLARED UI ROW — mirrors src/harnesses/antigravity.js key for key (test-harness-contract deep-compares).
@@ -495,7 +495,8 @@ export function accountUsageStore(app, backend) {
 /** WHAT A **VIBESPACE NOTIFICATION** (a Background Work event, a system
  *  notice) DOES TO A BUSY SESSION on this backend — 'steer' | 'queue' |
  *  'cli-inbox' | 'stash'. The LAW is the PURE one in src/backend-caps.js and
- *  it is DERIVED from {peerDelivery, inputModes.steer}; this wrapper only
+ *  it is DERIVED from {peerDelivery, inputModes.steer} (+ a row's declared
+ *  `steerJoinsTurn: false` — agy's steer is a new turn, lane agy-peer-wake); this wrapper only
  *  feeds it the client's mirror row, so the chrome and the server can never
  *  disagree about which lane a notification takes (owner decision 2026-09-07:
  *  notifications steer, human peer messages queue). */

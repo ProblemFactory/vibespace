@@ -230,7 +230,7 @@ try {
     check('…the last holder judged out ⇒ the forward stops (the device SOCKS unserved)', !ex.list().find((m) => m.id === 'host-mac').active && unserved === u0 + 1 && oS.s.destroyed);
     // WIRING: the Task Group store's onChange (server.js) calls it on every change
     const srvSrc = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
-    check('WIRING (open): server.js\'s TaskGroupManager onChange calls exitProxy.rejudgeAll(\'task-groups\')', /onChange: \(list\) => \{[^}]*?\n[^\n]*\n[^\n]*\n\s*try \{ exitProxy\.rejudgeAll\('task-groups'\); \} catch \{ \}/.test(srvSrc));
+    check('WIRING (open): server.js\'s TaskGroupManager onChange calls exitProxy.rejudgeAll(\'task-groups\')', /onChange: \(ch\) => \{\n[^\n]*taskFanout\.note\(ch && ch\.ids\);[^\n]*\n\s*try \{ exitProxy\.rejudgeAll\('task-groups'\); \} catch \{ \}/.test(srvSrc));   // lane task-group-fanout: after the fan-out's note (the broadcast coalesces, the re-judge does not)
     ex.groupsOf = null; ex.sessionsMap = () => new Map([['w1', S]]);
     await ex.setAccess('host-mac', { use: { mode: 'everyone' } });
   }

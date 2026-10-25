@@ -255,6 +255,7 @@ class AcpMessageManager extends MessageWindow {
       }
       case 'queue_changed': return this._processQueueChanged(record, emit);
       case 'queue_op_result': return this._processQueueOpResult(record, emit);
+      case 'queue_dropped': return this._processQueueDropped(record, emit); // lane stop-refills-composer: Stop's put-back (the base's one method)
       case 'notice': return this._processNotice(record, emit);
       case 'subagent': return this._processSubagent(record, emit);
       // `sub` = a SUBAGENT's own step (lane agy-subagent-cards): never the parent's card — its virtual session

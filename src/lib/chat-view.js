@@ -4546,7 +4546,20 @@ class ChatView {
       // never marks a row it is about to lose). Every other refusal keeps the
       // row and marks it, because the message really is still queued.
       if (op.ok === false && op.reason === 'gone') this._dropQueueRow(op.id);
-      this._chatInput?.setQueueOpResult(op.id, op.ok !== false, op.text || '');
+      this._chatInput?.setQueueOpResult(op.id, op.ok !== false, op.text || '', op.queueOp || null); // the verb decides whose answer it is (a Stop's remove never answers a pending edit)
+      return;
+    }
+    // STOP PUT THE DROPPED QUEUE BACK (lane stop-refills-composer): the words are already in the composer (the draft op
+    // landed first); ONE toast on every open client says how many, and what could not come back. No transcript card —
+    // the bubbles already read Removed.
+    if (op.subtype === 'queue-putback') {
+      const parts = [];
+      if (op.n > 0) parts.push(t('Stop put {n} queued message(s) back into the input box', { n: op.n }));
+      if (op.images > 0) parts.push(t('{k} attached image(s) were not put back — attach them again', { k: op.images }));
+      if (op.others > 0) parts.push(t('{k} other attachment(s) were not put back — attach them again', { k: op.others }));
+      if (op.cut > 0) parts.push(t('{m} message(s) came back shortened', { m: op.cut }));
+      if (op.omitted > 0) parts.push(t('{k} more queued message(s) were too long to put back', { k: op.omitted }));
+      if (parts.length) showToast(parts.join(' · '), { duration: 6000 });
       return;
     }
     if (op.subtype === 'served-model') {

@@ -2275,6 +2275,70 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const unmigrated = new TaskGroupManager({ dataDir: c.dataDir, homeDir: scratchHomeDir });
     ok(unmigrated.groupsForSession({ cwd: path.join(c.w, 'deep') }).length === 0 && unmigrated.contextDirOf('T-1-a') === null, 'RED CONTROL: without the migration the group\'s folder and notes folder are gone (the old fields are no longer read)');
   }
+
+  // ── 2026-10-task-group-archived-members (lane task-group-fanout): the keys the archive list names leave every group's
+  // members (sessions[]) — archived first (data/archive/task-group-archived-members.json), THROUGH the live store when
+  // there is one, else the file; a key merely not discovered is never pruned; at most once; an unreadable store fails ──
+  {
+    console.log('2026-10-task-group-archived-members');
+    const ID = '2026-10-task-group-archived-members';
+    const { TaskGroupManager } = require('../src/task-groups.js');
+    const rd = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
+    const MEMBERS = ['claude:a1', 'claude:b2', 'claude:c3', 'codex:b2x', 'webui:w9'];
+    const seed = (tag, { archived = ['claude:a1', 'b2', 'claude:gone'], store = true } = {}) => {
+      const root = path.join(tmp, 'tgam-' + tag), dataDir = path.join(root, 'data');
+      fs.mkdirSync(dataDir, { recursive: true });
+      if (store) fs.writeFileSync(path.join(dataDir, 'task-groups.json'), JSON.stringify({ version: 1, tasks: {
+        'T-1-a': { id: 'T-1-a', title: 'a', kind: 'task', archived: false, objective: '', backlog: [], progress: [], sessions: MEMBERS.slice(), ctx: [], createdAt: 1, updatedAt: 1 },
+        'T-1-b': { id: 'T-1-b', title: 'b', kind: 'task', archived: false, objective: '', backlog: [], progress: [], sessions: ['claude:c3'], ctx: [], createdAt: 2, updatedAt: 2 },
+      } }, null, 2));
+      if (archived) fs.writeFileSync(path.join(dataDir, 'user-state.json'), JSON.stringify({ archivedSessions: archived }));
+      return { root, dataDir };
+    };
+    const KEEP = ['claude:c3', 'codex:b2x', 'webui:w9'];
+    // (1) THROUGH the live store
+    const a = seed('live');
+    let notes = 0;
+    const live = new TaskGroupManager({ dataDir: a.dataDir, homeDir: scratchHomeDir, onChange: () => { notes++; } });
+    const ra = create({ rootDir: a.root, homeDir: scratchHomeDir, serverNotice: () => { }, tasks: live }).runLocalMigrations().find((r) => r.id === ID);
+    const arch = rd(path.join(a.dataDir, 'archive', 'task-group-archived-members.json'));
+    ok(ra && ra.status === 'ran' && ra.report.via === 'store' && ra.report.groups === 1 && ra.report.keys === 2 && JSON.stringify(live.get('T-1-a').sessions) === JSON.stringify(KEEP) && JSON.stringify(live.get('T-1-b').sessions) === '["claude:c3"]',
+      'through the live store: the archived key and the BARE archived id (claude:b2) leave the group; a not-archived member (claude:c3, codex:b2x — another id) stays', ra);
+    ok(JSON.stringify(arch) === JSON.stringify({ 'T-1-a': ['claude:a1', 'claude:b2'] }) && notes === 1 && JSON.stringify(rd(path.join(a.dataDir, 'task-groups.json')).tasks['T-1-a'].sessions) === JSON.stringify(KEEP),
+      'ARCHIVE FIRST: the pruned keys per group are in data/archive/task-group-archived-members.json; the store saved once and notified once', { arch, notes });
+    const again = create({ rootDir: a.root, homeDir: scratchHomeDir, serverNotice: () => { }, tasks: live }).runLocalMigrations().find((r) => r.id === ID);
+    const mig = create({ rootDir: a.root, homeDir: scratchHomeDir, tasks: live }).MIGRATIONS.find((m) => m.id === ID);
+    ok(again.status === 'already' && mig.run().keys === 0, 'at most once: the ledger says already, and the prune itself finds nothing left');
+    // (2) no live store (a suite): the file, atomically
+    const b = seed('file');
+    const rb = create({ rootDir: b.root, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+    ok(rb.status === 'ran' && rb.report.via === 'file' && rb.report.keys === 2 && JSON.stringify(rd(path.join(b.dataDir, 'task-groups.json')).tasks['T-1-a'].sessions) === JSON.stringify(KEEP), 'without a live store: the file (the same rule — task-membership membersWithout)', rb.report);
+    // (3) nothing to do: no archive list, no store; an unreadable store FAILS by name, untouched, retried
+    const n1 = seed('noarch', { archived: null });
+    const r1 = create({ rootDir: n1.root, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+    const n2 = seed('nostore', { store: false });
+    const r2 = create({ rootDir: n2.root, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+    ok(r1.status === 'ran' && r1.report.archived === 0 && r2.status === 'ran' && r2.report.groups === 0 && !fs.existsSync(path.join(n2.dataDir, 'archive', 'task-group-archived-members.json')), 'no archive list / no store: a dry run (no archive file made)', { r1, r2 });
+    const x = seed('bad'); fs.writeFileSync(path.join(x.dataDir, 'task-groups.json'), '{ not json');
+    const rx = create({ rootDir: x.root, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+    ok(rx.status === 'failed' && !rd(path.join(x.dataDir, 'migrations.json')).applied[ID] && fs.readFileSync(path.join(x.dataDir, 'task-groups.json'), 'utf8') === '{ not json', 'an unreadable store FAILS by name, is not recorded (retried next boot), and is left untouched', rx);
+    // the LIVE door beside it: a conversation archived from now on leaves every group through the same writer
+    const c = seed('door', { archived: [] });
+    const st = { archivedSessions: [] };
+    const running = new Set(['codex:b2x']);
+    const door = new TaskGroupManager({ dataDir: c.dataDir, homeDir: scratchHomeDir, readUserState: () => st, isLiveKey: (k) => running.has(k) });
+    const d1 = door.noteArchived(['claude:c3']);
+    door.bind('T-1-b', 'claude:c3');
+    const d2 = door.noteArchived(['claude:c3', 'claude:a1']);
+    ok(JSON.stringify(d1) === '["T-1-a","T-1-b"]' && JSON.stringify(d2) === '["T-1-a"]' && door.get('T-1-b').sessions.includes('claude:c3') && !door.get('T-1-a').sessions.includes('claude:a1'),
+      'the live door (the user-state write hook): a NEW archive key leaves every group; a conversation bound again after its archive stays (only keys new to the list)', { d1, d2 });
+    const d3 = door.noteArchived(['claude:c3', 'claude:a1', 'codex:b2x']);
+    const kept = door.get('T-1-a').sessions.includes('codex:b2x');
+    running.delete('codex:b2x');
+    const d4 = door.noteArchived(['claude:c3', 'claude:a1', 'codex:b2x']);
+    ok(JSON.stringify(d3) === '[]' && kept && JSON.stringify(d4) === '["T-1-a"]' && !door.get('T-1-a').sessions.includes('codex:b2x'),
+      'an archived conversation still RUNNING keeps its groups (its next turn needs their context) and leaves them at the first write after it ended', { d3, d4 });
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

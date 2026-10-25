@@ -401,8 +401,9 @@ const interactFailures = (src) => {
 // (`cleared: [{key, ats}]`, ids only), server.js carries it, and the guard counts it as a change.
 const statusGuardFailures = (tasksSrc, statusSrc, serverSrc) => {
   const bad = [];
-  if (!/const changed = sig !== this\._statusSig \|\| \(Array\.isArray\(msg\.cleared\) && msg\.cleared\.length > 0\);/.test(tasksSrc)) bad.push('the sidebar\'s change guard drops a broadcast whose statuses did not change, even when it names a clear');
-  if (!/this\._notify\(\{ cleared: \[\{ key, ats: out\.cleared\.slice\(\) \}\] \}\);/.test(statusSrc) || !/_notify\(extra = null\) \{ try \{ this\._onChange\(this\.snapshot\(\), extra\); \} catch \{ \} \}/.test(statusSrc)) bad.push('the history clear does not name what it touched');
+  // lane task-group-fanout: the frame is a DELTA (the touched keys) — the guard starts from the clear and adds the moved records
+  if (!/let changed = Array\.isArray\(msg && msg\.cleared\) && msg\.cleared\.length > 0;/.test(tasksSrc)) bad.push('the sidebar\'s change guard drops a broadcast whose statuses did not change, even when it names a clear');
+  if (!/this\._notify\(\[key\], \{ cleared: \[\{ key, ats: out\.cleared\.slice\(\) \}\] \}\);/.test(statusSrc) || !/_notify\(keys = \[\], extra = null\) \{[\s\S]{0,400}?this\._onChange\(d\.statuses, \{ \.\.\.\(extra \|\| \{\}\), sync: /.test(statusSrc)) bad.push('the history clear does not name what it touched');
   if (!/\.\.\.\(extra && Array\.isArray\(extra\.cleared\) \? \{ cleared: extra\.cleared \} : \{\}\)/.test(serverSrc)) bad.push('server.js does not carry `cleared` in session-status-updated');
   return bad;
 };
@@ -410,9 +411,9 @@ const statusGuardFailures = (tasksSrc, statusSrc, serverSrc) => {
   const T_REL = 'src/lib/sidebar-tasks.js', T_SRC = fs.readFileSync(path.join(ROOT, T_REL), 'utf8');
   const ST_SRC = fs.readFileSync(path.join(ROOT, 'src/session-status.js'), 'utf8'), SV_SRC = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
   ok(statusGuardFailures(T_SRC, ST_SRC, SV_SRC).length === 0, 'a status history clear reaches the sidebar: the broadcast names it, server.js carries it, the change guard admits it (verify r5)', statusGuardFailures(T_SRC, ST_SRC, SV_SRC));
-  const FIXED = 'const changed = sig !== this._statusSig || (Array.isArray(msg.cleared) && msg.cleared.length > 0);';
+  const FIXED = 'let changed = Array.isArray(msg && msg.cleared) && msg.cleared.length > 0;';
   ok(T_SRC.split(FIXED).length === 2, 'the guard is present once (the control swaps exactly it)');
-  const PRE = M.write(T_REL, T_SRC.replace(FIXED, 'const changed = sig !== this._statusSig;'), 'status-guard-drops-clear');
+  const PRE = M.write(T_REL, T_SRC.replace(FIXED, 'let changed = false;'), 'status-guard-drops-clear');
   const bad = statusGuardFailures(fs.readFileSync(PRE, 'utf8'), ST_SRC, SV_SRC);
   ok(bad.length === 1 && /change guard/.test(bad[0]), 'NEGATIVE CONTROL: the pre-r5 guard (the statuses\' signature alone) fails the check', bad);
 }
@@ -518,7 +519,9 @@ const orderFailures = (win, jobs, acts, sidebar = null, appSrc = '', panel = '')
   // verify r6 (reproduced in chrome — a real socket drop, the pre-clear answers held until after the clear's broadcasts):
   // the STATUS mirror's two fetches (page load + the reconnect resync) and the Channels panel's group list
   if (sidebar != null) {
-    if (!/proto\._fetchStatuses = function\(\) \{\s*const gen = this\._statusGen \|\| 0;[\s\S]{0,200}?if \(!d\?\.statuses \|\| \(this\._statusGen \|\| 0\) !== gen\) return;/.test(sidebar) || !/msg\.type === 'session-status-updated' && msg\.statuses\) \{\s*this\._statusGen = \(this\._statusGen \|\| 0\) \+ 1;/.test(sidebar) || (sidebar.match(/fetch\('\/api\/session-status'\)/g) || []).length !== 1) bad.push('the status mirror\'s fetch can replace a newer status frame');
+    // lane task-group-fanout: the generation rule in the hub's ORDER — an answer is dropped when a frame landed meanwhile AND
+    // it is older than the mirror (fetchVerdict); every applied delta (and a whole-map frame) bumps the generation
+    if (!/proto\._fetchStatuses = function\(\) \{\s*(?:this\._statusFetching = true;[^\n]*\n\s*)?const gen = this\._statusGen \|\| 0;[\s\S]{0,600}?if \(!d\?\.statuses \|\| \(\(this\._statusGen \|\| 0\) !== gen && fetchVerdict\(this\._statusMark, d\) === 'drop'\)\) return;/.test(sidebar) || !/msg\.type === 'session-status-updated' && msg\.statuses\) this\._onStatusDelta\(msg\);/.test(sidebar) || !/proto\._onStatusDelta = function\(msg, \{ replayed = false \} = \{\}\) \{\s*[^\n]*\n\s*if \(typeof msg\.seq !== 'number'\) \{ this\._statusGen = \(this\._statusGen \|\| 0\) \+ 1;[\s\S]{0,700}?if \(v !== 'apply'\)[^\n]*\n\s*this\._statusGen = \(this\._statusGen \|\| 0\) \+ 1;/.test(sidebar) || (sidebar.match(/fetch\('\/api\/session-status'\)/g) || []).length !== 1) bad.push('the status mirror\'s fetch can replace a newer status frame');
     if (!/this\.sidebar\?\._fetchStatuses\?\.\(\);/.test(appSrc) || /\/api\/session-status'\)\.then/.test(appSrc)) bad.push('the reconnect resync fetches the statuses itself (no generation)');
     if (!/const g0 = groupsGen;/.test(panel) || !/if \(groupsGen !== g0\) \{/.test(panel) || !/groups = msg\.groups; groupsGen\+\+;/.test(panel)) bad.push('the Channels panel\'s refresh can replace a newer group list');
   }

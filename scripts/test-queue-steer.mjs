@@ -273,7 +273,11 @@ console.log('— ③ the ws case gates on the caps row AND the running wrapper')
   ok('B-d963: …and the notification-steer fact shares that one writer too (initialiser + _setQueueSupported, nothing else)',
     (cv.match(/this\._queueNotifSteer = /g) || []).length === 2 && /steerNotif === this\._queueNotifSteer\) return;/.test(cv),
     (cv.match(/this\._queueNotifSteer = [^\n]*/g) || []));
-  ok("a queue op's RESULT reaches the strip as its own meta op (a row that spins forever is the silent failure wearing a spinner)", /if \(op\.subtype === 'queue-result'\) \{[\s\S]{0,700}this\._chatInput\?\.setQueueOpResult\(op\.id, op\.ok !== false, op\.text \|\| ''\);\s*\n\s*return;\s*\n\s*\}/.test(cv));
+  ok("a queue op's RESULT reaches the strip as its own meta op (a row that spins forever is the silent failure wearing a spinner)", /if \(op\.subtype === 'queue-result'\) \{[\s\S]{0,700}this\._chatInput\?\.setQueueOpResult\(op\.id, op\.ok !== false, op\.text \|\| '', op\.queueOp \|\| null\);[^\n]*\n\s*return;\s*\n\s*\}/.test(cv));
+  // lane stop-refills-composer: the result names its VERB — only the edit's own result answers a pending edit (a Stop's
+  // `remove ok:true` for the edited row is the gone outcome: the rewrite is kept), and Stop's put-back has its ONE toast
+  ok("…naming its verb, so a Stop's remove never resolves a pending edit as saved (lane stop-refills-composer)", /this\._resolvePendingEdit\(queueOp == null \|\| queueOp === 'edit' \? ok : false, text \|\| ''\)/.test(read('src/lib/chat-input.js')));
+  ok("Stop's put-back is ONE toast on every client (_onMeta handles queue-putback; the words are already in the box)", /if \(op\.subtype === 'queue-putback'\) \{[\s\S]{0,900}showToast\(parts\.join\(' · '\), \{ duration: 6000 \}\);\s*\n\s*return;/.test(cv));
   ok("…and a 'gone' verdict REMOVES the row first (the wrapper is authoritative about absence; a red ghost is the incident)", /if \(op\.ok === false && op\.reason === 'gone'\) this\._dropQueueRow\(op\.id\);/.test(cv));
   ok('wiring pin: the strip, the row keyboard and the chip send the SAME ws message through one method', /const frame = \{ type: 'queue-op', sessionId: this\.sessionId, op, id: id \|\| null \};/.test(cv) && (cv.match(/type: 'queue-op'/g) || []).length === 1);
   ok("…and the verb's own argument rides it: afterId only when the caller supplied one (null = the front), text only when it is a string", /if \(extra && 'afterId' in extra\) frame\.afterId = extra\.afterId === null \? null : String\(extra\.afterId\);/.test(cv) && /if \(extra && typeof extra\.text === 'string'\) frame\.text = extra\.text;/.test(cv));
@@ -296,7 +300,12 @@ console.log('— ③ the ws case gates on the caps row AND the running wrapper')
   // 2026-09-06 divergence is closed). The bubbles must say 'removed', not clear
   // as if they had RUN (the normalizer clears a chip that left with no result).
   const aw2 = read('data/bin/acp-wrapper.js');
-  ok("ACP Stop reports each dropped entry as a removal BEFORE the republish (a cleared chip means 'it ran')", /for \(const q of dropped\) record\('queue_op_result', \{ op: 'remove', id: q\.id, ok: true, msg_id: q\.opts\?\.msgId \|\| '', reason: 'stopped' \}\);\s*\n\s*if \(dropped\.length\) publishQueue\(\);/.test(aw2));
+  // THE ORDER LAW (lane stop-refills-composer, owner 2026-10-24 — Stop still drops, and what it dropped comes back into
+  // the composer): the per-item removal results → ONE queue_dropped record → the emptied republish, on acp AND codex
+  // (a composer editing a dropped row must get the draft op while that edit is still open)
+  const orderOf = (src, a, b, c) => { const i = src.search(a), j = src.search(b), k = src.search(c); return i > 0 && j > i && k > j; };
+  ok("ACP Stop: each dropped entry's removal → ONE queue_dropped (the person's rows) → the republish (a cleared chip means 'it ran')", orderOf(aw2, /for \(const q of dropped\) record\('queue_op_result', \{ op: 'remove', id: q\.id, ok: true, msg_id: q\.opts\?\.msgId \|\| '', reason: 'stopped' \}\);/, /record\('queue_dropped', droppedRecordFor\(/, /\n      if \(dropped\.length\) publishQueue\(\);/));
+  ok("codex Stop: every 'stopped' result → ONE queue_dropped (after the latch) → the republish", orderOf(cw2, /emitTaskEvent\('queue_op_result', \{ op: 'remove', id, ok: true, msg_id: known\?\.msgId \|\| '', reason: 'stopped' \}\);/, /if \(putBack\.length\) emitTaskEvent\('queue_dropped', droppedRecordFor\(putBack,/, /await refreshQueue\(\{ timeoutMs: rpcBudget\(\) \}\);/));
   ok('codex Stop clears the app-server queue too — the deletes go out BEFORE turn/interrupt, or the app-server drains them when the turn ends', /try \{ await clearQueueForStop\(\); \}[\s\S]{0,600}?if \(stopTurnId\) await interruptTurn\(stopTurnId\);/.test(cw2));
   // round-3: BOTH halves single-flight — a double-click (or a second attached
   // client) is ONE sweep and ONE interrupt, never a second sweep reporting the
@@ -1485,6 +1494,7 @@ console.log('— ⑧ the Stop button is one-shot while an interrupt is in flight
   ok(`the pending window (${pendingMs}ms) outlasts the codex wrapper's whole Stop sweep budget (${sweepMs}ms)`, pendingMs > sweepMs, { pendingMs, sweepMs });
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   ok('the new strings are translated (zh + ja)', ["'Stopping…':", "'Stopping the current turn…':"].every((k) => zh.includes(k) && ja.includes(k)));
+  ok("Stop's put-back toast is translated (zh + ja — lane stop-refills-composer)", ['"Stop put {n} queued message(s) back into the input box":', '"{k} attached image(s) were not put back — attach them again":', '"{k} other attachment(s) were not put back — attach them again":', '"{m} message(s) came back shortened":', '"{k} more queued message(s) were too long to put back":'].every((k) => zh.includes(k) && ja.includes(k)));
   ok('the pending look is a CLASS in the stylesheet, theme vars only (§17)', /\.chat-interrupt-btn\.chat-interrupt-pending/.test(read('public/chat.css')) && !/chat-interrupt-pending[^}]*#[0-9a-f]{3,6}/i.test(read('public/chat.css')));
 
   const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -2345,7 +2355,8 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           window.__ci.setQueue([window.__items[0], window.__items[2]], ${CODEX_VERBS});
           return { text: ta.value, pending: !!window.__ci._pendingEdit, toast: document.getElementById('global-toasts')?.textContent || '' };
         })()`);
-        ok(`…and a rewrite whose ROW LEFT THE QUEUE survives too (${JSON.stringify(refusedGone.text)})`, refusedGone.text === 'second, rewritten again' && refusedGone.pending === false);
+        // lane stop-refills-composer: the pre-edit draft is no longer thrown away for the rewrite — it stays BELOW it
+        ok(`…and a rewrite whose ROW LEFT THE QUEUE survives too — first, with the pre-edit draft kept below it (${JSON.stringify(refusedGone.text)})`, refusedGone.text === 'second, rewritten again\n\na draft I was typing' && refusedGone.pending === false);
         ok(`…with a toast saying where the text went (${JSON.stringify(refusedGone.toast.slice(0, 90))})`, /kept in the input/.test(refusedGone.toast));
         await evaljs(`(() => { document.querySelector('textarea').value = 'a draft I was typing'; window.__ci.setQueue(window.__items, ${CODEX_VERBS}); })()`);
         // …and a refusal ends the pending state ON THE ROW, with the reason.
@@ -2430,6 +2441,11 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
       // this session's draft (and sync it to every other client), while this
       // box went back to showing the real draft; the reverse bit too — an
       // incoming draft sync overwrote the rewrite mid-edit.
+      // SCOPE (lane stop-refills-composer): this is about the COMPOSER's own
+      // autosave of the edit box. A Stop while a row is being edited DOES put
+      // that row's ORIGINAL queued text into the draft — the server's put-back,
+      // by design (owner 2026-10-24) — and the abandon path keeps the rewrite
+      // above it (the ⑪ put-back leg below drives both).
       {
         const drafts = await evaljs(`(() => {
           window.__ci.setQueue(window.__items, ${CODEX_VERBS});
@@ -2535,7 +2551,7 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           window.__ci.setQueue(window.__items, ${CODEX_VERBS});
           return out;
         })()`);
-        ok(`finding 1(c): a rewrite ending in a newline whose ROW LEFT THE QUEUE is persisted as the draft, not just left in a volatile box (${JSON.stringify(goneWs)})`, goneWs.box === 'gone-row rewrite\n' && goneWs.draft === 'gone-row rewrite\n' && /kept in the input/.test(goneWs.toast) && goneWs.pending === false);
+        ok(`finding 1(c): a rewrite ending in a newline whose ROW LEFT THE QUEUE is persisted as the draft, not just left in a volatile box (${JSON.stringify(goneWs)})`, goneWs.box === 'gone-row rewrite\n\n\nmy real draft' && goneWs.draft === goneWs.box && /kept in the input/.test(goneWs.toast) && goneWs.pending === false); // lane stop-refills-composer: the rewrite (its newline intact) first, the pre-edit draft below it
 
         // (d) THE SPINNER. The socket-death and 20s paths write no row state
         // at all, so a bail-out left the row 'pending' with no result ever
@@ -2591,8 +2607,8 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
           window.__ci.setQueue(window.__items, ${CODEX_VERBS});
           return out;
         })()`);
-        ok(`finding 2: a republish that DRAINS the row being edited keeps the in-progress rewrite (${JSON.stringify(typingLost.box)})`, typingLost.box === 'ten seconds of typing that must not vanish' && typingLost.editing === null);
-        ok(`…persists it as the draft and says where it went (${JSON.stringify({ draft: typingLost.draft, toast: typingLost.toast.slice(0, 80) })})`, typingLost.draft === 'ten seconds of typing that must not vanish' && /kept in the input/.test(typingLost.toast));
+        ok(`finding 2: a republish that DRAINS the row being edited keeps the in-progress rewrite (${JSON.stringify(typingLost.box)})`, typingLost.box === 'ten seconds of typing that must not vanish\n\nmy real draft' && typingLost.editing === null); // lane stop-refills-composer: + the pre-edit draft below it
+        ok(`…persists it as the draft and says where it went (${JSON.stringify({ draft: typingLost.draft, toast: typingLost.toast.slice(0, 80) })})`, typingLost.draft === typingLost.box && /kept in the input/.test(typingLost.toast));
 
         // NEGATIVE CONTROL 1: an UNTOUCHED editor is not a rewrite — the row
         // vanishing there restores the pre-edit draft silently, exactly as
@@ -3809,6 +3825,70 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         ok('…but it does get the reorder grips and the edit controls it really serves (peer excluded)', acpHead.grips === 3 && acpHead.edits === 2, JSON.stringify(acpHead));
         const claudeHead = await evaljs(`(() => { window.__ci.setQueue(window.__items, ${CLAUDE_VERBS}); const s = document.querySelector('.chat-queue-strip'); return { hidden: s.classList.contains('hidden'), html: s.innerHTML.length }; })()`);
         ok(`claude publishes no queue ⇒ NO STRIP AT ALL, not an empty one (${JSON.stringify(claudeHead)})`, claudeHead.hidden && claudeHead.html === 0);
+      }
+      // STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer, owner 2026-10-24): the server's draft op carries
+      // `prepended`; the REAL ChatInput over the REAL StateSync lands only its prefix, in front of the LIVE box
+      {
+        const KEY = 'chat:sess-verbs';
+        const putBack = (value, prepended, version) => `VS.getStateSync()._applyOp('drafts', { type: 'state-sync', store: 'drafts', op: 'set', key: ${JSON.stringify(KEY)}, value: ${JSON.stringify(value)}, version: ${version}, prepended: ${prepended} })`;
+        // (a) over unsaved typing, focused, a selection inside it: every typed character kept, the caret shifted, ONE save
+        const landed = await evaljs(`(() => {
+          window.__ci.setQueue([], ${CODEX_VERBS});
+          const ta = document.querySelector('textarea');
+          clearTimeout(window.__ci._draftTimer); window.__ci._draftTimer = null;
+          ta.value = 'typed after Stop'; ta.focus(); ta.setSelectionRange(5, 9);
+          window.__stateSets.length = 0;
+          ${putBack('Q one\n\nold saved', 7, 900)};
+          return { box: ta.value, sel: [ta.selectionStart, ta.selectionEnd], sets: window.__stateSets.filter((m) => m.type === 'state-set').map((m) => m.value), timer: window.__ci._draftTimer };
+        })()`);
+        ok(`⑪ put-back: the prefix lands IN FRONT of the unsaved box, the caret shifted by it, and ONE save of the merged box (${JSON.stringify(landed)})`, landed.box === 'Q one\n\ntyped after Stop' && landed.sel[0] === 12 && landed.sel[1] === 16 && landed.sets.length === 1 && landed.sets[0] === landed.box && landed.timer === null);
+        // (b) nothing unsaved (the box held exactly what the store had): the box shows the value, NO save at all
+        const idle = await evaljs(`(() => {
+          const ta = document.querySelector('textarea');
+          ta.value = 'base'; clearTimeout(window.__ci._draftTimer); window.__ci._draftTimer = null;   // the box holds exactly the stored draft
+          window.__stateSets.length = 0;
+          ${putBack('Q two\n\nbase', 7, 902)};
+          return { box: ta.value, sets: window.__stateSets.filter((m) => m.type === 'state-set').length };
+        })()`);
+        ok(`⑪ put-back: an idle box (it held the stored draft) shows the merged value and saves NOTHING — no autosave storm across clients (${JSON.stringify(idle)})`, idle.box === 'Q two\n\nbase' && idle.sets === 0);
+        // (c) an edit open on a dropped row: the put-back lands on the STASH, then the row goes (the emptied republish)
+        // and the abandon path keeps the rewrite FIRST, the stash (the put-back, the original text in it) below it
+        const abandon = await evaljs(`(() => {
+          window.__ci.setQueue(window.__items, ${CODEX_VERBS});
+          const ta = document.querySelector('textarea');
+          ta.value = '';
+          document.querySelector('[data-queue-op="edit"][data-queue-id="q1"]').click();
+          ta.value = 'first, rewritten';
+          ${putBack('first\n\nsecond\n\n', 15, 904)};
+          const whileOpen = { box: ta.value, stash: window.__ci._editDraftBefore };
+          window.__stateSets.length = 0;
+          window.__ci.setQueue([], ${CODEX_VERBS});
+          return { whileOpen, box: ta.value, saved: window.__stateSets.filter((m) => m.type === 'state-set').map((m) => m.value).pop() || null, editing: window.__ci._editingQueueId };
+        })()`);
+        ok(`⑪ put-back while editing: it lands on the edit's stash, never over the rewrite (${JSON.stringify(abandon.whileOpen)})`, abandon.whileOpen.box === 'first, rewritten' && abandon.whileOpen.stash === 'first\n\nsecond\n\n');
+        ok(`⑪ …and when the row leaves, the rewrite is kept FIRST with the stash below it — box and draft agree (${JSON.stringify({ box: abandon.box, saved: abandon.saved })})`, abandon.box === 'first, rewritten\n\nfirst\n\nsecond\n\n' && abandon.saved === abandon.box && abandon.editing === null);
+        await evaljs(`(() => { document.getElementById('global-toasts')?.replaceChildren(); })()`);
+        // (d) OP-AWARE: a pending edit (its frame is out) answered by a Stop's `remove ok:true` for the same row keeps the
+        // rewrite — before, it resolved as "saved" and the box went back to the pre-edit draft (the rewrite lost)
+        const opAware = async (verb) => evaljs(`(() => {
+          window.__ci.setQueue(window.__items, ${CODEX_VERBS});
+          const ta = document.querySelector('textarea');
+          ta.value = 'the draft before';
+          document.querySelector('[data-queue-op="edit"][data-queue-id="q1"]').click();
+          ta.value = 'first, edited';
+          window.__ci._send();
+          const pending = !!window.__ci._pendingEdit;
+          window.__ci.setQueueOpResult('q1', true, '', ${JSON.stringify(verb)});
+          const after = { pending, box: ta.value, editing: window.__ci._editingQueueId };
+          window.__ci.setQueue([], ${CODEX_VERBS});
+          after.final = ta.value;
+          return after;
+        })()`);
+        const viaRemove = await opAware('remove');
+        ok(`⑪ a pending edit answered by Stop's remove ok:true keeps the rewrite (the gone outcome — merged with the stash when the row leaves) (${JSON.stringify(viaRemove)})`, viaRemove.pending === true && viaRemove.box === 'first, edited' && viaRemove.editing === 'q1' && viaRemove.final.startsWith('first, edited'));
+        const viaEdit = await opAware('edit');
+        ok(`⑪ CONTROL: the edit's OWN ok result still means saved — the box goes back to the pre-edit draft (${JSON.stringify(viaEdit)})`, viaEdit.pending === true && viaEdit.box === 'the draft before' && viaEdit.editing === null);
+        await evaljs(`(() => { window.__ci.setQueue(window.__items, ${CODEX_VERBS}); document.querySelector('textarea').value = ''; document.getElementById('global-toasts')?.replaceChildren(); })()`);
       }
     } catch (e) {
       ok(false,'the browser leg of ⑪ ran',  String(e.message || e).slice(0, 400));

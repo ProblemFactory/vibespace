@@ -17,6 +17,11 @@
 // every broadcast bumps a generation; a fetch issued before it gives up its
 // answer (it still says "loaded"). The leg in test-channels-e2e also waits for
 // the mirror's own loaded signal before creating the group.
+// LANE TASK-GROUP-FANOUT (2.369.353): the broadcast is a DELTA numbered in the hub's order; a frame that lands while the
+// mirror has not loaded yet is HELD (never applied over nothing) and replayed once the first answer lands; a fetch answer
+// is dropped only when a NEWER frame is already in (fetchVerdict). The constructed trial now pins that order: both answers
+// held ⇒ the group's frame held too ⇒ released ⇒ the first answer + the replayed frame put the group in, the second
+// (stale) answer is dropped.
 //
 // Legs: ① THE CONSTRUCTED INTERLEAVING — the page's /api/tasks answers are
 // GATED until the broadcast has been applied, then released: with the guard
@@ -128,13 +133,16 @@ async function constructed(i, tag) {
   // count is waited for (a request merely issued could still be served after the POST)
   const held = await evaljs('(async () => { for (let i = 0; i < 200; i++) { if ((window.__arrivedN || 0) >= 2) return window.__arrivedN; await new Promise((r) => setTimeout(r, 50)); } return window.__arrivedN || 0; })()');
   const gid = await mkGroup(`${tag} ${i}`);
-  const seen = await waitMirror(gid);
+  // the group's frame reached the page while the mirror had not loaded: it is HELD (never applied over nothing)
+  const frameHeld = await evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.app.sidebar._tasksHeld || []).some((m) => (m.changed || []).some((c) => c.id === ${JSON.stringify(gid)}))) return true; await new Promise((r) => setTimeout(r, 125)); } return false; })()`);
+  const early = await mirrorHas(gid);
   await evaljs('window.__releaseTasks(), 1');
+  const seen = await waitMirror(gid);
   await sleep(700);
   const still = await mirrorHas(gid);
   const tl = await evaljs('window.__tl');
   await rmGroup(gid);
-  return { held: held >= 2, gated: held, seen, still, sets: tl.filter((x) => x.ev === 'set').map((x) => x.n).join('>'), released: tl.filter((x) => x.ev === 'released').length };
+  return { held: held >= 2, gated: held, frameHeld, early, seen, still, sets: tl.filter((x) => x.ev === 'set').map((x) => x.n).join('>'), released: tl.filter((x) => x.ev === 'released').length };
 }
 
 // ── ① THE CONSTRUCTED INTERLEAVING on the shipped bundle ──
@@ -142,7 +150,7 @@ console.log(`① the stale answers released AFTER the broadcast — ${CONSTRUCTE
 {
   const out = [];
   for (let i = 1; i <= CONSTRUCTED; i++) out.push(await constructed(i, 'Held'));
-  ok(out.every((r) => r.held && r.seen && r.released >= 2), `FIXTURE: every trial held BOTH boot answers of /api/tasks (${out.map((r) => r.gated).join('/')}), saw the broadcast apply the group, then released them (${out.map((r) => r.sets).join(' ; ')})`, JSON.stringify(out));
+  ok(out.every((r) => r.held && r.frameHeld && !r.early && r.seen && r.released >= 2), `FIXTURE: every trial held BOTH boot answers of /api/tasks (${out.map((r) => r.gated).join('/')}), saw the group's frame HELD (not applied over an unloaded mirror), then released them and saw the group in (${out.map((r) => r.sets).join(' ; ')})`, JSON.stringify(out));
   ok(out.every((r) => r.still), `the group stays in the mirror after the stale answers land — ${out.filter((r) => r.still).length}/${CONSTRUCTED} (a fetch issued before a broadcast never overwrites it)`, JSON.stringify(out));
   const roster = await (async () => { const gid = await mkGroup('Roster check'); await waitMirror(gid); await evaljs('window.__releaseTasks(), 1'); const r = await rosterHas('Roster check'); await rmGroup(gid); return r; })();
   ok(roster, 'and the Grant access… roster names it');
@@ -181,13 +189,13 @@ console.log('② CONTROL: the pre-fix mirror (no generation guard) rebuilt into 
 {
   const MOD = path.join(wt, 'src/lib/sidebar-tasks.js');
   const src = fs.readFileSync(MOD, 'utf8');
-  const GUARD = "      if ((this._tasksGen || 0) !== gen) { this._tasksLoaded = true; this._tasksLoadErr = null; return; }\n";
+  const GUARD = "      if ((this._tasksGen || 0) !== gen && fetchVerdict(this._tasksMark, data) === 'drop') { this._tasksLoaded = true; this._tasksLoadErr = null; return; }\n";
   ok(src.includes(GUARD), 'the guard is spelled where the control removes it');
   fs.writeFileSync(MOD, src.replace(GUARD, ''));
   bundle();
   const out = [];
   for (let i = 1; i <= CONSTRUCTED; i++) out.push(await constructed(i, 'Ctl'));
-  ok(out.every((r) => r.held && r.seen && r.released >= 2) && out.every((r) => !r.still), `CONTROL: without the guard the same interleaving EMPTIES the mirror on every trial — ${out.filter((r) => !r.still).length}/${CONSTRUCTED} (${out.map((r) => r.sets).join(' ; ')}) — leg ① would go red`, JSON.stringify(out));
+  ok(out.every((r) => r.held && r.frameHeld && r.released >= 2) && out.every((r) => !r.still), `CONTROL: without the guard the same interleaving EMPTIES the mirror on every trial — ${out.filter((r) => !r.still).length}/${CONSTRUCTED} (${out.map((r) => r.sets).join(' ; ')}) — leg ① would go red`, JSON.stringify(out));
   fs.writeFileSync(MOD, src);
 }
 

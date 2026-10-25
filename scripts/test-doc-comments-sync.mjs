@@ -35,7 +35,7 @@ const utils = read('src/lib/utils.js');
 const c0 = utils.indexOf('class StateSync {'), c1 = utils.indexOf('\nlet _stateSync = null;');
 const CLASS = c0 > 0 && c1 > c0 ? utils.slice(c0, c1) : '';
 console.log('§0 the cuts');
-ok(/case 'state-set'/.test(CASES) && /case 'state-resync'/.test(CASES) && /store\.set\(data\.key, data\.value, ws, data\.basedOn\)/.test(CASES), 'src/ws-handler.js: the state-set + state-resync cases cut verbatim');
+ok(/case 'state-set'/.test(CASES) && /case 'state-resync'/.test(CASES) && /store\.set\(data\.key, value, ws, data\.basedOn\)/.test(CASES) && /const value = belt \? putbackBelt\(belt, data\.value, data\.basedOn\) : data\.value;/.test(CASES), 'src/ws-handler.js: the state-set + state-resync cases cut verbatim (the value is data.value off the drafts belt — lane stop-refills-composer)');
 ok(/init\(storeName\) \{/.test(CLASS) && /s\.loaded = \(async \(\) => \{/.test(CLASS) && /_applyOp\(storeName, op\)/.test(CLASS), 'src/lib/utils.js: the client StateSync class cut verbatim (init answers its one load)');
 ok(/saveDraft\('doc', draftId, /.test(read('src/lib/doc-window-ui.js')) && /export function saveDraft\(type, id, value\) \{\s*_stateSync\?\.set\('drafts', type \+ ':' \+ id, value\);/.test(utils), 'the Doc window writes through saveDraft(\'doc\', <host>\\u0001<path>) = the drafts store\'s doc:<host>\\u0001<path> key (the path below)');
 

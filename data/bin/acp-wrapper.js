@@ -383,6 +383,27 @@ function acpQueueFullText(blocks) {
   for (const b of asArray(blocks)) if (b?.type === 'text' && b.text) parts.push(String(b.text));
   return parts.join('\n');
 }
+/** STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer, owner 2026-10-24) — the `queue_dropped` record's payload.
+ *  The BYTE-IDENTICAL inline twin of src/queue-putback.js droppedRecordFor (a wrapper cannot require src/):
+ *  test-queue-putback pins this text to that one and drives both on one fixture. */
+function droppedRecordFor(rows, { dropId, turnId } = {}) {
+  const ITEM_MAX = 20000, TOTAL_MAX = 100000;
+  const items = []; let total = 0, omitted = 0;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r !== 'object') continue;
+    const full = typeof r.text === 'string' ? r.text : '';
+    let text = full.length > ITEM_MAX ? full.slice(0, ITEM_MAX) : full;
+    if (text.length < full.length && /[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);
+    if (total + text.length > TOTAL_MAX) { omitted++; continue; }
+    total += text.length;
+    const attachments = (Array.isArray(r.attachments) ? r.attachments : []).filter((a) => a && typeof a.type === 'string' && a.type).slice(0, 32)
+      .map((a) => ({ type: a.type.slice(0, 32), mime: typeof a.mime === 'string' && a.mime ? a.mime.slice(0, 100) : null, name: typeof a.name === 'string' && a.name ? a.name.slice(0, 200) : null }));
+    items.push({ id: String(r.id || ''), msgId: String(r.msgId || ''), ts: Number.isFinite(r.ts) ? r.ts : null, text, cut: text.length < full.length, attachments });
+  }
+  return { dropId: String(dropId || ''), by: 'stop', turnId: typeof turnId === 'string' && turnId ? turnId : null, items, omitted };
+}
+let dropSeq = 0;                  // the put-back record's id: `${pid}-${n}` — the server's idempotency key
+
 function publishQueue() {
   const items = promptQueue.map((q) => ({
     id: q.id,
@@ -503,7 +524,7 @@ async function runPrompt(blocks, opts = {}) {
     return;
   }
   const promptId = `p${++promptSeq}-${process.pid}`;
-  const mine = { id: promptId, cancelled: false, dispatched: false };
+  const mine = { id: promptId, cancelled: false, dispatched: false, blocks, opts }; // blocks/opts: Stop puts an UNDISPATCHED prompt back into the composer (lane stop-refills-composer)
   activePrompt = mine;
   meta.streaming = true; meta.activePromptId = promptId; scheduleMeta();
   const prompt = [...blocks];
@@ -652,6 +673,20 @@ async function handleInput(msg) {
       // Stop threw it away. The result stamps 'removed' first, and the empty
       // republish then leaves those bubbles alone (round-1 review).
       for (const q of dropped) record('queue_op_result', { op: 'remove', id: q.id, ok: true, msg_id: q.opts?.msgId || '', reason: 'stopped' });
+      // STOP PUTS THE DROPPED QUEUE BACK (owner 2026-10-24, amends 2026-09-07 — lane stop-refills-composer): still dropped,
+      // nothing above runs, but what the PERSON queued comes back into the composer — ONE `queue_dropped` record, after
+      // the per-item results and BEFORE the emptied republish (the order law: a composer editing a dropped row gets the
+      // draft op while that edit is still open). The UNDISPATCHED active prompt (the drain claimed it, Stop landed inside
+      // the context-prefix await — it never reached the agent) is the OLDEST row. Peer / nudge rows are not the person's:
+      // their own ladder takes them back below. Nothing of the person's ⇒ no record.
+      const theirs = (q) => !q.opts?.peer && !q.opts?.nudge && !q.opts?.retry && !q.opts?.silentQueue;
+      const putBack = [...(activePrompt && !activePrompt.dispatched && activePrompt.blocks && theirs(activePrompt) ? [activePrompt] : []), ...dropped.filter(theirs)];
+      if (putBack.length) {
+        record('queue_dropped', droppedRecordFor(putBack.map((q) => ({
+          id: q.id, msgId: q.opts?.msgId || '', ts: q.ts || null, text: acpQueueFullText(q.blocks),
+          attachments: asArray(q.blocks).filter((b) => b && b.type !== 'text').map((b) => ({ type: String(b.type || ''), mime: b.mimeType || null, name: b.name || null })),
+        })), { dropId: `${process.pid}-${++dropSeq}`, turnId: meta.activePromptId || null }));
+      }
       if (dropped.length) publishQueue();
       if (activePrompt) {
         activePrompt.cancelled = true;
@@ -684,14 +719,10 @@ async function handleInput(msg) {
         // stop-check entirely). Per-turn state dies with the turn it belongs to.
         if (q.opts?.nudge) { droppedNudges++; nudgeTurnActive = false; }
       }
-      // Count only what the USER queued. The bookkeeping nudge is ours, and a
-      // dropped PEER message was never the user's to re-send either — it goes
-      // straight back to the delivery ladder above (peer_result ok:false) and
-      // arrives on its own, so "send it again" is both impossible and wrong
-      // advice. The log line below still carries the true total.
-      const userDropped = dropped.length - droppedNudges - droppedPeers;
-      if (userDropped) notice('info', `Stop also dropped ${userDropped} queued message${userDropped === 1 ? '' : 's'} — send ${userDropped === 1 ? 'it' : 'them'} again to run ${userDropped === 1 ? 'it' : 'them'}.`, 'queue-cleared');
-      log(`interrupt: active=${!!activePrompt} dropped=${dropped.length} (nudges=${droppedNudges}, peers=${droppedPeers})`);
+      // The `queue-cleared` notice («send them again») is RETIRED (lane stop-refills-composer): what the person queued is
+      // back in their composer and the client's ONE toast says how many — the same words on every harness. The log line
+      // still carries the true total.
+      log(`interrupt: active=${!!activePrompt} dropped=${dropped.length} (nudges=${droppedNudges}, peers=${droppedPeers}, put back=${putBack.length})`);
       return;
     }
     case 'read-permission-rules': {

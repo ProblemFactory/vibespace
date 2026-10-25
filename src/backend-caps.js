@@ -46,6 +46,10 @@
 //                  Contract for any backend claiming this: its wrapper adverts
 //                  sidecar caps.peerMessage and serves the 'peer-message'
 //                  stdin verb, reporting peer_message_result honestly.
+//                  antigravity rides it too (lane agy-peer-wake, 2026-10-24):
+//                  its wrapper owns agy's stdin — idle ⇒ the line opens a
+//                  billed turn, busy ⇒ the wrapper's own queue runs it after;
+//                  the answer is the acp journal's `peer_result`.
 //   'stash-only' — no live lane; messages queue for next-turn injection.
 // inputModes names what a SEND DURING A TURN can do on this harness — the
 // queue/steer surface (ws 'queue-op', the client's queue strip and the bubble
@@ -71,7 +75,9 @@
 //                 steers per turn are accepted, and a steer does NOT remove
 //                 the queued copy — the wrapper deletes it). agy takes no input
 //                 mid-turn: its wrapper's steer stops the running turn and runs
-//                 the message first (lane agy-harness-fixes).
+//                 the message first (lane agy-harness-fixes) — a NEW billed
+//                 turn, so its row declares `steerJoinsTurn: false` and a
+//                 notification never takes that verb (notificationDelivery).
 //   'steer-all' — the same, for every queued item in order.
 //   'reorder'   — move an item (ws frame: RELATIVE `afterId`; the wrapper
 //                 translates it into the app-server's absolute full-order
@@ -326,6 +332,10 @@ function deriveInputModes(row) {
     steer: verbs.includes('steer'),
     queueOps: verbs.length > 0,
     queueVerbs: verbs,
+    // DECLARED, never derived (lane agy-peer-wake): this harness's 'steer' does NOT join the running turn — it stops
+    // it and runs the message as a turn of its own (agy). Carried only where a row says so: a missing key is codex's
+    // `turn/steer`, the meaning every older row was written against.
+    ...(row && row.steerJoinsTurn === false ? { steerJoinsTurn: false } : {}),
   });
 }
 const BACKEND_CAPS = {
@@ -505,13 +515,19 @@ const BACKEND_CAPS = {
   // run-all stay false), a turn ends on agy's own `result` event (authoritative), no persona verb, no
   // per-session worktree flag. No pool / quota probe in commit 1 (the machine login only; the
   // `-p /usage` reading and the per-account HOME root follow). hotSwitch 'unverified' = cold.
+  // peerDelivery 'rpc-queue' (lane agy-peer-wake, 2026-10-24 — the owner's `vibespace-msg send … --wake` to a live
+  // Antigravity conversation said «woke 0 agents · 1 wake refused»): the wrapper always SERVED the 'peer-message' frame
+  // (idle ⇒ a turn, busy ⇒ its queue); the row said stash-only and the advert said peerMessage:false. Proven by the frame
+  // round-trip (scripts/test-peer-delivery.mjs: the ladder → the REAL wrapper → the fake agy → `peer_result` → the
+  // settle), never declared by hand. steerJoinsTurn:false — its steer is a stop + a new turn, so a notification for a
+  // busy agy takes the 'queue' lane (its own billed turn after this one, charged when written), never 'steer' (free).
   antigravity: {
     pool: false, hotSwitch: 'unverified', hotSwitchEvidence: null, planC: false, sealedOrders: false, resetCredit: false, quotaProbe: null, fork: false, forkAtMessage: false, review: false, renameWriteback: false, titleRecord: null,
     streamProtocol: 'acp-events',
-    peerDelivery: 'stash-only',
+    peerDelivery: 'rpc-queue',
     compactEnd: null,
     frameFile: true,
-    inputModes: { queue: true, queueVerbs: ['remove', 'steer', 'reorder', 'edit'] },
+    inputModes: { queue: true, queueVerbs: ['remove', 'steer', 'reorder', 'edit'], steerJoinsTurn: false },
     turnState: 'authoritative',
     inProgressTools: false,
     responseStyle: { live: false, closed: true, values: [] },
@@ -596,14 +612,19 @@ function oauthUsageAccount(a) { return !!a && a.type === 'subscription' && capsO
 // DERIVED, never declared: a harness that serves the 'steer' verb on the
 // 'rpc-queue' lane steers its notifications — the same law that makes
 // inputModes.steer a VIEW of queueVerbs, so there is no second place to edit
-// and no backend-id branch anywhere downstream. HUMAN peer messages (frame
+// and no backend-id branch anywhere downstream. The ONE declared exception is
+// a fact about the verb itself: a row whose steer does not JOIN the running
+// turn (`inputModes.steerJoinsTurn === false` — agy's stops it and runs the
+// message as a new billed turn, lane agy-peer-wake) answers 'queue', so no
+// surface (the ladder's prediction, the hand-over's cost, Session Properties)
+// ever calls that turn free. HUMAN peer messages (frame
 // kind 'peer') deliberately do NOT take this lane: a person's message is its
 // own turn, and stealing it into someone else's running turn would change what
 // the agent was asked to do mid-answer.
 function notificationDelivery(caps) {
   const c = caps || NO_CAPS;
   const modes = c.inputModes || NO_CAPS.inputModes;
-  if (c.peerDelivery === 'rpc-queue') return modes.steer ? 'steer' : 'queue';
+  if (c.peerDelivery === 'rpc-queue') return modes.steer && modes.steerJoinsTurn !== false ? 'steer' : 'queue';
   if (c.peerDelivery === 'cli-inbox') return 'cli-inbox';
   return 'stash';
 }

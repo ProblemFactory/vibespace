@@ -15,6 +15,10 @@
  *                              {none} · {wait, why} until it has its OWN id (a fork's row carries its source's until adopted)
  *                              · {bind, groupId, groupIds} — the birth group is a MEMBERSHIP, written through the one bind
  *                              writer; `groupIds` = every group the create named (`taskIds`, the order picked; int346).
+ *   membersWithout(list, keys, {exact})  THE unbind rule (lane task-group-fanout): a group's members (sessions[]) without
+ *                              `keys` → { keep, gone }. A key `<backend>:<id>` matches itself; a BARE id (an older archive
+ *                              list's spelling) matches any member with that id unless `exact`. The store's ONE unbind
+ *                              writer and the archived-members migration's file road ask it.
  */
 
 const GLOB_TAIL = /(?:\/\*{1,2})+\/*$/;
@@ -51,4 +55,15 @@ function birthBindVerdict(s) {
   return { bind: true, groupId: want.groupId, groupIds };
 }
 
-module.exports = { folderOf, insideFolder, birthBindVerdict };
+function membersWithout(list, keys, { exact = false } = {}) {
+  const full = new Set(), bare = new Set();
+  for (const k of Array.isArray(keys) ? keys : []) { const v = String(k == null ? '' : k); if (!v) continue; full.add(v); if (!exact && !v.includes(':')) bare.add(v); }
+  const keep = [], gone = [];
+  for (const k of Array.isArray(list) ? list : []) {
+    const v = String(k);
+    if (full.has(v) || (bare.size && bare.has(v.slice(v.indexOf(':') + 1)))) gone.push(k); else keep.push(k);
+  }
+  return { keep, gone };
+}
+
+module.exports = { folderOf, insideFolder, birthBindVerdict, membersWithout };

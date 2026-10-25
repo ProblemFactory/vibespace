@@ -129,8 +129,13 @@ const msgRefusalAnswer = (r, code) => ({ error: agentText((r && r.error) || 'ref
 // 10240 wrapped). Beyond that the agent must Read a file to see the full
 // context — exactly the 2.68.0 "never learned the tools" failure. Cap with
 // margin so the critical HEAD (tools/identity/objective — ordered first) is
-// always in-context; only the TAIL (oldest activity-log lines) is dropped, and
-// it's recoverable via `vibespace-task show --full`. ONE implementation for
+// always in-context; only the TAIL is dropped, recoverable via `vibespace-task
+// show --full`. The activity logs sit last and print oldest → newest, so this
+// tail is their NEWEST lines (the injection audit, F1, lane injection-relevance —
+// this comment used to say "oldest"): the group renderers fit their cap FIRST
+// by re-picking the log under a smaller room (the oldest go), and the route
+// re-renders its group blocks into the room left; this cut is the last resort
+// for what still does not fit. ONE implementation for
 // BOTH hook payloads (task-context had none until 2026-09-22: a 3-group
 // SessionStart with CJK backlog items was 12.8 KB — wrapped).
 const INLINE_CAP = 9600; // bytes; margin under the 10240 wrap threshold
@@ -409,6 +414,31 @@ async function clearAsAgent(hit, item, res) {
 }
 // Resolve the calling agent's session from its per-session bearer token.
 // Returns [session, id] or replies 401/403 and returns null.
+// lane task-group-fanout: THE TURN'S CONTEXT READ (the owner's constraint 2026-10-24 — what the model is told must not
+// change). A hook call's Context-table signatures were a synchronous walk of every told folder on the main thread (92–185 ms
+// a turn on the owner's NFS rows); now the groups whose signature is due are read OFF the main thread first
+// (tasks.readSignatures: SafeFs, ≤ 1 s inside the hook's 3 s) and the route is entered AGAIN once that settled — nothing
+// above the call consumes anything. With nothing to read (every signature fresh, no off-thread reader) it stays synchronous.
+const turnRead = new WeakSet();   // the requests whose Context read already ran (the second entry goes straight through)
+function readTurnSigs(req, res, route, s, groups) {
+  if (turnRead.has(req) || typeof tasks.readSignatures !== 'function') return false;
+  const p = tasks.readSignatures(groups, { stale: s._sigStale || null });
+  if (!p) return false;
+  turnRead.add(req);
+  p.then(() => route(req, res), () => route(req, res));
+  return true;
+}
+/** one group's signature for THIS turn → { sig, stale }. A stale one (its read missed the bound) is marked on the session
+ *  and the caller DEFERS the group whole — nothing told, no seen mark moved (a change is never «seen» before it was read);
+ *  the next turn re-reads it and only a read that landed after the mark answers. */
+function turnSig(s, g) {
+  if (typeof tasks.signatureFact !== 'function') return { sig: tasks.contextSignature(g), stale: false };
+  const mark = s._sigStale && Object.prototype.hasOwnProperty.call(s._sigStale, g.id) ? s._sigStale[g.id] : null;
+  const f = tasks.signatureFact(g, { after: mark });
+  if (f.stale) { s._sigStale = s._sigStale || {}; if (mark == null) s._sigStale[g.id] = typeof tasks.sigGen === 'function' ? tasks.sigGen() : 0; }
+  else if (mark != null) { delete s._sigStale[g.id]; if (!Object.keys(s._sigStale).length) s._sigStale = null; }
+  return f;
+}
 function agentSession(req, res) {
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '') || req.body?.token;
   if (!token || !token.startsWith('vsst_')) { res.status(401).json({ error: 'missing session token' }); return null; }
@@ -541,7 +571,7 @@ function pendingPreambleBytes(sessionObj) {
 // SCOPED to the session's OWN context task — the ?taskId= query is ignored so a
 // token can never read another task's context. Records the task version the
 // session has now "seen" so UserPromptSubmit only RE-injects on later changes.
-app.get('/api/agent/task-context', (req, res) => {
+app.get('/api/agent/task-context', function taskContextRoute(req, res) {
   const hit = agentSession(req, res);
   if (!hit) return;
   // Integration master switch: empty delivery — covers sessions spawned BEFORE
@@ -562,14 +592,19 @@ app.get('/api/agent/task-context', (req, res) => {
     // all (falls through to the baseline tools intro) — the per-group
     // injectContext toggle stays the finer-grained instrument.
     const injectGroups = ctxInjectionOn() ? groups.filter((g) => g.injectContext !== false) : []; // P6: per-group context toggle
+    if (readTurnSigs(req, res, taskContextRoute, s, injectGroups)) return;   // lane task-group-fanout: the Context read, off the loop
     let context = '';
     const B = (t) => Buffer.byteLength(String(t), 'utf-8');
     // r7: a once-per-session teaching rides only when it fits WHOLE beside what is committed (the pending preamble
     // rides above it) — else it waits for the first prompt-context and is NOT stamped seen
     const fitsHere = (text) => B(context) + (context ? 2 : 0) + B(text) + pendingPreambleBytes(s) <= INLINE_CAP - INLINE_TAIL_MARGIN;
-    if (injectGroups.length) {
+    // lane task-group-fanout: a group whose Context read did not land in time is not delivered at SessionStart — every
+    // group waits whole for the first prompt (renderMultiContext states the WHOLE membership; nothing is marked seen)
+    const turnFacts = new Map(injectGroups.map((g) => [g.id, turnSig(s, g)]));
+    if (injectGroups.length && [...turnFacts.values()].some((f) => f.stale)) console.log(`[inject] ${key}: the Context read of ${[...turnFacts].filter(([, f]) => f.stale).map(([gid]) => gid).join(', ')} did not land in time — the groups wait for the first prompt`);
+    else if (injectGroups.length) {
       // Remote sessions read the auto-synced copy — translate file paths
-      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key, tools: toolsFor(s, id, { fresh: true }), isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s) });   // lane channels-teach: + the session's channel reach (asked fresh)
+      context = tasks.renderMultiContext(injectGroups.map((g) => g.id), { ctxBaseFor: remoteCtxBaseFor(s), sessionKey: key, tools: toolsFor(s, id, { fresh: true }), isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s), cap: Math.max(1, INLINE_CAP - INLINE_TAIL_MARGIN - pendingPreambleBytes(s)) });   // lane channels-teach: + the session's channel reach (asked fresh)
       // Only Claude injects the SessionStart output; codex runs the command but
       // ignores it, so don't mark groups "seen" for codex (that would starve its
       // UserPromptSubmit delivery).
@@ -579,7 +614,7 @@ app.get('/api/agent/task-context', (req, res) => {
         s._groupSnap = s._groupSnap || {};
         for (const g of injectGroups) {
           s._groupSeenAt[g.id] = tasks.contentAtOf(g);   // lane task-group-context: + a referenced group's table instant
-          s._ctxSig[g.id] = tasks.contextSignature(g);   // every told row's files (the Context table), '' = none
+          s._ctxSig[g.id] = turnFacts.get(g.id).sig;   // every told row's files (the Context table), '' = none — as read this turn
           // Snapshot what was just delivered — later updates diff against it
           // instead of re-injecting the whole group (2.113.0).
           s._groupSnap[g.id] = tasks.snapshotForDiff(g.id);
@@ -659,7 +694,7 @@ app.get('/api/agent/task-context', (req, res) => {
 //     group) reaches the agent on its next turn. Gated per group on
 //     updatedAt > _groupSeenAt[id] → no per-turn noise when nothing changed.
 //  3. Any pending status-override notice (consumed once).
-app.get('/api/agent/prompt-context', (req, res) => {
+app.get('/api/agent/prompt-context', function promptContextRoute(req, res) {
   const hit = agentSession(req, res);
   if (!hit) return;
   // A HOOK'S CALL ON A SESSION THE WRAPPER DELIVERS TO IS DEAD (channel-jump verify r7, reproduced on the real route):
@@ -684,6 +719,9 @@ app.get('/api/agent/prompt-context', (req, res) => {
   try {
     const [s, id] = hit;
     const key = sessionStatusKey(s, id);
+    // lane task-group-fanout: the Context read FIRST (off the loop, bounded) — the route is entered again once it settled,
+    // and nothing above this line consumed anything
+    if (readTurnSigs(req, res, promptContextRoute, s, ctxInjectionOn() ? tasks.groupsForSession({ sessionKey: key, cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).filter((g) => g.injectContext !== false) : [])) return;
     const parts = [];
     // Recreated-cwd safety notice (B-7812, user-mandated defense): a resume
     // whose working directory was DELETED got it recreated EMPTY on explicit
@@ -728,8 +766,9 @@ app.get('/api/agent/prompt-context', (req, res) => {
     // and that copy filled the cap — "the jobs update (538 B) waits … the 0 B left" in the journal — so the report,
     // budgeted last from what was left, got nothing and waited, silently, for a next user turn hours away on a busy
     // agent. News outranks a copy: its room is held here (in `tailHeld`), a full re-delivery that would take it gives up
-    // its TAIL instead (capInline's own cut — the oldest activity lines, named by `show --full`), and the section is
-    // still pushed LAST and WHOLE below, its markers moving only then.
+    // activity lines instead — re-rendered into the room left, its log RE-PICKED under a smaller cap (the OLDEST lines go:
+    // lane injection-relevance F1 — capInline's tail cut, the last resort, takes the NEWEST) — and the section is still
+    // pushed LAST and WHOLE below, its markers moving only then.
     let ge = null, myCid = null, rep = null;
     try {
       ge = groupsEngine();
@@ -757,11 +796,15 @@ app.get('/api/agent/prompt-context', (req, res) => {
       const changedDiffs = [];  // updated groups delivering as a DELTA
       const updatedFulls = [];  // updated groups needing a FULL re-delivery
       const restoredSame = [];  // B-86d3: groups the restored seen marks say are unchanged — named once, not repeated
+      const turnFacts = new Map();   // lane task-group-fanout: each group's signature as read THIS turn
       for (const g of injectGroups) {
         const seenAt = s._groupSeenAt[g.id];
         // User-written files under the Context table's rows don't bump updatedAt — a signature diff
         // (path/size/mtime of every told row's files) is how we notice them.
-        const sig = tasks.contextSignature(g);
+        const fact = turnSig(s, g);
+        if (fact.stale) continue;   // lane task-group-fanout: not read in time — DEFERRED whole (nothing told, no mark moved; the next turn)
+        const sig = fact.sig;
+        turnFacts.set(g.id, fact);
         // B-86d3: RESTORED marks — a held folder digest becomes the live signature when the folder is unchanged; a restored
         // LITE snapshot serves the diff unless the folder changed (the file diff needs the old signature itself) or it was
         // cut for another key — then that group is re-sent whole, as a session without a snapshot always was
@@ -790,7 +833,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
           const snap = s._groupSnap[g.id];
           const ctxBase = ctxBaseFor ? ctxBaseFor(g.id) : null;
           const changes = (injectDiffsEnabled() && snap)
-            ? tasks.diffChanges(g.id, snap, { gid: multi ? `--group ${g.id} ` : '', ctxBase, oldSig: s._ctxSig[g.id] || '', newSig: sig, sessionKey: key })
+            ? tasks.diffChanges(g.id, snap, { gid: multi ? `--group ${g.id} ` : '', ctxBase, oldSig: s._ctxSig[g.id] || '', newSig: sig, sessionKey: key, sessionName: s.name })
             : null;
           if (changes) {
             // empty lines = a no-op edit (nothing the injection renders
@@ -817,14 +860,19 @@ app.get('/api/agent/prompt-context', (req, res) => {
       // whose header ENUMERATES every changed group (user directive: stacked
       // per-group blocks + the ~2KB persisted-preview truncation could hide
       // the very fact that a second group changed).
-      const diffBlock = !changedDiffs.length ? null
+      // each block with its RE-RENDER under a smaller cap (F1, lane injection-relevance — the fit below): every group
+      // renderer shrinks its activity by re-picking it (the oldest lines go), never by cutting the newest off its end
+      const diffFit = !changedDiffs.length ? null
         : changedDiffs.length === 1
-          ? tasks.renderDiffBlock(changedDiffs[0].g.id, changedDiffs[0].changes, { multi, ctxBase: changedDiffs[0].ctxBase })
-          : tasks.renderContextDiffMulti(changedDiffs.map((x) => ({ id: x.g.id, changes: x.changes })));
-      const fullBlocks = [];
+          ? (cap) => tasks.renderDiffBlock(changedDiffs[0].g.id, changedDiffs[0].changes, { multi, ctxBase: changedDiffs[0].ctxBase, ...(cap ? { cap: Math.min(5000, cap) } : {}) })
+          : (cap) => tasks.renderContextDiffMulti(changedDiffs.map((x) => ({ id: x.g.id, changes: x.changes })), cap ? { cap: Math.min(6500, cap) } : {});
+      const diffBlock = diffFit ? diffFit(0) : null;
+      const fullBlocks = [], fullFits = [];
+      const UPDATED_HEAD = 'The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n';
       for (const g of updatedFulls) {
-        const ctx = tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s) });
-        if (ctx) { fullBlocks.push(`The Task Group below was UPDATED since you last saw it — this is the current state (supersedes any earlier copy).\n\n${ctx}`); fullCovered.add(g.id); }
+        const fit = (cap) => tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s), ...(cap ? { cap: Math.max(1, cap - B(UPDATED_HEAD)) } : {}) });
+        const ctx = fit(0);
+        if (ctx) { fullBlocks.push(UPDATED_HEAD + ctx); fullFits.push((cap) => UPDATED_HEAD + fit(cap)); fullCovered.add(g.id); }
       }
       let newFullGroups = [];
       if (firstGroups.length) {
@@ -837,21 +885,24 @@ app.get('/api/agent/prompt-context', (req, res) => {
         // a partial set (group bound mid-session) renders per-group with the
         // count-free multi phrasing instead.
         const allNew = firstGroups.length === injectGroups.length;
-        const fulls = (firstGroups.length > 1 && allNew)
-          ? [tasks.renderMultiContext(firstGroups.map((g) => g.id), { ctxBaseFor, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s) })].filter(Boolean)
-          : firstGroups.map((g) => tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s) })).filter(Boolean);
+        const fits1 = (firstGroups.length > 1 && allNew)
+          ? [(cap) => tasks.renderMultiContext(firstGroups.map((g) => g.id), { ctxBaseFor, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s), ...(cap ? { cap } : {}) })]
+          : firstGroups.map((g) => (cap) => tasks.renderContext(g.id, { multi, ctxBase: ctxBaseFor ? ctxBaseFor(g.id) : null, sessionKey: key, tools: toolFlags, isLiveClaim: liveClaimPredicate(), fileTools: fileToolsOf(s), ...(cap ? { cap } : {}) }));
+        const fulls = [];
+        for (const fit of fits1) { const ctx = fit(0); if (ctx) { fulls.push(ctx); fullFits.push(fit); } }
         if (fulls.length) {
           fullBlocks.push(...fulls);
           newFullGroups = firstGroups;
           for (const g of firstGroups) fullCovered.add(g.id);
           for (const g of firstGroups) {
             s._groupSeenAt[g.id] = tasks.contentAtOf(g);
-            s._ctxSig[g.id] = tasks.contextSignature(g);
+            s._ctxSig[g.id] = turnFacts.get(g.id).sig;   // lane task-group-fanout: as read this turn
             s._groupSnap[g.id] = tasks.snapshotForDiff(g.id);
           }
         }
       }
       const blocks = [...(diffBlock ? [diffBlock] : []), ...fullBlocks];
+      const fitters = [...(diffFit ? [diffFit] : []), ...fullFits];
       if (blocks.length > 1) {
         // MULTI-BLOCK delivery: Claude truncates an oversized persisted payload
         // to a ~2KB HEAD preview, so a plain one-after-the-other order can
@@ -865,6 +916,7 @@ app.get('/api/agent/prompt-context', (req, res) => {
         if (newFullGroups.length) kinds.push(`the FULL context for group(s) NEW to this session: ${newFullGroups.map(name).join(', ')}`);
         // the manifest HEADS the unit a held report's cut trims (verify r1: pushed apart, it took the cut pointer's room)
         blocks.unshift(`<vibespace-delivery-note>This delivery contains, in order: ${kinds.join('; ')}. ${tasks._persistRescueLine()}</vibespace-delivery-note>`);
+        fitters.unshift(null);   // the manifest is never re-rendered (it names every block)
       }
       // THE FIRST PROMPT AFTER A RESTART (B-86d3): the groups the restored marks say are unchanged are not repeated —
       // ONE line names them, decided BEFORE the blocks (a re-delivery beside it may take the cut, never this line); a
@@ -874,9 +926,13 @@ app.get('/api/agent/prompt-context', (req, res) => {
         const note = restoredSame.length ? tasks.renderUnchangedNote(restoredSame.map((g) => g.id), { multi }) : '';
         if (note && fits(note)) parts.push(note);
       }
-      // the report's held room (B-c198): a re-delivery that would take it gives up its tail here, never the report
+      // THE BLOCKS FIT THE ROOM LEFT (F1, lane injection-relevance): over it, each block — the last (the biggest full
+      // context) first — is RE-RENDERED under a smaller cap, its activity re-picked (the oldest lines go, never the newest)
       const blockCap = INLINE_CAP - INLINE_TAIL_MARGIN - committed() - 2;
-      if (rep && rep.text && blocks.length && B(blocks.join('\n\n')) > blockCap) parts.push(capInline(blocks.join('\n\n'), multi, Math.max(CUT_PTR_MAX, blockCap)));
+      const blocksOver = () => B(blocks.join('\n\n')) - blockCap;
+      for (let i = blocks.length - 1; i >= 0 && blocksOver() > 0; i--) if (fitters[i]) blocks[i] = fitters[i](Math.max(1, B(blocks[i]) - blocksOver()));
+      // the report's held room (B-c198): a re-delivery that still would take it gives up its tail here, never the report
+      if (rep && rep.text && blocks.length && blocksOver() > 0) parts.push(capInline(blocks.join('\n\n'), multi, Math.max(CUT_PTR_MAX, blockCap)));
       else parts.push(...blocks);
     } else if (!s._toolsIntroSeen) {
       // No injectable group → baseline tools intro once (see task-context note).
@@ -1186,7 +1242,7 @@ function injectDiffsEnabled() {
 // SCOPED to the session's own context task (VIBESPACE_TASK_ID at spawn) —
 // an agent cannot touch arbitrary tasks. All writes flow through TaskManager,
 // so TASK.md regenerates and tasks-updated broadcasts automatically. ──
-app.get('/api/agent/task', (req, res) => {
+app.get('/api/agent/task', function taskShowRoute(req, res) {
   const hit = agentSession(req, res);
   if (!hit) return;
   // Master switch: this READ returns the same steering substance the delivery
@@ -1195,6 +1251,11 @@ app.get('/api/agent/task', (req, res) => {
   if (!integrationOnMaster()) return res.status(403).json({ error: 'VibeSpace integration is disabled (master switch)' });
   const gid = resolveAgentGroup(hit, req, res);
   if (!gid) return;
+  // lane task-group-fanout: `--full` lists every row's files — read OFF the loop first (bounded), entered again once settled
+  if (req.query && req.query.full === '1' && !turnRead.has(req) && typeof tasks.readWalks === 'function') {
+    const p = tasks.readWalks(gid);
+    if (p) { turnRead.add(req); p.then(() => taskShowRoute(req, res), () => taskShowRoute(req, res)); return; }
+  }
   try {
     const t = tasks.view(gid);   // lane task-group-context: the view carries the derived contextDir (the 记笔记 row)
     // backlog: OPEN items only, in sortBacklog order (priority high → normal →
@@ -1205,7 +1266,7 @@ app.get('/api/agent/task', (req, res) => {
     const openSorted = sortBacklog((t.backlog || []).filter((b) => b.status === 'open'));
     rememberBacklogListing(`${you}|${gid}`, openSorted.map((b) => b.id)); // the numbers this session now holds
     const ctxBaseOf = req.query && req.query.full === '1' ? remoteCtxBaseFor(hit[0]) : null;
-    const ix = req.query && req.query.full === '1' ? tasks.contextIndexOf(gid, ctxBaseOf ? ctxBaseOf(gid) : null) : null;   // B-86d3 ②: --full lists every file
+    const ix = req.query && req.query.full === '1' ? tasks.contextIndexOf(gid, ctxBaseOf ? ctxBaseOf(gid) : null, { offLoop: true }) : null;   // B-86d3 ②: --full lists every file
     res.json({ success: true, you, task: taskShowAnswer(t, openSorted), ...(ix ? { contextIndex: contextIndexAnswer(ix) } : {}) });   // verify r4 F1: every peer-written field through the belt
   } catch (e) { res.status(404).json({ error: e.message }); }
 });

@@ -18,6 +18,7 @@ const { pidsMatchingCmdline } = require('./cli-identity'); // THE process reader
 const PI = require('./proc-identity'); // the ssh kill compares the meta's recorded birth (vs_same_proc, B-5ee1)
 const { shrinkVerdict, windowIds, layerGate } = require('./lib/desktop-record.js'); // PURE (userW inc-mun7qjmw-iksh): the layout-sync shrink belt + the layer gate (design q-039 P1)
 const { staleVerdict, keepIdentities } = require('./lib/desktop-record.js'); // PURE (lane layout-stale-record-sync): a record never goes backwards; a write never forgets who a window is
+const { beltValue: putbackBelt } = require('./queue-putback.js'); // PURE (lane stop-refills-composer): the server belt of a Stop put-back — a draft set that never saw it keeps it in front
 
 /** The sentence a harness-level verb refusal carries. Every branch says what
  *  happens to the message ANYWAY — a refusal that only says "no" leaves the
@@ -1508,8 +1509,12 @@ function registerWsHandler(wss, ctx) {
         case 'state-set': {
           const store = getSyncStore(data.store);
           if (store && store.clientWrites !== false && data.key && typeof data.key === 'string') { // lane agent-feedback: a server-owned mirror (`feedback`) takes no client write
-            if (data.value == null || data.value === '') store.delete(data.key, ws, data.basedOn);
-            else store.set(data.key, data.value, ws, data.basedOn); // answered to the sender (state-ack), stamped from + basedOn (lane statesync-last-arrival)
+            // lane stop-refills-composer, THE BELT: a draft set whose basedOn is below a Stop put-back's version was sent
+            // before that client saw it (an autosave in flight) — the stored value keeps the put-back in front of it
+            const belt = data.store === 'drafts' && data.key.startsWith('chat:') ? activeSessions.get(data.key.slice(5))?._putbackBelt : null;
+            const value = belt ? putbackBelt(belt, data.value, data.basedOn) : data.value;
+            if (value == null || value === '') store.delete(data.key, ws, data.basedOn);
+            else store.set(data.key, value, ws, data.basedOn); // answered to the sender (state-ack), stamped from + basedOn (lane statesync-last-arrival)
             // lane worker-dispatch verify r2 ①: a non-empty chat draft is a PERSON composing a reply (not yet sent, so
             // _userInputAt is stale) — stamp it so a dispatch never compacts a worker whose owner is mid-draft.
             if (data.store === 'drafts' && data.value != null && data.value !== '' && data.key.startsWith('chat:')) {

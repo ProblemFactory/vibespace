@@ -453,7 +453,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
   getTelemetry: () => { try { return telemetry; } catch { return null; } },
   getNoConvoRef: () => { try { return noConvoRef; } catch { return null; } }, getDeliver: () => { try { return deliver; } catch { return null; } }, getPages: () => { try { return publishedPages; } catch { return null; } }, getPermissionRules: () => { try { return permissionRules; } catch { return null; } }, // lazy getters; getPages = SendUserFile hands the user a private link (published-pages is created further down)
   getExitProxy: () => { try { return exitProxy; } catch { return null; } }, // verify-r2 A3-r2 / ask-a: the exit path ends a dead conversation's pairs + asks
-  getBrain: () => { try { return sessionBrain; } catch { return null; } }, // design-unknown-records: the four record→side-effect consumers the parse shares with the device feed (session-brain is created further down)
+  getBrain: () => { try { return sessionBrain; } catch { return null; } }, getSyncStore: (name) => { try { return getSyncStore(name); } catch { return null; } }, // design-unknown-records: the four record→side-effect consumers the parse shares with the device feed (session-brain is created further down); lane stop-refills-composer: Stop's put-back writes the drafts store (built further down — read at record time)
 });
 // ── Boot restore (src/server/boot-restore.js, decomposition #7) ──
 // migrations + restoreSessions + R6 pipe re-open + keeper re-adoption.
@@ -629,7 +629,7 @@ syncStores.stage = new SyncStore('stage', path.join(__dirname, 'data', 'stage-sy
 
 setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncStore, activeSessions, auth, getExitProxy: () => { try { return exitProxy; } catch { return null; } } /* lane grants-unify: a machine's exit lists ride the config bundle as grant rows */,
   getHosts: () => hosts, getMounts: () => mounts, getTasks: () => tasks,
-  getAccounts: () => accounts, getUsageHistory: () => usageHistory, onUserStateWrite: () => { try { channelsWiring.groups.noteUserState(); } catch {} }, // lane pair-group-fate: the sidebar archive (THE user-state write) ends that conversation's group waits
+  getAccounts: () => accounts, getUsageHistory: () => usageHistory, onUserStateWrite: (st) => { try { channelsWiring.groups.noteUserState(); } catch {} try { tasks.noteArchived(st && st.archivedSessions); } catch {} }, // lane pair-group-fate: the sidebar archive (THE user-state write) ends that conversation's group waits; lane task-group-fanout: …and leaves every group's members (sessions[])
   // React server-side to the Integration master switch: register/strip the
   // CLI-config hook entries the moment the setting flips (the only settings
   // key with a server-side side effect — everything else reads lazily).
@@ -666,10 +666,9 @@ const { TaskGroupManager } = require('./src/task-groups');
 const tasks = new TaskGroupManager({
   dataDir: path.join(__dirname, 'data'), grants, // lane grants-unify: a group's outside visibility is its row of the ONE grants store
   readUserState: () => persistenceRouter.readUserState(),
-  getSetting: (k) => serverSetting(k), isPathShadowed: (p) => { try { return mounts.shadowedBy(p); } catch { return null; } }, mirrorFs: () => app.locals.safeFs || null, // lane cli-call-timeouts: TASK.md is mirrored through SafeFs, off the store write
-  onChange: (list) => {
-    const json = JSON.stringify({ type: 'tasks-updated', tasks: list });
-    wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
+  getSetting: (k) => serverSetting(k), isPathShadowed: (p) => { try { return mounts.shadowedBy(p); } catch { return null; } }, mirrorFs: () => app.locals.safeFs || null, isLiveKey: (k) => { for (const [id, s] of activeSessions) { const sk = sessionStatusKey(s, id); if (sk === k || sk.endsWith(':' + k)) return true; } return false; }, // lane cli-call-timeouts: TASK.md is mirrored through SafeFs, off the store write; lane task-group-fanout: an archived conversation still RUNNING keeps its groups until it ends
+  onChange: (ch) => {
+    try { taskFanout.note(ch && ch.ids); } catch { } // lane task-group-fanout: THE broadcast = a coalesced DELTA of the groups this write named (src/server/task-fanout.js); the store never travels whole (GET /api/tasks only)
     try { exitProxy.rejudgeAll('task-groups'); } catch { } // verify-r2: a group change is a revoke too — open exit connections judged NOW (exitProxy is built later: a boot-time change is a caught TDZ)
     // identity verify r4 (2026-09-28): a Task Group change re-judges every browser lease a list admits THROUGH a Task
     // Group — a conversation removed from the group (or whose group is deleted) loses the kept profile AT ONCE like a
@@ -686,6 +685,7 @@ const tasks = new TaskGroupManager({
     } catch (e) { console.warn('[browser] the Task Group change re-judge failed — ' + (e && e.message)); }
   },
 });
+const taskFanout = require('./src/server/task-fanout.js').create({ list: () => tasks.list(), send: (json) => wss.clients.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } }) }); // lane task-group-fanout: the ONE tasks-updated broadcaster ({epoch, base, seq} — a client off `base` re-fetches)
 // System info + memory-pressure watch (2.216.0, userL's 32Gi OOM kill —
 // the pod-level kill takes every dtach session; warn BEFORE the kernel acts)
 // ── Sysinfo wiring (src/server/sysinfo-wiring.js): remote snapshot ladder ──
@@ -732,7 +732,7 @@ sysinfo.startWatch({
   broadcast: (msg) => { const json = JSON.stringify(msg); wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } }); },
 });
 
-app.get('/api/tasks', (req, res) => res.json({ tasks: tasks.list() })); require('./src/server/task-context-routes.js').mount(app, { tasks, serverSetting }); // lane task-group-context: the Context table's preview + path probe (no new line — the size ratchet)
+app.get('/api/tasks', (req, res) => { const at = taskFanout.mark(); res.json({ tasks: tasks.list(), ...at }); }); require('./src/server/task-context-routes.js').mount(app, { tasks, serverSetting }); // lane task-group-context: the Context table's preview + path probe (no new line — the size ratchet)
 app.post('/api/tasks', (req, res) => {
   try { res.json({ success: true, task: tasks.create(req.body || {}) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
@@ -1059,7 +1059,7 @@ const sessionStatus = new SessionStatusManager({
   dataDir: path.join(__dirname, 'data'),
   onWriteError: (e, file, o) => fdGauge.reportWriteError(e, file, o), // a failed debounced write retries + is named, never a crash (12:03:17)
   onChange: (statuses, extra) => { // `extra.cleared` = a history clear's ids (a statuses map equal to every client's copy must still reach it)
-    const json = JSON.stringify({ type: 'session-status-updated', statuses, ...(extra && Array.isArray(extra.cleared) ? { cleared: extra.cleared } : {}) });
+    const json = JSON.stringify({ type: 'session-status-updated', statuses, ...(extra && extra.sync), ...(extra && Array.isArray(extra.cleared) ? { cleared: extra.cleared } : {}) }); // lane task-group-fanout: `statuses` = the keys a write touched, `sync` = {removed, epoch, base, seq}
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
   },
 });

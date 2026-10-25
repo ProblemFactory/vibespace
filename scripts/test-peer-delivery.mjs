@@ -24,6 +24,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
+import { stopWrapper } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -408,6 +409,119 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   ok('RED CONTROL: the pid-only first-record lookup behind the same ladder posts to the STALE socket and fails not-running (the incident)', rg.ok === false && rg.notRunning === true && got.length === n0 && G.logs.some((l) => l.includes('pre-freeze.sock failed: socket error: connect ENOENT')), JSON.stringify(rg) + ' | ' + G.logs.join(' | '));
   srv.close();
   fs.rmSync(root, { recursive: true, force: true });
+}
+
+// ── lane agy-peer-wake: RUNG 1.5 FOR AN ANTIGRAVITY SESSION — THE FRAME ROUND TRIP, never a hand-declared lane ──
+// The owner (2026-10-24) woke a LIVE Antigravity conversation with `vibespace-msg send … --wake` and was told «woke 0
+// agents · 1 wake refused»: the row said stash-only and the wrapper adverted peerMessage:false, though it served the
+// frame. Here the REAL ladder writes into the REAL agy wrapper (its own sidecar is the advert findRpcPeer reads) over
+// the fake agy, and the wrapper's stdout goes through the REAL acp-events consumer, whose `peer_result` handlers
+// re-stash and SETTLE — the whole road the owner's message takes, measured.
+{
+  const { spawn } = await import('node:child_process');
+  const { addressableId } = require(path.join(REPO, 'src/claude-lock-capture.js'));
+  const { notificationDelivery, deriveInputModes } = require(path.join(REPO, 'src/backend-caps.js'));
+  const { wrapperCaps } = require(path.join(REPO, 'src/server/wrapper-files.js'));
+  const M = require(path.join(REPO, 'src/job-model.js'));
+  const AGY_WRAPPER = path.join(REPO, 'data/bin/agy-wrapper.js'), AGY_STUB = path.join(REPO, 'scripts/fixtures/antigravity-agy');
+  const D = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-agy-peer-'));
+  const BUF = path.join(D, 'session-buffers');
+  fs.mkdirSync(BUF, { recursive: true });
+  // a wrapper COPY lives at <root>/data/bin beside <root>/src → the repo's src (its requires of src/ resolve)
+  fs.mkdirSync(path.join(D, 'red', 'data', 'bin'), { recursive: true });
+  fs.symlinkSync(path.join(REPO, 'src'), path.join(D, 'red', 'src'));
+  const wsrc = read('data/bin/agy-wrapper.js');
+  const ADVERT = 'caps: { frameFile: true, peerMessage: true, notificationSteer: false,';
+  const RED = path.join(D, 'red', 'data', 'bin', 'agy-wrapper.js');
+  fs.writeFileSync(RED, wsrc.replace(ADVERT, 'caps: { frameFile: true, peerMessage: false,'));
+  const until = async (pred, ms, what) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = pred(); if (v) return v; await new Promise((r) => setTimeout(r, 15)); } throw new Error('timeout: ' + what); };
+  const env0 = { ...process.env };
+  for (const k of Object.keys(env0)) if (/^VIBESPACE_|^ACP_WEBUI_|^AGY_|^CLAUDE_CODE_/.test(k)) delete env0[k];
+  const ACID = 'a9e7c0de-1111-4222-8333-444455556666', RCID = 'a9e7c0de-1111-4222-8333-777788889999';
+  const AWID = 'sess-90-1000', RWID = 'sess-91-1000';
+  const stubLog = (wid) => path.join(D, wid + '.stub.log');
+  const lines = (wid) => { try { return fs.readFileSync(stubLog(wid), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.stdin).map((x) => JSON.parse(x.stdin).message.content); } catch { return []; } };
+  // HOME = the scratch dir: the wrapper's store reads and the fake agy see nobody's real store
+  const startAgy = (wrapper, wid, cid) => spawn(process.execPath, [wrapper, path.join(BUF, wid + '.buf'), path.join(BUF, wid + '.json'), AGY_STUB], {
+    env: { ...env0, HOME: D, AGY_WEBUI_CWD: D, AGY_WEBUI_BACKEND: 'antigravity', AGY_WEBUI_RESUME_ID: cid, AGY_WEBUI_AUTH_GRACE_MS: '400', AGY_STUB_SLOW_MS: '900', AGY_STUB_LOG: stubLog(wid) },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const kids = [startAgy(AGY_WRAPPER, AWID, ACID), startAgy(RED, RWID, RCID)];
+  const [A, R] = kids;
+  try {
+    // the session the hub holds: backendSessionId comes from the wrapper's own `session` record (the consumer adopts it)
+    const S = { backend: 'antigravity', mode: 'chat', backendSessionId: null, claudeSessionId: null, name: 'AgyPeer', host: null, buffer: '', sockName: null, socketPath: path.join(D, 'cw-' + AWID), pty: { write: (s) => { frames.push(String(s)); A.stdin.write(s); } } };
+    const RS = { backend: 'antigravity', mode: 'chat', backendSessionId: RCID, claudeSessionId: null, name: 'AgyOld', host: null, buffer: '', sockName: null, socketPath: path.join(D, 'cw-' + RWID), pty: { write: (s) => { redFrames.push(String(s)); R.stdin.write(s); } } };
+    const OS = { backend: 'opencode', mode: 'chat', backendSessionId: 'oc-live-1', claudeSessionId: null, name: 'Oc', host: null, pty: { write: () => { } } };
+    const frames = [], redFrames = [];
+    const money = { auth: 0, note: 0, release: 0 };
+    const L = require(path.join(REPO, 'src/server/conversation-deliver.js')).create({
+      dataDir: D,
+      peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false, reason: 'unused' }), postChannelEvent: async () => ({ ok: false }) },
+      getHosts: () => null, getConvIndex: () => null, serverSetting: () => false,
+      activeSessions: new Map([[AWID, S], [RWID, RS], ['sess-92-1000', OS]]), emitPeerCard: () => true,
+      authorizeSpend: () => { money.auth++; return { ok: true, identity: { key: 'slot-a', name: 'A' }, hold: { id: 'h' + money.auth } }; },
+      noteSpend: () => { money.note++; }, releaseSpend: () => { money.release++; },
+      log: () => { },
+    });
+    // the REAL consumer over the wrapper's stdout; its deliverRef is the ladder (settles + stashes are recorded)
+    const settles = [], logs = [];
+    const deliverRef = { ...L, settleRpcDelivery: (cid, o) => { const v = L.settleRpcDelivery(cid, o); settles.push({ cid, ...o, v, at: Date.now() }); return v; } };
+    const C = require(path.join(REPO, 'src/server/stdout/acp-events.js')).create({ engine: { noteTurnEnd: () => { } }, noteHarnessModels: () => { }, deliverRef, permissionRulesRef: null });
+    const noop = () => { };
+    const log0 = console.log;
+    console.log = (...a) => { const s = a.join(' '); if (s.startsWith('[deliver]')) logs.push(s); else log0(...a); };
+    try {
+      C.attach(S, AWID, { onData: (cb) => { A.stdout.setEncoding('utf8'); A.stdout.on('data', cb); } }, { feedLive: noop, broadcastToSession: noop, broadcastActiveSessions: noop, readSessionMeta: () => null, writeSessionMeta: noop, updateSessionTodos: noop });
+      await until(() => S.backendSessionId === ACID, 8000, 'the session record adopted');
+      ok('agy-peer-wake: the live agy session is ADDRESSED by its own conversation id (addressableId = the backendSessionId its wrapper journaled — the cid vibespace-msg resolves; agy has no fork, so the verify-r6 rule never hides it)', addressableId(S) === ACID && S.claudeSessionId === null, JSON.stringify({ a: addressableId(S), b: S.backendSessionId }));
+      await until(() => fs.existsSync(path.join(BUF, AWID + '.json')) && fs.existsSync(path.join(BUF, RWID + '.json')), 5000, 'both sidecars');
+      ok("agy-peer-wake: the antigravity row rides rung 1.5 — peerDelivery 'rpc-queue' — and the REAL wrapper's sidecar adverts peerMessage", capsOf('antigravity').peerDelivery === 'rpc-queue' && wrapperCaps(BUF, AWID, S.socketPath).peerMessage === true && L.peerReachable(ACID) === true);
+      // ① IDLE ⇒ THE WAKE
+      const t0 = Date.now();
+      const r1 = await L.deliverToConversation(ACID, 'Message from session "B": wake up, agy', { fromName: 'session B', cardText: 'wake up, agy' });
+      ok("agy-peer-wake ①: an IDLE agy session — the ladder answers ok on lane 'rpc-queue' (never the stash), not predicted free", r1.ok === true && r1.lane === 'rpc-queue' && r1.steered === false && r1.peerName === 'AgyPeer' && frames.length === 1 && JSON.parse(frames[0]).type === 'peer-message', JSON.stringify(r1));
+      const s1 = await until(() => settles[0], 8000, 'the first settle');
+      const rtt = s1.at - t0;
+      ok(`agy-peer-wake ①: …the wrapper's answer comes back through acp-events and SETTLES the frame: mode 'turn' → 'already-charged' (charged once, at the write) — the measured round trip: ${rtt} ms`, s1.cid === ACID && s1.ok === true && s1.mode === 'turn' && s1.v === 'already-charged' && money.note === 1 && money.release === 0, JSON.stringify({ s1, money }));
+      await until(() => lines(AWID).length >= 1, 5000, 'the line reached agy');
+      ok('agy-peer-wake ①: …and agy got ONE line: the «Message from session B:» head + the words (a billed turn opened = the wake)', lines(AWID)[0] === 'Message from session B:\nMessage from session "B": wake up, agy', lines(AWID));
+      // ② BUSY: a notification is NOT predicted free (agy's steer is a stop + a new turn) — charged at the write, queued
+      await until(() => S._isStreaming === false, 8000, 'the peer turn ended');
+      A.stdin.write(JSON.stringify({ type: 'chat-input', text: 'a slow one', msgId: 'u-slow' }) + '\n');
+      await until(() => S._isStreaming === true, 5000, 'busy');
+      ok("agy-peer-wake ②: the derived lane — antigravity's notifications take 'queue' (its row DECLARES steerJoinsTurn:false), codex's still 'steer'", notificationDelivery(capsOf('antigravity')) === 'queue' && notificationDelivery(capsOf('codex')) === 'steer' && capsOf('antigravity').inputModes.steer === true);
+      ok("agy-peer-wake ②: RED CONTROL — the same verb list WITHOUT the declaration derives 'steer': the busy notification would be predicted FREE (the lie a stop + new turn would bill)", notificationDelivery({ peerDelivery: 'rpc-queue', inputModes: deriveInputModes({ queue: true, queueVerbs: capsOf('antigravity').inputModes.queueVerbs }) }) === 'steer');
+      ok('agy-peer-wake ②: …and the PROCESS says it too: wrapperCaps takes the explicit notificationSteer:false over its list\'s derived true (explicit beats derived)', wrapperCaps(BUF, AWID, S.socketPath).notificationSteer === false && wrapperCaps(BUF, AWID, S.socketPath).queueVerbs.includes('steer'));
+      const r2 = await L.deliverToConversation(ACID, '[VibeSpace Background Work] task "nightly" (job-1): done.', { fromName: 'Background Work · nightly', kind: 'notification', spendReason: 'job-notification' });
+      ok('agy-peer-wake ②: a notification to the BUSY agy is written, steered:false, and CHARGED at the write (a billed turn is never predicted free)', r2.ok === true && r2.steered === false && frames.length === 2 && JSON.parse(frames[1]).kind === 'notification' && money.note === 2, JSON.stringify({ r2, money }));
+      const s2 = await until(() => settles[1], 5000, 'the second settle');
+      ok("agy-peer-wake ②: …the wrapper answers mode 'queued' (settle: 'already-charged') and the consumer SAYS the notification found no steer (codex's steerFailed twin)", s2.mode === 'queued' && s2.v === 'already-charged' && logs.some((l) => /rpc-queue: no steer into the running turn on antigravity — the notification took the 'queued' lane instead/.test(l)), JSON.stringify({ s2, logs }));
+      const r3 = await L.deliverToConversation(ACID, '[VibeSpace] a receipt', { fromName: 'Channels · API', kind: 'notification', noWake: true, spendReason: 'channel-receipt' });
+      ok('agy-peer-wake ②: a noWake notice to the busy agy is REFUSED before any frame, its words true ("would not join the running turn"), the hold given back', r3.ok === false && r3.refused === 'no-wake' && /would not join the running turn/.test(r3.reason) && frames.length === 2 && money.release === 1, JSON.stringify({ r3, money }));
+      // ③ a queued peer dropped by Stop goes BACK: ok:false + its words, mode-less (about an earlier frame) ⇒ re-stashed
+      const r4 = await L.deliverToConversation(ACID, 'one more thing', { fromName: 'session C', cardText: 'one more thing' });
+      await until(() => settles[2], 5000, 'the third settle');
+      A.stdin.write(JSON.stringify({ type: 'interrupt' }) + '\n');
+      await until(() => L.stashEntries(ACID).length >= 2, 5000, 'the re-stash');
+      const st = L.stashEntries(ACID);
+      ok('agy-peer-wake ③: Stop drops the queue (the owner\'s law) and the two queued frames come BACK — the REAL consumer re-stashes their words with their sender and path', r4.ok === true && st.some((e) => e.text === 'one more thing' && e.fromName === 'session C' && e.kind === 'peer') && st.some((e) => /task "nightly"/.test(e.text) && e.kind === 'notification'), JSON.stringify(st.map((e) => [e.text, e.fromName, e.kind])));
+      ok("agy-peer-wake ③: …and those answers settle NOTHING ('not-ours' — mode-less, about earlier frames): every frame was charged exactly once", settles.slice(3).every((s) => s.v === 'not-ours' && s.mode === null) && settles.slice(3).length === 2 && money.note === 3, JSON.stringify({ tail: settles.slice(3), money }));
+      // ④ THE RED COPY: the same wrapper with peerMessage:false — findRpcPeer skips it, nothing is written, and the miss
+      // names the cure (the owner's own conversation: its wrapper predates this lane until the session restarts)
+      const rr = await L.deliverToConversation(RCID, 'wake up, old one', { fromName: 'session B' });
+      ok('agy-peer-wake ④: RED COPY (peerMessage:false, the base advert) — findRpcPeer SKIPS it: no frame, the ladder misses', wsrc.includes(ADVERT) && wrapperCaps(BUF, RWID, RS.socketPath).peerMessage === false && rr.ok === false && redFrames.length === 0 && !rr.notRunning, JSON.stringify(rr));
+      ok('agy-peer-wake ④: …and the miss SAYS it is running with a process that predates live messages + the cure (restart), never «no live inbox … any reachable machine»', /running, but its agent's process predates live messages — restart the session/.test(rr.reason) && !/no live inbox/.test(rr.reason) && M.heldKind(rr, rr.reason) === 'not-reachable', rr.reason);
+      const ro = await L.deliverToConversation('oc-live-1', 'hello opencode', { fromName: 'session B' });
+      ok('agy-peer-wake ④: a RUNNING session whose harness has no live lane (opencode, stash-only) is said as running — not "not running"', ro.ok === false && /running, but its agent takes no message mid-session/.test(ro.reason) && !ro.notRunning, JSON.stringify(ro));
+      const rn = await L.deliverToConversation('no-such-conversation', 'hello?', { fromName: 'session B' });
+      ok('agy-peer-wake ④: …while a conversation running NOWHERE keeps its words + type (the classifier still reads it not-running)', rn.ok === false && rn.notRunning === true && /no live inbox for this conversation on any reachable machine/.test(rn.reason) && M.heldKind(rn, rn.reason) === 'not-running', JSON.stringify(rn));
+    } finally { console.log = log0; }
+  } catch (e) { ok('agy-peer-wake: the round trip ran to its end (a timeout here = a leg above never got its answer)', false, e.message); }
+  finally {
+    await Promise.all(kids.map((k) => stopWrapper(k)));   // §55: the wrapper's SIGTERM record lands before the dir goes
+    await stopWrapper(null, { dir: D });
+  }
 }
 
 fs.rmSync(dataDir, { recursive: true, force: true });

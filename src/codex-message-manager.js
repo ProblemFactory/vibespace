@@ -2127,6 +2127,7 @@ class CodexMessageManager extends MessageWindow {
     if (type === 'queued_input' && this._queuePublished && this._stampQueueChip(event.msg_id || event.msgId, 'queued', emit)) return;
     if (type === 'queue_changed') return this._processQueueChanged(event, emit);
     if (type === 'queue_op_result') return this._processQueueOpResult(event, emit);
+    if (type === 'queue_dropped') return this._processQueueDropped(event, emit); // lane stop-refills-composer: Stop's put-back (the base's one method)
     if (type === 'queued_input' || type === 'compact_started' || type === 'context_compacted' || type === 'command_applied') {
       const text = type === 'queued_input' ? 'Queued — runs after the current turn'
         : type === 'compact_started' ? 'Compacting context…'

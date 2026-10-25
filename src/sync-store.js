@@ -84,10 +84,13 @@ class SyncStore {
   // sender the version its set produced, and the broadcast names the sender (`from`) and its `basedOn`. The client's
   // arrival rule (src/sync-arrival.js) needs the ack: a remote op the server ordered BEFORE the client's own set never
   // lands over it (B-cede — before, two devices setting one key within a round trip each took the other's last).
-  set(key, value, senderWs, basedOn) {
+  // `extra` = a SERVER write's own stamp riding the op (lane stop-refills-composer: Stop's put-back carries `prepended`,
+  // the prefix's length — the clients land it as a prefix over their live box, src/queue-putback.js). A client's
+  // `state-set` passes none. The op rides the ring whole, so a reconnecting client's replay keeps the stamp.
+  set(key, value, senderWs, basedOn, extra) {
     this.version++;
     this.data[key] = value;
-    const op = { version: this.version, op: 'set', key, value, ...this._stamp(senderWs, basedOn) };
+    const op = { version: this.version, op: 'set', key, value, ...this._stamp(senderWs, basedOn), ...(extra && typeof extra === 'object' ? extra : {}) };
     this._pushOp(op);
     this._scheduleSave();
     this._broadcast(op, senderWs);

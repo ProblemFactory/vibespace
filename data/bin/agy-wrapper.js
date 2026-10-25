@@ -94,9 +94,13 @@ const meta = {
   sessionId: resumeId || null, sessionName: sessionName || null, streaming: false, activePromptId: null,
   model: state.model, agentMode: state.mode, effort: state.effort, configOptions: [], modes: null, availableCommands: [], todos: [], usage: null, pendingRequests: {},
   acp: { agentInfo: { name: 'agy', title: 'Antigravity CLI', version: null }, capabilities: { loadSession: true }, protocolVersion: null, authMethods: [] },
-  // the same advert as acp-wrapper (frameFile, the wrapper-owned queue + its three verbs, the read-only rules verb,
-  // queue-resync) — every verb below is served by THIS file
-  caps: { frameFile: true, peerMessage: false, inputQueue: true, queueVerbs: QUEUE_VERBS, permissionRules: true, queueResync: true },
+  // the same advert as acp-wrapper (frameFile, the wrapper-owned queue + its verbs, the read-only rules verb,
+  // queue-resync) — every verb below is served by THIS file. peerMessage (lane agy-peer-wake): the 'peer-message' frame
+  // is served below (idle ⇒ a turn, busy ⇒ queued after it) and answered honestly on `peer_result`, so the delivery
+  // ladder's live rung may write it (backend-caps peerDelivery 'rpc-queue'). notificationSteer:false — 'steer' here is
+  // a STOP + a new billed turn, never codex's free fold into the running turn: said explicitly, so the verb list above
+  // can never make a mid-turn notification look free (src/server/wrapper-files.js wrapperCaps: explicit beats derived).
+  caps: { frameFile: true, peerMessage: true, notificationSteer: false, inputQueue: true, queueVerbs: QUEUE_VERBS, permissionRules: true, queueResync: true },
   queue: [],
 };
 
@@ -178,7 +182,9 @@ function startChild() {
     child = null;
     if (restarting) return;   // the restart path starts the next one
     subsAtExit();
-    if (activePrompt) endPrompt(activePrompt, 'error', { message: `Antigravity exited (${signal || code})` }, activePrompt.opts || {});
+    const cur = activePrompt;
+    if (cur) endPrompt(cur, 'error', { message: `Antigravity exited (${signal || code})` }, cur.opts || {});
+    if (cur && !cur.dispatched) peerBack(cur, `Antigravity exited (${signal || code}) before it was delivered`); // its handler never answers now
     if (!shuttingDown && !authFailed) {
       if (code === 2) notice('error', 'Antigravity ended this session (exit 2): its stream refused a message it does not take in a running session (a slash command or a control message). Resume the conversation to continue.', 'agent-exited');
       else if (!markReadyDone || code) notice('error', `Antigravity exited (${signal ? 'signal ' + signal : 'exit code ' + code}) — see agy-wrapper.log. Resume the conversation to continue.`, 'agent-exited');
@@ -618,6 +624,27 @@ async function maybeStopNudge() {
   finally { clearTimeout(to); if (stopCheckAbort === ac) stopCheckAbort = null; }
 }
 const preview = (t) => { const s = String(t || '').replace(/\s+/g, ' ').trim(); return s.length > 120 ? s.slice(0, 119) + '…' : s; };
+/** STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer, owner 2026-10-24) — the `queue_dropped` record's payload.
+ *  The BYTE-IDENTICAL inline twin of src/queue-putback.js droppedRecordFor (a wrapper cannot require src/):
+ *  test-queue-putback pins this text to that one and drives both on one fixture. */
+function droppedRecordFor(rows, { dropId, turnId } = {}) {
+  const ITEM_MAX = 20000, TOTAL_MAX = 100000;
+  const items = []; let total = 0, omitted = 0;
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (!r || typeof r !== 'object') continue;
+    const full = typeof r.text === 'string' ? r.text : '';
+    let text = full.length > ITEM_MAX ? full.slice(0, ITEM_MAX) : full;
+    if (text.length < full.length && /[\uD800-\uDBFF]$/.test(text)) text = text.slice(0, -1);
+    if (total + text.length > TOTAL_MAX) { omitted++; continue; }
+    total += text.length;
+    const attachments = (Array.isArray(r.attachments) ? r.attachments : []).filter((a) => a && typeof a.type === 'string' && a.type).slice(0, 32)
+      .map((a) => ({ type: a.type.slice(0, 32), mime: typeof a.mime === 'string' && a.mime ? a.mime.slice(0, 100) : null, name: typeof a.name === 'string' && a.name ? a.name.slice(0, 200) : null }));
+    items.push({ id: String(r.id || ''), msgId: String(r.msgId || ''), ts: Number.isFinite(r.ts) ? r.ts : null, text, cut: text.length < full.length, attachments });
+  }
+  return { dropId: String(dropId || ''), by: 'stop', turnId: typeof turnId === 'string' && turnId ? turnId : null, items, omitted };
+}
+let dropSeq = 0;                  // the put-back record's id: `${pid}-${n}` — the server's idempotency key
+
 function publishQueue() {
   const items = promptQueue.map((q) => ({ id: q.id, msgId: q.opts?.msgId || '', preview: preview(q.text), ...(!q.opts?.peer && !q.opts?.nudge && !q.opts?.retry && q.text && q.text.length <= 20000 ? { text: q.text } : {}), ts: q.ts || null, kind: q.opts?.peer ? 'peer' : (q.opts?.nudge || q.opts?.retry) ? 'system' : 'user', from: q.opts?.peerFrom || null }));
   meta.queue = items; scheduleMeta();
@@ -627,7 +654,14 @@ function drainPromptQueue() {
   if (activePrompt || !promptQueue.length || restarting || !child) return;
   const next = promptQueue.shift();
   publishQueue();
-  runPrompt(next.text, next.opts).catch((e) => log('queued prompt failed: ' + e.message));
+  runPrompt(next.text, next.opts).then((ran) => { if (!ran.mode) peerBack(next, ran.reason); }).catch((e) => { log('queued prompt failed: ' + e.message); peerBack(next, e.message); });
+}
+/** A PEER message this wrapper took and will NOT deliver goes back to the delivery ladder with its words (lane
+ *  agy-peer-wake: never a silent drop) — `peer_result {ok:false, text}` and NO mode: it is about an EARLIER frame, which
+ *  the hub's settle must not mistake for an answer about the frame it wrote last (conversation-deliver
+ *  settleRpcDelivery); acp-events re-stashes the words for the conversation's next turn. A person's / nudge entry: no-op. */
+function peerBack(q, reason) {
+  if (q && q.opts?.peer && q.opts.peerText) record('peer_result', { ok: false, reason: String(reason || 'not delivered'), text: q.opts.peerText, fromName: q.opts.peerFrom || null, peerKind: q.opts.peerKind || null });
 }
 /** THE STEER's stop (lane agy-harness-fixes, bug 4): ends the RUNNING turn and KEEPS the queue (the steered message at
  *  its head) — agy's stream has no cancel, so a dispatched turn's process is restarted on the same conversation (what
@@ -654,13 +688,16 @@ function endPrompt(mine, stopReason, error, opts) {
   if (pendingRestart && !activePrompt) { const why = pendingRestart; pendingRestart = null; restartChild(why); return; }
   drainPromptQueue();
 }
+/** → what became of the text: {mode:'queued'} (it runs after the running turn / once a restart is up), {mode:'turn'}
+ *  (written to agy — the turn is open), or {mode:null, reason} (it never reached agy: Stop before it was written, not
+ *  signed in, not running). The peer frame answers from this (lane agy-peer-wake); a person's line ignores it. */
 async function runPrompt(text, opts = {}) {
   if (activePrompt || restarting || !child) {
     promptQueue.push({ id: `q${++queueSeq}-${process.pid}`, ts: Date.now(), text, opts });
     publishQueue();
     if (!opts.silentQueue) record('queued_input', { msg_id: opts.msgId || '', turn_id: meta.activePromptId || null });
     if (!child && !restarting && !shuttingDown) startChild();
-    return;
+    return { mode: 'queued' };
   }
   // THE ONE-TURN BYPASS INVARIANT: only the retry turn ever runs on a process started with the retry's bypass, and
   // the retry never runs without it — checked at dispatch, so a reorder / remove / Stop cannot leak it to a user turn
@@ -670,20 +707,26 @@ async function runPrompt(text, opts = {}) {
     promptQueue.unshift({ id: `q${++queueSeq}-${process.pid}`, ts: Date.now(), text, opts });
     publishQueue();
     restartChild(wantBypass ? 'allow and retry' : 'the retry\'s bypass ends');
-    return;
+    return { mode: 'queued' };
   }
   const promptId = `p${++promptSeq}-${process.pid}`;
-  const mine = { id: promptId, cancelled: false, dispatched: false, opts };
+  const mine = { id: promptId, cancelled: false, dispatched: false, opts, text }; // text: Stop puts an UNDISPATCHED prompt back into the composer (lane stop-refills-composer)
   activePrompt = mine;
   meta.streaming = true; meta.activePromptId = promptId; scheduleMeta();
   let body = text;
   if (!opts.nudge && !opts.peer) { const ctx = await fetchContextPrefix(); if (ctx) body = '<vibespace-context>\n' + ctx + '\n</vibespace-context>\n' + body; }
-  if (mine.cancelled) { endPrompt(mine, 'cancelled', null, opts); return; }
-  if (!(await authGate()) || mine.cancelled) { endPrompt(mine, mine.cancelled ? 'cancelled' : 'error', mine.cancelled ? null : { message: authFailed ? 'Antigravity is not signed in' : 'Antigravity is not running' }, opts); return; }
-  if (!child?.stdin?.writable) { endPrompt(mine, 'error', { message: 'Antigravity is not running' }, opts); return; }
+  const stopped = { mode: null, reason: 'stopped before it reached Antigravity' };
+  if (mine.cancelled) { endPrompt(mine, 'cancelled', null, opts); return stopped; }
+  if (!(await authGate()) || mine.cancelled) {
+    const why = authFailed ? 'Antigravity is not signed in' : 'Antigravity is not running';
+    endPrompt(mine, mine.cancelled ? 'cancelled' : 'error', mine.cancelled ? null : { message: why }, opts);
+    return mine.cancelled ? stopped : { mode: null, reason: why };
+  }
+  if (!child?.stdin?.writable) { endPrompt(mine, 'error', { message: 'Antigravity is not running' }, opts); return { mode: null, reason: 'Antigravity is not running' }; }
   record('prompt_start', { promptId, blocks: 1 });
   mine.dispatched = true;
   child.stdin.write(JSON.stringify({ event: 'user', message: { content: body } }) + '\n');
+  return { mode: 'turn' };
 }
 
 // ── stdin verbs (the AcpAdapter's frames) ──
@@ -780,26 +823,30 @@ async function handleInput(msg) {
       if (stopCheckAbort) { try { stopCheckAbort.abort(new Error('interrupted by Stop')); } catch { } }
       const dropped = promptQueue.splice(0, promptQueue.length);
       for (const q of dropped) record('queue_op_result', { op: 'remove', id: q.id, ok: true, msg_id: q.opts?.msgId || '', reason: 'stopped' });
+      // STOP PUTS THE DROPPED QUEUE BACK (owner 2026-10-24, lane stop-refills-composer — acp-wrapper's twin): ONE record of
+      // the person's rows between the results and the emptied republish; an UNDISPATCHED active prompt (Stop inside the
+      // context-prefix / sign-in await) is the oldest row; peer / nudge / retry rows go back through their own ladder.
+      const theirs = (q) => !q.opts?.peer && !q.opts?.nudge && !q.opts?.retry && !q.opts?.silentQueue;
+      const putBack = [...(activePrompt && !activePrompt.dispatched && typeof activePrompt.text === 'string' && theirs(activePrompt) ? [activePrompt] : []), ...dropped.filter(theirs)];
+      if (putBack.length) record('queue_dropped', droppedRecordFor(putBack.map((q) => ({ id: q.id, msgId: q.opts?.msgId || '', ts: q.ts || null, text: q.text, attachments: [] })), { dropId: `${process.pid}-${++dropSeq}`, turnId: meta.activePromptId || null }));
       if (dropped.length) publishQueue();
-      for (const q of dropped) { if (q.opts?.peer && q.opts.peerText) record('peer_result', { ok: false, reason: 'dropped by Stop before it was delivered', text: q.opts.peerText, fromName: q.opts.peerFrom || null, peerKind: q.opts.peerKind || null }); if (q.opts?.nudge) nudgeTurnActive = false; }
+      for (const q of dropped) { peerBack(q, 'dropped by Stop before it was delivered'); if (q.opts?.nudge) nudgeTurnActive = false; }
       // a retry dropped before it ran must not leave its one-turn bypass on the process the next turn uses
       if (retryBypass && !activePrompt?.opts?.retry) { retryBypass = false; restartChild('stop: the dropped retry\'s bypass ends'); }
-      // STOP CLEARS THE QUEUE (the owner's law, 2026-09-07 — codex-chat-wrapper / acp-wrapper), and the drop is SAID
-      // (lane agy-harness-fixes, bug 4): the person's messages it dropped are counted in the Stop line — never a silent loss
-      const mine = (dropped.filter((q) => !q.opts?.peer && !q.opts?.nudge)).length;
-      const droppedWords = mine ? ` Stop also cleared the queue: your ${mine} queued message${mine === 1 ? ' was' : 's were'} not sent — send again what should still run.` : '';
+      // STOP CLEARS THE QUEUE (the owner's law, 2026-09-07 — codex-chat-wrapper / acp-wrapper) and PUTS IT BACK (2026-10-24,
+      // the queue_dropped record above): the client's ONE toast says how many came back into the composer, so the count
+      // agy-harness-fixes (bug 4) added to the Stop line — «send again what should still run» — is retired (no longer true)
       if (activePrompt) {
         const cur = activePrompt;
         cur.cancelled = true;
         if (cur.dispatched) {
           // no cancel in agy's stream: the process is restarted on the same conversation (what it already did is kept)
           endPrompt(cur, 'cancelled', null, cur.opts || {});
-          notice('info', `Stopped — Antigravity has no cancel in its stream, so its process was restarted on the same conversation; what the turn already did stays.${droppedWords}`, 'stop-restart');
+          notice('info', 'Stopped — Antigravity has no cancel in its stream, so its process was restarted on the same conversation; what the turn already did stays.', 'stop-restart');
           restartChild('stop');
           return;
         }
       }
-      if (droppedWords) notice('info', `Stopped.${droppedWords}`, 'stop-restart');
       return;
     }
     case 'read-permission-rules':
@@ -813,16 +860,23 @@ async function handleInput(msg) {
     case 'set-mode':
     case 'set-permission-mode': applySetting('mode', msg.mode === 'default' ? '' : msg.mode, 'Mode'); return;
     case 'peer-message': {
+      // THE LIVE LANE (lane agy-peer-wake — backend-caps peerDelivery 'rpc-queue'): another session's message, or a
+      // VibeSpace notification, written by the delivery ladder. Idle ⇒ it opens a turn at once (the wake: a billed turn);
+      // busy, or while agy restarts ⇒ it waits in THIS queue and runs after (a turn of its own). The answer is what
+      // really happened, in write order: ok:true + mode 'turn' | 'queued' (a notification that waits also says
+      // steer:'unsupported' — agy takes nothing into a running turn, its steer verb is a stop + a new turn), or ok:false
+      // + mode 'undelivered' + its words when it never reached agy (Stop first, not signed in, not running) — the hub
+      // re-stashes them. A frame with no text is nothing (no record, no turn).
       const text = String(msg.text || '');
       if (!text.trim()) return;
       const fromName = msg.fromName ? String(msg.fromName) : null;
       const peerKind = msg.kind === 'notification' ? 'notification' : 'peer';
       try {
         record('user', { msgId: '', content: [{ type: 'text', text }], peer: { name: fromName, body: typeof msg.cardText === 'string' && msg.cardText.trim() ? msg.cardText : null, kind: peerKind } });
-        const queued = !!activePrompt;
-        await runPrompt(`Message from ${fromName || 'another session'}:\n${text}`, { peer: true, silentQueue: true, peerText: text, peerFrom: fromName, peerKind });
-        record('peer_result', { ok: true, mode: queued ? 'queued' : 'turn', ...(peerKind === 'notification' && queued ? { steer: 'unsupported' } : {}) });
-      } catch (e) { record('peer_result', { ok: false, reason: e.message, text, fromName, peerKind }); }
+        const ran = await runPrompt(`Message from ${fromName || 'another session'}:\n${text}`, { peer: true, silentQueue: true, peerText: text, peerFrom: fromName, peerKind });
+        if (ran.mode) record('peer_result', { ok: true, mode: ran.mode, ...(peerKind === 'notification' && ran.mode === 'queued' ? { steer: 'unsupported' } : {}) });
+        else record('peer_result', { ok: false, mode: 'undelivered', reason: ran.reason, text, fromName, peerKind });
+      } catch (e) { record('peer_result', { ok: false, mode: 'undelivered', reason: e.message, text, fromName, peerKind }); }
       return;
     }
     default:
@@ -859,13 +913,14 @@ function handleQueueOp(msg) {
     record('queue_op_result', { op, id, ok: true, msg_id: entry.opts?.msgId || '' }); publishQueue(); return;
   }
   const [dropped] = promptQueue.splice(idx, 1);
-  if (dropped.opts?.peer && dropped.opts.peerText) record('peer_result', { ok: false, reason: 'removed from the queue before it was delivered', text: dropped.opts.peerText, fromName: dropped.opts.peerFrom || null, peerKind: dropped.opts.peerKind || null });
+  peerBack(dropped, 'removed from the queue before it was delivered');
   if (dropped.opts?.nudge) nudgeTurnActive = false;
   record('queue_op_result', { op, id, ok: true, msg_id: dropped.opts?.msgId || '' }); publishQueue();
 }
 
 function finalizeExit(code) {
   shuttingDown = true;
+  for (const q of promptQueue.splice(0, promptQueue.length)) peerBack(q, 'Antigravity ended before it was delivered'); // the queue dies with this process: its peers' words go back
   meta.streaming = false; meta.activePromptId = null;
   if (writeTimer) clearTimeout(writeTimer);
   if (metaTimer) clearTimeout(metaTimer);

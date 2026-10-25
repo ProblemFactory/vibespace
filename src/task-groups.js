@@ -50,7 +50,7 @@ const crypto = require('crypto');
 const os = require('os');
 const TC = require('./task-context.js'); // PURE: the Context table's rows, resolution, derivations, budget plan (lane task-group-context)
 const { pickColorSeq } = require('./task-color-seq');
-const { folderOf, insideFolder } = require('./task-membership.js'); // PURE (lane open-task-binds): THE folder rule (a folder includes itself; a glob tail is the recursive switch) — the bundle's panel asks the same one
+const { folderOf, insideFolder, membersWithout } = require('./task-membership.js'); // PURE (lane open-task-binds): THE folder rule (a folder includes itself; a glob tail is the recursive switch) — the bundle's panel asks the same one
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a progress note / detail a reader sees never carries a credential in the clear
 // lane cli-call-timeouts: one TASK.md mirror write's bound (each op through SafeFs / fs.promises) and the retry after a miss
 const MIRROR_BOUND_MS = 10000;
@@ -75,6 +75,11 @@ const { applyClear } = require('./record-clear');
 const { toAgentText } = require('./peer-text.js');
 const { artifactsIntroLine } = require('./harnesses/artifacts-of.js'); // PURE: the one Artifacts sentence (lane artifacts-prompt-hint)
 const agentLine = (s, max = 0) => toAgentText(s == null ? '' : s, { kind: 'line', ...(max > 0 ? { max } : {}) });
+// THE GROUP-WIDE WORDS (lane injection-relevance): a line that asks, is blocked or waits on somebody is every member's news —
+// an update ranks it right after the lines addressed to the member (the injection audit's ask-word heuristic, en + zh;
+// matched on lowercased text)
+const GROUP_WIDE_RE = /\b(?:ask(?:s|ed|ing)?|block(?:s|ed|er|ing)?|needs[- ]input|waiting (?:on|for)|for[- ]you|urgent)\b|待你|阻塞|卡住|需要你|请你|等你/;
+const ACTIVITY_ROOM = 2200;   // an update's picked activity lines: at most 8 in this many bytes (the digest rides beside them)
 const agentBlock = (s) => toAgentText(s == null ? '' : s, { kind: 'block' });
 
 // lane cli-registry: the SessionStart tools section renders from THE agent CLI registry (one row per CLI on PATH — its
@@ -106,6 +111,11 @@ const LOG_RESERVE = 1200;
 // a listed folder is walked at most this deep / this many entries (a walk that hits the cap is "over N files")
 const WALK_DEPTH = 4;
 const WALK_CAP = 400;
+// lane task-group-fanout: the turn's off-thread signature read — the hook path waits at most SIG_BOUND_MS (its call aborts
+// at 3 s); one worker call's own deadline is SIG_READ_MS (past it the worker is presumed wedged — SafeFs replaces it)
+const SIG_BOUND_MS = 1000;
+const SIG_READ_MS = 10000;
+const sigEsc = (p) => p.replace(/%/g, '%25').replace(/\|/g, '%7C');
 // a told file is read up to this many bytes (a bigger one never fits a budget whole — it steps down)
 const READ_CAP = 64 * 1024;
 // the four depths in the agent's words (a stepped row's line names both)
@@ -227,7 +237,7 @@ function sanitizeStrArray(arr, cap = 200) {
 }
 
 class TaskGroupManager {
-  constructor({ dataDir, onChange, readUserState, getSetting, isPathShadowed, mirrorFs, mirrorBoundMs, grants = null, homeDir }) {
+  constructor({ dataDir, onChange, readUserState, getSetting, isPathShadowed, mirrorFs, mirrorBoundMs, sigBoundMs, isLiveKey, grants = null, homeDir }) {
     // lane grants-unify: the group's outside visibility is a ROW of the ONE grants store (door group-visibility) — the store (or
     // a getter); absent ⇒ none (every group opaque, a write refused by name)
     this._grants = typeof grants === 'function' ? grants : () => grants;
@@ -255,11 +265,18 @@ class TaskGroupManager {
     this._facts = require('./storage-facts.js').create({ safeFs: () => this._mirrorFs(), onLanded: () => { for (const c of [this._resCache, this._walkCache, this._sigCache]) if (c) c.clear(); } });
     this._mirror = new Map(); // groupId → { want: {dir, content}|null, inflight, since, startedAt, failedAt, why, retry }
     this._mirrorBoundMs = Number(mirrorBoundMs) > 0 ? Number(mirrorBoundMs) : MIRROR_BOUND_MS;   // (a suite shortens it)
+    this._sigBoundMs = Number(sigBoundMs) > 0 ? Number(sigBoundMs) : SIG_BOUND_MS;   // lane task-group-fanout: the turn read's bound (a suite shortens it)
     this._getSetting = getSetting || null; // tasks.autoStyleOrder for the allocator
     this._home = homeDir || os.homedir(); // a Context row's ~ and its last relative base
     // lane task-group-context: the OLD folder fields (folders[] / contextDir) — held aside per group, written back
     // into the file by _save (an older build still reads them, one release), read ONLY by migrateContextRows
     this._legacy = new Map();
+    // lane task-group-fanout: the archive list the last user-state write held — noteArchived unbinds only what is NEW in it;
+    // `isLiveKey(key)` (server.js: a running conversation) keeps an archived one in its groups until it ends
+    this._isLiveKey = typeof isLiveKey === 'function' ? isLiveKey : () => false;
+    this._archLive = new Set();
+    this._archSeen = null;
+    if (typeof readUserState === 'function') { try { const st = readUserState(); this._archSeen = new Set((st && Array.isArray(st.archivedSessions) ? st.archivedSessions : []).map(String)); } catch { this._archSeen = new Set(); } }
     const existed = this._load();
     for (const t of Object.values(this._state.tasks)) this._holdLegacy(t);
     // One-time migration: Task Groups lost their status (岗位 refactor) — a
@@ -649,11 +666,13 @@ class TaskGroupManager {
 
   // a listed folder's files, path order (≤ WALK_DEPTH deep, ≤ WALK_CAP; `over` = more were there) — cached 4 s per folder;
   // a folder on a blocked mount lists nothing (asked BEFORE the walk)
-  _walk(dir, { fresh = false } = {}) {
+  _walk(dir, { fresh = false, offLoop = false } = {}) {
     if (DOOR.blocked(dir)) return { files: [], over: false };
     if (!this._walkCache) this._walkCache = new Map();
     const hit = this._walkCache.get(dir);
     if (hit && !fresh && Date.now() - hit.at < 4000) return hit.w;
+    // lane task-group-fanout: a hook-path reader with an off-thread reader wired never walks here — the last listing, said
+    if (offLoop && this._sigReader()) return { ...(hit ? hit.w : { files: [], over: false }), reading: true };
     const files = this._listContextFiles(dir, WALK_CAP + 1);
     const w = { files: files.slice(0, WALK_CAP), over: files.length > WALK_CAP };
     if (this._walkCache.size > 256) this._walkCache.clear();
@@ -842,45 +861,171 @@ class TaskGroupManager {
 
   /** Every told file's state (path:size:mtime, % and | escaped, absolute paths): detects USER-written changes under the
    *  rows — files added / edited / removed outside the store, which bump nothing — so the next turn re-tells them. Rows
-   *  told at 只说明 are not walked. TTL-cached 4 s (it runs on EVERY prompt for every belonged group). */
-  contextSignature(tOrId) {
-    const t = this._groupOf(tOrId);
-    if (!t || !this._ctxRows(t).length) return '';
-    if (!this._sigCache) this._sigCache = new Map();
-    const key = 'ctx:' + t.id + ':' + JSON.stringify(this._ctxRows(t).map((r) => [r.path || '@' + r.ref, r.tell || '']));
-    const hit = this._sigCache.get(key);
-    if (hit && Date.now() - hit.at < 4000) return hit.sig;
-    const esc = (p) => p.replace(/%/g, '%25').replace(/\|/g, '%7C');
+   *  told at 只说明 are not walked. TTL-cached 4 s (it runs on EVERY prompt for every belonged group). The hook path reads
+   *  it OFF the main thread first (readSignatures) and asks signatureFact; this string form is the same answer. */
+  contextSignature(tOrId) { return this.signatureFact(tOrId).sig; }
+
+  _sigKey(t) { return 'ctx:' + t.id + ':' + JSON.stringify(this._ctxRows(t).map((r) => [r.path || '@' + r.ref, r.tell || ''])); }
+
+  /** the off-thread reader the signature walks through (SafeFs — the server's pool) or null (a suite, a CLI: the old
+   *  synchronous walk, byte-identical — scripts/test-task-group-fanout.mjs replays it as the control) */
+  _sigReader() { let sf = null; try { sf = this._mirrorFs(); } catch { sf = null; } return sf && typeof sf.call === 'function' ? sf : null; }
+
+  /** the signature as the old synchronous walk computes it (a FRESH walk — it refreshes the render's cache too, so a
+   *  re-delivery this signature causes lists what it saw) */
+  _syncSig(t, key) {
     const parts = [];
-    for (const it of this._toldRows(t)) {
-      if (it.head || it.gone || !it.x) continue;
-      const lvl = TC.chosenTell(it.row, it.x.kind);
-      if (lvl === 'note') continue;
-      if (it.x.kind === 'file') { const st = this._stat(it.x.abs); if (st) parts.push(`${esc(it.x.abs)}:${st.size}:${Math.round(st.mtimeMs || 0)}`); }
-      // a FRESH walk (it refreshes the render's cache too — a re-delivery this signature causes lists what it saw)
-      else if (it.x.kind === 'dir') for (const f of this._walk(it.x.abs, { fresh: true }).files) parts.push(`${esc(it.x.abs + '/' + f.path)}:${f.size}:${Math.round(f.mtime || 0)}`);
+    for (const j of this._sigJobs(t)) {
+      if (j.kind === 'file') { const st = this._stat(j.abs); if (st) parts.push(`${sigEsc(j.abs)}:${st.size}:${Math.round(st.mtimeMs || 0)}`); }
+      else for (const f of this._walk(j.abs, { fresh: true }).files) parts.push(`${sigEsc(j.abs + '/' + f.path)}:${f.size}:${Math.round(f.mtime || 0)}`);
     }
     const sig = parts.join('|');
-    if (this._sigCache.size > 256) this._sigCache.clear();
-    this._sigCache.set(key, { sig, at: Date.now() });
+    this._sigPut(key, { sig, at: Date.now() });
     return sig;
+  }
+  _sigPut(key, e) {
+    if (!this._sigCache) this._sigCache = new Map();
+    if (this._sigCache.size > 256) this._sigCache.clear();
+    this._sigCache.set(key, e);
+  }
+
+  /** what the signature reads: every told row's file / folder in table order ([{ kind, abs }]; a row told 只说明 is not read) */
+  _sigJobs(t) {
+    const jobs = [];
+    for (const it of this._toldRows(t)) {
+      if (it.head || it.gone || !it.x) continue;
+      if (TC.chosenTell(it.row, it.x.kind) === 'note') continue;
+      if (it.x.kind === 'file' || it.x.kind === 'dir') jobs.push({ kind: it.x.kind, abs: it.x.abs });
+    }
+    return jobs;
+  }
+
+  /**
+   * THE SIGNATURE A TURN MAY USE (lane task-group-fanout) → { sig, stale }. A read within the last 4 s (the TTL it always
+   * had) answers; with no off-thread reader the old synchronous walk; else the LAST signature, `stale: true` — the hook
+   * path then DEFERS that group (nothing told on a fact it did not read, no seen mark moved; the next turn reads again).
+   * `after` (a session's sigStale mark — the landing count when it went stale): only a read that LANDED after it answers,
+   * fresh or not (a root slower than the bound every time is still told, one turn late — never dropped).
+   */
+  signatureFact(tOrId, { after = null } = {}) {
+    const t = this._groupOf(tOrId);
+    if (!t || !this._ctxRows(t).length) return { sig: '', stale: false };
+    const key = this._sigKey(t);
+    const hit = this._sigCache && this._sigCache.get(key);
+    const take = (h) => {
+      // the render lists exactly what this signature saw (its walks, adopted for this turn)
+      if (h.walks) { if (!this._walkCache) this._walkCache = new Map(); for (const [dir, w] of h.walks) this._walkCache.set(dir, { w, at: Date.now() }); }
+      return { sig: h.sig, stale: false };
+    };
+    if (after != null) return hit && (hit.gen || 0) > after ? take(hit) : { sig: hit ? hit.sig : '', stale: true };
+    if (hit && Date.now() - hit.at < 4000) return take(hit);
+    if (!this._sigReader()) return { sig: this._syncSig(t, key), stale: false };
+    return { sig: hit ? hit.sig : '', stale: true };
+  }
+  /** the landing count a stale mark records (signatureFact `after`) */
+  sigGen() { return this._sigGen || 0; }
+
+  /** ONE group's signature read OFF the main thread (a SafeFs `contextFiles` per told folder — the same walk as
+   *  _listContextFiles, scripts/test-sync-fs-census ④ — and a `stat` per told file), joined while one is in flight. A
+   *  missing / unreadable path reads as the sync walk reads it (nothing); a worker that does not answer (its deadline, a
+   *  blocked mount at the pool's door) fails the read — never a fact. */
+  _readSig(t, sf) {
+    const key = this._sigKey(t);
+    if (!this._sigReads) this._sigReads = new Map();
+    if (this._sigReads.has(key)) return this._sigReads.get(key);
+    const at = Date.now();
+    const jobs = this._sigJobs(t);
+    const one = (j) => {
+      if (DOOR.blocked(j.abs)) return Promise.resolve(j.kind === 'dir' ? [] : null);   // B-afc4: the walk's own answer for a blocked mount
+      const call = j.kind === 'dir' ? sf.call('contextFiles', { path: j.abs, cap: WALK_CAP + 1 }, { timeoutMs: SIG_READ_MS }) : sf.call('stat', { path: j.abs }, { timeoutMs: SIG_READ_MS });
+      return call.then((r) => r, (e) => { if (e && (e.safeFsTimeout || e.status === 503)) throw e; return j.kind === 'dir' ? [] : null; });
+    };
+    const p = Promise.all(jobs.map(one)).then((facts) => {
+      const parts = [], walks = new Map();
+      jobs.forEach((j, i) => {
+        if (j.kind === 'file') { const st = facts[i]; if (st) parts.push(`${sigEsc(j.abs)}:${st.size}:${Math.round(st.mtimeMs || 0)}`); return; }
+        const files = Array.isArray(facts[i]) ? facts[i] : [];
+        const w = { files: files.slice(0, WALK_CAP), over: files.length > WALK_CAP };
+        walks.set(j.abs, w);
+        for (const f of w.files) parts.push(`${sigEsc(j.abs + '/' + f.path)}:${f.size}:${Math.round(f.mtime || 0)}`);
+      });
+      this._sigGen = (this._sigGen || 0) + 1;
+      this._sigPut(key, { sig: parts.join('|'), at, gen: this._sigGen, walks });
+      if (!this._walkCache) this._walkCache = new Map();
+      if (this._walkCache.size > 256) this._walkCache.clear();
+      for (const [dir, w] of walks) { const h = this._walkCache.get(dir); if (!h || h.at <= at) this._walkCache.set(dir, { w, at }); }
+    });
+    const done = p.then(() => true, () => false).finally(() => { if (this._sigReads.get(key) === done) this._sigReads.delete(key); });
+    this._sigReads.set(key, done);
+    return done;
+  }
+
+  /**
+   * THE TURN'S READ (lane task-group-fanout; the owner's constraint 2026-10-24: what the model is told must not change). The
+   * hook path's Context-table signatures were a synchronous walk of every told folder on the main thread — 92–185 ms per
+   * turn on the owner's NFS rows (not a storage mount, so the .350 SafeFs road never covered them). Now every group whose
+   * signature is older than its TTL (or `stale` — the session's marks: re-read unless one landed after the mark) is read
+   * OFF the main thread, and the call waits at most `boundMs` (inside the hook's 3 s). → a Promise that settles by then, or
+   * null when nothing needs reading (every signature fresh, or no off-thread reader: the route stays synchronous).
+   */
+  readSignatures(groups, { boundMs = this._sigBoundMs, stale = null } = {}) {
+    const sf = this._sigReader();
+    if (!sf) return null;
+    const list = [];
+    for (const g of Array.isArray(groups) ? groups : []) {
+      const t = this._groupOf(g && typeof g === 'object' ? g.id : g);
+      if (!t || !this._ctxRows(t).length) continue;
+      const hit = this._sigCache && this._sigCache.get(this._sigKey(t));
+      const mark = stale && Object.prototype.hasOwnProperty.call(stale, t.id) ? stale[t.id] : null;
+      if (mark == null && hit && Date.now() - hit.at < 4000) continue;
+      list.push(t);
+    }
+    if (!list.length) return null;
+    let timer = null;
+    const bound = new Promise((r) => { timer = setTimeout(r, Math.max(0, boundMs)); });   // a request waits on it: never unref'd
+    return Promise.race([Promise.all(list.map((t) => this._readSig(t, sf))), bound]).then(() => { clearTimeout(timer); });
   }
 
   /** The WHOLE listing behind `vibespace-task show --full` (where a stepped-down row points): the notes folder (dir +
    *  files, the old answer's shape) and every row's files. Paths as the agent reads them (a remote session's synced copy). */
-  contextIndexOf(id, ctxBase = null) {
+  contextIndexOf(id, ctxBase = null, { offLoop = false } = {}) {
     const t = this.get(id);
     if (!t || !this._ctxRows(t).length) return null;
     const notesAbs = this.contextDirOf(t);
     const rows = [];
+    // lane task-group-fanout: `offLoop` (the agent route, after readWalks) — a folder still being read is listed as last
+    // read and SAID (its note), never walked on the main thread
+    const said = (note, w) => (w.reading ? `${note ? note + ' — ' : ''}(still being read: a slow folder — ask again in a moment)` : note);
     for (const it of this._toldRows(t)) {
       if (it.head || it.gone || !it.x || !it.x.abs) continue;
       const shown = this._shown(it.x, ctxBase, notesAbs);
-      if (it.x.kind === 'dir') rows.push({ path: shown, note: it.row.note || '', files: this._walk(it.x.abs).files.map((f) => ({ path: shown + '/' + f.path, size: f.size })) });
+      if (it.x.kind === 'dir') { const w = this._walk(it.x.abs, { offLoop }); rows.push({ path: shown, note: said(it.row.note || '', w), files: w.files.map((f) => ({ path: shown + '/' + f.path, size: f.size })) }); }
       else if (it.x.kind === 'file') { const st = this._stat(it.x.abs); rows.push({ path: shown, note: it.row.note || '', files: [{ path: shown, size: st ? st.size : 0 }] }); }
     }
     const base = notesAbs ? (ctxBase || notesAbs) : null;
-    return { dir: base, files: notesAbs ? this._walk(notesAbs).files.map((f) => ({ path: base + '/' + f.path, size: f.size })) : [], rows };
+    return { dir: base, files: notesAbs ? this._walk(notesAbs, { offLoop }).files.map((f) => ({ path: base + '/' + f.path, size: f.size })) : [], rows };
+  }
+
+  /** `show --full`'s folders (every told folder + the notes folder) read OFF the main thread (lane task-group-fanout) into
+   *  the walk cache → a Promise settled within `boundMs`, or null (all fresh / no off-thread reader). */
+  readWalks(id, { boundMs = this._sigBoundMs } = {}) {
+    const sf = this._sigReader();
+    const t = this._state.tasks[id];
+    if (!sf || !t || !this._ctxRows(t).length) return null;
+    const dirs = new Set(this._toldRows(t).filter((it) => !it.head && !it.gone && it.x && it.x.kind === 'dir' && it.x.abs).map((it) => it.x.abs));
+    const notes = this.contextDirOf(t);
+    if (notes) dirs.add(notes);
+    if (!this._walkCache) this._walkCache = new Map();
+    const due = [...dirs].filter((d) => !DOOR.blocked(d) && !((h) => h && Date.now() - h.at < 4000)(this._walkCache.get(d)));
+    if (!due.length) return null;
+    const reads = due.map((d) => { const at = Date.now(); return sf.call('contextFiles', { path: d, cap: WALK_CAP + 1 }, { timeoutMs: SIG_READ_MS }).then((files) => {
+      const list = Array.isArray(files) ? files : [];
+      if (this._walkCache.size > 256) this._walkCache.clear();
+      this._walkCache.set(d, { w: { files: list.slice(0, WALK_CAP), over: list.length > WALK_CAP }, at });
+    }, () => { }); });
+    let timer = null;
+    const bound = new Promise((r) => { timer = setTimeout(r, Math.max(0, boundMs)); });   // a request waits on it: never unref'd
+    return Promise.race([Promise.all(reads), bound]).then(() => { clearTimeout(timer); });
   }
 
   /** ONE migration (2026-10-task-group-context-rows, src/server/migrations.js): every group that has no table yet gets
@@ -928,21 +1073,25 @@ class TaskGroupManager {
   // MAX_ENTRIES lines, (2) each note capped to PER_NOTE chars (the overflow is
   // recoverable via `show --full`, flagged with †), then (3) the byte budget as
   // a floor-guarded stop — and the route applies a final hard byte-cap on top.
-  _pickLogLines(t, room, now = null) {
+  _pickLogLines(t, room, now = null, min = 3, memo = null) {   // F1 (lane injection-relevance): `min` — a re-pick under a cap keeps fewer; `memo` — its re-picks reuse the lines
     const MAX_ENTRIES = 12;   // how many history lines at most
     const PER_NOTE = 200;     // per-entry char cap so long notes don't hog the budget
     const total = (t.progress || []).length;
     const picked = [];
     for (let i = total - 1; i >= 0 && picked.length < MAX_ENTRIES; i--) {
       const p = t.progress[i];
-      const raw = String(p.note || '');
-      const clipped = raw.length > PER_NOTE;
-      // clean char-slice (no word-boundary regex — that gutted CJK notes, which
-      // have no spaces: /\s+\S*$/ stripped back to the first space); the belt cuts BEFORE it judges (verify r4 F1)
-      const note = agentLine(raw, clipped ? PER_NOTE : 0);
-      const line = `- ${this._tsShort(p.at, now)} ${note}${(p.detail || clipped) ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
+      let line = memo ? memo.get(p) : undefined;
+      if (line === undefined) {
+        const raw = String(p.note || '');
+        const clipped = raw.length > PER_NOTE;
+        // clean char-slice (no word-boundary regex — that gutted CJK notes, which
+        // have no spaces: /\s+\S*$/ stripped back to the first space); the belt cuts BEFORE it judges (verify r4 F1)
+        const note = agentLine(raw, clipped ? PER_NOTE : 0);
+        line = `- ${this._tsShort(p.at, now)} ${note}${(p.detail || clipped) ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
+        if (memo) memo.set(p, line);
+      }
       const len = Buffer.byteLength(line, 'utf-8') + 1;
-      if (picked.length >= 3 && len > room) break;
+      if (picked.length >= min && len > room) break;
       picked.unshift(line); room -= len;
     }
     return { picked, total };
@@ -1157,7 +1306,7 @@ class TaskGroupManager {
     return parts;
   }
 
-  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false, sessionKey = null, tools = null, isLiveClaim = null, fileTools = undefined, now: nowAt = null } = {}) {
+  renderContext(id, { multi = false, ctxBase = null, logBudget = 8000, skipTools = false, sessionKey = null, tools = null, isLiveClaim = null, fileTools = undefined, now: nowAt = null, cap = 0 } = {}) {
     const t = this.get(id);
     const now = nowAt || Date.now();   // B-7960: ONE instant for the zone sentence and every dateless time below it
     const parts = this._contextHead(t, { multi, now, skipTools, sessionKey, tools, isLiveClaim, fileTools });
@@ -1168,16 +1317,26 @@ class TaskGroupManager {
     const teach = notesAbs ? this._notesTeaching(ctxBase, notesAbs) : [];
     parts.push(...this._ctxBlock(t, this._budgetFor(parts, teach), { ctxBase, gid: multi ? `--group ${t.id} ` : '' }).lines);
     parts.push(...teach);
-    // Activity log LAST — the one section that can safely lose its tail to the
-    // hook-preview truncation. Newest entries win the byte budget (≥3, ≤12).
+    // Activity log LAST — the one section that can safely lose lines to a cut.
+    // Newest entries win the byte budget (≥3, ≤12), printed oldest → newest.
     const totalLog = (t.progress || []).length;
+    const close = `</vibespace-task-context>`;
     if (totalLog) {
       const used = Buffer.byteLength(parts.join('\n'), 'utf-8');
-      const { picked } = this._pickLogLines(t, Math.max(1200, logBudget - used), now);
-      parts.push('', '## Activity log' + (picked.length < totalLog ? `  _(last ${picked.length} of ${totalLog} — \`vibespace-task show\` prints more)_` : '') + (picked.some(l => l.includes(' †')) ? `  _(† = has detail — \`vibespace-task show --full\`)_` : ''), '');
-      parts.push(...picked);
+      const memo = new Map();   // a cap's re-picks reuse the rendered lines
+      const logOf = (room, min) => {
+        const { picked } = this._pickLogLines(t, room, now, min, memo);
+        return ['', '## Activity log' + (picked.length < totalLog ? `  _(last ${picked.length} of ${totalLog} — \`vibespace-task show\` prints more)_` : '') + (picked.some(l => l.includes(' †')) ? `  _(† = has detail — \`vibespace-task show --full\`)_` : ''), '', ...picked];
+      };
+      let room = Math.max(1200, logBudget - used);
+      let log = logOf(room, 3);
+      // F1 (lane injection-relevance): over the caller's `cap` the log is RE-PICKED under a smaller room — its OLDEST
+      // lines go and the header still counts them; a tail cut of the joined text would take the NEWEST (printed last)
+      const over = () => Buffer.byteLength([...parts, ...log, close].join('\n'), 'utf-8') - cap;
+      while (cap > 0 && room > 0 && over() > 0) { room = Math.max(0, room - Math.max(128, over())); log = logOf(room, 0); }
+      parts.push(...log);
     }
-    parts.push(`</vibespace-task-context>`);
+    parts.push(close);
     return parts.join('\n');
   }
 
@@ -1244,7 +1403,7 @@ class TaskGroupManager {
   // review-caught); removed rows are named. Line order mirrors
   // renderContext (identity → objective → folder → activity LAST)
   // so tail-first truncation drops the safest section first.
-  diffChanges(id, snap, { gid = '', ctxBase = null, oldSig = '', newSig = '', sessionKey = null } = {}) {
+  diffChanges(id, snap, { gid = '', ctxBase = null, oldSig = '', newSig = '', sessionKey = null, sessionName = '' } = {}) {
     const t = this.get(id);
     if (!snap || typeof snap !== 'object' || typeof snap.objHash !== 'string') return null;
     // lane task-group-context: a snapshot from before the Context table cannot be diffed against it; a restored LITE one
@@ -1281,6 +1440,13 @@ class TaskGroupManager {
     const oldById = new Map();
     for (const b of (snap.backlog || [])) if (b.id) oldById.set(b.id, b);
     const blCh = [];
+    // F2 (lane injection-relevance): what OTHER sessions parked or resolved since the snapshot — never named mid-session
+    // before (the injection audit: 179 of 179 HIGH parks) — is told as ONE count line below, HIGH ids named. A restored
+    // LITE snapshot (seen-marks: `of`) keeps only this session's items, so the others' are judged by time there: parked /
+    // resolved after its last activity line (a re-tell after a restart is the safe direction)
+    const lite = snap.of !== undefined;
+    const since = Number(snap.lastProgressAt) || 0;
+    const byOthers = { parked: [], resolved: 0 };
     for (const b of t.backlog || []) {
       const o = b.id ? oldById.get(b.id) : null;
       const st = b.status || 'open';
@@ -1288,10 +1454,14 @@ class TaskGroupManager {
         // brand-new items: only OPEN ones are worth announcing (a new item
         // already resolved is history, not a pending parked thing)
         if (st === 'open' && relevant(b)) blCh.push(`- Backlog PARKED [${b.id}]: ${agentLine(b.text)}${b.detail ? ' †' : ''}${b.addedBy ? `  _(by ${b.addedBy})_` : ''}`);
+        else if (sessionKey && !relevant(b)) {
+          if (st === 'open' && (!lite || (b.addedAt || 0) > since)) byOthers.parked.push(b);
+          else if (lite && st !== 'open' && (b.resolvedAt || 0) > since) byOthers.resolved++;
+        }
         continue;
       }
       oldById.delete(b.id); // remaining at the end = removed items
-      if (!relevant(b) && !relevant(o)) continue; // not this session's item — the count line covers it
+      if (!relevant(b) && !relevant(o)) { if ((o.status || 'open') === 'open' && st !== 'open') byOthers.resolved++; continue; } // not this session's item — F2's count line covers it
       if ((o.status || 'open') !== st) {
         const verb = st === 'done' ? 'RESOLVED' : st === 'dropped' ? 'DROPPED' : 'REOPENED';
         blCh.push(`- Backlog ${verb} [${b.id}]: ${agentLine(b.text)}${b.resolvedBy && st !== 'open' ? `  _(by ${b.resolvedBy})_` : ''}`);
@@ -1318,6 +1488,14 @@ class TaskGroupManager {
     }
     ch.push(...blCh);
     if (nBlChanges) bits.push(`${nBlChanges} backlog change${nBlChanges > 1 ? 's' : ''}`);
+    if (byOthers.parked.length || byOthers.resolved) {
+      const hi = byOthers.parked.filter((b) => normalizePriority(b.priority) === 'high').map((b) => b.id);
+      const said = [];
+      if (byOthers.parked.length) said.push(`${byOthers.parked.length} parked${hi.length ? ` (${hi.length} HIGH [${hi.slice(0, 4).join(', ')}${hi.length > 4 ? `, +${hi.length - 4}` : ''}])` : ''}`);
+      if (byOthers.resolved) said.push(`${byOthers.resolved} resolved`);
+      ch.push(`- Backlog: ${said.join(', ')} by others since your last update — \`vibespace-task ${gid}backlog\``);
+      bits.push('backlog by others');
+    }
     // ── the Context table (lane task-group-context): rows removed are named; rows added or changed are re-told at their
     // depths within a slice of the update's room (the same plan the full context prints)
     if (rowsChanged) {
@@ -1389,43 +1567,111 @@ class TaskGroupManager {
       }
     }
     const fresh = (t.progress || []).filter((p) => p.at > (snap.lastProgressAt || 0));
+    let act = null;
     if (fresh.length) {
-      const picked = [];
-      let room = 2200;
-      for (let i = fresh.length - 1; i >= 0 && picked.length < 8; i--) {
-        const p = fresh[i];
-        const raw = String(p.note || '');            // per-entry cap so one long
-        const clipped = raw.length > 200;            // note can't starve the diff
-        const note = agentLine(raw, clipped ? 200 : 0); // clean slice (CJK has no spaces); the belt cuts BEFORE it judges (verify r4 F1)
-        const line = `  - ${this._tsShort(p.at)} ${note}${(p.detail || clipped) ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
-        const len = Buffer.byteLength(line, 'utf-8') + 1;
-        if (picked.length >= 1 && len > room) break;
-        picked.unshift(line); room -= len;
-      }
-      ch.push(`- New activity${fresh.length > picked.length ? ` _(last ${picked.length} of ${fresh.length} new)_` : ` (${fresh.length})`}:${picked.some((l) => l.includes(' †')) ? '  _(† = has detail)_' : ''}`);
-      ch.push(...picked);
-      bits.push(`${fresh.length} new activity`);
+      const pick = this.renderNewActivity(t, fresh, { sessionKey, sessionName, snap });
+      const lines = pick(ACTIVITY_ROOM);
+      if (lines.length) { act = { from: ch.length, room: ACTIVITY_ROOM, pick }; ch.push(...lines); bits.push(`${fresh.length} new activity`); }
     }
-    return { lines: ch, bits };
+    const out = { lines: ch, bits };
+    // the activity section's RE-PICK (F1) rides the result unenumerated: a block over its cap shrinks it by a smaller room
+    // (renderDiffBlock / renderContextDiffMulti) — the result's shape stays { lines, bits }
+    if (act) Object.defineProperty(out, 'act', { value: act });
+    return out;
+  }
+
+  // THE NEW ACTIVITY OF AN UPDATE (lane injection-relevance, 2026-10-24). The owner asked whether a member's model can
+  // fail to learn that something it needs EXISTS; the injection audit replayed the store through these renderers: half of
+  // the other sessions' lines logged inside a member's span never reached it (97 % to the count of 8, which sat at the
+  // cadence's p90), a sixth of the lines ADDRESSED to it among them, a third of the 8 slots repeating its OWN lines.
+  // Inside the same 8 lines / 2200 B now: the member's own lines are COUNTED, never repeated; the others' are RANKED —
+  // 0 addressed to it (its key or uuid head, its name — whole, or an identifier-like word of it: a peer writes
+  // `injection-relevance` for «lane injection-relevance» — a backlog id it parked or claims), 1 group-wide (an ask /
+  // blocked / needs-input word, an open HIGH id), 2 the rest, 3 a cleared entry (its words are gone) — newest first inside
+  // a rank; a line that does not fit is SKIPPED (never `break`); the picked ones print in TIME order. Every session left
+  // out is NAMED above them (≤ 6 digest lines + ONE overflow line; a cleared entry is never quoted — a clear is not news):
+  // existence before text, so any cut takes text first. Returns pick(room) → the section's lines ([] when only the
+  // member's own lines are new); a block over its cap re-picks under a smaller room (F1: the lowest-ranked, oldest go).
+  renderNewActivity(t, fresh, { sessionKey = null, sessionName = '', snap = null } = {}) {
+    const key = sessionKey ? String(sessionKey) : '';
+    const needles = [];
+    if (key) {
+      needles.push(key.toLowerCase());
+      const head = /^[0-9a-z]{8}/i.exec(key.slice(key.indexOf(':') + 1));
+      if (head) needles.push(head[0].toLowerCase());
+    }
+    const name = String(sessionName || '').trim().toLowerCase();
+    if (name.length >= 3) needles.push(name, ...name.split(/\s+/).filter((w) => w !== name && w.length >= 5 && /[-_0-9]/.test(w) && /^[a-z0-9._-]+$/.test(w)));
+    const its = (b) => !!key && (b.addedBy === key || (b.claimedBy || []).includes(key));
+    const mine = new Set([...(t.backlog || []), ...((snap && snap.backlog) || [])].filter((b) => b && b.id && its(b)).map((b) => String(b.id).toLowerCase()));
+    const highs = new Set((t.backlog || []).filter((b) => b.id && (b.status || 'open') === 'open' && normalizePriority(b.priority) === 'high').map((b) => String(b.id).toLowerCase()));
+    let own = 0;
+    const rows = [];
+    fresh.forEach((p, i) => {
+      if (key && p.session === key) { own++; return; }
+      const raw = String(p.note || '');            // per-entry cap so one long
+      const clipped = raw.length > 200;            // note can't starve the diff
+      const note = agentLine(raw, clipped ? 200 : 0); // clean slice (CJK has no spaces); the belt cuts BEFORE it judges (verify r4 F1)
+      const tail = ` ${note}${(p.detail || clipped) ? ' †' : ''}${p.session ? ` _(${p.session})_` : ''}`;
+      let rank = 3;
+      if (!p.clearedAt) {
+        const text = (raw + '\n' + String(p.detail || '')).slice(0, 4000).toLowerCase();
+        const ids = text.match(/\bb-[0-9a-f]{4,8}\b/g) || [];
+        rank = needles.some((n) => text.includes(n)) || ids.some((x) => mine.has(x)) ? 0
+          : GROUP_WIDE_RE.test(text) || ids.some((x) => highs.has(x)) ? 1 : 2;
+      }
+      rows.push({ i, p, rank, tail, min: Buffer.byteLength(tail, 'utf-8') + 5, line: null, len: 0 });   // min: the line's bytes before its time
+    });
+    if (!rows.length) return () => [];
+    const order = rows.slice().sort((a, b) => a.rank - b.rank || b.i - a.i);
+    // the time is formatted only for a row that may still fit, once (the owner's-clock format costs ~0.15 ms a line:
+    // a 500-line burst spent ~55 ms on lines it never printed)
+    const lineOf = (r) => { if (r.line === null) { r.line = `  - ${this._tsShort(r.p.at)}${r.tail}`; r.len = Buffer.byteLength(r.line, 'utf-8') + 1; } return r.len; };
+    return (room) => {
+      const told = new Set();
+      for (const r of order) { if (told.size >= 8) break; if (r.min > room || lineOf(r) > room) continue; told.add(r); room -= r.len; }
+      const bySession = new Map();
+      for (const r of rows) {
+        if (told.has(r)) continue;
+        const k = r.p.session || '';
+        let g = bySession.get(k);
+        if (!g) bySession.set(k, (g = { k, n: 0, addressed: 0, best: 9, last: -1, quote: null }));
+        g.n++; if (r.rank === 0) g.addressed++;
+        g.best = Math.min(g.best, r.rank); g.last = Math.max(g.last, r.i);
+        if (!r.p.clearedAt) g.quote = r;   // rows run oldest → newest: the last one kept is its newest
+      }
+      const sessions = [...bySession.values()].sort((a, b) => a.best - b.best || b.last - a.last);
+      const digest = sessions.slice(0, 6).map((g) => `  - ${g.k || 'unattributed'} logged ${g.n} more${g.addressed ? ` (${g.addressed} addressed to you)` : ''}${g.quote ? ` — newest: "${agentLine(g.quote.p.note, 48)}"` : ''}`);
+      const rest = sessions.slice(6);
+      if (rest.length) {
+        const n = rest.reduce((a, g) => a + g.n, 0), addressed = rest.reduce((a, g) => a + g.addressed, 0);
+        digest.push(`  - … ${n} more from ${rest.length} other session${rest.length === 1 ? '' : 's'}${addressed ? ` (${addressed} addressed to you)` : ''}`);
+      }
+      const picked = rows.filter((r) => told.has(r)).map((r) => r.line);
+      const first = [...told].filter((r) => r.rank === 0).length;
+      const more = rows.length - told.size;
+      const head = `- New activity (${fresh.length}${own ? `, ${own} of them yours — not repeated` : ''})${more ? ` — ${told.size} told${first ? ` (${first} addressed to you first)` : ''}, ${more} more below by session` : ''}:${picked.some((l) => l.includes(' †')) ? '  _(† = has detail)_' : ''}`;
+      return [head, ...digest, ...picked];
+    };
   }
 
   // ONE group's delta as a standalone <vibespace-task-update> block.
   // Back-compat single-group API: computes + renders. Returns null (fall back
   // to full) / '' (no-op change, skip) / the block.
-  renderContextDiff(id, snap, { multi = false, ctxBase = null, oldSig = '', newSig = '', sessionKey = null } = {}) {
+  renderContextDiff(id, snap, { multi = false, ctxBase = null, oldSig = '', newSig = '', sessionKey = null, sessionName = '' } = {}) {
     const gid = multi ? `--group ${id} ` : '';
-    const r = this.diffChanges(id, snap, { gid, ctxBase, oldSig, newSig, sessionKey });
+    const r = this.diffChanges(id, snap, { gid, ctxBase, oldSig, newSig, sessionKey, sessionName });
     if (r === null) return null;
     if (!r.lines.length) return '';
     return this.renderDiffBlock(id, r, { multi, ctxBase });
   }
 
   // Render a single group's precomputed diffChanges result as a block.
-  renderDiffBlock(id, changes, { multi = false, ctxBase = null } = {}) {
+  renderDiffBlock(id, changes, { multi = false, ctxBase = null, cap = 5000 } = {}) {
     const t = this.get(id);
     const notesAbs = this.contextDirOf(t);
     const gid = multi ? `--group ${t.id} ` : '';
-    const ch = changes.lines.slice(); // cap loop mutates
+    let ch = changes.lines.slice(); // cap loop mutates
     const head = [
       '<vibespace-task-update>',
       // TASK.md pointer is LOCAL-only: the remote ctx rsync excludes
@@ -1433,11 +1679,19 @@ class TaskGroupManager {
       `Task Group "${agentLine(t.title)}" (${t.id}) changed since your last update — DELTAS ONLY below; everything else you already know still stands. Full current state: \`vibespace-task ${gid}show --full\`${notesAbs && !ctxBase ? ` (or \`${agentLine(notesAbs)}/.vibespace/TASK.md\`)` : ''}.`,
       '',
     ];
-    // Hard cap ~5KB — drop change lines from the END (activity sits last = the
-    // safest to lose; the full-state pointer in the header always survives).
+    // Hard cap ~5KB (`cap`: less when the route fits the block into what is left). The activity sits last = the safest
+    // to lose, and it shrinks FIRST by a RE-PICK under a smaller room (F1, lane injection-relevance: its lowest-ranked,
+    // OLDEST lines go — a pop from the end took the NEWEST — and the digest naming every session left out stays); only
+    // then are change lines dropped from the END (the full-state pointer in the header always survives).
+    const act = changes.act;
+    const over = () => Buffer.byteLength([...head, ...ch, '</vibespace-task-update>'].join('\n'), 'utf-8') - cap;
+    for (let room = act ? act.room : 0; room > 0 && over() > 0;) {
+      room = Math.max(0, room - Math.max(128, over()));
+      ch = [...changes.lines.slice(0, act.from), ...act.pick(room)];
+    }
     let dropped = 0;
     let lines = [...head, ...ch, '</vibespace-task-update>'];
-    while (Buffer.byteLength(lines.join('\n'), 'utf-8') > 5000 && ch.length > 1) {
+    while (Buffer.byteLength(lines.join('\n'), 'utf-8') > cap && ch.length > 1) {
       ch.pop(); dropped++;
       lines = [...head, ...ch, `- … (+${dropped} more lines — \`vibespace-task ${gid}show --full\`)`, '</vibespace-task-update>'];
     }
@@ -1453,7 +1707,7 @@ class TaskGroupManager {
   // the existence of a group's update; per-group sections follow SMALLEST
   // FIRST (a big group's bulk truncates last, and the tail-drop hits it first).
   // items: [{ id, changes }] from diffChanges, each with non-empty lines.
-  renderContextDiffMulti(items) {
+  renderContextDiffMulti(items, { cap = 6500 } = {}) {
     const metas = items
       .map((it) => ({ ...it, t: this.get(it.id), size: Buffer.byteLength(it.changes.lines.join('\n'), 'utf-8') }))
       .sort((a, b) => a.size - b.size);
@@ -1462,14 +1716,26 @@ class TaskGroupManager {
       '<vibespace-task-update>',
       `${metas.length} of your Task Groups changed since your last update — DELTAS ONLY below; everything else you already know still stands. Changed: ${enumStr}. Full state per group: \`vibespace-task --group <id> show --full\`.`,
     ];
-    const body = [];
-    for (const m of metas) body.push('', `## "${agentLine(m.t.title)}" (${m.t.id})`, ...m.changes.lines);
+    let body = [];
+    const build = () => { body = []; for (const m of metas) body.push('', `## "${agentLine(m.t.title)}" (${m.t.id})`, ...(m.lines || m.changes.lines)); };
+    build();
+    // Cap ~6.5KB total (`cap`: less when the route fits the block into what is left). F1 (lane injection-relevance): the
+    // biggest group's activity (it sits last) is RE-PICKED under a smaller room first, then the next group's — the
+    // lowest-ranked, OLDEST lines go, never the newest, each digest stays. Only then are body lines dropped from the END;
+    // a section emptied down to its heading loses the heading too. The enumeration header always survives, so no
+    // group's update can vanish.
+    const size = () => Buffer.byteLength([...head, ...body, '</vibespace-task-update>'].join('\n'), 'utf-8');
+    for (let i = metas.length - 1; i >= 0 && size() > cap; i--) {
+      const m = metas[i], act = m.changes.act;
+      for (let room = act ? act.room : 0; room > 0 && size() > cap;) {
+        room = Math.max(0, room - Math.max(128, size() - cap));
+        m.lines = [...m.changes.lines.slice(0, act.from), ...act.pick(room)];
+        build();
+      }
+    }
     let lines = [...head, ...body, '</vibespace-task-update>'];
-    // Cap ~6.5KB total — drop body lines from the END (the biggest group sits
-    // last); a section emptied down to its heading loses the heading too. The
-    // enumeration header always survives, so no group's update can vanish.
     let over = false;
-    while (Buffer.byteLength(lines.join('\n'), 'utf-8') > 6500 && body.length > 3) {
+    while (Buffer.byteLength(lines.join('\n'), 'utf-8') > cap && body.length > 3) {
       body.pop(); over = true;
       while (body.length && (body[body.length - 1].startsWith('## ') || body[body.length - 1] === '')) body.pop();
       lines = [...head, ...body, `- … (truncated — per-group \`vibespace-task --group <id> show --full\`)`, '</vibespace-task-update>'];
@@ -1524,11 +1790,11 @@ class TaskGroupManager {
   // to the baseline tools intro). 1 → the normal single-group context. N → each
   // group's context, prefaced so the agent knows it spans multiple 岗位 and must
   // use `--group <id>` to act on a specific one.
-  renderMultiContext(groupIds, { ctxBaseFor = null, sessionKey = null, tools = null, isLiveClaim = null, fileTools = undefined } = {}) {
+  renderMultiContext(groupIds, { ctxBaseFor = null, sessionKey = null, tools = null, isLiveClaim = null, fileTools = undefined, cap = 0 } = {}) {
     const ids = (groupIds || []).filter((id) => this._state.tasks[id] && !this._state.tasks[id].archived);
     if (!ids.length) return '';
     const baseOf = (id) => (ctxBaseFor ? ctxBaseFor(id) : null);
-    if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]), sessionKey, tools, isLiveClaim, fileTools });
+    if (ids.length === 1) return this.renderContext(ids[0], { ctxBase: baseOf(ids[0]), sessionKey, tools, isLiveClaim, fileTools, cap });
     // LAYERED, not per-group blocks (user directive): tools → ALL identities →
     // ALL shared folders → ALL activity logs. Truncation then degrades by
     // LAYER — the first group's bulk can no longer erase the very EXISTENCE of
@@ -1581,12 +1847,13 @@ class TaskGroupManager {
     }
     head.push(...teach);
     const withLog = ids.filter((id) => (ts[id].progress || []).length);
-    const build = (roomPer) => {
+    const memo = new Map();   // F1: a cap's re-picks reuse the rendered lines
+    const build = (roomPer, min = 3) => {
       const parts = [...head];
       if (withLog.length) {
         parts.push('', `## Recent activity  _(newest last; \`vibespace-task --group <id> show --full\` prints more; † = has detail)_`);
         for (const id of withLog) {
-          const { picked, total } = this._pickLogLines(ts[id], roomPer, now);
+          const { picked, total } = this._pickLogLines(ts[id], roomPer, now, min, memo);
           parts.push('', `### "${agentLine(ts[id].title)}"` + (picked.length < total ? `  _(last ${picked.length} of ${total})_` : ''), ...picked);
         }
       }
@@ -1600,10 +1867,19 @@ class TaskGroupManager {
       roomPer = Math.max(700, Math.floor(roomPer / 2));
       out = build(roomPer);
     }
+    // F1 (lane injection-relevance): over the caller's `cap` every group's log is RE-PICKED under a smaller room — the
+    // OLDEST lines go and each heading still counts them; a tail cut of the text would take the last group's NEWEST
+    const over = () => Buffer.byteLength(out, 'utf-8') - cap;
+    while (cap > 0 && withLog.length && roomPer > 0 && over() > 0) {
+      roomPer = Math.max(0, roomPer - Math.max(128, Math.ceil(over() / withLog.length)));
+      out = build(roomPer, 0);
+    }
     return out;
   }
 
-  _notify() { try { this._onChange(this.list()); } catch { } }
+  // lane task-group-fanout: a write names the groups it touched (`ids`; null = every group) — the hub's ONE broadcaster
+  // (src/server/task-fanout.js) sends those groups' DELTA, never the store (1.57 MB to every client per Activity line before)
+  _notify(ids = null) { try { this._onChange({ ids: ids == null ? null : [].concat(ids) }); } catch { } }
 
   _migrateGroups(userState) {
     const groups = userState?.sessionGroups && typeof userState.sessionGroups === 'object' ? userState.sessionGroups : {};
@@ -1731,7 +2007,7 @@ class TaskGroupManager {
     };
     this._state.tasks[id] = t;
     this._save();
-    this._notify();
+    this._notify(id);
     return { ...t };
   }
 
@@ -1886,7 +2162,7 @@ class TaskGroupManager {
     }
     if (ctxChanged) t.ctxUpdatedAt = t.updatedAt;
     this._save();
-    this._notify();
+    this._notify(id);
     return { ...t };
   }
 
@@ -1898,7 +2174,7 @@ class TaskGroupManager {
     try { const g = this._grants(); if (g) g.remove('group-visibility', String(id), 'user'); } catch { /* the row of a gone group admits nobody */ }   // lane grants-unify
     this._legacy.delete(id);
     this._save();
-    this._notify();
+    this._notify(id);
   }
 
   // Granular tag add/remove — atomic server-side so two clients binding
@@ -1911,22 +2187,52 @@ class TaskGroupManager {
       t.sessions.push(key);
       t.updatedAt = Date.now();
       this._save();
-      this._notify();
+      this._notify(id);
     }
     return { ...t };
   }
 
   unbind(id, sessionKey) {
     const t = this.get(id);
-    const key = String(sessionKey || '');
-    const idx = t.sessions.indexOf(key);
-    if (idx >= 0) {
-      t.sessions.splice(idx, 1);
-      t.updatedAt = Date.now();
-      this._save();
-      this._notify();
-    }
+    this.unbindKeys([String(sessionKey || '')], { ids: [id], exact: true });
     return { ...t };
+  }
+
+  /** THE ONE UNBIND WRITER (lane task-group-fanout): `keys` leave the members (sessions[]) of `ids` (every group when
+   *  null) — ONE save, ONE notify naming the groups that changed (the rule: task-membership membersWithout). `dryRun`
+   *  writes nothing (the migration archives what would go first). → { changed: [group id], gone: { groupId: [key] } } */
+  unbindKeys(keys, { ids = null, exact = false, dryRun = false } = {}) {
+    const changed = [], gone = {};
+    for (const t of ids ? ids.map((i) => this._state.tasks[i]).filter(Boolean) : Object.values(this._state.tasks)) {
+      const r = membersWithout(t.sessions, keys, { exact });
+      if (!r.gone.length) continue;
+      changed.push(t.id); gone[t.id] = r.gone;
+      if (dryRun) continue;
+      t.sessions = r.keep;
+      t.updatedAt = Date.now();
+    }
+    if (changed.length && !dryRun) { this._save(); this._notify(changed); }
+    return { changed, gone };
+  }
+
+  /** An ARCHIVED conversation leaves every group (lane task-group-fanout; measured: 752 member keys in the lanes group,
+   *  never pruned). The user-state write hook hands the archive list in; only the keys NEW since the last list are
+   *  unbound (a conversation bound again after its archive stays). One still RUNNING keeps its groups until it ends —
+   *  its next turn still needs the group's context (the owner's constraint) — and leaves at the first write after.
+   *  → the group ids that changed */
+  noteArchived(list) {
+    const now = new Set((Array.isArray(list) ? list : []).map(String));
+    const was = this._archSeen;
+    this._archSeen = now;
+    if (!was) return [];
+    for (const k of now) if (!was.has(k)) this._archLive.add(k);
+    const due = [];
+    for (const k of [...this._archLive]) {
+      if (!now.has(k)) { this._archLive.delete(k); continue; }   // unarchived meanwhile
+      let live = false; try { live = !!this._isLiveKey(k); } catch { live = false; }
+      if (!live) { this._archLive.delete(k); due.push(k); }
+    }
+    return due.length ? this.unbindKeys(due).changed : [];
   }
 
   // User-visible progress note (P1: from the detail UI; P3: vibespace-task CLI).
@@ -1946,7 +2252,7 @@ class TaskGroupManager {
     t.updatedAt = Date.now();
     t.contentUpdatedAt = t.updatedAt; // progress is injected content
     this._save();
-    this._notify();
+    this._notify(id);
     return { ...t };
   }
 
@@ -2105,7 +2411,7 @@ class TaskGroupManager {
     if (out.cleared.length) {
       t.updatedAt = Date.now();
       this._save();
-      this._notify();
+      this._notify(id);
     }
     return out;
   }
@@ -2289,7 +2595,7 @@ class TaskGroupManager {
       updatedAt: now,
     };
     this._save();
-    this._notify();
+    this._notify(id);
     return { ...this._state.tasks[id] };
   }
 

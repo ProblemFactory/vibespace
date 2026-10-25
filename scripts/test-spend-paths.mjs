@@ -1348,6 +1348,13 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
       /peer_message_result[\s\S]{0,900}deliverRef\?\.settleRpcDelivery\?\.\(/.test(ce));
     ok('§5b …and the ladder gates on the CAPS ROW, never on a backend id',
       /notificationDelivery\(capsOf\(rpc\.s\.backend\)\) === 'steer'/.test(read('src/server/conversation-deliver.js')));
+    // lane agy-peer-wake: antigravity rides the SAME rung, answered on the acp journal's `peer_result` — its consumer
+    // settles EVERY answer the same way (an unwired twin would leave a predicted-free frame of that road free for ever)
+    const ae = read('src/server/stdout/acp-events.js');
+    ok('§5b WIRING (lane agy-peer-wake): the acp stdout consumer settles on EVERY peer_result, by PROPERTY ACCESS on the lazy ref',
+      /msg\.kind === 'peer_result'\) \{[\s\S]{0,4000}?deliverRef\?\.settleRpcDelivery\?\.\(cid, \{ ok: msg\.ok !== false, mode: msg\.mode \|\| null \}\)/.test(ae));
+    ok("§5b …and a harness whose 'steer' is a stop + a new turn (antigravity: steerJoinsTurn:false) is never on the predicted-free lane",
+      notificationDelivery(capsOf('antigravity')) === 'queue' && capsOf('antigravity').peerDelivery === 'rpc-queue');
   }
 }
 

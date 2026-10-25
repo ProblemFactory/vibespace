@@ -396,7 +396,8 @@ console.log('§3 session-status history');
   ok(r.status === 200 && r.body.cleared === 2 && statusBroadcasts === n0 + 1, 'the owner clears both entries by (key, at): one save, ONE session-status-updated broadcast', r.body);
   // verify r5 (reproduced in chrome): the broadcast NAMES what the clear touched — ids only — because its statuses map can be
   // exactly what every client already holds (a cleared entry that is not the current status), which a client's change guard drops
-  ok(lastStatusExtra && J(lastStatusExtra) === J({ cleared: [{ key: ME, ats: targets.map((h) => h.at) }] }) && !has(lastStatusExtra), 'the broadcast carries `cleared: [{key, ats}]` (ids only — no word): the entries it touched, whatever the current record did', lastStatusExtra);
+  // lane task-group-fanout: + `sync` (the frame's place in the order: {removed, epoch, base, seq}) — numbers and keys, no word
+  ok(lastStatusExtra && J(lastStatusExtra.cleared) === J([{ key: ME, ats: targets.map((h) => h.at) }]) && J(Object.keys(lastStatusExtra).sort()) === J(['cleared', 'sync']) && lastStatusExtra.sync.seq === lastStatusExtra.sync.base + 1 && !has(lastStatusExtra), 'the broadcast carries `cleared: [{key, ats}]` (ids only — no word): the entries it touched, whatever the current record did', lastStatusExtra);
   const h2 = sessionStatus.history(ME);
   ok(!has(h2) && h2.filter((h) => h.clearedAt).length === 2 && h2.length === hist.length && J(h2.map((h) => [h.state, h.at, h.setBy])) === J(hist.map((h) => [h.state, h.at, h.setBy])), 'the history keeps every entry, its state, time and setter; the words are the sentence');
   ok(!has(sessionStatus.get(ME)) && sessionStatus.get(ME).reason === CT && sessionStatus.get(ME).clearedAt, 'the CURRENT record (the card chips, "Now", vibespace-msg list) no longer says it');
@@ -439,8 +440,8 @@ console.log('§3b a clear is on disk before the broadcast (For-you + status, ver
   // the status door's broadcast names what it cleared since verify r5 (`_notify({ cleared })`) — the write rule is the same
   const NEW_WRITE = 'if (out.cleared.length) { this._save(); this.flush(); this._notify(); }';
   const OLD_WRITE = 'if (out.cleared.length) { this._save(); this._notify(); }';
-  const NEW_WRITE_SS = 'if (out.cleared.length) { this._save(); this.flush(); this._notify({ cleared: [{ key, ats: out.cleared.slice() }] }); }';
-  const OLD_WRITE_SS = 'if (out.cleared.length) { this._save(); this._notify({ cleared: [{ key, ats: out.cleared.slice() }] }); }';
+  const NEW_WRITE_SS = 'if (out.cleared.length) { this._save(); this.flush(); this._notify([key], { cleared: [{ key, ats: out.cleared.slice() }] }); }';   // lane task-group-fanout: + the key it touched
+  const OLD_WRITE_SS = 'if (out.cleared.length) { this._save(); this._notify([key], { cleared: [{ key, ats: out.cleared.slice() }] }); }';
   const drive = (UTM, SSM, tag) => {
     const dir = path.join(DATA, 'durable-' + tag); fs.mkdirSync(dir, { recursive: true });
     const r = {};

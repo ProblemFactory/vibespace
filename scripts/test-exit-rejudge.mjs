@@ -59,8 +59,8 @@ function census(T) {
   // C2 — Task Group membership: the tasks map, a group's sessions / folders / archived
   const TASK_WRITE = /this\._state\.tasks\[[^\]]*\]\s*=(?!=)|delete\s+this\._state\.tasks\[|\.sessions\s*=(?!=)|\.sessions\.(?:push|splice|pop|shift)\(|\.folders\s*=(?!=)|\.archived\s*=(?!=)|this\._state\s*=(?!=)/;
   const TASK_EXEMPT = { constructor: 'boot', _load: 'boot', _migrateGroups: 'boot (the constructor\'s one-time migration)' };
-  for (const m of methodsOf(T.tasks)) if (TASK_WRITE.test(m.body) && !TASK_EXEMPT[m.name] && !/this\._notify\(\)/.test(m.body)) v.push(`task-groups.js ${m.name}() moves membership without this._notify()`);
-  if (!/const tasks = new TaskGroupManager\(\{[\s\S]{0,900}?onChange: \(list\) => \{[\s\S]{0,400}?exitProxy\.rejudgeAll\(/.test(T.server)) v.push('server.js: the TaskGroupManager onChange does not call exitProxy.rejudgeAll');
+  for (const m of methodsOf(T.tasks)) if (TASK_WRITE.test(m.body) && !TASK_EXEMPT[m.name] && !/this\._notify\([^)]*\)/.test(m.body)) v.push(`task-groups.js ${m.name}() moves membership without this._notify()`);   // lane task-group-fanout: _notify(ids) names the groups
+  if (!/const tasks = new TaskGroupManager\(\{[\s\S]{0,900}?onChange: \(ch\) => \{[\s\S]{0,400}?exitProxy\.rejudgeAll\(/.test(T.server)) v.push('server.js: the TaskGroupManager onChange does not call exitProxy.rejudgeAll');
   if (!/\nhosts\.onReachChange = \(why\) => exitProxy\.rejudgeAll\(/.test(T.server)) v.push('server.js: hosts.onReachChange is not exitProxy.rejudgeAll');
   // C3 — the conversation's END: every removal from the live map tells the manager first
   for (const [file, src] of Object.entries(T.sessionFiles)) {
@@ -113,7 +113,7 @@ console.log('① the census');
   // the census is not vacuous: it FOUND the writers it judges
   const hostW = methodsOf(T.hosts).filter((m) => /this\._reachChanged\(/.test(m.body)).map((m) => m.name).sort();
   ok(JSON.stringify(hostW) === JSON.stringify(['importBundle', 'remove', 'reshapeStore', 'setExitAccess']), 'hosts.js: the four record writers found (importBundle, remove, reshapeStore, setExitAccess)', hostW);
-  const taskW = methodsOf(T.tasks).filter((m) => /this\._notify\(\)/.test(m.body)).length;
+  const taskW = methodsOf(T.tasks).filter((m) => /this\._notify\([^)]*\)/.test(m.body)).length;
   ok(taskW >= 6, `task-groups.js: ${taskW} membership writers found, each notifying`);
   const dels = Object.entries(T.sessionFiles).flatMap(([f, s]) => s.split('\n').map((l, i) => (/\bactiveSessions\.delete\(/.test(l) && !/^\s*\/\//.test(l) ? `${f}:${i + 1}` : null)).filter(Boolean));
   ok(dels.length >= 2, `the conversation's end: ${dels.length} removal sites found (${dels.join(', ')})`);

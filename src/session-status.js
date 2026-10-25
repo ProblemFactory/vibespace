@@ -21,6 +21,7 @@ const fs = require('fs');
 const path = require('path');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const { applyClear, CLEARED_TEXT } = require('./record-clear');
+const TD = require('./task-delta.js'); // PURE (lane task-group-fanout): a broadcast carries the changed keys, never the store
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a status reason / detail a reader sees never carries a credential in the clear // PURE: "Clear content…" (2026-09-28) — this store holds the door (clearHistory)
 
 // A Task (= a session) has one of these states; `done` = this piece of work is
@@ -36,6 +37,9 @@ class SessionStatusManager {
     this._onWriteError = typeof onWriteError === 'function' ? onWriteError : null; // lane-dead-bridge: a failed background write is NAMED (src/server/fd-gauge.js), never a crash
     this._writeFailures = 0;
     this._state = { statuses: {} };
+    // lane task-group-fanout: every broadcast is numbered within this boot ({ epoch, base, seq }) — a client whose mirror is
+    // not exactly at `base` re-fetches GET /api/session-status (which answers syncMark()), never a stale mirror
+    this._epoch = Date.now(); this._seq = 0; this._pruned = null;
     this._writeTimer = null; this._dirty = false; this._lastWritten = null;
     try {
       this._state = timedSync('session-status.read', () => JSON.parse(fs.readFileSync(this._file, 'utf-8')));
@@ -62,7 +66,7 @@ class SessionStatusManager {
     const keys = Object.keys(this._state.statuses);
     if (keys.length > MAX_ENTRIES) {
       keys.sort((a, b) => (this._state.statuses[a].at || 0) - (this._state.statuses[b].at || 0));
-      for (const k of keys.slice(0, keys.length - MAX_ENTRIES)) delete this._state.statuses[k];
+      for (const k of keys.slice(0, keys.length - MAX_ENTRIES)) { delete this._state.statuses[k]; (this._pruned = this._pruned || []).push(k); }   // …and the next broadcast names them gone
     }
     this._dirty = true;
     if (!this._writeTimer) this._writeTimer = setTimeout(() => { this._writeTimer = null; this._flushFromTimer(); }, 500);
@@ -104,7 +108,17 @@ class SessionStatusManager {
   // ids only) because the statuses map it sends may be EXACTLY what every client already holds (a cleared entry that is
   // not the current status) and a client's change guard would drop it (lane-redact verify r5: the sidebar's expanded
   // card kept the cleared words for good)
-  _notify(extra = null) { try { this._onChange(this.snapshot(), extra); } catch { } }
+  // lane task-group-fanout (measured: ALL 500 records, 106 KB, to every client per `vibespace-status`): the broadcast carries
+  // the records of the keys a write touched (+ the ones the bound pruned, as `removed`) and its place in the order (`sync`)
+  _notify(keys = [], extra = null) {
+    const touched = [...[].concat(keys || []), ...(this._pruned || [])];
+    this._pruned = null;
+    this._seq += 1;
+    const d = TD.statusChange(touched, this._state.statuses);
+    try { this._onChange(d.statuses, { ...(extra || {}), sync: { removed: d.removed, epoch: this._epoch, base: this._seq - 1, seq: this._seq } }); } catch { }
+  }
+  /** where GET /api/session-status's answer sits in the broadcast order */
+  syncMark() { return { epoch: this._epoch, seq: this._seq }; }
 
   snapshot() { return this._state.statuses; }
 
@@ -164,7 +178,7 @@ class SessionStatusManager {
       pendingNotices: prev?.pendingNotices || [],
     };
     this._logHistory(key, { ...v, setBy: 'agent', at: Date.now() });
-    this._save(); this._notify();
+    this._save(); this._notify([key]);
     return this._state.statuses[key];
   }
 
@@ -182,7 +196,7 @@ class SessionStatusManager {
       ],
     };
     this._logHistory(key, { ...v, setBy: 'user', at: Date.now() });
-    this._save(); this._notify();
+    this._save(); this._notify([key]);
     return this._state.statuses[key];
   }
 
@@ -203,7 +217,7 @@ class SessionStatusManager {
       delete this._state.statuses[key];
     }
     this._logHistory(key, { state: null, urgency: null, reason: null, setBy: by || 'user', at: Date.now(), cleared: true });
-    this._save(); this._notify();
+    this._save(); this._notify([key]);
     return null;
   }
 
@@ -253,7 +267,7 @@ class SessionStatusManager {
     // ON DISK BEFORE THE OWNER IS TOLD (lane-redact verify r4, reproduced): `_save` here is a 500 ms debounce flushed on
     // SIGTERM only — a SIGKILL / OOM inside that window brought the reason back at the next boot after the route had
     // answered "cleared". A clear is one owner decision: ONE synchronous write (user-todos.js clearItems says the same).
-    if (out.cleared.length) { this._save(); this.flush(); this._notify({ cleared: [{ key, ats: out.cleared.slice() }] }); }
+    if (out.cleared.length) { this._save(); this.flush(); this._notify([key], { cleared: [{ key, ats: out.cleared.slice() }] }); }
     return out;
   }
 
@@ -268,7 +282,7 @@ class SessionStatusManager {
       else this._state.history[toKey] = [...h, ...this._state.history[toKey]].slice(-50);
       delete this._state.history[fromKey];
     }
-    this._save(); this._notify();
+    this._save(); this._notify([fromKey, toKey]);
   }
 
   // THE QUEUE OF TYPED NOTICES (agent browser P1, design §3.8 layer ②). One
@@ -295,7 +309,7 @@ class SessionStatusManager {
     // the present, so the oldest go first.
     rec.pendingNotices.push({ ...n, at: Number(n.at) || Date.now() });
     if (rec.pendingNotices.length > MAX_NOTICES) rec.pendingNotices.splice(0, rec.pendingNotices.length - MAX_NOTICES);
-    this._save(); this._notify();
+    this._save(); this._notify([key]);
     return rec.pendingNotices.length;
   }
 
@@ -309,7 +323,7 @@ class SessionStatusManager {
     if (!n) return 0;
     rec.pendingNotices = keep;
     if (!keep.length && !rec.state && !rec.urgency && !rec.reason) delete this._state.statuses[key];
-    this._save(); this._notify();
+    this._save(); this._notify([key]);
     return n;
   }
 
@@ -328,7 +342,7 @@ class SessionStatusManager {
     const list = rec.pendingNotices.slice(0, n);
     rec.pendingNotices = rec.pendingNotices.slice(n);
     if (!rec.pendingNotices.length && !rec.state && !rec.urgency && !rec.reason) delete this._state.statuses[key];
-    this._save(); this._notify();
+    this._save(); this._notify([key]);
     return list;
   }
 

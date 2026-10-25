@@ -686,6 +686,43 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         return rep;
       },
     },
+    {
+      id: '2026-10-task-group-archived-members',
+      note: "AN ARCHIVED CONVERSATION LEAVES ITS TASK GROUPS (lane task-group-fanout, measured 2026-10-24: 752 member keys in the lanes group, never pruned — every one rode every tasks-updated broadcast and every membership test). From this release an archive unbinds it through the store's ONE unbind writer (unbindKeys, rule task-membership membersWithout); this run prunes the keys the archive list (data/user-state.json archivedSessions — `<backend>:<id>`, or an older bare id) already names. A key whose conversation is merely not discovered yet (a machine offline at boot) is NEVER pruned. ARCHIVE FIRST: the pruned keys per group go to data/archive/task-group-archived-members.json, then the store drops them. THROUGH the live TaskGroupManager when there is one, else the file (atomic). No archive list / no store = nothing to do; an unreadable store fails by name (retried next boot).",
+      run() {
+        let archived = [];
+        try { const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'user-state.json'), 'utf-8')); archived = Array.isArray(st && st.archivedSessions) ? st.archivedSessions.map(String) : []; } catch { return { archived: 0 }; }
+        if (!archived.length) return { archived: 0 };
+        const tm = typeof tasks === 'function' ? tasks() : tasks;
+        const f = path.join(dataDir, 'task-groups.json');
+        let doc = null;
+        if (!tm || typeof tm.unbindKeys !== 'function') {
+          try { doc = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch (e) { if (e && e.code === 'ENOENT') return { archived: archived.length, groups: 0 }; throw e; }   // no store = nothing to do; unreadable = fail by name
+        }
+        const gone = {};
+        if (tm && typeof tm.unbindKeys === 'function') Object.assign(gone, tm.unbindKeys(archived, { dryRun: true }).gone);
+        else for (const [id, t] of Object.entries((doc && doc.tasks) || {})) { const r = require('../task-membership.js').membersWithout(t && t.sessions, archived); if (r.gone.length) gone[id] = r.gone; }
+        const n = Object.values(gone).reduce((a, l) => a + l.length, 0);
+        if (n) {
+          fs.mkdirSync(archiveDir, { recursive: true });
+          const out = path.join(archiveDir, 'task-group-archived-members.json');
+          let prev = {}; try { prev = JSON.parse(fs.readFileSync(out, 'utf-8')); } catch { }
+          const merged = { ...prev };
+          for (const [id, keys] of Object.entries(gone)) merged[id] = [...new Set([...(Array.isArray(prev[id]) ? prev[id] : []), ...keys])];
+          fs.writeFileSync(out + '.tmp', JSON.stringify(merged, null, 2));
+          fs.renameSync(out + '.tmp', out);
+          if (tm && typeof tm.unbindKeys === 'function') tm.unbindKeys(archived);
+          else {
+            for (const [id, keys] of Object.entries(gone)) doc.tasks[id].sessions = require('../task-membership.js').membersWithout(doc.tasks[id].sessions, keys, { exact: true }).keep;
+            fs.writeFileSync(f + '.tmp', JSON.stringify(doc, null, 2));
+            fs.renameSync(f + '.tmp', f);
+          }
+        }
+        const rep = { archived: archived.length, groups: Object.keys(gone).length, keys: n, via: tm && typeof tm.unbindKeys === 'function' ? 'store' : 'file' };
+        console.log('[migrate] task-group-archived-members:', JSON.stringify(rep));
+        return rep;
+      },
+    },
   ];
 
   /** 2026-10-grants-unify: every pre-unify who-list → rows of THE grants store (src/server/grants-migration.js). `ensure`

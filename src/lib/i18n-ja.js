@@ -10795,4 +10795,10 @@ export default {
   "The harness’s own screen in a terminal window, instead of VibeSpace’s chat view.": "VibeSpace のチャット表示ではなく、ハーネス自身の画面をターミナルウィンドウで開きます。",
   "From the name": "名前から",
   "Your folders": "あなたのフォルダ",
+  // lane stop-refills-composer: Stop puts the dropped queue back into the composer (the toast)
+  "Stop put {n} queued message(s) back into the input box": "停止 — キュー待ちの {n} 件のメッセージを入力欄に戻しました",
+  "{k} attached image(s) were not put back — attach them again": "添付画像 {k} 件は戻せません — もう一度添付してください",
+  "{k} other attachment(s) were not put back — attach them again": "ほかの添付 {k} 件は戻せません — もう一度添付してください",
+  "{m} message(s) came back shortened": "{m} 件のメッセージは短縮して戻しました",
+  "{k} more queued message(s) were too long to put back": "さらに {k} 件のキュー待ちメッセージは長すぎて戻せませんでした",
 };

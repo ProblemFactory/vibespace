@@ -7,12 +7,15 @@
 // ≥ 1 KB room, the three-group shape ≤ 7.5 KB (lane task-group-context: every Context row told); ④ every pointer names a topic vibespace-docs serves, every surface has
 // one; ⑤ every line the cut dropped is in its manual and not in the intro; ⑥ CONTROL: the dropped lines put back ⇒
 // the same judge is red. lane channels-teach: ③ and ④ also judge a session whose channel REACH teaches `vibespace-channels`
-// (the tools section's paragraph, the reminder's segment). Run: node scripts/test-prompt-budget.mjs
+// (the tools section's paragraph, the reminder's segment). lane injection-relevance: ⑦ a busy group's mid-session UPDATE
+// (8 picked lines + the digest naming every session left out + the others'-backlog line) stays ≤ 4 096 B a group, three
+// groups under their 6 500 B block, each beside the per-turn reminder and a 500 B extra with ≥ 1 KB room under the cap.
+// Run: node scripts/test-prompt-budget.mjs
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { census, print, INTRO_MAX, FIRST_PROMPT_MAX, ROOM_MIN } from './measure-prompt-context.mjs';
+import { census, print, updateShapes, INTRO_MAX, FIRST_PROMPT_MAX, ROOM_MIN, UPDATE_MAX } from './measure-prompt-context.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -79,6 +82,17 @@ const restored = (Tx, f) => AR.sessionToolsIntro(Tx, f).replace('\n</vibespace-s
 const cc = census({ intro: restored });
 const cbad = judge(cc);
 ok(cc.introBytes > INTRO_MAX && cbad.some((b) => /^no Task Group/.test(b)), `the old-size intro (${cc.introBytes} B) fails the same judge: ${cbad.join('; ')}`);
+
+console.log('— ⑦ a busy group\'s update: the digest and the others\'-backlog line inside the 9 600 B law (lane injection-relevance)');
+const ups = updateShapes();
+for (const u of ups) console.log(`    ${u.name.padEnd(32)} ${String(u.bytes).padStart(5)} B`);
+const [p90, burst, three] = ups;
+ok(ups.length === 3 && ups.every((u) => /- New activity \(/.test(u.text) && /- Backlog: 3 parked \(1 HIGH \[B-[0-9a-f]+\]\) by others since your last update/.test(u.text)), 'three update shapes, each with its activity section and the others\'-backlog line (non-vacuous)');
+ok(/ logged \d+ more/.test(burst.text) && /… \d+ more from \d+ other sessions/.test(burst.text) && /, \d+ of them yours — not repeated\)/.test(burst.text) && !/more lines —/.test(burst.text), 'the burst names the sessions it leaves out (≤ 6 + the overflow), counts the member\'s own lines, and pops nothing');
+ok(p90.bytes <= UPDATE_MAX && burst.bytes <= UPDATE_MAX, `one group's update ≤ ${UPDATE_MAX} B (the p90 ${p90.bytes} B, a 460-line burst ${burst.bytes} B)`);
+const extra = 500 + '<vibespace-reminder></vibespace-reminder>'.length, rem = c.reminder;
+ok(three.bytes <= 6500 && !/truncated —/.test(three.text) && [p90.bytes + rem.one, burst.bytes + rem.one, three.bytes + rem.multi].every((b) => b + extra + 4 <= AR.INLINE_CAP - ROOM_MIN),
+  `three groups bursting ${three.bytes} B ≤ 6 500 B, uncut; each shape + the per-turn reminder + a 500 B extra leaves ≥ ${ROOM_MIN} B under ${AR.INLINE_CAP} B (${[p90.bytes + rem.one, burst.bytes + rem.one, three.bytes + rem.multi].map((b) => b + extra + 4).join(' / ')} B)`);
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

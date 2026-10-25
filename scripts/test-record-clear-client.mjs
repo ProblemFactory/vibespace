@@ -563,9 +563,10 @@ try {
   // ordered after it re-rendered the sidebar and hid the revert; the control pins that the suite still sees it)
   const STP = 'src/lib/sidebar-tasks.js';
   const tsrc = fs.readFileSync(path.join(repo, STP), 'utf8');
-  const GUARD = 'const changed = sig !== this._statusSig || (Array.isArray(msg.cleared) && msg.cleared.length > 0);';
+  // lane task-group-fanout: the frame is a delta — the guard starts from the named clear, then adds the records that moved
+  const GUARD = 'let changed = Array.isArray(msg && msg.cleared) && msg.cleared.length > 0;';
   check('CONTROL: the anchor (the sidebar\'s change guard admitting a named clear) is present once', tsrc.split(GUARD).length === 2);
-  const tmut = tsrc.replace(GUARD, 'const changed = sig !== this._statusSig;');
+  const tmut = tsrc.replace(GUARD, 'let changed = false;');
   MUT.write(STP, tmut, 'sidebar-guard-drops-clear', { esm: true });
   await buildBundle([{ rel: JP, contents: mutated }, { rel: SPP, contents: smut }, { rel: STP, contents: tmut }]);
   await reload(P1);

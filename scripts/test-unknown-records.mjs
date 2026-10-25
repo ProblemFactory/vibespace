@@ -78,6 +78,10 @@ console.log('§3 codex: an unknown record becomes a card too');
   mm.processLive({ type: 'totally_new_codex_record', foo: 'baz' });
   const c = cards(mm);
   ok('one card per unknown codex record, harness named, whole record', c.length === 2 && c[0].content[0].harness === 'Codex' && /totally_new_codex_record/.test(c[0].content[0].name) && /"foo": "baz"/.test(c[1].content[0].record), c.map((m) => m.content[0].name));
+  // lane stop-refills-composer: Stop's put-back record is HANDLED (the base's one method), never the fall-back card
+  const mq = createMessageManager('codex', 'test-unknown-codex-putback');
+  mq.processLive({ timestamp: 'x', type: 'event_msg', payload: { type: 'queue_dropped', dropId: '1-1', by: 'stop', turnId: 't', items: [{ id: 'q', msgId: 'm', ts: 1, text: 'back', cut: false, attachments: [] }], omitted: 0 } });
+  ok('codex: a queue_dropped event (Stop\'s put-back) is handled — no unknown-record card, no new-fields card', mq.messages.filter((m) => m.noticeKind === 'unknown-record' || m.noticeKind === 'unknown-fields').length === 0, mq.messages.map((m) => m.noticeKind));
 }
 
 console.log('§4 the fold owns the noise: kind "unknown", its own toggle, OFF by default');

@@ -361,6 +361,12 @@ ok(await waitFor(() => readMeta()?.activeTurnId === 'turn-2'), 'the drained item
   const lastRemoveIdx = evAll.map((e) => e.payload?.type === 'queue_op_result' && e.payload.reason === 'stopped').lastIndexOf(true);
   const emptyIdx = evAll.findIndex((e, i) => i > lastRemoveIdx && e.payload?.type === 'queue_changed' && (e.payload.items || []).length === 0);
   ok(lastRemoveIdx >= 0 && emptyIdx > lastRemoveIdx, 'the removal results are emitted BEFORE the emptied queue_changed (a bare empty republish would claim the messages RAN)');
+  // STOP PUTS THE DROPPED QUEUE BACK (owner 2026-10-24, lane stop-refills-composer): ONE record of the PERSON's rows the
+  // sweep deleted, its text the app-server's stored input — the peer row goes back to its ladder, never the composer
+  const dropIdx = evAll.findIndex((e) => e.payload?.type === 'queue_dropped');
+  const drop = dropIdx >= 0 ? evAll[dropIdx].payload : null;
+  ok(drop && evAll.filter((e) => e.payload?.type === 'queue_dropped').length === 1 && drop.items.length === 1 && drop.items[0].text === 'stop me' && drop.items[0].msgId === 'm12' && /^\d+-\d+$/.test(drop.dropId) && drop.by === 'stop' && drop.omitted === 0, `Stop puts the person's queued text back: ONE queue_dropped, items = [m12 'stop me'] (the peer row absent) — ${JSON.stringify(drop)}`);
+  ok(lastRemoveIdx >= 0 && dropIdx > lastRemoveIdx && emptyIdx > dropIdx, `…in ORDER: the last 'stopped' result (${lastRemoveIdx}) < queue_dropped (${dropIdx}) < the emptied republish (${emptyIdx})`);
   const peers = events().filter((e) => e.payload?.type === 'peer_message_result').slice(peersBefore).map((e) => e.payload);
   ok(peers.some((r) => r.ok === false && r.text === 'ping from C' && r.fromName === 'session C'), 'the queued agent-to-agent message goes back to the delivery ladder (ok:false with its text + label ⇒ the consumer re-stashes it)', JSON.stringify(peers));
   // NOTHING RUNS AFTER THE TURN: the queue was empty when the turn ended, so
@@ -649,7 +655,55 @@ process.stdin.on('data', (d) => {
   ok(userA('really stopped')?.queueState === 'removed', `…while the one Stop really dropped does (${userA('really stopped')?.queueState})`);
   const sysA = mmA.messages.filter((m) => m.role === 'system').map((m) => m.content?.[0]?.text || '');
   ok(sysA.some((t) => /no longer queued — it already ran/.test(t)), 'and the user is TOLD that one already ran (nothing silent)', sysA.join(' | '));
+  // lane stop-refills-composer: only a row the sweep REALLY deleted comes back — a `gone` row RAN (a1, the peer)
+  const dropsA = A.msgs().filter((m) => m.type === 'queue_dropped');
+  ok(dropsA.length === 1 && dropsA[0].items.length === 1 && dropsA[0].items[0].msgId === 'a3' && dropsA[0].items[0].text === 'really stopped', `the put-back carries a3 only — the {deleted:false} a1 (it RAN) and the peer are absent (${JSON.stringify(dropsA)})`);
   await A.stop();
+}
+
+// lane stop-refills-composer: an INHERITED queue (rows a PREVIOUS wrapper queued — this one holds no queueMeta for them):
+// the wrapper's own cid convention is the only witness, so a `peer-<pid>-<n>` / `notif-<pid>-<n>` row never reaches the
+// owner's composer, while an inherited row of the person's still comes back (attachments as descriptors, never bytes)
+const STUB_PUTBACK_INHERIT = `
+const fs = require('fs');
+let b = ''; let turns = 0; let activeTurn = null;
+let queue = [
+  { id: 'q-peer', input: [{ type: 'text', text: 'words a peer sent' }], clientUserMessageId: 'peer-1-1' },
+  { id: 'q-notif', input: [{ type: 'text', text: 'a notification' }], clientUserMessageId: 'notif-2-3' },
+  { id: 'q-old', input: [{ type: 'text', text: 'an old typed row' }, { type: 'image', url: 'data:image/png;base64,AAAA' }], clientUserMessageId: 'm-old' },
+];
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (d) => {
+  b += d; let i;
+  while ((i = b.indexOf('\\n')) !== -1) {
+    const line = b.slice(0, i); b = b.slice(i + 1);
+    if (!line.trim()) continue;
+    let m; try { m = JSON.parse(line); } catch { continue; }
+    if (m.id === undefined || !m.method) continue;
+    fs.appendFileSync(__RPCLOG__, line + '\\n');
+    if (m.method === 'thread/start') { send({ id: m.id, result: { thread: { id: 'th-inh' } } }); continue; }
+    if (m.method === 'turn/start') { turns++; const tid = 'turn-' + turns; activeTurn = tid; send({ id: m.id, result: { turn: { id: tid } } }); send({ method: 'turn/started', params: { turn: { id: tid } } }); continue; }
+    if (m.method === 'thread/queue/list') { send({ id: m.id, result: { data: queue.slice(), nextCursor: null } }); continue; }
+    if (m.method === 'thread/queue/delete') { const at = queue.findIndex((q) => q.id === m.params.queuedSubmissionId); if (at < 0) { send({ id: m.id, error: { code: -32600, message: 'queued submission not found' } }); continue; } queue.splice(at, 1); send({ id: m.id, result: { deleted: true } }); send({ method: 'thread/queue/changed', params: { threadId: 'th-inh' } }); continue; }
+    if (m.method === 'turn/interrupt') { send({ id: m.id, result: {} }); const e = activeTurn; activeTurn = null; send({ method: 'turn/completed', params: { turn: { id: e }, status: 'interrupted' } }); continue; }
+    send({ id: m.id, result: {} });
+  }
+});
+`;
+{
+  const I = spawnStub('putback-inherit', STUB_PUTBACK_INHERIT);
+  ok(await waitFor(() => I.meta()?.threadId === 'th-inh'), 'inherited-queue stub: the wrapper has a thread');
+  I.send({ type: 'chat-input', text: 'go', msgId: 'i0' });
+  ok(await waitFor(() => I.meta()?.activeTurnId === 'turn-1'), 'inherited-queue stub: a turn is running');
+  I.send({ type: 'queue-resync' });
+  ok(await waitFor(() => I.lastQueue().length === 3), `inherited-queue stub: the three inherited rows are listed (${JSON.stringify(I.lastQueue().map((r) => [r.msgId, r.kind]))})`);
+  I.send({ type: 'interrupt' });
+  ok(await waitFor(() => I.ops().filter((r) => r.op === 'remove' && r.reason === 'stopped').length === 3 && I.lastQueue().length === 0), `inherited-queue stub: Stop deletes all three (${JSON.stringify(I.ops())})`);
+  const dropsI = I.msgs().filter((m) => m.type === 'queue_dropped');
+  ok(dropsI.length === 1 && dropsI[0].items.length === 1 && dropsI[0].items[0].msgId === 'm-old' && dropsI[0].items[0].text === 'an old typed row', `an inherited peer-1-1 / notif-2-3 row is NEVER put into the owner's composer; the inherited row of the person's is (${JSON.stringify(dropsI.map((d) => d.items.map((x) => x.msgId)))})`);
+  ok(dropsI[0] && JSON.stringify(dropsI[0].items[0].attachments) === JSON.stringify([{ type: 'image', mime: 'image/png', name: null }]) && !JSON.stringify(dropsI[0]).includes('base64'), `…its picture rides as a DESCRIPTOR (type + mime), never the data URL (${JSON.stringify(dropsI[0] && dropsI[0].items[0].attachments)})`);
+  await I.stop();
 }
 
 // (3) — an app-server that stops answering. Stop is a SAFETY CONTROL: it must
@@ -694,6 +748,7 @@ process.stdin.on('data', (d) => {
   ok(gotB && elapsedB < 10000, `Stop reaches turn/interrupt on the sweep's budget even when thread/queue/list never answers (${elapsedB}ms; the 15s-per-RPC cut took 15s+ before sending it)`);
   ok(B.ops().some((r) => r.op === 'remove' && r.ok === false), `…and it SPEAKS: the queue was NOT cleared (${JSON.stringify(B.ops())})`);
   ok(!B.ops().some((r) => r.ok === true), 'nothing is reported removed when nothing could be read', JSON.stringify(B.ops()));
+  ok(!B.msgs().some((m) => m.type === 'queue_dropped'), 'nothing is put back either (no queue_dropped — the message is still queued and will run)');
   await B.stop();
 }
 {
@@ -716,6 +771,7 @@ process.stdin.on('data', (d) => {
   ok(rms.length === 4 && rms.every((r) => r.ok === false) && queuedIds.every((id) => rms.some((r) => r.id === id)), `every item Stop could NOT clear is reported ok:false, by id (${JSON.stringify(rms.map((r) => [r.id, r.ok, r.reason]))})`);
   ok(rms.some((r) => r.reason === 'timeout' && /did not answer/.test(r.detail || '')), 'the items the expired cap never even reached are reported as timeouts — reporting what was NOT cleared is the point', JSON.stringify(rms.map((r) => r.reason)));
   ok(C.lastQueue().length === 4, `…and the strip still lists them: they are still queued and will run (${C.lastQueue().length})`);
+  ok(!C.msgs().some((m) => m.type === 'queue_dropped'), 'rows the sweep could not clear are never put back (no queue_dropped: they are still queued and will run)', JSON.stringify(C.msgs().filter((m) => m.type === 'queue_dropped')));
   await C.stop();
 }
 

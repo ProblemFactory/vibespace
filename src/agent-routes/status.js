@@ -73,7 +73,7 @@ app.post('/api/agent/user-todo', async (req, res) => {
     res.status(400).json({ error: 'pass {add:{text,...}} | {list:true} | {resolve:"id or text"} | {show:"id"} | {clear:"id"}' });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
-app.get('/api/session-status', (req, res) => res.json({ statuses: sessionStatus.snapshot() }));
+app.get('/api/session-status', (req, res) => res.json({ statuses: sessionStatus.snapshot(), ...(typeof sessionStatus.syncMark === 'function' ? sessionStatus.syncMark() : {}) }));   // lane task-group-fanout: + {epoch, seq} — where this answer sits in the broadcast order
 // User set/override/clear from the UI (cookie-authed like every route)
 app.post('/api/session-status', (req, res) => {
   const { sessionKey, state, urgency, reason, clear } = req.body || {};

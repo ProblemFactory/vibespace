@@ -1796,6 +1796,47 @@ console.log('— acp-events');
   ok('a non-JSON line is passed through as raw output', outputs('w-acp').some((d) => /not json either/.test(d)));
 }
 
+// ── 3d. STOP'S PUT-BACK rides the ONE gate (lane stop-refills-composer): every consumer feeds the normalizer through
+// helpersFor(id).feedLive, and the door (src/server/queue-putback.js) runs FIRST there — one draft write per Stop
+console.log('— the put-back door at the feedLive gate (lane stop-refills-composer)');
+{
+  const order = [], sets = [];
+  const drafts = { data: {}, version: 0, get(k) { return this.data[k]; }, set(k, v, ws, basedOn, extra) { this.version++; this.data[k] = v; sets.push({ k, v, ws, basedOn, extra }); order.push('set:' + k); } };
+  const so3 = require(path.join(REPO, 'src/server/session-stdout.js')).create({
+    rootDir: tmp, BUFFERS_DIR, META_DIR, DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(tmp, 'nonexistent'),
+    CLAUDE_STREAM_TYPES: new Set(['system', 'assistant', 'user', 'result', '_stdin_ack']), _seenStreamTypes: new Set(), activeSessions, engine,
+    checkClaudeGoalStatus() { }, broadcastToSession: (s, id, m) => calls.broadcasts.push({ id, ...m }), broadcastActiveSessions: () => { calls.active++; },
+    noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { }, daemonPtyShim: (h) => h,
+    sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null,
+    getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }),
+    getDeliver: () => ({ stashFor() { } }), getBrain: () => brainStub,
+    getSyncStore: (name) => (name === 'drafts' ? drafts : undefined),
+  });
+  const item = (text) => ({ id: 'q-' + text.length, msgId: 'm-' + text.length, ts: 1, text, cut: false, attachments: [] });
+  const legs = [
+    ['codex', 'w-pb-codex', (dropId, text) => J({ timestamp: new Date().toISOString(), type: 'event_msg', payload: { type: 'queue_dropped', dropId, by: 'stop', turnId: 't1', items: [item(text)], omitted: 0 } })],
+    ['opencode', 'w-pb-acp', (dropId, text) => J({ ts: Date.now(), type: 'acp', kind: 'queue_dropped', dropId, by: 'stop', turnId: 'p1', items: [item(text)], omitted: 0 })],
+  ];
+  for (const [backend, wid, line] of legs) {
+    const s = mkSession(backend, wid); const p = fakePty();
+    const pl = s._normalizer.processLive.bind(s._normalizer);
+    s._normalizer.processLive = (m) => { order.push('fed:' + wid + ':' + (m.kind || m.payload?.type || m.type)); return pl(m); };
+    so3.setupSessionPty(s, wid, p);
+    const before = sets.length;
+    p.data(line('77-' + wid.length, 'queued on ' + backend));
+    p.data(line('77-' + wid.length, 'queued on ' + backend));   // the same record fed twice (a double feed, a gap-fill)
+    const mine = sets.slice(before);
+    ok(`${backend}: a queue_dropped line on the pty ⇒ ONE draft write (chat:${wid}, broadcast to all: no sender, prepended stamped); the same line twice ⇒ still one`, mine.length === 1 && mine[0].k === 'chat:' + wid && mine[0].v === 'queued on ' + backend + '\n\n' && mine[0].ws === null && mine[0].extra?.prepended === mine[0].v.length, mine);
+    const iSet = order.indexOf('set:chat:' + wid), iFed = order.indexOf('fed:' + wid + ':queue_dropped');
+    ok(`${backend}: the door runs BEFORE the normalizer at the ONE gate (the draft op precedes the record's meta op)`, iSet >= 0 && iFed > iSet, { iSet, iFed });
+    ok(`${backend}: …and the normalizer still gets the record (ONE queue-putback meta op, no unknown-record card)`, s._ops.filter((o) => o.op === 'meta' && o.subtype === 'queue-putback').length === 1 && !s._normalizer.messages.some((m) => m.noticeKind === 'unknown-record'), s._ops.filter((o) => o.op === 'meta').map((o) => o.subtype));
+  }
+  const s0 = mkSession('codex', 'w-pb-none'); const p0 = fakePty();
+  so.setupSessionPty(s0, 'w-pb-none', p0);   // the suite's own engine: no getSyncStore (the null default every other create() caller relies on)
+  let threw = null; try { p0.data(legs[0][2]('78-1', 'nowhere to go')); } catch (e) { threw = e; }
+  ok('an engine built without getSyncStore (the default) feeds the record on and writes nothing — no throw', !threw && s0._fed.some((m) => m.payload?.type === 'queue_dropped'));
+}
+
 // ── 4. LOUD failure: declared protocol with no consumer / no protocol at all ──
 console.log('— unknown protocol');
 {
@@ -1837,7 +1878,7 @@ console.log('— wiring pins');
   // READ — a lazy ref like the others, never a new inline consumer.
   ok('session-stdout requires the registry and builds it ONCE in create() with the orchestrator deps', /require\('\.\/stdout\/index\.js'\)/.test(ss) && (ss.match(/createStdoutRegistry\(/g) || []).length === 1 && /createStdoutRegistry\(\{ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes, USAGE_SCANNER_PATH,\s*\n\s*checkClaudeGoalStatus, noteModelSeen, noteHarnessModels, sbSeenFirst, hosts, usageHistory, deliverRef, pagesRef, permissionRulesRef, brainRef \}\)/.test(ss));
   ok('…hands its own closures (feedLive, broadcasts, meta store, todo helpers) as ONE helpers object', /const stdoutHelpers = \{ feedLive: \(s, m\) => \{ feedLive\(s, m\); SEARCH\.noteLive\(s\); \}, broadcastToSession, broadcastActiveSessions, readSessionMeta, writeSessionMeta,\s*\n\s*updateSessionTodos, applyTaskToolUpdate, emitTaskListTodos \};/.test(ss)); // lane global-search: feedLive also tells the search index
-  ok('…setupSessionPty resolves caps.streamProtocol → registry → attach (no protocol branch left in session-stdout)', /const consumer = streamProto \? stdoutConsumers\.get\(streamProto\) : null;/.test(ss) && /consumer\.attach\(session, id, ptyProcess, stdoutHelpers\);/.test(ss) && !/streamProto === '/.test(ss) && !/feedLive\(session, /.test(ss) && !/_stdin_ack/.test(ss));
+  ok('…setupSessionPty resolves caps.streamProtocol → registry → attach (no protocol branch left in session-stdout)', /const consumer = streamProto \? stdoutConsumers\.get\(streamProto\) : null;/.test(ss) && /consumer\.attach\(session, id, ptyProcess, helpersFor\(id\)\);/.test(ss) && !/streamProto === '/.test(ss) && !/feedLive\(session, /.test(ss) && !/_stdin_ack/.test(ss));
   ok('…the no-protocol text is unchanged and the no-consumer case is its own loud line + event', /has no streamProtocol in src\/backend-caps\.js — chat output passes through RAW \(register a pipeline\)/.test(ss) && /registers no consumer for it — chat output passes through RAW \(register one\)/.test(ss) && /'chat-protocol-no-consumer'/.test(ss));
   ok('…still dispatches on capsOf(session.backend) (the `backend || claude` default + NO_CAPS fallback are unchanged)', /const streamProto = capsOf\(session\.backend\)\.streamProtocol;/.test(ss));
   const idx = read('src/server/stdout/index.js');

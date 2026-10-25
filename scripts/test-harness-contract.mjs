@@ -163,6 +163,12 @@ for (const id of chatHarnessIds()) {
     `${id}: its wrapper SERVES the verb (${path.basename(HARNESSES[id].wrapper)})`);
   ok(/queueResync:\s*true/.test(w),
     `${id}: …and ADVERTS it in the sidecar it writes — the per-PROCESS gate, because a wrapper spawned before the verb either drops the frame silently (codex) or answers it with a VISIBLE error card (ACP)`);
+  // STOP PUTS THE DROPPED QUEUE BACK (owner 2026-10-24, lane stop-refills-composer): a harness that owns a queue drops it
+  // on Stop — so its wrapper owes the ONE `queue_dropped` record (the person's rows, through the byte-identical twin)
+  // the server's door writes back into the composer. Claude declares no verbs (above): the CLI owns that queue, and
+  // MEASURED on 2.1.308 it RUNS a queued frame right after the interrupt — nothing is dropped, nothing to put back.
+  ok(/function droppedRecordFor\(rows, \{ dropId, turnId \} = \{\}\) \{/.test(w) && /(record|emitTaskEvent)\('queue_dropped', droppedRecordFor\(/.test(w),
+    `${id}: a queue harness's wrapper emits ONE queue_dropped record on Stop (the put-back) through its droppedRecordFor twin (${path.basename(HARNESSES[id].wrapper)})`);
 }
 // …and the server READS that advert (wrapperCaps is the ONE reader of a
 // wrapper's own file; a caps flag nothing surfaces is a fix that never landed).

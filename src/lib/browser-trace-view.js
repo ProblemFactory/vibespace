@@ -48,6 +48,7 @@ import { cardBuildLine } from './browser-build-model.js'; // lane browser-admin 
 import { cliRowWords, cliOfferLabel, cliConfirmWords, cliOutcomeWords } from './browser-cli-model.js'; // lane browser-admin 2b: the Browser CLI row
 import { UI_ICONS } from './icons.js';
 import { memoryText } from '../runaway-guard.js';
+import { metaChanged } from '../task-delta.js'; // PURE (lane task-group-fanout): a Task Group's title / membership moved
 import { stuckWords, unresponsiveWords } from '../browser-stuck.js'; // lane browser-stuck: a profile row whose page waits on a dialog / does not respond
 import { frameUrl, bytesText, traceSummary, timelineLabel, positionText, overlayGeometry, traceWindowFor, unionWindow, assignEntriesToWindows, armGapFor, EPHEMERAL_SCOPE, TRACE_BYTES_PER_PROFILE, foldFits, visibleEntries, isFitEntry, fitCount } from '../browser-trace.js'; // lane trace-fits: the page-size fold
 import { sessionOfEntry, sessionOrdinals } from '../browser-sessions.js'; // 2026-09-27: the live view's session dividers + Sessions list (PURE)
@@ -1263,7 +1264,7 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null } = {}) {
   }
   const scheduleLoad = () => { if (st.timer) clearTimeout(st.timer); st.timer = setTimeout(() => { st.timer = null; load(); }, PANEL_REFRESH_DEBOUNCE_MS); };
   // (+ tasks-updated: a Task Group's title / membership on a "Who can use it" chip follows the store)
-  const onGlobal = (m) => { if (st.closed || !m) return; if (m.type === 'browser-passkeys-updated' && pkOpen.has(String(m.profileId || ''))) pkOpen.get(String(m.profileId)).load(); if (m.type === 'browser-housekeeping-updated' || m.type === 'browser-profiles-updated' || m.type === 'browser-trace-appended' || m.type === 'tasks-updated' || m.type === 'browser-kept-updated') scheduleLoad(); }; // lane browser-resume: + the kept browsers
+  const onGlobal = (m) => { if (st.closed || !m) return; if (m.type === 'browser-passkeys-updated' && pkOpen.has(String(m.profileId || ''))) pkOpen.get(String(m.profileId)).load(); if (m.type === 'browser-housekeeping-updated' || m.type === 'browser-profiles-updated' || m.type === 'browser-trace-appended' || (m.type === 'tasks-updated' && metaChanged(m)) || m.type === 'browser-kept-updated') scheduleLoad(); }; // lane task-group-fanout: a title / membership move only // lane browser-resume: + the kept browsers
   app.ws?.onGlobal?.(onGlobal);
   sweepBtn.onclick = async () => { sweepBtn.disabled = true; const r = await act('/api/browser/housekeeping/sweep', jsonInit('POST'), t('Sweep failed')); sweepBtn.disabled = false; if (r) showToast(t('Sweep: removed the frames of {n} action(s) ({bytes}) and {r} recording(s) ({rbytes})', { n: r.removed || 0, bytes: bytesText(r.bytesRemoved || 0), r: r.recordingsRemoved || 0, rbytes: bytesText(r.recordingBytesRemoved || 0) }), { duration: 6000 }); load(); };
   refreshBtn.onclick = () => load();
