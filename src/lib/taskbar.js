@@ -5,6 +5,41 @@ import { t } from './i18n.js';
 import { terminalOnly } from './agent-meta.js'; // the harness table's own word for a plain shell (§78: no id branch here)
 import { visualTabOrder } from './chain-layout.js'; // the chooser lists a group in its STRIP order (split tabs v2: left half, then right)
 import { registerCommand, registerMenuItem, menuItems as contribMenuItems } from './contributions.js';
+import { otherDesktopWindows } from '../desktop-switch.js'; // lane desktop-switch-phone: the ⧉ list's «Other desktops» group (PURE)
+
+/** The ⧉ list's «Other desktops» group: folded (the active desktop's windows stay the list's view) until opened; this page's. */
+let otherDesksOpen = false;
+
+/** Every other desktop's windows — the ones this page built there and the ones a held record lists that it has not built. */
+function otherDeskRows(app) {
+  const dm = app.desktopManager, wm = app.wm;
+  if (!dm || (dm.desktops || []).length < 2) return [];
+  const zOf = (w) => parseInt(w.element?.style?.zIndex, 10) || 0;
+  const built = [...wm.windows.values()].filter((w) => w._desktopId && !w._isStagePlaceholder && !(w._tabChain && w._tabChain.tabs[0] !== w.id))
+    .map((w) => ({ id: w.id, title: w.title, desk: w._desktopId, z: zOf(w) }));
+  const held = [];
+  for (const d of dm.desktops) for (const ws of dm._savedStates?.get(d.id)?.windows || []) {
+    const id = ws && (ws.winId || ws.id);
+    if (id && !wm.windows.has(id)) held.push({ id, title: ws.title, desk: d.id, z: Number(ws.zIndex) || 0 });
+  }
+  return otherDesktopWindows({ desktops: dm.desktops, activeId: dm.activeDesktopId, built, held });
+}
+
+/** A row of another desktop: switch there AND raise it. A built window = THE door (wm.revealWindow switches its desktop
+ *  first, test-architecture §62); one its desktop's record holds that this page has not built = the switch, then the door
+ *  once the switch's replay has built it. */
+function goOtherDesk(app, r) {
+  if (r.built) { app.wm.revealWindow(r.id); return; }
+  const dm = app.desktopManager;
+  const go = app.stage?.isActive ? app.stage.leave(r.deskId) : dm.switchTo(r.deskId);
+  let tries = 0;
+  const look = () => {
+    if (dm.activeDesktopId !== r.deskId) return;
+    if (app.wm.windows.has(r.id)) { app.wm.revealWindow(r.id); return; }
+    if (++tries < 20) setTimeout(look, 250);
+  };
+  Promise.resolve(go).then(look, look);
+}
 
 // Resolve the sidebar SESSION object behind a session window (chat/terminal)
 // — identity kept fresh in _openSpec by syncSessionIdentity. Non-session
@@ -698,7 +733,7 @@ export function showTabGroupList(app, anchor, chain, { hover = false, keyboard =
  * Show a popover listing all open windows (triggered by "x active" click).
  */
 export function showWindowList(app, anchor) {
-  if (!app.wm.windows.size) return;
+  if (!app.wm.windows.size && !otherDeskRows(app).length) return;
   const pop = createPopover(anchor, 'overlap-switcher');
 
   const place = () => requestAnimationFrame(() => {
@@ -757,7 +792,29 @@ export function showWindowList(app, anchor) {
       });
       pop.appendChild(item);
     }
-    if (!count) { pop.remove(); return; }
+    // lane desktop-switch-phone: the OTHER desktops' windows, folded under the active desktop's (its filter above stays the
+    // default view) — a window on another desktop is one press away: the switch, then the raise
+    const others = otherDeskRows(app);
+    if (others.length) {
+      const head = document.createElement('div');
+      head.className = 'overlap-switcher-item overlap-switcher-group' + (otherDesksOpen ? ' open' : '');
+      head.setAttribute('role', 'button'); head.setAttribute('aria-expanded', otherDesksOpen ? 'true' : 'false');
+      head.innerHTML = `<span class="osg-chev">${otherDesksOpen ? '\u25BE' : '\u25B8'}</span>`;
+      head.append(document.createTextNode(t('Other desktops ({n})', { n: others.length })));
+      head.onclick = (e) => { e.stopPropagation(); otherDesksOpen = !otherDesksOpen; render(); };
+      pop.appendChild(head);
+      if (otherDesksOpen) for (const r of others) {
+        const item = document.createElement('div');
+        item.className = 'overlap-switcher-item overlap-switcher-other';
+        item.dataset.winId = r.id; item.dataset.desktopId = r.deskId;
+        const label = document.createElement('span');
+        label.textContent = r.title + ' \u00B7 ' + r.deskName;
+        item.append(label);
+        item.onclick = () => { pop.remove(); goOtherDesk(app, r); };
+        pop.appendChild(item);
+      }
+    }
+    if (!count && !others.length) { pop.remove(); return; }
     place();
   };
   render();

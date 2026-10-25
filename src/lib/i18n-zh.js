@@ -10821,4 +10821,7 @@ export default {
   "Desktops — {name} ({k}/{n})": "桌面 — {name}（{k}/{n}）",
   "1 window": "1 个窗口",
   "New desktop": "新桌面",
+  "{n} not opened on this screen yet": "另有 {n} 个还没在这里打开",
+  "“{name}” is no longer there": "“{name}”已经不在了",
+  "Other desktops ({n})": "其他桌面（{n}）",
 };

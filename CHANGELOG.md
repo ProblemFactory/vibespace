@@ -7,6 +7,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - On a phone and on a foldable's inner screen you can now switch desktops: the Desktops button on the top bar or the side bar lists them all.
 - On a foldable's inner screen held sideways, the ☰ that hides the conversation list now sits at the conversation's top left; a reload keeps your choice.
+- On a computer, the window list in the taskbar now also shows the windows on your other desktops; pick one to go to its desktop.
 
 ## 2.369.356 — 2026-10-25
 

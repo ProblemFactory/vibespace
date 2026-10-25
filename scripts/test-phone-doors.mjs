@@ -156,10 +156,11 @@ console.log('⑥ THE DESKTOPS DOOR (lane desktop-switch-phone — userW on the D
   const mn = read('src/lib/mobile-nav.js'), dm = read('src/lib/desktop-manager.js'), css = read('public/style.css');
   ok(/\n    this\.desktopsBtn = this\._buildDesktopsDoor\(\);\n    this\.bar = installTrailingBar\(app\);/.test(mn) && /b\.id = 'mobile-nav-desktops'; b\.type = 'button'; b\.className = 'mnav-dest mnav-desktops';/.test(mn) && /b\.innerHTML = UI_ICONS\.desktops;/.test(mn),
     'MobileNav builds ONE Desktops button on its nav (both phone classes), an SVG icon (UI_ICONS.desktops) — no new nav, no new sheet component');
-  ok(/action: \(\) => this\.switchDesktop\(d\.id\) \};/.test(mn) && /action: \(\) => this\.switchDesktop\(dm\.createDesktop\(\)\) \}\);/.test(mn) && /const go = app\.stage\?\.isActive \? app\.stage\.leave\(id\) : id === dm\.activeDesktopId \? null : dm\.switchTo\(id\);/.test(mn),
-    'its menu: one row per desktop = the manager\'s own switch road (the Stage left first, as the taskbar preview\'s click), the last row «New desktop» = createDesktop — no hand-rolled switch');
-  ok(/const menu = regular \? showContextMenu\(r\.left, r\.top, items\) : this\._sheet\(items\);/.test(mn),
-    'the compact class lays the menu out as the phone\'s sheet (the «+» long-press sheet\'s _sheet), the regular class beside the button (showContextMenu — the existing infra)');
+  const sh = read('src/lib/desktop-switch-sheet.js');
+  ok(/openDesktopSheet\(this\.app, b, \{ onSwitch: \(id\) => this\.switchDesktop\(id\) \}\)/.test(mn) && /onSwitch\(r\.id\);/.test(sh) && /onSwitch\(dm\.createDesktop\(\)\);/.test(sh) && /const go = app\.stage\?\.isActive \? app\.stage\.leave\(id\) : id === dm\.activeDesktopId \? null : dm\.switchTo\(id\);/.test(mn),
+    'its sheet: one row per desktop = the manager\'s own switch road (the Stage left first, as the taskbar preview\'s click), the last row «New desktop» = createDesktop — no hand-rolled switch');
+  ok(/const menu = showContextMenu\(regular \? ar\.left : 0, regular \? ar\.top : 0, items\);/.test(sh) && /if \(!regular\) menu\.classList\.add\('mobile-sheet'\);/.test(sh),
+    'the compact class lays the sheet out as the phone\'s sheet (.mobile-sheet, the «+» long-press sheet\'s), the regular class beside the button (showContextMenu — the existing infra)');
   ok(/\n  _renderSwitcher\(\) \{\n    this\.app\._mobileNav\?\.updateDesktopsDoor\?\.\(\);/.test(dm) && /\n    this\.bar\?\.update\?\.\(\);\n    this\.updateDesktopsDoor\(\);\n/.test(mn),
     'the door follows every desktop change (the manager\'s _renderSwitcher — switch / create / rename / delete / a remote update) and every window change (updateTitle)');
   ok(/this\._titleEl\.onclick = \(\) => this\._showWindowSwitcher\(\);/.test(mn) && !/if \(app\.viewportClass\?\.\(\) !== 'regular'\) this\._showWindowSwitcher\(\)/.test(mn),

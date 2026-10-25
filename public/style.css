@@ -2217,6 +2217,10 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .overlap-switcher-item:hover { background: var(--accent-dim); }
+/* the ⧉ list's «Other desktops» group (lane desktop-switch-phone): a folded head, then «title · desktop» rows */
+.overlap-switcher-group { border-top: 1px solid var(--border); margin-top: 2px; color: var(--text-dim); font-size: 11px; }
+.overlap-switcher-group .osg-chev { width: 12px; display: inline-block; }
+.overlap-switcher-other { padding-left: 22px; }
 /* the grouped taskbar button's chooser (lane K): the tab on show is marked, a keyboard row lit, the button focusable */
 .taskbar-group-chooser .overlap-switcher-item.active { box-shadow: inset 2px 0 0 var(--accent); }
 .taskbar-group-chooser .overlap-switcher-item:focus-visible { outline: none; background: var(--accent-dim); }
@@ -2506,6 +2510,10 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   .mdesk-menu .mdesk-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mdesk-menu .mdesk-count { flex-shrink: 0; color: var(--text-dim); font-size: 12px; }
   .mdesk-menu .context-menu-item.active .mdesk-name { font-weight: 600; color: var(--accent); }
+  /* the sheet's rows (lane desktop-switch-phone commit 2): the name · its count, then up to three titles greyed */
+  .mdesk-menu .mdesk-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .mdesk-menu .mdesk-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .mdesk-menu .mdesk-titles { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* the 文件 card under the For-you page's bands (the first screen stays the attention list's) */
   #phone-home .ph-files { margin: 16px 0 4px; padding: 10px 12px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-window); }
   #phone-home .ph-files-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--text); }

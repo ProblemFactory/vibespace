@@ -10820,4 +10820,7 @@ export default {
   "Desktops — {name} ({k}/{n})": "デスクトップ — {name}（{k}/{n}）",
   "1 window": "1 ウィンドウ",
   "New desktop": "新しいデスクトップ",
+  "{n} not opened on this screen yet": "ほか {n} 件はまだこの画面で開いていません",
+  "“{name}” is no longer there": "「{name}」はもうありません",
+  "Other desktops ({n})": "ほかのデスクトップ（{n}）",
 };

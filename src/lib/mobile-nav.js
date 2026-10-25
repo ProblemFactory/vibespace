@@ -1,12 +1,14 @@
 import { chipMode, titleMinText, billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the row's billing pill folds, never cuts
 import { t } from './i18n.js';
-import { escHtml, onOutsidePress, showContextMenu, uiScale } from './utils.js';
+import { escHtml, onOutsidePress, showContextMenu } from './utils.js';
 import { showWindowContextMenu } from './taskbar.js';
 import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { getCommand, runCommand } from './contributions.js';
 import { openDesktopPicker } from './desktop-picker.js';
 import { installNavFilesDoor } from './phone-files.js'; // lane phone-files-door: the nav's 文件 — one tap to the files
 import { installTrailingBar } from './trailing-bar.js'; // lane duo-build-1: the regular class's trailing bar (this nav, standing)
+import { openDesktopSheet } from './desktop-switch-sheet.js'; // lane desktop-switch-phone: the desktops' sheet (the nav's Desktops door)
+import { doorState } from '../desktop-switch.js';
 
 const SHOWN_KEY = 'vibespace.phoneShown'; // { [desktopId]: winId } — this tab's window on show per desktop (§6b guard 10)
 function readShown() {
@@ -46,15 +48,6 @@ function fitRowPill(label, chip) {
 /** Is `w` minimized? A tab group is minimized as ONE frame — the HOST carries the flag, its guests are hidden with it. */
 const minimizedOf = (wm, w) => !!((w._tabChain && wm.windows.get(w._tabChain.tabs[0])) || w).isMinimized;
 
-/** A desktop's windows (the Desktops menu's count): the ones this page built there + the ones its held record lists that
- *  the page has not built (a desktop not opened since the page loaded holds nothing else). */
-function deskWindowCount(app, deskId) {
-  const wm = app.wm, held = app.desktopManager?._savedStates?.get(deskId)?.windows || [];
-  let n = 0;
-  for (const w of wm.windows.values()) if (w._desktopId === deskId && !w._isStagePlaceholder) n++;
-  for (const ws of held) { const id = ws && (ws.winId || ws.id); if (id && !wm.windows.has(id)) n++; }
-  return n;
-}
 
 export class MobileNav {
   constructor(app) {
@@ -125,7 +118,7 @@ export class MobileNav {
     b.id = 'mobile-nav-desktops'; b.type = 'button'; b.className = 'mnav-dest mnav-desktops';
     b.innerHTML = UI_ICONS.desktops;
     const badge = document.createElement('span'); badge.className = 'mnav-badge hidden'; b.appendChild(badge);
-    b.onclick = (e) => { e.stopPropagation(); this._showDesktops(b); };
+    b.onclick = (e) => { e.stopPropagation(); openDesktopSheet(this.app, b, { onSwitch: (id) => this.switchDesktop(id) }); };
     const usage = document.getElementById('mobile-nav-usage');
     if (usage && usage.parentNode === nav) nav.insertBefore(b, usage); else nav.appendChild(b);
     return b;
@@ -136,43 +129,11 @@ export class MobileNav {
   updateDesktopsDoor() {
     const b = this.desktopsBtn, dm = this.app.desktopManager;
     if (!b) return;
-    const desks = dm?.desktops || [], k = desks.findIndex((d) => d.id === dm?.activeDesktopId) + 1;
-    const label = k ? t('Desktops — {name} ({k}/{n})', { name: desks[k - 1].name, k, n: desks.length }) : t('Desktops');
+    const s = doorState((dm?.desktops || []).map((d) => ({ id: d.id, name: d.name, active: d.id === dm.activeDesktopId })));
+    const label = s.k ? t('Desktops — {name} ({k}/{n})', { name: s.name, k: s.k, n: s.n }) : t('Desktops');
     if (b.title !== label) { b.title = label; b.setAttribute('aria-label', label); }
-    const badge = b.querySelector('.mnav-badge'), num = desks.length > 1 && k ? String(k) : '';
-    if (badge && badge.textContent !== num) { badge.textContent = num; badge.classList.toggle('hidden', !num); }
-  }
-
-  /** The Desktops menu: every desktop by name with its window count, the active one marked; a tap = the manager's own
-   *  switch road (the taskbar preview's click — the Stage left first); the last row «+ New desktop» = the taskbar's «+».
-   *  The compact class lays it out as the phone's sheet under the nav (the «+» long-press sheet's pattern); the regular
-   *  class opens it beside the button, into the conversation column (the ⋯'s placement). */
-  _showDesktops(anchor) {
-    const app = this.app, dm = app.desktopManager;
-    if (!dm) return null;
-    const mark = (svg) => `<span class="mdesk-mark">${svg || ''}</span>`;
-    const items = dm.desktops.map((d) => {
-      const n = deskWindowCount(app, d.id);
-      return { labelHtml: `${mark(d.id === dm.activeDesktopId ? UI_ICONS.check : '')}<span class="mdesk-name">${escHtml(d.name)}</span><span class="mdesk-count">${escHtml(n === 1 ? t('1 window') : t('{n} windows', { n }))}</span>`,
-        action: () => this.switchDesktop(d.id) };
-    });
-    items.push({ labelHtml: `${mark(UI_ICONS.plus)}<span class="mdesk-name">${escHtml(t('New desktop'))}</span>`, action: () => this.switchDesktop(dm.createDesktop()) });
-    const regular = app.viewportClass?.() === 'regular';
-    const r = anchor.getBoundingClientRect();
-    const menu = regular ? showContextMenu(r.left, r.top, items) : this._sheet(items);
-    menu.classList.add('mdesk-menu');
-    menu.querySelectorAll('.context-menu-item').forEach((el, i) => {
-      const d = dm.desktops[i];
-      if (!d) { el.classList.add('mdesk-new'); return; }
-      el.dataset.desktopId = d.id;
-      el.classList.toggle('active', d.id === dm.activeDesktopId);
-    });
-    if (regular) {
-      const Z = uiScale(), nav = document.getElementById('mobile-nav');
-      if (getComputedStyle(nav).flexDirection === 'column') { menu.style.left = 'auto'; menu.style.right = ((innerWidth - r.left + 8) / Z) + 'px'; }
-      else { menu.style.top = ((r.bottom + 4) / Z) + 'px'; menu.style.bottom = ''; menu.style.left = 'auto'; menu.style.right = (Math.max(4, innerWidth - r.right) / Z) + 'px'; }
-    }
-    return menu;
+    const badge = b.querySelector('.mnav-badge');
+    if (badge && badge.textContent !== s.badge) { badge.textContent = s.badge; badge.classList.toggle('hidden', !s.badge); }
   }
 
   /** Switch this tab to desktop `id` by the manager's road (the Stage left first, as the taskbar's preview does), then show

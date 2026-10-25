@@ -40,6 +40,11 @@
 //     conversation's head (its title bar) opens the window switcher with both desktop tabs; the landscape list column's ☰
 //     hides it (the conversation 0–895), a reload keeps the choice, ☰ again shows it; 382 touch: the same door on the top
 //     bar, the phone's sheet, a tap on the second desktop shows its window (a lazy replay on this page)
+//   ⑨ THE ⧉ LIST + THE DOOR CENSUS (lane desktop-switch-phone): a mouse desktop's ⧉ list keeps the active desktop's windows
+//     and folds «Other desktops (1)»; its row «<title> · Desk B» switches AND raises (a held window: built by the switch,
+//     then revealed); the census presses every control of the phone chrome on screen and counts the ones that open desktop
+//     rows — 951: the bar's Desktops + the conversation's head, 382: Desktops + the title; RED CONTROL: a bundle with the
+//     base's no-door rules put back ⇒ 0 doors at 951 (and no taskbar)
 //   ⑥ RED CONTROL — a bundle built from this source with the base's four rules put back (no switch: the class frozen at
 //     boot; the composer focused on touch; no regular class: the Duo's 951 is the window manager; no ladder): (b) and (c)
 //     red on the cover, (a) red on the inner portrait, the composer focused on the touch Duo's attach, the 951 Duo's
@@ -104,6 +109,20 @@ process.stdin.on('end', () => process.exit(0));
   execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT });
 }
 const MUT_BUNDLE = fs.readFileSync(path.join(MUT, 'bundle-mut.js'));
+// ── ⑨'s RED CONTROL bundle (lane desktop-switch-phone): THIS source with the base's no-door rules put back — no Desktops
+// button, the regular class's title tap off, no head listener (ba15fe55: the regular class reached no desktop but the boot one) ──
+{
+  const D = path.join(MUT, 'door');
+  fs.mkdirSync(D, { recursive: true });
+  execSync(`cp -r ${repo}/src ${D}/src`);
+  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(D, 'node_modules'));
+  const sub = (rel, from, to) => { const f = path.join(D, rel); const s = fs.readFileSync(f, 'utf8'); if (s.split(from).length !== 2) throw new Error(`door mutant anchor ${rel}: ${from.slice(0, 60)}`); fs.writeFileSync(f, s.replace(from, to)); };
+  sub('src/lib/mobile-nav.js', 'this.desktopsBtn = this._buildDesktopsDoor();', 'this.desktopsBtn = null;');
+  sub('src/lib/mobile-nav.js', 'this._titleEl.onclick = () => this._showWindowSwitcher();', "this._titleEl.onclick = () => { if (app.viewportClass?.() !== 'regular') this._showWindowSwitcher(); };");
+  sub('src/lib/mobile-nav.js', "      if (app.viewportClass?.() !== 'regular' || getComputedStyle(document.getElementById('mobile-nav')).flexDirection !== 'column') return;\n", '      return;\n');
+  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-door.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: D });
+}
+const DOOR_BUNDLE = fs.readFileSync(path.join(MUT, 'door', 'bundle-door.js'));
 
 // ── throwaway server in a worktree (the tree's src/ + built public/) ──
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
@@ -145,7 +164,7 @@ sock.on('message', (d) => {
   if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown');
   if (m.method === 'Fetch.requestPaused') {
     const p = m.params, u = new URL(p.request.url);
-    if (mutantOn && u.pathname === '/bundle.js') sock.send(JSON.stringify({ id: ++seq, method: 'Fetch.fulfillRequest', params: { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }, { name: 'Cache-Control', value: 'no-store' }], body: MUT_BUNDLE.toString('base64') } }));
+    if (mutantOn && u.pathname === '/bundle.js') sock.send(JSON.stringify({ id: ++seq, method: 'Fetch.fulfillRequest', params: { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }, { name: 'Cache-Control', value: 'no-store' }], body: (mutantOn === 'door' ? DOOR_BUNDLE : MUT_BUNDLE).toString('base64') } }));
     else sock.send(JSON.stringify({ id: ++seq, method: 'Fetch.continueRequest', params: { requestId: p.requestId } }));
   }
 });
@@ -419,7 +438,7 @@ try {
     await evalJs(`(async () => { await app.desktopManager.switchTo(${JSON.stringify(desk1)}); return 1; })()`); await sleep(1300);
     const DOOR = `(() => { const b = document.getElementById('mobile-nav-desktops'); if (!b) return null; const r = b.getBoundingClientRect(), bar = document.getElementById('mobile-nav').getBoundingClientRect(); const y = (s) => { const e = document.querySelector(s); return e ? Math.round(e.getBoundingClientRect().top) : null; }; const badge = b.querySelector('.mnav-badge');
       return { shown: getComputedStyle(b).display !== 'none' && r.width > 0, l: Math.round(r.left), t: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), barL: Math.round(bar.left), gapT: y('#mobile-nav .mnav-gap'), tasksT: y('#mobile-nav-dest-tasks'), badge: badge && !badge.classList.contains('hidden') ? badge.textContent : '', label: b.getAttribute('aria-label') }; })()`;
-    const MENU = `(() => { const m = document.querySelector('.context-menu.mdesk-menu'); if (!m) return null; const b = m.getBoundingClientRect(); return { left: Math.round(b.left), right: Math.round(b.right), rows: [...m.querySelectorAll('.context-menu-item')].map((r) => ({ id: r.dataset.desktopId || null, active: r.classList.contains('active'), name: r.querySelector('.mdesk-name')?.textContent || '', count: r.querySelector('.mdesk-count')?.textContent || '', h: Math.round(r.getBoundingClientRect().height) })) }; })()`;
+    const MENU = `(() => { const m = document.querySelector('.context-menu.mdesk-menu'); if (!m) return null; const b = m.getBoundingClientRect(); return { left: Math.round(b.left), right: Math.round(b.right), rows: [...m.querySelectorAll('.context-menu-item')].map((r) => ({ id: r.dataset.desktopId || null, active: r.classList.contains('active'), name: r.querySelector('.mdesk-name')?.textContent || '', count: r.querySelector('.mdesk-count')?.textContent || '', titles: r.querySelector('.mdesk-titles')?.textContent || '', h: Math.round(r.getBoundingClientRect().height) })) }; })()`;
     const SHOWN = `(() => { const w = app.wm.windows.get(app.wm.activeWindowId); const el = w && w.element; const r = el && el.getBoundingClientRect(); const sb = document.getElementById('sidebar'); const sr = sb.getBoundingClientRect();
       return { desk: app.desktopManager.activeDesktopId, type: w ? w.type : null, onDesk: w ? w._desktopId : null, visible: !!el && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none', l: r ? Math.round(r.left) : null, w: r ? Math.round(r.width) : null, list: getComputedStyle(sb).display !== 'none' ? { l: Math.round(sr.left), w: Math.round(sr.width) } : null, badge: document.querySelector('#mobile-nav-desktops .mnav-badge')?.textContent || '' }; })()`;
     const d0 = await evalJs(DOOR);
@@ -428,6 +447,16 @@ try {
     const m0 = await evalJs(MENU);
     check('⑧ …a tap: a menu INTO the conversation column (left of the bar) — every desktop by name with its window count, the active one marked, then «New desktop»; 44 px rows',
       !!m0 && m0.right <= d0.barL && m0.rows.length === 3 && m0.rows[0].active && /\b2 windows/.test(m0.rows[0].count) && m0.rows[1].name === 'Desk B' && !m0.rows[1].active && /^1 window$/.test(m0.rows[1].count) && /New desktop/.test(m0.rows[2].name) && !m0.rows[2].id && m0.rows.every((r) => r.h >= 44), m0);
+    check('⑧ …each row\'s window titles under its name, greyed (the two conversations; the explorer)', /^Session \d.* · Session \d/.test(m0.rows[0].titles) && /vs-duo-layout-home|~|Files/.test(m0.rows[1].titles), m0.rows.map((r) => r.titles));
+    { // a long press on a row = the desktop's own verbs (Rename · Delete — the switcher tab's long press)
+      const at = await evalJs(`(() => { const r = document.querySelector('.mdesk-menu .context-menu-item[data-desktop-id="${deskB}"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] }); await sleep(800);
+      await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await sleep(400);
+      const verbs = await evalJs(`[...document.querySelectorAll('.context-menu:not(.mdesk-menu) .context-menu-item')].map((r) => r.textContent.trim())`);
+      check('⑧ …a long press on a row: Rename · Delete (the manager\'s own verbs; the sheet gives way to them)', JSON.stringify(verbs) === JSON.stringify(['Rename', 'Delete']) && !(await evalJs(`!!document.querySelector('.mdesk-menu')`)), verbs);
+      await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
+      await tap('#mobile-nav-desktops');
+    }
     await tap(`.mdesk-menu .context-menu-item[data-desktop-id="${deskB}"]`);
     await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(deskB)} && (app.wm.windows.get(app.wm.activeWindowId) || {})._desktopId === ${JSON.stringify(deskB)}`, 6000); await sleep(500);
     const s1 = await evalJs(SHOWN);
@@ -465,13 +494,69 @@ try {
     await tap('#mobile-nav-desktops');
     const m1 = await evalJs(MENU);
     check('⑧ …a tap: the phone\'s sheet under the bar lists both desktops with their counts + «New desktop»', !!m1 && m1.rows.length === 3 && m1.rows[0].active && m1.rows[1].name === 'Desk B' && /^1 window$/.test(m1.rows[1].count) && m1.left <= 10 && m1.right >= 372, m1);
+    check('⑧ …Desk B\'s explorer is in its held record only (this page booted on the first desktop): its row says so', /1 not opened on this screen yet/.test(m1.rows[1].titles), m1.rows[1]);
     await tap(`.mdesk-menu .context-menu-item[data-desktop-id="${deskB}"]`);
     await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(deskB)} && (app.wm.windows.get(app.wm.activeWindowId) || {})._desktopId === ${JSON.stringify(deskB)}`, 8000); await sleep(500);
     const s3 = await evalJs(SHOWN);
     await shot('desktops-door-382.png');
     check('⑧ …a tap on «Desk B»: the phone shows that desktop\'s window (the explorer — never built on this page before: the lazy replay), filling the screen, badge 2', s3.desk === deskB && s3.type === 'files' && s3.visible && s3.l === 0 && s3.w >= 380 && s3.badge === '2', s3);
+    const noted = await evalJs(`(() => { const m = JSON.parse(sessionStorage.getItem('vibespace.phoneShown') || '{}'); return Object.entries(m).map(([d, w]) => ({ d, w, wd: (app.wm.windows.get(w) || {})._desktopId || null })); })()`);
+    check('⑧ …§6b guard 10: every desktop\'s noted window on show is a window OF that desktop (the switch\'s in-between noted none)', noted.length >= 1 && noted.every((x) => !x.wd || x.wd === x.d) && noted.some((x) => x.d === deskB), noted);
     await sleep(1100);
     await evalJs(`(async () => { await app.desktopManager.switchTo(${JSON.stringify(desk1)}); return 1; })()`); await sleep(1300);
+  }
+  console.log('⑨ the ⧉ window list\'s «Other desktops» group (1280×800, a mouse) + THE DOOR CENSUS (every phone-chrome control that opens desktop rows)');
+  {
+    await device(1280, 800, { mouse: true }); await load(); await waitFor(`!!document.querySelector('.window.window-active')`, 10000); await sleep(600);
+    const deskB = await evalJs(`(app.desktopManager.desktops.find((d) => d.name === 'Desk B') || {}).id || null`);
+    await evalJs(`document.getElementById('taskbar-status').click(), 1`); await sleep(400);
+    const LIST = `(() => { const p = document.querySelector('.overlap-switcher'); if (!p) return null; return { mine: [...p.querySelectorAll('.overlap-switcher-item:not(.overlap-switcher-group):not(.overlap-switcher-other)')].length, head: p.querySelector('.overlap-switcher-group')?.textContent || null, others: [...p.querySelectorAll('.overlap-switcher-other')].map((r) => ({ win: r.dataset.winId, desk: r.dataset.desktopId, text: r.textContent })) }; })()`;
+    const w0 = await evalJs(LIST);
+    check('⑨ the ⧉ list: the active desktop\'s windows (its filter stays the view), then a FOLDED «Other desktops (1)»', !!w0 && w0.mine === 2 && /Other desktops \(1\)/.test(w0.head || '') && w0.others.length === 0, w0);
+    await evalJs(`document.querySelector('.overlap-switcher-group').click(); 1`); await sleep(200);
+    const w1 = await evalJs(LIST);
+    check('⑨ …unfolded: «<title> · Desk B» (the explorer the record holds — this page never built it)', !!w1 && w1.others.length === 1 && w1.others[0].desk === deskB && / · Desk B$/.test(w1.others[0].text), w1);
+    await evalJs(`document.querySelector('.overlap-switcher-other').click(); 1`);
+    const went = await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(deskB)} && (app.wm.windows.get(app.wm.activeWindowId) || {}).type === 'files'`, 8000);
+    check('⑨ …a press: Desk B on show AND its explorer raised (built by the switch\'s replay, then revealed)', went, await evalJs(`({ desk: app.desktopManager.activeDesktopId, type: (app.wm.windows.get(app.wm.activeWindowId) || {}).type || null })`));
+    await sleep(1100);
+    await evalJs(`(async () => { await app.desktopManager.switchTo(app.desktopManager.desktops[0].id); return 1; })()`); await sleep(1300);
+  }
+  /** THE DOOR CENSUS: every control of the phone chrome on screen (the nav's buttons and title, the conversation's title bar,
+   *  the list's ☰) pressed once; a door = a press that shows two desktop rows (the sheet's, or the switcher's tabs). Each
+   *  press is undone (menus, sheets, a dialog, the drawer, a window it opened, the list's tab / column). Two buttons are not
+   *  pressed — they act, they lead nowhere: the compact bar's ✕ (closes the window on show) and + (New Session). The
+   *  taskbar's own switcher must be off screen. */
+  const doorCensus = async () => {
+    const taskbar = await evalJs(`(() => { const t = document.getElementById('taskbar'); return !!t && getComputedStyle(t).display !== 'none' && t.getBoundingClientRect().height > 0; })()`);
+    const targets = await evalJs(`(() => { const out = []; const vis = (e) => { const r = e.getBoundingClientRect(); const cs = getComputedStyle(e); return r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden'; };
+      document.querySelectorAll('#mobile-nav > button, #mobile-nav-title, .window.window-active > .window-titlebar, #list-column-toggle').forEach((e, i) => { if (!vis(e) || e.id === 'mobile-nav-close' || e.id === 'mobile-nav-new') return; e.dataset.census = 'c' + i; out.push({ sel: '[data-census="c' + i + '"]', id: e.id || e.className.split(' ')[0] }); }); return out; })()`);
+    const doors = [];
+    for (const { sel, id } of targets) {
+      const before = await evalJs(`[...app.wm.windows.keys()]`);
+      try { await tap(sel); } catch { continue; }
+      const rows = await evalJs(`document.querySelectorAll('.mdesk-menu [data-desktop-id], .mobile-win-switcher .mobile-desk-tab:not(.mobile-desk-add)').length`);
+      if (rows >= 2) doors.push(id);
+      await evalJs(`(() => { document.querySelectorAll('.context-menu, .mobile-win-switcher, [data-popover]').forEach((m) => m.remove()); document.querySelectorAll('.usage-popup').forEach((p) => p.classList.add('hidden')); app.hideDialogs?.();
+        for (const id of [...app.wm.windows.keys()]) if (!${JSON.stringify(before)}.includes(id)) app.wm.closeWindow(id);
+        document.querySelector('.sidebar-tab[data-tab="folders"]')?.click(); if (app.sidebar.isOpen) app.sidebar.toggle(false); if (document.documentElement.classList.contains('vs-list-hidden')) app.sidebar.setListHidden(false); return 1; })()`);
+      await sleep(250);
+    }
+    return { taskbar, pressed: targets.map((x) => x.id), doors };
+  };
+  {
+    await device(951, 585); await load(); await attachBoth();
+    const c951 = await doorCensus();
+    check('⑨ THE DOOR CENSUS at 951 (touch, the regular class): no taskbar — and the doors are the bar\'s Desktops + the conversation\'s head', !c951.taskbar && c951.doors.includes('mobile-nav-desktops') && c951.doors.includes('window-titlebar'), c951);
+    await device(382, 580); await settle(382);
+    const c382 = await doorCensus();
+    check('⑨ …at 382 (the compact class): the top bar\'s Desktops + its title', !c382.taskbar && c382.doors.includes('mobile-nav-desktops') && c382.doors.includes('mobile-nav-title'), c382);
+    mutantOn = 'door';
+    await device(951, 585); await load(); await attachBoth();
+    const red = await doorCensus();
+    mutantOn = false;
+    check('⑨ RED CONTROL — the base\'s no-door rules put back (ba15fe55): at 951 not one control of the phone chrome opens a desktop row, and no taskbar', !red.taskbar && red.doors.length === 0 && red.pressed.length >= 5, red);
+    await load();
   }
   console.log('⑦ the posture ladder (folded alone moves nothing; segments:2 arranges; the cover ignores folded)');
   {
