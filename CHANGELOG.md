@@ -2,7 +2,7 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
-## 2.369.358 — 2026-10-25
+## 2.369.358 — 2026-10-26
 
 ### Added
 - A browser engine plugin can now be the agent browser: Change build… shows its Custom kernel card with the version, and says so when its kernel is missing.

@@ -4,7 +4,7 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
-## 2.369.358 — 2026-10-25
+## 2.369.358 — 2026-10-26
 
 ### engine-plugin — P0 of the custom browser kernel: a browser ENGINE plugin, the `{kind:'plugin'}` choice through both launch roads + a conversation's browser, the default policy as a setting with a fleet fact (BUILD lane on 2.369.355 ba15fe55; docs/design-custom-browser-plugin.zh.md §1 rewritten as built)
 - **The registry:** manifest `contributes.browserEngine` (needs `server` + `routes`, each refused by name; `needsConsent` always; `capabilitiesHash` names it only when true — no existing trust voided); built-in `CAP_VERBS['browser-engine'] = ['probe','launchOptions']` (`builtin.<id>` in the table); PURE src/browser-engines.js (answer verdicts, 6 `ENGINE_CODES` merged into BUILD_CODES, `ENGINE_ENV_KEYS = []`, the args VibeSpace owns refused, the policy); ORCH src/server/browser-engines.js (rows only while enabled + trusted + running; each verb ONE loader `askRoute` — new loader export, the /x/* proxy's message and 30 s cap; a probe about another path than the one handed is refused).
