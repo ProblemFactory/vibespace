@@ -306,7 +306,7 @@ const KNOWN_TOOLS = Object.freeze([
   { name: 'curl', proxyEnv: true, bareHosts: 'all', globs: true, urlFlags: ['--url'], blindPrefixes: ['--expand-'], valueFlags: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config', ...CURL_VALUE_FLAGS], keyed: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc', '--interface'], configFlags: ['-K', '--config'], fileFlags: ['--cacert', '--capath', '-E', '--cert', '--key', '--netrc-file', '--hsts', '--etag-save', '--etag-compare'] },   // round 3: a flag that redirects the connection off the URL's host (--alt-svc / --interface) is keyed; a value that is an agent-writable FILE (cert / ca / netrc / hsts cache) is a config class — blind unless it is the vault's own $VAULT_FILE
   { name: 'wget', proxyEnv: true, bareHosts: 'all', prefixOpts: true, valueFlags: WGET_VALUE_FLAGS, keyed: ['-e', '--execute', '-B', '--base', '--bind-address', '--use-askpass'], configFlags: ['--config', '-i', '--input-file', '--input-metalink'], fileFlags: ['--ca-certificate', '--certificate', '--private-key', '--load-cookies', '--save-cookies'] },   // round 3 (m2): --input-metalink fetches every URL in its file (like -i); a cert / cookie file the agent writes is a config class
   { name: 'http', aka: ['https', 'httpie'], proxyEnv: true, bareHosts: 'first', valueFlags: HTTPIE_VALUE_FLAGS, keyed: ['--proxy'] },
-  { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'], hostFlags: ['--hostname'], repoFlags: ['-R', '--repo'], repoEnv: ['GH_REPO'], blindSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'sync'], ['pr', 'checkout'], ['extension', 'install'], ['extension', 'upgrade']], blindFlagSubs: [{ sub: ['pr', 'merge'], flags: ['--delete-branch', '-d'] }, { sub: ['repo', 'create'], flags: ['--push', '--clone'] }], repoSpecSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'view'], ['repo', 'sync']], passDashes: true },   // round 3: gh extension install/upgrade runs code; a verb+flag that drives git (pr merge --delete-branch, repo create --push/--clone) is blind; only repo clone/fork/view/sync read a POSITIONAL as HOST/OWNER/REPO (gh api <path> is a path under the default host, never a host)   // round 2b: these drive `git` (the project's .git/config + hooks, like the git row); args after `--` go to git
+  { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'], hostFlags: ['--hostname'], repoFlags: ['-R', '--repo'], repoEnv: ['GH_REPO'], blindSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'sync'], ['pr', 'checkout'], ['extension', 'install'], ['extension', 'upgrade']], blindFlagSubs: [{ sub: ['pr', 'merge'], longs: ['--delete-branch'], shorts: ['-d'] }, { sub: ['repo', 'create'], longs: ['--push', '--clone'], shorts: ['-c'] }], repoSpecSubs: [['repo', 'archive'], ['repo', 'clone'], ['repo', 'delete'], ['repo', 'edit'], ['repo', 'fork'], ['repo', 'set-default'], ['repo', 'sync'], ['repo', 'unarchive'], ['repo', 'view']], passDashes: true },   // round 3: gh extension install/upgrade runs code; a verb+flag that drives git (pr merge --delete-branch, repo create --push/--clone) is blind; round 4: every gh repo verb whose first positional is <repository> (archive/clone/delete/edit/fork/set-default/sync/unarchive/view, pinned vs gh repo --help) reads positionals[0] as HOST/OWNER/REPO (gh api <path> is a path under the default host, never a host); a git-driving bool flag matches in every pflag spelling via boolFlagOn   // round 2b: these drive `git` (the project's .git/config + hooks, like the git row); args after `--` go to git
   { name: 'git', sub: 1, scpLike: true, proxyEnv: true, confDest: true, valueFlags: ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'], keyed: ['-c', '--config-env'] },
   { name: 'aws', hosts: ['*.amazonaws.com'], sub: 2, proxyEnv: true, valueFlags: ['--profile', '--region', '--output'] },
   { name: 'gcloud', hosts: ['*.googleapis.com'], sub: 3, proxyEnv: true, valueFlags: ['--project', '--account', '--format', '--configuration'] },
@@ -495,6 +495,31 @@ const CONNINFO_HOST = /(?:^|[\s?&=]|^-d)(?:host|hostaddr)\s*=\s*(?:'((?:[^'\\]|\
 function conninfoHosts(text) { const out = []; let m; CONNINFO_HOST.lastIndex = 0; while ((m = CONNINFO_HOST.exec(String(text)))) for (const h of String(m[1] != null ? m[1] : m[2]).split(',')) { const hh = h.trim(); if (/^(?:\/|%2f)/i.test(hh)) continue; out.push(normHost(hh)); } return out.filter(Boolean); }   // round 2b: a unix-socket path is local, not a network host
 const CONNINFO_URI = /^postgres(?:ql)?:\/\/[^#]*/i;
 function conninfoUriBlind(text) { const m = CONNINFO_URI.exec(String(text)); if (!m) return false; const q = m[0].indexOf('?'); return q >= 0 && m[0].slice(q).includes('%'); }   // round 3: a % in a conninfo URI's query = a libpq-decoded keyword (host / hostaddr / service) our reader cannot see
+/** round 4: is a boolean flag present in its TRUE sense in any pflag spelling — the long form, --flag=true (not =false / =0),
+ *  a short letter alone, a short letter inside a cluster of boolean letters (-dm / -md), or -x=true? gh's git-driving flags
+ *  spell short aliases (pr merge --delete-branch / -d; repo create --clone / -c, --push). */
+function boolFlagOn(argv, longs, shorts) {
+  const truthy = (val) => val == null || !/^(?:0|f|false)$/i.test(val);
+  for (const a of argv.slice(1)) {
+    if (a === '--') break;
+    if (a.startsWith('--') && a.length > 2) { const eq = a.indexOf('='); if (longs.includes(eq > 0 ? a.slice(0, eq) : a) && truthy(eq > 0 ? a.slice(eq + 1) : null)) return true; }
+    else if (a[0] === '-' && a.length > 1 && a[1] !== '-') { const eq = a.indexOf('='), letters = eq > 0 ? a.slice(1, eq) : a.slice(1), val = eq > 0 ? a.slice(eq + 1) : null; for (const c of letters) if (shorts.includes('-' + c) && truthy(val)) return true; }
+  }
+  return false;
+}
+/** round 4: a curl / wget FILE flag (--cacert / --cert / --netrc-file / --hsts …) escapes the config-file blind ONLY when its
+ *  WHOLE value is a $VAULT_FILE{…} placeholder (for -E / --cert an optional :password after it — nothing else) whose entry the
+ *  agent did NOT author: an owner-store entry. A template (--file NAME=@…, the agent's own text) or an agent-scoped entry (the
+ *  agent put or minted the bytes) is the agent's own file ⇒ blind as any other config file; a $VAULT_FILE{…} inside a longer
+ *  path (./x/$VAULT_FILE{o}/ca.pem, $VAULT_FILE{o}/../ca.pem) is not a whole placeholder ⇒ blind. */
+function fileFlagExempt(f, v, run) {
+  const re = f === '-E' || f === '--cert' ? /^\$VAULT_FILE\{([^}]*)\}(?::.*)?$/ : /^\$VAULT_FILE\{([^}]*)\}$/;
+  const m = re.exec(String(v));
+  if (!m) return false;
+  const inner = m[1];
+  if (ENV_NAME.test(inner)) { const file = run.files.find((x) => x.name === inner); return !!file && file.template == null && file.ref != null && !agentScopeOf(parseRef(file.ref)); }
+  return !agentScopeOf(innerRef(inner));
+}
 /** getopt's short-flag cluster: the first letter that takes a value takes the rest of the word (`-hHOST`, `-sSo out`) or the next word. */
 function shortSplit(a, takes) { for (let i = 1; i < a.length; i++) { const f = '-' + a[i]; if (takes.includes(f)) { let v = i + 1 < a.length ? a.slice(i + 1) : null; if (v && v[0] === '=') v = v.slice(1); return { f, head: a.slice(0, i + 1), v }; } } return null; }   // round 2b: `-s=https://…` (Go flags) drops the `=`
 const HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$|^localhost$/i;
@@ -551,12 +576,12 @@ function shapeOf(run) {
     if (row.registry) for (const a of positionals) { const h = a.split('/')[0]; if (HOSTNAME.test(h.replace(/:\d+$/, ''))) hosts.add(normHost(h)); }
     if (row.hostEnv) for (const v of envs(row.hostEnv)) many(v).forEach((h) => hosts.add(h));
     if (row.bareHosts) for (const a of [...(row.bareHosts === 'first' ? httpieTarget(positionals) : positionals), ...vals(row.urlFlags)]) { if (String(a).startsWith('@')) { unread = true; continue; } const t = targetOf(a, !!row.globs, row.bareHosts === 'all'); if (t.host) hosts.add(t.host); if (t.unread) unread = true; }   // round 2b: `--url @file` / `@urls.txt` reads the real targets from a file
-    if (row.conninfo) for (const a of argv.slice(1)) { conninfoHosts(a).forEach((h) => hosts.add(h)); if (conninfoUriBlind(a)) unread = true; }
+    if (row.conninfo) for (const a of [...argv.slice(1), ...vals(['-d', '--dbname'])]) { conninfoHosts(a).forEach((h) => hosts.add(h)); if (conninfoUriBlind(a)) unread = true; }
     const repoSpec = row.repoSpecSubs && row.repoSpecSubs.some((b) => b.every((w, i) => sub[i] === w)) && positionals.length ? [positionals[0]] : [];   // round 3 (fix 5): only a repo-spec verb reads a positional as a repo spec
     if (row.repoFlags) for (const v of [...vals(row.repoFlags), ...envs(row.repoEnv), ...repoSpec]) { const p = String(v).split('/'); if (p.length >= 3) { const h = normHost(p[0]); if (h) hosts.add(h); else unread = true; } }   // gh -R HOST/OWNER/REPO (round 2b: an IP / a port / a trailing dot routes too — no HOSTNAME gate; gh sends GH_ENTERPRISE_TOKEN to a non-github host)
     if (row.blindSubs && row.blindSubs.some((b) => b.every((w, i) => sub[i] === w))) unread = true;   // round 2b: a subcommand that drives git (gh repo clone / pr checkout) — the project's config / hooks decide where it goes
-    if (row.blindFlagSubs) for (const b of row.blindFlagSubs) if (b.sub.every((w, i) => sub[i] === w) && b.flags.some((fl) => flags.has(fl))) unread = true;   // round 3: a verb that drives git only with a flag (gh pr merge --delete-branch, repo create --push/--clone)
-    if (row.fileFlags) for (const [f, v] of valued) if (row.fileFlags.includes(f) && !/\$VAULT_FILE\{/.test(v)) configFile = true;   // round 3: a cert / config FILE the agent can write ⇒ config class — blind unless it is the vault's own $VAULT_FILE
+    if (row.blindFlagSubs) for (const b of row.blindFlagSubs) if (b.sub.every((w, i) => sub[i] === w) && boolFlagOn(argv, b.longs || [], b.shorts || [])) unread = true;   // round 3/4: a verb that drives git only with a bool flag (gh pr merge --delete-branch/-d, repo create --push/--clone/-c) — boolFlagOn matches every pflag spelling (long, =true not =false, a short alone or in a cluster, -x=true)
+    if (row.fileFlags) for (const [f, v] of valued) if (row.fileFlags.includes(f) && !fileFlagExempt(f, v, run)) configFile = true;   // round 3/4: a cert / config FILE the agent can write ⇒ config class — blind unless the WHOLE value is a $VAULT_FILE placeholder (fileFlagExempt) for an owner-store entry (a template / an agent-put entry / a substring blinds)
     if (row.passDashes && flags.has('--')) unread = true;   // round 2b: gh passes args after `--` to git
     if ([...argv.slice(1), ...run.plainEnv.map((e) => e.value), ...run.files.map((f) => f.text || '')].some(blindAuthority)) unread = true;   // round 2b (HIGH-1): a URL authority our host read cannot be trusted for
     if (!hosts.size && row.hosts) row.hosts.forEach((h) => hosts.add(h));

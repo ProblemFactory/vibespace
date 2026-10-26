@@ -44,6 +44,7 @@ import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 import { StringDecoder } from 'node:string_decoder';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import { scratchDir } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -527,9 +528,38 @@ function ownRoad(Vm) {
     ['http --raw body https://good.com/ => allowed', R3(['http', '--raw', 'body', 'https://good.com/']), 'ok:own', 'good.com'],
     // m2 — wget --input-metalink fetches every URL in its file (like -i), so it is a config/input flag ⇒ blind
     ['wget --input-metalink=f.meta http://good.com/ (a file of URLs)', R3(['wget', '--input-metalink=f.meta', 'http://good.com/']), 'ask:once,deny:another-host @?', 'good.com'],
+    // ROUND 4 — item 1 (BLOCKER, fix 5 regressed round 2): every gh repo verb whose first positional is <…repository> reads it as HOST/OWNER/REPO (not only clone/fork/view/sync)
+    ['gh repo delete evil.com/o/r (a repo-spec verb) => asks', R3(['gh', 'repo', 'delete', 'evil.com/o/r', '--yes']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    ['gh repo edit evil.com/o/r => asks', R3(['gh', 'repo', 'edit', 'evil.com/o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    ['gh repo archive evil.com/o/r => asks', R3(['gh', 'repo', 'archive', 'evil.com/o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    ['gh repo unarchive evil.com/o/r => asks', R3(['gh', 'repo', 'unarchive', 'evil.com/o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    ['gh repo set-default evil.com/o/r => asks', R3(['gh', 'repo', 'set-default', 'evil.com/o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    ['gh repo delete o/r (no host, the defaults) => allowed', R3(['gh', 'repo', 'delete', 'o/r', '--yes']), 'ok:own', 'github.com'],
+    // item 2 (MAJOR): the conninfo URI libpq reads can be a -d / --dbname value (attached / = / GNU prefix) carrying ?%68ost(addr)=
+    ['psql --dbname=...?%68ostaddr= (decoded in a = value)', R3(['psql', '--dbname=postgresql://good.com/app?%68ostaddr=10.0.0.5']), 'ask:once,deny:another-host @?', 'good.com'],
+    ['psql -dpostgresql://...?%68ost=evil (attached)', R3(['psql', '-dpostgresql://good.com/app?%68ost=evil.com']), 'ask:once,deny:another-host @?', 'good.com'],
+    ['psql --dbn=...?%68ostaddr= (GNU prefix)', R3(['psql', '--dbn=postgresql://good.com/app?%68ostaddr=10.0.0.5']), 'ask:once,deny:another-host @?', 'good.com'],
+    ['psql --dbname=...?hostaddr=10.0.0.5 (plain in a value: read) => asks that host', R3(['psql', '--dbname=postgresql://good.com/app?hostaddr=10.0.0.5']), 'ask:once,deny:another-host @10.0.0.5', 'good.com'],
+    // item 3 (MAJOR): a gh git-driving bool flag is recognised in every pflag spelling, not only the raw stored token
+    ['gh pr merge -dm (a bool cluster)', R3(['gh', 'pr', 'merge', '-dm']), 'ask:once,deny:another-host @?', 'github.com'],
+    ['gh pr merge -md (order-free)', R3(['gh', 'pr', 'merge', '-md']), 'ask:once,deny:another-host @?', 'github.com'],
+    ['gh pr merge -d=true', R3(['gh', 'pr', 'merge', '-d=true']), 'ask:once,deny:another-host @?', 'github.com'],
+    ['gh pr merge --delete-branch=true', R3(['gh', 'pr', 'merge', '--delete-branch=true']), 'ask:once,deny:another-host @?', 'github.com'],
+    ['gh pr merge --delete-branch=false (false does not drive git) => allowed', R3(['gh', 'pr', 'merge', '--delete-branch=false']), 'ok:own', 'github.com'],
+    ['gh repo create --push=true', R3(['gh', 'repo', 'create', '--push=true']), 'ask:once,deny:another-host @?', 'github.com'],
+    ['gh repo create --clone=true', R3(['gh', 'repo', 'create', '--clone=true']), 'ask:once,deny:another-host @?', 'github.com'],
+    ['gh repo create -c (the --clone short alias)', R3(['gh', 'repo', 'create', '-c']), 'ask:once,deny:another-host @?', 'github.com'],
   ]) say(`own minted · ${name}`, r2(p, fh), want);
   // fixup 1 — a cert flag whose value IS the vault's own file is not a config (blind stays false)
   say('own minted · curl --cert $VAULT_FILE{...} (the vault file itself) => not blind', Vm.shapeOf(Vm.planOf({ argv: ['curl', '--cert', '$VAULT_FILE{mounts/m1/secretKey}', 'https://good.com/'], env: [['T0', OWN]] })).blind, false);
+  // ROUND 4 — item 4: the $VAULT_FILE file-flag exception is the WHOLE value for an entry the agent did not author (an owner store); a template / an agent-put entry / a substring is the agent's own file => blind
+  const fblind = (argv, extra = {}) => Vm.shapeOf(Vm.planOf(Object.assign({ argv, env: [['T0', OWN]] }, extra))).blind;
+  say('own minted · --cert owner $VAULT_FILE{...}:pass (a password after it) => not blind', fblind(['curl', '--cert', '$VAULT_FILE{mounts/m1/secretKey}:pw', 'https://good.com/']), false);
+  say('own minted · --cacert $VAULT_FILE{agent:conv-own/ca} (the agent put the bytes) => blind', fblind(['curl', '--cacert', '$VAULT_FILE{agent:conv-own/ca}', 'https://good.com/']), true);
+  say('own minted · --cacert $VAULT_FILE{CA} where CA=vault://agent:own (agent-put) => blind', fblind(['curl', '--cacert', '$VAULT_FILE{CA}', 'https://good.com/'], { file: [['CA', 'vault://agent:conv-own/ca']] }), true);
+  say('own minted · --cacert $VAULT_FILE{CA} where CA=@template (agent text) => blind', fblind(['curl', '--cacert', '$VAULT_FILE{CA}', 'https://good.com/'], { file: [['CA', '@t']], templates: { t: 'x BEGIN CERT' } }), true);
+  say('own minted · --cacert ./x/$VAULT_FILE{owner}/ca.pem (a substring, not the whole value) => blind', fblind(['curl', '--cacert', './x/$VAULT_FILE{mounts/m1/secretKey}/ca.pem', 'https://good.com/']), true);
+  say('own minted · --cacert $VAULT_FILE{owner}/../ca.pem (a path past the placeholder) => blind', fblind(['curl', '--cacert', '$VAULT_FILE{mounts/m1/secretKey}/../ca.pem', 'https://good.com/']), true);
   // m3 — a config-DIR env the agent can write (its --proxy / --verify / a default host) is refused by name, like CURL_HOME / WGETRC
   const envCode = (n) => { const q = Vm.planOf({ argv: ['curl', 'https://good.com/'], env: [['T0', OWN], [n, './x']] }); return q.ok ? 'ok' : q.code; };
   for (const n of ['HTTPIE_CONFIG_DIR', 'GH_CONFIG_DIR', 'MYSQL_HOME', 'PGSYSCONFDIR']) say(`m3: ${n} refused by name`, envCode(n), 'env_refused');
@@ -537,7 +567,26 @@ function ownRoad(Vm) {
 }
 {
   const bad = ownRoad(V);
-  ok(!bad.length, 'the own road: whose (registered / durable id, a pending fork borrows nothing), own stored ⇒ ok:own everywhere (no card), own minted ⇒ ok:own to its host / under it and ONCE per host elsewhere (both hosts on the card; a pass per entry × host); where the destination cannot be told (a shell, an interpreter, a config file, a routing flag, project code, an unknown or agent-writable program, round 2: a known tool naming no host it can read; a backslash hides no host) ONCE per command shape locally and EVERY run on a cluster (a live «always» passes it); round 2: a host written without a scheme, in host=, attached, in a URI\'s list, gh --hostname is read, the owner\'s entry and a mix ⇒ today\'s road («always» / seen never pass a host), the lock / argv / the floor first; round 3: a curl connection/config-file flag (--alt-svc / --cacert / --hsts / --interface), a conninfo URI\'s percent-decoded query, a network positional that is not a readable target, a gh verb that drives git (pr merge --delete-branch / repo create --push|--clone / extension install), gh api <path> read as a path not a host, httpie --raw as a body (m1), wget --input-metalink as a config (m2), a config-dir env refused (m3)', bad);
+  ok(!bad.length, 'the own road: whose (registered / durable id, a pending fork borrows nothing), own stored ⇒ ok:own everywhere (no card), own minted ⇒ ok:own to its host / under it and ONCE per host elsewhere (both hosts on the card; a pass per entry × host); where the destination cannot be told (a shell, an interpreter, a config file, a routing flag, project code, an unknown or agent-writable program, round 2: a known tool naming no host it can read; a backslash hides no host) ONCE per command shape locally and EVERY run on a cluster (a live «always» passes it); round 2: a host written without a scheme, in host=, attached, in a URI\'s list, gh --hostname is read, the owner\'s entry and a mix ⇒ today\'s road («always» / seen never pass a host), the lock / argv / the floor first; round 3: a curl connection/config-file flag (--alt-svc / --cacert / --hsts / --interface), a conninfo URI\'s percent-decoded query, a network positional that is not a readable target, a gh verb that drives git (pr merge --delete-branch / repo create --push|--clone / extension install), gh api <path> read as a path not a host, httpie --raw as a body (m1), wget --input-metalink as a config (m2), a config-dir env refused (m3); round 4: every gh repo verb whose first positional is a repository reads its host (delete / edit / archive / unarchive / set-default no longer regress), a conninfo URI in a -d / --dbname value (attached / = / GNU prefix) blinds on a percent query, a gh bool flag blinds in every pflag spelling (-dm / -d=true / --delete-branch=true / repo create -c), and the $VAULT_FILE file-flag exception is the whole value for an owner-store entry (a template / an agent-put entry / a substring blinds)', bad);
+}
+
+console.log('⑤c THE gh REPO-SPEC GRAMMAR PIN (round 4, item 1) — every gh repo verb whose first positional is a repository must read it');
+{
+  const have = new Set(V.knownToolOf('gh').repoSpecSubs.map((b) => b[1]));
+  const ghRun = (args) => { try { return execFileSync('gh', args, { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
+  const help = ghRun(['repo', '--help']);
+  const verbs = help ? [...help.matchAll(/^\s{2,}([a-z][a-z-]+):\s/gm)].map((m) => m[1]) : [];
+  if (!verbs.length) ok(true, 'gh grammar pin SKIPPED — gh not runnable here (install gh to catch repo-verb drift against the row)');
+  else {
+    const repoVerbs = [], missing = [];
+    for (const vb of verbs) {
+      const u = ghRun(['repo', vb, '--help']);
+      if (!u) continue;
+      const ls = u.split('\n'), ui = ls.findIndex((l) => /^USAGE/.test(l)), usage = ui >= 0 ? (ls[ui + 1] || '') : '';
+      if (/<[a-z-]*repository>/.test(usage)) { repoVerbs.push(vb); if (!have.has(vb)) missing.push(vb); }
+    }
+    ok(repoVerbs.length >= 5 && !missing.length, `every gh repo verb whose first positional is <…repository> is in repoSpecSubs — read [${repoVerbs.join(', ')}]; row lacks: ${missing.join(', ') || 'none'}`, { repoVerbs, missing, have: [...have] });
+  }
 }
 
 console.log('⑥ THE SCRUBBER — a value and its forms (FORMS: spelled and read), over ONE window per run');
@@ -792,7 +841,7 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     ['a known tool naming no host it can read passes (round 2)', '|| !known || !hosts.size || unread ||', '|| !known || unread ||', ownRoad],
     ['a cluster keeps a blind shape after one plain 允许 (round 2)', "{ shapePasses: mode === 'allow' }", '{ shapePasses: true }', ownRoad],
     ['a target written without a scheme is not read (round 2)', 'if (t.host) hosts.add(t.host); if (t.unread) unread = true;', 'if (t.unread) unread = true;', ownRoad],
-    ['a connection string\'s host= is not read (round 2)', 'if (row.conninfo) for (const a of argv.slice(1))', 'if (false) for (const a of argv.slice(1))', ownRoad],
+    ['a connection string\'s host= is not read (round 2)', 'if (row.conninfo) for', 'if (false) for', ownRoad],
     ['an attached short flag is not split (round 2)', "cl = a[1] !== '-' && a.length > 2 && !takes.includes(a) ? shortSplit(a, takes) : null;", 'cl = null;', ownRoad],
     ['a URI\'s host list is not read (round 2)', "for (const x of (m[4] || '').split(',').slice(1))", 'for (const x of [])', ownRoad],
     ['a client\'s shell escape is not seen (round 2)', 'if (row.scriptFlags) for (const v of vals(row.scriptFlags))', 'if (false) for (const v of vals(row.scriptFlags))', ownRoad],
@@ -805,6 +854,12 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     ['httpie --raw read as a target (round 3, m1)', "'--verify', '--proxy', '--raw'];", "'--verify', '--proxy'];", ownRoad],
     ['wget --input-metalink is not a config (round 3, m2)', "'-i', '--input-file', '--input-metalink'],", "'-i', '--input-file'],", ownRoad],
     ['a config-dir env is not refused (round 3, m3)', 'PGSYSCONFDIR|PSQLRC|RCLONE_CONFIG|HTTPIE_CONFIG_DIR|GH_CONFIG_DIR|MYSQL_HOME|NETRC', 'PSQLRC|RCLONE_CONFIG|NETRC', ownRoad],
+    // round 4 (the brief's RED copies): each regression / residual re-opened in a copy => its own-road rows RED
+    ['only four repo verbs read the spec host (round 4, item 1)', "[['repo', 'archive'], ['repo', 'clone'], ['repo', 'delete'], ['repo', 'edit'], ['repo', 'fork'], ['repo', 'set-default'], ['repo', 'sync'], ['repo', 'unarchive'], ['repo', 'view']]", "[['repo', 'clone'], ['repo', 'fork'], ['repo', 'view'], ['repo', 'sync']]", ownRoad],
+    ['a conninfo URI in a -d / --dbname value is not read (round 4, item 2)', "...argv.slice(1), ...vals(['-d', '--dbname'])]", '...argv.slice(1)]', ownRoad],
+    ['a gh bool flag is matched only as its raw token (round 4, item 3)', 'boolFlagOn(argv, b.longs || [], b.shorts || [])', '(b.longs || []).concat(b.shorts || []).some((fl) => flags.has(fl))', ownRoad],
+    ['the gh repo create -c alias is unlisted (round 4, item 3)', "shorts: ['-c'] }]", 'shorts: [] }]', ownRoad],
+    ['the $VAULT_FILE file-flag exception is a substring test (round 4, item 4)', '!fileFlagExempt(f, v, run)', '!/\\$VAULT_FILE\\{/.test(v)', ownRoad],
   ];
   for (const [name, from, to, leg] of LEGS) {
     const { hit, M } = mutant(name.replace(/\W+/g, '-'), from, to);
