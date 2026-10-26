@@ -24,6 +24,8 @@
 //       "windows":    [{ "id", "title", "entry": "index.html" }],           iframe windows (served from ui/)
 //       "agentTools": [{ "name", "description", "args": { JSON-schema-ish } }], generated `vibespace-tool-<id>-<name>` shims
 //       "routes": true | false,                  /api/plugins/<id>/x/* proxied to the server process
+//       "browserEngine": true | false,           lane engine-plugin: a BROWSER ENGINE — its server answers GET /probe +
+//                                                POST /resolve-launch (src/browser-engines.js); needs server + routes, consent always
 //       "settings":   [{ "key", "type": boolean|string|number|select, "default", "label", "description"?, "options"? }],
 //                                                → Settings window category "Plugin: <label>", keys plugin.<id>.<key>
 //       "themes":     [{ "id", "label", "file": "themes/x.json" }],       JSON { css: {--var: value}, terminal?: {…} }
@@ -241,6 +243,17 @@ function validateManifest(raw, { hostVersion = null, folderName = null, homeDir 
     });
   }
   if (m.contributes.routes && !m.server) errors.push('contributes.routes needs server: true');
+  // lane engine-plugin (design-custom-browser-plugin §1.1): a BROWSER ENGINE decides which PROGRAM runs as a profile's browser —
+  // its two verbs ride its own process's routes (the engine registry asks them over IPC), so it is refused by name without
+  // either, and enabling it always goes through consent (needsConsent). Named on the manifest only when true.
+  if (c.browserEngine !== undefined) {
+    if (typeof c.browserEngine !== 'boolean') errors.push('contributes.browserEngine must be true|false');
+    else if (c.browserEngine) {
+      if (!m.server) errors.push('contributes.browserEngine needs server: true (the engine answers from its own process)');
+      if (!m.contributes.routes) errors.push('contributes.browserEngine needs contributes.routes: true (its verbs ride GET /probe and POST /resolve-launch)');
+      m.contributes.browserEngine = true;
+    }
+  }
   if (c.settings !== undefined) {
     if (!Array.isArray(c.settings)) errors.push('contributes.settings must be an array of { key, type, default, label }');
     else if (c.settings.length > 50) errors.push('contributes.settings: at most 50 entries');
@@ -342,7 +355,9 @@ function contributesAgentTools(m) { return !!(m?.contributes?.agentTools?.length
 /** True when enabling this plugin must go through the consent dialog: a
  *  trusted (same-origin) client module, any server-side power beyond the
  *  loader's implicit sandbox, or contributed agent tools. */
-function needsConsent(m) { return !!m && (m.client === 'module' || hasDeclaredCapabilities(m) || contributesAgentTools(m)); }
+function needsConsent(m) { return !!m && (m.client === 'module' || hasDeclaredCapabilities(m) || contributesAgentTools(m) || contributesBrowserEngine(m)); }
+/** lane engine-plugin: a browser ENGINE names the program VibeSpace starts as a profile's browser — always a consent. */
+function contributesBrowserEngine(m) { return !!(m && m.contributes && m.contributes.browserEngine === true); }
 
 /**
  * Plain-words capability list for the consent dialog — the SAME items on the
@@ -358,6 +373,7 @@ function capabilitySummary(m) {
   if (m.client === 'module') items.push({ id: 'client-module', text: 'Trusted client code: runs in this page with the same access as VibeSpace itself — it can read everything this page can, including your session, and act as you. Equivalent to adding code to VibeSpace.', params: {} });
   else if (m.client === 'iframe') items.push({ id: 'client-iframe', text: 'Sandboxed UI: its windows run in an isolated origin and cannot read this page.', params: {} });
   if (m.server) items.push({ id: 'server-process', text: 'Runs its own server process, confined to its plugin folder and its data folder.', params: {} });
+  if (contributesBrowserEngine(m)) items.push({ id: 'browser-engine', text: 'Can be chosen as the agent browser: it names the program VibeSpace starts as a profile\'s browser, outside the plugin sandbox.', params: {} }); // lane engine-plugin
   if (s.fs?.read?.length) items.push({ id: 'fs-read', text: 'Server: read files under {paths}', params: { paths: s.fs.read.join(', ') } });
   if (s.fs?.write?.length) items.push({ id: 'fs-write', text: 'Server: write AND read files under {paths}', params: { paths: s.fs.write.join(', ') } }); // write implies read in the permission args — the summary must say so
   if (s.childProcess) items.push({ id: 'child-process', text: 'Server: run other programs (child processes) — those programs are NOT confined and can reach anything the server user can.', params: {} });
@@ -388,8 +404,9 @@ function capabilitiesHash(m) {
   const subject = canonical({
     client: m.client || 'none', server: !!m.server, capabilities: m.capabilities || {},
     agentTools: (m.contributes?.agentTools || []).map((t) => t.name).sort(), routes: !!m.contributes?.routes,
+    ...(contributesBrowserEngine(m) ? { browserEngine: true } : {}), // lane engine-plugin: named only when true — every hash before it stays the same
   });
   return fnv1a(subject, 0x811c9dc5) + fnv1a(subject.split('').reverse().join(''), 0x9747b28c);
 }
 
-module.exports = { validateManifest, compareVersions, safeRelPath, normalizeFsPath, cleanText, hasDeclaredCapabilities, contributesAgentTools, needsConsent, capabilitySummary, capabilitiesHash, ID_RE, CLIENT_TIERS, SETTING_TYPES };
+module.exports = { validateManifest, compareVersions, safeRelPath, normalizeFsPath, cleanText, hasDeclaredCapabilities, contributesAgentTools, contributesBrowserEngine, needsConsent, capabilitySummary, capabilitiesHash, ID_RE, CLIENT_TIERS, SETTING_TYPES };

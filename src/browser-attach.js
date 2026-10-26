@@ -68,11 +68,13 @@ function argvVerdict(argv) {
 }
 /** THE ARGV of an attach launch (design §2.1): the required flags, the profile's directory, the profile store, the quiet
  *  log switches and the keeper's launch mark (both handed in: browser-stderr / browser-profiles spell them), then
- *  `about:blank` (Chrome's first tab blank — no New Tab page fetching anything). → `{ok, argv}` | `{ok:false, code, error}`. */
-function attachArgv({ profileDir, mark = null, quiet = [], url = 'about:blank' } = {}) {
+ *  `about:blank` (Chrome's first tab blank — no New Tab page fetching anything). `extra` (lane engine-plugin) = a browser
+ *  ENGINE's own launch arguments, before the mark — the same census judges them (a second --user-data-dir or a forbidden
+ *  switch refuses the whole argv). → `{ok, argv}` | `{ok:false, code, error}`. */
+function attachArgv({ profileDir, mark = null, quiet = [], url = 'about:blank', extra = [] } = {}) {
   if (typeof profileDir !== 'string' || !profileDir.startsWith('/')) return { ok: false, code: 'bad_profile_dir', error: "the attach launch needs the profile's absolute directory" };
   const argv = ['--remote-debugging-port=0', `--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', '--ozone-platform=x11',
-    '--disable-blink-features=AutomationControlled', '--disable-background-networking', ...PROFILE_STORE, ...(Array.isArray(quiet) ? quiet.map(String) : []), ...(mark ? [String(mark)] : []), String(url || 'about:blank')];
+    '--disable-blink-features=AutomationControlled', '--disable-background-networking', ...PROFILE_STORE, ...(Array.isArray(quiet) ? quiet.map(String) : []), ...(Array.isArray(extra) ? extra.map(String) : []), ...(mark ? [String(mark)] : []), String(url || 'about:blank')];
   const v = argvVerdict(argv);
   return v.ok ? { ok: true, argv } : { ok: false, code: 'bad_argv', error: `the attach argv failed its census (missing ${v.missing.join(' ') || '-'}; forbidden ${v.forbidden.join(' ') || '-'})` };
 }

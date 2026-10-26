@@ -109,7 +109,7 @@ console.log('⑥ wiring pins');
     'the ⧉ list\'s «Other desktops» rows are the model\'s and go through THE door (wm.revealWindow switches the desktop first)');
   ok(/if \(activeDesk && win\._desktopId && win\._desktopId !== activeDesk\) continue;/.test(tb) && /let otherDesksOpen = false;/.test(tb), 'the ⧉ list\'s active-desktop filter stays the default view; the group starts folded');
   const dm = read('src/lib/desktop-manager.js');
-  ok(/\n  _renderSwitcher\(\) \{\n    this\.app\._mobileNav\?\.updateDesktopsDoor\?\.\(\);/.test(dm) && !/desktop-switch-sheet|openDesktopSheet/.test(dm), 'the switcher\'s home stays the taskbar (desktop-manager.js); it only tells the door');
+  ok(/\n  _renderSwitcher\(\) \{\n    this\.app\._mobileNav\?\.updateDesktopsDoor\?\.\(\);/.test(dm) && !/openDesktopSheet/.test(dm) && (dm.match(/desktop-switch-sheet/g) || []).length === 1 && /^import \{ sheetRows \} from '\.\/desktop-switch-sheet\.js';/m.test(dm), 'the switcher\'s home stays the taskbar (desktop-manager.js); it only tells the door (int358: it reads the sheet\'s ROWS — sheetRows, its compact list\'s one source — and never opens the sheet)');
 }
 
 console.log('⑦ §6b guard 10 across a switch — MobileNav._noteShown, run on the real source text');

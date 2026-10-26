@@ -9,9 +9,10 @@
 //         here keeps its slot, dimmed, until the next open), two tabs (Actions | Notices)
 //         with the popup's counts, a scope (All sessions | the session you are reading) and
 //         a text filter (PURE scopeRows); rows keyed and patched in place (reconcileKeyed)
-//   RIGHT the item at FULL WIDTH — its title and detail rendered as markdown (every byte is
-//         agent-controlled: raw HTML in it is ESCAPED by the renderer, then sanitizeHtml), its
-//         option chips, a multi-line reply box, and the action row (Reply · Mark done ·
+//   RIGHT the item at FULL WIDTH — its title and detail in THE tray's renderer (lane foryou-honest P1-2: plain
+//         text + the For-you links, every byte escaped — never markdown: it made `__tests__/` a bold «tests/»
+//         on the answer surface), its option chips (explicit, else the detail's parsed — PURE
+//         src/ask-options.js), a multi-line reply box, and the action row (Reply · Mark done ·
 //         Dismiss · Reopen · Copy · the producer's action) — every verb THE model's
 //         (src/lib/user-todos-actions.js), the same routes the popup calls
 // After THIS client resolves the selected item the selection moves to the next open one
@@ -22,10 +23,7 @@
 // is THE door (the popup's ⤢, a row's ⤢, the mini inbox's ⤢, ⚙ Communication ▸ For you…).
 import { t, tc, resolveLang } from './i18n.js';
 import { cardWords } from './app-card-model.js'; // design 009: THE words of an app install's one card
-import { Marked } from 'marked';
-import { sanitizeHtml } from './safe-html.js';
-import { mountDiagrams } from './mermaid-render.js';
-import { copyText, escHtml, showContextMenu, showToast } from './utils.js';
+import { copyText, showContextMenu, showToast } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { pressVerdict } from './press-arm.js'; // verify-r6 V1: an Allow counts only once its pane has been shown ARM_MS
 import { registerWindowType, svgIcon16 } from './window-types.js';
@@ -33,7 +31,7 @@ import { registerMenuItem } from './contributions.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: an automation card's reach choices in the pane
 import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
-import { reconcileKeyed, agoText, expiresText, resolvedByText, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords } from './user-todos-row.js'; // THE keyed reconciler + the row words
+import { reconcileKeyed, agoText, expiresText, resolvedByText, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml } from './user-todos-row.js'; // THE keyed reconciler + the row words
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's box, as a dialog over this window
@@ -41,35 +39,31 @@ import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-past
 // The taskbar For-you button's own glyph (UI_ICONS.inbox's paths), in the registry's 16px chrome.
 const ICON = svgIcon16('<path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l1.5 6v3.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5z"/>');
 
-// MARKDOWN FOR AGENT TEXT: an item's title/detail/reply are written by an agent
-// (or a peer) and sync to EVERY client. Raw HTML inside them is not markup here:
-// this renderer ESCAPES every html token (so `<img onerror=…>` reads as the text
-// it is), and the output still goes through sanitizeHtml (src/lib/safe-html.js, the house rule). A private
-// Marked instance — the chat's global `marked` keeps its own options.
-const md = new Marked({ gfm: true, breaks: true, renderer: { html(h) { return escHtml(typeof h === 'string' ? h : (h && h.text) || ''); } } });
-function mdInto(el, src, { inline = false } = {}) {
-  const s = String(src || '');
-  el.innerHTML = sanitizeHtml(inline ? md.parseInline(s) : md.parse(s));
-  // a link opens beside the workspace, never in place of it
-  for (const a of el.querySelectorAll('a[href]')) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
-  if (!inline) mountDiagrams(el); // lane chat-mermaid: an item's ```mermaid fence draws
+// THE WORDS OF AN ITEM — ONE RENDERER WITH THE TRAY (lane foryou-honest, the stress evaluation's P1-2, 2026-10-25): an
+// item's title / detail are written by an agent (or a peer) and sync to EVERY client. This pane rendered them as MARKDOWN
+// and the tray as plain text: `test/ 还是 __tests__/？` reached the pane as «test/ 还是 <strong>tests</strong>/？» — the
+// two options the person answered between were not the agent's. Now both draw user-todos-row.js wordsHtml — the words
+// EXACTLY as written (pre-wrap keeps the line breaks), every segment escaped, a link a span around its own words.
+function wordsInto(el, src) {
+  el.innerHTML = wordsHtml(src);
 }
 
 const mk = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-const TAB_SEG = { urgent: 'ut-seg-urgent', high: 'ut-seg-high', normal: 'ut-seg-norm', low: 'ut-seg-norm' };
+const TAB_SEG = { urgent: 'ut-seg-urgent', high: 'ut-seg-high', normal: 'ut-seg-norm', low: 'ut-seg-norm', quiet: 'ut-seg-quiet' };
 const tabWord = (tab) => (tab === 'notices' ? t('Notices') : tc('inbox', 'Actions'));
 
 /**
  * Open (or reveal) THE For-you window. `itemId` = select that item (its tab
- * follows it), `sessionKey` = scope the list to that session. A replay
+ * follows it), `sessionKey` = scope the list to that session, `scope: 'all'` = every
+ * session (the tray head's ⤢ — an open window another device scoped is widened). A replay
  * (`syncId`, another client's layout) builds the window from its spec and
  * never re-points an open one.
  */
-export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId } = {}) {
+export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: wantScope = null, syncId } = {}) {
   for (const [id, w] of app.wm.windows || []) {
     if (w && w.type === 'inbox') {
       app.wm.revealWindow(id, { replay: !!syncId });
-      if (!syncId && w._inbox) w._inbox.show({ itemId, sessionKey });
+      if (!syncId && w._inbox) w._inbox.show({ itemId, sessionKey, scope: wantScope });
       return w;
     }
   }
@@ -176,7 +170,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     if (!st.scopeKey || e.notice || e.tail) bits.push(model.nameFor(i.sessionKey, [i]));
     bits.push(agoText(e.resolved ? (i.resolvedAt || i.createdAt) : i.createdAt, t));
     if (e.resolved) bits.push(i.status === 'dismissed' ? t('dismissed') : t('done'));
-    else if (Array.isArray(i.options) && i.options.length) bits.push(t('{n} options', { n: i.options.length }));
+    else if (model.optionsFor(i).length) bits.push(t('{n} options', { n: model.optionsFor(i).length })); // lane foryou-honest: a parsed «A …；B …» counts too
     const urg = e.resolved ? '' : (e.notice ? 'notice' : (i.urgency || 'normal'));
     return { words, sub, meta: bits.join(' · '), urg, sig: [words, sub, bits.join('\u0001'), urg, e.resolved ? 1 : 0].join('\u0000') };
   };
@@ -236,7 +230,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
       if (b.classList.contains('on') !== on) b.classList.toggle('on', on);
       if (b.getAttribute('aria-selected') !== String(on)) b.setAttribute('aria-selected', String(on));
       if (b.dataset.tab === 'actions') {
-        const words = actionWords(openInScope.filter((i) => !isNotice(i)));
+        const words = actionWords(openInScope.filter((i) => !isNotice(i)), c.inbox.action); // lane foryou-honest: c.inbox.action = THE honest count (openCount)
         setCount(b.querySelector('[data-n="action"]'), c.inbox.action, TAB_SEG[c.inbox.urgency] || 'ut-seg-norm', c.inbox.action ? words : '');
         const label = tabWord('actions') + (c.inbox.action ? ', ' + words : '');
         if (b.getAttribute('aria-label') !== label) b.setAttribute('aria-label', label);
@@ -376,7 +370,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     'app-reject': () => actBtn('app-reject', UI_ICONS.close, t('Not now'), t('Not now'), 'iw-act-exit'),
   };
   const viewOf = (it, e) => itemView(it, {
-    t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : model.wordsOf(it), detail: model.detailOf(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
+    t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : model.wordsOf(it), detail: model.detailOf(it), options: model.optionsFor(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
     origin: { origin: originOf(it), label: ORIGIN_LABELS[originOf(it)] || '' }, notice: isNotice(it), resolved: !!(e && e.resolved) || it.status !== 'open',
     reply: model.replyState(it), ago: (ts) => agoText(ts, t), expires: (ts) => expiresText(ts, t), resolvedBy: (by, item) => resolvedByText(by, t, item),
     detailState: !it.detailTruncated ? 'whole' : (st.loadErr && st.loadErr.id === it.id ? 'failed' : 'loading'), loadError: st.loadErr && st.loadErr.id === it.id ? st.loadErr.why : '',
@@ -455,8 +449,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     }
     c.el.classList.toggle('iw-item-resolved', v.resolved);
     c.el.classList.toggle('iw-item-cleared', model.isCleared(it)); // "Clear content…": the cleared sentence, dimmed
-    // the words: the title and the detail at FULL width, rendered (escaped raw HTML + sanitizeHtml), selectable
-    if (c.sig.title !== v.title) { mdInto(c.title, v.title, { inline: true }); linkifyInto(c.title); c.sig.title = v.title; } // lane foryou-attachments: its paths / links press-to-open
+    // the words: the title and the detail at FULL width, THE tray's renderer (plain + links, escaped), selectable
+    if (c.sig.title !== v.title) { wordsInto(c.title, v.title); c.sig.title = v.title; } // lane foryou-attachments: its paths / links press-to-open (lane foryou-honest: wordsHtml makes them)
     const artsSig = JSON.stringify((!model.isCleared(it) && it.artifacts) || null);
     if (c.sig.arts !== artsSig) { c.arts.replaceChildren(...askChipEls(it, t)); c.arts.style.display = c.arts.childElementCount ? '' : 'none'; c.sig.arts = artsSig; } // NODES, its words textContent
     // verify-r4 F4: an exit ask's detail IS the command it asks to run — shown VERBATIM (textContent in a <pre>), never as
@@ -471,14 +465,14 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     const plain = verbatim || !!(it.action && (it.action.type === 'browser-proposal' || it.action.type === 'main-ask' || it.action.type === 'vault-grant-ask' || it.action.type === 'secret-request'));   // lane vault-paste-request: a paste request's words are the agent's OWN — verbatim   // lane vault-manual-and-lock (int331 seam): a vault GRANT ask's detail = the entry ref + the agent's OWN words (the purpose) — shown verbatim, never markdown (a `*`/`#`/line-break the agent wrote must not re-render — the exit card's verify-r4 F4 trap)
     // design 009: an app install's ONE card — its lines, progress and Details fold (escaped; its buttons are the action row)
     const card = it.card && it.action && it.action.type === 'app-install' ? it.card : null;
-    const detailSig = card ? 'card\u0000' + (v.resolved ? 'r' : 'o') + JSON.stringify(card) : (plain ? 'cmd\u0000' : 'md\u0000') + v.detail;
+    const detailSig = card ? 'card\u0000' + (v.resolved ? 'r' : 'o') + JSON.stringify(card) : (plain ? 'cmd\u0000' : 'txt\u0000') + v.detail;
     if (c.sig.detail !== detailSig) {
       if (card) { c.detail.innerHTML = appCardHtml(it, t, { lang: resolveLang(), resolved: v.resolved, buttons: false }); c.detail.style.display = ''; }
       else if (plain) { const pre = mk('pre', 'iw-exit-cmd'); pre.textContent = v.detail; c.detail.replaceChildren(pre); }
-      else mdInto(c.detail, v.detail);
+      else wordsInto(c.detail, v.detail); // lane foryou-honest: THE tray's renderer (never markdown)
       // lane vault-scrub-forms (q-043 verify M1): a RUN card says what the scrubbing does not promise — the owner reads the command
       if (!card && it.action && it.action.type === 'vault-run-ask') c.detail.append(mk('div', 'iw-run-note', t('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.')));
-      if (!card) linkifyInto(c.detail); // lane foryou-attachments: text nodes only — the words stay as written
+      if (plain) linkifyInto(c.detail); // lane foryou-attachments: text nodes only — the words stay as written (a command's <pre>; the words' own renderer makes its links)
       if (!card) c.detail.style.display = v.detail ? '' : 'none';
       c.sig.detail = detailSig;
     }
@@ -798,7 +792,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
     const opt = e.target.closest('.iw-opt');
     if (opt) {
       const it = model.byId(c.id);
-      const label = it && Array.isArray(it.options) ? it.options[Number(opt.dataset.idx)] : null;
+      const label = it ? model.optionsFor(it)[Number(opt.dataset.idx)] : null; // lane foryou-honest: explicit, else the detail's parsed option
       if (label && !opt.disabled) sendReply(label, { chip: true });
       return;
     }
@@ -887,8 +881,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, syncId 
   signal?.addEventListener('abort', () => { stash(st.cur); clearTimeout(readClock); });
 
   /** The door for an OPEN window (a user's ⤢ / menu): select the item, apply the scope, re-sort (a new open). */
-  const show = ({ itemId: id = null, sessionKey: key = null } = {}) => {
+  const show = ({ itemId: id = null, sessionKey: key = null, scope = null } = {}) => {
     if (key) st.scopeKey = key;
+    else if (scope === 'all') st.scopeKey = null; // lane foryou-honest (P3-7): the tray head's ⤢ = the tray's scope, never the one another device left
     if (id) st.pendingItem = id;
     st.layout = null; // every door is an OPEN: the list re-sorts (the popup's rule; a window kept open all day would never re-sort otherwise)
     render();

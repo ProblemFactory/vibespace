@@ -6,8 +6,8 @@
 //   · one scroll (the search row scrolls with it): the stopped rows arrive PAGE by page as the list's end nears (an
 //     IntersectionObserver a screen ahead — the owner, 2026-10-03: 「不要添加'显示更多'按钮，都做成动态加载之类的无缝方案」);
 //   · a row = the session card the whole sidebar builds (`_buildSessionCard`: its tap, long-press menu, state chip,
-//     highlight) + its folder as the second line; the stylesheet gives it the phone's shape there (style.css, the
-//     regular class's block).
+//     highlight, its «needs you · N» marker — lane foryou-honest) + its folder as the second line; the stylesheet gives it
+//     the phone's shape there (style.css, the regular class's block).
 // A search, a manage pass or a remote host picked in the history switcher keeps the full workbench (sidebar-workbench.js):
 // its cross-host matches and batch bar are its own.
 import { t as tr } from './i18n.js';
@@ -54,9 +54,11 @@ export function installSidebarColumn(Sidebar) {
       const row = (s) => {
         const card = this._buildSessionCard(s);
         card.classList.add('col-card');
-        card.appendChild(pathLine(s));
-        // its open questions, answerable here (SPEC-v3 §2.3 — the For-you panel's own rows: user-todos-panel.js app.sessionAsks)
-        if (this.app.sessionAsks) { const box = document.createElement('div'); box.className = 'col-asks'; card.appendChild(box); this.app.sessionAsks.render(box, s); }
+        // the folder line under the name; the «needs you · N» marker (the card's own — _buildSessionCard) stays the last line.
+        // lane foryou-honest (the owner's B, 2026-10-25): the row MARKS its open questions, the For-you window answers them —
+        // the inline rows of slice 2c (the question, its detail fold, four chips) are withdrawn
+        const mark = card.querySelector(':scope > .ut-sess-mark');
+        if (mark) mark.before(pathLine(s)); else card.appendChild(pathLine(s));
         return card;
       };
       // the conversations with an open question come first (the attention list's rule: what needs the person leads)

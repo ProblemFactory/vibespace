@@ -43,6 +43,12 @@
 // is the REGISTRY record, never whether a folder was replaced (2.369.44:
 // enabled/trust outlive a hand-deleted plugin dir). update() = the owner
 // pulling the source they already chose, so consent rides along there.
+// FLEET PRE-TRUST (lane engine-distribution, the owner's D2 2026-10-25): a plugin the CLUSTER installed (the boot job,
+// `install({…, by:'fleet'})`) may carry `trust {by:'fleet', contentHash}` ONLY for the id fleet.json's
+// `browserEngine.plugin` names, ONLY when the fleet pins a full commit sha (a tag can move — it is never the anchor) that
+// the clone arrived at, and ONLY while the installed package's contentHash is the one recorded — a fleet that stops naming
+// it, another package under the id, another sha: the trust lapses and the owner is asked once, like any plugin. The panel
+// says «Installed and trusted by the cluster». A user-installed plugin still asks.
 // State: data/plugin-registry.json { enabled, trust, installs } (atomic).
 // Every change broadcasts `plugins-manifests-updated` (multi-client law).
 // Uninstall NEVER deletes: plugin dir + state dir move to data/plugins-trash/.
@@ -120,7 +126,8 @@ function classifyExit(tail, code, signal) {
   return `exited (${signal || 'code ' + code})${last ? ': ' + last : ''}`;
 }
 
-function create({ rootDir, app, broadcast = () => {}, agentEnv = () => ({ ...process.env }), agentAuth = () => null, log = console, hostVersion = null, binDir = null, autoStart = true, instanceUrl = null, telemetry = null } = {}) {
+function create({ rootDir, app, broadcast = () => {}, agentEnv = () => ({ ...process.env }), agentAuth = () => null, log = console, hostVersion = null, binDir = null, autoStart = true, instanceUrl = null, telemetry = null,
+  integrations = () => null, fleetEngine = () => null, fleetStatus = () => null, gitBin = 'git', gitTimeoutMs = undefined } = {}) { // lane engine-distribution: the git credential's store, the fleet's engine fact (D2), the boot job's outcome
   const pluginsDir = path.join(rootDir, 'data', 'plugins');
   const stateDir = path.join(rootDir, 'data', 'plugins-state');
   const registryFile = path.join(rootDir, 'data', 'plugin-registry.json');
@@ -129,7 +136,7 @@ function create({ rootDir, app, broadcast = () => {}, agentEnv = () => ({ ...pro
   // implicit grants — plugin dir + data/plugins-state/<id> — are inside data/
   // but are added by us, never declared).
   const forbiddenRoots = [{ path: path.resolve(rootDir), label: 'the VibeSpace install dir' }, { path: path.join(path.resolve(rootDir), 'data'), label: 'the VibeSpace data dir' }];
-  const installer = require('./plugin-install.js').create({ rootDir, hostVersion, forbiddenRoots, log });
+  const installer = require('./plugin-install.js').create({ rootDir, hostVersion, forbiddenRoots, log, integrations, gitBin, gitTimeoutMs });
   const plugins = new Map(); // id → { id, dir, manifest, errors, warnings, enabled, child, state, crashes:[], pending:Map, nextId, themes:{}, notice, errTail }
   let registry = { enabled: {}, trust: {}, installs: {} };
   try { registry = { ...registry, ...(JSON.parse(fs.readFileSync(registryFile, 'utf-8')) || {}) }; } catch { }
@@ -138,7 +145,14 @@ function create({ rootDir, app, broadcast = () => {}, agentEnv = () => ({ ...pro
   const notify = () => { try { broadcast({ type: 'plugins-manifests-updated', plugins: list() }); } catch { } };
   const tele = (name, detail) => { try { telemetry?.({ kind: 'event', name, detail: String(detail || '').slice(0, 300) }); } catch { } };
   const hashOf = (rec) => (rec?.manifest ? capabilitiesHash(rec.manifest) : null);
-  const isTrusted = (rec) => { const t = registry.trust[rec.id]; return !!(t && t.trusted && rec.manifest && t.capabilitiesHash === hashOf(rec)); };
+  /** The fleet's engine fact now: `{plugin, ref}` (D2 reads only these two). */
+  const fleetNamed = () => { try { const f = fleetEngine(); return f && typeof f.plugin === 'string' ? { plugin: f.plugin, ref: f.source && typeof f.source.ref === 'string' ? f.source.ref : '' } : null; } catch { return null; } };
+  /** D2: a fleet trust holds for THIS id, THIS sha, THIS package only (see the header). */
+  const fleetTrustHolds = (id, t) => {
+    const f = fleetNamed(), inst = registry.installs[id];
+    return !!(f && f.plugin === id && /^[0-9a-f]{40}$/.test(f.ref) && inst && inst.source === 'git' && inst.sha === f.ref && t.sha === f.ref && !!t.contentHash && inst.contentHash === t.contentHash);
+  };
+  const isTrusted = (rec) => { const t = registry.trust[rec.id]; return !!(t && t.trusted && rec.manifest && t.capabilitiesHash === hashOf(rec) && (t.by !== 'fleet' || fleetTrustHolds(rec.id, t))); };
 
   // ── discovery ──
   function discover() {
@@ -268,6 +282,16 @@ function create({ rootDir, app, broadcast = () => {}, agentEnv = () => ({ ...pro
     });
   }
 
+  /** lane engine-plugin: ONE route ask of a plugin — the same IPC `route` message the /x/* proxy sends, capped the same
+   *  (IPC_TIMEOUT_MS): the engine registry's road (src/server/browser-engines.js — `probe` = GET /probe, `launchOptions` =
+   *  POST /resolve-launch). A plugin that is not enabled or serves no routes is refused (404); a stopped one by `ask` (503);
+   *  no answer in time ⇒ 504. → the reply `{status, body, contentType}`. */
+  function askRoute(id, { method = 'GET', path: routePath = '/', query = {}, body = null } = {}, timeoutMs = IPC_TIMEOUT_MS) {
+    const rec = plugins.get(String(id || ''));
+    if (!rec || !rec.enabled || !rec.manifest?.contributes?.routes) return Promise.reject(Object.assign(new Error(`plugin ${id} serves no routes here`), { status: 404 }));
+    return ask(rec, { t: 'route', method, path: routePath, query: query || {}, headers: { 'content-type': 'application/json' }, body }, timeoutMs);
+  }
+
   // ── agent tool shims ──
   function shimName(pluginId, tool) { return `vibespace-tool-${pluginId.replace(/[^a-z0-9.-]/g, '')}-${tool}`; }
   function wantedShims() {
@@ -334,7 +358,8 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
         capabilities: m?.capabilities || { server: { fs: { read: [], write: [] }, childProcess: false, net: [] } },
         capabilitySummary: m ? capabilitySummary(m) : [], capabilitiesHash: hashOf(r),
         needsConsent: needsConsent(m), trusted: isTrusted(r), consentRequired: needsConsent(m) && !isTrusted(r), trustedAt: registry.trust[r.id]?.trustedAt || null,
-        install: inst ? { source: inst.source, value: inst.value, installedAt: inst.installedAt, updatedAt: inst.updatedAt || null } : null,
+        trustedBy: isTrusted(r) ? (registry.trust[r.id].by === 'fleet' ? 'fleet' : 'user') : null, // lane engine-distribution (D2): «Installed and trusted by the cluster»
+        install: inst ? { source: inst.source, value: inst.value, installedAt: inst.installedAt, updatedAt: inst.updatedAt || null, ref: inst.ref || null, sha: inst.sha || null, credential: inst.credential || null, by: inst.by || 'user' } : null,
         enabled: !!r.enabled, valid: !!m, errors: r.errors || [], warnings: r.warnings || [], notice: r.notice || null,
         state: m?.server ? r.state : (r.enabled ? 'running' : 'stopped'), lastError: r.lastError || null,
       };
@@ -366,8 +391,8 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
   function shutdown() { for (const rec of plugins.values()) stopChild(rec); }
   function get(id) { return plugins.get(id) || null; }
 
-  async function install({ source, value, file } = {}) {
-    const r = await installer.install({ source, value, file });
+  async function install({ source, value, file, ref = null, credential = null, by = 'user' } = {}) {
+    const r = await installer.install({ source, value, file, ref, credential });
     const prevInst = registry.installs[r.id] || null;
     // CONSENT DOES NOT TRANSFER TO NEW CODE (2.369.43): `enabled` and `trust`
     // are keyed by plugin ID, so installing a DIFFERENT package that declares
@@ -386,22 +411,30 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     // dialog at all. Consent survives only for a byte-identical package from
     // the same recorded source; anything else is new code behind a name the
     // owner trusted.
-    const sameSource = !!prevInst && prevInst.source === r.source && prevInst.value === r.value;
+    const sameSource = !!prevInst && prevInst.source === r.source && prevInst.value === r.value && (prevInst.ref || null) === (r.ref || null);
     const sameContent = !!prevInst && !!prevInst.contentHash && prevInst.contentHash === r.contentHash;
     const reconsent = !(sameSource && sameContent) && (!!registry.enabled[r.id] || !!registry.trust[r.id]);
     if (reconsent) { registry.enabled[r.id] = false; delete registry.trust[r.id]; }
-    registry.installs[r.id] = { source: r.source, value: r.value, contentHash: r.contentHash || null, installedAt: prevInst?.installedAt || Date.now(), updatedAt: prevInst ? Date.now() : null };
+    registry.installs[r.id] = { source: r.source, value: r.value, contentHash: r.contentHash || null, installedAt: prevInst?.installedAt || Date.now(), updatedAt: prevInst ? Date.now() : null,
+      ...(r.source === 'git' ? { ref: r.ref || null, sha: r.sha || null, credential: credential || null, by: by === 'fleet' ? 'fleet' : 'user' } : {}) };
+    // D2: the cluster's install of the id it names, at the sha it pins ⇒ trusted + enabled, the trust bound to this package
+    const f = by === 'fleet' ? fleetNamed() : null;
+    const fleetTrust = !!f && f.plugin === r.id && /^[0-9a-f]{40}$/.test(f.ref) && r.sha === f.ref && !!r.contentHash;
+    if (fleetTrust) {
+      const m0 = (() => { try { return validateManifest(JSON.parse(fs.readFileSync(path.join(pluginsDir, r.id, 'vibespace-plugin.json'), 'utf-8')), { hostVersion, folderName: r.id, homeDir: os.homedir(), forbiddenRoots }).manifest; } catch { return null; } })();
+      if (m0) { registry.trust[r.id] = { trusted: true, trustedAt: Date.now(), capabilitiesHash: capabilitiesHash(m0), by: 'fleet', sha: r.sha, contentHash: r.contentHash }; registry.enabled[r.id] = true; tele('plugin-trusted-by-fleet', r.id); }
+    } else if (by === 'fleet') log.warn?.(`[plugins] ${r.id}: installed by the cluster but NOT pre-trusted — ${!f ? 'the fleet names no engine plugin' : f.plugin !== r.id ? `the fleet names ${f.plugin}` : !/^[0-9a-f]{40}$/.test(f.ref) ? 'the fleet pins no full commit sha (a tag is never the trust anchor)' : `the clone arrived at ${r.sha}, the fleet pins ${f.ref}`}; the owner enables it`);
     saveRegistry();
     const prev = plugins.get(r.id);
     if (prev) stopChild(prev);
     discover();
     const rec = plugins.get(r.id);
-    if (rec && reconsent) { rec.notice = 'a different package under the same id — review what it asks for and enable it again'; log.warn?.(`[plugins] ${r.id}: ${rec.notice}`); tele('plugin-replaced-untrusted', r.id); }
+    if (rec && reconsent && !fleetTrust) { rec.notice = 'a different package under the same id — review what it asks for and enable it again'; log.warn?.(`[plugins] ${r.id}: ${rec.notice}`); tele('plugin-replaced-untrusted', r.id); }
     if (rec?.enabled) { rec.crashes = []; startChild(rec); }
     syncShims(); notify();
     tele('plugin-install', `${source} ${r.id}@${r.version}${r.replaced ? ' (replaced)' : ''}`);
     const plugin = list().find((p) => p.id === r.id);
-    return { plugin, replaced: r.replaced, previous: r.previous, warnings: r.warnings, disabled: reconsent, consentRequired: reconsent && !!plugin?.needsConsent, notice: reconsent ? rec?.notice || null : null };
+    return { plugin, replaced: r.replaced, previous: r.previous, warnings: r.warnings, disabled: reconsent && !fleetTrust, consentRequired: reconsent && !fleetTrust && !!plugin?.needsConsent, notice: reconsent && !fleetTrust ? rec?.notice || null : null, ref: r.ref || null, sha: r.sha || null, trustedBy: fleetTrust ? 'fleet' : null };
   }
   function uninstall(id) {
     const rec = plugins.get(id);
@@ -422,12 +455,12 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
     if (!inst) throw httpErr(400, `"${id}" has no recorded install source (it was placed by hand) — reinstall it through Install plugin… to make it updatable`);
     if (inst.source === 'zip') throw httpErr(400, `"${id}" was installed from an uploaded file — upload the new .vsp through Install plugin… (it replaces the installed copy)`);
     stopChild(rec);
-    const r = await installer.install({ source: inst.source, value: inst.value, expectId: id });
+    const r = await installer.install({ source: inst.source, value: inst.value, expectId: id, ref: inst.ref || null, credential: inst.credential || null });
     // Update = the owner deliberately pulling a new version of THIS plugin from
     // the source they already chose; consent rides along (a changed capability
     // surface still trips the discovery drift check). The new fingerprint must
     // be recorded, or a later reinstall would compare against a stale one.
-    registry.installs[id] = { ...inst, value: r.value, contentHash: r.contentHash || null, updatedAt: Date.now() }; saveRegistry();
+    registry.installs[id] = { ...inst, value: r.value, contentHash: r.contentHash || null, updatedAt: Date.now(), ...(inst.source === 'git' ? { sha: r.sha || null } : {}) }; saveRegistry();
     discover();
     const fresh = plugins.get(id);
     if (fresh?.enabled) { fresh.crashes = []; startChild(fresh); }
@@ -439,7 +472,7 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
   // ── routes ──
   if (app) {
     const sendErr = (res, e) => res.status(e.status || 500).json({ error: e.message, ...(e.payload || {}) });
-    app.get('/api/plugins/manifests', (req, res) => res.json({ plugins: list(), hostVersion }));
+    app.get('/api/plugins/manifests', (req, res) => { let fleet = null; try { fleet = fleetStatus() || null; } catch { fleet = null; } res.json({ plugins: list(), hostVersion, ...(fleet ? { fleet } : {}) }); });
     app.post('/api/plugins/manifests/reload', (req, res) => res.json({ plugins: reload() }));
     app.post('/api/plugins/manifests/:id/enabled', (req, res) => {
       try { res.json({ plugin: setEnabled(String(req.params.id), !!req.body?.enabled, { trusted: req.body?.trusted === true }) }); }
@@ -458,7 +491,10 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
       uploadMw = (req, res, next) => up(req, res, (err) => (err ? res.status(err.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'the .vsp is larger than 50 MB' : err.message }) : next()));
     } catch (e) { log.warn?.('[plugins] multer unavailable — .vsp uploads disabled: ' + e.message); }
     app.post('/api/plugins/install', uploadMw, async (req, res) => {
-      try { res.json(await install({ source: req.body?.source, value: req.body?.value, file: req.file?.path || null })); }
+      // lane engine-distribution: a git install's `ref` + `credential` (null | 'plugin-git' — a person never types a token here)
+      const cred = req.body?.credential == null || req.body.credential === '' ? null : String(req.body.credential);
+      if (cred && cred !== 'plugin-git') return res.status(400).json({ error: 'credential must be plugin-git (Integrations → Plugins → Plugin Git repository) or none', code: 'plugin_git_credential' });
+      try { res.json(await install({ source: req.body?.source, value: req.body?.value, file: req.file?.path || null, ref: req.body?.ref || null, credential: cred, by: 'user' })); }
       catch (e) { tele('plugin-install-failed', `${req.body?.source || '?'} ${e.message}`); sendErr(res, e); }
     });
     app.delete('/api/plugins/manifests/:id', (req, res) => { try { res.json(uninstall(String(req.params.id))); } catch (e) { sendErr(res, e); } });
@@ -545,7 +581,24 @@ fetch(api + '/api/agent/plugin-tool/${rec.id}/${t.name}', { method: 'POST', head
   discover();
   if (autoStart) { for (const rec of plugins.values()) if (rec.enabled) startChild(rec); }
   syncShims();
-  return { list, get, setEnabled, reload, shutdown, discover, syncShims, shimNames, install, uninstall, update, isTrusted: (id) => { const r = plugins.get(id); return !!r && isTrusted(r); }, SANDBOX_CSP, pluginsDir, shimDir, trashDir: installer.trashDir };
+  // lane engine-distribution: the Plugin Git credential's Test — `git ls-remote` of a repository this instance knows on the
+  // credential's host (the fleet's source, else a recorded git install) — a human's click through the integration store
+  try {
+    const store = typeof integrations === 'function' ? integrations() : integrations;
+    if (store && typeof store.registerTest === 'function') store.registerTest('plugin-git', async ({ resolved }) => {
+      const host = String((resolved && resolved.values && resolved.values.host) || '').trim().toLowerCase();
+      const PI = require('./plugin-install.js');
+      const f = (() => { try { return fleetEngine(); } catch { return null; } })();
+      const urls = [f && f.source && f.source.git, ...Object.values(registry.installs).filter((i) => i && i.source === 'git').map((i) => i.value)].filter(Boolean);
+      const url = urls.find((u) => PI.gitHostOf(u) === host);
+      if (!url) return { ok: false, error: `no repository on ${host || 'that host'} is known here yet — install one from it first (⚙ → Plugins → Install plugin…); the Test reaches it with git ls-remote` };
+      try { const r = await installer.testCredential(url); return { ok: true, detail: `${r.host} answered git ls-remote with this credential${r.head ? ` (HEAD ${r.head.slice(0, 12)})` : ''}` }; }
+      catch (e) { return { ok: false, error: `${e.message}${e.code ? ` [${e.code}]` : ''}` }; }
+    });
+  } catch (e) { log.warn?.(`[plugins] the Plugin Git credential's Test is not registered (${e && e.message})`); }
+  /** The install record of an id (the boot job compares it — source, value, ref — and never re-pulls the same). */
+  const installRecord = (id) => (registry.installs[id] ? { ...registry.installs[id] } : null);
+  return { list, get, setEnabled, reload, shutdown, discover, syncShims, shimNames, install, uninstall, update, askRoute, installRecord, isTrusted: (id) => { const r = plugins.get(id); return !!r && isTrusted(r); }, SANDBOX_CSP, pluginsDir, shimDir, trashDir: installer.trashDir };
 }
 
 module.exports = { create, SANDBOX_CSP, readThemeFile, classifyExit };

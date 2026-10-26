@@ -27,7 +27,10 @@ const HOLD_MS = 1500;              // P0 ④: the hook rejects in-page when no v
 const ALLOW_MAX = 20;
 const ROWS_MAX = 200;              // per profile
 const ID_SHOWN = 8;
-const REASONS = Object.freeze(['no-grant', 'policy-no', 'declined', 'expired', 'profile-switch', 'rp-mismatch', 'none', 'withdrawn']);
+const REASONS = Object.freeze(['no-grant', 'policy-no', 'declined', 'expired', 'profile-switch', 'rp-mismatch', 'none', 'withdrawn',
+  // lane passkey-sink (a kernel with `webauthn`, design-custom-browser-plugin §3): the request offers no ES256 key type · its rpId /
+  // client data are not the page's own (VibeSpace re-checks, never trusting the kernel) · the sealed keys cannot be opened (the vault)
+  'webauthn_alg_unsupported', 'webauthn_rp_mismatch', 'webauthn_key_locked']);
 /** The card's choices (P2 draws them; the approve route takes one as `choice`). */
 const CHOICES = Object.freeze({ register: Object.freeze(['once', 'no']), 'sign-in': Object.freeze(['once', 'always', 'no', 'never']) });
 /** Public suffixes an rpId may never be (a short list — Chrome's own registrable-domain check runs first). */
@@ -210,6 +213,27 @@ function gateVerdict({ kind = 'get', rpId = '', origin = '', rows = [], grant = 
   return { verdict: 'ask', rows: usable.map((r) => r.credentialId) };
 }
 
+/** lane passkey-sink (design-custom-browser-plugin §3): THE FLAGS VibeSpace signs with on a kernel with `webauthn` — VibeSpace IS
+ *  the authenticator there, so UV says what VibeSpace verified: set ONLY when the owner decided THIS ceremony — the card answered
+ *  once / always, the registration card's one-use grant, or the person's own ceremony (a takeover: their hands on the page); a
+ *  policy-`yes` release is automatic ⇒ uv false. A page that REQUIRES UV on such an automatic release is asked (the card) rather
+ *  than signed without it. UP always (the release is the presence); BE / BS never (the key lives in this VibeSpace only).
+ *  `v` = gateVerdict's release. → {ask: true} | {up: true, uv, be: false, bs: false}. */
+function kernelFlags(v, { kind = 'get', answer = null, takeover = false, userVerification = 'preferred' } = {}) {
+  const owner = !!takeover || answer === 'once' || answer === 'always' || (kind === 'create' && !!(v && v.consumeGrant));
+  const uv = !!(v && v.verdict === 'release' && v.uv && owner);
+  if (!uv && userVerification === 'required' && v && Array.isArray(v.load) && v.load.length) return { ask: true };
+  return { up: true, uv, be: false, bs: false };
+}
+/** lane passkey-sink: the ONE row a kernel sign-in signs with, of the rows the gate released — the page's allow list in its
+ *  order, else the most recently used (then the newest). → the rows in that order (the first that unseals signs). */
+function signOrder(rows, load = [], allow = []) {
+  const ids = (Array.isArray(load) ? load : []).map(str), want = (Array.isArray(allow) ? allow : []).map(str);
+  const hit = (rows || []).filter((r) => r && ids.includes(r.credentialId));
+  if (want.length) return want.map((id) => hit.find((r) => r.credentialId === id)).filter(Boolean);
+  return hit.slice().sort((a, b) => nat(b.lastUsedAt) - nat(a.lastUsedAt) || nat(b.createdAt) - nat(a.createdAt));
+}
+
 /** An approved registration grant (the card's "allow once"): for (rpId, conversation), one use, GRANT_MS. */
 function grantOf({ rpId, browserKey, user = '', now = 0, by = 'user' }) { return { rpId: hostWord(rpId), browserKey: str(browserKey), user: words(user), at: nat(now), expiresAt: nat(now) + GRANT_MS, used: false, by }; }
 const grantKey = (rpId, browserKey) => `${hostWord(rpId)} ${str(browserKey).replace(/\.\d+$/, '')}`;
@@ -260,4 +284,5 @@ module.exports = {
   ITEM_WORDS, // lane passkey-ui
   cipherOf, seal, open, keyRefusal, bumpSignCount, reconcile, rpMatches, rowsFor, gateVerdict, grantOf, grantKey, digest, proposalCard, proposalItem, countLine,
   cardBlock, // int258: the chat card's block (live + rebuild)
+  kernelFlags, signOrder, // lane passkey-sink: the UV rule + the row a kernel sign-in signs with
 };

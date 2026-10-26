@@ -62,8 +62,18 @@
  *    channel-api           <credential>  (an account id or mount:<id>; each entry its `tier`, `perDay`)
  *    exit                  <hostId>:use | <hostId>:run
  *    window                <windowId>    (a desktop-app window record; each entry its `origin`)
- *    group-visibility      <groupId>     (the group's members shown to outside agents; the entry's `level`) */
-const DOORS = Object.freeze(['browser-profile', 'automation-key-use', 'automation-key-reach', 'channel-reach', 'channel-watch', 'channel-api', 'exit', 'window', 'group-visibility']);
+ *    group-visibility      <groupId>     (the group's members shown to outside agents; the entry's `level`)
+ *    browser-login         <origin>#<user> | <origin>#* | *   (lane browser-login: who may have a saved web login filled on
+ *                          the custom kernel — ONE account, «any account on this site», «any site»; rows of the three ADD;
+ *                          the shape is RESOURCE_SHAPES' — a write of any other is `bad_resource`, a read `unknown_shape`) */
+const DOORS = Object.freeze(['browser-profile', 'automation-key-use', 'automation-key-reach', 'channel-reach', 'channel-watch', 'channel-api', 'exit', 'window', 'group-visibility', 'browser-login']);
+/** lane browser-login: a door whose resource has a SHAPE of its own (the rest: any id RESOURCE_RE takes). browser-login: an
+ *  origin (scheme + lower-case host + a port, as src/browser-login.js originOf spells it) `#` a lower-cased user name (no white
+ *  space, no `#`) or `*`; or `*` alone. */
+const RESOURCE_SHAPES = Object.freeze({
+  'browser-login': /^(?:\*|https?:\/\/(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,20}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?#(?:\*|[^\s#A-Z\u0000-\u001f\u007f]{1,160}))$/,
+});
+const resourceShapeOk = (door, resource) => { const re = RESOURCE_SHAPES[door]; return re ? re.test(str(resource)) : RESOURCE_RE.test(str(resource)); };
 const PRINCIPAL_KINDS = Object.freeze(['everyone', 'group', 'conversation']);
 /** Every code `admits` answers a refusal with — CLOSED. */
 const REFUSALS = Object.freeze(['not_granted', 'excepted', 'groups_unreadable', 'unknown_shape', 'fork_pending']);
@@ -138,6 +148,7 @@ function normRow(r) {
   if (!DOORS.includes(r.door)) return { ok: false, code: 'unknown_shape', why: `a door this release cannot judge (${str(r.door).slice(0, 40)})` };
   const resource = str(r.resource);
   if (!RESOURCE_RE.test(resource)) return { ok: false, code: 'unknown_shape', why: 'no resource' };
+  if (!resourceShapeOk(r.door, resource)) return { ok: false, code: 'unknown_shape', why: `a ${r.door} resource of another shape` };   // lane browser-login
   if (r.to !== undefined && !Array.isArray(r.to)) return { ok: false, code: 'unknown_shape', why: '`to` is not a list' };
   if (r.except !== undefined && !Array.isArray(r.except)) return { ok: false, code: 'unknown_shape', why: '`except` is not a list' };
   const to = [], seen = new Set();
@@ -171,6 +182,7 @@ function validateWrite(door, resource, { to = [], except = [] } = {}, { at = nul
   const no = (code, error) => ({ ok: false, code, error });
   if (!DOORS.includes(door)) return no('unknown_door', `no door "${str(door).slice(0, 40)}" — one of ${DOORS.join(', ')}`);
   if (!RESOURCE_RE.test(str(resource))) return no('bad_resource', 'a resource is a non-empty id (≤ 400 characters, no control characters)');
+  if (!resourceShapeOk(door, resource)) return no('bad_resource', `a ${door} resource is ${door === 'browser-login' ? '<origin>#<user>, <origin>#* or *' : 'of its own shape'}`);   // lane browser-login
   if (!Array.isArray(to)) return no('bad_row', '`to` must be a list');
   if (!Array.isArray(except)) return no('bad_row', '`except` must be a list');
   if (to.length > LIST_MAX || except.length > LIST_MAX) return no('too_many', `at most ${LIST_MAX} entries in "to" and in "except"`);
@@ -614,7 +626,7 @@ const LEGACY = Object.freeze({
 });
 
 module.exports = {
-  DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE,
+  DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk,
   principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, factsOf, admits, hitsOf, sharesGroup, names, namesNow,
   publicRow, rowKey, conversationKeyOf, conversationKeysOf, keyFromSessionKey, keyFromSubject,
   fromSessionPrincipal, fromExitGrant, fromHostExit, browserKeyResolver, fromBrowserOwner, fromWindowRecord, fromSubject, fromAutomationGrant,

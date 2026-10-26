@@ -137,6 +137,17 @@ html, body {
 .session-card-row { display: flex; align-items: center; gap: 5px; }
 .session-card-lines { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .session-card-main { display: flex; align-items: center; gap: 5px; min-width: 0; }
+/* «needs you · N · <the newest question>» (lane foryou-honest P2-4 — user-todos-panel.js app.sessionAsks.markIn): ONE line
+   under a session row whose conversation holds open For-you items; a tap opens the For-you window on them */
+.ut-sess-mark { display: flex; align-items: center; gap: 5px; width: 100%; min-width: 0; margin: 3px 0 0; padding: 2px 6px; border: none; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text-secondary); font: inherit; font-size: 11px; line-height: 1.35; text-align: left; cursor: pointer; }
+.ut-sess-mark[hidden] { display: none; }
+.ut-sess-mark:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.ut-sess-mark .ut-sm-icon { display: inline-flex; flex: none; color: var(--accent); }
+.ut-sess-mark .ut-sm-icon svg { width: 12px; height: 12px; }
+.ut-sess-mark .ut-sm-head { flex: none; color: var(--accent); font-weight: 600; white-space: nowrap; }
+.ut-sess-mark .ut-sm-sep { flex: none; color: var(--text-dim); }
+.ut-sess-mark .ut-sm-q { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (pointer: coarse) { .ut-sess-mark { min-height: 44px; font-size: 13px; } } /* a finger's target */
 .session-card-sub { display: flex; min-width: 0; }
 /* cwd: left-truncate (elide the front, keep the meaningful tail) like folder-path */
 .session-card-cwd { font-size: calc(9px * var(--ui-font-scale, 1)); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; min-width: 0; }
@@ -633,7 +644,8 @@ html, body {
 /* Session card expand button */
 .session-expand-btn {
   background: none; border: none; cursor: pointer; font-size: 10px; color: var(--text-dim);
-  padding: 0 2px; line-height: 1; margin-left: 4px; border-radius: 2px;
+  padding: 0 2px; line-height: 1; margin-left: 2px; border-radius: 2px;
+  min-width: 24px; min-height: 24px; flex-shrink: 0; /* «Show details»: the 24 px mouse target (lane desktop-small P2-6 — it was 9×10) */
   transition: color var(--transition);
 }
 .session-expand-btn:hover { color: var(--accent-hover); }
@@ -830,7 +842,7 @@ html, body {
 .status-filter-item input[type="checkbox"] { width: 13px; height: 13px; accent-color: var(--accent); }
 .icon-btn {
   background: transparent; border: none; color: var(--text-secondary); cursor: pointer;
-  width: 28px; height: 28px; border-radius: var(--radius-sm); display: flex; align-items: center;
+  width: 28px; height: 28px; min-width: 24px; border-radius: var(--radius-sm); display: flex; align-items: center; /* a squeezed row keeps 24 (lane desktop-small P2-6: Sort was 23×28) */
   justify-content: center; font-size: 14px; transition: all var(--transition);
 }
 .icon-btn:hover { background: var(--bg-hover); color: var(--text); }
@@ -940,7 +952,7 @@ html, body {
 }
 /* THE flexible item: the title yields first (an ellipsis), before any button gives up its words */
 #toolbar .toolbar-left > .toolbar-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#toolbar .toolbar-left > .toolbar-title[data-squeezed] { visibility: hidden; } /* narrower than TITLE_MIN_PX: a sliver of a glyph */
+#toolbar .toolbar-left > .toolbar-title[data-squeezed] { visibility: hidden; } /* squeezed at all: the name is whole or not drawn, never «Vibe…» (lane desktop-small P3-2; it was a sliver under TITLE_MIN_PX) */
 /* the fold's classes, scoped to the toolbar (an element Customize moves out keeps nothing of them) */
 #toolbar .bar-folded { display: none !important; }
 #toolbar .toolbar-action.tb-compact { padding: 0 7px; gap: 0; }
@@ -1079,9 +1091,11 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; margin-right: 8px;
 }
 .window-active .window-title { color: var(--text); }
-.window-controls { display: flex; gap: 3px; align-items: center; flex-shrink: 0; }
+/* the window's buttons: 24×24, 4 px apart — the mouse target floor (lane desktop-small P2-6: 20×20 three px apart, a ✕ aimed at landed on □) */
+.window-controls { display: flex; gap: 4px; align-items: center; flex-shrink: 0; }
+.window-titlebar.titlebar-narrow .win-overlap-btn { display: none; } /* a title bar under 440 px (window.js _observeTitleWidth): ⧉ steps aside — the title menu's «Switch window» does its act */
 .win-btn {
-  width: 20px; height: 20px; border: none; background: transparent; color: var(--text-dim);
+  width: 24px; height: 24px; border: none; background: transparent; color: var(--text-dim);
   border-radius: 3px; cursor: pointer; display: flex; align-items: center;
   justify-content: center; font-size: 10px; transition: all var(--transition); line-height: 1;
 }
@@ -1277,7 +1291,7 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .desktop-preview-waiting { border-color: var(--yellow, #e5c07b); }
 .desktop-preview-find-flash { animation: blink-fade 0.3s ease-in-out infinite reverse; background: var(--accent); }
 .desktop-preview-add {
-  width: 20px; height: var(--desktop-preview-h, 32px); border-radius: 3px;
+  width: 24px; height: var(--desktop-preview-h, 32px); /* 24 = the mouse target floor (lane desktop-small P2-6) */ border-radius: 3px;
   border: 1.5px dashed var(--border); background: transparent; color: var(--text-dim);
   cursor: pointer; font-size: 14px;
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
@@ -1305,6 +1319,37 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 }
 #taskbar-items { flex: 1; display: flex; gap: 2px; overflow-x: auto; align-items: center; scrollbar-width: none; }
 #taskbar-items::-webkit-scrollbar { display: none; }
+/* lane desktop-small (P2-2 — past ~8 windows the tiles ran on under the tray with nothing to say so): the tiles the strip
+   cuts are counted on ONE «+N» chip right after it; it lists them (taskbar.js fitTaskbarStrip / showHiddenTiles) */
+.taskbar-overflow {
+  flex-shrink: 0; min-width: 36px; height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer; font-variant-numeric: tabular-nums;
+}
+.taskbar-overflow:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-active); }
+.taskbar-overflow[hidden] { display: none; }
+/* …and the owner's many desktops: when their previews crowd the tiles out, the switcher is ONE «Desktop k/N ▾» button
+   (desktop-manager.js _renderCompactSwitcher, PURE switcherForm) whose list switches and adds */
+#desktop-previews.desktop-previews-compact { align-items: center; }
+.desktop-switch-compact {
+  display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; flex-shrink: 0; white-space: nowrap;
+  border: 1.5px solid var(--accent); border-radius: var(--radius-sm); background: var(--accent-dim); color: var(--text);
+  font-size: calc(11px * var(--ui-font-scale, 1)); font-weight: 600; cursor: pointer;
+}
+.desktop-switch-compact:hover { background: var(--bg-hover); }
+.desktop-switch-compact .dsc-btn-name { max-width: 10em; overflow: hidden; text-overflow: ellipsis; }
+.desktop-switch-compact .dsc-btn-pos { color: var(--text-dim); font-weight: 500; font-variant-numeric: tabular-nums; }
+.desktop-switch-compact.desktop-switch-waiting { border-color: var(--yellow, #e5c07b); }
+.desktop-switch-menu { min-width: 180px; }
+.desktop-switch-menu .context-menu-item { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+.desktop-switch-menu .dsc-mark { width: 12px; flex-shrink: 0; color: var(--accent); }
+.desktop-switch-menu .dsc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-switch-menu .dsc-count { flex-shrink: 0; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+/* r2 ①: a row's ⋯ opens the desktop's doors (Rename… / Delete / Move up / Move down — its right-click too); a window dragged
+   onto a row marks it (the preview's drop mark), the mini rect the drag carries into a preview has no place in a row */
+.desktop-switch-menu .dsc-more { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin: -2px -6px -2px 0; border-radius: var(--radius-sm); color: var(--text-dim); }
+.desktop-switch-menu .dsc-more:hover { background: var(--bg-hover); color: var(--text); }
+.desktop-switch-menu .desktop-switch-row.desktop-preview-drop { background: var(--accent-dim); box-shadow: inset 0 0 0 1.5px var(--accent); }
+.desktop-switch-row > .desktop-preview-win { display: none; }
 .taskbar-usage {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0; cursor: pointer;
   font-size: 9px; color: var(--text-dim); flex-shrink: 0; line-height: 1.1;
@@ -1369,6 +1414,9 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .ut-count.ut-seg-norm { background: var(--accent); color: var(--accent-fg, #fff); }
 /* 2.369.118: the grey NOTICE count — for-your-information items never colour the badge */
 .ut-count.ut-seg-notice { background: var(--bg-secondary); color: var(--text-dim); border: 1px solid var(--border); }
+/* lane foryou-honest (P1-1): the QUIET count — every open item outside the loud bands 1–4 (a plain agent question, 搁置):
+   counted, outlined, never a colour (the badge says the number the tray holds) */
+.ut-count.ut-seg-quiet { background: none; color: var(--accent); border: 1px solid var(--accent); line-height: 12px; }
 .ut-notice-head { font-size: 10px; color: var(--text-dim); margin: 10px 0 2px; text-transform: uppercase; letter-spacing: .03em; display: flex; align-items: baseline; gap: 6px; }
 /* lane foryou-folds: the notices are a grey count — the head is ONE button that opens the strip and the groups in place */
 button.ut-notice-head { width: 100%; background: none; border: none; padding: 2px 0; cursor: pointer; font-family: inherit; text-align: left; }
@@ -1404,7 +1452,10 @@ button.ut-notice-head:hover { color: var(--accent); }
 /* lane foryou-folds, measured (tools/tray-measure.mjs: production-length asks ran ~120 px a row — 4 fit the 1280×800 popup):
    a band row's words are a TWO-LINE preview, so the first screen holds its 6 rows + the fold heads; the row's 「▸ 详情」
    (or a reply box being typed) shows the whole words in place — the For-you window (⤢) always does */
-#user-todos-popup .ut-bands .ut-item:not(:has(.ut-detail-exp[open], .ut-reply)) > .ut-body > .ut-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+#user-todos-popup .ut-bands .ut-item:not(.ut-open):not(:has(.ut-detail-exp[open], .ut-reply)) > .ut-body > .ut-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* lane foryou-honest (P3-8): a tray row's body tap opens it IN PLACE (.ut-open); its conversation's name is the door there */
+#user-todos-popup .ut-meta .ut-sess { cursor: pointer; }
+#user-todos-popup .ut-meta .ut-sess:hover { color: var(--accent); text-decoration: underline; }
 /* lane phone-first-screen (design q-044 decision 5): THE PHONE'S FIRST SCREEN — the attention list as a page over the
    window area (under the nav bar; the sidebar, a sheet, a dialog and the toasts stand above it): the tray's bands, rows
    and folds (src/lib/user-todos-panel.js app.phoneHome) — never on a desktop. MEASURED on the real client at 375×812 /
@@ -1412,9 +1463,14 @@ button.ut-notice-head:hover { color: var(--accent); }
    page) — so the page's band rows take the tray's TWO-LINE preview, in the page's own scope (「▸ 详情」, a reply box
    being typed and ⤢ show the whole words, as in the tray) */
 #phone-home { display: none; }
-#phone-home .ut-bands .ut-item:not(:has(.ut-detail-exp[open], .ut-reply)) > .ut-body > .ut-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+#phone-home .ut-bands .ut-item:not(.ut-open):not(:has(.ut-detail-exp[open], .ut-reply)) > .ut-body > .ut-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .ut-group-n { color: var(--text-dim); font-weight: 400; }
 .ut-item { display: flex; gap: 7px; padding: 4px 2px 5px 8px; cursor: pointer; border-radius: var(--radius-sm); }
+.ut-go { display: none; } /* a folded row's trailing conversation door — a touch screen's accordion only (the touch scale block) */
+/* lane foryou-honest: the ☰ drawer's first row «For you · N» — the phone's (compact class) second door to its first screen */
+.drawer-foryou { display: none; }
+html[data-vc="compact"] .drawer-foryou { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 4px 6px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-window); color: var(--text); font-size: 16px; font-weight: 600; text-align: left; cursor: pointer; }
+html[data-vc="compact"] .drawer-foryou svg { width: 18px; height: 18px; flex: none; color: var(--accent); }
 .ut-item:hover { background: var(--hover-overlay, rgba(255,255,255,0.05)); }
 .ut-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 4px; flex: 0 0 auto; background: var(--text-dim); }
 .ut-dot[data-urgency="normal"] { background: var(--accent); }
@@ -1442,6 +1498,7 @@ button.ut-notice-head:hover { color: var(--accent); }
 .ut-detail-exp[open] > summary::before { content: '▾ '; content: '▾ ' / ""; }
 .ut-detail-exp > summary:hover { color: var(--accent); }
 .ut-meta { font-size: 9px; color: var(--text-dim); margin-top: 2px; }
+.ut-age { white-space: nowrap; } /* lane foryou-honest: the age keeps its separator (« · 3min ago») — a wrap never leaves a lone «·» */
 /* lane inbox-decision-group: the LLM plugin's tray sections (+ 待判断, inbox-verify F4) + a judged row's chip (+ the switch's example line) */
 .plugin-cfg-example { flex-basis: 100%; font-size: 11px; color: var(--text-dim); margin: 2px 0 0 22px; }
 .ut-actions { float: right; margin: 0 0 2px 8px; display: flex; gap: 2px; align-items: flex-start; opacity: 0.35; } /* floated inside .ut-body: the words wrap beside the buttons, then use the full width (2.369.175) */
@@ -1610,7 +1667,7 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .taskbar-item {
   padding: var(--taskbar-item-pad, 3px) 8px; background: rgba(255,255,255,0.04);
   border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text-secondary);
-  cursor: pointer; max-width: 200px; min-width: 60px; overflow: hidden;
+  cursor: pointer; max-width: 200px; min-width: 90px; overflow: hidden; /* 90 = taskbar-fit.js TILE_MIN_PX: an icon + a readable word (lane desktop-small P2-2 — 60 px left one or two characters) */
   flex-shrink: 1; transition: all var(--transition);
   display: flex; align-items: center; gap: 6px;
 }
@@ -1690,6 +1747,7 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .dialog-close {
   background: transparent; border: none; color: var(--text-dim); cursor: pointer;
   font-size: 13px; padding: 2px 5px; border-radius: var(--radius-sm); transition: all var(--transition);
+  min-width: 24px; min-height: 24px; margin: -2.5px 0; /* the 24 px mouse target (lane desktop-small P2-6 — it was 21×19); the margin gives the header its 19 px line back, so no dialog grows */
 }
 .dialog-close:hover { background: var(--hover-overlay); color: var(--text); }
 .dialog-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
@@ -1787,6 +1845,8 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
 .settings-nav-item:hover { background: var(--bg-hover); color: var(--text); }
 .settings-nav-item.active { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-weight: 600; }
 .settings-content { flex: 1; overflow-y: auto; padding: 0 16px 16px; }
+/* the window's rule at its foot, always seen (lane desktop-small P3-3): every row saves as it changes */
+.settings-foot { flex-shrink: 0; padding: 6px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-dim); }
 .settings-section { margin-top: 16px; }
 .settings-section-title {
   font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;
@@ -2700,6 +2760,16 @@ html[data-vc="regular"] #workspace { flex: 1; min-height: 0; }
   html[data-vc="regular"] #mobile-nav-dest-jobs { order: 16; }
   html[data-vc="regular"] #mobile-nav-gear { order: 20; display: inline-flex !important; align-items: center; justify-content: center; }
   html[data-vc="regular"] #mobile-nav-files .mnav-word { display: none !important; }
+  /* lane foryou-honest (P1-1): For you on the bar — the bottom section's first destination (order 11: after Desktops, which
+     also takes 11 and stands earlier in the nav; before Task Groups) — its icon over the honest count */
+  html[data-vc="regular"] #mobile-nav #mobile-nav-todos {
+    display: inline-flex !important; order: 11; width: 44px; height: 44px; padding: 0; flex-wrap: wrap; align-content: center; justify-content: center; gap: 1px 2px;
+  }
+  html[data-vc="regular"] #mobile-nav #mobile-nav-todos > svg { flex: 0 0 100%; height: 18px; }
+  /* …and its tray opens IN the conversation column (a destination's place, SPEC-v3 §2.2), never over the list or the bar */
+  html[data-vc="regular"] #user-todos-popup.usage-popup { left: 329px !important; right: 64px !important; top: 8px !important; max-height: calc(calc(100dvh / var(--ui-scale, 1)) - 16px) !important; } /* the column's height (the anchor's room above a mid-bar button is half of it) */
+  html[data-vc="regular"].vs-list-hidden #user-todos-popup.usage-popup { left: 8px !important; }
+  html[data-vc="regular"][data-fold="book"] #user-todos-popup.usage-popup { left: calc(var(--seg-edge, 475.5px) + var(--fold-seam, 20px) / 2 + 24px) !important; }
   /* the conversation's head: its title + its state word, no buttons (SPEC-v3 §2.4 — the ⋯ is on the bar) */
   html[data-vc="regular"] .window.window-active > .window-titlebar {
     display: flex; height: 44px; cursor: pointer; padding: 0 16px 0 52px; touch-action: auto; background: var(--bg-titlebar-active);
@@ -2722,6 +2792,9 @@ html[data-vc="regular"] #workspace { flex: 1; min-height: 0; }
   html[data-vc="regular"] #mobile-nav-artifacts { order: 4; }
   html[data-vc="regular"] #mobile-nav-more { order: 5; }
   html[data-vc="regular"] #mobile-nav-gear { order: 6; }
+  html[data-vc="regular"] #mobile-nav #mobile-nav-todos { display: inline-flex !important; order: 6; min-width: 44px; min-height: 44px; } /* lane foryou-honest: For you before ⚙ */
+  html[data-vc="regular"] #user-todos-popup.usage-popup { left: 329px !important; right: 8px !important; top: 52px !important; max-height: calc(calc(100dvh / var(--ui-scale, 1)) - 60px) !important; } /* its tray in the conversation column, under the bar */
+  html[data-vc="regular"].vs-list-hidden #user-todos-popup.usage-popup { left: 8px !important; }
   html[data-vc="regular"] #mobile-nav #mobile-nav-viewer-close.on, html[data-vc="regular"] #mobile-nav #mobile-nav-artifacts.on, html[data-vc="regular"] #mobile-nav #mobile-nav-more.on { display: inline-flex; }
   html[data-vc="regular"] #mobile-nav .mnav-bar-btn, html[data-vc="regular"] #mobile-nav-menu, html[data-vc="regular"] #mobile-nav-gear { min-width: 44px; min-height: 44px; }
 }
@@ -2774,20 +2847,9 @@ html[data-vc="regular"] .col-card .sess-state-chip .chip-text { display: inline 
 html[data-vc="regular"] .col-card .col-card-path { font-size: 13px; color: var(--text-dim); padding: 2px 0 0; } /* the head ellipsizes, the tail stays (.wb-card-path-text) */
 html[data-vc="regular"] .col-card.highlighted { background: var(--bg-hover); border-left: none !important; }
 html[data-vc="regular"] .col-sentinel { height: 1px; }
-/* the inline answers (SPEC-v3 §2.3): the row's question in two lines + its reply chips (outlined, 44 px) under its folder */
-html[data-vc="regular"] .col-card .col-asks { margin: 6px 0 2px; }
-html[data-vc="regular"] .col-card .col-asks[hidden] { display: none; }
-html[data-vc="regular"] .col-asks .ut-item { padding: 0; border: none; background: none; display: flex; gap: 8px; align-items: flex-start; }
-html[data-vc="regular"] .col-asks .ut-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
-html[data-vc="regular"] .col-asks .ut-text { order: 1; }
-html[data-vc="regular"] .col-asks .ut-opts { order: 2; }
-html[data-vc="regular"] .col-asks .ut-actions { order: 3; float: none !important; position: static !important; display: flex !important; gap: 4px; margin-top: 4px; opacity: 1; }
-html[data-vc="regular"] .col-asks .ut-meta { order: 4; font-size: 12px; color: var(--text-dim); }
-html[data-vc="regular"] .col-asks .ut-opt { max-width: 100%; padding: 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
-html[data-vc="regular"] .col-asks .ut-text { font-size: 13px; color: var(--text-secondary); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-html[data-vc="regular"] .col-asks .ut-opt, html[data-vc="regular"] .col-asks .ut-reply-btn { min-height: 44px; font-size: 14px; border: 1px solid var(--border); background: var(--bg-input); border-radius: var(--radius); }
-html[data-vc="regular"] .col-asks .ut-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-html[data-vc="regular"] .col-asks .ut-act { min-width: 44px; min-height: 44px; }
+/* «needs you · N» (lane foryou-honest — the owner's B, 2026-10-25): the row MARKS its open questions on one line; the
+   For-you window answers them (the inline answers of slice 2c — the question, its fold and four chips — are withdrawn) */
+html[data-vc="regular"] .col-card .ut-sess-mark { margin-top: 4px; font-size: 13px; }
 
 /* one scroll: the search row scrolls with the rows (SPEC-v3 §2.3) */
 html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex: none !important; padding: 0; }
@@ -2865,6 +2927,7 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 .global-toast-x {
   flex: none; border: none; background: none; color: var(--text-dim);
   font-size: 10px; cursor: pointer; padding: 1px 3px; line-height: 1;
+  min-width: 24px; min-height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); /* the 24 px mouse target (lane desktop-small P2-6 — it was 14×12) */
 }
 .global-toast-x:hover { color: var(--text); }
 .global-toast-action {
@@ -2877,7 +2940,7 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 .global-toast-warn { border-left-color: var(--yellow, #e5c07b); }
 /* lane path-link-not-found: a toast with a long path and three actions — the words and its ✕ on the first line, the actions under them */
 .global-toast-wide { flex-wrap: wrap; }
-.global-toast-wide .global-toast-body { flex: 1 1 calc(100% - 24px); }
+.global-toast-wide .global-toast-body { flex: 1 1 calc(100% - 48px); } /* room for the ✕ beside the words: 24 px (44 − 10 on touch) + the 8 px gap (lane desktop-small: the ✕ is a 24 px target now) */
 .global-toast-wide .global-toast-x { order: 1; }
 .global-toast-wide .global-toast-action { order: 2; }
 .global-toast-out { opacity: 0; transition: opacity 0.25s; }
@@ -2950,7 +3013,7 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 .dialog-check-row > .ns-auto-note { grid-column: 2; } /* the checkbox row is a 2-column grid: the note sits under the words, never widens the box's column */
 /* 可用工具 */
 .ns-tool-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.ns-tool-chip { font: 11px var(--font-mono, ui-monospace, Menlo, Consolas, monospace); padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; gap: 3px; line-height: 18px; }
+.ns-tool-chip { min-height: 24px; font: 11px var(--font-mono, ui-monospace, Menlo, Consolas, monospace); padding: 1px 8px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary); cursor: pointer; display: inline-flex; align-items: center; gap: 3px; line-height: 18px; }
 .ns-tool-chip:hover { border-color: var(--border-active); color: var(--text); }
 .ns-tool-chip.allow { color: var(--text); border-color: color-mix(in srgb, var(--green) 55%, transparent); background: color-mix(in srgb, var(--green) 9%, transparent); }
 .ns-tool-chip.deny { color: var(--red); border-color: color-mix(in srgb, var(--red) 55%, transparent); background: color-mix(in srgb, var(--red) 8%, transparent); text-decoration: line-through; }
@@ -2960,7 +3023,7 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 .ns-tool-warn { font-size: 10.5px; color: var(--yellow); font-weight: 400; line-height: 1.45; }
 .ns-codex-tools { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: center; }
 .ns-codex-tools .ns-ck { font-size: 10.5px; color: var(--text-dim); font-weight: 400; }
-.ns-link { background: transparent; border: 0; color: var(--accent); cursor: pointer; font-size: 10.5px; padding: 0 2px; font-family: inherit; }
+.ns-link { background: transparent; border: 0; color: var(--accent); cursor: pointer; font-size: 10.5px; padding: 0 2px; font-family: inherit; min-height: 24px; } /* the 24 px mouse target (lane desktop-small P2-6) */
 .ns-link:hover { text-decoration: underline; }
 .ns-link:disabled { color: var(--text-dim); cursor: default; text-decoration: none; }
 /* the right column's rows */
@@ -3122,7 +3185,7 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 .cwd-recent { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .cwd-recent-chip {
   background: var(--bg-input); border: 1px solid var(--border); color: var(--text-secondary);
-  font-size: 10px; padding: 2px 8px; border-radius: 10px; cursor: pointer;
+  font-size: 10px; padding: 2px 8px; border-radius: 10px; cursor: pointer; min-height: 24px; /* the 24 px mouse target (lane desktop-small P2-6) */
   max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   direction: rtl; text-align: left; /* front-truncate: keep the path's tail visible */
 }
@@ -3525,7 +3588,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 /* lane apps-launcher-witness: the filter box across Apps + the witnessed group; the group's head, note and source chip */
 .desktop-launch-filter { width: 100%; box-sizing: border-box; margin: 0 0 8px; padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-input); color: var(--text); }
 .desktop-launch-seen-sec.is-empty { display: none; }
-.desktop-launch-seen-recheck { margin-left: auto; flex: none; white-space: nowrap; font-size: 11px; font-weight: 400; padding: 1px 8px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text-secondary); cursor: pointer; }
+.desktop-launch-seen-recheck { margin-left: auto; flex: none; white-space: nowrap; font-size: 11px; font-weight: 400; padding: 1px 8px; min-height: 24px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text-secondary); cursor: pointer; } /* min-height: the 24 px mouse target (lane desktop-small P2-6 — «Check again» was 79×16) */
 .desktop-launch-seen-recheck:hover { color: var(--text); background: var(--bg-hover); }
 .desktop-launch-seen-note, .desktop-launch-catalog-note { margin: 0 0 6px; font-size: 11px; color: var(--text-secondary); }
 .desktop-launch-seen-state { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--text-secondary); }
@@ -3533,7 +3596,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 .desktop-launch-seen-state svg { width: 12px; height: 12px; animation: usage-refresh-spin 0.9s linear infinite; }
 .desktop-launch-seen-recheck:disabled { opacity: 0.5; cursor: progress; }
 .desktop-launch-seen-more { margin: 0 0 6px; font-size: 11px; color: var(--text-secondary); }
-.desktop-launch-seen-show { font-size: 11px; padding: 0; border: 0; background: none; color: var(--accent); cursor: pointer; text-decoration: underline; }
+.desktop-launch-seen-show { font-size: 11px; padding: 0 2px; min-height: 24px; border: 0; background: none; color: var(--accent); cursor: pointer; text-decoration: underline; } /* min-height: the 24 px mouse target (lane desktop-small P2-6 — «Show them» was 55×12) */
 .desktop-launch-chip { display: inline-block; vertical-align: baseline; font-size: 10px; line-height: 1.4; padding: 0 6px; border-radius: 8px; background: var(--bg-hover); color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .desktop-launch-card-wrap[hidden] { display: none; }
 .desktop-launch-browser-note { margin: 0 0 6px; font-size: 11px; line-height: 1.45; color: var(--text-secondary); }
@@ -4963,8 +5026,8 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
 .iw-meta { display: flex; flex-wrap: wrap; row-gap: 2px; font-size: 11px; color: var(--text-dim); }
 .iw-meta > span + span::before { content: '·'; content: '·' / ""; margin: 0 6px; }
 /* THE WORDS: the whole title and detail at the pane's width — they wrap, the pane scrolls, nothing is cut */
-.iw-title { font-size: 15px; font-weight: 600; line-height: 1.4; color: var(--text); overflow-wrap: anywhere; user-select: text; cursor: text; margin-bottom: 10px; }
-.iw-detail { font-size: 13px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; user-select: text; cursor: text; }
+.iw-title { font-size: 15px; font-weight: 600; line-height: 1.4; color: var(--text); overflow-wrap: anywhere; user-select: text; cursor: text; margin-bottom: 10px; white-space: pre-wrap; }
+.iw-detail { font-size: 13px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; user-select: text; cursor: text; white-space: pre-wrap; } /* lane foryou-honest (P1-2): the words as written — the tray's renderer, line breaks kept */
 .iw-detail > :last-child { margin-bottom: 0; }
 .iw-detail p { margin: 0 0 10px; }
 .iw-detail ul, .iw-detail ol { padding-left: 22px; margin: 0 0 10px; }
@@ -5036,6 +5099,79 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   .iw-back { min-width: 40px; }
   .iw-filter, .iw-reply-input { font-size: 14px; }
 }
+
+/* ── lane foryou-honest: THE TOUCH SCALE (the owner 2026-10-25 on the Duo's inline row: 「这个UI太怪了，按钮这么大，字这么小，还有个更小的
+   detail作为可操作项，你觉得手指很容易点是吧」) — on a touch screen every For-you surface (the tray's rows and its chrome, the title-bar mini
+   inbox, the For-you window, a session row's marker) reads at ONE scale: body text ≥ 16 px, the rest ≥ 14 px, every tap target
+   ≥ 44 × 44; the detail fold a FULL-WIDTH «detail ▾» row; a row's verbs in ONE row of 44 px buttons, each with its word under its
+   icon (data-label — Reply weighted); option chips the option's words at 15 px, wrapping to two lines. The mouse keeps its sizes.
+   THE ROW IS AN ACCORDION on the sheet and the phone's first-screen page (ONE row shape on a phone — 主开发's pick A): a folded
+   row is its question (16 px, one line) + ONE 14 px meta line and the whole row is the tap (nothing smaller inside it) but
+   its trailing 44 px conversation door; ONE open at a time (user-todos-panel.js openOne) — six folded rows + the band heads
+   are the first screen again (q-044 decision 1). Gate: test-foryou-honest-chrome's size census at 382 and 951 (RED CONTROL:
+   this block cut out). ── */
+@media (hover: none) and (pointer: coarse) {
+  /* THE FLOORS: no text under 14 px, no target under 44 × 44 */
+  #user-todos-popup *, .ut-mini-popover *, #phone-home *, .iw *, .ut-sess-mark, .ut-sess-mark * { font-size: max(14px, 1em) !important; }
+  #user-todos-popup :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"])),
+  .ut-mini-popover :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"])),
+  #phone-home :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"])),
+  .iw :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"]), .iw-row) { min-height: 44px !important; min-width: 44px; box-sizing: border-box; }
+  /* fields read at 16 px (iOS never zooms a focused field) — the 14 px floor above must not shrink them; a box with the mic is
+     48 px tall so the 44 px mic sits inside it */
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home, .iw) :is(textarea, select, input:not([type="radio"], [type="checkbox"])) { font-size: 16px !important; }
+  html:not(.voice-absent) :is(#user-todos-popup, .ut-mini-popover, #phone-home, .iw) .voice-field > textarea { min-height: 48px !important; }
+  .iw .iw-back { font-size: 18px !important; }
+  #user-todos-popup .ut-count, #phone-home .ut-count, .iw .ut-count { height: 20px; line-height: 20px; min-width: 20px; padding: 0 6px; box-sizing: border-box; }
+  :is(#user-todos-popup, #phone-home) .ut-band-bar { flex-wrap: wrap; row-gap: 4px; } /* a band's name is never squeezed to «Othe…» — its buttons wrap below it */
+  :is(#user-todos-popup, #phone-home) .ut-band-bar > .ut-band-name { flex: 0 0 auto; }
+  /* a row: the question (16 px), its detail as a full-width row, the chips, the meta with its conversation door, the verbs */
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item > .ut-body { display: flex; flex-direction: column; min-width: 0; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-text { font-size: 16px !important; line-height: 1.4; }
+  /* the meta is ONE run of text in a 44 px band (22 px lines + 11 px above and below; the name's door padded to 44 px inside
+     it): a long conversation name wraps INSIDE itself and the age rides glued to it (« · 3min ago», one nowrap span) — no
+     line starts with «·» (acceptance round 2) */
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-meta { display: block; line-height: 22px; padding-block: 11px; margin-top: 4px; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-meta .ut-sess { padding-block: 15px; overflow-wrap: anywhere; }
+  /* THE FOLDED ROW (the accordion): the question + one meta line; the whole row opens it — its trailing door aside */
+  :is(#user-todos-popup, #phone-home) .ut-item { position: relative; }
+  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > :not(.ut-go, .ut-text, .ut-meta) { display: none !important; }
+  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > .ut-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1 !important; line-clamp: 1 !important; overflow: hidden; } /* ONE line folded: at 14 px a band bar holding its «Mark all seen» and «N more — expand» wraps to 92 px — six two-line rows + the production shape's five heads end at 889 px at 375×812; one-line rows (52 px) end inside it */
+  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > .ut-meta { display: block; line-height: inherit; padding-block: 0; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
+  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > .ut-meta .ut-sess { display: inline; min-height: 0; padding-block: 0; }
+  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > :is(.ut-text, .ut-meta),
+  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > :is(.ut-text, .ut-meta) * { pointer-events: none; }
+  :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go { display: inline-flex; position: absolute; top: 4px; right: 0; min-width: 52px; min-height: 44px; padding: 3px 4px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-window); color: var(--accent); cursor: pointer; }
+  :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go svg { width: 18px; height: 18px; }
+  :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go::after { content: attr(data-label); font-size: 14px; line-height: 1.1; white-space: nowrap; }
+  :is(#user-todos-popup, #phone-home) .ut-item > .ut-body:has(> .ut-go) > :is(.ut-text, .ut-meta) { margin-right: 60px; }
+  /* THE OPEN ROW (acceptance round 2): the door keeps the QUESTION LINE as its row — the question | the door, centred on the
+     question's first line — and everything else runs full width BELOW the door's bottom edge (the detail box never under it) */
+  :is(#user-todos-popup, #phone-home) .ut-item.ut-open > .ut-body:has(> .ut-go) { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; }
+  :is(#user-todos-popup, #phone-home) .ut-item.ut-open > .ut-body:has(> .ut-go) > * { grid-column: 1 / -1; margin-right: 0; }
+  :is(#user-todos-popup, #phone-home) .ut-item.ut-open > .ut-body:has(> .ut-go) > .ut-text { grid-area: 1 / 1; padding-top: calc((44px - 1.4em) / 2); }
+  :is(#user-todos-popup, #phone-home) .ut-item.ut-open > .ut-body > .ut-go { grid-area: 1 / 2; position: static; align-self: start; }
+  :is(#user-todos-popup, #phone-home) .ut-item.ut-open:has(> .ut-body > .ut-go) > .ut-dot { margin-top: calc(4px + (44px - 22.4px) / 2); } /* the dot follows its line down */
+  /* the fold (acceptance round 2): a full-width row AFTER the band's shown rows (user-todos-panel.js drawBands — on touch) */
+  :is(#user-todos-popup, #phone-home) .ut-band > .ut-fold { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 0 12px 0 22px; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-detail { max-height: none; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-detail-exp > summary { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 12px; margin-top: 6px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-detail-exp > summary::before { content: none; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-detail-exp > summary::after { content: '▾'; content: '▾' / ""; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-detail-exp[open] > summary::after { content: '▴'; content: '▴' / ""; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-opts { gap: 6px; margin-top: 8px; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-opt, .iw .iw-opt { max-width: 100%; padding: 10px 14px; font-size: 15px !important; line-height: 1.35; white-space: normal; text-align: left; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; border-radius: 14px; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-actions { order: 2; float: none; width: 100%; margin: 8px 0 0; display: flex; gap: 6px; opacity: 1; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-reply { order: 3; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-actions > .ut-act { flex: 1 1 0; width: auto; height: auto; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px 2px; font-size: 16px !important; line-height: 1; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-actions > .ut-act[data-label]::after { content: attr(data-label); font-size: 14px; line-height: 1.2; white-space: nowrap; }
+  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-actions > .ut-reply-btn { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+  /* the For-you window: its title and words read as body text */
+  .iw .iw-title { font-size: 17px !important; }
+  .iw .iw-detail, .iw .iw-row-title, .iw .iw-reply-input, .iw .iw-filter { font-size: 16px !important; }
+  .iw .iw-act { justify-content: center; }
+}
+/* ── end of the touch scale (lane foryou-honest) ── */
 
 /* ── Guided CLI modal (embedded login/install terminal) + self-update dialog ── */
 /* Width belongs on the DIALOG, not the body: .dialog is a fixed width:440px
@@ -7260,6 +7396,9 @@ label.chan-cap-row { cursor: default; }
 .browser-live-dialog-actions > .mounts-btn, .browser-live-dialog > .mounts-btn { white-space: nowrap; flex: 0 0 auto; }
 .browser-live-dialog-actions > .mounts-btn.danger { color: var(--warn-text); border-color: var(--warn-text); }
 .browser-live-dialog-hint { font-size: 11px; color: var(--text-secondary); flex: 1 1 12em; min-width: 0; }
+.browser-live-surface-details > summary { cursor: pointer; font-size: 11px; color: var(--text-secondary); } /* lane browser-surfaces: a kernel prompt's details, ONE fold */
+.browser-live-surface-details > .browser-live-dialog-note { white-space: pre-wrap; color: var(--text-secondary); overflow-wrap: anywhere; }
+.browser-live-surface-sheet { display: flex; flex-direction: column; gap: 4px; }
 /* lane site-reset: the navigation-loop banner — the cycle's addresses, one per line, never wrapped into the canvas */
 .browser-live-loop-cycle { margin: 0; padding: 0 0 0 16px; flex: 1 1 100%; min-width: 0; font-family: var(--font-mono, monospace); font-size: 11px; }
 .browser-live-loop-cycle > li { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -7698,6 +7837,7 @@ label.chan-cap-row { cursor: default; }
 .bbuild-body { max-height: min(70vh, calc(80vh / var(--ui-scale, 1))); overflow-y: auto; }
 .bbuild-now, .bbuild-change, .bbuild-hint, .bbuild-note { font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
 .bbuild-now.chan-warn, .bbuild-change.chan-warn { color: var(--warn-text); }
+.bbuild-icon { display: inline-flex; align-items: flex-start; padding-top: 2px; color: var(--text-secondary); } /* lane engine-plugin: the «自研内核» card's glyph */
 .dialog-body .bwho-answer input.bbuild-path { margin-top: 4px; width: 100%; box-sizing: border-box; font-family: var(--font-mono, monospace); font-size: 11px; }
 .dialog-body label.bbuild-confirm { display: flex; flex-direction: row; align-items: center; gap: 6px; margin: 0; font-size: 12px; }
 .dialog-body label.bbuild-confirm input { width: auto; margin: 0; }
@@ -7782,6 +7922,7 @@ label.chan-cap-row { cursor: default; }
 .win-inbox-badge[data-urgency="high"] { background: var(--yellow, #e5c07b); color: #000; }
 .win-inbox-badge[data-urgency="urgent"] { background: var(--red, #e55); color: #fff; }
 .win-inbox-badge[data-urgency="low"] { background: var(--bg-secondary); color: var(--text-secondary); border-color: var(--border); }
+.win-inbox-badge[data-urgency="quiet"] { background: none; color: var(--accent); border-color: var(--accent); } /* lane foryou-honest: the honest count, nothing loud */
 .win-inbox-badge:hover { filter: brightness(1.12); }
 .win-inbox-badge:focus-visible { outline: 1px solid var(--border-active); outline-offset: 1px; }
 .win-inbox-badge svg { width: 10px; height: 10px; display: block; }
@@ -7989,7 +8130,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .ut-secret-state button { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
 .vault-paste-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }
 .vault-paste-words { font-weight: 600; font-size: 13px; overflow-wrap: anywhere; }
-.vault-secret-add-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; min-width: min(420px, 90vw); }
+.vault-secret-add-dialog .dialog-body, .vault-login-add-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; min-width: min(420px, 90vw); } /* lane browser-login: 网站登录… shares the free entry's layout */
 .vault-secret-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
 .vault-secret-label { color: var(--text-dim); }
 .vault-secret-kind { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }

@@ -137,7 +137,7 @@ Each `contributes.agentTools[]` becomes an executable `data/bin/vibespace-tool-<
 | Source | Value |
 |---|---|
 | Local folder | a directory holding `vibespace-plugin.json` |
-| Git | `https://host/owner/repo(.git)[#branch]` or `git@host:owner/repo.git` (shallow clone, 60 s) |
+| Git | `https://host/owner/repo(.git)` or `git@host:owner/repo.git` + an optional **Ref** (a tag, a branch or a full commit sha; `#ref` on the URL works too) — one ref fetched at depth 1, its sha recorded, 60 s. A PRIVATE repository: pick the **Plugin Git credential** (Integrations → Plugins: the host + an https token or an ssh deploy key) — git gets it only through files VibeSpace shreds after the clone |
 | `.vsp` package | a zip of the plugin folder (a single top-level folder is unwrapped) |
 | GitHub release | `owner/repo[@tag]` — the release's `*.vsp` asset (public repos) |
 

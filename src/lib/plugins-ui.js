@@ -276,6 +276,13 @@ export function installPluginsUI(App) {
       reload.onclick = async () => { const rr = await fetchJson('/api/plugins/manifests/reload', { method: 'POST' }); if (rr?.error) showToast(rr.error, { type: 'error' }); this.pluginClient?.refresh?.(); render(); };
       head.append(installBtn, reload);
       sec.appendChild(head);
+      // lane engine-distribution: the CLUSTER's plugin (fleet.json browserEngine) whose boot install failed — said here, by name
+      if (r?.fleet && r.fleet.outcome === 'failed' && r.fleet.plugin) {
+        const fw = document.createElement('div');
+        fw.className = 'plugin-detail plugin-cfg-warn plugin-fleet-failed';
+        fw.textContent = t("The cluster's plugin {plugin} could not be installed: {error}", { plugin: r.fleet.plugin, error: `${r.fleet.error || ''}${r.fleet.code ? ` [${r.fleet.code}]` : ''}` });
+        sec.appendChild(fw);
+      }
       if (!list.length) {
         const empty = document.createElement('div');
         empty.className = 'empty-hint'; empty.textContent = t('No plugins installed. Use Install plugin… (a folder, a git URL, a .vsp file or a GitHub release) — docs/examples/hello-plugin is the smallest complete one.');
@@ -325,8 +332,12 @@ export function installPluginsUI(App) {
           showToast(t('Uninstalled {id} (moved to trash)', { id: p.id }));
           this.pluginClient?.refresh?.(); render();
         };
-        rows.appendChild(pluginRow({ id: p.id, label: p.label && p.label !== p.id ? `${p.label} (${p.id})` : p.id, description: p.description || '', tone, chip, chipTitle: [p.version, why].filter(Boolean).join(' · '), onChip,
-          sw, install: uninstall, gear: this._pluginGear(p.id, p.label || p.id) }));
+        // lane engine-distribution (D2): the cluster installed AND trusted it (only the id it names, only at the sha it pins)
+        let fact = null;
+        if (p.trustedBy === 'fleet') { fact = document.createElement('div'); fact.className = 'plugin-row-fact plugin-fleet-trusted'; fact.textContent = t('Installed and trusted by the cluster') + (p.install?.sha ? ` · ${p.install.sha.slice(0, 12)}` : ''); }
+        const from = p.install && p.install.source === 'git' ? [p.install.ref ? `@${p.install.ref}` : '', p.install.sha ? p.install.sha.slice(0, 12) : ''].filter(Boolean).join(' ') : '';
+        rows.appendChild(pluginRow({ id: p.id, label: p.label && p.label !== p.id ? `${p.label} (${p.id})` : p.id, description: p.description || '', tone, chip, chipTitle: [p.version, from, why].filter(Boolean).join(' · '), onChip,
+          sw, install: uninstall, gear: this._pluginGear(p.id, p.label || p.id), fact }));
       }
       parent.appendChild(sec);
     };
@@ -436,11 +447,27 @@ export function installPluginsUI(App) {
       <label class="plugin-install-row"><span>${escHtml(t('Source'))}</span><select class="plugin-install-source">${SOURCES.map((s) => `<option value="${s.value}">${escHtml(s.label)}</option>`).join('')}</select></label>
       <label class="plugin-install-row plugin-install-value-row"><span>${escHtml(t('Location'))}</span><input type="text" class="plugin-install-value" spellcheck="false"></label>
       <label class="plugin-install-row plugin-install-file-row hidden"><span>${escHtml(t('File'))}</span><input type="file" class="plugin-install-file" accept=".vsp,.zip"></label>
+      <label class="plugin-install-row plugin-install-ref-row hidden"><span>${escHtml(t('Ref'))}</span><input type="text" class="plugin-install-ref" spellcheck="false" placeholder="${escHtml(t('a tag, a branch or a full commit sha (empty = the default branch)'))}"></label>
+      <div class="plugin-install-row plugin-install-cred-row hidden"><span>${escHtml(t('Credential'))}</span><select class="plugin-install-cred"><option value="">${escHtml(t('None (a public repository)'))}</option><option value="plugin-git">${escHtml(t('Plugin Git credential'))}</option></select><button type="button" class="mounts-btn plugin-install-cred-open">${escHtml(t('Set up…'))}</button></div>
+      <div class="plugin-cfg-hint plugin-install-cred-hint hidden">${escHtml(t('A private repository is read with the Plugin Git credential kept in Integrations (sealed by the vault) — a token is never typed here.'))}</div>
       <div class="plugin-cfg-hint">${escHtml(t('The package is validated before it is placed under data/plugins/<id>/. Plugins that ask for capabilities beyond the sandbox are enabled only after you review them.'))}</div>
       <div class="plugin-detail plugin-cfg-warn plugin-install-error hidden"></div>
       <div class="dialog-actions"><button class="mounts-btn plugin-install-cancel">${escHtml(t('Cancel'))}</button><button class="mounts-btn plugin-install-go">${escHtml(t('Install'))}</button></div>`;
     const srcSel = body.querySelector('.plugin-install-source'), val = body.querySelector('.plugin-install-value'), fileRow = body.querySelector('.plugin-install-file-row'), valRow = body.querySelector('.plugin-install-value-row'), fileIn = body.querySelector('.plugin-install-file'), errEl = body.querySelector('.plugin-install-error'), go = body.querySelector('.plugin-install-go');
-    const sync = () => { const s = SOURCES.find((x) => x.value === srcSel.value); val.placeholder = s?.placeholder || ''; fileRow.classList.toggle('hidden', srcSel.value !== 'zip'); valRow.classList.toggle('hidden', srcSel.value === 'zip'); };
+    // lane engine-distribution: a git source names its ref and picks the credential (the integration row — never typed here)
+    const refRow = body.querySelector('.plugin-install-ref-row'), refIn = body.querySelector('.plugin-install-ref'), credRow = body.querySelector('.plugin-install-cred-row'), credSel = body.querySelector('.plugin-install-cred'), credHint = body.querySelector('.plugin-install-cred-hint');
+    body.querySelector('.plugin-install-cred-open').onclick = () => { this.openIntegration?.('plugin-git'); };
+    let credRead = false;
+    const readCred = async () => {
+      if (credRead) return; credRead = true;
+      const c = await fetchJson('/api/integrations/plugin-git').catch(() => null);
+      const opt = credSel.querySelector('option[value="plugin-git"]');
+      const host = c && c.values ? String(c.values.host || '') : '';
+      const ready = !!(c && host && c.set && (c.set.token || c.set.deployKey));
+      opt.textContent = ready ? t('Plugin Git credential — {host} ({kind})', { host, kind: c.set.token ? t('token') : t('deploy key') }) : t('Plugin Git credential (not set — Set up…)');
+      opt.disabled = !ready;
+    };
+    const sync = () => { const s = SOURCES.find((x) => x.value === srcSel.value); val.placeholder = s?.placeholder || ''; fileRow.classList.toggle('hidden', srcSel.value !== 'zip'); valRow.classList.toggle('hidden', srcSel.value === 'zip'); const git = srcSel.value === 'git'; refRow.classList.toggle('hidden', !git); credRow.classList.toggle('hidden', !git); credHint.classList.toggle('hidden', !git); if (git) readCred(); };
     srcSel.onchange = sync; sync();
     body.querySelector('.plugin-install-cancel').onclick = () => close();
     const fail = (msg) => { errEl.textContent = msg; errEl.classList.remove('hidden'); showToast(msg, { type: 'error' }); go.disabled = false; go.textContent = t('Install'); };
@@ -457,9 +484,10 @@ export function installPluginsUI(App) {
         } else {
           const v = val.value.trim();
           if (!v) return fail(t('Enter a location first'));
-          res = await fetchJson('/api/plugins/install', { method: 'POST', body: JSON.stringify({ source: srcSel.value, value: v }) });
+          const git = srcSel.value === 'git';
+          res = await fetchJson('/api/plugins/install', { method: 'POST', body: JSON.stringify({ source: srcSel.value, value: v, ...(git && refIn.value.trim() ? { ref: refIn.value.trim() } : {}), ...(git && credSel.value ? { credential: credSel.value } : {}) }) });
         }
-        if (!res || res.error) return fail(res?.error || t('Install failed'));
+        if (!res || res.error) return fail(res?.error ? `${res.error}${res.code ? ` [${res.code}]` : ''}` : t('Install failed'));
         showToast(t('Installed {id} {version}', { id: res.plugin?.id || '', version: res.plugin?.version || '' }) + (res.replaced ? ' · ' + t('previous copy moved to trash') : ''));
         // A replacement that is not the same package drops the old consent —
         // say so, or the plugin silently comes back disabled (2.369.43).

@@ -66,6 +66,8 @@ export const CENSUS = [
   ['browser-live-window.js', 'input', 'text', 'BROWSE YOURSELF\'s address row (his own box: the H exemption — never a reclaim nor a yield); a page dialog\'s prompt answer (lane browser-stuck) — the .197 integration'],
   ['browser-live-window.js', 'tabindex', 'view+helper+widget', 'the view\'s root (0), its sink (-1); his Tabs pane rows (0, BROWSE YOURSELF: Enter goes to that tab)'],
   ['browser-live-window.js', 'inputmode', 'text', 'BROWSE YOURSELF\'s address <input> (`inputmode=url`: the phone keyboard\'s hint on the same text box as the input row) — the .198 integration (r4\'s construct met the .197 row)'],
+  ['browser-live-window.js', 'details', 'control', 'a browser kernel prompt\'s ONE details fold on the bar (lane browser-surfaces)'],
+  ['browser-live-window.js', 'select', 'choice', 'a browser kernel prompt\'s choice field in its answer sheet (a select-popup\'s options — lane browser-surfaces)'],
   ['browser-new-profile.js', 'input', 'text+control', 'New profile…: the name, the CDP port and a chrome file\'s path (text); the provider / machine / build radios (control) — lane browser-admin 1, classified at verify r2; its who radios became the one picker at the 2.369.202 integration'],
   ['browser-new-profile.js', 'inputmode', 'text', 'New profile…: the CDP port box (`inputMode=numeric` — the phone keyboard\'s hint on that text box)'],
   ['browser-passkeys-view.js', 'input', 'control', 'the Passkeys table\'s agents-off switch (a checkbox — lane passkey-ui; composed at the 2.369.261 integration)'],
@@ -264,6 +266,7 @@ export const CENSUS = [
   // read in its file and classed by the census's own rules; from this lane on the census runs in every fast gate
   ['account-models.js', 'input', 'text', '模型…\'s rows on Manage agents: a configured provider\'s model id / display name / context boxes (template inputs; the new row\'s id box takes the focus — design q-053 r1, lane provider-record; joined at the 2.369.329 integration)'],
   ['vault-totp-row.js', 'input', 'control', '「用于…」\'s grant picker: a checkbox per running conversation / Task Group (el(\'input\') + type checkbox — design q-047 L1, lane vault-totp; joined at the 2.369.328 integration)'],
+  ['vault-login-row.js', 'input', 'control', 'a web login\'s 「用于…」 picker (a radio per scope + a checkbox per conversation / Task Group / everyone) and 网站登录…\'s fields (site, user name, password, two-step name) — el(\'input\'), lane browser-login'],
   // ── verify r4 (attack 5): the rows the r3 grep could not see — element helpers, conditional tags, index.html, the new kinds ──
   ['browser-replay-window.js', 'combobox', 'widget', 'the sessions / actions lists (role=listbox: ← → Home End Space)'],
   ['channel-filter-editor.js', 'select', 'choice', 'the filter\'s pickers (selectBox — el(\'select\') from channel-chrome.js)'],
@@ -290,6 +293,7 @@ export const CENSUS = [
   ['index.html', 'textarea', 'text', 'the fork dialog\'s first message'],
   ['integrations-window.js', 'input', 'text+control', 'a key\'s fields (text / password); the source radios'],
   ['integrations-window.js', 'select', 'choice', 'the default-for-new-accounts preset'],
+  ['integrations-window.js', 'textarea', 'text', 'a several-line field of a key card (an ssh deploy key — lane engine-distribution)'],
   ['jobs-panel.js', 'textarea', 'text', 'a job panel\'s multi-line field (a panel schema block: createElement(b.type === \'input\' ? \'input\' : \'textarea\'))'],
   ['manage-agents.js', 'details', 'control', 'a member\'s fold'],
   ['mounts-dialog.js', 'details', 'control', 'the Advanced fields fold'],

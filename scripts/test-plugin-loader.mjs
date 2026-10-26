@@ -5,6 +5,8 @@
 // CSP, a forked server process reached over IPC (proxied routes + agent tool),
 // the generated agent-tool shim, enable/disable lifecycle, path-traversal
 // refusal, invalid-manifest loudness. Plus client wiring pins.
+// ②c lane engine-distribution: the fleet's engine plugin at boot (a local git repository) + D2's pre-trust — only the id the
+// fleet names, only at a full commit sha, only that package — with a patched-copy RED control.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -114,6 +116,141 @@ ok((await j('/api/plugins/manifests/broken.one/enabled', { method: 'POST', heade
 ok((await j('/api/plugins/manifests/nope.nope/enabled', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"enabled":true}' })).status === 404, 'unknown id → 404');
 loader.shutdown(); srv.close();
 try { fs.rmSync(root, { recursive: true, force: true }); } catch {}
+
+// ── ②b lane engine-plugin: a BROWSER ENGINE plugin (design-custom-browser-plugin §1.1) ──
+{
+  const M = require(path.join(REPO, 'src/plugin-manifest.js'));
+  const eb = { id: 'acme.engine', version: '1.0.0', engines: { vibespace: '2.369.24' }, client: 'none', server: true, contributes: { routes: true, browserEngine: true }, capabilities: { server: {} } };
+  const v = M.validateManifest(eb, { hostVersion: '2.369.24' });
+  ok(v.ok && v.manifest.contributes.browserEngine === true && M.needsConsent(v.manifest) && M.capabilitySummary(v.manifest).some((c) => c.id === 'browser-engine'), 'contributes.browserEngine with server + routes validates, ALWAYS needs consent, and the consent dialog names it (browser-engine)', JSON.stringify(v.errors));
+  const ns = M.validateManifest({ ...eb, server: false }), nr = M.validateManifest({ ...eb, contributes: { browserEngine: true } }), nb = M.validateManifest({ ...eb, contributes: { routes: true, browserEngine: 'yes' } });
+  ok(!ns.ok && ns.errors.some((e) => /browserEngine needs server: true/.test(e)) && !nr.ok && nr.errors.some((e) => /browserEngine needs contributes\.routes: true/.test(e)) && !nb.ok && nb.errors.some((e) => /browserEngine must be true\|false/.test(e)), 'refused BY NAME without its process, without its routes, or as anything but a boolean', JSON.stringify([ns.errors, nr.errors, nb.errors]));
+  const plain = M.validateManifest({ ...eb, contributes: { routes: true } }).manifest, off = M.validateManifest({ ...eb, contributes: { routes: true, browserEngine: false } }).manifest;
+  ok(off.contributes.browserEngine === undefined && M.capabilitiesHash(off) === M.capabilitiesHash(plain) && M.capabilitiesHash(v.manifest) !== M.capabilitiesHash(plain) && !M.needsConsent(plain), 'false = not an engine (named only when true): every capabilities hash before this lane stays the same — an existing trust is never voided — and growing into an engine re-asks consent');
+}
+{
+  const eroot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-plug-eng-'));
+  const EID = 'vibespace.custom-browser';
+  fs.cpSync(path.join(REPO, 'scripts/fixtures/engine-plugin'), path.join(eroot, 'data', 'plugins', EID), { recursive: true });
+  const expressE = require(path.join(REPO, 'node_modules/express'));
+  const le = create({ rootDir: eroot, app: expressE(), hostVersion: '2.369.356', log: { log() {}, warn() {} }, agentEnv: () => ({ PATH: process.env.PATH }) });
+  const reg = require(path.join(REPO, 'src/server/browser-engines.js')).create({ loader: le, dataDir: path.join(eroot, 'data') });
+  const row = () => le.list().find((p) => p.id === EID);
+  ok(row() && row().valid && row().contributes.browserEngine === true && row().needsConsent && !row().enabled && reg.rows().length === 0, 'the fixture engine plugin is listed (valid, an engine, consent needed) — and NOT in the engine table while disabled');
+  let refused = null; try { le.setEnabled(EID, true); } catch (e) { refused = e; }
+  ok(refused && refused.status === 409 && reg.rows().length === 0, 'enabling it without consent is refused (409) — the table stays empty');
+  le.setEnabled(EID, true, { trusted: true });
+  ok(row().state !== 'running' ? reg.rows().length === 0 : true, 'enabled + trusted but its process not up yet ⇒ not in the table (state is part of the rule)');
+  ok(await waitFor(() => reg.rows().length === 1), 'enabled + trusted + RUNNING ⇒ in the engine table');
+  const pr = await le.askRoute(EID, { method: 'GET', path: '/probe', query: { binaryPath: '/nonexistent/chrome' } });
+  ok(pr.status === 200 && pr.body.installed === false && pr.body.binaryPath === '/nonexistent/chrome', 'askRoute: ONE IPC route ask (GET /probe) answers about the path it was handed', JSON.stringify(pr));
+  let r404 = null; try { await le.askRoute('nope.nope', { path: '/probe' }); } catch (e) { r404 = e; }
+  ok(r404 && r404.status === 404, 'askRoute of a plugin that is not there ⇒ refused (404), never a hang');
+  le.get(EID).child.kill('SIGKILL');
+  ok(await waitFor(() => row().state === 'crashed' && reg.rows().length === 0, 3000), 'its process dies ⇒ out of the table at once (not running)');
+  ok(await waitFor(() => reg.rows().length === 1, 8000), '…restarted by the loader ⇒ back in');
+  le.setEnabled(EID, false);
+  ok(reg.rows().length === 0, 'disabled ⇒ out of the table at once');
+  le.shutdown();
+  try { fs.rmSync(eroot, { recursive: true, force: true }); } catch {}
+}
+
+// ── ②c lane engine-distribution: THE FLEET'S ENGINE PLUGIN AT BOOT + D2 (the cluster's pre-trust) ──
+// The REAL engine-distribution boot job over the REAL loader; its git source = a local bare repository holding the fixture
+// engine plugin at two commits (scripts/fixtures/git-repo.mjs — a recording git). D2: trusted by the fleet ONLY for the id
+// fleet.json names, ONLY at a full commit sha the clone arrived at, ONLY while the package is that contentHash.
+{
+  const { gitRepoFixture, URL_HTTPS } = await import('./fixtures/git-repo.mjs');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const EID = 'vibespace.custom-browser';
+  const groot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-plug-fleet-'));
+  const man = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin/vibespace-plugin.json'), 'utf8'));
+  const srvJs = fs.readFileSync(path.join(REPO, 'scripts/fixtures/engine-plugin/server.js'), 'utf8');
+  const FX = gitRepoFixture(path.join(groot, 'repo'), [{ files: { 'vibespace-plugin.json': { ...man, version: '0.1.1' }, 'server.js': srvJs }, tag: 'v0.1.1' }, { files: { 'vibespace-plugin.json': { ...man, version: '0.1.2' } }, tag: 'v0.1.2' }]);
+  const [shaA, shaB] = FX.shas;
+  const R0 = path.join(groot, 'root'); fs.mkdirSync(path.join(R0, 'data', 'plugins'), { recursive: true });
+  let fleet = null;
+  const todosF = [];
+  const expressF = require(path.join(REPO, 'node_modules/express'));
+  const appF = expressF();
+  const quiet = { log() {}, warn() {} };
+  let EDF = null;
+  const lf = create({ rootDir: R0, app: appF, hostVersion: '2.369.356', log: quiet, agentEnv: () => ({ PATH: process.env.PATH }), gitBin: FX.WRAP, integrations: () => null, fleetEngine: () => fleet, fleetStatus: () => (EDF ? EDF.fleetView() : null) });
+  const srvF = await new Promise((r) => { const s = appF.listen(0, '127.0.0.1', () => r(s)); });
+  const regF = require(path.join(REPO, 'src/server/browser-engines.js')).create({ loader: lf, dataDir: path.join(R0, 'data') });
+  EDF = require(path.join(REPO, 'src/server/engine-distribution.js')).create({ dataDir: path.join(R0, 'data'), engines: regF, loader: lf, fleetFacts: () => (fleet ? { browserEngine: fleet } : null), userTodos: { add: (k, item) => { todosF.push(item); return 'u' + todosF.length; } }, log: quiet });
+  const rowF = () => lf.list().find((p) => p.id === EID);
+  const fetches = () => FX.calls().filter((c) => c.argv.includes('fetch'));
+  const regFile = () => JSON.parse(fs.readFileSync(path.join(R0, 'data', 'plugin-registry.json'), 'utf8'));
+  // ① a fleet with no engine ⇒ nothing; ② the fleet names the plugin at a FULL sha ⇒ installed from git, trusted BY THE FLEET, enabled, running
+  const r0 = await EDF.bootFleet();
+  ok(r0.skipped && !rowF() && !fetches().length, 'no fleet engine ⇒ the boot job does nothing (no git call)');
+  fleet = { plugin: EID, default: false, preinstall: false, source: { git: URL_HTTPS, ref: shaA }, kernel: { url: '', sha256: '' } };
+  const r1 = await EDF.bootFleet();
+  const t1 = regFile().trust[EID];
+  ok(r1.ok && r1.outcome === 'installed' && rowF() && rowF().version === '0.1.1' && rowF().trusted && rowF().trustedBy === 'fleet' && rowF().enabled && !rowF().consentRequired && rowF().install.by === 'fleet' && rowF().install.sha === shaA && t1.by === 'fleet' && t1.sha === shaA && t1.contentHash === regFile().installs[EID].contentHash,
+    'D2: the fleet\'s plugin at a full sha ⇒ installed from git, trust {by:\'fleet\', sha, contentHash} — enabled with no dialog (the panel says «Installed and trusted by the cluster»)', { row: rowF() && { trustedBy: rowF().trustedBy, enabled: rowF().enabled }, t1 });
+  ok(await waitFor(() => regF.rows().length === 1, 8000), '…its process runs ⇒ it is in the engine table');
+  // ③ every boot compares the record and never re-pulls the same; a moved pin installs the new sha
+  const n1 = fetches().length;
+  const r2 = await EDF.bootFleet();
+  ok(r2.outcome === 'same' && fetches().length === n1, 'a boot with the same {source, ref} as the record ⇒ no git call (compare, never re-pull)');
+  fleet = { ...fleet, source: { git: URL_HTTPS, ref: shaB } };
+  const r3 = await EDF.bootFleet();
+  ok(r3.outcome === 'installed' && fetches().length === n1 + 1 && fetches().at(-1).argv.at(-1) === shaB && rowF().version === '0.1.2' && rowF().trustedBy === 'fleet' && regFile().trust[EID].sha === shaB, 'the fleet moves its pin ⇒ the boot installs THAT sha, and the fleet\'s trust moves to it');
+  // ④ a TAG is never the trust anchor: installed, the owner asked once
+  fleet = { ...fleet, source: { git: URL_HTTPS, ref: 'v0.1.1' } };
+  const r4 = await EDF.bootFleet();
+  ok(r4.outcome === 'installed' && rowF().version === '0.1.1' && !rowF().trusted && rowF().trustedBy === null && rowF().consentRequired && !rowF().enabled, 'a fleet ref that is a TAG ⇒ installed but NOT pre-trusted (a tag can move — only a sha anchors D2): disabled, the owner enables it', rowF() && { trusted: rowF().trusted, enabled: rowF().enabled });
+  fleet = { ...fleet, source: { git: URL_HTTPS, ref: shaA } };
+  await EDF.bootFleet();
+  ok(rowF().trustedBy === 'fleet' && rowF().enabled, '…back on a sha ⇒ trusted by the fleet again');
+  // ⑤ the trust LAPSES: the fleet stops naming it · the fleet names another id · another package under the id
+  const keep = fleet;
+  fleet = null;
+  ok(!rowF().trusted && rowF().consentRequired, 'the fleet stops naming the plugin ⇒ its fleet trust no longer holds (the owner is asked)');
+  fleet = { ...keep, plugin: 'acme.other' };
+  ok(!rowF().trusted, 'the fleet names another plugin id ⇒ this one\'s fleet trust no longer holds');
+  fleet = keep;
+  ok(rowF().trusted && rowF().trustedBy === 'fleet', '…named again at the same sha with the same package ⇒ it holds again');
+  const ins = regFile().installs[EID];
+  const regRaw = regFile(); regRaw.installs[EID] = { ...ins, contentHash: 'f'.repeat(64) }; fs.writeFileSync(path.join(R0, 'data', 'plugin-registry.json'), JSON.stringify(regRaw));
+  const lf2 = create({ rootDir: R0, app: null, autoStart: false, hostVersion: '2.369.356', log: quiet, fleetEngine: () => fleet });
+  ok(!lf2.list().find((p) => p.id === EID).trusted, 'a record whose package is not the trusted contentHash ⇒ the fleet trust does not hold (another package under the id)');
+  regRaw.installs[EID] = ins; fs.writeFileSync(path.join(R0, 'data', 'plugin-registry.json'), JSON.stringify(regRaw));
+  // ⑥ the fleet names ANOTHER id while its source holds this package ⇒ installed, never trusted
+  const R2 = path.join(groot, 'root2'); fs.mkdirSync(path.join(R2, 'data', 'plugins'), { recursive: true });
+  let fleet2 = { plugin: 'acme.other', source: { git: URL_HTTPS, ref: shaA } };
+  const lo = create({ rootDir: R2, app: null, autoStart: false, hostVersion: '2.369.356', log: quiet, gitBin: FX.WRAP, fleetEngine: () => fleet2 });
+  const io = await lo.install({ source: 'git', value: URL_HTTPS, ref: shaA, credential: 'auto', by: 'fleet' });
+  ok(io.plugin.id === EID && !io.plugin.trusted && io.trustedBy === null && !JSON.parse(fs.readFileSync(path.join(R2, 'data', 'plugin-registry.json'), 'utf8')).trust[EID], 'the fleet names another id ⇒ the package under THIS id is installed but never trusted by the fleet');
+  // ⑦ a user's install is never fleet-trusted, whatever the fleet names
+  const R3 = path.join(groot, 'root3'); fs.mkdirSync(path.join(R3, 'data', 'plugins'), { recursive: true });
+  const lu = create({ rootDir: R3, app: null, autoStart: false, hostVersion: '2.369.356', log: quiet, gitBin: FX.WRAP, fleetEngine: () => fleet });
+  const iu = await lu.install({ source: 'git', value: URL_HTTPS, ref: shaA, by: 'user' });
+  ok(!iu.plugin.trusted && iu.plugin.consentRequired && iu.plugin.install.by === 'user', 'the same package installed by a PERSON still asks once (D2 is the cluster\'s install only)');
+  // ⑧ a failed boot install: NAMED, ONE For-you notice, the Plugins panel's fleet line
+  fleet = { ...keep, source: { git: URL_HTTPS, ref: 'v9.9.9' } };
+  const r8 = await EDF.bootFleet();
+  const mf = await (await fetch(`http://127.0.0.1:${srvF.address().port}/api/plugins/manifests`)).json();
+  ok(!r8.ok && r8.code === 'plugin_git_ref_missing' && todosF.length === 1 && todosF[0].origin === 'plugin' && /cluster's plugin could not be installed/.test(todosF[0].text) && /plugin_git_ref_missing/.test(todosF[0].detail) && mf.fleet && mf.fleet.outcome === 'failed' && mf.fleet.code === 'plugin_git_ref_missing',
+    'a boot install that fails ⇒ named (plugin_git_ref_missing), ONE For-you notice (origin plugin), and GET /api/plugins/manifests carries the fleet line the Plugins panel draws', { r8, todo: todosF[0], fleet: mf.fleet });
+  // ⑨ preinstall ⇒ the kernel right away (this package has no kernel.json ⇒ refused by name, said once)
+  fleet = { ...keep, preinstall: true };
+  const r9 = await EDF.bootFleet();
+  ok(r9.ok && r9.kernel && r9.kernel.ok === false && r9.kernel.code === 'browser_engine_protocol' && todosF.length === 2 && /browser kernel could not be downloaded/.test(todosF[1].text), 'preinstall: true ⇒ the boot asks for the kernel right away (here: the package names no kernel.json ⇒ refused by name, ONE notice)', { kernel: r9.kernel });
+  // ⑩ RED CONTROL: a loader whose D2 check forgets the id trusts the package the fleet did NOT name
+  const LS = fs.readFileSync(path.join(REPO, 'src/server/plugin-loader.js'), 'utf8');
+  const anchor = "const fleetTrust = !!f && f.plugin === r.id && ";
+  ok(LS.includes(anchor), 'control: D2\'s id check is in plugin-loader.js');
+  const Lx = mutantCopies('plugin-loader-d2', REPO).load('src/server/plugin-loader.js', LS.replace(anchor, 'const fleetTrust = !!f && ').replace('return !!(f && f.plugin === id && ', 'return !!(f && '), 'any-id');
+  const R4 = path.join(groot, 'root4'); fs.mkdirSync(path.join(R4, 'data', 'plugins'), { recursive: true });
+  const lx = Lx.create({ rootDir: R4, app: null, autoStart: false, hostVersion: '2.369.356', log: quiet, gitBin: FX.WRAP, fleetEngine: () => fleet2 });
+  const ix = await lx.install({ source: 'git', value: URL_HTTPS, ref: shaA, credential: 'auto', by: 'fleet' });
+  ok(ix.plugin.trusted && ix.trustedBy === 'fleet', 'control: that copy pre-trusts a package under an id the fleet never named — exactly what ⑥ refuses (RED)');
+  lf.shutdown(); srvF.close();
+  try { fs.rmSync(groot, { recursive: true, force: true }); } catch {}
+}
 
 // ── ③ wiring pins ──
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');

@@ -63,6 +63,13 @@
  *                                    place, resolved in place; an arrival appends at its band's end and joins a fold that
  *                                    exists; `expand` shows a band's folded rows in place)
  *   bandEntries(layout, todos)     — [{band, code, name, entries, hidden, openIds, openCount}] — what the panel draws
+ *
+ * lane foryou-honest (the stress evaluation's P1-1 / P2-4 + the owner's B, 2026-10-25): THE HONEST COUNT — 21 agent questions
+ * open and every badge said «Nothing waiting on you» (the badge counted bands 1–4; a plain vibespace-ask is band 5):
+ *   openCount(items)               — every open ACTION item, whatever its band — THE number every For-you door says
+ *   badgeWords(action, total, t)   — THE badge's sentence over its loud part + the honest count (never «Nothing…» with one open)
+ *   sessionMark(open, keys)        — a session row's «needs you · N»: {n, newest}
+ *   firstLine(text, max)           — the marker's words (the newest question's first line, cut)
  */
 import { replyVerdict, REPLY_HIDDEN_CODES } from '../inbox-reply.js';
 import { rowOf, needsMe, placeOf, badgeRows, bandInfo, policyOf } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds, design q-044) — the tray's bands, cap and folds; `policy` = the owner's (src/attention-model.js settingsPolicy, lane attention-predicate-shared)
@@ -219,6 +226,43 @@ export function badgeOf(open, now = 0, policy = null) {
   const ids = new Set(badgeRows(rowsOf(all, now), now, policy).map((r) => r.id));   // decision 4: a band switched off counts nowhere
   return { action: all.filter((i) => ids.has(i.id)), notices: list.length - all.length, open: all };
 }
+// ── THE HONEST COUNT (lane foryou-honest, the stress evaluation's P1-1) ──────────────────────────────────────────────
+// THE LAW (kb-design-lessons): a surface that holds the person's open questions COUNTS THEM ALL — every open action item,
+// whatever its band (5 «Other questions», 搁置, a band the owner switched off); notices stay their own grey count. The LOUD
+// part (the coloured tiers, the blink, the arrival toasts) is still the attention list's bands 1–4; the rest is ONE quiet
+// segment, so the number the person reads is the number the tray holds.
+/** THE count every For-you door says (the phone's top-bar button, the taskbar button, the tray's Inbox tab and head, the
+ *  For-you window's Actions tab, the Duo's bar, a title-bar badge, a session row's marker): the open action items. */
+export function openCount(items) { return (items || []).filter((i) => i && !isNotice(i)).length; }
+/** THE BADGE'S SENTENCE (the taskbar / nav button's title, the tray's Inbox tab, the window's Actions tab — user-todos-actions
+ *  actionWords words it with the device's t): `action` = the loud part (bands 1–4, or every row where no band applies),
+ *  `total` = THE honest count. «2 urgent · 1 normal — waiting on you», «… · 18 more, none pressing» when quiet rows wait
+ *  too, «21 waiting on you — none pressing» with no loud row, «Nothing waiting on you» ONLY at zero. */
+export function badgeWords(action, total, t) {
+  const list = action || [];
+  const all = Math.max(Number(total) || 0, list.length);
+  const quiet = all - list.length;
+  if (!list.length) return all ? t('{n} waiting on you — none pressing', { n: all }) : t('Nothing waiting on you');
+  const cu = list.filter((i) => i.urgency === 'urgent').length, ch = list.filter((i) => i.urgency === 'high').length, cn = list.length - cu - ch;
+  return [cu ? t('{n} urgent', { n: cu }) : '', ch ? t('{n} high', { n: ch }) : '', cn ? t('{n} normal', { n: cn }) : '']
+    .filter(Boolean).join(' · ') + ' — ' + t('waiting on you') + (quiet ? ' · ' + t('{n} more, none pressing', { n: quiet }) : '');
+}
+const askedAt = (i) => Math.max(Number(i && i.createdAt) || 0, Number(i && i.reaskedAt) || 0);
+/** «needs you · N» ON A SESSION ROW (P2-4 — the Duo's list column, the phone's drawer, the desktop's sidebar; the owner's
+ *  B: the row MARKS, the For-you pane answers): `n` = the honest count of the open action items whose sessionKey is one
+ *  of `keys`, `newest` = the one asked last (its first line is the marker's words; its ⤢ road opens the pane on it). */
+export function sessionMark(open, keys) {
+  const ks = new Set(keys || []);
+  const mine = (open || []).filter((i) => i && !isNotice(i) && ks.has(i.sessionKey));
+  let newest = null;
+  for (const i of mine) if (!newest || askedAt(i) > askedAt(newest)) newest = i;
+  return { n: openCount(mine), newest };
+}
+/** The first non-empty line of `text`, cut at `max` with an ellipsis (a one-line marker; the pane holds the whole). */
+export function firstLine(text, max = 120) {
+  const s = (String(text || '').split('\n').find((l) => l.trim()) || '').trim();
+  return s.length > max ? s.slice(0, Math.max(0, max - 1)).trimEnd() + '…' : s;
+}
 /** THE BANDS' SLOTS while the popup is open — the slot law (inc-mtw02kbq-kj96) on the attention list. `prev` null = a
  *  fresh open: needsMe's order, the first screen shown, everything after it folded by band (搁置 whole). Afterwards
  *  every id keeps its band and its place (a resolved row stays, dimmed with ↺, while the store still lists it); an
@@ -336,16 +380,15 @@ const URGENCY_ORDER = ['low', 'normal', 'high', 'urgent'];
  *  urgency among them. `{count: 0, urgency: ''}` = no badge. */
 export function inboxBadgeFor(open, keys, now = null, policy = null) {
   const ks = new Set(keys || []);
-  // lane foryou-folds: given `now`, the badge counts that session's rows in bands 1–4 (the attention list's badge rule)
   const mine = (open || []).filter((i) => i && !isNotice(i) && ks.has(i.sessionKey));
-  const counted = now === null ? null : new Set(badgeOf(mine, now, policy).action.map((i) => i.id));
-  let count = 0, worst = -1;
-  for (const i of mine) {
-    if (counted && !counted.has(i.id)) continue;
-    count++;
-    worst = Math.max(worst, URGENCY_ORDER.indexOf(i.urgency || 'normal'));
-  }
-  return { count, urgency: count ? (URGENCY_ORDER[worst] || 'normal') : '' };
+  // lane foryou-folds: given `now`, the COLOUR is that session's rows in bands 1–4 (the attention list's loud rule); lane
+  // foryou-honest: the NUMBER is every open action item of it (openCount — a band-5 ask waits too; the row's «needs you · N»
+  // says the same number) — a count with no loud row is `quiet` (outlined, never a colour)
+  const loud = now === null ? null : new Set(badgeOf(mine, now, policy).action.map((i) => i.id));
+  let worst = -1;
+  for (const i of mine) if (!loud || loud.has(i.id)) worst = Math.max(worst, URGENCY_ORDER.indexOf(i.urgency || 'normal'));
+  const count = openCount(mine);
+  return { count, urgency: count ? (worst >= 0 ? URGENCY_ORDER[worst] || 'normal' : 'quiet') : '' };
 }
 
 /** The MINI INBOX's rows (one session's popover off its title-bar badge): the
@@ -480,14 +523,16 @@ export function noticeReadAll(notices, filter = 'all') {
  *  (null/garbage = never: everything counts; the panel stamps the key at
  *  install so an upgrade does not open on a hundred). */
 export function tabCounts(open, toastHistory, lastSeenTs, now = null, policy = null) {
-  // lane foryou-folds: given `now` (the popup), `inbox.action` = the badge's own number — the rows in bands 1–4; the
-  // For-you window (no `now`) still counts every open action item in its scope
+  // lane foryou-folds: given `now` (the popup), the COLOUR is the badge's loud rows (bands 1–4); the For-you window (no `now`)
+  // colours by every open action item in its scope. lane foryou-honest: the NUMBER is THE honest count (openCount) on both —
+  // the popup's Inbox tab says the badge's own number, a count with no loud row is `quiet`
   const { action, notices } = now === null ? badgeCounts(open) : badgeOf(open, now, policy);
+  const total = openCount(open);
   let worst = -1;
   for (const i of action) worst = Math.max(worst, URGENCY_ORDER.indexOf(i.urgency || 'normal'));
   const seen = Number(lastSeenTs);
   const since = Number.isFinite(seen) ? seen : 0;
   // B-3f5d ①: an entry recorded `seen` (shown while the user acted — their own "Copied", "Reply sent") is not unread
   const unread = (Array.isArray(toastHistory) ? toastHistory : []).filter((e) => e && typeof e.ts === 'number' && e.ts > since && !e.seen).length;
-  return { inbox: { action: action.length, notice: notices, urgency: action.length ? (URGENCY_ORDER[worst] || 'normal') : '' }, history: { unread } };
+  return { inbox: { action: total, notice: notices, urgency: total ? (worst >= 0 ? URGENCY_ORDER[worst] || 'normal' : 'quiet') : '' }, history: { unread } };
 }

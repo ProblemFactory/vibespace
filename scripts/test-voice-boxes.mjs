@@ -50,6 +50,7 @@ const ROWS = [
   ['jobs-panel.js', "b.type === 'input' ? 'input' : 'textarea'", A, 1, 'a job\'s question answered in its panel (the textarea block)'],
   ['channel-filter-editor.js', 'chan-dec-cond', 'a notification rule\'s condition — a setting the judge reads, not a message', 1],
   ['mounts-dialog.js', "el = document.createElement('textarea')", 'a mount form\'s field (configuration)', 1],
+  ['integrations-window.js', 'integ-input-multiline', 'a several-line SECRET field of an integration card (an ssh deploy key pasted whole) — a key paste, not a message; a secret never goes to a dictation vendor', 1], // lane engine-distribution
   ['vault-paste-box.js', 'vault-secret-note', 'a note stored beside a secret in the vault (「其他密钥或密码…」) — a form field, not a message; nothing said beside a secret goes to a dictation vendor', 1],
   ['doc-window-ui.js', 'doc-raw-edit', 'a doc block\'s raw source — an editor of the document, not a message', 1],
   ['browser-live-window.js', 'browser-live-kbd', 'the hidden keyboard proxy of a live browser (keys go to the page)', 1],

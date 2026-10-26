@@ -488,10 +488,12 @@ try {
   const badgeOf = (winId) => `(() => { const w = app.wm.windows.get(${JSON.stringify(winId)}); const b = w && w.titleBar.querySelector(':scope > .win-inbox-badge'); return b ? { n: b.textContent.trim(), urgency: b.dataset.urgency, label: b.getAttribute('aria-label'), title: b.title, iconHidden: b.querySelector('svg')?.getAttribute('aria-hidden'), tag: b.tagName, afterTitle: b.previousElementSibling === w.titleSpan || !!(w.titleSpan.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) } : null; })()`;
   const open9 = await badgeItemsOf(LIVE_KEYS);
   const all9 = await openActionsOf(LIVE_KEYS);
-  await waitFor(`(${badgeOf(liveWin)})?.n === ${JSON.stringify(String(open9.length))}`, 6000);
+  // lane foryou-honest (the stress evaluation's P1-1): the NUMBER is every open action row of the conversation (its row's
+  // «needs you · N» says the same), the COLOUR its loud rows (bands 1–4)
+  await waitFor(`(${badgeOf(liveWin)})?.n === ${JSON.stringify(String(all9.length))}`, 6000);
   const b9 = await evalJs(badgeOf(liveWin));
-  check(`the live window's title bar shows .win-inbox-badge = ${open9.length} (its open rows in bands 1–4 — the decision; its ${all9.length - open9.length} band-5 asks only grow the list), data-urgency = the worst (${WORST(open9)})`, open9.length === 1 && open9[0].id === pick.item.id && all9.length > open9.length && b9 && b9.n === String(open9.length) && b9.urgency === WORST(open9), { b9, open9: open9.map((i) => [i.id, i.urgency]) });
-  check('…a <button> after the title, labelled in plain words, its SVG icon aria-hidden', b9 && b9.tag === 'BUTTON' && b9.label === `${open9.length} items from this agent` && b9.title === b9.label && b9.iconHidden === 'true' && b9.afterTitle, b9);
+  check(`the live window's title bar shows .win-inbox-badge = ${all9.length} (EVERY open action row — the honest count: its decision + its ${all9.length - open9.length} band-5 asks), data-urgency = the worst LOUD row (${WORST(open9)})`, open9.length === 1 && open9[0].id === pick.item.id && all9.length > open9.length && b9 && b9.n === String(all9.length) && b9.urgency === WORST(open9), { b9, open9: open9.map((i) => [i.id, i.urgency]) });
+  check('…a <button> after the title, labelled in plain words, its SVG icon aria-hidden', b9 && b9.tag === 'BUTTON' && b9.label === `${all9.length} items from this agent` && b9.title === b9.label && b9.iconHidden === 'true' && b9.afterTitle, b9);
   const viewWin = await evalJs(`app.viewSession(${JSON.stringify(STOPPED_SID)}, ${JSON.stringify(CWD)}, 'stopped fixture', { backend: 'claude' })?.id || null`);
   check('the stopped fixture conversation opens as a view-only window', !!viewWin, viewWin);
   check('…whose title bar shows ITS OWN count (1, high — the hostile item)', await waitFor(`(() => { const b = (${badgeOf(viewWin)}); return !!b && b.n === '1' && b.urgency === 'high'; })()`, 6000), await evalJs(badgeOf(viewWin)));
@@ -658,7 +660,7 @@ try {
     const floodWin = await evalJs(`app.viewSession(${JSON.stringify(FLOOD_SID)}, ${JSON.stringify(CWD)}, 'flood fixture', { backend: 'claude' })?.id || null`);
     check('the flood fixture conversation opens as a view-only window', !!floodWin, floodWin);
     await sleep(800);
-    check(`…whose title-bar badge is ABSENT: its ${FLOOD_N} low asks are band 5 (a title-bar badge counts bands 1–4)`, !(await evalJs(badgeOf(floodWin))), await evalJs(badgeOf(floodWin)));
+    check(`…whose title-bar badge SAYS its ${FLOOD_N} low asks — quiet (band 5 is counted, never loud: lane foryou-honest)`, await waitFor(`(() => { const b = (${badgeOf(floodWin)}); return !!b && b.n === ${JSON.stringify(String(FLOOD_N))} && b.urgency === 'quiet'; })()`, 4000), await evalJs(badgeOf(floodWin)));
     const taskbarN = `[...document.querySelectorAll('#taskbar-user-todos .ut-count:not(.ut-seg-notice)')].reduce((a, e) => a + Number(e.textContent || 0), 0)`;
     const tb0 = await evalJs(taskbarN);
     await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (!p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); document.getElementById('taskbar-user-todos').click(); return true; })()`);
@@ -702,7 +704,8 @@ try {
     check('…the SAME nodes in the same order (nothing moved, nothing re-rendered)', await evalJs(`(() => { const rows = ${rowsOf}; return rows.length === window.__f30.length && rows.every((r, i) => r === window.__f30[i]); })()`));
     const st15 = await storeNow();
     check(`the store holds all ${FLOOD_N} dismissed by the user`, FLOOD_IDS.every((id) => { const i = st15.resolved.find((x) => x.id === id) || st15.open.find((x) => x.id === id); return !i || (i.status === 'dismissed'); }) && !st15.open.some((i) => i.sessionKey === floodKey), st15.open.filter((i) => i.sessionKey === floodKey).length);
-    check(`the taskbar count does not move (${tb0}): it counts bands 1–4, never band 5`, await evalJs(taskbarN) === tb0, await evalJs(taskbarN));
+    const left15 = (await storeNow()).open.filter((i) => i.kind !== 'notice').length;
+    check(`the taskbar count drops with the band (${tb0} → ${left15}): it counts every open item — band 5 too (lane foryou-honest)`, await waitFor(`(${taskbarN}) === ${left15}`, 3000) && left15 <= tb0 - FLOOD_N, await evalJs(taskbarN));
     check('"Mark all seen" hides itself (no open row left in the band)', await evalJs(`getComputedStyle(document.querySelector(${JSON.stringify(saSel)})).display === 'none'`));
     await sleep(1200);
     const utu = frames.filter((m) => m && m.type === 'user-todos-updated').length - utu0;
@@ -774,10 +777,11 @@ try {
     const c17 = await evalJs(`(() => { const d = document.createElement('div'); d.dataset.origin = ${JSON.stringify('"><img src=z onerror=window.__xss=7>')}; document.body.appendChild(d); const r = ${SWEEP}; d.remove(); return r.markup.length; })()`);
     check('CONTROL: the same sweep catches a data-origin that carries the forged string (one planted element ⇒ 1 offender) — the check above can go red', c17 === 1, c17);
     const tabSpan = (tabId, k) => `document.querySelector('${P} > .ut-tabs > .ut-tab[data-tab="${tabId}"] > .ut-tab-n[data-n="${k}"]')`;
-    const openActs = (() => { const t = Date.now(); const all = st.open.filter((i) => i.kind !== 'notice'); const ids = new Set(AM.badgeRows(all.map((i) => AM.rowOf(i, t)), t).map((r) => r.id)); return all.filter((i) => ids.has(i.id)); })(); // lane foryou-folds: the Inbox tab = the badge = bands 1–4
-    const WORSTSEG = { urgent: 'ut-seg-urgent', high: 'ut-seg-high', normal: 'ut-seg-norm', low: 'ut-seg-norm' }[WORST(openActs)];
+    const openActs = st.open.filter((i) => i.kind !== 'notice'); // lane foryou-honest: the Inbox tab = the badge = THE honest count (every open action item)
+    const loudActs = (() => { const t = Date.now(); const ids = new Set(AM.badgeRows(openActs.map((i) => AM.rowOf(i, t)), t).map((r) => r.id)); return openActs.filter((i) => ids.has(i.id)); })(); // …coloured by its loud rows (bands 1–4)
+    const WORSTSEG = loudActs.length ? { urgent: 'ut-seg-urgent', high: 'ut-seg-high', normal: 'ut-seg-norm', low: 'ut-seg-norm' }[WORST(loudActs)] : 'ut-seg-quiet';
     const t17 = await evalJs(`(() => { const a = ${tabSpan('inbox', 'action')}, n = ${tabSpan('inbox', 'notice')}, b = document.getElementById('taskbar-user-todos'); return { a: a && a.textContent, aShown: a && getComputedStyle(a).display !== 'none', aCls: a && a.className, aTitle: a && a.title, n: n && n.textContent, nCls: n && n.className, nTitle: n && n.title, btnTitle: b.title, label: a && a.parentElement.getAttribute('aria-label') }; })()`);
-    check(`the Inbox tab carries the rows in bands 1–4 (${openActs.length}, coloured by the worst tier: ${WORSTSEG}) and the grey notice count (${openNotices.length})`,
+    check(`the Inbox tab carries the honest count (${openActs.length}, coloured by the worst LOUD tier: ${WORSTSEG}) and the grey notice count (${openNotices.length})`,
       t17.aShown && t17.a === String(openActs.length) && t17.aCls.includes(WORSTSEG) && t17.n === String(openNotices.length) && t17.nCls.includes('ut-seg-notice'), t17);
     check('…in the taskbar badge\'s own words (badge title = the ask words · the notice words)', t17.btnTitle === `${t17.aTitle} · ${t17.nTitle}` && t17.label === `Inbox, ${t17.aTitle}, ${t17.nTitle}`, t17);
     await evalJs(`document.querySelector('${P} .ut-notices')?.scrollIntoView({ block: 'start' }); true`);
@@ -816,14 +820,14 @@ try {
     await evalJs(`window.__tabs18 = document.querySelector('${P} > .ut-tabs'); window.__un18 = ${tabSpan('history', 'unread')}; window.__ac18 = ${tabSpan('inbox', 'action')}; true`);
     const u0 = await evalJs(unread);
     const a0 = Number(await evalJs(`window.__ac18.textContent || 0`));
-    // lane foryou-folds: a band-5 ask files SILENTLY — no toast, the Notifications count and the Inbox tab (bands 1–4) unchanged
+    // lane foryou-folds: a band-5 ask files SILENTLY — no toast, the Notifications count unchanged; lane foryou-honest: the Inbox tab COUNTS it
     const quiet18 = await fileItem(token, { text: 'A plain ask moves only the list', urgency: 'normal' });
     await sleep(1500);
-    check('a band-5 ask files silently: no toast, the Notifications and Inbox counts unchanged (only bands 1–2 toast)', quiet18?.success && !(await evalJs(`[...document.querySelectorAll('.global-toast')].some((e) => e.textContent.includes('A plain ask moves only the list'))`)) && (await evalJs(unread)) === u0 && Number(await evalJs(`window.__ac18.textContent || 0`)) === a0, { quiet18: !!quiet18?.success, u: await evalJs(unread), a: await evalJs(`window.__ac18.textContent`) });
+    check(`a band-5 ask files silently: no toast, the Notifications count unchanged (only bands 1–2 toast) — and the Inbox tab counts it (${a0} → ${a0 + 1}, the honest count)`, quiet18?.success && !(await evalJs(`[...document.querySelectorAll('.global-toast')].some((e) => e.textContent.includes('A plain ask moves only the list'))`)) && (await evalJs(unread)) === u0 && await waitFor(`Number(window.__ac18.textContent || 0) === ${a0 + 1}`, 3000), { quiet18: !!quiet18?.success, u: await evalJs(unread), a: await evalJs(`window.__ac18.textContent`) });
     const ask18 = await fileItem(token, { text: 'A new ask makes a toast', urgency: 'urgent' });
     check('an URGENT ask is filed (band 1 — its arrival is a real toast: "For you · …")', ask18?.success && await waitFor(`[...document.querySelectorAll('.global-toast')].some((e) => e.textContent.includes('A new ask makes a toast'))`, 5000), ask18);
     check(`the Notifications tab's unread count ticks ${u0} → ${u0 + 1} in place (same span, same tabs node)`, await waitFor(`${unread} === ${u0 + 1} && ${tabSpan('history', 'unread')} === window.__un18 && document.querySelector('${P} > .ut-tabs') === window.__tabs18`, 4000), await evalJs(unread));
-    check(`…and the Inbox tab's ask count ${a0} → ${a0 + 1} (same span)`, await waitFor(`${tabSpan('inbox', 'action')} === window.__ac18 && window.__ac18.textContent === ${JSON.stringify(String(a0 + 1))}`, 4000), await evalJs(`window.__ac18.textContent`));
+    check(`…and the Inbox tab's ask count ${a0 + 1} → ${a0 + 2} (same span)`, await waitFor(`${tabSpan('inbox', 'action')} === window.__ac18 && window.__ac18.textContent === ${JSON.stringify(String(a0 + 2))}`, 4000), await evalJs(`window.__ac18.textContent`));
     const seen0 = Date.now();
     check('a real click on Notifications shows the history page with the toast on top', await realClick(`${P} > .ut-tabs > .ut-tab[data-tab="history"]`) && await waitFor(`(() => { const h = document.querySelector('${P} > .ut-hist'); return !!h && !document.querySelector('${P} > .ut-inbox') && (h.querySelector('.ut-hist-msg')?.textContent || '').includes('A new ask makes a toast'); })()`, 3000));
     const x18 = await evalJs(`(() => { const tabs = document.querySelector('${P} > .ut-tabs'); const h = tabs.querySelector('.ut-tab[data-tab="history"]'); return { same: tabs === window.__tabs18 && ${tabSpan('history', 'unread')} === window.__un18, unread: ${unread}, on: h.classList.contains('on') && h.getAttribute('aria-pressed') === 'true', inboxOff: !tabs.querySelector('.ut-tab[data-tab="inbox"]').classList.contains('on'), seen: Number(localStorage.getItem('vibespace.ut-history-seen')) }; })()`);
@@ -972,14 +976,17 @@ try {
   await waitApp();
   await sleep(1200);
   check('the page is a phone (app.isMobile, the nav inbox button present)', await evalJs(`app.isMobile && !!document.getElementById('mobile-nav-todos')`));
-  await evalJs(`document.getElementById('mobile-nav-todos').click(); true`);
+  // lane foryou-honest: the nav badge on a phone opens its first-screen PAGE (one surface) — the sheet is reached through its own
+  // door (the taskbar's, hidden on a phone: the page with no row to show falls back to it); the rows are the page's rows
+  await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
   const phoneSel = rowSel(phoneAsk.item.id);
-  check('the nav inbox opens the sheet listing the phone item', await waitFor(`!document.getElementById('user-todos-popup').classList.contains('hidden') && !!document.querySelector(${JSON.stringify(phoneSel)})`, 6000));
+  check('the sheet opens on the phone listing the phone item', await waitFor(`!document.getElementById('user-todos-popup').classList.contains('hidden') && !!document.querySelector(${JSON.stringify(phoneSel)})`, 6000));
   await sleep(400);
   const m6 = await evalJs(MEASURE);
   check(`⑳ the 375×812 sheet draws the SAME first screen: ${m6.rows.length} rows [${m6.rows.map((x) => x.h).join(', ')} px] + every band / fold head inside the sheet at scrollTop 0`, m6.rows.length === 6 && inside(m6), m6);
   await shot('ff-first-screen-phone', '#user-todos-popup');
   await waitFor(`!!document.querySelector(${JSON.stringify(phoneSel + ' .ut-reply-btn')}) && !document.querySelector(${JSON.stringify(phoneSel + ' .ut-reply-btn')}).disabled`, 8000);
+  await evalJs(`document.querySelector(${JSON.stringify(phoneSel + ' > .ut-body > .ut-text')}).click(); true`); // lane foryou-honest: a touch screen's row is FOLDED — the tap opens it (its verbs, its chips) before Reply
   await evalJs(`document.querySelector(${JSON.stringify(phoneSel + ' .ut-reply-btn')}).click(); true`);
   check('the same reply box opens on the phone', await waitFor(`!!document.querySelector(${JSON.stringify(phoneSel + ' .ut-reply textarea')})`, 3000));
   const sizes = await evalJs(`[...document.querySelectorAll('#user-todos-popup .ut-opt, #user-todos-popup .ut-reply-btn, #user-todos-popup .ut-act, #user-todos-popup .ut-reply textarea')].filter((el) => el.getClientRects().length).map((el) => { const r = el.getBoundingClientRect(); return { c: el.className.split(' ').pop(), w: Math.round(r.width), h: Math.round(r.height) }; })`);

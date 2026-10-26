@@ -12,7 +12,8 @@
  *
  * THE CHOICE. `profile.browser` = `{kind:'default'}` (the CLI's own pick — what every profile ran before this lane)
  * | `{kind:'build', version}` (a build in that machine's list) | `{kind:'path', path}` (a chrome file the user names —
- * a HUMAN act, cookie-only, exactly the rule of `browser.cloak.executablePath`). The agent can never set one:
+ * a HUMAN act, cookie-only, exactly the rule of `browser.cloak.executablePath`) | `{kind:'plugin', id}` (lane engine-plugin: a
+ * BROWSER ENGINE plugin's kernel — src/browser-engines.js; its probe answer is a fact the caller hands in). The agent can never set one:
  * `--executable-path` stays a refused LAUNCH flag, `install` stays NOT_OFFERED, and `by !== 'user'` is refused here.
  *
  * THE VERDICT (`browserChoiceVerdict`), one order everywhere (the create, Change build…, every launch): a choice is
@@ -29,6 +30,7 @@
 const fs = require('fs');
 const path = require('path');
 const SW = require('./browser-switch.js');
+const BE = require('./browser-engines.js'); // lane engine-plugin: PURE — the {kind:'plugin'} fragment, its codes, its words
 
 /** Where the CLI keeps its Chrome builds, relative to the account's home. */
 const BUILDS_REL = path.join('.agent-browser', 'browsers');
@@ -40,7 +42,9 @@ const BUILDS_MAX = 64;
 /** Every refusal this module answers — a closed set the routes' STATUS table mirrors. */
 const BUILD_CODES = Object.freeze(['browser_choice_invalid', 'browser_choice_user_only', 'browser_choice_provider', 'builds_unsupported', 'builds_unreadable', 'browser_build_missing', 'browser_build_not_executable', 'browser_path_missing', 'browser_path_not_executable', 'downgrade_refused', 'downgrade_unknown',
   // lane chrome-builds-download (design 004): the download's refusals, each said by name
-  'build_platform_unsupported', 'disk', 'build_present', 'build_version_invalid', 'build_version_unknown', 'build_list_invalid', 'build_list_unreachable', 'build_url_offhost', 'build_fetch_failed', 'build_check_failed', 'build_zip_shape', 'build_unpack_failed', 'build_verify_failed', 'build_in_use', 'build_not_downloaded', 'build_removing', 'unzip_unavailable', 'install_running', 'build_stalled']);
+  'build_platform_unsupported', 'disk', 'build_present', 'build_version_invalid', 'build_version_unknown', 'build_list_invalid', 'build_list_unreachable', 'build_url_offhost', 'build_fetch_failed', 'build_check_failed', 'build_zip_shape', 'build_unpack_failed', 'build_verify_failed', 'build_in_use', 'build_not_downloaded', 'build_removing', 'unzip_unavailable', 'install_running', 'build_stalled',
+  // lane engine-plugin: a browser ENGINE's refusals (src/browser-engines.js ENGINE_CODES), each said by name
+  ...BE.ENGINE_CODES]);
 
 /** `chrome-151.0.7922.34` → `{version:'151.0.7922.34', major:151}`; null for anything else. */
 function parseBuildDir(name) {
@@ -86,7 +90,8 @@ function listBuilds({ homeDir, fsImpl = fs } = {}) {
   return { ok: true, root, builds, missing: false, cut };
 }
 
-/** A choice, normalised: the default | a build by version | an absolute path to a chrome file. null = not a choice. */
+/** A choice, normalised: the default | a build by version | an absolute path to a chrome file | an engine plugin by its id.
+ *  null = not a choice. */
 function normalizeBrowserChoice(v) {
   if (v == null || v === '' || v === 'default') return { kind: 'default' };
   if (typeof v !== 'object' || Array.isArray(v)) return null;
@@ -99,12 +104,13 @@ function normalizeBrowserChoice(v) {
     const n = path.posix.normalize(p);
     return n === '/' ? null : { kind: 'path', path: n };
   }
+  if (kind === 'plugin') { const id = String(v.id == null ? '' : v.id); return BE.ID_RE.test(id) ? { kind: 'plugin', id } : null; } // lane engine-plugin
   return null;
 }
 /** Two choices name the same thing. */
 function sameChoice(a, b) {
   const x = normalizeBrowserChoice(a) || { kind: 'default' }, y = normalizeBrowserChoice(b) || { kind: 'default' };
-  return x.kind === y.kind && (x.kind === 'default' || (x.kind === 'build' ? x.version === y.version : x.path === y.path));
+  return x.kind === y.kind && (x.kind === 'default' || (x.kind === 'build' ? x.version === y.version : x.kind === 'plugin' ? x.id === y.id : x.path === y.path));
 }
 
 /**
@@ -116,11 +122,13 @@ function sameChoice(a, b) {
  *   launch runs the build already judged).
  * Inputs: `builds` = a `listBuilds` answer for THE machine the profile runs on; `pathFact` = `fileFact` of a named path
  * read on that machine (null ⇒ not read: a paired machine's path is judged there, at its start); `machine` = its name
- * in sentences. → `{ok:true, choice, executablePath, version, major}` | `{ok:false, code, error, …}`.
+ * in sentences; `engine` (lane engine-plugin) = an engine plugin's PROBE answer the caller read (src/server/browser-engines.js
+ * probe → its `fact`, or the refusal `{code, error}`) — a fact like `builds`, never asked here (null ⇒ browser_engine_missing).
+ * → `{ok:true, choice, executablePath, version, major}` | `{ok:false, code, error, …}`.
  */
-function browserChoiceVerdict({ choice, provider = null, by = 'user', builds = null, buildsError = null, pathFact = null, machine = 'this computer', label = 'this profile', recordedMajor = null, dirMajor = null, written = false, ladder = false, confirmed = false } = {}) {
+function browserChoiceVerdict({ choice, provider = null, by = 'user', builds = null, buildsError = null, pathFact = null, engine = null, machine = 'this computer', label = 'this profile', recordedMajor = null, dirMajor = null, written = false, ladder = false, confirmed = false } = {}) {
   const c = normalizeBrowserChoice(choice);
-  if (!c) return { ok: false, code: 'browser_choice_invalid', error: 'a browser build is {kind:"default"} | {kind:"build", version:"151.0.7922.34"} | {kind:"path", path:"/absolute/path/to/chrome"}' };
+  if (!c) return { ok: false, code: 'browser_choice_invalid', error: 'a browser build is {kind:"default"} | {kind:"build", version:"151.0.7922.34"} | {kind:"path", path:"/absolute/path/to/chrome"} | {kind:"plugin", id:"publisher.engine"}' };
   if (c.kind === 'default') return { ok: true, choice: c, executablePath: null, version: null, major: null };
   if (by !== 'user') return { ok: false, code: 'browser_choice_user_only', error: 'which Chrome build a profile runs is the user\'s choice (Agent browser panel → Change build…) — an agent never sets one; `vibespace-browser providers` lists the builds this machine has' };
   if (!(require('./browser-profiles.js').providerRow(provider) || {}).buildChoice) return { ok: false, code: 'browser_choice_provider', error: `a Chrome build is chosen for a Chromium profile only — "${label}" runs ${provider} (CloakBrowser runs its own measured build; a connected or cloud browser is not started by VibeSpace)` };
@@ -134,12 +142,17 @@ function browserChoiceVerdict({ choice, provider = null, by = 'user', builds = n
     if (!b) return { ok: false, code: 'browser_build_missing', version: c.version, error: `Chrome ${c.version} is not installed on ${machine} (no ~/.agent-browser/browsers/chrome-${c.version}) — pick another build, or install it there and choose it again` };
     if (!b.usable) return { ok: false, code: 'browser_build_not_executable', version: c.version, why: b.why, error: `Chrome ${c.version} on ${machine} has no runnable chrome file (${b.why === 'missing' ? 'chrome is missing from its folder' : b.why === 'not-executable' ? 'chrome is not executable' : 'chrome is not a regular file'})` };
     executablePath = b.path; version = b.version; major = b.major;
+  } else if (c.kind === 'plugin') {
+    // lane engine-plugin: the engine is there · its kernel installed and executable · its protocol (src/browser-engines.js)
+    const ev = BE.engineChoiceVerdict({ choice: c, engine, machine });
+    if (!ev.ok) return { ok: false, code: ev.code, error: ev.error, engine: c.id };
+    executablePath = ev.executablePath; version = ev.version; major = ev.major;
   } else {
     if (pathFact && !pathFact.usable) return { ok: false, code: pathFact.why === 'missing' ? 'browser_path_missing' : 'browser_path_not_executable', why: pathFact.why, error: pathFact.why === 'missing' ? `there is no file at ${c.path} on ${machine}` : `${c.path} on ${machine} is not a runnable file (${pathFact.why})` };
     executablePath = c.path;
   }
   if (ladder && written) {
-    const lv = SW.versionLadder({ target: version ? `Chrome ${version}` : `the chrome at ${c.path}`, targetMajor: major, recordedMajor, dirMajor, confirmed });
+    const lv = SW.versionLadder({ target: c.kind === 'plugin' ? `${BE.engineWords({ id: c.id, label: engine && engine.label })}${version ? ' (' + version + ')' : ''}` : version ? `Chrome ${version}` : `the chrome at ${c.path}`, targetMajor: major, recordedMajor, dirMajor, confirmed });
     if (!lv.ok) return { ok: false, code: lv.code, error: lv.error, needsConfirm: !!lv.needsConfirm, waysOut: lv.waysOut || [], wrote: lv.wrote != null ? lv.wrote : null, targetMajor: major };
   }
   return { ok: true, choice: c, executablePath, version, major };
@@ -154,13 +167,13 @@ function runningBuildOf(browserString) {
 /** The choice as the USER's surfaces read it (the panel row, the Change build… dialog: the path he typed is his). */
 function choiceView(choice) {
   const c = normalizeBrowserChoice(choice) || { kind: 'default' };
-  return c.kind === 'build' ? { kind: 'build', version: c.version } : c.kind === 'path' ? { kind: 'path', path: c.path } : { kind: 'default' };
+  return c.kind === 'build' ? { kind: 'build', version: c.version } : c.kind === 'path' ? { kind: 'path', path: c.path } : c.kind === 'plugin' ? { kind: 'plugin', id: c.id } : { kind: 'default' };
 }
 /** verify r1 (F5): what an AGENT may read of a choice — a FACT by kind: a build by its version, a chrome file the user named
  *  by KIND ONLY (its path is a place on the machine the user chose; versions only cross to an agent, never a path). */
 function agentChoiceView(choice) {
   const c = normalizeBrowserChoice(choice) || { kind: 'default' };
-  return c.kind === 'build' ? { kind: 'build', version: c.version } : c.kind === 'path' ? { kind: 'path' } : { kind: 'default' };
+  return c.kind === 'build' ? { kind: 'build', version: c.version } : c.kind === 'path' ? { kind: 'path' } : c.kind === 'plugin' ? { kind: 'plugin', id: c.id } : { kind: 'default' }; // lane engine-plugin: an engine plugin's id is a public name, never a path
 }
 /** verify r1 (F5): a vanished build's mark for an AGENT — the version of a build, never the path of a named file. */
 function agentMissingView(m) {
@@ -168,15 +181,24 @@ function agentMissingView(m) {
   return { kind: m.kind || null, what: m.kind === 'path' ? null : (m.what || null), at: m.at || null, code: m.code || null };
 }
 
-/** A choice in the agent's / the journal's words (English — the client words its own with t()). */
-function buildWords(choice) {
+/** A choice in the agent's / the journal's words (English — the client words its own with t()). `engineLabel` = an engine
+ *  plugin's own label when the caller has it (else its id). */
+function buildWords(choice, { engineLabel = '' } = {}) {
   const c = normalizeBrowserChoice(choice) || { kind: 'default' };
-  return c.kind === 'build' ? `Chrome ${c.version}` : c.kind === 'path' ? `the chrome at ${c.path}` : 'the default build';
+  return c.kind === 'build' ? `Chrome ${c.version}` : c.kind === 'path' ? `the chrome at ${c.path}` : c.kind === 'plugin' ? BE.engineWords({ id: c.id, label: engineLabel }) : 'the default build';
 }
 /** The ONE For-you notice of a chosen build that is gone (the keeper files it once per profile and choice): plain words,
  *  what to do — the English is the inbox's own (its items are stored strings, never re-translated). */
-function missingNotice({ label = 'a profile', choice = null } = {}) {
+function missingNotice({ label = 'a profile', choice = null, code = null, engineLabel = '' } = {}) {
   const c = normalizeBrowserChoice(choice) || { kind: 'default' };
+  if (c.kind === 'plugin') { // lane engine-plugin: the engine's plugin or its kernel is gone — said by what is missing; never Chrome in its place
+    const eng = BE.engineWords({ id: c.id, label: engineLabel });
+    const what = code === 'browser_engine_kernel_missing' ? `${eng}'s kernel is not installed` : code === 'browser_engine_not_executable' ? `${eng}'s kernel cannot be run` : code === 'browser_engine_missing' ? `${eng}'s plugin is not running` : `${eng} does not answer as an engine`;
+    return {
+      text: `"${label}" cannot start: ${what} on this computer`,
+      detail: `The profile "${label}" is set to run ${eng}, and ${what}, so its browser did not start (VibeSpace never switches it to Chrome by itself). Open the Agent browser panel and choose Change build… on "${label}" to pick a Chrome build or the default one — or ${code === 'browser_engine_missing' ? 'enable the plugin again in ⚙ → Plugins' : 'install its kernel again'}, and the next command starts it.`,
+    };
+  }
   const what = c.kind === 'build' ? `Chrome ${c.version}` : c.kind === 'path' ? `the browser at ${c.path}` : 'its browser';
   return {
     text: `"${label}" cannot start: ${what} is no longer on this computer`,
@@ -257,6 +279,22 @@ function majorsOf(versions) {
   return [...m.values()].sort((a, b) => b.major - a.major);
 }
 /**
+ * THE TWO HARD ROWS of a download (design 004 §2), said before any byte moves — the machine (`offered`: the platform tags a
+ * download exists for; Chrome for Testing's measured layout is Linux x64's; `machine` = the caller's own tag) and the disk (free bytes on the target's
+ * filesystem against the archive's length × DISK_FACTOR, when the length is known). Lane engine-distribution: a browser
+ * engine's kernel download asks the same two rows (`offered` = its kernel.json's platforms, `place` = the folder said).
+ * → `{hard: [{code, …, error}], needBytes, machine}`.
+ */
+function downloadHardRows({ platform = process.platform, arch = process.arch, machine: tag = null, offered = [DOWNLOAD_PLATFORM], freeBytes = null, archiveBytes = null, freePath = '', command = '', place = 'the builds folder', unsupported = null } = {}) {
+  const hard = [];
+  const machine = tag || SW.platformTag(platform, arch);
+  if (!offered.includes(machine)) hard.push({ code: 'build_platform_unsupported', machine, command: String(command || ''), error: unsupported ? String(unsupported) : `Downloads are offered on Linux x64 computers; on ${machine} install by hand${command ? ': ' + command : ''}` });
+  const zb = Number(archiveBytes), fb = Number(freeBytes);
+  const needBytes = Number.isFinite(zb) && zb > 0 ? zb * DISK_FACTOR : null;
+  if (needBytes != null && freeBytes != null && Number.isFinite(fb) && fb < needBytes) hard.push({ code: 'disk', need: needBytes, free: fb, path: String(freePath || ''), error: `needs about ${Math.ceil(needBytes / 1e6)} MB free, ${Math.floor(fb / 1e6)} MB left on ${freePath || place}` });
+  return { hard, needBytes, machine };
+}
+/**
  * THE COMPATIBILITY VERDICT of one version, said BEFORE the download (design 004 §2's table). Two HARD rows refuse the
  * download (`hard`, the first is `code`/`error`): the machine (only Linux x64 has the measured layout) and the disk (free bytes
  * on the builds folder's filesystem against the zip's length × 3, when the length is known). Every other row is a CHIP
@@ -270,12 +308,8 @@ function buildCompatVerdict({ version, channel = null, platform = process.platfo
   const v = String(version || '');
   if (!VERSION_RE.test(v)) return { ok: false, offer: false, code: 'build_version_invalid', error: `"${v.slice(0, 40)}" is not a Chrome version`, hard: [{ code: 'build_version_invalid' }], chips: [], major: null, needBytes: null };
   const major = Number(v.split('.')[0]);
-  const hard = [], chips = [];
-  const machine = SW.platformTag(platform, arch);
-  if (machine !== DOWNLOAD_PLATFORM) hard.push({ code: 'build_platform_unsupported', machine, command: String(command || ''), error: `Downloads are offered on Linux x64 computers; on ${machine} install by hand${command ? ': ' + command : ''}` });
-  const zb = Number(zipBytes), fb = Number(freeBytes);
-  const needBytes = Number.isFinite(zb) && zb > 0 ? zb * DISK_FACTOR : null;
-  if (needBytes != null && freeBytes != null && Number.isFinite(fb) && fb < needBytes) hard.push({ code: 'disk', need: needBytes, free: fb, path: String(freePath || ''), error: `needs about ${Math.ceil(needBytes / 1e6)} MB free, ${Math.floor(fb / 1e6)} MB left on ${freePath || 'the builds folder'}` });
+  const chips = [];
+  const { hard, needBytes } = downloadHardRows({ platform, arch, freeBytes, archiveBytes: zipBytes, freePath, command });
   if (present) chips.push({ kind: 'present' });
   if (cli) chips.push({ kind: 'cli', version: String(cli) });
   if (census) chips.push({ kind: 'census', relation: census === 'between' ? 'older' : String(census), census: censusChrome ? String(censusChrome) : null });
@@ -340,4 +374,5 @@ function versionSays(out, version) {
 
 module.exports = { buildWords, missingNotice, BUILDS_REL, BUILD_DIR_RE, BUILDS_MAX, BUILD_CODES, parseBuildDir, compareVersions, buildExecutable, fileFact, listBuilds, normalizeBrowserChoice, sameChoice, browserChoiceVerdict, runningBuildOf, choiceView, agentChoiceView, agentMissingView, buildsView,
   // lane chrome-builds-download (design 004)
-  CFT_CHANNELS, DOWNLOAD_PLATFORM, DISK_FACTOR, WITNESS_FILE, VERSION_RE, downloadUrlVerdict, parseLastKnownGood, parseKnownGood, majorsOf, buildCompatVerdict, downloadPlan, parseZipListing, zipShapeVerdict, versionSays };
+  CFT_CHANNELS, DOWNLOAD_PLATFORM, DISK_FACTOR, WITNESS_FILE, VERSION_RE, downloadUrlVerdict, parseLastKnownGood, parseKnownGood, majorsOf, buildCompatVerdict, downloadPlan, parseZipListing, zipShapeVerdict, versionSays,
+  downloadHardRows }; // lane engine-distribution: the two hard rows, shared with a browser engine's kernel download

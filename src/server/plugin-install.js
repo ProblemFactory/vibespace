@@ -21,6 +21,18 @@
 // loader's "is this the same package?" test for reinstall consent), and the
 // uploaded temp file is removed on EVERY exit path (the source whitelist used
 // to throw above the try/finally).
+// lane engine-distribution (P4 of the custom browser kernel, design-custom-browser-plugin §5.1): a PRIVATE git repository.
+// The credential is ONE integration row (`plugin-git`: host + an https token or an ssh deploy key, kept by the integration
+// store — sealed, the vault's key), resolved HERE at install time and handed to git ONLY through files: https ⇒ GIT_ASKPASS
+// names a 0700 script that cats a 0600 token file; ssh ⇒ GIT_SSH_COMMAND names a 0600 key file. Both live in a 0700 folder
+// inside the stage and are SHREDDED (overwritten, then unlinked) on every way out — never argv, never a URL with the token
+// (GIT_HTTPS_RE refuses `user@` anyway), never an env value: every git child is serviceEnv + named git switches (§94 FIXED
+// row), `-c credential.helper=` so no configured helper stores it; round 2: GIT_CONFIG_GLOBAL=/dev/null beside
+// GIT_CONFIG_NOSYSTEM=1 — the hub user's HOME git config (a url.insteadOf would send the clone, and the askpass's token, to
+// another host than the one the credential is bound to) is never read by a plugin's git child; a throw while the files are
+// written shreds the ones already there. The clone fetches ONE ref at depth 1 (a tag, a branch or
+// a full sha — the trust anchor of a fleet install is the sha) and records `{ref, sha}`; every failure is a NAMED code
+// (GIT_CODES) that reaches the owner (the Plugins panel; a boot install's For-you notice).
 const fs = require('fs');
 const { safeFetch } = require('../safe-fetch');
 const fsp = require('fs/promises');
@@ -29,6 +41,9 @@ const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 const { validateManifest } = require('../plugin-manifest');
+const { serviceEnv } = require('../agent-env.js');
+const { shredFile } = require('../secret-file.js');
+const IR = require('../integration-registry.js'); // PURE: the credential's `why` in words (a locked vault, none set)
 
 const MANIFEST = 'vibespace-plugin.json';
 const MAX_ZIP_BYTES = 50 * 1024 * 1024;       // upload / release asset cap
@@ -39,6 +54,14 @@ const GIT_TIMEOUT_MS = 60000;
 const GIT_HTTPS_RE = /^https:\/\/[A-Za-z0-9.-]+(?::\d+)?\/[A-Za-z0-9._\/-]+$/;
 const GIT_SSH_RE = /^(?:ssh:\/\/)?[A-Za-z0-9._-]+@[A-Za-z0-9.-]+(?::\d+)?[:/][A-Za-z0-9._\/-]+$/;
 const GH_SPEC_RE = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)(?:@([A-Za-z0-9._\/-]+))?$/;
+/** lane engine-distribution: a git ref — a tag, a branch or a full sha (no leading `-`, no `..`, no `@{`). */
+const GIT_REF_RE = /^(?!-)(?!.*\.\.)(?!.*@\{)[A-Za-z0-9._\/-]{1,100}$/;
+const GIT_SHA_RE = /^[0-9a-f]{40}$/;
+/** The ONE integration row a private repository's credential is kept in (src/integration-registry.js). */
+const GIT_CREDENTIAL_ROW = 'plugin-git';
+/** Every named refusal of a git install (the route answers `{error, code}`; the panel and the boot notice say them). */
+const GIT_CODES = Object.freeze(['plugin_git_auth', 'plugin_git_ref_missing', 'plugin_git_timeout', 'plugin_git_credential', 'plugin_git_failed', 'plugin_tree_rejected']);
+const codedErr = (status, code, msg) => Object.assign(httpErr(status, msg), { code, payload: { code } });
 
 const run = (cmd, args, opts = {}) => new Promise((resolve, reject) => {
   execFile(cmd, args, { maxBuffer: 8 * 1024 * 1024, ...opts }, (err, stdout, stderr) => {
@@ -121,20 +144,114 @@ async function stageFromPath(value, stage) {
   return dest;
 }
 
-async function stageFromGit(value, stage) {
-  let url = String(value || '').trim(), ref = null;
+/** The host a git URL names (`host` or `host:port`, lower case) — what a credential is bound to. */
+function gitHostOf(url) {
+  const u = String(url || '');
+  let m = /^https:\/\/([A-Za-z0-9.-]+)(?::(\d+))?\//.exec(u);
+  if (m) return m[1].toLowerCase() + (m[2] && m[2] !== '443' ? ':' + m[2] : '');
+  m = /^ssh:\/\/[A-Za-z0-9._-]+@([A-Za-z0-9.-]+)(?::(\d+))?\//.exec(u);
+  if (m) return m[1].toLowerCase() + (m[2] && m[2] !== '22' ? ':' + m[2] : '');
+  m = /^[A-Za-z0-9._-]+@([A-Za-z0-9.-]+):/.exec(u);
+  return m ? m[1].toLowerCase() : null;
+}
+/** A git URL + ref, judged before any child runs: `value` may carry `#<ref>` (the older form) — `ref` names it otherwise. */
+function gitSpecOf(value, refIn = null) {
+  let url = String(value || '').trim(), ref = refIn == null || refIn === '' ? null : String(refIn).trim();
   const hash = url.indexOf('#');
-  if (hash > 0) { ref = url.slice(hash + 1); url = url.slice(0, hash); }
+  if (hash > 0) { const r = url.slice(hash + 1); url = url.slice(0, hash); if (ref && r && r !== ref) throw httpErr(400, `git: the URL names #${r.slice(0, 40)} and the ref field names ${ref.slice(0, 40)} — give one`); ref = ref || r || null; }
   if (!GIT_HTTPS_RE.test(url) && !GIT_SSH_RE.test(url)) throw httpErr(400, 'git: URL must be https://host/owner/repo(.git) or git@host:owner/repo.git (optionally #branch)');
-  if (ref && !/^[A-Za-z0-9._\/-]{1,100}$/.test(ref)) throw httpErr(400, 'git: invalid #ref');
-  const dest = path.join(stage, 'pkg');
-  const args = ['clone', '--depth', '1', '--quiet', ...(ref ? ['--branch', ref] : []), '--', url, dest];
+  if (ref && !GIT_REF_RE.test(ref)) throw httpErr(400, 'git: invalid ref (a tag, a branch or a full 40-character sha)');
+  return { url, ref, https: GIT_HTTPS_RE.test(url), host: gitHostOf(url) };
+}
+/** POSIX single-quoting for the askpass script's file paths (the stage path is ours; quoted anyway). */
+const shq = (p) => `'${String(p).replace(/'/g, `'\\''`)}'`;
+/** ONE git child: serviceEnv + the named git switches (the egress door: a pod reaches its git host through the operator's
+ *  proxy), a timeout, no shell — §94's FIXED row holds it on serviceEnv. No config but the repository's own: no system file
+ *  (GIT_CONFIG_NOSYSTEM), no HOME / XDG file (GIT_CONFIG_GLOBAL=/dev/null) — the URL git dials is the URL credentialFor
+ *  judged. A TLS-inspecting egress's trust root therefore rides the egress door's GIT_SSL_CAINFO / GIT_SSL_CAPATH (round 3:
+ *  a HOME `http.sslCAInfo` is never read, and a git on libcurl-GnuTLS ignores SSL_CERT_FILE). → {stdout, stderr} | throws
+ *  {killed, stderr}. */
+function gitRun(gitBin, args, { add = {}, timeout = GIT_TIMEOUT_MS } = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(gitBin, args, { timeout, maxBuffer: 8 * 1024 * 1024, env: serviceEnv(process.env, { egress: true, add: { GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes', ...add } }) }, (err, stdout, stderr) => {
+      if (err) return reject(Object.assign(new Error(String(stderr || err.message || '').trim().slice(0, 600) || 'git failed'), { killed: !!err.killed || err.signal === 'SIGTERM', exit: err.code }));
+      resolve({ stdout: String(stdout || ''), stderr: String(stderr || '') });
+    });
+  });
+}
+/** A git failure → its NAMED code + the owner's words (the first line of git's own, never a value). */
+function gitFailure(e, { url, ref, cred, timeout = GIT_TIMEOUT_MS }) {
+  const t = String((e && e.message) || '');
+  const line = t.split('\n').map((x) => x.replace(/^(?:fatal|error|remote):\s*/i, '').trim()).filter(Boolean).slice(-1)[0] || 'git failed';
+  if (e && e.killed) return codedErr(504, 'plugin_git_timeout', `git: ${gitHostOf(url) || 'the host'} did not finish within ${+(timeout / 1000).toFixed(1)} s (its limit) — nothing was installed`);
+  if (/could not read (?:Username|Password)|Authentication failed|terminal prompts disabled|Permission denied \(publickey|HTTP Basic: Access denied|Invalid username or password|\b40[13]\b|not authorized|access denied|Repository not found|repository '.*' not found|Host key verification failed/i.test(t))
+    return codedErr(400, 'plugin_git_auth', `git: ${gitHostOf(url) || 'the host'} refused ${cred ? `the ${cred.kind === 'key' ? 'deploy key' : 'token'} of the Plugin Git credential (${cred.host})` : 'an anonymous clone'} — ${cred ? 'check that it can read this repository' : 'a private repository needs the Plugin Git credential (Integrations → Plugins, or the cluster\'s preset)'} (${line.slice(0, 160)})`);
+  if (/couldn't find remote ref|not our ref|no such remote ref|unknown revision|Could not find remote branch|invalid refspec|did not match any|no matching remote head/i.test(t))
+    return codedErr(400, 'plugin_git_ref_missing', `git: the repository has no ${ref ? `ref ${ref}` : 'default branch'} (${line.slice(0, 160)})`);
+  return codedErr(400, 'plugin_git_failed', `git clone failed: ${line.slice(0, 240)}`);
+}
+/** The credential files of ONE clone, in a 0700 folder: https ⇒ the token (0600) + its user + the askpass script (0700, it
+ *  names the FILES — never a value); ssh ⇒ the key (0600). → {add (the env names git reads), files, dir}. A throw part way
+ *  (a full disk at the second file) SHREDS the files already written, like every other way out (round 2). `writeFile` is a
+ *  suite's door (the second write that fails). */
+async function credentialFiles(stage, cred, { writeFile = fsp.writeFile } = {}) {
+  const dir = await fsp.mkdtemp(path.join(stage, '.cred-'));
+  const files = [];
   try {
-    await run('git', args, { timeout: GIT_TIMEOUT_MS, env: { PATH: process.env.PATH, HOME: process.env.HOME, GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: 'ssh -o BatchMode=yes' } });
-  } catch (e) { throw httpErr(400, `git clone failed: ${e.message}${e.code === null || /timed?\s*out|ETIMEDOUT/i.test(e.message) ? ' (60s limit)' : ''}`); }
-  try { fs.rmSync(path.join(dest, '.git'), { recursive: true, force: true }); } catch { }
-  await auditTree(dest, { hash: false });
-  return dest;
+    await fsp.chmod(dir, 0o700);
+    const put = async (name, text, mode) => { const f = path.join(dir, name); files.push(f); await writeFile(f, text, { mode, flag: 'wx' }); return f; };
+    if (cred.kind === 'token') {
+      const tok = await put('token', cred.token, 0o600);
+      const usr = await put('user', cred.username, 0o600);
+      const ask = await put('askpass', `#!/bin/sh\ncase "$1" in\n  [Uu]sername*) cat ${shq(usr)} ;;\n  *) cat ${shq(tok)} ;;\nesac\n`, 0o700);
+      return { dir, files, add: { GIT_ASKPASS: ask } };
+    }
+    const key = await put('key', cred.key.endsWith('\n') ? cred.key : cred.key + '\n', 0o600);
+    return { dir, files, add: { GIT_SSH_COMMAND: `ssh -i ${shq(key)} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new` } };
+  } catch (e) { await shredCredentials({ dir, files }); throw e; } // a name never written is a no-op for shredFile
+}
+/** Every credential file overwritten, then unlinked, then the folder — on every way out of a clone. → true when gone. */
+async function shredCredentials(c) {
+  if (!c) return true;
+  let gone = true;
+  for (const f of c.files) gone = (await shredFile(f)) && gone;
+  await fsp.rm(c.dir, { recursive: true, force: true }).catch(() => {});
+  return gone && !fs.existsSync(c.dir);
+}
+/** THE CLONE: an empty repository, ONE ref fetched at depth 1 (the remote's HEAD when none is named; a tag, a branch or a full
+ *  sha otherwise), checked out detached; the sha recorded (a named sha must be what arrived); `.git` removed. */
+async function stageFromGit(value, stage, { ref: refIn = null, cred = null, gitBin = 'git', timeout = GIT_TIMEOUT_MS } = {}) {
+  const spec = gitSpecOf(value, refIn);
+  const dest = path.join(stage, 'pkg');
+  let c = null, sha = null;
+  try {
+    if (cred) c = await credentialFiles(stage, cred);
+    const add = c ? c.add : {};
+    await gitRun(gitBin, ['init', '--quiet', dest]);
+    await gitRun(gitBin, ['-C', dest, '-c', 'credential.helper=', 'fetch', '--depth', '1', '--quiet', '--no-tags', '--', spec.url, spec.ref || 'HEAD'], { add, timeout });
+    await gitRun(gitBin, ['-C', dest, 'checkout', '--quiet', '--detach', 'FETCH_HEAD']);
+    sha = (await gitRun(gitBin, ['-C', dest, 'rev-parse', 'HEAD'])).stdout.trim();
+  } catch (e) { throw e && e.code && GIT_CODES.includes(e.code) ? e : gitFailure(e, { url: spec.url, ref: spec.ref, cred, timeout }); }
+  finally { await shredCredentials(c); }
+  if (!GIT_SHA_RE.test(sha || '')) throw codedErr(400, 'plugin_git_failed', 'git: the clone names no commit');
+  if (spec.ref && GIT_SHA_RE.test(spec.ref) && sha !== spec.ref) throw codedErr(400, 'plugin_git_ref_missing', `git: asked for ${spec.ref}, the repository answered ${sha}`);
+  await fsp.rm(path.join(dest, '.git'), { recursive: true, force: true }).catch(() => {});
+  try { await auditTree(dest, { hash: false }); } catch (e) { throw Object.assign(e, { code: 'plugin_tree_rejected', payload: { code: 'plugin_tree_rejected' } }); }
+  return { dir: dest, ref: spec.ref, sha, url: spec.url };
+}
+/** THE REACHABILITY TEST of the credential row: `git ls-remote <url> HEAD` with it (the same files, the same shredding). */
+async function lsRemote(url, { cred = null, gitBin = 'git', scratch, timeout = 15000 } = {}) {
+  const spec = gitSpecOf(url);
+  await fsp.mkdir(scratch, { recursive: true });
+  const stage = await fsp.mkdtemp(path.join(scratch, 'ls-'));
+  let c = null;
+  try {
+    if (cred) c = await credentialFiles(stage, cred);
+    const r = await gitRun(gitBin, ['-c', 'credential.helper=', 'ls-remote', '--', spec.url, 'HEAD'], { add: c ? c.add : {}, timeout });
+    const head = (r.stdout.split('\n')[0] || '').split(/\s+/)[0];
+    return { ok: true, host: spec.host, head: GIT_SHA_RE.test(head) ? head : null };
+  } catch (e) { throw e && e.code && GIT_CODES.includes(e.code) ? e : gitFailure(e, { url: spec.url, ref: null, cred }); }
+  finally { await shredCredentials(c); await fsp.rm(stage, { recursive: true, force: true }).catch(() => {}); }
 }
 
 /** unzip with a Zip-Slip audit first: every member name is checked before a
@@ -207,11 +324,41 @@ function moveDir(from, to) {
   }
 }
 
-function create({ rootDir, hostVersion = null, forbiddenRoots = [], log = console } = {}) {
+function create({ rootDir, hostVersion = null, forbiddenRoots = [], log = console, integrations = () => null, gitBin = 'git', gitTimeoutMs = GIT_TIMEOUT_MS } = {}) {
   const pluginsDir = path.join(rootDir, 'data', 'plugins');
   const stateDir = path.join(rootDir, 'data', 'plugins-state');
   const stagingDir = path.join(rootDir, 'data', 'plugins-staging');
   const trashDir = path.join(rootDir, 'data', 'plugins-trash');
+
+  /** THE CREDENTIAL of a git install (lane engine-distribution): `mode` = null (none — a public repository) | 'plugin-git'
+   *  (the person chose it: unset / locked / for another host ⇒ refused by name) | 'auto' (the fleet's boot install: the row
+   *  when it holds a credential for this host, else none). Resolved through the integration store — THE one reader of the
+   *  sealed values — at the moment of the clone, never kept. → {kind:'token'|'key', host, username, token|key} | null. */
+  function credentialFor(spec, mode) {
+    if (!mode) return null;
+    if (mode !== GIT_CREDENTIAL_ROW && mode !== 'auto') throw codedErr(400, 'plugin_git_credential', `git: unknown credential "${String(mode).slice(0, 40)}" — the one a plugin install uses is the Plugin Git credential (${GIT_CREDENTIAL_ROW})`);
+    const strict = mode === GIT_CREDENTIAL_ROW;
+    const no = (why) => { if (strict) throw codedErr(400, 'plugin_git_credential', `git: the Plugin Git credential cannot be used — ${why}`); return null; };
+    let store = null; try { store = typeof integrations === 'function' ? integrations() : integrations; } catch { store = null; }
+    if (!store || typeof store.resolveIntegration !== 'function') return no('this instance has no integration store');
+    let r;
+    try { r = store.resolveIntegration('plugin-git'); } catch (e) { return no(String(e && e.message).slice(0, 160)); }
+    // a credential that EXISTS but cannot be read now (the vault locked, a rotated key) is refused even for 'auto' — an anonymous
+    // clone in its place would only fail as «auth» and hide the reason
+    if (r && r.source === 'none' && (r.whyCode === 'vault-locked' || r.whyCode === 'undecryptable')) throw codedErr(400, 'plugin_git_credential', `git: the Plugin Git credential cannot be used — ${IR.credentialWhyText(r)}`);
+    if (!r || r.source === 'none') return no(`${IR.credentialWhyText(r || {}) || 'none is set'} (Integrations → Plugins → Plugin Git repository)`);
+    const v = r.values || {};
+    const host = String(v.host || '').trim().toLowerCase();
+    if (!host || host !== spec.host) return no(`it is for ${host || 'no host'}, the repository is on ${spec.host}`);
+    if (spec.https) return v.token ? { kind: 'token', host, username: String(v.username || '').trim() || 'x-access-token', token: String(v.token) } : no('it holds no token for an https repository');
+    return v.deployKey ? { kind: 'key', host, key: String(v.deployKey).replace(/\r\n/g, '\n') } : no('it holds no deploy key for an ssh repository');
+  }
+  /** The row's Test (registered by the loader with a repository it knows on that host): ls-remote with the credential. */
+  async function testCredential(url) {
+    const spec = gitSpecOf(url);
+    const cred = credentialFor(spec, GIT_CREDENTIAL_ROW);
+    return lsRemote(url, { cred, gitBin, scratch: stagingDir });
+  }
 
   /** Move a plugin's dir + state dir to the trash (never rmSync). Returns the trash path or null. */
   function trash(id, { reason = 'uninstall' } = {}) {
@@ -230,9 +377,10 @@ function create({ rootDir, hostVersion = null, forbiddenRoots = [], log = consol
    * whose id differs from the record being updated.
    * `contentHash` fingerprints the staged package so the loader can tell a
    * byte-identical reinstall from a DIFFERENT package claiming the same id.
-   * @returns {{ id, version, dir, replaced: boolean, previous: string|null, source, value, contentHash, warnings }}
+   * lane engine-distribution: a git source takes `ref` (a tag, a branch or a full sha) and `credential` (credentialFor).
+   * @returns {{ id, version, dir, replaced: boolean, previous: string|null, source, value, contentHash, warnings, ref, sha }}
    */
-  async function install({ source, value, file = null, expectId = null } = {}) {
+  async function install({ source, value, file = null, expectId = null, ref = null, credential = null } = {}) {
     // The uploaded temp file is cleaned in EVERY exit path — the source
     // whitelist used to throw ABOVE the try/finally, so a bad `source` left the
     // multipart upload sitting in os.tmpdir() forever (2.369.43).
@@ -241,33 +389,39 @@ function create({ rootDir, hostVersion = null, forbiddenRoots = [], log = consol
       if (!['path', 'git', 'zip', 'github-release'].includes(source)) throw httpErr(400, 'source must be path | git | zip | github-release');
       fs.mkdirSync(stagingDir, { recursive: true });
       const stage = fs.mkdtempSync(path.join(stagingDir, 'st-'));
-      let resolvedValue = value;
+      let resolvedValue = value, gitRef = null, gitSha = null;
       try {
         let pkgDir;
         if (source === 'path') pkgDir = await stageFromPath(value, stage);
-        else if (source === 'git') pkgDir = await stageFromGit(value, stage);
+        else if (source === 'git') {
+          const spec = gitSpecOf(value, ref);
+          const g = await stageFromGit(value, stage, { ref, cred: credentialFor(spec, credential), gitBin, timeout: gitTimeoutMs });
+          pkgDir = g.dir; resolvedValue = g.url; gitRef = g.ref; gitSha = g.sha;
+        }
         else if (source === 'zip') {
           if (!file) throw httpErr(400, 'zip: upload the .vsp file as the multipart field "file"');
           pkgDir = await stageFromZip(file, stage);
           resolvedValue = path.basename(String(value || file));
         } else { const r = await stageFromGithubRelease(value, stage); pkgDir = r.dir; resolvedValue = r.resolvedValue; }
-        const root = findPackageRoot(pkgDir);
+        let root;
+        try { root = findPackageRoot(pkgDir); } catch (e) { throw codedErr(400, 'plugin_tree_rejected', e.message); }
         let raw;
         try { raw = JSON.parse(fs.readFileSync(path.join(root, MANIFEST), 'utf-8')); }
-        catch (e) { throw httpErr(400, `${MANIFEST}: ${e.message}`); }
+        catch (e) { throw codedErr(400, 'plugin_tree_rejected', `${MANIFEST}: ${e.message}`); }
         const v = validateManifest(raw, { hostVersion, homeDir: os.homedir(), forbiddenRoots });
-        if (!v.ok) throw httpErr(400, `invalid manifest: ${v.errors.join('; ')}`);
+        if (!v.ok) throw codedErr(400, 'plugin_tree_rejected', `invalid manifest: ${v.errors.join('; ')}`);
         const id = v.manifest.id;
         if (expectId && id !== expectId) throw httpErr(409, `the package is "${id}" but this record is "${expectId}" — install it as a new plugin instead`);
-        if (v.manifest.server && !fs.existsSync(path.join(root, 'server.js'))) throw httpErr(400, 'manifest says server: true but the package has no server.js');
-        const { contentHash } = await auditTree(root); // the fingerprint of what actually lands on disk
+        if (v.manifest.server && !fs.existsSync(path.join(root, 'server.js'))) throw codedErr(400, 'plugin_tree_rejected', 'manifest says server: true but the package has no server.js');
+        let contentHash;
+        try { ({ contentHash } = await auditTree(root)); } catch (e) { throw Object.assign(e, { code: 'plugin_tree_rejected', payload: { code: 'plugin_tree_rejected' } }); } // the fingerprint of what actually lands on disk
         const target = path.join(pluginsDir, id);
         const replaced = fs.existsSync(target);
         const previous = replaced ? trash(id, { reason: expectId ? 'update' : 'reinstall' }) : null;
         fs.mkdirSync(pluginsDir, { recursive: true });
         moveDir(root, target);
-        log.log?.(`[plugins] installed ${id}@${v.manifest.version} from ${source}${replaced ? ' (previous copy in trash)' : ''}`);
-        return { id, version: v.manifest.version, dir: target, replaced, previous, source, value: resolvedValue, contentHash, warnings: v.warnings };
+        log.log?.(`[plugins] installed ${id}@${v.manifest.version} from ${source}${gitSha ? ` @${gitRef || 'HEAD'} (${gitSha.slice(0, 12)})` : ''}${replaced ? ' (previous copy in trash)' : ''}`);
+        return { id, version: v.manifest.version, dir: target, replaced, previous, source, value: resolvedValue, contentHash, warnings: v.warnings, ref: gitRef, sha: gitSha };
       } finally {
         try { fs.rmSync(stage, { recursive: true, force: true }); } catch { }
       }
@@ -276,7 +430,8 @@ function create({ rootDir, hostVersion = null, forbiddenRoots = [], log = consol
     }
   }
 
-  return { install, trash, pluginsDir, stateDir, trashDir, stagingDir };
+  return { install, trash, testCredential, pluginsDir, stateDir, trashDir, stagingDir };
 }
 
-module.exports = { create, auditTree, findPackageRoot, stageFromZip, GIT_HTTPS_RE, GIT_SSH_RE, GH_SPEC_RE, MAX_ZIP_BYTES, MANIFEST };
+module.exports = { create, auditTree, findPackageRoot, stageFromZip, GIT_HTTPS_RE, GIT_SSH_RE, GH_SPEC_RE, MAX_ZIP_BYTES, MANIFEST,
+  GIT_REF_RE, GIT_SHA_RE, GIT_CODES, GIT_CREDENTIAL_ROW, gitHostOf, gitSpecOf, credentialFiles, shredCredentials }; // lane engine-distribution

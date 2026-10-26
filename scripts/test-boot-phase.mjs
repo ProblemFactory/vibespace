@@ -14,6 +14,12 @@
 //     gates on awaitBootReady; the first-paint fetches ride _bootJson; the
 //     update dialog and the stale-tab reload wait for ready.
 //   ④ patched-copy controls: the same checks run on mutant copies and go red.
+//   ⑤ THE STALE-TAB STEP (lane phone-back-reload): staleTabStep's table — ONE reload per server version per tab, a tab
+//     that STILL runs the old bundle after it says so once (the notice), never a second reload; the app's wiring reads
+//     the step, writes the stamps and the diary rows; two reconnects after the reload replayed over the PURE step;
+//     a control without the notice row goes red. ACCEPTANCE ROUND 2: the app's own _checkBundleFreshness (its text
+//     from app.js) replayed over fake timers — two reconnects 300 ms apart ⇒ ONE reload, the notice only from the
+//     reloaded page and only while its bundle is still stale; RED: the round-1 stamp, written 800 ms before the reload.
 // Run: node scripts/test-boot-phase.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -116,7 +122,7 @@ check('loadAutoSave: no raw fetch left — /api/layouts, /api/active, /api/sessi
 const rs = layout.slice(layout.indexOf('async restoreState(state)'), layout.indexOf('// Restore windows — use gridBounds'));
 check('restoreState: its /api/active + /api/sessions ride _bootJson', (rs.match(/this\._bootJson\('\/api\/(active|sessions)'\)/g) || []).length === 2 && !/await fetch\('\/api\/(active|sessions)'\)/.test(rs));
 check('the update dialog: its reload waits for the boot phase (waitServerReady) before location.reload', /const reload = async \(msg\) => \{\s*done = true;\s*const r = await waitServerReady\(/.test(app));
-check('the stale-tab reload: waits for ready before it burns its once-per-version key', /if \(!\(await waitServerReady\(\{ \.\.\.bootDeps\(\) \}\)\)\.ok\) return;[^\n]*\n[^\n]*\n\s*sessionStorage\.setItem\(key/.test(app));
+check('the stale-tab reload: waits for ready, then burns its once-per-version key only as the reload fires', /if \(!\(await waitServerReady\(\{ \.\.\.bootDeps\(\) \}\)\)\.ok\) \{ navNote\(\{ k: 'stale', b: BUILD_VERSION, s: srv, d2: 'wait' \}\); return; \}[^\n]*\n\s*if \(this\._staleReloadAt \|\| sessionStorage\.getItem\(key\)\) return;[\s\S]{0,700}?setTimeout\(\(\) => \{ sessionStorage\.setItem\(key, String\(Date\.now\(\)\)\); location\.reload\(\); \}, 800\);/.test(app));
 const splash = read('src/lib/boot-splash.js');
 check('boot-splash: giving up records ONE boot-stuck telemetry event naming the request, then shows the reason + Reload', /track\('event', 'boot-stuck'/.test(splash) && /The server did not answer \{what\} \(\{reason\}\) after \{n\} tries\./.test(splash) && /location\.reload\(\)/.test(splash));
 check('boot-splash: a request that gave up NEVER resolves (restoring from nothing would let the first autosave overwrite the layout)', /if \(r\.gaveUp\) \{ splashGiveUp\(r\.gaveUp\); return new Promise\(\(\) => \{ \}\); \}/.test(splash));
@@ -150,6 +156,63 @@ const redsOf = (rows) => rows.filter(([, c]) => !c).map(([n]) => n);
   const f = mutant('src/lib/boot-ladder.js', "    if (r.ok && r.json && r.json.phase !== 'booting') return { ok: true, boot: r.json };", "    if (r.ok && r.json) return { ok: true, boot: r.json };", '.mjs');
   const reds = f ? redsOf(await import(pathToFileURL(f).href).then((m) => ladderLegs(m, 'mutant '))) : ['(anchor moved)'];
   check(`control: the old reload rule (any answer = reload) turns the waitServerReady legs red (${reds.length} red)`, f && reds.some((n) => /booting ×3/.test(n)), reds);
+}
+// ── ⑤ the stale-tab step (lane phone-back-reload) ──
+const STALE_ROWS = [ // [name, input, step]
+  ['the same version ⇒ none', { bundle: '2.369.357', server: '2.369.357' }, 'none'],
+  ['an unknown bundle version (a dev build) ⇒ none', { bundle: '', server: '2.369.358' }, 'none'],
+  ['no server answer ⇒ none', { bundle: '2.369.357', server: '' }, 'none'],
+  ['the first mismatch for this version in this tab ⇒ reload', { bundle: '2.369.357', server: '2.369.358' }, 'reload'],
+  ['reloaded once for it and STILL the old bundle ⇒ the notice', { bundle: '2.369.357', server: '2.369.358', reloaded: true }, 'notice'],
+  ['…said already ⇒ quiet (never a second reload, never a second notice)', { bundle: '2.369.357', server: '2.369.358', reloaded: true, noticed: true }, 'quiet'],
+  ['a NEWER server version later ⇒ its own one reload', { bundle: '2.369.357', server: '2.369.359', reloaded: false, noticed: false }, 'reload'],
+  ['this document\'s reload is PENDING (round 2: a reconnect inside its 800 ms) ⇒ none — never the notice', { bundle: '2.369.357', server: '2.369.358', pending: true }, 'none'],
+];
+const staleLegs = (M) => STALE_ROWS.map(([n, inp, want]) => [`stale-tab: ${n}`, M.staleTabStep(inp) === want, M.staleTabStep(inp)]);
+report(staleLegs(ladderMod));
+{ // the boot + two reconnects of a tab whose bundle never matches (a cached bundle): replayed over the PURE step + the per-tab stamps
+  const tab = new Map(); let reloads = 0, notices = 0;
+  const check1 = () => { const step = ladderMod.staleTabStep({ bundle: '2.369.357', server: '2.369.358', reloaded: tab.has('r'), noticed: tab.has('n') }); if (step === 'reload') { tab.set('r', 1); reloads++; } if (step === 'notice') { tab.set('n', 1); notices++; } return step; };
+  const steps = [check1(), check1(), check1(), check1()]; // the boot's connect, the reloaded page's connect, two reconnects
+  check('stale-tab: the boot + the reload + two reconnects of a bundle that never matches ⇒ ONE reload, ONE notice, then quiet', reloads === 1 && notices === 1 && steps.join() === 'reload,notice,quiet,quiet', steps);
+}
+check('stale-tab wiring: app.js reads staleTabStep with the per-tab stamps, the notice is said once (its own stamp + a diary row), a reload writes its diary row',
+  /const step = staleTabStep\(\{ bundle: BUILD_VERSION, server: srv, reloaded: !!sessionStorage\.getItem\(key\), noticed: !!sessionStorage\.getItem\(noticeKey\), pending: !!this\._staleReloadAt \}\);/.test(app)
+  && /if \(step === 'notice'\) \{\s*sessionStorage\.setItem\(noticeKey, String\(Date\.now\(\)\)\);\s*navNote\(\{ k: 'stale', b: BUILD_VERSION, s: srv, d2: 'notice' \}\);\s*showToast\(t\('This tab still runs VibeSpace \{old\} after its one reload for \{new\}/.test(app)
+  && /if \(step !== 'reload'\) return;/.test(app) && /this\._staleReloadAt = Date\.now\(\);\s*navNote\(\{ k: 'stale', b: BUILD_VERSION, s: srv, d2: 'reload' \}\);/.test(app));
+// round 2: the app's OWN method (its text from app.js) over fake timers — one tab, one document per reload
+const methodOf = (src) => { const a = src.indexOf('  async _checkBundleFreshness() {'), b = a >= 0 ? src.indexOf('\n  }\n', a) : -1; return b > a ? src.slice(a, b + 4) : null; };
+async function staleReplay(src, { afterBundle = '2.369.357' } = {}) {
+  const text = methodOf(src); if (!text) return null;
+  const store = new Map(), timers = [], ev = []; let doc = 1;
+  const deps = (bundle) => ({
+    BUILD_VERSION: bundle, fetchJson: async () => ({ version: '2.369.358' }), staleTabStep: ladderMod.staleTabStep,
+    sessionStorage: { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => { store.set(k, String(v)); } },
+    navNote: (r) => ev.push(`${r.d2}@${doc}`), showToast: (m) => { if (/still runs VibeSpace/.test(m)) ev.push(`notice-toast@${doc}`); },
+    t: (m) => m, waitServerReady: async () => ({ ok: true }), bootDeps: () => ({}), track: () => { },
+    location: { reload: () => { ev.push(`RELOAD@${doc}`); doc++; } }, setTimeout: (fn, ms) => { timers.push({ fn, ms }); },
+  });
+  const make = (bundle) => { const d = deps(bundle); return new Function(...Object.keys(d), text.replace('  async _checkBundleFreshness() {', 'return async function () {'))(...Object.values(d)); };
+  const page1 = {}, check1 = make('2.369.357');
+  await check1.call(page1); // a reconnect
+  await check1.call(page1); // another, 300 ms later — inside the reload's 800 ms (its timer has not fired)
+  timers.splice(0).forEach((x) => x.fn()); // the reload fires
+  await make(afterBundle).call({}); // the reloaded page's own connect
+  timers.splice(0).forEach((x) => x.fn());
+  return ev.join(' ');
+}
+{
+  const stale = await staleReplay(app), fresh = await staleReplay(app, { afterBundle: '2.369.358' });
+  check('stale-tab replay (round 2): two reconnects 300 ms apart ⇒ ONE reload; the notice only from the reloaded page, its bundle still stale', stale === 'reload@1 RELOAD@1 notice@2 notice-toast@2', stale);
+  check('…and none when the reload brought the new bundle', fresh === 'reload@1 RELOAD@1', fresh);
+  const r1 = app.replace('      this._staleReloadAt = Date.now();\n', '      sessionStorage.setItem(key, String(Date.now()));\n').replace('setTimeout(() => { sessionStorage.setItem(key, String(Date.now())); location.reload(); }, 800);', 'setTimeout(() => location.reload(), 800);');
+  const red = r1 !== app ? await staleReplay(r1) : '(anchors moved)';
+  check('control (RED from round 1): the stamp written 800 ms before the reload — the second reconnect burns the notice on the OLD page, before any reload', red === 'reload@1 notice@1 notice-toast@1 RELOAD@1', red);
+}
+{
+  const f = mutant('src/lib/boot-ladder.js', "  return noticed ? 'quiet' : 'notice';", "  return 'quiet';", '.mjs');
+  const reds = f ? redsOf(staleLegs(await import(pathToFileURL(f).href))) : ['(anchor moved)'];
+  check(`control: a step without the notice (the pre-fix silence) turns exactly the notice row red (${reds.length} red)`, f && reds.length === 1 && /STILL the old bundle/.test(reds[0]), reds);
 }
 console.log(failed ? `FAILED (${failed} of ${passed + failed})` : `ALL PASS (${passed})`);
 process.exit(failed ? 1 : 0);

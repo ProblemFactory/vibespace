@@ -1,10 +1,15 @@
-import { cssVarDefault, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
+import { cssVarDefault, escHtml, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { t } from './i18n.js';
+import { switcherForm, TILE_MIN_PX, STRIP_MIN_TILES } from './taskbar-fit.js'; // PURE (lane desktop-small): the switcher folds to ONE button when the desktops crowd the tiles out
+import { sheetRows } from './desktop-switch-sheet.js'; // int358 seam: the compact list's rows = the phone sheet's (PURE desktopRows over ONE input)
+import { UI_ICONS } from './icons.js'; // a compact-list row's ⋯ (lane desktop-small r2 ①)
 import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal, in words (PURE)
 import { mergeDesktopRecord, windowIds, captureForViewport, PHONE_KEEPS } from './desktop-record.js'; // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
 import { deferKeysOf } from './layout-model.js'; // B-4767: a desktop's deferred records wait in one slot per writer class (PURE)
 import { noteStamp } from './layout-model.js'; // lane layout-stale-record-sync: the newest server stamp seen per desktop — each write's `base` (PURE)
+
+const SPRING_MS = 350; // a window drag held this long on the compact switcher springs its list open (lane desktop-small r2 ①)
 
 /** A window this page tried to build (a desktop's first visit, the boot restore) and that is still absent this long
  *  after is one it cannot build: the record drops it, and says so to the server's belt ('unbuilt'). Before that it is
@@ -794,9 +799,14 @@ export class DesktopManager {
         w.gridBounds ? [w.gridBounds.left, w.gridBounds.top, w.gridBounds.width, w.gridBounds.height] : w.element?.style.left]),
       // the held records draw the windows a desktop holds that the page has not built (userW inc-mun7qjmw-iksh)
       [...this._savedStates].map(([k, st]) => [k, (st?.windows || []).map((w) => [w.winId || w.id, w.isMinimized ? 1 : 0, w.gridBounds ? [w.gridBounds.left, w.gridBounds.top, w.gridBounds.width, w.gridBounds.height] : 0])])]);
-    if (digest === this._switcherDigest) return;
-    this._switcherDigest = digest;
+    // lane desktop-small (the owner: «userW有一大堆桌面，屏幕尺寸小了之后桌面就堆积在一起了»): the switcher's FORM is part of what
+    // it draws — full (a preview per desktop) or compact (ONE «Desktop k/N ▾» button) — PURE switcherForm over the bar's room
+    const form = this._switcherFormFor(container);
+    if (digest + form === this._switcherDigest) return;
+    this._switcherDigest = digest + form;
     container.innerHTML = '';
+    container.classList.toggle('desktop-previews-compact', form === 'compact');
+    if (form === 'compact') { this._renderCompactSwitcher(container); return; }
 
     // Dynamic desktop (Stage): leftmost, visually separated. Clicking enters
     // the stage view; clicking a normal desktop while staged leaves it.
@@ -945,22 +955,11 @@ export class DesktopManager {
         // one. The element owning the menu must stop the event rather than
         // rely on each container's exemption list staying in sync.
         e.stopPropagation();
-        const items = [
-          { label: 'Rename', action: () => this._startRename(desk) },
-        ];
-        if (this._desktops.length > 1) {
-          items.push({ label: 'Delete', action: () => this.deleteDesktop(desk.id), style: 'color:var(--red, #e55)' });
-        }
-        const menu = showContextMenu(e.clientX, e.clientY, items);
-        // Open in the direction there's room (2.250.0, real report: a
-        // top-docked taskbar puts the previews near the viewport TOP, where an
-        // unconditional bottom-anchor grew the menu straight off the top edge).
-        // Anchor bottom (grow up) only when the click is in the lower half.
-        if (e.clientY > window.innerHeight / 2) {
-          menu.style.top = ''; menu.style.bottom = (window.innerHeight - e.clientY + 4) + 'px';
-        } else {
-          menu.style.bottom = ''; menu.style.top = (e.clientY + 4) + 'px';
-        }
+        const items = this._deskItems(desk); // THE desktop's doors — a compact-list row offers the same (lane desktop-small r2 ①)
+        // Open in the direction there's room (2.250.0, real report: a top-docked taskbar puts the previews near the viewport
+        // TOP): upward only from the lower half — PURE menuPlace (showContextMenu's) keeps it inside the viewport (lane
+        // desktop-small P2-3: the bottom anchor had no top clamp)
+        showContextMenu(e.clientX, e.clientY, items, 'context-menu', { up: e.clientY > window.innerHeight / 2 });
       });
 
       // Drag-to-reorder desktops (2.250.0). HTML5 drag on the wrapper; the
@@ -1001,9 +1000,168 @@ export class DesktopManager {
     container.appendChild(addBtn);
   }
 
+  /** THE SWITCHER'S FORM in the taskbar (lane desktop-small — P2-2 + the owner's many desktops): 'compact' when the previews
+   *  (each desktop's, the Stage's, the «+») would take more than their share of the bar or leave the tile strip under its
+   *  floor (PURE switcherForm); 'full' elsewhere (moved into the toolbar / a row, the phone). The bar's width is watched:
+   *  a resize that changes the verdict re-draws the switcher. */
+  _switcherFormFor(container) {
+    const bar = typeof container.closest === 'function' ? container.closest('#taskbar') : null;
+    if (!bar || this.app.isMobile) return 'full';
+    if (!this._barRO && typeof ResizeObserver === 'function') {
+      this._barRO = new ResizeObserver(() => { if (this._switcherFormFor(container) !== (container.classList.contains('desktop-previews-compact') ? 'compact' : 'full')) this.refreshSwitcher(); });
+      this._barRO.observe(bar);
+    }
+    const tray = container.parentElement, gap = (el) => (el ? parseFloat(getComputedStyle(el).columnGap) || 0 : 0);
+    let others = 48; // the «+N» chip's room (taskbar.js), counted whether it shows or not — the verdict never depends on itself
+    if (tray && tray !== bar) for (const el of tray.children) if (el !== container && el.offsetWidth) others += el.offsetWidth + gap(tray);
+    const cs = getComputedStyle(bar);
+    others += (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0) + 2 * gap(bar) + 8;
+    const previewW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--desktop-preview-w')) || 48;
+    const n = this._desktops.length + (this.app.stage?.enabled ? 1 : 0);
+    return switcherForm({ n, each: previewW + 6, add: 27, bar: bar.clientWidth, others, stripMin: STRIP_MIN_TILES * TILE_MIN_PX });
+  }
+
+  /** The compact switcher: ONE button — the active desktop's place «Desktop k/N ▾» (the Stage's name while staged) — whose
+   *  list switches (every desktop with its window count, the Stage first when it is on) and adds a desktop. A window
+   *  waiting on another desktop marks the button as it marks that desktop's preview. */
+  _renderCompactSwitcher(container) {
+    const stage = this.app.stage, i = this._desktops.findIndex((d) => d.id === this._activeId), desk = this._desktops[i];
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'desktop-switch-compact'; btn.setAttribute('aria-haspopup', 'menu');
+    // the desktop on show by its NAME (r2 ①: a rename shows on the button) and its place k/N
+    const word = document.createElement('span'), pos = document.createElement('span');
+    word.className = 'dsc-btn-name'; pos.className = 'dsc-btn-pos';
+    word.textContent = stage?.isActive ? t('Stage') : (desk?.name || '');
+    if (!stage?.isActive) pos.textContent = i + 1 + '/' + this._desktops.length;
+    btn.append(word, pos);
+    btn.setAttribute('aria-label', stage?.isActive ? t('Stage') : (desk?.name || '') + ' — ' + t('Desktop {k}/{n}', { k: i + 1, n: this._desktops.length }));
+    btn.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 6l4.5 4.5L12.5 6"/></svg>');
+    btn.title = t('Switch desktop — {name}', { name: stage?.isActive ? t('Stage') : (desk?.name || '') });
+    if ([...this.app.wm.windows.values()].some((w) => w._desktopId && w._desktopId !== this._activeId && w.element?.classList.contains('window-waiting'))) btn.classList.add('desktop-switch-waiting');
+    btn.addEventListener('click', (e) => { e.stopPropagation(); this._openDesktopList(btn); });
+    btn.addEventListener('dragover', () => this.dragHover(btn)); // a taskbar tile held here springs the list open too (its rows take the drop)
+    btn.addEventListener('dragleave', () => this._springStop()); // r3 ①: off the button before SPRING_MS — nothing springs later
+    container.appendChild(btn);
+  }
+
+  /** THE COMPACT LIST'S ROWS — ONE named source: the phone sheet's (int358: its sheetRows = master's
+   *  PURE desktopRows over the page's built windows and each held record's unbuilt ones — the same rows, the same counts on
+   *  both surfaces); the Stage first when it is on, then every desktop with its window count; `desk` = the manager's own
+   *  desktop (the row's doors); `on` = the one on show. */
+  _desktopListRows() {
+    const stage = this.app.stage;
+    const rows = [];
+    if (stage?.enabled) rows.push({ kind: 'stage', name: t('Stage'), count: null, on: !!stage.isActive });
+    for (const r of sheetRows({ desktopManager: this, wm: this.app.wm })) {
+      const desk = this._desktops.find((d) => d.id === r.id);
+      if (desk) rows.push({ kind: 'desktop', id: r.id, desk, name: r.name, count: r.windows, on: !stage?.isActive && r.active });
+    }
+    return rows;
+  }
+
+  /** The compact switcher's list (above the button on a bottom taskbar — PURE menuPlace keeps it inside the viewport): a row
+   *  switches, its right-click / ⋯ opens the desktop's doors, it takes a window's drop (_rowDoors); «Add desktop» last. */
+  _openDesktopList(anchor) {
+    const stage = this.app.stage, rows = this._desktopListRows();
+    const more = `<span class="dsc-more" role="button" aria-label="${escHtml(t('More'))}" title="${escHtml(t('More'))}">${UI_ICONS.more}</span>`;
+    const html = (r) => `<span class="dsc-mark">${r.on ? '\u2713' : ''}</span><span class="dsc-name">${escHtml(r.name)}</span>${r.count == null ? '' : `<span class="dsc-count" title="${escHtml(t('{n} windows', { n: r.count }))}">${r.count}</span>`}${r.kind === 'desktop' ? more : ''}`; // labelHtml: every part escaped (a desktop's name is the person's)
+    const items = rows.map((r) => ({ labelHtml: html(r), action: r.kind === 'stage' ? () => { if (!stage.isActive) stage.enter(); } : () => { if (stage?.isActive) return stage.leave(r.id); this.switchTo(r.id); } }));
+    items.push({ separator: true });
+    items.push({ label: '+ ' + t('Add desktop'), action: () => { const id = this.createDesktop(); this.switchTo(id); } });
+    const r = anchor.getBoundingClientRect();
+    const menu = showContextMenu(r.left, r.top, items, 'context-menu', { up: r.top > window.innerHeight / 2, extraClass: 'desktop-switch-menu' }); // styled BEFORE it is measured
+    const els = menu.querySelectorAll(':scope > .context-menu-item');
+    rows.forEach((row, k) => { if (row.kind === 'desktop' && els[k]) this._rowDoors(els[k], row.desk); });
+    return menu;
+  }
+
+  /** THE DESKTOP'S DOORS (lane desktop-small r2 ①: the compact form dropped them — exactly the person with many desktops
+   *  lost Rename, Delete and the order): the preview's right-click and a compact-list row's (its right-click or its ⋯) offer
+   *  the same items with the same handlers — Rename…, Delete (never the last desktop) and, for a row, Move up / Move down (a
+   *  preview reorders by drag; the list has none). `after` runs once the act is done — never after a cancel (r3 ④). */
+  _deskItems(desk, { order = false, after = null } = {}) {
+    const done = (p) => Promise.resolve(p).then((r) => { if (r !== false) after?.(); }); // a cancelled act (Rename… dismissed) leaves everything shut (r3 ④)
+    const items = [{ label: t('Rename…'), action: () => done(this._startRename(desk)) }];
+    if (this._desktops.length > 1) items.push({ label: t('Delete'), action: () => done(this.deleteDesktop(desk.id)), style: 'color:var(--red, #e55)' });
+    const i = order ? this._desktops.findIndex((d) => d.id === desk.id) : -1, prev = i > 0 ? this._desktops[i - 1] : null, next = i >= 0 ? this._desktops[i + 1] : null;
+    if (prev || next) items.push({ separator: true });
+    if (prev) items.push({ label: t('Move up'), action: () => done(this.reorderDesktop(desk.id, prev.id)) });
+    if (next) items.push({ label: t('Move down'), action: () => done(this.reorderDesktop(next.id, desk.id)) });
+    return items;
+  }
+
+  /** A compact-list row's doors (r2 ①): its right-click and its ⋯ open the desktop's items (with the order) — the list
+   *  comes back on its new state after the act; and it is a DROP target — a title-bar drag released on it (window.js hit-tests
+   *  `.desktop-switch-row`) or a taskbar tile dropped on it moves that window there, the preview drop's road. */
+  _rowDoors(el, desk) {
+    el.classList.add('desktop-switch-row'); el.dataset.desktopId = desk.id;
+    const back = () => setTimeout(() => { const b = document.querySelector('#desktop-previews .desktop-switch-compact'); if (b) this._openDesktopList(b); }, 0);
+    const open = (x, y) => showContextMenu(x, y, this._deskItems(desk, { order: true, after: back }), 'context-menu', { up: y > window.innerHeight / 2 });
+    el.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); open(e.clientX, e.clientY); });
+    el.querySelector('.dsc-more')?.addEventListener('click', (e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); open(r.right, r.top); });
+    el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('desktop-preview-drop'); });
+    el.addEventListener('dragleave', () => el.classList.remove('desktop-preview-drop'));
+    el.addEventListener('drop', (e) => {
+      e.preventDefault(); const list = el.closest('.desktop-switch-menu');
+      const winId = e.dataTransfer.getData('text/window-id');
+      this.dragDone(); list?.remove(); // the drag is over: the list (sprung or clicked open) and its ref go (r3 ①)
+      if (winId) this.dropOnRow(winId, desk.id, desk.name); // a taskbar tile dropped here: a refusal is said
+    });
+  }
+
+  /** A WINDOW DRAGGED OVER THE COMPACT SWITCHER (r2 ①) — ONE lifecycle for BOTH roads (r3 ①: the HTML5 road never ended it):
+   *  held SPRING_MS on the button, its list springs open and its desktop rows take the drop; off the button the timer stops,
+   *  off both the button and the list the list closes; the drag over (dragDone) ends it all — timer, list, ref, listeners.
+   *  `under` = the element under the pointer: the title-bar drag hit-tests it (window.js hides its window to look), a
+   *  taskbar tile's HTML5 drag is the document's dragover target (armed while a spring is live, _springArm). */
+  dragHover(under) {
+    if (this._springList && !this._springList.isConnected) this._springList = null; // closed by its own door (a press outside, Escape)
+    const btn = under?.closest?.('.desktop-switch-compact') || null;
+    if (btn && !this._springList) {
+      this._springArm();
+      if (!this._springTimer) this._springTimer = setTimeout(() => { this._springTimer = 0; const b = document.querySelector('#desktop-previews .desktop-switch-compact'); if (b && this._springLife) this._springList = this._openDesktopList(b); }, SPRING_MS);
+      return;
+    }
+    if (!btn) this._springStop();
+    if (!btn && this._springList && !under?.closest?.('.desktop-switch-menu')) this.dragDone();
+  }
+
+  /** The HTML5 road's half of the lifecycle (r3 ①): while a spring is live the document's dragenter / dragover are its hit
+   *  test (Chrome fires only dragenter on the step into a new element — its dragover waits for the next), and the drag's end
+   *  — a drop anywhere (a row's own handler runs first), a dragend (dropped, or Esc) — is dragDone. The pointer road fires
+   *  none of these; dragDone aborts them either way. */
+  _springArm() {
+    if (this._springLife) return;
+    const life = this._springLife = new AbortController(), o = { capture: true, signal: life.signal };
+    for (const type of ['dragenter', 'dragover']) window.addEventListener(type, (e) => this.dragHover(e.target), o);
+    window.addEventListener('drop', () => setTimeout(() => this.dragDone(), 0), o);
+    window.addEventListener('dragend', () => this.dragDone(), o);
+  }
+
+  _springStop() { if (this._springTimer) { clearTimeout(this._springTimer); this._springTimer = 0; } }
+
+  dragDone() {
+    this._springStop();
+    if (this._springList) { this._springList.remove(); this._springList = null; }
+    if (this._springLife) { this._springLife.abort(); this._springLife = null; }
+  }
+
+  /** A window dropped on a compact-list ROW — both roads (window.js _dropOnDeskRow, a tile's drop). The row may be stale (r3
+   *  ③: its desktop deleted on another screen while the list was open), so the move goes only to a desktop that IS here, as
+   *  the preview drop checks; a gone one is refused BY NAME and the window stays where it is. */
+  dropOnRow(winId, deskId, name) {
+    if (!this._desktops.some((d) => d.id === deskId)) {
+      showToast(t('«{name}» is no longer there — the window stays where it is', { name: name || '' }), { type: 'warn', duration: 6000 });
+      return { ok: false, code: 'no-desktop' };
+    }
+    return this.moveWindowToDesktop(winId, deskId, { speak: true });
+  }
+
   async _startRename(desk) {
     const name = await showInputDialog({ title: 'Rename Desktop', label: 'Desktop name', value: desk.name, confirmText: 'Rename' });
-    if (name && name.trim()) this.renameDesktop(desk.id, name.trim());
+    if (!(name && name.trim())) return false; // cancelled — false: nothing comes back (r3 ④)
+    this.renameDesktop(desk.id, name.trim());
+    return true;
   }
 
   // Move dragId to sit just BEFORE targetId in the desktop order (2.250.0).

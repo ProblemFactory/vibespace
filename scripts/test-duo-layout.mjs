@@ -20,8 +20,10 @@
 //     with a mouse still takes the composer on attach
 //   ④ THE REGULAR CLASS (slice 2 — SPEC-v3 §2 / §4): the Duo's 951×585 = the list column 0–320 | the conversation
 //     321–895 (the window on show fills it) | the trailing bar 895–951 standing (this conversation's actions on top, a
-//     visible gap, Task Groups · Files · Channels · Agent browser · Background Work · ⚙ at the bottom — 44 × 44), no
-//     toolbar / taskbar / rail / attention page, the head = the name + its state word; 669×867 = list 0–320 |
+//     visible gap, For you · Task Groups · Files · Channels · Agent browser · Background Work · ⚙ at the bottom — 44 × 44), no
+//     toolbar / taskbar / rail / attention page, the head = the name + its state word; a row with an open question comes
+//     first and MARKS it («needs you · 1 · …» — lane foryou-honest, the owner's B), its tap opens the For-you window where a
+//     chip answers it; 669×867 = list 0–320 |
 //     conversation 321–669 with the bar lying over it; the Duo's own ladder 951 → 382 → 951 → 669 → 382 → 951 with two
 //     windows and a draft: (a) (c) (d) as ②, and a window's focus never closes the list column
 //   ⑤ THE TRAILING BAR'S DOORS (951×585, touch): Files opens the explorer in the conversation column (selected, the ✕
@@ -91,7 +93,7 @@ process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n'
     out({ type: 'assistant', session_id: SID, uuid: 'a-' + k, message: { id: 'm' + k, type: 'message', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'The retry waits two seconds and gives up after three tries today; I will change it to back off 1, 2, 4, 8 and 16 seconds and mark the order for a person after the fifth try. Shall I add the tests too?' }], stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 40 } } });
     out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 300, num_turns: 1, result: 'done', session_id: SID, total_cost_usd: 0.001, usage: { input_tokens: 10, output_tokens: 40 } });
   }, 200); } });
-// a '#ask' turn files a For-you question through the hub's agent route (the vibespace-ask road) — the list column answers it inline
+// a '#ask' turn files a For-you question through the hub's agent route (the vibespace-ask road) — the list column MARKS it, the For-you window answers it (lane foryou-honest — the owner's B)
 process.stdin.on('data', (d) => { if (String(d).includes('#ask') && !globalThis.__asked) { globalThis.__asked = 1; fetch(process.env.VIBESPACE_API + '/api/agent/user-todo', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.VIBESPACE_SESSION_TOKEN }, body: JSON.stringify({ add: { text: 'Which deck goes to the Q3 review? v2 has two hand-edited appendix pages, v3 was regenerated from the template.', options: ['v3 (latest)', 'v2'], kind: 'action', urgency: 'normal' } }) }).catch(() => { }); } });
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
@@ -344,16 +346,22 @@ try {
     check('④ 951×585: the list column 0–320, the conversation 321–895, the bar 895–951 standing', a.list.l === 0 && a.list.w === 320 && a.win.l === 321 && a.win.w === 574 && a.nav.l === 895 && a.nav.w === 56 && a.dir === 'column' && a.nav.h === 585, a);
     check('④ …no toolbar, no taskbar, no rail', !a.toolbar && !a.taskbar && !a.rail, a);
     const ids = a.btns.map((x) => x.id), y = Object.fromEntries(a.btns.map((x) => [x.id, x.t]));
-    const order = ['mobile-nav-artifacts', 'mobile-nav-more', 'mobile-nav-dest-tasks', 'mobile-nav-files', 'mobile-nav-dest-channels', 'mobile-nav-dest-browser', 'mobile-nav-dest-jobs', 'mobile-nav-gear'];
-    check('④ the bar: Artifacts · ⋯ on top, a visible gap, Task Groups · Files · Channels · Agent browser · Background Work · ⚙ at the bottom (no ☰, no title, no +)', order.every((k) => k in y) && order.every((k, i) => i === 0 || y[order[i - 1]] < y[k]) && !!a.gap && a.gap.h >= 8 && a.gap.t > y['mobile-nav-more'] && a.gap.t < y['mobile-nav-dest-tasks'] && !ids.includes('mobile-nav-menu') && !ids.includes('mobile-nav-new'), { ids, y, gap: a.gap });
+    const order = ['mobile-nav-artifacts', 'mobile-nav-more', 'mobile-nav-todos', 'mobile-nav-dest-tasks', 'mobile-nav-files', 'mobile-nav-dest-channels', 'mobile-nav-dest-browser', 'mobile-nav-dest-jobs', 'mobile-nav-gear'];
+    check('④ the bar: Artifacts · ⋯ on top, a visible gap, For you · Task Groups · Files · Channels · Agent browser · Background Work · ⚙ at the bottom (no ☰, no title, no +)', order.every((k) => k in y) && order.every((k, i) => i === 0 || y[order[i - 1]] < y[k]) && !!a.gap && a.gap.h >= 8 && a.gap.t > y['mobile-nav-more'] && a.gap.t < y['mobile-nav-todos'] && !ids.includes('mobile-nav-menu') && !ids.includes('mobile-nav-new'), { ids, y, gap: a.gap });
     check('④ …every button 44 × 44 inside the 56 px bar', a.btns.every((x) => x.w === 44 && x.h === 44 && x.l >= 895 && x.l + 44 <= 951), a.btns);
     check('④ the conversation\'s head = its name + its state word (never its folder)', !!a.head && a.head.shown && !!a.head.name && !/—/.test(a.head.name) && !!a.head.state, a.head);
-    const asks = await evalJs(`(() => { const cards = [...document.querySelectorAll('#all-sessions-list .col-card')]; const i = cards.findIndex((c) => c.querySelector('.col-asks .ut-opt')); const chips = [...document.querySelectorAll('.col-asks .ut-opt')].map((b) => { const r = b.getBoundingClientRect(); return { text: b.textContent.trim(), h: Math.round(r.height), right: Math.round(r.right) }; }); return { first: i, chips, text: document.querySelector('.col-asks .ut-text')?.textContent || '' }; })()`);
-    check('④ §2.3 inline answers: the conversation with an open question is the FIRST row; its question and its reply chips (44 px, inside the column) are in the row', asks.first === 0 && asks.chips.length === 2 && asks.chips.every((c) => c.h >= 44 && c.right <= 320) && /Q3 review/.test(asks.text), asks);
-    await tap('.col-asks .ut-opt:last-child');
-    const answered = await waitFor(`!document.querySelector('.col-asks .ut-opt')`, 8000);
+    // §2.3 AS BUILT (lane foryou-honest — the stress evaluation and the owner's B, 2026-10-25): the row MARKS its open question
+    // on one line, the For-you window answers it (slice 2c's inline question + chips are withdrawn)
+    const mk = await evalJs(`(() => { const cards = [...document.querySelectorAll('#all-sessions-list .col-card')]; const i = cards.findIndex((c) => { const m = c.querySelector(':scope > .ut-sess-mark'); return !!m && !m.hidden; }); const m = i >= 0 ? cards[i].querySelector(':scope > .ut-sess-mark') : null; const r = m ? m.getBoundingClientRect() : null; return { first: i, text: m ? m.innerText.replace(/\\s+/g, ' ').trim() : '', h: r ? Math.round(r.height) : 0, right: r ? Math.round(r.right) : 0, chips: document.querySelectorAll('#sidebar .ut-opt, #sidebar .ut-item, #sidebar .col-asks').length }; })()`);
+    check('④ §2.3 as built: the conversation with an open question is the FIRST row; it MARKS it on one line «needs you · 1 · <the question>» (44 px, inside the column) — no question, no chips in the list (the owner\'s B)', mk.first === 0 && /^needs you · 1 · Which deck goes to the Q3 review\?/.test(mk.text) && mk.h >= 44 && mk.right <= 320 && mk.chips === 0, mk);
+    await tap('#all-sessions-list .col-card > .ut-sess-mark:not([hidden])');
+    const inPane = await waitFor(`(app.wm.windows.get(app.wm.activeWindowId) || {}).type === 'inbox' && document.querySelectorAll('.iw-item .iw-opt').length === 2`, 8000);
+    check('④ …its tap opens the For-you window in the conversation column on that question, its options as chips', inPane, await evalJs(`({ type: (app.wm.windows.get(app.wm.activeWindowId) || {}).type, opts: [...document.querySelectorAll('.iw-item .iw-opt')].map((b) => b.textContent) })`));
+    await tap('.iw-item .iw-opts > .iw-opt:last-child');
+    const answered = await waitFor(`!document.querySelector('#all-sessions-list .ut-sess-mark:not([hidden])')`, 8000);
+    await tap('#mobile-nav-viewer-close');
     const conv = await evalJs(`(app.wm.windows.get(app.wm.activeWindowId) || {}).type || null`);
-    check('④ …a chip answers it where it appears (the question leaves the row; the press never re-selects through the row)', answered && conv === 'chat', { answered, conv });
+    check('④ …a chip answers it there (the row\'s marker leaves); the bar\'s ✕ brings the conversation back', answered && conv === 'chat', { answered, conv });
     const paths = await evalJs(`[...document.querySelectorAll('.col-card .col-card-path')].map((p) => { const t = p.querySelector('.wb-card-path-text'); const cs = t && getComputedStyle(t); const r = p.getBoundingClientRect(), L = document.getElementById('sidebar').getBoundingClientRect(); return { text: !!t, ellipsis: cs?.textOverflow === 'ellipsis', rtl: cs?.direction === 'rtl', inside: r.right <= L.right + 0.5 }; })`);
     check('④ each row\'s folder line keeps its TAIL (the head ellipsizes, rtl) inside the column — the real Duo\'s slice-2 shots cut «…/cwd/contra» with no ellipsis', paths.length >= 2 && paths.every((p) => p.text && p.ellipsis && p.rtl && p.inside), paths);
     await putDraft();

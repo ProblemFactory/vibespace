@@ -71,6 +71,9 @@
 //   a digest, never in a Secret, never a VIBESPACE_MAINTAINER_KEY value env) and nothing else moves; the KEY ITSELF (or
 //   any value that is not 64 lowercase hex) REFUSES the render, named. CONTROL: a chart without that refusal renders a
 //   key value into the pod's env (RED).
+// P THE FLEET'S CUSTOM BROWSER KERNEL (lane engine-plugin, design-custom-browser-plugin §1.4): customBrowser.enabled ⇒ the
+//   override Secret's `fleet` gains ONE key `browserEngine` {plugin, default, source, kernel} (the app's own reader round-trips it
+//   into the default policy); off ⇒ byte-identical; the Deployment never changes; presets.volume=false ⇒ nothing.
 // CONTROLS (chart copies in scratch): the relay env back in the template, the fleet items rendered only when a relay is
 //   set (a pod roll per relay change), the old key not aliased — each turns its L assert red; a subPath mount, a source without
 //   optional, an env rendered beside the volume — each turns its assert red;
@@ -428,6 +431,35 @@ const relayVerdict = (out, want, def) => {
   const u = upgrade([CHART, { ...C, presets: { relayUrl: RELAY } }], [CHART, C]);
   ok(u.before.join() === 'fleet' && u.after.length === 0, `a relay dropped from the values LEAVES the override Secret and override/ on the same upgrade (data:-rendered; before ${u.before.join()} · after ${u.after.join() || 'none'})`);
   ok(upgrade([CHART, { ...C, oauthRelayUrl: RELAY }], [CHART, { ...C, presets: { relayUrl: RELAY } }]).after.join() === 'fleet', 'moving the old key to presets.relayUrl keeps override/fleet.json projected across the upgrade');
+}
+
+console.log('P the fleet\'s custom browser kernel (customBrowser.* → override/fleet.json `browserEngine` — lane engine-plugin, never an env)');
+{
+  const PL = (await import(path.join(REPO, 'src/preset-layers.js'))).default; // CJS through import (this suite is ESM with top-level await)
+  const ENGN = (await import(path.join(REPO, 'src/browser-engines.js'))).default;
+  const SHA = 'ab'.repeat(32);
+  const PIN = '7085e75f53efa707fb26c7b297d6789d6c9df0b0'; // lane engine-distribution: the kernel side's v0.1.2 — a FULL sha (D2's anchor)
+  const CB = { enabled: true, default: true, preinstall: true, source: { git: 'git@git.example.test:fleet/kernel-plugin.git', ref: PIN }, kernel: { url: 'https://dl.example.test/kernel-linux-x64.tar.zst', sha256: SHA } };
+  const def = render(CHART, C), off = render(CHART, { ...C, customBrowser: { ...CB, enabled: false } }), on = render(CHART, { ...C, customBrowser: CB });
+  const fOn = fleetOf(on);
+  ok(fleetOf(def) === undefined && fleetOf(off) === undefined && off === def, 'customBrowser off (the default, or enabled:false with every other field set) renders NOTHING — byte-identical to the chart without it');
+  ok(fOn && JSON.stringify(Object.keys(fOn)) === '["browserEngine"]' && fOn.browserEngine.plugin === 'vibespace.custom-browser' && fOn.browserEngine.default === true && fOn.browserEngine.source.git === CB.source.git && fOn.browserEngine.source.ref === PIN && fOn.browserEngine.preinstall === true && fOn.browserEngine.kernel.url === CB.kernel.url && fOn.browserEngine.kernel.sha256 === SHA,
+    'enabled ⇒ the override Secret\'s fleet = {browserEngine: {plugin, default, preinstall, source (a full sha pinned), kernel}} — ONE key beside the relay page', JSON.stringify(fOn));
+  const noPre = fleetOf(render(CHART, { ...C, customBrowser: { ...CB, preinstall: false } }));
+  ok(noPre && noPre.browserEngine.preinstall === false && PL.parseFleet(noPre).browserEngine.preinstall === false && PL.parseFleet(fOn).browserEngine.preinstall === true, 'lane engine-distribution: customBrowser.preinstall renders as fleet.json browserEngine.preinstall (true ⇒ the boot job downloads the kernel right away; false ⇒ at its first use) — the app\'s reader takes it');
+  ok(depOf(on) === depOf(def) && !envNames(depOf(on)).some((e) => /BROWSER|ENGINE|KERNEL/.test(e)) && !secretNamed(on, 'vibespace-alice').stringData.fleet, 'no env, no release-Secret key: the Deployment BYTE-IDENTICAL to the render without it (a flip never rolls the pod — the server re-reads fleet.json live)');
+  const both = fleetOf(render(CHART, { ...C, presets: { relayUrl: RELAY }, customBrowser: { enabled: true } }));
+  const relayOnly = dataOf(render(CHART, { ...C, presets: { relayUrl: RELAY } }), REL_OV).fleet;
+  ok(both && both.relayUrl === RELAY && both.browserEngine && both.browserEngine.default === false && relayOnly === JSON.stringify({ relayUrl: RELAY }), 'beside a relay page: both keys (default:false = the kernel is offered, not the default); a relay alone renders the SAME bytes as before this lane', JSON.stringify({ both, relayOnly }));
+  const parsed = PL.parseFleet(fOn);
+  const pol = ENGN.defaultEngineOf({ fleet: parsed.browserEngine }), polOwn = ENGN.defaultEngineOf({ own: 'default', fleet: parsed.browserEngine });
+  const canon = (v) => (v && typeof v === 'object' ? `{${Object.keys(v).sort().map((k) => JSON.stringify(k) + ':' + canon(v[k])).join(',')}}` : JSON.stringify(v)); // helm's toJson sorts keys
+  ok(canon(parsed.browserEngine) === canon(fOn.browserEngine) && pol.value === 'plugin:vibespace.custom-browser' && pol.source === 'fleet' && polOwn.source === 'user', 'the rendered key round-trips through the app\'s own reader (preset-layers parseFleet) into THE policy: the kernel the default, «set by the cluster preset» — a user\'s own value still wins');
+  ok(render(CHART, { ...C, customBrowser: CB }, ['--set', 'presets.volume=false']) === render(CHART, C, ['--set', 'presets.volume=false']), 'presets.volume=false: customBrowser renders nothing (no fleet.json reaches the pod — the relay page\'s rule)');
+  const vals = fs.readFileSync(path.join(CHART, 'values.yaml'), 'utf-8');
+  ok(/^customBrowser:\n  enabled: false\n  default: false\n  preinstall: false\n  source:\n    git: ""\n    ref: ""\n  kernel:\n    url: ""\n    sha256: ""$/m.test(vals) && /FULL\s+(?:#\s+)?commit sha/.test(vals) && /plugin-git/.test(vals), 'values.yaml documents the block, off by default — preinstall, the ref as a FULL commit sha (D2), the plugin-git credential row');
+  const always = chartCopy('engine-always', (x) => x.replace('{{- if $cb.enabled }}{{- $cbs := $cb.source', '{{- if true }}{{- $cbs := $cb.source'));
+  ok(fleetOf(render(always, C)) !== undefined, 'CONTROL: a chart that renders the engine whatever `enabled` says writes a fleet key on the default render — the off leg above is red on it');
 }
 
 console.log('N the install / upgrade NOTES (helm install --dry-run=client; a fake API answering the four discovery GETs)');

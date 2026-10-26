@@ -130,6 +130,7 @@ const RANDOM32 = new Map([
   ['src/agentd/client.js', [1, 'lane device-bundle-signing: the single-use LOCAL PROOF of an upgrade of this machine\'s own daemon (<root>/state/upgrade-proof, 0600; the daemon deletes it on any read) — a nonce, never a key']],
   ['src/server/sealed-json.js', [1, 'a sealed JSON file\'s key — minted INTO the vault as its `file:<name>` entry (secretPut), never a file (lane vault-e2e-password-fix-r2)']],
   ['src/server/feedback-forward.js', [1, 'the feedback ORIGIN KEY (fk_, lane feedback-forward): names this instance to the maintainer hub and opens only the marks on its own forwarded reports — data/feedback-outbox.json 0600, a named exception in src/vault.js SECRETS_AT_REST (never a store key); the hub keeps its sha256']],
+  ['src/webauthn-sign.js', [1, 'makeCredential: a new passkey\'s CREDENTIAL ID (lane passkey-sink) — public, handed to the site in the attestation and kept in the row; never a key (the key pair is generateKeyPairSync, sealed through the passkeys\' lawfulKey)']],
   ['src/relay-token.js', [1, 'tokenOf: an instance\'s OWN relay token (vsrt_, design q-051) — the owner\'s named exception in src/vault.js SECRETS_AT_REST (data/relay-token.json, 0600, never in the vault so a restart re-publishes without the second password); never a store key']], // lane relay-token-per-instance
 ]);
 const KEYNAME_RE = /^(\.[a-z0-9][a-z0-9._-]*[-.]key|[a-z0-9][a-z0-9._-]*\.key)$/; // a dotfile ending -key / .key, or any *.key (key-file-law-fix: dots too — '.vault.key')
@@ -146,6 +147,7 @@ const RANDOM_EXPR = new Map([
   ['src/server/vault-engine.js', [1, 'shred: random bytes the length of a key file being destroyed (overwritten before the unlink) — never a key']],
   ['src/server/rfb-signin.js', [1, 'the ARD Diffie-Hellman private exponent, the length of the machine\'s prime — ephemeral for ONE sign-in, never persisted']], // lane desktop-vnc-remember
   ['src/server/vault-run-door.js', [1, 'shredFile: random bytes the length of a run file being destroyed (the 0600 file a vibespace-vault run child read) — never a key']], // lane vault-run-door
+  ['src/secret-file.js', [1, 'shredFile: random bytes the length of a git credential file being destroyed (the 0600 token / deploy-key file a plugin clone read) — never a key']], // lane engine-distribution
 ]);
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => d.isDirectory() ? walk(path.join(dir, d.name)) : d.name.endsWith('.js') ? [path.join(dir, d.name)] : []);
 const SRC = new Map(walk(path.join(REPO, 'src')).map((f) => [path.relative(REPO, f), fs.readFileSync(f, 'utf-8')]));

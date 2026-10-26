@@ -86,6 +86,10 @@ export function openBrowser(app, url, { syncId, proxy = false } = {}) {
 
   // Detect load failures (X-Frame-Options, CSP, etc.)
   iframe.addEventListener('load', () => {
+    // THE ESC PROTOCOL THROUGH THE PAGE (lane desktop-small P3-1 — with this page holding the keyboard, Escape went to the page
+    // and a menu of ours stayed open over it): a same-origin page's Escape closes every [data-popover] float, as the app's own
+    // keydown does; the listener goes with the window (its controller) or the next navigation (a new window object)
+    try { iframe.contentWindow.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !e.isComposing) document.querySelectorAll('[data-popover]').forEach((p) => p.remove()); }, { signal: winInfo._listenerCtl?.signal }); } catch { /* a cross-origin page: nothing of it is ours (it is hidden below) */ }
     try { iframe.contentWindow.document; } catch {
       // Cross-origin blocked — show error
       errorMsg.innerHTML = `<p>This site blocked iframe embedding (X-Frame-Options).</p><p style="margin-top:8px"><a href="${escHtml(urlInput.value)}" target="_blank" style="color:var(--accent)">Open in new tab \u2197</a></p><p style="margin-top:12px;font-size:11px;opacity:0.6">Tip: Same-origin pages (noVNC, local services) work fine in this browser.</p>`;

@@ -109,7 +109,7 @@ console.log('\n§2 tier hygiene');
   ok(exceptions.join() === 'test-chat-e2e', `there is ONE exception, the owner's real turn (${exceptions.join(', ') || 'none'})`);
   const measured = fast.map((s) => fastRuleFindings(s, '').measuredMs || 0);
   const budget = measured.reduce((a, b) => a + b, 0);
-  ok(FAST_SUM_CAP_MS === 904 * 1000, `the fast tier's sum cap is 904 s (2026-10-20, lane fast-tier-ratchet: the honest restated sum 883.7 s + 20 s — UP to the truth from 640 s, DOWN by the speed-ups; 600 s by policy until 2.369.316, 480 s until 2.369.263) — moving it is a deliberate edit here (${FAST_SUM_CAP_MS / 1000} s)`);
+  ok(FAST_SUM_CAP_MS === 910 * 1000, `the fast tier's sum cap is 910 s (2026-10-25, lane engine-distribution: +6 s for P4's measured legs — the restated sum 907 s; 904 s since 2026-10-20, lane fast-tier-ratchet: the honest restated sum 883.7 s + 20 s — UP to the truth from 640 s, DOWN by the speed-ups; 600 s by policy until 2.369.316, 480 s until 2.369.263) — moving it is a deliberate edit here (${FAST_SUM_CAP_MS / 1000} s)`);
   ok(budget < FAST_SUM_CAP_MS, `the fast tier's measured sum stays under ${FAST_SUM_CAP_MS / 1000} s (${Math.round(budget / 1000)} s over ${fast.length} suites — the rule's point, re-measured)`);
   // The census must be able to go red — every disqualifier through its own
   // shape, the non-shapes that must NOT trip it, and every why rule.

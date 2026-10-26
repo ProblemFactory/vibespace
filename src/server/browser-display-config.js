@@ -14,6 +14,10 @@
  *        re-written only when its content changes. Measured on 0.38.1: a call whose view (headed, args) differs from
  *        the launch RELAUNCHES the browser — so every call of the record re-derives the SAME file from the SAME fact
  *        until the next launch probes again. The user's own config file is never written.
+ *   engineFileFor(file, view)                   — lane engine-plugin: a conversation's browser launched on a browser ENGINE
+ *        names, at every call, the file it names anyway + the engine's program (`executablePath`) and arguments (appended to
+ *        `args`) — the same derived-file rule (written once, re-written only when its content changes), so the agent's own
+ *        commands carry the launch's view and never relaunch it on Chrome (the measured relaunch rule).
  *
  * Never throws: a base file that cannot be read, or a dir that cannot be written, leaves the call on its base file
  * (said once in the journal — the launch then fails as it did before this lane, never worse).
@@ -66,9 +70,14 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
     const cfg = D.applyPlan(base, plan);
     const tag = crypto.createHash('sha1').update(String(baseFile)).digest('hex').slice(0, 10);
     const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-${tag}.json`);
+    return derived(file, cfg, baseFile, 'the display plan\'s config');
+  }
+  /** THE DERIVED FILE's rule (the display plan's and — lane engine-plugin — the engine view's): written once, re-written only
+   *  when its content changes; the memo names the file only while it is still ours (a regular file of this uid with exactly
+   *  this content — lstat: a symlink swapped in is not followed) — the keeper's machine-file rule (takeover r4). A file that
+   *  cannot be written leaves the call on `fallback` (said once). */
+  function derived(file, cfg, fallback, what) {
     const text = JSON.stringify(cfg, null, 2);
-    // the memo names the file only while it is still ours (a regular file of this uid with exactly this content —
-    // lstat: a symlink swapped in is not followed) — the keeper's machine-file rule (takeover r4)
     const own = () => { try { const st = fs.lstatSync(file); return st.isFile() && !st.isSymbolicLink() && (typeof process.getuid !== 'function' || st.uid === process.getuid()) && fs.readFileSync(file, 'utf8') === text; } catch { return false; } };
     if (memo.get(file) === text && own()) return file;
     try {
@@ -79,11 +88,24 @@ function create({ dir, writeJson, log = console, env = () => ({}), probe = null,
       memo.set(file, text);
       return file;
     } catch (e) {
-      say(`write:${file}`, `the display plan's config could not be written at ${file} (${e && e.message}) — the browser's calls keep ${baseFile}`);
-      return baseFile;
+      say(`write:${file}`, `${what} could not be written at ${file} (${e && e.message}) — the browser's calls keep ${fallback}`);
+      return fallback;
     }
   }
-  return { factFor, fileFor, probe: probeNow, dir };
+  /** lane engine-plugin: the file a call of a browser launched on an ENGINE names — `baseFile`'s content + the engine's
+   *  `{executablePath, args}` (sync, like fileFor). No view ⇒ the base file itself. */
+  function engineFileFor(baseFile, view) {
+    if (!baseFile || !view || typeof view.executablePath !== 'string' || !view.executablePath.startsWith('/')) return baseFile;
+    const base = readCfg(baseFile);
+    if (!base) { say(`eread:${baseFile}`, `the engine view could not read ${baseFile} — its calls keep that file`); return baseFile; }
+    const extra = Array.isArray(view.args) ? view.args.map(String) : [];
+    const had = Array.isArray(base.args) ? base.args.map(String) : typeof base.args === 'string' && base.args.trim() ? base.args.split(/[,\n]/).map((x) => x.trim()).filter(Boolean) : [];
+    const cfg = { ...base, executablePath: view.executablePath, ...(extra.length ? { args: [...had, ...extra] } : {}) };
+    const tag = crypto.createHash('sha1').update(String(baseFile) + '\u0000' + view.executablePath + '\u0000' + extra.join('\u0000')).digest('hex').slice(0, 10);
+    const file = path.join(dir, `${path.basename(baseFile).replace(/\.json$/, '')}-engine-${tag}.json`);
+    return derived(file, cfg, baseFile, 'the engine view\'s config');
+  }
+  return { factFor, fileFor, engineFileFor, probe: probeNow, dir };
 }
 
 module.exports = { create };

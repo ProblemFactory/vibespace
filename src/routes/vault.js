@@ -125,7 +125,7 @@ function slowLineOf(req, ms) {
 }
 
 function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null, paste = null,
-  totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }), log = (line) => console.log(line), slowMs = VAULT_SLOW_MS }) {
+  totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }), logins = null, log = (line) => console.log(line), slowMs = VAULT_SLOW_MS }) {
   app.use(['/api/vault', '/api/agent/vault'], (req, res, next) => {
     const t0 = process.hrtime.bigint();
     res.once('finish', () => { const ms = Number(process.hrtime.bigint() - t0) / 1e6; if (ms > slowMs) { try { log(slowLineOf(req, ms)); } catch { /* the answer went out */ } } });
@@ -165,8 +165,8 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   };
   const person = (fn) => async (req, res) => {
     const v = personVerdict(req);
-    if (!v.ok) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value'); refusedBearer(req, v.code); return answer(res, v); }   // lane vault-paste-request: a pasted `value` too
-    try { answer(res, await fn(req)); } catch (e) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value'); res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing changed' }); }
+    if (!v.ok) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword'); refusedBearer(req, v.code); return answer(res, v); }   // lane vault-paste-request: a pasted `value` too — lane browser-login: a typed `loginPassword`
+    try { answer(res, await fn(req)); } catch (e) { take(req, 'password', 'old', 'new', 'seed', 'uri', 'value', 'loginPassword'); res.status(500).json({ ok: false, code: 'error', error: 'the vault door failed — nothing changed' }); }
   };
   /** An AGENT (vsst_ session / jbt_ job token) — it may read the state and lock, nothing else. */
   const agentOk = (req) => {
@@ -226,6 +226,25 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
       const r = totp.use({ conversationId: caller.conversationId, groups: caller.groups, live: caller.live, run: runOfToken(token) }, req.params.name, { ip: ipOf(req) });
       return r.ok ? res.json({ ok: true, name: r.name, code: r.code, secondsLeft: r.secondsLeft, period: r.period }) : answer(res, r);
     });
+  }
+  // ── WEB LOGINS (lane browser-login — src/server/browser-logins.js over PURE src/browser-login.js). PEOPLE only: the list (names,
+  //    provenance, the grants that reach each — never a password), 添加 (the owner's own login: origin, user name, the password
+  //    taken off the body, an optional paired two-step entry), 删除 (its own grant row with it), 用于… (grant / take back: this
+  //    account, any account on this site, any site). The password itself shows only through /api/vault/reveal. An agent has NO
+  //    door here: its own is `vibespace-browser login` (the kernel fills; it never sees a value). Never cached by a proxy. ──
+  if (logins) {
+    const whoL = (req) => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } };
+    const noStoreL = (fn) => (req, res) => { res.set('Cache-Control', 'no-store'); return fn(req, res); };
+    const bodyL = (req) => (req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {});
+    app.get('/api/vault/web-logins', noStoreL(person(() => ({ ...logins.list(), subjects: subjects() }))));
+    app.post('/api/vault/web-logins', noStoreL(person((req) => {
+      const [pw] = take(req, 'loginPassword');
+      const b = bodyL(req);
+      return logins.addOwn({ origin: b.origin, username: b.username, password: typeof pw === 'string' ? pw : '', totpName: b.totpName || null }, { who: whoL(req) });
+    })));
+    app.delete('/api/vault/web-logins/:name', noStoreL(person((req) => logins.drop(String(req.params.name || ''), { who: whoL(req) }))));
+    app.post('/api/vault/web-logins/grants', noStoreL(person((req) => { const b = bodyL(req); return logins.grant(String(b.name || ''), String(b.scope || ''), String(b.subject || ''), { by: `user:${whoL(req).slice(0, 24)}` }); })));
+    app.post('/api/vault/web-logins/ungrant', noStoreL(person((req) => { const b = bodyL(req); return logins.ungrant(String(b.resource || ''), String(b.principal || ''), { by: `user:${whoL(req).slice(0, 24)}` }); })));
   }
   // ── agents: the state and the lock — never unlock ──
   app.get('/api/agent/vault/state', (req, res) => (agentOk(req) ? res.json(agentFacts()) : answer(res, { ok: false, code: 'unauthorized' })));

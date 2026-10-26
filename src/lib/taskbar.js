@@ -1,5 +1,7 @@
 import { startFileDownload } from './file-download.js';
 import { createPopover, showContextMenu, showToast, uiScale } from './utils.js';
+import { stripHidden, wheelScroll } from './taskbar-fit.js'; // PURE (lane desktop-small P2-2): the tiles the strip cuts, the wheel's sideways scroll
+import { menuPlace } from './menu-place.js'; // PURE: THE ONE placement — the «+N» list beside its chip (lane desktop-small r2 ②)
 import { groupClickVerdict, hoverVerdict, hoverStep, groupKeyVerdict, inFrontOf, GROUP_HOVER_INTENT_MS, GROUP_HOVER_LEAVE_MS } from './taskbar-group.js';
 import { t } from './i18n.js';
 import { terminalOnly } from './agent-meta.js'; // the harness table's own word for a plain shell (§78: no id branch here)
@@ -173,6 +175,95 @@ export function updateTaskbar(app) {
   const chip = document.getElementById('taskbar-status');
   chip.title = `${winCount} window${winCount === 1 ? '' : 's'} — click for window list`;
   chip.onclick = (e) => { e.stopPropagation(); showWindowList(app, chip); };
+  fitTaskbarStrip(app);
+}
+
+// ── THE STRIP AT A SMALL SCREEN (lane desktop-small — P2-2 of the small-viewport walk: past ~8 windows the tiles ran on
+//    under the tray, no scrollbar, no «+N», the wheel inert). The tiles keep a readable floor (style.css .taskbar-item
+//    min-width = PURE TILE_MIN_PX); the tiles the strip cuts are counted on ONE «+N» chip right after it, which lists them;
+//    a vertical wheel over the strip scrolls it sideways. Re-fitted at every taskbar update, scroll and strip resize. ──
+let _fitRaf = 0;
+function _stripTiles(strip) {
+  const sr = strip.getBoundingClientRect();
+  return { sr, tiles: [...strip.children].filter((el) => el.classList.contains('taskbar-item')).map((el) => { const r = el.getBoundingClientRect(); return { id: el.dataset.winId, left: r.left - sr.left, width: r.width, el }; }) };
+}
+export function fitTaskbarStrip(app) {
+  const strip = document.getElementById('taskbar-items');
+  if (!strip) return;
+  let chip = document.getElementById('taskbar-overflow');
+  if (!chip) {
+    chip = document.createElement('button');
+    chip.id = 'taskbar-overflow'; chip.type = 'button'; chip.className = 'taskbar-overflow'; chip.hidden = true;
+    chip.addEventListener('click', (e) => { e.stopPropagation(); showHiddenTiles(app, chip); });
+    strip.after(chip);
+  }
+  if (!strip._fitWired) {
+    strip._fitWired = true;
+    // a vertical wheel scrolls the strip sideways (PURE wheelScroll) — it has no height to scroll
+    strip.addEventListener('wheel', (e) => {
+      const v = wheelScroll({ scrollLeft: strip.scrollLeft, max: strip.scrollWidth - strip.clientWidth, deltaX: e.deltaX, deltaY: e.deltaY, deltaMode: e.deltaMode, width: strip.clientWidth });
+      if (v.used) { strip.scrollLeft = v.left; e.preventDefault(); }
+    }, { passive: false });
+    const again = () => { if (_fitRaf) return; _fitRaf = requestAnimationFrame(() => { _fitRaf = 0; fitTaskbarStrip(app); }); };
+    strip.addEventListener('scroll', again, { passive: true });
+    if (typeof ResizeObserver === 'function') new ResizeObserver(again).observe(strip);
+  }
+  const { sr, tiles } = _stripTiles(strip);
+  const { hidden } = stripHidden({ tiles, width: sr.width });
+  chip.hidden = hidden.length === 0;
+  chip.textContent = '+' + hidden.length;
+  chip.title = t('{n} more windows — click for the list', { n: hidden.length });
+  chip.setAttribute('aria-label', chip.title);
+}
+
+/** The «+N» chip's list: the windows whose tiles the strip cuts — a row raises its window (the tile's own activation) and
+ *  scrolls its tile into the strip. */
+function showHiddenTiles(app, chip) {
+  const strip = document.getElementById('taskbar-items');
+  if (!strip) return;
+  const { sr, tiles } = _stripTiles(strip);
+  const ids = new Set(stripHidden({ tiles, width: sr.width }).hidden);
+  const pop = createPopover(chip, 'overlap-switcher taskbar-overflow-list');
+  if (pop._closedByAnchor) return; // the chip pressed while its list was open: closed
+  for (const tl of tiles) {
+    if (!ids.has(tl.id)) continue;
+    const win = app.wm.windows.get(tl.id);
+    if (!win) continue;
+    const item = document.createElement('div');
+    item.className = 'overlap-switcher-item' + (tl.id === app.wm.activeWindowId && !win.isMinimized ? ' active' : '');
+    item.dataset.winId = tl.id;
+    const icon = document.createElement('span');
+    icon.innerHTML = win._typeIcon || '';
+    icon.style.cssText = 'font-size:11px;flex-shrink:0;display:inline-flex;align-items:center';
+    const label = document.createElement('span');
+    label.textContent = (win.isMinimized ? '\u229E ' : '') + win.title;
+    item.append(icon, label);
+    item.onclick = () => {
+      pop.remove();
+      activateWindow(app, tl.id);
+      // then its tile into the strip — looked up afresh (the activation may have re-drawn the strip), the nearest edge
+      requestAnimationFrame(() => {
+        const el = [...strip.children].find((c) => c.dataset && c.dataset.winId === tl.id);
+        if (!el) return;
+        const r = el.getBoundingClientRect(), sr = strip.getBoundingClientRect();
+        if (r.left < sr.left) strip.scrollLeft -= sr.left - r.left + 4;
+        else if (r.right > sr.right) strip.scrollLeft += r.right - sr.right + 4;
+      });
+    };
+    pop.appendChild(item);
+  }
+  // THE ONE placement (PURE menuPlace — r2 ②: this list was self-placed with no cap, so 26 windows at 951×585 left its tail
+  // unreachable): in the room on the chip's open side — above it on a bottom taskbar, below on a top one, never over it —
+  // a list taller than that room capped there and scrolling (createPopover's own clamp follows)
+  requestAnimationFrame(() => {
+    if (!pop.isConnected) return;
+    const Z = uiScale(), r = chip.getBoundingClientRect(), pr = pop.getBoundingClientRect(), up = r.top > window.innerHeight / 2;
+    const room = up ? r.top - 2 : window.innerHeight - r.bottom - 2;
+    const at = menuPlace({ x: r.right - pr.width, y: up ? room : 0, w: pr.width, h: pr.height, vw: window.innerWidth, vh: room, up });
+    if (at.maxH != null) { pop.style.maxHeight = (at.maxH / Z) + 'px'; pop.style.overflowY = 'auto'; }
+    pop.style.left = (at.left / Z) + 'px';
+    pop.style.top = ((up ? at.top : r.bottom + 2 + at.top) / Z) + 'px';
+  });
 }
 
 function _rebuildTaskbarItems(app, container, entries) {
@@ -215,8 +306,10 @@ function _rebuildTaskbarItems(app, container, entries) {
       e.dataTransfer.setData('text/window-id', id);
       e.dataTransfer.effectAllowed = 'move';
     });
+    item.addEventListener('dragend', () => app.desktopManager?.dragDone?.()); // its drag over — a sprung desktop list closes (lane desktop-small r3 ①)
     item.addEventListener('click', () => {
-      if (!win.isMinimized && id === app.wm.activeWindowId) { app.wm.witnessGeometry?.(id); app.wm.minimize(id); } // the user's act: witnessed (verify r4 ③)
+      // the focused window's tile minimizes it — unless its title bar is out of reach: then the click brings it back (lane desktop-small P2-1)
+      if (!win.isMinimized && id === app.wm.activeWindowId && app.wm.isReachable?.(id) !== false) { app.wm.witnessGeometry?.(id); app.wm.minimize(id); } // the user's act: witnessed (verify r4 ③)
       else activateWindow(app, id); // restore a minimized one, else focus + raise (the grouped button's activation too)
     });
     // Right-click context menu for window recovery
@@ -351,12 +444,9 @@ export function showWindowContextMenu(app, id, x, y, { closeLabel = null, onActi
     return out;
   };
   const menuItems = contribMenuItems('window', ctx).map((it) => wrapAct(it));
-  const menu = showContextMenu(x, y, menuItems, 'taskbar-context-menu');
-  if (y > window.innerHeight / 2) {
-    menu.style.top = '';
-    menu.style.bottom = (window.innerHeight - y + 4) + 'px';
-  }
-  return menu;
+  // opened in the lower half (a title bar near the taskbar, a tile): upward when there is room — PURE menuPlace keeps it
+  // inside the viewport either way (lane desktop-small P2-3: a bottom-anchored menu used to run off the top, Move first)
+  return showContextMenu(x, y, menuItems, 'taskbar-context-menu', { up: y > window.innerHeight / 2 });
 }
 
 // Group-aware item state: a tab-group item is active/waiting if ANY of its tabs
@@ -573,6 +663,7 @@ function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
     e.dataTransfer.setData('text/window-id', hostId);
     e.dataTransfer.effectAllowed = 'move';
   });
+  item.addEventListener('dragend', () => app.desktopManager?.dragDone?.()); // its drag over — a sprung desktop list closes (lane desktop-small r3 ①)
   const act = (verdict, { keyboard = false } = {}) => {
     const chain = liveChain();
     if (!chain) return;

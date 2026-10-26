@@ -80,6 +80,15 @@ const AGENT_PROV = Object.freeze({
   stored: { label: 'Agent stored · the agent saw the plaintext', sawPlaintext: true },
 });
 const AGENT_ENTRY_RE = /^agent:(.+)\/([^/]+)$/;
+/** lane browser-login (P3 of the custom browser kernel): a website's login `web-login:<origin>#<user>` (src/browser-login.js
+ *  NAME_RE is the strict shape; this reads its two halves) — its row names the user and the site; its provenance word rides the
+ *  engine's `kind` (the source: the owner's own, registered by an agent through the vault, typed by an agent itself). */
+const WEB_LOGIN_RE = /^web-login:(https?:\/\/[^#\s]{1,270})#([^\s#\u0000-\u001f\u007f]{1,160})$/;
+const LOGIN_SOURCES = Object.freeze({
+  owner: { origin: null, label: '' },
+  'vault-minted': { origin: 'mint', label: i18nKey('Registered by an agent · its password made by the vault, never shown'), sawPlaintext: false },
+  'agent-typed': { origin: 'put', label: i18nKey('Typed by an agent itself · strength unknown — the agent knows it'), sawPlaintext: true },
+});
 const FREE_ENTRY_RE = /^secret:[\w.-]{1,160}$/;   // lane vault-paste-request (src/vault-paste.js — the hub's ids are 10 hex characters)
 const FREE_KINDS = Object.freeze(['api-key', 'password', 'secret']);
 function secretRowOf(s, { machineName = (k) => k } = {}) {
@@ -88,6 +97,8 @@ function secretRowOf(s, { machineName = (k) => k } = {}) {
   for (const r of SECRET_ROWS) { const m = r.re.exec(name); if (m) return { entry: name, field: r.field, kind: r.kind, label: r.label(m[1], nameOf), detail: r.detail, createdAt: at }; }
   // lane vault-paste-request: a FREE entry (`secret:<id>` — pasted by the owner in For you at an agent's request, or added
   // in the Vault window's 「其他密钥或密码…」): its row says the label, the kind and the note a person wrote (never a value)
+  const wl = WEB_LOGIN_RE.exec(name);
+  if (wl) { const src = Object.prototype.hasOwnProperty.call(LOGIN_SOURCES, s && s.kind) ? s.kind : 'owner'; const p = LOGIN_SOURCES[src]; return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail: p.label, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null } } : {}) }; }   // lane browser-login
   if (FREE_ENTRY_RE.test(name)) return { entry: name, field: 'secret', kind: FREE_KINDS.includes(s && s.kind) ? s.kind : 'secret', label: String((s && s.label) || name.slice(7)), detail: String((s && s.note) || ''), createdAt: at };
   const am = AGENT_ENTRY_RE.exec(name);
   if (am) {
@@ -143,7 +154,7 @@ function plainBytesOf(blob) {
 }
 
 // ── THE REFERENCE: `<store>:<entry>#<field>` ──
-const ENTRY_RE = /^[^#\s\u0000-\u001f]{1,240}$/;
+const ENTRY_RE = /^(?:web-login:[^\s\u0000-\u001f]{1,440}|[^#\s\u0000-\u001f]{1,240})$/;   // lane browser-login: a web login's name holds its own `#` (parseRef splits at the LAST one)
 const FIELD_RE = /^[\w.:-]{1,160}$/;
 function refOf(store, entry, field) {
   const e = String(entry == null ? '' : entry), f = String(field == null ? '' : field);
@@ -152,7 +163,7 @@ function refOf(store, entry, field) {
 /** → { store, entry, field } | null (anything else is refused before a store is asked). */
 function parseRef(id) {
   const s = typeof id === 'string' ? id : '';
-  if (s.length > 420) return null;
+  if (s.length > 480) return null;
   const c = s.indexOf(':'), h = s.lastIndexOf('#');
   if (c < 1 || h <= c + 1) return null;
   const store = s.slice(0, c), entry = s.slice(c + 1, h), field = s.slice(h + 1);
@@ -175,6 +186,7 @@ function doorsOf({ store, entry, field }) {
   // person's GET, no 「验证是你」, audited); no 换新 (a site that changed the seed = delete + add — design §4 #9)
   // lane vault-paste-request: a free entry — its own delete door (the run door's switch and grants on it go with it)
   if (store === 'secrets' && FREE_ENTRY_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/secrets/${enc(e.slice(7))}`, confirm: 'secret' }, rotate: null };
+  if (store === 'secrets' && WEB_LOGIN_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/web-logins/${enc(e)}`, confirm: 'web-login' }, rotate: null, login: { name: e } };   // lane browser-login: its own delete door (its grant row goes with it) + 用于…
   if (store === 'secrets' && /^totp:[\w.-]{1,120}$/.test(e)) { const p = `/api/vault/totp/${enc(e.slice(5))}`; return { delete: { method: 'DELETE', path: p, confirm: 'totp' }, rotate: null, code: { path: p } }; }
   return { delete: null, rotate: null };
 }
@@ -261,6 +273,7 @@ const PURPOSES = Object.freeze([
   Object.freeze({ id: 'storage', label: i18nKey('Storage') }),                  // mounts
   Object.freeze({ id: 'app-logins', label: i18nKey('App logins') }),            // app-secrets
   Object.freeze({ id: 'passkeys', label: i18nKey('Passkeys') }),                // passkeys
+  Object.freeze({ id: 'web-logins', label: i18nKey('Web logins') }),            // secrets `web-login:` (lane browser-login: a website's login the custom kernel fills)
   Object.freeze({ id: 'automation', label: i18nKey('Automation keys') }),       // automation (`apikey:`)
   Object.freeze({ id: 'keys', label: i18nKey('Passwords & keys') }),            // secrets `secret:` (lane vault-paste-request: a free entry — pasted for an agent, or added in this window)
   Object.freeze({ id: 'agents', label: i18nKey('Kept by agents') }),            // an `agent:` entry (q-043 §9 mint / put) — BEFORE every rule above
@@ -282,6 +295,7 @@ function purposeOf(row) {
   if (store === 'passkeys') return 'passkeys';
   if (store === 'automation') return 'automation';
   if (/^(?:host|frp):/.test(entry)) return 'machines';
+  if (/^web-login:/.test(entry)) return 'web-logins';   // lane browser-login
   if (/^totp:/.test(entry)) return 'two-step';
   if (/^secret:/.test(entry)) return 'keys';
   if (/^apikey:/.test(entry)) return 'automation';
@@ -318,6 +332,7 @@ function provenanceOf(row) {
   const entry = String(row.entry == null ? '' : row.entry);
   if (row.origin === 'put') return 'agent-put';
   if (/^agent:/.test(entry)) return 'agent-mint';
+  if (row.provenance && row.provenance.prov === 'vault-minted') return 'agent-mint';   // lane browser-login: an agent's registration — the vault made the password, nobody saw it
   if (row.origin === 'qr' || row.origin === 'paste') return 'scan';
   if (row.store === 'secrets' && /^totp:/.test(entry)) return 'me';
   if (row.revealable === false) return 'system';

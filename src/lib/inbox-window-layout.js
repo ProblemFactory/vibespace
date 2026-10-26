@@ -138,17 +138,15 @@ export function scopeRows(entries, { sessionKey = null, query = '', tab = null, 
 }
 
 /**
- * THE LIST ROW'S CUT FORM of a detail: its first non-blank line with the
- * markdown marks a reader should not see in a one-liner dropped (`**`,
- * backticks, `__` only where it OPENS or CLOSES an emphasis — at a word's edge;
- * a `__` inside an identifier such as `window.__xss` stays, and a lone `_` or
- * `*` inside a word stays: snake_case is words — and a leading heading / quote
- * / list / numbered mark), cut at `max` with an ellipsis.
- * The pane shows the whole text; this is only the row's hint.
+ * THE LIST ROW'S CUT FORM of a detail: its first non-blank line, verbatim
+ * (lane foryou-honest: no markdown mark is dropped any more — the pane is no
+ * longer markdown, and the strip ate the agent's `__tests__/`), cut at `max`
+ * with an ellipsis. The pane shows the whole text; this is only the row's hint.
  */
 export function rowPreview(detail, max = 160) {
-  const line = String(detail || '').split('\n').find((l) => l.trim()) || '';
-  const plain = line.replace(/\*\*|`/g, '').replace(/(^|[\s(])__(?=\S)|(?<=\S)__(?=[\s).,;:!?]|$)/g, '$1').replace(/^\s*(?:#{1,6}|>|[-*+]|\d+[.)])\s+/, '').trim();
+  // lane foryou-honest (P1-2): the words EXACTLY as written — no markdown mark is stripped (the strip made the agent's
+  // `B __tests__/` read «B tests__/»); the pane draws the same words through the tray's renderer
+  const plain = (String(detail || '').split('\n').find((l) => l.trim()) || '').trim();
   return plain.length > max ? plain.slice(0, Math.max(0, max - 1)).trimEnd() + '…' : plain;
 }
 
@@ -207,7 +205,8 @@ export function itemView(item, ctx = {}) {
   const reply = card && !ctx.replyOpen ? { show: false, enabled: false, why: '' } : resolved ? { show: false, enabled: false, why: '' }
     : rs.show ? { show: true, enabled: !!rs.enabled, why: rs.enabled ? '' : String(rs.why || '') }
     : { show: false, enabled: false, why: rs.code && rs.code !== 'no_session' ? String(rs.why || '') : '' };
-  const options = !resolved && reply.show && Array.isArray(i.options) ? i.options.map((label, idx) => ({ idx, label: String(label) })) : [];
+  const optList = Array.isArray(ctx.options) ? ctx.options : Array.isArray(i.options) ? i.options : []; // lane foryou-honest: ctx.options = the model's (explicit, else the detail's parsed — PURE src/ask-options.js)
+  const options = !resolved && reply.show ? optList.map((label, idx) => ({ idx, label: String(label) })) : [];
   const producer = !resolved && i.action && i.action.type === 'reset-credit' && i.action.accountKey
     ? { type: 'reset-credit', accountKey: i.action.accountKey, sessionId: i.action.sessionId || null } : null;
   // lane-pairing ⑥: an exit's "ask me each time" item is answered HERE — Allow / Deny first (never a producer button)

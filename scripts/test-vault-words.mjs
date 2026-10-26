@@ -42,6 +42,15 @@ const K1 = 'The vault is locked — unlock it first (Unlock… at the top of the
 const K1N = 'The vault is locked — unlock it first';   // the rows' needle: a site that drops a fact stays ITS row's, judged without it
 const TAIL = 'Unlock… at the top of the page; For you names what is waiting on it';
 const ROWS = {
+  // lane passkey-sink: the kernel road's refusal when the passkeys' sealed key cannot be opened (refusedText 'webauthn_key_locked') —
+  // toward the AGENT: the user already knows, a person unlocks it on this instance's page, never ask them
+  'src/browser-passkey.js': [['VibeSpace\'s saved passkeys cannot be opened right now', 'agent', 'lane passkey-sink: a kernel ceremony refused webauthn_key_locked — said to the agent\'s next verbs (PK.refusedText)']],
+  // lane browser-login: a web login the custom kernel would fill — the agent's `vibespace-browser login` refused vault_locked (the fill, a
+  // signup the vault would mint for); the person's own save doors (the Vault window's 网站登录…, the save-login card) say it as a field verdict
+  'src/browser-login.js': [['the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page, and nothing is filled until then', 'agent', 'lane browser-login: LOCKED — `vibespace-browser login` refused vault_locked (BL.LOCKED, the fill verdict\'s words)']],
+  'src/server/browser-logins.js': [['the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page; no account was registered', 'agent', 'lane browser-login: a signup the vault could not seal before the fill (vault_locked) — nothing filled, no account made'],
+    ['the vault is locked — unlock it, then save', 'label', 'the owner\'s own save doors (网站登录… in the Vault window, the save-login card\'s Save) answer it as a field verdict while the person is at the door — not a background refusal', { count: 2 }]],
+  'src/lib/vault-login-row.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'the 网站登录… dialog\'s save-time verdict line (the same words as the paste box\'s) — a field verdict while the person is in the dialog, not a background refusal']],
   // int331 seam — sites from lanes that landed after this census's base (.326): relay status words, the provider-config save verdict,
   // and the 使用失败 For-you card's count/hint detail — all LABELS/status, not the tool-refusal sentences the two-facts rule (decision 5) targets
   'src/model-providers.js': [

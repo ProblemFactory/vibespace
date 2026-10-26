@@ -33,6 +33,7 @@ import { removeAccount, showReauthAccountDialog } from './channel-account-dialog
 import { passkeyDeleteWords } from './browser-panel-model.js';
 import { KIND_WORDS, countdownText, CLIPBOARD_CLEAR_MS, PURPOSES, purposeOf, PROVENANCES, provenanceOf, PROVENANCE_FILTERS, stateChipsOf, viewOf, bandItemsOf, bandDoorsOf } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
 import { loadAutomation, automationExtras, showMintDialog } from './vault-automation.js'; // design q-046: «Automation keys» — mint, grant, revoke (never a value)
+import { loadLogins, loginExtras, showLoginAddDialog } from './vault-login-row.js'; // lane browser-login: a website login's row — 用于… (this account / any account on this site / any site) + 网站登录…
 import { loadTotp, totpExtras } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…
 import { inboxModel } from './user-todos-actions.js'; // lane vault-window-v2: 「需要你」 = For you's own items (one store, one set of answers)
 import { showSecretAddDialog, showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: 「其他密钥或密码…」 + an agent's paste request answered here (THE box, as a dialog)
@@ -89,6 +90,7 @@ const showHelp = (row) => (row.store === 'automation'
   : t('Show this value — the second password is asked once, then values stay visible for 5 minutes'));
 const stateWord = (c) => (c.id === 'expired' ? t('Expired') : c.id === 'expires' ? t('Expires in {n} days', { n: c.days }) : t('Rotate suggested'));
 const isTotp = (row) => row.kind === 'totp' || !!(row.doors && row.doors.code);
+const isLogin = (row) => row.kind === 'login' && !!(row.doors && row.doors.login);   // lane browser-login
 const SORT_CHOICES = [['used', () => t('Recently used')], ['name', () => t('Name')], ['kind', () => t('Kind')], ['created', () => t('Newest')]];   // design q-047 §3.2: 最近使用 first
 
 /** The store card's own confirm words for its delete door (the same keys the card uses). */
@@ -100,6 +102,7 @@ function confirmWords(key, row) {
   if (key === 'passkey') { const [site, user] = String(row.label).split(' · '); const w = passkeyDeleteWords({ site, user: user || '' }, { w: t }); return { title: w.title, message: w.message, confirm: w.confirm }; }
   if (key === 'app-logins') return { title: t('Forget the logins this app keeps?'), message: t('VibeSpace keeps this app\'s logins for it in its own session; after you forget them the app asks again.'), confirm: t('Forget') };
   if (key === 'secret') return { title: t('Delete "{name}"?', { name: row.label }), message: t('The value leaves the vault. A conversation that uses it in a command loses it at its next run.'), confirm: t('Delete') };   // lane vault-paste-request: a free entry
+  if (key === 'web-login') return { title: t('Delete the login "{name}"?', { name: row.label }), message: t('Its password leaves the vault and this account\'s own grant goes with it. Agents can no longer be signed in there with it.'), confirm: t('Delete') };   // lane browser-login
   if (key === 'totp') return { title: t('Delete the two-step code "{name}"?', { name: row.label }), message: t('Its seed leaves the vault and every grant of its code stops. A site that asks for this code needs it set up again.'), confirm: t('Delete') };
   return { title: t('Delete'), message: row.label, confirm: t('Delete') };
 }
@@ -167,6 +170,7 @@ registerVaultAdd({ id: 'channel', order: 30, label: () => t('Channel account…'
 registerVaultAdd({ id: 'automation', order: 40, label: () => t('Automation key…'), run: (app, c) => showMintDialog({ refresh: c.refresh, data: c.auto() }) });
 // lane vault-paste-request (the owner 2026-10-23: 「我压根没法添加啊」): a plain secret the registry lists no row for — a password, an
 // API key, an OAuth client secret — a FREE entry `secret:<id>` (name, kind, value, note), the same masked field as For you's paste box
+registerVaultAdd({ id: 'web-login', order: 45, label: () => t('Website login…'), run: (app, c) => showLoginAddDialog({ refresh: c.refresh }) });   // lane browser-login: the owner's own login (the custom kernel fills it; agents never see it)
 registerVaultAdd({ id: 'secret', order: 50, label: () => t('Other key or password…'), run: (app, c) => showSecretAddDialog({ refresh: c.refresh }) });
 
 /** THE WINDOW (singleton). `focus` = a row (or an entry) to bring into view — a 「需要你」 item's door. */
@@ -320,7 +324,8 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   const autoOf = (row) => (row.store === 'automation' && st.auto ? ((st.auto.keys || []).find((k) => `apikey:${k.id}` === row.entry) || null) : null);
   // a row's signature leaves its last use out: a reveal moves the store key's last use, and an open value must survive the
   // next refresh — the 「最近使用」 cell is patched in place instead
-  const sigOf = (row) => JSON.stringify([{ ...row, lastUsed: null }, autoOf(row), row.store === 'automation' ? !!st.auto : 0]);
+  const loginOf = (row) => (isLogin(row) && st.logins ? ((st.logins.entries || []).find((e) => e.name === row.entry) || null) : null);   // lane browser-login: a web login's grant chips are part of its row's facts
+  const sigOf = (row) => JSON.stringify([{ ...row, lastUsed: null }, autoOf(row), row.store === 'automation' ? !!st.auto : 0, loginOf(row)]);
   // lane vault-key-row-compact: an automation key's 最近使用 is its last USE by a conversation (the head's one — the old extra line went)
   const keyUsed = (row) => { const k = autoOf(row); return k ? (k.lastUsedAt ? whenShort(k.lastUsedAt) : t('Never used')) : null; };
   const usedText = (row) => keyUsed(row) ?? (row.lastUsed ? (row.lastUsed.by === 'human' ? t('{when} · you', { when: whenShort(row.lastUsed.at) }) : t('{when} · VibeSpace', { when: whenShort(row.lastUsed.at) })) : '');
@@ -399,6 +404,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     let wide = null;   // lane vault-key-row-compact: an automation key's head chips count, its limits line + grants fold sit UNDER the head (full width)
     if (row.store === 'automation' && st.auto) { const ex = automationExtras(row, st.auto, { refresh }); chips.append(...(ex.chips || [])); wide = ex.box; doors.append(...ex.doors); }
     if (totpTx) { main.append(totpTx.box); doors.append(...totpTx.doors); }   // design q-047 L1: the code's grant chips + 用于…
+    if (isLogin(row) && st.logins) { const lx = loginExtras(row, st.logins, { refresh, show }); main.append(lx.box); doors.append(...lx.doors); }   // lane browser-login: who may have it filled + 用于…
     if (row.doors && row.doors.rotate) { const b = btnEl(t('Renew…'), 'vw-renew'); b.onclick = () => doRenew(row); doors.append(b); }
     if (row.doors && row.doors.delete) { const b = btnEl(t('Delete'), 'vw-del'); b.onclick = () => doDelete(row); doors.append(b); }
     show.onclick = () => (x.plain ? hideValue(x) : revealRow(x));
@@ -639,6 +645,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     st.data = { state: r.state, stores: r.stores || [], rows: r.rows || [] };
     st.auto = auto;
     st.totp = r.state === 'unlocked' && st.data.rows.some(isTotp) ? await loadTotp() : null;   // design q-047 L1: the codes' grants + the picker's subjects (never a value)
+    st.logins = r.state === 'unlocked' && st.data.rows.some(isLogin) ? await loadLogins() : null;   // lane browser-login: the logins' grants + the picker's subjects (never a password)
     if (r.reveal && r.reveal.open) noteRevealLeft(r.reveal.leftMs); else forgetReveal();
     drawTimer();
     if (r.state === 'locked') { hideAll(); for (const [id, x] of rowEls) { x.stopCode?.(); x.el.remove(); rowEls.delete(id); } }

@@ -11,6 +11,11 @@
 {{- /* THE FLEET'S SIGN-IN RELAY PAGE (lane oauth-relay-one-source): presets.relayUrl, else the deprecated oauthRelayUrl —
      rendered as this release's override/fleet.json beside the rows, never an env (an env moves only at a pod restart) */ -}}
 {{- $relay := $presets.relayUrl | default .Values.oauthRelayUrl -}}
+{{- /* THE FLEET'S CUSTOM BROWSER KERNEL (lane engine-plugin): customBrowser.enabled ⇒ fleet.json `browserEngine` beside the relay page */ -}}
+{{- $cb := .Values.customBrowser | default dict -}}
+{{- $fleet := dict -}}
+{{- if $relay }}{{- $_ := set $fleet "relayUrl" $relay -}}{{- end -}}
+{{- if $cb.enabled }}{{- $cbs := $cb.source | default dict -}}{{- $cbk := $cb.kernel | default dict -}}{{- $_ := set $fleet "browserEngine" (dict "plugin" "vibespace.custom-browser" "default" (eq (toString $cb.default) "true") "preinstall" (eq (toString $cb.preinstall) "true") "source" (dict "git" (toString ($cbs.git | default "")) "ref" (toString ($cbs.ref | default ""))) "kernel" (dict "url" (toString ($cbk.url | default "")) "sha256" (toString ($cbk.sha256 | default "")))) -}}{{- end -}}
 {{- if and $vol (not $ovG) $gd.clientId $gd.clientSecret -}}
 {{- $ovG = list (dict "key" "default" "label" "Default" "clientId" $gd.clientId "clientSecret" $gd.clientSecret) -}}
 {{- end -}}
@@ -73,7 +78,7 @@ metadata:
   name: {{ $name }}-preset-override
   labels: {{- include "vs.labels" . | nindent 4 }}
 type: Opaque
-{{- if or $ovG $ovI $relay }}
+{{- if or $ovG $ovI $fleet }}
 data:
   {{- if $ovG }}
   gdriveClients: {{ $ovG | toJson | b64enc | quote }}
@@ -81,8 +86,8 @@ data:
   {{- if $ovI }}
   integrations: {{ $ovI | toJson | b64enc | quote }}
   {{- end }}
-  {{- if $relay }}
-  fleet: {{ dict "relayUrl" $relay | toJson | b64enc | quote }}
+  {{- if $fleet }}
+  fleet: {{ $fleet | toJson | b64enc | quote }}
   {{- end }}
 {{- else }}
 data: {}

@@ -51,6 +51,7 @@ const G = require(path.join(REPO, 'src/channel-groups.js'));
 const IR = require(path.join(REPO, 'src/inbox-reply.js'));
 const JM = require(path.join(REPO, 'src/job-model.js'));
 const ST = require(path.join(REPO, 'src/browser-stuck.js'));
+const SFm = require(path.join(REPO, 'src/browser-surfaces.js')); // lane browser-surfaces: the kernel prompt's words
 const AR = require(path.join(REPO, 'src/agent-routes.js'));
 const EX = require(path.join(REPO, 'src/exit-reach.js'));
 
@@ -148,7 +149,13 @@ const DOORS = ['deliverToConversation(', 'stashFor(', 'pushNotice(', 'postToPeer
   'answersText(',
   // lane design-changes: THE CHANGES STRIP's ONE message — the user's comments + edits (an edited text's before / after,
   // a nudge) + each element's quote, the WHOLE block down the comment's own sender
-  'changesText('];
+  'changesText(',
+  // lane browser-surfaces: A BROWSER KERNEL's PROMPT toward the agent — THE sentence of a held surface (the verb's first line, the
+  // idle notice), the one line of the next result (a noted one / a policy answer / the user's answer), `vibespace-browser surfaces`
+  'surfaceText(', 'surfaceNote(', 'surfaceListText(',
+  // lane browser-login: A WEB LOGIN's answer toward the agent — `vibespace-browser login`'s sentence (what was filled, where, a receipt;
+  // a refusal's words) — origins the module itself canonicalised, the vault's user names and closed words, never the page's text
+  'loginText('];
 const RULES = new Set(['bounded', 'folded', 'frame-inert', 're-judged-at-read']);
 const BELT = ['bounded', 'folded', 'frame-inert'];
 // THE TABLE — one row per (file, door). `rules`: the closed set above (+ `declared:<why>`); `pin`: a regex the file's
@@ -260,6 +267,16 @@ const TABLE = {
   'src/server/browser-dialogs.js :: alertsNote(': { rules: ['declared:src/browser-stuck.js (its rows)'], pin: null, why: 'call site' },
   'src/server/browser-dialogs.js :: pageText(': { rules: ['declared:a navigation url through pageText (src/browser-stuck.js row)'], pin: /ST\.pageText\(e\.navUrl, 300\)/, why: 'the loading fact\'s url' },
   'src/routes/browser.js :: loadingText(': { rules: ['declared:src/browser-stuck.js (its rows)'], pin: null, why: 'call site' },
+  // ── lane browser-surfaces: the kernel's prompts — PURE src/browser-surfaces.js composes, its page words already through ST.pageText
+  // at the block (the INJECTED rule — the module imports nothing), JSON-quoted; THE BELT runs over every whole text at its door ──
+  'src/browser-surfaces.js :: surfaceText(': { rules: ['declared:the page\'s words (title, message, answer / field labels, choices) through ST.pageText at surfaceBlock, JSON-quoted (quoted / saysOf); the watch belts the whole sentence (its row)'], pin: /const saysOf = \(b\) => \[b\.title \? quoted\(b\.title\) : '', b\.message \? `\$\{quoted\(b\.message\)\}/, why: 'THE sentence of a held kernel prompt' },
+  'src/browser-surfaces.js :: surfaceNote(': { rules: ['declared:the block\'s words (page text through ST.pageText) JSON-quoted via saysOf; the watch belts the line (its row)'], pin: /function surfaceNote\(n\) \{/, why: 'the one line of the next result' },
+  'src/browser-surfaces.js :: surfaceListText(': { rules: ['declared:the block\'s words JSON-quoted via saysOf, the ids the kernel\'s tokens (idOf: printable ASCII ≤ 64); the route belts the list (its row)'], pin: /function surfaceListText\(blocks\) \{/, why: '`vibespace-browser surfaces`' },
+  'src/server/browser-dialogs.js :: surfaceText(': { rules: BELT, pin: /PT\(\)\.toAgentText\(SF\(\)\.surfaceText\(d, \{ now: at, repeat \}\), \{ max: SF\(\)\.TEXT_MAX \}\)/, why: 'THE sentence (the fact, the idle notice) through the belt' },
+  'src/server/browser-dialogs.js :: surfaceNote(': { rules: BELT, pin: /PT\(\)\.toAgentText\(SF\(\)\.surfaceNote\(a\), \{ max: SF\(\)\.TEXT_MAX \}\)/, why: 'the next result\'s line through the belt' },
+  'src/browser-login.js :: loginText(': { rules: ['declared:origins canonicalised by originOf (scheme + host + port — no path, no query, no user-info), the vault\'s own user names (userOf: no white space, no #), the kinds filled (a closed table) and the refusal sentences the module writes — no page text reaches it (formOf keeps no label / name of a field)'], pin: /function loginText\(r\) \{/, why: 'the `login` verb\'s answer' },
+  'src/routes/browser.js :: loginText(': { rules: BELT, pin: /require\('\.\.\/peer-text\.js'\)\.toAgentText\(BL\.loginText\(r\), \{ max: BL\.TEXT_MAX \}\)/, why: 'the `login` answer (and its refusal) through the belt' },
+  'src/routes/browser.js :: surfaceListText(': { rules: BELT, pin: /require\('\.\.\/peer-text\.js'\)\.toAgentText\(SF\.surfaceListText\(list\), \{ max: SF\.TEXT_MAX \}\)/, why: 'the `surfaces` answer through the belt' },
   'src/routes/user-todos-reply.js :: composeReply(': { rules: ['declared:src/inbox-reply.js composes (its row)'], pin: null, why: 'the route sends what composeReply built' },
   'src/jobs.js :: renderOwnerNotify(': { rules: ['declared:src/job-model.js renders (its row)'], pin: null, why: 'call site' },
   'src/jobs.js :: renderJobsUpdate(': { rules: ['declared:src/job-model.js renders (its row)'], pin: null, why: 'call site' },
@@ -1270,6 +1287,8 @@ const SITES = {
   'exit:heads': (b, n) => { const h = EX.outputHeads({ stdout: b + '\n' + NEXT, stderr: n + ': ' + b }); return h.stdout + '\n' + h.stderr; },
   'inbox:reply': (b, n) => IR.composeReply({ id: 'ut-0123456789', createdAt: T0, urgency: 'high', text: b, detail: b + '\n' + NEXT, options: [n.slice(0, 40), 'ok'] }, 'yes', { now: T0 + 60000 }),
   'browser:dialog': (b, n) => { const d = ST.dialogFromCdp({ type: 'confirm', message: b, url: 'https://x.example/' + n, defaultPrompt: b }, { targetId: 'T1', now: T0, seq: 1 }); return [ST.dialogText(d, { now: T0 + 5000, repeat: true }), ours(ST.renderDialogNotice({ dialog: ST.dialogBlock(d, { now: T0 }), label: n })), ST.answeredNote({ dialog: d, by: 'user', how: 'accepted', at: T0 }), ST.alertsNote([{ dialog: d }]), ST.answerDoneText(d, { accept: true, text: b })].join('\n' + NEXT + '\n'); },
+  // lane browser-surfaces: a kernel prompt's peer words (title, message, an answer label, a field label, a choice) as the watch / the route hand them on
+  'browser:surface': (b, n) => { const blk = SFm.surfaceBlock({ surfaceId: 'surf-1', kind: 'select-popup', title: n, message: b, origin: 'https://x.example/', fields: [{ fieldId: 'f-1-1', type: 'choice', label: b, options: [{ value: NEXT, label: n }] }], answers: [{ id: 'select', label: n, kind: 'choose' }, { id: 'cancel', label: b, kind: 'dismiss' }] }, { now: T0, pageText: ST.pageText }); const said = PT.toAgentText(SFm.surfaceText(blk, { now: T0 + 5000, repeat: true }), { max: SFm.TEXT_MAX }); return [said, PT.toAgentText(SFm.surfaceNote({ state: 'open', block: { ...blk, cls: 'noted' } }), { max: SFm.TEXT_MAX }), PT.toAgentText(SFm.surfaceListText([blk]), { max: SFm.TEXT_MAX }), ours(ST.renderDialogNotice({ dialog: SFm.blockAt(blk, { now: T0 }), text: said, label: n }))].join('\n'); },
   'browser:loading': (b, n) => ST.loadingText({ url: 'https://x.example/?q=' + b, since: T0, count: 2 }, { now: T0 + 1000 }) + '\n' + NEXT,
   'job:ownerNotify': (b, n) => JM.renderOwnerNotify({ id: 'jb-1', kind: 'task', name: n, state: 'done', context: { payload: b } }, { what: 'announced: ' + b }) + '\n' + NEXT,
   'job:notifStash': (b, n) => ours(JM.renderNotifStash([{ ts: T0, jobId: 'jb-1', jobName: n, text: b }, { ts: T0 + 1, jobId: 'jb-2', jobName: 'x', text: NEXT }])),

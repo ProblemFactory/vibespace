@@ -158,6 +158,10 @@ const V = {
   rdpDomain: (v) => (/[\u0000-\u001f\u007f\u2028\u2029",]/.test(String(v)) ? bad('no quotes, commas, line breaks or control characters') : String(v).length > 120 ? bad('at most 120 characters') : okV),
   oneLine: (v) => (/[\u0000\r\n\u2028\u2029]/.test(String(v)) ? bad('one line — a line break would end it early') : String(v).length > 256 ? bad('at most 256 characters') : okV),
   sha256Fp: (v) => (/^[0-9a-f]{2}(?::[0-9a-f]{2}){31}$/.test(String(v)) ? okV : bad('a sha256 fingerprint: 32 hex pairs, aa:bb:…')),
+  // lane engine-distribution: a git host (`github.com`, `git.example.com:8443`) — the ONE host a credential is handed to
+  gitHost: (v) => (/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?(?::\d{1,5})?$/i.test(String(v)) ? okV : bad('a host name such as github.com (no scheme, no path)')),
+  /** an ssh PRIVATE key in its PEM / OpenSSH text form (several lines; the store trims the ends) */
+  sshPrivateKey: (v) => (/^-----BEGIN (?:OPENSSH|RSA|EC|DSA)? ?PRIVATE KEY-----[\s\S]{20,}-----END (?:OPENSSH|RSA|EC|DSA)? ?PRIVATE KEY-----$/.test(String(v)) ? (/ENCRYPTED/.test(String(v)) ? bad('a passphrase-protected key cannot be used unattended — make a deploy key without a passphrase') : okV) : bad('an ssh private key: the whole text from -----BEGIN … PRIVATE KEY----- to -----END … PRIVATE KEY-----')),
 };
 
 /**
@@ -508,6 +512,37 @@ const ROWS = Object.freeze([
     usedBy: i18nKey('Used by the desktop window of a paired Windows or macOS machine'),
     docs: 'docs/kb-features.md',
   },
+
+  // ── A PRIVATE PLUGIN REPOSITORY'S CREDENTIAL (lane engine-distribution, P4 of the custom browser kernel — design-custom-browser
+  // -plugin §5.1; the owner 2026-10-25: 「插件系统要支持导入 repo（私有 Git 仓库，用安装者自己的 Git 凭据，绝不内置我们的密钥）」) ──
+  // ONE credential, bound to ONE git host: an https token (a personal access token / a fine-grained read token) or an ssh
+  // deploy key. Its consumer is the plugin installer (src/server/plugin-install.js resolves it at the moment of a git install
+  // and hands it to git ONLY through 0600 files it shreds after). A cluster ships it through the presets' integrations.json
+  // (`{id: 'plugin-git', values: {host, token}}`) — every pod of the fleet installs the fleet's plugin with it.
+  {
+    id: 'plugin-git',
+    label: i18nKey('Plugin Git repository'),
+    fields: [
+      { key: 'host', label: i18nKey('Git host'), secret: false, required: true, placeholder: 'github.com',
+        help: i18nKey('The host of the private repository (no scheme, no path). The credential is handed to this host only.'), validate: V.gitHost },
+      { key: 'username', label: i18nKey('User name'), secret: false, required: false, placeholder: 'x-access-token',
+        help: i18nKey('For an https token: the user name the host expects with it (empty = x-access-token, which GitHub accepts).'), validate: V.oneLine },
+      { key: 'token', label: i18nKey('Access token (https)'), secret: true, required: false, placeholder: '',
+        help: i18nKey('A read-only access token for https://<host>/… repositories. Git receives it through a file VibeSpace removes after the clone — never in a URL or on a command line.'), validate: V.minLen(8) },
+      { key: 'deployKey', label: i18nKey('Deploy key (ssh)'), secret: true, required: false, placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----', multiline: true,
+        help: i18nKey('A read-only ssh deploy key without a passphrase, for git@<host>:… repositories. Paste the whole private key.'), validate: V.sshPrivateKey },
+    ],
+    clusterEnv: { json: 'VIBESPACE_INTEGRATIONS', prefix: 'VIBESPACE_INTEGRATION_PLUGIN_GIT_' },
+    setup: null,
+    test: {
+      kind: 'reachability',
+      describe: i18nKey('Runs git ls-remote with this credential against a repository this instance knows on that host (the cluster\'s plugin source, or one you installed from). Reads the branch list only.'),
+      caveat: i18nKey('Proves the host accepts the credential for that repository — not that every repository on the host is readable, nor that its plugin is valid.'),
+    },
+    consumers: ['src/server/plugin-install.js'],
+    usedBy: i18nKey('Used by Install plugin… for a private Git repository'),
+    docs: 'docs/design-custom-browser-plugin.zh.md',
+  },
 ]);
 
 const byId = new Map(ROWS.map((r) => [r.id, r]));
@@ -639,7 +674,7 @@ function pickPreset(presets, { savedKey = null, prefer = null, rebindSingle = fa
 /** The declaration-only view of a row's fields (no validate functions): what
  *  the wire carries. */
 function fieldDecls(row) {
-  return row.fields.map(({ key, label, secret, required, placeholder, help }) => ({ key, label, secret: !!secret, required: !!required, placeholder: placeholder || '', help: help || '' }));
+  return row.fields.map(({ key, label, secret, required, placeholder, help, multiline }) => ({ key, label, secret: !!secret, required: !!required, placeholder: placeholder || '', help: help || '', ...(multiline ? { multiline: true } : {}) })); // lane engine-distribution: a several-line value (an ssh key) is a text box
 }
 
 /** A `bindsPerAccount` row's CUSTOM client, as its two declared fields: the
@@ -679,6 +714,8 @@ function oauthClientVendorOf(row) {
 const GROUPS = Object.freeze(['communication', 'browser', 'plugins']);
 const GROUP_WORDS = Object.freeze({ communication: i18nKey('Communication'), browser: i18nKey('Browser'), plugins: i18nKey('Plugins') });
 const BROWSER_CONSUMER = 'src/server/browser-backend.js';
+/** lane engine-distribution: the plugin installer's credential is a Plugins row too (the Plugins panel's install form picks it). */
+const PLUGIN_INSTALL_CONSUMER = 'src/server/plugin-install.js';
 const PLUGIN_ROWS = new Set(Object.values(PluginSettings.PLUGIN_SETTINGS).map((p) => p && p.integration).filter(Boolean));
 function groupOf(row) {
   const r = typeof row === 'string' ? rowById(row) : row;
@@ -687,7 +724,7 @@ function groupOf(row) {
   const hits = [
     used.some((c) => c.startsWith('src/channels/')) && 'communication',
     used.includes(BROWSER_CONSUMER) && 'browser',
-    PLUGIN_ROWS.has(r.id) && 'plugins',
+    (PLUGIN_ROWS.has(r.id) || used.includes(PLUGIN_INSTALL_CONSUMER)) && 'plugins',
   ].filter(Boolean);
   return hits.length === 1 ? hits[0] : null;
 }
@@ -781,5 +818,5 @@ module.exports = {
   ROWS, TEST_KINDS, SIGNIN_KINDS, REDIRECT_KEYS, REDIRECT_ALSO, TEST_BUTTON_LABEL, MASK, MASK_TAIL_MIN, CONNECT_WORDS, CONNECT_WHYS,
   rowById, rowIds, maskValue, validateValues, missingFields, resolvePrecedence, pickPreset,
   fieldDecls, checkRow, TRIM_NOTE, credentialWhyText, clientFieldsOf, bindsPerAccount, bindsPerMachine, oauthClientVendorOf,
-  GROUPS, GROUP_WORDS, groupOf,
+  GROUPS, GROUP_WORDS, groupOf, PLUGIN_INSTALL_CONSUMER,
 };

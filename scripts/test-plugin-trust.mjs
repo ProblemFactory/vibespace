@@ -3,6 +3,8 @@
 // + owner consent, contributed settings/themes, install sources, node
 // --permission capability ENFORCEMENT, remote shim shipping — against REAL
 // fixture plugins under a temp root (never the repo's data/). Client pins last.
+// ③b lane engine-distribution: a PRIVATE git repository with the Plugin Git credential — a real bare repository, a recording
+// git (argv / env / the askpass's answers / the files' modes), every failure by name, four patched-copy RED controls.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -176,6 +178,169 @@ writeJson(path.join(src, 'evilcap', 'vibespace-plugin.json'), { ...JSON.parse(fs
 const ec = await post('/api/plugins/install', { source: 'path', value: path.join(src, 'evilcap') });
 ok(ec.status === 400 && /covers the VibeSpace (install|data) dir/.test(ec.body.error), 'a capability over VibeSpace\'s own install/data dir is refused at install (named)', ec.body);
 ok(tele.some((e) => e.name === 'plugin-install') && tele.some((e) => e.name === 'plugin-uninstall') && tele.some((e) => e.name === 'plugin-install-failed'), 'install/uninstall/failures reach telemetry');
+
+// ── ③b lane engine-distribution: a PRIVATE git repository with the Plugin Git credential (design-custom-browser-plugin §5.1) ──
+// The REAL installer + loader over a REAL bare repository; git is a RECORDING wrapper (scripts/fixtures/git-repo.mjs: argv,
+// every env value, what the askpass answers, the files' modes, a shred witness) running the real git over it. The fixture
+// token is built at runtime by concatenation (never one literal). Patched copies of the installer are the RED controls.
+console.log('— git source + the Plugin Git credential (lane engine-distribution)');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const G = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-trust-git-'));
+  const { gitRepoFixture, URL_HTTPS, URL_SSH } = await import('./fixtures/git-repo.mjs');
+  const pkg = (version) => ({ id: 'acme.private', version, engines: { vibespace: '2.369.24' }, label: 'Private' });
+  const FX = gitRepoFixture(G, [{ files: { 'vibespace-plugin.json': pkg('1.0.0') }, tag: 'v1' }, { files: { 'vibespace-plugin.json': pkg('1.0.1') } }, { branch: 'bad', files: { 'etc-link': { link: '/etc' } } }]);
+  const [sha1, sha2] = FX.shas;
+  const { WRAP, calls, resetCalls, setMode } = FX;
+  const TOKEN = ['fx', 'pat', 'q7Zm', '93kd', 'Lw2a', 'r8Tn'].join('-');            // built at runtime: never one literal
+  const KEYTEXT = ['-----BEGIN OPENSSH ', 'PRIVATE KEY-----\n', 'Zml4dHVyZS1kZXBsb3kta2V5LW5vdC1hLWtleQ'.repeat(2), '\n-----END OPENSSH ', 'PRIVATE KEY-----'].join('');
+  let credValues = null;
+  const store = { resolveIntegration: (id) => { if (id !== 'plugin-git') throw new Error('unknown integration'); return credValues ? { source: 'user', values: { ...credValues }, whyCode: null, why: null } : { source: 'none', values: {}, whyCode: 'no-values', why: 'no key of your own and no cluster default' }; } };
+  const GR = path.join(G, 'root'); fs.mkdirSync(path.join(GR, 'data', 'plugins'), { recursive: true });
+  const quiet = { log() {}, warn() {} };
+  const PL = require(path.join(REPO, 'src/server/plugin-loader.js')).create({ rootDir: GR, app: null, autoStart: false, log: quiet, integrations: () => store, gitBin: WRAP, gitTimeoutMs: 1500 });
+  const URL_H = URL_HTTPS, URL_S = URL_SSH;
+  const thr = async (p) => { try { await p; return null; } catch (e) { return e; } };
+  const fetchOf = (cs) => cs.find((c) => c.argv.includes('fetch')) || null;
+  /** THE LEAK CENSUS of one recorded call: the token / the key never on argv, in a URL, in any env value; the askpass names
+   *  FILES (its text holds no value); the folder 0700, the value files 0600 */
+  const leaks = (c, secret) => { const p = []; if (!c) return ['no fetch call recorded']; if (c.argv.some((a) => a.includes(secret))) p.push('argv'); for (const [k, v] of Object.entries(c.env)) if (String(v).includes(secret)) p.push('env ' + k); if (c.ask && c.ask.script.includes(secret)) p.push('askpass text'); if (c.ask && (c.ask.dirMode !== '700' || c.ask.files.some(([n, m]) => n !== 'askpass' && m !== '600'))) p.push('askpass modes ' + JSON.stringify([c.ask.dirMode, c.ask.files])); if (c.key && (c.key.mode !== '600' || c.key.dirMode !== '700')) p.push('key modes'); return p; };
+  // gone = the folder is gone AND the value's inode (the hard-link witness) no longer holds the value: SHREDDED, not just unlinked
+  const held = (w, v) => { try { return fs.readFileSync(w, 'utf8').includes(v); } catch { return false; } };
+  const gone = (c) => !!c && !((c.ask && (fs.existsSync(c.ask.dir) || !c.ask.witness || held(c.ask.witness, TOKEN))) || (c.key && (fs.existsSync(c.key.dir) || !c.key.witness || held(c.key.witness, 'Zml4dHVyZS1kZXBsb3kta2V5'))));
+  // ① a public repository, ref = a tag: no credential reaches git at all; the record names ref + sha + contentHash
+  resetCalls();
+  const r1 = await PL.install({ source: 'git', value: URL_H, ref: 'v1' });
+  const f1 = fetchOf(calls());
+  ok(r1.plugin?.id === 'acme.private' && r1.plugin.version === '1.0.0' && r1.ref === 'v1' && r1.sha === sha1 && PL.installRecord('acme.private').sha === sha1 && PL.installRecord('acme.private').ref === 'v1' && !!PL.installRecord('acme.private').contentHash && !fs.existsSync(path.join(GR, 'data', 'plugins', 'acme.private', '.git')),
+    'a git install pins its ref (a tag here) and records {ref, sha, contentHash}; .git is removed', { ref: r1.ref, sha: r1.sha });
+  ok(f1 && !f1.env.GIT_ASKPASS && f1.argv.includes('credential.helper=') && f1.argv.includes('--depth') && f1.argv.at(-2) === URL_H && f1.argv.at(-1) === 'v1' && f1.env.GIT_TERMINAL_PROMPT === '0' && f1.env.GIT_SSH_COMMAND === 'ssh -o BatchMode=yes',
+    'no credential chosen ⇒ git gets none (no askpass), depth 1, the one ref, no prompt, no configured credential helper', f1 && f1.argv);
+  ok(f1 && Object.keys(f1.env).every((k) => ['PATH', 'HOME', 'LANG', 'TMPDIR', 'XDG_RUNTIME_DIR', 'TERM', 'HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH', 'GIT_TERMINAL_PROMPT', 'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_SSH_COMMAND', 'GIT_ASKPASS', 'PWD', 'SHLVL', '_', 'OLDPWD', 'GIT_EXEC_PATH', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_PREFIX'].includes(k) || /^LC_[A-Z]+$/.test(k)),
+    'the git child\'s env is serviceEnv (+ the egress door) + the named git switches — never the hub\'s', f1 && Object.keys(f1.env).join(' '));
+  // ② https + the token: through the askpass FILE only; argv / URL / env token-free; the files 0600 in a 0700 folder; shredded after
+  credValues = { host: 'repo.test', token: TOKEN };
+  resetCalls();
+  const r2 = await PL.install({ source: 'git', value: URL_H, ref: sha2, credential: 'plugin-git' });
+  const f2 = fetchOf(calls());
+  ok(r2.sha === sha2 && r2.plugin.version === '1.0.1' && f2 && f2.ask && f2.ask.user === 'x-access-token' && f2.ask.pass === TOKEN, 'a full sha ref is fetched exactly; the askpass answers the user name and the token — from its files', f2 && f2.ask && { user: f2.ask.user });
+  ok(!leaks(f2, TOKEN).length, `the token is on no argv, in no URL, in no env value, not in the askpass text; the folder 0700, the files 0600 (${leaks(f2, TOKEN).join(', ') || 'clean'})`);
+  ok(gone(f2) && !fs.readdirSync(path.join(GR, 'data', 'plugins-staging')).length, 'after the clone the credential files are SHREDDED (the token\'s inode — a hard-link witness — holds other bytes) and gone; the stage is empty');
+  // ③ ssh + the deploy key: GIT_SSH_COMMAND names a 0600 key file; shredded after
+  credValues = { host: 'repo.test', deployKey: KEYTEXT };
+  resetCalls();
+  const r3 = await PL.install({ source: 'git', value: URL_S, ref: 'v1', credential: 'plugin-git' });
+  const f3 = fetchOf(calls());
+  ok(r3.sha === sha1 && f3 && f3.key && f3.key.text === KEYTEXT + '\n' && /IdentitiesOnly=yes/.test(f3.env.GIT_SSH_COMMAND) && /BatchMode=yes/.test(f3.env.GIT_SSH_COMMAND) && !leaks(f3, 'Zml4dHVyZS1kZXBsb3kta2V5').length && gone(f3),
+    'ssh: the deploy key rides a 0600 file GIT_SSH_COMMAND names (IdentitiesOnly, BatchMode), never argv / env text; gone after', f3 && f3.key && { mode: f3.key.mode });
+  // ④ the credential refused BY NAME before git runs: none set · another host · the wrong kind for the URL
+  const before = calls().length;
+  credValues = null; const e4a = await thr(PL.install({ source: 'git', value: URL_H, credential: 'plugin-git' }));
+  credValues = { host: 'other.test', token: TOKEN }; const e4b = await thr(PL.install({ source: 'git', value: URL_H, credential: 'plugin-git' }));
+  credValues = { host: 'repo.test', deployKey: KEYTEXT }; const e4c = await thr(PL.install({ source: 'git', value: URL_H, credential: 'plugin-git' }));
+  ok([e4a, e4b, e4c].every((e) => e && e.code === 'plugin_git_credential') && calls().length === before && /no key of your own/.test(e4a.message) && /other\.test.*repo\.test/.test(e4b.message), 'plugin_git_credential BY NAME (none set · it is for another host · no token for an https URL) — git never ran', [e4a, e4b, e4c].map((e) => e && e.message));
+  // ⑤ the fleet's 'auto': the row when it holds a credential for this host, else none
+  credValues = { host: 'other.test', token: TOKEN }; resetCalls();
+  const r5 = await PL.install({ source: 'git', value: URL_H, ref: 'v1', credential: 'auto' });
+  ok(r5.sha === sha1 && !fetchOf(calls()).env.GIT_ASKPASS, "'auto' (the boot job's) with a credential for another host ⇒ an anonymous clone, never the other host's token");
+  // ⑥ named failures, each with the files shredded: a missing ref · an auth refusal · a timeout · a rejected tree
+  credValues = { host: 'repo.test', token: TOKEN };
+  const e6a = await thr(PL.install({ source: 'git', value: URL_H, ref: 'v9', credential: 'plugin-git' }));
+  setMode({ fail: 'auth' }); resetCalls();
+  const e6b = await thr(PL.install({ source: 'git', value: URL_H, ref: 'v1', credential: 'plugin-git' }));
+  const f6b = fetchOf(calls());
+  setMode({ fail: 'hang' }); resetCalls();
+  const e6c = await thr(require(path.join(REPO, 'src/server/plugin-install.js')).create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP, gitTimeoutMs: 600 }).install({ source: 'git', value: URL_H, ref: 'v1', credential: 'plugin-git' }));
+  const f6c = fetchOf(calls());
+  setMode(null);
+  const e6d = await thr(PL.install({ source: 'git', value: URL_H, ref: 'bad', credential: 'plugin-git' }));
+  ok(e6a && e6a.code === 'plugin_git_ref_missing' && e6b && e6b.code === 'plugin_git_auth' && /token of the Plugin Git credential/.test(e6b.message) && e6c && e6c.code === 'plugin_git_timeout' && e6d && e6d.code === 'plugin_tree_rejected' && /symlink/.test(e6d.message),
+    'every failure is NAMED: plugin_git_ref_missing · plugin_git_auth · plugin_git_timeout · plugin_tree_rejected', [e6a, e6b, e6c, e6d].map((e) => e && `${e.code}: ${String(e.message).slice(0, 80)}`));
+  ok(gone(f6b) && gone(f6c) && !fs.readdirSync(path.join(GR, 'data', 'plugins-staging')).length && PL.installRecord('acme.private').sha === sha1, '…the credential files are shredded on every failure too, the stage is empty, the installed record is untouched');
+  // ⑦ update re-pulls the RECORDED source: its ref and its credential
+  credValues = { host: 'repo.test', token: TOKEN };
+  await PL.install({ source: 'git', value: URL_H, ref: 'main', credential: 'plugin-git' }); resetCalls();
+  const u7 = await PL.update('acme.private');
+  const f7 = fetchOf(calls());
+  ok(u7.plugin.version === '1.0.1' && f7 && f7.argv.at(-1) === 'main' && f7.ask && f7.ask.pass === TOKEN && PL.installRecord('acme.private').sha === sha2, 'Update re-pulls the recorded ref with the recorded credential and records the new sha');
+  // ⑧ the row's reachability Test: ls-remote with the credential (the same files, shredded)
+  const PI = require(path.join(REPO, 'src/server/plugin-install.js'));
+  const inst8 = PI.create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP });
+  resetCalls();
+  const t8 = await inst8.testCredential(URL_H);
+  const f8 = calls().find((c) => c.argv.includes('ls-remote'));
+  ok(t8.ok && t8.head === sha2 && f8 && f8.ask && !leaks(f8, TOKEN).length && gone(f8), 'the Test = git ls-remote <url> HEAD with the credential (HEAD answered), token-free, its files gone after');
+  // ⑨ RED CONTROLS — patched copies of the installer each turn a census above red
+  const SRC = read('src/server/plugin-install.js');
+  const M = mutantCopies('plugin-trust-git', REPO);
+  const mutant = async (tag, from, to, check) => {
+    if (!SRC.includes(from)) return ok(false, `control ${tag}: its anchor is gone from plugin-install.js`, from);
+    const mod = M.load('src/server/plugin-install.js', SRC.replace(from, to), tag);
+    const ins = mod.create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP });
+    resetCalls();
+    let err = null; try { await ins.install({ source: 'git', value: URL_H, ref: 'v1', credential: 'plugin-git' }); } catch (e) { err = e; }
+    return check(fetchOf(calls()), err);
+  };
+  const rr = await post('/api/plugins/install', { source: 'git', value: URL_H, credential: 'my-own-token' });
+  ok(rr.status === 400 && rr.body.code === 'plugin_git_credential', 'the install ROUTE takes a credential by its integration row only (plugin-git) — any other value (a token typed into the form) is refused by name', rr.body);
+  ok(await mutant('token-in-url', "spec.url, spec.ref || 'HEAD']", "(cred && cred.token ? spec.url.replace('https://', 'https://' + cred.username + ':' + cred.token + '@') : spec.url), spec.ref || 'HEAD']", (c) => leaks(c, TOKEN).includes('argv')), 'control (a): a copy that puts the token in the clone URL is RED (argv)');
+  ok(await mutant('token-in-env', 'return { dir, files, add: { GIT_ASKPASS: ask } };', 'return { dir, files, add: { GIT_ASKPASS: ask, GIT_PASSWORD: cred.token } };', (c) => leaks(c, TOKEN).includes('env GIT_PASSWORD')), 'control (b): a copy that hands the token in the env is RED');
+  ok(await mutant('askpass-leak', "*) cat ${shq(tok)} ;;", "*) echo ${shq(cred.token)} ;;", (c) => leaks(c, TOKEN).includes('askpass text')), 'control (c): a LEAKING askpass copy (the token in the script) is RED');
+  process.on('exit', () => { try { fs.rmSync(G, { recursive: true, force: true }); } catch { /* gone */ } });
+  ok(await mutant('no-shred', '  for (const f of c.files) gone = (await shredFile(f)) && gone;', '  for (const f of c.files) await fsp.unlink(f).catch(() => {});', (c) => !gone(c)), 'control (d): a copy that only UNLINKS the files (no overwrite) is RED — the token\'s inode still holds it');
+  // ⑩ ROUND 2 (主开发's acceptance, MUST 2): the hub user's HOME git config is never read by a plugin's git child —
+  // GIT_CONFIG_GLOBAL=/dev/null on every one beside GIT_CONFIG_NOSYSTEM=1: a url.insteadOf there would send the clone (and the
+  // askpass's token) to another repository than the one credentialFor judged. REAL git under the wrapper applies the rewrite.
+  const FX2 = gitRepoFixture(path.join(G, 'other'), [{ files: { 'vibespace-plugin.json': pkg('6.6.6') }, tag: 'v1' }]);
+  const H2 = path.join(G, 'home-rewrite'); fs.mkdirSync(H2, { recursive: true });
+  fs.writeFileSync(path.join(H2, '.gitconfig'), `[url "file://${FX2.bare}"]\n\tinsteadOf = file://${FX.bare}\n`);
+  const homeWas = process.env.HOME;
+  const viaHome = async (ins) => { process.env.HOME = H2; resetCalls(); try { return await ins.install({ source: 'git', value: URL_H, ref: 'v1', credential: 'plugin-git' }); } catch (e) { return { err: e }; } finally { process.env.HOME = homeWas; } };
+  credValues = { host: 'repo.test', token: TOKEN };
+  const r10 = await viaHome(require(path.join(REPO, 'src/server/plugin-install.js')).create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP }));
+  const c10 = calls(), n10 = c10.filter((c) => c.argv.includes('fetch') || c.argv.includes('ls-remote'));
+  ok(r10.version === '1.0.0' && r10.sha === sha1 && c10.length >= 4 && c10.every((c) => c.env.GIT_CONFIG_GLOBAL === '/dev/null' && c.env.GIT_CONFIG_NOSYSTEM === '1') && n10.length === 1 && n10[0].ask && n10[0].ask.pass === TOKEN,
+    'round 2: a HOME .gitconfig whose url.insteadOf rewrites the repository ⇒ the clone still comes from the URL credentialFor judged (v1 = 1.0.0 at its sha, ONE fetch answered by the askpass) — every git child (init · fetch · checkout · rev-parse) runs with GIT_CONFIG_GLOBAL=/dev/null beside GIT_CONFIG_NOSYSTEM=1', { v: r10.version, err: r10.err && r10.err.message, env: c10.map((c) => c.env.GIT_CONFIG_GLOBAL) });
+  const homeAnchor = "GIT_CONFIG_GLOBAL: '/dev/null', ";
+  ok(SRC.includes(homeAnchor), 'control: the HOME-config switch\'s anchor is in plugin-install.js');
+  const r10m = await viaHome(M.load('src/server/plugin-install.js', SRC.replace(homeAnchor, ''), 'home-config').create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP }));
+  ok(r10m.version === '6.6.6', 'control (e): a copy WITHOUT GIT_CONFIG_GLOBAL follows the HOME rewrite — it installs the OTHER repository\'s package (6.6.6), fetched with the token meant for this one: RED', r10m.version || (r10m.err && r10m.err.message));
+  await PL.install({ source: 'git', value: URL_H, ref: 'v1', credential: 'plugin-git' }); // the right package back
+  // ⑪ ROUND 2 (SHOULD 5): a throw while the credential files are written (a full disk at the second) SHREDS the first one
+  const PIx = require(path.join(REPO, 'src/server/plugin-install.js'));
+  const W11 = path.join(G, 'witness-11');
+  const failSecond = () => { let n = 0; return async (f, text, o) => { n++; if (n === 2) throw Object.assign(new Error('ENOSPC: no space left on device, open'), { code: 'ENOSPC' }); await fs.promises.writeFile(f, text, o); if (n === 1) fs.linkSync(f, W11); }; };
+  const credT = { kind: 'token', host: 'repo.test', username: 'x-access-token', token: TOKEN };
+  const st11 = fs.mkdtempSync(path.join(G, 'st11-'));
+  const e11 = await thr(PIx.credentialFiles(st11, credT, { writeFile: failSecond() }));
+  ok(e11 && e11.code === 'ENOSPC' && fs.existsSync(W11) && !held(W11, TOKEN) && !fs.readdirSync(st11).length, 'round 2: a throw at the SECOND credential file (ENOSPC) ⇒ the first is SHREDDED like every other way out — its inode (a hard-link witness) holds other bytes; the folder is gone', { code: e11 && e11.code, left: fs.readdirSync(st11) });
+  const throwAnchor = '  } catch (e) { await shredCredentials({ dir, files }); throw e; }';
+  ok(SRC.includes(throwAnchor), 'control: the shred-on-throw anchor is in plugin-install.js');
+  fs.rmSync(W11, { force: true });
+  const st11b = fs.mkdtempSync(path.join(G, 'st11b-'));
+  await thr(M.load('src/server/plugin-install.js', SRC.replace(throwAnchor, '  } catch (e) { throw e; }'), 'no-shred-on-throw').credentialFiles(st11b, credT, { writeFile: failSecond() }));
+  ok(held(W11, TOKEN), 'control (f): a copy that does not shred on that throw leaves the token in the first file\'s inode (only the stage\'s rm would unlink it) — RED');
+  // ⑫ ROUND 3 (item 3): no HOME config is read (⑩), so a TLS-inspecting egress's trust root reaches git through the EGRESS DOOR —
+  // GIT_SSL_CAINFO / GIT_SSL_CAPATH (a git on libcurl-GnuTLS ignores SSL_CERT_FILE / SSL_CERT_DIR); a HOME http.sslCAInfo never
+  const H3 = path.join(G, 'home-ca'); fs.mkdirSync(H3, { recursive: true });
+  fs.writeFileSync(path.join(H3, '.gitconfig'), `[http]\n\tsslCAInfo = ${path.join(H3, 'home-ca.pem')}\n`);
+  const CAF = path.join(G, 'egress-ca.pem'), CAP = path.join(G, 'egress-certs');
+  const envWas = { HOME: process.env.HOME, GIT_SSL_CAINFO: process.env.GIT_SSL_CAINFO, GIT_SSL_CAPATH: process.env.GIT_SSL_CAPATH };
+  const viaCa = async (ins) => { Object.assign(process.env, { HOME: H3, GIT_SSL_CAINFO: CAF, GIT_SSL_CAPATH: CAP }); resetCalls(); try { return await ins.install({ source: 'git', value: URL_H, ref: 'v1', credential: 'plugin-git' }); } catch (e) { return { err: e }; } finally { for (const [k, v] of Object.entries(envWas)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; } } };
+  /** what the REAL git reads for http.sslCAInfo under `env` ('' = nothing) */
+  const caOf = (env) => { try { return execFileSync(FX.realGit, ['config', '--get', 'http.sslcainfo'], { env, cwd: G, encoding: 'utf8' }).trim(); } catch { return ''; } };
+  const r12 = await viaCa(PIx.create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP }));
+  const c12 = calls();
+  ok(r12.version === '1.0.0' && c12.length >= 4 && c12.every((c) => c.env.GIT_SSL_CAINFO === CAF && c.env.GIT_SSL_CAPATH === CAP) && caOf(c12[0].env) === '' && caOf({ ...c12[0].env, GIT_CONFIG_GLOBAL: undefined }) === path.join(H3, 'home-ca.pem'),
+    'round 3: the hub\'s GIT_SSL_CAINFO / GIT_SSL_CAPATH reach EVERY git child (the egress door) while a HOME http.sslCAInfo is NOT read — real git under the child\'s env answers none (the same env without GIT_CONFIG_GLOBAL answers the HOME file: the probe sees it)', { v: r12.version, err: r12.err && r12.err.message, ca: c12.map((c) => c.env.GIT_SSL_CAINFO) });
+  const AES = fs.readFileSync(path.join(REPO, 'src/agent-env.js'), 'utf8');
+  const caAnchor = ", 'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH']);", reqAnchor = "const { serviceEnv } = require('../agent-env.js');";
+  ok(AES.includes(caAnchor) && SRC.includes(reqAnchor), 'control: the egress door\'s git trust-root names are in agent-env.js; plugin-install.js reads serviceEnv from it');
+  const aeNoCa = M.write('src/agent-env.js', AES.replace(caAnchor, ']);'), 'no-git-ca');
+  const r12m = await viaCa(M.load('src/server/plugin-install.js', SRC.replace(reqAnchor, `const { serviceEnv } = require(${JSON.stringify(aeNoCa)});`), 'no-git-ca').create({ rootDir: GR, log: quiet, integrations: () => store, gitBin: WRAP }));
+  const c12m = calls();
+  ok(c12m.length >= 1 && c12m.every((c) => !('GIT_SSL_CAINFO' in c.env) && !('GIT_SSL_CAPATH' in c.env) && caOf(c.env) === ''), 'control (g): a copy whose egress door lacks GIT_SSL_CAINFO / GIT_SSL_CAPATH hands git NO trust root at all (the HOME one is not read either) — behind a TLS-inspecting egress every clone fails: RED', { v: r12m.version, env: c12m.map((c) => c.env.GIT_SSL_CAINFO || null) });
+}
 
 // ── ④ remote shim shipping ──
 console.log('— shims');

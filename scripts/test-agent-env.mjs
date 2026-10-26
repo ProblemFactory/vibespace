@@ -146,12 +146,12 @@ check(`MUTANT a spread of the hub's env under the built names ⇒ RED (${spread.
 //    net/http + crypto/x509 read (measured on the pinned rclone 1.69.3) — a proxy stays un-keepable by `keep`
 const { SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP } = require('../src/agent-env.js');
 {
-  const hubE = { ...hub, HTTP_PROXY: 'http://p:1', HTTPS_PROXY: 'http://p:2', NO_PROXY: 'localhost', no_proxy: 'localhost', ALL_PROXY: 'socks5://p:3', SSL_CERT_FILE: '/r.pem', SSL_CERT_DIR: '/certs', XDG_CACHE_HOME: '/xc' };
+  const hubE = { ...hub, HTTP_PROXY: 'http://p:1', HTTPS_PROXY: 'http://p:2', NO_PROXY: 'localhost', no_proxy: 'localhost', ALL_PROXY: 'socks5://p:3', SSL_CERT_FILE: '/r.pem', SSL_CERT_DIR: '/certs', GIT_SSL_CAINFO: '/g.pem', GIT_SSL_CAPATH: '/gcerts', XDG_CACHE_HOME: '/xc' };
   const eg = serviceEnv(hubE, { egress: true });
-  check('egress: the base + exactly the egress names the hub carries (ALL_PROXY never: rclone ignores it)', sorted(eg) === sorted({ ...serviceEnv(hubE), HTTP_PROXY: 1, HTTPS_PROXY: 1, http_proxy: 1, NO_PROXY: 1, no_proxy: 1, SSL_CERT_FILE: 1, SSL_CERT_DIR: 1 }), sorted(eg));
+  check('egress: the base + exactly the egress names the hub carries (ALL_PROXY never: rclone ignores it; git\'s own trust-root names since engine-distribution round 3)', sorted(eg) === sorted({ ...serviceEnv(hubE), HTTP_PROXY: 1, HTTPS_PROXY: 1, http_proxy: 1, NO_PROXY: 1, no_proxy: 1, SSL_CERT_FILE: 1, SSL_CERT_DIR: 1, GIT_SSL_CAINFO: 1, GIT_SSL_CAPATH: 1 }), sorted(eg));
   check('egress: still no secret, no config, no loader hook', !Object.keys(eg).some((k) => /^(VIBESPACE_|CLAUDE_|ANTHROPIC_|AWS_)|^NODE_OPTIONS$|^PORT$/.test(k)));
   check('the rclone env (keep RCLONE_ENV_KEEP + egress): + SSH_AUTH_SOCK + XDG_CACHE_HOME (the names rclone reads)', sorted(serviceEnv(hubE, { keep: RCLONE_ENV_KEEP, egress: true })) === sorted({ ...eg, SSH_AUTH_SOCK: 1, XDG_CACHE_HOME: 1 }));
-  check('EGRESS_ENV / RCLONE_ENV_KEEP / SSH_ENV_KEEP are pinned (frozen)', JSON.stringify(EGRESS_ENV) === JSON.stringify(['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR'])
+  check('EGRESS_ENV / RCLONE_ENV_KEEP / SSH_ENV_KEEP are pinned (frozen)', JSON.stringify(EGRESS_ENV) === JSON.stringify(['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH'])
     && JSON.stringify(RCLONE_ENV_KEEP) === JSON.stringify(['SSH_AUTH_SOCK', 'XDG_CACHE_HOME', 'XDG_CONFIG_HOME']) && JSON.stringify(SSH_ENV_KEEP) === JSON.stringify(['SSH_AUTH_SOCK'])
     && [EGRESS_ENV, RCLONE_ENV_KEEP, SSH_ENV_KEEP].every(Object.isFrozen));
   const always = judgeService((b, o = {}) => serviceEnv(b, { ...o, egress: true }));

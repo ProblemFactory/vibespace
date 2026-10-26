@@ -1,0 +1,101 @@
+{
+ "about": "THE FOR-YOU STRESS FIXTURE (lane foryou-honest, 2026-10-25): the 21 open agent questions of the stress evaluation (the duo demo's stress-asks.sh — four synthetic conversations, every choice written as PROSE in the detail, options=null) + one contracts question so the totals are the brief's: 21 open, six on one conversation. Read by test-user-todos-honest (PURE: the option shapes, the honest count) and test-foryou-honest-chrome (a stub files each through the hub's agent route). Synthetic words only. The `plan` ask (acceptance round 2, 2026-10-25) is filed on its own by the chrome suite's ⑥: an agent's numbered PLAN in the detail — never chips, the person types.",
+ "conversations": {
+  "payments": [
+   [
+    "这是一条很长的问题，用来看列表行里的行内回答在文字很长时怎么折行、怎么截断、芯片会不会被挤走：我已经把 payments 的退款重试改成了指数退避（1→2→4→8→16 秒，最多 5 次，第 5 次后标记「需要人工」），测试 7/7 通过；但我在 orders 里发现另一处同样的固定重试逻辑，还有 webhook 的重放也是固定 2 秒 3 次。要不要我把这三处都改成同样的策略？如果改，是否也要把日志加上？另外退款那条的幂等键目前是订单号+金额，建议改成订单号+退款单号，你同意吗？",
+    "选项很多：A 三处都改；B 只改退款；C 先不改；D 改但不加日志；E 改并加日志；F 幂等键也改；G 全部交给我判断；H 先开会讨论"
+   ],
+   [
+    "退款那条也改成同样的策略吗？",
+    "A 改（推荐）；B 不改"
+   ],
+   [
+    "要不要我顺便补测试？",
+    "是 / 否"
+   ],
+   [
+    "第四个问题：测试目录放在 test/ 还是 __tests__/？",
+    "A test/（现有）；B __tests__/"
+   ],
+   [
+    "第五个问题：要不要我把结果发到群里？",
+    "是 / 否"
+   ],
+   [
+    "第六个问题（短）",
+    "A / B / C"
+   ]
+  ],
+  "reports": [
+   [
+    "Q3 材料用哪一版？v2 的两页附录是手改的，v3 是按模板重新生成的。你要哪一版？",
+    "A v2；B v3；C 两版都给；D 合并成 v4"
+   ],
+   [
+    "附录里的图要不要换成矢量图？",
+    "是 / 否"
+   ],
+   [
+    "报表的货币单位用万元还是元？",
+    "A 万元；B 元；C 两者并列"
+   ],
+   [
+    "需要把 Q2 的对比列加回来吗？",
+    "是 / 否"
+   ],
+   [
+    "封面日期用提交日还是数据截止日？",
+    "A 提交日；B 截止日"
+   ]
+  ],
+  "contracts": [
+   [
+    "NDA 的读取权限还没批，要不要我先按模板草拟一版？",
+    "是 / 否"
+   ],
+   [
+    "合同里甲方名称用全称还是简称？",
+    "A 全称；B 简称"
+   ],
+   [
+    "违约金比例 20% 偏高，要不要按行业惯例改 10%？",
+    "A 改 10%；B 保持 20%；C 问法务"
+   ],
+   [
+    "管辖法院写北京还是上海？",
+    "A 北京；B 上海"
+   ],
+   [
+    "签署日期写哪一天？",
+    "A 今天；B 下周一"
+   ]
+  ],
+  "logs": [
+   [
+    "ingest 日志按天切分后，旧日志保留多少天？",
+    "A 7 天；B 30 天；C 90 天；D 永久"
+   ],
+   [
+    "要不要压缩旧日志？",
+    "是 / 否"
+   ],
+   [
+    "切分时间用 UTC 还是本地时间？",
+    "A UTC；B 本地"
+   ],
+   [
+    "一个几乎没有内容的问题",
+    ""
+   ],
+   [
+    "另一个问题，带很长很长的选项标签：这是选项 A 的很长说明，用来看芯片里的文字会不会溢出，选项 B 也同样长，选项 C 更长更长更长更长更长更长更长更长",
+    "A 这是选项 A 的很长说明文字；B 选项 B 也同样长的说明；C 更长更长更长更长更长更长更长更长"
+   ]
+  ]
+ },
+ "plan": [
+  "按这个计划处理 ingest 日志，可以吗？",
+  "1. 先把 ingest 的日志按天切分\n2. 旧日志压缩后保留 30 天\n3. 跑一遍回放验证"
+ ]
+}

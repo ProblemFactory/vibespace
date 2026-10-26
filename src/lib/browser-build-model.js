@@ -4,7 +4,9 @@
 // a missing build's mark, a machine's build list (src/browser-builds.js `buildsView`) — and this file says it: the
 // profile card's line, the Change build… dialog's rows (every build a row; one that cannot be picked greyed WITH its
 // reason as text), the sentences above its button, a refusal by its CODE. The server's English is the agent's.
+// lane engine-plugin: + a browser ENGINE plugin ({kind:'plugin', id}) — the «自研内核» card: the probe's version, never a path.
 const i18nKey = (s) => s;
+const ENGINE_ID_RE = /^[a-z0-9][a-z0-9-]*\.[a-z0-9][a-z0-9-]*$/; // = src/plugin-manifest.js ID_RE
 
 const VERSION_RE = /^\d{2,4}(?:\.\d{1,6}){2,3}$/;
 const majorOf = (v) => { const n = Number(String(v || '').split('.')[0]); return Number.isInteger(n) && n > 0 ? n : null; };
@@ -12,6 +14,7 @@ const normalize = (c) => {
   if (!c || typeof c !== 'object') return { kind: 'default' };
   if (c.kind === 'build' && VERSION_RE.test(String(c.version || ''))) return { kind: 'build', version: String(c.version) };
   if (c.kind === 'path' && typeof c.path === 'string' && c.path.startsWith('/')) return { kind: 'path', path: c.path };
+  if (c.kind === 'plugin' && ENGINE_ID_RE.test(String(c.id || ''))) return { kind: 'plugin', id: String(c.id) };
   return { kind: 'default' };
 };
 
@@ -20,7 +23,57 @@ export function choiceWords(choice, t) {
   const c = normalize(choice);
   if (c.kind === 'build') return t(i18nKey('Chrome {version}'), { version: c.version });
   if (c.kind === 'path') return t(i18nKey('the chrome at {path}'), { path: c.path });
+  if (c.kind === 'plugin') return t(i18nKey('the custom kernel ({id})'), { id: c.id });
   return t(i18nKey("the browser CLI's default build"));
+}
+
+/** lane engine-plugin: one engine row's sub-line — its plugin and the kernel's version (the probe's fact; never a path), or
+ *  why it cannot be picked (the refusal by its code, the kernel's state). Lane engine-distribution: the kernel's download as
+ *  it runs / why it failed; the version VibeSpace MEASURED («measured x») beats the plugin's word, which beats the declared
+ *  one («declared x (not measured)»); a verified receipt says so. */
+export function engineNote(e, t) {
+  if (!e || typeof e !== 'object') return '';
+  const plugin = String(e.label || e.id || '');
+  if (e.code) return buildRefusalWords({ code: e.code }, t) || t(i18nKey('{plugin} does not answer as a browser engine.'), { plugin });
+  const k = e.kernel && typeof e.kernel === 'object' ? e.kernel : null;
+  if (!e.installed) {
+    if (k && k.state === 'downloading') return k.total ? t(i18nKey('{plugin} · downloading its kernel… {pct}%'), { plugin, pct: Math.min(100, Math.floor((100 * Number(k.bytes || 0)) / Number(k.total))) }) : t(i18nKey('{plugin} · downloading its kernel…'), { plugin });
+    if (k && k.state === 'failed' && k.code === 'engine_node_unsupported') return t(i18nKey('{plugin} · its kernel needs Node {need} or later to unpack — this VibeSpace runs on Node {node}; nothing was downloaded'), { plugin, need: String(k.need || '22.15'), node: String(k.node || '?') });
+    if (k && k.state === 'failed' && k.code === 'engine_kernel_aside') return t(i18nKey('{plugin} · its previous kernel is set aside and could not be put back in its place — VibeSpace tries again at the next start'), { plugin });
+    if (k && k.state === 'failed' && k.code) return t(i18nKey('{plugin} · its kernel could not be downloaded: {why}'), { plugin, why: kernelFailWords(k.code, t) });
+    return t(i18nKey('{plugin} · its kernel is not installed on this computer.'), { plugin });
+  }
+  if (!e.executable) return t(i18nKey("{plugin} · its kernel can't be run."), { plugin });
+  const verified = e.integrity && e.integrity.verified === true ? ' · ' + t(i18nKey('verified')) : '';
+  if (e.measuredVersion) return t(i18nKey('{plugin} · measured {version}'), { plugin, version: String(e.measuredVersion) }) + verified;
+  if (e.version) return t(i18nKey('{plugin} · version {version}'), { plugin, version: String(e.version) }) + verified;
+  if (e.declaredVersion) return t(i18nKey('{plugin} · declared {version} (not measured)'), { plugin, version: String(e.declaredVersion) }) + verified;
+  return t(i18nKey('{plugin} · the kernel did not say its version'), { plugin }) + verified;
+}
+/** lane engine-distribution: why a kernel download stopped, by its code (the server's own sentence names the details). */
+function kernelFailWords(code, t) {
+  switch (String(code || '')) {
+    case 'disk': return t(i18nKey('not enough free disk space'));
+    case 'build_platform_unsupported': return t(i18nKey('the engine offers no kernel for this computer'));
+    case 'build_fetch_failed': return t(i18nKey('its download server could not be reached'));
+    case 'build_verify_failed': return t(i18nKey('the download did not match its sha256 — nothing was kept'));
+    case 'build_unpack_failed': return t(i18nKey('the archive is not the layout its kernel.json declares'));
+    case 'browser_engine_protocol': return t(i18nKey('its kernel.json cannot be read'));
+    case 'engine_url_not_https': return t(i18nKey('the cluster names a kernel address that is not https'));
+    case 'engine_sha_malformed': return t(i18nKey('the cluster pins a kernel sha256 that is not 64 hex digits'));
+    default: return String(code);
+  }
+}
+/** The Settings row's fact beside «Default browser engine» (GET /api/browser/engines): where the value in effect comes from
+ *  (a cluster preset says so) + each engine on this computer. */
+export function engineFactText(r, t) {
+  if (!r || r.error || !r.defaultEngine) return t(i18nKey('The browser engines could not be read.'));
+  const d = r.defaultEngine;
+  const value = String(d.value || 'default').startsWith('plugin:') ? choiceWords({ kind: 'plugin', id: String(d.value).slice(7) }, t) : t(i18nKey("the browser CLI's default build"));
+  const parts = [d.source === 'fleet' ? t(i18nKey('Set by the cluster preset: {value}.'), { value }) : d.source === 'user' ? t(i18nKey('Your choice: {value}.'), { value }) : t(i18nKey('Default: {value}.'), { value })];
+  const engines = Array.isArray(r.engines) ? r.engines : [];
+  parts.push(engines.length ? engines.map((e) => engineNote(e, t)).join(' · ') : t(i18nKey('No browser engine plugin is enabled on this computer.')));
+  return parts.join(' ');
 }
 
 /**
@@ -48,7 +101,7 @@ export function cardBuildLine({ buildChoice = true, choice = null, running = nul
  * could not be read says why in one note row; the default stays pickable. → `[{key, kind, version?, label, pickable,
  * note, current}]`.
  */
-export function buildRows(listing, { choice = null, lastChromiumMajor = null, local = true, machine = '', t, download = null } = {}) {
+export function buildRows(listing, { choice = null, lastChromiumMajor = null, local = true, machine = '', t, download = null, engines = null } = {}) {
   const cur = normalize(choice);
   const rows = [{ key: 'default', kind: 'default', label: t(i18nKey("The browser CLI's default build")), pickable: true, note: t(i18nKey('Whatever the browser CLI picks — usually the newest Chrome it installed.')), current: cur.kind === 'default' }];
   const l = listing && typeof listing === 'object' ? listing : null;
@@ -75,6 +128,16 @@ export function buildRows(listing, { choice = null, lastChromiumMajor = null, lo
     // the chosen build is GONE from the list: its row stays (greyed, said) so the person sees what it was set to
     if (cur.kind === 'build' && !rows.some((r) => r.kind === 'build' && r.version === cur.version)) rows.splice(1, 0, { key: 'v:' + cur.version, kind: 'build', version: cur.version, label: t(i18nKey('Chrome {version}'), { version: cur.version }), pickable: false, note: t(i18nKey('No longer installed.')), current: true });
   }
+  // lane engine-plugin: «自研内核» — one card per browser ENGINE plugin on this computer (its probe's version; greyed with why)
+  if (local) {
+    // the machine's listing carries them (`listing.engines` — the server's buildsView / machineBuilds); an explicit list wins
+    for (const e of Array.isArray(engines) ? engines : l && Array.isArray(l.engines) ? l.engines : []) {
+      if (!e || !ENGINE_ID_RE.test(String(e.id || ''))) continue;
+      rows.push({ key: 'e:' + e.id, kind: 'plugin', id: String(e.id), icon: 'browserEngine', label: t(i18nKey('Custom kernel')), pickable: !e.code && !!e.installed && !!e.executable, note: engineNote(e, t), current: cur.kind === 'plugin' && cur.id === e.id });
+    }
+    // the chosen engine is GONE from the table (its plugin off / removed): its row stays (greyed, said)
+    if (cur.kind === 'plugin' && !rows.some((r) => r.kind === 'plugin' && r.id === cur.id)) rows.push({ key: 'e:' + cur.id, kind: 'plugin', id: cur.id, icon: 'browserEngine', label: t(i18nKey('Custom kernel')), pickable: false, note: t(i18nKey('Its plugin is not running on this computer.')), current: true });
+  }
   if (local) rows.push({ key: 'path', kind: 'path', label: t(i18nKey('A chrome file I name')), pickable: true, note: t(i18nKey('The full path of a Chrome or Chromium program on this computer.')), current: cur.kind === 'path', path: cur.kind === 'path' ? cur.path : '' });
   // lane chrome-builds-download: the last row opens the picker (this computer, Linux x64 — the server's `download.offered`); an act, never a choice
   if (local && download && download.offered) rows.push({ key: 'download', kind: 'download', label: t(i18nKey('Download another build…')), pickable: false, note: t(i18nKey("From Google's Chrome for Testing — every version, its compatibility said before it downloads.")), current: false });
@@ -86,6 +149,7 @@ export function choiceOfRow(row, pathText = '') {
   if (!row || !row.pickable) return null;
   if (row.kind === 'default') return { kind: 'default' };
   if (row.kind === 'build') return { kind: 'build', version: row.version };
+  if (row.kind === 'plugin') return ENGINE_ID_RE.test(String(row.id || '')) ? { kind: 'plugin', id: row.id } : null;
   if (row.kind === 'path') { const p = String(pathText || '').trim(); return p.startsWith('/') ? { kind: 'path', path: p } : null; }
   return null;
 }
@@ -140,6 +204,13 @@ export function buildRefusalWords(r, t) {
     case 'browsing_yourself': return t(i18nKey('You are browsing this profile yourself — close your browsing first.'));
     case 'browser_driven': return t(i18nKey('Somebody is driving this browser by hand right now — hand it back first.'));
     case 'browser_restarting': return t(i18nKey('The browser is restarting — try again in a moment.'));
+    // lane engine-plugin: a browser ENGINE's refusals (src/browser-engines.js ENGINE_CODES)
+    case 'browser_engine_missing': return t(i18nKey('That browser engine plugin is not running on this computer — enable it in ⚙ → Plugins.'));
+    case 'browser_engine_kernel_missing': return t(i18nKey("That engine's kernel is not installed on this computer."));
+    case 'browser_engine_not_executable': return t(i18nKey("That engine's kernel can't be run."));
+    case 'browser_engine_protocol': return t(i18nKey('That engine speaks another version of the engine protocol — update the plugin or VibeSpace.'));
+    case 'browser_engine_unanswered': return t(i18nKey("That engine's plugin did not answer — restart it in ⚙ → Plugins."));
+    case 'browser_engine_env': return t(i18nKey('That engine asked to set environment variables VibeSpace does not allow.'));
     default: return null;
   }
 }

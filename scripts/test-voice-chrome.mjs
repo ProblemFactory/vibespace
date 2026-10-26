@@ -92,6 +92,7 @@ window.__fy = () => {
   const ctx = { t, nameFor: () => 'Voice lane chat', wordsOf: (i) => i.title, detailOf: (i) => i.detail, replyState: () => ({ show: true, enabled: true, why: '' }) };
   const row = renderRow({ item, resolved: false }, ctx);
   pop.appendChild(row); document.body.appendChild(pop);
+  row.classList.add('ut-open'); // lane foryou-honest: a touch screen's row is folded — the panel's openOne opens it before its Reply
   row.querySelector(':scope > .ut-body').append(replyBoxEl(t));
   return true;
 };

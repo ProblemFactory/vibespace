@@ -1439,7 +1439,7 @@ const integrationsWiring = require('./src/server/integrations-wiring.js').create
   app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), drivePresets: () => require('./src/mounts').MountManager.drivePresets(),
 }); // created BEFORE the mounts-plugins wiring: the agent browser's key consumer (P4 §7.5) registers its Test runners with this store and the keeper resolves through it
 // ── Mounts + plugins + dial-session wiring (src/server/mounts-plugins-wiring.js, decomposition #12) ──
-const { decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, pluginLoader,
+const { decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, browserKeeper, bootBrowserKeeper, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs, bootEngineDistribution, pluginLoader,
 } = require('./src/server/mounts-plugins-wiring.js').create({
   app, server: hub, rootDir: __dirname, HOST, PORT, BUFFERS_DIR, PERMISSION_MODES, integrations: integrationsWiring.store, getJobs: () => jobsWiring.getJobs(), // + lane jobs-browser: a job browses as its owner conversation // + agent browser P4 second half (§7.5): the key consumer's store
   auth, wss, WS_OPEN, syncStores, agentdDialDevices, getAccounts: () => accounts, getChannels: () => channelsWiring.channels, // + lane vault-contents-window: the Vault window lists these two stores
@@ -1757,7 +1757,7 @@ probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(
   // no systemd — the entrypoint respawn loop restarts us when update.sh kills
   // this pid; dtach sessions live in the same PID namespace and survive).
   try { fs.writeFileSync(path.join(__dirname, 'data', 'server.pid'), String(process.pid)); } catch {}
-  setTimeout(() => jobsWiring.initAfterListen(), 1500); setTimeout(() => appsWiring.afterListen(), 2500); memSampler.start(); // Background Work engine: adopt-first, never blocks boot; Layer 0 apps: a rebuilt machine's apps put back (the replay marker hit = nothing)
+  setTimeout(() => jobsWiring.initAfterListen(), 1500); setTimeout(() => appsWiring.afterListen(), 2500); setTimeout(() => bootEngineDistribution(), 4000); memSampler.start(); // lane engine-distribution: the fleet's engine plugin (fleet.json browserEngine) — ONE async job, never on the boot path // Background Work engine: adopt-first, never blocks boot; Layer 0 apps: a rebuilt machine's apps put back (the replay marker hit = nothing)
   console.log(`  dtach: ${DTACH_CMD}, node: ${NODE_CMD}, claude: ${CLAUDE_CMD}, codex: ${CODEX_CMD}`);
   if (process.platform === 'linux') console.log(`  X display: ${X_ENV.DISPLAY || '(none)'}${X_ENV.XAUTHORITY ? ' (xauth: ' + X_ENV.XAUTHORITY + ')' : ''} — clipboard image paste ${X_ENV.probed ? 'ready' : 'UNAVAILABLE (no working X display found)'}`);
 

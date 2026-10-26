@@ -162,6 +162,7 @@ import { ownResumable, keptLineWords } from '../browser-fact.js'; // lane browse
 import { receiptBook, noteInputSent, noteInputReceipt, sweepInputReceipts } from '../browser-stream.js'; // lane S2: every input has a receipt
 import { humanEndChoices, humanRefusalText, humanSyncId, addressVerdict, humanShareLine, LAUNCH_CODES } from '../browser-human.js'; // BROWSE YOURSELF (B-6ae8): the user's own browsing — its end buttons, its refusals, the address row (PURE)
 import { dialogWords, answeredWords, stuckWords, promptWords, permissionWords, printWords } from '../browser-stuck.js'; // lane browser-stuck: a page dialog / an unresponsive page in words (PURE)
+import { surfaceWords } from '../browser-surfaces.js'; // lane browser-surfaces: a browser kernel's prompt in words — its answers are the buttons (PURE)
 import { createLoopBanner } from './browser-loop-banner.js';
 import { patchPasskeyButtons } from './browser-proposal-card.js'; // lane passkey-ui: the passkey_ask banner's choices = the card's (one approve route)
 import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a page waiting for a passkey — ONE button, Cancel (PURE words) // lane site-reset: the navigation loop, keyed + patched in place
@@ -376,6 +377,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     you: null, mine: false, modeSince: 0, modeCause: null, cursor: null, confirmations: new Map(), confirmSlots: [], confirmTimer: null, wakes: null, lastMoveAt: 0, buttonsDown: 0, // r6: confirmSlots = the card's keyed slots, wakes = what a Hand back wakes
     // lane browser-stuck: the page dialog on show (the bridge's record), the prompt text typed so far, an answer in flight, a Restart in flight
     dialog: null, dialogText: null, dialogAnswering: false, restarting: false,
+    // lane browser-surfaces: a kernel's NOTED prompts on show (by id — a held one is `dialog`), the answer whose sheet is open, its typed values
+    surfaces: new Map(), sheet: null, sheetVals: {},
     // lane J r2: input feedback + the keyboard — acts sent this takeover, the last ripples, the user's mapped pointer, the echo timer
     sent: 0, ripples: [], youPt: null, echoTimer: null, reclaims: 0, composing: false, claimed: false, caretMoves: 0, strayKeys: 0, cues: 0, dialogCues: 0, dialogTakes: 0, dialogReturns: 0, frameReclaims: 0, lastFrameCueAt: 0, homeless: 0,
     // lane S4: the bridge's last `fit` record, the report last sent, the picture clocks, the pinch transform + its touches
@@ -1156,6 +1159,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       return;
     }
     if (dialogBar.dataset.passkey) { delete dialogBar.dataset.passkey; st.passkeyCancelling = false; }
+    const sv = d && d.kind && d.kind !== 'js-dialog' ? d : !d && !stuck && st.surfaces.size ? [...st.surfaces.values()].pop() : null; // lane browser-surfaces
+    if (sv) { renderSurfaceCard(sv); return; }
     dialogBar.textContent = '';
     dialogBar.style.display = d || stuck || blind ? '' : 'none';
     dialogBar.classList.toggle('stuck', !!stuck);
@@ -1194,6 +1199,66 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       dialogBar.append(line);
     }
   };
+  /** lane browser-surfaces: A KERNEL PROMPT'S CARD — the actor + verb + object as ONE title (the kind's words), the page's words,
+   *  its details under ONE fold, a button per ANSWER (`text` / `credential` / `file` answers open a sheet of the prompt's fields
+   *  first); VibeSpace paints it — the kernel paints nothing. Every answer goes back as the USER's (`dialog-answer` + its id). */
+  function renderSurfaceCard(b) {
+    const w = surfaceWords(b, t);
+    dialogBar.textContent = ''; dialogBar.style.display = ''; dialogBar.classList.toggle('stuck', false); dialogBar.classList.toggle('blind', false);
+    const title = document.createElement('div'); title.className = 'browser-live-dialog-title'; title.textContent = w.title;
+    dialogBar.append(title);
+    if (w.body) { const msg = document.createElement('div'); msg.className = 'browser-live-dialog-body'; msg.textContent = w.body; dialogBar.append(msg); }
+    if (w.details.length) {
+      const fold = document.createElement('details'); fold.className = 'browser-live-surface-details';
+      const sum = document.createElement('summary'); sum.textContent = w.fold; fold.append(sum);
+      const body = document.createElement('div'); body.className = 'browser-live-dialog-note'; body.textContent = w.details.join('\n'); fold.append(body);
+      dialogBar.append(fold);
+    }
+    const open = st.sheet && st.sheet.id === b.id ? w.buttons.find((x) => x.id === st.sheet.answerId) : null;
+    if (open) {
+      const sheet = document.createElement('div'); sheet.className = 'browser-live-surface-sheet';
+      const fields = open.kind === 'file' ? [{ fieldId: '__files', type: 'file', label: t('A file in the browser’s downloads folder (its full path)') }] : w.fields.filter((f) => f.type !== 'file');
+      for (const f of fields) {
+        let inp;
+        if (f.type === 'choice' && Array.isArray(f.options)) { inp = document.createElement('select'); for (const o of f.options) { const op = document.createElement('option'); op.value = o.value; op.textContent = o.label || o.value; op.disabled = !!o.disabled; inp.append(op); } }
+        else { inp = document.createElement('input'); inp.type = f.type === 'password' || f.type === 'credential' ? 'password' : 'text'; inp.autocomplete = 'off'; inp.placeholder = f.label || f.fieldId; }
+        inp.className = 'browser-live-dialog-input'; inp.setAttribute('aria-label', f.label || f.fieldId);
+        if (st.sheetVals[f.fieldId] !== undefined) inp.value = st.sheetVals[f.fieldId]; else if (f.defaultValue !== undefined) inp.value = f.defaultValue;
+        inp.oninput = () => { st.sheetVals[f.fieldId] = inp.value; };
+        inp.onkeydown = (e) => { e.stopPropagation(); if (enterSubmits(e)) { e.preventDefault(); sendSurface(b, open); } };
+        sheet.append(inp);
+      }
+      dialogBar.append(sheet);
+    }
+    const acts = document.createElement('div'); acts.className = 'browser-live-dialog-actions';
+    if (open) {
+      acts.append(textBtn(open.label, () => sendSurface(b, open), 'browser-live-dialog-accept browser-live-surface-send'));
+      acts.append(textBtn(t('Back'), () => { st.sheet = null; st.sheetVals = {}; renderDialog(); }, 'browser-live-dialog-dismiss'));
+    } else {
+      for (const x of w.buttons) {
+        if (x.blocked) continue;
+        acts.append(textBtn(x.label, () => { if (x.sheet) { st.sheet = { id: b.id, answerId: x.id }; st.sheetVals = {}; renderDialog(); } else sendSurface(b, x); }, (x.primary ? 'browser-live-dialog-accept' : 'browser-live-dialog-dismiss') + ' browser-live-surface-answer'));
+      }
+    }
+    for (const el of acts.children) el.disabled = !!st.dialogAnswering;
+    const hint = document.createElement('span'); hint.className = 'browser-live-dialog-hint'; hint.textContent = w.hint; acts.append(hint);
+    dialogBar.append(acts);
+  }
+  function sendSurface(b, x) {
+    if (st.dialogAnswering) return;
+    const vals = {}; let files = null;
+    if (x.kind === 'file') files = String(st.sheetVals.__files || '').split('\n').map((v) => v.trim()).filter(Boolean);
+    else for (const f of b.fields || []) if (f.type !== 'file' && st.sheetVals[f.fieldId] !== undefined) vals[f.fieldId] = String(st.sheetVals[f.fieldId]);
+    st.dialogAnswering = true; renderDialog();
+    send({ type: 'dialog-answer', id: b.id, answerId: x.id, ...(Object.keys(vals).length ? { values: vals } : {}), ...(files && files.length ? { files } : {}) });
+    st.sheetVals = {};
+  }
+  function onSurfaceRecord(m) {
+    if (!m || !m.surface || typeof m.surface !== 'object' || !m.surface.id) return;
+    st.surfaces.set(String(m.surface.id), m.surface);
+    if (st.surfaces.size > 8) st.surfaces.delete(st.surfaces.keys().next().value);
+    renderDialog();
+  }
   function answerDialog(accept, text) {
     if (!st.dialog || st.dialogAnswering) return;
     st.dialogAnswering = true; renderDialog();
@@ -1208,6 +1273,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     }
     if (m.state !== 'closed') return;
     const ids = Array.isArray(m.ids) ? m.ids : m.id ? [m.id] : [];
+    { let gone = false; for (const id of ids) if (st.surfaces.delete(String(id))) gone = true; if (st.sheet && ids.includes(st.sheet.id)) { st.sheet = null; st.sheetVals = {}; } if (gone) { st.dialogAnswering = false; renderDialog(); } } // lane browser-surfaces: a noted prompt closed
     const mine = !!(st.dialog && (ids.includes(st.dialog.id) || !ids.length));
     if (mine) { st.dialog = null; st.dialogAnswering = false; st.dialogText = null; renderDialog(); }
     if (m.answered && (mine || m.answered.by === 'auto')) showToast(answeredWords(m.answered, t), { duration: 3500 });
@@ -2096,6 +2162,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       case 'confirmation-resolved': if (m.id && st.confirmations.delete(m.id)) renderConfirms(); break;
       case 'page-note': pageNote(m.permission || null); break; // lane browser-ui-prompts-r2: the bar's one line (a permission decided, a print closed)
       case 'dialog': onDialogRecord(m); break; // lane browser-stuck: a page dialog opened / closed on the tab this view shows
+      case 'surface': onSurfaceRecord(m); break; // lane browser-surfaces: a kernel's NOTED prompt (it never holds the page)
       case 'passkey-ack': if (!m.ok) { st.passkeyCancelling = false; renderDialog(); showToast(t('The passkey request could not be cancelled: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); } break; // lane browser-passkey
       case 'dialog-ack': if (!m.ok) { st.dialogAnswering = false; renderDialog(); showToast(t('The dialog could not be answered: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); } break;
       case 'confirmation-ack': if (!m.ok) showToast(t('Could not answer the confirmation: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); else st.confirmations.delete(m.id), renderConfirms(); break;

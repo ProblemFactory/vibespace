@@ -325,8 +325,12 @@ try {
     const MUTW = mutantCopies('exitwin', REPO);
     const winSrc = fs.readFileSync(path.join(REPO, 'src/lib/inbox-window.js'), 'utf8');
     const { text: winPre, hits: winHits } = withoutVerbatimKind(winSrc, 'exit-run-ask'); // DERIVED (mirror-330-reds): the kind leaves the list wherever it sits
-    ok(winHits >= 1 && winPre !== winSrc, `CONTROL (F4 window): the patch applies — exit-run-ask taken out of the verbatim-command list (${winHits} literal)`);
-    const Q = await W.openPage({ width: 1280, height: 820, lang: 'zh', bundleText: await buildPatchedBundle(MUTW, 'src/lib/inbox-window.js', winPre, 'mdcmd') });
+    // lane foryou-honest (2.369.358): the pane's words are plain text now (the tray's renderer) — the pre-fix pane ALSO had markdown
+    // there, so the control puts both back: the kind out of the verbatim list AND the words through a Marked parse again
+    const MD_FROM = 'function wordsInto(el, src) {\n  el.innerHTML = wordsHtml(src);\n}';
+    const winPreMd = winPre.split(MD_FROM).join("import { Marked as PreMarked } from 'marked';\nconst preMd = new PreMarked({ gfm: true, breaks: true });\nfunction wordsInto(el, src) {\n  el.innerHTML = preMd.parse(String(src || ''));\n}");
+    ok(winHits >= 1 && winPre !== winSrc && winPreMd !== winPre, `CONTROL (F4 window): the patch applies — exit-run-ask taken out of the verbatim-command list (${winHits} literal) and the words through markdown again (the pre-fix pane)`);
+    const Q = await W.openPage({ width: 1280, height: 820, lang: 'zh', bundleText: await buildPatchedBundle(MUTW, 'src/lib/inbox-window.js', winPreMd, 'mdcmd') });
     await Q.evalJs(`app.openInbox({ itemId: ${JSON.stringify(r4.id)} }); true`);
     await Q.waitFor(`!!document.querySelector('.iw-detail')?.offsetParent`, 8000);
     const q4 = await Q.evalJs(`(() => { const d = document.querySelector('.iw-detail'); return { text: d.innerText, h1: !!d.querySelector('h1'), em: !!d.querySelector('em') }; })()`);

@@ -23,6 +23,9 @@
  *                                      restarted got the new Google clients and no relay page ⇒ redirect_uri_mismatch.
  *                                      Now one road: merged per FIELD (src/preset-layers.js mergeFleet), watched
  *                                      with the rest, the journal says «relay page changed»; `fleet()` reads it.
+ *                                      lane engine-plugin: + `browserEngine` {plugin, default, source, kernel} — the
+ *                                      fleet's custom browser kernel (chart `customBrowser`); the keeper's default
+ *                                      policy reads it (`browser.defaultEngine`: the user's own › this › 'default').
  *
  * `<dir>` = `VIBESPACE_PRESETS_DIR` (set and empty = off), else
  * /etc/vibespace/presets when it exists (the server's own instance only —
@@ -170,7 +173,8 @@ function create({ dir = null, log = console, now = () => Date.now(), pollMs = PO
     lastErrKey = slots.map((s) => (s.error ? `${s.layer}:${s.kind}:${s.error.code}` : '')).join('|');
     const n = P.KINDS.map((k) => `${k === 'gdrive' ? 'Google clients' : 'integrations'} ${merged[k] ? merged[k].entries.length : 'absent'}`).join(', ');
     const relay = merged.fleet && 'relayUrl' in merged.fleet.facts ? (merged.fleet.facts.relayUrl || 'none') : 'absent';
-    log.log(`[presets] ${dir}: ${n}, relay page ${relay} (the environment is the fallback for an absent kind)`);
+    const eng = merged.fleet && merged.fleet.facts.browserEngine ? `${merged.fleet.facts.browserEngine.plugin}${merged.fleet.facts.browserEngine.default ? ' (the default of new browsers)' : ''}` : 'absent'; // lane engine-plugin
+    log.log(`[presets] ${dir}: ${n}, relay page ${relay}, browser engine ${eng} (the environment is the fallback for an absent kind)`);
     sayRelay(merged.fleet);
     sayStrays();
   }

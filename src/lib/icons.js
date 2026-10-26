@@ -129,6 +129,9 @@ export const UI_ICONS = {
   // A browser session's REPLAY (2026-09-27): the agent browser's window with a play mark in place of the dot — the
   // replay window's kind icon, the chat card's Replay row, the Sessions list's rows
   browserReplay: _s('<rect x="1.5" y="2.5" width="13" height="10" rx="1.5"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/><path d="M6.8 7.4v3.4l2.9-1.7z"/>'),
+  // lane engine-plugin: A BROWSER ENGINE (the Change build… dialog's «自研内核» card) — the agent browser's window with a chip
+  // in it: the program inside is the plugin's own kernel
+  browserEngine: _s('<rect x="1.5" y="2.5" width="13" height="10" rx="1.5"/><path d="M1.5 5.5h13M4 4h.01M6 4h.01"/><rect x="5.6" y="7.3" width="4.8" height="3.4" rx=".6"/><path d="M7 7.3v-.8M9 7.3v-.8M7 10.7v.8M9 10.7v.8"/>'),
   info:      _s('<circle cx="8" cy="8" r="6.5"/><path d="M8 7v4.5M8 4.8v.2"/>'),
   // Communication panel (docs/design-communication-panel-ui.md §4.7, a4
   // 2026-09-18): the channel KINDS (chat / mail / the built-in robot), the

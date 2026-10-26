@@ -135,26 +135,26 @@ ok(J(L.scopeRows(null, {})) === '[]' && J(ids(L.scopeRows([null, { item: null },
   ok(bad2.length === 2, 'control: a copy without the session scope lists every session\'s rows under "this session"', bad2);
 }
 
-console.log('④b rowPreview — the list row\'s one-line cut of a detail (the pane has the whole text)');
+console.log('④b rowPreview — the list row\'s one-line cut of a detail, VERBATIM (lane foryou-honest P1-2: the pane has the whole text, both drawn as written)');
 const PREV = [
-  ['the first non-blank line, bold marks dropped', '\n\nMARK — **please review before Friday.**\nsecond line', 160, 'MARK — please review before Friday.'],
-  ['a heading mark dropped', '## The plan', 160, 'The plan'],
-  ['a list mark dropped', '- first, the dry run', 160, 'first, the dry run'],
-  ['a numbered mark dropped', '2) the canary', 160, 'the canary'],
-  ['a quote mark and backticks dropped', '> run `npm test` first', 160, 'run npm test first'],
-  ['snake_case stays words (a lone _ is not a mark)', 'rename user_id to owner_id', 160, 'rename user_id to owner_id'],
-  ['__emphasis__ marks dropped at the word\'s edges', 'this is __really__ urgent', 160, 'this is really urgent'],
+  ['the first non-blank line, its marks kept', '\n\nMARK — **please review before Friday.**\nsecond line', 160, 'MARK — **please review before Friday.**'],
+  ['THE STRESS ROW: an agent\'s `__tests__/` stays (the strip read «B tests__/» — the option the agent did not write)', 'A test/（现有）；B __tests__/', 160, 'A test/（现有）；B __tests__/'],
+  ['a heading / list / numbered / quote mark stays as written', '## The plan', 160, '## The plan'],
+  ['…a list mark', '- first, the dry run', 160, '- first, the dry run'],
+  ['…a quote mark and backticks', '> run `npm test` first', 160, '> run `npm test` first'],
+  ['snake_case stays words', 'rename user_id to owner_id', 160, 'rename user_id to owner_id'],
+  ['__emphasis__ marks stay (the pane is no markdown either)', 'this is __really__ urgent', 160, 'this is __really__ urgent'],
   ['a dunder INSIDE an identifier stays (the r0 preview printed window.xss)', '</div><img src=y onerror=window.__xss=3>', 160, '</div><img src=y onerror=window.__xss=3>'],
   ['cut at max with an ellipsis', 'x'.repeat(50), 20, 'x'.repeat(19) + '…'],
   ['nothing ⇒ empty', null, 160, ''],
 ];
 for (const [label, d, max, want] of PREV) ok(L.rowPreview(d, max) === want, `${label} → ${J(want)}`, L.rowPreview(d, max));
 {
-  const raw = await mutant('preview-raw', ".replace(/\\*\\*|`/g, '')", '');
-  const greedy = await mutant('preview-greedy-dunder', ".replace(/\\*\\*|`/g, '').replace(/(^|[\\s(])__(?=\\S)|(?<=\\S)__(?=[\\s).,;:!?]|$)/g, '$1')", ".replace(/\\*\\*|__|`/g, '')");
-  ok(greedy && greedy.rowPreview('</div><img src=y onerror=window.__xss=3>', 160) === '</div><img src=y onerror=window.xss=3>', 'control: the first cut (every `__` dropped) mangles an identifier — the dunder row can go red');
-  const bad = raw ? PREV.filter(([, d, max, want]) => raw.rowPreview(d, max) !== want).length : 0;
-  ok(bad >= 2, `control: a copy that keeps the marks shows "**" / backticks in the row (${bad} rows red)`);
+  // RED CONTROL = the base's rule put back (it dropped the markdown marks a one-liner "should not show")
+  const base = await mutant('preview-base-strip', "const plain = (String(detail || '').split('\\n').find((l) => l.trim()) || '').trim();",
+    "const line = String(detail || '').split('\\n').find((l) => l.trim()) || ''; const plain = line.replace(/\\*\\*|`/g, '').replace(/(^|[\\s(])__(?=\\S)|(?<=\\S)__(?=[\\s).,;:!?]|$)/g, '$1').replace(/^\\s*(?:#{1,6}|>|[-*+]|\\d+[.)])\\s+/, '').trim();");
+  const red = base ? PREV.filter(([, d, max, want]) => base.rowPreview(d, max) !== want).map(([l]) => l) : [];
+  ok(red.length >= 5 && red.some((l) => /THE STRESS ROW/.test(l)) && base.rowPreview('A test/（现有）；B __tests__/', 160) === 'A test/（现有）；B tests__/', `RED CONTROL: the base's strip turns the agent's \`B __tests__/\` into «B tests__/» (${red.length} rows red)`, red);
 }
 
 console.log('⑤ itemView — the pane as STRUCTURE (fed the REAL replyButtonState)');
@@ -295,14 +295,15 @@ console.log('⑦ wiring pins — the window really calls every rule; the doors; 
   // XSS: item strings are TEXT; markdown through the escaping renderer + sanitizeHtml (src/lib/safe-html.js); the only innerHTML writes are those two
   const inner = [...w.matchAll(/\.innerHTML\s*=\s*([^;]+);/g)].map((m) => m[1].trim());
   // design 009: + an app install's ONE card — THE row renderer's escaped HTML (every hole escHtml'd or a closed value: scripts/test-app-card.mjs §5)
-  ok(J(inner) === J(['sanitizeHtml(inline ? md.parseInline(s) : md.parse(s))', 'icon', 'appCardHtml(it, t, { lang: resolveLang(), resolved: v.resolved, buttons: false })']) && /import \{ sanitizeHtml \} from '\.\/safe-html\.js';/.test(w) && /const md = new Marked\(\{ gfm: true, breaks: true, renderer: \{ html\(h\) \{ return escHtml\(/.test(w) && /b\.append\(mk\('span', 'iw-act-label', label\)\)/.test(w),
-    'XSS: exactly three innerHTML writes — the sanitized markdown (raw HTML ESCAPED by the renderer first), a UI_ICONS constant and an install card\'s escaped HTML (design 009); every other item string is textContent', inner);
-  ok(/for \(const a of el\.querySelectorAll\('a\[href\]'\)\) \{ a\.target = '_blank'; a\.rel = 'noopener noreferrer'; \}/.test(w), 'a link in an item opens beside the workspace, never in place of it');
+  // lane foryou-honest (P1-2): the words are THE tray's renderer (user-todos-row.js wordsHtml — every segment escaped), never markdown
+  ok(J(inner) === J(['wordsHtml(src)', 'icon', 'appCardHtml(it, t, { lang: resolveLang(), resolved: v.resolved, buttons: false })']) && /import \{[^}]*\bwordsHtml\b[^}]*\} from '\.\/user-todos-row\.js';/.test(w) && !/from 'marked'/.test(w) && !/\bmdInto\(/.test(w) && /b\.append\(mk\('span', 'iw-act-label', label\)\)/.test(w),
+    'XSS: exactly three innerHTML writes — THE tray\'s escaped words (wordsHtml: plain text + its links, every segment escaped — no markdown since lane foryou-honest), a UI_ICONS constant and an install card\'s escaped HTML (design 009); every other item string is textContent', inner);
+  ok(!/<a\b|createElement\('a'\)/.test(w) && /if \(tg\.open === 'url' \|\| tg\.open === 'mail'\) \{ window\.open\(tg\.href, '_blank', 'noopener'\); return true; \}/.test(acts), 'a link in an item opens beside the workspace, never in place of it (the pane draws no <a>: a link is a .fy-link span — THE model\'s openLink opens a new tab)');
   // the window type + the doors
   ok(/registerWindowType\(\{\s*type: 'inbox', label: 'For you', singleton: true, icon: ICON,\s*action: 'openInbox',/.test(w) && /app\.openInbox\(\{ itemId: spec && spec\.itemId, sessionKey: spec && spec\.sessionKey, syncId \}\)/.test(w), "registered: type 'inbox', singleton, openSpec action 'openInbox' replayed with its itemId / sessionKey / syncId");
-  ok(/app\.wm\.revealWindow\(id, \{ replay: !!syncId \}\);\s*if \(!syncId && w\._inbox\) w\._inbox\.show\(\{ itemId, sessionKey \}\);/.test(w), 'an open window is REVEALED (a replay only raises) and re-pointed by a user\'s door, never by a replay');
+  ok(/app\.wm\.revealWindow\(id, \{ replay: !!syncId \}\);\s*if \(!syncId && w\._inbox\) w\._inbox\.show\(\{ itemId, sessionKey, scope: wantScope \}\);/.test(w), 'an open window is REVEALED (a replay only raises) and re-pointed by a user\'s door, never by a replay');
   ok(/openInbox\(opts\) \{ return openInboxWindow\(this, opts \|\| \{\}\); \}/.test(read('src/lib/app.js')), 'app.openInbox is THE door (app.js)');
-  ok(/if \(e\.target\.closest\('\.ut-tabs > \.ut-open-win'\)\) \{ hidePopup\('open-win'\); app\.openInbox\(\); return; \}/.test(panel), 'door (a): the popup\'s ⤢ opens the whole inbox');
+  ok(/if \(e\.target\.closest\('\.ut-tabs > \.ut-open-win'\)\) \{ hidePopup\('open-win'\); app\.openInbox\(\{ scope: 'all' \}\); return; \}/.test(panel) && /else if \(scope === 'all'\) st\.scopeKey = null;/.test(w), 'door (a): the popup\'s ⤢ opens the whole inbox — an open window another device scoped is WIDENED to all sessions (lane foryou-honest P3-7)');
   ok(/else \{ hidePopup\('view'\); app\.openInbox\(\{ itemId: rec\.id \}\); \}/.test(panel) && /app\.openInbox\(\{ itemId: rec\.id, sessionKey: rec\.sessionKey \}\)/.test(panel), 'door (b): a row\'s ⤢ opens the window ON that item (the mini inbox\'s scoped to its session)');
   ok(/if \(e\.target\.closest\('\.ut-mini-head > \.ut-open-win'\)\) \{ pop\.remove\(\); app\.openInbox\(\{ sessionKey: primaryKey\(mini\?\.keys \|\| keys\) \}\); return; \}/.test(panel), 'door (c): the mini inbox\'s head ⤢ opens the window scoped to that session');
   ok(/menu: 'gear', parent: 'comm', order: 5, icon: ICON,/.test(w) && /label: \(\) => t\('For you…'\),\s*run: \(c\) => c\.app\.openInbox\(\),/.test(w), 'door (d): ⚙ Communication ▸ For you…');

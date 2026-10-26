@@ -59,7 +59,37 @@ function parseEvent(payload) {
 /** The ceremony record: `{id, kind, rpId, startedAt, tab, outcome, endedAt}` (`id` = `<tab>:<ctx>:<n>` — unique per document). */
 function recordOf(ev, { tab = null, ctx = 0, now = 0 } = {}) {
   return { id: `${str(tab)}:${Number(ctx) || 0}:${ev.id}`, n: ev.id, ctx: Number(ctx) || 0, kind: ev.kind, rpId: ev.rpId, startedAt: Number(now) || 0, tab: tab == null ? null : str(tab), outcome: 'pending', endedAt: 0,
-    ...(ev.conditional ? { conditional: true } : {}), ...(ev.allow && ev.allow.length ? { allow: ev.allow } : {}), ...(ev.user ? { user: ev.user } : {}), ...(ev.origin ? { origin: ev.origin } : {}) };
+    ...(ev.conditional ? { conditional: true } : {}), ...(ev.allow && ev.allow.length ? { allow: ev.allow } : {}), ...(ev.user ? { user: ev.user } : {}), ...(ev.origin ? { origin: ev.origin } : {}),
+    ...(ev.req ? { kernel: ev.req } : {}) }; // lane passkey-sink: a kernel's ceremony carries its request (what VibeSpace signs and answers)
+}
+/** lane passkey-sink (design-custom-browser-plugin §3): THE KERNEL'S CEREMONY — on a kernel whose `features` list `webauthn` there
+ *  is no hook: `VibeSpace.webauthnRequest` IS the start. → the `start` event applyEvent takes (the SAME record — the verdict, the
+ *  chip, the card, `passkey status|cancel` reused) with the ceremony's data in `req`: the kernel's ids, `op` (it wins over the
+ *  bridge's `kind`), the hash VibeSpace signs, what the signer re-checks (origin, challenge, the clientDataJSON when handed), the
+ *  key types offered, UV asked, the new user's handle. Binary fields are kept as base64url (a kernel's standard base64 is
+ *  normalised); every field bounded. `n` = the watch's own number for the ceremony (the record's id). null = no usable
+ *  surfaceId / requestId (nothing could ever answer it). */
+const KERNEL_ID = /^[\x21-\x7e]{1,64}$/;
+const UV_WORDS = Object.freeze(['required', 'preferred', 'discouraged']);
+function kernelEvent(p, { n = 0 } = {}) {
+  if (!p || typeof p !== 'object' || !Number.isSafeInteger(n) || n <= 0) return null;
+  const surfaceId = str(p.surfaceId), requestId = str(p.requestId);
+  if (!KERNEL_ID.test(surfaceId) || !KERNEL_ID.test(requestId)) return null;
+  const op = KINDS.includes(p.op) ? p.op : KINDS.includes(p.kind) ? p.kind : 'get';
+  const b64 = (v, max) => { const s = str(v).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); return /^[A-Za-z0-9_-]+$/.test(s) && s.length <= max ? s : ''; };
+  const ids = (list) => (Array.isArray(list) ? list : []).slice(0, 40).map((c) => b64(c && typeof c === 'object' ? c.id : c, 1400)).filter(Boolean).slice(0, 20);
+  const origin = /^https?:\/\/[^\s/?#]{1,300}$/i.test(str(p.origin)) ? str(p.origin) : '';
+  const u = op === 'create' && p.user && typeof p.user === 'object' ? p.user : null;
+  const req = {
+    surfaceId, requestId, op, rpId: rpWord(p.rpId), origin,
+    clientDataHash: b64(p.clientDataHash, 43), challenge: b64(p.challenge, 1400), clientDataJSON: b64(p.clientDataJSON, 11000) || null,
+    pubKeyCredParams: (Array.isArray(p.pubKeyCredParams) ? p.pubKeyCredParams : []).slice(0, 16).map((x) => ({ type: str(x && x.type).slice(0, 20), alg: x && Number.isSafeInteger(x.alg) ? x.alg : 0 })),
+    userVerification: UV_WORDS.includes(p.userVerification) ? p.userVerification : 'preferred',
+    residentKey: UV_WORDS.includes(p.residentKey) ? p.residentKey : 'preferred',
+    exclude: ids(p.excludeCredentials), userId: u ? b64(u.id, 86) : '',
+  };
+  const user = u ? { name: str(u.name).slice(0, 64), displayName: str(u.displayName).slice(0, 64) } : null;
+  return { ev: 'start', id: n, kind: op, rpId: req.rpId, allow: ids(p.allowCredentials), ...(user ? { user } : {}), origin, conditional: p.mediation === 'conditional', req };
 }
 /** Apply an event to a tab's records (in place; bounded) → the record it touched, or null. */
 function applyEvent(records, ev, { tab = null, ctx = 0, now = 0 } = {}) {
@@ -122,6 +152,10 @@ function refusedText(why, rpId) {
     case 'profile-switch': return `The owner turned passkeys off for agents on this browser profile — ${rp}'s request was refused; use the page's other way in.`;
     case 'rp-mismatch': return `The page asked for a passkey of ${rp}, which its own address may not use — refused.`;
     case 'withdrawn': return `The user took over the browser — your passkey request on ${rp} was withdrawn.`;
+    // lane passkey-sink: a kernel with `webauthn` — VibeSpace answers the ceremony itself
+    case 'webauthn_alg_unsupported': return `${rp} asked for a kind of passkey VibeSpace does not make (it offered no ES256 key type) — the page was told it was not allowed; use its other way in.`;
+    case 'webauthn_rp_mismatch': return `The passkey request named ${rp}, which is not the page's own (its address may not use it, or the data to sign names another page) — VibeSpace signed nothing and the page was told it was not allowed.`;
+    case 'webauthn_key_locked': return `VibeSpace's saved passkeys cannot be opened right now, so nothing was signed for ${rp} — when the vault is locked a person unlocks it on this instance's page, and the user has already been told (their tray names what is waiting on it): do not ask them to unlock it or for its password. The page was told it was not allowed; press its button again later, or use its other way in.`;
     default: return `The passkey request on ${rp} was refused.`;
   }
 }
@@ -151,10 +185,12 @@ function loopVerdict(verb, v) {
   if (passkeyReads(verb)) return { act: 'note', code: v.state, text: v.text };
   return { act: 'answer', code: v.state, text: v.text };
 }
-function cancelText({ n = 0, rpId = '' } = {}) {
+function cancelText({ n = 0, rpId = '', kernel = false } = {}) {
   if (!n) return 'No passkey request is waiting on your browser.';
   const rp = rpWord(rpId) || 'this site';
-  return `Cancelled the page's passkey request (${rp}) — the page was told the request was aborted and takes input again. Use its other way in (a recovery code, a password), or ask the user to sign in on their own device.`;
+  // lane passkey-sink: on a kernel with `webauthn` the kernel ends the ceremony — the page sees NotAllowedError (Q4), not AbortError
+  const told = kernel ? 'the page was told it was not allowed (NotAllowedError)' : 'the page was told the request was aborted';
+  return `Cancelled the page's passkey request (${rp}) — ${told} and takes input again. Use its other way in (a recovery code, a password), or ask the user to sign in on their own device.`;
 }
 const NONE_TEXT = 'No passkey request is waiting on your browser.';
 const UNKNOWN_TEXT = 'VibeSpace cannot see passkey requests on this browser (it started before VibeSpace could watch them) — a page that will not move may be waiting for one: navigate elsewhere or close the tab.';
@@ -425,6 +461,6 @@ module.exports = {
   passkeyCardWords, CHOICE_WORDS, // lane passkey-ui
   PASSKEY_OPEN_CODE, PASSKEY_ASK_CODE, REFUSED_SAID_MS, HOOK_HOLD_MS, KINDS, OUTCOMES, PENDING_SAID_MS, FOR_YOU_AFTER_MS, RECORDS_KEEP, PASSKEY_PASS_VERBS, PASSKEY_READ_VERBS,
   NONE_TEXT, UNKNOWN_TEXT, FOR_YOU_WORDS,
-  rpWord, parseEvent, recordOf, applyEvent, endPending, passkeyVerdict, passkeyText, passkeyBlock, passkeyPasses, passkeyReads,
+  rpWord, parseEvent, kernelEvent /* lane passkey-sink */, recordOf, applyEvent, endPending, passkeyVerdict, passkeyText, passkeyBlock, passkeyPasses, passkeyReads,
   loopVerdict, cancelText, passkeyWords, forYouItem, keyForYouItem, installHook, hookSource, installReporter, reporterSource, SLOT_MARK, CTL_FN, REARM_FN, askText, refusedText, registerText, // lane passkey-binding-isolated: + the isolated-world reporter; − dropExpression (no main-world binding to drop)
 };

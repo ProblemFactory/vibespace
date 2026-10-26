@@ -1,10 +1,11 @@
 import { ThemeManager, THEMES, BUILTIN_THEMES } from './themes.js';
-import { waitServerReady, reasonOf } from './boot-ladder.js';
+import { waitServerReady, reasonOf, staleTabStep } from './boot-ladder.js';
 import { awaitBootReady, bootDeps, startingLine, retryLine } from './boot-splash.js';
 import { installPluginClient } from './plugin-client.js';
 import { installKeybindings, registerKeybinding, runCommand } from './contributions.js';
 import { buildGearMenu } from './gear-menu.js';
 import { BUILD_VERSION } from './build-version.js';
+import { navNote } from './nav-log.js'; // lane phone-back-reload: the stale-tab step is a row of the tab's diary
 import { track } from './telemetry-client.js';
 import { WsManager } from './ws.js';
 import { WindowManager } from './window.js';
@@ -2228,6 +2229,17 @@ class App {
       const srv = r?.version;
       if (!srv || srv === BUILD_VERSION) return;
       const key = 'vibespace.reloaded-for.' + srv;
+      // lane phone-back-reload: ONE reload per server version per tab (staleTabStep, PURE in boot-ladder.js); a tab that
+      // reloaded once and STILL runs the old bundle says so once and never reloads again (measured before: silent)
+      const noticeKey = 'vibespace.stale-said.' + srv;
+      const step = staleTabStep({ bundle: BUILD_VERSION, server: srv, reloaded: !!sessionStorage.getItem(key), noticed: !!sessionStorage.getItem(noticeKey), pending: !!this._staleReloadAt });
+      if (step === 'notice') {
+        sessionStorage.setItem(noticeKey, String(Date.now()));
+        navNote({ k: 'stale', b: BUILD_VERSION, s: srv, d2: 'notice' });
+        showToast(t('This tab still runs VibeSpace {old} after its one reload for {new} — reload it yourself to update', { old: BUILD_VERSION, new: srv }), { type: 'warn', duration: 12000 });
+        return;
+      }
+      if (step !== 'reload') return;
       // PER-TAB, not per-origin (2.240.3, userN's "updated but still broken"
       // marathon): localStorage is shared across every tab of the origin, so
       // the FIRST tab to reload burned the once-per-version key and every
@@ -2235,14 +2247,16 @@ class App {
       // silently misbehaved against the new server, looking exactly like
       // "the fix didn't work". sessionStorage is per-tab and survives the
       // reload within it, preserving the anti-loop property where it matters.
-      if (sessionStorage.getItem(key)) return;
       // B-0ece: reload onto a server READY for a page, not one still booting (else the tab sits on the splash)
-      if (!(await waitServerReady({ ...bootDeps() })).ok) return; // gave up — the next reconnect checks again
-      if (sessionStorage.getItem(key)) return; // another reconnect's check won the wait
-      sessionStorage.setItem(key, String(Date.now()));
+      if (!(await waitServerReady({ ...bootDeps() })).ok) { navNote({ k: 'stale', b: BUILD_VERSION, s: srv, d2: 'wait' }); return; } // gave up — the next reconnect checks again
+      if (this._staleReloadAt || sessionStorage.getItem(key)) return; // another reconnect's check won the wait
+      // the reload is PENDING, and the once-per-version stamp waits for the moment it fires (acceptance round 2: stamped
+      // 800 ms early, a reconnect inside that window read «already reloaded» and burned the one notice — no reload yet)
+      this._staleReloadAt = Date.now();
+      navNote({ k: 'stale', b: BUILD_VERSION, s: srv, d2: 'reload' });
       try { track('event', 'stale-bundle-reload', BUILD_VERSION + ' -> ' + srv); } catch { }
       showToast(t('VibeSpace was updated — reloading this tab…'));
-      setTimeout(() => location.reload(), 800);
+      setTimeout(() => { sessionStorage.setItem(key, String(Date.now())); location.reload(); }, 800);
     } catch { }
   }
 

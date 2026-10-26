@@ -57,12 +57,40 @@
  * own `ctl` in the ceremony's execution context (found by identity, never through the page's slot): the hooked closure
  * aborts its AbortControllers — the page's promise rejects AbortError.
  * A tab whose hook never armed is `unknown`, never `passkey_open`.
+ *
+ * ONE BROWSER = ONE SOURCE (lane browser-surfaces, 2026-10-25 — P1 of the custom browser kernel, design-custom-browser-plugin
+ * §2): at every socket's open the watch asks `VibeSpace.getVersion` FIRST (before any tab is tracked). No such method (standard
+ * Chrome) ⇒ today's road, one journal line, never asked again for that browser. A kernel whose `features` list `surfaces` ⇒ on
+ * every page session `VibeSpace.enable {surfaces:true}` then `VibeSpace.listSurfaces {targetId}` (the three-touch rule, at every
+ * (re)attach: ① enable ② align `w.surf` — a surface the kernel no longer lists is closed `navigated` by the kernel, a new one is
+ * opened ③ the CLI's long-poll is module-wide, so it re-arms by itself) — and the page's own prompts are READ FROM SURFACES:
+ * the file-chooser intercept, the Fetch sign-in hook and the deny-ahead permission plan are never installed there, and a
+ * `Page.javascriptDialogOpening` / `fileChooserOpened` / `Fetch.authRequired` the kernel sends anyway is ignored by name (the
+ * kernel suppresses them once enabled — Q3/Q10; this is the belt). Events are routed by `m.sessionId || params.targetId` (Q2:
+ * every VibeSpace.* event rides the flattened PAGE session). PURE src/browser-surfaces.js makes the block (dialogBlock's shape —
+ * no reader changes its read), the class (HELD ⇒ `w.open` + the waiters + the idle notice, exactly a dialog's road; NOTED ⇒ one
+ * line in the next result + the live view's bar; SILENT ⇒ a journal line), the policy answer (P — answered at once over THIS
+ * socket) and the answer verdict; `VibeSpace.answerSurface` answers, its six error codes mapped by name. A HELD surface only
+ * the owner can answer files ONE For-you card (`action.type: 'browser-surface'`) after PROMPT_ASK_MS, resolved when it closes.
  */
 const ST = require('../browser-stuck.js');
 const PK = require('../browser-passkey.js');
 const PS = require('../browser-passkey-store.js'); // lane passkey-store-core: the sealed per-profile table + THE GATE (this file is its one writer)
 const crypto = require('crypto');
 let WS = null; try { WS = require('ws').WebSocket; } catch { WS = null; }
+// lane browser-surfaces: the kernel's surfaces (PURE) and the agent belt are asked only on a kernel that HAS surfaces — required
+// at first use, so a copy of this file beside the three dialog modules alone (test-browser-passkey's controls) runs unchanged
+let SFm = null, PTm = null;
+const SF = () => SFm || (SFm = require('../browser-surfaces.js'));
+const PT = () => PTm || (PTm = require('../peer-text.js'));
+let BLm = null;
+const BL = () => BLm || (BLm = require('../browser-login.js')); // lane browser-login: lazily (two passkey suites copy this file beside three modules only)
+// lane passkey-sink: the PURE passkey signer — asked only on a kernel with `webauthn` (required at first use, like SF / PT)
+let WAm = null;
+const WA = () => WAm || (WAm = require('../webauthn-sign.js'));
+const PK_ORPHAN_MS = 1500; // a webauthn surface whose request never comes (it began before this socket) is cancelled after this — never a page left waiting
+const NATIVE_ON_KERNEL = new Set(['Page.javascriptDialogOpening', 'Page.javascriptDialogClosed', 'Page.fileChooserOpened', 'Fetch.authRequired']); // one source: never read where surfaces are on
+const KERNEL_PROBE_MS = 2000; // VibeSpace.getVersion — standard Chrome refuses it in ms (-32601); a socket that never answers is today's road
 
 const ANSWERED_KEEP = 32;
 const OUTCOMES_KEEP = 16;
@@ -81,7 +109,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   enableTimeoutMs = ST.ENABLE_TIMEOUT_MS, connectTimeoutMs = 3000, callTimeoutMs = 5000, pageAnswerMs = ST.PAGE_ANSWER_MS, closeGoneMs = 2000 /* lane browser-shared-profile-freeze */, captureTimeoutMs = ST.LOOP_SCREENSHOT_MS, quietMs = ST.LOOP_QUIET_MS, reEnableMs = RE_ENABLE_MS, // verify r1: the quiet rule is a clock a fast gate shortens (lane browser-held-not-hung: the re-ask too)
   tabsOf = null, holdersOf = null, leaseCountOf = null, labelOf = null, notice = null, withdraw = null, forYou = null,
   promptAskMs = ST.PROMPT_ASK_MS, authHoldMaxMs = ST.AUTH_HOLD_MAX_MS,
-  passkeys = null, takeoverOf = null } = {}) { // lane passkey-store-core: `passkeys` = {read, write, cipher} (the wiring: data/browser-passkeys.json 0600 + the key file); none ⇒ today's tab-native passkeys // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
+  passkeys = null, takeoverOf = null, vaultUse = null /* lane passkey-sink: (entry, use, o) → {receipt} — the vault's ONE use writer (a kernel signature is a USE of the passkeys' key) */, passkeyOrphanMs = PK_ORPHAN_MS, downloadsDirOf = null /* lane browser-surfaces: profileId → the browser's downloads directory (a file answer is handed from there only) */,
+  logins = null /* lane browser-login: src/server/browser-logins.js — the web logins' ONE writer, its grants and its use lines (the watch hands the kernel the values and keeps none) */, conversationOf = null /* lane browser-login: sessionId → {cid, name} (the conversation a submission is told for) */ } = {}) { // lane passkey-store-core: `passkeys` = {read, write, cipher} (the wiring: data/browser-passkeys.json 0600 + the key file); none ⇒ today's tab-native passkeys // lane browser-ui-prompts: the sign-in's two clocks (a fast gate shortens them)
   const watches = new Map();       // profileId → watch
   const listeners = new Set();
   const waiters = new Set();       // long-polls: {profileId, scope(), resolve}
@@ -116,6 +145,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   const pkIdsFor = (pid) => { if (!pkIds.has(pid)) pkIds.set(pid, { slot: 'vs' + crypto.randomBytes(16).toString('hex'), world: 'vspw' + crypto.randomBytes(10).toString('hex'), chan: 'vspc' + crypto.randomBytes(16).toString('hex') }); return pkIds.get(pid); }; // lane passkey-binding-isolated: + the hook's ISOLATED WORLD name + the SECRET CustomEvent channel (128-bit: the page can neither enter the world nor forge a report)
   const pkDisplacedAt = new Map(); // lane passkey-prewrap-fix: profileId → the episodes a page replaced the credentials API (the Passkeys card's line)
   const sayOnce = new Set();
+  const kernelOf = new Map();      // lane browser-surfaces: profileId → false (standard Chrome: never asked again) | {protocol, kinds, features}
   const say = (key, line) => { if (sayOnce.has(key)) return; sayOnce.add(key); try { log.warn?.(`[browser-dialog] ${line}`); } catch { /* */ } };
 
   function emit(ev) { for (const fn of [...listeners]) { try { fn(ev); } catch (e) { say('listener:' + (e && e.message), `a listener threw: ${e && e.message}`); } } }
@@ -134,9 +164,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   // ── the socket ──
   function newWatch(profileId, url) {
     const w = { profileId, url, holds: true, ws: null, state: 'connecting', id: 0, waiting: new Map(), sessions: new Map(), targets: new Map(), open: new Map(), pendingBy: new Map(), answered: [], seq: 0, readyP: null, commands: [],
-      pkSlot: pkIdsFor(profileId).slot, pkWorld: pkIdsFor(profileId).world, pkChan: pkIdsFor(profileId).chan, pkForYou: new Map(), headed: null, bornAt: now(), // lane browser-passkey; lane passkey-binding-isolated: the isolated world + the secret channel, kept across sockets
+      pkSlot: pkIdsFor(profileId).slot, pkWorld: pkIdsFor(profileId).world, pkChan: pkIdsFor(profileId).chan, pkForYou: new Map(), pkSeq: 0 /* lane passkey-sink: the kernel ceremonies' numbers */, headed: null, bornAt: now(), // lane browser-passkey; lane passkey-binding-isolated: the isolated world + the secret channel, kept across sockets
       prompts: new Map(), authReq: new Map(), promptNotes: [], promptTimers: new Map(), promptForYou: new Map(), // lane browser-ui-prompts (authReq: prompt id → the paused request — never in a record)
-      permCtx: new Map(), grants: new Map(), printing: new Set() }; // lane browser-ui-prompts-r2: contexts decided ahead (ctx → the decision's promise), the agent's per-origin flips, previews being released
+      permCtx: new Map(), grants: new Map(), printing: new Set(), // lane browser-ui-prompts-r2
+      kernel: null, surf: new Map(), surfTimers: new Map(), surfForYou: new Map(), nativeIgnored: 0, autoSurf: 0 }; // lane browser-surfaces: null = not asked yet; the open surfaces by id; the owner's card clock + item; the belt's count: contexts decided ahead (ctx → the decision's promise), the agent's per-origin flips, previews being released
     let readyResolve;
     w.readyP = new Promise((r) => { readyResolve = r; });
     w.ready = () => readyResolve();
@@ -161,6 +192,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       w.state = 'open';
       // lane browser-passkey: a HEADED browser's passkey window is on this computer's desktop (the banner says so) — the browser's own word
       call(w, 'Browser.getVersion').then((v) => { const ua = v && v.result ? String(v.result.userAgent || '') : ''; w.headed = ua ? !/HeadlessChrome/.test(ua) : null; }).catch(() => { /* unknown */ });
+      await probeKernel(w); // lane browser-surfaces: ONE source per browser — known before the first tab is tracked
       await call(w, 'Target.setDiscoverTargets', { discover: true });
       const r = await call(w, 'Target.getTargets');
       const infos = (r && r.result && Array.isArray(r.result.targetInfos)) ? r.result.targetInfos : [];
@@ -187,6 +219,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const fn of w.waiting.values()) { try { fn({ error: { message: why } }); } catch { /* */ } }
     w.waiting.clear();
     const open = [...w.open.values()];
+    for (const rec of w.surf.values()) { surfaceAskDone(w, rec); if (!open.includes(rec)) open.push(rec); } w.surf.clear(); // lane browser-surfaces: a NOTED one is in the live view's bar too
     w.open.clear();
     if (watches.get(w.profileId) === w) watches.delete(w.profileId);
     for (const e of w.targets.values()) { if (e.reEnable) { clearTimeout(e.reEnable); e.reEnable = null; } if (e.quiet) { clearTimeout(e.quiet); e.quiet = null; } }
@@ -199,7 +232,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!info || info.type !== 'page' || !info.targetId) return Promise.resolve();
     // lane browser-swiftshader-cpu: thawPaint's own blank tab (opened and closed in ~20 ms) is nobody's — never tracked
     if (w.flipping && !info.openerId && /^(about:blank)?$/.test(String(info.url || ''))) return Promise.resolve();
-    decideAhead(w, info.browserContextId || null); // lane browser-ui-prompts-r2: no permission prompt ever pends (browser-wide per context: never awaited by the tab's enable)
+    if (!w.kernel) decideAhead(w, info.browserContextId || null); // lane browser-surfaces: a kernel's permission asks are surfaces (P deny unless allowed ahead) // lane browser-ui-prompts-r2: no permission prompt ever pends (browser-wide per context: never awaited by the tab's enable)
     const tid = String(info.targetId);
     const known = w.targets.get(tid);
     if (known) { known.url = String(info.url || known.url || ''); known.title = String(info.title || known.title || ''); return known.enabling || Promise.resolve(); }
@@ -225,12 +258,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     return e.enabling;
   }
   async function enable(w, e) {
+    if (w.kernel) await armSurfaces(w, e); // lane browser-surfaces: ① VibeSpace.enable ② listSurfaces — before Page.enable (a held page's enable never answers; its surfaces still list)
     const en = await call(w, 'Page.enable', {}, e.sid, enableTimeoutMs);
     if (en && !en.timeout && !en.error) {
       const was = e.heldAt;
       e.enabled = true; e.heldAt = 0;
       armPasskey(w, e);
-      armPrompts(w, e); // lane browser-ui-prompts
+      if (!w.kernel) armPrompts(w, e); // lane browser-ui-prompts (lane browser-surfaces: a kernel's chooser / sign-in are surfaces — never hooked twice)
       if (was) emit({ kind: 'held-cleared', profileId: w.profileId, targetId: e.targetId });
       return;
     }
@@ -249,7 +283,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     let m; try { m = JSON.parse(typeof d === 'string' ? d : d.toString()); } catch { return; }
     if (m.id && w.waiting.has(m.id)) { const fn = w.waiting.get(m.id); w.waiting.delete(m.id); fn(m); return; }
     const p = m.params || {};
+    if (w.kernel && NATIVE_ON_KERNEL.has(m.method)) { w.nativeIgnored++; say('native:' + w.profileId + ':' + m.method, `${w.profileId}: the kernel sent ${m.method} on a session with surfaces on — ignored (one source: its surface is the prompt)`); return; } // lane browser-surfaces: the belt
     switch (m.method) {
+      case 'VibeSpace.surfaceOpened': return onSurfaceOpened(w, surfaceTab(w, m), p); // lane browser-surfaces (Q2: routed by the page session, else params.targetId)
+      case 'VibeSpace.surfaceUpdated': return onSurfaceUpdated(w, surfaceTab(w, m), p);
+      case 'VibeSpace.surfaceClosed': return onSurfaceClosed(w, surfaceTab(w, m), p);
+      case 'VibeSpace.webauthnRequest': return pkRequest(w, surfaceTab(w, m), p); // lane passkey-sink: a kernel with `webauthn` — the ceremony's data (its surface is the held card)
+      case 'VibeSpace.credentialFormDetected': return onLoginForm(w, surfaceTab(w, m), p); // lane browser-login: a kernel with `credentials` — a form the `login` verb may fill
+      case 'VibeSpace.credentialSubmitted': return onLoginSubmitted(w, surfaceTab(w, m), p); // lane browser-login: the page took a form — the vault saves what it should (the ONE writer)
       case 'Target.targetCreated': case 'Target.targetInfoChanged': track(w, p.targetInfo); return;
       case 'Target.targetDestroyed': {
         const tid = String(p.targetId || '');
@@ -262,6 +303,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (e.owner && keeper && typeof keeper.forgetOwnTab === 'function') { try { keeper.forgetOwnTab(w.profileId, e.owner, tid); } catch { /* the keeper's own failure */ } } // verify r3 #2: the persisted witness goes with the tab
         if (e.loop) { e.loop = null; emit({ kind: 'loop-cleared', profileId: w.profileId, targetId: tid, why: 'tab-closed' }); } // lane site-reset: a closed tab's loop is over
         if (e.heldAt) emit({ kind: 'held-cleared', profileId: w.profileId, targetId: tid, why: 'tab-closed' }); // lane browser-held-not-hung: a closed tab holds nothing (the fact moves)
+        for (const rec of [...w.surf.values()]) if (rec.targetId === tid) onSurfaceClosed(w, tid, { surfaceId: rec.id, how: 'tab-closed', by: 'tab-closed' }); // lane browser-surfaces
         const dlg = w.open.get(tid);
         if (dlg) { w.open.delete(tid); emit({ kind: 'closed', profileId: w.profileId, targetId: tid, answered: { id: dlg.id, dialog: dlg, how: 'dismissed', by: 'tab-closed', at: now(), targetId: tid } }); withdrawNotices([dlg.id]); }
         return;
@@ -275,7 +317,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       // 0.38.1: it precedes frameStartedNavigating by ≤ 2 ms; a browser-initiated navigation (the agent's open) has none
       case 'Page.frameRequestedNavigation': { const e = tabOf(w, m); if (e && String(p.frameId || '') === e.targetId) e.req = { reason: String(p.reason || 'other').slice(0, 40), at: now() }; return; }
       case 'Page.frameNavigated': { const e = tabOf(w, m); if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.type === 'file') dropPrompt(w, w.prompts.get(e.targetId), 'navigated');
-        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { endNav(e); hop(w, e, { url: String(p.frame.url || '') }); } return; }
+        if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId && w.prompts.get(e.targetId)?.native && !NATIVE_SHEET_PAGE_RE.test(String(p.frame.url || ''))) settleNative(w, w.prompts.get(e.targetId)); /* lane browser-x-in-window: Chrome's own sheet answered (or cancelled) — the tab committed a real page (MEASURED: the sheet itself stands over a `chrome-error://chromewebdata/` commit) */ if (e && p.frame && String(p.frame.id || '') === e.targetId && !p.frame.parentId) { endNav(e); hop(w, e, { url: String(p.frame.url || '') }); e.forms = []; /* lane browser-login: a new document — its forms are new too */ } return; }
       case 'Page.navigatedWithinDocument': case 'Page.frameStoppedLoading': {
         const e = tabOf(w, m);
         if (e && m.method === 'Page.navigatedWithinDocument' && String(p.frameId || '') === e.targetId) hop(w, e, { url: String(p.url || ''), same: true });
@@ -576,6 +618,12 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   async function answerOn(w, tid, { accept, text = null, by }) {
     const d = w.open.get(tid);
     if (!d) return { ok: false, code: 'no_dialog', error: ST.NO_DIALOG_TEXT };
+    if (d.surface) { // lane browser-surfaces: the kernel's prompt — its own answers (accept → its OK / its text answer, dismiss → its dismiss)
+      const pick = SF().dialogAnswerOf(d, { accept, text });
+      if (!pick) return { ok: false, code: 'bad_answer', error: `that prompt has no ${accept ? 'accept' : 'dismiss'} answer — vibespace-browser surfaces names its answers` };
+      const r = await answerSurfaceOn(w, d, { answerId: pick.answerId, values: pick.values, files: null, by });
+      return r.ok ? { ok: true, dialog: d } : r;
+    }
     const e = w.targets.get(tid);
     if (!e || !e.sid) return { ok: false, code: 'not_watched', error: 'VibeSpace is not attached to that tab' };
     w.pendingBy.set(tid, { by, accept: !!accept });
@@ -706,8 +754,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   /** The live view's question: the dialog open on these tabs (null = any tab of that browser), as a block. */
   function openOn(profileId, targets = null) {
     const d = openIn(profileId, Array.isArray(targets) ? new Set(targets.filter(Boolean).map(String)) : null);
-    return d ? ST.dialogBlock(d, { now: now() }) : null;
+    return d ? blockOf(d) : null;
   }
+  /** lane browser-surfaces: the block a reader gets — a surface's own (dialogBlock's shape + its answers / fields / detail), else
+   *  the dialog's. */
+  function blockOf(d, { at = now() } = {}) { return d && d.surface ? SF().blockAt(d, { now: at }) : ST.dialogBlock(d, { now: at }); }
+  /** THE SENTENCE of a held dialog / surface — a js-dialog surface keeps `dialog accept|dismiss`'s words; every other kind is
+   *  browser-surfaces' sentence through THE BELT (src/peer-text.js — the page's words ride it). */
+  function sentenceOf(d, { at = now(), repeat = false } = {}) { return d && d.surface && d.kind !== 'js-dialog' ? PT().toAgentText(SF().surfaceText(d, { now: at, repeat }), { max: SF().TEXT_MAX }) : ST.dialogText(d, { now: at, repeat }); }
   /** verify r1 A5: a tab in scope this watch has NOT seen into (its Page.enable not answered yet, or never — a dialog
    *  that opened before the watch attached, e.g. across a VibeSpace restart: measured, a newcomer's Page.enable never
    *  answers under an open dialog). The watch cannot see a dialog there; the lease's own daemon may have. */
@@ -748,7 +802,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
         if (words) notes.push(words);
       }
       // verify r1 A3: a few alerts are told one by one (the ruling's mention); a storm is ONE line, never 32
-      for (const a of w.promptNotes) { if (seen.has(a.id) || !inScope(scope, a.targetId)) continue; if (consume) seen.add(a.id); const words = a.kind === 'print' ? ST.printNote(a) : ST.promptAnsweredNote(a); if (words) notes.push(words); } // lane browser-ui-prompts (+ r2: the page tried to print, once per occurrence): who answered a sign-in, never what
+      for (const a of w.promptNotes) { if (seen.has(a.id) || !inScope(scope, a.targetId)) continue; if (consume) seen.add(a.id); const words = a.kind === 'print' ? ST.printNote(a) : a.kind === 'surface' ? PT().toAgentText(SF().surfaceNote(a), { max: SF().TEXT_MAX }) : ST.promptAnsweredNote(a); if (words) notes.push(words); } // lane browser-surfaces: + a kernel prompt's one line (noted / policy / answered by the user) // lane browser-ui-prompts (+ r2: the page tried to print, once per occurrence): who answered a sign-in, never what
       if (alerts.length > ST.ALERT_NOTES_MAX) notes.unshift(ST.alertsNote(alerts));
       else notes.unshift(...alerts.map((a) => ST.answeredNote(a)).filter(Boolean));
       if (seen.size > 256) { const keep = [...seen].slice(-128); told.set(browserKey, new Set(keep)); }
@@ -773,8 +827,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       blind: watched && !d ? !!blindIn(pid, scope) : false,
       loading: watched && !d && !loop ? loadingIn(pid, scope) : null, // verify r1 A7 (lane site-reset: a loop explains a timeout better — the loop is said instead)
       unattributed: watched && !d && scope instanceof Set && (scope.size === 0 || orphan.busy), // r4 #2: an orphan tab with a fact — the dialog verbs fall back to the browser's own view
-      open: d ? ST.dialogBlock(d, { now: t }) : null,
-      text: d ? ST.dialogText(d, { now: t, repeat: true }) : '',
+      open: d ? blockOf(d, { at: t }) : null, // lane browser-surfaces: a surface's own block
+      text: d ? sentenceOf(d, { at: t, repeat: true }) : '',
       targetId: d ? d.targetId : null,
       notes,
       stuck: !d && !loop && verdict.state === 'unresponsive' ? { ...verdict, text: ST.stuckAgentText(verdict) } : null,
@@ -886,7 +940,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (seen.has(d.id)) continue;
       seen.add(d.id);
       let label = null; try { label = labelOf ? labelOf(w.profileId) : null; } catch { label = null; }
-      try { notice(h.sessionId, { kind: 'browser-dialog', dialog: ST.dialogBlock(d, { now: now() }), label: h.ephemeral ? null : label }); let ss = noticedSessions.get(d.id); if (!ss) { ss = new Set(); noticedSessions.set(d.id, ss); } ss.add(h.sessionId); } catch (e) { say('notice:' + (e && e.message), `the idle dialog notice was not queued — ${e && e.message}`); }
+      try { notice(h.sessionId, { kind: 'browser-dialog', dialog: blockOf(d), ...(d.surface && d.kind !== 'js-dialog' ? { text: sentenceOf(d) } : {}), label: h.ephemeral ? null : label }); let ss = noticedSessions.get(d.id); if (!ss) { ss = new Set(); noticedSessions.set(d.id, ss); } ss.add(h.sessionId); } catch (e) { say('notice:' + (e && e.message), `the idle dialog notice was not queued — ${e && e.message}`); } // lane browser-surfaces: a kernel prompt's own sentence rides the notice
     }
   }
 
@@ -903,7 +957,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (dialogId) { const d = w.open.get(tid); if (!d || d.id !== dialogId) return { ok: false, code: 'no_dialog', error: 'that dialog is no longer open' }; }
     const r = await answerOn(w, tid, { accept, text, by });
     if (r.ok && by === 'agent' && browserKey) { let seen = told.get(browserKey); if (!seen) { seen = new Set(); told.set(browserKey, seen); } seen.add(r.dialog.id); }
-    return r.ok ? { ok: true, dialog: ST.dialogBlock(r.dialog, { now: now() }), text: ST.answerDoneText(r.dialog, { accept: !!accept, text }) } : r;
+    return r.ok ? { ok: true, dialog: blockOf(r.dialog), text: r.dialog.surface && r.dialog.kind !== 'js-dialog' ? `the browser prompt was ${accept ? 'accepted' : 'dismissed'}` : ST.answerDoneText(r.dialog, { accept: !!accept, text }) } : r;
   }
 
   // ── lane site-reset step 1b: A LOOPING TAB NEVER DISABLES THE BROWSER — `stop` ──
@@ -1169,6 +1223,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   // ── lane browser-passkey: the ceremony hook ──
   function armPasskey(w, e) {
+    if (pkSinks(w)) return null; // lane passkey-sink: a kernel with `webauthn` — no hook, no virtual authenticator (both stay for standard Chrome)
     if (!e.pk.armed && !e.pk.arming && e.sid) e.pk.arming = armHook(w, e, e.sid).finally(() => { e.pk.arming = null; });
     return e.pk.arming || null;
   }
@@ -1195,6 +1250,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
    *  on this computer's desktop only when that window is. The hidden-window rung's window is on the CLI's own Xvfb, which
    *  nobody sees: the banner's desktop note there sent the user looking for a window that is not on any screen. */
   function onDesktop(profileId) {
+    if (pkSinks(watches.get(String(profileId)))) return false; // lane passkey-sink: the kernel draws no passkey window — VibeSpace answers
     if ((watches.get(String(profileId)) || {}).headed !== true) return false;
     let rec = null; try { rec = keeper && typeof keeper.browserOf === 'function' ? keeper.browserOf(String(profileId)) : null; } catch { rec = null; }
     const fb = rec && rec.display && rec.display.fallback;
@@ -1234,9 +1290,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
     const v = passkeyIn(pid, scopeFor(t));
     if (v.state === 'unknown') return { ok: true, n: 0, state: 'unknown', text: PK.UNKNOWN_TEXT };
-    let n = 0, rpId = '';
+    let n = 0, kn = 0, rpId = '';
     for (const e of passkeyTabs(w, scopeFor(t))) {
-      const ctxs = [...new Set(e.pk.records.filter((r) => r.outcome === 'pending').map((r) => r.ctx))];
+      for (const rec of e.pk.records.filter((r) => r.kernel && r.outcome === 'pending')) if (await pkKernelCancel(w, e, rec, by)) { n++; kn++; rpId = rpId || rec.rpId; } // lane passkey-sink: the kernel ends it (cancelSurface) — the page sees NotAllowedError
+      const ctxs = [...new Set(e.pk.records.filter((r) => r.outcome === 'pending' && !r.kernel).map((r) => r.ctx))];
       for (const ctx of ctxs) {
         const r = await pkCall(w, e, ctx, 'cancel');
         const k = r && r.result && r.result.result ? Number(r.result.result.value) || 0 : 0;
@@ -1244,13 +1301,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       }
       if (n) passkeyChanged(w, e);
     }
-    return { ok: true, n, rpId, text: PK.cancelText({ n, rpId }) };
+    return { ok: true, n, rpId, text: PK.cancelText({ n, rpId, kernel: kn > 0 }) };
   }
   // ── lane passkey-store-core: THE PASSKEY STORE'S CEREMONIES (docs/design-passkey-store.zh.md; P0's corrections) ──
   // The tab's virtual authenticator is EMPTY between ceremonies; a held ceremony is judged by PURE PS.gateVerdict and only
   // the rows it may use are loaded for it; `end` unloads everything. THIS file is the store's ONE writer.
   const pkRead = () => { if (!pkCache) { let raw = null; try { raw = pks.read(); } catch (e) { say('pk-read:' + (e && e.message), `the passkey store could not be read — ${e && e.message}`); } pkCache = PS.normalizeStore(raw); } return pkCache; };
-  const pkWrite = (next) => { pkCache = PS.normalizeStore(next); try { pks.write(pkCache); } catch (e) { say('pk-write:' + (e && e.message), `the passkey store was not written — ${e && e.message}`); } };
+  const pkWrite = (next) => { pkCache = PS.normalizeStore(next); try { pks.write(pkCache); return true; } catch (e) { say('pk-write:' + (e && e.message), `the passkey store was not written — ${e && e.message}`); return false; } }; // lane passkey-sink: → on disk?
   const b64 = (u) => { const s = String(u || '').replace(/-/g, '+').replace(/_/g, '/'); return s + '='.repeat((4 - (s.length % 4)) % 4); };
   const b64u = (s) => String(s || '').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   /** P0 (b): `enable` and the authenticator are ONE step — an enabled domain with no authenticator hangs every get. */
@@ -1262,7 +1319,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (!id) { await call(w, 'WebAuthn.disable', {}, sid); say('pk-auth:' + w.profileId, `${w.profileId}: the passkey authenticator was not attached — ${(a && a.error && a.error.message) || 'no answer'}`); }
     return id;
   }
-  const pkCtl = (w, e, rec, verb) => pkCall(w, e, rec ? rec.ctx : null, verb, rec ? rec.n : 0);
+  const pkCtl = (w, e, rec, verb) => (rec && rec.kernel ? pkKernelCtl(w, e, rec, verb) : pkCall(w, e, rec ? rec.ctx : null, verb, rec ? rec.n : 0)); // lane passkey-sink: a kernel's ceremony is answered over VibeSpace.*
   /** lane passkey-prewrap-fix (passkey-verify lens ②): OUR closure in a document, by OBJECT IDENTITY — the private field the
    *  hook stamped on CredentialsContainer.prototype under the profile's slot name (page script can neither read one nor make
    *  one without that name). On an ARM: found ⇒ REARM (this arm's binding + key; a slot the page took is taken back —
@@ -1367,6 +1424,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   /** ① a held ceremony starts → ② the gate → release (load ONLY its rows) | ask (a card) | refuse (the hook rejects in-page). */
   async function pkGate(w, e, rec) {
+    if (rec && rec.kernel) return pkKernelGate(w, e, rec); // lane passkey-sink: the kernel road (no authenticator, VibeSpace signs)
     if (!e.pk.auth) return pkCtl(w, e, rec, 'release'); // no authenticator on this tab: Chrome's own behaviour (said passkey_open if it never ends)
     if (e.pk.draining) await e.pk.draining.catch(() => {}); // ONE ceremony per tab at a time: the last one's unload first
     const pid = w.profileId, part = PS.profileOf(pkRead(), pid);
@@ -1543,7 +1601,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   function setTabsOf(fn) { tabsFn = typeof fn === 'function' ? fn : null; }
   /** r4 #2: the orphan tabs of a browser and what they hold (a diagnostic read — the suites, `stats`). */
   function orphansOf(profileId, scope = new Set(['-'])) { const w = watches.get(String(profileId || '')); const ob = orphanBusy(w, scope); return { orphans: ob.orphans ? [...ob.orphans] : [], loop: ob.loop ? ob.loop.targetId : null, busy: ob.busy, loading: w && ob.orphans ? (loadingIn(w.profileId, ob.orphans) || null) : null, open: w && ob.orphans ? !!openIn(w.profileId, ob.orphans) : false }; }
-  function stats() { return [...watches.values()].map((w) => ({ profileId: w.profileId, state: w.state, tabs: w.targets.size, enabled: [...w.targets.values()].filter((e) => e.enabled).length, held: [...w.targets.values()].filter((e) => e.heldAt).length, open: [...w.open.values()].map((d) => ({ id: d.id, type: d.type })), answered: w.answered.length, loops: [...w.targets.values()].filter((e) => e.loop).length })); }
+  function stats() { return [...watches.values()].map((w) => ({ profileId: w.profileId, state: w.state, tabs: w.targets.size, enabled: [...w.targets.values()].filter((e) => e.enabled).length, held: [...w.targets.values()].filter((e) => e.heldAt).length, open: [...w.open.values()].map((d) => ({ id: d.id, type: d.type })), answered: w.answered.length, loops: [...w.targets.values()].filter((e) => e.loop).length, kernel: w.kernel ? { protocol: w.kernel.protocol, features: w.kernel.features } : w.kernel, surfaces: [...w.surf.values()].map((x) => ({ id: x.id, kind: x.kind, cls: x.cls })), nativeIgnored: w.nativeIgnored })); } // lane browser-surfaces
   function shutdown() { for (const w of [...watches.values()]) { try { w.ws && w.ws.close(1001); } catch { /* */ } down(w, 'the server is restarting', { keepNotices: true }); } for (const x of waiters) x.resolve(null); waiters.clear(); }
 
   // ── lane browser-ui-prompts (B-ebfc): THE BROWSER'S OWN PROMPTS — hooked on every enabled tab of this socket ──
@@ -1689,11 +1747,495 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     setTimeout(() => w.printing.delete(tid), 60000).unref?.();
   }
 
+  // ── lane passkey-sink (P2 of the custom browser kernel, design-custom-browser-plugin §3): THE CEREMONY SINKS TO VIBESPACE ──
+  // On a kernel whose `features` list `webauthn` there is no hook and no virtual authenticator: the kernel TRANSPORTS the ceremony
+  // (`VibeSpace.webauthnRequest`), VibeSpace signs it (PURE src/webauthn-sign.js, the key sealed in the passkey store) and answers
+  // (`VibeSpace.webauthnAnswer`). The RECORD is today's (PK.applyEvent: the verdict, the chip, the card, `passkey status|cancel`)
+  // — its source is the request. The webauthn SURFACE (P1) is only the held card's existence: it stands as this record (never a
+  // second dialog_open, never a browser-surface card); the request carries the ceremony's data. UV = the owner decided THIS
+  // ceremony (PS.kernelFlags — never auto); the sign count is written BEFORE the answer leaves; every signature and every new
+  // key is a USE of the passkeys' key (the vault's writer: purpose + receipt, never the bytes).
+  function pkSinks(w) { return !!(w && w.kernel && Array.isArray(w.kernel.features) && w.kernel.features.includes('webauthn')); }
+  /** The record (and its tab) of a kernel ceremony by its surface id. */
+  function pkRecOf(w, surfaceId) { for (const e of w.targets.values()) for (const r of e.pk.records) if (r.kernel && r.kernel.surfaceId === surfaceId) return { e, r }; return null; }
+  /** `VibeSpace.webauthnRequest` — the ceremony's start (the record), then the gate. */
+  function pkRequest(w, tid, p) {
+    const e = tid ? w.targets.get(tid) : null;
+    if (!e || !pkSinks(w)) { say('pk-req-tab:' + w.profileId, `${w.profileId}: a passkey request ${e ? 'from a browser that does not list the webauthn feature' : 'for a tab this watch does not know'} was not taken`); return; }
+    const ev = PK.kernelEvent(p, { n: ++w.pkSeq });
+    if (!ev) { say('pk-req:' + w.profileId, `${w.profileId}: a passkey request without a usable surfaceId / requestId was not taken`); return; }
+    if (e.pk.records.some((r) => r.kernel && r.kernel.requestId === ev.req.requestId)) return; // the same request twice
+    if (!e.pk.armed) { e.pk.armed = true; e.pk.sink = true; } // the request itself proves the road
+    const rec = PK.applyEvent(e.pk.records, ev, { tab: e.targetId, ctx: 0, now: now() });
+    passkeyChanged(w, e, true);
+    pkGate(w, e, rec).catch((err) => pkFailed(w, e, rec, err));
+  }
+  /** THE KERNEL ROAD'S GATE: the request re-checked (never trusting the kernel), then PS.gateVerdict exactly as the hook road
+   *  asks it (the rows of its rpId, the grant, the takeover, the card's answer) → sign | create | ask (the card; the kernel's
+   *  request waits) | refuse (the page is told NotAllowedError, the reason on the record). */
+  async function pkKernelGate(w, e, rec) {
+    if (rec.outcome !== 'pending' || rec.answering) return null;
+    const q = rec.kernel, pid = w.profileId;
+    if (!rec.by) rec.by = pkTakeover(w, e) ? 'human' : 'agent'; // the operator at the START (a takeover never lifts an agent's ceremony)
+    if (q.clientDataHash.length !== 43) { say('pk-req-hash:' + pid, `${pid}: a passkey request came without a 32-byte clientDataHash — answered not allowed`); await pkKernelAnswer(w, e, rec, { error: 'NotAllowedError' }); return pkKernelEnd(w, e, rec, 'error', 'NotAllowedError'); }
+    const pre = WA().requestVerdict({ crypto, req: q, rpMatches: PS.rpMatches });
+    if (pre) return pkKernelRefuse(w, e, rec, pre);
+    if (!pks) return pkKernelRefuse(w, e, rec, 'none'); // no store wired: nothing in VibeSpace holds a passkey
+    const part = PS.profileOf(pkRead(), pid), owner = pkOwner(w, e);
+    const gk = pid + ' ' + PS.grantKey(rec.rpId, owner || '');
+    const v = PS.gateVerdict({ kind: rec.conditional ? 'conditional' : rec.kind, rpId: rec.rpId, origin: q.origin, rows: part.rows, grant: pkGrants.get(gk) || null, input: { allow: rec.allow || [] }, answer: rec.answer || null, profileSwitch: part.agentsOff, takeover: rec.by === 'human', now: now() });
+    if (v.verdict === 'refuse') return pkKernelRefuse(w, e, rec, v.why);
+    if (v.verdict === 'ask') return pkAsk(w, e, rec, v.rows);
+    const f = PS.kernelFlags(v, { kind: rec.kind, answer: rec.answer || null, takeover: rec.by === 'human', userVerification: q.userVerification });
+    if (f.ask) return pkAsk(w, e, rec, v.load); // the page REQUIRES UV and nobody decided this ceremony: the owner's card is the verification
+    if (v.consumeGrant) pkGrants.delete(gk);
+    return rec.kind === 'create' ? pkKernelCreate(w, e, rec, v, f) : pkKernelSign(w, e, rec, v, f);
+  }
+  /** A sign-in: the row (the page's allow list order, else the latest used), its key unsealed for ONE signature, the count bumped
+   *  and WRITTEN before the answer leaves (a crash between = one count the site refuses once, never a reused one), the use noted,
+   *  the answer. No row opens ⇒ the page meets an empty authenticator (NotAllowedError, as standard Chrome's). */
+  async function pkKernelSign(w, e, rec, v, f) {
+    const q = rec.kernel, pid = w.profileId;
+    for (const row of PS.signOrder(PS.profileOf(pkRead(), pid).rows, v.load, rec.allow)) {
+      const key = PS.open(pks.cipher, row), refused = PS.keyRefusal(key);
+      if (refused) { pkKeyRefused(w, rec, refused); return pkKernelRefuse(w, e, rec, 'webauthn_key_locked'); }
+      pkKeyOk();
+      if (!key) { say('pk-open:' + row.credentialId.slice(0, 8), `${pid}: a stored passkey (${row.credentialId.slice(0, 8)}) could not be unsealed — the key file changed?`); continue; }
+      const used = PS.reconcile(PS.bumpSignCount(row).row, 0, now());
+      if (!pkWrite(PS.withRow(pkRead(), pid, used))) { await pkKernelAnswer(w, e, rec, { error: 'NotAllowedError' }); return pkKernelEnd(w, e, rec, 'error', 'NotAllowedError'); } // the count is not on disk: never signed with
+      const ad = WA().authenticatorData({ crypto, rpId: row.rpId, flags: f, signCount: used.signCount });
+      const { signature } = WA().assertion({ crypto, privateKeyPkcs8: key, clientDataHash: q.clientDataHash, authenticatorData: ad });
+      rec.userName = row.userName; rec.uv = f.uv;
+      pkUse(w, e, rec, `sign in to ${row.rpId} with a passkey`);
+      const r = await pkKernelAnswer(w, e, rec, { get: { credentialId: row.credentialId, authenticatorData: WA().b64u(ad), signature: WA().b64u(signature), userHandle: row.userHandle || null } });
+      pkKernelEnd(w, e, rec, r.ok ? 'ok' : 'aborted-by-page', r.ok ? null : r.code);
+      emit({ kind: 'passkeys', profileId: pid }); // the table's uses / last used
+      return v;
+    }
+    await pkKernelAnswer(w, e, rec, { error: 'NotAllowedError' });
+    pkKernelEnd(w, e, rec, 'error', 'NotAllowedError');
+    return v;
+  }
+  /** A registration: a P-256 pair made HERE, sealed under the passkeys' key BEFORE the answer leaves (a key VibeSpace cannot keep
+   *  is never handed to a site), the row written (signCount 0, NEW_KEY_POLICY), the use noted, the answer; a page that is gone
+   *  by then never got it — its row is dropped again. */
+  async function pkKernelCreate(w, e, rec, v, f) {
+    const q = rec.kernel, pid = w.profileId;
+    const m = WA().makeCredential({ crypto, rpId: rec.rpId, user: q.userId ? { id: q.userId } : null, flags: f });
+    const sealed = PS.seal(pks.cipher, m.privateKeyPkcs8.toString('base64')), refused = PS.keyRefusal(sealed);
+    m.privateKeyPkcs8.fill(0);
+    if (refused) { pkKeyRefused(w, rec, refused); return pkKernelRefuse(w, e, rec, 'webauthn_key_locked'); }
+    pkKeyOk();
+    const row = PS.normalizeRow({ credentialId: WA().b64u(m.credentialId), rpId: rec.rpId, userHandle: q.userId, userName: rec.user && rec.user.name, displayName: rec.user && rec.user.displayName, keySealed: sealed, signCount: 0, createdBy: v.createdBy === 'human' ? 'human' : 'agent', bySession: pkOwner(w, e), createdAt: now(), policy: PS.NEW_KEY_POLICY });
+    if (!row || !pkWrite(PS.withRow(pkRead(), pid, row))) { say('pk-new:' + pid, `${pid}: a new passkey was not stored — the page was told it was not allowed`); await pkKernelAnswer(w, e, rec, { error: 'NotAllowedError' }); return pkKernelEnd(w, e, rec, 'error', 'NotAllowedError'); }
+    rec.createdBy = row.createdBy; rec.userName = row.userName; rec.uv = f.uv; rec.harvested = true;
+    pkUse(w, e, rec, `register a passkey on ${rec.rpId}`);
+    const r = await pkKernelAnswer(w, e, rec, { create: { credentialId: row.credentialId, attestationObject: WA().b64u(m.attestationObject) } });
+    if (!r.ok) { rec.harvested = false; pkWrite(PS.dropRows(pkRead(), pid, (x) => x.credentialId === row.credentialId).store); }
+    pkKernelEnd(w, e, rec, r.ok ? 'ok' : 'aborted-by-page', r.ok ? null : r.code);
+    emit({ kind: 'passkeys', profileId: pid });
+    return v;
+  }
+  /** Refused by name: the page is told NotAllowedError, the reason stays on the record (said to the next verbs for a minute). */
+  async function pkKernelRefuse(w, e, rec, why) {
+    rec.refused = true; rec.why = why;
+    if (why !== 'none') pkTrace(w, e, rec, 'refused', { why });
+    await pkKernelAnswer(w, e, rec, { error: 'NotAllowedError' });
+    pkKernelEnd(w, e, rec, 'refused', 'NotAllowedError');
+    return { verdict: 'refuse', why };
+  }
+  /** The hook verbs the shared code asks (pkAsk's heartbeat, a failed step's release, a withdrawal) on the kernel road. */
+  async function pkKernelCtl(w, e, rec, verb) {
+    if (verb === 'wait' || verb === 'drained' || rec.outcome !== 'pending') return null; // the kernel's request simply waits
+    if (verb === 'cancel') return pkKernelCancel(w, e, rec);
+    const r = await pkKernelAnswer(w, e, rec, { error: 'NotAllowedError' }); // refuse · a failed step's release: never a signature
+    pkKernelEnd(w, e, rec, rec.refused ? 'refused' : 'error', 'NotAllowedError');
+    return r;
+  }
+  /** `passkey cancel` / the live view's Cancel on the kernel: `VibeSpace.cancelSurface` — the page sees NotAllowedError (Q4). */
+  async function pkKernelCancel(w, e, rec, by = 'agent') {
+    if (rec.outcome !== 'pending' || rec.answering) return false;
+    rec.answering = true;
+    const r = await call(w, 'VibeSpace.cancelSurface', { surfaceId: rec.kernel.surfaceId }, e.sid);
+    rec.answering = false;
+    if (!r || r.error || r.timeout || (r.result && r.result.ok === false)) { if (r && ((r.result && r.result.code === 'no_such_surface') || /no_such_surface/.test(String(r.error && r.error.message)))) pkKernelEnd(w, e, rec, 'aborted-by-page'); return false; }
+    rec.by = by;
+    pkKernelEnd(w, e, rec, 'cancelled', 'NotAllowedError');
+    return true;
+  }
+  /** ONE answer on the ceremony's page session — `VibeSpace.webauthnAnswer {surfaceId, requestId, get | create | error}` →
+   *  {ok} | {ok:false, code} (the kernel's refusal by name — `no_such_request`: the page or the kernel ended it first). */
+  async function pkKernelAnswer(w, e, rec, body) {
+    const q = rec.kernel;
+    rec.answering = true;
+    const r = await call(w, 'VibeSpace.webauthnAnswer', { surfaceId: q.surfaceId, requestId: q.requestId, ...body }, e.sid);
+    rec.answering = false;
+    const code = r && r.error ? String((r.error.data && r.error.data.code) || (String(r.error.message || '').match(/\b(no_such_request|no_such_surface|invalid_values|eval_failed)\b/) || [])[1] || 'eval_failed').slice(0, 40)
+      : r && r.timeout ? 'timeout' : r && r.result && r.result.ok === false ? String(r.result.code || 'eval_failed').slice(0, 40) : null;
+    if (code) say('pk-answer:' + w.profileId + ':' + code, `${w.profileId}: the kernel did not take a passkey answer — ${code}`);
+    return code ? { ok: false, code } : { ok: true };
+  }
+  /** The ceremony is over: the record ends (an open card withdrawn), its trace row, the chip / waiters re-read. */
+  function pkKernelEnd(w, e, rec, outcome, name = null) {
+    if (rec.outcome !== 'pending') return;
+    const a = rec.ask && pkAsks.get(rec.ask); if (a && a.state === 'open') pkClose(a, 'withdrawn');
+    PK.applyEvent(e.pk.records, { ev: 'end', id: rec.n, outcome, ...(name && /^[A-Za-z_]{1,40}$/.test(name) ? { name } : {}) }, { tab: e.targetId, ctx: 0, now: now() });
+    if (!rec.refused) pkTrace(w, e, rec, rec.outcome, rec.harvested ? { harvested: true } : {});
+    passkeyChanged(w, e);
+  }
+  /** THE USE LAW (lane vault-use-law): a signature or a new key is a USE of the passkeys' sealed key — ONE line through the
+   *  vault's writer (purpose + receipt; the key's bytes never leave this process). → the receipt (kept on the record) or null. */
+  function pkUse(w, e, rec, purpose) {
+    if (typeof vaultUse !== 'function') return null;
+    const owner = pkOwner(w, e);
+    const h = owner ? (holdersOf ? holdersOf(w.profileId) : []).find((x) => x && x.browserKey === owner && x.sessionId) : null;
+    let label = null; try { label = labelOf ? labelOf(w.profileId) : null; } catch { label = null; }
+    try { const r = vaultUse('passkeys', { by: rec.by === 'human' ? 'human' : 'agent', door: 'passkey', conv: h ? h.sessionId : null }, { outcome: 'ok', purpose, actor: `the agent browser ${label || w.profileId}`.slice(0, 80) }); rec.receipt = r && r.receipt ? String(r.receipt) : null; } catch (err) { say('pk-use:' + (err && err.message), `${w.profileId}: the passkey use was not noted — ${err && err.message}`); }
+    return rec.receipt || null;
+  }
+  /** The webauthn surface on a kernel with `webauthn`: the record stands for it. One whose request never comes (it began before
+   *  this socket — a reconnect's listSurfaces; the request is not sent again) is cancelled: nothing could sign it. */
+  function pkSurface(w, srec) {
+    const t = setTimeout(() => {
+      if (w.state !== 'open' || w.surf.get(srec.id) !== srec || pkRecOf(w, srec.id)) return;
+      say('pk-orphan:' + w.profileId, `${w.profileId}: a passkey request the kernel holds came with no request this watch saw (it began before this socket) — cancelled, the page is told it was not allowed`);
+      const e = w.targets.get(srec.targetId);
+      call(w, 'VibeSpace.cancelSurface', { surfaceId: srec.id }, e ? e.sid : null);
+    }, passkeyOrphanMs);
+    if (t.unref) t.unref();
+  }
+  /** The kernel closed a ceremony's surface that VibeSpace was not answering: the page went (aborted, timed out, navigated), or
+   *  the agent's / the person's dismiss through the surface doors (`answer <id> cancel`). */
+  function pkSurfaceGone(w, srec) {
+    const hit = pkRecOf(w, srec.id);
+    if (!hit || hit.r.outcome !== 'pending' || hit.r.answering) return;
+    const by = srec.pendingBy ? srec.pendingBy.by : null;
+    if (by) hit.r.by = by;
+    pkKernelEnd(w, hit.e, hit.r, by ? 'cancelled' : 'aborted-by-page');
+  }
+  // ── lane browser-surfaces (P1 of the custom browser kernel): A KERNEL'S SURFACES — the dialog pipeline's ONE source there ──
+  /** `VibeSpace.getVersion` on the browser session, ONCE per browser (the answer is kept per profile until it starts again): no
+   *  method / no `surfaces` ⇒ today's road (one journal line); `{protocol: 1, features: [… 'surfaces' …]}` ⇒ the kernel road. */
+  async function probeKernel(w) {
+    if (kernelOf.has(w.profileId)) { w.kernel = kernelOf.get(w.profileId); return; }
+    const v = await call(w, 'VibeSpace.getVersion', {}, null, Math.min(callTimeoutMs, KERNEL_PROBE_MS));
+    const r = v && v.result && typeof v.result === 'object' ? v.result : null;
+    const feats = r && Array.isArray(r.features) ? r.features.map((x) => String(x).slice(0, 40)).slice(0, 16) : [];
+    if (r && Number(r.protocol) === 1 && feats.includes('surfaces')) {
+      w.kernel = { protocol: 1, kinds: Array.isArray(r.kinds) ? r.kinds.map((x) => String(x).slice(0, 40)).slice(0, 64) : [], features: feats };
+      say('kernel:' + w.profileId, `${w.profileId}: a browser kernel with VibeSpace surfaces (protocol 1, ${feats.join(' + ')}) — its page prompts are read from its surfaces`);
+      const unknown = w.kernel.kinds.filter((k) => !SF().SURFACE_KINDS.includes(k));
+      if (unknown.length) say('kinds:' + w.profileId, `${w.profileId}: the kernel names ${unknown.length} surface kind(s) VibeSpace does not know (${unknown.slice(0, 4).join(', ')}) — each is a generic card`);
+    } else {
+      w.kernel = false;
+      say('kernel:' + w.profileId, `${w.profileId}: no VibeSpace surfaces on this browser (${v && v.error ? 'VibeSpace.getVersion is not a method here' : v && v.timeout ? 'VibeSpace.getVersion did not answer' : r && Number(r.protocol) !== 1 ? `protocol ${String(r.protocol).slice(0, 8)}` : 'no surfaces feature'}) — today's dialog road`);
+    }
+    if (!(v && v.timeout)) kernelOf.set(w.profileId, w.kernel); // never asked again for this browser (a silent socket is asked on the next one)
+    crossCheckEngine(w);
+  }
+  /** P0's hand-over (design §1.2): a profile whose browser is an ENGINE plugin has TWO answers about its kernel — the engine's own
+   *  probe (the registry) and the live `VibeSpace.getVersion` — a disagreement is ONE journal line; the live answer rules. */
+  function crossCheckEngine(w) {
+    let choice = null; try { const b = keeper && typeof keeper.browserOf === 'function' ? keeper.browserOf(w.profileId) : null; choice = b && b.browserChoice && b.browserChoice.kind === 'plugin' ? b.browserChoice : null; } catch { choice = null; }
+    if (!choice || typeof keeper.engineFactOf !== 'function') return;
+    Promise.resolve(keeper.engineFactOf(String(choice.id || ''))).then((fact) => {
+      if (!fact || fact.code) return;
+      const pf = Array.isArray(fact.features) ? fact.features.map((x) => String(x).slice(0, 40)).sort() : [], lf = w.kernel ? [...w.kernel.features].sort() : [];
+      const pk = Array.isArray(fact.kinds) ? fact.kinds.length : 0, lk = w.kernel ? w.kernel.kinds.length : 0;
+      if (JSON.stringify(pf) !== JSON.stringify(lf) || pk !== lk) say('engine-x:' + w.profileId, `${w.profileId}: the engine ${String(choice.id).slice(0, 80)}'s probe says features [${pf.join(', ')}] and ${pk} kinds, its live kernel [${lf.join(', ')}] and ${lk} — the live answer rules`);
+    }).catch(() => { /* the probe's own refusal is the keeper's to say */ });
+  }
+  /** THE THREE-TOUCH RULE on one page session (every attach, every re-ask of a held tab): ① `VibeSpace.enable {surfaces:true}`
+   *  ② `VibeSpace.listSurfaces {targetId}` aligns `w.surf` (③ the CLI's long-poll is module-wide — it re-arms by itself). */
+  async function armSurfaces(w, e) {
+    if (!e.sid) return;
+    const en = await call(w, 'VibeSpace.enable', { surfaces: true }, e.sid);
+    if (!en || en.timeout || en.error || (en.result && en.result.ok === false)) { say('senable:' + w.profileId + ':' + (en && en.error ? en.error.message : en && en.timeout ? 'timeout' : 'refused'), `${w.profileId}: VibeSpace.enable was not taken on tab ${e.targetId} — ${en && en.error ? en.error.message : en && en.timeout ? 'it did not answer' : String((en.result && en.result.code) || 'refused').slice(0, 40)}`); return; }
+    e.surfaces = true;
+    if (pkSinks(w)) { e.pk.armed = true; e.pk.sink = true; } // lane passkey-sink: the kernel's requests ARE this tab's ceremonies (no hook, no virtual authenticator)
+    const ls = await call(w, 'VibeSpace.listSurfaces', { targetId: e.targetId }, e.sid);
+    const list = ls && ls.result && Array.isArray(ls.result.surfaces) ? ls.result.surfaces : null;
+    if (list && w.targets.get(e.targetId) === e) alignSurfaces(w, e.targetId, list);
+  }
+  /** ② — what the kernel lists is what stands: a known one it no longer lists closed `navigated` by the kernel, a new one opened. */
+  function alignSurfaces(w, tid, list) {
+    const listed = new Set();
+    for (const s of list.slice(0, 64)) {
+      if (!s || typeof s !== 'object' || (s.targetId && String(s.targetId) !== tid)) continue;
+      const id = String(s.surfaceId || ''); listed.add(id);
+      if (!w.surf.has(id)) onSurfaceOpened(w, tid, s);
+    }
+    for (const rec of [...w.surf.values()]) if (rec.targetId === tid && !listed.has(rec.id)) onSurfaceClosed(w, tid, { surfaceId: rec.id, how: 'navigated', by: 'kernel' });
+  }
+  /** The tab an event is FOR (Q2): the page session it rode, else its `params.targetId` when this watch knows that tab. */
+  function surfaceTab(w, m) {
+    const tid = w.sessions.get(String(m.sessionId || ''));
+    if (tid) return tid;
+    const pt = m.params && m.params.targetId ? String(m.params.targetId) : '';
+    return pt && w.targets.has(pt) ? pt : null;
+  }
+  function onSurfaceOpened(w, tid, p) {
+    if (!tid) { say('surf-tab:' + w.profileId, `${w.profileId}: a surface for a tab this watch does not know was not taken (${String((p && p.kind) || '?').slice(0, 32)})`); return; }
+    const t = now();
+    const b = SF().surfaceBlock(p, { now: t, pageText: ST.pageText });
+    if (!b) { say('surf-id:' + w.profileId, `${w.profileId}: a surface without a usable id was not taken`); return; }
+    if (w.surf.has(b.id)) return; // listSurfaces after an event that already opened it
+    const rec = { ...b, targetId: tid, surface: true };
+    w.surf.set(rec.id, rec);
+    if (w.surf.size > 256) { const old = w.surf.keys().next().value; const x = w.surf.get(old); w.surf.delete(old); surfaceAskDone(w, x); }
+    const sink = SF().sinkOf(rec.kind, w.kernel);
+    if (sink === 'webauthn') { rec.passkey = true; return pkSurface(w, rec); } // lane passkey-sink: the passkey record stands for it — never a second dialog_open, never a browser-surface card
+    if (sink === 'credentials' || (rec.kind === 'http-auth' && loginSinks(w))) { if (sink) rec.sink = sink; else rec.logins = true; } // lane browser-login: the login road fills it — the agent's line names `vibespace-browser login`
+    if (rec.cls === 'silent') { // SILENT: one journal line per kind, never a card, never a note
+      say('supp:' + w.profileId + ':' + ((rec.detail && rec.detail.suppressedKind) || rec.kind), `${w.profileId}: surface:${rec.kind} ${(rec.detail && rec.detail.suppressedKind) || ''}${rec.detail && rec.detail.reason ? ` (${rec.detail.reason})` : ''}`);
+      emit({ kind: 'surface', state: 'trace', profileId: w.profileId, targetId: tid, surface: { id: rec.id, kind: rec.kind, suppressedKind: (rec.detail && rec.detail.suppressedKind) || null } });
+      return;
+    }
+    // P — the policy answers at once over this socket (each row's RED control lives in test-browser-surfaces)
+    const pv = SF().policyVerdict(rec, { grants: [...w.grants.values()] });
+    if (pv) {
+      rec.policy = pv;
+      answerSurfaceOn(w, rec, { answerId: pv.answerId, values: null, files: null, by: 'policy' }).then((r) => { if (!r.ok && w.surf.get(rec.id) === rec) { say('policy:' + w.profileId + ':' + r.code, `${w.profileId}: a ${rec.kind} surface was not answered by policy — ${r.error}`); rec.policy = null; standSurface(w, rec); } });
+      return;
+    }
+    // a js-dialog alert: today's rule — accepted at once (the tab's budget), held for the user while they drive
+    if (rec.kind === 'js-dialog' && rec.type === 'alert') {
+      const e = w.targets.get(tid);
+      if (userDrives(w.profileId)) { rec.forUser = true; return standSurface(w, rec); }
+      const recent = e ? (e.autoAt = (e.autoAt || []).filter((x) => t - x < ST.AUTO_ACCEPT_WINDOW_MS)).length : 0;
+      const v = ST.autoAnswerVerdict(rec, { recent });
+      if (v.auto) {
+        if (e) e.autoAt.push(t);
+        rec.autoPending = true; w.autoSurf++;
+        const pick = SF().dialogAnswerOf(rec, { accept: true });
+        answerSurfaceOn(w, rec, { answerId: pick ? pick.answerId : '', values: null, files: null, by: 'auto' }).then((r) => { rec.autoPending = false; if (!r.ok && w.surf.get(rec.id) === rec) { say('sauto:' + r.code, `${w.profileId}: an alert surface could not be accepted — ${r.error}`); standSurface(w, rec); } });
+        return;
+      }
+      if (v.storm) rec.storm = v.storm;
+    }
+    standSurface(w, rec);
+  }
+  /** A surface that waits: HELD ⇒ the dialog road (`w.open` for its tab, the waiters, the idle notice, the owner's card later);
+   *  NOTED ⇒ one line in the next result + the live view's bar. */
+  function standSurface(w, rec) {
+    if (rec.cls === 'held') {
+      const cur = w.open.get(rec.targetId);
+      if (!cur || cur.surface !== true || !w.surf.has(cur.id)) { w.open.set(rec.targetId, rec); held(w, rec.targetId, rec); }
+      surfaceAskLater(w, rec);
+      return;
+    }
+    noteSurface(w, rec, { state: 'open' });
+    emit({ kind: 'surface', state: 'open', profileId: w.profileId, targetId: rec.targetId, surface: rec });
+  }
+  function noteSurface(w, rec, { state, how = '', by = '', answer = null, why = '' }) {
+    w.promptNotes.push({ id: `${rec.id}:${state}`, kind: 'surface', state, block: SF().blockAt(rec, { now: now() }), how, by, answer, why, at: now(), targetId: rec.targetId });
+    if (w.promptNotes.length > ANSWERED_KEEP) w.promptNotes.shift();
+  }
+  function onSurfaceUpdated(w, tid, p) {
+    const rec = w.surf.get(String((p && p.surfaceId) || ''));
+    if (!rec || (tid && rec.targetId !== tid)) return;
+    const n = SF().applySurfacePatch(rec, p.patch, { now: now(), pageText: ST.pageText });
+    const next = { ...n, targetId: rec.targetId, surface: true, ...(rec.policy ? { policy: rec.policy } : {}), ...(rec.forUser ? { forUser: true } : {}) };
+    w.surf.set(rec.id, next);
+    if (w.open.get(rec.targetId) === rec) w.open.set(rec.targetId, next);
+    if (rec.cls !== 'held' && next.cls === 'held') { standSurface(w, next); return; } // a download turned dangerous: now the owner's
+    emit({ kind: 'surface', state: 'updated', profileId: w.profileId, targetId: rec.targetId, surface: next });
+  }
+  function onSurfaceClosed(w, tid, p) {
+    const id = String((p && p.surfaceId) || '');
+    const rec = w.surf.get(id);
+    if (!rec) return;
+    w.surf.delete(id);
+    surfaceAskDone(w, rec);
+    if (rec.passkey) return pkSurfaceGone(w, rec); // lane passkey-sink: its ceremony ends with it (the record says so — no surface note)
+    const a = SF().closedBlock(rec, { how: String(p.how || ''), by: String(p.by || ''), answeredBy: rec.pendingBy ? rec.pendingBy.by : null, answerId: rec.pendingBy ? rec.pendingBy.answerId : null, at: now() });
+    if (w.open.get(rec.targetId) === rec) {
+      w.open.delete(rec.targetId);
+      // the next held surface on that tab (if any) stands in its place
+      const next = [...w.surf.values()].filter((x) => x.targetId === rec.targetId && x.cls === 'held' && !x.policy && !x.autoPending).sort((x, y) => x.openedAt - y.openedAt)[0];
+      if (next) { w.open.set(next.targetId, next); held(w, next.targetId, next); }
+    }
+    if (rec.kind === 'js-dialog') { // the dialog road's own record (alertsNote / answeredNote / waitSettled read it)
+      const dismissed = a.how === 'dismissed' || (a.answer && a.answer.kind === 'dismiss') || (a.how !== 'answered');
+      w.answered.push({ id: rec.id, dialog: rec, how: dismissed ? 'dismissed' : 'accepted', by: a.by === 'kernel' || a.by === 'page' ? 'unknown' : a.by, at: a.at, targetId: rec.targetId, surface: true });
+      if (w.answered.length > ANSWERED_KEEP) w.answered.splice(0, w.answered.length - ANSWERED_KEEP);
+    } else if (rec.cls !== 'silent' && a.by !== 'agent') noteSurface(w, rec, { state: 'closed', how: a.how, by: a.by, answer: a.answer || null, why: rec.policy ? rec.policy.why : '' });
+    emit({ kind: 'closed', profileId: w.profileId, targetId: rec.targetId, answered: { ...a, dialog: SF().blockAt(rec, { now: a.at }) } });
+    withdrawNotices([rec.id]);
+  }
+  /** ONE answer over THIS socket's session for the surface's tab — `VibeSpace.answerSurface {surfaceId, answerId, values?, files?}`;
+   *  the kernel's refusal (a CDP error naming its code, or `{ok:false, code}`) mapped BY NAME. Who answered is kept on the
+   *  record for its close. */
+  async function answerSurfaceOn(w, rec, { answerId, values = null, files = null, by }) {
+    const e = w.targets.get(rec.targetId);
+    if (!e || !e.sid) return { ok: false, code: 'not_watched', error: 'VibeSpace is not attached to that tab' };
+    rec.pendingBy = { by, answerId: String(answerId || '') };
+    const params = { surfaceId: rec.id, answerId: String(answerId || ''), ...(values && Object.keys(values).length ? { values } : {}), ...(files && files.length ? { files } : {}) };
+    const r = await call(w, 'VibeSpace.answerSurface', params, e.sid);
+    const kerr = r && r.error ? (String((r.error.data && r.error.data.code) || '').match(/^[a-z_]{3,40}$/) ? r.error.data.code : (String(r.error.message || '').match(/\b(no_such_surface|invalid_action|stale_origin|no_such_request|invalid_values|eval_failed)\b/) || [])[1] || 'eval_failed') : r && r.result && r.result.ok === false ? String(r.result.code || 'eval_failed') : null;
+    if (!r || r.timeout || kerr) {
+      if (rec.pendingBy && rec.pendingBy.answerId === String(answerId || '')) rec.pendingBy = null;
+      const code = r && r.timeout ? 'answer_failed' : SF().kernelErrorToCode(kerr);
+      if (code === 'no_dialog' && w.surf.get(rec.id) === rec) onSurfaceClosed(w, rec.targetId, { surfaceId: rec.id, how: 'navigated', by: 'kernel' }); // the kernel no longer has it: it is gone here too
+      return { ok: false, code, error: r && r.timeout ? 'the browser did not answer' : `the browser refused that answer (${String(kerr).slice(0, 40)})` };
+    }
+    return { ok: true, surface: rec };
+  }
+  /** The profile's downloads directory, REAL (a symlink never moves the sandbox), or null — async: a path an agent names may sit
+   *  on a mount, never read synchronously on the hub's loop. */
+  async function sandboxOf(pid) {
+    let d = null; try { d = typeof downloadsDirOf === 'function' ? downloadsDirOf(pid) : null; } catch { d = null; }
+    return typeof d === 'string' && d[0] === '/' ? realOf(d) : null;
+  }
+  const realOf = (p) => { const s = String(p || ''); return s && s[0] === '/' ? require('fs').promises.realpath(s).catch(() => null) : Promise.resolve(null); };
+  /** THE ANSWER DOOR (the agent's `vibespace-browser answer <id> <answerId> [--value k=v] [--file p]`, the live view's buttons,
+   *  the For-you card's Approve / Reject): the surface in the conversation's scope, the verdict (who may pick what, the values,
+   *  the files inside the downloads directory, the card the user saw), then the kernel. */
+  async function answerSurface({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, { surfaceId, answerId, values = null, files = null, by = 'agent', shown = null } = {}) {
+    const pid = String(profileId || ''); const w = watches.get(pid);
+    if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
+    if (!w.kernel) return { ok: false, code: 'no_dialog', error: 'this browser has no VibeSpace surfaces (standard Chrome) — a page dialog is answered with vibespace-browser dialog accept|dismiss' };
+    const scope = by === 'user-card' ? null : scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
+    const rec = w.surf.get(String(surfaceId || ''));
+    if (!rec || !inScope(scope, rec.targetId) || rec.cls === 'silent') return { ok: false, code: 'no_dialog', error: 'no such browser prompt is open on your browser — vibespace-browser surfaces lists them' };
+    if (shown !== null && shown !== undefined && String(shown) !== SF().digestOf(rec)) return { ok: false, code: 'surface_changed', error: 'that prompt changed after it was shown — nothing was answered; read it again' };
+    const who = by === 'user-card' ? 'user' : by;
+    const list = Array.isArray(files) ? await Promise.all(files.slice(0, SF().FILES_MAX + 1).map(async (f) => ({ asked: String(f || '').slice(0, 300), real: await realOf(f) }))) : null;
+    const v = SF().answerVerdict({ block: rec, by: who, answerId, values, files: list, sandbox: list && list.length ? await sandboxOf(pid) : null });
+    if (!v.ok) return v;
+    const r = await answerSurfaceOn(w, rec, { answerId: v.answer.id, values: v.values, files: v.files, by: who });
+    if (!r.ok) return r;
+    if (who === 'agent' && browserKey) { let seen = told.get(browserKey); if (!seen) { seen = new Set(); told.set(browserKey, seen); } seen.add(rec.id); }
+    return { ok: true, surface: SF().blockAt(rec, { now: now() }), answer: v.answer, text: `the browser prompt was answered: ${JSON.stringify(v.answer.label)} — ${SF().kindWord(rec)}${rec.url ? ` from ${rec.url}` : ''}` };
+  }
+  /** Every surface standing in the conversation's scope (`vibespace-browser surfaces`, the live view's bar) — blocks, oldest first. */
+  function surfacesIn(profileId, scope = null) {
+    const w = watches.get(String(profileId || ''));
+    if (!w || w.state !== 'open' || !w.kernel) return [];
+    return [...w.surf.values()].filter((x) => x.cls !== 'silent' && !x.policy && !x.autoPending && inScope(scope, x.targetId)).sort((a, b) => a.openedAt - b.openedAt).map((x) => SF().blockAt(x, { now: now() }));
+  }
+  /** The live view's relay question: does a BLOCKING surface stand on these tabs (null = any)? Input to the page is dropped then. */
+  function blockingOn(profileId, targets = null) {
+    const w = watches.get(String(profileId || ''));
+    if (!w || !w.kernel) return null;
+    const set = Array.isArray(targets) && targets.length ? new Set(targets.map(String)) : null;
+    for (const x of w.surf.values()) if (x.blocking && x.cls !== 'silent' && !x.policy && (!set || set.has(x.targetId))) return { id: x.id, kind: x.kind };
+    return null;
+  }
+  /** The For-you card's door: the surface by its id on any watched browser (the owner's card names no conversation). */
+  function surfaceById(surfaceId) {
+    for (const w of watches.values()) { const rec = w.surf.get(String(surfaceId || '')); if (rec && w.state === 'open') return { profileId: w.profileId, block: SF().blockAt(rec, { now: now() }) }; }
+    return null;
+  }
+  /** A HELD surface only the OWNER can answer (some answer is not the agent's), unanswered PROMPT_ASK_MS ⇒ ONE For-you card
+   *  (`browser-surface`: Approve presses its first answer that needs no typing, Reject its dismiss — the card's `shown` digest
+   *  guards both); resolved when it closes. */
+  function surfaceAskLater(w, rec) {
+    if (!forYou || w.surfTimers.has(rec.id) || !(rec.answers || []).some((a) => !SF().agentMay(rec, a))) return;
+    const x = setTimeout(() => { w.surfTimers.delete(rec.id); surfaceAsk(w, rec.id); }, promptAskMs);
+    if (x.unref) x.unref();
+    w.surfTimers.set(rec.id, x);
+  }
+  function surfaceAsk(w, id) {
+    const rec = w.surf.get(id);
+    if (!rec || w.surfForYou.has(id) || !forYou) return;
+    let label = null; try { label = labelOf ? labelOf(w.profileId) : null; } catch { label = null; }
+    const what = SF().kindTitle(rec.kind, (k) => k); // the kind's title KEY (worded in the device's language: a param may be words)
+    const site = rec.url || '';
+    const text = site ? 'A page in the agent browser asks you ({site}): {what}' : 'A page in the agent browser asks you: {what}'; const detail = 'Open its live view to answer it there — or Approve / Reject here.';
+    const approve = SF().approveOf(rec); const reject = (rec.answers || []).find((a) => a.kind === 'dismiss') || null;
+    let fy = null;
+    try { fy = forYou.add?.(w.profileId, { kind: 'action', urgency: 'high', text: text.replace('{site}', site).replace('{what}', what) + (label ? ` — ${String(label).slice(0, 80)}` : ''), detail, i18n: { text: { key: text, params: { what: { key: what }, ...(site ? { site } : {}) } }, detail: [{ key: detail }] },
+      ...(approve || reject ? { action: { type: 'browser-surface', id: rec.id, shown: SF().digestOf(rec), ...(approve ? { approve: approve.id, approveLabel: approve.label } : {}), ...(reject ? { reject: reject.id } : {}) } } : {}) }); } catch (err) { say('surf-fy:' + (err && err.message), `the browser prompt's For-you item was not filed — ${err && err.message}`); }
+    if (fy) w.surfForYou.set(id, fy);
+  }
+  function surfaceAskDone(w, rec) {
+    if (!rec) return;
+    const x = w.surfTimers.get(rec.id); if (x) { clearTimeout(x); w.surfTimers.delete(rec.id); }
+    const fy = w.surfForYou.get(rec.id); if (fy) { w.surfForYou.delete(rec.id); try { forYou?.resolve?.(fy); } catch { /* the tray's own failure */ } }
+  }
+  // ── lane browser-login (P3 of the custom browser kernel, design §4): WEB LOGINS — on a kernel whose features list
+  // `credentials` the kernel reports a page's login forms (`VibeSpace.credentialFormDetected` → the tab's `e.forms`, ≤ 8, a new
+  // document clears them), fills what the VAULT holds (`VibeSpace.fillCredential` — the values ride this loopback socket and
+  // nothing here keeps them) and says when the page took a form (`VibeSpace.credentialSubmitted` → the ONE writer,
+  // src/server/browser-logins.js, saves what it should). The agent's door is `fillLogin` (`vibespace-browser login`): the
+  // verdict, the grant, the two-step code and every use line are the logins module's; an http-auth surface is answered the same
+  // way (its credential answer, the same phishing rule and grant).
+  function loginSinks(w) { return !!(w && w.kernel && Array.isArray(w.kernel.features) && w.kernel.features.includes('credentials')); }
+  function onLoginForm(w, tid, p) {
+    const e = tid ? w.targets.get(tid) : null;
+    if (!e || !loginSinks(w)) { say('login-form:' + w.profileId, `${w.profileId}: a login form ${e ? 'from a browser that does not list the credentials feature' : 'for a tab this watch does not know'} was not kept`); return; }
+    const f = BL().formOf(p, { now: now() });
+    if (!f) { say('login-form-bad:' + w.profileId, `${w.profileId}: a login form the kernel reported had no field VibeSpace can fill — not kept`); return; }
+    e.forms = BL().keepForm(e.forms, { ...f, targetId: e.targetId });
+    emit({ kind: 'login-form', profileId: w.profileId, targetId: e.targetId, form: { id: f.id, kind: f.kind, origin: f.pageOrigin } });
+  }
+  /** The conversation a tab's page is for — its id and its name (the notice's words, the entry's provenance). */
+  function loginConv(w, e) {
+    const bk = pkOwner(w, e);
+    const h = (holdersOf ? holdersOf(w.profileId) || [] : []).find((x) => x && !x.human && bk && parentKey(x.browserKey) === parentKey(bk));
+    let c = null; try { c = h && h.sessionId && typeof conversationOf === 'function' ? conversationOf(h.sessionId) : null; } catch { c = null; }
+    return { conv: (c && c.cid) || (h && h.sessionId) || null, name: (c && c.name) || null };
+  }
+  function onLoginSubmitted(w, tid, p) {
+    const e = tid ? w.targets.get(tid) : null;
+    if (!e || !loginSinks(w) || !logins) { say('login-sub:' + w.profileId, `${w.profileId}: a login submission ${e ? 'on a browser VibeSpace keeps no logins for' : 'for a tab this watch does not know'} was not saved`); return; }
+    const filled = e.filled && e.filled.formId === String(p.surfaceId || p.formId || '') && now() - e.filled.at < 10 * 60e3 ? e.filled : null;
+    const by = pkTakeover(w, e) ? 'human' : 'agent';
+    const who = filled ? { conv: filled.conv, name: filled.actor } : loginConv(w, e);
+    let r;
+    try { r = logins.submitted({ origin: p.pageOrigin || p.origin, usernameHint: p.usernameHint, password: typeof p.password === 'string' ? p.password : null, outcome: p.outcome, by, name: filled ? filled.name : null, conv: who.conv, convName: who.name, profileId: w.profileId }); }
+    catch (err) { r = { state: 'none', why: err && err.message }; }
+    p.password = undefined; // the loopback socket's bytes go nowhere else
+    if (filled && r && r.state !== 'held') e.filled = null;
+    say('login-saved:' + w.profileId + ':' + Date.now(), `${w.profileId}: a login submission on ${BL().originOf(p.pageOrigin || p.origin) || 'a page'} — ${r ? r.state : 'none'}${r && r.why ? ` (${String(r.why).slice(0, 60)})` : ''}`);
+    emit({ kind: 'login-saved', profileId: w.profileId, targetId: e.targetId, state: r ? r.state : 'none', name: (r && r.name) || null });
+  }
+  /** The forms standing on the conversation's tabs (a kernel's) — ids, kinds, origins and field types only. */
+  function loginForms(profileId, scope = null) {
+    const w = watches.get(String(profileId || ''));
+    if (!w || !loginSinks(w)) return [];
+    const out = [];
+    for (const e of w.targets.values()) if (inScope(scope, e.targetId)) for (const f of e.forms || []) out.push({ id: f.id, targetId: e.targetId, kind: f.kind, origin: f.pageOrigin, fields: f.fields.map((x) => x.type) });
+    return out;
+  }
+  /** THE `login` DOOR: the conversation's own tabs' forms (+ a held http-auth surface) → the logins module's plan → the kernel
+   *  fills (or the surface is answered) → ONE use line → the agent's answer: what was filled, never a value. */
+  async function fillLogin({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, { origin = null, user = null, newUser = null, generate = false, submit = false, facts = {}, conv = null, actor = null } = {}) {
+    const pid = String(profileId || ''); const w = watches.get(pid);
+    if (!logins) return { ok: false, code: 'not_watched', error: 'VibeSpace keeps no web logins on this server' };
+    if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
+    if (!loginSinks(w)) return { ok: false, code: 'login_no_form', error: 'this browser does not report login forms (standard Chrome) — only the custom browser kernel does; the owner can sign in by hand in the live view' };
+    const scope = scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
+    const forms = [];
+    for (const e of w.targets.values()) if (inScope(scope, e.targetId)) for (const f of e.forms || []) forms.push(f);
+    for (const rec of w.surf.values()) if (rec.kind === 'http-auth' && inScope(scope, rec.targetId)) { const f = BL().formOfSurface(SF().blockAt(rec, { now: now() }), { now: rec.openedAt || 0 }); if (f) forms.push({ ...f, targetId: rec.targetId }); }
+    forms.sort((a, b) => (a.at || 0) - (b.at || 0));
+    const plan = logins.planFill({ forms, origin, user, newUser, generate, facts, conv, actor });
+    if (!plan.ok) return plan;
+    const e = w.targets.get(String(plan.form.targetId || ''));
+    let r = null, kerr = null;
+    if (!e || !e.sid) kerr = 'not_attached';
+    else if (plan.form.surface) { const rec = w.surf.get(plan.form.id); const a = rec ? await answerSurfaceOn(w, rec, { answerId: plan.form.answerId, values: plan.values, by: 'agent' }) : { ok: false, code: 'no_dialog' }; if (!a.ok) kerr = a.code === 'surface_stale' ? 'stale_origin' : a.code; }
+    else {
+      r = await call(w, 'VibeSpace.fillCredential', { surfaceId: plan.form.id, values: plan.values, expectedOrigin: plan.origin, submit: !!submit }, e.sid);
+      kerr = !r || r.timeout ? 'timeout' : r.error ? (String((r.error.data && r.error.data.code) || '').match(/^[a-z_]{3,40}$/) ? r.error.data.code : (String(r.error.message || '').match(/\b(stale_origin|invalid_values|no_such_surface|eval_failed)\b/) || [])[1] || 'eval_failed') : r.result && r.result.ok === false ? String(r.result.code || 'eval_failed') : null;
+    }
+    plan.values = null; // handed to the kernel — kept by no one here
+    const u = logins.noteFill(plan, { conv, actor, outcome: kerr ? 'login_failed' : 'ok' });
+    if (kerr) return { ok: false, code: kerr === 'stale_origin' ? 'login_phishing' : 'login_failed', error: kerr === 'stale_origin' ? `the page is no longer ${plan.origin} (the kernel checked it again) — nothing was filled` : kerr === 'not_attached' ? 'VibeSpace is not attached to that tab — nothing was filled' : `the browser did not fill the form (${String(kerr).slice(0, 40)})${plan.mode === 'login' ? '' : ' — the new login stays in the vault, pending, so no password is lost'}` };
+    if (!plan.form.surface) e.filled = { formId: plan.form.id, name: plan.name, mode: plan.mode, at: now(), conv, actor };
+    return { ok: true, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled, submitted: !!submit || !!plan.form.surface, receipt: u && u.receipt, otpMissing: !!plan.otpMissing, ...(plan.length ? { length: plan.length } : {}) };
+  }
+  /** The kernel road's facts for one browser (the routes' `surfaces` answer, the suites): null = not asked yet. */
+  function kernelFactOf(profileId) { const w = watches.get(String(profileId || '')); return w ? w.kernel : kernelOf.has(String(profileId || '')) ? kernelOf.get(String(profileId || '')) : null; }
+
   // the keeper's own lease seam: a browser that starts again or stops starts a fresh watch and a fresh verdict
   let unsubLease = null;
   if (keeper && typeof keeper.onLease === 'function') {
     unsubLease = keeper.onLease((ev) => {
       if (!ev || !ev.profileId) return null;
+      if (ev.kind === 'browser-stopped' || ev.kind === 'browser-ready') kernelOf.delete(String(ev.profileId)); // lane browser-surfaces: a browser started again may be another engine (Change build…) — asked again
       if (ev.kind === 'browser-stopped') disarm(ev.profileId, 'the browser stopped');
       else if (ev.kind === 'browser-ready') { resetOutcomes(ev.profileId); const w = watches.get(String(ev.profileId)); if (w) { try { w.ws && w.ws.close(1000); } catch { /* */ } down(w, 'the browser started again'); } }
       return null;
@@ -1710,6 +2252,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     paintFacts, freezePaint, thawPaint, // lane browser-swiftshader-cpu: a browser nobody watches and nobody drives paints nothing
     promptIn, answerPrompt, // lane browser-ui-prompts: a file chooser / an HTTP sign-in, named and answerable
     setPermission, permissionsOf, // lane browser-ui-prompts-r2: every permission decided ahead; the agent's per-origin flip
+    answerSurface, surfacesIn, blockingOn, surfaceById, blockOf, kernelFactOf, // lane browser-surfaces: a kernel's surfaces — the answer door, the list, the relay's drop, the owner's card, the readers' block
+    fillLogin, loginForms, // lane browser-login: the `login` verb's door (the vault's values to the kernel, never to anyone else) + the forms a tab reports
     shutdown: () => { shutdown(); try { unsubLease?.(); } catch { /* */ } }, _watches: watches };
 }
 

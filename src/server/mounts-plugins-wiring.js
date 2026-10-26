@@ -120,12 +120,21 @@ const vaultTotp = require('./vault-totp.js').create({ dataDir: path.join(rootDir
 // test-msg-cli-groups §2c); a use by such a fork presents another token, so the parent's run-bound grant never covers it
 const totpSessionOf = (cid) => [...activeSessions.values()].find((s) => s && !s.isTmuxView && require('../claude-lock-capture.js').addressableId(s) === cid) || null;
 const totpRunOf = (cid) => { const s = totpSessionOf(cid); return s ? require('./vault-totp.js').runOfToken(s.agentToken) : null; };   // THIS run of a running conversation (its token's digest)
+// lane browser-login (P3 of the custom browser kernel): WEB LOGINS — the vault's `web-login:<origin>#<user>` entries (PURE
+// src/browser-login.js; ONE writer src/server/browser-logins.js): the kernel fills them, the agent never sees a value; the
+// `browser-login` grant (the ONE grants store) decides who may, and covers the login's paired two-step code (D3); an account
+// an agent registers is saved automatically, with its provenance, and ONE For-you notice tells the owner (D5 as reversed)
+const browserLogins = require('./browser-logins.js').create({ vault, grants: () => require('./grants-store.js').store(), totpCode: (name, o) => vaultTotp.codeForLogin(name, o),
+  forYou: { add: (profileId, item) => { if (!userTodos) return null; const r = userTodos.add('browser', { origin: 'browser', by: 'agent', sessionName: 'Agent browser', ...item }); return r && (r.id || (typeof r === 'string' ? r : null)); },
+    resolve: (id) => { if (userTodos && userTodos.get(id)?.status === 'open') userTodos.setStatus(id, 'done', 'browser'); } },
+  log: (m) => console.log(m) });
 // lane vault-paste-request (the owner 2026-10-23: 「应该允许你给我弹一个保险库输入框让我直接 paste 进去」): an agent ASKS for a secret, the
 // owner PASTES it into its For-you item's masked box (or refuses); the value goes to the one writer of its place (a registry
 // field: the integration store; a free entry: the vault's `secret:<id>`); the asker reads a receipt at its next turn (the stash)
 const vaultPaste = require('./vault-paste-door.js').create({ vault, integrations, userTodos, deliver, vaultRun, log: (m) => console.log('[vault-paste]', m) });
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste,
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
+  logins: browserLogins,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)
   linkTokenFor: (hostKey, who) => hostTokens.tokenFor(hostKey, who), onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
   // int317 (RED-3): the door's audit row → the device audit (the machine card's Activity…) — the session, its host key, the status
   auditLink: ({ sid, hostKey, status }) => { const h = vaultHostOf(hostKey); if (hosts && hosts.deviceAudit) hosts.deviceAudit.append(require('../device-acts.js').linkTokenLine({ at: Date.now(), sid, hostKey, hostId: h ? h.id : null, machine: h ? (h.name || h.id) : null, status })); } });
@@ -567,8 +576,13 @@ app.post('/api/plugins/:id/prompted', (req, res) => {
 // enable / crash events into the local ledger.
 let hostVersion = null; try { hostVersion = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf-8')).version; } catch { }
 const { agentEnv } = require('../ws-handler'); // the ONE sanitized-env builder every spawn uses (spawn-hygiene law)
+// lane engine-distribution (P4): the fleet's engine fact (fleet.json `browserEngine` — D2's pre-trust reads its plugin + sha)
+// and THE KERNEL'S DISTRIBUTION (made beside the keeper below; its boot job's outcome is the Plugins panel's fleet line)
+const fleetEngineFact = () => { try { const f = require('./cluster-presets.js').sharedPresets().fleet(); return f && f.browserEngine ? f.browserEngine : null; } catch { return null; } };
+let engineDistribution = null;
 const pluginLoader = require('./plugin-loader.js').create({
   rootDir, app, hostVersion, agentEnv, log: console, instanceUrl,
+  integrations: () => integrations, fleetEngine: fleetEngineFact, fleetStatus: () => (engineDistribution ? engineDistribution.fleetView() : null),
   broadcast: (m) => bcastAll(m),
   telemetry: (ev) => { try { getTelemetry?.()?.record(ev); } catch { } },
   agentAuth: (req) => {
@@ -923,6 +937,11 @@ function createSessionMessages(session, sessionId) {
     // resolves their keys (`keyFor`, the ONE resolve the keeper asks through
     // before a spawn); the switcher's SOURCE chip reads its masked `sourceOf`
     const browserBackend = require('./browser-backend').create({ integrations: () => integrations, log: console });
+    // lane engine-plugin: THE ENGINE REGISTRY; lane engine-distribution: its kernels' distribution (download · receipt ·
+    // measured version · the fleet's boot job — ONE For-you producer, origin plugin)
+    const browserEngines = require('./browser-engines.js').create({ loader: pluginLoader, plugins, dataDir: path.join(rootDir, 'data'), log: console });
+    engineDistribution = require('./engine-distribution.js').create({ dataDir: path.join(rootDir, 'data'), engines: browserEngines, loader: pluginLoader, fleetFacts: () => { try { return require('./cluster-presets.js').sharedPresets().fleet(); } catch { return null; } },
+      env: () => process.env, userTodos: () => userTodos, notify: () => { try { bcastAll({ type: 'browser-engines-updated' }); } catch { /* no clients */ } }, log: console });
     { const ids = browserBackend.registerTests(); if (ids.length) console.log(`[browser] key rows' Test runners registered: ${ids.join(', ')}`); }
     // P6 (§6.2 / §6.5 / D6): the CDP-mediating proxy — LAZY (listens on
     // nothing until the first mediated lease), owned by the keeper (its
@@ -950,6 +969,11 @@ function createSessionMessages(session, sessionId) {
       // (a real host is never in the map), its url fetched over plain http on loopback at the url's own port
       ...(testEgressMap.size ? { chromeBuildsResolve: (u) => { try { const x = new URL(u); const ip = testEgressMap.get(x.hostname.toLowerCase()); return ip ? `http://${ip}:${x.port || 80}${x.pathname}${x.search}` : u; } catch { return u; } } } : {}),
       kept: browserKept, // lane browser-resume (§3.9)
+      // lane engine-plugin: THE ENGINE REGISTRY (a manifest plugin with contributes.browserEngine, enabled + trusted + running;
+      // a built-in one providing 'browser-engine') + the fleet facts `browser.defaultEngine` reads (presets fleet.json)
+      engines: browserEngines,
+      fleetFacts: () => { try { return require('./cluster-presets.js').sharedPresets().fleet(); } catch { return null; } },
+      engineDistribution: () => engineDistribution, // lane engine-distribution: the kernel downloaded + its version measured once
       vncDisplay: process.env.VIBESPACE_VNC_DISPLAY || ':7', // B-d635: the desktop singleton's display (src/vnc.js VNC_DISPLAY) — the display probe names it, so no surface says "no desktop session" beside it
       serverSetting, serverNotice, getTelemetry,
       userTodos, // lane H verify r5: the ONE For-you notice (origin browser) when a profile's browser keeps closing (the heal budget)
@@ -1077,6 +1101,9 @@ function createSessionMessages(session, sessionId) {
       const holdersOf = (profileId) => { try { const out = (browserKeeper.list().leases || []).filter((l) => l && l.profileId === profileId && l.browserKey).map((l) => ({ browserKey: l.browserKey, sessionId: l.sessionId || null, ephemeral: !!l.ephemeral })); const h = typeof browserKeeper.humanOf === 'function' ? browserKeeper.humanOf(profileId) : null; if (h && h.browserKey) out.push({ browserKey: h.browserKey, sessionId: null, ephemeral: false, human: true, input: h.input === 'user' ? 'user' : 'agent' }); return out; } catch { return []; } };
       browserDialogs = require('./browser-dialogs').create({
         keeper: browserKeeper, holdersOf,
+        vaultUse: (entry, use, o) => vault.noteUse(entry, use, o), // lane passkey-sink: a kernel's passkey signature / new key is a USE of the passkeys' key (purpose + receipt — the use law's ONE writer)
+        logins: browserLogins, conversationOf: (sid) => { const s = activeSessions.get(sid); return s ? { cid: require('../claude-lock-capture.js').addressableId(s) || null, name: String(s.webuiName || s.name || '').slice(0, 80) || null } : null; }, // lane browser-login: the web logins' ONE writer + the conversation a submission is told for
+        downloadsDirOf: () => path.join(os.homedir(), 'Downloads'), // lane browser-surfaces: a kernel's file picker is handed files from the browser's downloads directory only (Chrome's own default, the CLI's own write place)
         // lane browser-passkey: ONE For-you item per (profile, rpId) while a page waits for a passkey > 20 s — resolved when it ends
         forYou: {
           add: (profileId, item) => { if (!userTodos) return null; const r = userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Agent browser', ...item }); return r && (r.id || (typeof r === 'string' ? r : null)); },
@@ -1146,6 +1173,7 @@ function createSessionMessages(session, sessionId) {
     let jobBindings = null; try { jobBindings = require('./browser-bindings').create({ dataDir: path.join(rootDir, 'data') }); } catch (e) { console.warn('[browser] the job → conversation key reader is unavailable — a job of a stopped conversation is refused no_browser_key: ' + (e && e.message)); }
     setupBrowserRoutes({
       keeper: browserKeeper, activeSessions,
+      logins: browserLogins, // lane browser-login: the owner's save-login card's door
       getJobs: () => (getJobs ? getJobs() : null),
       bindingsLookup: (cid) => (jobBindings ? jobBindings.lookup(cid) : ''),
       tasksForConversation: (cid) => { const tasks = getTasks ? getTasks() : null; return tasks ? (tasks.groupsForSession({ sessionKey: cid }) || []).map((g) => g.id) : []; },
@@ -1398,6 +1426,8 @@ function createSessionMessages(session, sessionId) {
     } catch (e) { console.warn('[browser-trace] boot failed:', e && e.message); }
   };
 
-  return { decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs };
+  return { decisionEngine, feedback, mounts, plugins, dialBridge, graduateHostToDial, createSessionMessages, pluginLoader, browserKeeper, bootBrowserKeeper: () => { bootBrowserKeeper(bootBrowserTrace); }, browserStream, browserHandback, browserTrace, browserKeys, browserDialogs,
+    // lane engine-distribution (P4, §5.4): THE FLEET'S ENGINE PLUGIN at boot — ONE job after the listen, never on the boot path
+    bootEngineDistribution: () => { if (!engineDistribution) return; engineDistribution.bootFleet().then((r) => { if (r && r.plugin) console.log(`[plugins] the fleet's engine plugin ${r.plugin}: ${r.outcome}${r.kernel ? ` · kernel ${r.kernel.ok === false ? `not downloaded [${r.kernel.code}]` : 'ready'}` : ''}`); }, (e) => console.warn(`[plugins] the fleet's engine plugin boot job failed — ${e && e.message}`)); } };
 }
 module.exports = { create };

@@ -250,6 +250,8 @@ export default {
   "WebGL renderer": "WebGL 渲染器",
   "Draw terminals with WebGL (fast). Turn it off to test whether GPU-side freezes come from the terminals — new terminals then use the DOM renderer (existing ones keep theirs until reopened).": "用 WebGL 绘制终端（快）。关掉可以验证 GPU 侧的卡顿是否来自终端 —— 之后新开的终端改用 DOM 渲染器（已开的保持原样，重开才变）。",
   "Freeze captured automatically ({id}) — see Diagnostics → Incidents": "已自动抓取卡顿现场（{id}）—— 见诊断 → 事故",
+  "A back press reloaded the page — captured automatically ({id}), see Diagnostics → Incidents": "一次返回让页面重新加载了 —— 已自动抓取现场（{id}），见诊断 → 事故",
+  "This tab still runs VibeSpace {old} after its one reload for {new} — reload it yourself to update": "为 {new} 自动刷新过一次后，这个标签页仍在运行 VibeSpace {old} —— 请手动刷新以更新",
   "Freeze capture failed ({err})": "卡顿现场抓取失败（{err}）",
   "The desktop is not connected — reconnect first": "桌面未连接 —— 请先重新连接",
   "This page is not served over HTTPS, so the browser will not hand over the clipboard — paste here instead (Ctrl+V), then Send.": "这个页面不是 HTTPS，浏览器不会交出剪贴板 —— 请在这里粘贴（Ctrl+V），再点发送。",
@@ -4005,6 +4007,12 @@ export default {
   "Select…": "选择…",
   "Agent session": "Agent 会话",
   "Add desktop": "新建桌面",
+  // lane desktop-small: the taskbar at a small screen (the «+N» chip, the compact desktop switcher) and the Settings foot
+  "{n} more windows — click for the list": "还有 {n} 个窗口 — 点开列表",
+  "Desktop {k}/{n}": "桌面 {k}/{n}",
+  "Switch desktop — {name}": "切换桌面 — {name}",
+  "«{name}» is no longer there — the window stays where it is": "「{name}」已不在了 — 窗口留在原处",
+  "Every change here saves as you make it — there is nothing to press at the end.": "这里的每项改动都会立即保存 — 最后不需要再按保存。",
   "No windows on this desktop": "此桌面没有窗口",
   "Minimized": "已最小化",
   "Copy screen (the visible terminal text)": "复制屏幕（终端当前可见文本）",
@@ -5324,6 +5332,7 @@ export default {
   "{n} options": "{n} 个选项",
   "Mark done": "标记完成",
   "inbox::Dismiss": "忽略",
+  "inbox::Chat": "对话",
   "inbox::Actions": "待处理",
   "Copy the whole item": "复制整条内容",
   "Select an item to read it here.": "选中左侧的一条，在这里完整阅读。",
@@ -8862,7 +8871,7 @@ export default {
   "Set up first": "先设置",
   "Offline": "离线",
   "VibeSpace virtual desktop": "VibeSpace 虚拟桌面",
-  "This host’s own screen is a Wayland session — it cannot be shown yet; the virtual desktop can": "这台主机的屏幕是 Wayland 会话，暂不能显示；虚拟桌面可以",
+  "This host’s own screen is a Wayland session and cannot be shown yet — click here for the virtual desktop.": "本机自己的屏幕是 Wayland 会话，暂时无法显示 — 点这里打开虚拟桌面。",
   "Checking machines…": "正在查看机器…",
   "No paired Windows or Mac machine yet": "还没有配对的 Windows 或 Mac 机器",
   // lane desktop-picker-instant: a machine row's 技术细节 (its title)
@@ -10824,4 +10833,152 @@ export default {
   "{n} not opened on this screen yet": "另有 {n} 个还没在这里打开",
   "“{name}” is no longer there": "“{name}”已经不在了",
   "Other desktops ({n})": "其他桌面（{n}）",
+  // lane engine-plugin: a browser ENGINE plugin — the «自研内核» card, the default engine setting, the consent line
+  "Chrome (the browser CLI's build)": "Chrome（浏览器 CLI 安装的版本）",
+  "The custom kernel (vibespace.custom-browser plugin)": "自研内核（vibespace.custom-browser 插件）",
+  "Default browser engine": "默认浏览器内核",
+  "Which browser program NEW agent browsers run: Chrome as the browser CLI installs it (default), or the custom kernel of the vibespace.custom-browser plugin. Read when a profile is created and when a conversation's browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.": "新建的 Agent 浏览器运行哪个浏览器程序：浏览器 CLI 安装的 Chrome（默认），或 vibespace.custom-browser 插件的自研内核。在新建配置、以及对话的浏览器第一次启动时读取，之后保存在它上面 — 已有的配置用「更换版本…」切换。集群可以预设它；你在这里选的值优先。",
+  "the custom kernel ({id})": "自研内核（{id}）",
+  "{plugin} does not answer as a browser engine.": "{plugin} 没有按浏览器内核的方式应答。",
+  "{plugin} · its kernel is not installed on this computer.": "{plugin} · 它的内核没有装在这台电脑上。",
+  "{plugin} · its kernel can't be run.": "{plugin} · 它的内核无法运行。",
+  "{plugin} · version {version}": "{plugin} · 版本 {version}",
+  "{plugin} · the kernel did not say its version": "{plugin} · 内核没有报告版本",
+  "The browser engines could not be read.": "读不到浏览器内核的列表。",
+  "Set by the cluster preset: {value}.": "由集群预设：{value}。",
+  "Your choice: {value}.": "你的选择：{value}。",
+  "Default: {value}.": "默认：{value}。",
+  "No browser engine plugin is enabled on this computer.": "这台电脑上没有启用浏览器内核插件。",
+  "Custom kernel": "自研内核",
+  "Its plugin is not running on this computer.": "它的插件没有在这台电脑上运行。",
+  "That browser engine plugin is not running on this computer — enable it in ⚙ → Plugins.": "这个浏览器内核插件没有在这台电脑上运行 — 在 ⚙ → 插件 里启用它。",
+  "That engine's kernel is not installed on this computer.": "这个内核的程序没有装在这台电脑上。",
+  "That engine's kernel can't be run.": "这个内核的程序无法运行。",
+  "That engine speaks another version of the engine protocol — update the plugin or VibeSpace.": "这个内核说的是另一版内核协议 — 请更新插件或 VibeSpace。",
+  "That engine's plugin did not answer — restart it in ⚙ → Plugins.": "这个内核的插件没有应答 — 在 ⚙ → 插件 里重启它。",
+  "That engine asked to set environment variables VibeSpace does not allow.": "这个内核要求设置 VibeSpace 不允许的环境变量。",
+  "Can be chosen as the agent browser: it names the program VibeSpace starts as a profile's browser, outside the plugin sandbox.": "可被选作 Agent 浏览器：它指定 VibeSpace 作为配置的浏览器启动的程序，该程序在插件沙箱之外运行。",
+  "The page shows a dialog": "网页弹出了一个对话框", // lane browser-surfaces
+  "The site asks for a client certificate": "网站要求选择客户端证书", // lane browser-surfaces
+  "The page asks for a permission": "网页请求一项权限", // lane browser-surfaces
+  "The page wants to download a file": "网页想下载一个文件", // lane browser-surfaces
+  "The page wants to print": "网页想打印", // lane browser-surfaces
+  "The page wants to open a window": "网页想打开一个窗口", // lane browser-surfaces
+  "The page shows a list to choose from": "网页弹出了一个下拉列表", // lane browser-surfaces
+  "The page asks for a passkey": "网页请求通行密钥", // lane browser-surfaces
+  "The page has a login form": "网页上有登录表单", // lane browser-surfaces
+  "The page asks for a payment": "网页发起了付款请求", // lane browser-surfaces
+  "The page wants to open another program": "网页想打开另一个程序", // lane browser-surfaces
+  "The browser shows a warning page": "浏览器显示了一个警告页", // lane browser-surfaces
+  "The page wants to go full screen": "网页想进入全屏", // lane browser-surfaces
+  "The page wants to lock the pointer": "网页想锁定鼠标指针", // lane browser-surfaces
+  "The page asks to capture a screen or camera": "网页请求捕获屏幕或摄像头", // lane browser-surfaces
+  "The page asks to use a device": "网页请求使用一个设备", // lane browser-surfaces
+  "The page shows a picker": "网页弹出了一个选择器", // lane browser-surfaces
+  "A browser prompt was suppressed": "一个浏览器弹窗被压下了", // lane browser-surfaces
+  "The browser shows a prompt": "浏览器弹出了一个提示", // lane browser-surfaces
+  "Site: {origin}": "网站：{origin}", // lane browser-surfaces
+  "Frame: {origin}": "框架：{origin}", // lane browser-surfaces
+  "Kind: {kind}": "类型：{kind}", // lane browser-surfaces
+  "The page waits for this answer — the agent is told it is open": "网页在等这个回答 — Agent 已被告知它开着", // lane browser-surfaces
+  "The page runs on — the agent is told": "网页照常运行 — Agent 已被告知", // lane browser-surfaces
+  "A file in the browser’s downloads folder (its full path)": "浏览器下载文件夹里的一个文件（完整路径）", // lane browser-surfaces
+  "A page in the agent browser asks you ({site}): {what}": "Agent 浏览器里的网页在问你（{site}）：{what}", // lane browser-surfaces
+  "A page in the agent browser asks you: {what}": "Agent 浏览器里的网页在问你：{what}", // lane browser-surfaces
+  "Open its live view to answer it there — or Approve / Reject here.": "打开它的实时画面在那里回答 — 或在这里批准 / 拒绝。", // lane browser-surfaces
+  "Presses “{label}” on the page": "在网页上按下“{label}”", // lane browser-surfaces
+  "Refused — the page was told": "已拒绝 — 网页已收到", // lane browser-surfaces
+  "Answered — the page moves on": "已回答 — 网页继续", // lane browser-surfaces
+  "That prompt changed after it was shown — nothing was answered; read it again": "这个弹窗在显示之后变了 — 没有作答；请重新看一遍", // lane browser-surfaces
+  "That prompt is no longer open": "这个弹窗已经不在了", // lane browser-surfaces
+  // lane foryou-honest: the honest count, the session row's marker, ✓ / ✕ with Undo
+  "{n} waiting on you — none pressing": "{n} 项等你处理 — 都不紧急",
+  "{n} more, none pressing": "另有 {n} 项，都不紧急",
+  "needs you · {n}": "需要你 · {n}",
+  "Open the {n} open items of this conversation in the For-you window": "在「待你处理」窗口中打开这个对话的 {n} 项",
+  "Marked done": "已标记完成",
+  "Dismissed": "已忽略",
+  "Any site": "任何网站",
+  "Any account on this site": "这个网站的任何账号",
+  "This account": "这个账号",
+  "Shows the password — after the second password. An agent never sees it: the custom browser kernel fills it": "显示密码 — 先输入第二道密码。agent 从来看不到它：由自研浏览器内核填入",
+  "Filled for:": "可为谁填入：",
+  "Let the custom browser kernel fill this login for a conversation, a task group or everyone — they never see the password": "让自研浏览器内核为某个对话、任务组或所有人填入这个登录 — 他们永远看不到密码",
+  "Who may have \"{name}\" filled": "谁可以让内核填入「{name}」",
+  "For": "范围",
+  "Every conversation on this instance": "这个实例上的所有对话",
+  "The custom browser kernel fills the user name and password into the site's own form — the conversation never sees them. «Any account on this site» also lets an agent register new accounts there, through the vault.": "自研浏览器内核把用户名和密码填进网站自己的表单 — 对话永远看不到它们。「这个网站的任何账号」也允许 agent 经由保险库在那里注册新账号。",
+  "Add a website login": "添加网站登录",
+  "The site — e.g. https://example.com": "网站 — 例如 https://example.com",
+  "The user name or email you sign in with": "登录用的用户名或邮箱",
+  "Its password": "它的密码",
+  "Optional — the name of its two-step code in this vault": "可选 — 保险库里与之配对的两步验证码名称",
+  "Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.": "只会填到这个网站本身（精确到地址、经 https）— 绝不填到别的网站，也不填到嵌入它的框架里。",
+  "Updated the login in the vault": "已更新保险库里的登录",
+  "Saved the login to the vault": "已把登录存入保险库",
+  "Give the site's address over https (http only for this machine's localhost)": "请填写 https 的网站地址（http 只限本机 localhost）",
+  "Give the user name (no spaces, no #)": "请填写用户名（不含空格和 #）",
+  "Type its password": "请输入它的密码",
+  "The two-step code's name, as it is listed in this vault": "两步验证码的名称，与保险库里列出的一致",
+  "Delete the login \"{name}\"?": "删除登录「{name}」？",
+  "Its password leaves the vault and this account's own grant goes with it. Agents can no longer be signed in there with it.": "它的密码将离开保险库，这个账号自己的授权也一并删除。agent 之后不能再用它在那里登录。",
+  "Website login…": "网站登录…",
+  "Saves it in the vault — agents you allow can have it filled, never seeing it": "存入保险库 — 你允许的 agent 可以让内核填入，但永远看不到它",
+  "Not saved — the password was forgotten": "未保存 — 密码已丢弃",
+  "That card changed after it was shown — nothing was saved; read it again": "这张卡片在显示之后变了 — 没有保存；请重新看一遍",
+  "That card is no longer open — the password was not kept": "这张卡片已经不在了 — 密码没有保留",
+  "Web logins": "网站登录",
+  "Registered by an agent · its password made by the vault, never shown": "由 agent 注册 · 密码由保险库生成，从未显示",
+  "Typed by an agent itself · strength unknown — the agent knows it": "由 agent 自己输入 · 强度未知 — agent 知道这个密码",
+  "An agent registered {user} on {site} — the vault made its password and saved the login": "agent 在 {site} 注册了 {user} — 密码由保险库生成，登录已保存",
+  "The agent never saw the password. It is in the Vault under Web logins, marked as registered by an agent.": "agent 从未看到密码。它在保险库的「网站登录」里，标为由 agent 注册。",
+  "An agent signed up {user} on {site} with a password it typed itself — saved to the vault, marked «typed by the agent»": "agent 用自己输入的密码在 {site} 注册了 {user} — 已存入保险库，标为「agent 自己输入」",
+  "The vault did not make this password, so its strength is unknown and the agent knows it. It is in the Vault under Web logins — change it on the site if you want one only the vault knows.": "这个密码不是保险库生成的，所以强度未知，而且 agent 知道它。它在保险库的「网站登录」里 — 如果想要只有保险库知道的密码，请在该网站上修改。",
+  "The login {user} on {site} was updated — its password changed": "{site} 上的登录 {user} 已更新 — 密码变了",
+  "The previous password is kept in the entry for one revision (Vault → Web logins).": "上一个密码在条目里保留一个版本（保险库 → 网站登录）。",
+  "Update the saved login {user} on {site}?": "更新 {site} 上已保存的登录 {user}？",
+  "Save the login {user} on {site} to the vault?": "把 {site} 上的登录 {user} 存入保险库？",
+  "You signed in with a different password in the agent browser. Update keeps the old one in the entry for one revision.": "你在 agent 浏览器里用另一个密码登录了。更新后旧密码会在条目里保留一个版本。",
+  "You signed in by hand in the agent browser. Saved logins can be filled by agents you allow — they never see the password.": "你在 agent 浏览器里手动登录了。保存的登录可以由你允许的 agent 让内核填入 — 他们永远看不到密码。",
+  "{plugin} · downloading its kernel… {pct}%": "{plugin} · 正在下载内核… {pct}%",
+  "{plugin} · downloading its kernel…": "{plugin} · 正在下载内核…",
+  "{plugin} · its kernel could not be downloaded: {why}": "{plugin} · 内核下载失败：{why}",
+  "verified": "已校验",
+  "{plugin} · measured {version}": "{plugin} · 实测 {version}",
+  "{plugin} · declared {version} (not measured)": "{plugin} · 声明 {version}（未实测）",
+  "not enough free disk space": "磁盘剩余空间不足",
+  "the engine offers no kernel for this computer": "该引擎没有适用于这台电脑的内核",
+  "its download server could not be reached": "无法连接它的下载服务器",
+  "the download did not match its sha256 — nothing was kept": "下载内容与其 sha256 不符 — 未保留任何文件",
+  "the archive is not the layout its kernel.json declares": "压缩包的结构与其 kernel.json 声明的不符",
+  "its kernel.json cannot be read": "无法读取它的 kernel.json",
+  "The cluster's plugin {plugin} could not be installed: {error}": "集群的插件 {plugin} 安装失败：{error}",
+  "Installed and trusted by the cluster": "由集群安装并信任",
+  "Ref": "引用（Ref）",
+  "a tag, a branch or a full commit sha (empty = the default branch)": "标签、分支或完整的提交 sha（留空 = 默认分支）",
+  "None (a public repository)": "无（公开仓库）",
+  "Plugin Git credential": "插件 Git 凭据",
+  "A private repository is read with the Plugin Git credential kept in Integrations (sealed by the vault) — a token is never typed here.": "私有仓库用「集成」里保存的插件 Git 凭据读取（由保险库密封）— 令牌从不在这里输入。",
+  "Plugin Git credential — {host} ({kind})": "插件 Git 凭据 — {host}（{kind}）",
+  "token": "令牌",
+  "deploy key": "部署密钥",
+  "Plugin Git credential (not set — Set up…)": "插件 Git 凭据（未设置 — 设置…）",
+  "Plugin Git repository": "插件 Git 仓库",
+  "Git host": "Git 主机",
+  "The host of the private repository (no scheme, no path). The credential is handed to this host only.": "私有仓库所在的主机（不带协议、不带路径）。凭据只交给这台主机。",
+  "For an https token: the user name the host expects with it (empty = x-access-token, which GitHub accepts).": "用于 https 令牌：主机要求随令牌提供的用户名（留空 = x-access-token，GitHub 接受）。",
+  "Access token (https)": "访问令牌（https）",
+  "A read-only access token for https://<host>/… repositories. Git receives it through a file VibeSpace removes after the clone — never in a URL or on a command line.": "用于 https://<host>/… 仓库的只读访问令牌。Git 通过一个文件拿到它，克隆后 VibeSpace 即删除该文件 — 从不放进 URL 或命令行。",
+  "Deploy key (ssh)": "部署密钥（ssh）",
+  "A read-only ssh deploy key without a passphrase, for git@<host>:… repositories. Paste the whole private key.": "用于 git@<host>:… 仓库的只读 ssh 部署密钥，不能带口令。粘贴完整的私钥。",
+  "Runs git ls-remote with this credential against a repository this instance knows on that host (the cluster's plugin source, or one you installed from). Reads the branch list only.": "用这个凭据对本实例在该主机上已知的一个仓库（集群的插件来源，或你安装过的仓库）运行 git ls-remote。只读取分支列表。",
+  "Proves the host accepts the credential for that repository — not that every repository on the host is readable, nor that its plugin is valid.": "证明主机对那个仓库接受这个凭据 — 不证明该主机上的每个仓库都可读，也不证明其中的插件有效。",
+  "Used by Install plugin… for a private Git repository": "「安装插件…」从私有 Git 仓库安装时使用",
+  "{name}: its browser kernel could not be downloaded": "{name}：浏览器内核下载失败",
+  "{name}: the cluster's plugin could not be installed": "{name}：集群的插件安装失败",
+  "{plugin} · its kernel needs Node {need} or later to unpack — this VibeSpace runs on Node {node}; nothing was downloaded": "{plugin} · 解包内核需要 Node {need} 或更高版本——此 VibeSpace 运行在 Node {node} 上；未下载任何内容",
+  "the cluster names a kernel address that is not https": "集群指定的内核地址不是 https",
+  "{plugin} · its previous kernel is set aside and could not be put back in its place — VibeSpace tries again at the next start": "{plugin} · 先前的内核被挪在一旁，未能放回原位——VibeSpace 会在下次启动时再试",
+  "the cluster pins a kernel sha256 that is not 64 hex digits": "集群指定的内核 sha256 不是 64 位十六进制数",
+  "{name}: its browser kernel is set aside and could not be put back": "{name}：浏览器内核被挪在一旁，未能放回",
 };

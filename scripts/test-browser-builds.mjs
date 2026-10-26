@@ -19,6 +19,11 @@
 //   ④ the client words (src/lib/browser-build-model.js) in en / zh / ja + wiring pins;
 //   ⑤ patched copies as controls: a launch that forgets the build on later calls, a verdict that lets an agent choose,
 //      a keeper that falls back to the default build when the chosen one vanished.
+//   ⑦ lane engine-plugin (design-custom-browser-plugin §1): a browser ENGINE plugin — the PURE answer + choice verdicts and
+//      the policy; the REAL keeper over the fixture engine (scripts/fixtures/engine-plugin, the REAL loader's IPC child): its
+//      kernel + arguments on every call, the vanished kernel refused by name with ONE For-you item, a timeout / an env key /
+//      another protocol / the plugin turned off each by name, Change build… to it, the policy at a create and at a
+//      conversation's browser's first start (its config names the kernel for the agent's commands too); patched controls.
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -646,6 +651,745 @@ console.log('— verify r1: the default chip · the zip\'s declared unpacked siz
     'the default chip: only a version newer than every build here (or with none) says it, naming the default-choice profiles; never an older / equal / present one, nor when not asked');
   const zl = BB.parseZipListing('chrome-linux64/\nchrome-linux64/chrome\nchrome-linux64/blob\n', 'drwxr-xr-x  3.0 unx        0 b- stor 80-000-00 00:00 chrome-linux64/\n-rwxr-xr-x  3.0 unx       51 b- stor 80-000-00 00:00 chrome-linux64/chrome\n-rw-r--r--  3.0 unx 67108864 b- defN 80-000-00 00:00 chrome-linux64/blob\n');
   ok(zl.ok && BB.zipShapeVerdict(zl.entries).unpacked === 67108915, 'the zip\'s declared unpacked size is summed over its files (the keeper weighs it against the free space before `unzip -q`)', zl);
+}
+
+// ═══ ⑦ lane engine-plugin: A BROWSER ENGINE PLUGIN (design-custom-browser-plugin §1) ════════════════════════════════
+console.log('— ⑦ lane engine-plugin: the engine verdicts, the real keeper over the fixture engine (the real loader + its IPC child), the vanished kernel, the policy');
+const ENGN = require('../src/browser-engines.js');
+const BPR = require('../src/browser-profiles.js');
+const EID = 'vibespace.custom-browser';
+{
+  ok(ENGN.ID_RE.source === require('../src/plugin-manifest.js').ID_RE.source, 'the engine id rule IS the manifest id rule (src/plugin-manifest.js ID_RE)');
+  const P0 = { installed: true, executable: true, binaryPath: '/k/chrome', version: 'Chromium 150.0.7871.186', protocol: 1, kinds: ['js-dialog'], features: ['surfaces', 'webauthn'] };
+  const pv = (body, status = 200) => ENGN.engineAnswerVerdict('probe', { status, body }, { id: EID, label: 'Kernel' });
+  const lv = (body, status = 200) => ENGN.engineAnswerVerdict('launchOptions', { status, body }, { id: EID, label: 'Kernel' });
+  const rowsP = [[P0, true], [{ ...P0, version: null }, true], [{ ...P0, protocol: 2 }, 'browser_engine_protocol'], [{ ...P0, features: ['webauthn'] }, 'browser_engine_protocol'], [{ ...P0, installed: 'yes' }, 'browser_engine_protocol'], [{ ...P0, installed: false, executable: false }, true]];
+  const badP = rowsP.filter(([b, want]) => { const r = pv(b); return want === true ? !r.ok : r.ok || r.code !== want; });
+  ok(!badP.length && pv(P0, 500).code === 'browser_engine_protocol' && pv({ ...P0, version: null }).fact.version === null, 'a probe answer: version null is a FACT (ok, null), protocol ≠ 1 / no surfaces / another shape / HTTP 500 ⇒ browser_engine_protocol, a kernel not installed is a fact (the choice judges it)', badP);
+  const L0 = { executablePath: '/k/chrome', args: ['--x=1'], env: {} };
+  const envR = lv({ ...L0, env: { LD_PRELOAD: '/x/evil.so' } });
+  const rowsL = [[L0, true], [{ ...L0, env: undefined }, true], [{ ...L0, args: ['--remote-debugging-port=9222'] }, 'browser_engine_protocol'], [{ ...L0, args: ['--user-data-dir=/elsewhere'] }, 'browser_engine_protocol'], [{ ...L0, args: ['--a\n--b'] }, 'browser_engine_protocol'], [{ ...L0, executablePath: 'chrome' }, 'browser_engine_protocol'], [{ ...L0, args: Array(65).fill('--a') }, 'browser_engine_protocol'], [{ ...L0, env: { X: 1 } }, 'browser_engine_protocol']];
+  const badL = rowsL.filter(([b, want]) => { const r = lv(b); return want === true ? !r.ok : r.ok || r.code !== want; });
+  ok(!badL.length && lv({ error: 'x', code: 'no_binary' }, 409).code === 'browser_engine_kernel_missing' && envR.code === 'browser_engine_env' && /LD_PRELOAD/.test(envR.error) && !/evil/.test(envR.error),
+    'a launch answer: 409 no_binary ⇒ browser_engine_kernel_missing; an env key outside ENGINE_ENV_KEYS (none) ⇒ browser_engine_env, named, its VALUE never read; the debugging endpoint / the profile\'s directory / a multi-line argument / a relative program ⇒ browser_engine_protocol', { badL, envR });
+  const ok1 = BB.normalizeBrowserChoice({ kind: 'plugin', id: EID }), c = { kind: 'plugin', id: EID };
+  ok(ok1 && ok1.id === EID && BB.normalizeBrowserChoice({ kind: 'plugin', id: 'Bad.Id' }) === null && BB.normalizeBrowserChoice({ kind: 'plugin', id: 'nodot' }) === null && BB.sameChoice(c, { kind: 'plugin', id: EID }) && !BB.sameChoice(c, { kind: 'plugin', id: 'other.engine' }) && !BB.sameChoice(c, null)
+    && JSON.stringify(BB.choiceView(c)) === JSON.stringify(c) && JSON.stringify(BB.agentChoiceView(c)) === JSON.stringify(c) && BB.buildWords(c, { engineLabel: 'Custom Browser Kernel' }) === 'the Custom Browser Kernel engine' && BB.buildWords(c) === `the ${EID} engine`,
+    'the choice {kind:\'plugin\', id}: the manifest id rule, sameChoice / choiceView / agentChoiceView (the id is a public name) / buildWords «the <label> engine»');
+  const V = (o) => BB.browserChoiceVerdict({ choice: c, provider: 'chromium', ...o });
+  const order = [[{ choice: { kind: 'plugin', id: 'x' } }, 'browser_choice_invalid'], [{ by: 'agent', engine: P0 }, 'browser_choice_user_only'], [{ provider: 'cloak', engine: P0 }, 'browser_choice_provider'], [{}, 'browser_engine_missing'], [{ engine: { code: 'browser_engine_unanswered', error: 'x' } }, 'browser_engine_unanswered'],
+    [{ engine: { ...P0, installed: false } }, 'browser_engine_kernel_missing'], [{ engine: { ...P0, executable: false } }, 'browser_engine_not_executable'], [{ engine: { ...P0, protocol: 2 } }, 'browser_engine_protocol']];
+  const badO = order.filter(([o, want]) => V(o).code !== want).map(([o, want]) => [want, V(o).code]);
+  const good = V({ engine: P0 });
+  ok(!badO.length && good.ok && good.executablePath === '/k/chrome' && good.version === P0.version && good.major === 150 && ENGN.ENGINE_CODES.every((k) => BB.BUILD_CODES.includes(k)), 'THE verdict for an engine, in order: well-formed · the user\'s · chromium · the engine there · its kernel installed · executable · protocol; ok ⇒ its kernel\'s path + the version (major 150); the 6 codes are in BUILD_CODES', badO);
+  const rs = read('src/routes/browser.js');
+  ok(ENGN.ENGINE_CODES.every((k) => new RegExp(`\\b${k}: 409\\b`).test(rs)), 'every engine refusal is a 409 in the routes\' STATUS table');
+  const le = ENGN.engineLaunchEnv({ args: ['--a=1,2', '--b'], env: { X: 'y' } }, { base: ['--mark'] });
+  ok(le.AGENT_BROWSER_ARGS === '--mark\n--a=1,2\n--b' && !('X' in le) && ENGN.engineLaunchEnv({ args: ['--b'] }, { base: ['--m'] }).AGENT_BROWSER_ARGS === '--m,--b' && !('AGENT_BROWSER_ARGS' in ENGN.engineLaunchEnv({ args: [] }, { base: ['--m'] })),
+    'the launch view: the base arguments first, the engine\'s after; newline-separated when one holds a comma (the CLI takes either); no arguments ⇒ no list (the config\'s stays); env outside the whitelist never carried', le);
+  const D = ENGN.defaultEngineOf;
+  const FE = { plugin: EID, default: true };
+  ok(D({ own: 'default', fleet: FE }).source === 'user' && D({ own: 'default', fleet: FE }).value === 'default' && D({ fleet: FE }).value === 'plugin:' + EID && D({ fleet: FE }).source === 'fleet' && D({ fleet: { plugin: EID, default: false } }).value === 'default' && D({ fleet: { plugin: EID, default: false } }).source === 'fleet'
+    && D({ own: 'plugin:nope.x', fleet: null }).source === 'default' && D({}).value === 'default' && JSON.stringify(ENGN.choiceOfDefault('plugin:' + EID)) === JSON.stringify(c) && ENGN.choiceOfDefault('default') === null,
+    'THE POLICY: the user\'s own value › the fleet\'s (default true ⇒ the plugin, false ⇒ Chrome — said «set by the cluster preset») › \'default\'; a stored value outside the enum is none');
+  const mn = BB.missingNotice({ label: 'K', choice: c, code: 'browser_engine_kernel_missing', engineLabel: 'Custom Browser Kernel' });
+  ok(/"K" cannot start: the Custom Browser Kernel engine's kernel is not installed/.test(mn.text) && /never switches it to Chrome by itself/.test(mn.detail) && !/\/k\//.test(mn.text + mn.detail), 'the vanished kernel\'s ONE For-you notice says what is missing and the way out — never a path', mn);
+}
+// the fixture engine through the REAL loader (its node --permission child over IPC) in a scratch root; the kernel = a tiny
+// program in the plugin's own state folder (the path VibeSpace resolves and hands it); the shared fake agent-browser logs
+// every call's launch view
+const EROOT = path.join(ROOT, 'engine-root');
+fs.cpSync(path.join(REPO, 'scripts/fixtures/engine-plugin'), path.join(EROOT, 'data', 'plugins', EID), { recursive: true });
+const expressE = require(path.join(REPO, 'node_modules/express'));
+const LDR = require('../src/server/plugin-loader.js').create({ rootDir: EROOT, app: expressE(), hostVersion: '2.369.356', log: { log() { }, warn() { } }, agentEnv: () => ({ PATH: process.env.PATH }) });
+process.on('exit', () => { try { LDR.shutdown(); } catch { /* gone */ } });
+const ENGR = require('../src/server/browser-engines.js').create({ loader: LDR, dataDir: path.join(EROOT, 'data'), timeoutMs: 400 });
+const KP = ENGR.kernelPath(EID);
+const KVER = 'Chromium 150.0.7871.186 vibespace-fake-kernel';
+const MODE = path.join(EROOT, 'data', 'plugins-state', EID, 'mode.json');
+const setMode = (m) => { fs.mkdirSync(path.dirname(MODE), { recursive: true }); if (m) fs.writeFileSync(MODE, JSON.stringify(m)); else fs.rmSync(MODE, { force: true }); };
+const waitRows = async (n, ms = 8000) => { const t0 = Date.now(); while (ENGR.rows().length !== n && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 25)); return ENGR.rows().length === n; };
+{
+  ok(ENGR.rows().length === 0, 'the table before anything: no engine (the fixture plugin installed, not enabled)');
+  const nc = thr(() => LDR.setEnabled(EID, true));
+  const ncE = await nc;
+  ok(ncE && /needs your consent/.test(ncE.message) && ENGR.rows().length === 0, 'an engine plugin cannot be enabled without consent (contributes.browserEngine ⇒ needsConsent)', ncE && ncE.message);
+  LDR.setEnabled(EID, true, { trusted: true });
+  ok(await waitRows(1) && ENGR.rows()[0].id === EID && ENGR.rows()[0].family === 'manifest', 'enabled + trusted + running ⇒ ONE row in the engine table', ENGR.rows());
+  fs.mkdirSync(path.dirname(KP), { recursive: true });
+  ok(/\/plugins-state\/vibespace\.custom-browser\/kernel\/linux-x64\/chrome$/.test(KP), 'the kernel\'s place: the plugin\'s own state folder (its only readable place besides its package)', KP);
+  const pr0 = await ENGR.probe(EID);
+  ok(pr0.ok && pr0.fact.installed === false && pr0.fact.binaryPath === KP, 'no kernel there yet ⇒ the probe answers installed:false about the path it was HANDED (a fact, not an error)', pr0);
+  fs.writeFileSync(KP, `#!/bin/sh\necho "${KVER}"\n`, { mode: 0o755 });
+  const pr1 = await ENGR.probe(EID);
+  ok(pr1.ok && pr1.fact.installed && pr1.fact.executable && pr1.fact.version === KVER && pr1.fact.label === 'Fixture Browser Engine', 'the kernel placed ⇒ installed, executable, its own --version (the plugin\'s childProcess grant)', pr1);
+}
+const settingsE = {};
+let fleetE = null;
+const KEY_E = 'bk-0000e0e1';
+const ke = mkKeeper(path.join(ROOT, 'data-eng'), { engines: ENGR, serverSetting: (k) => settingsE[k], fleetFacts: () => fleetE, liveKeys: () => new Set([KEY_A, KEY_E]) });
+{
+  const t0 = todos.length;
+  const ef = await ke.engineFactOf(EID);
+  const pe = ke.createProfile({ label: 'Kernel', browser: { kind: 'plugin', id: EID } }, { engine: ef });
+  ok(pe.browser && pe.browser.kind === 'plugin' && pe.browser.id === EID, 'a create naming the engine, its probe handed in (the route asks it) ⇒ the record carries {kind:\'plugin\', id}');
+  const ea = await thr(() => ke.createProfile({ label: 'Agent kernel', browser: { kind: 'plugin', id: EID } }, { engine: ef, by: 'agent' }));
+  const en = await thr(() => ke.createProfile({ label: 'Unasked', browser: { kind: 'plugin', id: EID } }));
+  ok(ea && ea.code === 'browser_choice_user_only' && en && en.code === 'browser_engine_missing', 'an agent never chooses an engine; a create nobody asked the engine for is refused by name (browser_engine_missing), never recorded blind', { ea: ea && ea.code, en: en && en.code });
+  const c0 = fake.calls().length;
+  await ke.start(pe.id, { why: 'test' });
+  const ns = 'vs-' + pe.id;
+  const la = fake.launches().at(-1), cs = callsOf(ns, c0);
+  const args = String(la.args || '').split(/[,\n]/);
+  ok(la.exe === KP && cs.length >= 2 && cs.every((c) => c.exe === KP), `the engine's kernel rides EVERY call of the browser's own session (${cs.map((c) => c.verb).join(' · ')}) — AGENT_BROWSER_EXECUTABLE_PATH, the build pin's road`, { la, cs });
+  ok(args.includes('--vibespace-engine=fixture') && args.includes(`--vibespace-profile=${pe.id}`) && args.includes(BPR.keeperMarkArg(pe.id)) && args.includes('--disable-blink-features=AutomationControlled') && args.some((a) => /^--log-level=/.test(a) || /^--disable-logging/.test(a) || /^--v=/.test(a) || /enable-logging/.test(a)),
+    'its launch arguments ride AGENT_BROWSER_ARGS with what the config\'s list carried (the keeper\'s mark, the automation flag) and the quiet switches', args);
+  const rc = ke._reg().browsers[pe.id].browserChoice;
+  ok(rc && rc.kind === 'plugin' && rc.id === EID && rc.version === KVER, 'the browser record says what this launch was asked to run: {kind:\'plugin\', id, version} (the probe\'s version)', rc);
+  await ke.stop(pe.id, { why: 'user' });
+  // the kernel VANISHES
+  fs.renameSync(KP, KP + '.away');
+  const n0 = fake.launches().length, t1 = todos.length;
+  const e1 = await thr(() => ke.start(pe.id, { why: 'test' }));
+  ok(e1 && e1.code === 'browser_engine_kernel_missing' && fake.launches().length === n0, 'the kernel gone ⇒ the launch is refused BY NAME (browser_engine_kernel_missing) — nothing launched, never Chrome in its place', e1 && (e1.code || e1));
+  const mk = ke.profile(pe.id).buildMissing;
+  ok(mk && mk.what === EID && mk.kind === 'plugin' && todos.length === t1 + 1 && /cannot start: the Fixture Browser Engine's kernel is not installed/.test(todos.at(-1).text) && !todos.at(-1).detail.includes(KP), 'the record is MARKED and ONE For-you item filed (origin browser), the words without a path', { mk, todo: todos.at(-1) });
+  const e2 = await thr(() => ke.start(pe.id, { why: 'test' }));
+  ok(e2 && e2.code === 'browser_engine_kernel_missing' && todos.length === t1 + 1 && !(ke.list().browsers[pe.id] && ke.list().browsers[pe.id].state === 'starting'), '…a second refused launch files nothing more, and no half-started record is left');
+  fs.renameSync(KP + '.away', KP);
+  await ke.start(pe.id, { why: 'test' });
+  ok(!ke.profile(pe.id).buildMissing && fake.launches().at(-1).exe === KP, 'the kernel back ⇒ it starts, the mark clears by itself');
+  await ke.stop(pe.id, { why: 'user' });
+  // an engine that does not answer / asks for env / speaks another protocol — each by name; a timeout marks nothing
+  setMode({ hang: 'probe' });
+  const tq = Date.now(), t2 = todos.length;
+  const eu = await thr(() => ke.start(pe.id, { why: 'test' }));
+  ok(eu && eu.code === 'browser_engine_unanswered' && /did not answer within 0 s|did not answer/.test(eu.message) && !ke.profile(pe.id).buildMissing && todos.length === t2, `no answer within the registry's bound ⇒ browser_engine_unanswered (answered after ${Date.now() - tq} ms — printed, never judged), nothing marked, nothing filed — the next launch asks again`, eu && eu.code);
+  setMode({ launch: { env: { LD_PRELOAD: '/x/evil.so' } } });
+  const nv = fake.launches().length;
+  const ev = await thr(() => ke.start(pe.id, { why: 'test' }));
+  ok(ev && ev.code === 'browser_engine_env' && /LD_PRELOAD/.test(ev.message) && !/evil/.test(ev.message) && fake.launches().length === nv, 'an engine asking to set LD_PRELOAD on its browser ⇒ browser_engine_env, named, its value never read, nothing launched', ev && ev.message);
+  setMode({ probe: { protocol: 2 } });
+  const ep = await thr(() => ke.start(pe.id, { why: 'test' }));
+  ok(ep && ep.code === 'browser_engine_protocol' && /protocol 2/.test(ep.message), 'an engine of another protocol ⇒ browser_engine_protocol by name', ep && ep.message);
+  setMode(null);
+  if (ke.profile(pe.id).buildMissing) { await ke.start(pe.id, { why: 'test' }); await ke.stop(pe.id, { why: 'user' }); } // clear the mark the two refusals above left
+  // the PLUGIN turned off ⇒ the table loses it at once ⇒ refused browser_engine_missing (marked, ONE item)
+  LDR.setEnabled(EID, false);
+  const t3 = todos.length;
+  const em = await thr(() => ke.start(pe.id, { why: 'test' }));
+  ok(ENGR.rows().length === 0 && em && em.code === 'browser_engine_missing' && todos.length === t3 + 1 && /plugin is not running/.test(todos.at(-1).text), 'the plugin turned off ⇒ out of the table at once ⇒ the launch refused browser_engine_missing (one For-you item: its plugin is not running)', em && em.code);
+  LDR.setEnabled(EID, true);
+  ok(await waitRows(1), 'enabled again (its trust kept) ⇒ back in the table');
+  await ke.start(pe.id, { why: 'test' });
+  ok(!ke.profile(pe.id).buildMissing, '…and the profile starts again');
+  await ke.stop(pe.id, { why: 'user' });
+  // CHANGE BUILD… to the engine: a running Chrome profile restarts on the kernel; the dialog's facts never carry a path
+  const pc = ke.createProfile({ label: 'Switches' });
+  await ke.start(pc.id, { why: 'test' });
+  const bv = await ke.buildsView(pc.id);
+  const row = ((bv.listing && bv.listing.engines) || []).find((e) => e.id === EID);
+  ok(row && row.version === KVER && row.installed && row.label === 'Fixture Browser Engine' && !JSON.stringify(bv).includes(KP) && !JSON.stringify(await ke.machineBuilds()).includes(KP), 'Change build… lists the engine (its probe\'s version — the «自研内核» card) and NO path anywhere in the dialog\'s facts', row);
+  const swA = await thr(() => ke.setBrowserChoice({ profileId: pc.id, choice: { kind: 'plugin', id: EID }, by: 'agent' }));
+  ok(swA && swA.code === 'browser_choice_user_only' && !ke.profile(pc.id).browser, 'an agent never switches a profile to an engine (refused by name, nothing changed)', swA && swA.code);
+  const sw = await ke.setBrowserChoice({ profileId: pc.id, choice: { kind: 'plugin', id: EID }, by: 'user' });
+  ok(sw.ok && sw.restarted && fake.launches().at(-1).exe === KP && ke.profile(pc.id).browser.id === EID, 'Change build… → the engine: the running browser restarts on its kernel', { ok: sw.ok, restarted: sw.restarted });
+  await ke.setBrowserChoice({ profileId: pc.id, choice: { kind: 'default' }, by: 'user' });
+  await ke.stop(pc.id, { why: 'user' });
+  ok(ke.list().profiles.length > 0 && t0 <= todos.length, 'the engine legs leave the keeper usable');
+}
+// THE POLICY: the two read points (a profile's create, a conversation's browser's first start), written on the record
+{
+  fleetE = { browserEngine: { plugin: EID, default: true } };
+  const d1 = ke.defaultEngineNow();
+  const p1 = ke.createProfile({ label: 'By fleet' });
+  ok(d1.value === 'plugin:' + EID && d1.source === 'fleet' && p1.browser && p1.browser.kind === 'plugin' && p1.browser.id === EID, 'the fleet says the kernel is the default, the user said nothing ⇒ a new profile is BORN with {kind:\'plugin\'} (written on the record)', { d1, b: p1.browser });
+  settingsE['browser.defaultEngine'] = 'default';
+  const p2 = ke.createProfile({ label: 'By user' });
+  ok(ke.defaultEngineNow().source === 'user' && !p2.browser && ke.profile(p1.id).browser.id === EID, 'the user\'s own value wins over the fleet\'s (a new profile runs Chrome) — and the profile born before keeps its choice (never a silent migration)');
+  delete settingsE['browser.defaultEngine'];
+  fleetE = { relayUrl: 'https://relay.example.test/relay/' };
+  const p3 = ke.createProfile({ label: 'No key' });
+  ok(ke.defaultEngineNow().source === 'default' && !p3.browser, 'a fleet.json without the key changes nothing (Chrome, source default)');
+  fleetE = { browserEngine: { plugin: EID, default: true } };
+  const ad = path.join(ROOT, 'adopted-dir'); fs.mkdirSync(ad, { recursive: true });
+  const p4 = ke.createProfile({ label: 'Adopted' }, { dir: ad });
+  ok(!p4.browser, 'an adopted folder keeps its browser (the policy names NEW profiles only)');
+  // a conversation's browser: the policy read at its first start, written on its record; its program + arguments ride the
+  // config every call names (the agent's own commands included) — never a relaunch on Chrome
+  const pairs = BPR.browserEnvFor({ browserKey: KEY_E, variant: BPR.VARIANTS.N, idleMs: 600000 });
+  const n0 = fake.launches().length;
+  const eph = await ke.ensureEphemeral({ browserKey: KEY_E, sessionId: 'sess-e', envPairs: pairs, sessionName: 'eng', variant: 'N' });
+  const ev0 = ke.ephemeralFor(KEY_E);
+  const ep = ev0 ? ke.profile(ev0.profileId) : null;
+  const la = fake.launches().at(-1);
+  ok(eph && ep && ep.browser && ep.browser.id === EID && fake.launches().length === n0 + 1 && la.config && la.config.executablePath === KP && (la.config.args || []).includes('--vibespace-engine=fixture'), 'a conversation\'s browser is BORN with the policy\'s engine and LAUNCHES its kernel: the config it ran with names the program + its arguments', { browser: ep && ep.browser, config: la && la.config });
+  const cf = ke.configFileFor({ ephemeral: true, pairs });
+  let cfg = null; try { cfg = JSON.parse(fs.readFileSync(cf, 'utf8')); } catch { cfg = null; }
+  ok(cfg && cfg.executablePath === KP && (cfg.args || []).includes('--vibespace-engine=fixture'), 'the config the AGENT\'s own commands are named (/resolve) carries the same program + arguments — the launch view never differs, so the browser is never relaunched on Chrome', cf);
+  fleetE = null;
+  try { if (ep) ke.retireEphemeral(ep.id, 'test'); } catch { /* best effort */ }
+}
+// ⑦ controls: patched copies the gates above must turn red
+{
+  const MUT = mutantCopies('badm-engine', REPO);
+  const ks = read('src/server/browser-keeper.js');
+  const anchor = "    if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id }); }";
+  const fb = ks.replace(anchor, "    if (!v.ok) return {};");
+  ok(ks.includes(anchor) && fb !== ks, 'control (e): the patch (a keeper that starts Chrome when the engine\'s kernel vanished) applies');
+  const Ke = MUT.load('src/server/browser-keeper.js', fb, 'engine-fallback');
+  fs.mkdirSync(path.join(ROOT, 'data-ce'), { recursive: true });
+  const kx = Ke.create({ dataDir: path.join(ROOT, 'data-ce'), homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set(), install: false, tickMs: 3600e3, log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, engines: ENGR });
+  const px = kx.createProfile({ label: 'Falls back', browser: { kind: 'plugin', id: EID } }, { engine: await kx.engineFactOf(EID) });
+  fs.renameSync(KP, KP + '.away');
+  const n0 = fake.launches().length;
+  const ex = await thr(() => kx.start(px.id, { why: 'control' }));
+  ok(!ex && fake.launches().length === n0 + 1 && fake.launches().at(-1).exe === null, 'control (e): …it LAUNCHED Chrome silently — exactly what ⑦\'s "refused by name, nothing launched" catches');
+  try { await kx.stop(px.id, { why: 'user' }); } catch { /* none */ }
+  fs.renameSync(KP + '.away', KP);
+  const es = read('src/browser-engines.js');
+  const envAnchor = "    const extra = Object.keys(env).filter((k) => !ENGINE_ENV_KEYS.includes(k));";
+  const open = es.replace(envAnchor, "    const extra = [];");
+  ok(es.includes(envAnchor) && open !== es, 'control (f): the patch (an engine verdict that lets any env key through) applies');
+  const ENo = MUT.load('src/browser-engines.js', open, 'env-open');
+  ok(ENo.engineAnswerVerdict('launchOptions', { status: 200, body: { executablePath: '/k/chrome', args: [], env: { LD_PRELOAD: '/x' } } }, { id: EID }).ok === true, 'control (f): …LD_PRELOAD rides the browser\'s env — exactly what ⑦\'s browser_engine_env row catches');
+}
+
+// ═══ ⑧ lane engine-distribution: THE KERNEL DOWNLOADED (design-custom-browser-plugin §5.3 as built) ═══════════════════════
+// PURE src/engine-kernel.js (kernel.json, the plan, the tar entries + shape, the receipt, the version words) + the REAL
+// src/server/engine-distribution.js over the fixture engine (the real loader's IPC child, in the kernel side's v0.1.1 shape:
+// no childProcess ⇒ version null, declaredVersion + integrity from the receipt) and a FAKE FILE HOST on loopback — a few-KB
+// tar.zst of the kernel's layout, built here (ustar + node's zstd), never the real 1.2 GB kernel.
+console.log('— ⑧ lane engine-distribution: kernel.json, the download over a fake file host, the receipt, the measured version, first use');
+{
+  const EK = require('../src/engine-kernel.js');
+  const EDM = require('../src/server/engine-distribution.js');
+  const zlib = require('zlib');
+  const crypto = require('crypto');
+  const BMm = await import('../src/lib/browser-build-model.js');
+  const tW = (s, p) => String(s).replace(/\{(\w+)\}/g, (m, k) => (p && k in p ? String(p[k]) : m));
+  // ── the PURE half ──
+  const LAYOUT = { archiveFormat: 'tar.zst', stripComponents: 1, binaryRelPath: 'chrome', requiredFiles: ['chrome', 'icudtl.dat', 'resources.pak', 'v8_context_snapshot.bin', 'libEGL.so', 'libGLESv2.so', 'libvk_swiftshader.so'] };
+  const kjson = (over = {}, plat = {}) => ({ schemaVersion: 1, id: EID, version: '150.0.7871.186-vs1', protocol: 1, layout: LAYOUT, platforms: { 'linux-x64': { url: 'https://kernels.test/k.tar.zst', sha256: 'a'.repeat(64), bytes: 1246347752, version: '150.0.7871.186-vs1', binaryRelPath: 'chrome', layout: { archiveFormat: 'tar.zst', stripComponents: 1, binaryRelPath: 'chrome' }, ...plat } }, ...over });
+  const mv = EK.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID });
+  ok(mv.ok && mv.version === '150.0.7871.186-vs1' && mv.url === 'https://kernels.test/k.tar.zst' && mv.host === 'kernels.test' && mv.bytes === 1246347752 && mv.source === 'package' && mv.layout.stripComponents === 1 && mv.layout.requiredFiles.length === 7 && mv.layout.requiredFiles[0] === 'chrome',
+    'kernel.json in the kernel side\'s shape (schemaVersion 1, the top-level layout + platforms[linux-x64]) ⇒ ONE artifact: url, sha256, bytes, version, layout (requiredFiles, the platform layout merged over the top one)', mv);
+  const peerDir = process.env.VIBESPACE_CUSTOM_BROWSER_PLUGIN || '';
+  if (peerDir && fs.existsSync(path.join(peerDir, 'kernel.json'))) { const pm = EK.kernelManifestVerdict(JSON.parse(fs.readFileSync(path.join(peerDir, 'kernel.json'), 'utf8')), { tag: 'linux-x64', id: EID }); ok(pm.ok && pm.layout.requiredFiles.includes('chrome'), 'the kernel side\'s OWN kernel.json (VIBESPACE_CUSTOM_BROWSER_PLUGIN) passes the same verdict', pm); }
+  else console.log('  … SKIP the kernel side\'s own kernel.json — VIBESPACE_CUSTOM_BROWSER_PLUGIN names no package here');
+  const refusals = [
+    [kjson({ platforms: { 'macos-arm64': kjson().platforms['linux-x64'] } }), 'build_platform_unsupported'],
+    [kjson({ schemaVersion: 2 }), 'browser_engine_protocol'],
+    [kjson({}, { url: 'http://kernels.test/k.tar.zst' }), 'browser_engine_protocol'],
+    [kjson({}, { url: 'https://u:p@kernels.test/k.tar.zst' }), 'browser_engine_protocol'],
+    [kjson({}, { sha256: 'xyz' }), 'browser_engine_protocol'],
+    [kjson({}, { binaryRelPath: 'bin/chrome' }), 'browser_engine_protocol'],
+    [kjson({ layout: { ...LAYOUT, archiveFormat: 'zip' } }, { layout: {} }), 'browser_engine_protocol'],
+    [kjson({ layout: { ...LAYOUT, requiredFiles: ['../etc/passwd'] } }), 'browser_engine_protocol'],
+    [kjson({}, { bytes: -1 }), 'browser_engine_protocol'],
+    [null, 'browser_engine_protocol'],
+  ].map(([d, code]) => [EK.kernelManifestVerdict(d, { tag: 'linux-x64', id: EID }).code, code]);
+  ok(refusals.every(([a, b]) => a === b), 'kernel.json refused BY NAME: no artifact for this machine ⇒ build_platform_unsupported; another schema, an http / user@ URL, a bad sha256, a program not at <tag>/chrome, a zip, a requiredFile outside, no length, no file ⇒ browser_engine_protocol', refusals);
+  const fv = EK.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID, fleet: { url: 'https://artifacts.fleet.test/k.tar.zst', sha256: 'b'.repeat(64) } });
+  const fs2 = EK.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID, fleet: { url: 'https://artifacts.fleet.test/k.tar.zst', sha256: 'a'.repeat(64) } });
+  const fHalf = EK.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID, fleet: { url: 'https://mirror.fleet.test/k.tar.zst', sha256: '' } });
+  const fPin = EK.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID, fleet: { url: '', sha256: 'b'.repeat(64) } });
+  const fHttp = EK.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID, fleet: { url: 'http://artifacts.fleet.test/k.tar.zst', sha256: 'b'.repeat(64) } });
+  ok(fv.ok && fv.source === 'fleet' && fv.host === 'artifacts.fleet.test' && fv.sha256 === 'b'.repeat(64) && fv.bytes === null && fs2.bytes === 1246347752
+    && fHalf.ok && fHalf.source === 'fleet' && fHalf.host === 'mirror.fleet.test' && fHalf.sha256 === 'a'.repeat(64) && fHalf.bytes === 1246347752 && fPin.ok && fPin.host === 'kernels.test' && fPin.sha256 === 'b'.repeat(64) && fPin.bytes === null,
+    'the fleet\'s kernel {url, sha256} is MERGED over the package\'s field by field (round 2): both ⇒ its own archive (its length kept only for the SAME sha256); a url alone ⇒ a mirror (the package\'s sha256 authenticates it); a sha256 alone ⇒ the package\'s address pinned to it', { fHalf: fHalf.host, fPin: fPin.sha256 });
+  ok(!fHttp.ok && fHttp.code === 'engine_url_not_https' && /not an https address/.test(fHttp.error) && /never takes the package's address/.test(fHttp.error),
+    'round 2: a fleet kernel URL that is not https ⇒ refused BY NAME (engine_url_not_https) — never the package\'s address in its place', fHttp);
+  const fBad = ['xyz', 'b'.repeat(65), 'g'.repeat(64), 1234].map((x) => EK.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID, fleet: { url: '', sha256: x } }));
+  const PLr = require('../src/preset-layers.js');
+  const viaFleet = ['XYZ', 'c'.repeat(65)].map((x) => EK.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID, fleet: PLr.parseFleet({ browserEngine: { plugin: EID, kernel: { sha256: x } } }).browserEngine.kernel }));
+  ok(fBad.every((v) => !v.ok && v.code === 'engine_sha_malformed' && /not 64 hex digits/.test(v.error) && /never takes the package's sha256/.test(v.error)) && viaFleet.every((v) => v.code === 'engine_sha_malformed')
+    && EK.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID, fleet: { url: 7, sha256: '' } }).code === 'engine_url_not_https',
+    'round 3: a fleet sha256 that is not 64 hex digits (short, 65 long, not hex, a number) ⇒ refused BY NAME (engine_sha_malformed) — never the package\'s sha256 in its place; the same through fleet.json\'s reader (it keeps the value AS NAMED — no longer blanked, nor clipped to 64); a url of another type is «not https»', { codes: fBad.map((v) => v.code || v.sha256), viaFleet: viaFleet.map((v) => v.code) });
+  const pl = EK.kernelPlan({ kernelPath: KP });
+  ok(pl.ok && pl.exe === KP && pl.targetDir === path.dirname(KP) && pl.part === path.dirname(KP) + '.part' && pl.unpackDir === path.join(path.dirname(path.dirname(KP)), '.unpack-linux-x64') && pl.receipt === path.join(path.dirname(KP), 'install-receipt.json') && !EK.kernelPlan({ kernelPath: '/a/../b/chrome' }).ok && !EK.kernelPlan({ kernelPath: 'rel/x/chrome' }).ok,
+    'THE PLAN: every path inside the kernel\'s own folder (<tag>.part, .unpack-<tag>, <tag>/, the receipt beside chrome); a path of another shape is never planned', pl);
+  const ev = (e, strip = 1) => EK.tarEntryVerdict(e, { strip });
+  const er = [ev({ name: 'k/chrome', kind: 'file' }).rel === 'chrome', ev({ name: './k/sub/a', kind: 'file' }).rel === 'sub/a', ev({ name: 'k/', kind: 'dir' }).rel === null, !ev({ name: '/etc/x', kind: 'file' }).ok, !ev({ name: 'k/../x', kind: 'file' }).ok, !ev({ name: 'k/l', kind: 'link', linkname: '/etc' }).ok, !ev({ name: 'k/fifo', kind: 'special' }).ok, !ev({ name: 'chrome', kind: 'file' }).ok, !ev({ name: 'k/a\\b', kind: 'file' }).ok];
+  ok(er.every(Boolean), 'each archive entry judged: inside the top folder ⇒ its path after stripComponents; an absolute name, "..", a link, a special file, a file above the top folder, a backslash ⇒ refused', er);
+  const dotList = [{ name: './', kind: 'dir' }, { name: './k/', kind: 'dir' }, { name: './k/chrome', kind: 'file', size: 3, mode: 0o755 }, { name: './k/icudtl.dat', kind: 'file', size: 1, mode: 0o644 }];
+  const dotV = EK.tarShapeVerdict(dotList, { layout: { stripComponents: 1, requiredFiles: ['chrome', 'icudtl.dat'] } });
+  ok(dotV.ok && dotV.files === 2 && ev({ name: './', kind: 'dir' }).root === true && !ev({ name: './', kind: 'file' }).ok && !ev({ name: './../x', kind: 'file' }).ok && !ev({ name: '/k/chrome', kind: 'file' }).ok && !EK.tarShapeVerdict([...dotList, { name: './k/../../x', kind: 'file', size: 1 }], { layout: { stripComponents: 1 } }).ok,
+    'round 2: an archive made with `tar -C dir -cf - .` (its own root `./` first) has ONE top folder — `./` is the root, never a second top; "..", an absolute name and a nameless file are still refused', dotV.ok ? { files: dotV.files } : dotV);
+  ok(EK.receiptVerdict({ sha256: 'c'.repeat(64), bytes: 45, verifiedAt: 1, version: 'v' }, { size: 45 }).verified && !EK.receiptVerdict({ sha256: 'c'.repeat(64), bytes: 45, verifiedAt: 1, version: 'v' }, { size: 46 }).verified && !EK.receiptVerdict(null).verified,
+    'the receipt read back: verified only while the program\'s size is the receipt\'s bytes (never a rehash of 1.2 GB)');
+  ok(EK.versionOf('Chromium 150.0.7871.186-vs1\n').version === '150.0.7871.186-vs1' && EK.versionOf('Chromium 150.0.7871.186 vibespace-fake-kernel').version === '150.0.7871.186' && EK.versionOf('nothing').version === null
+    && EK.versionFact({ measuredVersion: 'm', version: 'r', declaredVersion: 'd' }).kind === 'measured' && EK.versionFact({ version: 'r', declaredVersion: 'd' }).kind === 'reported' && EK.versionFact({ declaredVersion: 'd' }).kind === 'declared' && EK.versionFact({}).kind === 'none',
+    '`--version`\'s first line → the version (with its -suffix); the version a surface says: measured › reported › declared › none');
+  const hr = BB.downloadHardRows({ machine: 'linux-x64', offered: ['linux-x64'], freeBytes: 1e6, archiveBytes: 1e6, freePath: '/pvc' });
+  const hm = BB.downloadHardRows({ machine: 'darwin-arm64', offered: ['linux-x64'], unsupported: 'no kernel here' });
+  ok(hr.hard.length === 1 && hr.hard[0].code === 'disk' && /on \/pvc/.test(hr.hard[0].error) && hr.needBytes === 3e6 && hm.hard[0].code === 'build_platform_unsupported' && hm.hard[0].error === 'no kernel here', 'design 004\'s two hard rows are ONE helper (downloadHardRows): the disk (archive × DISK_FACTOR, the place named) and the machine');
+  // ── the ARCHIVE (ustar built here, zstd by node) + the FAKE FILE HOST ──
+  const tarOf = (entries) => {
+    const parts = [];
+    for (const e of entries) {
+      const h = Buffer.alloc(512), body = e.body == null ? Buffer.alloc(0) : Buffer.from(e.body);
+      h.write(e.name, 0, 100, 'utf8'); h.write(((e.mode || 0o644).toString(8)).padStart(7, '0') + '\0', 100); h.write('0000000\0', 108); h.write('0000000\0', 116);
+      h.write((e.type === '5' || e.type === '2' ? 0 : body.length).toString(8).padStart(11, '0') + '\0', 124); h.write('00000000000\0', 136); h.write(e.type || '0', 156);
+      if (e.link) h.write(e.link, 157, 100, 'utf8');
+      h.write('ustar\0', 257); h.write('00', 263); h.fill(32, 148, 156);
+      let sum = 0; for (const b of h) sum += b;
+      h.write(sum.toString(8).padStart(6, '0') + '\0 ', 148);
+      parts.push(h);
+      if (e.type !== '5' && e.type !== '2') parts.push(body, Buffer.alloc((512 - (body.length % 512)) % 512));
+    }
+    parts.push(Buffer.alloc(1024));
+    return zlib.zstdCompressSync(Buffer.concat(parts));
+  };
+  const RUNS = path.join(EROOT, 'kernel-runs.log');
+  const KSAYS = 'Chromium 150.0.7871.186-vs1';
+  const chromeBody = `#!/bin/sh\necho run >> ${JSON.stringify(RUNS)}\necho "${KSAYS}"\n`;
+  const kernelEntries = (top = 'vibespace-chromium-150.0.7871.186-vs1-linux-x64', extra = []) => [{ name: top + '/', type: '5', mode: 0o755 }, { name: `${top}/chrome`, body: chromeBody, mode: 0o755 },
+    ...['icudtl.dat', 'resources.pak', 'v8_context_snapshot.bin', 'libEGL.so', 'libGLESv2.so', 'libvk_swiftshader.so'].map((f) => ({ name: `${top}/${f}`, body: crypto.randomBytes(700) })), { name: `${top}/locales/`, type: '5', mode: 0o755 }, { name: `${top}/locales/en-US.pak`, body: 'x' }, ...extra];
+  const ARCH = tarOf(kernelEntries());
+  const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
+  const BAD = Buffer.from(ARCH); BAD[BAD.length - 9] ^= 0xff;
+  const EVIL = tarOf(kernelEntries(undefined, [{ name: 'vibespace-chromium-150.0.7871.186-vs1-linux-x64/escape', type: '2', link: '/etc/passwd' }]));
+  const DOTS = tarOf(kernelEntries(undefined, [{ name: 'vibespace-chromium-150.0.7871.186-vs1-linux-x64/../../oops', body: 'x' }]));
+  const SHORT = tarOf(kernelEntries().filter((e) => !/libEGL/.test(e.name)));
+  const served = { '/k.tar.zst': ARCH, '/bad.tar.zst': BAD, '/evil.tar.zst': EVIL, '/dots.tar.zst': DOTS, '/short.tar.zst': SHORT, '/fleet/k.tar.zst': ARCH };
+  const hits = [];
+  const host = http.createServer((q, r) => { hits.push(q.url); if (q.url === '/hop') { r.writeHead(302, { location: 'https://kernels.test/k.tar.zst' }); return r.end(); } if (q.url === '/hop-http') { r.writeHead(302, { location: 'http://kernels.test/k.tar.zst' }); return r.end(); } const b = served[q.url]; if (!b) { r.writeHead(404); return r.end(); } r.writeHead(200, { 'content-length': b.length }); r.end(b); });
+  await new Promise((res) => host.listen(0, '127.0.0.1', res));
+  process.on('exit', () => { try { host.close(); } catch { /* gone */ } });
+  const hostPort = host.address().port;
+  const resolveUrl = (u) => u.replace(/^https:\/\/(kernels\.test|artifacts\.fleet\.test)/, `http://127.0.0.1:${hostPort}`);
+  const KJ = path.join(EROOT, 'data', 'plugins', EID, 'kernel.json');
+  const writeKJ = (file, s = sha(served[file] || ARCH), extra = {}) => fs.writeFileSync(KJ, JSON.stringify(kjson({}, { url: `https://kernels.test${file}`, sha256: s, bytes: (served[file] || ARCH).length, ...extra })));
+  let freeNow = null, fleetK = null;
+  const edTodos = [];
+  const ED = EDM.create({ dataDir: path.join(EROOT, 'data'), engines: ENGR, loader: LDR, resolveUrl, freeOf: async (d) => (freeNow ? { ...freeNow } : { free: 1e12, path: d }), fleetFacts: () => (fleetK ? { browserEngine: { plugin: EID, kernel: fleetK } } : null), userTodos: { add: (k, item) => { edTodos.push(item); return 'ut-' + edTodos.length; } }, log: { log() {}, warn() {} } });
+  const keD = mkKeeper(path.join(ROOT, 'data-eng8'), { engines: ENGR, engineDistribution: ED, fleetFacts: () => null }); // a keeper with the kernel's distribution
+  setMode({ noExec: true }); // the kernel side's plugin: no childProcess — its version is null, the receipt is its integrity
+  fs.rmSync(path.dirname(KP), { recursive: true, force: true }); fs.rmSync(RUNS, { force: true });
+  // ① the download: fetch → sha256 → list → extract → requiredFiles → the receipt → ONE rename → the version measured ONCE
+  writeKJ('/k.tar.zst');
+  const r1 = await ED.installKernel(EID, { wait: true });
+  const kdir = path.dirname(KP);
+  const rc = JSON.parse(fs.readFileSync(path.join(kdir, 'install-receipt.json'), 'utf8'));
+  ok(r1.ok && r1.sha256 === sha(ARCH) && fs.statSync(KP).mode & 0o100 && LAYOUT.requiredFiles.every((f) => fs.statSync(path.join(kdir, f)).isFile()) && fs.existsSync(path.join(kdir, 'locales', 'en-US.pak')) && !fs.readdirSync(path.dirname(kdir)).some((n) => /\.part$|^\.unpack-|^\.removing-/.test(n)),
+    'the kernel lands at kernelPath\'s folder: stripComponents 1, every requiredFiles a file, chrome executable — no .part / .unpack- / .removing- left', fs.readdirSync(path.dirname(kdir)));
+  ok(rc.sha256 === sha(ARCH) && rc.bytes === fs.statSync(KP).size && rc.version === '150.0.7871.186-vs1' && Number.isFinite(rc.verifiedAt) && rc.archiveBytes === ARCH.length && rc.binarySha256 === sha(Buffer.from(chromeBody)),
+    'install-receipt.json beside chrome: {sha256 (the archive\'s, verified), bytes (chrome\'s size), verifiedAt, version} (+ the archive\'s length, the program\'s own hash)', rc);
+  const runs1 = () => { try { return fs.readFileSync(RUNS, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
+  const kf1 = ED.kernelFact(EID);
+  ok(kf1.state === 'installed' && kf1.measuredVersion === '150.0.7871.186-vs1' && runs1() === 1 && kf1.sha256 === sha(ARCH), 'right after the install VibeSpace ran `<kernel> --version` ONCE (serviceEnv, 5 s) — measuredVersion + measuredAt on the engine record', { kf1, runs: runs1() });
+  const m2 = await ED.measure(EID);
+  const pr = await ENGR.probe(EID);
+  ok(m2.cached && runs1() === 1 && pr.ok && pr.fact.version === null && pr.fact.declaredVersion === '150.0.7871.186-vs1' && pr.fact.integrity && pr.fact.integrity.verified === true && pr.fact.integrity.sha256 === sha(ARCH),
+    'asked again ⇒ the record answers (no second run); the plugin\'s probe (no childProcess) says version null, declaredVersion, integrity {verified} from the receipt', { runs: runs1(), fact: pr.fact });
+  const rec0 = JSON.parse(fs.readFileSync(path.join(EROOT, 'data', 'browser-engines.json'), 'utf8'));
+  ok(rec0.engines[EID].measured.version === '150.0.7871.186-vs1' && rec0.engines[EID].kernel.sha256 === sha(ARCH) && !JSON.stringify(rec0).includes(KP), 'THE ENGINE RECORD (data/browser-engines.json, one writer) keeps the measured version + the installed kernel — never a path');
+  // ② the card + Settings' fact line say what was measured / declared — never a path
+  const rowsV = await keD.engineRowsView();
+  const ro = rowsV.find((e) => e.id === EID);
+  ok(ro && ro.measuredVersion === '150.0.7871.186-vs1' && ro.declaredVersion === '150.0.7871.186-vs1' && ro.integrity.verified && /measured 150\.0\.7871\.186-vs1 · verified/.test(BMm.engineNote(ro, tW)) && !JSON.stringify(rowsV).includes(KP),
+    'Change build…\'s «自研内核» row: «… · measured 150.0.7871.186-vs1 · verified» (the engine record over the probe) — no path', ro && BMm.engineNote(ro, tW));
+  ok(/declared 150\.0\.7871\.186-vs1 \(not measured\)/.test(BMm.engineNote({ ...ro, measuredVersion: null, version: null }, tW)) && /version 9/.test(BMm.engineNote({ ...ro, measuredVersion: null, version: '9' }, tW)) && /downloading its kernel… 50%/.test(BMm.engineNote({ id: EID, installed: false, executable: false, kernel: { state: 'downloading', bytes: 5, total: 10 } }, tW)) && /could not be downloaded: the download did not match its sha256/.test(BMm.engineNote({ id: EID, installed: false, kernel: { state: 'failed', code: 'build_verify_failed' } }, tW)),
+    'the words: «declared x (not measured)» when nothing was measured; the plugin\'s own version next; a download in flight with its %; a failed one by its code');
+  ok(/measured 150\.0\.7871\.186-vs1/.test(BMm.engineFactText({ engines: rowsV, defaultEngine: keD.defaultEngineNow() }, tW)), 'Settings\' fact line under «Default browser engine» says the same measured version');
+  // ③ the launch reads the MEASURED version (no second --version), the record says it
+  const pk = keD.createProfile({ label: 'Measured', browser: { kind: 'plugin', id: EID } }, { engine: await keD.engineFactOf(EID) });
+  await keD.start(pk.id, { why: 'test' });
+  ok(keD._reg().browsers[pk.id].browserChoice.version === '150.0.7871.186-vs1' && runs1() === 1 && fake.launches().at(-1).exe === KP, 'the launch: the kernel, the MEASURED version on the browser record — the kernel ran --version once in all', { runs: runs1(), rc: keD._reg().browsers[pk.id].browserChoice });
+  await keD.stop(pk.id, { why: 'user' });
+  // ④ refusals BY NAME, before / after bytes — the installed kernel untouched by every failed attempt
+  const before = fs.readFileSync(KP, 'utf8');
+  const thrK = async (p) => { try { await p; return null; } catch (e) { return e; } };
+  freeNow = { free: 1000, path: '/pvc/data' }; const h0 = hits.length;
+  const eDisk = await thrK(ED.installKernel(EID, { wait: true }));
+  const hDisk = hits.length;
+  freeNow = null;
+  writeKJ('/k.tar.zst', sha(ARCH).replace(/^./, (c) => (c === '0' ? '1' : '0')));
+  const eSha = await thrK(ED.installKernel(EID, { wait: true }));
+  writeKJ('/bad.tar.zst', sha(ARCH)); const eBad = await thrK(ED.installKernel(EID, { wait: true }));
+  writeKJ('/evil.tar.zst'); const eEvil = await thrK(ED.installKernel(EID, { wait: true }));
+  writeKJ('/dots.tar.zst'); const eDots = await thrK(ED.installKernel(EID, { wait: true }));
+  writeKJ('/short.tar.zst'); const eShort = await thrK(ED.installKernel(EID, { wait: true }));
+  writeKJ('/gone.tar.zst', 'd'.repeat(64)); const e404 = await thrK(ED.installKernel(EID, { wait: true }));
+  writeKJ('/hop-http'); const eHop = await thrK(ED.installKernel(EID, { wait: true }));
+  fs.writeFileSync(KJ, JSON.stringify(kjson({ platforms: { 'windows-x64': kjson().platforms['linux-x64'] } })));
+  const ePlat = await thrK(ED.installKernel(EID, { wait: true }));
+  const codes = { eDisk, eSha, eBad, eEvil, eDots, eShort, e404, eHop, ePlat };
+  const want = { eDisk: 'disk', eSha: 'build_verify_failed', eBad: 'build_verify_failed', eEvil: 'build_unpack_failed', eDots: 'build_unpack_failed', eShort: 'build_unpack_failed', e404: 'build_fetch_failed', eHop: 'build_fetch_failed', ePlat: 'build_platform_unsupported' };
+  ok(Object.entries(want).every(([k, c]) => codes[k] && codes[k].code === c), 'every refusal BY NAME: disk · a sha256 that is not the archive\'s · bytes that are not the declared ones · a link entry · a ".." entry · a missing requiredFile · a 404 · an http redirect hop · no artifact for this machine', Object.fromEntries(Object.entries(codes).map(([k, e]) => [k, e && e.code])));
+  ok(/0 MB left on \/pvc\/data/.test(eDisk.message) && hDisk === h0 && /nothing was downloaded/.test(eDisk.message) && /is not the declared/.test(eSha.message) && /link entry/.test(eEvil.message) && /no libEGL\.so/.test(eShort.message) && /windows-x64/.test(ePlat.message),
+    '…each says why: `disk` names the folder\'s free bytes (a pod\'s PVC) before any byte moved, the sha256 mismatch names both, the entry, the missing file, what the engine offers', { disk: eDisk.message, sha: eSha.message });
+  ok(fs.readFileSync(KP, 'utf8') === before && ED.kernelFact(EID).state === 'installed' && !fs.readdirSync(path.dirname(kdir)).some((n) => /\.part$|^\.unpack-|^\.removing-/.test(n)) && !fs.existsSync(path.join(EROOT, 'data', 'plugins-state', 'oops')) && !fs.existsSync(path.join(EROOT, 'data', 'oops')),
+    '…and the kernel already in place is untouched by every failed attempt; no partial is left; nothing escaped its folder');
+  ok(edTodos.length === 0, 'a person\'s own download files no For-you notice (the card says it)');
+  // ⑤ a redirect hop (https) is followed; the FLEET's artifact host wins over the package's
+  writeKJ('/hop', sha(ARCH)); const h1 = hits.length;
+  const r5 = await ED.installKernel(EID, { wait: true });
+  ok(r5.ok && hits.slice(h1).join() === '/hop,/k.tar.zst', 'an https redirect hop is followed by hand (each hop judged https)', hits.slice(h1));
+  fleetK = { url: 'https://artifacts.fleet.test/fleet/k.tar.zst', sha256: sha(ARCH) }; const h2 = hits.length;
+  writeKJ('/k.tar.zst', 'e'.repeat(64));
+  const r6 = await ED.installKernel(EID, { wait: true, by: 'fleet' });
+  ok(r6.ok && hits.slice(h2).join() === '/fleet/k.tar.zst' && ED.kernelFact(EID).source === 'fleet', 'the fleet\'s browserEngine.kernel {url, sha256} replaces kernel.json\'s (the cluster\'s own artifact host)', hits.slice(h2));
+  fleetK = null;
+  // ⑤b round 2: a fleet kernel URL that is not https ⇒ refused by name BEFORE any byte — never the package's address instead
+  fleetK = { url: 'http://artifacts.fleet.test/fleet/k.tar.zst', sha256: sha(ARCH) }; const h3 = hits.length;
+  writeKJ('/k.tar.zst');
+  const eHttpF = await thrK(ED.installKernel(EID, { wait: true, by: 'user' }));
+  ok(eHttpF && eHttpF.code === 'engine_url_not_https' && hits.length === h3 && ED.kernelFact(EID).state === 'installed' && /not https/.test(BMm.engineNote({ id: EID, installed: false, kernel: { state: 'failed', code: 'engine_url_not_https' } }, tW)),
+    'round 2: the fleet names an http kernel URL ⇒ engine_url_not_https by name, ZERO requests (the package\'s https address is NOT taken in its place); the card says so', { code: eHttpF && eHttpF.code, hits: hits.slice(h3) });
+  fleetK = null;
+  // ⑤d round 3: a fleet sha256 that is not 64 hex digits ⇒ refused by name BEFORE any byte — never the package's sha256 instead
+  fleetK = { url: '', sha256: 'abc123' }; const h4 = hits.length;
+  const eShaF = await thrK(ED.installKernel(EID, { wait: true, by: 'user' }));
+  ok(eShaF && eShaF.code === 'engine_sha_malformed' && /not 64 hex digits/.test(eShaF.message) && hits.length === h4 && ED.kernelFact(EID).state === 'installed' && /not 64 hex digits/.test(BMm.engineNote({ id: EID, installed: false, kernel: { state: 'failed', code: 'engine_sha_malformed' } }, tW)),
+    'round 3: the fleet pins a sha256 that is not 64 hex digits ⇒ engine_sha_malformed by name, ZERO requests (the package\'s sha256 is NOT taken in its place); the card says so', { code: eShaF && eShaF.code, hits: hits.slice(h4) });
+  fleetK = null;
+  // ⑤c round 2: an archive whose names start with `./` (made with `tar -C dir -cf - .`) installs
+  served['/dot.tar.zst'] = tarOf([{ name: './', type: '5', mode: 0o755 }, ...kernelEntries().map((e) => ({ ...e, name: './' + e.name }))]);
+  writeKJ('/dot.tar.zst');
+  const rDot = await thrK(ED.installKernel(EID, { wait: true }));
+  ok(!rDot && ED.kernelFact(EID).sha256 === sha(served['/dot.tar.zst']) && fs.existsSync(path.join(kdir, 'locales', 'en-US.pak')) && (fs.statSync(KP).mode & 0o100), 'round 2: a `./`-rooted archive (tar -C dir -cf - .) installs — its root is no second top folder', rDot && rDot.message);
+  writeKJ('/k.tar.zst');
+  // ⑥ a failure nobody watched (the fleet's, a first use) files ONE For-you notice, once per code
+  writeKJ('/k.tar.zst', 'f'.repeat(64));
+  await thrK(ED.installKernel(EID, { wait: true, by: 'fleet' })); await thrK(ED.installKernel(EID, { wait: true, by: 'fleet' }));
+  ok(edTodos.length === 1 && edTodos[0].origin === 'plugin' && edTodos[0].kind === 'notice' && /could not be downloaded/.test(edTodos[0].text) && /build_verify_failed/.test(edTodos[0].detail) && !edTodos[0].detail.includes(KP), 'a fleet download\'s failure ⇒ ONE For-you notice (origin plugin), the code named, no path — the same failure again files nothing more', edTodos);
+  // ⑦ FIRST USE: the kernel absent ⇒ the launch refused by name, the download started; when it lands the next launch runs it
+  writeKJ('/k.tar.zst');
+  const ke8 = keD;
+  const p8 = ke8.createProfile({ label: 'First use', browser: { kind: 'plugin', id: EID } }, { engine: await ke8.engineFactOf(EID) });
+  fs.rmSync(kdir, { recursive: true, force: true }); fs.rmSync(RUNS, { force: true });
+  const e8 = await thrK(ke8.start(p8.id, { why: 'test' }));
+  ok(e8 && e8.code === 'browser_engine_kernel_missing' && /VibeSpace is downloading it now/.test(e8.message), 'the kernel not there ⇒ the launch is refused BY NAME and says VibeSpace is downloading it now (its first use) — never Chrome in its place', e8 && e8.message);
+  const t8 = Date.now(); while (ED.kernelFact(EID).state === 'downloading' && Date.now() - t8 < 8000) await new Promise((r) => setTimeout(r, 25));
+  await ke8.start(p8.id, { why: 'test' });
+  ok(ED.kernelFact(EID).state === 'installed' && fake.launches().at(-1).exe === KP && ke8._reg().browsers[p8.id].browserChoice.version === '150.0.7871.186-vs1' && runs1() === 1, '…it lands, and the next launch runs it with its measured version (one --version)', { st: ED.kernelFact(EID).state, runs: runs1() });
+  await ke8.stop(p8.id, { why: 'user' });
+  // ⑧ a kernel placed BY HAND (no receipt): measured once (keyed by its size + mtime), «declared» until then
+  const ED2 = EDM.create({ dataDir: path.join(ROOT, 'data-ed2'), engines: ENGR, loader: LDR, log: { log() {}, warn() {} } });
+  fs.rmSync(path.join(kdir, 'install-receipt.json'), { force: true }); fs.rmSync(RUNS, { force: true });
+  const m8 = await ED2.measure(EID); const m8b = await ED2.measure(EID);
+  ok(m8.version === '150.0.7871.186-vs1' && /^stat:/.test(m8.for) && m8b.cached && runs1() === 1 && ED2.kernelFact(EID).state === 'absent' && ED2.kernelFact(EID).measuredVersion === '150.0.7871.186-vs1', 'a kernel placed by hand (no receipt): measured once too, keyed by its size + mtime');
+  // ⑧b the kernel side's OWN CLI stub (their src/fake-kernel-stub.mjs — a shebang program whose --version prints a version) as the
+  // kernel at its place: measured by VibeSpace (the plugin has no childProcess) — when VIBESPACE_CUSTOM_BROWSER_PLUGIN names their package
+  const peerStub = peerDir ? path.join(peerDir, 'src', 'fake-kernel-stub.mjs') : '';
+  if (!peerStub || !fs.existsSync(peerStub)) console.log('  … SKIP the measured --version of the kernel side\'s own CLI stub — VIBESPACE_CUSTOM_BROWSER_PLUGIN names no package with src/fake-kernel-stub.mjs here');
+  else {
+    const PD = path.join(ROOT, 'peer-kernel', 'data');
+    const pk = path.join(PD, 'plugins-state', EID, 'kernel', 'linux-x64', 'chrome');
+    // a COPY at the kernel's place (their CLI checks argv[1] against its own path — a symlink would never run its main): the stub as
+    // `chrome` beside its sibling modules, an ESM package marker so the extension-less program loads as a module
+    fs.mkdirSync(path.dirname(pk), { recursive: true });
+    for (const f of fs.readdirSync(path.dirname(peerStub)).filter((n) => /\.mjs$/.test(n))) fs.copyFileSync(path.join(path.dirname(peerStub), f), path.join(path.dirname(pk), f));
+    fs.copyFileSync(peerStub, pk); fs.chmodSync(pk, 0o755);
+    fs.writeFileSync(path.join(path.dirname(pk), 'package.json'), JSON.stringify({ type: 'module' }));
+    const EDp = EDM.create({ dataDir: PD, engines: { kernelPath: () => pk }, log: { log() {}, warn() {} } });
+    const mp = await EDp.measure(EID);
+    ok(mp.ok && /^\d{2,4}\.\d+\.\d+\.\d+/.test(mp.version) && /measured /.test(BMm.engineNote({ id: EID, label: 'Custom Browser Kernel', installed: true, executable: true, version: null, measuredVersion: mp.version }, tW)), `the kernel side's OWN CLI stub at the kernel's place: VibeSpace's --version (serviceEnv, 5 s) measures it — «measured ${mp.version}» (it says «${mp.says}»)`, mp);
+  }
+  // ⑨ RED CONTROL: a copy without the sha256 check installs the corrupted archive — exactly what ④'s sha leg refuses
+  const EDS = read('src/server/engine-distribution.js');
+  const shaAnchor = "    if (sha !== m.sha256) throw named('build_verify_failed',";
+  ok(EDS.includes(shaAnchor), 'control: the sha256 check\'s anchor is in engine-distribution.js');
+  const { mutantCopies: mutantCopies8 } = await import('./mutant-copy.mjs');
+  const EDx = mutantCopies8('builds-kernel', REPO).load('src/server/engine-distribution.js', EDS.replace(shaAnchor, "    if (false) throw named('build_verify_failed',"), 'no-sha');
+  const EDxi = EDx.create({ dataDir: path.join(EROOT, 'data'), engines: ENGR, loader: LDR, resolveUrl, log: { log() {}, warn() {} } });
+  writeKJ('/k.tar.zst', 'a'.repeat(64), { bytes: ARCH.length });
+  const ex8 = await thrK(EDxi.installKernel(EID, { wait: true }));
+  ok(!ex8 && JSON.parse(fs.readFileSync(path.join(kdir, 'install-receipt.json'), 'utf8')).sha256 === sha(ARCH), 'control: a copy without the sha256 check INSTALLS an archive whose sha256 is not the declared one — RED against ④', ex8 && ex8.code);
+
+  // ═══ ROUND 2 (主开发's acceptance, 2026-10-25): the extract's writes, a Node without zstd, the landing, the fleet URL, `./` ═══
+  const quiet8 = { log() {}, warn() {} };
+  const fsp8 = fs.promises;
+  const M8 = mutantCopies8('builds-kernel-r2', REPO);
+  /** an engine-distribution over its OWN data folder (a copy of the package's kernel.json) — its record never mixes with ED's */
+  const edAt = (name, opts = {}, mod = EDM) => { const dd = path.join(ROOT, name); fs.mkdirSync(path.join(dd, 'plugins', EID), { recursive: true }); fs.copyFileSync(KJ, path.join(dd, 'plugins', EID, 'kernel.json')); return mod.create({ dataDir: dd, engines: ENGR, loader: LDR, resolveUrl, log: quiet8, ...opts }); };
+  const removing = path.join(path.dirname(kdir), '.removing-linux-x64'), unpacking = path.join(path.dirname(kdir), '.unpack-linux-x64');
+  const leftovers = () => fs.readdirSync(path.dirname(kdir)).filter((n) => /\.part$|^\.unpack-|^\.removing-/.test(n));
+  // ⑩ (MUST 1) THE EXTRACT'S WRITES: ONE 'error' listener per file for its whole life; a failed write (ENOSPC) is the install's
+  // refusal by name — no 'uncaughtException' (the hub's exit), no partial, the previous kernel untouched
+  /** a write-stream door that COUNTS each stream's 'error' listeners at every write and fails the write `failOn` picks (ENOSPC) */
+  const countingIo = (failOn = () => false) => {
+    const st = { writes: 0, maxErr: 0, failed: 0 };
+    return { st, createWriteStream: (f, o) => {
+      const ws = fs.createWriteStream(f, o); const w0 = ws._write.bind(ws); let n = 0; ws._writev = undefined;
+      ws._write = (c, e, cb) => { st.writes++; n++; st.maxErr = Math.max(st.maxErr, ws.listenerCount('error')); if (failOn(f, n)) { st.failed++; return cb(Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC', errno: -28, syscall: 'write' })); } return w0(c, e, cb); };
+      return ws;
+    } };
+  };
+  const uncaught = []; const onU = (e) => uncaught.push((e && e.code) || String(e)); process.on('uncaughtException', onU);
+  /** the install's answer, or `uncaught` the moment one reached the process, or `hung` */
+  const settled = (p, ms) => Promise.race([p.then(() => null, (e) => e), new Promise((r) => { const t0 = Date.now(); const iv = setInterval(() => { if (uncaught.length || Date.now() - t0 > ms) { clearInterval(iv); r({ code: uncaught.length ? 'uncaught' : 'hung' }); } }, 10); })]);
+  served['/big.tar.zst'] = tarOf(kernelEntries(undefined, [{ name: 'vibespace-chromium-150.0.7871.186-vs1-linux-x64/big.pak', body: crypto.randomBytes(3 * 1024 * 1024) }]));
+  writeKJ('/big.tar.zst');
+  const big = countingIo();
+  const rBig = await settled(edAt('data-ed10a', { io: big }).installKernel(EID, { wait: true }), 20000);
+  ok(!rBig && big.st.writes > 60 && big.st.maxErr <= 2 && !leftovers().length, `round 2: a 3 MB file extracted in ${big.st.writes} writes — at most ${big.st.maxErr} 'error' listener on its stream at any write (ONE, attached at its creation; the drain wait reuses it)`, { err: rBig && rBig.message, ...big.st });
+  const prev10 = fs.readFileSync(KP);
+  const nos = countingIo((f, n) => path.basename(f) === 'icudtl.dat' && n === 1);
+  const eNos = await settled(edAt('data-ed10b', { io: nos }).installKernel(EID, { wait: true }), 8000);
+  ok(eNos && eNos.code === 'disk' && /ran out of room/.test(eNos.message) && /ENOSPC/.test(eNos.message) && nos.st.failed === 1 && uncaught.length === 0 && !leftovers().length && fs.readFileSync(KP).equals(prev10) && fs.statSync(path.join(kdir, 'icudtl.dat')).size === 700,
+    'round 2: an injected ENOSPC on an extracted file\'s write ⇒ the install answers `disk` by name; NO uncaughtException (the hub stays up), the partial folder removed, the previous kernel untouched', { code: eNos && eNos.code, msg: eNos && eNos.message, uncaught });
+  const nosBig = countingIo((f, n) => path.basename(f) === 'big.pak' && n === 40);
+  const eNosB = await settled(edAt('data-ed10c', { io: nosBig }).installKernel(EID, { wait: true }), 8000);
+  const nosPart = countingIo((f, n) => /\.part$/.test(f) && n === 3);
+  const eNosP = await settled(edAt('data-ed10d', { io: nosPart }).installKernel(EID, { wait: true }), 8000);
+  ok(eNosB && eNosB.code === 'disk' && eNosP && eNosP.code === 'disk' && /the download/.test(eNosP.message) && uncaught.length === 0 && !leftovers().length && fs.readFileSync(KP).equals(prev10),
+    '…the same mid-file (a write that waited for drain) and on the download\'s .part — `disk`, nothing left, no uncaughtException', { b: eNosB && eNosB.message, p: eNosP && eNosP.message, uncaught });
+  // ⑩b ROUND 3 (1): A CLOSE THAT FAILS — 'finish' comes BEFORE fs.close; the writer settles on 'close', so a close-time ENOSPC (an
+  // NFS bind's close-to-open) is the install's `disk` and nothing lands; fewer bytes on disk than written after the close ⇒ refused
+  /** a write-stream door whose fs.close FAILS (ENOSPC) for the files `pick` names — or answers after cutting the file 1 byte short */
+  const closeIo = (pick, how = 'enospc') => ({ createWriteStream: (f, o) => fs.createWriteStream(f, pick(f) ? { ...o, fs: { open: fs.open, write: fs.write, writev: fs.writev,
+    close: (fd, cb) => (how === 'short' ? fs.ftruncate(fd, Math.max(0, fs.fstatSync(fd).size - 1), () => fs.close(fd, cb)) : fs.close(fd, () => cb(Object.assign(new Error('ENOSPC: no space left on device, close'), { code: 'ENOSPC', errno: -28, syscall: 'close' })))) } } : o) });
+  const isIcu = (f) => path.basename(f) === 'icudtl.dat';
+  writeKJ('/k.tar.zst');
+  const inoC = fs.statSync(kdir).ino;
+  const eC1 = await settled(edAt('data-ed10e', { io: closeIo(isIcu) }).installKernel(EID, { wait: true }), 8000);
+  const eC2 = await settled(edAt('data-ed10f', { io: closeIo((f) => /\.part$/.test(f)) }).installKernel(EID, { wait: true }), 8000);
+  const eC3 = await settled(edAt('data-ed10g', { io: closeIo(isIcu, 'short') }).installKernel(EID, { wait: true }), 8000);
+  ok(eC1 && eC1.code === 'disk' && /ENOSPC/.test(eC1.message) && /icudtl\.dat/.test(eC1.message) && eC2 && eC2.code === 'disk' && /the download/.test(eC2.message) && uncaught.length === 0 && !leftovers().length && fs.statSync(kdir).ino === inoC,
+    'round 3: an injected ENOSPC at CLOSE (after \'finish\') on an extracted file and on the download\'s .part ⇒ `disk` by name — NOTHING landed (the previous kernel\'s folder is the same one), nothing left, no uncaughtException', { c1: eC1 && eC1.message, c2: eC2 && eC2.message, uncaught });
+  ok(eC3 && eC3.code === 'build_unpack_failed' && /699 of its 700 bytes are on disk after it was closed/.test(eC3.message) && !leftovers().length && fs.statSync(kdir).ino === inoC,
+    'round 3: a close that leaves fewer bytes on disk than were written (699 of 700) ⇒ build_unpack_failed by name — the size on disk is compared after the close; nothing landed', eC3 && eC3.message);
+
+  // ⑪ (MUST 3) A NODE WITHOUT ZSTD: refused by name BEFORE any byte (engine_node_unsupported: the floor + the running Node),
+  // remembered on the engine record for THAT Node — its first use never downloads on it; the card says it
+  writeKJ('/k.tar.zst');
+  const nodeTodos = [];
+  const EDn = edAt('data-ed11', { zlib: {}, nodeVersion: '20.20.2', userTodos: { add: (k, item) => { nodeTodos.push(item); return 'ut-n' + nodeTodos.length; } } });
+  const h11 = hits.length;
+  const eN1 = await thrK(EDn.installKernel(EID, { wait: true, by: 'first-use' }));
+  const eN2 = await thrK(EDn.installKernel(EID, { wait: true, by: 'first-use' }));
+  const recN = JSON.parse(fs.readFileSync(path.join(ROOT, 'data-ed11', 'browser-engines.json'), 'utf8')).engines[EID];
+  const kfN = EDn.kernelFact(EID);
+  ok(eN1 && eN1.code === 'engine_node_unsupported' && /Node 20\.20\.2/.test(eN1.message) && /Node 22\.15 or later/.test(eN1.message) && eN2 && eN2.code === 'engine_node_unsupported' && hits.length === h11,
+    'round 2: a Node whose zlib has no zstd (a stub — Node 20.20.2\'s) ⇒ engine_node_unsupported BY NAME, naming the floor 22.15 and the running Node — ZERO bytes fetched, twice', { msg: eN1 && eN1.message, hits: hits.slice(h11) });
+  ok(recN.failure && recN.failure.code === 'engine_node_unsupported' && recN.failure.node === '20.20.2' && recN.failure.need === '22.15' && kfN.code === 'engine_node_unsupported' && kfN.node === '20.20.2' && nodeTodos.length === 1 && /22\.15 or later/.test(nodeTodos[0].detail)
+    && /needs Node 22\.15 or later to unpack — this VibeSpace runs on Node 20\.20\.2/.test(BMm.engineNote({ id: EID, installed: false, kernel: { state: 'failed', code: kfN.code, node: kfN.node, need: kfN.need } }, tW)),
+    '…remembered on the engine record for that Node {code, node, need}; ONE For-you notice (update Node); the card says «needs Node 22.15 or later … runs on Node 20.20.2»', { failure: recN.failure, todos: nodeTodos.length });
+  const EDn2 = EDM.create({ dataDir: path.join(ROOT, 'data-ed11'), engines: ENGR, loader: LDR, resolveUrl, nodeVersion: '24.12.0', log: quiet8 });
+  await EDn2.ready;
+  ok(EDn2.kernelFact(EID).code === null, '…a fact about THAT Node: the same record read on another Node (an upgrade) says nothing of it — the gate is asked again');
+  const keN = mkKeeper(path.join(ROOT, 'data-eng11'), { engines: ENGR, engineDistribution: EDn, fleetFacts: () => null });
+  const pN = keN.createProfile({ label: 'Old Node', browser: { kind: 'plugin', id: EID } }, { engine: await keN.engineFactOf(EID) });
+  const keptK = path.join(ROOT, 'kernel-kept'); fs.rmSync(keptK, { recursive: true, force: true }); fs.renameSync(kdir, keptK); // the kernel absent: its first use
+  const h11b = hits.length;
+  const eK1 = await thrK(keN.start(pN.id, { why: 'test' })); const eK2 = await thrK(keN.start(pN.id, { why: 'test' }));
+  fs.renameSync(keptK, kdir);
+  ok(eK1 && eK1.code === 'browser_engine_kernel_missing' && /cannot download it here/.test(eK1.message) && /Node 20\.20\.2/.test(eK1.message) && !/downloading it now/.test(eK1.message) && eK2 && eK2.code === 'browser_engine_kernel_missing' && hits.length === h11b && nodeTodos.length === 1,
+    'round 2: its FIRST USE on that Node: the launch refused by name saying why (Node 20.20.2; 22.15 or later) — never «downloading it now», no request, again none, still ONE notice', { e1: eK1 && eK1.message, hits: hits.slice(h11b) });
+
+  // ⑫ (SHOULD 4) THE LANDING: a final rename that fails AFTER the previous kernel was moved aside puts it BACK; a landing that
+  // finds an aside copy (an earlier one stopped between its renames) restores it before anything could delete it
+  const failLand = { rename: async (a, b) => { if (a === unpacking && b === kdir) throw Object.assign(new Error('EXDEV: cross-device link not permitted, rename'), { code: 'EXDEV' }); return fsp8.rename(a, b); } };
+  const prev12 = fs.readFileSync(KP);
+  const eL = await thrK(edAt('data-ed12a', { io: failLand }).installKernel(EID, { wait: true }));
+  const mL = await edAt('data-ed12b').measure(EID, { force: true });
+  ok(eL && eL.code === 'build_unpack_failed' && /the previous kernel was put back/.test(eL.message) && fs.readFileSync(KP).equals(prev12) && mL.ok && mL.version === '150.0.7871.186-vs1' && !leftovers().length,
+    'round 2: the final rename fails (EXDEV) after the previous kernel was moved aside ⇒ it is moved BACK and said so — the previous kernel\'s path still measures', { msg: eL && eL.message, m: mL.version || mL.code });
+  fs.renameSync(kdir, removing); // an earlier landing stopped between its two renames: the previous kernel aside, nothing in its place
+  const eL2 = await thrK(edAt('data-ed12c', { io: failLand }).installKernel(EID, { wait: true }));
+  const back2 = fs.existsSync(KP) && fs.readFileSync(KP).equals(prev12) && !fs.existsSync(removing);
+  fs.renameSync(kdir, removing);
+  const rL3 = await thrK(edAt('data-ed12d').installKernel(EID, { wait: true }));
+  ok(eL2 && /put back/.test(eL2.message) && back2 && !rL3 && fs.existsSync(KP) && !leftovers().length, '…a kernel found ASIDE is restored first (never deleted unrestored): a failing landing leaves it in its place, a good one replaces it and leaves no .removing-', { e2: eL2 && eL2.message, back2, r3: rL3 && rL3.message });
+  // ⑫b ROUND 3 (2): THE ASIDE COPY IS PUT BACK FIRST — at the boot, at measure, at a first use — with NO download; one that cannot
+  // be put back ⇒ the record holds NO kernel (engine_kernel_aside: never «installed» over an empty place), the card names it
+  writeKJ('/k.tar.zst');
+  const failBack = { rename: async (a, b) => { if (a === removing && b === kdir) throw Object.assign(new Error('EACCES: permission denied, rename'), { code: 'EACCES' }); return fsp8.rename(a, b); } };
+  const failBoth = { rename: async (a, b) => { if ((a === unpacking || a === removing) && b === kdir) { const c = a === removing ? 'EACCES' : 'EXDEV'; throw Object.assign(new Error(c + ': rename'), { code: c }); } return fsp8.rename(a, b); } };
+  const asideTodos = [];
+  const atB = (opts = {}, mod = EDM) => edAt('data-ed12e', { userTodos: { add: (k, item) => { asideTodos.push(item); return 'ut-a' + asideTodos.length; } }, ...opts }, mod);
+  const recB = () => JSON.parse(fs.readFileSync(path.join(ROOT, 'data-ed12e', 'browser-engines.json'), 'utf8')).engines[EID];
+  const r12e = await thrK(atB().installKernel(EID, { wait: true })); // the record: installed
+  fs.renameSync(kdir, removing); // a landing stopped between its two renames (the hub died there): the kernel aside, its place empty
+  const h12 = hits.length;
+  const B1 = atB(); const b1 = await B1.bootFleet();
+  const mB1 = await B1.measure(EID, { force: true });
+  ok(!r12e && b1.restored && b1.restored.length === 1 && b1.restored[0].restored === true && fs.existsSync(KP) && !fs.existsSync(removing) && mB1.ok && mB1.version === '150.0.7871.186-vs1' && hits.length === h12 && B1.kernelFact(EID).state === 'installed',
+    'round 3: a .removing-<tag> beside an EMPTY place ⇒ the boot puts it back with NO download — the kernel path measures; the record says installed (it is)', { b1, m: mB1.version || mB1.code, hits: hits.slice(h12) });
+  fs.renameSync(kdir, removing);
+  const B2 = atB({ io: failBack }); const b2 = await B2.bootFleet();
+  const kf2 = B2.kernelFact(EID), rec2 = recB();
+  const m2b = await B2.measure(EID, { force: true });
+  const e2b = await thrK(B2.installKernel(EID, { wait: true, by: 'first-use' }));
+  ok(b2.restored[0].restored === false && b2.restored[0].code === 'engine_kernel_aside' && kf2.state === 'failed' && kf2.code === 'engine_kernel_aside' && !rec2.kernel && rec2.aside && rec2.aside.version === '150.0.7871.186-vs1' && !fs.existsSync(KP) && fs.existsSync(removing)
+    && !m2b.ok && m2b.code === 'engine_kernel_aside' && e2b && e2b.code === 'engine_kernel_aside' && hits.length === h12 && asideTodos.length === 1 && /set aside and could not be put back/.test(asideTodos[0].text)
+    && /previous kernel is set aside and could not be put back in its place/.test(BMm.engineNote({ id: EID, installed: false, kernel: { state: kf2.state, code: kf2.code } }, tW)),
+    'round 3: the put-back FAILS (EACCES) ⇒ the record holds NO kernel (engine_kernel_aside; the aside kernel kept as `aside`) — never «installed» over an empty place; measure and a first use refuse by name with NO download; ONE For-you notice; the card names it', { b2: b2.restored, kf2, todos: asideTodos.length });
+  const B3 = atB(); const b3 = await B3.bootFleet(); const kf3 = B3.kernelFact(EID);
+  ok(b3.restored[0].restored === true && fs.existsSync(KP) && kf3.state === 'installed' && kf3.version === '150.0.7871.186-vs1' && kf3.code === null && hits.length === h12,
+    '…the next start puts it back: the aside kernel\'s record is the installed one again, the failure cleared — still no download', kf3);
+  const D1 = atB({ io: failBoth });
+  const eD = await thrK(D1.installKernel(EID, { wait: true }));
+  const kfD = D1.kernelFact(EID), emptyD = !fs.existsSync(KP) && fs.existsSync(removing);
+  const mD = await atB().measure(EID, { force: true });
+  ok(eD && eD.code === 'engine_kernel_aside' && /could not be put back \(EACCES\)/.test(eD.message) && emptyD && kfD.state !== 'installed' && kfD.code === 'engine_kernel_aside' && mD.ok && fs.existsSync(KP) && !fs.existsSync(removing),
+    'round 3: the final rename AND the put-back fail in ONE landing ⇒ engine_kernel_aside by name, the record NOT «installed» while the place is empty; the next measure puts it back FIRST and measures it', { e: eD && eD.message, kfD, m: mD.version || mD.code });
+  const keA = mkKeeper(path.join(ROOT, 'data-eng12'), { engines: ENGR, engineDistribution: atB(), fleetFacts: () => null });
+  const pA = keA.createProfile({ label: 'Aside', browser: { kind: 'plugin', id: EID } }, { engine: await keA.engineFactOf(EID) });
+  fs.renameSync(kdir, removing); const h12b = hits.length;
+  const sA = await thrK(keA.start(pA.id, { why: 'test' }));
+  ok(!sA && fs.existsSync(KP) && !fs.existsSync(removing) && hits.length === h12b && fake.launches().at(-1).exe === KP, 'round 3: a FIRST USE finds the kernel aside ⇒ the launch puts it back (no download) and starts it', { e: sA && sA.message, hits: hits.slice(h12b) });
+  await keA.stop(pA.id, { why: 'user' });
+  // ⑫c ROUND 4: THE PUT-BACK ONLY ONTO AN ENOENT-EMPTY PLACE — a stat of the place answering anything else (EIO / ESTALE) is a
+  // transient: nothing moved, nothing said; a leftover beside a GOOD kernel is deleted, never put back over it; a record dropped
+  // once is healed by the next probe / measure that finds the kernel in its place
+  const leftTodos = [];
+  const atL = (opts = {}, mod = EDM) => edAt('data-ed12f', { userTodos: { add: (k, item) => { leftTodos.push(item); return 'ut-l' + leftTodos.length; } }, ...opts }, mod);
+  const recAt = (name) => JSON.parse(fs.readFileSync(path.join(ROOT, name, 'browser-engines.json'), 'utf8')).engines[EID];
+  /** a stat door whose FIRST stat of the kernel's place answers EIO (an NFS bind's transient), every other one the disk's */
+  const eioOnce = () => { const st = { n: 0 }; return { st, io: { stat: async (f) => { if (f === kdir && st.n++ === 0) throw Object.assign(new Error('EIO: i/o error, stat'), { code: 'EIO' }); return fsp8.stat(f); } } }; };
+  const r12f = await thrK(atL().installKernel(EID, { wait: true })); // the record: installed
+  const kL = recAt('data-ed12f').kernel;
+  fs.cpSync(kdir, removing, { recursive: true }); // (a) a LEFTOVER beside a GOOD kernel (the landing's rm failed; an NFS silly-rename)
+  const h12c = hits.length;
+  const eA1 = eioOnce();
+  const A1 = atL({ io: eA1.io }); const a1 = await A1.bootFleet();
+  const kfA1 = A1.kernelFact(EID), recA1 = recAt('data-ed12f'), keptA1 = fs.existsSync(removing);
+  const mA1 = await A1.measure(EID, { force: true }); // the next time the place reads: the leftover is deleted
+  const recA2 = recAt('data-ed12f');
+  ok(!r12f && eA1.st.n >= 2 && a1.restored.length === 0 && keptA1 && kfA1.state === 'installed' && kfA1.code === null && JSON.stringify(recA1.kernel) === JSON.stringify(kL) && !recA1.aside && !recA1.failure
+    && mA1.ok && !fs.existsSync(removing) && fs.existsSync(KP) && JSON.stringify(recA2.kernel) === JSON.stringify(kL) && !recA2.failure && leftTodos.length === 0 && hits.length === h12c,
+    'round 4 (a): a .removing-<tag> LEFTOVER beside a GOOD kernel + ONE stat of the place answering EIO ⇒ a transient: nothing moved, no notice, the record untouched; the next measure deletes the leftover — never put back over the kernel — still no notice, no download',
+    { stats: eA1.st.n, a1: a1.restored, kfA1, kept: keptA1, m: mA1.version || mA1.code, todos: leftTodos.length });
+  fs.renameSync(kdir, removing); // (b) an aside copy beside an EMPTY place (ENOENT)
+  const A2 = atL(); const a2 = await A2.bootFleet();
+  ok(a2.restored.length === 1 && a2.restored[0].restored === true && fs.existsSync(KP) && !fs.existsSync(removing) && A2.kernelFact(EID).state === 'installed' && JSON.stringify(recAt('data-ed12f').kernel) === JSON.stringify(kL) && leftTodos.length === 0 && hits.length === h12c,
+    'round 4 (b): …an aside copy beside an EMPTY place (ENOENT) is put back, as in round 3 — the record installed, no notice, no download', a2.restored);
+  fs.renameSync(kdir, removing); // (c) the put-back FAILS once: the record drops its kernel (engine_kernel_aside), ONE notice
+  const C1 = atL({ io: failBack }); const c1 = await C1.bootFleet();
+  const dropped = c1.restored[0] && c1.restored[0].code === 'engine_kernel_aside' && !recAt('data-ed12f').kernel && C1.kernelFact(EID).state === 'failed' && leftTodos.length === 1;
+  fs.renameSync(removing, kdir); // the kernel back in its place without VibeSpace (put back by hand; the file server's late rename)
+  const C2 = atL(); await C2.ready; // kernelFact is sync: read once the record is loaded
+  const stillC = C2.kernelFact(EID).state;
+  const keC = mkKeeper(path.join(ROOT, 'data-eng12c'), { engines: ENGR, engineDistribution: C2, fleetFacts: () => null });
+  const pC = keC.createProfile({ label: 'Healed', browser: { kind: 'plugin', id: EID } }, { engine: await keC.engineFactOf(EID) });
+  const sC = await thrK(keC.start(pC.id, { why: 'test' }));
+  const kfC = C2.kernelFact(EID), recC = recAt('data-ed12f');
+  ok(dropped && stillC === 'failed' && !sC && fake.launches().at(-1).exe === KP && kfC.state === 'installed' && kfC.version === kL.version && kfC.code === null && JSON.stringify(recC.kernel) === JSON.stringify(kL) && !recC.aside && !recC.failure && leftTodos.length === 1 && hits.length === h12c,
+    'round 4 (c): a record DROPPED once (a put-back that failed) + the kernel back in its place ⇒ the next good probe (a first use: installed, executable) measures and the record says installed again — its own record, the failure cleared, no download, no second notice',
+    { dropped, stillC, kfC, e: sC && sC.message });
+  await keC.stop(pC.id, { why: 'user' });
+
+  // ⑬ THE RED CONTROLS of round 2 — patched copies, each turning a leg above red
+  const fwA = EDS.indexOf('  function fileWriter(dest) {'), fwB = EDS.indexOf('  /** The free bytes of the filesystem');
+  const gateAnchor = '      planOf(sid, { unpack: unpackFacts() });';
+  const backAnchor = '      if (had) { try { await io.rename(plan.removingDir, plan.targetDir); back = true; }';
+  const asideAnchor = '  async function putBack(sid, plan) {';
+  const EKS = read('src/engine-kernel.js');
+  const urlAnchor = "if (flUrl && !httpsUrlOf(flUrl)) return { ok: false, code: 'engine_url_not_https'";
+  const rootAnchor = '    if (v.root) continue;';
+  ok(fwA > 0 && fwB > fwA && [gateAnchor, backAnchor, asideAnchor].every((a) => EDS.includes(a)) && [urlAnchor, rootAnchor].every((a) => EKS.includes(a)), 'control: round 2\'s anchors are in engine-distribution.js and engine-kernel.js');
+  // (1) the OLD writer: an 'error' listener per drain wait, none between waits
+  const OLDW = ['  function fileWriter(dest) {', "    const ws = io.createWriteStream(dest, { flags: 'wx', mode: 0o600 });", '    return {', '      stream: ws,',
+    "      async write(buf) { if (!ws.write(buf)) await new Promise((r, j) => { ws.once('drain', r); ws.once('error', j); }); },",
+    '      async end() { await new Promise((resolve, reject) => ws.end((e) => (e ? reject(e) : resolve()))); },', '      destroy() { try { ws.destroy(); } catch { /* gone */ } },', '    };', '  }', ''].join('\n');
+  const EDw = M8.load('src/server/engine-distribution.js', EDS.slice(0, fwA) + OLDW + EDS.slice(fwB), 'old-writer');
+  writeKJ('/big.tar.zst');
+  const bigR = countingIo();
+  await settled(edAt('data-ed13a', { io: bigR }, EDw).installKernel(EID, { wait: true }), 20000);
+  const nosR = countingIo((f, n) => path.basename(f) === 'icudtl.dat' && n === 1);
+  const eNosR = await settled(edAt('data-ed13b', { io: nosR }, EDw).installKernel(EID, { wait: true }), 3000);
+  await new Promise((r) => setTimeout(r, 50));
+  process.off('uncaughtException', onU);
+  ok(bigR.st.maxErr > 2 && (uncaught.length > 0 || (eNosR && eNosR.code === 'hung')), `control (1): the OLD extract is RED — ${bigR.st.maxErr} 'error' listeners piled on one stream; the injected ENOSPC ${uncaught.length ? `reached process 'uncaughtException' (${uncaught.join(', ')}) — the hub's exit` : 'hung the install'}`, { maxErr: bigR.st.maxErr, uncaught, eNosR: eNosR && eNosR.code });
+  for (const n of leftovers()) fs.rmSync(path.join(path.dirname(kdir), n), { recursive: true, force: true }); // what the hung copy left
+  // (3) no node gate: the whole archive fetched and hashed, then the ARCHIVE blamed
+  const EDg = M8.load('src/server/engine-distribution.js', EDS.replace(gateAnchor, '      planOf(sid, { unpack: null });'), 'no-node-gate');
+  writeKJ('/k.tar.zst'); const h13 = hits.length;
+  const eG = await thrK(edAt('data-ed13c', { zlib: {}, nodeVersion: '20.20.2' }, EDg).installKernel(EID, { wait: true }));
+  ok(eG && eG.code === 'build_unpack_failed' && hits.length > h13 && fs.existsSync(KP), 'control (3): a copy WITHOUT the gate fetches the whole archive, hashes it, then blames the ARCHIVE (build_unpack_failed) — RED against ⑪', { code: eG && eG.code, hits: hits.slice(h13) });
+  // (4) no put-back / no restore: the previous kernel lost
+  const EDb = M8.load('src/server/engine-distribution.js', EDS.replace(backAnchor, backAnchor.replace('if (had)', 'if (false)')), 'no-put-back');
+  const eB = await thrK(edAt('data-ed13d', { io: failLand }, EDb).installKernel(EID, { wait: true }));
+  const lostB = !fs.existsSync(KP) && fs.existsSync(removing);
+  const EDa = M8.load('src/server/engine-distribution.js', EDS.replace(asideAnchor, asideAnchor + ' return false;'), 'no-restore');
+  const mB = await edAt('data-ed13e', {}, EDa).measure(EID, { force: true }); // round 3's measure would put it back — this copy never does
+  const eA = await thrK(edAt('data-ed13f', { io: failLand }, EDa).installKernel(EID, { wait: true })); // the aside copy the control above left
+  const lostA = !fs.existsSync(KP) && !fs.existsSync(removing);
+  ok(eB && eA && !mB.ok && mB.code === 'browser_engine_kernel_missing' && lostB && lostA, 'control (4): a copy that does not move the previous kernel back leaves NO kernel at its path (measure: kernel missing) — RED; a copy that does not restore an aside copy DELETES it at the next landing — the previous kernel lost, RED', { mB: mB.code, lostB, lostA });
+  // (6) the fleet's http URL dropped for the package's; (7) `./` read as a top folder
+  const EKf = M8.load('src/engine-kernel.js', EKS.replace(urlAnchor, "if (flUrl && !httpsUrlOf(flUrl)) flUrl = ''; if (false) return { ok: false, code: 'engine_url_not_https'"), 'fleet-fallback');
+  const fF = EKf.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID, fleet: { url: 'http://artifacts.fleet.test/k.tar.zst', sha256: 'b'.repeat(64) } });
+  ok(fF.ok && fF.host === 'kernels.test', 'control (6): a copy that DROPS the http fleet URL silently takes the package\'s address in its place — RED against the refusal', { ok: fF.ok, host: fF.host });
+  const EKr = M8.load('src/engine-kernel.js', EKS.replace(rootAnchor, '    /* no root rule */'), 'no-root');
+  const dR = EKr.tarShapeVerdict(dotList, { layout: { stripComponents: 1, requiredFiles: ['chrome', 'icudtl.dat'] } });
+  ok(!dR.ok && /two top folders/.test(dR.error), 'control (7): a copy without the root rule reads `./` as a top folder («two top folders») — RED', dR.error);
+  // ROUND 3's RED controls. (8) the end settles at 'finish' (round 2's): a file that failed at close LANDS, and one short of its bytes
+  const endA = EDS.indexOf('      async end() {'), endB = EDS.indexOf('      destroy() { try { ws.destroy(); }');
+  const OLDEND = "      async end() { if (err()) throw err(); const p = wait(); ws.end((e) => settle(e ? err() || e : err())); await p; if (err()) throw err(); },\n";
+  const EDe = M8.load('src/server/engine-distribution.js', EDS.slice(0, endA) + OLDEND + EDS.slice(endB), 'end-at-finish');
+  writeKJ('/k.tar.zst');
+  await thrK(edAt('data-ed13x').installKernel(EID, { wait: true })); // a kernel in its place again (control (4) lost it)
+  const ino8 = fs.statSync(kdir).ino;
+  const rE1 = await thrK(edAt('data-ed13g', { io: closeIo(isIcu) }, EDe).installKernel(EID, { wait: true }));
+  const landed8 = fs.statSync(kdir).ino !== ino8;
+  const rE2 = await thrK(edAt('data-ed13h', { io: closeIo(isIcu, 'short') }, EDe).installKernel(EID, { wait: true }));
+  const short8 = fs.statSync(path.join(kdir, 'icudtl.dat')).size;
+  ok(endA > 0 && endB > endA && !rE1 && landed8 && !rE2 && short8 === 699, 'control (8): a copy whose end settles at \'finish\' (round 2\'s) LANDS the kernel whose icudtl.dat failed at close, and one whose icudtl.dat is 699 of its 700 bytes — RED against ⑩b', { e1: rE1 && rE1.message, landed8, e2: rE2 && rE2.message, short8 });
+  // (9) no put-back at the boot: the place stays EMPTY while the record says «installed»
+  const bootAnchor = '    const restored = await bootRestore();';
+  const asideRecAnchor = '      if (!back) { const rk = recOf(sid);';
+  ok([bootAnchor, asideRecAnchor].every((a) => EDS.includes(a)), 'control: round 3\'s anchors are in engine-distribution.js');
+  const ED9 = M8.load('src/server/engine-distribution.js', EDS.replace(bootAnchor, '    const restored = [];'), 'no-boot-restore');
+  await thrK(atB().installKernel(EID, { wait: true })); // the record: installed
+  fs.renameSync(kdir, removing);
+  const n9 = atB({}, ED9); await n9.bootFleet();
+  const lie9 = !fs.existsSync(KP) && n9.kernelFact(EID).state === 'installed';
+  fs.renameSync(removing, kdir);
+  ok(lie9, 'control (9): a copy whose boot does not put the aside copy back leaves the place EMPTY while the record says «installed» — RED against ⑫b', { lie9 });
+  // (10) the landing keeps the record when NEITHER kernel is in its place
+  const ED10 = M8.load('src/server/engine-distribution.js', EDS.replace(asideRecAnchor, '      if (false) { const rk = recOf(sid);'), 'aside-record');
+  const n10 = atB({ io: failBoth }, ED10); const e10 = await thrK(n10.installKernel(EID, { wait: true }));
+  const lie10 = !fs.existsSync(KP) && fs.existsSync(removing) && n10.kernelFact(EID).state === 'installed';
+  fs.renameSync(removing, kdir);
+  ok(e10 && e10.code === 'build_unpack_failed' && lie10, 'control (10): a copy whose landing keeps the record when both renames fail says «installed» over an EMPTY place — RED against ⑫b', { e10: e10 && e10.code, lie10 });
+  // (11) round 2's fleet reading: a malformed fleet sha256 dropped for the package's — the silent fallback
+  const shaFleetAnchor = "  const flSha = isObj(fleet) ? given(fleet.sha256).toLowerCase() : '';";
+  const EKs = M8.load('src/engine-kernel.js', EKS.replace(shaFleetAnchor, "  const flSha = isObj(fleet) && SHA_RE.test(given(fleet.sha256).toLowerCase()) ? given(fleet.sha256).toLowerCase() : '';"), 'fleet-sha-fallback');
+  const fS = EKs.kernelManifestVerdict(kjson(), { tag: 'linux-x64', id: EID, fleet: { url: '', sha256: 'abc123' } });
+  ok(EKS.includes(shaFleetAnchor) && fS.ok && fS.sha256 === 'a'.repeat(64), 'control (11): a copy that DROPS a malformed fleet sha256 silently takes the package\'s sha256 in its place — RED against the refusal', { ok: fS.ok, sha: fS.sha256 });
+  // ROUND 4's RED controls. (12) round 3's put-back predicate: ANY stat error of the place reads as an empty place (its stat
+  // through the same injectable door, so the EIO reaches it), and a leftover beside a kernel is kept
+  const pbA = EDS.indexOf('    // round 4: put back ONLY onto a place that answers ENOENT'), pbB = EDS.indexOf('    const rec = recOf(sid);\n    try { await io.rename(plan.removingDir, plan.targetDir); }');
+  const OLDPB = '    try { await io.stat(plan.targetDir); return false; } catch { /* nothing in its place — restore */ }\n';
+  const ED12 = M8.load('src/server/engine-distribution.js', EDS.slice(0, pbA) + OLDPB + EDS.slice(pbB), 'any-error-put-back');
+  const redTodos = [];
+  const atR = (opts = {}, mod = EDM) => edAt('data-ed13i', { userTodos: { add: (k, item) => { redTodos.push(item); return 'ut-r' + redTodos.length; } }, ...opts }, mod);
+  await thrK(atR().installKernel(EID, { wait: true })); // the record: installed
+  const k13 = recAt('data-ed13i').kernel;
+  fs.cpSync(kdir, removing, { recursive: true }); // a leftover beside the good kernel
+  const n12 = atR({ io: eioOnce().io }, ED12); const b12 = await n12.bootFleet();
+  const kf12 = n12.kernelFact(EID), rec12 = recAt('data-ed13i');
+  const b12b = await atR({}, ED12).bootFleet(); // the next start, the place reading again
+  ok(pbA > 0 && pbB > pbA && b12.restored[0] && b12.restored[0].code === 'engine_kernel_aside' && kf12.state === 'failed' && !rec12.kernel && fs.existsSync(KP) && redTodos.length === 1 && /set aside and could not be put back/.test(redTodos[0].text) && b12b.restored.length === 0 && fs.existsSync(removing),
+    'control (12): round 3\'s predicate (any stat error = an empty place) renames onto the GOOD kernel after ONE EIO ⇒ engine_kernel_aside, the record DROPPED, a FALSE For-you notice — and the leftover kept beside the kernel at the next start — RED against ⑫c (a)', { b12: b12.restored, kf12: kf12.state, todos: redTodos.length, kept: fs.existsSync(removing) });
+  // (13) no heal: the record dropped by (12) stays dropped while the kernel measures in its place
+  const healAnchor = '    if (!rec.kernel && !running.has(sid)) await placeHeld(sid, plan, rec);';
+  const ED13 = M8.load('src/server/engine-distribution.js', EDS.replace(healAnchor, ''), 'no-heal');
+  const n13 = atR({}, ED13); const m13 = await n13.measure(EID, { force: true });
+  const kf13 = n13.kernelFact(EID);
+  ok(EDS.includes(healAnchor) && m13.ok && kf13.state === 'failed' && !recAt('data-ed13i').kernel, 'control (13): a copy without the heal MEASURES the kernel in its place while the record stays dropped («failed» over a good kernel) — RED against ⑫c (c)', { m: m13.version || m13.code, kf13: kf13.state });
+  // (14) the keeper's round-3 re-measure condition: a probe that says installed + a measured version never asks — no heal
+  const KS = read('src/server/browser-keeper.js');
+  const unrecAnchor = '(!engine.measuredVersion || unrecorded)';
+  const K14 = M8.load('src/server/browser-keeper.js', KS.replace(unrecAnchor, '!engine.measuredVersion'), 'no-reprobe');
+  fs.mkdirSync(path.join(ROOT, 'data-eng13'), { recursive: true });
+  const d14 = atR(); await d14.ready;
+  const ke14 = K14.create({ dataDir: path.join(ROOT, 'data-eng13'), homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: path.join(ROOT, 'ab-state'), FAKE_AB_CDP_PORT: String(CDP_PORT) }), serverSetting: () => undefined, liveKeys: () => new Set([KEY_A]), install: false, tickMs: 3600e3,
+    log: { log() { }, warn() { }, error() { } }, hostKnown: () => false, engines: ENGR, engineDistribution: d14, fleetFacts: () => null });
+  const p14 = ke14.createProfile({ label: 'Not healed', browser: { kind: 'plugin', id: EID } }, { engine: await ke14.engineFactOf(EID) });
+  const s14 = await thrK(ke14.start(p14.id, { why: 'control' }));
+  const kf14 = d14.kernelFact(EID);
+  await ke14.stop(p14.id, { why: 'user' }).catch(() => {});
+  ok(KS.includes(unrecAnchor) && !s14 && kf14.state === 'failed' && !recAt('data-ed13i').kernel, 'control (14): a keeper that re-measures only a kernel with no measured version launches it and leaves the record dropped — RED against ⑫c (c)', { e: s14 && s14.message, kf14: kf14.state });
+  const n14 = atR(); const m14 = await n14.measure(EID, { force: true });
+  ok(m14.ok && n14.kernelFact(EID).state === 'installed' && JSON.stringify(recAt('data-ed13i').kernel) === JSON.stringify(k13), '(the same record healed by the product\'s measure — its own record again)', recAt('data-ed13i'));
+  const rRe = await thrK(ED.installKernel(EID, { wait: true })); // the kernel back in its place
+  ok(!rRe && fs.existsSync(KP) && !leftovers().length, '(the kernel reinstalled; nothing left beside it)', rRe && rRe.message);
+  setMode(null);
 }
 
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);

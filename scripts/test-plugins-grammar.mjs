@@ -128,5 +128,28 @@ else {
   if (was === null) skip('④ RED CONTROL (the base plugin file)'); else ok(OLD_NAME.test(was), '④ RED CONTROL: the base\'s plugin file (7b6fa3c7b) names the old plugin — the needle reads it');
 }
 
+// ⑤ lane engine-plugin (design-custom-browser-plugin §1.1): the capability word `browser-engine` — the built-in family's half of
+// the ONE engine table: a plugin that declares it must have the two verbs (refused by name at registration otherwise), the
+// manager lists every one that declares it, and hands out only a verb CAP_VERBS names for a capability it declares
+console.log('— ⑤ the capability word browser-engine (CAP_VERBS: probe + launchOptions)');
+{
+  const PL = require(path.join(repo, 'src/plugins.js'));
+  ok(JSON.stringify(PL.CAP_VERBS['browser-engine']) === JSON.stringify(['probe', 'launchOptions']), '⑤ CAP_VERBS[\'browser-engine\'] = [probe, launchOptions] (the engine registry\'s two verbs)');
+  const base0 = { install() {}, start() {}, stop() {}, status() { return {}; } };
+  const def = (extra = {}) => ({ id: 'fake-engine', label: 'Fake engine', description: 'x', provides: ['browser-engine'], create: () => ({ ...base0, ...extra }) });
+  let e1 = null; try { PL.validatePlugin(def(), { ...base0 }); } catch (e) { e1 = e; }
+  let e2 = null; try { PL.validatePlugin(def(), { ...base0, probe() {}, launchOptions() {} }); } catch (e) { e2 = e; }
+  ok(e1 && /verb probe\(\) missing/.test(e1.message) && !e2, '⑤ a built-in plugin declaring browser-engine without probe() is refused BY NAME at registration; with both verbs it registers', e1 && e1.message);
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'vs-pg-eng-'));
+  try {
+    const m = new PL.PluginManager({ dataDir: dir, broadcast: () => {}, plugins: [def({ probe: () => ({ ok: 1 }), launchOptions: () => ({}) }), { id: 'plain-one', label: 'Plain', description: 'x', provides: [], create: () => ({ ...base0 }) }] });
+    let e3 = null; try { m.capVerb('plain-one', 'browser-engine', 'probe'); } catch (e) { e3 = e; }
+    let e4 = null; try { m.capVerb('fake-engine', 'browser-engine', 'install'); } catch (e) { e4 = e; }
+    ok(JSON.stringify(m.providerIds('browser-engine')) === '["fake-engine"]' && m.capVerb('fake-engine', 'browser-engine', 'probe')().ok === 1 && e3 && e4, '⑤ providerIds lists every declarer; capVerb hands out only a CAP_VERBS verb of a declared capability (a plugin that does not declare it, or another verb, refused)', { e3: e3 && e3.message, e4: e4 && e4.message });
+    const reg = require(path.join(repo, 'src/server/browser-engines.js')).create({ plugins: m });
+    ok(JSON.stringify(reg.rows()) === JSON.stringify([{ id: 'builtin.fake-engine', label: 'Fake engine', family: 'builtin', version: null }]), '⑤ …and the engine table addresses a built-in engine `builtin.<id>` (the manifest id rule), beside the manifest family', reg.rows());
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);
 process.exit(fail ? 1 : 0);

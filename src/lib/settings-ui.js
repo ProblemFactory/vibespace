@@ -3,6 +3,7 @@ import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_AD
 import { showConfirmDialog, fetchJson, showToast, copyText } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
+import { engineFactText } from './browser-build-model.js'; // lane engine-plugin: the default engine's fact line (where it came from, the engines here)
 import { t } from './i18n.js';
 import { escHtml } from './utils.js';
 import { UI_ICONS } from './icons.js';
@@ -169,7 +170,13 @@ class SettingsUI {
     content.className = 'settings-content';
     body.append(nav, content);
 
-    dialog.append(header, searchWrap, body);
+    // THE WINDOW SAYS ITS RULE WHERE IT IS ALWAYS SEEN (lane desktop-small P3-3 — the walk: a 19,500–21,700 px page, the one
+    // Save it found 19,000 px down, no Save / Close at the foot): every row saves as it changes; a row with a Save of its
+    // own (a secret, the decisions box) has it beside its field
+    const foot = document.createElement('div');
+    foot.className = 'settings-foot';
+    foot.textContent = t('Every change here saves as you make it — there is nothing to press at the end.');
+    dialog.append(header, searchWrap, body, foot);
 
     this._facts = this._buildFacts(() => { if (content.isConnected) this._rerenderKeepingPlace(content, nav); });
     // the rows other rows' `when` reads: changing one re-draws, so a dependent row appears / goes at once
@@ -425,6 +432,7 @@ class SettingsUI {
     if (schema.apply) this._renderApplyChip(info, path, schema);
     else if (schema.channel) this._renderChannelChip(info, schema);
     if (schema.fact === 'browser-display') this._renderDisplayFact(info);
+    if (schema.fact === 'browser-engine') this._renderEngineFact(info); // lane engine-plugin: where the default engine comes from + the engines here
     if (schema.fact === 'attention-today') this._renderAttentionToday(info);
     if (path === DECISION_BUDGET_PATH) this._renderDecisionToday(info);   // the cap's row says what today cost against it
     if (path === VOICE_SUGGEST_PATH) mountSuggestionList(info);            // every word suggested now, each with 加入 / 忽略 (the door)
@@ -615,6 +623,16 @@ class SettingsUI {
     line.textContent = t('checking…');
     info.appendChild(line);
     fetchJson('/api/browser/display').then((r) => { if (line.isConnected || line.parentNode) line.textContent = machineDisplayText(r); });
+  }
+
+  /** lane engine-plugin: the FACT beside the default-engine PREFERENCE — where the value in effect comes from (a cluster preset
+   *  says so: «由集群预设») and each engine plugin's kernel on this computer (GET /api/browser/engines, asked when the row draws). */
+  _renderEngineFact(info) {
+    const line = document.createElement('div');
+    line.className = 'settings-row-fact';
+    line.textContent = t('checking…');
+    info.appendChild(line);
+    fetchJson('/api/browser/engines').then((r) => { if (line.isConnected || line.parentNode) line.textContent = engineFactText(r, t); });
   }
 
   /** lane https-tailscale: the hub's https address (GET /api/tls — the plan src/server/tls.js holds, no probe on render):

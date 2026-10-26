@@ -9,6 +9,8 @@
 //   ③ every legacy mapper DIFFERENTIAL — the pre-unify reader (GM.LEGACY) ≡ admits over the mapped row, over a probe
 //     set, for every shape the census found (exit, browser, window, automation, channels, group visibility);
 //   ④ CONTROLS — patched copies (an admits that ignores `except`; a reader that drops a malformed exception) turn ② red.
+//   ⑤ lane browser-login: the `browser-login` door and its RESOURCE SHAPE (<origin>#<user> · <origin>#* · *) — the write refuses any
+//     other (bad_resource), a stored row of another shape reads as unknown_shape (fail closed), the three scopes' rows ADD.
 // Fast (PURE, in-process).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -184,6 +186,23 @@ console.log('④ controls: patched copies of the model turn ② red');
     const M2 = MZ.load('src/grant-model.js', src.replace(DROP, '    if (!n) continue;\n'), 'drops-bad-except');
     ok(M2.admits([row([{ kind: 'everyone' }], [{ kind: 'conversation', key: '' }])], { conversationKey: 'x' }).ok, 'CONTROL (b): a reader that DROPS a malformed exception reads the row WIDER (admits) — ① «voids the row» would be red');
   } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
+}
+
+// ═══ ⑤ lane browser-login: the door and its resource grammar ═══════════════════
+console.log('⑤ lane browser-login: the browser-login door — its resource shape (one account · any account on a site · any site), fail closed');
+{
+  const W = (r) => GM.validateWrite('browser-login', r, { to: [{ kind: 'everyone' }] });
+  const good = ['*', 'https://shop.example.test#*', 'https://shop.example.test:8443#alice.k+tag', 'http://localhost#dev', 'https://[::1]#v6'];
+  const bad = ['shop.example.test#alice', 'https://shop.example.test', 'https://SHOP.example.test#a', 'https://shop.example.test#Alice', 'https://shop.example.test#a b', 'https://shop.example.test/p#a', '**', 'ftp://x.test#a', 'https://x.test#a#b'];
+  ok(GM.DOORS.includes('browser-login') && GM.DOORS[GM.DOORS.length - 1] === 'browser-login', 'the door is in DOORS (a new door is a value in the enum, never a who-list of its own)');
+  ok(good.every((r) => W(r).ok) && bad.every((r) => W(r).code === 'bad_resource'), 'the write takes <origin>#<user>, <origin>#* and * — and refuses every other shape bad_resource by name', { good: good.map((r) => [r, W(r).ok]), bad: bad.map((r) => [r, W(r).code]) });
+  ok(GM.validateWrite('exit', 'Anything Goes:use', { to: [] }).ok && GM.resourceShapeOk('window', 'w-1') && !GM.resourceShapeOk('browser-login', 'w-1'), 'the other doors keep the general id rule (only browser-login has a shape of its own)');
+  const odd = { door: 'browser-login', resource: 'shop.example.test#alice', to: [{ kind: 'everyone' }], except: [] };
+  ok(GM.admits([odd], { conversationKeys: ['c1'] }).code === 'unknown_shape' && GM.publicRow(odd).unknown === true, 'a stored row of another shape is read FAIL CLOSED (unknown_shape — never «everyone»)');
+  const C1 = { kind: 'conversation', key: 'c1' }, G = { kind: 'group', id: 'g1' };
+  const rows = [{ door: 'browser-login', resource: 'https://shop.example.test#alice', to: [C1], except: [] }, { door: 'browser-login', resource: 'https://shop.example.test#*', to: [G], except: [{ kind: 'conversation', key: 'c2' }] }, { door: 'browser-login', resource: '*', to: [{ kind: 'everyone' }], except: [{ kind: 'conversation', key: 'c3' }] }];
+  const v = (cid) => GM.admits(rows, { conversationKeys: [cid], groupIds: cid === 'c2' ? ['g1'] : [] });
+  ok(v('c1').ok && v('c1').via === 'conversation' && v('c2').ok && v('c2').via === 'everyone' && !v('c3').ok && v('c3').code === 'excepted' && v('c4').ok && v('c4').via === 'everyone', 'the three scopes ADD: c1 by its account row, c2 left out of the site\'s wildcard but admitted by «any site», c3 left out of «any site» and in nothing else ⇒ excepted', ['c1', 'c2', 'c3', 'c4'].map((c) => [c, v(c).ok, v(c).via || v(c).code]));
 }
 
 console.log(fail ? `FAILED (${pass} passed, ${fail} failed)` : `ALL PASS (${pass})`);

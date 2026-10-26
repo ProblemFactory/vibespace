@@ -29,6 +29,8 @@
 //   §4 pins: the CSS shield + touch-action rules, ONE feed (src/lib/drag-feed.js registers DRAG_FEED's four events; the
 //      four doors — title bar, handle, tab tear-off, icon — attach it; no document mouse feed anywhere), the hand-over's
 //      pointerId, the xpra hold ending as the WM's drag does (verify r1 finding #2);
+//   §2 (f) THE RELEASE NEVER BURIES A WINDOW (lane desktop-small P2-1): a grid release below the workspace takes the nearest
+//      bottom cell, a free drop keeps 80×32 of the title bar inside, a named window comes back inside; the base's copy buries
 //   §5 THE DOOR CENSUS (verify r2 T1): grep-derived over src/lib — every document / window move-or-end listener is the
 //      feed's or named with its reason; every feed door counted per file (window.js 2, tab-group.js 3, the twelve
 //      handle-style doors on startPointerDrag); native HTML5 dragstart doors counted; three planted controls (a door put
@@ -451,6 +453,45 @@ console.log('§2 the real WindowManager over the fake DOM: the incident, every e
     const afterB = { b: B.element.classList.contains('dragging'), shield: shieldOn(), holders: dragShieldHolders(), ends: B.dragEnds.join() };
     ok(both.a && both.b && both.shield && both.holders === 2 && !afterA.a && afterA.b && afterA.shield && afterA.holders === 1 && !afterB.b && !afterB.shield && afterB.holders === 0 && afterB.ends === 'release', `TWO FEEDS: a mouse drag + a touch drag hold the shield as two holders; the first end leaves it UP for the second (${JSON.stringify({ both, afterA, afterB })})`);
   }
+}
+
+// (f) THE RELEASE NEVER BURIES A WINDOW (lane desktop-small P2-1 — 1024×600, the Quad preset: a title bar dragged onto the
+//     taskbar and released there left the window at y 553 of a 556 px workspace, its tile and the window list unable to bring
+//     it back). The real WindowManager over the fake DOM (a 1600×1000 workspace — the taskbar's place is below it): a grid
+//     release BELOW the workspace takes the nearest bottom cell; a free drop there keeps 80×32 of the title bar inside; a
+//     window a door names (revealWindow) while its bar is out of reach comes back wholly inside. CONTROL: a copy with the
+//     base's three lines (no nearest cell, no release clamp, no recovery) buries it every time.
+{
+  const copiesF = [];
+  const releaseLegs = async (WM) => {
+    const out = {};
+    const wg = mkWm(WM, { grid: { rows: 2, cols: 2 } });
+    const a = mkWin(wg, 'rel-grid', { w: 500, h: 400, l: 100, t: 80 }); a._wm = wg;
+    await dragThen(a, { end: 'pointerup', at: IFRAME, pid: 170, to: { x: 700, y: 1100 } });
+    out.grid = box(a);
+    const wf = mkWm(WM); // freeform, the drag snap off (this fake's setting)
+    const b = mkWin(wf, 'rel-free', { w: 500, h: 400, l: 100, t: 80 });
+    await dragThen(b, { end: 'pointerup', at: IFRAME, pid: 171, to: { x: 700, y: 1100 } });
+    out.free = box(b);
+    const c = mkWin(wf, 'rel-named', { w: 500, h: 400, l: 100, t: 1200 });
+    wf.revealWindow('rel-named');
+    out.named = box(c);
+    return out;
+  };
+  const A = await releaseLegs(WindowManager);
+  ok(A.grid.top === 502 && A.grid.left === 4 && A.grid.top + A.grid.height <= 1000, `a GRID release below the workspace (the taskbar's place) takes the nearest bottom cell (${JSON.stringify(A.grid)})`, A.grid);
+  ok(A.free.top === 1000 - 32 && A.free.left === 500, `a FREE drop below it keeps 80×32 of the title bar inside — top ${A.free.top} (the drag had it at 1060)`, A.free);
+  ok(A.named.top === 600 && A.named.left === 100, `a window whose title bar is out of reach, named (revealWindow — its tile, its window-list row), comes back wholly inside (top 1200 → ${A.named.top})`, A.named);
+  let text = read('src/lib/window.js');
+  for (const [from, to] of [
+    ['    if (idx < 0 && this.grid) { const p = releasePoint({ x: cx, y: cy }, this.workspace.getBoundingClientRect()); idx = this._getGridCell(p.x, p.y); }\n', ''],
+    ['      this._keepReachable(win); // EVERY release keeps 80×32', '      // pre-fix CONTROL: no release clamp'],
+    ['    this._bringBack?.(host); // a named window', '    // pre-fix CONTROL: no recovery'],
+  ]) { if (text.split(from).length !== 2) throw new Error('control anchor ' + from.slice(0, 60)); text = text.replace(from, to); }
+  const pf = MUT.write('src/lib/window.js', text, 'no-release-keep', { esm: true }); copiesF.push(pf);
+  const C = await releaseLegs((await import(pathToFileURL(pf).href)).WindowManager);
+  ok(C.grid.top > 1000 - 32 && C.free.top > 1000 - 32 && C.named.top === 1200, `CONTROL (the base's three lines): the grid release, the free drop and the named window all stay buried (${C.grid.top} / ${C.free.top} / ${C.named.top})`, C);
+  for (const c of copiesCensus(copiesF, MUT.dir, repo, { minCopies: 1, label: '(f) control: ' })) ok(c.pass, c.name, c.detail);
 }
 
 // ── §3 CONTROLS ─────────────────────────────────────────────────────────────

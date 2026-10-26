@@ -279,7 +279,7 @@ const ROWS = [
   ["src/server/ops-routes.js", "*", 1, "local-only", "CI_HEAVY_DIR = <rootDir>/data/ci-heavy; entry names regex-filtered (<sha>.green|red|pid|skipped)"],
   ["src/server/plugin-install.js", "stageFromPath", 1, "guarded", "existsSync of <src>/vibespace-plugin.json where src = the directory a person names for Install plugin… (source=path) or its recorded value on Update"],
   ["src/server/plugin-install.js", "*", 22, "local-only", "data/plugins, plugins-state, plugins-staging/st-*, plugins-trash under rootDir=<checkout>; the .vsp upload is multer temp under os.tmpdir()/vibespace-plugin-uploads"],
-  ["src/server/plugin-loader.js", "*", 17, "local-only", "data/plugins/<dir> (Dirent.isDirectory: symlinks skipped), data/plugin-registry.json, shims in data/bin; route/theme paths confined inside rec.dir"],
+  ["src/server/plugin-loader.js", "*", 18, "local-only", "data/plugins/<dir> (Dirent.isDirectory: symlinks skipped), data/plugin-registry.json, shims in data/bin; route/theme paths confined inside rec.dir; lane engine-distribution: D2 reads the just-installed data/plugins/<id>/vibespace-plugin.json"],
   ["src/server/published-pages.js", "create > publish", 2, "guarded", "abs = path.resolve(b.path) from the POST body — the file a person/agent publishes, any folder, possibly under a storage mount"],
   ["src/server/published-pages.js", "*", 9, "local-only", "storeFile / pagesDir under <dataDir> (published-pages.json, published-pages/<id>.html|.bin)"],
   ["src/server/sealed-json.js", "*", 3, "local-only", "file = <checkout>/data/dropline-oauth.json (the only caller, mounts-plugins-wiring.js)"],

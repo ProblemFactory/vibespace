@@ -270,8 +270,9 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
       const isSet = !!(v.set && v.set[f.key]);
       const missing = (v.missing || []).includes(f.key);
       const editor = () => {
-        const inp = el('input', 'plugin-cfg-flags integ-input');
-        inp.type = f.secret ? 'password' : 'text';
+        // lane engine-distribution: a several-line value (an ssh deploy key) is a text box — an input would drop its line breaks
+        const inp = f.multiline ? el('textarea', 'plugin-cfg-flags integ-input integ-input-multiline') : el('input', 'plugin-cfg-flags integ-input');
+        if (f.multiline) { inp.rows = 5; inp.spellcheck = false; inp.wrap = 'off'; } else inp.type = f.secret ? 'password' : 'text';
         inp.placeholder = f.placeholder || '';
         inp.autocomplete = 'off';
         if (!f.secret && isSet) inp.value = v.values[f.key] || '';
@@ -294,7 +295,7 @@ function renderCard(app, v, { refresh, focus, setupBase = '' }) {
           showToast(t('Saved'));
           refresh(v.id);
         };
-        inp.onkeydown = (e) => { if (enterSubmits(e)) save.onclick(); if (e.key === 'Escape') done(); };
+        inp.onkeydown = (e) => { if (!f.multiline && enterSubmits(e)) save.onclick(); if (e.key === 'Escape') done(); };
         row.appendChild(wrap);
         inp.focus();
       };

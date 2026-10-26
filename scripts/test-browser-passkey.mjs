@@ -14,6 +14,12 @@
 //   ⑤ patched-copy controls: the 3 s said at 0 s ⇒ ① red; the hook never armed ⇒ `unknown`, never passkey_open;
 //     a watch ready before its hook is armed ⇒ `unknown` right after `arm` (lane mirror-green-222: the mirror's red)
 //   ⑥ the surfaces: the verb in the CLI's tables, the route, the manual's recipe + section, the boot copy beside the CLI
+//   ⑧ lane passkey-sink (P2 of the custom browser kernel): THE KERNEL ROAD over the fake kernel (scripts/fixtures/fake-kernel.mjs) —
+//      no hook / no authenticator where `features` list `webauthn`; VibeSpace.webauthnRequest → the SAME record; register (the
+//      server-made key, sealed, the row's shape), sign-in verified against the sealed key's public half, UV only when the owner
+//      decided THIS ceremony, the count written before the answer, the use law's line; the refusals by name; cancel ⇒ the page
+//      sees NotAllowedError; the page's own abort; P1's dismiss; an orphan surface; the vault locked; a kernel without the
+//      feature unchanged; no store
 import { createRequire } from 'module';
 import path from 'path';
 import fs from 'fs';
@@ -414,6 +420,155 @@ console.log('⑦ lane passkey-store-core: THE GATE (§2.3, one example per row),
   ctl(r, 'refuse', r.sent[0].id); await p;
   r = fakeRealm(); PK.installHook(r.G, r.cfg); r.nav.get({ publicKey: { challenge: 1, answer: true } }); await tick();
   ok(r.calls.length === 1, 'no store wired (no hold) ⇒ today\'s pass-through, unchanged');
+}
+
+console.log('⑧ lane passkey-sink: THE KERNEL ROAD — a kernel with `webauthn` (the fake kernel): VibeSpace.webauthnRequest → the SAME record, the gate, the signer, the answer');
+{
+  const crypto = await import('node:crypto');
+  const PS = require('../src/browser-passkey-store.js'), WA = require('../src/webauthn-sign.js'), Dm = require('../src/server/browser-dialogs.js');
+  const { startFakeKernel } = await import('./fixtures/fake-kernel.mjs');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const until = async (fn, ms = 2000) => { const t0 = Date.now(); for (;;) { const v = fn(); if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(10); } };
+  // every record the watch makes (the shared PURE module, observed)
+  const RECS = [];
+  const realApply = PK.applyEvent;
+  PK.applyEvent = (recs, ev, o) => { const r = realApply(recs, ev, o); if (ev && ev.ev === 'start' && r) RECS.push(r); return r; };
+  const O = 'https://example.test', U1 = Buffer.from('user-1').toString('base64url');
+  async function kworld({ features, cipher = PS.cipherOf(crypto, crypto.randomBytes(32)), takeover = false, store = true, file0 = null } = {}) {
+    const k = await startFakeKernel({ firstUrl: O + '/', mode: features ? { features } : {} });
+    const x = { k, file: file0, items: [], resolved: [], uses: [], logs: [], writes: [], takeover, cipher };
+    const passkeys = store ? { read: () => x.file, write: (o) => { x.writes.push({ answersBefore: k.webauthnAnswers().length, counts: (((o.profiles || {})['bp-1'] || {}).rows || []).map((r) => r.signCount) }); x.file = JSON.parse(JSON.stringify(o)); }, cipher: x.cipher } : null;
+    x.w = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: k.wsUrl }), onLease: () => () => {} }, log: { warn: (l) => x.logs.push(String(l)), log() {} }, enableTimeoutMs: 300, promptAskMs: 60, passkeyOrphanMs: 150,
+      holdersOf: () => [{ browserKey: 'bk-1', sessionId: 's1' }], leaseCountOf: () => 1, labelOf: () => 'Work', passkeys, takeoverOf: () => x.takeover,
+      forYou: { add: (pid, it) => { x.items.push(it); return 'fy-' + x.items.length; }, resolve: (id) => x.resolved.push(id) },
+      vaultUse: (entry, use, o) => { x.uses.push({ entry, use, o }); return { receipt: 'vr-' + String(x.uses.length).padStart(12, '0') }; } });
+    await x.w.arm('bp-1');
+    x.rows = () => PS.profileOf(x.file, 'bp-1').rows;
+    x.cards = () => x.items.filter((i) => i.action && i.action.type === 'browser-proposal');
+    x.last = () => RECS[RECS.length - 1];
+    x.close = async () => { x.w.shutdown(); await k.close(); };
+    return x;
+  }
+  const T = { profileId: 'bp-1', browserKey: 'bk-1', sessionId: 's1' };
+  /** the page's answer, then the record's end (the watch ends it once the kernel took the answer) */
+  const settled = async (cc) => { const aa = await cc.answerPromise; await until(() => RECS.filter((q) => q.kernel && q.kernel.requestId === cc.request.requestId).every((q) => q.outcome !== 'pending')); return aa; };
+  const create = (x, o = {}) => x.k.triggerWebAuthn({ op: 'create', origin: O, user: { id: U1, name: 'alice', displayName: 'Alice' }, ...o });
+  const register = async (x) => { const r = await x.w.passkeyRegister({ ...T, rpId: 'example.test', user: 'alice' }); x.w.answerPasskey(r.proposal.id, { choice: 'once', shown: r.proposal.shown }); const c = create(x); return { c, a: await settled(c) }; };
+  const pubOf = (x, row) => WA.publicKeyOf({ crypto, privateKeyPkcs8: x.cipher.open(row.keySealed) }).publicKey;
+  const verifies = (x, row, req, get) => crypto.verify('sha256', Buffer.concat([Buffer.from(get.authenticatorData, 'base64url'), Buffer.from(req.clientDataHash, 'base64url')]), pubOf(x, row), Buffer.from(get.signature, 'base64url'));
+  const flagsOf = (get) => Buffer.from(get.authenticatorData, 'base64url')[32];
+  const countOf = (get) => Buffer.from(get.authenticatorData, 'base64url').readUInt32BE(33);
+
+  // ⑧a the switch
+  let x = await kworld();
+  const asked = x.k.calls().map((c) => c.method);
+  ok(!asked.some((m) => /^Runtime\.addBinding$|^Page\.addScriptToEvaluateOnNewDocument$|^WebAuthn\./.test(m)) && asked.includes('VibeSpace.enable') && x.w.passkeyIn('bp-1', null).state === 'none',
+    '⑧a THE SWITCH: on a kernel whose features list `webauthn` the watch injects NO hook and pairs NO virtual authenticator (no Runtime.addBinding / addScriptToEvaluateOnNewDocument / WebAuthn.*) — and the tab reads `none`, never `unknown` (the kernel\'s requests are its ceremonies)', asked);
+  // ⑧b the request → the record; no key ⇒ the empty authenticator's answer
+  let c = x.k.triggerWebAuthn({ op: 'get', origin: O, allowCredentials: [{ id: 'AAAAAAAAAAAAAAAAAAAAAA' }] });
+  let a = await settled(c), r = x.last();
+  ok(r && r.kernel && r.kernel.requestId === c.request.requestId && r.kernel.surfaceId === c.request.surfaceId && r.kind === 'get' && r.rpId === 'example.test' && r.origin === O && r.allow.join() === 'AAAAAAAAAAAAAAAAAAAAAA' && r.n > 0 && r.ctx === 0,
+    '⑧b webauthnRequest → THE record (PK.applyEvent\'s): kind / rpId / origin / the allow list, the kernel\'s ids kept on it', r);
+  ok(a.outcome === 'cancelled' && a.error === 'NotAllowedError' && r.outcome === 'error' && r.error === 'NotAllowedError' && !r.refused, '⑧b no passkey for the site ⇒ the page meets an EMPTY authenticator: NotAllowedError (as Chrome\'s own), the record ends error — not a refusal', { a, r });
+  // ⑧c register: ungranted ⇒ no-grant; granted ⇒ the row, sealed; the attestation the page got names the sealed key
+  c = create(x); a = await settled(c); r = x.last();
+  ok(a.error === 'NotAllowedError' && r.outcome === 'refused' && r.why === 'no-grant' && x.w.passkeyIn('bp-1', null).state === 'refused' && /passkey register example\.test/.test(x.w.passkeyIn('bp-1', null).text), '⑧c an ungranted create ⇒ refused no-grant (the page told NotAllowedError; the next verbs told how to ask)', { a, r });
+  const reg = await register(x);
+  const row = x.rows()[0];
+  ok(reg.a.outcome === 'completed' && x.rows().length === 1 && /^[A-Za-z0-9_-]{43}$/.test(row.credentialId) && row.userHandle === U1 && row.userName === 'alice' && row.displayName === 'Alice' && row.signCount === 0 && row.policy === PS.NEW_KEY_POLICY && row.createdBy === 'agent' && row.bySession === 'bk-1' && /^v1\./.test(row.keySealed),
+    '⑧c the owner\'s grant ⇒ the key pair made on the SERVER, the row {credentialId (32 B), rpId, userHandle = user.id, names, keySealed, signCount 0, createdBy, policy ask} written by the ONE writer', PS.publicRow(row));
+  const att = Buffer.from(reg.a.create.attestationObject, 'base64url');
+  const authData = att.subarray(att.indexOf(Buffer.from('68617574684461746158', 'hex')) + 11);
+  ok(reg.a.create.credentialId === row.credentialId && authData.subarray(0, 32).equals(crypto.createHash('sha256').update('example.test').digest()) && authData[32] === 0x45 && authData.subarray(55, 87).toString('base64url') === row.credentialId,
+    '⑧c the page got {credentialId, attestationObject fmt none}: rpIdHash, UP|UV|AT (the owner\'s grant IS this ceremony\'s answer), the stored id');
+  ok(x.uses.length === 1 && x.uses[0].entry === 'passkeys' && x.uses[0].use.door === 'passkey' && x.uses[0].use.by === 'agent' && x.uses[0].use.conv === 's1' && /register a passkey on example\.test/.test(x.uses[0].o.purpose) && x.last().receipt === 'vr-000000000001' && !JSON.stringify(x.uses).includes(row.keySealed),
+    '⑧c THE USE LAW: the new key is ONE use of the passkeys\' key through the vault\'s writer — purpose + its receipt on the record, never the key', x.uses);
+  // ⑧d sign-in: policy ask ⇒ the card; once ⇒ signed, UV, the count written BEFORE the answer
+  const n0 = x.cards().length;
+  c = x.k.triggerWebAuthn({ op: 'get', origin: O });
+  await until(() => x.cards().length > n0);
+  const v = x.w.passkeyIn('bp-1', null), f = x.w.factFor({ ...T, consume: false });
+  ok(v.state === 'passkey_ask' && x.cards().length === n0 + 1 && f.passkey && f.passkey.state === 'passkey_ask' && !f.open, '⑧d policy ask ⇒ passkey_ask + ONE card (the existing pkNewAsk); the kernel\'s request WAITS; the webauthn SURFACE is not a second dialog_open', { v: v.state, open: f.open });
+  await sleep(120);
+  ok(!x.items.some((i) => i.action && i.action.type === 'browser-surface'), '⑧d … and never a browser-surface card (the passkey card is the ONE card) — past promptAskMs');
+  const card = x.cards().pop();
+  x.writes.length = 0;
+  x.w.answerPasskey(card.action.id, { choice: 'once', shown: card.action.shown });
+  a = await settled(c);
+  ok(a.outcome === 'completed' && a.get.credentialId === row.credentialId && a.get.userHandle === U1 && verifies(x, x.rows()[0], c.request, a.get), '⑧d allow once ⇒ get.signature VERIFIES against the sealed key\'s public half (over authenticatorData ‖ the kernel\'s clientDataHash)');
+  ok(flagsOf(a.get) === 0x05 && countOf(a.get) === 1 && x.rows()[0].signCount === 1 && x.rows()[0].uses === 1 && x.rows()[0].lastUsedAt > 0, '⑧d UP|UV (the owner answered THIS ceremony), signCount 1 — the store holds the count signed, the use stamped');
+  ok(x.writes.length >= 1 && x.writes[0].answersBefore === x.k.webauthnAnswers().length - 1 && x.writes[0].counts[0] === 1, '⑧d the count was WRITTEN before the answer left (the kernel had not yet been answered at the write)', x.writes);
+  // ⑧e policy yes (always) ⇒ silent, UV 0 — automatic is never verification; the count strictly increases
+  c = x.k.triggerWebAuthn({ op: 'get', origin: O }); await until(() => x.cards().length > n0 + 1);
+  const card2 = x.cards().pop(); x.w.answerPasskey(card2.action.id, { choice: 'always', shown: card2.action.shown }); a = await settled(c);
+  ok(a.outcome === 'completed' && flagsOf(a.get) === 0x05 && countOf(a.get) === 2 && x.rows()[0].policy === 'yes', '⑧e «always» answers THIS ceremony too (UV) and remembers the policy yes');
+  const n2 = x.cards().length;
+  c = x.k.triggerWebAuthn({ op: 'get', origin: O }); a = await settled(c);
+  ok(a.outcome === 'completed' && x.cards().length === n2 && flagsOf(a.get) === 0x01 && countOf(a.get) === 3 && verifies(x, x.rows()[0], c.request, a.get), '⑧e policy yes ⇒ signed with NO card and UV 0 — an automatic release is never the owner\'s verification; the count 1 → 2 → 3', { flags: flagsOf(a.get), count: countOf(a.get) });
+  c = x.k.triggerWebAuthn({ op: 'get', origin: O, userVerification: 'required' });
+  await until(() => x.cards().length > n2);
+  ok(x.w.passkeyIn('bp-1', null).state === 'passkey_ask', '⑧e a page that REQUIRES UV on an automatic release ⇒ the owner\'s card (never signed without it)');
+  const card3 = x.cards().pop(); x.w.answerPasskey(card3.action.id, { choice: 'once', shown: card3.action.shown }); a = await settled(c);
+  ok(flagsOf(a.get) === 0x05 && countOf(a.get) === 4, '⑧e … answered ⇒ UV 1, count 4');
+  // ⑧f the person's own ceremony (a takeover): no card, UV — their hands on the page are their answer
+  x.takeover = true; const n3 = x.cards().length;
+  c = x.k.triggerWebAuthn({ op: 'get', origin: O }); a = await settled(c); x.takeover = false;
+  ok(a.outcome === 'completed' && x.cards().length === n3 && flagsOf(a.get) === 0x05 && x.uses[x.uses.length - 1].use.by === 'human', '⑧f a takeover\'s own ceremony ⇒ signed, no card, UV 1; its use is the person\'s (no bearer line)');
+  // ⑧g refusals by name — nothing signed
+  const before = x.k.webauthnAnswers().length, signedBefore = x.uses.length;
+  const ref = async (o) => { const cc = x.k.triggerWebAuthn({ op: 'get', origin: O, ...o }); const aa = await settled(cc); return { a: aa, r: x.last() }; };
+  const g1 = await ref({ rpId: 'example.test', origin: 'https://evil.test' });
+  const g2 = await ref({ clientOrigin: 'https://evil.test' });
+  const g3 = await ref({ op: 'create', user: { id: U1, name: 'bob' }, pubKeyCredParams: [{ type: 'public-key', alg: -257 }] });
+  ok(g1.r.why === 'webauthn_rp_mismatch' && g2.r.why === 'webauthn_rp_mismatch' && g3.r.why === 'webauthn_alg_unsupported' && [g1, g2, g3].every((g) => g.a.error === 'NotAllowedError' && g.r.outcome === 'refused') && x.uses.length === signedBefore && x.k.webauthnAnswers().slice(before).every((w) => w.error && !w.get && !w.create),
+    '⑧g refused BY NAME, nothing signed: an rpId the origin may not use and a clientDataJSON naming another origin (VibeSpace re-checks — never trusts the kernel) ⇒ webauthn_rp_mismatch; a create offering no ES256 ⇒ webauthn_alg_unsupported', [g1.r.why, g2.r.why, g3.r.why]);
+  ok(/not the page's own/.test(PK.refusedText('webauthn_rp_mismatch', 'example.test')) && /ES256/.test(PK.refusedText('webauthn_alg_unsupported', 'example.test')) && /on this instance's page/.test(PK.refusedText('webauthn_key_locked', 'example.test')) && /already been told/.test(PK.refusedText('webauthn_key_locked', 'example.test')) && ['webauthn_alg_unsupported', 'webauthn_rp_mismatch', 'webauthn_key_locked'].every((w) => PS.REASONS.includes(w)),
+    '⑧g the three new reasons are in REASONS and each has its sentence');
+  const g4 = await ref({ mediation: 'conditional', origin: 'https://other.test', rpId: 'other.test' });
+  ok(g4.a.error === 'NotAllowedError' && g4.r.why === 'none' && x.w.passkeyIn('bp-1', null).why !== 'none', '⑧g a conditional (autofill) get with no key for its site ⇒ the kernel answers NotAllowedError at once (the in-page refuse rule does not apply; `none` is never said)', g4);
+  // ⑧h cancel — the kernel ends it; the page sees NotAllowedError (Q4); the words say so
+  ok(x.w.passkeyPolicy('bp-1', row.credentialId.slice(0, 8), 'ask').ok, '⑧h (the key back to policy ask — the table\'s own door)');
+  const n4 = x.cards().length;
+  c = x.k.triggerWebAuthn({ op: 'get', origin: O });
+  await until(() => x.cards().length > n4);
+  const cn = await x.w.cancelPasskey(T); a = await settled(c); r = x.last();
+  ok(cn.ok && cn.n === 1 && /NotAllowedError/.test(cn.text) && !/aborted/.test(cn.text) && a.outcome === 'cancelled' && a.error === 'NotAllowedError' && r.outcome === 'cancelled' && x.k.answers().some((q) => q.cancel && q.surfaceId === c.request.surfaceId), '⑧h `passkey cancel` ⇒ VibeSpace.cancelSurface; the stub\'s promise lands cancelled, the page sees NotAllowedError, the words say so', { cn, a, r: r && r.outcome });
+  ok((x.w.passkeyCards('bk-1').pop() || {}).state === 'withdrawn', '⑧h the card that waited on it is withdrawn with it', x.w.passkeyCards('bk-1').map((q) => q.state));
+  // ⑧i the page itself ends it (abort / navigation): the record ends, the waiting card withdrawn
+  c = x.k.triggerWebAuthn({ op: 'get', origin: O });
+  await until(() => x.w.passkeyIn('bp-1', null).state === 'passkey_ask');
+  x.k.abortWebAuthn(c.request.requestId); await settled(c); r = x.last();
+  ok(r.outcome === 'aborted-by-page' && !['passkey_ask', 'passkey_open'].includes(x.w.passkeyIn('bp-1', null).state) && (x.w.passkeyCards('bk-1').pop() || {}).state === 'withdrawn', '⑧i the page aborted (its surface closed by the page) ⇒ the record ends aborted-by-page, nothing waits, its card withdrawn', r && r.outcome);
+  // ⑧j the agent's `answer <surface> cancel` through P1's door ends the ceremony the same way
+  c = x.k.triggerWebAuthn({ op: 'get', origin: O });
+  await until(() => x.w.passkeyIn('bp-1', null).state === 'passkey_ask');
+  const ans = await x.w.answerSurface(T, { surfaceId: c.request.surfaceId, answerId: 'cancel', by: 'agent' });
+  a = await settled(c); await sleep(30); r = x.last();
+  ok(ans.ok && a.error === 'NotAllowedError' && r.outcome === 'cancelled' && r.by === 'agent', '⑧j P1\'s surface door: the agent\'s dismiss of the webauthn surface ⇒ NotAllowedError, the record cancelled by the agent', { ans, r: r && r.outcome });
+  // ⑧k a surface whose request never comes (it began before this socket) is cancelled — never a page left waiting
+  c = x.k.triggerWebAuthn({ op: 'get', origin: O, noRequest: true });
+  a = await Promise.race([c.answerPromise, sleep(3000).then(() => null)]);
+  ok(a && a.outcome === 'cancelled' && a.error === 'NotAllowedError' && x.logs.some((l) => /came with no request this watch saw/.test(l)), '⑧k an orphan webauthn surface (no request seen — a reconnect) ⇒ cancelled after passkeyOrphanMs (1.5 s in the product), said once', a);
+  await x.close();
+  // ⑧l the vault locked ⇒ webauthn_key_locked + the existing key For-you line; nothing signed
+  const locked = { seal: (t) => ({ ok: false, code: 'key-unreadable:vault_locked', file: 'browser-passkeys.key', words: 'the vault is locked' }), open: (t) => ({ ok: false, code: 'key-unreadable:vault_locked', file: 'browser-passkeys.key', words: 'the vault is locked' }) };
+  x = await kworld({ cipher: locked, file0: PS.withRow(null, 'bp-1', { ...row, policy: 'yes' }) });
+  c = x.k.triggerWebAuthn({ op: 'get', origin: O }); a = await settled(c); r = x.last();
+  ok(a.error === 'NotAllowedError' && r.why === 'webauthn_key_locked' && x.items.some((i) => /browser-passkeys\.key/.test(i.text || '')) && x.uses.length === 0 && /on this instance's page/.test(x.w.passkeyIn('bp-1', null).text || ''), '⑧l the vault locked (keyRefusal) ⇒ webauthn_key_locked, the page told NotAllowedError, the key For-you line filed, nothing signed', { r: r && r.why, items: x.items.map((i) => i.text) });
+  await x.close();
+  // ⑧m a kernel with surfaces but no `webauthn`: today's road (the hook + the authenticator) and P1's held webauthn surface — unchanged
+  x = await kworld({ features: ['surfaces'] });
+  const asked2 = x.k.calls().map((q) => q.method);
+  c = x.k.triggerWebAuthn({ op: 'get', origin: O, noRequest: true }); await sleep(80);
+  const f2 = x.w.factFor({ ...T, consume: false });
+  ok(asked2.includes('Runtime.addBinding') && asked2.includes('Page.addScriptToEvaluateOnNewDocument') && f2.open && f2.open.kind === 'webauthn', '⑧m a kernel WITHOUT the `webauthn` feature: the hook arms as on standard Chrome and the webauthn surface stands as P1\'s held dialog (unchanged)', { open: f2.open && f2.open.kind });
+  await x.close();
+  // ⑧n no store wired: nothing in VibeSpace holds a passkey ⇒ NotAllowedError at once
+  x = await kworld({ store: false });
+  c = x.k.triggerWebAuthn({ op: 'get', origin: O }); a = await settled(c);
+  ok(a.error === 'NotAllowedError' && x.last().why === 'none', '⑧n no passkey store wired ⇒ NotAllowedError at once (refused `none`, never said)');
+  await x.close();
+  PK.applyEvent = realApply;
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

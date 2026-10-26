@@ -375,8 +375,8 @@ console.log('④ TWO-STEP CODES — the inventory row (design q-047 L1, lane vau
 
 console.log('⑧ THE PURPOSES AND THE PROVENANCE (lane vault-window-v2, design q-047 §3.1 / §3.2)');
 {
-  ok(VI.PURPOSE_IDS.join() === 'two-step,accounts,integrations,machines,storage,app-logins,passkeys,automation,keys,agents,other' && new Set(VI.PURPOSE_IDS).size === VI.PURPOSES.length && VI.PURPOSES.filter((p) => p.onlyWhenAny).map((p) => p.id).join() === 'other',
-    'THE TABLE (pinned — a new purpose changes this line): ten purposes + Other (lane vault-paste-request: + Passwords & keys, the free `secret:` entries) (shown only when it holds a row), the rail\'s order, each id once', VI.PURPOSE_IDS);
+  ok(VI.PURPOSE_IDS.join() === 'two-step,accounts,integrations,machines,storage,app-logins,passkeys,web-logins,automation,keys,agents,other' && new Set(VI.PURPOSE_IDS).size === VI.PURPOSES.length && VI.PURPOSES.filter((p) => p.onlyWhenAny).map((p) => p.id).join() === 'other',
+    'THE TABLE (pinned — a new purpose changes this line): eleven purposes + Other (lane vault-paste-request: + Passwords & keys, the free `secret:` entries; lane browser-login: + Web logins, a website\'s `web-login:` entries) (shown only when it holds a row), the rail\'s order, each id once', VI.PURPOSE_IDS);
   const onceIn = (V, rows) => { const groups = V.groupByPurpose(rows); const seen = new Map(); for (const g of groups) for (const r of g.rows) seen.set(r.id, (seen.get(r.id) || 0) + 1); return rows.filter((r) => seen.get(r.id) !== 1).map((r) => [r.id, seen.get(r.id) || 0]); };
   ok(inv.rows.length >= 15 && inv.rows.length === inv.stores.reduce((n, x) => n + x.count, 0) && onceIn(VI, inv.rows).length === 0 && inv.rows.every((r) => VI.PURPOSE_IDS.includes(VI.purposeOf(r))), `EVERY ROW of the real stores (${inv.rows.length}, all eight groups) lands in EXACTLY ONE purpose`, onceIn(VI, inv.rows));
   const P = (id) => VI.purposeOf(inv.rows.find((r) => r.id === id) || null);
@@ -392,6 +392,12 @@ console.log('⑧ THE PURPOSES AND THE PROVENANCE (lane vault-window-v2, design q
   const R = (store, entry, extra = {}) => VI.rowOf(store, { entry, field: extra.field || 'value', label: entry, ...extra });
   ok(VI.purposeOf(R('secrets', 'totp:github', { kind: 'totp', field: 'code' })) === 'two-step' && VI.purposeOf(R('secrets', 'apikey:ak-1')) === 'automation' && VI.purposeOf({ store: 'secrets', entry: 'agent:github-token' }) === 'agents' && VI.purposeOf({ store: 'accounts', entry: 'agent:x' }) === 'agents' && VI.purposeOf({ store: 'nope', entry: 'x' }) === null && VI.purposeOf(null) === null,
     'the rows to come: a two-step entry (lane vault-totp\'s totp:) · an apikey: entry · an agent: entry wins over its store (q-043 §9 — one entry, one purpose) · an unknown store / nothing ⇒ no purpose');
+  // lane browser-login: a website login's row — its own purpose, its provenance by its source word, the reference round-trips (its name holds a `#`)
+  const WL = (kind) => VI.rowOf('secrets', VI.secretRowOf({ name: 'web-login:https://shop.example.test:8443#alice.k+tag', at: 5, ...(kind ? { kind, actor: 'Chat One' } : {}) }));
+  const wlOwn = WL(null), wlMint = WL('vault-minted'), wlTyped = WL('agent-typed');
+  ok(wlOwn && VI.purposeOf(wlOwn) === 'web-logins' && wlOwn.kind === 'login' && wlOwn.field === 'password' && wlOwn.label === 'alice.k+tag · shop.example.test:8443' && VI.provenanceOf(wlOwn) === 'me' && VI.provenanceOf(wlMint) === 'agent-mint' && VI.provenanceOf(wlTyped) === 'agent-put' && VI.stateChipsOf(wlTyped).some((c) => c.id === 'rotate') && !VI.stateChipsOf(wlMint).length
+    && JSON.stringify(VI.parseRef(wlOwn.id)) === JSON.stringify({ store: 'secrets', entry: 'web-login:https://shop.example.test:8443#alice.k+tag', field: 'password' }) && wlOwn.doors.delete.path === '/api/vault/web-logins/' + encodeURIComponent('web-login:https://shop.example.test:8443#alice.k+tag') && wlOwn.revealable === true,
+    'a web login\'s row (lane browser-login): purpose Web logins, kind login, «user · site»; the owner\'s = 我自己, registered through the vault = agent 铸造 · 从未显示, typed by an agent = agent 见过明文 (+ rotate); its reference round-trips; its own delete door; revealable (the password, behind 验证是你)', { wlOwn, mint: VI.provenanceOf(wlMint), typed: VI.provenanceOf(wlTyped) });
   // THE PROVENANCE
   ok(VI.PROVENANCE_IDS.join() === 'me,scan,hub-mint,agent-mint,agent-put,system' && VI.PROVENANCE_FILTERS.map((f) => f.id).join() === 'me,agent-mint,agent-put,system' && VI.PROVENANCES.every((p) => VI.PROVENANCE_FILTERS.some((f) => f.id === p.filter)),
     'the provenance chips (six) and the bar\'s four filters — every chip answers to one filter', VI.PROVENANCES.map((p) => `${p.id}→${p.filter}`));

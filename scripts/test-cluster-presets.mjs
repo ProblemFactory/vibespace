@@ -36,6 +36,8 @@
 //    override returns; a later cluster rotation then reaches the user (with the
 //    override still projected it is shadowed — the field symptom). CONTROL:
 //    a copy that compares the values only leaves the summary on "release".
+// §6 lane engine-plugin: fleet.json `browserEngine` (the chart's customBrowser) — parsed, merged as ONE field, diffed by value,
+//    said without its addresses; the live reader sees a flip once.
 // §5 THE FLEET FACTS — fleet.json (lane oauth-relay-one-source, 2026-10-23 — the owner: «你为啥搞了两套分发 auth client
 //    的方案»: the Google client rows were presets files, live; the relay page a chart env, at restart): PURE parseFleet /
 //    mergeFleet (per FIELD: the release's field wins, '' included; a field neither names is absent) / diffFleet /
@@ -683,10 +685,60 @@ console.log('§5 fleet.json — the fleet\'s relay page rides the presets');
   r.stop();
   // CONTROL: a merge reading the layers in the wrong order — the cluster wins over the release
   const srcP = fs.readFileSync(path.join(REPO, 'src/preset-layers.js'), 'utf-8');
-  const a5 = "    for (const k of FLEET_FIELDS) if (typeof f[k] === 'string') { facts[k] = f[k]; layerOf[k] = layer; }";
+  const a5 = "    for (const k of FLEET_FIELDS) if (fleetValueOk(k, f[k])) { facts[k] = k === 'browserEngine' ? parseBrowserEngineFact(f[k]) : f[k]; layerOf[k] = layer; }"; // lane engine-plugin: the write per field, + the engine fact
   ok(srcP.includes(a5), 'control anchor: the per-field write');
-  const rev = M.load('src/preset-layers.js', srcP.replace(a5, "    for (const k of FLEET_FIELDS) if (typeof f[k] === 'string' && !(k in facts)) { facts[k] = f[k]; layerOf[k] = layer; }"), 'fleet-first-wins');
+  const rev = M.load('src/preset-layers.js', srcP.replace(a5, "    for (const k of FLEET_FIELDS) if (fleetValueOk(k, f[k]) && !(k in facts)) { facts[k] = k === 'browserEngine' ? parseBrowserEngineFact(f[k]) : f[k]; layerOf[k] = layer; }"), 'fleet-first-wins');
   ok(rev.mergeFleet({ cluster: { relayUrl: RELAY1 }, release: { relayUrl: MINE } }).facts.relayUrl === RELAY1, 'CONTROL: a merge where the first layer read keeps its field lets the CLUSTER win — the override assert above is red on it');
+}
+
+// §6 lane engine-plugin (design-custom-browser-plugin §1.4): fleet.json `browserEngine` — the fleet's custom browser kernel
+console.log('§6 fleet.json browserEngine — the fleet\'s custom browser kernel rides the same layers');
+{
+  const EID = 'vibespace.custom-browser', SHA = 'cd'.repeat(32);
+  const full = { plugin: EID, default: true, source: { git: 'git@git.example.test:fleet/k.git', ref: 'main' }, kernel: { url: 'https://dl.example.test/k.tar.zst', sha256: SHA.toUpperCase() } };
+  const p = PL.parseFleet({ browserEngine: full, relayUrl: ' https://admin.fleet.example.test/relay/ ' });
+  ok(p.browserEngine && p.browserEngine.plugin === EID && p.browserEngine.default === true && p.browserEngine.kernel.sha256 === SHA && p.relayUrl === 'https://admin.fleet.example.test/relay/', 'parseFleet: browserEngine normalized beside relayUrl (the sha256 lower-cased)', p);
+  const bad = [PL.parseFleet({ browserEngine: { plugin: 'Not An Id', default: true } }), PL.parseFleet({ browserEngine: 'yes' }), PL.parseFleet({ browserEngine: { default: true } })];
+  const odd = PL.parseFleet({ browserEngine: { plugin: EID, default: 'true', kernel: { sha256: 'xyz' }, source: 7 } }).browserEngine;
+  const long = PL.parseFleet({ browserEngine: { plugin: EID, kernel: { sha256: 'a'.repeat(65), url: 7 } } }).browserEngine;
+  ok(bad.every((x) => !('browserEngine' in x)) && odd.default === false && odd.kernel.sha256 === 'xyz' && odd.source.git === '' && long.kernel.sha256 === 'a'.repeat(65) && long.kernel.url === '7',
+    'a value of another shape is not named (no plugin id ⇒ no fact); default only when true; a malformed source reads empty — the KERNEL fields are kept AS NAMED (engine-distribution round 3): a malformed sha256 is the install\'s refusal by name (engine_sha_malformed), never blanked into the package\'s, nor clipped to 64 into a valid-looking pin', { bad, odd, long });
+  const mC = PL.mergeFleet({ cluster: { browserEngine: p.browserEngine }, release: null });
+  const mR = PL.mergeFleet({ cluster: { browserEngine: p.browserEngine }, release: PL.parseFleet({ browserEngine: { plugin: EID, default: false } }) });
+  ok(mC.facts.browserEngine.default === true && mC.layerOf.browserEngine === 'cluster' && mR.facts.browserEngine.default === false && mR.layerOf.browserEngine === 'release' && mR.facts.browserEngine.kernel.url === '', 'mergeFleet: ONE field — the release\'s object replaces the cluster\'s whole (its kernel included)');
+  ok(PL.diffFleet(mC, PL.mergeFleet({ cluster: { browserEngine: PL.parseFleet({ browserEngine: full }).browserEngine } })).length === 0 && PL.diffFleet(mC, mR).join() === 'browserEngine' && PL.diffFleet(null, mC).join() === 'browserEngine', 'diffFleet compares the object by value (the same content ⇒ no change, a flip ⇒ browserEngine)');
+  const w = PL.fleetWords(['browserEngine'], mR);
+  ok(w === `browser engine changed (now ${EID}, not the default)` && !/git@|https:/.test(PL.fleetWords(['browserEngine'], mC)), 'fleetWords: «browser engine changed (now <plugin>, …)» — never its source or kernel address', w);
+  const dir = path.join(ROOT, 'fleet-engine');
+  const ROWS = { 'gdrive-clients.json': [g('org1', SECRET_A, 'Org')] };
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: 'https://admin.fleet.example.test/relay/', browserEngine: full } });
+  const cap = capture();
+  const r = CP.create({ dir, log: cap.log, debounceMs: 30, pollMs: 250 });
+  ok(r.fleet() && r.fleet().browserEngine && r.fleet().browserEngine.default === true && cap.lines.some((l) => l.includes(`browser engine ${EID} (the default of new browsers)`)) && !cap.lines.some((l) => /git@|dl\.example/.test(l)), `boot read: fleet() carries the engine fact; the boot line names it (never its addresses): ${cap.lines[0]}`);
+  const changes = []; r.onChange((c) => changes.push(c));
+  await r.start();
+  cap.lines.length = 0;
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: 'https://admin.fleet.example.test/relay/', browserEngine: { ...full, default: false } } });
+  await until(() => changes.length >= 1, 3000);
+  const ln = cap.lines.filter((l) => /\[presets\] changed/.test(l));
+  ok(changes.length === 1 && r.fleet().browserEngine.default === false && ln.length === 1 && ln[0].endsWith(`browser engine changed (now ${EID}, not the default)`), 'a flip of the Secret is seen ONCE, live (no restart), said by plugin id + whether it is the default', ln);
+  project(dir, { ...ROWS, 'fleet.json': { relayUrl: 'https://admin.fleet.example.test/relay/' } });
+  await until(() => changes.length >= 2, 3000);
+  ok(!('browserEngine' in r.fleet()) && r.fleet().relayUrl === 'https://admin.fleet.example.test/relay/', 'the key dropped ⇒ the fact absent (the policy falls back to the user\'s value or the default), the relay page untouched');
+  r.stop();
+  // lane engine-distribution: + `preinstall` (true only when true) — and the Plugin Git credential rides the SAME layers
+  ok(PL.parseFleet({ browserEngine: { ...full, preinstall: true } }).browserEngine.preinstall === true && PL.parseFleet({ browserEngine: { ...full, preinstall: 'true' } }).browserEngine.preinstall === false && PL.parseFleet({ browserEngine: full }).browserEngine.preinstall === false,
+    'parseFleet: browserEngine.preinstall is true only when true (the boot job downloads the kernel right away), else false (at its first use)');
+  const gdir = path.join(ROOT, 'fleet-plugin-git');
+  const TOK = ['fleet', 'pat', 'x9Qe', 'Zt41'].join('-'); // built at runtime, never one literal
+  project(gdir, { ...ROWS, 'integrations.json': [{ id: 'plugin-git', key: 'default', label: 'Fleet git', values: { host: 'git.example.test', token: TOK } }] });
+  const rg = CP.create({ dir: gdir, log: capture().log, debounceMs: 30, pollMs: 250 });
+  const gdata = path.join(ROOT, 'fleet-plugin-git-data'); fs.mkdirSync(gdata, { recursive: true });
+  const st = IS.create({ dataDir: gdata, env: {}, presets: rg, log: { log() {}, warn() {}, error() {} } });
+  const res = st.resolveIntegration('plugin-git'), pv = st.publicView('plugin-git');
+  ok(res.source === 'cluster' && res.values.host === 'git.example.test' && res.values.token === TOK && pv.source === 'cluster' && !JSON.stringify(pv).includes(TOK) && pv.values.host === 'git.example.test',
+    'the presets\' integrations.json ships the plugin-git credential to every pod: the store resolves it from the cluster layer (the installer\'s one road), its card shows the host — the token never', { source: res.source, card: pv.values });
+  rg.stop();
 }
 
 for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 8 })) ok(row.pass, row.name, row.detail);

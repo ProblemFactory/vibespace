@@ -21,7 +21,7 @@ import { showContextMenu, fetchJson } from './utils.js';
 import { t } from './i18n.js';
 import { UI_ICONS } from './icons.js';
 import { openDesktopPicker } from './desktop-picker.js'; // lane desktop-v2-entry: the Desktop button is a picker
-import { TOOLBAR_ITEMS, TOOLBAR_COMPACT, TITLE_MIN_PX, toolbarSpec, overflowRows, compactTitle } from './toolbar-fold-model.js';
+import { TOOLBAR_ITEMS, TOOLBAR_COMPACT, toolbarSpec, overflowRows, compactTitle } from './toolbar-fold-model.js';
 
 export const TOOLBAR_MENU = 'toolbar-overflow';
 
@@ -93,10 +93,24 @@ export function installToolbarFold(app) {
   more.setAttribute('aria-haspopup', 'menu');
   bar.appendChild(more);
   const zones = () => [bar.querySelector('.toolbar-left'), bar.querySelector('[data-zone="toolbar-center"]'), bar.querySelector('[data-zone="toolbar-right"]')].filter(Boolean);
+  // the flexible title squeezed is not drawn — the product's name is whole or absent, never «Vibe…» (lane desktop-small P3-2:
+  // at 951 px it was cut to «Vibe…» / «Vi…»; before, only a sliver under the model's TITLE_MIN_PX hid). Judged after every
+  // fold AND whenever the title's own box changes (a viewport grown back left a stale verdict: the fold's last pass ran
+  // before the title settled). Its box is kept — a data attribute, never a class, so the fold's observer is not woken by it
+  const judgeTitle = () => {
+    const title = bar.querySelector('.toolbar-title');
+    if (!title) return;
+    const squeezed = title.scrollWidth > title.clientWidth + 1;
+    if (squeezed !== (title.dataset.squeezed === '1')) { if (squeezed) title.dataset.squeezed = '1'; else delete title.dataset.squeezed; }
+  };
+  // ONE lifetime (r2 ④ — the lifecycle law): the fold and the title's observer stop together — the fold's dispose aborts it
+  const life = new AbortController();
+  { const title = bar.querySelector('.toolbar-title'); if (title && typeof ResizeObserver === 'function') { const ro = new ResizeObserver(judgeTitle); ro.observe(title); life.signal.addEventListener('abort', () => ro.disconnect(), { once: true }); } }
   const zoneKey = (z) => z.dataset.zone || 'toolbar-left';
   const fold = createBarFold(bar, {
     more,
     rulerIn: bar, // `#toolbar …` rules and the toolbar's own zoom reach the clones
+    signal: life.signal, // r2 ④: the fold and the title's observer share ONE lifetime
     groups: () => zones().map((z) => ({ key: zoneKey(z), gapPx: parseFloat(getComputedStyle(z).columnGap) || 0 })),
     items: () => {
       const out = [];
@@ -117,13 +131,7 @@ export function installToolbarFold(app) {
       // Customize mode: the unfolded bar may now wrap to more rows — its alignment chip moves below the whole bar
       if (v && v.suspended) { try { app._customize?._positionAlignChips?.(); } catch { /* not editing */ } }
       for (const el of bar.querySelectorAll('.toolbar-action')) nameCompact(el, el.classList.contains(TOOLBAR_COMPACT));
-      // the flexible title squeezed below a readable width shows a sliver of a glyph: it hides instead (its box kept —
-      // a data attribute, never a class, so the fold's observer is not woken by it)
-      const title = bar.querySelector('.toolbar-title');
-      if (title) {
-        const squeezed = title.scrollWidth > title.clientWidth + 1 && title.clientWidth < TITLE_MIN_PX;
-        if (squeezed !== (title.dataset.squeezed === '1')) { if (squeezed) title.dataset.squeezed = '1'; else delete title.dataset.squeezed; }
-      }
+      judgeTitle();
       // an element Customize (or another client's arrangement) moved OUT of the toolbar sheds the fold's classes
       for (const id of Object.keys(TOOLBAR_ITEMS)) {
         const el = document.getElementById(id);
@@ -140,6 +148,7 @@ export function installToolbarFold(app) {
     const r = more.getBoundingClientRect();
     showContextMenu(r.left, r.bottom + 2, rows).classList.add('toolbar-more-menu');
   });
+  fold.dispose = () => life.abort();
   bar._tbFold = fold;
   return fold;
 }

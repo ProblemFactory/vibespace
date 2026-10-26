@@ -29,8 +29,9 @@ const B = require('./browser-profiles.js');
 const RUNNING_STATES = Object.freeze(['starting', 'up']);
 /** The /api/agent/browser/<route> verbs a job may call: read, act, answer a dialog or a page's passkey wait, decide a page
  *  permission on its own browser (lane browser-ui-prompts-r2), fix its page's picture size (lane launch-picture-size — a page
- *  act like `set viewport`, the owner conversation's own browser). */
-const JOB_ROUTES_ALLOWED = Object.freeze(['profiles', 'status', 'providers', 'resolve', 'audit', 'tab', 'dialog', 'direct', 'passkey', 'permission', 'size']);
+ *  act like `set viewport`, the owner conversation's own browser); have a login the vault keeps filled on the custom kernel (lane
+ *  browser-login — judged by the owner conversation's own `browser-login` grant, like a passkey's sign-in). */
+const JOB_ROUTES_ALLOWED = Object.freeze(['profiles', 'status', 'providers', 'resolve', 'audit', 'tab', 'dialog', 'direct', 'passkey', 'permission', 'size', 'login']);
 /** …and the ones that would change the conversation's browsers — refused by name. Any route in neither list is refused too. */
 const JOB_ROUTES_REFUSED = Object.freeze(['use', 'pin', 'new', 'new-child', 'detach', 'backend', 'blocked', 'site-hint', 'site-reset', 'resume', 'restart', 'takeover-request']); // int220: `restart` (lane browser-unresponsive) stops the browser under every holder — a conversation's act, never a job's // lane browser-takeover-queue: `ask-human`'s route — asking a person to take over is the conversation's (a job's run asks nobody)
 

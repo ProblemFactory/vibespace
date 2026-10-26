@@ -141,8 +141,8 @@ console.log("§1b the window's groups");
   ok(JSON.stringify(R.GROUPS) === JSON.stringify(['communication', 'browser', 'plugins']) && R.GROUPS.every((g) => typeof R.GROUP_WORDS[g] === 'string' && R.GROUP_WORDS[g].length > 0), 'three groups in the window\'s order (communication, browser, plugins), each with its plain noun');
   ok(table.every(([, g]) => R.GROUPS.includes(g)), `every row lands in exactly ONE group (${table.map(([id, g]) => id + '→' + g).join(', ')})`);
   ok(ids('browser') === R.ROWS.filter((r) => r.id === 'cloak' || r.id.startsWith('cloud:')).map((r) => r.id).sort().join() && ids('browser').split(',').length === 6, `browser = cloak + every cloud:* row (${ids('browser')})`);
-  const named = Object.values(PS.PLUGIN_SETTINGS).map((p) => p.integration).filter(Boolean).sort().join();
-  ok(ids('plugins') === named && /\bllm\b/.test(named) && /dropline/.test(named), `plugins = exactly the rows a built-in plugin's settings table names (${ids('plugins')}) — the LLM plugin's key is a plugin's, not Communication's`);
+  const named = [...Object.values(PS.PLUGIN_SETTINGS).map((p) => p.integration).filter(Boolean), ...R.ROWS.filter((r) => r.consumers.includes(R.PLUGIN_INSTALL_CONSUMER)).map((r) => r.id)].sort().join();
+  ok(ids('plugins') === named && /\bllm\b/.test(named) && /dropline/.test(named) && /plugin-git/.test(named), `plugins = exactly the rows a built-in plugin's settings table names + the plugin installer's credential (lane engine-distribution) (${ids('plugins')}) — the LLM plugin's key is a plugin's, not Communication's`);
   ok(ids('communication') === R.ROWS.filter((r) => r.consumers.some((c) => c.startsWith('src/channels/'))).map((r) => r.id).sort().join() && R.ROWS.filter((r) => R.groupOf(r) === 'communication').every((r) => r.bindsPerAccount === true),
     `communication = the rows a channel adapter consumes (${ids('communication')}); today every one is account-bound, so the window (which draws no account-bound row) shows no 通讯 head — it draws when such a row becomes a card`);
   ok(R.groupOf('llm') === 'plugins' && R.groupOf('cloud:kernel') === 'browser' && R.groupOf('no-such-row') === null && R.groupOf(null) === null, 'groupOf answers an id as it answers the row; an unknown id is null (the window draws it last, never drops it)');
@@ -157,6 +157,22 @@ console.log("§1b the window's groups");
   ok(R.groupOf({ ...dec, id: 'llm-2' }) === null, 'CONTROL: the Language model row under an id no plugin names is null (the plugins group comes from the plugin table, not the row\'s look)');
   ok(R.groupOf({ ...cloak, consumers: ['src/server/browser-backend.js', 'src/channels/fake.js'] }) === null, 'CONTROL: a row consumed by both a channel adapter and the browser backend (two groups) is null');
   ok(R.groupOf({ ...cloak, consumers: [] }) === null, 'CONTROL: a row with no consumer is null');
+  ok(R.groupOf({ ...cloak, id: 'brand-new', consumers: [R.PLUGIN_INSTALL_CONSUMER] }) === 'plugins' && R.groupOf({ ...cloak, consumers: [R.PLUGIN_INSTALL_CONSUMER, 'src/server/browser-backend.js'] }) === null, 'lane engine-distribution: a row the plugin INSTALLER consumes is a Plugins row; the installer + the browser backend (two groups) is null');
+}
+
+// ═══ §1c THE PLUGIN GIT CREDENTIAL (lane engine-distribution, P4 of the custom browser kernel) ═══
+console.log('§1c the plugin-git row');
+{
+  const g = R.rowById('plugin-git');
+  ok(g && !R.checkRow(g).length && g.test.kind === 'reachability' && g.test.caveat && JSON.stringify(g.consumers) === '["src/server/plugin-install.js"]' && !g.wiredIn && !g.bindsPerAccount && !g.bindsPerMachine && g.clusterEnv && g.clusterEnv.json === 'VIBESPACE_INTEGRATIONS' && !g.setup,
+    'plugin-git: ONE card row — a reachability Test (git ls-remote) with its caveat, consumed by the plugin installer (landed WITH its consumer: no wiredIn, decision 25), the cluster ships it through integrations.json');
+  ok(JSON.stringify(g.fields.map((f) => [f.key, !!f.secret, !!f.required, !!f.multiline])) === JSON.stringify([['host', false, true, false], ['username', false, false, false], ['token', true, false, false], ['deployKey', true, false, true]]), 'its fields: host (the ONE host the credential goes to), username (optional), token (secret, https), deployKey (secret, ssh, several lines)');
+  ok(R.fieldDecls(g).find((f) => f.key === 'deployKey').multiline === true && !('multiline' in R.fieldDecls(g).find((f) => f.key === 'token')), 'the wire declares the several-line field (the card draws a text box for it), nothing else');
+  const v = (patch) => R.validateValues(g, patch);
+  const key = ['-----BEGIN OPENSSH ', 'PRIVATE KEY-----\n', 'b3BlbnNzaC1rZXktdjEAAAAA'.repeat(3), '\n-----END OPENSSH ', 'PRIVATE KEY-----'].join('');
+  ok(v({ host: 'github.com', token: 'x'.repeat(8) + 'y', deployKey: key }).ok && v({ host: 'git.example.com:8443' }).ok && v({ host: 'https://github.com' }).errors.host && v({ host: 'github.com/x' }).errors.host && v({ deployKey: 'ssh-ed25519 AAAA… a public key' }).errors.deployKey && /passphrase/.test(v({ deployKey: key.replace('b3Bl', 'Proc-Type: 4,ENCRYPTED\nb3Bl') }).errors.deployKey || '') && v({ token: 'short' }).errors.token,
+    'its validators: a bare host (no scheme, no path), a private key (a public one / a passphrase-protected one refused by name), a token of at least 8 characters');
+  ok(R.groupOf(g) === 'plugins', 'it is drawn in the Integrations window\'s Plugins group');
 }
 
 // ═══ §2 masking + validation ═══════════════════════════════════════════════
@@ -244,7 +260,7 @@ store.registerTest(CARD, shapeRunner);
 {
   const r0 = await get('/api/integrations');
   const cards = R.ROWS.filter((r) => !r.bindsPerAccount && !r.bindsPerMachine).map((r) => r.id); // lane remoteapp-r1b: a per-machine row is not a card either
-  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 8 && cards[6] === 'dropline' && cards[7] === 'llm', `GET /api/integrations lists the six browser key rows + the Dropline voice key row + the llm row ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
+  ok(r0.status === 200 && Array.isArray(r0.json.integrations) && r0.json.integrations.map((x) => x.id).join() === cards.join() && cards.length === 9 && cards[6] === 'dropline' && cards[7] === 'llm' && cards[8] === 'plugin-git', `GET /api/integrations lists the six browser key rows + the Dropline voice key row + the llm row + the plugin installer's Git credential (lane engine-distribution) ONLY (${r0.json.integrations.map((x) => x.id).join(', ')})`);
   ok(['fake', 'lark', 'gmail'].every((id) => !r0.json.integrations.some((x) => x.id === id)) && ['fake', 'lark', 'gmail'].every((id) => R.rowById(id).bindsPerAccount === true), 'r4: the account-bound rows (fake / lark / gmail) are NOT cards — absent from the list');
   // every card verb on an account-bound row: 404 BY NAME
   for (const id of ['fake', 'lark', 'gmail']) {
@@ -1013,6 +1029,8 @@ if (tracked.length) {
   // lane decision-core: the decision engine's one-question Test, registered the way mounts-plugins-wiring does
   const de = require(path.join(REPO, 'src/server/decision-engine.js')).create({ dataDir: (() => { const d = path.join(ROOT, 'decision'); fs.mkdirSync(d, { recursive: true }); return d; })(), integrations: store, log: { warn() {} } });
   store.registerTest(de.ROW_ID, de.testRunner);
+  // lane engine-distribution: the plugin LOADER registers the Plugin Git credential's Test (git ls-remote through the installer)
+  { const lr = path.join(ROOT, 'loader-root'); fs.mkdirSync(path.join(lr, 'data', 'plugins'), { recursive: true }); require(path.join(REPO, 'src/server/plugin-loader.js')).create({ rootDir: lr, app: null, autoStart: false, log: { log() {}, warn() {} }, integrations: () => store }); }
   // lane decision-card-words (owner on .261: "每个选项说法太抽象了"): the card speaks the user's words — the row's own
   // title + three ORDERED steps + its own radio words reach the view, every other row keeps the shared ones, and no
   // string the card shows (row, plugin description, the three switches + their example hints) carries an engine word

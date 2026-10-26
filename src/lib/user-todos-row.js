@@ -27,8 +27,10 @@
 //
 // entry = {item, resolved, notice?, tail?, band?}   (band: a tray attention-list row — lane foryou-folds)
 // ctx   = {t, nameFor(key, items), wordsOf(item), detailOf(item),
-//          replyState(item) → {show, enabled, why}, mini?}
+//          replyState(item) → {show, enabled, why}, optionsOf(item) → [label] (the chips: the agent's options, else
+//          its detail's parsed — lane foryou-honest, PURE src/ask-options.js), mini?}
 import { escHtml } from './utils.js';
+import { tc } from './i18n.js'; // lane foryou-honest: «Dismiss» in the For-you sense (忽略 — the plain key is a dialog's «close»)
 import { UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: the first-use card's reach choices (one spelling with the For-you window and the Vault window)
@@ -171,7 +173,18 @@ const apiCardOf = (i) => (i && i.action && i.action.type === 'channel-api-propos
 const apiChipHtml = (c, t) => (c && c.chip && c.chip.key ? `<span class="ut-api-chip">${escHtml(t(c.chip.key, c.chip.params || {}))}</span> ` : '');
 const apiTechHtml = (c, t) => (c && Array.isArray(c.tech) && c.tech.length
   ? `<details class="ut-detail-exp ut-api-tech" data-fold="tech"><summary>${escHtml(t('Technical details'))}</summary><div class="ut-detail">${c.tech.map((l) => escHtml(String(l))).join('\n')}</div></details>` : '');
-const proposalAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'browser-proposal' && /^pk-[0-9a-f]{8}$/.test(String(i.action.id || '')) ? passkeyAskHtml(i, t, detail) : i && i.action && PROPOSAL_ACTIONS.includes(i.action.type)
+/** lane browser-surfaces: a BROWSER PROMPT only the owner can answer (a kernel's surface — a sign-in, a certificate, a device…):
+ *  its words above Approve (presses the prompt's one answer that needs no typing — the page's own label in the tooltip) and
+ *  Reject (its refusal); a prompt that needs typing has no Approve — the live view answers it. */
+const surfaceAskHtml = (i, t, detail) => `<div class="ut-proposal-plan">${escHtml(detail || '')}</div><div class="ut-exit-answer ut-proposal-answer">`
+  + (i.action.approve ? `<button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Presses “{label}” on the page', { label: String(i.action.approveLabel || i.action.approve).slice(0, 80) }))}">${escHtml(t('Approve'))}</button>` : '')
+  + (i.action.reject ? `<button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Reject'))}</button>` : '') + '</div>';
+/** lane browser-login: the owner's SAVE-LOGIN card — a person signed in by hand in the agent browser (a live-view takeover): Save
+ *  (or Update, for a login the vault keeps with another password) / Not now; the password is held on the hub until answered. */
+const saveLoginAskHtml = (i, t, detail) => `<div class="ut-proposal-plan">${escHtml(detail || '')}</div><div class="ut-exit-answer ut-proposal-answer">`
+  + `<button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Saves it in the vault — agents you allow can have it filled, never seeing it'))}">${escHtml(i.action.update ? t('Update') : t('Save'))}</button>`
+  + `<button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Not now'))}</button></div>`;
+const proposalAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'save-login' && /^sl-[0-9a-f]{8}$/.test(String(i.action.id || '')) ? saveLoginAskHtml(i, t, detail) : i && i.action && i.action.type === 'browser-surface' && i.action.id ? surfaceAskHtml(i, t, detail) : i && i.action && i.action.type === 'browser-proposal' && /^pk-[0-9a-f]{8}$/.test(String(i.action.id || '')) ? passkeyAskHtml(i, t, detail) : i && i.action && PROPOSAL_ACTIONS.includes(i.action.type)
   ? `<div class="ut-proposal-plan">${apiChipHtml(apiCardOf(i), t)}${escHtml(detail || '')}</div>${apiTechHtml(apiCardOf(i), t)}`
     + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Runs exactly what this card says'))}">${escHtml(t('Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Reject'))}</button></div>` : '') : '');
 
@@ -191,6 +204,12 @@ const grantAskHtml = (i, t) => {
 };
 /** An --options label is a REPLY the person sends — it reads as one («Reply: …»), never as the act it names. */
 export const optionWords = (label, t) => t('Reply: {label}', { label: String(label) });
+/** THE WORDS OF AN ITEM, ONE RENDERER (lane foryou-honest, the stress evaluation's P1-2): plain text + the For-you links
+ *  (foryou-links linkedHtml — every segment escaped, a link a span around its own words), never markdown — the tray's rows
+ *  and the For-you window's pane both draw this (the pane's markdown turned `__tests__/` into a bold «tests/»). */
+export const wordsHtml = (text) => linkedHtml(String(text || ''), { escape: escHtml });
+/** The labels a row's chips stand for (lane foryou-honest): ctx.optionsOf (the model's — explicit, else parsed), else the item's own. */
+export const rowOptions = (i, ctx) => (ctx && typeof ctx.optionsOf === 'function' ? ctx.optionsOf(i) : i && Array.isArray(i.options) ? i.options : []) || [];
 
 /** design 009 §2 A: an app install's ONE CARD — the engine's view (`item.card`, src/app-card.js) worded by
  *  app-card-model: who asks and why, where it comes from and how big, what the click gives; TWO buttons (Install / Not
@@ -239,13 +258,15 @@ function partsOf(entry, ctx) {
     : `<span class="ut-dot" data-urgency="${notice ? '' : escHtml(i.urgency || 'normal')}" title="${escHtml(notice ? t('notice') : (i.urgency || 'normal'))}"></span>`;
   // Detail rides behind a collapsed expander (up to 2000 chars of agent context).
   // (an exit ask's detail IS its command — shown whole above its Allow / Deny, never again folded below them)
-  const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${linkedHtml(detail, { escape: escHtml })}</div></details>` : '';
+  const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${wordsHtml(detail)}</div></details>` : '';
   // lane browser-propose: an open proposal's words are shown whole ABOVE its Approve (proposalAskHtml) — never folded again below
   const detailFold = i && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-api-proposal' || HELD_ASKS.includes(i.action.type) || isSecretAsk(i)) && !resolved ? '' : detailHtml; // lane hub-act-ask: shown whole above its answers (design q-046: an automation ask too; lane vault-paste-request: a paste request's words above its box)
   // OPTION CHIPS (design-user-inbox-reply D3a): one click = a reply whose text
   // IS the label. Addressed by INDEX — the label never rides an attribute.
-  const opts = !resolved && rs.show && Array.isArray(i.options) && i.options.length
-    ? `<div class="ut-opts">${i.options.map((o, k) => `<button type="button" class="ut-opt" data-idx="${k}">${escHtml(optionWords(o, t))}</button>`).join('')}</div>` : ''; // lane controls-that-lie: a reply reads as a reply
+  // lane foryou-honest (P2-3): the chips are ctx.optionsOf's — the agent's options, else its detail's «A …；B …» parsed
+  const optList = rowOptions(i, ctx);
+  const opts = !resolved && rs.show && optList.length
+    ? `<div class="ut-opts">${optList.map((o, k) => `<button type="button" class="ut-opt" data-idx="${k}">${escHtml(optionWords(o, t))}</button>`).join('')}</div>` : ''; // lane controls-that-lie: a reply reads as a reply
   let meta;
   if (resolved) {
     const by = resolvedByText(i.resolvedBy, t, i);
@@ -254,26 +275,35 @@ function partsOf(entry, ctx) {
     meta = (tail ? `<span class="ut-sess" title="${escHtml(t('Go to this session'))}">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
       + escHtml(i.status === 'dismissed' ? t('dismissed') : t('done'))
       + (by ? ' · ' + escHtml(by) : '') + replied
-      + (tail ? ' · ' + escHtml(agoText(i.resolvedAt || i.createdAt, t)) : '');
+      + (tail ? `<span class="ut-age"> · ${escHtml(agoText(i.resolvedAt || i.createdAt, t))}</span>` : '');
   } else {
     const exp = notice ? expiresText(i.expiresAt, t) : '';
     // lane foryou-folds: a row of the tray's attention list (`entry.band`) names its conversation — the bands are flat, no
     // group head — with THE running dot of a real session in front (D1.7: the panel patches it live, never the row)
     const dot = entry.band && typeof i.sessionKey === 'string' && i.sessionKey.includes(':') ? `<span class="ut-live-dot" data-key="${escHtml(i.sessionKey)}" role="img"></span>` : '';
-    meta = (notice || entry.band ? `<span class="ut-sess">${dot}${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
-      + escHtml(agoText(i.createdAt, t)) + (exp ? ' · ' + escHtml(exp) : '');
+    // lane foryou-honest (acceptance round 2): the age keeps its separator — ONE nowrap span « · 3min ago», its space inside
+    // (no break before the dot), so a long name wraps INSIDE itself and no line starts with «·»; an expiry's dot rides the age
+    const age = escHtml(agoText(i.createdAt, t)) + (exp ? ' ·' : '');
+    meta = (notice || entry.band ? `<span class="ut-sess" title="${escHtml(t('Go to this session'))}">${dot}${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span><span class="ut-age"> · ${age}</span>` // lane foryou-honest (P3-8): the name is the tray row's door to its conversation
+      : `<span class="ut-age">${age}</span>`) + (exp ? ' ' + escHtml(exp) : '');
   }
-  const body = `<div class="ut-text">${card ? escHtml(words) : linkedHtml(words, { escape: escHtml })}</div>${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
+  // lane foryou-honest (the phone's ONE row shape): a touch screen folds a row to its question + meta line — the whole row
+  // opens it in place — and THIS trailing door keeps the conversation one tap away (a mouse never sees it: style.css); a row
+  // RESOLVED in its band slot keeps it (acceptance round 2: nothing left to open — its door is its way to the conversation)
+  const go = notice || entry.band ? `<button type="button" class="ut-go" title="${escHtml(t('Go to this session'))}" aria-label="${escHtml(t('Go to this session'))}" data-label="${escHtml(tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
+  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words)}</div>${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
-  const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}">⤢</button>`;
+  // lane foryou-honest (the touch scale): every verb carries its WORD in data-label — a touch screen draws it under the icon
+  // (style.css's touch block, ::after — never the button's text, so a title / aria / textContent reader is unchanged)
+  const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}" data-label="${escHtml(t('Open'))}">⤢</button>`;
   // design 009: a card's Reply / Mark done / Ignore / Copy / Clear content… live behind its ⋯ (two buttons on its face)
-  const more = `<button type="button" class="ut-act ut-more" title="${escHtml(t('More'))}" aria-label="${escHtml(t('More'))}">⋯</button>`;
+  const more = `<button type="button" class="ut-act ut-more" title="${escHtml(t('More'))}" aria-label="${escHtml(t('More'))}" data-label="${escHtml(t('More'))}">⋯</button>`;
   const actions = resolved
-    ? `<span class="ut-actions">${view}<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}">↺</button></span>`
+    ? `<span class="ut-actions">${view}<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}" data-label="${escHtml(t('Reopen'))}">↺</button></span>`
     : card ? `<span class="ut-actions">${view}${more}</span>`
-    : `<span class="ut-actions">${actionBtnHtml(i, t)}${reauthBtnHtml(i, t)}${takeoverBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
-      + `<button class="ut-act ut-done" title="${escHtml(i.open && i.open.done ? t(i.open.done) : t('Handled — mark done'))}">✓</button>` // lane foryou-plugin-notices: a door's `done` = what this ✓ does (the plugin applies it)
-      + `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}">✕</button></span>`;
+    : `<span class="ut-actions">${actionBtnHtml(i, t)}${reauthBtnHtml(i, t)}${takeoverBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}" data-label="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
+      + `<button class="ut-act ut-done" title="${escHtml(i.open && i.open.done ? t(i.open.done) : t('Handled — mark done'))}" data-label="${escHtml(t('Mark done'))}">✓</button>` // lane foryou-plugin-notices: a door's `done` = what this ✓ does (the plugin applies it)
+      + `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}" data-label="${escHtml(tc('inbox', 'Dismiss'))}">✕</button></span>`;
   return { cls, dot, body, actions, sig: cls + '\u0000' + dot + '\u0000' + body + '\u0000' + actions };
 }
 
@@ -388,7 +418,7 @@ export function applyLive(el, item, ctx) {
   }
   const busy = el.dataset.sending === '1';
   el.querySelectorAll(':scope > .ut-body > .ut-opts > .ut-opt').forEach((c) => {
-    const label = (Array.isArray(item.options) && item.options[Number(c.dataset.idx)]) || '';
+    const label = rowOptions(item, ctx)[Number(c.dataset.idx)] || '';
     c.disabled = busy;
     c.title = rs.enabled ? t('Reply with "{label}"', { label }) : box.reopen ? t('Reopen and send "{label}"', { label }) : why;
   });
@@ -448,7 +478,9 @@ export function patchRow(el, entry, ctx) {
     const sbox = body && body.querySelector(':scope > .ut-secret');
     const keepS = sbox && !entry.resolved && isSecretAsk(entry.item) ? sbox : null;
     const keeps = [keep, keepS].filter(Boolean);
+    const wasOpen = el.classList.contains('ut-open'); // a row opened in place stays open through a repaint — an answer (resolved) closes it
     el.className = p.cls;
+    if (wasOpen && !entry.resolved) el.classList.add('ut-open');
     if (!keeps.length) {
       el.innerHTML = p.dot + `<div class="ut-body">${p.actions}${p.body}</div>`;
       body = el.querySelector(':scope > .ut-body');

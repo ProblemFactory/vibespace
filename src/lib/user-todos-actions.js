@@ -19,7 +19,7 @@
 // install at boot) builds it, the window asks for the same one.
 import { t, resolveLang } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
-import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
+import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
 import { showInstallDialog, launchDpr, launchUiScale } from './desktop-app-launcher.js';
 import { appRefusalText } from './app-install-dialog.js'; // a refusal code → the user's words (busy, a decided proposal…)
 import { shownDigest, openRowOf } from './app-card-model.js'; // design 009: the digest of the card pressed; the row an Installed card opens // Layer 0 apps: THE install dialog an agent's install proposal opens (the same component as "Install xpra on {machine}…")
@@ -34,6 +34,7 @@ import { openTakeover } from './browser-takeover-queue.js'; // lane browser-take
 import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «Who can use it»'s own refusal words (the dialog's)
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
+import { askOptions } from '../ask-options.js'; // PURE (lane foryou-honest): an ask's chips — the explicit options, else its detail's «A …；B …» / «是 / 否» parsed
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
  *  popup's Inbox tab and the window's Actions tab (B-328d: "same words as the badge"). */
@@ -42,14 +43,11 @@ export function tierCounts(action) {
   const ch = action.filter((i) => i.urgency === 'high').length;
   return { cu, ch, cn: action.length - cu - ch };
 }
-/** …and its WORDS ("2 urgent · 1 normal — waiting on you"). */
-export function actionWords(action) {
-  const { cu, ch, cn } = tierCounts(action);
-  return action.length
-    ? [cu ? t('{n} urgent', { n: cu }) : '', ch ? t('{n} high', { n: ch }) : '', cn ? t('{n} normal', { n: cn }) : '']
-        .filter(Boolean).join(' · ') + ' — ' + t('waiting on you')
-    : t('Nothing waiting on you');
-}
+/** …and its WORDS ("2 urgent · 1 normal — waiting on you"). lane foryou-honest (the stress evaluation's P1-1): `total` =
+ *  THE honest count (user-todos-layout openCount — every open action item, `action` = its loud bands-1–4 part): with any
+ *  item open the words never say «Nothing waiting on you» — a quiet-only count reads «21 waiting on you — none pressing»,
+ *  a loud one adds «· 18 more, none pressing». */
+export function actionWords(action, total = action.length) { return badgeWords(action, total, t); } // the sentence is PURE (user-todos-layout.js badgeWords)
 
 export function inboxModel(app) {
   if (app._inboxModel) return app._inboxModel;
@@ -192,6 +190,21 @@ export function inboxModel(app) {
     if (!r || !r.success) { showToast(t('Could not update the item') + (r?.error ? `: ${r.error}` : ''), { type: 'error' }); return false; }
     return true;
   };
+  /** Does `jump` open the item's own DOOR (a job's form, a plugin's sheet, Manage Agents, a channel, the vault) rather than its
+   *  conversation? (jump's own early returns, in its order) — a tray row's body tap still opens a door; only a jump to the
+   *  conversation became «open the row in place» (lane foryou-honest P3-8). */
+  const isDoor = (key, item) => !!(item?.jobId || item?.open?.kind === 'plugin-settings' || key === 'jobs' || key === 'accounts' || key === 'machines'
+    || (item?.action?.type === 'open-channel' && item.action.adapterId && item.action.convId)
+    || ['vault-unlock', 'vault-use-failed', 'vault-rotate'].includes(item?.action?.type));
+  /** ✓ / ✕ ON AN ITEM (lane foryou-honest, the stress evaluation's P3-2: one press decided it — no toast, the ↺ two screens
+   *  away): the status POST, then ONE toast with Undo for 6 s — the ↺ road (status open) on the same item. */
+  const resolveOne = async (id, status) => {
+    const ok = await setStatus(id, status);
+    if (ok) showToast(status === 'done' ? t('Marked done') : t('Dismissed'), { duration: 6000, actions: [{ label: t('Undo'), run: () => setStatus(id, 'open') }] });
+    return ok;
+  };
+  /** THE CHIPS OF AN ITEM (PURE askOptions over the words this device shows): the agent's options, else its detail's. */
+  const optionsFor = (i) => askOptions(i, detailOf(i));
   /** «Mark all read» (lane inbox-fyi-mark-all) — THE notices' bulk verb (the window's notices tab, the popup's and the
    *  phone page's notices head): ONE POST for every id (PURE noticeReadAll chose them) ⇒ the store's ONE write + ONE
    *  broadcast, so every count drops in the same tick on every client; then a 5 s Undo toast that brings exactly the
@@ -421,6 +434,22 @@ export function inboxModel(app) {
       showToast(r && r.code === 'not-pending' ? t('That request was already decided') : r && r.code === 'proposal_changed' ? t('That card changed after it was shown — nothing ran; read it again') : (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;
     }
+    if (rec && rec.action && rec.action.type === 'save-login') {
+      // lane browser-login: a person's own sign-in in the agent browser — Save / Update keeps it in the vault, Not now forgets it;
+      // the digest of what this row showed rides `shown` (a card that changed since saves nothing)
+      const r = await fetchJson(`/api/browser/logins/cards/${encodeURIComponent(rec.action.id)}/${answer === 'reject' ? 'reject' : 'approve'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shown: rec.action.shown }) });
+      if (r && r.ok) { showToast(answer === 'reject' ? t('Not saved — the password was forgotten') : r.updated ? t('Updated the login in the vault') : t('Saved the login to the vault')); return true; }
+      showToast(r && r.code === 'card_changed' ? t('That card changed after it was shown — nothing was saved; read it again') : r && r.code === 'card_gone' ? t('That card is no longer open — the password was not kept') : (r && r.error) || t('server unreachable'), { type: 'error' });
+      return false;
+    }
+    if (rec && rec.action && rec.action.type === 'browser-surface') {
+      // lane browser-surfaces: a browser prompt only the owner can answer — Approve presses its answer that needs no typing,
+      // Reject refuses it; the digest of what this row showed rides `shown` (a prompt that changed since answers nothing)
+      const r = await fetchJson(`/api/browser/surfaces/${encodeURIComponent(rec.action.id)}/${answer === 'reject' ? 'reject' : 'approve'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shown: rec.action.shown }) });
+      if (r && r.ok) { showToast(answer === 'reject' ? t('Refused — the page was told') : t('Answered — the page moves on')); return true; }
+      showToast(r && r.code === 'surface_changed' ? t('That prompt changed after it was shown — nothing was answered; read it again') : r && r.code === 'no_dialog' ? t('That prompt is no longer open') : (r && r.error) || t('server unreachable'), { type: 'error' });
+      return false;
+    }
     if (rec && rec.action && rec.action.type === 'browser-proposal') {
       // lane browser-propose: THE person's answer to an agent's proposal, where it appears — the same route the chat card
       // presses, with the digest of what this row showed (`shown`); the proposal's card patches itself, the runner answers
@@ -606,11 +635,11 @@ export function inboxModel(app) {
   const model = {
     get todos() { return todos; },
     get loaded() { return loaded; },
-    byId, sessionFor, displayName, wordsOf, detailOf, detailLinesOf, nameFor, jump, setStatus, readNotices, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
+    byId, sessionFor, displayName, wordsOf, detailOf, detailLinesOf, nameFor, jump, isDoor, setStatus, resolveOne, optionsFor, readNotices, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
     ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, replyBox, patchDot, boardOf, drafts,
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */
-    rowCtx: { t, nameFor, wordsOf, detailOf, replyState, lang: resolveLang },
+    rowCtx: { t, nameFor, wordsOf, detailOf, replyState, optionsOf: optionsFor, lang: resolveLang },
     /** Subscribe: `todos` (every snapshot, the store's order), `live` (an
      *  active-sessions payload was ingested), `status` (the board statuses
      *  moved). A surface that closes passes its AbortSignal (or calls the

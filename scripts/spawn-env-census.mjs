@@ -277,6 +277,9 @@ export const FIXED = Object.freeze([
   ['src/plugins/tailscale.js', 'cmd', 'tailscaled (egress: the control plane through the operator\'s proxy)'],
   ['src/routes/files.js', "'bash'", 'xclip, the clipboard holder (+ the display and ITS cookie)'],
   ['src/server/boot-restore.js', 'DTACH_CMD', "the remote chat re-adopt's transport (as ws-create's r6Env)", { by: 'agentEnv' }],
+  // lane engine-distribution (P4 of the custom browser kernel): two NEW children, held to their builder from the start
+  ['src/server/plugin-install.js', 'gitBin', "a plugin install's git children (init / fetch / checkout / rev-parse / ls-remote, each with its timeout): serviceEnv + the egress door + named git switches — a private repository's credential only through the 0600 files GIT_ASKPASS / GIT_SSH_COMMAND name, never an env value"],
+  ['src/server/engine-distribution.js', 'exe', "a browser engine kernel's `--version`, run ONCE after its install / before its first launch (5 s) — the measured version"],
 ]);
 /** SSH_ROWS: [file, cmd, builder | 'upstream', why] — the ssh roads NOT on hosts.sshEnv() */
 export const SSH_ROWS = Object.freeze([

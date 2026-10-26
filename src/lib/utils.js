@@ -1,4 +1,5 @@
 import { t } from './i18n.js';
+import { menuPlace } from './menu-place.js'; // PURE (lane desktop-small P2-3): THE ONE placement of a menu inside the viewport
 import { metric } from './telemetry-client.js';
 import { pressCloses, pressPhase, tapVerdict, shouldCloseOnBlur } from './outside-press.js';
 import { NATIVE_PRESS_SELECTOR, PRESS_CHROME_SELECTOR, effectiveUserSelect, pointOnText, pressTargetClass, longPressVerdict, selectionCloses, selectStartAllowed, trustedContextMenu } from './press-select.js';
@@ -366,6 +367,64 @@ export function toastSpot({ tier = false, anchored = false, modal = false, compo
   if (typeof composerTop === 'number' && Number.isFinite(composerTop) && composerTop > 0 && composerTop <= vh) return { bottom: (vh - composerTop + gap) / (scale || 1) };
   return null;
 }
+/** lane desktop-small (fence ⑨ — the walk at 1100 / 1280 px: a «listening on port 98xx» toast over a chat window's status bar,
+ *  a Files cell, the desktop menu's Delete; the stack's z 100000 stands over every menu, and a toast that takes a press
+ *  takes the menu's). PURE: WHERE THE DESKTOP TIER'S STACK STANDS — its own place (beside the inbox button, else the
+ *  centred strip over the taskbar) unless its rect `rect` meets an open menu or a composer (`avoid`, viewport px); then it
+ *  rises above what it meets (`gap` px clear), again while it meets another, never past the toolbar's bottom `topY` (no
+ *  room ⇒ its own place). → { bottom } (the stack's CSS bottom, layout px: ÷ `scale`) | null (its own place). */
+export function toastDeskSpot({ rect = null, avoid = [], topY = 0, vh = 0, scale = 1, gap = 8 } = {}) {
+  if (!rect || !(rect.height > 0) || !(vh > 0)) return null;
+  const list = (Array.isArray(avoid) ? avoid : []).filter(Boolean);
+  const meets = (top, bottom) => list.find((a) => rect.left < a.right && rect.right > a.left && top < a.bottom && bottom > a.top);
+  let bottom = rect.bottom;
+  for (let i = 0; i <= list.length; i++) {
+    const a = meets(bottom - rect.height, bottom);
+    if (!a) return bottom === rect.bottom ? null : { bottom: (vh - bottom) / (scale || 1) };
+    bottom = a.top - gap;
+    if (bottom - rect.height < topY) return null;
+  }
+  return null;
+}
+/** what the desktop tier's stack must not stand on: every open menu / float and every composer shown (viewport px) */
+function _toastAvoid() {
+  const out = [];
+  for (const el of document.querySelectorAll('.context-menu, .taskbar-context-menu, [data-popover], .chat-input-area')) {
+    if (el.id === 'global-toasts' || el.closest('#global-toasts')) continue;
+    if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true })) continue; // a window on another desktop is visibility:hidden
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight) out.push(r);
+  }
+  return out;
+}
+/** THE STACK'S OWN PLACE: beside the inbox button when it shows (customize mode can move it to any bar; a phone hides it ⇒
+ *  the centred strip). Re-asked by the desktop tier's placement before it measures (lane desktop-small fence ⑨). */
+function _anchorToastStack(stack) {
+  const anchor = _toastCfg.getAnchor?.();
+  const r = anchor && anchor.offsetParent ? anchor.getBoundingClientRect() : null;
+  if (r) {
+    stack.classList.add('gt-anchored');
+    stack.style.left = 'auto';
+    stack.style.transform = 'none';
+    const Z = uiScale(); // viewport→layout px (F2)
+    stack.style.right = (Math.max(8, window.innerWidth - r.right) / Z) + 'px';
+    if (r.top > window.innerHeight / 2) { stack.style.bottom = ((window.innerHeight - r.top + 8) / Z) + 'px'; stack.style.top = 'auto'; }
+    else { stack.style.top = ((r.bottom + 8) / Z) + 'px'; stack.style.bottom = 'auto'; }
+  } else {
+    stack.classList.remove('gt-anchored');
+    stack.style.left = ''; stack.style.right = ''; stack.style.top = ''; stack.style.bottom = ''; stack.style.transform = '';
+  }
+}
+/** the desktop tier: its own place, then off any open menu / composer (PURE toastDeskSpot); a menu opened later is a <body>
+ *  child, so the watch re-places it */
+function _placeDeskToasts(stack) {
+  _anchorToastStack(stack);
+  const tb = document.getElementById('toolbar'), tr = tb ? tb.getBoundingClientRect() : null;
+  const desk = toastDeskSpot({ rect: stack.getBoundingClientRect(), avoid: _toastAvoid(), topY: tr && tr.height ? tr.bottom : 0, vh: window.innerHeight, scale: uiScale() });
+  if (desk) { stack.style.top = 'auto'; stack.style.bottom = desk.bottom + 'px'; }
+  if (!_toastWatch) { _toastWatch = new MutationObserver(_queueToastPlace); _toastWatch.observe(document.body, { childList: true }); }
+  _toastWatch.observe(stack, { childList: true });
+}
 const _toastTier = () => { try { return matchMedia(VC_PHONE_MEDIA).matches || isTouchDevice(); } catch { return false; } }; // int355: the phone paths' ONE media list (duo-build-1's law, test-viewport-class)
 /** the dialog of the topmost open app modal (createModalShell's overlay or the static #dialog-overlay), else null */
 function _openModalDialog() {
@@ -398,13 +457,16 @@ function _placeToastStack() {
 }
 function _placeToastStackNow() {
   const stack = document.getElementById('global-toasts');
-  const live = !!stack && stack.isConnected && stack.children.length > 0 && !stack.classList.contains('gt-anchored');
+  const shown = !!stack && stack.isConnected && stack.children.length > 0;
+  const live = shown && !stack.classList.contains('gt-anchored');
   const dlg = live ? _openModalDialog() : null;
   const spot = live ? toastSpot({ tier: _toastTier(), modal: !!dlg, composerTop: dlg ? null : _composerTop(), vh: window.innerHeight, scale: uiScale() }) : null;
   let room = spot && spot.room ? dlg.querySelector(':scope > .gt-room') : null;
   for (const r of document.querySelectorAll('.gt-room')) if (r !== room) r.remove();
   if (!live || !spot) {
     if (live) { stack.style.top = ''; stack.style.bottom = ''; }
+    // the desktop tier, anchored or centred (lane desktop-small fence ⑨): never on an open menu or a composer
+    if (shown && !_toastTier() && !_openModalDialog()) { _placeDeskToasts(stack); return; }
     if (!live && _toastWatch) { _toastWatch.disconnect(); _toastWatch = null; }
     return;
   }
@@ -450,20 +512,7 @@ export function showToast(message, { type = 'info', duration, action, actions, h
   }
   // Anchor next to the inbox button when it's visible (customize mode can
   // move it to any bar; mobile hides it → fall back to the centered strip).
-  const anchor = _toastCfg.getAnchor?.();
-  const r = anchor && anchor.offsetParent ? anchor.getBoundingClientRect() : null;
-  if (r) {
-    stack.classList.add('gt-anchored');
-    stack.style.left = 'auto';
-    stack.style.transform = 'none';
-    const Z = uiScale(); // viewport→layout px (F2)
-    stack.style.right = (Math.max(8, window.innerWidth - r.right) / Z) + 'px';
-    if (r.top > window.innerHeight / 2) { stack.style.bottom = ((window.innerHeight - r.top + 8) / Z) + 'px'; stack.style.top = 'auto'; }
-    else { stack.style.top = ((r.bottom + 8) / Z) + 'px'; stack.style.bottom = 'auto'; }
-  } else {
-    stack.classList.remove('gt-anchored');
-    stack.style.left = ''; stack.style.right = ''; stack.style.top = ''; stack.style.bottom = ''; stack.style.transform = '';
-  }
+  _anchorToastStack(stack);
   const el = document.createElement('div');
   el.className = `global-toast global-toast-${type}`;
   const body = document.createElement('div');
@@ -834,12 +883,18 @@ export function createPopover(anchor, className, opts = {}) {
  * @param {number} y
  * @param {Array<{label: string, action: function, style?: string}>} items
  * @param {string} [className='context-menu']
+ * @param {object} [opts] - { up: true } = open ABOVE the point (its bottom edge at y) when there is room — a menu opened from
+ *   the lower half of the screen (a title bar near the taskbar, a taskbar tile); the placement is PURE menuPlace either way.
+ *   `extraClass` = classes on the MENU only (its items keep `className + '-item'`), set BEFORE it is measured — a class
+ *   added after the placement restyled a menu already placed (lane desktop-small r2: the desktop list landed 85 px above
+ *   its button, measured unstyled)
  */
-export function showContextMenu(x, y, items, className = 'context-menu') {
+export function showContextMenu(x, y, items, className = 'context-menu', { up = false, extraClass = '' } = {}) {
   // Remove existing menus of same class
   document.querySelectorAll('.' + className.split(' ')[0]).forEach(p => p.remove());
   const pop = document.createElement('div');
   pop.className = className;
+  if (extraClass) pop.classList.add(...String(extraClass).split(/\s+/).filter(Boolean));
   pop.dataset.popover = '1'; // global Escape handler closes anything tagged
   pop.style.position = 'fixed';
   pop.style.zIndex = '99999';
@@ -924,19 +979,14 @@ export function showContextMenu(x, y, items, className = 'context-menu') {
     }
     pop.appendChild(el);
   }
-  // Keep menu on screen. A menu TALLER than the viewport additionally gets
-  // capped + scrollable — clamping alone left its tail unreachable.
-  let mr = pop.getBoundingClientRect();
-  const vw = window.innerWidth, vh = window.innerHeight;
-  if (mr.height > vh - 8) {
-    pop.style.maxHeight = ((vh - 8) / Z) + 'px';
-    pop.style.overflowY = 'auto';
-    mr = pop.getBoundingClientRect();
-  }
-  if (mr.right > vw) pop.style.left = (Math.max(0, vw - mr.width - 4) / Z) + 'px';
-  if (mr.bottom > vh) pop.style.top = (Math.max(0, vh - mr.height - 4) / Z) + 'px';
-  if (mr.left < 0) pop.style.left = '4px';
-  if (mr.top < 0) pop.style.top = '4px';
+  // Keep menu on screen — THE ONE placement (PURE menuPlace, lane desktop-small P2-3): below the point, or above it when
+  // `up` and there is room, else clamped to the edge; a menu TALLER than the viewport is capped + scrollable (clamping
+  // alone left its tail unreachable). Viewport px measured, layout px written.
+  const mr = pop.getBoundingClientRect();
+  const at = menuPlace({ x, y, w: mr.width, h: mr.height, vw: window.innerWidth, vh: window.innerHeight, up });
+  if (at.maxH != null) { pop.style.maxHeight = (at.maxH / Z) + 'px'; pop.style.overflowY = 'auto'; }
+  pop.style.left = (at.left / Z) + 'px';
+  pop.style.top = (at.top / Z) + 'px';
   pop.style.visibility = '';
   return pop;
 }

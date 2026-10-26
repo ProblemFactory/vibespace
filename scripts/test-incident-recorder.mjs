@@ -20,6 +20,11 @@
 //      flag throws (CONTROL), and symbolicate.mjs names no flag value of its own; decodeMappings vs a hand-made VLQ line
 //   ⑤ the REAL client bundle (when built): the map rebuilt in memory maps the recorder's fill word back to
 //      src/lib/chat-enter-keys.js — the road an incident's frame takes
+//   ⑥ THE TAB'S NAVIGATION DIARY (src/lib/nav-log.js, lane phone-back-reload — every boot with its navigation type,
+//      every back with its verdict, the re-arm's landing, the exit, the stale-tab step; it survives the loads in the
+//      tab): the ring keeps the last NAV_LOG_CAP rows; a full ring of the widest rows stays small; prevDocTail reads
+//      the PREVIOUS document's last rows only; entriesShape carries no URL; the PRIVACY CENSUS — every navNote( call in
+//      src/lib writes only the declared keys (never a URL, a title, a record's words); the snapshot carries the diary
 // Run: node scripts/test-incident-recorder.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -191,6 +196,94 @@ console.log('⑤ the real client bundle');
       ok('the client map (rebuilt in memory, byte-identical) maps the recorder’s fill word to src/lib/chat-enter-keys.js', !!p && path.relative(REPO, path.resolve(ctx.mapDir, p.source)) === 'src/lib/chat-enter-keys.js', { why, col, p });
     }
   }
+}
+
+console.log('⑥ the tab\'s navigation diary (lane phone-back-reload)');
+{
+  const navCopy = path.join(TMP, 'nav-log.mjs'); fs.writeFileSync(navCopy, read('src/lib/nav-log.js'));
+  const store = new Map();
+  globalThis.sessionStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)) };
+  const NL = await import(pathToFileURL(navCopy).href);
+  for (let i = 0; i < 200; i++) NL.navNote({ k: 'pop', v: 'close', tg: 'window', ex: i });
+  const log = NL.navLogRead();
+  ok(`the ring keeps the last ${NL.NAV_LOG_CAP} rows (200 written), newest last, each stamped with t + this document's id`, log.length === NL.NAV_LOG_CAP && log[0].ex === 200 - NL.NAV_LOG_CAP && log.at(-1).ex === 199 && log.every((r) => typeof r.t === 'number' && r.d === NL.DOC_ID), { n: log.length, first: log[0], last: log.at(-1) });
+  store.clear();
+  const wide = { k: 'boot', type: 'back_forward', step: 'rebuild', st: 'other', len: 50, ents: 'x'.repeat(50) + '*S', disc: 1, ref: 'other', vis: 'visible' };
+  for (let i = 0; i < 80; i++) NL.navNote({ ...wide, i });
+  const bytes = Buffer.byteLength(store.get(NL.NAV_LOG_KEY));
+  ok(`a full diary of the widest row (a 50-entry shape) stays small: ${(bytes / 1024).toFixed(1)} KB ≤ 16 KB in sessionStorage — and the hub's body cap never feels it`, bytes <= 16 * 1024, bytes);
+  const tail = NL.prevDocTail([{ d: 'a', k: 'boot' }, { d: 'b', k: 'boot' }, { d: 'b', k: 'pop', v: 'arm' }, { d: 'b', k: 'hide' }, { d: 'me', k: 'boot' }], 'me');
+  ok('prevDocTail: the PREVIOUS document\'s last rows (up to 3, oldest first) — never an older document\'s, never this one\'s', tail.map((r) => r.d + r.k).join() === 'bboot,bpop,bhide' && NL.prevDocTail([], 'me').length === 0 && NL.prevDocTail([{ d: 'me', k: 'boot' }], 'me').length === 0, tail);
+  const shape = NL.entriesShape([{ same: false, path: '/' }, { same: true, path: '/' }, { same: true, path: '/' }, { same: false, path: '/p/abc' }], 1, '/');
+  ok('entriesShape: the entries as S / x (this document or another), * = current, o = not the app\'s page — no URL, no path text', shape === 'x*SSxo' && NL.entriesShape(null, 0, '/') === '', shape);
+  try { store.set(NL.NAV_LOG_KEY, '{not json'); NL.navNote({ k: 'boot' }); } catch (e) { ok('a corrupt diary never throws', false, e.message); }
+  ok('a corrupt diary is started again, never thrown', NL.navLogRead().length === 1);
+  delete globalThis.sessionStorage;
+  // THE PRIVACY CENSUS: every navNote( and exitIntentWrite( call under src/, PARSED (acorn) — acceptance round 3: round
+  // 2's regex read only a literal `navNote({…})` and only `key:` pairs, so a ternary argument and a shorthand key went
+  // unseen. A call's argument must be a literal row (either side of a ternary); each key declared, none spread or
+  // computed; each value read for a URL / title / text (a PURE shaper's arguments aside: what it answers is a shape);
+  // the function never passed around as a value (an alias the census could not follow).
+  // round 2: came (a way in: back / forward / other), ek (8 chars of the browser's random entry key — no URL, no title),
+  // the hop rows' n / stay / why / drop
+  const KEYS = new Set(['k', 'type', 'step', 'st', 'len', 'ents', 'disc', 'ref', 'vis', 'v', 'tg', 'ex', 'ms', 'landed', 'push', 'skip', 'load', 'p', 'b', 's', 'd2', 'capture', 'id', 'came', 'ek', 'n', 'stay', 'why', 'drop']);
+  const FNS = new Map([['navNote', KEYS], ['exitIntentWrite', new Set(['t', 'hop', 'key', 'to'])]]);
+  const acorn = require('acorn');
+  const URLISH = /href|url|title|text|name|search|hash|referr|origin|host|path|cookie|location|document/i;
+  const SHAPERS = new Set(['entriesShape', 'entryKey']);
+  const walkAst = (n, fn, parent = null) => {
+    if (!n || typeof n.type !== 'string' || fn(n, parent) === false) return;
+    for (const [k, v] of Object.entries(n)) { if (k === 'loc') continue; if (Array.isArray(v)) v.forEach((x) => walkAst(x, fn, n)); else if (v && typeof v.type === 'string') walkAst(v, fn, n); }
+  };
+  const readsOf = (v) => { const out = []; walkAst(v, (n) => { if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && SHAPERS.has(n.callee.name)) return false; if (n.type === 'Identifier') out.push(n.name); if (n.type === 'Literal' && typeof n.value === 'string' && /^(https?:|data:|\/)/.test(n.value)) out.push('a URL literal'); }); return out; };
+  const rowsOf = (a) => (a.type === 'ObjectExpression' ? [a] : a.type === 'ConditionalExpression' ? [...rowsOf(a.consequent), ...rowsOf(a.alternate)] : [null]);
+  const OWN = new Set(['FunctionDeclaration', 'ImportSpecifier', 'ExportSpecifier']);
+  function privacyCensus(src, file) {
+    const out = [];
+    walkAst(acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true }), (n, parent) => {
+      if (n.type === 'Identifier' && FNS.has(n.name) && parent && !OWN.has(parent.type) && !(parent.type === 'CallExpression' && parent.callee === n)) out.push({ file, line: n.loc.start.line, fn: n.name, keys: [], bad: ['used as a value'] });
+      if (n.type !== 'CallExpression' || n.callee.type !== 'Identifier' || !FNS.has(n.callee.name)) return;
+      const fn = n.callee.name, keys = [], bad = [];
+      if (n.arguments.length !== 1) bad.push(`${n.arguments.length} arguments`);
+      for (const row of n.arguments.length ? rowsOf(n.arguments[0]) : []) {
+        if (!row) { bad.push('an argument that is no literal row'); continue; }
+        for (const p of row.properties) {
+          if (p.type !== 'Property' || p.computed) { bad.push(p.type === 'SpreadElement' ? 'a spread' : 'a computed key'); continue; }
+          const k = p.key.type === 'Identifier' ? p.key.name : String(p.key.value);
+          keys.push(k);
+          if (!FNS.get(fn).has(k)) bad.push(`key ${k}${p.shorthand ? ' (shorthand)' : ''}`);
+          const r = readsOf(p.value).filter((x) => URLISH.test(x) || x === 'a URL literal');
+          if (r.length) bad.push(`${k} reads ${r.join(' / ')}`);
+        }
+      }
+      out.push({ file, line: n.loc.start.line, fn, keys, bad });
+    });
+    return out;
+  }
+  const calls = [];
+  for (const f of fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).filter((x) => x.endsWith('.js'))) {
+    const src = read('src/' + f);
+    if (/\b(navNote|exitIntentWrite)\b/.test(src)) calls.push(...privacyCensus(src, f));
+  }
+  const bad = calls.filter((c) => c.bad.length || (c.fn === 'navNote' && !c.keys.includes('k')));
+  const nNote = calls.filter((c) => c.fn === 'navNote').length, nIntent = calls.filter((c) => c.fn === 'exitIntentWrite').length;
+  ok(`PRIVACY CENSUS (parsed): ${nNote} navNote( + ${nIntent} exitIntentWrite( calls (${[...new Set(calls.map((c) => c.file))].join(', ')}) — each argument a literal row (either side of a ternary), only declared keys (shorthand ones too), no value reading a url / href / title / text / location`, nNote >= 15 && nIntent >= 2 && bad.length === 0 && calls.some((c) => c.keys.length > 1 && c.line && /mobile-back/.test(c.file)), bad);
+  const PLANTED = {
+    'a ternary argument whose branch reads location.href': "navNote(cond ? { k: 'hop', why: location.href } : { k: 'hop', n: 1 });",
+    'a shorthand key the set never declared': "const href = location.href; navNote({ k: 'hop', href });",
+    'a declared key, its value the URL': "navNote({ k: 'boot', why: document.URL });",
+    'a spread row': "navNote({ k: 'boot', ...row });",
+    'a variable for the row': 'navNote(row);',
+    'an alias': "const nn = navNote; nn({ k: 'boot', u: location.href });",
+    'an intent carrying the title': "exitIntentWrite({ t: Date.now(), hop: 0, key: document.title, to: 'below' });",
+  };
+  const missed = Object.entries(PLANTED).filter(([, src]) => !privacyCensus(src, 'planted').some((c) => c.bad.length)).map(([n]) => n);
+  ok(`CONTROL: the census reds each of ${Object.keys(PLANTED).length} planted calls (${Object.keys(PLANTED).join('; ')})`, missed.length === 0, missed);
+  const round2 = (src) => [...src.matchAll(/\bnavNote\(\{([^}]*)\}\)/g)].some((m) => [...m[1].matchAll(/(?:^|,)\s*([a-z0-9]+)\s*:/gi)].map((x) => x[1]).some((k) => !KEYS.has(k)));
+  ok('CONTROL (RED from round 2): round 2\'s regex census passes the ternary and the shorthand shapes — this one reds both', !round2(PLANTED['a ternary argument whose branch reads location.href']) && !round2(PLANTED['a shorthand key the set never declared']) && round2("navNote({ k: 'boot', href: location.href })"));
+  const rec = read('src/lib/incident-recorder.js');
+  ok('the snapshot carries the diary (out.navLog = navLogRead()) — every capture, manual or automatic', rec.includes("import { navLogRead } from './nav-log.js';") && rec.includes('try { out.navLog = navLogRead(); } catch { }'));
+  ok('autoCaptureIncident takes the toast\'s words (a back that cost a load is no freeze); the freeze words stay the default', /app\.autoCaptureIncident = async \(reason, detail, \{ toastKey = 'Freeze captured automatically \(\{id\}\) — see Diagnostics → Incidents' \} = \{\}\) => \{/.test(rec) && rec.includes('showToast(t(toastKey, { id: r.id }));'));
 }
 
 console.log(`\nfull console ring with stacks: ${(ringBytes / 1024).toFixed(0)} KB in bundle.json`);

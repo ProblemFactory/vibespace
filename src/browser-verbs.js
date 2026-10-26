@@ -54,7 +54,11 @@ const OURS = Object.freeze(['profiles', 'new', 'providers', 'use', 'detach', 'st
 // hook aborts the page's own request; 0.38.1 has no `passkey` verb)
 // lane browser-ui-prompts-r2 (2026-10-08): + `permission <kind> allow|deny [origin] [lat,lon]` (Browser.setPermission through the
 // watch — every kind is denied ahead; 0.38.1 has no `permission` verb, so no help fixture names it)
-const OURS_PAGE = Object.freeze(['stop', 'site-reset', 'passkey', 'permission']);
+// lane browser-surfaces (2026-10-25): + `answer <id> <answerId> [--value k=v] [--file p]` and `surfaces` (a browser kernel's prompts —
+// VibeSpace.answerSurface through the watch; 0.38.1 has neither verb)
+// lane browser-login (2026-10-25): + `login [<origin>] [--user <u>] [--submit] | --new-user <u> --generate` (a login the vault keeps,
+// filled by a custom browser kernel through VibeSpace.fillCredential — the agent never sees a value; 0.38.1 has no such verb)
+const OURS_PAGE = Object.freeze(['stop', 'site-reset', 'passkey', 'permission', 'answer', 'surfaces', 'login']);
 
 /** Page verbs (the browser CLI 0.32.0's `--help` + `skills get core --full`
  *  census, design §3.2 rows 1–2 + `close` + D4/D5's pass-throughs). `profiles`

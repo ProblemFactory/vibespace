@@ -223,7 +223,10 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
       'remote-path', 'local-path',
       // app system Layer 1 (2.369.210): `sudo -n sh -c INSTALL_SCRIPT vs-sys-install <helper> <sudoers> <helper-sha256>
       // <sudoers-sha256>` — the boot install's argv placeholders in src/app-system.js's comment.
-      'helper-sha256', 'sudoers-sha256']);
+      'helper-sha256', 'sudoers-sha256',
+      // browser engine plugin (2.369.356, lane engine-plugin — classified by lane browser-surfaces, the int356 pick after it):
+      // `<dataDir>/plugins-state/<id>/kernel/<platform-arch>/chrome` — the kernel's place in src/server/browser-engines.js's comment.
+      'platform-arch']);
     const seen = new Map();
     for (const f of files) {
       let txt; try { txt = fsx.readFileSync(path.join(REPO, f), 'utf-8'); } catch { continue; }

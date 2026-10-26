@@ -31,4 +31,20 @@ function replaceShredding(file, text) {
   }
 }
 
-module.exports = { replaceShredding };
+/** A SECRET-BEARING FILE REMOVED (lane engine-distribution: a git credential handed to ONE clone through a 0600 file — the
+ *  askpass's token, a deploy key): its bytes are overwritten in place (random, fsync) before the name is unlinked. Async (the
+ *  install road never blocks the loop); never through a link; a missing file is nothing to do. → true when it is gone. */
+async function shredFile(file) {
+  const fsp = fs.promises;
+  let st = null;
+  try { st = await fsp.lstat(file); } catch { return true; }
+  if (st.isSymbolicLink() || !st.isFile()) { await fsp.unlink(file).catch(() => {}); return true; }
+  let fh = null;
+  try { fh = await fsp.open(file, 'r+'); if (st.size > 0) await fh.write(crypto.randomBytes(st.size), 0, st.size, 0); await fh.sync().catch(() => {}); }
+  catch { /* the unlink below still removes the name */ }
+  finally { if (fh) await fh.close().catch(() => {}); }
+  await fsp.unlink(file).catch(() => {});
+  try { await fsp.lstat(file); return false; } catch { return true; }
+}
+
+module.exports = { replaceShredding, shredFile };

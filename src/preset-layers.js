@@ -1,7 +1,8 @@
 'use strict';
 /**
  * PRESET LAYERS — PURE (CJS; imports only the PURE integration registry, for
- * a row's label in the words). lane cluster-presets (B-53fe, 2026-10-01).
+ * a row's label in the words, and — lane engine-plugin — the PURE browser-engines
+ * id rule). lane cluster-presets (B-53fe, 2026-10-01).
  *
  * A COMPANY PRESET (a Google OAuth client, a Lark app, a browser key the
  * cluster provides) reaches an instance from up to THREE places, lowest first:
@@ -29,7 +30,8 @@
  *
  * THE FLEET FACTS (lane oauth-relay-one-source): `fleet.json` — a company fact
  * that is not a credential list (the fleet's sign-in relay page) rides the same
- * two layers, merged per FIELD (`parseFleet` / `mergeFleet` below).
+ * two layers, merged per FIELD (`parseFleet` / `mergeFleet` below); lane
+ * engine-plugin: + `browserEngine` (the fleet's custom browser kernel).
  */
 const R = require('./integration-registry.js');
 
@@ -71,14 +73,36 @@ const PARSERS = Object.freeze({ integrations: parseIntegrations, gdrive: parseDr
 // is PER FIELD (a field the release names replaces the cluster's, '' included — "this release has no relay page"); a
 // field neither layer names is ABSENT (the caller's fallback). It used to be a chart value rendered as an env, which
 // changes only at a pod restart, while the client rows beside it changed live: two roads for one fact.
-const FLEET_FIELDS = Object.freeze(['relayUrl']);
-/** `{relayUrl?}` → the known fields, trimmed strings (a field of another type is not named). Throws on a non-object. */
+// lane engine-plugin (design-custom-browser-plugin §1.4): + `browserEngine` = `{plugin, default, source: {git, ref}, kernel: {url,
+// sha256}}` — the fleet's custom browser kernel (the chart's `customBrowser` block): which engine plugin, whether it is the
+// DEFAULT of new browsers (`browser.defaultEngine`: the user's own value › this › 'default'), where P4 installs it from. ONE
+// field (a release's object replaces the cluster's whole); a value of another shape is not named. Lane engine-distribution:
+// + `preinstall` (true ⇒ the boot job downloads the kernel right away, else at its first use); `source.ref` is the trust
+// anchor of D2's pre-trust only when it is a full commit sha. Round 3: `kernel {url, sha256}` are kept AS NAMED (trimmed, the
+// sha256 lower-cased) — a malformed one is the kernel install's refusal by name (engine_url_not_https / engine_sha_malformed),
+// never blanked here into a silent fallback to the package's.
+const FLEET_FIELDS = Object.freeze(['relayUrl', 'browserEngine']);
+const ENG = require('./browser-engines.js'); // PURE: the engine plugin id rule (ID_RE)
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
+const str = (v, n) => (typeof v === 'string' ? v.trim().slice(0, n) : '');
+/** A fleet.json `browserEngine` → its normalized fact, or null (no plugin id ⇒ not a fact). */
+function parseBrowserEngineFact(v) {
+  if (!isObj(v) || typeof v.plugin !== 'string' || !ENG.ID_RE.test(v.plugin.trim())) return null;
+  const src = isObj(v.source) ? v.source : {}, k = isObj(v.kernel) ? v.kernel : {};
+  const given = (x, n) => (x == null ? '' : String(x).trim().slice(0, n)); // a kernel field the fleet names, whatever its type
+  return { plugin: v.plugin.trim(), default: v.default === true, preinstall: v.preinstall === true, source: { git: str(src.git, 2000), ref: str(src.ref, 200) }, kernel: { url: given(k.url, 2000), sha256: given(k.sha256, 200).toLowerCase() } };
+}
+const FLEET_PARSE = Object.freeze({ relayUrl: (v) => (typeof v === 'string' ? v.trim() : undefined), browserEngine: (v) => parseBrowserEngineFact(v) || undefined });
+/** `{relayUrl?, browserEngine?}` → the known fields (relayUrl trimmed; browserEngine normalized — a field of another shape is
+ *  not named). Throws on a non-object. */
 function parseFleet(obj) {
   if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new TypeError('not an object');
   const out = {};
-  for (const k of FLEET_FIELDS) if (typeof obj[k] === 'string') out[k] = obj[k].trim();
+  for (const k of FLEET_FIELDS) { const v = FLEET_PARSE[k](obj[k]); if (v !== undefined) out[k] = v; }
   return out;
 }
+/** A parsed field's value as the merge takes it (relayUrl: any string; browserEngine: a normalized fact). */
+const fleetValueOk = (k, v) => (k === 'browserEngine' ? !!parseBrowserEngineFact(v) : typeof v === 'string');
 /** THE FLEET MERGE, per field. `layers` = `{cluster, release}`, each a parsed object or `null` (that file is absent).
  *  `null` when both are absent, else `{facts, layerOf}` (`layerOf[field]` = the layer the value in effect came from). */
 function mergeFleet(layers = {}) {
@@ -87,15 +111,18 @@ function mergeFleet(layers = {}) {
   for (const layer of LAYERS) {
     const f = layers[layer];
     if (!f || typeof f !== 'object') continue;
-    for (const k of FLEET_FIELDS) if (typeof f[k] === 'string') { facts[k] = f[k]; layerOf[k] = layer; }
+    for (const k of FLEET_FIELDS) if (fleetValueOk(k, f[k])) { facts[k] = k === 'browserEngine' ? parseBrowserEngineFact(f[k]) : f[k]; layerOf[k] = layer; }
   }
   return { facts, layerOf };
 }
 /** The fields whose value in effect moved between two merges (absent ≠ ''). */
-const diffFleet = (prev, next) => FLEET_FIELDS.filter((k) => (prev && k in prev.facts ? prev.facts[k] : null) !== (next && k in next.facts ? next.facts[k] : null));
+const fleetKey = (m, k) => (m && k in m.facts ? JSON.stringify(m.facts[k]) : null); // lane engine-plugin: an object field compares by value
+const diffFleet = (prev, next) => FLEET_FIELDS.filter((k) => fleetKey(prev, k) !== fleetKey(next, k));
 /** The journal's words for the moved fields (English; a relay page is an address every vendor app lists — not a secret). */
 function fleetWords(fields, next) {
-  return fields.map((k) => (k === 'relayUrl' ? `relay page changed (now ${next && next.facts.relayUrl ? next.facts.relayUrl : next && 'relayUrl' in next.facts ? 'none' : 'unset — the environment is the fallback'})` : `${k} changed`)).join(' · ');
+  return fields.map((k) => (k === 'relayUrl' ? `relay page changed (now ${next && next.facts.relayUrl ? next.facts.relayUrl : next && 'relayUrl' in next.facts ? 'none' : 'unset — the environment is the fallback'})`
+    // lane engine-plugin: the engine by its plugin id + whether it is the default — never its source or kernel address
+    : k === 'browserEngine' ? `browser engine changed (now ${next && next.facts.browserEngine ? `${next.facts.browserEngine.plugin}, ${next.facts.browserEngine.default ? 'the default of new browsers' : 'not the default'}` : 'unset'})` : `${k} changed`)).join(' · ');
 }
 
 /** An entry's identity inside its kind (what an override replaces). */

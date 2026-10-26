@@ -250,6 +250,8 @@ export default {
   "WebGL renderer": "WebGL レンダラー",
   "Draw terminals with WebGL (fast). Turn it off to test whether GPU-side freezes come from the terminals — new terminals then use the DOM renderer (existing ones keep theirs until reopened).": "ターミナルを WebGL で描画します（高速）。GPU 側のフリーズがターミナル由来か確かめるにはオフに — 以降の新しいターミナルは DOM レンダラーを使います（既存のものは開き直すまでそのまま）。",
   "Freeze captured automatically ({id}) — see Diagnostics → Incidents": "フリーズの現場を自動取得しました（{id}）— 診断 → インシデントを参照",
+  "A back press reloaded the page — captured automatically ({id}), see Diagnostics → Incidents": "戻る操作でページが再読み込みされました — 現場を自動取得しました（{id}）— 診断 → インシデントを参照",
+  "This tab still runs VibeSpace {old} after its one reload for {new} — reload it yourself to update": "{new} のための 1 回の再読み込みの後も、このタブは VibeSpace {old} のままです — 手動で再読み込みして更新してください",
   "Freeze capture failed ({err})": "フリーズの現場取得に失敗しました（{err}）",
   "The desktop is not connected — reconnect first": "デスクトップが接続されていません — 先に再接続してください",
   "This page is not served over HTTPS, so the browser will not hand over the clipboard — paste here instead (Ctrl+V), then Send.": "このページは HTTPS ではないため、ブラウザはクリップボードを渡しません — ここに貼り付け（Ctrl+V）てから送信してください。",
@@ -4004,6 +4006,12 @@ export default {
   "Select…": "選択…",
   "Agent session": "エージェントセッション",
   "Add desktop": "デスクトップを追加",
+  // lane desktop-small: the taskbar at a small screen (the «+N» chip, the compact desktop switcher) and the Settings foot
+  "{n} more windows — click for the list": "ほかに {n} 個のウィンドウ — クリックで一覧",
+  "Desktop {k}/{n}": "デスクトップ {k}/{n}",
+  "«{name}» is no longer there — the window stays where it is": "「{name}」はもうありません — ウィンドウはそのままです",
+  "Switch desktop — {name}": "デスクトップを切り替え — {name}",
+  "Every change here saves as you make it — there is nothing to press at the end.": "ここでの変更はすべてその場で保存されます — 最後に押すボタンはありません。",
   "No windows on this desktop": "このデスクトップにウィンドウはありません",
   "Minimized": "最小化済み",
   "Copy screen (the visible terminal text)": "画面をコピー（ターミナルの表示中テキスト）",
@@ -5322,6 +5330,7 @@ export default {
   "Only this session: {name}": "このセッションのみ：{name}",
   "{n} options": "{n} 個の選択肢",
   "Mark done": "完了にする",
+  "inbox::Chat": "会話",
   "inbox::Dismiss": "無視",
   "inbox::Actions": "要対応",
   "Copy the whole item": "項目全体をコピー",
@@ -8861,7 +8870,7 @@ export default {
   "Set up first": "先に設定",
   "Offline": "オフライン",
   "VibeSpace virtual desktop": "VibeSpace 仮想デスクトップ",
-  "This host’s own screen is a Wayland session — it cannot be shown yet; the virtual desktop can": "このホストの画面は Wayland セッションのため、まだ表示できません。仮想デスクトップは使えます",
+  "This host’s own screen is a Wayland session and cannot be shown yet — click here for the virtual desktop.": "このホスト自身の画面は Wayland セッションのため、まだ表示できません — ここをクリックすると仮想デスクトップを開きます。",
   "Checking machines…": "マシンを確認中…",
   "No paired Windows or Mac machine yet": "ペアリングした Windows / Mac はまだありません",
   // lane desktop-picker-instant: a machine row's 技術詳細 (its title)
@@ -10823,4 +10832,152 @@ export default {
   "{n} not opened on this screen yet": "ほか {n} 件はまだこの画面で開いていません",
   "“{name}” is no longer there": "「{name}」はもうありません",
   "Other desktops ({n})": "ほかのデスクトップ（{n}）",
+  // lane engine-plugin: a browser ENGINE plugin — the «自研内核» card, the default engine setting, the consent line
+  "Chrome (the browser CLI's build)": "Chrome（ブラウザ CLI のビルド）",
+  "The custom kernel (vibespace.custom-browser plugin)": "独自カーネル（vibespace.custom-browser プラグイン）",
+  "Default browser engine": "既定のブラウザエンジン",
+  "Which browser program NEW agent browsers run: Chrome as the browser CLI installs it (default), or the custom kernel of the vibespace.custom-browser plugin. Read when a profile is created and when a conversation's browser first starts, then kept on it — Change build… switches an existing profile. A cluster can preset it; a value you pick here wins.": "新しいエージェントブラウザが動かすブラウザプログラム：ブラウザ CLI がインストールした Chrome（既定）か、vibespace.custom-browser プラグインの独自カーネル。プロファイルの作成時と会話のブラウザの初回起動時に読まれ、その後はそこに保存されます — 既存のプロファイルは「ビルドを変更…」で切り替えます。クラスタが事前に設定できます。ここで選んだ値が優先されます。",
+  "the custom kernel ({id})": "独自カーネル（{id}）",
+  "{plugin} does not answer as a browser engine.": "{plugin} はブラウザエンジンとして応答しません。",
+  "{plugin} · its kernel is not installed on this computer.": "{plugin} · そのカーネルはこのコンピュータにインストールされていません。",
+  "{plugin} · its kernel can't be run.": "{plugin} · そのカーネルは実行できません。",
+  "{plugin} · version {version}": "{plugin} · バージョン {version}",
+  "{plugin} · the kernel did not say its version": "{plugin} · カーネルがバージョンを返しませんでした",
+  "The browser engines could not be read.": "ブラウザエンジンの一覧を読めませんでした。",
+  "Set by the cluster preset: {value}.": "クラスタのプリセットで設定：{value}。",
+  "Your choice: {value}.": "あなたの選択：{value}。",
+  "Default: {value}.": "既定：{value}。",
+  "No browser engine plugin is enabled on this computer.": "このコンピュータで有効なブラウザエンジンのプラグインはありません。",
+  "Custom kernel": "独自カーネル",
+  "Its plugin is not running on this computer.": "そのプラグインはこのコンピュータで動いていません。",
+  "That browser engine plugin is not running on this computer — enable it in ⚙ → Plugins.": "そのブラウザエンジンのプラグインはこのコンピュータで動いていません — ⚙ → プラグイン で有効にしてください。",
+  "That engine's kernel is not installed on this computer.": "そのエンジンのカーネルはこのコンピュータにインストールされていません。",
+  "That engine's kernel can't be run.": "そのエンジンのカーネルは実行できません。",
+  "That engine speaks another version of the engine protocol — update the plugin or VibeSpace.": "そのエンジンは別のバージョンのエンジンプロトコルを話します — プラグインか VibeSpace を更新してください。",
+  "That engine's plugin did not answer — restart it in ⚙ → Plugins.": "そのエンジンのプラグインが応答しません — ⚙ → プラグイン で再起動してください。",
+  "That engine asked to set environment variables VibeSpace does not allow.": "そのエンジンは VibeSpace が許可しない環境変数の設定を求めました。",
+  "Can be chosen as the agent browser: it names the program VibeSpace starts as a profile's browser, outside the plugin sandbox.": "エージェントブラウザとして選べます：VibeSpace がプロファイルのブラウザとして起動するプログラムを指定し、そのプログラムはプラグインのサンドボックスの外で動きます。",
+  "The page shows a dialog": "ページがダイアログを表示しています", // lane browser-surfaces
+  "The site asks for a client certificate": "サイトがクライアント証明書を求めています", // lane browser-surfaces
+  "The page asks for a permission": "ページが権限を求めています", // lane browser-surfaces
+  "The page wants to download a file": "ページがファイルをダウンロードしようとしています", // lane browser-surfaces
+  "The page wants to print": "ページが印刷しようとしています", // lane browser-surfaces
+  "The page wants to open a window": "ページがウィンドウを開こうとしています", // lane browser-surfaces
+  "The page shows a list to choose from": "ページが選択リストを表示しています", // lane browser-surfaces
+  "The page asks for a passkey": "ページがパスキーを求めています", // lane browser-surfaces
+  "The page has a login form": "ページにログインフォームがあります", // lane browser-surfaces
+  "The page asks for a payment": "ページが支払いを求めています", // lane browser-surfaces
+  "The page wants to open another program": "ページが別のプログラムを開こうとしています", // lane browser-surfaces
+  "The browser shows a warning page": "ブラウザが警告ページを表示しています", // lane browser-surfaces
+  "The page wants to go full screen": "ページが全画面表示にしようとしています", // lane browser-surfaces
+  "The page wants to lock the pointer": "ページがポインタをロックしようとしています", // lane browser-surfaces
+  "The page asks to capture a screen or camera": "ページが画面またはカメラのキャプチャを求めています", // lane browser-surfaces
+  "The page asks to use a device": "ページがデバイスの使用を求めています", // lane browser-surfaces
+  "The page shows a picker": "ページがピッカーを表示しています", // lane browser-surfaces
+  "A browser prompt was suppressed": "ブラウザのプロンプトが抑止されました", // lane browser-surfaces
+  "The browser shows a prompt": "ブラウザがプロンプトを表示しています", // lane browser-surfaces
+  "Site: {origin}": "サイト：{origin}", // lane browser-surfaces
+  "Frame: {origin}": "フレーム：{origin}", // lane browser-surfaces
+  "Kind: {kind}": "種類：{kind}", // lane browser-surfaces
+  "The page waits for this answer — the agent is told it is open": "ページはこの回答を待っています — エージェントには開いていることが伝わっています", // lane browser-surfaces
+  "The page runs on — the agent is told": "ページはそのまま動いています — エージェントには伝わっています", // lane browser-surfaces
+  "A file in the browser’s downloads folder (its full path)": "ブラウザのダウンロードフォルダ内のファイル（フルパス）", // lane browser-surfaces
+  "A page in the agent browser asks you ({site}): {what}": "エージェントブラウザのページが尋ねています（{site}）：{what}", // lane browser-surfaces
+  "A page in the agent browser asks you: {what}": "エージェントブラウザのページが尋ねています：{what}", // lane browser-surfaces
+  "Open its live view to answer it there — or Approve / Reject here.": "ライブビューを開いてそこで回答するか、ここで承認 / 拒否してください。", // lane browser-surfaces
+  "Presses “{label}” on the page": "ページで「{label}」を押します", // lane browser-surfaces
+  "Refused — the page was told": "拒否しました — ページに伝わりました", // lane browser-surfaces
+  "Answered — the page moves on": "回答しました — ページは先へ進みます", // lane browser-surfaces
+  "That prompt changed after it was shown — nothing was answered; read it again": "このプロンプトは表示後に変わりました — 何も回答していません。もう一度読んでください", // lane browser-surfaces
+  "That prompt is no longer open": "このプロンプトはもう開いていません", // lane browser-surfaces
+  // lane foryou-honest: the honest count, the session row's marker, ✓ / ✕ with Undo
+  "{n} waiting on you — none pressing": "{n} 件が対応待ち — 急ぎはありません",
+  "{n} more, none pressing": "ほか {n} 件（急ぎなし）",
+  "needs you · {n}": "要対応 · {n}",
+  "Open the {n} open items of this conversation in the For-you window": "この会話の {n} 件を「あなた宛て」ウィンドウで開く",
+  "Marked done": "完了にしました",
+  "Dismissed": "無視しました",
+  "Any site": "すべてのサイト",
+  "Any account on this site": "このサイトのすべてのアカウント",
+  "This account": "このアカウント",
+  "Shows the password — after the second password. An agent never sees it: the custom browser kernel fills it": "パスワードを表示します — 2 つ目のパスワードの後で。エージェントは決して見ません：独自ブラウザーカーネルが入力します",
+  "Filled for:": "入力を許可：",
+  "Let the custom browser kernel fill this login for a conversation, a task group or everyone — they never see the password": "独自ブラウザーカーネルが、会話・タスクグループ・全員のためにこのログインを入力できるようにします — パスワードは決して見えません",
+  "Who may have \"{name}\" filled": "「{name}」を入力してもらえるのは誰か",
+  "For": "範囲",
+  "Every conversation on this instance": "このインスタンスのすべての会話",
+  "The custom browser kernel fills the user name and password into the site's own form — the conversation never sees them. «Any account on this site» also lets an agent register new accounts there, through the vault.": "独自ブラウザーカーネルがユーザー名とパスワードをサイト自身のフォームに入力します — 会話には決して見えません。「このサイトのすべてのアカウント」は、エージェントがボールト経由でそこに新しいアカウントを登録することも許可します。",
+  "Add a website login": "ウェブサイトのログインを追加",
+  "The site — e.g. https://example.com": "サイト — 例：https://example.com",
+  "The user name or email you sign in with": "サインインに使うユーザー名またはメール",
+  "Its password": "そのパスワード",
+  "Optional — the name of its two-step code in this vault": "任意 — このボールトにある対の 2 段階コードの名前",
+  "Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.": "入力されるのはそのサイト自身（正確なアドレス、https）だけです — 別のサイトにも、それを埋め込んだフレームにも入力しません。",
+  "Updated the login in the vault": "ボールトのログインを更新しました",
+  "Saved the login to the vault": "ログインをボールトに保存しました",
+  "Give the site's address over https (http only for this machine's localhost)": "https のサイトアドレスを入力してください（http はこのマシンの localhost のみ）",
+  "Give the user name (no spaces, no #)": "ユーザー名を入力してください（空白と # は不可）",
+  "Type its password": "そのパスワードを入力してください",
+  "The two-step code's name, as it is listed in this vault": "このボールトに表示されている 2 段階コードの名前",
+  "Delete the login \"{name}\"?": "ログイン「{name}」を削除しますか？",
+  "Its password leaves the vault and this account's own grant goes with it. Agents can no longer be signed in there with it.": "パスワードはボールトから消え、このアカウント自身の許可も一緒に消えます。エージェントはもうこれでそこにサインインできません。",
+  "Website login…": "ウェブサイトのログイン…",
+  "Saves it in the vault — agents you allow can have it filled, never seeing it": "ボールトに保存します — 許可したエージェントは入力してもらえますが、決して見えません",
+  "Not saved — the password was forgotten": "保存しませんでした — パスワードは破棄しました",
+  "That card changed after it was shown — nothing was saved; read it again": "このカードは表示後に変わりました — 何も保存していません。もう一度読んでください",
+  "That card is no longer open — the password was not kept": "このカードはもう開いていません — パスワードは保持していません",
+  "Web logins": "ウェブログイン",
+  "Registered by an agent · its password made by the vault, never shown": "エージェントが登録 · パスワードはボールトが生成、一度も表示されていません",
+  "Typed by an agent itself · strength unknown — the agent knows it": "エージェント自身が入力 · 強度不明 — エージェントはこのパスワードを知っています",
+  "An agent registered {user} on {site} — the vault made its password and saved the login": "エージェントが {site} で {user} を登録しました — パスワードはボールトが生成し、ログインを保存しました",
+  "The agent never saw the password. It is in the Vault under Web logins, marked as registered by an agent.": "エージェントはパスワードを一度も見ていません。ボールトの「ウェブログイン」にあり、エージェントが登録したと表示されます。",
+  "An agent signed up {user} on {site} with a password it typed itself — saved to the vault, marked «typed by the agent»": "エージェントが自分で入力したパスワードで {site} に {user} を登録しました — ボールトに保存し、「エージェントが入力」と表示します",
+  "The vault did not make this password, so its strength is unknown and the agent knows it. It is in the Vault under Web logins — change it on the site if you want one only the vault knows.": "このパスワードはボールトが生成したものではないため、強度は不明で、エージェントはこれを知っています。ボールトの「ウェブログイン」にあります — ボールトだけが知るパスワードにしたい場合は、そのサイトで変更してください。",
+  "The login {user} on {site} was updated — its password changed": "{site} のログイン {user} を更新しました — パスワードが変わりました",
+  "The previous password is kept in the entry for one revision (Vault → Web logins).": "以前のパスワードはエントリに 1 世代分保持されます（ボールト → ウェブログイン）。",
+  "Update the saved login {user} on {site}?": "{site} に保存済みのログイン {user} を更新しますか？",
+  "Save the login {user} on {site} to the vault?": "{site} のログイン {user} をボールトに保存しますか？",
+  "You signed in with a different password in the agent browser. Update keeps the old one in the entry for one revision.": "エージェントブラウザーで別のパスワードでサインインしました。更新すると、古いパスワードはエントリに 1 世代分保持されます。",
+  "You signed in by hand in the agent browser. Saved logins can be filled by agents you allow — they never see the password.": "エージェントブラウザーで手動でサインインしました。保存したログインは、許可したエージェントのために入力されます — パスワードは決して見えません。",
+  "{plugin} · downloading its kernel… {pct}%": "{plugin} · カーネルをダウンロード中… {pct}%",
+  "{plugin} · downloading its kernel…": "{plugin} · カーネルをダウンロード中…",
+  "{plugin} · its kernel could not be downloaded: {why}": "{plugin} · カーネルをダウンロードできませんでした：{why}",
+  "verified": "検証済み",
+  "{plugin} · measured {version}": "{plugin} · 実測 {version}",
+  "{plugin} · declared {version} (not measured)": "{plugin} · 宣言 {version}（未実測）",
+  "not enough free disk space": "ディスクの空き容量が足りません",
+  "the engine offers no kernel for this computer": "このエンジンにはこのコンピューター用のカーネルがありません",
+  "its download server could not be reached": "ダウンロードサーバーに接続できませんでした",
+  "the download did not match its sha256 — nothing was kept": "ダウンロードが sha256 と一致しません — 何も保持していません",
+  "the archive is not the layout its kernel.json declares": "アーカイブの構成が kernel.json の宣言と違います",
+  "its kernel.json cannot be read": "kernel.json を読めません",
+  "The cluster's plugin {plugin} could not be installed: {error}": "クラスターのプラグイン {plugin} をインストールできませんでした：{error}",
+  "Installed and trusted by the cluster": "クラスターがインストールし信頼済み",
+  "Ref": "参照（Ref）",
+  "a tag, a branch or a full commit sha (empty = the default branch)": "タグ、ブランチ、または完全なコミット sha（空欄 = 既定のブランチ）",
+  "None (a public repository)": "なし（公開リポジトリ）",
+  "Plugin Git credential": "プラグイン Git 認証情報",
+  "A private repository is read with the Plugin Git credential kept in Integrations (sealed by the vault) — a token is never typed here.": "プライベートリポジトリは「連携」に保存したプラグイン Git 認証情報（ボールトで封印）で読み取ります — トークンをここに入力することはありません。",
+  "Plugin Git credential — {host} ({kind})": "プラグイン Git 認証情報 — {host}（{kind}）",
+  "token": "トークン",
+  "deploy key": "デプロイキー",
+  "Plugin Git credential (not set — Set up…)": "プラグイン Git 認証情報（未設定 — 設定…）",
+  "Plugin Git repository": "プラグイン Git リポジトリ",
+  "Git host": "Git ホスト",
+  "The host of the private repository (no scheme, no path). The credential is handed to this host only.": "プライベートリポジトリのホスト（スキームもパスも付けない）。認証情報はこのホストにだけ渡されます。",
+  "For an https token: the user name the host expects with it (empty = x-access-token, which GitHub accepts).": "https トークン用：ホストがトークンと一緒に求めるユーザー名（空欄 = x-access-token、GitHub はこれを受け付けます）。",
+  "Access token (https)": "アクセストークン（https）",
+  "A read-only access token for https://<host>/… repositories. Git receives it through a file VibeSpace removes after the clone — never in a URL or on a command line.": "https://<host>/… リポジトリ用の読み取り専用アクセストークン。Git はファイル経由で受け取り、クローン後に VibeSpace がそのファイルを削除します — URL やコマンドラインには決して入りません。",
+  "Deploy key (ssh)": "デプロイキー（ssh）",
+  "A read-only ssh deploy key without a passphrase, for git@<host>:… repositories. Paste the whole private key.": "git@<host>:… リポジトリ用の、パスフレーズなしの読み取り専用 ssh デプロイキー。秘密鍵全体を貼り付けてください。",
+  "Runs git ls-remote with this credential against a repository this instance knows on that host (the cluster's plugin source, or one you installed from). Reads the branch list only.": "この認証情報で、このインスタンスがそのホスト上で知っているリポジトリ（クラスターのプラグインの取得元、またはあなたがインストールに使ったもの）に git ls-remote を実行します。ブランチ一覧だけを読みます。",
+  "Proves the host accepts the credential for that repository — not that every repository on the host is readable, nor that its plugin is valid.": "ホストがそのリポジトリに対してこの認証情報を受け入れることを示します — ホスト上のすべてのリポジトリが読めることも、そのプラグインが有効であることも示しません。",
+  "Used by Install plugin… for a private Git repository": "「プラグインをインストール…」がプライベート Git リポジトリに使います",
+  "{name}: its browser kernel could not be downloaded": "{name}：ブラウザーカーネルをダウンロードできませんでした",
+  "{name}: the cluster's plugin could not be installed": "{name}：クラスターのプラグインをインストールできませんでした",
+  "{plugin} · its kernel needs Node {need} or later to unpack — this VibeSpace runs on Node {node}; nothing was downloaded": "{plugin} · カーネルの展開には Node {need} 以降が必要です——この VibeSpace は Node {node} で動作しています。何もダウンロードしていません",
+  "the cluster names a kernel address that is not https": "クラスターが指定したカーネルのアドレスが https ではありません",
+  "{plugin} · its previous kernel is set aside and could not be put back in its place — VibeSpace tries again at the next start": "{plugin} · 以前のカーネルが脇に移されたまま元の場所に戻せませんでした——VibeSpace は次回の起動時にもう一度試します",
+  "the cluster pins a kernel sha256 that is not 64 hex digits": "クラスターが指定したカーネルの sha256 が 16 進数 64 桁ではありません",
+  "{name}: its browser kernel is set aside and could not be put back": "{name}：ブラウザーカーネルが脇に移されたまま戻せませんでした",
 };

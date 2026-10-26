@@ -264,6 +264,34 @@ presets:
   # only: with volume=false no relay page reaches the pod (the NOTES say so).
   relayUrl: ""
 
+# THE FLEET'S CUSTOM BROWSER KERNEL (lane engine-plugin; docs/design-custom-browser-plugin.zh.md
+# §1.4): enabled ⇒ rendered into this release's override fleet.json as ONE key
+# `browserEngine` {plugin: "vibespace.custom-browser", default, source, kernel}
+# beside the relay page (no env: a fleet fact moves live, never at a restart).
+# `default: true` makes the kernel the engine of every NEW agent browser on the
+# pod (Settings → Agent browser → «Default browser engine» says «set by the
+# cluster preset»; a value the user picks there wins; existing profiles keep
+# theirs). `source` = where each pod installs the plugin from (a git URL; its
+# credential is the `plugin-git` row of integrations — e.g. presets.override /
+# integrations: [{id: plugin-git, values: {host, token}}]), `ref` = the FULL
+# commit sha it pins (a tag can move: only a sha is the trust anchor — the
+# cluster's plugin is pre-trusted only at that sha, D2; the kernel side's
+# v0.1.2 is 7085e75f53efa707fb26c7b297d6789d6c9df0b0). `kernel` = its binary
+# (url + sha256 on the fleet's own artifact host; empty = the plugin's
+# kernel.json). `preinstall: true` downloads the kernel (≈1.2 GB, onto the
+# PVC) right after the pod starts; false = at its first use. The image never
+# carries the kernel. The volume form only (presets.volume), like the relay page.
+customBrowser:
+  enabled: false
+  default: false
+  preinstall: false
+  source:
+    git: ""
+    ref: ""
+  kernel:
+    url: ""
+    sha256: ""
+
 # LEGACY per-release preset blocks — with presets.volume (the default) they are
 # this release's OVERRIDE (the same as presets.override, which wins when set);
 # with presets.volume=false they are rendered as env, as before.

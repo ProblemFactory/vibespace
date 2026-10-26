@@ -11,13 +11,16 @@
 // "typing" marker; keyup entries only a modifier's name), ws entries keep
 // type/sessionId/size only (never payload bodies), chat content is never
 // captured (transcripts already live on disk — the bundle's timestamps point
-// at them). The user-supplied note is the only free text.
+// at them). The user-supplied note is the only free text. The tab's navigation
+// diary (./nav-log.js, lane phone-back-reload) rides every capture as
+// snapshot.navLog: entry shapes, back verdicts, versions — never a URL.
 import { t } from './i18n.js';
 import { onRendererFreeze } from './telemetry-client.js';
 import { BUILD_VERSION } from './build-version.js';
 import { actionKeyWords, actionKeyUpWords, imeMarker } from './chat-enter-keys.js';
 import { showToast, fetchJson, copyText, createModalShell, escHtml, uiScale } from './utils.js';
 import { stackHead } from './incident-stack.js'; // lane vault-chip-zone-errors: an uncaught / unhandled entry keeps its first frames (PURE)
+import { navLogRead } from './nav-log.js'; // lane phone-back-reload: the tab's diary — survives the loads in this tab, so a back that cost one is in it
 
 const CAP = { action: 500, ws: 700, console: 250, op: 300 };
 
@@ -161,6 +164,7 @@ export function installIncidentRecorder(app) {
     try { out.screenEvents = window.__vsScreenEvents ? window.__vsScreenEvents().slice(-40) : null; } catch { }
     try { out.inputs = window.__vsInputs ? window.__vsInputs().slice(-40) : null; } catch { }   // pointer/key timestamps (no elements) — the paint-gap verdict's present-person evidence
     try { out.fetchTimings = window.__vsFetchTimings ? window.__vsFetchTimings().slice(-20) : null; } catch { }   // lane vault-slow-load: this page's last requests (route, ms) — «加载有点长» answers itself
+    try { out.navLog = navLogRead(); } catch { }   // lane phone-back-reload: every boot (its navigation type), back, re-arm, exit and stale-tab step of THIS TAB — the documents before this one included
     try {
       out.windows = [...app.wm.windows.values()].map((w) => ({
         id: w.id, type: w.type, title: w.titleSpan?.textContent?.slice(0, 60),
@@ -234,7 +238,8 @@ export function installIncidentRecorder(app) {
   // 10 minutes: the same bundle as the button, the note names the freeze, and a
   // toast names the incident id so the capture is never silent.
   let lastAuto = 0;
-  app.autoCaptureIncident = async (reason, detail) => {
+  // toastKey (lane phone-back-reload): the words naming the capture ({id}) — a back that cost a load is no freeze
+  app.autoCaptureIncident = async (reason, detail, { toastKey = 'Freeze captured automatically ({id}) — see Diagnostics → Incidents' } = {}) => {
     if (Date.now() - lastAuto < 10 * 60e3) return null;
     lastAuto = Date.now();
     const note = `auto: ${reason} — ${detail}`.slice(0, 2000);
@@ -242,7 +247,7 @@ export function installIncidentRecorder(app) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ note, rings, snapshot: snapshot(), version: BUILD_VERSION, auto: true }),
     });
-    if (r?.id) showToast(t('Freeze captured automatically ({id}) — see Diagnostics → Incidents', { id: r.id }));
+    if (r?.id) showToast(t(toastKey, { id: r.id }));
     else showToast(t('Freeze capture failed ({err})', { err: r?.error || 'no answer' }), { type: 'error' });
     return r?.id || null;
   };

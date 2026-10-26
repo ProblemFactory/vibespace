@@ -359,6 +359,45 @@ guess from a timeout:
   Agent browser panel; it loses what was typed on the page); never retry in a
   loop.
 
+### Browser prompts on the custom kernel — `vibespace-browser surfaces` / `answer`
+
+When your browser runs the custom kernel (a profile whose build is the «Custom kernel»), EVERY prompt a page raises — a dialog,
+a file picker, an HTTP sign-in, a permission, a print, a popup, a select's list, a date picker… — is a card VibeSpace shows
+(lane browser-surfaces). A prompt that holds the page ends your command `[dialog_open]` like a page dialog; its sentence names
+each answer as a command:
+
+* `vibespace-browser surfaces` — what is open on your browser: id, kind, whether it holds the page, its answers (`(user)` =
+  only the user may pick it).
+* `vibespace-browser answer <id> <answerId> [--value <field>=<text>]… [--file <path>]…` — press one of its answers. A file is
+  handed to the page ONLY from the browser's downloads folder (copy it there first — anything else is
+  `surface_path_refused`). A page dialog still takes `dialog accept [text] | dismiss`.
+* The user's answers are theirs: a sign-in, a client certificate, a screen / device picker, proceeding past a warning page,
+  where a download is saved — `answer` refuses them `surface_owner_only` (you may still refuse the prompt); the user answers
+  in the live view or on their For-you card, and your next command says so.
+* Decided for you at once (told in your next result): permissions are denied unless you allowed one ahead
+  (`vibespace-browser permission <kind> allow [origin]`), downloads are saved, opening another program is refused, a
+  payment request is cancelled.
+
+### Signing in on the custom kernel — `vibespace-browser login`
+
+On the custom kernel the password manager is the owner's vault (lane browser-login): the kernel reports each login form a page
+shows, and `login` has the kernel fill it with a login the vault keeps — you never see the password or the two-step code, so
+never ask the owner for one.
+
+* `vibespace-browser login [<origin>] [--user <name>] [--submit]` — fill the login form on your tab (no origin = the form on
+  your tab; `--user` when the vault keeps several logins of that site; `--submit` submits it too, else press its button).
+  The answer names what was filled and a receipt. Refusals by name: `login_no_form` (open the sign-in page first — standard
+  Chrome reports no forms), `login_phishing` (a login is filled only on its own site: exact origin and port, https, never a
+  frame of another site), `login_not_granted` (the owner grants it in the Vault window — tell them which site),
+  `login_no_entry`, `login_ambiguous`, `vault_locked` (the owner already knows — do not ask them to unlock).
+* `vibespace-browser login [<origin>] --new-user <name> --generate [--submit]` — register an account THROUGH the vault: the
+  vault makes a strong password that fits the site's rules (`password_rules_unsupported` when none can), the kernel fills it,
+  and when the page takes the form the login is saved for the owner automatically (they get one notice). Use this instead of
+  typing a password yourself — a password you type is saved too, but marked as one you know.
+* `vibespace-browser login [<origin>] [--user <name>] --generate` on a change-password form — the vault makes the new one.
+* A two-step code the owner paired with the login is filled with it. An HTTP sign-in box on the kernel is answered by `login`
+  the same way.
+
 ### A page waiting for a passkey — `[passkey_open]` / `[passkey_ask]`; the passkeys your browser holds
 
 A sign-in page may call the browser's passkey API (WebAuthn: "Use your passkey", "Create a passkey"). VibeSpace keeps
@@ -891,7 +930,7 @@ Browsing: `vibespace-browser <verb>` — open <url> / snapshot / click @ref / fi
 ## When the page asks for a file or a sign-in
 
 - **A file chooser** (an upload button): no file window ever shows in your browser and nothing is picked. Your next command's result says so (`[page_prompt]`). Upload with `vibespace-browser upload <selector of the file input> <path>` (a file in your conversation's folder). The page keeps running meanwhile.
-- **An HTTP sign-in** (the browser's own username/password box, basic or digest): only the user can answer it — they type it in the live view, and you never see it. Tell the user which site asks; do not retry the page in a loop. After 60 s it also shows in their For you tray.
+- **An HTTP sign-in** (the browser's own username/password box, basic or digest): only the user can answer it — they type it in the live view, and you never see it. (On the custom kernel a login the vault keeps answers it: `vibespace-browser login`.) Tell the user which site asks; do not retry the page in a loop. After 60 s it also shows in their For you tray.
 - A sign-in also ends the command that ran into it AT ONCE with that sentence (`[page_prompt]`) — never after its timeout.
 - **A permission** (location, notifications, camera, microphone, …): every kind is DENIED ahead, so a page asking is answered at once. To allow one for your tab's site: `vibespace-browser permission <kind> allow [origin] [<lat>,<lon>]` (geolocation needs the position to answer with one); `deny` puts it back. The user sees the line in the live view.
 - **Print** (`window.print()`): the print window is closed by VibeSpace (in the hidden window it froze the page) and your next result says so once. For a printout: `vibespace-browser pdf <path>`.

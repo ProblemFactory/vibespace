@@ -1329,6 +1329,15 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
       // lane launch-picture-size (composed at the 2.369.272 integration): the user's Pin size… — a FIXED picture size for any
       // conversation's browser; an agent fixes its OWN through POST /api/agent/browser/size (SIZE_IS_USERS)
       ['POST', '/api/browser/size', '/api/browser/size', { sessionId: 'sess-any', size: '1280x720' }],
+      // lane engine-plugin (walked by lane browser-surfaces — the row P0 left out): the engines' facts row of Settings → Agent browser
+      ['GET', '/api/browser/engines', '/api/browser/engines'],
+      // lane browser-surfaces: the owner's Approve / Reject on a browser prompt's For-you card — an agent answers its OWN browser's
+      // prompts through `vibespace-browser answer` (SURFACE_IS_USERS)
+      ['POST', '/api/browser/surfaces/:id/:verb', '/api/browser/surfaces/surf-1/approve', { shown: '00000000' }],
+      // int358 (the census found both on the lanes' own tips — walked here): lane browser-login, the owner's Save / Not now on
+      // a save-login For-you card (SAVE_LOGIN_IS_USERS); lane engine-distribution, the kernel's download (ENGINES_ARE_USERS)
+      ['POST', '/api/browser/logins/cards/:id/:verb', '/api/browser/logins/cards/sl-0000abcd/approve', { shown: '00000000' }],
+      ['POST', '/api/browser/engines/:id/kernel', '/api/browser/engines/vibespace.custom-browser/kernel', {}],
     ];
     const table = WALK_H.map(([m, p]) => m + ' ' + p).sort();
     ok(J(derived) === J(table), `the human-route census: the routes that serve HIS browsing, derived from the routers (${derived.length}), are exactly the walk's table — a new one is RED until it is walked`, { derived, table });

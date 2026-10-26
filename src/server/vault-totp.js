@@ -223,7 +223,25 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     return { ok: true, name: String(name), code: r.code, secondsLeft: r.secondsLeft, period: r.period };
   }
 
-  return { addEntry, view, drop, grant, ungrant, list, use, GRANTS_FILE };   // addEntry, never `add(`: a For-you add site's name (test-user-todos-layout's census)
+  /** lane browser-login (D3 — the owner, 2026-10-25: the login grant COVERS its paired two-step code): the CODE of `name` for a
+   *  web login the browser-login door already admitted — the hub fills it through the kernel (the agent sees no code); ONE
+   *  `vault-totp-use` line (via browser-login), paced like a conversation's own answers; never the seed. */
+  function codeForLogin(name, { conv = null, ip = null } = {}) {
+    const entry = T.entryOf(String(name == null ? '' : name));
+    const subject = conv ? `session:${clip(conv, 200)}` : 'unknown';
+    const done = (r) => { vault.audit('vault-totp-use', { by: 'agent', subject, entry: entry || clip(name, 130), ip, ok: !!r.ok, ...(r.ok ? { via: 'browser-login' } : { code: r.code }) }); return r; };
+    if (!entry) return done(named('not_found'));
+    const t = now(), k = subject;
+    const mine = (usePace.get(k) || []).filter((x) => t - x < VI.REVEAL_PACE_MS && t >= x);
+    const p = VI.paceVerdict(mine, t, T.USE_PACE_MAX);
+    if (!p.ok) { usePace.set(k, mine); return done(p); }
+    const r = withRecord(entry, codeOf);
+    if (!r.ok) return done(r);
+    mine.push(t); usePace.set(k, mine);
+    done({ ok: true });
+    return { ok: true, code: r.code, secondsLeft: r.secondsLeft };
+  }
+  return { addEntry, view, drop, grant, ungrant, list, use, codeForLogin, GRANTS_FILE };   // addEntry, never `add(`: a For-you add site's name (test-user-todos-layout's census)
 }
 
 module.exports = { create, runOfToken, GRANTS_FILE };

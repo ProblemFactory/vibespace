@@ -11,7 +11,7 @@
 // seeded) and headless Chrome over raw CDP at the owner's 448×850, DPR 3, an Android UA, touch, hover:none / pointer:coarse.
 // The microphone, MediaRecorder and /api/voice/* are stubbed IN THE PAGE (never a vendor call; the request that leaves the
 // page is counted — what the hub would have logged).
-//   ① THE OWNER'S SEQUENCE: #mobile-nav-todos → Reply → the microphone → 2.4 s → the stop HELD on 「0:02」 until the capsule
+//   ① THE OWNER'S SEQUENCE: the sheet (the phone's badge now opens its page — the same rows; lane foryou-honest) → its row → Reply → the microphone → 2.4 s → the stop HELD on 「0:02」 until the capsule
 //      has redrawn under the finger (asserted: the span it went down on left the page before the lift — the field's shape)
 //      ⇒ the tray stays open, ONE request left the page, the words are in the reply box (the same node, still focused),
 //      and the op ring holds no popup-hide
@@ -164,9 +164,13 @@ const boot = async () => {
 };
 /** the tray open, Reply on its first ask: the box focused (the keyboard up on a phone) */
 const openReply = async () => {
-  if (!(await trayOpen())) await tap('#mobile-nav-todos');
+  // lane foryou-honest: the phone's badge opens its first-screen PAGE (one surface; the same rows, the same box) — the sheet,
+  // whose closer this suite pins, is reached through its own door; a touch screen's row is FOLDED: a tap on its words opens it
+  if (!(await trayOpen())) await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
   await waitFor(`!!document.querySelector(${JSON.stringify(`${TRAY} .ut-reply-btn`)})`, 5000);
-  if (!(await evalJs(`!!document.querySelector(${JSON.stringify(BOX)})`))) await tap(`${TRAY} .ut-reply-btn`);
+  const ROW = `${TRAY} .ut-item:has(.ut-reply-btn) > .ut-body > .ut-text`;
+  if (!(await evalJs(`!!document.querySelector(${JSON.stringify(BOX)})`)) && !(await evalJs(`!!document.querySelector(${JSON.stringify(`${TRAY} .ut-item.ut-open .ut-reply-btn`)})`))) { await tap(ROW); await sleep(200); }
+  if (!(await evalJs(`!!document.querySelector(${JSON.stringify(BOX)})`))) await tap(`${TRAY} .ut-item.ut-open .ut-reply-btn`);
   await waitFor(`document.activeElement && document.activeElement.matches(${JSON.stringify(BOX)})`, 3000);
 };
 /** THE OWNER'S STOP: the finger down on 「0:02」 and held until the capsule has redrawn under it (four times a second), then
@@ -207,7 +211,7 @@ try {
   await tapAt(224, 820); // a first touch (the page's activation)
 
   // ── ① THE OWNER'S SEQUENCE ──
-  console.log('① #mobile-nav-todos → Reply → the microphone → the stop held on 「0:02」 across a redraw');
+  console.log('① the sheet → its row → Reply → the microphone → the stop held on 「0:02」 across a redraw');
   await openReply();
   const d1 = await dictate('Use the cold bucket');
   check('①a the stop went down on the capsule\'s time and that span LEFT the page before the lift (a redraw under the finger — the field\'s shape), a tap still (< 500 ms)', d1.boxEl && d1.recording && d1.stop.downTag === 'span.voice-time' && d1.stop.gone && d1.stop.heldMs < 500, d1.stop);
@@ -248,7 +252,7 @@ try {
   await evalJs('document.activeElement && document.activeElement.blur(); true');
   await key('Escape');
   check('④d Escape on the tray (not in a box) closes it — why \'escape\'', !(await trayOpen()) && (await hides()).at(-1)?.why === 'escape', await hides());
-  await tap('#mobile-nav-todos'); await sleep(300);
+  await evalJs(`document.getElementById('taskbar-user-todos').click(); true`); await sleep(300); // the sheet's own door (lane foryou-honest: the badge opens the page)
   const opened = await trayOpen();
   for (const type of ['rawKeyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, modifiers: 1, key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37, nativeVirtualKeyCode: 37 }); // the browser's own back (Alt+Left = NavigationController::GoBack)
   await sleep(800);

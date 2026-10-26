@@ -116,8 +116,11 @@ const SERVICE_ENV_LC = /^LC_[A-Z]+$/;
  *  MEASURED on the pinned rclone 1.69.3, Go's net/http + crypto/x509 (lane spawn-env-debts): HTTP_PROXY / http_proxy for
  *  http, HTTPS_PROXY / https_proxy for https, NO_PROXY / no_proxy (ALL_PROXY never), and the trust roots of a
  *  TLS-inspecting egress, SSL_CERT_FILE / SSL_CERT_DIR. A proxy URL may carry credentials, so `keep` refuses it;
- *  `egress: true` is the one door, opened by name at the spawn. */
-const EGRESS_ENV = Object.freeze(['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR']);
+ *  `egress: true` is the one door, opened by name at the spawn. Lane engine-distribution round 3: + GIT_SSL_CAINFO /
+ *  GIT_SSL_CAPATH — a plugin's git reads no HOME config (GIT_CONFIG_GLOBAL=/dev/null), so its `http.sslCAInfo` is gone, and a
+ *  git on libcurl-GnuTLS ignores SSL_CERT_FILE / SSL_CERT_DIR (MEASURED: git 2.53): these two NAMES carry a trust root's
+ *  path, never a value of their own. */
+const EGRESS_ENV = Object.freeze(['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy', 'NO_PROXY', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH']);
 /** What an rclone child reads beyond the service list + the egress door — MEASURED (lane spawn-env-debts): ssh-agent
  *  for an sftp remote with no key file and no password (SSH_AUTH_SOCK: refused without it), its default cache / config
  *  dirs (XDG_CACHE_HOME / XDG_CONFIG_HOME — the device mount's vfs cache is rclone's default). Its remote rides its own

@@ -407,22 +407,31 @@ try {
   console.log('#1 For-you inbox');
   const badge = await evalJs(`(() => { const b = document.getElementById('mobile-nav-todos'); return { has: b.classList.contains('ut-has-items'), urg: b.dataset.urgency, pills: [...b.querySelectorAll('.ut-count')].map((p) => p.className.replace('ut-count ', '') + ':' + p.textContent) }; })()`);
   check('the nav inbox button carries the seeded item as a high-urgency badge pill', badge.has && badge.urg === 'high' && badge.pills.length === 1 && badge.pills[0] === 'ut-seg-high:1', badge);
-  await tap('#mobile-nav-todos');
+  // lane foryou-honest: on the phone the badge is the door to its first-screen PAGE (one surface) — it toggles the page, never
+  // the sheet beside it; the sheet is reached through its own door (the page with no row to show falls back to it)
+  const pg = () => evalJs(`({ page: !document.getElementById('phone-home').classList.contains('hidden'), sheet: !document.getElementById('user-todos-popup').classList.contains('hidden'), item: document.getElementById('phone-home').textContent.includes(${JSON.stringify(TODO_TEXT)}), sb: app.sidebar.isOpen, win: !!app.wm.activeWindowId })`);
+  const pg0 = await pg(); await tap('#mobile-nav-todos'); await sleep(300);
+  const pg1 = await pg();
+  await tap(pg1.sb ? '#drawer-foryou' : '#mobile-nav-todos'); await sleep(300); // nothing under the page ⇒ the conversation list — its first row «For you · N» is the way back
+  const pg2 = await pg();
+  check('tapping it toggles the first-screen page listing the item — never the sheet (lane foryou-honest; nothing under the page ⇒ the conversation list, its first row brings the page back)', pg1.page !== pg0.page && pg2.page === pg0.page && !pg1.sheet && !pg2.sheet && (pg0.page ? pg0.item : pg1.item) && (pg0.page && !pg1.win ? pg1.sb : true) && !pg2.sb, { pg0, pg1, pg2 });
+  await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
   const sheet = await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); const r = p.getBoundingClientRect(); return { hidden: p.classList.contains('hidden'), l: Math.round(r.left), r: Math.round(r.right), w: Math.round(r.width), t: Math.round(r.top), text: p.textContent.includes(${JSON.stringify(TODO_TEXT)}) }; })()`);
-  check(`tapping it opens #user-todos-popup as a full-width sheet under the nav (left ${sheet.l}, right ${sheet.r}, top ${sheet.t}) listing the item`, !sheet.hidden && sheet.l >= 0 && sheet.r <= VW && sheet.w >= VW - 40 && sheet.t >= 40 && sheet.text, sheet);
+  await evalJs(`document.querySelector('#user-todos-popup .ut-bands .ut-item > .ut-body > .ut-text')?.click(); true`); await sleep(200); // a touch screen's row is FOLDED — the tap opens it (its ✓ ✕ ⤢)
+  check(`the sheet's own door opens #user-todos-popup as a full-width sheet under the nav (left ${sheet.l}, right ${sheet.r}, top ${sheet.t}) listing the item`, !sheet.hidden && sheet.l >= 0 && sheet.r <= VW && sheet.w >= VW - 40 && sheet.t >= 40 && sheet.text, sheet);
   // r2: the sheet's OWN controls (tabs 17 px, ✓/✕/⤢ 20 px, the session header 18 px before)
   const sheetCtl = await evalJs(rectsOf('#user-todos-popup .ut-tab, #user-todos-popup .ut-act, #user-todos-popup .ut-band-bar'));
   check(`the sheet's tabs / ✓ ✕ ⤢ / band head (lane foryou-folds: the band bar replaced the session header) are ≥ 36 px tall, the buttons ≥ 36 wide (${sheetCtl.map((r) => r.w + '×' + r.h).join(', ')})`, sheetCtl.length >= 6 && sheetCtl.every((r) => r.h >= 36) && sheetCtl.filter((r) => r.txt.length <= 1).every((r) => r.w >= 36), sheetCtl);
   // r2: Escape closes it (a persistent element cannot carry [data-popover] — its own keydown handler)
   await escape();
   check('Escape closes the sheet (its own handler; the popup cannot carry the [data-popover] protocol)', await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`));
-  await tap('#mobile-nav-todos');
+  await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
   // layering: a [data-popover] node above the sheet takes the Escape first (the global handler removes it), the sheet stays
   await evalJs(`(() => { const m = document.createElement('div'); m.className = 'context-menu'; m.setAttribute('data-popover', ''); m.id = 'r2-pop'; document.body.appendChild(m); return true; })()`);
   await escape();
   check('…and a popover above it takes the Escape first: the popover closes, the sheet stays open', await evalJs(`!document.getElementById('r2-pop') && !document.getElementById('user-todos-popup').classList.contains('hidden')`));
-  await tap('#mobile-nav-todos');
-  check('tapping the button again closes the sheet (the outside-tap closer exempts it)', await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`));
+  await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
+  check('its door again closes the sheet', await evalJs(`document.getElementById('user-todos-popup').classList.contains('hidden')`));
 
   // ── #3 "+" long-press sheet ──
   console.log('#3 "+" long-press sheet');
@@ -787,6 +796,7 @@ try {
   await restartWith(prodShape());
   for (const [w, h] of [[375, 812], [390, 844]]) {
     await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 2, mobile: true });
+    await evalJs('sessionStorage.clear(); true'); // a COLD open (lane foryou-honest: a RELOAD of a tab with a window on show keeps that window)
     await reloadPhone();
     await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.querySelectorAll('#phone-home .ut-bands .ut-item').length > 0`, 15000);
     await sleep(500);
@@ -816,8 +826,11 @@ try {
     check('the asks\' conversation is live and listed on the phone (created through the real spawn path after the restart)', created && listed, frames.slice(-2).map((f) => JSON.stringify(f).slice(0, 160)));
   }
   const firstRow = await evalJs(`document.querySelector('#phone-home .ut-bands .ut-item')?.dataset.id || null`);
+  // lane foryou-honest (ONE row shape on a phone): a tap on the words opens the row IN PLACE; its trailing door is the jump
   await tap(`#phone-home .ut-item[data-id="${firstRow}"] .ut-text`);
-  check('a row\'s tap opens its conversation: a chat window on show, the page stepped aside, the nav names the window and its ✕ is back',
+  check('a tap on a row\'s words opens it in place (the page stays, one row open)', await waitFor(`!document.getElementById('phone-home').classList.contains('hidden') && document.querySelectorAll('#phone-home .ut-item.ut-open').length === 1 && !!document.querySelector('#phone-home .ut-item.ut-open[data-id="${firstRow}"]')`, 3000));
+  await tap(`#phone-home .ut-item[data-id="${firstRow}"] .ut-go`);
+  check('a row\'s trailing door opens its conversation: a chat window on show, the page stepped aside, the nav names the window and its ✕ is back',
     await waitFor(`document.getElementById('phone-home').classList.contains('hidden') && app.wm.windows.get(app.wm.activeWindowId)?.type === 'chat' && document.getElementById('mobile-nav-title').textContent !== 'For you' && getComputedStyle(document.getElementById('mobile-nav-close')).display !== 'none'`, 15000),
     await evalJs(`({ hidden: document.getElementById('phone-home').classList.contains('hidden'), active: app.wm.activeWindowId, type: app.wm.windows.get(app.wm.activeWindowId)?.type, title: document.getElementById('mobile-nav-title').textContent, row: ${JSON.stringify(firstRow)}, toasts: [...document.querySelectorAll('#global-toasts .global-toast-body')].map((e) => e.textContent) })`));
   const wins = await evalJs('app.wm.windows.size');

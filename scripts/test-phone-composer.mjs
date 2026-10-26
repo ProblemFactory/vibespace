@@ -35,8 +35,9 @@ function judgeInput(src) {
 }
 function judgeBar(src) {
   return {
-    more: /if \(PHONE_MQ\?\.matches\) chip\('more', /.test(src),
-    foldGate: (() => { const f = src.indexOf('  _fold() {'), g = src.indexOf('if (!PHONE_MQ?.matches || open) return;', f), a = src.indexOf("classList.add('chat-status-folded')", f); return f > 0 && g > f && a > g; })(),
+    // lane desktop-small P2-4: the ONE row is a phone's AND a narrow desk window's (_oneRow: PHONE_MQ, or a window < NARROW_BAR_PX)
+    more: /if \(this\._oneRow\(\)\) chip\('more', /.test(src) && /_oneRow\(\) \{\s*if \(PHONE_MQ\?\.matches\) return true;[\s\S]{0,260}return \(w > 0 && w < NARROW_BAR_PX\) \|\| \(h > 0 && h < SHORT_WINDOW_PX\);/.test(src),
+    foldGate: (() => { const f = src.indexOf('  _fold() {'), p = src.indexOf('phone = this._oneRow()', f), g = src.indexOf('if (!phone || open) return;', f), a = src.indexOf("classList.add('chat-status-folded')", f); return f > 0 && p > f && g > p && a > g; })(),
     sheetRows: /if \(PHONE_MQ\?\.matches\) for \(const \[k, label\] of \[\['effort', t\('Effort'\)\], \['style', t\('Output style'\)\]\]\)/.test(src),
   };
 }
@@ -58,7 +59,7 @@ ok('the desk order is captured before the phone face exists', jI.deskFirst, jI);
 ok('phone: the mic (and ⤢) live INSIDE the field box', jI.mic, jI);
 ok('the + sheet reaches the image / file / folder inputs, in that order', jI.sheet, jI);
 ok('the phone face is gated on the 768 px query (and follows it)', jI.gated, jI);
-ok('the status bar: ⋯ exists only on a phone; the fold writes nothing on the desk', jB.more && jB.foldGate, jB);
+ok('the status bar: ⋯ exists only on a phone or a desk window narrower than NARROW_BAR_PX (lane desktop-small P2-4); the fold writes nothing on a wide desk bar', jB.more && jB.foldGate, jB);
 ok('the model chip\'s sheet carries effort + style on a phone', jB.sheetRows, jB);
 ok('chat.css: the phone block is gated — outside the query it only hides the door', jC.block && jC.gated, jC);
 
@@ -73,7 +74,7 @@ const deskLine = `inputWrap.append(${DESK_ROW});`;
 ok('RED: the desk row gaining the + door', !judgeInput(ci.replace(deskLine, `inputWrap.append(plusBtn, ${DESK_ROW});`)).desk);
 ok('RED: the phone face keeping the desk mic beside the field', !judgeInput(ci.replace(PHONE_ROW, 'plusBtn, attachInput, this._voice.btn, fileInput, dirInput, field, this._slashDropdown, this._voice.chip')).phone);
 ok('RED: the phone CSS un-gated', !judgeCss(css.replace(/(THE PHONE COMPOSER[\s\S]*?)@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{/, '$1@media all {')).gated);
-ok('RED: ⋯ on the desk', !judgeBar(sb.replace("if (PHONE_MQ?.matches) chip('more', ", "chip('more', ")).more);
+ok('RED: ⋯ on every desk bar', !judgeBar(sb.replace("if (this._oneRow()) chip('more', ", "chip('more', ")).more);
 
 console.log('④ the fold table (PURE phoneBarFold; lane phone-bar-billing-nofold — mirror-262: the runner\'s fonts folded the billing chip)');
 // a row = the bar's chips as measured at 390 px (room = 390 − 24 padding − ⋯ 36 − gap 8 = 322): the hub's fonts, then
@@ -90,7 +91,7 @@ ok('the three forms by the room the other never-fold chips leave: full → compa
 ok('no room at all: the icon still draws — the billing chip is never in the folded set', none.billing === 'icon' && !none.folded.split(',').includes('billing') && none.folded.includes('goal'), none);
 ok('effort + style always fold and their width folds nothing else (style 80 px > the room left)', hub.folded.split(',').includes('style') && !hub.folded.includes('autoresume'), hub);
 ok('wiring: _fold lays the bar by phoneBarFold and writes the billing form; _fitBilling leaves the closed phone row to it',
-  /const plan = phoneBarFold\(\{ chips, room, gap \}\);/.test(sb) && /bill\.el\.dataset\.mode = plan\.billing;/.test(sb) && /if \(PHONE_MQ\?\.matches && !this\._foldOpen\) return;/.test(sb), null);
+  /const plan = phoneBarFold\(\{ chips, room, gap \}\);/.test(sb) && /bill\.el\.dataset\.mode = plan\.billing;/.test(sb) && /if \(this\._oneRow\(\) && !this\._foldOpen\) return;/.test(sb), null);
 { // RED control: the billing chip foldable again (the base's rule) — the runner row folds it
   const tc = read('src/lib/title-chips.js'), f = path.join(os.tmpdir(), `vs-phonebar-red-${process.pid}.mjs`);
   fs.writeFileSync(f, tc.replace("'turnstate', 'health', 'billing']", "'turnstate', 'health']"));

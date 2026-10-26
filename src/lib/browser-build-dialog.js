@@ -8,10 +8,14 @@
 import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell, showConfirmDialog } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
+import { UI_ICONS } from './icons.js'; // lane engine-plugin: the «自研内核» card's glyph
 import { buildRows, choiceOfRow, choiceWords, cardBuildLine, changeSentences, installHint, changedWords, buildRefusalWords,
   pickerIntro, channelLabel, majorLabel, verdictLines, downloadConfirmWords, downloadRefusalWords, downloadProgressWords, installedWords, freeWords, removeConfirmWords, removedWords } from './browser-build-model.js';
 
 const DIALOG_ID = 'browser-build-dialog';
+/** lane engine-plugin: a row's glyph (the «自研内核» card) — a CONSTANT svg from icons.js; none for a row without one. Kept
+ *  out of openBuildDialog: test-record-clear-census reads that body in one 6000-character span (its toast sits near the end). */
+const iconOf = (r) => { if (!r.icon || !UI_ICONS[r.icon]) return []; const ic = el('span', 'bbuild-icon'); ic.innerHTML = UI_ICONS[r.icon]; return [ic]; };
 
 export async function openBuildDialog(app, profileId, { label = '', onDone = null, pick = null } = {}) {
   const id = String(profileId || '');
@@ -44,7 +48,7 @@ export async function openBuildDialog(app, profileId, { label = '', onDone = nul
       pathInput.addEventListener('focus', () => { if (!input.checked) { input.checked = true; st.picked = r; } });
       text.appendChild(pathInput);
     }
-    row.append(input, text);
+    row.append(input, ...iconOf(r), text);
     list.appendChild(row);
   }
   body.appendChild(list);

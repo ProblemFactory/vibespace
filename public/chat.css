@@ -152,6 +152,22 @@
 .chat-task-detail { padding: 6px 12px; }
 .chat-task-title { font-weight: 500; margin-bottom: 2px; }
 .chat-status-bar { flex-wrap: wrap; }
+/* lane desktop-small — the desk bar at a small screen. P2-6: every clickable chip is a ≥ 24×24 mouse target (the model /
+   effort / goal / style chips were 13–14 px tall text pills), the painted pill unchanged (the model's background clipped
+   to its padding box); the bar's padding gives the height back, so one row stays ≤ 28 px. P2-4: a desk window narrower
+   than 480 px keeps its bar ONE row — what does not fit folds behind ⋯, which opens the bar in place (chat-status-bar.js
+   _fold over PURE phoneBarFold, the phone's own fold) — and one under 300 px high starts its composer at ONE line, so its
+   messages keep ≥ 45 % of the window (a Quad cell kept 62–144 px of them under three bar rows and a 79 px composer). */
+.chat-status-bar { padding-top: 1px; padding-bottom: 1px; row-gap: 2px; }
+.chat-status-bar .chat-status-clickable { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; min-width: 24px; box-sizing: border-box; flex-shrink: 0; } /* flex-shrink 0: an explicit min-width replaces a flex item's content minimum — without it a chip shrank under its words (the billing pill's full form clipped) */
+.chat-status-bar .chat-status-model { border: solid transparent; border-width: 5px 0; background-clip: padding-box; }
+.chat-status-bar.chat-status-narrow { flex-wrap: nowrap; }
+.chat-status-bar.chat-status-narrow.chat-status-open { flex-wrap: wrap; }
+.chat-status-bar.chat-status-narrow > .chat-status-folded { display: none !important; }
+.chat-status-bar.chat-status-narrow > .chat-status-more { font-size: 13px; letter-spacing: 1px; }
+.chat-view.chat-short .chat-input-area { padding-top: 6px; padding-bottom: 6px; }
+.chat-view.chat-short .chat-input { min-height: 34px; padding-top: 6px; padding-bottom: 6px; }
+.chat-view.chat-short .chat-shortcut-hint { display: none; }
 
 /* TODO display */
 .chat-todo-display {
@@ -1134,6 +1150,7 @@
 }
 .chat-pre-wrap:hover .chat-code-toolbar { opacity: 1; }
 .chat-wrap-toggle, .chat-lang-btn {
+  min-height: 24px; min-width: 24px; box-sizing: border-box; /* the 24 px mouse target (lane desktop-small P2-6 — Copy / Wrap were 33×14) */
   font-size: 9px; padding: 1px 5px; border-radius: var(--radius-sm); cursor: pointer;
   background: var(--bg-input); border: 1px solid var(--border); color: var(--text-secondary);
 }
@@ -1193,15 +1210,23 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 .chat-code-block .hljs-name, .chat-code-block .hljs-tag { color: var(--red, #e06c75); }
 .chat-code-block .hljs-params { color: var(--text); }
 .chat-open-editor-btn {
-  position: absolute; top: 2px; right: 2px;
+  position: absolute; top: 2px; right: 2px; min-width: 24px; min-height: 24px; box-sizing: border-box; /* the 24 px mouse target (lane desktop-small P2-6) */
+  display: inline-flex; align-items: center; justify-content: center;
   font-size: 11px; padding: 1px 4px; border-radius: var(--radius-sm); cursor: pointer;
   background: var(--bg-input); border: 1px solid var(--border); color: var(--text-secondary);
   opacity: 0; transition: opacity var(--transition); z-index: 2; line-height: 1;
 }
 .chat-msg:hover > .chat-open-editor-btn { opacity: 0.7; }
 .chat-open-editor-btn:hover { opacity: 1 !important; color: var(--accent); border-color: var(--accent); }
-/* Fork-from-here button sits just left of the open-in-editor button */
-.chat-fork-btn { right: 26px; }
+/* Fork-from-here button sits just left of the open-in-editor button (4 px apart) */
+.chat-fork-btn { right: 30px; }
+/* …and the words never run under them (lane desktop-small P2-5 — at 376–504 px «1→2→4→8→16 秒» read «1→2→4→8 [⑂][📋]»): a
+   message that carries them keeps their column free — its text's right padding = the buttons' width (one 24 px button
+   + 4, two + 4 apart), never a float (a float as tall as the buttons made every one-line row taller); a touch client has
+   no hover buttons (the … button) */
+.chat-msg:has(> .chat-open-editor-btn) > :is(.chat-compact-msg, .chat-bubble) .chat-text { padding-right: 28px; }
+.chat-msg:has(> .chat-fork-btn) > :is(.chat-compact-msg, .chat-bubble) .chat-text { padding-right: 56px; }
+@media (hover: none) and (pointer: coarse) { .chat-msg:has(> .chat-open-editor-btn) > :is(.chat-compact-msg, .chat-bubble) .chat-text { padding-right: 0; } }
 /* THE MESSAGE'S … BUTTON (touch only — created when app.isTouch; lane mobile-select). A long press on the words is
    the platform's selection, so the message menu opens from here. FLOATED as the content's first child: the first
    lines wrap around it, it is never drawn over the words. 36 px wide (a finger), 28 px tall (two lines of text). */
@@ -1441,7 +1466,7 @@ pre.chat-pre-wrapped { white-space: pre-wrap; word-break: break-all; }
 }
 .chat-expand-btn {
   position: absolute; right: 6px; bottom: 6px;
-  width: 22px; height: 22px; border-radius: var(--radius-sm); border: none;
+  width: 24px; height: 24px; border-radius: var(--radius-sm); border: none; /* 24 = the mouse target floor (lane desktop-small P2-6) */
   background: transparent; color: var(--text-dim); font-size: 13px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   opacity: 0.5; transition: all var(--transition);

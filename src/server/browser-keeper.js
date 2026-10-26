@@ -81,6 +81,7 @@ const DSP = require('../browser-display.js'); // lane headless-fallback: headed 
 const HC = require('../hidden-chars.js'); // lane browser-propose: a proposal card's words carry no character that is not drawn (THE one set)
 const KB = require('../browser-kept.js'); // lane browser-resume (§3.9): the conversation's KEPT browser — tabs, D2's restore kind (PURE)
 const BB = require('../browser-builds.js');
+const ENG = require('../browser-engines.js'); // lane engine-plugin: PURE — an engine plugin's verdicts, its launch env view, the default policy
 const BE = require('../browser-stderr.js'); // lane browser-stderr-pipe: the quiet log switches + the stderr-pipe-full verdict
 const CL = require('../browser-clone.js'); // lane browser-profile-clone (B-9669): New profile… copied from a stopped profile — the PURE tables + verdict
 const CR = require('./browser-clone-run.js'); // … and its copy, off the event loop (atomic: <dir>.copying renamed at the end)
@@ -209,6 +210,16 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // lane browser-windows (U1): the window a holder's tab opens in — `(cdpUrl, {url}) → {ok, targetId, windowId}` over the
   // keeper browser's own endpoint (browser-viewport.openWindow); injectable for the gate (a fake has no CDP)
   openWindow: openWindowFn = null, closeTarget: closeTargetFn = null, openTabInWindow: openInWindowFn = null, windowOf: windowOfFn = null, openTabByActivate: activateFn = null, // verify r2 T1: rung 2 of a later tab (browser-viewport.openTabByActivate)
+  // lane engine-plugin (design-custom-browser-plugin §1): THE ENGINE REGISTRY (src/server/browser-engines.js, or a getter) — a
+  // profile whose `browser` is {kind:'plugin', id} runs that engine's kernel (its probe + launch options asked at each launch,
+  // inside the in-flight start); `fleetFacts` = the presets' fleet.json facts (a getter → {browserEngine?} | null) the default
+  // policy `browser.defaultEngine` reads. Absent ⇒ no engine (a plugin choice refused by name, browser_engine_missing) and
+  // the policy is the user's own value or 'default'.
+  engines = null, fleetFacts = null,
+  // lane engine-distribution (P4): THE KERNEL'S DISTRIBUTION (src/server/engine-distribution.js, or a getter) — the kernel
+  // downloaded into its place with a receipt, the version MEASURED once (`--version`) before the first launch, the engine
+  // record's facts. Absent ⇒ a kernel is whatever was placed by hand, its version the plugin's word.
+  engineDistribution = null,
   // lane browser-resume (§3.9, the owner's ruling 1): THE KEPT STORE (src/server/browser-kept.js, or a getter) — a
   // conversation's own browser's logins directory + its tabs survive the browser's stop; the keeper is its ONE feeder
   // (start / stop / the live tab list / a deliberate close). Absent ⇒ nothing is kept (today's ephemerality).
@@ -293,7 +304,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       return file ? displayed(opts, ex, file, recordForCall(ns, opts.session || null, ex)) : opts;
     };
     const displayed = (opts, ex, file, rec) => {
-      const eff = rec && rec.display ? displays.fileFor(file, rec.display) : file;
+      const eff0 = rec && rec.display ? displays.fileFor(file, rec.display) : file;
+      const eff = rec && rec.engineView ? displays.engineFileFor(eff0, rec.engineView) : eff0; // lane engine-plugin: a conversation's browser on an ENGINE names its program + arguments at every call
       return eff === ex[VERBS.CONFIG_KEY] ? opts : { ...opts, extraEnv: { ...ex, [VERBS.CONFIG_KEY]: eff } };
     };
     const out = { ...r };
@@ -1038,10 +1050,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // lane headless-fallback: an ephemeral whose launch fell back names the PLANNED file (the launch's own) — never the base
     const rec = ephemeral ? recordForCall(null, null, pe) : null;
     const planned = (file) => (rec && rec.display && file ? displays.fileFor(file, rec.display) : file);
-    if (typeof own === 'string' && own.startsWith('/')) return planned(own);
+    const engined = (file) => (rec && rec.engineView && file ? displays.engineFileFor(file, rec.engineView) : file); // lane engine-plugin: the engine's view rides the agent's commands too
+    if (typeof own === 'string' && own.startsWith('/')) return engined(planned(own));
     // r4: an ephemeral's command runs with the file its browser was LAUNCHED with (marked when the keeper launched it) —
     // a different one would relaunch its Chrome (measured); a lease's session with machine.json (it never launches)
-    return ephemeral ? planned(ephemeralConfigFor(pe)) : machineConfigFile('machine');
+    return ephemeral ? engined(planned(ephemeralConfigFor(pe))) : machineConfigFile('machine');
   }
   /**
    * Create a profile. `owner` = { kind, id }: a session-created profile is
@@ -1050,7 +1063,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * made 0700 under ~/.agent-browser/ (the CLI's own root, so `agent-browser
    * profiles` lists it too); an adopted directory keeps its path.
    */
-  function createProfile(input = {}, { owner = null, dir = null, legacy = false, createdBy = null, use = null, knownKeys = null, by = 'user', builds = null, id: mintedId = null, clonedFrom = null } = {}) {
+  function createProfile(input = {}, { owner = null, dir = null, legacy = false, createdBy = null, use = null, knownKeys = null, by = 'user', builds = null, engine = null, id: mintedId = null, clonedFrom = null } = {}) {
     ensureLoaded();
     const v = B.validateProfileInput(input, { existing: named(), control, mediation: mediationOn() });
     if (!v.ok) throw namedError(v.code, v.error, v.why ? { why: v.why } : {});
@@ -1061,7 +1074,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // lane browser-admin 2a: the Chrome BUILD the profile runs — the USER's choice only (an agent's route passes `by`),
     // judged by THE verdict over the machine's own list (`builds` = the route's fresh listing of a paired machine; this
     // machine's is read here). A new directory was never written: no version ladder at the create.
-    const choice = choiceAtCreate(input.browser, { provider: v.value.provider, host: v.value.host, by, builds, label: v.value.label });
+    let choice = choiceAtCreate(input.browser, { provider: v.value.provider, host: v.value.host, by, builds, engine, label: v.value.label });
+    // lane engine-plugin: THE DEFAULT POLICY — a brand-new local chromium profile naming no build is born with `browser.defaultEngine`'s
+    // choice (the owner's / the fleet's — never an agent's; judged at its launch like any choice); an adopted or copied folder keeps its browser
+    if (input.browser == null && dir == null && !clonedFrom && !v.value.host && (B.providerRow(v.value.provider) || {}).buildChoice) { const pc = policyChoice(); if (pc) choice = pc; }
     // P4: the ROW said a paired machine may run it; whether the id names one
     // is this instance's host registry's answer (refused by name, never a
     // silent local fallback)
@@ -1098,12 +1114,14 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   }
   /** The verdict at a CREATE: a choice that is not the default is the user's, chromium's, and on that machine's list
    *  (`builds` for a paired machine comes from the route; this machine's is read now). Throws by name. */
-  function choiceAtCreate(raw, { provider, host = null, by = 'user', builds = null, label = '' } = {}) {
+  function choiceAtCreate(raw, { provider, host = null, by = 'user', builds = null, label = '', engine = null } = {}) {
     const c0 = BB.normalizeBrowserChoice(raw);
     if (c0 && c0.kind === 'default') return c0;
     const list = c0 && c0.kind === 'build' ? (host ? builds : buildsHere()) : null;
     const pf = c0 && c0.kind === 'path' && !host ? BB.fileFact(c0.path) : null;
-    const v = BB.browserChoiceVerdict({ choice: raw, provider, by, builds: list, pathFact: pf, machine: host || 'this computer', label });
+    // lane engine-plugin: an engine plugin's probe is I/O — the route asks it first and hands the FACT in (`engine`, like `builds`)
+    const eng = c0 && c0.kind === 'plugin' ? (host ? engineOffMachine(host) : engine) : null;
+    const v = BB.browserChoiceVerdict({ choice: raw, provider, by, builds: list, pathFact: pf, engine: eng, machine: host || 'this computer', label });
     if (!v.ok) throw namedError(v.code, v.error, v.version ? { version: v.version } : {});
     return v.choice;
   }
@@ -1114,19 +1132,102 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function launchBuildOf(p) {
     const c = BB.normalizeBrowserChoice(p.browser);
     if (!c || c.kind === 'default' || !(B.providerRow(p.provider) || {}).buildChoice) { if (p.buildMissing) { delete p.buildMissing; dirty = true; } return {}; }
+    if (c.kind === 'plugin') return { engineChoice: c }; // lane engine-plugin: judged inside the in-flight start (launchEngineOf — its asks are I/O)
     const v = BB.browserChoiceVerdict({ choice: c, provider: p.provider, by: 'user', builds: c.kind === 'build' ? buildsHere() : null, pathFact: c.kind === 'path' ? BB.fileFact(c.path) : null, label: p.label });
     if (v.ok) { if (p.buildMissing) { delete p.buildMissing; dirty = true; log.log?.(`[browser] ${p.id} "${p.label}": its chosen Chrome build is back (${c.kind === 'build' ? c.version : c.path})`); } return { executablePath: v.executablePath }; }
     noteBuildMissing(p, c, v);
     throw namedError(v.code === 'browser_path_missing' || v.code === 'browser_path_not_executable' ? v.code : 'browser_build_missing', v.error, { version: c.kind === 'build' ? c.version : null });
   }
+  // ── lane engine-plugin: A BROWSER ENGINE PLUGIN (design-custom-browser-plugin §1) — the registry's two verbs, the policy ──
+  const engs = () => { try { return typeof engines === 'function' ? engines() : engines; } catch { return null; } };
+  /** A paired machine has no engine: engine plugins run on the computer VibeSpace runs on (their process is this hub's). */
+  const engineOffMachine = (host) => ({ code: 'browser_engine_missing', error: `browser engine plugins run on the computer VibeSpace runs on — a profile on ${host} runs that machine's own Chrome builds` });
+  /** An engine's PROBE fact on this machine (ONE registry ask over the kernel path VibeSpace resolved) — the fact `{installed,
+   *  executable, binaryPath, version, protocol, kinds, features, label}` | a refusal `{code, error}`. */
+  async function engineFactOf(id, { host = null } = {}) {
+    if (host) return engineOffMachine(host);
+    const r = engs();
+    if (!r || typeof r.probe !== 'function') return ENG.missingOf({ id });
+    const v = await r.probe(id);
+    return v.ok ? withKernelFact(v.fact) : { code: v.code, error: v.error };
+  }
+  // lane engine-distribution: the engine RECORD's facts beside the probe's — the version VibeSpace measured, the download
+  const eds = () => { try { return typeof engineDistribution === 'function' ? engineDistribution() : engineDistribution; } catch { return null; } };
+  function withKernelFact(f) {
+    const d = eds();
+    const k = d && typeof d.kernelFact === 'function' ? d.kernelFact(f.id) : null;
+    if (!k) return f;
+    return { ...f, measuredVersion: f.installed ? k.measuredVersion : null, measuredAt: f.installed ? k.measuredAt : null, kernel: { state: k.state, step: k.step, bytes: k.bytes, total: k.total, code: k.code, error: k.error, node: k.node, need: k.need } };
+  }
+  /** The engine table as the USER's surfaces read it (Change build…, New profile…, Settings): each row's probe FACT, never its
+   *  path (the kernel's place stays here). A paired machine's dialog has none. */
+  async function engineRowsView({ host = null } = {}) {
+    const r = engs();
+    if (host || !r || typeof r.rows !== 'function') return [];
+    const out = [];
+    for (const row of r.rows()) {
+      const f = await engineFactOf(row.id);
+      out.push({ id: row.id, label: row.label, family: row.family, plugin: row.version || null, ...(f.code ? { code: f.code, error: f.error } : { installed: !!f.installed, executable: !!f.executable, version: f.version, protocol: f.protocol, features: (f.features || []).slice(),
+        // lane engine-distribution: 实测 / 声明 — the measured version beats the declared one; the receipt's read; the download
+        declaredVersion: f.declaredVersion || null, measuredVersion: f.measuredVersion || null, measuredAt: f.measuredAt || null, integrity: f.integrity || null, kernel: f.kernel || null }) });
+    }
+    return out;
+  }
+  /** THE DEFAULT POLICY now — `browser.defaultEngine`: the user's own stored value › the fleet's (fleet.json `browserEngine`) ›
+   *  'default' → `{value, source, fleet: {plugin, default} | null}`. */
+  function defaultEngineNow() {
+    let own; try { own = serverSetting('browser.defaultEngine'); } catch { own = undefined; }
+    let fe = null; try { const f = typeof fleetFacts === 'function' ? fleetFacts() : null; fe = f && f.browserEngine && typeof f.browserEngine === 'object' ? f.browserEngine : null; } catch { fe = null; }
+    return { ...ENG.defaultEngineOf({ own, fleet: fe }), fleet: fe ? { plugin: fe.plugin || null, default: fe.default === true } : null };
+  }
+  /** The choice a NEW record is born with when nothing names one — read at a profile's create and at a conversation's
+   *  browser's first start, then WRITTEN on the record (a later flip moves new records only). null = the default. */
+  const policyChoice = () => ENG.choiceOfDefault(defaultEngineNow().value);
+  /** The arguments a launch carries anyway, riding an engine's env list (AGENT_BROWSER_ARGS REPLACES the config's list):
+   *  the automation flag where the row stamps it, the keeper's mark LAST. */
+  const engineBaseArgs = (p, prow) => B.withKeeperMark(B.withAutomationFlag([], { on: automationFlagOn() && !!(prow && prow.automationFlag) }), p.id);
+  /** THE ENGINE'S LAUNCH — its probe judged by THE verdict now (a plugin or kernel gone since it was chosen is refused BY NAME,
+   *  MARKED on the record + ONE For-you item; VibeSpace never starts Chrome in its place), then its launch options for THIS
+   *  profile (the kernel VibeSpace resolved, the profile's directory) → `{executablePath, args, env, engine:{id, version,
+   *  label}}`. A timeout (browser_engine_unanswered) is refused by name and marks nothing (the next launch asks again). */
+  async function launchEngineOf(p, c) {
+    let engine = await engineFactOf(c.id, { host: p.host || null });
+    // lane engine-distribution: the kernel's version MEASURED once before its first launch (cached per receipt — 5 s at most);
+    // a kernel not there yet is downloaded on this FIRST USE (in the background — the launch is refused by name meanwhile)
+    const d = p.host ? null : eds();
+    let fetching = null, refused = null;
+    if (d && engine && !engine.code && !engine.installed) {
+      const k = d.kernelFact(c.id);
+      if (k.state === 'downloading') fetching = k;
+      // round 2: a Node this kernel cannot be unpacked on is REMEMBERED (the engine record, for that Node) — no download asked again
+      else if (k.state === 'failed' && k.code === 'engine_node_unsupported') refused = { code: k.code, message: k.error };
+      else { try { fetching = await d.installKernel(c.id, { by: 'first-use' }); } catch (e) { fetching = null; refused = e; log.warn?.(`[browser] ${p.id} "${p.label}": its engine's kernel cannot be downloaded — ${e && e.message}`); } }
+      // round 3: the previous kernel PUT BACK in its place (a landing stopped between its renames) — no download: asked again
+      if (fetching && fetching.restored) { fetching = null; engine = await engineFactOf(c.id, { host: p.host || null }); }
+    }
+    // round 4: the probe finds the kernel IN its place while the record holds none (dropped once) ⇒ measure — the record follows it
+    const unrecorded = !!(engine && engine.kernel && engine.kernel.state !== 'installed' && engine.kernel.state !== 'downloading');
+    if (d && engine && !engine.code && engine.installed && engine.executable && (!engine.measuredVersion || unrecorded)) { try { await d.measure(c.id); } catch { /* the version stays the plugin's word */ } engine = withKernelFact(engine); }
+    const v = BB.browserChoiceVerdict({ choice: c, provider: p.provider, by: 'user', engine, label: p.label });
+    if (!v.ok && !fetching && refused && refused.code === 'engine_node_unsupported' && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace cannot download it here: ${refused.message}`;
+    if (!v.ok && !fetching && refused && refused.code === 'engine_kernel_aside' && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — ${refused.message}`;
+    if (!v.ok && fetching && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace is downloading it now (${fetching.total || fetching.bytes ? `${Math.round(Number(fetching.total || fetching.bytes) / 1e6)} MB` : 'its kernel.json\'s archive'}); start the browser again when it is done`;
+    if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id }); }
+    const lo = await engs().launchOptions(c.id, { profileId: p.id, binaryPath: v.executablePath, ...(p.dir ? { userDataDir: p.dir } : {}) });
+    if (!lo.ok) { if (lo.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, lo, engine); throw namedError(lo.code, lo.error, { engine: c.id }); }
+    if (p.buildMissing) { delete p.buildMissing; dirty = true; log.log?.(`[browser] ${p.id} "${p.label}": ${BB.buildWords(c)} answers again`); } // the engine by its id (its label is the plugin's text)
+    return { executablePath: lo.launch.executablePath, args: lo.launch.args, env: lo.launch.env, engine: { id: c.id, version: v.version, label: engine.label || null } };
+  }
+  /** What a launch RECORDS it was asked to run (`rec.browserChoice`): the choice, + an engine's version (the probe's fact). */
+  const recordedChoice = (p, be) => (p.browser ? { ...BB.choiceView(p.browser), ...(be && be.engine ? { version: be.engine.version } : {}) } : { kind: 'default' });
   /** ONE mark + ONE For-you item per (profile, choice) until it is resolved (the build is back, or the user picks another). */
-  function noteBuildMissing(p, c, v) {
-    const what = c.kind === 'build' ? c.version : c.path;
+  function noteBuildMissing(p, c, v, engine = null) {
+    const what = c.kind === 'build' ? c.version : c.kind === 'plugin' ? c.id : c.path;
     const had = p.buildMissing && p.buildMissing.what === what;
     if (!had) { p.buildMissing = { what, kind: c.kind, code: v.code, at: now(), filed: false }; commit(); }
     if (p.buildMissing.filed) return;
     if (!userTodos || typeof userTodos.add !== 'function') { if (!had) log.warn?.(`[browser] ${p.id} "${p.label}": its Chrome build ${what} is missing — ${v.error} (no For-you store is wired, so only this journal says so)`); return; }
-    const n = BB.missingNotice({ label: p.label, choice: c });
+    const n = BB.missingNotice({ label: p.label, choice: c, code: v.code, engineLabel: engine && engine.label ? engine.label : '' });
     try { userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', text: n.text, detail: n.detail, sessionName: 'Agent browser' }); p.buildMissing.filed = true; commit(); }
     catch (e) { log.warn?.(`[browser] ${p.id} "${p.label}": the missing-build notice was not filed (${e && e.message}) — tried again at the next launch`); }
     log.warn?.(`[browser] ${p.id} "${p.label}": its Chrome build ${what} is missing — ${v.error}`);
@@ -2786,6 +2887,11 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const cap = ceilingNow({ ephemeral: true, browserKey: p.owner.id });
     if (cap) throw namedError(cap.code, cap.error, { holders: cap.holders, remedy: cap.remedy, scope: cap.scope, others: cap.others });
     const p0 = (async () => {
+      // lane engine-plugin: a conversation's browser whose record names an ENGINE (browser.defaultEngine, written at its first
+      // start) — judged here, inside the in-flight start and before any record: refused by name (MARKED + ONE For-you item),
+      // never Chrome in its place; its program + arguments ride the config every call of this browser names (rec.engineView)
+      const ec = (() => { const c = BB.normalizeBrowserChoice(p.browser); return c && c.kind === 'plugin' ? c : null; })();
+      const engineLaunch = ec ? await launchEngineOf(p, ec) : null;
       const ns = nsOf(profileId);
       const env0 = pairsEnv(pairs);
       const prev = reg.browsers[profileId] || null;
@@ -2799,6 +2905,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       // are set again at the launch below).
       if (prev && prev.mark) rec.mark = prev.mark;
       { const lh = launchHostsFor(prev, p.dir || null); if (lh.length) { rec.hosts = lh; rec.host = prev && prev.host ? prev.host : lh[lh.length - 1]; } } // verify r4 (S26b): a retired record's directory still knows
+      if (engineLaunch) { rec.engineView = { executablePath: engineLaunch.executablePath, args: engineLaunch.args.slice() }; rec.browserChoice = recordedChoice(p, engineLaunch); }
       reg.browsers[profileId] = rec;
       commit();
       if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } } // r2 M1: a dead daemon's browser is ended first
@@ -2899,6 +3006,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const ownDir = B.ephemeralDirOf(v.pairs, { configProfile: ownKeptDirOf(bk, v.pairs) });
     if (!p) {
       p = B.newProfileRecord({ id: mintId(), label: B.ephemeralLabel(sessionName), dir: ownDir, ephemeral: true, owner: { kind: 'conversation', id: bk }, now: now() });
+      { const pc = policyChoice(); if (pc) p.browser = pc; } // lane engine-plugin: the default policy, read at this browser's first start and WRITTEN here
       reg.profiles.push(p);
       created = true;
     } else if ((p.dir || null) !== (ownDir || null) && !B.isLiveBrowser(reg.browsers[p.id]) && !starting.has(p.id)) {
@@ -3857,7 +3965,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const prow = B.providerRow(p.provider) || {};
     // lane browser-admin 2a: a profile pinned to one Chrome build (a `buildChoice` row) — judged NOW (a build gone since it
     // was chosen is refused by name before any record exists); its executable rides the launch view of EVERY call, as cloak's does
-    const buildEnv = !p.host ? launchBuildOf(p) : {};
+    let buildEnv = !p.host ? launchBuildOf(p) : {}; // lane engine-plugin: `let` — an engine choice is resolved inside p0 below
     if (!p.host && prow.buildChoice && buildEnv.executablePath) providerEnv = SW.launchEnvFor(p.provider, { executablePath: buildEnv.executablePath });
     if (!p.host && prow.executable === 'installed') {
       const exe = cloakExecutable();
@@ -3869,6 +3977,15 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const quietLog = !p.host && !!prow.starts && !argvPrefix.length;
     if (quietLog && providerEnv.AGENT_BROWSER_ARGS) providerEnv = { ...providerEnv, AGENT_BROWSER_ARGS: BE.withQuietLogging(String(providerEnv.AGENT_BROWSER_ARGS)) };
     const p0 = (async () => {
+      // lane engine-plugin: an ENGINE choice is judged HERE — its probe + launch options are I/O, asked inside the in-flight
+      // start (a second start of this profile waits on this one) and before any record exists (a refusal leaves none). Its
+      // program rides the build pin's own road (AGENT_BROWSER_EXECUTABLE_PATH), its arguments AGENT_BROWSER_ARGS (with the
+      // mark + the automation flag the config's list would have carried, then the quiet switches), its env ENGINE_ENV_KEYS only
+      if (buildEnv.engineChoice) {
+        buildEnv = await launchEngineOf(p, buildEnv.engineChoice);
+        providerEnv = { ...SW.launchEnvFor(p.provider, { executablePath: buildEnv.executablePath }), ...ENG.engineLaunchEnv(buildEnv, { base: engineBaseArgs(p, prow) }) };
+        if (quietLog && providerEnv.AGENT_BROWSER_ARGS) providerEnv = { ...providerEnv, AGENT_BROWSER_ARGS: BE.withQuietLogging(String(providerEnv.AGENT_BROWSER_ARGS)) };
+      }
       const ns = nsOf(profileId);
       const prevRec = reg.browsers[profileId] || null; // r2 M1: the browser the last launch recorded (its lock holder, if orphaned)
       const rec = { profileId, ns, pid: null, starttime: null, socketDir: null, cdpUrl: null, state: 'starting', startedAt: now(), endedAt: null, lastError: null, stoppedBy: null, lastLeaseDroppedAt: null, startedBy: why,
@@ -3915,6 +4032,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         // lane browser-admin 2a: a pinned build runs only where its machine's agent can list builds (capability
         // `browser-builds`) — an older agent would ignore the choice and launch its default build, so it is refused by name
         const remoteChoice = BB.normalizeBrowserChoice(p.browser);
+        if (remoteChoice && remoteChoice.kind === 'plugin') { const off = engineOffMachine(p.host); throw failed(off.code, off.error); } // lane engine-plugin: never asked of a machine
         if (remoteChoice && remoteChoice.kind !== 'default') {
           const bl = await buildsFor(p.host);
           if (!bl || bl.ok === false) throw failed((bl && bl.code) || 'builds_unsupported', `${p.host}: ${(bl && bl.error) || 'its Chrome builds could not be listed'}`);
@@ -3947,7 +4065,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const attachExe = buildEnv.executablePath || ATL.chromeExecutable(rtEnv);
       const road = AT.launchRoad({ local: true, starts: !!prow.starts, ownLaunch: argvPrefix.length > 0 || prow.executable === 'installed', headed: headed0, wired: !!displayKeeper, driverVersion: displayKeeper ? ((await cliNow()) || {}).version || null : null, xpra: await displayHasXpra(), exe: attachExe });
       rec.launch = road.launch; rec.launchWhy = road.why;
-      if (road.launch === 'attach') { const a = await attachStart(p, rec, prevRec, { exe: attachExe, why, ns }); if (a) return a; } // null ⇒ its display did not come up: the driver road, said
+      if (road.launch === 'attach') { const a = await attachStart(p, rec, prevRec, { exe: attachExe, why, ns, engineLaunch: buildEnv.engine ? buildEnv : null }); if (a) return a; } // null ⇒ its display did not come up: the driver road, said
       // lane headless-fallback: THE DISPLAY IS A FACT — probed now, here (the launch's view carries the plan: HEADED and the
       // planned config every call of this record names); the fact rides the record
       rec.display = await displays.factFor({ baseFile: machineConfigFile('machine', p.id), headedEnv: headed0, prev: prevRec && prevRec.display, mode: noDisplayMode(), preference: headed0 }); // H5: an unset preference resolved against this probe
@@ -3964,7 +4082,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       rec.mark = p.id; // r4 (MAJOR 2): the launch carries this profile's MARK (machine-<id>.json); every later keeper call keeps that file
       rec.holdDialogs = true; // lane browser-stuck: …and holds page dialogs (noAutoDialog) from this launch on
       rec.launchFlags = !!prow.launchFlags && (argvPrefix.length > 0 || Object.keys(providerEnv).length > 0); // r4: a provider's own launch flags (cloak: its env pair; the row's `launchFlags`) — a heal never relaunches it. lane browser-admin 2a: a chromium build pin is NOT one — the heal's `get cdp-url` carries rec.launchEnv (the executable included), so it relaunches the SAME build
-      rec.browserChoice = p.browser ? BB.choiceView(p.browser) : { kind: 'default' }; // what this launch was asked to run (the running build is `cdpBrowser`, the browser's own answer)
+      rec.browserChoice = recordedChoice(p, buildEnv); // what this launch was asked to run (the running build is `cdpBrowser`, the browser's own answer; lane engine-plugin: + an engine's version)
       const stamp0 = F.dirLaunchStamp(p.dir); // r5 MAJOR 1 (iii): the directory before this launch
       rec.cli = await cliNow(); // verify r2 (H1): the CLI this launch runs — every later call of this browser runs that version
       const r = await rt.launch(ns, { dir: p.dir, idleMs: 0, headed: headed0, extraEnv: { ...vendorEnv, ...providerEnv, ...rec.display.env }, argvPrefix });   // the .197 integration: lane-cloak's provider pair + the display fact's env (last: DISPLAY / XAUTHORITY are the machine's)
@@ -4184,7 +4302,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * adoption judge that pid — no daemon of ours sits under it. → browserView(rec) | null when the display session did not
    * come up (said on the record; the caller runs the driver road).
    */
-  async function attachStart(p, rec, prevRec, { exe, why, ns }) {
+  async function attachStart(p, rec, prevRec, { exe, why, ns, engineLaunch = null }) {
     const profileId = p.id;
     const failed = (code, msg, extra = {}) => { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = msg; commit(); return namedError(code, msg, extra); };
     if (reaping.has(profileId)) { try { await reaping.get(profileId); } catch { /* its own log */ } }
@@ -4204,11 +4322,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     rec.displaySession = { id: ds.id, display: ds.display || null };
     stampLaunchHost(rec, prevRec, p.dir || null); // lane profile-lock-roll (L1): THIS machine's name on the record
     rec.mark = p.id; rec.holdDialogs = true; rec.automationFlag = true; rec.quietLog = true; // the argv carries the mark, AutomationControlled and the quiet switches
-    rec.browserChoice = p.browser ? BB.choiceView(p.browser) : { kind: 'default' };
+    rec.browserChoice = recordedChoice(p, engineLaunch);
     rec.launchEnv = { AGENT_BROWSER_IDLE_TIMEOUT_MS: '0' };
     rec.cli = await cliNow(); // the CLI every later call of this browser runs (it attaches; it never launches)
     commit();
-    const av = AT.attachArgv({ profileDir: p.dir, mark: B.keeperMarkArg(p.id), quiet: BE.QUIET_LOG_ARGS });
+    const engineArgs = engineLaunch && Array.isArray(engineLaunch.args) ? engineLaunch.args : []; // lane engine-plugin: the engine's own arguments, censused by the builder
+    const av = AT.attachArgv({ profileDir: p.dir, mark: B.keeperMarkArg(p.id), quiet: BE.QUIET_LOG_ARGS, extra: engineArgs });
     if (!av.ok) { await endDisplay(rec, 'its launch was refused'); throw failed(av.code, av.error); }
     // the env: the keeper's base env (agentEnv — never process.env) minus every driver key, the display session's X, the
     // daemon's short TMPDIR (Chrome's singleton socket must fit sun_path — lane browser-tmpdir-socket-length)
@@ -4219,6 +4338,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (xenv.DISPLAY) env.DISPLAY = xenv.DISPLAY; else if (ds.display) env.DISPLAY = ds.display;
     if (xenv.XAUTHORITY) env.XAUTHORITY = xenv.XAUTHORITY;
     { const td = daemonTmp(); if (td) env.TMPDIR = td; }
+    if (engineLaunch && engineLaunch.env) for (const k of ENG.ENGINE_ENV_KEYS) if (typeof engineLaunch.env[k] === 'string') env[k] = engineLaunch.env[k]; // lane engine-plugin: the whitelist only (none today)
     const r = await ATL.spawnChrome({ exe, argv: av.argv, env, profileDir: p.dir, logFile: path.join(dataDir, 'browser-env', 'attach', profileId + '.log') });
     if (!r.ok) {
       const lr = lockRefusalAfterLaunch(p, prevRec); // the directory taken meanwhile ⇒ its holder named
@@ -6068,7 +6188,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   // rv-browser F7 (lane dc-browser-installs): the slot is src/server/browser-installs.js and each installable is a row its
   // own file declares (browser-cloak-install.js, browser-cli-install.js, browser-builds-keeper.js — one INSTALLERS line
   // each); this keeper hands them what they read (its later consts and its reassigned lets at call time) and names no kind.
-  const installs = BI.create({ dataDir, installDir, installTimeoutMs, cloakExecutable, egressResolve, env, hereTag, log, namedError, notify, now, proofOf, usableExe, whichOnPath, writeJsonAtomic, bf, bfPath, cliFolderOf, cliPin, installedCliOf, runningClis, browsing, buildsFor, buildsHere, chromeBuildsResolve, commit, ensureLoaded, healing, homeDir, humans, isEph, isLocalRec, isMediated, keptDirFor, keptStore, mediator, named, profile, pview, readDirMajor, reopenLeaseTabs, start, stop, stopping, switching, userTodos,
+  const installs = BI.create({ dataDir, installDir, installTimeoutMs, cloakExecutable, egressResolve, env, hereTag, log, namedError, notify, now, proofOf, usableExe, whichOnPath, writeJsonAtomic, bf, bfPath, cliFolderOf, cliPin, installedCliOf, runningClis, browsing, buildsFor, buildsHere, engineFactOf, engineRowsView, chromeBuildsResolve, commit, ensureLoaded, healing, homeDir, humans, isEph, isLocalRec, isMediated, keptDirFor, keptStore, mediator, named, profile, pview, readDirMajor, reopenLeaseTabs, start, stop, stopping, switching, userTodos,
     get cliPrefix() { return cliPrefix; }, get cliWitnessOf() { return cliWitnessOf; }, get isMusl() { return isMusl; }, get inputsView() { return inputsView; },
     get reg() { return reg; }, get dirty() { return dirty; }, set dirty(v) { dirty = v; }, get inFlightReader() { return inFlightReader; },
     get cliGen() { return cliGen; }, set cliGen(v) { cliGen = v; }, get cliMemo() { return cliMemo; }, set cliMemo(v) { cliMemo = v; } });
@@ -7222,6 +7342,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   const api = {
     list, profile, profileByRef, browserOf, leasesFor, leasesOn, createProfile, adoptDirectory, removeProfile, cloneSources, cloneProfile,
     buildsFor, // lane browser-admin 2a: Change build… (buildsView, machineBuilds, setBrowserChoice, onRelaunch: the builds row, in ...installs.api)
+    engineFactOf, engineRowsView, defaultEngineNow, // lane engine-plugin: an engine's probe fact (the create route hands it in), the user's engine table, the default policy
+    installEngineKernel: (id) => { const d = eds(); if (!d) throw namedError('browser_engine_missing', 'this instance does not download browser engine kernels'); return d.installKernel(id, { by: 'user' }); }, // lane engine-distribution: a person's «Download kernel»
     restartProfile, askAnswer: (id, by) => { ensureLoaded(); const rec = reg.browsers[id]; return askAnswer(rec, profile(id), by); }, // lane browser-unresponsive: THE recovery + one ask (the gate's seam)
     cliPin, cliFactReady, _reattached: () => reattached, // cliFacts + installCli: the CLI row, in ...installs.api
     ...installs.api, // rv-browser F7 (lane dc-browser-installs): every install row's own routes (lane chrome-builds-download (design 004): Download another build…) // lane browser-admin 2b: the browser CLI VibeSpace drives (verify r3: cliFactReady = the doors' fact, the candidates asked first)

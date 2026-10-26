@@ -195,13 +195,17 @@ export function installSidebarRender(SidebarClass) {
 
 
   proto._buildSessionCard = function(s, opts = {}) {
-    return renderSessionCard(s, {
+    const card = renderSessionCard(s, {
       state: this, app: this.app, settings: this.app.settings,
       expandedCardId: this._expandedCardId,
       onExpandToggle: (id) => { this._expandedCardId = id; this._render(); },
       onRename: (session, originalName) => this.renameSession(session, originalName),
       showCwd: !!opts.showCwd, // task board: show each session's cwd on row 2
     });
+    // lane foryou-honest (P2-4 — the owner's B): «needs you · N · <the newest question>» when the conversation holds open
+    // For-you items (user-todos-panel.js app.sessionAsks — the row marks, the For-you window answers)
+    this.app.sessionAsks?.markIn?.(card, s);
+    return card;
   };
 
 }

@@ -58,7 +58,7 @@ const hits = ATTACH_FILES.flatMap((f) => syncCensus(fs.readFileSync(path.join(RE
 const ks = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
 const attachFn = ks.slice(ks.indexOf('  async function attachStart('), ks.indexOf('  async function stop(profileId'));
 ok(hits.length === 0 && attachFn.length > 2000 && syncCensus(attachFn).length === 0, `no literal --disable-sync on the attach road (${ATTACH_FILES.length} files + the keeper's attachStart, ${attachFn.length} chars) beyond the FORBIDDEN list`, hits);
-ok(/AT\.attachArgv\(\{ profileDir: p\.dir, mark: B\.keeperMarkArg\(p\.id\), quiet: BE\.QUIET_LOG_ARGS \}\)/.test(attachFn) && /ATL\.spawnChrome\(\{ exe, argv: av\.argv,/.test(attachFn), 'the keeper spawns EXACTLY the builder\'s argv (no flag added beside it)');
+ok(/AT\.attachArgv\(\{ profileDir: p\.dir, mark: B\.keeperMarkArg\(p\.id\), quiet: BE\.QUIET_LOG_ARGS, extra: engineArgs \}\)/.test(attachFn) && /const engineArgs = engineLaunch && Array\.isArray\(engineLaunch\.args\) \? engineLaunch\.args : \[\];/.test(attachFn) && /ATL\.spawnChrome\(\{ exe, argv: av\.argv,/.test(attachFn), 'the keeper spawns EXACTLY the builder\'s argv (no flag added beside it — lane engine-plugin: an engine\'s own arguments go IN through the builder, censused with the rest)');
 ok(syncCensus("const ARGV = ['--remote-debugging-port=0', '--disable-sync'];").length === 1, 'CONTROL: a planted argv literal with --disable-sync is RED');
 const noAC = mutant('src/browser-attach.js', "\n    '--disable-blink-features=AutomationControlled', '--disable-background-networking', ...PROFILE_STORE", "\n    '--disable-background-networking', ...PROFILE_STORE");
 ok(!noAC.attachArgv({ profileDir: '/p' }).ok && AT.argvVerdict(['--remote-debugging-port=0', '--user-data-dir=/p', '--no-first-run', '--no-default-browser-check', '--ozone-platform=x11', '--disable-background-networking']).missing.join() === '--disable-blink-features=AutomationControlled', 'CONTROL: a builder that drops AutomationControlled is RED (its census names the missing flag)');
@@ -285,6 +285,54 @@ ok(recB2.state === 'stopped' && /the browser exited/.test(recB2.lastError) && dc
   ok(kh._reg().browsers[pU.id].state === 'stopped' && !kh._reg().browsers[pU.id].displaySession === false && !dlive.has(kh._reg().browsers[pU.id].displaySession.id), 'nobody holds it ⇒ no heal (stopped, its display gone; the next command starts it)');
   await kh.stop(pH.id, { why: 'user' }).catch(() => { });
 }
+// lane engine-plugin: a profile on a browser ENGINE takes the ATTACH road too — the engine's program is the one spawned, its own
+// arguments go IN through the argv builder (the same census), the record says the engine + its version
+{
+  const KDIR = path.join(S, 'kernel'); fs.mkdirSync(KDIR, { recursive: true });
+  const KERN = path.join(KDIR, 'chrome');
+  fs.writeFileSync(KERN, `#!/bin/sh\necho "$0" >> "$FAKE_STATE/kernel-ran.log"\nexec ${path.join(FAKE_BIN, 'google-chrome')} "$@"\n`, { mode: 0o755 });
+  const EID = 'vibespace.custom-browser';
+  const fact = { installed: true, executable: true, binaryPath: KERN, version: 'Chromium 150.0.7871.186 fake', protocol: 1, kinds: [], features: ['surfaces'], label: 'Fake engine' };
+  const asked = [];
+  const REG = { rows: () => [{ id: EID, label: 'Fake engine', family: 'manifest', version: '0.0.1' }], probe: async (id) => { asked.push(['probe', id]); return { ok: true, fact: { ...fact } }; }, launchOptions: async (id, x) => { asked.push(['launchOptions', id, x.profileId, x.binaryPath, x.userDataDir]); return { ok: true, launch: { executablePath: KERN, args: ['--vibespace-engine=attach-leg'], env: {} } }; } };
+  const ke = mk({ dataDir: path.join(S, 'data-engine'), engines: REG });
+  const pE = ke.createProfile({ label: 'Engine', browser: { kind: 'plugin', id: EID } }, { owner: { kind: 'instance', id: null }, engine: fact });
+  setMode('ok');
+  const n0 = chromeLog().length;
+  const vE = await ke.start(pE.id, { why: 'test' });
+  const recE = ke._reg().browsers[pE.id];
+  const clE = chromeLog().slice(n0).pop();
+  let ran = ''; try { ran = fs.readFileSync(path.join(STATE, 'kernel-ran.log'), 'utf8'); } catch { ran = ''; }
+  ok(vE.state === 'ready' && recE.launch === 'attach' && recE.executable === KERN && ran.includes(KERN), 'an engine profile on the attach road: the ENGINE\'s program is the one spawned (rec.executable = its path)', { launch: recE.launch, exe: recE.executable, ran });
+  ok(clE && JSON.stringify(clE.args) === JSON.stringify(AT.attachArgv({ profileDir: pE.dir, mark: B.keeperMarkArg(pE.id), quiet, extra: ['--vibespace-engine=attach-leg'] }).argv) && clE.ab.length === 0, 'its own arguments went in through the argv builder (mark + quiet switches kept, the same census), no AGENT_BROWSER_* in its env', clE && clE.args);
+  ok(recE.browserChoice && recE.browserChoice.kind === 'plugin' && recE.browserChoice.version === fact.version && asked.some((a) => a[0] === 'launchOptions' && a[2] === pE.id && a[3] === KERN && a[4] === pE.dir), 'the record says {kind:\'plugin\', id, version}; the engine was asked for THIS profile with the kernel VibeSpace resolved and the profile\'s directory', { bc: recE.browserChoice, asked });
+  const bad = AT.attachArgv({ profileDir: pE.dir, mark: B.keeperMarkArg(pE.id), quiet, extra: ['--user-data-dir=/elsewhere'] });
+  ok(!bad.ok && bad.code === 'bad_argv', 'CONTROL: an engine argument naming another --user-data-dir fails the builder\'s census (bad_argv) — never spawned', bad);
+  await ke.stop(pE.id, { why: 'user' });
+  // lane engine-distribution: the kernel side's plugin has no childProcess — its probe says version null + declaredVersion; the
+  // KEEPER has the version measured ONCE before the first launch (the engine record's), the record + the card say «measured»
+  const factN = { ...fact, version: null, declaredVersion: '150.0.7871.186-vs1' };
+  const measured = { n: 0, v: null };
+  const EDS = { kernelFact: () => ({ state: 'installed', measuredVersion: measured.v, measuredAt: measured.v ? 1 : null }), measure: async () => { measured.n++; measured.v = '150.0.7871.186-vs1'; return { ok: true, version: measured.v }; }, installKernel: async () => { throw new Error('not here'); } };
+  const REGN = { ...REG, probe: async () => ({ ok: true, fact: { ...factN } }) };
+  const kn = mk({ dataDir: path.join(S, 'data-engine-m'), engines: REGN, engineDistribution: () => EDS });
+  const pN = kn.createProfile({ label: 'Measured', browser: { kind: 'plugin', id: EID } }, { owner: { kind: 'instance', id: null }, engine: factN });
+  await kn.start(pN.id, { why: 'test' }); await kn.stop(pN.id, { why: 'user' }); await kn.start(pN.id, { why: 'test' });
+  const BMk = await import('../src/lib/browser-build-model.js');
+  const rowN = (await kn.engineRowsView()).find((e) => e.id === EID);
+  const tK = (x, q) => String(x).replace(/\{(\w+)\}/g, (m, k) => (q && k in q ? String(q[k]) : m));
+  ok(measured.n === 1 && kn._reg().browsers[pN.id].browserChoice.version === '150.0.7871.186-vs1' && rowN.measuredVersion === '150.0.7871.186-vs1' && /· measured 150\.0\.7871\.186-vs1$/.test(BMk.engineNote(rowN, tK)),
+    'lane engine-distribution: the kernel\'s --version measured ONCE before its first launch (a second launch asks nothing), the record says the measured version, the card «… · measured 150.0.7871.186-vs1»', { n: measured.n, rc: kn._reg().browsers[pN.id].browserChoice, note: BMk.engineNote(rowN, tK) });
+  await kn.stop(pN.id, { why: 'user' });
+  const EDF = { ...EDS, kernelFact: () => ({ state: 'installed', measuredVersion: null }), measure: async () => { measured.n++; return { ok: false, error: 'it printed no version' }; } };
+  const kf = mk({ dataDir: path.join(S, 'data-engine-d'), engines: REGN, engineDistribution: () => EDF });
+  const pF = kf.createProfile({ label: 'Declared', browser: { kind: 'plugin', id: EID } }, { owner: { kind: 'instance', id: null }, engine: factN });
+  await kf.start(pF.id, { why: 'test' });
+  const rowF = (await kf.engineRowsView()).find((e) => e.id === EID);
+  ok(kf._reg().browsers[pF.id].browserChoice.version === '150.0.7871.186-vs1' && /declared 150\.0\.7871\.186-vs1 \(not measured\)/.test(BMk.engineNote(rowF, tK)), '…a kernel that says no version still starts: the record carries the DECLARED version, the card «declared 150.0.7871.186-vs1 (not measured)»', BMk.engineNote(rowF, tK));
+  await kf.stop(pF.id, { why: 'user' });
+}
+
 // ═══ ⑦ LANE BROWSER-DISPLAY-HOLDERS (the owner 2026-10-25): ONE NOTION OF HELD — a person's stop is a fact, never a crash ═══
 console.log('— ⑦ lane browser-display-holders: the display record carries its holders; a person\'s stop is never healed, its holders told once');
 {

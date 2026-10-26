@@ -17,6 +17,9 @@
 //   (c) CONTROL 1: CDP WebAuthn virtual authenticator + a resident credential ⇒ `end ok`, the page says ok, no passkey_open
 //   (d) CONTROL 2: a watch copy whose hook never arms (the Runtime.addBinding step removed) ⇒ `unknown`, no banner,
 //       no verb woken
+//   (K) lane passkey-sink: THE KERNEL LEG — the fake kernel as the browser (no Chrome, no agent-browser: it runs before their
+//       SKIPs): register / sign-in over the real store file + key file, the signature verified against the sealed key, cancel
+//       ⇒ NotAllowedError; three mutant controls (UV always true · the count not advanced · the request not re-checked) RED
 // SKIPs by name without the real agent-browser 0.38.1 or an Xvfb. Zero vendor calls, no real site; the scratch root, its
 // daemons, Xvfbs and Chromes are ended by this run's own root.
 import fs from 'node:fs';
@@ -263,6 +266,91 @@ await storeLegs();
 { const dsrc0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const calls = dsrc0.match(/Runtime\.addBinding'[^\n;]*/g) || [];
   ok(calls.length >= 1 && calls.every((l) => /executionContextName/.test(l)), `census: every Runtime.addBinding in the watch is isolated-world (executionContextName) \u2014 ${calls.length} call(s)`, calls); }
+
+// ── LANE PASSKEY-SINK (2026-10-25, P2 of the custom browser kernel — design-custom-browser-plugin §3): THE KERNEL LEG. On a
+// kernel whose `features` list `webauthn` there is no Chrome authenticator at all: the browser is the fake kernel
+// (scripts/fixtures/fake-kernel.mjs over a real socket), the REAL watch answers its VibeSpace.webauthnRequest with the REAL
+// store FILE (0600) sealed under a real key file (the wiring's lawfulKey road), and the page is the stub's promise:
+//   K1 register (the owner's one-use grant) ⇒ the key made on the server, sealed in the file, the attestation names it
+//   K2 a sign-in (policy yes — automatic) ⇒ the fake kernel's triggerWebAuthn → our get.signature VERIFIES against the SEALED
+//      key's public half (opened from the file through the key file); UP without UV (automatic is never verification)
+//   K3 the next sign-in ⇒ the count strictly increases, on disk before the answer
+//   K4 a clientDataJSON naming another origin (the kernel's word not trusted) ⇒ refused webauthn_rp_mismatch, nothing signed
+//   K5 `passkey cancel` ⇒ the stub's promise lands `cancelled`, the page sees NotAllowedError
+//   CONTROLS (mutant copies of src/server/browser-dialogs.js, each RED on its leg): UV always true ⇒ K2; the count not
+//   advanced ⇒ K3; the request not re-checked ⇒ K4
+// No Chrome and no agent-browser needed (the fake kernel IS the browser) — it runs before their SKIPs.
+async function kernelLegs(Dm, tag) {
+  const PSx = require('../src/browser-passkey-store.js'), WA = require('../src/webauthn-sign.js'), SB = require('../src/secret-box.js'), KF = require('../src/key-file.js'), CS = require('../src/channel-store.js');
+  const { startFakeKernel } = await import('./fixtures/fake-kernel.mjs');
+  const d = path.join(ROOT, 'pkkernel-' + tag, 'data'); fs.mkdirSync(d, { recursive: true });
+  const file = path.join(d, 'browser-passkeys.json'), keyFile = path.join(d, 'browser-passkeys.key');
+  const withCipher = (op) => { const k = SB.lawfulKey(keyFile, { raw: true, hasCiphertext: () => SB.holdsCiphertext({ files: [file], re: /v1\.[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]{22}\./ }) }); if (!k.ok) return { ok: false, code: k.code, file: path.basename(keyFile), words: KF.refusalWords(k.code, path.basename(keyFile)) }; return op(PSx.cipherOf(crypto, k.key)); };
+  const passkeys = { read: () => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } }, write: (o) => CS.writeJsonAtomic(file, o, { mode: 0o600 }), cipher: { seal: (x) => withCipher((c) => c.seal(x)), open: (x) => withCipher((c) => c.open(x)) } };
+  const k = await startFakeKernel({ firstUrl: 'https://example.test/' });
+  const uses = [], items = [], out = {};
+  const w = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: k.wsUrl }), onLease: () => () => {} }, log: { warn() {}, log() {} }, enableTimeoutMs: 300, holdersOf: () => [{ browserKey: 'bk-k', sessionId: 'sk' }], leaseCountOf: () => 1, labelOf: () => 'Kernel',
+    passkeys, takeoverOf: () => false, forYou: { add: (pid, it) => { items.push(it); return 'fy-' + items.length; }, resolve() {} }, vaultUse: (entry, use, o) => { uses.push({ entry, use, o }); return { receipt: 'vr-00000000000' + uses.length }; } });
+  const T = { profileId: 'bp-k', browserKey: 'bk-k', sessionId: 'sk' };
+  const settled = async (c) => { const a = await c.answerPromise; await sleep(40); return a; }; // the page's answer, then the watch's end of the record
+  try {
+    await w.arm('bp-k');
+    const reg = await w.passkeyRegister({ ...T, rpId: 'example.test', user: 'alice' });
+    w.answerPasskey(reg.proposal.id, { choice: 'once', shown: reg.proposal.shown });
+    const c1 = k.triggerWebAuthn({ op: 'create', origin: 'https://example.test', user: { id: Buffer.from('u-k').toString('base64url'), name: 'alice', displayName: 'Alice' } });
+    const a1 = await settled(c1);
+    const row = () => PSx.profileOf(passkeys.read(), 'bp-k').rows[0];
+    const r0 = row();
+    const pub = r0 ? WA.publicKeyOf({ crypto, privateKeyPkcs8: passkeys.cipher.open(r0.keySealed) }) : null;
+    const att = a1.create ? Buffer.from(a1.create.attestationObject, 'base64url') : Buffer.alloc(0);
+    out.K1 = !!(a1.outcome === 'completed' && r0 && r0.signCount === 0 && (fs.statSync(file).mode & 0o777) === 0o600 && (fs.statSync(keyFile).mode & 0o777) === 0o600 && pub && att.includes(pub.publicKeyCose) && !fs.readFileSync(file, 'utf8').includes(passkeys.cipher.open(r0.keySealed)));
+    w.passkeyPolicy('bp-k', r0 ? r0.credentialId.slice(0, 8) : 'none', 'yes');
+    const c2 = k.triggerWebAuthn({ op: 'get', origin: 'https://example.test' });
+    const a2 = await settled(c2);
+    const ad2 = a2.get ? Buffer.from(a2.get.authenticatorData, 'base64url') : Buffer.alloc(37);
+    out.K2sig = !!(a2.outcome === 'completed' && pub && crypto.verify('sha256', Buffer.concat([ad2, Buffer.from(c2.request.clientDataHash, 'base64url')]), pub.publicKey, Buffer.from(a2.get.signature, 'base64url')));
+    out.K2uv = (ad2[32] & 0x05) === 0x01; // UP, no UV — an automatic release
+    const c3 = k.triggerWebAuthn({ op: 'get', origin: 'https://example.test' });
+    const a3 = await settled(c3);
+    const n2 = ad2.readUInt32BE(33), n3 = a3.get ? Buffer.from(a3.get.authenticatorData, 'base64url').readUInt32BE(33) : -1;
+    out.K3 = n2 >= 1 && n3 > n2 && row().signCount === n3;
+    out.counts = [n2, n3, row() && row().signCount];
+    const before = uses.length;
+    const c4 = k.triggerWebAuthn({ op: 'get', origin: 'https://example.test', clientOrigin: 'https://evil.test' });
+    const a4 = await settled(c4);
+    out.K4 = a4.outcome === 'cancelled' && a4.error === 'NotAllowedError' && uses.length === before && !k.webauthnAnswers().some((x) => x.requestId === c4.request.requestId && x.get);
+    w.passkeyPolicy('bp-k', r0 ? r0.credentialId.slice(0, 8) : 'none', 'ask');
+    const c5 = k.triggerWebAuthn({ op: 'get', origin: 'https://example.test' });
+    await until(() => w.passkeyIn('bp-k', null).state === 'passkey_ask', 2000);
+    const cn = await w.cancelPasskey(T);
+    const a5 = await c5.answerPromise;
+    out.K5 = cn.ok && cn.n === 1 && a5.outcome === 'cancelled' && a5.error === 'NotAllowedError' && /NotAllowedError/.test(cn.text);
+    out.uses = uses.map((u) => u.o.purpose);
+  } finally { w.shutdown(); await k.close(); }
+  return out;
+}
+{
+  const Dk = require('../src/server/browser-dialogs.js');
+  const K = await kernelLegs(Dk, 'real');
+  ok(K.K1, 'K1 the kernel road: register (the owner\'s one-use grant) ⇒ the key made on the server, sealed in the store FILE (0600, key file 0600), the attestation names its public half — no plaintext in the file', K);
+  ok(K.K2sig, 'K2 the fake kernel\'s triggerWebAuthn ⇒ our get.signature VERIFIES against the SEALED key\'s public half (opened from the file through the key file)', K);
+  ok(K.K2uv, 'K2 … UP without UV: a policy-yes release is automatic — never the owner\'s verification', K);
+  ok(K.K3, `K3 the next sign-in ⇒ the count strictly increases and the file holds it (${JSON.stringify(K.counts)})`, K);
+  ok(K.K4, 'K4 a clientDataJSON naming another origin ⇒ refused webauthn_rp_mismatch, the page told NotAllowedError, nothing signed (VibeSpace re-checks — never trusts the kernel)', K);
+  ok(K.K5, 'K5 `passkey cancel` ⇒ VibeSpace.cancelSurface: the stub\'s promise lands `cancelled`, the page sees NotAllowedError', K);
+  ok(K.uses && K.uses.length === 3 && /register a passkey on example\.test/.test(K.uses[0]), 'the use law: the new key + two signatures = three uses through the vault\'s writer (purposes only)', K.uses);
+  // THE THREE CONTROLS — mutant copies of the watch, each RED on its own leg
+  const MUTK = mutantCopies('bpasskey-kernel', REPO);
+  const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const control = async (name, from, to, red) => {
+    if (!dsrc.includes(from)) return ok(false, `CONTROL ${name}: the anchor moved`, from);
+    const Km = await kernelLegs(MUTK.load('src/server/browser-dialogs.js', dsrc.replace(from, to), name.replace(/\W+/g, '-')), name.replace(/\W+/g, '-'));
+    return ok(red(Km), `CONTROL ${name} ⇒ its leg is RED`, Km);
+  };
+  await control('uv always true', 'const f = PS.kernelFlags(v, { kind: rec.kind, answer: rec.answer || null, takeover: rec.by === \'human\', userVerification: q.userVerification });', 'const f = { ...PS.kernelFlags(v, { kind: rec.kind, answer: rec.answer || null, takeover: rec.by === \'human\', userVerification: q.userVerification }), uv: true };', (Km) => Km.K2sig && !Km.K2uv);
+  await control('signCount not advanced', 'const used = PS.reconcile(PS.bumpSignCount(row).row, 0, now());', 'const used = PS.reconcile(row, 0, now());', (Km) => Km.K2sig && !Km.K3);
+  await control('rpId not re-checked', "const pre = WA().requestVerdict({ crypto, req: q, rpMatches: PS.rpMatches });", 'const pre = null;', (Km) => Km.K2sig && !Km.K4);
+}
 
 const REAL_AB = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
 let ver = null; try { ver = REAL_AB ? execFileSync(REAL_AB, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }

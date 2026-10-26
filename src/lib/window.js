@@ -1,7 +1,10 @@
 import { attachPopoverClose, escHtml, showToast, uiScale } from './utils.js';
-import { dragEndVerdict } from './drag-end.js';
+import { dragEndVerdict, releaseBox, resizeRelease, insideBox, releasePoint, reachable as reachableBox, RELEASE_KEEP } from './drag-end.js'; // lane desktop-small P2-1: the release keeps a title bar reachable, the named window comes back
 import { captureOn, setDragShield, attachDragFeed } from './drag-feed.js'; // ONE feed for every drag door (verify r1)
 import { minOf, clampToMin, raiseToMin, keepInside, zoneBox, wholePx, rescaleBox } from './window-min-size.js';
+import { cascadeBox } from './window-min-size.js'; // lane desktop-small: a new window never buries a title bar on show
+/** A title bar narrower than this sets its ⧉ overlap indicator aside (lane desktop-small P2-6 — _observeTitleWidth). */
+const NARROW_TITLE_PX = 440;
 import { fixedWindowPlacement } from './desktop-app-placement.js'; // lane app-window-fit-topleft (B-1f0b): where a window whose app fixed its size stands (PURE)
 import { track } from './telemetry-client.js';
 import { t } from './i18n.js';
@@ -135,6 +138,7 @@ class WindowManager {
     this.windows.set(id, winInfo);
     this._applyTitleMeta(winInfo);
     this._setupDrag(winInfo); this._setupResize(winInfo); this._setupIconDrag(winInfo);
+    this._observeTitleWidth(winInfo); // lane desktop-small P2-6: a narrow title bar sets the ⧉ indicator aside (24 px buttons)
     controls.querySelector('.win-overlap-btn').onclick = (e) => {
       e.stopPropagation();
       const btn = e.currentTarget;
@@ -265,6 +269,7 @@ class WindowManager {
       if (win.fixedSize && this._placeFixed(win)) continue; // lane app-window-fit-topleft: larger than THIS workspace ⇒ its top-left, this client's (never captured)
       if (win.gridBounds && !win.isMaximized) this._applyGridBounds(win);
       if (win.minWidth || win.minHeight) this._applyOwnMin(win); // the workspace cap follows the workspace (r2)
+      this._keepReachable(win); // a narrower / shorter workspace (the sidebar, the browser window) never buries a title bar — this client's fit, never captured (lane desktop-small P2-1)
     }
   }
 
@@ -571,8 +576,10 @@ class WindowManager {
       // Desktop preview: detect hover, collapse window into mini preview inside it
       const prevVis = element.style.visibility;
       element.style.visibility = 'hidden';
-      let hoverPreview = document.elementFromPoint(e.clientX, e.clientY)?.closest('.desktop-preview');
+      const under = document.elementFromPoint(e.clientX, e.clientY);
+      let hoverPreview = under?.closest('.desktop-preview, .desktop-switch-row'); // a row of the compact switcher's list too (lane desktop-small r2 ①)
       element.style.visibility = prevVis;
+      this._app?.desktopManager?.dragHover?.(under); // held on the compact «Desktop k/N» button, its list springs open
       // Stage↔desktop drags are blocked BOTH directions: the stage preview is
       // not a drop target, and stage-view windows (placeholder/hero/aux) never
       // drag out to a desktop preview (real report: an escaped placeholder).
@@ -674,7 +681,8 @@ class WindowManager {
       this.snapIndicator.style.display = 'none';
       for (const [, w] of this.windows) w.element.classList.remove('tab-drop-target');
       if (mergeGhost) { mergeGhost.remove(); mergeGhost = null; }
-      document.querySelectorAll('.desktop-preview').forEach(p => p.classList.remove('desktop-preview-drop'));
+      document.querySelectorAll('.desktop-preview, .desktop-switch-row').forEach(p => p.classList.remove('desktop-preview-drop'));
+      this._app?.desktopManager?.dragDone?.(); // a list the drag sprang open closes with it (r2 ①)
       markRefusal(null); // the refused preview's mark and the words beside the pointer (inc-muly2izg-cks3)
     };
     // SEAMLESS (round 3 lane B): a drag started from a pointer the app's header bar handed over is fed by POINTER
@@ -718,6 +726,17 @@ class WindowManager {
         return;
       }
 
+      // lane desktop-small r2 ①: released on a ROW of the compact switcher's list — the preview drop's road, the window
+      // keeping the place it had when the drag began (slid wholly inside: reachable on that desktop)
+      if (deskPreviewTarget && deskPreviewTarget.classList.contains('desktop-switch-row')) {
+        const deskId = deskPreviewTarget.dataset.desktopId || null, deskName = deskPreviewTarget.querySelector('.dsc-name')?.textContent || '';
+        this._clearGridHighlight(); this.gridOverlay.classList.remove('dragging');
+        if (deskMiniWin) { deskMiniWin.remove(); deskMiniWin = null; }
+        deskPreviewTarget = null; deskSavedBounds = null; tabMergeTarget = null; savedBounds = null;
+        element.style.visibility = ''; element.style.pointerEvents = '';
+        this._dropOnDeskRow(win, dragFrom, { id: deskId, name: deskName }, { wasMax: dragFromMax, prev: dragFromPrev });
+        return;
+      }
       // Desktop preview drop: if we have a mini window inside a preview, commit the move
       if (deskPreviewTarget && deskMiniWin) {
         const dm = this._app?.desktopManager;
@@ -807,6 +826,7 @@ class WindowManager {
         win._preSnapBounds = null;
         win._isSnapped = false;
       }
+      this._keepReachable(win); // EVERY release keeps 80×32 of the title bar inside the workspace (lane desktop-small P2-1)
       this._clearGridHighlight(); this.gridOverlay.classList.remove('dragging');
       // Re-capture proportional bounds after final position (snap or free drop)
       setTimeout(() => {
@@ -898,6 +918,18 @@ class WindowManager {
     this._scheduleOverlapUpdate(); this._notify();
   }
 
+  /** A title-bar drag released on a ROW of the compact switcher's list (lane desktop-small r2 ①): the window goes back to
+   *  where the drag began — its grid fraction slid wholly inside, its box kept reachable — and, a row of another desktop,
+   *  moves there by the row's door (desktopManager.dropOnRow — a desktop deleted elsewhere is refused by name, r3 ③); the
+   *  active desktop's row puts it back. */
+  _dropOnDeskRow(win, from, desk, back) {
+    const gb = from && from.gridBounds ? insideBox(from.gridBounds, { w: 1, h: 1 }) : null;
+    this._putBackAfterRefusedDrop(win, gb ? { ...from, gridBounds: { left: gb.left, top: gb.top, width: gb.width, height: gb.height } } : from, back);
+    this._keepReachable(win);
+    const dm = this._app?.desktopManager;
+    if (dm && desk.id && desk.id !== dm.activeDesktopId) dm.dropOnRow(win.id, desk.id, desk.name);
+  }
+
   _snapVal(val, gridLines, threshold) {
     for (const gl of gridLines) {
       if (Math.abs(val - gl) < threshold) return gl;
@@ -978,6 +1010,7 @@ class WindowManager {
         /** THE END DOOR of the resize: once (a second end is a no-op), whatever ended it. */
         const endResize = (why = 'release') => {
           if (!win._resizeOp) return;
+          if (resized) this._keepReachable(win, dir); // r2 ③: the resize's release keeps the title bar too (a north edge past the top stops there)
           if (resized) win._boundsAt = Date.now(); // THE HELD GEOMETRY's witness (verify r2 ⑩): the resize is the user's, newer than any record received before it; a press that moved nothing holds nothing (verify r3)
           win._lastResizeEnd = why;
           detach();
@@ -1204,8 +1237,20 @@ class WindowManager {
     const o = (this.windowCounter % 8) * 30, box = { left: 40 + o, top: 40 + o, width, height };
     const ws = this._mobileLayout() ? null : this._workspaceBox();
     if (!ws) return box;
-    const k = keepInside({ ...box, width: Math.min(width, ws.w), height: Math.min(height, ws.h) }, ws);
-    return { left: k.left, top: k.top, width: k.width, height: k.height };
+    // lane desktop-small (the walk's cascade at 1280×640, re-measured at all four viewports): the slid slot opened a window
+    // on the SAME top as the one before — 30 px to the right, or exactly over it — and the earlier title bars showed 0–4 %.
+    // PURE cascadeBox: the slot as before unless it would bury a title bar on show; then the first top below them
+    return cascadeBox({ ...box, width: Math.min(width, ws.w), height: Math.min(height, ws.h) }, ws, this._barsOnShow());
+  }
+  /** The title bars of the windows on show on this desktop (layout px) — what a new window must not bury. */
+  _barsOnShow() {
+    const out = [];
+    for (const w of this.windows.values()) {
+      if ((w._tabChain && w._tabChain.tabs[0] !== w.id) || w.isMinimized || w._hiddenByDesktop || w._hiddenByStage) continue;
+      const el = w.element; if (!el || !(el.offsetWidth > 0)) continue;
+      out.push({ left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: (w.titleBar && w.titleBar.offsetHeight) || 32 });
+    }
+    return out;
   }
   /**
    * PUT A WINDOW INTO A ZONE — the ONE placement every sizing path goes through (inc-muhmqvzf-jodk, 2026-09-26: Chrome
@@ -1329,7 +1374,11 @@ class WindowManager {
   _clearGridHighlight() { this.gridOverlay.querySelectorAll('.grid-cell').forEach(c => c.classList.remove('highlight')); }
 
   _snapToGrid(winId, cx, cy) {
-    const idx = this._getGridCell(cx, cy); if (idx < 0) return;
+    let idx = this._getGridCell(cx, cy);
+    // a release OUTSIDE every cell (over the taskbar, past an edge) takes the cell nearest the pointer — it used to take none
+    // and the free drag's place stood: a window buried under the taskbar (lane desktop-small P2-1, PURE releasePoint)
+    if (idx < 0 && this.grid) { const p = releasePoint({ x: cx, y: cy }, this.workspace.getBoundingClientRect()); idx = this._getGridCell(p.x, p.y); }
+    if (idx < 0) return;
     const win = this.windows.get(winId); if (!win) return;
     this._positionToCell(win, idx, true);
     this._captureGridBounds(win); // Track as proportional bounds
@@ -1480,6 +1529,80 @@ class WindowManager {
     const focusId = ch && host.id !== id && this._app?.stage?.shouldIntercept?.(win) ? host.id : id;
     if (host.isMinimized) { this.witnessGeometry(focusId); this.restore(focusId); } // the user named it: its restore is the user's act (verify r4 ③)
     else this.focusWindow(focusId);
+    this._bringBack?.(host); // a named window whose title bar is out of reach comes back INSIDE, not only raised (lane desktop-small P2-1)
+    return true;
+  }
+
+  /** A window element's box (layout px) as its inline px say — what a drop / a placement WROTE (a snap's transition is still
+   *  mid-flight in offsetLeft); else as laid out (_layoutBoxOf). */
+  _inlineBoxOf(el) {
+    const px = (v) => (/^-?\d+(\.\d+)?(e-?\d+)?px$/.test(String(v || '')) ? parseFloat(v) : NaN);
+    const b = { left: px(el.style.left), top: px(el.style.top), width: px(el.style.width), height: px(el.style.height) };
+    if (!Object.values(b).every(Number.isFinite)) return this._layoutBoxOf(el);
+    if (el.offsetWidth > b.width) b.width = el.offsetWidth; // a CSS minimum wider than the inline size (the .window floor)
+    return b;
+  }
+  /** THE RELEASE'S LAST WORD (lane desktop-small — P2-1 of the small-viewport walk: a Quad drag released over the taskbar
+   *  left the window at y 553 of a 556 px workspace): the window keeps RELEASE_KEEP (80×32) of its title bar inside the
+   *  workspace — PURE releaseBox, moved never resized. Asked at the end of every drop that leaves the window placed (the
+   *  title-bar drag's snap / grid cell / free drop, the tab tear-off's), at every workspace reflow (this client's fit:
+   *  never captured nor announced) and at the end of every resize (`dir` = its edge — r2 ③: PURE resizeRelease, the dragged
+   *  edge stops at the top). A maximized window, the phone layout, a workspace not laid out: as is. */
+  _keepReachable(win, dir = null) {
+    if (!win || win.isMaximized || win._hiddenByDesktop || this._mobileLayout()) return false;
+    const b = this._inlineBoxOf(win.element), ws = this._workspaceBox();
+    if (!b || !ws) return false;
+    const k = dir ? resizeRelease(b, ws, dir, this._barKeep(win), this._ownMinOf(win)) : releaseBox(b, ws, this._barKeep(win));
+    if (!k.moved) return false;
+    win.element.style.left = k.left + 'px'; win.element.style.top = k.top + 'px';
+    if (dir) win.element.style.height = k.height + 'px';
+    return true;
+  }
+  /** RELEASE_KEEP of the TITLE BAR, as the window's box must keep it: the bar sits inside the window's border. */
+  _barKeep(win) {
+    const el = win.element, bx = el.clientLeft || 0, by = el.clientTop || 0;
+    return { w: RELEASE_KEEP.w + 2 * bx, h: RELEASE_KEEP.h + by };
+  }
+  /** A NARROW TITLE BAR (lane desktop-small P2-6 — the window buttons are 24×24 and 4 px apart now, 19 px more than the
+   *  20 / 3 px row): under NARROW_TITLE_PX the ⧉ overlap indicator steps aside (style.css `.titlebar-narrow` — its act is the
+   *  title menu's «Switch window»), so a narrow window's title and a split group's tabs (their doors) keep the room they
+   *  had. ONE ResizeObserver over every title bar; a window's bar is unobserved when the window closes. Its own field —
+   *  `_titleRO` is the tab-group mixin's (the split tail's observer: sharing the name silenced it, test-split-ux). */
+  _observeTitleWidth(win) {
+    if (typeof ResizeObserver !== 'function' || !win || !win.titleBar) return;
+    if (!this._narrowTitleRO) {
+      this._narrowTitleRO = new ResizeObserver((entries) => {
+        for (const en of entries) { const bar = en.target, w = bar.offsetWidth, narrow = w > 0 && w < NARROW_TITLE_PX; if (bar.classList.contains('titlebar-narrow') !== narrow) bar.classList.toggle('titlebar-narrow', narrow); }
+      });
+    }
+    this._narrowTitleRO.observe(win.titleBar);
+    win._listenerCtl?.signal?.addEventListener?.('abort', () => this._narrowTitleRO.unobserve(win.titleBar), { once: true });
+  }
+  /** Can the person reach this window's title bar (the release's rule)? Nothing to reach — minimized, maximized, hidden,
+   *  the phone layout, an unknown id — reads true (nothing to recover). The taskbar tile asks it before its minimize. */
+  isReachable(id) {
+    const w = this.windows.get(id), win = (w && w._tabChain && this.windows.get(w._tabChain.tabs[0])) || w;
+    if (!win || win.isMinimized || win.isMaximized || win._hiddenByDesktop || win._hiddenByStage || this._mobileLayout()) return true;
+    const b = this._inlineBoxOf(win.element), ws = this._workspaceBox();
+    return !b || !ws || reachableBox(b, ws, this._barKeep(win));
+  }
+  /** THE RECOVERY LOOP (lane desktop-small P2-1 — a buried window's tile, clicked twice, minimized it and restored it to
+   *  the same buried place; its window-list row only raised it): a window the person NAMED (every revealWindow door — the
+   *  taskbar tile, the window list, the palette, a sidebar card) whose title bar is out of reach is brought wholly inside
+   *  the workspace (PURE insideBox) — witnessed as the user's act, its grid bounds captured, the layout told. A reachable
+   *  window (one the person left hanging partly off) stays where it is. */
+  _bringBack(win) {
+    if (!win || win.isMaximized || win.isMinimized || win._hiddenByDesktop || win._hiddenByStage || this._mobileLayout()) return false;
+    const b = this._inlineBoxOf(win.element), ws = this._workspaceBox();
+    if (!b || !ws || reachableBox(b, ws, this._barKeep(win))) return false;
+    const k = insideBox(b, ws);
+    if (!k.moved) return false;
+    this.witnessGeometry(win.id);
+    win.element.style.left = k.left + 'px'; win.element.style.top = k.top + 'px';
+    if (win.gridBounds) this._captureGridBounds(win);
+    if (win._tabChain) this._syncChainBounds(win._tabChain);
+    if (win.onMoved) { try { win.onMoved(); } catch {} }
+    this._scheduleOverlapUpdate(); this._notify();
     return true;
   }
 

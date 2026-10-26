@@ -56,6 +56,7 @@ export class MobileNav {
     // THE PHONE'S WINDOW ON SHOW IS ITS OWN (§6b guard 10): per tab, per desktop (sessionStorage), read once before the
     // boot's restore focuses anything — a reload shows the same window; a record from another client never changes it
     this._shown = readShown();
+    this._shownAtBoot = Object.keys(this._shown).length > 0; // lane foryou-honest: this tab showed a window before — a RELOAD (the phone's first screen never hijacks it)
     this._shownBooted = false;
 
     // ☰: the phone's drawer; in the regular class (the Duo's inner portrait) the list COLUMN's show / hide (lane duo-build-1)
@@ -214,6 +215,9 @@ export class MobileNav {
       row(UI_ICONS.browserLive, t('Agent browser…'), () => app.openBrowserProfiles()),
     ]);
   }
+
+  /** Did this tab show a window before this boot (a reload, not a cold open)? — user-todos-panel.js's bootHome reads it. */
+  shownAtBoot() { return this._shownAtBoot; }
 
   /** The window on show, noted for this tab once the boot's restore is over (every window change ends here). */
   _noteShown() {

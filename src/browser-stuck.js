@@ -263,6 +263,9 @@ const NO_DIALOG_TEXT = 'No page dialog is open on your browser.';
 function renderDialogNotice(n) {
   const d = n && n.dialog;
   if (!d) return '';
+  // lane browser-surfaces: a browser KERNEL's prompt (not a page dialog) carries its OWN sentence — its answers are its own, never
+  // `dialog accept|dismiss`; the words re-judged here (a stored notice is read back)
+  if (typeof n.text === 'string' && n.text && typeof d.kind === 'string' && d.kind !== 'js-dialog') return '<system-reminder>\n' + `While you ran no browser command, a browser prompt opened in ${n.label ? `your browser ${quoted(pageText(n.label, 80))}` : 'your browser'}: ${pageText(n.text, 4000)} The user may answer it first in the live view.` + '\n</system-reminder>';
   return '<system-reminder>\n' + `While you ran no browser command, a page dialog opened in ${n.label ? `your browser ${quoted(pageText(n.label, 80))}` : 'your browser'} — ${d.type}: ${saidBy(d)}. The page will not move until it is answered: vibespace-browser dialog accept [text]  |  vibespace-browser dialog dismiss. ${answerMeaning(d.type)} The user may answer it first in the live view.` + '\n</system-reminder>';
 }
 

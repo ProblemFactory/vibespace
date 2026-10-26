@@ -9,6 +9,18 @@
 // reload / restore only once the server's boot phase (GET /api/boot) is `ready`.
 
 export const LADDER_MS = [1000, 2000, 5000, 10000];
+
+/** THE STALE-TAB STEP (2.160.1 / 2.240.3; lane phone-back-reload). On a ws (re)connect the bundle's baked version
+ *  (`bundle`) vs the server's (`server`): 'none' — the same (or either unknown); 'reload' — the first mismatch for
+ *  this server version in this tab (`reloaded` = the per-tab sessionStorage stamp); 'notice' — the tab already
+ *  reloaded once for it and STILL runs the old bundle (a cached bundle, a dev build without a bump): say so once,
+ *  never a second reload (measured: two reconnects after the reload stayed silent before); 'quiet' — said already.
+ *  `pending` — this document's reload is scheduled and has not fired (the stamp is written as it fires): 'none'. */
+export function staleTabStep({ bundle, server, reloaded = false, noticed = false, pending = false } = {}) {
+  if (!bundle || !server || bundle === server || pending) return 'none';
+  if (!reloaded) return 'reload';
+  return noticed ? 'quiet' : 'notice';
+}
 export const STALL_MS = 10000;     // one boot request that has not answered by then = stalled
 export const POLL_MS = 1000;       // the boot-phase poll while the server says `booting`
 export const STARTING_CAP_MS = 180000; // the server flips to ready after 90 s itself; this is the belt

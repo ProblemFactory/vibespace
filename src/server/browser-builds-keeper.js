@@ -18,7 +18,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 function create(ctx, slot) {
-  const { bf, browsing, buildsFor, buildsHere, chromeBuildsResolve, commit, ensureLoaded, env, healing, hereTag, homeDir, humans, installDir, isEph, isLocalRec, isMediated, keptDirFor, keptStore, log, mediator, named, namedError, notify, now, profile, pview, readDirMajor, reopenLeaseTabs, start, stop, stopping, switching, usableExe, userTodos, whichOnPath, writeJsonAtomic } = ctx;
+  const { bf, browsing, buildsFor, buildsHere, engineFactOf, engineRowsView, chromeBuildsResolve, commit, ensureLoaded, env, healing, hereTag, homeDir, humans, installDir, isEph, isLocalRec, isMediated, keptDirFor, keptStore, log, mediator, named, namedError, notify, now, profile, pview, readDirMajor, reopenLeaseTabs, start, stop, stopping, switching, usableExe, userTodos, whichOnPath, writeJsonAtomic } = ctx;
   const { INSTALL_TIMEOUT_MS, busyWords, installMarker, installState, mine: isMine, markInstall, otherOf, runStep, stalledWords } = slot;
   const inputsView = (...a) => ctx.inputsView(...a); // declared later in the keeper (read at call time)
   // ── lane chrome-builds-download (design 004, B-80c1 — the owner: 「能不能自动从网上下载对应的版本？…下载前让用户检查是否互相兼容」) ──
@@ -395,7 +395,7 @@ function create(ctx, slot) {
     const p = profile(profileId);
     if (!p || isEph(p)) throw namedError('not-found', `no profile ${profileId}`);
     const rec = ctx.reg.browsers[p.id] || null;
-    const listing = await buildsFor(p.host || null);
+    const listing = { ...(await buildsFor(p.host || null)), engines: await engineRowsView({ host: p.host || null }) }; // lane engine-plugin: + the engines (the «自研内核» card — each one's probe FACT, its version, never a path)
     return {
       profileId: p.id, label: p.label, provider: p.provider, buildChoice: !!(B.providerRow(p.provider) || {}).buildChoice, host: p.host || null, choice: BB.choiceView(p.browser), missing: p.buildMissing ? { ...p.buildMissing } : null,
       listing, live: B.isLiveBrowser(rec), running: rec ? BB.runningBuildOf(rec.cdpBrowser) : null, holders: ctx.reg.leases.filter((l) => l.profileId === p.id).length,
@@ -418,7 +418,7 @@ function create(ctx, slot) {
   /** The New profile… dialog's build section: a machine's builds before any profile exists. */
   // lane remote-profile-start: + `ready` — can a browser run on that machine at all (its CLI, a Chrome), with the ONE step for
   // ITS platform; null for this computer (its own CLI flows) and for an agent that predates the fact (never claimed missing)
-  async function machineBuilds(hostId = null) { const listing = await buildsFor(hostId || null); return { host: hostId || null, listing, installCommand: installCommandFor(hostId || null), download: downloadOffer(hostId || null), ready: hostId && listing && listing.ready ? listing.ready : null }; }
+  async function machineBuilds(hostId = null) { const listing = { ...(await buildsFor(hostId || null)), engines: await engineRowsView({ host: hostId || null }) }; return { host: hostId || null, listing, installCommand: installCommandFor(hostId || null), download: downloadOffer(hostId || null), ready: hostId && listing && listing.ready ? listing.ready : null }; } // lane engine-plugin: the listing carries the engines (New profile…)
   /**
    * CHANGE BUILD… (lane browser-admin 2a). THE verdict (well-formed · the user's · chromium · on that machine's list /
    * a runnable file · the §7.4 version ladder when the directory was ever written — a downgrade refused by name, an
@@ -444,13 +444,14 @@ function create(ctx, slot) {
     const refuseDriven = (h) => { throw namedError('browser_driven', `"${p.label}" is being driven by hand right now (the live view of ${h.driver}) — hand the browser back first, then change its build`, { driver: h.driver }); };
     { const h = drivenNow(); if (h.hold === 'driven') refuseDriven(h); } // (1) before anything is read
     const c = BB.normalizeBrowserChoice(choice);
-    if (!c) throw namedError('browser_choice_invalid', 'a browser build is {kind:"default"} | {kind:"build", version} | {kind:"path", path}');
+    if (!c) throw namedError('browser_choice_invalid', 'a browser build is {kind:"default"} | {kind:"build", version} | {kind:"path", path} | {kind:"plugin", id}');
     if (BB.sameChoice(c, p.browser)) throw namedError('build_noop', `"${p.label}" already runs ${BB.buildWords(c)}`);
     const builds = c.kind === 'build' ? await buildsFor(p.host || null) : null;
+    const engine = c.kind === 'plugin' ? await engineFactOf(c.id, { host: p.host || null }) : null; // lane engine-plugin: the engine's probe, a fact like the list
     const dirMajor = p.host ? null : readDirMajor(p.dir);
-    const v = BB.browserChoiceVerdict({ choice: c, provider: p.provider, by, builds, pathFact: c.kind === 'path' && !p.host ? BB.fileFact(c.path) : null, machine: p.host || 'this computer', label: p.label,
+    const v = BB.browserChoiceVerdict({ choice: c, provider: p.provider, by, builds, pathFact: c.kind === 'path' && !p.host ? BB.fileFact(c.path) : null, engine, machine: p.host || 'this computer', label: p.label,
       recordedMajor: Number.isInteger(p.lastChromiumMajor) ? p.lastChromiumMajor : null, dirMajor, written: dirWritten(p), ladder: true, confirmed: !!confirmed });
-    if (!v.ok) throw namedError(v.code, v.error, { needsConfirm: !!v.needsConfirm, waysOut: v.waysOut || [], version: c.kind === 'build' ? c.version : null, wrote: v.wrote != null ? v.wrote : null });
+    if (!v.ok) throw namedError(v.code, v.error, { needsConfirm: !!v.needsConfirm, waysOut: v.waysOut || [], version: c.kind === 'build' ? c.version : null, wrote: v.wrote != null ? v.wrote : null, ...(c.kind === 'plugin' ? { engine: c.id } : {}) });
     if (switching.has(p.id)) { const rr = SW.restartingRefusal(p); throw namedError(rr.code, rr.error); } // re-asked after the listing's await
     { const h = drivenNow(); if (h.hold === 'driven') refuseDriven(h); } // (2) re-asked after the listing's await
     refuseBrowsing(); // verify r2 (H2): …and his own browsing, begun during it

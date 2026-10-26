@@ -2,6 +2,41 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.358 — 2026-10-25
+
+### Added
+- A browser engine plugin can now be the agent browser: Change build… shows its Custom kernel card with the version, and says so when its kernel is missing.
+- Settings → Agent browser → Default browser engine picks what new agent browsers run; a cluster can preset it, and the row says when it did.
+- On the custom browser kernel every page prompt (a dialog, a file picker, a sign-in, a permission, a print) is a VibeSpace card the agent or you answer.
+- On the custom browser kernel a website's passkey sign-in is answered with the passkey VibeSpace keeps for you, after your confirmation.
+- On the custom browser kernel the agent signs in with the logins you keep in the vault, never seeing a password; accounts it registers are saved for you.
+- Plugins can be installed from a private Git repository with a credential kept in the vault; the custom browser kernel is downloaded once and checksum-checked.
+- The Custom kernel card says when this computer's Node is too old to unpack it (22.15 or later) and when the cluster names a kernel address that is not https.
+
+### Changed
+- For you counts every question waiting for you and never says “Nothing waiting on you” while one is open; a foldable’s inner screen has it on the side bar.
+- A conversation in the list shows one line, “needs you · N” and its newest question; tap it to answer in the For-you window instead of in the list.
+- Choices an agent writes as “A …; B …” or “yes / no” become buttons (a numbered plan stays text), and the For-you window shows the words exactly as written.
+- On a touch screen For you is easier to hit: 16 px questions, Reply · Open · Mark done · Dismiss buttons with their words, a full-width detail row.
+- On a phone, For you opens its first-screen page; each item folds to its question: tap it to open it in place, or tap Chat to go to its conversation.
+- On a small screen every window stays reachable from the taskbar: its buttons stay readable, a scrolling «+N» list holds the rest, the wheel scrolls them.
+- Many desktops on a small screen fold into one «Work 2/8» button whose list switches, adds, renames, deletes and reorders them and takes a dropped window.
+- A narrow chat window keeps its status bar on one line (⋯ shows the rest), and a short one keeps more of its height for the messages.
+- Mouse targets — window buttons, status chips, the ✕ of a note or a dialog — are at least 24 px, and the window buttons stand further apart.
+- A new window no longer opens over the title bars of the windows already open, and Settings says at its foot that every change saves as you make it.
+
+### Fixed
+- ✓ and ✕ on a For-you item show Undo for a few seconds; tapping an item in the tray opens it in place instead of leaving the tray.
+- Reloading a phone keeps the window you had open instead of jumping to For you; the For-you badge and the first row in ☰ bring the page back.
+- A window dragged onto the taskbar or resized past the top is no longer lost under a bar; its taskbar button or window-list row brings such a window back.
+- A window's right-click menu near the bottom of a small screen opens inside the screen, so Move and Minimize can be clicked.
+- The Open in editor and Fork buttons no longer cover the last words of a message's first line.
+- A note no longer covers an open menu or the message box; the Desktop list closes when you click into a web view, and its note is a whole sentence.
+- On a narrow toolbar the VibeSpace name is shown whole or not at all, never cut to «Vibe…».
+- On a phone the back button no longer reloads VibeSpace after the browser put the tab to sleep or VibeSpace was opened again in the same tab.
+- If a back press ever reloads the page again, VibeSpace captures what happened for the admin by itself and tells you.
+- A tab that still runs an older version after its one automatic reload now says so instead of staying silent.
+
 ## 2.369.357 — 2026-10-25
 
 ### Added

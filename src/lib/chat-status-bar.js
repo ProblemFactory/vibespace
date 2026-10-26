@@ -10,6 +10,11 @@ import { t } from './i18n.js';
 import { shortWorkflowName } from '../workflow-name.js';
 // THE PHONE BAR (lane phone-chat-composer): ≤ 768 px the bar is ONE 40-px row — see _fold
 const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(VC_PHONE_MEDIA) : null;
+/** THE NARROW DESK WINDOW (lane desktop-small P2-4 — at 340–376 px a chat window's bar wrapped to THREE rows, 69 px, and a
+ *  Quad cell kept 62–144 px of messages): a desk window narrower than this keeps its bar ONE row, the rest behind ⋯ (the
+ *  phone's own fold, PURE phoneBarFold) — and one shorter than SHORT_WINDOW_PX too, with its composer at one line. */
+export const NARROW_BAR_PX = 480;
+export const SHORT_WINDOW_PX = 300;
 /** The regular class's one-row bar keeps these (the model, the billing icon, a dropped ssh pipe's amber chip); the rest fold behind ﹀. */
 const REGULAR_BAR_KEEP = new Set(['model', 'billing', 'remote']);
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
@@ -171,12 +176,34 @@ export class ChatStatusBar {
     });
     this._foldOpen = false;
     PHONE_MQ?.addEventListener?.('change', () => this.render());
-    if (PHONE_MQ && typeof ResizeObserver !== 'undefined') new ResizeObserver(() => this._fold()).observe(this._element);
+    // the bar AND its window (a narrow / short desk window — lane desktop-small P2-4): the window is watched once it exists
+    if (typeof ResizeObserver !== 'undefined') { this._sizeRO = new ResizeObserver(() => this._onSize()); this._sizeRO.observe(this._element); }
+  }
+
+  /** ONE ROW: a phone, or a desk window narrower than NARROW_BAR_PX or shorter than SHORT_WINDOW_PX (its ⋯ folds what does not fit). */
+  _oneRow() {
+    if (PHONE_MQ?.matches) return true;
+    const win = typeof this._element.closest === 'function' ? this._element.closest('.window') : null, w = win ? win.offsetWidth : 0, h = win ? win.offsetHeight : 0;
+    return (w > 0 && w < NARROW_BAR_PX) || (h > 0 && h < SHORT_WINDOW_PX);
+  }
+  /** A size change of the bar or its window: the one-row verdict re-drawn when it flips (the ⋯ chip comes or goes), else
+   *  the fold re-measured; a desk window under SHORT_WINDOW_PX marks its view `chat-short` (the composer starts at one line —
+   *  chat.css), so its messages keep ≥ 45 % of the window. */
+  _onSize() {
+    if (this._disposed || typeof this._element.closest !== 'function') return;
+    const win = this._element.closest('.window');
+    if (win && this._sizeRO && this._watchedWin !== win) { this._watchedWin = win; this._sizeRO.observe(win); }
+    const one = this._oneRow();
+    if (one !== !!this._wasOneRow) { this._wasOneRow = one; this.render(); } else this._fold();
+    const view = this._element.closest('.chat-view');
+    const short = !!win && !PHONE_MQ?.matches && win.offsetHeight > 0 && win.offsetHeight < SHORT_WINDOW_PX;
+    if (view && view.classList.contains('chat-short') !== short) view.classList.toggle('chat-short', short);
   }
 
   /** The .chat-status-bar element */
   dispose() {
     this._disposed = true;
+    if (this._sizeRO) { this._sizeRO.disconnect(); this._sizeRO = null; }
     if (this._wfTimer) { clearTimeout(this._wfTimer); this._wfTimer = null; }
   }
 
@@ -1081,7 +1108,7 @@ export class ChatStatusBar {
     }
 
     // the regular class (SPEC-v3 §2.4, lane duo-build-1): the bar's own expander wears ﹀ — this conversation's ONE ⋯ is the trailing bar's
-    if (PHONE_MQ?.matches) chip('more', `chat-status-more chat-status-clickable${this._foldOpen ? ' active' : ''}`, this._foldOpen ? t('Close') : t('More'), this._foldOpen ? '\u2715' : (document.documentElement.dataset.vc === 'regular' ? (UI_ICONS.chevronDown || '\u22EF') : '\u22EF'));
+    if (this._oneRow()) chip('more', `chat-status-more chat-status-clickable${this._foldOpen ? ' active' : ''}`, this._foldOpen ? t('Close') : t('More'), this._foldOpen ? '\u2715' : (document.documentElement.dataset.vc === 'regular' ? (UI_ICONS.chevronDown || '\u22EF') : '\u22EF'));
     this._reconcile(chips);
     this._fitBilling();
     this._fold();
@@ -1111,7 +1138,7 @@ export class ChatStatusBar {
       if (!el.querySelector('.pill-compact')) w.compact = Infinity;   // no short word: full or the glyph
       this._billingW = w;
     }
-    if (PHONE_MQ?.matches && !this._foldOpen) return; // the phone's ONE row: `_fold` picks the form (lane phone-bar-billing-nofold)
+    if (this._oneRow() && !this._foldOpen) return; // the ONE row (a phone, a narrow desk window): `_fold` picks the form (lane phone-bar-billing-nofold)
     const mode = pillMode({ slotPx, fullPx: this._billingW.full, compactPx: this._billingW.compact });
     if (el.dataset.mode !== mode) el.dataset.mode = mode;
   }
@@ -1168,12 +1195,14 @@ export class ChatStatusBar {
    *  The billing chip (who pays) never folds: it goes compact, then icon (PURE `phoneBarFold`, lane
    *  phone-bar-billing-nofold — the runner's wider fonts folded it). The desk bar is never touched (no ⋯ chip, no class written). */
   _fold() {
-    const bar = this._element, phone = !!PHONE_MQ?.matches, open = phone && this._foldOpen;
-    if (!phone && !this._phoneFolded) return; // the desk bar: nothing read, nothing written
-    this._phoneFolded = phone; // one desk pass after the phone face clears what it wrote
+    const bar = this._element, phone = this._oneRow(), open = phone && this._foldOpen; // `phone` = the ONE row: a phone, or a narrow desk window (lane desktop-small P2-4)
+    if (!phone && !this._phoneFolded) return; // the wide desk bar: nothing read, nothing written
+    this._phoneFolded = phone; // one wide pass after the one-row face clears what it wrote
+    const narrow = phone && !PHONE_MQ?.matches;
+    if (bar.classList.contains('chat-status-narrow') !== narrow) bar.classList.toggle('chat-status-narrow', narrow);
     if (bar.classList.contains('chat-status-open') !== open) bar.classList.toggle('chat-status-open', open);
     for (const el of bar.querySelectorAll(':scope > .chat-status-folded')) el.classList.remove('chat-status-folded');
-    if (!PHONE_MQ?.matches || open) return;
+    if (!phone || open) return;
     const more = this._chipEls.get('more')?.el;
     const cs = getComputedStyle(bar), gap = parseFloat(cs.columnGap) || 0;
     const room = bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - (more ? more.offsetWidth + gap : 0);

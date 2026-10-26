@@ -1414,6 +1414,7 @@ const tabGroupMethods = {
         else { const snap = this._getSnapZone(e.clientX, e.clientY); if (snap) { this._applySnap(winId, snap); snapped = true; } }
       }
       if (snapped) win._isSnapped = true;
+      this._keepReachable?.(win); // the tear-off's drop keeps 80×32 of the title bar inside the workspace too (lane desktop-small P2-1)
       this._clearGridHighlight();
       setTimeout(() => { this._captureGridBounds(win); this._scheduleOverlapUpdate(); this._notify(); }, 250);
     };

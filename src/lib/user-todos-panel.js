@@ -28,11 +28,11 @@
 // it (mobile-back.js: HOME = the page while the list has rows, else the conversation list); ☰ still opens the list.
 import { t, tc } from './i18n.js';
 import { rowOf as attentionRow, toastWorthy, PARKED, FOLD_HEAD, settingsPolicy, bandKey, BANDS, CAP_KEY } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words; the owner's switches + cap (lane attention-predicate-shared, settingsPolicy — their ONE reader)
-import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY, noticeReadAll } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
+import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY, noticeReadAll, openCount, sessionMark, firstLine } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
-import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts } from './utils.js';
+import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts } from './utils.js';
 import { UI_ICONS } from './icons.js';
 import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文件 card under the phone page's bands
 import { BACK_DISMISS_EVENT } from './back-guard.js'; // lane mobile-back-guard: the phone's back closes this sheet through hidePopup
@@ -52,6 +52,23 @@ export function installUserTodos(app) {
   // the same segmented badge and opens the same popup (the stylesheet's
   // full-width sheet rule for .usage-popup beats the inline anchor).
   const mBtn = document.getElementById('mobile-nav-todos');
+  // lane foryou-honest (the owner: «切到其他窗口之后又回不来了»): the ☰ drawer's FIRST row «For you · N» (the honest count) —
+  // the second door back to the phone's first screen beside the badge (style.css shows it on the compact class only)
+  const drawerRow = (() => {
+    const sec = document.querySelector('#sidebar > .sidebar-section');
+    if (!sec) return null;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.id = 'drawer-foryou';
+    b.className = 'drawer-foryou';
+    b.addEventListener('click', () => {
+      app.sidebar?.toggle?.(false);
+      if (!showHome() && popup.classList.contains('hidden')) togglePopup(mBtn || btn); // nothing on the page's first screen: the sheet
+    });
+    sec.prepend(b);
+    return b;
+  })();
+  const paintDrawerRow = (total) => { if (drawerRow) drawerRow.innerHTML = UI_ICONS.inbox + `<span>${escHtml(t('For you'))} · ${total}</span>`; };
   const model = inboxModel(app); // THE one store + the verbs (src/lib/user-todos-actions.js) — the For-you window asks for the same one
   onVaultFacts(() => document.querySelectorAll('.ut-secret').forEach((b) => applySecretBox(b))); // lane vault-paste-request: every paste box says the vault's state live (locked ⇒ 解锁… inline; unlocked ⇒ ready)
   let todos = { open: [], resolved: [] };
@@ -74,6 +91,11 @@ export function installUserTodos(app) {
   // (lane duo-build-1: wired on every page — a desktop boot folded to the phone has it — and shown only while app.isMobile)
   const home = document.getElementById('phone-home');
   const H = { layout: null, bands: null, open: new Map(), noticesOpen: false, noticeOrder: null };
+  // lane foryou-honest (the owner: «每次刷新都是这个»): per tab (sessionStorage, like the window on show — §6b guard 10), was
+  // the page on show when this tab last ran ('1' / '0'; null = a COLD open). Read once, before anything shows.
+  const HOME_ON_KEY = 'vibespace.phoneHomeOn';
+  const homeWas = (() => { try { return sessionStorage.getItem(HOME_ON_KEY); } catch { return null; } })();
+  const noteHomeOn = (on) => { try { sessionStorage.setItem(HOME_ON_KEY, on ? '1' : '0'); } catch { } };
   // NOTICES BY ORIGIN (B-328d): the filter is per DEVICE (like the language) and
   // survives a close; the group ORDER is append-only while the popup is open
   // (the origins the last paint listed — null on every open, like the layout).
@@ -148,11 +170,14 @@ export function installUserTodos(app) {
     // only ACTION items colour the badge; notices are a grey count of their own.
     // lane foryou-folds: the badge counts the attention list's bands 1–4 (a band-5 ask or a row in 搁置 moves only the list)
     const { action, notices } = badgeOf(todos.open, Date.now(), attnPolicy());
-    const n = action.length;
+    // lane foryou-honest (the stress evaluation's P1-1): THE HONEST COUNT — every open action item (21 band-5 asks read
+    // «Nothing waiting on you» here); `action` stays the loud part (the coloured tiers), the rest is ONE quiet segment
+    const total = openCount(todos.open);
+    const n = action.length, quiet = Math.max(0, total - n);
     const worst = action.reduce((w, i) => Math.max(w, URG_RANK[i.urgency || 'normal'] || 1), 0);
-    btn.classList.toggle('ut-has-items', n > 0);
+    btn.classList.toggle('ut-has-items', total > 0);
     btn.classList.toggle('ut-has-notices', notices > 0);
-    btn.dataset.urgency = n ? (Object.keys(URG_RANK).find((k) => URG_RANK[k] === worst) || 'normal') : '';
+    btn.dataset.urgency = n ? (Object.keys(URG_RANK).find((k) => URG_RANK[k] === worst) || 'normal') : total ? 'quiet' : '';
     // SEGMENTED badge (owner request): one pill per urgency tier so the
     // high-priority count is readable at a glance — urgent (red) · high
     // (yellow) · rest (accent). Zero tiers don't render; one tier looks
@@ -161,17 +186,19 @@ export function installUserTodos(app) {
     const segs = [cu ? `<span class="ut-count ut-seg-urgent">${cu}</span>` : '',
                   ch ? `<span class="ut-count ut-seg-high">${ch}</span>` : '',
                   cn ? `<span class="ut-count ut-seg-norm">${cn}</span>` : '',
+                  quiet ? `<span class="ut-count ut-seg-quiet" title="${t('{n} more, none pressing', { n: quiet })}">${quiet}</span>` : '',
                   notices ? `<span class="ut-count ut-seg-notice" title="${t('{n} notices (for your information)', { n: notices })}">${notices}</span>` : ''].join('');
     btn.innerHTML = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l1.5 6v3.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5z"/></svg>${segs}`;
-    btn.title = actionWords(action) + (notices ? ' · ' + t('{n} notices (for your information)', { n: notices }) : '');
+    btn.title = actionWords(action, total) + (notices ? ' · ' + t('{n} notices (for your information)', { n: notices }) : '');
     if (mBtn) {
       // same badge, same classes (the CSS colours by data-urgency / ut-has-items)
       mBtn.innerHTML = UI_ICONS.inbox + segs;
       mBtn.title = btn.title;
-      mBtn.classList.toggle('ut-has-items', n > 0);
+      mBtn.classList.toggle('ut-has-items', total > 0);
       mBtn.classList.toggle('ut-has-notices', notices > 0);
       mBtn.dataset.urgency = btn.dataset.urgency;
     }
+    paintDrawerRow(total);
   };
 
   // ── THE POPUP: KEYED ROWS, RECONCILED IN PLACE (design-user-inbox-reply D1.9) ──
@@ -187,7 +214,7 @@ export function installUserTodos(app) {
   // THE TABS (B-328d): built ONCE per open and PATCHED in place — the active
   // mark and the keyed count spans (`.ut-tab-n[data-n]`) follow every broadcast
   // and every toast; a page switch replaces the page below them, never them.
-  const TAB_SEG = { urgent: 'ut-seg-urgent', high: 'ut-seg-high', normal: 'ut-seg-norm', low: 'ut-seg-norm' };
+  const TAB_SEG = { urgent: 'ut-seg-urgent', high: 'ut-seg-high', normal: 'ut-seg-norm', low: 'ut-seg-norm', quiet: 'ut-seg-quiet' };
   const setCount = (span, n, seg, title) => {
     const disp = n > 0 ? '' : 'none';
     if (span.style.display !== disp) span.style.display = disp;
@@ -210,7 +237,7 @@ export function installUserTodos(app) {
       const q = (k) => b.querySelector(`:scope > .ut-tab-n[data-n="${k}"]`);
       let label;
       if (b.dataset.tab === 'inbox') {
-        const words = actionWords(action); // the taskbar badge's own sentence
+        const words = actionWords(action, c.inbox.action); // the taskbar badge's own sentence (lane foryou-honest: c.inbox.action = THE honest count)
         const nWords = t('{n} notices (for your information)', { n: c.inbox.notice });
         setCount(q('action'), c.inbox.action, TAB_SEG[c.inbox.urgency] || 'ut-seg-norm', c.inbox.action ? words : '');
         setCount(q('notice'), c.inbox.notice, 'ut-seg-notice', c.inbox.notice ? nWords : '');
@@ -381,9 +408,12 @@ export function installUserTodos(app) {
       // the bar's right end holds it for the whole open — 「还有 N 条 — 展开」 ⇄ 「收起」, one fixed width; 「全部标为已看」 keeps its own
       // slot left of it. Nothing held back any more (the folded rows resolved elsewhere) ⇒ the toggle hides but KEEPS its slot,
       // so no destructive control ever slides into a spot a fold button just vacated.
-      let fe = bar.querySelector(':scope > .ut-fold');
+      // lane foryou-honest (acceptance round 2): ON A TOUCH SCREEN the fold is a full-width row AFTER the band's shown rows,
+      // where the rows it reveals appear — the wrapped bar drew «N more — expand» above the newest rows it extends
+      const foldHome = isTouchDevice() ? g : bar;
+      let fe = g.querySelector(':scope > .ut-fold, :scope > .ut-band-bar > .ut-fold');
       if (b.foldable) {
-        if (!fe) { fe = mk('button', 'ut-fold'); fe.type = 'button'; bar.append(fe); }
+        if (!fe) { fe = mk('button', 'ut-fold'); fe.type = 'button'; foldHome.append(fe); }
         fe.dataset.band = String(b.band);
         const live = b.expanded || b.hidden > 0;
         fe.dataset.state = b.expanded ? 'open' : 'folded';
@@ -393,7 +423,7 @@ export function installUserTodos(app) {
         fe.disabled = !live;
         const vis = live ? '' : 'hidden';
         if (fe.style.visibility !== vis) fe.style.visibility = vis;
-        if (bar.lastElementChild !== fe) bar.append(fe);
+        if (foldHome.lastElementChild !== fe) foldHome.append(fe);
       } else if (fe) fe.remove();
     }
     for (const g of existing.values()) { open.delete(g.dataset.band); g.remove(); }
@@ -524,7 +554,7 @@ export function installUserTodos(app) {
     const allRows = entriesFor(layout, todos).map((g) => [g.key, g.entries, g.openCount]);
     // NOTICES (2.369.118): for-your-information rows leave the list for a section of their own under the bands
     const { notices } = splitNotices(allRows);
-    const openActions = badgeOf(todos.open, now, attnPolicy()).open.length;
+    const openActions = openCount(todos.open); // lane foryou-honest: THE honest count (the badge's number)
     root.querySelector(':scope > .ut-title > .ut-head-sub').textContent = openActions ? t('{n} open', { n: openActions }) : t('all clear');
     drawBands(root.querySelector(':scope > .ut-bands'), drawn);
     root.querySelector(':scope > .ut-empty').style.display = drawn.length ? 'none' : '';
@@ -694,12 +724,14 @@ export function installUserTodos(app) {
   app.openMiniInbox = openMiniInbox;
   app._syncInboxBadges = scheduleBadges;
 
-  // THE LIST COLUMN'S INLINE ANSWERS (lane duo-build-1 — SPEC-v3 §2.3: a question is a property of its conversation's
-  // row, answerable where it appears): the regular class's list rows (src/lib/sidebar-column.js) ask here for their
-  // session's open items and get THE mini inbox's rows — the same miniInboxEntries, the same reconcileRows, the same
-  // rowClick (a chip answers, Reply opens the box, ✓ / ✕ resolve). Every row asked once is repainted on each snapshot
-  // until it leaves the DOM; a press inside never reaches the row (selecting the conversation is the row's own tap).
-  const colAsks = new Set();
+  // «NEEDS YOU · N» ON A SESSION ROW (lane foryou-honest — the stress evaluation's P2-4 and the owner's B, 2026-10-25): the
+  // regular class's list column answered questions INLINE (lane duo-build-1 slice 2c: each question, its detail fold and four
+  // 44 px chips in the row — 21 questions made the column 5.3 screens with no whole conversation on the first one, and the
+  // chips were never the options). Now EVERY session row (the Duo's list column, the phone's drawer, the desktop's sidebar —
+  // sidebar-render.js `_buildSessionCard`) carries ONE marker line when its conversation holds open items: «needs you · N ·
+  // <the newest question's first line>» (PURE sessionMark / firstLine — the honest count); a tap opens THE For-you window
+  // scoped to that conversation on the newest question (the row ⤢ road); answering happens there and in the tray.
+  // Every marker on the page repaints from the CURRENT snapshot on each broadcast (a DOM query — nothing kept).
   const keysForRow = (s) => {
     if (!s) return null;
     const keys = [];
@@ -710,47 +742,43 @@ export function installUserTodos(app) {
     if (s.webuiId) add(`webui:${s.webuiId}`);
     return keys.length ? keys : null;
   };
-  const paintAsks = (box) => {
-    const keys = keysForRow(box._utRow);
-    // a FRESH layout on every paint (never the mini inbox's append-only one): an answered question leaves the row — the
-    // row becomes an ordinary row again (SPEC-v3 §2.3)
-    const { entries } = keys ? miniInboxEntries(null, todos, keys) : { entries: [] };
-    box.hidden = !entries.length;
-    let rows = box.querySelector(':scope > .ut-mini-rows');
-    if (!entries.length) { if (rows) rows.replaceChildren(); return 0; }
-    if (!rows) { rows = mk('div', 'ut-mini-rows'); box.appendChild(rows); }
-    reconcileRows(rows, entries, null, miniCtx);
-    return entries.length;
+  const markOf = (s) => { const keys = keysForRow(s); return keys ? sessionMark(todos.open, keys) : { n: 0, newest: null }; };
+  const paintMark = (el) => {
+    const m = markOf(el._utRow);
+    el.hidden = !m.n;
+    if (!m.n) { if (el.firstChild) el.replaceChildren(); el.dataset.n = '0'; delete el.dataset.id; return; }
+    const head = t('needs you · {n}', { n: m.n });
+    const line = firstLine(wordsOf(m.newest)); // TEXT — an agent's words (a cleared item reads the cleared sentence)
+    if (el.dataset.n !== String(m.n) || el.dataset.id !== m.newest.id || el._utLine !== line) {
+      const icon = mk('span', 'ut-sm-icon'); icon.innerHTML = UI_ICONS.inbox; icon.setAttribute('aria-hidden', 'true');
+      el.replaceChildren(icon, mk('span', 'ut-sm-head', head), ...(line ? [mk('span', 'ut-sm-sep', '·'), mk('span', 'ut-sm-q', line)] : []));
+      el.dataset.n = String(m.n); el.dataset.id = m.newest.id; el._utLine = line;
+    }
+    const title = t('Open the {n} open items of this conversation in the For-you window', { n: m.n });
+    if (el.title !== title) { el.title = title; el.setAttribute('aria-label', head + ' · ' + line); }
   };
   app.sessionAsks = {
-    /** How many open items this sidebar row's session holds (the column ranks those rows first). */
-    count: (s) => { const keys = keysForRow(s); return keys ? miniInboxEntries(null, todos, keys).entries.length : 0; },
-    /** Paint the session's open items into `box` (and keep it painted on every snapshot while it is in the DOM). */
-    render: (box, s) => {
-      box._utRow = s;
-      if (!box._utWired) {
-        box._utWired = true;
-        box.classList.add('ut-col-asks');
-        box.addEventListener('click', (e) => {
-          e.stopPropagation(); // the row's own tap selects the conversation; a press in its question answers it
-          if (fyPress(e, () => { })) return;
-          if (e.target.closest('.ut-detail-exp')) return;
-          const item = e.target.closest('.ut-item');
-          if (item) rowClick(e, item, { mini: true });
-        });
-        box.addEventListener('keydown', (e) => {
-          if (e.key === 'Escape' && !e.isComposing) { const b = e.target?.closest?.('.ut-reply'); if (b) { foldBox(b); e.preventDefault(); e.stopPropagation(); } return; }
-          replyKeys(e);
-        });
-        box.addEventListener('input', growOnInput);
-        box.addEventListener('contextmenu', (e) => { e.stopPropagation(); rowMenu(e); });
-      }
-      colAsks.add(box);
-      return paintAsks(box);
+    /** How many open items this sidebar row's session holds (THE honest count — the column ranks those rows first). */
+    count: (s) => markOf(s).n,
+    /** Append the row's «needs you · N» marker to `card` (kept current on every snapshot while it is in the DOM). */
+    markIn: (card, s) => {
+      const el = mk('button', 'ut-sess-mark');
+      el.type = 'button';
+      el._utRow = s;
+      el.addEventListener('click', (e) => {
+        e.stopPropagation(); // the row's own tap selects the conversation; the marker opens its questions
+        const m = markOf(el._utRow);
+        if (!m.newest) return;
+        if (app.isMobile && app.viewportClass?.() !== 'regular' && app.sidebar?.isOpen) app.sidebar.toggle?.(false); // the phone's drawer steps aside for the window
+        app.openInbox({ itemId: m.newest.id, sessionKey: m.newest.sessionKey });
+      });
+      card.appendChild(el);
+      paintMark(el);
+      return el;
     },
   };
   // after the panel's own listener stored the snapshot (registered below — a microtask later every listener has run)
-  model.on('todos', () => queueMicrotask(() => { for (const box of colAsks) { if (!box.isConnected) colAsks.delete(box); else paintAsks(box); } }));
+  model.on('todos', () => queueMicrotask(() => { for (const el of document.querySelectorAll('.ut-sess-mark')) paintMark(el); }));
 
   const togglePopup = (anchor) => {
     notePopupHide('button'); // its own button again (an open popup only: an open says nothing)
@@ -772,7 +800,16 @@ export function installUserTodos(app) {
     if (!popup.classList.contains('hidden')) armExitButtons();
   };
   btn.onclick = () => togglePopup(btn);
-  if (mBtn) mBtn.onclick = () => togglePopup(mBtn);
+  if (mBtn) mBtn.onclick = () => {
+    // lane foryou-honest: on the phone (the compact class) the badge IS the door to its first screen — ONE surface, never the
+    // sheet drawing the page's rows a second time: it toggles the page (the window it covered is on show again; none ⇒ the
+    // conversation list); the sheet only when the page has no row to show (the notices or 搁置 alone)
+    if (app.viewportClass?.() === 'compact' && home) {
+      if (homeShown()) { hideHome(); if (!app.wm?.activeWindowId) app.sidebar?.toggle?.(true); return; }
+      if (showHome()) { if (!popup.classList.contains('hidden')) hidePopup('home'); if (app.sidebar?.isOpen) app.sidebar.toggle(false); return; }
+    }
+    togglePopup(mBtn);
+  };
   // an outside press hides the popup — THE ONE closer (utils.js onOutsidePress: capture-phase pointerdown, so a press
   // into an app's picture counts too; lane M). A PERSISTENT element: armed once for the app's life. Its rules, kept:
   // the nav button is exempt like the taskbar one — a press on it would hide the popup and the click would re-open it
@@ -860,7 +897,7 @@ export function installUserTodos(app) {
   popup.addEventListener('click', (e) => {
     if (fyPress(e, () => hidePopup('artifact'))) return; // lane foryou-attachments: a chip / a link in the words opens what it names, never the row's jump
     // §9: the whole inbox as THE window (the popup steps aside for it)
-    if (e.target.closest('.ut-tabs > .ut-open-win')) { hidePopup('open-win'); app.openInbox(); return; }
+    if (e.target.closest('.ut-tabs > .ut-open-win')) { hidePopup('open-win'); app.openInbox({ scope: 'all' }); return; } // lane foryou-honest (P3-7): the tray's own scope — a window another device scoped to one conversation is widened, never inherited
     const tb = e.target.closest('.ut-tab');
     if (tb) { if (tb.dataset.tab !== tab) { tab = tb.dataset.tab; renderPanel(); } return; } // the page below the tabs switches; the tabs are patched, never rebuilt
     // a notice FILTER chip (B-328d): per device; the active origin chip again = all
@@ -891,14 +928,16 @@ export function installUserTodos(app) {
     if (e.target.closest('.ut-detail-exp')) return;
     const item = e.target.closest('.ut-item');
     if (!item) return;
-    rowClick(e, item);
+    rowClick(e, item, { expand: true });
   });
   /** Every action ON A ROW — the panel's and the mini inbox's (chunk 3) are the
    *  same rows through the same renderer, so one handler serves both; only the
    *  row-body click differs: the panel jumps to the session, the mini inbox is
    *  already IN that session's window (`mini` ⇒ no jump). */
-  function rowClick(e, item, { mini = false } = {}) {
+  function rowClick(e, item, { mini = false, expand = false } = {}) {
     const id = item.dataset.id;
+    // lane foryou-honest: a folded row's trailing door — its conversation in ONE tap (the phone's first screen keeps decision 5's jump)
+    if (e.target.closest('.ut-go')) { const rec = byId(id); if (rec) jump(rec.sessionKey, rec); return; }
     // the reply box is a place to type, never a jump
     const sendBtn = e.target.closest('.ut-reply-send');
     if (sendBtn) { if (!sendBtn.disabled) { const ta = item.querySelector(':scope > .ut-body > .ut-reply textarea'); sendReply(item, ta ? ta.value : ''); } return; }
@@ -915,7 +954,7 @@ export function installUserTodos(app) {
     const chip = e.target.closest('.ut-opt');
     if (chip) {
       const rec = byId(id);
-      const label = rec && Array.isArray(rec.options) ? rec.options[Number(chip.dataset.idx)] : null;
+      const label = rec ? model.optionsFor(rec)[Number(chip.dataset.idx)] : null; // lane foryou-honest: the chip's own label (explicit, else the detail's parsed option)
       if (label && !chip.disabled) sendReply(item, label, { chip: true });
       return;
     }
@@ -1016,16 +1055,46 @@ export function installUserTodos(app) {
       Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), exitBtn.dataset.answer, reachPick ? { reach: reachPick.value } : {})).finally(() => { exitBtn.disabled = false; });
       return;
     }
-    if (e.target.closest('.ut-done')) setStatus(id, 'done');
-    else if (e.target.closest('.ut-dismiss')) setStatus(id, 'dismissed');
+    if (e.target.closest('.ut-done')) model.resolveOne(id, 'done'); // lane foryou-honest (P3-2): ONE toast with Undo for 6 s (the ↺ road)
+    else if (e.target.closest('.ut-dismiss')) model.resolveOne(id, 'dismissed');
     else if (e.target.closest('.ut-reopen')) setStatus(id, 'open');
     else {
       if (mini) return; // the mini inbox lives in this session's own window — nothing to jump to
       // a real text SELECTION inside the row must not jump-and-close
       if (String(window.getSelection?.() || '')) return;
       const rec = byId(id);
+      // lane foryou-honest (the stress evaluation's P3-8): in the TRAY a row's body tap EXPANDS it (the whole question, its
+      // detail open) — it never navigates away to the conversation; the conversation's name in its meta line is the door to
+      // it. An item whose jump is its own DOOR (a plugin's sheet, a job's form, a channel, the vault — model.isDoor) still opens it
+      // ON A TOUCH SCREEN THE ROW IS AN ACCORDION (the owner: «那我想看下一个对话怎么办？这个能折叠吗？»): a folded row is its
+      // question + meta line and the whole row opens it — ONE open at a time; an open row's conversation name (or a door
+      // item's body) is its door, the rest folds it back
+      if (expand && isTouchDevice()) {
+        if (!item.classList.contains('ut-open')) { openOne(item); return; }
+        if (e.target.closest('.ut-sess') || (rec && model.isDoor(rec.sessionKey, rec))) { if (rec) jump(rec.sessionKey, rec); return; }
+        toggleOpen(item);
+        return;
+      }
+      // (a RESOLVED row has nothing to open — its body jumps to its conversation, as before: acceptance round 2)
+      if (expand && !item.classList.contains('ut-item-resolved') && !e.target.closest('.ut-sess') && !(rec && model.isDoor(rec.sessionKey, rec))) { toggleOpen(item); return; }
       if (rec) jump(rec.sessionKey, rec);
     }
+  }
+  /** A tray row opened IN PLACE (P3-8): the clamp lifts and the detail fold opens; a second tap folds both back. */
+  function toggleOpen(item) {
+    const on = !item.classList.contains('ut-open');
+    item.classList.toggle('ut-open', on);
+    const d = item.querySelector(':scope > .ut-body > .ut-detail-exp');
+    if (d) d.open = on;
+  }
+  /** The touch accordion's open: the row opens and every other open row of its surface (the sheet, the phone's page) folds
+   *  — twenty open rows would be the five-screen column again. Its answers appeared just now: armed afresh (press-arm). */
+  function openOne(item) {
+    const surface = item.closest('#user-todos-popup, #phone-home') || item.parentElement;
+    for (const o of surface.querySelectorAll('.ut-item.ut-open')) if (o !== item) toggleOpen(o);
+    toggleOpen(item);
+    armExitButtons();
+    item.scrollIntoView?.({ block: 'nearest' });
   }
 
   // ── THE PHONE'S FIRST SCREEN (lane phone-first-screen, design q-044 decision 5) ─────────────────────────────────────
@@ -1065,6 +1134,7 @@ export function installUserTodos(app) {
       home.classList.remove('hidden');
       home.scrollTop = 0;
       document.body.classList.add('phone-home-on'); // the nav's ✕ closes the ACTIVE window — hidden while the page covers it (style.css)
+      noteHomeOn(true);
       app._updateMobileNavTitle?.();
     }
     renderHome();
@@ -1080,6 +1150,7 @@ export function installUserTodos(app) {
     Object.assign(H, { layout: null, bands: null });
     H.open.clear();
     document.body.classList.remove('phone-home-on');
+    noteHomeOn(false);
     app._updateMobileNavTitle?.();
   };
   if (home) {
@@ -1101,7 +1172,7 @@ export function installUserTodos(app) {
       if (sa) { markAllSeen(sa); return; }
       if (e.target.closest('.ut-detail-exp')) return;
       const item = e.target.closest('.ut-item');
-      if (item) rowClick(e, item); // the row's verbs; its body opens the conversation (jump ⇒ the page steps aside)
+      if (item) rowClick(e, item, { expand: isTouchDevice() }); // the row's verbs; its body opens the conversation (jump ⇒ the page steps aside) — on a touch screen the sheet's accordion (lane foryou-honest)
     });
     home.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !e.isComposing) { const box = e.target?.closest?.('.ut-reply'); if (box) { foldBox(box); e.preventDefault(); e.stopPropagation(); } return; } // a reply box folds (its text kept as a draft)
@@ -1121,6 +1192,11 @@ export function installUserTodos(app) {
       const go = () => {
         document.removeEventListener('pointerdown', press, { capture: true });
         if (pressed || document.getElementById('welcome')?.classList.contains('onboarding')) return;
+        // lane foryou-honest: a RELOAD of a tab that had a window on show keeps that window (mobile-nav.js restores it) — the
+        // page takes the screen on a COLD open, when nothing is on show, or when it was on show itself; it is one tap away
+        // (the badge, the drawer's first row)
+        const reloaded = homeWas !== null || !!app._mobileNav?.shownAtBoot?.();
+        if (reloaded && homeWas !== '1' && app.wm?.activeWindowId) return;
         if (showHome() && app.sidebar?.isOpen) app.sidebar.toggle(false);
       };
       if (model.loaded) { go(); return; }

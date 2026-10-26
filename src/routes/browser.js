@@ -206,10 +206,22 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   'list-changed': 409, empty_list: 400, too_many: 400, unknown_task: 400, unknown_conversation: 400, no_browser_key: 409, 'session-gone': 410, groups_unreadable: 409,
   // lane browser-stuck (2026-09-28): a page dialog holds the page; nothing open to answer; no watch on that browser; the browser did not take the answer
   dialog_open: 409, no_dialog: 409, not_watched: 409, answer_failed: 502,
+  // lane browser-surfaces: a kernel's surface answered (src/browser-surfaces.js SURFACE_CODES — the kernel's six error codes mapped
+  // by name onto these): no such answer, the page moved under it, values the fields refuse, the owner's answer, a file outside the
+  // browser's downloads directory, a card that changed after it was shown
+  bad_answer: 400, surface_stale: 409, bad_values: 400, surface_owner_only: 403, surface_path_refused: 403, surface_changed: 409,
+  // lane browser-login: a saved web login filled by the custom kernel (src/browser-login.js REFUSALS): no form on your tab, a
+  // form that is not the site's own (or not https), several logins (--user), the owner's grant, the vault locked, the site's
+  // password rules a strong password cannot meet, no such login, an account already kept, a bad origin / user name, the kernel's
+  // refusal; the owner's save card answered on a changed / gone card
+  login_no_form: 409, login_phishing: 403, login_ambiguous: 409, login_not_granted: 403, vault_locked: 423, password_rules_unsupported: 422, login_no_entry: 404, login_exists: 409,
+  login_bad_origin: 400, login_bad_user: 400, login_failed: 502, not_written: 503, card_changed: 409, card_gone: 410,
   // lane browser-admin 2a: which Chrome build a profile runs (src/browser-builds.js BUILD_CODES) + Change build…'s own
   browser_choice_invalid: 400, browser_choice_user_only: 403, browser_choice_provider: 400, builds_unsupported: 409, builds_unreadable: 503,
   browser_build_missing: 409, browser_build_not_executable: 409, browser_path_missing: 409, browser_path_not_executable: 409, build_noop: 409, browsing_yourself: 409,
   browser_driven: 409, // verify r1 (F1): the user drives that browser by hand right now — never restarted under his hands
+  // lane engine-plugin: a browser ENGINE plugin's refusals (src/browser-engines.js ENGINE_CODES, merged into BUILD_CODES)
+  browser_engine_missing: 409, browser_engine_kernel_missing: 409, browser_engine_not_executable: 409, browser_engine_protocol: 409, browser_engine_unanswered: 409, browser_engine_env: 409,
   // lane browser-propose (2026-09-30): a proposal's Approve / Reject — not in a state to decide, a card that is not the proposal as it stands, nothing to approve here
   proposal_state: 409, proposal_changed: 409, proposal_unavailable: 409,
   // lane site-reset: a tab that is not this conversation's; a stop the tab did not answer; the site-reset refusals
@@ -415,6 +427,27 @@ router.get('/api/browser/display', async (req, res) => {
   const k = keeperOr503(res); if (!k) return;
   try { res.json({ display: typeof k.machineDisplay === 'function' ? await k.machineDisplay() : null, mode: typeof k.noDisplayMode === 'function' ? k.noDisplayMode() : 'auto', preference: typeof k.headedSetting === 'function' ? k.headedSetting() : null }); } catch (e) { fail(res, e); } // H5: `preference` = browser.headed as stored (null = unset) — Settings' line says what an UNSET one does here
 });
+/** lane engine-plugin: THE BROWSER ENGINES on this computer (Settings → Agent browser's «default engine» row; the dialogs carry
+ *  their own copy) — each engine plugin's probe FACT (its version; never a path) and the default policy `browser.defaultEngine`
+ *  in effect with where it came from (`source`: user | fleet | default — «由集群预设» when the fleet set it). Cookie-only. */
+router.get('/api/browser/engines', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, ENGINES_ARE_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (typeof k.engineRowsView !== 'function') return res.status(503).json({ error: 'this keeper has no browser engines', code: 'unavailable' });
+  try { res.json({ engines: await k.engineRowsView(), defaultEngine: k.defaultEngineNow() }); } catch (e) { fail(res, e); }
+});
+/** lane engine-distribution: «Download kernel» — a PERSON's act (cookie-only): the engine's kernel downloaded into its place
+ *  (kernel.json's artifact, or the fleet's), verified (sha256), unpacked, its receipt written, its version measured. The
+ *  refusals before any byte answer here by name (disk, build_platform_unsupported, install_running, browser_engine_protocol);
+ *  the rest is said through GET /api/browser/engines (`kernel.state`). */
+router.post('/api/browser/engines/:id/kernel', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, ENGINES_ARE_USERS)) return;
+  const k = keeperOr503(res); if (!k) return;
+  if (typeof k.installEngineKernel !== 'function') return res.status(503).json({ error: 'this keeper does not download browser engine kernels', code: 'unavailable' });
+  try { res.json(await k.installEngineKernel(String(req.params.id || ''))); } catch (e) { fail(res, e); }
+});
 /** B-0b8c (lane browser-probe-transient): THE FLOOR FACTS — the browser CLI version the keeper's act reads, its floor
  *  verdict (an 'unknown' says whether the probe ladder still asks: `settled`) and the last probe's state `{at, ok, why,
  *  attempts, since, nextAt, exhausted}`; POST …/check = the For-you notice's Check again: ONE probe now (the single flight
@@ -516,9 +549,11 @@ router.post('/api/browser/profiles', async (req, res) => {
     const ch = B0.normalizeBrowserChoice(input.browser);
     const remoteHost = input.host && input.host !== 'local' ? String(input.host) : null;
     const builds = ch && ch.kind === 'build' && remoteHost && typeof k.buildsFor === 'function' ? await k.buildsFor(remoteHost) : null;
+    // lane engine-plugin: a browser ENGINE's probe is asked here (I/O) and handed to the create as a FACT, like a paired machine's list
+    const engine = ch && ch.kind === 'plugin' && typeof k.engineFactOf === 'function' ? await k.engineFactOf(ch.id, { host: remoteHost }) : null;
     // owner ruling A: a named profile is usable by ALL of the owner's conversations by default (the dialog / the row's
     // "Who can use it" narrows it); with a list, the record is born with it — ONE write
-    const opts = { owner: { kind: 'instance', id: null }, by: 'user', builds, ...(u.use ? { use: u.use, knownKeys: u.knownKeys } : {}) };
+    const opts = { owner: { kind: 'instance', id: null }, by: 'user', builds, engine, ...(u.use ? { use: u.use, knownKeys: u.knownKeys } : {}) };
     // lane browser-profile-clone (B-9669): "Copy logins from" — the copy of a stopped profile's folder (a running one is stopped first)
     if (input.cloneFrom != null) return res.json({ profile: await k.cloneProfile(input, { ...opts, nameOf: cloneHolderName }) });
     res.json({ profile: k.createProfile(input, opts) });
@@ -596,6 +631,7 @@ const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.header
 // `refuseAgentRestart` onto it): `error` = the route's own sentence, the code is always `agent_forbidden`
 const OWN_BROWSING_IS_USERS = 'the user\'s own browsing — an agent token may not start, drive, end or read it';
 const INSTALL_IS_USERS = 'installing a program is the user\'s act — an agent token may not start a download; tell the user what to install';
+const ENGINES_ARE_USERS = 'the browser engines on this computer are read by the Settings window — an agent token reads its own browser through vibespace-browser';
 const BUILD_IS_USERS = 'which Chrome build a profile runs is the user\'s choice (Agent browser panel → Change build…) — an agent token may not set it; `vibespace-browser providers` lists the builds';
 const CLONE_IS_USERS = 'copying a profile\'s logins into a new profile is the user\'s act (Agent browser panel → New profile… → Copy logins from) — an agent token may not do it';
 const USE_IS_USERS = 'who may use a profile is the user\'s choice (Agent browser panel → Who can use it) — an agent token may not set it; an agent\'s own `new` makes a profile every conversation can use'; // verify r1 (F6)
@@ -1182,6 +1218,47 @@ function passkeyAnswer(req, res, choice, shown) {
   if (!r.ok) return res.status(r.code === 'not-found' ? 404 : r.code === 'bad-request' ? 400 : 409).json({ error: r.error, code: r.code });
   res.json({ ok: true, proposal: r.proposal });
 }
+/** lane browser-surfaces: THE OWNER's Approve / Reject on a browser prompt's For-you card (`action.type: 'browser-surface'`) — Approve
+ *  presses the prompt's first answer that needs no typing, Reject its dismiss; the body names the digest of the card that was
+ *  pressed (`shown`): a prompt that changed since ⇒ 409 surface_changed, nothing answered. Only the person's session reaches here. */
+const SURFACE_IS_USERS = 'answering a browser prompt from the For-you tray is the user\'s act — an agent answers its own browser\'s prompts with vibespace-browser answer';
+/** lane browser-login: the owner's SAVE-LOGIN card (a person signed in by hand in a live-view takeover — a submission the agent
+ *  did not make): Save / Update ⇒ the logins module's ONE writer, Not now ⇒ forgotten. A person's act: an agent's bearer is
+ *  refused; the card's `shown` digest must be the card as it stands (else card_changed, nothing written). */
+const SAVE_LOGIN_IS_USERS = 'saving a login from the For-you tray is the user\'s act — an agent\'s own registrations are saved by the vault itself';
+router.post('/api/browser/logins/cards/:id/:verb', (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, SAVE_LOGIN_IS_USERS)) return;
+  const L = ctx.logins;
+  const verb = String(req.params.verb || '');
+  if (!['approve', 'reject'].includes(verb)) return res.status(404).json({ error: 'approve | reject', code: 'not-found' });
+  if (!L || typeof L.answerCard !== 'function') return res.status(503).json({ error: 'VibeSpace keeps no web logins on this server', code: 'unavailable' });
+  const shown = typeof req.body?.shown === 'string' ? req.body.shown.slice(0, 40) : null;
+  if (!shown) return res.status(400).json({ error: 'an answer names the card it was pressed on (`shown`)', code: 'shown_required' });
+  const r = L.answerCard(String(req.params.id || '').slice(0, 40), { approve: verb === 'approve', shown });
+  if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code });
+  res.json({ ok: true, saved: !!r.saved, updated: !!r.updated });
+});
+router.post('/api/browser/surfaces/:id/:verb', async (req, res) => {
+  if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, SURFACE_IS_USERS)) return;
+  const D = ctx.dialogs;
+  const verb = String(req.params.verb || '');
+  if (!['approve', 'reject'].includes(verb)) return res.status(404).json({ error: 'approve | reject', code: 'not-found' });
+  if (!D || typeof D.surfaceById !== 'function') return res.status(503).json({ error: 'VibeSpace does not answer browser prompts on this server', code: 'unavailable' });
+  const shown = typeof req.body?.shown === 'string' ? req.body.shown.slice(0, 40) : null;
+  if (!shown) return res.status(400).json({ error: 'an answer names the card it was pressed on (`shown`)', code: 'shown_required' });
+  const hit = D.surfaceById(String(req.params.id || '').slice(0, 80));
+  if (!hit) return res.status(409).json({ error: 'that browser prompt is no longer open', code: 'no_dialog' });
+  const SF = require('../browser-surfaces.js');
+  const a = verb === 'approve' ? SF.approveOf(hit.block) : (hit.block.answers || []).find((x) => x.kind === 'dismiss');
+  if (!a) return res.status(409).json({ error: verb === 'approve' ? 'that prompt has no answer the card can press — answer it in the live view' : 'that prompt cannot be refused', code: 'bad_answer' });
+  try {
+    const r = await D.answerSurface({ profileId: hit.profileId }, { surfaceId: hit.block.id, answerId: a.id, by: 'user-card', shown });
+    if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code });
+    res.json({ ok: true, answer: r.answer });
+  } catch (e) { fail(res, e); }
+});
 /** lane passkey-store-core: the owner's passkey table (publicRow only — never a key), a key's policy, its removal, the
  *  profile's "agents never sign in with passkeys" switch. Owner routes: an agent's bearer is refused by name. */
 const PASSKEYS_ARE_USERS = 'the passkey table is the user\'s — an agent uses `vibespace-browser passkey list | register | forget`';
@@ -1847,7 +1924,8 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     if (profileId && typeof req.body?.url === 'string') k.noteLeaseUrl(f.browserKey, profileId, req.body.url);
     k.audit({ sessionId: f.sessionId, browserKey: f.browserKey, profileId, verb: req.body?.verb, ok: req.body?.ok !== false });
     // lane browser-resume C: an attachment's FIRST command bound a tab of its own — its first tab ROOT (once per lease; bounded)
-    if (profileId && !ephOk && req.body?.ok !== false && typeof k.bootstrapTabRoot === 'function') { try { await k.bootstrapTabRoot(profileId, f.browserKey); } catch { /* the roots are learned at the next tab act */ } }
+    // lane browser-surfaces: `answer` / `surfaces` never reach the browser CLI — the root (read through ITS daemon, which a held page holds) waits for a verb that does
+    if (profileId && !ephOk && req.body?.ok !== false && !['answer', 'surfaces'].includes(String(req.body?.verb || '')) && typeof k.bootstrapTabRoot === 'function') { try { await k.bootstrapTabRoot(profileId, f.browserKey); } catch { /* the roots are learned at the next tab act */ } }
     // THE AGENT IS TOLD (the owner's ruling, 2026-09-27 — "告知agent发生了打断"): a takeover that began at or after this
     // command's /resolve caught it in flight — the CLI prints it by name and exits as a refusal. A child handle's pair is
     // its own key (a helper's browser); an unmanaged / ephemeral command asks the conversation's own pair.
@@ -2045,6 +2123,39 @@ router.post('/api/agent/browser/passkey', async (req, res) => {
     res.json({ ok: true, cancelled: r.n, text: r.text });
   } catch (e) { fail(res, e); }
 });
+/** lane browser-login (P3 of the custom browser kernel, design §4): `vibespace-browser login [<origin>] [--user <u>] [--submit]`
+ *  · `login [<origin>] --new-user <u> --generate` (register through the vault) · `login [<origin>] [--user <u>] --generate` (a
+ *  change-password form) — a login the VAULT keeps, filled by the kernel on THIS conversation's own tab (the watch's
+ *  `fillLogin`; the verdict, the grant, the two-step code and the use line are src/server/browser-logins.js's). The answer says
+ *  WHAT was filled (kinds) and the use's receipt — never a value (test-vault-law ⑫). While the user drives, the page is theirs. */
+router.post('/api/agent/browser/login', async (req, res) => {
+  const k = keeperOr503(res); if (!k) return;
+  const f = agentFacts(req, res); if (!f) return;
+  const D = ctx.dialogs;
+  const BL = require('../browser-login.js');
+  if (!D || typeof D.fillLogin !== 'function') return res.status(409).json({ error: 'VibeSpace keeps no web logins on this server', code: 'not_watched' });
+  const body = req.body || {};
+  const word = (v, n) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, n) : null);
+  if (body.newUser !== undefined && body.newUser !== null && body.generate !== true) return res.status(400).json({ error: 'a new account\'s password is the vault\'s: --new-user <name> goes with --generate', code: 'bad-request' });
+  const t0 = dialogTargetFor(k, f, body.profile);
+  if (!t0.ok) return failVerdict(res, t0);
+  try {
+    const armed = await D.arm(t0.profileId);
+    if (!armed.ok) return res.status(409).json({ error: armed.error || 'VibeSpace is not watching this browser', code: 'not_watched' });
+    const t = dialogTargetFor(k, f, body.profile); // the reach, asked again after the await
+    if (!t.ok) return failVerdict(res, t);
+    let st = null; try { st = k.inputStateFor(t.ephemeral ? t.browserKey : f.browserKey, t.ephemeral ? null : t.profileId); } catch { st = null; }
+    if (st && st.input === 'user') return res.status(409).json({ error: require('../browser-interrupt.js').interruptedText('login'), code: 'browser_interrupted', takenAt: st.takenAt || 0 });
+    const s = f.session || {};
+    const cid = require('../claude-lock-capture.js').addressableId(s);
+    const r = await D.fillLogin(t, { origin: word(body.origin, 300), user: word(body.user, 200), newUser: word(body.newUser, 200), generate: body.generate === true, submit: body.submit === true,
+      facts: { conversationKeys: Array.isArray(f.conversationKeys) ? f.conversationKeys : [], groupIds: Array.isArray(f.taskIds) ? f.taskIds : [], groupsUnreadable: !!f.groupsUnreadable }, conv: cid ? String(cid) : f.sessionId, actor: String(s.webuiName || s.name || '').slice(0, 80) || null });
+    const text = require('../peer-text.js').toAgentText(BL.loginText(r), { max: BL.TEXT_MAX });
+    if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: text, code: r.code, ...(r.grant ? { grant: r.grant } : {}) });
+    try { ctx.traceDialogAct?.({ sessionId: f.sessionId, profileId: t.ephemeral ? null : t.profileId, action: 'login', dialog: { type: 'login', message: r.origin } }); } catch (e) { console.warn('[browser-login] the trace row was not written — ' + (e && e.message)); }
+    res.json({ ok: true, mode: r.mode, origin: r.origin, user: r.user, filled: r.filled, submitted: !!r.submitted, receipt: r.receipt || null, text });
+  } catch (e) { fail(res, e); }
+});
 /** lane browser-ui-prompts-r2 (B-ebfc): the agent's `permission <kind> allow|deny [origin] [lat,lon]` — OUR CDP act on THIS
  *  conversation's own browser (every kind is denied ahead by the watch; this flips one kind for one origin, the current tab's
  *  by default). Recorded on the lease, the trace and the live view's line. While the user drives it is the user's page. */
@@ -2111,7 +2222,7 @@ router.post('/api/agent/browser/dialog', async (req, res) => {
   const t = dialogTargetFor(k, f, req.body?.profile);
   if (!t.ok) return failVerdict(res, t);
   const action = String(req.body?.action || 'status');
-  if (!['status', 'accept', 'dismiss'].includes(action)) return res.status(400).json({ error: 'dialog takes status | accept [text] | dismiss', code: 'bad-request' });
+  if (!['status', 'accept', 'dismiss', 'answer', 'surfaces'].includes(action)) return res.status(400).json({ error: 'dialog takes status | accept [text] | dismiss — and on a browser kernel with surfaces: answer <id> <answerId> | surfaces', code: 'bad-request' }); // lane browser-surfaces
   try {
     const armed = await D.arm(t.profileId);
     if (!armed.ok) return res.status(409).json({ error: armed.error || 'VibeSpace is not watching this browser', code: 'not_watched' });
@@ -2122,10 +2233,21 @@ router.post('/api/agent/browser/dialog', async (req, res) => {
     // (the daemon answers for its OWN tab — the per-lease witness)
     const blindSay = (fct) => res.status(409).json({ error: fct.blind ? 'VibeSpace\'s watch cannot see into this tab (a dialog may have opened before it attached) — the browser\'s own view answers' : 'VibeSpace does not know which tab of this shared browser is yours — the browser\'s own view answers', code: 'not_watched', why: fct.blind ? 'blind' : 'unattributed' });
     if (action === 'status') { const fct = D.factFor({ ...t, consume: true }); if (!fct.open && (fct.blind || fct.unattributed)) return blindSay(fct); return res.json({ ok: true, watched: fct.watched, open: fct.open, text: fct.open ? fct.text : ST.NO_DIALOG_TEXT, notes: fct.notes }); }
+    // lane browser-surfaces: `vibespace-browser surfaces` — every prompt standing on this conversation's browser (a kernel's), its answers named
+    if (action === 'surfaces') { const SF = require('../browser-surfaces.js'); const list = typeof D.surfacesIn === 'function' ? D.surfacesIn(t.profileId, D.scopeFor(t)) : []; const kernel = typeof D.kernelFactOf === 'function' ? D.kernelFactOf(t.profileId) : null; return res.json({ ok: true, kernel: !!kernel, surfaces: list, text: kernel ? require('../peer-text.js').toAgentText(SF.surfaceListText(list), { max: SF.TEXT_MAX }) : 'This browser is standard Chrome — it has no VibeSpace surfaces; a page dialog is answered with vibespace-browser dialog accept|dismiss.' }); }
     let st = null; try { st = k.inputStateFor(t.ephemeral ? t.browserKey : f.browserKey, t.ephemeral ? null : t.profileId); } catch { st = null; }
     if (st && st.input === 'user') return res.status(409).json({ error: require('../browser-interrupt.js').interruptedText('dialog ' + action), code: 'browser_interrupted', takenAt: st.takenAt || 0 });
     // lane browser-windows: the verify r1 A1 drive belt is gone with the drive claim — the user driving the window this lease
     // is in (its own, or an older run's shared one) is THIS lease's input state, refused just above
+    if (action === 'answer') { // lane browser-surfaces (before the blind belt — a kernel lists its surfaces even on a tab whose Page.enable is held): `vibespace-browser answer <id> <answerId> [--value k=v] [--file p]` → VibeSpace.answerSurface
+      if (typeof D.answerSurface !== 'function') return res.status(409).json({ error: 'VibeSpace does not answer browser prompts on this server', code: 'not_watched' });
+      const vals = req.body?.values && typeof req.body.values === 'object' && !Array.isArray(req.body.values) ? req.body.values : null;
+      const files = Array.isArray(req.body?.files) ? req.body.files.filter((x) => typeof x === 'string').slice(0, 32) : null;
+      const r = await D.answerSurface(t, { surfaceId: String(req.body?.surface || '').slice(0, 80), answerId: String(req.body?.answerId || '').slice(0, 80), values: vals, files, by: 'agent' });
+      if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: r.error, code: r.code });
+      try { ctx.traceDialogAct?.({ sessionId: f.sessionId, profileId: t.ephemeral ? null : t.profileId, action: 'answer', dialog: { type: r.surface.kind, message: r.surface.title } }); } catch (e) { console.warn('[browser-dialog] the trace row was not written — ' + (e && e.message)); }
+      return res.json({ ok: true, text: r.text, surface: r.surface, answer: r.answer });
+    }
     { const fct = D.factFor({ ...t, consume: false }); if (!fct.open && (fct.blind || fct.unattributed)) return blindSay(fct); }
     const text = action === 'accept' && typeof req.body?.text === 'string' ? req.body.text.slice(0, 2000) : null;
     const r = await D.answer(t, { accept: action === 'accept', text, by: 'agent' });

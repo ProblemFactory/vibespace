@@ -144,7 +144,9 @@ const NO_DIAGRAM = {
   'src/lib/doc-window.js': 'the Doc window hands `Marked` to the reading render (Export HTML / Copy as HTML / Print) — its output leaves the app (a file, the clipboard, a print frame); the window itself edits the source in Tiptap, a fence there is code (a later lane)',
   'src/lib/doc-window-model.js': 'readingHtml — the same reading render (Export / Copy / Print), PURE: no DOM to draw into',
 };
-const WANT_DRAW = ['src/lib/chat-renderers.js', 'src/lib/code-editor.js', 'src/lib/file-viewer.js', 'src/lib/jobs-panel.js', 'src/lib/inbox-window.js'];
+// (lane foryou-honest P1-2: the For-you window draws an item's words as plain text through the tray's renderer — no markdown
+// parse there any more, so no fence to draw: the census would list it the moment it parsed markdown again)
+const WANT_DRAW = ['src/lib/chat-renderers.js', 'src/lib/code-editor.js', 'src/lib/file-viewer.js', 'src/lib/jobs-panel.js'];
 function mdCensus(files, readF) {
   const out = { draws: [], listed: [], unlisted: [] };
   for (const f of files) {

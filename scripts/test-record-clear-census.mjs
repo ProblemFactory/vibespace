@@ -456,6 +456,8 @@ const ROUTES = {
   // design q-047 L1 (lane vault-totp): the person's two-step doors ride the same person() wrapper — a BEARER refused there is named
   // the same way (use-law's bearerOf → jobByToken), so each reaches the jobs stash to name who it refused; no record of the five kinds
   'GET /api/vault/totp': 'meta', 'POST /api/vault/totp': 'meta', 'GET /api/vault/totp/:name': 'meta', 'DELETE /api/vault/totp/:name': 'meta', 'POST /api/vault/totp/:name/grants': 'meta', 'DELETE /api/vault/totp/grants/:id': 'meta',
+  // lane browser-login: the Vault window's web logins (names, provenance words and grant rows — never a password; a person's doors)
+  'GET /api/vault/web-logins': 'meta', 'POST /api/vault/web-logins': 'meta', 'DELETE /api/vault/web-logins/:name': 'meta', 'POST /api/vault/web-logins/grants': 'meta', 'POST /api/vault/web-logins/ungrant': 'meta',
   // the run door's two person doors (lane vault-run-door) ride the same person() wrapper — the bearer it refuses is named the same way
   'POST /api/vault/runnable': 'meta', 'POST /api/vault/run/asks/:askId': 'meta',
   // lane vault-manual-and-lock: an agent's REQUEST (the session resolved through the jobs stash like run), its USES (its own
@@ -480,6 +482,7 @@ const ROUTES = {
   'POST /api/agent/browser/passkey': 'meta', // lane browser-passkey: the page's passkey wait — status / cancel through the watch
   'POST /api/agent/browser/size': 'meta', // lane launch-picture-size: the conversation's FIXED picture size ({w, h} in the page-size note — no content)
   'POST /api/agent/browser/permission': 'meta', // lane browser-ui-prompts-r2: one page permission decided through the watch (the lease's l.permissions row: kind + origin, no content)
+  'POST /api/agent/browser/login': 'meta', // lane browser-login: a saved web login filled through the watch — the answer is what was filled (kinds) + a receipt, never a record's text
   'POST /api/agent/browser/restart': 'meta', // int220 (lane browser-unresponsive): the keeper's restartProfile on a browser the caller holds — no record of the five kinds
   'POST /api/agent/browser/site-reset': 'meta',
   'GET /api/agent/browser/providers': 'meta',
@@ -777,6 +780,9 @@ const STORAGE = {
   'src/lib/channel-window.js|localStorage|hideKey': ['marker', 'lane channel-threads: an account\'s "reactions can be read after one Re-authorize" note dismissed (a flag per adapter id — the .197 integration)'],
   'src/lib/app.js|localStorage|k': ['pref', 'CLIENT_PREF_KEYS — the per-device UI prefs (scale, font size)'],
   'src/lib/app.js|sessionStorage|key': ['marker', 'the once-per-version stale-bundle reload stamp (a time)'],
+  'src/lib/app.js|sessionStorage|noticeKey': ['marker', 'lane phone-back-reload: the once-per-version "this tab still runs the old bundle" notice was said (a time)'],
+  'src/lib/nav-log.js|sessionStorage|NAV_LOG_KEY': ['telemetry', 'lane phone-back-reload: the tab\'s navigation diary — entry shapes, back verdicts, navigation types, versions; never a URL, a title or words'],
+  'src/lib/nav-log.js|sessionStorage|EXIT_INTENT_KEY': ['ids', 'lane phone-back-reload round 2: the exit\'s intent — a time, a hop count, 8 chars of the browser\'s random key for the entry it left; never a URL'],
   'src/lib/appearance-panel.js|localStorage|\'termFontSize\'': ['pref', 'terminal font size'],
   'src/lib/new-session-form.js|localStorage|FOLD_KEY': ['pref', 'lane new-session-form: the New Session form\'s «More options» fold open on this device (a "1" / "0" flag, never a record\'s words)'],
   'src/lib/appearance-panel.js|localStorage|\'termFontFamily\'': ['pref', 'terminal font'],
@@ -847,6 +853,7 @@ const STORAGE = {
   'src/lib/sidebar.js|sessionStorage|AGENT_KIND_FILTER_KEY': ['pref', 'the agent-kind filter (this tab)'],
   'src/lib/mobile-nav.js|sessionStorage|SHOWN_KEY': ['ids', 'the phone\'s window on show per desktop id (this tab — §6b guard 10)'],
   'src/lib/sidebar.js|sessionStorage|LIST_HIDDEN_KEY': ['pref', 'lane desktop-switch-phone: the regular class\'s landscape list column hidden or not — \'1\' / \'0\', this tab only; no words of any record'],
+  'src/lib/user-todos-panel.js|sessionStorage|HOME_ON_KEY': ['marker', 'was the phone\'s first-screen page on show when this tab last ran (\'1\' / \'0\'; this tab — a reload keeps the window on show, lane foryou-honest)'],
   'src/lib/telemetry-client.js|localStorage|PENDING_KEY': ['telemetry', 'unsent telemetry events: names / stacks / versions, never content (the module\'s privacy rule)'],
   'src/lib/channel-account-dialogs.js|localStorage|rememberKey(kind)': ['owner', 'the Slack app the owner made in step 1 of Connect (design 017): its id, its name and the workspace\'s name — never a token, never a record\'s words'],
   'src/lib/themes.js|localStorage|\'theme\'': ['pref', 'the theme'],
@@ -874,13 +881,17 @@ console.log('§H the client (verify r5): storage · titles · the belt · caches
   ok(dead.length === 0, 'H1 no dead row (every classified key is still written)', dead);
   ok(Object.values(STORAGE).every(([c, why]) => STORAGE_CLASSES.has(c) && why.length >= 6), 'H1 every row names its class (pref / ids / owner / ref / plugin / telemetry / marker) and what it holds');
   // lane mobile-back-guard: the phone's back sentinel is the ONE history write — the constant state {vs: 1} with the URL untouched
-  // (no third argument), so the entry holds no record, no words, no id; any other pushState / replaceState stays red
+  // (no third argument), so the entry holds no record, no words, no id; any other pushState / replaceState stays red.
+  // Lane phone-back-reload: plus ONE replaceState(null, '') — the boot's rebuild clears a sentinel's state (no URL, nothing kept)
   const historyCalls = (text) => text.match(/\bhistory\s*\.\s*(pushState|replaceState)\b[^;]*/g) || [];
-  const sentinelOnly = (rel, text) => rel === 'src/lib/mobile-back.js' && historyCalls(text).length === 1 && historyCalls(text)[0] === "history.pushState({ vs: 1 }, '')";
-  const otherWrites = other.filter((o) => !(o === 'src/lib/mobile-back.js: history.pushState' && sentinelOnly('src/lib/mobile-back.js', read('src/lib/mobile-back.js'))));
+  const SENTINEL_WRITES = ["history.pushState({ vs: 1 }, '')", "history.replaceState(null, '')"];
+  const sentinelOnly = (rel, text) => rel === 'src/lib/mobile-back.js' && historyCalls(text).join('\n') === SENTINEL_WRITES.join('\n');
+  const otherWrites = other.filter((o) => !(['src/lib/mobile-back.js: history.pushState', 'src/lib/mobile-back.js: history.replaceState'].includes(o) && sentinelOnly('src/lib/mobile-back.js', read('src/lib/mobile-back.js'))));
   ok(otherWrites.length === 0, 'H1 the client writes NO IndexedDB database, CacheStorage cache, service worker, cookie, window.name, URL or indexed storage slot (the phone\'s back sentinel {vs: 1} aside)', otherWrites);
-  ok(!sentinelOnly('src/lib/mobile-back.js', "const push = () => history.pushState({ vs: 1, id: rec.id }, '');") && !sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState({ vs: 1 }, '', '/s/' + id);")
-    && !sentinelOnly('src/lib/other.js', "history.pushState({ vs: 1 }, '')"), 'H1 CONTROL: a sentinel carrying an id, a second history write (a URL), the same call in another file — each is red');
+  ok(!sentinelOnly('src/lib/mobile-back.js', "const push = () => history.pushState({ vs: 1, id: rec.id }, '');\nhistory.replaceState(null, '');") && !sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState({ vs: 1 }, '', '/s/' + id);")
+    && !sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState(null, '');\nhistory.replaceState(null, '');")
+    && !sentinelOnly('src/lib/other.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState(null, '');")
+    && sentinelOnly('src/lib/mobile-back.js', "history.pushState({ vs: 1 }, '');\nhistory.replaceState(null, '');"), 'H1 CONTROL: a sentinel carrying an id, a history write with a URL, a third write, the same calls in another file — each is red (the pair itself green)');
   ok(Object.entries(STORAGE).filter(([, [c]]) => c === 'ref').map(([k]) => k).join() === "src/lib/utils.js|localStorage|'vibespace.toastHistory'", 'H1 exactly ONE key can name a record: the toast history');
   const utils = read('src/lib/utils.js');
   // B-3f5d ① (lane for-you-jobs): the entry may carry `seen: true` (shown while the user acted) — a flag, no words
@@ -1165,7 +1176,6 @@ const CACHES = {
   'src/lib/user-todos-actions.js|fullById': 'the whole details this client saw — restoreDetails prunes to the ids the snapshot lists and a cleared item carries no detail (r3 + test-user-todos-layout ⑫)',
   'src/lib/user-todos-actions.js|detailLoads': 'id → an in-flight load (deleted on answer; ensureDetail re-checks isCleared after its GET)',
   'src/lib/user-todos-actions.js|replyFailures': 'id → THIS page\'s last refused reply {code, why} — the route\'s / the create\'s own reason (lane inbox-reply-dead-session), never an item\'s words; deleted on the next sent reply',
-  'src/lib/user-todos-panel.js|colAsks': 'the list column\'s inline-answer boxes painted so far (DOM elements; each repaints from the CURRENT snapshot on every broadcast and leaves the set when it leaves the DOM — lane duo-build-1; no words kept)',
   'src/lib/user-todos-panel.js|bandOpen': 'band number → its open ids the last paint listed, folded ones included — what that band\'s Mark all seen resolves (lane foryou-folds; ids only)',
   'src/lib/task-log.js|picked': 'selected entry ids',
   'src/lib/task-log.js|openIds': 'expanded entry ids',
@@ -1869,6 +1879,11 @@ const I_RECV = {
   'src/browser-profiles.js|f': ['launch fatal row', 'a fixed reason code of LAUNCH_FATALS (lane browser-tmpdir-socket-length)'],
   'src/browser-profiles.js|existing': ['browser profile', 'a profile label'], 'src/browser-profiles.js|profile': ['browser profile', 'a profile label'], 'src/browser-profiles.js|row': ['browser profile', 'a profile label'],
   'src/browser-switch.js|profile': ['browser profile', 'a profile label'], 'src/browser-trace.js|profile': ['browser profile', 'a profile label'],
+  // lane browser-surfaces: a browser KERNEL's prompt (VibeSpace.surfaceOpened) — the page's words through ST.pageText, never one of the five kinds
+  'src/browser-surfaces.js|a': ['browser surface', 'a kernel prompt\'s ANSWER label (page text) in THE sentence / the note / the verdict\'s refusal'],
+  'src/browser-surfaces.js|f': ['browser surface', 'a kernel prompt\'s FIELD label / choices (page text) in THE sentence / the verdict\'s refusal'],
+  'src/browser-surfaces.js|b': ['browser surface', 'a kernel prompt\'s block — its whitelisted detail (page text) on the bar\'s details fold'],
+  'src/server/browser-dialogs.js|rec': ['browser surface', 'a kernel prompt\'s record — a suppressed prompt\'s kind + reason (the kernel\'s words) on its ONE journal line'],
   'src/channel-groups.js|c': ['member', 'B-ff04: a candidate MEMBER\'s name in the @ refusal (unknown / ambiguous-mention) — a session name, not a message'],
   'src/channel-groups.js|group': ['agent group', 'a group\'s NAME — the group, not a message (a rename\'s previous name, raw.from, is the cleared field)'],
   'src/channel-record.js|b': ['channel block', 'a render block\'s own kind word'], 'src/channel-record.js|BLOCK_LIMITS': ['constant', 'a length limit'],

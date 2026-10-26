@@ -226,11 +226,19 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const d = pid ? dialogs.openOn(pid, relay.activeTarget ? [relay.activeTarget] : null) : null;
     return d ? { type: 'dialog', state: 'open', dialog: d } : null;
   }
+  /** lane browser-surfaces: the NOTED surfaces a browser kernel shows on the tab this relay shows (a held one is the dialog above). */
+  function surfaceRecordsFor(relay) {
+    const pid = dialogs && typeof dialogs.surfacesIn === 'function' ? relayProfileId(relay) : null;
+    return pid ? dialogs.surfacesIn(pid, relay.activeTarget ? new Set([relay.activeTarget]) : null).filter((b) => b.cls !== 'held').map((b) => ({ type: 'surface', state: 'open', surface: b })) : [];
+  }
+  const blockOfEv = (d) => (dialogs && typeof dialogs.blockOf === 'function' ? dialogs.blockOf(d) : require('../browser-stuck.js').dialogBlock(d, { now: now() })); // lane browser-surfaces: a surface's own block
   const unsubDialogs = dialogs && typeof dialogs.onChange === 'function' ? dialogs.onChange((ev) => {
     if (!ev || !ev.profileId) return;
     for (const r of relays.values()) {
       if (relayProfileId(r) !== ev.profileId) continue;
-      if (ev.kind === 'open' && dialogShownOn(r, ev.targetId)) broadcast(r, { type: 'dialog', state: 'open', dialog: require('../browser-stuck.js').dialogBlock(ev.dialog, { now: now() }) });
+      if (ev.kind === 'open' && dialogShownOn(r, ev.targetId)) broadcast(r, { type: 'dialog', state: 'open', dialog: blockOfEv(ev.dialog) });
+      // lane browser-surfaces: a kernel's NOTED surface (the bar shows it; it never holds the page) / a surface whose words moved
+      else if (ev.kind === 'surface' && ev.surface && (ev.state === 'open' || ev.state === 'updated') && dialogShownOn(r, ev.targetId)) broadcast(r, ev.surface.cls === 'held' ? { type: 'dialog', state: 'open', dialog: blockOfEv(ev.surface) } : { type: 'surface', state: 'open', surface: blockOfEv(ev.surface) });
       else if (ev.kind === 'closed' && ev.answered && dialogShownOn(r, ev.targetId)) broadcast(r, { type: 'dialog', state: 'closed', id: ev.answered.id, answered: { how: ev.answered.how, by: ev.answered.by, at: ev.answered.at } });
       else if (ev.kind === 'down' && ev.closed && ev.closed.length) broadcast(r, { type: 'dialog', state: 'closed', ids: ev.closed, answered: null });
       // lane browser-ui-prompts-r2: the bar's one line — a permission the agent decided, a print preview the watch closed
@@ -242,12 +250,21 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (!dialogs) return;
     const pid = relayProfileId(relay);
     if (!pid) return;
-    dialogs.arm(pid).then(() => { const rec = dialogRecordFor(relay); if (rec) broadcast(relay, rec); }).catch(() => { /* the watch says why in its own journal line */ });
+    dialogs.arm(pid).then(() => { const rec = dialogRecordFor(relay); if (rec) broadcast(relay, rec); for (const x of surfaceRecordsFor(relay)) broadcast(relay, x); }).catch(() => { /* the watch says why in its own journal line */ }); // lane browser-surfaces: + the noted surfaces
   }
   function answerDialog(relay, viewer, msg) {
     const pid = relayProfileId(relay);
     const ack = (o) => send(viewer.ws, { type: 'dialog-ack', id: String(msg.id || ''), ...o });
     if (!dialogs || !pid) return ack({ ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' });
+    // lane browser-surfaces: a kernel's prompt answered by its OWN answer id (the bar's buttons; a sheet's values / files) — as the USER
+    if (typeof msg.answerId === 'string' && typeof dialogs.answerSurface === 'function') {
+      const vals = msg.values && typeof msg.values === 'object' && !Array.isArray(msg.values) ? msg.values : null;
+      const files = Array.isArray(msg.files) ? msg.files.filter((x) => typeof x === 'string').slice(0, 32) : null;
+      dialogs.answerSurface({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relay.target.kind !== 'attachment' }, { surfaceId: String(msg.id || '').slice(0, 80), answerId: msg.answerId.slice(0, 80), values: vals, files, by: 'user' })
+        .then((r) => ack(r.ok ? { ok: true } : { ok: false, code: r.code || 'refused', error: r.error || 'refused' }))
+        .catch((e) => ack({ ok: false, code: 'internal', error: String(e && e.message) }));
+      return;
+    }
     dialogs.answer({ profileId: pid, browserKey: relay.browserKey, sessionId: relay.sessionId, ephemeral: relay.target.kind !== 'attachment', dialogId: msg.id ? String(msg.id).slice(0, 80) : null }, { accept: !!msg.accept, text: msg.accept && typeof msg.text === 'string' ? msg.text.slice(0, 2000) : null, by: 'user' })
       .then((r) => ack(r.ok ? { ok: true } : { ok: false, code: r.code || 'refused', error: r.error || 'refused' }))
       .catch((e) => ack({ ok: false, code: 'internal', error: String(e && e.message) }));
@@ -353,7 +370,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     // watches, so EVERY live view of an ephemeral browser is such a joiner. Without it the view never read itself
     // connected, and lane J's keyboard ownership (`connected` is one of its facts) never let a takeover own the keyboard.
     if (relay.upstream && relay.upstream.readyState === 1) send(ws, { type: 'status', state: 'upstream-open' });
-    { const dr = dialogRecordFor(relay); if (dr) send(ws, dr); } // lane browser-stuck: a late viewer sees the dialog that holds the page
+    { const dr = dialogRecordFor(relay); if (dr) send(ws, dr); for (const x of surfaceRecordsFor(relay)) send(ws, x); } // lane browser-stuck: a late viewer sees the dialog that holds the page (lane browser-surfaces: + a kernel's noted surfaces)
     // P3: a late viewer is told what is still waiting on a confirmation
     if (keeper && typeof keeper.pendingFor === 'function') { try { for (const c of keeper.pendingFor(relay.browserKey, relay.target.profileId || null)) send(ws, c); } catch { /* optional */ } }
     broadcastViewers(relay);
@@ -1407,6 +1424,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       const rid = Number.isInteger(msg.rid) ? msg.rid : null;
       const receipt = (r) => { if (rid !== null) send(viewer.ws, { type: 'input-receipt', rid, ok: !!r.ok, via: r.via || null, code: r.code || null, error: r.error || null, ...(Number.isFinite(r.landed) ? { landed: r.landed } : {}), ...(r.dropped ? { dropped: r.dropped } : {}) }); }; // lane live-input: a text act says how much landed (and a line break it could not type)
       if (v.forward && relay.anchor && relay.anchor.switched) { receipt(S.tabSwitchedReceipt(relay.anchor)); return; } // verify r3: the takeover is on another tab than the one on show — nothing forwarded, said by name
+      { const pid = v.forward && dialogs && typeof dialogs.blockingOn === 'function' ? relayProfileId(relay) : null; const blk = pid ? dialogs.blockingOn(pid, relay.activeTarget ? [relay.activeTarget] : null) : null; if (blk) { receipt({ ok: false, code: 'surface_blocking', error: 'a browser prompt holds the page — answer it in the bar above first' }); return; } } // lane browser-surfaces: while a BLOCKING surface stands, input never reaches the page
       if (v.forward && relay.upstream && relay.upstream.readyState === 1) {
         // lane live-input: every input of the holder goes through ONE ordered pipeline — a text act is cut into the
         // `char` records the browser accepts (S.textRecords, ≤ 3 UTF-16 units each) and its chunks keep their place

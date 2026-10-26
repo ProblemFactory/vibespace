@@ -4,6 +4,10 @@ import { applyI18nToDom, t } from './lib/i18n.js';
 import { showToast } from './lib/utils.js';
 import { installIncidentRecorder } from './lib/incident-recorder.js';
 import { installTelemetry, track, metric, reportBootTime, installLongTaskWatch, installFetchTimingWatch, recentLongTasks, gpuRenderer, installCompositorStallWatch, installScreenWatch, installInputStamp, recentCompositorStalls } from './lib/telemetry-client.js';
+import { continueExit } from './lib/mobile-back.js';
+// lane phone-back-reload (round 2): an older VibeSpace page the phone's exit LANDED on goes on back and never boots the
+// app — the promise settles only if this page stays (its ONE named load)
+const exitHop = continueExit();
 installTelemetry(); // BEFORE App: a boot crash must be captured, not silent
 installLongTaskWatch(); // main-thread stall ring — feeds the suspend-vs-block verdict below
 installFetchTimingWatch(); // the page's last 20 requests (route, ms) — an incident snapshot carries them (lane vault-slow-load)
@@ -50,6 +54,7 @@ setTimeout(() => { try { const g = gpuRenderer(); window.__vsGpu = g; if (g) tra
   }, 5000);
 }
 window.addEventListener('DOMContentLoaded', async () => {
+  if (exitHop) await exitHop;
   applyUiPrefs(); // DPI zoom + UI font scale BEFORE App measures anything (no post-boot jump)
   applyI18nToDom(); // translate index.html static text BEFORE App reads/moves DOM
   try {

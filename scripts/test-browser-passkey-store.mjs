@@ -7,6 +7,8 @@
 //   ④ the sign count: pre-incremented before the release, reconciled after the event (never backwards)
 //   ⑤ rpMatches: the registrable-suffix rule, positive and negative examples
 //   ⑥ the table's edits (find / drop / policy / switch / a removed profile) and the card's data (P2's contract)
+//   ⑦ lane passkey-sink (a kernel with `webauthn`): the row VibeSpace makes there (its shape), kernelFlags (UV only when the owner
+//      decided THIS ceremony), signOrder, the three new reasons
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -105,6 +107,36 @@ console.log('⑥ the table and the card');
   ok(card.type === 'passkey' && card.kind === 'register' && card.choices.join() === 'once,no' && /^[0-9a-f]{8}$/.test(card.shown) && PS.proposalCard({ id: 'pk-0000abcd', kind: 'register', profileId: 'bp-1', profileLabel: 'Work', rpId: 'github.com', user: { name: 'alice', displayName: 'Alice' }, expiresAt: 9 }).shown === card.shown, 'the register card: choices once | no, a stable `shown` digest', card);
   ok(PS.proposalCard({ id: 'pk-1', kind: 'sign-in', rpId: 'github.com' }).choices.join() === 'once,always,no,never', 'the sign-in card: once | always | no | never');
   ok(item.kind === 'action' && item.action.type === 'browser-proposal' && item.action.id === 'pk-0000abcd' && item.action.shown === card.shown && /Work wants to register a passkey on github\.com for alice/.test(item.text), 'its For-you item is the existing browser-proposal action (Approve = allow once)', item);
+}
+console.log('⑦ lane passkey-sink: a kernel with `webauthn` — the row VibeSpace makes, the UV rule, the row a sign-in signs with, the reasons');
+{
+  // the created row (src/server/browser-dialogs.js pkKernelCreate's shape): a server-made P-256 key, sealed; signCount 0; policy ask
+  const WA = require('../src/webauthn-sign.js');
+  const m = WA.makeCredential({ crypto, rpId: 'github.com', user: { id: Buffer.from('user-7') }, flags: { up: true, uv: true } });
+  const made = { credentialId: m.credentialId.toString('base64url'), rpId: 'github.com', userHandle: m.userHandle.toString('base64url'), userName: 'alice', displayName: 'Alice', keySealed: PS.seal(C, m.privateKeyPkcs8.toString('base64')), signCount: 0, createdBy: 'agent', bySession: 'bk-12345678', createdAt: 5, policy: PS.NEW_KEY_POLICY };
+  const nr = PS.normalizeRow(made);
+  ok(nr && nr.credentialId.length === 43 && nr.userHandle === Buffer.from('user-7').toString('base64url') && nr.signCount === 0 && nr.policy === 'ask' && nr.createdBy === 'agent' && nr.uses === 0 && JSON.stringify(PS.normalizeRow(nr)) === JSON.stringify(nr),
+    'the row VibeSpace makes on the kernel is a store row like any other (32-byte id → 43 b64url characters, userHandle = user.id, signCount 0, NEW_KEY_POLICY) — it round-trips', nr);
+  ok(PS.open(C, nr) === m.privateKeyPkcs8.toString('base64') && crypto.createPrivateKey({ key: Buffer.from(PS.open(C, nr), 'base64'), format: 'der', type: 'pkcs8' }).asymmetricKeyDetails.namedCurve === 'prime256v1' && !JSON.stringify(PS.publicRow(nr)).includes(nr.keySealed),
+    'its key opens to the PKCS#8 P-256 the signer made (the shape the virtual authenticator handed — one row type for both roads); publicRow never carries it');
+  // the UV rule
+  const rel = (o) => ({ verdict: 'release', uv: true, load: ['K1'], ...o });
+  const F = [
+    ['a get the owner answered once', PS.kernelFlags(rel(), { answer: 'once' }), { up: true, uv: true }],
+    ['a get the owner answered always', PS.kernelFlags(rel(), { answer: 'always' }), { up: true, uv: true }],
+    ['a get released by policy yes (automatic)', PS.kernelFlags(rel(), {}), { up: true, uv: false }],
+    ['the person\'s own ceremony (a takeover)', PS.kernelFlags(rel(), { takeover: true }), { up: true, uv: true }],
+    ['a create by the owner\'s one-use grant', PS.kernelFlags(rel({ load: [], consumeGrant: true, createdBy: 'agent' }), { kind: 'create' }), { up: true, uv: true }],
+    ['an empty-authenticator release', PS.kernelFlags(rel({ uv: false, load: [] }), { userVerification: 'required' }), { up: true, uv: false }],
+  ];
+  for (const [name, f, want] of F) ok(f.up === want.up && f.uv === want.uv && f.be === false && f.bs === false && !f.ask, `kernelFlags: ${name} ⇒ UP${want.uv ? ' + UV' : ', no UV'} (never BE / BS — the key lives in this VibeSpace only)`, f);
+  ok(PS.kernelFlags(rel(), { userVerification: 'required' }).ask === true && !PS.kernelFlags(rel(), { userVerification: 'required', answer: 'once' }).ask, 'a page that REQUIRES UV on an automatic release is asked (the card), never signed without it; once answered it signs with UV');
+  // the row a sign-in signs with
+  const R = (id, lastUsedAt, createdAt) => ({ credentialId: id, lastUsedAt, createdAt });
+  const rows = [R('a', 5, 1), R('b', 9, 2), R('c', 0, 3)];
+  ok(PS.signOrder(rows, ['a', 'b', 'c']).map((r) => r.credentialId).join() === 'b,a,c' && PS.signOrder(rows, ['a', 'c'], ['c', 'a']).map((r) => r.credentialId).join() === 'c,a' && PS.signOrder(rows, ['a']).map((r) => r.credentialId).join() === 'a',
+    'signOrder: only the released rows; the page\'s allow list in its order, else the most recently used first');
+  ok(['webauthn_alg_unsupported', 'webauthn_rp_mismatch', 'webauthn_key_locked'].every((w) => PS.REASONS.includes(w)) && ['no-grant', 'policy-no', 'declined', 'expired', 'profile-switch', 'rp-mismatch', 'none', 'withdrawn'].every((w) => PS.REASONS.includes(w)), 'REASONS: every existing one kept + the three kernel refusals by name');
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

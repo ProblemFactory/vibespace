@@ -1,0 +1,11 @@
+{
+  "id": "vibespace.custom-browser",
+  "version": "0.0.1",
+  "label": "Fixture Browser Engine",
+  "description": "A browser engine plugin for VibeSpace's own suites: answers GET /probe and POST /resolve-launch over the loader's IPC like the custom kernel's plugin.",
+  "engines": { "vibespace": "2.369.353" },
+  "client": "none",
+  "server": true,
+  "contributes": { "routes": true, "browserEngine": true },
+  "capabilities": { "server": { "childProcess": true } }
+}

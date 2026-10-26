@@ -174,6 +174,12 @@ const doorProbes = async () => {
   const msgAcl = require('../src/msg-acl.js');
   const vis = (cid) => msgAcl.levelFor({ cid, groups: ['g1'] }, ['g-outside'], (g) => st.rowsFor('group-visibility', g));
   out.groupVisibility = [{ ok: vis('m1') !== 'none' }, { ok: vis('m2') !== 'none' }];
+  // lane browser-login: a web login's «any account on this site» row (PURE src/browser-login.js fillVerdict asks GM.admits over its rows)
+  const BLg = require('../src/browser-login.js');
+  const lf = BLg.formOf({ surfaceId: 'surf-cred-1', pageOrigin: 'https://shop.example.test', fields: [{ fieldId: 'f-1', type: 'password' }] });
+  const lrows = (res) => (res === 'https://shop.example.test#*' ? [{ door: 'browser-login', resource: res, to: [G1], except: [M1] }] : []);
+  const loginV = (cid) => BLg.fillVerdict({ forms: [lf], entries: [{ origin: 'https://shop.example.test', user: 'alice' }], grantRows: lrows, facts: { conversationKeys: [cid], groupIds: ['g1'] }, vaultState: 'unlocked' });
+  out.browserLogin = [loginV('m1'), loginV('m2')].map((x) => ({ ok: x.ok, code: x.ok ? null : x.grant }));
   out.wake = await wakeWorlds();
   return out;
 };
@@ -240,6 +246,7 @@ async function wakeWorlds() {
   ok(left(p.automationReach[0]) && p.automationReach[0].code === 'excepted' && p.automationReach[1].ok, 'automation key reach: a conversation left out of the grant\'s reach is refused `excepted`; another is reached', p.automationReach);
   ok(left(p.channelReach[0]) && p.channelReach[1].ok, 'channel reach: the member left out sees nothing (hidden — the uniform not-found); another member sees it');
   ok(left(p.groupVisibility[0]) && p.groupVisibility[1].ok, 'group visibility: the member left out is not exposed to outsiders; another member is');
+  ok(left(p.browserLogin[0]) && p.browserLogin[0].code === 'excepted' && p.browserLogin[1].ok, 'web login (lane browser-login): the member left out of «any account on this site» gets no login filled (excepted); another member does', p.browserLogin);
   const w = p.wake;
   ok(w.roundRobin.set && w.roundRobin.calls.length >= 3 && w.roundRobin.calls.every((c) => c === 'm2'), `channel notification, a Task Group's round-robin: every wake goes to m2 — the member left out is never woken (never billed) (${J(w.roundRobin.calls)})`, w.roundRobin);
   ok(w.roundRobin.ownWatch && w.roundRobin.ownWatch.ok === false && w.roundRobin.ownWatch.code === 'excepted' && w.roundRobin.stillLeftOut, 'the member left out cannot write its OWN watch over the user\'s exception (refused `excepted`, the exception kept)', w.roundRobin.ownWatch);
@@ -258,9 +265,9 @@ console.log('⑦ RED control: THE admits swapped for a patched copy that ignores
     ok(src.split(EX).length === 2, 'CONTROL setup: the exception rung is found exactly once');
     GM.admits = MZ.load('src/grant-model.js', src.replace(EX, ''), 'ignores-except').admits;
     const p = await doorProbes();
-    const inAll = [['exit', p.exit[0].ok], ['window', p.window[0].ok], ['browser', p.browser[0].ok], ['automation use', p.automationUse[0].ok], ['automation reach', p.automationReach[0].ok], ['channel reach', p.channelReach[0].ok], ['group visibility', p.groupVisibility[0].ok],
+    const inAll = [['exit', p.exit[0].ok], ['window', p.window[0].ok], ['browser', p.browser[0].ok], ['automation use', p.automationUse[0].ok], ['automation reach', p.automationReach[0].ok], ['channel reach', p.channelReach[0].ok], ['group visibility', p.groupVisibility[0].ok], ['web login', p.browserLogin[0].ok],
       ['round-robin', p.wake.roundRobin.calls.includes('m1')], ['fan-out', p.wake.fanOut.calls.includes('m1')], ['access left out', p.wake.accessLeftOut.m1Reads]];
-    ok(inAll.every(([, v]) => v), `CONTROL: every door admits / wakes the member the owner left out — each ⑥ leg would be red (${inAll.filter(([, v]) => !v).map(([k]) => k).join(', ') || 'all ten'})`, inAll);
+    ok(inAll.every(([, v]) => v), `CONTROL: every door admits / wakes the member the owner left out — each ⑥ leg would be red (${inAll.filter(([, v]) => !v).map(([k]) => k).join(', ') || 'all eleven'})`, inAll);
   } finally { GM.admits = real; try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
 }
 

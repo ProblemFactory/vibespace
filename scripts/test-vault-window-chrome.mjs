@@ -4,6 +4,8 @@
 // headless Chrome, the built bundle:
 //   ① sign in, set the second password, store two secrets (an integration key that is an HTML payload, an API key)
 //   ② the window lists them MASKED: no value anywhere in the page's DOM (markup or any input's value)
+//   ②e (lane browser-login): 添加… ▸ 网站登录… adds a website login — its row under Web logins («user · site», By you), 用于… offers
+//      the three scopes and writes ONE grants row, 删除 in its own words; the password never in the page.
 //   ②d (lane vault-paste-request, the owner's 「我压根没法添加啊」): 添加… ▸ 其他密钥或密码… adds a FREE entry (name, kind, a masked
 //      value, a note) — its row under Passwords & keys (Password · By you), 显示 behind 验证是你, a bearer refused human_only, 删除
 //      through the usual confirm
@@ -203,7 +205,7 @@ await closeVaultWindow();
 check('the window opens again with it', !!(await openWindow()) && !!(await until(`!!document.querySelector('.vw-row[data-store="automation"]')`, { timeout: 8000 })));
 const RAIL = `[...document.querySelectorAll('.vw-rail .vw-rail-item')].map((b) => [b.dataset.purpose, b.querySelector('.vw-rail-n').textContent])`;
 const railNow = await until(`(() => { const r = ${RAIL}; return r.length >= 10 ? r : null; })()`, { timeout: 5000 });
-check('THE RAIL: 全部 + the ten purposes in the design\'s order (Other only when something lands in it; lane vault-paste-request: + Passwords & keys)', !!railNow && railNow.map(([p]) => p).join() === 'all,two-step,accounts,integrations,machines,storage,app-logins,passkeys,automation,keys,agents', railNow);
+check('THE RAIL: 全部 + the eleven purposes in the design\'s order (Other only when something lands in it; lane vault-paste-request: + Passwords & keys; lane browser-login: + Web logins)', !!railNow && railNow.map(([p]) => p).join() === 'all,two-step,accounts,integrations,machines,storage,app-logins,passkeys,web-logins,automation,keys,agents', railNow);
 const countsNow = () => evalJs(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; const by = {}; for (const r of rows) by[r.dataset.purpose] = (by[r.dataset.purpose] || 0) + 1; return { by, total: rows.length, rail: Object.fromEntries(${RAIL}), heads: Object.fromEntries([...document.querySelectorAll('.vw-list .vw-group')].map((h) => [h.dataset.purpose, h.querySelector('.vw-group-n').textContent])) }; })()`);
 const c0 = await countsNow();
 check('NINE-COLUMN COUNTS = ROWS: each purpose\'s rail count = its rows in the list = its group head; 全部 = every row (accounts 2 · integrations 1 · automation 1)', Number(c0.rail.all) === c0.total && Object.entries(c0.rail).filter(([p]) => p !== 'all').every(([p, n]) => Number(n) === (c0.by[p] || 0)) && Object.entries(c0.heads).every(([p, n]) => Number(n) === c0.by[p]) && c0.by.accounts === 2 && c0.by.integrations === 1 && c0.by.automation === 1 && c0.total === 4, c0);
@@ -237,7 +239,7 @@ check('NO GREYED CONTROL anywhere in the window (a door a row has not is not dra
 check('unlocked ⇒ 「添加…」 in the bar', !!(await until(visible('.vw-add'), { timeout: 3000 })));
 await click('.vw-add');
 const addMenu = await until(`[...document.querySelectorAll('.context-menu .context-menu-item')].map((e) => e.textContent).join('|') || null`, { timeout: 3000 });
-check('添加… lists the doors that add a value — each the store\'s own (an account, an integration key, a channel account, an automation key) and (lane vault-paste-request, the owner\'s 「我压根没法添加啊」) any other key or password', addMenu === 'Account…|Integration key…|Channel account…|Automation key…|Other key or password…', addMenu);
+check('添加… lists the doors that add a value — each the store\'s own (an account, an integration key, a channel account, an automation key) and (lane vault-paste-request, the owner\'s 「我压根没法添加啊」) any other key or password', addMenu === 'Account…|Integration key…|Channel account…|Automation key…|Website login…|Other key or password…', addMenu);   // lane browser-login: + 网站登录…
 await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
 await shot('vw-v2-list.png');
 
@@ -290,6 +292,38 @@ console.log('②d 「其他密钥或密码…」 (lane vault-paste-request — t
   check('… and the vault holds it no more (the contents list)', !((left.json && left.json.rows) || []).some((r) => r.label === 'Router admin'), left.status);
   await closeVaultWindow();
   check('the window reopens (its 5-minute reveal window ended with the close)', !!(await openWindow()) && (await evalJs(`document.querySelectorAll('.vw-plain').length`)) === 0);
+}
+
+console.log('②e lane browser-login: 添加… ▸ 网站登录… — a website login: its row under Web logins, 用于… with the three scopes, 删除; never a password in the page');
+{
+  const WPW = ['wl', crypto.randomBytes(8).toString('hex'), 'Q7'].join('-');   // built at run time
+  await click('.vw-add');
+  await until(`[...document.querySelectorAll('.context-menu .context-menu-item')].length >= 6`, { timeout: 3000 });
+  await evalJs(`(() => { const m = [...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => e.textContent === 'Website login…'); if (m) m.click(); return !!m; })()`);
+  check('网站登录… opens its dialog: the site, the user name, the password (a masked field), the two-step name', !!(await until(visible('.vault-login-add-dialog'), { timeout: 5000 })) && !!(await evalJs(`(() => { const d = document.querySelector('.vault-login-add-dialog'); return !!d.querySelector('.vault-login-site') && !!d.querySelector('.vault-login-user') && d.querySelector('.vault-login-pass').type === 'password' && !!d.querySelector('.vault-login-otp'); })()`)));
+  await typeInto('.vault-login-add-dialog .vault-login-site', 'https://shop.example.test/login');
+  await typeInto('.vault-login-add-dialog .vault-login-user', 'Alice@Example.test');
+  await typeInto('.vault-login-add-dialog .vault-login-pass', WPW);
+  await click('.vault-login-add-dialog .btn-create');
+  check('Save to vault ⇒ the dialog closes', !!(await until(`!document.querySelector('.vault-login-add-dialog')`, { timeout: 8000 })));
+  const ROW_WL = '.vw-row[data-purpose="web-logins"]';
+  const wr = await until(`(() => { const r = document.querySelector(${JSON.stringify(ROW_WL)}); if (!r || !r.querySelector('.vw-login-grant')) return null; const p = r.querySelector('.vw-chip-prov'); return { id: r.dataset.id, text: r.textContent, prov: p && p.dataset.prov, use: true, del: !!r.querySelector('.vw-del'), rail: document.querySelector('.vw-rail-item[data-purpose="web-logins"] .vw-rail-n')?.textContent }; })()`, { timeout: 10000 });
+  check('its row: «alice@example.test · shop.example.test» under Web logins — By you, 用于… and 删除 (the rail counts it)', !!wr && wr.id === 'secrets:web-login:https://shop.example.test#alice@example.test#password' && /alice@example\.test · shop\.example\.test/.test(wr.text) && wr.prov === 'me' && wr.use && wr.del && wr.rail === '1', wr);
+  check('the password is in no markup and no field of the page', !(await pageText()).includes(WPW));
+  await click(ROW_WL + ' .vw-login-grant');
+  const pk = await until(`(() => { const d = [...document.querySelectorAll('.vw-ak-dialog')].pop(); if (!d) return null; return { scopes: [...d.querySelectorAll('input[type=radio]')].map((x) => x.value), who: [...d.querySelectorAll('input[type=checkbox]')].map((x) => x.value) }; })()`, { timeout: 5000 });
+  check('用于… offers the three scopes (this account · any account on this site · any site) and who (everyone among them)', !!pk && pk.scopes.join() === 'this-account,any-account,any-site' && pk.who.includes('everyone'), pk);
+  await evalJs(`(() => { const d = [...document.querySelectorAll('.vw-ak-dialog')].pop(); d.querySelector('input[value="any-site"]').click(); [...d.querySelectorAll('input[type=checkbox]')].find((x) => x.value === 'everyone').click(); return true; })()`);
+  await click('.vw-login-save');
+  const g = await until(`fetch('/api/vault/web-logins').then((r) => r.json()).then((j) => { const e = (j.entries || [])[0]; return e && e.grants.length ? e.grants.map((x) => x.scope + ':' + (x.to || []).map((p) => p.kind).join('+')).join() : null; })`, { timeout: 8000 });
+  check('Save ⇒ ONE row of the grants store («any site» to everyone, door browser-login); the row\'s chip shows it', g === 'any-site:everyone' && !!(await until(`!!document.querySelector(${JSON.stringify(ROW_WL + ' .vw-ak-chip[data-scope="any-site"]')})`, { timeout: 8000 })), g);
+  await click(ROW_WL + ' .vw-del');
+  check('删除 ⇒ the confirm in its own words (the password leaves the vault)', /Its password leaves the vault/.test(await until(`[...document.querySelectorAll('.dialog-overlay')].map((o) => o.textContent).join(' ') || null`, { timeout: 5000 }) || ''));
+  await evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].pop(); o.querySelector('.btn-create').click(); return true; })()`);
+  check('confirmed ⇒ the row is gone, the rail counts 0', !!(await until(`!document.querySelector(${JSON.stringify(ROW_WL)}) && document.querySelector('.vw-rail-item[data-purpose="web-logins"] .vw-rail-n')?.textContent === '0'`, { timeout: 8000 })));
+  await api('POST', '/api/vault/web-logins/ungrant', { resource: '*', principal: 'everyone' });   // the wildcard names no entry — the owner takes it back by hand
+  await closeVaultWindow();
+  check('the window reopens', !!(await openWindow()));
 }
 
 console.log('③ 显示 ⇒ 验证是你 ⇒ the value');
@@ -438,7 +472,7 @@ await splashGone();
 await openWindow();
 check('「显示」', (await evalJs(`document.querySelector(${JSON.stringify(ROW_INT + ' .vw-show')})?.textContent`)) === '显示');
 check('the setup-token row says 「长期 OAuth 令牌」', /长期 OAuth 令牌/.test(await evalJs(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent || ''`)));
-check('the rail in Chinese: 全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 自动化 key · 密码与密钥 · agent 存放 (lane vault-paste-request: + 密码与密钥)', (await evalJs(`[...document.querySelectorAll('.vw-rail .vw-rail-name')].map((e) => e.textContent).join(' · ')`)) === '全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 自动化 key · 密码与密钥 · agent 存放');
+check('the rail in Chinese: 全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 网站登录 · 自动化 key · 密码与密钥 · agent 存放 (lane vault-paste-request: + 密码与密钥; lane browser-login: + 网站登录)', (await evalJs(`[...document.querySelectorAll('.vw-rail .vw-rail-name')].map((e) => e.textContent).join(' · ')`)) === '全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 网站登录 · 自动化 key · 密码与密钥 · agent 存放');
 check('「显示」 on the automation key carries the owner\'s own sentence as its help; the chips read 「hub 铸造 · 从未显示」 / 「我自己」', (await evalJs(`document.querySelector('.vw-row[data-store="automation"] .vw-show')?.title`)) === '显示密钥值——只在要交给外部系统时；内部 agent 按授权使用，不需要看到值' && (await evalJs(`document.querySelector('.vw-row[data-store="automation"] .vw-chip-prov')?.textContent`)) === 'hub 铸造 · 从未显示' && (await evalJs(`document.querySelector(${JSON.stringify(rowKey(accId) + ' .vw-chip-prov')})?.textContent`)) === '我自己');
 await click(ROW_INT + ' .vw-show');
 check('「验证是你」', (await until(`document.querySelector('#vault-reveal-dialog h3')?.textContent`, { timeout: 5000 })) === '验证是你');

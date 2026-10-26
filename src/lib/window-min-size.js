@@ -44,6 +44,38 @@ export function keepInside({ left, top, width, height }, ws) {
 }
 
 /**
+ * THE CASCADE THAT BURIES NOTHING (lane desktop-small — the walk's «三窗级联» at 1280×640, re-measured at all four small
+ * viewports: a window the WM places by default was slid up onto the workspace by keepInside, so a 500 px Files window on a
+ * 500–555 px workspace opened on the SAME top as the one before — 30 px to the right, or exactly over it — and the earlier
+ * title bars were 0–4 % visible). `slot` = the cascade's box (its size already capped at the workspace), `ws` = the
+ * workspace, `bars` = the title bars of the windows on show (layout px). The slot slid inside as before when it covers at
+ * most `cover` of every bar; else the first top from the slot's own top down (in `step`s) whose box — its height cut at
+ * the workspace's floor, never under `minH` (the .window floor, or `keep` of the size asked: a window is never opened a
+ * sliver of itself to spare another's bar) — covers none past `cover`; none ⇒ the slid slot (never worse than before).
+ */
+export function cascadeBox(slot, ws, bars = [], { step = 30, cover = 0.2, keep = 0.6, minH = Math.max(WINDOW_FLOOR.h, Math.round(slot.height * keep)) } = {}) {
+  const slid = keepInside(slot, ws);
+  const first = { left: slid.left, top: slid.top, width: slot.width, height: slot.height };
+  if (!ws || !(Number(ws.w) > 0) || !(Number(ws.h) > 0) || !Array.isArray(bars) || !bars.length) return first;
+  const covered = (b) => {
+    let worst = 0;
+    for (const r of bars) {
+      const a = r.width * r.height; if (!(a > 0)) continue;
+      const ix = Math.max(0, Math.min(b.left + b.width, r.left + r.width) - Math.max(b.left, r.left));
+      const iy = Math.max(0, Math.min(b.top + b.height, r.top + r.height) - Math.max(b.top, r.top));
+      worst = Math.max(worst, (ix * iy) / a);
+    }
+    return worst;
+  };
+  if (covered(first) <= cover) return first;
+  for (let top = Math.max(0, slot.top); ws.h - top >= minH; top += step) {
+    const b = { left: slid.left, top, width: slot.width, height: Math.min(slot.height, ws.h - top) };
+    if (covered(b) <= cover) return b;
+  }
+  return first;
+}
+
+/**
  * A ZONE'S BOX for a window with a minimum (inc-muhmqvzf-jodk, 2026-09-26 — Chrome snapped into the right third of
  * a 1×3 grid on a 1450 px workspace: a 478 px cell, a 502 px window minimum; the window grew rightward from the
  * cell's left edge, hung 20 px past the workspace, and #workspace (overflow: clip) cut the app's ⋮ and our own ✕).

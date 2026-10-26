@@ -45,8 +45,9 @@ const BUILTIN = require('./plugins/index.js');
 const PS = require('./plugin-settings.js'); // PURE: one settings table per built-in plugin (docs/design-plugin-settings.zh.md)
 const SB = require('./secret-box.js');       // the data dir's vault (a plugin's secret is its entry)
 
-// the verbs a declared capability obliges (the manager's relay surface calls these on the 'relay' provider)
-const CAP_VERBS = Object.freeze({ relay: ['publish', 'unpublish', 'setSelfDialSub'] });
+// the verbs a declared capability obliges (the manager's relay surface calls these on the 'relay' provider; lane engine-plugin:
+// a BROWSER ENGINE answers the engine registry's two verbs — src/server/browser-engines.js, the contract src/browser-engines.js)
+const CAP_VERBS = Object.freeze({ relay: ['publish', 'unpublish', 'setSelfDialSub'], 'browser-engine': ['probe', 'launchOptions'] });
 const REQUIRED_VERBS = ['install', 'start', 'stop', 'status'];
 const OPTIONAL_VERBS = ['setup', 'config', 'mode', 'enable', 'bootReplay', 'applySettings', 'lookup', 'sealSecrets'];   // sealSecrets: the vault's open hook (r2)
 
@@ -204,6 +205,14 @@ class PluginManager {
   }
   /** The id of the plugin that declares a capability (null when none does). */
   providerId(cap) { for (const d of this._defs.values()) if (d.provides.includes(cap)) return d.id; return null; }
+  /** lane engine-plugin: EVERY plugin that declares a capability, in registration order (the engine registry's built-in half). */
+  providerIds(cap) { return [...this._defs.values()].filter((d) => d.provides.includes(cap)).map((d) => d.id); }
+  /** lane engine-plugin: ONE verb CAP_VERBS names for a capability the plugin declares — a refusal by name otherwise. */
+  capVerb(id, cap, verb) {
+    const d = this._defs.get(id);
+    if (!d || !d.provides.includes(cap) || !(CAP_VERBS[cap] || []).includes(verb)) throw new Error(`no plugin ${id} answers ${cap} ${verb}`);
+    return this._verb(id, verb);
+  }
   _provider(cap, verb, what) {
     const id = this.providerId(cap);
     if (!id) throw new Error(what + ' — no plugin on this instance provides ' + cap);
@@ -374,4 +383,4 @@ async function probeProto(target, { timeoutMs = 2500 } = {}) {
   return isHttp ? 'http' : 'tcp';
 }
 
-module.exports = { PluginManager, probeProto, validatePlugin, OPENCODE_SERVE_ID: require('./plugins/opencode-serve.js').id };
+module.exports = { PluginManager, probeProto, validatePlugin, CAP_VERBS, OPENCODE_SERVE_ID: require('./plugins/opencode-serve.js').id };

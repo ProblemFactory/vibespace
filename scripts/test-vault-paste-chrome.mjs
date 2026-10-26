@@ -203,7 +203,12 @@ try {
   await splashGone();
   await evalJs(`document.querySelector('#vault-unlock-dialog .vault-later').click(); true`);   // set aside for this tab — the box says it instead
   check('set aside (Later)', !!(await until(`!document.getElementById('vault-unlock-dialog')`, { timeout: 5000 })));
-  await tap('#mobile-nav-todos');
+  // lane foryou-honest: the phone's badge opens its first-screen PAGE (the same rows) — the sheet through its own door; a touch
+  // screen's row is FOLDED (its box inside), a tap on its words opens it
+  await evalJs(`document.getElementById('taskbar-user-todos').click(); true`);
+  const ROW3 = `${TRAY} .ut-item:has(.ut-secret[data-req="${a3.id}"])`; // the row itself (its words pass a tap through to it)
+  await until(`!!document.querySelector(${JSON.stringify(ROW3)})`, { timeout: 10000 });
+  await tap(ROW3);
   check('the phone\'s tray sheet shows the request kept over the restart, with its box', !!(await until(visible(boxOf(a3.id)), { timeout: 10000 })));
   const locked = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(boxOf(a3.id))}); const u = b.querySelector('.ut-secret-unlock'); return { state: b.dataset.state, words: b.querySelector('.ut-secret-words').textContent, unlock: !!u && u.getBoundingClientRect().height > 0 }; })()`);
   check('LOCKED is said by name in the box (vault_locked) with 解锁… inline — never a silent failure', locked.state === 'locked' && /vault_locked/.test(locked.words) && locked.unlock, locked);

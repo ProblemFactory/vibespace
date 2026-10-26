@@ -7,7 +7,7 @@
 // Rows by the PURE src/desktop-screens.js pickerRows. A machine's window stays NOT persisted (design 014 D1: the sign-in is
 // asked each time); only the choice is remembered, in this browser.
 import { t } from './i18n.js';
-import { fetchJson } from './utils.js';
+import { fetchJson, onOutsidePress } from './utils.js';
 import { pickerRows, recentChoice } from '../desktop-screens.js';
 import { openMachineDesktop, showMachineDesktopDialog } from './machine-desktop.js';
 import { runningWhereText } from './desktop-app-words.js'; // lane app-launch-singleton: where it runs / who started it (a leaf)
@@ -98,6 +98,7 @@ export function openDesktopPicker(app, { anchor = null, focusHost = null } = {})
   if (open) open.close();
   const box = el('div', 'desktop-picker');
   box.setAttribute('role', 'menu'); box.tabIndex = -1;
+  box.dataset.popover = '1'; // the app's Esc protocol closes it like every other float (lane desktop-small P3-1)
   const phone = typeof innerWidth === 'number' && innerWidth < 600;
   if (phone) box.classList.add('desktop-picker-sheet');
   document.body.append(box);
@@ -123,7 +124,7 @@ export function openDesktopPicker(app, { anchor = null, focusHost = null } = {})
       const ds = r.kind === 'machine' ? knownDisplays(r.hostId) : [];
       const onDisplay = r.display != null ? ds.find((d) => d.key === r.display) : null;
       const parts = [el('span', 'desktop-picker-name', r.display != null ? `${name} · ${onDisplay ? displayWord(onDisplay) : t('Display {n}', { n: r.display })}` : name), el('span', 'desktop-picker-state', STATE_WORDS[r.state]())];
-      if (r.kind === 'local' && r.seat === 'wayland') parts.push(el('span', 'desktop-picker-note', t('This host’s own screen is a Wayland session — it cannot be shown yet; the virtual desktop can')));
+      if (r.kind === 'local' && r.seat === 'wayland') parts.push(el('span', 'desktop-picker-note', t('This host’s own screen is a Wayland session and cannot be shown yet — click here for the virtual desktop.'))); // a whole sentence that says the row is the door (lane desktop-small P3-1: it stopped at «the virtual desktop can»)
       if (r.kind === 'machine' && r.group === 'remote' && ds.length > 1) parts.push(el('span', 'desktop-picker-chips', ds.map(displayWord).join(' · ')));
       b.replaceChildren(...parts);
       b.title = r.kind === 'machine' ? machineProbeText(r.machine) : ''; // 「上次检查 N 秒前 · 探测 M ms」
@@ -186,7 +187,6 @@ export function openDesktopPicker(app, { anchor = null, focusHost = null } = {})
     box.style.left = Math.max(8, Math.min(innerWidth - w - 8, r ? r.left : (innerWidth - w) / 2)) + 'px';
     box.style.top = (r ? r.bottom + 4 : 48) + 'px';
   };
-  const onDown = (e) => { if (!box.contains(e.target) && !(anchor && anchor.contains && anchor.contains(e.target))) close(); };
   const onKey = (e) => {
     if (e.key === 'Escape') { e.preventDefault(); close(); return; }
     if (e.key === 'Enter') { const b = document.activeElement; if (b && b.classList.contains('desktop-picker-row') && !b.disabled) { e.preventDefault(); b.click(); } return; } // D1: Enter opens the focused row (the recent one first)
@@ -195,11 +195,14 @@ export function openDesktopPicker(app, { anchor = null, focusHost = null } = {})
     const i = bs.indexOf(document.activeElement);
     e.preventDefault(); moved = true; (bs[(i + (e.key === 'ArrowDown' ? 1 : bs.length - 1)) % bs.length] || box).focus();
   };
-  const offApps = app.ws && typeof app.ws.onGlobal === 'function' ? app.ws.onGlobal((m) => { if (m.type === 'desktop-apps-updated' && open === api && Array.isArray(m.apps)) { apps = m.apps; draw(); place(); } }) : null;
+  const offApps = app.ws && typeof app.ws.onGlobal === 'function' ? app.ws.onGlobal((m) => { if (open === api && !box.isConnected) { close(); return; } if (m.type === 'desktop-apps-updated' && open === api && Array.isArray(m.apps)) { apps = m.apps; draw(); place(); } }) : null; // removed by the Esc protocol ⇒ its watchers go at the next broadcast
   // lane desktop-picker-instant: the rows at once, a landed probe patches its row (no 「正在查看机器…」 over a slow machine)
-  const offMachines = watchMachines(app, (ms) => { if (open !== api) return; loading = false; machines = ms; draw(); place(); }, () => { if (open !== api) return; loading = false; draw(); });
-  function close() { if (open !== api) return; open = null; box.remove(); document.removeEventListener('pointerdown', onDown, true); box.removeEventListener('keydown', onKey); try { offApps?.(); } catch { /* gone */ } try { offMachines(); } catch { /* gone */ } }
-  document.addEventListener('pointerdown', onDown, true);
+  const offMachines = watchMachines(app, (ms) => { if (open !== api) return; if (!box.isConnected) { close(); return; } loading = false; machines = ms; draw(); place(); }, () => { if (open !== api) return; loading = false; draw(); }); // removed by the Esc protocol ⇒ it retires at its next answer
+  function close() { if (open !== api) return; open = null; box.remove(); try { offOutside(); } catch { /* gone */ } box.removeEventListener('keydown', onKey); try { offApps?.(); } catch { /* gone */ } try { offMachines(); } catch { /* gone */ } }
+  // THE APP'S CLOSER (lane desktop-small P3-1 — its own document pointerdown never heard a press INTO a frame: a Web view's
+  // page took the press, the popover stayed, and its Escape then went to that page): onOutsidePress — a press elsewhere, or
+  // a press into any frame (the window's blur with the frame active) closes it; the anchor's own press is the toggle's
+  const offOutside = onOutsidePress(box, () => close(), { exclude: anchor ? [anchor] : [] });
   box.addEventListener('keydown', onKey);
   const api = { el: box, close, rows: () => rows };
   open = api;

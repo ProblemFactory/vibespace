@@ -72,12 +72,24 @@
 //      user's field) is refused while paused and the page neither scrolls nor
 //      loses its focused field, the sub-app list answers (a read); handed back
 //      the find goes through and the page SCROLLS (the positive control).
+//   ⑧ lane engine-plugin (2026-10-25): the REAL keeper over the fixture engine plugin (the real loader's IPC child) whose
+//      kernel is the FAKE KERNEL — the real agent-browser launches it as a profile's browser (its arguments + the keeper's
+//      mark through AGENT_BROWSER_ARGS), and our own CDP socket on the record's url reads ONE VibeSpace.getVersion answer.
+//   ⑨ lane browser-surfaces (2026-10-25): ⑧'s world + the REAL routes, dialog watch and `vibespace-browser` — a js-dialog
+//      SURFACE holding a navigation ends the verb in flight [dialog_open], `surfaces` lists it, `answer <id> accept` is ONE
+//      VibeSpace.answerSurface on the watch's own page session, the page continues; the watch's session never hooks Fetch /
+//      the chooser (one source).
+//   ⑩ lane browser-login (2026-10-25): ⑨'s world + a REAL vault + the logins module — the fake kernel (as the program) detects a
+//      login form on a navigation, `vibespace-browser login` fills it (the kernel counts 2 filled fields, the entry's origin
+//      expected; the agent's answer carries no value), a `--new-user … --generate --submit` signup is saved automatically with
+//      `source: vault-minted` and ONE notice, and a submission the page typed itself is saved as `agent-typed`.
 // SKIPs with evidence when no chrome / no agent-browser / a launch fails.
 // cdp-protocol-under-test — every 'Page.navigate' here is a CDP message judged
 // by the proxy against a real chrome, never a navigation of VibeSpace's page.
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import crypto from 'node:crypto';   // lane browser-login: ⑩'s fixture passwords, built at run time
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, freePort } from './scratch.mjs';
@@ -154,6 +166,7 @@ function cleanup() {
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(130); });
 
+const B_isLoop = (u) => /^wss?:\/\/127\.0\.0\.1:\d+\//.test(String(u || '')); // lane engine-plugin ⑧
 const getJson = (url) => new Promise((res) => http.get(url, (r) => { let b = ''; r.on('data', (c) => b += c); r.on('end', () => { let j = null; try { j = JSON.parse(b); } catch { j = null; } res({ status: r.statusCode, json: j, raw: b }); }); }).on('error', (e) => res({ status: 0, error: e.message })));
 function cdpClient(url) {
   const ws = new WebSocket(url); let id = 0; const waits = new Map(); const events = [];
@@ -1048,6 +1061,259 @@ console.log('— ④ naive study 2: the real keeper + the real binary — two se
       try { kk.shutdown(); } catch { }
       for (const pid of mine()) { if (pid === process.pid) continue; try { process.kill(pid, 'SIGKILL'); } catch { } }
       await sleep(300);
+      for (let i = 0; i < 5; i++) { try { fs.rmSync(KR, { recursive: true, force: true }); } catch { } if (!fs.existsSync(KR)) break; await sleep(250); }
+    }
+  })();
+}
+
+// ═══ ⑧ lane engine-plugin (design-custom-browser-plugin §1.3 / §6.1): THE FAKE KERNEL AS «THE BROWSER» ═══
+// The real keeper over the fixture engine plugin (scripts/fixtures/engine-plugin — the REAL loader's node --permission child,
+// its two verbs over IPC) whose kernel is the fake kernel (scripts/fixtures/fake-kernel.mjs, Target.* complete); the REAL
+// agent-browser launches it as the profile's browser through the build pin's own road; our OWN CDP socket on the record's url
+// asks `VibeSpace.getVersion` — the embedder domain answers. No Chrome: the kernel is the fake, the CLI is real.
+console.log('— ⑧ lane engine-plugin: the real agent-browser launches the FAKE KERNEL as a profile\'s browser; VibeSpace.getVersion through our own socket');
+{
+  const Kk = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js'), Bp = require('../src/browser-profiles.js');
+  let ver8 = null; try { ver8 = execFileSync('agent-browser', ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim(); } catch { }
+  if (!ver8) skip('⑧ agent-browser is not runnable here (put the real binary first on PATH) — the fake-kernel leg needs it');
+  else await (async () => {
+    const KR = scratch('mc8'); fs.rmSync(KR, { recursive: true, force: true });
+    const KH = path.join(KR, 'h'), KXD = path.join(KR, 'x'), PROOT = path.join(KR, 'p');
+    for (const d of [path.join(KH, '.agent-browser'), KXD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
+    const quiet = { log() { }, warn() { }, error() { } };
+    const EID = 'vibespace.custom-browser';
+    fs.cpSync(path.join(REPO, 'scripts/fixtures/engine-plugin'), path.join(PROOT, 'data', 'plugins', EID), { recursive: true });
+    const express8 = require(path.join(REPO, 'node_modules/express'));
+    const LD8 = require('../src/server/plugin-loader.js').create({ rootDir: PROOT, app: express8(), hostVersion: '2.369.356', log: quiet, agentEnv: () => ({ PATH: process.env.PATH }) });
+    const REG8 = require('../src/server/browser-engines.js').create({ loader: LD8, dataDir: path.join(PROOT, 'data') });
+    const KP8 = REG8.kernelPath(EID);
+    fs.mkdirSync(path.dirname(KP8), { recursive: true });
+    // the plugin runs `--version` from its node --permission child, and Node 24 hands that sandbox to a NODE child through
+    // NODE_OPTIONS (measured: the fake kernel then cannot even read node_modules/ws) — a native kernel ignores it; the fake drops it
+    fs.writeFileSync(KP8, `#!/bin/sh\nunset NODE_OPTIONS\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(REPO, 'scripts/fixtures/fake-kernel.mjs'))} "$@"\n`, { mode: 0o755 });
+    const mine = () => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map(Number).filter((pid) => { try { return pid !== process.pid && (fs.readFileSync(`/proc/${pid}/environ`, 'utf8').includes(KR) || fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(KR)); } catch { return false; } });
+    const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => new Set(), runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, tickMs: 3600e3, engines: REG8 });
+    let c8 = null;
+    try {
+      LD8.setEnabled(EID, true, { trusted: true });
+      const t0 = Date.now(); while (!REG8.rows().length && Date.now() - t0 < 8000) await sleep(25);
+      const fact = await kk.engineFactOf(EID);
+      ok(REG8.rows().length === 1 && fact && fact.installed && /vibespace-fake-kernel/.test(String(fact.version)), `⑧ the fixture engine is in the table and its probe ran the fake kernel's own --version ("${fact && fact.version}")`, JSON.stringify(fact));
+      const pk = kk.createProfile({ label: 'Kernel' }, { owner: { kind: 'instance', id: null } });
+      await kk.setBrowserChoice({ profileId: pk.id, choice: { kind: 'plugin', id: EID }, by: 'user' });
+      const v8 = await kk.start(pk.id, { why: 'test' });
+      const rec8 = kk.browserOf(pk.id), view8 = kk.list().browsers[pk.id] || {};
+      let argv8 = []; try { argv8 = JSON.parse(fs.readFileSync(path.join(pk.dir, 'fake-kernel-argv.json'), 'utf8')); } catch { argv8 = []; }
+      ok(v8 && v8.state === 'ready' && rec8 && B_isLoop(rec8.cdpUrl) && rec8.browserChoice && rec8.browserChoice.kind === 'plugin' && view8.runningBuild === '150.0.7871.186', `⑧ the REAL ${ver8} launched the kernel as the profile's browser: ready, its CDP url on loopback, the record {kind:'plugin'} + the build the kernel reports (${view8.runningBuild})`, JSON.stringify(rec8 && { state: rec8.state, cdp: rec8.cdpUrl, bc: rec8.browserChoice, rb: view8.runningBuild }));
+      ok(argv8.includes('--vibespace-engine=fixture') && argv8.includes(Bp.keeperMarkArg(pk.id)) && argv8.includes(`--user-data-dir=${pk.dir}`) && argv8.some((a) => /^--remote-debugging-port=/.test(a)), '⑧ the engine\'s own arguments + the keeper\'s mark reached the kernel THROUGH the real CLI (AGENT_BROWSER_ARGS), beside the CLI\'s own debugging port and the profile\'s directory', JSON.stringify(argv8));
+      c8 = cdpClient(rec8.cdpUrl); await c8.open;
+      const gv = await c8.call('VibeSpace.getVersion');
+      ok(gv.result && gv.result.protocol === 1 && Array.isArray(gv.result.kinds) && gv.result.kinds.length === 20 && gv.result.features.includes('surfaces'), `⑧ OUR OWN CDP socket on the record's url: VibeSpace.getVersion answers protocol ${gv.result && gv.result.protocol}, ${gv.result && gv.result.kinds && gv.result.kinds.length} kinds, features ${gv.result && gv.result.features && gv.result.features.join(',')}`, JSON.stringify(gv));
+      c8.ws.close(); c8 = null;
+      await kk.stop(pk.id, { why: 'user' });
+      LD8.shutdown(); // the plugin's own process is the loader's — ended with it, before the census of this leg's processes
+      await sleep(600);
+      const left8 = mine().map((pid) => { let c = ''; try { c = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').slice(0, 120); } catch { } return `${pid} ${c}`; });
+      ok(left8.length === 0, `⑧ the stop ended the kernel and the CLI's daemon, the loader its plugin — no process of this leg is left (${left8.join(' | ') || 'none'})`);
+    } finally {
+      try { if (c8) c8.ws.close(); } catch { }
+      try { LD8.shutdown(); } catch { }
+      for (const pid of mine()) { try { process.kill(pid, 'SIGKILL'); } catch { } }
+      await sleep(200);
+      for (let i = 0; i < 5; i++) { try { fs.rmSync(KR, { recursive: true, force: true }); } catch { } if (!fs.existsSync(KR)) break; await sleep(250); }
+    }
+  })();
+}
+
+// ═══ ⑨ lane browser-surfaces (design-custom-browser-plugin §2): THE KERNEL'S SURFACES THROUGH THE REAL CLI ═══
+// ⑧'s world (the real keeper over the fixture engine plugin, the REAL agent-browser launching the FAKE KERNEL as the profile's
+// browser) + the REAL routes, the REAL dialog watch and the REAL `vibespace-browser`: a navigation the page holds with a js-dialog
+// SURFACE (the fake kernel's `#vs-surface=` fragment: the surface opens, the page's load waits for its answer) ends the verb in
+// flight `[dialog_open]` with THE sentence; `vibespace-browser surfaces` lists it; `vibespace-browser answer <id> accept` is
+// VibeSpace.answerSurface on the watch's own page session; the page continues (its load fires, the next verb runs).
+console.log('— ⑨ lane browser-surfaces: the real agent-browser on the FAKE KERNEL — a js-dialog surface ends the verb in flight dialog_open, `vibespace-browser answer` accepts it, the page continues');
+{
+  const Kk = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js');
+  const D9 = require('../src/server/browser-dialogs.js');
+  // the product's own resolver (past the VibeSpace shim — the push shell's PATH has data/bin first)
+  const REAL9 = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
+  let ver9 = null; try { ver9 = REAL9 ? execFileSync(REAL9, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
+  if (!ver9) skip(`⑨ no real agent-browser resolves past the shim (PATH=${BASE_ENV.PATH || ''}) — the surfaces leg needs it`);
+  else await (async () => {
+    const KR = scratch('mc9'); fs.rmSync(KR, { recursive: true, force: true });
+    const KH = path.join(KR, 'h'), KXD = path.join(KR, 'x'), PROOT = path.join(KR, 'p');
+    for (const d of [path.join(KH, '.agent-browser'), KXD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
+    const quiet = { log() { }, warn() { }, error() { } };
+    const EID = 'vibespace.custom-browser';
+    fs.cpSync(path.join(REPO, 'scripts/fixtures/engine-plugin'), path.join(PROOT, 'data', 'plugins', EID), { recursive: true });
+    const express9 = require(path.join(REPO, 'node_modules/express'));
+    const LD9 = require('../src/server/plugin-loader.js').create({ rootDir: PROOT, app: express9(), hostVersion: '2.369.356', log: quiet, agentEnv: () => ({ PATH: process.env.PATH }) });
+    const REG9 = require('../src/server/browser-engines.js').create({ loader: LD9, dataDir: path.join(PROOT, 'data') });
+    const KP9 = REG9.kernelPath(EID);
+    fs.mkdirSync(path.dirname(KP9), { recursive: true });
+    fs.writeFileSync(KP9, `#!/bin/sh\nunset NODE_OPTIONS\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(REPO, 'scripts/fixtures/fake-kernel.mjs'))} "$@"\n`, { mode: 0o755 });
+    const mine = () => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map(Number).filter((pid) => { try { return pid !== process.pid && (fs.readFileSync(`/proc/${pid}/environ`, 'utf8').includes(KR) || fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(KR)); } catch { return false; } });
+    const KEY9 = 'bk-0000f9a1', TOKEN9 = 'vsst_mc9_surfaces', SID9 = 'sess-mc9';
+    const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => new Set([KEY9]), runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, tickMs: 3600e3, engines: REG9 });
+    let srv9 = null, dw9 = null;
+    try {
+      LD9.setEnabled(EID, true, { trusted: true });
+      const t0 = Date.now(); while (!REG9.rows().length && Date.now() - t0 < 8000) await sleep(25);
+      const pk = kk.createProfile({ label: 'Kernel' }, { owner: { kind: 'instance', id: null } });
+      await kk.setBrowserChoice({ profileId: pk.id, choice: { kind: 'plugin', id: EID }, by: 'user' });
+      const sessions9 = new Map([[SID9, { agentToken: TOKEN9, _browserKey: KEY9, _browserVariant: 'D', _browserEnv: null, name: 'Chat kernel', cwd: KR }]]);
+      const opens9 = [];
+      dw9 = D9.create({ keeper: kk, log: quiet, leaseCountOf: () => 1, holdersOf: () => [] });
+      dw9.onChange((e) => { if (e.kind === 'open') opens9.push({ id: e.dialog.id, kind: e.dialog.kind }); });
+      const R9 = require('../src/routes/browser.js');
+      R9.setup({ keeper: kk, activeSessions: sessions9, dialogs: dw9, tasksForSession: () => [] });
+      const app9 = express9(); app9.use(express9.json()); app9.use(R9.router);
+      srv9 = http.createServer(app9); const port9 = await freePort(); await new Promise((r) => srv9.listen(port9, '127.0.0.1', r));
+      await kk.attach({ profileId: pk.id, browserKey: KEY9, sessionId: SID9, by: 'user' });
+      const PW9 = path.join(KR, 'passwd.cjs'); fs.writeFileSync(PW9, `const os = require('os'); const real = os.userInfo; os.userInfo = (o) => ({ ...real(o), homedir: ${JSON.stringify(KH)} });\n`);
+      const env9 = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD, VIBESPACE_API: `http://127.0.0.1:${port9}`, VIBESPACE_SESSION_TOKEN: TOKEN9, VIBESPACE_SESSION_CWD: KR };
+      const cli9 = (args) => new Promise((resolve) => {
+        const c = spawn(process.execPath, ['--require', PW9, path.join(REPO, 'data/bin/vibespace-browser'), ...args], { env: env9, cwd: KR });
+        let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
+        const t = setTimeout(() => c.kill('SIGKILL'), 60000);
+        c.on('exit', (code) => { clearTimeout(t); resolve({ code, out, err }); });
+      });
+      let r = await cli9(['open', 'https://example.test/start']);
+      const st9 = dw9.stats()[0] || {};
+      ok(r.code === 0 && st9.kernel && st9.kernel.protocol === 1 && st9.kernel.features.includes('surfaces'), `⑨ the REAL ${ver9} drives the kernel; the watch on its CDP url took the KERNEL road (VibeSpace.getVersion: surfaces)`, JSON.stringify({ r, kernel: st9.kernel }));
+      r = await cli9(['open', 'https://example.test/next#vs-surface=js-dialog:confirm']);
+      const sid9 = (opens9.find((o) => o.kind === 'js-dialog') || {}).id || '';
+      ok(r.code === 1 && r.out.startsWith('A page dialog is open and the page will not move until it is answered — confirm: "Leave this page?"') && /\[dialog_open\]/.test(r.err) && opens9.filter((o) => o.id === sid9).length === 1 && /^surf-js-dialog-\d+$/.test(sid9), '⑨ a js-dialog SURFACE holds the navigation ⇒ the verb in flight ends [dialog_open] with THE sentence (ONE open — the watch read it from the surface)', JSON.stringify({ r, opens9 }));
+      r = await cli9(['surfaces']);
+      ok(r.code === 0 && r.out.includes(`${sid9}  js-dialog  held blocking`) && /answers: accept, dismiss/.test(r.out), '⑨ `vibespace-browser surfaces` lists it with its answers', JSON.stringify(r));
+      r = await cli9(['answer', sid9, 'accept']);
+      let kcalls = []; try { kcalls = fs.readFileSync(path.join(pk.dir, 'fake-kernel-calls.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { kcalls = []; }
+      const ans9 = kcalls.filter((c) => c.method === 'VibeSpace.answerSurface');
+      const watchSess = new Set(kcalls.filter((c) => c.method === 'VibeSpace.enable').map((c) => c.session));
+      ok(r.code === 0 && /the browser prompt was answered: "OK"/.test(r.out) && ans9.length === 1 && ans9[0].params.surfaceId === sid9 && ans9[0].params.answerId === 'accept' && watchSess.has(ans9[0].session), '⑨ `vibespace-browser answer <id> accept` = ONE VibeSpace.answerSurface {surfaceId, answerId: accept} on the watch\'s own page session', JSON.stringify({ r, ans9 }));
+      r = await cli9(['get', 'url']);
+      ok(r.code === 0 && /https:\/\/example\.test\/next/.test(r.out) && !dw9.factFor({ profileId: pk.id, browserKey: KEY9, sessionId: SID9, consume: false }).open, '⑨ the page continues — the next verb runs (its url), nothing open', JSON.stringify(r));
+      const watchCalls = kcalls.filter((c) => watchSess.has(c.session)).map((c) => c.method);
+      ok(watchSess.size >= 1 && !watchCalls.includes('Fetch.enable') && !watchCalls.includes('Page.setInterceptFileChooserDialog') && watchCalls.indexOf('VibeSpace.enable') < watchCalls.indexOf('Page.enable') && (dw9.stats()[0] || {}).nativeIgnored === 0, '⑨ ONE SOURCE on the watch\'s session: VibeSpace.enable before Page.enable, no Fetch / chooser hook; the kernel sent it no native dialog event', JSON.stringify({ watchCalls, st: dw9.stats()[0] }));
+      await kk.stop(pk.id, { why: 'user' });
+      LD9.shutdown();
+      await sleep(600);
+      const left9 = mine().map((pid) => { let c = ''; try { c = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').slice(0, 120); } catch { } return `${pid} ${c}`; });
+      ok(left9.length === 0, `⑨ the stop ended the kernel and the CLI's daemon — no process of this leg is left (${left9.join(' | ') || 'none'})`);
+    } finally {
+      try { dw9 && dw9.shutdown(); } catch { }
+      try { kk.shutdown(); } catch { }
+      try { srv9 && srv9.close(); } catch { }
+      try { LD9.shutdown(); } catch { }
+      for (const pid of mine()) { try { process.kill(pid, 'SIGKILL'); } catch { } }
+      await sleep(200);
+      for (let i = 0; i < 5; i++) { try { fs.rmSync(KR, { recursive: true, force: true }); } catch { } if (!fs.existsSync(KR)) break; await sleep(250); }
+    }
+  })();
+}
+
+// ═══ ⑩ lane browser-login (design-custom-browser-plugin §4): A WEB LOGIN THROUGH THE REAL CLI ═══
+// ⑨'s world + a REAL vault engine (its own data dir), a memory grants store and the REAL logins module wired into the REAL watch
+// and routes: the fake kernel — launched by the REAL agent-browser as the profile's browser — reports a login form on a
+// navigation (`#vs-login=`), `vibespace-browser login` fills it from the vault (VibeSpace.fillCredential on the watch's own page
+// session — 2 fields, the entry's origin expected; the agent's output holds no value), a signup through the vault is saved
+// automatically (vault-minted, ONE notice) and a submission the page typed itself (`#vs-typed=`) is saved as agent-typed.
+console.log('— ⑩ lane browser-login: the real agent-browser on the FAKE KERNEL — `vibespace-browser login` fills a vault login, a signup is saved as vault-minted, an agent-typed one as agent-typed');
+{
+  const Kk = require('../src/server/browser-keeper.js'), Ff = require('../src/browser-facts.js');
+  const D10 = require('../src/server/browser-dialogs.js'), BL10 = require('../src/browser-login.js'), VE10 = require('../src/server/vault-engine.js');
+  const REAL10 = (() => { try { return Ff.binaryResolver('agent-browser', BASE_ENV)(); } catch { return null; } })();
+  let ver10 = null; try { ver10 = REAL10 ? execFileSync(REAL10, ['--version'], { encoding: 'utf8', timeout: 8000, env: BASE_ENV }).trim() : null; } catch { }
+  if (!ver10) skip(`⑩ no real agent-browser resolves past the shim (PATH=${BASE_ENV.PATH || ''}) — the login leg needs it`);
+  else await (async () => {
+    const KR = scratch('mc10'); fs.rmSync(KR, { recursive: true, force: true });
+    const KH = path.join(KR, 'h'), KXD = path.join(KR, 'x'), PROOT = path.join(KR, 'p'), VD = path.join(KR, 'vault');
+    for (const d of [path.join(KH, '.agent-browser'), KXD, VD]) fs.mkdirSync(d, { recursive: true, mode: 0o700 });
+    const kenv = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD };
+    const quiet = { log() { }, warn() { }, error() { } };
+    const EID = 'vibespace.custom-browser';
+    fs.cpSync(path.join(REPO, 'scripts/fixtures/engine-plugin'), path.join(PROOT, 'data', 'plugins', EID), { recursive: true });
+    const express10 = require(path.join(REPO, 'node_modules/express'));
+    const LD10 = require('../src/server/plugin-loader.js').create({ rootDir: PROOT, app: express10(), hostVersion: '2.369.356', log: quiet, agentEnv: () => ({ PATH: process.env.PATH }) });
+    const REG10 = require('../src/server/browser-engines.js').create({ loader: LD10, dataDir: path.join(PROOT, 'data') });
+    const KP10 = REG10.kernelPath(EID);
+    fs.mkdirSync(path.dirname(KP10), { recursive: true });
+    fs.writeFileSync(KP10, `#!/bin/sh\nunset NODE_OPTIONS\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(path.join(REPO, 'scripts/fixtures/fake-kernel.mjs'))} "$@"\n`, { mode: 0o755 });
+    const mine = () => fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x)).map(Number).filter((pid) => { try { return pid !== process.pid && (fs.readFileSync(`/proc/${pid}/environ`, 'utf8').includes(KR) || fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(KR)); } catch { return false; } });
+    const until10 = async (fn, ms = 8000) => { const t0 = Date.now(); for (;;) { let v; try { v = fn(); } catch { v = false; } if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(25); } };
+    const KEY10 = 'bk-0000f10a', TOKEN10 = 'vsst_mc10_login', SID10 = 'sess-mc10', CID10 = 'conv-mc10';
+    const SITE10 = 'https://shop.example.test';
+    const PW10 = ['mc10', crypto.randomBytes(6).toString('hex'), 'Kx', String(crypto.randomInt(10, 99))].join('-');   // built at run time, never a literal
+    const TYPED10 = ['typed', crypto.randomBytes(5).toString('hex'), 'Qa9'].join('-');
+    const eng10 = VE10.create({ dataDir: VD, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+    const kk = Kk.create({ dataDir: path.join(KR, 'data'), homeDir: KH, env: () => kenv, serverSetting: () => undefined, liveKeys: () => new Set([KEY10]), runtime: Ff.createBrowserRuntime({ env: kenv }), facts: Ff.createBrowserFacts({ env: kenv }), log: quiet, install: false, tickMs: 3600e3, engines: REG10 });
+    let srv10 = null, dw10 = null;
+    try {
+      await eng10.setup(['mc10', crypto.randomBytes(4).toString('hex'), 'second'].join(' '));
+      const grants10 = require('../src/server/grants-store.js').create({ memory: true });
+      const notices10 = [];
+      const logins10 = require('../src/server/browser-logins.js').create({ vault: eng10, grants: () => grants10, forYou: { add: (pid, it) => { notices10.push(it); return 'fy-' + notices10.length; }, resolve() { } } });
+      LD10.setEnabled(EID, true, { trusted: true });
+      const t0 = Date.now(); while (!REG10.rows().length && Date.now() - t0 < 8000) await sleep(25);
+      const pk = kk.createProfile({ label: 'Kernel' }, { owner: { kind: 'instance', id: null } });
+      await kk.setBrowserChoice({ profileId: pk.id, choice: { kind: 'plugin', id: EID }, by: 'user' });
+      const sessions10 = new Map([[SID10, { agentToken: TOKEN10, _browserKey: KEY10, _browserVariant: 'D', _browserEnv: null, name: 'Chat kernel', cwd: KR, backendSessionId: CID10 }]]);
+      dw10 = D10.create({ keeper: kk, log: quiet, leaseCountOf: () => 1, holdersOf: () => [{ browserKey: KEY10, sessionId: SID10 }], logins: logins10, conversationOf: () => ({ cid: CID10, name: 'Chat kernel' }) });
+      const R10 = require('../src/routes/browser.js');
+      R10.setup({ keeper: kk, activeSessions: sessions10, dialogs: dw10, logins: logins10, tasksForSession: () => [] });
+      const app10 = express10(); app10.use(express10.json()); app10.use(R10.router);
+      srv10 = http.createServer(app10); const port10 = await freePort(); await new Promise((r) => srv10.listen(port10, '127.0.0.1', r));
+      await kk.attach({ profileId: pk.id, browserKey: KEY10, sessionId: SID10, by: 'user' });
+      const PWF = path.join(KR, 'passwd.cjs'); fs.writeFileSync(PWF, `const os = require('os'); const real = os.userInfo; os.userInfo = (o) => ({ ...real(o), homedir: ${JSON.stringify(KH)} });\n`);
+      const env10 = { ...BASE_ENV, HOME: KH, XDG_RUNTIME_DIR: KXD, VIBESPACE_API: `http://127.0.0.1:${port10}`, VIBESPACE_SESSION_TOKEN: TOKEN10, VIBESPACE_SESSION_CWD: KR };
+      const cli10 = (args) => new Promise((resolve) => {
+        const c = spawn(process.execPath, ['--require', PWF, path.join(REPO, 'data/bin/vibespace-browser'), ...args], { env: env10, cwd: KR });
+        let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
+        const t = setTimeout(() => c.kill('SIGKILL'), 60000);
+        c.on('exit', (code) => { clearTimeout(t); resolve({ code, out, err }); });
+      });
+      const kcalls = () => { try { return fs.readFileSync(path.join(pk.dir, 'fake-kernel-calls.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)); } catch { return []; } };
+      const formsNow = () => dw10.loginForms(pk.id);
+      let r = await cli10(['open', `${SITE10}/login#vs-login=login`]);
+      const st10 = dw10.stats()[0] || {};
+      await until10(() => formsNow().length === 1);
+      ok(r.code === 0 && st10.kernel && st10.kernel.features.includes('credentials') && formsNow().length === 1 && formsNow()[0].origin === SITE10 && formsNow()[0].kind === 'login', `⑩ the REAL ${ver10} drives the kernel; its credentialFormDetected reaches the watch — a login form of ${SITE10} on the tab`, JSON.stringify({ r, forms: formsNow(), kernel: st10.kernel }));
+      ok(logins10.addOwn({ origin: SITE10, username: 'alice', password: PW10 }).ok && logins10.grant(`web-login:${SITE10}#alice`, 'this-account', `session:${CID10}`).ok, '⑩ the owner keeps a login for the site in the vault and grants this account to the conversation');
+      r = await cli10(['login']);
+      const fills = kcalls().filter((c) => c.method === 'VibeSpace.fillCredential');
+      const watchSess = new Set(kcalls().filter((c) => c.method === 'VibeSpace.enable').map((c) => c.session));
+      ok(r.code === 0 && /^Filled the user name and the password on https:\/\/shop\.example\.test \(alice\) from the vault/.test(r.out) && fills.length === 1 && Object.keys(fills[0].params.values || {}).length === 2 && fills[0].params.expectedOrigin === SITE10 && watchSess.has(fills[0].session), '⑩ `vibespace-browser login` = ONE VibeSpace.fillCredential on the watch\'s own page session: the kernel counts 2 filled fields, the entry\'s origin expected', JSON.stringify({ r, fills: fills.map((f) => ({ n: Object.keys(f.params.values || {}).length, expectedOrigin: f.params.expectedOrigin, submit: f.params.submit })) }));
+      ok(!r.out.includes(PW10) && !r.err.includes(PW10) && /Receipt vr-[0-9a-f]{12}\./.test(r.out), '⑩ the agent\'s answer (stdout + stderr) carries no value — what was filled and a receipt');
+      // a signup THROUGH the vault — saved automatically, ONE notice
+      r = await cli10(['open', `${SITE10}/signup#vs-login=signup`]);
+      await until10(() => formsNow().some((f) => f.kind === 'signup'));
+      logins10.grant(`web-login:${SITE10}#alice`, 'any-account', `session:${CID10}`);
+      r = await cli10(['login', '--new-user', 'bob', '--generate', '--submit']);
+      await until10(() => notices10.length >= 1);
+      const bob = eng10.secretGet(`web-login:${SITE10}#bob`);
+      const bobRec = bob.ok && bob.value ? BL10.recordOf(bob.value.toString('utf8')) : null;
+      ok(r.code === 0 && /the vault made a 20-character password/.test(r.out) && bobRec && bobRec.source === 'vault-minted' && bobRec.strength === 'generated' && !bobRec.pending && bobRec.submittedAt && !r.out.includes(bobRec.password) && notices10.length === 1 && notices10[0].kind === 'notice' && /registered bob/.test(notices10[0].text), '⑩ `login --new-user bob --generate --submit`: the kernel submits, the vault SAVED it automatically (source vault-minted, confirmed) and ONE notice tells the owner — the agent never saw the password', JSON.stringify({ r: r.out.slice(0, 300), rec: bobRec && { source: bobRec.source, pending: bobRec.pending || null }, notices10 }));
+      // a submission the page typed itself (the agent bypassed --generate) — saved as agent-typed
+      r = await cli10(['open', `${SITE10}/welcome#vs-typed=carol:${encodeURIComponent(TYPED10)}`]);
+      await until10(() => notices10.length >= 2);
+      const carol = eng10.secretGet(`web-login:${SITE10}#carol`);
+      const carolRec = carol.ok && carol.value ? BL10.recordOf(carol.value.toString('utf8')) : null;
+      ok(carolRec && carolRec.source === 'agent-typed' && carolRec.strength === 'unknown' && carolRec.password === TYPED10 && carolRec.createdIn && carolRec.createdIn.conversation === 'Chat kernel' && notices10.length === 2 && /typed itself/.test(notices10[1].text), '⑩ a credential the agent typed itself (credentialSubmitted with a password the vault never minted) is saved automatically, marked agent-typed — never discarded', JSON.stringify({ rec: carolRec && { source: carolRec.source, strength: carolRec.strength }, notices10 }));
+      await kk.stop(pk.id, { why: 'user' });
+      LD10.shutdown();
+      await sleep(600);
+      const left10 = mine().map((pid) => { let c = ''; try { c = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ').slice(0, 120); } catch { } return `${pid} ${c}`; });
+      ok(left10.length === 0, `⑩ the stop ended the kernel and the CLI's daemon — no process of this leg is left (${left10.join(' | ') || 'none'})`);
+    } finally {
+      try { dw10 && dw10.shutdown(); } catch { }
+      try { kk.shutdown(); } catch { }
+      try { srv10 && srv10.close(); } catch { }
+      try { LD10.shutdown(); } catch { }
+      try { eng10.close(); } catch { }
+      for (const pid of mine()) { try { process.kill(pid, 'SIGKILL'); } catch { } }
+      await sleep(200);
       for (let i = 0; i < 5; i++) { try { fs.rmSync(KR, { recursive: true, force: true }); } catch { } if (!fs.existsSync(KR)) break; await sleep(250); }
     }
   })();
