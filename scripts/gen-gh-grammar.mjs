@@ -17,9 +17,11 @@
 //     [HOST/]OWNER/REPO, OR whose DESCRIPTION names a repository — read as a HOST/OWNER/REPO spec], spec:1 (a positional gh
 //     resolves with ghrepo.FromFullName — <…repo[sitory]> / <destination-repo> / a curated <name>), host:'-x' (the
 //     --hostname short for this verb, or null) }   — a verb that REACHES A HOST
-//   { default:1 }   — round 7 (5c): a verb the help PROVES reaches only the default host (no repository/host-typed arg, no
-//     --hostname, no repository-typed/-named value) — listed so it runs ok:own instead of a FALSE blind, never hand-picked.
-// Only a verb with NO parseable --help (`unreadable`: a gh extension exec) is absent and BLINDS. bool flags are NOT kept:
+//   { default:1 }   — a verb a POSITIVE proof clears (round 8): it reaches no host (no repository/host-typed arg, no --hostname,
+//     no repository-typed/-named value) AND its help names no program-execution / download / git-road word and no url/path/spec/
+//     gist positional — so it runs ok:own, never a FALSE blind, never hand-picked. A verb that reaches no host and FAILS the
+//     positive proof (gh copilot execs a PATH program, gh gist clone drives git) is ABSENT ⇒ BLIND, like an unknown verb.
+// A verb with NO parseable --help (`unreadable`: a gh extension exec) is also absent and BLINDS. bool flags are NOT kept:
 // shapeOf never reads them (the git-driving bool shorts live in the row's blindFlagSubs), and a flag whose MEANING moved from
 // bool to value still shows up in `value` — so the equality census stays meaningful and lean.
 //
@@ -57,11 +59,19 @@ export function sectionSubs(lines) {
 // FromFullName may TYPE as `string` yet its description names a repository (`issue develop --branch-repo`).
 export function parseVerb(path) { const h = ghHelp(path); return h == null ? null : parseHelp(h); }
 
+const HEADER = /^[A-Z][A-Z]+(?: [A-Z]+)*$/;   // an all-caps, left-justified section header: USAGE / FLAGS / INHERITED FLAGS / EXAMPLES / LEARN MORE / ARGUMENTS / JSON FIELDS (a description sentence `Clone a gist.` is NOT one)
+
 export function parseHelp(h) {
   const ls = h.split('\n');
   const ui = ls.findIndex((l) => /^USAGE/.test(l));
   const usage = ui >= 0 ? (ls[ui + 1] || '') : '';
   const subs = sectionSubs(ls);
+  // round 8 (BLOCKER): the verb's PROSE = its description (the lines before the first section header) + its EXAMPLES block — the
+  // positive proof reads this (never the FLAGS, never the USAGE/verb words) for a program-execution / download / git-road word.
+  const descLines = []; for (const l of ls) { if (HEADER.test(l)) break; descLines.push(l); }
+  let inEx = false; const exLines = [];
+  for (const l of ls) { if (HEADER.test(l)) { inEx = /^EXAMPLES\b/.test(l); continue; } if (inEx) exLines.push(l); }
+  const prose = descLines.join('\n') + '\n' + exLines.join('\n');
   const flags = {};
   let inFlags = false;
   for (const l of ls) {
@@ -74,11 +84,28 @@ export function parseHelp(h) {
     if (!m) continue;
     flags[m[2]] = { short: m[1] || null, value: !!m[3], type: m[3] || null, desc: sp[2] };
   }
-  return { usage, subs, flags };
+  return { usage, subs, flags, prose };
 }
 
 const REPO_TYPE = /repository|OWNER\/REPO/;                               // the help's TYPE column marks a value gh resolves to a repo (and so a host): `repository`, `[HOST/]OWNER/REPO`
 const REPO_DESC = /\b(?:repositor(?:y|ies)|repo|destination)\b|OWNER\/REPO/i;   // round 7 (MAJOR 3): a `string`-typed value whose DESCRIPTION names a repository / destination is resolved by FromFullName too
+
+// round 8 (BLOCKER): {default:1} is a POSITIVE proof, not a negative one. A verb reaches only the default host (⇒ ok:own) ONLY
+// if its help (a) names NO program execution / download / git road word in its DESCRIPTION or EXAMPLES, AND (b) takes no
+// positional the help NAMES as a url / path / spec / gist (repository/<name> is already a spec ⇒ belongs). Otherwise it EXECUTES
+// a program (gh copilot execs the Copilot CLI on PATH) / drives git (gh gist clone → git clone) / takes a host-bearing arg — so
+// {default:1} cannot be proven and the verb is ABSENT ⇒ BLIND (asking is cheap; a false ok:own on a program-runner is the leak).
+// The word list is DERIVED once (the three categories' markers) and PINNED here; test-vault-run-model ⑤d pins it + a RED fixture
+// per word, and the ⑤c census re-runs this proof against the live gh so a new {default:1} verb or a reclassification is RED.
+export const PROGRAM_WORDS = Object.freeze(['execute', 'exec', 'run', 'launch', 'open', 'download', 'install', 'clone', 'checkout', 'push', 'pull', 'fetch', 'git', 'browser', 'editor', 'shell', 'command']);
+export const POSITIONAL_TYPE_WORDS = Object.freeze(['url', 'path', 'spec', 'gist']);
+const wordRe = (words) => new RegExp('\\b(?:' + words.join('|') + ')\\b', 'i');
+export function positiveProof(v, progWords = PROGRAM_WORDS, posWords = POSITIONAL_TYPE_WORDS) {
+  if (wordRe(progWords).test(v.prose || '')) return false;                                   // (a) a program / download / git word in the description or examples
+  const positionals = (String(v.usage || '').match(/<[^>]+>/g) || []).join(' ');
+  if (wordRe(posWords).test(positionals)) return false;                                       // (b) a positional the help names as a url / path / spec / gist
+  return true;
+}
 
 export function leafGrammar(v, specHint) {
   const value = [], repoValues = [];
@@ -95,11 +122,17 @@ export function leafGrammar(v, specHint) {
 
 // A verb REACHES A HOST — a full entry — when: its first/any positional is a repository (spec); or it carries --hostname
 // (host); or it has a value the help TYPEs or DESCRIBES as a repository, INCLUDING the inherited -R/--repo (repoValues).
-// Everything else the help PROVES reaches only the default host ⇒ { default:1 } (round 7, 5c), so it runs ok:own, not a FALSE
-// blind. repo create's positional is a <name> gh still parses with ghrepo.FromFullName, so it is CURATED with spec:1.
+// A verb that reaches no host gets { default:1 } ONLY if positiveProof clears it (round 8); otherwise it is ABSENT ⇒ BLIND.
+// repo create's positional is a <name> gh still parses with ghrepo.FromFullName, so it is CURATED with spec:1.
 export const CURATED = [{ path: ['repo', 'create'], spec: 1 }];
 export const belongs = (g) => !!(g.spec || g.host || (g.repoValues && g.repoValues.length) || (g.value && g.value.includes('--hostname')));   // --hostname (gh api / auth) reaches a host even with no short alias
-const entryOf = (g) => belongs(g) ? g : { default: 1 };
+// round 8 (BLOCKER): a non-host-reaching verb is {default:1} (ok:own) only when positiveProof clears its help; else null ⇒ the
+// walk OMITS it ⇒ the reader BLINDS it. Takes the whole parsed help v (leafGrammar for the host read, prose+usage for the proof).
+export function entryOf(v) {
+  const g = leafGrammar(v);
+  if (belongs(g)) return g;
+  return positiveProof(v) ? { default: 1 } : null;
+}
 
 export function regenerate(groups) {
   const out = {}, unreadable = [];
@@ -110,7 +143,7 @@ export function regenerate(groups) {
     const v = parseVerb(path);
     if (!v) { unreadable.push(key); return; }   // a passthrough with no parseable --help (gh extension exec): absent ⇒ BLIND, but recorded
     if (v.subs.length && depth < 4) { for (const s of v.subs) walk([...path, s], depth + 1); return; }
-    out[key] = entryOf(leafGrammar(v));
+    const e = entryOf(v); if (e) out[key] = e;   // round 8: a null entry (positiveProof failed) is OMITTED ⇒ the verb BLINDS
   };
   for (const grp of groups) walk([grp], 1);
   for (const c of CURATED) { const v = parseVerb(c.path); if (!v) { unreadable.push(c.path.join(' ')); continue; } out[c.path.join(' ')] = leafGrammar(v, c.spec); }
@@ -136,7 +169,7 @@ export async function buildGrammarParallel(opts = {}) {
     if (h == null) { unreadable.push(key); return; }
     const v = parseHelp(h);
     if (v.subs.length && depth < 4) { await Promise.all(v.subs.map((s) => walk([...path, s], depth + 1))); return; }
-    out[key] = entryOf(leafGrammar(v));
+    const e = entryOf(v); if (e) out[key] = e;   // round 8: a null entry (positiveProof failed) is OMITTED ⇒ the verb BLINDS
   };
   const groups = sectionSubs(((await gate(() => help([]))) || '').split('\n'));
   await Promise.all(groups.map((grp) => walk([grp], 1)));
@@ -144,15 +177,16 @@ export async function buildGrammarParallel(opts = {}) {
   return { table: out, unreadable };
 }
 
-// The program-naming env vars (round 7, MAJOR 4), DERIVED from `gh help environment`: a paragraph (blank-line delimited)
-// whose leading backtick-quoted NAMES are followed by a description that names an editor / browser / pager. Returns a sorted
-// list (null if gh is not runnable). GH_FORCE_TTY / GH_TOKEN / GH_HOST … are excluded by the derivation (no program word).
+// The program-naming env vars (round 7 MAJOR 4; round 8 MAJOR 2 adds GH_PATH), DERIVED from `gh help environment`: a paragraph
+// (blank-line delimited) whose leading backtick-quoted NAMES are followed by a description that names an editor / browser /
+// pager / executable. Returns a sorted list (null if gh is not runnable). GH_FORCE_TTY / GH_TOKEN / GH_HOST / GH_EXTENSION /
+// GH_CONFIG_DIR are excluded by the derivation (they name no program the user supplies — gh SETS GH_EXTENSION / GH_PATH itself).
 export function parseEnvHijack(text) {
   const names = new Set();
   for (const para of String(text || '').split(/\n\s*\n/)) {
     const head = /^((?:`[^`]+`(?:,\s*)?)+)/.exec(para);
     if (!head) continue;
-    if (!/\b(?:editor|browser|pager|paging)\b/i.test(para)) continue;   // program-naming only — derived, never hand-picked
+    if (!/\b(?:editor|browser|pager|paging|executable)\b/i.test(para)) continue;   // round 8 (MAJOR 2): program-naming only, DERIVED from the help's own words — `executable` admits GH_PATH («the path to the gh executable»); the decoys gh SETS itself (GH_EXTENSION «standalone program», GH_NO_EXTENSION_UPDATE_NOTIFIER «executed») say program/executed, never `executable`, so they stay out, as do GH_CONFIG_DIR / GH_FORCE_TTY
     for (const nm of head[1].match(/`([^`]+)`/g) || []) names.add(nm.replace(/`/g, '').trim());
   }
   return [...names].sort();
