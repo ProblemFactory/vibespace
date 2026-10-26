@@ -2969,7 +2969,7 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
 .ns-host-dot { font-size: 11.5px; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; }
 .ns-host-dot i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); display: inline-block; }
 .ns-seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; flex: none; max-width: 100%; flex-wrap: wrap; }
-.ns-seg button { border: 0; border-right: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary); font-size: 12px; padding: 4px 12px; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.ns-seg button { border: 0; border-right: 1px solid var(--border); background: var(--bg-input); color: var(--text-secondary); font-size: 12px; padding: 4px 12px; cursor: pointer; font-family: inherit; white-space: nowrap; min-height: 24px; } /* the 24 px mouse target as a CSS fact, never the font's line box: DejaVu Sans (the hosted runner's sans-serif) drew them 22 px tall (lane desktop-small, CI hotfix .358) */
 .ns-seg button:last-child { border-right: 0; }
 .ns-seg button.on { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--text); font-weight: 500; }
 .ns-seg button:disabled { opacity: .45; cursor: default; }

@@ -56,8 +56,18 @@
 //   recovery; no «+N» / wheel / compact switcher and the 60 px tile floor; the bottom-anchored title menu; no narrow fold
 //   and no short composer), served through the Fetch domain with the matching style.css / chat.css at 1024×600: P2-1, P2-2,
 //   P2-3 and P2-4 go RED there; the real bundle back, the same legs pass (the fix, not the reload).
+//   CI HOTFIX (2.369.358 — the hosted runner red on both tries, reproduced here with its fontconfig and its PATH): TWO
+//   FONT LEGS — DejaVu Sans (the runner's sans-serif: a scratch fontconfig naming only the DejaVu / Liberation / Noto CJK /
+//   emoji dirs — wider glyphs, a shorter line box) and the box's own (not run twice where it already IS DejaVu Sans — the
+//   runner) — every viewport in both, then RED ⑦, the acceptance blocks and the RED controls in DejaVu (last, as before:
+//   they rename and delete the hub's desktops), each leg's face read back from Chrome (CSS.getPlatformFontsForNode). The hub offers the Desktop on every box (a stub Xtigervnc first on the
+//   server's PATH, never started — the runner has no TigerVNC, its hub hid #btn-desktop and ⑩ died on a TypeError that
+//   hid three viewports): a missing target is a NAMED ✗ and every leg and every viewport runs to its end. ⑦ judges the
+//   WORDS — a pre-wrap line's hanging space is no word. RED CONTROLS ⑧ ⑦ in DejaVu: the New Session switches' min-height
+//   taken away ⇒ the census finds them 22 px tall again (the leg draws the runner's metrics); the words' right padding taken
+//   away ⇒ words under the buttons.
 // Requires google-chrome (SKIP without) and a fresh `npm run build`. Run: node scripts/test-desktop-small-chrome.mjs
-// [--only 1024x600] [--shots DIR]
+// [--only 1024x600] [--font dejavu|box] [--shots DIR]
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -74,7 +84,8 @@ if (!fs.existsSync(path.join(repo, 'public', 'bundle.js'))) { console.log('✗ n
 const argOf = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : null; };
 const VIEWPORTS = [[951, 585], [1024, 600], [1100, 700], [1280, 640]].filter(([w, h]) => !argOf('--only') || argOf('--only').split(',').includes(`${w}x${h}`));
 
-const [PORT, CDP_PORT] = await freePorts(2);
+const [PORT, ...CDP_PORTS] = await freePorts(4);
+let CDP_PORT = CDP_PORTS[0]; // each Chrome its own (startChrome: DejaVu, the box's own, DejaVu again)
 const wt = scratch('desk-small-wt');
 const fakeHome = scratchHome('desk-small-home', fs);
 const chromeDir = scratch('desk-small-chrome');
@@ -84,6 +95,21 @@ const CWD = path.join(stubDir, 'work');
 const SHOTS = argOf('--shots') ? path.resolve(argOf('--shots')) : scratch('desk-small-shots');
 for (const d of [stubDir, CWD, SHOTS]) fs.mkdirSync(d, { recursive: true });
 for (let i = 0; i < 4; i++) fs.writeFileSync(path.join(CWD, `notes-${i}.md`), '# notes\n');
+// ── the font legs (CI hotfix .358): DejaVu Sans — the hosted runner's sans-serif — through a scratch fontconfig naming only
+//    the dirs the runner has (DejaVu, Liberation, Noto CJK + the colour emoji face; the system conf.d still applies), and the
+//    box's own: the viewports in DejaVu, then in the box's own face, then DejaVu again for RED ⑦, the acceptance blocks and
+//    the RED controls ──
+const FONT_LEGS = ['dejavu', 'box'].filter((f) => !argOf('--font') || argOf('--font').split(',').includes(f));
+const fontsDir = scratch('desk-small-fonts');
+fs.mkdirSync(path.join(fontsDir, 'emoji'), { recursive: true });
+for (const f of ['/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf']) if (fs.existsSync(f)) fs.symlinkSync(f, path.join(fontsDir, 'emoji', path.basename(f)));
+const DEJAVU_CONF = path.join(fontsDir, 'fonts.conf');
+fs.writeFileSync(DEJAVU_CONF, `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n${['/usr/share/fonts/truetype/dejavu', '/usr/share/fonts/truetype/liberation', '/usr/share/fonts/opentype/noto', path.join(fontsDir, 'emoji')].map((d) => `  <dir>${d}</dir>\n`).join('')}  <cachedir>${path.join(fontsDir, 'cache')}</cachedir>\n  <include ignore_missing="yes">/etc/fonts/conf.d</include>\n</fontconfig>\n`);
+// ── the hub offers the Desktop on every box (⑩): /api/vnc/status says `available` when `which` finds a TigerVNC — a stub
+//    Xtigervnc first on the server's PATH (the runner has none); nothing here starts a desktop, so if run it only says so ──
+const deskBin = path.join(stubDir, 'desk-bin');
+fs.mkdirSync(deskBin, { recursive: true });
+fs.writeFileSync(path.join(deskBin, 'Xtigervnc'), '#!/bin/sh\necho "test-desktop-small-chrome: a stub Xtigervnc - this suite starts no desktop" >&2\nexit 1\n', { mode: 0o755 });
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 let pass = 0, fail = 0;
 const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1200) : ''}`); } return !!c; };
@@ -186,15 +212,14 @@ for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const srvLog = fs.openSync(path.join(SHOTS, 'server.log'), 'a');
-const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: path.join(stubDir, 'claude'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1' }, stdio: ['ignore', srvLog, srvLog] });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
-  '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: deskBin + path.delimiter + (process.env.PATH || ''), PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: path.join(stubDir, 'claude'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1' }, stdio: ['ignore', srvLog, srvLog] });
+let chrome = null, sock = null, chromeStarts = 0; // the font leg's Chrome and its CDP socket (startChrome / stopChrome)
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch { }
   try { srv.kill('SIGKILL'); } catch { }
   for (const root of [wt, fakeHome, stubDir, chromeDir]) { try { endRootedProcesses(root); } catch { } } // the server, dtach, the wrapper, the stub, Chrome (§57b)
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  for (const d of [chromeDir, fakeHome, stubDir, MUT, MUT2, MUT3]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
+  for (const d of [chromeDir, fakeHome, stubDir, fontsDir, MUT, MUT2, MUT3]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
@@ -204,17 +229,9 @@ for (let i = 0; i < 120; i++) { try { await fetch(`${ORIGIN}/api/home`); break; 
 
 // ── raw CDP (+ the RED control's bundle / stylesheets through the Fetch domain) ──
 const WebSocket = require('ws');
-let target = null;
-for (let i = 0; i < 120 && !target; i++) {
-  try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((x) => x.type === 'page'); } catch { }
-  if (!target) await sleep(250);
-}
-if (!target) { console.log('✗ chrome never exposed a CDP page target'); process.exit(1); }
-const sock = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
-await new Promise((r) => sock.on('open', r));
 let seq = 0; let mutantOn = null; const pend = new Map(); const pageErrors = []; let dragData = null;
 const fulfil = (p, body, type) => sock.send(JSON.stringify({ id: ++seq, method: 'Fetch.fulfillRequest', params: { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: type }, { name: 'Cache-Control', value: 'no-store' }], body: body.toString('base64') } }));
-sock.on('message', (d) => {
+const onCdp = (d) => {
   const m = JSON.parse(d);
   if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); PENDS.delete(m.id); return; }
   if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown');
@@ -227,7 +244,7 @@ sock.on('message', (d) => {
     else if (M && M.chat && u.pathname === '/chat.css') fulfil(p, M.chat, 'text/css');
     else sock.send(JSON.stringify({ id: ++seq, method: 'Fetch.continueRequest', params: { requestId: p.requestId } }));
   }
-});
+};
 const cdp = (method, params = {}) => new Promise((res, rej) => {
   const id = ++seq; PENDS.set(id, { method, at: Date.now() }); pend.set(id, (m) => (m.error ? rej(new Error(method + ': ' + m.error.message)) : res(m.result)));
   sock.send(JSON.stringify({ id, method, params }));
@@ -240,16 +257,57 @@ const evalJs = async (expr) => {
 const J = JSON.stringify;
 const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch { } await sleep(150); } try { return await evalJs(expr); } catch { return false; } };
 const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
-await cdp('Runtime.enable'); await cdp('Page.enable');
-await cdp('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }, { urlPattern: '*style.css*', requestStage: 'Request' }, { urlPattern: '*chat.css*', requestStage: 'Request' }] });
-await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
+/** one Chrome per font leg (CI hotfix .358): `dejavu` reads the scratch fontconfig, `box` the box's own; its own profile and CDP
+ *  port; the page target's socket, the Fetch domain (the RED controls' bundles) and the returning-user script */
+const startChrome = async (font) => {
+  const n = chromeStarts++; CDP_PORT = CDP_PORTS[n];
+  chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
+    '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--disable-background-timer-throttling', `--user-data-dir=${path.join(chromeDir, `${font}-${n}`)}`, 'about:blank'],
+  { stdio: 'ignore', env: font === 'dejavu' ? { ...process.env, FONTCONFIG_FILE: DEJAVU_CONF } : process.env });
+  let target = null;
+  for (let i = 0; i < 120 && !target; i++) {
+    try { target = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((x) => x.type === 'page'); } catch { }
+    if (!target) await sleep(250);
+  }
+  if (!target) return false;
+  sock = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
+  await new Promise((r) => sock.on('open', r)); sock.on('message', onCdp);
+  await cdp('Runtime.enable'); await cdp('Page.enable');
+  await cdp('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }, { urlPattern: '*style.css*', requestStage: 'Request' }, { urlPattern: '*chat.css*', requestStage: 'Request' }] });
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
+  return true;
+};
+const stopChrome = async () => {
+  const c = chrome; chrome = null; try { sock?.close(); } catch { } sock = null;
+  if (c) await new Promise((r) => { c.once('exit', r); try { c.kill('SIGKILL'); } catch { r(); } setTimeout(r, 5000); });
+};
+/** the face the page's words are drawn in — Chrome's own answer: CSS.getPlatformFontsForNode on a probe that inherits the body's font */
+const pageFace = async () => {
+  try {
+    await evalJs(`(() => { const p = document.createElement('span'); p.id = 'ds-face-probe'; p.style.cssText = 'position:fixed;left:0;top:0;opacity:0;pointer-events:none'; p.textContent = 'Make the refund retry'; document.body.appendChild(p); p.getBoundingClientRect(); return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(1)))); })()`); // laid out and drawn before Chrome is asked
+    await cdp('DOM.enable'); await cdp('CSS.enable');
+    const { root } = await cdp('DOM.getDocument', { depth: 0 });
+    const { nodeId } = await cdp('DOM.querySelector', { nodeId: root.nodeId, selector: '#ds-face-probe' });
+    const { fonts } = await cdp('CSS.getPlatformFontsForNode', { nodeId });
+    await evalJs(`document.getElementById('ds-face-probe')?.remove()`);
+    return [...(fonts || [])].sort((a, b) => b.glyphCount - a.glyphCount)[0]?.familyName || null;
+  } catch (e) { return 'unread: ' + e.message; }
+};
+/** one leg of a walk: a throw is a NAMED ✗ with where it threw, and the walk goes on (CI hotfix .358: a TypeError at 951×585
+ *  ended the run — the three viewports after it never reached the log) */
+const step = async (name, fn) => {
+  try { await fn(); } catch (e) { check(`${name}: the leg ran to its end`, false, String((e && e.stack) || e).split('\n').slice(0, 4).join(' | ')); } finally { mutantOn = null; }
+};
 
 // ── the mouse ──
 const mouse = (type, x, y, extra = {}) => cdp('Input.dispatchMouseEvent', { type, x: Math.round(x), y: Math.round(y), button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, ...extra });
 const hover = (x, y) => cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: Math.round(x), y: Math.round(y), button: 'none', buttons: 0 });
-const click = async (p) => { await hover(p.x, p.y); await mouse('mousePressed', p.x, p.y); await sleep(40); await mouse('mouseReleased', p.x, p.y); await sleep(250); };
-const rclick = async (p) => { await hover(p.x, p.y); await mouse('mousePressed', p.x, p.y, { button: 'right', buttons: 2 }); await sleep(40); await mouse('mouseReleased', p.x, p.y, { button: 'right', buttons: 0 }); await sleep(350); };
+/** a press whose target is not on screen is a NAMED ✗ (where it was asked for), never a TypeError that ends the walk */
+const missing = (what) => { const at = (new Error().stack.split('\n')[3] || '').trim().replace(/^.*\//, '').replace(/\)$/, ''); check(`${what} found its target on screen (${at})`, false); return false; };
+const click = async (p) => { if (!p) return missing('a press'); await hover(p.x, p.y); await mouse('mousePressed', p.x, p.y); await sleep(40); await mouse('mouseReleased', p.x, p.y); await sleep(250); return true; };
+const rclick = async (p) => { if (!p) return missing('a right-press'); await hover(p.x, p.y); await mouse('mousePressed', p.x, p.y, { button: 'right', buttons: 2 }); await sleep(40); await mouse('mouseReleased', p.x, p.y, { button: 'right', buttons: 0 }); await sleep(350); };
 const dragTo = async (a, b, steps = 18) => {
+  if (!a || !b) return missing('a drag');
   await hover(a.x, a.y); await mouse('mousePressed', a.x, a.y); await sleep(60);
   for (let i = 1; i <= steps; i++) { await mouse('mouseMoved', a.x + (b.x - a.x) * i / steps, a.y + (b.y - a.y) * i / steps); await sleep(25); }
   await sleep(120); await mouse('mouseReleased', b.x, b.y); await sleep(450);
@@ -257,6 +315,17 @@ const dragTo = async (a, b, steps = 18) => {
 const key = async (k, code, vk) => { await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk }); await sleep(200); };
 const esc = () => key('Escape', 'Escape', 27);
 const centre = (sel, idx = 0) => evalJs(`(() => { const e = document.querySelectorAll(${J(sel)})[${idx}]; if (!e) return null; const r = e.getBoundingClientRect(); return r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; })()`);
+/** press the element `sel` names — not on screen ⇒ a ✗ naming the selector */
+const press = async (sel, idx = 0) => { const p = await centre(sel, idx); if (!p) { check(`a press on ${sel}: it is on screen`, false); return false; } return click(p); };
+/** ⑩ the Desktop door wherever the toolbar's fold put it — the button, or folded, the ⋯'s «Desktop» row (the same command,
+ *  desktop.open; toolbar-fold-model gives it priority 4: an app door, it folds first) */
+const openDesktopDoor = async () => {
+  if (await centre('#btn-desktop')) return (await press('#btn-desktop')) && 'the toolbar';
+  if (!(await centre('#toolbar-more'))) return null;
+  await press('#toolbar-more'); await sleep(300);
+  const row = await evalJs(`(() => { const r = [...document.querySelectorAll('.toolbar-more-menu .context-menu-item')].find((x) => x.textContent.trim() === 'Desktop'); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
+  return row ? (await click(row)) && 'the ⋯ menu' : null;
+};
 
 // ── the page ──
 const device = async (w, h) => {
@@ -313,13 +382,25 @@ const HITS = `(() => { const out = [], seen = new Set(); const EXC = ${J(Object.
   return out; })()`;
 const WIN_BTN_GAPS = `(() => [...document.querySelectorAll('.window .window-controls')].filter((c) => c.getBoundingClientRect().width > 0).flatMap((c) => { const bs = [...c.children].filter((b) => b.getBoundingClientRect().width > 0); return bs.slice(1).map((b, i) => Math.round(b.getBoundingClientRect().left - bs[i].getBoundingClientRect().right)); }))()`;
 
-/** ⑦ the words of a message under its hover buttons: every text line box of the top window's messages vs the buttons */
-const BTN_OVER_TEXT = `(() => { const win = [...document.querySelectorAll('.window')].filter((w) => w.querySelector('.chat-message-list')).sort((a, b) => (+b.style.zIndex || 0) - (+a.style.zIndex || 0))[0]; if (!win) return null; const bad = []; let n = 0;
+/** ⑦ the WORDS of a message under its hover buttons: every word's glyph boxes in the top window's messages vs the buttons.
+ *  A word, not a text node's line box (CI hotfix .358): a user message is pre-wrap, so the space that ends a wrapped line
+ *  HANGS past the content box (CSS Text 3 §4.1.3) — under DejaVu Sans the one after «refund» hung 4 px into the Fork
+ *  button's 2 px margin (the runner's ✗ [639,108,643,641]); an invisible space covers no word. `spaces` counts them, unjudged */
+const BTN_OVER_TEXT = `(() => { const win = [...document.querySelectorAll('.window')].filter((w) => w.querySelector('.chat-message-list')).sort((a, b) => (+b.style.zIndex || 0) - (+a.style.zIndex || 0))[0]; if (!win) return null; const bad = []; let n = 0, spaces = 0;
   for (const m of win.querySelectorAll('.chat-msg')) { const btns = [...m.querySelectorAll(':scope > .chat-open-editor-btn')].map((b) => b.getBoundingClientRect()).filter((r) => r.width > 0); if (!btns.length) continue; n++;
     const text = m.querySelector('.chat-text'); if (!text) continue; const tw = document.createTreeWalker(text, NodeFilter.SHOW_TEXT); let node;
-    while ((node = tw.nextNode())) { if (!node.data.trim()) continue; const rg = document.createRange(); rg.selectNodeContents(node);
-      for (const lr of rg.getClientRects()) { if (lr.width < 1) continue; for (const br of btns) { if (lr.left < br.right - 0.5 && lr.right > br.left + 0.5 && lr.top < br.bottom - 0.5 && lr.bottom > br.top + 0.5) { bad.push([Math.round(lr.left), Math.round(lr.top), Math.round(lr.right), Math.round(br.left), node.data.slice(0, 16)]); break; } } } } }
-  return { messages: n, bad: bad.slice(0, 6) }; })()`;
+    const under = (rg) => [...rg.getClientRects()].find((lr) => lr.width >= 1 && btns.some((br) => lr.left < br.right - 0.5 && lr.right > br.left + 0.5 && lr.top < br.bottom - 0.5 && lr.bottom > br.top + 0.5));
+    while ((node = tw.nextNode())) { for (const mt of node.data.matchAll(/\\S+|\\s+/g)) { const rg = document.createRange(); rg.setStart(node, mt.index); rg.setEnd(node, mt.index + mt[0].length); const lr = under(rg); if (!lr) continue;
+      if (!mt[0].trim()) { spaces++; continue; } const br = btns.find((b) => lr.left < b.right - 0.5 && lr.right > b.left + 0.5); bad.push([Math.round(lr.left), Math.round(lr.top), Math.round(lr.right), Math.round(br ? br.left : 0), mt[0].slice(0, 16)]); } } }
+  return { messages: n, bad: bad.slice(0, 6), spaces }; })()`;
+/** ⑦ a chat window 420 px wide, its first reply hovered — the word measure */
+const hoverWords = async (id) => {
+  await evalJs(`app.wm.resizeWindowTo(${J(id)}, { w: 420, h: 420 })`); await sleep(400);
+  const m = await evalJs(`(() => { const w = app.wm.windows.get(${J(id)}).element; const msg = w.querySelector('.chat-msg-assistant'); if (!msg) return null; const r = msg.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + 10 }; })()`);
+  if (!m) return null;
+  await hover(m.x, m.y); await sleep(300);
+  return evalJs(BTN_OVER_TEXT);
+};
 
 const STRIP = `(() => { const s = document.getElementById('taskbar-items'); const sr = s.getBoundingClientRect(); const tiles = [...s.querySelectorAll(':scope > .taskbar-item')];
   const rows = tiles.map((t) => { const r = t.getBoundingClientRect(); const whole = r.left >= sr.left - 0.5 && r.right <= sr.right + 0.5; const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { id: t.dataset.winId, w: Math.round(r.width), whole, hits: !!h && t.contains(h) }; });
@@ -381,11 +462,13 @@ const legNarrowChat = async () => {
   return { id, narrow, short };
 };
 
-const runViewport = async ([VW, VH]) => {
-  const tag = `${VW}x${VH}`;
-  console.log(`\n═══ ${tag} (mouse, sidebar open) ═══`);
+const runViewport = async ([VW, VH], font) => {
+  const tag = font === 'dejavu' ? `${VW}x${VH}-DejaVu` : `${VW}x${VH}`;
   pageErrors.length = 0;
   await load(VW, VH);
+  const face = await pageFace();
+  console.log(`\n═══ ${tag} (mouse, sidebar open — the words in ${face}) ═══`);
+  if (font === 'dejavu') check(`${tag}: the DejaVu leg draws the page in DejaVu Sans (Chrome's own answer: ${face})`, face === 'DejaVu Sans', face);
   await closeAll();
   await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
   await attach(0); await attach(1);
@@ -406,7 +489,7 @@ const runViewport = async ([VW, VH]) => {
   check(`⑤ ${tag}: the rail's last item ends inside the viewport (${rail.last} ≤ ${rail.vh}) and #sidebar does not scroll as a whole`, rail.last <= rail.vh + 0.5 && rail.sb[0] <= rail.sb[1] + 1, rail);
 
   console.log(`— ⑧ the 24 px mouse target (${tag})`);
-  {
+  await step(`${tag} ⑧ the 24 px mouse target`, async () => {
     const card = await centre('.session-item-card');
     if (card) { await hover(card.x, card.y); await sleep(250); }
     await evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'chat'); const m = w && w.element.querySelector('.chat-msg-assistant .chat-pre-wrap'); if (m) { const r = m.getBoundingClientRect(); window.__preAt = { x: r.left + r.width / 2, y: r.top + 8 }; } return 1; })()`);
@@ -424,10 +507,10 @@ const runViewport = async ([VW, VH]) => {
     const gaps = await evalJs(WIN_BTN_GAPS);
     check(`⑧ ${tag}: the window buttons stand ≥ 4 px apart (${[...new Set(gaps)].join(', ')} px)`, gaps.length > 0 && gaps.every((g) => g >= 4), gaps);
     await evalJs(`document.querySelectorAll('#global-toasts').forEach((t) => t.remove())`);
-  }
+  });
 
   console.log(`— ⑦ the chat window (${tag})`);
-  {
+  await step(`${tag} ⑦ the chat window`, async () => {
     const c = await legNarrowChat();
     check(`⑦ ${tag}: a ${c.narrow.w} px chat window keeps its status bar ONE row (${c.narrow.rows} row, ${c.narrow.bar} px ≤ 28) with ⋯ for the rest (P2-4)`, c.narrow.rows === 1 && c.narrow.bar <= 28 && c.narrow.more, c.narrow);
     await evalJs(`app.wm.resizeWindowTo(${J(c.id)}, { w: 360, h: 420 })`); await sleep(500);
@@ -436,15 +519,12 @@ const runViewport = async ([VW, VH]) => {
     const opened = await evalJs(`(() => { const bar = app.wm.windows.get(${J(c.id)}).element.querySelector('.chat-status-bar'); return { open: bar.classList.contains('chat-status-open'), folded: bar.querySelectorAll(':scope > .chat-status-folded').length, model: !!bar.querySelector('.chat-status-model') && bar.querySelector('.chat-status-model').getBoundingClientRect().width > 0 }; })()`);
     check(`⑦ ${tag}: ⋯ opens the bar in place — every chip shown again`, opened.open && opened.folded === 0 && opened.model, opened);
     check(`⑦ ${tag}: a ${c.short.h} px high chat window keeps ≥ 45 % of itself for messages (${Math.round(c.short.share * 100)} %, ${c.short.list} px)`, c.short.share >= 0.45, c.short);
-    await evalJs(`app.wm.resizeWindowTo(${J(c.id)}, { w: 420, h: 420 })`); await sleep(400);
-    const m = await evalJs(`(() => { const w = app.wm.windows.get(${J(c.id)}).element; const msg = w.querySelector('.chat-msg-assistant'); const r = msg.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + 10 }; })()`);
-    await hover(m.x, m.y); await sleep(300);
-    const over = await evalJs(BTN_OVER_TEXT);
-    check(`⑦ ${tag}: the Open in editor / Fork buttons never stand on a message's words (${over && over.messages} messages with buttons, hovered) (P2-5)`, !!over && over.messages > 0 && over.bad.length === 0, over);
-  }
+    const over = await hoverWords(c.id);
+    check(`⑦ ${tag}: the Open in editor / Fork buttons never stand on a message's words (${over && over.messages} messages with buttons, hovered; ${over && over.spaces} hanging spaces under one — no word) (P2-5)`, !!over && over.messages > 0 && over.bad.length === 0, over);
+  });
 
   console.log(`— ③ menus inside the screen (${tag})`);
-  {
+  await step(`${tag} ③ menus inside the screen`, async () => {
     const t = await legTitleMenu();
     check(`③ ${tag}: the title-bar menu of a lower-row chat window (right-clicked at y ${Math.round(t.at.y)}) lies inside the viewport, its first row at y ${t.m && t.m.firstTop} ≥ 0, «Move» takes a press (P2-3)`, !!t.m && t.m.inside && t.m.firstTop >= 0 && t.m.moveHit, t.m);
     const chip = await evalJs(`(() => { const ws = [...document.querySelectorAll('.window')].filter((w) => w.querySelector('.chat-status-model') && w.offsetWidth).sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top); const c = ws[0] && ws[0].querySelector('.chat-status-model'); if (!c) return null; const r = c.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
@@ -456,10 +536,10 @@ const runViewport = async ([VW, VH]) => {
     }
     const wl = await centre('#taskbar-status');
     if (wl) { await click(wl); await sleep(400); const l = await evalJs(INVIEW('.overlap-switcher')); check(`③ ${tag}: the window list lies inside the viewport`, !!l && l.inside && l.scrolls, l); await esc(); }
-  }
+  });
 
   console.log(`— ① the release never buries a window (${tag})`);
-  {
+  await step(`${tag} ① the release never buries a window`, async () => {
     const d = await legDragOverTaskbar(tag);
     check(`① ${tag}: Quad — a title bar released over the taskbar keeps ${d.after.bar[0]}×${d.after.bar[1]} of it inside the workspace (≥ 80×32) (P2-1)`, reachableBar(d.after), d.after);
     check(`① ${tag}: …and its tile, clicked twice, leaves it reachable (${d.afterTiles.bar[0]}×${d.afterTiles.bar[1]})`, reachableBar(d.afterTiles) && !d.afterTiles.min, d.afterTiles);
@@ -487,10 +567,10 @@ const runViewport = async ([VW, VH]) => {
     check(`④ ${tag}: after the viewport shrank and grew back, the brand is still whole or not drawn (the fold's last pass ran before the title settled — the title re-judges its own box)`, !brand || !brand.drawn || brand.sw <= brand.cw + 1, brand);
     const unreach = (rows) => rows.filter((r) => !(r.bar[0] >= 79.5 && r.bar[1] >= 31.5));
     check(`① ${tag}: the sidebar folded / opened and the viewport shrunk to ${VW - 140}×${VH - 90} and back — every window's title bar keeps ≥ 80×32 inside`, [folded, opened, small, back].every((r) => r.length > 0 && unreach(r).length === 0), { folded: unreach(folded), opened: unreach(opened), small: unreach(small), back: unreach(back) });
-  }
+  });
 
   console.log(`— ② the recovery loop (${tag})`);
-  {
+  await step(`${tag} ② the recovery loop`, async () => {
     const id = (await chatWins())[0];
     const bury = () => evalJs(`(() => { const w = app.wm.windows.get(${J(id)}); w.element.style.top = (document.getElementById('workspace').offsetHeight + 24) + 'px'; app.wm.focusWindow(${J(id)}); return 1; })()`); // what an old layout / another screen leaves
     await bury(); await sleep(200);
@@ -500,15 +580,15 @@ const runViewport = async ([VW, VH]) => {
     const byTile = await evalJs(BOX(id));
     check(`② ${tag}: a buried window (title bar ${buried.bar[0]}×${buried.bar[1]} inside) — its taskbar tile brings its rect INSIDE the workspace (not only raised)`, !reachableBar(buried) && byTile.inside && !byTile.min, { buried, byTile });
     await bury(); await sleep(200);
-    await click(await centre('#taskbar-status')); await sleep(400);
+    await press('#taskbar-status'); await sleep(400);
     const row = await evalJs(`(() => { const rows = [...document.querySelectorAll('.overlap-switcher .overlap-switcher-item')]; const want = app.wm.windows.get(${J(id)}).title; const r = rows.find((x) => x.textContent.includes(want)); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; })()`);
     if (row) await click(row); await sleep(400);
     const byRow = await evalJs(BOX(id));
     check(`② ${tag}: …and its window-list row does too`, !!row && byRow.inside, byRow);
-  }
+  });
 
   console.log(`— ⑥ the taskbar (${tag})`);
-  {
+  await step(`${tag} ⑥ the taskbar`, async () => {
     const t = await legTaskbar();
     const s = t.s0, hidden = s.rows.filter((r) => !r.whole), visibleBad = s.rows.filter((r) => r.whole && !r.hits), narrow = s.rows.filter((r) => r.w < 90);
     check(`⑥ ${tag}: ${s.n} windows — every tile ≥ 90 px (P2-2: 60 px, a 1–2 character label)`, s.n >= 15 && narrow.length === 0, narrow.slice(0, 4));
@@ -526,7 +606,7 @@ const runViewport = async ([VW, VH]) => {
     const picked = await evalJs(`(() => { const t = document.querySelector('.taskbar-item[data-win-id="${pick}"]'), s = document.getElementById('taskbar-items'); const r = t.getBoundingClientRect(), sr = s.getBoundingClientRect(); return { active: app.wm.activeWindowId === ${J(pick)}, whole: r.left >= sr.left - 0.5 && r.right <= sr.right + 0.5 }; })()`);
     check(`⑥ ${tag}: …a row raises its window and brings its tile into the strip`, picked.active && picked.whole, picked);
     // the compact switcher's list switches and adds
-    await click(await centre('.desktop-switch-compact')); await sleep(350);
+    await press('.desktop-switch-compact'); await sleep(350);
     const dl = await evalJs(`(() => { const m = document.querySelector('.desktop-switch-menu'); if (!m) return null; const r = m.getBoundingClientRect(); const rows = [...m.querySelectorAll('.context-menu-item')]; const two = rows.find((x) => x.dataset.desktopId === app.desktopManager.desktops[1].id); const b = two && two.getBoundingClientRect(); return { rows: rows.length, inside: r.top >= -0.5 && r.bottom <= innerHeight + 0.5 && r.left >= -0.5 && r.right <= innerWidth + 0.5, two: b ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null }; })()`);
     check(`⑥ ${tag}: the button's list holds the 8 desktops + «Add desktop», inside the viewport`, !!dl && dl.rows === 9 && dl.inside, dl);
     if (dl && dl.two) await click(dl.two); await sleep(700);
@@ -536,7 +616,7 @@ const runViewport = async ([VW, VH]) => {
     await shot(`${tag}-p22-taskbar.png`);
 
     console.log(`— ⑨ the toast (${tag})`);
-    await click(await centre('.desktop-switch-compact')); await sleep(350);
+    await press('.desktop-switch-compact'); await sleep(350);
     await evalJs(`(() => { const c = [...app.wm.windows.values()].find((w) => w.type === 'chat' && !w._hiddenByDesktop); app.wm.requestClose(c.id); return 1; })()`); await sleep(700);
     const tm = await evalJs(`(() => { const m = document.querySelector('.desktop-switch-menu'), toasts = [...document.querySelectorAll('#global-toasts .global-toast')]; if (!m || !toasts.length) return { menu: !!m, toasts: toasts.length }; const meets = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top; const mr = m.getBoundingClientRect(); const comps = [...document.querySelectorAll('.chat-input-area')].map((c) => c.getBoundingClientRect()).filter((r) => r.width > 0);
       const rows = [...m.querySelectorAll('.context-menu-item')].map((x) => { const r = x.getBoundingClientRect(); const h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!h && x.contains(h); });
@@ -546,22 +626,24 @@ const runViewport = async ([VW, VH]) => {
     await shot(`${tag}-toast-menu.png`);
     await esc();
     await evalJs(`(() => { const dm = app.desktopManager; for (const d of dm.desktops.slice(1)) dm.deleteDesktop(d.id); return dm.desktops.length; })()`).catch(() => 0); await sleep(500);
-  }
+  });
 
   console.log(`— ⑪ the cascade (${tag})`);
-  {
+  await step(`${tag} ⑪ the cascade`, async () => {
     await closeAll(); await layout('freeform');
     for (let i = 0; i < 3; i++) { await evalJs(`(() => { app.openFileExplorer(${J(CWD)}); return 1; })()`); await sleep(450); }
     const vis = await evalJs(`(() => [...app.wm.windows.values()].map((w) => { const tb = w.titleBar.getBoundingClientRect(); let v = 0, a = 0; for (let x = tb.left + 3; x < tb.right - 3; x += 6) for (let y = tb.top + 4; y < tb.bottom - 2; y += 6) { a++; const h = document.elementFromPoint(x, y); if (h && w.element.contains(h)) v++; } return Math.round(100 * v / Math.max(1, a)); }))()`);
     check(`⑪ ${tag}: three windows opened on an empty desktop keep ≥ 80 % of each title bar visible (${vis.join(' / ')} %) — the cascade buries none`, vis.length === 3 && vis.every((v) => v >= 80), vis);
     await shot(`${tag}-cascade.png`);
-  }
+  });
 
   console.log(`— ⑩ the Desktop popover (${tag})`);
-  {
+  await step(`${tag} ⑩ the Desktop popover`, async () => {
     await closeAll();
     await evalJs(`(() => { app._vncSeat = 'wayland'; app.openBrowser(${J(ORIGIN + '/fonts.css')}); return 1; })()`); await sleep(1500);
-    await click(await centre('#btn-desktop')); await sleep(800);
+    let vnc = null; try { vnc = await (await fetch(`${ORIGIN}/api/vnc/status`)).json(); } catch { }
+    const door = await openDesktopDoor(); await sleep(800);
+    check(`⑩ ${tag}: the hub offers the Desktop (/api/vnc/status available — the stub Xtigervnc) and its door takes the press (${door || 'no door'})`, !!vnc && vnc.available === true && !!door, { vnc, door });
     const p = await evalJs(`(() => { const b = document.querySelector('.desktop-picker'); if (!b) return null; const r = b.getBoundingClientRect(); return { notes: [...b.querySelectorAll('.desktop-picker-row .desktop-picker-note')].map((n) => n.textContent.trim()), inside: r.left >= -0.5 && r.top >= -0.5 && r.right <= innerWidth + 0.5 && r.bottom <= innerHeight + 0.5 }; })()`);
     check(`⑩ ${tag}: the Desktop popover lies inside the viewport and the local row's note is a whole sentence ending with a period (P3-1 — it stopped at «the virtual desktop can»)`, !!p && p.inside && p.notes.length > 0 && p.notes.every((n) => /[.。]$/.test(n)), p);
     const fr = await evalJs(`(() => { const f = [...document.querySelectorAll('.window iframe')].find((x) => x.offsetWidth > 0 && getComputedStyle(x).display !== 'none'); if (!f) return null; const r = f.getBoundingClientRect(); return { x: r.left + Math.min(220, r.width / 2), y: r.top + Math.min(140, r.height / 2) }; })()`);
@@ -573,22 +655,44 @@ const runViewport = async ([VW, VH]) => {
     await esc(); await sleep(250);
     const floats = await evalJs(`({ left: document.querySelectorAll('[data-popover]').length, active: document.activeElement && document.activeElement.tagName })`);
     check(`⑩ ${tag}: Escape pressed while the same-origin frame holds the keyboard closes every [data-popover] float (${floats.left} left)`, floats.left === 0 && floats.active === 'IFRAME', floats);
-  }
+  });
 
   console.log(`— P3-3 the Settings window (${tag})`);
-  {
+  await step(`${tag} P3-3 the Settings window`, async () => {
     await closeAll();
     await evalJs(`(() => { app._settingsUI.open(); return 1; })()`); await sleep(1500);
     await evalJs(`(() => { const c = document.querySelector('.settings-content'); if (c) c.scrollTop = c.scrollHeight; return 1; })()`); await sleep(400);
     const st = await evalJs(`(() => { const n = document.querySelector('.settings-nav'), c = document.querySelector('.settings-content'), f = document.querySelector('.settings-foot'), w = n && n.closest('.window'); if (!n || !c) return null; const fr = f && f.getBoundingClientRect(), wr = w && w.getBoundingClientRect(), nr = n.getBoundingClientRect(); return { scrolled: c.scrollTop > 1000, navInWindow: !!wr && nr.top >= wr.top && nr.top < wr.top + 140, foot: !!f && fr.height > 0 && !!wr && fr.bottom <= wr.bottom + 0.5 && fr.top >= wr.top, text: f && f.textContent }; })()`);
     check(`P3-3 ${tag}: with the content scrolled to its end the nav still stands at the top of its column and the window's foot says the save rule`, !!st && st.scrolled && st.navInWindow && st.foot && /saves as you make it/.test(st.text || ''), st);
     await closeAll();
-  }
+  });
 
   check(`⑫ ${tag}: zero page errors`, pageErrors.length === 0, pageErrors.slice(0, 4));
 };
 
-for (const vp of VIEWPORTS) await runViewport(vp);
+/** RED CONTROLS ⑧ ⑦ (CI hotfix .358, the DejaVu leg), each an injected rule taken away again: ⑧ the New Session switches'
+ *  min-height gone ⇒ the census finds them under 24 px (DejaVu Sans' line box — the runner's 22); ⑦ the words' right padding
+ *  gone ⇒ the word measure sees words under the buttons; the rule removed, the same screen passes */
+const inject = (id, css) => evalJs(`(() => { const st = document.createElement('style'); st.id = ${J(id)}; st.textContent = ${J(css)}; document.head.appendChild(st); return 1; })()`);
+const legRedFont = async () => {
+  console.log('\n═══ RED CONTROLS ⑧ ⑦ — the switches\' min-height / the words\' right padding taken away (injected rules), 951×585, DejaVu ═══');
+  await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+  await inject('ds-red8', '.ns-seg button { min-height: 0 !important; }');
+  await evalJs(`(() => { app.showNewSessionDialog(); return 1; })()`); await sleep(700);
+  const red8 = await evalJs(HITS);
+  await evalJs(`document.getElementById('ds-red8')?.remove()`); await sleep(250);
+  const back8 = await evalJs(HITS);
+  await esc(); await sleep(300);
+  check(`RED ⑧: the New Session switches without their min-height — the census finds them under 24 px in DejaVu Sans (${red8.filter((k) => /×2[0-3]$/.test(k)).length})`, red8.some((k) => /×2[0-3]$/.test(k)), red8);
+  check('CONTROL ⑧: the min-height back — the same dialog, no target under 24 px', back8.length === 0, back8);
+  const c = await legNarrowChat();
+  await inject('ds-red7', '.chat-msg .chat-text { padding-right: 0 !important; }');
+  const red = await hoverWords(c.id);
+  await evalJs(`document.getElementById('ds-red7')?.remove()`); await sleep(250);
+  const back = await hoverWords(c.id);
+  check(`RED ⑦: the words' right padding taken away — words under the Open in editor / Fork buttons (${red && red.bad.length})`, !!red && red.messages > 0 && red.bad.length > 0, red);
+  check('CONTROL ⑦: the padding back — the same window, no word under them', !!back && back.messages > 0 && back.bad.length === 0, back);
+};
 
 // ═════════════════════════════ acceptance r2 — the compact form's doors, the «+N» tail, the resize (951×585) ═════════════════════════════
 /** A SECOND CLIENT of the same hub (⑬: a row's Move down must reach another screen — layout-sync): its own page target and
@@ -823,94 +927,113 @@ const legRenameCancel = async () => {
   return { name0, menu: !!ren, dialog, ...(await evalJs(`({ name: app.desktopManager.desktops[0].name, list: !!document.querySelector('.desktop-switch-menu'), menus: document.querySelectorAll('.context-menu').length, open: [...document.querySelectorAll('.dialog-footer .btn-cancel')].some((x) => x.getBoundingClientRect().width > 0) })`)) };
 };
 
-console.log('\n═══ acceptance r2 — the compact form\'s doors, the «+N» list\'s tail, the resize\'s release (951×585) ═══');
-{
-  pageErrors.length = 0;
-  await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
-  const z = await legResizeTop();
-  check(`⑮ r2: a north edge dragged past the workspace's top — the title bar keeps ≥ 32 px inside (bar ${z.after && J(z.after.bar)})`, !!z.handle && reachableBar(z.after), z);
-  const t = await legTail();
-  check(`⑭ r2: 26 windows («${t.chip}») — the «+N» list stands inside the viewport, capped and scrolling (${t.l0 && t.l0.n} rows)`, /^\+\d+$/.test(t.chip || '') && +t.chip.slice(1) >= 18 && !!t.l0 && t.l0.inside && t.l0.scrolls, t);
-  check('⑭ r2: …the wheel brings its LAST row in, and that row takes the click (its window raised)', !!t.l1 && t.l1.lastHit && t.picked, { l1: t.l1, picked: t.picked });
-  const d = await legDoors(false);
-  check(`⑬ r2: 8 desktops — the button names the desktop on show («${d.button0}»); a row's right-click opens its doors (${J(d.rowMenu)})`, d.button0 === d.name0 + ' 1/8' && J(d.rowMenu) === J(['Rename…', 'Delete', 'Move down']), { button0: d.button0, rowMenu: d.rowMenu });
-  check(`⑬ r2: …Rename… ⇒ the new name on the row (the list back) and on the button (${J(d.renamed)})`, !!d.renamed && d.renamed.name === 'Taxes' && d.renamed.row === 'Taxes' && d.renamed.button === 'Taxes 1/8', d.renamed);
-  check(`⑬ r2: …a row's ⋯ (${d.more && d.more.w + '×' + d.more.h}) → Delete ⇒ N−1 (${J(d.deleted)})`, !!d.more && d.more.w >= 24 && d.more.h >= 24 && d.deleted.n === 7 && d.deleted.rows === 7 && d.deleted.button === 'Taxes 1/7', { more: d.more, deleted: d.deleted });
-  check('⑬ r2: …a title-bar drag held on the button springs the list open; released on a row, the window is on that desktop (this screen stays) and the list closes', d.sprang && d.moved.on && d.moved.stayed && !d.moved.list, { sprang: d.sprang, moved: d.moved });
-  check(`⑬ r2: …on that desktop the window shows with its title bar reachable (bar ${d.there && J(d.there.bar)})`, d.shown && reachableBar(d.there), { shown: d.shown, there: d.there });
-  check('⑬ r2: …a row\'s Move down reorders — and ANOTHER client of the hub follows (layout-sync)', d.wantOrder && Array.isArray(d.other) && J(d.other) === J(d.order), { order: d.order, other: d.other });
-  check('⑫ r2: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
-}
+const acceptanceAndControls = async () => {
+  console.log('\n═══ acceptance r2 — the compact form\'s doors, the «+N» list\'s tail, the resize\'s release (951×585) ═══');
+  await step('acceptance r2', async () => {
+    pageErrors.length = 0;
+    await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+    const z = await legResizeTop();
+    check(`⑮ r2: a north edge dragged past the workspace's top — the title bar keeps ≥ 32 px inside (bar ${z.after && J(z.after.bar)})`, !!z.handle && reachableBar(z.after), z);
+    const t = await legTail();
+    check(`⑭ r2: 26 windows («${t.chip}») — the «+N» list stands inside the viewport, capped and scrolling (${t.l0 && t.l0.n} rows)`, /^\+\d+$/.test(t.chip || '') && +t.chip.slice(1) >= 18 && !!t.l0 && t.l0.inside && t.l0.scrolls, t);
+    check('⑭ r2: …the wheel brings its LAST row in, and that row takes the click (its window raised)', !!t.l1 && t.l1.lastHit && t.picked, { l1: t.l1, picked: t.picked });
+    const d = await legDoors(false);
+    check(`⑬ r2: 8 desktops — the button names the desktop on show («${d.button0}»); a row's right-click opens its doors (${J(d.rowMenu)})`, d.button0 === d.name0 + ' 1/8' && J(d.rowMenu) === J(['Rename…', 'Delete', 'Move down']), { button0: d.button0, rowMenu: d.rowMenu });
+    check(`⑬ r2: …Rename… ⇒ the new name on the row (the list back) and on the button (${J(d.renamed)})`, !!d.renamed && d.renamed.name === 'Taxes' && d.renamed.row === 'Taxes' && d.renamed.button === 'Taxes 1/8', d.renamed);
+    check(`⑬ r2: …a row's ⋯ (${d.more && d.more.w + '×' + d.more.h}) → Delete ⇒ N−1 (${J(d.deleted)})`, !!d.more && d.more.w >= 24 && d.more.h >= 24 && d.deleted.n === 7 && d.deleted.rows === 7 && d.deleted.button === 'Taxes 1/7', { more: d.more, deleted: d.deleted });
+    check('⑬ r2: …a title-bar drag held on the button springs the list open; released on a row, the window is on that desktop (this screen stays) and the list closes', d.sprang && d.moved.on && d.moved.stayed && !d.moved.list, { sprang: d.sprang, moved: d.moved });
+    check(`⑬ r2: …on that desktop the window shows with its title bar reachable (bar ${d.there && J(d.there.bar)})`, d.shown && reachableBar(d.there), { shown: d.shown, there: d.there });
+    check('⑬ r2: …a row\'s Move down reorders — and ANOTHER client of the hub follows (layout-sync)', d.wantOrder && Array.isArray(d.other) && J(d.other) === J(d.order), { order: d.order, other: d.other });
+    check('⑫ r2: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
+  });
 
-console.log('\n═══ acceptance r3 — the spring on the REAL HTML5 road, a stale row, a cancelled Rename… (951×585) ═══');
-{
-  pageErrors.length = 0;
-  await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
-  const h = await legSpringHtml5();
-  check('⑯ r3: a taskbar tile\'s drag is Chrome\'s OWN HTML5 drag (intercepted, its data the window\'s id)', h.btn && h.intercepted, { btn: h.btn, intercepted: h.intercepted });
-  check('⑯ r3: …~100 ms across the button, off it, Esc ⇒ no list ever (right after, 0.6 s, 2.1 s), no timer, no ref, no listener', Array.isArray(h.passCancel) && h.passCancel.length === 3 && h.passCancel.every(springIdle), h.passCancel);
-  check('⑯ r3: …the same dropped back on the strip ⇒ no list ever, no timer', Array.isArray(h.passDrop) && h.passDrop.every(springIdle), h.passDrop);
-  check('⑯ r3: …held ≥ 350 ms the list springs; off the button and the list it closes (the title-bar road\'s rule); dropped away ⇒ closed, no timer, no ref, no listener', !!h.holdAway && h.holdAway.opened.list && !h.holdAway.off.list && springIdle(h.holdAway.after), h.holdAway);
-  check('⑯ r3: …held, then Esc ⇒ closed, no timer, no ref, no listener', !!h.holdEsc && h.holdEsc.opened.list && springIdle(h.holdEsc.after), h.holdEsc);
-  check('⑯ r3: …held, dropped on a row ⇒ the window on that desktop (this screen stays), the list and its ref gone', !!h.rowDrop && h.rowDrop.row && h.rowDrop.on4 && h.rowDrop.stayed && springIdle(h.rowDrop.st), h.rowDrop);
-  const st = await legStaleRow();
-  check(`⑰ r3: a title-bar drag released on a STALE row (its desktop deleted on another client) — refused by name, the window stays here, on show, reachable (${st.pointer && J(st.pointer.toast)})`, staleOk(st.pointer, st.pointer && st.pointer.name), st.pointer);
-  check('⑰ r3: …a taskbar tile dropped on a stale row — the same', !!st.html5 && st.html5.dragged && staleOk(st.html5, st.html5.name), st.html5);
-  const rc = await legRenameCancel();
-  check('⑱ r3: a row\'s Rename… cancelled ⇒ nothing comes back — no list, no menu, no dialog, the name kept', rc.menu && rc.dialog && !rc.list && rc.menus === 0 && !rc.open && rc.name === rc.name0, rc);
-  check('⑫ r3: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
-}
+  console.log('\n═══ acceptance r3 — the spring on the REAL HTML5 road, a stale row, a cancelled Rename… (951×585) ═══');
+  await step('acceptance r3', async () => {
+    pageErrors.length = 0;
+    await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+    const h = await legSpringHtml5();
+    check('⑯ r3: a taskbar tile\'s drag is Chrome\'s OWN HTML5 drag (intercepted, its data the window\'s id)', h.btn && h.intercepted, { btn: h.btn, intercepted: h.intercepted });
+    check('⑯ r3: …~100 ms across the button, off it, Esc ⇒ no list ever (right after, 0.6 s, 2.1 s), no timer, no ref, no listener', Array.isArray(h.passCancel) && h.passCancel.length === 3 && h.passCancel.every(springIdle), h.passCancel);
+    check('⑯ r3: …the same dropped back on the strip ⇒ no list ever, no timer', Array.isArray(h.passDrop) && h.passDrop.every(springIdle), h.passDrop);
+    check('⑯ r3: …held ≥ 350 ms the list springs; off the button and the list it closes (the title-bar road\'s rule); dropped away ⇒ closed, no timer, no ref, no listener', !!h.holdAway && h.holdAway.opened.list && !h.holdAway.off.list && springIdle(h.holdAway.after), h.holdAway);
+    check('⑯ r3: …held, then Esc ⇒ closed, no timer, no ref, no listener', !!h.holdEsc && h.holdEsc.opened.list && springIdle(h.holdEsc.after), h.holdEsc);
+    check('⑯ r3: …held, dropped on a row ⇒ the window on that desktop (this screen stays), the list and its ref gone', !!h.rowDrop && h.rowDrop.row && h.rowDrop.on4 && h.rowDrop.stayed && springIdle(h.rowDrop.st), h.rowDrop);
+    const st = await legStaleRow();
+    check(`⑰ r3: a title-bar drag released on a STALE row (its desktop deleted on another client) — refused by name, the window stays here, on show, reachable (${st.pointer && J(st.pointer.toast)})`, staleOk(st.pointer, st.pointer && st.pointer.name), st.pointer);
+    check('⑰ r3: …a taskbar tile dropped on a stale row — the same', !!st.html5 && st.html5.dragged && staleOk(st.html5, st.html5.name), st.html5);
+    const rc = await legRenameCancel();
+    check('⑱ r3: a row\'s Rename… cancelled ⇒ nothing comes back — no list, no menu, no dialog, the name kept', rc.menu && rc.dialog && !rc.list && rc.menus === 0 && !rc.open && rc.name === rc.name0, rc);
+    check('⑫ r3: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
+  });
 
-// ═════════════════════════════════════════ THE RED CONTROL (1024×600) ═════════════════════════════════════════
-console.log('\n═══ RED CONTROL — the base\'s rules put back (one esbuild of this tree + the base\'s CSS lines), 1024×600 ═══');
-{
-  mutantOn = MUTANT;
-  await load(1024, 600); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
-  const d = await legDragOverTaskbar('RED');
-  check('RED P2-1: Quad — a title bar released over the taskbar is BURIED (under 80×32 of it inside)', !reachableBar(d.after), d.after);
-  check('RED P2-1: …and its tile, clicked twice, leaves it buried', !reachableBar(d.afterTiles), d.afterTiles);
-  const t = await legTaskbar();
-  check('RED P2-2: 15 windows — no «+N» chip, 60 px tiles, the wheel inert, 8 desktops piled as previews', !t.s0.chip && t.s0.rows.some((r) => r.w < 90) && t.s1.scroll[0] === t.s0.scroll[0] && t.s8.compact === null && t.s8.previews === 8, { chip: t.s0.chip, w: t.s0.rows.slice(0, 2), scroll: [t.s0.scroll[0], t.s1.scroll[0]], compact: t.s8.compact, previews: t.s8.previews });
-  await evalJs(`(() => { const dm = app.desktopManager; for (const x of dm.desktops.slice(1)) dm.deleteDesktop(x.id); return 1; })()`).catch(() => 0); await sleep(500);
-  const m = await legTitleMenu();
-  check('RED P2-3: the lower-row title menu runs off the top (first row at y < 0)', !!m.m && m.m.firstTop < 0, m.m);
-  const c = await legNarrowChat();
-  check('RED P2-4: a 360 px chat window wraps its bar (more than one row) and a 250 px high one keeps under 45 % for messages', c.narrow.rows > 1 && c.short.share < 0.45, { narrow: c.narrow, short: c.short });
-  mutantOn = null;
-  // the fix, not the reload: the real bundle back, the same legs pass
-  await load(1024, 600); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
-  const d2 = await legDragOverTaskbar('RED-back');
-  const m2 = await legTitleMenu();
-  const c2 = await legNarrowChat();
-  check('CONTROL: the real bundle back — the same legs pass (the release reachable, the menu inside, the bar one row)', reachableBar(d2.after) && !!m2.m && m2.m.firstTop >= 0 && c2.narrow.rows === 1, { d: d2.after, m: m2.m, c: c2.narrow });
-}
+  // ═════════════════════════════════════════ THE RED CONTROL (1024×600) ═════════════════════════════════════════
+  console.log('\n═══ RED CONTROL — the base\'s rules put back (one esbuild of this tree + the base\'s CSS lines), 1024×600 ═══');
+  await step('RED CONTROL', async () => {
+    mutantOn = MUTANT;
+    await load(1024, 600); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+    const d = await legDragOverTaskbar('RED');
+    check('RED P2-1: Quad — a title bar released over the taskbar is BURIED (under 80×32 of it inside)', !reachableBar(d.after), d.after);
+    check('RED P2-1: …and its tile, clicked twice, leaves it buried', !reachableBar(d.afterTiles), d.afterTiles);
+    const t = await legTaskbar();
+    check('RED P2-2: 15 windows — no «+N» chip, 60 px tiles, the wheel inert, 8 desktops piled as previews', !t.s0.chip && t.s0.rows.some((r) => r.w < 90) && t.s1.scroll[0] === t.s0.scroll[0] && t.s8.compact === null && t.s8.previews === 8, { chip: t.s0.chip, w: t.s0.rows.slice(0, 2), scroll: [t.s0.scroll[0], t.s1.scroll[0]], compact: t.s8.compact, previews: t.s8.previews });
+    await evalJs(`(() => { const dm = app.desktopManager; for (const x of dm.desktops.slice(1)) dm.deleteDesktop(x.id); return 1; })()`).catch(() => 0); await sleep(500);
+    const m = await legTitleMenu();
+    check('RED P2-3: the lower-row title menu runs off the top (first row at y < 0)', !!m.m && m.m.firstTop < 0, m.m);
+    const c = await legNarrowChat();
+    check('RED P2-4: a 360 px chat window wraps its bar (more than one row) and a 250 px high one keeps under 45 % for messages', c.narrow.rows > 1 && c.short.share < 0.45, { narrow: c.narrow, short: c.short });
+    mutantOn = null;
+    // the fix, not the reload: the real bundle back, the same legs pass
+    await load(1024, 600); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+    const d2 = await legDragOverTaskbar('RED-back');
+    const m2 = await legTitleMenu();
+    const c2 = await legNarrowChat();
+    check('CONTROL: the real bundle back — the same legs pass (the release reachable, the menu inside, the bar one row)', reachableBar(d2.after) && !!m2.m && m2.m.firstTop >= 0 && c2.narrow.rows === 1, { d: d2.after, m: m2.m, c: c2.narrow });
+  });
 
-// ═════════════════════════════════════════ THE RED CONTROL r2 (951×585) ═════════════════════════════════════════
-console.log('\n═══ RED CONTROL r2 — the round-1 rules put back (one esbuild of this tree), 951×585 ═══');
-{
-  mutantOn = MUTANT2;
-  await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
-  const z = await legResizeTop();
-  check(`RED r2 ③: no resize release — the north edge past the top lifts the title bar out (bar ${z.after && J(z.after.bar)})`, !!z.handle && !reachableBar(z.after), z);
-  const t = await legTail();
-  check('RED r2 ②: the self-placed «+N» list runs past the viewport, no scroll — its last row out of reach', !!t.l0 && (!t.l0.inside || !t.l0.scrolls) && !(t.l1 && t.l1.lastHit && t.picked), t);
-  const d = await legDoors(true);
-  check('RED r2 ①: a row has no doors (its right-click opens no Rename…, no ⋯ to press, the name and N unchanged) and a title-bar drag held on the button springs nothing — the window stays where it was', !d.rowMenu.includes('Rename…') && !d.more && d.renamed.name === d.name0 && d.deleted.n === 8 && !d.sprang && !d.moved.on && !d.wantOrder, d);
-  mutantOn = null;
-}
+  // ═════════════════════════════════════════ THE RED CONTROL r2 (951×585) ═════════════════════════════════════════
+  console.log('\n═══ RED CONTROL r2 — the round-1 rules put back (one esbuild of this tree), 951×585 ═══');
+  await step('RED CONTROL r2', async () => {
+    mutantOn = MUTANT2;
+    await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+    const z = await legResizeTop();
+    check(`RED r2 ③: no resize release — the north edge past the top lifts the title bar out (bar ${z.after && J(z.after.bar)})`, !!z.handle && !reachableBar(z.after), z);
+    const t = await legTail();
+    check('RED r2 ②: the self-placed «+N» list runs past the viewport, no scroll — its last row out of reach', !!t.l0 && (!t.l0.inside || !t.l0.scrolls) && !(t.l1 && t.l1.lastHit && t.picked), t);
+    const d = await legDoors(true);
+    check('RED r2 ①: a row has no doors (its right-click opens no Rename…, no ⋯ to press, the name and N unchanged) and a title-bar drag held on the button springs nothing — the window stays where it was', !d.rowMenu.includes('Rename…') && !d.more && d.renamed.name === d.name0 && d.deleted.n === 8 && !d.sprang && !d.moved.on && !d.wantOrder, d);
+    mutantOn = null;
+  });
 
-// ═════════════════════════════════════════ THE RED CONTROL r3 (951×585) ═════════════════════════════════════════
-console.log('\n═══ RED CONTROL r3 — round 2\'s rules put back (one esbuild of this tree), 951×585 ═══');
-{
-  mutantOn = MUTANT3;
-  await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
-  const h = await legSpringHtml5();
-  check('RED r3 ①: the HTML5 road never ends the spring — the list springs AFTER a cancelled pass, stays after a drop away, and a row drop orphans its ref', !!h.passCancel && h.passCancel.some((x) => x.list) && !!h.holdAway && h.holdAway.after.list && !!h.rowDrop && h.rowDrop.st.ref && !h.rowDrop.st.refLive, h);
-  const st = await legStaleRow();
-  check('RED r3 ③: a stale row moves the window under the gone desktop\'s id — off every desktop, hidden', !!st.pointer && !st.pointer.known && st.pointer.hidden, st);
-  const rc = await legRenameCancel();
-  check('RED r3 ④: a cancelled Rename… brings the list back', rc.dialog && rc.list, rc);
-  mutantOn = null;
+  // ═════════════════════════════════════════ THE RED CONTROL r3 (951×585) ═════════════════════════════════════════
+  console.log('\n═══ RED CONTROL r3 — round 2\'s rules put back (one esbuild of this tree), 951×585 ═══');
+  await step('RED CONTROL r3', async () => {
+    mutantOn = MUTANT3;
+    await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+    const h = await legSpringHtml5();
+    check('RED r3 ①: the HTML5 road never ends the spring — the list springs AFTER a cancelled pass, stays after a drop away, and a row drop orphans its ref', !!h.passCancel && h.passCancel.some((x) => x.list) && !!h.holdAway && h.holdAway.after.list && !!h.rowDrop && h.rowDrop.st.ref && !h.rowDrop.st.refLive, h);
+    const st = await legStaleRow();
+    check('RED r3 ③: a stale row moves the window under the gone desktop\'s id — off every desktop, hidden', !!st.pointer && !st.pointer.known && st.pointer.hidden, st);
+    const rc = await legRenameCancel();
+    check('RED r3 ④: a cancelled Rename… brings the list back', rc.dialog && rc.list, rc);
+    mutantOn = null;
+  });
+};
+
+// ═════════════════════════════ the font legs (CI hotfix .358): the viewports in DejaVu Sans, then in the box's own face; then DejaVu again — RED ⑦, the acceptance blocks, the RED controls ═════════════════════════════
+for (const [font, part] of [...FONT_LEGS.map((f) => [f, 'the viewports']), [FONT_LEGS[0], 'the RED controls and the acceptance blocks']]) {
+  console.log(`\n▓▓▓ ${font === 'dejavu' ? 'DEJAVU SANS — the hosted runner\'s sans-serif (a scratch fontconfig)' : 'THE BOX\'S OWN FONT'}: ${part} ▓▓▓`);
+  if (!(await startChrome(font))) { check(`the ${font} leg: Chrome exposed a CDP page target`, false); await stopChrome(); continue; }
+  if (part === 'the viewports') {
+    if (font === 'box' && FONT_LEGS.includes('dejavu')) {
+      await load(951, 585); const face = await pageFace();
+      if (face === 'DejaVu Sans') { console.log('  — this box\'s own sans-serif IS DejaVu Sans (the hosted runner): its leg would repeat the DejaVu leg — not run twice'); await stopChrome(); continue; }
+    }
+    for (const vp of VIEWPORTS) await step(`${vp.join('x')} ${font}`, () => runViewport(vp, font));
+  } else {
+    if (font === 'dejavu') await step('RED ⑧ ⑦', legRedFont);
+    await acceptanceAndControls();
+  }
+  await stopChrome();
 }
 
 console.log(`\n${fail ? 'FAIL' : 'ALL PASS'} (${pass} passed, ${fail} failed) — shots in ${SHOTS}`);

@@ -33,6 +33,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The Open in editor and Fork buttons no longer cover the last words of a message's first line.
 - A note no longer covers an open menu or the message box; the Desktop list closes when you click into a web view, and its note is a whole sentence.
 - On a narrow toolbar the VibeSpace name is shown whole or not at all, never cut to «Vibe…».
+- In New Session the Agent | Terminal switch and the backend buttons are at least 24 px tall with any font; with DejaVu Sans they were 22 px.
 - On a phone the back button no longer reloads VibeSpace after the browser put the tab to sleep or VibeSpace was opened again in the same tab.
 - If a back press ever reloads the page again, VibeSpace captures what happened for the admin by itself and tells you.
 - A tab that still runs an older version after its one automatic reload now says so instead of staying silent.
