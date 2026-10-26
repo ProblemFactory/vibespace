@@ -573,9 +573,9 @@ function ownRoad(Vm) {
     ['gh auth -h evil.com login --with-token (a value flag before the 2nd verb word)', R3(['gh', 'auth', '-h', 'evil.com', 'login', '--with-token']), 'ask:once,deny:another-host @?', 'github.com'],
     ['gh --branch=main repo view evil.com/o/r (regressed vs 9e9f ⇒ blind now)', R3(['gh', '--branch=main', 'repo', 'view', 'evil.com/o/r']), 'ask:once,deny:another-host @?', 'github.com'],
     ['gh repo edit -d x evil.com/o/r (flags AFTER the verbs: the spec host is read) => asks @evil', R3(['gh', 'repo', 'edit', '-d', 'x', 'evil.com/o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
-    // item 2 (MAJOR): a verb the table does not carry (not repo-scoped, or unknown) ⇒ BLIND, never ok:own on the defaults
-    ['gh search repos x --owner evil.com (search is not repo-scoped: absent from the table) ⇒ blind', R3(['gh', 'search', 'repos', 'x', '--owner', 'evil.com']), 'ask:once,deny:another-host @?', 'github.com'],
-    ['gh config get x (a no-host verb absent from the table) ⇒ blind', R3(['gh', 'config', 'get', 'x']), 'ask:once,deny:another-host @?', 'github.com'],
+    // item 2 (round 6): an UNKNOWN verb ⇒ BLIND. ROUND 7 (5c): a verb the help PROVES default-host-only (search repos, config get) is listed {default:1} and runs ok:own — only a verb absent from the WHOLE live tree (gh frobnicate, an extension) still blinds
+    ['gh search repos x --owner evil.com (round 7, 5c: default-host-only — --owner is not a host) => allowed', R3(['gh', 'search', 'repos', 'x', '--owner', 'evil.com']), 'ok:own', 'github.com'],
+    ['gh config get x (round 7, 5c: default-host-only) => allowed', R3(['gh', 'config', 'get', 'x']), 'ok:own', 'github.com'],
     ['gh frobnicate x (an unknown verb) ⇒ blind', R3(['gh', 'frobnicate', 'x']), 'ask:once,deny:another-host @?', 'github.com'],
     // item 3 (MAJOR): a repository-TYPEd value / the <name> positional gh parses with FromFullName is a spec (a host when it has one)
     ['gh repo create x --template evil.com/o/r (--template is TYPEd repository) ⇒ asks @evil', R3(['gh', 'repo', 'create', 'x', '--template', 'evil.com/o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
@@ -585,6 +585,23 @@ function ownRoad(Vm) {
     ['gh issue list (default host) => allowed', R3(['gh', 'issue', 'list']), 'ok:own', 'github.com'],
     ['gh pr merge (no git-driving flag, default host) => allowed', R3(['gh', 'pr', 'merge']), 'ok:own', 'github.com'],
     ['gh issue list -R evil.com/o/r (-R AFTER the verb is read) ⇒ asks @evil', R3(['gh', 'issue', 'list', '-R', 'evil.com/o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    // ROUND 7 — BLOCKER 2 (round 6 RECORDED this REFUTED; the reviewers wire-proved it ACCEPTED on gh 2.102.0): the scp-like git@HOST:O/R and ssh/git URLs go-gh's repository.Parse accepts, in a positional AND in -R
+    ['gh repo view git@evil.com:o/r (scp-like positional) ⇒ asks @evil', R3(['gh', 'repo', 'view', 'git@evil.com:o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    ['gh issue view 1 -R git@evil.com:o/r (scp-like -R) ⇒ asks @evil', R3(['gh', 'issue', 'view', '1', '-R', 'git@evil.com:o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    ['gh issue list -R ssh://git@evil.com/o/r (ssh URL, userinfo stripped) ⇒ asks @evil', R3(['gh', 'issue', 'list', '-R', 'ssh://git@evil.com/o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    ['gh repo view evil.com:o/r (colon, NO git@/scheme ⇒ NOT a host: the default) => allowed (control)', R3(['gh', 'repo', 'view', 'evil.com:o/r']), 'ok:own', 'github.com'],
+    // ROUND 7 — MAJOR 3 (a repo gh resolves with FromFullName but TYPEs as string / <destination-repo>): the token went to the DESTINATION host on the wire
+    ['gh issue transfer 1 evil.com/x/y (<destination-repo> = the 2nd positional) ⇒ asks @evil', R3(['gh', 'issue', 'transfer', '1', 'evil.com/x/y']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    ['gh issue develop 1 --branch-repo evil.com/x/y (TYPE string, desc names a repository) ⇒ asks @evil', R3(['gh', 'issue', 'develop', '1', '--branch-repo', 'evil.com/x/y']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    ['gh issue transfer 1 owner/repo (2-part ⇒ default) => allowed (control)', R3(['gh', 'issue', 'transfer', '1', 'owner/repo']), 'ok:own', 'github.com'],
+    // ROUND 7 — 5b (the lead depth is the grammar's longest KEY, not the constant sub:2): a 3-word verb reads its -R host (was a false blind @? under the cap)
+    ['gh repo autolink list -R evil.com/o/r (3-word verb) ⇒ asks @evil', R3(['gh', 'repo', 'autolink', 'list', '-R', 'evil.com/o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    ['gh repo deploy-key list -R evil.com/o/r (3-word verb) ⇒ asks @evil', R3(['gh', 'repo', 'deploy-key', 'list', '-R', 'evil.com/o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    // ROUND 7 — 5c (a verb the help PROVES reaches only the default host runs ok:own, not a FALSE blind — derived, never hand-picked)
+    ['gh gist create f.txt (default-host-only) => allowed', R3(['gh', 'gist', 'create', 'f.txt']), 'ok:own', 'github.com'],
+    ['gh status (default-host-only) => allowed', R3(['gh', 'status']), 'ok:own', 'github.com'],
+    ['gh repo list (default-host-only) => allowed', R3(['gh', 'repo', 'list']), 'ok:own', 'github.com'],
+    ['gh ssh-key list (default-host-only) => allowed', R3(['gh', 'ssh-key', 'list']), 'ok:own', 'github.com'],
   ]) say(`own minted · ${name}`, r2(p, fh), want);
   // fixup 1 — a cert flag whose value IS the vault's own file is not a config (blind stays false)
   say('own minted · curl --cert $VAULT_FILE{...} (the vault file itself) => not blind', Vm.shapeOf(Vm.planOf({ argv: ['curl', '--cert', '$VAULT_FILE{mounts/m1/secretKey}', 'https://good.com/'], env: [['T0', OWN]] })).blind, false);
@@ -599,14 +616,18 @@ function ownRoad(Vm) {
   // m3 — a config-DIR env the agent can write (its --proxy / --verify / a default host) is refused by name, like CURL_HOME / WGETRC
   const envCode = (n) => { const q = Vm.planOf({ argv: ['curl', 'https://good.com/'], env: [['T0', OWN], [n, './x']] }); return q.ok ? 'ok' : q.code; };
   for (const n of ['HTTPIE_CONFIG_DIR', 'GH_CONFIG_DIR', 'MYSQL_HOME', 'PGSYSCONFDIR']) say(`m3: ${n} refused by name`, envCode(n), 'env_refused');
+  // ROUND 7 — MAJOR 4: gh reads GH_BROWSER / GH_EDITOR / GH_PAGER FIRST (program-naming env, DERIVED from `gh help environment` into the gh row's envHijack) — a minted value must not run gh with one set; GH_FORCE_TTY is NOT program-naming (its help names columns) so the derivation correctly does NOT refuse it
+  const ghEnvCode = (n) => { const q = Vm.planOf({ argv: ['gh', 'browse', '-R', 'o/r'], env: [['T0', OWN], [n, '/evil/script']] }); return q.ok ? 'ran' : q.code; };
+  for (const n of ['GH_BROWSER', 'GH_EDITOR', 'GH_PAGER', 'BROWSER', 'EDITOR', 'PAGER', 'VISUAL', 'GIT_EDITOR']) say(`gh env hijack: ${n} refused by name`, ghEnvCode(n), 'env_refused');
+  say('gh env: GH_FORCE_TTY is NOT program-naming (derived out of the hijack list) ⇒ runs', ghEnvCode('GH_FORCE_TTY'), 'ran');
   return bad;
 }
 {
   const bad = ownRoad(V);
-  ok(!bad.length, 'the own road: whose (registered / durable id, a pending fork borrows nothing), own stored ⇒ ok:own everywhere (no card), own minted ⇒ ok:own to its host / under it and ONCE per host elsewhere (both hosts on the card; a pass per entry × host); where the destination cannot be told (a shell, an interpreter, a config file, a routing flag, project code, an unknown or agent-writable program, round 2: a known tool naming no host it can read; a backslash hides no host) ONCE per command shape locally and EVERY run on a cluster (a live «always» passes it); round 2: a host written without a scheme, in host=, attached, in a URI\'s list, gh --hostname is read, the owner\'s entry and a mix ⇒ today\'s road («always» / seen never pass a host), the lock / argv / the floor first; round 3: a curl connection/config-file flag (--alt-svc / --cacert / --hsts / --interface), a conninfo URI\'s percent-decoded query, a network positional that is not a readable target, a gh verb that drives git (pr merge --delete-branch / repo create --push|--clone / extension install), gh api <path> read as a path not a host, httpie --raw as a body (m1), wget --input-metalink as a config (m2), a config-dir env refused (m3); round 4: every gh repo verb whose first positional is a repository reads its host (delete / edit / archive / unarchive / set-default no longer regress), a conninfo URI in a -d / --dbname value (attached / = / GNU prefix) blinds on a percent query, a gh bool flag blinds in every pflag spelling (-dm / -d=true / --delete-branch=true / repo create -c), and the $VAULT_FILE file-flag exception is the whole value for an owner-store entry (a template / an agent-put entry / a substring blinds); round 5: gh\'s flag knowledge is GENERATED per verb from gh\'s own --help (⑤c diffs it against the live gh) — a value flag before the spec no longer hides the host (repo edit -d x evil.com/o/r), the generated table reads skill install / label clone / the auth -h hostname too, and a cluster\'s =value binds to the LAST letter only so an earlier git-driving bool is still set true (gh pr merge -dm=false); round 6: the reader FAILS CLOSED — a dash before the verb words or a verb the table does not carry BLINDS (gh repo -d x edit evil/o/r, gh -R … before the verb, gh search repos, an unknown verb), the table carries EVERY host-reaching verb (the inherited -R, --hostname, a <repository>/<name> positional, a repository-TYPEd value like repo create --template) so the agent own gh stays ok:own (issue list / pr merge / api), and a repository-typed value or the FromFullName <name> positional asks its host (repo create evil/o/r)', bad);
+  ok(!bad.length, 'the own road: whose (registered / durable id, a pending fork borrows nothing), own stored ⇒ ok:own everywhere (no card), own minted ⇒ ok:own to its host / under it and ONCE per host elsewhere (both hosts on the card; a pass per entry × host); where the destination cannot be told (a shell, an interpreter, a config file, a routing flag, project code, an unknown or agent-writable program, round 2: a known tool naming no host it can read; a backslash hides no host) ONCE per command shape locally and EVERY run on a cluster (a live «always» passes it); round 2: a host written without a scheme, in host=, attached, in a URI\'s list, gh --hostname is read, the owner\'s entry and a mix ⇒ today\'s road («always» / seen never pass a host), the lock / argv / the floor first; round 3: a curl connection/config-file flag (--alt-svc / --cacert / --hsts / --interface), a conninfo URI\'s percent-decoded query, a network positional that is not a readable target, a gh verb that drives git (pr merge --delete-branch / repo create --push|--clone / extension install), gh api <path> read as a path not a host, httpie --raw as a body (m1), wget --input-metalink as a config (m2), a config-dir env refused (m3); round 4: every gh repo verb whose first positional is a repository reads its host (delete / edit / archive / unarchive / set-default no longer regress), a conninfo URI in a -d / --dbname value (attached / = / GNU prefix) blinds on a percent query, a gh bool flag blinds in every pflag spelling (-dm / -d=true / --delete-branch=true / repo create -c), and the $VAULT_FILE file-flag exception is the whole value for an owner-store entry (a template / an agent-put entry / a substring blinds); round 5: gh\'s flag knowledge is GENERATED per verb from gh\'s own --help (⑤c diffs it against the live gh) — a value flag before the spec no longer hides the host (repo edit -d x evil.com/o/r), the generated table reads skill install / label clone / the auth -h hostname too, and a cluster\'s =value binds to the LAST letter only so an earlier git-driving bool is still set true (gh pr merge -dm=false); round 6: the reader FAILS CLOSED — a dash before the verb words or a verb the table does not carry BLINDS (gh repo -d x edit evil/o/r, gh -R … before the verb, gh search repos, an unknown verb), the table carries EVERY host-reaching verb (the inherited -R, --hostname, a <repository>/<name> positional, a repository-TYPEd value like repo create --template) so the agent own gh stays ok:own (issue list / pr merge / api), and a repository-typed value or the FromFullName <name> positional asks its host (repo create evil/o/r); round 7: the scp-like git@HOST:O/R and ssh/https URL spec go-gh accepts asks its host (BLOCKER 2, in a positional AND -R; round 6 had RECORDED it refuted), a FromFullName string-TYPEd / description-named repo asks the destination host (issue transfer <destination-repo>, issue develop --branch-repo — MAJOR 3), GH_BROWSER/GH_EDITOR/GH_PAGER are env_refused (MAJOR 4, DERIVED from gh help environment), a 3-word verb reads its -R (5b: depth from the grammar not sub:2), and a verb the help PROVES default-host-only runs ok:own not a FALSE blind (5c: search repos / gist create / status)', bad);
 }
 
-console.log('⑤c THE gh GRAMMAR CENSUS (round 5/6) — the shipped gh grammar + its pinned version must EQUAL the live gh, re-parsed over the WHOLE live tree IN PARALLEL (the registry law: a kind of fact is one table derived from its source, a census fails a drift — round 6: the whole tree, so a new host-reaching verb in ANY group is caught, not only the shipped groups)');
+console.log('⑤c THE gh GRAMMAR CENSUS (round 5/6/7) — the shipped gh grammar (host-reaching + {default:1} default-host-only entries) + its pinned version + envHijack must EQUAL the live gh, re-parsed over the WHOLE live tree IN PARALLEL (a census fails a drift). ROUND 7: the version pin is a HARD GATE — a live gh ≠ the pinned version is a NAMED SKIP off-gate (the other lanes run their fast tier on the system gh) and RED on CI; EXTENSION COMMANDS are excluded from the walk (never exec a third-party binary in a test)');
 await (async () => {
   const gh = V.knownToolOf('gh'), shipped = gh.grammar || {}, pinned = gh.grammarVersion || null;
   const canon = (t) => Object.keys(t).sort().map((k) => k + '=' + JSON.stringify(t[k])).join('\n');
@@ -615,7 +636,10 @@ await (async () => {
     else { ghPin = ' + 1 SKIP: gh absent — grammar census NOT run'; console.log('  – gh grammar census SKIPPED — gh not runnable here; the total names the skip (install gh 2.102.0 to re-parse the grammar)'); }   // a SKIP changes the count, it is not a ✓ with the same total
   } else {
     const live = GHG.ghVersion();
-    ok(live === pinned, `the pinned gh version equals the live gh (pinned ${pinned}, live ${live}) — regenerate (node scripts/gen-gh-grammar.mjs --write) when the runner's gh rolls`, live === pinned ? undefined : { pinned, live });
+    if (live !== pinned) {   // round 7 (BLOCKER 1): a version mismatch is a NAMED SKIP off-gate (every other lane's fast tier + the integration/release gates run here on the SYSTEM gh), RED on the gate — a diff against a DIFFERENT gh is meaningless (a flag whose meaning moved IS the risk), so the whole census yields to ONE skip, not a hard assert
+      if (process.env.CI || process.env.GITHUB_ACTIONS) { ok(false, `gh grammar census REQUIRED on the gate at the pinned gh ${pinned}, but the live gh is ${live} — the runner must ship the pinned gh (regenerate the literal if the runner's gh rolled)`, { pinned, live }); return; }
+      ghPin = ` + 1 SKIP: gh ${live} ≠ pinned ${pinned} — census not run`; console.log(`  – gh grammar census SKIPPED — live gh ${live} ≠ pinned ${pinned}; the total names the skip (install gh ${pinned} to re-parse the grammar)`); return;
+    }
     const { table, unreadable } = await GHG.buildGrammarParallel();                                  // the WHOLE live tree, concurrently (~0.9 s): the SAME parse as the serial generator, so no spurious drift
     const shippedKeys = new Set(Object.keys(shipped)), liveKeys = new Set(Object.keys(table));
     const added = [...liveKeys].filter((k) => !shippedKeys.has(k));                                  // a host-reaching verb the live gh grew ANYWHERE in the tree, absent from the literal ⇒ RED by name
@@ -627,6 +651,25 @@ await (async () => {
     ghPin = `, gh grammar census: ${Object.keys(shipped).length} verbs @ gh ${pinned}`;
   }
 })();
+
+console.log('⑤d THE GENERATORS OWN HYGIENE (round 7) — the census walk, the env-hijack derivation and the --write guard, PURE (no live gh)');
+{
+  // 5a: the walk takes *COMMANDS verbs ONLY, never an EXTENSION / ALIAS / HELP-TOPIC entry (so the fast tier never execs a third-party gh extension)
+  const synth = ['USAGE', '  gh <command>', '', 'CORE COMMANDS', '  repo:      work with repos', '', 'EXTENSION COMMANDS', '  myext:     a third-party binary', '', 'ALIAS COMMANDS', '  co:        pr checkout', '', 'HELP TOPICS', '  environment: env vars', ''].join('\n');
+  const subs = GHG.parseHelp(synth).subs;
+  ok(subs.includes('repo') && !subs.includes('myext') && !subs.includes('co') && !subs.includes('environment'), '5a: the walk takes CORE verbs but never an EXTENSION / ALIAS / HELP-TOPIC entry (a third-party extension is never exec-ed by a test)', { subs });
+  // MAJOR 4: the program-naming env list is DERIVED from `gh help environment` — editor/browser/pager IN, GH_FORCE_TTY / GH_TOKEN OUT
+  const envHelp = ['`GH_EDITOR`, `EDITOR` (in order of precedence): the editor tool to use', 'for authoring text.', '', '`GH_BROWSER`, `BROWSER` (in order of precedence): the web browser to use for opening links.', '', '`GH_PAGER`, `PAGER` (in order of precedence): a terminal paging program to send output to.', '', '`GH_FORCE_TTY`: set to a number of columns for the viewport.', '', '`GH_TOKEN`: an authentication token.'].join('\n');
+  const hj = GHG.parseEnvHijack(envHelp);
+  ok(JSON.stringify(hj) === JSON.stringify(['BROWSER', 'EDITOR', 'GH_BROWSER', 'GH_EDITOR', 'GH_PAGER', 'PAGER']), 'MAJOR 4: parseEnvHijack derives editor/browser/pager names, excludes GH_FORCE_TTY / GH_TOKEN (not program-naming)', { hj });
+  // 5d: --write refuses an empty / null-version / empty-hijack / shrunk grammar; a shrink needs --force
+  ok(GHG.writeGuard({ ver: null, hijack: ['X'], nkeys: 195, shipped: 118 }), '5d: a null version is refused (gh absent / broken PATH ⇒ no silent pin at null)');
+  ok(GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], nkeys: 0, shipped: 118 }), '5d: an EMPTY grammar is refused');
+  ok(GHG.writeGuard({ ver: '2.102.0', hijack: [], nkeys: 195, shipped: 118 }), '5d: an empty env-hijack list is refused (gh help environment not read)');
+  ok(GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], nkeys: 100, shipped: 118 }), '5d: a SHRINK below the shipped count is refused without --force');
+  ok(!GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], nkeys: 100, shipped: 118, force: true }), '5d: a shrink IS allowed with --force (a verb really removed upstream)');
+  ok(!GHG.writeGuard({ ver: '2.102.0', hijack: ['X'], nkeys: 195, shipped: 118 }), '5d: a healthy grow is allowed');
+}
 
 console.log('⑥ THE SCRUBBER — a value and its forms (FORMS: spelled and read), over ONE window per run');
 const LABEL = 'mounts/m1/secretKey', PH = `[vault:${LABEL}]`;
@@ -889,21 +932,23 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     ['a conninfo URI percent query is not read (round 3)', 'if (conninfoUriBlind(a)) unread = true;', 'if (conninfoUriBlind(a) && false) unread = true;', ownRoad],
     ['a network positional that is not a target is ignored (round 3)', 'return strict ? { unread: true } : {};', 'return {};', ownRoad],
     ['a verb+flag that drives git is not blind (round 3)', 'if (row.blindFlagSubs) for (const b of row.blindFlagSubs)', 'if (false) for (const b of row.blindFlagSubs)', ownRoad],
-    ['a non-spec verb reads its positional as a host (round 3/5)', 'vg && vg.spec && positionals.length ?', 'positionals.length ?', ownRoad],
+    ['a spec verb reads only its FIRST positional, not all (round 7, MAJOR 3 — issue transfer\'s 2nd positional)', 'const repoSpec = vg && vg.spec ? positionals : [];', 'const repoSpec = vg && vg.spec ? positionals.slice(0, 1) : [];', ownRoad],
     ['httpie --raw read as a target (round 3, m1)', "'--verify', '--proxy', '--raw'];", "'--verify', '--proxy'];", ownRoad],
     ['wget --input-metalink is not a config (round 3, m2)', "'-i', '--input-file', '--input-metalink'],", "'-i', '--input-file'],", ownRoad],
     ['a config-dir env is not refused (round 3, m3)', 'PGSYSCONFDIR|PSQLRC|RCLONE_CONFIG|HTTPIE_CONFIG_DIR|GH_CONFIG_DIR|MYSQL_HOME|NETRC', 'PSQLRC|RCLONE_CONFIG|NETRC', ownRoad],
     // round 4 (the brief's RED copies): each regression / residual re-opened in a copy => its own-road rows RED
     // round 5: the hand-kept repoSpecSubs became the generated grammar — the mutants below RED the grammar / the parse / the cluster rule
-    ['a spec verb loses its positional read (round 5/6 — the generated literal: repo create <name>)', '"repoValues":["--template","-p"],"spec":1', '"repoValues":["--template","-p"],"spec":0', ownRoad],
-    ['a value flag before the spec is NOT consumed (round 5, item 1 — takes)', '...(vg ? vg.value : [])', '...(vg ? [] : [])', ownRoad],
+    ['a spec verb loses its positional read (round 7 — issue transfer <destination-repo>, the generated literal)', '"issue transfer": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":1', '"issue transfer": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0', ownRoad],
+    ['a value flag before the spec is NOT consumed (round 5, item 1 — takes)', '...(vg && vg.value ? vg.value : [])', '...(vg && vg.value ? [] : [])', ownRoad],
     ['the gh grammar is not looked up by verb (round 5/6 — the longest leading key)', "vg = row.grammar[ghLead.slice(0, n).join(' ')] || null", 'vg = null', ownRoad],
     ['a gh verb the table does not carry is NOT blind (round 6, items 1+2 — fail closed)', 'if (row.grammar && !vg) unread = true;', 'if (row.grammar && false) unread = true;', ownRoad],
     ['a one-word verb (api) is not found by the longest-key scan (round 6, item 1)', 'for (let n = ghLead.length; n >= 1 && !vg; n--)', 'for (let n = ghLead.length; n >= ghLead.length && !vg; n--)', ownRoad],
-    ['a repository-TYPEd value is not read as a spec (round 6, item 3 — repoValues)', 'const repoVals = vg && vg.repoValues ? vals(vg.repoValues).map(stripScheme) : [];', 'const repoVals = [];', ownRoad],
+    ['a repository-TYPEd/named value is not read as a spec (round 6/7 — repoValues)', 'const repoVals = vg && vg.repoValues ? vals(vg.repoValues) : [];', 'const repoVals = [];', ownRoad],
     ['a cluster =value binds to EVERY letter, not the last (round 5, item 2)', 'truthy(i === letters.length - 1 ? clVal : null)', 'truthy(clVal)', ownRoad],
     ['the per-verb -h hostname short is not read (round 5, accepted)', '...(vg && vg.host ? [vg.host] : [])', '...(vg && vg.host ? [] : [])', ownRoad],
-    ['a repo-spec scheme is not stripped (round 5/6)', "const stripScheme = (x) => String(x).replace(/^[a-z][a-z0-9+.-]{0,31}:\\/\\//i, '');", 'const stripScheme = (x) => String(x);', ownRoad],
+    ['the scp-like git@HOST:O/R spec is not read (round 7, BLOCKER 2 — repoHostOf)', 'm = /^git@([^/:]+):/i.exec(s);', 'm = null;', ownRoad],
+    ['the gh lead depth is capped at 2, not the grammar longest key (round 7, 5b)', 'const ghDepth = row && row.grammar ? gramDepthOf(row.grammar) : 0;', 'const ghDepth = row && row.grammar ? 2 : 0;', ownRoad],
+    ['a tool program-naming env (GH_BROWSER) is not refused (round 7, MAJOR 4)', "if (TOOL_ENV_HIJACK.has(n)) return 'the tool would start a program it names';", 'if (false) return undefined;', ownRoad],
     ['a conninfo URI in a -d / --dbname value is not read (round 4, item 2)', "...argv.slice(1), ...vals(['-d', '--dbname'])]", '...argv.slice(1)]', ownRoad],
     ['a gh bool flag is matched only as its raw token (round 4, item 3)', 'boolFlagOn(argv, b.longs || [], b.shorts || [], vg)', '(b.longs || []).concat(b.shorts || []).some((fl) => flags.has(fl))', ownRoad],
     ['the gh repo create -c alias is unlisted (round 4, item 3)', "shorts: ['-c'] }]", 'shorts: [] }]', ownRoad],

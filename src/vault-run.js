@@ -276,6 +276,7 @@ function envRefusedOf(name, as = 'plain') {
   const n = String(name || '');
   const h = ENV_HIJACK.find((r) => r.re.test(n));
   if (h) return h.why;
+  if (TOOL_ENV_HIJACK.has(n)) return 'the tool would start a program it names';   // round 7 (MAJOR 4): GH_BROWSER / GH_EDITOR / GH_PAGER (gh reads the GH_ ones FIRST) — DERIVED into the gh row's envHijack from `gh help environment`
   const c = as === 'file' ? null : ENV_CONFIG.find((r) => r.re.test(n));
   return c ? c.why : null;
 }
@@ -306,13 +307,18 @@ const KNOWN_TOOLS = Object.freeze([
   { name: 'curl', proxyEnv: true, bareHosts: 'all', globs: true, urlFlags: ['--url'], blindPrefixes: ['--expand-'], valueFlags: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config', ...CURL_VALUE_FLAGS], keyed: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc', '--interface'], configFlags: ['-K', '--config'], fileFlags: ['--cacert', '--capath', '-E', '--cert', '--key', '--netrc-file', '--hsts', '--etag-save', '--etag-compare'] },   // round 3: a flag that redirects the connection off the URL's host (--alt-svc / --interface) is keyed; a value that is an agent-writable FILE (cert / ca / netrc / hsts cache) is a config class — blind unless it is the vault's own $VAULT_FILE
   { name: 'wget', proxyEnv: true, bareHosts: 'all', prefixOpts: true, valueFlags: WGET_VALUE_FLAGS, keyed: ['-e', '--execute', '-B', '--base', '--bind-address', '--use-askpass'], configFlags: ['--config', '-i', '--input-file', '--input-metalink'], fileFlags: ['--ca-certificate', '--certificate', '--private-key', '--load-cookies', '--save-cookies'] },   // round 3 (m2): --input-metalink fetches every URL in its file (like -i); a cert / cookie file the agent writes is a config class
   { name: 'http', aka: ['https', 'httpie'], proxyEnv: true, bareHosts: 'first', valueFlags: HTTPIE_VALUE_FLAGS, keyed: ['--proxy'] },
-  { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'], hostFlags: ['--hostname'], repoFlags: ['-R', '--repo'], repoEnv: ['GH_REPO'], blindSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'sync'], ['pr', 'checkout'], ['extension', 'install'], ['extension', 'upgrade']], blindFlagSubs: [{ sub: ['pr', 'merge'], longs: ['--delete-branch'], shorts: ['-d'] }, { sub: ['repo', 'create'], longs: ['--push', '--clone'], shorts: ['-c'] }], grammarVersion: '2.102.0', grammar: {
+  { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'], hostFlags: ['--hostname'], repoFlags: ['-R', '--repo'], repoEnv: ['GH_REPO'], blindSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'sync'], ['pr', 'checkout'], ['extension', 'install'], ['extension', 'upgrade']], blindFlagSubs: [{ sub: ['pr', 'merge'], longs: ['--delete-branch'], shorts: ['-d'] }, { sub: ['repo', 'create'], longs: ['--push', '--clone'], shorts: ['-c'] }], grammarVersion: '2.102.0', envHijack: ["BROWSER","EDITOR","GH_BROWSER","GH_EDITOR","GH_PAGER","GIT_EDITOR","PAGER","VISUAL"], grammar: {
       "agent-task create": {"value":["--base","--custom-agent","--from-file","--repo","-F","-R","-a","-b"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "agent-task list": {"default":1},
       "agent-task view": {"value":["--jq","--json","--repo","--template","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "alias delete": {"default":1},
+      "alias import": {"default":1},
+      "alias list": {"default":1},
+      "alias set": {"default":1},
       "api": {"value":["--cache","--field","--header","--hostname","--input","--jq","--method","--preview","--raw-field","--template","-F","-H","-X","-f","-p","-q","-t"],"repoValues":[],"spec":0,"host":null},
-      "attestation download": {"value":["--digest-alg","--hostname","--limit","--owner","--predicate-type","--repo","-L","-R","-d","-o"],"repoValues":[],"spec":0,"host":null},
-      "attestation trusted-root": {"value":["--hostname","--tuf-root","--tuf-url"],"repoValues":[],"spec":0,"host":null},
-      "attestation verify": {"value":["--bundle","--cert-identity","--cert-identity-regex","--cert-oidc-issuer","--custom-trusted-root","--digest-alg","--format","--hostname","--jq","--limit","--owner","--predicate-type","--repo","--signer-digest","--signer-repo","--signer-workflow","--source-digest","--source-ref","--template","-L","-R","-b","-d","-i","-o","-q","-t"],"repoValues":[],"spec":0,"host":null},
+      "attestation download": {"value":["--digest-alg","--hostname","--limit","--owner","--predicate-type","--repo","-L","-R","-d","-o"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "attestation trusted-root": {"value":["--hostname","--tuf-root","--tuf-url"],"repoValues":["--tuf-url"],"spec":0,"host":null},
+      "attestation verify": {"value":["--bundle","--cert-identity","--cert-identity-regex","--cert-oidc-issuer","--custom-trusted-root","--digest-alg","--format","--hostname","--jq","--limit","--owner","--predicate-type","--repo","--signer-digest","--signer-repo","--signer-workflow","--source-digest","--source-ref","--template","-L","-R","-b","-d","-i","-o","-q","-t"],"repoValues":["--repo","--signer-repo","--signer-workflow","--source-digest","--source-ref","-R"],"spec":0,"host":null},
       "auth login": {"value":["--git-protocol","--hostname","--scopes","-h","-p","-s"],"repoValues":[],"spec":0,"host":"-h"},
       "auth logout": {"value":["--hostname","--user","-h","-u"],"repoValues":[],"spec":0,"host":"-h"},
       "auth refresh": {"value":["--hostname","--remove-scopes","--scopes","-h","-r","-s"],"repoValues":[],"spec":0,"host":"-h"},
@@ -323,24 +329,60 @@ const KNOWN_TOOLS = Object.freeze([
       "browse": {"value":["--branch","--commit","--repo","-R","-b","-c"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "cache delete": {"value":["--ref","--repo","-R","-r"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "cache list": {"value":["--jq","--json","--key","--limit","--order","--ref","--repo","--sort","--template","-L","-O","-R","-S","-k","-q","-r","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "codespace code": {"value":["--codespace","--repo","--repo-owner","-R","-c"],"repoValues":["--repo","--repo-owner","-R"],"spec":0,"host":null},
+      "codespace cp": {"value":["--codespace","--profile","--repo","--repo-owner","-R","-c","-p"],"repoValues":["--repo","--repo-owner","-R"],"spec":0,"host":null},
+      "codespace create": {"value":["--branch","--devcontainer-path","--display-name","--idle-timeout","--location","--machine","--repo","--retention-period","-R","-b","-d","-l","-m"],"repoValues":["--branch","--repo","-R","-b"],"spec":0,"host":null},
+      "codespace delete": {"value":["--codespace","--days","--org","--repo","--repo-owner","--user","-R","-c","-o","-u"],"repoValues":["--repo","--repo-owner","-R"],"spec":0,"host":null},
+      "codespace edit": {"value":["--codespace","--display-name","--machine","--repo","--repo-owner","-R","-c","-d","-m"],"repoValues":["--repo","--repo-owner","-R"],"spec":0,"host":null},
+      "codespace jupyter": {"value":["--codespace","--repo","--repo-owner","-R","-c"],"repoValues":["--repo","--repo-owner","-R"],"spec":0,"host":null},
+      "codespace list": {"value":["--jq","--json","--limit","--org","--repo","--template","--user","-L","-R","-o","-q","-t","-u"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "codespace logs": {"value":["--codespace","--repo","--repo-owner","-R","-c"],"repoValues":["--repo","--repo-owner","-R"],"spec":0,"host":null},
+      "codespace ports forward": {"value":["--codespace","--repo","--repo-owner","-R","-c"],"repoValues":["--repo","--repo-owner","-R"],"spec":0,"host":null},
+      "codespace ports visibility": {"value":["--codespace","--repo","--repo-owner","-R","-c"],"repoValues":["--repo","--repo-owner","-R"],"spec":0,"host":null},
+      "codespace rebuild": {"value":["--codespace","--repo","--repo-owner","-R","-c"],"repoValues":["--repo","--repo-owner","-R"],"spec":0,"host":null},
+      "codespace ssh": {"value":["--codespace","--debug-file","--profile","--repo","--repo-owner","--server-port","-R","-c"],"repoValues":["--repo","--repo-owner","-R"],"spec":0,"host":null},
+      "codespace stop": {"value":["--codespace","--org","--repo","--repo-owner","--user","-R","-c","-o","-u"],"repoValues":["--repo","--repo-owner","-R"],"spec":0,"host":null},
+      "codespace view": {"value":["--codespace","--jq","--json","--repo","--repo-owner","--template","-R","-c","-q","-t"],"repoValues":["--repo","--repo-owner","-R"],"spec":0,"host":null},
+      "completion": {"default":1},
+      "config clear-cache": {"default":1},
+      "config get": {"default":1},
+      "config list": {"default":1},
+      "config set": {"default":1},
+      "copilot": {"default":1},
       "discussion comment": {"value":["--body","--body-file","--repo","-F","-R","-b"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "discussion create": {"value":["--body","--body-file","--category","--label","--repo","--title","-F","-R","-b","-c","-l","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "discussion edit": {"value":["--add-label","--body","--body-file","--category","--remove-label","--repo","--title","-F","-R","-b","-c","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "discussion list": {"value":["--after","--author","--category","--jq","--json","--label","--limit","--order","--repo","--search","--sort","--state","--template","-A","-L","-R","-S","-c","-l","-q","-s","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "discussion view": {"value":["--after","--jq","--json","--limit","--order","--repo","--template","-L","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "extension browse": {"default":1},
+      "extension create": {"default":1},
       "extension install": {"value":["--pin"],"repoValues":[],"spec":1,"host":null},
+      "extension list": {"default":1},
+      "extension remove": {"default":1},
+      "extension search": {"value":["--jq","--json","--license","--limit","--order","--owner","--sort","--template","-L","-q","-t"],"repoValues":["--order","--sort"],"spec":0,"host":null},
+      "extension upgrade": {"default":1},
+      "gist clone": {"default":1},
+      "gist create": {"default":1},
+      "gist delete": {"default":1},
+      "gist edit": {"default":1},
+      "gist list": {"default":1},
+      "gist rename": {"default":1},
+      "gist view": {"default":1},
+      "gpg-key add": {"default":1},
+      "gpg-key delete": {"default":1},
+      "gpg-key list": {"default":1},
       "issue close": {"value":["--comment","--duplicate-of","--reason","--repo","-R","-c","-r"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "issue comment": {"value":["--attach","--body","--body-file","--repo","-F","-R","-b"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "issue create": {"value":["--assignee","--attach","--blocked-by","--blocking","--body","--body-file","--label","--milestone","--parent","--project","--recover","--repo","--template","--title","--type","-F","-R","-T","-a","-b","-l","-m","-p","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "issue delete": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
-      "issue develop": {"value":["--base","--branch-repo","--name","--repo","--worktree","-R","-b","-n"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "issue develop": {"value":["--base","--branch-repo","--name","--repo","--worktree","-R","-b","-n"],"repoValues":["--branch-repo","--repo","-R"],"spec":0,"host":null},
       "issue edit": {"value":["--add-assignee","--add-blocked-by","--add-blocking","--add-label","--add-project","--add-sub-issue","--attach","--body","--body-file","--milestone","--parent","--remove-assignee","--remove-blocked-by","--remove-blocking","--remove-label","--remove-project","--remove-sub-issue","--repo","--title","--type","-F","-R","-b","-m","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "issue list": {"value":["--app","--assignee","--author","--jq","--json","--label","--limit","--mention","--milestone","--repo","--search","--state","--template","--type","-A","-L","-R","-S","-a","-l","-m","-q","-s","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "issue lock": {"value":["--reason","--repo","-R","-r"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "issue pin": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "issue reopen": {"value":["--comment","--repo","-R","-c"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "issue status": {"value":["--jq","--json","--repo","--template","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
-      "issue transfer": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "issue transfer": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":1,"host":null},
       "issue unlock": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "issue unpin": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "issue view": {"value":["--jq","--json","--repo","--template","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
@@ -349,6 +391,8 @@ const KNOWN_TOOLS = Object.freeze([
       "label delete": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "label edit": {"value":["--color","--description","--name","--repo","-R","-c","-d","-n"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "label list": {"value":["--jq","--json","--limit","--order","--repo","--search","--sort","--template","-L","-R","-S","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "licenses": {"default":1},
+      "org list": {"default":1},
       "pr checkout": {"value":["--branch","--repo","--worktree","-R","-b"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "pr checks": {"value":["--interval","--jq","--json","--repo","--template","-R","-i","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "pr close": {"value":["--comment","--repo","-R","-c"],"repoValues":["--repo","-R"],"spec":0,"host":null},
@@ -367,6 +411,26 @@ const KNOWN_TOOLS = Object.freeze([
       "pr unlock": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "pr update-branch": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "pr view": {"value":["--jq","--json","--repo","--template","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "preview prompter": {"default":1},
+      "project close": {"default":1},
+      "project copy": {"default":1},
+      "project create": {"default":1},
+      "project delete": {"default":1},
+      "project edit": {"default":1},
+      "project field-create": {"default":1},
+      "project field-delete": {"default":1},
+      "project field-list": {"default":1},
+      "project item-add": {"default":1},
+      "project item-archive": {"default":1},
+      "project item-create": {"default":1},
+      "project item-delete": {"default":1},
+      "project item-edit": {"default":1},
+      "project item-list": {"default":1},
+      "project link": {"value":["--owner","--repo","--team","-R","-T"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "project list": {"default":1},
+      "project mark-template": {"default":1},
+      "project unlink": {"value":["--owner","--repo","--team","-R","-T"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "project view": {"default":1},
       "release create": {"value":["--discussion-category","--notes","--notes-file","--notes-start-tag","--repo","--target","--title","-F","-R","-n","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "release delete": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "release delete-asset": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
@@ -383,20 +447,25 @@ const KNOWN_TOOLS = Object.freeze([
       "repo autolink list": {"value":["--jq","--json","--repo","--template","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "repo autolink view": {"value":["--jq","--json","--repo","--template","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "repo clone": {"value":["--upstream-remote-name","-u"],"repoValues":[],"spec":1,"host":null},
-      "repo create": {"value":["--description","--gitignore","--homepage","--license","--remote","--source","--team","--template","-d","-g","-h","-l","-p","-r","-s","-t"],"repoValues":["--template","-p"],"spec":1,"host":null},
+      "repo create": {"value":["--description","--gitignore","--homepage","--license","--remote","--source","--team","--template","-d","-g","-h","-l","-p","-r","-s","-t"],"repoValues":["--description","--gitignore","--homepage","--license","--remote","--source","--template","-d","-g","-h","-l","-p","-r","-s"],"spec":1,"host":null},
       "repo delete": {"value":[],"repoValues":[],"spec":1,"host":null},
       "repo deploy-key add": {"value":["--repo","--title","-R","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "repo deploy-key delete": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "repo deploy-key list": {"value":["--jq","--json","--repo","--template","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
-      "repo edit": {"value":["--add-topic","--default-branch","--description","--homepage","--remove-topic","--squash-merge-commit-message","--visibility","-d","-h"],"repoValues":[],"spec":1,"host":null},
-      "repo fork": {"value":["--fork-name","--org","--remote-name"],"repoValues":[],"spec":1,"host":null},
+      "repo edit": {"value":["--add-topic","--default-branch","--description","--homepage","--remove-topic","--squash-merge-commit-message","--visibility","-d","-h"],"repoValues":["--add-topic","--default-branch","--description","--homepage","--remove-topic","--visibility","-d","-h"],"spec":1,"host":null},
+      "repo fork": {"value":["--fork-name","--org","--remote-name"],"repoValues":["--fork-name"],"spec":1,"host":null},
+      "repo gitignore list": {"default":1},
+      "repo gitignore view": {"default":1},
+      "repo license list": {"default":1},
+      "repo license view": {"default":1},
+      "repo list": {"value":["--jq","--json","--language","--limit","--template","--topic","--visibility","-L","-l","-q","-t"],"repoValues":["--limit","--visibility","-L"],"spec":0,"host":null},
       "repo read-dir": {"value":["--jq","--json","--ref","--repo","--template","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "repo read-file": {"value":["--jq","--json","--output","--ref","--repo","--template","-R","-o","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "repo rename": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "repo set-default": {"value":[],"repoValues":[],"spec":1,"host":null},
-      "repo sync": {"value":["--branch","--source","-b","-s"],"repoValues":[],"spec":1,"host":null},
+      "repo sync": {"value":["--branch","--source","-b","-s"],"repoValues":["--source","-s"],"spec":1,"host":null},
       "repo unarchive": {"value":[],"repoValues":[],"spec":1,"host":null},
-      "repo view": {"value":["--branch","--jq","--json","--template","-b","-q","-t"],"repoValues":[],"spec":1,"host":null},
+      "repo view": {"value":["--branch","--jq","--json","--template","-b","-q","-t"],"repoValues":["--branch","-b"],"spec":1,"host":null},
       "ruleset check": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "ruleset list": {"value":["--limit","--org","--repo","-L","-R","-o"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "ruleset view": {"value":["--org","--repo","-R","-o"],"repoValues":["--repo","-R"],"spec":0,"host":null},
@@ -408,24 +477,33 @@ const KNOWN_TOOLS = Object.freeze([
       "run view": {"value":["--attempt","--job","--jq","--json","--repo","--template","-R","-a","-j","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "run watch": {"value":["--interval","--repo","-R","-i"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "search code": {"value":["--extension","--filename","--jq","--json","--language","--limit","--match","--owner","--repo","--size","--template","-L","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
-      "search commits": {"value":["--author","--author-date","--author-email","--author-name","--committer","--committer-date","--committer-email","--committer-name","--hash","--jq","--json","--limit","--order","--owner","--parent","--repo","--sort","--template","--tree","--visibility","-L","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
-      "search issues": {"value":["--app","--assignee","--author","--closed","--commenter","--comments","--created","--interactions","--involves","--jq","--json","--label","--language","--limit","--match","--mentions","--milestone","--order","--owner","--project","--reactions","--repo","--search-type","--sort","--state","--team-mentions","--template","--updated","--visibility","-L","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
-      "search prs": {"value":["--app","--assignee","--author","--base","--checks","--closed","--commenter","--comments","--created","--head","--interactions","--involves","--jq","--json","--label","--language","--limit","--match","--mentions","--merged-at","--milestone","--order","--owner","--project","--reactions","--repo","--review","--review-requested","--reviewed-by","--sort","--state","--team-mentions","--template","--updated","--visibility","-B","-H","-L","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "search commits": {"value":["--author","--author-date","--author-email","--author-name","--committer","--committer-date","--committer-email","--committer-name","--hash","--jq","--json","--limit","--order","--owner","--parent","--repo","--sort","--template","--tree","--visibility","-L","-R","-q","-t"],"repoValues":["--owner","--repo","--visibility","-R"],"spec":0,"host":null},
+      "search issues": {"value":["--app","--assignee","--author","--closed","--commenter","--comments","--created","--interactions","--involves","--jq","--json","--label","--language","--limit","--match","--mentions","--milestone","--order","--owner","--project","--reactions","--repo","--search-type","--sort","--state","--team-mentions","--template","--updated","--visibility","-L","-R","-q","-t"],"repoValues":["--owner","--repo","--visibility","-R"],"spec":0,"host":null},
+      "search prs": {"value":["--app","--assignee","--author","--base","--checks","--closed","--commenter","--comments","--created","--head","--interactions","--involves","--jq","--json","--label","--language","--limit","--match","--mentions","--merged-at","--milestone","--order","--owner","--project","--reactions","--repo","--review","--review-requested","--reviewed-by","--sort","--state","--team-mentions","--template","--updated","--visibility","-B","-H","-L","-R","-q","-t"],"repoValues":["--owner","--repo","--visibility","-R"],"spec":0,"host":null},
+      "search repos": {"value":["--created","--followers","--forks","--good-first-issues","--help-wanted-issues","--include-forks","--jq","--json","--language","--license","--limit","--match","--number-topics","--order","--owner","--size","--sort","--stars","--template","--topic","--updated","--visibility","-L","-q","-t"],"repoValues":["--include-forks","--limit","--match","--order","--sort","-L"],"spec":0,"host":null},
       "secret delete": {"value":["--app","--env","--org","--repo","-R","-a","-e","-o"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "secret list": {"value":["--app","--env","--jq","--json","--org","--repo","--template","-R","-a","-e","-o","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
-      "secret set": {"value":["--app","--body","--env","--env-file","--org","--repo","--repos","--visibility","-R","-a","-b","-e","-f","-o","-r","-v"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "secret set": {"value":["--app","--body","--env","--env-file","--org","--repo","--repos","--visibility","-R","-a","-b","-e","-f","-o","-r","-v"],"repoValues":["--repo","--repos","-R","-r"],"spec":0,"host":null},
       "skill install": {"value":["--agent","--dir","--pin","--scope"],"repoValues":[],"spec":1,"host":null},
+      "skill list": {"default":1},
       "skill preview": {"value":[],"repoValues":[],"spec":1,"host":null},
+      "skill publish": {"default":1},
+      "skill search": {"default":1},
+      "skill update": {"default":1},
+      "ssh-key add": {"default":1},
+      "ssh-key delete": {"default":1},
+      "ssh-key list": {"default":1},
+      "status": {"default":1},
       "variable delete": {"value":["--env","--org","--repo","-R","-e","-o"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "variable get": {"value":["--env","--jq","--json","--org","--repo","--template","-R","-e","-o","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "variable list": {"value":["--env","--jq","--json","--org","--repo","--template","-R","-e","-o","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
-      "variable set": {"value":["--body","--env","--env-file","--org","--repo","--repos","--visibility","-R","-b","-e","-f","-o","-r","-v"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "variable set": {"value":["--body","--env","--env-file","--org","--repo","--repos","--visibility","-R","-b","-e","-f","-o","-r","-v"],"repoValues":["--repo","--repos","-R","-r"],"spec":0,"host":null},
       "workflow disable": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "workflow enable": {"value":["--repo","-R"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "workflow list": {"value":["--jq","--json","--limit","--repo","--template","-L","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "workflow run": {"value":["--field","--raw-field","--ref","--repo","-F","-R","-f","-r"],"repoValues":["--repo","-R"],"spec":0,"host":null},
       "workflow view": {"value":["--ref","--repo","-R","-r"],"repoValues":["--repo","-R"],"spec":0,"host":null},
-    }, passDashes: true },   // round 3: gh extension install/upgrade runs code; a verb+flag that drives git (pr merge --delete-branch, repo create --push/--clone) is blind; round 5: the gh flag knowledge is GENERATED from gh's own --help per verb (scripts/gen-gh-grammar.mjs → `grammar`; test-vault-run-model ⑤c re-runs the same parse against the live gh and diffs — a verb / value flag / bool / positional shape / hostname short drift is RED by name). shapeOf reads it: a value flag consumes its argument in ANY spelling so it is not misread as the <...repository> positional (repo edit -d x evil.com/o/r), a `spec` verb reads positionals[0] as HOST/OWNER/REPO (the table caught skill install/preview + label clone, not only repo's verbs; gh api <path> stays a path), a `host` short is --hostname (gh auth status -h evil.com), and a cluster's =value binds to the LAST letter only so an earlier git-driving bool is still set true (gh pr merge -dm=false). ROUND 6 (FAIL CLOSED — do not model cobra): the reader reads ONLY the spellings it can read with certainty and BLINDS the rest of gh. A dash BEFORE the verb words, or a verb the table does not carry, ⇒ vg null ⇒ blind (it asks — asking is cheap, a silent send is the one thing the vault must never do). So the table now carries EVERY host-reaching verb (gen-gh-grammar.mjs walks the WHOLE live tree): a `<repository>`/`<name>` positional (spec), --hostname (host), or a value the help TYPEs as a repository (repoValues — repo create --template, the inherited -R) — the agent's own gh (issue list, pr merge, repo view, api) stays ok:own while an unknown or relocated spelling asks. grammar + grammarVersion are GENERATED (node scripts/gen-gh-grammar.mjs --write, pinned to the runner's gh); ⑤c re-parses the whole live tree IN PARALLEL and diffs the version AND the table — any drift RED by name. gh api <path> is a path under the default host, never a host   // round 2b: these drive `git` (the project's .git/config + hooks, like the git row); args after `--` go to git
+    }, passDashes: true },   // round 3: gh extension install/upgrade runs code; a verb+flag that drives git (pr merge --delete-branch, repo create --push/--clone) is blind; round 5: the gh flag knowledge is GENERATED from gh's own --help per verb (scripts/gen-gh-grammar.mjs → `grammar`; test-vault-run-model ⑤c re-runs the same parse against the live gh and diffs — a verb / value flag / bool / positional shape / hostname short drift is RED by name). shapeOf reads it: a value flag consumes its argument in ANY spelling so it is not misread as the <...repository> positional (repo edit -d x evil.com/o/r), a `spec` verb reads positionals[0] as HOST/OWNER/REPO (the table caught skill install/preview + label clone, not only repo's verbs; gh api <path> stays a path), a `host` short is --hostname (gh auth status -h evil.com), and a cluster's =value binds to the LAST letter only so an earlier git-driving bool is still set true (gh pr merge -dm=false). ROUND 6 (FAIL CLOSED — do not model cobra): the reader reads ONLY the spellings it can read with certainty and BLINDS the rest of gh. A dash BEFORE the verb words, or a verb the table does not carry, ⇒ vg null ⇒ blind (it asks — asking is cheap, a silent send is the one thing the vault must never do). So the table now carries EVERY host-reaching verb (gen-gh-grammar.mjs walks the WHOLE live tree): a `<repository>`/`<name>` positional (spec), --hostname (host), or a value the help TYPEs as a repository (repoValues — repo create --template, the inherited -R) — the agent's own gh (issue list, pr merge, repo view, api) stays ok:own while an unknown or relocated spelling asks. grammar + grammarVersion are GENERATED (node scripts/gen-gh-grammar.mjs --write, pinned to the runner's gh); ⑤c re-parses the whole live tree IN PARALLEL and diffs the version AND the table — any drift RED by name. gh api <path> is a path under the default host, never a host   // round 2b: these drive `git` (the project's .git/config + hooks, like the git row); args after `--` go to git. ROUND 7: a dash-before-verb / unknown / extension verb still BLINDS, but a verb the help PROVES reaches only the default host is listed {default:1} and runs ok:own (no FALSE blind); a positional or value the help TYPEs OR DESCRIBES as a repository (incl. the scp-like git@HOST:O/R and ssh/git/http/https URLs, read by repoHostOf exactly as go-gh's repository.Parse) asks its host; the program-naming env vars (envHijack, DERIVED from `gh help environment`: GH_BROWSER/GH_EDITOR/GH_PAGER + the generic BROWSER/EDITOR/VISUAL/PAGER) are env_refused
   { name: 'git', sub: 1, scpLike: true, proxyEnv: true, confDest: true, valueFlags: ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'], keyed: ['-c', '--config-env'] },
   { name: 'aws', hosts: ['*.amazonaws.com'], sub: 2, proxyEnv: true, valueFlags: ['--profile', '--region', '--output'] },
   { name: 'gcloud', hosts: ['*.googleapis.com'], sub: 3, proxyEnv: true, valueFlags: ['--project', '--account', '--format', '--configuration'] },
@@ -447,6 +525,10 @@ const KNOWN_TOOLS = Object.freeze([
 const toolNameOf = (argv0, resolved = null) => String(resolved || argv0 || '').split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '');
 const findIn = (list, n, key = (r) => r.names) => list.find((r) => key(r).includes(n)) || list.find((r) => key(r).includes(n.replace(/[\d.]+$/, ''))) || null;
 const knownToolOf = (name) => (name ? findIn(KNOWN_TOOLS, name, (r) => [r.name, ...(r.aka || [])]) : null);
+// round 7 (MAJOR 4): the union of every known tool's own program-naming env vars (gh's envHijack, GENERATED from its help) —
+// refused by name in envRefusedOf alongside the hand-kept cross-tool ENV_HIJACK (a belt). A GH_ name is namespaced, so a
+// machine-wide union is correct and the census pins the gh list against the live gh.
+const TOOL_ENV_HIJACK = Object.freeze(new Set(KNOWN_TOOLS.flatMap((r) => r.envHijack || [])));
 /** → { code, cls, name, words } | null. */
 function refusedTool(argv0, { resolved = null } = {}) {
   const name = toolNameOf(argv0, resolved);
@@ -575,6 +657,23 @@ function materialize(run, { valueOf, pathOf }) {
 // ── THE SHAPE KEY (decision ④) ──
 const URL_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/(?:[^@\s\/\\?#'"]{0,256}@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9.-]+)(?::(\d{1,5}))?((?:,(?:\[[0-9a-f:.]+\]|[A-Za-z0-9.-]+)(?::\d{1,5})?)*)/gi;   // lane vault-agent-own (review): a `\` ends the userinfo — WHATWG reads `https://evil\@good/` as host evil
 const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/\.$/, ''); return x && x.length <= 253 ? (port ? `${x}:${port}` : x) : null; };
+const GRAM_DEPTH = new WeakMap();   // round 7 (5b): the lead depth is the grammar's longest key (repo autolink create = 3 words), memoised per frozen grammar — never the constant row.sub (= 2, for blindSubs)
+const gramDepthOf = (g) => { let d = GRAM_DEPTH.get(g); if (d === undefined) { d = Math.max(1, ...Object.keys(g).map((k) => k.split(' ').length)); GRAM_DEPTH.set(g, d); } return d; };
+// round 7 (BLOCKER 2): a gh repository SPEC → the HOST gh resolves it to with go-gh's repository.Parse, or null for a default-host
+// form. Wire-proven on gh 2.102.0 (GH_DEBUG=api): a scheme URL ssh|git|git+ssh|git+https|http|https://[user@]HOST[:port]/… ; the
+// scp-like git@HOST:OWNER/REPO (go-gh's git.IsURL treats ONLY a git@ prefix as a URL — foo@HOST:… and HOST:OWNER/REPO are NOT
+// hosts, they fall to the default host); and [HOST/]OWNER/REPO (3 slash-parts ⇒ HOST, 2 ⇒ default). '' = a host-bearing spec
+// whose host is unreadable ⇒ the caller BLINDS; null = a default-host form.
+const repoHostOf = (raw) => {
+  const s = String(raw).trim();
+  let m = /^(?:ssh|git\+ssh|git\+https|git|https?):\/\/(?:[^@/]*@)?([^/:]+)/i.exec(s);
+  if (m) return normHost(m[1]) || '';
+  m = /^git@([^/:]+):/i.exec(s);
+  if (m) return normHost(m[1]) || '';
+  const p = s.split('/');
+  if (p.length >= 3) return normHost(p[0]) || '';
+  return null;
+};
 function urlHosts(text) {
   const out = []; let m; URL_RE.lastIndex = 0;
   while ((m = URL_RE.exec(String(text)))) if (m[1].toLowerCase() !== 'vault') {
@@ -667,10 +766,11 @@ function shapeOf(run) {
   let script = null, afterDashes = false, valueNext = null, configFile = false, unread = false;
   const isKeyed = (f) => !!(row && (row.keyed || []).includes(f));
   const ghLead = [];   // round 5/6: gh's grammar is PER VERB — collect the LEADING non-dash words (gh wants the command first), stopping at the FIRST dash. A dash before the verb words is a flag the reader cannot place (cobra skips an unknown flag + its arg at every level and re-parses at the leaf), so no key matches ⇒ vg null ⇒ BLIND (fail closed — gh repo -d x edit evil/o/r is not read as repo edit)
-  if (row && row.grammar) for (const a of argv.slice(1)) { if (a[0] === '-' || ghLead.length >= (row.sub || 0)) break; ghLead.push(a); }
+  const ghDepth = row && row.grammar ? gramDepthOf(row.grammar) : 0;   // round 7 (5b): the grammar's longest key, so a 3-word verb (repo autolink create) is matched, not capped at row.sub
+  if (row && row.grammar) for (const a of argv.slice(1)) { if (a[0] === '-' || ghLead.length >= ghDepth) break; ghLead.push(a); }
   let vg = null;   // the LONGEST leading key the table knows (1 word like `api`, 2 like `repo create`); null = a dash came first, or a verb the table does not carry (one that reaches no host) ⇒ the shape BLINDS below
   if (row && row.grammar) for (let n = ghLead.length; n >= 1 && !vg; n--) vg = row.grammar[ghLead.slice(0, n).join(' ')] || null;
-  const takes = row ? [...(row.valueFlags || []), ...(row.hostFlags || []), ...(row.configFlags || []), ...(row.keyed || []), ...(vg ? vg.value : [])] : [];   // the flags that take a value (+ gh's per-verb value flags)
+  const takes = row ? [...(row.valueFlags || []), ...(row.hostFlags || []), ...(row.configFlags || []), ...(row.keyed || []), ...(vg && vg.value ? vg.value : [])] : [];   // the flags that take a value (+ gh's per-verb value flags)
   if (kind !== 'tool') script = JSON.stringify(argv.slice(1));
   else for (const a of argv.slice(1)) {
     if (!afterDashes && a === '--') { afterDashes = true; flags.add('--'); continue; }
@@ -712,10 +812,9 @@ function shapeOf(run) {
     if (row.hostEnv) for (const v of envs(row.hostEnv)) many(v).forEach((h) => hosts.add(h));
     if (row.bareHosts) for (const a of [...(row.bareHosts === 'first' ? httpieTarget(positionals) : positionals), ...vals(row.urlFlags)]) { if (String(a).startsWith('@')) { unread = true; continue; } const t = targetOf(a, !!row.globs, row.bareHosts === 'all'); if (t.host) hosts.add(t.host); if (t.unread) unread = true; }   // round 2b: `--url @file` / `@urls.txt` reads the real targets from a file
     if (row.conninfo) for (const a of [...argv.slice(1), ...vals(['-d', '--dbname'])]) { conninfoHosts(a).forEach((h) => hosts.add(h)); if (conninfoUriBlind(a)) unread = true; }
-    const stripScheme = (x) => String(x).replace(/^[a-z][a-z0-9+.-]{0,31}:\/\//i, '');
-    const repoSpec = vg && vg.spec && positionals.length ? [stripScheme(positionals[0])] : [];   // round 5: a `spec` verb reads positionals[0] as HOST/OWNER/REPO — gh's ghrepo.FromFullName (repo view's <repository>, repo create's <name>); a URL scheme is stripped
-    const repoVals = vg && vg.repoValues ? vals(vg.repoValues).map(stripScheme) : [];   // round 6: EVERY value the help TYPEs as a repository is a spec too, any flag any verb (repo create --template evil/o/r, the inherited -R) — gh resolves it to that host
-    if (row.repoFlags) for (const v of [...vals(row.repoFlags), ...envs(row.repoEnv), ...repoSpec, ...repoVals]) { const p = String(v).split('/'); if (p.length >= 3) { const h = normHost(p[0]); if (h) hosts.add(h); else unread = true; } }   // gh -R HOST/OWNER/REPO (round 2b: an IP / a port / a trailing dot routes too — no HOSTNAME gate; gh sends GH_ENTERPRISE_TOKEN to a non-github host)
+    const repoSpec = vg && vg.spec ? positionals : [];   // round 5/7: a `spec` verb reads EVERY positional (repo view's <repository>, repo create's <name>, issue transfer's SECOND positional <destination-repo>)
+    const repoVals = vg && vg.repoValues ? vals(vg.repoValues) : [];   // round 6/7: every value the help TYPEs OR DESCRIBES as a repository (the inherited -R, repo create --template, issue develop --branch-repo)
+    if (row.repoFlags) for (const v of [...vals(row.repoFlags), ...envs(row.repoEnv), ...repoSpec, ...repoVals]) { const h = repoHostOf(v); if (h) hosts.add(h); else if (h === '') unread = true; }   // round 7 (BLOCKER 2): repoHostOf reads every form go-gh accepts (the scp-like git@HOST:O/R + ssh/https URLs incl.); a 2-part OWNER/REPO ⇒ the default host; a 3-part spec with an unreadable host ⇒ blind
     if (row.blindSubs && row.blindSubs.some((b) => b.every((w, i) => sub[i] === w))) unread = true;   // round 2b: a subcommand that drives git (gh repo clone / pr checkout) — the project's config / hooks decide where it goes
     if (row.blindFlagSubs) for (const b of row.blindFlagSubs) if (b.sub.every((w, i) => sub[i] === w) && boolFlagOn(argv, b.longs || [], b.shorts || [], vg)) unread = true;   // round 3/4/5: a verb that drives git only with a bool flag (gh pr merge --delete-branch/-d, repo create --push/--clone/-c) — boolFlagOn matches every pflag spelling (long, =true not =false, a short alone or in a cluster, -x=true); round 5: a cluster's =value binds to the LAST letter only (the grammar says which letters take a value)
     if (row.fileFlags) for (const [f, v] of valued) if (row.fileFlags.includes(f) && !fileFlagExempt(f, v, run)) configFile = true;   // round 3/4: a cert / config FILE the agent can write ⇒ config class — blind unless the WHOLE value is a $VAULT_FILE placeholder (fileFlagExempt) for an owner-store entry (a template / an agent-put entry / a substring blinds)
