@@ -9,15 +9,19 @@
 //           came (navigation.activation: back | forward | other — another site's page or not our entry — | '' no API)
 //   pop   — st (the landed entry), v (the verdict), tg (the layer it closed), ex (the exit plan's skip, 0 = none)
 //   go1   — the re-arm traversal: ms until the page stood on the sentinel again, or landed 0 + push 1 (the 500 ms belt)
-//   leave — skip (history.go(-skip)), load (1 = the tab's first entry: the ONE named load); or why cancelled (round 3:
-//           the exit's go() was announced and never ended — a 204, a stopped load —: the page stays, the intent dropped)
+//   leave — skip (history.go(-skip)), load (1 = the tab's first entry: the ONE named load); or why cancelled | input
+//           (round 3: the exit's go() was announced and did not end within 3 s — a 204, a stopped load, or only a slow
+//           one —, or a tap came while it was pending: the page stays; round 4: its intent kept for a late commit); or
+//           slow (ms — round 4: that go() committed after all, this late: the page's pagehide after the stay)
+//   rearm — why (cancelled | input): a page that stayed through its go() stands on a sentinel again (round 4)
 //   hop   — a document the exit's go() LOADED went on back without booting the app (back-guard.js exitHop): n (the hop),
 //           skip, ents; or n + stay 1 + why (cap | input | api | show | cancelled — the page stays and boots: the ONE
-//           named load); or drop 1 (an intent that was not this load's)
+//           named load); or n + slow (ms: a stayed hop's go() committed late); or drop 1 (an intent not this load's)
 //   hide / show — pagehide / pageshow (p = persisted: the back/forward cache; ek = the entry the page stood on, the
 //           browser's own random key cut to 8 — what a later load's navigation.activation names as «from»)
 //   stale — the stale-tab step: b (the bundle's version), s (the server's), d2 (reload | notice | quiet | wait)
-//   cost  — this load followed a back press inside VibeSpace (back-guard.js backCostLoad): the auto capture's cause
+//   cost  — this load followed a back press inside VibeSpace (back-guard.js backCostLoad), or why slow: an exit that left
+//           late (back-guard.js slowExit — round 4): the auto capture's cause
 // PRIVACY (the incident recorder's rule): never a URL, a title, a record or typed text — entry shapes, verdicts,
 // version numbers.
 export const NAV_LOG_KEY = 'vibespace.navLog';

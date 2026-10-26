@@ -21,6 +21,9 @@
 // NO KEY, NO HOP (acceptance round 3): only a load whose navigation.activation names the entry the exit left goes on —
 // without that API (Chromium 102–122, Safari 26.0–26.1) a forward press inside the intent's 10 s hopped the person back
 // out of the page they chose (reproduced on Chrome 154 with the API removed).
+// A SLOW EXIT IS STILL AN EXIT (acceptance round 4): a page whose go() did not end within its 3 s bound stays, but that
+// go() may only be slow — it keeps the intent, so the document a late commit lands on still goes on (exitHop), and one
+// that lands too late to go on boots and says so (slowExit).
 
 /** A second back inside this window after the 「再返回一次退出」 toast leaves; later it re-arms. */
 export const BACK_WINDOW_MS = 2000;
@@ -62,7 +65,9 @@ export function exitPlan({ current = 0, block = 0, length = 0 } = {}) {
 
 /** THE EXIT'S INTENT, read by a document at its boot (round 2) — or when the back/forward cache shows it again (round
  *  3: navType 'back_forward' then). Before its go() the exit writes { t, hop, key — the entry it left (navigation's own
- *  random key), to: 'below' } (src/lib/nav-log.js); the document that go() reaches reads it before the app boots:
+ *  random key), to: 'below' } (src/lib/nav-log.js); a page that stayed through its go() keeps it (round 4: the go() may
+ *  only be slow) and, should that go() commit late, keys it at its pagehide to the entry it leaves from; the document
+ *  that go() reaches reads it before the app boots:
  *    'none'  — no intent: boot
  *    'clear' — not this load's: a boot that is no history traversal (navType ≠ back_forward), an intent EXIT_INTENT_MS
  *              old, or a load that did not come from the entry the intent names (`fromKey` = navigation.activation's
@@ -96,6 +101,19 @@ export function backCostLoad({ navType = '', prev = [], now = 0, withinMs = COST
   const last = prev[prev.length - 1];
   if (!(last && now >= last.t && now - last.t < withinMs)) return false;
   return !prev.some((r) => r && (r.k === 'leave' || r.k === 'hop'));
+}
+
+/** Did THIS load come from an exit that LEFT LATE (round 4)? The previous document stayed through its go() (no pagehide
+ *  within the 3 s bound) and left after all — its diary's slow row (a leave or a hop with `slow` ms, written at that late
+ *  pagehide) — and this load did not go on (the wiring asks only when exitHop said no hop: the intent past its window,
+ *  or a tap on the stayed page dropped it). The person sees VibeSpace load after their exit: an incident («a slow
+ *  exit»), unlike the exit's own named load. The same frame as backCostLoad: navType back_forward, the rows from under
+ *  `withinMs` ago, never a forward press or a page of another site. */
+export function slowExit({ navType = '', prev = [], now = 0, withinMs = COST_WINDOW_MS, came = '' } = {}) {
+  if (navType !== 'back_forward' || !prev.length || came === 'forward' || came === 'other') return false;
+  const last = prev[prev.length - 1];
+  if (!(last && now >= last.t && now - last.t < withinMs)) return false;
+  return prev.some((r) => r && (r.k === 'leave' || r.k === 'hop') && r.slow > 0);
 }
 
 /** What one back press closes, topmost first — Esc's order (every [data-popover] float, then a dialog), then the

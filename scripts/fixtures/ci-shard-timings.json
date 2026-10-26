@@ -169,6 +169,7 @@
   "test-exit-forensics": 86440,
   "test-exit-run": 16293,
   "test-exit-runs-dialog-fit-ui": 52716,
+  "test-exit-slow-chrome": 471000,
   "test-fallback-policy": 73,
   "test-feed-miss-ui": 16643,
   "test-fold-ux": 65086,

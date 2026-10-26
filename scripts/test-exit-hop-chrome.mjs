@@ -11,7 +11,8 @@
 //      judges require that second visit: a page the cache shows again is another road) — round 2 stood on
 //      the splash for good (no App, its beforeunload listener held, the intent kept); shipped: the App boots within 4 s
 //      of the hop's go(), no beforeunload listener of the module left (getEventListeners(window), against a booted
-//      page's own count), the intent dropped, the diary's row «hop stay why cancelled»
+//      page's own count), the diary's row «hop stay why cancelled» — and (round 4) the intent KEPT, suspended for a late
+//      commit (a stay cannot tell a cancelled go() from a slow one: test-exit-slow-chrome)
 //   ② a hop STOPPED: the same road onto a previous page that answers in 8 s, Page.stopLoading once the hop's request
 //      reached that site (the person taps stop while it loads): the same judges
 //   ③ NO KEY, NO HOP: navigation.activation removed (Chromium 102–122, Safari 26.0–26.1: entries() without it) — G3's
@@ -20,7 +21,8 @@
 //   ④ (the cache ON) G7's road as shipped: the exit ends on the page before VibeSpace — and whether the older document
 //      it went through was LOADED or kept by the cache is said as measured (Chrome 154: loaded — the cache names
 //      ConflictingBrowsingInstance; a kept one going on is test-back-guard's fake-world leg, RED from round 2)
-// Its own clock: 600 s (suite-watchdog); run bare it assumes its ci.mjs row's budget (900 s) and says so at start.
+// Round 4 moved the lines round 2's swaps anchor on (the bound's and the tap's); round 3's own RED roads live in
+// test-exit-slow-chrome. Its own clock: 600 s (suite-watchdog); run bare it assumes its ci.mjs row's budget (900 s).
 // Requires google-chrome (SKIP without) and a fresh `npm run build`. Run: node scripts/test-exit-hop-chrome.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -160,8 +162,8 @@ const useBundle = (buf) => fs.writeFileSync(bundleFile, buf); // the index route
  *  nothing, the exit writes its intent with or without navigation.activation, and exitHop lets the clock alone decide. */
 const ROUND2 = {
   'mobile-back.js': [
-    ['  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); cancelled(); }, GONE_WAIT_MS); };', '  const onLeave = () => { began = true; };'],
-    ['  const onInput = () => { off(); input(); };', '  const onInput = () => { if (!began) { off(); input(); } };'],
+    ["  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); stayed('cancelled', null); linger(); }, GONE_WAIT_MS); };", '  const onLeave = () => { began = true; };'],
+    ["  const onInput = () => {\n    off();\n    if (!began) { drop(); input(); return; }\n    const abort = abortGo();\n    if (!abort) drop();\n    stayed('input', abort);\n    const end = linger();\n    abort?.then((landed) => { if (landed) { drop(); end(); } });\n  };", '  const onInput = () => { if (!began) { off(); drop(); input(); } };'],
     ['    if (tellsArrival()) exitIntentWrite({ t: Date.now(), hop: 0, key: entryKey(), to: \'below\' });', '    exitIntentWrite({ t: Date.now(), hop: 0, key: entryKey(), to: \'below\' });']],
   'back-guard.js': [["  if (!(typeof fromKey === 'string' && fromKey !== '' && fromKey === intent.key)) return 'clear';", "  if (fromKey !== undefined && fromKey !== intent.key) return 'clear';"]],
 };
@@ -257,11 +259,12 @@ try {
     console.log(`  · shipped ${JSON.stringify(G).slice(0, 900)} (a booted page's own beforeunload listeners: ${own})`);
     const C = cache === 'off' ? 'I' : 'II';
     const red = (x) => !!x && x.armed && x.asked === 2 && x.hop === 1 && !x.booted && x.unload >= 1 && !!x.intent && x.intent !== 'unreadable';
-    const green = (x) => x.armed && x.asked === 2 && x.hop === 1 && x.booted && x.ms !== null && x.ms <= 4000 && x.onApp && x.loads === 1 && x.why === 'cancelled' && x.unload === own && x.intent === null;
+    const kept = (x) => { try { return JSON.parse(x.intent).hop === 1; } catch { return false; } };
+    const green = (x) => x.armed && x.asked === 2 && x.hop === 1 && x.booted && x.ms !== null && x.ms <= 4000 && x.onApp && x.loads === 1 && x.why === 'cancelled' && x.unload === own && kept(x);
     check(`${C}① RED (round 2): the hop's go() onto a page that answers 204 — the older document stands on the splash for good: no App, its beforeunload listener held, the intent kept`, red(R.c204), R.c204);
-    check(`${C}① the shipped rules: the same 204 — the App boots within 4 s of the hop's go() (the diary: hop stay why cancelled), no beforeunload listener of the module left, the intent dropped`, green(G.c204), G.c204);
+    check(`${C}① the shipped rules: the same 204 — the App boots within 4 s of the hop's go() (the diary: hop stay why cancelled), no beforeunload listener of the module left, the intent kept for a late commit (round 4)`, green(G.c204), G.c204);
     check(`${C}② RED (round 2): the hop's go() onto a slow page, stopped while it loads — the splash for good, the listener held, the intent kept`, red(R.stop), R.stop);
-    check(`${C}② the shipped rules: the same stop — the App boots within 4 s of the hop's go(), no listener of the module left, the intent dropped`, green(G.stop), G.stop);
+    check(`${C}② the shipped rules: the same stop — the App boots within 4 s of the hop's go(), no beforeunload listener of the module left, the intent kept (round 4)`, green(G.stop), G.stop);
     check(`${C}③ RED (round 2): navigation.activation removed (entries() kept) — the exit, then a FORWARD press inside 10 s: the person is hopped back OUT of the page they went forward onto`, !!R.fwd && R.fwd.api.activation === 'absent' && R.fwd.api.entries && R.fwd.left && !R.fwd.stays && R.fwd.url.startsWith(AUX), R.fwd);
     check(`${C}③ the shipped rules: no key, no hop — the exit writes no intent there, and the page the person went forward onto boots and stays (${G.fwd.restored ? 'kept by the cache and shown again' : 'loaded'})`, G.fwd.api.activation === 'absent' && G.fwd.left && G.fwd.stays && !G.fwd.hops.some((h) => /^n/.test(h)), G.fwd);
     if (G.kept) check(`II④ the cache ON, G7's road as shipped: the exit ends on the page before VibeSpace; the older document it went through was ${G.kept.restored ? 'KEPT by the cache and went on' : `LOADED (the cache said: ${G.kept.cache.join(' · ') || 'nothing'})`}`, G.kept.armed && G.kept.outside && G.kept.loads + G.kept.restored === 1, G.kept);
