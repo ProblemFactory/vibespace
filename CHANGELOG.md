@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - Installing a plugin from a Git repository and switching plugins on or off work again: the form went out in the wrong format and was read as empty.
+- An automation key can open a conversation in a folder on a mounted drive again: since 2.369.350 every such folder read as missing.
 
 ## 2.369.358 — 2026-10-26
 

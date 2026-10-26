@@ -80,7 +80,29 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   if (!dataDir || !vault) throw new TypeError('automation-engine: dataDir and vault are required');
   // lane automation-open-limits: the facts an open's limits are judged over — a folder's real path (null = missing) and the
   // hub's defaults for what an open does not name (the wiring hands the account store's and the instance's)
-  const realpath = typeof openFacts.realpath === 'function' ? openFacts.realpath : (p) => { try { return fs.realpathSync.native(p); } catch { return null; } };
+  // 2.369.359 (userW's agent, on 2.369.357 → .358): the folder judge read the real path SYNC on the main thread; under
+  // mounts.mainThreadSyncGuard (2.369.350) a folder on a storage mount threw EVSMOUNTSYNC ⇒ null ⇒ «does not exist» ⇒
+  // cwd_outside_roots for EVERY mounted folder (the key's own roots sat on the mount too). The real paths of the cwd AND the
+  // key's roots are read OFF the main thread and BOUNDED (the hub wires the SafeFs worker's `realpath`; the default is
+  // fs.promises — the threadpool, never the loop) BEFORE the PURE judge, which then reads a memo: no fs call of its own. A
+  // missing folder is null (the judge says «does not exist»); one that cannot be read (a mount that did not answer in
+  // REALPATH_MS, a refusal) is a NAMED refusal saying so — never «does not exist».
+  const REALPATH_MS = Number.isFinite(Number(openFacts.realpathMs)) && Number(openFacts.realpathMs) > 0 ? Number(openFacts.realpathMs) : 8000;
+  const realpathAsync = typeof openFacts.realpathAsync === 'function' ? openFacts.realpathAsync : (p) => fs.promises.realpath(p);
+  const MISSING = new Set(['ENOENT', 'ENOTDIR', 'ELOOP', 'ENAMETOOLONG']);
+  async function realpathsOf(paths) {
+    const memo = new Map();
+    await Promise.all([...new Set(paths.filter((p) => typeof p === 'string' && p))].map(async (p) => {
+      let timer = null;
+      const bound = new Promise((resolve, reject) => { timer = setTimeout(() => reject(Object.assign(new Error(`no answer in ${REALPATH_MS / 1000} s`), { code: 'ETIMEDOUT' })), REALPATH_MS); });   // the bound keeps the loop alive until it fires: a judgment in flight is work, never a stray timer
+      try { const r = await Promise.race([realpathAsync(p), bound]); memo.set(p, typeof r === 'string' ? r : null); }
+      catch (e) {
+        if (e && MISSING.has(e.code)) { memo.set(p, null); return; }
+        throw Object.assign(new Error(`the real path of "${String(p).slice(0, 200)}" could not be read (${String((e && e.message) || e).slice(0, 160)})`), { code: 'realpath_unreadable', path: p });
+      } finally { clearTimeout(timer); }
+    }));
+    return memo;
+  }
   const FILE = path.join(dataDir, A.STORE_FILE), AUDIT = path.join(dataDir, A.AUDIT_FILE);
   // lane grants-unify: a grant's WHO (door automation-key-use) and its REACH (door automation-key-reach) are rows of the ONE grants
   // store, resource = the grant's id; the record here keeps only what is no who (key, mode, stamps, a spent once)
@@ -487,7 +509,12 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
    *  named refusal, carrying the key's limits (names only: what the caller may ask for instead). */
   async function limitsJudge(k, args) {
     const eff = effectiveOpen(args);
-    const v = A.openLimitsVerdict(k.limits, eff, { realpath });
+    // the real paths the judge will ask for — the cwd as asked and the key's roots — read off the main thread first (above)
+    const L = A.limitsOf(k.limits) || A.limitsOf(A.DEFAULT_LIMITS);
+    let reals;
+    try { reals = await realpathsOf([String(eff.cwd == null ? '' : eff.cwd), ...L.cwdRoots]); }
+    catch (e) { return { ...named(A.LIMIT_CODES.cwdRoots, `${e.message} — the folder's real path decides where it is`, { field: 'cwdRoots', limits: k.limits }), args }; }
+    const v = A.openLimitsVerdict(k.limits, eff, { realpath: (p) => (reals.has(p) ? reals.get(p) : null) });
     if (!v.ok) return { ...named(v.code, v.why, { field: v.field, limits: k.limits }), args };   // q-049 M1: no `unbounded` — null limits now refuse
     // q-049 M2 (lane automation-open-permission-resolve): no permission mode named ⇒ the CLI's own setting runs — resolved for
     // the REAL folder just judged (the folder judge runs FIRST: a folder outside the roots reads no config at all) and judged

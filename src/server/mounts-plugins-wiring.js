@@ -181,7 +181,9 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
     } }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
   openFacts: { defaults: (backend) => require('./conversation-ops.js').openDefaults(backend, { accounts: getAccounts(), ...automationSettings }),
     // lane automation-open-permission-resolve (q-049 M2): the CLI's own permission mode for the judged folder (its project layer follows it)
-    permissionDefault: (cwd, backend) => require('./permission-rules.js').resolveDefaultMode({ backend, cwd }) } });
+    permissionDefault: (cwd, backend) => require('./permission-rules.js').resolveDefaultMode({ backend, cwd }),
+    // 2.369.359 (userW): the folder judge's real paths come from the SafeFs worker, bounded — the loop never waits on a storage mount
+    realpathAsync: async (p) => { const sf = app.locals && app.locals.safeFs; if (!sf) throw Object.assign(new Error('the SafeFs pool is not up'), { code: 'safefs_down' }); const r = await sf.call('realpath', { path: p }, { timeoutMs: 8000 }); return r && typeof r.path === 'string' ? r.path : null; } } });
 require('../routes/automation.js').registerAutomationRoutes(app, { engine: automation, who: (req) => require('../auth.js').Auth.signInHandle(req),
   limitChoices: () => require('./conversation-ops.js').limitChoices({ accounts: getAccounts() }),   // lane automation-open-limits: the limit pickers
   permissionNow: (cwd) => require('./permission-rules.js').resolveDefaultMode({ backend: 'claude', cwd: cwd || process.cwd() }),   // q-049 M2: the picker's 「CLI 自己的设置（现在是 X）」 — the key's first folder, else the hub's own

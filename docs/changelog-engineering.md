@@ -11,6 +11,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - **Fix + fence:** `JSON_HDR` on the three calls; test-architecture **§102** censuses every direct `fetch` / `fetchJson` call in `src/lib` + `src/client.js` whose body is `JSON.stringify(…)` and has no `headers` (red by file:line; an in-suite control sees a bare call). On 91bf7e18 the census names 3 lines (plugins-ui.js:256, :319, :488); on this commit 0.
 - Gates: test-architecture, test-plugin-loader, test-changelog-style, the build's i18n-check; greps clean.
 
+### automation-mount-realpath — an automation key's folder judge reads real paths off the main thread (hotfix by 主开发; userW's agent, fb-ac40a458d8)
+- **Cause:** automation-engine.js handed `fs.realpathSync.native` to the PURE `openLimitsVerdict`; the 2.369.350 mount guard (sync-fs-witness) refused it on every storage-mount path with `EVSMOUNTSYNC`, the engine's catch answered null, the judge said «does not exist» ⇒ `cwd_outside_roots` for the cwd AND the key's roots on the mount — every open through a key whose folders sit on a mount, since .350.
+- **Fix:** `limitsJudge` reads the real paths of the cwd + the roots first through `openFacts.realpathAsync` (the wiring: `app.locals.safeFs.call('realpath', …, {timeoutMs: 8000})`; default `fs.promises.realpath`) under `REALPATH_MS`; the judge reads a memo. Missing (ENOENT…) stays «does not exist»; unreadable / no answer in the bound ⇒ a NAMED refusal. Gate: test-automation-keys ⑫e (RED on 91bf7e18 with every sync realpath refused as the guard does; the bound; ENOENT).
+- Note for the fleet: userW's instance marks fb-ac40a458d8 handled at 2.369.359.
+
 ## 2.369.358 — 2026-10-26
 
 ### engine-plugin — P0 of the custom browser kernel: a browser ENGINE plugin, the `{kind:'plugin'}` choice through both launch roads + a conversation's browser, the default policy as a setting with a fleet fact (BUILD lane on 2.369.355 ba15fe55; docs/design-custom-browser-plugin.zh.md §1 rewritten as built)

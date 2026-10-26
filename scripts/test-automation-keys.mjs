@@ -214,6 +214,7 @@ const mkWorld = async (tag, { timers, verbs = null } = {}) => {
 };
 const caller = (o = {}) => ({ conversationId: 'conv-1', sessionKey: 'claude:conv-1', name: 'Worker one', live: true, groups: [], ...o });
 const cards = (w) => (w.userTodos.snapshot().open || []).filter((i) => i.action && i.action.type === 'automation-ask');
+const cardSoon = async (w, max = 100) => { for (let i = 0; i < max && !cards(w).length; i++) await new Promise((r) => setTimeout(r, 10)); return cards(w); };   // 2.369.359: an open's pre-judge reads the folder's real path OFF the thread; its card lands after that I/O — a leg waits for the card it reads, bounded
 const auditOf = (w) => { try { return fs.readFileSync(path.join(w.dir, A.AUDIT_FILE), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 const hitsIn = (dir, needles) => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else { const b = fs.readFileSync(p); const s = b.toString('latin1'); for (const n of needles) for (const form of [n, Buffer.from(n).toString('hex'), Buffer.from(n).toString('base64')]) if (s.includes(form)) out.push(path.relative(dir, p)); } } }; walk(dir); return [...new Set(out)]; };
 {
@@ -304,7 +305,7 @@ const hitsIn = (dir, needles) => { const out = []; const walk = (d) => { for (co
     'conversations.open': (args) => { ran.push(`open:${args.name}`); return { ok: true, conversationId: 'conv-9' }; },
   } });
   w.engine.mint({ name: 'k', scopes: ['conversations.rename', 'conversations.open'], limits: OPEN_LIMITS });
-  const turn = () => new Promise((r) => setImmediate(r));
+  const turn = () => new Promise((r) => setTimeout(r, 15));   // 2.369.359: an open's pre-judge reads the folder's real path OFF the thread first (⑫e) — a card is filed after that I/O lands, not within one setImmediate
   // M1: the caller disconnects mid-card (its request's signal aborts) ⇒ withdrawn; the card closes; an Always runs NOTHING
   const gone = new AbortController();
   const pg = w.engine.use({ caller: caller(), verb: 'conversations.open', args: { cwd: '/tmp', name: 'ghost worker' }, signal: gone.signal });
@@ -644,8 +645,7 @@ const grantsOf = (w) => JSON.parse(fs.readFileSync(path.join(w.dir, A.STORE_FILE
   ok(r5.code === 'cwd_outside_roots' && !cards(w).length, 'no grant + an open outside the limits ⇒ refused at once, NO first-use card (the owner is never asked about it)', r5);
   // the limits edited while a card waits ⇒ judged again after the answer
   const p6 = e.use({ caller: caller({ conversationId: 'conv-6', sessionKey: 'claude:conv-6' }), verb: 'conversations.open', args: { cwd: IN }, want: k.key.id });
-  await new Promise((r) => setImmediate(r));
-  const c6 = cards(w);
+  const c6 = await cardSoon(w);
   const narrowed = e.setLimits(k.key.id, { ...LIM_OPEN, cwdRoots: [LOUT] }, { by: 'user' });
   if (c6.length) e.answer(c6[0].action.askId, { answer: 'always' });
   const r6 = await p6;
@@ -750,7 +750,7 @@ const grantsOf = (w) => JSON.parse(fs.readFileSync(path.join(w.dir, A.STORE_FILE
 console.log('⑫c MUTANT — the config read BEFORE the folder judge');
 {
   const ESRC = fs.readFileSync(path.join(ROOT, 'src/server/automation-engine.js'), 'utf8');
-  const n1 = "    const v = A.openLimitsVerdict(k.limits, eff, { realpath });\n    if (!v.ok) return { ...named(v.code, v.why, { field: v.field, limits: k.limits }), args };";
+  const n1 = "    const v = A.openLimitsVerdict(k.limits, eff, { realpath: (p) => (reals.has(p) ? reals.get(p) : null) });\n    if (!v.ok) return { ...named(v.code, v.why, { field: v.field, limits: k.limits }), args };";
   ok(ESRC.split(n1).length === 2, 'ANCHOR: the folder judge runs first, spelled once');
   const MX = M.load('src/server/automation-engine.js', ESRC.replace(n1, "    if (!eff.permissionMode && typeof openFacts.permissionDefault === 'function') { try { await openFacts.permissionDefault(String(eff.cwd || ''), eff.backend); } catch { } }\n" + n1), 'config-first');
   const reads = [];
@@ -761,6 +761,36 @@ console.log('⑫c MUTANT — the config read BEFORE the folder judge');
   e.grant(k.key.id, ['session:conv-1']);
   const r = await e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: LOUT }, want: k.key.id });
   ok(r.code === 'cwd_outside_roots' && reads.length >= 1 && reads[0][0] === LOUT, `MUTANT RED: an engine that reads the config FIRST asked about a folder OUTSIDE the roots (${JSON.stringify(reads[0])}) — the project layer of a folder the key does not reach was read`, { r: r.code, reads });
+}
+console.log('⑫e 2.369.359 (userW\'s agent, 2.369.357): the folder judge never reads a real path SYNC on the main thread — under mounts.mainThreadSyncGuard a storage mount answered EVSMOUNTSYNC and every mounted folder read as «does not exist»');
+{
+  const rig = judgeRig();
+  const w = await mkWorld('judge-mount-guard');
+  const refuse = () => { const e = new Error('refused: a synchronous fs call on a storage mount from the main thread'); e.code = 'EVSMOUNTSYNC'; throw e; };
+  const origSync = fs.realpathSync, origNative = fs.realpathSync.native;
+  const guarded = () => refuse();
+  guarded.native = guarded;
+  fs.realpathSync = guarded;   // the guard's shape on the main thread: every sync realpath refused (the engine captured the fs module, not the function)
+  let r1 = null, r2 = null, r3 = null;
+  try {
+    const e = judgeEngine(ENG, w, rig);   // the default road: fs.promises (the threadpool), bounded
+    const k = e.mint({ name: 'mounted', scopes: ['conversations.open'], limits: LIM_OPEN });
+    e.grant(k.key.id, ['session:conv-1']);
+    r1 = await e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN }, want: k.key.id });
+    const slow = judgeEngine(ENG, w, rig, { realpathAsync: () => new Promise(() => {}), realpathMs: 300 });
+    const k2 = slow.mint({ name: 'slow', scopes: ['conversations.open'], limits: LIM_OPEN });
+    slow.grant(k2.key.id, ['session:conv-1']);
+    const t0 = Date.now();
+    r2 = await slow.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN }, want: k2.key.id });
+    r2 = { ...r2, ms: Date.now() - t0 };
+    const missing = judgeEngine(ENG, w, rig, { realpathAsync: async () => { const err = new Error('ENOENT: no such file or directory'); err.code = 'ENOENT'; throw err; } });
+    const k3 = missing.mint({ name: 'missing', scopes: ['conversations.open'], limits: LIM_OPEN });
+    missing.grant(k3.key.id, ['session:conv-1']);
+    r3 = await missing.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN }, want: k3.key.id });
+  } finally { fs.realpathSync = origSync; fs.realpathSync.native = origNative; }
+  ok(r1 && r1.ok === true, 'RED CONTROL (the base read fs.realpathSync.native on the main thread ⇒ the guard\'s refusal ⇒ «does not exist» ⇒ cwd_outside_roots): with every sync realpath refused, an open inside the roots is OK — the real paths were read off the main thread', r1 && (r1.ok || `${r1.code} ${r1.why}`));
+  ok(r2 && !r2.ok && r2.code === 'cwd_outside_roots' && /could not be read/.test(String(r2.why)) && /no answer in 0\.3 s/.test(String(r2.why)), 'a real path that does not answer within the bound is a NAMED refusal naming the bound (the mount did not answer) — never «does not exist» (the ratchet keeps wall-clock bounds out of fast suites; the why names the 0.3 s bound, which proves the bound fired)', r2 && `${r2.code} ${r2.why} ${r2.ms} ms`);
+  ok(r3 && !r3.ok && r3.code === 'cwd_outside_roots' && /does not exist/.test(String(r3.why)), 'a MISSING folder (ENOENT off the thread) still says «does not exist»', r3 && `${r3.code} ${r3.why}`);
 }
 console.log('⑫d B-dbba — `conversations open --name` names the conversation AT its create (the frame\'s sessionName); the answer, the status, the audit and the card say it');
 {
@@ -779,7 +809,7 @@ console.log('⑫d B-dbba — `conversations open --name` names the conversation 
   ok(au.length === 1 && au[0].ok && au[0].args.name === 'worker one' && au[0].args.cwd === IN, 'the audit line keeps the name (names and ids only)', au[0]);
   // the first-use card of an open says WHAT it would open
   const p = e.use({ caller: caller({ conversationId: 'conv-8', sessionKey: 'claude:conv-8', name: 'Worker eight' }), verb: 'conversations.open', args: { cwd: IN, name: 'lane foo' }, want: k.key.id });
-  await new Promise((r2) => setImmediate(r2));
+  await cardSoon(w);   // 2.369.359: the open's card lands after its off-thread read
   const c = cards(w);
   ok(c.length === 1 && c[0].detail.startsWith(`This call would open "lane foo" in ${IN}.\nThe key's folders: ${LROOT} (with their subfolders).\n`) && c[0].i18n.detail.length === 4 && c[0].i18n.detail[0].params.name === 'lane foo' && c[0].i18n.detail[0].params.cwd === IN
     && c[0].i18n.detail[1].key === "The key's folders: {roots} (with their subfolders)." && c[0].i18n.detail[1].params.roots === LROOT && /^Allow once/.test(c[0].i18n.detail[2].key) && /^The reach says/.test(c[0].i18n.detail[3].key),
@@ -787,7 +817,7 @@ console.log('⑫d B-dbba — `conversations open --name` names the conversation 
   e.answer(c[0].action.askId, { answer: 'deny' });
   ok((await p).code === 'ask_denied', '…denied as before');
   const p2 = e.use({ caller: caller({ conversationId: 'conv-9', sessionKey: 'claude:conv-9' }), verb: 'conversations.open', args: { cwd: IN }, want: k.key.id });
-  await new Promise((r2) => setImmediate(r2));
+  await cardSoon(w);   // 2.369.359: the open's card lands after its off-thread read
   const c2 = cards(w);
   ok(c2.length === 1 && c2[0].detail.startsWith(`This call would open a conversation in ${IN}.\n`), 'an open with no name says so (the folder only)', c2[0] && c2[0].detail);
   e.answer(c2[0].action.askId, { answer: 'deny' }); await p2;
@@ -1057,8 +1087,8 @@ console.log('⑩ wiring pins');
   const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
   const ws = read('src/ws-handler.js'), wire = read('src/server/mounts-plugins-wiring.js');
   ok(/rename: \(data\) => ConversationOps\.renameSession\(\{ activeSessions, setCustomName, writeSessionMeta, readSessionMeta, broadcastActiveSessions, getSessionKey \}, data\),/.test(ws) && /convOps\.renameConversation\(data, data\.name, byOfWs\(ws\)\);[^\n]*\n\s+break;/.test(ws) && /ConversationOps\.provide\(convOpsOwn\);/.test(ws) && !/const trimmedName/.test(ws), 'the ws rename case calls THE function (its body lives in conversation-ops.js only — lane automation-verbs: through the renameConversation seam) and hands it to the automation door');
-  ok(/openFacts: \{ defaults: \(backend\) => require\('\.\/conversation-ops\.js'\)\.openDefaults\(backend, \{ accounts: getAccounts\(\), \.\.\.automationSettings \}\),\n[^\n]*\n\s+permissionDefault: \(cwd, backend\) => require\('\.\/permission-rules\.js'\)\.resolveDefaultMode\(\{ backend, cwd \}\) \} \}\);/.test(wire) && /limitChoices: \(\) => require\('\.\/conversation-ops\.js'\)\.limitChoices\(\{ accounts: getAccounts\(\) \}\)/.test(wire) && /permissionNow: \(cwd\) => require\('\.\/permission-rules\.js'\)\.resolveDefaultMode\(\{ backend: 'claude', cwd: cwd \|\| process\.cwd\(\) \}\)/.test(wire),
-    'lane automation-open-limits wiring: the engine judges over the account store\'s default + the instance\'s default model; the doors hand the pickers\' choices; q-049 M2: the engine resolves the CLI\'s own permission mode through src/server/permission-rules.js (the PURE module requires nothing), the list door the picker\'s 「现在是 X」');
+  ok(/openFacts: \{ defaults: \(backend\) => require\('\.\/conversation-ops\.js'\)\.openDefaults\(backend, \{ accounts: getAccounts\(\), \.\.\.automationSettings \}\),\n[^\n]*\n\s+permissionDefault: \(cwd, backend\) => require\('\.\/permission-rules\.js'\)\.resolveDefaultMode\(\{ backend, cwd \}\),\n[^\n]*\n\s+realpathAsync: async \(p\) => \{ const sf = app\.locals && app\.locals\.safeFs; if \(!sf\) throw Object\.assign\(new Error\('the SafeFs pool is not up'\), \{ code: 'safefs_down' \}\); const r = await sf\.call\('realpath', \{ path: p \}, \{ timeoutMs: 8000 \}\);[^\n]*\} \}\);/.test(wire) && /limitChoices: \(\) => require\('\.\/conversation-ops\.js'\)\.limitChoices\(\{ accounts: getAccounts\(\) \}\)/.test(wire) && /permissionNow: \(cwd\) => require\('\.\/permission-rules\.js'\)\.resolveDefaultMode\(\{ backend: 'claude', cwd: cwd \|\| process\.cwd\(\) \}\)/.test(wire),
+    'lane automation-open-limits wiring: the engine judges over the account store\'s default + the instance\'s default model; the doors hand the pickers\' choices; q-049 M2: the engine resolves the CLI\'s own permission mode through src/server/permission-rules.js (the PURE module requires nothing); 2.369.359: the folder judge\'s real paths come from the SafeFs worker (realpathAsync, 8 s), never a sync realpath on the loop, the list door the picker\'s 「现在是 X」');
   ok(!/require\((?!'\.\/grant-model\.js'\))/.test(fs.readFileSync(path.join(ROOT, 'src/automation-keys.js'), 'utf8')) && !/permission-rules/.test(fs.readFileSync(path.join(ROOT, 'src/automation-keys.js'), 'utf8').replace(/src\/server\/permission-rules\.js resolveDefaultMode|src\/permission-rules\.js claudeDefaultMode/g, '')), 'the resolver is PASSED IN: src/automation-keys.js still requires nothing and names permission-rules only in its comments');
   ok(/require\('\.\/automation-engine\.js'\)\.create\(\{ dataDir: path\.join\(rootDir, 'data'\), vault, userTodos,/.test(wire) && /registerAutomationRoutes\(app, \{ engine: automation,/.test(wire) && /automation: \(\) => automation,/.test(wire), 'the hub wires the engine (the vault, For you), its doors, and its rows in the Vault window');
   ok(VE.isSecretName('apikey:ak-000000000001') && R('src/vault.js').SECRETS_AT_REST.some((r) => r.entry === 'apikey:<key id>') && R('src/vault-inventory.js').GROUP_IDS.includes('automation') && R('src/vault-inventory.js').revealableOf('automation', 'apikey:ak-000000000001'),
@@ -1280,8 +1310,7 @@ console.log('⑰ 编辑… — a minted key\'s verbs and limits after minting (l
   const e = judgeEngine(ENG, w2, rig);
   const ka = e.mint({ name: 'anywhere', scopes: ['conversations.open'], limits: ALL });
   const pc = e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN, name: 'w' }, want: ka.key.id });
-  await new Promise((r2) => setImmediate(r2));
-  const c = cards(w2);
+  const c = await cardSoon(w2);   // 2.369.359: the open's card lands after its off-thread read
   ok(c.length === 1 && c[0].i18n.detail.length === 4 && /^The reach says/.test(c[0].i18n.detail[3].key) && c[0].i18n.detail[1].key === "The key's folders: all paths — any folder on this VibeSpace." && !c[0].i18n.detail[1].params && c[0].detail.includes("\nThe key's folders: all paths — any folder on this VibeSpace.\n"),
     'the first-use card of an all-paths key says 「所有路径」 (its own line, i18n — never a bare `/`)', c[0] && c[0].i18n.detail);
   e.answer(c[0].action.askId, { answer: 'deny' });
