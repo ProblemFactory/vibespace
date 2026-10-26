@@ -59,6 +59,12 @@
 //      dies; the reconnect's re-read keeps the drag and B RE-SENDS it (the real server's `layout-sync-ack` proven first);
 //      CONTROL an old server (acks ignored): the fallback stamps at the send, the re-read reverses the drag, B never hangs
 //      the pointerup — the box snapped back to where A last saw it, the drag's save was swallowed, no toast)
+//   A0 CI .358 (the Actions mirror, both tries: «✗ A: …and Fin's with 0» `[]` — the product had moved, the server read
+//      «Fin 1 → 0»): A AWAITED HR's frame and READ Fin's from the list at that instant. A FRAME THE SUITE EXPECTS IS
+//      AWAITED WITH A BOUND (3 s), never read at an instant, and a wait that runs out is a ✗ that names it (A, J, M).
+//      RED CONTROL: Fin's frame HELD 1.2 s in the page (app.ws.send wrapped) — the instant read at HR's frame sees `[]`,
+//      the runner's ✗, and the awaited read finds the 0. VS_CPU_THROTTLE=<n> slows every page's CPU n× (the runner's
+//      cores, on this box; measured: ×4 never parts the two frames here — one save sends both in one task)
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
@@ -78,6 +84,7 @@ const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const ONLY = (process.env.DMOVE_ONLY || '').split(',').filter(Boolean); // a leg filter for a verifier's re-run (the whole suite is the gate)
 const want = (id) => !ONLY.length || ONLY.includes(id);
 const ROOT = scratch('dmove');
+const THROTTLE = Number(process.env.VS_CPU_THROTTLE) || 0; // the runner's slower cores, on this box (CI .358)
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 const procs = new Set(); const worktrees = new Set(); let fakeHome = null;
 function cleanup() {
@@ -166,6 +173,7 @@ else await (async () => {
     await cdp('Page.enable'); await cdp('Runtime.enable'); await cdp('Network.enable');
     await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47 — before every navigation this suite makes
     await cdp('Emulation.setDeviceMetricsOverride', { width: 1571, height: 905, deviceScaleFactor: 1, mobile: false });
+    if (THROTTLE > 1) { await cdp('Emulation.setCPUThrottlingRate', { rate: THROTTLE }); if (name === 'p1') console.log(`  (every page's CPU throttled ×${THROTTLE} — VS_CPU_THROTTLE)`); }
     const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
     const mouse = (type, x, y, extra = {}) => cdp('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: 1, ...extra });
     const click = async (x, y) => { await mouse('mouseMoved', x, y, { buttons: 0 }); await mouse('mousePressed', x, y); await sleep(40); await mouse('mouseReleased', x, y); };
@@ -210,6 +218,17 @@ else await (async () => {
     return up;
   };
   const hrSyncsSent = () => framesSent.filter((m) => m.type === 'layout-sync' && m.desktopId === 'desk-hr');
+  /** The window counts of the Fin records the page SENT so far. */
+  const finSentCounts = () => framesSent.filter((m) => m.type === 'layout-sync' && m.desktopId === 'desk-fin').map((m) => (m.state?.windows || []).length);
+  /** A FRAME THE SUITE EXPECTS IS AWAITED (CI .358): `pred` within `ms`, else the detail names the wait that ran out. */
+  const awaitFrame = async (pred, ms, what, seen) => { const t0 = Date.now(); const got = await until(pred, ms, 20); return { got, ms: Date.now() - t0, why: got ? '' : `waited ${ms} ms for ${what} — none came; seen: ${seen()}` }; };
+  /** After the drop: HR's frame awaited, then Fin's with 0 awaited — `atHr` = what the list held the instant HR's was seen. */
+  const sentAfterDrop = async () => {
+    const hr = await awaitFrame(() => hrSyncsSent().length > 0, 3000, 'HR\'s outgoing layout-sync', () => J(framesSent.map((m) => m.type + ':' + (m.desktopId || ''))));
+    const atHr = finSentCounts();
+    const fin = await awaitFrame(() => finSentCounts().includes(0), 3000, 'Fin\'s outgoing layout-sync with 0 windows (after HR\'s)', () => J(finSentCounts()));
+    return { hr, atHr, fin };
+  };
   const sortIds = (a) => [...a].sort();
   const refusalsSince = (j0) => (journal.slice(j0).match(/\[layout-sync\] REFUSED[^\n]*/g) || []);
 
@@ -224,11 +243,11 @@ else await (async () => {
       await dropOnto('win-fin-1-a', 'desk-hr');
       const pv = await previewRects('desk-hr');
       ok(pv === 4, 'A: after the REAL title-bar drop HR\'s preview draws 4 (2.369.198: 1)', pv);
-      await until(() => hrSyncsSent().length > 0, 3000);
+      const sent = await sentAfterDrop();
       const sentHr = hrSyncsSent().map((m) => (m.state?.windows || []).map((w) => w.winId));
-      ok(sentHr.length >= 1 && sortIds(sentHr[0]).join() === sortIds(['win-hr-1-a', 'win-hr-2-a', 'win-hr-3-a', 'win-fin-1-a']).join(), 'A: the page\'s OUTGOING layout-sync after the drop carries HR with 4 windows (CDP webSocketFrameSent)', J(sentHr));
-      const sentFin = framesSent.filter((m) => m.type === 'layout-sync' && m.desktopId === 'desk-fin').map((m) => (m.state?.windows || []).length);
-      ok(sentFin.includes(0), 'A: …and Fin\'s with 0 (the window left it)', J(sentFin));
+      ok(sentHr.length >= 1 && sortIds(sentHr[0]).join() === sortIds(['win-hr-1-a', 'win-hr-2-a', 'win-hr-3-a', 'win-fin-1-a']).join(), 'A: the page\'s OUTGOING layout-sync after the drop carries HR with 4 windows (CDP webSocketFrameSent)', sent.hr.why || J(sentHr));
+      if (sent.fin.got && !sent.atHr.includes(0)) console.log(`  (A: Fin's frame was seen ${sent.fin.ms} ms after HR's — the list held ${J(sent.atHr)} at HR's instant)`);
+      ok(sent.fin.got, 'A: …and Fin\'s with 0 (the window left it — awaited ≤ 3 s, never read at HR\'s instant)', sent.fin.why);
       ok(await until(async () => (await serverIds('desk-hr')).length === 4, 3000), 'A: the SERVER\'s record of HR = 4 before any switch (2.369.198: HR unchanged until the switch, then 1)', J(await serverIds('desk-hr')));
       await clickPreview('desk-hr');
       const shown = await ev(SHOWN);
@@ -243,6 +262,18 @@ else await (async () => {
       const has = (d, a, b) => hist.some((e) => (e.change || []).some(([n, x, y]) => n === d && x === a && y === b));
       const lossRow = hist.find((e) => (e.change || []).some(([n, a, b]) => n === 'HR' && b < a));
       ok(!lossRow && has('HR', 3, 4) && has('Fin', 1, 0), 'A: the rollback points the move wrote read "Then: HR 3 → 4" and "Then: Fin 1 → 0" (the target first — never a moment with the window on no desktop); no point reads HR shrinking', J(hist.slice(0, 5).map((e) => e.change)));
+    }
+
+    // ── A0: RED CONTROL of A's read (CI .358) — Fin's frame held in the page ──
+    console.log('— A0: CONTROL — Fin\'s outgoing frame held 1.2 s in the page (the runner\'s order, scripted)');
+    if (want('A0') && ok(await fresh('a0'), 'A0: fresh fixture, the page booted')) {
+      // the page's ONE socket door: a Fin layout-sync leaves 1.2 s late, everything else at once (the product's records unchanged)
+      await ev(`(() => { const ws = app.ws, send = ws.send.bind(ws); ws.send = (d) => (d && d.type === 'layout-sync' && d.desktopId === 'desk-fin' ? setTimeout(() => send(d), 1200) : send(d)); return true; })()`);
+      await dropOnto('win-fin-1-a0', 'desk-hr');
+      const sent = await sentAfterDrop();
+      ok(sent.hr.got && !sent.atHr.includes(0), 'A0: the pre-.358 read — Fin\'s list taken at the instant HR\'s frame is seen — misses the 0 (the runner\'s ✗, `[]`)', sent.hr.why || J(sent.atHr));
+      ok(sent.fin.got, 'A0: …the awaited read finds Fin\'s with 0 within the 3 s bound', sent.fin.why);
+      ok(await until(async () => (await serverIds('desk-fin')).length === 0 && (await serverIds('desk-hr')).length === 4, 4000), 'A0: the server ends at HR 4 / Fin 0 (the held frame changed only WHEN Fin\'s record left)', J({ hr: await serverIds('desk-hr'), fin: await serverIds('desk-fin') }));
     }
 
     // ── B: CONTROL visited first ──
@@ -421,7 +452,7 @@ else await (async () => {
       ok(await P2.ev('app.layoutManager._pointerDown === true'), 'J: B\'s pointer is down on fin-2, heading for HR\'s preview');
       P2.framesGot.length = 0;
       await nudge(); // A's drag of fin-1 ⇒ A's save of Fin (still listing fin-2) lands under B's pointer
-      ok(P2.framesGot.some((f) => f.desktopId === 'desk-fin' && (f.state?.windows || []).some((w) => w.winId === 'win-fin-2-j')), 'J: A\'s Fin record, listing fin-2, reached B during the drag (deferred)', J(P2.framesGot.map((f) => [f.desktopId, (f.state?.windows || []).map((w) => w.winId)])));
+      ok(await until(() => P2.framesGot.some((f) => f.desktopId === 'desk-fin' && (f.state?.windows || []).some((w) => w.winId === 'win-fin-2-j')), 3000), 'J: A\'s Fin record, listing fin-2, reached B during the drag (deferred; awaited ≤ 3 s)', J(P2.framesGot.map((f) => [f.desktopId, (f.state?.windows || []).map((w) => w.winId)])));
       for (let i = 7; i <= 20; i++) { await P2.mouse('mouseMoved', tb.l + 80 + (p.x - tb.l - 80) * i / 20, tb.y + (p.y - tb.y) * i / 20); await sleep(35); }
       await P2.mouse('mouseMoved', p.x + 1, p.y); await sleep(80); await P2.mouse('mouseMoved', p.x, p.y); await sleep(120);
       await P2.mouse('mouseReleased', p.x, p.y);
@@ -481,7 +512,7 @@ else await (async () => {
       ok(await P2.ev('app.layoutManager._pointerDown === true'), 'M: B\'s pointer is down on hr-2');
       P2.framesGot.length = 0;
       await nudge(); // A drags hr-1 a little ⇒ A's save of HR (hr-2 where A last saw it) lands on B, deferred
-      ok(P2.framesGot.some((f) => f.desktopId === 'desk-hr'), 'M: A\'s HR record reached B during the drag');
+      ok(await until(() => P2.framesGot.some((f) => f.desktopId === 'desk-hr'), 3000), 'M: A\'s HR record reached B during the drag (awaited ≤ 3 s)', J(P2.framesGot.map((f) => f.desktopId)));
       for (let i = 7; i <= 12; i++) { await P2.mouse('mouseMoved', tb.l + 80 + i * 30, tb.y + i * 20); await sleep(35); }
       await P2.mouse('mouseReleased', tb.l + 80 + 12 * 30, tb.y + 12 * 20);
       await sleep(150);
