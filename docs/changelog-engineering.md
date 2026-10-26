@@ -4,6 +4,14 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.361 — 2026-10-28
+
+### lark-signin-dialog — a Lark re-authorize ends when the consent LANDS; the narrowing row never names a scope the account holds (FIX lane on 2.369.358 91bf7e18; the owner's two reports on his own instance, 2026-10-26 14:0x PT)
+- **The landing (R1):** the owner's dialog ended 77 s after his consent landed — `authWatcher` answered only on `auth.state === 'connected'`, and `authState` said `expired` on the record's refused `lastPass` (the dead sign-in that made him press: evidence about the OLD token) until the forced pass after the landing finished. `onAuthDone` (his road — the journal's «connected as», not `applyRebind`'s «re-authorized under») and `applyRebind` now null a refused `lastPass` in the landing's write; the watcher answers through channel-caps `consentEndOf` (a moved `lastAuthAt` is the end, never the state).
+- **The held token (R2/R3):** `scopeSource.lacking` subtracts `heldNow` (and the ladder's order reads the same set); a first sign-in and a rebind keep the list's word. One journal line per consent page names the source, the gap, the held count and (`covering N the list omits: …`) the list's gaps the held token carries — which wide scope the owner's list omits is not knowable without the real answer, so that line names it at his next press (the fake shows each of the 11, absent or tenant-typed, drew the row before).
+- **The pins (R4):** Connect's, the Re-authorize's and a rebind's start answers carry `scopesFrom` / `scopesWhy` / `lacking`; the route answers the engine's whole.
+- **Proof:** test-channels-lark-shape ⑪d (514 → 538; RED on the 91bf7e18 tree: 12 asserts of the new legs; CONTROLS by mutant copies) · test-integrations-ui (l) with the stub's new `gmailHold` (base 244/1 → 245/0). The fast row restated 6.2 → 6.6 s (base/head back to back); the fast tier's stated sum is now 910 s of its 910 s cap (rounded) — the next fast growth needs a cut or a cap move.
+
 ## 2.369.360 — 2026-10-27
 
 ### ci358-reds (items 7 + 8 and round 2 — c083607d → 5bdb59fb; the .358 mirror's two fast-tier races)

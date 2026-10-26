@@ -48,7 +48,7 @@ import { t as tr, deviceLocale } from './i18n.js';
 import { mountsDialog, wireOAuthConnect, reauthDialog, wireStepPaste, api as mountsApi } from './mounts-dialog.js';
 import { routeErrorText, policyModeText } from './channel-words.js';
 import * as P from '../channel-policy.js';
-import { narrowRowVerdict } from '../channel-caps.js';   // lane lark-consent-chain ADDENDUM 1: the narrowing row only where the vendor can refuse
+import { narrowRowVerdict, consentEndOf } from '../channel-caps.js';   // lane lark-consent-chain ADDENDUM 1: the narrowing row only where the vendor can refuse; lane lark-signin-dialog: a consent's end
 import { ownerPolicyModel, guardRowsEl } from './channel-reach-editor.js';   // lanes account-policy-door + guards-door: the policy row's model and guard rows
 import { icon, el, btn } from './channel-chrome.js';
 import { accountTitle } from './channel-avatar.js';   // lane channels-badges: the badge's hover title and the card's name are ONE spelling
@@ -486,16 +486,19 @@ function flowNotice(flow) {
 /** Watch ONE account's row on `channels-updated` for the end of a consent
  *  that began at `base` (the row's `lastAuthAt` when it started): the
  *  engine stamps `lastAuthAt` when a consent LANDS (success or failure), so
- *  a changed stamp is the answer — `{token}` when it connected, `{fail}`
- *  with the refusal otherwise. No fetch: the broadcast IS the computation. */
+ *  a changed stamp is the answer — `{token}` when it landed, `{fail}`
+ *  with the refusal otherwise. No fetch: the broadcast IS the computation.
+ *  lane lark-signin-dialog: the LANDING ends the dialog (channel-caps
+ *  `consentEndOf`), never `auth.state` — the pass after the landing decides
+ *  the account's health (the card's), and waiting on it kept the owner's
+ *  dialog open 77 s after his consent landed. */
 function authWatcher(app, id, base) {
   let answer = {};
   const on = (msg) => {
     if (!msg || msg.type !== 'channels-updated' || !msg.digest) return;
-    const row = (msg.digest.adapters || []).find((x) => x.id === id);
-    if (!row || !row.lastAuthAt || row.lastAuthAt === base) return;
-    if (row.lastAuthError) answer = { fail: tr('The consent flow ended: {error}', { error: row.lastAuthError }) };
-    else if (row.auth && row.auth.state === 'connected') answer = { token: id, running: false, user: row.auth.user || null };
+    const end = consentEndOf((msg.digest.adapters || []).find((x) => x.id === id), base);
+    if (!end) return;
+    answer = end.fail ? { fail: tr('The consent flow ended: {error}', { error: end.fail }) } : { token: id, running: false, user: end.user };
   };
   const unsub = app.ws.onGlobal(on);
   return { state: () => answer, off: () => { try { if (typeof unsub === 'function') unsub(); else app.ws.offGlobal(on); } catch {} } };

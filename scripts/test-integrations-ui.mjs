@@ -710,13 +710,21 @@ const p2 = await newPage();
   ok(re1.client === 'custom' && re1.id === CUSTOM_ID && re1.secret === CUSTOM_SECRET, `the OAuth client select on top carries the account's OWN custom client, prefilled (${JSON.stringify({ client: re1.client, id: re1.id })})`);
   ok(/^Google reported the saved sign-in as expired or revoked/.test(re1.hint) && re1.order[0] === 'mounts-field-hint' && re1.order[1] === 'label:OAuth client' && re1.order.includes('button:Sign in with Google'), `the storage shape: who reported the death → the client select → Sign in with Google (${JSON.stringify(re1.order)})`);
   await p1.probe('the re-authorize dialog', '#chan-reauth-dialog .dialog');
-  stubMode({ email: 'ben@example.test', refresh: 'ok', expiresIn: 3600 });
+  // lane lark-signin-dialog (the owner 2026-10-26: his dialog finished 77 s after the consent landed — it waited for the pass
+  // after the landing): the stub HOLDS that pass's mailbox reads (`gmailHold`) until the dialog is judged; the account is the
+  // owner's at his press — its last pass the refusal (auth-expired) that made him re-authorize
+  const lp0 = ((await accounts()).find((a) => a.id === B.id) || {}).lastPass || null;
+  ok(!!lp0 && lp0.ok === false && lp0.code === 'auth-expired', `setup: the dead account's last pass is the refusal (${JSON.stringify(lp0 && { ok: lp0.ok, code: lp0.code })}) — the record the owner's landing carried`);
+  stubMode({ email: 'ben@example.test', refresh: 'ok', expiresIn: 3600, gmailHold: true });
   await p1.evaljs(`${DLG('reauth')}.querySelector(':scope > .mounts-btn-primary').click(); 1`);
   const url3 = await p1.evaljs(consentUrlIn('#chan-reauth-dialog .mounts-oauth-link input'));
   ok(!!url3 && new URL(url3).searchParams.get('client_id') === CUSTOM_ID, 'the re-authorize consent runs under the account\'s own client, with the cross-browser link row');
   ok(await p1.evaljs(`!!document.querySelector('#chan-reauth-dialog input[placeholder^="http://127.0.0.1"]')`), 'and the paste-back box');
   ok((await followConsent(url3)) === 200, 'the redirect lands on the loopback');
-  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if (!document.querySelector('#chan-reauth-dialog')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'the dialog closes when the new sign-in lands');
+  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if (!document.querySelector('#chan-reauth-dialog')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'the dialog closes when the new sign-in LANDS — the pass after it still held (lane lark-signin-dialog; 2.369.358 kept «sign-in page opened» until that pass ended)');
+  const lp1 = ((await accounts()).find((a) => a.id === B.id) || {}).lastPass || null;
+  ok(!(lp1 && lp1.ok === true), `…closed BEFORE the pass after the landing finished (lastPass ${JSON.stringify(lp1)}) — the dialog never waits on the account's health`);
+  stubMode({ email: 'ben@example.test', refresh: 'ok', expiresIn: 3600 });   // the held pass goes on
   ok(await p1.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && !c.querySelector('.mounts-errline') && !c.querySelector('.chan-sec-reauth') && c.querySelector('.chan-sec-health')); }`)), 'the card heals (lane channel-reauth-visible: the red line too — the good pass after the consent retracts it): the error line is gone, the health line is back');
 
   // (m) Edit on the custom account prefills the SECRET (D3)

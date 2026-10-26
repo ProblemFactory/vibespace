@@ -29,6 +29,9 @@ const real = globalThis.fetch;
 let n = 0;
 const mode = () => { try { return JSON.parse(fs.readFileSync(path.join(DIR, 'mode.json'), 'utf-8')); } catch { return {}; } };
 const J = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+// lane lark-signin-dialog: mode.json `gmailHold: true` HOLDS the pass's mailbox reads (history / threads — never the consent's
+// own profile read) until the suite clears it (re-read every 100 ms, at most 60 s): a pass slower than the landing it follows
+const holdGmail = async () => { for (let i = 0; i < 600 && mode().gmailHold; i++) await new Promise((r) => setTimeout(r, 100)); };
 const THREADS = [
   { id: 't-quote', subject: 'Supplier quote v3', from: 'Brook <brook@example.test>', text: 'The revised quote is attached.' },
   { id: 't-interview', subject: 'Interview on Thursday', from: 'Cass <cass@example.test>', text: 'Does 15:00 work for you?' },
@@ -57,6 +60,7 @@ globalThis.fetch = async function stubFetch(url, init = {}) {
   if (u.hostname === 'gmail.googleapis.com') {
     const p = u.pathname.replace(/^\/gmail\/v1\/users\/me/, '');
     if (m.api === '401') return J(401, { error: { code: 401, message: 'Request had invalid authentication credentials.', status: 'UNAUTHENTICATED' } });
+    if (m.gmailHold && (p === '/history' || p === '/threads' || p.startsWith('/threads/'))) await holdGmail();
     if (p === '/profile') return J(200, { emailAddress: m.email || 'ada@example.test', historyId: '1000', messagesTotal: THREADS.length });
     if (p === '/history') return J(200, { historyId: '1000' });
     if (p === '/threads') return J(200, { threads: THREADS.map((t) => ({ id: t.id, snippet: t.text, historyId: '1000' })), resultSizeEstimate: THREADS.length });

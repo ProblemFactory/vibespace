@@ -633,6 +633,7 @@ function create(engineCtx) {
       if (st.changed) rec.identity = st.identity;
       if (st.learned) { learned = st.learned; rec.lastAuthNote = { code: 'enterprise-learned', at: now() }; } else delete rec.lastAuthNote;
       rec.lastAuthError = null; rec.lastAuthAt = now();
+      if (rec.lastPass && rec.lastPass.ok === false) rec.lastPass = null;   // lane lark-signin-dialog: as at the record's own door (onAuthDone)
     });
     if (learned) log.log(`[channels] ${rec.id}: the sign-in names the organisation ${learned} the account's identity did not — the same account; its identity learned it`);
     dropLive(rec.id, 'client switched');
@@ -930,7 +931,11 @@ function create(engineCtx) {
     // is not the record's last sign-in line (the connected record used to wear "replaced by a newer sign-in" as an
     // error). verify r8: one whose consent LANDED before the newer began is a landed consent — the write is the fact
     if (r && !r.ok && r.cancelled === 'superseded') { log.log(`[channels] ${rec.id}: an older sign-in completed after a newer one and was refused (${r.error || 'superseded'}) — the newer sign-in stands`); return; }
-    await store.adapters.update(() => { rec.lastAuthError = r && r.ok ? null : String((r && r.error) || 'the consent flow failed'); rec.lastAuthAt = now(); });
+    // lane lark-signin-dialog (the owner 2026-10-26: «it suddenly worked while I was typing», 77 s after his consent landed):
+    // a LANDED consent clears the record's refused pass — that refusal (the dead sign-in that made him re-authorize) was
+    // evidence about the OLD token, and `authState` read it as «expired» on the fresh one until the pass below finished; the
+    // landing's broadcast says `connected`, the forced pass writes the real verdict
+    await store.adapters.update(() => { rec.lastAuthError = r && r.ok ? null : String((r && r.error) || 'the consent flow failed'); rec.lastAuthAt = now(); if (r && r.ok && rec.lastPass && rec.lastPass.ok === false) rec.lastPass = null; });
     const e = adapterFor(rec);
     await refreshAuth(e);
     // verify r8: THE WRITE IS THE FACT, and so is what came after it — a consent that landed and was DISCONNECTED

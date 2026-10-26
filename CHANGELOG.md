@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.361 — 2026-10-28
+
+### Fixed
+- Lark re-authorize: once you finish signing in in another browser, the dialog completes at once instead of waiting for the next read.
+- «Sign in without the N extra permissions» shows only where Lark can really refuse; permissions already granted no longer count.
+
 ## 2.369.360 — 2026-10-27
 
 ### Added

@@ -1662,6 +1662,7 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
   let codeN = 0, exchanges = 0;
   const pages = [];
   let grantFilter = null;                  // lane lark-consent-chain: a Lark that grants less than its page asked (a page granting nothing)
+  let listOmit = new Set(), listTenant = new Set();   // lane lark-signin-dialog: an app list that OMITS / types tenant-only a permission the app HAS enabled
   const fakeAuth = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://127.0.0.1');
     pages.push(Buffer.byteLength(req.url));
@@ -1689,7 +1690,7 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
     }
     if (u.pathname === '/open-apis/authen/v1/user_info') return R({ code: 0, data: { open_id: 'ou_owner', union_id: 'on_owner', user_id: 'uid_owner', name: 'Owner' } });
     if (u.pathname === '/open-apis/auth/v3/tenant_access_token/internal') return R({ code: 0, tenant_access_token: 't-app-0001', expire: 7200 });
-    if (u.pathname === '/open-apis/application/v6/applications/me') return R({ code: 0, data: { app: { app_id: 'cli_appa0001', scopes: appRows(APP.scopes, []) } } });
+    if (u.pathname === '/open-apis/application/v6/applications/me') return R({ code: 0, data: { app: { app_id: 'cli_appa0001', scopes: [...appRows(APP.scopes.filter((x) => !listOmit.has(x) && !listTenant.has(x)), []), ...[...listTenant].map((x) => row(x, ['tenant']))] } } });
     if (u.pathname === '/open-apis/im/v1/chats') return R({ code: 0, data: { items: [], has_more: false } });
     const mm = /^\/open-apis\/minutes\/v1\/minutes\/([A-Za-z0-9]+)(\/transcript|\/media)?$/.exec(u.pathname);
     if (mm) {
@@ -1948,6 +1949,141 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
         `CONTROL — an engine that never chains: ONE press holds page 1 only (${recOf(eN, idN).auth.morePending} left, the tab stops) — the walk above would be red`);
     } finally { eN.stop(); olN.stopAll(); }
     for (const r of copiesCensus(MN.files, MN.dir, REPO, { minCopies: 1, label: 'chan-lark-nochain: ' })) ok(r.pass, r.name, r.detail); }
+  // lane lark-signin-dialog (the owner 2026-10-26, two reports on his own instance at 2.369.358; his record: a held token of 425
+  // scopes incl. all 11 of WIDE_SCOPES, refusedScopes [], the consent that landed accepted with the whole wide group): (1) his
+  // Re-authorize dialog finished 77 s after the consent LANDED — the landing's broadcast still said «expired» (the record's
+  // lastPass was the refused pass that made him re-authorize: evidence about the OLD token) and the dialog waited for the pass
+  // after it; (2) it offered «不含 这 11 项额外权限 重新登录» though his token HOLDS all 11 (the app's list omitted one — a scope
+  // Lark already granted this app for this person cannot be «not enabled»)
+  console.log('  ⑪d lane lark-signin-dialog: a landed consent ends the dialog on its FIRST broadcast; the narrowing row never names a held scope');
+  {
+    const said0 = [], msgs = [];
+    const capLog = { log: (m) => said0.push(String(m)), warn: (m) => said0.push(String(m)), error() {} };
+    const consentLines = () => said0.splice(0).filter((l) => /^\[channels\] lark: consent page /.test(l));   // the lines since the last read
+    const rowIn = (m, id) => ((m && m.type === 'channels-updated' && m.digest && m.digest.adapters) || []).find((x) => x.id === id) || null;
+    const firstLanded = (id, base) => msgs.map((m) => rowIn(m, id)).find((x) => x && x.lastAuthAt && x.lastAuthAt !== base) || null;
+    const CLIENT_B = { credentialKey: 'custom', credential: { appId: 'cli_appb0002', appSecret: 'fs-appb-' + 'secret-0002' } };
+    const X = 'auth:user.id:read';   // the brief's example: one of the 11 the owner's token holds
+    const rowFor = (flow) => CC.narrowRowVerdict(flow, Array.isArray(flow && flow.nextNarrow) ? flow.nextNarrow : []);
+    // a consent page through the fake Lark WITHOUT browse()'s fixed 120 ms settle — every leg below polls for what it waits on
+    const land = async (consentUrl) => {
+      const p0 = await new Promise((resolve) => { http.get(AUTH + new URL(consentUrl).search, (res) => { res.resume(); res.on('end', () => resolve({ status: res.statusCode, location: res.headers.location || null })); }).on('error', () => resolve({ status: 0, location: null })); });
+      if (p0.status === 302 && p0.location) await get(p0.location);
+      return p0.status;
+    };
+    // ONE ACCOUNT'S STORY, the owner's: its FIRST sign-in while the app's list omits X (nothing held — the list's word alone, the
+    // row stays) and Lark grants X (it IS enabled); later the sign-in dies (its last pass REFUSED, auth-expired) and he
+    // re-authorizes — on its own client (the record's own door, onAuthDone: his journal's «lark: connected as …»), then under
+    // another client (applyRebind)
+    const story = async (E, tag) => {
+      APP.scopes = [...FLOOR, ...EXTRA_E2E]; stripMinutes = false; grantFilter = null; listOmit = new Set([X]); listTenant = new Set(); said0.length = 0;
+      const { eng: eS, ol: olS } = await mkEngine(tag, E, { broadcast: (m) => msgs.push(m), log: capLog });
+      const clk0 = clock;
+      try {
+        const s = await eS.startOAuth({ kind: 'lark', credentialKey: 'custom', credential: { appId: 'cli_appa0001', appSecret: 'fs-appa-' + 'secret-0001' } });
+        const first = { flow: s.flow, said: consentLines(), status: await land(s.url) };
+        for (let i = 0; i < 200 && !eS.oauthStatus(s.flowId).done; i++) await sleep(10);
+        const id = (await eS.connect('lark', { flowId: s.flowId })).adapter.id;
+        for (let i = 0; i < 200 && !recOf(eS, id).lastPass; i++) await sleep(10);   // Connect's own pass first
+        const scopes0 = recOf(eS, id).auth.scopes || [];
+        const press = async (choice) => {
+          Object.assign(recOf(eS, id), { lastPass: { at: now(), ok: false, code: 'auth-expired', error: 'lark: the user token was refused (99991677)' }, consecutiveFailures: 1 });
+          const before = eS.adapterView(recOf(eS, id)).auth.state;
+          clock += 1000;   // the person's second at the vendor's page (this suite's clock stands still: the landing's stamp must move)
+          const r = await eS.reauthorize(id, choice);
+          const base = (r.adapter && r.adapter.lastAuthAt) || null, said = consentLines();
+          msgs.length = 0;
+          const status = await land(r.flow.consentUrl);
+          for (let i = 0; i < 200 && !firstLanded(id, base); i++) await sleep(10);
+          const row1 = firstLanded(id, base);
+          for (let i = 0; i < 200 && !(recOf(eS, id).lastPass && recOf(eS, id).lastPass.ok); i++) await sleep(10);   // the forced pass after it, before the next press
+          return { before, status, rebind: !!r.rebind, flow: r.flow, said, first: row1, end: CC.consentEndOf(row1, base) };
+        };
+        const own = await press({}), other = await press(CLIENT_B);
+        return { id, first, holds: scopes0.includes(X), held: scopes0.length, own, other };
+      } finally { eS.stop(); olS.stopAll(); clock = clk0; }
+    };
+    const stateOf = (x) => JSON.stringify(x.first && { state: x.first.auth.state, why: x.first.auth.why, lastPass: x.first.lastPass });
+    const S = await story(ENG, 'story');
+    // R1 — the landing's FIRST broadcast says connected, and the dialog's watcher answers on it
+    for (const [road, x, rebind] of [['its own client (onAuthDone)', S.own, false], ['another client (applyRebind)', S.other, true]]) {
+      ok(x.before === 'expired' && x.status === 302 && x.rebind === rebind && x.first && x.first.auth.state === 'connected' && x.first.lastPass === null && x.first.lastAuthError === null,
+        `R1 — ${road}: the account was «${x.before}» at the press (its last pass refused); the consent lands ⇒ the FIRST channels-updated row with the new lastAuthAt already says «${x.first && x.first.auth.state}» (the refused pass was about the OLD token — cleared at the landing; the forced pass writes the real verdict)`, stateOf(x));
+      ok(x.end && x.end.token === S.id && !x.end.fail, `R1 — ${road}: the dialog's watcher (channel-caps consentEndOf) answers {token} on that FIRST row — the dialog ends at the landing, not at the pass after it`, JSON.stringify(x.end));
+    }
+    // the watcher's verdict, PURE: the landing is the answer whatever the account's state says (the card's business)
+    const ROW = (o) => ({ id: 'lark', lastAuthAt: 2000, lastAuthError: null, auth: { state: 'expired', why: 'last-pass-refused', user: 'Owner' }, ...o });
+    ok(JSON.stringify(CC.consentEndOf(ROW({}), 1000)) === JSON.stringify({ token: 'lark', user: 'Owner' }) && CC.consentEndOf(ROW({}), 2000) === null && CC.consentEndOf(ROW({ lastAuthAt: null }), null) === null && CC.consentEndOf(null, 1) === null
+      && JSON.stringify(CC.consentEndOf(ROW({ lastAuthError: 'access_denied' }), 1000)) === JSON.stringify({ fail: 'access_denied' }),
+      'consentEndOf: a moved stamp is the end — {token} even on a row still saying «expired», {fail} with the refusal it carries; the same stamp / none is no end');
+    { const dlg = fs.readFileSync(path.join(REPO, 'src/lib/channel-account-dialogs.js'), 'utf-8');
+      const at = dlg.indexOf('function authWatcher('), aw = at < 0 ? '' : dlg.slice(at, dlg.indexOf('\n}\n', at));
+      ok(aw && /consentEndOf\(/.test(aw) && !/\.state\b/.test(aw), 'the dialog\'s watcher reads the landing through consentEndOf and never the account\'s auth.state (2.369.358 answered only on `auth.state === \'connected\'`)'); }
+    // R2 — a held scope is never «lacking»; a first sign-in (nothing held) and a rebind (another app) keep the list's word
+    ok(S.first.status === 302 && S.holds && S.first.flow.scopesFrom === 'app' && JSON.stringify(S.first.flow.lacking) === JSON.stringify([X]) && rowFor(S.first.flow).show === true,
+      `R2 — a FIRST sign-in (nothing held) keeps today's rule: the list omits ${X} ⇒ lacking [${S.first.flow.lacking}], the row stays (its press drops the wide group) — and Lark granted it (it is enabled: the token holds it)`, JSON.stringify({ from: S.first.flow.scopesFrom, lacking: S.first.flow.lacking }));
+    ok(S.own.flow.scopesFrom === 'app' && JSON.stringify(S.own.flow.lacking) === '[]' && rowFor(S.own.flow).show === false && JSON.stringify(S.own.flow.nextNarrow) === JSON.stringify([...lark.WIDE_SCOPES]),
+      `R2 — the RE-AUTHORIZE (the held token carries ${X} — Lark's own evidence it is enabled): lacking [] ⇒ NO «不含 这 ${lark.WIDE_SCOPES.length} 项额外权限 重新登录» row (its press would drop the wide group, every scope of it held)`, JSON.stringify({ from: S.own.flow.scopesFrom, lacking: S.own.flow.lacking }));
+    ok(S.other.rebind && JSON.stringify(S.other.flow.lacking) === JSON.stringify([X]) && rowFor(S.other.flow).show === true, `R2 — under ANOTHER client (a rebind = another app): the held token is no evidence for it — lacking [${S.other.flow.lacking}], the row stays`, JSON.stringify(S.other.flow.lacking));
+    // R3 — the source said once per consent start
+    const reL = (lack, held) => new RegExp(`^\\[channels\\] lark: consent page 1/1 asks \\d+ scopes \\(list from app: \\d+ user permissions read\\); lacking: ${lack}; held: ${held}$`);
+    const xRe = X.replace(/[.]/g, '\\.');
+    ok(S.first.said.length === 1 && reL(xRe, 0).test(S.first.said[0]) && S.own.said.length === 1 && reL('none', `${S.held} \\(covering 1 the list omits: ${xRe}\\)`).test(S.own.said[0]) && S.other.said.length === 1 && reL(xRe, 0).test(S.other.said[0]),
+      `R3 — ONE line per consent start says the source, the gap and the held count — and on a re-authorize which of the list's gaps the held token covers (the omitted scope NAMED even where no row is drawn): «${S.first.said[0]}» · «${S.own.said[0]}»`, JSON.stringify([S.first.said, S.own.said, S.other.said]));
+    { const lines = [];
+      const xr = lark.create({ id: 'l', options: {} }, { oauth: { begin: async () => ({ flowId: 'f' }) }, resolveIntegration: () => CRED, tokens: mkTokens(), fetch: vendorOf(() => [], { refuse: REFUSE_READ }).fetchFn, now, log: { warn() {}, log: (m) => lines.push(String(m)), error() {} } });
+      await xr.auth.begin();
+      ok(lines.length === 1 && /^\[channels\] lark: consent page 1\/1 asks \d+ scopes \(the floor: .*99991672.*\); lacking: none; held: 0$/.test(lines[0]), `R3 — a list Lark refused: the line names the floor and the read's answer: «${(lines[0] || '').slice(0, 160)}…»`); }
+    // R4 — the START answers carry the verdict's facts (a flow that says neither keeps the row); the route sends the engine's whole
+    ok([S.first, S.own, S.other].every((x) => x.flow && x.flow.scopesFrom === 'app' && Array.isArray(x.flow.lacking) && 'scopesWhy' in x.flow),
+      'R4 — Connect\'s start, the re-authorize and the rebind answer each carry scopesFrom / scopesWhy / lacking (safeFlow over the loopback\'s status view)');
+    { const rt = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf-8');
+      ok(rt.split("res.json(await engine().reauthorize(req.params.id, {").length === 2, 'R4 — the re-authorize ROUTE answers the engine\'s re-authorize result whole (res.json(await engine().reauthorize(…)))'); }
+    // THE MEASUREMENT (R3's question — which wide scope can the app's list omit?), on the adapter's own begin over ONE real consent
+    // machine: the read keeps a row only when SCOPE_SHAPE admits it and its token_types name `user` (2000 rows walked); all 11
+    // pass the shape, so a wide scope leaves «listed» only ABSENT from the answer or typed WITHOUT user — each one, either way,
+    // drew the row on a re-authorize whose token held it (2.369.358); now none does, and a first sign-in keeps the row
+    { const olT = OL.createOAuthLoopback({ now, log: quiet, fixedCallbackUrl: `http://127.0.0.1:${await freePort()}/lark/cb` });
+      const beginWith = async (L0, held, rows) => {
+        const tk = mkTokens(); if (held) tk.st.token = { scopes: held.slice(), openId: 'ou_owner' };
+        const x = L0.create({ id: 'lt', options: {} }, { oauth: olT, resolveIntegration: () => CRED, tokens: tk, fetch: vendorOf(() => rows).fetchFn, now, log: quiet });
+        const flow = await x.auth.begin();
+        olT.cancel(flow.flowId, 'cancelled');
+        return flow;
+      };
+      const rowsWithout = (x, how) => (how === 'tenant' ? [...appRows(FLOOR.filter((y) => y !== x), []), row(x, ['tenant'])] : appRows(FLOOR.filter((y) => y !== x), []));
+      try {
+        ok(lark.WIDE_SCOPES.every((x) => lark.SCOPE_SHAPE.test(x)), `the read's shape admits all ${lark.WIDE_SCOPES.length} wide scopes (only absence or a tenant-only type can drop one)`);
+        const table = [];
+        for (const x of lark.WIDE_SCOPES) for (const how of x === X ? ['omit', 'tenant'] : ['omit']) {
+          const f = await beginWith(lark, null, rowsWithout(x, how)), a = await beginWith(lark, FLOOR, rowsWithout(x, how));
+          table.push({ x, how, first: rowFor(f).show, lackFirst: f.lacking.join(), again: rowFor(a).show, lacking: a.lacking.length });
+        }
+        ok(table.length === lark.WIDE_SCOPES.length + 1 && table.every((t) => t.first === true && t.lackFirst === t.x && t.again === false && t.lacking === 0),
+          `each wide scope the list omits (or types tenant-only): a first sign-in names it lacking and keeps the row, the re-authorize holding it draws none (${table.map((t) => `${t.x}${t.how === 'tenant' ? ' (tenant-only)' : ''}`).join(', ')})`, JSON.stringify(table.filter((t) => !(t.first && !t.again))));
+        // CONTROL — a lark copy whose «lacking» ignores the held token (2.369.358): the token HOLDING X draws the row (the owner's screen)
+        const MR = mutantCopies('chan-lark-heldlack', REPO);
+        const srcR = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
+        const HELD = " && !heldNow.has(x)) };";
+        ok(srcR.split(HELD).length === 2, 'CONTROL setup: the held token\'s subtraction is spelled once in the consent\'s source');
+        const m = await beginWith(require(MR.write('src/channels/lark.js', srcR.replace(HELD, ') };'), 'heldlack')), FLOOR, rowsWithout(X, 'omit'));
+        ok(JSON.stringify(m.lacking) === JSON.stringify([X]) && rowFor(m).show === true, `CONTROL — «lacking» without the held token: a re-authorize whose token HOLDS ${X} draws the row — the R2 assert above would be red`);
+        for (const r of copiesCensus(MR.files, MR.dir, REPO, { minCopies: 1, label: 'chan-lark-heldlack: ' })) ok(r.pass, r.name, r.detail);
+      } finally { olT.stopAll(); } }
+    // CONTROLS on the engine (one copy, two lines out): landings that keep the refused pass (2.369.358) ⇒ the first row says
+    // «expired» — the pre-lane watcher (`auth.state === 'connected'`) answered nothing on it and waited for the pass; a start
+    // answer without scopesFrom ⇒ the dialog's verdict keeps the row though nothing lacks
+    { const MQ = mutantCopies('chan-lark-landing', REPO);
+      const srcQ = engineSource(REPO);
+      const CLEAR = ' if (r && r.ok && rec.lastPass && rec.lastPass.ok === false) rec.lastPass = null;';
+      const CLEAR_B = '      if (rec.lastPass && rec.lastPass.ok === false) rec.lastPass = null;   // lane lark-signin-dialog: as at the record\'s own door (onAuthDone)\n';
+      const FROM = ' scopesFrom: st.scopesFrom || null,';
+      ok(srcQ.split(CLEAR).length === 2 && srcQ.split(CLEAR_B).length === 2 && srcQ.split(FROM).length === 2, 'CONTROL setup: each landing\'s clear (the record\'s own door, the rebind) and safeFlow\'s scopesFrom are spelled once');
+      const Q = await story(MQ.load('src/server/channels-engine.js', srcQ.replace(CLEAR, '').replace(CLEAR_B, '').replace(FROM, ''), 'noclear'), 'story-noclear');
+      ok([Q.own, Q.other].every((x) => x.status === 302 && x.first && x.first.auth.state === 'expired' && x.first.auth.why === 'last-pass-refused'), `CONTROL — landings that keep the refused pass: the first row says «${Q.own.first && Q.own.first.auth.state}» on both roads — the R1 asserts above would be red`, JSON.stringify([stateOf(Q.own), stateOf(Q.other)]));
+      ok(!Q.own.flow.scopesFrom && JSON.stringify(Q.own.flow.lacking) === '[]' && rowFor(Q.own.flow).show === true, 'CONTROL — a start answer without scopesFrom: the verdict keeps the row though nothing lacks — the R4 assert above would be red');
+      for (const r of copiesCensus(MQ.files, MQ.dir, REPO, { minCopies: 1, label: 'chan-lark-landing: ' })) ok(r.pass, r.name, r.detail); }
+  }
   await new Promise((r) => fakeAuth.close(r));
   fs.rmSync(ROOTB, { recursive: true, force: true });
 }

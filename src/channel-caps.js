@@ -1525,6 +1525,18 @@ function consentChainText(chain, { t = defaultT } = {}) {
   if (!(page >= 1 && total >= 2 && page <= total)) return '';
   return t('Authorizing page {page}/{total}… (in the tab that opened)', { page, total });
 }
+/** lane lark-signin-dialog (the owner 2026-10-26: his Re-authorize dialog finished 77 s after the consent LANDED — it waited for
+ *  the pass after it): THE END OF A CONSENT as the sign-in dialog reads it off ONE account's `channels-updated` row. The engine
+ *  stamps `lastAuthAt` when a consent lands (success or failure), so a stamp other than `base` (the row's when the consent
+ *  began) IS the end: `{fail}` = the refusal the row says (`lastAuthError`), else `{token, user}` — whatever `auth.state`
+ *  says: the account's health is the card's, decided by the pass that follows; the dialog never waits on it. null = not
+ *  ended yet. */
+function consentEndOf(row, base = null) {
+  const r = row && typeof row === 'object' ? row : null;
+  if (!r || !r.lastAuthAt || r.lastAuthAt === base) return null;
+  if (r.lastAuthError) return { fail: String(r.lastAuthError) };
+  return { token: r.id || null, user: (r.auth && r.auth.user) || null };
+}
 /** lane lark-consent-chain, ADDENDUM 1 (the owner: 「lark 授权窗口那个什么 11 项权限的提示没用了吧？」): may the sign-in dialog offer
  *  THE NARROWING ROW («Sign in without …» — a vendor that refuses a WHOLE consent naming a scope its app has not enabled:
  *  Lark 20027, said on the vendor's own page only) for the press that drops `scopes`? Only where that refusal CAN happen:
@@ -1544,6 +1556,7 @@ function narrowRowVerdict(flow, scopes = []) {
 
 module.exports = {
   consentChainText, narrowRowVerdict,   // lane lark-consent-chain
+  consentEndOf,   // lane lark-signin-dialog
   sendWhyText, threadWhyText, reactWhyText, reactReadText, refusedScopeText,
   CONV_CAPS_TTL_MS, HOST_FACTS_TTL_MS, PUSH_HEARTBEAT_MS, SCAN_SOURCE_ORDER, OFFER_WHAT,
   PUSH_MISS_THRESHOLD, PUSH_MISS_MIN_SAMPLES, PUSH_MISS_WINDOW_MS, PUSH_MISS_MIN_KEEP, PUSH_CLAIMS,

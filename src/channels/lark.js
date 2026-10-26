@@ -240,6 +240,8 @@ function chainOrder(todo) {
 const CHAIN_APP_READ_REUSE_MS = 10 * 60e3;
 const APP_SCOPES_READ_MAX = 2000;
 const APP_SCOPES_WAIT_MS = 8000;
+/** lane lark-signin-dialog: at most this many «lacking» names in the consent's one log line (the rest counted). */
+const LACKING_SAID_MAX = 20;
 const SCOPE_SHAPE = /^[a-z][a-z0-9_.-]{0,63}(?::[a-z0-9_.-]{1,64}){0,4}$/;
 /** lane channel-row-notices (ADDENDUM 1 — the owner: «重新授权干啥？»): WHICH FEATURE FAMILY a Lark permission unlocks (the
  *  shared vocabulary is src/channel-caps.js SCOPE_FAMILIES) — by the namespace before its first colon, Lark's own grouping
@@ -2006,8 +2008,16 @@ function create(record = {}, deps = {}) {
         const asked = (without = []) => [...consentScopes(without), ...extras.filter((x) => !(Array.isArray(without) && without.includes(x)))];
         // ADDENDUM 1: where the list came from — the app's own (a scope Lark would refuse, 20027, can only be one of the floor's
         // the list LACKS) or the floor (the read failed: any of the floor may be one the app lacks)
+        // lane lark-signin-dialog (the owner 2026-10-26: «不含 这 11 项额外权限 重新登录» on an account whose token HOLDS all 11): a
+        // scope the held token carries is one Lark already granted THIS app for this person (grants accumulate) — enabled by
+        // Lark's own evidence, whatever the list omits — so it is never «lacking»; a first sign-in (nothing held) keeps the list's word
         const listed = new Set(app.scopes);
-        const scopeSource = { from: app.why ? 'floor' : 'app', why: app.why || null, lacking: app.why ? [] : floor.filter((x) => !listed.has(x)) };
+        const scopeSource = { from: app.why ? 'floor' : 'app', why: app.why || null, lacking: app.why ? [] : floor.filter((x) => !listed.has(x) && !heldNow.has(x)) };
+        // …and SAID, once per consent page: the next «why is this row here» is answered by the log — which scope the list
+        // omitted (lacking), and which omitted ones the held token covers (never lacking, still the list's gap)
+        const namesOf = (xs) => xs.slice(0, LACKING_SAID_MAX).join(', ') + (xs.length > LACKING_SAID_MAX ? ` +${xs.length - LACKING_SAID_MAX} more` : '');
+        const covered = app.why ? [] : floor.filter((x) => !listed.has(x) && heldNow.has(x));
+        log.log && log.log(`[channels] lark: consent page ${Math.min(pageNo, total)}/${total} asks ${asked().length} scopes (${app.why ? `the floor: ${app.why}` : `list from app: ${app.scopes.length} user permissions read`}); lacking: ${scopeSource.lacking.length ? namesOf(scopeSource.lacking) : 'none'}; held: ${heldNow.size}${covered.length ? ` (covering ${covered.length} the list omits: ${namesOf(covered)})` : ''}`);
         return oauth.begin({
           id: adapterId, label: 'Lark',
           ...(viaRoute ? { mode: 'public', redirectUri: way.redirectUri, stateFor, road: way.road } : { mode: 'fixed', registeredCallbackUrl: CONSENT.callbackUrl }),
@@ -2028,8 +2038,8 @@ function create(record = {}, deps = {}) {
           // a stale read still has its one press)
           optionalScopes: (() => {
             const groups = OPTIONAL_SCOPE_GROUPS.map((g) => g.filter((x) => floor.includes(x))).filter((g) => g.length);
-            const listed = new Set(app.scopes);
-            const lacks = (g) => !app.why && g.some((x) => !listed.has(x));
+            const lackSet = new Set(scopeSource.lacking);   // lane lark-signin-dialog: the list's gaps the held token does not cover
+            const lacks = (g) => g.some((x) => lackSet.has(x));
             return [...groups.filter(lacks), ...groups.filter((g) => !lacks(g)), extras].filter((g) => g.length);
           })(),
           exchange: async ({ code, redirectUri, cancelled = null, narrowed = [] }) => {
