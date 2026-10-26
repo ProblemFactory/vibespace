@@ -122,6 +122,42 @@ export async function evalInBlankTab(cdpPort, expression, { ms = 15000 } = {}) {
     try { await fetch(`http://127.0.0.1:${cdpPort}/json/close/${t.id}`); } catch { }
   }
 }
+
+/** A REAL CLICK AS ONE ACT (int358 — test-channel-jump ② was red 4 runs of 7 on the 2.369.358 train): a suite's real click
+ *  MEASURED its element, then pressed where it HAD been; rows that move while an agent's turn lands (the card grows, the
+ *  chat's tail pin scrolls it) put a NEIGHBOUR under the pointer, and the product rightly opened the neighbour. This door
+ *  measures (scrolled into view), moves the pointer there and asks AT PRESS TIME whether the element under the pointer
+ *  (document.elementFromPoint) is the measured one or inside it; a target that moved is re-aimed ONCE and said in the log;
+ *  still not under the pointer ⇒ no press (false; `realClick.lastMiss` says why). `realClick.reaimed` = the last re-aim.
+ *  `evalJs(expr)` = the suite's Runtime.evaluate (returnByValue); `cdp(method, params)` = its socket; `beforePress` = a
+ *  test hook between the measure and the press (a RED control's scripted late shift). */
+export function realClicker({ evalJs, cdp, log = (line) => console.log(line) }) {
+  const desc = 'const desc = (h) => (h ? h.tagName + \'.\' + String(h.className).slice(0, 60) : null);';
+  const MEASURE = (sel) => `(() => { ${desc} const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; window.__vsRealClickEl = e; const hit = document.elementFromPoint(x, y); return { x, y, w: q.width, h: q.height, hit: desc(hit), hits: !!hit && (hit === e || e.contains(hit)) }; })()`;
+  const UNDER = (x, y) => `(() => { ${desc} const e = window.__vsRealClickEl, hit = document.elementFromPoint(${x}, ${y}); return { hit: desc(hit), hits: !!e && e.isConnected && !!hit && (hit === e || e.contains(hit)) }; })()`;
+  const realClick = async (sel, { beforePress = null } = {}) => {
+    realClick.lastMiss = null; realClick.reaimed = null;
+    let r = await evalJs(MEASURE(sel));
+    if (!r || !r.hits) { realClick.lastMiss = r; return false; }
+    if (beforePress) await beforePress(r);
+    for (let aim = 0; ; aim++) {
+      await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
+      const u = await evalJs(UNDER(r.x, r.y));
+      if (u && u.hits) break;
+      if (aim === 1) { realClick.lastMiss = { ...r, atPress: u, why: 'still not under the pointer after one re-aim' }; log(`  [realClick] ${sel}: still not under the pointer after one re-aim (${u && u.hit}) — no press`); return false; }
+      const r2 = await evalJs(MEASURE(sel));
+      realClick.reaimed = { from: { x: Math.round(r.x), y: Math.round(r.y) }, under: u && u.hit, to: r2 ? { x: Math.round(r2.x), y: Math.round(r2.y) } : null };
+      log(`  [realClick] ${sel}: it moved between the measure and the press — at (${Math.round(r.x)}, ${Math.round(r.y)}) the pointer was over ${u && u.hit}; re-aimed once at ${r2 ? `(${Math.round(r2.x)}, ${Math.round(r2.y)})` : 'nothing (gone)'}`);
+      if (!r2 || !r2.hits) { realClick.lastMiss = r2; return false; }
+      r = r2;
+    }
+    await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+    return true;
+  };
+  realClick.lastMiss = null; realClick.reaimed = null;
+  return realClick;
+}
 /** A suite that plants a violation ON PURPOSE (a negative control) TAKES its report: waits ≤ `ms` for `want` lines matching
  *  `match` (a parsed line → bool) in this suite's file, removes them and returns them (the hub never writes the same key
  *  twice). What is left is what the teardown judges. */

@@ -44,7 +44,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, evalInBlankTab } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, evalInBlankTab, realClicker } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -185,14 +185,10 @@ const evalJs = async (expr) => {
 const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch {} await sleep(150); } try { return await evalJs(expr); } catch { return false; } };
 const waitApp = () => evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })');
 let lastMiss = null;
-const realClick = async (sel) => {
-  const r = await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, w: q.width, h: q.height, hit: hit ? hit.tagName + '.' + String(hit.className).slice(0, 60) : null, hits: !!hit && (hit === e || e.contains(hit)) }; })()`);
-  if (!r || !r.hits) { lastMiss = r; return false; }
-  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
-  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
-  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
-  return true;
-};
+// THE real-click door (scratch.mjs realClicker, int358): measure, move, hit-test AT PRESS TIME, one re-aim — never a press
+// on whatever moved under the pointer since the measure (test-channel-jump ② opened the neighbour row 4 runs of 7)
+const RC = realClicker({ evalJs, cdp });
+const realClick = async (sel, o) => { const ok = await RC(sel, o); lastMiss = RC.lastMiss; return ok; };
 const shot = async (name, sel, pad = 6) => {
   const dir = process.env.VS_SHOT_DIR;
   if (!dir) return;
@@ -261,9 +257,62 @@ try {
 
   // ── ② a click opens that conversation ──
   console.log('② a row click opens the conversation');
+  // int358 — THE BELT: «three rows + the drafted mark» is reached while the turn is still landing (the drafted row grows,
+  // the turn's last words arrive below, the chat's tail pin scrolls the card): a click waits for the turn to be OVER (the
+  // stub's turns.log row + its last words drawn) and the rows to STAND STILL (two polls 300 ms apart, the same rects) — the
+  // layout a person would aim at; the door's press-time hit test (scratch.mjs realClicker) is the braces
+  const turnOver = async (k, words, ms = 15000) => {
+    const t0 = Date.now(), tl = path.join(stubDir, 'turns.log');
+    while (Date.now() - t0 < ms && !(fs.existsSync(tl) && new RegExp('^' + k + ' ', 'm').test(fs.readFileSync(tl, 'utf8')))) await sleep(150);
+    return waitFor(`[...document.querySelectorAll('.chat-msg')].some((m) => m.textContent.includes(${JSON.stringify(words)}))`, Math.max(1000, ms - (Date.now() - t0)));
+  };
+  const rowsStill = async (rowsSel, ms = 10000) => {
+    const t0 = Date.now(); let prev = null;
+    while (Date.now() - t0 < ms) {
+      const now = await evalJs(`JSON.stringify([...document.querySelectorAll(${JSON.stringify(rowsSel)})].map((e) => { const q = e.getBoundingClientRect(); return [Math.round(q.top), Math.round(q.left), Math.round(q.height)]; }))`);
+      if (prev !== null && now === prev && now !== '[]') return true;
+      prev = now; await sleep(300);
+    }
+    return false;
+  };
+  const ROWS1 = `${CARD(1)} .chat-channel-touches:not([hidden]) > .chat-channel-touch`;
+  check('the turn is over and the card\'s rows stand still (two polls 300 ms apart) — the layout a person aims at', await turnOver(1, 'Read three conversations and drafted a reply.') && await rowsStill(ROWS1));
   const annIdx = r1.findIndex((r) => r.key === 'fake-poll/fake-poll-announce');
   check('a REAL click on the Announcements row', await realClick(`${CARD(1)} .chat-channel-touch[data-key="fake-poll/fake-poll-announce"]`), { annIdx, lastMiss });
   check('…opens THAT conversation\'s window', await waitFor(`!!(${channelWin('fake-poll-announce')})`, 8000));
+  // int358 RED CONTROL — a scripted LATE SHIFT between the measure and the press: the rows move down ONE row pitch (a
+  // transform: hit testing follows it, the chat's scroll anchoring cannot undo it), so the row ABOVE the target stands under
+  // the measured point — the runner's own failure. 571f1903's helper (measure, then press where it was) opens THAT
+  // neighbour; the door re-aims once and opens the target.
+  {
+    const ROW = `${CARD(1)} .chat-channel-touch[data-key="fake-poll/fake-poll-announce"]`;
+    const BOX = `${CARD(1)} .chat-channel-touches:not([hidden])`;
+    const shift = () => evalJs(`(() => { const box = document.querySelector(${JSON.stringify(BOX)}); const rows = [...box.querySelectorAll(':scope > .chat-channel-touch')]; const i = rows.findIndex((r) => r.dataset.key === 'fake-poll/fake-poll-announce'); const pitch = rows[i].getBoundingClientRect().top - rows[i - 1].getBoundingClientRect().top; box.style.transform = 'translateY(' + pitch + 'px)'; return Math.round(pitch); })()`);
+    const unshift = () => evalJs(`(() => { document.querySelector(${JSON.stringify(BOX)}).style.transform = ''; return true; })()`);
+    const closeChannelWins = () => evalJs(`(() => { for (const [id, w] of [...app.wm.windows]) if (w && w._openSpec && w._openSpec.action === 'openChannel') app.wm.closeWindow(id); return true; })()`);
+    const opened = () => evalJs(`[...app.wm.windows.values()].filter((w) => w && w._openSpec && w._openSpec.action === 'openChannel').map((w) => w._openSpec.convId)`);
+    // 571f1903's helper, verbatim but for the hook between its measure and its press
+    const realClickOld = async (sel, { beforePress } = {}) => {
+      const r = await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; e.scrollIntoView({ block: 'center' }); const q = e.getBoundingClientRect(); const x = q.left + q.width / 2, y = q.top + q.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, w: q.width, h: q.height, hit: hit ? hit.tagName + '.' + String(hit.className).slice(0, 60) : null, hits: !!hit && (hit === e || e.contains(hit)) }; })()`);
+      if (!r || !r.hits) return false;
+      if (beforePress) await beforePress(r);
+      await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
+      await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+      await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+      return true;
+    };
+    let pitch = 0;
+    await closeChannelWins(); await sleep(400);
+    await realClickOld(ROW, { beforePress: async () => { pitch = await shift(); await sleep(100); } });
+    await sleep(1500); const old = await opened();
+    await unshift(); await closeChannelWins(); await sleep(400);
+    const pressed = await realClick(ROW, { beforePress: async () => { await shift(); await sleep(100); } });
+    await waitFor(`!!(${channelWin('fake-poll-announce')})`, 8000); const neu = await opened(); const reaimed = RC.reaimed;
+    await unshift();
+    console.log(`  RED CONTROL ②: a late shift of ${pitch} px between the measure and the press — 571f1903's helper opened ${JSON.stringify(old)}; the door ${reaimed ? `re-aimed (${JSON.stringify(reaimed)})` : 'did not re-aim'} and opened ${JSON.stringify(neu)}`);
+    check('RED CONTROL ②: a late shift of one row pitch — 571f1903\'s measure-then-press helper opens the NEIGHBOUR row (the runner\'s failure)', pitch > 0 && old.length === 1 && old[0] !== 'fake-poll-announce', { pitch, old });
+    check('…THE door (scratch.mjs realClicker) sees the moved target at press time, re-aims once and opens THAT conversation', pressed && !!reaimed && neu.length === 1 && neu[0] === 'fake-poll-announce', { pressed, reaimed, neu });
+  }
 
   // ── ③ the chip ──
   console.log('③ the status-bar chip and its menu');
@@ -277,7 +326,7 @@ try {
   const menu = await evalJs(`[...document.querySelectorAll('.chat-status-channel-row')].map((r) => ({ key: r.dataset.key, name: r.querySelector('.chat-status-channel-name').textContent }))`);
   check('its menu lists the three, drafted first', menu.length === 3 && menu[0].key === 'fake-poll/fake-poll-ops', menu);
   await shot('chip-menu', '.chat-status-dropdown', 40);
-  check('a menu row opens its conversation (the drafted one)', await realClick('.chat-status-channel-row[data-key="fake-poll/fake-poll-ops"]') && await waitFor(`!!(${channelWin('fake-poll-ops')})`, 8000));
+  check('a menu row opens its conversation (the drafted one)', await rowsStill('.chat-status-channel-row') && await realClick('.chat-status-channel-row[data-key="fake-poll/fake-poll-ops"]') && await waitFor(`!!(${channelWin('fake-poll-ops')})`, 8000));
 
   // ── ④ the reverse link ──
   console.log('④ the conversation window links back to the chat');
