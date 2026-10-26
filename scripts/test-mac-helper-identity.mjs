@@ -13,7 +13,14 @@
 //   ⑦ the argvs: verifyPlan (--verify --strict first, then -dv), signArgs (ad-hoc without an identity; Developer ID = hardened
 //      runtime + timestamp + THE identifier), and scripts/build-mac-helper.sh's text carries those switches + the identity record;
 //   ⑧ RED controls over patched copies of the module (in memory): the team check dropped ⇒ another team's signature passes; the
-//      pinned-adhoc refusal dropped ⇒ an ad-hoc push passes under a pin — each proves the rule above is what bites.
+//      pinned-adhoc refusal dropped ⇒ an ad-hoc push passes under a pin — each proves the rule above is what bites;
+//   ⑨ ROUND 2 (2026-10-26, the captures 主开发 took on the owner's Mac — codesign-outputs.mjs HELPER_* / CHROME_*): the real ad-hoc
+//      helper reads `adhoc`, the real Developer ID app (Google Chrome) reads `developer-id` by its team; a copy of the module with
+//      HELPER_TEAM_IDS = [that team] takes Chrome's shape with our identifier and still refuses the real ad-hoc helper;
+//   ⑩ ROUND 2: `codesign -dr -` parsed as its own shape (parseDesignatedRequirement: the `designated =>` line — implicit `#`, cdhash
+//      per slice vs identifier + anchor apple generic + the two Developer ID OIDs + the leaf's OU), our DR = Chrome's field for field
+//      with the identifier group and the Team ID substituted, requirementVerdict (the agent's question after a developer-id verdict:
+//      a cdhash / another team's / an extra clause ⇒ refused) + a RED control, the agent's third run.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -28,12 +35,19 @@ const SIG = require(path.join(REPO, 'src/agentd-signature.js'));
 const SP = require(path.join(REPO, 'src/stream-plan.js'));
 const SRC_TEXT = fs.readFileSync(path.join(REPO, 'src/mac-helper-identity.js'), 'utf8');
 const PIN = [CS.TEAM];
+/** A patched copy of the module, loaded in memory (it imports nothing — the patch is a text replace). */
+const load = (text) => { const m = { exports: {} }; new Function('module', 'exports', 'require', text)(m, m.exports, () => { throw new Error('imports nothing'); }); return m.exports; };
 
 console.log('— ① the designated requirement —');
 {
   const dr = MI.designatedRequirement({ teamId: CS.TEAM });
-  ok(dr === `identifier "com.problemfactory.vibespace.screen" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = "${CS.TEAM}"`, 'the DR = THE identifier + anchor apple generic + the Developer ID OIDs + the Team ID as the leaf\'s OU — no cdhash, no version, no name', dr);
+  ok(dr === `identifier "com.problemfactory.vibespace.screen" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = ${CS.TEAM}`, 'the DR = THE identifier + anchor apple generic + the Developer ID OIDs + the Team ID as the leaf\'s OU (unquoted, as codesign prints it) — no cdhash, no version, no name', dr);
   ok(!/cdhash/i.test(dr) && !/\bvs-/.test(dr), 'nothing in it moves with a rebuild (no cdhash, no helper version)');
+  const chrome = MI.parseDesignatedRequirement(CS.CHROME_DR);
+  const substituted = chrome.designated.replace(/^\(identifier "com\.google\.Chrome"[^)]*\) and /, `identifier "${CS.IDENTIFIER}" and `).replace(/ = EQHXZ8M8AV$/, ` = ${CS.TEAM}`);
+  ok(substituted !== chrome.designated && substituted === dr && CS.designated({ team: CS.TEAM }) === `Executable=${CS.HELPER_FILE}\ndesignated => ${dr}\n`, 'ROUND 2: the DR equals a REAL Developer ID requirement (Google Chrome\'s `codesign -dr -`, captured on the owner\'s Mac) with its identifier group and its Team ID substituted — nothing else differs', { substituted, dr });
+  const fields = dr.split(' and '), cf = chrome.designated.split(' and ');
+  ok(fields.length === 5 && cf.length === 5 && same(fields.slice(1, 4), cf.slice(1, 4)) && fields[1] === 'anchor apple generic' && fields[2] === 'certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */' && fields[3] === 'certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */' && fields[4] === `certificate leaf[subject.OU] = ${CS.TEAM}` && cf[4] === 'certificate leaf[subject.OU] = EQHXZ8M8AV', 'field for field: the identifier · anchor apple generic · certificate 1 OID 1.2.840.113635.100.6.2.6 · leaf OID 1.2.840.113635.100.6.1.13 · the leaf\'s OU = the Team ID — fields 2–4 byte-equal to Chrome\'s', { fields, cf });
   let threw = 0; for (const bad of [{ teamId: 'short' }, { teamId: CS.TEAM, identifier: 'bad id!' }, {}]) { try { MI.designatedRequirement(bad); } catch { threw++; } }
   ok(threw === 3 && MI.HELPER_IDENTIFIER === CS.IDENTIFIER, 'a Team ID is 10 capitals / digits, an identifier is a bundle-id shape; HELPER_IDENTIFIER is the design\'s', { threw });
   ok(Array.isArray(MI.HELPER_TEAM_IDS) && Object.isFrozen(MI.HELPER_TEAM_IDS) && /HELPER_TEAM_IDS = Object\.freeze\(\[\]\)/.test(SRC_TEXT), 'HELPER_TEAM_IDS is a frozen list — EMPTY today (the owner has not enrolled; one commit fills it, design §6.7)', MI.HELPER_TEAM_IDS);
@@ -42,9 +56,12 @@ console.log('— ① the designated requirement —');
 
 console.log('— ② parseCodesignInfo over codesign -dv --verbose=4 —');
 {
-  const a = MI.parseCodesignInfo(CS.adhoc());
-  ok(a.signed && a.adhoc && a.teamId === null && a.authority.length === 0 && /^vibespace-screen-[0-9a-f]{40}$/.test(a.identifier) && a.cdhash === 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678' && a.runtime === null && a.flags === '0x2', 'today\'s helper: ad-hoc (Signature=adhoc, flags adhoc, TeamIdentifier=not set), the linker\'s per-build identifier, its cdhash', a);
-  const d = MI.parseCodesignInfo(CS.developerId({ notarized: true }));
+  const a = MI.parseCodesignInfo(CS.HELPER_DV);
+  ok(a.signed && a.adhoc && a.teamId === null && a.authority.length === 0 && a.identifier === CS.HELPER_ADHOC_IDENTIFIER && /^vibespace-screen-[0-9a-f]{40}$/.test(a.identifier) && a.cdhash === CS.HELPER_CDHASH && a.runtime === null && a.flags === '0x2' && a.format === 'Mach-O universal (x86_64 arm64)' && a.timestamp === null, 'ROUND 2, the REAL helper (captured on the owner\'s Mac): ad-hoc (Signature=adhoc, flags 0x2(adhoc), TeamIdentifier=not set, no Authority), the linker\'s per-build identifier (name + UUID + hash), the universal format, the cdhash kept', a);
+  const rc = MI.parseCodesignInfo(CS.CHROME_DV);
+  ok(rc.signed && !rc.adhoc && rc.teamId === CS.CHROME_TEAM && rc.identifier === CS.CHROME_IDENTIFIER && same(rc.authority, ['Developer ID Application: Google LLC (EQHXZ8M8AV)', 'Developer ID Certification Authority', 'Apple Root CA']) && rc.timestamp === 'Oct 19, 2026 at 7:23:41 PM' && rc.cdhash === null && rc.flags === null, 'ROUND 2, a REAL Developer ID app (Google Chrome, notarized): the three-authority chain verbatim, TeamIdentifier, a secure timestamp (the signature outlives the certificate) — signed even though the capture kept no CodeDirectory line', rc);
+  ok(CS.adhoc() === CS.HELPER_DV && CS.adhocDr() === CS.HELPER_DR && MI.parseCodesignInfo(CS.IDENTITIES_NONE).signed === false && MI.parseCodesignInfo(CS.CHROME_ASSESS).signed === false, 'the generators with no argument ARE the captures; `0 valid identities found` (the owner before enrollment) and spctl\'s text parse as unsigned, not a crash');
+  const d = MI.parseCodesignInfo(CS.developerId());
   ok(d.signed && !d.adhoc && d.teamId === CS.TEAM && d.identifier === CS.IDENTIFIER && same(d.authority, [`Developer ID Application: Helper Publisher (${CS.TEAM})`, 'Developer ID Certification Authority', 'Apple Root CA']) && d.runtime === '26.0.0' && d.flags === '0x10000' && d.cdhash === '0fedcba987654321fedcba987654321fedcba987', 'a Developer ID signature: the three-authority chain in order, TeamIdentifier, the hardened runtime version, the flags', d);
   const x = MI.parseCodesignInfo(CS.appleDevelopment());
   ok(x.signed && !x.adhoc && /^Apple Development:/.test(x.authority[0]) && x.teamId === CS.TEAM, 'an Apple Development signature parses as signed, not ad-hoc, with its own leaf', x);
@@ -73,6 +90,12 @@ console.log('— ③ identityVerdict —');
   const chain = V(CS.developerId().replace('Authority=Apple Root CA\n', ''), { teamIds: PIN });
   ok(chain.kind === 'other' && /does not run Developer ID Certification Authority → Apple Root CA/.test(chain.why), 'a chain that does not end at Apple Root CA ⇒ other', chain);
   ok(V(CS.adhoc(), { teamIds: PIN }).kind === 'adhoc' && V(CS.adhoc(), { teamIds: [] }).kind === 'adhoc', 'ad-hoc is ad-hoc, pin or no pin');
+  const realHelper = V(CS.HELPER_DV, { teamIds: PIN }), realHelper0 = V(CS.HELPER_DV, { teamIds: [] });
+  ok(realHelper.kind === 'adhoc' && realHelper0.kind === 'adhoc' && realHelper.identifier === CS.HELPER_ADHOC_IDENTIFIER && realHelper.cdhash === CS.HELPER_CDHASH, 'ROUND 2: the REAL ad-hoc helper reads `adhoc` (pin or no pin) — its linker identifier is no objection (an ad-hoc identity is the cdhash, not the name)', realHelper);
+  const chromeAs = V(CS.CHROME_DV, { teamIds: [CS.CHROME_TEAM], identifier: CS.CHROME_IDENTIFIER });
+  ok(chromeAs.kind === 'developer-id' && chromeAs.teamId === CS.CHROME_TEAM && chromeAs.identifier === CS.CHROME_IDENTIFIER && /Developer ID by team EQHXZ8M8AV/.test(chromeAs.why), 'ROUND 2: the REAL Chrome capture reads `developer-id` by team EQHXZ8M8AV when that team is pinned and its identifier is the one asked', chromeAs);
+  const chromeOurs = V(CS.CHROME_DV, { teamIds: [CS.CHROME_TEAM] }), chromeNoPin = V(CS.CHROME_DV, { teamIds: [] });
+  ok(chromeOurs.kind === 'other' && /identifier is com\.google\.Chrome, not com\.problemfactory\.vibespace\.screen/.test(chromeOurs.why) && chromeNoPin.kind === 'other' && /signed by team EQHXZ8M8AV; this agent pins no Team ID yet/.test(chromeNoPin.why), 'Chrome itself is never our helper: with its team pinned it fails THE identifier; with no pin (today) it is `other` like any Developer ID build', { chromeOurs, chromeNoPin });
   ok(V(CS.unsigned(), { teamIds: PIN }).kind === 'unsigned' && MI.identityVerdict(null).kind === 'unsigned', 'unsigned / no facts ⇒ unsigned');
   ok(V(CS.developerId(), { teamIds: ['bad', CS.TEAM] }).kind === 'developer-id' && V(CS.developerId(), { teamIds: ['vsteam0001'] }).kind === 'other', 'a malformed pin row is ignored; the pin is case-exact');
 }
@@ -130,13 +153,15 @@ console.log('— ⑥ the release record\'s helper row —');
 console.log('— ⑦ the argvs and the release script —');
 {
   const vp = MI.verifyPlan('/Users/u/.vibespace/helpers/vibespace-screen-vs-1');
-  ok(same(vp.map((x) => [x.file, x.args]), [['/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', '/Users/u/.vibespace/helpers/vibespace-screen-vs-1']], ['/usr/bin/codesign', ['-dv', '--verbose=4', '/Users/u/.vibespace/helpers/vibespace-screen-vs-1']]]) && MI.MAC_CODESIGN === '/usr/bin/codesign', 'verifyPlan: the strict verification FIRST, then the facts — both /usr/bin/codesign (every Mac has it, no CLT needed)', vp);
+  ok(same(vp.map((x) => [x.file, x.args]), [['/usr/bin/codesign', ['--verify', '--strict', '--verbose=2', '/Users/u/.vibespace/helpers/vibespace-screen-vs-1']], ['/usr/bin/codesign', ['-dv', '--verbose=4', '/Users/u/.vibespace/helpers/vibespace-screen-vs-1']], ['/usr/bin/codesign', ['-dr', '-', '/Users/u/.vibespace/helpers/vibespace-screen-vs-1']]]) && MI.MAC_CODESIGN === '/usr/bin/codesign', 'verifyPlan: the strict verification FIRST, then the facts, then (round 2) the designated requirement — all /usr/bin/codesign (every Mac has it, no CLT needed)', vp);
   ok(same(MI.signArgs({ out: '/w/x' }), ['-s', '-', '-f', '/w/x']) && same(MI.signArgs({ identity: `Developer ID Application: Helper Publisher (${CS.TEAM})`, out: '/w/x' }), ['--sign', `Developer ID Application: Helper Publisher (${CS.TEAM})`, '--options', 'runtime', '--timestamp', '--identifier', CS.IDENTIFIER, '--force', '/w/x']), 'signArgs: ad-hoc without an identity (the cut before any certificate); Developer ID = hardened runtime + a secure timestamp + THE identifier');
   const sh = fs.readFileSync(path.join(REPO, 'scripts/build-mac-helper.sh'), 'utf8');
   ok(/--sign\) SIGN=/.test(sh) && /--identifier\) IDENTIFIER=/.test(sh) && /--notarize\) NOTARIZE=/.test(sh) && /IDENTIFIER="com\.problemfactory\.vibespace\.screen"/.test(sh), 'build-mac-helper.sh takes --sign / --identifier / --notarize; the identifier defaults to the design\'s');
   ok(/codesign --sign "\$SIGN" --options runtime --timestamp --identifier "\$IDENTIFIER" --force/.test(sh) && /codesign --verify --strict --verbose=2/.test(sh) && /codesign -s - -f/.test(sh), 'its signed branch is signArgs\'s argv and verifies strictly; its default branch is the ad-hoc one (unchanged)');
   ok(/vibespace-screen\.identity\.json/.test(sh) && /notarized: notarized === 'true'/.test(sh) && /xcrun notarytool submit .* --keychain-profile "\$NOTARIZE" --wait/.test(sh) && /notarization did not succeed — the signed helper ships without it/.test(sh), 'it writes the identity record (version, sha256, kind, teamId, identifier, notarized) and a failed notarization never fails the build');
   ok(/Authority=Developer ID Application:/.test(sh) && /the signature names no Team ID/.test(sh) && /--notarize needs --sign/.test(sh), 'it refuses by name: a --sign identity that is not Developer ID Application, a signature without a Team ID, --notarize without --sign');
+  const want = /\n\s*WANT="([^\n]*)"\n/.exec(sh);
+  ok(/codesign -dr - "\$WORK\/vibespace-screen"/.test(sh) && want && want[1].replace(/\\"/g, '"').replace('$IDENTIFIER', CS.IDENTIFIER).replace('$TEAM', CS.TEAM) === MI.designatedRequirement({ teamId: CS.TEAM }) && /the designated requirement is not the Developer ID one the agent keys the grant on/.test(sh), 'ROUND 2: the release script reads the signed prebuilt\'s requirement back (`codesign -dr -`) and refuses by name unless it is designatedRequirement\'s text — the same text the agent will read on the Mac', want && want[1]);
   const sm = fs.readFileSync(path.join(REPO, 'src/agentd/stream-mac.js'), 'utf8');
   const ensure = sm.slice(sm.indexOf('function ensure()'), sm.indexOf('/** What the facts saw'));
   const iJudge = ensure.indexOf('await identityOf(pushed)'), iPlace = ensure.indexOf('fs.renameSync(pushed, P.bin)');
@@ -146,7 +171,6 @@ console.log('— ⑦ the argvs and the release script —');
 
 console.log('— ⑧ RED controls: patched copies of the module —');
 {
-  const load = (text) => { const m = { exports: {} }; new Function('module', 'exports', 'require', text)(m, m.exports, () => { throw new Error('imports nothing'); }); return m.exports; };
   ok(load(SRC_TEXT).identityVerdict(MI.parseCodesignInfo(CS.developerId({ team: CS.OTHER_TEAM })), { teamIds: PIN }).kind === 'other', 'the clean copy refuses another team (the control\'s baseline)');
   const noTeam = SRC_TEXT.replace("if (!pins.includes(team)) return { kind: 'other'", "if (false) return { kind: 'other'");
   ok(noTeam !== SRC_TEXT && load(noTeam).identityVerdict(MI.parseCodesignInfo(CS.developerId({ team: CS.OTHER_TEAM })), { teamIds: PIN }).kind === 'developer-id', 'RED: with the Team ID check dropped, ANOTHER team\'s Developer ID signature passes as ours — the check is what bites');
@@ -154,6 +178,52 @@ console.log('— ⑧ RED controls: patched copies of the module —');
   ok(noAdhoc !== SRC_TEXT && load(noAdhoc).swapVerdict({ incoming: { version: 'v', identity: { kind: 'adhoc' } }, teamIds: PIN }).take === true, 'RED: with the pinned-adhoc refusal dropped, an ad-hoc push is taken under a pin — the refusal is what bites');
   const noIdent = SRC_TEXT.replace("if (base.identifier !== identifier) return { kind: 'other'", "if (false) return { kind: 'other'");
   ok(noIdent !== SRC_TEXT && load(noIdent).identityVerdict(MI.parseCodesignInfo(CS.developerId({ identifier: 'com.example.other' })), { teamIds: PIN }).kind === 'developer-id', 'RED: with the identifier check dropped, a foreign identifier by our team passes — the check is what bites');
+}
+
+console.log('— ⑨ ROUND 2: the pin mutant over the REAL shapes —');
+{
+  const pinned = SRC_TEXT.replace('HELPER_TEAM_IDS = Object.freeze([])', `HELPER_TEAM_IDS = Object.freeze([${JSON.stringify(CS.CHROME_TEAM)}])`);
+  const P = load(pinned);
+  ok(pinned !== SRC_TEXT && same([...P.HELPER_TEAM_IDS], [CS.CHROME_TEAM]) && Object.isFrozen(P.HELPER_TEAM_IDS), 'a copy of the module with HELPER_TEAM_IDS = [EQHXZ8M8AV] — the shape of the pin commit (the owner\'s Team ID will stand there)');
+  const chromeShape = P.identityVerdict(P.parseCodesignInfo(CS.developerId({ team: CS.CHROME_TEAM, name: 'Google LLC' })));
+  ok(chromeShape.kind === 'developer-id' && chromeShape.teamId === CS.CHROME_TEAM && chromeShape.identifier === CS.IDENTIFIER, 'the pinned copy accepts Chrome\'s signer shape with OUR identifier (its defaults: that pin, HELPER_IDENTIFIER)', chromeShape);
+  const chromeItself = P.identityVerdict(P.parseCodesignInfo(CS.CHROME_DV), { identifier: CS.CHROME_IDENTIFIER });
+  ok(chromeItself.kind === 'developer-id' && chromeItself.teamId === CS.CHROME_TEAM, '…and the verbatim Chrome capture by its own identifier (the pin is the only thing that changed)', chromeItself);
+  const takes = P.swapVerdict({ incoming: { version: 'vs-new', identity: chromeShape } }), refuses = P.swapVerdict({ incoming: { version: 'vs-new', identity: P.identityVerdict(P.parseCodesignInfo(CS.HELPER_DV)) } });
+  ok(takes.take === true && refuses.take === false && refuses.code === 'helper_unsigned' && /ad-hoc signed; this agent pins Team ID EQHXZ8M8AV/.test(refuses.why), 'the pinned copy TAKES the Developer ID shape and still REFUSES the real ad-hoc helper by name (helper_unsigned — the local build stays the fallback)', { takes, refuses });
+  const clean = MI.swapVerdict({ incoming: { version: 'vs-new', identity: MI.identityVerdict(MI.parseCodesignInfo(CS.developerId({ team: CS.CHROME_TEAM, name: 'Google LLC' }))) } });
+  ok(clean.take === false && clean.code === 'helper_unsigned' && /pins no Team ID yet/.test(clean.why) && MI.swapVerdict({ incoming: { version: 'vs-new', identity: MI.identityVerdict(MI.parseCodesignInfo(CS.HELPER_DV)) } }).take === true, 'the UNPATCHED module (no pin today) refuses that same shape and takes the real ad-hoc helper — the pin commit is what flips both');
+  ok(P.wantSigned({ kind: 'adhoc' }) === true && MI.wantSigned({ kind: 'adhoc' }) === false && P.wantSigned(chromeShape) === false, 'the pinned copy wants the signed prebuilt over an ad-hoc install (and nothing over a signed one); the unpinned one wants nothing');
+}
+
+console.log('— ⑩ ROUND 2: codesign -dr - parsed as its own shape —');
+{
+  const h = MI.parseDesignatedRequirement(CS.HELPER_DR);
+  ok(h.executable === CS.HELPER_FILE && h.implicit === true && h.kind === 'cdhash' && same(h.cdhashes, [...CS.HELPER_CDHASHES]) && h.identifiers.length === 0 && h.teamId === null && h.oids.length === 0 && h.designated === 'cdhash H"d18ecc296a649af2546060b5a4c68fcf04c1fcc4" or cdhash H"cddfb0e2117db0e6c05d6b9803c5c3e1318505b4"', 'the REAL ad-hoc helper: `# designated =>` (implicit — codesign computed it: Internal requirements count=0) = one cdhash PER SLICE of the universal binary — why every rebuild is a new client to tccd', h);
+  const c = MI.parseDesignatedRequirement(CS.CHROME_DR);
+  ok(c.executable === CS.CHROME_FILE && c.implicit === false && c.kind === 'developer-id' && same(c.identifiers, ['com.google.Chrome', 'com.google.Chrome.beta', 'com.google.Chrome.dev', 'com.google.Chrome.canary']) && c.teamId === CS.CHROME_TEAM && same(c.oids, ['1.2.840.113635.100.6.2.6', '1.2.840.113635.100.6.1.13']) && c.anchorAppleGeneric === true && c.cdhashes.length === 0, 'the REAL Chrome: `designated =>` (embedded) = four identifiers, anchor apple generic, EXACTLY the OIDs 1.2.840.113635.100.6.2.6 (certificate 1) and 1.2.840.113635.100.6.1.13 (the leaf), the leaf\'s OU = EQHXZ8M8AV — the developer-id shape', c);
+  const ours = MI.parseDesignatedRequirement(CS.designated({ team: CS.TEAM }));
+  ok(ours.kind === 'developer-id' && same(ours.identifiers, [CS.IDENTIFIER]) && ours.teamId === CS.TEAM && ours.implicit === false && ours.designated === MI.designatedRequirement({ teamId: CS.TEAM }), 'our own requirement parses back to ONE identifier + the team and equals designatedRequirement\'s text', ours);
+  const sp = CS.drSplit(CS.CHROME_DR);
+  ok(sp.stderr === `Executable=${CS.CHROME_FILE}\n` && sp.stdout === `designated => ${c.designated}\n` && same(MI.parseDesignatedRequirement(sp.stdout + sp.stderr), c) && MI.parseDesignatedRequirement(CS.CHROME_DR.replace(' = EQHXZ8M8AV', ' = "EQHXZ8M8AV"')).teamId === CS.CHROME_TEAM, 'the Executable line is stderr, the requirement stdout — read in either order; a quoted OU reads the same team', sp);
+  ok(MI.parseDesignatedRequirement(CS.CHROME_ASSESS).kind === null && MI.parseDesignatedRequirement('').designated === null && MI.parseDesignatedRequirement(null).kind === null && MI.parseDesignatedRequirement(CS.HELPER_DV).kind === null, 'no designated line (spctl\'s text, a -dv output, empty, null) ⇒ kind null, nothing invented');
+  const odd = MI.parseDesignatedRequirement(`designated => identifier "x" and anchor apple generic and certificate leaf[subject.OU] = ${CS.TEAM}`);
+  ok(odd.kind === 'other' && same(odd.identifiers, ['x']) && odd.teamId === CS.TEAM && odd.oids.length === 0, 'identifier + team WITHOUT the two Developer ID OIDs is `other` — not a requirement tccd would keep across certificates');
+  // requirementVerdict — the agent's question after a developer-id verdict (src/agentd/stream-mac.js identityOf)
+  const RV = (req, o) => MI.requirementVerdict(req, o) || '';
+  ok(MI.requirementVerdict(ours, { teamId: CS.TEAM }) === null && /a cdhash requirement \(implicit — the grant would die with the next build\)/.test(RV(h, { teamId: CS.TEAM })), 'ours passes; the real ad-hoc helper\'s cdhash requirement is refused by name (implicit, per-build)');
+  ok(/it names com\.google\.Chrome \/ com\.google\.Chrome\.beta \/ com\.google\.Chrome\.dev \/ com\.google\.Chrome\.canary by team EQHXZ8M8AV, not com\.google\.Chrome by team EQHXZ8M8AV/.test(RV(c, { teamId: CS.CHROME_TEAM, identifier: CS.CHROME_IDENTIFIER })), 'Chrome\'s four-identifier requirement is not the plain one-identifier requirement a helper must carry — named: what it has, what was asked');
+  ok(/it names com\.problemfactory\.vibespace\.screen by team VSTEAM0001, not com\.problemfactory\.vibespace\.screen by team ZZOTHER002/.test(RV(ours, { teamId: CS.OTHER_TEAM })) && /printed no designated requirement/.test(RV(MI.parseDesignatedRequirement(''), { teamId: CS.TEAM })) && /not the Developer ID shape \(identifier "x"/.test(RV(odd, { teamId: CS.TEAM, identifier: 'x' })) && /10 capitals/.test(RV(ours, { teamId: 'bad' })), 'another team, no requirement, a requirement without the OIDs, a malformed team — each refused by name');
+  const extra = MI.parseDesignatedRequirement(CS.designated({ team: CS.TEAM }).replace(/\n$/, ' and certificate leaf[subject.CN] = "x"\n'));
+  ok(extra.kind === 'developer-id' && /extra clauses: not the plain Developer ID requirement/.test(RV(extra, { teamId: CS.TEAM })), 'the right identifier + team WITH an extra clause (a custom -r) is refused: only THE plain requirement');
+  // the agent's third run (src/agentd/stream-mac.js identityOf): only after a developer-id verdict; the requirement READ, not assumed
+  const sm = fs.readFileSync(path.join(REPO, 'src/agentd/stream-mac.js'), 'utf8');
+  const idf = sm.slice(sm.indexOf('async function identityOf('), sm.indexOf('async function build('));
+  const iGate = idf.indexOf("if (id.kind !== 'developer-id') return id;"), iParse = idf.indexOf('MI.parseDesignatedRequirement('), iJudge = idf.indexOf('MI.requirementVerdict(');
+  ok(iGate > 0 && iParse > iGate && iJudge > iParse && /requirement: req\.designated/.test(idf) && /kind: 'other'/.test(idf) && !/MI\.designatedRequirement\(/.test(sm.slice(sm.indexOf('function ensure()'))), 'the agent asks `-dr -` only after a developer-id verdict, judges it with requirementVerdict (a refusal is `other` ⇒ helper_unsigned) and records the requirement it READ — ensure() no longer assumes one');
+  // RED control: the equality dropped ⇒ another team's requirement passes as ours
+  const noEq = SRC_TEXT.replace('if (req.designated === expect) return null;', 'return null;');
+  ok(noEq !== SRC_TEXT && load(noEq).requirementVerdict(ours, { teamId: CS.OTHER_TEAM }) === null && MI.requirementVerdict(ours, { teamId: CS.OTHER_TEAM }) !== null, 'RED: with the text equality dropped, a requirement naming ANOTHER team passes as ours — the comparison is what bites');
 }
 
 console.log(`\n${fail ? '✗' : '✓'} test-mac-helper-identity: ${pass} passed, ${fail} failed`);

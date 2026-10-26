@@ -187,6 +187,7 @@ const fakeExec = (cfg) => {
         const target = args[args.length - 1], kind = (cfg.identityOf && cfg.identityOf(target)) || cfg.identity || 'adhoc';
         if (kind === 'unsigned') return cb(Object.assign(new Error('exit 1'), { code: 1 }), '', CS.unsigned({ file: target }));
         if (args[0] === '-dv') return cb(null, '', kind === 'developer-id' ? CS.developerId({ file: target }) : kind === 'other' ? CS.developerId({ file: target, team: CS.OTHER_TEAM }) : CS.adhoc({ file: target }));
+        if (args[0] === '-dr') { const t = CS.drSplit(kind === 'adhoc' || cfg.dr === 'cdhash' ? CS.adhocDr({ file: target }) : CS.designated({ file: target, team: kind === 'other' ? CS.OTHER_TEAM : CS.TEAM })); return cb(null, t.stdout, t.stderr); } // round 2: the requirement (cfg.dr = 'cdhash' ⇒ a custom -r one)
         return cb(null, '', '');
       }
       cb(new Error('unexpected ' + file), '', '');
@@ -256,13 +257,14 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-s
     if (compiler) { devDir = path.join(h, 'CLT'); fs.mkdirSync(path.join(devDir, 'usr/bin'), { recursive: true }); fs.writeFileSync(path.join(devDir, 'usr/bin/swiftc'), ''); }
     return { h, P, devDir };
   };
-  // (a) pinned + a Developer ID prebuilt by the pinned team ⇒ taken; codesign --verify then -dv ran on the INCOMING path, nothing else
+  // (a) pinned + a Developer ID prebuilt by the pinned team ⇒ taken; codesign --verify, -dv, then -dr (round 2) ran on the INCOMING path, nothing else
   const a = mk('smac-ida', { pushed: true });
   const xa = fakeExec({ identity: 'developer-id' });
   const ra = await MAC.createMacHelper({ execFile: xa.ef, fs, home: a.h, teamIds: PIN }).ensure();
   const runs = xa.events.filter((e) => e[0] === 'start');
   ok(ra.state === 'ready' && ra.how === 'prebuilt' && ra.identity && ra.identity.kind === 'developer-id' && ra.identity.teamId === CS.TEAM && ra.identity.identifier === MI.HELPER_IDENTIFIER && ra.wantSigned === false && ra.regrant === false && stateOf(a.P).identity.kind === 'developer-id', 'pinned: a Developer ID prebuilt by the pinned team is put in place; its identity is recorded; wantSigned false; a first install is no re-grant', ra);
-  ok(same(runs.map((e) => [e[1], e[2][0], e[2][e[2].length - 1]]), [['codesign', '--verify', a.P.incoming(SRC.VERSION)], ['codesign', '-dv', a.P.incoming(SRC.VERSION)]]) && !fs.existsSync(a.P.incoming(SRC.VERSION)), 'exactly two runs: `codesign --verify --strict` then `codesign -dv --verbose=4`, both on the INCOMING file (judged before the rename; no compiler asked)', runs);
+  ok(same(runs.map((e) => [e[1], e[2][0], e[2][e[2].length - 1]]), [['codesign', '--verify', a.P.incoming(SRC.VERSION)], ['codesign', '-dv', a.P.incoming(SRC.VERSION)], ['codesign', '-dr', a.P.incoming(SRC.VERSION)]]) && !fs.existsSync(a.P.incoming(SRC.VERSION)), 'exactly three runs: `codesign --verify --strict`, `codesign -dv --verbose=4`, then `codesign -dr -` (round 2), all on the INCOMING file (judged before the rename; no compiler asked)', runs);
+  ok(ra.identity.requirement === MI.designatedRequirement({ teamId: CS.TEAM }) && stateOf(a.P).identity.requirement === ra.identity.requirement && /certificate leaf\[subject\.OU\] = VSTEAM0001$/.test(ra.identity.requirement), 'round 2: the requirement in the state is the one READ from the file by `codesign -dr -` (THE Developer ID one: identifier + anchor apple generic + the two OIDs + the Team ID as the leaf\'s OU) — what tccd will key the grant on', ra.identity.requirement);
   // (b) pinned + an ad-hoc prebuilt ⇒ refused helper_unsigned, the file removed; a compiler ⇒ built here (the fallback), the state says what was refused
   const b = mk('smac-idb', { pushed: true, compiler: true });
   const xb = fakeExec({ identity: 'adhoc', devDir: b.devDir });
@@ -304,6 +306,13 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-s
   const xg2 = fakeExec({ identity: 'other' });
   const rg2 = await MAC.createMacHelper({ execFile: xg2.ef, fs, home: g.h, teamIds: PIN }).ensure();
   ok(rg.state === 'ready' && rg.how === null && rg.have === SRC.VERSION && rg.refused && rg.refused.code === 'helper_unsigned' && fs.readFileSync(g.P.bin, 'utf8') === 'installed' && !fs.existsSync(g.P.incoming(SRC.VERSION)) && xg2.events.length === 0 && rg2.state === 'ready', 'a refused push at the installed version leaves the installed helper in place (the refusal recorded); the next ensure() with nothing pushed runs NOTHING', { rg, ev2: xg2.events.length });
+  // (i) round 2: a Developer ID signature by the pinned team whose designated requirement is NOT the Developer ID one (a custom `-r`:
+  //     a cdhash requirement — tccd would key the grant on the hash and the next build would lose it) ⇒ refused by name; the ad-hoc
+  //     path of (b) above never asked -dr (two codesign runs there)
+  const i1 = mk('smac-idi', { pushed: true });
+  const xi = fakeExec({ identity: 'developer-id', dr: 'cdhash' });
+  const ri = await MAC.createMacHelper({ execFile: xi.ef, fs, home: i1.h, teamIds: PIN }).ensure();
+  ok(ri.state === 'missing' && ri.code === 'helper_unsigned' && /designated requirement is not the Developer ID one/.test(ri.error) && /a cdhash requirement/.test(ri.error) && !fs.existsSync(i1.P.incoming(SRC.VERSION)) && xi.events.filter((e) => e[0] === 'start' && e[1] === 'codesign').length === 3, 'round 2: a Developer ID build by the pinned team that carries a cdhash requirement (a custom -r) is REFUSED by name after the third run — the grant would not survive the next build', ri);
   // (h) RED control: a copy of stream-mac.js that skips the verdict puts the unsigned push in place
   const srcText = fs.readFileSync(path.join(REPO, 'src/agentd/stream-mac.js'), 'utf8');
   const mutantText = srcText.replace("const sv = MI.swapVerdict(", "const sv = { take: true, code: null, why: 'MUTANT' }; void MI.swapVerdict(").replace(/require\('\.\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`).replace(/require\('\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src/agentd', f))})`);
@@ -787,7 +796,7 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
   const sp = await hub2.start('host-push');
   ok(sp.take === true && sp.source && sp.source.encoder === 'VideoToolbox' && fs.readFileSync(PP.version, 'utf8') === SRC.VERSION && (fs.statSync(PP.bin).mode & 0o111) && logs2.some((m) => /pushed this hub's prebuilt/.test(m)), 'a Mac with no helper and no compiler: the offer said no_helper, the HUB pushed its prebuilt over the device link, the agent put it in place and the offer — asked once more — streams', { sp: { take: sp.take, code: sp.code, why: sp.why }, logs2 });
   const csLog = fs.existsSync(FC.log) ? fs.readFileSync(FC.log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
-  ok(csLog.some((x) => x[0] === '--verify' && x[1] === '--strict' && x[x.length - 1] === PP.incoming(SRC.VERSION)) && csLog.some((x) => x[0] === '-dv' && x[x.length - 1] === PP.incoming(SRC.VERSION)) && JSON.parse(fs.readFileSync(PP.state, 'utf8')).identity.kind === 'adhoc', 'lane apple-signing: the REAL daemon judged the pushed file through codesign (--verify --strict, then -dv) at its INCOMING path before putting it in place; the state records ad-hoc (taken: no Team ID pinned)', csLog);
+  ok(csLog.some((x) => x[0] === '--verify' && x[1] === '--strict' && x[x.length - 1] === PP.incoming(SRC.VERSION)) && csLog.some((x) => x[0] === '-dv' && x[x.length - 1] === PP.incoming(SRC.VERSION)) && !csLog.some((x) => x[0] === '-dr') && JSON.parse(fs.readFileSync(PP.state, 'utf8')).identity.kind === 'adhoc', 'lane apple-signing: the REAL daemon judged the pushed file through codesign (--verify --strict, then -dv; never -dr for an ad-hoc one — round 2) at its INCOMING path before putting it in place; the state records ad-hoc (taken: no Team ID pinned)', csLog);
   fs.writeFileSync(path.join(hubBin, 'vibespace-screen.version'), 'vs-other');
   const r = await DW.pushMacHelper(dmp, { dir: PP.dir, version: SRC.VERSION }, hubBin);
   ok(r.ok === false && r.code === 'no_helper' && /vs-other/.test(r.error), 'a hub whose prebuilt is another version pushes nothing (an agent would never take it)', r);

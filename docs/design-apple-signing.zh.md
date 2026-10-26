@@ -40,8 +40,8 @@ codesign --sign "Developer ID Application: <姓名> (TEAMID)" --options runtime 
 ```
 
 - **身份 = designated requirement（DR）**，Developer ID 证书下 codesign 默认生成：
-  `identifier "com.problemfactory.vibespace.screen" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = "TEAMID"`
-  ——只认 identifier 与 Team ID，**不含 cdhash、不含版本、不含姓名**。PURE `src/mac-helper-identity.js` `designatedRequirement({ teamId, identifier })` 产出这段文本，测试钉住它。
+  `identifier "com.problemfactory.vibespace.screen" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = TEAMID`
+  ——只认 identifier 与 Team ID，**不含 cdhash、不含版本、不含姓名**。PURE `src/mac-helper-identity.js` `designatedRequirement({ teamId, identifier })` 产出这段文本，测试钉住它。**第二轮（2026-10-26）实证**：主开发在 owner 的 Mac 上抓了一个公证过的 Developer ID 应用（Chrome）的 `codesign -dr -`——与上面这段**逐字段相同**，只有 identifier 组与 Team ID 不同（OU 不带引号，照 codesign 打印的样子；两个 OID 正是 `1.2.840.113635.100.6.2.6` 与 `1.2.840.113635.100.6.1.13`）；今天的 ad-hoc 助手的 `-dr -` 是 `# designated => cdhash H"…" or cdhash H"…"`（`#` = codesign 算出来的、没嵌进文件；universal 二进制每个 slice 一个 cdhash）——这就是每版再授权的实物证据。
 - **TCC 为什么从此不再问**：tccd 记每个 client 的 `csreq`（= 这段 DR）；非 bundle 的可执行文件的 client 是**它的路径**（client_type 1）+ csreq。路径固定（今天的法，B-a2f8）+ DR 固定 ⇒ 任何重建的助手都满足同一条 csreq ⇒ 授权保留。ad-hoc 的 csreq 是 `cdhash H"…"`——每次重建都变，这正是今天每版再授权的原因（stream-plan.js「an ad-hoc grant is keyed to path + cdhash」）。
 - **只再授权一次**：第一个 Developer ID 构建替换 ad-hoc 构建时，csreq 从 cdhash 变成 DR——TCC 视为换了 client，owner **最后一次**在「屏幕与系统录音」里把 vibespace-screen 关掉再打开。之后：永不。设计与窗口的话都这么说（§8.6：新拒绝名 `helper_signed_regrant` = 「这是最后一次」）。
 - **`--identifier` 固定**：不给时 codesign 取文件名（`vibespace-screen`，也稳定），但显式钉住，免得谁改了输出文件名就换了身份。
@@ -61,7 +61,7 @@ xcrun notarytool submit vibespace-screen.zip --keychain-profile vibespace-notary
 ### 2.3 Agent 的校验（「设备不 re-exec 任何未签名的东西」延伸到助手）
 
 - PURE `src/mac-helper-identity.js`：`HELPER_IDENTIFIER = 'com.problemfactory.vibespace.screen'`；`HELPER_TEAM_IDS`（agent 里钉住的 Team ID 列表，**今天为空**——owner 报 Team ID 后一次提交填入）；`parseCodesignInfo(text)` 读 `codesign -dv --verbose=4` 的输出（Identifier / TeamIdentifier / Authority 链 / `Signature=adhoc` / CDHash / Runtime 版本）；`identityVerdict(info, { teamIds, identifier })` → `developer-id`（Authority 以 `Developer ID Application:` 开头 + 链到 Apple Root + TeamIdentifier 在钉住的列表里 + identifier 相符）/ `adhoc` / `other`（签了但不是我们的队伍，或 identifier 不符）/ `unsigned`。
-- **校验时机**：**放到固定路径之前**（= 任何 exec 之前）——agent 对推来的 `vibespace-screen-<VERSION>` 跑 `/usr/bin/codesign --verify --strict --verbose=2` 与 `-dv --verbose=4`（每台 Mac 都有 /usr/bin/codesign，不需要 CLT）；通过才 rename 到位，并把身份（kind / teamId / identifier / cdhash）写进 `.state.json`。不每次 spawn 都校验：文件只在 agent 用户的家目录里，由 agent 自己写；状态文件里缺身份记录（老 agent 装的助手）时补校一次。
+- **校验时机**：**放到固定路径之前**（= 任何 exec 之前）——agent 对推来的 `vibespace-screen-<VERSION>` 跑 `/usr/bin/codesign --verify --strict --verbose=2` 与 `-dv --verbose=4`（每台 Mac 都有 /usr/bin/codesign，不需要 CLT）；通过才 rename 到位，并把身份（kind / teamId / identifier / cdhash）写进 `.state.json`。**第二轮**：裁决为 developer-id 时再跑一次 `codesign -dr -`，读出的 DR 必须**正是** 2.1 那段（自定义 `-r` 的、cdhash 的、别队伍的、多一个子句的 ⇒ `helper_unsigned`——否则 tccd 记下的 csreq 不是我们以为的那条，下一版就丢授权）；写进 `.state.json` 的 `requirement` 是**读出来的**，不是假设的。ad-hoc 的不问（它的 DR 按构造就是 cdhash）。不每次 spawn 都校验：文件只在 agent 用户的家目录里，由 agent 自己写；状态文件里缺身份记录（老 agent 装的助手）时补校一次。
 - **裁决表**（PURE `swapVerdict({ installed, incoming, teamIds })`）：
 
 | 钉住的 Team ID | 推来的 prebuilt | 结果 |
@@ -141,12 +141,12 @@ xcrun notarytool submit vibespace-screen.zip --keychain-profile vibespace-notary
    `xcrun notarytool store-credentials vibespace-notary --key ~/.private_keys/AuthKey_<KEYID>.p8 --key-id <KEYID> --issuer <ISSUER>`（凭据进钥匙串，profile 名 `vibespace-notary`）。
 7. **告诉主开发（都是公开信息）**：`security find-identity -v -p codesigning` 打印的**名字**（例 `Developer ID Application: <姓名> (ABCDE12345)`——括号里就是 **Team ID**），以及 Ad Hoc 描述文件的到期日。主开发把 Team ID 钉进 `src/mac-helper-identity.js` `HELPER_TEAM_IDS`（一次提交），之后的切版就按 §3 签。
 8. **TestFlight 的材料**（App Store Connect，都是公开信息）：**App 记录**（My Apps → + → 平台 iOS、名称「VibeSpace」、主要语言、Bundle ID 选 `com.problemfactory.vibespace`、SKU 任意、分类 Developer Tools / Productivity）；**图标** 1024×1024（随 archive 上传，放在 asset catalog 里）；**Test Information**（Beta App Description、反馈邮箱、联系人姓名 / 邮箱 / 电话——外部测试必填）；**隐私政策 URL**（外部测试与商店都要一个可访问的页面——建议 hub 仓库 docs 里一页：「app 不收集数据；它只连接你自己指定的 VibeSpace 服务器」）；**App 隐私详情**（问卷答「Data Not Collected」——Apple 页「App Privacy Details」：「Data that is processed only on device is not 'collected'」；提交商店时必填，TestFlight 不问）；**出口合规**：Info.plist 的 `ITSAppUsesNonExemptEncryption = NO`（只用 HTTPS = 标准豁免，§5）；**外部测试组** + **公开链接**（TestFlight 标签 → External Testing → 建组 → Create Public Link → Open to Anyone）。
-9. **主开发顺便要你的 Mac 上抓两份输出给测试当 fixture**（公开信息）：`codesign -dv --verbose=4 ~/.vibespace/helpers/vibespace-screen`（现在的 ad-hoc 助手）和任一 Developer ID 签名的程序（如 `codesign -dv --verbose=4 /Applications/Xcode.app/Contents/MacOS/Xcode`）。
+9. ~~**主开发顺便要你的 Mac 上抓两份输出给测试当 fixture**（公开信息）：`codesign -dv --verbose=4 ~/.vibespace/helpers/vibespace-screen`（现在的 ad-hoc 助手）和任一 Developer ID 签名的程序。~~ **已抓（2026-10-26 第二轮，主开发经 exit road）**：fixtures 已是逐字输出（`scripts/fixtures/stream/codesign-outputs.mjs`，家目录改写为 /Users/me，哈希原样）。
 
 ## §7 门与法
 
 - PURE `src/mac-helper-identity.js`（imports nothing；进 test-architecture 的 PURE 集）：DR 文本、`parseCodesignInfo`、`identityVerdict`、`swapVerdict`、`helperRow` / `helperRowVerdict`（manifest 行的形状）、校验 argv、词。
-- **test-mac-helper-identity**（fast，PURE，< 0.3 s——fast 档总和 909.2 / 910 s，只容得下这么大）：fixtures = `codesign -dv --verbose=4` 的真实输出形状（ad-hoc / Developer ID / 另一队伍 / 未签名——§6.8 抓到真机输出后替换为逐字 fixture）；每条裁决一腿 + RED 对照（去掉 Team ID 检查的变体接受别人的签名）。
+- **test-mac-helper-identity**（fast，PURE，< 0.3 s——fast 档总和 909.2 / 910 s，只容得下这么大）：fixtures = owner Mac 上的**逐字**输出（第二轮：ad-hoc 助手的 `-dv --verbose=4` 与 `-dr -`、Chrome 的 Developer ID 签名者行与 DR；Apple Development / 未签名仍是文档形状）；每条裁决一腿 + RED 对照（去掉 Team ID 检查的变体接受别人的签名；钉住 `HELPER_TEAM_IDS=[Chrome 的队伍]` 的变体接受 Chrome 的形状、仍拒 ad-hoc；DR 文本与 Chrome 的逐字段相等；`-dr -` 按自己的形状解析；去掉 DR 相等检查的变体放过别队伍的 DR）。
 - **test-stream-mac §3**：推来的 prebuilt **先校验后到位**；`helper_unsigned` 按名拒绝（RED 对照：去掉校验的补丁副本接受它）；签名版赢过本机编译；同版本 ad-hoc → Developer ID 的换版 = 一次 regrant；Developer ID → Developer ID 不 regrant；§6 真 daemon 的推送腿用假 codesign（bundle 副本里 `/usr/bin/codesign` 换成假程序——与 §6 已有的三处 darwin 补丁同法）。
 - **test-agentd-upgrade-signature**：manifest 带 `helper` 行 ⇒ 校验通过；伪造 / 篡改该行 ⇒ `bad-signature`；畸形行 ⇒ `malformed`；`sign-agentd` 在 scratch 仓里有 data/bin/helpers 产物时写出该行。
 - 普查：test-sync-fs-census 的 `pushMacHelper` 行（同步读 2 → 4：`.identity.json` 与 manifest）；spawn-env-census 不变（校验复用 `run()` 的 execFile）；test-exit-forensics 不变（无新 kill）。
@@ -161,7 +161,8 @@ xcrun notarytool submit vibespace-screen.zip --keychain-profile vibespace-notary
 - `src/agentd-signature.js` + `scripts/sign-agentd.mjs` + `scripts/agentd-release.mjs`：manifest 的 `helper` 行在签名消息里。
 - `scripts/build-mac-helper.sh --sign / --identifier / --notarize`（默认 ad-hoc）+ `.identity.json`。
 - 窗口的话：`helper_signed_regrant`（「这是最后一次」）与 `helper_unsigned`（en/zh/ja）。
-- **未建（下一条车道）**：`apps/ios/` 的壳——等 D3 / D5 定下（两者改文件形状），而且本箱没有 xcodebuild、没有门能跑它；§4–§5 已写到可以开工。证书落地后的那条车道：钉 Team ID、第一次签名切版、§6.8 的真 fixture 替换。
+- **第二轮（2026-10-26，主开发抓回真机输出）**：fixtures 改为逐字捕获；DR 文本改为 codesign 打印的形状（OU 不带引号）并与真 DR 逐字段相等；`parseDesignatedRequirement` / `requirementVerdict`（PURE）+ agent 在 developer-id 裁决后第三次跑 `codesign -dr -`、不是那条 DR 就拒；`build-mac-helper.sh` 签完同样核对 DR 再写 `.identity.json`。
+- **未建（下一条车道）**：`apps/ios/` 的壳——等 D3 / D5 定下（两者改文件形状），而且本箱没有 xcodebuild、没有门能跑它；§4–§5 已写到可以开工。证书落地后的那条车道：钉 Team ID、第一次签名切版。
 
 ## §9 Owner 决定汇总
 

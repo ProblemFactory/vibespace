@@ -88,13 +88,21 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
     for (const d of dirs) for (const f of [`${d}/usr/bin/swiftc`, `${d}/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc`]) if (isFile(f)) return '/usr/bin/swiftc'; // statSync follows the CLT's swiftc → swift-frontend link
     return null;
   }
-  /** Who signed a file (lane apple-signing): the strict verification, then the facts — both through codesign ON THE MAC. → identityVerdict's */
+  /** Who signed a file (lane apple-signing): the strict verification, then the facts — and for a Developer ID build the designated
+   *  requirement it carries (round 2: READ from the file — what tccd will key the grant on — never assumed; one that is not THE
+   *  Developer ID requirement is refused). All through codesign ON THE MAC. → identityVerdict's (+ requirement) */
   async function identityOf(file) {
-    const [vf, dv] = MI.verifyPlan(file, codesign);
+    const [vf, dv, dr] = MI.verifyPlan(file, codesign);
     const v = await run(vf.file, vf.args, 30000);
     if (v.err) return { kind: 'unsigned', teamId: null, identifier: null, cdhash: null, authority: [], why: `codesign --verify refused it (${(v.stderr.trim().split('\n').pop() || v.err.message || '').slice(0, 160)})` };
     const d = await run(dv.file, dv.args, 30000);
-    return MI.identityVerdict(MI.parseCodesignInfo(d.stderr || d.stdout), { teamIds });
+    const id = MI.identityVerdict(MI.parseCodesignInfo(d.stderr || d.stdout), { teamIds });
+    if (id.kind !== 'developer-id') return id; // an ad-hoc requirement is its cdhash by construction; other / unsigned are refused already
+    const r = await run(dr.file, dr.args, 30000);
+    const req = MI.parseDesignatedRequirement(`${r.stderr || ''}\n${r.stdout || ''}`);
+    const bad = r.err ? `codesign -dr failed (${(r.stderr.trim().split('\n').pop() || r.err.message || '').slice(0, 160)})` : MI.requirementVerdict(req, { teamId: id.teamId, identifier: id.identifier });
+    if (bad) return { ...id, kind: 'other', why: `its designated requirement is not the Developer ID one the grant must key on — ${bad}` };
+    return { ...id, requirement: req.designated };
   }
   async function build(swiftc) {
     const dir = `${P.dir}/.build-${process.pid}`, src = `${dir}/vibespace-screen.swift`, out = `${dir}/vibespace-screen`;
@@ -135,7 +143,7 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
         const v = await identityOf(pushed);
         const sv = MI.swapVerdict({ installed: have ? { version: have, identity: from } : null, incoming: { version, identity: v }, teamIds });
         if (sv.take) {
-          try { fs.chmodSync(pushed, 0o755); fs.renameSync(pushed, P.bin); how = 'prebuilt'; identity = v.kind === 'developer-id' ? { ...v, requirement: MI.designatedRequirement({ teamId: v.teamId, identifier: v.identifier }) } : v; } catch (e) { why = `the pushed helper could not be put in place (${e && e.code})`; } // the requirement tccd keys the grant on rides the state (what the facts show)
+          try { fs.chmodSync(pushed, 0o755); fs.renameSync(pushed, P.bin); how = 'prebuilt'; identity = v; } catch (e) { why = `the pushed helper could not be put in place (${e && e.code})`; } // a Developer ID identity carries the requirement READ from the file (identityOf) — what tccd keys the grant on rides the state
         } else {
           try { fs.unlinkSync(pushed); } catch { /* gone already */ }
           if (sv.code) { refused = { code: sv.code, why: sv.why, at: now() }; log(`[stream] mac screen helper ${version}: a pushed helper was refused (${sv.code} — ${sv.why})`); }

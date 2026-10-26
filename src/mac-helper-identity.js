@@ -11,7 +11,9 @@
  *
  * THE LAW this file extends: a device re-execs nothing unsigned (CLAUDE.md, design q-042 D2). A helper the hub pushes is
  * judged BEFORE it is put at the fixed path (= before any exec) by `codesign --verify --strict` + `codesign -dv --verbose=4`
- * read through parseCodesignInfo → identityVerdict → swapVerdict (the table in the design's §2.3):
+ * read through parseCodesignInfo → identityVerdict → swapVerdict (the table in the design's §2.3) — and a Developer ID verdict
+ * by `codesign -dr -` read through parseDesignatedRequirement → requirementVerdict: the requirement tccd will key the grant on
+ * must be THE one below (a custom `-r`, a cdhash one or another team's would lose the grant at the next build).
  *   HELPER_TEAM_IDS empty (today)  ad-hoc taken as before · a Developer ID of ANY team / other / unsigned ⇒ helper_unsigned
  *   HELPER_TEAM_IDS pinned          Developer ID by a pinned team with THE identifier taken — also over an installed ad-hoc
  *                                   build of the same version · ad-hoc / other / unsigned ⇒ helper_unsigned (the local build
@@ -31,17 +33,25 @@ const VERSION_RE = /^[A-Za-z0-9._-]{1,40}$/;
 const CDHASH_RE = /^[0-9a-f]{40}$/;
 const DEV_ID_RE = /^Developer ID Application: (.+) \(([A-Z0-9]{10})\)$/;
 const MAC_CODESIGN = '/usr/bin/codesign';
+/** The two certificate-extension OIDs a Developer ID chain carries: certificate 1 (the Developer ID Certification Authority) and
+ *  the leaf (a Developer ID Application certificate) — read field for field from a real `codesign -dr -` (scripts/fixtures/stream/
+ *  codesign-outputs.mjs CHROME_DR, captured on the owner's Mac 2026-10-26). */
+const OID_DEVELOPER_ID_CA = '1.2.840.113635.100.6.2.6';
+const OID_DEVELOPER_ID_LEAF = '1.2.840.113635.100.6.1.13';
 
-/** The designated requirement codesign writes for a Developer ID signature of `identifier` by `teamId` — what tccd stores. */
+/** The designated requirement codesign writes for a Developer ID signature of `identifier` by `teamId` — what tccd stores. The
+ *  text is codesign's own shape (the leaf's OU unquoted, `/* exists *\/` after each OID) so that what the agent reads back with
+ *  `codesign -dr -` compares equal. */
 function designatedRequirement({ teamId, identifier = HELPER_IDENTIFIER } = {}) {
   if (!TEAM_RE.test(String(teamId || ''))) throw new Error('mac-helper-identity: a Team ID is 10 capitals / digits');
   if (!IDENT_RE.test(String(identifier || ''))) throw new Error('mac-helper-identity: not a code identifier');
-  return `identifier "${identifier}" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = "${teamId}"`;
+  return `identifier "${identifier}" and anchor apple generic and certificate 1[field.${OID_DEVELOPER_ID_CA}] /* exists */ and certificate leaf[field.${OID_DEVELOPER_ID_LEAF}] /* exists */ and certificate leaf[subject.OU] = ${teamId}`;
 }
 
-/** The two codesign runs that judge a file (in this order): the strict verification, then the facts. → [{ file, args }] */
+/** The codesign runs that judge a file (in this order): the strict verification, the facts, and — only after a developer-id
+ *  verdict (an ad-hoc signature's requirement is its cdhash by construction) — the designated requirement. → [{ file, args }] */
 function verifyPlan(bin, codesign = MAC_CODESIGN) {
-  return [{ file: codesign, args: ['--verify', '--strict', '--verbose=2', String(bin)] }, { file: codesign, args: ['-dv', '--verbose=4', String(bin)] }];
+  return [{ file: codesign, args: ['--verify', '--strict', '--verbose=2', String(bin)] }, { file: codesign, args: ['-dv', '--verbose=4', String(bin)] }, { file: codesign, args: ['-dr', '-', String(bin)] }];
 }
 
 /** The release script's codesign argv: ad-hoc without an identity (today's cut), Developer ID with one (hardened runtime,
@@ -54,7 +64,7 @@ function signArgs({ identity = null, identifier = HELPER_IDENTIFIER, out } = {})
 /** `codesign -dv --verbose=4` (its stderr) → the facts, or { signed: false } for «code object is not signed at all». */
 function parseCodesignInfo(text) {
   const s = String(text || '');
-  const info = { signed: false, identifier: null, teamId: null, authority: [], adhoc: false, cdhash: null, runtime: null, format: null, flags: null };
+  const info = { signed: false, identifier: null, teamId: null, authority: [], adhoc: false, cdhash: null, runtime: null, format: null, flags: null, timestamp: null };
   if (/code object is not signed at all/.test(s)) return info;
   for (const raw of s.split(/\r?\n/)) {
     const line = raw.trim();
@@ -69,6 +79,7 @@ function parseCodesignInfo(text) {
     else if (k === 'CDHash') info.cdhash = CDHASH_RE.test(v) ? v : null;
     else if (k === 'Runtime Version') info.runtime = v.slice(0, 40) || null;
     else if (k === 'Format') info.format = v.slice(0, 120) || null;
+    else if (k === 'Timestamp') info.timestamp = v.slice(0, 60) || null; // a secure timestamp: the signature outlives the certificate
   }
   if (info.identifier || info.cdhash) info.signed = true;
   return info;
@@ -89,6 +100,46 @@ function identityVerdict(info, { teamIds = HELPER_TEAM_IDS, identifier = HELPER_
   if (!pins.includes(team)) return { kind: 'other', ...base, teamId: team, why: pins.length ? `signed by team ${team}, not the pinned ${pins.join(' / ')}` : `signed by team ${team}; this agent pins no Team ID yet` };
   if (base.identifier !== identifier) return { kind: 'other', ...base, teamId: team, why: `its identifier is ${base.identifier || 'missing'}, not ${identifier}` };
   return { kind: 'developer-id', ...base, teamId: team, why: `Developer ID by team ${team}` };
+}
+
+/** `codesign -dr -` (the requirement on stdout, the Executable line on stderr — given here in either order) → the requirement's
+ *  shape. kind: 'cdhash' = an ad-hoc signature's (codesign COMPUTES it, printed `# designated =>` — implicit — one cdhash per slice
+ *  of a universal binary: why every rebuild is a new client to tccd); 'developer-id' = identifier(s) + anchor apple generic + the
+ *  two Developer ID OIDs + the leaf's OU = a Team ID (the shape designatedRequirement writes); 'other' = some other requirement;
+ *  null = no designated line at all. */
+function parseDesignatedRequirement(text) {
+  const out = { executable: null, designated: null, implicit: false, kind: null, cdhashes: [], identifiers: [], teamId: null, oids: [], anchorAppleGeneric: false };
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.startsWith('Executable=')) { if (!out.executable) out.executable = line.slice('Executable='.length).slice(0, 400) || null; continue; }
+    const m = /^(#\s*)?designated\s*=>\s*(.+)$/.exec(line);
+    if (!m || out.designated) continue;
+    out.designated = m[2].trim().slice(0, 2000); out.implicit = !!m[1];
+  }
+  const d = out.designated;
+  if (!d) return out;
+  for (const m of d.matchAll(/cdhash H"([0-9a-f]{40})"/g)) out.cdhashes.push(m[1]);
+  for (const m of d.matchAll(/identifier "([^"]{1,200})"/g)) out.identifiers.push(m[1]);
+  for (const m of d.matchAll(/\[field\.([0-9.]{1,80})\]/g)) out.oids.push(m[1]);
+  out.anchorAppleGeneric = /\banchor apple generic\b/.test(d);
+  const ou = /certificate leaf\[subject\.OU\] = "?([A-Z0-9]{10})"?(?=$|[\s)])/.exec(d);
+  out.teamId = ou ? ou[1] : null;
+  const dev = out.identifiers.length > 0 && out.anchorAppleGeneric && out.oids.includes(OID_DEVELOPER_ID_CA) && out.oids.includes(OID_DEVELOPER_ID_LEAF) && !!out.teamId && out.cdhashes.length === 0;
+  out.kind = dev ? 'developer-id' : out.cdhashes.length && !out.identifiers.length ? 'cdhash' : 'other';
+  return out;
+}
+
+/** After a developer-id verdict: is the requirement the file carries THE one tccd must key the grant on — designatedRequirement's
+ *  for this team + identifier, nothing more? → null (it is) | why not. A custom `-r` requirement, a cdhash one, another team's
+ *  or an extra clause would not survive the next build (or would key the grant on something we do not control). */
+function requirementVerdict(req, { teamId, identifier = HELPER_IDENTIFIER } = {}) {
+  if (!req || !req.designated) return 'codesign printed no designated requirement';
+  if (req.kind === 'cdhash') return `a cdhash requirement (${req.implicit ? 'implicit — ' : ''}the grant would die with the next build)`;
+  if (req.kind !== 'developer-id') return `not the Developer ID shape (${req.designated.slice(0, 160)})`;
+  let expect; try { expect = designatedRequirement({ teamId, identifier }); } catch (e) { return e.message; }
+  if (req.designated === expect) return null;
+  if (req.identifiers.length === 1 && req.identifiers[0] === identifier && req.teamId === teamId) return 'extra clauses: not the plain Developer ID requirement';
+  return `it names ${req.identifiers.join(' / ')} by team ${req.teamId}, not ${identifier} by team ${teamId}`;
 }
 
 /** Does a pushed helper go to the fixed path? installed = { version, identity } | null (what is there now; identity null =
@@ -144,4 +195,4 @@ function helperRowShape(row) {
 /** The row's line inside the signed message (src/agentd-signature.js bundleMessage) — present iff the record carries it. */
 const helperRowLine = (row) => `helper ${row.version} ${row.sha256} ${row.identity.kind} ${row.identity.teamId || '-'} ${row.identity.identifier || '-'}`;
 
-module.exports = { HELPER_IDENTIFIER, HELPER_TEAM_IDS, KINDS, MAC_CODESIGN, designatedRequirement, verifyPlan, signArgs, parseCodesignInfo, identityVerdict, swapVerdict, regrantVerdict, wantSigned, helperRow, helperRowShape, helperRowLine };
+module.exports = { HELPER_IDENTIFIER, HELPER_TEAM_IDS, KINDS, MAC_CODESIGN, designatedRequirement, verifyPlan, signArgs, parseCodesignInfo, identityVerdict, parseDesignatedRequirement, requirementVerdict, swapVerdict, regrantVerdict, wantSigned, helperRow, helperRowShape, helperRowLine };
