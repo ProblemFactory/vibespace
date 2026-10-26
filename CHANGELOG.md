@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.359 — 2026-10-26
+
+### Fixed
+- Installing a plugin from a Git repository and switching plugins on or off work again: the form went out in the wrong format and was read as empty.
+
 ## 2.369.358 — 2026-10-26
 
 ### Added

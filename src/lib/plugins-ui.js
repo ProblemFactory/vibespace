@@ -8,6 +8,7 @@ import { t } from './i18n.js';
 import { renderVoiceSheet } from './voice-plugin-card.js'; // the Voice row's 「待处理 N」 sheet: Connect + the proposal cards
 import { pluginCategoryOf } from './settings-schema.js';
 import { decisionLineOf, paintDecisionLine, liveDecisionLine } from './decision-readout.js'; // lane decision-spend-readout: the judge's money as the row's second line
+const JSON_HDR = { 'Content-Type': 'application/json' };   // 2.369.359: a JSON body SAYS it is JSON — fetch's default for a string body is text/plain, which express.json() skips, so the route read an EMPTY body and refused «source must be …» (the owner, installing the custom browser plugin)
 
 // lane decision-vendor-hygiene: the LLM plugin row's STOPS (decision-model rowStopOf — no call until the key or the
 // model changes): the chip says which, its title says what to do. `s` = the engine's status().stop {why, status, at}.
@@ -253,7 +254,7 @@ export function installPluginsUI(App) {
     };
     // ── MANIFEST PLUGINS (Plugin Ph2 2.369.24; Ph4 2.369.30 consent / install / update / uninstall) ──
     const enablePlugin = async (p, { trusted = false } = {}) => {
-      const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled: true, trusted }) });
+      const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ enabled: true, trusted }) });
       if (rr?.consentRequired && !trusted) { const okc = await this._pluginConsentDialog(p, rr.capabilities); if (okc) return enablePlugin(p, { trusted: true }); return; }
       if (rr?.error) { showToast(rr.error, { type: 'error' }); return; }
       showToast(trusted ? t('Plugin enabled (trusted)') : t('Plugin enabled'));
@@ -316,7 +317,7 @@ export function installPluginsUI(App) {
             if (p.consentRequired) { const okc = await this._pluginConsentDialog(p); if (!okc) { cb.checked = false; return; } return enablePlugin(p, { trusted: true }); }
             return enablePlugin(p);
           }
-          const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled: false }) });
+          const rr = await fetchJson(`/api/plugins/manifests/${encodeURIComponent(p.id)}/enabled`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ enabled: false }) });
           if (rr?.error) { showToast(rr.error, { type: 'error' }); cb.checked = true; return; }
           showToast(t('Plugin disabled'));
           this.pluginClient?.refresh?.();
@@ -485,7 +486,7 @@ export function installPluginsUI(App) {
           const v = val.value.trim();
           if (!v) return fail(t('Enter a location first'));
           const git = srcSel.value === 'git';
-          res = await fetchJson('/api/plugins/install', { method: 'POST', body: JSON.stringify({ source: srcSel.value, value: v, ...(git && refIn.value.trim() ? { ref: refIn.value.trim() } : {}), ...(git && credSel.value ? { credential: credSel.value } : {}) }) });
+          res = await fetchJson('/api/plugins/install', { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ source: srcSel.value, value: v, ...(git && refIn.value.trim() ? { ref: refIn.value.trim() } : {}), ...(git && credSel.value ? { credential: credSel.value } : {}) }) });
         }
         if (!res || res.error) return fail(res?.error ? `${res.error}${res.code ? ` [${res.code}]` : ''}` : t('Install failed'));
         showToast(t('Installed {id} {version}', { id: res.plugin?.id || '', version: res.plugin?.version || '' }) + (res.replaced ? ' · ' + t('previous copy moved to trash') : ''));

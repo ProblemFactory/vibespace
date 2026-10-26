@@ -4,6 +4,13 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.359 — 2026-10-26
+
+### plugin-install-json — the Install plugin dialog's JSON POSTs name their content type (hotfix by 主开发, the owner blocked installing the custom browser plugin)
+- **Cause:** `src/lib/plugins-ui.js` posted `JSON.stringify` bodies with no headers ⇒ `text/plain` ⇒ `express.json()` skipped ⇒ `req.body = {}` ⇒ the route's whitelist refused «source must be path | git | zip | github-release» (install) — the enable switch posted the same way. The multipart zip road and every route test (which sent the header) were green, so the gate never saw it (since the git rows of 2.369.356).
+- **Fix + fence:** `JSON_HDR` on the three calls; test-architecture **§102** censuses every direct `fetch` / `fetchJson` call in `src/lib` + `src/client.js` whose body is `JSON.stringify(…)` and has no `headers` (red by file:line; an in-suite control sees a bare call). On 91bf7e18 the census names 3 lines (plugins-ui.js:256, :319, :488); on this commit 0.
+- Gates: test-architecture, test-plugin-loader, test-changelog-style, the build's i18n-check; greps clean.
+
 ## 2.369.358 — 2026-10-26
 
 ### engine-plugin — P0 of the custom browser kernel: a browser ENGINE plugin, the `{kind:'plugin'}` choice through both launch roads + a conversation's browser, the default policy as a setting with a fleet fact (BUILD lane on 2.369.355 ba15fe55; docs/design-custom-browser-plugin.zh.md §1 rewritten as built)

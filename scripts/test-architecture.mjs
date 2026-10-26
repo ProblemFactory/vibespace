@@ -5606,5 +5606,30 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     `§101c CONTROLS: a bare child.stdin.end(tar) in hosts.js (${bare101.roadBad.length} red), the helper's listener after its write (${late101.helper ? 'WRONG' : 'red'}) and an unlistened write in a new file (${newF.newBad.length ? 'red' : 'WRONG'}) are caught; a listened one is not (${okF.newBad.length ? 'WRONG' : 'green'})`);
 }
 
+
+// ── §102 (2.369.359, the owner installing the custom browser plugin): A JSON BODY SAYS IT IS JSON ──
+// fetch() sends a string body as text/plain by default; express.json() parses only application/json, so the route read
+// an EMPTY body and refused the Install plugin dialog's git install by name («source must be path | git | zip |
+// github-release») while the dialog had sent source:'git'. Every direct fetch / fetchJson call in the client whose body
+// is JSON.stringify(…) names a content type (headers: …); a wrapper that builds such calls is itself one of them.
+{
+  const bareJsonCalls = (src) => {
+    const out = [];
+    for (const m of src.matchAll(/\b(fetch|fetchJson)\(/g)) {
+      let depth = 1, j = m.index + m[0].length;
+      while (j < src.length && depth) { const c = src[j]; if (c === '(') depth++; else if (c === ')') depth--; j++; }
+      const call = src.slice(m.index + m[0].length, j - 1);
+      if (/\bbody\s*:\s*JSON\.stringify\(/.test(call) && !/\bheaders\b/.test(call)) out.push(src.slice(0, m.index).split('\n').length);
+    }
+    return out;
+  };
+  const files = ['src/client.js', ...fs.readdirSync(path.join(REPO, 'src/lib')).filter((n) => n.endsWith('.js')).map((n) => 'src/lib/' + n)];
+  const bare = [];
+  for (const f of files) for (const line of bareJsonCalls(fs.readFileSync(path.join(REPO, f), 'utf8'))) bare.push(`${f}:${line}`);
+  ok(bare.length === 0, `§102 every client fetch / fetchJson with a JSON.stringify body names its content type (headers) — a bare one is text/plain to express.json() and the route reads an empty body${bare.length ? ': ' + bare.join(' ') : ''}`);
+  const control = bareJsonCalls("const r = await fetchJson('/api/x', { method: 'POST', body: JSON.stringify({ a: 1 }) });\nawait fetch('/api/y', { method: 'POST', headers: H, body: JSON.stringify({}) });");
+  ok(control.length === 1 && control[0] === 1, `§102 CONTROL: the census sees a bare JSON POST (line 1) and spares the one with headers (${JSON.stringify(control)})`);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
