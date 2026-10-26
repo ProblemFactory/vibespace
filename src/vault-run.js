@@ -27,7 +27,12 @@
  *     interpreter is not refused: its whole command line IS the shape, shown verbatim, never «always».
  *   · THE KNOWN TOOLS (`KNOWN_TOOLS`, §8.4): default hosts, where a tool's hosts come from (URLs, scp-like targets, an ssh
  *     target, a host flag, a registry), its subcommand words, whether it honours the proxy env (P1 vault-run-egress fences
- *     on it); a tool outside the table, or one naming no host = destination UNKNOWN (said on the card, never «always»).
+ *     on it); a tool outside the table, or one naming no host = destination UNKNOWN (said on the card, never «always»). Lane
+ *     vault-agent-own (round 2): a URL tool's target written WITHOUT a scheme (`curl evil.example.com`, httpie's `:3000`), a
+ *     libpq connection string's `host=` / `hostaddr=` and a URI's host LIST (`postgresql://a,b/db`), an ATTACHED short flag
+ *     (`-hHOST`, `-oProxyCommand=…` — getopt: the first letter that takes a value takes the rest of the word) and gh's
+ *     `--hostname` / `-R HOST/OWNER/REPO` are READ as hosts; a target the shape cannot list (a curl glob, a bare number, a URL
+ *     it cannot read, curl `--expand-*`) makes the shape BLIND (`unread`).
  *   · THE SHAPE KEY (`shapeOf`, `shapeKeyOf`; decision ④): tool + flags (order-free) + hosts + entries + injection + the
  *     plain env (names AND values — lane vault-run-door: `PGHOST=evil` is another shape) + the templates' text + `--on`; a
  *     known tool's subcommand words belong to the tool, and so do the VALUES of its routing flags (`keyed`: ssh -o / -J /
@@ -45,9 +50,11 @@
  *     conversation — its registered id for an entry made before this lane, its DURABLE id, the CLI session id a resumed
  *     conversation keeps, for one made since). Provenance decides ONE thing: a value the agent PUT (it saw it) never asks; a value
  *     the hub MINTED (the agent never saw it) asks ONCE PER HOST when a run names a host other than the one it was minted `--for`
- *     (`awayOf` — the only leak the card can still prevent; a KNOWN tool naming no host is a local command and asks nothing; a
- *     run whose destination cannot be told — a shell, an interpreter, an unknown tool, a routing flag, a config file, project
- *     code, a program an agent could write — asks once per command SHAPE). Still audited, still scrubbed.
+ *     (`awayOf` — the only leak the card can still prevent); a run whose destination cannot be told — a shell, an interpreter,
+ *     an unknown tool, a routing flag, a config file, project code, a program an agent could write, and (round 2) a known tool
+ *     whose host the table did not read (every row of the table reaches the network: no host read is not «no host») — asks
+ *     once per command SHAPE on a local instance and EVERY run on a cluster, where only a live «always» (the second password)
+ *     passes it, as for the owner's own entries. Still audited, still scrubbed.
  *   · THE SCRUBBER (`FORMS` / `FORM_ROWS` — THE ONE LIST, each form with a real tool that prints it by itself; `formsOf`,
  *     `VIEWS`, `createRunMasker`, `createMasker`, `maskText`): the value in every spelling a real producer prints becomes its
  *     placeholder. SPELLED (texts built from the value): raw; base64 (standard and URL-safe, padded or not, and the value's own
@@ -260,7 +267,7 @@ const ENV_HIJACK = Object.freeze([
   Object.freeze({ re: /^PATH$/, why: 'the tool was resolved on the agent\'s PATH; another would change what it starts' }),
 ]);
 const ENV_CONFIG = Object.freeze([   // a plain value pointing at the agent's own file is refused; a `--file NAME=…` the hub renders is not
-  Object.freeze({ re: /^(?:KUBECONFIG|CURL_HOME|WGETRC|DOCKER_CONFIG|AWS_CONFIG_FILE|AWS_SHARED_CREDENTIALS_FILE|NPM_CONFIG_USERCONFIG|PIP_CONFIG_FILE|PGSERVICEFILE|PGPASSFILE|RCLONE_CONFIG|NETRC)$/i, why: 'it points the tool at a config it obeys' }),
+  Object.freeze({ re: /^(?:KUBECONFIG|CURL_HOME|WGETRC|DOCKER_CONFIG|AWS_CONFIG_FILE|AWS_SHARED_CREDENTIALS_FILE|NPM_CONFIG_USERCONFIG|PIP_CONFIG_FILE|PGSERVICEFILE|PGPASSFILE|PSQLRC|RCLONE_CONFIG|NETRC)$/i, why: 'it points the tool at a config it obeys' }),   // round 2: PSQLRC (its `\!` runs a shell)
   Object.freeze({ re: /^(?:HOME|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_CACHE_HOME)$/, why: 'it moves the home a tool reads its config from' }),   // lane vault-run-door (the security review)
   Object.freeze({ re: /^(?:https?_proxy|all_proxy|no_proxy|ftp_proxy)$/i, why: 'where a run may go is the hub\'s (vault-run-egress)' }),
 ]);
@@ -290,24 +297,29 @@ const INTERPRETERS = Object.freeze(['node', 'nodejs', 'deno', 'bun', 'python', '
 // ── THE KNOWN TOOLS (§8.4 — P1 vault-run-egress fences the `proxyEnv` ones) ──
 const SSH_VALUE_FLAGS = ['-b', '-c', '-D', '-E', '-e', '-F', '-I', '-i', '-J', '-L', '-l', '-m', '-O', '-o', '-p', '-P', '-Q', '-R', '-S', '-W', '-w', '-B'];
 const SSH_KEYED = ['-o', '-F', '-J', '-W', '-L', '-R', '-D', '-S'];   // lane vault-run-door: where the connection goes / what it runs (ProxyCommand) — the value is the shape
+// lane vault-agent-own (round 2): the flags whose VALUE is the next word, so a value is never read as a target (`curl -X POST`,
+// `wget -O out.html`); a flag missing here only makes its value look like a target — a card more, never one less
+const CURL_VALUE_FLAGS = ['-A', '--user-agent', '-b', '--cookie', '-c', '--cookie-jar', '-C', '--continue-at', '-d', '--data', '--data-ascii', '--data-binary', '--data-raw', '--data-urlencode', '--json', '-D', '--dump-header', '-e', '--referer', '-E', '--cert', '--cert-type', '--key', '--key-type', '--cacert', '--capath', '--ciphers', '-F', '--form', '--form-string', '-H', '--header', '-m', '--max-time', '--connect-timeout', '-o', '--output', '--output-dir', '-r', '--range', '-T', '--upload-file', '-u', '--user', '-U', '--proxy-user', '-w', '--write-out', '-X', '--request', '-y', '--speed-time', '-Y', '--speed-limit', '-z', '--time-cond', '--retry', '--retry-delay', '--retry-max-time', '--limit-rate', '--max-filesize', '--max-redirs', '--oauth2-bearer', '--aws-sigv4', '--interface', '--local-port', '-Q', '--quote', '--stderr', '--trace', '--trace-ascii', '--pinnedpubkey', '--pass', '--proto', '--proto-redir', '--variable', '--url-query', '--url', '--unix-socket', '--abstract-unix-socket', '--dns-servers'];
+const WGET_VALUE_FLAGS = ['-O', '--output-document', '-o', '--output-file', '-a', '--append-output', '-P', '--directory-prefix', '-U', '--user-agent', '--header', '--user', '--password', '--http-user', '--http-password', '--post-data', '--post-file', '--body-data', '--body-file', '--method', '-t', '--tries', '-T', '--timeout', '--load-cookies', '--save-cookies', '--ca-certificate', '--certificate', '--private-key', '-w', '--wait', '-Q', '--quota', '--limit-rate', '-l', '--level', '-A', '--accept', '-R', '--reject', '-D', '--domains', '--exclude-domains', '-e', '--execute', '-B', '--base', '--bind-address', '--config', '-i', '--input-file'];
+const HTTPIE_VALUE_FLAGS = ['-a', '--auth', '-A', '--auth-type', '-o', '--output', '--session', '--session-read-only', '--cert', '--cert-key', '--cert-key-pass', '--ciphers', '--ssl', '--timeout', '--max-redirects', '--boundary', '--format-options', '-p', '--print', '-P', '--history-print', '--pretty', '-s', '--style', '--response-charset', '--response-mime', '--default-scheme', '--verify', '--proxy'];
 const KNOWN_TOOLS = Object.freeze([
-  { name: 'curl', proxyEnv: true, valueFlags: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config'], keyed: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url'], configFlags: ['-K', '--config'] },
-  { name: 'wget', proxyEnv: true },
-  { name: 'http', aka: ['https', 'httpie'], proxyEnv: true },
-  { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'] },
-  { name: 'git', sub: 1, scpLike: true, proxyEnv: true, valueFlags: ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'], keyed: ['-c', '--config-env'] },
+  { name: 'curl', proxyEnv: true, bareHosts: 'all', globs: true, urlFlags: ['--url'], blindPrefixes: ['--expand-'], valueFlags: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config', ...CURL_VALUE_FLAGS], keyed: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '--unix-socket', '--abstract-unix-socket', '--dns-servers'], configFlags: ['-K', '--config'] },
+  { name: 'wget', proxyEnv: true, bareHosts: 'all', prefixOpts: true, valueFlags: WGET_VALUE_FLAGS, keyed: ['-e', '--execute', '-B', '--base', '--bind-address', '--use-askpass'], configFlags: ['--config', '-i', '--input-file'] },
+  { name: 'http', aka: ['https', 'httpie'], proxyEnv: true, bareHosts: 'first', valueFlags: HTTPIE_VALUE_FLAGS, keyed: ['--proxy'] },
+  { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'], hostFlags: ['--hostname'], repoFlags: ['-R', '--repo'], repoEnv: ['GH_REPO'], blindSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'sync'], ['pr', 'checkout']], passDashes: true },   // round 2b: these drive `git` (the project's .git/config + hooks, like the git row); args after `--` go to git
+  { name: 'git', sub: 1, scpLike: true, proxyEnv: true, confDest: true, valueFlags: ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'], keyed: ['-c', '--config-env'] },
   { name: 'aws', hosts: ['*.amazonaws.com'], sub: 2, proxyEnv: true, valueFlags: ['--profile', '--region', '--output'] },
   { name: 'gcloud', hosts: ['*.googleapis.com'], sub: 3, proxyEnv: true, valueFlags: ['--project', '--account', '--format', '--configuration'] },
   { name: 'az', hosts: ['management.azure.com', 'login.microsoftonline.com'], sub: 2, proxyEnv: true, valueFlags: ['--subscription', '-g', '--resource-group', '-o', '--output'] },
   { name: 'npm', hosts: ['registry.npmjs.org'], sub: 1, proxyEnv: true, runsProject: true },
   { name: 'pip', hosts: ['pypi.org', 'files.pythonhosted.org'], sub: 1, proxyEnv: true, runsProject: true },
   { name: 'docker', hosts: ['registry-1.docker.io'], sub: 1, registry: true, proxyEnv: false, runsProject: true },
-  { name: 'kubectl', sub: 1, proxyEnv: true, valueFlags: ['-n', '--namespace', '--context', '--cluster', '--user', '-o', '--output', '-l', '--selector', '-f', '--filename', '-c', '--container', '--kubeconfig', '-s', '--server'], configFlags: ['--kubeconfig'] },
-  { name: 'psql', hostFlags: ['-h', '--host'], hostEnv: ['PGHOST', 'PGHOSTADDR'], proxyEnv: false },
-  { name: 'mysql', hostFlags: ['-h', '--host'], hostEnv: ['MYSQL_HOST'], proxyEnv: false },
-  { name: 'rclone', sub: 1, proxyEnv: true },
+  { name: 'kubectl', sub: 1, proxyEnv: true, hostFlags: ['-s', '--server'], valueFlags: ['-n', '--namespace', '--context', '--cluster', '--user', '-o', '--output', '-l', '--selector', '-f', '--filename', '-c', '--container', '--kubeconfig', '-s', '--server'], configFlags: ['--kubeconfig'] },
+  { name: 'psql', hostFlags: ['-h', '--host'], hostEnv: ['PGHOST', 'PGHOSTADDR'], conninfo: true, proxyEnv: false, prefixOpts: true, valueFlags: ['-c', '--command', '-f', '--file', '-d', '--dbname', '-o', '--output'], configFlags: ['-f', '--file'], scriptFlags: ['-c', '--command', '-o', '--output'], escapes: /^[\\|]/ },   // round 2: `-c '\! …'` is psql's shell (a -c starting with a backslash is a meta-command); `-o '|cmd'` pipes to a shell; a -f file may hold one
+  { name: 'mysql', hostFlags: ['-h', '--host'], hostEnv: ['MYSQL_HOST'], proxyEnv: false, prefixOpts: true, valueFlags: ['-e', '--execute'], configFlags: ['--defaults-file', '--defaults-extra-file', '--login-path'], scriptFlags: ['-e', '--execute'], escapes: /\\[!.]|\b(?:system|source)\b/i },   // round 2: the client's `system` / `\!` / `source`
+  { name: 'rclone', sub: 1, proxyEnv: true, confDest: true, valueFlags: ['--config'], configFlags: ['--config'] },
   { name: 'ssh', sshTarget: true, proxyEnv: false, valueFlags: SSH_VALUE_FLAGS, keyed: SSH_KEYED, configFlags: ['-F'] },
-  { name: 'sftp', sshTarget: true, proxyEnv: false, valueFlags: SSH_VALUE_FLAGS, keyed: SSH_KEYED, configFlags: ['-F'] },
+  { name: 'sftp', sshTarget: true, proxyEnv: false, valueFlags: SSH_VALUE_FLAGS, keyed: SSH_KEYED, configFlags: ['-F', '-b'] },   // round 2: -b = a batch file (its `!command` is a local shell)
   { name: 'scp', scpLike: true, copies: true, proxyEnv: false, valueFlags: SSH_VALUE_FLAGS, keyed: SSH_KEYED, configFlags: ['-F'] },
   { name: 'rsync', scpLike: true, copies: true, proxyEnv: false, valueFlags: ['-e', '--rsh'], keyed: ['-e', '--rsh'] },
 ].map((r) => Object.freeze({ argvOnly: false, ...r })));
@@ -442,9 +454,47 @@ function materialize(run, { valueOf, pathOf }) {
 }
 
 // ── THE SHAPE KEY (decision ④) ──
-const URL_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/(?:[^@\s\/\\?#'"]{0,256}@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9.-]+)(?::(\d{1,5}))?/gi;   // lane vault-agent-own (review): a `\` ends the userinfo — WHATWG reads `https://evil\@good/` as host evil
+const URL_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/(?:[^@\s\/\\?#'"]{0,256}@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9.-]+)(?::(\d{1,5}))?((?:,(?:\[[0-9a-f:.]+\]|[A-Za-z0-9.-]+)(?::\d{1,5})?)*)/gi;   // lane vault-agent-own (review): a `\` ends the userinfo — WHATWG reads `https://evil\@good/` as host evil
 const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/\.$/, ''); return x && x.length <= 253 ? (port ? `${x}:${port}` : x) : null; };
-function urlHosts(text) { const out = []; let m; URL_RE.lastIndex = 0; while ((m = URL_RE.exec(String(text)))) if (m[1].toLowerCase() !== 'vault') out.push(normHost(m[2], m[3])); return out.filter(Boolean); }
+function urlHosts(text) {
+  const out = []; let m; URL_RE.lastIndex = 0;
+  while ((m = URL_RE.exec(String(text)))) if (m[1].toLowerCase() !== 'vault') {
+    out.push(normHost(m[2], m[3]));
+    for (const x of (m[4] || '').split(',').slice(1)) { const k = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(x); if (k) out.push(normHost(k[1], k[2])); }   // round 2: every host of a URI's list
+  }
+  return out.filter(Boolean);
+}
+// lane vault-agent-own (round 2) — the hosts the table did not read and the tool still goes to
+const URL_AUTHORITY_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/([^\/?#\s'"]*)/gi;   // scheme through the authority (up to the path / query / fragment)
+/** round 2b (HIGH-1): curl and wget percent-decode the host, IDNA-map a non-ASCII host and read userinfo PAST a backslash —
+ *  so `good.com%2eevil.com`, `good.com。evil.com`, `good.com\@evil.com` all reach evil.com while URL_RE reads good.com. An
+ *  authority that holds a `%`, a `\` or a non-ASCII byte cannot be trusted ⇒ the shape is BLIND (its real host is unknown). */
+function blindAuthority(text) {
+  let m; URL_AUTHORITY_RE.lastIndex = 0;
+  while ((m = URL_AUTHORITY_RE.exec(String(text)))) if (m[1].toLowerCase() !== 'vault' && /[%\\]|[^\x00-\x7f]/.test(m[2])) return true;
+  return false;
+}
+const BARE_RE = /^(?:[^\s@\/\\?#]*@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)?(?::(\d{0,5}))?(?:[\/?#]\S*)?$/i;
+/** A URL tool's target (curl / wget: every positional; httpie: its URL) → { host } (written without a scheme: `evil.example.com/x`,
+ *  httpie's `:3000` = localhost) | { unread: true } (a target whose hosts the shape cannot list: curl's glob `{a,b}` / `[1-9]`, a
+ *  bare number — an address too, `2130706433` = 127.0.0.1 —, a URL URL_RE cannot read) | {} (not a target: a header, a data word). */
+function targetOf(a, globs = false) {
+  const s = String(a);
+  if (globs && /[{}]|\[(?![0-9a-f:.]+\])/i.test(s)) return { unread: true };
+  if (/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(s)) return urlHosts(s).length ? {} : { unread: true };
+  const m = BARE_RE.exec(s);
+  if (!m || (!m[1] && m[2] == null)) return {};
+  if (!m[1]) return { host: normHost('localhost', m[2] || null) };
+  if (/^[\d.]+$/.test(m[1]) && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(m[1])) return { unread: true };
+  return { host: normHost(m[1], m[2] || null) };
+}
+/** httpie: `http [METHOD] URL [items…]` — its one target. */
+const httpieTarget = (ps) => (ps.length >= 2 && /^[A-Za-z]+$/.test(ps[0]) ? [ps[1]] : ps.slice(0, 1));
+/** libpq's `host=` / `hostaddr=` (a connection string, `-d …`, a URI's `?host=`) → every host it names (a host LIST too). */
+const CONNINFO_HOST = /(?:^|[\s?&=]|^-d)(?:host|hostaddr)\s*=\s*(?:'((?:[^'\\]|\\.)*)'|([^\s&'"]+))/gi;
+function conninfoHosts(text) { const out = []; let m; CONNINFO_HOST.lastIndex = 0; while ((m = CONNINFO_HOST.exec(String(text)))) for (const h of String(m[1] != null ? m[1] : m[2]).split(',')) { const hh = h.trim(); if (/^(?:\/|%2f)/i.test(hh)) continue; out.push(normHost(hh)); } return out.filter(Boolean); }   // round 2b: a unix-socket path is local, not a network host
+/** getopt's short-flag cluster: the first letter that takes a value takes the rest of the word (`-hHOST`, `-sSo out`) or the next word. */
+function shortSplit(a, takes) { for (let i = 1; i < a.length; i++) { const f = '-' + a[i]; if (takes.includes(f)) { let v = i + 1 < a.length ? a.slice(i + 1) : null; if (v && v[0] === '=') v = v.slice(1); return { f, head: a.slice(0, i + 1), v }; } } return null; }   // round 2b: `-s=https://…` (Go flags) drops the `=`
 const HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$|^localhost$/i;
 function argClassOf(a) {
   if (/\$VAULT_FILE\{/.test(a)) return '<vaultfile>';
@@ -457,48 +507,70 @@ function argClassOf(a) {
  *  templates, on, script, known, proxyEnv, always, noAlways, argvExposed }. `always` = «always» may be offered for it. */
 function shapeOf(run) {
   const row = run.row, kind = run.kind, argv = run.argv;
-  const flags = new Set(), sub = [], args = [], positionals = [], keyed = [];
-  let script = null, afterDashes = false, valueNext = false, keyNext = null, configFile = false;
+  const flags = new Set(), sub = [], args = [], positionals = [], keyed = [], valued = [];
+  let script = null, afterDashes = false, valueNext = null, configFile = false, unread = false;
   const isKeyed = (f) => !!(row && (row.keyed || []).includes(f));
+  const takes = row ? [...(row.valueFlags || []), ...(row.hostFlags || []), ...(row.configFlags || []), ...(row.keyed || [])] : [];   // the flags that take a value
   if (kind !== 'tool') script = JSON.stringify(argv.slice(1));
   else for (const a of argv.slice(1)) {
     if (!afterDashes && a === '--') { afterDashes = true; flags.add('--'); continue; }
     if (!afterDashes && a.length > 1 && a[0] === '-') {
-      const eq = a.startsWith('--') ? a.indexOf('=') : -1, f = eq > 0 ? a.slice(0, eq) : a;
+      const eq = a.startsWith('--') ? a.indexOf('=') : -1, cl = a[1] !== '-' && a.length > 2 && !takes.includes(a) ? shortSplit(a, takes) : null;   // round 2: -hHOST, -oProxyCommand=…, -sSo out
+      let f = eq > 0 ? a.slice(0, eq) : cl ? cl.f : a;
+      const v = eq > 0 ? a.slice(eq + 1) : cl ? cl.v : null;
+      if (row && row.prefixOpts && f.startsWith('--') && f.length > 2 && !takes.includes(f)) {   // round 2b: GNU/my_getopt accept any UNIQUE prefix of a long option (wget --exec, psql --hos, --comm, --fil)
+        const pref = (list) => (list || []).find((t) => t.startsWith('--') && t !== f && t.startsWith(f));
+        const c = pref(row.configFlags) || pref(row.scriptFlags) || pref(row.hostFlags) || pref(row.keyed) || pref(row.urlFlags) || pref(row.valueFlags);
+        if (c) f = c;   // treat the abbreviation as the flag it names — its value is read (or the shape goes blind) as if spelled in full
+      }
       if (row && (row.configFlags || []).includes(f)) configFile = true;
-      if (eq > 0) { flags.add(a.slice(0, eq + 1)); if (isKeyed(f)) keyed.push(`${f}=${a.slice(eq + 1)}`); else args.push(argClassOf(a.slice(eq + 1))); } else flags.add(a);
-      valueNext = eq < 0 && !!(row && (row.valueFlags || []).concat(row.hostFlags || []).includes(a));
-      keyNext = valueNext && isKeyed(a) ? a : null;
+      if (row && (row.blindPrefixes || []).some((p) => f.startsWith(p))) unread = true;   // curl --expand-url https://{{H}}/ — a host made at run time
+      if (v != null) { flags.add(eq > 0 ? a.slice(0, eq + 1) : cl.head); if (isKeyed(f)) keyed.push(`${f}=${v}`); else { args.push(argClassOf(v)); valued.push([f, v]); } } else flags.add(cl ? cl.head : a);
+      valueNext = v == null && (takes.includes(a) || takes.includes(f) || cl) ? f : null;   // round 2b: a resolved prefix (f) takes a value too
       continue;
     }
-    const wasValue = valueNext; valueNext = false;
-    if (wasValue && keyNext) { keyed.push(`${keyNext}=${a}`); keyNext = null; continue; }   // a routing flag's value IS the shape (ssh -o ProxyCommand=…)
-    if (!wasValue && row && row.sub && sub.length < row.sub && !positionals.length && /^[a-z][a-z0-9-]{0,40}$/.test(a)) { sub.push(a); continue; }
+    const wasValue = valueNext; valueNext = null;
+    if (wasValue && isKeyed(wasValue)) { keyed.push(`${wasValue}=${a}`); continue; }   // a routing flag's value IS the shape (ssh -o ProxyCommand=…)
+    if (wasValue) { args.push(argClassOf(a)); valued.push([wasValue, a]); continue; }
+    if (row && row.sub && sub.length < row.sub && !positionals.length && /^[a-z][a-z0-9-]{0,40}$/.test(a)) { sub.push(a); continue; }
     args.push(argClassOf(a));
-    if (!wasValue) positionals.push(a);
+    positionals.push(a);
   }
   // THE HOSTS: every URL anywhere (the command, the plain env values, the templates) + the row's own rules; its defaults when none
   const hosts = new Set([...argv.slice(1), ...run.plainEnv.map((e) => e.value), ...run.files.map((f) => f.text || '')].flatMap(urlHosts));
   if (row && kind === 'tool') {
-    const all = argv.slice(1);
+    const vals = (list) => valued.filter(([f]) => (list || []).includes(f)).map(([, v]) => v);
+    const envs = (list) => run.plainEnv.filter((e) => (list || []).includes(e.name) && e.value).map((e) => e.value);
+    const many = (v) => String(v).split(',').map((h) => normHost(h.trim()));   // libpq takes a host LIST (PGHOST=h1,h2 · -h h1,h2)
     if (row.scpLike) for (const a of positionals) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{2,253}):(?!\/\/)/.exec(a); if (m && !/^[A-Za-z]$/.test(m[1])) hosts.add(normHost(m[1])); }
     if (row.sshTarget && positionals.length) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253})$/.exec(positionals[0]); if (m) hosts.add(normHost(m[1])); }
-    if (row.hostFlags) all.forEach((a, i) => { const eq = a.indexOf('='); if (row.hostFlags.includes(a) && all[i + 1]) hosts.add(normHost(all[i + 1])); else if (eq > 0 && row.hostFlags.includes(a.slice(0, eq))) hosts.add(normHost(a.slice(eq + 1))); });
+    if (row.hostFlags) for (const v of vals(row.hostFlags)) if (!/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(v)) many(v).forEach((h) => hosts.add(h));   // -h x · --host=x · -hx (round 2); a URL value (kubectl -s https://…) was read above
+    if (row.scriptFlags) for (const v of vals(row.scriptFlags)) if (row.escapes.test(v)) unread = true;   // round 2: a client's shell escape — where it sends is the shell's
     if (row.registry) for (const a of positionals) { const h = a.split('/')[0]; if (HOSTNAME.test(h.replace(/:\d+$/, ''))) hosts.add(normHost(h)); }
-    if (row.hostEnv) for (const e of run.plainEnv) if ([].concat(row.hostEnv).includes(e.name) && e.value) hosts.add(normHost(e.value));
+    if (row.hostEnv) for (const v of envs(row.hostEnv)) many(v).forEach((h) => hosts.add(h));
+    if (row.bareHosts) for (const a of [...(row.bareHosts === 'first' ? httpieTarget(positionals) : positionals), ...vals(row.urlFlags)]) { if (String(a).startsWith('@')) { unread = true; continue; } const t = targetOf(a, !!row.globs); if (t.host) hosts.add(t.host); if (t.unread) unread = true; }   // round 2b: `--url @file` / `@urls.txt` reads the real targets from a file
+    if (row.conninfo) for (const a of argv.slice(1)) conninfoHosts(a).forEach((h) => hosts.add(h));
+    if (row.repoFlags) for (const v of [...vals(row.repoFlags), ...envs(row.repoEnv), ...positionals]) { const p = String(v).split('/'); if (p.length >= 3) { const h = normHost(p[0]); if (h) hosts.add(h); else unread = true; } }   // gh -R HOST/OWNER/REPO (round 2b: an IP / a port / a trailing dot routes too — no HOSTNAME gate; gh sends GH_ENTERPRISE_TOKEN to a non-github host)
+    if (row.blindSubs && row.blindSubs.some((b) => b.every((w, i) => sub[i] === w))) unread = true;   // round 2b: a subcommand that drives git (gh repo clone / pr checkout) — the project's config / hooks decide where it goes
+    if (row.passDashes && flags.has('--')) unread = true;   // round 2b: gh passes args after `--` to git
+    if ([...argv.slice(1), ...run.plainEnv.map((e) => e.value), ...run.files.map((f) => f.text || '')].some(blindAuthority)) unread = true;   // round 2b (HIGH-1): a URL authority our host read cannot be trusted for
     if (!hosts.size && row.hosts) row.hosts.forEach((h) => hosts.add(h));
   }
   hosts.delete(null);
-  const known = !!row && kind === 'tool';
-  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile ? 'config-file' : run.programWritable ? 'program-writable' : null;
+  const known = !!row && kind === 'tool';   // round 2: `unread` (a curl glob, a bare number) is part of an UNKNOWN destination — never «always»
+  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size || unread ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile ? 'config-file' : run.programWritable ? 'program-writable' : null;
   return {
     v: SHAPE_V, tool: run.tool, name: run.name, kind, sub, flags: [...flags].sort(), args, hosts: [...hosts].sort(),
     entries: run.refs.map((r) => r.ref).sort(), injection: [...run.injection].sort(), env: run.plainEnv.map((e) => `${e.name}=${e.value}`).sort(), keyed: keyed.sort(),
     templates: run.files.filter((f) => f.text != null).map((f) => `${f.name}=${f.text}`).sort(), on: run.on || null, script,
     known, proxyEnv: !!(known && row.proxyEnv), always: !noAlways, noAlways, argvExposed: !!run.argvExposed,
     // lane vault-agent-own (the review): where it sends what it reads cannot be told — the raw facts, never `noAlways` (a
-    // known tool naming no host reads 'unknown-destination' there, which hid a config file / a program an agent wrote)
-    blind: kind !== 'tool' || !known || keyed.length > 0 || configFile || !!(row && row.runsProject) || !!run.programWritable,
+    // known tool naming no host reads 'unknown-destination' there, which hid a config file / a program an agent wrote).
+    // Round 2: every row of KNOWN_TOOLS reaches the network, so a known tool whose host the table did not READ (`curl` with
+    // no URL, `psql` over a service, `rclone remote:`) is not a local command — no host read is not «no host»; a target the
+    // shape cannot list (`unread`) and a destination its config keeps (`confDest`: git's url.<base>.insteadOf in the
+    // project's own .git/config, an rclone remote) are blind too
+    blind: kind !== 'tool' || !known || !hosts.size || unread || keyed.length > 0 || configFile || !!(row && (row.runsProject || row.confDest)) || !!run.programWritable,
   };
 }
 /** THE KEY a remembered «always» is stored under — everything decision ④ says, nothing positional. */
@@ -544,17 +616,19 @@ function ownDoorOf(ref) {
  */
 /** Where a run sends what it reads CANNOT be told from its shape (lane vault-agent-own, the review): a shell or an interpreter
  *  (its own code decides), a tool outside the table, a routing flag (ssh -o / curl --connect-to / -x …), a config file the card
- *  cannot show, the project's own code (npm / pip / docker), a program an agent could have written. A known tool naming no
- *  host is a LOCAL command; a known tool naming hosts sends there. */
+ *  cannot show, the project's own code (npm / pip / docker), a program an agent could have written — and (round 2) a known
+ *  tool whose host the table did not read: every row of the table reaches the network. A known tool naming hosts sends there.
+ *  `shapePasses` = a 允许 for such a shape is remembered (`keep`) — a LOCAL instance's rule; a CLUSTER asks every run of it
+ *  (round 2: never looser than the owner's own entries there — only a live «always», behind the second password, passes it). */
 const destUnknown = (sh) => !sh || sh.blind !== false;   // shapeOf's `blind` (a shape that does not say is blind)
-function awayOf(refs, facts, shape, passes = []) {
+function awayOf(refs, facts, shape, passes = [], { shapePasses = true } = {}) {
   const out = [], hosts = shape && Array.isArray(shape.hosts) ? shape.hosts : [], ps = Array.isArray(passes) ? passes : [];
   const unknown = destUnknown(shape), shapePass = unknown ? `?${shapeKeyOf(shape)}` : null;   // an unknown destination is passed per SHAPE, never per host
   for (const r of refs || []) {
     const e = facts.get(r.id);
     if (!e || e.own !== true || e.prov !== 'minted') continue;   // a value the agent PUT (it saw it) asks nothing, ever
-    if (unknown) { if (!ps.some((p) => p && p.id === r.id && p.host === shapePass)) out.push({ ref: r.ref, id: r.id, forHost: forHostOf(e.forHost), host: null, pass: shapePass, unknown: true }); continue; }
-    for (const h of hosts) if (!sameHost(h, e.forHost) && !ps.some((p) => p && p.id === r.id && p.host === h)) out.push({ ref: r.ref, id: r.id, forHost: forHostOf(e.forHost), host: h, pass: h });
+    if (unknown) { if (!(shapePasses && ps.some((p) => p && p.id === r.id && p.host === shapePass))) out.push({ ref: r.ref, id: r.id, forHost: forHostOf(e.forHost), host: null, pass: shapePass, unknown: true, keep: !!shapePasses }); continue; }
+    for (const h of hosts) if (!sameHost(h, e.forHost) && !ps.some((p) => p && p.id === r.id && p.host === h)) out.push({ ref: r.ref, id: r.id, forHost: forHostOf(e.forHost), host: h, pass: h, keep: true });
   }
   return out;
 }
@@ -573,13 +647,16 @@ function runVerdict({ state, plan, shape = null, entries = [], granted = false, 
     if (!(Number(e.bytes) >= MIN_MASK_BYTES)) return refuse('entry_too_short_to_mask', { ref: r.ref });
   }
   if (granted !== true) return refuse('use_not_granted');
-  // THE OWN ROAD (lane vault-agent-own): what the caller made itself asks nothing — but a minted value bound for another host
-  const away = awayOf(plan.refs, facts, sh, passes);
-  const why = [...(plan.refs.some((r) => (facts.get(r.id) || {}).own !== true) ? ['not-own'] : []), ...(away.length ? ['another-host'] : [])];
-  if (!why.length) return { ok: true, by: 'own' };
-  if (!why.includes('not-own')) return { ok: false, ask: true, code: 'ask', why, away, offers: ['once', 'deny'], alwaysTtls: [], alwaysDefault: null, reauth: false, ttlMs: ASK_TTL_MS, noAlways: 'another-host', argvExposed: sh.argvExposed };   // ONCE per host: the answer is the host's pass, never a shape's «always»
-  if (!away.length && sh.always && remembered && (remembered.until == null || Number(remembered.until) > now)) return { ok: true, by: 'always' };
   const mode = policy === 'ask' || policy === 'allow' ? policy : instance === 'cluster' ? 'ask' : 'allow';
+  const live = !!(sh.always && remembered && (remembered.until == null || Number(remembered.until) > now));   // a remembered «always» (the second password gave it)
+  // THE OWN ROAD (lane vault-agent-own): what the caller made itself asks nothing — but a minted value bound for another host,
+  // or (round 2) through a shape whose destination cannot be told: once per shape on a local instance, EVERY run on a cluster
+  // unless a live «always» covers the shape (never a host: a host is passed once, by its own card)
+  const away0 = awayOf(plan.refs, facts, sh, passes, { shapePasses: mode === 'allow' }), away = away0.filter((x) => !(x.unknown && live));
+  const why = [...(plan.refs.some((r) => (facts.get(r.id) || {}).own !== true) ? ['not-own'] : []), ...(away.length ? ['another-host'] : [])];
+  if (!why.length) return { ok: true, by: away0.length ? 'always' : 'own' };
+  if (!why.includes('not-own') && !away.some((x) => x.unknown)) return { ok: false, ask: true, code: 'ask', why, away, offers: ['once', 'deny'], alwaysTtls: [], alwaysDefault: null, reauth: false, ttlMs: ASK_TTL_MS, noAlways: 'another-host', argvExposed: sh.argvExposed };   // ONCE per host: the answer is the host's pass, never a shape's «always»
+  if (!away.length && live) return { ok: true, by: 'always' };
   if (!away.length && mode === 'allow' && seen === true) return { ok: true, by: 'seen' };   // a NEW shape always draws the card (lane vault-run-door's mutant)
   return { ok: false, ask: true, code: 'ask', why, away, offers: sh.always ? ['once', 'always', 'deny'] : ['once', 'deny'], alwaysTtls: sh.always ? Object.keys(ALWAYS_TTLS) : [], alwaysDefault: sh.always ? ALWAYS_DEFAULT : null, reauth: sh.always, ttlMs: ASK_TTL_MS, noAlways: sh.noAlways, argvExposed: sh.argvExposed };
 }
@@ -913,7 +990,7 @@ module.exports = {
   SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
   parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, ownsAgentEntry, forHostOf, sameHost, isFreeEntry, refFor: refOf,
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
-  TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf,
+  TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
   shapeOf, shapeKeyOf, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,

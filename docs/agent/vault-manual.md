@@ -147,8 +147,15 @@ Creating needs no approval (it costs nothing and leaks nothing), and neither doe
 nobody — no switch, no grant, no card (`list` names it «yours»; `request` for it answers that it is yours). The ONE question
 left is for a **minted** value: a run that sends it to a host other than the one you minted it `--for` (or to any host,
 without `--for`) shows the user ONE card naming both hosts; once allowed, that host is asked no more until the vault locks.
-A known tool naming no host asks nothing; a shell, an interpreter, a config file or any command whose destination cannot be
-told asks ONCE per command shape — prefer the tool itself (`curl https://<its host>`) over a script. Every use is still recorded (`uses`), scrubbed and refused by the same tables.
+A command whose destination cannot be told asks too: a shell, an interpreter, a config file, a routing flag, the project's
+own code, a client's shell escape (`psql -c '\! …'`, `psql -f <file>`, `mysql -e 'system …'`) — and a known tool naming no host the vault can read (`curl -s` with no address, `psql` over a service or
+`PGSERVICE`, `rclone remote:`, `git push origin`, `kubectl` on its kubeconfig): every tool the vault knows reaches the
+network, so «no host read» is not «no host». It asks ONCE per command shape on the user's own machine and EVERY run on a
+shared (cluster) instance, unless the user chose «Always for this shape» (where offered, behind the second password). A host
+written without `https://` (`curl api.example.com`), in a connection string (`psql "host=…"`), attached (`-hdb.example.com`)
+or in a host list (`postgresql://a,b/db`) is read like any other. So name the host, in the tool itself:
+`curl https://<its host>/…`, `psql -h <its host>` — never a script. Every use is still recorded (`uses`), scrubbed and refused
+by the same tables.
 
 ## A seed or a login you hold — `totp add` and `login add`
 

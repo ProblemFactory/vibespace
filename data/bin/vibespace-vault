@@ -69,8 +69,9 @@ const USAGE = [
   '  vibespace-vault run [--env NAME=vault://<store>/<row>/<field>]… [--file NAME=vault://…|@<template>]… [--stdin vault://…] [--timeout <s>] -- <command…>',
   '                             run a command that needs a stored secret WITHOUT seeing it: the hub injects it (env / a 0600 file /',
   '                             stdin — never the command line), the user allows each new command shape (once, or always) — a',
-  '                             secret THIS conversation stored runs without asking anyone (a minted one sent to a host other than',
-  '                             its --for asks the user once per host) — and the',
+  '                             secret THIS conversation put runs without asking anyone; one it MINTED runs without asking for its',
+  '                             --for host — another host asks the user once per host, a command whose destination cannot be told',
+  '                             (a shell, a script, a tool naming no host it can read) asks every run on a shared instance — and the',
   '                             output comes back with the secret blanked to [vault:<store>/<row>/<field>]. In the command,',
   '                             $VAULT_FILE{NAME} or $VAULT_FILE{<store>/<row>/<field>} is the PATH of a 0600 file holding it; a',
   '                             template file names a value as $VAULT{<store>/<row>/<field>}. Refused by name: tools that print,',
@@ -81,8 +82,9 @@ const USAGE = [
   '      the HUB makes a random secret and seals it under agent:<this conversation>/<name>; you get the name + a',
   '      vault:// reference and NEVER the value (the user can reveal it in ⚙ System ▸ Vault…). For registering an',
   '      account, setting a service password, generating a token — a secret you do not need to read. --for names the',
-  '      host it is for: a run sending it there (or a known tool naming no host) asks nobody; another host — or a',
-  '      shell / script whose destination cannot be told — asks the user once.',
+  '      host it is for: a run sending it there asks nobody; another host asks the user once per host; a command',
+  '      whose destination cannot be told (a shell, a script, a tool naming no host it can read, a config file) asks',
+  '      the user — once per command shape on their own machine, every run on a shared instance.',
   '  vibespace-vault put <name> --from-file <0600 file> | --stdin',
   '      seal a value you ALREADY have (a key a vendor page gave you) under agent:<this conversation>/<name>. The value',
   '      rides a 0600 file or stdin — NEVER the command line (argv is readable). The vault records that you saw the',
@@ -146,6 +148,7 @@ async function requestCmd(rest) {
   const why = out['--for'] !== undefined ? out['--for'] : out['--purpose'];
   if (positional.length !== 1 || why === undefined) { console.error('vibespace-vault: request <vault://…> --for "<what you will run with it, and why>"  ·  or ask the user to paste one: request "<what>" --purpose "<why>"'); process.exit(2); }
   const d = await callCoded('POST', '/api/agent/vault/request', { entry: positional[0], purpose: why }, 'request');
+  if (d.already === 'own' && d.minted) { console.log(`${d.ref} is this conversation's own — the hub minted it${d.for ? ` for ${d.for}` : ' with no --for host'}: ${d.for ? `a run sending it to ${d.for} (or a host under it) runs without asking; ` : ''}another host asks the user once per host, and a command whose destination cannot be told (a shell, a script, a tool naming no host it can read, a config file) asks every run on a shared instance (once per command shape on the user's own machine): vibespace-vault run --env NAME=${d.ref} -- <command>`); return; }   // lane vault-agent-own (round 2)
   if (d.already === 'own') { console.log(`${d.ref} is this conversation's own — it stored it, so it runs without asking anyone: vibespace-vault run --env NAME=${d.ref} -- <command>`); return; }   // lane vault-agent-own
   if (d.already === 'open') { console.log(`${d.ref} is already open for runs — run it (a new kind of command still shows the user its card first)`); return; }
   if (d.already === 'granted') { console.log(`${d.ref} is already granted to this conversation (${d.once ? 'for one run' : 'for every run'} until ${whenAt(d.until)}) — run it`); return; }
@@ -238,7 +241,7 @@ async function mint(rest) {
   console.log('  reference: ' + d.ref);
   console.log('  ' + (d.provenance || 'agent minted · never shown to the agent') + ' — the value is sealed; you never see it.');
   console.log('  The user can reveal it in ⚙ System ▸ Vault… behind the second password (it is meant to be typed somewhere).');
-  console.log(d.for ? `  Made for ${d.for}: a run of yours sending it there (or a known tool naming no host) asks nobody; another host — or a shell / script whose destination cannot be told — asks the user once.` : '  No --for: a known tool naming no host asks nobody; each host it goes to (or each shell / script command) asks the user once.');   // lane vault-agent-own
+  console.log((d.for ? `  Made for ${d.for}: a run of yours sending it there asks nobody; another host asks the user once per host.` : '  No --for: each host it goes to asks the user once.') + ' A command whose destination cannot be told (a shell, a script, a tool naming no host it can read) asks the user every run on a shared instance, once per command shape on their own machine.');   // lane vault-agent-own (round 2)
 }
 
 /** lane vault-agent-own: a value the agent holds, from a 0600 file or stdin — NEVER the command line (argv is readable). One
@@ -326,7 +329,7 @@ async function main() {
   if (cmd === 'list') {
     const d = await call('GET', '/api/agent/vault/runnable');
     if (!d.entries || !d.entries.length) { console.log('no stored secret is open for your runs — ask the user for one with its purpose: vibespace-vault request <vault://…> --for "<why>" (they open it in ⚙ System ▸ Vault…, or grant it to you from For you)'); return; }
-    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'own' ? '  yours: this conversation stored it — runs without asking' : e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : ''}`);
+    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'own' ? (e.minted ? `  yours: minted${e.for ? ` for ${e.for} — runs there without asking` : ''}; another host or a command whose destination cannot be told asks the user` : '  yours: this conversation stored it — runs without asking') : e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : ''}`);
     return;
   }
   if (cmd === 'uses') return usesCmd();

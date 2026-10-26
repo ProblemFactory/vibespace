@@ -44,10 +44,14 @@
 //      run of anything else): its own STORED entry runs with no switch, no grant, no card — scrubbed, its run line allowedBy
 //      'own', its use line (door run, ok, the receipt); a resumed conversation (a new registered id, its durable one kept)
 //      runs it too, a pending fork and another conversation are refused by name; its own MINTED entry runs to its --for host
-//      and to no host with no card, to ANOTHER host draws ONE card naming both hosts (who stored it, why it asks; no «always»)
-//      and after one 允许 that host runs without a card — until a LOCK ends the pass; a lock still ends an own run mid-run; a
-//      request for it answers `already: 'own'` (no card); list names it (by own) to its conversation only; the Vault row has
-//      no switch; the owner's entry still draws today's card, now saying who stored it and why it asks
+//      with no card, to ANOTHER host draws ONE card naming both hosts (who stored it, why it asks; no «always») and after one
+//      允许 that host runs without a card — until a LOCK ends the pass; ROUND 2: a known tool naming no host it can read
+//      (`curl -s`) asks; a BLIND shape (a shell, `node -e`) asks EVERY run on a cluster (one 允许 is not kept), a blind shape
+//      «always» is offered for (curl --resolve) passes after «always» + the second password until the lock ends the 8-hour
+//      one; a LOCAL instance asks once and then runs that shape with no card; a lock still ends an own run mid-run; a
+//      request for it answers `already: 'own'` (no card; a minted one says so and names its host); list names it (by own) to
+//      its conversation only; the Vault row has no switch; the owner's entry still draws today's card, now saying who stored
+//      it and why it asks
 //   ⑩b THE CAP'S SHAPE (B-4934, q-043 verify L2): eight conversations × 8 open asks, then a NINTH conversation's first ask
 //      is FILED (MUTANT: the old 64-request hub-wide cap ⇒ RED); one conversation's 9th ⇒ too_many_requests by name; 32
 //      conversations asking ⇒ the 33rd too_many_askers by name while one already asking still asks; more than 8 asking ⇒
@@ -846,8 +850,10 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   ok(fork.code === 'use_not_granted' && other.code === 'use_not_granted' && !cardsOf(w).length, 'a pending fork (it borrows its parent\'s id: conv null) and another conversation ⇒ use_not_granted by name — no card, nothing read', [fork.code, other.code]);
   // MINTED --for api.example.com: its host and no host ⇒ no card; another host ⇒ ONE card naming both; once allowed, that host is passed
   const m1 = await w.door.run({ caller: w.caller, args: ['--env', `T=${MINT}`, '--', 'curl', '-s', 'https://api.example.com/v1/login'], cwd: w.work });
-  const m0 = await w.door.run({ caller: w.caller, args: ['--env', `T=${MINT}`, '--', 'curl', '-s'], cwd: w.work });   // a KNOWN tool naming no host (an interpreter's destination cannot be told — it asks)
-  ok(m1.ok && m1.by === 'own' && m0.ok && m0.by === 'own' && !cardsOf(w).length && !leaks(m1.stdout + m0.stdout, MINT_V).length, 'its own MINTED entry to the host it was minted for, and in a known tool naming no host ⇒ no card', [m1.code || m1.by, m0.code || m0.by]);
+  ok(m1.ok && m1.by === 'own' && !cardsOf(w).length && !leaks(m1.stdout, MINT_V).length, 'its own MINTED entry to the host it was minted for ⇒ no card', m1.code || m1.by);
+  // ROUND 2: a known tool naming no host it can READ is not a local command (every tool of the table reaches the network)
+  const m0 = await runAnswered(w, ['--env', `T=${MINT}`, '--', 'curl', '-s'], { answer: 'deny' });
+  ok(!!m0.card && m0.r.code === 'ask_denied' && /Why it asks: where this command sends it cannot be told \(.*a host it does not read/.test(m0.card.detail || ''), 'its MINTED value in a known tool naming no host it can read (curl -s) ⇒ the card (where it goes cannot be told) — denied, nothing ran', m0.r.code);
   const away = await runAnswered(w, ['--env', `T=${MINT}`, '--', 'curl', '-s', 'https://elsewhere.example.net/x'], { answer: 'once' });
   const d = (away.card && away.card.detail) || '';
   ok(!!away.card && away.r.ok && away.r.by === 'once' && away.card.action.always === false && /Stored by: vault:\/\/agent:conv-1\/site-pw — this conversation \(the hub minted it for api\.example\.com/.test(d) && /Why it asks: it would go to another host — vault:\/\/agent:conv-1\/site-pw was minted for api\.example\.com, this run sends it to elsewhere\.example\.net/.test(d) && !d.includes(MINT_V),
@@ -856,14 +862,41 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   ok(again.ok && again.by === 'own' && !cardsOf(w).length, 'ONCE per host: the same host again ⇒ no card (the 允许 was that host\'s pass for this entry)', again.code || again.by);
   const third = await runAnswered(w, ['--env', `T=${MINT}`, '--', 'curl', '-s', 'https://third.example.org/'], { answer: 'deny' });
   ok(!!third.card && third.r.code === 'ask_denied', 'a THIRD host asks again — denied, nothing ran', third.r.code);
-  // THE REVIEW: through a shell its destination cannot be told — even naming its own host — ⇒ ONE card per command SHAPE
+  // THE REVIEW + ROUND 2: through a shell or an interpreter its destination cannot be told — even naming its own host — ⇒ on a
+  // CLUSTER the card EVERY run (one plain 允许 is never kept there: the owner's own entries ask every run too)
   const shellArgs = ['--env', `T=${MINT}`, '--', '/bin/sh', '-c', 'curl -s https://api.example.com/v1/login'];
   const blind1 = await runAnswered(w, shellArgs, { answer: 'once' });
   const bd = (blind1.card && blind1.card.detail) || '';
-  const blind2 = await w.door.run({ caller: w.caller, args: shellArgs, cwd: w.work });
-  const blind3 = await runAnswered(w, ['--env', `T=${MINT}`, '--', '/bin/sh', '-c', 'curl -s https://api.example.com/v1/other'], { answer: 'deny' });
-  ok(!!blind1.card && blind1.r.ok && /Why it asks: where this command sends it cannot be told/.test(bd) && blind1.card.action.always === false && blind2.ok && blind2.by === 'own' && !leaks(blind2.stdout || '', MINT_V).length && !!blind3.card,
-    'its MINTED value through a SHELL (where it goes cannot be told, even naming its own host) ⇒ ONE card for that command shape, the same shape again runs with no card, another shell command asks again', { card: !!blind1.card, by: blind2.by || blind2.code, third: !!blind3.card, why: bd.split('\n').filter((l) => /^Why/.test(l)) });
+  const blind2 = await runAnswered(w, shellArgs, { answer: 'deny' });
+  ok(!!blind1.card && blind1.r.ok && !leaks(blind1.r.stdout || '', MINT_V).length && /Why it asks: where this command sends it cannot be told/.test(bd) && /on this shared instance every run of it asks again/.test(bd) && blind1.card.action.always === false && !!blind2.card && blind2.r.code === 'ask_denied',
+    'its MINTED value through a SHELL on a cluster (where it goes cannot be told, even naming its own host) ⇒ the card; allowed once it ran — and the SAME shape asks AGAIN (a cluster keeps no shape pass)', { card: !!blind1.card, second: blind2.r.code, why: bd.split('\n').filter((l) => /^Why/.test(l)) });
+  const nodeArgs = ['--env', `T=${MINT}`, '--', NODE, '-e', 'process.stdout.write("node got " + process.env.T + "\\n")'];
+  const n1 = await runAnswered(w, nodeArgs, { answer: 'once' }), n2 = await runAnswered(w, nodeArgs, { answer: 'deny' });
+  ok(!!n1.card && n1.r.ok && /node got \[vault:agent:conv-1\/site-pw\]/.test(n1.r.stdout || '') && !!n2.card && n2.r.code === 'ask_denied', 'node -e on a cluster: allowed once ⇒ it ran (scrubbed); the NEXT run asks again', [n1.r.code || n1.r.by, n2.r.code]);
+  // RED COPY (round 2): a door that reads the LOCAL rule on a cluster — the remember-until-lock this round removed — runs the same node -e again with NO card
+  const SRCD = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8'), fromD = 'instance: instanceKind(), policy: policy(), passes: passes(), now: now() });';
+  const nD = SRCD.split(fromD).length - 1, modD = nD === 1 ? M.load('src/server/vault-run-door.js', SRCD.replace(fromD, "instance: instanceKind(), policy: 'allow', passes: passes(), now: now() });"), 'cluster-keeps') : null;
+  const wr = modD ? await world({ instance: 'cluster', doorMod: modD }) : null;
+  const rn1 = wr ? await runAnswered(wr, nodeArgs, { answer: 'once' }) : null, rn2 = wr ? await runAnswered(wr, nodeArgs, { answer: 'deny' }) : null;
+  ok(nD === 1 && !!rn1 && rn1.r.ok && !!rn2 && !rn2.card && rn2.r.ok, 'RED COPY (round 2): a door reading the local rule on a cluster runs the SAME node -e again with NO card after one plain 允许 — the shipped door asks (above)', { n: nD, second: rn2 && (rn2.r.by || rn2.r.code), card: rn2 && !!rn2.card });
+  if (wr) wr.vault.lock('door');
+  // a blind shape «always» IS offered for (a known tool naming its host, a routing flag): «always» needs the second password,
+  // then the shape runs with no card — until a LOCK ends the 8-hour «always»
+  const kyArgs = ['--env', `T=${MINT}`, '--', 'curl', '-s', '--resolve', 'api.example.com:443:127.0.0.1', 'https://api.example.com/v1/login'];
+  const k1 = await runAnswered(w, kyArgs, { answer: null });
+  const kNo = k1.card ? w.door.answer(k1.card.action.askId, { answer: 'always', ttl: '8h' }) : null;
+  const kYes = k1.card ? w.door.answer(k1.card.action.askId, { answer: 'always', ttl: '8h', reauthed: true }) : null;
+  const k1r = await k1.r, k2 = await w.door.run({ caller: w.caller, args: kyArgs, cwd: w.work });
+  ok(!!k1.card && k1.card.action.always === true && kNo && kNo.code === 'reveal_needs_password' && kYes && kYes.ok && k1r.ok && k1r.by === 'always' && k2.ok && k2.by === 'always' && !leaks((k1r.stdout || '') + (k2.stdout || ''), MINT_V).length,
+    'a blind shape with «always» on offer (curl --resolve): «always» without the second password is refused, with it the run goes and the same shape runs again with NO card (allowedBy always)', { always: k1.card && k1.card.action.always, no: kNo && kNo.code, by: [k1r.by || k1r.code, k2.by || k2.code] });
+  // a LOCAL instance keeps the base rule: one 允许, then that shape runs with no card this unlock
+  const wl = await world({ instance: 'local' });
+  const l1 = await runAnswered(wl, shellArgs, { answer: 'once' });
+  const l2 = await wl.door.run({ caller: wl.caller, args: shellArgs, cwd: wl.work });
+  const l3 = await runAnswered(wl, ['--env', `T=${MINT}`, '--', '/bin/sh', '-c', 'curl -s https://api.example.com/v1/other'], { answer: 'deny' });
+  ok(!!l1.card && l1.r.ok && /Allow lets this command shape run with it again without asking until the vault locks/.test(l1.card.detail || '') && l2.ok && l2.by === 'own' && !leaks(l2.stdout || '', MINT_V).length && !!l3.card,
+    'on a LOCAL instance: one 允许 for the shell shape, then the same shape runs with no card; another shell command asks again', { by: l2.by || l2.code, third: !!l3.card });
+  wl.vault.lock('door');
   // THE LOCK: an own run is ended mid-run like any other; the passes go with the unlock
   const pidFile = path.join(w.work, 'own-pid.txt');
   const hang = w.door.run({ caller: w.caller, args: ['--env', `T=${OWN}`, '--', NODE, PRINTER, 'hang', pidFile], cwd: w.work });
@@ -873,13 +906,17 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   ok(!!pid && hr.code === 'vault_locked' && hr.killed === true && !alive(pid), 'a LOCK still ends a run of its own entry mid-run (the child gone, the answer vault_locked)', [pid, hr.code, hr.killed]);
   await w.vault.unlock(PW);
   const passGone = await runAnswered(w, ['--env', `T=${MINT}`, '--', 'curl', '-s', 'https://elsewhere.example.net/x'], { answer: 'deny' });
-  ok(!!passGone.card, 'after the lock the host pass is gone — that host asks again', !!passGone.card);
+  const alwaysGone = await runAnswered(w, kyArgs, { answer: 'deny' });
+  ok(!!passGone.card && !!alwaysGone.card, 'after the lock the host pass is gone — that host asks again — and so is the 8-hour «always» of the blind shape', [!!passGone.card, !!alwaysGone.card]);
   // THE REQUEST, THE LIST, THE OWNER'S CARD
   const q = w.door.request({ caller: { ...w.caller, scope: 'conv-1' }, entry: OWN, purpose: 'push the tag' });
-  ok(q.ok && q.already === 'own' && !(w.userTodos.snapshot().open || []).some((x) => x.action && x.action.type === 'vault-grant-ask'), 'a request for its own entry ⇒ already: own — no card in For you (the owner is never asked for what it stored itself)', q);
+  ok(q.ok && q.already === 'own' && !q.minted && !(w.userTodos.snapshot().open || []).some((x) => x.action && x.action.type === 'vault-grant-ask'), 'a request for its own entry ⇒ already: own — no card in For you (the owner is never asked for what it stored itself)', q);
+  const qm = w.door.request({ caller: { ...w.caller, scope: 'conv-1' }, entry: MINT, purpose: 'sign in' });
+  ok(qm.ok && qm.already === 'own' && qm.minted === true && qm.for === 'api.example.com', 'ROUND 2: a request for its own MINTED entry says it is minted and for which host (the CLI then says another host or a blind command still asks)', qm);
   const mine = (w.door.runnableFor({ ...w.caller, scope: 'sess-77-1', conv: 'conv-1' }).entries || []).filter((e) => e.by === 'own').map((e) => e.ref).sort();
   const theirs = (w.door.runnableFor({ ...w.caller, conversationId: 'conv-2', scope: 'sess-79-1', conv: 'conv-2' }).entries || []).map((e) => e.ref);
-  ok(mine.join() === [MINT, OWN].sort().join() && !theirs.some((r) => r.startsWith('vault://agent:conv-1/')), '`list` names its own entries (by own) to its conversation — and never to another', { mine, theirs });
+  const mintedRow = (w.door.runnableFor({ ...w.caller, scope: 'sess-77-1', conv: 'conv-1' }).entries || []).find((e) => e.ref === MINT) || {};
+  ok(mine.join() === [MINT, OWN].sort().join() && !theirs.some((r) => r.startsWith('vault://agent:conv-1/')) && mintedRow.minted === true && mintedRow.for === 'api.example.com', '`list` names its own entries (by own; a minted one with its host) to its conversation — and never to another', { mine, theirs, mintedRow });
   openRow(w);
   const owner = await runAnswered(w, ['--env', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'env'], { answer: 'once' });
   const od = (owner.card && owner.card.detail) || '';
