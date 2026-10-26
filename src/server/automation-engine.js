@@ -204,7 +204,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     audit({ keyId: k.id, subject: 'owner', verb: 'key.revoke', ok: true, by });
     return { ok: true, key: A.publicKey(next) };
   }
-  /** Grant a key to subjects (a conversation `session:<id>` / a Task Group `group:<id>`) — `always` unless a card's once.
+  /** Grant a key to subjects (a conversation `session:<id>` / a Task Group `group:<id>` / ALL AGENTS `everyone:*` — lane
+   *  key-grant-everyone: every conversation here, the ones started later included) — `always` unless a card's once (a once
+   *  grant to All agents is spent by the FIRST use, whoever makes it: one use, not one per conversation).
    *  `reach` (lane key-instance-scope): 'opened' (the default) | 'instance' | {taskGroups: [ids]} — PURE reachOf, refused by name. */
   function grant(keyId, subjects, { by = 'user', mode = 'always', fromAsk = false, reach = 'opened', except = [] } = {}) {
     const k = keyById(keyId);
@@ -213,7 +215,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     const list = (Array.isArray(subjects) ? subjects : [subjects]).map(String);
     if (!list.length) return named('bad_args', 'name at least one conversation or task group');
     const badOne = list.find((s) => !A.isSubject(s) || s === 'external');
-    if (badOne) return named('bad_args', badOne === 'external' ? 'an outside caller (external) is not grantable yet — L3' : `not a conversation or task group: "${String(badOne).slice(0, 80)}"`);
+    if (badOne) return named('bad_args', badOne === 'external' ? 'an outside caller (external) is not grantable yet — L3' : `not a conversation, a task group or all agents (everyone:*): "${String(badOne).slice(0, 80)}"`);
     if (!A.MODES.includes(mode)) return named('bad_args', 'mode is always or once');
     const rch = A.reachOf(reach);
     if (rch === null) return named('bad_args', 'reach is opened, instance or {taskGroups: [task ids]}');
@@ -225,8 +227,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       if (mode === 'always' && grants.some((g) => g.keyId === k.id && g.subject === s && g.mode === 'always')) continue;
       const id = newId('ag');
       // lane grants-unify: the grant's WHO and REACH are rows of the ONE store (the record keeps the rest)
-      // «除了»: a Task Group grant may leave members out (a conversation grant names no members — none ride it)
-      const use0 = A.useRowForSubject(s), use = use0 && /^group:/.test(s) ? { ...use0, except } : use0, reachRow = A.reachRowFor(rch);
+      // «除了»: a Task Group grant — or one to All agents (lane key-grant-everyone) — may leave members out (a conversation
+      // grant names no members — none ride it)
+      const use0 = A.useRowForSubject(s), use = use0 && (/^group:/.test(s) || s === A.EVERYONE_SUBJECT) ? { ...use0, except } : use0, reachRow = A.reachRowFor(rch);
       rows.push({ door: 'automation-key-use', resource: id, ...use });
       if (reachRow) rows.push({ door: 'automation-key-reach', resource: id, ...reachRow });
       const g = A.grantOf({ id, keyId: k.id, mode, at: t, by: String(by).slice(0, 60), spentAt: null, use: { door: 'automation-key-use', resource: id, ...use }, reachRow: reachRow ? { door: 'automation-key-reach', resource: id, ...reachRow } : null });
@@ -414,14 +417,16 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
             : { key: "The key's folders: {roots} (with their subfolders).", params: { roots: roots.join(', ').slice(0, 300) } };
           const fill = (k, p) => k.replace(/\{(\w+)\}/g, (_, n) => (p && p[n] != null ? String(p[n]) : `{${n}}`));
           const D1 = 'Allow once lets this call go ahead. Always grants the key to this conversation (the Vault window lists it; take it back there). Deny refuses it and asks no more for 10 minutes. No answer in 60 s: refused. The key\'s value is never shown to the conversation.';
+          // lane key-grant-everyone: the card names the WHO it does not offer — All agents, on the key's row (never a bare everyone:*)
+          const D_ALL = 'Always grants it to this conversation only — to let every conversation here use it without asking, grant the key to All agents on its row in the Vault window.';
           const it = userTodos.add(caller.sessionKey || 'vault', {
             origin: 'vault', urgency: 'urgent', kind: 'action', by: 'agent', sessionName: who, expiresAt: q.askedAt + A.ASK_TTL_MS,
             text: `${who} wants to use the automation key "${key.name}" (${verbWord})`,
-            detail: [openLine ? fill(openLine.key, openLine.params) : null, rootsLine ? fill(rootsLine.key, rootsLine.params) : null, D1, 'The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key\'s row in the Vault window.'].filter(Boolean).join('\n'),
+            detail: [openLine ? fill(openLine.key, openLine.params) : null, rootsLine ? fill(rootsLine.key, rootsLine.params) : null, D1, 'The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key\'s row in the Vault window.', D_ALL].filter(Boolean).join('\n'),
             i18n: { text: { key: '{who} wants to use the automation key "{key}" ({verb})', params: { who, key: key.name, verb: verbWord } },
               detail: [...(openLine ? [openLine] : []), ...(rootsLine ? [rootsLine] : []), { key: D1 },
                 // lane key-instance-scope: the card offers the grant's REACH beside its answers (the client draws the three choices off action.groups)
-                { key: 'The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key\'s row in the Vault window.' }] },
+                { key: 'The reach says which other conversations it may rename, end or archive with this key: only the ones it opens (the default), the conversations of its Task Groups, or every conversation on this VibeSpace — change it later on the key\'s row in the Vault window.' }, { key: D_ALL }] },
             action: { type: 'automation-ask', askId, keyId: key.id, key: String(key.name).slice(0, 60), verb, subject, groups: q.groups.map((g) => g.slice('group:'.length)).slice(0, 8).join(' ') },   // the caller's Task Group ids, space-joined (an action field is a string; ids hold no space)
           });
           q.todoId = it && it.id;
@@ -580,7 +585,7 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     }
     // lane grants-unify: a conversation the owner LEFT OUT of the key's Task Group grant is refused BY NAME — never a first-use card
     // asking the owner again about the very conversation he excluded
-    if (!verdict.ok) return done({ ...named(verdict.code, verdict.code === 'verb_not_in_scope' ? `the key "${key.name}" does not hold ${verb} — the owner adds it with Edit… in the Vault window` : verdict.code === 'excepted' ? `the owner left this conversation out of the Task Group grant of the key "${key.name}" (an exception on the key's row in the Vault window) — ask the owner to lift it, or to grant the key to this conversation` : null), args: v0.args }, key.id, asked ? { ask: asked } : {});
+    if (!verdict.ok) return done({ ...named(verdict.code, verdict.code === 'verb_not_in_scope' ? `the key "${key.name}" does not hold ${verb} — the owner adds it with Edit… in the Vault window` : verdict.code === 'excepted' ? `the owner left this conversation out of the key "${key.name}"'s grant to a Task Group or to all agents (an exception on the key's row in the Vault window) — ask the owner to lift it, or to grant the key to this conversation` : null), args: v0.args }, key.id, asked ? { ask: asked } : {});
     // THE LIMITS (lane automation-open-limits — the q-048 verify's M2): WHAT an open asks for, against its key's limits as
     // they stand NOW (re-read — the owner may have edited them while a card waited): AFTER the grant, BEFORE the grant is
     // spent, the spend authorizer runs and anything spawns (impl → conversation-ops openConversation). A refused open is

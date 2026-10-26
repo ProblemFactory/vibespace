@@ -129,7 +129,8 @@ async function main() {
     if (more.length) { console.error(USAGE); process.exit(2); }
     const d = await call('GET', '/api/agent/automation/keys');
     if (!d.keys.length) { console.log('no key is granted to this conversation yet — calling a verb asks the user (For you), or they grant one in the Vault window'); return; }
-    for (const k of d.keys) console.log(`${k.name} (${k.id}) — ${k.scopes.join(', ')} — via ${k.via.map((v) => `${v.subject}${v.mode === 'once' ? ' (once)' : ''}`).join(', ')} — reach: ${reachWords(k.reach)}${k.scopes.includes('conversations.open') ? `\n  limits: ${limitsWords(k.limits)}` : ''}`);
+    // lane key-grant-everyone: a grant to every conversation reads «all agents (everyone:*)» — never a bare everyone:*
+    for (const k of d.keys) console.log(`${k.name} (${k.id}) — ${k.scopes.join(', ')} — via ${k.via.map((v) => `${v.subject === 'everyone:*' ? 'all agents (everyone:*)' : v.subject}${v.mode === 'once' ? ' (once)' : ''}`).join(', ')} — reach: ${reachWords(k.reach)}${k.scopes.includes('conversations.open') ? `\n  limits: ${limitsWords(k.limits)}` : ''}`);
     return;
   }
   if (cmd === 'audit') {

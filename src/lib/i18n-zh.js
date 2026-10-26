@@ -11053,4 +11053,6 @@ export default {
   "Each keeps its long-lived token in its folder, and a conversation started on it directly keeps working; the pool names it in its notices with this reason.": "每个账号的长期 token 都留在它的文件夹里，直接在它上面开的对话照常工作；账号池的通知会点名它并说明这个原因。",
   "To use one in the pool now, re-login it in Manage Agents. This item resolves itself once CLI {v} is measured.": "想现在就让它进入账号池，请在「管理 agent」里重新登录。CLI {v} 测量完成后，这一项会自动消失。",
   "Long-lived token in its folder: claude {cli} prints no quota lines for it — refreshes when a session uses it": "长期 token 在它的文件夹里：claude {cli} 不会为它显示额度——有会话用到它时才会刷新",
+  "This reach is for the grants you add — pick whom to grant the key to (All agents is the first row), or change an existing grant's reach on its chip": "这个作用范围只用于这次新加的授权——先选授权给谁（第一行是「所有 agent」），已有授权的作用范围在它的标签上改",
+  "Always grants it to this conversation only — to let every conversation here use it without asking, grant the key to All agents on its row in the Vault window.": "「一直」只授权给这个会话——要让这里的每个会话都不用问就能用，在保险库窗口该 key 的行里把它授权给「所有 agent」。",
 };

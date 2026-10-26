@@ -4,6 +4,15 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.362 — 2026-10-29
+
+### key-grant-everyone — an automation key granted to ALL AGENTS (subject `everyone:*`, its «除了»), and the reach 「整个 VibeSpace」 proven to save end to end (BUILD on 91bf7e18 = 2.369.358, rebased onto 5055b9ad6 = 2.369.361; the owner 2026-10-26: 「Vault 里的自动化 key 没有办法保存给整个 vibespace 这个权限」)
+- **Which reading the owner hit:** B as the owner met it, through A — 授权给…'s only 整个 VibeSpace was «新加授权的作用范围» (the reach of the grants a save ADDS); picked with nobody added, 保存 said 已保存 and wrote nothing (base Chrome: toast 已保存, dialog closed, 0 grants). The reach dialog on a grant's chip was never broken (a PIN after a reload, green on the base).
+- **R1:** `SUBJECT_RE` admits `everyone:*`; grant-model `fromSubject` ⇒ `{kind:'everyone'}`; `engine.grant` writes `{to:[everyone], except}`; `useVerdict` admits any live caller (a stranger started later); an exception refused BY NAME (no card); a once grant spent by the first use, whoever makes it; `reachVerdict` (b) never counts All agents (MUTANT RED); `grantOrder` first.
+- **R2 / R4:** the picker's first row 「所有 agent」 + «除了»; the row / 审计… / the first-use card's new last line say 「所有 agent」; `vibespace-api keys` «via all agents (everyone:*)»; a reach-only save refused by name. The zh word stays the product's one spelling 「所有 agent」 (23 strings, 4 heavy suites pin it).
+- **R3:** test-automation-keys-chrome ⑥ (PIN): 整个 VibeSpace on a chip survives a reload, the store's reach row `{to:[{kind:everyone}]}`; ⑫: the stranger in Task Group B may not rename the live conversation of Task Group A under 只有它开的会话, may after 整个 VibeSpace + 保存 + a reload.
+- **Gates:** test-automation-keys 360 → 394 on 5055b9ad6 (357 → 391 on 91bf7e18; ㉑ + an R3 PIN; base: 20 red); test-automation-keys-chrome 94 → 111 (⑫ 16 + the ⑥ PIN; base: 13 red; green under AK_FONT=dejavu + VS_CPU_THROTTLE=4); test-everyone-principal 101 → 102 (the Vault key picker moved from EXEMPT to SURFACES + CONTROL (1c); base: 3 red); test-grant-model 100 → 101 (base: 1 red).
+
 ## 2.369.361 — 2026-10-29
 
 ### pool-silent-members (the owner's hub inc-mvsjhna7-o85y, 2026-10-28 12:56–13:01 PT; forensics report in the lane dir)

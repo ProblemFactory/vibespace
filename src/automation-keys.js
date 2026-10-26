@@ -12,7 +12,9 @@
  *   · SCOPES is a CLOSED table: one row per verb {verb, layer, billed, args}; a new verb is a row + its consumer (decision
  *     25's discipline) — there is no "every API" key.
  *   · A GRANT `{id, keyId, subject, mode, at, by, spentAt}` lets a SUBJECT use a key: `session:<conversation id>` (one
- *     conversation), `group:<task id>` (every conversation of that Task Group), `external` (an outside caller with the
+ *     conversation), `group:<task id>` (every conversation of that Task Group), `everyone:*` (lane key-grant-everyone — the
+ *     owner 2026-10-26 「Vault 里的自动化 key 没有办法保存给整个 vibespace 这个权限」: ALL AGENTS — every conversation of this
+ *     instance, the ones started later included, minus the ones its «除了» leaves out), `external` (an outside caller with the
  *     value — L3). Grants are written by a PERSON only: the Vault window's 授权给… and the first-use card's answer.
  *   · `useVerdict` is THE judgment of one use, made on the hub: the caller's own session token names the subject, the
  *     grant table says whether that subject may use the key, the key's scopes whether the verb is in it, the vault's state
@@ -65,7 +67,8 @@ const ID_RE = /^[\w.:-]{1,200}$/;          // a conversation / session / task id
 const FEEDBACK_ID_RE = /^fb-[0-9a-f]{10}$/;  // a feedback report's id (src/server/feedback-store.js mints them)
 const RELEASE_RE = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/;   // a release (2.369.330) — the one that shipped a fix
 const NOTE_MAX = 200;                       // feedback.handled's note
-const SUBJECT_RE = /^(?:session:[\w.:-]{1,200}|group:[\w.:-]{1,120}|external)$/;
+const SUBJECT_RE = /^(?:session:[\w.:-]{1,200}|group:[\w.:-]{1,120}|everyone:\*|external)$/;
+const EVERYONE_SUBJECT = 'everyone:*';      // lane key-grant-everyone: ALL AGENTS as a grant's subject (the picker's row key, the audit's word)
 const MODES = Object.freeze(['always', 'once']);
 const REACHES = Object.freeze(['opened', 'groups', 'instance']);   // lane key-instance-scope: the KINDS of a grant's reach, narrowest first
 const GROUP_ID_RE = /^[\w.:-]{1,120}$/;                            // a Task Group id as the subjects name it (group:<id>)
@@ -222,7 +225,7 @@ function widestReach(list) {
 function subjectOfRow(row) {
   const n = row ? GM.normRow(row) : null;
   const e = n && n.ok ? n.row.to[0] : null;
-  return !e ? null : e.kind === 'conversation' ? `session:${e.key}` : e.kind === 'group' ? `group:${e.id}` : null;
+  return !e ? null : e.kind === 'conversation' ? `session:${e.key}` : e.kind === 'group' ? `group:${e.id}` : e.kind === 'everyone' ? EVERYONE_SUBJECT : null;
 }
 /** lane grants-unify: a reach row → the grant's reach summary ('opened' | 'instance' | {taskGroups}) — null = a row the model
  *  cannot read (the grant is then NO grant: a damaged reach is never read wider nor quietly narrower). */
@@ -287,7 +290,8 @@ function openedOf(raw) {
  * `target`? ONE rule for rename / bind / end / archive / status / invite (design q-046: a grant is key × conversation, and
  * the OPENER is the natural holder of the lifecycle of what it opened): the target is within reach when
  *   (a) THE KEY OPENED IT — an `opened` row of this key names its webui id or its conversation id, or
- *   (b) a grant of this key names it — the target conversation itself, or one of its Task Groups, or
+ *   (b) a grant of this key names it — the target conversation itself, or one of its Task Groups (a grant to ALL AGENTS
+ *       names nobody — lane key-grant-everyone: every conversation would be in reach whatever the grant's reach says), or
  *   (c) the target IS the caller, or
  *   (d) THE GRANT'S REACH says so (lane key-instance-scope): `reach` = the reach of the grant this use rides — 'instance'
  *       reaches EVERY conversation; {taskGroups} reaches one in those Task Groups; 'opened' (the default) adds nothing.
@@ -303,7 +307,7 @@ function reachVerdict({ keyId = '', caller = '', target = {}, grants = [], opene
   if (rows.some((o) => (cid && o.conversationId && o.conversationId === cid) || (wid && o.webuiId && o.webuiId === wid))) return { ok: true, by: 'opener' };
   // THE ONE ADMISSION (lane grants-unify — src/grant-model.js admits): the target as the caller a grant / a reach would name
   const facts = { conversationKeys: cid ? [cid] : [`webui:${wid}`], groupIds: (Array.isArray(t.groups) ? t.groups : []).filter(Boolean).map(String) };
-  if ((Array.isArray(grants) ? grants : []).map(grantOf).some((g) => g && g.keyId === keyId && g.subject !== 'external' && GM.admits([useRowOf(g)].filter(Boolean), facts).ok)) return { ok: true, by: 'grant' };
+  if ((Array.isArray(grants) ? grants : []).map(grantOf).some((g) => { if (!g || g.keyId !== keyId || g.subject === 'external') return false; const v = GM.admits([useRowOf(g)].filter(Boolean), facts); return v.ok && v.via !== 'everyone'; })) return { ok: true, by: 'grant' };
   const r = reachOf(reach) || 'opened';   // an unknown reach reads as the narrowest
   // the reach this use rides (`reachRows`, the riding grants' rows — useVerdict's), else the summary mapped
   const rrows = (Array.isArray(reachRows) ? reachRows : [reachRowOf({ reach: r })]).filter(Boolean);
@@ -334,7 +338,7 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
   if (!external && (!/^session:/.test(str(subject)) || !isSubject(subject))) return { ok: false, code: 'not_granted' };
   if (!external && !subjectLive) return { ok: false, code: 'subject_ended' };
   // an outside caller is judged by `external` grants ONLY; a conversation by THE ONE ADMISSION over each grant's use row
-  // (lane grants-unify: its own conversation, one of its Task Groups — minus the members the owner left out) — never the other's
+  // (lane grants-unify: its own conversation, one of its Task Groups, All agents — minus the members the owner left out) — never the other's
   const facts = { conversationKeys: [str(subject).slice('session:'.length)], groupIds: Array.isArray(subjectGroups) ? subjectGroups : [] };
   const cands = [];
   let excepted = false;
@@ -626,10 +630,10 @@ function grantEnded(g, live) {
   if (!/^session:/.test(s)) return false;
   return !(live instanceof Set ? live.has(s) : Array.isArray(live) && live.includes(s));
 }
-/** The grants list's ORDER: Task Groups, then running conversations, then ended ones — each by its name (the caller's
- *  words, else the subject). `rows` = [{ subject, name?, ended? }] → a new sorted list. */
+/** The grants list's ORDER: All agents FIRST (lane key-grant-everyone), then Task Groups, then running conversations, then
+ *  ended ones — each by its name (the caller's words, else the subject). `rows` = [{ subject, name?, ended? }] → a new sorted list. */
 function grantOrder(rows) {
-  const rank = (r) => (/^group:/.test(str(r && r.subject)) ? 0 : r && r.ended ? 2 : 1);
+  const rank = (r) => (str(r && r.subject) === EVERYONE_SUBJECT ? -1 : /^group:/.test(str(r && r.subject)) ? 0 : r && r.ended ? 2 : 1);
   const nameOf = (r) => str((r && r.name) || (r && r.subject));
   return (Array.isArray(rows) ? rows : []).slice().sort((a, b) => rank(a) - rank(b) || nameOf(a).localeCompare(nameOf(b)) || str(a.subject).localeCompare(str(b.subject)));
 }
@@ -692,7 +696,7 @@ function auditLine({ at, keyId = null, subject = '', verb = '', args = null, ok 
 }
 
 module.exports = {
-  KEY_ID_RE, VALUE_PREFIX, VALUE_RE, ENTRY_PREFIX, NAME_MAX, SUBJECT_RE, MODES, REACHES, ASK_TTL_MS, ASK_QUIET_MS, AUDIT_FILE, STORE_FILE, FEEDBACK_ID_RE, RELEASE_RE, NOTE_MAX,
+  KEY_ID_RE, VALUE_PREFIX, VALUE_RE, ENTRY_PREFIX, NAME_MAX, SUBJECT_RE, EVERYONE_SUBJECT, MODES, REACHES, ASK_TTL_MS, ASK_QUIET_MS, AUDIT_FILE, STORE_FILE, FEEDBACK_ID_RE, RELEASE_RE, NOTE_MAX,
   SCOPES, VERBS, scopeOf, CODES, keyOf, publicKey, grantOf, reachOf, reachKind, widestReach, isSubject, callerSubjects, openedOf, reachVerdict,
   subjectOfRow, reachOfRow, useRowOf, reachRowOf, useRowForSubject, reachRowFor,   // lane grants-unify
   useVerdict, pickKey, mintPlan, scopesPlan, editPlan, scopesChangeWords, entryOf, keyIdOfEntry, identityOf, argsSummary, auditLine,

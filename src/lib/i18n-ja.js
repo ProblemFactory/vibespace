@@ -11052,4 +11052,6 @@ export default {
   "Each keeps its long-lived token in its folder, and a conversation started on it directly keeps working; the pool names it in its notices with this reason.": "各アカウントの長期トークンはそのフォルダーに残り、そのアカウントで直接始めた会話はそのまま動きます。プールの通知はこの理由とともにそのアカウントを名指しします。",
   "To use one in the pool now, re-login it in Manage Agents. This item resolves itself once CLI {v} is measured.": "今すぐプールで使うには、「エージェントを管理」で再ログインしてください。CLI {v} の測定が終わると、この項目は自動で解決します。",
   "Long-lived token in its folder: claude {cli} prints no quota lines for it — refreshes when a session uses it": "長期トークンはフォルダー内にあります：claude {cli} はこれについて使用量を表示しません——セッションが使ったときに更新されます",
+  "This reach is for the grants you add — pick whom to grant the key to (All agents is the first row), or change an existing grant's reach on its chip": "この対象範囲は今回追加する付与だけに使われます——まず付与先を選んでください（最初の行が「すべてのエージェント」）。既存の付与の対象範囲は、そのチップで変えられます",
+  "Always grants it to this conversation only — to let every conversation here use it without asking, grant the key to All agents on its row in the Vault window.": "「常に」はこの会話だけに付与します——ここのすべての会話が確認なしで使えるようにするには、保管庫ウィンドウでこのキーの行から「すべてのエージェント」に付与してください。",
 };
