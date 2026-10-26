@@ -19,6 +19,7 @@
 // a suite that renames its scratch dir cannot walk out from under the guard.
 import net from 'node:net';
 import fs from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD } from './scratch-run.mjs';
@@ -474,4 +475,55 @@ export async function stopWrapper(child, { dir = null, graceMs = 3000 } = {}) {
     clearTimeout(t);
   }
   if (dir) { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
+}
+
+/** THE HOSTED RUNNER'S FACE (ci358-reds — the 2.369.358 mirror red on test-chat-scroll and test-artifacts-handover-ui, both
+ *  green here; desktop-small's .358 hotfix measured the same): the Actions runner's sans-serif is DejaVu Sans, this box's is
+ *  not, and a layout a face can tip (a paragraph's wrap, a chip's width) went red there only. A chrome suite whose legs
+ *  measure such a layout runs as FONT LEGS: `dejavu` — its Chrome under a scratch fontconfig naming only the dirs the runner
+ *  has (DejaVu, Liberation, Noto CJK, the colour emoji face; the system conf.d still applies) — then `box`, the box's own
+ *  face, never run where that IS DejaVu Sans (the runner). `--font dejavu|box` runs one leg; without it the suite runs each
+ *  leg as a child (runFontLegs) and fails if one does. A box without the DejaVu dir runs `box` alone and says so. */
+export const RUNNER_FONT_DIRS = Object.freeze(['/usr/share/fonts/truetype/dejavu', '/usr/share/fonts/truetype/liberation', '/usr/share/fonts/opentype/noto']);
+const EMOJI_FACE = '/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf'; // linked alone: its dir also holds Noto Sans, which would be the sans-serif
+/** The face this box's fontconfig answers for sans-serif ('' when fc-match is missing). */
+export function boxSans() { try { return execFileSync('fc-match', ['-f', '%{family}', 'sans-serif'], { encoding: 'utf8', timeout: 10000 }).trim(); } catch { return ''; } }
+/** The legs this box runs: ['dejavu', 'box'] | ['dejavu'] (the box IS DejaVu) | ['box'] (no DejaVu dir). */
+export function fontLegs() {
+  if (!fs.existsSync(path.join(RUNNER_FONT_DIRS[0], 'DejaVuSans.ttf'))) return ['box'];
+  return /^DejaVu Sans(,|$)/.test(boxSans()) ? ['dejavu'] : ['dejavu', 'box'];
+}
+/** The `dejavu` leg's Chrome env: { FONTCONFIG_FILE } of a fontconfig written under `dir` (the suite removes `dir`). */
+export function runnerFontEnv(dir) {
+  const emoji = path.join(dir, 'emoji');
+  fs.mkdirSync(emoji, { recursive: true });
+  if (fs.existsSync(EMOJI_FACE)) { try { fs.symlinkSync(EMOJI_FACE, path.join(emoji, path.basename(EMOJI_FACE))); } catch { } }
+  const file = path.join(dir, 'fonts.conf');
+  fs.writeFileSync(file, `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n${[...RUNNER_FONT_DIRS, emoji].map((d) => `  <dir>${d}</dir>\n`).join('')}  <cachedir>${path.join(dir, 'cache')}</cachedir>\n  <include ignore_missing="yes">/etc/fonts/conf.d</include>\n</fontconfig>\n`);
+  return { FONTCONFIG_FILE: file };
+}
+/** Run `script` once per font leg (`--font <leg>` appended), output inherited; the exit code is the first failing leg's. */
+export function runFontLegs(script, argv = process.argv.slice(2)) {
+  let code = 0;
+  for (const leg of fontLegs()) {
+    console.log(`── font leg ${leg}${leg === 'dejavu' ? " (the hosted runner's sans-serif, a scratch fontconfig)" : ` (this box's own: ${boxSans() || '?'})`} ──`);
+    const r = spawnSync(process.execPath, [script, ...argv, '--font', leg], { stdio: 'inherit', env: process.env });
+    if (r.status !== 0 && !code) code = r.status || 1;
+  }
+  return code;
+}
+/** The face Chrome drew `selector`'s text in (CSS.getPlatformFontsForNode — the most glyphs), or null; `cdp(method, params)`.
+ *  The LAST match first: an element content-visibility skips has drawn nothing (an empty font list). */
+export async function drawnFace(cdp, selector) {
+  try {
+    await cdp('DOM.enable'); await cdp('CSS.enable');
+    const { root } = await cdp('DOM.getDocument', { depth: 0 });
+    const { nodeIds } = await cdp('DOM.querySelectorAll', { nodeId: root.nodeId, selector });
+    for (const nodeId of [...(nodeIds || [])].reverse().slice(0, 20)) {
+      const { fonts } = await cdp('CSS.getPlatformFontsForNode', { nodeId });
+      const top = [...(fonts || [])].sort((a, b) => b.glyphCount - a.glyphCount)[0];
+      if (top?.familyName) return top.familyName;
+    }
+    return null;
+  } catch { return null; }
 }

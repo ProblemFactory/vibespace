@@ -36,6 +36,14 @@
 //   H  the stale-tab reload: a server whose version the bundle never matches — ONE reload, ONE notice, then quiet across
 //      two reconnects (the diary's stale rows say reload, notice); two reconnects 300 ms apart — ONE reload, the notice
 //      only from the reloaded page (round 2)
+//   CI .358 (ci358-reds — the mirror's WATCHDOG at 720 s on «· red: the renderer-kill road», both tries; the runner's Chrome is
+//   156): on Chrome 156 Page.crash kills the renderer ~6 s LATE (measured 6.2 / 6.3 s; 154: within the 1.5 s the road used to
+//   sleep), so the road's reload started a load the crash then killed — never answered, the tab left dead, and the next
+//   Runtime.evaluate waited for ever. The road now reloads once Inspector.targetCrashed arrives (bounded 30 s: a renderer
+//   that never dies is a named ✗ with what was seen), and EVERY CDP call is bounded (45 s, the method named). G1's RED
+//   premise is Chrome's: a 156 discard keeps the tab's document (chrome://discards says «loaded», 154 «unloaded») and the
+//   pre-fix back loads nothing there — the leg says which discard it saw and judges that. VS_CPU_THROTTLE=<n> slows the
+//   page's main thread n×.
 // Its own clock: 720 s (suite-watchdog); run bare it assumes its ci.mjs row's budget (900 s) and says so at start.
 // Requires google-chrome (SKIP without) and a fresh `npm run build`. Run: node scripts/test-mobile-back-chrome.mjs
 import { execSync, spawn } from 'node:child_process';
@@ -123,8 +131,11 @@ const onMessage = (d) => {
   if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown');
 };
 sock.on('message', onMessage);
+const CDP_MS = 45e3; // BOUNDED (ci358-reds): a call the browser never answers is a named failure, never a hang
 const cdp = (method, params = {}) => new Promise((res, rej) => {
-  const id = ++seq; PENDS.set(id, { method, at: Date.now() }); pend.set(id, (m) => (m.error ? rej(new Error(method + ': ' + m.error.message)) : res(m.result)));
+  const id = ++seq; PENDS.set(id, { method, at: Date.now() });
+  const tm = setTimeout(() => { pend.delete(id); PENDS.delete(id); rej(new Error(`CDP ${method}: no answer in ${CDP_MS / 1000} s`)); }, CDP_MS);
+  pend.set(id, (m) => { clearTimeout(tm); return m.error ? rej(new Error(method + ': ' + m.error.message)) : res(m.result); });
   sock.send(JSON.stringify({ id, method, params }));
 });
 const evalJs = async (expr) => {
@@ -133,7 +144,9 @@ const evalJs = async (expr) => {
   return r.result.value;
 };
 const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch { } await sleep(150); } try { return await evalJs(expr); } catch { return false; } };
-await cdp('Runtime.enable'); await cdp('Page.enable');
+const THROTTLE = Number(process.env.VS_CPU_THROTTLE) || 0; // the runner's 2 vCPU, on this box (applied again on every re-attach)
+await cdp('Runtime.enable'); await cdp('Page.enable'); await cdp('Inspector.enable'); // Inspector: the renderer-kill road waits for targetCrashed
+if (THROTTLE > 1) { await cdp('Emulation.setCPUThrottlingRate', { rate: THROTTLE }); console.log(`  (the page's CPU throttled ×${THROTTLE} — VS_CPU_THROTTLE)`); }
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard over the nav bar
 const nav = async () => { const h = await cdp('Page.getNavigationHistory'); return { index: h.currentIndex, len: h.entries.length, url: h.entries[h.currentIndex].url }; };
 const onApp = (n) => n.url.startsWith(ORIGIN);
@@ -204,7 +217,8 @@ const attachTo = async (targetId) => {
   try { sock.close(); } catch { }
   let t = null; for (let i = 0; i < 40 && !t; i++) { try { t = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((x) => x.id === targetId); } catch { } if (!t) await sleep(250); }
   sock = new WebSocket(t.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 }); await new Promise((r) => sock.on('open', r)); sock.on('message', onMessage);
-  await cdp('Runtime.enable'); await cdp('Page.enable');
+  await cdp('Runtime.enable'); await cdp('Page.enable'); await cdp('Inspector.enable');
+  if (THROTTLE > 1) await cdp('Emulation.setCPUThrottlingRate', { rate: THROTTLE });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.addScriptToEvaluateOnNewDocument', { source: DROP_GO1 });
   target = t;
 };
@@ -239,9 +253,21 @@ const discardAndShow = async (dims) => {
   B.close();
   return { discarded: /discarded/.test(row), loaded, seen, row };
 };
+/** The renderer killed (Android's low-memory kill), then the page reloaded — once the kill HAS happened: Chrome 156 lands
+ *  Page.crash ~6 s late, and a reload sent before it was a load the crash killed (never answered, the tab left dead).
+ *  Page.crash itself is never answered (the renderer is gone): sent raw. → { crashed, ms, reloaded, seen } */
 const crashAndReload = async () => {
-  sock.send(JSON.stringify({ id: ++seq, method: 'Page.crash' })); // never answered: the renderer is gone (Android's low-memory kill)
-  await sleep(1500); await cdp('Page.reload');
+  let crashed = false;
+  const onCrash = (d) => { try { if (JSON.parse(d).method === 'Inspector.targetCrashed') crashed = true; } catch { } };
+  sock.on('message', onCrash);
+  const t0 = Date.now();
+  sock.send(JSON.stringify({ id: ++seq, method: 'Page.crash' }));
+  while (!crashed && Date.now() - t0 < 30000) await sleep(100);
+  sock.off('message', onCrash);
+  const ms = Date.now() - t0;
+  if (!crashed) return { crashed, ms, reloaded: false, seen: await evalJs('({ href: location.href, rs: document.readyState })').catch((e) => String(e.message)) };
+  const reloaded = await cdp('Page.reload').then(() => true, (e) => String(e.message));
+  return { crashed, ms, reloaded, seen: null };
 };
 /** The client rebuilt with mobile-back.js patched ([from, to] pairs; null when an anchor moved). */
 const buildBundle = async (tag, swaps) => {
@@ -451,14 +477,22 @@ try {
     } else R.discard = { disc, back: {}, after: {} };
     console.log(`  · ${tag}: the renderer-kill road`);
     await boot(); await touch382(); await evalJs('app.openFileExplorer(); true'); await sleep(900);
-    await crashAndReload(); await settle();
+    const kill = await crashAndReload();
+    console.log(`    the renderer: ${kill.crashed ? `dead after ${(kill.ms / 1000).toFixed(1)} s (Inspector.targetCrashed), reloaded: ${kill.reloaded}` : `NOT dead after ${(kill.ms / 1000).toFixed(0)} s — no Inspector.targetCrashed; the page: ${JSON.stringify(kill.seen)}`}`);
+    if (!kill.crashed || kill.reloaded !== true) { R.crash = { kill, boot: null, window: { url: '' }, armed: false, exit: { url: '' } }; } else { // the G2 legs judge this stub false, never throw
+    // the person touches the RELOADED page (every road touches a fresh boot): an untouched document's sentinel is pushed
+    // without an activation, and Chrome's back-button intervention may then skip the page's own entries — B1's subject.
+    // Measured on Chrome 156 (ci358-reds): untouched, the shipped wiring's window back LOADED the older VibeSpace entry in
+    // 1 of 2 runs (diary: back_forward, came back, a cost row); the crash itself landing ~6 s late made the race reachable
+    await settle(); await touch382();
     const cBoot = (await diary()).filter((r) => r.k === 'boot').at(-1);
     await evalJs('if (app.sidebar.isOpen) app.sidebar.toggle(false); app.openFileExplorer(); true'); await sleep(900);
     const c1 = await backAndSee();
     await atHome(); const c2 = await backAndSee(300); const cToast = (await toasts().catch(() => [])).includes('Press back again to exit');
     const c3 = await backAndSee(1500); if (c3.loaded && c3.onApp) await settle();
-    R.crash = { boot: cBoot, window: c1, armed: cToast && c2.onApp && !c2.loaded, exit: c3, leave: c3.onApp ? null : 'left' };
+    R.crash = { kill, boot: cBoot, window: c1, armed: cToast && c2.onApp && !c2.loaded, exit: c3, leave: c3.onApp ? null : 'left' };
     if (c3.onApp) R.crash.rows = (await diary()).slice(-4);
+    }
     console.log(`  · ${tag}: the second-load road (a \`?\` link over an older document of the tab)`);
     await boot(); await touch382();
     await evalJs(`location.href = '/?session=back-reload'; true`); await sleep(600); await settle();
@@ -472,7 +506,12 @@ try {
   GREEN = await roads('green');
   console.log('  · RED  ' + JSON.stringify(RED).slice(0, 900));
   console.log('  · GREEN ' + JSON.stringify(GREEN).slice(0, 900));
-  check('G1 RED (the pre-fix wiring): a discarded tab shown again — its FIRST back (a window on show) LOADS the page (the owner\'s splash); the diary\'s cost row + ONE automatic incident in the back\'s own words say so', !!RED && RED.discard.disc.discarded && RED.discard.disc.loaded && RED.discard.back.loaded && RED.discard.cost >= 1 && RED.discard.incidents === 1 && RED.discard.said >= 1, RED?.discard);
+  // the RED premise is Chrome's (ci358-reds): a discard that UNLOADS the document (154: chrome://discards' row «unloaded»)
+  // leaves the dead entry the pre-fix back loads; a discard that KEEPS it (156: «loaded») leaves nothing to load — there the
+  // pre-fix back must stay same-document with no cost row and no incident (and the shipped wiring is judged below either way)
+  const keptDoc = !!RED && /\bdiscarded\b/.test(RED.discard.disc.row || '') && !/\bunloaded\b/.test(RED.discard.disc.row || '') && /\bloaded\b/.test(RED.discard.disc.row || '');
+  if (RED) console.log(`  · G1 RED's discard on this Chrome: ${keptDoc ? 'it KEEPS the document (row «loaded» — Chrome 156+): the pre-fix back has no dead entry to load' : 'it UNLOADS the document (row «unloaded»): the pre-fix back loads the dead entry'}`);
+  check('G1 RED (the pre-fix wiring): a discarded tab shown again — where Chrome\'s discard unloads the document, its FIRST back (a window on show) LOADS the page (the owner\'s splash) and the diary\'s cost row + ONE automatic incident in the back\'s own words say so; where it keeps the document, the back stays same-document, no cost row, no incident', !!RED && RED.discard.disc.discarded && RED.discard.disc.loaded && (keptDoc ? !RED.discard.back.loaded && RED.discard.back.onApp && RED.discard.cost === 0 && RED.discard.incidents === 0 : RED.discard.back.loaded && RED.discard.cost >= 1 && RED.discard.incidents === 1 && RED.discard.said >= 1), RED?.discard);
   check('G1 the shipped wiring: the discarded tab\'s boot REBUILDS (diary: back_forward, rebuild, disc 1) and its first back closes the window — same document, back on the sentinel, no incident', GREEN.discard.disc.discarded && GREEN.discard.disc.loaded && GREEN.discard.boot?.type === 'back_forward' && GREEN.discard.boot?.step === 'rebuild' && GREEN.discard.boot?.disc === 1 && !GREEN.discard.back.loaded && GREEN.discard.back.onApp && GREEN.discard.after.st?.vs === 1 && GREEN.discard.after.sb && GREEN.discard.incidents === 0, GREEN.discard);
   check('G2 RED: a renderer killed + reloaded (diary: reload, push, state null) — the 「再返回一次退出」 exit LOADS the older VibeSpace entry', !!RED && RED.crash.boot?.type === 'reload' && RED.crash.boot?.st === 'null' && RED.crash.armed && RED.crash.exit.loaded && RED.crash.exit.onApp, RED?.crash);
   check('G2 the shipped wiring: the window back stays same-document; the exit lands on the page before VibeSpace — no VibeSpace load', GREEN.crash.boot?.st === 'null' && !GREEN.crash.window.loaded && GREEN.crash.window.onApp && GREEN.crash.armed && !GREEN.crash.exit.onApp && GREEN.crash.exit.url.startsWith('data:'), GREEN.crash);

@@ -25,15 +25,22 @@
 //   ⑨ the Write's document opened BEFORE its file existed says «Waiting for the file…» and opens it when it lands
 //   ⑩ the THIRD prompt offers «Let it work in work/ without asking» (the first two do not); a press answers with the
 //      folder's allow rules (Bash, Edit, Write, MultiEdit, NotebookEdit → localSettings) on the CLI's stdin
+// FONT LEGS + THE COLLAPSE (ci358-reds — the 2.369.358 mirror red on ③ ④, green here): the whole suite runs in the hosted
+//   runner's DejaVu Sans (a scratch fontconfig, scripts/scratch.mjs runFontLegs) and in this box's face. ③ first censuses the
+//   list: NO card on display is laid out 0 px tall — the list is a flex column and a content-visibility:auto card is
+//   size-contained (automatic minimum 0), so an overflowing list shrank the cards it skipped to nothing (overlapping, words
+//   clipped) until a wheel brought them back and the list grew +311 px under the reader (the −500 wheel read 188 px).
+//   CONTROL at the end: `flex-shrink: 1` put back on .chat-msg ⇒ the census finds collapsed cards. VS_CPU_THROTTLE=<n>
+//   slows the page's main thread n× (the runner's 2 vCPU).
 // RED CONTROL: the same suite on the base tree (2.369.342) fails 22 legs: ① ② ④ ⑤ ⑦'s PageDown ⑧ ⑨ ⑩ (③, ⑥ and ⑦'s wheel
 // are pins — a real wheel always worked; the studies' «dead wheel» was the harness: agent-browser 0.38.2 `mouse wheel` lands at 0,0).
-// Requires google-chrome (SKIP without). Run: node scripts/test-chat-scroll.mjs [--tree <dir>]
+// Requires google-chrome (SKIP without). Run: node scripts/test-chat-scroll.mjs [--tree <dir>] [--font dejavu|box]
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, runFontLegs, runnerFontEnv, drawnFace } from './scratch.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv();
 const require = createRequire(import.meta.url);
@@ -41,6 +48,8 @@ const ti = process.argv.indexOf('--tree');
 const repo = ti > 0 ? path.resolve(process.argv[ti + 1]) : path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
+const fi = process.argv.indexOf('--font'), FONT = fi > 0 ? process.argv[fi + 1] : null; // one font leg; none = every leg, each a child
+if (!FONT) process.exit(runFontLegs(fileURLToPath(import.meta.url)));
 
 const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('chat-scroll-wt');
@@ -52,6 +61,8 @@ fs.mkdirSync(CWD, { recursive: true });
 const SUMMARY = path.join(CWD, 'Summary.md');
 const SID = '5c3a0000-0000-4000-8000-0000000c5c01';
 const STDIN_LOG = path.join(stubDir, 'stdin.ndjson');
+const fontsDir = scratch('chat-scroll-fonts');
+const FONT_ENV = FONT === 'dejavu' ? runnerFontEnv(fontsDir) : {};
 const NTH_FILE = path.join(stubDir, 'nth'); // the stub's chat-process counter: the 2nd chat (⑪) gets its own conversation id and script
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
@@ -171,7 +182,7 @@ fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: path.join(stubDir, 'claude'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1' }, stdio: 'ignore' });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
-  '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
+  '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, ...FONT_ENV } });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
@@ -179,7 +190,7 @@ const cleanup = () => {
   try { srv.kill('SIGKILL'); } catch {}
   for (const root of [wt, fakeHome, stubDir]) { try { endRootedProcesses(root); } catch {} } // every process this suite caused carries one of these paths (dtach, the wrapper, the stub)
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [wt, `${wt}-chrome`, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  for (const d of [wt, `${wt}-chrome`, fakeHome, stubDir, fontsDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
@@ -224,6 +235,8 @@ const stdinLines = () => { try { return fs.readFileSync(STDIN_LOG, 'utf8').split
 
 try {
   await cdp('Runtime.enable'); await cdp('Page.enable');
+  const THROTTLE = Number(process.env.VS_CPU_THROTTLE) || 0;
+  if (THROTTLE > 1) { await cdp('Emulation.setCPUThrottlingRate', { rate: THROTTLE }); console.log(`  (the page's CPU throttled ×${THROTTLE} — VS_CPU_THROTTLE)`); }
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
@@ -278,7 +291,15 @@ try {
 
   // ── ③ ──
   console.log('③ a real wheel moves the chat');
-  const g = await rectOf(LIST);
+  const face = await drawnFace(cdp, '.chat-msg-assistant .chat-text p');
+  check(`the leg's face, read back from Chrome: ${face} (${FONT === 'dejavu' ? "the hosted runner's DejaVu Sans" : "this box's own"})`, FONT === 'dejavu' ? face === 'DejaVu Sans' : !!face, face);
+  // NO CARD COLLAPSED (ci358-reds): a card on display with words is never laid out 0 px tall — a skipped card keeps its
+  // placeholder (contain-intrinsic-size), a rendered one its words
+  const collapsed = () => evalJs(`[...document.querySelectorAll('.chat-message-list > .chat-msg')].filter((e) => getComputedStyle(e).display !== 'none' && (e.textContent || '').trim() && e.getBoundingClientRect().height < 1).map((e) => (e.textContent || '').trim().slice(0, 32))`);
+  const c0 = await collapsed();
+  check('no card of the list is laid out 0 px tall (a flex column shrank the cards content-visibility skipped: overlapping, words clipped, the list short by their height)', c0.length === 0, c0);
+  const g = (await rectOf(LIST)) || { x: 0, y: 0, w: 0, h: 0 };
+  if (!(g.w > 0 && g.h > 0)) check('the list is on screen to wheel over', false, g);
   const cx = Math.round(g.x + g.w / 2), cy = Math.round(g.y + g.h / 2);
   const w0 = await st(); await wheelAt(cx, cy, -500); const w1 = await st(); await wheelAt(cx, cy, 250); const w2 = await st();
   check('wheel up over the list moves it up, wheel down moves it down', w1 < w0 - 200 && w2 > w1 + 100, { w0, w1, w2 });
@@ -477,6 +498,13 @@ try {
   ws.send(JSON.stringify({ type: 'interrupt', sessionId: sid2 }));   // Stop (a typed message mid-turn is held by the wrapper since 2.369.354)
   check('the turn ends (LIVE-END) and the view is still pinned at the bottom', await waitFor(`/LIVE-END/.test(${L2}.textContent)`, 15000) && (await sleep(800), (await geo2()).pin === true));
 
+  { // CONTROL (ci358-reds): the base's shrink put back on the cards ⇒ the census finds collapsed cards; taken off ⇒ none
+    await evalJs(`(() => { const st = document.createElement('style'); st.id = 'cs-shrink-ctl'; st.textContent = '.chat-msg { flex-shrink: 1 !important; }'; document.head.appendChild(st); return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true)))); })()`);
+    const cRed = await collapsed();
+    await evalJs(`(() => { document.getElementById('cs-shrink-ctl')?.remove(); return new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true)))); })()`);
+    const cBack = await collapsed();
+    check(`CONTROL: \`flex-shrink: 1\` put back on .chat-msg ⇒ the census finds collapsed cards (${cRed.length}); taken off ⇒ none (${cBack.length})`, cRed.length > 0 && cBack.length === 0, { cRed: cRed.slice(0, 4), cBack });
+  }
   check('no page exception in the whole run', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++;

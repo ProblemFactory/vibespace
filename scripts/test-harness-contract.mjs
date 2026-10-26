@@ -177,9 +177,30 @@ for (const id of chatHarnessIds()) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-hc-qr-'));
   fs.writeFileSync(path.join(d, 'sess-new.json'), JSON.stringify({ caps: { inputQueue: true, queueResync: true } }));
   fs.writeFileSync(path.join(d, 'sess-old.json'), JSON.stringify({ caps: { inputQueue: true } }));
-  ok(wrapperCaps(d, 'sess-new', '/x').queueResync === true, 'wrapperCaps surfaces queueResync from a REAL sidecar file');
-  ok(wrapperCaps(d, 'sess-old', '/x').queueResync === false, '…and a wrapper predating the verb reads FALSE (never inherited from inputQueue)');
-  ok(wrapperCaps(d, 'sess-missing', '/x').queueResync === false, '…and an unreadable sidecar (a REMOTE wrapper: its file is on ITS machine) is FALSE — unknown is never "yes"');
+  // a socket NO live process carries (ci358-reds): the fixture's '/x' sat inside 62 live wrappers' paths on the lanes' box, and
+  // the /proc fallback read one of THEIR sidecars as the missing session's — the check was red on every tree there
+  const none = path.join(d, 'no-such.sock');
+  ok(wrapperCaps(d, 'sess-new', none).queueResync === true, 'wrapperCaps surfaces queueResync from a REAL sidecar file');
+  ok(wrapperCaps(d, 'sess-old', none).queueResync === false, '…and a wrapper predating the verb reads FALSE (never inherited from inputQueue)');
+  ok(wrapperCaps(d, 'sess-missing', none).queueResync === false, '…and an unreadable sidecar (a REMOTE wrapper: its file is on ITS machine) is FALSE — unknown is never "yes"');
+  // THE SOCKET IS A WORD (ci358-reds): a fake /proc holding ONE stranger — a dtach master whose cmdline CONTAINS '/x' (its
+  // socket <d>/x/cw-other) and whose sidecar adverts queueResync — never answers for another session's socket
+  const proc = path.join(d, 'proc'), other = path.join(d, 'x');
+  fs.mkdirSync(path.join(proc, '4242'), { recursive: true }); fs.mkdirSync(other, { recursive: true });
+  fs.writeFileSync(path.join(other, 'cw-other.json'), JSON.stringify({ caps: { inputQueue: true, queueResync: true } }));
+  fs.writeFileSync(path.join(proc, '4242', 'cmdline'), ['dtach', '-c', path.join(other, 'cw-other'), '-E', '-r', 'none', process.execPath, path.join(REPO, 'data/bin/chat-wrapper.js'), path.join(other, 'cw-other.buf'), path.join(other, 'cw-other.json'), ''].join('\0'));
+  ok(wrapperCaps(d, 'sess-missing', '/x', { procDir: proc }).queueResync === false, '…and a dtach master whose cmdline merely CONTAINS the socket path is a stranger: its sidecar is never read (the socket is the word after `dtach -c`)');
+  ok(wrapperCaps(d, 'sess-missing', path.join(other, 'cw-other'), { procDir: proc }).queueResync === true, '…while the master whose socket word IS the path is found (the 2.339.2 counter-collision road still reads its sidecar)');
+  { // RED CONTROL: the substring match put back in a copy reads the stranger's sidecar for '/x'
+    const src = fs.readFileSync(path.join(REPO, 'src/server/wrapper-files.js'), 'utf8');
+    const NEW = "if (c < 0 || argv[c + 1] !== sockPath || !/(chat|acp)-wrapper\\.js/.test(cmd)) continue;";
+    const OLD = "if (!cmd.includes(sockPath) || !cmd.includes('dtach\\0-c\\0') || !/(chat|acp)-wrapper\\.js/.test(cmd)) continue;";
+    const mut = src.replace(NEW, OLD).replace("require('../backend-caps.js')", `require(${JSON.stringify(path.join(REPO, 'src/backend-caps.js'))})`);
+    const file = path.join(d, 'wrapper-files-substring.js');
+    fs.writeFileSync(file, mut);
+    const red = mut.includes(OLD) && !mut.includes(NEW) ? require(file).wrapperCaps(d, 'sess-missing', '/x', { procDir: proc }) : null;
+    ok(!!red && red.queueResync === true, 'CONTROL: the substring match put back in a copy reads the STRANGER\'s sidecar for \'/x\' (queueResync true from cw-other.json)', red ? red.reason : 'the swap anchor moved');
+  }
   fs.rmSync(d, { recursive: true, force: true });
 }
 ok(chatHarnessIds().join(',') === 'claude,codex,opencode,antigravity', `chat-capable harnesses: ${chatHarnessIds().join(',')}`);

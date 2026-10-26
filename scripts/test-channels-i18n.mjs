@@ -372,6 +372,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const at200 = desk.filter((x) => x.name === 'list-focus-200');
     ok(at200.length > 0 && at200.every((x) => x.rail.sidebar >= 224 && x.rail.sidebar - x.rail.w >= 156),
       '…and at the 200 px setting the words come out of the sidebar, not the panel: sidebar ≥ 224 px, panel ≥ 156 px (what the 200 px floor gave it before the words)', JSON.stringify(at200.map((x) => x.rail)));
+    // ci358-reds (the .358 mirror's list-focus-200 red — the sidebar CLOSED, its 68 px rail measured): a pass's page left
+    // open reconnected to the next pass's server and its layout record closed that pass's sidebar mid-shot. A shot never
+    // inherits another pass's page: the driver closes each pass's TAB, and every IM shot says the app pages it saw
+    const crowded = imShots.filter((x) => x.pages !== 1);
+    ok(imShots.length > 0 && crowded.length === 0, 'every IM shot was taken with ONE app page in the browser — its own pass\'s (an earlier pass\'s tab, left open, reconnected to the next server and its layout record closed the sidebar mid-pass)', JSON.stringify(crowded.slice(0, 8).map((x) => `${x.tag}/${x.name}: ${x.pages}`)));
     ok(viol.length === 0, 'THE LOOK: nothing overlaps, nothing is cut, no part leaves its row, nothing scrolls sideways, every phone target ≥ 36 px, every avatar ≥ 4.5 : 1 and paint — at every rail width, in every language, under the runner\'s face',
       viol.slice(0, 30).map((v) => `${v.what} ${v.where}: ${v.detail}`).join('\n    '));
   }

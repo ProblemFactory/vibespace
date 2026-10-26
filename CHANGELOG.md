@@ -30,6 +30,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Reloading a phone keeps the window you had open instead of jumping to For you; the For-you badge and the first row in ☰ bring the page back.
 - A window dragged onto the taskbar or resized past the top is no longer lost under a bar; its taskbar button or window-list row brings such a window back.
 - A window's right-click menu near the bottom of a small screen opens inside the screen, so Move and Minimize can be clicked.
+- In a long chat the scrollbar no longer jumps as you scroll up: messages above the screen keep their height instead of shrinking to nothing until you reach them.
 - The Open in editor and Fork buttons no longer cover the last words of a message's first line.
 - A note no longer covers an open menu or the message box; the Desktop list closes when you click into a web view, and its note is a whole sentence.
 - On a narrow toolbar the VibeSpace name is shown whole or not at all, never cut to «Vibe…».

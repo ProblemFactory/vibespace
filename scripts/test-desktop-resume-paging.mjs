@@ -805,6 +805,9 @@ patch('src/lib/chat-view.js', [
   // control's `extendTop:done` reading was made of is that stale write over the rebuilt window.
   ['const stale = gen !== this._windowGen; // B-172e ③', 'const stale = false; // control: no window generation'],
 ]);
+// (7) THE LAYER ci358-reds ADDED: a card the flex-column list can no longer shrink to 0 px (.chat-msg flex-shrink 0) — the
+// resumed subtree's re-measure kept its height, so with (1)-(6) stripped the control went green on the fixed build
+patch('public/chat.css', [['.chat-msg { max-width: 100%; min-width: 0; flex-shrink: 0; contain:', '.chat-msg { max-width: 100%; min-width: 0; contain:']]);
 buildBundle();
 const bad = await run('gates-removed');
 check('NEGATIVE CONTROL: without the gates the resume DOES page up (extendTop:done)',

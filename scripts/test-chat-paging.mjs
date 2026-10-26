@@ -709,9 +709,15 @@ if (huge.opened?.ok) {
 // settled heights for cards inside the TRIM KEEP ZONE (viewport ± one viewport);
 // the reader's card must survive every landing. The control swaps the pre-fix
 // two-frame release onto the same view (an own property over the prototype).
+// THE 0 px WAS A FLEX SHRINK (ci358-reds): the list is a flex column and a card under content-visibility:auto is
+// size-contained (automatic minimum 0), so the release frame's NEW lock was shrunk to nothing — once .chat-msg is
+// flex-shrink 0 even the pre-fix release lays no fresh card out off its height (measured: 0 of 11 landings). The control
+// therefore restores the pre-fix WORLD — the two-frame release AND the base's shrinkable cards (`flex-shrink: 1`, last in
+// the cascade); the pre-fix release alone on today's list is run and reported too (informational).
 // On a red, the first offending frame's geometry is printed — the evidence.
-const RELEASE_LEG = (control) => `(async () => {
+const RELEASE_LEG = (control, shrink = control) => `(async () => {
   const v = window.__v, list = v._messageList, ch = list.clientHeight;
+  if (${shrink}) { const st = document.createElement('style'); st.id = 'cp-shrink-ctl'; st.textContent = '.chat-msg { flex-shrink: 1; }'; document.head.appendChild(st); }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const raf0 = window.requestAnimationFrame;
   const proto = Object.getPrototypeOf(v)._reserveFreshHeights;
@@ -775,15 +781,15 @@ const RELEASE_LEG = (control) => `(async () => {
       }
       out.push({ dir, ws: [ws0, v._windowStart], we: [we0, v._windowEnd], frames: log.length, fresh: fin.fresh.length, nBad, nScreen, first, readerLost: log.some((l) => !l.readerIn), readerAt: [log[0]?.readerAt, fin.readerAt] });
     }
-  } finally { delete v._reserveFreshHeights; window.requestAnimationFrame = raf0; }
+  } finally { delete v._reserveFreshHeights; window.requestAnimationFrame = raf0; document.getElementById('cp-shrink-ctl')?.remove(); }
   return { ch, stalled, landings: out };
 })()`;
-const releaseLeg = async (control) => {
+const releaseLeg = async (control, shrink = control) => {
   await pageReady(PORT, 'release ' + (control ? 'control' : 'fix'));
   await sleep(1500);
   const opened = await evaljs(OPEN_HUGE(SID3, CWD, 'huge release ' + (control ? 'control' : 'fix')));
   if (!opened?.ok) return { opened };
-  return { opened, ...(await evaljs(RELEASE_LEG(control))) };
+  return { opened, ...(await evaljs(RELEASE_LEG(control, shrink))) };
 };
 console.log('§4e the release frame (B-1192): a paging landing under a 3-frame stall never lays a fresh slab card out ON SCREEN at a height the reader does not see');
 {
@@ -796,10 +802,15 @@ console.log('§4e the release frame (B-1192): a paging landing under a 3-frame s
   const bad = L.filter((l) => l.nScreen);
   check('§4e no fresh slab card ON SCREEN is ever laid out at a height other than its settled one — in its release frame or any other (the override comes off only once the card has left the viewport)', L.length && !bad.length, 'first offending frame (evidence): ' + JSON.stringify(bad[0]?.first));
   check('§4e the reader\'s card survives every landing', L.length && !L.some((l) => l.readerLost), JSON.stringify(L.map((l) => l.readerAt)));
+  // THE RULE UNDER IT (ci358-reds): no card of the list may shrink — every .chat-msg computes flex-shrink 0
+  const shrinkable = await evaljs(`(() => { const all = [...document.querySelectorAll('.chat-message-list > .chat-msg')]; return { n: all.length, shrink: all.filter((e) => getComputedStyle(e).flexShrink !== '0').length }; })()`);
+  check(`§4e every card of the list computes flex-shrink 0 — a flex column never shrinks a size-contained card to nothing (${shrinkable?.shrink} of ${shrinkable?.n} could)`, shrinkable?.n > 0 && shrinkable.shrink === 0, shrinkable);
+  const alone = await releaseLeg(true, false); // the pre-fix release on today's shrink-proof cards (informational)
+  for (const l of alone.landings || []) console.log(line('pre-fix release, cards that cannot shrink', l));
   const ctl = await releaseLeg(true);
   const C = ctl.landings || [];
-  for (const l of C) console.log(line('control', l));
-  check(`§4e NEGATIVE CONTROL: the pre-fix two-frame release on the same view lays a fresh card out ON SCREEN off its height (${C.filter((l) => l.nScreen).length} of ${C.length} landings) — the leg sees the defect`, C.length >= 5 && C.some((l) => l.nScreen), JSON.stringify(ctl.opened || C).slice(0, 400));
+  for (const l of C) console.log(line('control: pre-fix release + shrinkable cards', l));
+  check(`§4e NEGATIVE CONTROL: the pre-fix world (the two-frame release + cards a flex column may shrink) on the same view lays a fresh card out ON SCREEN off its height (${C.filter((l) => l.nScreen).length} of ${C.length} landings) — the leg sees the defect`, C.length >= 5 && C.some((l) => l.nScreen), JSON.stringify(ctl.opened || C).slice(0, 400));
 }
 
 // ── 4g. THE NOTCH INSIDE THE LOAD LOCK (B-8c25 — this suite's red on the 2.369.195 mirror, passed on retry:

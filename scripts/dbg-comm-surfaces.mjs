@@ -42,6 +42,14 @@
 //                     (scripts/test-channels-i18n.mjs imCensus).
 //   VS_UI_FACE        force a font face on the page (e.g. 'DejaVu Sans', the
 //                     runner's system-ui — the .185 lesson)
+//   VS_CPU_THROTTLE   slow each page's main thread n× (the runner's 2 vCPU)
+//
+// ONE PAGE PER PASS (ci358-reds — the 2.369.358 mirror's list-focus-200 red): a pass's page is CLOSED when the pass ends —
+// the TAB, not only this driver's socket. Every pass boots a fresh server on the same port, and a tab left open
+// reconnected to it: an earlier desktop pass's layout record closed the next pass's sidebar ~0.7 s after the panel
+// opened (stack: _handleRemoteSync → _applyRemoteState → sidebar.toggle(false)), so the 200 px shot measured the 68 px
+// rail (2 of 4 on the runner; here on the full pass, 2.369.357 too). Each IM shot's JSON says `pages` = the app pages the
+// browser held when it was taken (test-channels-i18n: exactly 1).
 //
 // Nothing here calls a vendor (§ban-safety): the Lark / Gmail consent flows are
 // STARTED (a consent URL is built, a loopback port is bound) and CANCELLED —
@@ -159,8 +167,10 @@ async function newPage({ width, height, mobile }) {
   await new Promise((res) => ws.on('open', res));
   let seq = 0; const pend = new Map();
   ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
-  const cdp = (method, params = {}) => new Promise((res) => { const id = ++seq; pend.set(id, res); ws.send(JSON.stringify({ id, method, params })); });
+  // BOUNDED (ci358-reds): an unanswered call resolves as an error after 60 s — evaljs throws it, the pass fails by name
+  const cdp = (method, params = {}) => new Promise((res) => { const id = ++seq; const tm = setTimeout(() => { pend.delete(id); res({ id, error: { message: `CDP ${method}: no answer in 60 s` } }); }, 60000); pend.set(id, (m) => { clearTimeout(tm); res(m); }); ws.send(JSON.stringify({ id, method, params })); });
   await cdp('Runtime.enable'); await cdp('Page.enable');
+  if (Number(process.env.VS_CPU_THROTTLE) > 1) await cdp('Emulation.setCPUThrottlingRate', { rate: Number(process.env.VS_CPU_THROTTLE) });
   const metrics = async (w, h, m) => cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: !!m });
   await metrics(width, height, mobile);
   const evaljs = async (expr) => {
@@ -195,7 +205,9 @@ async function newPage({ width, height, mobile }) {
     if (!r2.result || !r2.result.data) throw new Error('no screenshot: ' + JSON.stringify(r2).slice(0, 300));
     fs.writeFileSync(file, Buffer.from(r2.result.data, 'base64'));
   };
-  return { cdp, evaljs, load, prime, shot, metrics, close: () => { try { ws.close(); } catch {} } };
+  // the TAB closes with the pass (ci358-reds: a tab left open reconnected to the next pass's server) — then the socket
+  const close = async () => { try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t.id}`); } catch { } try { ws.close(); } catch { } };
+  return { cdp, evaljs, load, prime, shot, metrics, close };
 }
 for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
 
@@ -774,7 +786,7 @@ async function pass({ lang, viewport, theme }) {
   await capture(page, tag, 'integ-06-editing-secret', BB, { pad: 4 });
   await closeAllWindows(page);
 
-  page.close();
+  await page.close();
 }
 
 /** Every Latin-only visible string a zh/ja pass showed, deduped, with the
@@ -1034,8 +1046,10 @@ async function imCapture(page, tag, name, rootSel, groups, { pad = 0, clipSel = 
   const im = await page.evaljs(`${IM_MEASURE}(${JSON.stringify(rootSel)}, ${JSON.stringify(groups)})`);
   // the rail's state in this shot: 'labelled' (the first week's words) | 'icons' | 'none' (no rail on screen: the phone)
   const rail = await page.evaljs(`(() => { const r = document.getElementById('sidebar-rail'), sb = document.getElementById('sidebar'); const w = r ? Math.round(r.getBoundingClientRect().width) : 0; return w ? { state: r.classList.contains('rail-labelled') ? 'labelled' : 'icons', w, sidebar: Math.round(sb.getBoundingClientRect().width) } : { state: 'none' }; })()`);
-  fs.writeFileSync(file + '.json', JSON.stringify({ name, tag, rootSel, clip, ...(m || {}), im, rail }, null, 1));
-  manifest.push({ tag, name, file: path.basename(file) + '.png', missing: m && m.missing, rect: m && m.rect, im: true, rail });
+  // the app pages the browser holds at this shot: this pass's own, and no other (ci358-reds)
+  const pages = await fetch(`http://127.0.0.1:${CDP_PORT}/json`).then((r) => r.json()).then((ts) => ts.filter((x) => x.type === 'page' && String(x.url).startsWith(base)).length).catch(() => null);
+  fs.writeFileSync(file + '.json', JSON.stringify({ name, tag, rootSel, clip, ...(m || {}), im, rail, pages }, null, 1));
+  manifest.push({ tag, name, file: path.basename(file) + '.png', missing: m && m.missing, rect: m && m.rect, im: true, rail, pages });
   log(tag, name, m && m.missing ? 'MISSING ' + m.missing : `${m.rect.w}×${m.rect.h} · ${im && im.groups ? im.groups.length : 0} groups · ${im && im.targets ? im.targets.length : 0} targets`);
   return im;
 }
@@ -1167,7 +1181,7 @@ async function imPass({ lang, viewport, theme }) {
   await sleep(500);
   await imCapture(page, tag, `${mobile ? 'm-' : ''}outbox-open`, '[data-shot="win"]', IM_OUTBOX_GROUPS);
   await page.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()]) window.app.wm.closeWindow(w.id); return 1; })()`);
-  page.close();
+  await page.close();
 }
 
 const runs = [];

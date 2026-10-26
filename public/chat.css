@@ -205,7 +205,15 @@
 }
 
 /* Messages */
-.chat-msg { max-width: 100%; min-width: 0; contain: layout style paint; content-visibility: auto; contain-intrinsic-size: auto 80px; }
+.chat-msg { max-width: 100%; min-width: 0; flex-shrink: 0; contain: layout style paint; content-visibility: auto; contain-intrinsic-size: auto 80px; }
+/* flex-shrink 0 (ci358-reds, the 2.369.358 mirror's test-chat-scroll red): the list is a flex COLUMN, and a card under
+   content-visibility:auto is size-contained — its automatic minimum height is 0 — so an overflowing list SHRANK the
+   cards it had skipped to 0 px: placeholders ignored (contain-intrinsic-size never applied), the cards above the view
+   stacked on each other with their words clipped, scrollHeight short by their height. A wheel / PageUp that brought
+   them back grew the list under the reader (measured in DejaVu Sans: a −500 wheel read 188 px — scroll anchoring added
+   the +311 px the cards grew; a PageUp 164 of a 334 px screen). A card is never shrunk: the list scrolls. It was also the
+   0 px of B-1192's release frame: with cards that cannot shrink, the pre-fix two-frame release lays no fresh card out off
+   its height (test-chat-paging §4e: 0 of 11 landings; its control puts the shrink back). */
 /* content-visibility:auto REMEMBERS the last-rendered height (the `auto` in
    contain-intrinsic-size). A code block's height is WIDTH-SENSITIVE when
    wrapped (narrower viewport -> more wrapped rows -> taller). A message first
@@ -1991,6 +1999,10 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
   .chat-input-area .chat-shortcut-hint { display: none; }
   .chat-view .chat-status-bar { flex-wrap: nowrap; overflow: hidden; gap: 8px; min-height: 40px; padding: 0 12px env(safe-area-inset-bottom, 0px); border-top: none; background: var(--bg-titlebar); font-size: 12px; }
   .chat-view .chat-status-bar .chat-status-clickable { padding: 0 4px; }
+  /* the 24 px MOUSE-target floor (lane desktop-small P2-6, above) is the desk's: on the phone's ONE row it widened every
+     icon chip 20 → 24 px and folded the next chip behind ⋯ (ci358-reds: «产出 · 4» at 390 px in DejaVu Sans) — the touch
+     bar keeps its own scale (the 36 px search and ⋯ chips below are their own rules) */
+  .chat-status-bar .chat-status-clickable { min-width: auto; }
   .chat-view .chat-status-bar .chat-status-model { font-size: 12px; padding: 0 8px; letter-spacing: 0; border: solid transparent; border-width: 4px 0; background-clip: padding-box; border-radius: var(--radius); }
   .chat-status-bar > .chat-status-folded { display: none !important; }
   .chat-view .chat-status-bar > .chat-status-more { min-width: 36px; justify-content: center; font-size: 16px; }

@@ -16,23 +16,31 @@
 //   ④ `vibespace-design open <dir> --for lead` from helper = ②'s design part (card + window + home) — the person back in
 //     lead's conversation first (an agent's Design opens beside a chat only where the person looks: agent-window-no-pop)
 //   ⑤ zh at 390 px: the hand-over and subagent cards say 移交自 / 子代理, the chip and every card inside the viewport, no
-//     card word clipped (rect census)
-// Run: node scripts/test-artifacts-handover-ui.mjs   (SKIPs without chrome)
+//     card word clipped (rect census); the chip sits IN the phone bar's ONE row (chips past its width fold behind ⋯ —
+//     display:none, a 0×0 rect: the 2.369.358 mirror red, «产出 · 4» folded in DejaVu Sans because the desk's 24 px mouse
+//     floor widened the icon chips 20 → 24 px; CONTROL, DejaVu leg: that floor put back on the phone's chips folds it)
+// FONT LEGS (ci358-reds): the whole suite runs in the hosted runner's DejaVu Sans (a scratch fontconfig, scratch.mjs
+// runFontLegs) and in this box's face; VS_CPU_THROTTLE=<n> slows the page's main thread n×.
+// Run: node scripts/test-artifacts-handover-ui.mjs [--font dejavu|box]   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, runFontLegs, runnerFontEnv, drawnFace } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VNC_ENV = await vncEnv();
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome'); process.exit(0); }
+const fi = process.argv.indexOf('--font'), FONT = fi > 0 ? process.argv[fi + 1] : null; // one font leg; none = every leg, each a child
+if (!FONT) process.exit(runFontLegs(fileURLToPath(import.meta.url)));
 const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('artifacts-handover-ui-wt');
 const fakeHome = scratchHome('artifacts-handover-ui-home', fs);
 const stubDir = scratch('artifacts-handover-ui-stub');
+const fontsDir = scratch('artifacts-handover-ui-fonts');
+const FONT_ENV = FONT === 'dejavu' ? runnerFontEnv(fontsDir) : {};
 fs.mkdirSync(stubDir, { recursive: true });
 const CWD = { lead: path.join(fakeHome, 'lead'), helper: path.join(fakeHome, 'helper'), outsider: path.join(fakeHome, 'outsider') };
 for (const d of Object.values(CWD)) fs.mkdirSync(d, { recursive: true });
@@ -116,7 +124,7 @@ const runs = (step, all = false) => { try { return fs.readFileSync(RUNLOG, 'utf8
 
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
-  '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
+  '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, ...FONT_ENV } });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
@@ -124,7 +132,7 @@ const cleanup = () => {
   try { srv.kill('SIGKILL'); } catch {}
   for (const root of [wt, fakeHome, stubDir]) { try { endRootedProcesses(root); } catch {} }
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [wt, `${wt}-chrome`, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  for (const d of [wt, `${wt}-chrome`, fakeHome, stubDir, fontsDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
@@ -146,7 +154,8 @@ sock.on('message', (d) => {
   if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); }
   if (m.method === 'Runtime.exceptionThrown') { try { pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown'); } catch {} }
 });
-const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => m.error ? rej(new Error(m.error.message)) : res(m.result)); sock.send(JSON.stringify({ id, method, params })); });
+// BOUNDED (ci358-reds): a call the browser never answers is a named failure, never a hang
+const cdp = (method, params = {}, ms = 30000) => new Promise((res, rej) => { const id = ++seq; const tm = setTimeout(() => { pend.delete(id); rej(new Error(`CDP ${method}: no answer in ${ms / 1000} s`)); }, ms); pend.set(id, (m) => { clearTimeout(tm); m.error ? rej(new Error(m.error.message)) : res(m.result); }); sock.send(JSON.stringify({ id, method, params })); });
 const evalJs = async (expr) => {
   const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
   if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
@@ -173,6 +182,8 @@ const reattach = async () => {
 };
 try {
   await cdp('Runtime.enable'); await cdp('Page.enable');
+  const THROTTLE = Number(process.env.VS_CPU_THROTTLE) || 0;
+  if (THROTTLE > 1) { await cdp('Emulation.setCPUThrottlingRate', { rate: THROTTLE }); console.log(`  (the page's CPU throttled ×${THROTTLE} — VS_CPU_THROTTLE)`); }
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 860, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
@@ -283,16 +294,32 @@ try {
         if (sel === '.chat-artifact-meta' && c.scrollWidth > c.clientWidth + 1) bad.push(['clipped', sel, e.dataset.key, c.scrollWidth, c.clientWidth, c.textContent]);
       }
     }
-    // the phone's status bar is ONE swipe line (chat.css, max-width 768px): the chip may rest past the edge — judged once
-    // the bar scrolls it in (its words whole), its resting x reported
+    // the phone's status bar is ONE row (chat-status-bar.js _fold, lane phone-chat-composer): the chips past its width fold
+    // behind ⋯ (display:none — a 0×0 rect); the Artifacts chip must be IN the row, its words whole — the row's widths reported
     const chip = document.querySelector('.chat-status-artifacts');
     const rest = chip ? Math.round(chip.getBoundingClientRect().left) : null;
     if (chip) chip.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     const cr = chip && chip.getBoundingClientRect(), ct = chip && chip.querySelector('.chat-status-artifacts-text');
     if (!chip || !inV(cr) || (ct && ct.scrollWidth > ct.clientWidth + 1)) bad.push(['chip', chip ? [Math.round(cr.left), Math.round(cr.right)] : null]);
-    return { vw, bad, chip: chip && chip.textContent.trim(), rest, n: ${CARDS}.length };
+    const bar = chip && chip.parentElement;
+    const row = bar ? [...bar.children].filter((e) => !e.classList.contains('chat-status-folded')).map((e) => [e.getAttribute('data-chip'), e.offsetWidth]) : null;
+    return { vw, bad, chip: chip && chip.textContent.trim(), rest, n: ${CARDS}.length, folded: !!(chip && chip.classList.contains('chat-status-folded')), row, barW: bar ? bar.clientWidth : null };
   })()`);
-  check('rect census at 390 px: every card and its kind / name / meta inside the viewport, no meta clipped; the chip (scrolled into the swipe bar) readable and counting 4', census.n >= 4 && census.bad.length === 0 && /4/.test(census.chip || ''), census);
+  check('rect census at 390 px: every card and its kind / name / meta inside the viewport, no meta clipped; the chip IN the phone bar\'s ONE row (never folded behind ⋯), readable and counting 4', census.n >= 4 && census.bad.length === 0 && /4/.test(census.chip || ''), census);
+  const face = await drawnFace(cdp, '.chat-status-artifacts');
+  check(`the leg's face, read back from Chrome: ${face} (${FONT === 'dejavu' ? "the hosted runner's DejaVu Sans" : "this box's own"})`, FONT === 'dejavu' ? face === 'DejaVu Sans' : !!face, face);
+  { // CONTROL (the DejaVu leg — the runner's red): the desk's 24 px mouse floor put back on the phone's chips (its own
+    // specificity, last in the cascade: the 36 px search and ⋯ rules still win, as on the base) folds the
+    // Artifacts chip behind ⋯; taken off, it is back in the row (the bar's own fold re-run each time: a style is no resize)
+    const nudge = async () => { await evalJs(`(${VIEW})?._statusBar?._fold?.(), true`); await sleep(200); };
+    const folded = () => evalJs(`(() => { const c = document.querySelector('.chat-status-artifacts'); return c ? c.classList.contains('chat-status-folded') : null; })()`);
+    await evalJs(`(() => { const st = document.createElement('style'); st.id = 'ah-floor-ctl'; st.textContent = '.chat-status-bar .chat-status-clickable { min-width: 24px; }'; document.head.appendChild(st); return true; })()`);
+    await nudge(); const fRed = await folded();
+    await evalJs(`(document.getElementById('ah-floor-ctl')?.remove(), true)`);
+    await nudge(); const fBack = await folded();
+    if (FONT === 'dejavu') check(`CONTROL: the desk's 24 px floor put back on the phone's chips folds the Artifacts chip behind ⋯ (${fRed}); taken off, it is back in the row (${!fBack})`, fRed === true && fBack === false, { fRed, fBack });
+    else console.log(`  · the desk's floor on the phone's chips in this box's face: folded ${fRed}; taken off: folded ${fBack}`);
+  }
   await evalJs(`localStorage.removeItem('vibespace.lang'); true`);
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {

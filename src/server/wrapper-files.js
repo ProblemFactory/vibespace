@@ -9,21 +9,26 @@
 // catch{}. Fallback: the dtach MASTER process of the session's socket carries
 // the wrapper argv, and argv[2] IS the buffer path — read it out of /proc
 // (Linux; best-effort, returns the expected pair when anything fails).
+// THE SOCKET IS A WORD (ci358-reds, found by lane phone-back-reload): the master is the process whose argv word after
+// `dtach -c` IS sockPath — a cmdline merely CONTAINING it is a stranger (test-harness-contract's '/x' sat inside 62 live
+// wrappers' paths on the lanes' box, and their sidecar's caps were read as the missing session's). `procDir` = a
+// fixture's fake /proc (the RED control), never set by the product.
 const fs = require('fs');
 const path = require('path');
 
-function resolveWrapperFiles(BUFFERS_DIR, id, sockPath) {
+function resolveWrapperFiles(BUFFERS_DIR, id, sockPath, { procDir = '/proc' } = {}) {
   const expected = { buf: path.join(BUFFERS_DIR, id + '.buf'), sidecar: path.join(BUFFERS_DIR, id + '.json') };
   try {
     if (fs.existsSync(expected.sidecar)) return expected;
     if (!sockPath) return expected;
-    for (const pidDir of fs.readdirSync('/proc')) {
+    for (const pidDir of fs.readdirSync(procDir)) {
       if (!/^\d+$/.test(pidDir)) continue;
       let cmd = '';
-      try { cmd = fs.readFileSync(path.join('/proc', pidDir, 'cmdline'), 'utf-8'); } catch { continue; }
-      // the dtach MASTER: `dtach -c <sockPath> … chat-wrapper.js <buf> <sidecar> …`
-      if (!cmd.includes(sockPath) || !cmd.includes('dtach\0-c\0') || !/(chat|acp)-wrapper\.js/.test(cmd)) continue; // claude/codex chat wrappers + the ACP wrapper (S8)
+      try { cmd = fs.readFileSync(path.join(procDir, pidDir, 'cmdline'), 'utf-8'); } catch { continue; }
+      // the dtach MASTER: `dtach -c <sockPath> … chat-wrapper.js <buf> <sidecar> …` — its socket WORD, never a substring
       const argv = cmd.split('\0');
+      const c = argv.findIndex((a, i) => a === '-c' && /(^|\/)dtach$/.test(argv[i - 1] || ''));
+      if (c < 0 || argv[c + 1] !== sockPath || !/(chat|acp)-wrapper\.js/.test(cmd)) continue; // claude/codex chat wrappers + the ACP wrapper (S8)
       const buf = argv.find((a) => a.endsWith('.buf'));
       if (buf) {
         console.log(`[restore] ${id}: wrapper files resolved via /proc (counter-collision session) → ${path.basename(buf)}`);
@@ -112,8 +117,8 @@ const QUEUE_OP_MAX_BYTES = 64 * 1024;
  *  turn) and says `notificationSteer: false`, so its verb list can never make
  *  a mid-turn notification look free. A sidecar without the field (every codex
  *  build) keeps the derived rule above. */
-function wrapperCaps(BUFFERS_DIR, id, sockPath) {
-  const { sidecar } = resolveWrapperFiles(BUFFERS_DIR, id, sockPath);
+function wrapperCaps(BUFFERS_DIR, id, sockPath, opts) {
+  const { sidecar } = resolveWrapperFiles(BUFFERS_DIR, id, sockPath, opts);
   let m;
   try { m = JSON.parse(fs.readFileSync(sidecar, 'utf-8')); } catch { return { frameFile: false, peerMessage: false, inputQueue: false, queueVerbs: [], notificationSteer: false, queueResync: false, responseStyle: false, permissionRules: false, caps: null, reason: 'no-sidecar', startedAt: null, pid: null }; }
   const caps = (m && m.caps && typeof m.caps === 'object') ? m.caps : null;
