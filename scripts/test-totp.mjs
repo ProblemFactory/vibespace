@@ -153,6 +153,12 @@ console.log('⑧ the grants');
   ok(U({ caller: { conversationId: 'c-2', groups: [], run: RUN } }).code === 'not_granted' && U({ caller: { conversationId: 'c-2', groups: ['T-1'], run: RUN2 } }).ok, 'another conversation ⇒ not_granted; one in the granted Task Group ⇒ ok');
   ok(U({ caller: { conversationId: 'c-3', groups: ['T-2'], run: RUN } }).code === 'not_granted' && U({ caller: me, entry: 'totp:other' }).code === 'not_granted', 'another group · another entry ⇒ not_granted');
   ok(U({ caller: { groups: ['T-1'] } }).code === 'unauthorized' && U({ caller: { ...me, live: false } }).code === 'not_running' && U({ caller: null }).code === 'unauthorized', 'no conversation id ⇒ unauthorized; a view (not running) ⇒ not_running');
+  // lane vault-agent-own: an entry the caller ADDED ITSELF (its `owner`) is its own — no grant, in this run or a later one
+  const own = (caller, o = {}) => T.useVerdict({ grants: [], entry: 'totp:mine', vaultState: 'unlocked', owner: 'conv-own', caller, ...o });
+  ok(own({ conversationId: 'conv-own', conv: 'conv-own', scope: 'sess-1-1', run: RUN }).ok && own({ conversationId: 'conv-own', conv: 'conv-own', scope: 'sess-1-1', run: RUN }).grant.subject === 'own', 'OWN: its owner (by its durable id) gets the code with NO grant (via own)');
+  ok(own({ conversationId: 'conv-own', conv: 'conv-own', scope: 'sess-9-9', run: RUN2 }).ok && own({ conversationId: 'x', scope: 'conv-own', run: RUN }).ok, 'OWN: a later run of it (it ended and came back — a new run, a new registered id) still does; an owner recorded by the registered id matches that one');
+  ok(own({ conversationId: 'conv-own', conv: null, scope: 'sess-5-5', run: RUN }).code === 'not_granted' && own({ conversationId: 'conv-2', conv: 'conv-2', scope: 'sess-2-2', run: RUN }).code === 'not_granted', 'OWN: a pending fork (durable id null, its parent\'s conversation id) and another conversation ⇒ not_granted');
+  ok(own({ conversationId: 'conv-own', conv: 'conv-own', run: RUN }, { vaultState: 'locked' }).code === 'vault_locked' && own({ conversationId: 'conv-own', conv: 'conv-own', run: RUN, live: false }).code === 'not_running' && own({ conversationId: 'conv-own', run: RUN }, { owner: '' }).code === 'not_granted', 'OWN: still LOCKED first and a view refused; an empty owner owns nothing');
 }
 
 console.log('⑨ PURE');

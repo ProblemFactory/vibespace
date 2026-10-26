@@ -192,7 +192,9 @@ console.log('④ the agent side has no unlock');
   // token (its own session token names the session; the engine is never asked to unlock: LOCKED ⇒ 423 vault_locked)
   // lane vault-paste-request: + the PASTE REQUEST door — an agent asks the owner to paste a secret (ONE For-you item; the answer
   // is the request's id, never a value — the owner's paste goes to the one writer of its place through a person's door)
-  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/mint,/api/agent/vault/put,/api/agent/vault/link-token,/api/agent/vault/secret-request,/api/agent/vault/run,/api/agent/vault/runnable,/api/agent/vault/request,/api/agent/vault/uses', `the agent doors are the two-step code, state, lock, mint, put, the session's own link token, the paste request, run and runnable only (${agentDoors.join(', ')})`);
+  // lane vault-agent-own: + the agent's OWN two-step seed and web login (`totp add` / `login add` — CREATE only: the answer names
+  // the entry, never the seed or the password; its code answers through the two-step door, its login fills through the kernel)
+  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/totp,/api/agent/vault/login,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/mint,/api/agent/vault/put,/api/agent/vault/link-token,/api/agent/vault/secret-request,/api/agent/vault/run,/api/agent/vault/runnable,/api/agent/vault/request,/api/agent/vault/uses', `the agent doors are the two-step code (and its own seed's add), its own login's add, state, lock, mint, put, the session's own link token, the paste request, run and runnable only (${agentDoors.join(', ')})`);
   // design q-047 L1 (lane vault-totp): + the TWO-STEP CODE door — a GET answering a granted entry's CURRENT code (never the
   // seed: its answer is built from named fields only — test-vault-routes ⑨ plants a seed and ⑩'s mutant leaks it ⇒ RED)
   const codeDoor = (() => { const i = routes.indexOf("app.get('/api/agent/vault/totp/:name'"); const j = routes.indexOf('\n    });', i); return i > 0 && j > i ? routes.slice(i, j) : ''; })();
@@ -388,7 +390,7 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
   const CLI_VERBS = {
     status: ['receipt', 'the vault\'s state in words and since when (GET /api/agent/vault/state)'],
     lock: ['purpose-door', 'locks the vault for the caller (a suspected leak, the end of a task); the answer is the state'],
-    totp: ['receipt', 'the CURRENT two-step code of an entry the user granted this conversation (name, code, secondsLeft, period) — never the seed (the entry\'s bytes); the hub reads the seed and computes the code at its clock (design q-047 L1, lane vault-totp)'],
+    totp: ['receipt', 'the CURRENT two-step code of an entry the user granted this conversation, or it added itself (name, code, secondsLeft, period) — never the seed (the entry\'s bytes); the hub reads the seed and computes the code at its clock (design q-047 L1, lane vault-totp); lane vault-agent-own: `totp add` seals a seed the agent holds — its answer names the entry'],
     help: ['receipt', 'the usage text'], '-h': ['receipt', 'the usage text'], '--help': ['receipt', 'the usage text'],
     mint: ['purpose-door', 'the hub makes and seals a random value; the answer is the entry name + its vault:// reference', SIB('vault-mint-put')],
     put: ['purpose-door', 'seals a value the agent already has (a 0600 file or stdin, never argv); the answer is the name + reference', SIB('vault-mint-put')],
@@ -397,6 +399,8 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     // reads its own grants, open requests and vault-use lines back (names, purposes, codes, receipts)
     request: ['purpose-door', 'files ONE For-you question naming the agent, the entry and its purpose; the answer is the question\'s id (or that the entry is open already)'],
     uses: ['receipt', 'this conversation\'s grants, open requests and own vault-use lines — references, purposes, times, outcomes, receipts (GET /api/agent/vault/uses)'],
+    // lane vault-agent-own: `login add` seals a website login the agent holds (its password from a 0600 file or stdin — never argv)
+    login: ['purpose-door', 'login add: a web-login entry the conversation owns (provenance agent-typed); the answer is its origin and user — never the password (the kernel fills it: vibespace-browser login)'],
   };
   const AGENT_ROUTES = {
     'GET /api/agent/vault/state': ['receipt', 'the state, setUpAt, lockedSince and the key count — facts'],
@@ -412,6 +416,9 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     // the answer is the request's id and the place it names; the value goes to its writer through the owner's cookie door only
     'POST /api/agent/vault/secret-request': ['purpose-door', 'secret-request: a For-you paste box for the owner — the answer is the request\'s id and its place, never a value (the receipt at the next turn names where, never what)'],
     'GET /api/agent/vault/uses': ['receipt', 'uses: this conversation\'s grants, requests and vault-use lines — names, codes, receipts'],
+    // lane vault-agent-own: what an agent holds itself goes in as ITS KIND — CREATE only, the value taken off the body
+    'POST /api/agent/vault/totp': ['purpose-door', 'totp add: seals a two-step seed the agent holds as `totp:<name>` it owns; the answer is the name and entry — never the seed, never a code'],
+    'POST /api/agent/vault/login': ['purpose-door', 'login add: seals a website login the agent holds as a web-login entry it owns; the answer is its origin and user — never the password'],
   };
   const ENGINE_KEYS = {
     dataDir: 'receipt', file: 'receipt', state: 'receipt', facts: 'receipt', epoch: 'receipt', hasEntry: 'receipt', peek: 'receipt', lastUse: 'receipt', secretNames: 'receipt', blockedSummary: 'receipt',
@@ -617,6 +624,47 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
   ok(s0.own, '(c) …the POSITIVE CONTROL: the exception\'s own answer (a session on a machine asking its link-token door) carries its own machine\'s token — the sweep sees a value when one is there');
   const auditUse = fs.readFileSync(path.join(d8, VE8.AUDIT_FILE), 'utf8');
   ok(/"event":"vault-use"[^\n]*"door":"link-token"[^\n]*"outcome":"ok"/.test(auditUse) && hitsOf(auditUse).length === 0, 'the link-token answers are USES in the audit (door link-token, outcome ok) — and the audit holds no stored value in any form', hitsOf(auditUse));
+
+  // (c2) lane vault-agent-own: THE OWNER CONVERSATION'S OWN RUN NEVER REVEALS THE VALUE EITHER — no card asked anyone, and the
+  // scrubber still stands between the child and the agent: the REAL put route seals a value under the session's own entry
+  // (named by its DURABLE id), the REAL run route — the door over the same engine, on a CLUSTER — runs a child printing it raw,
+  // hex, base64 and base64url ⇒ 0 hits in the answer, no card filed, its run line allowedBy own; another session ⇒ refused
+  {
+    if (eng8.state() !== 'unlocked') await eng8.unlock(PW8, {});
+    const TO = { own: T('vsst_'), other: T('vsst_') };
+    const sessO = new Map([['s-own', { name: 'Law own', agentToken: TO.own, _webuiId: 'c-own', claudeSessionId: 'law-conv-own', cwd: ROOT8 }], ['s-other', { name: 'Law other', agentToken: TO.other, _webuiId: 'c-other', claudeSessionId: 'law-conv-other', cwd: ROOT8 }]]);
+    const todosO = new (require(path.join(REPO, 'src/user-todos.js')).UserTodoManager)({ dataDir: path.join(ROOT8, 'todos-own'), expirySweepMs: 0 });
+    const runO = require(path.join(REPO, 'src/server/vault-run-door.js')).create({ dataDir: d8, vault: eng8, userTodos: todosO, sources: { secrets: () => require(path.join(REPO, 'src/server/vault-contents.js')).secretSource({ vault: eng8 }) }, instanceKind: () => 'cluster', runRoot: () => ROOT8, log: () => {} });
+    const appO = express8(); appO.use(express8.json());
+    reg8(appO, { vault: eng8, activeSessions: sessO, getJobs: () => jobs8, run: runO });
+    const srvO = await listen(appO); const portO = srvO.address().port;
+    const valO = `law-own-${crypto.randomBytes(12).toString('hex')}`;
+    const put = await call(portO, 'POST', '/api/agent/vault/put', { authorization: 'Bearer ' + TO.own }, { name: 'law-tok', value: valO });
+    const ref = (() => { try { return JSON.parse(put.body).ref; } catch { return null; } })();
+    const PRINT = 'const v = process.env.T; console.log(v); console.log(Buffer.from(v).toString("hex")); console.log(Buffer.from(v).toString("base64")); console.log(Buffer.from(v).toString("base64url"));';
+    const ran = await call(portO, 'POST', '/api/agent/vault/run', { authorization: 'Bearer ' + TO.own }, { args: ['--env', `T=${ref}`, '--', process.execPath, '-e', PRINT], cwd: ROOT8 });
+    const ansO = (() => { try { return JSON.parse(ran.body); } catch { return {}; } })();
+    const formsO = formsOf(Buffer.from(valO)), hitO = formsO.filter((f) => ran.body.includes(f));
+    const cardO = (todosO.snapshot().open || []).filter((i) => i.action && /^vault-/.test(i.action.type));
+    const lineO = fs.readFileSync(path.join(d8, VE8.AUDIT_FILE), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.event === 'vault-run' && x.outcome === 'ran').pop();
+    ok(ref === 'vault://agent:law-conv-own/law-tok' && ran.status === 200 && ansO.ok === true && ansO.by === 'own' && !cardO.length && hitO.length === 0 && (ansO.stdout || '').split('[vault:agent:law-conv-own/law-tok]').length >= 3 && !!lineO && lineO.allowedBy === 'own',
+      '(c2) lane vault-agent-own: the OWNER conversation\'s run of the value it PUT (named by its durable id) asks nobody — and its answer holds the value in NO form (raw / hex / base64 / base64url: the scrubber still stands); its run line says allowedBy own', { ref, status: ran.status, by: ansO.by, cards: cardO.length, hits: hitO.length, stdout: String(ansO.stdout || '').slice(0, 200), allowedBy: lineO && lineO.allowedBy });
+    const otherRun = await call(portO, 'POST', '/api/agent/vault/run', { authorization: 'Bearer ' + TO.other }, { args: ['--env', `T=${ref}`, '--', process.execPath, '-e', PRINT], cwd: ROOT8 });
+    ok(otherRun.status === 403 && /use_not_granted/.test(otherRun.body) && formsO.every((f) => !otherRun.body.includes(f)), '(c2) …another session\'s run of it ⇒ 403 use_not_granted, nothing read', otherRun.status);
+    await new Promise((res) => srvO.close(res));
+    // THE CONTROL: the same run through a door copy whose scrubber masks nothing ⇒ the value IS in the answer (the 0 above is not vacuous)
+    const DR = path.join(REPO, 'src/server/vault-run-door.js'), drSrc = fs.readFileSync(DR, 'utf8');
+    const drMut = drSrc.replace("scrub = VR.createRunMasker(secrets, ['out', 'err']);", "scrub = VR.createRunMasker([], ['out', 'err']);");
+    const Mo = require('module'), mo = new Mo(DR, null); mo.filename = DR; mo.paths = Mo._nodeModulePaths(path.dirname(DR)); mo._compile(drMut, DR);
+    const runM = mo.exports.create({ dataDir: path.join(ROOT8, 'mut-run'), vault: eng8, userTodos: todosO, sources: { secrets: () => require(path.join(REPO, 'src/server/vault-contents.js')).secretSource({ vault: eng8 }) }, instanceKind: () => 'cluster', runRoot: () => ROOT8, log: () => {} });
+    fs.mkdirSync(path.join(ROOT8, 'mut-run'), { recursive: true });
+    const appM = express8(); appM.use(express8.json());
+    reg8(appM, { vault: eng8, activeSessions: sessO, getJobs: () => jobs8, run: runM });
+    const srvM = await listen(appM);
+    const ranM = await call(srvM.address().port, 'POST', '/api/agent/vault/run', { authorization: 'Bearer ' + TO.own }, { args: ['--env', `T=${ref}`, '--', process.execPath, '-e', PRINT], cwd: ROOT8 });
+    await new Promise((res) => srvM.close(res));
+    ok(drMut !== drSrc && formsO.filter((f) => ranM.body.includes(f)).length >= 2, '(c2) CONTROL RED: a door copy whose scrubber masks nothing answers the owner conversation\'s run WITH the value — the leg above sees a value when one is there', { patched: drMut !== drSrc, hits: formsO.filter((f) => ranM.body.includes(f)).length });
+  }
 
   // (d) THE MUTANTS
   const Module8 = require('module');

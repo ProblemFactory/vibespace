@@ -373,10 +373,16 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     meta.push(kindWord(row.kind));
     if (!(row.store === 'secrets' && row.size === 'unknown')) meta.push(t('length: {size}', { size: (SIZE_WORDS[row.size] || SIZE_WORDS.unknown)() }));   // a hub secret: names and dates only
     if (row.createdAt) meta.push(t('saved {when}', { when: whenShort(row.createdAt) }));
+    // lane vault-agent-own: what an agent kept itself says its rule — its own conversation uses it with no switch, no card —
+    // on its OWN line under the meta (the meta is one clipped line: words past its width were never read)
+    const pv = row.provenance && row.provenance.by === 'agent' ? row.provenance : null;
+    const ruleWords = row.run && row.run.own ? t('Its own conversation uses it directly · other conversations cannot use it') : pv && pv.owner ? t('Its own conversation uses it directly · other conversations need a grant') : null;
+    const ownRule = ruleWords ? vwEl('div', 'vw-own-rule', pv && pv.actor ? `${ruleWords} · ${t('kept by {name}', { name: pv.actor })}` : ruleWords) : null;
     // lane vault-key-row-compact: an automation key's head is ONE line — its kind is the chip and a minted value's length says
     // nothing, so the meta line goes; the name's title keeps when it was made
     if (row.store === 'automation') label.title = row.createdAt ? `${labelWord(row)} · ${t('saved {when}', { when: whenText(row.createdAt) })}` : labelWord(row);
     else main.append(vwEl('div', 'vw-meta', meta.join(' · ')));
+    if (ownRule) main.append(ownRule);
     // THE CHIPS: kind · provenance · state (a fact the row holds — never a hint, never a greyed control)
     const chips = vwEl('div', 'vw-chips');
     chips.append(vwEl('span', 'vw-chip vw-chip-kind', kindWord(row.kind)));
@@ -451,6 +457,8 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     h.dataset.purpose = id;
     const n = vwEl('span', 'vw-group-n');
     h.append(vwEl('span', 'vw-group-name', purposeWord(id)), n);
+    const help = (PURPOSES.find((p) => p.id === id) || {}).help;   // lane vault-agent-own: «Kept by agents» says its rule under its name
+    if (help) h.append(vwEl('span', 'vw-group-help', t(help)));
     headEls.set(id, { el: h, n, mint: null });
     return headEls.get(id);
   }
@@ -497,6 +505,8 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     b.type = 'button'; b.dataset.purpose = id; b.setAttribute('role', 'tab');
     const n = vwEl('span', 'vw-rail-n');
     b.append(vwEl('span', 'vw-rail-name', label), n);
+    const help = (PURPOSES.find((p) => p.id === id) || {}).help;
+    if (help) b.title = t(help);   // lane vault-agent-own: the rail item's help — the same sentence
     b.onclick = () => { if (b.classList.contains('vw-rail-off')) return; st.purpose = id; place(); list.scrollTop = 0; };   // before the first answer too: the pick waits for the rows
     it = { el: b, n };
     railEls.set(id, it);

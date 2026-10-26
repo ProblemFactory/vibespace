@@ -13,6 +13,12 @@
 //      known tool names; when «always» is offered
 //   ⑤ THE VERDICT — every store of the vault has a door or is runnable (an unknown store fails closed); runVerdict's
 //      9 216-cell grid vs a reference (lane vault-run-door: + the design's «shape seen?» — a local instance asks a NEW shape)
+//   ⑤b THE OWN ROAD (lane vault-agent-own — the owner 2026-10-26: 「它自己存的使用为啥还要我的允许？」) — whose an agent entry is
+//      (its registered id or its durable one; a pending fork borrows nothing); the verdict rows: own stored ⇒ ok:own on a
+//      cluster and a local instance, a shell too (no card); own minted to its --for host / a host under it / no host ⇒ ok:own;
+//      to another host ⇒ ask once/deny (why another-host, the card's two hosts), a pass per entry × host; no --for / a dotless
+//      one / a lookalike ⇒ another host; the owner's entry and a mix ⇒ today's road (why not-own; «always» and «seen» never
+//      pass a host); the plan's refusals, the lock and the 8-byte floor still first
 //   ⑥ THE SCRUBBER — 7 values × 50 printings (Node's own encoders are the oracle; lane vault-scrub-forms: + UTF-16 LE/BE,
 //      base32, quoted-printable, \xNN / octal / \u{…} escapes, HTML entities, colour escapes, wrapped base64 — each a real
 //      producer's) masked whole; every split point and three chunkings equal the one-shot; text without a value passes byte
@@ -23,7 +29,9 @@
 //   ⑦ THE CLI's WORDS — parseRunArgs
 //   ⑧ MUTANTS — patched copies RED: the scrubber without base64; argv allowed by default; a print-class tool not refused;
 //      a value split across chunks escaping; lane vault-scrub-forms: each NEW form dropped (utf16, base32, qp, escape, entity,
-//      ansi, wrap), a view's held tail ignored, a backslash run held whole
+//      ansi, wrap), a view's held tail ignored, a backslash run held whole; lane vault-agent-own: an own stored entry asks, an
+//      own entry needs the switch, a minted value's host never matches, a minted value goes anywhere, another conversation owns
+//      it, a pending fork borrows its parent's id, a lookalike host passes, a seen shape passes the host
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -297,6 +305,93 @@ console.log('⑤ THE VERDICT — entry × conversation × shape × time');
   ok(dr.code === 'entry_has_its_own_door' && dr.ref === ACCT && /account pool/.test(dr.words), 'an own-door refusal names the reference and its door', dr);
 }
 
+console.log('⑤b THE OWN ROAD (lane vault-agent-own) — what an agent stored itself is its own to use; a minted value asks only for another host');
+/** Every own-road row against a module (the shipped one, or a mutant copy) → the rows it gets wrong [[row, got, want]]. */
+function ownRoad(Vm) {
+  const bad = [], NOW0 = 1_800_000_000_000, OWN = 'vault://agent:conv-own/tok';
+  const say = (name, got, want) => { if (got !== want) bad.push([name, got, want]); };
+  const P = (argv, refs = [OWN]) => Vm.planOf({ argv, env: refs.map((r, i) => ['T' + i, r]) });
+  const fact = (p, extra) => p.refs.map((r) => ({ id: r.id, exists: true, open: false, bytes: 32, ...extra(r) }));
+  const verdict = (p, entries, o = {}) => Vm.runVerdict({ state: 'unlocked', plan: p, entries, granted: o.granted !== false, instance: o.instance || 'cluster', policy: o.policy || null, seen: !!o.seen, remembered: o.remembered || null, passes: o.passes || [], now: NOW0 });
+  const sum = (v) => (v.ok ? `ok:${v.by}` : v.ask ? `ask:${v.offers.join()}:${(v.why || []).join('+')}` : v.code);
+  // WHOSE: the entry's scope is the conversation — by its registered id (an older entry) or its durable one (every new entry)
+  const R = Vm.parseRef(OWN), RS = Vm.parseRef('vault://agent:sess-9-1/tok');
+  say('owns by the durable id', Vm.ownsAgentEntry(R, { scope: 'sess-1-1', conv: 'conv-own' }), true);
+  say('owns an older entry by the registered id', Vm.ownsAgentEntry(RS, { scope: 'sess-9-1', conv: 'conv-own' }), true);
+  say('a resumed conversation (a new registered id) keeps a new entry', Vm.ownsAgentEntry(R, { scope: 'sess-2-2', conv: 'conv-own' }), true);
+  say('a pending fork (conv null) never borrows its parent\'s id', Vm.ownsAgentEntry(R, { scope: 'sess-3-3', conv: null, conversationId: 'conv-own' }), false);
+  say('a caller that carries no conv: its conversation id', Vm.ownsAgentEntry(R, { conversationId: 'conv-own' }), true);
+  say('another conversation owns nothing of it', Vm.ownsAgentEntry(R, { scope: 'sess-4-4', conv: 'conv-other' }), false);
+  say('a non-agent reference is nobody\'s own', Vm.ownsAgentEntry(Vm.parseRef(M1), { scope: 'mounts', conv: 'm1' }), false);
+  // OWN STORED (the agent saw it): never a card — a cluster, a local instance, a known tool, a shell, an interpreter
+  for (const instance of ['cluster', 'local']) for (const argv of [['curl', 'https://api.example.com'], ['bash', '-c', 'curl https://elsewhere.example.org'], ['python3', 'x.py']]) {
+    const p = P(argv);
+    say(`own stored · ${instance} · ${argv[0]}`, sum(verdict(p, fact(p, () => ({ own: true, prov: 'stored' })), { instance })), 'ok:own');
+  }
+  // OWN MINTED (the agent never saw it): its --for host, a host under it, no host ⇒ nothing asked; another host ⇒ ONCE per host
+  const minted = (forHost) => () => ({ own: true, prov: 'minted', forHost });
+  const pTo = P(['curl', 'https://api.example.com/v1']), pSub = P(['curl', 'https://eu.api.example.com']), pNone = P(['psql']), pAway = P(['curl', 'https://elsewhere.example.org']);
+  say('own minted to its host', sum(verdict(pTo, fact(pTo, minted('api.example.com')))), 'ok:own');
+  say('own minted to a host under it (--for a URL)', sum(verdict(pSub, fact(pSub, minted('https://api.example.com/login')))), 'ok:own');
+  say('own minted to no host (a local command)', sum(verdict(pNone, fact(pNone, minted('api.example.com')))), 'ok:own');
+  const va = verdict(pAway, fact(pAway, minted('api.example.com')));
+  say('own minted to another host ⇒ asks (once / deny)', sum(va), 'ask:once,deny:another-host');
+  say('…its card names both hosts', JSON.stringify((va.away || []).map((a) => [a.forHost, a.host])), JSON.stringify([['api.example.com', 'elsewhere.example.org']]));
+  say('…on a local instance with the shape seen too', sum(verdict(pAway, fact(pAway, minted('api.example.com')), { instance: 'local', seen: true })), 'ask:once,deny:another-host');
+  say('…and no more once that host passed', sum(verdict(pAway, fact(pAway, minted('api.example.com')), { passes: [{ id: pAway.refs[0].id, host: 'elsewhere.example.org' }] })), 'ok:own');
+  say('a pass is per entry × host', sum(verdict(pAway, fact(pAway, minted('api.example.com')), { passes: [{ id: 'secrets:agent:conv-own/other#secret', host: 'elsewhere.example.org' }] })), 'ask:once,deny:another-host');
+  say('minted with no --for: every host is another', sum(verdict(pTo, fact(pTo, minted(null)))), 'ask:once,deny:another-host');
+  say('a dotless --for names no host', sum(verdict(pTo, fact(pTo, minted('com')))), 'ask:once,deny:another-host');
+  const pLook = P(['curl', 'https://evilapi.example.com']);
+  say('a lookalike host is another host', sum(verdict(pLook, fact(pLook, minted('api.example.com')))), 'ask:once,deny:another-host');
+  // THE REVIEW: where a run sends a MINTED value cannot be told ⇒ it asks, ONCE per command shape — a shell or an interpreter
+  // naming its host (its own code decides), a config file, a routing flag, the project's own code, an unknown tool, a program
+  // an agent could have written; a backslash never hides the host (`https://evil\@good/` goes to evil)
+  const blind = [['a shell naming its host', ['bash', '-c', 'curl https://api.example.com']], ['an interpreter naming no host', ['python3', 'x.py']], ['curl -K (a config file)', ['curl', '-K', 'c.cfg', 'https://api.example.com']],
+    ['a routing flag (ssh -o)', ['ssh', '-o', 'ProxyCommand=nc x 22', 'api.example.com']], ['the project\'s own code (npm)', ['npm', 'install']], ['a tool outside the table', ['mytool', '--to', 'api.example.com']]];
+  for (const [name, argv] of blind) { const pb = P(argv); say(`own minted · ${name} ⇒ asks`, sum(verdict(pb, fact(pb, minted('api.example.com')))), 'ask:once,deny:another-host'); }
+  const pw = Vm.planOf({ argv: ['psql'], env: [['T', OWN]], programWritable: true });
+  say('own minted · a known tool an agent could have written ⇒ asks', sum(verdict(pw, fact(pw, minted('api.example.com')))), 'ask:once,deny:another-host');
+  const pSh = P(['bash', '-c', 'curl https://api.example.com']), vSh = verdict(pSh, fact(pSh, minted('api.example.com')));
+  say('…its card says the destination cannot be told', JSON.stringify((vSh.away || []).map((a) => [a.unknown, a.host])), JSON.stringify([[true, null]]));
+  say('…its pass is the SHAPE\'s: allowed once, the same command shape asks no more', sum(verdict(pSh, fact(pSh, minted('api.example.com')), { passes: (vSh.away || []).map((a) => ({ id: a.id, host: a.pass })) })), 'ok:own');
+  const pSh2 = P(['bash', '-c', 'curl https://api.example.com/other']);
+  say('…another shell command is another shape and asks', sum(verdict(pSh2, fact(pSh2, minted('api.example.com')), { passes: (vSh.away || []).map((a) => ({ id: a.id, host: a.pass })) })), 'ask:once,deny:another-host');
+  say('own STORED through a shell still asks nothing', sum(verdict(pSh, fact(pSh, () => ({ own: true, prov: 'stored' })))), 'ok:own');
+  const pBs = P(['http', 'https://evil.example\\@api.example.com/x']);
+  say('a backslash never hides the host (http https://evil\\@api…/ goes to evil)', sum(verdict(pBs, fact(pBs, minted('api.example.com')))), 'ask:once,deny:another-host');
+  // NOT ITS OWN (the owner's entry — another conversation's never reaches here: the door's `granted`): today's road
+  const pm = P(['curl', 'https://api.example.com'], [M1]);
+  say('the owner\'s entry, switch off', sum(verdict(pm, fact(pm, () => ({})))), 'entry_not_runnable');
+  say('the owner\'s entry, switch on ⇒ the card (why: not-own)', sum(verdict(pm, fact(pm, () => ({ open: true })))), 'ask:once,always,deny:not-own');
+  say('another conversation\'s agent entry (not granted)', sum(verdict(pTo, fact(pTo, () => ({ open: true })), { granted: false })), 'use_not_granted');
+  const pmix = P(['curl', 'https://api.example.com'], [OWN, M1]);
+  const mix = (own) => fact(pmix, (r) => (r.store === 'mounts' ? { open: true } : own));
+  say('own + the owner\'s ⇒ the card', sum(verdict(pmix, mix({ own: true, prov: 'stored' }))), 'ask:once,always,deny:not-own');
+  say('own + the owner\'s · a live «always» passes', sum(verdict(pmix, mix({ own: true, prov: 'stored' }), { remembered: { until: null } })), 'ok:always');
+  const pmixAway = P(['curl', 'https://elsewhere.example.org'], [OWN, M1]);
+  const mixAway = fact(pmixAway, (r) => (r.store === 'mounts' ? { open: true } : { own: true, prov: 'minted', forHost: 'api.example.com' }));
+  say('a minted value away + the owner\'s · «always» never passes the host', sum(verdict(pmixAway, mixAway, { remembered: { until: null } })), 'ask:once,always,deny:not-own+another-host');
+  say('a minted value away + the owner\'s · a seen shape never passes the host', sum(verdict(pmixAway, mixAway, { instance: 'local', seen: true })), 'ask:once,always,deny:not-own+another-host');
+  // STILL FIRST: the lock, the plan's refusals, the 8-byte floor
+  say('own but locked', sum(Vm.runVerdict({ state: 'locked', plan: pTo, entries: fact(pTo, () => ({ own: true, prov: 'stored' })), granted: true })), 'vault_locked');
+  say('own but on the command line', sum(Vm.runVerdict({ state: 'unlocked', plan: Vm.planOf({ argv: ['curl', `--token=${OWN}`] }), entries: [], granted: true })), 'argv_refused');
+  say('own but under 8 bytes', sum(Vm.runVerdict({ state: 'unlocked', plan: pTo, entries: [{ id: pTo.refs[0].id, exists: true, open: false, bytes: 5, own: true, prov: 'stored' }], granted: true })), 'entry_too_short_to_mask');
+  // THE HOSTS: --for → its host; a run's host is it, or under it — never a lookalike, a suffix without a dot, a TLD
+  say('forHostOf: a URL', Vm.forHostOf('https://User@API.Example.com:8443/login'), 'api.example.com');
+  say('forHostOf: host/service', Vm.forHostOf('api.example.com/oauth'), 'api.example.com');
+  say('forHostOf: a dotless word names no host', Vm.forHostOf('okta'), null);
+  say('sameHost: a port', Vm.sameHost('api.example.com:8443', 'api.example.com'), true);
+  say('sameHost: a known tool\'s wildcard', Vm.sameHost('*.amazonaws.com', 's3.amazonaws.com'), true);
+  say('sameHost: not a lookalike', Vm.sameHost('evilapi.example.com', 'api.example.com'), false);
+  say('sameHost: not a parent', Vm.sameHost('example.com', 'api.example.com'), false);
+  return bad;
+}
+{
+  const bad = ownRoad(V);
+  ok(!bad.length, 'the own road: whose (registered / durable id, a pending fork borrows nothing), own stored ⇒ ok:own everywhere (no card), own minted ⇒ ok:own to its host / under it / no host (a known tool) and ONCE per host elsewhere (both hosts on the card; a pass per entry × host), ONCE per command shape where the destination cannot be told (a shell, an interpreter, a config file, a routing flag, project code, an unknown or agent-writable program; a backslash hides no host), the owner\'s entry and a mix ⇒ today\'s road («always» / seen never pass a host), the lock / argv / the floor first', bad);
+}
+
 console.log('⑥ THE SCRUBBER — a value and its forms (FORMS: spelled and read), over ONE window per run');
 const LABEL = 'mounts/m1/secretKey', PH = `[vault:${LABEL}]`;
 const VALUES = [
@@ -534,6 +629,17 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
       .map(([form, from, to]) => [`the scrubber without the ${form} form`, from, to, (Vm) => (Vm === V ? once('scrub', () => scrubLeaks(V)) : scrubLeaks(Vm)).filter(([, n]) => n.startsWith(form + ': '))]),
     ['a backslash run held whole', 'k = j + 2 * Math.floor((k - j) / 2);', 'k = j;', (Vm) => { const m = Vm.createMasker(secretsOf(VALUES[0])), n = m.push('\\'.repeat(65536)).length; return n >= 65536 - 2 * m.window - 12 ? [] : [['held', n]]; }],
     ['a view\'s held tail ignored', 'if (!final) { const len = r ? r.sk.length : end, ss = len - W;', 'if (false) { const len = r ? r.sk.length : end, ss = len - W;', (Vm) => (Vm === V ? once('chunk', () => chunkEscapes(V)).filter(([, n]) => READ_ROWS.some(([r]) => r === n)) : chunkEscapes(Vm, READ_ROWS))],
+    // lane vault-agent-own: each rule of the own road, broken in a copy ⇒ its rows RED
+    ['an own stored entry still asks', "  if (!why.length) return { ok: true, by: 'own' };\n", '\n', ownRoad],
+    ['an own entry still needs the switch', 'if (e.open !== true && e.own !== true) return refuse(', 'if (e.open !== true) return refuse(', ownRoad],
+    ['a minted value\'s own host never matches', '  if (!f || !h) return false;\n  if (h.startsWith', '  return false;\n  if (h.startsWith', ownRoad],
+    ['a minted value goes anywhere', '  const away = awayOf(plan.refs, facts, sh, passes);', '  const away = [];', ownRoad],
+    ['another conversation owns it', '  return !!sc && callerIdsOf(caller).includes(sc);', '  return !!sc;', ownRoad],
+    ['a pending fork borrows its parent\'s id', '...(caller.conv !== undefined ? [caller.conv] : [caller.conversationId])', 'caller.conv, caller.conversationId', ownRoad],
+    ['a lookalike host passes', "  return h === f || h.endsWith('.' + f);", '  return h === f || h.endsWith(f);', ownRoad],
+    ['a seen shape passes the host', "  if (!away.length && mode === 'allow' && seen === true)", "  if (mode === 'allow' && seen === true)", ownRoad],
+    ['a blind destination passes (the review)', "const destUnknown = (sh) => !sh || sh.blind !== false;", 'const destUnknown = () => false;', ownRoad],
+    ['a backslash hides the host (the review)', "(?:[^@\\s\\/\\\\?#'\"]{0,256}@)?", "(?:[^@\\s\\/?#'\"]{0,256}@)?", ownRoad],
   ];
   for (const [name, from, to, leg] of LEGS) {
     const { hit, M } = mutant(name.replace(/\W+/g, '-'), from, to);

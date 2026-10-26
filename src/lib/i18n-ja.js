@@ -9730,6 +9730,11 @@ export default {
   "Integrations & channels": "連携とチャネル", // lane vault-window-v2
   "Machines & relay": "マシンとリレー", // lane vault-window-v2
   "Kept by agents": "エージェントの保管", // lane vault-window-v2
+  "Its own conversation uses it directly · other conversations cannot use it": "保存した会話はそのまま使える · 他の会話は使えない",
+  "Its own conversation uses it directly · other conversations need a grant": "保存した会話はそのまま使える · 他の会話は許可が必要",
+  "kept by {name}": "{name} が保存",
+  "What an agent kept itself: the conversation that kept it uses it without asking you; other conversations cannot use it": "エージェントが自分で保存したもの：保存した会話はあなたに聞かずに使えます。他の会話は使えません",
+  "Added by an agent itself — the agent saw the seed": "エージェントが自分で追加 · シードを見ている",
   "By you": "自分", // lane vault-window-v2
   "Scanned · by you": "スキャン · 自分", // lane vault-window-v2
   "Minted by the hub · never shown": "ハブが生成 · 未表示", // lane vault-window-v2

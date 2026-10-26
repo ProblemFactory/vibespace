@@ -52,7 +52,7 @@ const CATEGORIES = Object.freeze([
   Object.freeze({ id: 'web-logins', label: i18nKey('Web logins') }),
   Object.freeze({ id: 'automation', label: i18nKey('Automation keys') }),
   Object.freeze({ id: 'keys', label: i18nKey('Passwords & keys') }),
-  Object.freeze({ id: 'agents', label: i18nKey('Kept by agents') }),
+  Object.freeze({ id: 'agents', label: i18nKey('Kept by agents'), help: i18nKey('What an agent kept itself: the conversation that kept it uses it without asking you; other conversations cannot use it') }),   // lane vault-agent-own: the rule in words (the only category with a help sentence)
   Object.freeze({ id: 'other', label: i18nKey('Other'), onlyWhenAny: true }),
 ]);
 const CATEGORY_IDS = Object.freeze(CATEGORIES.map((c) => c.id));

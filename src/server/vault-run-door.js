@@ -15,6 +15,13 @@
  *     in the audit. Read and written only while the vault is unlocked; an 8-hour «always» lives in memory only (a lock ends it).
  *     The body carries a GENERATION: a copy older than one this hub read or wrote is a replay — read as empty too. Switching an
  *     entry OFF drops every «always» and seen shape that names it.
+ *   · THE OWN ROAD (lane vault-agent-own — the owner 2026-10-26: 「它自己存的使用为啥还要我的允许？」): an `agent:` entry the CALLER
+ *     made (PURE `ownsAgentEntry` — its scope is this conversation, by its registered or its durable id) is open to its runs BY
+ *     CONSTRUCTION: no switch, no grant, no card (`allowedBy: 'own'` on its run line; its use line, the scrubber, the refusal
+ *     tables, the bounds and the lock all stay). A value the hub MINTED asks ONCE PER HOST when a run names a host other than the
+ *     one it was minted `--for` — the card names both; the owner's 允许 is that host's PASS for that entry (memory only — a lock
+ *     ends it). The Vault window shows no switch on an agent row (`rowFacts` own); `list` names the caller's own entries; a
+ *     `request` for one answers `already: 'own'`. Another conversation's agent entry stays refused (`use_not_granted`).
  *   · THE CARD (decisions ② ④; exit-proxy's ask: one per conversation × shape, 60 s, the For-you item and the ask ONE state,
  *     a full tray ⇒ `ask_unfiled` at once, a second run of a shape whose card is up ⇒ `ask_pending`): 允许一次 / 此形状总是 /
  *     拒绝. A CLUSTER instance asks for every run without a live «always»; a LOCAL one asks the first time a shape runs and
@@ -152,6 +159,7 @@ const NO_ALWAYS = Object.freeze({
   'runs-project-code': 'it runs the project\'s own code (package scripts, setup files, a Dockerfile)',
   'config-file': 'it reads a config file this card cannot show',
   'program-writable': 'the program sits where an agent could have written it',
+  'another-host': 'a minted value goes to another host one host at a time',   // lane vault-agent-own
 });
 
 // THE ENGINE'S ENTRY-CLASS CHECK (decision ⑤ — the second of two that say no, beside the model's ownDoorOf): the stores whose
@@ -257,6 +265,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const settled = new Map();   // askId → 'settled' | 'expired' (a second answer says which)
   const seen = new Map();      // pair → at — the owner allowed this shape once, THIS unlock (a local instance asks no more)
   const shortAlways = new Map(); // pair → until — an 8-hour «always» (memory only: a lock ends it)
+  const hostPasses = new Map();  // lane vault-agent-own: `${scope}\n${entry id}\n${host}` → { scope, id, host, at } — the owner let a minted value go there (a lock ends it)
   const runs = new Set();      // the children running now
   // lane vault-manual-and-lock: an agent's REQUESTS (one For-you ask each, open until answered or the lock) and the GRANT ROWS
   // their answers write (memory only — the «always» rows' shape + once + purpose; a lock ends them all)
@@ -323,6 +332,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   /** The Vault window's fact for a row: may it be opened for runs, is it open. */
   function rowFacts(row) {
     const ref = row && VI.parseRef(row.id);
+    if (VR.agentScopeOf(ref)) return { can: false, open: false, own: true };   // lane vault-agent-own: its conversation runs it by construction, another may not — no switch to show
     const c = classOf(ref, row);
     const d = c.runnable ? load() : null;
     return { can: c.runnable, open: !!(c.runnable && d && d.runnable.has(row.id)) };
@@ -359,12 +369,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const d = load(), out = [], scope = scopeOf(caller);
     const ids = new Set(d.runnable);
     if (scope) for (const g of grants.values()) if (g.conv === scope && g.until > now()) ids.add(g.entries[0]);
+    const owns = (ref) => VR.ownsAgentEntry(ref, caller);
+    const sec = sourceOf('secrets');   // lane vault-agent-own: + the agent entries THIS caller made (runnable by construction)
+    try { for (const raw of (sec && sec.vaultRows()) || []) { const row = VI.rowOf('secrets', raw), ref = row && VI.parseRef(row.id); if (ref && owns(ref)) ids.add(row.id); } } catch { /* a source that fails lists nothing of its own */ }
     for (const id of [...ids].sort()) {
       const ref = VI.parseRef(id), row = ref && rowOf(ref);
       if (!row || !classOf(ref, row).runnable) continue;
+      if (VR.agentScopeOf(ref) && !owns(ref)) continue;   // another conversation's own entry is never listed (its switch opens nothing to this one)
       const r = VR.refFor(ref.store, ref.entry, ref.field);   // the canonical spelling (the review: encodeURIComponent left !'()* raw)
       const g = d.runnable.has(id) || !scope ? null : grantOf(scope, id);
-      out.push({ ref: r ? r.ref : null, store: ref.store, label: row.label, kind: row.kind, field: ref.field, ...(g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : {}) });
+      out.push({ ref: r ? r.ref : null, store: ref.store, label: row.label, kind: row.kind, field: ref.field, ...(owns(ref) ? { by: 'own' } : g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : {}) });
     }
     return { ok: true, entries: out.filter((x) => x.ref) };
   }
@@ -383,14 +397,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     try { q.resolve({ outcome, askId: q.askId }); } catch { }
     return true;
   }
-  function ask({ caller, run, shape, key, detail, signal }) {
+  function ask({ caller, run, shape, key, detail, signal, always = null }) {
     const pair = pairOf(caller.conversationId, key);
     if (byPair.has(pair) && asks.has(byPair.get(pair))) return Promise.resolve({ outcome: 'pending', askId: byPair.get(pair) });
     if (signal && signal.aborted) return Promise.resolve({ outcome: 'gone', askId: null });
     return new Promise((resolve) => {
       const askId = randomBytes(16).toString('hex');
       const who = String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80);
-      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, always: !!shape.always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), askedAt: now(), todoId: null, timer: null, resolve };
+      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, always: always == null ? !!shape.always : !!always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), askedAt: now(), todoId: null, timer: null, resolve };
       asks.set(askId, q); byPair.set(pair, askId);
       if (userTodos) {
         try {
@@ -399,7 +413,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
             text: `${who} wants to run a command with a stored secret`,
             detail,   // THE WHOLE RUN as the owner approves it — the command (references, never a value), the secrets, how, the hosts, the folder
             i18n: { text: { key: '{who} wants to run a command with a stored secret', params: { who } } },
-            action: { type: 'vault-run-ask', askId, always: !!shape.always, tool: String(shape.name || '').slice(0, 40) },   // = ACTION_TYPE (spelled for the approval census's grep)
+            action: { type: 'vault-run-ask', askId, always: q.always, tool: String(shape.name || '').slice(0, 40) },   // = ACTION_TYPE (spelled for the approval census's grep)
           });
           q.todoId = it && it.id;
         } catch (e) {
@@ -546,7 +560,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!c.runnable) return named('entry_has_its_own_door', { ref: ref.ref, door: c.door, words: `${VR.WORDS.entry_has_its_own_door}: ${c.door}` });
     if (!row) return named('entry_unknown', { ref: ref.ref });
     const sc = VR.agentScopeOf(ref);
-    if (sc && sc !== scope && sc !== caller.conversationId) return named('use_not_granted', { ref: ref.ref });   // another conversation's own entry is its own
+    if (sc && VR.ownsAgentEntry(ref, caller)) return { ok: true, already: 'own', ref: ref.ref };   // lane vault-agent-own: what it stored itself is its own to use — nothing to ask
+    if (sc) return named('use_not_granted', { ref: ref.ref });   // another conversation's own entry is its own
     const pair = pairOf(scope, ref.id);
     const g = grantOf(scope, ref.id);
     if (g) return { ok: true, already: 'granted', ref: ref.ref, once: g.once, until: g.until };
@@ -689,11 +704,19 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   }
 
   // ── THE CARD'S WORDS (the whole run, deterministic: the belt compares it) ──
-  function detailOf(run, shape, cwd) {
+  function detailOf(run, shape, cwd, asks = null) {
     const L = [cmdText(run.argv), ''];
     L.push(`Program: ${run.tool}${run.programWritable ? ' — in a folder an agent can write' : ''}`);   // the review: the typed name is not what runs
     L.push(`Secrets: ${run.refs.map((r) => r.ref).join(', ')}`);
     L.push(`Given as: ${run.injection.join(', ')}`);
+    if (asks) {   // lane vault-agent-own: WHO stored each entry and WHY this run asks (the card the owner still sees keeps its words)
+      for (const r of run.refs) { const e = asks.facts.find((x) => x.id === r.id) || {}; L.push(`Stored by: ${r.ref} — ${e.own ? (e.prov === 'minted' ? `this conversation (the hub minted it${forWords(VR.forHostOf(e.forHost))} — the agent never saw it)` : 'this conversation (it saw the value)') : 'you'}`); }   // the review: the agent's --for normalized, never its raw words on the owner's card
+      if (asks.why.includes('not-own')) L.push('Why it asks: another conversation is using it — this conversation did not store it');
+      for (const a of asks.away) {
+        if (a.unknown) L.push(`Why it asks: where this command sends it cannot be told (a shell or an interpreter, a tool VibeSpace does not know, a routing flag, a config file, the project's own code or a program an agent could have written) — ${a.ref} was minted${forWords(a.forHost)}. Allow lets this command shape run with it again without asking until the vault locks.`);
+        else L.push(`Why it asks: it would go to another host — ${a.ref} was minted${forWords(a.forHost)}, this run sends it to ${a.host}. Allow lets it go to ${a.host} again without asking until the vault locks.`);
+      }
+    }
     if (run.argvExposed) L.push('ON THE COMMAND LINE: every user of this machine can read it while it runs (/proc/<pid>/cmdline)');
     L.push(`Hosts: ${shape.hosts.length ? shape.hosts.join(', ') : 'unknown — the tool names none'}`);
     if (run.plainEnv.length) L.push(`Env: ${run.plainEnv.map((e) => `${e.name}=${quote(e.value)}`).join(' ')}`);
@@ -704,6 +727,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     return L.join('\n').trim();
   }
 
+  const forWords = (h) => (h ? ` for ${h}` : ' with no host named');
   // ── THE RUN ──
   const callerRuns = (conv) => [...runs].filter((r) => r.conv === conv).length;
   function killGroup(rec, sig) {
@@ -768,6 +792,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const detail = detailOf(spec, shape, place);
     if (detail.length > DETAIL_MAX) return named('card_too_long');
     const head = { tool: spec.tool, entries: spec.refs.map((r) => r.ref), shapeId, hosts: shape.hosts, injection: spec.injection, argvExposed: spec.argvExposed, cwd: place, cmd: utf8Head(SS.redactSecrets(cmdText(spec.argv)).text) };
+    // lane vault-agent-own: ANOTHER conversation's agent entry is refused by name before any fact of it is read (no switch opens it)
+    const foreign = spec.refs.find((r) => VR.agentScopeOf(r) && !VR.ownsAgentEntry(r, caller));
+    if (foreign) { note('use_not_granted', { ...head, ref: foreign.ref }); return named('use_not_granted', { ref: foreign.ref }); }
     // THE FACTS the verdict reads: each entry's row (exists), its switch (open), its class (the engine's check) and its length
     const d = load();
     const entries = [];
@@ -775,13 +802,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     for (const r of spec.refs) {
       const row = rowOf(r), c = classOf(r, row);
       if (!c.runnable) { note('entry_has_its_own_door', { ...head, ref: r.ref }); return named('entry_has_its_own_door', { ref: r.ref, door: c.door, words: `${VR.WORDS.entry_has_its_own_door}: ${c.door}` }); }
-      const sw = !!(row && d && d.runnable.has(r.id)), g = row ? grantOf(scope, r.id) : null;
+      const own = !!row && VR.ownsAgentEntry(r, caller), pv = (own && row.provenance) || {};   // lane vault-agent-own: an entry it made itself — open to it by construction
+      const sw = !!(row && d && d.runnable.has(r.id)), g = row && !own ? grantOf(scope, r.id) : null;
       if (g) purposes.set(r.id, g.purpose);
       if (g && !sw) admitted.push({ pair: pairOf(scope, r.id), g });
       const open = sw || !!g;   // the owner's switch (every conversation) OR the grant his answer wrote (this one)
       let bytes = 0;
-      if (row && open) { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } }
-      entries.push({ id: r.id, exists: !!row, open, bytes });
+      if (row && (open || own)) { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } }
+      entries.push({ id: r.id, exists: !!row, open, bytes, ...(own ? { own: true, prov: pv.prov === 'minted' ? 'minted' : 'stored', forHost: pv.forHost || null } : {}) });
     }
     const pair = pairOf(caller.conversationId, key);
     const stored = d ? d.always.find((a) => a.conv === caller.conversationId && a.key === key) : null;
@@ -789,20 +817,24 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const remembered = stored && (stored.until == null || stored.until > now()) ? stored : short && short.until > now() ? { until: short.until } : null;
     // granted: P0 has no who-may-use list — the owner's per-row switch and the card ARE the grant (P1 vault-use-reach narrows it
     // to whom); an AGENT's own entry (`agent:<scope>/<name>`) is its conversation's only
-    const granted = spec.refs.every((r) => { const sc = VR.agentScopeOf(r); return !sc || sc === scope || sc === caller.conversationId; });   // a mint's scope is the use law's conv (lane vault-mint-put)
-    let verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries, granted, remembered, seen: seen.has(pair), instance: instanceKind(), policy: policy(), now: now() });
+    const granted = spec.refs.every((r) => !VR.agentScopeOf(r) || VR.ownsAgentEntry(r, caller));   // a mint's scope: the conversation's registered id, or (lane vault-agent-own) its durable one
+    const passes = () => [...hostPasses.values()].filter((p) => p.scope === scope).map((p) => ({ id: p.id, host: p.host }));   // lane vault-agent-own: the hosts the owner let a minted value go to
+    let verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries, granted, remembered, seen: seen.has(pair), instance: instanceKind(), policy: policy(), passes: passes(), now: now() });
     let askId = null, asked = null;
     if (!verdict.ok && verdict.ask) {
       if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size >= RUNS_MAX) return named('too_many_runs');
-      const a = await ask({ caller, run: spec, shape, key, detail, signal });
+      const shown = detailOf(spec, shape, place, { facts: entries, why: verdict.why || [], away: verdict.away || [] });   // lane vault-agent-own: + who stored each entry, why it asks
+      if (shown.length > DETAIL_MAX) return named('card_too_long');
+      const a = await ask({ caller, run: spec, shape, key, detail: shown, signal, always: verdict.offers.includes('always') });
       asked = a.outcome; askId = a.askId;
       if (asked === 'pending') { note('ask_pending', { ...head, askId }); return named('ask_pending'); }
       const outcome = { gone: 'caller_gone', unfiled: 'ask_unfiled', denied: 'ask_denied', expired: 'ask_expired', changed: 'ask_changed', vault_locked: 'vault_locked' }[asked];
       if (outcome) { note(outcome, { ...head, askId }); return named(outcome); }
       // allowed / always — the verdict AGAIN over the facts as they stand NOW (a lock, a switch closed while the card waited)
+      for (const x of verdict.away || []) hostPasses.set(`${scope}\n${x.id}\n${x.pass}`, { scope, id: x.id, host: x.pass, at: now() });   // lane vault-agent-own: ONCE per host (or, where the destination cannot be told, per command shape) — the 允许 is that pass for that entry
       const d2 = load();
-      const again = spec.refs.map((r) => { const row = rowOf(r); return { id: r.id, exists: !!row, open: !!(row && ((d2 && d2.runnable.has(r.id)) || grantOf(scope, r.id))), bytes: entries.find((e) => e.id === r.id).bytes }; });
-      verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries: again, granted, remembered: { until: null }, seen: true, instance: instanceKind(), policy: 'allow', now: now() });
+      const again = spec.refs.map((r) => { const row = rowOf(r), e0 = entries.find((e) => e.id === r.id); return { ...e0, exists: !!row, open: !!(row && ((d2 && d2.runnable.has(r.id)) || grantOf(scope, r.id))) }; });
+      verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries: again, granted, remembered: { until: null }, seen: true, instance: instanceKind(), policy: 'allow', passes: passes(), now: now() });
       if (verdict.ok) verdict = { ok: true, by: asked === 'always' ? 'always' : 'once' };
     }
     if (!verdict.ok) { if (verdict.code === 'vault_locked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } } note(verdict.code, { ...head, askId }); return verdict; }
@@ -920,7 +952,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     asking.batch = true;   // B-4934: one recount after the whole withdrawal, not one per request
     try { for (const q of [...requests.values()]) settleRequest(q, 'vault_locked', 'locked'); } finally { asking.batch = false; }   // lane vault-manual-and-lock: every open request is withdrawn
     askingLine();
-    seen.clear(); shortAlways.clear(); grants.clear(); db = null; dbEpoch = -1;   // … and every grant ends (once / 8 hours)
+    seen.clear(); shortAlways.clear(); grants.clear(); hostPasses.clear(); db = null; dbEpoch = -1;   // … and every grant ends (once / 8 hours) — and every host pass (lane vault-agent-own)
   }
   if (typeof vault.onLock === 'function') vault.onLock((why) => onLocked(why));
 

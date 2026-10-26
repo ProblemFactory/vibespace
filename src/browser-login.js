@@ -16,7 +16,8 @@
  *   · THE FILL VERDICT (fillVerdict) — in order: a form on the tab · THE PHISHING RULE (pageOrigin === frameOrigin === the
  *     entry's origin, exact to the port, never the registrable domain; https, or http on localhost only) · ONE entry (several ⇒
  *     login_ambiguous) · THE GRANT (door `browser-login`: the rows of `<origin>#<user>`, `<origin>#*` and `*` ADD — GM.admits,
- *     the model's own refusal named) · the vault open. Then `valuesOf` maps the opened values onto the form's field ids.
+ *     the model's own refusal named; lane vault-agent-own: a login the CALLER stored itself — its entry's `owner` is one of the
+ *     caller's ids, `owners` — is its own to fill, no grant) · the vault open. Then `valuesOf` maps the opened values onto the form's field ids.
  *   · THE PASSWORD the vault mints (generatePassword) — ≥ 20 characters from an INJECTED rng (a site that caps the length
  *     lower gets its cap, never under GENERATED_MIN), every class of the charset present, the site's constraints honoured
  *     (min / max length, the pattern read as the browser reads it); a pattern no candidate satisfies ⇒
@@ -237,7 +238,7 @@ function grantWords(code, origin) {
  * `entries` = `[{origin, user}]` (the vault's names); `grantRows(resource)` = the grants store's rows of that resource;
  * `facts` = the caller's (GM.admits'); `vaultState` = the engine's.
  */
-function fillVerdict({ forms = [], origin = null, user = null, newUser = null, generate = false, entries = [], grantRows = () => [], facts = {}, vaultState = 'locked' } = {}) {
+function fillVerdict({ forms = [], origin = null, user = null, newUser = null, generate = false, entries = [], grantRows = () => [], facts = {}, vaultState = 'locked', owners = [] } = {}) {
   const mode = newUser !== null && newUser !== undefined && newUser !== '' ? 'signup' : generate ? 'change' : 'login';
   const want = mode === 'login' ? 'login' : 'new';
   const asked = origin !== null && origin !== undefined && origin !== '' ? originOf(origin) : null;
@@ -265,7 +266,9 @@ function fillVerdict({ forms = [], origin = null, user = null, newUser = null, g
     u = cands[0].user;
   }
   const rows = grantResources(o, u).flatMap((r) => { try { return grantRows(r) || []; } catch { return [{ door: DOOR, resource: r, to: null }]; } });
-  const g = GM.admits(rows, facts);
+  const kept = mode === 'signup' ? null : here.find((e) => e.user === u) || null;   // lane vault-agent-own: a login the caller stored itself is its own to fill
+  const own = !!(kept && typeof kept.owner === 'string' && kept.owner !== '' && (Array.isArray(owners) ? owners : []).includes(kept.owner));
+  const g = own ? { ok: true, via: 'own', row: null } : GM.admits(rows, facts);
   if (!g.ok) return no('login_not_granted', grantWords(g.code, o), { grant: g.code, mode, origin: o, name: PREFIX + o + '#' + u });
   if (vaultState !== 'unlocked') return no('vault_locked', LOCKED, { vault: str(vaultState) || 'locked' });
   const plan = planOf(form, mode);

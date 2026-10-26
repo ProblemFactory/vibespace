@@ -40,6 +40,14 @@
 //      asks) and spends; 8 hours = every run; deny / the card closed elsewhere / a changed item / a gone conversation grant
 //      nothing; the switch OFF and a LOCK end every grant and withdraw every request; the use lines carry the purpose and the
 //      run's receipt and `uses` reads back this conversation's alone; the request's card on the page
+//   ⑪ THE OWN ROAD (lane vault-agent-own — the owner 2026-10-26: 「它自己存的使用为啥还要我的允许？」) — on a CLUSTER (which asks every
+//      run of anything else): its own STORED entry runs with no switch, no grant, no card — scrubbed, its run line allowedBy
+//      'own', its use line (door run, ok, the receipt); a resumed conversation (a new registered id, its durable one kept)
+//      runs it too, a pending fork and another conversation are refused by name; its own MINTED entry runs to its --for host
+//      and to no host with no card, to ANOTHER host draws ONE card naming both hosts (who stored it, why it asks; no «always»)
+//      and after one 允许 that host runs without a card — until a LOCK ends the pass; a lock still ends an own run mid-run; a
+//      request for it answers `already: 'own'` (no card); list names it (by own) to its conversation only; the Vault row has
+//      no switch; the owner's entry still draws today's card, now saying who stored it and why it asks
 //   ⑩b THE CAP'S SHAPE (B-4934, q-043 verify L2): eight conversations × 8 open asks, then a NINTH conversation's first ask
 //      is FILED (MUTANT: the old 64-request hub-wide cap ⇒ RED); one conversation's 9th ⇒ too_many_requests by name; 32
 //      conversations asking ⇒ the 33rd too_many_askers by name while one already asking still asks; more than 8 asking ⇒
@@ -168,7 +176,8 @@ const ROWS = {
   'app-secrets': [{ entry: 'app1', field: 'item.0.1', label: 'app login', bytes: VALUE2.length, v: VALUE2 }],
   accounts: [{ entry: 'acct1', field: 'apiKey', label: 'my account', kind: 'api-key', bytes: VALUE3.length, v: VALUE3 }],
   channels: [{ entry: 'lark1', field: 'token', label: 'lark', kind: 'token', bytes: 40, v: 'channel-token-abcdefghijklmnop' }],
-  secrets: [{ entry: 'host:dev1', field: 'token', label: 'link', bytes: 40, v: 'pairing-token-abcdefghijklmnop' }, { entry: 'agent:conv-1/gh-token', field: 'secret', label: 'Agent secret · gh-token', bytes: 30, v: 'agent-minted-value-0123456789' }],
+  secrets: [{ entry: 'host:dev1', field: 'token', label: 'link', bytes: 40, v: 'pairing-token-abcdefghijklmnop' }, { entry: 'agent:conv-1/gh-token', field: 'secret', label: 'Agent secret · gh-token', bytes: 30, v: 'agent-minted-value-0123456789' },
+    { entry: 'agent:conv-1/site-pw', field: 'secret', label: 'Agent secret · site-pw', bytes: 29, provenance: { by: 'agent', prov: 'minted', sawPlaintext: false, actor: 'Lane X', forHost: 'api.example.com' }, v: 'agent-minted-pw-0123456789abc' }],   // lane vault-agent-own: a MINTED own entry, --for api.example.com
 };
 const sourceOf = (store) => ({ vaultRows: () => ROWS[store].map(({ v, ...r }) => r), vaultReveal: (e, f) => { const r = ROWS[store].find((x) => x.entry === e && x.field === f); return r ? r.v : null; } });
 const CALLER = { conversationId: 'conv-1', sessionKey: 'claude:conv-1', name: 'Lane X', cwd: null };
@@ -320,10 +329,9 @@ console.log('②b AN AGENT\'S OWN ENTRY (vault-mint-put\'s mint / put) — opene
 {
   const w = await world();
   const id = 'secrets:agent:conv-1/gh-token#secret';
-  ok(w.door.rowFacts({ id }).can === true && w.door.rowFacts({ id }).open === false, 'the Vault window\'s row of an agent\'s own entry carries the switch (off by default)');
+  ok(w.door.rowFacts({ id }).can === false && w.door.rowFacts({ id }).own === true, 'lane vault-agent-own: the Vault window\'s row of an agent\'s own entry carries NO switch — its conversation runs it by construction, no other may');
   const r0 = await w.door.run({ caller: w.caller, args: ['--env', 'T=vault://agent:conv-1/gh-token', '--', NODE, PRINTER, 'env'], cwd: w.work });
-  ok(r0.code === 'entry_not_runnable', 'not opened yet ⇒ entry_not_runnable (decision ⑤ holds for it too)', r0.code);
-  ok(w.door.setRunnable({ id, on: true, reauthed: true }).open === true, 'the owner opens it');
+  ok(r0.ok && r0.by === 'own' && !cardsOf(w).length, 'lane vault-agent-own: never opened, never granted ⇒ ITS conversation runs it with no card (was entry_not_runnable — decision ⑤ no longer holds for an entry it stored itself)', r0.code || r0.by);
   const own = await runAnswered(w, ['--env', 'T=vault://agent:conv-1/gh-token', '--', NODE, PRINTER, 'env']);
   ok(own.r.ok && !leaks(own.r.stdout + own.r.stderr, 'agent-minted-value-0123456789').length && /\[vault:agent:conv-1\/gh-token\]/.test(own.r.stdout), 'ITS conversation runs with it, spelled as mint hands it out — scrubbed to [vault:agent:conv-1/gh-token]', own.r.code);
   const other = await w.door.run({ caller: { ...w.caller, conversationId: 'conv-2', sessionKey: 'claude:conv-2', name: 'Lane Y' }, args: ['--env', 'T=vault://agent:conv-1/gh-token', '--', NODE, PRINTER, 'env'], cwd: w.work });
@@ -813,6 +821,69 @@ console.log('⑩b THE CAP\'S SHAPE (B-4934, q-043 verify L2): 8 open asks per co
     w.mk().reconcile();
     ok(before === 1 && !lineOf().length, 'a BOOT (reconcile): a line a previous process filed is closed — its requests died with it', before);
   } finally { ROWS.mounts.splice(-CAP_ROWS.length); }
+}
+
+console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored itself is its own to use; a minted value asks once per other host');
+{
+  const w = await world({ instance: 'cluster', killGraceMs: 400 });   // a cluster asks EVERY run of anything else: «no card» here is the own road's
+  const OWN = 'vault://agent:conv-1/gh-token', MINT = 'vault://agent:conv-1/site-pw', OWN_V = 'agent-minted-value-0123456789', MINT_V = 'agent-minted-pw-0123456789abc';
+  const usesOf = () => w.door.usesFor({ ...w.caller, scope: 'conv-1' }).uses || [];
+  // STORED: no switch, no grant, no card — scrubbed, audited (allowedBy own), a use line with the receipt
+  const r1 = await w.door.run({ caller: w.caller, args: ['--env', `T=${OWN}`, '--', NODE, PRINTER, 'env'], cwd: w.work });
+  const line1 = runLines(w).filter((x) => x.outcome === 'ran').pop(), use1 = usesOf()[0];
+  ok(r1.ok && r1.by === 'own' && !cardsOf(w).length && !leaks(r1.stdout + r1.stderr, OWN_V).length && /\[vault:agent:conv-1\/gh-token\]/.test(r1.stdout), 'its own STORED entry: no switch, no grant, NO CARD on a cluster — the output scrubbed to its placeholder', [r1.code || r1.by, cardsOf(w).length]);
+  ok(!!line1 && line1.allowedBy === 'own' && line1.entries[0] === OWN && line1.receipt === r1.receipt && !!use1 && use1.door === 'run' && use1.outcome === 'ok' && use1.receipt === r1.receipt && use1.entry === OWN, 'still a use: its run line says allowedBy own, its use line (door run, ok) carries the run\'s receipt — `vibespace-vault uses` lists it', [line1 && line1.allowedBy, use1]);
+  const sh = await w.door.run({ caller: w.caller, args: ['--env', `T=${OWN}`, '--', '/bin/sh', '-c', 'echo "$T"'], cwd: w.work });
+  ok(sh.ok && sh.by === 'own' && !cardsOf(w).length && !leaks(sh.stdout, OWN_V).length, 'a shell too (a shell\'s whole command is its shape — still no card for its own stored value; the scrubber still reads the output)', sh.code || sh.by);
+  const pr = await w.door.run({ caller: w.caller, args: ['--env', `T=${OWN}`, '--', 'cat', '$VAULT_FILE{T}'], cwd: w.work });
+  ok(pr.code === 'tool_prints_secrets', 'the refusal tables still hold for its own entry: a printing tool is refused by name', pr.code);
+  // WHOSE: a resumed conversation keeps it (its durable id); a pending fork and another conversation are refused by name
+  const resumed = { ...w.caller, scope: 'sess-77-1', conv: 'conv-1', conversationId: 'conv-1' };
+  const r2 = await w.door.run({ caller: resumed, args: ['--env', `T=${OWN}`, '--', NODE, PRINTER, 'env'], cwd: w.work });
+  ok(r2.ok && r2.by === 'own', 'a conversation that ended and came back (a new registered id, its durable id kept) runs its own entry — no card', r2.code || r2.by);
+  const fork = await w.door.run({ caller: { ...w.caller, scope: 'sess-78-1', conv: null, conversationId: 'conv-1' }, args: ['--env', `T=${OWN}`, '--', NODE, PRINTER, 'env'], cwd: w.work });
+  const other = await w.door.run({ caller: { ...w.caller, conversationId: 'conv-2', sessionKey: 'claude:conv-2', name: 'Lane Y', scope: 'sess-79-1', conv: 'conv-2' }, args: ['--env', `T=${OWN}`, '--', NODE, PRINTER, 'env'], cwd: w.work });
+  ok(fork.code === 'use_not_granted' && other.code === 'use_not_granted' && !cardsOf(w).length, 'a pending fork (it borrows its parent\'s id: conv null) and another conversation ⇒ use_not_granted by name — no card, nothing read', [fork.code, other.code]);
+  // MINTED --for api.example.com: its host and no host ⇒ no card; another host ⇒ ONE card naming both; once allowed, that host is passed
+  const m1 = await w.door.run({ caller: w.caller, args: ['--env', `T=${MINT}`, '--', 'curl', '-s', 'https://api.example.com/v1/login'], cwd: w.work });
+  const m0 = await w.door.run({ caller: w.caller, args: ['--env', `T=${MINT}`, '--', 'curl', '-s'], cwd: w.work });   // a KNOWN tool naming no host (an interpreter's destination cannot be told — it asks)
+  ok(m1.ok && m1.by === 'own' && m0.ok && m0.by === 'own' && !cardsOf(w).length && !leaks(m1.stdout + m0.stdout, MINT_V).length, 'its own MINTED entry to the host it was minted for, and in a known tool naming no host ⇒ no card', [m1.code || m1.by, m0.code || m0.by]);
+  const away = await runAnswered(w, ['--env', `T=${MINT}`, '--', 'curl', '-s', 'https://elsewhere.example.net/x'], { answer: 'once' });
+  const d = (away.card && away.card.detail) || '';
+  ok(!!away.card && away.r.ok && away.r.by === 'once' && away.card.action.always === false && /Stored by: vault:\/\/agent:conv-1\/site-pw — this conversation \(the hub minted it for api\.example\.com/.test(d) && /Why it asks: it would go to another host — vault:\/\/agent:conv-1\/site-pw was minted for api\.example\.com, this run sends it to elsewhere\.example\.net/.test(d) && !d.includes(MINT_V),
+    'to ANOTHER host ⇒ ONE card: who stored it and why it asks, BOTH hosts named, no «always» (a host at a time) — allowed once, it ran', { card: !!away.card, by: away.r.by, always: away.card && away.card.action.always, detail: d.split('\n').filter((l) => /^(Stored by|Why it asks)/.test(l)) });
+  const again = await w.door.run({ caller: w.caller, args: ['--env', `T=${MINT}`, '--', 'curl', '-s', 'https://elsewhere.example.net/other'], cwd: w.work });
+  ok(again.ok && again.by === 'own' && !cardsOf(w).length, 'ONCE per host: the same host again ⇒ no card (the 允许 was that host\'s pass for this entry)', again.code || again.by);
+  const third = await runAnswered(w, ['--env', `T=${MINT}`, '--', 'curl', '-s', 'https://third.example.org/'], { answer: 'deny' });
+  ok(!!third.card && third.r.code === 'ask_denied', 'a THIRD host asks again — denied, nothing ran', third.r.code);
+  // THE REVIEW: through a shell its destination cannot be told — even naming its own host — ⇒ ONE card per command SHAPE
+  const shellArgs = ['--env', `T=${MINT}`, '--', '/bin/sh', '-c', 'curl -s https://api.example.com/v1/login'];
+  const blind1 = await runAnswered(w, shellArgs, { answer: 'once' });
+  const bd = (blind1.card && blind1.card.detail) || '';
+  const blind2 = await w.door.run({ caller: w.caller, args: shellArgs, cwd: w.work });
+  const blind3 = await runAnswered(w, ['--env', `T=${MINT}`, '--', '/bin/sh', '-c', 'curl -s https://api.example.com/v1/other'], { answer: 'deny' });
+  ok(!!blind1.card && blind1.r.ok && /Why it asks: where this command sends it cannot be told/.test(bd) && blind1.card.action.always === false && blind2.ok && blind2.by === 'own' && !leaks(blind2.stdout || '', MINT_V).length && !!blind3.card,
+    'its MINTED value through a SHELL (where it goes cannot be told, even naming its own host) ⇒ ONE card for that command shape, the same shape again runs with no card, another shell command asks again', { card: !!blind1.card, by: blind2.by || blind2.code, third: !!blind3.card, why: bd.split('\n').filter((l) => /^Why/.test(l)) });
+  // THE LOCK: an own run is ended mid-run like any other; the passes go with the unlock
+  const pidFile = path.join(w.work, 'own-pid.txt');
+  const hang = w.door.run({ caller: w.caller, args: ['--env', `T=${OWN}`, '--', NODE, PRINTER, 'hang', pidFile], cwd: w.work });
+  let pid = null; for (let k = 0; k < 500 && !pid; k++) { try { pid = Number(fs.readFileSync(pidFile, 'utf8')) || null; } catch { } await sleep(10); }
+  w.vault.lock('door');
+  const hr = await hang;
+  ok(!!pid && hr.code === 'vault_locked' && hr.killed === true && !alive(pid), 'a LOCK still ends a run of its own entry mid-run (the child gone, the answer vault_locked)', [pid, hr.code, hr.killed]);
+  await w.vault.unlock(PW);
+  const passGone = await runAnswered(w, ['--env', `T=${MINT}`, '--', 'curl', '-s', 'https://elsewhere.example.net/x'], { answer: 'deny' });
+  ok(!!passGone.card, 'after the lock the host pass is gone — that host asks again', !!passGone.card);
+  // THE REQUEST, THE LIST, THE OWNER'S CARD
+  const q = w.door.request({ caller: { ...w.caller, scope: 'conv-1' }, entry: OWN, purpose: 'push the tag' });
+  ok(q.ok && q.already === 'own' && !(w.userTodos.snapshot().open || []).some((x) => x.action && x.action.type === 'vault-grant-ask'), 'a request for its own entry ⇒ already: own — no card in For you (the owner is never asked for what it stored itself)', q);
+  const mine = (w.door.runnableFor({ ...w.caller, scope: 'sess-77-1', conv: 'conv-1' }).entries || []).filter((e) => e.by === 'own').map((e) => e.ref).sort();
+  const theirs = (w.door.runnableFor({ ...w.caller, conversationId: 'conv-2', scope: 'sess-79-1', conv: 'conv-2' }).entries || []).map((e) => e.ref);
+  ok(mine.join() === [MINT, OWN].sort().join() && !theirs.some((r) => r.startsWith('vault://agent:conv-1/')), '`list` names its own entries (by own) to its conversation — and never to another', { mine, theirs });
+  openRow(w);
+  const owner = await runAnswered(w, ['--env', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'env'], { answer: 'once' });
+  const od = (owner.card && owner.card.detail) || '';
+  ok(!!owner.card && owner.r.ok && /Stored by: vault:\/\/mounts\/m1\/secretKey — you/.test(od) && /Why it asks: another conversation is using it — this conversation did not store it/.test(od), 'the OWNER\'s entry keeps today\'s card (the switch + a card per run on a cluster) — now saying who stored it and why it asks', od.split('\n').filter((l) => /^(Stored by|Why it asks)/.test(l)));
 }
 
 try { fs.chmodSync(BIN, 0o755); } catch { }   // the read-only bin given back (the scratch dir is removed)

@@ -16,6 +16,9 @@
  *     `save-login` CARD (Save / Not now): only then is a password held in memory — until the card is answered, ≤ CARDS_MAX,
  *     CARD_MS, then forgotten. A submission while the vault is locked is held the same way and written at the next unlock
  *     (an account the agent made is never lost to a lock).
+ *   · AN AGENT'S OWN (lane vault-agent-own — `vibespace-vault login add`, POST /api/agent/vault/login): a login the agent holds
+ *     itself, sealed `agent-typed` with its `owner` = the storing conversation (its durable id); that conversation's fill needs
+ *     no grant (fillVerdict `owners`), another's does; an agent never writes over a kept login (`login_exists`).
  *   · THE OWNER'S DOORS (cookie routes — src/routes/vault.js): add one (`by: 'owner'`), delete one (its own grant row with it),
  *     「用于…」 (grant / ungrant: this account, any account on this site, any site), the listing's facts (never a password).
  */
@@ -51,7 +54,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
   function names() {
     let list = []; try { list = typeof vault.secretNames === 'function' ? vault.secretNames() || [] : []; } catch { list = []; }
     const out = [];
-    for (const s of list) { const p = s && BL.parseName(s.name); if (p) out.push({ name: s.name, origin: p.origin, user: p.user, at: Number(s.at) || null, source: BL.SOURCES.includes(s.kind) ? s.kind : 'owner', actor: s.actor || null }); }
+    for (const s of list) { const p = s && BL.parseName(s.name); if (p) out.push({ name: s.name, origin: p.origin, user: p.user, at: Number(s.at) || null, source: BL.SOURCES.includes(s.kind) ? s.kind : 'owner', actor: s.actor || null, owner: s.owner || null }); }   // owner: lane vault-agent-own
     return out;
   }
   /** ONE entry opened → {ok, rec} | {ok:true, rec:null} (none) | a named refusal. The value's Buffer is zeroed at once. */
@@ -65,10 +68,10 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
   }
   /** THE ONE WRITER of a web-login entry: the record sealed under its name (the engine's secretPut — provenance as its `kind`,
    *  the conversation as its `actor`: words a person reads, never a value). */
-  function writeEntry(name, rec, { actor = null } = {}) {
+  function writeEntry(name, rec, { actor = null, owner = null } = {}) {
     if (!BL.isEntryName(name)) return named('bad-name', 'not a web-login entry');
     let text; try { text = BL.textOf(rec); } catch (e) { return named('bad-record', e && e.message); }
-    const r = vault.secretPut(name, text, { kind: rec.source, actor: actor ? str(actor).slice(0, 128) : null });
+    const r = vault.secretPut(name, text, { kind: rec.source, actor: actor ? str(actor).slice(0, 128) : null, owner: owner ? str(owner).slice(0, 128) : null });
     if (!r || !r.ok) { const c = str(r && r.code); return named(/vault_locked|vault_not_set_up/.test(c) ? 'vault_locked' : 'not_written', c || 'not written'); }
     return { ok: true };
   }
@@ -82,8 +85,8 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
    * otpMissing}` (the watch fills `values`, then calls noteFill) | a named refusal. `forms` = the tab's (oldest first),
    * `facts` = the caller's (GM.admits'), `conv` / `actor` = the conversation (its id / its name — the use line, the notice).
    */
-  function planFill({ forms = [], origin = null, user = null, newUser = null, generate = false, facts = {}, conv = null, actor = null } = {}) {
-    const v = BL.fillVerdict({ forms, origin, user, newUser, generate, entries: names(), grantRows: rowsOf, facts, vaultState: vstate() });
+  function planFill({ forms = [], origin = null, user = null, newUser = null, generate = false, facts = {}, conv = null, actor = null, owners = [] } = {}) {
+    const v = BL.fillVerdict({ forms, origin, user, newUser, generate, entries: names(), grantRows: rowsOf, facts, vaultState: vstate(), owners });
     if (!v.ok) {
       if (v.code === 'vault_locked') blocked(actor, origin || (forms[forms.length - 1] || {}).pageOrigin || '');
       if (v.code === 'login_not_granted' && v.name) use(v.name, { conv, actor, outcome: 'not_granted', purpose: purposeOf(v.mode, v.origin) });   // a bearer's refused use is a line too (the use law)
@@ -96,7 +99,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
       if (!o.rec) return named('login_no_entry', `no saved login for ${v.user} on ${v.origin} is in the vault`);
       let otp = null, otpMissing = false;
       if (v.plan.otp.length) {
-        if (o.rec.totpName && typeof totpCode === 'function') { let c = null; try { c = totpCode(o.rec.totpName, { conv }); } catch { c = null; } if (c && c.ok && c.code) otp = String(c.code); else otpMissing = true; }
+        if (o.rec.totpName && typeof totpCode === 'function') { let c = null; try { c = totpCode(o.rec.totpName, { conv, ...(v.grant && v.grant.via === 'own' ? { owners } : {}) }); } catch { c = null; } if (c && c.ok && c.code) otp = String(c.code); else otpMissing = true; }   // an OWN fill (no grant) gets only a code the caller owns too (the review)
         else otpMissing = true;
       }
       const { values, filled } = BL.valuesOf(v, { username: o.rec.username, password: o.rec.password, otp });
@@ -237,6 +240,32 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     try { vault.audit?.('vault-web-login-saved', { why: n, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
     return { ok: true, name: n, updated: !!ex.rec };
   }
+  /** lane vault-agent-own: AN AGENT stores a login it holds itself (`vibespace-vault login add`) — sealed `agent-typed`, its `owner`
+   *  the storing conversation (its fill there needs no grant); a login already kept for that account is never written over by
+   *  an agent. → {ok, name, origin, user} | a named refusal — never the password. */
+  function addAgent({ origin, username, password, totpName = null } = {}, { owner = null, actor = null } = {}) {
+    const o = BL.originOf(origin);
+    if (!o) return named('login_bad_origin', 'a website address (https://host[:port])');
+    if (!BL.secureOrigin(o)) return named('login_bad_origin', 'a login is kept for an https site (plain http on this machine\'s localhost only)');
+    const n = BL.entryName(o, username);
+    if (!n) return named('login_bad_user', 'a user name (no spaces, no #)');
+    if (typeof password !== 'string' || !password || password.length > 4096) return named('value_required', 'the password (a 0600 file or stdin)');
+    if (totpName && !/^[\w.-]{1,120}$/.test(str(totpName))) return named('bad_totp', 'a two-step entry name from the Vault (letters, digits, . _ -)');
+    if (!owner) return named('unauthorized', 'the calling conversation has no id yet — send it one message first');
+    if (vstate() !== 'unlocked') { blocked(actor, o); return named('vault_locked', BL.LOCKED); }
+    // the review (HIGH): a login an agent stores may pair only a two-step entry THIS conversation added itself — its own fill
+    // needs no grant, so pairing anyone else's seed would hand that code to a page the agent serves (http on localhost)
+    if (totpName) { let tl = []; try { tl = vault.secretNames() || []; } catch { tl = []; } const t = tl.find((s) => s && s.name === `totp:${str(totpName)}`); if (!t || !t.owner || t.owner !== str(owner)) return named('bad_totp', `pair only a two-step entry this conversation added itself (vibespace-vault totp add ${str(totpName).slice(0, 120)}) — another one stays the user's`); }
+    const ex = open(n);
+    if (!ex.ok) return ex;
+    const user = BL.parseName(n).user;
+    if (ex.rec) return named('login_exists', `a login for ${user} on ${o} is already in the vault — sign in with it: vibespace-browser login ${o} --user ${user}`);
+    const rec = BL.newRecord({ origin: o, username: str(username).trim(), password, source: 'agent-typed', now: now(), conversation: actor || owner, ...(totpName ? { totpName: str(totpName) } : {}) });
+    const w = writeEntry(n, rec, { actor: actor || owner, owner });
+    if (!w.ok) return w;
+    try { vault.audit?.('vault-web-login-saved', { why: n, by: 'agent', who: actor ? str(actor).slice(0, 40) : null }); } catch { /* */ }
+    return { ok: true, name: n, origin: o, user };
+  }
   /** Delete one (a person's door): the entry, and its own grant row (the wildcards stay — they name no entry). */
   function drop(name, { who = null } = {}) {
     const p = BL.parseName(name);
@@ -276,7 +305,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     return w && w.ok ? { ok: true, removed: true } : named((w && w.code) || 'not_written', (w && w.error) || 'not written');
   }
 
-  return { names, planFill, noteFill, submitted, flushHeld, answerCard, cardOf: (id) => { const c = cards.get(str(id)); return c ? { id: c.id, name: c.name, shown: c.shown, update: c.existing } : null; }, list, addOwn, drop, grant, ungrant, _cards: cards, _held: held };
+  return { names, planFill, noteFill, submitted, flushHeld, answerCard, cardOf: (id) => { const c = cards.get(str(id)); return c ? { id: c.id, name: c.name, shown: c.shown, update: c.existing } : null; }, list, addOwn, addAgent, drop, grant, ungrant, _cards: cards, _held: held };
 }
 
 module.exports = { create, CARDS_MAX, CARD_MS, HELD_MAX, TYPED_MAX, TYPED_MS };

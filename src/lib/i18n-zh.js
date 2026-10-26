@@ -9731,6 +9731,11 @@ export default {
   "Integrations & channels": "集成与频道", // lane vault-window-v2
   "Machines & relay": "机器与中继", // lane vault-window-v2
   "Kept by agents": "agent 存放", // lane vault-window-v2
+  "Its own conversation uses it directly · other conversations cannot use it": "本对话可直接使用 · 其他对话不能使用",
+  "Its own conversation uses it directly · other conversations need a grant": "本对话可直接使用 · 其他对话需授权",
+  "kept by {name}": "由 {name} 保存",
+  "What an agent kept itself: the conversation that kept it uses it without asking you; other conversations cannot use it": "agent 自己存的：存它的那个对话直接使用，不用问你；其他对话不能使用",
+  "Added by an agent itself — the agent saw the seed": "agent 自己添加 · agent 见过种子",
   "By you": "我自己", // lane vault-window-v2
   "Scanned · by you": "扫码 · 我自己", // lane vault-window-v2
   "Minted by the hub · never shown": "hub 铸造 · 从未显示", // lane vault-window-v2

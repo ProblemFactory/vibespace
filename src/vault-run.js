@@ -40,6 +40,14 @@
  *     door (`OWN_DOORS`) / unknown / not opened for runs / too short to scrub; the conversation's grant; a remembered «always» for
  *     this shape; else a cluster ASKS every time (once / always / deny — the urgent card, 60 s) and a local instance asks the
  *     FIRST time a shape runs and allows it after one 允许 (`seen` — the owner's decision ②; still audited, still scrubbed).
+ *   · THE OWN ROAD (lane vault-agent-own — the owner 2026-10-26: 「它自己存的使用为啥还要我的允许？」): an `agent:` entry is runnable by
+ *     the conversation that made it BY CONSTRUCTION — no switch, no grant, no card (`ownsAgentEntry`: the entry's scope is that
+ *     conversation — its registered id for an entry made before this lane, its DURABLE id, the CLI session id a resumed
+ *     conversation keeps, for one made since). Provenance decides ONE thing: a value the agent PUT (it saw it) never asks; a value
+ *     the hub MINTED (the agent never saw it) asks ONCE PER HOST when a run names a host other than the one it was minted `--for`
+ *     (`awayOf` — the only leak the card can still prevent; a KNOWN tool naming no host is a local command and asks nothing; a
+ *     run whose destination cannot be told — a shell, an interpreter, an unknown tool, a routing flag, a config file, project
+ *     code, a program an agent could write — asks once per command SHAPE). Still audited, still scrubbed.
  *   · THE SCRUBBER (`FORMS` / `FORM_ROWS` — THE ONE LIST, each form with a real tool that prints it by itself; `formsOf`,
  *     `VIEWS`, `createRunMasker`, `createMasker`, `maskText`): the value in every spelling a real producer prints becomes its
  *     placeholder. SPELLED (texts built from the value): raw; base64 (standard and URL-safe, padded or not, and the value's own
@@ -168,6 +176,29 @@ function parseRef(s) {
 /** An agent's own entry → the conversation that owns it (its scope); any other reference → null. */
 const agentScopeOf = (ref) => { const m = ref && ref.store === 'secrets' && ref.field === 'secret' ? AGENT_ENTRY.exec(String(ref.entry)) : null; return m ? m[1] : null; };
 const placeholderOf = (ref) => `[vault:${ref && ref.label ? ref.label : String(ref || '')}]`;
+/** lane vault-agent-own: is `ref` an agent entry THIS caller made? Its scope is the conversation's registered id (an entry made
+ *  before lane vault-agent-own) or its durable id (the CLI session id — kept across a resume; every entry made since): either
+ *  spelling of the caller says yes. `caller` = { scope, conv, conversationId }: `conv` is the FORK-SAFE durable id (null for a
+ *  pending fork, which borrows its parent's) — when the caller carries it, the raw conversationId is not read. */
+const callerIdsOf = (caller) => (caller ? [caller.scope, ...(caller.conv !== undefined ? [caller.conv] : [caller.conversationId])] : []).filter((x) => typeof x === 'string' && x !== '');
+function ownsAgentEntry(ref, caller = {}) {
+  const sc = agentScopeOf(ref);
+  return !!sc && callerIdsOf(caller).includes(sc);
+}
+/** A mint's `--for <host/service>` → the host it names (lower case — no scheme, user, port or path), or null. A bare word
+ *  with no dot (`com`, a service's name) names no host: every host is then «another host» (a suffix must not cover a TLD). */
+function forHostOf(s) {
+  const m = /^(?:[a-z][a-z0-9+.-]{0,31}:\/\/)?(?:[^@\s\/?#]*@)?(\[[0-9a-f:.]+\]|[a-z0-9.-]+)/.exec(String(s == null ? '' : s).trim().toLowerCase());
+  const h = m ? m[1].replace(/\.$/, '') : '';
+  return h && h.length <= 253 && /[a-z0-9]/.test(h) && (/\.[a-z0-9-]/.test(h) || h === 'localhost' || h[0] === '[') ? h : null;
+}
+/** Is a run's `host` (a shape's: `name`, `name:port`, `*.suffix`) the host a value was minted for — or one under it? */
+function sameHost(host, forHost) {
+  const f = forHostOf(forHost), h = String(host == null ? '' : host).toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+  if (!f || !h) return false;
+  if (h.startsWith('*.')) { const s = h.slice(2); return f === s || f.endsWith('.' + s); }
+  return h === f || h.endsWith('.' + f);
+}
 /** Every reference-shaped piece of `text` → { refs: [{ …ref, at, len, form: 'url' | 'brace' | 'file', name? }], bad: [{ at, text }] }.
  *  `form` url = `vault://…`; brace = `$VAULT{…}`; file = `$VAULT_FILE{…}` (`name` set when it names a `--file NAME`). A
  *  `vault://` / `$VAULT{` / `$VAULT_FILE{` in any letter case that does not parse is BAD — never read as plain text. */
@@ -411,7 +442,7 @@ function materialize(run, { valueOf, pathOf }) {
 }
 
 // ── THE SHAPE KEY (decision ④) ──
-const URL_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/(?:[^@\s\/?#'"]{0,256}@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9.-]+)(?::(\d{1,5}))?/gi;
+const URL_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/(?:[^@\s\/\\?#'"]{0,256}@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9.-]+)(?::(\d{1,5}))?/gi;   // lane vault-agent-own (review): a `\` ends the userinfo — WHATWG reads `https://evil\@good/` as host evil
 const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/\.$/, ''); return x && x.length <= 253 ? (port ? `${x}:${port}` : x) : null; };
 function urlHosts(text) { const out = []; let m; URL_RE.lastIndex = 0; while ((m = URL_RE.exec(String(text)))) if (m[1].toLowerCase() !== 'vault') out.push(normHost(m[2], m[3])); return out.filter(Boolean); }
 const HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$|^localhost$/i;
@@ -465,6 +496,9 @@ function shapeOf(run) {
     entries: run.refs.map((r) => r.ref).sort(), injection: [...run.injection].sort(), env: run.plainEnv.map((e) => `${e.name}=${e.value}`).sort(), keyed: keyed.sort(),
     templates: run.files.filter((f) => f.text != null).map((f) => `${f.name}=${f.text}`).sort(), on: run.on || null, script,
     known, proxyEnv: !!(known && row.proxyEnv), always: !noAlways, noAlways, argvExposed: !!run.argvExposed,
+    // lane vault-agent-own (the review): where it sends what it reads cannot be told — the raw facts, never `noAlways` (a
+    // known tool naming no host reads 'unknown-destination' there, which hid a config file / a program an agent wrote)
+    blind: kind !== 'tool' || !known || keyed.length > 0 || configFile || !!(row && row.runsProject) || !!run.programWritable,
   };
 }
 /** THE KEY a remembered «always» is stored under — everything decision ④ says, nothing positional. */
@@ -502,8 +536,29 @@ function ownDoorOf(ref) {
  * `seen` = the owner allowed this (conversation, shape) once already, this unlock (the door's memory — lane vault-run-door);
  * `instance` 'cluster' | 'local'; `policy` 'ask' | 'allow' | null (null = the instance's: a cluster asks EVERY time, a local one
  * asks the first time and allows a SEEN shape — decision ②: «a new shape asks; a local instance allows after one 允许»).
+ * lane vault-agent-own: an entry's facts may say `own` (an agent entry the caller made — open by construction), `prov`
+ * ('stored' | 'minted') and `forHost` (a mint's `--for`); `passes` = [{ id, host }] the owner already allowed a minted value to
+ * go to. Every entry its own and no minted value bound for another host ⇒ { ok: true, by: 'own' } — no card; an ask says
+ * `why` (['not-own'] — an entry the caller did not make · ['another-host'] — a minted value to a host it was not made for)
+ * and `away` (the hosts to allow — ONCE each).
  */
-function runVerdict({ state, plan, shape = null, entries = [], granted = false, remembered = null, seen = false, instance = 'local', policy = null, now = Date.now() } = {}) {
+/** Where a run sends what it reads CANNOT be told from its shape (lane vault-agent-own, the review): a shell or an interpreter
+ *  (its own code decides), a tool outside the table, a routing flag (ssh -o / curl --connect-to / -x …), a config file the card
+ *  cannot show, the project's own code (npm / pip / docker), a program an agent could have written. A known tool naming no
+ *  host is a LOCAL command; a known tool naming hosts sends there. */
+const destUnknown = (sh) => !sh || sh.blind !== false;   // shapeOf's `blind` (a shape that does not say is blind)
+function awayOf(refs, facts, shape, passes = []) {
+  const out = [], hosts = shape && Array.isArray(shape.hosts) ? shape.hosts : [], ps = Array.isArray(passes) ? passes : [];
+  const unknown = destUnknown(shape), shapePass = unknown ? `?${shapeKeyOf(shape)}` : null;   // an unknown destination is passed per SHAPE, never per host
+  for (const r of refs || []) {
+    const e = facts.get(r.id);
+    if (!e || e.own !== true || e.prov !== 'minted') continue;   // a value the agent PUT (it saw it) asks nothing, ever
+    if (unknown) { if (!ps.some((p) => p && p.id === r.id && p.host === shapePass)) out.push({ ref: r.ref, id: r.id, forHost: forHostOf(e.forHost), host: null, pass: shapePass, unknown: true }); continue; }
+    for (const h of hosts) if (!sameHost(h, e.forHost) && !ps.some((p) => p && p.id === r.id && p.host === h)) out.push({ ref: r.ref, id: r.id, forHost: forHostOf(e.forHost), host: h, pass: h });
+  }
+  return out;
+}
+function runVerdict({ state, plan, shape = null, entries = [], granted = false, remembered = null, seen = false, instance = 'local', policy = null, passes = [], now = Date.now() } = {}) {
   if (state === 'not_set_up') return refuse('vault_not_set_up');
   if (state !== 'unlocked') return refuse('vault_locked');
   if (!plan || !plan.ok) return plan && plan.code ? plan : refuse('bad_flag');
@@ -514,14 +569,19 @@ function runVerdict({ state, plan, shape = null, entries = [], granted = false, 
     if (door) return refuse('entry_has_its_own_door', { ref: r.ref, door, words: `${WORDS.entry_has_its_own_door}: ${door}` });
     const e = facts.get(r.id);
     if (!e || !e.exists) return refuse('entry_unknown', { ref: r.ref });
-    if (e.open !== true) return refuse('entry_not_runnable', { ref: r.ref });
+    if (e.open !== true && e.own !== true) return refuse('entry_not_runnable', { ref: r.ref });   // lane vault-agent-own: its own entry is open to its conversation by construction
     if (!(Number(e.bytes) >= MIN_MASK_BYTES)) return refuse('entry_too_short_to_mask', { ref: r.ref });
   }
   if (granted !== true) return refuse('use_not_granted');
-  if (sh.always && remembered && (remembered.until == null || Number(remembered.until) > now)) return { ok: true, by: 'always' };
+  // THE OWN ROAD (lane vault-agent-own): what the caller made itself asks nothing — but a minted value bound for another host
+  const away = awayOf(plan.refs, facts, sh, passes);
+  const why = [...(plan.refs.some((r) => (facts.get(r.id) || {}).own !== true) ? ['not-own'] : []), ...(away.length ? ['another-host'] : [])];
+  if (!why.length) return { ok: true, by: 'own' };
+  if (!why.includes('not-own')) return { ok: false, ask: true, code: 'ask', why, away, offers: ['once', 'deny'], alwaysTtls: [], alwaysDefault: null, reauth: false, ttlMs: ASK_TTL_MS, noAlways: 'another-host', argvExposed: sh.argvExposed };   // ONCE per host: the answer is the host's pass, never a shape's «always»
+  if (!away.length && sh.always && remembered && (remembered.until == null || Number(remembered.until) > now)) return { ok: true, by: 'always' };
   const mode = policy === 'ask' || policy === 'allow' ? policy : instance === 'cluster' ? 'ask' : 'allow';
-  if (mode === 'allow' && seen === true) return { ok: true, by: 'seen' };   // a NEW shape always draws the card (lane vault-run-door's mutant)
-  return { ok: false, ask: true, code: 'ask', offers: sh.always ? ['once', 'always', 'deny'] : ['once', 'deny'], alwaysTtls: sh.always ? Object.keys(ALWAYS_TTLS) : [], alwaysDefault: sh.always ? ALWAYS_DEFAULT : null, reauth: sh.always, ttlMs: ASK_TTL_MS, noAlways: sh.noAlways, argvExposed: sh.argvExposed };
+  if (!away.length && mode === 'allow' && seen === true) return { ok: true, by: 'seen' };   // a NEW shape always draws the card (lane vault-run-door's mutant)
+  return { ok: false, ask: true, code: 'ask', why, away, offers: sh.always ? ['once', 'always', 'deny'] : ['once', 'deny'], alwaysTtls: sh.always ? Object.keys(ALWAYS_TTLS) : [], alwaysDefault: sh.always ? ALWAYS_DEFAULT : null, reauth: sh.always, ttlMs: ASK_TTL_MS, noAlways: sh.noAlways, argvExposed: sh.argvExposed };
 }
 
 // ── THE SCRUBBER ──
@@ -851,10 +911,10 @@ function maskText(text, secrets) { const m = createMasker(secrets); return m.pus
 
 module.exports = {
   SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
-  parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, isFreeEntry, refFor: refOf,
+  parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, ownsAgentEntry, forHostOf, sameHost, isFreeEntry, refFor: refOf,
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
-  shapeOf, shapeKeyOf, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, runVerdict,
+  shapeOf, shapeKeyOf, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
 };

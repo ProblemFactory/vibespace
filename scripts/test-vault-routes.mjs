@@ -34,6 +34,7 @@ import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
 import { scratch } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -184,6 +185,7 @@ const TP = require(path.join(REPO, 'src/totp.js'));
 const at = (file) => (s) => s.replace(/require\((['"])(\.{1,2}\/[^'"]+)\1\)/g, (m, q, p) => `require(${JSON.stringify(path.resolve(path.join(REPO, path.dirname(file)), p))})`);
 const hmacT = (a, k, m) => crypto.createHmac(String(a).toLowerCase(), k).update(m).digest();
 const SEED = TP.base32Encode(crypto.randomBytes(20)), SEED_NEW = TP.base32Encode(crypto.randomBytes(20));   // planted seeds, built at runtime
+const SEED_OWN = TP.base32Encode(crypto.randomBytes(20));   // lane vault-agent-own: the seed an agent adds itself
 const URI = `otpauth://totp/GitHub:owner%40example.com?secret=${SEED}&issuer=GitHub`;
 /** One hub: the gate, the JSON body, the vault routes with the contents doors and the two-step doors; three sessions. */
 async function totpHub(tag, { routesSrc = null, totpSrc = null } = {}) {
@@ -197,14 +199,16 @@ async function totpHub(tag, { routesSrc = null, totpSrc = null } = {}) {
   const VC = require(path.join(REPO, 'src/server/vault-contents.js'));
   const contents = VC.create({ vault: v, sources: { secrets: () => VC.secretSource({ vault: v }) }, now: () => clock, mono: () => clock });
   const totp = load('src/server/vault-totp.js', totpSrc).create({ dataDir: dir, vault: v, now: () => clock, log: (m) => lines.push(String(m)) });
+  const logins = require(path.join(REPO, 'src/server/browser-logins.js')).create({ vault: v, grants: () => require(path.join(REPO, 'src/server/grants-store.js')).create({ memory: true }), totpCode: (n, o) => totp.codeForLogin(n, o), now: () => clock });   // lane vault-agent-own: `login add`
   const tok = () => 'vsst_' + crypto.randomBytes(16).toString('hex');
-  const sessions = new Map([['s1', { agentToken: tok(), backendSessionId: 'conv-1', groups: [] }], ['s2', { agentToken: tok(), backendSessionId: 'conv-2', groups: ['T-1'] }], ['s3', { agentToken: tok(), backendSessionId: 'conv-3', isTmuxView: true, groups: [] }]]);
-  const callerOf = (token) => { for (const s of sessions.values()) if (s.agentToken === token) return { conversationId: s.backendSessionId, live: !s.isTmuxView, groups: s.groups }; return null; };
+  const sessions = new Map([['s1', { agentToken: tok(), backendSessionId: 'conv-1', _webuiId: 'sess-1-1', conv: 'conv-1', groups: [] }], ['s2', { agentToken: tok(), backendSessionId: 'conv-2', groups: ['T-1'] }], ['s3', { agentToken: tok(), backendSessionId: 'conv-3', isTmuxView: true, groups: [] }]]);
+  // the wiring's sessionCallerOf: + its registered id (`scope`) and its fork-safe durable id (`conv`) — lane vault-agent-own
+  const callerOf = (token) => { for (const s of sessions.values()) if (s.agentToken === token) return { conversationId: s.backendSessionId, live: !s.isTmuxView, groups: s.groups, scope: s._webuiId, ...('conv' in s ? { conv: s.conv } : {}) }; return null; };
   const runOf = (cid) => { for (const s of sessions.values()) if (!s.isTmuxView && s.backendSessionId === cid) return VT0.runOfToken(s.agentToken); return null; };
   const a = express();
   a.use(au.middleware()); au.registerRoutes(a); a.use(express.json());
   load('src/routes/vault.js', routesSrc).registerVaultRoutes(a, { vault: v, activeSessions: sessions, getJobs: () => ({ jobByToken: (t) => (t === 'jbt_live' ? { id: 'j1' } : null) }), contents, who: (req) => Auth.signInHandle(req),
-    totp, callerOf, runOf, grantLive: (g) => !g.subject.startsWith('session:') || runOf(g.subject.slice(8)) === g.run, subjects: () => ({ sessions: [...sessions.values()].filter((s) => !s.isTmuxView).map((s) => ({ subject: `session:${s.backendSessionId}`, name: s.backendSessionId })), groups: [{ subject: 'group:T-1', name: 'T-1' }] }) });
+    totp, logins, callerOf, runOf, grantLive: (g) => !g.subject.startsWith('session:') || runOf(g.subject.slice(8)) === g.run, subjects: () => ({ sessions: [...sessions.values()].filter((s) => !s.isTmuxView).map((s) => ({ subject: `session:${s.backendSessionId}`, name: s.backendSessionId })), groups: [{ subject: 'group:T-1', name: 'T-1' }] }) });
   const s = await new Promise((r) => { const x = a.listen(0, '127.0.0.1', () => r(x)); });
   const port = s.address().port, own = `http://127.0.0.1:${port}`;
   const page = { cookie: `vs_token=${au.issueToken('owner')}`, 'sec-fetch-site': 'same-origin', origin: own };
@@ -222,7 +226,7 @@ async function totpHub(tag, { routesSrc = null, totpSrc = null } = {}) {
   const agent = (token, name = 'github-owner') => go(`/api/agent/vault/totp/${encodeURIComponent(name)}`, { headers: { authorization: 'Bearer ' + token } });
   const expect = (seed = SEED) => TP.totp(TP.base32Decode(seed).bytes, { now: clock, hmac: hmacT }).code;
   const audit = () => { try { return fs.readFileSync(path.join(dir, VE.AUDIT_FILE), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
-  return { dir, vault: v, sessions, go, agent, page, answers, lines, expect, audit, step: (ms) => { clock += ms; }, close: () => { v.close(); s.close(); } };
+  return { dir, vault: v, sessions, go, agent, page, answers, lines, expect, audit, port, logins, step: (ms) => { clock += ms; }, close: () => { v.close(); s.close(); } };
 }
 /** THE CHECKS, in order on one hub (the shipped tree passes every one; each mutant must fail at least one). */
 const TOTP_CHECKS = [
@@ -335,17 +339,69 @@ const TOTP_CHECKS = [
     const m = await H.agent(H.sessions.get('s2').agentToken);
     return d.status === 200 && file.grants.length === 0 && gone.status === 404 && re.status === 200 && m.status === 403 && m.json.code === 'not_granted';
   }],
+  // lane vault-agent-own: the agent's OWN seed — `vibespace-vault totp add` (the owner 2026-10-26: 「它自己存的使用为啥还要我的允许？」)
+  ['an AGENT adds a seed it holds (POST /api/agent/vault/totp, the seed off the body) ⇒ its name and entry — no seed, no code in the answer; the URL never carries one; a cookie is 401', async (H) => {
+    const bearer = { authorization: 'Bearer ' + H.sessions.get('s1').agentToken };
+    const r = await H.go('/api/agent/vault/totp', { method: 'POST', headers: bearer, body: { name: 'agent-okta', seed: SEED_OWN } });
+    const q = await H.go(`/api/agent/vault/totp?seed=${SEED_NEW}`, { method: 'POST', headers: bearer, body: { name: 'q-okta' } });
+    const c = await H.go('/api/agent/vault/totp', { method: 'POST', body: { name: 'c-okta', seed: SEED_NEW } });
+    const add = H.audit().find((l) => l.event === 'vault-totp-add' && l.entry === 'totp:agent-okta');
+    return r.status === 200 && r.json.name === 'agent-okta' && r.json.entry === 'totp:agent-okta' && !r.raw.includes(SEED_OWN) && !r.raw.includes(H.expect(SEED_OWN)) && !!add && add.by === 'agent' && q.status === 400 && q.json.code === 'value_in_argv' && c.status === 401;
+  }],
+  ['its code answers THE CONVERSATION THAT STORED IT with NO grant (audited via own) — another conversation is not_granted; the same name again ⇒ 409 exists, in words an agent can act on', async (H) => {
+    const mine = await H.agent(H.sessions.get('s1').agentToken, 'agent-okta');
+    const theirs = await H.agent(H.sessions.get('s2').agentToken, 'agent-okta');
+    const again = await H.go('/api/agent/vault/totp', { method: 'POST', headers: { authorization: 'Bearer ' + H.sessions.get('s1').agentToken }, body: { name: 'agent-okta', seed: SEED_NEW } });
+    const use = H.audit().filter((l) => l.event === 'vault-totp-use' && l.entry === 'totp:agent-okta' && l.ok);
+    return mine.status === 200 && mine.json.code === H.expect(SEED_OWN) && !mine.raw.includes(SEED_OWN) && theirs.status === 403 && theirs.json.code === 'not_granted' && use.length === 1 && use[0].via === 'own' && again.status === 409 && again.json.code === 'exists' && /pick another name/.test(again.json.error);
+  }],
+  ['a conversation that ENDED AND CAME BACK (a new token, a new registered id, its durable id kept) still gets it; a pending fork (its durable id null, its parent\'s conversation id) does not', async (H) => {
+    const T4 = 'vsst_' + crypto.randomBytes(16).toString('hex'), T5 = 'vsst_' + crypto.randomBytes(16).toString('hex');
+    H.sessions.set('s4', { agentToken: T4, backendSessionId: 'conv-1', _webuiId: 'sess-4-4', conv: 'conv-1', groups: [] });
+    H.sessions.set('s5', { agentToken: T5, backendSessionId: 'conv-1', _webuiId: 'sess-5-5', conv: null, groups: [] });
+    const back = await H.agent(T4, 'agent-okta'), fork = await H.agent(T5, 'agent-okta');
+    H.sessions.delete('s4'); H.sessions.delete('s5');
+    return back.status === 200 && back.json.code === H.expect(SEED_OWN) && fork.status === 403 && fork.json.code === 'not_granted';
+  }],
+  ['the owner\'s Vault window lists it as the agent\'s: provenance agent-typed, the conversation that stored it, «stored by an agent» (origin put)', async (H) => {
+    const l = await H.go('/api/vault/contents');
+    const row = ((l.json && l.json.rows) || []).find((x) => x.entry === 'totp:agent-okta');
+    return !!row && row.provenance && row.provenance.prov === 'agent-typed' && row.provenance.owner === 'conv-1' && row.origin === 'put' && row.kind === 'totp' && !l.raw.includes(SEED_OWN);
+  }],
   ['THE SEED in no answer but the reveal\'s, no audit line, no log; data/vault-grants.json 0600 holds no seed, no code', async (H) => {
-    const leak = H.answers.filter((x) => !x.p.startsWith('/api/vault/reveal') && (x.d.includes(SEED) || x.d.includes(SEED_NEW)));
+    const leak = H.answers.filter((x) => !x.p.startsWith('/api/vault/reveal') && (x.d.includes(SEED) || x.d.includes(SEED_NEW) || x.d.includes(SEED_OWN)));
     const f = path.join(H.dir, VT0.GRANTS_FILE);
     const txt = fs.readFileSync(f, 'utf8'), aud = fs.readFileSync(path.join(H.dir, VE.AUDIT_FILE), 'utf8');
-    return leak.length === 0 && ![SEED, SEED_NEW].some((s) => aud.includes(s) || txt.includes(s) || H.lines.join('\n').includes(s)) && (fs.statSync(f).mode & 0o777) === 0o600;
+    return leak.length === 0 && ![SEED, SEED_NEW, SEED_OWN].some((s) => aud.includes(s) || txt.includes(s) || H.lines.join('\n').includes(s)) && (fs.statSync(f).mode & 0o777) === 0o600;
   }],
 ];
 console.log('⑨ two-step codes (design q-047 L1)');
 {
   const H = await totpHub('shipped');
   for (const [name, fn] of TOTP_CHECKS) { let r = false; try { r = await fn(H); } catch (e) { r = false; console.error('    threw: ' + e.message); } ok(r, name); }
+  // lane vault-agent-own: THE REAL CLI — `vibespace-vault totp add` / `login add` read the value from a 0600 file or stdin (NEVER
+  // argv), the hub answers names; the code answers the storing conversation; a file others can read is refused before any call
+  const cli = (args, { input = null } = {}) => new Promise((res) => {
+    const p = spawn(process.execPath, [path.join(REPO, 'data/bin/vibespace-vault'), ...args], { env: { PATH: process.env.PATH, HOME: H.dir, VIBESPACE_API: `http://127.0.0.1:${H.port}`, VIBESPACE_SESSION_TOKEN: H.sessions.get('s1').agentToken }, stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '', err = ''; p.stdout.on('data', (c) => { out += c; }); p.stderr.on('data', (c) => { err += c; });
+    const k = setTimeout(() => p.kill('SIGKILL'), 15000);
+    p.on('close', (code) => { clearTimeout(k); res({ code, out, err, argv: args.join(' ') }); });
+    p.stdin.end(input == null ? '' : input);
+  });
+  const SEED_CLI = TP.base32Encode(crypto.randomBytes(20)), PW_CLI = ['cli', crypto.randomBytes(9).toString('hex'), 'pw'].join('-');
+  const f600 = path.join(H.dir, 'seed.txt'), f644 = path.join(H.dir, 'open.txt');
+  fs.writeFileSync(f600, `otpauth://totp/Shop:me?secret=${SEED_CLI}&issuer=Shop\n`, { mode: 0o600 }); fs.writeFileSync(f644, SEED_CLI, { mode: 0o644 }); fs.chmodSync(f644, 0o644);
+  const add = await cli(['totp', 'add', 'cli-shop', '--from-file', f600]);
+  const code = await cli(['totp', 'cli-shop']);
+  const open = await cli(['totp', 'add', 'cli-open', '--from-file', f644]);
+  const both = await cli(['totp', 'add', 'cli-two', '--from-file', f600, '--stdin']);
+  const login = await cli(['login', 'add', 'https://shop.example.test', '--user', 'cli-user', '--stdin', '--totp', 'cli-shop'], { input: PW_CLI + '\n' });
+  const kept = H.logins.names().find((x) => x.name === 'web-login:https://shop.example.test#cli-user');
+  const all = [add, code, open, both, login].map((r) => r.out + r.err + r.argv).join('\n');
+  ok(add.code === 0 && /stored the two-step code cli-shop/.test(add.out) && code.code === 0 && code.out.startsWith(H.expect(SEED_CLI) + ' (') && login.code === 0 && /stored the login cli-user on https:\/\/shop\.example\.test/.test(login.out) && !!kept && kept.owner === 'conv-1' && kept.source === 'agent-typed',
+    'THE REAL CLI: `totp add <name> --from-file <0600>` stores the otpauth link, `totp <name>` answers ITS code with no grant, `login add … --stdin --totp` stores a web login this conversation owns (agent-typed)', { add, code: code.out, login, kept });
+  ok(open.code === 1 && /readable by others/.test(open.err) && both.code === 2 && /exactly one of --from-file/.test(both.err) && !all.includes(SEED_CLI) && !all.includes(PW_CLI),
+    '…a file others can read is refused (chmod 600 named), --from-file with --stdin is refused; no answer, no error and no command line holds the seed or the password', { open: open.err, both: both.err });
   H.close();
 }
 
@@ -357,9 +413,11 @@ console.log('⑩ MUTANTS — each RED');
     ['the agent door answers the SEED', {
       totpSrc: TS.replace('return { ok: true, name: String(name), code: r.code, secondsLeft: r.secondsLeft, period: r.period };', 'return { ok: true, name: String(name), code: r.code, secondsLeft: r.secondsLeft, period: r.period, seed: withRecord(entry, (rec) => ({ ok: true, seed: rec.seed })).seed };'),
       routesSrc: RS.replace('return r.ok ? res.json({ ok: true, name: r.name, code: r.code, secondsLeft: r.secondsLeft, period: r.period }) : answer(res, r);', 'return r.ok ? res.json(r) : answer(res, r);') }],
-    ['the agent door without the grant', { totpSrc: TS.replace('const v = T.useVerdict({ grants, entry, caller, vaultState: vaultState() });', "const v = vaultState() === 'unlocked' ? { ok: true, grant: { subject: 'none' } } : T.useVerdict({ grants, entry, caller, vaultState: vaultState() });") }],
-    ['a conversation\'s grant outlives its run', { totpSrc: TS.replace('const v = T.useVerdict({ grants, entry, caller, vaultState: vaultState() });', 'const v = T.useVerdict({ grants: grants.map((g) => (g.run ? { ...g, run: caller && caller.run } : g)), entry, caller, vaultState: vaultState() });') }],
+    ['the agent door without the grant', { totpSrc: TS.replace('const v = T.useVerdict({ grants, entry, caller, vaultState: vaultState(), owner: ownerOf(entry) });', "const v = vaultState() === 'unlocked' ? { ok: true, grant: { subject: 'none' } } : T.useVerdict({ grants, entry, caller, vaultState: vaultState(), owner: ownerOf(entry) });") }],
+    ['a conversation\'s grant outlives its run', { totpSrc: TS.replace('const v = T.useVerdict({ grants, entry, caller, vaultState: vaultState(), owner: ownerOf(entry) });', 'const v = T.useVerdict({ grants: grants.map((g) => (g.run ? { ...g, run: caller && caller.run } : g)), entry, caller, vaultState: vaultState(), owner: ownerOf(entry) });') }],
     ['a view with no audit line', { totpSrc: TS.replace("    vault.audit('vault-totp-view', { who: w, ip, by: 'human', entry });\n", '') }],
+    ['an agent\'s OWN seed still needs a grant (lane vault-agent-own)', { totpSrc: TS.replace('vaultState: vaultState(), owner: ownerOf(entry) });   // owner: lane vault-agent-own', 'vaultState: vaultState(), owner: null });   // owner: lane vault-agent-own') }],
+    ['an agent\'s add answers the seed back (lane vault-agent-own)', { routesSrc: RS.replace('return r.ok ? res.json({ ok: true, name: r.name, entry: r.entry }) :', 'return r.ok ? res.json({ ok: true, name: r.name, entry: r.entry, seed: String(seed || uri || \'\') }) :') }],
     ['the view pace forgotten', { totpSrc: TS.replace('const p = VI.paceVerdict(mine, t, T.VIEW_PACE_MAX);', 'const p = { ok: true };').replace('const c = p.ok ? VI.paceVerdict(viewAll, t, T.VIEW_PACE_CEILING) : p;', 'const c = p;') }],
     ['看码 lets an agent token through', { routesSrc: RS.replace("app.get('/api/vault/totp/:name', noStore(person((req) => totp.view(whoT(req), req.params.name, { ip: ipOf(req) }))));", "app.get('/api/vault/totp/:name', noStore((req, res) => answer(res, totp.view(whoT(req), req.params.name, { ip: ipOf(req) }))));") }],
     ['a deleted entry\'s grants outlive it (a new seed under the old name is covered)', { totpSrc: TS.replace('    if (!dropGrantsOf(entry)) return named(\'failed\', `${GRANTS_FILE} could not be read or written — nothing was deleted`);\n', '').replace('    if (!dropGrantsOf(entry)) return named(\'failed\', `${GRANTS_FILE} could not be read or written — nothing is stored`);   // a stale grant never covers a new seed\n', '') }],
@@ -547,6 +605,24 @@ console.log('⑫ agents: mint / put in their own namespace (q-043 §9, lane vaul
   ok(rvBearer.status === 403 && rvBearer.json.code === 'human_only', 'the person reveal door refuses a bearer even past the sign-in gate (human_only) — only the owner reveals a value', rvBearer);
   const names = v2.secretNames().map((x) => x.name).sort();
   ok(JSON.stringify(names) === JSON.stringify(['agent:conv-NINE/signup-pw', 'agent:conv-NINE/vendor', 'agent:job-j9/token']), 'every entry landed under the caller\'s OWN scope (conv-NINE / job-j9) — the agent chose none of them', names);
+  // lane vault-agent-own: a conversation with a DURABLE id (its CLI session id — a resume keeps it) names a NEW entry by it, so a
+  // conversation that ended and came back still owns it; a pending fork (it borrows its parent's id) falls back to its own
+  // registered id; a mint records its --for (the one host a run sends it to without asking)
+  const TOKD = 'vsst_' + crypto.randomBytes(16).toString('hex'), TOKF = 'vsst_' + crypto.randomBytes(16).toString('hex');
+  sessions2.set('sess-31-1', { agentToken: TOKD, _webuiId: 'sess-31-1', claudeSessionId: 'conv-durable-1', name: 'Chat Durable' });
+  sessions2.set('sess-32-1', { agentToken: TOKF, _webuiId: 'sess-32-1', claudeSessionId: 'conv-durable-1', _forkRequested: true, _forkSourceId: 'conv-durable-1', name: 'Chat Fork' });   // a PENDING fork: it still carries its source's id
+  const dm = await H('/api/agent/vault/mint', { bearer: TOKD, body: { name: 'site-pw', for: 'https://api.example.com/login' } });
+  const dp = await H('/api/agent/vault/put', { bearer: TOKD, body: { name: 'okta-seed', value: ['put', crypto.randomBytes(6).toString('hex')].join('-') } });
+  const fm = await H('/api/agent/vault/mint', { bearer: TOKF, body: { name: 'fork-pw' } });
+  const dn = v2.secretNames().find((x) => x.name === 'agent:conv-durable-1/site-pw') || {};
+  const forkPending = require(path.join(REPO, 'src/claude-lock-capture.js')).addressableId(sessions2.get('sess-32-1')) === null;
+  ok(dm.status === 200 && dm.json.ref === 'vault://agent:conv-durable-1/site-pw' && dp.json.name === 'agent:conv-durable-1/okta-seed' && dn.forHost === 'https://api.example.com/login' && dn.prov === 'minted' && forkPending && fm.json.name === 'agent:sess-32-1/fork-pw',
+    'lane vault-agent-own: mint / put name a NEW entry by the conversation\'s DURABLE id (kept across a resume) and a mint records its --for; a pending fork names its own registered id, never its parent\'s', { dm: dm.json, dp: dp.json, fm: fm.json, forHost: dn.forHost, forkPending });
+  // the review: --for is shown to the owner on a card — a control or direction character never survives the mint
+  const cm = await H('/api/agent/vault/mint', { bearer: TOKD, body: { name: 'ctl-pw', for: 'api.example.com\u202e\nHosts: elsewhere.example.org' } });
+  const cn = v2.secretNames().find((x) => x.name === 'agent:conv-durable-1/ctl-pw') || {};
+  ok(cm.status === 200 && typeof cn.forHost === 'string' && !/[\u0000-\u001f\u202a-\u202e]/.test(cn.forHost) && cn.forHost === 'api.example.comHosts: elsewhere.example.org', 'a mint\'s --for keeps no control / direction character (it reaches the owner\'s card)', cn.forHost);
+  sessions2.delete('sess-31-1'); sessions2.delete('sess-32-1');
   v2.lock('test');
   const ml = await H('/api/agent/vault/mint', { body: { name: 'z' } });
   const pl = await H('/api/agent/vault/put', { body: { name: 'z', value: 'v' } });

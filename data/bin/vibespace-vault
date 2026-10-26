@@ -25,6 +25,10 @@ CC.cliStart({ tool: 'vibespace-vault', flags: ['--call-timeout'] });
 // is for (ONE question in their For you tray — nothing waits on it); their answer is a grant (one run, or every run for 8
 // hours; a lock ends it). `uses` = this conversation's grants, its open requests and its own uses (entry, purpose, when,
 // outcome, receipt) — names and codes, never a value.
+// lane vault-agent-own (the owner 2026-10-26: 「它自己存的使用为啥还要我的允许？」): what THIS conversation stored itself (mint / put,
+// `totp add`, `login add`) is its own to use — no switch, no grant, no card (a minted value going to another host than its
+// `--for` asks the user once per host). A seed or a password you hold goes in as ITS KIND: `totp add` (the vault computes the
+// code) and `login add` (the browser kernel fills it) — never a free `put`; you never need the value again.
 // lane vault-paste-request (the owner 2026-10-23: 「应该允许你给我弹一个保险库输入框让我直接 paste 进去」): `request "<what>" --purpose
 // "<why>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>]` — the SAME verb's second shape (the first
 // argument is words, not a vault:// reference): ONE item in the user's For you tray with a masked box; the user pastes the
@@ -38,10 +42,18 @@ const USAGE = [
   'usage — the vault that seals every credential this VibeSpace stores (unlocked only by the user\'s second password):',
   '  vibespace-vault [status]   the state: unlocked / locked / not set up',
   '  vibespace-vault lock       lock it now — every stored credential stays sealed until the user unlocks it again',
-  '  vibespace-vault totp <name> [--json]   the CURRENT two-step code of <name> + the seconds it has left — when the user',
-  '                             granted it to this conversation (Vault window ▸ 用于…); never the seed',
-  '  vibespace-vault list       the stored secrets you may use in a run (the user opened them, or granted one to you) — a',
-  '                             reference each, never a value',
+  '  vibespace-vault totp <name> [--json]   the CURRENT two-step code of <name> + the seconds it has left — when this',
+  '                             conversation added it (totp add) or the user granted it (Vault window ▸ 用于…); never the seed',
+  '  vibespace-vault totp add <name> --from-file <0600 file> | --stdin',
+  '                             store a two-step seed you hold (the otpauth:// link or the base32 seed) as a REAL two-step entry:',
+  '                             the vault computes its code (`totp <name>`, no grant for this conversation) — you never read it back',
+  '  vibespace-vault login add <origin> --user <name> --from-file <0600 file> | --stdin [--totp <name>]',
+  '                             store a website login you hold (its password) as a web-login entry, optionally paired with a two-step',
+  '                             entry YOU added (totp add): `vibespace-browser login <origin> --user <name>` fills it (the kernel; no grant for this',
+  '                             conversation) — you never see the password again',
+  '                             A seed or a password goes in as ITS KIND (totp add / login add), never as a free `put`.',
+  '  vibespace-vault list       the stored secrets you may use in a run (the ones this conversation stored, the ones the user',
+  '                             opened, or granted to you) — a reference each, never a value',
   '  vibespace-vault request <vault://…> --for "<purpose>"',
   '                             ask the user for an entry, with what you will run with it: ONE question in their For you tray;',
   '                             nothing waits on it — `uses` shows their answer (once: your next run · 8h: every run for 8 hours)',
@@ -56,7 +68,9 @@ const USAGE = [
   '                             (entry, purpose, when, outcome, receipt) — never a value',
   '  vibespace-vault run [--env NAME=vault://<store>/<row>/<field>]… [--file NAME=vault://…|@<template>]… [--stdin vault://…] [--timeout <s>] -- <command…>',
   '                             run a command that needs a stored secret WITHOUT seeing it: the hub injects it (env / a 0600 file /',
-  '                             stdin — never the command line), the user allows each new command shape (once, or always), and the',
+  '                             stdin — never the command line), the user allows each new command shape (once, or always) — a',
+  '                             secret THIS conversation stored runs without asking anyone (a minted one sent to a host other than',
+  '                             its --for asks the user once per host) — and the',
   '                             output comes back with the secret blanked to [vault:<store>/<row>/<field>]. In the command,',
   '                             $VAULT_FILE{NAME} or $VAULT_FILE{<store>/<row>/<field>} is the PATH of a 0600 file holding it; a',
   '                             template file names a value as $VAULT{<store>/<row>/<field>}. Refused by name: tools that print,',
@@ -66,11 +80,14 @@ const USAGE = [
   '  vibespace-vault mint <name> [--length 24] [--charset ascii-printable|alnum|digits] [--for <host/service>]',
   '      the HUB makes a random secret and seals it under agent:<this conversation>/<name>; you get the name + a',
   '      vault:// reference and NEVER the value (the user can reveal it in ⚙ System ▸ Vault…). For registering an',
-  '      account, setting a service password, generating a token — a secret you do not need to read.',
+  '      account, setting a service password, generating a token — a secret you do not need to read. --for names the',
+  '      host it is for: a run sending it there (or a known tool naming no host) asks nobody; another host — or a',
+  '      shell / script whose destination cannot be told — asks the user once.',
   '  vibespace-vault put <name> --from-file <0600 file> | --stdin',
   '      seal a value you ALREADY have (a key a vendor page gave you) under agent:<this conversation>/<name>. The value',
   '      rides a 0600 file or stdin — NEVER the command line (argv is readable). The vault records that you saw the',
-  '      plaintext; rotate it when you can (the transcript\'s copy is not protected).',
+  '      plaintext; rotate it when you can (the transcript\'s copy is not protected). This conversation runs with',
+  '      it without asking anyone. A two-step seed or a website password is NOT a put: use totp add / login add.',
   '',
   '  (unlock, set up and change are the user\'s, from the page: ⚙ System ▸ Vault… — never ask for the password)',
 ].join('\n');
@@ -129,6 +146,7 @@ async function requestCmd(rest) {
   const why = out['--for'] !== undefined ? out['--for'] : out['--purpose'];
   if (positional.length !== 1 || why === undefined) { console.error('vibespace-vault: request <vault://…> --for "<what you will run with it, and why>"  ·  or ask the user to paste one: request "<what>" --purpose "<why>"'); process.exit(2); }
   const d = await callCoded('POST', '/api/agent/vault/request', { entry: positional[0], purpose: why }, 'request');
+  if (d.already === 'own') { console.log(`${d.ref} is this conversation's own — it stored it, so it runs without asking anyone: vibespace-vault run --env NAME=${d.ref} -- <command>`); return; }   // lane vault-agent-own
   if (d.already === 'open') { console.log(`${d.ref} is already open for runs — run it (a new kind of command still shows the user its card first)`); return; }
   if (d.already === 'granted') { console.log(`${d.ref} is already granted to this conversation (${d.once ? 'for one run' : 'for every run'} until ${whenAt(d.until)}) — run it`); return; }
   if (d.filed) { console.log(`asked the user for ${d.ref}; nothing waits on it`); console.log(d.filed); }   // lane chat-needs-you-card: the hub's line (the card + the tray)
@@ -220,6 +238,44 @@ async function mint(rest) {
   console.log('  reference: ' + d.ref);
   console.log('  ' + (d.provenance || 'agent minted · never shown to the agent') + ' — the value is sealed; you never see it.');
   console.log('  The user can reveal it in ⚙ System ▸ Vault… behind the second password (it is meant to be typed somewhere).');
+  console.log(d.for ? `  Made for ${d.for}: a run of yours sending it there (or a known tool naming no host) asks nobody; another host — or a shell / script whose destination cannot be told — asks the user once.` : '  No --for: a known tool naming no host asks nobody; each host it goes to (or each shell / script command) asks the user once.');   // lane vault-agent-own
+}
+
+/** lane vault-agent-own: a value the agent holds, from a 0600 file or stdin — NEVER the command line (argv is readable). One
+ *  trailing newline a file / echo adds is dropped; the value itself is kept. */
+function secretIn(out, verb) {
+  const hasFile = out['--from-file'] !== undefined, hasStdin = !!out['--stdin'];
+  if (hasFile === hasStdin) { console.error(`vibespace-vault: ${verb} needs exactly one of --from-file <0600 file> or --stdin (never the value on the command line)`); process.exit(2); }
+  let value;
+  if (hasFile) {
+    const file = out['--from-file'];
+    let st; try { st = fs.statSync(file); } catch (e) { console.error('vibespace-vault: cannot read ' + file + ' (' + (e && e.code) + ')'); process.exit(1); }
+    if (st.mode & 0o077) { console.error('vibespace-vault: ' + file + ' is readable by others (mode ' + (st.mode & 0o777).toString(8) + ') — the plaintext must be private; run: chmod 600 ' + file); process.exit(1); }
+    value = fs.readFileSync(file, 'utf8');
+  } else value = fs.readFileSync(0, 'utf8');
+  value = value.replace(/\r?\n$/, '');
+  if (!value) { console.error('vibespace-vault: the value is empty'); process.exit(1); }
+  return value;
+}
+/** lane vault-agent-own: `totp add <name> --from-file | --stdin` — the otpauth:// link or the seed becomes the two-step entry
+ *  `totp:<name>`, this conversation's own: its code answers here with no grant; the seed is never read back. */
+async function totpAdd(rest) {
+  const { out, positional } = parseFlags(rest, { '--from-file': 'value', '--stdin': 'bool' });
+  if (positional.length !== 1) { console.error('vibespace-vault: totp add <name> --from-file <0600 file> | --stdin   (the otpauth:// link or the base32 seed — never on the command line)'); process.exit(2); }
+  const text = secretIn(out, 'totp add');
+  const d = await callCoded('POST', '/api/agent/vault/totp', { name: positional[0], ...(/^otpauth:\/\//i.test(text.trim()) ? { uri: text.trim() } : { seed: text.trim() }) }, 'totp add');
+  console.log(`stored the two-step code ${d.name} — the seed is sealed; you never read it back`);
+  console.log(`  its code: vibespace-vault totp ${d.name}   (no grant: this conversation stored it)`);
+}
+/** lane vault-agent-own: `login add <origin> --user <name> --from-file | --stdin [--totp <name>]` — a website login this
+ *  conversation holds becomes a web-login entry it owns: the kernel fills it (`vibespace-browser login`), no grant here. */
+async function loginAdd(rest) {
+  const { out, positional } = parseFlags(rest, { '--user': 'value', '--from-file': 'value', '--stdin': 'bool', '--totp': 'value' });
+  if (positional.length !== 1 || out['--user'] === undefined) { console.error('vibespace-vault: login add <origin> --user <name> --from-file <0600 file> | --stdin [--totp <totpname>]   (the password — never on the command line)'); process.exit(2); }
+  const pw = secretIn(out, 'login add');
+  const d = await callCoded('POST', '/api/agent/vault/login', { origin: positional[0], username: out['--user'], loginPassword: pw, ...(out['--totp'] !== undefined ? { totpName: out['--totp'] } : {}) }, 'login add');
+  console.log(`stored the login ${d.user} on ${d.origin} — the password is sealed; you never read it back`);
+  console.log(`  sign in with it: vibespace-browser login ${d.origin} --user ${d.user}   (the kernel fills it; no grant: this conversation stored it)`);
 }
 
 async function put(rest) {
@@ -250,6 +306,7 @@ async function main() {
   const args = process.argv.slice(2);
   const [cmd = 'status'] = args;
   if (cmd === 'totp') {
+    if (args[1] === 'add' && args.slice(2).some((a) => a !== '--json')) return totpAdd(args.slice(2));   // lane vault-agent-own (`totp add` alone = the code of an entry named «add»)
     const rest = args.slice(1), json = rest.includes('--json'), names = rest.filter((a) => a !== '--json');
     if (names.length !== 1 || names[0].startsWith('-')) { console.error('vibespace-vault: totp takes ONE name\n' + USAGE); process.exit(2); }
     const d = await call('GET', '/api/agent/vault/totp/' + encodeURIComponent(names[0]));
@@ -262,13 +319,14 @@ async function main() {
   if (cmd === 'mint') return mint(args.slice(1));
   if (cmd === 'put') return put(args.slice(1));
   if (cmd === 'request') return requestCmd(args.slice(1));
+  if (cmd === 'login') { if (args[1] === 'add') return loginAdd(args.slice(2)); console.error('vibespace-vault: login add <origin> --user <name> --from-file <0600 file> | --stdin [--totp <name>]\n' + USAGE); process.exit(2); }   // lane vault-agent-own
   if (args.length > 1) { console.log(USAGE); process.exit(2); }
   if (cmd === 'status') return print(await call('GET', '/api/agent/vault/state'));
   if (cmd === 'lock') { const d = await call('POST', '/api/agent/vault/lock'); print(d); return; }
   if (cmd === 'list') {
     const d = await call('GET', '/api/agent/vault/runnable');
     if (!d.entries || !d.entries.length) { console.log('no stored secret is open for your runs — ask the user for one with its purpose: vibespace-vault request <vault://…> --for "<why>" (they open it in ⚙ System ▸ Vault…, or grant it to you from For you)'); return; }
-    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : ''}`);
+    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'own' ? '  yours: this conversation stored it — runs without asking' : e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : ''}`);
     return;
   }
   if (cmd === 'uses') return usesCmd();
