@@ -80,6 +80,13 @@ try {
   ok(/is not the signed release/.test(SIG.manifestMatches(good, { sha256: 'f'.repeat(64), version: '1.2.3' }).why), 'hub: another build\'s bytes ⇒ unsigned-local-build');
   ok(SIG.manifestMatches(good, { sha256: good.sha256, version: '1.2.4' }).signed === false && SIG.manifestMatches(good, { sha256: good.sha256, version: '1.2.3' }).signed === true, 'hub: the version must match too; these bytes + this version ⇒ signed');
   ok(JSON.stringify(SIG.parseTrust(SIG.trustText([row(K1)], { from: 'bundle', at: 'x' }))) === JSON.stringify([row(K1)]) && SIG.parseTrust('{}') === null && SIG.parseTrust('junk') === null, 'trusted-keys.json round-trips; junk is no pin');
+  // ── lane apple-signing: the release's prebuilt Mac screen helper rides the record INSIDE the signed message ──
+  const HROW = { version: 'vs-11f32156ba0a', sha256: 'c'.repeat(64), identity: { kind: 'developer-id', teamId: 'VSTEAM0001', identifier: 'com.problemfactory.vibespace.screen' } };
+  const hr = SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, helper: HROW });
+  ok(SIG.verify([row(K1)], B, '1.2.3', hr, C).ok && JSON.stringify(hr.helper) === JSON.stringify(HROW) && /\nhelper vs-11f32156ba0a c{64} developer-id VSTEAM0001 com\.problemfactory\.vibespace\.screen\n$/.test(SIG.bundleMessage('1.2.3', hr.sha256, hr.keyId, hr).toString()), 'lane apple-signing: a record with the helper row (the Mac screen helper\'s version, sha256, Developer ID identity) verifies; the row is the last line of the signed message', hr.helper);
+  ok(SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: { ...HROW, sha256: 'd'.repeat(64) } }, C).code === 'bad-signature' && SIG.verify([row(K1)], B, '1.2.3', { ...good, helper: HROW }, C).code === 'bad-signature' && SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: undefined }, C).code === 'bad-signature', 'a TAMPERED helper row, one ADDED to a record signed without it, or one REMOVED ⇒ bad-signature (the row is inside the signed message)');
+  ok(SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: { ...HROW, identity: { kind: 'nope' } } }, C).code === 'malformed' && SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: 'x' }, C).code === 'malformed' && SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: { ...HROW, identity: { kind: 'developer-id', teamId: null, identifier: null } } }, C).code === 'malformed', 'a malformed helper row (an unknown kind, a non-object, a Developer ID row without its team) ⇒ malformed');
+  ok(SIG.verify([row(K1)], B, '1.2.3', SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, helper: { version: 'vs-x', sha256: 'c'.repeat(64), identity: { kind: 'adhoc' } } }), C).ok && (() => { try { SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, helper: { version: 'v', sha256: 'bad' } }); return false; } catch (e) { return /names no sha256/.test(e.message); } })(), 'an ad-hoc row (no team, no identifier) signs and verifies; sign() refuses a malformed row by name');
   // ── fix r2: the floor + the signed rollback (RED-1), trust on first use (RED-2), the chain keeps siblings (low ④) ──
   console.log('— ① fix r2: the version floor, the signed rollback, trust on first use, a rotation keeps the siblings —');
   const Fo = (o) => ({ ...C, ...o });
@@ -516,6 +523,21 @@ try {
   const rBytes = fs.readFileSync(path.join(R, 'data/bin/vibespace-agentd.js'));
   ok(ss.status === 0 && man && SIG.verify([{ keyId: rowM[1], publicKey: rowM[2] }], rBytes, '3.0.1', man, C).ok && fs.existsSync(path.join(R, 'data/bin/vibespace-agentd.manifest.json')), 'sign-agentd writes release/agentd/manifest.json that verifies (and the copy beside the bundle)', ss.stdout + ss.stderr);
   ok(man && JSON.stringify(man.keys) === JSON.stringify([{ keyId: rowM[1], publicKey: rowM[2] }]) && SIG.verify([], rBytes, '3.0.1', man, { ...C, tofu: true }).tofu === true, 'fix r2: the manifest SIGNS the release key set (RELEASE_KEYS) — a device that trusts no key can take it on first use');
+  ok(man && man.helper === undefined, 'lane apple-signing: no prebuilt Mac screen helper in data/bin/helpers ⇒ no helper row (the record as before)');
+  { // lane apple-signing: the prebuilt + its identity record in data/bin/helpers ⇒ the row is signed into the record; a record that does not describe the bytes is refused by name
+    const hd = path.join(R, 'data/bin/helpers'); fs.mkdirSync(hd, { recursive: true });
+    const hbytes = Buffer.from('#!/bin/sh\necho a fake universal helper\n');
+    fs.writeFileSync(path.join(hd, 'vibespace-screen'), hbytes); fs.writeFileSync(path.join(hd, 'vibespace-screen.version'), 'vs-11f32156ba0a\n');
+    const hsha = crypto.createHash('sha256').update(hbytes).digest('hex');
+    fs.writeFileSync(path.join(hd, 'vibespace-screen.identity.json'), JSON.stringify({ version: 'vs-11f32156ba0a', sha256: hsha, kind: 'developer-id', teamId: 'VSTEAM0001', identifier: 'com.problemfactory.vibespace.screen', notarized: true, at: 'x' }));
+    const sh = run('sign-agentd.mjs');
+    const manH = (() => { try { return JSON.parse(fs.readFileSync(path.join(R, 'release/agentd/manifest.json'), 'utf8')); } catch { return null; } })();
+    ok(sh.status === 0 && manH && JSON.stringify(manH.helper) === JSON.stringify({ version: 'vs-11f32156ba0a', sha256: hsha, identity: { kind: 'developer-id', teamId: 'VSTEAM0001', identifier: 'com.problemfactory.vibespace.screen' } }) && SIG.verify([{ keyId: rowM[1], publicKey: rowM[2] }], rBytes, '3.0.1', manH, C).ok && /helper vs-11f32156ba0a developer-id by team VSTEAM0001/.test(sh.stdout), 'sign-agentd signs the helper row (version, sha256, identity — never the notarization flag or the date) from data/bin/helpers and says so', sh.stdout + sh.stderr);
+    fs.writeFileSync(path.join(hd, 'vibespace-screen.identity.json'), JSON.stringify({ version: 'vs-11f32156ba0a', sha256: 'f'.repeat(64), kind: 'developer-id', teamId: 'VSTEAM0001', identifier: 'com.problemfactory.vibespace.screen' }));
+    const shBad = run('sign-agentd.mjs');
+    ok(shBad.status === 2 && /the helper's identity record describes sha256 ffffffffffff…, the prebuilt is/.test(shBad.stderr), 'an identity record that does not describe the prebuilt (a stale pair) is refused by name — nothing signed', shBad.stderr);
+    fs.rmSync(hd, { recursive: true, force: true });
+  }
   const rbBad = run('sign-agentd.mjs', ['--allow-downgrade-to', '3.0.0']);
   ok(rbBad.status === 2 && /--allow-downgrade-to 3\.0\.0 is not this bundle's version 3\.0\.1/.test(rbBad.stderr), 'sign-agentd --allow-downgrade-to naming another version is refused (exit 2, by name)', rbBad.stderr);
   const rbOk = run('sign-agentd.mjs', ['--allow-downgrade-to', '3.0.1']);

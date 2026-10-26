@@ -213,6 +213,8 @@ export function windowStreamText(code, { title = '', machine = '', why = '' } = 
   if (code === 'no_helper') return t('the Mac has no screen helper yet — install the Command Line Tools there (xcode-select --install) or update VibeSpace');
   if (code === 'screen_permission') return t('Screen Recording is off for vibespace-screen on the Mac');
   if (code === 'helper_changed_regrant') return t('the Mac’s screen helper was updated and needs its Screen Recording switch again');
+  if (code === 'helper_signed_regrant') return t('the Mac’s signed screen helper replaced the old one and needs its Screen Recording switch one last time'); // lane apple-signing
+  if (code === 'helper_unsigned') return t('the screen helper the hub offered the Mac was refused: it is not signed by the VibeSpace release team');
   return t('The stream of “{title}” stopped: {why}', { title, why: why || code || '?' });
 }
 

@@ -17,6 +17,14 @@
  *   else `no_helper` naming both recipes. A REPLACED helper whose old version held its Screen Recording grant is a NEW TCC
  *   client (an ad-hoc grant = path + cdhash: measured), so its state says `regrant` until the facts see the grant again — the
  *   plan then refuses `helper_changed_regrant`, never a bare screen_permission.
+ *   THE IDENTITY (lane apple-signing — docs/design-apple-signing.zh.md §2–§3): a pushed prebuilt is JUDGED before it is put at the
+ *   fixed path (= before any exec; src/mac-helper-identity.js: `codesign --verify --strict` + `-dv --verbose=4` → developer-id /
+ *   adhoc / other / unsigned → swapVerdict against HELPER_TEAM_IDS): refused BY NAME `helper_unsigned` (the file removed, the state
+ *   says so, the local build stays the fallback — ad-hoc by construction, never pushed); a Developer ID build by a pinned team is
+ *   taken even over an installed ad-hoc build of the SAME version — the LAST re-grant (`helper_signed_regrant`): tccd keys a
+ *   Developer ID helper on its requirement (identifier + Team ID), so every later version keeps the grant (regrantVerdict). The
+ *   facts carry `helper.identity` + `helper.wantSigned`; the offer answer carries them too and the hub pushes its signed prebuilt
+ *   once (src/server/desktop-webrtc.js). The fast path (version file + binary, nothing pushed) still runs NOTHING.
  * FACTS (`stream-facts` on a Mac): the helper's own (run disclaimed, so its TCC answer is ITS grant) — displays, windows, TCC,
  *   the lock, its version — and the helper's state; kept FACTS_MS (a window source re-reads once when its window is not in them).
  *   THE GRANT'S EVENTS (lane stream-mac-ax-respawn): the helper keeps the last tcc a facts read saw; every read, and the
@@ -51,6 +59,7 @@
  */
 const SP = require('../stream-plan.js');
 const SRC = require('./mac-helper-source.js');
+const MI = require('../mac-helper-identity.js'); // lane apple-signing: who signed a pushed helper, and whether it goes to the fixed path
 const SND = require('../sound-model.js'); // lane speaker-passthrough-v1: the sound's limits + the Opus packet's samples
 const MW = require('../machine-window.js');
 
@@ -62,7 +71,7 @@ const named = (code, error, extra) => ({ ok: false, code, error, ...(extra || {}
 const RECIPE = 'on the Mac: `xcode-select --install` (the Command Line Tools — the agent then builds its screen helper itself), or put the release\'s prebuilt helper in the hub\'s data/bin/helpers/';
 
 /** THE HELPER of this Mac: its fixed place, version, build / prebuilt, TCC memory. */
-function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, version = SRC.VERSION, source = SRC.SOURCE, env = process.env } = {}) {
+function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, version = SRC.VERSION, source = SRC.SOURCE, env = process.env, teamIds = MI.HELPER_TEAM_IDS, codesign = MI.MAC_CODESIGN } = {}) {
   const P = SP.macHelperPaths(home);
   let building = null;
   const run = (file, args, timeout = RUN_MS, more = null) => new Promise((resolve) => {
@@ -78,6 +87,14 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
     const dirs = [...new Set([r.err ? '' : r.stdout.trim(), '/Library/Developer/CommandLineTools'].filter(Boolean))];
     for (const d of dirs) for (const f of [`${d}/usr/bin/swiftc`, `${d}/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc`]) if (isFile(f)) return '/usr/bin/swiftc'; // statSync follows the CLT's swiftc → swift-frontend link
     return null;
+  }
+  /** Who signed a file (lane apple-signing): the strict verification, then the facts — both through codesign ON THE MAC. → identityVerdict's */
+  async function identityOf(file) {
+    const [vf, dv] = MI.verifyPlan(file, codesign);
+    const v = await run(vf.file, vf.args, 30000);
+    if (v.err) return { kind: 'unsigned', teamId: null, identifier: null, cdhash: null, authority: [], why: `codesign --verify refused it (${(v.stderr.trim().split('\n').pop() || v.err.message || '').slice(0, 160)})` };
+    const d = await run(dv.file, dv.args, 30000);
+    return MI.identityVerdict(MI.parseCodesignInfo(d.stderr || d.stdout), { teamIds });
   }
   async function build(swiftc) {
     const dir = `${P.dir}/.build-${process.pid}`, src = `${dir}/vibespace-screen.swift`, out = `${dir}/vibespace-screen`;
@@ -98,28 +115,44 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
   }
   function view(extra = {}) {
     const st = readState();
-    return { state: 'ready', bin: P.bin, dir: P.dir, version, have: installed(), how: st.how || null, buildMs: st.buildMs == null ? null : st.buildMs, regrant: !!st.regrant, granted: !!st.granted, ...extra };
+    const identity = st.identity && typeof st.identity === 'object' ? st.identity : null;
+    return { state: 'ready', bin: P.bin, dir: P.dir, version, have: installed(), how: st.how || null, buildMs: st.buildMs == null ? null : st.buildMs, regrant: !!st.regrant, granted: !!st.granted, identity, wantSigned: MI.wantSigned(identity, teamIds), refused: st.refused || null, ...extra };
   }
-  /** → { state: 'ready', bin, … } | { state: 'missing', code: 'no_helper', error, dir, version, have, canBuild } */
+  /** → { state: 'ready', bin, … } | { state: 'missing', code: 'no_helper' | 'helper_unsigned', error, dir, version, have, canBuild } */
   function ensure() {
     const have = installed();
-    if (have === version && isFile(P.bin)) return Promise.resolve(view());
+    const pushed = P.incoming(version);
+    const hasPushed = isFile(pushed);
+    if (have === version && isFile(P.bin) && !hasPushed) return Promise.resolve(view());
     if (building) return building;
     building = (async () => {
       const st = readState();
       const wasGranted = !!(have && st.version === have && (st.granted || st.regrant));
-      let how = null, ms = null, why = null;
+      const from = have && st.version === have && st.identity && typeof st.identity === 'object' ? st.identity : null;
+      let how = null, ms = null, why = null, identity = null, refused = !hasPushed && st.refused && typeof st.refused === 'object' ? st.refused : null; // a refusal stands until a push is judged again
       try { fs.mkdirSync(P.dir, { recursive: true }); } catch { /* the build says it */ }
-      const pushed = P.incoming(version);
-      if (isFile(pushed)) {
-        try { fs.chmodSync(pushed, 0o755); fs.renameSync(pushed, P.bin); how = 'prebuilt'; } catch (e) { why = `the pushed helper could not be put in place (${e && e.code})`; }
+      if (hasPushed) { // lane apple-signing: JUDGED before it is put in place — never exec'd first
+        const v = await identityOf(pushed);
+        const sv = MI.swapVerdict({ installed: have ? { version: have, identity: from } : null, incoming: { version, identity: v }, teamIds });
+        if (sv.take) {
+          try { fs.chmodSync(pushed, 0o755); fs.renameSync(pushed, P.bin); how = 'prebuilt'; identity = v.kind === 'developer-id' ? { ...v, requirement: MI.designatedRequirement({ teamId: v.teamId, identifier: v.identifier }) } : v; } catch (e) { why = `the pushed helper could not be put in place (${e && e.code})`; } // the requirement tccd keys the grant on rides the state (what the facts show)
+        } else {
+          try { fs.unlinkSync(pushed); } catch { /* gone already */ }
+          if (sv.code) { refused = { code: sv.code, why: sv.why, at: now() }; log(`[stream] mac screen helper ${version}: a pushed helper was refused (${sv.code} — ${sv.why})`); }
+        }
       }
+      if (!how && have === version && isFile(P.bin)) { if (refused) writeState({ ...st, refused }); return view(); } // the installed one stays (nothing to swap, or the swap was refused)
       const swiftc = how ? null : await compiler();
-      if (!how && swiftc) { const b = await build(swiftc); if (b.ok) { how = 'built'; ms = b.ms; } else why = b.error; }
-      if (!how) return { state: 'missing', code: 'no_helper', error: why || `the Mac has no screen helper ${version} and no compiler to build it — ${RECIPE}`, dir: P.dir, version, have, canBuild: !!swiftc, archs: SP.MAC_HELPER.archs };
+      if (!how && swiftc) { const b = await build(swiftc); if (b.ok) { how = 'built'; ms = b.ms; identity = { kind: 'adhoc', teamId: null, identifier: null, cdhash: null, authority: [], why: 'built here (codesign -s -)' }; } else why = b.error; }
+      if (!how) {
+        if (refused) { if (hasPushed) writeState({ ...st, refused }); return { state: 'missing', code: 'helper_unsigned', error: `${SP.MAC_WHY.helper_unsigned} (${refused.why})`, dir: P.dir, version, have, canBuild: !!swiftc, archs: SP.MAC_HELPER.archs, refused }; }
+        return { state: 'missing', code: 'no_helper', error: why || `the Mac has no screen helper ${version} and no compiler to build it — ${RECIPE}`, dir: P.dir, version, have, canBuild: !!swiftc, archs: SP.MAC_HELPER.archs };
+      }
       try { fs.writeFileSync(P.version + '.tmp', version); fs.renameSync(P.version + '.tmp', P.version); } catch (e) { return { state: 'missing', code: 'no_helper', error: `the helper's version could not be written (${e && e.code})`, dir: P.dir, version, have, canBuild: !!swiftc }; }
-      writeState({ version, how, buildMs: ms, at: now(), granted: false, regrant: wasGranted, rowAsked: null });
-      log(`[stream] mac screen helper ${version} ${how}${ms != null ? ` in ${ms} ms` : ''}${have ? ` (replaces ${have}${wasGranted ? ' — its Screen Recording grant does not carry over: helper_changed_regrant' : ''})` : ''}`);
+      const regrant = MI.regrantVerdict({ wasGranted, from, to: identity });
+      writeState({ version, how, buildMs: ms, at: now(), granted: false, regrant, rowAsked: null, identity, ...(refused ? { refused } : {}) });
+      const replaced = have ? ` (replaces ${have}${have === version ? ', the ad-hoc build of the same version' : ''}${regrant ? (identity && identity.kind === 'developer-id' ? ' — its Screen Recording grant does not carry over ONE LAST time: helper_signed_regrant (a Developer ID helper keeps it from now on)' : ' — its Screen Recording grant does not carry over: helper_changed_regrant') : wasGranted ? ' — the same Developer ID identity: the grant carries over' : ''})` : '';
+      log(`[stream] mac screen helper ${version} ${how}${ms != null ? ` in ${ms} ms` : ''}${identity ? ` [${identity.kind}${identity.teamId ? ` by team ${identity.teamId}` : ''}]` : ''}${replaced}`);
       return view();
     })().finally(() => { building = null; });
     return building;
@@ -147,8 +180,8 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
   return { paths: P, version, ensure, sawTcc, sawDoor, onTcc, rowAsked, spawnPlan, installed, run };
 }
 
-function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'), log = () => { }, now = Date.now, home = null, helper = null } = {}) {
-  const H = helper || createMacHelper({ execFile, fs, home: home || (env && env.HOME) || require('os').homedir(), log, now, env });
+function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'), log = () => { }, now = Date.now, home = null, helper = null, codesign = MI.MAC_CODESIGN } = {}) {
+  const H = helper || createMacHelper({ execFile, fs, home: home || (env && env.HOME) || require('os').homedir(), log, now, env, codesign });
   let memo = null, inflight = null;
   async function readFacts() {
     const h = await H.ensure();
@@ -177,7 +210,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     if (!plan.ok && f.ok) { f = await facts({ force: true }); plan = f.ok ? SP.planScreen(f, { ...want, kbps: maxKbps }) : f; } // a refusal re-reads once (a window opened a second ago, a grant just given)
     if (!plan.ok) {
       if (plan.code === 'no_helper' && f.helper) return { ...plan, helper: { dir: f.helper.dir, version: f.helper.version, archs: SP.MAC_HELPER.archs } };
-      if ((plan.code === 'screen_permission' || plan.code === 'helper_changed_regrant') && !H.rowAsked()) registerRow(f);
+      if ((plan.code === 'screen_permission' || plan.code === 'helper_changed_regrant' || plan.code === 'helper_signed_regrant') && !H.rowAsked()) registerRow(f);
       return plan;
     }
     return macSource(plan, maxKbps, f);
@@ -189,7 +222,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     if (!f.ok) return f;
     const h = f.helper || {};
     if (h.state !== 'ready') return named(h.code || 'no_helper', h.error || SP.MAC_WHY.no_helper);
-    if (!f.tcc || f.tcc.screen !== 'granted') return named(h.regrant ? 'helper_changed_regrant' : 'screen_permission', h.regrant ? SP.MAC_WHY.helper_changed_regrant : SP.MAC_WHY.screen_permission, { settings: SP.MAC_SETTINGS.screen });
+    if (!f.tcc || f.tcc.screen !== 'granted') { const rc = h.regrant ? SP.macRegrantCode(h) : 'screen_permission'; return named(rc, SP.MAC_WHY[rc], { settings: SP.MAC_SETTINGS.screen }); }
     return { ok: true, platform: 'darwin', helper: { bin: h.bin, version: h.version }, windows: SP.macWindowRows(f) };
   }
   /** THE WINDOW LOOK of src/machine-window.js (window-track: `look()`, fresh) and the screen table (display-facts: `look({ force:
@@ -200,7 +233,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     if (!f.ok) return f;
     const h = f.helper || {};
     if (h.state !== 'ready') return named(h.code || 'no_helper', h.error || SP.MAC_WHY.no_helper);
-    if (windows && (!f.tcc || f.tcc.screen !== 'granted')) return named(h.regrant ? 'helper_changed_regrant' : 'screen_permission', h.regrant ? SP.MAC_WHY.helper_changed_regrant : SP.MAC_WHY.screen_permission, { settings: SP.MAC_SETTINGS.screen });
+    if (windows && (!f.tcc || f.tcc.screen !== 'granted')) { const rc = h.regrant ? SP.macRegrantCode(h) : 'screen_permission'; return named(rc, SP.MAC_WHY[rc], { settings: SP.MAC_SETTINGS.screen }); }
     return f;
   }
   /** Each process's start (epoch ms; a pid that does not run is absent) — `ps -o pid= -o lstart=` in the C locale: a PROCESS read
@@ -392,6 +425,8 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       },
       /** Where the picture sits on the Mac (the helper's started / frame lines) — the injector maps picture pixels with it. */
       inputTarget() { return target; },
+      // lane apple-signing: the helper's identity facts ride the offer answer — the hub pushes its SIGNED prebuilt once when `wantSigned`
+      helper: { dir: H.paths.dir, version: H.version, identity: (f.helper && f.helper.identity) || null, wantSigned: !!(f.helper && f.helper.wantSigned) },
       // lane desktop-handover: ONE still (`desktop-grab`) is the helper's to take, and the helper has no still verb yet — a new verb
       // is a new helper VERSION, and a new version asks the owner to switch Screen Recording on again: it rides the helper's next
       // version, refused by name until then (the hand-over's input works: the session's own sink above)

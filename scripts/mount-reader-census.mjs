@@ -130,7 +130,7 @@ export const ROWS = [
   ['src/server/design-engine.js', 'user-path', 6, 'DOOR\\.blocked\\(', 'the design watch relist: refused by name, never read'],
   ['src/server/desktop-access.js', 'own-tree', 1, null, 'lane desktop-picker-instant: data/desktop-machines.json (the machine rows\' last known state), read once at boot — the server\'s own store'],
   ['src/server/desktop-app-keeper.js', 'own-tree', 1, null, DATA],
-  ['src/server/desktop-webrtc.js', 'own-tree', 3, null, 'lane stream-p3m-build: the prebuilt Mac screen helper the hub pushes to a Mac with no compiler — data/bin/helpers/vibespace-screen (+ .version) in the checkout: its version, its size, its bytes'],
+  ['src/server/desktop-webrtc.js', 'own-tree', 6, null, 'lane stream-p3m-build: the prebuilt Mac screen helper the hub pushes to a Mac with no compiler — data/bin/helpers/vibespace-screen (+ .version) in the checkout: its version, its size, its bytes; lane apple-signing +3: its .identity.json, the release record beside the bundle (data/bin/vibespace-agentd.manifest.json) and the prebuilt\'s digest over a stream — all in the checkout'],
   ['src/server/device-upgrade-watch.js', 'own-tree', 1, null, DATA],
   ['src/server/device-alerts.js', 'own-tree', 1, null, DATA], // lane device-act-audit: the three urgent items' dedup ledger (data/device-alerts.json)
   ['src/server/dial-health-watch.js', 'own-tree', 1, null, DATA], // lane host-stale-dialer: data/dial-health.json (the For-you ledger)

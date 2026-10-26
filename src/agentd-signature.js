@@ -15,12 +15,14 @@
  *   the signed message   'vibespace-agentd-bundle/v1' ‖ version ‖ sha256(bundle) ‖ keyId   (newline-separated)
  *                        [‖ 'keys <keyId>:<publicKey> …'] [‖ 'allow-downgrade-to <version>']  (fix r2: present iff the
  *                        record carries them — a record without them signs the v1 message unchanged)
+ *                        [‖ 'helper <version> <sha256> <kind> <teamId|-> <identifier|->']  (lane apple-signing: the release's
+ *                        prebuilt Mac screen helper — src/mac-helper-identity.js helperRow; present iff the record carries it)
  *   a chain link         'vibespace-agentd-key-link/v1' ‖ by ‖ keyId ‖ publicKey, signed by `by`
  *   a retirement         'vibespace-agentd-key-retire/v1' ‖ keyId, signed by THAT key (its holder retires it)
  *   keyId                the first 16 hex of sha256(the raw 32-byte public key)
  *   the record (= release/agentd/manifest.json = the upgrade control line's `sig`)
  *                        { v: 1, version, sha256, keyId, sig, keys: [{ keyId, publicKey }], allowDowngradeTo?,
- *                          chain: [{ keyId, publicKey, by, sig } | { retire, sig }] }
+ *                          chain: [{ keyId, publicKey, by, sig } | { retire, sig }], helper?: { version, sha256, identity: { kind, teamId, identifier } } }
  *
  * verify → { ok: true, keyId, sha256, viaChain, tofu, rollback, floor, trustAfter } | { ok: false, code, why } — codes:
  * 'malformed' | 'version-mismatch' | 'unknown-key' | 'bad-signature' | 'downgrade'. The digest is ALWAYS computed here
@@ -49,6 +51,11 @@ const SHA_RE = /^[0-9a-f]{64}$/;
 const B64_RE = /^[A-Za-z0-9+/]{1,200}={0,2}$/;
 const MAX_CHAIN = 16;
 const MAX_KEYS = 16;
+// lane apple-signing: the helper row's shape (the same rules as src/mac-helper-identity.js helperRowShape — this file imports nothing)
+const HELPER_KINDS = Object.freeze(['developer-id', 'adhoc', 'other', 'unsigned']);
+const HELPER_VERSION_RE = /^[A-Za-z0-9._-]{1,40}$/;
+const TEAM_RE = /^[A-Z0-9]{10}$/;
+const IDENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/;
 // the DER prefix of an ed25519 SubjectPublicKeyInfo — the raw 32-byte key follows it (RFC 8410)
 const SPKI_ED25519 = '302a300506032b6570032100';
 /** Every refusal a device may answer an upgrade with (the hub reads them as a signature refusal: never retried). */
@@ -80,9 +87,25 @@ function publicKeyOf(privateKey, opts) {
   return pub.subarray(12).toString('base64');
 }
 
+/** The helper row's shape — null when well-formed, else why. */
+function helperShape(row) {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return 'the helper row is not an object';
+  if (typeof row.version !== 'string' || !HELPER_VERSION_RE.test(row.version)) return 'the helper row names no version';
+  if (typeof row.sha256 !== 'string' || !SHA_RE.test(row.sha256)) return 'the helper row names no sha256';
+  const id = row.identity;
+  if (!id || typeof id !== 'object' || Array.isArray(id)) return 'the helper row names no identity';
+  if (!HELPER_KINDS.includes(id.kind)) return 'the helper row\'s identity kind is unknown';
+  if (id.teamId != null && !TEAM_RE.test(String(id.teamId))) return 'the helper row\'s Team ID is not a Team ID';
+  if (id.identifier != null && !IDENT_RE.test(String(id.identifier))) return 'the helper row\'s identifier is not an identifier';
+  if (id.kind === 'developer-id' && (!id.teamId || !id.identifier)) return 'a Developer ID row needs its Team ID and identifier';
+  return null;
+}
+/** The helper row's line inside the signed message (≡ src/mac-helper-identity.js helperRowLine — pinned equal by its suite). */
+const helperLine = (row) => `helper ${row.version} ${row.sha256} ${row.identity.kind} ${row.identity.teamId || '-'} ${row.identity.identifier || '-'}`;
 const bundleMessage = (version, sha256, keyId, extra = {}) => Buffer.from(`${DOMAIN_BUNDLE}\n${version}\n${sha256}\n${keyId}\n`
   + (Array.isArray(extra.keys) ? `keys ${extra.keys.map((k) => `${k.keyId}:${k.publicKey}`).join(' ')}\n` : '')
-  + (extra.allowDowngradeTo != null ? `allow-downgrade-to ${extra.allowDowngradeTo}\n` : ''), 'utf8');
+  + (extra.allowDowngradeTo != null ? `allow-downgrade-to ${extra.allowDowngradeTo}\n` : '')
+  + (extra.helper != null ? `${helperLine(extra.helper)}\n` : ''), 'utf8');
 const linkMessage = (l) => Buffer.from(`${DOMAIN_LINK}\n${l.by}\n${l.keyId}\n${l.publicKey}\n`, 'utf8');
 const retireMessage = (keyId) => Buffer.from(`${DOMAIN_RETIRE}\n${keyId}\n`, 'utf8');
 
@@ -114,6 +137,7 @@ function shapeOf(rec) {
     for (const k of rec.keys) if (!k || typeof k !== 'object' || typeof k.keyId !== 'string' || !KEYID_RE.test(k.keyId) || !b64(k.publicKey, 32)) return 'a key-set row is malformed';
   }
   if (rec.allowDowngradeTo != null && rec.allowDowngradeTo !== rec.version) return 'allowDowngradeTo names another version than the record signs';
+  if (rec.helper != null) { const bad = helperShape(rec.helper); if (bad) return bad; }
   return null;
 }
 
@@ -196,7 +220,8 @@ function verify(publicKeys, bundleBytes, version, record, opts) {
 
 /** The release machine's half: sign a bundle (privateKey = PEM text or a KeyObject). `opts.keys` = the release's key set
  *  (src/agentd/release-keys.js RELEASE_KEYS — signed into the record; default: the signer alone; null: none);
- *  `opts.allowDowngradeTo` = this version, when the release is a deliberate rollback below devices' floors. */
+ *  `opts.allowDowngradeTo` = this version, when the release is a deliberate rollback below devices' floors; `opts.helper` = the
+ *  release's prebuilt Mac screen helper row { version, sha256, identity } (lane apple-signing), signed into the message. */
 function sign(privateKey, bundleBytes, version, opts) {
   const crypto = need(opts);
   if (typeof version !== 'string' || !VERSION_RE.test(version)) throw new Error('agentd-signature: not a version: ' + version);
@@ -205,7 +230,9 @@ function sign(privateKey, bundleBytes, version, opts) {
   const keys = opts.keys === null ? null : (Array.isArray(opts.keys) ? opts.keys : [{ keyId, publicKey }]).map((k) => ({ keyId: k.keyId, publicKey: k.publicKey }));
   if (keys && !keys.some((k) => k.keyId === keyId && k.publicKey === publicKey)) throw new Error('agentd-signature: the signing key is not in the key set it signs');
   if (opts.allowDowngradeTo != null && opts.allowDowngradeTo !== version) throw new Error(`agentd-signature: allowDowngradeTo ${opts.allowDowngradeTo} is not this release's version ${version}`);
-  const extra = { ...(keys ? { keys } : {}), ...(opts.allowDowngradeTo != null ? { allowDowngradeTo: version } : {}) };
+  let helper = null;
+  if (opts.helper != null) { const bad = helperShape(opts.helper); if (bad) throw new Error('agentd-signature: ' + bad); const h = opts.helper; helper = { version: h.version, sha256: h.sha256, identity: { kind: h.identity.kind, teamId: h.identity.teamId || null, identifier: h.identity.identifier || null } }; }
+  const extra = { ...(keys ? { keys } : {}), ...(opts.allowDowngradeTo != null ? { allowDowngradeTo: version } : {}), ...(helper ? { helper } : {}) };
   const sha256 = crypto.createHash('sha256').update(bundleBytes).digest('hex');
   const sig = crypto.sign(null, bundleMessage(version, sha256, keyId, extra), privateKey).toString('base64');
   const chain = Array.isArray(opts.chain) ? opts.chain.map((l) => (l.retire != null ? { retire: l.retire, sig: l.sig } : { keyId: l.keyId, publicKey: l.publicKey, by: l.by, sig: l.sig })) : [];
@@ -274,4 +301,4 @@ function floorText({ floor, honoured = [], at }) {
   return JSON.stringify({ v: 1, floor, honoured: honoured.slice(-32), at }, null, 2) + '\n';
 }
 
-module.exports = { verify, sign, signLink, signRetire, generateKeyPair, keyIdOf, publicKeyOf, manifestMatches, parseTrust, trustText, parseFloor, floorText, compareVersions, bundleMessage, linkMessage, retireMessage, REFUSALS, VERSION_RE, DOMAIN_BUNDLE, DOMAIN_LINK, DOMAIN_RETIRE };
+module.exports = { verify, sign, signLink, signRetire, generateKeyPair, keyIdOf, publicKeyOf, manifestMatches, parseTrust, trustText, parseFloor, floorText, compareVersions, bundleMessage, linkMessage, retireMessage, helperLine, helperShape, REFUSALS, VERSION_RE, DOMAIN_BUNDLE, DOMAIN_LINK, DOMAIN_RETIRE };

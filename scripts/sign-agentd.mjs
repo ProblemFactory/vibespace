@@ -15,6 +15,11 @@
 // that already ran a newer agent land this older one exactly once (lane device-bundle-signing-fix-r2). Never an env,
 // never a hub-side flag — only this signature says a downgrade is wanted.
 //
+// Lane apple-signing (docs/design-apple-signing.zh.md §3.3): when data/bin/helpers/ holds the release's prebuilt Mac screen helper
+// (scripts/build-mac-helper.sh, run on the owner's Mac) WITH its .identity.json, the record also signs a `helper` row — its version,
+// sha256 and identity (developer-id + Team ID + identifier, or adhoc) — so a hub pushes only the prebuilt the release named. A
+// prebuilt whose record does not describe it (a stale pair) is refused by name; no prebuilt ⇒ no row (the record is as before).
+//
 // Refuses (exit 2, by name): CI set; a running instance's checkout (data/auth.json …); a key inside the repo, readable by
 // others, or not ed25519; a key whose public half is not in src/agentd/release-keys.js; a bundle that is not this
 // checkout's version; --allow-downgrade-to naming another version. Reads no key material from the environment.
@@ -43,7 +48,19 @@ const key = loadPrivateKey(keyPathOf(argv));
 const keyId = SIG.keyIdOf(SIG.publicKeyOf(key, { crypto }), { crypto });
 if (!RK.RELEASE_KEYS.some((k) => k.keyId === keyId)) die(2, `sign-agentd: refused — key ${keyId} is not in src/agentd/release-keys.js RELEASE_KEYS. Paste the row scripts/gen-release-key.mjs printed, rebuild (npm run build:agentd), then sign.`);
 
-const manifest = SIG.sign(key, bytes, version, { crypto, chain: RK.KEY_CHAIN, keys: RK.RELEASE_KEYS, ...(allowDowngradeTo ? { allowDowngradeTo } : {}) });
+const helper = helperRowOf(path.join(REPO, 'data/bin/helpers'));
+function helperRowOf(dir) {
+  const bin = path.join(dir, 'vibespace-screen');
+  if (!fs.existsSync(bin)) return null;
+  let hv = null, ident = null;
+  try { hv = fs.readFileSync(bin + '.version', 'utf8').trim(); } catch { die(2, 'sign-agentd: refused — data/bin/helpers/vibespace-screen has no .version beside it (scripts/build-mac-helper.sh writes both)'); }
+  try { ident = JSON.parse(fs.readFileSync(bin + '.identity.json', 'utf8')); } catch { die(2, 'sign-agentd: refused — data/bin/helpers/vibespace-screen has no .identity.json beside it (scripts/build-mac-helper.sh writes it; make the prebuilt again)'); }
+  const sha256 = crypto.createHash('sha256').update(fs.readFileSync(bin)).digest('hex');
+  if (!ident || ident.sha256 !== sha256) die(2, `sign-agentd: refused — the helper's identity record describes sha256 ${String(ident && ident.sha256).slice(0, 12)}…, the prebuilt is ${sha256.slice(0, 12)}…: a stale prebuilt or record`);
+  if (ident.version !== hv) die(2, `sign-agentd: refused — the helper's identity record is for ${ident.version}, the prebuilt says ${hv}`);
+  return { version: hv, sha256, identity: { kind: ident.kind, teamId: ident.teamId || null, identifier: ident.identifier || null } };
+}
+const manifest = SIG.sign(key, bytes, version, { crypto, chain: RK.KEY_CHAIN, keys: RK.RELEASE_KEYS, ...(allowDowngradeTo ? { allowDowngradeTo } : {}), ...(helper ? { helper } : {}) });
 const check = SIG.verify(RK.RELEASE_KEYS, bytes, version, manifest, { crypto });
 if (!check.ok) die(1, `sign-agentd: the fresh signature does not verify (${check.code}: ${check.why}) — nothing written`);
 const fresh = SIG.verify([], bytes, version, manifest, { crypto, tofu: true });
@@ -56,5 +73,6 @@ write(path.join(REPO, 'data/bin/vibespace-agentd.manifest.json'));
 console.log(`signed vibespace-agentd ${version}
   sha256 ${manifest.sha256}
   key    ${keyId}${manifest.chain.length ? ` (chain: ${manifest.chain.length} entr${manifest.chain.length > 1 ? 'ies' : 'y'})` : ''}${allowDowngradeTo ? `
-  ROLLBACK devices that already ran a newer agent land ${version} once (allowDowngradeTo, signed)` : ''}
+  ROLLBACK devices that already ran a newer agent land ${version} once (allowDowngradeTo, signed)` : ''}${helper ? `
+  helper ${helper.version} ${helper.identity.kind}${helper.identity.teamId ? ` by team ${helper.identity.teamId}` : ''} (sha256 ${helper.sha256.slice(0, 12)}…) — the Mac screen helper's row, signed` : ''}
   wrote  release/agentd/manifest.json — commit it with the release (git add release/agentd/manifest.json)`);

@@ -28,7 +28,7 @@ export function releaseVerdict(repo = REPO) {
   if (!m.signed) return { signed: false, why: m.why, sha256, version };
   const v = SIG.verify(RK.RELEASE_KEYS, bytes, version, manifest, { crypto });
   if (!v.ok) return { signed: false, why: `release/agentd/manifest.json does not verify against src/agentd/release-keys.js — ${v.code}: ${v.why}`, sha256, version };
-  return { signed: true, manifest, sha256, version, keyId: v.keyId };
+  return { signed: true, manifest, sha256, version, keyId: v.keyId, helper: manifest.helper && typeof manifest.helper === 'object' ? manifest.helper : null }; // lane apple-signing: the prebuilt Mac screen helper's row, when the release signed one
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -38,7 +38,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (r.signed) {
       const tmp = out + '.' + process.pid + '.tmp';
       fs.writeFileSync(tmp, JSON.stringify(r.manifest, null, 2) + '\n'); fs.renameSync(tmp, out);
-      console.log(`  agentd ${r.version}: the signed release (key ${r.keyId}, sha256 ${r.sha256.slice(0, 12)}…) — paired machines are updated to it`);
+      console.log(`  agentd ${r.version}: the signed release (key ${r.keyId}, sha256 ${r.sha256.slice(0, 12)}…) — paired machines are updated to it${r.helper ? `; the Mac screen helper ${r.helper.version} (${r.helper.identity.kind}) is the release's` : ''}`);
     } else {
       try { fs.unlinkSync(out); } catch { }
       console.log(`  agentd ${r.version}: UNSIGNED local build (sha256 ${r.sha256.slice(0, 12)}…) — ${r.why}. This VibeSpace updates only its own machine's agent; paired machines keep theirs until a signed release (scripts/sign-agentd.mjs on the release machine).`);
