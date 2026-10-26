@@ -7,9 +7,10 @@
 // help-text HASH) is RED by name.
 //
 //   node scripts/gen-gh-grammar.mjs                 # print the literal (grammar + version + envHijack) to stdout
-//   node scripts/gen-gh-grammar.mjs --allow-shas    # print each allowlisted verb's live help sha (re-pin ALLOWLIST after a review)
+//   node scripts/gen-gh-grammar.mjs --allow-shas    # print each allowlisted verb's live help sha
+//   node scripts/gen-gh-grammar.mjs --repin --reason "<why>"   # THE re-pin after a gh version roll: rewrite grammarVersion + the 32 ALLOWLIST hashes, print the verbs whose help changed (the re-review list); refuses if a verb's help is gone (the allow SET would change)
 //   node scripts/gen-gh-grammar.mjs --write         # rewrite the gh row's `grammar` + `grammarVersion` + `envHijack` IN PLACE
-//   node scripts/gen-gh-grammar.mjs --write --force "<reason naming the review>"   # change the reviewed allow set deliberately
+//   node scripts/gen-gh-grammar.mjs --write --force "<reason naming the review>"   # change the reviewed allow set deliberately (--write compares the SET of allowlisted verbs BY NAME, so a same-size swap still needs --force)
 //
 // FAIL CLOSED. The reader reads only the spellings it can read with CERTAINTY and BLINDS the rest of gh (a dash before the verb
 // words, or a verb ABSENT from this table). The table maps "<group> <verb>" → either
@@ -82,17 +83,19 @@ const REPO_TYPE = /repositor|OWNER\/REPO/i;                               // the
 const REPO_DESC = /\b(?:repositor(?:y|ies)|repo|destination)\b|OWNER\/REPO/i;   // round 7: a `string`-typed value whose DESCRIPTION names a repository / destination is resolved by FromFullName too
 const REPO_NAME = /repo/i;   // round 9 (BLOCKER): a DESCRIPTION-only repo match is a spec ONLY when the flag's own long name is repo-shaped (--repo / --signer-repo / --branch-repo). Else --branch ("view a branch OF THE REPOSITORY"), --source-ref, --signer-workflow, --order ("order of REPOSITORIES") merely MENTION a repository but are a ref / branch / sort / digest — NOT a HOST/OWNER/REPO spec, so their value must never be read as a host (that mis-read minted a bogus @feature card and drove the round-8 host-shape patch the BLOCKER reverts)
 
+const LAUNCH_DESC = /\b(?:browser|editor)\b/i;   // round 10 (BLOCKER 1a): a flag whose help OPENS a browser / editor — gh execs the launcher the agent NAMES (the browser:/editor: key of its config file, or exec.LookPath('xdg-open', …) on the child's PATH) with the minted value in that program's env, ok:own and no card. The grammar never reads bool flags, so --web/-w (19 verbs) and --editor/-e (4) are recorded in `launch` and shapeOf BLINDS the verb when one is present (an unknown verb — the card asks). Census over the 32 helps: every launcher's description names "browser" or "editor" and no non-launcher flag does; --web/--editor are matched by NAME too, in case a future help drops the word
 export function leafGrammar(v, specHint) {
-  const value = [], repoValues = [];
+  const value = [], repoValues = [], launch = [];
   for (const [long, info] of Object.entries(v.flags)) {
+    if (long === '--web' || long === '--editor' || LAUNCH_DESC.test(info.desc || '')) { launch.push(long); if (info.short) launch.push('-' + info.short); }
     if (!info.value) continue;   // bool flags are not kept (shapeOf never reads them; a bool→value move still shows up in `value`)
     value.push(long); if (info.short) value.push('-' + info.short);
     if ((info.type && REPO_TYPE.test(info.type)) || (REPO_DESC.test(info.desc || '') && REPO_NAME.test(long))) { repoValues.push(long); if (info.short) repoValues.push('-' + info.short); }
   }
-  value.sort(); repoValues.sort();
+  value.sort(); repoValues.sort(); launch.sort();
   const spec = /<[a-z-]*repo(?:sitory)?>/.test(v.usage) || !!specHint ? 1 : 0;
   const hn = v.flags['--hostname'];
-  return { value, repoValues, spec, host: hn && hn.short ? '-' + hn.short : null };
+  return { value, repoValues, spec, host: hn && hn.short ? '-' + hn.short : null, ...(launch.length ? { launch } : {}) };
 }
 
 export const belongs = (g) => !!(g.spec || g.host || (g.repoValues && g.repoValues.length) || (g.value && g.value.includes('--hostname')));   // --hostname (gh api / auth) reaches a host even with no short alias
@@ -113,7 +116,7 @@ export const ALLOWLIST = [
   { path: ["issue", "close"], note: "closes an issue; -R asks off-host", sha: "977a3100120d92c0" },
   { path: ["pr", "list"], note: "lists pull requests; -R asks off-host", sha: "c1a905bb71b1060e" },
   { path: ["pr", "view"], note: "shows one PR; -R asks off-host (no checkout)", sha: "30004c2cb2259298" },
-  { path: ["pr", "create"], note: "opens a PR on the default host; -R asks off-host (no local checkout)", sha: "8edfc544c5dc4897" },
+  { path: ["pr", "create"], note: "opens a PR; allowlisted ONLY with --head AND -R — gh's create path runs `git status` (UncommittedChangeCount, over core.fsmonitor) and, when the head is unpushed, `git push` (the repo's pre-push hook / core.hooksPath); --head + -R names the branch and the repo so gh resolves no CWD repo and never pushes (every other shape BLINDS, src/vault-run.js needFlagSubs)", sha: "8edfc544c5dc4897" },
   { path: ["pr", "checks"], note: "shows a PR's CI checks; -R asks off-host", sha: "8fda9c43de95c8f7" },
   { path: ["pr", "status"], note: "shows the PR status of the current context; -R asks off-host", sha: "20c2404d73e83375" },
   { path: ["pr", "comment"], note: "comments on a PR; -R asks off-host", sha: "c6cd0d1fbfeaee08" },
@@ -146,7 +149,8 @@ export const CURATED = [];   // round 9: repo create's FromFullName <name> posit
 export function entryOf(v, key) {
   if (!ALLOW_KEYS.has(key)) return null;
   const g = leafGrammar(v);
-  return belongs(g) ? g : { default: 1 };
+  if (belongs(g)) return g;
+  return g.launch ? { default: 1, launch: g.launch } : { default: 1 };   // round 10: a no-host verb that still opens a browser (search repos --web) keeps its launch set so shapeOf blinds the flag
 }
 
 // round 9 (MAJOR 2): the live help-text sha of each allowlisted verb vs its pinned ALLOWLIST sha — returns every drift ({key,
@@ -216,23 +220,58 @@ function literalText(table) {
   const keys = Object.keys(table).sort();
   return '{\n' + keys.map((k) => `      ${JSON.stringify(k)}: ${JSON.stringify(table[k])}`).join(',\n') + ',\n    }';
 }
-function shippedGrammarCount(src) {
+function shippedGrammarKeys(src) {
   const m = /grammar: \{([\s\S]*?)\n    \}/.exec(src);
-  return m ? (m[1].match(/^\s{6}"/gm) || []).length : 0;
+  return m ? [...m[1].matchAll(/^\s{6}"([^"]+)":/gm)].map((x) => x[1]) : [];
 }
 // round 9 (MAJOR 2): --write must never pin an EMPTY / null-version grammar nor an empty env list, and must refuse a CHANGE to
 // the reviewed allow set (a GROW reopens an ok:own door; a SHRINK narrows it) without a deliberate --force naming the review.
 // Returns the refusal message, or null to allow. PURE so the suite can drive it.
-export function writeGuard({ ver, hijack, nkeys, shipped, force }) {
+export function writeGuard({ ver, hijack, keys, shippedKeys, force }) {
   if (ver == null) return "refusing --write: gh version not discovered (gh absent / broken PATH) — the grammar would be pinned at null";
-  if (!nkeys) return "refusing --write: discovery produced an EMPTY grammar";
+  if (!keys || !keys.length) return "refusing --write: discovery produced an EMPTY grammar";
   if (hijack == null || !hijack.length) return "refusing --write: `gh help environment` not read — the program-naming env list would be empty";
-  if (nkeys !== shipped && !force) return `refusing --write: the reviewed allow set changes from ${shipped} to ${nkeys} verb(s) — a GROW reopens an ok:own door and a SHRINK narrows it; pass --write --force "<reason naming the review>" to change the allowlist deliberately`;
+  const now = new Set(keys), was = new Set(shippedKeys || []);                 // round 10 (MINOR): compare the SET of allowlisted verbs BY NAME, not the count — a same-size swap (one verb out, one in) is a GROW+SHRINK the count would miss
+  const added = keys.filter((k) => !was.has(k)).sort(), removed = [...was].filter((k) => !now.has(k)).sort();
+  if ((added.length || removed.length) && !force) return `refusing --write: the reviewed allow set changes${added.length ? ` — added ${added.join(', ')}` : ''}${removed.length ? ` — removed ${removed.join(', ')}` : ''}; a GROW reopens an ok:own door and a SHRINK narrows it (a same-size swap is both) — pass --write --force "<reason naming the review>"`;
   return null;
 }
 
+function argReason() {
+  const i = process.argv.indexOf('--reason');
+  if (i >= 0 && process.argv[i + 1]) return process.argv[i + 1];
+  const eq = process.argv.find((a) => a.startsWith('--reason='));
+  return eq ? eq.slice('--reason='.length) : '';
+}
+
 if (process.argv[1] && process.argv[1].endsWith('gen-gh-grammar.mjs')) {
-  if (process.argv.includes('--allow-shas')) {
+  if (process.argv.includes('--repin')) {
+    // round 10 (MINOR): THE ONE re-pin after a gh version rolls — rewrites the version pin (src/vault-run.js grammarVersion) AND
+    // the 32 ALLOWLIST help hashes (here), prints each verb whose help text changed (the re-review list), and refuses when the
+    // allow SET would change (a verb's help gone — renamed/removed): that needs a hand review + --write --force, not a re-pin.
+    const reason = argReason();
+    if (!reason) throw new Error('refusing --repin: pass --reason "<why the gh version rolled / what you re-reviewed>" — a re-pin moves the hash a verb is reviewed against');
+    const ver = ghVersion();
+    if (ver == null) throw new Error('refusing --repin: gh version not discovered (gh absent / broken PATH)');
+    const live = {};
+    for (const e of ALLOWLIST) { const k = e.path.join(' '); const h = ghHelp(e.path); if (h == null) throw new Error(`refusing --repin: \`gh ${k} --help\` is unreadable — the allow SET would change (the verb moved / was removed); review ALLOWLIST by hand, then node scripts/gen-gh-grammar.mjs --write --force "<reason>"`); live[k] = helpSha(h); }
+    const changed = ALLOWLIST.filter((e) => live[e.path.join(' ')] !== e.sha).map((e) => e.path.join(' '));
+    const GEN = new URL(import.meta.url).pathname;
+    let g = readFileSync(GEN, 'utf8');
+    g = g.split('\n').map((line) => {
+      const m = /^\s*\{ path: (\[[^\]]*\]),/.exec(line);
+      if (!m) return line;
+      let p; try { p = JSON.parse(m[1]); } catch { return line; }
+      const k = Array.isArray(p) ? p.join(' ') : null;
+      return k && k in live ? line.replace(/sha: "[0-9a-f]*"/, `sha: "${live[k]}"`) : line;
+    }).join('\n');
+    writeFileSync(GEN, g);
+    const SRC = new URL('../src/vault-run.js', import.meta.url).pathname;
+    let v = readFileSync(SRC, 'utf8');
+    if (!/grammarVersion: '[^']*'/.test(v)) throw new Error("no `grammarVersion: '…'` in the gh row to pin");
+    writeFileSync(SRC, v.replace(/grammarVersion: '[^']*'/, `grammarVersion: '${ver}'`));
+    process.stderr.write(`re-pinned ${ALLOWLIST.length} help hashes + grammarVersion '${ver}' (reason: ${reason}).\nRe-review the verbs whose help changed: ${changed.length ? changed.join(', ') : '(none — only the version pin moved)'}\nThen node scripts/gen-gh-grammar.mjs --write if a reviewed shape changed.\n`);
+  } else if (process.argv.includes('--allow-shas')) {
     const ver = ghVersion();
     const lines = ALLOWLIST.map((e) => { const h = ghHelp(e.path); return `${JSON.stringify(e.path.join(' '))}: ${JSON.stringify(h == null ? null : helpSha(h))}`; });
     process.stdout.write(`// allowlist help shas @ gh ${ver}\n` + lines.join('\n') + '\n');
@@ -245,8 +284,8 @@ if (process.argv[1] && process.argv[1].endsWith('gen-gh-grammar.mjs')) {
       const SRC = new URL('../src/vault-run.js', import.meta.url).pathname;
       const force = process.argv.includes('--force');
       let s = readFileSync(SRC, 'utf8');
-      const shipped = shippedGrammarCount(s), nkeys = Object.keys(table).length;
-      const refusal = writeGuard({ ver, hijack, nkeys, shipped, force });
+      const shippedKeys = shippedGrammarKeys(s), keys = Object.keys(table);
+      const refusal = writeGuard({ ver, hijack, keys, shippedKeys, force });
       if (refusal) throw new Error(refusal);
       const g0 = s.indexOf('grammar: {');
       if (g0 < 0) throw new Error('no `grammar: {` in src/vault-run.js');
@@ -258,7 +297,7 @@ if (process.argv[1] && process.argv[1].endsWith('gen-gh-grammar.mjs')) {
       if (!/envHijack: \[[^\]]*\]/.test(s)) throw new Error('no `envHijack: [...]` in the gh row to rewrite');
       s = s.replace(/envHijack: \[[^\]]*\]/, `envHijack: ${JSON.stringify(hijack)}`);
       writeFileSync(SRC, s);
-      process.stderr.write(`wrote grammar (${nkeys} verbs, was ${shipped}) + grammarVersion '${ver}' + envHijack ${JSON.stringify(hijack)} into src/vault-run.js\n`);
+      process.stderr.write(`wrote grammar (${keys.length} verbs, was ${shippedKeys.length}) + grammarVersion '${ver}' + envHijack ${JSON.stringify(hijack)} into src/vault-run.js\n`);
     } else {
       process.stdout.write(`// gh ${ver}\n// envHijack ${JSON.stringify(hijack)}\n` + lit + '\n');
     }

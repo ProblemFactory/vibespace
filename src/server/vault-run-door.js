@@ -116,6 +116,7 @@ const MARK_LABEL = 'vault-run-store-v1';
 const RUN_DIR_PREFIX = 'vs-vault-run-';
 const OWNER_FILE = '.owner';                 // the run folder's hub identity { pid, starttime, bootId }
 const MARK_ENV = 'VS_RUN_MARK';      // every child of a run carries its folder's name here (the end's /proc scan)
+const SEAL_DIR_NAME = 'vault-run-env';   // round 10 (BLOCKER 1b): a hub-owned EMPTY dir under data/ — HOME + GH_CONFIG_DIR for a runSeal tool (gh), so it reads no HOME config and writes nothing of the agent's
 const ARGS_MAX = 65536, CWD_MAX = 4096;      // the request's words (the review: an unbounded value stalled the loop)
 const STORE_MAX = 1024 * 1024;               // data/vault-run.json read bounded (a FIFO / a huge file never stalls the hub)
 const KILL_GRACE_MS = 5000;
@@ -748,6 +749,23 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    * `args` = the CLI's words after `run`; `cwd` = where the agent stood. → { ok: true, exit, signal, timedOut, truncated, ms,
    * stdout, stderr, scrubbed, redacted, by } | { ok: false, code, words, … }.
    */
+  // round 10 (BLOCKER 1b): a tool that declares runSeal (gh) spawns with the HUB's environment, never the agent's — so gh
+  // resolves its browser:/editor: launcher (BLOCKER 1a blinds the flag; this is the second, independent layer) and its `git`
+  // child from a config dir + a PATH the agent cannot steer, not from the agent's own ~/.config/gh/config.yml or a shim at the
+  // head of the hub's PATH (~/.local/bin). HOME + the tool's config-dir env point at a hub-owned EMPTY dir minted once under
+  // data/ (gh's hosts.yml would live there and holds nothing — the token rides env); the PATH keeps only the hub's absolute
+  // dirs the agent (same uid) CANNOT write (so the round-9 note's "git from the PATH head" is moot: no agent dir is on it).
+  const isWritableDir = (p) => { try { fs.accessSync(p, fs.constants.W_OK); return true; } catch { return false; } };
+  let sealDir = null, sealPath = null;
+  const runSealDir = () => { if (!sealDir) { const d = path.join(dataDir, SEAL_DIR_NAME); try { fs.mkdirSync(d, { recursive: true }); fs.chmodSync(d, 0o700); } catch { } sealDir = d; } return sealDir; };
+  const sealedPathOf = (b) => { if (sealPath == null) sealPath = String((b && b.PATH) || '').split(':').filter((d) => d && d[0] === '/' && !isWritableDir(d)).join(':'); return sealPath; };
+  function sealEnvFor(row, b) {
+    if (!row || !row.runSeal) return {};
+    const dir = runSealDir();
+    const out = { HOME: dir, PATH: sealedPathOf(b) };
+    if (row.runSeal.configDirEnv) out[row.runSeal.configDirEnv] = dir;
+    return out;
+  }
   async function run({ caller = {}, args = [], cwd = null, signal = null } = {}) {
     const t0 = now();
     const by = { kind: caller.job ? 'job' : 'agent', key: caller.sessionKey || null, name: caller.name || null };
@@ -930,7 +948,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       };
       let child;
       try {
-        child = spawnImpl(spec.tool, m.argv.slice(1), { argv0: m.argv[0], cwd: place, env: { ...base, ...m.env, [MARK_ENV]: mark }, stdio: [m.stdin != null ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: true, windowsHide: true });
+        child = spawnImpl(spec.tool, m.argv.slice(1), { argv0: m.argv[0], cwd: place, env: { ...base, ...sealEnvFor(spec.row, base), ...m.env, [MARK_ENV]: mark }, stdio: [m.stdin != null ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: true, windowsHide: true });
       } catch (e) { spawnError = String((e && e.code) || (e && e.message) || 'spawn').slice(0, 80); finish(null, null); return; }
       rec.child = child;
       runs.add(rec);
