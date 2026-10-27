@@ -210,14 +210,16 @@ export function memoryWords(mb) {
   return n < 1024 ? `${n} MB` : `${Math.round((n / 1024) * 10) / 10} GB`;
 }
 const runsNow = (j) => j.state === 'up' || j.state === 'starting' || j.state === 'awaiting-user'; // the run's own bound is the one in force
-/** «4 GB · cgroup» / «4 GB · rlimit» / «unbounded — this host cannot enforce a bound» — '' from a hub that says nothing */
+/** «4 GB · cgroup» / «4 GB · rlimit» / «unbounded — this host cannot enforce a bound» — '' from a hub that says nothing; a
+ *  bound the instance's own limit lowered says so (round 3): «6 GB · rlimit · capped by the instance’s 8 GB limit» */
 export function memoryChip(j, t) {
   if (!j || j.memoryMb === undefined || j.memoryMb === null) return '';
   const b = j.memoryBound;
   if (!j.memoryMb && !(b && runsNow(j) && b.mb)) return t('unbounded — set by the owner');
   if (b && b.by === 'none' && b.mb) return t('unbounded — this host cannot enforce a bound');
   const mb = b && b.mb && runsNow(j) ? b.mb : j.memoryMb;
-  return b && b.by !== 'none' ? `${memoryWords(mb)} · ${b.by === 'cgroup' ? 'cgroup' : 'rlimit'}` : memoryWords(mb);
+  const capped = j.memoryCap && j.memoryCap.limitMb ? ` · ${t('capped by the instance’s {size} limit', { size: memoryWords(j.memoryCap.limitMb) })}` : '';
+  return (b && b.by !== 'none' ? `${memoryWords(mb)} · ${b.by === 'cgroup' ? 'cgroup' : 'rlimit'}` : memoryWords(mb)) + capped;
 }
 /** the NAMED end the card says beside the state — the park first (it is why the job no longer runs) */
 export function memoryEndWords(j, t) {

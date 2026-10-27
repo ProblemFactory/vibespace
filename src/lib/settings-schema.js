@@ -982,7 +982,7 @@ const SETTINGS_SCHEMA = {
   'jobs.memoryMb': {
     type: 'number', default: 4096, min: 0, max: 1048576, step: 256,
     label: t('Memory bound of a background job (MB)'),
-    description: t('Every background job runs under this memory bound unless it was given its own (its properties, or vibespace-job run --memory 8G). A job that goes past it is stopped and says so («stopped: used more than 4 GB»); two such ends in a row park it until you start it again. Enforced by a cgroup where this computer\'s user systemd offers one, else by a data limit on the job; the job\'s card names which. Not set: the cluster\'s default, else 4096. 0 = unbounded.'),
+    description: t('Every background job runs under this memory bound unless it was given its own (its properties, or vibespace-job run --memory 8G). A job that goes past it is stopped and says so («stopped: used more than 4 GB»); two such ends in a row park it until you start it again. Enforced by a cgroup where this computer\'s user systemd offers one, else by a data limit on the job; the job\'s card names which. Not set: the cluster\'s default, else 4096. 0 = unbounded. Where this computer or pod has a memory limit of its own, every bound — 0 too — stays below it, leaving VibeSpace a quarter of it (at least 1 GB); the card says when it was lowered.'),
     category: t('Background Work'), liveApply: true,
   },
   'agents.stopNudgeStaleMinutes': {

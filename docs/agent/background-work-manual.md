@@ -171,7 +171,9 @@ URL — share the new one.
 
 Every run has a memory bound: `--memory 8G` at create (or `vibespace-job memory <id> 8G|512M|inherit` later — owner
 conversation only, and it asks the user first like `start`; it applies from the NEXT run), else the user's Settings → Background Work, else the cluster's
-default, else **4 GB**. Unbounded (0) is the user's call alone — you cannot set it.
+default, else **4 GB**. Unbounded (0) is the user's call alone — you cannot set it. On an instance with a memory limit of
+its own (a cluster pod) every bound is capped below it — the hub keeps max(1 GB, a quarter): `--memory 16G` on an 8 GB pod
+runs at 6 GB, and `show` says «capped by the instance's 8 GB limit (asked 16 GB)».
 
 - The wrapper enforces it with what this host offers and SAYS which (`vibespace-job show <id>` → `memory: …`):
   a cgroup of the user systemd (a real ceiling, no swap) or RLIMIT_DATA on the process (a fleet pod: no systemd);

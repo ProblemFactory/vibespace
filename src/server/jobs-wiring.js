@@ -118,7 +118,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   if (deliver && typeof deliver.registerStashJudge === 'function') deliver.registerStashJudge((e) => jm.judgeHeldEntry(e));
 
   const USER = { isUser: true, groups: new Set() };
-  const runsOf = (j) => (j.runs || []).map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger, lastLine: r.lastLine || '', memoryMb: r.memoryMb ?? null, memoryBound: r.memoryBound || null }));
+  const runsOf = (j) => (j.runs || []).map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger, lastLine: r.lastLine || '', memoryMb: r.memoryMb ?? null, memoryAskedMb: r.memoryAskedMb ?? null, memoryCap: r.memoryCap || null, memoryBound: r.memoryBound || null }));
   // the panel's fold groups one-shots by OWNER SESSION (§13 rule 3): the
   // conversation lineage id + the webui session id ride the user list only
   const ownerOf = (j) => ({ conversationId: (j.owner && j.owner.conversation && j.owner.conversation.id) || null, sessionId: (j.owner && j.owner.sessionId) || null });

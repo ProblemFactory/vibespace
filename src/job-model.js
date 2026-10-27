@@ -181,7 +181,7 @@ function onServiceExit(job, { uptimeMs, now }) {
 // the best rung it measures at spawn (a cgroup of the user systemd › RLIMIT_DATA on the child › none, said), and an end by
 // it is NAMED (`oom-bound`, beside the `oom` of a kill from outside). An OOM counts toward THE PARK LAW — a boot's judgement
 // exactly like a sweep's.
-const MEMORY = Object.freeze({ defaultMb: 4096, minMb: 256, maxMb: 1024 * 1024, parkAfter: 2 });
+const MEMORY = Object.freeze({ defaultMb: 4096, minMb: 256, maxMb: 1024 * 1024, parkAfter: 2, hubShareMinMb: 1024, hubShareRatio: 0.25 });
 const MEMORY_CAUSES = Object.freeze(['oom-bound', 'oom']);
 const MEMORY_RUNGS = Object.freeze(['cgroup', 'rlimit-data']); // best first; `none` = neither answered (said, never silent)
 const MEMORY_PARK_TEXT = 'parked: out of memory twice — raise its bound or fix the job';
@@ -210,17 +210,37 @@ const finiteMb = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ?
 // THE LADDER's reading of a stored value: one below the floor (an older record, a setting typed as 100, a cluster's env) is
 // held AT the floor — never unbounded, never a bound a runtime cannot start under
 const ladderMb = (v) => { const mb = finiteMb(v); return mb !== null && mb > 0 && mb < MEMORY.minMb ? MEMORY.minMb : mb; };
+/** THE INSTANCE'S CAP (acceptance round 3): on a pod with memory.oom.group=1 a job bound at or above the container's limit
+ *  protects nothing — the container dies first, the hub with it. The instance's own memory.max (`limitMb`; null / 0 = no
+ *  limit: a host that caps nothing) keeps the hub's share — max(1 GiB, 25 %): measured 2026-10-27 the owner's hub held
+ *  2.9 GB resident and a scratch hub ~0.5 GB, an agent CLI 0.5–0.85 GB, so the hub and one conversation need ≥ 1 GiB on the
+ *  smallest pod and the share grows with the pod — and a job may have the rest (never under the floor: a smaller instance
+ *  still bounds the job at minMb, said by the cap's numbers). */
+function instanceCapOf(limitMb) {
+  const lim = finiteMb(limitMb);
+  if (!lim) return null;
+  const hubMb = Math.max(MEMORY.hubShareMinMb, Math.ceil(lim * MEMORY.hubShareRatio));
+  return { limitMb: lim, hubMb, capMb: Math.max(MEMORY.minMb, lim - hubMb) };
+}
 /** THE LADDER: the job's own value › the owner's setting `jobs.memoryMb` (an explicit 0 = unbounded) › the cluster's
- *  default (the chart's env VIBESPACE_JOBS_MEMORY_MB — a cluster may lower it; never 0) › 4096. `setting` is undefined
- *  while the owner never set it (the server's settings reader answers the stored value, never the schema default). */
-function memoryMbOf(job, { setting, cluster } = {}) {
-  const own = ladderMb(job && job.memoryMb);
-  if (own !== null) return { mb: own, source: 'job' };
-  const set = ladderMb(setting);
-  if (set !== null) return { mb: set, source: 'setting' };
-  const cl = ladderMb(typeof cluster === 'string' && cluster.trim() ? Number(cluster) : cluster);
-  if (cl) return { mb: cl, source: 'cluster' };
-  return { mb: MEMORY.defaultMb, source: 'default' };
+ *  default (the chart's env VIBESPACE_JOBS_MEMORY_MB — a cluster may lower it; never 0) › 4096 — the ASKED bound. `setting`
+ *  is undefined while the owner never set it (the server's settings reader answers the stored value, never the schema
+ *  default). THE EFFECTIVE bound (round 3) = min(the asked, the instance's cap): where the instance has a memory.max
+ *  (`instanceMb`) and the asked bound is above its cap — or unbounded (0) — the answer is the cap, and it says so
+ *  ({askedMb, cap: {limitMb, hubMb}}); a host with no limit caps nothing. */
+function memoryMbOf(job, { setting, cluster, instanceMb } = {}) {
+  const asked = (() => {
+    const own = ladderMb(job && job.memoryMb);
+    if (own !== null) return { mb: own, source: 'job' };
+    const set = ladderMb(setting);
+    if (set !== null) return { mb: set, source: 'setting' };
+    const cl = ladderMb(typeof cluster === 'string' && cluster.trim() ? Number(cluster) : cluster);
+    if (cl) return { mb: cl, source: 'cluster' };
+    return { mb: MEMORY.defaultMb, source: 'default' };
+  })();
+  const cap = instanceCapOf(instanceMb);
+  if (!cap || (asked.mb && asked.mb <= cap.capMb)) return asked;
+  return { mb: cap.capMb, source: asked.source, askedMb: asked.mb, cap: { limitMb: cap.limitMb, hubMb: cap.hubMb } };
 }
 /** the rung a run carries — a FACT the wrapper measured (`none` says why), never a silent fallback */
 function boundRecord(r) {
@@ -678,7 +698,7 @@ module.exports = {
   vetSpec, jobCommandParts, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,
-  MEMORY, MEMORY_CAUSES, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, boundRecord, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
+  MEMORY, MEMORY_CAUSES, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, boundRecord, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
   notifyEffective, renderOwnerNotify, renderNotifStash,

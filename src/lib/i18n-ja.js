@@ -11057,10 +11057,11 @@ export default {
   "Memory bound: {size}": "メモリ上限：{size}",
   "unbounded — set by the owner": "上限なし — 所有者の設定",
   "unbounded — this host cannot enforce a bound": "上限なし — このホストでは上限をかけられません",
+  "capped by the instance’s {size} limit": "インスタンスの上限 {size} により制限",
   "parked: out of memory twice — raise its bound or fix the job": "停止中：2 回続けてメモリ上限超過 — 上限を上げるかジョブを直してください",
   "stopped: used more than {size}": "停止：メモリ上限超過（{size} を超えて使用）",
   "killed: the instance ran out of memory": "強制終了：インスタンス全体のメモリ不足",
   "{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again": "{name}：停止中 — 2 回続けてメモリ上限超過。上限を上げるかジョブを直してから、もう一度開始してください",
   "Memory bound of a background job (MB)": "バックグラウンドジョブのメモリ上限（MB）",
-  "Every background job runs under this memory bound unless it was given its own (its properties, or vibespace-job run --memory 8G). A job that goes past it is stopped and says so («stopped: used more than 4 GB»); two such ends in a row park it until you start it again. Enforced by a cgroup where this computer's user systemd offers one, else by a data limit on the job; the job's card names which. Not set: the cluster's default, else 4096. 0 = unbounded.": "バックグラウンドジョブは、ジョブ自身の上限（プロパティ、または vibespace-job run --memory 8G）がない限り、このメモリ上限の下で動きます。上限を超えたジョブは停止され、その理由が表示されます（「停止：メモリ上限超過（4 GB を超えて使用）」）。2 回続けてそう終わると、あなたが再び開始するまで停止したままになります。このコンピューターのユーザー systemd が cgroup を提供していれば cgroup で、なければジョブのデータ領域の上限で制限し、ジョブのカードにどちらかが表示されます。未設定の場合：クラスターの既定値、なければ 4096。0 = 上限なし。",
+  "Every background job runs under this memory bound unless it was given its own (its properties, or vibespace-job run --memory 8G). A job that goes past it is stopped and says so («stopped: used more than 4 GB»); two such ends in a row park it until you start it again. Enforced by a cgroup where this computer's user systemd offers one, else by a data limit on the job; the job's card names which. Not set: the cluster's default, else 4096. 0 = unbounded. Where this computer or pod has a memory limit of its own, every bound — 0 too — stays below it, leaving VibeSpace a quarter of it (at least 1 GB); the card says when it was lowered.": "バックグラウンドジョブは、ジョブ自身の上限（プロパティ、または vibespace-job run --memory 8G）がない限り、このメモリ上限の下で動きます。上限を超えたジョブは停止され、その理由が表示されます（「停止：メモリ上限超過（4 GB を超えて使用）」）。2 回続けてそう終わると、あなたが再び開始するまで停止したままになります。このコンピューターのユーザー systemd が cgroup を提供していれば cgroup で、なければジョブのデータ領域の上限で制限し、ジョブのカードにどちらかが表示されます。未設定の場合：クラスターの既定値、なければ 4096。0 = 上限なし。このコンピューターや pod 自体にメモリ上限がある場合、どの上限も（0 も）それを超えず、VibeSpace に 4 分の 1（最低 1 GB）を残します。下げられたときはカードに表示されます。",
 };

@@ -72,7 +72,9 @@ const sizeWords = (mb) => (mb >= 1024 ? `${Math.round(mb / 102.4) / 10} GB` : `$
 function memLine(j) {
   if (j.memoryMb === undefined) return '';   // an older hub
   const run = j.run || {}, b = j.memoryBound;
-  const head = j.memoryMb ? `memory: ${sizeWords(j.memoryMb)} (${j.memorySource === 'job' ? 'its own' : j.memorySource === 'setting' ? "the owner's setting" : j.memorySource === 'cluster' ? "the cluster's default" : 'the default'})` : 'memory: UNBOUNDED (the owner set 0)';
+  const c = j.memoryCap, asked = j.memoryAskedMb ? sizeWords(j.memoryAskedMb) : 'unbounded';
+  const capped = c && c.limitMb ? ` — capped by the instance's ${sizeWords(c.limitMb)} limit (asked ${asked}; the hub keeps ${sizeWords(c.hubMb)})` : '';
+  const head = j.memoryMb ? `memory: ${sizeWords(j.memoryMb)}${capped} (${j.memorySource === 'job' ? 'its own' : j.memorySource === 'setting' ? "the owner's setting" : j.memorySource === 'cluster' ? "the cluster's default" : 'the default'})` : 'memory: UNBOUNDED (the owner set 0)';
   const rung = !b ? '' : b.by === 'none' ? ` · last run unbounded — ${b.why}` : ` · last run held by ${b.by === 'cgroup' ? 'a cgroup' : 'RLIMIT_DATA'} at ${sizeWords(b.mb)}`;
   const end = run.cause === 'oom-bound' ? ` · its last run was stopped: used more than ${sizeWords((b && b.mb) || j.memoryMb)}` : run.cause === 'oom' ? ' · its last run was killed: the instance ran out of memory' : '';
   const park = j.parkedFor === 'memory' ? ` · PARKED (out of memory twice): raise it (vibespace-job memory ${j.cronParent || j.id} 8G) or fix the job, then vibespace-job start ${j.cronParent || j.id}`
@@ -279,7 +281,8 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
     case 'memory': {
       if (!pos[1] || !pos[2]) { console.error('usage: vibespace-job memory <id|name> 8G|512M|inherit'); process.exit(1); }
       const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/memory`, { value: pos[2] });
-      console.log(`memory bound: ${r.memoryMb ? sizeWords(r.memoryMb) : 'unbounded'} (${r.memorySource}) — from its next run; a parked job waits for vibespace-job start`);
+      const rc = r.memoryCap && r.memoryCap.limitMb ? ` — capped by the instance's ${sizeWords(r.memoryCap.limitMb)} limit (asked ${r.memoryAskedMb ? sizeWords(r.memoryAskedMb) : 'unbounded'})` : '';
+      console.log(`memory bound: ${r.memoryMb ? sizeWords(r.memoryMb) : 'unbounded'}${rc} (${r.memorySource}) — from its next run; a parked job waits for vibespace-job start`);
       break;
     }
     case 'notify': {

@@ -999,7 +999,7 @@ class JobManager {
     // THE MEMORY BOUND (lane jobs-memory-bound): THE LADDER's answer for THIS run (src/job-model.js memoryMbOf) rides the spec;
     // the wrapper measures the rung that enforces it and says so (bound.json while it runs, exit.json `memory` at its end)
     const mem = M.memoryMbOf(job, this._memoryCtx());
-    job.runs.push({ startedAt: runTs, trigger, log: path.join(ctl, 'current.log'), memoryMb: mem.mb });
+    job.runs.push({ startedAt: runTs, trigger, log: path.join(ctl, 'current.log'), memoryMb: mem.mb, memoryAskedMb: mem.askedMb !== undefined ? mem.askedMb : mem.mb, ...(mem.cap ? { memoryCap: mem.cap } : {}) }); // round 3: both numbers (asked, effective), and the instance's cap when it lowered the bound
     if (job.runs.length > 20) job.runs.splice(0, job.runs.length - 20);
     this._save(); // intent-before-spawn, flushed
     // accept-fixes-jobs F6: the job's OWN directory (its cmd.cwd — never the server's cwd fallback) is exported as
@@ -1279,7 +1279,32 @@ class JobManager {
   /** THE LADDER's inputs (lane jobs-memory-bound): the owner's setting `jobs.memoryMb` (undefined while never set) and the
    *  cluster's default (the chart's env) — read live, per run */
   _memoryCtx() {
-    try { return (typeof this.d.memoryCtx === 'function' && this.d.memoryCtx()) || {}; } catch { return {}; }
+    let ctx = {};
+    try { ctx = (typeof this.d.memoryCtx === 'function' && this.d.memoryCtx()) || {}; } catch { }
+    return { ...ctx, instanceMb: this._instanceLimitMb() };
+  }
+  /** THE INSTANCE'S OWN LIMIT (lane jobs-memory-bound, acceptance round 3 — the cap of THE LADDER): the tightest memory.max of
+   *  the hub's cgroup and its ancestors, in MB (a pod: the container's; null = none — a host that caps nothing); the deps
+   *  seam `memoryLimitDir` names one cgroup dir instead (a fake). Read at most once a minute: a pod's limit moves only with
+   *  an in-place resize. */
+  _instanceLimitMb() {
+    if (this._limitRead && now() - this._limitRead.at < 60e3) return this._limitRead.mb;
+    let mb = null;
+    try {
+      const dirs = [];
+      if (typeof this.d.memoryLimitDir === 'string') dirs.push(this.d.memoryLimitDir);
+      else {
+        const rel = (fs.readFileSync('/proc/self/cgroup', 'utf8').split('\n').find((l) => l.startsWith('0::')) || '0::/').slice(3) || '/';
+        for (let p = rel; ; p = path.dirname(p)) { dirs.push(path.join('/sys/fs/cgroup', p)); if (p === '/' || p === '.') break; }
+      }
+      for (const dir of dirs) {
+        let v = '';
+        try { v = fs.readFileSync(path.join(dir, 'memory.max'), 'utf8').trim(); } catch { continue; }
+        if (/^\d+$/.test(v)) { const m = Math.floor(Number(v) / 1048576); if (mb === null || m < mb) mb = m; }
+      }
+    } catch { }
+    this._limitRead = { at: now(), mb };
+    return mb;
   }
   /** THE PARK LAW's act (lane jobs-memory-bound): a job whose runs ended out of memory M.MEMORY.parkAfter times in a row is
    *  parked BY NAME and not run again until its owner acts (start — after raising its bound or fixing the job): a service
@@ -1666,12 +1691,14 @@ class JobManager {
     const task = job.kind === 'cron' && job.action && job.action.type === 'spawn-task' && job.action.task ? job.action.task : null;
     const targets = task ? [task, ...[...this.jobs.values()].filter((k) => k.cronParent === job.id)] : [job];
     const cur = targets[0].memoryMb === undefined || targets[0].memoryMb === null ? null : targets[0].memoryMb;
-    if (cur === mb) { const same = M.memoryMbOf(targets[0], this._memoryCtx()); return { ok: true, unchanged: true, memoryMb: same.mb, memorySource: same.source }; } // nothing changes, nothing is written
+    const said = (e) => ({ memoryMb: e.mb, memoryAskedMb: e.askedMb !== undefined ? e.askedMb : e.mb, memorySource: e.source, memoryCap: e.cap || null });
+    if (cur === mb) return { ok: true, unchanged: true, ...said(M.memoryMbOf(targets[0], this._memoryCtx())) }; // nothing changes, nothing is written
     for (const t of targets) { if (mb === null) delete t.memoryMb; else t.memoryMb = mb; }
     const eff = M.memoryMbOf(targets[0], this._memoryCtx());
-    this._touch(job, { what: `memory bound ${mb === null ? 'back to the default' : 'set'}: ${eff.mb ? M.memoryWords(eff.mb) : 'unbounded'} (${eff.source}; from its next run)` });
+    const capped = eff.cap ? ` — capped by the instance's ${M.memoryWords(eff.cap.limitMb)} limit (asked ${eff.askedMb ? M.memoryWords(eff.askedMb) : 'unbounded'})` : '';
+    this._touch(job, { what: `memory bound ${mb === null ? 'back to the default' : 'set'}: ${eff.mb ? M.memoryWords(eff.mb) : 'unbounded'}${capped} (${eff.source}; from its next run)` });
     this._save();
-    return { ok: true, memoryMb: eff.mb, memorySource: eff.source };
+    return { ok: true, ...said(eff) };
   }
   rm(job, { stop, orphan } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
@@ -1764,7 +1791,7 @@ class JobManager {
       catchUp: job.catchUp || null, stopWithOwner: !!job.stopWithOwner, singleInstance: job.singleInstance !== false,
       // lane jobs-memory-bound: THE LADDER's answer now (a cron's: its task's), the rung its latest run measured, the park's
       // reason and the out-of-memory ends counted toward it
-      ...(() => { const m = M.memoryMbOf(job.kind === 'cron' && job.action && job.action.task ? job.action.task : job, this._memoryCtx()); return { memoryMb: m.mb, memorySource: m.source }; })(),
+      ...(() => { const m = M.memoryMbOf(job.kind === 'cron' && job.action && job.action.task ? job.action.task : job, this._memoryCtx()); return { memoryMb: m.mb, memoryAskedMb: m.askedMb !== undefined ? m.askedMb : m.mb, memorySource: m.source, memoryCap: (run && !run.endedAt && run.memoryCap) || m.cap || null }; })(),
       memoryBound: (run && run.memoryBound) || null, oomEnds: (job.supervise && job.supervise.oomEnds) || 0,
       parkedFor: (job.supervise && job.supervise.parkedAt && job.supervise.parkedFor) || null,
       run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '' } : null,

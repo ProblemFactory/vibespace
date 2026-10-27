@@ -368,7 +368,7 @@ async function expandDetail(app, el, j, refresh) {
     const value = memorySetValue(job, memIn.value);
     if (value === null) { showToast(t('Memory bound: {size}', { size: job.memoryMb ? memoryWords(job.memoryMb) : t('unbounded') })); return; } // unchanged: nothing is written
     const r2 = await fetchJson(`/api/jobs/${j.id}/memory`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
-    if (r2?.error) showToast(r2.error, { error: true }); else { showToast(t('Memory bound: {size}', { size: r2.memoryMb ? memoryWords(r2.memoryMb) : t('unbounded') })); refresh?.(); }
+    if (r2?.error) showToast(r2.error, { error: true }); else { showToast(t('Memory bound: {size}', { size: r2.memoryMb ? memoryWords(r2.memoryMb) : t('unbounded') }) + (r2.memoryCap?.limitMb ? ' · ' + t('capped by the instance’s {size} limit', { size: memoryWords(r2.memoryCap.limitMb) }) : '')); refresh?.(); } // the effective bound, and the cap that lowered the asked one
   };
   memRow.append(memLbl, memIn, memSet, memFact);
   d.appendChild(memRow);

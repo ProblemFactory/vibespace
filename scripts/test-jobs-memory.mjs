@@ -5,7 +5,9 @@
 //   §1 PURE  THE LADDER (a job's own › the owner's setting, 0 = unbounded › the cluster's env › 4096; a stored value under
 //            the floor held AT it), the size verdict (an agent never 0; 512k is refused by name, never «unbounded»), the
 //            rung record, the named end's words — the server's and the card's; the properties field (the exact value,
-//            and a Set that changes nothing writes nothing)
+//            and a Set that changes nothing writes nothing); THE INSTANCE'S CAP (round 3): the effective bound = min(the
+//            asked, the instance's memory.max less the hub's share max(1 GiB, 25 %)) — a 16 GB job on an 8 GiB pod runs at
+//            6 GiB and the card says «capped by the instance’s 8 GB limit»
 //   §1b PURE the wrapper's judges (data/bin/job-wrapper.js, required with no ctl dir): an allocation refused at the bound,
 //            keyed on the CODE first, then the words of every node the hub runs (a fixture per wording, measured) and
 //            other runtimes'; the manager's version; a scope's end by its Result (≥ 253) or its own memory.events (< 253)
@@ -19,7 +21,8 @@
 //            still a stop; ② the rlimit rung (forced): RLIMIT_DATA refuses ⇒ the same named end under THIS node (22 or
 //            24 — the code or the words); ③ a systemd-run that refuses OOMPolicy (systemd < 253) and ④ one that never
 //            answers ⇒ the job runs ONCE on the next rung, the refusal in its why; ⑤ a manager < 253 (no OOMPolicy for a
-//            scope): the scope without it, the end read from the scope's own memory.events
+//            scope): the scope without it, the end read from the scope's own memory.events; ⑥ the instance's cap: a 16 GB
+//            job on an instance whose memory.max is 8 GiB runs under RLIMIT_DATA 6 GiB, both numbers on the run
 //   §4 REAL  the park law through the engine's own doors: a service's oom-bound end (1), its BOOT REPLAY's (2) ⇒ parked,
 //            the next boot leaves it alone, the owner's start counts afresh; ⓑ oom → a restart → oom is NOT two in a row
 //            (a service), ⓒ nor for a cron (fire 1 oom, fire 2 cut by a restart, fire 3 oom ⇒ still enabled)
@@ -31,6 +34,7 @@
 // RED on 6428c67e (the base): the job grows to 512 MB and ends `exit 0`; no rung, no named end, no park, a boot replays blind.
 // RED on 0259f1ea (round 1): a refused systemd-run kills every job, by cgroup; restart resets nothing; cache is pressure;
 // node 24.22's refusal is no OOM; a SIGKILL is an OOM off the hub's counter; 512k is unbounded; the field rounds.
+// RED on 8a2727c8 (round 2): a 16 GB job on an 8 GiB pod is bound at 16 GB — the pod dies first.
 // Load: each job allocates ≤ 512 MB once (most far less, the cgroup legs stop at 256 MB), no busy loop; the real legs run at
 // once (≤ ~0.6 s); scratch dataDirs under os.tmpdir(), one per leg.
 import fs from 'node:fs';
@@ -73,6 +77,16 @@ console.log('§1 PURE — THE LADDER, the size verdict, the rung record, the nam
     ['a stored value under the floor is held AT it (a job\'s 100, a setting\'s 100, a cluster\'s 64 ⇒ 256 — never unbounded)', [of({ memoryMb: 100 }, {}), of({}, { setting: 100 }), of({}, { cluster: '64' })], [{ mb: 256, source: 'job' }, { mb: 256, source: 'setting' }, { mb: 256, source: 'cluster' }]],
   ];
   for (const [n, got, want] of rows) ok(JSON.stringify(got) === JSON.stringify(want), `ladder: ${n}`, got);
+  // THE INSTANCE'S CAP (round 3): the hub keeps max(1 GiB, 25 %) of the instance's own memory.max; a job may have the rest
+  const capOf = fn('instanceCapOf');
+  ok(JSON.stringify(capOf(8192)) === JSON.stringify({ limitMb: 8192, hubMb: 2048, capMb: 6144 }) && capOf(32768).capMb === 24576 && capOf(2048).hubMb === 1024 && capOf(2048).capMb === 1024 && capOf(1024).capMb === 256 && capOf(null) === null && capOf(0) === null,
+    'the instance\'s cap: 8 GiB keeps the hub 2 GiB (25 %) ⇒ 6 GiB for a job; 32 GiB ⇒ 24 GiB; 2 GiB keeps 1 GiB (the floor of the share) ⇒ 1 GiB; 1 GiB ⇒ the 256 MB floor; no limit ⇒ no cap', [capOf(8192), capOf(2048), capOf(1024)]);
+  const big = of({ memoryMb: 16384 }, { instanceMb: 8192 });
+  ok(JSON.stringify(big) === JSON.stringify({ mb: 6144, source: 'job', askedMb: 16384, cap: { limitMb: 8192, hubMb: 2048 } }), 'the effective bound: a 16 GB job on an 8 GiB instance ⇒ 6 GiB, both numbers and the cap said (8a2727c8: 16 GB — the pod dies first)', big);
+  ok(JSON.stringify(of({ memoryMb: 4096 }, { instanceMb: 8192 })) === JSON.stringify({ mb: 4096, source: 'job' }) && of({ memoryMb: 16384 }, { instanceMb: null }).mb === 16384 && of({}, { setting: 8192 }).mb === 8192,
+    'a bound under the cap is untouched; a host with no memory.max caps nothing');
+  const zero = of({}, { setting: 0, instanceMb: 8192 });
+  ok(zero.mb === 6144 && zero.askedMb === 0 && zero.cap && zero.cap.limitMb === 8192, 'the owner\'s 0 (unbounded) on an 8 GiB instance ⇒ 6 GiB, capped and said — unbounded is no bound at all where the container dies first', zero);
   const v = fn('memoryValueVerdict');
   ok(v('8G').mb === 8192 && v('512M').mb === 512 && v('1.5g').mb === 1536 && v('4096').mb === 4096 && v(2048).mb === 2048 && v('8GB').mb === 8192 && v('2GiB').mb === 2048, 'size: 8G · 512M · 1.5g · 4096 (MB) · 8GB · 2GiB read as MB');
   ok(v('0').ok === false && /owner/.test(v('0').error || '') && v('0', { byUser: true }).ok === true && v('0', { byUser: true }).mb === 0, 'size: 0 (unbounded) is the user\'s alone — an agent is refused by name');
@@ -89,6 +103,8 @@ console.log('§1 PURE — THE LADDER, the size verdict, the rung record, the nam
   ok(chip({ state: 'up', memoryMb: 4096, memoryBound: { mb: 4096, by: 'cgroup' } }, t) === '4 GB · cgroup' && chip({ state: 'up', memoryMb: 4096, memoryBound: { mb: 4096, by: 'rlimit-data' } }, t) === '4 GB · rlimit'
     && chip({ state: 'up', memoryMb: 4096, memoryBound: { mb: 4096, by: 'none', why: 'no rung' } }, t) === 'unbounded — this host cannot enforce a bound' && chip({ state: 'down', memoryMb: 0 }, t) === 'unbounded — set by the owner' && chip({ state: 'down' }, t) === '',
   'the card\'s chip: «4 GB · cgroup» / «4 GB · rlimit» / «unbounded — this host cannot enforce a bound» / the owner\'s 0 / nothing from an older hub');
+  const capChip = chip({ state: 'up', memoryMb: 6144, memoryAskedMb: 16384, memoryCap: { limitMb: 8192, hubMb: 2048 }, memoryBound: { mb: 6144, by: 'rlimit-data' } }, t);
+  ok(capChip === '6 GB · rlimit · capped by the instance’s 8 GB limit' && chip({ state: 'down', memoryMb: 6144, memoryCap: { limitMb: 8192, hubMb: 2048 }, memoryBound: { mb: 6144, by: 'cgroup' } }, t) === '6 GB · cgroup · capped by the instance’s 8 GB limit', 'the card\'s chip says the cap: «6 GB · rlimit · capped by the instance’s 8 GB limit»', capChip);
   ok(ends({ run: { cause: 'oom-bound' }, memoryBound: { mb: 256 } }, t) === 'stopped: used more than 256 MB' && ends({ parkedFor: 'memory', run: { cause: 'oom-bound' } }, t) === 'parked: out of memory twice — raise its bound or fix the job'
     && ends({ run: { cause: 'oom' } }, t) === 'killed: the instance ran out of memory' && ends({ run: { cause: 'ok' } }, t) === '', 'the card\'s named end: the bound, the park first, the instance\'s OOM, nothing else');
   // the properties field shows the STORED bound exactly; Set without a change writes nothing (0259f1ea: 1500 MB showed «1.5GB»
@@ -98,7 +114,7 @@ console.log('§1 PURE — THE LADDER, the size verdict, the rung record, the nam
   ok(field(own(1500)) === '1500M' && field(own(1536)) === '1536M' && field(own(4096)) === '4G' && field(own(0)) === '0' && field({ memorySource: 'setting', memoryMb: 8192 }) === '', 'the field: the job\'s own bound exactly — «1500M», «1536M», «4G», «0»; empty when it follows the ladder', [field(own(1500)), field(own(1536)), field(own(4096))]);
   ok(setv(own(1500), ' 1500M ') === null && setv({ memorySource: 'default', memoryMb: 4096 }, '') === null && setv(own(1500), '2G') === '2G' && setv(own(1500), '') === 'inherit', 'Set: the field unchanged ⇒ nothing is written (null); a new size is written; emptied ⇒ back to the ladder');
   // the words exist in every language the card speaks (the i18n tables carry each key)
-  const keys = ['stopped: used more than {size}', 'parked: out of memory twice — raise its bound or fix the job', 'killed: the instance ran out of memory', 'unbounded — this host cannot enforce a bound', '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again', 'Memory bound of a background job (MB)'];
+  const keys = ['stopped: used more than {size}', 'parked: out of memory twice — raise its bound or fix the job', 'killed: the instance ran out of memory', 'unbounded — this host cannot enforce a bound', '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again', 'Memory bound of a background job (MB)', 'capped by the instance’s {size} limit'];
   for (const lang of ['zh', 'ja']) { const src = read(`src/lib/i18n-${lang}.js`); const miss = keys.filter((k) => !src.includes(JSON.stringify(k) + ':')); ok(!miss.length, `the named end, the park and the setting speak ${lang}`, miss); }
 }
 
@@ -178,8 +194,11 @@ const scratch = () => {
 // a FAKE tool in a leg's <dataDir>/bin — first on the job's PATH (the engine puts it there), so the wrapper meets it
 const fake = (dir, name, body) => fs.writeFileSync(path.join(dir, 'bin', name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
 const realOf = (cmd) => String(spawnSync('sh', ['-c', `command -v ${cmd}`], { encoding: 'utf8' }).stdout || '').trim();
+// THE INSTANCE every leg runs on unless it names its own: no memory.max (a host that caps nothing) — the suite's own cgroup
+// may carry one (env.sh's scope: 24 GiB), and the cap would then lower an owner's 0; leg ⑥ names an 8 GiB instance
+const NO_LIMIT = (() => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-jobs-mem-nolimit-')); fs.writeFileSync(path.join(d, 'memory.max'), 'max\n'); dirs.push(d); return d; })();
 const engineIn = (dir) => (extra = {}) => {
-  const E = new JobManager({ dataDir: dir, broadcast: () => { }, notifyUser: (n) => said.push(n), log: (...a) => logs.push(a.join(' ')), memoryUnitPrefix: PREFIX, ...extra });
+  const E = new JobManager({ dataDir: dir, broadcast: () => { }, notifyUser: (n) => said.push(n), log: (...a) => logs.push(a.join(' ')), memoryUnitPrefix: PREFIX, memoryLimitDir: NO_LIMIT, ...extra });
   E.init();
   for (const t of E._timers) clearInterval(t); // the suite drives the sweep itself (no 5 s tick)
   E._timers = [];
@@ -310,6 +329,30 @@ leg('§3 REAL ⑤ a manager < 253 — the scope WITHOUT OOMPolicy=, the end read
   const run = lastRun(j), ex = readJson(path.join(ctlOf(j), 'exit.json')) || {};
   ok(run.cause === 'oom-bound' && j.state === 'failed', '< 253: 256 MB bound, a 512 MB Buffer ⇒ oom-bound (0259f1ea: OOMPolicy refused — exit 1, error)', { cause: run.cause, exit: run.exit });
   ok(ex.memory && ex.memory.by === 'cgroup' && ex.memory.confirmed === true && ex.memory.maxBytes === 256 * MiB && /systemd 252 has no OOMPolicy for a scope/.test(ex.memory.why || '') && /memory\.events: oom 1, oom_kill 1/.test(ex.memory.how || ''), '< 253: the scope held it (memory.max read back), its why says 252 has no OOMPolicy, its end is the scope\'s own memory.events (oom 1, oom_kill 1)', ex.memory);
+  stopEngine(E);
+});
+
+leg('§3 REAL ⑥ the instance\'s cap — a 16 GB job on an instance whose memory.max is 8 GiB runs at 6 GiB, and says so', async (ok) => {
+  if (!realOf('prlimit')) { skip++; ok.say('  - SKIP the cap leg: no prlimit here'); return; }
+  const dir = scratch(), lim = path.join(dir, 'instance-cgroup');
+  fs.mkdirSync(lim); fs.writeFileSync(path.join(lim, 'memory.max'), String(8 * 1024 * MiB)); // the pod's own memory.max: 8 GiB
+  const E = engineIn(dir)({ memoryRungs: ['rlimit-data'], memoryLimitDir: lim });
+  const j = E.jobs.get((E.create({ kind: 'task', name: 'big', cmd: { argv: ['sh', '-c', 'echo capped-run'] }, memoryMb: '16G', owner }, caller).job || {}).id);
+  await settle(E, j);
+  const run = lastRun(j), ex = readJson(path.join(ctlOf(j), 'exit.json')) || {};
+  ok(run.memoryMb === 6144 && run.memoryAskedMb === 16384 && JSON.stringify(run.memoryCap) === JSON.stringify({ limitMb: 8192, hubMb: 2048 }), 'cap: the run asked 16 GB and runs at 6 GiB — both numbers and the cap on its record (8a2727c8: 16 GB)', { memoryMb: run.memoryMb, asked: run.memoryAskedMb, cap: run.memoryCap });
+  ok(run.cause === 'ok' && ex.memory && ex.memory.by === 'rlimit-data' && ex.memory.mb === 6144 && ex.memory.maxBytes === 6144 * MiB, 'cap: the wrapper held it at the EFFECTIVE bound — RLIMIT_DATA 6 GiB read back off the child', ex.memory);
+  const snap = E.snapshot(j), words = LF('memoryChip')(snap, (k, p) => (p ? k.replace(/\{(\w+)\}/g, (_, x) => p[x]) : k));
+  ok(snap.memoryMb === 6144 && snap.memoryAskedMb === 16384 && words === '6 GB · rlimit · capped by the instance’s 8 GB limit', 'cap: the card says «6 GB · rlimit · capped by the instance’s 8 GB limit»', { words, snap: { mb: snap.memoryMb, asked: snap.memoryAskedMb, cap: snap.memoryCap } });
+  // the engine's own read, without the seam: the tightest memory.max of its cgroup and every ancestor (here, whatever this
+  // host gives the suite — env.sh's scope carries 24 GiB, a CI runner none) equals the suite's own walk of /proc/self/cgroup
+  const own = (() => { let mb = null; const rel = (fs.readFileSync('/proc/self/cgroup', 'utf8').split('\n').find((l) => l.startsWith('0::')) || '0::/').slice(3); const parts = rel.split('/').filter(Boolean);
+    for (let i = parts.length; i >= 0; i--) { try { const v = fs.readFileSync(path.join('/sys/fs/cgroup', ...parts.slice(0, i), 'memory.max'), 'utf8').trim(); if (/^\d+$/.test(v)) mb = Math.min(mb === null ? Infinity : mb, Math.floor(Number(v) / MiB)); } catch { } } return mb; })();
+  const H = engineIn(scratch())({ memoryLimitDir: undefined });
+  ok(act(H, '_instanceLimitMb') === own, `cap: the engine reads its own cgroup's tightest memory.max (here ${own === null ? 'none — no cap' : own + ' MB'})`, act(H, '_instanceLimitMb'));
+  stopEngine(H);
+  const four = act(E, 'setMemory', j, '4G'), back = act(E, 'setMemory', j, '16G');
+  ok(four.memoryMb === 4096 && !four.memoryCap && back.memoryMb === 6144 && back.memoryAskedMb === 16384 && back.memoryCap && back.memoryCap.limitMb === 8192 && E.events.some((e) => e.jobId === j.id && /capped by the instance's 8 GB limit \(asked 16 GB\)/.test(e.what || '')), 'cap: the properties / CLI take the ASKED value and answer the effective one (4G stays 4 GB; 16G ⇒ 6 GB, capped, said in the journal)', { four, back });
   stopEngine(E);
 });
 
@@ -469,6 +512,8 @@ try {
     ok(/'jobs\.memoryMb': \{\s*\n\s*type: 'number', default: 4096, min: 0,/.test(schema), 'the setting jobs.memoryMb lives in the schema (default 4096, 0 = unbounded)');
     ok(/name: VIBESPACE_JOBS_MEMORY_MB/.test(chart) && /fetchJson\(`\/api\/jobs\/\$\{j\.id\}\/memory`/.test(panel), 'the chart renders the cluster\'s default; the card\'s properties post the bound');
     ok(/memIn\.value = memoryFieldValue\(job\);/.test(panel) && /const value = memorySetValue\(job, memIn\.value\);\s*\n\s*if \(value === null\)/.test(panel), 'the properties field shows the stored bound exactly, and an unchanged Set posts nothing');
+    ok(/capped by the instance's \$\{sizeWords\(c\.limitMb\)\} limit \(asked \$\{asked\}; the hub keeps/.test(cli) && /capped by the instance's \$\{sizeWords\(r\.memoryCap\.limitMb\)\} limit \(asked/.test(cli) && /r2\.memoryCap\?\.limitMb \? ' · ' \+ t\('capped by the instance’s \{size\} limit'/.test(panel) && /memoryAskedMb: r\.memoryAskedMb \?\? null, memoryCap: r\.memoryCap \|\| null/.test(wiring),
+      'the cap is said where the job is: `show` / `poll` (asked, effective, the hub\'s share), `memory <id>`, the properties toast, the API\'s runs');
     // THE ONE ROAD: the model's park law is called in ONE place, and every end — the sweep's and the boot's, `oom` and
     // env-restart — goes through it (0259f1ea: two bookkeeping paths, the boot's env-restart in neither)
     ok(jobs.split('M.onMemoryEnd(').length === 2 && /const memPark = windowEnd \? null : this\._countEnd\(job, run\.cause\);/.test(jobs) && /const mp = ends \? this\._countEnd\(job, v\.cause\) : null;/.test(jobs) && /this\._bootNoExit\(job, run, M\.bootEndCause\(sample, sample \? this\._cgroupNow\(\) : null\)\);/.test(jobs), 'src/jobs.js: ONE call of the park law (_countEnd) — _finalizeRun and the boot\'s _bootNoExit (oom AND env-restart) both end there');

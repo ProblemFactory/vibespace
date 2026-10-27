@@ -1067,6 +1067,9 @@ const PRINTS = {
     // lane jobs-memory-bound: memLine(j) — the job's memory bound, the rung its last run measured, the park; and the `memory` verb's echo
     'j.memoryMb': `${V}:a number of MB`, 'j.memorySource': `${V}:an enum (job | setting | cluster | default)`, 'j.memoryBound': `${V}:the rung record {mb, by, why} the wrapper measured`, 'b.by': `${V}:an enum (cgroup | rlimit-data | none)`,
     'b.why': `${V}:the wrapper's own sentence (a fixed vocabulary + the scope's unit name VibeSpace built)`, 'b.mb': `${V}:a number of MB`, 'j.parkedFor': `${V}:an enum`, 'j.cronParent': `${V}:a job id`, 'r.memoryMb': `${V}:a number of MB`, 'r.memorySource': `${V}:an enum`,
+    // acceptance round 3: THE INSTANCE'S CAP — the asked bound beside the effective one, and the cap {limitMb, hubMb} the hub read off its own cgroup
+    'j.memoryAskedMb': `${V}:a number of MB`, 'j.memoryCap': `${V}:the cap record {limitMb, hubMb} the hub read off its own cgroup`, 'c.limitMb': `${V}:a number of MB`, 'c.hubMb': `${V}:a number of MB`,
+    'r.memoryAskedMb': `${V}:a number of MB`, 'r.memoryCap': `${V}:the cap record {limitMb, hubMb}`, 'r.memoryCap.limitMb': `${V}:a number of MB`, 'rc': `${V}:a local the CLI built from r.memoryCap / r.memoryAskedMb (numbers in fixed words)`,
     // verify r3 F2: the subscribe / unsubscribe echo is ONE print whose arguments span three lines — r2's line-based walker saw none of these six
     'r.updated': `${V}:a flag`, 'r.already': `${V}:a flag`, 'r.filter': `${O}:the caller's own subscription filter (echoed)`, 'r.count': `${V}:a count`, 'r.removed': `${V}:a flag`, 'pos': `${O}:the job the caller named (its positional argument)`,
     // verify r3 F4: the REACH of the prints — the records behind `j`, the run behind `dur_`, the request behind call()
