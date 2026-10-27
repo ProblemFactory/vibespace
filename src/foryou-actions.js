@@ -22,6 +22,9 @@
  *   cli       the agent CLI that files it and the line it prints: 'filed' (the hub's `filedLine` — the card in this
  *             conversation + the tray), 'wait' (a held call's wait note names the card), 'own' (the CLI's own words)
  *   scope     where it is filed: 'conversation' (its key) · 'about' (a group key + `about` naming it) · 'group' (no conversation)
+ *   decide    'person' = ONLY a person's click on this instance's page decides it — its door asks THE person verdict
+ *             (src/routes/vault.js personVerdict: any bearer ⇒ human_only, not this page ⇒ cross_site), so its record says
+ *             «approved by you · 09:41» (decidedStamp) on both doors (lane wake-approve-card); absent = its words stay its own
  * Every older table is DERIVED here (ACTION_IDENTITY · WAIT_ACTIONS · CARD_ACTION_TYPES · ANSWER_ACTION_TYPES);
  * scripts/test-foryou-actions-census.mjs fails on a type a producer files with no row, a row nobody files, a `handled` row
  * with no branch, a `card: 'row'` row the row does not draw, a `chat` row the card does not draw.
@@ -40,6 +43,11 @@
  *   filedLine(type | item, id, tray) → THE one line an agent can quote after a filing (the hub's words; a CLI prints it),
  *                                  worded from surfaceOf — never «the card in this conversation» for an item with none
  *   SURFACES                     → every surface that shows a conversation its own items, and whether it reads `about`
+ *   decidedStamp(item, {t, now}) → «approved by you · 09:41» / «denied by you · 09:41» for a `decide: 'person'` row's
+ *                                  decision (null otherwise) — THE stamp the chat card AND the tray row say (lane wake-approve-card)
+ *   decisionCard(item, {role})   → {state, buttons, stamp, waiting} — the PURE card model: filed / approved / denied /
+ *                                  expired / waiting-owner (a viewer who may not decide: the words, no buttons)
+ *   VIEWERS · canDecide(role)    → WHO may decide: an IDENTITY fact (the owner's cookie), never a view's — one row per role
  * `transcript` = the chat's loaded records as lean rows {id, ts, role, tool, cmd, out} (chat-needs-card.js maps them).
  */
 
@@ -81,8 +89,8 @@ const ROWS = Object.freeze([
   { type: 'browser-surface', identity: null, producer: 'src/server/browser-dialogs.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'browser', scope: 'group' },
   { type: 'save-login', identity: null, producer: 'src/server/browser-logins.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'group' },
   // ── channels ──
-  { type: 'channel-watch-request', identity: null, producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'watch --mode wake', 'filed'), scope: 'about' },
-  { type: 'open-channel', identity: 'key', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'request', 'filed'), scope: 'about' },
+  { type: 'channel-watch-request', identity: 'id', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'watch --mode wake', 'filed'), scope: 'about', decide: 'person' },
+  { type: 'open-channel', identity: 'key', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'request', 'filed'), scope: 'about', decide: 'person' },
   { type: 'channel-api-proposal', identity: 'id', producer: 'src/server/channel-api-cards.js', builtIn: 'src/channel-api-card.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: false, owner: 'the raw-API card the chat draws where it was proposed (B-2198) — src/lib/channel-api-card-view.js', on: 'the API card in this conversation', scope: 'group' },
   { type: 'channel-reauth', identity: null, producer: 'src/server/channels-engine.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'check', scope: 'group' },
   // ── an app on the desktop ──
@@ -242,6 +250,62 @@ function settledWords(item, t = fmt, kind = null) {
   return item && item.status === 'dismissed' ? t('dismissed') : t('done');
 }
 
+/** DERIVED (lane wake-approve-card) — the types ONLY a person's click on this page decides (`decide: 'person'`): their
+ *  door asks THE person verdict (pinned by scripts/test-wake-approve-card.mjs), so their record may say «by you». */
+const PERSON_DECIDES = typesWhere((r) => r.decide === 'person');
+
+/** WHO MAY DECIDE (lane wake-approve-card — 主开发's ruling 2026-10-27: canDecide is an IDENTITY fact, never a VIEW fact).
+ *  The person holding the owner's cookie decides from EVERY view they open — the live chat, a view-* history, a sub-*
+ *  viewer: taking the buttons from a read-only view would cost the owner a door and fence nothing (the fence is the
+ *  server's: the cookie + THE person verdict). One row per viewer ROLE an instance can have; `VIEWER_ROLE` is the role every
+ *  page has today. 'viewer' is DEFERRED: no instance has a non-owner viewer (Clerk's allowlist names owners only;
+ *  window-share shares desktop-app windows, never a chat) — the day one does, its row loses `deferred`, a page names it,
+ *  and the card's false branch («waiting for the owner», no buttons) is what it sees. The census
+ *  (scripts/test-wake-approve-card.mjs) fails a deferred row a page names, and a role no row declares. */
+const VIEWERS = Object.freeze({
+  owner: Object.freeze({ canDecide: true, how: 'the owner\'s cookie on this instance\'s page' }),
+  viewer: Object.freeze({ canDecide: false, deferred: true, how: 'no instance has a non-owner viewer yet — Clerk\'s allowlist names owners only' }),
+});
+const VIEWER_ROLE = 'owner';
+/** May a viewer of `role` decide? An unknown role may not (fail closed). */
+function canDecide(role = VIEWER_ROLE) { const r = Object.prototype.hasOwnProperty.call(VIEWERS, role) ? VIEWERS[role] : null; return !!(r && r.canDecide); }
+
+const pad2 = (n) => String(n).padStart(2, '0');
+/** A decision's clock time on this device: «09:41» the same day as `now`, else «10/26 09:41». */
+function clockWords(ts, now = Date.now()) {
+  const d = new Date(Number(ts) || 0), n = new Date(Number(now) || 0);
+  const hm = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
+}
+/** THE DECIDED STAMP (lane wake-approve-card, R1): a `decide: 'person'` row's item the owner decided ⇒ {verb, time, text}
+ *  («approved by you», «09:41», «approved by you · 09:41»); anything else ⇒ null (its own words). The chat card's quiet
+ *  line and the tray row (resolvedByText — the tray, the mini inbox, the For-you window) both say it: one spelling. */
+function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
+  if (!item || item.status === 'open' || !item.action || !PERSON_DECIDES.includes(item.action.type)) return null;
+  const by = item.resolvedBy;
+  if (by !== 'allowed' && by !== 'denied') return null;
+  const verb = by === 'allowed' ? t('approved by you') : t('denied by you');
+  const time = clockWords(item.resolvedAt || item.createdAt, now);
+  return { verb, time, text: `${verb} · ${time}`, denied: by === 'denied' };
+}
+/** THE DECISION CARD'S MODEL (lane wake-approve-card) — `item` → {state, buttons, stamp, waiting}:
+ *   'filed'         open, and this viewer may decide ⇒ buttons ['approve', 'deny'] (the row's own verbs — the tray's route)
+ *   'waiting-owner' open, and this viewer may NOT (canDecide false) ⇒ NO buttons, `waiting` = the words it reads instead
+ *   'approved' / 'denied' — decided; `stamp` = decidedStamp (a person row) or the settled verb
+ *   'expired' / 'withdrawn' / 'settled' — over without a decision; never a button */
+function decisionCard(item, { role = VIEWER_ROLE, t = fmt, now = Date.now() } = {}) {
+  const it = item || {};
+  if (it.status === 'open') {
+    return canDecide(role)
+      ? { state: 'filed', buttons: ['approve', 'deny'], stamp: null, waiting: null }
+      : { state: 'waiting-owner', buttons: [], stamp: null, waiting: t('waiting for the owner — answer it in the conversation or in For you') };
+  }
+  const st = decidedStamp(it, { t, now });
+  const by = it.resolvedBy;
+  const state = by === 'allowed' ? 'approved' : by === 'denied' ? 'denied' : (by === 'expired' || by === 'ask-expired') ? 'expired' : by === 'agent' ? 'withdrawn' : 'settled';
+  return { state, buttons: [], stamp: st ? st.text : settledWords(it, t), waiting: null };
+}
+
 /** WHERE an item IS shown and answered — read off its registry row (acceptance round 3, #5: the hub told an agent its
  *  `--notice` was «on the card in this conversation»; a notice has no card). `x` = an action TYPE (a producer that knows
  *  the row it files) or the filed ITEM. 'card' = the chat's needs card draws it (its verbs, and the tray's) · 'tray' = no
@@ -279,4 +343,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard };

@@ -923,7 +923,13 @@ malformed input → 400, `failed` / `unknown` → 502.
     null removes) the USER-origin grant only → `{ok, reach:{entries:[{id,
     principal, scope, level, origin, at, by}], requests}}`.
   - `POST /api/channels/reach-requests/:id/approve|deny` → `{ok, request,
-    grant}` (approve = exactly ONE visible grant, origin `request`).
+    grant}` (approve = exactly ONE visible grant, origin `request`; a `wr-…`
+    wake request's approve writes exactly its frozen watch row). A PERSON's
+    door (lane wake-approve-card, .360 — routes/vault.js `personVerdict`,
+    asked before the engine): any bearer (vsst_ / jbt_ / vsak_) or a body
+    `token` ⇒ 403 `{code:'human_only'}`; a write that is not this page (no
+    browser — a bare curl on a sign-in-off instance —, another site, a
+    foreign Origin) ⇒ 403 `{code:'cross_site'}`. No agent route decides one.
   - The digest carries per conversation `policy` `{mode, source, declared}`,
     `reach` `{entries, requests}`, `outbox` `{awaiting, unknown, latestAt}`,
     the assignment's `receiptWake`, and at the top `awaitingTotal`.

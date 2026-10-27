@@ -1050,6 +1050,24 @@ function create(engineCtx) {
     notify([]);
     return { ok: true, request: { ...req0, status: approve ? 'approved' : 'denied' } };
   }
+  // THE ITEM AND THE REQUEST ARE ONE STATE (lane wake-approve-card — exit-proxy verify-r2 ask-b's law, which the hub-act,
+  // automation and vault asks keep): a wake request's For-you item leaving 'open' by any door but the decide route above —
+  // the card's or the tray's ✓ Mark done / ✕ Dismiss, «Mark all seen» — settles the request NOT approved (nothing is written:
+  // «Deny changes nothing»). It stayed open for ever with nothing left to decide it, and its agent's two-open bound
+  // (MAX_OPEN_WATCH_REQUESTS) refused every later wake ask. A reopen of an item whose request is over goes straight back to
+  // done (verify-r6 W2's rule) — its Approve could only answer «already decided».
+  if (userTodos && typeof userTodos.onStatus === 'function') {
+    userTodos.onStatus((it, { status, by } = {}) => {
+      const req = it && it.id ? (store.index.table('watchRequests') || []).find((r) => r && r.todoId === it.id) : null;   // THE request this item is
+      if (!req) return;
+      if (status === 'open') { if (req.status !== 'open') { try { userTodos.setStatus(it.id, 'done', 'ask-over'); } catch { } } return; }
+      if (req.status !== 'open') return;
+      const t = now();
+      store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req.id); if (!r2 || r2.status !== 'open') return; r2.status = 'denied'; r2.decidedAt = t; r2.decidedBy = `item-${String(status)}-by-${String(by || 'user')}`; })
+        .then(() => { try { store.audit({ kind: 'acl', op: 'watch-deny', principal: req.principal, scope: req.scope, requestId: req.id, at: t, by: 'user', via: 'item' }); } catch { } notify([]); })
+        .catch((e) => log.warn(`[channels] ${req.id}: its item left 'open' but the request could not be settled: ${(e && e.message) || e}`));
+    });
+  }
 
   // ── the agent-facing reads (§11) — reach FIRST, uniform not-found ────────
   const LIST_FOR_MAX = 200;   // design 008 S6: an agent's `list` names the newest 200 it may see; the rest is found by search

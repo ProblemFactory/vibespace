@@ -16,7 +16,7 @@
 //   ②b THE PRESS ARM AND A SCROLL (found here; the owner met it 2026-10-26) — RED CONTROL first: a bundle without the arm's
 //     re-stamp on scroll — the transcript scrolls the Approve, it rests 1.5 s, the press is REFUSED «moved under the pointer»
 //   ③ the same press on this tree ⇒ ACCEPTED: the watch request is approved on the hub, client B's card becomes the quiet record
-//     «approved · …» in its tool card and its tray item is resolved; the chip says the one left
+//     «approved by you · HH:MM» in its tool card (lane wake-approve-card's stamp) and its tray item is resolved; the chip says the one left
 //   ④ A RELOAD keeps the open card at its tool card and the chip
 //   ④b an answer from ANOTHER client (a reply posted on A's road while B is in front) — B's card patched IN PLACE (the same
 //     element, «you replied»; never the transcript re-rendered)
@@ -352,7 +352,7 @@ try {
   check('the owner approved the access request — its item resolves `allowed` (its card\'s record says «approved»)', !!accDone && accDone.resolvedBy === 'allowed', { rqId, g, accDone });
   await A.waitFor(`document.querySelector('.cn-card[data-item="${acc.id}"]')?.classList.contains('cn-done')`, 6000);
   const accRec = await A.evalJs(CARD(acc.id));
-  check('…and on the page its card is the quiet one-line record «approved · …» in the same place', !!accRec && accRec.done && accRec.verb === 'approved' && /vibespace-channels request/.test(accRec.hostCmd), accRec);
+  check('…and on the page its card is the quiet one-line record «approved by you · HH:MM» in the same place (lane wake-approve-card: a person-only decision says who and when)', !!accRec && accRec.done && accRec.verb === 'approved by you' && /vibespace-channels request/.test(accRec.hostCmd), accRec);
   say('then do:watch');
   const wr = await findOpen((i) => i.action && i.action.type === 'channel-watch-request');
   const seen = {};
@@ -416,7 +416,7 @@ try {
   await B.front();
   await B.waitFor(`document.querySelector('.cn-card[data-item="${wr && wr.id}"]')?.classList.contains('cn-done')`, 8000);
   const wB = await B.evalJs(CARD(wr && wr.id));
-  check('client B: the watch request\'s card is now the quiet record «approved · …», still in its tool card', !!wB && wB.done && wB.verb === 'approved' && /vibespace-channels watch/.test(wB.hostCmd), wB);
+  check('client B: the watch request\'s card is now the quiet record «approved by you · HH:MM», still in its tool card', !!wB && wB.done && wB.verb === 'approved by you' && /vibespace-channels watch/.test(wB.hostCmd), wB);
   const trayB = await B.evalJs(`(() => { const it = app._inboxModel?.byId(${JSON.stringify(wr && wr.id)}); return it ? it.status : null; })()`);
   check('client B\'s tray (the For-you store) holds it resolved; the chip says the one left', trayB === 'done' && (await B.evalJs(CHIP))?.text === 'waiting for you · a question', { trayB, chip: await B.evalJs(CHIP) });
   await B.evalJs(`document.querySelector('.cn-card[data-item="${wr && wr.id}"]').scrollIntoView({ block: 'center' })`); await sleep(300);
@@ -429,7 +429,7 @@ try {
   await A.load();
   await A.waitFor(`!!document.querySelector('.cn-card[data-item="${ask.id}"]')`, 15000);
   const ra = await A.evalJs(CARD(ask.id)), rw = await A.evalJs(CARD(wr && wr.id));
-  check('after a reload: the ask\'s card is back OPEN in its tool card (its chips), the chip «waiting for you · a question» stands, the watch request\'s record «approved» in its own', !!ra && ra.open && /vibespace-ask/.test(ra.hostCmd) && ra.chips.length === 2 && (await A.evalJs(CHIP))?.text === 'waiting for you · a question' && !!rw && rw.done && rw.verb === 'approved', { ra, rw, chip: await A.evalJs(CHIP) });
+  check('after a reload: the ask\'s card is back OPEN in its tool card (its chips), the chip «waiting for you · a question» stands, the watch request\'s record «approved» in its own', !!ra && ra.open && /vibespace-ask/.test(ra.hostCmd) && ra.chips.length === 2 && (await A.evalJs(CHIP))?.text === 'waiting for you · a question' && !!rw && rw.done && rw.verb === 'approved by you', { ra, rw, chip: await A.evalJs(CHIP) });
   lap('④ done');
 
   console.log('④b ANSWERED ON ANOTHER CLIENT: the card patched in place');

@@ -2,6 +2,17 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.361 — 2026-10-28
+
+### Added
+- A wake request now shows its Approve / Deny card in the chat that asked for it, too; one click decides. Only your click counts, never a typed «approve».
+- A decided request says who and when, on its card and in For you: «approved by you · 09:41».
+
+### Fixed
+- With sign-in off, a script or an agent's token could approve a channel request by calling its route; now only a click on this page decides one.
+- Two wake requests with the same words are two cards again, and asking again after a Deny is a new card; the denied one keeps its line.
+- Closing a wake request with Mark done or Dismiss now counts as not approved; before, it waited for ever and the agent could not ask again.
+
 ## 2.369.360 — 2026-10-27
 
 ### Added

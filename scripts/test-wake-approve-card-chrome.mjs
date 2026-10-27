@@ -1,0 +1,431 @@
+#!/usr/bin/env node
+// A WAKE REQUEST IN THE CHAT THAT RAISED IT, DECIDED BY A CLICK AT EITHER DOOR, IN A REAL CHROME (lane wake-approve-card — the
+// owner's ruling 2026-10-27 on userW's report: an agent asked to be WOKEN by a chat and the Approve sat only in the For-you
+// tray; «the chat that raised it ALSO shows the Approve / Deny card; the approval is still ONLY a click»). The card is lane
+// chat-needs-you-card's ONE renderer; this suite drives the delta end to end over a throwaway server (this tree's src/ +
+// built public/, the fake channel adapters on) and ONE stub `claude` conversation behind the real chat-wrapper whose turns
+// RUN THE REAL CLIs as Bash tool calls. The RUNNER'S SHAPE: Chrome under the runner's fontconfig (DejaVu, Liberation, Noto CJK)
+// and a 2× CPU throttle on every page; a press is measured and pressed as ONE act (realClick); no wall-clock bound asserted.
+//   ⓪ RED CONTROL FIRST — userW's chat (a bundle without the needs cards): ONE agent turn files two wake requests; the chat
+//     shows NO card, the tray alone holds the Approve (the «before» shot)
+//   ① ONE TURN, TWO WAKE REQUESTS of the same words (two chats titled «Ops room» — Lark-like and Slack-like): TWO cards in
+//     the tool cards that ran them, on two pages; each Approve / Deny an icon + its word, ≥ 24 px at a desk, ≥ 44 px on a
+//     phone (375 touch); the For-you tray counts each ONCE and keeps its own Approve (R4, the control)
+//   ② A CLICK IS THE ONLY APPROVAL on the real hub: the agent's own vsst_ (its real token), a job's jbt_, an automation key,
+//     a bare write ⇒ refused by name; no agent-side route decides; the AGENT itself trying (its Bash POSTs with its token and
+//     its text says «approve») ⇒ refused; the owner typing «approve» to the agent ⇒ nothing decided — both still open
+//   ③ THE FALSE BRANCH (no role has it today — the registry's deferred viewer row): a page whose role may not decide reads
+//     «waiting for the owner — …» with NO buttons; the owner's role back ⇒ the buttons back
+//   ④ APPROVE ON THE CARD (page A) ⇒ the hub approves exactly that request — the agent's own watch list now holds the wake
+//     watch (the wake proceeds); page B's card says «approved by you · HH:MM»; page A's For-you window says the same
+//   ⑤ DENY IN THE TRAY (page A's For-you window, the other request) ⇒ the card for it in the chat under the window — folded in
+//     the accordion — PATCHED IN PLACE (the same element; no record of the transcript re-drawn) to «denied by you · HH:MM»;
+//     page B says it too
+//   ⑥ A RELOAD re-derives both records from the store (never stored twice: the store holds each item once, the page's storage
+//     holds none); the agent never saw the card (nothing of it reached the conversation: its stdin, the hub's frames). RED
+//     CONTROL: the base's record words (a bundle without the stamp) — «approved · …», neither who nor when
+//   SHOTS: before (no card), the two cards (desk + phone), the waiting-owner branch, the decided records.
+// Requires google-chrome (SKIP without) and a fresh `npm run build`. Run: node scripts/test-wake-approve-card-chrome.mjs [--shots <dir>]
+import { execSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import * as SCR from './scratch.mjs';   // the runner's fontconfig helpers where this tree has them (2.369.358+)
+import { armWatchdog } from './suite-watchdog.mjs';
+const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
+const require = createRequire(import.meta.url);
+const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
+if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
+if (!fs.existsSync(path.join(repo, 'public', 'bundle.js'))) { console.log('✗ no public/bundle.js — run `npm run build` first'); process.exit(1); }
+
+const [PORT, CDP_PORT] = await freePorts(2);
+const wt = scratch('wake-card-wt');
+const fakeHome = scratchHome('wake-card-home', fs);
+const chromeDir = scratch('wake-card-chrome');
+const stubDir = scratch('wake-card-stub');
+const fontDir = scratch('wake-card-fonts');
+const MUT = scratch('wake-card-mut');
+const MUT2 = scratch('wake-card-mut2');
+const WORK = path.join(stubDir, 'work', 'ops');
+const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[process.argv.indexOf('--shots') + 1]) : scratch('wake-card-shots');
+for (const d of [stubDir, WORK, SHOTS, fontDir]) fs.mkdirSync(d, { recursive: true });
+const ORIGIN = `http://127.0.0.1:${PORT}`;
+let pass = 0, fail = 0;
+const check = (n, c, e) => { if (c) { pass++; console.log(`  ✓ ${n}`); } else { fail++; console.log(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const POLL = 'fake-poll/fake-poll-ops', PUSH = 'fake-push/fake-push-ops';   // both titled «Ops room»: the SAME words
+
+// ── THE RUNNER'S FACE: scratch.mjs's runnerFontEnv where this tree has it (2.369.358+), else the same fontconfig here ──
+const RUNNER_FONT_DIRS = SCR.RUNNER_FONT_DIRS || ['/usr/share/fonts/truetype/dejavu', '/usr/share/fonts/truetype/liberation', '/usr/share/fonts/opentype/noto'];
+function runnerFontEnv(dir) {
+  if (typeof SCR.runnerFontEnv === 'function') return SCR.runnerFontEnv(dir);
+  const file = path.join(dir, 'fonts.conf');
+  fs.writeFileSync(file, `<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n${RUNNER_FONT_DIRS.map((d) => `  <dir>${d}</dir>\n`).join('')}  <cachedir>${path.join(dir, 'cache')}</cachedir>\n  <include ignore_missing="yes">/etc/fonts/conf.d</include>\n</fontconfig>\n`);
+  return { FONTCONFIG_FILE: file };
+}
+const FONT_ENV = fs.existsSync(path.join(RUNNER_FONT_DIRS[0], 'DejaVuSans.ttf')) ? runnerFontEnv(fontDir) : {};
+console.log(FONT_ENV.FONTCONFIG_FILE ? '  (Chrome under the runner\'s fontconfig: DejaVu / Liberation / Noto CJK)' : '  (no DejaVu on this box — this box\'s own face)');
+
+// ── the stub CLI: each user line = ONE turn; a line naming a verb RUNS the real CLIs as Bash tool calls ──
+fs.writeFileSync(path.join(stubDir, 'claude'), `#!${process.execPath}
+const args = process.argv.slice(2);
+if (args.includes('--version')) { console.log('2.1.308 (Claude Code) stub'); process.exit(0); }
+const { spawnSync } = require('child_process');
+const fs = require('fs');
+const SID = 'wk-' + process.pid;
+const DIR = ${JSON.stringify(stubDir)};
+const BIN = ${JSON.stringify(path.join(wt, 'data', 'bin'))};
+fs.writeFileSync(DIR + '/env.json', JSON.stringify({ sid: SID, token: process.env.VIBESPACE_SESSION_TOKEN || null, api: process.env.VIBESPACE_API || null }));
+const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-fable-5-1', cwd: process.cwd(), tools: ['Bash'], permissionMode: 'default', claude_code_version: '2.1.308' });
+const watch = (conv) => ['vibespace-channels', ['watch', conv, '--mode', 'wake', '--why', 'wake me on outages in ' + conv + ' so I can open an incident']];
+// the AGENT trying to approve its own request: its own token on the person's route and on an agent-side twin of it
+const SELF = 'const id = require("fs").readFileSync(' + JSON.stringify(DIR + '/wr-id') + ', "utf8").trim(); const H = { Authorization: "Bearer " + process.env.VIBESPACE_SESSION_TOKEN, "Content-Type": "application/json" };'
+  + ' (async () => { for (const p of ["/api/channels/reach-requests/" + id + "/approve", "/api/agent/channels/reach-requests/" + id + "/approve"]) { const r = await fetch(' + JSON.stringify(${JSON.stringify(ORIGIN)}) + ' + p, { method: "POST", headers: H, body: "{}" }); let j = null; try { j = await r.json(); } catch {} console.log(p.split("/")[2] + " " + r.status + " " + ((j && j.code) || "-")); } })();';
+const VERBS = {
+  watch2: [watch(${JSON.stringify(POLL)}), watch(${JSON.stringify(PUSH)})],
+  selfapprove: [['node', ['-e', SELF]]],
+};
+let n = 0, buf = '';
+const turn = (line) => {
+  const k = ++n;
+  fs.appendFileSync(DIR + '/seen.log', line + '\\n');   // what the AGENT reads — never the card
+  const verb = Object.keys(VERBS).find((v) => line.includes('do:' + v + ' ') || line.endsWith('do:' + v));
+  const calls = verb ? VERBS[verb] : [];
+  calls.forEach(([cli, argv], j) => {
+    const tid = 'toolu_wk' + k + '_' + j;
+    const command = cli + ' ' + argv.map((a) => (/^[\\w./:-]+$/.test(a) ? a : JSON.stringify(a))).join(' ');
+    out({ type: 'assistant', session_id: SID, uuid: 'a-t' + k + '-' + j, message: { id: 'mt' + k + '_' + j, type: 'message', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'tool_use', id: tid, name: 'Bash', input: { command, description: 'run ' + cli } }] } });
+    const r = cli === 'node' ? spawnSync(process.execPath, argv, { env: process.env, encoding: 'utf8', timeout: 60000 }) : spawnSync(process.execPath, [BIN + '/' + cli, ...argv], { env: process.env, encoding: 'utf8', timeout: 60000 });
+    const text = String(r.stdout || '') + (r.stderr ? String(r.stderr) : '');
+    fs.appendFileSync(DIR + '/cli.log', '### ' + (verb || '?') + ' ' + j + ' rc=' + r.status + '\\n' + text + '\\n');
+    out({ type: 'user', session_id: SID, uuid: 'u-t' + k + '-' + j, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: tid, content: text || '(no output)', is_error: r.status !== 0 }] } });
+  });
+  const said = verb === 'selfapprove' ? 'approve — I approve my own wake request.' : calls.length ? 'Filed it for you — it waits on your click.' : 'ok';
+  out({ type: 'assistant', session_id: SID, uuid: 'a-' + k, message: { id: 'm' + k, type: 'message', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: said }] } });
+  out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 200, num_turns: 1, result: 'done', session_id: SID, total_cost_usd: 0.001, usage: { input_tokens: 10, output_tokens: 12 } });
+};
+process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); let m = null; try { m = JSON.parse(line); } catch {} if (!m || m.type !== 'user') continue; const c = m.message && m.message.content; const text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => (x && x.type === 'text' ? x.text : '')).join('') : ''; turn(text); } });
+process.stdin.on('end', () => setTimeout(() => process.exit(0), 300));
+`, { mode: 0o755 });
+
+// ── RED CONTROL bundles: THIS source with one cut each (a missing anchor = a named red) ──
+function mutantBundle(dir, cuts) {
+  fs.mkdirSync(dir, { recursive: true });
+  execSync(`cp -r ${repo}/src ${dir}/src`);
+  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(dir, 'node_modules'));
+  for (const [rel, from, to] of cuts) { const f = path.join(dir, rel); const s = fs.readFileSync(f, 'utf8'); if (s.split(from).length !== 2) throw new Error(`mutant anchor ${rel}: ${from.slice(0, 60)}`); fs.writeFileSync(f, s.replace(from, to)); }
+  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: dir });
+  return fs.readFileSync(path.join(dir, 'bundle-mut.js'));
+}
+let NO_CARD = null, NO_CARD_ERR = '', NO_STAMP = null, NO_STAMP_ERR = '';
+try { NO_CARD = mutantBundle(MUT, [['src/lib/chat-view.js', '    this._needsCards = new NeedsCards(this);\n    this._needsCards.start(winInfo?._listenerCtl?.signal);\n', '']]); } catch (e) { NO_CARD_ERR = String(e && e.message || e).split('\n')[0]; }
+try { NO_STAMP = mutantBundle(MUT2, [['src/lib/chat-needs-card.js', 'const stamp = decidedStamp(e.item, { t });', 'const stamp = null;'], ['src/lib/user-todos-row.js', 'const stamp = item ? decidedStamp(item, { t }) : null;', 'const stamp = null;']]); } catch (e) { NO_STAMP_ERR = String(e && e.message || e).split('\n')[0]; }
+
+// ── throwaway server in a worktree (the tree's src/ + built public/ + data/bin — the CLIs the stub runs) ──
+try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
+execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
+for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
+fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
+fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
+const srvLog = fs.openSync(path.join(SHOTS, 'server.log'), 'a');
+const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: path.join(stubDir, 'claude'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1' }, stdio: ['ignore', srvLog, srvLog] });
+const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
+  '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, ...FONT_ENV } });
+const cleanup = () => {
+  try { chrome.kill('SIGKILL'); } catch { }
+  try { srv.kill('SIGKILL'); } catch { }
+  for (const root of [wt, fakeHome, stubDir, chromeDir]) { try { endRootedProcesses(root); } catch { } } // the server, dtach, the wrapper, the stub, Chrome (§57b)
+  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
+  for (const d of [chromeDir, fakeHome, stubDir, fontDir, MUT, MUT2]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
+};
+process.on('exit', cleanup);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
+const PENDS = new Map();
+armWatchdog({ capMs: 480e3, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
+for (let i = 0; i < 120; i++) { try { await fetch(`${ORIGIN}/api/home`); break; } catch { await sleep(250); } }
+
+// ── raw CDP, one connection per page (+ a RED control's bundle through the Fetch domain) ──
+const WebSocket = require('ws');
+let seq = 0; let mutant = null;
+const pageErrors = [];
+async function connect(target) {
+  const sock = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
+  await new Promise((r) => sock.on('open', r));
+  const pend = new Map();
+  sock.on('message', (d) => {
+    const m = JSON.parse(d);
+    if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); PENDS.delete(m.id); return; }
+    if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown');
+    if (m.method === 'Fetch.requestPaused') {
+      const p = m.params, u = new URL(p.request.url);
+      if (mutant?.bundle && u.pathname === '/bundle.js') sock.send(JSON.stringify({ id: ++seq, method: 'Fetch.fulfillRequest', params: { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }, { name: 'Cache-Control', value: 'no-store' }], body: mutant.bundle.toString('base64') } }));
+      else sock.send(JSON.stringify({ id: ++seq, method: 'Fetch.continueRequest', params: { requestId: p.requestId } }));
+    }
+  });
+  const cdp = (method, params = {}) => new Promise((res, rej) => {
+    const id = ++seq; PENDS.set(id, { method, at: Date.now() }); pend.set(id, (m) => (m.error ? rej(new Error(method + ': ' + m.error.message)) : res(m.result)));
+    sock.send(JSON.stringify({ id, method, params }));
+  });
+  const evalJs = async (expr) => {
+    const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+    if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
+    return r.result.value;
+  };
+  const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch { } await sleep(120); } try { return await evalJs(expr); } catch { return false; } };
+  await cdp('Runtime.enable'); await cdp('Page.enable');
+  await cdp('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }] });
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
+  await cdp('Emulation.setCPUThrottlingRate', { rate: 2 }); // the runner's slower CPU
+  const device = async (w, h, { mouse = false } = {}) => {
+    await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: mouse ? 1 : 2, mobile: !mouse });
+    await cdp('Emulation.setTouchEmulationEnabled', { enabled: !mouse, maxTouchPoints: mouse ? 1 : 5 });
+    await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: mouse ? 'hover' : 'none' }, { name: 'pointer', value: mouse ? 'fine' : 'coarse' }] });
+  };
+  const load = async () => {
+    await cdp('Page.navigate', { url: ORIGIN + '/' });
+    await waitFor('!!(window.app && app.ready)', 30000); await evalJs('app.ready.then(() => true)');
+    await waitFor(`!document.getElementById('loading-screen')`, 15000); await sleep(900);
+  };
+  const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
+  // A REAL PRESS = measure and press as ONE act (scratch.mjs realClicker's shape — 2.369.358): the target measured WHERE IT
+  // STANDS (scrolled only when it is not wholly in view — a press that scrolls its own target moves it under the pointer, and
+  // the press arm rightly refuses that: measured here, a second 'center' scroll moved a centred Approve by 40 px), the pointer
+  // moved there, what is UNDER it asked, pressed only if it is the target (one re-aim when it moved between the two)
+  const realClick = async (sel) => {
+    const MEASURE = `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; let q = e.getBoundingClientRect(); if (q.top < 0 || q.bottom > innerHeight || q.left < 0 || q.right > innerWidth) { e.scrollIntoView({ block: 'center' }); q = e.getBoundingClientRect(); } return q.width && q.height ? { x: q.left + q.width / 2, y: q.top + q.height / 2 } : null; })()`;
+    for (let aim = 0; aim < 2; aim++) {
+      const r = await evalJs(MEASURE); if (!r) return false;
+      await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
+      const hits = await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}), h = document.elementFromPoint(${r.x}, ${r.y}); return !!e && !!h && (h === e || e.contains(h)); })()`);
+      if (!hits) continue;
+      await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+      await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
+      return true;
+    }
+    return false;
+  };
+  /** THE PERSON'S PRESS: the target brought into view, a rest past the press arm's ARM_MS (a button that just MOVED under the
+   *  pointer answers nothing — the arm's law), then ONE real press where it stands → {pressed, toast, miss} */
+  const restThenPress = async (sel) => {
+    await evalJs(`document.querySelector(${JSON.stringify(sel)})?.scrollIntoView({ block: 'center' }); true`); await sleep(1500);
+    const ARM = `(() => { const b = document.querySelector(${JSON.stringify(sel)}); if (!b) return null; return { since: b._armSince == null ? null : Math.round(performance.now() - b._armSince), armTop: b._armTop == null ? null : Math.round(b._armTop * 10) / 10, top: Math.round(b.getBoundingClientRect().top * 10) / 10, scroll: Math.round((b.closest('.chat-message-list') || document.scrollingElement).scrollTop) }; })()`;
+    const before = await evalJs(ARM);
+    const pressed = await realClick(sel);
+    const after = await evalJs(ARM);
+    const miss = pressed ? null : await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return 'gone'; const q = e.getBoundingClientRect(); const h = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return { w: q.width, h: q.height, top: q.top, hit: h ? h.tagName + '.' + String(h.className).slice(0, 60) : null }; })()`);
+    await sleep(700);
+    const toast = await evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).join(' | ')`);
+    return { pressed, toast, miss, before, after };
+  };
+  return { cdp, evalJs, waitFor, device, load, shot, realClick, restThenPress, front: () => cdp('Page.bringToFront'), close: () => { try { sock.close(); } catch { } } };
+}
+
+const targets = async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).filter((x) => x.type === 'page');
+let target = null;
+for (let i = 0; i < 120 && !target; i++) { try { target = (await targets())[0]; } catch { } if (!target) await sleep(250); }
+if (!target) { console.log('✗ chrome never exposed a CDP page target'); process.exit(1); }
+const A = await connect(target);
+
+// ── the conversation (a stub claude behind the real chat-wrapper) and its turns ──
+const hubWs = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const frames = [];
+await new Promise((r) => hubWs.on('open', r)); hubWs.on('message', (d) => { try { frames.push(String(d)); } catch { } });
+hubWs.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: WORK, reqId: 'wk-ops' }));
+let SID = null; for (let i = 0; i < 100 && !SID; i++) { const f = frames.map((x) => { try { return JSON.parse(x); } catch { return null; } }).find((m) => m?.type === 'created' && m.reqId === 'wk-ops'); if (f) SID = f.sessionId; else await sleep(150); }
+const say = (text) => hubWs.send(JSON.stringify({ type: 'chat-input', sessionId: SID, text }));
+const api = async () => (await (await fetch(`${ORIGIN}/api/user-todos`)).json()).todos;
+const wakeItems = async () => { const t = await api(); return { open: t.open.filter((i) => i.action && i.action.type === 'channel-watch-request'), resolved: t.resolved.filter((i) => i.action && i.action.type === 'channel-watch-request') }; };
+const cliLog = () => { try { return fs.readFileSync(path.join(stubDir, 'cli.log'), 'utf8'); } catch { return ''; } };
+const logHas = async (re, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (re.test(cliLog())) return true; await sleep(150); } return re.test(cliLog()); };
+const until = async (fn, ms = 20000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await fn(); if (v) return v; await sleep(150); } return fn(); };
+const CHAT = (sid) => `[...app.wm.windows.values()].find((w) => w.type === 'chat' && app.sessions.get(w.id)?.sessionId === ${JSON.stringify(sid)})`;
+const VIEW = `(() => { for (const v of app.sessions?.values?.() || []) if (v && v._needsCards && v._messageList?.isConnected) return v; return null; })()`;
+const openChat = (P) => P.evalJs(`(() => { if (!${CHAT(SID)}) app.attachSession(${JSON.stringify(SID)}, 'ops watch', ${JSON.stringify(WORK)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
+/** the card of item `id` in a page: where it sits, its state, its verbs (word + icon + size), its record line */
+const CARD = (id) => `(() => { const c = document.querySelector('.cn-card[data-item="${id}"]'); if (!c) return null; const host = c.closest('.chat-msg'); const raw = host && host._rawMsg;
+  const btn = (sel) => { const b = c.querySelector(sel); if (!b || !b.offsetParent) return null; const r = b.getBoundingClientRect(); return { word: (b.textContent || '').trim(), icon: !!b.querySelector('.ut-decide-ico svg'), w: Math.round(r.width), h: Math.round(r.height) }; };
+  return { open: c.classList.contains('cn-open'), done: c.classList.contains('cn-done'), fold: c.classList.contains('cn-fold'), wait: c.classList.contains('cn-wait'), tag: c.__wkTag || null,
+    hostCmd: raw && raw.content && raw.content[0] && raw.content[0].input ? String(raw.content[0].input.command || '') : '', text: (c.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 300),
+    approve: btn('.ut-action-proposal[data-answer="approve"]'), deny: btn('.ut-action-proposal[data-answer="reject"]'), buttons: [...c.querySelectorAll('button')].filter((x) => x.offsetParent && !x.classList.contains('cn-line')).length,
+    line: (c.querySelector('.cn-line')?.textContent || '').trim() }; })()`;
+/** the clock words a decision at `ts` reads on THIS page (its timezone): «09:41» */
+const hm = (P, ts) => P.evalJs(`(() => { const d = new Date(${Number(ts) || 0}); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); })()`);
+const T0 = Date.now();
+let Bp = null;
+const lap = async (what) => { const bw = Bp ? await Bp.evalJs(`document.visibilityState + ' · ' + [...app.wm.windows.values()].length + ' windows'`).catch(() => '?') : '-'; console.log(`  (${what} at ${((Date.now() - T0) / 1000).toFixed(1)} s · page B ${bw})`); };
+
+try {
+  // setup: the owner lets the agent SEE both «Ops room» chats (the Reach dialog's own route — a visible row each)
+  await sleep(600); say('hello');
+  const env = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(stubDir, 'env.json'), 'utf8')); } catch { return null; } });
+  await A.device(1280, 800, { mouse: true }); await A.load();
+  for (const conv of [POLL, PUSH]) {
+    let r = null;
+    for (let i = 0; i < 80 && !(r && r.status === 200); i++) { r = await A.evalJs(`fetch('/api/channels/${conv}/reach', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ principal: { kind: 'agent', id: ${JSON.stringify(env && env.sid)} }, level: 'visible' }) }).then((r) => ({ status: r.status }))`); if (!r || r.status !== 200) await sleep(250); }
+    if (!r || r.status !== 200) console.log(`  (setup: the reach write for ${conv} answered ${JSON.stringify(r)})`);
+  }
+  check('setup: the stub conversation runs behind the real wrapper with its own session token (vsst_) — the agent the hub knows', !!env && /^vsst_/.test(String(env.token || '')) && !!SID, env && { sid: env.sid, token: String(env.token || '').slice(0, 5) });
+
+  if (!NO_CARD) check('⓪ the RED CONTROL bundle builds from this source (its anchor is the chain\'s line)', false, NO_CARD_ERR);
+  else try {
+    console.log('⓪ RED CONTROL FIRST — userW\'s chat (no needs cards): the agent files its wake request, the chat says nothing');
+    mutant = { bundle: NO_CARD };
+    await A.load(); await openChat(A);
+    say('now do:watch2');   // ONE turn, two wake requests (both chats titled «Ops room»)
+    await logHas(/### watch2 1 rc=/);
+    await until(async () => (await wakeItems()).open.length === 2);
+    await A.waitFor(`!!${CHAT(SID)} && document.querySelectorAll('.chat-msg-tool-result').length >= 2`, 15000); await sleep(1500);
+    const r = await A.evalJs(`({ cards: document.querySelectorAll('.cn-card').length, approveInChat: !!document.querySelector('.chat-message-list .ut-action-proposal'), open: (app._inboxModel?.todos.open || []).filter((i) => i.action && i.action.type === 'channel-watch-request').length })`);
+    await A.shot('before-no-card-1280.png');
+    check('RED CONTROL: the base\'s chat — the wake requests are open in the tray, the chat that raised them shows NO card and NO Approve (userW\'s report)', r.cards === 0 && !r.approveInChat && r.open === 2, r);
+  } catch (e) { fail++; console.log('  ✗ ⓪ threw: ' + (e?.message || e)); } finally { mutant = null; }
+  await lap('⓪ done');
+
+  console.log('① ONE TURN, TWO WAKE REQUESTS of the same words — two cards, two pages; the tray counts each once and keeps its Approve');
+  if (!/### watch2 1 rc=/.test(cliLog())) { say('now do:watch2'); await logHas(/### watch2 1 rc=/); }   // ⓪ did not run (its bundle failed)
+  const two = await until(async () => { const w = await wakeItems(); return w.open.length === 2 ? w.open : null; });
+  // which request is which: the id each `vibespace-channels watch` call printed (its «Filed for you: … (wr-…)» line)
+  const printed = (j) => ((/### watch2 \d rc=/.test(cliLog()) ? cliLog().split('### watch2 ' + j + ' rc=')[1] || '' : '').split('###')[0].match(/\((wr-[^)]+)\)/) || [])[1] || null;
+  const wrPoll = (two || []).find((i) => i.action.id === printed(0)), wrPush = (two || []).find((i) => i.action.id === printed(1));
+  check(`two open wake requests with the SAME words («${two && two[0] && two[0].text}») — two items, one per request (identity 'id')`, !!two && two.length === 2 && two[0].text === two[1].text && two[0].id !== two[1].id && !!wrPoll && !!wrPush && wrPoll.id !== wrPush.id, (two || []).map((i) => [i.id, i.action.id, i.text]));
+  fs.writeFileSync(path.join(stubDir, 'wr-id'), wrPoll ? wrPoll.action.id : '');
+  await A.load(); await openChat(A);
+  await A.cdp('Target.createTarget', { url: 'about:blank' }).catch(() => null);
+  let tB = null; for (let i = 0; i < 40 && !tB; i++) { tB = (await targets()).find((x) => x.id !== target.id); if (!tB) await sleep(150); }
+  const B = await connect(tB); Bp = B;
+  await B.device(1280, 800, { mouse: true }); await B.load(); await openChat(B);
+  for (const P of [A, B]) await P.waitFor(`document.querySelectorAll('.cn-card[data-item="${wrPoll && wrPoll.id}"], .cn-card[data-item="${wrPush && wrPush.id}"]').length === 2`, 15000);
+  const cA = { poll: await A.evalJs(CARD(wrPoll && wrPoll.id)), push: await A.evalJs(CARD(wrPush && wrPush.id)) };
+  const cB = { poll: await B.evalJs(CARD(wrPoll && wrPoll.id)), push: await B.evalJs(CARD(wrPush && wrPush.id)) };
+  check('…TWO cards in the asking chat on BOTH pages, each in the tool card that ran ITS `vibespace-channels watch` (never one merged card)', !!cA.poll && !!cA.push && !!cB.poll && !!cB.push && /vibespace-channels watch fake-poll/.test(cA.poll.hostCmd) && /vibespace-channels watch fake-push/.test(cA.push.hostCmd), { cA, cB });
+  check('…the newest open (its Approve / Deny), the older a folded row of the accordion — both their own card', !!cA.push && cA.push.open && !cA.push.fold && !!cA.poll && cA.poll.fold, { push: cA.push && { open: cA.push.open, fold: cA.push.fold }, poll: cA.poll && { fold: cA.poll.fold } });
+  check(`…Approve ✓ / Deny ✕ — an icon AND its word, ≥ 24 px at a desk (Approve ${cA.push?.approve?.w}×${cA.push?.approve?.h}, Deny ${cA.push?.deny?.w}×${cA.push?.deny?.h})`, !!cA.push?.approve && !!cA.push?.deny && cA.push.approve.icon && cA.push.deny.icon && cA.push.approve.word === 'Approve' && cA.push.deny.word === 'Deny' && cA.push.approve.w >= 24 && cA.push.approve.h >= 24 && cA.push.deny.w >= 24 && cA.push.deny.h >= 24, cA.push);
+  check('…the card says who asks and what Approve writes: «… asks to be woken by Ops room» + a billed turn + the agent\'s reason', !!cA.push && /asks to be woken by Ops room/.test(cA.push.text) && /a billed turn/.test(cA.push.text) && /so I can open an incident/.test(cA.push.text), cA.push && cA.push.text);
+  await A.evalJs(`document.querySelector('.cn-card[data-item="${wrPush && wrPush.id}"]').scrollIntoView({ block: 'center' })`); await sleep(400);
+  await A.shot('after-two-cards-1280.png');
+  // R4 — THE TRAY UNCHANGED: each request counted ONCE, its row keeps its own Approve (the mini tray / the For-you window)
+  const tray = await A.evalJs(`(() => { const open = (app._inboxModel?.todos.open || []); const ids = open.map((i) => i.id); return { n: open.length, poll: ids.filter((x) => x === ${JSON.stringify(wrPoll && wrPoll.id)}).length, push: ids.filter((x) => x === ${JSON.stringify(wrPush && wrPush.id)}).length, chip: (document.querySelector('.chat-status-foryou')?.textContent || '').trim() }; })()`);
+  check(`R4 (the control): the For-you store the tray counts holds each request ONCE (${tray.poll} + ${tray.push} of ${tray.n} open); the chat's chip «${tray.chip}»`, tray.poll === 1 && tray.push === 1 && tray.n === 2 && tray.chip === 'waiting for you · 2 approvals', tray);
+  await B.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wrPoll && wrPoll.id)} }); true`);
+  await B.waitFor(`!!document.querySelector('.iw-item .iw-act[data-act="proposal-approve"]')`, 10000);
+  const win = await B.evalJs(`(() => { const a = document.querySelector('.iw-item .iw-act[data-act="proposal-approve"]'), d = document.querySelector('.iw-item .iw-act[data-act="proposal-reject"]'); return { approve: !!a && a.offsetParent !== null, deny: !!d && d.offsetParent !== null, title: (document.querySelector('.iw-item .iw-title')?.textContent || '').trim() }; })()`);
+  check('R4: the For-you window\'s row for the same request keeps its own Approve (and its Reject) — the tray door is unchanged', win.approve && win.deny && /asks to be woken by Ops room/.test(win.title), win);
+  await B.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
+  // …and on a phone (B at 375 touch for one look — then back to its desk)
+  await B.device(375, 812); await B.load();
+  await B.waitFor(`document.documentElement.dataset.vc === 'compact'`, 8000);
+  await B.evalJs(`app.phoneHome?.hide?.(); true`).catch(() => null); await openChat(B);
+  await B.waitFor(`!!document.querySelector('.cn-card[data-item="${wrPush && wrPush.id}"] .ut-action-proposal[data-answer="approve"]')`, 12000);
+  await B.evalJs(`document.querySelector('.cn-card[data-item="${wrPush && wrPush.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
+  const ph = await B.evalJs(CARD(wrPush && wrPush.id));
+  await B.shot('after-card-phone-375.png');
+  check(`…on a phone (375 touch): Approve ${ph?.approve?.w}×${ph?.approve?.h}, Deny ${ph?.deny?.w}×${ph?.deny?.h} — every target ≥ 44 × 44`, !!ph?.approve && !!ph?.deny && ph.approve.w >= 44 && ph.approve.h >= 44 && ph.deny.w >= 44 && ph.deny.h >= 44, ph);
+  await B.device(1280, 800, { mouse: true }); await B.load(); await openChat(B);
+  await B.waitFor(`!!document.querySelector('.cn-card[data-item="${wrPush && wrPush.id}"]')`, 12000);
+  await lap('① done');
+
+  console.log('② A CLICK IS THE ONLY APPROVAL — on the real hub: tokens, a bare write, the agent itself, a typed «approve»');
+  const post = async (headers, p = `/api/channels/reach-requests/${wrPoll && wrPoll.action.id}/approve`) => { const r = await fetch(ORIGIN + p, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: '{}' }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, code: j && j.code }; };
+  const refusals = {
+    vsst: await post({ Authorization: 'Bearer ' + (env && env.token) }),
+    jbt: await post({ Authorization: 'Bearer jbt_0123456789abcdef' }),
+    vsak: await post({ Authorization: 'Bearer vsak_' + 'A'.repeat(43) }),
+    bare: await post({}),
+    agentRoute: await post({ Authorization: 'Bearer ' + (env && env.token) }, `/api/agent/channels/reach-requests/${wrPoll && wrPoll.action.id}/approve`),
+  };
+  check('the agent\'s own vsst_ (its real token), a job\'s jbt_, an automation key\'s vsak_ ⇒ 403 human_only; a bare write (no browser) ⇒ 403 cross_site; an agent-side twin of the route ⇒ no such door', refusals.vsst.status === 403 && refusals.vsst.code === 'human_only' && refusals.jbt.code === 'human_only' && refusals.vsak.code === 'human_only' && refusals.bare.status === 403 && refusals.bare.code === 'cross_site' && refusals.agentRoute.status >= 400 && refusals.agentRoute.status !== 200, refusals);
+  say('now do:selfapprove');
+  await logHas(/### selfapprove 0 rc=/);
+  const self = (cliLog().split('### selfapprove 0')[1] || '').split('###')[0];
+  check('the AGENT itself — its Bash POSTs the approve with its own token, its text says «approve» ⇒ the person\'s route answers 403 human_only, the agent-side twin is no door', /channels 403 human_only/.test(self) && /agent [45]\d\d/.test(self), self.trim());
+  say('approve');   // the OWNER typing «approve» to the agent — words, never a decision
+  await sleep(2500);
+  const still = await wakeItems();
+  check('…and the owner typing «approve» in the chat decides nothing — both requests still open, both cards still with their buttons', still.open.length === 2 && !!(await A.evalJs(CARD(wrPush && wrPush.id)))?.approve, still.open.map((i) => i.id));
+  await lap('② done');
+
+  console.log('③ THE FALSE BRANCH — a page whose role may not decide (no role has it today: the registry\'s deferred viewer row)');
+  const wait = await A.evalJs(`(async () => { const v = ${VIEW}; v._needsCards._role = () => 'viewer'; v._needsCards.render(); await new Promise((r) => setTimeout(r, 300)); return null; })()`).then(() => A.evalJs(CARD(wrPush && wrPush.id)));
+  await A.shot('waiting-owner-1280.png');
+  check('the card reads «waiting for the owner — answer it in the conversation or in For you» with NO button', !!wait && wait.wait && wait.buttons === 0 && /waiting for the owner — answer it in the conversation or in For you/.test(wait.text), wait);
+  const back = await A.evalJs(`(async () => { const v = ${VIEW}; v._needsCards._role = () => 'owner'; v._needsCards.render(); await new Promise((r) => setTimeout(r, 300)); return null; })()`).then(() => A.evalJs(CARD(wrPush && wrPush.id)));
+  check('…the owner\'s role back ⇒ Approve / Deny back (the owner decides from every view they open)', !!back && !back.wait && !!back.approve && !!back.deny, back);
+  await lap('③ done');
+
+  console.log('④ APPROVE ON THE CARD (page A) ⇒ the hub approves exactly that request; page B\'s card patched in place');
+  await A.front();
+  const pr = await A.restThenPress(`.cn-card[data-item="${wrPush && wrPush.id}"] .ut-action-proposal[data-answer="approve"]`);
+  const pressed = pr.pressed;
+  const pushDone = await until(async () => (await wakeItems()).resolved.find((i) => i.id === (wrPush && wrPush.id)));
+  check('a real click on the card\'s Approve ⇒ the hub resolved THAT request `allowed` (the other still open)', pressed && !!pushDone && pushDone.resolvedBy === 'allowed' && (await wakeItems()).open.some((i) => i.id === (wrPoll && wrPoll.id)), { pr, pushDone: pushDone && { by: pushDone.resolvedBy } });
+  const watches = await (await fetch(ORIGIN + '/api/agent/channels/watches', { headers: { Authorization: 'Bearer ' + (env && env.token) } })).json().catch(() => null);
+  const wake = ((watches && watches.watches) || []).find((w) => /fake-push-ops/.test(JSON.stringify(w)));
+  check('…the wake proceeds: the agent\'s own watch list now holds exactly what the card said — a WAKE on the Slack-like «Ops room» (and nothing on the other)', !!wake && /wake/.test(JSON.stringify(wake)) && !((watches && watches.watches) || []).some((w) => /fake-poll-ops/.test(JSON.stringify(w))), watches);
+  const stampPush = 'approved by you · ' + (await hm(B, pushDone && pushDone.resolvedAt));
+  // B (the other client) is READ where it stands, in the back: its For-you store took the decision live (the broadcast — what
+  // its tray row and its cards are drawn from). Its windows are not asserted here: a CDP page sent to the back drops its
+  // window layout (measured: no window left — the chain's «never assert identity across a front/back switch»); the
+  // in-place identity is ⑤'s, on ONE page that never switched
+  const bModel = await B.waitFor(`(app._inboxModel?.todos.resolved || []).some((i) => i.id === ${JSON.stringify(wrPush && wrPush.id)} && i.resolvedBy === 'allowed')`, 10000);
+  const bRec = await B.evalJs(CARD(wrPush && wrPush.id));
+  if (!bRec) console.log('  (page B: ' + JSON.stringify(await B.evalJs(`({ vis: document.visibilityState, wins: [...app.wm.windows.values()].map((w) => w.type + ':' + (app.sessions.get(w.id)?.sessionId || '') + (w.minimized ? ':min' : '')), cards: [...document.querySelectorAll('.cn-card')].map((c) => c.dataset.item + (c.classList.contains('cn-done') ? ':done' : '')), msgs: document.querySelectorAll('.chat-message-list .chat-msg').length, resolved: (app._inboxModel?.todos.resolved || []).map((i) => i.id).slice(0, 5) })`)) + ')');
+  check(`page B (the other client, in the back): its For-you store took the decision live — the item resolved \`allowed\` (what its tray row and its card are drawn from)${bRec ? `; its card reads «${bRec.line.slice(0, 40)}»` : ''}`, !!bModel && (!bRec || (bRec.done && bRec.line.includes(stampPush))), bRec);
+  await A.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wrPush && wrPush.id)} }); true`);
+  const aWin = await A.waitFor(`[...document.querySelectorAll('.iw-item .iw-meta, .iw-row')].some((e) => (e.textContent || '').includes(${JSON.stringify(stampPush)}))`, 10000);
+  check(`page A's For-you window (the tray door) says the same «${stampPush}»`, !!aWin);
+  await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
+  await lap('④ done');
+
+  console.log('⑤ DENY IN THE TRAY (page A\'s For-you window) ⇒ its card in the chat under it — folded — patched in place');
+  await A.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${wrPoll && wrPoll.id}"]'); if (c) c.__wkTag = 'A-poll'; window.__wkRecsA = [...document.querySelectorAll('.chat-message-list .chat-msg')]; return !!c; })()`);
+  await A.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wrPoll && wrPoll.id)} }); true`);
+  const winUp = await A.waitFor(`!!document.querySelector('.iw-item .iw-act[data-act="proposal-reject"]')`, 10000);
+  await A.shot('tray-deny-before-1280.png');
+  if (!winUp) console.log('  (the window: ' + JSON.stringify(await A.evalJs(`({ wins: [...app.wm.windows.values()].map((w) => w.type + (w.minimized ? ':min' : '')), items: document.querySelectorAll('.iw-item').length, acts: [...document.querySelectorAll('.iw-act')].map((b) => b.dataset.act) })`)) + ')');
+  const dr = await A.restThenPress('.iw-item .iw-act[data-act="proposal-reject"]');
+  const denied = dr.pressed;
+  const pollDone = await until(async () => (await wakeItems()).resolved.find((i) => i.id === (wrPoll && wrPoll.id)));
+  check('a real click on Reject in the For-you window ⇒ the hub resolved that request `denied`', denied && !!pollDone && pollDone.resolvedBy === 'denied', { dr, pollDone: pollDone && pollDone.resolvedBy });
+  const stampPoll = 'denied by you · ' + (await hm(A, pollDone && pollDone.resolvedAt));
+  await A.waitFor(`document.querySelector('.cn-card[data-item="${wrPoll && wrPoll.id}"]')?.classList.contains('cn-done')`, 10000);
+  const aRec = await A.evalJs(CARD(wrPoll && wrPoll.id));
+  const keptA = await A.evalJs(`(window.__wkRecsA || []).filter((e) => e.isConnected).length + '/' + (window.__wkRecsA || []).length`);
+  const bPoll = await B.evalJs(CARD(wrPoll && wrPoll.id));   // the other page, in the back, follows too
+  await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
+  check(`page A: the SAME card element now reads «${stampPoll}» (✕) in the tool card that ran its watch; the transcript was not re-drawn (${keptA} records the same nodes)`, !!aRec && aRec.done && aRec.tag === 'A-poll' && aRec.line.includes(stampPoll) && /^✕/.test(aRec.line) && /vibespace-channels watch fake-poll/.test(aRec.hostCmd) && /^(\d+)\/\1$/.test(keptA), { aRec, keptA });
+  check(`…and page B (the other client) says «${stampPoll}» too`, !!bPoll && bPoll.done && bPoll.line.includes(stampPoll), bPoll);
+  // the shot: the run that holds both records opened (decided cards fold with their run, like any record)
+  await A.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${wrPoll && wrPoll.id}"]'); const h = c && [...document.querySelectorAll('.chat-run-header')].find((x) => x.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING); h?.click(); return !!h; })()`); await sleep(600);
+  await A.evalJs(`document.querySelector('.cn-card[data-item="${wrPoll && wrPoll.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(300);
+  await A.shot('after-decided-records-1280.png');
+  await lap('⑤ done');
+
+  console.log('⑥ A RELOAD re-derives both records from the store; never stored twice; the agent never saw the card');
+  await A.load(); await openChat(A);
+  await A.waitFor(`document.querySelectorAll('.cn-card.cn-done[data-item="${wrPoll && wrPoll.id}"], .cn-card.cn-done[data-item="${wrPush && wrPush.id}"]').length === 2`, 15000);
+  const rl = { poll: await A.evalJs(CARD(wrPoll && wrPoll.id)), push: await A.evalJs(CARD(wrPush && wrPush.id)) };
+  check('after a reload both records stand where they were filed, with their stamps', !!rl.poll && !!rl.push && rl.poll.line.includes(stampPoll) && rl.push.line.includes(stampPush) && /fake-poll/.test(rl.poll.hostCmd) && /fake-push/.test(rl.push.hostCmd), rl);
+  const t = await api(); const all = [...t.open, ...t.resolved];
+  const stored = await A.evalJs(`(() => { let hit = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i), v = localStorage.getItem(k) || ''; if (v.includes(${JSON.stringify(wrPoll && wrPoll.id)}) || v.includes(${JSON.stringify(wrPush && wrPush.id)}) || /approved by you|denied by you/.test(v)) hit.push(k); } return hit; })()`);
+  check(`never stored twice: the store holds each item once (${all.filter((i) => i.id === (wrPoll && wrPoll.id)).length}, ${all.filter((i) => i.id === (wrPush && wrPush.id)).length}); the page's storage holds no card (${stored.length} keys)`, all.filter((i) => i.id === (wrPoll && wrPoll.id)).length === 1 && all.filter((i) => i.id === (wrPush && wrPush.id)).length === 1 && stored.length === 0, stored);
+  const seen = fs.readFileSync(path.join(stubDir, 'seen.log'), 'utf8');
+  const leaked = frames.filter((f) => /approved by you|denied by you|Waiting for you —|waiting for the owner/.test(f));
+  check('the agent never saw the card: what reached the conversation holds none of its words (its stdin: the owner\'s own lines only), and no hub frame carried them', !/approved by you|denied by you|Waiting for you|Approve|Deny/.test(seen) && leaked.length === 0, { seen: seen.trim().split('\n'), leaked: leaked.length });
+  if (!NO_STAMP) check('⑥ the stamp\'s RED CONTROL bundle builds (its anchors are this lane\'s lines)', false, NO_STAMP_ERR);
+  else try {
+    mutant = { bundle: NO_STAMP };
+    await B.front(); await B.load(); await openChat(B);
+    await B.waitFor(`document.querySelectorAll('.cn-card.cn-done').length >= 2`, 15000);
+    const red = await B.evalJs(CARD(wrPush && wrPush.id));
+    check(`RED CONTROL: the base's record words — «${red && red.line.slice(0, 60)}»: neither who decided nor when`, !!red && red.done && /approved · /.test(red.line) && !/by you/.test(red.line), red);
+  } catch (e) { fail++; console.log('  ✗ ⑥ RED threw: ' + (e?.message || e)); } finally { mutant = null; }
+  await lap('⑥ done');
+  check('no page threw', pageErrors.length === 0, pageErrors.slice(0, 3));
+} catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
+
+console.log(`  shots: ${SHOTS}`);
+console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+process.exit(fail ? 1 : 0);

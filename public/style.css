@@ -8136,6 +8136,10 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .ut-action-proposal { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); } /* lane browser-propose: a WORDED button on the 24 px .ut-act icon box — its own width (the exit ask's rule) */
 .ut-proposal-answer .ut-action-proposal { height: 24px; min-width: 64px; }
 .ut-proposal-answer .ut-proposal-approve { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+/* lane wake-approve-card: a decision only a person's click makes (a wake request) — Approve ✓ / Deny ✕, the icon beside the word, in the button's own colour */
+.ut-proposal-answer .ut-action-proposal:has(> .ut-decide-ico) { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.ut-decide-ico { display: inline-flex; flex: none; }
+.ut-decide-ico svg { width: 12px; height: 12px; display: block; }
 .ut-action-grant { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); } /* lane controls-that-lie: the GRANT an ask names — a WORDED button on the 24 px .ut-act icon box, its own width (the exit ask's rule); a long profile label wraps */
 .ut-grant-answer .ut-action-grant { height: auto; min-height: 24px; min-width: 64px; white-space: normal; overflow-wrap: anywhere; text-align: start; background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 /* lane vault-paste-request: an agent's request for a secret — the MASKED paste box under its words (the field, 存入保险库, 拒绝)

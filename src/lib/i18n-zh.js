@@ -11047,4 +11047,7 @@ export default {
   "you replied": "你已回复",
   "approved": "已批准",
   "withdrawn by the agent": "已被 agent 撤回",
+  // lane wake-approve-card: a decision only your click makes says who and when (the chat card and the tray row alike; «approved by you» is the API dialog's key)
+  "denied by you": "你已拒绝",
+  "waiting for the owner — answer it in the conversation or in For you": "等待所有者处理 — 在对话里或「待你处理」中回答",
 };

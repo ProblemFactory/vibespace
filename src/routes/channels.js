@@ -25,6 +25,7 @@ const fs = require('fs');
 const OAUTH_DOORS = require('../server/oauth-doors.js'); // lane voice-p1-oauth-teach: non-channel consent landings
 const express = require('express');
 const { contentDisposition } = require('../file-disposition.js');   // lane-raw-filename: THE Content-Disposition builder
+const { personVerdict } = require('./vault.js');   // lane wake-approve-card: THE person verdict (a request is decided by a click)
 const router = express.Router();
 
 let ctx = null;
@@ -1221,10 +1222,22 @@ router.put('/api/channels/:adapterId/:convId/reach', async (req, res) => {
     answer3(res, await engine().setReach(req.params.adapterId, req.params.convId, { principal: b.principal, level: b.level === undefined ? null : b.level }, 'user'));
   } catch (e) { fail(res, e); }
 });
-/** An agent's access REQUEST decided: approve = EXACTLY ONE visible grant. */
+/** An agent's access REQUEST decided: approve = EXACTLY ONE visible grant.
+ *  A CLICK IS THE ONLY APPROVAL (lane wake-approve-card, the owner's ruling 2026-10-27): the decision — a reach request's
+ *  grant, a wake request's billed turns — is a PERSON's on this instance's own page, through THE person verdict the vault,
+ *  automation and provider doors ask (src/routes/vault.js personVerdict — one verdict, never a local copy): any bearer (an
+ *  agent's vsst_, a job's jbt_, an automation key's vsak_) ⇒ 403 `human_only`; a write that is not this page (another
+ *  site, or no browser at all — a bare curl on an instance whose sign-in is off) ⇒ 403 `cross_site`. The chat card and the
+ *  For-you row are two doors to this ONE route (the engine's decideRequest is called from here only — the census). */
+const DECIDE_REFUSED = Object.freeze({
+  human_only: 'only a person decides this, on this instance\'s page — an agent, a job or an automation key never approves a request (its own or another\'s)',
+  cross_site: 'only a person decides this, on this instance\'s own page — this write did not come from it',
+});
 router.post('/api/channels/reach-requests/:id/:verdict', async (req, res) => {
   try {
     forHost(req);
+    const who = personVerdict(req);
+    if (!who.ok) return bad(res, 403, DECIDE_REFUSED[who.code] || DECIDE_REFUSED.cross_site, { code: who.code });
     const v = req.params.verdict;
     if (v !== 'approve' && v !== 'deny') return bad(res, 400, 'verdict must be approve or deny', { code: 'bad-request' });
     answer3(res, await engine().decideRequest(req.params.id, v === 'approve', 'user'));

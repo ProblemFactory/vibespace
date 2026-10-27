@@ -37,6 +37,7 @@ import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; //
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
+import { decidedStamp, PERSON_DECIDES } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
@@ -58,6 +59,11 @@ export function expiresText(ts, t) {
  *  user's own inbox reply, design-user-inbox-reply D1.4). `item` = the
  *  resolved item, for a resolution worded with its fact ('resumed'). */
 export function resolvedByText(by, t, item = null) {
+  // lane wake-approve-card: a decision only a person's click makes (a `decide: 'person'` row — a wake request, a reach request)
+  // reads as the chat card's record does: «approved by you · 09:41» / «denied by you · 09:41» — the tray, the mini inbox and
+  // the For-you window all word a resolved row here
+  const stamp = item ? decidedStamp(item, { t }) : null;
+  if (stamp) return stamp.text;
   if (by === 'agent') return t('by the agent');
   if (by === 'system') return t('automatically');
   if (by === 'expired') return t('expired');
@@ -186,7 +192,10 @@ const saveLoginAskHtml = (i, t, detail) => `<div class="ut-proposal-plan">${escH
   + `<button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Not now'))}</button></div>`;
 const proposalAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'save-login' && /^sl-[0-9a-f]{8}$/.test(String(i.action.id || '')) ? saveLoginAskHtml(i, t, detail) : i && i.action && i.action.type === 'browser-surface' && i.action.id ? surfaceAskHtml(i, t, detail) : i && i.action && i.action.type === 'browser-proposal' && /^pk-[0-9a-f]{8}$/.test(String(i.action.id || '')) ? passkeyAskHtml(i, t, detail) : i && i.action && PROPOSAL_ACTIONS.includes(i.action.type)
   ? `<div class="ut-proposal-plan">${apiChipHtml(apiCardOf(i), t)}${escHtml(detail || '')}</div>${apiTechHtml(apiCardOf(i), t)}`
-    + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Runs exactly what this card says'))}">${escHtml(t('Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Reject'))}</button></div>` : '') : '');
+    + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Runs exactly what this card says'))}">${decideIcon(i, 'check')}${escHtml(t('Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${decideIcon(i, 'close')}${escHtml(PERSON_DECIDES.includes(i.action.type) ? t('Deny') : t('Reject'))}</button></div>` : '') : '');
+/** lane wake-approve-card: a decision only a person's click makes (a wake request) wears its verb's icon beside its word —
+ *  Approve ✓ / Deny ✕, theme-coloured (currentColor); every other proposal's buttons stay words. */
+const decideIcon = (i, k) => (i && i.action && PERSON_DECIDES.includes(i.action.type) ? `<span class="ut-decide-ico" aria-hidden="true">${UI_ICONS[k]}</span>` : '');
 
 /** Layer 0 apps (docs/design-app-persistence.zh.md §3.1): an agent's install PROPOSAL, answered where it appears — Install…
  *  opens THE install dialog on the proposal (its fresh plan: every command, the packages, the sizes — nothing runs before

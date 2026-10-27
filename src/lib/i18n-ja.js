@@ -11046,4 +11046,7 @@ export default {
   "you replied": "返信済み",
   "approved": "承認済み",
   "withdrawn by the agent": "エージェントが取り下げ",
+  // lane wake-approve-card: a decision only your click makes says who and when (the chat card and the tray row alike; «approved by you» is the API dialog's key)
+  "denied by you": "拒否済み",
+  "waiting for the owner — answer it in the conversation or in For you": "所有者の対応待ち — 会話または「あなた宛て」で回答してください",
 };

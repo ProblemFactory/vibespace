@@ -170,6 +170,39 @@ console.log('④ W1: the agent\'s own watch');
   ok(ap2.code === 'bad-state' && userTodos.get(todo.id).status !== 'open', 'decided once; the For-you item is resolved');
 }
 
+console.log('④b THE ITEM AND THE REQUEST ARE ONE STATE (lane wake-approve-card): a wake request\'s item closed by ✓ / ✕ settles it');
+/** a wake ask, its item closed by a generic verb (✕ Dismiss), the agent asking again, the closed item reopened */
+async function oneStateLeg(ENGM, name) {
+  const { eng, userTodos } = mkEngine(name, { ENGM });
+  await eng.pass(A, { force: true });
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)] });
+  const wk = await eng.agentWatch(AG, KEY, { delivery: 'wake', why: 'on call' });
+  if (!wk.ok || !wk.request) return { wk };
+  const reqOf = (id) => (eng.store.index.table('watchRequests') || []).find((r) => r.id === id) || {};
+  const todoId = reqOf(wk.request && wk.request.id).todoId;
+  userTodos.setStatus(todoId, 'dismissed', 'user');   // the card's (or the tray's) ✕ — not the decide route
+  for (let i = 0; i < 40 && reqOf(wk.request.id).status === 'open'; i++) await new Promise((r) => setTimeout(r, 25));
+  const settled = reqOf(wk.request.id);
+  const written = (eng.store.index.snapshot().conversations[KEY]?.watchers || []).some((w) => w.principal.id === 'agent-1');
+  const again = await eng.agentWatch(AG, KEY, { delivery: 'wake', why: 'still on call' });
+  userTodos.setStatus(todoId, 'open', 'user');          // the For-you window's «reopen» on the closed item
+  const reopened = userTodos.get(todoId);
+  return { status: settled.status, decidedBy: settled.decidedBy || null, written, again: { already: !!again.already, same: !!again.request && again.request.id === wk.request.id }, reopened: { status: reopened.status, by: reopened.resolvedBy } };
+}
+{
+  const g = await oneStateLeg(ENG, 'e3b');
+  ok(g.status === 'denied' && /^item-dismissed-by-user$/.test(g.decidedBy) && !g.written, `✕ Dismiss on the item settles the request NOT approved (${g.status}, ${g.decidedBy}) — nothing written («Deny changes nothing»)`, J2s(g));
+  ok(!g.again.already && !g.again.same, 'the agent asking again files a NEW request the owner can decide (never «already filed» behind a closed item)', J2s(g.again));
+  ok(g.reopened.status === 'done' && g.reopened.by === 'ask-over', 'reopening the closed item puts it straight back (\'ask-over\' — its Approve could only answer «already decided»)', J2s(g.reopened));
+  // CONTROL: the engine without the hook — the request stays open for ever behind a closed item
+  const src = engineSource(REPO);
+  const anchor = "    userTodos.onStatus((it, { status, by } = {}) => {\n      const req = it && it.id ? (store.index.table('watchRequests') || []).find((r) => r && r.todoId === it.id) : null;";
+  const cut = src.split(anchor).length === 2 ? src.replace(anchor, "    userTodos.onStatus((it) => {\n      return;") : src;
+  const E3 = MUT.load('src/server/channels-engine.js', cut, 'no-one-state');
+  const r = await oneStateLeg(E3, 'e3b-red');
+  ok(cut !== src && r.status === 'open' && r.again.already && r.again.same, `CONTROL: an engine without the hook — the dismissed item leaves its request OPEN (${r.status}) and the agent\'s next ask is «already filed» behind an item nobody can see`, J2s(r));
+}
+
 console.log('⑤ W5: next-turn rides the free stash; a legacy row still wakes');
 async function deliveryLeg(ENGM, name) {
   const { eng, delivered, stashed, clock } = mkEngine(name, { ENGM });
@@ -275,7 +308,9 @@ async function removalLeg(ENGM, name) {
   // the decided rows are the NEWEST (pushed after the open ones): an oldest-first drop would take an open row
   await eng.store.index.update((ix) => { for (let i = 0; i < 100; i++) ix.watchRequests.push({ id: `wr-old-${i}`, kind: 'watch', principal: OTHER, scope: { kind: 'conversation', id: 'x' }, status: 'denied', at: 1 }); });
   const n0 = eng.store.index.table('watchRequests').filter((r) => r.status === 'open').length;
-  await userTodos.setStatus(todo.id, 'done', 'user'); // free a slot in the tray
+  // free a slot in the tray with a FILLER (lane wake-approve-card: closing the wake request's own item now settles its request — ④b)
+  const filler = userTodos.snapshot().open.find((i) => i.sessionKey === key && /^filler /.test(i.text));
+  await userTodos.setStatus(filler.id, 'done', 'user');
   const more = await eng.agentWatch(OG, `${A}/fake-poll-announce`, { delivery: 'wake' });
   const list = eng.store.index.table('watchRequests');
   ok(more.ok && more.proposed && list.length === 100 && list.filter((r) => r.status === 'open').length === n0 + 1 && list.some((r) => r.id === more.request.id), 'past 100 rows a DECIDED one is dropped, every open one kept', JSON.stringify({ len: list.length, open: list.filter((r) => r.status === 'open').length }));
