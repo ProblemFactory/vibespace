@@ -55,7 +55,7 @@ export const ROWS = [
   ['src/harness-config.js', 'own-tree', 9, null, CLI],
   ['src/hosts.js', 'own-tree', 29, null, DATA],
   ['src/incident.js', 'own-tree', 19, null, DATA],
-  ['src/jobs.js', 'own-tree', 24, null, `${DATA}; lane job-spec-off-argv +1: the run's spec file, opened O_WRONLY|O_CREAT|O_EXCL 0600 inside its own ctl dir (data/job-logs) — a write, never a read; lane job-wrapper-update-window +1: a stat of data/bin/job-wrapper.js (its mtime: is a protocol mismatch the update's window?) — the server's own tree`],
+  ['src/jobs.js', 'own-tree', 27, null, `${DATA}; lane job-spec-off-argv +1: the run's spec file, opened O_WRONLY|O_CREAT|O_EXCL 0600 inside its own ctl dir (data/job-logs) — a write, never a read; lane job-wrapper-update-window +1: a stat of data/bin/job-wrapper.js (its mtime: is a protocol mismatch the update's window?) — the server's own tree; lane jobs-memory-bound +3 (_cgroupNow, the boot judge): /proc/self/cgroup, the instance's own /sys/fs/cgroup memory.events and a stat of that dir (its identity) — kernel pseudo-files, never a mount`],
   ['src/ledger-slot-backfill.js', 'own-tree', 13, null, CLI],
   ['src/login-state.js', 'own-tree', 2, null, CLI],
   ['src/machine-mounts.js', 'own-tree', 7, null, DATA],

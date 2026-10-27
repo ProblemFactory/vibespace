@@ -10,7 +10,7 @@ import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: a panel's ```mermaid fence draws
 import { registerWindowType } from './window-types.js';
-import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords } from './jobs-layout.js';
+import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue } from './jobs-layout.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
@@ -359,13 +359,15 @@ async function expandDetail(app, el, j, refresh) {
   const memRow = document.createElement('div'); memRow.className = 'jobs-access jobs-memory';
   const memLbl = document.createElement('span'); memLbl.textContent = t('Memory bound') + ':';
   const memIn = document.createElement('input'); memIn.className = 'jobs-memory-input'; memIn.size = 8;
-  memIn.value = job.memorySource === 'job' ? (job.memoryMb ? memoryWords(job.memoryMb).replace(' ', '') : '0') : '';
+  memIn.value = memoryFieldValue(job); // the stored bound exactly — never a rounded one Set would write back
   memIn.placeholder = job.memoryMb ? memoryWords(job.memoryMb) : t('unbounded');
   const memSet = document.createElement('button'); memSet.className = 'jobs-btn'; memSet.textContent = t('Set');
   const memFact = document.createElement('span'); memFact.className = 'jobs-memory-fact';
   memFact.textContent = `${memorySourceWords(job, t)}${job.memoryBound ? ' · ' + (memoryChip(job, t) || '') : ''} · ${t('from its next run')}`;
   memSet.onclick = async () => {
-    const r2 = await fetchJson(`/api/jobs/${j.id}/memory`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: memIn.value.trim() || 'inherit' }) });
+    const value = memorySetValue(job, memIn.value);
+    if (value === null) { showToast(t('Memory bound: {size}', { size: job.memoryMb ? memoryWords(job.memoryMb) : t('unbounded') })); return; } // unchanged: nothing is written
+    const r2 = await fetchJson(`/api/jobs/${j.id}/memory`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
     if (r2?.error) showToast(r2.error, { error: true }); else { showToast(t('Memory bound: {size}', { size: r2.memoryMb ? memoryWords(r2.memoryMb) : t('unbounded') })); refresh?.(); }
   };
   memRow.append(memLbl, memIn, memSet, memFact);

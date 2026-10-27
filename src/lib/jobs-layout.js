@@ -11,7 +11,8 @@
  *   foldTasks(tasks, {expanded, sessionNames})  owner session → name family → rows
  *   pruneFolds(folds, layout)           the persisted fold map, minus keys no group holds
  *   heldText(digest, {t})               the held-notification sentence, words by the device's own t()
- *   memoryChip(job, t) · memoryEndWords(job, t) · memorySourceWords(job, t) · memoryWords(mb)
+ *   memoryChip(job, t) · memoryEndWords(job, t) · memorySourceWords(job, t) · memoryWords(mb) · memoryFieldValue(job) ·
+ *   memorySetValue(job, typed)
  *                                       the memory bound's chip, its named end / park, where it comes from (lane jobs-memory-bound)
  *
  * The client READS `job.ack` (the server computes it over the full record —
@@ -226,6 +227,19 @@ export function memoryEndWords(j, t) {
   if (c === 'oom-bound') return t('stopped: used more than {size}', { size: memoryWords((j.memoryBound && j.memoryBound.mb) || j.run.memoryMb || j.memoryMb) });
   if (c === 'oom') return t('killed: the instance ran out of memory');
   return '';
+}
+/** the properties field: the job's OWN stored bound EXACTLY (acceptance round 2 — a rounded 0.1 GB written back changed it):
+ *  a whole GB as «4G», anything else in MB («1536M», «1000M»), «0» = unbounded; '' when the job has none (the ladder's) */
+export function memoryFieldValue(j) {
+  if (!j || j.memorySource !== 'job') return '';
+  const mb = Math.max(0, Math.floor(Number(j.memoryMb) || 0));
+  return !mb ? '0' : mb % 1024 === 0 ? `${mb / 1024}G` : `${mb}M`;
+}
+/** Set: what to write — null when the field still says what is stored (nothing changes, nothing is written); '' = back to
+ *  the ladder (`inherit`) */
+export function memorySetValue(j, typed) {
+  const v = String(typed == null ? '' : typed).trim();
+  return v === memoryFieldValue(j) ? null : (v || 'inherit');
 }
 /** where the bound comes from, for the properties row */
 export function memorySourceWords(j, t) {

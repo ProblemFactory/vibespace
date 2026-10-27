@@ -175,16 +175,18 @@ default, else **4 GB**. Unbounded (0) is the user's call alone — you cannot se
 
 - The wrapper enforces it with what this host offers and SAYS which (`vibespace-job show <id>` → `memory: …`):
   a cgroup of the user systemd (a real ceiling, no swap) or RLIMIT_DATA on the process (a fleet pod: no systemd);
-  `unbounded — this host cannot enforce a bound` when neither works.
+  `unbounded — this host cannot enforce a bound` when neither works. The rung is proven on the process before the job
+  runs: a systemd that refuses the scope or does not answer in 3 s only moves the job to the next rung (the why says so).
 - Past the bound the job ends `cause=oom-bound` — «stopped: used more than 4 GB». `cause=oom` = killed by an OOM
   from OUTSIDE its bound (the whole instance ran out).
 - **Two out-of-memory ends in a row PARK the job** («parked: out of memory twice — raise its bound or fix the job»):
   a service is no longer restarted — not by its backoff, not when VibeSpace restarts — until someone runs
   `vibespace-job start <id>`. Raise the bound first (`vibespace-job memory <id> 8G`) or fix the leak.
+- Any other end — ok, error, a restart of VibeSpace — resets the count.
 - On a cluster ONE process past the pod's limit kills the whole instance (your conversation included); a run that
-  died that way is judged at the next start and counts too.
+  died that way counts too when the instance's own OOM record shows it (a restart for another reason never counts).
 - Under RLIMIT_DATA node counts ~600 MB of its own reservations against the bound — under ~512 MB node cannot
-  even start. Give a node job at least 1G.
+  even start. Give a node job at least 1G. A size under 256M is refused by name.
 
 ## 8. Permissions model (why you can't see some jobs)
 

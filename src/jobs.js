@@ -1196,12 +1196,11 @@ class JobManager {
         if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); continue; }
         // no live process, no exit record ⇒ died with the environment
         // THE BOOT'S JUDGE (lane jobs-memory-bound): under memory.oom.group the wrapper dies with its job, so no exit record
-        // says what happened — the wrapper's last pressure sample does: the instance was full and THIS job held most of it ⇒
-        // the run ended `oom`, counted toward the park exactly like a run's end (the base replayed it blind, every boot)
-        const verdict = run && !run.endedAt ? M.bootEndCause(this._ctlJson(job, run, 'pressure.json')) : null;
-        if (verdict && verdict.cause === 'oom') { this._bootOomEnd(job, run, verdict); continue; }
-        if (job.kind === 'service') { job.state = 'down'; this._touch(job); }
-        else { if (run && !run.endedAt) { run.endedAt = now(); run.cause = 'env-restart'; run.exit = null; } job.state = 'interrupted'; this._touch(job, { what: 'interrupted (env-restart: the host/pod restarted)' }); }
+        // says what happened — the wrapper's last pressure sample and the instance's own OOM count do (src/job-model.js
+        // bootEndCause: `oom` only when the SAME cgroup's oom_kill rose and this job held most of its anon memory; page cache
+        // is never pressure). Every verdict — `oom` or env-restart — ends the run through the ONE road of the park law
+        const sample = run && !run.endedAt ? this._ctlJson(job, run, 'pressure.json') : null;
+        this._bootNoExit(job, run, M.bootEndCause(sample, sample ? this._cgroupNow() : null));
       } catch (e) { this.d.log(`[jobs] adopt failed for ${job.id}:`, e.message); }
     }
     // one-shot collapse of pre-2.343.3 per-fire child records: keep the newest
@@ -1229,20 +1228,48 @@ class JobManager {
     }
   }
   _readExit(job, run) { return this._ctlJson(job, run, 'exit.json'); }
-  /** a run the instance's OOM took with it (THE BOOT'S JUDGE above): named, counted, parked at the law's count */
-  _bootOomEnd(job, run, v) {
-    run.endedAt = v.at || now(); run.exit = null; run.cause = 'oom';
-    run.memoryPressure = { jobMb: v.jobMb, usedMb: v.usedMb, limitMb: v.limitMb };
-    if (!run.memoryBound) { const b = this._ctlJson(job, run, 'bound.json'); if (b) run.memoryBound = M.boundRecord(b); }
-    const mp = M.onMemoryEnd(job.supervise, 'oom', now());
+  /** THE ONE ROAD of the park law (lane jobs-memory-bound, acceptance round 2): every end of a run — the sweep's and the boot's
+   *  adopt of an exit record (_finalizeRun), the boot's judge of a run that died with the instance (_bootNoExit), `oom` or
+   *  env-restart alike — is counted HERE and nowhere else: a memory end counts, any other resets (OOM / restart / OOM is not
+   *  two in a row) */
+  _countEnd(job, cause) {
+    const mp = M.onMemoryEnd(job.supervise, cause, now());
     job.supervise = mp.supervise;
-    const said = `${M.memoryEndWhat(run)} — it held ${M.memoryWords(v.jobMb)} of the ${M.memoryWords(v.usedMb)} in use (limit ${M.memoryWords(v.limitMb)})`;
-    this.d.log(`[jobs] ${job.id} died with the instance out of memory — judged at boot, counted ${mp.count} of ${M.MEMORY.parkAfter}`);
-    if (mp.park) { this._parkForMemory(job, run); return; }
-    if (job.kind === 'service') { job.state = 'down'; this._touch(job, { what: `down: ${said}` }); return; }
-    job.state = 'failed';
-    this._touch(job, { what: `failed: ${said}` });
-    this._notifyOwner(job, { what: `failed: ${said}` });
+    return mp;
+  }
+  /** the instance's memory cgroup NOW, as the boot's judge reads it: its identity (boot + inode — a new container's cgroup is
+   *  another) and its own OOM count (memory.events) — the wrapper's sample carries the same at the job's start */
+  _cgroupNow() {
+    const seam = this.d.memorySample && typeof this.d.memorySample.sampleDir === 'string' ? this.d.memorySample.sampleDir : '';
+    try {
+      const dir = seam || path.join('/sys/fs/cgroup', (fs.readFileSync('/proc/self/cgroup', 'utf8').split('\n').find((l) => l.startsWith('0::')) || '0::/').slice(3));
+      const t = fs.readFileSync(path.join(dir, 'memory.events'), 'utf8');
+      const n = (k) => Number((new RegExp(`^${k} (\\d+)$`, 'm').exec(t) || [])[1] || 0);
+      return { cgId: `${bootId()}:${fs.statSync(dir).ino}`, oomKill: n('oom_kill'), oomGroupKill: n('oom_group_kill') };
+    } catch { return null; }
+  }
+  /** a run that died WITH the instance (THE BOOT'S JUDGE above): `oom` is named, counted, parked at the law's count; an
+   *  env-restart is the base's interruption — and resets the count (the same road). The verdict's reasoning rides the run. */
+  _bootNoExit(job, run, v) {
+    const ends = !!(run && !run.endedAt);
+    if (ends) {
+      run.endedAt = (v.cause === 'oom' && v.at) || now(); run.exit = null; run.cause = v.cause;
+      if (v.why) run.memoryJudge = { why: v.why, jobAnonMb: v.jobAnonMb, anonMb: v.anonMb, fileMb: v.fileMb, usedMb: v.usedMb, limitMb: v.limitMb, ...(v.oomKills !== undefined ? { oomKills: v.oomKills } : {}) };
+      if (!run.memoryBound) { const b = this._ctlJson(job, run, 'bound.json'); if (b) run.memoryBound = M.boundRecord(b); }
+    }
+    const mp = ends ? this._countEnd(job, v.cause) : null;
+    if (v.cause === 'oom' && ends) {
+      const said = `${M.memoryEndWhat(run)} — it held ${M.memoryWords(v.jobAnonMb)} of the instance's ${M.memoryWords(v.anonMb)} of anon memory (limit ${M.memoryWords(v.limitMb)})`;
+      this.d.log(`[jobs] ${job.id} died with the instance out of memory — judged at boot, counted ${mp.count} of ${M.MEMORY.parkAfter}`);
+      if (mp.park) { this._parkForMemory(job, run); return; }
+      if (job.kind === 'service') { job.state = 'down'; this._touch(job, { what: `down: ${said}` }); return; }
+      job.state = 'failed';
+      this._touch(job, { what: `failed: ${said}` });
+      this._notifyOwner(job, { what: `failed: ${said}` });
+      return;
+    }
+    if (job.kind === 'service') { job.state = 'down'; this._touch(job); }
+    else { job.state = 'interrupted'; this._touch(job, { what: 'interrupted (env-restart: the host/pod restarted)' }); }
   }
   /** a run's own record in its ctl dir — exit.json, and (lane jobs-memory-bound) bound.json / pressure.json the wrapper writes */
   _ctlJson(job, run, name) {
@@ -1304,9 +1331,8 @@ class JobManager {
     delete job._stopRequested; delete job._timedOut; delete job._untilHit;
     const windowEnd = run.cause === 'update_window';
     // THE PARK LAW (lane jobs-memory-bound): EVERY judged end counts — the sweep's, and the boot's (a run that ended while the
-    // server was down is judged here at its boot exactly like a run judged live; the base never counted a boot's)
-    const memPark = windowEnd ? null : M.onMemoryEnd(job.supervise, run.cause, now());
-    if (memPark) job.supervise = memPark.supervise;
+    // server was down is judged here at its boot exactly like a run judged live; the base never counted a boot's) — _countEnd
+    const memPark = windowEnd ? null : this._countEnd(job, run.cause);
     if (job.kind === 'service' && windowEnd) {
       job.state = 'down'; this._touch(job, { what: 'down (update_window: it started while VibeSpace was updating itself and never ran — the restarted server starts it again)' }); // never a crash of the supervisor's count: the boot replay starts a desiredUp service
     } else if (job.kind === 'service' && memPark && memPark.park) {
@@ -1639,6 +1665,8 @@ class JobManager {
     }
     const task = job.kind === 'cron' && job.action && job.action.type === 'spawn-task' && job.action.task ? job.action.task : null;
     const targets = task ? [task, ...[...this.jobs.values()].filter((k) => k.cronParent === job.id)] : [job];
+    const cur = targets[0].memoryMb === undefined || targets[0].memoryMb === null ? null : targets[0].memoryMb;
+    if (cur === mb) { const same = M.memoryMbOf(targets[0], this._memoryCtx()); return { ok: true, unchanged: true, memoryMb: same.mb, memorySource: same.source }; } // nothing changes, nothing is written
     for (const t of targets) { if (mb === null) delete t.memoryMb; else t.memoryMb = mb; }
     const eff = M.memoryMbOf(targets[0], this._memoryCtx());
     this._touch(job, { what: `memory bound ${mb === null ? 'back to the default' : 'set'}: ${eff.mb ? M.memoryWords(eff.mb) : 'unbounded'} (${eff.source}; from its next run)` });

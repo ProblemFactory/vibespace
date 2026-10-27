@@ -186,34 +186,39 @@ const MEMORY_CAUSES = Object.freeze(['oom-bound', 'oom']);
 const MEMORY_RUNGS = Object.freeze(['cgroup', 'rlimit-data']); // best first; `none` = neither answered (said, never silent)
 const MEMORY_PARK_TEXT = 'parked: out of memory twice — raise its bound or fix the job';
 const SIZE_UNIT = { k: 1 / 1024, m: 1, g: 1024, t: 1024 * 1024 };
-/** a size → whole MB: 8G · 512M · 1.5g · 4096 (MB) · 0 (unbounded); null when it is not one */
+/** a size → MB, EXACT (512k is 0.5 MB — never rounded to 0, which would read as «unbounded»): 8G · 512M · 1.5g · 4096 (MB)
+ *  · 0; null when it is not one */
 function parseMemoryMb(v) {
-  if (typeof v === 'number') return Number.isFinite(v) && v >= 0 ? Math.floor(v) : null;
+  if (typeof v === 'number') return Number.isFinite(v) && v >= 0 ? v : null;
   const m = /^\s*(\d+(?:\.\d+)?)\s*([kmgt])?(?:i?b)?\s*$/i.exec(String(v == null ? '' : v));
   if (!m) return null;
-  const mb = Math.floor(Number(m[1]) * SIZE_UNIT[(m[2] || 'm').toLowerCase()]);
+  const mb = Number(m[1]) * SIZE_UNIT[(m[2] || 'm').toLowerCase()];
   return Number.isFinite(mb) ? mb : null;
 }
-/** a per-job value at create or in the job's properties: 0 (unbounded) is the OWNER's call alone (the user — never an agent,
- *  never a default); a bound below minMb would starve a runtime at start (node reserves ~600 MB of RLIMIT_DATA, measured) */
+/** a per-job value at create or in the job's properties: «0» / «off» (unbounded) is the OWNER's call alone, typed as such (the
+ *  user — never an agent, never a default, never a size that rounds down to nothing); any other value below minMb is refused
+ *  BY NAME for everyone — it would starve a runtime at start (node reserves ~600 MB of RLIMIT_DATA, measured) */
 function memoryValueVerdict(raw, { byUser = false } = {}) {
-  const mb = parseMemoryMb(raw);
+  const mb = /^\s*off\s*$/i.test(String(raw == null ? '' : raw)) ? 0 : parseMemoryMb(raw);
   if (mb === null) return { ok: false, error: `memory: "${String(raw).slice(0, 40)}" is not a size — say 8G, 512M or a number of MB` };
-  if (mb === 0 && !byUser) return { ok: false, error: 'memory 0 (unbounded) is the owner\'s call — they set it in the job\'s properties or in Settings → Background Work' };
-  if (mb > 0 && mb < MEMORY.minMb) return { ok: false, error: `memory: at least ${MEMORY.minMb} MB (or 0 = unbounded, the owner's call)` };
+  if (mb === 0) return byUser ? { ok: true, mb: 0 } : { ok: false, error: 'memory 0 (unbounded) is the owner\'s call — they set it in the job\'s properties or in Settings → Background Work' };
+  if (mb < MEMORY.minMb) return { ok: false, error: `memory: at least ${MEMORY.minMb} MB — "${String(raw).slice(0, 40)}" is under it (0 or off = unbounded, the owner's call)` };
   if (mb > MEMORY.maxMb) return { ok: false, error: `memory: at most ${MEMORY.maxMb / 1024 / 1024} TB` };
-  return { ok: true, mb };
+  return { ok: true, mb: Math.floor(mb) };
 }
 const finiteMb = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null);
+// THE LADDER's reading of a stored value: one below the floor (an older record, a setting typed as 100, a cluster's env) is
+// held AT the floor — never unbounded, never a bound a runtime cannot start under
+const ladderMb = (v) => { const mb = finiteMb(v); return mb !== null && mb > 0 && mb < MEMORY.minMb ? MEMORY.minMb : mb; };
 /** THE LADDER: the job's own value › the owner's setting `jobs.memoryMb` (an explicit 0 = unbounded) › the cluster's
  *  default (the chart's env VIBESPACE_JOBS_MEMORY_MB — a cluster may lower it; never 0) › 4096. `setting` is undefined
  *  while the owner never set it (the server's settings reader answers the stored value, never the schema default). */
 function memoryMbOf(job, { setting, cluster } = {}) {
-  const own = finiteMb(job && job.memoryMb);
+  const own = ladderMb(job && job.memoryMb);
   if (own !== null) return { mb: own, source: 'job' };
-  const set = finiteMb(setting);
+  const set = ladderMb(setting);
   if (set !== null) return { mb: set, source: 'setting' };
-  const cl = finiteMb(typeof cluster === 'string' && cluster.trim() ? Number(cluster) : cluster);
+  const cl = ladderMb(typeof cluster === 'string' && cluster.trim() ? Number(cluster) : cluster);
   if (cl) return { mb: cl, source: 'cluster' };
   return { mb: MEMORY.defaultMb, source: 'default' };
 }
@@ -234,9 +239,10 @@ function memoryEndWhat(run) {
   if (run.cause === 'oom-bound') return `stopped: used more than ${memoryWords((run.memoryBound && run.memoryBound.mb) || run.memoryMb)}`;
   return 'killed: the instance ran out of memory (not its own bound)';
 }
-/** THE PARK LAW — at EVERY judged end (the sweep's, the boot's adopt of an exit record, the boot's env-restart): an end in
- *  MEMORY_CAUSES counts, any other end resets; parkAfter in a row ⇒ parked by name, not run again until the owner acts
- *  (start — after raising the bound or fixing the job). Pure over the supervise record; the boot replay is no exception. */
+/** THE PARK LAW — at EVERY judged end (the sweep's, the boot's adopt of an exit record, the boot's env-restart — one road in
+ *  src/jobs.js, _countEnd): an end in MEMORY_CAUSES counts, ANY other end resets (an env-restart too: OOM / restart / OOM is
+ *  not two in a row); parkAfter in a row ⇒ parked by name, not run again until the owner acts (start — after raising the bound
+ *  or fixing the job). Pure over the supervise record; the boot replay is no exception. */
 function onMemoryEnd(supervise, cause, nowMs) {
   const sup = { consecutiveFails: 0, parkedAt: null, ...(supervise || {}) };
   if (!MEMORY_CAUSES.includes(cause)) return { supervise: { ...sup, oomEnds: 0 }, park: false, count: 0 };
@@ -245,13 +251,25 @@ function onMemoryEnd(supervise, cause, nowMs) {
   return { supervise: { ...sup, oomEnds: count, ...(park ? { parkedAt: nowMs, parkedFor: 'memory' } : {}) }, park, count };
 }
 /** THE BOOT'S JUDGE of a run that died WITH its environment (no exit record: under memory.oom.group the wrapper dies too).
- *  The wrapper's last pressure sample (written only while the instance sat at ≥ 90 % of a finite limit) attributes it: the
- *  instance was full and THIS job held at least half of what was used ⇒ `oom` (the container's kill, counted); otherwise the
- *  base's env-restart (a deploy, a crash, a kill that was not this job's). */
-function bootEndCause(pressure, { full = 0.9, share = 0.5 } = {}) {
-  const limit = Number(pressure && pressure.limitMb) || 0, used = Number(pressure && pressure.usedMb) || 0, mine = Number(pressure && pressure.jobMb) || 0;
-  if (!(limit > 0) || used < full * limit || mine < share * used) return { cause: 'env-restart' };
-  return { cause: 'oom', jobMb: Math.round(mine), usedMb: Math.round(used), limitMb: Math.round(limit), at: Number(pressure.at) || 0 };
+ *  PAGE CACHE IS NEVER PRESSURE (acceptance round 2): memory.current counts reclaimable cache, so «the instance sat near its
+ *  limit» is no evidence of an OOM — a rolling update of a pod full of cache looked exactly like one. The judge says `oom`
+ *  ONLY when the instance's OWN memory.events (oom_kill / oom_group_kill) ROSE since the job started — read now, at the boot,
+ *  from the SAME cgroup the wrapper sampled (`now` = {cgId, oomKill, oomGroupKill}; a new container's counters start afresh
+ *  and are not this run's) — AND the job held at least `share` of the instance's ANON memory (memory.stat anon, never
+ *  memory.current) at the wrapper's last sample. Anything else is the base's env-restart («ended with the instance»), never
+ *  counted. The verdict carries the sample's numbers and its reason (`why`): the record shows the judge's reasoning. */
+function bootEndCause(sample, now, { share = 0.5 } = {}) {
+  const s = sample && typeof sample === 'object' ? sample : null;
+  if (!s) return { cause: 'env-restart' };
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const facts = { jobAnonMb: Math.round(n(s.jobAnonMb)), anonMb: Math.round(n(s.anonMb)), fileMb: Math.round(n(s.fileMb)), usedMb: Math.round(n(s.usedMb)), limitMb: Math.round(n(s.limitMb)), at: n(s.at) };
+  const sameCg = !!(now && s.cgId && now.cgId === s.cgId);
+  const kills = sameCg ? (n(now.oomKill) - n(s.oomKillAtStart)) + (n(now.oomGroupKill) - n(s.oomGroupKillAtStart)) : 0;
+  const end = (cause, why) => ({ cause, why, ...facts, ...(sameCg ? { oomKills: Math.max(0, kills) } : {}) });
+  if (!sameCg) return end('env-restart', 'the instance\'s memory cgroup is not the one the job ran in (a new container) — its OOM count is not this run\'s');
+  if (!(kills > 0)) return end('env-restart', 'the instance\'s memory.events count no OOM kill since the job started — it ended with the instance');
+  if (!(facts.anonMb > 0 && facts.jobAnonMb >= share * facts.anonMb)) return end('env-restart', `the instance was OOM-killed, but this job held ${facts.jobAnonMb} of its ${facts.anonMb} MB of anon memory — not most of it`);
+  return end('oom', `the instance was OOM-killed (${kills}) and this job held ${facts.jobAnonMb} of its ${facts.anonMb} MB of anon memory`);
 }
 
 // ── names ─────────────────────────────────────────────────────────────────

@@ -14,12 +14,45 @@
 // group. First act = atomic pidfile with {pid, starttime, bootId, argvHash} —
 // the spawn-then-persist crash window closes because WE write our own stamp.
 // THE MEMORY BOUND (lane jobs-memory-bound, 2026-10-26): spec.memory = {mb, unit, rungs} — the bound the server resolved; the
-// rung that holds the child is MEASURED here and said (bound.json, then exit.json `memory`), and an end by it is named.
+// rung that holds the child is PROVEN here before the job runs and said (bound.json, then exit.json `memory`), a refused rung
+// falls to the next, and an end by the bound is named (below, THE MEMORY BOUND).
 'use strict';
 const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const crypto = require('crypto');
+
+// ── THE NAMED END's PURE judges (lane jobs-memory-bound, acceptance round 2) — exported to a suite that require()s this file
+// with no ctl dir on argv (the fixtures of scripts/test-jobs-memory.mjs); run as the wrapper, nothing below changes.
+// An allocation the bound refused, in the job's LAST WORDS — keyed on the error CODE first, then on the words of every
+// runtime the hub runs (measured under RLIMIT_DATA 2026-10-27: node 22.22 and 24.12 «RangeError: Array buffer allocation
+// failed», no code; node 24.22 «RangeError: Failed to allocate memory», code ERR_MEMORY_ALLOCATION_FAILED; V8's own heap
+// limit «JavaScript heap out of memory»), then other runtimes' (Python, C++, Go, Rust, a JVM). '' = not one.
+const ALLOC_CODES = /\b(ERR_MEMORY_ALLOCATION_FAILED|ENOMEM)\b/;
+const ALLOC_WORDS = /Array buffer allocation failed|Failed to allocate memory|JavaScript heap out of memory|Fatal process out of memory|Cannot allocate memory|\bMemoryError\b|std::bad_alloc|runtime: out of memory|memory allocation of \d+ bytes failed|OutOfMemoryError/i;
+function allocationRefused(text) {
+  const t = String(text || ''), c = ALLOC_CODES.exec(t);
+  if (c) return `code ${c[1]}`;
+  const w = ALLOC_WORDS.exec(t);
+  return w ? `«${w[0]}»` : '';
+}
+/** the manager's major version: «259.5-0ubuntu3.4» (systemctl show -p Version) · «systemd 249 (249.11-…)» (--version) → 259 / 249 */
+function systemdMajor(text) { const m = /^(?:systemd\s+)?(\d{2,4})\b/.exec(String(text || '').trim()); return m ? Number(m[1]) : 0; }
+/** a scope's end on a manager ≥ 253 (OOMPolicy=stop): its Result says oom-kill; a peak well below the bound = the host ran out */
+function scopeResultEnd(result, peakBytes, boundMb) {
+  if (result !== 'oom-kill') return {};
+  const peakMb = peakBytes ? Math.round(peakBytes / 1048576) : undefined;
+  return peakBytes && peakBytes < 0.9 * boundMb * 1048576 ? { cause: 'oom', how: 'the kernel killed it below its bound (the host ran out)', peakMb } : { cause: 'oom-bound', how: 'its scope was killed at MemoryMax (oom-kill)', peakMb };
+}
+/** a scope's end on a manager < 253 (no OOMPolicy for a scope): its OWN memory.events at the go and at the job's end — an
+ *  oom_kill with the scope's own `oom` (its MemoryMax reached) is the bound; an oom_kill without it, the host's OOM */
+function scopeEventsEnd(atGo, atEnd) {
+  if (!atGo || !atEnd) return {};
+  const kills = atEnd.oomKill - atGo.oomKill, ooms = atEnd.oom - atGo.oom;
+  if (!(kills > 0)) return {};
+  return ooms > 0 ? { cause: 'oom-bound', how: `its scope's memory.events: oom ${ooms}, oom_kill ${kills} (at MemoryMax)` } : { cause: 'oom', how: `its scope's memory.events: oom_kill ${kills} below its MemoryMax (the host ran out)` };
+}
+if (!process.argv[2] && require.main !== module) { module.exports = { allocationRefused, systemdMajor, scopeResultEnd, scopeEventsEnd }; return; }
 
 const ctlDir = process.argv[2];
 const specPath = process.argv[3];
@@ -97,7 +130,9 @@ if (refusal) {
 
 let logFd = fs.openSync(logPath, 'a');
 let logSize = fs.fstatSync(logFd).size;
+let held = null; // a gated rung's words before its proof (THE MEMORY BOUND): the job's log gets them only once the job runs
 function writeLog(buf) {
+  if (held) { held.push(buf); return; }
   try {
     if (logSize + buf.length > logCap) { // rotate: keep ONE previous generation; never unlink the live fd's file
       try { fs.closeSync(logFd); fs.renameSync(logPath, logPath + '.1'); } catch { }
@@ -126,24 +161,31 @@ function maskChunk(buf) {
   return out === text ? buf : Buffer.from(out, 'utf8');
 }
 
-// ── THE MEMORY BOUND (lane jobs-memory-bound, F6 of B-7f9e, 2026-10-26) ──────────────────────────────────────────────────
+// ── THE MEMORY BOUND (lane jobs-memory-bound, F6 of B-7f9e, 2026-10-26; acceptance round 2, 2026-10-27) ──────────────────
 // A fleet pod's cgroup has memory.oom.group=1: ONE process past the container's limit kills the whole pod, the hub with it.
-// The server resolves the job's bound (src/job-model.js memoryMbOf); the RUNG that enforces it is MEASURED here, at spawn,
-// best first — never assumed, never a silent fallback (the record says which rung holds the child and why a better did not):
+// The server resolves the job's bound (src/job-model.js memoryMbOf); the RUNG that enforces it is PROVEN here BEFORE the job
+// runs, best first — never assumed, never claimed unproven, and a rung this host refuses FALLS TO THE NEXT (the record says
+// which rung holds the child and why a better one did not):
 //   ① cgroup — `systemd-run --user --scope -p MemoryMax=` where a user systemd answers on the job's own bus and holds a
-//     memory controller (a host under systemd; a fleet pod has none). OOMPolicy=stop and no --collect: the scope's Result
-//     says oom-kill when the kernel ended it (measured 2026-10-27: the cgroup dir is GONE when the child's exit reaches us —
-//     the unit's Result is the fact that survives; --collect or OOMPolicy=continue lose it). MemorySwapMax=0: a bound that
-//     swaps is no bound. The job keeps OUR process group (measured): the engine's group kill reaches it as before.
+//     memory controller (a host under systemd; a fleet pod has none). MemorySwapMax=0: a bound that swaps is no bound.
+//     OOMPolicy=stop only where the manager has it for a scope (systemd ≥ 253, its Version read first — 249 / 252 refuse the
+//     assignment and nothing would run): there the scope's Result says oom-kill (measured 2026-10-27: the cgroup dir is GONE
+//     when the child's exit reaches us — the unit's Result is the fact that survives; no --collect). Below 253 the gate
+//     HOLDS the scope (a sh parent in it) until the wrapper has read the scope's own memory.events after the job's end.
 //   ② rlimit-data — `prlimit --data=` on the child (util-linux; in the fleet image): RLIMIT_DATA, never RLIMIT_AS (V8
-//     reserves address space and dies at start under -v). The refusal is an ENOMEM inside the job — read in its last words.
-//     Measured: node 24 counts ~600 MB of its own reservations against it (under 512 MB it cannot start).
-//   ③ none — said with its why (the owner's 0, or neither rung on this host).
+//     reserves address space and dies at start under -v). The refusal is an allocation error inside the job — its code
+//     or its words, in its last words (allocationRefused above). Measured: node 24 counts ~600 MB of its own reservations.
+//   ③ none — said with its why (the owner's 0, or neither rung on this host / both refused).
+// THE GATE: a rung's command runs `sh -c <gate>` with fd 3 a socket to us; the gate waits for our «go», which is said only
+// once the bound was READ BACK off the child (its cgroup is the scope and the scope's memory.max is the bound; or its
+// RLIMIT_DATA is the bound — confirmed: true). A tool that exits before the go («Unknown assignment», a refused scope) or
+// does not answer within 3 s never ran the job: it is killed and the job starts on the next rung — exactly once.
 const MiB = 1024 * 1024;
 const asked = spec.memory && typeof spec.memory === 'object' ? spec.memory : null;
 const memMb = asked && Number.isFinite(asked.mb) && asked.mb > 0 ? Math.floor(asked.mb) : 0;
 const unit = asked && /^[A-Za-z0-9_.@-]{1,180}$/.test(String(asked.unit || '')) ? String(asked.unit) : `vibespace-job-${process.pid}`;
 const rungs = asked && Array.isArray(asked.rungs) ? asked.rungs : ['cgroup', 'rlimit-data'];
+const gateMs = asked && Number(asked.gateMs) > 0 ? Math.min(Number(asked.gateMs), 3000) : 3000; // the engine's test seam may shorten it
 function onPath(cmd) {
   for (const d of String(spec.env.PATH || '').split(':')) {
     if (!d) continue;
@@ -155,92 +197,169 @@ function onPath(cmd) {
 function ask(cmd, args) {
   try { const r = spawnSync(cmd, args, { env: spec.env, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }); return r.status === 0 ? String(r.stdout || '').trim() : null; } catch { return null; }
 }
-function measureBound() {
-  if (!asked) return { mb: 0, by: 'none', why: 'the server asked for no bound (a server older than this wrapper)' };
-  if (!memMb) return { mb: 0, by: 'none', why: 'unbounded — the owner set 0' };
-  const misses = [];
+const GATE_EXEC = 'read -r go <&3 || exit 125; exec "$@" 3<&-';
+const GATE_HOLD = 'read -r go <&3 || exit 125; "$@" 3<&-; rc=$?; echo "$rc" >&3; read -r ack <&3; exit "$rc"';
+const misses = []; // why each better rung does not hold the job — said in the why of the one that does
+function rungPlan() {
+  if (!asked) return [{ by: 'none', why: 'the server asked for no bound (a server older than this wrapper)' }];
+  if (!memMb) return [{ by: 'none', why: 'unbounded — the owner set 0' }];
+  const sh = onPath('sh'), plan = [];
   for (const rung of rungs) {
     if (rung === 'cgroup') {
       const run = onPath('systemd-run'), ctl = onPath('systemctl');
-      const cg = run && ctl ? ask(ctl, ['--user', 'show', '-p', 'ControlGroup', '--value']) : null;
-      let held = '';
-      if (cg) { try { held = fs.readFileSync(path.join('/sys/fs/cgroup', cg, 'cgroup.controllers'), 'utf8'); } catch { } }
+      const cg = run && ctl && sh ? ask(ctl, ['--user', 'show', '-p', 'ControlGroup', '--value']) : null;
+      let controllers = '';
+      if (cg) { try { controllers = fs.readFileSync(path.join('/sys/fs/cgroup', cg, 'cgroup.controllers'), 'utf8'); } catch { } }
       if (!run || !ctl) misses.push('no systemd-run here');
+      else if (!sh) misses.push('no sh here to hold the job until its bound is read back');
       else if (!cg) misses.push('no user systemd answered');
-      else if (!/\bmemory\b/.test(held)) misses.push('the user systemd holds no memory controller');
-      else return { mb: memMb, by: 'cgroup', why: `a scope of the user systemd (${unit}.scope, MemoryMax)`, ctl, argv: [run, '--user', '--scope', '--quiet', `--unit=${unit}`, '-p', `MemoryMax=${memMb}M`, '-p', 'MemorySwapMax=0', '-p', 'OOMPolicy=stop', '--', ...spec.argv] };
+      else if (!/\bmemory\b/.test(controllers)) misses.push('the user systemd holds no memory controller');
+      else {
+        const version = systemdMajor(ask(ctl, ['--user', 'show', '-p', 'Version', '--value'])) || systemdMajor(ask(ctl, ['--version']));
+        const policy = version >= 253;
+        plan.push({ by: 'cgroup', ctl, version, policy, argv: [run, '--user', '--scope', '--quiet', `--unit=${unit}`, '-p', `MemoryMax=${memMb}M`, '-p', 'MemorySwapMax=0', ...(policy ? ['-p', 'OOMPolicy=stop'] : []), '--', sh, '-c', policy ? GATE_EXEC : GATE_HOLD, 'sh', ...spec.argv] });
+      }
     } else if (rung === 'rlimit-data') {
       const pl = onPath('prlimit');
       if (!pl) misses.push('no prlimit here');
-      else return { mb: memMb, by: 'rlimit-data', why: `RLIMIT_DATA on the job${misses.length ? ` (no cgroup: ${misses.join('; ')})` : ''}`, argv: [pl, `--data=${memMb * MiB}:${memMb * MiB}`, '--', ...spec.argv] };
+      else if (!sh) misses.push('no sh here to hold the job until its limit is read back');
+      else plan.push({ by: 'rlimit-data', argv: [pl, `--data=${memMb * MiB}:${memMb * MiB}`, '--', sh, '-c', GATE_EXEC, 'sh', ...spec.argv] });
     }
   }
-  return { mb: memMb, by: 'none', why: `this host cannot enforce a bound (${misses.join('; ') || 'no rung offered'})` };
+  return plan;
 }
-const bound = measureBound();
-const launch = bound.argv || spec.argv;
-const boundRec = { mb: bound.mb, by: bound.by, why: bound.why, ...(bound.by === 'cgroup' ? { unit: `${unit}.scope` } : {}) };
-let exited = false;
+const plan = rungPlan();
+function whyOf(r) {
+  if (r.why) return r.why;
+  const before = misses.join('; ');
+  if (r.by === 'cgroup') return `a scope of the user systemd (${unit}.scope, MemoryMax${r.policy ? ', OOMPolicy=stop' : `; systemd ${r.version || '?'} has no OOMPolicy for a scope — its end is read from the scope's memory.events`})`;
+  if (r.by === 'rlimit-data') return before ? `${before} — RLIMIT_DATA on the job instead` : 'RLIMIT_DATA on the job';
+  return `this host cannot enforce a bound (${before || 'no rung offered'})`;
+}
+let rung = null, child = null, proven = false, boundRec = null, stopping = null, exited = false;
+let scopeDir = '', eventsAtGo = null, eventsAtEnd = null;
 
-const child = spawn(launch[0], launch.slice(1), {
-  cwd: spec.cwd || process.cwd(),
-  env: spec.env,
-  stdio: [spec.stdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe'],
-});
-child.stdout.on('data', (b) => writeLog(maskChunk(b)));
-child.stderr.on('data', (b) => writeLog(maskChunk(b)));
 // the job's LAST WORDS (4 KiB, both streams): under RLIMIT_DATA an allocation the bound refuses ends inside the job, and the
-// job says so as it dies — node «Array buffer allocation failed» / «heap out of memory», «Cannot allocate memory» (ENOMEM),
-// Python MemoryError, std::bad_alloc, Go «runtime: out of memory», Rust «memory allocation of N bytes failed», a JVM's
-// OutOfMemoryError
+// job says so as it dies (allocationRefused above)
 let tail = Buffer.alloc(0);
 const keepTail = (b) => { tail = Buffer.concat([tail, b]); if (tail.length > 4096) tail = tail.subarray(tail.length - 4096); };
-child.stdout.on('data', keepTail);
-child.stderr.on('data', keepTail);
-const ENOMEM_WORDS = /Array buffer allocation failed|JavaScript heap out of memory|Fatal process out of memory|Cannot allocate memory|\bENOMEM\b|\bMemoryError\b|std::bad_alloc|runtime: out of memory|memory allocation of \d+ bytes failed|OutOfMemoryError/i;
 
-// the rung is CONFIRMED on the child itself — its cgroup is the scope and holds the bound, or its RLIMIT_DATA is the bound —
-// then written for the engine (bound.json: the card says it while the job runs; exit.json repeats it)
 function writeBound() {
   try {
     fs.writeFileSync(path.join(ctlDir, 'bound.json.tmp'), JSON.stringify(boundRec));
     fs.renameSync(path.join(ctlDir, 'bound.json.tmp'), path.join(ctlDir, 'bound.json'));
   } catch { }
 }
-function confirmBound(tries) {
-  if (bound.by === 'none') return writeBound();
-  let seen = null;
+const readNum = (f) => { try { const v = fs.readFileSync(f, 'utf8').trim(); return /^\d+$/.test(v) ? Number(v) : null; } catch { return null; } };
+function readEvents(dir) {
   try {
-    if (bound.by === 'cgroup') {
-      const cg = fs.readFileSync(`/proc/${child.pid}/cgroup`, 'utf8').trim().replace(/^0::/, '');
-      if (cg.endsWith(`/${unit}.scope`)) seen = fs.readFileSync(path.join('/sys/fs/cgroup', cg, 'memory.max'), 'utf8').trim();
+    const t = fs.readFileSync(path.join(dir, 'memory.events'), 'utf8');
+    const n = (k) => Number((new RegExp(`^${k} (\\d+)$`, 'm').exec(t) || [])[1] || 0);
+    return { oom: n('oom'), oomKill: n('oom_kill'), oomGroupKill: n('oom_group_kill') };
+  } catch { return null; }
+}
+
+function launch() {
+  rung = plan.shift() || { by: 'none' };
+  rung.why = whyOf(rung);
+  const gated = rung.by !== 'none';
+  const argv = gated ? rung.argv : spec.argv;
+  held = gated ? [] : null; tail = Buffer.alloc(0); proven = false;
+  child = spawn(argv[0], argv.slice(1), {
+    cwd: spec.cwd || process.cwd(),
+    env: spec.env,
+    stdio: [spec.stdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe', ...(gated ? ['pipe'] : [])],
+  });
+  child.stdout.on('data', (b) => writeLog(maskChunk(b)));
+  child.stderr.on('data', (b) => writeLog(maskChunk(b)));
+  child.stdout.on('data', keepTail);
+  child.stderr.on('data', keepTail);
+  const me = child;
+  child.on('exit', (code, signal) => { if (me === child && (proven || !gated)) ended(code, signal); });
+  child.on('close', (code, signal) => { if (me === child && gated && !proven) fellThrough(code, signal); });
+  if (!gated) { boundRec = { mb: memMb, by: 'none', why: rung.why }; writeBound(); startSampler(); return; }
+  if (rung.by === 'cgroup' && !rung.policy) { // THE HOLD (< 253): the gate says the job's end, we read the scope, then it leaves
+    child.stdio[3].on('data', (d) => {
+      if (!proven || eventsAtEnd || !/^\d+\s*$/.test(String(d))) return;
+      eventsAtEnd = readEvents(scopeDir);
+      try { me.stdio[3].write('ack\n'); } catch { }
+    });
+  }
+  child.stdio[3].on('error', () => { });
+  prove(Date.now() + gateMs);
+}
+// THE PROOF: the bound read back off the gated child — then, and only then, the go
+function prove(deadline) {
+  if (proven || rung.refused || child.exitCode !== null || child.signalCode !== null) return;
+  let seen = null, at = '';
+  try {
+    if (rung.by === 'cgroup') {
+      const cg = (/^0::(.*)$/m.exec(fs.readFileSync(`/proc/${child.pid}/cgroup`, 'utf8')) || [])[1] || '';
+      if (cg.endsWith(`/${unit}.scope`)) { at = path.join('/sys/fs/cgroup', cg); seen = fs.readFileSync(path.join(at, 'memory.max'), 'utf8').trim(); }
     } else {
-      const m = /^Max data size\s+(\S+)/m.exec(fs.readFileSync(`/proc/${child.pid}/limits`, 'utf8'));
-      if (m && m[1] === String(bound.mb * MiB)) seen = m[1];
+      seen = (/^Max data size\s+(\S+)/m.exec(fs.readFileSync(`/proc/${child.pid}/limits`, 'utf8')) || [])[1] || null;
     }
   } catch { }
-  if (seen) { boundRec.confirmed = true; boundRec.maxBytes = Number(seen) || 0; return writeBound(); }
-  if (tries <= 0 || exited) { boundRec.confirmed = false; return writeBound(); }
-  const t = setTimeout(() => confirmBound(tries - 1), 20); t.unref?.();
+  if (seen === String(memMb * MiB)) return sayGo(at, seen);
+  if (Date.now() >= deadline) {
+    const tool = path.basename(rung.argv[0]);
+    return refuse(at ? `its scope's memory.max reads ${seen || 'nothing'}, not ${memMb} MB` : `${tool} did not answer in ${gateMs / 1000} s`);
+  }
+  const t = setTimeout(() => prove(deadline), 10); t.unref?.();
 }
-if (child.pid) confirmBound(150);
+function sayGo(at, seen) {
+  proven = true;
+  boundRec = { mb: memMb, by: rung.by, why: rung.why, confirmed: true, maxBytes: Number(seen), ...(rung.by === 'cgroup' ? { unit: `${unit}.scope` } : {}) };
+  if (rung.by === 'cgroup' && !rung.policy) { scopeDir = at; eventsAtGo = readEvents(at); }
+  writeBound();
+  const words = held || []; held = null;
+  for (const b of words) writeLog(b);
+  try { child.stdio[3].write('go\n'); } catch { }
+  startSampler();
+}
+// the rung never held the job (no go was said, so the gate never ran it): close the gate, end the tool
+function refuse(why) {
+  rung.refused = why;
+  try { child.stdio[3].destroy(); } catch { }
+  try { child.kill('SIGKILL'); } catch { }
+}
+// a gated tool ended before the go — refused by the host, or by us above: the job starts on the NEXT rung, said in the log
+function fellThrough(code, signal) {
+  const tool = path.basename(rung.argv[0]);
+  const words = Buffer.concat(held || []).toString('utf8').split('\n').map((l) => l.trim()).filter(Boolean)[0] || '';
+  held = null;
+  const why = rung.refused || (words ? `${tool} refused: ${words.slice(0, 160)}` : `${tool} ended before the job ran (${signal || `exit ${code}`})`);
+  if (stopping) { boundRec = { mb: memMb, by: 'none', why: `stopped before its bound was proven (${why})` }; return ended(null, stopping); }
+  misses.push(why);
+  writeLog(Buffer.from(`[job-wrapper] the ${rung.by} rung did not hold the job — ${why}; it runs on the next rung\n`));
+  launch();
+}
 
 // THE PRESSURE SAMPLE — the boot's evidence when the WHOLE instance dies (memory.oom.group: we die with the job, no exit.json).
-// Only where OUR cgroup has a finite limit (a pod: the container's); written while it sits at ≥ 90 % of it, removed below it.
-// The engine's boot reads it (src/job-model.js bootEndCause): full, and this job held most of it ⇒ the run ended `oom`.
+// Only where OUR cgroup has a finite limit (a pod: the container's). PAGE CACHE IS NEVER PRESSURE (acceptance round 2): the
+// sample is the instance's ANON memory (memory.stat anon — never memory.current, which counts reclaimable cache) and the
+// job's own (RssAnon over its process tree), written while the instance's anon sits at ≥ half its limit, removed below it;
+// it carries the instance's oom_kill / oom_group_kill at the wrapper's start and the cgroup's identity — the boot reads the
+// counters again in the SAME cgroup (src/job-model.js bootEndCause): only a ROSE count is an OOM.
 const ownCg = (() => {
   if (asked && typeof asked.sampleDir === 'string' && asked.sampleDir[0] === '/') return asked.sampleDir; // the engine's test seam (a fake cgroup dir)
   try { return path.join('/sys/fs/cgroup', (fs.readFileSync('/proc/self/cgroup', 'utf8').split('\n').find((l) => l.startsWith('0::')) || '0::/').slice(3)); } catch { return ''; }
 })();
-const readNum = (f) => { try { const v = fs.readFileSync(f, 'utf8').trim(); return /^\d+$/.test(v) ? Number(v) : null; } catch { return null; } };
-const oomKills = () => { try { const m = /^oom_kill (\d+)$/m.exec(fs.readFileSync(path.join(ownCg, 'memory.events'), 'utf8')); return m ? Number(m[1]) : null; } catch { return null; } };
-const oomKillsAtSpawn = ownCg ? oomKills() : null;
 const limitBytes = ownCg ? readNum(path.join(ownCg, 'memory.max')) : null;
-function treeRss(root) { // the job's process tree (≤ 256 processes), VmRSS summed — /proc only, no exec
+const eventsAtStart = limitBytes ? readEvents(ownCg) : null;
+const cgId = (() => { try { return limitBytes ? `${bootId()}:${fs.statSync(ownCg).ino}` : ''; } catch { return ''; } })();
+function memStat(dir) {
+  try {
+    const t = fs.readFileSync(path.join(dir, 'memory.stat'), 'utf8');
+    const n = (k) => { const m = new RegExp(`^${k} (\\d+)$`, 'm').exec(t); return m ? Number(m[1]) : null; };
+    return { anon: n('anon'), file: n('file') };
+  } catch { return null; }
+}
+function treeAnon(root) { // the job's process tree (≤ 256 processes), RssAnon summed — /proc only, no exec
   let sum = 0, n = 0;
   const walk = (pid) => {
     if (n++ > 256) return;
-    try { const m = /^VmRSS:\s+(\d+) kB/m.exec(fs.readFileSync(`/proc/${pid}/status`, 'utf8')); if (m) sum += Number(m[1]) * 1024; } catch { return; }
+    try { const m = /^RssAnon:\s+(\d+) kB/m.exec(fs.readFileSync(`/proc/${pid}/status`, 'utf8')); if (m) sum += Number(m[1]) * 1024; } catch { return; }
     let kids = [];
     try { kids = fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').trim().split(/\s+/).filter(Boolean); } catch { }
     for (const k of kids) walk(k);
@@ -250,43 +369,48 @@ function treeRss(root) { // the job's process tree (≤ 256 processes), VmRSS su
 }
 const pressurePath = path.join(ctlDir, 'pressure.json');
 let pressureOn = false, pressureTimer = null;
-if (limitBytes && child.pid) {
+function startSampler() {
+  if (!limitBytes || pressureTimer) return;
   pressureTimer = setInterval(() => {
-    const used = readNum(path.join(ownCg, 'memory.current'));
-    if (used === null) return;
-    if (used >= 0.9 * limitBytes) {
-      const rec = { at: Date.now(), jobMb: Math.round(treeRss(child.pid) / MiB), usedMb: Math.round(used / MiB), limitMb: Math.round(limitBytes / MiB) };
+    const st = memStat(ownCg);
+    if (!st || st.anon === null || !child || !child.pid) return;
+    if (st.anon >= 0.5 * limitBytes) {
+      const rec = {
+        at: Date.now(), cgId, oomKillAtStart: eventsAtStart ? eventsAtStart.oomKill : null, oomGroupKillAtStart: eventsAtStart ? eventsAtStart.oomGroupKill : null,
+        jobAnonMb: Math.round(treeAnon(child.pid) / MiB), anonMb: Math.round(st.anon / MiB), fileMb: Math.round((st.file || 0) / MiB),
+        usedMb: Math.round((readNum(path.join(ownCg, 'memory.current')) || 0) / MiB), limitMb: Math.round(limitBytes / MiB),
+      };
       try { fs.writeFileSync(pressurePath + '.tmp', JSON.stringify(rec)); fs.renameSync(pressurePath + '.tmp', pressurePath); pressureOn = true; } catch { }
     } else if (pressureOn) { try { fs.unlinkSync(pressurePath); } catch { } pressureOn = false; }
   }, Number(asked && asked.sampleMs) > 0 ? Number(asked.sampleMs) : 2000);
   pressureTimer.unref?.();
 }
 
-// THE NAMED END — what ended the job, measured where it can be: the scope's Result (oom-kill; its MemoryPeak tells the bound
-// from an OOM of the whole host), the job's last words under RLIMIT_DATA, the kernel's oom_kill count of OUR cgroup for a
-// kill from outside. Never a guess: no fact ⇒ no memory cause (the engine judges the exit as before).
+// THE NAMED END — what ended the job, measured where the rung can: the scope's Result (≥ 253; its MemoryPeak tells the bound
+// from an OOM of the whole host), the scope's own memory.events (< 253, read by the hold), the job's last words under
+// RLIMIT_DATA (a code first). Never a guess, never a counter wider than the job's own (the hub's whole subtree counts kills
+// that were not this job's): no fact ⇒ no memory cause (the engine judges the exit as before).
 const pause = (ms) => { try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch { } };
 function memoryEnd(code, signal) {
-  if (bound.by === 'cgroup') {
-    let result = '', peak = 0, read = false;
+  if (!proven) return {};
+  if (rung.by === 'cgroup' && rung.policy) {
+    let result = '', peak = 0;
     for (let i = 0; i < 20; i++) { // the unit's facts land with the kill (measured: at once) — bounded at 1 s anyway
-      const out = ask(bound.ctl, ['--user', 'show', `${unit}.scope`, '-p', 'Result', '-p', 'ActiveState', '-p', 'MemoryPeak']);
+      const out = ask(rung.ctl, ['--user', 'show', `${unit}.scope`, '-p', 'Result', '-p', 'ActiveState', '-p', 'MemoryPeak']);
       if (out === null) break;
-      read = true;
       const f = Object.fromEntries(out.split('\n').map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
       result = f.Result || ''; peak = /^\d+$/.test(f.MemoryPeak || '') ? Number(f.MemoryPeak) : 0;
       if (result !== 'success' || !['active', 'deactivating', 'activating'].includes(f.ActiveState)) break;
       pause(50);
     }
-    if (result && result !== 'success') ask(bound.ctl, ['--user', 'reset-failed', `${unit}.scope`]); // a failed scope is ours to clear
-    const peakMb = peak ? Math.round(peak / MiB) : undefined;
-    if (result === 'oom-kill') return peak && peak < 0.9 * bound.mb * MiB ? { cause: 'oom', how: 'the kernel killed it below its bound (the host ran out)', peakMb } : { cause: 'oom-bound', how: 'its scope was killed at MemoryMax (oom-kill)', peakMb };
-    if (!read && (signal === 'SIGKILL' || code === 137)) return { cause: 'oom-bound', how: 'SIGKILL with the bound set (its scope could not be read)' };
-  } else if (bound.by === 'rlimit-data' && (code !== 0 || signal) && ENOMEM_WORDS.test(tail.toString('utf8'))) {
-    return { cause: 'oom-bound', how: 'an allocation past RLIMIT_DATA was refused (its last words)' };
+    if (result && result !== 'success') ask(rung.ctl, ['--user', 'reset-failed', `${unit}.scope`]); // a failed scope is ours to clear
+    return scopeResultEnd(result, peak, memMb);
   }
-  const after = signal === 'SIGKILL' && oomKillsAtSpawn !== null ? oomKills() : null;
-  if (after !== null && after > oomKillsAtSpawn) return { cause: 'oom', how: 'the kernel\'s OOM killer took it (the instance ran out)' };
+  if (rung.by === 'cgroup') return scopeEventsEnd(eventsAtGo, eventsAtEnd || readEvents(scopeDir));
+  if (rung.by === 'rlimit-data' && (code !== 0 || signal)) {
+    const r = allocationRefused(tail.toString('utf8'));
+    if (r) return { cause: 'oom-bound', how: `an allocation past RLIMIT_DATA was refused (its last words: ${r})` };
+  }
   return {};
 }
 
@@ -309,10 +433,11 @@ if (spec.stdinOpen) {
   ansTimer.unref?.();
 }
 
-// forward termination to the whole child group; the engine kills OUR group (-pid)
-for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { try { child.kill(sig); } catch { } });
+// forward termination to the whole child group; the engine kills OUR group (-pid). A stop before the go never starts the job.
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { stopping = sig; try { child.kill(sig); } catch { } });
 
-child.on('exit', (code, signal) => {
+function ended(code, signal) {
+  if (exited) return;
   exited = true;
   if (ansTimer) clearInterval(ansTimer);
   if (pressureTimer) clearInterval(pressureTimer);
@@ -323,4 +448,5 @@ child.on('exit', (code, signal) => {
   try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}\n`)); } catch { }
   writeExit({ code, signal: signal || null, endedAt: Date.now(), memory });
   process.exit(code === null ? 143 : code);
-});
+}
+launch();
