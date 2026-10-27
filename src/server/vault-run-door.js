@@ -491,13 +491,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     { key: 'To let every conversation use it, turn on «Usable by agent runs» on its row in ⚙ System ▸ Vault….' },
   ];
   const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
-  function settleRequest(q, outcome, why = outcome) {
+  /** `fact` (r4): the PERSON's mark — the answer came through THE person verdict (src/routes/vault.js `person`), so the item's
+   *  record says «allowed by you for 8 h · 09:41» (resolvedFact {decidedBy: 'person', decidedAt}). */
+  function settleRequest(q, outcome, why = outcome, fact = null) {
     if (!requests.has(q.askId)) return false;
     requests.delete(q.askId);
     if (reqByPair.get(q.pair) === q.askId) reqByPair.delete(q.pair);
     settled.set(q.askId, 'settled');
     while (settled.size > SETTLED_MAX) settled.delete(settled.keys().next().value);
-    if (q.todoId && userTodos) { try { const it = userTodos.get?.(q.todoId); if (it && it.status === 'open') userTodos.setStatus(q.todoId, 'done', outcome === 'vault_locked' ? 'vault_locked' : outcome === 'changed' ? 'ask-changed' : outcome); } catch { } }
+    if (q.todoId && userTodos) { try { const it = userTodos.get?.(q.todoId); const by = outcome === 'vault_locked' ? 'vault_locked' : outcome === 'changed' ? 'ask-changed' : outcome; if (it && it.status === 'open') { if (fact && typeof userTodos.resolveAnswered === 'function') userTodos.resolveAnswered([q.todoId], by, fact); else userTodos.setStatus(q.todoId, 'done', by); } } catch { } }
     if (outcome === 'denied') { reqQuiet.set(q.pair, now() + REQUEST_QUIET_MS); for (const [p, u] of reqQuiet) if (!(u > now())) reqQuiet.delete(p); }
     log(`${q.who}: the request for ${q.ref} ${outcome}${why !== outcome ? ` (${why})` : ''}`);
     askingLine();
@@ -592,13 +594,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  closed entry for a conversation — the per-row switch's job — so it needs the switch's 验证是你 (`reauthed`: this page's
    *  window, the second password again; the review: a click alone is a header a local process can forge on a hub with no
    *  sign-in); Deny stays a click. */
-  function answerRequest(askId, { answer: a, reauthed = false, by = 'user' } = {}) {
+  function answerRequest(askId, { answer: a, reauthed = false, by = 'user', person = false } = {}) {
     const id = String(askId || '');
     const q = requests.get(id);
     if (!q) return { ok: false, code: settled.has(id) ? 'ask_settled' : 'ask_unknown' };
     if (!GRANT_ANSWERS.includes(a)) return { ok: false, code: 'bad_grant_answer' };
     const said = { by: String(by).slice(0, 40), conv: q.scope, entry: q.ref, askId: q.askId };
-    if (a === 'deny') { settleRequest(q, 'denied', 'answered'); audit('vault-grant', { ...said, answer: 'deny' }); return { ok: true, outcome: 'denied' }; }
+    const mark = () => (person ? { decidedBy: 'person', decidedAt: now() } : null);   // r4: the person verdict's mark (the route's `person`)
+    if (a === 'deny') { settleRequest(q, 'denied', 'answered', mark()); audit('vault-grant', { ...said, answer: 'deny' }); return { ok: true, outcome: 'denied' }; }
     if (vaultState() !== 'unlocked') { settleRequest(q, 'vault_locked'); return { ok: false, code: 'vault_locked' }; }
     if (!reauthed) return { ok: false, code: 'reveal_needs_password' };   // the card stays up
     // THE BELT (as the run card's): a grant is for what the owner was SHOWN — the item still open, this request's, its very detail
@@ -614,7 +617,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const t = now(), until = t + GRANT_MS;
     grants.set(q.pair, { conv: q.scope, key: null, entries: [q.id], until, once: a === 'once', at: t, by: said.by, askId: q.askId, purpose: q.purpose });
     audit('vault-grant', { ...said, answer: a, until });
-    settleRequest(q, 'granted', 'answered');
+    settleRequest(q, a === 'once' ? 'granted-once' : 'granted', 'answered', mark());   // r4: the item says which of its verbs (Allow once / For 8 hours)
     return { ok: true, outcome: a === 'once' ? 'granted-once' : 'granted', until };
   }
   /** lane vault-paste-request: THE PASTE IS THE GRANT — the owner pasted a NEW free entry into For you in answer to THIS

@@ -2339,6 +2339,69 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(JSON.stringify(d3) === '[]' && kept && JSON.stringify(d4) === '["T-1-a"]' && !door.get('T-1-a').sessions.includes('codex:b2x'),
       'an archived conversation still RUNNING keeps its groups (its next turn needs their context) and leaves them at the first write after it ended', { d3, d4 });
   }
+
+  // ── 2026-10-closed-access-pointers-hidden (lane wake-approve-card r4): an access request's pointer the PERSON closed before
+  // round 3 (resolvedBy 'user') over a request still OPEN becomes a HIDDEN pointer (what round 3 writes for that close) —
+  // through the live store, flushed — and the engine's resurface brings it back now; at most once; no engine ⇒ fails by name ──
+  {
+    console.log('2026-10-closed-access-pointers-hidden');
+    try {
+    const ID = '2026-10-closed-access-pointers-hidden';
+    const { UserTodoManager } = require('../src/user-todos.js');
+    const FA = require('../src/foryou-actions.js');
+    const seed = (tag, { channelsDir = true } = {}) => {
+      const root = path.join(tmp, 'cap-' + tag), dataDir = path.join(root, 'data');
+      fs.mkdirSync(channelsDir ? path.join(dataDir, 'channels') : dataDir, { recursive: true });
+      const st = new UserTodoManager({ dataDir, expirySweepMs: 0 });
+      const add = (text, key, by, status) => { const it = st.add('channels', { origin: 'channels', by: 'agent', sessionName: 'Channels', text, about: 'claude:c-ops', action: { type: 'open-channel', adapterId: 'lark', convId: key, key: `lark/${key}` } }); if (status) { const x = st._state.items.find((i) => i.id === it.id); x.status = status; x.resolvedBy = by; x.resolvedAt = 1000; } return it.id; };
+      const ids = {
+        doneByUser: add('ops-agent requests access to Ops room', 'oc_ops', 'user', 'done'),          // ✓ before r3 — the request still open
+        dismissedByUser: add('ops-agent requests access to Dev room', 'oc_dev', 'user', 'dismissed'), // ✕ before r3 — still open
+        decided: add('ops-agent requests access to HR room', 'oc_hr', 'user', 'done'),             // closed by the person, its request since DECIDED
+        byProducer: add('ops-agent requests access to Fin room', 'oc_fin', 'system', 'done'),      // its producer's own close — never the person's
+        hidden: add('ops-agent requests access to QA room', 'oc_qa', 'hidden', 'dismissed'),        // already hidden by round 3
+        open: add('ops-agent requests access to Web room', 'oc_web', null, null),                  // still open
+      };
+      st.flush();
+      return { root, dataDir, ids };
+    };
+    /** the engine's two doors as channels-access answers them: the pointers of the OPEN requests, and resurface (a HIDDEN one reopened) */
+    const engineOver = (ids, store) => ({ openAccessPointers: () => [ids.doneByUser, ids.dismissedByUser, ids.byProducer, ids.hidden, ids.open],
+      resurfacePointers: () => { let n = 0; for (const id of [ids.doneByUser, ids.dismissedByUser, ids.byProducer, ids.hidden, ids.open]) { const it = store.get(id); if (it && FA.isHidden(it)) { store.setStatus(id, 'open', 'system'); n++; } } return n; } });
+    // RED CONTROL first: the store as round 3 left it — the person's pre-r3 close is not a hidden pointer, so resurface never brings it back
+    const c = seed('ctl');
+    const ctlStore = new UserTodoManager({ dataDir: c.dataDir, expirySweepMs: 0 });
+    const ctlBack = engineOver(c.ids, ctlStore).resurfacePointers();
+    ok(ctlBack === 1 && ctlStore.get(c.ids.doneByUser).status === 'done' && ctlStore.get(c.ids.dismissedByUser).status === 'dismissed', 'RED CONTROL: without the migration the pointers the person closed before round 3 never come back (resurface reopens only the one round 3 hid) — the owner never sees them again', { back: ctlBack });
+    // (1) THROUGH the live store, then back in For you
+    const a = seed('live');
+    const live = new UserTodoManager({ dataDir: a.dataDir, expirySweepMs: 0 });
+    const ra = create({ rootDir: a.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: live, channels: engineOver(a.ids, live) }).runLocalMigrations().find((r) => r.id === ID);
+    const g = (id) => { const it = live.get(id); return it && [it.status, it.resolvedBy]; };
+    ok(ra && ra.status === 'ran' && ra.report.hidden === 2 && ra.report.store === 'live', 'the two pointers the PERSON closed (✓ / ✕) over an OPEN request are rewritten as round 3 writes that close — hidden («hidden — nothing was decided»)', ra && ra.report);
+    ok(ra.report.back === 3 && [a.ids.doneByUser, a.ids.dismissedByUser, a.ids.hidden].every((id) => JSON.stringify(g(id)) === '["open",null]'), '…and the engine\'s resurface brings them back to For you NOW (with the one round 3 hid) — the boot reconcile ran before this run', { back: ra.report.back, a: g(a.ids.doneByUser), b: g(a.ids.dismissedByUser) });
+    ok(JSON.stringify(g(a.ids.decided)) === '["done","user"]' && JSON.stringify(g(a.ids.byProducer)) === '["done","system"]' && JSON.stringify(g(a.ids.open)) === '["open",null]', 'untouched: a pointer whose request was DECIDED since, a producer\'s own close, an open pointer', { decided: g(a.ids.decided), producer: g(a.ids.byProducer), open: g(a.ids.open) });
+    const disk = JSON.parse(fs.readFileSync(path.join(a.dataDir, 'user-todos.json'), 'utf8'));
+    const onDisk = (id) => { const it = (disk.items || []).find((x) => x.id === id); return it && it.status; };
+    ok(onDisk(a.ids.doneByUser) !== 'done' && onDisk(a.ids.dismissedByUser) !== undefined, 'flushed BEFORE the ledger row (the file holds the rewrite, not the old close)', { a: onDisk(a.ids.doneByUser) });
+    const again = create({ rootDir: a.root, homeDir: scratchHomeDir, serverNotice: () => { }, userTodos: live, channels: engineOver(a.ids, live) }).runLocalMigrations().find((r) => r.id === ID);
+    const mig = create({ rootDir: a.root, homeDir: scratchHomeDir, userTodos: live, channels: engineOver(a.ids, live) }).MIGRATIONS.find((m) => m.id === ID);
+    ok(again.status === 'already' && mig.run().hidden === 0, 'at most once: the ledger says already, and the rewrite itself finds nothing left');
+    // (2) no live store: a private one on the same file (no resurface — the engine holds another store)
+    const b = seed('file');
+    const rb = create({ rootDir: b.root, homeDir: scratchHomeDir, serverNotice: () => { }, channels: engineOver(b.ids, new UserTodoManager({ dataDir: b.dataDir, expirySweepMs: 0 })) }).runLocalMigrations().find((r) => r.id === ID);
+    const fileStore = new UserTodoManager({ dataDir: b.dataDir, expirySweepMs: 0 });
+    ok(rb.status === 'ran' && rb.report.store === 'private' && rb.report.hidden === 2 && rb.report.back === 0 && FA.isHidden(fileStore.get(b.ids.doneByUser)) && FA.isHidden(fileStore.get(b.ids.dismissedByUser)), 'without a live store: a private store on the file (hidden; the boot reconcile brings them back on the next boot)', rb.report);
+    // (3) no engine: channels data present ⇒ FAILS by name (retried next boot), nothing touched; none ⇒ nothing to do
+    const x = seed('noeng');
+    const rx = create({ rootDir: x.root, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+    const xs = new UserTodoManager({ dataDir: x.dataDir, expirySweepMs: 0 });
+    ok(rx.status === 'failed' && /no channels engine/.test(rx.error) && !JSON.parse(fs.readFileSync(path.join(x.dataDir, 'migrations.json'), 'utf8')).applied[ID] && xs.get(x.ids.doneByUser).resolvedBy === 'user', 'no engine while channels data exists ⇒ FAILS by name, not recorded (retried next boot), nothing touched', rx);
+    const n = seed('nochan', { channelsDir: false });
+    const rn = create({ rootDir: n.root, homeDir: scratchHomeDir, serverNotice: () => { } }).runLocalMigrations().find((r) => r.id === ID);
+    ok(rn.status === 'ran' && rn.report.store === 'absent', 'no channels data ⇒ nothing to do (recorded)', rn.report);
+    } catch (e) { ok(false, '2026-10-closed-access-pointers-hidden threw on this tree (the migration it asks for is missing): ' + ((e && e.message) || e)); }
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

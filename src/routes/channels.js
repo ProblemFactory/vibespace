@@ -420,25 +420,49 @@ const listOf = (b, key) => (b && Object.prototype.hasOwnProperty.call(b, key) ? 
  *  ruling: these doors wrote the SAME wake row the decide route writes, with no verdict — on an instance whose sign-in is off
  *  an agent's curl got billed wakes with no click). A watcher row whose delivery is `wake` (deliveryModeOf: a row that never
  *  said reads wake; a digest is a paced wake) starts BILLED turns — the owner's money, the decision Approve makes on a wake
- *  request. So a write CARRYING one — a Notify… list at any grain, a rule written with its lists, a pre-split assignment
- *  (its watcher row IS a wake: splitAssignment writes no delivery) — passes THE person verdict first (src/routes/vault.js
- *  personVerdict, the decide route's own: any bearer ⇒ 403 human_only, not this page ⇒ 403 cross_site). An agent's own road
- *  to a wake is its ASK (`vibespace-channels watch --mode wake` ⇒ fileWatchRequest ⇒ the owner's click), never a direct
- *  write; a write with no wake row (a next-turn row, a removal, []) is as it was. scripts/test-approval-census.mjs lists
- *  every caller of a watch writer in this file and fails one that does not ask this first. */
+ *  request. An agent's own road to a wake is its ASK (`vibespace-channels watch --mode wake` ⇒ fileWatchRequest ⇒ the
+ *  owner's click), never a direct write.
+ *  ACCEPTANCE ROUND 4 (主开发: «the person verdict guards every write that CHANGES WHAT A WAKE FIRES ON or who it reaches,
+ *  not only the write that creates one»): round 2 keyed the gate on a `watchers` list IN THE BODY, so a rule's `pattern` or
+ *  `watchExcept` alone, a conversation's filter, an access list, a removal reached an approved wake with no click (a bearer,
+ *  or a bare curl on a sign-in-off instance, widened it to more conversations, members, messages). Now EVERY route that
+ *  writes a grain names the grain it writes — read off its PATH (accountGrain / ruleGrain / convGrain), never its body — and
+ *  asks the engine whether that grain HOLDS a wake (engine.wakeHeldAt: a wake row stored on it, or for a conversation's
+ *  filter a wake row naming it); held, or the body would write one ⇒ THE person verdict (src/routes/vault.js personVerdict,
+ *  the decide route's own: any bearer ⇒ 403 human_only, not this page ⇒ 403 cross_site). A grain with no wake stays open
+ *  to the agent as it was. scripts/test-wake-approve-card.mjs ⑨ (the WRITER CENSUS) derives the engine's grain writers
+ *  from its source and fails a route that calls one without this gate first, unconditionally. */
 const WAKE_REFUSED = Object.freeze({
   human_only: 'a wake (a billed turn) is the owner\'s to set, on this instance\'s page — an agent, a job or an automation key never writes one; an agent asks for it (vibespace-channels watch --mode wake) and the owner approves',
   cross_site: 'a wake (a billed turn) is set on this instance\'s own page — this write did not come from it',
 });
+/** r4: the words when the grain HOLDS a wake (the write would change what it fires on or whom it reaches). */
+const WAKE_HELD_REFUSED = Object.freeze({
+  human_only: 'this grain holds a wake (a billed turn) the owner set — what it fires on and whom it reaches (its rule, its filter, its lists, its exceptions) is the owner\'s to change, on this instance\'s page; an agent, a job or an automation key never changes it',
+  cross_site: 'this grain holds a wake (a billed turn) — it is changed on this instance\'s own page; this write did not come from it',
+});
 const wakeRowsOf = (rows) => (Array.isArray(rows) ? rows.filter((w) => w && typeof w === 'object' && deliveryModeOf(w) === 'wake') : []);
 /** A pre-split assignment's watcher row (F.splitAssignment) carries no delivery — it is a wake whenever it is written. */
 const assignmentRowsOf = (a) => (a && typeof a === 'object' ? [{ principal: a.principal || null }] : []);
-/** → true when it answered (403, by name): `rows` hold a wake and the write is not a person's on this page. */
-function wakeRefused(req, res, rows) {
-  if (!wakeRowsOf(rows).length) return false;
+/** THE GRAIN a route writes, off its PATH (r4 — never a body field): the account, a rule (no :pid = a NEW rule, which holds
+ *  nothing yet), a conversation. */
+const accountGrain = (req) => ({ adapterId: req.params.id, grain: { kind: 'account' } });
+const ruleGrain = (req) => ({ adapterId: req.params.id, grain: { kind: 'pattern', id: req.params.pid || null } });
+const convGrain = (req) => ({ adapterId: req.params.adapterId, grain: { kind: 'conversation', convId: req.params.convId } });
+/** Does the grain `at` hold a wake now (THE engine's mark)? An engine that cannot say ⇒ it does (fail closed: the person verdict). */
+function wakeHeld(at) {
+  try { const e = engine(); return typeof e.wakeHeldAt !== 'function' || !!(e.wakeHeldAt(at.adapterId, at.grain) || {}).held; } catch { return true; }
+}
+/** → true when it answered (403, by name): the grain `at` HOLDS a wake or `rows` (the body's) would write one, and the write is
+ *  not a person's on this page. Every grain-writing route asks it first, whatever its body says. */
+function wakeRefused(req, res, at, rows = []) {
+  const writes = wakeRowsOf(rows).length > 0;
+  const held = !writes && wakeHeld(at);
+  if (!writes && !held) return false;
   const who = personVerdict(req);
   if (who.ok) return false;
-  bad(res, 403, WAKE_REFUSED[who.code] || WAKE_REFUSED.cross_site, { code: who.code });
+  const words = held ? WAKE_HELD_REFUSED : WAKE_REFUSED;
+  bad(res, 403, words[who.code] || words.cross_site, { code: who.code, ...(held ? { wakeHeld: true } : {}) });
   return true;
 }
 /** lane grants-unify — «除了»: the members of a picked Task Group / All agents LEFT OUT (`except`, a list of
@@ -449,6 +473,7 @@ router.put('/api/channels/adapters/:id/access', async (req, res) => {
     forHost(req);
     const list = listOf(req.body, 'access');
     if (list === undefined) return bad(res, 400, 'access is required (a list of {principal, authority}; [] removes everyone)', { code: 'bad-request' });
+    if (wakeRefused(req, res, accountGrain(req))) return;
     scopeAnswer(res, await engine().setAccess(req.params.id, { kind: 'account' }, list, { base: req.body.base, ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });
@@ -457,7 +482,7 @@ router.put('/api/channels/adapters/:id/watchers', async (req, res) => {
     forHost(req);
     const list = listOf(req.body, 'watchers');
     if (list === undefined) return bad(res, 400, 'watchers is required (a list; [] notifies nobody)', { code: 'bad-request' });
-    if (wakeRefused(req, res, list)) return;
+    if (wakeRefused(req, res, accountGrain(req), list)) return;
     scopeAnswer(res, await engine().setWatchers(req.params.id, { kind: 'account' }, list, { base: req.body.base, ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });
@@ -466,6 +491,7 @@ router.put('/api/channels/adapters/:id/patterns/:pid/access', async (req, res) =
     forHost(req);
     const list = listOf(req.body, 'access');
     if (list === undefined) return bad(res, 400, 'access is required', { code: 'bad-request' });
+    if (wakeRefused(req, res, ruleGrain(req))) return;
     scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern', id: req.params.pid }, { access: list, ...(req.body.pattern !== undefined ? { pattern: req.body.pattern } : {}), ...(req.body.base !== undefined ? { base: req.body.base } : {}), ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });
@@ -474,7 +500,7 @@ router.put('/api/channels/adapters/:id/patterns/:pid/watchers', async (req, res)
     forHost(req);
     const list = listOf(req.body, 'watchers');
     if (list === undefined) return bad(res, 400, 'watchers is required', { code: 'bad-request' });
-    if (wakeRefused(req, res, list)) return;
+    if (wakeRefused(req, res, ruleGrain(req), list)) return;
     scopeAnswer(res, await engine().setWatchers(req.params.id, { kind: 'pattern', id: req.params.pid }, list, { base: req.body.base, ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });
@@ -485,7 +511,7 @@ router.put('/api/channels/adapters/:id/assignment', async (req, res) => {
     forHost(req);
     const b = req.body || {};
     if (!('assignment' in b)) return bad(res, 400, 'assignment is required (an object, or null to unassign)', { code: 'bad-request' });
-    if (wakeRefused(req, res, assignmentRowsOf(b.assignment))) return;
+    if (wakeRefused(req, res, accountGrain(req), assignmentRowsOf(b.assignment))) return;
     scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'account' }, b.assignment === null ? null : { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
   } catch (e) { fail(res, e); }
 });
@@ -499,7 +525,7 @@ router.post('/api/channels/adapters/:id/patterns', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    if (wakeRefused(req, res, b.assignment !== undefined ? assignmentRowsOf(b.assignment) : b.watchers)) return;
+    if (wakeRefused(req, res, ruleGrain(req), b.assignment !== undefined ? assignmentRowsOf(b.assignment) : b.watchers)) return;
     if (b.assignment !== undefined) return scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern' }, { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
     scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern' }, { pattern: b.pattern, access: b.access === undefined ? [] : b.access, ...(b.watchers !== undefined ? { watchers: b.watchers } : {}), ...exceptOf(b), ...(b.watchExcept !== undefined ? { watchExcept: b.watchExcept } : {}) }));
   } catch (e) { fail(res, e); }
@@ -508,13 +534,17 @@ router.put('/api/channels/adapters/:id/patterns/:pid', async (req, res) => {
   try {
     forHost(req);
     const b = req.body || {};
-    if (wakeRefused(req, res, b.assignment !== undefined ? assignmentRowsOf(b.assignment) : b.watchers)) return;
+    if (wakeRefused(req, res, ruleGrain(req), b.assignment !== undefined ? assignmentRowsOf(b.assignment) : b.watchers)) return;
     if (b.assignment !== undefined) return scopeAnswer(res, await engine().setScopeAssignment(req.params.id, { kind: 'pattern', id: req.params.pid }, { ...(b.assignment || {}), estimateAtSet: b.estimateAtSet || null }));
     scopeAnswer(res, await engine().setGrain(req.params.id, { kind: 'pattern', id: req.params.pid }, { ...(b.pattern !== undefined ? { pattern: b.pattern } : {}), ...(b.access !== undefined ? { access: b.access } : {}), ...(b.watchers !== undefined ? { watchers: b.watchers } : {}), ...exceptOf(b), ...(b.watchExcept !== undefined ? { watchExcept: b.watchExcept } : {}), ...(b.base !== undefined ? { base: b.base } : {}) }));
   } catch (e) { fail(res, e); }
 });
 router.delete('/api/channels/adapters/:id/patterns/:pid', async (req, res) => {
-  try { forHost(req); scopeAnswer(res, await engine().removePattern(req.params.id, req.params.pid)); } catch (e) { fail(res, e); }
+  try {
+    forHost(req);
+    if (wakeRefused(req, res, ruleGrain(req))) return;   // r4: removing a rule that holds a wake is a wake write
+    scopeAnswer(res, await engine().removePattern(req.params.id, req.params.pid));
+  } catch (e) { fail(res, e); }
 });
 /** THE HONEST ESTIMATE over a scope, BEFORE saving: `{scope:{kind:'account'|
  *  'pattern'}, pattern?, filter?, notify?, digestMinutes?, dailyWakeCap?}` →
@@ -1074,7 +1104,7 @@ router.put('/api/channels/:adapterId/:convId/assignment', async (req, res) => {
     forHost(req);
     const b = req.body || {};
     if (!('assignment' in b)) return bad(res, 400, 'assignment is required (an object, or null to unassign)', { code: 'bad-request' });
-    if (wakeRefused(req, res, assignmentRowsOf(b.assignment))) return;
+    if (wakeRefused(req, res, convGrain(req), assignmentRowsOf(b.assignment))) return;
     const input = b.assignment === null ? null : { ...(b.assignment && typeof b.assignment === 'object' ? b.assignment : {}), estimateAtSet: b.estimateAtSet || (b.assignment && b.assignment.estimateAtSet) || null };
     answer(res, await engine().setAssignment(req.params.adapterId, req.params.convId, input));
   } catch (e) { fail(res, e); }
@@ -1086,6 +1116,7 @@ router.put('/api/channels/:adapterId/:convId/access', async (req, res) => {
     forHost(req);
     const list = listOf(req.body, 'access');
     if (list === undefined) return bad(res, 400, 'access is required (a list of {principal, authority}; [] removes everyone)', { code: 'bad-request' });
+    if (wakeRefused(req, res, convGrain(req))) return;
     answer(res, await engine().setAccess(req.params.adapterId, { kind: 'conversation', convId: req.params.convId }, list, { base: req.body.base, ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });
@@ -1094,7 +1125,7 @@ router.put('/api/channels/:adapterId/:convId/watchers', async (req, res) => {
     forHost(req);
     const list = listOf(req.body, 'watchers');
     if (list === undefined) return bad(res, 400, 'watchers is required (a list; [] notifies nobody)', { code: 'bad-request' });
-    if (wakeRefused(req, res, list)) return;
+    if (wakeRefused(req, res, convGrain(req), list)) return;
     answer(res, await engine().setWatchers(req.params.adapterId, { kind: 'conversation', convId: req.params.convId }, list, { base: req.body.base, ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });
@@ -1105,6 +1136,7 @@ router.put('/api/channels/:adapterId/:convId/filter', async (req, res) => {
     forHost(req);
     const b = req.body || {};
     if (!('filter' in b)) return bad(res, 400, 'filter is required (an object, or null to clear)', { code: 'bad-request' });
+    if (wakeRefused(req, res, convGrain(req))) return;   // r4: a filter a wake fires on is the owner's
     answer(res, await engine().setFilter(req.params.adapterId, req.params.convId, b.filter, { estimate: b.estimate || null }));
   } catch (e) { fail(res, e); }
 });
@@ -1138,7 +1170,7 @@ function answer3(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
   const status = code === 'not-found' ? 404
-    : code === 'send-not-available' || code === 'bad-state' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' || code === 'changed-since-shown' || code === 'topic-forbidden' || code === 'placement-not-offered' ? 409
+    : code === 'send-not-available' || code === 'bad-state' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' || code === 'changed-since-shown' || code === 'topic-forbidden' || code === 'expired' || code === 'placement-not-offered' ? 409   // r4: `expired` = a wake ask past its end (its `expiredAt` rides the answer)
     : code === 'rate-floor' ? 429
     : code === 'bad-proposal' || code === 'bad-policy' || code === 'bad-grant' || code === 'bad-request' ? 400
     : code === 'failed' || code === 'unknown' ? 502 : 500;
@@ -1252,6 +1284,7 @@ router.put('/api/channels/:adapterId/:convId/reach', async (req, res) => {
     forHost(req);
     const b = req.body || {};
     if (!b.principal || typeof b.principal !== 'object') return bad(res, 400, 'principal is required ({kind:"agent"|"group", id})', { code: 'bad-request' });
+    if (wakeRefused(req, res, convGrain(req))) return;   // r4: who may see a conversation that holds a wake is whom the wake may reach
     answer3(res, await engine().setReach(req.params.adapterId, req.params.convId, { principal: b.principal, level: b.level === undefined ? null : b.level }, 'user'));
   } catch (e) { fail(res, e); }
 });

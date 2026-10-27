@@ -24,6 +24,9 @@
 //      says «expires in 7 d»; the refusal at the bound names the oldest ask and its end; past it the sweep expires it
 //      («expired · the agent can ask again», the bound freed); an Approve after its end is refused `expired`; an ask filed
 //      before the lifetime and an item that ended while nobody listened are settled at the boot reconcile
+//   ④e lane wake-approve-card r4 — THE WAKE'S REACH IS THE PERSON'S: the real engine behind the real routes; on a grain holding an
+//      approved wake the reviewer's three curls (a rule's pattern match-all, its watchExcept [], the conversation's filter) from a
+//      vsst_ and from a bare curl ⇒ 403, nothing widened; the same writes on a grain holding no wake ⇒ 200 (RED: bec3e3f8 ⇒ 200)
 //   CONTROLS (scripts/mutant-copy.mjs, scratch copies): a filter without the inherited rule refuses ③; an engine
 //   dispatch without the next-turn branch bills ⑤; an engine without the removed-by-user check lets ⑦ re-register.
 import fs from 'node:fs';
@@ -273,6 +276,18 @@ try {
 } catch (e) { ok(false, '④c threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
 
 console.log('④d A WAKE ASK HAS A LIFETIME (lane wake-approve-card r3): 7 days, said on the card, the bound freed at its end');
+/** the REAL routes (src/routes/channels.js over express) in front of `eng` for one `fn(call)` — `call(method, path, body,
+ *  headers)` → {status, code, …answer} (r4: the decide route's answer to a press past an ask's end) */
+async function withRoutes(eng, fn) {
+  const express = require('express'), http = require('node:http');
+  const ROUTES = require(path.join(REPO, 'src/routes/channels.js'));
+  ROUTES.setup({ getEngine: () => eng });
+  const app = express(); app.use(express.json()); app.use(ROUTES.router);
+  const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const call = async (method, p, body = {}, headers = { 'Sec-Fetch-Site': 'same-origin' }) => { const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }); let j = {}; try { j = await r.json(); } catch { } return { status: r.status, ...j }; };
+  try { return await fn(call); } finally { await new Promise((r) => srv.close(r)); }
+}
 async function lifetimeLeg(ENGM, name) {
   const { eng, userTodos, clock } = mkEngine(name, { ENGM });
   await eng.pass(A, { force: true });
@@ -294,7 +309,11 @@ async function lifetimeLeg(ENGM, name) {
   const ended = { request: reqOf(ra.id).status, decidedBy: reqOf(ra.id).decidedBy || null, item: ia2 && ia2.status, by: ia2 && ia2.resolvedBy, words: ia2 ? FA.settledWords(ia2) : null, b: reqOf(b.request && b.request.id).status };
   const next = await eng.agentWatch(AG, A, { delivery: 'wake', why: 'the whole account' });   // its bound freed
   clock.advance(2 * 3600e3);   // b is past its end now — never swept yet
-  const late = await eng.decideRequest(b.request.id, true, 'user', { person: true });
+  const rb = reqOf(b.request.id);
+  // r4 (主开发): a press past the end answers ONE way on both sides of the minute sweep — the page's own route (this instance's
+  // page: Sec-Fetch-Site same-origin), a 409 `expired` with its end (was: 500 before the sweep, «already decided» after it)
+  const http2 = await withRoutes(eng, async (call) => ({ before: await call('POST', `/api/channels/reach-requests/${b.request.id}/approve`), after: await call('POST', `/api/channels/reach-requests/${ra.id}/deny`) }));
+  const late = { code: http2.before.code || null, ok: !!http2.before.ok };
   // BOOT: an ask filed BEFORE the lifetime (no end of its own, its item lasting) 8 days old; an item that ended while nobody listened
   const old = userTodos.add('channels', { origin: 'channels', text: 'Worker asks to be woken by an old room', action: { type: 'channel-watch-request', id: 'wr-legacy' } });
   const dark = userTodos.add('channels', { origin: 'channels', text: 'Worker asks to be woken by a dark room', action: { type: 'channel-watch-request', id: 'wr-dark' } });
@@ -304,7 +323,7 @@ async function lifetimeLeg(ENGM, name) {
   const boot = typeof eng.reconcileAsks === 'function' ? await eng.reconcileAsks() : null;
   for (let i = 0; i < 40 && reqOf('wr-dark').status === 'open'; i++) await new Promise((r) => setTimeout(r, 25));
   return { t0, filed, show: show && show.request, day6, full: { code: full.code, error: full.error || '', oldest: full.oldest || null }, a: ra.id, swept, ended, next: { ok: !!next.ok, proposed: !!next.proposed, code: next.code || null },
-    late: { code: late.code || null, ok: !!late.ok, request: reqOf(b.request.id).status }, boot: { legacy: reqOf('wr-legacy').status, legacyItem: userTodos.get(old.id).resolvedBy, dark: reqOf('wr-dark').status, darkBy: reqOf('wr-dark').decidedBy || null, settled: boot && boot.settled } };
+    late: { code: late.code || null, ok: !!late.ok, request: reqOf(b.request.id).status }, http: { before: { status: http2.before.status, code: http2.before.code, expiredAt: http2.before.expiredAt || null, error: http2.before.error || '' }, after: { status: http2.after.status, code: http2.after.code, expiredAt: http2.after.expiredAt || null, error: http2.after.error || '' }, bEnd: rb.expiresAt || null }, boot: { legacy: reqOf('wr-legacy').status, legacyItem: userTodos.get(old.id).resolvedBy, dark: reqOf('wr-dark').status, darkBy: reqOf('wr-dark').decidedBy || null, settled: boot && boot.settled } };
 }
 try {
   const g = await lifetimeLeg(ENG, 'e4d');
@@ -316,6 +335,9 @@ try {
   ok(g.swept.includes(g.a) && g.ended.request === 'expired' && g.ended.decidedBy === 'expired' && g.ended.item === 'done' && g.ended.by === 'expired' && g.ended.words === 'expired · the agent can ask again' && g.ended.b === 'open', 'past 7 days the sweep EXPIRES it: the request `expired` (nothing written), its item closed «expired · the agent can ask again»; the younger ask still waits', J2s(g.ended));
   ok(g.next.ok && g.next.proposed, 'its bound is freed: the agent\'s next wake ask is filed', J2s(g.next));
   ok(g.late.code === 'expired' && !g.late.ok && g.late.request === 'expired', 'an Approve after its end (before the sweep wrote it) is refused `expired` — never approved late', J2s(g.late));
+  const word = /^this request expired on \d{4}-\d\d-\d\d \d\d:\d\d [A-Z]+ — the agent can ask again$/;
+  ok(g.http.before.status === 409 && g.http.before.code === 'expired' && g.http.before.expiredAt === g.http.bEnd && word.test(g.http.before.error), `r4: the page\'s Approve in the ≤ 60 s BEFORE the sweep ⇒ 409 expired with its end — «${g.http.before.error}» (was 500, words no page translated)`, J2s(g.http.before));
+  ok(g.http.after.status === 409 && g.http.after.code === 'expired' && g.http.after.expiredAt === g.filed.expiresAt && word.test(g.http.after.error), 'r4: …and AFTER the sweep (the request already `expired`) the same answer — 409 expired with its end (was «request already expired», a 409 bad-state the page words «already decided»)', J2s(g.http.after));
   ok(g.boot.legacy === 'expired' && g.boot.legacyItem === 'expired' && g.boot.dark === 'expired' && g.boot.darkBy === 'expired' && g.boot.settled >= 1, 'the boot reconcile: an ask filed before the lifetime (8 days old, its item lasting) expires; an item that ended while nobody listened settles its request', J2s(g.boot));
   // CONTROL: the engine whose asks never end (the base: no lifetime) — 8 days on, the ask is open for ever and the bound stays full
   const src = engineSource(REPO);
@@ -325,6 +347,61 @@ try {
   const r = await lifetimeLeg(E5, 'e4d-red');
   ok(cut !== src && r.ended.request === 'open' && r.next.code === 'watch-request-limit' && r.boot.legacy === 'open', 'CONTROL: an engine whose asks never end — 7 days on the ask is still OPEN, the agent\'s next ask refused at the bound, the 8-day-old one still open after the boot', J2s({ ended: r.ended, next: r.next, legacy: r.boot.legacy }));
 } catch (e) { ok(false, '④d threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
+
+console.log('④e THE WAKE\'S REACH IS THE PERSON\'S (lane wake-approve-card r4): the reviewer\'s three curls on a grain holding an approved wake');
+/** The REAL engine behind the REAL routes (src/routes/channels.js over express): a conversation holding an APPROVED wake (the
+ *  agent's ask, the owner's Approve) beside the owner's own wake for another agent filtered on the room's filter, and a rule
+ *  holding the owner's wake; beside
+ *  them a conversation and a rule holding NONE. The reviewer's three writes — the rule's pattern (match-all), its watchExcept
+ *  ([]), the conversation's filter (one letter) — from an agent's vsst_ and from a bare curl. → statuses + what was stored. */
+async function reachLeg(ENGM, name) {
+  const express = require('express'), http = require('node:http');
+  const ROUTES = require(path.join(REPO, 'src/routes/channels.js'));
+  const { eng } = mkEngine(name, { ENGM });
+  await eng.pass(A, { force: true });
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER)] });
+  const ANN = `${A}-announce`;
+  await eng.setFilter(A, C, { match: 'any', rules: [{ kind: 'keyword', value: 'outage' }] });
+  await eng.setFilter(A, ANN, { match: 'any', rules: [{ kind: 'keyword', value: 'release' }] });
+  const fid = (eng.store.index.peek(KEY) || {}).filterId;
+  await eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: OTHER, delivery: 'wake', mode: 'filtered', filterId: fid }] });   // the owner's Notify…: Other is woken on «outage»
+  const ask = await eng.agentWatch(AG, KEY, { delivery: 'wake', why: 'paged on an outage' });
+  const approved = ask.request ? await eng.decideRequest(ask.request.id, true, 'user', { person: true }) : { ok: false, code: 'no-ask' };
+  const rows = eng.store.index.peek(KEY).watchers || [];
+  const row = rows.find((w) => w.principal && w.principal.id === AGENT.id) || null, other = rows.find((w) => w.principal && w.principal.id === OTHER.id) || null;
+  const p1 = await eng.setGrain(A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [acc(AGENT)], watchers: [{ principal: AGENT, delivery: 'wake' }] });
+  const p2 = await eng.setGrain(A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Announce' }] }, access: [acc(AGENT)], watchers: [{ principal: AGENT, delivery: 'next-turn' }] });
+  const P1 = p1.grain && p1.grain.id, P2 = p2.grain && p2.grain.id;
+  ROUTES.setup({ getEngine: () => eng });
+  const app = express(); app.use(express.json()); app.use(ROUTES.router);
+  const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const put = async (p, body, headers) => { const r = await fetch(base + p, { method: 'PUT', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, code: (j && j.code) || null }; };
+  const MATCH_ALL = { match: 'any', rules: [{ kind: 'kind', value: 'group' }, { kind: 'kind', value: 'dm' }] };
+  const WIDE = { match: 'any', rules: [{ kind: 'keyword', value: 'e' }] };
+  const curls = (rule, conv) => [['pattern', `/api/channels/adapters/${A}/patterns/${rule}`, { pattern: MATCH_ALL }], ['watchExcept', `/api/channels/adapters/${A}/patterns/${rule}`, { watchExcept: [] }], ['filter', `/api/channels/${A}/${conv}/filter`, { filter: WIDE }]];
+  const VSST = { Authorization: 'Bearer vsst_0123456789abcdef' };
+  const out = { setup: { approved: !!approved.ok, delivery: row && F.deliveryModeOf(row), other: other && F.deliveryModeOf(other), otherMode: other && other.mode, fid: fid || null, otherFilter: other && other.filterId, P1: !!P1, P2: !!P2 }, held: {}, bare: {}, free: {} };
+  try {
+    out.marks = typeof eng.wakeHeldAt === 'function' ? { conv: eng.wakeHeldAt(A, { kind: 'conversation', convId: C }).held, rule: eng.wakeHeldAt(A, { kind: 'pattern', id: P1 }).held, ann: eng.wakeHeldAt(A, { kind: 'conversation', convId: ANN }).held, p2: eng.wakeHeldAt(A, { kind: 'pattern', id: P2 }).held, account: eng.wakeHeldAt(A, { kind: 'account' }).held } : null;
+    for (const [k, p, b] of curls(P1, C)) out.bare[k] = (await put(p, b, {})).status;   // a bare curl first (sign-in off) — then the agent's bearer
+    for (const [k, p, b] of curls(P1, C)) out.held[k] = await put(p, b, VSST);
+    for (const [k, p, b] of curls(P2, ANN)) out.free[k] = (await put(p, b, VSST)).status;
+    const snap = eng.store.index.snapshot();
+    const pa = (snap.patternAssignments || {})[P1];
+    out.after = { pattern: pa && JSON.stringify(pa.pattern), filter: JSON.stringify(((snap.filters || {})[fid] || {}).rules || null) };
+  } finally { await new Promise((r) => srv.close(r)); }
+  return out;
+}
+try {
+  const g = await reachLeg(ENG, 'e4e');
+  ok(g.setup.approved && g.setup.delivery === 'wake' && g.setup.other === 'wake' && g.setup.otherMode === 'filtered' && g.setup.otherFilter === g.setup.fid && g.setup.P1 && g.setup.P2, 'setup: the agent\'s wake ask on the Ops room, APPROVED by the owner, beside the owner\'s wake for Other on the room\'s own filter («outage»); a rule holding the owner\'s wake; a rule and a room holding none', J2s(g.setup));
+  ok(g.marks && g.marks.conv && g.marks.rule && !g.marks.ann && !g.marks.p2 && !g.marks.account, 'the engine MARKS the grains that hold a wake (wakeHeldAt): the Ops room and the Ops rule — not the Announcements room, not the next-turn rule, not the account', J2s(g.marks));
+  ok(g.held.pattern.status === 403 && g.held.pattern.code === 'human_only' && g.held.watchExcept.status === 403 && g.held.watchExcept.code === 'human_only' && g.held.filter.status === 403 && g.held.filter.code === 'human_only', 'THE REVIEWER\'S THREE CURLS from an agent\'s vsst_ on the grains holding the wake — the rule\'s pattern (match-all), its watchExcept ([]), the room\'s filter — ⇒ 403 human_only each', J2s(g.held));
+  ok(g.bare.pattern === 403 && g.bare.watchExcept === 403 && g.bare.filter === 403, '…and from a bare curl (an instance whose sign-in is off) ⇒ 403 (cross_site)', J2s(g.bare));
+  ok(g.after.pattern === J2s({ match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }) && g.after.filter === J2s([{ kind: 'keyword', value: 'outage' }]), 'nothing was widened: the rule still matches «Ops», Other\'s wake still fires on «outage» only', J2s(g.after));
+  ok(g.free.pattern === 200 && g.free.watchExcept === 200 && g.free.filter === 200, 'the SAME three writes on a rule and a room holding NO wake ⇒ 200 (a non-wake grain stays the agent\'s to edit)', J2s(g.free));
+} catch (e) { ok(false, '④e threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); }
 
 console.log('⑤ W5: next-turn rides the free stash; a legacy row still wakes');
 async function deliveryLeg(ENGM, name) {

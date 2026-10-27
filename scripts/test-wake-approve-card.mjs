@@ -38,7 +38,11 @@
 //   ⑧ …AND EVERY DOOR DRAWS THEM — the tray row (user-todos-row.js: the tray, the mini inbox, the chat's card) and the For-you
 //     window (inbox-window-layout itemView): an open decision row's verbs are Approve / Deny and no ✓ / ✕; a decided one has
 //     no ↺; the window's second verb is «Deny»; a non-decision row keeps its closers (the control)
-//   ⑨ EVERY WRITER OF A WAKE WATCH ASKS THE PERSON VERDICT — the watchers / assignment / rule doors of src/routes/channels.js
+//   ⑨ EVERY WRITE THAT CHANGES WHAT A WAKE FIRES ON ASKS THE PERSON VERDICT (r2 + r4) — every route writing a grain asks the engine
+//      whether the grain its PATH names HOLDS a wake (wakeHeldAt) and, held or a wake in the body, THE person verdict; the
+//      WRITER CENSUS derives the engine's grain writers and fails a route that calls one without the gate first; RED: round 3's
+//      gate (keyed on a `watchers` body) lets a vsst_ and a bare curl widen a held wake through all 10 doors of a held rule /
+//      conversation (the rule's pattern, its watchExcept, the conversation's filter, …)
 //     over a stub engine: a wake row from a vsst_ ⇒ 403 human_only, from a bare write ⇒ 403 cross_site (the engine never
 //     asked); a next-turn row (an agent's non-wake write), a removal ⇒ as before; this page ⇒ written. THE WRITER CENSUS: every
 //     route calling a watch writer asks it first; every setGrain call inside the engine is named (the agent's own road writes
@@ -53,6 +57,9 @@
 //     with no Undo. RED CONTROL: a registry without the row's closer — ✓ records «done» by the user
 //   ⑪ A WAKE ASK HAS A LIFETIME — the card's and the tray row's «expires in 7 d» (expiryWords; «… h» / «… min» near its end;
 //     nothing for a closed ask or another row), the window's «expires in N d». RED CONTROL: the row without `showsExpiry`
+//   ⑬ ROUND 4 — an Approve / Deny on an ask past its end ⇒ 409 `expired` (words + its date, zh / ja / en; RED: answer3 without
+//     the mapping ⇒ 500); vault-grant-ask (Allow once / For 8 hours / Deny) is a DECISION ROW: its own ends, no ✓ / ✕, the
+//     stamps «allowed once by you» / «allowed by you for 8 h» / «denied by you» (RED: the row as bec3e3f8 had it — ✓ closes it)
 //   ⑫ THE VAULT'S TWO ASKS AND THE HUB-ACT ASK ARE CARDS IN THE ASKING CHAT, decided by a person — registry rows (chat, decide
 //     'person', their own ends and stamps): the chat draws each where its producer files it (the run ask and the paste
 //     request under the asking conversation's key, the hub-act ask `about` it); «allowed by you · HH:MM» / «always allowed by
@@ -150,8 +157,8 @@ console.log('② THE KINDS TABLE — which owner decisions are a card in the cha
   }
   const spendNotice = { id: 'ut-s', sessionKey: 'accounts', text: 'Auto-resume skipped: the daily ceiling is reached', status: 'open', origin: 'spend', kind: 'notice' };
   ok(FA.needOf(spendNotice) === null && FA.surfaceOf(spendNotice).at === 'notice', 'the spend guard\'s ceilings (src/server/spend-guard.js — kind \'notice\'): no card — nothing to decide (the brief\'s pointer: the guard files NO wake request; the wake request is channels-access.js fileWatchRequest\'s)', FA.surfaceOf(spendNotice));
-  ok(JSON.stringify([...FA.PERSON_DECIDES].sort()) === JSON.stringify(['channel-watch-request', 'hub-act-ask', 'open-channel', 'secret-request', 'vault-run-ask']), 'PERSON_DECIDES = the reach-requests route\'s two rows + (r3) the vault\'s run ask and paste request and the hub-act ask — each behind a person\'s door (⑤)', FA.PERSON_DECIDES);
-  ok(JSON.stringify([...FA.DECISION_ROWS].sort()) === JSON.stringify(['channel-watch-request', 'hub-act-ask', 'secret-request', 'vault-run-ask']), 'DECISION_ROWS (their own verbs, no other closer) = the person rows that DRAW their verbs — the wake request (r2), the vault\'s run ask and paste request and the hub-act ask (r3); open-channel is a POINTER (⑩: it hides)', FA.DECISION_ROWS);
+  ok(JSON.stringify([...FA.PERSON_DECIDES].sort()) === JSON.stringify(['channel-watch-request', 'hub-act-ask', 'open-channel', 'secret-request', 'vault-grant-ask', 'vault-run-ask']), 'PERSON_DECIDES = the reach-requests route\'s two rows + (r3) the vault\'s run ask and paste request and the hub-act ask + (r4) the vault\'s grant request — each behind a person\'s door (⑤)', FA.PERSON_DECIDES);
+  ok(JSON.stringify([...FA.DECISION_ROWS].sort()) === JSON.stringify(['channel-watch-request', 'hub-act-ask', 'secret-request', 'vault-grant-ask', 'vault-run-ask']), 'DECISION_ROWS (their own verbs, no other closer) = the person rows that DRAW their verbs — the wake request (r2), the vault\'s run ask and paste request and the hub-act ask (r3), the vault\'s grant request (r4: Allow once / For 8 hours / Deny); open-channel is a POINTER (⑩: it hides)', FA.DECISION_ROWS);
 }
 
 // ── ③ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -274,6 +281,8 @@ const DOORS = {
   'vault-run-ask': { client: ['src/lib/user-todos-actions.js', '/api/vault/run/asks/'], server: ['src/routes/vault.js', "app.post('/api/vault/run/asks/:askId'"], verdict: 'person((req)', engine: /run\.answer\(/, mark: 'person: true' },
   'secret-request': { client: ['src/lib/vault-paste-box.js', '/api/vault/secret-requests/'], server: ['src/routes/vault.js', "app.post('/api/vault/secret-requests/:id/answer'"], verdict: 'person((req)', engine: /paste\.answer\(/, mark: 'person: true' },
   'hub-act-ask': { client: ['src/lib/user-todos-actions.js', '/api/hub-acts/asks/'], server: ['src/server/exit-routes.js', "app.post('/api/hub-acts/asks/:askId'"], verdict: 'personVerdict(req)', engine: /hosts\.hubActs\.answer\(/, mark: 'person: true' },
+  // r4: the vault's grant request (Allow once / For 8 hours / Deny) — the third vault card in the same chat
+  'vault-grant-ask': { client: ['src/lib/user-todos-actions.js', '/api/vault/request/asks/'], server: ['src/routes/vault.js', "app.post('/api/vault/request/asks/:askId'"], verdict: 'person((req)', engine: /run\.answerRequest\(/, mark: 'person: true' },
 };
 /** THE person verdict each door's file asks — routes/vault.js's own, never a local copy */
 const VERDICT_FROM = { 'src/routes/channels.js': /const \{ personVerdict \} = require\('\.\/vault\.js'\);/, 'src/server/exit-routes.js': /const \{ personVerdict \} = require\('\.\.\/routes\/vault\.js'\);/, 'src/routes/vault.js': /const person = \(fn\) => async \(req, res\) => \{\n    const v = personVerdict\(req\);/ };
@@ -306,6 +315,8 @@ function doorProblems(rows, files) {
   ok(doorProblems(FA.PERSON_DECIDES, hubBase).some((x) => /'hub-act-ask': src\/server\/exit-routes\.js decides before \(or without\)/.test(x)), 'RED COPY (r3): the hub-act door as the base had it (a bearer check, no page verdict) is named', doorProblems(FA.PERSON_DECIDES, hubBase));
   const noMark = { ...SRC_FILES, 'src/routes/vault.js': SRC_FILES['src/routes/vault.js'].replace("by: 'user', person: true }); }));   // r3: «allowed by you · 09:41»", "by: 'user' }); }));") };
   ok(doorProblems(FA.PERSON_DECIDES, noMark).some((x) => /'vault-run-ask': .*without handing in the person verdict's mark/.test(x)), 'RED COPY (r3): the run ask\'s door without the mark is named (its record could never say «by you»)', doorProblems(FA.PERSON_DECIDES, noMark));
+  const grantNoMark = { ...SRC_FILES, 'src/routes/vault.js': SRC_FILES['src/routes/vault.js'].replace("by: 'user', person: true }); }));   // r4: `person`", "by: 'user' }); }));   // r4: `person`") };
+  ok(grantNoMark['src/routes/vault.js'] !== SRC_FILES['src/routes/vault.js'] && doorProblems(FA.PERSON_DECIDES, grantNoMark).some((x) => /'vault-grant-ask': .*without handing in the person verdict's mark/.test(x)), 'RED COPY (r4): the grant request\'s door as bec3e3f8 had it (no mark) is named', doorProblems(FA.PERSON_DECIDES, grantNoMark));
 }
 /** who calls the engine's decide: exactly routes/channels.js; no agent route and no automation verb names the decide road */
 function decideCallers(files) {
@@ -455,12 +466,14 @@ console.log('⑧ …AND EVERY DOOR DRAWS THEM — the tray row (the tray, the mi
 }
 
 // ── ⑨ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
-console.log('⑨ EVERY WRITER OF A WAKE WATCH ASKS THE PERSON VERDICT — the watchers / assignment / rule doors');
+console.log('⑨ EVERY WRITE THAT CHANGES WHAT A WAKE FIRES ON ASKS THE PERSON VERDICT (r2 + r4) — every grain-writing door');
 const WAKE = { principal: { kind: 'agent', id: 'c-ops' }, notify: 'wake', delivery: 'wake', mode: 'all', dailyWakeCap: 5 };
 const LEGACY = { principal: { kind: 'agent', id: 'c-ops' }, notify: 'wake', mode: 'all' };   // no delivery = a wake
 const DIGEST = { principal: { kind: 'agent', id: 'c-ops' }, notify: 'digest', delivery: 'wake', digestMinutes: 30, mode: 'all' };
 const NEXT = { principal: { kind: 'agent', id: 'c-ops' }, notify: 'wake', delivery: 'next-turn', mode: 'all', origin: 'agent' };
 const ASSIGN = { principal: { kind: 'agent', id: 'c-ops' }, authority: 'draft' };
+const ACC = [{ principal: { kind: 'agent', id: 'c-ops' }, authority: 'draft' }];
+const MATCH_ALL = { match: 'any', rules: [{ kind: 'kind', value: 'group' }, { kind: 'kind', value: 'dm' }] };   // every conversation
 const DOORS_W = [
   ['PUT', '/api/channels/fake-poll/fake-poll-ops/watchers', (rows) => ({ watchers: rows })],
   ['PUT', '/api/channels/adapters/fake-poll/watchers', (rows) => ({ watchers: rows })],
@@ -474,8 +487,45 @@ const DOORS_A = [
   ['POST', '/api/channels/adapters/fake-poll/patterns'],
   ['PUT', '/api/channels/adapters/fake-poll/patterns/p1'],
 ];
+/** r4: EVERY door that writes a grain, with a body that writes NO wake row (the reviewer's holes: a rule's pattern alone, its
+ *  watchExcept alone, a conversation's filter — and the rest: an access list, a reach, a removal, an unassign, a next-turn row).
+ *  `grain` = the grain its PATH names (`<adapter>|<kind>|<id>`) — `at(id)` swaps the rule / conversation id. */
+const GRAIN_DOORS = (rule, conv) => [
+  ['PUT', '/api/channels/adapters/fake-poll/access', { access: ACC }, 'fake-poll|account|'],
+  ['PUT', '/api/channels/adapters/fake-poll/watchers', { watchers: [NEXT] }, 'fake-poll|account|'],
+  ['PUT', '/api/channels/adapters/fake-poll/assignment', { assignment: null }, 'fake-poll|account|'],
+  ['PUT', `/api/channels/adapters/fake-poll/patterns/${rule}/access`, { access: ACC }, `fake-poll|pattern|${rule}`],
+  ['PUT', `/api/channels/adapters/fake-poll/patterns/${rule}/watchers`, { watchers: [] }, `fake-poll|pattern|${rule}`],
+  ['PUT', `/api/channels/adapters/fake-poll/patterns/${rule}`, { pattern: MATCH_ALL }, `fake-poll|pattern|${rule}`],
+  ['PUT', `/api/channels/adapters/fake-poll/patterns/${rule}`, { watchExcept: [] }, `fake-poll|pattern|${rule}`],
+  ['DELETE', `/api/channels/adapters/fake-poll/patterns/${rule}`, {}, `fake-poll|pattern|${rule}`],
+  ['PUT', `/api/channels/fake-poll/${conv}/assignment`, { assignment: null }, `fake-poll|conversation|${conv}`],
+  ['PUT', `/api/channels/fake-poll/${conv}/access`, { access: ACC }, `fake-poll|conversation|${conv}`],
+  ['PUT', `/api/channels/fake-poll/${conv}/watchers`, { watchers: [NEXT] }, `fake-poll|conversation|${conv}`],
+  ['PUT', `/api/channels/fake-poll/${conv}/filter`, { filter: MATCH_ALL }, `fake-poll|conversation|${conv}`],
+  ['PUT', `/api/channels/fake-poll/${conv}/reach`, { principal: { kind: 'agent', id: 'c-ops' }, level: 'visible' }, `fake-poll|conversation|${conv}`],
+];
+/** the real router over a stub engine whose grains in `held` HOLD a wake (THE engine's mark — wakeHeldAt); every write recorded */
+function stubWith(mod, held) {
+  const writes = [], asked = [];
+  const wrote = (what) => async (...a) => { writes.push({ what, a }); return { ok: true }; };
+  mod.setup({ getEngine: () => ({
+    decideRequest: async () => ({ ok: true }),
+    wakeHeldAt: (adapterId, grain) => { const k = `${adapterId}|${grain && grain.kind}|${(grain && (grain.id || grain.convId)) || ''}`; asked.push(k); return { held: held.has(k), rows: held.has(k) ? 1 : 0 }; },
+    setWatchers: wrote('setWatchers'), setGrain: wrote('setGrain'), setAssignment: wrote('setAssignment'), setScopeAssignment: wrote('setScopeAssignment'),
+    setAccess: wrote('setAccess'), removePattern: wrote('removePattern'), setFilter: wrote('setFilter'), setReach: wrote('setReach') }) });
+  return { writes, asked };
+}
+async function listen(mod) {
+  const app = express(); app.use(express.json()); app.use(mod.router);
+  const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const own = `http://127.0.0.1:${srv.address().port}`;
+  const send = async (method, p, headers = {}, body = {}) => { const r = await fetch(own + p, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: method === 'DELETE' ? undefined : JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, code: j && j.code, error: j && j.error, wakeHeld: !!(j && j.wakeHeld) }; };
+  return { send, close: () => new Promise((r) => srv.close(r)) };
+}
 async function wakeDoors(mod) {
-  const S = await serve(mod);
+  const st = stubWith(mod, new Set());   // r2's legs: no grain holds a wake — the BODY is what would write one
+  const S = await listen(mod);
   try {
     const out = { vsst: [], bare: [], digest: [], legacy: [], next: [], removal: [], page: [], assignVsst: [], assignBare: [], assignPage: [], writesAfterRefusals: 0 };
     for (const [m, p, body] of DOORS_W) {
@@ -488,18 +538,18 @@ async function wakeDoors(mod) {
       out.assignVsst.push((await S.send(m, p, { Authorization: 'Bearer vsst_0123456789abcdef' }, { assignment: ASSIGN })));
       out.assignBare.push((await S.send(m, p, {}, { assignment: ASSIGN })));
     }
-    out.writesAfterRefusals = S.writes.length;
+    out.writesAfterRefusals = st.writes.length;
     for (const [m, p, body] of DOORS_W) {
       out.next.push((await S.send(m, p, { Authorization: 'Bearer vsst_0123456789abcdef' }, body([NEXT]))));
       out.removal.push((await S.send(m, p, { Authorization: 'Bearer vsst_0123456789abcdef' }, body([]))));
       out.page.push((await S.send(m, p, { 'Sec-Fetch-Site': 'same-origin' }, body([WAKE]))));
     }
     for (const [m, p] of DOORS_A) out.assignPage.push((await S.send(m, p, { 'Sec-Fetch-Site': 'same-origin' }, { assignment: ASSIGN })));
-    out.writes = S.writes.length;
+    out.writes = st.writes.length;
     return out;
   } finally { await S.close(); }
 }
-const GATE_LINE = /^    if \(wakeRefused\(req, res, [^\n]*\)\) return;\n/gm;
+const GATE_LINE = /^    if \(wakeRefused\(req, res, [^\n]*\)\) return;[^\n]*\n/gm;
 {
   const g = await wakeDoors(routerFrom(REAL_SRC));
   const all = (xs, st, code) => xs.length > 0 && xs.every((r) => r.status === st && (code === undefined || r.code === code));
@@ -508,60 +558,126 @@ const GATE_LINE = /^    if \(wakeRefused\(req, res, [^\n]*\)\) return;\n/gm;
   ok(all(g.digest, 403, 'human_only') && all(g.legacy, 403, 'human_only'), 'a DIGEST (a paced wake) and a row that never said its delivery (it reads wake) ⇒ refused the same way', { digest: g.digest, legacy: g.legacy });
   ok(all(g.assignVsst, 403, 'human_only') && all(g.assignBare, 403, 'cross_site'), `a pre-split ASSIGNMENT (its watcher row IS a wake) on its ${DOORS_A.length} doors ⇒ refused the same way`, { v: g.assignVsst, b: g.assignBare });
   ok(g.writesAfterRefusals === 0, `…and the engine never asked to write (${g.writesAfterRefusals} writes)`);
-  ok(all(g.next, 200) && all(g.removal, 200), 'an agent\'s NON-wake write (a next-turn row) and a removal ([]) are as they were — written', { next: g.next, removal: g.removal });
+  ok(all(g.next, 200) && all(g.removal, 200), 'on a grain that holds NO wake, an agent\'s non-wake write (a next-turn row) and a removal ([]) are as they were — written', { next: g.next, removal: g.removal });
   ok(all(g.page, 200) && all(g.assignPage, 200) && g.writes === DOORS_W.length * 3 + DOORS_A.length, `this instance's own page ⇒ written (the owner's Notify…) — ${g.writes} writes`, { page: g.page, assignPage: g.assignPage, writes: g.writes });
-  // RED CONTROL: the route file as the base shipped it (no gate)
+  // RED CONTROL: the route file with no gate at all (round 1)
   const cuts = (REAL_SRC.match(GATE_LINE) || []).length;
   const r = await wakeDoors(routerFrom(REAL_SRC.replace(GATE_LINE, '')));
-  ok(cuts === 7 && all(r.vsst, 200) && all(r.bare, 200) && all(r.assignVsst, 200), `RED CONTROL: the base's doors (the ${cuts} gates cut) — an agent's vsst_ and a bare curl WRITE a wake on every door (${r.vsst.map((x) => x.status).join(', ')})`, { vsst: r.vsst.map((x) => x.status), bare: r.bare.map((x) => x.status) });
+  ok(cuts === 13 && all(r.vsst, 200) && all(r.bare, 200) && all(r.assignVsst, 200), `RED CONTROL: the doors with the ${cuts} gates cut — an agent's vsst_ and a bare curl WRITE a wake on every door (${r.vsst.map((x) => x.status).join(', ')})`, { vsst: r.vsst.map((x) => x.status), bare: r.bare.map((x) => x.status) });
 }
-/** THE WRITER CENSUS — every route calling a watch writer asks the gate before it; every setGrain call inside the engine is named
- *  with its road; no other file calls a writer. → problems (empty = green) */
-const WRITERS = /engine\(\)\.(setWatchers|setAssignment|setScopeAssignment|setGrain)\(/;
-const ENGINE_SETGRAIN = {   // the enclosing function → why it may write without the gate (it is never a route)
-  agentWatch: 'the agent\'s own road: next-turn only — a wake returns fileWatchRequest (its ASK) before this write',
-  agentUnwatch: 'a removal (the agent\'s own row filtered out) — never a wake',
-  decideWatchRequest: 'THE decision: behind the decide route\'s person verdict',
-  setAccess: 'access only (no watchers)', setWatchers: 'a route\'s writer (the gate is the route\'s)', setAssignment: 'a route\'s writer (the gate is the route\'s)', setScopeAssignment: 'a route\'s writer (the gate is the route\'s)',
-};
-function writerProblems(files) {
-  const out = [];
-  const R = files['src/routes/channels.js'] || '';
-  const heads = [...R.matchAll(/^router\.(get|put|post|patch|delete)\('([^']+)'/gm)];
-  heads.forEach((h, k) => {
-    const body = R.slice(h.index, k + 1 < heads.length ? heads[k + 1].index : R.length);
-    const w = body.match(WRITERS);
-    if (!w) return;
-    const call = body.slice(w.index, body.indexOf('\n', w.index));
-    if (w[1] === 'setGrain' && !/watchers/.test(call)) return;   // an access-only grain write
-    const g = body.indexOf('if (wakeRefused(req, res, ');
-    if (g < 0 || g > w.index) out.push(`${h[1].toUpperCase()} ${h[2]}: calls ${w[1]} without asking the person verdict for a wake row first`);
-  });
-  const E = files['src/server/channels-access.js'] || '';
-  for (const m of E.matchAll(/(?<![\w.]|function )setGrain\(/g)) {   // every CALL (its own definition is not one)
-    const before = E.slice(0, m.index);
-    const fn = [...before.matchAll(/(?:async )?function (\w+)\(/g)].pop();
-    const name = fn ? fn[1] : '?';
-    if (!ENGINE_SETGRAIN[name]) out.push(`src/server/channels-access.js ${name}(): writes a grain (setGrain) — a writer the census does not know`);
-  }
-  const aw = E.slice(E.indexOf('async function agentWatch('));
-  const wakeAsk = aw.indexOf("if (d === 'wake') return withRoad(await fileWatchRequest("), direct = aw.indexOf('setGrain(');
-  if (!(wakeAsk >= 0 && direct > wakeAsk)) out.push('agentWatch: its direct write is not behind the wake ask (a wake must return fileWatchRequest first)');
-  for (const [rel, s] of Object.entries(files)) {
-    if (rel === 'src/routes/channels.js' || rel === 'src/server/channels-access.js') continue;
-    if (/\.(setWatchers|setAssignment|setScopeAssignment)\(/.test(s) || /\.setGrain\([^)]*watchers/.test(s)) out.push(`${rel}: calls a watch writer — the only doors are src/routes/channels.js's (each behind the person verdict)`);
-  }
-  return out;
+/** r3's gate, rebuilt from this file (the RED copy of round 4): the gate keyed on the BODY's rows only — a door with no rows to
+ *  read has no gate; wakeRefused asks nothing of the grain. */
+const R3_GATE_FN = 'function wakeRefused(req, res, rows) {\n  if (!wakeRowsOf(rows).length) return false;\n  const who = personVerdict(req);\n  if (who.ok) return false;\n  bad(res, 403, WAKE_REFUSED[who.code] || WAKE_REFUSED.cross_site, { code: who.code });\n  return true;\n}\n';
+function r3Form(src) {
+  const i = src.indexOf('function wakeRefused(req, res, at, rows = []) {'), j = i < 0 ? -1 : src.indexOf('\n}\n', i) + 3;
+  return (i < 0 ? src : src.slice(0, i) + R3_GATE_FN + src.slice(j))
+    .replace(/if \(wakeRefused\(req, res, (?:accountGrain|ruleGrain|convGrain)\(req\), ([^\n]*)\)\) return;/g, 'if (wakeRefused(req, res, $1)) return;')
+    .replace(/^    if \(wakeRefused\(req, res, (?:accountGrain|ruleGrain|convGrain)\(req\)\)\) return;[^\n]*\n/gm, '');
+}
+/** the r4 legs: EVERY grain door, its body writing no wake — on grains that HOLD one (rule p1, conversation fake-poll-ops) and on
+ *  grains that do not (rule p2, conversation fake-poll-dev; the account holds none here) */
+async function heldDoors(mod) {
+  const HELD = new Set(['fake-poll|pattern|p1', 'fake-poll|conversation|fake-poll-ops']);
+  const st = stubWith(mod, HELD);
+  const S = await listen(mod);
+  try {
+    const out = { held: [], bare: [], page: [], free: [], writesRefused: 0, asked: [] };
+    const heldDoorsOnly = GRAIN_DOORS('p1', 'fake-poll-ops').filter((d) => HELD.has(d[3]));
+    for (const [m, p, body] of heldDoorsOnly) {
+      out.held.push({ door: `${m} ${p}`, body: Object.keys(body).join(','), ...(await S.send(m, p, { Authorization: 'Bearer vsst_0123456789abcdef' }, body)) });
+      out.bare.push(await S.send(m, p, {}, body));
+    }
+    out.writesRefused = st.writes.length;
+    out.asked = [...new Set(st.asked)];
+    for (const [m, p, body] of heldDoorsOnly) out.page.push(await S.send(m, p, { 'Sec-Fetch-Site': 'same-origin' }, body));
+    for (const [m, p, body] of GRAIN_DOORS('p2', 'fake-poll-dev')) out.free.push({ door: `${m} ${p}`, ...(await S.send(m, p, { Authorization: 'Bearer vsst_0123456789abcdef' }, body)) });
+    out.writes = st.writes.length;
+    out.nHeld = heldDoorsOnly.length;
+    return out;
+  } finally { await S.close(); }
 }
 {
-  const p = writerProblems(SRC_FILES);
-  ok(!p.length, 'THE WRITER CENSUS: every route of src/routes/channels.js calling a watch writer asks the person verdict first; every setGrain inside the engine is named with its road; no other file writes a watch', p);
-  const red = writerProblems({ ...SRC_FILES, 'src/routes/channels.js': REAL_SRC.replace(GATE_LINE, '') });
-  ok(red.length === 7 && red.every((x) => /without asking the person verdict/.test(x)), `RED COPY: the base's routes — the census names each door by name (${red.length}): ${red.map((x) => x.split(':')[0]).join(' · ')}`, red);
-  const planted = writerProblems({ ...SRC_FILES, 'src/server/channels-access.js': SRC_FILES['src/server/channels-access.js'].replace('  /** Approve = EXACTLY the frozen row', '  async function wakeEveryone(a, g, rows) { return setGrain(a, g, { watchers: rows }); }\n  /** Approve = EXACTLY the frozen row') });
-  ok(planted.some((x) => /wakeEveryone\(\): writes a grain/.test(x)), 'RED COPY: a writer planted in the engine is named', planted);
-  const other = writerProblems({ ...SRC_FILES, 'src/server/automation-engine.js': SRC_FILES['src/server/automation-engine.js'] + '\nasync function x(eng) { return eng.setWatchers("a", { kind: "account" }, []); }\n' });
-  ok(other.some((x) => /automation-engine\.js: calls a watch writer/.test(x)), 'RED COPY: a second file calling a writer is named', other);
+  const g = await heldDoors(routerFrom(REAL_SRC));
+  const all = (xs, st, code) => xs.length > 0 && xs.every((r) => r.status === st && (code === undefined || r.code === code));
+  ok(g.nHeld === 10 && all(g.held, 403, 'human_only') && g.held.every((r) => r.wakeHeld && /this grain holds a wake \(a billed turn\)/.test(r.error || '')), `r4: on a grain that HOLDS a wake, EVERY write from an agent's vsst_ ⇒ 403 human_only «this grain holds a wake…» — ${g.nHeld} doors: ${g.held.map((r) => `${r.door} {${r.body}}`).join(' · ')}`, g.held.filter((r) => r.status !== 403));
+  ok(all(g.bare, 403, 'cross_site') && g.writesRefused === 0, 'r4: …a bare curl (sign-in off) ⇒ 403 cross_site; the engine never asked to write', { bare: g.bare.map((x) => x.status), writes: g.writesRefused });
+  ok(['fake-poll|pattern|p1', 'fake-poll|conversation|fake-poll-ops'].every((k) => g.asked.includes(k)) && g.asked.every((k) => /^fake-poll\|(account\||pattern\|p[12]|conversation\|fake-poll-(ops|dev))$/.test(k)), 'r4: the gate asks THE ENGINE about the grain its PATH names (account / rule / conversation) — never a body field', g.asked);
+  ok(all(g.page, 200) && all(g.free, 200), `r4: this instance's page ⇒ written; the same ${g.free.length} writes on grains with NO wake ⇒ 200 for the agent (a non-wake grain stays the agent's to edit)`, { page: g.page.map((x) => x.status), free: g.free.filter((x) => x.status !== 200) });
+  // RED CONTROL: round 3's routes (the gate keyed on the body) — the reviewer's three curls and every other hole WRITE
+  const red = await heldDoors(routerFrom(r3Form(REAL_SRC)));
+  const holes = red.held.filter((r) => r.status === 200);
+  ok(r3Form(REAL_SRC) !== REAL_SRC && holes.length === red.nHeld && red.writesRefused === red.nHeld * 2, `RED CONTROL: round 3's gate (keyed on a \`watchers\` body) — a vsst_ and a bare curl WIDEN the held wake through all ${red.nHeld} doors (the reviewer's: the rule's pattern ⇒ ${red.held.find((r) => r.body === 'pattern').status}, its watchExcept ⇒ ${red.held.find((r) => r.body === 'watchExcept').status}, the conversation's filter ⇒ ${red.held.find((r) => /filter$/.test(r.door)).status})`, red.held.map((r) => `${r.door} {${r.body}} ${r.status}`));
+}
+/** THE WRITER CENSUS (r4 — 主开发: «keyed on the fact "this write can change a wake's reach", never on a body field»):
+ *  ① THE ENGINE'S GRAIN WRITERS are DERIVED from src/server/channels-access.js — every function that writes a grain row (the
+ *    grants store's one writer: setGrainRows / removeRule / setLevel; a stored filter) and every function that calls one;
+ *  ② every route of src/routes/channels.js calling one asks `if (wakeRefused(req, res, <grain>(req)…)) return;` FIRST, at its
+ *    handler's own level (never inside a condition), naming the grain its path writes (adapters/:id → accountGrain, …/patterns
+ *    → ruleGrain, /:adapterId/:convId → convGrain) — the decide route alone answers to its own verdict (⑤);
+ *  ③ every call of a writer INSIDE the engine is a named road (why it may write without the gate);
+ *  ④ no other file calls one. → { routes, writers, problems } */
+const GRAIN_PRIMITIVE = /CG\.(setGrainRows|removeRule|setLevel)\(|filtersOf\(ix\)\[[^\]]+\]\s*=(?!=)|\.filterId\s*=(?!=)/;
+const ENGINE_ROADS = {   // the enclosing function → why it may call a grain writer without the gate (it is never a route)
+  agentWatch: 'the agent\'s own road: next-turn only — a wake returns fileWatchRequest (its ASK) before this write; the user\'s row is never replaced',
+  agentUnwatch: 'a removal of the agent\'s OWN row — never another\'s, never a wake it did not ask for',
+  decideRequest: 'THE decision: behind the decide route\'s person verdict (⑤)', decideWatchRequest: 'THE decision: behind the decide route\'s person verdict (⑤)',
+  setAccess: 'a route\'s writer (the gate is the route\'s)', setWatchers: 'a route\'s writer (the gate is the route\'s)', setAssignment: 'a route\'s writer (the gate is the route\'s)', setScopeAssignment: 'a route\'s writer (the gate is the route\'s)',
+};
+const ROUTE_EXEMPT = { decideRequest: 'the decide route — its own person verdict, pinned in ⑤' };
+function grainWriters(E) {
+  const heads = [...E.matchAll(/(?:async )?function (\w+)\(/g)];
+  const fns = heads.map((h, k) => ({ name: h[1], body: E.slice(h.index + h[0].length, k + 1 < heads.length ? heads[k + 1].index : E.length) }));
+  const W = new Set(fns.filter((f) => GRAIN_PRIMITIVE.test(f.body)).map((f) => f.name));
+  for (let grew = true; grew;) { grew = false; for (const f of fns) if (!W.has(f.name) && [...W].some((w) => new RegExp(`(?<![\\w.])${w}\\(`).test(f.body))) { W.add(f.name); grew = true; } }
+  return { W, fns };
+}
+const grainOfPath = (p) => (/\/patterns(\/|'|$)/.test(p) ? 'ruleGrain' : /^\/api\/channels\/adapters\/:id\//.test(p) ? 'accountGrain' : /^\/api\/channels\/:adapterId\/:convId\//.test(p) ? 'convGrain' : null);
+function writerCensus(files) {
+  const out = [], routes = [];
+  const E = files['src/server/channels-access.js'] || '';
+  const { W, fns } = grainWriters(E);
+  const R = files['src/routes/channels.js'] || '';
+  const heads = [...R.matchAll(/^router\.(get|put|post|patch|delete)\('([^']+)'/gm)];
+  const callRe = new RegExp(`engine\\(\\)\\.(${[...W].join('|')})\\(`);
+  heads.forEach((h, k) => {
+    const body = R.slice(h.index, k + 1 < heads.length ? heads[k + 1].index : R.length);
+    const w = body.match(callRe);
+    if (!w) return;
+    const door = `${h[1].toUpperCase()} ${h[2]}`;
+    if (ROUTE_EXEMPT[w[1]]) return;
+    routes.push(door);
+    const want = grainOfPath(h[2]);
+    const gate = body.match(/^    if \(wakeRefused\(req, res, (\w+)\(req\)[,)][^\n]*\n/m);
+    if (!gate) { out.push(`${door}: calls ${w[1]} without asking the person verdict for the grain it writes (no gate at the handler's own level, or one keyed on the body only)`); return; }
+    if (gate.index > w.index) out.push(`${door}: asks the gate AFTER it calls ${w[1]}`);
+    if (gate[1] !== want) out.push(`${door}: its gate names ${gate[1]} — the path writes the ${want}`);
+  });
+  for (const f of fns) for (const w of W) if (w !== f.name && new RegExp(`(?<![\\w.])${w}\\(`).test(f.body) && !ENGINE_ROADS[f.name]) out.push(`src/server/channels-access.js ${f.name}(): calls the grain writer ${w}() — a road the census does not know`);
+  const UNAMBIGUOUS = /\.(setGrain|setWatchers|setAssignment|setScopeAssignment|removePattern|setFilter)\(/, CHANNEL_ONLY = /(?:getChannels\(\)|\bchannels|\bchan|\beng)\.(setAccess|setReach)\(/;
+  for (const [rel, s] of Object.entries(files)) {
+    if (rel === 'src/routes/channels.js' || /^src\/server\/channels-[a-z]+\.js$/.test(rel)) continue;
+    if (UNAMBIGUOUS.test(s) || CHANNEL_ONLY.test(s)) out.push(`${rel}: calls a channel grain writer — the only doors are src/routes/channels.js's (each behind the gate)`);
+  }
+  return { routes, writers: [...W].sort(), problems: out };
+}
+{
+  const c = writerCensus(SRC_FILES);
+  ok(!c.problems.length && c.routes.length === 13, `THE WRITER CENSUS (r4): the engine's grain writers, derived (${c.writers.join(', ')}); the ${c.routes.length} routes that call one each ask the gate FIRST for the grain their path writes: ${c.routes.join(' · ')}`, c.problems);
+  const r3 = writerCensus({ ...SRC_FILES, 'src/routes/channels.js': r3Form(REAL_SRC) });
+  const bodyKeyed = (r3Form(REAL_SRC).match(/^    if \(wakeRefused\(req, res, [^\n]*\)\) return;/gm) || []).length;
+  ok(r3.problems.length === 13 && r3.problems.every((x) => /without asking the person verdict for the grain it writes/.test(x)), `RED COPY: round 3's routes — the census names all ${r3.problems.length} doors (the ${13 - bodyKeyed} that never asked and the ${bodyKeyed} keyed on a body field): ${r3.problems.map((x) => x.replace(/: (calls|asks|its gate) .*$/, '').replace('/api/channels/', '…/')).join(' · ')}`, r3.problems);
+  const nested = writerCensus({ ...SRC_FILES, 'src/routes/channels.js': REAL_SRC.replace("    if (wakeRefused(req, res, convGrain(req))) return;   // r4: a filter a wake fires on is the owner's\n", "    if (b.filter && b.filter.rules) { if (wakeRefused(req, res, convGrain(req))) return; }\n") });
+  ok(nested.problems.some((x) => /^PUT \/api\/channels\/:adapterId\/:convId\/filter: calls setFilter without asking/.test(x)), 'RED COPY: a gate inside a condition on the body (the filter only when it has rules) is named', nested.problems);
+  const wrongGrain = writerCensus({ ...SRC_FILES, 'src/routes/channels.js': REAL_SRC.replace("    if (wakeRefused(req, res, ruleGrain(req))) return;   // r4: removing a rule that holds a wake is a wake write\n", "    if (wakeRefused(req, res, accountGrain(req))) return;\n") });
+  ok(wrongGrain.problems.some((x) => /DELETE \/api\/channels\/adapters\/:id\/patterns\/:pid: its gate names accountGrain — the path writes the ruleGrain/.test(x)), 'RED COPY: a gate asking about another grain than the one the path writes is named', wrongGrain.problems);
+  const planted = writerCensus({ ...SRC_FILES, 'src/server/channels-access.js': SRC_FILES['src/server/channels-access.js'].replace('  /** Approve = EXACTLY the frozen row', '  async function wakeEveryone(a, g, rows) { return setGrain(a, g, { watchers: rows }); }\n  /** Approve = EXACTLY the frozen row') });
+  ok(planted.problems.some((x) => /wakeEveryone\(\): calls the grain writer setGrain/.test(x)), 'RED COPY: a writer planted in the engine is named', planted.problems);
+  const withPrim = SRC_FILES['src/server/channels-access.js'].replace('  /** Approve = EXACTLY the frozen row', "  function widenRule(id, p) { return CG.setGrainRows(CG.grainResource('pattern', id), { access: p }, 'agent'); }\n  /** Approve = EXACTLY the frozen row");
+  const newRoute = REAL_SRC.replace("router.delete('/api/channels/adapters/:id/patterns/:pid',", "router.put('/api/channels/adapters/:id/patterns/:pid/widen', async (req, res) => {\n  try { forHost(req); scopeAnswer(res, await engine().widenRule(req.params.pid, req.body.access)); } catch (e) { fail(res, e); }\n});\nrouter.delete('/api/channels/adapters/:id/patterns/:pid',");
+  const derived = writerCensus({ ...SRC_FILES, 'src/server/channels-access.js': withPrim, 'src/routes/channels.js': newRoute });
+  ok(derived.writers.includes('widenRule') && derived.problems.some((x) => /^PUT \/api\/channels\/adapters\/:id\/patterns\/:pid\/widen: calls widenRule without asking/.test(x)), 'RED COPY: the writers are DERIVED — a new engine function writing grain rows (the one writer) joins the census by itself, and a route calling it with no gate is named', derived.problems);
+  const other = writerCensus({ ...SRC_FILES, 'src/server/automation-engine.js': SRC_FILES['src/server/automation-engine.js'] + '\nasync function x(eng) { return eng.setFilter("a", "c", null); }\n' });
+  ok(other.problems.some((x) => /automation-engine\.js: calls a channel grain writer/.test(x)), 'RED COPY: a second file calling a writer is named', other.problems);
 }
 
 // ── ⑩ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -672,6 +788,60 @@ try {
   const redV = { drawn: base.needsOf([askOf.runAsk, askOf.paste, baseHub], ME).map((e) => e.item.action.type), check: rb.check, stamp: (base.decidedStamp({ ...askOf.runAsk, status: 'done', resolvedBy: 'allowed', resolvedFact: mark }, { now: NOW }) || {}).text || null, decision: base.isDecisionRow(askOf.runAsk), scope: base.ROW_OF['hub-act-ask'].scope };
   ok(J(redV) === J({ drawn: ['vault-run-ask', 'secret-request'], check: 'ok', stamp: null, decision: false, scope: 'group' }), 'RED CONTROL: the rows as the base had them — the hub-act ask (filed as the base filed it) is drawn in no chat, ✓ closes a run ask «done», no «allowed by you»', redV);
 } catch (e) { ok(false, '⑫ threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
+
+// ── ⑬ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('⑬ ROUND 4 — an ask past its end answers ONE way (409 «expired on <date>»); the vault\'s grant request is a decision row');
+try {
+  // (a) the decide route maps the engine's `expired` to a 409 (test-channel-agent-watch ④d drives the real engine both sides of the sweep)
+  const END = NOW + 7 * 864e5;
+  const pressExpired = async (mod) => {
+    mod.setup({ getEngine: () => ({ decideRequest: async () => ({ ok: false, code: 'expired', expiredAt: END, error: 'this request expired on 2026-11-03 10:05 PT — the agent can ask again' }) }) });
+    const S = await listen(mod);
+    try { return await S.send('POST', '/api/channels/reach-requests/wr-x/approve', { 'Sec-Fetch-Site': 'same-origin' }); } finally { await S.close(); }
+  };
+  const e1 = await pressExpired(routerFrom(REAL_SRC));
+  ok(e1.status === 409 && e1.code === 'expired' && /^this request expired on .* — the agent can ask again$/.test(e1.error || ''), 'the decide route: an ask past its end ⇒ 409 `expired` with its words (never a 500)', e1);
+  const MAP = " || code === 'expired' || code === 'placement-not-offered' ? 409";
+  const e0 = REAL_SRC.split(MAP).length === 2 ? await pressExpired(routerFrom(REAL_SRC.replace(MAP, " || code === 'placement-not-offered' ? 409"))) : null;
+  ok(e0 && e0.status === 500, 'RED CONTROL: answer3 without the mapping (bec3e3f8) — the same press ⇒ HTTP 500', e0);
+  // (b) the page words it in the owner's language, from its end
+  const ACT = read('src/lib/user-todos-actions.js');
+  ok(/\(r && r\.code === 'expired'\) \? t\('This request expired on \{date\} — the agent can ask again', \{ date: clockWords\(r\.expiredAt\) \}\)/.test(ACT), 'the page (the chat card and the tray — one press road) toasts «This request expired on {date} — the agent can ask again», its date from `expiredAt` (THE registry\'s clockWords)');
+  const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js');
+  const KEYS = ['This request expired on {date} — the agent can ask again', 'allowed once by you', 'allowed by you for 8 h', 'allowed for 8 hours', 'allowed once'];
+  const missing = KEYS.filter((k) => !ZH.includes(JSON.stringify(k) + ':') || !JA.includes(JSON.stringify(k) + ':'));
+  ok(!missing.length, `the new words are in zh and ja (${KEYS.length} keys)`, missing);
+  // (c) vault-grant-ask: THE third vault card in the same chat (Allow once / For 8 hours / Deny) is a DECISION ROW
+  const grant = { id: 'ut-grt0000001', sessionKey: 'claude:c-ops', text: 'ops asks to use a stored secret', detail: 'Secret: bucket — vault://mounts/m1/secretKey', status: 'open', urgency: 'high', origin: 'vault', kind: 'action', action: { type: 'vault-grant-ask', askId: 'c'.repeat(32) }, createdAt: NOW - 30e3 };
+  const row = FA.ROW_OF['vault-grant-ask'];
+  ok(row.decide === 'person' && row.stamp === 'grant' && J(FA.endsOf(grant)) === J(['granted-once', 'granted', 'denied', 'vault_locked', 'ask-changed', 'ask-over']) && FA.isDecisionRow(grant) && J(FA.closersOf(grant)) === '[]', 'THE registry: vault-grant-ask decided by a person, its own ends (Allow once / For 8 hours / Deny + a lock, a changed card, an ask that is over), no ✓ / ✕ (closersOf [])', { decide: row.decide, stamp: row.stamp, ends: FA.endsOf(grant) });
+  const mark = { decidedBy: 'person', decidedAt: NOW - 60e3 };
+  const st = (by, fact = mark) => (FA.decidedStamp({ ...grant, status: 'done', resolvedBy: by, resolvedAt: NOW, resolvedFact: fact }, { now: NOW }) || {}).text || null;
+  const stamps = { once: st('granted-once'), h8: st('granted'), deny: st('denied'), locked: st('vault_locked'), noMark: st('granted', null), card: FA.decisionCard({ ...grant, status: 'done', resolvedBy: 'granted', resolvedFact: mark }, { now: NOW }).state };
+  ok(J(stamps) === J({ once: 'allowed once by you · 10:04', h8: 'allowed by you for 8 h · 10:04', deny: 'denied by you · 10:04', locked: null, noMark: null, card: 'approved' }), 'its stamps: «allowed once by you · HH:MM», «allowed by you for 8 h · HH:MM», «denied by you · HH:MM» — only with the person verdict\'s mark; a lock is no stamp', stamps);
+  const lawG = (registry) => {
+    const { m, done } = storeWith(registry);
+    try {
+      const it = m.add(grant.sessionKey, { origin: 'vault', by: 'agent', text: grant.text, urgency: 'high', action: grant.action });
+      const tryS = (s2, by) => { try { m.setStatus(it.id, s2, by); return 'ok'; } catch (e) { return e.code || e.message; } };
+      const r = { check: tryS('done', 'user'), seen: m.setStatusMany([it.id], 'dismissed', 'user').changed.length, status: m.get(it.id).status };
+      r.granted = m.resolveAnswered([it.id], 'granted', mark).length;
+      r.reopen = tryS('open', 'user');
+      return r;
+    } finally { done(); }
+  };
+  const lg = lawG(FA);
+  ok(J(lg) === J({ check: 'decision_row', seen: 0, status: 'open', granted: 1, reopen: 'decision_final' }), 'the store law: ✓ refused by name (decision_row — was a silent Deny with a dead Undo), «Mark all seen» passes it by, For 8 hours ends it, a decision is final', lg);
+  const docCE = globalThis.document.createElement;
+  const boxEl = () => { const e = docCE(); return Object.assign(e, { append() {}, querySelector: () => null }); };
+  const drawG = (R, it) => { globalThis.document.createElement = boxEl; let h; try { h = R.renderRow({ item: it, resolved: false, band: 1 }, rctx3).innerHTML; } finally { globalThis.document.createElement = docCE; } return { closers: [...h.matchAll(/class="ut-act (ut-done|ut-dismiss|ut-reopen)/g)].map((x) => x[1]), own: [...h.matchAll(/data-answer="(\w+)"/g)].map((x) => x[1]) }; };
+  const dv = drawG(ROW3, grant);
+  ok(dv.closers.length === 0 && J(dv.own) === J(['once', '8h', 'deny']), `the row (the tray, the chat card — one renderer): its own three verbs ${J(dv.own)} and NO ✓ / ✕`, dv);
+  // RED CONTROL: the row as bec3e3f8 had it (no decide) — ✓ / ✕ drawn, ✓ closes it «done» by the user (the press then denies it silently)
+  const baseG = registryFrom(read('src/foryou-actions.js').replace(/(\{ type: 'vault-grant-ask'[^\n]*?scope: 'conversation'), decide: 'person', ends: \[[^\]]*\], stamp: 'grant' \}/, '$1 }'));
+  const rg = lawG(baseG);
+  ok(!baseG.isDecisionRow(grant) && J(baseG.closersOf(grant)) === J(['done', 'dismiss']) && rg.check === 'ok' && (baseG.decidedStamp({ ...grant, status: 'done', resolvedBy: 'granted', resolvedFact: mark }, { now: NOW }) || null) === null, 'RED CONTROL: the row as bec3e3f8 had it — ✓ / ✕ offered, ✓ closes the request «done» by the user, no «allowed by you for 8 h»', { closers: baseG.closersOf(grant), check: rg.check });
+} catch (e) { ok(false, '⑬ threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

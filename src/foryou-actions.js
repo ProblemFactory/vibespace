@@ -35,7 +35,8 @@
  *             verbs and its own ends (a held ask's 60 s, a locked vault, a gone conversation); nothing else closes it (absent =
  *             DECISION_ENDS: allowed / denied / expired)
  *   stamp     the decided stamp's words (STAMPS): 'approve' «approved by you · 09:41» (the default) · 'allow' «allowed by you» /
- *             «always allowed by you» (a held ask's Allow once / Always) · 'store' «stored · 09:41» (a paste request)
+ *             «always allowed by you» (a held ask's Allow once / Always) · 'store' «stored · 09:41» (a paste request) ·
+ *             'grant' «allowed once by you» / «allowed by you for 8 h» (an agent's request for a stored secret — r4)
  *   showsExpiry  the card and the tray row say its end («expires in 7 d» — a wake ask's lifetime, expiryWords)
  *   closer    'hide' = its item is a POINTER (acceptance round 3 — 主开发: «a pointer item hides, never decides»): a door to
  *             where its question lives (the Reach dialog, the Outbox, the conversation), so its ONE closer is ✕ «Hide» —
@@ -90,7 +91,7 @@ const ROWS = Object.freeze([
   // ── vault ──
   { type: 'automation-ask', identity: 'askId', producer: 'src/server/automation-engine.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-api', 'an automation key\'s first use', 'own'), scope: 'conversation' },
   { type: 'vault-run-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'run', 'wait'), scope: 'conversation', decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over', 'ask-changed', 'vault_locked'], stamp: 'allow' },
-  { type: 'vault-grant-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'request <vault://…>', 'filed'), scope: 'conversation' },
+  { type: 'vault-grant-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'request <vault://…>', 'filed'), scope: 'conversation', decide: 'person', ends: ['granted-once', 'granted', 'denied', 'vault_locked', 'ask-changed', 'ask-over'], stamp: 'grant' },   // r4: Allow once / For 8 hours / Deny are its three verbs (+ a lock, a changed card, an ask that is over)
   { type: 'secret-request', identity: 'requestId', producer: 'src/server/vault-paste-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'secret', cli: C('vibespace-vault', 'request "<what>"', 'filed'), scope: 'conversation', decide: 'person', ends: ['stored', 'denied', 'vault_locked', 'ask-over', 'expired'], stamp: 'store' },
   { type: 'vault-unlock', identity: null, producer: 'src/server/vault-hooks.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
   // the audit's two drifts (2026-10-26): a failed use was in no table; a rotate suggestion merged by its text — now by its entry
@@ -267,6 +268,8 @@ function settledWords(item, t = fmt, kind = null) {
   if (by === 'allowed') return k === 'approval' ? t('approved') : t('allowed');
   if (by === 'denied') return t('denied');
   if (by === 'stored') return t('saved to the vault');
+  if (by === 'granted') return t('allowed for 8 hours');   // r4: an agent's request for a stored secret, answered
+  if (by === 'granted-once') return t('allowed once');
   if (by === 'expired' || by === 'ask-expired') return isDecisionRow(item) ? t('expired · the agent can ask again') : t('expired');   // r2: a decision's end
   if (by === HIDDEN_BY) return t('hidden — nothing was decided');   // r3: a pointer the person hid
   if (by === 'agent') return t('withdrawn by the agent');
@@ -365,6 +368,7 @@ const STAMPS = Object.freeze({
   approve: Object.freeze({ allowed: i18nKey('approved by you'), denied: i18nKey('denied by you') }),
   allow: Object.freeze({ allowed: i18nKey('allowed by you'), always: i18nKey('always allowed by you'), denied: i18nKey('denied by you') }),
   store: Object.freeze({ stored: i18nKey('stored'), denied: i18nKey('refused by you') }),
+  grant: Object.freeze({ 'granted-once': i18nKey('allowed once by you'), granted: i18nKey('allowed by you for 8 h'), denied: i18nKey('denied by you') }),   // r4: vault-grant-ask's three verbs
 });
 function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
   if (!item || item.status === 'open' || !item.action || !PERSON_DECIDES.includes(item.action.type)) return null;
@@ -391,7 +395,7 @@ function decisionCard(item, { role = VIEWER_ROLE, t = fmt, now = Date.now() } = 
   }
   const st = decidedStamp(it, { t, now });
   const by = it.resolvedBy;
-  const state = by === 'allowed' || by === 'always' || by === 'stored' ? 'approved' : by === 'denied' ? 'denied' : (by === 'expired' || by === 'ask-expired') ? 'expired' : by === 'agent' ? 'withdrawn' : 'settled';
+  const state = by === 'allowed' || by === 'always' || by === 'stored' || by === 'granted' || by === 'granted-once' ? 'approved' : by === 'denied' ? 'denied' : (by === 'expired' || by === 'ask-expired') ? 'expired' : by === 'agent' ? 'withdrawn' : 'settled';
   return { state, buttons: [], stamp: st ? st.text : settledWords(it, t), waiting: null };
 }
 

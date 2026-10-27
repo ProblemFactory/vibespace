@@ -1061,14 +1061,20 @@ function create(engineCtx) {
     notify([]);
     return { ok: true, proposed: true, request: { id: req.id, status: 'open', expiresAt: req.expiresAt }, dailyWakeCap: row.dailyWakeCap, expiresAt: req.expiresAt, ...(req.todoId ? { filed: CN.filedLine('channel-watch-request', req.id, OF.tray()) } : {}) };
   }
+  /** AN ASK PAST ITS END, ONE ANSWER (lane wake-approve-card r4 — 主开发: an Approve / Deny in the ≤ 60 s before the minute
+   *  sweep answered HTTP 500 with words no page translated, after it «already decided»): either side of the sweep it is a
+   *  409 `expired` (src/routes/channels.js answer3) naming its end — `expiredAt` (the page words it in the owner's language:
+   *  «this request expired on <date> — the agent can ask again») and the English `error` for a CLI. */
+  const expiredRefusal = (r) => { const end = askEndOf(r); return { ok: false, code: 'expired', expiredAt: end, error: `this request expired on ${OF.when(end)} — the agent can ask again` }; };
   /** Approve = EXACTLY the frozen row, written through `setGrain` (the access rule re-judged now); deny = nothing. */
   async function decideWatchRequest(requestId, approve, by = 'user', { person = false } = {}) {
     const req0 = (store.index.table('watchRequests') || []).find((r) => r && r.id === requestId);
     if (!req0) return { ok: false, code: 'not-found', error: 'No such request' };
+    if (req0.status === 'expired') return expiredRefusal(req0);   // r4: after the sweep — the same answer as before it
     if (req0.status !== 'open') return { ok: false, code: 'bad-state', error: `request already ${req0.status}` };
     const t = now();
     // r3: an ask past its end is over even before the sweep wrote it — expired now, never approved late
-    if (askEndOf(req0) <= t) { await expireWatchRequests(t); return { ok: false, code: 'expired', error: 'this wake ask expired unanswered — the agent can ask again' }; }
+    if (askEndOf(req0) <= t) { await expireWatchRequests(t); return expiredRefusal(req0); }
     if (approve) {
       const pk = pkOf(req0.principal);
       const en1 = req0.grain && req0.grain.kind === 'conversation' ? store.index.peek(`${req0.adapterId}/${req0.grain.convId}`) : null;
@@ -1142,9 +1148,22 @@ function create(engineCtx) {
         let it = null; try { it = userTodos.get(r.todoId); } catch { }
         if (it && it.status !== 'open') { await settleFromItem(r, it.status, it.resolvedBy); settled++; }
       }
-      for (const en of Object.values(store.index.live())) for (const r of (en && en.reachRequests) || []) if (resurface(r)) resurfaced++;
+      resurfaced = resurfacePointers();
     }
     return { expired, settled, resurfaced };
+  }
+  /** Every OPEN access request's hidden pointer back in For you (resurface) → how many came back. The boot reconcile, and
+   *  the one-shot 2026-10-closed-access-pointers-hidden (src/server/migrations.js — it runs after the engine started). */
+  function resurfacePointers() {
+    let n = 0;
+    for (const en of Object.values(store.index.live())) for (const r of (en && en.reachRequests) || []) if (resurface(r)) n++;
+    return n;
+  }
+  /** The For-you item ids of every OPEN access request (its pointer) — what the r4 migration may rewrite. */
+  function openAccessPointers() {
+    const out = [];
+    for (const en of Object.values(store.index.live())) for (const r of (en && en.reachRequests) || []) if (r && r.status === 'open' && r.todoId) out.push(String(r.todoId));
+    return out;
   }
 
   // ── the agent-facing reads (§11) — reach FIRST, uniform not-found ────────
@@ -1452,6 +1471,40 @@ function create(engineCtx) {
     return site.kind === 'conversation' ? `f-${site.key}|${pk}` : `f-${site.kind}-${site.id}|${pk}`;
   }
   const estimateOf = (e, t) => (e && typeof e === 'object' ? { matchedPerDay: Number(e.matchedPerDay) || 0, totalPerDay: Number(e.totalPerDay) || 0, windowDays: Number(e.windowDays) || 7, sampled: !!e.sampled, truncated: !!e.truncated, conversations: Number(e.conversations) || 0, at: t } : null);
+  /** THE GRAIN HOLDS A WAKE (lane wake-approve-card, acceptance round 4 — 主开发: «the person verdict guards every write that
+   *  CHANGES WHAT A WAKE FIRES ON, not only the write that creates one»). A grain holds a wake when a notification row stored
+   *  ON it delivers as a wake (F.deliveryModeOf: a row that never said reads wake; a digest is a paced wake): every list,
+   *  rule and exception written there shapes what that wake fires on or whom it reaches — its access and `except` (who may
+   *  see it), its watchers and `watchExcept` (who is woken), a rule's `pattern` (which conversations), an assignment (both
+   *  lists), a removal (the wake itself). A conversation's saved filter is held too while ANY wake row names it (a filtered
+   *  row's `filterId`). The route asks this BEFORE the write, for EVERY grain it writes, whatever the body says; held ⇒ THE
+   *  person verdict (src/routes/channels.js wakeRefused). A grain with no wake stays the agent's to edit. → {held, rows, why}
+   *  (`why` 'watchers' | 'filter' | null; an unknown grain or a NEW rule holds nothing — the writer answers for it). */
+  const wakesIn = (list) => (Array.isArray(list) ? list : []).filter((w) => w && typeof w === 'object' && F.deliveryModeOf(w) === 'wake');
+  const NOT_HELD = Object.freeze({ held: false, rows: 0, why: null });
+  function wakeHeldAt(adapterId, grain) {
+    const kind = grain && grain.kind;
+    let own = [];
+    if (kind === 'conversation') {
+      const en = store.index.peek(`${adapterId}/${grain.convId}`);
+      if (!en) return NOT_HELD;
+      own = wakesIn(convGrainOf(en).watchers);
+      if (!own.length && en.filterId && wakeNamesFilter(adapterId, en.filterId)) return { held: true, rows: 1, why: 'filter' };
+    } else if (kind === 'account') own = wakesIn(F.grainOf(accountGrainOf(adapterId)).watchers);
+    else if (kind === 'pattern' && grain.id) { const pa = patternById(grain.id); own = pa && pa.adapterId === adapterId ? wakesIn(F.grainOf(pa).watchers) : []; }
+    return own.length ? { held: true, rows: own.length, why: 'watchers' } : NOT_HELD;
+  }
+  /** Does a wake row on any grain of this account wake on filter `fid` (a filtered row naming it)? */
+  function wakeNamesFilter(adapterId, fid) {
+    const names = (list) => wakesIn(list).some((w) => w.mode === 'filtered' && w.filterId === fid);
+    if (names(F.grainOf(accountGrainOf(adapterId)).watchers) || patternsOf(adapterId).some((pa) => names(F.grainOf(pa).watchers))) return true;
+    for (const x of Object.values(store.index.live())) {
+      if (!x || x.adapterId !== adapterId) continue;
+      const mentions = (Array.isArray(x.watchers) && x.watchers.some((w) => w && w.filterId === fid)) || (x.assignment && x.assignment.filterId === fid);
+      if (mentions && names(convGrainOf(x).watchers)) return true;
+    }
+    return false;
+  }
   /**
    * WRITE ONE GRAIN — `patch` = `{access?, watchers?, pattern?}` (an absent
    * key keeps the stored list). Validates the ACCESS list, then every
@@ -1985,7 +2038,7 @@ function create(engineCtx) {
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, resurfacePointers, openAccessPointers,
   };
 }
 

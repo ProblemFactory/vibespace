@@ -8230,7 +8230,7 @@ function create(deps = {}) {
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, resurfacePointers, openAccessPointers,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
@@ -8647,6 +8647,8 @@ function create(deps = {}) {
     collectReceipt,   // lane channel-direct-send-sync: the drafting CLI reads a direct send's receipt inline (GET status?id&collect=1)
     setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
     expireWatchRequests, reconcileAsks,   // lane wake-approve-card r3: a wake ask's lifetime + the asks' boot reconcile (suites drive them)
+    wakeHeldAt,   // lane wake-approve-card r4: does this grain hold a wake? (the routes ask it before EVERY grain write — wakeRefused)
+    resurfacePointers, openAccessPointers,   // r4: the 2026-10-closed-access-pointers-hidden migration (src/server/migrations.js) goes through these
     agentWatch, agentUnwatch, agentWatchesFor, setAgentDirectory, directoryLists,   // lane channel-agent-watch
     attention, setJudge, labelJudged,   // lane decision-attention: the judged rows' scan, the account's "never judge", a label
     owedPass, judgedRoadFor,   // lane judged-watch-state: the owed re-judgment's look (a suite drives it by hand) + the doors' reading of a judged road

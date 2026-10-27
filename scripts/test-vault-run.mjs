@@ -656,8 +656,12 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   ok(w.door.answerRequest(q1.askId, { answer: 'always' }).code === 'bad_grant_answer', 'the answer is once, 8h or deny (no «always» — the per-row switch is the owner\'s always)');
   const nr = w.door.answerRequest(q1.askId, { answer: 'once' });
   ok(nr.code === 'reveal_needs_password' && reqsOf().length === 1 && !w.door._grants.size, 'Allow WITHOUT this page\'s 验证是你 ⇒ reveal_needs_password, the card stays up (a grant opens the entry as the switch does — the review: a click alone is forgeable on a hub with no sign-in)', nr);
-  const g1 = w.door.answerRequest(q1.askId, { answer: 'once', reauthed: true });
+  const g1 = w.door.answerRequest(q1.askId, { answer: 'once', reauthed: true, person: true });
   ok(g1.ok && g1.outcome === 'granted-once' && !reqsOf().length && w.door._grants.size === 1 && !fs.existsSync(path.join(w.dataDir, DOOR.STORE_FILE)), 'Allow once ⇒ ONE grant row, in memory only (the store file holds no grant)', g1);
+  // lane wake-approve-card r4: vault-grant-ask is a DECISION ROW — its record says which of ITS verbs, and the person's stamp
+  const FA = R('src/foryou-actions.js');
+  const i1 = w.userTodos.get(it.id), st1 = FA.decidedStamp ? FA.decidedStamp(i1) : null;
+  ok(i1 && i1.status === 'done' && i1.resolvedBy === 'granted-once' && i1.resolvedFact && i1.resolvedFact.decidedBy === 'person' && st1 && /^allowed once by you · (\d+\/\d+ )?\d\d:\d\d$/.test(st1.text), 'r4: the record says the verb — «allowed once by you · HH:MM» (resolvedBy granted-once, the person verdict\'s mark)', { by: i1 && i1.resolvedBy, fact: i1 && i1.resolvedFact, stamp: st1 && st1.text });
   ok(w.door.answerRequest(q1.askId, { answer: 'once', reauthed: true }).code === 'ask_settled', 'a second answer ⇒ ask_settled');
   const ro = await w.door.run({ caller: other, args: ENV('env'), cwd: w.work });
   ok(ro.code === 'entry_not_runnable', 'the grant is THAT conversation\'s — another conversation\'s run of the same entry ⇒ entry_not_runnable');
@@ -683,7 +687,10 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   ok(l3ok.r.ok && !w.door._grants.size, '…then a real run honours the restored grant once and SPENDS it (a once-grant is spent only when a child ran)');
   // 8 HOURS: every run of the conversation, until the switch goes OFF or the vault locks
   const q3 = w.door.request({ caller, entry: M1, purpose: PURPOSE });
-  const g3 = w.door.answerRequest(q3.askId, { answer: '8h', reauthed: true });
+  const i3id = reqsOf()[0] && reqsOf()[0].id;
+  const g3 = w.door.answerRequest(q3.askId, { answer: '8h', reauthed: true, person: true });
+  const i3 = w.userTodos.get(i3id), st3 = FA.decidedStamp ? FA.decidedStamp(i3) : null;
+  ok(i3 && i3.resolvedBy === 'granted' && st3 && /^allowed by you for 8 h · (\d+\/\d+ )?\d\d:\d\d$/.test(st3.text) && FA.decisionCard(i3).state === 'approved', 'r4: For 8 hours ⇒ «allowed by you for 8 h · HH:MM» (the card\'s state approved)', { by: i3 && i3.resolvedBy, stamp: st3 && st3.text });
   const ra = await w.door.run({ caller, args: ENV('env'), cwd: w.work }), rb = await w.door.run({ caller, args: ENV('env'), cwd: w.work });
   ok(g3.outcome === 'granted' && ra.ok && rb.ok && w.door._grants.size === 1 && [...w.door._grants.values()][0].until - Date.now() <= DOOR.GRANT_MS, 'For 8 hours ⇒ every run of the conversation (the seen shape without a card on a local instance), the grant stays — ≤ 8 hours', [ra.code, rb.code]);
   ok(w.door.request({ caller, entry: M1, purpose: 'x' }).already === 'granted' && w.door.runnableFor(caller).entries.some((e) => e.ref === M1 && e.by === 'grant') && !w.door.runnableFor(other).entries.length, 'a request for an entry already granted answers so (nothing filed); `list` names it to THAT conversation alone');
@@ -691,9 +698,16 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   ok(!w.door._grants.size, 'switching the entry OFF ends its grants too (OFF = closed for every conversation)');
   // the card closed elsewhere / a changed item / a gone conversation — no grant
   const q4 = w.door.request({ caller, entry: M1, purpose: PURPOSE });
-  w.userTodos.setStatus(reqsOf()[0].id, 'dismissed', 'user');
-  w.door._reqQuiet.clear();   // a dismissed card quiets the pair like a deny (the next legs ask again)
-  ok(w.door.answerRequest(q4.askId, { answer: 'once', reauthed: true }).code === 'ask_settled' && !w.door._grants.size, 'the request\'s card closed by another door (dismissed) ⇒ settled, not granted — a late answer is ask_settled');
+  // r4 (主开发): a decision row — ✓ Mark done / ✕ Dismiss (a stale page's) / «Mark all seen» are REFUSED by name; the request stays
+  // open (was: ✓ denied it silently and the toast offered a dead Undo); only Allow once / For 8 hours / Deny end it
+  const i4id = reqsOf()[0].id;
+  const tried = ['done', 'dismissed'].map((st) => { try { w.userTodos.setStatus(i4id, st, 'user'); return 'closed'; } catch (e) { return e.code; } });
+  const many = w.userTodos.setStatusMany ? w.userTodos.setStatusMany([i4id], 'dismissed', 'user') : null;
+  ok(tried.every((c) => c === 'decision_row') && (!many || !many.changed.length) && w.userTodos.get(i4id).status === 'open' && w.door._requests.has(q4.askId) && FA.closersOf(w.userTodos.get(i4id)).length === 0, 'r4: a generic close of the request\'s card (✓, ✕, «Mark all seen») is REFUSED by name (decision_row) — the request stays open; no ✓ / ✕ is drawn (closersOf [])', { tried, many: many && many.changed.length });
+  const d4 = w.door.answerRequest(q4.askId, { answer: 'deny', person: true });
+  const i4 = w.userTodos.get(i4id), st4 = FA.decidedStamp ? FA.decidedStamp(i4) : null;
+  w.door._reqQuiet.clear();   // a deny quiets the pair (the next legs ask again)
+  ok(d4.outcome === 'denied' && i4.resolvedBy === 'denied' && st4 && /^denied by you · /.test(st4.text) && w.door.answerRequest(q4.askId, { answer: 'once', reauthed: true }).code === 'ask_settled' && !w.door._grants.size, 'its own Deny ends it — «denied by you · HH:MM»; a late answer is ask_settled', { by: i4.resolvedBy, stamp: st4 && st4.text });
   const q5 = w.door.request({ caller, entry: M1, purpose: PURPOSE });
   const i5 = reqsOf()[0]; const held5 = w.userTodos._state.items.find((x) => x.id === i5.id); held5.detail = held5.detail.replace('nightly', 'Nightly');
   const a5 = w.door.answerRequest(q5.askId, { answer: 'once', reauthed: true });

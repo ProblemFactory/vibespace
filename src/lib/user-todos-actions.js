@@ -34,7 +34,7 @@ import { openTakeover } from './browser-takeover-queue.js'; // lane browser-take
 import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «Who can use it»'s own refusal words (the dialog's)
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
-import { isPointer } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo
+import { isPointer, clockWords } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo; r4: an expired ask's end in words
 import { askOptions } from '../ask-options.js'; // PURE (lane foryou-honest): an ask's chips — the explicit options, else its detail's «A …；B …» / «是 / 否» parsed
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
@@ -424,7 +424,8 @@ export function inboxModel(app) {
       // says, through the access request's own decide route (the one door; never a second approval surface)
       const r = await fetchJson(`/api/channels/reach-requests/${encodeURIComponent(rec.action.id)}/${answer === 'reject' ? 'deny' : 'approve'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
       if (r && r.ok) { showToast(answer === 'reject' ? t('Denied — nothing changed') : t('Approved — the agent is woken by it from now on')); return true; }
-      showToast((r && r.code === 'bad-state') ? t('That request was already decided') : (r && r.error) || t('server unreachable'), { type: 'error' });
+      // r4: past its end (either side of the minute sweep) ⇒ ONE 409 `expired` with its end — said in the owner's language
+      showToast((r && r.code === 'expired') ? t('This request expired on {date} — the agent can ask again', { date: clockWords(r.expiredAt) }) : (r && r.code === 'bad-state') ? t('That request was already decided') : (r && r.error) || t('server unreachable'), { type: 'error' });
       return false;
     }
     if (rec && rec.action && rec.action.type === 'channel-api-proposal') {

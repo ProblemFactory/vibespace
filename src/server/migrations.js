@@ -723,6 +723,39 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         return rep;
       },
     },
+    {
+      id: '2026-10-closed-access-pointers-hidden',
+      note: "A POINTER HIDES, NEVER DECIDES (lane wake-approve-card, acceptance rounds 3 → 4 — 主开发): an access request's For-you item (its pointer to the Reach dialog) the PERSON closed before round 3 — ✓ Mark done / ✕ Dismiss / «Mark all seen», recorded resolvedBy 'user' — while its request stands OPEN lost its ↺ in round 3 and was never brought back (round 3's resurface brings back only a HIDDEN pointer), so the owner never saw it again and the agent's re-ask was told «already open». Each such record (an open-channel item whose id an OPEN access request holds, closed by 'user') becomes what round 3 writes for that close — status 'dismissed', resolvedBy 'hidden' («hidden — nothing was decided»; its resolvedAt kept) — THROUGH the live inbox store (flushed before the ledger row); then the engine's resurface (the boot reconcile's — it ran before this run) brings it back to For you now, and the re-ask brings it back from here on. Which requests are open is the CHANNELS ENGINE's to say (its index holds them): without one while a channels data dir exists the run FAILS by name (retried on a boot that has one); no channels data = nothing to do. A second run finds nothing (each such record is hidden or open again).",
+      run() {
+        const eng = typeof channels === 'function' ? channels() : channels;
+        if (!eng || typeof eng.openAccessPointers !== 'function') {
+          if (!fs.existsSync(path.join(dataDir, 'channels'))) return { open: 0, hidden: 0, back: 0, store: 'absent' };
+          throw new Error('no channels engine to name the open access requests — retried on a boot that has one');
+        }
+        const ids = new Set(eng.openAccessPointers());
+        if (!ids.size) return { open: 0, hidden: 0, back: 0 };
+        const { isPointer, HIDDEN_BY } = require('../foryou-actions.js');
+        const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+        let store = live, priv = false;
+        if (!store || typeof store.reshapeItems !== 'function') {
+          if (!fs.existsSync(path.join(dataDir, 'user-todos.json'))) return { open: ids.size, hidden: 0, back: 0, store: 'absent' };
+          const { UserTodoManager } = require('../user-todos.js');
+          store = new UserTodoManager({ dataDir, expirySweepMs: 0 });
+          priv = true;
+        }
+        const rep = { open: ids.size, hidden: 0, back: 0, store: priv ? 'private' : 'live' };
+        store.reshapeItems((it) => {
+          if (!it || !ids.has(String(it.id)) || it.status === 'open' || it.resolvedBy !== 'user' || !isPointer(it)) return false;
+          it.status = 'dismissed'; it.resolvedBy = HIDDEN_BY;   // what round 3 writes for the person's close of a pointer (src/user-todos.js hideOf)
+          rep.hidden++;
+          return true;
+        });
+        store.flush();   // the atomic write lands BEFORE the runner records applied[id] (a throw fails the run — retried next boot)
+        if (rep.hidden && !priv && typeof eng.resurfacePointers === 'function') rep.back = eng.resurfacePointers();   // the engine holds THIS store: back in For you now
+        console.log('[migrate] closed-access-pointers-hidden:', JSON.stringify(rep));
+        return rep;
+      },
+    },
   ];
 
   /** 2026-10-grants-unify: every pre-unify who-list → rows of THE grants store (src/server/grants-migration.js). `ensure`

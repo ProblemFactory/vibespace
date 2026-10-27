@@ -91,6 +91,8 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'hidden') return ''; // r3: a hidden pointer's status word says it all (statusWords) — nothing was decided
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
   if (by === 'stored') return t('saved to the vault'); // lane vault-paste-request: a paste request answered by its paste
+  if (by === 'granted') return t('allowed for 8 hours'); // r4: an agent's request for a stored secret (vault-grant-ask) answered For 8 hours
+  if (by === 'granted-once') return t('allowed once'); // …or Allow once
   // B-2198 part 2: a raw-API proposal's item is answered BY its outcome (the card's words: Ran · 200 · 1.2 KB / Rejected by you)
   if (by === 'channel-api' && item && item.resolvedFact && item.resolvedFact.apiOutcome) return t(item.resolvedFact.apiOutcome.key, item.resolvedFact.apiOutcome.params || {});
   // lane exit-item-heal: an unexpected-exit item answered by the conversation running again (its new session's start, this device's clock)

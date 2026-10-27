@@ -11063,4 +11063,9 @@ export default {
   "stored": "已存入",
   "refused by you": "你已拒绝",
   "Wrong name or kind? Refuse — the agent can ask again with the right one.": "名称或类型不对？拒绝即可 — 助手可以用正确的名称再次请求。",
+  "This request expired on {date} — the agent can ask again": "这个请求已于 {date} 过期 — 助手可以再次请求",
+  "allowed by you for 8 h": "你已允许 8 小时",
+  "allowed once by you": "你已允许一次",
+  "allowed for 8 hours": "已允许 8 小时",
+  "allowed once": "已允许一次",
 };

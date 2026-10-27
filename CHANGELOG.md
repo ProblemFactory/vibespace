@@ -17,6 +17,12 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - With sign-in off, an agent's token could also give itself a wake through the Notify settings; that now takes your click on this page too.
 - Mark done on an access request in For you said «done» while the request stayed open; it now offers only Hide, which decides nothing.
 - Vault asks and machine actions end only with their own buttons now, never Mark done or Dismiss, and say «allowed by you · 09:41».
+- Approve or Deny on a wake request after its 7 days says when it expired and that the agent can ask again, instead of an error.
+- Access requests closed with Mark done before this update come back to For you while they are still open.
+- An agent's request for a stored secret ends only with Allow once, For 8 hours or Deny, and says «allowed by you for 8 h · 09:41».
+
+### Security
+- With sign-in off, an agent could widen a wake you approved by editing its rule or filter; changing what a wake reacts to now takes your click.
 
 ## 2.369.360 — 2026-10-27
 

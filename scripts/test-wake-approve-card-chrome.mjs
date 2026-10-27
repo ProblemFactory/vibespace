@@ -34,6 +34,9 @@
 //   SHOTS: before (no card), the two cards (desk + phone), the waiting-owner branch, the decided records; round 2: the phone's
 //     decision row (r2-phone-decision-row-375.png), the tray's decision rows (r2-tray-decision-rows-1280.png), after the phone
 //     press (r2-phone-after-press-375.png).
+// ACCEPTANCE ROUND 4 (主开发): ⑦d THE VAULT'S GRANT REQUEST IS A DECISION ROW — the agent's request for a STORED secret is a card in
+//     the asking chat with its own three verbs (Allow once / For 8 hours / Deny) and NO ✓ / ✕; For 8 hours (the second password
+//     first) records «allowed by you for 8 h · HH:MM» (RED on bec3e3f8: ✓ / ✕ drawn — ✓ «Mark done» denied the request silently)
 // ACCEPTANCE ROUND 3 (主开发 + the owner's items 3–4): ⑦a A POINTER HIDES — the agent's access request (rq-) is a card in the
 //     asking chat with ONE closer, ✕ Hide (on the base: ✓ Mark done / ✕ Dismiss — the ✓ pressed recorded «✓ done» with the request
 //     open); the press records «hidden — nothing was decided», the request stays open in the Reach dialog, the toast has no Undo;
@@ -112,6 +115,10 @@ const VRUN = 'const { spawnSync } = require("child_process"); const B = ' + JSON
   + ' if (!ref) { console.log("vibespace-vault list: " + l.stdout + l.stderr); process.exit(3); }'
   + ' const r = spawnSync(process.execPath, [B + "/vibespace-vault", "run", "--env", "PW=" + ref, "--", process.execPath, "-e", "console.log(process.env.PW ? 1 : 0)"], { env: process.env, encoding: "utf8", timeout: 90000 });'
   + ' console.log("vibespace-vault run: rc=" + r.status + " " + String(r.stdout) + String(r.stderr)); process.exit(r.status || 0);';
+// round 4: the agent asks the owner for a STORED entry (its reference the suite wrote to grant-ref) — the vault's third card
+const VGRANT = 'const { spawnSync } = require("child_process"); const B = ' + JSON.stringify(BIN) + '; const ref = require("fs").readFileSync(' + JSON.stringify(DIR + '/grant-ref') + ', "utf8").trim();'
+  + ' const r = spawnSync(process.execPath, [B + "/vibespace-vault", "request", ref, "--for", "upload the nightly backup to the bucket"], { env: process.env, encoding: "utf8", timeout: 30000 });'
+  + ' console.log("vibespace-vault request: rc=" + r.status + " " + String(r.stdout) + String(r.stderr)); process.exit(r.status || 0);';
 const VERBS = {
   watch2: [watch(${JSON.stringify(POLL)}), watch(${JSON.stringify(PUSH)})],
   watchnt: [['vibespace-channels', ['watch', ${JSON.stringify(POLL)}, '--mode', 'next-turn', '--keyword', 'outage', '--why', 'tell me about outages on my next turn']]],   // round 2: the agent's own NON-wake road
@@ -123,6 +130,7 @@ const VERBS = {
   vreq: [['vibespace-vault', ['request', 'UniFi UCG-Fiber local admin', '--purpose', 'log in to the controller to read the WAN state', '--kind', 'password', '--name', 'UniFi UCG-Fiber local admin (agent-ops)']]],
   vrun: [['node', ['-e', VRUN]]],
   vrunall: [['node', ['-e', VRUN.replace('process.execPath, "-e", "console.log(process.env.PW ? 1 : 0)"', '"curl", "-s", "https://api.example.com/v1/items"')]]],   // round 3: a known tool naming a host — «Always» offered
+  vgrant: [['node', ['-e', VGRANT]]],   // round 4: the agent asks for a STORED entry (the vault's grant request — Allow once / For 8 hours / Deny)
 };
 let n = 0, buf = '';
 const turn = (line) => {
@@ -663,6 +671,44 @@ try {
   const wireEnd = { pageFrames: WS_SEEN.length, hits: hits(WS_SEEN.join('\n')) + hits(frames.join('\n')) + hits(fs.readFileSync(path.join(SHOTS, 'server.log'), 'utf8')) + hits(fs.readFileSync(path.join(stubDir, 'seen.log'), 'utf8')) + hits(cliLog()) };
   check(`…and after both runs: still 0 hits of the value over ${wireEnd.pageFrames} page frames, every hub broadcast, the server log and all the agent saw`, wireEnd.hits === 0, wireEnd);
   await lap('⑦c done');
+  // ⑦d r4 — THE VAULT'S GRANT REQUEST (the third vault card in the same chat: Allow once / For 8 hours / Deny) IS A DECISION ROW:
+  // its own three verbs and no ✓ / ✕; For 8 hours (验证是你 first) records «allowed by you for 8 h · HH:MM». On bec3e3f8 the card
+  // drew ✓ / ✕ and ✓ «Mark done» DENIED the request silently, its toast offering an Undo that could not bring it back
+  const VALUE2 = ['grant', 'leg', 'bucket', 'key', Date.now().toString(36)].join('-');
+  const ne = await A.evalJs(`fetch('/api/vault/secrets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: 'Backup bucket key', kind: 'secret', value: ${J3(VALUE2)} }) }).then((r) => r.json())`);
+  fs.writeFileSync(path.join(stubDir, 'grant-ref'), String((ne && ne.ref) || ''));
+  say('now do:vgrant'); await logHas(/### vgrant 0 rc=/);
+  const ga = await until(async () => (await api()).open.find((i) => i.action && i.action.type === 'vault-grant-ask') || null, 15000);
+  await A.waitFor(`!!document.querySelector('.cn-card[data-item="${ga && ga.id}"] [data-answer="deny"]')`, 15000);
+  await A.evalJs(`document.querySelector('.cn-card[data-item="${ga && ga.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
+  const gc = await A.evalJs(CARD(ga && ga.id));
+  const gAns = await A.evalJs(`[...document.querySelectorAll('.cn-card[data-item="${ga && ga.id}"] [data-answer]')].filter((b) => b.offsetParent).map((b) => b.dataset.answer)`);
+  await A.shot('r4-chat-vault-grant-1280.png');
+  check(`r4 ⑦d: the agent's request for a STORED secret is a card in the asking chat — its own verbs ${J3(gAns)} (${J3(gc && gc.verbs)}), no ✓ / ✕ (${gc && gc.closers})`, !!ne && !!ne.ref && !!gc && gc.closers === 0 && J3(gAns) === J3(['once', '8h', 'deny']), { ref: ne && ne.ref, verbs: gc && gc.verbs, answers: gAns, closers: gc && gc.closers });
+  if (gc && gc.closers > 0) {
+    // the base: its ✓ «Mark done» — the press the owner made — closes the card and DENIES the request; the toast offers Undo
+    const tick = await A.restThenPress(`.cn-card[data-item="${ga.id}"] .ut-done`);
+    const gAfter = await until(async () => (await api()).resolved.find((i) => i.id === ga.id) || null, 8000);
+    const again = await A.evalJs(`fetch('/api/vault/request/asks/${ga.action.askId}', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer: 'deny' }) }).then((r) => r.json())`);
+    check(`RED (this tree): ✓ on the grant card closed it «${gAfter && gAfter.resolvedBy}» and the request is over (a late answer: ${again && again.code}) — the toast «${tick && tick.toast}»`, false, { by: gAfter && gAfter.resolvedBy, status: gAfter && gAfter.status, late: again && again.code, toast: tick && tick.toast });
+  } else {
+    const p8 = await A.restThenPress(`.cn-card[data-item="${ga && ga.id}"] [data-answer="8h"]`);
+    await A.waitFor(`!!document.getElementById('vault-reveal-pw')`, 8000);
+    await A.evalJs(`document.getElementById('vault-reveal-pw').focus(); true`);
+    await A.cdp('Input.insertText', { text: SECOND });
+    await A.evalJs(`document.querySelector('.vault-reveal-go').click(); true`);
+    const gDone = await until(async () => (await api()).resolved.find((i) => i.id === (ga && ga.id)) || null, 10000);
+    const stampG = 'allowed by you for 8 h · ' + await hm(A, gDone && gDone.resolvedFact && gDone.resolvedFact.decidedAt);
+    await A.waitFor(`(document.querySelector('.cn-card[data-item="${ga && ga.id}"] .cn-line')?.textContent || '').includes(${J3(stampG)})`, 8000);
+    const gCard = await A.evalJs(CARD(ga && ga.id));
+    const toast8 = await A.evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).join(' | ')`);
+    // the shot: the run that holds the decided card opened (a decided card folds with its run, like any record)
+    await A.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${ga && ga.id}"]'); const h = c && [...document.querySelectorAll('.chat-run-header')].filter((x) => x.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING).pop(); if (h && !c.offsetParent) h.click(); return !!h; })()`); await sleep(600);
+    await A.evalJs(`document.querySelector('.cn-card[data-item="${ga && ga.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(400);
+    await A.shot('r4-chat-vault-grant-allowed-1280.png');
+    check(`…For 8 hours on the card (the second password first): the record «${gCard && gCard.line}» (${gDone && gDone.resolvedBy}, the person verdict's mark), the toast «${toast8}»`, !!p8 && p8.pressed && !!gDone && gDone.resolvedBy === 'granted' && !!gDone.resolvedFact && gDone.resolvedFact.decidedBy === 'person' && !!gCard && gCard.line.includes(stampG) && gCard.closers === 0, { by: gDone && gDone.resolvedBy, fact: gDone && gDone.resolvedFact, line: gCard && gCard.line, toast: toast8 });
+  }
+  await lap('⑦d done');
   check('no page threw', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 

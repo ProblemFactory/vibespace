@@ -11062,4 +11062,9 @@ export default {
   "stored": "保存済み",
   "refused by you": "あなたが拒否しました",
   "Wrong name or kind? Refuse — the agent can ask again with the right one.": "名前や種類が違いますか？拒否してください — エージェントは正しい名前で再度依頼できます。",
+  "This request expired on {date} — the agent can ask again": "この依頼は {date} に失効しました — エージェントは再度依頼できます",
+  "allowed by you for 8 h": "あなたが 8 時間許可しました",
+  "allowed once by you": "あなたが 1 回だけ許可しました",
+  "allowed for 8 hours": "8 時間許可しました",
+  "allowed once": "1 回だけ許可しました",
 };
