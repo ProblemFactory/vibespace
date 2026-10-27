@@ -226,6 +226,27 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
   ok(!aw.length, '«always» is offered only for a KNOWN tool that names its host — never a tool outside the table, one naming no host, a shell or an interpreter (destination unknown / the script is the program)', aw.map(([a, w]) => [a.join(' '), w, A(a)]));
   const pr = V.shapeOf(V.planOf({ argv: ['curl', 'https://api.example.com'], env: [['T', M1]] }));
   ok(pr.proxyEnv === true && V.shapeOf(V.planOf({ argv: ['psql', '-h', 'db.x'], env: [['PGPASSWORD', M1]] })).proxyEnv === false, 'the shape says whether the tool honours the proxy env (P1 vault-run-egress fences on it)');
+  // round 16: the ONE route-host set — a <url> positional is a route (issue/pr view/checks/comment/close); gh api keeps path-vs-url;
+  // a no-row tool (shell / interpreter / unknown binary) routes to every host it names (never «unknown»); `mentions` is a free-text
+  // host that is NOT a route (never the row default api.github.com); a routing host that does not parse flags badHost.
+  const RH = (argv, env) => V.shapeOf(V.planOf({ argv, env: env || [[argv[0] === 'gh' ? 'GH_TOKEN' : 'T', M1]] })).routeHosts.join(' ');
+  const MEN = (argv) => V.shapeOf(V.planOf({ argv, env: [['GH_TOKEN', M1]] })).mentions.join(' ');
+  const R16 = [
+    [RH(['gh', 'issue', 'view', 'https://evil.test/o/r/issues/1', '-R', 'ghe.example.test/o/r']), 'evil.test ghe.example.test', 'a <url> positional + a different -R = TWO route hosts (two_hosts at the door)'],
+    [RH(['gh', 'pr', 'checks', 'https://evil.test/o/r/pull/2', '-R', 'o/r']), 'evil.test github.com', 'pr checks <url> + -R o/r = two routes'],
+    [RH(['gh', 'issue', 'view', '123', '-R', 'ghe.example.test/o/r']), 'ghe.example.test', 'a NUMBER positional is no route host'],
+    [RH(['gh', 'issue', 'view', 'https://ghe.example.test/o/r/issues/1', '-R', 'ghe.example.test/o/r']), 'ghe.example.test', 'a <url> whose host EQUALS the -R host is ONE route (no false two_hosts)'],
+    [RH(['gh', 'api', 'repos/o/r']), 'github.com', 'gh api <path> stays on the default host'],
+    [RH(['gh', 'api', 'https://ghe.example.test/api/v3/user']), 'ghe.example.test', 'gh api <url> routes to the url host'],
+    [RH(['bash', '-c', 'curl https://x.example'], [['T', M1]]), 'x.example', 'a shell routes to every host it names (never «unknown»)'],
+    [RH(['frobnicate', 'connect', 'https://y.example'], [['T', M1]]), 'y.example', 'an unknown binary routes to the host it names'],
+    [RH(['gh', 'issue', 'list']), 'github.com', 'plain gh ⇒ the default route host (github.com, not api.github.com)'],
+    [MEN(['gh', 'issue', 'list']), '', 'a plain gh card never MENTIONS the row default api.github.com'],
+    [MEN(['gh', 'issue', 'comment', '5', '-R', 'o/r', '--body', 'see https://evil.test/x']), 'evil.test', 'a --body URL is a MENTION, never a route'],
+  ];
+  const R16bad = R16.filter(([got, want]) => got !== want);
+  ok(!R16bad.length, 'round 16: the ONE route-host set — a url positional is a route (two_hosts when it differs from -R), gh api keeps path-vs-url, a no-row tool routes to every host it names (never unknown), mentions is a free-text host that is not a route (never the row default api.github.com)', R16bad.map(([g, w, note]) => [note, 'got[' + g + ']', 'want[' + w + ']']));
+  ok(V.shapeOf(V.planOf({ argv: ['psql', '-h', ',db.example.com'], env: [['PGPASSWORD', M1]] })).badHost === true && V.shapeOf(V.planOf({ argv: ['psql', '-h', 'db.example.com'], env: [['PGPASSWORD', M1]] })).badHost === false, 'round 16: a routing value that does not parse (psql -h ,db.example.com -> null) sets shape.badHost; a clean host does not (the door refuses bad_host, never lets null reach the verdict)');
 }
 
 console.log('①b AN AGENT\'S OWN ENTRY (lane vault-run-door × lane vault-mint-put) — vault://agent:<scope>/<name>');

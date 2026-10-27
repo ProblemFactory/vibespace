@@ -99,11 +99,12 @@ export function leafGrammar(v, specHint) {
   }
   value.sort(); repoValues.sort(); launch.sort();
   const spec = /<[a-z-]*repo(?:sitory)?>/.test(v.usage) || !!specHint ? 1 : 0;
+  const urlArg = /<urls?>/.test(v.usage) ? 1 : 0;   // round 16 (BLOCKER): a positional typed `<url>` / `<urls>` in the USAGE line — gh CONTACTS that URL's host (issue view/close/comment, pr view/checks/comment …); derived from the live help, never hand-picked; shapeOf adds the host to routeHosts, the door refuses two_hosts when it differs from the -R / GH_HOST host
   const hn = v.flags['--hostname'];
-  return { value, repoValues, spec, host: hn && hn.short ? '-' + hn.short : null, ...(launch.length ? { launch } : {}) };
+  return { value, repoValues, spec, host: hn && hn.short ? '-' + hn.short : null, ...(urlArg ? { urlArg } : {}), ...(launch.length ? { launch } : {}) };
 }
 
-export const belongs = (g) => !!(g.spec || g.host || (g.repoValues && g.repoValues.length) || (g.value && g.value.includes('--hostname')));   // --hostname (gh api / auth) reaches a host even with no short alias
+export const belongs = (g) => !!(g.spec || g.host || g.urlArg || (g.repoValues && g.repoValues.length) || (g.value && g.value.includes('--hostname')));   // --hostname (gh api / auth) reaches a host even with no short alias; round 16: a <url> positional reaches a host too
 
 // ROUND 9 (MAJOR 2): THE REVIEWED ALLOWLIST — the set of verbs a minted own value may run with NO CARD (ok:own on the default
 // host), reviewed against what each verb DOES (not what its help SAYS). Everything NOT here is ABSENT ⇒ BLIND. OUT, because it
