@@ -2617,7 +2617,7 @@ app.post('/api/agent/jobs', (req, res) => {
     singleInstance: b.singleInstance, timeoutMs: b.timeoutMs, untilOutput: b.untilOutput,
     stdinOpen: b.stdinOpen, notifyUser: b.notifyUser, schedule: b.schedule,
     catchUp: b.catchUp, action: b.action, context: b.context, access: b.access,
-    stopWithOwner: b.stopWithOwner, notify: b.notify,
+    stopWithOwner: b.stopWithOwner, notify: b.notify, memoryMb: b.memoryMb, // lane jobs-memory-bound: `--memory 8G` (the engine judges it; 0 is the user's alone)
     owner: {
       conversation: a.caller.conversationId ? { id: a.caller.conversationId } : null,
       sessionId: a.sessionId, sessionCreatedAt: a.session.createdAt || 0,
@@ -2710,7 +2710,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   if (a.selfJob && !selfActs.includes(act)) return res.status(403).json({ error: 'a job token may only report progress, ask, or announce' });
   const needsControl = ['stop', 'start', 'rm', 'announce']; // announce puts text in front of the owner+subscribers — view alone doesn't grant that
   if (!a.selfJob && needsControl.includes(act) && !jobModel.canControl(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
-  if (!a.selfJob && (act === 'access' || act === 'notify')) {
+  if (!a.selfJob && (act === 'access' || act === 'notify' || act === 'memory')) {
     if (!jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
     if (act === 'access' && job.access && job.access.lockedBy === 'user') return res.status(403).json({ error: "the user pinned this job's access — ask in chat instead of changing it" });
   }
@@ -2738,6 +2738,7 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
       a.jm._touch(job); a.jm._save();
       return res.json({ success: true, notify: job.notify || 'inherit', preview: (() => { try { return a.jm.notifyPreview(job); } catch { return null; } })() });
     }
+    else if (act === 'memory') r = a.jm.setMemory(job, req.body?.value ?? null, { byUser: false }); // lane jobs-memory-bound: owner conversation only (canEdit above)
     else return res.status(400).json({ error: `unknown action "${act}"` });
     if (r.error) return res.status(400).json({ error: r.error });
     res.json({ success: true, ...r });

@@ -996,7 +996,10 @@ class JobManager {
     job.state = 'starting';
     delete job.ack; // a NEW run is a new claim on the user's attention (triage §13)
     job.runs = job.runs || [];
-    job.runs.push({ startedAt: runTs, trigger, log: path.join(ctl, 'current.log') });
+    // THE MEMORY BOUND (lane jobs-memory-bound): THE LADDER's answer for THIS run (src/job-model.js memoryMbOf) rides the spec;
+    // the wrapper measures the rung that enforces it and says so (bound.json while it runs, exit.json `memory` at its end)
+    const mem = M.memoryMbOf(job, this._memoryCtx());
+    job.runs.push({ startedAt: runTs, trigger, log: path.join(ctl, 'current.log'), memoryMb: mem.mb });
     if (job.runs.length > 20) job.runs.splice(0, job.runs.length - 20);
     this._save(); // intent-before-spawn, flushed
     // accept-fixes-jobs F6: the job's OWN directory (its cmd.cwd — never the server's cwd fallback) is exported as
@@ -1005,6 +1008,7 @@ class JobManager {
       argv: job.cmd.argv, cwd: job.cmd.cwd || process.cwd(),
       env: jobEnv({ ...(job.cmd.env || {}), ...this._secretsFor(job), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
       logCapBytes: 50 * 1024 * 1024, stdinOpen: !!job.stdinOpen,
+      memory: { mb: mem.mb, unit: `${this.d.memoryUnitPrefix || 'vibespace-job'}-${job.id}-${runTs}`, rungs: this.d.memoryRungs || M.MEMORY_RUNGS, ...(this.d.memorySample ? this.d.memorySample : {}) },
     };
     // A SECRET NEVER RIDES ARGV (lane job-spec-off-argv, 2026-10-20): the spec carries the job's secrets and its jbt_
     // token, and /proc/<pid>/cmdline is readable by every local user for the wrapper's whole life — so the spec rides a
@@ -1191,6 +1195,11 @@ class JobManager {
         if (exit) { this._finalizeRun(job, run, exit, 'boot'); continue; }
         if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); continue; }
         // no live process, no exit record ⇒ died with the environment
+        // THE BOOT'S JUDGE (lane jobs-memory-bound): under memory.oom.group the wrapper dies with its job, so no exit record
+        // says what happened — the wrapper's last pressure sample does: the instance was full and THIS job held most of it ⇒
+        // the run ended `oom`, counted toward the park exactly like a run's end (the base replayed it blind, every boot)
+        const verdict = run && !run.endedAt ? M.bootEndCause(this._ctlJson(job, run, 'pressure.json')) : null;
+        if (verdict && verdict.cause === 'oom') { this._bootOomEnd(job, run, verdict); continue; }
         if (job.kind === 'service') { job.state = 'down'; this._touch(job); }
         else { if (run && !run.endedAt) { run.endedAt = now(); run.cause = 'env-restart'; run.exit = null; } job.state = 'interrupted'; this._touch(job, { what: 'interrupted (env-restart: the host/pod restarted)' }); }
       } catch (e) { this.d.log(`[jobs] adopt failed for ${job.id}:`, e.message); }
@@ -1219,9 +1228,49 @@ class JobManager {
       } catch (e) { this.d.log(`[jobs] replay failed for ${job.id}:`, e.message); }
     }
   }
-  _readExit(job, run) {
+  _readExit(job, run) { return this._ctlJson(job, run, 'exit.json'); }
+  /** a run the instance's OOM took with it (THE BOOT'S JUDGE above): named, counted, parked at the law's count */
+  _bootOomEnd(job, run, v) {
+    run.endedAt = v.at || now(); run.exit = null; run.cause = 'oom';
+    run.memoryPressure = { jobMb: v.jobMb, usedMb: v.usedMb, limitMb: v.limitMb };
+    if (!run.memoryBound) { const b = this._ctlJson(job, run, 'bound.json'); if (b) run.memoryBound = M.boundRecord(b); }
+    const mp = M.onMemoryEnd(job.supervise, 'oom', now());
+    job.supervise = mp.supervise;
+    const said = `${M.memoryEndWhat(run)} — it held ${M.memoryWords(v.jobMb)} of the ${M.memoryWords(v.usedMb)} in use (limit ${M.memoryWords(v.limitMb)})`;
+    this.d.log(`[jobs] ${job.id} died with the instance out of memory — judged at boot, counted ${mp.count} of ${M.MEMORY.parkAfter}`);
+    if (mp.park) { this._parkForMemory(job, run); return; }
+    if (job.kind === 'service') { job.state = 'down'; this._touch(job, { what: `down: ${said}` }); return; }
+    job.state = 'failed';
+    this._touch(job, { what: `failed: ${said}` });
+    this._notifyOwner(job, { what: `failed: ${said}` });
+  }
+  /** a run's own record in its ctl dir — exit.json, and (lane jobs-memory-bound) bound.json / pressure.json the wrapper writes */
+  _ctlJson(job, run, name) {
     if (!run) return null;
-    try { return JSON.parse(fs.readFileSync(path.join(this._ctlDir(job, run.startedAt), 'exit.json'), 'utf-8')); } catch { return null; }
+    try { return JSON.parse(fs.readFileSync(path.join(this._ctlDir(job, run.startedAt), name), 'utf-8')); } catch { return null; }
+  }
+  /** THE LADDER's inputs (lane jobs-memory-bound): the owner's setting `jobs.memoryMb` (undefined while never set) and the
+   *  cluster's default (the chart's env) — read live, per run */
+  _memoryCtx() {
+    try { return (typeof this.d.memoryCtx === 'function' && this.d.memoryCtx()) || {}; } catch { return {}; }
+  }
+  /** THE PARK LAW's act (lane jobs-memory-bound): a job whose runs ended out of memory M.MEMORY.parkAfter times in a row is
+   *  parked BY NAME and not run again until its owner acts (start — after raising its bound or fixing the job): a service
+   *  is never restarted (neither its backoff nor the boot replay — supervise.parkedAt), a cron child parks its parent (its
+   *  next fire would run it again). */
+  _parkForMemory(job, run) {
+    const parent = job.cronParent ? this.jobs.get(job.cronParent) : null;
+    const what = `${M.memoryEndWhat(run)} — ${M.MEMORY_PARK_TEXT}`;
+    for (const j of parent ? [job, parent] : [job]) {
+      j.state = 'failed';
+      if (j.kind === 'cron') { j.desiredUp = false; j.nextFireAt = null; }
+      if (j !== job) j.supervise = { ...(j.supervise || {}), parkedAt: now(), parkedFor: 'memory' };
+      if (j.kind === 'service') this._teardownPublish(j);
+      this._touch(j, { what });
+    }
+    this.d.log(`[jobs] ${job.id} ${M.MEMORY_PARK_TEXT} (${run.cause}; bound ${M.memoryWords(run.memoryMb)}${run.memoryBound ? ' · ' + run.memoryBound.by : ''})`);
+    try { this.d.notifyUser({ text: `${job.name}: ${M.MEMORY_PARK_TEXT}`, urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null, i18n: { text: { key: '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again', params: { name: job.name } } } }); } catch { }
+    this._notifyOwner(job, { what: `${what} (vibespace-job memory ${parent ? parent.id : job.id} <size>, then vibespace-job start ${parent ? parent.id : job.id})` });
   }
   /** Was a run's protocol mismatch the update's WINDOW (lane job-wrapper-update-window)? Yes when an older server generation
    *  started it (this one is the restart), or the wrapper changed on disk after this server booted and not long ago (the
@@ -1243,15 +1292,29 @@ class JobManager {
     // an interruption, no failure notice; a mismatch outside a window is the install's own fault, said as one
     const proto = exit.reason === 'update_window' && !job._stopRequested ? (this._inUpdateWindow(run) ? 'update_window' : 'wrapper-mismatch') : null;
     if (proto === 'update_window') run.exit = null; // no process of the job ever exited
-    run.cause = proto || (untilHit ? 'ok(until-output)' : exit.signal === 'SIGKILL' && why === 'oom' ? 'oom'
-      : job._stopRequested ? 'interrupted' : exit.code === 0 ? 'ok' : job._timedOut ? 'timeout' : 'error');
+    // THE NAMED END (lane jobs-memory-bound): the wrapper measured what ended the job (exit.json `memory`) — its own bound
+    // (`oom-bound`: the scope's oom-kill, or an allocation RLIMIT_DATA refused) or an OOM from outside (`oom`) — and the rung
+    // that held it. A stop the owner asked for stays a stop.
+    const mem = exit.memory && typeof exit.memory === 'object' ? exit.memory : null;
+    if (mem && mem.by) run.memoryBound = M.boundRecord(mem);
+    const memCause = mem && M.MEMORY_CAUSES.includes(mem.cause) && !job._stopRequested ? mem.cause : null;
+    run.cause = proto || (untilHit ? 'ok(until-output)' : memCause
+      || (job._stopRequested ? 'interrupted' : exit.code === 0 ? 'ok' : job._timedOut ? 'timeout' : 'error'));
+    if (memCause) this.d.log(`[jobs] ${job.id} ${M.memoryEndWhat(run)} (${mem.how || mem.cause}; ${why})`);
     delete job._stopRequested; delete job._timedOut; delete job._untilHit;
     const windowEnd = run.cause === 'update_window';
+    // THE PARK LAW (lane jobs-memory-bound): EVERY judged end counts — the sweep's, and the boot's (a run that ended while the
+    // server was down is judged here at its boot exactly like a run judged live; the base never counted a boot's)
+    const memPark = windowEnd ? null : M.onMemoryEnd(job.supervise, run.cause, now());
+    if (memPark) job.supervise = memPark.supervise;
     if (job.kind === 'service' && windowEnd) {
       job.state = 'down'; this._touch(job, { what: 'down (update_window: it started while VibeSpace was updating itself and never ran — the restarted server starts it again)' }); // never a crash of the supervisor's count: the boot replay starts a desiredUp service
+    } else if (job.kind === 'service' && memPark && memPark.park) {
+      this._parkForMemory(job, run);
     } else if (job.kind === 'service') {
       const dec = M.onServiceExit(job, { uptimeMs: run.endedAt - run.startedAt, now: now() });
-      job.supervise = dec.supervise || job.supervise;
+      job.supervise = { ...(dec.supervise || job.supervise), ...(job.supervise && job.supervise.oomEnds ? { oomEnds: job.supervise.oomEnds } : {}) };
+      if (memCause && !dec.park) this._touch(job, { what: `${M.memoryEndWhat(run)} — ${M.MEMORY.parkAfter - memPark.count} more out-of-memory end parks it` });
       if (dec.park) {
         job.state = 'failed';
         this._teardownPublish(job);
@@ -1272,6 +1335,7 @@ class JobManager {
       // log's own output (under a forced stop / OOM the process's last words —
       // the wrapper's exit marker only when the wrapper outlived the group)
       run.lastLine = job.clearedAt && !((run.startedAt || 0) > job.clearedAt) ? null : this._lastLogLine(job, run);
+      if (memPark && memPark.park) { this._parkForMemory(job, run); return; } // lane jobs-memory-bound: the park says the end (once)
       // quiet-success is the DEFAULT, not a law (2.346.0, owner decision): the
       // creating agent opts scheduled successes into events+notify with
       // --notify-ok (job.notifyOk, inherited by the cron child via the
@@ -1279,7 +1343,8 @@ class JobManager {
       const routineCronOk = job.cronParent && job.state === 'done' && !job.notifyOk;
       const evText = windowEnd ? `interrupted (update_window: it started while VibeSpace was updating itself and never ran — ${job.cronParent ? 'its next fire runs it' : 'the restarted server runs it again'})`
         : run.cause === 'wrapper-mismatch' ? `failed: it never started — data/bin/job-wrapper.js speaks another protocol than this server (restart VibeSpace to finish its update)`
-          : `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`;
+          : memCause ? `${job.state}: ${M.memoryEndWhat(run)} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`
+            : `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`;
       this._touch(job, routineCronOk ? null : { what: evText });
       if (job.notifyUser && !windowEnd) { try { this.d.notifyUser({ text: `Task ${job.name}: ${job.state} (${run.cause})`, urgency: job.state === 'failed' ? 'normal' : 'low', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { } }
       // owner auto-notify honors the same quiet-success law: routine scheduled
@@ -1301,6 +1366,7 @@ class JobManager {
       const run = job.runs && job.runs[job.runs.length - 1];
       const stamp = this._readStamp(job);
       if (stamp && job.state === 'starting') { job.state = 'up'; this._touch(job); }
+      if (stamp && run && !run.memoryBound) { const b = this._ctlJson(job, run, 'bound.json'); if (b) { run.memoryBound = M.boundRecord(b); this._touch(job); } } // lane jobs-memory-bound
       // a stop that raced the wrapper's first act (no pid stamp yet ⇒ nothing
       // to kill) is honored HERE once the stamp exists — without this, a stop
       // in a job's first few hundred ms silently no-opped (2.350.0 gate catch)
@@ -1495,6 +1561,17 @@ class JobManager {
       if (!v.ok) return { error: v.error };
     }
     if (spec.context && Buffer.byteLength(spec.context.payload || '', 'utf-8') > M.CONTEXT_PAYLOAD_CAP) return { error: `context payload exceeds ${M.CONTEXT_PAYLOAD_CAP} bytes — store the brief in a file and reference its path` };
+    // THE MEMORY BOUND (lane jobs-memory-bound): the creator's own value (a scheduled task's rides its action's task — the
+    // fire builds the child from it); absent = THE LADDER at each run. 0 (unbounded) is the user's alone.
+    const task = spec.kind === 'cron' && spec.action && spec.action.type === 'spawn-task' && spec.action.task ? spec.action.task : null;
+    const memRaw = task ? task.memoryMb : spec.memoryMb;
+    let memMb = null;
+    if (memRaw !== undefined && memRaw !== null && memRaw !== '') {
+      const mv = M.memoryValueVerdict(memRaw, { byUser: !!caller.isUser });
+      if (!mv.ok) return { error: mv.error };
+      memMb = mv.mb;
+    }
+    if (task) { if (memMb === null) delete task.memoryMb; else task.memoryMb = memMb; }
     const visNames = new Set(M.visibleJobs([...this.jobs.values()], caller).map((j) => j.name));
     const { name, renamed } = M.resolveName(spec.name, visNames);
     const job = {
@@ -1511,6 +1588,7 @@ class JobManager {
       stopWithOwner: !!spec.stopWithOwner, desiredUp: true,
       state: spec.kind === 'cron' ? 'scheduled' : 'starting', proc: null, supervise: { consecutiveFails: 0, parkedAt: null },
       runs: [], createdAt: now(),
+      ...(memMb !== null && !task ? { memoryMb: memMb } : {}),
     };
     this.jobs.set(job.id, job);
     if (job.kind !== 'cron') {
@@ -1535,6 +1613,8 @@ class JobManager {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     job.desiredUp = true;
     job.supervise = { consecutiveFails: 0, parkedAt: null };
+    // lane jobs-memory-bound: the owner acted — a cron parked for its child's out-of-memory ends counts its child afresh
+    for (const k of job.kind === 'cron' ? this.jobs.values() : []) if (k.cronParent === job.id) k.supervise = { consecutiveFails: 0, parkedAt: null };
     if (job.kind === 'cron') {
       const vet = M.vetSpec(job); // B-f8c7: a cron spawns only at its next fire — reviving one the vet refuses answers NOW
       if (!vet.ok) { this._refuseRun(job, vet, 'manual'); return { error: vet.error }; }
@@ -1545,6 +1625,25 @@ class JobManager {
     try { this._spawn(job, 'manual'); } catch (e) { return { error: e.message }; } // B-f8c7: the run-time vet's refusal is an answer
     this._save();
     return { ok: true };
+  }
+  /** THE BOUND, CHANGED (lane jobs-memory-bound) — from the job's properties (the owner) or `vibespace-job memory` (its owner
+   *  conversation): a per-job value, or null / 'inherit' = back to THE LADDER. It applies from the NEXT run (the running
+   *  process keeps the bound it started under); a cron's lands on its task (and its child) — the fire runs that. */
+  setMemory(job, raw, { byUser = false } = {}) {
+    if (this.readOnly) return { error: 'registry is read-only in this process' };
+    let mb = null;
+    if (raw !== null && raw !== undefined && raw !== '' && raw !== 'inherit') {
+      const v = M.memoryValueVerdict(raw, { byUser });
+      if (!v.ok) return { error: v.error };
+      mb = v.mb;
+    }
+    const task = job.kind === 'cron' && job.action && job.action.type === 'spawn-task' && job.action.task ? job.action.task : null;
+    const targets = task ? [task, ...[...this.jobs.values()].filter((k) => k.cronParent === job.id)] : [job];
+    for (const t of targets) { if (mb === null) delete t.memoryMb; else t.memoryMb = mb; }
+    const eff = M.memoryMbOf(targets[0], this._memoryCtx());
+    this._touch(job, { what: `memory bound ${mb === null ? 'back to the default' : 'set'}: ${eff.mb ? M.memoryWords(eff.mb) : 'unbounded'} (${eff.source}; from its next run)` });
+    this._save();
+    return { ok: true, memoryMb: eff.mb, memorySource: eff.source };
   }
   rm(job, { stop, orphan } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
@@ -1635,6 +1734,11 @@ class JobManager {
       // field is never read (`vibespace-job run --at … --notify-ok` showed notifyOk=false for fires that notify)
       untilOutput: job.untilOutput || null, notifyUser: !!job.notifyUser, notifyOk: !!job.notifyOk || !!(job.action && job.action.type === 'spawn-task' && job.action.task && job.action.task.notifyOk),
       catchUp: job.catchUp || null, stopWithOwner: !!job.stopWithOwner, singleInstance: job.singleInstance !== false,
+      // lane jobs-memory-bound: THE LADDER's answer now (a cron's: its task's), the rung its latest run measured, the park's
+      // reason and the out-of-memory ends counted toward it
+      ...(() => { const m = M.memoryMbOf(job.kind === 'cron' && job.action && job.action.task ? job.action.task : job, this._memoryCtx()); return { memoryMb: m.mb, memorySource: m.source }; })(),
+      memoryBound: (run && run.memoryBound) || null, oomEnds: (job.supervise && job.supervise.oomEnds) || 0,
+      parkedFor: (job.supervise && job.supervise.parkedAt && job.supervise.parkedFor) || null,
       run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '' } : null,
       runsCount: (job.runs || []).length,
       // triage (§13): the server computes the acknowledgement over the FULL

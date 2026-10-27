@@ -11,6 +11,8 @@
  *   foldTasks(tasks, {expanded, sessionNames})  owner session → name family → rows
  *   pruneFolds(folds, layout)           the persisted fold map, minus keys no group holds
  *   heldText(digest, {t})               the held-notification sentence, words by the device's own t()
+ *   memoryChip(job, t) · memoryEndWords(job, t) · memorySourceWords(job, t) · memoryWords(mb)
+ *                                       the memory bound's chip, its named end / park, where it comes from (lane jobs-memory-bound)
  *
  * The client READS `job.ack` (the server computes it over the full record —
  * the snapshot's journal is truncated) and never derives acknowledgement.
@@ -197,4 +199,36 @@ export function heldText(digest, { t, cid = null } = {}) {
   else if (kind === 'not-reachable') why = tr('the agent did not accept it (busy or unreachable); delivered with the conversation’s next prompt or a hand-over');
   else why = tr('the conversation has no live inbox right now; delivered when it next resumes');
   return `${head} — ${why}`;
+}
+
+// ── THE MEMORY BOUND (lane jobs-memory-bound, F6 of B-7f9e) — the card's words over the snapshot's facts: memoryMb (THE
+// LADDER's answer for the next run) · memoryBound (the rung the latest run measured: {mb, by, why}) · run.cause (oom-bound /
+// oom) · parkedFor. `t` is the device's translator, handed in (PURE). A size reads the same in every language.
+export function memoryWords(mb) {
+  const n = Math.max(0, Math.floor(Number(mb) || 0));
+  return n < 1024 ? `${n} MB` : `${Math.round((n / 1024) * 10) / 10} GB`;
+}
+const runsNow = (j) => j.state === 'up' || j.state === 'starting' || j.state === 'awaiting-user'; // the run's own bound is the one in force
+/** «4 GB · cgroup» / «4 GB · rlimit» / «unbounded — this host cannot enforce a bound» — '' from a hub that says nothing */
+export function memoryChip(j, t) {
+  if (!j || j.memoryMb === undefined || j.memoryMb === null) return '';
+  const b = j.memoryBound;
+  if (!j.memoryMb && !(b && runsNow(j) && b.mb)) return t('unbounded — set by the owner');
+  if (b && b.by === 'none' && b.mb) return t('unbounded — this host cannot enforce a bound');
+  const mb = b && b.mb && runsNow(j) ? b.mb : j.memoryMb;
+  return b && b.by !== 'none' ? `${memoryWords(mb)} · ${b.by === 'cgroup' ? 'cgroup' : 'rlimit'}` : memoryWords(mb);
+}
+/** the NAMED end the card says beside the state — the park first (it is why the job no longer runs) */
+export function memoryEndWords(j, t) {
+  if (!j) return '';
+  if (j.parkedFor === 'memory') return t('parked: out of memory twice — raise its bound or fix the job');
+  const c = j.run && j.run.cause;
+  if (c === 'oom-bound') return t('stopped: used more than {size}', { size: memoryWords((j.memoryBound && j.memoryBound.mb) || j.run.memoryMb || j.memoryMb) });
+  if (c === 'oom') return t('killed: the instance ran out of memory');
+  return '';
+}
+/** where the bound comes from, for the properties row */
+export function memorySourceWords(j, t) {
+  const s = j && j.memorySource;
+  return s === 'job' ? t('its own') : s === 'setting' ? t('your setting') : s === 'cluster' ? t('the cluster’s default') : t('the default');
 }

@@ -20,7 +20,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // status-bar chip read it off the same frame (`jm` is bound lazily: the
     // constructor never broadcasts)
     broadcast: (type, payload) => broadcastAll({ type, ...payload, held: jm.heldDigest() }),
-    notifyUser: ({ text, urgency, jobId, jobName, ownerCid }) => {
+    notifyUser: ({ text, urgency, jobId, jobName, ownerCid, i18n }) => {
       // ATTRIBUTION = the AGENT CONVERSATION that owns the job (owner verdict
       // 2.357.0: an ask hanging off a background-task entity is 反直觉 — the
       // user thinks in terms of the agent they were talking to, and 2.348.1's
@@ -45,6 +45,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
           text, urgency: urgency || 'normal', by: 'agent', jobId,
           detail: (jobId ? `Background job ${jobId}` : '') + (ownerCid && jobName ? ` · via ${jobName}` : ''),
           sessionName: ownerCid ? (sessName ? `${sessName} · ${jobName || 'job'}` : (jobName || 'background job')) : (jobName || 'background job'),
+          ...(i18n ? { i18n } : {}), // lane jobs-memory-bound: a park the device words (zh/ja/en)
         });
       } catch (e) { log('[jobs] notify failed:', e.message); }
     },
@@ -107,13 +108,17 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // TRIAGE ARCHIVE policy (design §13 rule 5): the two settings rows, read
     // live; an explicit 0 = never archive that class
     archivePolicy: () => ({ doneAfterHours: serverSetting('jobs.archiveDoneAfterHours'), failedAfterDays: serverSetting('jobs.archiveFailedAfterDays') }),
+    // THE MEMORY BOUND's ladder inputs (lane jobs-memory-bound), read live per run: the owner's setting as STORED (undefined
+    // while never set — the schema's 4096 is the ladder's last rung, not an owner's word) and the cluster's default (the
+    // chart's `jobs.memoryMb` → env VIBESPACE_JOBS_MEMORY_MB)
+    memoryCtx: () => ({ setting: serverSetting('jobs.memoryMb'), cluster: process.env.VIBESPACE_JOBS_MEMORY_MB }),
   });
   // "Clear content…" (verify r4): every entry the ladder stashes is judged by the jobs store at its write — a frame a
   // wrapper hands back after the clear names a cleared job by id and is held as the sentence (jobs.js judgeHeldEntry)
   if (deliver && typeof deliver.registerStashJudge === 'function') deliver.registerStashJudge((e) => jm.judgeHeldEntry(e));
 
   const USER = { isUser: true, groups: new Set() };
-  const runsOf = (j) => (j.runs || []).map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger, lastLine: r.lastLine || '' }));
+  const runsOf = (j) => (j.runs || []).map((r) => ({ startedAt: r.startedAt, endedAt: r.endedAt || null, exit: r.exit ?? null, cause: r.cause || null, trigger: r.trigger, lastLine: r.lastLine || '', memoryMb: r.memoryMb ?? null, memoryBound: r.memoryBound || null }));
   // the panel's fold groups one-shots by OWNER SESSION (§13 rule 3): the
   // conversation lineage id + the webui session id ride the user list only
   const ownerOf = (j) => ({ conversationId: (j.owner && j.owner.conversation && j.owner.conversation.id) || null, sessionId: (j.owner && j.owner.sessionId) || null });
@@ -201,6 +206,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       else if (act === 'start') r = jm.start(job);
       else if (act === 'rm') r = jm.rm(job, { stop: !!req.body?.stop, orphan: !!req.body?.orphan });
       else if (act === 'answer') r = jm.answerPanel(job, req.body?.answers || {});
+      else if (act === 'memory') r = jm.setMemory(job, req.body?.value ?? null, { byUser: true }); // lane jobs-memory-bound: the job's properties (0 = unbounded: the owner's call)
       // the user EXPANDED the row (triage §13 rule 1c): a terminal one-shot is
       // acknowledged by the person who opened it; anything else is a no-op
       else if (act === 'seen') { const changed = jm.markAck(job, 'user-opened'); if (changed) jm._save(); return res.json({ success: true, changed, ack: M.ackState(job) }); }

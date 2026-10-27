@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.361 — 2026-10-28
+
+### Added
+- Background jobs now run under a memory limit: 4 GB by default, changed in Settings, in a job's properties or with --memory 8G.
+- A job that goes past its limit stops and says so: “stopped: used more than 4 GB”; its card shows the limit and how this computer enforces it.
+
+### Changed
+- A job out of memory twice in a row waits for you instead of restarting blindly, so on a cluster it no longer takes the whole instance down again and again.
+
 ## 2.369.360 — 2026-10-27
 
 ### Added

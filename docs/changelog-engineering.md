@@ -4,6 +4,14 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.361 — 2026-10-28
+
+### jobs-memory-bound — a Background Work job carries a memory bound and a NAMED end; an OOM counts toward the park and is never restarted blindly (F6 of B-7f9e)
+- **Cause:** the fleet pod's cgroup has `memory.oom.group=1` (the forensics of userQ's instance, 2026-10-27: 638 restarts in 74 h — an admin exec that time); nothing bounded a job, `jobs.js`'s `oom` cause was dead code, and a run that died with the pod (no exit.json — the wrapper dies too) was replayed by every boot, never counted.
+- **Measured:** a user-systemd scope without `--collect`, OOMPolicy=stop ⇒ `Result=oom-kill` + `MemoryPeak` survive the kill (the cgroup dir does not); the scoped child keeps the wrapper's process group; fleet image 3.7.0 = prlimit (util-linux 2.38.1), no systemd; node 24 needs > 512 MB of RLIMIT_DATA to start (V8 CodeRange), node 22 starts under 512 MB.
+- **Built:** PURE ladder / verdict / rung record / park law / boot judge (src/job-model.js); the wrapper measures + confirms the rung (cgroup › rlimit-data › none + why), names the end (oom-bound / oom), samples pressure; the engine names, counts (sweep, boot adopt, boot env-restart), parks (a cron child parks its parent); setting `jobs.memoryMb`, chart `jobs.memoryMb` → `VIBESPACE_JOBS_MEMORY_MB`; the card's chip + named end + properties row (zh/ja); `vibespace-job run --memory` / `memory <id>`.
+- Gates: test-jobs-memory 65 (base 6428c67e: 8 / 57 — the 512 MB job ends exit 0, a boot replays blind); the job suites, test-spend-paths, the record-clear / peer-text censuses (rows), test-helm-render, test-ci-gate (fast 909.63 / 910 s: the four real legs run at once, 0.4 s).
+
 ## 2.369.360 — 2026-10-27
 
 ### ci358-reds (items 7 + 8 and round 2 — c083607d → 5bdb59fb; the .358 mirror's two fast-tier races)
