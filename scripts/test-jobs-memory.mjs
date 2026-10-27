@@ -7,7 +7,8 @@
 //            rung record, the named end's words — the server's and the card's; the properties field (the exact value,
 //            and a Set that changes nothing writes nothing); THE INSTANCE'S CAP (round 3): the effective bound = min(the
 //            asked, the instance's memory.max less the hub's share max(1 GiB, 25 %)) — a 16 GB job on an 8 GiB pod runs at
-//            6 GiB and the card says «capped by the instance’s 8 GB limit»
+//            6 GiB and the card says «capped by the instance’s 8 GB limit»; WHICH limit (round 4: the one that CONTAINS the
+//            job — the instance, the user slice, a cgroup by name); the field shows the STORED value, the effective one beside it
 //   §1b PURE the wrapper's judges (data/bin/job-wrapper.js, required with no ctl dir): an allocation refused at the bound,
 //            keyed on the CODE first, then the words of every node the hub runs (a fixture per wording, measured) and
 //            other runtimes'; the manager's version; a scope's end by its Result (≥ 253) or its own memory.events (< 253)
@@ -22,7 +23,10 @@
 //            24 — the code or the words); ③ a systemd-run that refuses OOMPolicy (systemd < 253) and ④ one that never
 //            answers ⇒ the job runs ONCE on the next rung, the refusal in its why; ⑤ a manager < 253 (no OOMPolicy for a
 //            scope): the scope without it, the end read from the scope's own memory.events; ⑥ the instance's cap: a 16 GB
-//            job on an instance whose memory.max is 8 GiB runs under RLIMIT_DATA 6 GiB, both numbers on the run
+//            job on an instance whose memory.max is 8 GiB runs under RLIMIT_DATA 6 GiB, both numbers on the run; ROUND 4: ⑦ a
+//            stop ENDS THE JOB — < 253, a job deaf to SIGTERM: its scope empty before the end is written, «stopped by force»;
+//            a wrapper gone, its job not: the engine's step reaches the scope; ⑧ a refused rung's timer never judges the next
+//            rung's child; ⑨ the cgroup rung's cap is what CONTAINS its scope (the hub's own limit does not; a user slice's does)
 //   §4 REAL  the park law through the engine's own doors: a service's oom-bound end (1), its BOOT REPLAY's (2) ⇒ parked,
 //            the next boot leaves it alone, the owner's start counts afresh; ⓑ oom → a restart → oom is NOT two in a row
 //            (a service), ⓒ nor for a cron (fire 1 oom, fire 2 cut by a restart, fire 3 oom ⇒ still enabled)
@@ -35,6 +39,8 @@
 // RED on 0259f1ea (round 1): a refused systemd-run kills every job, by cgroup; restart resets nothing; cache is pressure;
 // node 24.22's refusal is no OOM; a SIGKILL is an OOM off the hub's counter; 512k is unbounded; the field rounds.
 // RED on 8a2727c8 (round 2): a 16 GB job on an 8 GiB pod is bound at 16 GB — the pod dies first.
+// RED on 222f7f5d (round 3): a stop kills the < 253 holder and the job runs on (its ports held); a refused rung's timer refuses
+// the next; the field shows the effective bound as if stored; a scope beside the hub is capped by the hub's own limit.
 // Load: each job allocates ≤ 512 MB once (most far less, the cgroup legs stop at 256 MB), no busy loop; the real legs run at
 // once (≤ ~0.6 s); scratch dataDirs under os.tmpdir(), one per leg.
 import fs from 'node:fs';
@@ -103,7 +109,7 @@ console.log('§1 PURE — THE LADDER, the size verdict, the rung record, the nam
   ok(chip({ state: 'up', memoryMb: 4096, memoryBound: { mb: 4096, by: 'cgroup' } }, t) === '4 GB · cgroup' && chip({ state: 'up', memoryMb: 4096, memoryBound: { mb: 4096, by: 'rlimit-data' } }, t) === '4 GB · rlimit'
     && chip({ state: 'up', memoryMb: 4096, memoryBound: { mb: 4096, by: 'none', why: 'no rung' } }, t) === 'unbounded — this host cannot enforce a bound' && chip({ state: 'down', memoryMb: 0 }, t) === 'unbounded — set by the owner' && chip({ state: 'down' }, t) === '',
   'the card\'s chip: «4 GB · cgroup» / «4 GB · rlimit» / «unbounded — this host cannot enforce a bound» / the owner\'s 0 / nothing from an older hub');
-  const capChip = chip({ state: 'up', memoryMb: 6144, memoryAskedMb: 16384, memoryCap: { limitMb: 8192, hubMb: 2048 }, memoryBound: { mb: 6144, by: 'rlimit-data' } }, t);
+  const capChip = chip({ state: 'up', memoryMb: 6144, memoryAskedMb: 16384, memoryCap: { limitMb: 8192, hubMb: 2048 }, memoryBound: { mb: 6144, by: 'rlimit-data', cap: { limitMb: 8192, hubMb: 2048 } } }, t);
   ok(capChip === '6 GB · rlimit · capped by the instance’s 8 GB limit' && chip({ state: 'down', memoryMb: 6144, memoryCap: { limitMb: 8192, hubMb: 2048 }, memoryBound: { mb: 6144, by: 'cgroup' } }, t) === '6 GB · cgroup · capped by the instance’s 8 GB limit', 'the card\'s chip says the cap: «6 GB · rlimit · capped by the instance’s 8 GB limit»', capChip);
   ok(ends({ run: { cause: 'oom-bound' }, memoryBound: { mb: 256 } }, t) === 'stopped: used more than 256 MB' && ends({ parkedFor: 'memory', run: { cause: 'oom-bound' } }, t) === 'parked: out of memory twice — raise its bound or fix the job'
     && ends({ run: { cause: 'oom' } }, t) === 'killed: the instance ran out of memory' && ends({ run: { cause: 'ok' } }, t) === '', 'the card\'s named end: the bound, the park first, the instance\'s OOM, nothing else');
@@ -113,8 +119,30 @@ console.log('§1 PURE — THE LADDER, the size verdict, the rung record, the nam
   const own = (mb) => ({ memorySource: 'job', memoryMb: mb });
   ok(field(own(1500)) === '1500M' && field(own(1536)) === '1536M' && field(own(4096)) === '4G' && field(own(0)) === '0' && field({ memorySource: 'setting', memoryMb: 8192 }) === '', 'the field: the job\'s own bound exactly — «1500M», «1536M», «4G», «0»; empty when it follows the ladder', [field(own(1500)), field(own(1536)), field(own(4096))]);
   ok(setv(own(1500), ' 1500M ') === null && setv({ memorySource: 'default', memoryMb: 4096 }, '') === null && setv(own(1500), '2G') === '2G' && setv(own(1500), '') === 'inherit', 'Set: the field unchanged ⇒ nothing is written (null); a new size is written; emptied ⇒ back to the ladder');
+  // ROUND 4 — the field shows the STORED (asked) value, never the effective one a cap lowered it to; the effective bound and the
+  // limit stand beside it, read-only; Set compares with the stored value only (222f7f5d: a stored 16G showed «6G», a stored 0
+  // «6G», and typing 6G wrote nothing)
+  const capd = { memorySource: 'job', memoryMb: 6144, memoryAskedMb: 16384, memoryCap: { limitMb: 8192, hubMb: 2048, of: 'instance' } }, capd0 = { ...capd, memoryAskedMb: 0 };
+  ok(field(capd) === '16G' && field(capd0) === '0' && setv(capd, '6G') === '6G' && setv(capd, '16G') === null && setv(capd0, '0') === null, 'the field under the cap: a stored 16G shows «16G», a stored 0 «0» — never the effective 6G; typing 6G writes 6G; the stored value again writes nothing (222f7f5d: «6G», «6G», 6G wrote nothing)', [field(capd), field(capd0), setv(capd, '6G')]);
+  const effw = LF('memoryEffectiveWords');
+  ok(effw(capd, t) === 'effective 6 GB · the instance’s limit 8 GB' && effw({ ...capd, memoryMb: 24576, memoryCap: { limitMb: 32768, hubMb: 8192, of: 'user slice' } }, t) === 'effective 24 GB · the user slice’s limit 32 GB' && effw({ ...capd, memoryCap: { limitMb: 8192, hubMb: 2048, of: 'vibespace.service' } }, t) === 'effective 6 GB · vibespace.service’s limit 8 GB' && effw(own(4096), t) === '',
+    'beside the field, read-only: «effective 6 GB · the instance’s limit 8 GB» (the user slice’s, a unit’s by its name); nothing when nothing lowers it', effw(capd, t));
+  // ROUND 4 — WHICH limit capped: the one that CONTAINS the job, named by the cgroup that holds it
+  const holder = fn('limitHolder'), cw = fn('capWords');
+  ok(holder('/') === 'instance' && holder('') === 'instance' && holder('/user.slice') === 'user slice' && holder('/user.slice/user-1000.slice') === 'user slice' && holder('/user.slice/user-1000.slice/user@1000.service/app.slice/vibespace.service') === 'vibespace.service' && holder('/kubepods.slice/kubepods-burstable.slice') === 'kubepods-burstable.slice',
+    'which limit: «/» (a container\'s own root) is the instance; user.slice / user-<uid>.slice the user slice; any other cgroup by its name', [holder('/'), holder('/user.slice/user-1000.slice'), holder('/a/vibespace.service')]);
+  const named = of({ memoryMb: 49152 }, { instanceMb: 32768, instanceOf: 'user slice' });
+  ok(named.mb === 24576 && named.cap && named.cap.of === 'user slice' && cw(named.cap) === "the user slice's 32 GB limit" && cw({ limitMb: 8192 }) === "the instance's 8 GB limit" && cw({ limitMb: 8192, of: 'vibespace.service' }) === "vibespace.service's 8 GB limit",
+    'the cap says which limit: a 48 GB job under a 32 GiB user slice ⇒ 24 GiB, «the user slice\'s 32 GB limit» (the journal\'s and the CLI\'s words)', named);
+  const brc = fn('boundRecord')({ mb: 24576, by: 'cgroup', why: 'scope', confirmed: true, cap: { limitMb: 32768, hubMb: 8192, cgroup: '/user.slice' } });
+  ok(brc.cap && brc.cap.of === 'user slice' && brc.cap.limitMb === 32768 && brc.cap.hubMb === 8192, 'the rung record carries the cap its proof read off the scope, named by its cgroup', brc);
+  ok(chip({ state: 'up', memoryMb: 4096, memoryBound: { mb: 24576, by: 'cgroup', cap: { limitMb: 32768, hubMb: 8192, of: 'user slice' } } }, t) === '24 GB · cgroup · capped by the user slice’s 32 GB limit'
+    && chip({ state: 'down', memoryMb: 6144, memoryCap: { limitMb: 8192, hubMb: 2048, of: 'vibespace.service' }, memoryBound: { mb: 6144, by: 'rlimit-data' } }, t) === '6 GB · rlimit · capped by vibespace.service’s 8 GB limit'
+    && chip({ state: 'up', memoryMb: 6144, memoryCap: { limitMb: 8192, hubMb: 2048 }, memoryBound: { mb: 16384, by: 'cgroup' } }, t) === '16 GB · cgroup',
+  'the chip names the limit that contains the job — a live run\'s own proof («24 GB · cgroup · capped by the user slice’s 32 GB limit»; a scope the hub\'s limit does not contain: «16 GB · cgroup»), an idle job\'s next run (a unit by its name)');
   // the words exist in every language the card speaks (the i18n tables carry each key)
-  const keys = ['stopped: used more than {size}', 'parked: out of memory twice — raise its bound or fix the job', 'killed: the instance ran out of memory', 'unbounded — this host cannot enforce a bound', '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again', 'Memory bound of a background job (MB)', 'capped by the instance’s {size} limit'];
+  const keys = ['stopped: used more than {size}', 'parked: out of memory twice — raise its bound or fix the job', 'killed: the instance ran out of memory', 'unbounded — this host cannot enforce a bound', '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again', 'Memory bound of a background job (MB)', 'capped by the instance’s {size} limit',
+    'capped by the user slice’s {size} limit', 'capped by {name}’s {size} limit', 'effective {size}', 'the instance’s limit {size}', 'the user slice’s limit {size}', '{name}’s limit {size}'];
   for (const lang of ['zh', 'ja']) { const src = read(`src/lib/i18n-${lang}.js`); const miss = keys.filter((k) => !src.includes(JSON.stringify(k) + ':')); ok(!miss.length, `the named end, the park and the setting speak ${lang}`, miss); }
 }
 
@@ -147,6 +175,12 @@ console.log('§1b PURE — the wrapper\'s judges: a refused allocation (the CODE
   ok(ver('259.5-0ubuntu3.4') === 259 && ver('systemd 249 (249.11-0ubuntu3.12)') === 249 && ver('252.33-1~deb12u1') === 252 && ver('') === 0 && ver(null) === 0, 'the manager\'s version: «259.5-0ubuntu3.4» (show -p Version) · «systemd 249 (…)» (--version) · nothing ⇒ 0 (OOMPolicy= only from 253)');
   const byResult = WF('scopeResultEnd');
   ok(byResult('oom-kill', 256 * MiB, 256).cause === 'oom-bound' && byResult('oom-kill', 100 * MiB, 256).cause === 'oom' && JSON.stringify(byResult('success', 0, 256)) === '{}', 'a scope ≥ 253: Result oom-kill at its bound ⇒ oom-bound; well below it ⇒ the host\'s oom; success ⇒ nothing');
+  ok(byResult('oom-kill', 300 * MiB, 0).cause === 'oom', 'a scope with no bound of its own (the owner\'s 0, nothing containing it) killed by the kernel ⇒ the host\'s oom, never its «bound» (222f7f5d: oom-bound)');
+  const wcap = WF('capOf'), rule = { minMb: M.MEMORY.minMb, hubShareMinMb: M.MEMORY.hubShareMinMb, hubShareRatio: M.MEMORY.hubShareRatio };
+  ok([1024, 2048, 3000, 8192, 32768, 1048576].every((l) => JSON.stringify(wcap(l, rule)) === JSON.stringify(M.instanceCapOf(l))) && wcap(0, rule) === null && wcap(8192, null) === null, 'the cap\'s arithmetic: the wrapper\'s copy (its numbers handed in by the server) equals the model\'s instanceCapOf, limit for limit');
+  const sharedA = WF('sharedAncestors');
+  ok(JSON.stringify(sharedA('/user.slice/user-1000.slice/user@1000.service/app.slice/vibespace-job-x.scope', '/user.slice/user-1000.slice/user@1000.service/app.slice/vibespace.service')) === JSON.stringify(['/user.slice/user-1000.slice/user@1000.service/app.slice', '/user.slice/user-1000.slice/user@1000.service', '/user.slice/user-1000.slice', '/user.slice', '/']) && JSON.stringify(sharedA('/a/b.scope', '/')) === JSON.stringify(['/']),
+    'what a scope SHARES with the hub: the common ancestors (app.slice up to «/») — never the hub\'s own unit');
   const byEvents = WF('scopeEventsEnd'), e = (oom, oomKill) => ({ oom, oomKill, oomGroupKill: 0 });
   ok(byEvents(e(0, 0), e(1, 1)).cause === 'oom-bound' && /memory\.events/.test(byEvents(e(0, 0), e(1, 1)).how || '') && byEvents(e(0, 0), e(0, 1)).cause === 'oom' && JSON.stringify(byEvents(e(0, 0), e(3, 0))) === '{}' && JSON.stringify(byEvents(null, e(1, 1))) === '{}', 'a scope < 253: its own memory.events — oom_kill with its own oom ⇒ oom-bound; oom_kill alone ⇒ the host\'s; no kill or nothing read ⇒ nothing');
 }
@@ -233,6 +267,15 @@ const fakeCgroup = (dir, { anonMb = 150, fileMb = 40, currentMb = 190, maxMb = 2
   fs.writeFileSync(path.join(cg, 'memory.stat'), `anon ${anonMb * MiB}\nfile ${fileMb * MiB}\nkernel 1048576\n`); fs.writeFileSync(path.join(cg, 'memory.events'), 'low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\n');
   return cg;
 };
+// a scope's processes NOW, read off the REAL manager by its unit (its ControlGroup) — [] once it is empty or gone; and the
+// suite's own kill of a scope it made (a RED run's leftover never outlives the suite)
+const CTL = realOf('systemctl') || 'systemctl';
+const scopeProcs = (u) => { if (!u) return []; const r = spawnSync(CTL, ['--user', 'show', '-p', 'ControlGroup', '--value', u], { encoding: 'utf8', timeout: 3000 }); const cg = String(r.stdout || '').trim(); if (!cg) return []; try { return fs.readFileSync(`/sys/fs/cgroup${cg}/cgroup.procs`, 'utf8').split('\n').filter(Boolean); } catch { return []; } };
+const killScopeOf = (u) => { if (u && u.startsWith(PREFIX)) { spawnSync(CTL, ['--user', 'kill', '--signal=KILL', u], { timeout: 3000 }); spawnSync(CTL, ['--user', 'reset-failed', u], { timeout: 3000 }); } };
+const FAKE_CTL_252 = (ctl) => `case "$*" in *"-p Version"*) echo 252.33-1~deb12u1; exit 0;; *--version*) echo "systemd 252 (252.33-1~deb12u1)"; exit 0;; esac\nexec ${ctl} "$@"`;
+// the suite's OWN walk of what a scope shares with this process (independent of the wrapper's): the common ancestors
+const sharedOf = (a, b) => { const pa = a.split('/').filter(Boolean), pb = b.split('/').filter(Boolean); let n = 0; while (n < pa.length && n < pb.length && pa[n] === pb[n]) n++; return Array.from({ length: n + 1 }, (_, i) => '/' + pa.slice(0, n - i).join('/')); };
+const selfCgroup = (() => { try { return (fs.readFileSync('/proc/self/cgroup', 'utf8').split('\n').find((l) => l.startsWith('0::')) || '0::/').slice(3) || '/'; } catch { return '/'; } })();
 const bumpGroupKill = (cg) => { const p = path.join(cg, 'memory.events'), t = fs.readFileSync(p, 'utf8'); fs.writeFileSync(p, t.replace(/^oom_group_kill (\d+)$/m, (_, n) => `oom_group_kill ${Number(n) + 1}`)); };
 const legs = [];
 const leg = (title, body) => legs.push({ title, body, rows: [] });
@@ -328,7 +371,7 @@ leg('§3 REAL ⑤ a manager < 253 — the scope WITHOUT OOMPolicy=, the end read
   await settle(E, j);
   const run = lastRun(j), ex = readJson(path.join(ctlOf(j), 'exit.json')) || {};
   ok(run.cause === 'oom-bound' && j.state === 'failed', '< 253: 256 MB bound, a 512 MB Buffer ⇒ oom-bound (0259f1ea: OOMPolicy refused — exit 1, error)', { cause: run.cause, exit: run.exit });
-  ok(ex.memory && ex.memory.by === 'cgroup' && ex.memory.confirmed === true && ex.memory.maxBytes === 256 * MiB && /systemd 252 has no OOMPolicy for a scope/.test(ex.memory.why || '') && /memory\.events: oom 1, oom_kill 1/.test(ex.memory.how || ''), '< 253: the scope held it (memory.max read back), its why says 252 has no OOMPolicy, its end is the scope\'s own memory.events (oom 1, oom_kill 1)', ex.memory);
+  ok(ex.memory && ex.memory.by === 'cgroup' && ex.memory.confirmed === true && ex.memory.maxBytes === 256 * MiB && /systemd 252 has no OOMPolicy for a scope/.test(ex.memory.why || '') && /memory\.events: oom [1-9]\d*, oom_kill [1-9]\d* \(at MemoryMax\)/.test(ex.memory.how || ''), '< 253: the scope held it (memory.max read back), its why says 252 has no OOMPolicy, its end is the scope\'s own memory.events (oom ≥ 1 — the kernel may count a second while its victim dies — oom_kill ≥ 1)', ex.memory);
   stopEngine(E);
 });
 
@@ -340,7 +383,7 @@ leg('§3 REAL ⑥ the instance\'s cap — a 16 GB job on an instance whose memor
   const j = E.jobs.get((E.create({ kind: 'task', name: 'big', cmd: { argv: ['sh', '-c', 'echo capped-run'] }, memoryMb: '16G', owner }, caller).job || {}).id);
   await settle(E, j);
   const run = lastRun(j), ex = readJson(path.join(ctlOf(j), 'exit.json')) || {};
-  ok(run.memoryMb === 6144 && run.memoryAskedMb === 16384 && JSON.stringify(run.memoryCap) === JSON.stringify({ limitMb: 8192, hubMb: 2048 }), 'cap: the run asked 16 GB and runs at 6 GiB — both numbers and the cap on its record (8a2727c8: 16 GB)', { memoryMb: run.memoryMb, asked: run.memoryAskedMb, cap: run.memoryCap });
+  ok(run.memoryMb === 6144 && run.memoryAskedMb === 16384 && run.memoryCap && run.memoryCap.limitMb === 8192 && run.memoryCap.hubMb === 2048, 'cap: the run asked 16 GB and runs at 6 GiB — both numbers and the cap on its record (8a2727c8: 16 GB)', { memoryMb: run.memoryMb, asked: run.memoryAskedMb, cap: run.memoryCap });
   ok(run.cause === 'ok' && ex.memory && ex.memory.by === 'rlimit-data' && ex.memory.mb === 6144 && ex.memory.maxBytes === 6144 * MiB, 'cap: the wrapper held it at the EFFECTIVE bound — RLIMIT_DATA 6 GiB read back off the child', ex.memory);
   const snap = E.snapshot(j), words = LF('memoryChip')(snap, (k, p) => (p ? k.replace(/\{(\w+)\}/g, (_, x) => p[x]) : k));
   ok(snap.memoryMb === 6144 && snap.memoryAskedMb === 16384 && words === '6 GB · rlimit · capped by the instance’s 8 GB limit', 'cap: the card says «6 GB · rlimit · capped by the instance’s 8 GB limit»', { words, snap: { mb: snap.memoryMb, asked: snap.memoryAskedMb, cap: snap.memoryCap } });
@@ -349,11 +392,108 @@ leg('§3 REAL ⑥ the instance\'s cap — a 16 GB job on an instance whose memor
   const own = (() => { let mb = null; const rel = (fs.readFileSync('/proc/self/cgroup', 'utf8').split('\n').find((l) => l.startsWith('0::')) || '0::/').slice(3); const parts = rel.split('/').filter(Boolean);
     for (let i = parts.length; i >= 0; i--) { try { const v = fs.readFileSync(path.join('/sys/fs/cgroup', ...parts.slice(0, i), 'memory.max'), 'utf8').trim(); if (/^\d+$/.test(v)) mb = Math.min(mb === null ? Infinity : mb, Math.floor(Number(v) / MiB)); } catch { } } return mb; })();
   const H = engineIn(scratch())({ memoryLimitDir: undefined });
-  ok(act(H, '_instanceLimitMb') === own, `cap: the engine reads its own cgroup's tightest memory.max (here ${own === null ? 'none — no cap' : own + ' MB'})`, act(H, '_instanceLimitMb'));
+  const hubRead = (act(H, '_instanceLimit') || {}).mb ?? act(H, '_instanceLimitMb');
+  ok(hubRead === own, `cap: the engine reads its own cgroup's tightest memory.max (here ${own === null ? 'none — no cap' : own + ' MB'})`, hubRead);
   stopEngine(H);
   const four = act(E, 'setMemory', j, '4G'), back = act(E, 'setMemory', j, '16G');
   ok(four.memoryMb === 4096 && !four.memoryCap && back.memoryMb === 6144 && back.memoryAskedMb === 16384 && back.memoryCap && back.memoryCap.limitMb === 8192 && E.events.some((e) => e.jobId === j.id && /capped by the instance's 8 GB limit \(asked 16 GB\)/.test(e.what || '')), 'cap: the properties / CLI take the ASKED value and answer the effective one (4G stays 4 GB; 16G ⇒ 6 GB, capped, said in the journal)', { four, back });
   stopEngine(E);
+});
+
+leg('§3 REAL ⑦ a stop ENDS THE JOB, never just its holder — systemd < 253 (a fake 252 over the real manager), a job deaf to SIGTERM', async (ok) => {
+  if (!userSystemd) { skip++; ok.say('  - SKIP the stop legs: no user systemd with a memory controller answers here'); return; }
+  const dir = scratch(), ctl = realOf('systemctl'), run0 = realOf('systemd-run');
+  fake(dir, 'systemctl', FAKE_CTL_252(ctl));
+  fake(dir, 'systemd-run', `${REFUSE_OOMPOLICY}\nexec ${run0} -p OOMPolicy=continue "$@"`);
+  const DEAF = ['sh', '-c', 'trap "" TERM; exec sleep 9'];
+  // ⓐ the owner's stop: SIGTERM to the wrapper's group — the job ignores it; the scope's drain bound (10 s) is the engine's
+  // test seam here, 0.3 s
+  const deaf = async () => {
+    const E = engineIn(dir)({ memorySample: { stopMs: 300 } });
+    const j = E.jobs.get((E.create({ kind: 'task', name: 'deaf', cmd: { argv: DEAF }, memoryMb: 256, owner }, caller).job || {}).id);
+    const up = await running(E, j), b = readJson(path.join(ctlOf(j), 'bound.json')) || {};
+    const before = scopeProcs(b.unit);
+    E.stop(j);
+    await until(() => !E._verifyAlive(E._readStamp(j)), 3000, 10);
+    const atEnd = scopeProcs(b.unit);
+    await E._sweep(); // the engine's own tick: a requested stop's kill step (222f7f5d: gated on the wrapper's life — it is gone)
+    await until(() => !scopeProcs(b.unit).length, 1500, 25);
+    return { E, j, up, b, before, atEnd, after: scopeProcs(b.unit), ex: readJson(path.join(ctlOf(j), 'exit.json')) || {}, run: lastRun(j) };
+  };
+  // ⓑ the engine's kill step never hangs on the wrapper's life: a wrapper killed ALONE (its job left in its scope — the real
+  // manager, ≥ 253) — the owner's stop is said to the scope, and the sweep reaps what an ended run left there
+  const orphan = async () => {
+    const E = engineIn(scratch())();
+    const k = E.jobs.get((E.create({ kind: 'task', name: 'orphan', cmd: { argv: DEAF }, memoryMb: 256, owner }, caller).job || {}).id);
+    const up = await running(E, k), b = readJson(path.join(ctlOf(k), 'bound.json')) || {};
+    try { process.kill(E._readStamp(k).pid, 'SIGKILL'); } catch { } // the wrapper alone — not its group
+    await until(() => !E._verifyAlive(E._readStamp(k)), 2000, 10);
+    const orphaned = scopeProcs(b.unit);
+    E.stop(k);
+    await E._sweep();
+    await until(() => !scopeProcs(b.unit).length, 1500, 25);
+    return { E, k, up, b, orphaned, left: scopeProcs(b.unit) };
+  };
+  const [A, B] = await Promise.all([deaf(), orphan()]);
+  ok(A.up && A.b.by === 'cgroup' && /systemd 252/.test(A.b.why || '') && A.before.length >= 1, `deaf: it runs in its scope on the < 253 rung (cgroup.procs before the stop: [${A.before.join(' ')}])`, A.b);
+  ok(!A.atEnd.length && !A.after.length, `deaf: the stop ENDED the job — its scope's cgroup.procs when its wrapper ended: [${A.atEnd.join(' ')}], after the engine's step: [${A.after.join(' ')}] (222f7f5d: the holder died at once, the wrapper left, «sleep 9» stayed)`, { atEnd: A.atEnd, after: A.after });
+  ok(A.ex.signal === 'SIGKILL' && A.ex.stop === 'SIGTERM' && /^stopped by force: it did not end on SIGTERM in 0\.3 s — its scope was killed$/.test(A.ex.forced || ''), `deaf: exit.json names the job's OWN end (signal ${A.ex.signal}), the stop (${A.ex.stop}) and «${A.ex.forced || 'no force'}» (222f7f5d: the holder's SIGTERM, no force)`, A.ex);
+  ok(A.run.cause === 'interrupted' && /stopped by force/.test(A.run.forced || '') && /stopped by force/.test(A.run.lastLine || '') && A.E.events.some((e) => e.jobId === A.j.id && /stopped by force/.test(e.what || '')), 'deaf: the run stays a stop (interrupted) and says «stopped by force» — its record, its last line, its journal', { cause: A.run.cause, forced: A.run.forced, lastLine: A.run.lastLine });
+  ok(B.up && B.orphaned.length >= 1 && !B.left.length && /^stopped by force: its wrapper was gone and its scope still held 1 process — its scope was killed$/.test(lastRun(B.k).forced || ''), `a wrapper gone, its job not (cgroup.procs: [${B.orphaned.join(' ')}]) — the engine's step reached the SCOPE: [${B.left.join(' ')}], said on the run (222f7f5d: nothing reached it)`, { orphaned: B.orphaned, left: B.left, forced: lastRun(B.k).forced });
+  for (const u of [A.b.unit, B.b.unit]) killScopeOf(u); // a RED run's orphans never outlive the suite
+  stopEngine(A.E); stopEngine(B.E);
+});
+
+leg('§3 REAL ⑧ a timer belongs to its rung — a refused rung\'s proof never judges the next rung\'s child', async (ok) => {
+  if (!fakeable) { skip++; ok.say('  - SKIP the late-refusal leg: no cgroup v2 memory controller or no prlimit here'); return; }
+  const dir = scratch(), pl = realOf('prlimit');
+  fake(dir, 'systemctl', FAKE_CTL_259);
+  fake(dir, 'systemd-run', 'sleep 0.25; echo "Unknown assignment: OOMPolicy=stop" >&2; exit 1'); // refused LATE in its window
+  fake(dir, 'prlimit', `sleep 0.2; exec ${pl} "$@"`); // the next rung: slow but sound — it proves well inside ITS OWN window
+  const E = engineIn(dir)({ memorySample: { gateMs: 400 } });
+  const j = E.jobs.get((E.create({ kind: 'task', name: 'late', cmd: { argv: ['sh', '-c', 'echo ran-once'] }, memoryMb: 1024, owner }, caller).job || {}).id);
+  await settle(E, j);
+  const ex = readJson(path.join(ctlOf(j), 'exit.json')) || {}, m = ex.memory || {}, log = fs.readFileSync(lastRun(j).log, 'utf8');
+  ok(m.by === 'rlimit-data' && m.confirmed === true && m.why === 'systemd-run refused: Unknown assignment: OOMPolicy=stop — RLIMIT_DATA on the job instead' && (log.match(/ran-once/g) || []).length === 1, `late refusal: the next rung proves in its own window — ${m.by}, «${m.why}» (222f7f5d: the refused rung's timer judged prlimit by ITS deadline — by none, «prlimit did not answer»)`, m);
+  stopEngine(E);
+});
+
+leg('§3 REAL ⑨ the cap is the limit that CONTAINS the job — a scope beside the hub is not inside the hub\'s own limit; a slice it shares is', async (ok) => {
+  if (!userSystemd) { skip++; ok.say('  - SKIP the containment leg: no user systemd with a memory controller answers here'); return; }
+  // where this host puts a user scope (the manager's app.slice), and what that shares with this process — the suite's own walk
+  const um = String(spawnSync(CTL, ['--user', 'show', '-p', 'ControlGroup', '--value'], { encoding: 'utf8', timeout: 3000 }).stdout || '').trim();
+  const shared = sharedOf(`${um}/app.slice/x.scope`, selfCgroup);
+  const realLim = shared.map((d) => { try { const v = fs.readFileSync(path.join('/sys/fs/cgroup', d, 'memory.max'), 'utf8').trim(); return /^\d+$/.test(v) ? Math.floor(Number(v) / MiB) : null; } catch { return null; } }).filter((v) => v !== null).sort((x, y) => x - y)[0] ?? null;
+  const want = realLim ? Math.min(16384, M.instanceCapOf(realLim).capMb) : 16384;
+  // (a) the HUB's own cgroup holds 8 GiB (the seam stands for it — env.sh's scope, the hub's unit); a 16 GB job on the cgroup
+  // rung lives in a scope BESIDE the hub: that limit does not contain it, nothing lowers it (the rlimit rung, inside the hub,
+  // still is — leg ⑥)
+  const dir = scratch(), lim = path.join(dir, 'hub-cgroup');
+  fs.mkdirSync(lim); fs.writeFileSync(path.join(lim, 'memory.max'), String(8 * 1024 * MiB));
+  const E = engineIn(dir)({ memoryLimitDir: lim });
+  const j = E.jobs.get((E.create({ kind: 'task', name: 'beside', cmd: { argv: ['sh', '-c', 'echo beside'] }, memoryMb: '16G', owner }, caller).job || {}).id);
+  await settle(E, j);
+  const bj = (readJson(path.join(ctlOf(j), 'exit.json')) || {}).memory || {}, rj = lastRun(j);
+  ok(bj.by === 'cgroup' && bj.mb === want && bj.maxBytes === want * MiB && rj.memoryMb === want && (realLim ? !!rj.memoryCap : !rj.memoryCap), `beside: a 16 GB job whose hub holds 8 GiB runs at ${want} MB on the cgroup rung — its scope's memory.max read back ${bj.maxBytes}; the hub's own limit does not contain it (222f7f5d: 6 GiB, «capped by the instance's 8 GB»)`, { by: bj.by, mb: bj.mb, cap: rj.memoryCap });
+  // (b) a limit the scope SHARES with the hub (a fake tree of memory.max files — the seam `limitRoot`; this host's real
+  // user.slice holds the production hub and is never touched): 32 GiB there ⇒ a 48 GB job runs at 24 GiB, and the record
+  // names WHICH limit
+  const top = shared[shared.length - 2] || '/', base = top.split('/').filter(Boolean).pop() || '';
+  const name = top === '/' ? 'instance' : /^user(-\d+)?\.slice$/.test(base) ? 'user slice' : base;
+  const tree = path.join(dir, 'cgroup-tree');
+  fs.mkdirSync(path.join(tree, top), { recursive: true }); fs.writeFileSync(path.join(tree, top, 'memory.max'), String(32 * 1024 * MiB));
+  const F = engineIn(scratch())({ memorySample: { limitRoot: tree } });
+  const k = F.jobs.get((F.create({ kind: 'task', name: 'shared', cmd: { argv: ['sh', '-c', 'echo shared'] }, memoryMb: '48G', owner }, caller).job || {}).id);
+  await settle(F, k);
+  const bk = (readJson(path.join(ctlOf(k), 'exit.json')) || {}).memory || {}, rk = lastRun(k);
+  const tr = (key, p) => (p ? key.replace(/\{(\w+)\}/g, (_, x) => p[x]) : key), words = LF('memoryChip')(F.snapshot(k), tr);
+  ok(bk.by === 'cgroup' && bk.mb === 24576 && bk.maxBytes === 24576 * MiB && rk.memoryMb === 24576 && rk.memoryAskedMb === 49152 && rk.memoryCap && rk.memoryCap.limitMb === 32768 && rk.memoryCap.of === name,
+    `shared: ${top} at 32 GiB ⇒ a 48 GB job's scope is set to 24 GiB before the go (read back ${bk.maxBytes}); the run names the limit — «${name}» (222f7f5d: 48 GiB, nothing read off the scope)`, { by: bk.by, mb: bk.mb, cap: rk.memoryCap });
+  const capName = name === 'instance' ? 'the instance’s' : name === 'user slice' ? 'the user slice’s' : `${name}’s`;
+  const set64 = act(F, 'setMemory', k, '64G');
+  ok(words === `24 GB · cgroup · capped by ${capName} 32 GB limit` && set64.memoryMb === 24576 && set64.memoryCap && set64.memoryCap.of === name && F.events.some((e) => e.jobId === k.id && e.what && e.what.includes(`capped by ${capName.replace('’', "'")} 32 GB limit (asked 64 GB)`)),
+    `shared: the card says «${words}»; the next run's words follow what contains this host's scopes (a 64G ⇒ 24 GB, the journal names the limit)`, { words, set64 });
+  stopEngine(E); stopEngine(F);
 });
 
 leg('§4 REAL — the park law through the engine\'s doors (a boot replay counts exactly like a run)', async (ok) => {
@@ -512,8 +652,15 @@ try {
     ok(/'jobs\.memoryMb': \{\s*\n\s*type: 'number', default: 4096, min: 0,/.test(schema), 'the setting jobs.memoryMb lives in the schema (default 4096, 0 = unbounded)');
     ok(/name: VIBESPACE_JOBS_MEMORY_MB/.test(chart) && /fetchJson\(`\/api\/jobs\/\$\{j\.id\}\/memory`/.test(panel), 'the chart renders the cluster\'s default; the card\'s properties post the bound');
     ok(/memIn\.value = memoryFieldValue\(job\);/.test(panel) && /const value = memorySetValue\(job, memIn\.value\);\s*\n\s*if \(value === null\)/.test(panel), 'the properties field shows the stored bound exactly, and an unchanged Set posts nothing');
-    ok(/capped by the instance's \$\{sizeWords\(c\.limitMb\)\} limit \(asked \$\{asked\}; the hub keeps/.test(cli) && /capped by the instance's \$\{sizeWords\(r\.memoryCap\.limitMb\)\} limit \(asked/.test(cli) && /r2\.memoryCap\?\.limitMb \? ' · ' \+ t\('capped by the instance’s \{size\} limit'/.test(panel) && /memoryAskedMb: r\.memoryAskedMb \?\? null, memoryCap: r\.memoryCap \|\| null/.test(wiring),
-      'the cap is said where the job is: `show` / `poll` (asked, effective, the hub\'s share), `memory <id>`, the properties toast, the API\'s runs');
+    ok(/capped by \$\{capWords\(c\)\} \(asked \$\{asked\}; the hub keeps/.test(cli) && /capped by \$\{capWords\(r\.memoryCap\)\} \(asked/.test(cli) && /r2\.memoryCap\?\.limitMb \? ' · ' \+ memoryCapWords\(r2\.memoryCap, t\)/.test(panel) && /memoryAskedMb: r\.memoryAskedMb \?\? null, memoryCap: r\.memoryCap \|\| null/.test(wiring),
+      'the cap is said where the job is, and WHICH limit: `show` / `poll` (asked, effective, the hub\'s share), `memory <id>`, the properties toast, the API\'s runs');
+    ok(/memEff\.textContent = memoryEffectiveWords\(job, t\);/.test(panel) && /memRow\.append\(memLbl, memIn, memSet, memFact, memEff\);/.test(panel), 'the properties: the effective bound and its limit stand BESIDE the stored value, read-only');
+    // a stop ends the JOB: the gate execs it on every rung (the < 253 keeper sits beside it, never its parent) and nothing but
+    // its own rung and child is read by a proof's timer
+    ok(/const GATE_KEEP = 'read -r go <&3 \|\| exit 125; \( \(trap "" TERM INT HUP; read -r ack <&3\) <\/dev\/null >\/dev\/null 2>&1 & \); exec "\$@" 3<&-';/.test(WRAPPER_SRC) && !/GATE_HOLD/.test(WRAPPER_SRC) && /r\.timer = setTimeout\(\(\) => prove\(r, c, deadline\), 10\)/.test(WRAPPER_SRC) && !/setTimeout\(\(\) => prove\(deadline\)/.test(WRAPPER_SRC),
+      'the wrapper: the job is exec\'d on every rung (the < 253 keeper double-forked beside it, deaf to a stop); a proof\'s timer is bound to its rung and its child');
+    ok(/const hadProc = force && scope \? this\._escalate\(job, scope\) : this\._killGroup\(job, force \? 'SIGKILL' : 'SIGTERM'\);/.test(jobs) && /this\._escalate\(job, this\._runScope\(job, run\)\); \/\/ round 4/.test(jobs) && /await this\._reapScope\(job, run\);/.test(jobs) && jobs.split("setTimeout(() => this._killGroup(job, 'SIGKILL')").length === 1,
+      'src/jobs.js: every kill step goes through _escalate (the scope on the cgroup rung, whether or not its wrapper lives); a dead wrapper\'s scope is reaped');
     // THE ONE ROAD: the model's park law is called in ONE place, and every end — the sweep's and the boot's, `oom` and
     // env-restart — goes through it (0259f1ea: two bookkeeping paths, the boot's env-restart in neither)
     ok(jobs.split('M.onMemoryEnd(').length === 2 && /const memPark = windowEnd \? null : this\._countEnd\(job, run\.cause\);/.test(jobs) && /const mp = ends \? this\._countEnd\(job, v\.cause\) : null;/.test(jobs) && /this\._bootNoExit\(job, run, M\.bootEndCause\(sample, sample \? this\._cgroupNow\(\) : null\)\);/.test(jobs), 'src/jobs.js: ONE call of the park law (_countEnd) — _finalizeRun and the boot\'s _bootNoExit (oom AND env-restart) both end there');
@@ -526,6 +673,7 @@ try {
   for (const E of engines) for (const j of E.jobs.values()) { try { const st = E._readStamp(j); if (E._verifyAlive(st)) process.kill(-st.pid, 'SIGKILL'); } catch { } }
   const left = spawnSync('systemctl', ['--user', 'list-units', '--all', '--no-legend', '--plain', `${PREFIX}-*`], { encoding: 'utf8', timeout: 3000 });
   if (userSystemd) ok(left.status === 0 && !String(left.stdout || '').trim(), 'no scope this suite made outlives it (failed ones are reset by the wrapper that read them)', String(left.stdout || '').trim());
+  for (const l of String(left.stdout || '').split('\n')) killScopeOf(l.trim().split(/\s+/)[0]); // said above, then gone — never left running
   for (const d of dirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 }
 

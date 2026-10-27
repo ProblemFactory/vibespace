@@ -12,7 +12,7 @@
  *   pruneFolds(folds, layout)           the persisted fold map, minus keys no group holds
  *   heldText(digest, {t})               the held-notification sentence, words by the device's own t()
  *   memoryChip(job, t) · memoryEndWords(job, t) · memorySourceWords(job, t) · memoryWords(mb) · memoryFieldValue(job) ·
- *   memorySetValue(job, typed)
+ *   memorySetValue(job, typed) · memoryCapWords(cap, t) · memoryEffectiveWords(job, t)
  *                                       the memory bound's chip, its named end / park, where it comes from (lane jobs-memory-bound)
  *
  * The client READS `job.ack` (the server computes it over the full record —
@@ -211,15 +211,32 @@ export function memoryWords(mb) {
 }
 const runsNow = (j) => j.state === 'up' || j.state === 'starting' || j.state === 'awaiting-user'; // the run's own bound is the one in force
 /** «4 GB · cgroup» / «4 GB · rlimit» / «unbounded — this host cannot enforce a bound» — '' from a hub that says nothing; a
- *  bound the instance's own limit lowered says so (round 3): «6 GB · rlimit · capped by the instance’s 8 GB limit» */
+ *  bound a limit lowered says so (round 3), and WHICH limit (round 4 — the one that contains the job): «6 GB · rlimit · capped
+ *  by the instance’s 8 GB limit» · «24 GB · cgroup · capped by the user slice’s 32 GB limit». A live run's are its own proof's. */
 export function memoryChip(j, t) {
   if (!j || j.memoryMb === undefined || j.memoryMb === null) return '';
-  const b = j.memoryBound;
-  if (!j.memoryMb && !(b && runsNow(j) && b.mb)) return t('unbounded — set by the owner');
+  const b = j.memoryBound, live = !!(b && b.mb && runsNow(j));
+  if (!j.memoryMb && !live) return t('unbounded — set by the owner');
   if (b && b.by === 'none' && b.mb) return t('unbounded — this host cannot enforce a bound');
-  const mb = b && b.mb && runsNow(j) ? b.mb : j.memoryMb;
-  const capped = j.memoryCap && j.memoryCap.limitMb ? ` · ${t('capped by the instance’s {size} limit', { size: memoryWords(j.memoryCap.limitMb) })}` : '';
+  const mb = live ? b.mb : j.memoryMb, cap = live ? b.cap : j.memoryCap;
+  const capped = cap && cap.limitMb ? ` · ${memoryCapWords(cap, t)}` : '';
   return (b && b.by !== 'none' ? `${memoryWords(mb)} · ${b.by === 'cgroup' ? 'cgroup' : 'rlimit'}` : memoryWords(mb)) + capped;
+}
+/** the limit that lowered a bound, named (round 4): the instance (a container's own root), the user slice, or a cgroup by its
+ *  name (the hub's own unit …) */
+export function memoryCapWords(cap, t) {
+  const size = memoryWords(cap && cap.limitMb), of = cap && cap.of;
+  if (!of || of === 'instance') return t('capped by the instance’s {size} limit', { size });
+  return of === 'user slice' ? t('capped by the user slice’s {size} limit', { size }) : t('capped by {name}’s {size} limit', { name: of, size });
+}
+/** BESIDE the properties field, read-only (round 4): the bound the next run gets and the limit that lowered the stored one —
+ *  «effective 6 GB · the instance’s limit 8 GB»; '' when nothing lowers it (the field itself always shows what is STORED) */
+export function memoryEffectiveWords(j, t) {
+  const c = j && j.memoryCap;
+  if (!c || !c.limitMb) return '';
+  const size = memoryWords(c.limitMb);
+  const lim = !c.of || c.of === 'instance' ? t('the instance’s limit {size}', { size }) : c.of === 'user slice' ? t('the user slice’s limit {size}', { size }) : t('{name}’s limit {size}', { name: c.of, size });
+  return `${t('effective {size}', { size: memoryWords(j.memoryMb) })} · ${lim}`;
 }
 /** the NAMED end the card says beside the state — the park first (it is why the job no longer runs) */
 export function memoryEndWords(j, t) {
@@ -231,14 +248,16 @@ export function memoryEndWords(j, t) {
   return '';
 }
 /** the properties field: the job's OWN stored bound EXACTLY (acceptance round 2 — a rounded 0.1 GB written back changed it):
- *  a whole GB as «4G», anything else in MB («1536M», «1000M»), «0» = unbounded; '' when the job has none (the ladder's) */
+ *  a whole GB as «4G», anything else in MB («1536M», «1000M»), «0» = unbounded; '' when the job has none (the ladder's). The
+ *  STORED value — the asked one — never the effective bound a cap lowered it to (round 4: a stored 16G showed «6G», a stored 0
+ *  «6G», and typing 6G wrote nothing); the effective one stands beside it (memoryEffectiveWords) */
 export function memoryFieldValue(j) {
   if (!j || j.memorySource !== 'job') return '';
-  const mb = Math.max(0, Math.floor(Number(j.memoryMb) || 0));
+  const mb = Math.max(0, Math.floor(Number(j.memoryAskedMb ?? j.memoryMb) || 0));
   return !mb ? '0' : mb % 1024 === 0 ? `${mb / 1024}G` : `${mb}M`;
 }
-/** Set: what to write — null when the field still says what is stored (nothing changes, nothing is written); '' = back to
- *  the ladder (`inherit`) */
+/** Set: what to write — null when the field still says what is STORED (nothing changes, nothing is written — compared with
+ *  the stored value only, never the effective one); '' = back to the ladder (`inherit`) */
 export function memorySetValue(j, typed) {
   const v = String(typed == null ? '' : typed).trim();
   return v === memoryFieldValue(j) ? null : (v || 'inherit');

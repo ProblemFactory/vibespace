@@ -11,6 +11,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Changed
 - A job out of memory twice in a row waits for you instead of restarting blindly, so on a cluster it no longer takes the whole instance down again and again.
 - On a computer or cluster with its own memory limit, a job's limit stays below it, and its card says when it was lowered.
+- Stopping a background job now ends everything it started; its properties keep the limit you set and show the one in force beside it.
 
 ## 2.369.360 — 2026-10-27
 

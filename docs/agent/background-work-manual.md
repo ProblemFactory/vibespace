@@ -173,7 +173,11 @@ Every run has a memory bound: `--memory 8G` at create (or `vibespace-job memory 
 conversation only, and it asks the user first like `start`; it applies from the NEXT run), else the user's Settings → Background Work, else the cluster's
 default, else **4 GB**. Unbounded (0) is the user's call alone — you cannot set it. On an instance with a memory limit of
 its own (a cluster pod) every bound is capped below it — the hub keeps max(1 GB, a quarter): `--memory 16G` on an 8 GB pod
-runs at 6 GB, and `show` says «capped by the instance's 8 GB limit (asked 16 GB)».
+runs at 6 GB, and `show` says «capped by the instance's 8 GB limit (asked 16 GB)». The cap is the limit that CONTAINS the
+job — under a user systemd the job's own scope sits beside VibeSpace, so a limit on VibeSpace's own service does not lower
+it, a limit on the user slice does (`show` names which).
+- **A stop ends the WHOLE job** — everything it started: a process that ignores SIGTERM is killed 10 s later (its run says
+  «stopped by force: …»), and under a user systemd nothing it left behind outlives the run.
 
 - The wrapper enforces it with what this host offers and SAYS which (`vibespace-job show <id>` → `memory: …`):
   a cgroup of the user systemd (a real ceiling, no swap) or RLIMIT_DATA on the process (a fleet pod: no systemd);

@@ -227,8 +227,9 @@ function instanceCapOf(limitMb) {
  *  is undefined while the owner never set it (the server's settings reader answers the stored value, never the schema
  *  default). THE EFFECTIVE bound (round 3) = min(the asked, the instance's cap): where the instance has a memory.max
  *  (`instanceMb`) and the asked bound is above its cap — or unbounded (0) — the answer is the cap, and it says so
- *  ({askedMb, cap: {limitMb, hubMb}}); a host with no limit caps nothing. */
-function memoryMbOf(job, { setting, cluster, instanceMb } = {}) {
+ *  ({askedMb, cap: {limitMb, hubMb}}); a host with no limit caps nothing. The limit is the one that CONTAINS the job (round
+ *  4): the caller says which (`instanceOf`, a limitHolder name) and the cap carries it as `of`. */
+function memoryMbOf(job, { setting, cluster, instanceMb, instanceOf } = {}) {
   const asked = (() => {
     const own = ladderMb(job && job.memoryMb);
     if (own !== null) return { mb: own, source: 'job' };
@@ -240,12 +241,27 @@ function memoryMbOf(job, { setting, cluster, instanceMb } = {}) {
   })();
   const cap = instanceCapOf(instanceMb);
   if (!cap || (asked.mb && asked.mb <= cap.capMb)) return asked;
-  return { mb: cap.capMb, source: asked.source, askedMb: asked.mb, cap: { limitMb: cap.limitMb, hubMb: cap.hubMb } };
+  return { mb: cap.capMb, source: asked.source, askedMb: asked.mb, cap: { limitMb: cap.limitMb, hubMb: cap.hubMb, ...(instanceOf ? { of: instanceOf } : {}) } };
+}
+/** WHICH LIMIT capped (round 4), by the cgroup that holds it: «/» — the root a container sees (a pod's cgroup namespace) — is
+ *  the instance; user.slice / user-<uid>.slice the user slice; any other cgroup its own name (the hub's unit, a slice) */
+function limitHolder(cg) {
+  const s = String(cg || '');
+  if (!s || s === '/') return 'instance';
+  const base = s.split('/').filter(Boolean).pop() || '';
+  if (/^user(-\d+)?\.slice$/.test(base)) return 'user slice';
+  return /^[A-Za-z0-9_.@:-]{1,80}$/.test(base) ? base : 'instance';
+}
+/** «the instance's 8 GB limit» · «the user slice's 32 GB limit» · «vibespace.service's 8 GB limit» */
+function capWords(cap) {
+  const of = (cap && cap.of) || 'instance';
+  return `${of === 'instance' || of === 'user slice' ? 'the ' + of : of}'s ${memoryWords(cap && cap.limitMb)} limit`;
 }
 /** the rung a run carries — a FACT the wrapper measured (`none` says why), never a silent fallback */
 function boundRecord(r) {
   const by = r && ['cgroup', 'rlimit-data', 'none'].includes(r.by) ? r.by : 'none';
-  return { mb: finiteMb(r && r.mb) || 0, by, why: clip(String((r && r.why) || (by === 'none' ? 'the wrapper did not say' : '')), 200) };
+  const c = r && r.cap && typeof r.cap === 'object' && finiteMb(r.cap.limitMb) ? r.cap : null; // round 4: the limit that lowered it, named
+  return { mb: finiteMb(r && r.mb) || 0, by, why: clip(String((r && r.why) || (by === 'none' ? 'the wrapper did not say' : '')), 200), ...(c ? { cap: { limitMb: finiteMb(c.limitMb), hubMb: finiteMb(c.hubMb) || 0, of: typeof c.of === 'string' && c.of ? clip(c.of, 80) : limitHolder(c.cgroup) } } : {}) };
 }
 /** 4096 → "4 GB", 1536 → "1.5 GB", 512 → "512 MB" */
 function memoryWords(mb) {
@@ -698,7 +714,7 @@ module.exports = {
   vetSpec, jobCommandParts, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,
-  MEMORY, MEMORY_CAUSES, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, boundRecord, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
+  MEMORY, MEMORY_CAUSES, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
   notifyEffective, renderOwnerNotify, renderNotifStash,

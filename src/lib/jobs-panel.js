@@ -10,7 +10,7 @@ import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: a panel's ```mermaid fence draws
 import { registerWindowType } from './window-types.js';
-import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue } from './jobs-layout.js';
+import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords } from './jobs-layout.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
@@ -359,8 +359,8 @@ async function expandDetail(app, el, j, refresh) {
   const memRow = document.createElement('div'); memRow.className = 'jobs-access jobs-memory';
   const memLbl = document.createElement('span'); memLbl.textContent = t('Memory bound') + ':';
   const memIn = document.createElement('input'); memIn.className = 'jobs-memory-input'; memIn.size = 8;
-  memIn.value = memoryFieldValue(job); // the stored bound exactly — never a rounded one Set would write back
-  memIn.placeholder = job.memoryMb ? memoryWords(job.memoryMb) : t('unbounded');
+  memIn.value = memoryFieldValue(job); // the STORED bound exactly — never a rounded one Set would write back, never the effective one
+  memIn.placeholder = (job.memoryAskedMb ?? job.memoryMb) ? memoryWords(job.memoryAskedMb ?? job.memoryMb) : t('unbounded'); // what an empty field asks: the ladder's
   const memSet = document.createElement('button'); memSet.className = 'jobs-btn'; memSet.textContent = t('Set');
   const memFact = document.createElement('span'); memFact.className = 'jobs-memory-fact';
   memFact.textContent = `${memorySourceWords(job, t)}${job.memoryBound ? ' · ' + (memoryChip(job, t) || '') : ''} · ${t('from its next run')}`;
@@ -368,9 +368,13 @@ async function expandDetail(app, el, j, refresh) {
     const value = memorySetValue(job, memIn.value);
     if (value === null) { showToast(t('Memory bound: {size}', { size: job.memoryMb ? memoryWords(job.memoryMb) : t('unbounded') })); return; } // unchanged: nothing is written
     const r2 = await fetchJson(`/api/jobs/${j.id}/memory`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
-    if (r2?.error) showToast(r2.error, { error: true }); else { showToast(t('Memory bound: {size}', { size: r2.memoryMb ? memoryWords(r2.memoryMb) : t('unbounded') }) + (r2.memoryCap?.limitMb ? ' · ' + t('capped by the instance’s {size} limit', { size: memoryWords(r2.memoryCap.limitMb) }) : '')); refresh?.(); } // the effective bound, and the cap that lowered the asked one
+    if (r2?.error) showToast(r2.error, { error: true }); else { showToast(t('Memory bound: {size}', { size: r2.memoryMb ? memoryWords(r2.memoryMb) : t('unbounded') }) + (r2.memoryCap?.limitMb ? ' · ' + memoryCapWords(r2.memoryCap, t) : '')); refresh?.(); } // the effective bound, and the limit that lowered the asked one
   };
-  memRow.append(memLbl, memIn, memSet, memFact);
+  // round 4: beside the stored value, read-only — the bound the next run gets and the limit that lowers it («effective 6 GB ·
+  // the instance’s limit 8 GB»)
+  const memEff = document.createElement('span'); memEff.className = 'jobs-memory-fact';
+  memEff.textContent = memoryEffectiveWords(job, t);
+  memRow.append(memLbl, memIn, memSet, memFact, memEff);
   d.appendChild(memRow);
   // owner auto-notify state (2.344.0): which lane told (or will tell) the
   // owner conversation about this job, and when it last happened

@@ -969,6 +969,49 @@ class JobManager {
     if (!this._verifyAlive(stamp)) return false;
     return PI.signalIdentity(stamp, sig, { group: true, what: `job ${job.id}` }).ok; // the group, else its leader
   }
+  // A STOP ENDS THE JOB (lane jobs-memory-bound, acceptance round 4): on the cgroup rung the job's group is its SCOPE — every
+  // process it started, in its process group or not, and whether or not its wrapper still lives (the base killed nothing once
+  // the wrapper was gone: a job its holder left behind kept its ports and met the next start). The scope is named by its run's
+  // own bound.json (the run's start time is in the unit's name — never another run's), and killed by the KERNEL's own
+  // cgroup.kill (5.14+): every process of the cgroup at once, no pid read then signalled, and no process started here — this
+  // file starts exactly one, the vetted job (test-job-model's ONE DOOR).
+  /** the scope a run's job lives in — {unit, dir} — or null (another rung, or no proof yet) */
+  _runScope(job, run) {
+    const b = run ? this._ctlJson(job, run, 'bound.json') : null;
+    if (!b || b.by !== 'cgroup' || !/^[A-Za-z0-9_.@-]{1,200}\.scope$/.test(String(b.unit || ''))) return null;
+    const cg = typeof b.cgroup === 'string' && /^\/[A-Za-z0-9_.@/-]+$/.test(b.cgroup) && !b.cgroup.includes('..') && b.cgroup.endsWith(`/${b.unit}`) ? b.cgroup : '';
+    return { unit: b.unit, dir: cg ? path.join('/sys/fs/cgroup', cg) : '' };
+  }
+  /** SIGKILL to every process of a scope (its cgroup.kill) — false when the scope is gone or this kernel has no cgroup.kill */
+  _killScope(scope) {
+    return scope && scope.dir ? fs.promises.writeFile(path.join(scope.dir, 'cgroup.kill'), '1').then(() => true, () => false) : Promise.resolve(false);
+  }
+  /** THE KILL STEP of a stop / a timeout: the cgroup rung's scope — its wrapper, alive, writes the end once the scope is empty;
+   *  a wrapper still there a step later (wedged) is killed with its group; any other rung: the group, as before */
+  _escalate(job, scope) {
+    if (!scope || !scope.dir) return this._killGroup(job, 'SIGKILL');
+    const k = job._scopeKilled;
+    if (k && k.unit === scope.unit && now() - k.at >= 3000) {
+      const cur = this._runScope(job, job.runs && job.runs[job.runs.length - 1]);
+      return cur && cur.unit === scope.unit ? this._killGroup(job, 'SIGKILL') : false; // never a later run's wrapper
+    }
+    if (!k || k.unit !== scope.unit) job._scopeKilled = { unit: scope.unit, at: now() };
+    this._killScope(scope);
+    return true;
+  }
+  /** a run whose wrapper is gone: what is still in its scope belongs to an ENDED run — killed, and said on the run */
+  async _reapScope(job, run) {
+    const scope = this._runScope(job, run);
+    if (!scope || !scope.dir) return;
+    let left = 0;
+    try { left = (await fs.promises.readFile(path.join(scope.dir, 'cgroup.procs'), 'utf8')).split('\n').filter((l) => /^\d+$/.test(l)).length; } catch { return; }
+    if (!left) return;
+    const held = `its wrapper was gone and its scope still held ${left} process${left === 1 ? '' : 'es'}`;
+    const words = (await this._killScope(scope)) ? `stopped by force: ${held} — its scope was killed` : `${held} — not killed: this kernel has no cgroup.kill (systemctl --user kill --signal=KILL ${scope.unit})`;
+    run.forced = run.forced || words;
+    this.d.log(`[jobs] ${job.id} ${words}`);
+    this._touch(job, { what: words });
+  }
 
   // ── spawn ───────────────────────────────────────────────────────────────
   // B-f8c7 (lane job-vendor-ban): THE ONE VET judges every RUN, not only the create — this is the one place a job's command
@@ -998,7 +1041,8 @@ class JobManager {
     job.runs = job.runs || [];
     // THE MEMORY BOUND (lane jobs-memory-bound): THE LADDER's answer for THIS run (src/job-model.js memoryMbOf) rides the spec;
     // the wrapper measures the rung that enforces it and says so (bound.json while it runs, exit.json `memory` at its end)
-    const mem = M.memoryMbOf(job, this._memoryCtx());
+    const mem = M.memoryMbOf(job, this._memoryCtx()); // the record's, until the wrapper says the bound it proved (_adoptBound)
+    const hub = M.memoryMbOf(job, this._memoryCtx({ hub: true })); // the spec's: the rlimit / none rungs live inside the hub's own cgroup
     job.runs.push({ startedAt: runTs, trigger, log: path.join(ctl, 'current.log'), memoryMb: mem.mb, memoryAskedMb: mem.askedMb !== undefined ? mem.askedMb : mem.mb, ...(mem.cap ? { memoryCap: mem.cap } : {}) }); // round 3: both numbers (asked, effective), and the instance's cap when it lowered the bound
     if (job.runs.length > 20) job.runs.splice(0, job.runs.length - 20);
     this._save(); // intent-before-spawn, flushed
@@ -1008,7 +1052,8 @@ class JobManager {
       argv: job.cmd.argv, cwd: job.cmd.cwd || process.cwd(),
       env: jobEnv({ ...(job.cmd.env || {}), ...this._secretsFor(job), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
       logCapBytes: 50 * 1024 * 1024, stdinOpen: !!job.stdinOpen,
-      memory: { mb: mem.mb, unit: `${this.d.memoryUnitPrefix || 'vibespace-job'}-${job.id}-${runTs}`, rungs: this.d.memoryRungs || M.MEMORY_RUNGS, ...(this.d.memorySample ? this.d.memorySample : {}) },
+      // round 4: the ASKED bound rides too — the cgroup rung caps it by what contains ITS scope, read once the scope exists
+      memory: { mb: hub.mb, askedMb: hub.askedMb !== undefined ? hub.askedMb : hub.mb, cap: hub.cap || null, capRule: { minMb: M.MEMORY.minMb, hubShareMinMb: M.MEMORY.hubShareMinMb, hubShareRatio: M.MEMORY.hubShareRatio }, unit: `${this.d.memoryUnitPrefix || 'vibespace-job'}-${job.id}-${runTs}`, rungs: this.d.memoryRungs || M.MEMORY_RUNGS, ...(this.d.memorySample ? this.d.memorySample : {}) },
     };
     // A SECRET NEVER RIDES ARGV (lane job-spec-off-argv, 2026-10-20): the spec carries the job's secrets and its jbt_
     // token, and /proc/<pid>/cmdline is readable by every local user for the wrapper's whole life — so the spec rides a
@@ -1191,6 +1236,7 @@ class JobManager {
           continue;
         }
         const run = job.runs && job.runs[job.runs.length - 1];
+        this._reapScope(job, run).catch(() => { }); // round 4: its wrapper is gone — what is left in its scope is an ended run's
         const exit = this._readExit(job, run);
         if (exit) { this._finalizeRun(job, run, exit, 'boot'); continue; }
         if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); continue; }
@@ -1255,7 +1301,7 @@ class JobManager {
     if (ends) {
       run.endedAt = (v.cause === 'oom' && v.at) || now(); run.exit = null; run.cause = v.cause;
       if (v.why) run.memoryJudge = { why: v.why, jobAnonMb: v.jobAnonMb, anonMb: v.anonMb, fileMb: v.fileMb, usedMb: v.usedMb, limitMb: v.limitMb, ...(v.oomKills !== undefined ? { oomKills: v.oomKills } : {}) };
-      if (!run.memoryBound) { const b = this._ctlJson(job, run, 'bound.json'); if (b) run.memoryBound = M.boundRecord(b); }
+      if (!run.memoryBound) { const b = this._ctlJson(job, run, 'bound.json'); if (b) this._adoptBound(run, b); }
     }
     const mp = ends ? this._countEnd(job, v.cause) : null;
     if (v.cause === 'oom' && ends) {
@@ -1278,33 +1324,49 @@ class JobManager {
   }
   /** THE LADDER's inputs (lane jobs-memory-bound): the owner's setting `jobs.memoryMb` (undefined while never set) and the
    *  cluster's default (the chart's env) — read live, per run */
-  _memoryCtx() {
+  _memoryCtx({ hub = false } = {}) {
     let ctx = {};
     try { ctx = (typeof this.d.memoryCtx === 'function' && this.d.memoryCtx()) || {}; } catch { }
-    return { ...ctx, instanceMb: this._instanceLimitMb() };
+    // THE LIMIT THAT CONTAINS THE JOB (round 4): the hub's own, where jobs live inside it (the rlimit / none rungs); where this
+    // host's runs prove the cgroup rung, what contains a scope — the last proof's (_adoptBound)
+    const lim = !hub && this._rungSeen && this._rungSeen.by === 'cgroup' ? this._rungSeen.contain : this._instanceLimit();
+    return { ...ctx, instanceMb: lim.mb, instanceOf: lim.of };
   }
   /** THE INSTANCE'S OWN LIMIT (lane jobs-memory-bound, acceptance round 3 — the cap of THE LADDER): the tightest memory.max of
    *  the hub's cgroup and its ancestors, in MB (a pod: the container's; null = none — a host that caps nothing); the deps
-   *  seam `memoryLimitDir` names one cgroup dir instead (a fake). Read at most once a minute: a pod's limit moves only with
-   *  an in-place resize. */
-  _instanceLimitMb() {
-    if (this._limitRead && now() - this._limitRead.at < 60e3) return this._limitRead.mb;
-    let mb = null;
+   *  seam `memoryLimitDir` names one cgroup dir instead (a fake — the instance's own). Read at most once a minute: a pod's
+   *  limit moves only with an in-place resize. Round 4: {mb, of} — which limit (M.limitHolder: the instance, the user slice,
+   *  the hub's own unit …). */
+  _instanceLimit() {
+    if (this._limitRead && now() - this._limitRead.at < 60e3) return this._limitRead;
+    let mb = null, of = null;
     try {
       const dirs = [];
-      if (typeof this.d.memoryLimitDir === 'string') dirs.push(this.d.memoryLimitDir);
+      if (typeof this.d.memoryLimitDir === 'string') dirs.push(['/', this.d.memoryLimitDir]);
       else {
         const rel = (fs.readFileSync('/proc/self/cgroup', 'utf8').split('\n').find((l) => l.startsWith('0::')) || '0::/').slice(3) || '/';
-        for (let p = rel; ; p = path.dirname(p)) { dirs.push(path.join('/sys/fs/cgroup', p)); if (p === '/' || p === '.') break; }
+        for (let p = rel; ; p = path.dirname(p)) { dirs.push([p, path.join('/sys/fs/cgroup', p)]); if (p === '/' || p === '.') break; }
       }
-      for (const dir of dirs) {
+      for (const [cg, dir] of dirs) {
         let v = '';
         try { v = fs.readFileSync(path.join(dir, 'memory.max'), 'utf8').trim(); } catch { continue; }
-        if (/^\d+$/.test(v)) { const m = Math.floor(Number(v) / 1048576); if (mb === null || m < mb) mb = m; }
+        if (/^\d+$/.test(v)) { const m = Math.floor(Number(v) / 1048576); if (mb === null || m < mb) { mb = m; of = M.limitHolder(cg); } }
       }
     } catch { }
-    this._limitRead = { at: now(), mb };
-    return mb;
+    this._limitRead = { at: now(), mb, of };
+    return this._limitRead;
+  }
+  /** THE RUNG A RUN PROVED — bound.json while it runs, exit.json `memory` at its end: its record, and (round 4) the bound it
+   *  ACTUALLY holds and the limit that capped it — the cgroup rung's cap is what contains its scope, known only once the scope
+   *  exists; the proof also tells every next run's words what contains the jobs of this host */
+  _adoptBound(run, b) {
+    run.memoryBound = M.boundRecord(b);
+    if (!b.confirmed) return;
+    run.memoryMb = run.memoryBound.mb;
+    if (run.memoryBound.cap) run.memoryCap = run.memoryBound.cap; else delete run.memoryCap;
+    const c = b.by === 'cgroup' && b.contain && typeof b.contain === 'object' ? b.contain : null;
+    const mb = c && Number.isFinite(c.limitMb) && c.limitMb > 0 ? Math.floor(c.limitMb) : null;
+    this._rungSeen = b.by === 'cgroup' ? { by: 'cgroup', contain: { mb, of: mb ? M.limitHolder(c.cgroup) : null } } : { by: b.by };
   }
   /** THE PARK LAW's act (lane jobs-memory-bound): a job whose runs ended out of memory M.MEMORY.parkAfter times in a row is
    *  parked BY NAME and not run again until its owner acts (start — after raising its bound or fixing the job): a service
@@ -1348,12 +1410,14 @@ class JobManager {
     // (`oom-bound`: the scope's oom-kill, or an allocation RLIMIT_DATA refused) or an OOM from outside (`oom`) — and the rung
     // that held it. A stop the owner asked for stays a stop.
     const mem = exit.memory && typeof exit.memory === 'object' ? exit.memory : null;
-    if (mem && mem.by) run.memoryBound = M.boundRecord(mem);
+    if (mem && mem.by) this._adoptBound(run, mem);
+    const forced = typeof exit.forced === 'string' && exit.forced ? M.clip(exit.forced, 200) : ''; // round 4: an end that had to kill its scope
+    if (forced) { run.forced = forced; this.d.log(`[jobs] ${job.id} ${forced}`); if (job.kind === 'service') this._touch(job, { what: forced }); } // a task says it in its end line below
     const memCause = mem && M.MEMORY_CAUSES.includes(mem.cause) && !job._stopRequested ? mem.cause : null;
     run.cause = proto || (untilHit ? 'ok(until-output)' : memCause
       || (job._stopRequested ? 'interrupted' : exit.code === 0 ? 'ok' : job._timedOut ? 'timeout' : 'error'));
     if (memCause) this.d.log(`[jobs] ${job.id} ${M.memoryEndWhat(run)} (${mem.how || mem.cause}; ${why})`);
-    delete job._stopRequested; delete job._timedOut; delete job._untilHit;
+    delete job._stopRequested; delete job._timedOut; delete job._untilHit; delete job._scopeKilled;
     const windowEnd = run.cause === 'update_window';
     // THE PARK LAW (lane jobs-memory-bound): EVERY judged end counts — the sweep's, and the boot's (a run that ended while the
     // server was down is judged here at its boot exactly like a run judged live; the base never counted a boot's) — _countEnd
@@ -1395,7 +1459,7 @@ class JobManager {
       const evText = windowEnd ? `interrupted (update_window: it started while VibeSpace was updating itself and never ran — ${job.cronParent ? 'its next fire runs it' : 'the restarted server runs it again'})`
         : run.cause === 'wrapper-mismatch' ? `failed: it never started — data/bin/job-wrapper.js speaks another protocol than this server (restart VibeSpace to finish its update)`
           : memCause ? `${job.state}: ${M.memoryEndWhat(run)} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`
-            : `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`;
+            : `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)${forced ? ` — ${forced}` : ''}`;
       this._touch(job, routineCronOk ? null : { what: evText });
       if (job.notifyUser && !windowEnd) { try { this.d.notifyUser({ text: `Task ${job.name}: ${job.state} (${run.cause})`, urgency: job.state === 'failed' ? 'normal' : 'low', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { } }
       // owner auto-notify honors the same quiet-success law: routine scheduled
@@ -1417,15 +1481,16 @@ class JobManager {
       const run = job.runs && job.runs[job.runs.length - 1];
       const stamp = this._readStamp(job);
       if (stamp && job.state === 'starting') { job.state = 'up'; this._touch(job); }
-      if (stamp && run && !run.memoryBound) { const b = this._ctlJson(job, run, 'bound.json'); if (b) { run.memoryBound = M.boundRecord(b); this._touch(job); } } // lane jobs-memory-bound
+      if (stamp && run && !run.memoryBound) { const b = this._ctlJson(job, run, 'bound.json'); if (b) { this._adoptBound(run, b); this._touch(job); } } // lane jobs-memory-bound
       // a stop that raced the wrapper's first act (no pid stamp yet ⇒ nothing
       // to kill) is honored HERE once the stamp exists — without this, a stop
       // in a job's first few hundred ms silently no-opped (2.350.0 gate catch)
       if (stamp && job._stopRequested && this._verifyAlive(stamp)) {
-        this._killGroup(job, 'SIGKILL');
+        this._escalate(job, this._runScope(job, run)); // round 4: on the cgroup rung, the scope
       }
       if (stamp && !this._verifyAlive(stamp)) {
         const exit = this._readExit(job, run) || { code: null, endedAt: now() };
+        await this._reapScope(job, run); // round 4: a wrapper gone, its scope not — never an ended run still running
         this._finalizeRun(job, run, exit, 'sweep');
         continue;
       }
@@ -1433,7 +1498,8 @@ class JobManager {
       // timeout
       if (job.kind === 'task' && job.timeoutMs && run && !run.endedAt && now() - run.startedAt > job.timeoutMs) {
         job._timedOut = true; this._killGroup(job, 'SIGTERM');
-        const t = setTimeout(() => this._killGroup(job, 'SIGKILL'), 10_000); t.unref?.();
+        const scope = this._runScope(job, run);
+        const t = setTimeout(() => this._escalate(job, scope), 10_000); t.unref?.();
       }
       // untilOutput: incremental literal scan, bounded per tick
       if (job.kind === 'task' && job.untilOutput && run && !job._untilHit) this._untilScan(job, run);
@@ -1497,7 +1563,7 @@ class JobManager {
         job._untilHit = true;
         this._event(job, 'until-marker hit — completing after grace');
         const grace = Number(process.env.VIBESPACE_JOBS_GRACE_MS) || 30_000; // env knob: tests shrink the until-grace
-        const t = setTimeout(() => { this._killGroup(job, 'SIGTERM'); const t2 = setTimeout(() => this._killGroup(job, 'SIGKILL'), 10_000); t2.unref?.(); }, grace);
+        const t = setTimeout(() => { this._killGroup(job, 'SIGTERM'); const scope = this._runScope(job, run); const t2 = setTimeout(() => this._escalate(job, scope), 10_000); t2.unref?.(); }, grace);
         t.unref?.();
       }
     } catch { }
@@ -1653,8 +1719,11 @@ class JobManager {
     if (job.kind === 'service' || job.kind === 'cron') { job.desiredUp = false; }
     job._stopRequested = true;
     if (job.kind === 'service') this._teardownPublish(job);
-    const hadProc = this._killGroup(job, force ? 'SIGKILL' : 'SIGTERM');
-    if (hadProc && !force) { const t = setTimeout(() => this._killGroup(job, 'SIGKILL'), 10_000); t.unref?.(); }
+    const run = job.runs && job.runs[job.runs.length - 1];
+    const scope = run && !run.endedAt ? this._runScope(job, run) : null; // round 4: the cgroup rung's group is its scope
+    const hadProc = force && scope ? this._escalate(job, scope) : this._killGroup(job, force ? 'SIGKILL' : 'SIGTERM');
+    // the kill step, 10 s on — the scope's too when its wrapper is gone (the sweep reaps such a scope first)
+    if ((hadProc || scope) && !force) { const t = setTimeout(() => this._escalate(job, scope), 10_000); t.unref?.(); }
     if (!hadProc && job.kind === 'cron') { job.state = 'down'; }
     this._touch(job);
     this._save();
@@ -1695,7 +1764,7 @@ class JobManager {
     if (cur === mb) return { ok: true, unchanged: true, ...said(M.memoryMbOf(targets[0], this._memoryCtx())) }; // nothing changes, nothing is written
     for (const t of targets) { if (mb === null) delete t.memoryMb; else t.memoryMb = mb; }
     const eff = M.memoryMbOf(targets[0], this._memoryCtx());
-    const capped = eff.cap ? ` — capped by the instance's ${M.memoryWords(eff.cap.limitMb)} limit (asked ${eff.askedMb ? M.memoryWords(eff.askedMb) : 'unbounded'})` : '';
+    const capped = eff.cap ? ` — capped by ${M.capWords(eff.cap)} (asked ${eff.askedMb ? M.memoryWords(eff.askedMb) : 'unbounded'})` : '';
     this._touch(job, { what: `memory bound ${mb === null ? 'back to the default' : 'set'}: ${eff.mb ? M.memoryWords(eff.mb) : 'unbounded'}${capped} (${eff.source}; from its next run)` });
     this._save();
     return { ok: true, ...said(eff) };
@@ -1791,7 +1860,7 @@ class JobManager {
       catchUp: job.catchUp || null, stopWithOwner: !!job.stopWithOwner, singleInstance: job.singleInstance !== false,
       // lane jobs-memory-bound: THE LADDER's answer now (a cron's: its task's), the rung its latest run measured, the park's
       // reason and the out-of-memory ends counted toward it
-      ...(() => { const m = M.memoryMbOf(job.kind === 'cron' && job.action && job.action.task ? job.action.task : job, this._memoryCtx()); return { memoryMb: m.mb, memoryAskedMb: m.askedMb !== undefined ? m.askedMb : m.mb, memorySource: m.source, memoryCap: (run && !run.endedAt && run.memoryCap) || m.cap || null }; })(),
+      ...(() => { const m = M.memoryMbOf(job.kind === 'cron' && job.action && job.action.task ? job.action.task : job, this._memoryCtx()); return { memoryMb: m.mb, memoryAskedMb: m.askedMb !== undefined ? m.askedMb : m.mb, memorySource: m.source, memoryCap: m.cap || null }; })(), // round 4: the NEXT run's (a live run's own rides its memoryBound.cap)
       memoryBound: (run && run.memoryBound) || null, oomEnds: (job.supervise && job.supervise.oomEnds) || 0,
       parkedFor: (job.supervise && job.supervise.parkedAt && job.supervise.parkedFor) || null,
       run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '' } : null,
