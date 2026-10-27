@@ -1072,6 +1072,9 @@ const PRINTS = {
     'r.memoryAskedMb': `${V}:a number of MB`, 'r.memoryCap': `${V}:the cap record {limitMb, hubMb}`, 'r.memoryCap.limitMb': `${V}:a number of MB`, 'rc': `${V}:a local the CLI built from r.memoryCap / r.memoryAskedMb (numbers in fixed words)`,
     // acceptance round 4: WHICH limit capped — the one that contains the job (capWords(c) prints it)
     'c.of': `${V}:the limit's holder — instance | user slice | a cgroup's own name the hub or the wrapper read off a cgroup path (VibeSpace's or systemd's unit names)`,
+    // acceptance round 5: THE RECORD's words — the rung (src/job-model.js boundWords: fixed words + a size + the wrapper's why), and what
+    // a run's end left or killed (runEndWords: fixed words + counts + a scope's unit name VibeSpace built)
+    'b.words': `${V}:the hub's words for the rung that held the last run (boundWords — fixed vocabulary, a size, b.why)`, 'run.endWords': `${V}:the hub's words for what the run's job left running or the kill the hub made (runEndWords — fixed vocabulary, counts, a unit name VibeSpace built)`, 'j.run.endWords': `${V}:the same words, on show's last-run line`,
     // verify r3 F2: the subscribe / unsubscribe echo is ONE print whose arguments span three lines — r2's line-based walker saw none of these six
     'r.updated': `${V}:a flag`, 'r.already': `${V}:a flag`, 'r.filter': `${O}:the caller's own subscription filter (echoed)`, 'r.count': `${V}:a count`, 'r.removed': `${V}:a flag`, 'pos': `${O}:the job the caller named (its positional argument)`,
     // verify r3 F4: the REACH of the prints — the records behind `j`, the run behind `dur_`, the request behind call()

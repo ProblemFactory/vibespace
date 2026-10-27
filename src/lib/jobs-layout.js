@@ -12,8 +12,9 @@
  *   pruneFolds(folds, layout)           the persisted fold map, minus keys no group holds
  *   heldText(digest, {t})               the held-notification sentence, words by the device's own t()
  *   memoryChip(job, t) · memoryEndWords(job, t) · memorySourceWords(job, t) · memoryWords(mb) · memoryFieldValue(job) ·
- *   memorySetValue(job, typed) · memoryCapWords(cap, t) · memoryEffectiveWords(job, t)
- *                                       the memory bound's chip, its named end / park, where it comes from (lane jobs-memory-bound)
+ *   memorySetValue(job, typed) · memoryCapWords(cap, t) · memoryEffectiveWords(job, t) · runLeftWords(run, t)
+ *                                       the memory bound's chip, its named end / park, where it comes from (lane jobs-memory-bound);
+ *                                       what a run's job left running (round 5)
  *
  * The client READS `job.ack` (the server computes it over the full record —
  * the snapshot's journal is truncated) and never derives acknowledgement.
@@ -218,6 +219,7 @@ export function memoryChip(j, t) {
   const b = j.memoryBound, live = !!(b && b.mb && runsNow(j));
   if (!j.memoryMb && !live) return t('unbounded — set by the owner');
   if (b && b.by === 'none' && b.mb) return t('unbounded — this host cannot enforce a bound');
+  if (b && b.by === 'cgroup' && !b.mb && runsNow(j)) return t('unbounded (the owner set 0) · in its own scope'); // round 5: never «0 MB · cgroup»
   const mb = live ? b.mb : j.memoryMb, cap = live ? b.cap : j.memoryCap;
   const capped = cap && cap.limitMb ? ` · ${memoryCapWords(cap, t)}` : '';
   return (b && b.by !== 'none' ? `${memoryWords(mb)} · ${b.by === 'cgroup' ? 'cgroup' : 'rlimit'}` : memoryWords(mb)) + capped;
@@ -237,6 +239,15 @@ export function memoryEffectiveWords(j, t) {
   const size = memoryWords(c.limitMb);
   const lim = !c.of || c.of === 'instance' ? t('the instance’s limit {size}', { size }) : c.of === 'user slice' ? t('the user slice’s limit {size}', { size }) : t('{name}’s limit {size}', { name: c.of, size });
   return `${t('effective {size}', { size: memoryWords(j.memoryMb) })} · ${lim}`;
+}
+/** WHAT A RUN'S JOB LEFT RUNNING (round 5 — the ruling of 2026-10-27: a job's scope IS the job): a task's were stopped (by
+ *  force past the grace), a service's kept while it runs — «left 1 running — stopped; to keep a daemon, run it as a service
+ *  job»; '' when it left nothing */
+export function runLeftWords(run, t) {
+  const l = run && run.left;
+  if (!l || !(l.n > 0)) return '';
+  if (l.kept) return t('left {n} running — kept: the service’s until it stops or starts again', { n: l.n });
+  return l.force ? t('left {n} running — stopped by force; to keep a daemon, run it as a service job', { n: l.n }) : t('left {n} running — stopped; to keep a daemon, run it as a service job', { n: l.n });
 }
 /** the NAMED end the card says beside the state — the park first (it is why the job no longer runs) */
 export function memoryEndWords(j, t) {

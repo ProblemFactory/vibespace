@@ -269,6 +269,32 @@ function memoryWords(mb) {
   if (n < 1024) return `${n} MB`;
   return `${String(Math.round((n / 1024) * 10) / 10)} GB`;
 }
+/** the rung a run's bound held by, in THE RECORD's words (round 5 — `show` / `poll` print these, never «a rung ⇒ a size»): an
+ *  unbounded scope (the owner's 0 where nothing it shares with the hub is limited) is never «held by a cgroup at 0 MB» */
+function boundWords(b) {
+  if (!b) return '';
+  if (b.by === 'none') return `unbounded — ${b.why || 'the wrapper did not say'}`;
+  if (!finiteMb(b.mb)) return b.by === 'cgroup' ? 'unbounded (the owner set 0) · in its own scope' : 'unbounded (the owner set 0)';
+  return `held by ${b.by === 'cgroup' ? 'a cgroup' : 'RLIMIT_DATA'} at ${memoryWords(b.mb)}`;
+}
+/** WHAT A RUN'S JOB LEFT RUNNING (round 5 — the ruling of 2026-10-27: a job's scope IS the job): the wrapper's count at the job's
+ *  own end — a task's were stopped (SIGTERM; by force past the grace); a service's KEPT, its own while it runs (on a rung
+ *  without a scope named by identity — pid, starttime, boot — for the engine to stop). exit.json's `left`, sanitized; null = none */
+function leftRecord(l) {
+  if (!l || typeof l !== 'object' || !Number.isInteger(l.n) || l.n < 1) return null;
+  const pids = l.kept && Array.isArray(l.pids) ? l.pids.filter((p) => Array.isArray(p) && Number.isInteger(p[0]) && p[0] > 1 && Number.isFinite(p[1])).slice(0, 64).map((p) => [p[0], p[1]]) : [];
+  return { n: Math.min(l.n, 9999), ...(l.kept ? { kept: true } : l.force ? { force: true } : {}), ...(pids.length ? { pids, boot: typeof l.boot === 'string' ? clip(l.boot, 64) : '' } : {}) };
+}
+/** «the job left 1 process running — it was stopped; to keep a daemon, run it as a service job» · «… stopped by force …» ·
+ *  «it left 1 process running — kept: a service's own until it is stopped or started again» (data/bin/job-wrapper.js says
+ *  the same in the job's log — a suite pins the twins equal) */
+function leftWords(l) {
+  const n = l.n, many = n !== 1;
+  if (l.kept) return `it left ${n} process${many ? 'es' : ''} running — kept: a service's own until it is stopped or started again`;
+  return `the job left ${n} process${many ? 'es' : ''} running — ${many ? 'they were' : 'it was'} stopped${l.force ? ' by force' : ''}; to keep a daemon, run it as a service job`;
+}
+/** what a run's end says beyond its cause (the journal, `show` / `poll`): what its job left, else a kill we made */
+function runEndWords(run) { return run && run.left ? leftWords(run.left) : (run && typeof run.forced === 'string' && run.forced) || ''; }
 /** the NAMED end the journal says (the card words the same through its own t()) */
 function memoryEndWhat(run) {
   if (!run || !MEMORY_CAUSES.includes(run.cause)) return '';
@@ -714,7 +740,7 @@ module.exports = {
   vetSpec, jobCommandParts, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,
-  MEMORY, MEMORY_CAUSES, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
+  MEMORY, MEMORY_CAUSES, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, boundWords, leftRecord, leftWords, runEndWords, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
   notifyEffective, renderOwnerNotify, renderNotifStash,

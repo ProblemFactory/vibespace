@@ -71,7 +71,13 @@ function scopeEventsEnd(atGo, atEnd) {
   if (!(kills > 0)) return {};
   return ooms > 0 ? { cause: 'oom-bound', how: `its scope's memory.events: oom ${ooms}, oom_kill ${kills} (at MemoryMax)` } : { cause: 'oom', how: `its scope's memory.events: oom_kill ${kills} below its MemoryMax (the host ran out)` };
 }
-if (!process.argv[2] && require.main !== module) { module.exports = { allocationRefused, systemdMajor, scopeResultEnd, scopeEventsEnd, capOf, sharedAncestors }; return; }
+/** what the job LEFT running, worded (round 5) — src/job-model.js leftWords' twin (a suite pins the two equal) */
+function leftWords(l) {
+  const n = l.n, many = n !== 1;
+  if (l.kept) return `it left ${n} process${many ? 'es' : ''} running — kept: a service's own until it is stopped or started again`;
+  return `the job left ${n} process${many ? 'es' : ''} running — ${many ? 'they were' : 'it was'} stopped${l.force ? ' by force' : ''}; to keep a daemon, run it as a service job`;
+}
+if (!process.argv[2] && require.main !== module) { module.exports = { allocationRefused, systemdMajor, scopeResultEnd, scopeEventsEnd, capOf, sharedAncestors, leftWords }; return; }
 
 const ctlDir = process.argv[2];
 const specPath = process.argv[3];
@@ -217,6 +223,9 @@ const unit = asked && /^[A-Za-z0-9_.@-]{1,180}$/.test(String(asked.unit || '')) 
 const rungs = asked && Array.isArray(asked.rungs) ? asked.rungs : ['cgroup', 'rlimit-data'];
 const gateMs = asked && Number(asked.gateMs) > 0 ? Math.min(Number(asked.gateMs), 3000) : 3000; // the engine's test seam may shorten it
 const stopMs = asked && Number(asked.stopMs) > 0 ? Math.min(Number(asked.stopMs), 10000) : 10000; // the scope's drain bound (below); a seam too
+// round 5 (the ruling): a SERVICE keeps what its run leaves running — its own while it runs (the engine stops them before its
+// next start, at its stop); what a TASK leaves is an orphan, stopped at its end and said
+const keeps = spec.kind === 'service';
 const limitRoot = asked && typeof asked.limitRoot === 'string' && asked.limitRoot[0] === '/' ? asked.limitRoot : '/sys/fs/cgroup'; // the cap's reads (a seam: a fake tree)
 const selfCg = (() => { try { return (fs.readFileSync('/proc/self/cgroup', 'utf8').split('\n').find((l) => l.startsWith('0::')) || '0::/').slice(3) || '/'; } catch { return ''; } })();
 function onPath(cmd) {
@@ -296,6 +305,8 @@ function readEvents(dir) {
 }
 /** the processes still in a cgroup (its cgroup.procs) — [] once it is empty or gone */
 function procsOf(dir) { try { return fs.readFileSync(path.join(dir, 'cgroup.procs'), 'utf8').split('\n').filter((l) => /^\d+$/.test(l)); } catch { return []; } }
+/** the keeper (< 253) — a fork of the gate's sh, its command line the gate's own — is ours, never something the job left */
+const isKeeper = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[2] === GATE_KEEP; } catch { return false; } };
 
 function launch() {
   const r = rung = plan.shift() || { by: 'none', mb: memMb, cap: hubCap };
@@ -453,7 +464,9 @@ function memoryEnd(code, signal) {
   if (!proven) return {};
   if (rung.by === 'cgroup' && rung.policy) {
     let result = '', peak = 0;
-    for (let i = 0; i < 20; i++) { // the unit's facts land with the kill (measured: at once) — bounded at 1 s anyway
+    // the unit's facts land with the kill (measured: at once) — bounded at 1 s anyway; round 5: a job that EXITED, or one the
+    // owner stopped (a stop stays a stop), is read once — its leftovers keep the scope active: no second of waiting for nothing
+    for (let i = 0; i < (signal && !stopping ? 20 : 1); i++) {
       const out = ask(rung.ctl, ['--user', 'show', `${unit}.scope`, '-p', 'Result', '-p', 'ActiveState', '-p', 'MemoryPeak']);
       if (out === null) break;
       const f = Object.fromEntries(out.split('\n').map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)]));
@@ -495,8 +508,12 @@ if (spec.stdinOpen) {
 // we say it to the child too, and on the cgroup rung to EVERY process of its scope (THE SCOPE IS THE GROUP: what the job
 // started outside its process group as well). Bounded: a job still running stopMs after the stop is stopped BY FORCE — its
 // scope killed — and its end says so. A stop before the go never starts the job.
+// ONE FLAG, ONE MEANING (round 5): `forced` is a kill WE made, its words say why — never inferred from how the job died (a
+// SIGKILL of the job alone — an agent's kill -9, the kernel at MemoryMax — killed no scope: what it left is still drained);
+// `scopeEmpty` is the scope's cgroup.procs MEASURED empty when the end is written
 let stopAt = 0, forced = '';
 const scoped = () => proven && rung.by === 'cgroup';
+const nap = (ms) => new Promise((res) => setTimeout(res, ms));
 function scopeKill(sig) { // the manager's own kill of every process of the scope — async, bounded at 3 s
   return new Promise((res) => {
     let p = null;
@@ -507,8 +524,7 @@ function scopeKill(sig) { // the manager's own kill of every process of the scop
   });
 }
 async function forceScope(why) {
-  if (forced) return;
-  forced = why;
+  if (!forced) forced = why; // the first kill's why — and every call kills (round 5: a label is never the guard)
   await scopeKill('SIGKILL');
   if (procsOf(scopeDir).length) { try { fs.writeFileSync(path.join(scopeDir, 'cgroup.kill'), '1'); } catch { } } // no manager answered: the kernel's own
 }
@@ -522,19 +538,53 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
     const t = setTimeout(() => { if (!exited) forceScope(`it did not end on ${sig} in ${stopMs / 1000} s — its scope was killed`); }, stopMs); t.unref?.();
   });
 }
-// THE END IS WRITTEN ONCE THE SCOPE IS EMPTY (the cgroup rung): the keeper is let go (its events read), then what the job left
-// behind gets the rest of stopMs (from the stop, else from its end) before the scope is killed — never a run that «ended»
-// while its processes still run, hold its ports, and meet the next start
-async function drainScope(signal) {
-  if (!scoped()) return;
+// THE END IS WRITTEN ONCE THE SCOPE IS EMPTY (the cgroup rung): the keeper is let go (its events read), then — round 5, the
+// ruling of 2026-10-27 (a job's scope IS the job) — at a natural end what still runs in the scope is what the job LEFT: a
+// TASK's orphans are stopped at once (SIGTERM to the scope; stopMs later, by force) and said; a SERVICE keeps them (its own
+// while it runs — the engine stops them before its next start, at its stop). After a stop the whole scope heard it: what
+// still runs stopMs after it is killed. Never a run that «ended» while its processes still run, hold its ports, and meet
+// the next start — and never a «scope was killed» that killed nothing (round 5)
+async function drainScope() {
   if (!rung.policy) { try { child.stdio[3].destroy(); } catch { } } // the keeper's read ends: it leaves the scope
-  if (stopping && signal === 'SIGKILL' && !forced) forced = `it did not end on ${stopping} — its scope was killed`; // the engine's kill step
-  const deadline = (stopAt || Date.now()) + stopMs;
-  while (procsOf(scopeDir).length && Date.now() < deadline) await new Promise((res) => setTimeout(res, 25));
-  const left = procsOf(scopeDir).length;
-  if (!left) return;
-  await forceScope(`${left} process${left === 1 ? '' : 'es'} it left in its scope ${left === 1 ? 'was' : 'were'} still running ${stopMs / 1000} s after it ${stopping ? 'was stopped' : 'ended'} — its scope was killed`);
-  for (let i = 0; i < 80 && procsOf(scopeDir).length; i++) await new Promise((res) => setTimeout(res, 25));
+  const left = stopping ? 0 : procsOf(scopeDir).filter((p) => !isKeeper(p)).length;
+  if (left && keeps) return { left: { n: left, kept: true }, scopeEmpty: false };
+  if (left) await scopeKill('SIGTERM');
+  const deadline = (stopping ? stopAt : Date.now()) + stopMs;
+  while (procsOf(scopeDir).length && Date.now() < deadline) await nap(25);
+  const still = procsOf(scopeDir).length, s = still === 1 ? '' : 'es', was = still === 1 ? 'was' : 'were';
+  if (still) await forceScope(left ? `${still} process${s} it left ${was} still running ${stopMs / 1000} s after its SIGTERM — its scope was killed` : `${still} process${s} ${was} still in its scope ${stopMs / 1000} s after the stop — its scope was killed`);
+  for (let i = 0; i < 80 && procsOf(scopeDir).length; i++) await nap(25);
+  return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !procsOf(scopeDir).length };
+}
+// A RUNG WITHOUT A SCOPE (rlimit-data, none — a fleet pod): what the job left is what still runs in OUR process group (the job
+// is our child in it; what it put in the background stays there) — a task's stopped and said, a service's kept and named by
+// identity for the engine. A process that left the group (setsid) is beyond a rung without a scope. /proc only, no exec.
+const statOf = (pid) => { try { const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' '); } catch { return null; } };
+function groupLeft() {
+  const out = [];
+  let ents = [];
+  try { ents = fs.readdirSync('/proc'); } catch { return out; }
+  for (const e of ents) {
+    if (!/^\d+$/.test(e) || Number(e) === process.pid) continue;
+    const r = statOf(e);
+    if (r && Number(r[2]) === process.pid && r[0] !== 'Z') out.push([Number(e), Number(r[19])]);
+  }
+  return out;
+}
+const same = ([pid, st]) => { const r = statOf(pid); return !!r && r[0] !== 'Z' && Number(r[19]) === st; };
+async function drainGroup() {
+  if (stopping) return {}; // the stop reached our whole group — the engine's kill step follows if it must
+  const left = groupLeft();
+  if (!left.length) return {};
+  if (keeps) return { left: { n: left.length, kept: true, pids: left.slice(0, 64), boot: bootId() } };
+  for (const [pid] of left) { try { process.kill(pid, 'SIGTERM'); } catch { } }
+  const deadline = Date.now() + stopMs;
+  let live = left.filter(same);
+  while (live.length && Date.now() < deadline) { await nap(25); live = live.filter(same); }
+  const still = groupLeft(); // the group once more: what was forked meanwhile too
+  for (const [pid] of still) { try { process.kill(pid, 'SIGKILL'); } catch { } }
+  if (still.length) forced = `${still.length} process${still.length === 1 ? '' : 'es'} it left ${still.length === 1 ? 'was' : 'were'} still running ${stopMs / 1000} s after its SIGTERM — killed`;
+  return { left: { n: left.length, ...(still.length ? { force: true } : {}) } };
 }
 
 async function ended(code, signal) {
@@ -544,12 +594,12 @@ async function ended(code, signal) {
   if (pressureTimer) clearInterval(pressureTimer);
   if (pressureOn) { try { fs.unlinkSync(pressurePath); } catch { } } // the run ended under its own wrapper: the exit record speaks
   const memory = { ...boundRec, ...memoryEnd(code, signal) };
-  await drainScope(signal);
+  const drained = scoped() ? await drainScope() : await drainGroup();
   const named = memory.cause === 'oom-bound' ? ` — stopped: used more than ${memory.mb >= 1024 ? Math.round(memory.mb / 102.4) / 10 + ' GB' : memory.mb + ' MB'} (${memory.how})`
     : memory.cause === 'oom' ? ` — killed: out of memory (${memory.how})` : '';
-  const force = forced ? ` — stopped by force: ${forced}` : '';
-  try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${force}\n`)); } catch { }
-  writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}) });
+  const end = drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '';
+  try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${end}\n`)); } catch { }
+  writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty } : {}) });
   process.exit(code === null ? 143 : code);
 }
 launch();

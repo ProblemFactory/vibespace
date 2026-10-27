@@ -113,6 +113,11 @@ export const ROWS = [
   ['src/ws-create.js', "try { process.kill(Number(lock.pid), 'SIGKILL'); } catch { }", 'scan', 'captureForkProof\\(', 'a pending fork\'s own CLI holding its parent\'s id (B-8b7b: the lock dir, the ppid walk to its wrapper and lockWrittenByItsPid read in the same proof step, 2 sightings)'],
   ['src/ws-handler.js', "try { process.kill(dpid, 'SIGTERM'); } catch {}", 'scan', 'pidsMatchingCmdline\\(', 'a stale dtach of this socket (cmdline scan, same pass)', 4],
   ['src/ws-handler.js', 'kill -9 $P 2>/dev/null; true;', 'legacy', 'vs_same_proc "\\$P" "\\$T"', 'a remote session\'s CLI (the ssh kill)', 0, 1, SHWHY],
+  // lane jobs-memory-bound, acceptance round 5 (the ruling: what a task LEAVES running is stopped at its end): on a rung without a
+  // scope, the processes of the wrapper's OWN process group (pgrp = its pid, read off a fresh /proc scan in the same pass, each
+  // with its starttime) — the engine's stop of what a service KEPT goes through src/proc-identity.js (no row of its own)
+  ['data/bin/job-wrapper.js', "for (const [pid] of left) { try { process.kill(pid, 'SIGTERM'); } catch { } }", 'scan', 'const left = groupLeft\\(\\);', 'what a task left in the wrapper\'s own process group at its end — stopped (a fresh /proc scan, same pass)'],
+  ['data/bin/job-wrapper.js', "for (const [pid] of still) { try { process.kill(pid, 'SIGKILL'); } catch { } }", 'scan', 'const still = groupLeft\\(\\);', 'the same group re-scanned once its grace is out — by force (the scan the line above)', 2],
 ];
 // the persisted pids — each record and what its signal proves (a record with no starttime cannot be signalled by proof)
 export const RECORDS = [

@@ -10,7 +10,7 @@ import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: a panel's ```mermaid fence draws
 import { registerWindowType } from './window-types.js';
-import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords } from './jobs-layout.js';
+import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, runLeftWords } from './jobs-layout.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
@@ -128,6 +128,8 @@ function stateLine(j) {
   if (j.nextFireAt) bits.push(t('next') + ' ~' + hum(j.nextFireAt - Date.now()));
   const memEnd = memoryEndWords(j, t); // lane jobs-memory-bound: an end by the bound (or the park it led to) is named
   if (memEnd) bits.push(memEnd);
+  const left = runLeftWords(run, t); // round 5: what the job left running — stopped (a task's), kept (a service's)
+  if (left) bits.push(left);
   return bits.join(' · ');
 }
 
@@ -409,7 +411,8 @@ async function expandDetail(app, el, j, refresh) {
   }
   for (const run of (job.runs || []).slice(-6).reverse()) {
     const rr = document.createElement('div'); rr.className = 'jobs-run';
-    rr.textContent = `${new Date(run.startedAt).toLocaleString()} · ${run.endedAt ? hum(run.endedAt - run.startedAt) : t('running')} · exit=${run.exit ?? '—'} ${run.cause || ''} (${run.trigger})`;
+    const left = runLeftWords(run, t); // round 5: what it left running
+    rr.textContent = `${new Date(run.startedAt).toLocaleString()} · ${run.endedAt ? hum(run.endedAt - run.startedAt) : t('running')} · exit=${run.exit ?? '—'} ${run.cause || ''} (${run.trigger})${left ? ' · ' + left : ''}`;
     d.appendChild(rr);
   }
   if (job.logTail) { const lt = document.createElement('pre'); lt.className = 'jobs-log'; lt.textContent = job.logTail; d.appendChild(lt); }

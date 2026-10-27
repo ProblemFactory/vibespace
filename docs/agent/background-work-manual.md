@@ -177,7 +177,11 @@ runs at 6 GB, and `show` says «capped by the instance's 8 GB limit (asked 16 GB
 job — under a user systemd the job's own scope sits beside VibeSpace, so a limit on VibeSpace's own service does not lower
 it, a limit on the user slice does (`show` names which).
 - **A stop ends the WHOLE job** — everything it started: a process that ignores SIGTERM is killed 10 s later (its run says
-  «stopped by force: …»), and under a user systemd nothing it left behind outlives the run.
+  «stopped by force: it did not end on SIGTERM in 10 s …») — 10 s is the job's to shut down cleanly.
+- **What a TASK leaves running is stopped when it ends** (`nohup x &`, a background daemon): its run says «the job left
+  1 process running — it was stopped; to keep a daemon, run it as a service job». A **service** keeps what it starts
+  until it is stopped or started again (its next run starts only once the old ones are gone). On a cluster pod (no
+  systemd) only what stays in the job's process group is seen — a `setsid` daemon is beyond it: run it as a service.
 
 - The wrapper enforces it with what this host offers and SAYS which (`vibespace-job show <id>` → `memory: …`):
   a cgroup of the user systemd (a real ceiling, no swap) or RLIMIT_DATA on the process (a fleet pod: no systemd);
