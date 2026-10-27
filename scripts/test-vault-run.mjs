@@ -196,7 +196,8 @@ const ROWS = {
   accounts: [{ entry: 'acct1', field: 'apiKey', label: 'my account', kind: 'api-key', bytes: VALUE3.length, v: VALUE3 }],
   channels: [{ entry: 'lark1', field: 'token', label: 'lark', kind: 'token', bytes: 40, v: 'channel-token-abcdefghijklmnop' }],
   secrets: [{ entry: 'host:dev1', field: 'token', label: 'link', bytes: 40, v: 'pairing-token-abcdefghijklmnop' }, { entry: 'agent:conv-1/gh-token', field: 'secret', label: 'Agent secret · gh-token', bytes: 30, v: 'agent-minted-value-0123456789' },
-    { entry: 'agent:conv-1/site-pw', field: 'secret', label: 'Agent secret · site-pw', bytes: 29, provenance: { by: 'agent', prov: 'minted', sawPlaintext: false, actor: 'Lane X', forHost: 'api.example.com' }, v: 'agent-minted-pw-0123456789abc' }],   // lane vault-agent-own: a MINTED own entry, --for api.example.com
+    { entry: 'agent:conv-1/site-pw', field: 'secret', label: 'Agent secret · site-pw', bytes: 29, provenance: { by: 'agent', prov: 'minted', sawPlaintext: false, actor: 'Lane X', forHost: 'api.example.com' }, v: 'agent-minted-pw-0123456789abc' },
+    { entry: 'agent:conv-1/gh-mint', field: 'secret', label: 'Agent secret · gh-mint', bytes: 30, provenance: { by: 'agent', prov: 'minted', sawPlaintext: false, actor: 'Lane X', forHost: 'github.com' }, v: 'agent-minted-ghv-0123456789abc' }],   // lane vault-agent-own (r13): a MINTED own entry --for github.com (the cross-host minor: a call -R ghe.* approved on a card homes to the APPROVED host)   // lane vault-agent-own: a MINTED own entry, --for api.example.com
 };
 const sourceOf = (store) => ({ vaultRows: () => ROWS[store].map(({ v, ...r }) => r), vaultReveal: (e, f) => { const r = ROWS[store].find((x) => x.entry === e && x.field === f); return r ? r.v : null; } });
 const CALLER = { conversationId: 'conv-1', sessionKey: 'claude:conv-1', name: 'Lane X', cwd: null };
@@ -931,7 +932,7 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const mine = (w.door.runnableFor({ ...w.caller, scope: 'sess-77-1', conv: 'conv-1' }).entries || []).filter((e) => e.by === 'own').map((e) => e.ref).sort();
   const theirs = (w.door.runnableFor({ ...w.caller, conversationId: 'conv-2', scope: 'sess-79-1', conv: 'conv-2' }).entries || []).map((e) => e.ref);
   const mintedRow = (w.door.runnableFor({ ...w.caller, scope: 'sess-77-1', conv: 'conv-1' }).entries || []).find((e) => e.ref === MINT) || {};
-  ok(mine.join() === [MINT, OWN].sort().join() && !theirs.some((r) => r.startsWith('vault://agent:conv-1/')) && mintedRow.minted === true && mintedRow.for === 'api.example.com', '`list` names its own entries (by own; a minted one with its host) to its conversation — and never to another', { mine, theirs, mintedRow });
+  ok(mine.join() === [MINT, OWN, 'vault://agent:conv-1/gh-mint'].sort().join() && !theirs.some((r) => r.startsWith('vault://agent:conv-1/')) && mintedRow.minted === true && mintedRow.for === 'api.example.com', '`list` names its own entries (by own; a minted one with its host) to its conversation — and never to another', { mine, theirs, mintedRow });
   openRow(w);
   const owner = await runAnswered(w, ['--env', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'env'], { answer: 'once' });
   const od = (owner.card && owner.card.detail) || '';
@@ -956,7 +957,7 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const GHREAL = path.join(ROOT, 'ghreal'); fs.mkdirSync(GHREAL, { recursive: true });
   fs.writeFileSync(path.join(GHREAL, 'gh'), "#!/usr/bin/env node\nprocess.stdout.write('gh\\n');\n", { mode: 0o755 });
   const GHREAL_GH = path.join(GHREAL, 'gh');
-  const digestVouch = (p) => Promise.resolve(p === GHREAL_GH ? GHSHA : 'dead'.repeat(16));   // 64 hex, != the pin for any other path
+  const digestVouch = (fd) => { let tgt = null; try { tgt = fs.readlinkSync('/proc/self/fd/' + fd); } catch { } return Promise.resolve(tgt === GHREAL_GH ? GHSHA : 'dead'.repeat(16)); };   // r13: the door hands the OPEN fd — resolve it back to the path it holds; 64 hex != the pin for any other binary
   const mkGh = (extra) => sw.mk(DOOR, { isRootOwned: REAL, toolDigest: digestVouch, ...extra });
   // plant config.yml + hosts.yml where round 10 minted its dir — the seal must point NOWHERE near it
   const planted = path.join(sw.dataDir, 'vault-run-env'); fs.mkdirSync(planted, { recursive: true });
@@ -973,17 +974,32 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
     'BLOCKER (r11): HOME, GH_CONFIG_DIR and every XDG_* point at SEAL_NOWHERE — a planted config / hosts / state is never read', { HOME: E.HOME, NOWHERE });
   ok(fs.readdirSync(planted).sort().join(',') === 'config.yml,hosts.yml', 'BLOCKER (r11): the door wrote NOTHING in the round-10 dir — it is no longer the run environment', fs.readdirSync(planted));
   const dirs = (E.PATH || '').split(':');
-  ok(!dirs.includes(WSEAL) && !dirs.includes(NOTYET) && !dirs.includes(GHREAL) && dirs.includes('/usr/bin') && dirs.includes('/bin'),
-    'round 12 (BLOCKER): the sealed PATH keeps ONLY root-owned system dirs (/usr/bin, /bin) and DROPS every uid-owned dir — the agent-writable WSEAL, the not-yet NOTYET, AND the uid-owned gh dir GHREAL (OWNERSHIP, not the mode bits)', { WSEAL: dirs.includes(WSEAL), NOTYET: dirs.includes(NOTYET), GHREAL: dirs.includes(GHREAL), usrbin: dirs.includes('/usr/bin') });
+  ok(!dirs.includes(WSEAL) && !dirs.includes(NOTYET) && !dirs.includes(GHREAL) && dirs.includes('/usr/bin') && dirs.every((d) => DOOR.sealDirReal(d) === d),
+    'round 12/13 (BLOCKER): the sealed PATH is root-owned REALPATHS only — WSEAL/NOTYET/GHREAL (all uid-owned) are dropped, /usr/bin kept, every surviving entry is its own canonical root-owned realpath', { WSEAL: dirs.includes(WSEAL), NOTYET: dirs.includes(NOTYET), GHREAL: dirs.includes(GHREAL), usrbin: dirs.includes('/usr/bin'), dirs });
   ok(E.GIT_CONFIG_GLOBAL === '/dev/null' && E.GIT_CONFIG_NOSYSTEM === '1' && E.GIT_TERMINAL_PROMPT === '0', 'BLOCKER (r11): gh’s git child reads no user / system config', { GIT_CONFIG_GLOBAL: E.GIT_CONFIG_GLOBAL });
   ok(E.GH_TOKEN === 'agent-minted-value-0123456789' && E.GH_HOST === undefined && E.GH_ENTERPRISE_TOKEN === undefined, 'the injected token rides GH_TOKEN; a STORED value (no --for host) pins NO GH_HOST and is NOT re-homed', { token: !!E.GH_TOKEN, GH_HOST: E.GH_HOST });
 
-  // RUN A2 — INVERTED (round 12): the agent MAKES NOTYET 0555 (uid-owned) between runs; the SAME door must STILL DROP it — "cannot
-  // write" is OWNERSHIP, not the write bit. On round 11 (accessSync W_OK) this exact dir was KEPT and a planted `git` shim ran.
+  // RUN A2 — INVERTED (round 12/13): the agent MAKES NOTYET 0555 (uid-owned) and a FRESH seal still DROPS it — "cannot write" is
+  // OWNERSHIP, not the write bit (round 11 with accessSync W_OK KEPT this exact dir and a planted `git` shim ran). A fresh door so
+  // the realpath seal re-computes with NOTYET present as 0555: its chain is not root-owned.
   fs.mkdirSync(NOTYET, { recursive: true }); fs.chmodSync(NOTYET, 0o555);
-  await dA.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work });
-  const E2 = A.get().env; const dirs2 = (E2.PATH || '').split(':');
-  ok(!dirs2.includes(NOTYET), 'round 12 (BLOCKER, RUN A2 INVERTED): a uid-owned 0555 dir the agent created between runs is STILL DROPPED — the owner flips the write bit at will, so ownership is the test (round 11 KEPT it; the shim would run)', { kept: dirs2.includes(NOTYET) });
+  const A2 = capOf();
+  const dA2 = mkGh({ spawnImpl: A2.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [WSEAL, NOTYET, GHREAL, '/usr/bin', '/bin'].join(':') }) });
+  await dA2.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work });
+  const E2 = A2.get().env; const dirs2 = (E2.PATH || '').split(':');
+  ok(!dirs2.includes(NOTYET) && dirs2.includes('/usr/bin'), 'round 12/13 (BLOCKER, RUN A2 INVERTED): a uid-owned 0555 dir is DROPPED by the realpath seal (its chain is not root-owned) — round 11 KEPT it; the shim would run', { kept: dirs2.includes(NOTYET) });
+
+  // SYMLINK SEAL (round 13 BLOCKER): the agent owns a PATH entry and points it at a ROOT dir so it passes the ownership check, then
+  // re-points it to its own dir AFTER the spawn. The child PATH must hold the REALPATH (/usr/bin), never the link STRING — so the
+  // re-point redirects nothing (gh's git/pager child resolves /usr/bin). Driven on the REAL sealDir (default); base kept the name.
+  const MYLINK = path.join(ROOT, 'agent-link'); try { fs.unlinkSync(MYLINK); } catch { }
+  fs.symlinkSync('/usr/bin', MYLINK);
+  const Y = capOf();
+  const dY = mkGh({ spawnImpl: Y.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [MYLINK, '/usr/bin', '/bin'].join(':') }) });
+  await dY.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work });
+  const EY = Y.get() ? Y.get().env : {}; const dirsY = (EY.PATH || '').split(':');
+  ok(!!Y.get() && !dirsY.includes(MYLINK) && dirsY.includes('/usr/bin'),
+    'round 13 (BLOCKER): an agent-owned symlink (PATH entry -> /usr/bin) is baked as its REALPATH /usr/bin, never the link STRING — re-pointing it after the spawn cannot redirect the child (base keeps the link name at the head)', { sealed: EY.PATH, hasLink: dirsY.includes(MYLINK) });
 
   // DIGEST RED — a gh shim at a uid-owned dir whose bytes are NOT the pin ⇒ tool_changed BEFORE any spawn: the agent cannot swap
   // the pinned gh for its own program (digestVouch returns a non-matching sha for any path but GHREAL_GH).
@@ -994,6 +1010,28 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const rS = await dS.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', path.join(GHSHIM, 'gh'), 'issue', 'list'], cwd: sw.work });
   ok(!rS.ok && rS.code === 'tool_changed' && !S.get(), 'round 12 (BLOCKER-class): a uid-owned gh whose sha256 differs from the pin is refused BY NAME (tool_changed) — a planted shim of the same name never runs, nothing spawned', { ok: rS.ok, code: rS.code, spawned: !!S.get() });
 
+  // HASH->SPAWN TOCTOU (round 13 MAJOR): a pinned uid-owned gh swapped for a shim BETWEEN the door's hash and its spawn. The door
+  // exec's the SAME inode it hashed via /proc/<pid>/fd, so the shim (a NEW inode renamed over the path) never runs — a REAL spawn
+  // writes a marker proving the ORIGINAL inode ran. On base (hash by path, exec by path) the renamed shim runs.
+  const TDIR = path.join(ROOT, 'toctou'); fs.mkdirSync(TDIR, { recursive: true });
+  const TOOLP = path.join(TDIR, 'gh'), SHIMP = path.join(TDIR, 'shim'), MARK = path.join(TDIR, 'who-ran');
+  fs.writeFileSync(TOOLP, '#!/bin/sh\nprintf ORIGINAL > ' + MARK + '\n', { mode: 0o755 });
+  fs.writeFileSync(SHIMP, '#!/bin/sh\nprintf SHIM > ' + MARK + '\n', { mode: 0o755 });
+  try { fs.unlinkSync(MARK); } catch { }
+  const swapDigest = (fd) => { try { fs.renameSync(SHIMP, TOOLP); } catch { } return Promise.resolve(GHSHA); };   // vouch (original bytes match the pin) AND swap a NEW inode over the path — the TOCTOU window
+  const dZ = sw.mk(DOOR, { isRootOwned: REAL, toolDigest: swapDigest, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [TDIR, '/usr/bin', '/bin'].join(':') }) });   // DEFAULT spawnImpl = REAL spawn
+  const rZ = await dZ.run({ caller: sw.caller, args: ['--timeout', '15', '--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', TOOLP, 'issue', 'list'], cwd: sw.work });
+  await sleep(200);
+  const whoRan = (() => { try { return fs.readFileSync(MARK, 'utf8'); } catch { return '(none)'; } })();
+  ok(rZ.ok && whoRan === 'ORIGINAL', 'round 13 (MAJOR, hash->spawn TOCTOU): a shim renamed over the pinned gh AFTER the door hashed it and BEFORE the spawn never ran — the door exec\'d the SAME inode via /proc/<pid>/fd (marker = ORIGINAL; base runs SHIM)', { ok: rZ.ok, whoRan, exit: rZ.exit });
+
+  // tool_unpinnable (round 13 MAJOR): where /proc/<pid>/fd is unavailable (not Linux — hasProcFd injected false) a pinned uid-owned
+  // tool is refused BY NAME rather than exec'd by a second path lookup the digest cannot vouch for. Nothing spawned.
+  const U = capOf();
+  const dU = mkGh({ spawnImpl: U.spawn, hasProcFd: false, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+  const rU = await dU.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work });
+  ok(!rU.ok && rU.code === 'tool_unpinnable' && !U.get(), 'round 13 (MAJOR): on a host without /proc/<pid>/fd a pinned uid-owned tool is tool_unpinnable (never exec\'d by a second path lookup) — nothing spawned', { ok: rU.ok, code: rU.code, spawned: !!U.get() });
+
   // RUN B — own MINTED site-pw (--for api.example.com, a non-github host) ⇒ the door pins GH_HOST AND homes the credential to
   // GH_ENTERPRISE_TOKEN (the agent passed a GH_TOKEN reference and named neither the host nor the enterprise credential name).
   const B = capOf();
@@ -1002,6 +1040,19 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const EB = B.get() ? B.get().env : {};
   ok(rB.ok && rB.by === 'own' && EB.GH_HOST === 'api.example.com' && EB.GH_ENTERPRISE_TOKEN === 'agent-minted-pw-0123456789abc' && EB.GH_TOKEN === undefined,
     'round 12 (MINOR): a value minted --for a GHES host pins GH_HOST and the DOOR homes the credential to GH_ENTERPRISE_TOKEN (GH_TOKEN cleared) — the agent named neither', { GH_HOST: EB.GH_HOST, ENT: EB.GH_ENTERPRISE_TOKEN, TOK: EB.GH_TOKEN });
+
+  // RUN D (round 13 MINOR): a value minted --for github.com, the call NAMES a GHES host (-R ghe.example.test/o/r) approved on a
+  // card ⇒ GH_HOST and the credential follow the host the VERDICT APPROVED (ghe.example.test → GH_ENTERPRISE_TOKEN), not the mint's
+  // --for (github.com). On base the seal pinned the mint's --for: GH_HOST=github.com + GH_TOKEN, the request reaching nowhere.
+  const Dd = capOf();
+  const dDd = mkGh({ spawnImpl: Dd.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+  const pDd = dDd.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-mint', '--', GHREAL_GH, 'issue', 'list', '-R', 'ghe.example.test/o/r'], cwd: sw.work });
+  const cardDd = await waitCard(sw);
+  if (cardDd) dDd.answer(cardDd.action.askId, { answer: 'once' });
+  const rDd = await pDd;
+  const EDd = Dd.get() ? Dd.get().env : {};
+  ok(rDd.ok && rDd.by === 'once' && EDd.GH_HOST === 'ghe.example.test' && EDd.GH_ENTERPRISE_TOKEN === 'agent-minted-ghv-0123456789abc' && EDd.GH_TOKEN === undefined,
+    'round 13 (MINOR): a value minted --for github.com, the call -R ghe.example.test approved on a card ⇒ GH_HOST + GH_ENTERPRISE_TOKEN follow the APPROVED host, not the mint\'s --for (base pinned github.com + GH_TOKEN, reaching nowhere)', { ok: rDd.ok, by: rDd.by, GH_HOST: EDd.GH_HOST, ENT: !!EDd.GH_ENTERPRISE_TOKEN, TOK: EDd.GH_TOKEN, card: !!cardDd });
 
   // RUN C — a runSeal tool resolved via an absolute path from a uid-owned dir, the agent PATH ALL uid-owned ⇒ the sealed PATH is
   // EMPTY ⇒ refused BY NAME (gh could not find git). A root hub, or git only under a writable prefix.
