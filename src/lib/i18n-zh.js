@@ -11056,6 +11056,7 @@ export default {
   "Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.": "无法读取「谁可以用」——按原样拒绝（绝不放宽解读）。重新保存即可修复。", // lane vault-use-grants
   "Used with no card by:": "无需卡片即可使用：", // lane vault-use-grants
   "used {n}×": "已用 {n} 次", // lane vault-use-grants
+  "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "该条目已关闭，授权暂停——打开「可供 agent 运行使用」即可恢复。", // lane vault-use-grants
   "until {when}": "至 {when}", // lane vault-use-grants
   "Take this back": "收回", // lane vault-use-grants
   "except {name}": "除了 {name}", // lane vault-use-grants
@@ -11103,7 +11104,8 @@ export default {
   "The policy judge is ON: a run its grants do not cover is judged against these words by the decision API; a yes runs it (recorded in For you), anything else shows you the card. It never sees the value.": "策略裁决已开启：授权未覆盖的运行会由 decision API 按这段话裁决；通过就运行（记录在「待你处理」里），其余情况都会给你弹卡片。它永远看不到值。", // lane vault-use-grants
   "The policy judge is OFF (Settings ▸ Integration ▸ «Let the policy judge approve vault uses») — the words are kept for when you turn it on.": "策略裁决已关闭（设置 ▸ 集成 ▸「让策略裁决批准保险库使用」）——这段话会保留，等你开启时使用。", // lane vault-use-grants
   "{who}: a command with a stored secret was approved by the policy judge": "{who}：一条使用存储秘密的命令已由策略裁决批准", // lane vault-use-grants
-  "Approved by the policy judge · {time} · {why}": "由策略裁决批准 · {time} · {why}", // lane vault-use-grants
+  "Approved by the policy judge · {time} · inside your policy ({p})": "由策略裁决批准 · {time} · 在你的策略范围内（{p}）", // lane vault-use-grants
+  "Your policy: {policy}": "你的策略：{policy}", // lane vault-use-grants
   "The command: {cmd}": "命令：{cmd}", // lane vault-use-grants
   "Open the entry in the Vault window to see its policy — its Revoke makes this command ask you again next time.": "在保险库窗口打开该条目可查看它的策略——在那里撤销后，这条命令下次会重新询问你。", // lane vault-use-grants
   "Let the policy judge approve vault uses": "让策略裁决批准保险库使用", // lane vault-use-grants

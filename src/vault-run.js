@@ -415,6 +415,49 @@ const URL_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/(?:[^@\s\/?#'"]{0,256}@)?(\[[0-9a
 const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/\.$/, ''); return x && x.length <= 253 ? (port ? `${x}:${port}` : x) : null; };
 function urlHosts(text) { const out = []; let m; URL_RE.lastIndex = 0; while ((m = URL_RE.exec(String(text)))) if (m[1].toLowerCase() !== 'vault') out.push(normHost(m[2], m[3])); return out.filter(Boolean); }
 const HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$|^localhost$/i;
+
+// ── THE RUN'S DESTINATIONS (lane vault-use-grants round 2, BLOCKER) — THE SEAM ──
+// `shape.hosts` is what the card NAMES (every URL / host-flag / scp target / default). Where the value actually GOES is a
+// wider question: curl's routing flags (-x/--proxy/--connect-to/--resolve/--socks*), ssh's -o ProxyCommand / -J / -W, git's
+// -c, rsync's -e, and a proxy environment variable all send it to a host that never enters `shape.hosts`. `routeHostsOf`
+// reads those too (the SAME reader a card and a grant must share), and returns `opaque:true` when a routing input cannot be
+// resolved to a concrete host (ProxyCommand, a proxy env var, an unparseable value) — the door then asks (fail closed).
+// INTEGRATION SEAM: lane vault-agent-own adds `shape.routeHosts` (every host gh CONTACTS). At train-C merge, the two become
+// ONE: this reader's curl/ssh/git/rsync routing parse folds into that `routeHosts`, and `destinationsOf` reads the field.
+// Until then this is the one function to swap — do not grow a second host grammar beside it.
+/** An authority (no scheme) → { host, port } (userinfo dropped at the LAST `@`, IPv6 brackets handled). */
+function splitAuthority(a) {
+  let s = String(a == null ? '' : a).trim();
+  const at = s.lastIndexOf('@'); if (at >= 0) s = s.slice(at + 1);
+  if (s[0] === '[') { const j = s.indexOf(']'); if (j > 0) { const m = /^:(\d{1,5})$/.exec(s.slice(j + 1)); return { host: s.slice(1, j), port: m ? m[1] : null }; } }
+  const p = s.split(':');
+  if (p.length === 2 && /^\d{1,5}$/.test(p[1])) return { host: p[0], port: p[1] };
+  return { host: p.length > 2 ? s : p[0], port: null };   // > 2 colons = a bare IPv6 literal
+}
+const schemeOff = (s) => String(s == null ? '' : s).replace(/^[a-z][a-z0-9+.-]{0,31}:\/\//i, '');
+/** A routing value that names a host → normHost (with its port), or null + sets opaque when it is a word, not a host. */
+function routeHosts(row, kind, hosts, keyed, positionals, plainEnv) {
+  const out = new Set(hosts), add = (h, port = null) => { const n = normHost(h, port); if (n) out.add(n); };
+  let opaque = false;
+  if (!(row && kind === 'tool')) { for (const h of hosts) out.add(h); return { hosts: [...out].filter(Boolean), opaque }; }
+  if (row.proxyEnv) for (const e of plainEnv || []) if (/^(?:https?|all|ftp)_proxy$/i.test(e.name) && String(e.value || '').trim()) opaque = true;   // a proxy env var intercepts every request — where it goes cannot be told
+  for (const kv of keyed || []) {
+    const i = kv.indexOf('='); const flag = kv.slice(0, i), val = kv.slice(i + 1);
+    if (flag === '-x' || flag === '--proxy' || flag === '--preproxy' || /^--socks[45]/.test(flag)) { const a = splitAuthority(schemeOff(val)); if (a.host) add(a.host, a.port); else if (val.trim()) opaque = true; }
+    else if (flag === '--connect-to') { const f = val.split(':'); if (f[2]) add(f[2], /^\d{1,5}$/.test(f[3] || '') ? f[3] : null); }   // HOST1:PORT1:HOST2:PORT2 → connects to HOST2
+    else if (flag === '--resolve') { const m = /^\+?[^:]+:\d+:(.+)$/.exec(val); if (m) for (const addr of m[1].split(',')) { const a = splitAuthority(addr.trim()); if (a.host) add(a.host); } }   // HOST:PORT:ADDR[,ADDR] → routes to ADDR
+    else if (flag === '--doh-url') { urlHosts(val).forEach((h) => out.add(h)); }
+    else if (flag === '-o') { const e = val.indexOf('='), ve = val.indexOf(' '), c = e < 0 ? ve : ve < 0 ? e : Math.min(e, ve); const k = (c < 0 ? val : val.slice(0, c)).trim().toLowerCase(), rest = c < 0 ? '' : val.slice(c + 1).trim(); if (k === 'proxycommand') opaque = true; else if (k === 'proxyjump' || k === 'hostname') for (const h of rest.split(/[,\s]+/)) { const a = splitAuthority(h); if (a.host) add(a.host, a.port); } }   // ssh -o
+    else if (flag === '-J') { for (const h of val.split(',')) { const a = splitAuthority(h.trim()); if (a.host) add(a.host, a.port); } }   // ssh jump host(s)
+    else if (flag === '-W') { const a = splitAuthority(val); if (a.host) add(a.host, a.port); }   // ssh -W host:port
+    else if (flag === '-c' || flag === '--config-env' || flag === '-e' || flag === '--rsh' || flag === '-D' || flag === '-S' || flag === '-L' || flag === '-R') opaque = true;   // git config / a remote-shell command / a forward can redirect where it goes
+  }
+  if (/^(?:curl|wget|http|https|httpie)$/.test(row.name)) for (const p of positionals) { const bare = schemeOff(p).replace(/^\/+/, ''); const m = /^([a-z0-9](?:[a-z0-9-]{0,62})(?:\.[a-z0-9](?:[a-z0-9-]{0,62}))+)(?::(\d{1,5}))?(?:[\/?#]|$)/i.exec(bare); if (m && !/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(p)) add(m[1], m[2] || null); }   // a bare host positional (curl evil.example/x) is a destination
+  return { hosts: [...out].filter(Boolean), opaque };
+}
+/** THE reader the card and the grant share: { hosts, opaque } — the hosts the run will CONTACT. (The seam above.) */
+const destinationsOf = (shape) => ({ hosts: Array.isArray(shape.routeHosts) ? shape.routeHosts : (shape.hosts || []), opaque: !!shape.routeOpaque });
+
 function argClassOf(a) {
   if (/\$VAULT_FILE\{/.test(a)) return '<vaultfile>';
   if (/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(a)) return '<url>';
@@ -459,9 +502,13 @@ function shapeOf(run) {
   }
   hosts.delete(null);
   const known = !!row && kind === 'tool';
-  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile ? 'config-file' : run.programWritable ? 'program-writable' : null;
+  // lane vault-use-grants round 2 (BLOCKER): the DESTINATIONS the run contacts (routing flags, proxies, bare positionals) —
+  // a superset of `hosts`; `routeOpaque` when a routing input cannot be resolved (ProxyCommand, a proxy env var) ⇒ no «always».
+  const dest = routeHosts(row, kind, [...hosts], keyed, positionals, run.plainEnv);
+  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size ? 'unknown-destination' : dest.opaque ? 'opaque-route' : row.runsProject ? 'runs-project-code' : configFile ? 'config-file' : run.programWritable ? 'program-writable' : null;
   return {
     v: SHAPE_V, tool: run.tool, name: run.name, kind, sub, flags: [...flags].sort(), args, hosts: [...hosts].sort(),
+    routeHosts: dest.hosts.slice().sort(), routeOpaque: dest.opaque,
     entries: run.refs.map((r) => r.ref).sort(), injection: [...run.injection].sort(), env: run.plainEnv.map((e) => `${e.name}=${e.value}`).sort(), keyed: keyed.sort(),
     templates: run.files.filter((f) => f.text != null).map((f) => `${f.name}=${f.text}`).sort(), on: run.on || null, script,
     known, proxyEnv: !!(known && row.proxyEnv), always: !noAlways, noAlways, argvExposed: !!run.argvExposed,
@@ -855,6 +902,6 @@ module.exports = {
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
-  shapeOf, shapeKeyOf, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, runVerdict,
+  shapeOf, shapeKeyOf, destinationsOf, routeHosts, splitAuthority, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
 };

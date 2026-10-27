@@ -431,7 +431,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     const name = keyNameOf(entry) || String(entry || '');
     const u = VU.useOf(use, now());
     const outcome = VU.outcomeOf(o.outcome);
-    if (outcome === 'ok' || o.used === true) { uses.set(name, u); const sn = o.store ? keyNameOf(o.store) : null; if (sn) uses.set(sn, u); contentsChanged('use'); }   // o.used: a run's child had the value, whatever ended it — lane vault-use-grants: a use moves the row's «last used» and its «used N×» (the window is told)
+    if (outcome === 'ok' || o.used === true) { uses.set(name, u); const sn = o.store ? keyNameOf(o.store) : null; if (sn) uses.set(sn, u); if (u.by !== 'system') contentsChanged('use'); }   // o.used: a run's child had the value, whatever ended it — lane vault-use-grants: a use moves the row's «last used» and its «used N×» (the window is told). Round 2 (claim 1): NEVER notify on the hub's own `by:system` reads — the window's own listing does such a read (app-logins → lawfulKey → noteUse), so a notify there would feed itself an endless re-read loop.
     if (u.by === 'system') return { receipt: null };   // the hub's own read: its «last used» only (a line per store read would drown the file)
     const receipt = VU.RECEIPT_RE.test(String(o.receipt || '')) ? String(o.receipt) : `vr-${crypto.randomBytes(6).toString('hex')}`;
     if (VU.BEARERS.includes(u.by)) audit('vault-use', VU.useLine({ at: u.at, entry: name, purpose: o.purpose, use: u, actor: o.actor, outcome, receipt, ip: o.ip, grant: o.grant }));   // lane vault-use-grants: `o.grant` = the vault-use grant that admitted it

@@ -11055,6 +11055,7 @@ export default {
   "Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.": "「誰が使えるか」を読み取れません——そのまま拒否します（広く解釈しません）。保存し直すと直ります。", // lane vault-use-grants
   "Used with no card by:": "カードなしで使用：", // lane vault-use-grants
   "used {n}×": "{n} 回使用", // lane vault-use-grants
+  "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "項目がオフの間は停止中——「エージェント実行で使用可」をオンにすると復元します。", // lane vault-use-grants
   "until {when}": "{when} まで", // lane vault-use-grants
   "Take this back": "取り消す", // lane vault-use-grants
   "except {name}": "{name} を除く", // lane vault-use-grants
@@ -11102,7 +11103,8 @@ export default {
   "The policy judge is ON: a run its grants do not cover is judged against these words by the decision API; a yes runs it (recorded in For you), anything else shows you the card. It never sees the value.": "ポリシー判定はオンです：許可でカバーされない実行は decision API がこの文で判定し、承認なら実行（「あなた宛て」に記録）、それ以外はカードを表示します。値は決して見えません。", // lane vault-use-grants
   "The policy judge is OFF (Settings ▸ Integration ▸ «Let the policy judge approve vault uses») — the words are kept for when you turn it on.": "ポリシー判定はオフです（設定 ▸ 連携 ▸「ポリシー判定に保管庫の使用を承認させる」）——オンにしたときのために保存しておきます。", // lane vault-use-grants
   "{who}: a command with a stored secret was approved by the policy judge": "{who}：保存された秘密を使うコマンドがポリシー判定で承認されました", // lane vault-use-grants
-  "Approved by the policy judge · {time} · {why}": "ポリシー判定が承認 · {time} · {why}", // lane vault-use-grants
+  "Approved by the policy judge · {time} · inside your policy ({p})": "ポリシー判定が承認 · {time} · ポリシーの範囲内（{p}）", // lane vault-use-grants
+  "Your policy: {policy}": "あなたのポリシー：{policy}", // lane vault-use-grants
   "The command: {cmd}": "コマンド：{cmd}", // lane vault-use-grants
   "Open the entry in the Vault window to see its policy — its Revoke makes this command ask you again next time.": "保管庫ウィンドウでその項目を開くとポリシーを確認できます——そこで取り消すと、このコマンドは次回また確認します。", // lane vault-use-grants
   "Let the policy judge approve vault uses": "ポリシー判定に保管庫の使用を承認させる", // lane vault-use-grants

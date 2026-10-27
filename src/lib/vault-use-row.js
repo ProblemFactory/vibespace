@@ -35,7 +35,7 @@ function nameOf(m, app) {
   return (s && s.name) || m.name || String(m.key || '').slice(0, 8);
 }
 /** The row's «Who may use it» facts signature (the window patches the box in place when it moves). */
-export const useSigOf = (row) => JSON.stringify((row && row.run && row.run.use) || null);
+export const useSigOf = (row) => JSON.stringify([(row && row.run && row.run.use) || null, !!(row && row.run && row.run.paused)]);   // round 2 MAJOR: whether the entry is suspended is part of the signature — turning it OFF/ON greys / restores the grant chips
 
 /** The row's extras: `box` (the chips and 「Who may use it…」 under them — the main column: the row's door column keeps its
  *  width) and `doors` (none). `redraw(row)` patches the chips in place. */
@@ -55,8 +55,9 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
     if (!u) return;
     if (u.unknown) { host.append(el('div', 'vw-use-bad', t('Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.'))); return; }
     const live = (u.to || []).filter(Boolean);
+    const paused = live.length && !!(r && r.run && r.run.paused);   // round 2 MAJOR: the entry was turned OFF — its grants are kept but suspended
     if (live.length) {
-      const chips = el('div', 'vw-ak-grants vw-use-chips');
+      const chips = el('div', `vw-ak-grants vw-use-chips${paused ? ' vw-use-paused' : ''}`);
       chips.append(el('span', 'vw-ak-to vw-use-to', t('Used with no card by:')));
       for (const m of live) {
         const chip = el('span', `vw-ak-chip vw-use-chip${m.expired ? ' vw-use-expired' : ''}`);
@@ -76,6 +77,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
       }
       for (const x of u.except || []) chips.append(el('span', 'vw-ak-chip vw-use-chip vw-use-except', t('except {name}', { name: nameOf(x, app) })));
       host.append(chips);
+      if (paused) host.append(el('div', 'vw-use-paused-note', t('Paused while the entry is off — turn «Usable by agent runs» on to restore these.')));
     }
     if (u.used && u.used.uses) host.append(el('div', 'vw-ak-used vw-use-count', t('used {n}× by {m} conversations', { n: u.used.uses, m: u.used.convs })));
     if (u.policy) host.append(el('div', 'vw-ak-used vw-use-policy', u.judge === 'on' ? t('Policy for the judge: «{text}»', { text: u.policy.text }) : t('Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)', { text: u.policy.text })));

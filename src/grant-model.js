@@ -103,10 +103,14 @@ const ENTRY_FIELDS = Object.freeze({
   'group-visibility': Object.freeze({ level: Object.freeze(['visible', 'messageable']) }),
   'vault-use': Object.freeze({ hosts: 'hosts', until: 'time' }),   // lane vault-use-grants
 });
-/** lane vault-use-grants: ONE destination a vault-use entry may name — a lower-case host name (letters, digits, `-`, dots),
- *  an IPv4 / IPv6 address (IPv6 bracketed or bare), or `@entry` («the hosts the entry was stored for» — the door resolves
- *  it at use time). Never a wildcard: «any host» is no value of this field. */
-const HOST_TOKEN_RE = /^(?:@entry|[a-z0-9](?:[a-z0-9-]{0,62})(?:\.[a-z0-9](?:[a-z0-9-]{0,62}))*\.?|\[[0-9a-f:.]{2,45}\]|[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7})$/;
+/** lane vault-use-grants: ONE destination a vault-use entry may name — EVERY shape the run card can name (round 2 MAJOR):
+ *  a host name (one label like `router` or many like `api.example.com`), an IPv4 / IPv6 address (IPv6 bracketed or bare),
+ *  any of those with a `:port`, or a `*.domain` wildcard over a registrable domain (`*.amazonaws.com`, never `*.com`); or
+ *  `@entry` («the hosts the entry was stored for», resolved at use time). Never «any host» — no `*` alone, no `*.<TLD>`. A
+ *  bare label (`com`, `lan`) is a HOST NAME, not a wildcard: it covers ONLY itself (src/vault-use-grant.js `hostCovers`
+ *  requires a dot before it may match subdomains — a single label can never stand for everything under it). */
+const _L = '[a-z0-9](?:[a-z0-9-]{0,62})';
+const HOST_TOKEN_RE = new RegExp(`^(?:@entry|(?:${_L}(?:\\.${_L})*\\.?|\\*(?:\\.${_L}){2,}|\\[[0-9a-f:.]{2,45}\\])(?::\\d{1,5})?|[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7})$`, 'i');
 const HOSTS_MAX = 16;
 /** A `hosts` value → its normal list (lower-cased, a trailing dot and IPv6 brackets dropped, deduplicated, ≤ HOSTS_MAX) |
  *  null when it is not a non-empty list of host tokens (the entry is then refused at a write, dropped at a read). */

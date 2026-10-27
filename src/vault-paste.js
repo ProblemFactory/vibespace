@@ -75,7 +75,7 @@ const WORDS = Object.freeze({
   name_with_into: '--name labels a NEW vault entry; an Integrations field already has its name — drop --name or --into',
   value_required: 'paste the value first',
   value_too_long: `a value is at most ${LIMITS.value} characters`,
-  bad_host: `--host names where the new entry is used: host names or addresses (e.g. 192.168.1.1,router.lan), at most ${LIMITS.hosts}, comma-separated — never a wildcard`,   // lane vault-use-grants
+  bad_host: `--host names where the new entry is used: host names or addresses (e.g. 192.168.1.1,router.lan,*.amazonaws.com), at most ${LIMITS.hosts}, comma-separated — a *.domain wildcard is fine, a lone * or «any host» is not`,   // lane vault-use-grants
   hosts_with_into: '--host names where a NEW vault entry is used; an Integrations field is used by VibeSpace itself — drop --host or --into',
 });
 /** lane vault-use-grants: the request's hosts (a comma / space separated string, or a list) → the one spelling | null when

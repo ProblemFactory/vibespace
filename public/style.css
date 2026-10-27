@@ -8801,6 +8801,8 @@ button.vw-chip { cursor: pointer; }
 .vw-use .vw-use-grant { align-self: flex-start; }
 .vw-use-expired { opacity: 0.6; text-decoration: line-through; }
 .vw-use-except { color: var(--text-dim); }
+.vw-use-paused { opacity: 0.5; }
+.vw-use-paused-note { color: var(--text-dim); font-size: 0.85em; margin-top: 2px; }
 .vw-nomatch-all { margin-left: 8px; }
 .vw-use-approved { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .vw-use-policy-in { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }

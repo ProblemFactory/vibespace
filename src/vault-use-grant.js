@@ -44,12 +44,23 @@ function grantIdOf(resource, principalKey) {
   return `vg-${h.toString(16).padStart(8, '0')}`;
 }
 const isAddress = (h) => /^\d{1,3}(?:\.\d{1,3}){3}$/.test(h) || h.includes(':');
-/** Does grant host `g` cover run host `h`? The same host, or (both DNS names) `h` under `g`. */
+/** A host token → { host, port } (IPv6 brackets dropped, a `:port` split off; a bare IPv6 literal keeps its colons). */
+function splitHostPort(s) {
+  let x = String(s == null ? '' : s).trim().toLowerCase().replace(/\.$/, '');
+  if (x[0] === '[') { const j = x.indexOf(']'); if (j > 0) { const m = /^:(\d{1,5})$/.exec(x.slice(j + 1)); return { host: x.slice(1, j), port: m ? m[1] : null }; } }
+  const colons = (x.match(/:/g) || []).length;
+  if (colons === 1) { const [h, p] = x.split(':'); if (/^\d{1,5}$/.test(p)) return { host: h, port: p }; }
+  return { host: x, port: null };   // no port, or a bare IPv6 literal (> 1 colon)
+}
+/** Does grant host `g` cover run host `h`? A `:port` on the grant is specific (it must match); then: the same host, a
+ *  `*.domain` wildcard over `h`, or (both DNS names) `h` a subdomain of `g`. An address covers only itself. */
 function hostCovers(g, h) {
-  const a = String(g || '').toLowerCase(), b = String(h || '').toLowerCase();
-  if (!a || !b) return false;
-  if (a === b) return true;
-  return !isAddress(a) && !isAddress(b) && /[a-z]/.test(a) && b.endsWith(`.${a}`);
+  const G = splitHostPort(g), H = splitHostPort(h);
+  if (!G.host || !H.host) return false;
+  if (G.port && G.port !== H.port) return false;   // a grant naming a port is exact on the port
+  if (G.host.startsWith('*.')) { const base = G.host.slice(2); return H.host === base || H.host.endsWith(`.${base}`); }
+  if (G.host === H.host) return true;
+  return !isAddress(G.host) && !isAddress(H.host) && G.host.includes('.') && H.host.endsWith(`.${G.host}`);
 }
 /** A run's hosts in the one spelling (lower case, no trailing dot, no IPv6 brackets) — what the shape says (src/vault-run.js). */
 const runHostsOf = (hosts) => [...new Set((Array.isArray(hosts) ? hosts : []).map((h) => String(h == null ? '' : h).trim().toLowerCase().replace(/\.$/, '').replace(/^\[(.*)\]$/, '$1')).filter(Boolean))];

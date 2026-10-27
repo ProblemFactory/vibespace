@@ -171,6 +171,7 @@ const NO_ALWAYS = Object.freeze({
   shell: 'a shell\'s whole script is its shape',
   interpreter: 'an interpreter runs a program this card cannot read',
   'unknown-destination': 'where this tool sends what it reads is unknown',
+  'opaque-route': 'where it is routed (a proxy, an ssh ProxyCommand, a config directive) cannot be told from the command',
   'runs-project-code': 'it runs the project\'s own code (package scripts, setup files, a Dockerfile)',
   'config-file': 'it reads a config file this card cannot show',
   'program-writable': 'the program sits where an agent could have written it',
@@ -295,12 +296,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const audit = (event, line) => { try { vault.audit(event, line); } catch (e) { log(`the audit line could not be written (${e.message})`); } };
 
   // ── THE STORE (marked by the vault) ──
-  const bodyOf = (d) => JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: [...d.runnable].sort(), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)),
+  const bodyOf = (d) => JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: [...d.runnable].sort(), ...(d.suspended && d.suspended.size ? { suspended: [...d.suspended].sort() } : {}), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)),
     ...(d.policies && Object.keys(d.policies).length ? { policies: Object.fromEntries(Object.keys(d.policies).sort().map((k) => [k, d.policies[k]])) } : {}),   // lane vault-use-grants (R4): only when there is one — a body without them is marked as before
-    ...(d.policyRevoked && d.policyRevoked.length ? { policyRevoked: d.policyRevoked.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)) } : {}) });
+    ...(d.policyRevoked && d.policyRevoked.length ? { policyRevoked: d.policyRevoked.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)) } : {}),
+    ...(d.policyApproved && Object.keys(d.policyApproved).length ? { policyApproved: Object.fromEntries(Object.keys(d.policyApproved).sort().map((k) => [k, { n: Number(d.policyApproved[k].n) || 0, lastAt: Number(d.policyApproved[k].lastAt) || 0, shapes: (d.policyApproved[k].shapes || []).map((s) => ({ conv: s.conv, key: s.key })), items: (d.policyApproved[k].items || []).slice() }])) } : {}) });   // lane vault-use-grants round 2 (MAJOR): the judge's approvals ride the marked store so a Revoke survives a restart — ONE canonical key order so save and load serialize identically (the mark verifies)
   const okPolicy = (x) => x && typeof x === 'object' && typeof x.text === 'string' && x.text.length > 0 && x.text.length <= DM.VAULT_POLICY_MAX;
   const policiesOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, x] of Object.entries(raw).slice(0, 256)) if (VI.parseRef(k) && okPolicy(x)) out[k] = { text: x.text, at: Number(x.at) || null, by: String(x.by || 'user').slice(0, 40) }; return out; };
   const revokedOf = (raw) => (Array.isArray(raw) ? raw : []).filter((x) => x && typeof x.conv === 'string' && typeof x.key === 'string').slice(0, 512).map((x) => ({ conv: x.conv, key: x.key }));
+  const approvedOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, x] of Object.entries(raw).slice(0, 256)) if (VI.parseRef(k) && x && typeof x === 'object') out[k] = { n: Number(x.n) || 0, lastAt: Number(x.lastAt) || 0, shapes: (Array.isArray(x.shapes) ? x.shapes : []).filter((s) => s && typeof s.conv === 'string' && typeof s.key === 'string').slice(0, 256).map((s) => ({ conv: s.conv, key: s.key })), items: (Array.isArray(x.items) ? x.items : []).filter((i) => typeof i === 'string').slice(0, 256) }; return out; };   // the SAME field order as bodyOf emits (n, lastAt, shapes, items) so the mark verifies on read
   const okAlways = (a) => a && typeof a.conv === 'string' && typeof a.key === 'string' && a.key.startsWith(VR.SHAPE_V + ':') && (a.until === null || Number.isFinite(a.until)) && Array.isArray(a.entries);
   let lastGen = 0;   // the newest generation this hub read or wrote — an older copy is a replay (the review: a saved copy restored)
   /** The store as the vault vouches for it — null unless unlocked. Read once per unlock (the epoch), kept in memory. */
@@ -309,10 +312,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (db && dbEpoch === vault.epoch()) return db;
     let raw = null, why = null;
     try { raw = JSON.parse(readBounded(FILE, STORE_MAX).toString('utf8')); } catch (e) { if (!(e && e.code === 'ENOENT')) why = `unreadable (${e.code || 'not JSON'})`; }
-    let next = { gen: lastGen, runnable: new Set(), always: [], policies: {}, policyRevoked: [] };
+    let next = { gen: lastGen, runnable: new Set(), suspended: new Set(), always: [], policies: {}, policyRevoked: [], policyApproved: {} };
     if (raw && !why) {
       try {
-        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40) })), policies: policiesOf(raw.policies), policyRevoked: revokedOf(raw.policyRevoked) };
+        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), suspended: new Set((Array.isArray(raw.suspended) ? raw.suspended : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40) })), policies: policiesOf(raw.policies), policyRevoked: revokedOf(raw.policyRevoked), policyApproved: approvedOf(raw.policyApproved) };
         const want = vault.macOf(MARK_LABEL, bodyOf(cand));
         const got = typeof raw.mark === 'string' && /^[0-9a-f]{64}$/.test(raw.mark) ? raw.mark : null;   // the review: a non-hex mark threw in timingSafeEqual
         if (!(want && got && cand.gen >= 0 && crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')))) why = 'its mark does not verify';
@@ -335,7 +338,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     log(`data/${STORE_FILE}: ${c.carried} «always» member(s) carried into the vault-use grants (${c.expired} expired, ${c.hostless} with no host)${r.ok ? '' : ' — the store could not be rewritten; carried again at the next read'}`);
   }
   function save(next0) {
-    const next = { policies: (db && db.policies) || {}, policyRevoked: (db && db.policyRevoked) || [], ...next0, gen: Math.max(lastGen, Number(db && db.gen) || 0) + 1 };   // lane vault-use-grants (R4): a save that names no policy keeps them
+    const next = { suspended: (db && db.suspended) || new Set(), policies: (db && db.policies) || {}, policyRevoked: (db && db.policyRevoked) || [], policyApproved: (db && db.policyApproved) || {}, ...next0, gen: Math.max(lastGen, Number(db && db.gen) || 0) + 1 };   // lane vault-use-grants (R4): a save that names no policy keeps them; (round 2) a save that names no `suspended` keeps it
     const mark = vault.macOf(MARK_LABEL, bodyOf(next));
     if (!mark) return named('vault_locked');
     try { writeJsonAtomic(FILE, { ...JSON.parse(bodyOf(next)), mark }); } catch (e) { return named('failed', { why: `data/${STORE_FILE} could not be written (${e.code || e.message})` }); }
@@ -370,8 +373,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     let use = null;
     if (grantable) { try { const r = ref && VR.refFor(ref.store, ref.entry, ref.field); const counts = typeof vault.useCounts === 'function' ? vault.useCounts() : {}; use = { ...useGrants.publicFor(row.id, r ? counts[r.ref] : null), entryHosts: Array.isArray(row.hosts) ? row.hosts : [], used: r && counts[r.ref] ? { uses: counts[r.ref].uses, convs: counts[r.ref].convs } : { uses: 0, convs: 0 } }; } catch { use = { unknown: true, to: [], except: [] }; } }
     // lane vault-use-grants (R4): the entry's policy (the owner's words), whether the judge is on, what it approved since the boot
-    if (use && !use.unknown) { const pol = d && d.policies && d.policies[row.id]; const ap = approved.get(row.id); let on = false; try { on = !!policyOn(); } catch { on = false; } use.policy = pol ? { text: pol.text, at: pol.at } : null; use.judge = on ? 'on' : 'off'; use.approved = ap ? { n: ap.n, lastAt: ap.lastAt } : null; }
-    return { can: c.runnable, open: !!(c.runnable && d && d.runnable.has(row.id)), ...(grantable ? { use } : {}) };
+    if (use && !use.unknown) { const pol = d && d.policies && d.policies[row.id]; const ap = d && d.policyApproved && d.policyApproved[row.id]; let on = false; try { on = !!policyOn(); } catch { on = false; } use.policy = pol ? { text: pol.text, at: pol.at } : null; use.judge = on ? 'on' : 'off'; use.approved = ap ? { n: ap.n, lastAt: ap.lastAt } : null; }
+    return { can: c.runnable, open: !!(c.runnable && d && d.runnable.has(row.id)), paused: !!(c.runnable && d && d.suspended && d.suspended.has(row.id)), ...(grantable ? { use } : {}) };   // round 2 MAJOR: `paused` = the entry was turned OFF, so its grants are held (the window greys them)
   }
   /** A PERSON's switch (src/routes/vault.js: people only; ON needs this page's 验证是你 window — `reauthed`). */
   function setRunnable({ id, on, reauthed = false, by = 'user' } = {}) {
@@ -385,21 +388,21 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (on && !row) return named('entry_unknown');
     if (on && !reauthed) return { ok: false, code: 'reveal_needs_password' };
     const d = load();
-    const was = d.runnable.has(key);
-    if (!!on === was) return { ok: true, id: key, open: was, already: true };
-    const runnable = new Set(d.runnable);
-    if (on) runnable.add(key); else runnable.delete(key);
+    const wasRun = d.runnable.has(key), wasSusp = d.suspended.has(key);
+    if (!!on === wasRun && !on === wasSusp) return { ok: true, id: key, open: wasRun, already: true };
+    const runnable = new Set(d.runnable), suspended = new Set(d.suspended);
+    if (on) { runnable.add(key); suspended.delete(key); } else { runnable.delete(key); suspended.add(key); }   // round 2 MAJOR: an explicit OFF marks the entry suspended — every vault-use grant is held (kept, not deleted) while it is; ON clears it
     // OFF takes back every «always» and seen shape that names this entry (the review: an «always» outlived its switch)
     const always = on ? d.always : d.always.filter((a) => !a.entries.includes(key));
     if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) shortAlways.delete(p); for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); for (const [p, x] of grants) if (x.entries.includes(key)) grants.delete(p); }   // + the grants (lane vault-manual-and-lock: OFF = closed for every conversation)
-    const r = save({ runnable, always });
+    const r = save({ runnable, suspended, always });
     if (!r.ok) return r;
     audit('vault-run-switch', { by: String(by).slice(0, 40), store: ref.store, entry: ref.entry, field: ref.field, open: !!on });
     try { vault.contentsChanged && vault.contentsChanged('switch'); } catch { }   // lane vault-use-grants: every open Vault window shows the switch
     return { ok: true, id: key, open: !!on };
   }
-  // ── THE POLICY (lane vault-use-grants R4) ──
-  const approved = new Map();   // entry id → { n, lastAt, items: [todoId], shapes: [{conv, key}] } — what the judge approved since the boot (the row's line, its Revoke)
+  // ── THE POLICY (lane vault-use-grants R4) ── approvals persist in the marked store as `policyApproved` (round 2 MAJOR:
+  // a Revoke survives a restart; the row's «approved N×» survives); entry id → { n, lastAt, items: [todoId], shapes: [{conv, key}] }.
   /** A PERSON's door: the entry's policy (one paragraph, ≤ VAULT_POLICY_MAX). Setting one lets the judge approve uses — a
    *  widening — so it needs this page's 验证是你 window (`reauthed`); clearing it is a click. */
   function setPolicy({ id, text = '', reauthed = false, by = 'user' } = {}) {
@@ -425,29 +428,36 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  conversation × shape pairs go into the marked store); the For-you records of those approvals are closed. */
   function revokeApprovals({ id, by = 'user' } = {}) {
     if (vaultState() !== 'unlocked') return named('vault_locked');
-    const key = String(id || ''), ap = approved.get(key);
+    const key = String(id || ''), d = load(), ap = d && d.policyApproved ? d.policyApproved[key] : null;
     if (!ap) return { ok: true, revoked: 0 };
-    const d = load();
     const have = new Set(d.policyRevoked.map((x) => `${x.conv}\n${x.key}`));
     const policyRevoked = [...d.policyRevoked, ...ap.shapes.filter((x) => !have.has(`${x.conv}\n${x.key}`))].slice(-512);
-    const r = save({ runnable: d.runnable, always: d.always, policyRevoked });
+    const policyApproved = { ...d.policyApproved }; delete policyApproved[key];
+    const r = save({ runnable: d.runnable, always: d.always, policyRevoked, policyApproved });
     if (!r.ok) return r;
-    approved.delete(key);
     if (userTodos) for (const tid of ap.items) { try { const it = userTodos.get?.(tid); if (it && it.status === 'open') userTodos.setStatus(tid, 'done', 'vault'); } catch { } }
     audit('vault-run-policy-revoked', { by: String(by).slice(0, 40), entry: key, shapes: ap.shapes.length });
     try { vault.contentsChanged && vault.contentsChanged('policy'); } catch { }
     return { ok: true, revoked: ap.shapes.length };
   }
-  /** Ask the judge about ONE run with the CARD's facts (never a value). → { approve, p?, line? } — `line` = what the card says. */
-  async function judgePolicy({ caller, spec, shape, key, refs, policies }) {
-    const rows = refs.map((r) => rowOf(r));
-    const parts = {
-      command: `${cmdText(spec.argv)}\n(the secret${refs.length > 1 ? 's' : ''} ${refs.map((r) => r.ref).join(', ')} given as ${spec.injection.join(', ')} — a reference, never the value)`, program: String(spec.tool || ''), hosts: shape.hosts.length ? shape.hosts.join(', ') : 'unknown — the tool names none',
+  /** The EXACT facts the judge is shown for ONE run (the rendered card — program, every argument verbatim, the hosts it
+   *  contacts, each template in full, the purpose, the entry). The memo and the Revoke are keyed on THESE, never the coarse
+   *  shape (round 2 MAJOR: an approved read-only GET must not green-light a DELETE of the same shape). */
+  function policyPartsOf(spec, shape, refs) {
+    const rows = refs.map((r) => rowOf(r)), dst = VR.destinationsOf(shape);
+    return {
+      command: `${cmdText(spec.argv)}\n(the secret${refs.length > 1 ? 's' : ''} ${refs.map((r) => r.ref).join(', ')} given as ${spec.injection.join(', ')} — a reference, never the value)`, program: String(spec.tool || ''), hosts: dst.hosts.length ? dst.hosts.join(', ') : 'unknown — the tool names none',
       templates: spec.files.filter((f) => f.template != null).map((f) => `${f.name} (@${f.template}):\n${String(f.text)}`).join('\n\n'),
       purpose: rows.map((x) => (x && x.detail) || '').filter(Boolean).join(' · ') || 'not said', entry: rows.map((x, i) => (x && x.label) || refs[i].ref).join(', '),
     };
+  }
+  /** The memo / Revoke key = a digest of the exact facts shown PLUS the policy text — a different method, path, template byte
+   *  or policy ⇒ a different key ⇒ a fresh judgment (never a memo hit). */
+  const judgedKeyOf = (parts, policyText) => crypto.createHash('sha256').update(JSON.stringify([parts.command, parts.program, parts.hosts, parts.templates, parts.purpose, parts.entry, String(policyText || '')])).digest('hex').slice(0, 32);
+  /** Ask the judge about ONE run with the CARD's facts (never a value). → { approve, p?, line? } — `line` = what the card says. */
+  async function judgePolicy({ caller, parts, policies, jkey }) {
     let res = null;
-    try { res = await policyJudge(parts, { policy: policies.join(' / '), memo: { id: `${caller.conversationId}\n${key}`, policy: policies.join('\n') } }); }
+    try { res = await policyJudge(parts, { policy: policies.join(' / '), memo: { id: `${caller.conversationId}\n${jkey}`, policy: policies.join('\n') } }); }
     catch (e) { return { approve: false, line: `The policy judge could not be asked (${String((e && e.message) || e).slice(0, 80)}) — so this card asks you.` }; }
     if (!res || !res.ok) return { approve: false, line: `The policy judge could not be asked (${String((res && (res.why || res.code)) || 'unavailable').slice(0, 80)}) — so this card asks you.` };
     const a = Array.isArray(res.answers) ? res.answers[0] : null;
@@ -456,35 +466,42 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (p >= DM.VAULT_POLICY_THRESHOLD) return { approve: true, p };
     return { approve: false, p, line: `The policy judge did not find it inside your policy (${p.toFixed(2)} < ${DM.VAULT_POLICY_THRESHOLD}) — so this card asks you.` };
   }
-  /** THE RECORD of an approval: ONE For-you item (its door opens the entry's row — 「Revoke」 there) + the row's line. */
-  function recordApproval({ caller, spec, refs, p, key }) {
+  /** THE RECORD of an approval: ONE For-you item (its door opens the entry's row — 「Revoke」 there) + the row's line. The
+   *  approval is persisted in the marked store (round 2 MAJOR: the Revoke survives a restart); the record names the policy
+   *  that matched and the judge's probability, every line keyed for zh/ja (round 2 MINOR: {why} had no translation). */
+  function recordApproval({ caller, spec, refs, p, key, policy = '' }) {
     const who = String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80);
     const at = now(), hhmm = new Date(at).toTimeString().slice(0, 5);
-    const why = typeof p === 'number' ? `inside your policy (${p.toFixed(2)})` : 'inside your policy';
+    const d = load(); if (!d) return;
+    const policyApproved = { ...d.policyApproved };
     for (const r of refs) {
-      const ap = approved.get(r.id) || { n: 0, lastAt: 0, items: [], shapes: [] };
+      const ap = { n: 0, lastAt: 0, items: [], shapes: [], ...(policyApproved[r.id] || {}) };
       ap.n++; ap.lastAt = at;
       if (!ap.shapes.some((x) => x.conv === caller.conversationId && x.key === key)) ap.shapes.push({ conv: caller.conversationId, key });
-      approved.set(r.id, ap);
+      policyApproved[r.id] = ap;
     }
-    if (!userTodos) return;
-    const head = cmdText(spec.argv).slice(0, 200);
+    const head = cmdText(spec.argv).slice(0, 200), pstr = typeof p === 'number' ? p.toFixed(2) : '—';
     const lines = [
-      { key: 'Approved by the policy judge · {time} · {why}', params: { time: hhmm, why } },
+      { key: 'Approved by the policy judge · {time} · inside your policy ({p})', params: { time: hhmm, p: pstr } },
       { key: 'The command: {cmd}', params: { cmd: head } },
+      { key: 'Your policy: {policy}', params: { policy: String(policy || '').slice(0, 300) } },
       { key: 'Open the entry in the Vault window to see its policy — its Revoke makes this command ask you again next time.' },
     ];
-    try {
-      const it = userTodos.add(caller.sessionKey || 'vault', {
-        origin: 'vault', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: who,
-        text: `${who}: a command with a stored secret was approved by the policy judge`,
-        detail: lines.map((l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m))).join('\n'),
-        i18n: { text: { key: '{who}: a command with a stored secret was approved by the policy judge', params: { who } }, detail: lines },
-        action: { type: 'vault-policy-approved', entry: refs[0].entry, id: refs[0].id },   // the door opens the entry's row (its Revoke)
-      });
-      const tid = it && it.id;
-      if (tid) for (const r of refs) { const ap = approved.get(r.id); if (ap && !ap.items.includes(tid)) ap.items.push(tid); }
-    } catch (e) { log(`${who}: the policy judge's approval could not be filed in For you: ${e.message}`); }
+    let tid = null;
+    if (userTodos) {
+      try {
+        const it = userTodos.add(caller.sessionKey || 'vault', {
+          origin: 'vault', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: who,
+          text: `${who}: a command with a stored secret was approved by the policy judge`,
+          detail: lines.map((l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m))).join('\n'),
+          i18n: { text: { key: '{who}: a command with a stored secret was approved by the policy judge', params: { who } }, detail: lines },
+          action: { type: 'vault-policy-approved', entry: refs[0].entry, id: refs[0].id },   // the door opens the entry's row (its Revoke)
+        });
+        tid = it && it.id;
+      } catch (e) { log(`${who}: the policy judge's approval could not be filed in For you: ${e.message}`); }
+    }
+    if (tid) for (const r of refs) if (!policyApproved[r.id].items.includes(tid)) policyApproved[r.id].items.push(tid);
+    save({ runnable: d.runnable, always: d.always, policyApproved });
   }
   /** What THIS caller may reference (vibespace-vault list): the opened rows — a reference, a label, a kind; never a value —
    *  and (lane vault-manual-and-lock) the entries a grant opened for THIS conversation (`by: 'grant'`, its purpose and end). */
@@ -529,7 +546,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     return new Promise((resolve) => {
       const askId = randomBytes(16).toString('hex');
       const who = String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80);
-      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, always: !!shape.always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), askedAt: now(), todoId: null, timer: null, resolve, hosts: (shape.hosts || []).slice() };   // hosts: lane vault-use-grants («Always» = a grant for these hosts)
+      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, always: !!shape.always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), askedAt: now(), todoId: null, timer: null, resolve, hosts: VR.destinationsOf(shape).hosts.slice() };   // hosts: lane vault-use-grants («Always» = a grant for the run's DESTINATIONS, not only the URL host — round 2 BLOCKER)
       asks.set(askId, q); byPair.set(pair, askId);
       if (userTodos) {
         try {
@@ -846,7 +863,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     L.push(`Secrets: ${run.refs.map((r) => r.ref).join(', ')}`);
     L.push(`Given as: ${run.injection.join(', ')}`);
     if (run.argvExposed) L.push('ON THE COMMAND LINE: every user of this machine can read it while it runs (/proc/<pid>/cmdline)');
-    L.push(`Hosts: ${shape.hosts.length ? shape.hosts.join(', ') : 'unknown — the tool names none'}`);
+    const dst = VR.destinationsOf(shape);   // lane vault-use-grants round 2 (BLOCKER): where the value GOES (routing flags, proxies), not only what the URL names
+    L.push(`Hosts: ${dst.hosts.length ? dst.hosts.join(', ') : 'unknown — the tool names none'}${dst.opaque ? ' (and a route this card cannot resolve — a proxy or ProxyCommand)' : ''}`);
     if (run.plainEnv.length) L.push(`Env: ${run.plainEnv.map((e) => `${e.name}=${quote(e.value)}`).join(' ')}`);
     L.push(`Folder: ${cwd}`);
     for (const f of run.files) if (f.template != null) L.push(`Template ${f.name} (@${f.template}):`, String(f.text).replace(/\s+$/, ''));
@@ -917,6 +935,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!spec.ok) { note(spec.code, { tool: resolved, why: spec.why || null }); return spec; }
     usedRefs = spec.refs;
     const shape = VR.shapeOf(spec), key = VR.shapeKeyOf(shape), shapeId = shapeIdOf(key);
+    const dest = VR.destinationsOf(shape);   // lane vault-use-grants round 2 (BLOCKER): the grant covers the run's DESTINATIONS, judged by the reader the card uses
     // lane vault-use-grants: THE STANDING APPROVAL of each entry for THIS caller and THIS run's hosts (the grant door's PURE verdict —
     // a Task Group's members read now); a member that does not cover the run is named on the card
     const standing = new Map();
@@ -924,9 +943,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       let uf = null;
       try { uf = useFacts(caller) || {}; } catch { uf = { groupsUnreadable: true }; }
       const facts = { ...uf, conversationKeys: [...new Set([caller.conversationId, ...(Array.isArray(uf.conversationKeys) ? uf.conversationKeys : [])].filter(Boolean).map(String))], groupIds: Array.isArray(uf.groupIds) ? uf.groupIds : [], groupsUnreadable: !!uf.groupsUnreadable };
-      for (const r of spec.refs) { const row = rowOf(r); if (row) { try { standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: shape.hosts, destinationKnown: !!shape.always, entryHosts: row.hosts || [] })); } catch { /* unreadable: no standing approval */ } } }
+      for (const r of spec.refs) { const row = rowOf(r); if (row) { try { standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: dest.hosts, destinationKnown: !!shape.always, entryHosts: row.hosts || [] })); } catch { /* unreadable: no standing approval */ } } }
     }
-    let detail = [detailOf(spec, shape, place), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${shape.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : [])].join('\n');
+    let detail = [detailOf(spec, shape, place), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${dest.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : [])].join('\n');
     if (detail.length > DETAIL_MAX) return named('card_too_long');
     const head = { tool: spec.tool, entries: spec.refs.map((r) => r.ref), shapeId, hosts: shape.hosts, injection: spec.injection, argvExposed: spec.argvExposed, cwd: place, cmd: utf8Head(SS.redactSecrets(cmdText(spec.argv)).text) };
     // THE FACTS the verdict reads: each entry's row (exists), its switch (open), its class (the engine's check) and its length
@@ -939,7 +958,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const sw = !!(row && d && d.runnable.has(r.id)), g = row ? grantOf(scope, r.id) : null;
       if (g) purposes.set(r.id, g.purpose);
       if (g && !sw) admitted.push({ pair: pairOf(scope, r.id), g });
-      const open = sw || !!g || VUG.holds(standing.get(r.id));   // the owner's switch (every conversation) OR the grant his answer wrote (this one) OR a standing vault-use grant (lane vault-use-grants)
+      const suspended = !!(row && d && d.suspended && d.suspended.has(r.id));   // round 2 MAJOR: the owner turned this entry OFF — every grant is suspended while it is (kept, not deleted), so OFF closes EVERYTHING
+      const open = sw || !!g || (VUG.holds(standing.get(r.id)) && !suspended);   // the owner's switch (every conversation) OR the once-grant his answer wrote (this one) OR a standing vault-use grant (unless the entry is OFF)
       let bytes = 0;
       if (row && open) { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } }
       entries.push({ id: r.id, exists: !!row, open, bytes });
@@ -954,7 +974,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     let verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries, granted, remembered, seen: seen.has(pair), instance: instanceKind(), policy: policy(), now: now() });
     // lane vault-use-grants: A STANDING APPROVAL SHORT-CIRCUITS THE CARD — every entry admitted for every host of the run (the
     // verdict's own refusals stand: a lock, an unknown entry, a too-short value, another conversation's own entry)
-    if (!verdict.ok && verdict.ask && spec.refs.length && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true)) {
+    if (!verdict.ok && verdict.ask && spec.refs.length && spec.refs.every((r) => !(d && d.suspended && d.suspended.has(r.id)) && (standing.get(r.id) || {}).ok === true)) {   // round 2 MAJOR: a grant short-circuits the card unless the entry is OFF (suspended), which closes everything
       for (const r of spec.refs) standingIds.set(r.id, standing.get(r.id).id);
       verdict = { ok: true, by: 'grant', grants: [...new Set(standingIds.values())] };
       head.grants = verdict.grants;
@@ -965,13 +985,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     try { policyOnNow = !!(policyJudge && policyOn()); } catch { policyOnNow = false; }
     if (!verdict.ok && verdict.ask && policyOnNow && d && spec.refs.length) {
       const pols = spec.refs.map((r) => (d.policies[r.id] ? d.policies[r.id].text : null));
-      const revoked = d.policyRevoked.some((x) => x.conv === caller.conversationId && x.key === key);
-      if (pols.every(Boolean) && revoked) detail = `${detail}\nYou revoked the policy judge's approval of this command — so this card asks you.`;
-      else if (pols.every(Boolean)) {
-        const j = await judgePolicy({ caller, spec, shape, key, refs: spec.refs, policies: pols });
-        if (signal && signal.aborted) { note('caller_gone', head); return named('caller_gone'); }
-        if (j.approve) { verdict = { ok: true, by: 'policy', p: j.p }; head.policy = { p: j.p }; recordApproval({ caller, spec, refs: spec.refs, p: j.p, key }); }
-        else detail = `${detail}\n${j.line}`;
+      if (pols.every(Boolean)) {
+        const parts = policyPartsOf(spec, shape, spec.refs), jkey = judgedKeyOf(parts, pols.join('\n'));   // round 2 MAJOR: the memo/Revoke key is the EXACT facts, never the coarse shape key
+        const revoked = d.policyRevoked.some((x) => x.conv === caller.conversationId && x.key === jkey);
+        if (revoked) detail = `${detail}\nYou revoked the policy judge's approval of this command — so this card asks you.`;
+        else {
+          const j = await judgePolicy({ caller, parts, policies: pols, jkey });
+          if (signal && signal.aborted) { note('caller_gone', head); return named('caller_gone'); }
+          if (j.approve) { verdict = { ok: true, by: 'policy', p: j.p }; head.policy = { p: j.p }; recordApproval({ caller, spec, refs: spec.refs, p: j.p, key: jkey, parts, policy: pols.join(' · ') }); }
+          else detail = `${detail}\n${j.line}`;
+        }
       }
       if (detail.length > DETAIL_MAX) return named('card_too_long');
     }
@@ -985,7 +1008,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (outcome) { note(outcome, { ...head, askId }); return named(outcome); }
       // allowed / always — the verdict AGAIN over the facts as they stand NOW (a lock, a switch closed while the card waited)
       const d2 = load();
-      const again = spec.refs.map((r) => { const row = rowOf(r); return { id: r.id, exists: !!row, open: !!(row && ((d2 && d2.runnable.has(r.id)) || grantOf(scope, r.id) || (useGrants && (asked === 'always' || VUG.holds(standing.get(r.id)))))), bytes: entries.find((e) => e.id === r.id).bytes }; });   // lane vault-use-grants: an «Always» just wrote the standing member
+      const again = spec.refs.map((r) => { const row = rowOf(r); const sw2 = !!(row && d2 && d2.runnable.has(r.id)), susp2 = !!(row && d2 && d2.suspended && d2.suspended.has(r.id)); return { id: r.id, exists: !!row, open: !!(row && (sw2 || grantOf(scope, r.id) || (useGrants && !susp2 && (asked === 'always' || VUG.holds(standing.get(r.id)))))), bytes: entries.find((e) => e.id === r.id).bytes }; });   // lane vault-use-grants: an «Always» just wrote the standing member — a grant opens unless the entry was turned OFF while the card waited (round 2 MAJOR)
       verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries: again, granted, remembered: { until: null }, seen: true, instance: instanceKind(), policy: 'allow', now: now() });
       if (verdict.ok) verdict = { ok: true, by: asked === 'always' ? 'always' : 'once' };
     }
