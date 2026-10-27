@@ -980,7 +980,7 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   ok(!dirs.includes(WSEAL) && !dirs.includes(NOTYET) && !dirs.includes(GHREAL) && dirs.includes('/usr/bin') && dirs.every((d) => DOOR.sealDirReal(d) === d),
     'round 12/13 (BLOCKER): the sealed PATH is root-owned REALPATHS only — WSEAL/NOTYET/GHREAL (all uid-owned) are dropped, /usr/bin kept, every surviving entry is its own canonical root-owned realpath', { WSEAL: dirs.includes(WSEAL), NOTYET: dirs.includes(NOTYET), GHREAL: dirs.includes(GHREAL), usrbin: dirs.includes('/usr/bin'), dirs });
   ok(E.GIT_CONFIG_GLOBAL === '/dev/null' && E.GIT_CONFIG_NOSYSTEM === '1' && E.GIT_TERMINAL_PROMPT === '0', 'BLOCKER (r11): gh’s git child reads no user / system config', { GIT_CONFIG_GLOBAL: E.GIT_CONFIG_GLOBAL });
-  ok(E.GH_TOKEN === 'agent-minted-value-0123456789' && E.GH_HOST === undefined && E.GH_ENTERPRISE_TOKEN === undefined, 'the injected token rides GH_TOKEN; a STORED value (no --for host) pins NO GH_HOST and is NOT re-homed', { token: !!E.GH_TOKEN, GH_HOST: E.GH_HOST });
+  ok(E.GH_TOKEN === 'agent-minted-value-0123456789' && E.GH_HOST === 'github.com' && E.GH_ENTERPRISE_TOKEN === undefined, 'round 15 (the ONE host set): a STORED value run as a default-host verb (gh issue list) ROUTES to github.com (routeHosts\' default) — GH_HOST is pinned to github.com and the credential stays GH_TOKEN (not re-homed to GH_ENTERPRISE_TOKEN)', { token: !!E.GH_TOKEN, GH_HOST: E.GH_HOST });
 
   // RUN A2 — INVERTED (round 12/13): the agent MAKES NOTYET 0555 (uid-owned) and a FRESH seal still DROPS it — "cannot write" is
   // OWNERSHIP, not the write bit (round 11 with accessSync W_OK KEPT this exact dir and a planted `git` shim ran). A fresh door so
@@ -1028,16 +1028,19 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const ipRan = (() => { try { return fs.readFileSync(IPMARK, 'utf8'); } catch { return '(none)'; } })();
   ok(!rIP.ok && rIP.code === 'tool_not_sealed' && !rewrote && ipRan === '(none)', 'round 14 (BLOCKER, in-place rewrite): a uid-owned gh is tool_not_sealed BEFORE the hash — the rewrite seam never ran and nothing spawned (base: the fd exec\'d the rewritten SHIM with the token)', { code: rIP.code, rewrote, ipRan });
 
-  // DRIFT (round 14): a SEALED (root-owned, modeled) gh whose bytes do NOT match the pin is tool_changed — the sha256 stays the
-  // DRIFT detector (a package roll) on a sealed inode; the owner re-pins. (digestVouch returns a non-matching sha for any path but
-  // GHREAL_GH; here the sealed tool is the shim, modeled root-owned via toolSealed, so the sealed check passes and the hash fails.)
+  // DRIFT (round 15 BLOCKER): a SEALED (root-owned, modeled) gh whose bytes DIFFER from the shipped 2.102.0 pin RUNS — the SEAL is
+  // the content fence, the sha256 is a DRIFT RECORD, never a gate. (digestVouch returns a non-pin sha for SHIMGH, modeled root-owned
+  // via toolSealed.) On fca70cfe this was tool_changed — every root-owned non-2.102.0 gh (the hub's own 2.100.0, every apt gh) refused.
   const S = capOf();
   const GHSHIM = path.join(ROOT, 'ghshim'); fs.mkdirSync(GHSHIM, { recursive: true });
-  fs.writeFileSync(path.join(GHSHIM, 'gh'), "#!/usr/bin/env node\nrequire('fs').writeFileSync(process.env.STEAL||'/dev/null', process.env.GH_TOKEN||'');\n", { mode: 0o755 });
+  fs.writeFileSync(path.join(GHSHIM, 'gh'), "#!/usr/bin/env node\nprocess.stdout.write('shim\\n');\n", { mode: 0o755 });
   const SHIMGH = path.join(GHSHIM, 'gh');
   const dS = sw.mk(DOOR, { isRootOwned: REAL, toolDigest: digestVouch, toolSealed: (p, fd) => p === SHIMGH || DOOR.sealedToolReal(p, fd), spawnImpl: S.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHSHIM, '/usr/bin', '/bin'].join(':') }) });
   const rS = await dS.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', SHIMGH, 'issue', 'list'], cwd: sw.work });
-  ok(!rS.ok && rS.code === 'tool_changed' && !S.get(), 'round 14: a SEALED gh whose sha256 differs from the pin is tool_changed (the DRIFT detector) — nothing spawned', { ok: rS.ok, code: rS.code, spawned: !!S.get() });
+  const toolsFile = path.join(sw.dataDir, 'vault-run-tools.json');
+  const toolsStore = fs.existsSync(toolsFile) ? JSON.parse(fs.readFileSync(toolsFile, 'utf8')) : null;
+  const shimRec = toolsStore && toolsStore.tools && toolsStore.tools[SHIMGH];
+  ok(rS.ok && rS.by === 'own' && !!S.get() && shimRec && shimRec.sha256 === 'dead'.repeat(16), 'round 15 (BLOCKER): a SEALED gh whose bytes ≠ the shipped pin RUNS ok:own and its digest is DRIFT-RECORDED in data/vault-run-tools.json (the seal is the content fence; the digest is a record, never a gate) — base refused it tool_changed', { ok: rS.ok, by: rS.by, spawned: !!S.get(), recorded: shimRec && shimRec.sha256 });
 
   // REAL-OWNERSHIP CONTROL (round 14 BLOCKER): the exported sealed predicate on the box's /usr/bin/gh (root-owned) vs a uid-owned
   // fixture — the VERDICT says sealed/unsealed with NO vendor call (gh --version is not a vault verb).
@@ -1081,6 +1084,97 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
     const dGN = mkGh({ toolDigest: goneDigest, spawnImpl: GN.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
     const rGN = await dGN.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work, signal: ac.signal });
     ok(!rGN.ok && rGN.code === 'caller_gone' && !GN.get(), 'round 14 (MAJOR): a caller gone DURING the hash ⇒ caller_gone, nothing spawned (base: spawn-then-stop)', { code: rGN.code, spawned: !!GN.get() });
+  }
+
+
+  // ── ROUND 15 ITEM 1 (BLOCKER): a ROOT-OWNED gh of ANY version RUNS (drift-recorded), never tool_changed ──
+  // the REAL /usr/bin/gh (root-owned, likely NOT the pinned 2.102.0): SEALED ⇒ runs with a minted value + a drift baseline, no gate.
+  {
+    const SYSGH2 = '/usr/bin/gh';
+    if (fs.existsSync(SYSGH2)) {
+      const S1 = capOf();
+      const dSys = sw.mk(DOOR, { isRootOwned: REAL, toolDigest: digestVouch, spawnImpl: S1.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: ['/usr/bin', '/bin'].join(':') }) });   // DEFAULT toolSealed = the REAL chain+fstat rule (no inject) — /usr/bin/gh is genuinely root-owned
+      const rSys = await dSys.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', SYSGH2, 'issue', 'list'], cwd: sw.work });
+      const ts = fs.existsSync(path.join(sw.dataDir, 'vault-run-tools.json')) ? JSON.parse(fs.readFileSync(path.join(sw.dataDir, 'vault-run-tools.json'), 'utf8')) : null;
+      ok(rSys.ok && rSys.by === 'own' && !!S1.get() && ts && ts.tools && ts.tools[SYSGH2] && /^[0-9a-f]{64}$/.test(ts.tools[SYSGH2].sha256), 'round 15 (BLOCKER, REAL ownership): the box\'s root-owned /usr/bin/gh (any version) RUNS ok:own with a minted value and is drift-recorded — no tool_changed, no vendor call (base refused it unless it was exactly the pinned 2.102.0)', { ok: rSys.ok, by: rSys.by, recorded: !!(ts && ts.tools && ts.tools[SYSGH2]) });
+    } else { console.log('  – round 15 item 1 REAL /usr/bin/gh run SKIPPED: no /usr/bin/gh on this box'); }
+  }
+
+  // ── ROUND 15 ITEM 2a (MAJOR, ONE host set): a GHES-minted value + -R o/r --body evil.test ──
+  // the card asks for github.com (the ROUTE of -R o/r), names evil.test ONLY as a mention, and homes to github.com + GH_TOKEN.
+  {
+    const A2 = capOf();
+    const dA2m = mkGh({ spawnImpl: A2.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const pA2 = dA2m.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/site-pw', '--', GHREAL_GH, 'issue', 'create', '-R', 'o/r', '--title', 't', '--body', 'see https://evil.test/x'], cwd: sw.work });
+    const cA2 = await waitCard(sw); const dA2d = cA2 ? cA2.detail : '';
+    if (cA2) dA2m.answer(cA2.action.askId, { answer: 'once' });
+    const rA2 = await pA2; const EA2 = A2.get() ? A2.get().env : {};
+    ok(rA2.ok && /sends it to github\.com/.test(dA2d) && !/sends it to evil\.test/.test(dA2d) && /Mentions.*evil\.test/.test(dA2d) && EA2.GH_HOST === 'github.com' && EA2.GH_TOKEN === 'agent-minted-pw-0123456789abc' && EA2.GH_ENTERPRISE_TOKEN === undefined,
+      'round 15 (MAJOR 2a): a GHES-minted value + -R o/r --body evil.test — the CARD asks for github.com (the route), names evil.test only as a Mention, and homes to github.com + GH_TOKEN; evil.test is never a target (base: the card named evil.test)', { ok: rA2.ok, GH_HOST: EA2.GH_HOST, sendsGithub: /sends it to github\.com/.test(dA2d), mentionsEvil: /Mentions.*evil\.test/.test(dA2d) });
+  }
+
+  // ── ROUND 15 ITEM 2b (MAJOR, ONE host set): a github-minted value + --body evil.test (no -R) ⇒ NO card, NO pass ──
+  // and the LATER run that ROUTES to evil.test (-R evil.test/o/r) on the SAME door ASKS (the body mention never became a pass).
+  {
+    const B2 = capOf();
+    const dB2 = mkGh({ spawnImpl: B2.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const before = cardsOf(sw).length;
+    const r1 = await dB2.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-mint', '--', GHREAL_GH, 'issue', 'create', '--title', 't', '--body', 'see https://evil.test/x'], cwd: sw.work });
+    const added = cardsOf(sw).length - before;
+    const p2 = dB2.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-mint', '--', GHREAL_GH, 'issue', 'list', '-R', 'evil.test/o/r'], cwd: sw.work });
+    const c2 = await waitCard(sw);
+    ok(r1.ok && r1.by === 'own' && added === 0 && !!c2 && /sends it to evil\.test/.test(c2.detail), 'round 15 (MAJOR 2b): --body evil.test (github-minted, no -R) routes to github.com ⇒ NO card, NO evil.test pass kept; a LATER -R evil.test/o/r on the same door ASKS (base: the body Allow kept a pass for evil.test, the later run ran silent)', { by: r1.by, addedCards: added, laterAsks: !!c2 });
+    if (c2) dB2.answer(c2.action.askId, { answer: 'deny' });
+    await p2.catch(() => {});
+  }
+
+  // ── ROUND 15 ITEM 2c (MAJOR, ONE host set): gh api <GHES url> — the endpoint URL is a ROUTE host ──
+  // the card asks for the GHES host, and after approval GH_HOST + GH_ENTERPRISE_TOKEN carry the APPROVED credential there.
+  {
+    const C2 = capOf();
+    const dC2 = mkGh({ spawnImpl: C2.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const pC2 = dC2.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-mint', '--', GHREAL_GH, 'api', 'https://ghe.example.test/api/v3/repos/o/r'], cwd: sw.work });
+    const cC2 = await waitCard(sw); const dC2d = cC2 ? cC2.detail : '';
+    if (cC2) dC2.answer(cC2.action.askId, { answer: 'once' });
+    const rC2 = await pC2; const EC2 = C2.get() ? C2.get().env : {};
+    ok(rC2.ok && rC2.by === 'once' && EC2.GH_HOST === 'ghe.example.test' && EC2.GH_ENTERPRISE_TOKEN === 'agent-minted-ghv-0123456789abc' && EC2.GH_TOKEN === undefined && /sends it to ghe\.example\.test/.test(dC2d),
+      'round 15 (MAJOR 2c): gh api https://ghe.example.test/... — the endpoint URL is a ROUTE host; the card asks for ghe.example.test and after approval GH_HOST=ghe.example.test + GH_ENTERPRISE_TOKEN carry the credential there (base: sealed github.com + GH_TOKEN, so gh never sent the approved credential)', { by: rC2.by, GH_HOST: EC2.GH_HOST, ENT: !!EC2.GH_ENTERPRISE_TOKEN });
+  }
+
+  // ── ROUND 15 ITEM 3 (MINOR): only git-DRIVING verbs need git on the sealed PATH; the probe is RE-ASKED when it was false ──
+  {
+    const G1 = capOf();
+    const dG1 = mkGh({ spawnImpl: G1.spawn, probeGit: () => false, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const rApi = await dG1.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'api', '/user'], cwd: sw.work });
+    ok(rApi.ok && rApi.by === 'own' && !!G1.get(), 'round 15 (MINOR 3): gh api (never runs git) RUNS ok:own even when git is absent from the sealed PATH (base: run_path_unsafe refused EVERY gh run)', { ok: rApi.ok, by: rApi.by });
+    const G2 = capOf();
+    const dG2 = mkGh({ spawnImpl: G2.spawn, probeGit: () => false, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const rClone = await dG2.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'repo', 'clone', 'o/r'], cwd: sw.work });
+    ok(!rClone.ok && rClone.code === 'git_not_on_seal' && !G2.get(), 'round 15 (MINOR 3): gh repo clone (DRIVES git) is git_not_on_seal by NAME when git is absent — not run_path_unsafe, and ONLY a git-driving verb is refused', { code: rClone.code, spawned: !!G2.get() });
+    let gitHere = false;
+    const G3 = capOf();
+    const dG3 = mkGh({ spawnImpl: G3.spawn, probeGit: () => gitHere, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const rC1 = await dG3.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'repo', 'clone', 'o/r'], cwd: sw.work });
+    gitHere = true;
+    const rC2 = await dG3.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'repo', 'clone', 'o/r'], cwd: sw.work });
+    ok(rC1.code === 'git_not_on_seal' && rC2.ok && rC2.by === 'own', 'round 15 (MINOR 3): the git-on-seal probe is RE-ASKED per refused call — git installed after boot ⇒ gh repo clone refused then RUNS (base: gitOnSeal probed once at boot, never re-checked)', { first: rC1.code, second: rC2.ok });
+  }
+
+  // ── ROUND 15 ITEM 4 (MINOR): the PER-CALLER cap is checked BEFORE the hash — an over-cap call never hashes ──
+  {
+    let hashes = 0; const kids = [];
+    const countingDigest = (fd) => { hashes++; return digestVouch(fd); };
+    const holdSpawn = () => { const c = new EventEmitter(); c.pid = 95000 + kids.length; c.stdout = new EventEmitter(); c.stdout.destroy = () => {}; c.stderr = new EventEmitter(); c.stderr.destroy = () => {}; c.stdin = null; kids.push(c); return c; };   // never closes ⇒ the run stays in `runs`
+    const dH = sw.mk(DOOR, { isRootOwned: REAL, toolDigest: countingDigest, toolSealed: sealedVouch, spawnImpl: holdSpawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const prime = Array.from({ length: 4 }, () => dH.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work }));
+    for (let i = 0; i < 20 && dH.running() < 4; i++) await new Promise((r) => setImmediate(r));
+    const primedHashes = hashes;   // the 4 priming runs share ONE memoised hash (same inode)
+    hashes = 0;
+    const over = await Promise.all(Array.from({ length: 20 }, () => dH.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work })));
+    const capped = over.filter((r) => !r.ok && r.code === 'too_many_runs').length;
+    ok(dH.running() === 4 && capped === 20 && hashes === 0 && primedHashes === 1, 'round 15 (MINOR 4): an over-cap conversation (4 held) ⇒ 20 parallel calls are too_many_runs BEFORE the hash — 0 digests of the 42 MB binary (base: all 20 hashed); the 4 priming runs shared ONE memoised hash', { running: dH.running(), capped, hashes, primedHashes });
+    for (const c of kids) { c.emit('exit', 0, null); c.emit('close', 0, null); }   // release the held runs (finish ⇒ runs.delete + shred) so the process exits clean
+    await Promise.all(prime);
   }
 
   // RUN B — own MINTED site-pw (--for api.example.com, a non-github host) ⇒ the door pins GH_HOST AND homes the credential to
@@ -1173,7 +1267,7 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
       const rW = await dW.run({ caller: sw.caller, args: ['--timeout', '15', '--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', REALGH, 'pr', 'create', '-R', 'o/r', '--head', 'feat', '-t', 't', '-b', 'b'], cwd: sw.work });
       await sleep(150);
       ok(hits === 0 && got === 0, 'round 12 (minor 4, WIRE): the REAL pinned gh, run through the door with a planted config.yml (http_unix_socket → my live socket), connected to the socket ZERO times and sent ZERO bytes — the seal (GH_CONFIG_DIR=NOWHERE) means no planted config / hosts is read; the token never reached the agent socket', { hits, bytes: got, exit: rW.exit, stderr: (rW.stderr || '').slice(0, 90) });
-      ok(rW.ok === true && rW.by === 'own', 'round 12/14 (minor 4): the REAL gh passed the SEALED (ownership) + DIGEST gates (its bytes match the committed toolSha256) and RAN ok:own — the streaming sha256 the door computes on the live binary IS the pin, exec\'d as the SAME inode via /proc/fd', { ok: rW.ok, by: rW.by, exit: rW.exit });
+      ok(rW.ok === true && rW.by === 'own', 'round 12/14/15 (minor 4): the REAL pinned gh is SEALED (root-owned) and its live bytes are DRIFT-RECORDED (never gated), and it RAN ok:own — the streaming sha256 the door computes on the live binary is the drift record, exec\'d as the SAME inode via /proc/fd', { ok: rW.ok, by: rW.by, exit: rW.exit });
     } finally { server.close(); try { fs.unlinkSync(sockPath); } catch { } }
   }
 }

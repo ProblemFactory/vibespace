@@ -115,6 +115,7 @@ const sealDirReal = (d) => { if (!d || d[0] !== '/') return null; let real; try 
 // so the inode the door hashes and exec's cannot be rewritten IN PLACE by the agent. A uid-owned tool is NEVER pinnable: r13's fd
 // exec'd the agent's CURRENT bytes after an in-place rewrite (O_RDONLY and /proc/<pid>/fd pin the inode, never its content).
 const fstatRootOwned = (fd) => { try { const st = fs.fstatSync(fd); return st.uid === 0 && (st.mode & 0o022) === 0; } catch { return false; } };
+const fstatOf = (fd) => { try { return fs.fstatSync(fd); } catch { return null; } };
 const sealedToolReal = (p, fd) => chainRootOwned(p) && fstatRootOwned(fd);
 // round 14 (MINOR): does `git` (gh's child) live on a sealed PATH? resolved ONCE at boot over the sealed dirs, never per spawn.
 const probeGitReal = (dirs) => dirs.some((d) => { if (!d) return false; try { return fs.statSync(path.join(d, 'git')).isFile(); } catch { return false; } });
@@ -142,7 +143,7 @@ const ASKING_TEXT = `More than ${ASKING_LINE_OVER} conversations are asking to u
 const ASKING_KEY = '{n} conversations are asking to use stored secrets';
 const ASKING_DETAIL = 'Each conversation asks on its own card in For you. This line goes when 8 or fewer are asking.';
 const REQUEST_QUIET_MS = 10 * 60e3;          // a Deny (or the card dismissed) quiets that conversation × entry 10 minutes (the automation card's rule)
-const USE_SKIP = new Set(['ask_pending', 'too_many_runs', 'spawn_failed', 'run_path_unsafe', 'tool_changed', 'tool_not_sealed', 'storage_blocked']);   // a wait or the hub's own failure before any child ran — not a use's outcome (a child that ran is always one)
+const USE_SKIP = new Set(['ask_pending', 'too_many_runs', 'spawn_failed', 'run_path_unsafe', 'tool_not_sealed', 'git_not_on_seal', 'storage_blocked']);   // a wait or the hub's own failure before any child ran — not a use's outcome (a child that ran is always one)
 const STORE_FILE = 'vault-run.json';
 const MARK_LABEL = 'vault-run-store-v1';
 const RUN_DIR_PREFIX = 'vs-vault-run-';
@@ -161,11 +162,11 @@ const RUNS_MAX = 16, RUNS_PER_CALLER = 4;
 const STATUS = Object.freeze({
   vault_not_set_up: 409, vault_locked: 423, bad_flag: 400, bad_reference: 400, bad_env_name: 400, duplicate_name: 400, no_command: 400,
   cmd_too_long: 400, no_reference: 400, template_unread: 400, template_too_long: 400, hidden_chars: 400, card_too_long: 400,
-  env_refused: 403, argv_refused: 403, tool_prints_secrets: 403, tool_wraps_another: 403, tool_has_its_own_door: 403, tool_changed: 409, tool_not_sealed: 409,
+  env_refused: 403, argv_refused: 403, tool_prints_secrets: 403, tool_wraps_another: 403, tool_has_its_own_door: 403, tool_not_sealed: 409,
   entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, entry_too_short_to_mask: 403, use_not_granted: 403,
   job_no_use: 403, device_road_later: 403, cwd_refused: 403, template_refused: 403, tool_not_found: 404, unauthorized: 401,
   ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, caller_gone: 410, too_many_runs: 429,
-  spawn_failed: 500, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500,
+  spawn_failed: 500, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500, git_not_on_seal: 500,
   request_pending: 409, request_quiet: 429, purpose_required: 400, purpose_too_long: 400, too_many_requests: 429,   // lane vault-manual-and-lock
   too_many_askers: 429,   // B-4934
 });
@@ -177,7 +178,7 @@ const MORE_WORDS = Object.freeze({
   request_too_large: `the run's words are over ${ARGS_MAX} characters or its folder over ${CWD_MAX} — refused before anything is read`,
   failed: 'the run door failed — nothing ran',
   run_path_unsafe: 'no directory on the hub PATH is safe to run this tool from — none is a root-owned system directory (every one is missing, or owned by this user, who could plant a program there) — nothing ran',   // round 11 (MAJOR 2) / round 12 (BLOCKER): a runSeal tool whose sealed PATH (ROOT-OWNED dirs only) came out empty
-  tool_changed: 'this tool sits in a directory this user owns, so its program can be replaced — its bytes do not match the pinned digest the hub recorded, and a replaced program never runs; re-pin the owner\'s own install with node scripts/gen-gh-grammar.mjs --repin',   // round 12 (BLOCKER-class): a uid-owned tool whose sha256 differs from the row\'s toolSha256 pin
+  git_not_on_seal: 'this gh command drives git (a clone / fork / push / checkout), but git is not on a root-owned PATH directory — a git loaded from a directory this user can write could run the agent\'s own program with the minted value in its environment; install git where only root writes (`sudo apt install git`); nothing ran',   // round 15 (MINOR): a git-DRIVING gh verb on a hub whose sealed PATH lacks git (gh api / issue list never run git and are NOT refused)
   tool_not_sealed: 'this tool lives in a directory this user can write, so its program could be replaced after the hub hashed it (the fd pins WHICH file runs, root ownership pins WHAT is in it) — a tool that runs with a minted secret must live where ONLY root writes: /usr/bin or /usr/local/bin (`sudo apt install gh`); nothing ran',   // round 14 (BLOCKER): a uid-owned pinned tool is unsealed — r13's fd exec'd the CURRENT bytes after an in-place rewrite
   // lane vault-manual-and-lock: the request's own codes
   request_pending: 'you already asked the user for that entry — the question waits in their For you tray; `vibespace-vault uses` shows the answer when it comes',
@@ -312,10 +313,35 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const reqQuiet = new Map();  // pair → until (a Deny / a dismissed card: no new card for that pair for 10 minutes)
   let asking = { id: null, n: 0, quiet: false, batch: false };   // B-4934: the «N conversations are asking» notice (its item, its count, set aside by the owner)
   let db = null, dbEpoch = -1;
-  let lockGen = 0, bootSealMs = 0, gitOnSeal = null;   // round 14: a lock epoch (restoreOnce never restores a once-grant across a lock) + the boot-computed seal facts (the sealed PATH's ms, whether git is on it)
+  let lockGen = 0, bootSealMs = 0, gitOnSeal = null, sealedDirs = [];   // round 14/15: a lock epoch (restoreOnce never restores a once-grant across a lock) + the boot-computed seal facts (the sealed PATH's ms, dirs, whether git is on it)
+  const digestMemo = new Map();   // round 15: fd digest keyed by inode identity `${dev}:${ino}:${size}:${mtimeMs}:${ctimeMs}` ⇒ Promise<sha> — one hash per tool change, shared by concurrent callers
   const hubIdentity = (() => { try { return PI.identityOf(process.pid); } catch { return null; } })();   // written into every run folder (the boot sweep's proof)
   const vaultState = () => { try { return vault.state(); } catch { return 'locked'; } };
   const audit = (event, line) => { try { vault.audit(event, line); } catch (e) { log(`the audit line could not be written (${e.message})`); } };
+
+  // ── THE TOOL DRIFT STORE (round 15, NOT marked — nothing secret): the first-seen {path,dev,ino,size,mtime,sha256} of each
+  // SEALED tool. The SEAL (root ownership) is the content fence; this store is a RECORD, never a gate. A later run whose bytes
+  // or inode differ RECORDS the drift (an audit line + one notice the first time) and RUNS — root changed it. data/vault-run-tools.json.
+  const TOOLS_FILE = path.join(dataDir, 'vault-run-tools.json');
+  let toolsCache = null;
+  const toolsLoad = () => { if (toolsCache) return toolsCache; let o = null; try { o = JSON.parse(readBounded(TOOLS_FILE, STORE_MAX).toString('utf8')); } catch { o = null; } toolsCache = (o && o.tools && typeof o.tools === 'object') ? { v: 1, tools: o.tools } : { v: 1, tools: {} }; return toolsCache; };
+  const toolsSave = () => { try { writeJsonAtomic(TOOLS_FILE, toolsCache); } catch (e) { log(`data/vault-run-tools.json could not be written (${(e && e.code) || e})`); } };
+  // a digest→version LABEL for the drift line ONLY (the lane fixture's seam, named as such — the door NEVER gates on it; an
+  // unknown sha RUNS and is labelled by its short sha). The shipped gh row seeds it with the lane's bundled gh.
+  const ghVersionOf = (sha) => { try { const r = VR.knownToolOf('gh'); return (r && r.toolSha256 && r.toolSha256 === sha) ? (r.grammarVersion || null) : null; } catch { return null; } };
+  const digestOf = (fd, st) => { const key = st ? `${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}` : null; if (key && digestMemo.has(key)) return digestMemo.get(key); const p = Promise.resolve(toolDigest(fd)); if (key) { if (digestMemo.size > 64) digestMemo.clear(); digestMemo.set(key, p); } return p; };
+  const driftNote = (toolPath, st, sha, head, toolName) => {
+    if (!sha) return;   // couldn't hash — nothing to record; the run still proceeds (the SEAL is the fence)
+    const store = toolsLoad(), prev = store.tools[toolPath] || null;
+    const rec = { path: toolPath, dev: st ? st.dev : null, ino: st ? st.ino : null, size: st ? st.size : null, mtime: st ? Math.round(st.mtimeMs) : null, sha256: sha, version: ghVersionOf(sha), at: now() };
+    if (!prev) { store.tools[toolPath] = rec; toolsSave(); return; }   // first run: establish the baseline, no notice
+    if (prev.sha256 === sha && prev.ino === rec.ino && prev.dev === rec.dev) return;   // unchanged — no record, no hash next time (the memo)
+    const from = prev.version || (prev.sha256 ? prev.sha256.slice(0, 12) : '?'), to = rec.version || sha.slice(0, 12);
+    const firstNotice = prev.noticedSha !== sha; rec.noticedSha = sha;
+    store.tools[toolPath] = rec; toolsSave();
+    audit('vault-run-tool-drift', { tool: toolName, path: toolPath, from, to, firstNotice });   // the drift RECORD — a root-owned tool the hub trusts changed (a package roll); it RUNS
+    if (firstNotice) log(`vault-run-door: ${toolName} changed since the last run: ${from} → ${to} (a root-owned tool — it runs; the seal is the content fence, the digest is a drift record)`);
+  };
 
   // ── THE STORE (marked by the vault) ──
   const bodyOf = (d) => JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: [...d.runnable].sort(), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)) });
@@ -757,7 +783,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       }
     }
     if (run.argvExposed) L.push('ON THE COMMAND LINE: every user of this machine can read it while it runs (/proc/<pid>/cmdline)');
-    L.push(`Hosts: ${shape.hosts.length ? shape.hosts.join(', ') : 'unknown — the tool names none'}`);
+    L.push(`Hosts: ${shape.routeHosts.length ? shape.routeHosts.join(', ') : 'unknown — the tool names none'}`);   // round 15: where it is SENT (the ONE routing set)
+    { const mentioned = (shape.hosts || []).filter((h) => !(shape.routeHosts || []).includes(h)); if (mentioned.length) L.push(`Mentions (named in the command, not where it is sent): ${mentioned.join(', ')}`); }
     if (run.plainEnv.length) L.push(`Env: ${run.plainEnv.map((e) => `${e.name}=${quote(e.value)}`).join(' ')}`);
     L.push(`Folder: ${cwd}`);
     for (const f of run.files) if (f.template != null) L.push(`Template ${f.name} (@${f.template}):`, String(f.text).replace(/\s+$/, ''));
@@ -797,8 +824,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // a uid-owned dir's owner, the agent, flips the write bit at will, so a 0555 uid dir is NEVER safe) — and (round 13) the child
   // PATH holds the REALPATH of each surviving dir, never the agent's string, computed ONCE and cached (no path stat'd on the loop
   // at spawn); if none survive the run is refused BY NAME (run_path_unsafe), never a
-  // silent git-not-found. The TOOL itself is pinned by its sha256 DIGEST when its path is uid-owned (a replaceable gh runs only if
-  // its bytes match the row's toolSha256 — tool_changed otherwise; the owner's own install keeps working), and the agent's env is
+  // silent git-not-found (round 15: only a git-DRIVING verb needs git — git_not_on_seal by name, re-probed per call). The TOOL
+  // (a runSeal credential tool) runs with a minted value ONLY when SEALED (root-owned fd); its bytes are a DRIFT RECORD, never a
+  // gate (round 15 — a sealed tool's current bytes ARE authoritative, root is the writer), and the agent's env is
   // an ALLOWLIST (src/vault-run.js envRefusedOf): only the row's reviewed names + the credential (as a reference) pass.
   // round 12/13 (BLOCKER): a path is the hub's only when ROOT owns it (st.uid === 0) with no group/other write bit, AND every
   // ancestor of its REALPATH is the same — r12 followed symlinks and kept the agent's STRING, so ~/.local/bin -> /usr/bin passed
@@ -866,22 +894,23 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // round 12/13/14 (BLOCKER-class): a tool whose binary OR its dir is NOT root-owned (uid-owned: ~/.local/bin, a brew prefix,
     // nvm) is one the agent can REPLACE. A PINNED credential tool (gh) runs with the minted value ONLY when it is SEALED — its
     // realpath chain is root-owned AND the OPEN fd's inode is root-owned with no group/other write (round 14, verified at the hash
-    // below); a uid-owned pinned tool is tool_not_sealed (r13 exec'd an fd whose uid-owned inode the agent rewrote IN PLACE — the
-    // fd pins WHICH inode runs, root ownership pins WHAT is in it). The sha256 pin is then the DRIFT detector (tool_changed on a
-    // package roll), streamed over the fd and exec'd as the SAME inode via /proc/<pid>/fd. A non-pinned uid-owned tool still BLINDS
+    // below); a uid-owned credential tool is tool_not_sealed (r13 exec'd an fd whose uid-owned inode the agent rewrote IN PLACE —
+    // the fd pins WHICH inode runs, root ownership pins WHAT is in it). On a sealed inode the sha256 is a DRIFT RECORD (round 15:
+    // recorded, never a gate — a root-owned gh of ANY version runs), streamed over the fd and exec'd as the SAME inode via
+    // /proc/<pid>/fd. A non-runSeal uid-owned tool still BLINDS
     // (programWritable — the card asks every run), unchanged.
     const replaceable = !!resolved && !(isRootOwned(resolved) && isRootOwned(path.dirname(resolved)));
     const toolName = resolved ? VR.toolNameOf(req.argv[0], resolved) : null;
-    const toolRow = resolved ? VR.knownToolOf(toolName) : null;   // round 14: a pinned tool is sealed-checked + hashed whether its path is root- or uid-owned
-    const toolPin = (toolRow && toolRow.toolSha256) || null;   // set ⇒ the sealed-check + drift hash runs in run() (digest FIRST); the SAME open fd is exec'd
-    const programWritable = replaceable && !toolPin;
+    const toolRow = resolved ? VR.knownToolOf(toolName) : null;   // round 15: a KNOWN credential tool (gh, runSeal) is sealed-checked + drift-hashed whether its path is root- or uid-owned
+    const sealedTool = !!(toolRow && toolRow.runSeal);   // set ⇒ the sealed-check + drift hash runs in run(); the SAME open fd is exec'd. The digest is a DRIFT RECORD, never a gate against a shipped constant (r14's bug: every root-owned non-2.102.0 gh refused)
+    const programWritable = replaceable && !sealedTool;
     const spec = VR.planOf({ ...req, resolved, templates: tp.templates, programWritable });
     if (!spec.ok) { note(spec.code, { tool: resolved, why: spec.why || null }); return spec; }
     usedRefs = spec.refs;
     const shape = VR.shapeOf(spec), key = VR.shapeKeyOf(shape), shapeId = shapeIdOf(key);
     const detail = detailOf(spec, shape, place);
     if (detail.length > DETAIL_MAX) return named('card_too_long');
-    const head = { tool: spec.tool, entries: spec.refs.map((r) => r.ref), shapeId, hosts: shape.hosts, routeHosts: shape.routeHosts, injection: spec.injection, argvExposed: spec.argvExposed, cwd: place, cmd: utf8Head(SS.redactSecrets(cmdText(spec.argv)).text) };
+    const head = { tool: spec.tool, entries: spec.refs.map((r) => r.ref), shapeId, hosts: shape.routeHosts, routeHosts: shape.routeHosts, mentions: (shape.hosts || []).filter((h) => !(shape.routeHosts || []).includes(h)), injection: spec.injection, argvExposed: spec.argvExposed, cwd: place, cmd: utf8Head(SS.redactSecrets(cmdText(spec.argv)).text) };
     // lane vault-agent-own: ANOTHER conversation's agent entry is refused by name before any fact of it is read (no switch opens it)
     const foreign = spec.refs.find((r) => VR.agentScopeOf(r) && !VR.ownsAgentEntry(r, caller));
     if (foreign) { note('use_not_granted', { ...head, ref: foreign.ref }); return named('use_not_granted', { ref: foreign.ref }); }
@@ -909,9 +938,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // to whom); an AGENT's own entry (`agent:<scope>/<name>`) is its conversation's only
     const granted = spec.refs.every((r) => !VR.agentScopeOf(r) || VR.ownsAgentEntry(r, caller));   // a mint's scope: the conversation's registered id, or (lane vault-agent-own) its durable one
     const passes = () => [...hostPasses.values()].filter((p) => p.scope === scope).map((p) => ({ id: p.id, host: p.host }));   // lane vault-agent-own: the hosts the owner let a minted value go to
-    // round 14 (BLOCKER + MAJOR ×2): the digest is taken FIRST — before the verdict, before the cap check, before any grant is
-    // spent. So no await sits between the cap check and runs.add (20 parallel calls see callerRuns grow and 16 get too_many_runs,
-    // not 20 spawns), and no grant is spent before a tool_changed (the once-grant is never wrongly restored). After the await the
+    // round 14/15: the digest is taken after the PER-CALLER cap (round 15: a refused call never hashes) and memoised per inode
+    // identity; no await sits between the hub-wide cap check and runs.add (20 parallel calls see callerRuns grow and 16 get
+    // too_many_runs, not 20 spawns), and no grant is spent before a sealed-tool refusal. After the await the
     // verdict re-reads the vault state, and we re-check the state + the signal BY NAME (a lock ⇒ vault_locked, a gone caller ⇒
     // caller_gone — nothing spawned, never spawn-then-stop). The open fd is handed to spawnRun (it exec's the SAME inode) or
     // closed here on any early return (the finally).
@@ -919,19 +948,34 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const closeTool = () => { if (toolFd != null) { try { fs.closeSync(toolFd); } catch { } toolFd = null; } };
     const lg0 = lockGen;
     try {
-      if (toolPin) {
-        // a pinned credential tool (gh) runs with the minted value ONLY when SEALED: its realpath chain is root-owned AND the OPEN
-        // fd's inode is root-owned with no group/other write (toolSealed). A uid-owned tool is tool_not_sealed — r13's /proc/fd
-        // exec'd the agent's CURRENT bytes after an in-place rewrite (O_RDONLY and the fd pin the inode, never its content). On a
-        // sealed inode the sha256 pin is the DRIFT detector: tool_changed on a mismatch (a package roll), exec of the SAME inode on
-        // a match (via /proc/<pid>/fd below, or by path where /proc is absent — a root-owned inode is unswappable by path).
-        try { toolFd = fs.openSync(spec.tool, 'r'); } catch { note('tool_changed', { ...head, tool: toolName, why: 'unreadable' }); return named('tool_changed', { tool: toolName }); }
+      if (sealedTool) {
+        // round 15 (BLOCKER): a KNOWN credential tool (gh) runs with a minted value ONLY when SEALED — its realpath chain is
+        // root-owned AND the OPEN fd's inode is root-owned with no group/other write (toolSealed). THE SEAL IS THE CONTENT FENCE:
+        // only root can change a root-owned file, so its CURRENT bytes are authoritative. The sha256 is NOT a gate against a shipped
+        // constant (r14 refused every root-owned gh whose bytes ≠ the one pinned 2.102.0 — the hub's own /usr/bin/gh 2.100.0, every
+        // apt gh, the very remedy tool_not_sealed prescribes); it is a DRIFT RECORD: the first run records {path,dev,ino,size,mtime,
+        // sha256} in data/vault-run-tools.json, a later run whose bytes/inode differ RECORDS the drift (an audit line + one notice)
+        // and RUNS — root changed it, which is the fence's own premise. A uid-owned tool is tool_not_sealed (r13's /proc/fd exec'd
+        // the agent's CURRENT bytes after an in-place rewrite — O_RDONLY and the fd pin the inode, never its content). The digest is
+        // taken AFTER the per-caller cap (a refused call never hashes) and memoised per inode identity (one hash per tool change).
+        try { toolFd = fs.openSync(spec.tool, 'r'); } catch { note('tool_not_sealed', { ...head, tool: toolName, why: 'unreadable' }); return named('tool_not_sealed', { tool: toolName }); }
         if (!toolSealed(spec.tool, toolFd)) { note('tool_not_sealed', { ...head, tool: toolName }); return named('tool_not_sealed', { tool: toolName }); }
-        const got = await toolDigest(toolFd);
-        if (got !== toolPin) { note('tool_changed', { ...head, tool: toolName, why: got ? 'its bytes differ from the pinned digest' : 'unreadable' }); return named('tool_changed', { tool: toolName }); }
+        if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER) return named('too_many_runs');   // round 15 (MINOR): the PER-CALLER cap is checked BEFORE the hash — a refused call never hashes the 42 MB binary
+        const tstat = fstatOf(toolFd);
+        const got = await digestOf(toolFd, tstat);   // memoised per (dev,ino,size,mtime,ctime): concurrent callers share ONE hash, a repeat run of an unchanged tool re-hashes nothing
+        driftNote(spec.tool, tstat, got, head, toolName);   // the DRIFT RECORD — records + audits a changed root-owned tool; NEVER refuses
         if (!hasProcFd) closeTool();   // a sealed (root-owned) inode is unswappable by path — exec by path where /proc/<pid>/fd is absent (not Linux)
         if (vaultState() !== 'unlocked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } note('vault_locked', { ...head }); return named('vault_locked'); }
         if (signal && signal.aborted) { note('caller_gone', head); return named('caller_gone'); }
+      }
+      // round 15 (MINOR): only the gh verbs that DRIVE git (repo clone/fork/sync, pr checkout, pr merge --delete-branch, repo
+      // create --push/--clone, pr create, extension install/upgrade, args after --) need git on the sealed PATH; gh api / issue list
+      // / pr view never run git and must NOT be refused for a missing git (r14's gitOnSeal refused EVERY gh run). A git-driving verb
+      // on a hub without git is git_not_on_seal by NAME (install git); the probe is RE-ASKED here when it was false at boot (git may
+      // have been installed since — a bounded statSync over the already-computed sealed dirs, never a PATH recompute).
+      if (sealedTool && spec.row && spec.row.runSeal && shape.gitDriven) {
+        if (gitOnSeal === false) gitOnSeal = probeGit(sealedDirs);
+        if (gitOnSeal === false) { note('git_not_on_seal', { ...head, tool: toolName }); return named('git_not_on_seal'); }
       }
       let verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries, granted, remembered, seen: seen.has(pair), instance: instanceKind(), policy: policy(), passes: passes(), now: now() });
       let askId = null, asked = null;
@@ -966,8 +1010,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // L3 (int331) + round 14: a once-grant is spent only when a child RAN — restore it when nothing ran (entry_unknown / too-short
       // / spawn_failed), but NEVER across a lock (the epoch moved, or the vault is no longer unlocked): a lock ends every grant
       // (vault_locked is not in BURNED; onLocked cleared them), so restoreOnce must not bring a spent once-grant back after one.
-      const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe', 'tool_changed', 'tool_not_sealed']);
+      const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe', 'git_not_on_seal', 'tool_not_sealed']);
       const restoreOnce = (r) => { if (lockGen === lg0 && vaultState() === 'unlocked' && r && r.ok === false && BURNED.has(r.code)) for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); return r; };
+      if (sealedTool && toolFd != null && !toolSealed(spec.tool, toolFd)) { note('tool_not_sealed', { ...head, tool: toolName, why: 'ownership changed between the hash and the spawn' }); return named('tool_not_sealed', { tool: toolName }); }   // round 15: tool_changed's one remaining case — a sealed tool whose fstat ownership moved before the exec
       fdHandedOff = true;
       const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt, toolFd, closeTool, toolName });
       return out && typeof out.then === 'function' ? out.then(restoreOnce) : restoreOnce(out);
@@ -996,7 +1041,6 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (spec.row && spec.row.runSeal && !sealEnv.PATH) { closeTool(); note('run_path_unsafe', { ...head }); return named('run_path_unsafe'); }
     // round 14 (MINOR, the r11 "git not found ⇒ re-check"): gh spawns `git` as a child; if git is not on the sealed (root-owned)
     // PATH the run would silently fail — gitOnSeal is resolved ONCE at boot over the same sealed PATH; refuse BY NAME here.
-    if (spec.row && spec.row.runSeal && gitOnSeal === false) { closeTool(); note('run_path_unsafe', { ...head, why: 'git is not on the sealed PATH' }); return named('run_path_unsafe'); }
     // round 13/14: the tool was opened, SEALED-checked and hashed in run() (the digest FIRST). spawnRun exec's the SAME inode via
     // /proc/<pid>/fd (toolFd, held from the hash), or by path where /proc is absent (a sealed root-owned inode is unswappable). The
     // held fd is closed in finish() with the run.
@@ -1130,7 +1174,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
 
   // round 14 (MINOR): the sealed PATH and whether `git` lives on it are computed ONCE at the door's construction (a boot step,
   // bounded — the boot law < 250 ms), never on the event loop at the first spawn (r11 fixup 1; r13's lazy memo did it at spawn #1).
-  try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); gitOnSeal = probeGit(sealed.split(':').filter(Boolean)); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
+  try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); sealedDirs = sealed.split(':').filter(Boolean); gitOnSeal = probeGit(sealedDirs); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
 
   return { run, answer, setRunnable, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
     listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet,
