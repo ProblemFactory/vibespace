@@ -242,12 +242,18 @@ export function memoryEffectiveWords(j, t) {
 }
 /** WHAT A RUN'S JOB LEFT RUNNING (round 5 — the ruling of 2026-10-27: a job's scope IS the job): a task's were stopped (by
  *  force past the grace), a service's kept while it runs — «left 1 running — stopped; to keep a daemon, run it as a service
- *  job»; '' when it left nothing */
+ *  job»; round 6: what the engine stopped later says when (`cleared` — this device's clock: «left 1 running — stopped at
+ *  14:05», never «kept» once they are gone), and a task's processes that left its group are said, not stopped; '' when it left
+ *  nothing */
 export function runLeftWords(run, t) {
   const l = run && run.left;
-  if (!l || !(l.n > 0)) return '';
+  if (!l || !(l.n > 0 || l.escaped > 0)) return '';
+  if (l.cleared) { const d = new Date(l.cleared); return t('left {n} running — stopped at {time}', { n: l.n, time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }); }
   if (l.kept) return t('left {n} running — kept: the service’s until it stops or starts again', { n: l.n });
-  return l.force ? t('left {n} running — stopped by force; to keep a daemon, run it as a service job', { n: l.n }) : t('left {n} running — stopped; to keep a daemon, run it as a service job', { n: l.n });
+  const esc = l.escaped > 0 ? t('{n} left its group — not stopped; run it as a service job', { n: l.escaped }) : '';
+  if (!(l.n > 0)) return esc;
+  const main = l.force ? t('left {n} running — stopped by force; to keep a daemon, run it as a service job', { n: l.n }) : t('left {n} running — stopped; to keep a daemon, run it as a service job', { n: l.n });
+  return esc ? `${main} · ${esc}` : main;
 }
 /** the NAMED end the card says beside the state — the park first (it is why the job no longer runs) */
 export function memoryEndWords(j, t) {

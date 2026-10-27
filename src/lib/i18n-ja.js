@@ -11068,6 +11068,8 @@ export default {
   "left {n} running — stopped; to keep a daemon, run it as a service job": "{n} 個のプロセスが残存 — 停止しました。デーモンを残すにはサービスジョブとして実行してください",
   "left {n} running — stopped by force; to keep a daemon, run it as a service job": "{n} 個のプロセスが残存 — 強制停止しました。デーモンを残すにはサービスジョブとして実行してください",
   "left {n} running — kept: the service’s until it stops or starts again": "{n} 個のプロセスが残存 — 保持：サービスが停止または再起動するまでサービスのもの",
+  "left {n} running — stopped at {time}": "{n} 個のプロセスが残存 — {time} に停止しました",
+  "{n} left its group — not stopped; run it as a service job": "{n} 個のプロセスがプロセスグループを離れました — 停止していません。サービスジョブとして実行してください",
   "parked: out of memory twice — raise its bound or fix the job": "停止中：2 回続けてメモリ上限超過 — 上限を上げるかジョブを直してください",
   "stopped: used more than {size}": "停止：メモリ上限超過（{size} を超えて使用）",
   "killed: the instance ran out of memory": "強制終了：インスタンス全体のメモリ不足",

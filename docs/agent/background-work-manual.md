@@ -176,12 +176,16 @@ its own (a cluster pod) every bound is capped below it — the hub keeps max(1 G
 runs at 6 GB, and `show` says «capped by the instance's 8 GB limit (asked 16 GB)». The cap is the limit that CONTAINS the
 job — under a user systemd the job's own scope sits beside VibeSpace, so a limit on VibeSpace's own service does not lower
 it, a limit on the user slice does (`show` names which).
-- **A stop ends the WHOLE job** — everything it started: a process that ignores SIGTERM is killed 10 s later (its run says
-  «stopped by force: it did not end on SIGTERM in 10 s …») — 10 s is the job's to shut down cleanly.
+- **A stop ends the WHOLE job** — everything it started (on a cluster pod with no systemd: its process group): a process
+  that ignores SIGTERM is killed 10 s later (its run says «stopped by force: it did not end on SIGTERM in 10 s …») — 10 s
+  is the job's to shut down cleanly.
 - **What a TASK leaves running is stopped when it ends** (`nohup x &`, a background daemon): its run says «the job left
   1 process running — it was stopped; to keep a daemon, run it as a service job». A **service** keeps what it starts
-  until it is stopped or started again (its next run starts only once the old ones are gone). On a cluster pod (no
-  systemd) only what stays in the job's process group is seen — a `setsid` daemon is beyond it: run it as a service.
+  until its NEXT START — your `start`, its restart policy's, or the replay after VibeSpace restarts or updates — or its
+  stop, park or removal; then they are stopped (SIGTERM, 10 s, then by force; said, and `show` says when) and its next
+  run starts only once they are gone. On a cluster pod a process that LEAVES the job's process group (`setsid`) cannot
+  be stopped from there: a task's is named — «1 process left its group — not stopped; run it as a service job» — and a
+  service keeps it with the rest.
 
 - The wrapper enforces it with what this host offers and SAYS which (`vibespace-job show <id>` → `memory: …`):
   a cgroup of the user systemd (a real ceiling, no swap) or RLIMIT_DATA on the process (a fleet pod: no systemd);

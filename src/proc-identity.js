@@ -157,6 +157,28 @@ function signalIdentity(identity, signal, opts = {}) {
   return one(pid);
 }
 
+/**
+ * THE PROCESSES OF A RECORDED RUN (lane jobs-memory-bound, acceptance round 6) — a FRESH /proc scan, never a list read back:
+ * every process of process group `pgid` (0: none), or carrying `mark` (NAME=value) in its environ — a process that left the
+ * group (setsid) still carries what it inherited — started at or after `since` (field 22), not a zombie, never this process.
+ * Identities ({pid, starttime, bootId}), proven again by signalIdentity at the act. [] where there is no /proc.
+ */
+function membersOf({ pgid = 0, since = 0, mark = '' } = {}, opts) {
+  const root = rootOf(opts), out = [];
+  let ents = [];
+  try { ents = fs.readdirSync(root); } catch { return out; }
+  const bootId = bootIdOf(opts);
+  for (const e of ents) {
+    if (!/^\d+$/.test(e) || Number(e) === process.pid) continue;
+    const r = statRest(e, opts);
+    if (!r || r[0] === 'Z' || Number(r[19]) < since) continue;
+    let hit = !!pgid && Number(r[2]) === Number(pgid);
+    if (!hit && mark) { try { hit = fs.readFileSync(`${root}/${e}/environ`, 'latin1').split('\0').includes(mark); } catch { } }
+    if (hit) out.push({ pid: Number(e), starttime: Number(r[19]), bootId });
+  }
+  return out;
+}
+
 // ── SHIPPED TWIN BEGIN — data/bin/vibespace-remote-keeper carries these lines byte-for-byte: it ships to a host as ONE
 // file and cannot require src/ (the vibespace-usage-scan precedent). test-pid-identity pins the copy to this source. ──
 /** agentd's spawn-proof token (moved verbatim from src/agentd/agentd.js pidStartTime): 'l' + field 22 on a
@@ -251,7 +273,7 @@ function legacyOnce(door, pid, say) {
 
 module.exports = {
   PROC_ROOT, UNPROVABLE, WITHHELD_KEY, LEGACY_LINE,
-  hasProc, bootIdOf, starttimeOf, stateOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, reportOnce, startToken,
+  hasProc, bootIdOf, starttimeOf, stateOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
   bootToken, tokenVerdict, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,
   _resetReported: () => { _reported.clear(); _legacySaid.clear(); },
 };

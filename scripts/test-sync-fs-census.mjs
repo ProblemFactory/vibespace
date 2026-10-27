@@ -150,7 +150,7 @@ const ROWS = [
   ["src/opslog.js", "_activate", 1, "guarded", "appendFileSync to $VIBESPACE_OPSLOG_DIR/server-<day>.log at process exit — a deployment dir that is typically a kernel-mounted CephFS (network storage)"],
   ["src/peer-messaging.js", "*", 4, "local-only", "REGISTRY_DIR = ~/.claude/sessions (<pid>.json + .key beside) and the CLI's own messagingSocketPath socket"],
   ["src/port-forward.js", "*", 2, "local-only", "its only writeJsonAtomic caller (_persist) writes this.file = <dataDir>/port-forwards.json"],
-  ["src/proc-identity.js", "*", 4, "local-only", "/proc (PROC_ROOT; opts.procRoot is only a test override): <pid>/stat, self/stat, sys/kernel/random/boot_id"],
+  ["src/proc-identity.js", "*", 6, "local-only", "/proc (PROC_ROOT; opts.procRoot is only a test override): <pid>/stat, self/stat, sys/kernel/random/boot_id; lane jobs-memory-bound round 6 +2 (membersOf — a recorded run's processes at clear time): the /proc listing and a process's environ (the job's mark) — procfs, never a mount"],
   ["src/quota-model-migrate.js", "*", 4, "local-only", "cacheDir = <dataDir>/usage-cache, archiveDir = <dataDir>/archive (migrations.js one-shot backfill)"],
   ["src/rate-limit-capture.js", "captureRateLimitEvent", 2, "local-only", "fileFor(id) = usage-write cacheFileFor(cacheDir, id); every caller's cacheDir = <dataDir>/usage-cache (USAGE_CACHE_DIR)."],
   ["src/reading-repair.js", "*", 17, "local-only", "every dir derives from dataDir = <checkout>/data (migrations.js, usage-pool-engine repairIdentityAnchors, server.js prefetch): usage-cache, usage-anchors, usage-history, archive"],

@@ -71,11 +71,16 @@ function scopeEventsEnd(atGo, atEnd) {
   if (!(kills > 0)) return {};
   return ooms > 0 ? { cause: 'oom-bound', how: `its scope's memory.events: oom ${ooms}, oom_kill ${kills} (at MemoryMax)` } : { cause: 'oom', how: `its scope's memory.events: oom_kill ${kills} below its MemoryMax (the host ran out)` };
 }
-/** what the job LEFT running, worded (round 5) — src/job-model.js leftWords' twin (a suite pins the two equal) */
+/** what the job LEFT running, worded (round 5; round 6: what left its group, what the record names of more than its bound) —
+ *  src/job-model.js leftWords' twin, line for line (a suite pins the two equal) */
 function leftWords(l) {
-  const n = l.n, many = n !== 1;
-  if (l.kept) return `it left ${n} process${many ? 'es' : ''} running — kept: a service's own until it is stopped or started again`;
-  return `the job left ${n} process${many ? 'es' : ''} running — ${many ? 'they were' : 'it was'} stopped${l.force ? ' by force' : ''}; to keep a daemon, run it as a service job`;
+  const n = l.n || 0, es = (k) => (k === 1 ? '' : 'es');
+  const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  if (l.cleared) return `it left ${n} process${es(n)} running — stopped at ${hhmm(l.cleared)}`;
+  if (l.kept) return `it left ${n} process${es(n)} running — kept: a service's own until it is stopped or started again${l.escaped ? ` (${l.escaped} outside its group)` : ''}${l.recorded ? ` (${l.recorded} of ${n} recorded)` : ''}`;
+  const esc = l.escaped ? `${l.escaped} process${es(l.escaped)} left its group — not stopped` : '';
+  if (!n) return `${esc}; run it as a service job`;
+  return `the job left ${n} process${es(n)} running — ${n === 1 ? 'it was' : 'they were'} stopped${l.force ? ' by force' : ''}${esc ? `; ${esc}; run it as a service job` : '; to keep a daemon, run it as a service job'}`;
 }
 if (!process.argv[2] && require.main !== module) { module.exports = { allocationRefused, systemdMajor, scopeResultEnd, scopeEventsEnd, capOf, sharedAncestors, leftWords }; return; }
 
@@ -241,8 +246,10 @@ function ask(cmd, args) {
 }
 const GATE_EXEC = 'read -r go <&3 || exit 125; exec "$@" 3<&-';
 // < 253: the KEEPER — a sh of its own (double-forked: no child of the job's) that ignores a stop and holds the scope open on
-// fd 3 until the wrapper has read the scope's memory.events and lets it go; the job itself is exec'd, as on every rung
-const GATE_KEEP = 'read -r go <&3 || exit 125; ( (trap "" TERM INT HUP; read -r ack <&3) </dev/null >/dev/null 2>&1 & ); exec "$@" 3<&-';
+// fd 3 until the wrapper has read the scope's memory.events and lets it go; the job itself is exec'd, as on every rung. Round
+// 6: the keeper is known by its PID — the gate says it on fd 3 ($! of the double fork) BEFORE the job is exec'd — never by its
+// command line (a child of the job's carrying the gate's exact text was taken for it, and killed)
+const GATE_KEEP = 'read -r go <&3 || exit 125; ( (trap "" TERM INT HUP; read -r ack <&3) </dev/null >/dev/null 2>&1 & echo "keeper $!" >&3 ); exec "$@" 3<&-';
 const misses = []; // why each better rung does not hold the job — said in the why of the one that does
 function rungPlan() {
   if (!asked) return [{ by: 'none', why: 'the server asked for no bound (a server older than this wrapper)' }];
@@ -283,6 +290,7 @@ function whyOf(r) {
 }
 let rung = null, child = null, proven = false, boundRec = null, stopping = null, exited = false;
 let scopeDir = '', eventsAtGo = null;
+let keeper = null, keeperSaid = null; // < 253 (round 6): the keeper's identity {pid, start} — said by the gate on fd 3
 
 // the job's LAST WORDS (4 KiB, both streams): under RLIMIT_DATA an allocation the bound refuses ends inside the job, and the
 // job says so as it dies (allocationRefused above)
@@ -305,8 +313,8 @@ function readEvents(dir) {
 }
 /** the processes still in a cgroup (its cgroup.procs) — [] once it is empty or gone */
 function procsOf(dir) { try { return fs.readFileSync(path.join(dir, 'cgroup.procs'), 'utf8').split('\n').filter((l) => /^\d+$/.test(l)); } catch { return []; } }
-/** the keeper (< 253) — a fork of the gate's sh, its command line the gate's own — is ours, never something the job left */
-const isKeeper = (pid) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[2] === GATE_KEEP; } catch { return false; } };
+/** the keeper (< 253) is ours, never something the job left — known by the PID its gate said, and its start (round 6) */
+const isKeeper = (pid) => !!keeper && Number(pid) === keeper.pid && Number((statOf(pid) || [])[19]) === keeper.start;
 
 function launch() {
   const r = rung = plan.shift() || { by: 'none', mb: memMb, cap: hubCap };
@@ -328,6 +336,14 @@ function launch() {
   child.on('close', (code, signal) => { if (c === child && gated && !proven) fellThrough(r, code, signal); });
   if (!gated) { boundRec = { mb: memMb, askedMb, by: 'none', why: r.why, ...(hubCap ? { cap: hubCap } : {}) }; writeBound(); startSampler(); return; }
   child.stdio[3].on('error', () => { });
+  if (r.by === 'cgroup' && !r.policy) { // the keeper's PID, said before the job runs (round 6)
+    let said = '';
+    keeperSaid = new Promise((res) => c.stdio[3].on('data', (b) => {
+      said += b;
+      const m = /^keeper (\d+)$/m.exec(said);
+      if (m && !keeper && c === child) { keeper = { pid: Number(m[1]), start: Number((statOf(m[1]) || [])[19]) }; res(); }
+    }));
+  }
   prove(r, c, Date.now() + gateMs);
 }
 // THE PROOF: the bound read back off the gated child — then, and only then, the go. The timer is the rung's own: it reads only
@@ -533,7 +549,11 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
     if (stopping) return;
     stopping = sig; stopAt = Date.now();
     try { child.kill(sig); } catch { }
-    if (!scoped()) return;
+    if (!scoped()) { // round 6: a rung without a scope — the job's group is OURS to end at the grace, said (drainGroup takes what
+      // the job left in it); the engine's kill step is a backstop for a wrapper that cannot (a second later)
+      const t = setTimeout(() => { if (exited) return; if (!forced) forced = `it did not end on ${sig} in ${stopMs / 1000} s — its process group was killed`; try { child.kill('SIGKILL'); } catch { } }, stopMs); t.unref?.();
+      return;
+    }
     scopeKill(sig);
     const t = setTimeout(() => { if (!exited) forceScope(`it did not end on ${sig} in ${stopMs / 1000} s — its scope was killed`); }, stopMs); t.unref?.();
   });
@@ -545,20 +565,31 @@ for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
 // still runs stopMs after it is killed. Never a run that «ended» while its processes still run, hold its ports, and meet
 // the next start — and never a «scope was killed» that killed nothing (round 5)
 async function drainScope() {
-  if (!rung.policy) { try { child.stdio[3].destroy(); } catch { } } // the keeper's read ends: it leaves the scope
-  const left = stopping ? 0 : procsOf(scopeDir).filter((p) => !isKeeper(p)).length;
-  if (left && keeps) return { left: { n: left, kept: true }, scopeEmpty: false };
+  if (!rung.policy) { // the keeper's read ends: it leaves the scope — known by the PID it said, awaited out (round 6)
+    if (keeperSaid && !keeper) await Promise.race([keeperSaid, nap(500)]);
+    try { child.stdio[3].destroy(); } catch { }
+    for (let i = 0; i < 40 && keeper && procsOf(scopeDir).includes(String(keeper.pid)); i++) await nap(25);
+  }
+  const procs = stopping ? [] : procsOf(scopeDir).filter((p) => !isKeeper(p)), left = procs.length;
+  if (left && keeps) { // round 6: named by identity too — a stop whose read of the scope does not answer SIGTERMs them blind
+    const rows = procs.map((p) => [Number(p), Number((statOf(p) || [])[19])]).filter((r) => r[1] > 0).slice(0, 64);
+    return { left: { n: left, kept: true, pids: rows, boot: bootId(), ...(rows.length < left ? { recorded: rows.length } : {}) }, scopeEmpty: false };
+  }
   if (left) await scopeKill('SIGTERM');
   const deadline = (stopping ? stopAt : Date.now()) + stopMs;
   while (procsOf(scopeDir).length && Date.now() < deadline) await nap(25);
   const still = procsOf(scopeDir).length, s = still === 1 ? '' : 'es', was = still === 1 ? 'was' : 'were';
-  if (still) await forceScope(left ? `${still} process${s} it left ${was} still running ${stopMs / 1000} s after its SIGTERM — its scope was killed` : `${still} process${s} ${was} still in its scope ${stopMs / 1000} s after the stop — its scope was killed`);
+  if (still) await forceScope(left ? `${still} process${s} it left ${was} still running ${stopMs / 1000} s after its SIGTERM — its scope was killed` : `${still} process${s} ${was} still in its scope ${stopMs / 1000} s after ${stopping ? 'the stop' : 'its end'} — its scope was killed`);
   for (let i = 0; i < 80 && procsOf(scopeDir).length; i++) await nap(25);
   return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !procsOf(scopeDir).length };
 }
 // A RUNG WITHOUT A SCOPE (rlimit-data, none — a fleet pod): what the job left is what still runs in OUR process group (the job
 // is our child in it; what it put in the background stays there) — a task's stopped and said, a service's kept and named by
-// identity for the engine. A process that left the group (setsid) is beyond a rung without a scope. /proc only, no exec.
+// identity for the engine. Round 6: A STOP DRAINS THE GROUP THE WAY AN END DOES (round 5 left it to the engine's kill step,
+// which cannot reach a group once its wrapper is gone: a SIGTERM-deaf member survived the stop for ever, unsaid) — its SIGTERM
+// came with the stop, the grace runs from the stop. A process that LEFT the group (setsid) is beyond a rung without a scope:
+// THE RECORD SAYS WHAT IT COULD NOT SEE — a fresh scan for the job's mark in /proc/*/environ (VIBESPACE_JOB_ID, inherited)
+// finds it: a task's said, not stopped; a service keeps it with the rest. /proc only, no exec.
 const statOf = (pid) => { try { const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' '); } catch { return null; } };
 function groupLeft() {
   const out = [];
@@ -572,19 +603,39 @@ function groupLeft() {
   return out;
 }
 const same = ([pid, st]) => { const r = statOf(pid); return !!r && r[0] !== 'Z' && Number(r[19]) === st; };
+const MARK = spec && spec.env && spec.env.VIBESPACE_JOB_ID ? `VIBESPACE_JOB_ID=${spec.env.VIBESPACE_JOB_ID}` : '';
+function escapedOf() { // started after us, outside our group, carrying the job's mark — never us (our own env carries it too)
+  const out = [];
+  let ents = [];
+  if (!MARK) return out;
+  try { ents = fs.readdirSync('/proc'); } catch { return out; }
+  for (const e of ents) {
+    if (!/^\d+$/.test(e) || Number(e) === process.pid) continue;
+    const r = statOf(e);
+    if (!r || r[0] === 'Z' || Number(r[2]) === process.pid || Number(r[19]) < stamp.starttime) continue;
+    try { if (fs.readFileSync(`/proc/${e}/environ`, 'latin1').split('\0').includes(MARK)) out.push([Number(e), Number(r[19])]); } catch { }
+  }
+  return out;
+}
 async function drainGroup() {
-  if (stopping) return {}; // the stop reached our whole group — the engine's kill step follows if it must
   const left = groupLeft();
-  if (!left.length) return {};
-  if (keeps) return { left: { n: left.length, kept: true, pids: left.slice(0, 64), boot: bootId() } };
+  const out = escapedOf(), mine = keeps && stopping; // a service STOPPED: what it kept is its own, stopped with it — outside its group too
+  if (!left.length && !out.length) return {};
+  const rows = keeps ? [...left, ...out] : left, n = rows.length;
+  const kept = keeps ? { kept: true, pids: rows.slice(0, 64), boot: bootId(), ...(out.length ? { escaped: out.length } : {}), ...(n > 64 ? { recorded: 64 } : {}) } : null;
+  if (keeps && !stopping) return { left: { n, ...kept } }; // kept: named by identity for the engine (its stop, park, removal, next start)
+  if (!n) return { left: { n: 0, escaped: out.length } }; // a task's that left its group: said, not stopped
+  if (mine) left.push(...out);
   for (const [pid] of left) { try { process.kill(pid, 'SIGTERM'); } catch { } }
-  const deadline = Date.now() + stopMs;
+  const deadline = (stopping ? stopAt : Date.now()) + stopMs; // after a stop the grace is the stop's own
   let live = left.filter(same);
   while (live.length && Date.now() < deadline) { await nap(25); live = live.filter(same); }
   const still = groupLeft(); // the group once more: what was forked meanwhile too
+  if (mine) still.push(...out.filter(same));
   for (const [pid] of still) { try { process.kill(pid, 'SIGKILL'); } catch { } }
-  if (still.length) forced = `${still.length} process${still.length === 1 ? '' : 'es'} it left ${still.length === 1 ? 'was' : 'were'} still running ${stopMs / 1000} s after its SIGTERM — killed`;
-  return { left: { n: left.length, ...(still.length ? { force: true } : {}) } };
+  if (still.length && !forced) forced = `${still.length} process${still.length === 1 ? '' : 'es'} it left ${still.length === 1 ? 'was' : 'were'} still running ${stopMs / 1000} s after its SIGTERM — killed`;
+  if (mine) return { left: { n, ...kept, cleared: Date.now() } }; // recorded the way an end records them — and stopped with it
+  return { left: { n, ...(still.length ? { force: true } : {}), ...(out.length ? { escaped: out.length } : {}) } };
 }
 
 async function ended(code, signal) {

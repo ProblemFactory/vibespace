@@ -96,9 +96,11 @@ const ARCHIVE_SWEEP_MS = 5 * 60 * 1000;
 // A STOP'S GRACE and THE REAP'S BOUND (lane jobs-memory-bound, acceptance round 5): a stop's SIGTERM, then STOP_GRACE_MS before
 // the kill step — the owner's stop, a timeout, an until-marker and a stop the sweep honors alike (the tick never cuts it short);
 // a read of a scope's cgroup.procs answers within REAP_READ_MS or the run is judged without it (a busy threadpool never holds
-// a judgment — the reap is retried by a later tick)
+// a judgment — the reap is retried by a later tick). Round 6: A REAP THAT DID NOT FINISH IS ALWAYS RETRIED — whoever started it
+// (the boot, the sweep, a start), by every tick whatever its job's state, REAP_TRIES times; then said once and dropped
 const STOP_GRACE_MS = 10_000;
 const REAP_READ_MS = 2000;
+const REAP_TRIES = 12;
 const pause = (ms) => new Promise((res) => setTimeout(res, ms));
 /** the typed held record for a stash entry, from the ladder's own answer */
 function heldOf(r, reason) {
@@ -137,7 +139,7 @@ class JobManager {
     this.archive = null;          // null = not loaded yet
     this._lastArchiveSweep = 0;   // the 5-min cadence rides the 5 s _sweep tick — no second timer
     this._sweepRun = null; this._sweepSkips = 0; // ONE JUDGE PER RUN END (round 5): a pass in flight is never entered twice
-    this._reapLater = new Map();  // run → job: judged while its scope's read did not answer — reaped by a later tick (round 5)
+    this._reapLater = new Map();  // run → {job, tries}: a reap that did not finish (round 6: whoever started it) — retried by every tick
     this.jobs = new Map();
     this.readOnly = false;
     this.ready = false;
@@ -989,18 +991,37 @@ class JobManager {
     const b = run ? this._ctlJson(job, run, 'bound.json') : null;
     if (!b || b.by !== 'cgroup' || !/^[A-Za-z0-9_.@-]{1,200}\.scope$/.test(String(b.unit || ''))) return null;
     const cg = typeof b.cgroup === 'string' && /^\/[A-Za-z0-9_.@/-]+$/.test(b.cgroup) && !b.cgroup.includes('..') && b.cgroup.endsWith(`/${b.unit}`) ? b.cgroup : '';
-    return { unit: b.unit, dir: cg ? path.join('/sys/fs/cgroup', cg) : '' };
+    return { unit: b.unit, dir: cg ? path.join(this.d.cgroupRoot || '/sys/fs/cgroup', cg) : '' }; // cgroupRoot: a fast suite's fake tree only
   }
-  /** SIGKILL to every process of a scope (its cgroup.kill) — false when the scope is gone or this kernel has no cgroup.kill */
-  _killScope(scope) {
-    return scope && scope.dir ? fs.promises.writeFile(path.join(scope.dir, 'cgroup.kill'), '1').then(() => true, () => false) : Promise.resolve(false);
+  /** SIGKILL to every process of a scope (its cgroup.kill, opened O_WRONLY — never created). Round 6: TWO OUTCOMES, TWO WORDS —
+   *  'killed'; 'gone' (nothing there to kill: the scope is gone, or empty); 'nokill' (the scope still holds processes and has no
+   *  cgroup.kill — a kernel before 5.14); 'refused' (another error); 'unread' (its read did not answer) — round 5 said «no
+   *  cgroup.kill» for a scope that was merely gone */
+  async _killScope(scope) {
+    if (!scope || !scope.dir) return 'gone';
+    const err = await fs.promises.writeFile(path.join(scope.dir, 'cgroup.kill'), '1', { flag: fs.constants.O_WRONLY }).then(() => null, (e) => e || {});
+    if (!err) return 'killed';
+    const pids = await this._scopeProcs(scope);
+    return pids === null ? 'unread' : !pids.length ? 'gone' : err.code === 'ENOENT' ? 'nokill' : 'refused';
   }
   /** THE STOP'S GRACE (round 5) — the wrapper's drain bound is the same number (a suite's seam shortens both: memorySample.stopMs) */
   _graceMs() { const s = Number(this.d.memorySample && this.d.memorySample.stopMs); return s > 0 ? Math.min(s, STOP_GRACE_MS) : STOP_GRACE_MS; }
   _graceWords() { return `it did not end on SIGTERM in ${this._graceMs() / 1000} s`; }
-  /** when the engine's kill step comes: the grace — on the cgroup rung a second later, a BACKSTOP: the wrapper kills its own
-   *  scope at the grace and says so in the job's log (the card's last line); the engine's step is for a wrapper that cannot */
-  _killStepMs(scope) { return this._graceMs() + (scope && scope.dir ? 1000 : 0); }
+  /** when the engine's kill step comes: a second after the grace, a BACKSTOP on every rung — the wrapper kills its own scope
+   *  (round 6: or its own process group, on a rung without a scope) at the grace and says so in the job's log (the card's last
+   *  line); the engine's step is for a wrapper that cannot */
+  _killStepMs() { return this._graceMs() + 1000; }
+  /** a run still running — the job's LAST run, not ended */
+  _runLive(job, run) { return !!run && !run.endedAt && !!job.runs && job.runs[job.runs.length - 1] === run; }
+  /** A KILL TIMER BELONGS TO ITS RUN (round 6): the kill step of a stop / a timeout / an until-marker fires only while the run it
+   *  was armed for still runs, and a new spawn disarms every timer of the previous run (_spawn) — the base's timer read the
+   *  CURRENT run's stamp and killed a service started again inside the grace (cause error: a crash to its restart policy) */
+  _armKillStep(job, run, scope) {
+    const timers = job._killSteps || (job._killSteps = new Set());
+    const t = setTimeout(() => { timers.delete(t); if (this._runLive(job, run)) this._escalate(job, scope, this._graceWords(), run); }, this._killStepMs(scope));
+    t.unref?.(); timers.add(t);
+    return t;
+  }
   /** a promise's answer, or null once `ms` passed without it (the work itself goes on) */
   _within(p, ms) { let t; return Promise.race([p, new Promise((res) => { t = setTimeout(() => res(null), ms); })]).finally(() => clearTimeout(t)); }
   /** the pids in a scope (its cgroup.procs; [] once it is gone) — BOUNDED (round 5): null when the read did not answer within
@@ -1018,9 +1039,11 @@ class JobManager {
   /** THE KILL STEP of a stop / a timeout: the cgroup rung's scope — its wrapper, alive, writes the end once the scope is empty;
    *  a wrapper still there a step later (wedged) is killed with its group; any other rung: the group, as before. `why`
    *  (round 5) — the job did not end in its grace — rides the run's end as «stopped by force: <why> — its scope / its process
-   *  group was killed» (a kill WE made, the engine's fact); a forced stop says none (the owner asked for it) */
-  _escalate(job, scope, why) {
-    const run = job.runs && job.runs[job.runs.length - 1];
+   *  group was killed» (a kill WE made, the engine's fact); a forced stop says none (the owner asked for it). `forRun` (round 6):
+   *  the run the step was armed for — a step for a run that ended reaches nothing, and its words never land on the next */
+  _escalate(job, scope, why, forRun) {
+    if (forRun && !this._runLive(job, forRun)) return false;
+    const run = forRun || (job.runs && job.runs[job.runs.length - 1]);
     const said = (what) => { if (why && run && !run.endedAt) job._forced = { run: run.startedAt, words: `stopped by force: ${why} — ${what}` }; };
     if (!scope || !scope.dir) { const hit = this._killGroup(job, 'SIGKILL'); if (hit) said('its process group was killed'); return hit; }
     const k = job._scopeKilled;
@@ -1029,35 +1052,65 @@ class JobManager {
       return cur && cur.unit === scope.unit ? this._killGroup(job, 'SIGKILL') : false; // never a later run's wrapper
     }
     if (!k || k.unit !== scope.unit) job._scopeKilled = { unit: scope.unit, at: now() };
-    this._killScope(scope).then((hit) => { if (hit) said('its scope was killed'); });
+    this._killScope(scope).then((r) => { if (r === 'killed') said('its scope was killed'); });
     return true;
   }
   /** a run whose wrapper is gone: what is still in its scope belongs to an ENDED run — killed, and said on the run. True once
-   *  done (nothing there, or killed and read empty); false when its read did not answer in its bound — the caller judges the
-   *  run without it and a later tick retries (round 5). One reap per run in flight: a second caller awaits the first. */
+   *  done (nothing there, or killed and read empty); false when it did not finish (round 5: the caller judges the run without
+   *  it). Round 6 — ONE ROAD: a reap that did not finish ENQUEUES ITSELF (_reapLater) whoever started it — the boot (whose
+   *  answer was dropped: a task's, a cron child's or a non-replayed service's old scope kept its processes for ever, unsaid), the
+   *  sweep, a start (_clearBefore) — and every tick retries it, whatever its job's state. One reap per run in flight: a second
+   *  caller awaits the first. */
   _reapScope(job, run) {
     const inflight = this._reaping || (this._reaping = new WeakMap());
     if (run && inflight.has(run)) return inflight.get(run);
-    const p = this._reapOnce(job, run);
+    const p = this._reapOnce(job, run).then((done) => {
+      if (run && done) { this._reapLater.delete(run); (this._reaped || (this._reaped = new WeakSet())).add(run); }
+      else if (run && !this._reapLater.has(run)) this._reapLater.set(run, { job, tries: 0 });
+      return done;
+    });
     if (run) { inflight.set(run, p); p.then(() => inflight.delete(run), () => inflight.delete(run)); }
     return p;
   }
   async _reapOnce(job, run) {
     const scope = this._runScope(job, run);
     if (!scope || !scope.dir) return true;
+    const bound = this.d.reapReadMs ?? REAP_READ_MS;
+    const st = run._reap || (run._reap = {}); // this run's reap across its attempts (runtime only): the count it read, its kill
     const pids = await this._scopeProcs(scope);
-    if (pids === null) return false;
-    if (!pids.length) return true;
-    const left = pids.length;
-    const killed = await this._within(this._killScope(scope), this.d.reapReadMs ?? REAP_READ_MS);
-    if (killed === null) return false;
-    for (let i = 0; killed && i < 20; i++) { const p = await this._scopeProcs(scope); if (!p || !p.length) break; await pause(50); } // gone — never a run started beside it
-    const held = `its wrapper was gone and its scope still held ${left} process${left === 1 ? '' : 'es'}`;
-    const words = killed ? `stopped by force: ${held} — its scope was killed` : `${held} — not killed: this kernel has no cgroup.kill — systemctl --user kill --signal=KILL ${scope.unit}`;
+    if (pids && pids.length) st.n = Math.max(st.n || 0, pids.length);
+    if (pids && !pids.length) return st.killed ? this._reapSaid(job, run, scope, 'killed') : true; // our kill's effect, seen now
+    // round 6: a read past its bound never leaves an ended run's processes running — the scope is the run's own (its unit names
+    // the run's start) and what it holds is an ended run's: its cgroup.kill is written all the same (ONE write per run in flight
+    // — a late answer still counts: what it killed is said by the attempt that sees the scope empty)
+    if (!st.kill) st.kill = this._killScope(scope).then((r) => { if (r === 'killed') st.killed = true; else if (r !== 'nokill') delete st.kill; return r; });
+    const r = await this._within(st.kill, bound);
+    if (r === null || r === 'unread' || r === 'refused') return false;
+    if (r === 'gone') return true; // nothing there (it ended on its own meanwhile) — nothing killed, nothing said
+    if (r === 'killed' && (await this._scopeEmpty(scope, this.d.reapConfirmMs ?? 1000)) === false) return false; // still there: never «killed» unproven — retried
+    return this._reapSaid(job, run, scope, r);
+  }
+  /** the reap's words, once, on the run and its journal — what it read (or that no read answered), and what was done */
+  _reapSaid(job, run, scope, r) {
+    const n = run._reap && run._reap.n, bound = this.d.reapReadMs ?? REAP_READ_MS;
+    const held = n ? `its wrapper was gone and its scope still held ${n} process${n === 1 ? '' : 'es'}` : `its wrapper was gone and its scope did not answer a read in ${bound / 1000} s`;
+    const words = r === 'killed' ? `stopped by force: ${held} — its scope was killed` : `${held} — not killed: this kernel has no cgroup.kill — systemctl --user kill --signal=KILL ${scope.unit}`;
+    delete run._reap;
     run.forced = run.forced || words;
     this.d.log(`[jobs] ${job.id} ${words}`);
     this._touch(job, { what: words });
     return true;
+  }
+  /** a killed scope read EMPTY within `ms` (true) — still holding processes at the end (false), no read answered (null) */
+  async _scopeEmpty(scope, ms) {
+    const until = now() + ms;
+    let seen = null;
+    for (;;) {
+      const p = await this._scopeProcs(scope);
+      if (p) { if (!p.length) return true; seen = false; }
+      if (now() >= until) return seen;
+      await pause(50);
+    }
   }
   /** WHAT A SERVICE KEPT (round 5, the ruling of 2026-10-27: a service's processes are its own while it runs) — what its last
    *  run left running is stopped when the service stops, parks, is removed, or before its next run starts: SIGTERM, the grace,
@@ -1073,53 +1126,89 @@ class JobManager {
     return p;
   }
   async _clearKeptOnce(job, run, l) {
-    const grace = this._graceMs(), scope = this._runScope(job, run);
-    let n = 0, force = false;
+    const grace = this._graceMs(), scope = this._runScope(job, run), until = now() + grace;
+    const recorded = (l.pids || []).map(([pid, starttime]) => ({ pid, starttime, bootId: l.boot || '' }));
+    const sent = new Map(); // pid → identity: every process its SIGTERM reached (a pid is never an identity — B-1cc6: read and proven by the one module)
+    const term = (ids) => { for (const id of ids) if (id && !sent.has(id.pid) && PI.aliveIdentity(id) === true) { sent.set(id.pid, id); PI.signalIdentity(id, 'SIGTERM'); } };
+    let n = 0, force = false, blind = false;
     if (scope && scope.dir) {
+      // round 6: a read past its bound is no reason to skip the grace — SIGTERM BLIND to what the run recorded (the wrapper names
+      // a kept scope's processes too), the read retried through the grace, what it then lists SIGTERMed as it appears
       let pids = await this._scopeProcs(scope);
-      n = pids ? pids.length : l.n;
-      for (const pid of pids || []) { const id = PI.identityOf(pid); if (id) PI.signalIdentity(id, 'SIGTERM'); } // a pid is never an identity (B-1cc6): read and proven by the one module
-      const until = now() + grace;
-      while (pids && pids.length && now() < until) { await pause(50); pids = await this._scopeProcs(scope); }
+      if (pids) term(pids.map((p) => PI.identityOf(p))); else { blind = true; term(recorded); }
+      n = Math.max(pids ? pids.length : 0, sent.size);
+      while ((pids === null || pids.length) && now() < until) {
+        await pause(50);
+        const p = await this._scopeProcs(scope);
+        if (p) { term(p.map((x) => PI.identityOf(x))); pids = p; n = Math.max(n, sent.size); }
+      }
       if (pids === null || pids.length) {
         force = true;
         await this._within(this._killScope(scope), this.d.reapReadMs ?? REAP_READ_MS);
-        for (let i = 0; i < 20; i++) { const p = await this._scopeProcs(scope); if (!p || !p.length) break; await pause(50); }
+        await this._scopeEmpty(scope, 1000);
       }
+      if (!n) n = pids === null ? l.n : 0;
     } else {
-      const ids = (l.pids || []).map(([pid, starttime]) => ({ pid, starttime, bootId: l.boot || '' }));
-      let live = ids.filter((id) => PI.aliveIdentity(id) === true);
-      n = live.length;
-      for (const id of live) PI.signalIdentity(id, 'SIGTERM');
-      const until = now() + grace;
+      // round 6: the GROUP AT CLEAR TIME, never only the recorded list — what a kept process forked since the record, the rows
+      // past the record's bound and what left the group carrying the job's mark (a fresh /proc scan of src/proc-identity.js);
+      // the group only while a recorded process of it lives (its id is then still that group's — never a recycled leader's)
+      const st = this._ctlJson(job, run, 'pid.json');
+      const scan = () => {
+        if (!st || st.bootId !== PI.bootIdOf()) return [];
+        const anchored = recorded.some((id) => PI.aliveIdentity(id) === true);
+        return PI.membersOf({ pgid: anchored ? st.pid : 0, since: Number(st.starttime) || 0, mark: `VIBESPACE_JOB_ID=${job.id}` });
+      };
+      term(recorded); term(scan());
+      let live = [...sent.values()];
       while (live.length && now() < until) { await pause(50); live = live.filter((id) => PI.aliveIdentity(id) === true); }
+      const late = scan().filter((id) => !sent.has(id.pid)); // forked during the grace: by force with the rest
+      for (const id of late) sent.set(id.pid, id);
+      live.push(...late.filter((id) => PI.aliveIdentity(id) === true));
+      n = sent.size;
       if (live.length) { force = true; for (const id of live) PI.signalIdentity(id, 'SIGKILL'); }
     }
     l.cleared = now(); this._dirty = true;
     if (!n) return;
-    const what = `stopped what its last run left running (${n} process${n === 1 ? '' : 'es'})${force ? ` — by force, ${grace / 1000} s after its SIGTERM` : ''}`;
+    const how = !force ? '' : blind && !sent.size ? ` — by force: its scope did not answer a read in ${grace / 1000} s, so no SIGTERM could reach it` : blind ? ` — by force, ${grace / 1000} s after its SIGTERM (sent to what it recorded: its scope did not answer a read)` : ` — by force, ${grace / 1000} s after its SIGTERM`;
+    const what = `stopped what its last run left running (${n} process${n === 1 ? '' : 'es'})${how}`;
     this.d.log(`[jobs] ${job.id} ${what}`);
     this._touch(job, { what });
   }
   /** NEVER A RUN BESIDE ITS PREDECESSOR (round 5): a service's next run — the boot replay, the restart policy, the owner's start
-   *  — starts once what its last run left is gone: what it KEPT (stopped) and a dead wrapper's scope (reaped) — awaited,
-   *  bounded by the grace (past it the run starts anyway, said); with nothing to wait for it starts at once */
+   *  (round 6: EVERY start of a service) — starts once what its last run left is gone: what it KEPT (stopped) and a scope its
+   *  wrapper did not see empty (reaped) — awaited, bounded by the grace (past it the run starts anyway, said). With nothing
+   *  pending (_pending: nothing kept, its scope measured empty in exit.json or already reaped) it starts at once, in the
+   *  caller's own tick; with something pending it starts after at least one bounded read (async — on the cgroup rung a dead
+   *  wrapper's scope is always read first) */
   _startAfter(job, trigger, should) {
+    if (job._starting) return job._starting;
     const run = job.runs && job.runs[job.runs.length - 1];
     const go = () => { if (should() && this.jobs.get(job.id) === job) this._spawn(job, trigger); };
-    if (!run || !run.endedAt || !(this._runScope(job, run) || (run.left && run.left.kept && !run.left.cleared))) { go(); return Promise.resolve(); }
-    if (job._starting) return job._starting;
+    if (!this._pending(job, run)) { go(); return Promise.resolve(); }
     const p = job._starting = this._clearBefore(job, run).then(() => { delete job._starting; try { go(); } catch (e) { this.d.log(`[jobs] ${trigger} start of ${job.id} refused:`, e.message); } });
     return p;
+  }
+  /** what a service's next start waits for (round 6): processes its last run KEPT and not yet stopped; a reap of its scope in
+   *  flight or deferred; a scope its wrapper did not measure empty (no exit.json `scopeEmpty` — a wrapper that died) */
+  _pending(job, run) {
+    if (!run || !run.endedAt) return false;
+    if (run.left && run.left.kept && !run.left.cleared) return true;
+    if (!this._runScope(job, run)) return false; // no scope: nothing of it to reap (a pod's rung starts at once)
+    if (this._reapLater.has(run) || (this._reaping && this._reaping.has(run))) return true;
+    if (this._reaped && this._reaped.has(run)) return false;
+    const exit = this._readExit(job, run);
+    return !(exit && exit.scopeEmpty === true);
   }
   async _clearBefore(job, run) {
     await this._clearKept(job, run);
     const until = now() + this._graceMs();
-    while (!(await this._reapScope(job, run))) {
-      if (now() < until) continue;
-      const what = `its last run's scope did not answer in ${this._graceMs() / 1000} s — its next run starts anyway`;
-      this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
-      return;
+    while (!(await this._reapScope(job, run))) { // round 6: a reap that does not finish here stays enqueued — a later tick reaps it
+      if (now() >= until) {
+        const what = `its last run's scope did not answer in ${this._graceMs() / 1000} s — its next run starts anyway (the reap is retried)`;
+        this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
+        return;
+      }
+      await pause(50);
     }
   }
 
@@ -1149,6 +1238,8 @@ class JobManager {
     job.state = 'starting';
     delete job.ack; // a NEW run is a new claim on the user's attention (triage §13)
     delete job._stopRequested; delete job._termAt; delete job._stopForce; delete job._forced; // round 5: a stop said to an ENDED run never stops the next
+    for (const t of job._killSteps || []) clearTimeout(t); // round 6: …nor does its kill timer — a new run disarms every timer of the last
+    delete job._killSteps;
     job.runs = job.runs || [];
     // THE MEMORY BOUND (lane jobs-memory-bound): THE LADDER's answer for THIS run (src/job-model.js memoryMbOf) rides the spec;
     // the wrapper measures the rung that enforces it and says so (bound.json while it runs, exit.json `memory` at its end)
@@ -1350,8 +1441,9 @@ class JobManager {
         const run = job.runs && job.runs[job.runs.length - 1];
         const exit = this._readExit(job, run);
         // round 4: its wrapper is gone — what is left in its scope is an ended run's (a service's KEPT processes excepted —
-        // round 5, the ruling: its replay stops them first); round 5: a service's replay AWAITS this reap (_startAfter)
-        if (!(exit && exit.left && exit.left.kept)) this._reapScope(job, run).catch(() => { });
+        // round 5, the ruling: its replay stops them first); round 5: a service's replay AWAITS this reap (_startAfter); round
+        // 6: a reap past its read's bound is never dropped — it enqueues itself and every tick retries it (_reapScope)
+        if (!(exit && (exit.scopeEmpty === true || (exit.left && exit.left.kept)))) this._reapScope(job, run).catch(() => { });
         if (exit) { this._finalizeRun(job, run, exit, 'boot'); continue; }
         if (stamp && !stamp.bootId) { job.state = 'unverified'; this._touch(job, { what: 'unverified after restart — resolve in the panel' }); continue; }
         // no live process, no exit record ⇒ died with the environment
@@ -1536,9 +1628,13 @@ class JobManager {
     if (left) run.left = left;
     const endWords = left ? M.leftWords(left) : forced;
     if (endWords) { this.d.log(`[jobs] ${job.id} ${endWords}`); if (job.kind === 'service') this._touch(job, { what: endWords }); } // a task says it in its end line below
-    const memCause = mem && M.MEMORY_CAUSES.includes(mem.cause) && !job._stopRequested ? mem.cause : null;
+    // round 6: THE EXIT RECORD'S OWN WORDS WIN — an out-of-memory end it names with no `stop` in it ended the run before the
+    // owner's stop reached it (a stop pressed between exit.json and this judgment erased the OOM and its count)
+    const memNamed = mem && M.MEMORY_CAUSES.includes(mem.cause) ? mem.cause : null;
+    const stopped = !!job._stopRequested && !(memNamed && !exit.stop);
+    const memCause = memNamed && !stopped ? memNamed : null;
     run.cause = proto || (untilHit ? 'ok(until-output)' : memCause
-      || (job._stopRequested ? 'interrupted' : exit.code === 0 ? 'ok' : job._timedOut ? 'timeout' : 'error'));
+      || (stopped ? 'interrupted' : exit.code === 0 ? 'ok' : job._timedOut ? 'timeout' : 'error'));
     if (memCause) this.d.log(`[jobs] ${job.id} ${M.memoryEndWhat(run)} (${mem.how || mem.cause}; ${why})`);
     delete job._stopRequested; delete job._timedOut; delete job._untilHit; delete job._scopeKilled; delete job._termAt; delete job._stopForce; delete job._forced;
     const windowEnd = run.cause === 'update_window';
@@ -1595,10 +1691,12 @@ class JobManager {
   }
 
   // ── sweeps ──────────────────────────────────────────────────────────────
-  // ONE JUDGE PER RUN END (lane jobs-memory-bound, acceptance round 5): a pass may await (a scope's reap) and the 5 s tick has no
-  // say over it — a tick that finds a pass in flight SKIPS it (said once, past three skips) and answers with that pass; round 4's
-  // overlapping passes judged ONE ended run once per tick of a busy threadpool (oomEnds 2: a service parked «out of memory
-  // twice» after a single OOM, two park notices)
+  // ONE JUDGE PER RUN END (lane jobs-memory-bound, acceptance round 5): a pass may await (the reaps it retries) and the 5 s tick
+  // has no say over it — a tick that finds a pass in flight SKIPS it (said once, past three skips) and answers with that pass;
+  // round 4's overlapping passes judged ONE ended run once per tick of a busy threadpool (oomEnds 2: a service parked «out of
+  // memory twice» after a single OOM, two park notices). Round 6: a pass's wall time is ONE bounded read — a run is judged
+  // first and its reap goes on beside it, the deferred reaps are retried AT ONCE (round 5 awaited each scope in series: K
+  // hung scopes held a pass 2K s and every job behind them)
   _sweep() {
     if (this._sweepRun) {
       if (++this._sweepSkips === 4) this.d.log(`[jobs] the sweep has run ${Math.round((now() - this._sweepAt) / 1000)} s — its ticks skip until it ends`);
@@ -1626,25 +1724,24 @@ class JobManager {
       // Round 5: honored AS the stop — its SIGTERM first, the kill step a grace later (a forced stop: at once); a stop whose
       // SIGTERM landed keeps its own clock — the tick killed a graceful job 0–5 s after the stop and the end said «in 10 s»
       if (stamp && job._stopRequested && this._verifyAlive(stamp)) {
-        if (job._stopForce) this._escalate(job, this._runScope(job, run)); // round 4: on the cgroup rung, the scope
+        if (job._stopForce) this._escalate(job, this._runScope(job, run), undefined, run); // round 4: on the cgroup rung, the scope
         else if (!job._termAt) { if (this._killGroup(job, 'SIGTERM')) job._termAt = now(); }
-        else { const scope = this._runScope(job, run); if (now() - job._termAt >= this._killStepMs(scope)) this._escalate(job, scope, this._graceWords()); }
+        else { const scope = this._runScope(job, run); if (now() - job._termAt >= this._killStepMs(scope)) this._escalate(job, scope, this._graceWords(), run); }
       }
       if (stamp && !this._verifyAlive(stamp)) {
         const exit = this._readExit(job, run) || { code: null, endedAt: now() };
         // round 4: a wrapper gone, its scope not — never an ended run still running (a service's KEPT processes excepted —
-        // round 5, the ruling). Round 5: the reap's read is BOUNDED — past REAP_READ_MS the run is judged from its exit record
-        // now and the reap retried by a later tick
-        if (!(exit.left && exit.left.kept) && !(await this._reapScope(job, run))) this._reapLater.set(run, job);
+        // round 5, the ruling). Round 6: the run is judged from its exit record NOW and its reap goes on beside it (bounded; one
+        // that does not finish enqueues itself — _reapScope); a restart waits for it (_startAfter)
+        if (!(exit.scopeEmpty === true || (exit.left && exit.left.kept))) this._reapScope(job, run).catch(() => { }); // measured empty: nothing to reap
         this._finalizeRun(job, run, exit, 'sweep');
         continue;
       }
       if (stamp) this._listenRead(job, stamp); // lane artifacts-services: the port it serves (async, ≤ 1 read / job / 30 s)
       // timeout
-      if (job.kind === 'task' && job.timeoutMs && run && !run.endedAt && now() - run.startedAt > job.timeoutMs) {
+      if (job.kind === 'task' && job.timeoutMs && run && !run.endedAt && !job._timedOut && now() - run.startedAt > job.timeoutMs) {
         job._timedOut = true; this._killGroup(job, 'SIGTERM');
-        const scope = this._runScope(job, run);
-        const t = setTimeout(() => this._escalate(job, scope, this._graceWords()), this._killStepMs(scope)); t.unref?.();
+        this._armKillStep(job, run, this._runScope(job, run)); // round 6: once per run, bound to it
       }
       // untilOutput: incremental literal scan, bounded per tick
       if (job.kind === 'task' && job.untilOutput && run && !job._untilHit) this._untilScan(job, run);
@@ -1660,8 +1757,16 @@ class JobManager {
         this._touch(job, { what: 'interaction panel expired unanswered', verb: 'answers' });
       }
     }
-    // the reaps a busy threadpool deferred (round 5): their runs were judged; what their scopes still hold never runs on
-    for (const [r, j] of this._reapLater) if (await this._reapScope(j, r)) this._reapLater.delete(r);
+    // the reaps that did not finish (round 6: the boot's, the sweep's, a start's): their runs were judged; what their scopes still
+    // hold never runs on — retried at once (a pass waits ONE bounded read), REAP_TRIES times, then said once and dropped
+    await Promise.allSettled([...this._reapLater].map(async ([r, e]) => {
+      if (await this._reapScope(e.job, r)) return;
+      const tries = this.d.reapTries || REAP_TRIES; // a suite's seam
+      if (++e.tries < tries || this._reapLater.get(r) !== e) return;
+      this._reapLater.delete(r);
+      const scope = this._runScope(e.job, r), what = `its wrapper was gone and its scope did not answer in ${tries} tries — not reaped: systemctl --user kill --signal=KILL ${scope ? scope.unit : '(its scope)'}`;
+      this.d.log(`[jobs] ${e.job.id} ${what}`); this._touch(e.job, { what });
+    }));
     this._serviceDoor();
   }
   // ── SERVICES (lane artifacts-services): a job that LISTENS is a deliverable of its owner conversation ──
@@ -1710,8 +1815,9 @@ class JobManager {
         job._untilHit = true;
         this._event(job, 'until-marker hit — completing after grace');
         const grace = Number(process.env.VIBESPACE_JOBS_GRACE_MS) || 30_000; // env knob: tests shrink the until-grace
-        const t = setTimeout(() => { this._killGroup(job, 'SIGTERM'); const scope = this._runScope(job, run); const t2 = setTimeout(() => this._escalate(job, scope, this._graceWords()), this._killStepMs(scope)); t2.unref?.(); }, grace);
-        t.unref?.();
+        const steps = job._killSteps || (job._killSteps = new Set()); // round 6: bound to ITS run — a new run disarms it (_spawn)
+        const t = setTimeout(() => { steps.delete(t); if (!this._runLive(job, run)) return; this._killGroup(job, 'SIGTERM'); this._armKillStep(job, run, this._runScope(job, run)); }, grace);
+        t.unref?.(); steps.add(t);
       }
     } catch { }
   }
@@ -1868,10 +1974,11 @@ class JobManager {
     if (job.kind === 'service') this._teardownPublish(job);
     const run = job.runs && job.runs[job.runs.length - 1];
     const scope = run && !run.endedAt ? this._runScope(job, run) : null; // round 4: the cgroup rung's group is its scope
-    const hadProc = force && scope ? this._escalate(job, scope) : this._killGroup(job, force ? 'SIGKILL' : 'SIGTERM');
+    const hadProc = force && scope ? this._escalate(job, scope, undefined, run) : this._killGroup(job, force ? 'SIGKILL' : 'SIGTERM');
     if (force) job._stopForce = true; else if (hadProc) job._termAt = now(); // round 5: the stop's own clock (the sweep keeps it)
-    // the kill step, a grace on — the scope's too when its wrapper is gone (the sweep reaps such a scope first)
-    if ((hadProc || scope) && !force) { const t = setTimeout(() => this._escalate(job, scope, this._graceWords()), this._killStepMs(scope)); t.unref?.(); }
+    // the kill step, a grace on — the scope's too when its wrapper is gone (the sweep reaps such a scope first); round 6: bound
+    // to THIS run — it never reaches a run started again inside the grace
+    if ((hadProc || scope) && !force && this._runLive(job, run)) this._armKillStep(job, run, scope);
     // round 5 (the ruling): a service whose last run ENDED keeping what it left — its stop stops them, said
     if (run && run.endedAt) this._clearKept(job, run).catch(() => { });
     if (!hadProc && job.kind === 'cron') { job.state = 'down'; }
@@ -1892,14 +1999,14 @@ class JobManager {
     // a refusal names the job by ID (lane-redact verify r7): the panel toasts it and the device's toast history (the For-you
     // Notifications tab) keeps every toast — `<name> is already running` outlived the job's "Clear content…" there
     if (['up', 'starting'].includes(job.state)) return { error: `${job.id} is already running` }; // a live process is never re-judged into 'failed'
-    // round 5: a service's run never starts beside what its last run KEPT — they are stopped first (awaited), then it runs
-    const prev = job.runs && job.runs[job.runs.length - 1];
-    if (job.kind === 'service' && prev && prev.left && prev.left.kept && !prev.left.cleared) {
+    // round 5: a service's run never starts beside what its last run left — round 6: EVERY start of a service goes through
+    // _startAfter (it starts at once when nothing is pending; a deferred reap, a kept process, a scope never seen empty is awaited)
+    if (job.kind === 'service') {
       const vet = M.vetSpec(job);
       if (!vet.ok) { this._refuseRun(job, vet, 'manual'); return { error: vet.error }; }
-      this._startAfter(job, 'manual', () => job.desiredUp && !['up', 'starting'].includes(job.state));
+      try { this._startAfter(job, 'manual', () => job.desiredUp && !['up', 'starting'].includes(job.state)); } catch (e) { return { error: e.message }; }
       this._save();
-      return { ok: true, after: 'what its last run left running is stopped first' };
+      return ['up', 'starting'].includes(job.state) ? { ok: true } : { ok: true, after: 'what its last run left running is stopped first' };
     }
     try { this._spawn(job, 'manual'); } catch (e) { return { error: e.message }; } // B-f8c7: the run-time vet's refusal is an answer
     this._save();
@@ -2024,7 +2131,7 @@ class JobManager {
       ...(() => { const m = M.memoryMbOf(job.kind === 'cron' && job.action && job.action.task ? job.action.task : job, this._memoryCtx()); return { memoryMb: m.mb, memoryAskedMb: m.askedMb !== undefined ? m.askedMb : m.mb, memorySource: m.source, memoryCap: m.cap || null }; })(), // round 4: the NEXT run's (a live run's own rides its memoryBound.cap)
       memoryBound: run && run.memoryBound ? { ...run.memoryBound, words: M.boundWords(run.memoryBound) } : null, oomEnds: (job.supervise && job.supervise.oomEnds) || 0, // round 5: the record's words (an unbounded scope is never «0 MB»)
       parkedFor: (job.supervise && job.supervise.parkedAt && job.supervise.parkedFor) || null,
-      run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '', ...(run.left ? { left: { n: run.left.n, kept: !!run.left.kept, force: !!run.left.force, cleared: !!run.left.cleared } } : {}), ...(M.runEndWords(run) ? { endWords: M.runEndWords(run) } : {}) } : null, // round 5: what it left running / the kill we made
+      run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '', ...(run.left ? { left: { n: run.left.n, kept: !!run.left.kept, force: !!run.left.force, cleared: run.left.cleared || 0, escaped: run.left.escaped || 0 } } : {}), ...(M.runEndWords(run) ? { endWords: M.runEndWords(run) } : {}) } : null, // round 5: what it left running / the kill we made
       runsCount: (job.runs || []).length,
       // triage (§13): the server computes the acknowledgement over the FULL
       // record (the journal above is truncated to 8) — clients read, never derive

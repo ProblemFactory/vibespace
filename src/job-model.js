@@ -278,22 +278,37 @@ function boundWords(b) {
   return `held by ${b.by === 'cgroup' ? 'a cgroup' : 'RLIMIT_DATA'} at ${memoryWords(b.mb)}`;
 }
 /** WHAT A RUN'S JOB LEFT RUNNING (round 5 — the ruling of 2026-10-27: a job's scope IS the job): the wrapper's count at the job's
- *  own end — a task's were stopped (SIGTERM; by force past the grace); a service's KEPT, its own while it runs (on a rung
- *  without a scope named by identity — pid, starttime, boot — for the engine to stop). exit.json's `left`, sanitized; null = none */
+ *  own end — a task's were stopped (SIGTERM; by force past the grace); a service's KEPT, its own while it runs, named by
+ *  identity (pid, starttime, boot) for the engine to stop. Round 6: `escaped` — processes that LEFT the job's group (setsid)
+ *  on a rung without a scope, found by the job's mark in their environ: a task's are said, not stopped (a service keeps them
+ *  with the rest); `recorded` — how many of `n` the record names when they were more than its bound (64); `cleared` — when
+ *  they were stopped (a service STOPPED on a rung without a scope: its wrapper stops what it kept with it). exit.json's
+ *  `left`, sanitized; null = none */
 function leftRecord(l) {
-  if (!l || typeof l !== 'object' || !Number.isInteger(l.n) || l.n < 1) return null;
+  if (!l || typeof l !== 'object' || !Number.isInteger(l.n) || l.n < 0) return null;
+  const escaped = Number.isInteger(l.escaped) && l.escaped > 0 ? Math.min(l.escaped, 9999) : 0;
+  if (l.n < 1 && !escaped) return null;
   const pids = l.kept && Array.isArray(l.pids) ? l.pids.filter((p) => Array.isArray(p) && Number.isInteger(p[0]) && p[0] > 1 && Number.isFinite(p[1])).slice(0, 64).map((p) => [p[0], p[1]]) : [];
-  return { n: Math.min(l.n, 9999), ...(l.kept ? { kept: true } : l.force ? { force: true } : {}), ...(pids.length ? { pids, boot: typeof l.boot === 'string' ? clip(l.boot, 64) : '' } : {}) };
+  const n = Math.min(l.n, 9999), recorded = pids.length && Number.isInteger(l.recorded) && l.recorded < n ? l.recorded : 0;
+  const cleared = l.kept && Number.isFinite(l.cleared) && l.cleared > 0 ? l.cleared : 0;
+  return { n, ...(l.kept ? { kept: true } : l.force ? { force: true } : {}), ...(escaped ? { escaped } : {}), ...(pids.length ? { pids, boot: typeof l.boot === 'string' ? clip(l.boot, 64) : '' } : {}), ...(recorded ? { recorded } : {}), ...(cleared ? { cleared } : {}) };
 }
 /** «the job left 1 process running — it was stopped; to keep a daemon, run it as a service job» · «… stopped by force …» ·
- *  «it left 1 process running — kept: a service's own until it is stopped or started again» (data/bin/job-wrapper.js says
- *  the same in the job's log — a suite pins the twins equal) */
+ *  «it left 1 process running — kept: a service's own until it is stopped or started again» · round 6: «1 process left its
+ *  group — not stopped; run it as a service job» (a task's setsid escapee) · «… (64 of 70 recorded)» · once the engine stopped
+ *  what a service kept (`cleared`, its instant): «it left 1 process running — stopped at 14:05» (the hub's clock).
+ *  data/bin/job-wrapper.js says the same in the job's log — a suite pins the twins equal */
 function leftWords(l) {
-  const n = l.n, many = n !== 1;
-  if (l.kept) return `it left ${n} process${many ? 'es' : ''} running — kept: a service's own until it is stopped or started again`;
-  return `the job left ${n} process${many ? 'es' : ''} running — ${many ? 'they were' : 'it was'} stopped${l.force ? ' by force' : ''}; to keep a daemon, run it as a service job`;
+  const n = l.n || 0, es = (k) => (k === 1 ? '' : 'es');
+  const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  if (l.cleared) return `it left ${n} process${es(n)} running — stopped at ${hhmm(l.cleared)}`;
+  if (l.kept) return `it left ${n} process${es(n)} running — kept: a service's own until it is stopped or started again${l.escaped ? ` (${l.escaped} outside its group)` : ''}${l.recorded ? ` (${l.recorded} of ${n} recorded)` : ''}`;
+  const esc = l.escaped ? `${l.escaped} process${es(l.escaped)} left its group — not stopped` : '';
+  if (!n) return `${esc}; run it as a service job`;
+  return `the job left ${n} process${es(n)} running — ${n === 1 ? 'it was' : 'they were'} stopped${l.force ? ' by force' : ''}${esc ? `; ${esc}; run it as a service job` : '; to keep a daemon, run it as a service job'}`;
 }
-/** what a run's end says beyond its cause (the journal, `show` / `poll`): what its job left, else a kill we made */
+/** what a run's end says beyond its cause (the journal, `show` / `poll`): what its job left (round 6: and when the engine
+ *  stopped what it kept), else a kill we made */
 function runEndWords(run) { return run && run.left ? leftWords(run.left) : (run && typeof run.forced === 'string' && run.forced) || ''; }
 /** the NAMED end the journal says (the card words the same through its own t()) */
 function memoryEndWhat(run) {
