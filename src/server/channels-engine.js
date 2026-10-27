@@ -3918,8 +3918,8 @@ function create(deps = {}) {
       // R4: the ACCOUNT grain's two lists (`accountGrain`; `assignment` = the
       // same view, the pre-split name a legacy reader asks for) and every
       // rule with its own two lists
-      accountGrain: accountGrainOf(rec.id) && (F.grainOf(accountGrainOf(rec.id)).access.length || F.grainOf(accountGrainOf(rec.id)).watchers.length) ? grainView(rec, accountGrainOf(rec.id), t) : null,
-      assignment: accountGrainOf(rec.id) && (F.grainOf(accountGrainOf(rec.id)).access.length || F.grainOf(accountGrainOf(rec.id)).watchers.length) ? grainView(rec, accountGrainOf(rec.id), t) : null,
+      accountGrain: accountGrainOf(rec.id) && (heldRead(accountGrainOf(rec.id)).access.length || heldRead(accountGrainOf(rec.id)).watchers.length) ? grainView(rec, accountGrainOf(rec.id), t) : null,   // r5: the one reader
+      assignment: accountGrainOf(rec.id) && (heldRead(accountGrainOf(rec.id)).access.length || heldRead(accountGrainOf(rec.id)).watchers.length) ? grainView(rec, accountGrainOf(rec.id), t) : null,
       patterns: patternsOf(rec.id).map((pa) => grainView(rec, pa, t)),
       // R4 (B-6acc): the ACCOUNT's sending policy (what a composed message reads, the Grant access dialog's `send` cap)
       policy: policyFor(rec, null),
@@ -8230,7 +8230,7 @@ function create(deps = {}) {
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, resurfacePointers, openAccessPointers,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, grainReadAt, heldRead, resurfacePointers, openAccessPointers,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
@@ -8579,7 +8579,7 @@ function create(deps = {}) {
       const holder = source === 'account' ? accountGrainOf(rec.id) : patternById(patternId);
       const results = [];
       // an ALL-AGENTS watcher is flushed per running conversation (its fan-out keys — each its own window and ledger)
-      for (const w of holder ? F.grainOf(holder).watchers : []) {
+      for (const w of holder ? heldRead(holder).watchers : []) {   // r5: the one reader (the account's access included)
         const pks = w.principal.kind === 'everyone' ? fanTargets().map((x) => pkOf(F.fanWatcher(w, x.cid).principal)) : [pkOf(w.principal)];
         for (const k of pks) results.push(await flushScope(rec, source, patternId || null, k, {}));
       }
@@ -8648,6 +8648,7 @@ function create(deps = {}) {
     setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
     expireWatchRequests, reconcileAsks,   // lane wake-approve-card r3: a wake ask's lifetime + the asks' boot reconcile (suites drive them)
     wakeHeldAt,   // lane wake-approve-card r4: does this grain hold a wake? (the routes ask it before EVERY grain write — wakeRefused)
+    grainReadAt,   // r5: THE one reader of a grain (the access above it included; every stored row, active or inert) — «held» reads it
     resurfacePointers, openAccessPointers,   // r4: the 2026-10-closed-access-pointers-hidden migration (src/server/migrations.js) goes through these
     agentWatch, agentUnwatch, agentWatchesFor, setAgentDirectory, directoryLists,   // lane channel-agent-watch
     attention, setJudge, labelJudged,   // lane decision-attention: the judged rows' scan, the account's "never judge", a label

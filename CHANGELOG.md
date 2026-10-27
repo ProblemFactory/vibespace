@@ -20,9 +20,14 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Approve or Deny on a wake request after its 7 days says when it expired and that the agent can ask again, instead of an error.
 - Access requests closed with Mark done before this update come back to For you while they are still open.
 - An agent's request for a stored secret ends only with Allow once, For 8 hours or Deny, and says «allowed by you for 8 h · 09:41».
+- Editing a rule that notifies an agent through the account's access no longer deletes that notification.
+- A rule digest for an agent with access through the account now arrives instead of waiting for ever.
+- A stored-secret request answered before this update reads «allowed», as it never recorded Allow once or For 8 hours.
 
 ### Security
 - With sign-in off, an agent could widen a wake you approved by editing its rule or filter; changing what a wake reacts to now takes your click.
+- With sign-in off, an agent could turn a wake back on or edit a rule that wakes it through the account; that now takes your click.
+- With sign-in off, a script or an automation key could re-enable a webhook path that wakes an agent or add a caller; that now takes your click.
 
 ## 2.369.360 — 2026-10-27
 

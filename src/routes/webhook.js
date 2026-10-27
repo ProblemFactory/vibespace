@@ -34,6 +34,7 @@ const WH = require('../channels/webhook.js');
 const WP = require('../webhook-pair.js');
 const EF = require('../egress-fence.js');
 const { bearerOf } = require('../channels/index.js');
+const { wakeRefused } = require('./channels.js');   // lane wake-approve-card r5: THE wake gate (one gate, never a local copy)
 
 const router = express.Router();
 const ADAPTER_ID = WH.kind;
@@ -244,6 +245,14 @@ router.post('/api/channels/webhook/:slug/pair', async (req, res) => {
 // ── THE OWNER'S VERBS (cookie routes; an agent's bearer is refused by name first) ─────────────────────────────────────
 const OWNERS = 'a webhook path and its callers are the owner\'s — an agent token may not read or change them (propose with vibespace-ask)';
 function owner(req, res) { if (!isAgentBearer(req)) return true; res.status(403).json({ ok: false, code: 'agent-forbidden', error: OWNERS }); return false; }
+/** lane wake-approve-card r5 (主开发: «a webhook path that holds a wake is a wake grain»): THE PATH a verb writes, off its URL
+ *  (`slug` = the path a verb names past its URL — the join's, read from the code; null = a path not made yet). Its options
+ *  (disabled, ipAllow, the per-path wake budget) and its callers decide which events its conversation gets, and its
+ *  facts (title, participants, kind) are what a rule matches — the engine's `wakeHeldAt` says whether a wake reaches it
+ *  (its conversation, the account, any rule of the account); held ⇒ THE person verdict (src/routes/channels.js wakeRefused —
+ *  `owner()` alone let a bare curl on a sign-in-off instance, or an automation key, re-enable a held path). */
+const pathGrain = (req, slug = req.params.slug) => ({ adapterId: ADAPTER_ID, grain: { kind: 'path', convId: slug ? String(slug) : null } });
+const pathRefused = (req, res, slug) => wakeRefused(req, res, slug === undefined ? pathGrain(req) : pathGrain(req, slug), [], engine);
 const json = express.json({ limit: '64kb' });
 const bad = (res, status, error, code = 'bad-request') => res.status(status).json({ ok: false, code, error });
 function pathOptions(b, prev = {}) {
@@ -276,6 +285,7 @@ const pathView = (st, slug) => ({ ...st.path(slug), options: optionsOf(slug), ca
 router.get('/api/channels/webhook/paths', (req, res) => { if (!owner(req, res)) return; const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable'); res.set('Cache-Control', 'no-store').json({ ok: true, paths: st.paths().map((s) => pathView(st, s)) }); });
 router.post('/api/channels/webhook/paths', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pathRefused(req, res)) return;   // r5: a NEW path's events reach the account's wake / a rule's (no slug yet: the grains above it)
   try {
     const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable');
     const b = req.body || {}; const slug = String(b.slug || '');
@@ -290,6 +300,7 @@ router.post('/api/channels/webhook/paths', json, async (req, res) => {
 });
 router.put('/api/channels/webhook/paths/:slug', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pathRefused(req, res)) return;   // r5: disabled / ipAllow / wakesPerHour / title — what a held wake fires on
   try {
     const st = store(); const slug = String(req.params.slug || '');
     if (!st || !st.path(slug)) return bad(res, 404, `no path ${slug.slice(0, 64)}`, 'not-found');
@@ -316,6 +327,7 @@ router.post('/api/channels/webhook/paths/:slug/send', json, async (req, res) => 
 /** REGISTER — mint → atomic write → the token in THIS answer and nowhere else (a failed write answers 500, no token). */
 router.post('/api/channels/webhook/paths/:slug/callers', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pathRefused(req, res)) return;   // r5: a new caller = new events a held wake fires on
   try {
     const st = store(); const slug = String(req.params.slug || '');
     if (!st || !st.path(slug)) return bad(res, 404, `no path ${slug.slice(0, 64)}`, 'not-found');
@@ -328,6 +340,7 @@ router.post('/api/channels/webhook/paths/:slug/callers', json, async (req, res) 
 });
 router.post('/api/channels/webhook/paths/:slug/callers/:id/:verb', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pathRefused(req, res)) return;   // r5: rotate / revoke / delivery — who may post the events a held wake fires on
   try {
     const st = store(); const slug = String(req.params.slug || ''); const id = String(req.params.id || '');
     if (!st || !st.path(slug)) return bad(res, 404, `no path ${slug.slice(0, 64)}`, 'not-found');
@@ -348,6 +361,7 @@ router.post('/api/channels/webhook/paths/:slug/callers/:id/:verb', json, async (
  *  minutes keeps it valid (lane webhook-pair-join). */
 router.post('/api/channels/webhook/paths/:slug/pair-code', json, (req, res) => {
   if (!owner(req, res)) return;
+  if (pathRefused(req, res)) return;   // r5: the code IS the authority of the completion (/:slug/pair) that writes a caller
   try {
     const st = store(); const slug = String(req.params.slug || '');
     if (!st || !st.path(slug)) return bad(res, 404, `no path ${slug.slice(0, 64)}`, 'not-found');
@@ -401,6 +415,7 @@ router.post('/api/channels/webhook/join', json, async (req, res) => {
     const had = st.path(slug);
     const existing = had ? st.callersRaw(slug).find((c) => c.kind === 'peer' && !c.revokedAt && c.delivery && c.delivery.replyUrl === av.url) : null;
     if (b.check === true) return res.set('Cache-Control', 'no-store').json({ ok: true, check: true, from: cv.name, host: new URL(av.url).host, theirPath: av.slug, slug, exists: !!had, repair: !!existing, expiresAt: cv.exp });
+    if (pathRefused(req, res, slug)) return;   // r5: the path this join makes or re-pairs (its slug read from the code) — a peer's events reach its wakes
     const myId = existing ? existing.id : had ? st.freshId(slug) : `c-${crypto.randomBytes(4).toString('hex')}`;
     const token = PT.mintToken('webhook');
     const body = WP.frameOf({ nonce: cv.nonce, hookUrl: mine.url, caller: myId, token, name: b.name || (had ? had.replyName : WH.REPLY_NAME_DEFAULT) });

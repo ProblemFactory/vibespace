@@ -690,9 +690,9 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   const i3id = reqsOf()[0] && reqsOf()[0].id;
   const g3 = w.door.answerRequest(q3.askId, { answer: '8h', reauthed: true, person: true });
   const i3 = w.userTodos.get(i3id), st3 = FA.decidedStamp ? FA.decidedStamp(i3) : null;
-  ok(i3 && i3.resolvedBy === 'granted' && st3 && /^allowed by you for 8 h · (\d+\/\d+ )?\d\d:\d\d$/.test(st3.text) && FA.decisionCard(i3).state === 'approved', 'r4: For 8 hours ⇒ «allowed by you for 8 h · HH:MM» (the card\'s state approved)', { by: i3 && i3.resolvedBy, stamp: st3 && st3.text });
+  ok(i3 && i3.resolvedBy === 'granted-8h' && st3 && /^allowed by you for 8 h · (\d+\/\d+ )?\d\d:\d\d$/.test(st3.text) && FA.decisionCard(i3).state === 'approved', 'r4: For 8 hours ⇒ «allowed by you for 8 h · HH:MM» (the card\'s state approved) — r5: the record `granted-8h` carries the duration (`granted` was both verbs\' before .360)', { by: i3 && i3.resolvedBy, stamp: st3 && st3.text });
   const ra = await w.door.run({ caller, args: ENV('env'), cwd: w.work }), rb = await w.door.run({ caller, args: ENV('env'), cwd: w.work });
-  ok(g3.outcome === 'granted' && ra.ok && rb.ok && w.door._grants.size === 1 && [...w.door._grants.values()][0].until - Date.now() <= DOOR.GRANT_MS, 'For 8 hours ⇒ every run of the conversation (the seen shape without a card on a local instance), the grant stays — ≤ 8 hours', [ra.code, rb.code]);
+  ok(g3.outcome === 'granted-8h' && ra.ok && rb.ok && w.door._grants.size === 1 && [...w.door._grants.values()][0].until - Date.now() <= DOOR.GRANT_MS, 'For 8 hours ⇒ every run of the conversation (the seen shape without a card on a local instance), the grant stays — ≤ 8 hours', [ra.code, rb.code]);
   ok(w.door.request({ caller, entry: M1, purpose: 'x' }).already === 'granted' && w.door.runnableFor(caller).entries.some((e) => e.ref === M1 && e.by === 'grant') && !w.door.runnableFor(other).entries.length, 'a request for an entry already granted answers so (nothing filed); `list` names it to THAT conversation alone');
   openRow(w); w.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });
   ok(!w.door._grants.size, 'switching the entry OFF ends its grants too (OFF = closed for every conversation)');

@@ -450,14 +450,15 @@ const accountGrain = (req) => ({ adapterId: req.params.id, grain: { kind: 'accou
 const ruleGrain = (req) => ({ adapterId: req.params.id, grain: { kind: 'pattern', id: req.params.pid || null } });
 const convGrain = (req) => ({ adapterId: req.params.adapterId, grain: { kind: 'conversation', convId: req.params.convId } });
 /** Does the grain `at` hold a wake now (THE engine's mark)? An engine that cannot say ⇒ it does (fail closed: the person verdict). */
-function wakeHeld(at) {
-  try { const e = engine(); return typeof e.wakeHeldAt !== 'function' || !!(e.wakeHeldAt(at.adapterId, at.grain) || {}).held; } catch { return true; }
+function wakeHeld(at, eng = engine) {
+  try { const e = eng(); return typeof e.wakeHeldAt !== 'function' || !!(e.wakeHeldAt(at.adapterId, at.grain) || {}).held; } catch { return true; }
 }
 /** → true when it answered (403, by name): the grain `at` HOLDS a wake or `rows` (the body's) would write one, and the write is
- *  not a person's on this page. Every grain-writing route asks it first, whatever its body says. */
-function wakeRefused(req, res, at, rows = []) {
+ *  not a person's on this page. Every grain-writing route asks it first, whatever its body says. r5: `eng` = the engine the
+ *  caller holds — src/routes/webhook.js asks THIS gate with its own (one gate, never a local copy). */
+function wakeRefused(req, res, at, rows = [], eng = engine) {
   const writes = wakeRowsOf(rows).length > 0;
-  const held = !writes && wakeHeld(at);
+  const held = !writes && wakeHeld(at, eng);
   if (!writes && !held) return false;
   const who = personVerdict(req);
   if (who.ok) return false;
@@ -1405,4 +1406,4 @@ router.post('/api/channel-groups/:id/:verb', async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
-module.exports = { router, setup };
+module.exports = { router, setup, wakeRefused };   // r5: the webhook path verbs ask the same gate

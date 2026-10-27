@@ -91,7 +91,7 @@ const ROWS = Object.freeze([
   // ── vault ──
   { type: 'automation-ask', identity: 'askId', producer: 'src/server/automation-engine.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-api', 'an automation key\'s first use', 'own'), scope: 'conversation' },
   { type: 'vault-run-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'run', 'wait'), scope: 'conversation', decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over', 'ask-changed', 'vault_locked'], stamp: 'allow' },
-  { type: 'vault-grant-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'request <vault://…>', 'filed'), scope: 'conversation', decide: 'person', ends: ['granted-once', 'granted', 'denied', 'vault_locked', 'ask-changed', 'ask-over'], stamp: 'grant' },   // r4: Allow once / For 8 hours / Deny are its three verbs (+ a lock, a changed card, an ask that is over)
+  { type: 'vault-grant-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'request <vault://…>', 'filed'), scope: 'conversation', decide: 'person', ends: ['granted-once', 'granted-8h', 'denied', 'vault_locked', 'ask-changed', 'ask-over'], stamp: 'grant' },   // r4: Allow once / For 8 hours / Deny are its three verbs (+ a lock, a changed card, an ask that is over); r5: For 8 hours writes `granted-8h` (the duration on the record)
   { type: 'secret-request', identity: 'requestId', producer: 'src/server/vault-paste-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'secret', cli: C('vibespace-vault', 'request "<what>"', 'filed'), scope: 'conversation', decide: 'person', ends: ['stored', 'denied', 'vault_locked', 'ask-over', 'expired'], stamp: 'store' },
   { type: 'vault-unlock', identity: null, producer: 'src/server/vault-hooks.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
   // the audit's two drifts (2026-10-26): a failed use was in no table; a rotate suggestion merged by its text — now by its entry
@@ -268,8 +268,9 @@ function settledWords(item, t = fmt, kind = null) {
   if (by === 'allowed') return k === 'approval' ? t('approved') : t('allowed');
   if (by === 'denied') return t('denied');
   if (by === 'stored') return t('saved to the vault');
-  if (by === 'granted') return t('allowed for 8 hours');   // r4: an agent's request for a stored secret, answered
+  if (by === 'granted-8h') return t('allowed for 8 hours');   // r4: an agent's request for a stored secret, answered — r5: only a record carrying the duration says it
   if (by === 'granted-once') return t('allowed once');
+  if (by === 'granted') return t('allowed');   // r5: a record from before .360 (Allow once and For 8 hours both stored `granted`) says only what was decided
   if (by === 'expired' || by === 'ask-expired') return isDecisionRow(item) ? t('expired · the agent can ask again') : t('expired');   // r2: a decision's end
   if (by === HIDDEN_BY) return t('hidden — nothing was decided');   // r3: a pointer the person hid
   if (by === 'agent') return t('withdrawn by the agent');
@@ -368,7 +369,7 @@ const STAMPS = Object.freeze({
   approve: Object.freeze({ allowed: i18nKey('approved by you'), denied: i18nKey('denied by you') }),
   allow: Object.freeze({ allowed: i18nKey('allowed by you'), always: i18nKey('always allowed by you'), denied: i18nKey('denied by you') }),
   store: Object.freeze({ stored: i18nKey('stored'), denied: i18nKey('refused by you') }),
-  grant: Object.freeze({ 'granted-once': i18nKey('allowed once by you'), granted: i18nKey('allowed by you for 8 h'), denied: i18nKey('denied by you') }),   // r4: vault-grant-ask's three verbs
+  grant: Object.freeze({ 'granted-once': i18nKey('allowed once by you'), 'granted-8h': i18nKey('allowed by you for 8 h'), denied: i18nKey('denied by you') }),   // r4: vault-grant-ask's three verbs (r5: an old `granted` has no stamp — its own words, «allowed»)
 });
 function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
   if (!item || item.status === 'open' || !item.action || !PERSON_DECIDES.includes(item.action.type)) return null;
@@ -395,7 +396,7 @@ function decisionCard(item, { role = VIEWER_ROLE, t = fmt, now = Date.now() } = 
   }
   const st = decidedStamp(it, { t, now });
   const by = it.resolvedBy;
-  const state = by === 'allowed' || by === 'always' || by === 'stored' || by === 'granted' || by === 'granted-once' ? 'approved' : by === 'denied' ? 'denied' : (by === 'expired' || by === 'ask-expired') ? 'expired' : by === 'agent' ? 'withdrawn' : 'settled';
+  const state = by === 'allowed' || by === 'always' || by === 'stored' || by === 'granted' || by === 'granted-8h' || by === 'granted-once' ? 'approved' : by === 'denied' ? 'denied' : (by === 'expired' || by === 'ask-expired') ? 'expired' : by === 'agent' ? 'withdrawn' : 'settled';
   return { state, buttons: [], stamp: st ? st.text : settledWords(it, t), waiting: null };
 }
 

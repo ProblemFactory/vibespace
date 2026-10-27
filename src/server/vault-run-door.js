@@ -617,8 +617,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const t = now(), until = t + GRANT_MS;
     grants.set(q.pair, { conv: q.scope, key: null, entries: [q.id], until, once: a === 'once', at: t, by: said.by, askId: q.askId, purpose: q.purpose });
     audit('vault-grant', { ...said, answer: a, until });
-    settleRequest(q, a === 'once' ? 'granted-once' : 'granted', 'answered', mark());   // r4: the item says which of its verbs (Allow once / For 8 hours)
-    return { ok: true, outcome: a === 'once' ? 'granted-once' : 'granted', until };
+    // r4: the item says which of its verbs; r5 (主开发: «a record says only what was decided»): each verb its OWN value —
+    // `granted-8h` carries the duration (a record from before .360 stored `granted` for BOTH verbs: it reads «allowed»)
+    const end = a === 'once' ? 'granted-once' : 'granted-8h';
+    settleRequest(q, end, 'answered', mark());
+    return { ok: true, outcome: end, until };
   }
   /** lane vault-paste-request: THE PASTE IS THE GRANT — the owner pasted a NEW free entry into For you in answer to THIS
    *  conversation's request (its purpose on the card, src/server/vault-paste-door.js): the conversation may use that one

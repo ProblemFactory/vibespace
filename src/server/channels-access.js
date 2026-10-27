@@ -225,8 +225,42 @@ function create(engineCtx) {
    *  the same way — merged, never a fallback). */
   function convGrainOf(en) {
     if (!en) return { access: [], watchers: [], except: [], watchExcept: [] };
-    const h = overlay({ watchers: en.watchers }, 'conversation', en.key, legacyConvAssignment(en));   // lane grants-unify: the rows, never `en.access`
-    return { ...F.grainOf({ access: h.access, watchers: h.watchers }, null, { inherited: convInheritedOf(en) }), except: h.except, watchExcept: h.watchExcept, grainRes: h.grainRes };
+    const g = readGrainHolder(en.adapterId, 'conversation', en);   // lane wake-approve-card r5: THE one reader (below)
+    return { access: g.access, watchers: g.watchers, except: g.except, watchExcept: g.watchExcept, grainRes: g.grainRes };
+  }
+  /** THE ONE READER OF A GRAIN (lane wake-approve-card, acceptance round 5 — 主开发: «"held" is a fact about what is STORED on
+   *  the grain, read by the ONE reader the engine fires with»): the holder AS STORED (the overlay — its grants-store rows +
+   *  the index holder's settings) through `F.grainAsFired`, with the access above it exactly as the firing path reads it
+   *  (`effectiveFor` → `F.effectiveGrants`): an account with its account-scope grants, a rule with the account's access rows
+   *  + those grants, a conversation with every grain above it. → `{access, watchers (in effect), stored (every row, active
+   *  or inert), inert, holder, except, watchExcept, grainRes}` (null = no holder). «held» (wakeHeldAt), the grain writer
+   *  (setGrain), the dialogs' lists (grainView) and a scope digest's own watcher (storedWatcherFor) read here — never a
+   *  narrower view that drops a row (round 4 read a rule without the account's access: a live wake read «not held», and a
+   *  vsst_ pattern edit deleted it). */
+  function readGrainHolder(adapterId, kind, h) {
+    if (!h) return null;
+    if (kind === 'conversation') {
+      const o = overlay({ watchers: h.watchers }, 'conversation', h.key, legacyConvAssignment(h));   // lane grants-unify: the rows, never `en.access`
+      return { ...F.grainAsFired('conversation', { access: o.access, watchers: o.watchers }, { above: convInheritedOf(h) }), holder: h, except: o.except, watchExcept: o.watchExcept, grainRes: o.grainRes };
+    }
+    const above = { accountKeys: accountGrantKeys(adapterId), ...(kind === 'pattern' ? { account: accountGrainOf(adapterId) } : {}) };
+    return { ...F.grainAsFired(kind, h, above), holder: h, except: h.except || [], watchExcept: h.watchExcept || [], grainRes: h.grainRes };
+  }
+  /** The grain a route / a writer names (`{kind:'conversation', convId} | {kind:'account'} | {kind:'pattern', id}`), read. */
+  function grainReadAt(adapterId, grain) {
+    const kind = grain && grain.kind;
+    if (kind === 'conversation') return readGrainHolder(adapterId, kind, store.index.peek(`${adapterId}/${grain.convId}`));
+    if (kind === 'account') return readGrainHolder(adapterId, kind, accountGrainOf(adapterId));
+    if (kind === 'pattern' && grain.id) { const h = patternById(grain.id); return h && h.adapterId === adapterId ? readGrainHolder(adapterId, kind, h) : null; }
+    return null;
+  }
+  /** An account / rule HOLDER (accountGrainOf / patternById / patternsOf — its overlay names its grants-store resource,
+   *  `account:<id>` / `rule:<id>`) read through the one reader; a conversation's lists already read (convGrainOf) as they stand. */
+  function heldRead(holder) {
+    const m = /^(account|rule):(.+)$/.exec(String((holder && holder.grainRes) || ''));
+    const kind = m ? (m[1] === 'account' ? 'account' : 'pattern') : null;
+    const aid = kind === 'account' ? m[2] : kind ? holder.adapterId : null;
+    return aid ? readGrainHolder(aid, kind, holder) : F.grainOf(holder);
   }
   /** lane channel-agent-watch W3 — ACCESS IS MAX OVER THE GRAIN AND ITS ANCESTORS: the principal keys a VISIBLE grant
    *  names (`grants`; `skipOwn` = leave out the conversation's own access-origin rows, which a write is replacing). */
@@ -326,7 +360,7 @@ function create(engineCtx) {
   /** A grain's stored watcher for key `pk` — a fan-out key (`everyone:*><cid>`) answers the stored All row as that
    *  conversation's watcher while the conversation runs (null when it stopped: nobody waits for its hits). */
   function storedWatcherFor(holder, pk) {
-    const list = holder ? F.grainOf(holder).watchers : [];
+    const list = holder ? heldRead(holder).watchers : [];   // r5: as the wake that found it reads it (the account's access included)
     const fan = F.fanOfKey(pk);
     if (!fan) return list.find((x) => pkOf(x.principal) === pk) || null;
     const root = list.find((x) => pkOf(x.principal) === fan.root);
@@ -433,7 +467,7 @@ function create(engineCtx) {
    *  watcher's (else the first access row's) fields flat beside them — the
    *  pre-split single-assignment shape a legacy reader expects. */
   function grainView(rec, holder, t = now(), { capsNow = null } = {}) {
-    const g = F.grainOf(holder);
+    const g = heldRead(holder);   // r5: the lists a dialog draws = the lists setGrain stamps (the one reader)
     const access = g.access.map((r) => accessRowView(r, capsNow));
     const watchers = g.watchers.map((w) => watcherView(w, t));
     const lead = watchers[0] || null;
@@ -863,7 +897,7 @@ function create(engineCtx) {
       const seesSome = Object.values(store.index.live()).some((en) => en && en.adapterId === rec.id && ACL.canSee(reachFor(ctx, rec, en).level));   // B-f32b: a scan reads live(), never a copy of the index (composed at the 2.369.202 integration)
       return seesSome ? { ok: false, code: 'no-access', error: `you do not have access to the whole account ${rec.id} — watch one conversation you can read (<adapter>/<conversation id>), or ask the user for the account` } : ACL.notFound();
     }
-    return { ok: true, adapterId: rec.id, rec, en: null, key: null, title: rec.label || rec.id, grain: { kind: 'account' }, grainNow: () => F.grainOf(accountGrainOf(rec.id), undefined, { inherited: accountGrantKeys(rec.id) }), raw: () => { const g = accountGrainOf(rec.id) || {}; return { access: g.access || [], watchers: g.watchers || [] }; } };
+    return { ok: true, adapterId: rec.id, rec, en: null, key: null, title: rec.label || rec.id, grain: { kind: 'account' }, grainNow: () => grainReadAt(rec.id, { kind: 'account' }) || { access: [], watchers: [] }, raw: () => { const g = accountGrainOf(rec.id) || {}; return { access: g.access || [], watchers: g.watchers || [] }; } };
   }
   /**
    * W1 — `vibespace-channels watch <conv|account> [--mode next-turn|wake|digest] [rule flags | --spec json]` (lane
@@ -1079,7 +1113,7 @@ function create(engineCtx) {
       const pk = pkOf(req0.principal);
       const en1 = req0.grain && req0.grain.kind === 'conversation' ? store.index.peek(`${req0.adapterId}/${req0.grain.convId}`) : null;
       if (req0.grain && req0.grain.kind === 'conversation' && !en1) return { ok: false, code: 'not-found', error: 'that conversation is gone' };
-      const g = en1 ? convGrainOf(en1) : F.grainOf(accountGrainOf(req0.adapterId), undefined, { inherited: accountGrantKeys(req0.adapterId) });
+      const g = grainReadAt(req0.adapterId, req0.grain) || { watchers: [] };   // r5: the one reader
       const others = g.watchers.filter((w) => w && pkOf(w.principal) !== pk);
       const w = await setGrain(req0.adapterId, req0.grain, { watchers: [...others, { ...req0.watch }] }, { by });
       if (!w || !w.ok) return w || { ok: false, code: 'error', error: 'the notification could not be written' };
@@ -1478,30 +1512,42 @@ function create(engineCtx) {
    *  see it), its watchers and `watchExcept` (who is woken), a rule's `pattern` (which conversations), an assignment (both
    *  lists), a removal (the wake itself). A conversation's saved filter is held too while ANY wake row names it (a filtered
    *  row's `filterId`). The route asks this BEFORE the write, for EVERY grain it writes, whatever the body says; held ⇒ THE
-   *  person verdict (src/routes/channels.js wakeRefused). A grain with no wake stays the agent's to edit. → {held, rows, why}
-   *  (`why` 'watchers' | 'filter' | null; an unknown grain or a NEW rule holds nothing — the writer answers for it). */
+   *  person verdict (src/routes/channels.js wakeRefused). A grain with no wake stays the agent's to edit.
+   *  r5 (主开发: «"held" is a fact about what is STORED on the grain, read by the ONE reader the engine fires with»): the
+   *  grain is read by `readGrainHolder` (F.grainAsFired — the access above it included) and EVERY wake row stored on it
+   *  counts, active or INERT (its principal's access gone: a write that gives it back — a reach, an access row — makes it
+   *  live, so it is a wake write). A webhook PATH (`{kind:'path', convId: slug}`; null = a path not made yet) is a wake grain
+   *  too: its options and callers decide which events its conversation gets and its facts (title, participants, kind) are
+   *  what a rule matches — held when its conversation holds a wake, or the account, or any rule of the account does.
+   *  → {held, rows, inert, why} (`why` 'watchers' | 'filter' | 'account' | 'rule' | null; an unknown grain or a NEW rule
+   *  holds nothing — the writer answers for it). */
   const wakesIn = (list) => (Array.isArray(list) ? list : []).filter((w) => w && typeof w === 'object' && F.deliveryModeOf(w) === 'wake');
-  const NOT_HELD = Object.freeze({ held: false, rows: 0, why: null });
+  const NOT_HELD = Object.freeze({ held: false, rows: 0, inert: 0, why: null });
   function wakeHeldAt(adapterId, grain) {
     const kind = grain && grain.kind;
-    let own = [];
-    if (kind === 'conversation') {
-      const en = store.index.peek(`${adapterId}/${grain.convId}`);
-      if (!en) return NOT_HELD;
-      own = wakesIn(convGrainOf(en).watchers);
-      if (!own.length && en.filterId && wakeNamesFilter(adapterId, en.filterId)) return { held: true, rows: 1, why: 'filter' };
-    } else if (kind === 'account') own = wakesIn(F.grainOf(accountGrainOf(adapterId)).watchers);
-    else if (kind === 'pattern' && grain.id) { const pa = patternById(grain.id); own = pa && pa.adapterId === adapterId ? wakesIn(F.grainOf(pa).watchers) : []; }
-    return own.length ? { held: true, rows: own.length, why: 'watchers' } : NOT_HELD;
+    if (kind === 'path') {
+      const above = [{ kind: 'account' }, ...rawPatternsOf(adapterId).map((pa) => ({ kind: 'pattern', id: pa.id }))];
+      for (const g of [...(grain.convId ? [{ kind: 'conversation', convId: grain.convId }] : []), ...above]) {
+        const h = wakeHeldAt(adapterId, g);
+        if (h.held) return g.kind === 'conversation' ? h : { ...h, why: g.kind === 'account' ? 'account' : 'rule' };
+      }
+      return NOT_HELD;
+    }
+    const g = grainReadAt(adapterId, grain);
+    if (!g) return NOT_HELD;
+    const own = wakesIn(g.stored);
+    if (own.length) return { held: true, rows: own.length, inert: wakesIn(g.inert).length, why: 'watchers' };
+    if (kind === 'conversation' && g.holder.filterId && wakeNamesFilter(adapterId, g.holder.filterId)) return { held: true, rows: 1, inert: 0, why: 'filter' };
+    return NOT_HELD;
   }
-  /** Does a wake row on any grain of this account wake on filter `fid` (a filtered row naming it)? */
+  /** Does a wake row stored on any grain of this account (active or inert — the one reader) wake on filter `fid`? */
   function wakeNamesFilter(adapterId, fid) {
-    const names = (list) => wakesIn(list).some((w) => w.mode === 'filtered' && w.filterId === fid);
-    if (names(F.grainOf(accountGrainOf(adapterId)).watchers) || patternsOf(adapterId).some((pa) => names(F.grainOf(pa).watchers))) return true;
+    const names = (g) => !!g && wakesIn(g.stored).some((w) => w.mode === 'filtered' && w.filterId === fid);
+    if (names(grainReadAt(adapterId, { kind: 'account' })) || rawPatternsOf(adapterId).some((pa) => names(grainReadAt(adapterId, { kind: 'pattern', id: pa.id })))) return true;
     for (const x of Object.values(store.index.live())) {
       if (!x || x.adapterId !== adapterId) continue;
       const mentions = (Array.isArray(x.watchers) && x.watchers.some((w) => w && w.filterId === fid)) || (x.assignment && x.assignment.filterId === fid);
-      if (mentions && names(convGrainOf(x).watchers)) return true;
+      if (mentions && names(readGrainHolder(adapterId, 'conversation', x))) return true;
     }
     return false;
   }
@@ -1522,7 +1568,12 @@ function create(engineCtx) {
     if (!site.ok) return site;
     const { rec, kind } = site;
     // lane grants-unify: the lists as the rows hold them (+ the two rows' left-out members — part of the stamp)
-    const cur = site.kind === 'conversation' ? convGrainOf(site.holder) : { ...F.grainOf(site.holder), except: (site.holder && site.holder.except) || [], watchExcept: (site.holder && site.holder.watchExcept) || [] };
+    // lane wake-approve-card r5: read by THE one reader (readGrainHolder: the access above the grain included, as the wake
+    // reads it — round 4 read the holder with its own access only: it dropped a rule's watcher whose access is the account's,
+    // and this write then deleted the owner's live wake); its INERT rows (stored, not in effect now) are kept by every write
+    // that does not name them
+    const rd = readGrainHolder(adapterId, kind, site.holder);
+    const cur = rd ? { access: rd.access, watchers: rd.watchers, except: rd.except || [], watchExcept: rd.watchExcept || [] } : { access: [], watchers: [], except: [], watchExcept: [] };
     const p = patch && typeof patch === 'object' ? patch : {};
     for (const f of ['except', 'watchExcept']) if (p[f] !== undefined && p[f] !== null && !Array.isArray(p[f])) return { ok: false, code: 'bad-request', error: `${f} must be a list of the conversations / Task Groups left out` };
     // mirror-193: a dialog's whole-list write carries the STAMP of the lists it drew (`base`); a grain that moved
@@ -1592,7 +1643,11 @@ function create(engineCtx) {
     const addedA = access.filter((r) => !beforeA.has(pkOf(r.principal)));
     const changedW = new Set([...beforeW].filter((pk) => { const nw = watchers.find((w) => pkOf(w.principal) === pk); const ow = prevW.get(pk); return !nw || JSON.stringify({ ...nw, stats: null, updatedAt: null }) !== JSON.stringify({ ...ow, stats: null, updatedAt: null }); }));
     const oldFilterIds = cur.watchers.map((w) => w.filterId).filter(Boolean);
-    const empty = !access.length && !watchers.length;
+    // r5: a stored row this write does not name stays as it was (inert); a list naming its principal replaces it; the
+    // grain CLEARED (an assignment removed: `clear`) takes them too
+    const inertKept = p.clear === true ? [] : (rd ? rd.inert : []).filter((w) => !watchers.some((nw) => pkOf(nw.principal) === pkOf(w.principal)));
+    const stored = [...watchers, ...inertKept];
+    const empty = !access.length && !stored.length;
     // verify r1 F1: a user's whole-list write that DROPS an agent's own row leaves a mark that agent cannot write over
     // (its `watch` there is refused by name); a row the user writes or approves for that agent here lifts it
     const byUser = !/^agent:/.test(String(by));
@@ -1603,7 +1658,7 @@ function create(engineCtx) {
     // anywhere (the index's watcher settings follow only landed rows). An agent's own watch never edits the owner's
     // exceptions (they ride as stored).
     const res = CG.grainResource(kind, kind === 'conversation' ? site.key : site.id);
-    const wr = CG.setGrainRows(res, { access, watchers, ...(byUser && p.except !== undefined ? { except: p.except || [] } : {}), ...(byUser && p.watchExcept !== undefined ? { watchExcept: p.watchExcept || [] } : {}) }, by);
+    const wr = CG.setGrainRows(res, { access, watchers: stored, ...(byUser && p.except !== undefined ? { except: p.except || [] } : {}), ...(byUser && p.watchExcept !== undefined ? { watchExcept: p.watchExcept || [] } : {}) }, by);
     // an agent's own row where the user LEFT IT OUT never lifts the user's exception — refused in the agent's words
     if (!wr.ok && !byUser && wr.code === 'except_conflicts') return { ok: false, code: 'excepted', error: 'the user left you out of this grant here (an exception on the Task Group / All agents row) — only the user can lift it, in Channels (Grant access… / Notify…)' };
     if (!wr.ok) return { ok: false, code: wr.code, error: wr.error };
@@ -1615,7 +1670,7 @@ function create(engineCtx) {
         if (!holder) return;
         healP2(holder);
         liftGrainInPlace(ix, holder, 'conversation');
-        holder.watchers = watchers;   // lane grants-unify: the settings + ledgers; WHO (access, reach, the watch row) is the grants store's
+        holder.watchers = stored;   // lane grants-unify: the settings + ledgers; WHO (access, reach, the watch row) is the grants store's
       } else {
         const tbName = kind === 'account' ? 'accountAssignments' : 'patternAssignments';
         const tb = ix[tbName] || (ix[tbName] = {});
@@ -1624,7 +1679,7 @@ function create(engineCtx) {
           holder = tb[site.id] ? liftGrainInPlace(ix, tb[site.id], kind) : (tb[site.id] = { adapterId, scope: { kind, id: site.id }, createdAt: t, createdBy: by });
           holder.adapterId = adapterId; holder.scope = { kind, id: site.id }; holder.updatedAt = t;
           if (kind === 'pattern') { holder.id = site.id; holder.pattern = pattern; }
-          holder.watchers = watchers;   // lane grants-unify: the access list and the account's reach are the grants store's rows
+          holder.watchers = stored;   // lane grants-unify: the access list and the account's reach are the grants store's rows
         }
       }
       for (const fw of filterWrites) { const fp = filtersOf(ix)[fw.id] || null; filtersOf(ix)[fw.id] = { id: fw.id, ...fw.filter, createdAt: fp ? fp.createdAt : t, updatedAt: t, estimateAtSet: fw.est || (fp ? fp.estimateAtSet : null) || null }; }
@@ -1708,7 +1763,8 @@ function create(engineCtx) {
     const pa = patternById(id);
     if (!pa || pa.adapterId !== adapterId) return { ok: false, code: 'not-found', error: 'no such rule' };
     const t = now();
-    const g = F.grainOf(pa);
+    const r0 = readGrainHolder(adapterId, 'pattern', pa);   // r5: every row stored on the rule (the one reader), active or inert
+    const g = { access: r0.access, watchers: r0.stored };
     const wr = CG.removeRule(id, { by });   // lane grants-unify: its access row and its watch row, through the ONE writer
     if (!wr.ok) return { ok: false, code: wr.code, error: wr.error };
     await store.index.update((ix) => { const tb = ix.patternAssignments || {}; const fids = g.watchers.map((w) => w.filterId).filter(Boolean); delete tb[id]; for (const fid of fids) if (/^f-pattern-/.test(fid) && !filterReferenced(ix, fid)) delete filtersOf(ix)[fid]; });
@@ -1725,7 +1781,7 @@ function create(engineCtx) {
    *  and refusals are unchanged). */
   async function setAssignment(adapterId, convId, input) {
     if (!known(adapterId, convId)) return { ok: false, code: 'not-found', error: 'No such conversation' };
-    if (input === null) return setGrain(adapterId, { kind: 'conversation', convId }, { access: [], watchers: [] });
+    if (input === null) return setGrain(adapterId, { kind: 'conversation', convId }, { access: [], watchers: [], clear: true });   // r5: every row, an inert one too
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId);
     const t = now();
     const key = `${adapterId}/${convId}`;
@@ -1751,13 +1807,13 @@ function create(engineCtx) {
     if (!rec) return { ok: false, code: 'not-found', error: `no such account '${adapterId}'` };
     const kind = scope && scope.kind;
     if (kind !== 'account' && kind !== 'pattern') return { ok: false, code: 'bad-assignment', error: 'scope.kind must be account|pattern (a conversation is assigned on its own route)' };
-    if (input === null) return kind === 'account' ? setGrain(adapterId, { kind: 'account' }, { access: [], watchers: [] }) : (scope.id ? removePattern(adapterId, scope.id) : { ok: false, code: 'not-found', error: 'no such rule' });
+    if (input === null) return kind === 'account' ? setGrain(adapterId, { kind: 'account' }, { access: [], watchers: [], clear: true }) : (scope.id ? removePattern(adapterId, scope.id) : { ok: false, code: 'not-found', error: 'no such rule' });
     const b = input && typeof input === 'object' ? input : {};
     const t = now();
     const site = grainSite(adapterId, kind === 'account' ? { kind } : { kind, id: scope.id || null }, t);
     if (!site.ok) return site;
-    const cur = F.grainOf(site.holder);
-    const prevW = cur.watchers.find((w) => b.principal && pkOf(w.principal) === pkOf(b.principal));
+    const cur = readGrainHolder(adapterId, kind, site.holder) || { stored: [] };   // r5: the one reader — every stored row (its filter id is kept)
+    const prevW = cur.stored.find((w) => b.principal && pkOf(w.principal) === pkOf(b.principal));
     const inlineFilterId = b.filter && b.mode === 'filtered' && pkOf(b.principal) ? inlineFilterIdFor(site, pkOf(b.principal), prevW) : null;
     const v = F.validateAssignment({ ...b, ...(inlineFilterId ? { filterId: inlineFilterId } : {}), scope: { kind, id: site.id } }, site.caps);
     if (!v.ok) return { ok: false, code: v.code || 'bad-assignment', error: v.error, ...(v.code ? {} : { why: v.why || null }) };
@@ -1785,8 +1841,8 @@ function create(engineCtx) {
         }
       };
       const acct = accountGrainOf(rec.id);
-      if (acct) push('account', F.grainOf(acct));
-      for (const pa of patternsOf(rec.id)) push('pattern', F.grainOf(pa), { patternId: pa.id, rule: F.patternSummary(pa.pattern) });
+      if (acct) push('account', heldRead(acct));
+      for (const pa of patternsOf(rec.id)) push('pattern', heldRead(pa), { patternId: pa.id, rule: F.patternSummary(pa.pattern) });
       for (const en of Object.values(store.index.live())) if (en && en.adapterId === rec.id) { const g = convGrainOf(en); if (g.access.length) push('conversation', g, { key: agentId(en.key), title: agentTitle(en, en.id) }); }   // verify r3 F6: the key as a line piece; verify r2 F4: the seventh title answer (`vibespace-channels status` prints it before the next row) through the belt
     }
     return { ok: true, access: out };
@@ -1813,7 +1869,7 @@ function create(engineCtx) {
     const finer = (en) => {
       if (!pk) return false;
       if (convGrainOf(en).watchers.some((w) => pkOf(w.principal) === pk)) return true;
-      if (scope && scope.kind === 'account') return patternsOf(adapterId).some((pa) => F.grainOf(pa).watchers.some((w) => pkOf(w.principal) === pk) && F.matchConversation(pa.pattern, convFacts(en)).hit);
+      if (scope && scope.kind === 'account') return patternsOf(adapterId).some((pa) => heldRead(pa).watchers.some((w) => pkOf(w.principal) === pk) && F.matchConversation(pa.pattern, convFacts(en)).hit);
       return false;
     };
     const convs = Object.values(store.index.live()).filter((en) => en && en.adapterId === adapterId && !en.unlistedAt && !finer(en) && (!pat || F.matchConversation(pat, convFacts(en)).hit))
@@ -2038,7 +2094,7 @@ function create(engineCtx) {
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, resurfacePointers, openAccessPointers,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, grainReadAt, heldRead, resurfacePointers, openAccessPointers,
   };
 }
 

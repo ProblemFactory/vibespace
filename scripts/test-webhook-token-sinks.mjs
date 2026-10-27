@@ -45,9 +45,12 @@ await new Promise((r) => srv.listen(0, '127.0.0.1', r));
 const port = srv.address().port;
 app.locals.instancePublicUrl = `http://127.0.0.1:${port}`;   // lane webhook-l3-cli-pair: the pairing's hook URL
 const answers = [];
+// lane wake-approve-card r5: the OWNER's verbs come from this instance's page (Sec-Fetch-Site same-origin) — a path holding the
+// owner's wake refuses a bare write (src/routes/webhook.js pathRefused); the inbound door and a caller's poll stay cookie-free
+const OWNER_PAGE = (p) => (/^\/api\/channels\/webhook\/(paths|join)/.test(p) ? { 'Sec-Fetch-Site': 'same-origin' } : {});
 const call = (method, p, { headers = {}, body = null, keep = true } = {}) => new Promise((resolve) => {
   const b = body === null ? null : typeof body === 'string' ? body : JSON.stringify(body);
-  const req = http.request({ host: '127.0.0.1', port, method, path: p, headers: { ...(b ? { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(b)) } : {}), ...headers } }, (res) => { let t = ''; res.on('data', (d) => { t += d; }); res.on('end', () => { if (keep) answers.push({ p, method, t }); let j = null; try { j = JSON.parse(t); } catch { } resolve({ status: res.statusCode, t, j }); }); });
+  const req = http.request({ host: '127.0.0.1', port, method, path: p, headers: { ...(b ? { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(b)) } : {}), ...OWNER_PAGE(p), ...headers } }, (res) => { let t = ''; res.on('data', (d) => { t += d; }); res.on('end', () => { if (keep) answers.push({ p, method, t }); let j = null; try { j = JSON.parse(t); } catch { } resolve({ status: res.statusCode, t, j }); }); });
   if (b) req.write(b); req.end();
 });
 const hmacHex = (k, t) => crypto.createHmac('sha256', k).update(t).digest('hex');

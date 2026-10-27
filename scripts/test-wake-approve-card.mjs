@@ -60,6 +60,12 @@
 //   ⑬ ROUND 4 — an Approve / Deny on an ask past its end ⇒ 409 `expired` (words + its date, zh / ja / en; RED: answer3 without
 //     the mapping ⇒ 500); vault-grant-ask (Allow once / For 8 hours / Deny) is a DECISION ROW: its own ends, no ✓ / ✕, the
 //     stamps «allowed once by you» / «allowed by you for 8 h» / «denied by you» (RED: the row as bec3e3f8 had it — ✓ closes it)
+//   ⑭ ROUND 5 — «held» is read by THE reader that fires: F.grainAsFired reads a rule with the account's access (the reviewer's
+//     fixture: a live rule wake; RED: round 4's F.grainOf(pa) drops it) and keeps every stored row (active or inert); the
+//     ONE-READER CENSUS over the engine (held / write / view roads through readGrainHolder; RED COPIES); a record says only
+//     what was decided — an old `granted` reads «allowed», `granted-8h` «allowed for 8 hours» (RED: 4b8896e7's words)
+//   ⑨ (r5) the census's FILE LIST is derived from the engine (its grain writers + the entry fields it reads for wakes):
+//     src/routes/webhook.js's path verbs ask the gate for the PATH (RED: the verbs as 4b8896e7 had them; a new routes file)
 //   ⑫ THE VAULT'S TWO ASKS AND THE HUB-ACT ASK ARE CARDS IN THE ASKING CHAT, decided by a person — registry rows (chat, decide
 //     'person', their own ends and stamps): the chat draws each where its producer files it (the run ask and the paste
 //     request under the asking conversation's key, the hub-act ask `about` it); «allowed by you · HH:MM» / «always allowed by
@@ -569,7 +575,7 @@ const GATE_LINE = /^    if \(wakeRefused\(req, res, [^\n]*\)\) return;[^\n]*\n/g
  *  read has no gate; wakeRefused asks nothing of the grain. */
 const R3_GATE_FN = 'function wakeRefused(req, res, rows) {\n  if (!wakeRowsOf(rows).length) return false;\n  const who = personVerdict(req);\n  if (who.ok) return false;\n  bad(res, 403, WAKE_REFUSED[who.code] || WAKE_REFUSED.cross_site, { code: who.code });\n  return true;\n}\n';
 function r3Form(src) {
-  const i = src.indexOf('function wakeRefused(req, res, at, rows = []) {'), j = i < 0 ? -1 : src.indexOf('\n}\n', i) + 3;
+  const i = src.indexOf('function wakeRefused(req, res, at, rows = [], eng = engine) {'), j = i < 0 ? -1 : src.indexOf('\n}\n', i) + 3;   // r5: the gate takes the caller's engine
   return (i < 0 ? src : src.slice(0, i) + R3_GATE_FN + src.slice(j))
     .replace(/if \(wakeRefused\(req, res, (?:accountGrain|ruleGrain|convGrain)\(req\), ([^\n]*)\)\) return;/g, 'if (wakeRefused(req, res, $1)) return;')
     .replace(/^    if \(wakeRefused\(req, res, (?:accountGrain|ruleGrain|convGrain)\(req\)\)\) return;[^\n]*\n/gm, '');
@@ -608,14 +614,23 @@ async function heldDoors(mod) {
   const holes = red.held.filter((r) => r.status === 200);
   ok(r3Form(REAL_SRC) !== REAL_SRC && holes.length === red.nHeld && red.writesRefused === red.nHeld * 2, `RED CONTROL: round 3's gate (keyed on a \`watchers\` body) — a vsst_ and a bare curl WIDEN the held wake through all ${red.nHeld} doors (the reviewer's: the rule's pattern ⇒ ${red.held.find((r) => r.body === 'pattern').status}, its watchExcept ⇒ ${red.held.find((r) => r.body === 'watchExcept').status}, the conversation's filter ⇒ ${red.held.find((r) => /filter$/.test(r.door)).status})`, red.held.map((r) => `${r.door} {${r.body}} ${r.status}`));
 }
-/** THE WRITER CENSUS (r4 — 主开发: «keyed on the fact "this write can change a wake's reach", never on a body field»):
+/** THE WRITER CENSUS (r4 — 主开发: «keyed on the fact "this write can change a wake's reach", never on a body field»; r5: «the
+ *  census scans every routes file that writes a grain the engine reads for wakes — derive the file list from the engine's
+ *  writers, never a hand list»):
  *  ① THE ENGINE'S GRAIN WRITERS are DERIVED from src/server/channels-access.js — every function that writes a grain row (the
  *    grants store's one writer: setGrainRows / removeRule / setLevel; a stored filter) and every function that calls one;
- *  ② every route of src/routes/channels.js calling one asks `if (wakeRefused(req, res, <grain>(req)…)) return;` FIRST, at its
- *    handler's own level (never inside a condition), naming the grain its path writes (adapters/:id → accountGrain, …/patterns
- *    → ruleGrain, /:adapterId/:convId → convGrain) — the decide route alone answers to its own verdict (⑤);
- *  ③ every call of a writer INSIDE the engine is a named road (why it may write without the gate);
- *  ④ no other file calls one. → { routes, writers, problems } */
+ *  ② THE FIELDS THE ENGINE READS FOR WAKES off a conversation entry are DERIVED — what a rule matches over (convFacts) and
+ *    what the per-path wake budget reads (pathBudgetVerdict) — and a function of any file that writes one on an index entry
+ *    (inside `index.update`) is a grain writer of that file, as is every function of the file calling it;
+ *  ③ THE FILE LIST is DERIVED: every file of src/ (the engine family aside) whose code calls an engine writer through a
+ *    channels engine, or holds a writer of ②; in it every route calling one asks the gate FIRST, at its handler's own level
+ *    (never inside a condition), naming the grain its path writes (adapters/:id → accountGrain, …/patterns → ruleGrain,
+ *    /:adapterId/:convId → convGrain, /api/channels/webhook/… → pathGrain) — directly (`wakeRefused`) or through a local
+ *    wrapper of it; the decide route and the agent's own watch answer to their own roads; a route whose AUTHORITY is a door
+ *    elsewhere (the pairing's completion — the owner's code) names that door, which carries the gate; a writer called
+ *    anywhere but a route is named;
+ *  ④ every call of a writer INSIDE the engine is a named road (why it may write without the gate). → { routes, writers,
+ *    fields, files, problems } */
 const GRAIN_PRIMITIVE = /CG\.(setGrainRows|removeRule|setLevel)\(|filtersOf\(ix\)\[[^\]]+\]\s*=(?!=)|\.filterId\s*=(?!=)/;
 const ENGINE_ROADS = {   // the enclosing function → why it may call a grain writer without the gate (it is never a route)
   agentWatch: 'the agent\'s own road: next-turn only — a wake returns fileWatchRequest (its ASK) before this write; the user\'s row is never replaced',
@@ -623,46 +638,93 @@ const ENGINE_ROADS = {   // the enclosing function → why it may call a grain w
   decideRequest: 'THE decision: behind the decide route\'s person verdict (⑤)', decideWatchRequest: 'THE decision: behind the decide route\'s person verdict (⑤)',
   setAccess: 'a route\'s writer (the gate is the route\'s)', setWatchers: 'a route\'s writer (the gate is the route\'s)', setAssignment: 'a route\'s writer (the gate is the route\'s)', setScopeAssignment: 'a route\'s writer (the gate is the route\'s)',
 };
-const ROUTE_EXEMPT = { decideRequest: 'the decide route — its own person verdict, pinned in ⑤' };
+/** writers a route may call without the gate — each answers to its own road */
+const ROUTE_EXEMPT = { decideRequest: 'the decide route — its own person verdict, pinned in ⑤', agentWatch: 'the agent\'s own watch (next-turn; a wake is an ASK the owner approves)', agentUnwatch: 'the agent\'s own row removed' };
+/** routes whose AUTHORITY is another door: that door must carry the gate */
+const AUTHORITY_DOORS = { 'POST /api/channels/webhook/:slug/pair': { door: 'POST /api/channels/webhook/paths/:slug/pair-code', why: 'the pairing\'s completion (cookie-free) writes the caller the owner\'s code was minted for — the code is its authority' } };
+/** names a writer shares with another engine (an exit's setAccess, an automation key's setReach): counted on a channels engine only */
+const AMBIGUOUS = new Set(['setAccess', 'setReach', 'decideRequest']);
+const CHANNEL_RECV = String.raw`(?:\bengine\(\)|\beng|\be|channelsEngine\(\)|getChannels\(\)|\bchannels|\bchan)`;
+/** the engine's functions (r4: `function` heads — an arrow const inside one stays part of its body) */
+function fnsOf(text) {
+  const heads = [...text.matchAll(/(?:async )?function (\w+)\(/g)];
+  return heads.map((h, k) => ({ name: h[1], at: h.index, body: text.slice(h.index + h[0].length, k + 1 < heads.length ? heads[k + 1].index : text.length) }));
+}
+/** a routes file's TOP-LEVEL functions (a `function` declaration or a column-0 arrow const), each ending where the next
+ *  top-level declaration or route begins */
+function topFnsOf(text) {
+  const heads = [...text.matchAll(/^(?:async )?function (\w+)\(|^(?:const|let) (\w+) = (?:async )?(?:\([^)\n]*\)|\w+) =>/gm)];
+  const stops = [...text.matchAll(/^(?:(?:async )?function \w+\(|(?:const|let|var) \w+ =|(?:router|app)\.\w+\(|module\.exports)/gm)].map((m) => m.index);
+  return heads.map((h) => { const end = stops.find((x) => x > h.index); return { name: h[1] || h[2], at: h.index, body: text.slice(h.index + h[0].length, end === undefined ? text.length : end) }; });
+}
 function grainWriters(E) {
-  const heads = [...E.matchAll(/(?:async )?function (\w+)\(/g)];
-  const fns = heads.map((h, k) => ({ name: h[1], body: E.slice(h.index + h[0].length, k + 1 < heads.length ? heads[k + 1].index : E.length) }));
+  const fns = fnsOf(E);
   const W = new Set(fns.filter((f) => GRAIN_PRIMITIVE.test(f.body)).map((f) => f.name));
   for (let grew = true; grew;) { grew = false; for (const f of fns) if (!W.has(f.name) && [...W].some((w) => new RegExp(`(?<![\\w.])${w}\\(`).test(f.body))) { W.add(f.name); grew = true; } }
   return { W, fns };
 }
-const grainOfPath = (p) => (/\/patterns(\/|'|$)/.test(p) ? 'ruleGrain' : /^\/api\/channels\/adapters\/:id\//.test(p) ? 'accountGrain' : /^\/api\/channels\/:adapterId\/:convId\//.test(p) ? 'convGrain' : null);
+/** ② the entry fields the engine reads for wakes — derived from its source */
+function wakeReadFields(files) {
+  const E = files['src/server/channels-access.js'] || '', G = files['src/server/channels-engine.js'] || '';
+  const cf = /function convFacts\(en\) \{([^\n]*)\}/.exec(E);
+  const pb = /function pathBudgetVerdict\([^)]*\) \{([\s\S]*?)\n  \}/.exec(G);
+  const fieldsIn = (s) => [...String(s || '').matchAll(/\ben\.(\w+)\b/g)].map((m) => m[1]);
+  return [...new Set([...fieldsIn(cf && cf[1]), ...fieldsIn(pb && pb[1])])].sort();
+}
+const grainOfPath = (p) => (/^\/api\/channels\/webhook\//.test(p) ? 'pathGrain' : /\/patterns(\/|'|$)/.test(p) ? 'ruleGrain' : /^\/api\/channels\/adapters\/:id\//.test(p) ? 'accountGrain' : /^\/api\/channels\/:adapterId\/:convId\//.test(p) ? 'convGrain' : null);
+const ROUTE_HEAD = /^(?:router|app)\.(get|put|post|patch|delete)\('([^']+)'/gm;
 function writerCensus(files) {
-  const out = [], routes = [];
+  const out = [], routes = [], derivedFiles = [];
   const E = files['src/server/channels-access.js'] || '';
   const { W, fns } = grainWriters(E);
-  const R = files['src/routes/channels.js'] || '';
-  const heads = [...R.matchAll(/^router\.(get|put|post|patch|delete)\('([^']+)'/gm)];
-  const callRe = new RegExp(`engine\\(\\)\\.(${[...W].join('|')})\\(`);
-  heads.forEach((h, k) => {
-    const body = R.slice(h.index, k + 1 < heads.length ? heads[k + 1].index : R.length);
-    const w = body.match(callRe);
-    if (!w) return;
-    const door = `${h[1].toUpperCase()} ${h[2]}`;
-    if (ROUTE_EXEMPT[w[1]]) return;
-    routes.push(door);
-    const want = grainOfPath(h[2]);
-    const gate = body.match(/^    if \(wakeRefused\(req, res, (\w+)\(req\)[,)][^\n]*\n/m);
-    if (!gate) { out.push(`${door}: calls ${w[1]} without asking the person verdict for the grain it writes (no gate at the handler's own level, or one keyed on the body only)`); return; }
-    if (gate.index > w.index) out.push(`${door}: asks the gate AFTER it calls ${w[1]}`);
-    if (gate[1] !== want) out.push(`${door}: its gate names ${gate[1]} — the path writes the ${want}`);
-  });
-  for (const f of fns) for (const w of W) if (w !== f.name && new RegExp(`(?<![\\w.])${w}\\(`).test(f.body) && !ENGINE_ROADS[f.name]) out.push(`src/server/channels-access.js ${f.name}(): calls the grain writer ${w}() — a road the census does not know`);
-  const UNAMBIGUOUS = /\.(setGrain|setWatchers|setAssignment|setScopeAssignment|removePattern|setFilter)\(/, CHANNEL_ONLY = /(?:getChannels\(\)|\bchannels|\bchan|\beng)\.(setAccess|setReach)\(/;
+  const fields = wakeReadFields(files);
+  const fieldWrite = new RegExp(`\\ben\\.(${fields.join('|')})\\s*=(?!=)`);
+  const wNames = [...W];
+  const callW = new RegExp(`${CHANNEL_RECV}\\.(${wNames.join('|')})\\(`);
   for (const [rel, s] of Object.entries(files)) {
-    if (rel === 'src/routes/channels.js' || /^src\/server\/channels-[a-z]+\.js$/.test(rel)) continue;
-    if (UNAMBIGUOUS.test(s) || CHANNEL_ONLY.test(s)) out.push(`${rel}: calls a channel grain writer — the only doors are src/routes/channels.js's (each behind the gate)`);
+    if (/^src\/server\/channels-[a-z]+\.js$/.test(rel)) continue;
+    // ② this file's own writers of a wake field (inside an index update), and every function of it calling one
+    const local = topFnsOf(s);
+    const L = new Set(local.filter((f) => /\bindex\.update\(/.test(f.body) && fieldWrite.test(f.body)).map((f) => f.name));
+    for (let grew = true; grew;) { grew = false; for (const f of local) if (!L.has(f.name) && [...L].some((w) => new RegExp(`(?<![\\w.])${w}\\(`).test(f.body))) { L.add(f.name); grew = true; } }
+    const callL = L.size ? new RegExp(`(?<![\\w.])(${[...L].join('|')})\\(`) : null;
+    const writes = (body) => { const m = body.match(callW); if (m && !(AMBIGUOUS.has(m[1]) && !new RegExp(`${CHANNEL_RECV}\\.${m[1]}\\(`).test(body))) return { w: m[1], at: m.index }; const l = callL && body.match(callL); return l ? { w: l[1], at: l.index, local: true } : null; };
+    if (!callW.test(s) && !L.size) continue;
+    derivedFiles.push(rel);
+    // the gate: `wakeRefused(req, res, <grain>(req)…)` or a local wrapper of it (its grain read off its definition)
+    const wrappers = Object.fromEntries([...s.matchAll(/const (\w+) = \(req, res[^)]*\) => wakeRefused\(req, res,[^\n]*?(\w+Grain)\(req/g)].map((m) => [m[1], m[2]]));
+    const direct = /^(?: {2}| {4})if \(wakeRefused\(req, res, (\w+)\(req\)[,)][^\n]*\n/m;
+    const viaWrapper = Object.keys(wrappers).length ? new RegExp(`^(?: {2}| {4})if \\((${Object.keys(wrappers).join('|')})\\(req, res[^\\n]*\\)\\) return;`, 'm') : null;
+    const heads = [...s.matchAll(ROUTE_HEAD)];
+    const bodies = heads.map((h, k) => { const next = k + 1 < heads.length ? heads[k + 1].index : s.length; const decl = s.slice(h.index + 1).search(/\n(?:function |async function |const |let |\/\*\*)/); return { door: `${h[1].toUpperCase()} ${h[2]}`, path: h[2], at: h.index, body: s.slice(h.index, decl < 0 ? next : Math.min(next, h.index + 1 + decl)) }; });
+    const gateOf = (body) => { const d = body.match(direct); if (d) return { at: d.index, grain: d[1] }; const w = viaWrapper && body.match(viaWrapper); return w ? { at: w.index, grain: wrappers[w[1]] } : null; };
+    for (const b of bodies) {
+      const w = writes(b.body);
+      if (!w) continue;
+      if (ROUTE_EXEMPT[w.w]) continue;
+      const auth = AUTHORITY_DOORS[b.door];
+      if (auth) { const d = bodies.find((x) => x.door === auth.door); if (!d || !gateOf(d.body)) out.push(`${rel} ${b.door}: its authority is ${auth.door}, which does not ask the gate`); continue; }
+      routes.push(b.door);
+      const want = grainOfPath(b.path), gate = gateOf(b.body);
+      if (!gate) { out.push(`${b.door}: calls ${w.w} without asking the person verdict for the grain it writes (no gate at the handler's own level, or one keyed on the body only)`); continue; }
+      if (gate.at > w.at) out.push(`${b.door}: asks the gate AFTER it calls ${w.w}`);
+      if (gate.grain !== want) out.push(`${b.door}: its gate names ${gate.grain} — the path writes the ${want}`);
+    }
+    // a writer called outside every route (an engine road elsewhere, a timer, a helper) is named — its local writers' own bodies aside
+    let rest = s; for (const b of [...bodies].reverse()) rest = rest.slice(0, b.at) + rest.slice(b.at + b.body.length);
+    for (const f of topFnsOf(rest)) { if (L.has(f.name)) continue; const w = writes(f.body); if (w && !ROUTE_EXEMPT[w.w]) out.push(`${rel} ${f.name}(): calls the grain writer ${w.w}() outside a gated route`); }
   }
-  return { routes, writers: [...W].sort(), problems: out };
+  for (const f of fns) for (const w of W) if (w !== f.name && new RegExp(`(?<![\\w.])${w}\\(`).test(f.body) && !ENGINE_ROADS[f.name]) out.push(`src/server/channels-access.js ${f.name}(): calls the grain writer ${w}() — a road the census does not know`);
+  return { routes, writers: [...W].sort(), fields, files: derivedFiles.sort(), problems: out };
 }
+const WEBHOOK = 'src/routes/webhook.js';
+const WH_SRC = SRC_FILES[WEBHOOK] || '';
+const WH_GATE = /^ {2,4}if \(pathRefused\(req, res[^\n]*\)\) return;[^\n]*\n/gm;
 {
   const c = writerCensus(SRC_FILES);
-  ok(!c.problems.length && c.routes.length === 13, `THE WRITER CENSUS (r4): the engine's grain writers, derived (${c.writers.join(', ')}); the ${c.routes.length} routes that call one each ask the gate FIRST for the grain their path writes: ${c.routes.join(' · ')}`, c.problems);
+  const ch = c.routes.filter((r) => !/\/webhook\//.test(r)), wh = c.routes.filter((r) => /\/webhook\//.test(r));
+  ok(!c.problems.length && ch.length === 13, `THE WRITER CENSUS (r4): the engine's grain writers, derived (${c.writers.join(', ')}); the ${ch.length} routes of src/routes/channels.js that call one each ask the gate FIRST for the grain their path writes: ${ch.join(' · ')}`, c.problems);
+  ok(JSON.stringify(c.fields) === JSON.stringify(['authors', 'kind', 'options', 'participants', 'stats', 'title']) && c.files.includes(WEBHOOK) && c.files.includes('src/routes/channels.js') && wh.length === 5 && !c.problems.length, `r5: THE FILE LIST IS DERIVED — the fields the engine reads for wakes off an entry (${c.fields.join(', ')}: what a rule matches, the per-path budget) and the writers of the engine name ${c.files.length} files (${c.files.join(', ')}); src/routes/webhook.js's ${wh.length} path verbs each ask the gate for the PATH: ${wh.join(' · ')} (the pairing's completion answers to the gated pair-code)`, { files: c.files, fields: c.fields, wh, problems: c.problems });
   const r3 = writerCensus({ ...SRC_FILES, 'src/routes/channels.js': r3Form(REAL_SRC) });
   const bodyKeyed = (r3Form(REAL_SRC).match(/^    if \(wakeRefused\(req, res, [^\n]*\)\) return;/gm) || []).length;
   ok(r3.problems.length === 13 && r3.problems.every((x) => /without asking the person verdict for the grain it writes/.test(x)), `RED COPY: round 3's routes — the census names all ${r3.problems.length} doors (the ${13 - bodyKeyed} that never asked and the ${bodyKeyed} keyed on a body field): ${r3.problems.map((x) => x.replace(/: (calls|asks|its gate) .*$/, '').replace('/api/channels/', '…/')).join(' · ')}`, r3.problems);
@@ -677,7 +739,16 @@ function writerCensus(files) {
   const derived = writerCensus({ ...SRC_FILES, 'src/server/channels-access.js': withPrim, 'src/routes/channels.js': newRoute });
   ok(derived.writers.includes('widenRule') && derived.problems.some((x) => /^PUT \/api\/channels\/adapters\/:id\/patterns\/:pid\/widen: calls widenRule without asking/.test(x)), 'RED COPY: the writers are DERIVED — a new engine function writing grain rows (the one writer) joins the census by itself, and a route calling it with no gate is named', derived.problems);
   const other = writerCensus({ ...SRC_FILES, 'src/server/automation-engine.js': SRC_FILES['src/server/automation-engine.js'] + '\nasync function x(eng) { return eng.setFilter("a", "c", null); }\n' });
-  ok(other.problems.some((x) => /automation-engine\.js: calls a channel grain writer/.test(x)), 'RED COPY: a second file calling a writer is named', other.problems);
+  ok(other.problems.some((x) => /automation-engine\.js x\(\): calls the grain writer setFilter\(\) outside a gated route/.test(x)), 'RED COPY: a second file calling a writer is named', other.problems);
+  // r5 REDs: the webhook path verbs as 4b8896e7 had them (owner() alone), a gate after the write, a NEW routes file writing a wake field
+  const cut = WH_SRC.replace(WH_GATE, '');
+  const r4w = writerCensus({ ...SRC_FILES, [WEBHOOK]: cut });
+  const named = r4w.problems.filter((x) => /webhook/.test(x));
+  ok((WH_SRC.match(WH_GATE) || []).length === 6 && named.length === 6 && named.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: calls syncRow without asking/.test(x)) && named.some((x) => /its authority is POST \/api\/channels\/webhook\/paths\/:slug\/pair-code, which does not ask the gate/.test(x)), `RED COPY: the path verbs as 4b8896e7 had them (owner() only) — the census names all ${named.length}: ${named.map((x) => x.replace(/^src\/routes\/webhook\.js /, '').replace(/: (calls|its authority) .*$/, '').replace('/api/channels/webhook/', '…/')).join(' · ')}`, named);
+  const late = writerCensus({ ...SRC_FILES, [WEBHOOK]: WH_SRC.replace("  if (pathRefused(req, res)) return;   // r5: disabled / ipAllow / wakesPerHour / title — what a held wake fires on\n", '').replace("    await syncRow(slug, ov.options);\n    res.json({ ok: true, path: pathView(st, slug) });\n  } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }\n});\n/** THE OWNER'S \"Send", "    await syncRow(slug, ov.options);\n    if (pathRefused(req, res)) return;\n    res.json({ ok: true, path: pathView(st, slug) });\n  } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }\n});\n/** THE OWNER'S \"Send") });
+  ok(late.problems.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: asks the gate AFTER it calls syncRow/.test(x)), 'RED COPY: a path verb asking the gate only AFTER its write (inside its try, past the write) is named', late.problems.filter((x) => /webhook/.test(x)));
+  const plantedFile = writerCensus({ ...SRC_FILES, 'src/routes/hooks-extra.js': "const router = require('express').Router();\nfunction touch(e, slug, o) { return e.store.index.update(() => { const en = e.store.index.entry('webhook', slug); en.options = o; }); }\nrouter.put('/api/channels/webhook/extra/:slug', async (req, res) => {\n  await touch(engine(), req.params.slug, req.body);\n  res.json({ ok: true });\n});\n" });
+  ok(plantedFile.files.includes('src/routes/hooks-extra.js') && plantedFile.problems.some((x) => /^PUT \/api\/channels\/webhook\/extra\/:slug: calls touch without asking/.test(x)), 'RED COPY: a NEW routes file writing a field the engine reads for wakes (a path\'s options) joins the file list by itself — its route with no gate is named (never a hand list)', { files: plantedFile.files, problems: plantedFile.problems.slice(-2) });
 }
 
 // ── ⑩ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -814,10 +885,10 @@ try {
   // (c) vault-grant-ask: THE third vault card in the same chat (Allow once / For 8 hours / Deny) is a DECISION ROW
   const grant = { id: 'ut-grt0000001', sessionKey: 'claude:c-ops', text: 'ops asks to use a stored secret', detail: 'Secret: bucket — vault://mounts/m1/secretKey', status: 'open', urgency: 'high', origin: 'vault', kind: 'action', action: { type: 'vault-grant-ask', askId: 'c'.repeat(32) }, createdAt: NOW - 30e3 };
   const row = FA.ROW_OF['vault-grant-ask'];
-  ok(row.decide === 'person' && row.stamp === 'grant' && J(FA.endsOf(grant)) === J(['granted-once', 'granted', 'denied', 'vault_locked', 'ask-changed', 'ask-over']) && FA.isDecisionRow(grant) && J(FA.closersOf(grant)) === '[]', 'THE registry: vault-grant-ask decided by a person, its own ends (Allow once / For 8 hours / Deny + a lock, a changed card, an ask that is over), no ✓ / ✕ (closersOf [])', { decide: row.decide, stamp: row.stamp, ends: FA.endsOf(grant) });
+  ok(row.decide === 'person' && row.stamp === 'grant' && J(FA.endsOf(grant)) === J(['granted-once', 'granted-8h', 'denied', 'vault_locked', 'ask-changed', 'ask-over']) && FA.isDecisionRow(grant) && J(FA.closersOf(grant)) === '[]', 'THE registry: vault-grant-ask decided by a person, its own ends (Allow once / For 8 hours / Deny + a lock, a changed card, an ask that is over), no ✓ / ✕ (closersOf [])', { decide: row.decide, stamp: row.stamp, ends: FA.endsOf(grant) });
   const mark = { decidedBy: 'person', decidedAt: NOW - 60e3 };
   const st = (by, fact = mark) => (FA.decidedStamp({ ...grant, status: 'done', resolvedBy: by, resolvedAt: NOW, resolvedFact: fact }, { now: NOW }) || {}).text || null;
-  const stamps = { once: st('granted-once'), h8: st('granted'), deny: st('denied'), locked: st('vault_locked'), noMark: st('granted', null), card: FA.decisionCard({ ...grant, status: 'done', resolvedBy: 'granted', resolvedFact: mark }, { now: NOW }).state };
+  const stamps = { once: st('granted-once'), h8: st('granted-8h'), deny: st('denied'), locked: st('vault_locked'), noMark: st('granted-8h', null), card: FA.decisionCard({ ...grant, status: 'done', resolvedBy: 'granted-8h', resolvedFact: mark }, { now: NOW }).state };   // r5: For 8 hours writes `granted-8h`
   ok(J(stamps) === J({ once: 'allowed once by you · 10:04', h8: 'allowed by you for 8 h · 10:04', deny: 'denied by you · 10:04', locked: null, noMark: null, card: 'approved' }), 'its stamps: «allowed once by you · HH:MM», «allowed by you for 8 h · HH:MM», «denied by you · HH:MM» — only with the person verdict\'s mark; a lock is no stamp', stamps);
   const lawG = (registry) => {
     const { m, done } = storeWith(registry);
@@ -825,7 +896,7 @@ try {
       const it = m.add(grant.sessionKey, { origin: 'vault', by: 'agent', text: grant.text, urgency: 'high', action: grant.action });
       const tryS = (s2, by) => { try { m.setStatus(it.id, s2, by); return 'ok'; } catch (e) { return e.code || e.message; } };
       const r = { check: tryS('done', 'user'), seen: m.setStatusMany([it.id], 'dismissed', 'user').changed.length, status: m.get(it.id).status };
-      r.granted = m.resolveAnswered([it.id], 'granted', mark).length;
+      r.granted = m.resolveAnswered([it.id], 'granted-8h', mark).length;   // r5: the For 8 hours end
       r.reopen = tryS('open', 'user');
       return r;
     } finally { done(); }
@@ -842,6 +913,66 @@ try {
   const rg = lawG(baseG);
   ok(!baseG.isDecisionRow(grant) && J(baseG.closersOf(grant)) === J(['done', 'dismiss']) && rg.check === 'ok' && (baseG.decidedStamp({ ...grant, status: 'done', resolvedBy: 'granted', resolvedFact: mark }, { now: NOW }) || null) === null, 'RED CONTROL: the row as bec3e3f8 had it — ✓ / ✕ offered, ✓ closes the request «done» by the user, no «allowed by you for 8 h»', { closers: baseG.closersOf(grant), check: rg.check });
 } catch (e) { ok(false, '⑬ threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); }
+
+// ── ⑭ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('⑭ ROUND 5 — «held» is read by THE reader that fires (every stored wake row, active or inert); a record says only what was decided');
+try {
+  const F14 = require(path.join(SRC, 'channel-filter.js'));
+  const W8 = { kind: 'agent', id: 'agent-1', name: 'Worker' }, O8 = { kind: 'agent', id: 'agent-2', name: 'Other' };
+  const a8 = (p) => ({ principal: p, authority: 'draft' });
+  // (a) PURE — the reviewer's fixture: the account's access [Worker, Other]; rule «Ops» with access [Other] and Notify Worker
+  const acct = { access: [a8(W8), a8(O8)], watchers: [] };
+  const rule = { id: 'pa-ops', pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, createdAt: 1, access: [a8(O8)], watchers: [{ principal: W8, delivery: 'wake' }] };
+  const ids = (xs) => xs.map((w) => w.principal.id);
+  const live = F14.grainAsFired('pattern', rule, { account: acct });
+  const off = F14.grainAsFired('pattern', rule, { account: { access: [a8(O8)], watchers: [] } });   // the owner took Worker off the account
+  const fired = F14.effectiveGrants({ patterns: [rule], account: acct }, { title: 'Ops' });
+  const r14a = { live: [ids(live.watchers), ids(live.stored), ids(live.inert)], off: [ids(off.watchers), ids(off.stored), ids(off.inert)], fired: fired ? fired.watchers.map((x) => `${x.source}:${x.watcher.principal.id}`) : [] };
+  ok(J(r14a) === J({ live: [['agent-1'], ['agent-1'], []], off: [[], ['agent-1'], ['agent-1']], fired: ['pattern:agent-1'] }), 'THE ONE READER (F.grainAsFired): the rule read WITH the account\'s access — Worker\'s wake in effect (and effectiveGrants fires it, through the same reader); the account\'s access taken away — the row stays STORED, inert', r14a);
+  ok(J(ids(F14.grainOf(rule).watchers)) === '[]', 'RED CONTROL: round 4\'s read of the rule (`F.grainOf(pa)` — no inherited access) drops the live wake: «not held»', ids(F14.grainOf(rule).watchers));
+} catch (e) { ok(false, '⑭ (a) threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
+try {
+  // (b) THE ONE-READER CENSUS over the engine's source: every road that asks «held», writes a grain or draws its lists reads it
+  // through readGrainHolder (→ F.grainAsFired); none reads a holder through the narrower F.grainOf; «held» counts the STORED rows
+  const ROADS = ['convGrainOf', 'readGrainHolder', 'grainReadAt', 'wakeHeldAt', 'wakeNamesFilter', 'setGrain', 'grainView', 'storedWatcherFor', 'removePattern', 'setScopeAssignment'];
+  const oneReader = (E, FS) => {
+    const fns = fnsOf(E), byName = Object.fromEntries(fns.map((f) => [f.name, f.body]));
+    const bad = [];
+    for (const n of ROADS) {
+      const b = byName[n];
+      if (b === undefined) { bad.push(`${n}: missing`); continue; }
+      if (/\bF\.grainOf\(/.test(b)) bad.push(`${n}: reads a grain through F.grainOf (a narrower view)`);
+      if (n !== 'readGrainHolder' && !/(?<![\w.])(readGrainHolder|grainReadAt|heldRead)\(/.test(b)) bad.push(`${n}: never reaches the one reader`);
+    }
+    if (!/F\.grainAsFired\(/.test(byName.readGrainHolder || '')) bad.push('readGrainHolder: does not read through F.grainAsFired');
+    if (!/wakesIn\(g\.stored\)/.test(byName.wakeHeldAt || '')) bad.push('wakeHeldAt: does not count every STORED wake row');
+    const eff = (/function effectiveGrants\([\s\S]*?\n\}\n/.exec(FS) || [''])[0];
+    if ((eff.match(/grainAsFired\('(account|pattern|conversation)'/g) || []).length !== 3 || /\bgrainOf\(/.test(eff)) bad.push('effectiveGrants: its three grains are not read through grainAsFired');
+    return bad;
+  };
+  const E14 = read('src/server/channels-access.js'), FS14 = read('src/channel-filter.js');
+  const b14 = oneReader(E14, FS14);
+  ok(!b14.length, `THE ONE-READER CENSUS: ${ROADS.length} roads of the engine (${ROADS.join(', ')}) read a grain through readGrainHolder → F.grainAsFired — the reader effectiveGrants fires with; «held» counts every stored wake row`, b14);
+  const narrowSet = oneReader(E14.replace('    const rd = readGrainHolder(adapterId, kind, site.holder);\n', '    const rd = site.holder ? { ...F.grainOf(site.holder), inert: [] } : null;\n'), FS14);
+  const activeOnly = oneReader(E14.replace('const own = wakesIn(g.stored);', 'const own = wakesIn(g.watchers);'), FS14);
+  ok(narrowSet.some((x) => /^setGrain: reads a grain through F\.grainOf/.test(x)) && activeOnly.some((x) => /^wakeHeldAt: does not count every STORED/.test(x)), 'RED COPIES: a writer reading the holder through F.grainOf (round 4\'s setGrain), a «held» counting only the rows in effect (round 4\'s — an inert wake read «not held») — each named', { narrowSet, activeOnly });
+} catch (e) { ok(false, '⑭ (b) threw on this tree: ' + ((e && e.message) || e)); }
+try {
+  // (c) A RECORD SAYS ONLY WHAT WAS DECIDED: an old `granted` (Allow once and For 8 hours both wrote it before .360) ⇒ «allowed»
+  const tI = (x, p) => String(x).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] != null ? p[k] : ''));
+  const old = { ...grantItem14(), status: 'done', resolvedBy: 'granted', resolvedAt: NOW };
+  const words = (R, by) => R.settledWords({ ...old, resolvedBy: by }, tI);
+  const rowWords = (by) => ROW3.resolvedByText(by, tI, { ...old, resolvedBy: by });
+  const r14c = { old: [words(FA, 'granted'), rowWords('granted'), FA.decisionCard(old, { now: NOW }).stamp], h8: [words(FA, 'granted-8h'), rowWords('granted-8h')], once: [words(FA, 'granted-once'), rowWords('granted-once')] };
+  ok(J(r14c) === J({ old: ['allowed', 'allowed', 'allowed'], h8: ['allowed for 8 hours', 'allowed for 8 hours'], once: ['allowed once', 'allowed once'] }), 'a stored {resolvedBy: \'granted\'} (before .360 — either verb) reads «allowed» on the card, the tray and the For-you window; only `granted-8h` (it carries the duration) says «allowed for 8 hours»', r14c);
+  const ZH14 = read('src/lib/i18n-zh.js');
+  ok(/\n {2}"allowed": "已允许",/.test(ZH14), 'zh: «allowed» = «已允许»');
+  const DOOR = read('src/server/vault-run-door.js');
+  ok(/const end = a === 'once' \? 'granted-once' : 'granted-8h';\n {4}settleRequest\(q, end, 'answered', mark\(\)\);\n {4}return \{ ok: true, outcome: end, until \};/.test(DOOR) && !/settleRequest\(q, 'granted'/.test(DOOR), 'the door writes the two ends apart — Allow once ⇒ `granted-once`, For 8 hours ⇒ `granted-8h` (the answer\'s `outcome` the same) — and never `granted` again');
+  const r4G = registryFrom(read('src/foryou-actions.js').replace("  if (by === 'granted-8h') return t('allowed for 8 hours');", "  if (by === 'granted') return t('allowed for 8 hours');"));
+  ok(r4G.settledWords(old, tI) === 'allowed for 8 hours', 'RED CONTROL: the words as 4b8896e7 had them — the old record (maybe an Allow once) says «allowed for 8 hours»', r4G.settledWords(old, tI));
+} catch (e) { ok(false, '⑭ threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); }
+function grantItem14() { return { id: 'ut-grt0000002', sessionKey: 'claude:c-ops', text: 'ops asks to use a stored secret', status: 'open', origin: 'vault', kind: 'action', action: { type: 'vault-grant-ask', askId: 'd'.repeat(32) }, createdAt: NOW - 30e3 }; }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

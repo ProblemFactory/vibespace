@@ -406,7 +406,7 @@ export function inboxModel(app) {
       // way the row's switch does, so Allow asks 验证是你 FIRST, in the press's own task (Deny is a click).
       if (answer !== 'deny' && !revealLeftMs() && !(await askRevealPassword())) return false;
       const r = await fetchJson(`/api/vault/request/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(answer !== 'deny' ? revealHeaders() : {}) }, body: JSON.stringify({ answer }) });
-      if (r && r.ok) { showToast(r.outcome === 'granted' ? t('Granted for 8 hours — a lock ends it') : r.outcome === 'granted-once' ? t('Granted for its next run') : t('denied')); return true; }   // `outcome` (the vault door lays its facts' `state` over an answer)
+      if (r && r.ok) { showToast(r.outcome === 'granted-8h' ? t('Granted for 8 hours — a lock ends it') : r.outcome === 'granted-once' ? t('Granted for its next run') : t('denied')); return true; }   // `outcome` (the vault door lays its facts' `state` over an answer)
       const code = r && r.code;
       if (code === 'reveal_needs_password') forgetReveal();
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_unknown' ? t('That request is gone')

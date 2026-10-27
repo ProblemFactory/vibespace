@@ -27,6 +27,11 @@
 //   ④e lane wake-approve-card r4 — THE WAKE'S REACH IS THE PERSON'S: the real engine behind the real routes; on a grain holding an
 //      approved wake the reviewer's three curls (a rule's pattern match-all, its watchExcept [], the conversation's filter) from a
 //      vsst_ and from a bare curl ⇒ 403, nothing widened; the same writes on a grain holding no wake ⇒ 200 (RED: bec3e3f8 ⇒ 200)
+//   ④f lane wake-approve-card r5 — «HELD» IS READ BY THE READER THAT FIRES: the reviewer's fixture (a rule wake whose watcher holds
+//      the account's access) is held — a vsst_ pattern edit ⇒ 403, the owner's own edit KEEPS the wake; a stored wake made inert
+//      (its access taken off the account) is held — the agent's own vsst_ reach ⇒ 403, the wake stays inert (RED: 4b8896e7 ⇒ 200)
+//   ④g lane wake-approve-card r5 — A WEBHOOK PATH THAT HOLDS A WAKE IS A WAKE GRAIN: a bare curl / a vsak_ enabling (budget,
+//      allow-list, callers) a disabled held path ⇒ 403; the same on a path with no wake ⇒ 200 (RED: 4b8896e7 ⇒ 200)
 //   CONTROLS (scripts/mutant-copy.mjs, scratch copies): a filter without the inherited rule refuses ③; an engine
 //   dispatch without the next-turn branch bills ⑤; an engine without the removed-by-user check lets ⑦ re-register.
 import fs from 'node:fs';
@@ -402,6 +407,132 @@ try {
   ok(g.after.pattern === J2s({ match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }) && g.after.filter === J2s([{ kind: 'keyword', value: 'outage' }]), 'nothing was widened: the rule still matches «Ops», Other\'s wake still fires on «outage» only', J2s(g.after));
   ok(g.free.pattern === 200 && g.free.watchExcept === 200 && g.free.filter === 200, 'the SAME three writes on a rule and a room holding NO wake ⇒ 200 (a non-wake grain stays the agent\'s to edit)', J2s(g.free));
 } catch (e) { ok(false, '④e threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); }
+
+console.log('④f «HELD» IS READ BY THE READER THAT FIRES (lane wake-approve-card r5): a rule wake whose watcher holds the account\'s access; a stored wake made inert');
+/** (a) THE REVIEWER'S FIXTURE: the account's access [Worker, Other]; rule «Ops» with access [Other] and Notify Worker (a wake) —
+ *  Worker's access is the ACCOUNT's, so the wake fires (F.effectiveGrants reads the rule with the account's access). A vsst_
+ *  rewrite of the rule's pattern; then the owner's own (this page's) edit of the rule. (b) THE INERT ROW: Notify Worker on the
+ *  Ops room (a wake) while Worker holds the account; the owner takes Worker off the account (the row stays stored, inert);
+ *  then the agent's own vsst_ `PUT …/reach visible` on that room. → statuses + what fires. */
+async function heldLeg(ENGM, name) {
+  const { eng } = mkEngine(name, { ENGM });
+  await eng.pass(A, { force: true });
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER)] });
+  const OPS = { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] };
+  const p = await eng.setGrain(A, { kind: 'pattern' }, { pattern: OPS, access: [acc(OTHER)], watchers: [{ principal: AGENT, delivery: 'wake' }] });
+  const P = p.grain && p.grain.id;
+  const firesOn = () => { const e = eng.effectiveFor(A, C); const w = e && e.watchers.find((x) => x.watcher.principal.id === AGENT.id); return w ? `${w.source}:${F.deliveryModeOf(w.watcher)}` : null; };
+  const ruleRows = () => { const pa = (eng.store.index.snapshot().patternAssignments || {})[P]; const g = typeof eng.grainReadAt === 'function' ? eng.grainReadAt(A, { kind: 'pattern', id: P }) : null; return { stored: (pa && pa.watchers || []).map((w) => w.principal.id), listed: g ? g.stored.some((w) => w.principal.id === AGENT.id) : !!(pa && (pa.watchers || []).length) }; };   // listed = the grants store's watch row still names Worker (the overlay keeps only listed rows)
+  const VSST = { Authorization: 'Bearer vsst_0123456789abcdef' };
+  const MATCH_ALL = { match: 'any', rules: [{ kind: 'kind', value: 'group' }, { kind: 'kind', value: 'dm' }] };
+  const out = { setup: { P: !!P, fires: firesOn() } };
+  out.mark = eng.wakeHeldAt(A, { kind: 'pattern', id: P });
+  out.a = await withRoutes(eng, async (call) => {
+    const vsst = await call('PUT', `/api/channels/adapters/${A}/patterns/${P}`, { pattern: MATCH_ALL }, VSST);
+    const afterVsst = { pattern: JSON.stringify(((eng.store.index.snapshot().patternAssignments || {})[P] || {}).pattern), rows: ruleRows(), fires: firesOn() };
+    // the owner's own edit of the SAME rule (this page): the rule now matches «Ops» or «Incident» — the wake must stay
+    const page = await call('PUT', `/api/channels/adapters/${A}/patterns/${P}`, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }, { kind: 'title', value: 'Incident' }] } });
+    const view = (page.watchers || []).map((w) => w.principal && w.principal.id);
+    // the dialog's lists ARE the lists the writer stamps: a save carrying the stamp of what the answer drew lands
+    const based = await call('PUT', `/api/channels/adapters/${A}/patterns/${P}/access`, { access: [acc(OTHER)], base: F.grainStamp({ access: page.access || [], watchers: page.watchers || [], except: page.except || [], watchExcept: page.watchExcept || [] }) });
+    return { vsst: { status: vsst.status, code: vsst.code || null, wakeHeld: !!vsst.wakeHeld }, afterVsst, page: { status: page.status, view }, afterPage: { rows: ruleRows(), fires: firesOn() }, based: { status: based.status, code: based.code || null }, afterBased: { rows: ruleRows(), fires: firesOn() } };
+  });
+  // (b) the inert row
+  const r = await eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, delivery: 'wake' }] });
+  const convFires = () => { const e = eng.effectiveFor(A, C); const w = e && e.watchers.find((x) => x.watcher.principal.id === AGENT.id && x.source === 'conversation'); return w ? F.deliveryModeOf(w.watcher) : null; };
+  out.b = { set: !!r.ok, live: convFires() };
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(OTHER)] });   // the owner takes Worker off the account
+  out.b.inert = convFires();
+  out.b.stored = (eng.store.index.peek(KEY).watchers || []).filter((w) => w.principal.id === AGENT.id).length;
+  out.b.mark = eng.wakeHeldAt(A, { kind: 'conversation', convId: C });
+  out.b.reach = await withRoutes(eng, async (call) => { const x = await call('PUT', `/api/channels/${A}/${C}/reach`, { principal: { kind: 'agent', id: AGENT.id }, level: 'visible' }, VSST); return { status: x.status, code: x.code || null }; });
+  out.b.after = convFires();
+  // a write on that room that does not name the inert row (the owner's access list) keeps it stored
+  await eng.setGrain(A, { kind: 'conversation', convId: C }, { access: [acc(OTHER)] });
+  out.b.keptByAccessWrite = (eng.store.index.peek(KEY).watchers || []).filter((w) => w.principal.id === AGENT.id).length;
+  return out;
+}
+try {
+  const g = await heldLeg(ENG, 'e4f');
+  ok(g.setup.P && g.setup.fires === 'pattern:wake', 'setup (the reviewer\'s fixture): the account\'s access [Worker, Other]; rule «Ops» with access [Other] and Notify Worker — the wake FIRES (effectiveFor: Worker via the rule, a wake)', J2s(g.setup));
+  ok(g.mark.held === true && g.mark.rows === 1, '(a) the engine marks the rule HELD — read by the reader that fires (the account\'s access included)', J2s(g.mark));
+  ok(g.a.vsst.status === 403 && g.a.vsst.code === 'human_only' && g.a.vsst.wakeHeld, '(a) an agent\'s vsst_ rewriting the rule\'s pattern (match-all) ⇒ 403 human_only', J2s(g.a.vsst));
+  ok(g.a.afterVsst.pattern === J2s({ match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }) && g.a.afterVsst.rows.stored.includes(AGENT.id) && g.a.afterVsst.rows.listed && g.a.afterVsst.fires === 'pattern:wake', '(a) …nothing changed: the rule still matches «Ops», the owner\'s wake still stored, listed and FIRING', J2s(g.a.afterVsst));
+  ok(g.a.page.status === 200 && g.a.page.view.includes(AGENT.id) && g.a.afterPage.rows.stored.includes(AGENT.id) && g.a.afterPage.rows.listed && g.a.afterPage.fires === 'pattern:wake', '(a) the OWNER\'s own edit of that rule (this page) ⇒ 200 and the wake is KEPT — the writer reads the rule as the wake does (round 4\'s writer deleted it), and the dialog lists it', J2s({ page: g.a.page, after: g.a.afterPage }));
+  ok(g.a.based.status === 200 && g.a.afterBased.fires === 'pattern:wake', '(a) the dialog\'s lists are the lists the writer stamps: a save carrying the stamp of what the answer drew lands (never `grain-changed`), the wake kept', J2s({ based: g.a.based, after: g.a.afterBased }));
+  ok(g.b.set && g.b.live === 'wake' && g.b.inert === null && g.b.stored === 1, '(b) setup: Notify Worker on the Ops room (a live wake, its access the account\'s); the owner takes Worker off the account ⇒ the row is INERT (stored, never woken)', J2s(g.b));
+  ok(g.b.mark.held === true && g.b.mark.inert === 1, '(b) the engine marks the room HELD — a wake row stored on it counts whether active or inert', J2s(g.b.mark));
+  ok(g.b.reach.status === 403 && g.b.reach.code === 'human_only' && g.b.after === null, '(b) the agent\'s own vsst_ `PUT …/reach visible` on that room ⇒ 403 human_only — the inert wake stays inert (no billed turn without a click)', J2s({ reach: g.b.reach, after: g.b.after }));
+  ok(g.b.keptByAccessWrite === 1, '(b) a write on the room that does not name the inert row (an access list) keeps it stored — never a narrower view that drops a row', g.b.keptByAccessWrite);
+} catch (e) { ok(false, '④f threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); }
+/** (c) THE SAME READER DELIVERS: a rule digest (a paced wake) for Worker, whose access is the account's — the hits held for it
+ *  (the firing reader puts them there) and its window's flush (`flushScope`, which finds the watcher by the same reader). */
+async function digestLeg(ENGM, name) {
+  const { eng, delivered } = mkEngine(name, { ENGM });
+  await eng.pass(A, { force: true });
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER)] });
+  const p = await eng.setGrain(A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [acc(OTHER)], watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 5 }] });
+  const P = p.grain && p.grain.id;
+  const recs = eng.messages(A, C, { limit: 3 });
+  await eng.onFresh(eng.adapterRecords().adapters.find((r) => r.id === A), C, (recs.records || recs).slice(-3), { origin: 'test' });
+  await new Promise((r) => setTimeout(r, 50));
+  const held = (eng.store.index.live()[KEY].pending || []).filter((x) => x && x.for === 'agent:agent-1').length;
+  const d0 = delivered.length;
+  const fl = await eng.flushScope(A, 'pattern', P, 'agent:agent-1');
+  await new Promise((r) => setTimeout(r, 50));
+  return { P: !!P, held, flush: { ok: !!(fl && fl.ok), why: (fl && fl.why) || null }, delivered: delivered.slice(d0).filter((d) => d.cid === 'agent-1').length };
+}
+try {
+  const g = await digestLeg(ENG, 'e4f-digest');
+  ok(g.P && g.held >= 1 && g.flush.ok && g.delivered === 1, `(c) a rule DIGEST for Worker (its access the account's): the hits are held for it (${g.held}) and its window's flush DELIVERS one block — the flush finds the watcher by the reader that held them (round 4's flush read the rule without the account's access: «not-watching», the hits held for ever)`, J2s(g));
+} catch (e) { ok(false, '④f (c) threw on this tree: ' + ((e && e.stack) || e)); }
+
+console.log('④g A WEBHOOK PATH THAT HOLDS A WAKE IS A WAKE GRAIN (lane wake-approve-card r5): the path verbs behind the person verdict');
+/** The REAL webhook routes (src/routes/webhook.js) in front of a REAL engine with the built-in inbound door: two paths made on
+ *  this page — «held» with the owner's wake on its conversation, «free» with none — both disabled on this page. Then the
+ *  path verbs from a bare curl (an instance whose sign-in is off) and from an automation key's bearer (vsak_ — `owner()`
+ *  refuses only vsst_ / jbt_). → statuses + the stored path. */
+async function pathLeg(ENGM, name) {
+  const express = require('express'), http = require('node:http');
+  const WR = require(path.join(REPO, 'src/routes/webhook.js'));
+  const dataDir = path.join(ROOT, name);
+  const quiet = { log() {}, warn() {}, error() {} };
+  const eng = ENGM.create({ dataDir, env: {}, broadcast: () => {}, log: quiet, deliver: { deliverToConversation: async () => ({ ok: true, lane: 'message' }), stashFor() {} }, serverSetting: () => undefined, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }], httpInbound: true });
+  WR.setup({ getEngine: () => eng, dataDir, serverSetting: () => undefined });
+  const app = express(); app.use(WR.router);
+  const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const PAGE = { 'Sec-Fetch-Site': 'same-origin' }, VSAK = { Authorization: 'Bearer vsak_0123456789abcdef' };
+  const call = async (method, p, body = {}, headers = PAGE) => { const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }); let j = {}; try { j = await r.json(); } catch { } return { status: r.status, code: j.code || null, wakeHeld: !!j.wakeHeld, j }; };
+  const W = WR.ADAPTER_ID;
+  try {
+    const mk = { held: await call('POST', '/api/channels/webhook/paths', { slug: 'held', title: 'held', textPath: 'text' }), free: await call('POST', '/api/channels/webhook/paths', { slug: 'free', title: 'free', textPath: 'text' }) };
+    const cHeld = await call('POST', '/api/channels/webhook/paths/held/callers', { name: 'ci-bot', auth: 'bearer', delivery: { mode: 'poll' } });
+    const n = await eng.setGrain(W, { kind: 'conversation', convId: 'held' }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, delivery: 'wake' }] });   // the owner's Notify… on the held path
+    const off = { held: (await call('PUT', '/api/channels/webhook/paths/held', { disabled: true })).status, free: (await call('PUT', '/api/channels/webhook/paths/free', { disabled: true })).status };
+    const marks = typeof eng.wakeHeldAt === 'function' ? { held: eng.wakeHeldAt(W, { kind: 'path', convId: 'held' }).held, free: eng.wakeHeldAt(W, { kind: 'path', convId: 'free' }).held } : null;
+    const disabledOf = (slug) => { const f = JSON.parse(fs.readFileSync(path.join(dataDir, 'channels', W, 'callers.json'), 'utf8')); return !!(f.paths[slug] && f.paths[slug].disabled); };
+    const out = { setup: { made: [mk.held.status, mk.free.status], caller: cHeld.status, notify: !!n.ok, off }, marks };
+    out.bare = { enable: await call('PUT', '/api/channels/webhook/paths/held', { disabled: false }, {}), budget: await call('PUT', '/api/channels/webhook/paths/held', { wakesPerHour: 60 }, {}), ipAllow: await call('PUT', '/api/channels/webhook/paths/held', { ipAllow: [] }, {}), caller: await call('POST', '/api/channels/webhook/paths/held/callers', { name: 'intruder', auth: 'bearer', delivery: { mode: 'poll' } }, {}), revoke: await call('POST', `/api/channels/webhook/paths/held/callers/${cHeld.j.caller && cHeld.j.caller.id}/revoke`, {}, {}) };
+    out.vsak = await call('PUT', '/api/channels/webhook/paths/held', { disabled: false }, VSAK);
+    out.heldAfter = disabledOf('held');
+    out.free = { enable: await call('PUT', '/api/channels/webhook/paths/free', { disabled: false }, {}), caller: await call('POST', '/api/channels/webhook/paths/free/callers', { name: 'ci-bot', auth: 'bearer', delivery: { mode: 'poll' } }, {}) };
+    out.freeAfter = disabledOf('free');
+    out.page = await call('PUT', '/api/channels/webhook/paths/held', { disabled: false });
+    out.pageAfter = disabledOf('held');
+    return out;
+  } finally { await new Promise((r) => srv.close(r)); try { eng.stop && eng.stop(); } catch { } }
+}
+try {
+  const g = await pathLeg(ENG, 'e4g');
+  const st = (x) => x && x.status;
+  ok(J2s(g.setup.made) === '[200,200]' && g.setup.caller === 200 && g.setup.notify && g.setup.off.held === 200 && g.setup.off.free === 200, 'setup: paths «held» (the owner\'s wake on its conversation, a caller) and «free» (no wake) made and disabled on this page', J2s(g.setup));
+  ok(g.marks && g.marks.held === true && g.marks.free === false, 'the engine marks the held path (wakeHeldAt {kind: path}) — not the free one', J2s(g.marks));
+  ok(Object.values(g.bare).every((x) => x.status === 403 && x.code === 'cross_site' && x.wakeHeld) && g.heldAfter === true, `a BARE curl (sign-in off) on the held path — enable it, raise its wake budget, open its allow-list, register a caller, revoke one — ⇒ 403 cross_site each (${Object.values(g.bare).map(st).join(', ')}); the path stays disabled`, J2s(Object.fromEntries(Object.entries(g.bare).map(([k, v]) => [k, [v.status, v.code]]))));
+  ok(g.vsak.status === 403 && g.vsak.code === 'human_only', '…an automation key\'s bearer (vsak_ — `owner()` lets it by) ⇒ 403 human_only', J2s(g.vsak));
+  ok(st(g.free.enable) === 200 && st(g.free.caller) === 200 && g.freeAfter === false, 'the SAME bare curls on the path with NO wake ⇒ 200 (enabled, a caller registered)', J2s({ enable: st(g.free.enable), caller: st(g.free.caller) }));
+  ok(g.page.status === 200 && g.pageAfter === false, 'this instance\'s own page enables the held path ⇒ 200', J2s(g.page.status));
+} catch (e) { ok(false, '④g threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); }
 
 console.log('⑤ W5: next-turn rides the free stash; a legacy row still wakes');
 async function deliveryLeg(ENGM, name) {
