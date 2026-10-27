@@ -204,10 +204,10 @@ const base = `http://127.0.0.1:${PORT}`;
 const waitServer = async () => { for (let i = 0; i < 120; i++) { try { await fetch(`${base}/api/home`); return true; } catch { await sleep(250); } } return false; };
 const waitDown = async () => { for (let i = 0; i < 80; i++) { try { await fetch(`${base}/api/home`); await sleep(100); } catch { return true; } } return false; };
 ok(await waitServer(), 'the worktree server booted (with the vendor stub preloaded)');
-const api = async (method, p, body) => {
+const api = async (method, p, body, headers = {}) => {
   // a request that races a boot's last socket reset is retried (never a request the server answered)
   for (let i = 0; ; i++) {
-    try { const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }); const text = await r.text(); return { status: r.status, text, json: (() => { try { return JSON.parse(text); } catch { return null; } })() }; }
+    try { const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined }); const text = await r.text(); return { status: r.status, text, json: (() => { try { return JSON.parse(text); } catch { return null; } })() }; }
     catch (e) { if (i >= 20) throw e; await sleep(250); }
   }
 };
@@ -730,7 +730,7 @@ const p2 = await newPage();
 
   // (n) Remove: refused BY NAME while referenced; an unreferenced account goes
   const conv = (await api('GET', '/api/channels')).json.conversations.find((c) => c.adapterId === A.id);
-  const asg = await api('PUT', `/api/channels/${encodeURIComponent(A.id)}/${encodeURIComponent(conv.id)}/assignment`, { assignment: { principal: { kind: 'agent', id: 'agent-7', name: 'Procurement agent' }, mode: 'all' } });
+  const asg = await api('PUT', `/api/channels/${encodeURIComponent(A.id)}/${encodeURIComponent(conv.id)}/assignment`, { assignment: { principal: { kind: 'agent', id: 'agent-7', name: 'Procurement agent' }, mode: 'all' } }, { 'Sec-Fetch-Site': 'same-origin' /* the owner's page — lane wake-approve-card r2 */ });
   ok(asg.status === 200, 'FIXTURE: one conversation of the first account is assigned to an agent');
   const confirmNewest = `(async () => { for (let i = 0; i < 40; i++) { const b = [...document.querySelectorAll('.dialog-overlay .dialog-footer .btn-create')].pop(); if (b) { b.click(); return true; } await new Promise((r) => setTimeout(r, 50)); } return false; })()`;
   await p1.evaljs(`(async () => { ${card(A.id)}.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 200)); [...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => e.textContent.trim() === 'Remove…').click(); return 1; })()`);

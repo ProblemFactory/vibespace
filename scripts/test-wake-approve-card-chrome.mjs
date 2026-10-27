@@ -24,7 +24,16 @@
 //   ⑥ A RELOAD re-derives both records from the store (never stored twice: the store holds each item once, the page's storage
 //     holds none); the agent never saw the card (nothing of it reached the conversation: its stdin, the hub's frames). RED
 //     CONTROL: the base's record words (a bundle without the stamp) — «approved · …», neither who nor when
-//   SHOTS: before (no card), the two cards (desk + phone), the waiting-owner branch, the decided records.
+// ACCEPTANCE ROUND 2 (主开发): ⓪b EVERY WRITER OF A WAKE WATCH ASKS THE PERSON VERDICT — on the real hub, the agent's own vsst_
+//     on the watchers doors (a conversation, the account, a rule, an assignment) with a wake row ⇒ 403 human_only, a bare write
+//     ⇒ 403 cross_site; its non-wake write (a next-turn row) and its own CLI road (`watch --mode next-turn --keyword`) as they
+//     were; this page ⇒ written · ① the PHONE leg: a decision row's verbs are Approve ✓ / Deny ✕ and nothing that closes it
+//     · ①c NO OTHER CLOSER: no ✓ to press on the phone (on the base: pressed, it DENIED the request and the record read «✓
+//     done»), «Mark all seen» on the tray passes both by («2 decisions left for you»), a scripted close is refused by name ·
+//     ④/⑤ a decision has no Undo · ⑤b A DECISION IS FINAL: a reopen is refused by name, the decided rows carry no ↺ / Reopen
+//   SHOTS: before (no card), the two cards (desk + phone), the waiting-owner branch, the decided records; round 2: the phone's
+//     decision row (r2-phone-decision-row-375.png), the tray's decision rows (r2-tray-decision-rows-1280.png), after the phone
+//     press (r2-phone-after-press-375.png).
 // Requires google-chrome (SKIP without) and a fresh `npm run build`. Run: node scripts/test-wake-approve-card-chrome.mjs [--shots <dir>]
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -87,6 +96,8 @@ const SELF = 'const id = require("fs").readFileSync(' + JSON.stringify(DIR + '/w
   + ' (async () => { for (const p of ["/api/channels/reach-requests/" + id + "/approve", "/api/agent/channels/reach-requests/" + id + "/approve"]) { const r = await fetch(' + JSON.stringify(${JSON.stringify(ORIGIN)}) + ' + p, { method: "POST", headers: H, body: "{}" }); let j = null; try { j = await r.json(); } catch {} console.log(p.split("/")[2] + " " + r.status + " " + ((j && j.code) || "-")); } })();';
 const VERBS = {
   watch2: [watch(${JSON.stringify(POLL)}), watch(${JSON.stringify(PUSH)})],
+  watchnt: [['vibespace-channels', ['watch', ${JSON.stringify(POLL)}, '--mode', 'next-turn', '--keyword', 'outage', '--why', 'tell me about outages on my next turn']]],   // round 2: the agent's own NON-wake road
+  unwatchnt: [['vibespace-channels', ['unwatch', ${JSON.stringify(POLL)}]]],
   selfapprove: [['node', ['-e', SELF]]],
 };
 let n = 0, buf = '';
@@ -250,6 +261,8 @@ const CARD = (id) => `(() => { const c = document.querySelector('.cn-card[data-i
   return { open: c.classList.contains('cn-open'), done: c.classList.contains('cn-done'), fold: c.classList.contains('cn-fold'), wait: c.classList.contains('cn-wait'), tag: c.__wkTag || null,
     hostCmd: raw && raw.content && raw.content[0] && raw.content[0].input ? String(raw.content[0].input.command || '') : '', text: (c.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 300),
     approve: btn('.ut-action-proposal[data-answer="approve"]'), deny: btn('.ut-action-proposal[data-answer="reject"]'), buttons: [...c.querySelectorAll('button')].filter((x) => x.offsetParent && !x.classList.contains('cn-line')).length,
+    verbs: [...c.querySelectorAll('button')].filter((x) => x.offsetParent && !x.classList.contains('cn-line')).map((x) => ((x.textContent || '').trim() + (x.dataset.label ? ' ' + x.dataset.label : '')).trim().slice(0, 24)),
+    closers: [...c.querySelectorAll('.ut-done, .ut-dismiss, .ut-reopen')].filter((x) => x.offsetParent).length,
     line: (c.querySelector('.cn-line')?.textContent || '').trim() }; })()`;
 /** the clock words a decision at `ts` reads on THIS page (its timezone): «09:41» */
 const hm = (P, ts) => P.evalJs(`(() => { const d = new Date(${Number(ts) || 0}); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); })()`);
@@ -268,6 +281,35 @@ try {
     if (!r || r.status !== 200) console.log(`  (setup: the reach write for ${conv} answered ${JSON.stringify(r)})`);
   }
   check('setup: the stub conversation runs behind the real wrapper with its own session token (vsst_) — the agent the hub knows', !!env && /^vsst_/.test(String(env.token || '')) && !!SID, env && { sid: env.sid, token: String(env.token || '').slice(0, 5) });
+
+  console.log('⓪b EVERY WRITER OF A WAKE WATCH ASKS THE PERSON VERDICT (round 2) — the watchers doors on the real hub');
+  try {
+    const V = { Authorization: 'Bearer ' + (env && env.token) };
+    const me = { kind: 'agent', id: env && env.sid };
+    const WAKE = { principal: me, notify: 'wake', delivery: 'wake', mode: 'all', dailyWakeCap: 3 };
+    const NEXT = { principal: me, notify: 'wake', delivery: 'next-turn', mode: 'all' };   // (no origin 'agent': clearing it must not leave the user's removal mark)
+    const send = async (method, p, body, headers = {}) => { const r = await fetch(ORIGIN + p, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, code: j && j.code, id: j && j.grain && j.grain.id }; };
+    const undo = async (r, method, p, body) => { if (r.status === 200) await send(method, p, body, { 'Sec-Fetch-Site': 'same-origin' }); };   // the base wrote it: take it back at once (a wake row wakes)
+    const w = {};
+    w.conv = await send('PUT', `/api/channels/${POLL}/watchers`, { watchers: [WAKE] }, V); await undo(w.conv, 'PUT', `/api/channels/${POLL}/watchers`, { watchers: [] });
+    w.bare = await send('PUT', `/api/channels/${POLL}/watchers`, { watchers: [WAKE] }); await undo(w.bare, 'PUT', `/api/channels/${POLL}/watchers`, { watchers: [] });
+    w.acct = await send('PUT', '/api/channels/adapters/fake-poll/watchers', { watchers: [WAKE] }, V); await undo(w.acct, 'PUT', '/api/channels/adapters/fake-poll/watchers', { watchers: [] });
+    w.assign = await send('PUT', `/api/channels/${POLL}/assignment`, { assignment: { principal: me, authority: 'draft' } }, V); await undo(w.assign, 'PUT', `/api/channels/${POLL}/assignment`, { assignment: null });
+    w.rule = await send('POST', '/api/channels/adapters/fake-poll/patterns', { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [], watchers: [WAKE] }, V);
+    if (w.rule.status === 200 && w.rule.id) await fetch(`${ORIGIN}/api/channels/adapters/fake-poll/patterns/${w.rule.id}`, { method: 'DELETE', headers: { 'Sec-Fetch-Site': 'same-origin' } });
+    console.log('  (the doors answered: ' + JSON.stringify(w) + ')');
+    check('a WAKE row from the agent\'s own vsst_ (its real token) on the watchers doors — a conversation, the account, a rule written with its lists, a pre-split assignment ⇒ 403 human_only; a bare write ⇒ 403 cross_site (on the base: written, a billed wake with no click)', w.conv.status === 403 && w.conv.code === 'human_only' && w.acct.code === 'human_only' && w.rule.code === 'human_only' && w.assign.code === 'human_only' && w.bare.status === 403 && w.bare.code === 'cross_site', w);
+    const nt = await send('PUT', `/api/channels/${POLL}/watchers`, { watchers: [NEXT] }, V);
+    const cleared = await send('PUT', `/api/channels/${POLL}/watchers`, { watchers: [] }, V);
+    say('now do:watchnt'); await logHas(/### watchnt 0 rc=/);
+    const ntOut = (cliLog().split('### watchnt 0')[1] || '').split('###')[0];
+    const mine = await (await fetch(ORIGIN + '/api/agent/channels/watches', { headers: V })).json().catch(() => null);
+    say('now do:unwatchnt'); await logHas(/### unwatchnt 0 rc=/);
+    check(`…an agent's NON-wake write stays as it is: a next-turn row on the same door ⇒ ${nt.status} (a removal ⇒ ${cleared.status}); its own CLI road (\`watch --mode next-turn --keyword outage\`) sets it at once`, nt.status === 200 && cleared.status === 200 && / rc=0/.test(cliLog().split('### watchnt 0')[1] || '') && /next turn|next-turn/.test(JSON.stringify(mine)), { nt, cleared, ntOut: ntOut.trim().slice(0, 200), mine: JSON.stringify(mine).slice(0, 300) });
+    const page = await A.evalJs(`(async () => { const p = '/api/channels/${POLL}/watchers'; const put = (rows) => fetch(p, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ watchers: rows }) }).then((r) => r.status); const a = await put([${JSON.stringify(WAKE)}]); const b = await put([]); return { wrote: a, cleared: b }; })()`);
+    check(`…this instance's own page (the owner's Notify…) writes the wake (${page.wrote}) and takes it back (${page.cleared})`, page.wrote === 200 && page.cleared === 200, page);
+  } catch (e) { fail++; console.log('  ✗ ⓪b threw: ' + (e?.message || e)); }
+  await lap('⓪b done');
 
   if (!NO_CARD) check('⓪ the RED CONTROL bundle builds from this source (its anchor is the chain\'s line)', false, NO_CARD_ERR);
   else try {
@@ -311,8 +353,9 @@ try {
   check(`R4 (the control): the For-you store the tray counts holds each request ONCE (${tray.poll} + ${tray.push} of ${tray.n} open); the chat's chip «${tray.chip}»`, tray.poll === 1 && tray.push === 1 && tray.n === 2 && tray.chip === 'waiting for you · 2 approvals', tray);
   await B.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wrPoll && wrPoll.id)} }); true`);
   await B.waitFor(`!!document.querySelector('.iw-item .iw-act[data-act="proposal-approve"]')`, 10000);
-  const win = await B.evalJs(`(() => { const a = document.querySelector('.iw-item .iw-act[data-act="proposal-approve"]'), d = document.querySelector('.iw-item .iw-act[data-act="proposal-reject"]'); return { approve: !!a && a.offsetParent !== null, deny: !!d && d.offsetParent !== null, title: (document.querySelector('.iw-item .iw-title')?.textContent || '').trim() }; })()`);
-  check('R4: the For-you window\'s row for the same request keeps its own Approve (and its Reject) — the tray door is unchanged', win.approve && win.deny && /asks to be woken by Ops room/.test(win.title), win);
+  const win = await B.evalJs(`(() => { const a = document.querySelector('.iw-item .iw-act[data-act="proposal-approve"]'), d = document.querySelector('.iw-item .iw-act[data-act="proposal-reject"]'); return { approve: !!a && a.offsetParent !== null, deny: !!d && d.offsetParent !== null, denyWord: d ? (d.textContent || '').trim() : null, acts: [...document.querySelectorAll('.iw-item .iw-act')].filter((x) => x.offsetParent).map((x) => x.dataset.act), title: (document.querySelector('.iw-item .iw-title')?.textContent || '').trim() }; })()`);
+  check('R4: the For-you window\'s row for the same request keeps its own Approve — the tray door is unchanged', win.approve && win.deny && /asks to be woken by Ops room/.test(win.title), win);
+  check(`round 2: …and there too a decision row has TWO verbs — Approve / «${win.denyWord}», no Mark done / Dismiss (${JSON.stringify(win.acts)})`, win.denyWord === 'Deny' && !win.acts.includes('done') && !win.acts.includes('dismiss'), win);
   await B.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
   // …and on a phone (B at 375 touch for one look — then back to its desk)
   await B.device(375, 812); await B.load();
@@ -321,10 +364,44 @@ try {
   await B.waitFor(`!!document.querySelector('.cn-card[data-item="${wrPush && wrPush.id}"] .ut-action-proposal[data-answer="approve"]')`, 12000);
   await B.evalJs(`document.querySelector('.cn-card[data-item="${wrPush && wrPush.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
   const ph = await B.evalJs(CARD(wrPush && wrPush.id));
-  await B.shot('after-card-phone-375.png');
+  await B.shot('after-card-phone-375.png'); await B.shot('r2-phone-decision-row-375.png');
   check(`…on a phone (375 touch): Approve ${ph?.approve?.w}×${ph?.approve?.h}, Deny ${ph?.deny?.w}×${ph?.deny?.h} — every target ≥ 44 × 44`, !!ph?.approve && !!ph?.deny && ph.approve.w >= 44 && ph.approve.h >= 44 && ph.deny.w >= 44 && ph.deny.h >= 44, ph);
+  // ROUND 2: A DECISION ROW HAS TWO VERBS — what ends it is Approve / Deny and nothing else (no ✓ Mark done / ✕ Dismiss)
+  const NOT_AN_END = /^(⤢|↗)/;   // a door that opens it elsewhere (the For-you window) — never closes it
+  check(`round 2, the PHONE: the decision row's verbs are ${JSON.stringify(ph?.verbs)} — the two that end it are Approve / Deny, nothing else (${ph?.closers} ✓ / ✕ drawn)`, !!ph && ph.closers === 0 && ph.verbs.filter((v) => !NOT_AN_END.test(v)).join('|') === 'Approve|Deny', ph && { verbs: ph.verbs, closers: ph.closers });
+  // ①c — NO OTHER CLOSER. The phone first, while it is a phone: a ✓ beside Approve / Deny, if one is drawn, is PRESSED — what it
+  // does is the finding (on the base it was a silent Deny: the request denied, the record «✓ done»)
+  console.log('①c A DECISION ROW HAS NO OTHER CLOSER (round 2) — the phone\'s ✓, the tray\'s «Mark all seen», a scripted close');
+  const tick = `.cn-card[data-item="${wrPush && wrPush.id}"] .ut-done`;
+  await B.front();
+  const hasTick = await B.evalJs(`(() => { const b = document.querySelector(${JSON.stringify(tick)}); return !!b && !!b.offsetParent; })()`);
+  const tickPress = hasTick ? await B.restThenPress(tick) : null;
+  await sleep(hasTick ? 1200 : 200);
+  const afterTick = { item: ((await api()).resolved.find((i) => i.id === (wrPush && wrPush.id)) || null), card: await B.evalJs(CARD(wrPush && wrPush.id)) };
+  afterTick.open = (await wakeItems()).open.some((i) => i.id === (wrPush && wrPush.id));
+  await B.shot('r2-phone-after-press-375.png');
+  check(`the phone: no ✓ Mark done to press beside Approve / Deny — the request is still open, its card still has its two verbs${hasTick ? ` (the base: the press ${tickPress && tickPress.pressed ? 'resolved it «' + (afterTick.item && afterTick.item.resolvedBy) + '» — the record reads «' + (afterTick.card && afterTick.card.line) + '», toast «' + (tickPress && tickPress.toast) + '»' : 'missed'})` : ''}`, !hasTick && afterTick.open && !!afterTick.card && !!afterTick.card.approve, { hasTick, tickPress, item: afterTick.item && { status: afterTick.item.status, by: afterTick.item.resolvedBy }, line: afterTick.card && afterTick.card.line });
   await B.device(1280, 800, { mouse: true }); await B.load(); await openChat(B);
   await B.waitFor(`!!document.querySelector('.cn-card[data-item="${wrPush && wrPush.id}"]')`, 12000);
+  // the tray (page A's For-you popup): both rows Approve / Deny only; «Mark all seen» on their band passes both by
+  await A.front();
+  await A.evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); document.getElementById('taskbar-user-todos').click(); return true; })()`);
+  await A.waitFor(`!!document.querySelector('#user-todos-popup .ut-item[data-id="${wrPoll && wrPoll.id}"]')`, 8000);
+  const ROWV = (id) => `(() => { const r = document.querySelector('#user-todos-popup .ut-item[data-id="${id}"]'); if (!r) return null; return { answers: [...r.querySelectorAll('.ut-action-proposal')].filter((x) => x.offsetParent).map((x) => (x.textContent || '').trim()), closers: [...r.querySelectorAll('.ut-done, .ut-dismiss, .ut-reopen')].filter((x) => x.offsetParent).length }; })()`;
+  const tr = { poll: await A.evalJs(ROWV(wrPoll && wrPoll.id)), push: await A.evalJs(ROWV(wrPush && wrPush.id)) };
+  await A.shot('r2-tray-decision-rows-1280.png');
+  const trOk = (x) => !!x && x.closers === 0 && x.answers.join('|') === 'Approve|Deny';
+  check(`the tray: each decision row's verbs are Approve / Deny and no ✓ / ✕ (${JSON.stringify(tr)})`, trOk(tr.poll) && (!tr.push || trOk(tr.push)), tr);
+  const seenSel = `#user-todos-popup .ut-band:has(.ut-item[data-id="${wrPoll && wrPoll.id}"]) > .ut-band-bar > .ut-seen-all`;
+  const hasSeen = await A.evalJs(`(() => { const b = document.querySelector(${JSON.stringify(seenSel)}); return !!b && !!b.offsetParent; })()`);
+  let seenToast = '', seenHow = 'the band\'s «Mark all seen»';
+  if (hasSeen) { await A.realClick(seenSel); await sleep(1200); seenToast = await A.evalJs(`[...document.querySelectorAll('.global-toast, .toast')].map((x) => x.textContent).join(' | ')`); }
+  else { seenHow = 'its route (the band drew no «Mark all seen»)'; const r = await A.evalJs(`fetch('/api/user-todos/resolve-many', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [${JSON.stringify(wrPoll && wrPoll.id)}, ${JSON.stringify(wrPush && wrPush.id)}], status: 'dismissed' }) }).then((r) => r.json())`); seenToast = JSON.stringify(r); }
+  const afterSeen = await wakeItems();
+  check(`«Mark all seen» (${seenHow}) passes the decision rows by — «${seenToast.slice(0, 80)}» — they stay until decided (${afterSeen.open.length} open)`, afterSeen.open.length === (afterTick.open ? 2 : 1) && /decisions? left for you/.test(seenToast), { seenToast, open: afterSeen.open.map((i) => i.id) });
+  const scripted = await A.evalJs(`fetch('/api/user-todos/${wrPoll && wrPoll.id}', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }) }).then(async (r) => ({ status: r.status, ...(await r.json().catch(() => ({}))) }))`);
+  check(`a scripted close of a decision row (the old ✓'s own route) ⇒ ${scripted.status} ${scripted.code} — said by name, the request still open`, scripted.status === 409 && scripted.code === 'decision_row' && (await wakeItems()).open.some((i) => i.id === (wrPoll && wrPoll.id)), scripted);
+  await A.evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`); await sleep(300);
   await lap('① done');
 
   console.log('② A CLICK IS THE ONLY APPROVAL — on the real hub: tokens, a bare write, the agent itself, a typed «approve»');
@@ -361,6 +438,7 @@ try {
   const pressed = pr.pressed;
   const pushDone = await until(async () => (await wakeItems()).resolved.find((i) => i.id === (wrPush && wrPush.id)));
   check('a real click on the card\'s Approve ⇒ the hub resolved THAT request `allowed` (the other still open)', pressed && !!pushDone && pushDone.resolvedBy === 'allowed' && (await wakeItems()).open.some((i) => i.id === (wrPoll && wrPoll.id)), { pr, pushDone: pushDone && { by: pushDone.resolvedBy } });
+  check(`round 2: a decision is final — its toast offers no Undo («${pr.toast}»); the record carries the person verdict's mark`, !/Undo/.test(pr.toast || '') && !!pushDone && !!pushDone.resolvedFact && pushDone.resolvedFact.decidedBy === 'person', { toast: pr.toast, fact: pushDone && pushDone.resolvedFact });
   const watches = await (await fetch(ORIGIN + '/api/agent/channels/watches', { headers: { Authorization: 'Bearer ' + (env && env.token) } })).json().catch(() => null);
   const wake = ((watches && watches.watches) || []).find((w) => /fake-push-ops/.test(JSON.stringify(w)));
   check('…the wake proceeds: the agent\'s own watch list now holds exactly what the card said — a WAKE on the Slack-like «Ops room» (and nothing on the other)', !!wake && /wake/.test(JSON.stringify(wake)) && !((watches && watches.watches) || []).some((w) => /fake-poll-ops/.test(JSON.stringify(w))), watches);
@@ -388,7 +466,7 @@ try {
   const dr = await A.restThenPress('.iw-item .iw-act[data-act="proposal-reject"]');
   const denied = dr.pressed;
   const pollDone = await until(async () => (await wakeItems()).resolved.find((i) => i.id === (wrPoll && wrPoll.id)));
-  check('a real click on Reject in the For-you window ⇒ the hub resolved that request `denied`', denied && !!pollDone && pollDone.resolvedBy === 'denied', { dr, pollDone: pollDone && pollDone.resolvedBy });
+  check('a real click on Deny in the For-you window ⇒ the hub resolved that request `denied` — no Undo offered', denied && !!pollDone && pollDone.resolvedBy === 'denied' && !/Undo/.test(dr.toast || ''), { dr, pollDone: pollDone && pollDone.resolvedBy });
   const stampPoll = 'denied by you · ' + (await hm(A, pollDone && pollDone.resolvedAt));
   await A.waitFor(`document.querySelector('.cn-card[data-item="${wrPoll && wrPoll.id}"]')?.classList.contains('cn-done')`, 10000);
   const aRec = await A.evalJs(CARD(wrPoll && wrPoll.id));
@@ -402,6 +480,17 @@ try {
   await A.evalJs(`document.querySelector('.cn-card[data-item="${wrPoll && wrPoll.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(300);
   await A.shot('after-decided-records-1280.png');
   await lap('⑤ done');
+
+  console.log('⑤b A DECISION IS FINAL (round 2) — a reopen refused by name; the decided rows carry no ↺ / Reopen');
+  const reo = await A.evalJs(`Promise.all([${JSON.stringify(wrPoll && wrPoll.id)}, ${JSON.stringify(wrPush && wrPush.id)}].map((id) => fetch('/api/user-todos/' + id, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'open' }) }).then(async (r) => ({ status: r.status, code: (await r.json().catch(() => ({}))).code }))))`);
+  const stillDone = (await wakeItems()).resolved.filter((i) => i.id === (wrPoll && wrPoll.id) || i.id === (wrPush && wrPush.id)).map((i) => i.resolvedBy).sort().join(',');
+  check(`reopening a decided request (the old ↺ / the 6 s Undo) ⇒ ${reo.map((x) => x.status + ' ' + x.code).join(', ')} — both records keep «${stillDone}»`, reo.every((x) => x.status === 409 && x.code === 'decision_final') && stillDone === 'allowed,denied', { reo, stillDone });
+  await A.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wrPush && wrPush.id)} }); true`);
+  await A.waitFor(`!!document.querySelector('.iw-item')`, 8000); await sleep(400);
+  const finalActs = await A.evalJs(`[...document.querySelectorAll('.iw-item .iw-act')].filter((x) => x.offsetParent).map((x) => x.dataset.act)`);
+  await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(300);
+  check(`the For-you window on a decided request: ${JSON.stringify(finalActs)} — no Reopen`, Array.isArray(finalActs) && !finalActs.includes('reopen') && !finalActs.includes('done'), finalActs);
+  await lap('⑤b done');
 
   console.log('⑥ A RELOAD re-derives both records from the store; never stored twice; the agent never saw the card');
   await A.load(); await openChat(A);

@@ -27,13 +27,30 @@
 //     is named by no page, an unknown role may not decide. RED COPIES for each
 //   ⑥ ONE RENDERER, NEVER STORED TWICE — the card writes no storage of its own and calls no route itself (its verbs are the
 //     panel's rows): a textual census of src/lib/chat-needs-card.js with RED COPIES
+// ACCEPTANCE ROUND 2 (主开发 — «a decision row has TWO verbs and no other closer; the stamp names only a person's decision; every
+// writer of a wake watch is behind the person verdict»):
+//   ⑦ A DECISION ROW HAS TWO VERBS — the store (src/user-todos.js over THE registry's decide: 'person' rows): ✓ Mark done /
+//     ✕ Dismiss refused by name (decision_row), «Mark all seen» passes it by (`decisions`), a reply never decides, its end
+//     (expired) and its decision (allowed / denied) close it; a decided one is FINAL (reopen / re-stamp ⇒ decision_final) and a
+//     re-file beside it is a new item (its stamp permanent); an item of any other row closes and reopens as before. RED CONTROL:
+//     the store as the base shipped it — ✓ closed the wake item «done» (the silent Deny), «Mark all seen» closed it, ↺ reopened
+//     a decided record and its stamp was gone
+//   ⑧ …AND EVERY DOOR DRAWS THEM — the tray row (user-todos-row.js: the tray, the mini inbox, the chat's card) and the For-you
+//     window (inbox-window-layout itemView): an open decision row's verbs are Approve / Deny and no ✓ / ✕; a decided one has
+//     no ↺; the window's second verb is «Deny»; a non-decision row keeps its closers (the control)
+//   ⑨ EVERY WRITER OF A WAKE WATCH ASKS THE PERSON VERDICT — the watchers / assignment / rule doors of src/routes/channels.js
+//     over a stub engine: a wake row from a vsst_ ⇒ 403 human_only, from a bare write ⇒ 403 cross_site (the engine never
+//     asked); a next-turn row (an agent's non-wake write), a removal ⇒ as before; this page ⇒ written. THE WRITER CENSUS: every
+//     route calling a watch writer asks it first; every setGrain call inside the engine is named (the agent's own road writes
+//     next-turn only — a wake is its ASK); no other file calls a writer. RED COPIES: the route file without its gate (a vsst_
+//     wake write ⇒ 200, the census names every door), a planted engine writer
 // Run: node scripts/test-wake-approve-card.mjs
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import Module, { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -47,19 +64,32 @@ const at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi).getTime();   // th
 const NOW = at(2026, 10, 27, 10, 5);
 const wr = (o = {}) => ({ id: 'ut-aaaa000001', sessionKey: 'channels', text: 'ops-agent asks to be woken by Ops room', status: 'open', origin: 'channels', action: { type: 'channel-watch-request', id: 'wr-mh2k1-a1b2c3' }, createdAt: at(2026, 10, 27, 9, 30), resolvedAt: null, resolvedBy: null, ...o });
 
+/** a module from `source` compiled AT `rel`'s own path (the real file, or a RED copy) — its requires resolve, nothing is written */
+function moduleFrom(rel, source) {
+  const real = path.join(REPO, rel);
+  const m = new Module(real + '#red', null);
+  m.filename = real; m.paths = Module._nodeModulePaths(path.dirname(real));
+  m._compile(source, real);
+  return m.exports;
+}
+const registryFrom = (source) => moduleFrom('src/foryou-actions.js', source);
+
 // ── ① ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('① THE CARD MODEL — item → its state, its buttons, its stamp');
 {
   const filed = FA.decisionCard(wr(), { now: NOW });
   ok(filed.state === 'filed' && JSON.stringify(filed.buttons) === '["approve","deny"]' && filed.stamp === null && filed.waiting === null, 'filed: open, the owner looking ⇒ Approve + Deny, no stamp', filed);
-  const appr = FA.decisionCard(wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: at(2026, 10, 27, 9, 41) }), { now: NOW });
+  const P = (ts) => ({ resolvedFact: { decidedBy: 'person', decidedAt: ts } });   // the decide route's mark (round 2)
+  const appr = FA.decisionCard(wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: at(2026, 10, 27, 9, 41), ...P(at(2026, 10, 27, 9, 41)) }), { now: NOW });
   ok(appr.state === 'approved' && !appr.buttons.length && appr.stamp === 'approved by you · 09:41', 'approved from either door ⇒ «approved by you · 09:41», no button', appr);
-  const den = FA.decisionCard(wr({ status: 'done', resolvedBy: 'denied', resolvedAt: at(2026, 10, 27, 9, 52) }), { now: NOW });
+  const den = FA.decisionCard(wr({ status: 'done', resolvedBy: 'denied', resolvedAt: at(2026, 10, 27, 9, 52), ...P(at(2026, 10, 27, 9, 52)) }), { now: NOW });
   ok(den.state === 'denied' && !den.buttons.length && den.stamp === 'denied by you · 09:52', 'denied ⇒ «denied by you · 09:52», no button', den);
-  const old = FA.decidedStamp(wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: at(2026, 10, 26, 23, 7) }), { now: NOW });
+  const old = FA.decidedStamp(wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: at(2026, 10, 26, 23, 7), ...P(at(2026, 10, 26, 23, 7)) }), { now: NOW });
   ok(!!old && old.text === 'approved by you · 10/26 23:07' && old.time === '10/26 23:07' && old.verb === 'approved by you', 'a decision of another day names its day: «approved by you · 10/26 23:07»', old);
   const exp = FA.decisionCard(wr({ status: 'done', resolvedBy: 'expired', resolvedAt: at(2026, 10, 27, 10, 0) }), { now: NOW });
-  ok(exp.state === 'expired' && !exp.buttons.length && exp.stamp === 'expired', 'expired ⇒ its final state, no button (never «by you»)', exp);
+  ok(exp.state === 'expired' && !exp.buttons.length && exp.stamp === 'expired · the agent can ask again', 'expired ⇒ its final state «expired · the agent can ask again», no button (never «by you», never «ask-over»)', exp);
+  const expOther = { id: 'ut-n', sessionKey: 'claude:c1', text: 'budget notice', status: 'done', resolvedBy: 'expired', action: null, kind: 'notice' };
+  ok(FA.settledWords(expOther) === 'expired', 'an item of any other row that expired keeps its plain «expired»', FA.settledWords(expOther));
   const wd = FA.decisionCard(wr({ status: 'done', resolvedBy: 'agent', resolvedAt: at(2026, 10, 27, 10, 0) }), { now: NOW });
   ok(wd.state === 'withdrawn' && !wd.buttons.length && wd.stamp === 'withdrawn by the agent', 'withdrawn by the agent ⇒ its final state, no button', wd);
   const viewer = FA.decisionCard(wr(), { role: 'viewer', now: NOW });
@@ -70,7 +100,17 @@ console.log('① THE CARD MODEL — item → its state, its buttons, its stamp')
   ok(FA.decidedStamp(exitAllowed, { now: NOW }) === null && FA.decisionCard(exitAllowed, { now: NOW }).stamp === FA.settledWords(exitAllowed) && !/by you/.test(FA.decisionCard(exitAllowed, { now: NOW }).stamp), 'a row no person-only door decides keeps its own words (an exit ask: «approved · 2 min ago» as before — no «by you»)', FA.decisionCard(exitAllowed, { now: NOW }));
   ok(FA.decidedStamp(wr(), { now: NOW }) === null, 'an open request has no stamp');
   const zh = (s, p) => ({ 'approved by you': '你已批准', 'denied by you': '你已拒绝' }[s] || s).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] != null ? p[k] : ''));
-  ok(FA.decidedStamp(wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: at(2026, 10, 27, 9, 41) }), { t: zh, now: NOW }).text === '你已批准 · 09:41', 'the page\'s words: «你已批准 · 09:41» (zh)');
+  ok(FA.decidedStamp(wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: at(2026, 10, 27, 9, 41), ...P(at(2026, 10, 27, 9, 41)) }), { t: zh, now: NOW }).text === '你已批准 · 09:41', 'the page\'s words: «你已批准 · 09:41» (zh)');
+  // ROUND 2 (minor): «by you» is a fact the RECORD carries — the person verdict's mark, at the time it records
+  const late = FA.decidedStamp(wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: at(2026, 10, 27, 9, 43), ...P(at(2026, 10, 27, 9, 41)) }), { now: NOW });
+  ok(!!late && late.text === 'approved by you · 09:41', 'the stamp\'s time is the one the mark records (decidedAt 09:41), whatever the store\'s resolve time', late);
+  const unmarked = wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: at(2026, 10, 27, 9, 41) });
+  const um = FA.decisionCard(unmarked, { now: NOW });
+  ok(FA.decidedStamp(unmarked, { now: NOW }) === null && um.state === 'approved' && um.stamp === 'approved' && !/by you/.test(um.stamp), 'a record WITHOUT the mark (decidedBy null — decided before the verdict stood, by a bearer or a curl on the base route) keeps its old words «approved · 2 min ago»: no «by you»', um);
+  ok(FA.decidedStamp(wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: at(2026, 10, 27, 9, 41), resolvedFact: { decidedBy: 'user', decidedAt: at(2026, 10, 27, 9, 41) } }), { now: NOW }) === null, '…nor one marked by anyone but the person verdict');
+  const RED_FA = registryFrom(read('src/foryou-actions.js').replace("  if (!fact || fact.decidedBy !== 'person') return null;\n", '').replace('Number(fact.decidedAt) || ', ''));   // the base: no mark asked, the store's time
+  const redSt = RED_FA.decidedStamp(unmarked, { now: NOW });
+  ok(read('src/foryou-actions.js').includes("  if (!fact || fact.decidedBy !== 'person') return null;\n") && !!redSt && /by you/.test(redSt.text), `RED CONTROL: the base's stamp (no mark asked) — a record decidedBy null says «${redSt && redSt.text}»`, redSt);
   // RED CONTROL: the base's record — the quiet line said settledWords + an age: no who, no when
   const base = FA.settledWords(wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: at(2026, 10, 27, 9, 41) }));
   ok(base === 'approved' && !/by you|09:41/.test(base), `RED CONTROL: the base's record words — «${base} · 2 min ago»: neither who decided nor when`, base);
@@ -94,6 +134,7 @@ console.log('② THE KINDS TABLE — which owner decisions are a card in the cha
   const spendNotice = { id: 'ut-s', sessionKey: 'accounts', text: 'Auto-resume skipped: the daily ceiling is reached', status: 'open', origin: 'spend', kind: 'notice' };
   ok(FA.needOf(spendNotice) === null && FA.surfaceOf(spendNotice).at === 'notice', 'the spend guard\'s ceilings (src/server/spend-guard.js — kind \'notice\'): no card — nothing to decide (the brief\'s pointer: the guard files NO wake request; the wake request is channels-access.js fileWatchRequest\'s)', FA.surfaceOf(spendNotice));
   ok(JSON.stringify([...FA.PERSON_DECIDES].sort()) === JSON.stringify(['channel-watch-request', 'open-channel']), 'PERSON_DECIDES = exactly the two rows the reach-requests route decides', FA.PERSON_DECIDES);
+  ok(JSON.stringify(FA.DECISION_ROWS) === JSON.stringify(['channel-watch-request']), 'round 2: DECISION_ROWS (two verbs, no other closer) = the person rows that DRAW their verbs — the wake request; open-channel\'s item is a door to the Reach dialog and the Outbox\'s pointer shares its type (its producer retracts it)', FA.DECISION_ROWS);
 }
 
 // ── ③ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -130,7 +171,7 @@ function scene(registry) {
   const g = scene(FA);
   ok(g.open.length === 2 && g.a.id !== g.b.id && g.cards === 2 && g.aDecidable, `two open wake requests with the same words ⇒ TWO items, two cards in the asking chat, the older (wr-a1) decidable on its own — ${g.open.length} items, ${g.cards} cards`, g.open.map((i) => [i.id, i.action.id]));
   ok(g.c.id !== g.a.id && g.denied.status === 'done' && g.denied.resolvedBy === 'denied' && g.denied.action.id === 'wr-a1', 'a re-ask after a Deny is a NEW item; the denied record keeps «denied» (and its request id)', { c: g.c.id, denied: g.denied });
-  const RED = { ...FA, ROWS: FA.ROWS.map((r) => (r.type === 'channel-watch-request' ? { ...r, identity: null } : r)) };
+  const RED = { ...FA, ROWS: FA.ROWS.map((r) => (r.type === 'channel-watch-request' ? { ...r, identity: null } : r)), isDecisionRow: () => false };   // + the store as the base shipped it (no decision row)
   RED.ACTION_IDENTITY = Object.freeze(Object.fromEntries(RED.ROWS.filter((r) => r.identity).map((r) => [r.type, r.identity])));
   const r = scene(RED);
   ok(r.open.length === 1 && r.cards === 1 && !r.aDecidable && r.b.id === r.a.id, `RED CONTROL: the row as the base shipped it (identity null) — the second request MERGES into the first item: ${r.open.length} item / ${r.cards} card for two requests, the older (wr-a1) decidable by nothing`, r.open.map((i) => [i.id, i.action.id]));
@@ -150,12 +191,16 @@ function routerFrom(source) {
 }
 async function serve(mod) {
   const calls = [];
-  mod.setup({ getEngine: () => ({ decideRequest: async (id, approve, by) => { calls.push({ id, approve, by }); return { ok: true, request: { id, status: approve ? 'approved' : 'denied' } }; } }) });
+  const writes = [];
+  const wrote = (what) => async (...a) => { writes.push({ what, a }); return { ok: true }; };
+  mod.setup({ getEngine: () => ({ decideRequest: async (id, approve, by, opts) => { calls.push({ id, approve, by, person: !!(opts && opts.person) }); return { ok: true, request: { id, status: approve ? 'approved' : 'denied' } }; },
+    setWatchers: wrote('setWatchers'), setGrain: wrote('setGrain'), setAssignment: wrote('setAssignment'), setScopeAssignment: wrote('setScopeAssignment') }) });
   const app = express(); app.use(express.json()); app.use(mod.router);
   const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const own = `http://127.0.0.1:${srv.address().port}`;
   const post = async (verdict, headers = {}, body = {}) => { const r = await fetch(`${own}/api/channels/reach-requests/wr-mh2k1-a1b2c3/${verdict}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, code: j && j.code, error: j && j.error }; };
-  return { own, calls, post, close: () => new Promise((r) => srv.close(r)) };
+  const send = async (method, p, headers = {}, body = {}) => { const r = await fetch(own + p, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, code: j && j.code, error: j && j.error }; };
+  return { own, calls, writes, post, send, close: () => new Promise((r) => srv.close(r)) };
 }
 const REAL_SRC = read('src/routes/channels.js');
 const VERDICT_LINES = "    const who = personVerdict(req);\n    if (!who.ok) return bad(res, 403, DECIDE_REFUSED[who.code] || DECIDE_REFUSED.cross_site, { code: who.code });\n";
@@ -187,6 +232,7 @@ const VERDICT_LINES = "    const who = personVerdict(req);\n    if (!who.ok) ret
     const page = await S.post('approve', { 'Sec-Fetch-Site': 'same-origin' });
     const own = await S.post('deny', { Origin: S.own });
     ok(page.status === 200 && own.status === 200 && S.calls.length === 2 && S.calls[0].approve === true && S.calls[0].by === 'user' && S.calls[1].approve === false, 'this instance\'s own page (Sec-Fetch-Site same-origin / its own Origin) ⇒ decided, by \'user\'', { page, own, calls: S.calls });
+    ok(S.calls.length === 2 && S.calls.every((c) => c.person === true), 'round 2: the route hands the engine the person verdict\'s mark ({person: true}) — the record says decidedBy \'person\' + the time, the only record «by you» may name', S.calls);
   } finally { await S.close(); }
   // RED CONTROL: the route as the base shipped it (the person verdict cut)
   ok(REAL_SRC.split(VERDICT_LINES).length === 2, 'the RED copy\'s anchor is the route\'s verdict (exactly once)');
@@ -287,6 +333,204 @@ function cardStoreProblems(src) {
   // the stamp is ONE spelling on both doors: the tray row words a resolved item through decidedStamp, as the card does
   const row = SRC_FILES['src/lib/user-todos-row.js'];
   ok(/const stamp = item \? decidedStamp\(item, \{ t \}\) : null;\s*if \(stamp\) return stamp\.text;/.test(row) && /const stamp = decidedStamp\(e\.item, \{ t \}\);/.test(src), 'the tray row (resolvedByText — the tray, the mini inbox, the For-you window) and the chat card both say decidedStamp\'s words');
+}
+
+// ── ⑦ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('⑦ A DECISION ROW HAS TWO VERBS — the store: no generic closer, «Mark all seen» passes it by, a decision is final');
+const tryIt = (fn) => { try { const v = fn(); return v && v.id ? v.status + ':' + v.resolvedBy : 'ok'; } catch (e) { return e.code || ('threw: ' + e.message); } };
+function lawScene(registry) {
+  const { m, done } = storeWith(registry);
+  try {
+    const a = fileWake(m, 'wr-l1');
+    const other = m.add('claude:c-ops', { text: 'Which branch should I deploy?', by: 'agent', origin: 'agent' });   // any other row: its closers stay
+    const r = {};
+    r.markDone = tryIt(() => m.setStatus(a.id, 'done', 'user'));                   // ✓ Mark done (the card's, the tray's)
+    r.afterMark = m.get(a.id).status + ':' + m.get(a.id).resolvedBy;
+    r.dismiss = tryIt(() => m.setStatus(a.id, 'dismissed', 'user'));               // ✕ Dismiss
+    const many = m.setStatusMany([a.id, other.id], 'dismissed', 'user');              // «Mark all seen» on their band
+    r.seenAll = { changed: many.changed, decisions: many.decisions || null };
+    m.resolveByReply(a.id, 'approve');                                                 // a typed «approve»
+    r.afterReply = m.get(a.id).status;
+    r.answered = m.resolveAnswered([a.id], 'denied', { decidedBy: 'person', decidedAt: 1 }).length;   // THE decide route's close
+    const dec = { status: m.get(a.id).status, by: m.get(a.id).resolvedBy, fact: m.get(a.id).resolvedFact || null };
+    r.reopen = tryIt(() => m.setStatus(a.id, 'open', 'user'));                       // ↺ / the 6 s Undo
+    r.restamp = tryIt(() => m.setStatus(a.id, 'dismissed', 'user'));
+    r.kept = { status: m.get(a.id).status, by: m.get(a.id).resolvedBy, fact: !!m.get(a.id).resolvedFact };
+    r.dec = dec;
+    // its producer files the SAME request again after the decision (the same id, the same words)
+    const o2 = fileWake(m, 'wr-l1');
+    r.refile = { fresh: o2.id !== a.id, first: m.get(a.id).status + ':' + m.get(a.id).resolvedBy, second: m.get(o2.id).status };
+    // the Outbox's pointer (open-channel — a door, no decision row): its producer retracts it as it always did
+    const ptr = m.add('channels', { text: 'Proposals awaiting approval in Team', by: 'agent', origin: 'channels', action: { type: 'open-channel', adapterId: 'fake-poll', convId: 'oc_teamA', key: 'fake-poll/oc_teamA' } });
+    r.pointer = tryIt(() => m.setStatus(ptr.id, 'done', 'system'));
+    // its END: an item that expires (the store's sweep)
+    const e = fileWake(m, 'wr-l2', 'Ops room 2');
+    m.get(e.id).expiresAt = Date.now() - 1; r.expired = m.expireDue(Date.now() + 1) + ':' + m.get(e.id).resolvedBy;
+    // the control: any other row closes and reopens as it always did
+    r.other = [m.get(other.id).status, tryIt(() => m.setStatus(other.id, 'open', 'user')), tryIt(() => m.setStatus(other.id, 'done', 'user'))];
+    return r;
+  } finally { done(); }
+}
+{
+  const hasLaw = typeof FA.isDecisionRow === 'function' && typeof FA.offersClosers === 'function' && Array.isArray(FA.DECISION_ENDS);
+  ok(hasLaw && FA.isDecisionRow(wr()) && !FA.offersClosers(wr()) && JSON.stringify(FA.DECISION_ENDS) === '["allowed","denied","expired"]', 'THE registry names a decision row (decide: \'person\') and its only ends — allowed / denied (its two verbs), expired (its end)', hasLaw && FA.DECISION_ENDS);
+  const g = lawScene(FA);
+  ok(g.markDone === 'decision_row' && g.dismiss === 'decision_row' && g.afterMark === 'open:null', `✓ Mark done / ✕ Dismiss on a wake request's item are refused BY NAME (${g.markDone} / ${g.dismiss}) — it stays open (was: a silent Deny whose record read «✓ done»)`, g);
+  ok(Array.isArray(g.seenAll.decisions) && g.seenAll.decisions.length === 1 && g.seenAll.changed.length === 1 && !g.seenAll.changed.includes(g.seenAll.decisions[0]), `«Mark all seen» passes the decision row by (listed in \`decisions\` — the page says «1 decision left for you») and marks the rest (${g.seenAll.changed.length})`, g.seenAll);
+  ok(g.afterReply === 'open', 'a typed reply («approve») never answers a decision — the item stays open', g.afterReply);
+  ok(g.answered === 1 && g.dec.status === 'done' && g.dec.by === 'denied' && !!g.dec.fact && g.dec.fact.decidedBy === 'person', 'its decision closes it: «denied», with the person verdict\'s mark', g.dec);
+  ok(g.reopen === 'decision_final' && g.restamp === 'decision_final' && g.kept.status === 'done' && g.kept.by === 'denied' && g.kept.fact, `a decision is FINAL: reopening it (the old ↺ / the 6 s Undo) and re-stamping it are refused by name (${g.reopen} / ${g.restamp}); the record keeps «denied by you»`, g.kept);
+  ok(g.refile.fresh && g.refile.first === 'done:denied' && g.refile.second === 'open', 'the same request filed again after its decision is a NEW item beside it — the decided record keeps its stamp (never reopened under the new filing)', g.refile);
+  ok(g.pointer === 'done:system', 'CONTROL: the Outbox\'s pointer item (open-channel — a door, no decision row) is retracted by its producer as before', g.pointer);
+  ok(g.expired === '1:expired', 'its END closes it — the expiry sweep (\'expired\': the agent can ask again)', g.expired);
+  ok(g.other[0] === 'dismissed' && g.other[1] === 'open:null' && g.other[2] === 'done:user', 'CONTROL: an item of any other row is closed by «Mark all seen», reopened by ↺ and closed by ✓ as before', g.other);
+  // RED CONTROL: the store as the base shipped it (no decision row)
+  const r = lawScene({ ...FA, isDecisionRow: () => false });
+  ok(r.markDone === 'done:user' && (!r.seenAll.decisions || !r.seenAll.decisions.length) && r.reopen === 'open:null', `RED CONTROL: the base's store — ✓ Mark done closed the wake item «${r.markDone}» (the silent Deny), «Mark all seen» took it with the rest, ↺ reopened a decided record (${r.reopen}: its «denied by you» gone)`, r);
+}
+
+// ── ⑧ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('⑧ …AND EVERY DOOR DRAWS THEM — the tray row (the tray, the mini inbox, the chat\'s card) and the For-you window');
+{
+  const noop = () => {};
+  const mkEl = () => ({ dataset: {}, className: '', innerHTML: '', querySelector: () => null, querySelectorAll: () => [], appendChild: noop, addEventListener: noop, setAttribute: noop, classList: { add: noop, remove: noop, toggle: noop, contains: () => false }, style: {} });
+  globalThis.window = globalThis.window || globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
+  globalThis.localStorage = globalThis.localStorage || { getItem: () => null, setItem: noop, removeItem: noop };
+  globalThis.document = globalThis.document || { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl(), head: mkEl() };
+  const R = await import(pathToFileURL(path.join(SRC, 'lib', 'user-todos-row.js')).href);
+  const L = await import(pathToFileURL(path.join(SRC, 'lib', 'inbox-window-layout.js')).href);
+  const tt = (s, p) => String(s).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] != null ? p[k] : ''));
+  const rctx = { t: tt, nameFor: () => 'Channels', wordsOf: (i) => i.text, detailOf: (i) => i.detail || '', replyState: () => ({ show: false }), optionsOf: () => [] };
+  const verbsOf = (html) => ({ answer: [...html.matchAll(/data-answer="(\w+)"[^>]*>(?:<span class="ut-decide-ico"[^>]*>.*?<\/span>)?([^<]*)</g)].map((m) => m[2]), closers: [...html.matchAll(/class="ut-act (ut-done|ut-dismiss|ut-reopen)"/g)].map((m) => m[1]) });
+  const open = R.renderRow({ item: wr({ detail: 'Approve writes: wake ops-agent now (a billed turn)' }), resolved: false, band: 5 }, rctx).innerHTML;
+  const vo = verbsOf(open);
+  ok(JSON.stringify(vo.answer) === '["Approve","Deny"]' && vo.closers.length === 0, `the tray row (and the chat's card — one renderer) of an open wake request: its verbs are ${JSON.stringify(vo.answer)} and NO ✓ / ✕ (${JSON.stringify(vo.closers)})`, vo);
+  const decided = wr({ status: 'done', resolvedBy: 'allowed', resolvedAt: NOW - 60e3, resolvedFact: { decidedBy: 'person', decidedAt: NOW - 60e3 } });
+  const dh = R.renderRow({ item: decided, resolved: true, tail: true }, rctx).innerHTML;
+  ok(verbsOf(dh).closers.length === 0 && /approved by you · /.test(dh), 'its decided record: «approved by you · HH:MM» and NO ↺ (a decision is final)', verbsOf(dh));
+  const plain = { id: 'ut-p', sessionKey: 'claude:c-ops', text: 'Which branch should I deploy?', status: 'open', urgency: 'normal', origin: 'agent', createdAt: NOW - 60e3 };
+  const ph = R.renderRow({ item: plain, resolved: false, band: 5 }, rctx).innerHTML;
+  const pr = R.renderRow({ item: { ...plain, status: 'done', resolvedBy: 'user', resolvedAt: NOW }, resolved: true, tail: true }, rctx).innerHTML;
+  ok(JSON.stringify(verbsOf(ph).closers) === '["ut-done","ut-dismiss"]' && JSON.stringify(verbsOf(pr).closers) === '["ut-reopen"]', 'CONTROL: any other row keeps ✓ / ✕ while open and ↺ once resolved', { open: verbsOf(ph).closers, resolved: verbsOf(pr).closers });
+  const ictx = (item) => ({ t: tt, words: item.text, detail: item.detail || '', name: 'Channels', origin: { origin: 'channels', label: 'Channels' }, notice: false, reply: { show: false }, ago: () => '', expires: () => '', resolvedBy: () => '', closers: FA.offersClosers ? FA.offersClosers(item) : undefined });
+  const w1 = L.itemView(wr(), ictx(wr())).actions, w2 = L.itemView(decided, ictx(decided)).actions, w3 = L.itemView(plain, ictx(plain)).actions;
+  ok(JSON.stringify(w1) === '["proposal-approve","proposal-reject","copy"]' && JSON.stringify(w2) === '["copy"]', `the For-you window: an open wake request's verbs ${JSON.stringify(w1)} (no Mark done / Dismiss), its decided record ${JSON.stringify(w2)} (no Reopen)`, { w1, w2 });
+  ok(JSON.stringify(w3) === '["done","dismiss","copy"]', 'CONTROL: any other item\'s verbs in the window are as before', w3);
+  const IW = read('src/lib/inbox-window.js');
+  ok(/'proposal-reject': \(it\) => \(isDecisionRow\(it\) \? actBtn\('proposal-reject', UI_ICONS\.close, t\('Deny'\)/.test(IW) && /closers: offersClosers\(it\)/.test(IW), 'the window asks THE registry: its second verb says «Deny» on a decision row (Approve / Deny on every door), and its verbs are offersClosers\'');
+  // RED CONTROL: the base's verbs (no closers flag asked) — Mark done / Dismiss beside Approve / Reject, Reopen on the decided record
+  const b1 = L.itemView(wr(), { ...ictx(wr()), closers: undefined }).actions, b2 = L.itemView(decided, { ...ictx(decided), closers: undefined }).actions;
+  ok(b1.includes('done') && b1.includes('dismiss') && b2.includes('reopen'), `RED CONTROL: the base's window — ${JSON.stringify(b1)} on the open request, ${JSON.stringify(b2)} on the decided one`, { b1, b2 });
+}
+
+// ── ⑨ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('⑨ EVERY WRITER OF A WAKE WATCH ASKS THE PERSON VERDICT — the watchers / assignment / rule doors');
+const WAKE = { principal: { kind: 'agent', id: 'c-ops' }, notify: 'wake', delivery: 'wake', mode: 'all', dailyWakeCap: 5 };
+const LEGACY = { principal: { kind: 'agent', id: 'c-ops' }, notify: 'wake', mode: 'all' };   // no delivery = a wake
+const DIGEST = { principal: { kind: 'agent', id: 'c-ops' }, notify: 'digest', delivery: 'wake', digestMinutes: 30, mode: 'all' };
+const NEXT = { principal: { kind: 'agent', id: 'c-ops' }, notify: 'wake', delivery: 'next-turn', mode: 'all', origin: 'agent' };
+const ASSIGN = { principal: { kind: 'agent', id: 'c-ops' }, authority: 'draft' };
+const DOORS_W = [
+  ['PUT', '/api/channels/fake-poll/fake-poll-ops/watchers', (rows) => ({ watchers: rows })],
+  ['PUT', '/api/channels/adapters/fake-poll/watchers', (rows) => ({ watchers: rows })],
+  ['PUT', '/api/channels/adapters/fake-poll/patterns/p1/watchers', (rows) => ({ watchers: rows })],
+  ['POST', '/api/channels/adapters/fake-poll/patterns', (rows) => ({ pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [], watchers: rows })],
+  ['PUT', '/api/channels/adapters/fake-poll/patterns/p1', (rows) => ({ watchers: rows })],
+];
+const DOORS_A = [
+  ['PUT', '/api/channels/fake-poll/fake-poll-ops/assignment'],
+  ['PUT', '/api/channels/adapters/fake-poll/assignment'],
+  ['POST', '/api/channels/adapters/fake-poll/patterns'],
+  ['PUT', '/api/channels/adapters/fake-poll/patterns/p1'],
+];
+async function wakeDoors(mod) {
+  const S = await serve(mod);
+  try {
+    const out = { vsst: [], bare: [], digest: [], legacy: [], next: [], removal: [], page: [], assignVsst: [], assignBare: [], assignPage: [], writesAfterRefusals: 0 };
+    for (const [m, p, body] of DOORS_W) {
+      out.vsst.push((await S.send(m, p, { Authorization: 'Bearer vsst_0123456789abcdef' }, body([WAKE]))));
+      out.bare.push((await S.send(m, p, {}, body([WAKE]))));
+      out.digest.push((await S.send(m, p, { Authorization: 'Bearer vsst_0123456789abcdef' }, body([DIGEST]))));
+      out.legacy.push((await S.send(m, p, { Authorization: 'Bearer jbt_0123456789abcdef' }, body([LEGACY]))));
+    }
+    for (const [m, p] of DOORS_A) {
+      out.assignVsst.push((await S.send(m, p, { Authorization: 'Bearer vsst_0123456789abcdef' }, { assignment: ASSIGN })));
+      out.assignBare.push((await S.send(m, p, {}, { assignment: ASSIGN })));
+    }
+    out.writesAfterRefusals = S.writes.length;
+    for (const [m, p, body] of DOORS_W) {
+      out.next.push((await S.send(m, p, { Authorization: 'Bearer vsst_0123456789abcdef' }, body([NEXT]))));
+      out.removal.push((await S.send(m, p, { Authorization: 'Bearer vsst_0123456789abcdef' }, body([]))));
+      out.page.push((await S.send(m, p, { 'Sec-Fetch-Site': 'same-origin' }, body([WAKE]))));
+    }
+    for (const [m, p] of DOORS_A) out.assignPage.push((await S.send(m, p, { 'Sec-Fetch-Site': 'same-origin' }, { assignment: ASSIGN })));
+    out.writes = S.writes.length;
+    return out;
+  } finally { await S.close(); }
+}
+const GATE_LINE = /^    if \(wakeRefused\(req, res, [^\n]*\)\) return;\n/gm;
+{
+  const g = await wakeDoors(routerFrom(REAL_SRC));
+  const all = (xs, st, code) => xs.length > 0 && xs.every((r) => r.status === st && (code === undefined || r.code === code));
+  ok(all(g.vsst, 403, 'human_only') && g.vsst.every((r) => /a wake \(a billed turn\) is the owner's to set/.test(r.error || '')), `a WAKE row from an agent's vsst_ on every watchers door (${DOORS_W.length}: a conversation, the account, a rule's list, a new rule, a rule rewritten) ⇒ 403 human_only, said by name`, g.vsst);
+  ok(all(g.bare, 403, 'cross_site'), 'a bare write (curl on an instance whose sign-in is off) ⇒ 403 cross_site', g.bare);
+  ok(all(g.digest, 403, 'human_only') && all(g.legacy, 403, 'human_only'), 'a DIGEST (a paced wake) and a row that never said its delivery (it reads wake) ⇒ refused the same way', { digest: g.digest, legacy: g.legacy });
+  ok(all(g.assignVsst, 403, 'human_only') && all(g.assignBare, 403, 'cross_site'), `a pre-split ASSIGNMENT (its watcher row IS a wake) on its ${DOORS_A.length} doors ⇒ refused the same way`, { v: g.assignVsst, b: g.assignBare });
+  ok(g.writesAfterRefusals === 0, `…and the engine never asked to write (${g.writesAfterRefusals} writes)`);
+  ok(all(g.next, 200) && all(g.removal, 200), 'an agent\'s NON-wake write (a next-turn row) and a removal ([]) are as they were — written', { next: g.next, removal: g.removal });
+  ok(all(g.page, 200) && all(g.assignPage, 200) && g.writes === DOORS_W.length * 3 + DOORS_A.length, `this instance's own page ⇒ written (the owner's Notify…) — ${g.writes} writes`, { page: g.page, assignPage: g.assignPage, writes: g.writes });
+  // RED CONTROL: the route file as the base shipped it (no gate)
+  const cuts = (REAL_SRC.match(GATE_LINE) || []).length;
+  const r = await wakeDoors(routerFrom(REAL_SRC.replace(GATE_LINE, '')));
+  ok(cuts === 7 && all(r.vsst, 200) && all(r.bare, 200) && all(r.assignVsst, 200), `RED CONTROL: the base's doors (the ${cuts} gates cut) — an agent's vsst_ and a bare curl WRITE a wake on every door (${r.vsst.map((x) => x.status).join(', ')})`, { vsst: r.vsst.map((x) => x.status), bare: r.bare.map((x) => x.status) });
+}
+/** THE WRITER CENSUS — every route calling a watch writer asks the gate before it; every setGrain call inside the engine is named
+ *  with its road; no other file calls a writer. → problems (empty = green) */
+const WRITERS = /engine\(\)\.(setWatchers|setAssignment|setScopeAssignment|setGrain)\(/;
+const ENGINE_SETGRAIN = {   // the enclosing function → why it may write without the gate (it is never a route)
+  agentWatch: 'the agent\'s own road: next-turn only — a wake returns fileWatchRequest (its ASK) before this write',
+  agentUnwatch: 'a removal (the agent\'s own row filtered out) — never a wake',
+  decideWatchRequest: 'THE decision: behind the decide route\'s person verdict',
+  setAccess: 'access only (no watchers)', setWatchers: 'a route\'s writer (the gate is the route\'s)', setAssignment: 'a route\'s writer (the gate is the route\'s)', setScopeAssignment: 'a route\'s writer (the gate is the route\'s)',
+};
+function writerProblems(files) {
+  const out = [];
+  const R = files['src/routes/channels.js'] || '';
+  const heads = [...R.matchAll(/^router\.(get|put|post|patch|delete)\('([^']+)'/gm)];
+  heads.forEach((h, k) => {
+    const body = R.slice(h.index, k + 1 < heads.length ? heads[k + 1].index : R.length);
+    const w = body.match(WRITERS);
+    if (!w) return;
+    const call = body.slice(w.index, body.indexOf('\n', w.index));
+    if (w[1] === 'setGrain' && !/watchers/.test(call)) return;   // an access-only grain write
+    const g = body.indexOf('if (wakeRefused(req, res, ');
+    if (g < 0 || g > w.index) out.push(`${h[1].toUpperCase()} ${h[2]}: calls ${w[1]} without asking the person verdict for a wake row first`);
+  });
+  const E = files['src/server/channels-access.js'] || '';
+  for (const m of E.matchAll(/(?<![\w.]|function )setGrain\(/g)) {   // every CALL (its own definition is not one)
+    const before = E.slice(0, m.index);
+    const fn = [...before.matchAll(/(?:async )?function (\w+)\(/g)].pop();
+    const name = fn ? fn[1] : '?';
+    if (!ENGINE_SETGRAIN[name]) out.push(`src/server/channels-access.js ${name}(): writes a grain (setGrain) — a writer the census does not know`);
+  }
+  const aw = E.slice(E.indexOf('async function agentWatch('));
+  const wakeAsk = aw.indexOf("if (d === 'wake') return withRoad(await fileWatchRequest("), direct = aw.indexOf('setGrain(');
+  if (!(wakeAsk >= 0 && direct > wakeAsk)) out.push('agentWatch: its direct write is not behind the wake ask (a wake must return fileWatchRequest first)');
+  for (const [rel, s] of Object.entries(files)) {
+    if (rel === 'src/routes/channels.js' || rel === 'src/server/channels-access.js') continue;
+    if (/\.(setWatchers|setAssignment|setScopeAssignment)\(/.test(s) || /\.setGrain\([^)]*watchers/.test(s)) out.push(`${rel}: calls a watch writer — the only doors are src/routes/channels.js's (each behind the person verdict)`);
+  }
+  return out;
+}
+{
+  const p = writerProblems(SRC_FILES);
+  ok(!p.length, 'THE WRITER CENSUS: every route of src/routes/channels.js calling a watch writer asks the person verdict first; every setGrain inside the engine is named with its road; no other file writes a watch', p);
+  const red = writerProblems({ ...SRC_FILES, 'src/routes/channels.js': REAL_SRC.replace(GATE_LINE, '') });
+  ok(red.length === 7 && red.every((x) => /without asking the person verdict/.test(x)), `RED COPY: the base's routes — the census names each door by name (${red.length}): ${red.map((x) => x.split(':')[0]).join(' · ')}`, red);
+  const planted = writerProblems({ ...SRC_FILES, 'src/server/channels-access.js': SRC_FILES['src/server/channels-access.js'].replace('  /** Approve = EXACTLY the frozen row', '  async function wakeEveryone(a, g, rows) { return setGrain(a, g, { watchers: rows }); }\n  /** Approve = EXACTLY the frozen row') });
+  ok(planted.some((x) => /wakeEveryone\(\): writes a grain/.test(x)), 'RED COPY: a writer planted in the engine is named', planted);
+  const other = writerProblems({ ...SRC_FILES, 'src/server/automation-engine.js': SRC_FILES['src/server/automation-engine.js'] + '\nasync function x(eng) { return eng.setWatchers("a", { kind: "account" }, []); }\n' });
+  ok(other.some((x) => /automation-engine\.js: calls a watch writer/.test(x)), 'RED COPY: a second file calling a writer is named', other);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

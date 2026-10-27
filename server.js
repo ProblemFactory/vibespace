@@ -1087,7 +1087,7 @@ require('./src/routes/user-todos-reply.js').registerResolveManyRoute(app, { user
 require('./src/routes/user-todos-reply.js').registerItemReadRoute(app, { userTodos }); // GET /api/user-todos/:id — ONE item whole (the snapshot previews a resolved item's detail at 300 chars; the For-you window fetches the rest here)
 app.post('/api/user-todos/:id', (req, res) => { // User actions from the panel: done / dismissed / open (reopen)
   try { res.json({ success: true, item: userTodos.setStatus(req.params.id, req.body?.status, 'user') }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { const decision = e && (e.code === 'decision_row' || e.code === 'decision_final'); res.status(decision ? 409 : 400).json({ error: e.message, ...(decision ? { code: e.code } : {}) }); } // lane wake-approve-card r2: a decision row's two verbs only — refused by name
 });
 // ── Agent-facing routes ── (extracted to src/agent-routes.js in the 2.92.0 split)
 const { setupAgentRoutes } = require('./src/agent-routes');

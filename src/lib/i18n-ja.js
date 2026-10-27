@@ -11049,4 +11049,7 @@ export default {
   // lane wake-approve-card: a decision only your click makes says who and when (the chat card and the tray row alike; «approved by you» is the API dialog's key)
   "denied by you": "拒否済み",
   "waiting for the owner — answer it in the conversation or in For you": "所有者の対応待ち — 会話または「あなた宛て」で回答してください",
+  "expired · the agent can ask again": "期限切れ · エージェントは再度依頼できます",
+  "1 decision left for you — Approve or Deny it": "あなたの判断を待つ項目が 1 件残っています — 承認または拒否してください",
+  "{n} decisions left for you — Approve or Deny each": "あなたの判断を待つ項目が {n} 件残っています — それぞれ承認または拒否してください",
 };

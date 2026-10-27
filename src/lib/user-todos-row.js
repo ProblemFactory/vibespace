@@ -37,7 +37,7 @@ import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; //
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
-import { decidedStamp, PERSON_DECIDES } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card
+import { decidedStamp, PERSON_DECIDES, offersClosers } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
@@ -307,12 +307,15 @@ function partsOf(entry, ctx) {
   const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}" data-label="${escHtml(t('Open'))}">⤢</button>`;
   // design 009: a card's Reply / Mark done / Ignore / Copy / Clear content… live behind its ⋯ (two buttons on its face)
   const more = `<button type="button" class="ut-act ut-more" title="${escHtml(t('More'))}" aria-label="${escHtml(t('More'))}" data-label="${escHtml(t('More'))}">⋯</button>`;
+  // lane wake-approve-card r2: A DECISION ROW HAS TWO VERBS (foryou-actions offersClosers) — its Approve / Deny above, no ✓ / ✕
+  // beside them (a generic close was a silent Deny), and no ↺ once decided (a decision is final)
+  const closers = offersClosers(i);
   const actions = resolved
-    ? `<span class="ut-actions">${view}<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}" data-label="${escHtml(t('Reopen'))}">↺</button></span>`
+    ? `<span class="ut-actions">${view}${closers ? `<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}" data-label="${escHtml(t('Reopen'))}">↺</button>` : ''}</span>`
     : card ? `<span class="ut-actions">${view}${more}</span>`
     : `<span class="ut-actions">${actionBtnHtml(i, t)}${reauthBtnHtml(i, t)}${takeoverBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}" data-label="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
-      + `<button class="ut-act ut-done" title="${escHtml(i.open && i.open.done ? t(i.open.done) : t('Handled — mark done'))}" data-label="${escHtml(t('Mark done'))}">✓</button>` // lane foryou-plugin-notices: a door's `done` = what this ✓ does (the plugin applies it)
-      + `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}" data-label="${escHtml(tc('inbox', 'Dismiss'))}">✕</button></span>`;
+      + (closers ? `<button class="ut-act ut-done" title="${escHtml(i.open && i.open.done ? t(i.open.done) : t('Handled — mark done'))}" data-label="${escHtml(t('Mark done'))}">✓</button>` // lane foryou-plugin-notices: a door's `done` = what this ✓ does (the plugin applies it)
+      + `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}" data-label="${escHtml(tc('inbox', 'Dismiss'))}">✕</button>` : '') + '</span>';
   return { cls, dot, body, actions, sig: cls + '\u0000' + dot + '\u0000' + body + '\u0000' + actions };
 }
 

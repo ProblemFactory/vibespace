@@ -757,13 +757,16 @@ function create(engineCtx) {
     notify([convId]);
     return { ok: true, request: { ...req }, ...(req.todoId ? { filed: CN.filedLine('open-channel', req.id, OF.tray()) } : {}) };
   }
-  async function decideRequest(requestId, approve, by = 'user') {
+  /** `person` (lane wake-approve-card r2): the decide route asked THE person verdict first — the request records
+   *  `decidedBy: 'person'` + the time, and its item carries the same mark (`resolvedFact`), the only record that may
+   *  say «approved by you · 09:41»; any other caller's decision keeps its plain words. */
+  async function decideRequest(requestId, approve, by = 'user', { person = false } = {}) {
     // B-f32b: the scan reads the live rows; only the row holding the request is copied
     const live = store.index.live();
     let hit = null;
     for (const k in live) { const x = live[k]; if (x && (x.reachRequests || []).some((r) => r.id === requestId)) { hit = k; break; } }
     const en = hit ? store.index.peek(hit) : null;
-    if (!en && (store.index.table('watchRequests') || []).some((r) => r && r.id === requestId)) return decideWatchRequest(requestId, approve, by);
+    if (!en && (store.index.table('watchRequests') || []).some((r) => r && r.id === requestId)) return decideWatchRequest(requestId, approve, by, { person });
     if (!en) return { ok: false, code: 'not-found', error: 'No such request' };
     const req = en.reachRequests.find((r) => r.id === requestId);
     if (req.status !== 'open') return { ok: false, code: 'bad-state', error: `request already ${req.status}` };
@@ -787,13 +790,13 @@ function create(engineCtx) {
         grant = v.grant;
       }
       applied = true;
-      r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = by;
+      r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by;
     });
     if (refused) return { ok: false, code: refused.code, error: refused.error };
     if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
     try { store.audit({ kind: 'acl', op: approve ? 'grant' : 'deny', principal: req.principal, scope: req.scope, level: approve ? 'visible' : null, origin: 'request', requestId, at: t, by }); } catch {}
     if (req.todoId && userTodos && typeof userTodos.get === 'function') {
-      try { const it = userTodos.get(req.todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(req.todoId, 'done', approve ? 'allowed' : 'denied'); } catch {}   // lane chat-needs-you-card: the card's record says which
+      try { const it = userTodos.get(req.todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.resolveAnswered([req.todoId], approve ? 'allowed' : 'denied', person ? { decidedBy: 'person', decidedAt: t } : null); } catch {}   // lane chat-needs-you-card: the card's record says which; r2: and whose (the person verdict's mark)
     }
     notify([en.id]);
     return { ok: true, request: { ...req, status: approve ? 'approved' : 'denied' }, grant };
@@ -1026,7 +1029,7 @@ function create(engineCtx) {
     return { ok: true, proposed: true, request: { id: req.id, status: 'open' }, dailyWakeCap: row.dailyWakeCap, ...(req.todoId ? { filed: CN.filedLine('channel-watch-request', req.id, OF.tray()) } : {}) };
   }
   /** Approve = EXACTLY the frozen row, written through `setGrain` (the access rule re-judged now); deny = nothing. */
-  async function decideWatchRequest(requestId, approve, by = 'user') {
+  async function decideWatchRequest(requestId, approve, by = 'user', { person = false } = {}) {
     const req0 = (store.index.table('watchRequests') || []).find((r) => r && r.id === requestId);
     if (!req0) return { ok: false, code: 'not-found', error: 'No such request' };
     if (req0.status !== 'open') return { ok: false, code: 'bad-state', error: `request already ${req0.status}` };
@@ -1041,30 +1044,31 @@ function create(engineCtx) {
       if (!w || !w.ok) return w || { ok: false, code: 'error', error: 'the notification could not be written' };
     }
     let applied = false;
-    await store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === requestId); if (!r2 || r2.status !== 'open') return; applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = by; });
+    await store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === requestId); if (!r2 || r2.status !== 'open') return; applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by; });
     if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
     try { store.audit({ kind: 'acl', op: approve ? 'watch-approve' : 'watch-deny', principal: req0.principal, scope: req0.scope, requestId, at: t, by }); } catch {}
     if (req0.todoId && userTodos && typeof userTodos.get === 'function') {
-      try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(req0.todoId, 'done', approve ? 'allowed' : 'denied'); } catch {}   // lane chat-needs-you-card: the card's record says which
+      try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.resolveAnswered([req0.todoId], approve ? 'allowed' : 'denied', person ? { decidedBy: 'person', decidedAt: t } : null); } catch {}   // lane chat-needs-you-card: the card's record says which; r2: and whose (the person verdict's mark)
     }
     notify([]);
     return { ok: true, request: { ...req0, status: approve ? 'approved' : 'denied' } };
   }
   // THE ITEM AND THE REQUEST ARE ONE STATE (lane wake-approve-card — exit-proxy verify-r2 ask-b's law, which the hub-act,
-  // automation and vault asks keep): a wake request's For-you item leaving 'open' by any door but the decide route above —
-  // the card's or the tray's ✓ Mark done / ✕ Dismiss, «Mark all seen» — settles the request NOT approved (nothing is written:
-  // «Deny changes nothing»). It stayed open for ever with nothing left to decide it, and its agent's two-open bound
-  // (MAX_OPEN_WATCH_REQUESTS) refused every later wake ask. A reopen of an item whose request is over goes straight back to
-  // done (verify-r6 W2's rule) — its Approve could only answer «already decided».
+  // automation and vault asks keep). Acceptance round 2: a wake request's item is a DECISION ROW — the store lets it leave
+  // 'open' only by the decide route above (allowed / denied) or by its END (`expired`); a generic close (✓ Mark done / ✕
+  // Dismiss / «Mark all seen» / a reply) is refused there by name, and a decided item is never reopened (decision_final) —
+  // so there is NO reopen branch here any more (round 1's sent a decided record back to «ask-over» while its watch stood).
+  // What is left for this law: an item that ENDED without a decision (the store's expiry sweep) settles its request
+  // `expired` — nothing written, the agent's two-open bound (MAX_OPEN_WATCH_REQUESTS) freed, «the agent can ask again».
   if (userTodos && typeof userTodos.onStatus === 'function') {
     userTodos.onStatus((it, { status, by } = {}) => {
+      if (status === 'open') return;   // never a decided one (the store refuses it: decision_final)
       const req = it && it.id ? (store.index.table('watchRequests') || []).find((r) => r && r.todoId === it.id) : null;   // THE request this item is
-      if (!req) return;
-      if (status === 'open') { if (req.status !== 'open') { try { userTodos.setStatus(it.id, 'done', 'ask-over'); } catch { } } return; }
-      if (req.status !== 'open') return;
+      if (!req || req.status !== 'open') return;
       const t = now();
-      store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req.id); if (!r2 || r2.status !== 'open') return; r2.status = 'denied'; r2.decidedAt = t; r2.decidedBy = `item-${String(status)}-by-${String(by || 'user')}`; })
-        .then(() => { try { store.audit({ kind: 'acl', op: 'watch-deny', principal: req.principal, scope: req.scope, requestId: req.id, at: t, by: 'user', via: 'item' }); } catch { } notify([]); })
+      const ended = by === 'expired';
+      store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req.id); if (!r2 || r2.status !== 'open') return; r2.status = ended ? 'expired' : 'denied'; r2.decidedAt = t; r2.decidedBy = ended ? 'expired' : `item-${String(status)}-by-${String(by || 'user')}`; })
+        .then(() => { try { store.audit({ kind: 'acl', op: ended ? 'watch-expire' : 'watch-deny', principal: req.principal, scope: req.scope, requestId: req.id, at: t, by: ended ? 'system' : 'user', via: 'item' }); } catch { } notify([]); })
         .catch((e) => log.warn(`[channels] ${req.id}: its item left 'open' but the request could not be settled: ${(e && e.message) || e}`));
     });
   }

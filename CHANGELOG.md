@@ -11,7 +11,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - With sign-in off, a script or an agent's token could approve a channel request by calling its route; now only a click on this page decides one.
 - Two wake requests with the same words are two cards again, and asking again after a Deny is a new card; the denied one keeps its line.
-- Closing a wake request with Mark done or Dismiss now counts as not approved; before, it waited for ever and the agent could not ask again.
+- A wake request offers only Approve and Deny: Mark done, Dismiss and Mark all seen no longer close it unanswered, and a decision is final.
+- With sign-in off, an agent's token could also give itself a wake through the Notify settings; that now takes your click on this page too.
 
 ## 2.369.360 — 2026-10-27
 

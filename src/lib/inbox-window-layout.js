@@ -232,6 +232,9 @@ export function itemView(item, ctx = {}) {
   // lane controls-that-lie: an ask that names a GRANT carries the grant — «Let this conversation use …», first (it DOES it)
   const grantAsk = !resolved && !i.clearedAt && i.action && i.action.type === 'browser-grant' && i.action.profileId ? { profileId: String(i.action.profileId), label: String(i.action.label || i.action.profileId) } : null;
   const actions = resolved ? ['reopen', 'copy'] : [...(grantAsk ? ['browser-grant'] : []), ...(appNoteAsk ? ['desktop-app-show'] : []), ...(restartAsk ? ['browser-restart'] : []), ...(floorAsk ? ['browser-floor-check'] : []), ...(reauthAsk ? ['channel-reauth'] : []), ...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(hubAsk ? ['hub-once', ...(hubAsk.type === 'vault-grant-ask' ? ['grant-8h'] : hubAsk.type === 'vault-run-ask' ? (hubAsk.always ? ['shape-always'] : []) : [hubAsk.type === 'automation-ask' ? 'auto-always' : hubAsk.type === 'pool-cross-provider' ? 'pool-always' : 'hub-always']), 'hub-deny'] : []), ...(secretAsk ? ['secret-paste', 'secret-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
+  // lane wake-approve-card r2: A DECISION ROW HAS TWO VERBS — `ctx.closers` false (the caller asks the registry's offersClosers;
+  // this file imports nothing) draws no Mark done / Dismiss beside its Approve / Deny, and no Reopen once it is decided
+  const verbs = ctx.closers === false ? actions.filter((a) => a !== 'done' && a !== 'dismiss' && a !== 'reopen') : actions;
   const title = String(ctx.words != null ? ctx.words : (i.text || ''));
   const detail = String(ctx.detail != null ? ctx.detail : (i.detail || ''));
   const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text ? i.reply.text : null;
@@ -245,6 +248,6 @@ export function itemView(item, ctx = {}) {
   return {
     id: i.id || null, sessionKey: i.sessionKey || null, title, detail, name: String(ctx.name || ''),
     urgency: resolved || notice ? '' : urgency, notice, resolved, status: resolved ? (i.status === 'dismissed' ? 'dismissed' : 'done') : 'open',
-    meta, replied, options, reply, actions: cardActs || actions, producer, exitAsk, hubAsk, proposal, appAsk, restartAsk, grantAsk, copy, cut,
+    meta, replied, options, reply, actions: cardActs || verbs, producer, exitAsk, hubAsk, proposal, appAsk, restartAsk, grantAsk, copy, cut,
   };
 }

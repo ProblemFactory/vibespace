@@ -22,7 +22,8 @@
  *       (no transcript, the CLI missing, an account that cannot serve…), the item still open. A live session's
  *       path is untouched.
  *
- *   POST /api/user-todos/resolve-many   {ids: string[] (1..200), status: 'dismissed'|'done'}
+ *   POST /api/user-todos/resolve-many   {ids: string[] (1..200), status: 'dismissed'|'done'} → {ok, changed, unknown, decisions}
+ *                                        (`decisions` = the open DECISION rows it passed by — lane wake-approve-card r2)
  *     → {ok:true, changed: n, unknown: [id…]} — "Mark all seen" on a group head
  *       (design-user-inbox-reply §4 d, chunk 4): the store's setStatusMany,
  *       resolvedBy 'user', ONE save + ONE broadcast; an unknown id is named, the
@@ -125,7 +126,7 @@ function registerResolveManyRoute(app, { userTodos }) {
       if (ids.length > RESOLVE_MANY_MAX) return fail(400, 'too_many', `at most ${RESOLVE_MANY_MAX} ids per request (got ${ids.length})`);
       if (!RESOLVE_MANY_STATUSES.includes(status)) return fail(400, 'bad_status', `status must be one of ${RESOLVE_MANY_STATUSES.join('/')}`);
       const r = userTodos.setStatusMany(ids, status, 'user');
-      res.json({ ok: true, changed: r.changed.length, unknown: r.unknown });
+      res.json({ ok: true, changed: r.changed.length, unknown: r.unknown, decisions: r.decisions || [] });   // lane wake-approve-card r2: a decision row stays until decided
     } catch (e) { fail(500, 'failed', e.message); }
   });
   // «Mark all read» (lane inbox-fyi-mark-all): POST /api/user-todos/notices/read-all {ids} — every open NOTICE among the

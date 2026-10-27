@@ -11050,4 +11050,7 @@ export default {
   // lane wake-approve-card: a decision only your click makes says who and when (the chat card and the tray row alike; «approved by you» is the API dialog's key)
   "denied by you": "你已拒绝",
   "waiting for the owner — answer it in the conversation or in For you": "等待所有者处理 — 在对话里或「待你处理」中回答",
+  "expired · the agent can ask again": "已过期 · 助手可以再次请求",
+  "1 decision left for you — Approve or Deny it": "还有 1 项决定等你来做 — 请批准或拒绝",
+  "{n} decisions left for you — Approve or Deny each": "还有 {n} 项决定等你来做 — 请逐一批准或拒绝",
 };

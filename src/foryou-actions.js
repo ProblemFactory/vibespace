@@ -24,7 +24,13 @@
  *   scope     where it is filed: 'conversation' (its key) · 'about' (a group key + `about` naming it) · 'group' (no conversation)
  *   decide    'person' = ONLY a person's click on this instance's page decides it — its door asks THE person verdict
  *             (src/routes/vault.js personVerdict: any bearer ⇒ human_only, not this page ⇒ cross_site), so its record says
- *             «approved by you · 09:41» (decidedStamp) on both doors (lane wake-approve-card); absent = its words stay its own
+ *             «approved by you · 09:41» (decidedStamp) on both doors (lane wake-approve-card); absent = its words stay its own.
+ *             A DECISION ROW (acceptance round 2) = a `decide: 'person'` row that draws its own verbs (`card: 'row'` — a wake
+ *             request): exactly TWO verbs end its item — Approve / Deny (DECISION_ENDS: allowed / denied, or its end:
+ *             expired) — no generic closer (✓ Mark done / ✕ Dismiss / «Mark all seen» / a reply), and a decided one is final
+ *             (never reopened, never re-stamped): src/user-todos.js refuses the rest by name. open-channel is no decision
+ *             row: its item is a DOOR (`card: 'none'` — its Approve / Deny are the Reach dialog's) and the Outbox's pointer
+ *             («Proposals awaiting approval in …», retracted by its producer) shares its type
  * Every older table is DERIVED here (ACTION_IDENTITY · WAIT_ACTIONS · CARD_ACTION_TYPES · ANSWER_ACTION_TYPES);
  * scripts/test-foryou-actions-census.mjs fails on a type a producer files with no row, a row nobody files, a `handled` row
  * with no branch, a `card: 'row'` row the row does not draw, a `chat` row the card does not draw.
@@ -44,7 +50,9 @@
  *                                  worded from surfaceOf — never «the card in this conversation» for an item with none
  *   SURFACES                     → every surface that shows a conversation its own items, and whether it reads `about`
  *   decidedStamp(item, {t, now}) → «approved by you · 09:41» / «denied by you · 09:41» for a `decide: 'person'` row's
- *                                  decision (null otherwise) — THE stamp the chat card AND the tray row say (lane wake-approve-card)
+ *                                  decision THE PERSON VERDICT MARKED (resolvedFact.decidedBy 'person' — the decide route's;
+ *                                  null otherwise: an older record keeps «approved») — THE stamp the chat card AND the tray say
+ *   isDecisionRow(item) · offersClosers(item) · DECISION_ENDS → a decision row has two verbs and no generic closer
  *   decisionCard(item, {role})   → {state, buttons, stamp, waiting} — the PURE card model: filed / approved / denied /
  *                                  expired / waiting-owner (a viewer who may not decide: the words, no buttons)
  *   VIEWERS · canDecide(role)    → WHO may decide: an IDENTITY fact (the owner's cookie), never a view's — one row per role
@@ -243,7 +251,7 @@ function settledWords(item, t = fmt, kind = null) {
   if (by === 'allowed') return k === 'approval' ? t('approved') : t('allowed');
   if (by === 'denied') return t('denied');
   if (by === 'stored') return t('saved to the vault');
-  if (by === 'expired' || by === 'ask-expired') return t('expired');
+  if (by === 'expired' || by === 'ask-expired') return isDecisionRow(item) ? t('expired · the agent can ask again') : t('expired');   // r2: a decision's end
   if (by === 'agent') return t('withdrawn by the agent');
   if (by === 'handed-back') return t('handed back');
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
@@ -253,6 +261,22 @@ function settledWords(item, t = fmt, kind = null) {
 /** DERIVED (lane wake-approve-card) — the types ONLY a person's click on this page decides (`decide: 'person'`): their
  *  door asks THE person verdict (pinned by scripts/test-wake-approve-card.mjs), so their record may say «by you». */
 const PERSON_DECIDES = typesWhere((r) => r.decide === 'person');
+/** A DECISION ROW HAS TWO VERBS (lane wake-approve-card, acceptance round 2 — 主开发: «a generic close is not a decision»).
+ *  An item of a `decide: 'person'` row leaves 'open' ONLY by its decision — `allowed` / `denied`, which the decide route's
+ *  engine writes — or by its END (`expired`: the agent can ask again). Nothing else closes it: no ✓ Mark done / ✕ Dismiss is
+ *  drawn (the row's own Approve / Deny stand where they stood), «Mark all seen» passes it by («N decisions left for you»), a
+ *  reply never answers it; and a decided one is FINAL — never reopened, never re-stamped (an undone Approve would withdraw a
+ *  billed wake already proceeding; after a Deny the agent asks again). src/user-todos.js refuses the rest BY NAME
+ *  (decision_row / decision_final); the row (user-todos-row.js) and the For-you window (inbox-window-layout.js) draw
+ *  `offersClosers` — one answer, three surfaces. */
+const DECISION_ENDS = Object.freeze(['allowed', 'denied', 'expired']);
+/** The `decide: 'person'` rows whose item DRAWS its two verbs (`card: 'row'`) — the wake request. open-channel is not one: its
+ *  item is a door to the Reach dialog (where its Approve / Deny are), and the Outbox's pointer item shares its type (its
+ *  producer retracts it — a law that refused that close would leave the pointer standing: test-channel-names F2). */
+const DECISION_ROWS = typesWhere((r) => r.decide === 'person' && r.card === 'row');
+function isDecisionRow(item) { return !!(item && item.action && typeof item.action === 'object' && DECISION_ROWS.includes(item.action.type)); }
+/** Does this item offer the generic closers (✓ Mark done / ✕ Dismiss while open, ↺ Reopen once resolved)? Never a decision row. */
+function offersClosers(item) { return !isDecisionRow(item); }
 
 /** WHO MAY DECIDE (lane wake-approve-card — 主开发's ruling 2026-10-27: canDecide is an IDENTITY fact, never a VIEW fact).
  *  The person holding the owner's cookie decides from EVERY view they open — the live chat, a view-* history, a sub-*
@@ -279,13 +303,18 @@ function clockWords(ts, now = Date.now()) {
 }
 /** THE DECIDED STAMP (lane wake-approve-card, R1): a `decide: 'person'` row's item the owner decided ⇒ {verb, time, text}
  *  («approved by you», «09:41», «approved by you · 09:41»); anything else ⇒ null (its own words). The chat card's quiet
- *  line and the tray row (resolvedByText — the tray, the mini inbox, the For-you window) both say it: one spelling. */
+ *  line and the tray row (resolvedByText — the tray, the mini inbox, the For-you window) both say it: one spelling.
+ *  «BY YOU» IS A FACT THE RECORD CARRIES (acceptance round 2): only an item the decide route resolved AFTER THE PERSON
+ *  VERDICT — `resolvedFact: {decidedBy: 'person', decidedAt}` (channels-access) — says it, at that time; a record decided
+ *  before the verdict stood (a bearer, a curl on the base route) or by any other road keeps its old words («approved»). */
 function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
   if (!item || item.status === 'open' || !item.action || !PERSON_DECIDES.includes(item.action.type)) return null;
   const by = item.resolvedBy;
   if (by !== 'allowed' && by !== 'denied') return null;
+  const fact = item.resolvedFact && typeof item.resolvedFact === 'object' ? item.resolvedFact : null;
+  if (!fact || fact.decidedBy !== 'person') return null;
   const verb = by === 'allowed' ? t('approved by you') : t('denied by you');
-  const time = clockWords(item.resolvedAt || item.createdAt, now);
+  const time = clockWords(Number(fact.decidedAt) || item.resolvedAt || item.createdAt, now);
   return { verb, time, text: `${verb} · ${time}`, denied: by === 'denied' };
 }
 /** THE DECISION CARD'S MODEL (lane wake-approve-card) — `item` → {state, buttons, stamp, waiting}:
@@ -343,4 +372,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, isDecisionRow, offersClosers, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard };

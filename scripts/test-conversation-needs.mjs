@@ -313,7 +313,7 @@ console.log('⑦ the store keeps `about` — the conversation an item filed unde
   const AR = read('src/agent-routes.js');
   ok(/sessionKey: \(\(\) => \{ try \{ return sessionStatusKey\(s, id\); \} catch \{ return `webui:\$\{id\}`; \} \}\)\(\),/.test(AR), 'the channels principal carries the conversation\'s own key (sessionStatusKey) — the engine stamps `about` from it');
   ok((SRC.access.match(/about: ctx\.sessionKey \|\| null,/g) || []).length === 2, 'channels-access stamps `about: ctx.sessionKey` on the access request AND the watch request');
-  ok((SRC.access.match(/userTodos\.setStatus\(req0?\.todoId, 'done', approve \? 'allowed' : 'denied'\)/g) || []).length === 2, 'a decided watch / access request resolves `allowed` / `denied` (the card\'s record says which — it read «automatically»)');
+  ok((SRC.access.match(/userTodos\.resolveAnswered\(\[req0?\.todoId\], approve \? 'allowed' : 'denied', person \? \{ decidedBy: 'person', decidedAt: t \} : null\)/g) || []).length === 2, 'a decided watch / access request resolves `allowed` / `denied` (the card\'s record says which — it read «automatically»; lane wake-approve-card r2: with the person verdict\'s mark when the decide route asked it)');
 }
 
 // ── ⑧ THE WIRING ─────────────────────────────────────────────────────────────────────────────────────────────────────

@@ -33,6 +33,7 @@ import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store 
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
 import { reconcileKeyed, agoText, expiresText, resolvedByText, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml } from './user-todos-row.js'; // THE keyed reconciler + the row words
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
+import { offersClosers, isDecisionRow } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's box, as a dialog over this window
 
@@ -360,7 +361,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     'grant-8h': () => actBtn('grant-8h', UI_ICONS.check, t('For 8 hours'), t('Every run of this conversation with this secret, for 8 hours — a new kind of command still shows its card; locking the vault ends it'), 'iw-act-exit'),
     // lane browser-propose: the agent's browser proposal — ONE primary Approve (runs exactly what the item says), a quiet Reject
     'proposal-approve': () => actBtn('proposal-approve', UI_ICONS.check, t('Approve'), t('Runs exactly what this card says'), 'iw-act-primary iw-act-exit'),
-    'proposal-reject': () => actBtn('proposal-reject', UI_ICONS.close, t('Reject'), t('Reject'), 'iw-act-exit'),
+    'proposal-reject': (it) => (isDecisionRow(it) ? actBtn('proposal-reject', UI_ICONS.close, t('Deny'), t('Deny'), 'iw-act-exit') : actBtn('proposal-reject', UI_ICONS.close, t('Reject'), t('Reject'), 'iw-act-exit')), // lane wake-approve-card r2: a decision row's two verbs are Approve / Deny on every door
     // Layer 0 apps: an agent's install proposal — Install… opens THE install dialog (the plan first), Not now declines
     // design 009: a CARD's Install installs (one click — the label is its kind's verb); an item filed before the card opens THE dialog
     'app-install': (it) => (it && it.card ? actBtn('app-install', UI_ICONS.check, cardWords(it.card, t, resolveLang()).go, t('Runs exactly what this card says'), 'iw-act-primary iw-act-exit') : actBtn('app-install', UI_ICONS.check, t('Install…'), t('Shows the plan first — nothing runs until you confirm'), 'iw-act-primary iw-act-exit')),
@@ -372,7 +373,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
   const viewOf = (it, e) => itemView(it, {
     t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : model.wordsOf(it), detail: model.detailOf(it), options: model.optionsFor(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
     origin: { origin: originOf(it), label: ORIGIN_LABELS[originOf(it)] || '' }, notice: isNotice(it), resolved: !!(e && e.resolved) || it.status !== 'open',
-    reply: model.replyState(it), ago: (ts) => agoText(ts, t), expires: (ts) => expiresText(ts, t), resolvedBy: (by, item) => resolvedByText(by, t, item),
+    reply: model.replyState(it), closers: offersClosers(it), ago: (ts) => agoText(ts, t), expires: (ts) => expiresText(ts, t), resolvedBy: (by, item) => resolvedByText(by, t, item),
     detailState: !it.detailTruncated ? 'whole' : (st.loadErr && st.loadErr.id === it.id ? 'failed' : 'loading'), loadError: st.loadErr && st.loadErr.id === it.id ? st.loadErr.why : '',
   });
   /** The session's board chip beside its name (the popup's chunk-4 chip: needs input / blocked / review / working). */

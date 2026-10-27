@@ -1135,8 +1135,9 @@ console.log('⑩ the inline filter at the account and pattern grains (the owner\
   const { eng } = mkEngine({ name: 'inline-filter' });
   await eng.pass(A, { force: true });
   routes.setup({ getEngine: () => eng });
+  // lane wake-approve-card r2: the OWNER'S PAGE — a wake row is written only by a person on this page (personVerdict)
   const call = (method, url, body) => new Promise((resolve) => {
-    const req = { method, url, params: url.params, query: {}, body: body || {} };
+    const req = { method, url, params: url.params, query: {}, body: body || {}, headers: { 'sec-fetch-site': 'same-origin' } };
     const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(payload) { resolve({ status: this.statusCode, body: payload }); return this; } };
     const layer = routes.router.stack.find((l) => l.route && l.route.path === url.path && l.route.methods[method.toLowerCase()]);
     if (!layer) return resolve({ status: 0, body: { error: 'no such route' } });
@@ -2644,9 +2645,10 @@ console.log('⑬ mirror-193: a whole-list write from a stale copy is refused by 
   const F = require(path.join(REPO, 'src/channel-filter.js'));
   const A = 'fake-poll', ACC = { kind: 'account' };
   const XI = { kind: 'agent', id: 'agent-xi', name: 'Xi' }, READER = { kind: 'agent', id: 'a99e0001-reader', name: 'reader' }, WORK = { kind: 'group', id: 'tg-work', name: '工作' };
+  // lane wake-approve-card r2: the OWNER'S PAGE — a wake row is written only by a person on this page (personVerdict)
   const call = (eng, method, url, body) => new Promise((resolve) => {
     routes.setup({ getEngine: () => eng });
-    const req = { method, url, params: url.params, query: {}, body: body || {} };
+    const req = { method, url, params: url.params, query: {}, body: body || {}, headers: { 'sec-fetch-site': 'same-origin' } };
     const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(payload) { resolve({ status: this.statusCode, body: payload }); return this; } };
     const layer = routes.router.stack.find((l) => l.route && l.route.path === url.path && l.route.methods[method.toLowerCase()]);
     if (!layer) return resolve({ status: 0, body: { error: 'no such route' } });

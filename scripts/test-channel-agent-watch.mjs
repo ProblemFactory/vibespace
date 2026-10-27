@@ -173,34 +173,53 @@ console.log('④ W1: the agent\'s own watch');
 console.log('④b THE ITEM AND THE REQUEST ARE ONE STATE (lane wake-approve-card): a wake request\'s item closed by ✓ / ✕ settles it');
 /** a wake ask, its item closed by a generic verb (✕ Dismiss), the agent asking again, the closed item reopened */
 async function oneStateLeg(ENGM, name) {
-  const { eng, userTodos } = mkEngine(name, { ENGM });
+  const { eng, userTodos, clock } = mkEngine(name, { ENGM });
   await eng.pass(A, { force: true });
   await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)] });
   const wk = await eng.agentWatch(AG, KEY, { delivery: 'wake', why: 'on call' });
   if (!wk.ok || !wk.request) return { wk };
   const reqOf = (id) => (eng.store.index.table('watchRequests') || []).find((r) => r.id === id) || {};
   const todoId = reqOf(wk.request && wk.request.id).todoId;
-  userTodos.setStatus(todoId, 'dismissed', 'user');   // the card's (or the tray's) ✕ — not the decide route
-  for (let i = 0; i < 40 && reqOf(wk.request.id).status === 'open'; i++) await new Promise((r) => setTimeout(r, 25));
-  const settled = reqOf(wk.request.id);
-  const written = (eng.store.index.snapshot().conversations[KEY]?.watchers || []).some((w) => w.principal.id === 'agent-1');
-  const again = await eng.agentWatch(AG, KEY, { delivery: 'wake', why: 'still on call' });
-  userTodos.setStatus(todoId, 'open', 'user');          // the For-you window's «reopen» on the closed item
-  const reopened = userTodos.get(todoId);
-  return { status: settled.status, decidedBy: settled.decidedBy || null, written, again: { already: !!again.already, same: !!again.request && again.request.id === wk.request.id }, reopened: { status: reopened.status, by: reopened.resolvedBy } };
+  const tryClose = (st) => { try { userTodos.setStatus(todoId, st, 'user'); return 'closed'; } catch (e) { return e.code || e.message; } };
+  const dismiss = tryClose('dismissed');   // the card's (or the tray's) ✕ — a generic closer, not a decision
+  const markDone = tryClose('done');       // ✓ Mark done
+  const seenAll = userTodos.setStatusMany([todoId], 'dismissed', 'user');   // «Mark all seen» on its band
+  await new Promise((r) => setTimeout(r, 60));
+  const afterClosers = { item: userTodos.get(todoId).status, request: reqOf(wk.request.id).status };
+  const dec = await eng.decideRequest(wk.request.id, false, 'user', { person: true });   // THE decide route's call (its verdict asked)
+  const it1 = userTodos.get(todoId);
+  const reopen = tryClose('open');         // the old ↺ / the 6 s Undo
+  const it1b = userTodos.get(todoId);
+  // an END that is no decision: the agent asks again, its item expires (the store's sweep of a producer's expiresAt)
+  const wk2 = await eng.agentWatch(AG, KEY, { delivery: 'wake', why: 'still on call' });
+  const t2 = reqOf(wk2.request && wk2.request.id).todoId;
+  const item2 = t2 ? userTodos.get(t2) : null; if (item2) item2.expiresAt = clock() - 1;
+  const swept = userTodos.expireDue(clock());
+  for (let i = 0; i < 40 && wk2.request && reqOf(wk2.request.id).status === 'open'; i++) await new Promise((r) => setTimeout(r, 25));
+  const again = await eng.agentWatch(AG, KEY, { delivery: 'wake', why: 'on call once more' });
+  return { dismiss, markDone, seenAll: { changed: seenAll.changed.length, decisions: seenAll.decisions || null }, afterClosers,
+    decided: { ok: dec.ok, request: reqOf(wk.request.id).status, decidedBy: reqOf(wk.request.id).decidedBy, item: it1.status, by: it1.resolvedBy, fact: it1.resolvedFact || null },
+    reopen, kept: { status: it1b.status, by: it1b.resolvedBy, fact: it1b.resolvedFact || null },
+    expired: { swept, item: t2 ? userTodos.get(t2).resolvedBy : null, request: wk2.request ? reqOf(wk2.request.id).status : null, decidedBy: wk2.request ? reqOf(wk2.request.id).decidedBy : null },
+    again: { already: !!again.already, fresh: !!again.request && !!wk2.request && again.request.id !== wk2.request.id } };
 }
 {
+  // acceptance round 2 (主开发): A DECISION ROW HAS TWO VERBS — a generic close is not a decision (it was a silent Deny whose
+  // record read «✓ done», and its 6 s Undo reopened a request that was over); the item and its request stay ONE state
   const g = await oneStateLeg(ENG, 'e3b');
-  ok(g.status === 'denied' && /^item-dismissed-by-user$/.test(g.decidedBy) && !g.written, `✕ Dismiss on the item settles the request NOT approved (${g.status}, ${g.decidedBy}) — nothing written («Deny changes nothing»)`, J2s(g));
-  ok(!g.again.already && !g.again.same, 'the agent asking again files a NEW request the owner can decide (never «already filed» behind a closed item)', J2s(g.again));
-  ok(g.reopened.status === 'done' && g.reopened.by === 'ask-over', 'reopening the closed item puts it straight back (\'ask-over\' — its Approve could only answer «already decided»)', J2s(g.reopened));
-  // CONTROL: the engine without the hook — the request stays open for ever behind a closed item
+  ok(g.dismiss === 'decision_row' && g.markDone === 'decision_row' && g.seenAll.changed === 0 && (g.seenAll.decisions || []).length === 1, `✕ Dismiss / ✓ Mark done on a wake request's item are refused BY NAME (${g.dismiss}, ${g.markDone}); «Mark all seen» passes it by (${J2s(g.seenAll)})`, J2s(g));
+  ok(g.afterClosers.item === 'open' && g.afterClosers.request === 'open', 'the item and its request are still open — decidable by their two verbs only', J2s(g.afterClosers));
+  ok(g.decided.ok && g.decided.request === 'denied' && g.decided.decidedBy === 'person' && g.decided.item === 'done' && g.decided.by === 'denied' && !!g.decided.fact && g.decided.fact.decidedBy === 'person' && Number(g.decided.fact.decidedAt) > 0, 'Deny through the decide route (its person verdict asked): the request records decidedBy \'person\' + the time, the item carries the same mark (resolvedFact) — the only record that says «by you»', J2s(g.decided));
+  ok(g.reopen === 'decision_final' && g.kept.status === 'done' && g.kept.by === 'denied' && !!g.kept.fact, `a decision is FINAL: reopening it is refused by name (${g.reopen}); its record keeps «denied» and its mark`, J2s(g.kept));
+  ok(g.expired.swept === 1 && g.expired.item === 'expired' && g.expired.request === 'expired' && g.expired.decidedBy === 'expired', `an item that ENDS without a decision (the expiry sweep) settles its request \`expired\` (${g.expired.request}) — never «denied», never «ask-over»`, J2s(g.expired));
+  ok(!g.again.already && g.again.fresh, 'the agent can ask again: a NEW request the owner can decide (never «already filed» behind an item that ended)', J2s(g.again));
+  // CONTROL: the engine without the hook — the request stays open for ever behind an item that ended
   const src = engineSource(REPO);
-  const anchor = "    userTodos.onStatus((it, { status, by } = {}) => {\n      const req = it && it.id ? (store.index.table('watchRequests') || []).find((r) => r && r.todoId === it.id) : null;";
+  const anchor = "    userTodos.onStatus((it, { status, by } = {}) => {\n      if (status === 'open') return;";
   const cut = src.split(anchor).length === 2 ? src.replace(anchor, "    userTodos.onStatus((it) => {\n      return;") : src;
   const E3 = MUT.load('src/server/channels-engine.js', cut, 'no-one-state');
   const r = await oneStateLeg(E3, 'e3b-red');
-  ok(cut !== src && r.status === 'open' && r.again.already && r.again.same, `CONTROL: an engine without the hook — the dismissed item leaves its request OPEN (${r.status}) and the agent\'s next ask is «already filed» behind an item nobody can see`, J2s(r));
+  ok(cut !== src && r.expired.item === 'expired' && r.expired.request === 'open' && r.again.already, `CONTROL: an engine without the hook — the expired item leaves its request OPEN (${r.expired.request}) and the agent's next ask is «already filed» behind an item nobody can see`, J2s(r));
 }
 
 console.log('⑤ W5: next-turn rides the free stash; a legacy row still wakes');

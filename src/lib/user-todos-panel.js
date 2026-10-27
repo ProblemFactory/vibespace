@@ -941,6 +941,8 @@ export function installUserTodos(app) {
     const r = await fetchJson('/api/user-todos/resolve-many', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, status: 'dismissed' }) });
     delete btnEl.dataset.busy; btnEl.disabled = false;
     if (!r || !r.ok) showToast(t('Could not update {n} items: {why}', { n: ids.length, why: r && r.error ? r.error : t('server unreachable') }), { type: 'error' });
+    // lane wake-approve-card r2: a DECISION row is passed by — it stays until you Approve or Deny it (or it expires); said, never silent
+    else if (Array.isArray(r.decisions) && r.decisions.length) showToast(r.decisions.length === 1 ? t('1 decision left for you — Approve or Deny it') : t('{n} decisions left for you — Approve or Deny each', { n: r.decisions.length }));
   };
   popup.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('fy-link')) { e.preventDefault(); e.target.click(); } }); // a link span is keyboard-reachable (tabindex 0)
   popup.addEventListener('click', (e) => {

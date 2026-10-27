@@ -177,6 +177,20 @@ function normalizeOpen(x, plugin) {
 
 // THE MERGE RULE (lane chat-needs-you-card, amendment 1): derived from THE For-you action registry — a row's `identity`
 const { ACTION_IDENTITY } = require('./foryou-actions.js');
+const { isDecisionRow, DECISION_ENDS } = require('./foryou-actions.js');   // lane wake-approve-card r2: THE registry's decision rows
+/** A DECISION ROW HAS TWO VERBS (lane wake-approve-card, acceptance round 2 — the registry's DECISION_ROWS: a `decide:
+ *  'person'` row that draws its own Approve / Deny — the wake request). Its item leaves 'open' only by its decision (`allowed` / `denied`, the decide route's
+ *  engine) or its end (`expired`); a generic close — the ✓ / ✕ a stale page still draws, a script, «Mark all seen», a reply —
+ *  is refused BY NAME (`decision_row`), and a decided one is final (`decision_final`: never reopened, never re-stamped). Was:
+ *  ✓ Mark done beside Approve DENIED a wake request silently, its record read «✓ done», and the 6 s Undo reopened a request
+ *  that was over. → null (lawful) | {code, error}. */
+function decisionRefusal(item, status, by) {
+  if (!isDecisionRow(item)) return null;
+  if (item.status !== 'open') return status === item.status && by === item.resolvedBy ? null : { code: 'decision_final', error: `${item.id} was decided (${item.resolvedBy || item.status}) — a decision is final; the agent can ask again` };
+  if (status !== 'open' && !DECISION_ENDS.includes(by)) return { code: 'decision_row', error: `${item.id} is a decision — only its Approve or Deny ends it (nothing else closes it)` };
+  return null;
+}
+const decisionError = (no) => Object.assign(new Error(no.error), { code: no.code });
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
@@ -527,7 +541,8 @@ class UserTodoManager {
       const idKey = ACTION_IDENTITY[action.type];
       return !idKey || i.action[idKey] === action[idKey];
     };
-    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && i.text === text && sameFiling(i) && !i.clearedAt);
+    // lane wake-approve-card r2: a DECIDED decision is final — a re-file is a new question beside it, never its reopen
+    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && i.text === text && sameFiling(i) && !i.clearedAt && !(i.status !== 'open' && isDecisionRow(i)));
     const openCount = this._state.items.filter((i) => i.sessionKey === sessionKey && i.status === 'open').length;
     // a SERVER producer whose open items its own domain bounds (one per account row) may raise the per-key cap; the agent
     // route never passes it (lane oat-identity-fix-r2, L1)
@@ -609,7 +624,7 @@ class UserTodoManager {
     let n = 0;
     const went = [];
     for (const it of this._state.items) {
-      if (it.status !== 'open' || it.jobId !== jobId) continue;
+      if (it.status !== 'open' || it.jobId !== jobId || decisionRefusal(it, 'done', 'agent')) continue;
       // the ask is told apart by its words — a CLEARED item has none (verify r3: an answered / expired /
       // withdrawn panel must still close the job's cleared ask item, else it stays open with the sentence)
       if (onlyAsk && !it.clearedAt && !/needs your input/.test(it.text)) continue;
@@ -638,6 +653,8 @@ class UserTodoManager {
     if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
+    const no = decisionRefusal(item, status, by);   // lane wake-approve-card r2: a decision row's two verbs only, and final
+    if (no) throw decisionError(no);
     const wasOpen = item.status === 'open';
     item.status = status;
     // a reopen is the user saying it still matters: it no longer expires
@@ -658,14 +675,17 @@ class UserTodoManager {
    *  never a throw — the rest of the batch still applies. ONE save + ONE
    *  broadcast for the whole batch (N setStatus calls would push N snapshots to
    *  every client). An invalid status throws by name before anything changes.
-   *  @returns {{changed: string[], unknown: string[]}} */
+   *  A DECISION ROW is passed by (lane wake-approve-card r2): it stays until decided or expired — its id is listed in
+   *  `decisions` (the page says «N decisions left for you»), never closed by a bulk verb.
+   *  @returns {{changed: string[], unknown: string[], decisions: string[]}} */
   setStatusMany(ids, status, by = 'user') {
     if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);
-    const changed = [], unknown = [], went = [];
+    const changed = [], unknown = [], went = [], decisions = [];
     const now = this._now();
     for (const id of new Set(Array.isArray(ids) ? ids : [])) {
       const item = this._state.items.find((i) => i.id === id);
       if (!item) { unknown.push(id); continue; }
+      if (decisionRefusal(item, status, by)) { if (item.status === 'open') decisions.push(id); continue; }
       const wasOpen = item.status === 'open';
       item.status = status;
       if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
@@ -674,7 +694,7 @@ class UserTodoManager {
       if (wasOpen && status !== 'open') went.push(item);
     }
     if (changed.length) { this._save(); this._notify(); this._emitStatus(went, by, true); }
-    return { changed, unknown };
+    return { changed, unknown, decisions };
   }
 
   /** «Mark all read» on the notices (lane inbox-fyi-mark-all, the owner 2026-10-22: a notice asks nothing, so confirming
@@ -709,7 +729,7 @@ class UserTodoManager {
     const went = [], now = this._now();
     for (const id of new Set(Array.isArray(ids) ? ids : [])) {
       const item = this._state.items.find((i) => i.id === id);
-      if (!item || item.status !== 'open') continue;
+      if (!item || item.status !== 'open' || decisionRefusal(item, 'done', by)) continue;
       item.status = 'done'; item.resolvedAt = now; item.resolvedBy = by;
       if (fact) item.resolvedFact = { ...fact };
       went.push(item);
@@ -728,7 +748,7 @@ class UserTodoManager {
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
     item.reply = { text: String(text == null ? '' : text).slice(0, REPLY_MAX), at: now };
-    const wasOpen = item.status === 'open';
+    const wasOpen = item.status === 'open' && !decisionRefusal(item, 'done', 'reply');   // lane wake-approve-card r2: a typed reply never decides
     if (wasOpen) { item.status = 'done'; item.resolvedAt = now; item.resolvedBy = 'reply'; }
     this._save(); this._notify();
     if (wasOpen) this._emitStatus([item], 'reply');
