@@ -28,6 +28,11 @@
  * file; its id derived from it), never matched by its words (r5 filed through add()'s text match: two machines of one
  * display name shared ONE item, and one machine's resume closed it while the other's month was still held). Two open
  * notices of one machine name are told apart by the host id's short form in their words («M (1a2b3c4d)»).
+ * Round 7 (THE MOVING-LIST LAW — an open item's identity and label never change while it is open): the tag is a fact
+ * about the ITEM, given once and STICKY until that item closes — a twin appearing tags the new item and, once, the open
+ * ones that have none; a close relabels nobody; a re-word keeps the tag (r6 re-derived it from the open twins at each
+ * filing: an open item's words flipped as OTHER machines' notices came and went). A reopened item is a new life: its
+ * tag is judged again from the open twins.
  * `wire({usageHistory, userTodos})` = server.js's one line (it sets `usageHistory.onShape`, reconciles 3 s after boot).
  */
 const INBOX_KEY = 'usage-ledger';
@@ -119,14 +124,31 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
   }
   /** r6: the OPEN notices of OTHER machines with this display name (two machines of one name: each told by its host id). */
   const twinsOf = (host, name) => (typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => ours(i) && i.status === 'open' && nameOf(i) === name && paramsOf(i).host && paramsOf(i).host !== String(host)) : []).map((x) => userTodos.get(x)).filter(Boolean);
-  /** r6: an item's words re-filled with another machine label (its stored sentences, their params) — in place. */
-  function relabel(item, label) {
+  /** r6: an open twin's words re-filled with its host id's short form (its stored sentences, their params) — in place, ONCE
+   *  (r7: an item that has a tag keeps it); `name` (the bare machine name) kept beside it — an item filed before `name`
+   *  was stored would read its own tagged label back as its name. */
+  function relabel(item, name) {
     userTodos.reshapeItems((it) => {
-      if (it.id !== item.id || !it.i18n || !it.i18n.text || it.i18n.text.params.machine === label) return false;
+      if (it.id !== item.id || !it.i18n || !it.i18n.text) return false;
+      const q = it.i18n.text.params, tag = shortHost(q.host), label = `${name} (${tag})`;
+      if (q.tag || q.machine === label) return false;
       const i18n = JSON.parse(JSON.stringify(it.i18n));
-      i18n.text.params.machine = label; i18n.text.params.tag = shortHost(i18n.text.params.host);
+      i18n.text.params.machine = label; i18n.text.params.tag = tag; i18n.text.params.name = name;
       for (const l of i18n.detail || []) if (l.params && Object.prototype.hasOwnProperty.call(l.params, 'machine')) l.params.machine = label;
       it.i18n = i18n; it.text = fillOf(i18n.text.key, i18n.text.params); it.detail = (i18n.detail || []).map((l) => fillOf(l.key, l.params || {})).join('\n');
+      return true;
+    });
+  }
+  /** r7: the «Past the bound» line re-said with the count the hold ENDED with (rows dropped while it drained — a harvest
+   *  mid-drain pushed out a segment not drained yet) — in place, before 'resumed' closes the item. */
+  function redrop(item, dropped, month) {
+    userTodos.reshapeItems((it) => {
+      if (it.id !== item.id || !it.i18n || !Array.isArray(it.i18n.detail)) return false;
+      const d = it.i18n.detail, at = d.findIndex((l) => l && l.key === D_DROPPED), n = String(Math.max(0, Number(dropped) || 0));
+      if (at >= 0 && d[at].params && d[at].params.dropped === n) return false;
+      const i18n = JSON.parse(JSON.stringify(it.i18n)), line = { key: D_DROPPED, params: { dropped: n, month: String(month || (at >= 0 && d[at].params ? d[at].params.month : '') || '') } };
+      if (at >= 0) i18n.detail[at] = line; else i18n.detail.splice(Math.min(2, i18n.detail.length), 0, line);
+      it.i18n = i18n; it.detail = i18n.detail.map((l) => fillOf(l.key, l.params || {})).join('\n');
       return true;
     });
   }
@@ -137,10 +159,12 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
       // a name the event does not know (a hold read back at boot names its host id only) keeps the one its notice said
       const name = ev.hostName && ev.hostName !== ev.host ? ev.hostName : nameOf(prev) || ev.hostName;
       const twins = twinsOf(ev.host, name);
-      const w = noticeOf({ ...ev, hostName: name, tag: twins.length ? shortHost(ev.host) : '' });
+      // r7: the tag an OPEN item carries is kept (sticky until it closes); a new or reopened item is tagged when a twin is open
+      const stuck = prev && prev.status === 'open' ? String(paramsOf(prev).tag || '') : '';
+      const w = noticeOf({ ...ev, hostName: name, tag: stuck || (twins.length ? shortHost(ev.host) : '') });
       try {
-        // r6: each twin told by ITS host id too (its words re-filled in place)
-        for (const t of twins) relabel(t, `${name} (${shortHost(paramsOf(t).host)})`);
+        // r6: each twin told by ITS host id too (its words re-filled in place) — r7: once (a twin that has a tag keeps it)
+        for (const t of twins) relabel(t, name);
         if (!prev) {
           // r6: filed by its KEY (host id × file — the item's id derived from it), never matched by its words
           const it = userTodos.add(INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Usage', text: w.text, detail: w.detail, i18n: w.i18n, itemKey: keyOf(ev.host, ev.shard) });
@@ -160,6 +184,7 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
     } else if (ev.kind === 'resumed') {
       const it = itemOf(ev.host, ev.shard); // whatever it says (r5)
       open.delete(keyOf(ev.host, ev.shard));
+      if (it && Number(ev.dropped) > 0) { try { redrop(it, ev.dropped, ev.month); } catch { } } // r7: the count it ended with
       if (it) close(it.id, 'shape-ok');
     }
   };

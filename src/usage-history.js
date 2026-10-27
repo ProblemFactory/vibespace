@@ -216,13 +216,31 @@ const REMEDY_STATES = Object.freeze(['running', 'judging', 'failed', 'not-rewrit
 // (gen × HOLD_GEN_SPAN + i) and minted only once the previous hold of the month drained — a drained hold whose unlinks
 // failed (EBUSY on the NFS data dir) is a stale generation: its files are unlinked at the read-back, never read, and never
 // name the new hold's rows (r5 restarted the numbers at 0: the stale set dropped the new segments at the read-back).
+// r7: THE DISK NEVER SAYS «DROPPED» ABOUT A ROW MEMORY STILL HOLDS — an append's order is the rows, then the set's lines
+// naming only what the rows' append confirmed (`gone`, `back`, `below`: every segment numbered under it is done), then
+// the unlinks; an append that throws (ENOSPC, EDQUOT, EMFILE — a part of it may have landed) is cut back to the length
+// it had, and the hold is as it was on disk AND in memory (r6 wrote the set first: a rows append that threw left a set
+// naming live, acked segments, and a restart deleted them as «dropped»; a torn set line glued the next one to it). A
+// drained row leaves the segment it was read from and the bound counts UNDRAINED bytes (r6 counted a draining segment's
+// recorded rows as dropped when a harvest pushed it out mid-drain). What is done is RECORDED before its files can be left
+// behind — `below` when a drained segment's unlink fails, `retired` before a hold's last unlink — so a read-back unlinks
+// them unread whether or not a newer generation exists (r6 told a stale generation only by a newer one). A listing of
+// `_held/` that fails (EIO) is no empty disk: the month's batch waits, unacked, never a hold minted on the live one.
 const HOLD_MAX_BYTES = 64 * 1024 * 1024, HOLD_SEG_BYTES = 16 * 1024 * 1024;
 const HOLD_NAME_RE = /^(events-\d{4}-\d{2})~([A-Za-z0-9_-]+)\.(\d+)\.ndjson$/;
 const HOLD_DROP_RE = /^(events-\d{4}-\d{2})~([A-Za-z0-9_-]+)\.(\d+)\.dropped$/; // r6: a hold generation's dropped set
-const HOLD_GEN_SPAN = 1e6; // r6: a hold's segments are numbered gen × 10⁶ + i (a hold never nears 10⁶ segments of ≤ 16 MiB)
+const HOLD_DROP_TMP_RE = /^(events-\d{4}-\d{2})~([A-Za-z0-9_-]+)\.(\d+)\.dropped\.tmp$/; // r7: a compaction killed before its rename (swept at the listing)
+// r6: a hold's segments are numbered gen × 10⁶ + i. r7: a rotation past a generation's last number is REFUSED, loudly
+// (`HOLD_SEQ_BOUND`) — never read back as the next generation's; unreachable: a segment closes only when the next append
+// does not fit, so two neighbours hold > 16 MiB and 10⁶ of them are ≥ 8 TB through ONE machine × month
+const HOLD_GEN_SPAN = 1e6, HOLD_SEQ_BOUND = 'hold-seq-bound';
 const holdGenOf = (seq) => Math.floor(Number(seq) / HOLD_GEN_SPAN);
 const DROP_LINE_RIDS = 4096, DROP_COMPACT_MIN = 64 * 1024; // r6: rids per set line (≪ a MiB line); the set file rewritten past 4× its set (≥ 64 KiB)
 const dropLines = (tag, rids) => { let out = ''; for (let i = 0; i < rids.length; i += DROP_LINE_RIDS) out += JSON.stringify({ [tag]: rids.slice(i, i + DROP_LINE_RIDS) }) + '\n'; return out; };
+// r7: the bytes the set takes as its compacted lines (its compaction's bound is 4× that — r6 took 4× the FILE read back)
+const dropBytesOf = (set) => { let n = 0; for (const r of set) n += r.length + 3; return n + 12 * Math.ceil(set.size / DROP_LINE_RIDS); };
+// r7: a held row is a WHOLE line — the drain's own test, at the read-back too (a line torn by a crash mid-append is no row)
+const rowStart = (buf, a, b) => { while (a < b && buf[a] === 0) a++; return buf[a] === 0x7b && buf[b - 1] === 0x7d ? a : -1; };
 // a host id in a file name, reversibly: [A-Za-z0-9-] kept, every other byte `_` + its two hex digits
 const holdHostKey = (host) => Array.from(Buffer.from(String(host), 'utf8')).map((b) => (b < 128 && /[A-Za-z0-9-]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : '_' + b.toString(16).padStart(2, '0'))).join('');
 const holdHostOf = (key) => { const out = []; for (let i = 0; i < key.length; i++) { if (key[i] === '_') { out.push(parseInt(key.slice(i + 1, i + 3), 16)); i += 2; } else out.push(key.charCodeAt(i)); } return Buffer.from(out).toString('utf8'); };
@@ -782,23 +800,26 @@ class UsageHistory {
     // HELD (its hold, in order) and that month paused and said; a month back in shape drains its hold first (a small one in
     // this turn — these rows then append behind it; a big one in steps, these rows queued in the hold behind it); every
     // other month ingests as usual
-    const go = [], hold = [];
+    const go = [], hold = [], holdFailed = [];
+    const failOf = (shard, e) => ({ month: path.basename(shard).slice(7, 14), shard: path.basename(shard), error: (e && e.code) || String((e && e.message) || e).slice(0, 80) });
     for (const shard of shards) {
       const v = this._shapeVerdict(shard);
-      let h = this._holdOf(shard, hostId);
+      // r7 (e5): a hold listing that FAILS (EIO) is no empty disk — the month's rows wait, unacked (`holdFailed`), until a
+      // listing succeeds; never appended past a hold nobody could see, never a hold minted on top of the live one's files
+      let h; try { h = this._holdOf(shard, hostId); } catch (e) { const f = failOf(shard, e); holdFailed.push(f); console.warn(`[usage] the held months could not be listed (${f.error}) — the rows of ${f.shard} from ${hostName || hostId} wait: this batch is not acked, its device sends it again`); continue; }
       if (!h) return { added: 0, appended: 0, duplicates: 0, deferred: 'ledger-hold-loading', ack: false }; // a big hold read in steps: the batch waits, the device keeps it
       if (v.ok && this._holdBusy(h)) { if (this._pausedShards.has(this._pauseKey(hostId, shard))) this._resume(hostId, shard); else this._drainHold(h); h = this._holdOf(shard, hostId) || h; }
       if (!v.ok || this._holdBusy(h)) hold.push({ shard, v }); else go.push(shard);
     }
     // F1 — every appended shard's rid index ready (a big one loads in steps; the batch waits, the device keeps it)
     for (const shard of go) if (!this._ingestIndex(shard)) return { added: 0, appended: 0, duplicates: 0, deferred: 'ledger-index-loading', ack: false };
-    let held = 0, heldDup = 0; const paused = [], holdFailed = [];
+    let held = 0, heldDup = 0; const paused = [];
     for (const { shard, v } of hold) {
       // r5: a hold that could not be written is THAT month's — its notice, the answer's `holdFailed` — never stamped on the
       // batch's other months (r4 carried one batch-level error into every later paused month's notice)
       let holdError = null;
       try { const r = this._holdRows(this._holdOf(shard, hostId, true), shardBuffers[shard], hostName); held += r.held; heldDup += r.duplicates; }
-      catch (e) { holdError = (e && e.code) || String((e && e.message) || e).slice(0, 80); holdFailed.push({ month: path.basename(shard).slice(7, 14), shard: path.basename(shard), error: holdError }); console.warn(`[usage] the rows of ${path.basename(shard)} from ${hostName || hostId} could not be held (${holdError}) — this batch is not acked: its device sends it again`); }
+      catch (e) { const f = failOf(shard, e); holdError = f.error; holdFailed.push(f); console.warn(`[usage] the rows of ${path.basename(shard)} from ${hostName || hostId} could not be held (${holdError}) — this batch is not acked: its device sends it again`); }
       if (!v.ok) paused.push(this._pause(hostId, hostName, shard, v, holdError));
     }
     // r4: this machine's other paused months judged again at its every ingest (a month split by hand, a bound raised, a
@@ -929,7 +950,7 @@ class UsageHistory {
   _pause(hostId, hostName, shard, v, holdError = null) {
     const key = this._pauseKey(hostId, shard), prev = this._pausedShards.get(key), now = Date.now(), base = path.basename(shard);
     const ratio = v.ratio == null || !Number.isFinite(Number(v.ratio)) ? null : Math.round(Number(v.ratio) * 10) / 10;
-    const h = this._holdOf(shard, hostId);
+    let h; try { h = this._holdOf(shard, hostId); } catch { h = null; } // r7: a listing that fails counts nothing (said «counting»)
     const rec = { host: hostId, hostName: hostName || (prev && prev.hostName) || hostId, shard: base, month: base.slice(7, 14), size: v.size, ratio, why: v.why, exact: !!v.exact, since: prev ? prev.since : now, lastAt: now, held: h ? this._heldCount(h) : null, dropped: h ? this._droppedOf(h) : (prev ? prev.dropped : 0), holdMax: this._holdMax(), ...(holdError ? { holdError } : {}), remedy: null, drain: null };
     this._pausedShards.set(key, rec);
     const first = !prev;
@@ -951,34 +972,40 @@ class UsageHistory {
   _holdFile(h, seq) { return path.join(this.heldDir, `${h.key}.${seq}.ndjson`); }
   _dropFile(key, gen) { return path.join(this.heldDir, `${key}.${gen}.dropped`); }
   /** The holds a restart found (`_held/`, read once per process) → Map(key → [seq]); r6: every generation a file names is
-   *  seen (`_holdGens` — the next hold of that month is a newer one, even when an old file could not be unlinked). */
+   *  seen (`_holdGens` — the next hold of that month is a newer one, even when an old file could not be unlinked). r7: a
+   *  listing that FAILS (EIO, not ENOENT) throws and is never cached — an empty disk is a fact, never a guess (r6 cached it
+   *  as empty: the next hold was minted gen 0 on top of the live gen-0 files); a `.dropped.tmp` is swept. */
   _heldOnDisk() {
     if (this._heldList) return this._heldList;
     const m = new Map();
-    let names = []; try { names = fs.readdirSync(this.heldDir); } catch { }
+    let names = []; try { names = fs.readdirSync(this.heldDir); } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
     for (const n of names) {
       let x = HOLD_NAME_RE.exec(n);
       if (x) { const k = `${x[1]}~${x[2]}`; if (!m.has(k)) m.set(k, []); m.get(k).push(Number(x[3])); this._holdGenSeen(k, holdGenOf(x[3])); continue; }
       x = HOLD_DROP_RE.exec(n);
-      if (x) { const k = `${x[1]}~${x[2]}`; if (!this._dropFiles.has(k)) this._dropFiles.set(k, []); this._dropFiles.get(k).push(Number(x[3])); this._holdGenSeen(k, Number(x[3])); }
+      if (x) { const k = `${x[1]}~${x[2]}`; if (!this._dropFiles.has(k)) this._dropFiles.set(k, []); this._dropFiles.get(k).push(Number(x[3])); this._holdGenSeen(k, Number(x[3])); continue; }
+      if (HOLD_DROP_TMP_RE.test(n)) this._heldUnlink(path.join(this.heldDir, n)); // a compaction killed between its write and its rename (the old file is whole)
     }
     return (this._heldList = m);
   }
   _holdGenSeen(key, gen) { if (!(this._holdGens.get(key) >= gen)) this._holdGens.set(key, gen); }
   /** r6: a NEW hold of (month, host) — a generation newer than any this process or its disk has seen. */
   _holdGenNext(key) { this._heldOnDisk(); const g = this._holdGens.has(key) ? this._holdGens.get(key) + 1 : 0; this._holdGens.set(key, g); return g; }
-  /** r6: the set files of `key` other than generation `gen`'s — a stale hold's — unlinked (an error leaves them: never read). */
-  _dropStale(key, gen) {
+  /** r6: the set files of `key` other than generation `gen`'s — a stale hold's — unlinked (an error leaves them: never read).
+   *  r7: never one of a generation in `stuck` (a segment of it could not be unlinked: its set's `retired` stays beside it). */
+  _dropStale(key, gen, stuck = null) {
     const gens = this._dropFiles.get(key) || [];
-    for (const g of gens) if (g !== gen) { try { fs.unlinkSync(this._dropFile(key, g)); } catch { } }
-    if (gens.length) this._dropFiles.set(key, gens.filter((g) => g === gen));
+    for (const g of gens) if (g !== gen && !(stuck && stuck.has(g))) this._heldUnlink(this._dropFile(key, g));
+    if (gens.length) this._dropFiles.set(key, gens.filter((g) => g === gen || (stuck && stuck.has(g))));
   }
   /** The hold of (shard, host) → its record | NO_HOLD (nothing held; `create` makes the record) | null (a big hold on disk
    *  is being read in steps — the caller waits). A hold on disk is read back once: its rows' rids (a re-sent row is held
    *  once), counts and the dropped set (r6: its generation's set file); inline while ≤ INGEST_IX_INLINE_BYTES, else a
    *  step per turn. r6 (R1): the hold's generation is its newest segment's — a segment of an OLDER one is a drained
    *  hold's file whose unlink failed (a generation is minted only once the previous hold drained: its drain read the file
-   *  to its end, into the ledger): unlinked, never read, never counted, never named by this hold's set. */
+   *  to its end, into the ledger): unlinked, never read, never counted, never named by this hold's set. r7: the newest
+   *  generation itself may be done — its set says `retired`: its files unlinked unread, nothing held (`create` ⇒ a newer
+   *  one). A listing that fails throws (the caller's batch waits). */
   _holdOf(shard, host, create = false) {
     const key = this._holdKey(shard, host);
     let h = this._holds.get(key);
@@ -987,15 +1014,15 @@ class UsageHistory {
     if (!listed.length && !create) return NO_HOLD;
     this._heldOnDisk().delete(key);
     const gen = listed.length ? holdGenOf(listed[listed.length - 1]) : this._holdGenNext(key);
-    const seqs = listed.filter((q) => holdGenOf(q) === gen);
-    for (const q of listed) if (holdGenOf(q) !== gen) { try { fs.unlinkSync(path.join(this.heldDir, `${key}.${q}.ndjson`)); } catch { } }
-    this._dropStale(key, gen);
-    h = { key, gen, base: path.basename(shard, '.ndjson'), host: String(host), hostName: null, segs: [], nextSeq: gen * HOLD_GEN_SPAN, gone: new Set(), goneBytes: 0, goneTorn: false, compactAt: DROP_COMPACT_MIN, loading: null, draining: null };
+    const seqs = listed.filter((q) => holdGenOf(q) === gen), stuck = new Set();
+    for (const q of listed) if (holdGenOf(q) !== gen && !this._heldUnlink(path.join(this.heldDir, `${key}.${q}.ndjson`))) stuck.add(holdGenOf(q));
+    this._dropStale(key, gen, stuck);
+    h = { key, gen, base: path.basename(shard, '.ndjson'), host: String(host), hostName: null, segs: [], nextSeq: gen * HOLD_GEN_SPAN, gone: new Set(), goneBytes: 0, goneTorn: false, below: 0, retired: false, stale: false, compactAt: DROP_COMPACT_MIN, loading: null, draining: null };
     this._holds.set(key, h);
     if (!seqs.length) return h;
     const steps = this._holdLoadSteps(h, seqs), inline = this.ingestIndexInlineBytes || INGEST_IX_INLINE_BYTES;
     let r; do { r = steps.next(); } while (!r.done && r.value <= inline);
-    if (r.done) return h;
+    if (r.done) { if (!h.retired) return h; this._holds.delete(key); return create ? this._holdOf(shard, host, true) : NO_HOLD; }
     h.loading = LD.runStepped(steps, { sliceMs: 20 }).then(() => { h.loading = null; this._afterHoldLoad(h); }, (e) => {
       console.warn(`[usage] the hold ${h.key} could not be read: ${(e && e.message) || e} — read again at the next ingest`);
       this._holds.delete(key); this._heldOnDisk().set(key, seqs);
@@ -1004,33 +1031,54 @@ class UsageHistory {
   }
   _holdKey(shard, host) { return `${path.basename(shard, '.ndjson')}~${holdHostKey(host)}`; }
   /** Is anything of (shard, host) held — in memory or on disk, not yet read back? (r5: a resume waits for it) */
-  _holdsAny(shard, host) { const k = this._holdKey(shard, host), h = this._holds.get(k); return h ? !!(h.loading || this._holdBusy(h)) : this._heldOnDisk().has(k); }
+  _holdsAny(shard, host) { const k = this._holdKey(shard, host), h = this._holds.get(k); if (h) return !!(h.loading || this._holdBusy(h)); try { return this._heldOnDisk().has(k); } catch { return true; } } // r7: a listing that fails — held, as far as anyone knows
   /** The dropped count — the SET's size (r6: the dropped ROWS, each rid once — however often it was re-sent or dropped). */
   _droppedOf(h) { return (h && h.gone && h.gone.size) || 0; }
   *_holdLoadSteps(h, seqs) {
     let read = 0;
-    // r6: the generation's dropped set first (`gone` adds, `back` removes — in their order)
+    // r6: the generation's dropped set first (`gone` adds, `back` removes — in their order); r7: `below` (every segment
+    // numbered under it is done) and `retired` (the whole generation is)
     const df = this._dropFile(h.key, h.gen);
     for (let lineEnd = 0; ;) {
       let end;
       try {
         end = LD.eachLine(df, h.goneBytes, Infinity, (buf, a, b, at) => {
           lineEnd = at + (b - a) + 1;
-          try { const j = JSON.parse(buf.toString('utf8', a, b)); if (Array.isArray(j && j.gone)) for (const r of j.gone) h.gone.add(String(r)); else if (Array.isArray(j && j.back)) for (const r of j.back) h.gone.delete(String(r)); } catch { }
+          try {
+            const j = JSON.parse(buf.toString('utf8', a, b));
+            if (Array.isArray(j && j.gone)) for (const r of j.gone) h.gone.add(String(r));
+            else if (Array.isArray(j && j.back)) for (const r of j.back) h.gone.delete(String(r));
+            else if (j && Number.isFinite(j.below)) h.below = Math.max(h.below, j.below);
+            else if (j && j.retired != null) h.retired = true;
+          } catch { } // a line torn mid-append (a crash, or a cut that failed too) is no line
         }, { limit: WARM_SLICE_BYTES });
       } catch (e) { if (e && e.code === 'ENOENT') break; throw e; }
       if (end === h.goneBytes) { h.goneTorn = h.goneBytes > lineEnd; break; } // a crash mid-append: the next one starts on a line of its own
       read += end - h.goneBytes; h.goneBytes = end;
       yield read;
     }
+    // r7: a RETIRED generation (its drain ended, an unlink failed — EBUSY): every file of it unlinked unread, nothing held,
+    // nothing counted (r6 read it back as the live hold when no newer one existed); its set stays while a segment does
+    if (h.retired) {
+      let all = true;
+      for (const seq of seqs) all = this._holdUnlink(h, seq) && all;
+      if (all) this._heldUnlink(df);
+      h.gone.clear();
+      return;
+    }
     for (const seq of seqs) {
+      h.nextSeq = Math.max(h.nextSeq, seq + 1);
+      // r7: a segment under `below` is DONE — dropped (its rows are in the set: a crash came between the set's line and the
+      // unlink) or drained (its rows are in the ledger: its unlink failed): unlinked unread, never counted, never drained
+      if (seq < h.below) { this._holdUnlink(h, seq); continue; }
       const seg = { seq, rows: 0, bytes: 0, at: 0, rids: new Set(), torn: false }, file = this._holdFile(h, seq);
-      h.segs.push(seg); h.nextSeq = Math.max(h.nextSeq, seq + 1);
+      h.segs.push(seg);
       let lineEnd = 0;
       for (;;) {
         const end = LD.eachLine(file, seg.bytes, Infinity, (buf, a, b, at) => {
           lineEnd = at + (b - a) + 1;
-          const rid = LD.ridAt(buf, a, b);
+          const x = rowStart(buf, a, b); // r7: a torn line is no row — r6 counted it held, and a re-send of it was a «duplicate» no drain could read
+          const rid = x < 0 ? null : LD.ridAt(buf, x, b);
           if (rid) { seg.rows++; seg.rids.add(rid); }
         }, { limit: WARM_SLICE_BYTES });
         if (end === seg.bytes) break;
@@ -1038,15 +1086,16 @@ class UsageHistory {
         yield read;
       }
       seg.torn = seg.bytes > lineEnd; // a crash mid-append: the next append starts on a line of its own
+      if (!seg.rids.size) { h.segs.pop(); this._holdUnlink(h, seq); } // r7: no whole row — nothing to hold or drain
     }
-    // r5: a segment the dropped set names was dropped — a crash came between the set's line and its unlink: unlinked now,
-    // never counted again (its rows are in the set) and never drained (they were never recorded). r6: named by its ROWS —
-    // every one of them in the set; a row in any other live segment is HELD (it will be recorded), never in the set
-    for (const seg of [...h.segs]) {
-      if (seg.rids.size && [...seg.rids].every((r) => h.gone.has(r))) { h.segs.splice(h.segs.indexOf(seg), 1); this._holdUnlink(h, seg.seq); continue; }
-      for (const r of seg.rids) h.gone.delete(r);
-    }
-    h.compactAt = Math.max(DROP_COMPACT_MIN, 4 * h.goneBytes);
+    h.nextSeq = Math.max(h.nextSeq, h.below); // a number `below` names is never used again
+    // r7: a generation read back with NO live row is done — retired silently (its set's count was its own episode's, said
+    // and closed; an empty file a failed append left, a crash between a drain's last unlink and its record)
+    if (!h.segs.length) { h.retired = true; if (!h.stale) this._heldUnlink(df); h.gone.clear(); return; }
+    // a row in a live segment is HELD (it will be recorded), never in the set — r7: whatever a line said (a crash between
+    // the rows and their `back` line); the segments the set dropped are the ones `below` names, never guessed from rows
+    for (const seg of h.segs) for (const r of seg.rids) h.gone.delete(r);
+    h.compactAt = Math.max(DROP_COMPACT_MIN, 4 * dropBytesOf(h.gone)); // r7: 4× the set (r6: 4× the file — a file 31× its set was kept)
   }
   _holdBusy(h) { return !!(h && (h.draining || h.segs.length)); }
   _heldCount(h) { return h.segs.reduce((a, s) => a + s.rows, 0); }
@@ -1062,17 +1111,18 @@ class UsageHistory {
   }
   /** One append to a hold, BOUNDED: a batch alone past the bound keeps its newest rows; a segment past HOLD_SEG_BYTES starts
    *  the next; past the bound the oldest segments go — every row dropped COUNTED and said in one line. r5: the count is the
-   *  dropped SET — r6: the dropped ROWS' rids (`h.gone`), never a position: its lines (`gone` / `back`) appended to the
-   *  generation's set file BEFORE the rows and the unlinks — a crash after the set's line leaves a segment the read-back
-   *  drops uncounted (`_holdLoadSteps`). A re-sent row the set holds is held again only when every row of the append fits
-   *  without dropping another (it leaves the set: recorded after all); else it stays dropped — counted once, never
-   *  re-written (the bound keeps the newest rows; a frozen window re-sent at every harvest writes nothing). Nothing is
-   *  dropped in memory unless the rows' append landed (one that throws — ENOSPC — leaves the hold as it was). → {held, again}
-   *  (`again`: re-sent dropped rows that stay dropped). */
+   *  dropped SET — r6: the dropped ROWS' rids (`h.gone`), never a position. A re-sent row the set holds is held again only
+   *  when every row of the append fits without dropping another (it leaves the set: recorded after all); else it stays
+   *  dropped — counted once, never re-written (the bound keeps the newest rows; a frozen window re-sent at every harvest
+   *  writes nothing). r7 THE ORDER: the rows, then the set's lines (`gone` / `back` and `below` — the first segment kept)
+   *  naming only what the rows' append confirmed, then the unlinks; an append that throws is cut back and the hold is as
+   *  it was, on disk and in memory (a set line that cannot be written cuts the rows back too). The bound counts UNDRAINED
+   *  bytes; a pushed-out segment's dropped rows are the ones not drained yet. → {held, again} (`again`: re-sent dropped
+   *  rows that stay dropped). */
   _holdAppend(h, rows) {
     if (!rows.length) return { held: 0, again: 0 };
     const max = this._holdMax(), segMax = Math.min(max, this.holdSegBytes || HOLD_SEG_BYTES);
-    const lenOf = (e) => Buffer.byteLength(e.line) + 1, total0 = h.segs.reduce((a, s) => a + s.bytes, 0);
+    const lenOf = (e) => Buffer.byteLength(e.line) + 1, leftOf = (s) => s.bytes - s.at, total0 = h.segs.reduce((a, s) => a + leftOf(s), 0);
     const back = rows.filter((e) => h.gone.has(e.rid));
     const fits = !back.length || total0 + rows.reduce((a, e) => a + lenOf(e), 0) <= max;
     const take = fits ? rows : rows.filter((e) => !h.gone.has(e.rid)), again = rows.length - take.length;
@@ -1081,41 +1131,107 @@ class UsageHistory {
     let bytes = len.reduce((a, b) => a + b, 0), cut = 0;
     while (bytes > max && cut < take.length) bytes -= len[cut++]; // a batch alone over the bound: its oldest rows go
     const last = h.segs[h.segs.length - 1], fresh = !last || (last.bytes && last.bytes + bytes > segMax);
+    if (fresh && holdGenOf(h.nextSeq) !== h.gen) { // r7 (unreachable — see HOLD_SEQ_BOUND): never numbered as the next generation's
+      console.warn(`[usage] the hold ${h.key} would rotate past its generation's ${HOLD_GEN_SPAN} segment numbers — refused (${HOLD_SEQ_BOUND}): this batch is not acked`);
+      throw Object.assign(new Error(`the hold ${h.key} is past its generation's segment numbers`), { code: HOLD_SEQ_BOUND });
+    }
     const seg = fresh ? { seq: h.nextSeq, rows: 0, bytes: 0, at: 0, rids: new Set(), torn: false } : last;
     const segs = fresh ? [...h.segs, seg] : h.segs, gone = [];
-    for (let total = segs.reduce((a, s) => a + s.bytes, 0); segs.length - gone.length > 1 && total + bytes > max;) { const old = segs[gone.length]; gone.push(old); total -= old.bytes; }
+    for (let total = segs.reduce((a, s) => a + leftOf(s), 0); segs.length - gone.length > 1 && total + bytes > max;) { const old = segs[gone.length]; gone.push(old); total -= leftOf(old); }
     const keep = cut ? take.slice(cut) : take;
+    // the rows dropped: this batch's oldest past the bound + the pushed-out segments' rows NOT DRAINED (r7: a drained row
+    // left its segment's rids at its step — r6 counted a draining segment's recorded rows «never recorded»)
     const dropRids = [...take.slice(0, cut).map((e) => e.rid), ...gone.flatMap((g) => [...g.rids])], backRids = fits ? back.map((e) => e.rid) : [];
-    const setText = dropRids.length || backRids.length ? (h.goneTorn ? '\n' : '') + dropLines('gone', dropRids) + dropLines('back', backRids) : '';
+    const below = gone.length ? segs[gone.length].seq : 0; // r7: every segment numbered under it is done (its rows in the set)
+    const setText = dropRids.length || backRids.length || below ? (h.goneTorn ? '\n' : '') + dropLines('gone', dropRids) + dropLines('back', backRids) + (below ? JSON.stringify({ below }) + '\n' : '') : '';
     const text = keep.length ? (seg.torn ? '\n' : '') + keep.map((e) => e.line).join('\n') + '\n' : '';
-    timedSync('usage-held.write', () => {
-      fs.mkdirSync(this.heldDir, { recursive: true });
-      if (setText) { fs.appendFileSync(this._dropFile(h.key, h.gen), setText); h.goneBytes += Buffer.byteLength(setText); h.goneTorn = false; }
-      if (text) fs.appendFileSync(this._holdFile(h, seg.seq), text);
-    });
+    fs.mkdirSync(this.heldDir, { recursive: true });
+    // r7 THE ORDER — the rows first: one that throws is cut back, the hold as it was (disk and memory)
+    const file = this._holdFile(h, seg.seq);
+    if (text) { const f = this._holdWrite(file, text, seg.bytes); if (f) { this._holdTorn(h, seg, fresh, f.at); throw f.error; } }
+    // … then the set's lines, naming only what the rows' append confirmed: one that throws is cut back and the rows with it
+    // (rows that cannot be cut back are on disk whole — then they are held, and nothing is dropped)
+    if (setText) {
+      const f = this._holdWrite(this._dropFile(h.key, h.gen), setText, h.goneBytes);
+      if (f) {
+        this._goneTorn(h, f.at);
+        const at = text ? this._holdCut(file, seg.bytes) : seg.bytes;
+        if (at !== seg.bytes) { if (fresh) { h.segs.push(seg); h.nextSeq++; } seg.torn = at !== seg.bytes + Buffer.byteLength(text); seg.bytes = at < 0 ? seg.bytes + Buffer.byteLength(text) : at; seg.rows += keep.length; for (const e of keep) seg.rids.add(e.rid); for (const r of backRids) h.gone.delete(r); }
+        throw f.error;
+      }
+      h.goneBytes += Buffer.byteLength(setText); h.goneTorn = false;
+    }
+    // … both landed: the memory …
     if (fresh && text) { h.segs.push(seg); h.nextSeq++; }
-    for (const r of dropRids) h.gone.add(r); // the set's line landed, and the rows': now the files go
-    for (const r of backRids) h.gone.delete(r);
-    for (const old of gone) { h.segs.splice(h.segs.indexOf(old), 1); this._holdUnlink(h, old.seq); }
     if (text) { seg.torn = false; seg.bytes += Buffer.byteLength(text); seg.rows += keep.length; for (const e of keep) seg.rids.add(e.rid); }
+    for (const r of dropRids) h.gone.add(r);
+    for (const r of backRids) h.gone.delete(r);
+    if (below) h.below = Math.max(h.below, below);
+    // … and only now the files go (a crash before their unlink: `below` names them)
+    for (const old of gone) { h.segs.splice(h.segs.indexOf(old), 1); this._holdUnlink(h, old.seq); }
     if (h.goneBytes > h.compactAt) this._dropCompact(h);
     if (dropRids.length) console.warn(`[usage] the rows of ${h.base} held for ${h.hostName || h.host} passed the hold's ${Math.round(max / 2 ** 20)} MiB: its ${dropRids.length} oldest held row(s) were dropped — ${this._droppedOf(h)} dropped so far, counted in its notice, never recorded`);
     return { held: keep.length, again };
   }
-  /** r6: the set file rewritten as the set (tmp + rename) once its lines pass 4× it — an error leaves the old one (valid). */
+  /** r7: ONE append to a hold's file (a segment's rows, its generation's set lines) — whole or not at all: one that throws
+   *  (ENOSPC, EDQUOT, EMFILE — a part of it may have landed) is cut back to the length it had (`before`). → null (landed)
+   *  | {error, at} (`at`: its length now — `before`, else the real one: the cut failed too, see `_holdTorn`). */
+  _holdWrite(file, text, before) {
+    try { timedSync('usage-held.write', () => fs.appendFileSync(file, text)); return null; } catch (error) { return { error, at: this._holdCut(file, before) }; }
+  }
+  /** r7: a hold's file cut back to `before` bytes → its length now (`before`; the real one when the cut fails; -1 unknown).
+   *  A file the append created (`before` 0) is unlinked — never an empty file left beside the hold. */
+  _holdCut(file, before) {
+    try { if (before > 0 || !this._heldUnlink(file)) fs.truncateSync(file, before); return before; }
+    catch (e) { if (e && e.code === 'ENOENT') return 0; try { return fs.statSync(file).size; } catch { return -1; } }
+  }
+  /** r7: a segment an append left torn (its cut failed too) — known in-process: its next line on a line of its own, its
+   *  length the real one, a fresh one's number used. */
+  _holdTorn(h, seg, fresh, at) {
+    if (at === seg.bytes) return;
+    seg.torn = true; if (at > seg.bytes) seg.bytes = at;
+    if (fresh) { h.segs.push(seg); h.nextSeq++; }
+  }
+  /** r7: the set file an append left torn (its cut failed too): its next line on a line of its own, and the set rewritten
+   *  whole (from memory) at the next append — the fragment's whole lines never read back as the set's. */
+  _goneTorn(h, at) {
+    if (at === h.goneBytes) return;
+    h.goneTorn = true; if (at > h.goneBytes) h.goneBytes = at;
+    h.compactAt = 0;
+  }
+  /** r7: one RECORD line in the generation's set file (`below`, `retired`) → whether it landed. */
+  _holdMark(h, line) {
+    const text = (h.goneTorn ? '\n' : '') + JSON.stringify(line) + '\n';
+    const f = this._holdWrite(this._dropFile(h.key, h.gen), text, h.goneBytes);
+    if (f) { this._goneTorn(h, f.at); return false; }
+    h.goneBytes += Buffer.byteLength(text); h.goneTorn = false;
+    if (line.below) h.below = Math.max(h.below, line.below);
+    return true;
+  }
+  /** r6: the set file rewritten as the set (tmp + rename) once its lines pass 4× it — an error leaves the old one (valid).
+   *  r7: `below` rides it; 4× from growth alone rewrites it at 64 KiB, 256 KiB, 1 MiB, … (≈ 1.33× its final size in all). */
   _dropCompact(h) {
-    const f = this._dropFile(h.key, h.gen), text = dropLines('gone', [...h.gone]);
-    try { if (!text) { fs.unlinkSync(f); h.goneBytes = 0; } else { fs.writeFileSync(f + '.tmp', text); fs.renameSync(f + '.tmp', f); h.goneBytes = Buffer.byteLength(text); } h.goneTorn = false; } catch { }
+    const f = this._dropFile(h.key, h.gen), text = dropLines('gone', [...h.gone]) + (h.below ? JSON.stringify({ below: h.below }) + '\n' : '');
+    try {
+      if (!text) { if (this._heldUnlink(f)) h.goneBytes = 0; }
+      else { timedSync('usage-held.write', () => fs.writeFileSync(f + '.tmp', text)); fs.renameSync(f + '.tmp', f); h.goneBytes = Buffer.byteLength(text); }
+      h.goneTorn = false;
+    } catch { this._heldUnlink(f + '.tmp'); }
     h.compactAt = Math.max(DROP_COMPACT_MIN, 4 * h.goneBytes);
   }
   /** r6: a hold that ended (drained, or nothing left to drain): its record gone and its generation's set file unlinked — the
-   *  next hold of the month is a new generation (an unlink that fails leaves a stale file, never read). */
+   *  next hold of the month is a new generation. r7: a generation with a file on disk RECORDS its end (`retired`) before
+   *  its set's unlink, and keeps the set while a segment it could not unlink is left (EBUSY): a read-back unlinks them
+   *  unread, with or without a newer generation. */
   _holdRetire(h) {
     if (!h || h.none) return;
     if (this._holds.get(h.key) === h) this._holds.delete(h.key);
-    try { fs.unlinkSync(this._dropFile(h.key, h.gen)); } catch { }
+    if (h.goneBytes || h.stale) this._holdMark(h, { retired: h.gen });
+    if (!h.stale) this._heldUnlink(this._dropFile(h.key, h.gen));
   }
-  _holdUnlink(h, seq) { try { fs.unlinkSync(this._holdFile(h, seq)); } catch { } }
+  /** r7: ONE unlink of a hold's file → whether it is gone (an error — EBUSY on the NFS data dir — leaves it: `stale`). */
+  _heldUnlink(p) { try { fs.unlinkSync(p); return true; } catch (e) { return !!(e && e.code === 'ENOENT'); } }
+  _holdUnlink(h, seq) { const done = this._heldUnlink(this._holdFile(h, seq)); if (!done) h.stale = true; return done; }
   /** r4: a month back in shape — its held rows ingested IN ORDER (the oldest segment first) through the ingest's own law (the
    *  shard's rid index: a row the ledger already holds costs zero bytes), a slice at a time; each segment unlinked once read
    *  to its end. A small hold (≤ INGEST_IX_INLINE_BYTES, its shard's index current) drains in the calling turn; a bigger one
@@ -1160,9 +1276,13 @@ class UsageHistory {
         if (rid) rows.push({ rid, line: buf.toString('utf8', a, b) });
       }, { limit: WARM_SLICE_BYTES });
     } catch (e) { if (!e || e.code !== 'ENOENT') throw e; }
-    if (rows.length) { const r = this._appendRemote({ [shard]: rows }, [shard]); sum.rows += rows.length; sum.appended += r.appended; sum.duplicates += r.duplicates; seg.rows = Math.max(0, seg.rows - rows.length); }
+    if (rows.length) {
+      const r = this._appendRemote({ [shard]: rows }, [shard]); sum.rows += rows.length; sum.appended += r.appended; sum.duplicates += r.duplicates; seg.rows = Math.max(0, seg.rows - rows.length);
+      for (const x of rows) seg.rids.delete(x.rid); // r7: a drained row LEAVES the segment it was read from (a drop never counts it)
+    }
     if (end > seg.at) { seg.at = end; return true; }
-    h.segs.shift(); this._holdUnlink(h, seg.seq); // read to its end: every row of it is in the ledger
+    // read to its end: every row of it is in the ledger — r7: an unlink that fails (EBUSY) is recorded (`below`): never read again
+    h.segs.shift(); if (!this._holdUnlink(h, seg.seq)) this._holdMark(h, { below: seg.seq + 1 });
     return h.segs.length > 0;
   }
   /** A hold drained to its end: its record gone — r5: and only NOW its month's pause ends (the shard judged again first: in
@@ -1194,6 +1314,7 @@ class UsageHistory {
   /** A hold read back (a restart, a big hold's steps): its month in shape ⇒ drained (its pause, if any, resumed); out of
    *  shape ⇒ that month paused and said with its counts (a hold with no notice gets its one). */
   _afterHoldLoad(h) {
+    if (h.retired) { if (this._holds.get(h.key) === h) this._holds.delete(h.key); return; } // r7: a retired generation — nothing held, nothing said
     const shard = this._shardPath(h.base + '.ndjson'), rec = this._pausedShards.get(this._pauseKey(h.host, shard));
     let v; try { v = this._shapeVerdict(shard); } catch { return; }
     if (v.ok) { if (rec) this._resume(h.host, shard); else this._drainHold(h); }
@@ -1201,8 +1322,10 @@ class UsageHistory {
   }
   /** Boot (r4): every hold on disk read back and judged (`_afterHoldLoad`; a big one when its steps end) → how many. */
   restoreHolds() {
-    let n = 0;
-    for (const key of [...this._heldOnDisk().keys()]) {
+    let n = 0, keys;
+    // r7: a listing that fails (EIO) reads nothing back now — each month's hold is read at its machine's next ingest
+    try { keys = [...this._heldOnDisk().keys()]; } catch (e) { console.warn(`[usage] the held months could not be listed (${(e && e.code) || e}) — each is read back at its machine's next harvest`); return 0; }
+    for (const key of keys) {
       const x = /^(events-\d{4}-\d{2})~([A-Za-z0-9_-]+)$/.exec(key);
       if (!x) continue;
       n++;
@@ -1325,7 +1448,7 @@ class UsageHistory {
   _resume(hostId, shard) {
     const key = this._pauseKey(hostId, shard), rec = this._pausedShards.get(key);
     if (!rec) return;
-    const h = this._holdOf(this._shardPath(rec.shard), hostId);
+    let h; try { h = this._holdOf(this._shardPath(rec.shard), hostId); } catch { return; } // r7: its hold unknown (a listing failed) — it stays paused
     if (!h) return;
     if (this._holdBusy(h)) {
       this._drainHold(h);
