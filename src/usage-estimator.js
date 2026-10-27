@@ -599,8 +599,18 @@ class UsageEstimator {
     // between anchors (late-scanned workflow transcripts), and learn-time
     // live-cost recomputation should see it without waiting for a new anchor.
     const c = this._rateCache.get(identityKey);
-    if (c && Date.now() - c.at < 600000) return c.rates;
+    const loading = this._ledgerLoading();
+    if (c && (loading || (!c.partial && Date.now() - c.at < 600000))) return c.rates;
     const lines = this.lines(identityKey);
+    // lane ledger-dedup-law r2 — NO LEARNED RATE FROM A PARTIAL LEDGER: while the boot warm is still loading, the live
+    // recompute below would read part of the ledger (840 of 20 000 requests in the acceptance's fixture). The rates learn
+    // from the anchors' frozen costSince only (each measured on a whole ledger when it was recorded), are NOT written to
+    // rates.json, and are learned again at the first ask after the warm.
+    if (loading) {
+      const rates = learnRates(lines, { priors: this.priorsFor(identityKey) });
+      this._rateCache.set(identityKey, { rates, at: Date.now(), partial: true });
+      return rates;
+    }
     // learn-time LIVE cost recomputation (see extractPairs) — the frozen
     // costSince snapshots under-count fast burns whose ledger events land
     // after the sweep; the live ledger heals them retroactively.
@@ -610,6 +620,11 @@ class UsageEstimator {
     return rates;
   }
   invalidate(identityKey) { this._rateCache.delete(identityKey); this._lineCache.delete(identityKey); this._estMemo.clear(); }
+  /** The ledger this estimator reads is still loading past its takeover bound (the boot's stepped warm) → {bytesLeft, at},
+   *  else null (lane ledger-dedup-law r2): a cost read now is part of the ledger. */
+  _ledgerLoading() {
+    try { const uh = typeof this._usageHistory === 'function' ? this._usageHistory() : this._usageHistory; return uh && typeof uh.ledgerLoading === 'function' ? uh.ledgerLoading() : null; } catch { return null; }
+  }
   _persistRates(identityKey, rates, nAnchors) {
     try {
       const fp = path.join(this.dir, 'rates.json');
@@ -644,6 +659,7 @@ class UsageEstimator {
    *  identity's learned rates over the trailing window's ledger + live cost
    *  (burnRates). {} = no rate or no recent spend: no claim. */
   burnFor(accountId, nowMs = Date.now(), { windowMs = BURN_WINDOW_MS } = {}) {
+    if (this._ledgerLoading()) return {}; // lane ledger-dedup-law r2: the trailing window's cost would be part of the ledger — no claim
     try {
       const ident = this.resolveIdentity(accountId);
       if (!ident?.identityKey) return {};
@@ -666,6 +682,9 @@ class UsageEstimator {
     // (utilization 1, fetchedAt now) so the pool's immediate switch reads
     // 85%-ish instead of dead and stays put (adversarial-review major).
     if (m && nowMs - m.at < 30000 && !(rawCache?.fetchedAt > (m.baseFetchedAt || 0))) return m.est;
+    // lane ledger-dedup-law r2: no estimate from a partial ledger — the cost since the anchor would be part of it (the
+    // newest month loads last); null = the reading stands (every caller's no-estimate road), nothing memoized
+    if (this._ledgerLoading()) return null;
     let est = null, baseFetchedAt = 0;
     try {
       const ident = this.resolveIdentity(accountId);
@@ -789,11 +808,41 @@ function cliRefreshDrift(est, raw, nowMs = Date.now()) {
   return { drift, triggerDrift, moved, rolled };
 }
 
+// THE WHOLE-LEDGER GATE (lane ledger-dedup-law r2 — no money decision from a partial ledger). While the boot's stepped warm has
+// more of the ledger left than a reader may take over, every sync reader answers from the rows loaded so far
+// (costBetweenMulti says `partial`). The pool engine's two money writers stand behind this gate: its anchor sweep (it
+// records costSince + the calibration into the anchor files, and re-learns rates) WAITS — `run(fn)`: now when the ledger is
+// whole, else once when the warm ends (an ask meanwhile joins that one run; the first sweep at 20 s simply waits); its
+// automatic pool decision is SKIPPED — `holds()`: true while loading, said once ("ledger still loading"), and `onWhole`
+// hears the warm's end so every auto pool is decided again. Never throws.
+function wholeLedgerGate({ ledger, log = () => {}, onWhole = () => {} } = {}) {
+  const queued = [];
+  let waiting = null, said = false, held = false;
+  const loading = () => { try { return ledger && typeof ledger.ledgerLoading === 'function' ? ledger.ledgerLoading() : null; } catch { return null; } };
+  const wait = (l) => {
+    if (!said) { said = true; log(`ledger still loading (${Math.ceil(((l && l.bytesLeft) || 0) / 1048576)} MiB left) — the anchor sweep and the automatic pool decisions wait for the whole ledger`); }
+    if (waiting) return;
+    waiting = Promise.resolve(typeof ledger.whenWarm === 'function' ? ledger.whenWarm() : null).catch(() => { }).then(() => {
+      waiting = null;
+      const again = loading();
+      if (again) { wait(again); return; }
+      said = false;
+      for (const fn of queued.splice(0)) { try { fn(); } catch { } }
+      if (held) { held = false; try { onWhole(); } catch { } }
+    });
+  };
+  return {
+    loading,
+    holds() { const l = loading(); if (!l) return false; held = true; wait(l); return true; },
+    run(fn) { const l = loading(); if (!l) { fn(); return 'ran'; } if (!queued.includes(fn)) queued.push(fn); wait(l); return 'waiting'; },
+  };
+}
+
 module.exports = {
   PRIOR_WEIGHT_DU, CLAUDE_MAX_PRIOR_FULL_USD,
   normU, scopedKey, scopedFamily, costForKey,
   extractPairs, learnRates, estimateBuckets, overlayCache, predictCalib,
-  CALIB_METRIC, calibMetricRows, sweepAnchorGroup, cliRefreshDrift,
+  CALIB_METRIC, calibMetricRows, sweepAnchorGroup, cliRefreshDrift, wholeLedgerGate,
   burnRates, BURN_WINDOW_MS,
   UsageEstimator,
 };

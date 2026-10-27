@@ -85,18 +85,21 @@ const shapeEnd = (out, seen, perHost) => {
 };
 
 /**
- * THE SAMPLED SHAPE of one shard → { file, size, ino, mtimeMs, rows, unique, ratio, hosts: [{host, rows}], sampled } —
- * `ratio` = rows / unique over the union of the windows (null when they held no row: a sparse or empty file). A file of at
- * most SAMPLES × SAMPLE_BYTES is counted whole (exactly). Throws only when the file cannot be stat'ed.
+ * THE SAMPLED SHAPE of one shard → { file, size, ino, mtimeMs, rows, unique, ratio, hosts: [{host, rows}], sampled,
+ * windows } — `ratio` = rows / unique over the union of the windows (null when they held no row: a sparse or empty file);
+ * `windows` = where each window starts, evenly from the head (0) to the tail (size − a window). A file of at most
+ * SAMPLES × SAMPLE_BYTES is counted whole (exactly). Throws only when the file cannot be stat'ed. A sample of windows sees
+ * a repeat only when both copies fall in it — a re-sent window far from its first copy reads ≈ 1× here, so the ingest
+ * judges by its index's exact count once it has read the shard (usage-history `_shapeVerdict`, lane ledger-dedup-law r2).
  */
 function shapeOf(file, { samples = SAMPLES, sampleBytes = SAMPLE_BYTES } = {}) {
   const st = fs.statSync(file);
-  const out = { file, size: st.size, ino: st.ino, mtimeMs: st.mtimeMs, rows: 0, unique: 0, ratio: null, hosts: [], sampled: 0 };
+  const out = { file, size: st.size, ino: st.ino, mtimeMs: st.mtimeMs, rows: 0, unique: 0, ratio: null, hosts: [], sampled: 0, windows: [] }; // windows: where each sample starts (the head, the middle, the tail)
   const seen = new Set(), perHost = new Map();
   if (!st.size) return out;
   if (st.size <= samples * sampleBytes) {
     eachLine(file, 0, st.size, (buf, a, b) => { const rid = ridAt(buf, a, b); if (rid) shapeRow(out, seen, perHost, rid); });
-    out.sampled = st.size;
+    out.sampled = st.size; out.windows.push(0);
     return shapeEnd(out, seen, perHost);
   }
   const buf = Buffer.alloc(sampleBytes);
@@ -106,7 +109,7 @@ function shapeOf(file, { samples = SAMPLES, sampleBytes = SAMPLE_BYTES } = {}) {
       const at = Math.floor(k * (st.size - sampleBytes) / (samples - 1));
       const got = fs.readSync(fd, buf, 0, sampleBytes, at);
       if (got <= 0) continue;
-      out.sampled += got;
+      out.sampled += got; out.windows.push(at);
       // a window that does not start the file starts mid-row: its first (cut) line is skipped, and so is its last
       let a = 0;
       if (at > 0) { const nl = buf.subarray(0, got).indexOf(10); if (nl < 0) continue; a = nl + 1; }

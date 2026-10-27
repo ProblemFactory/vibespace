@@ -231,7 +231,7 @@ const MAX_ITEMS = 1000;          // total ledger cap — oldest RESOLVED pruned 
 // lane ledger-dedup-law F3 (B-7f9e: 958 expired hub-act cards held 958 of a fleet owner's 1000 slots and evicted the items
 // he had answered): at the cap an item that ended UNANSWERED (its producer's end — the expiry sweep, an ask that ran out or
 // was over) goes before any item a person resolved, oldest first in each; an OPEN item is never evicted
-const EXPIRED_BY = new Set(['expired', 'ask-expired', 'ask-over']);
+const EXPIRED_BY = new Set(['expired', 'ask-expired', 'ask-over', 'no-longer-asked']); // r2: a standing item its subject stopped asking ended unanswered too
 const RESOLVED_TAIL = 15;                    // the snapshot's resolved tail: always the newest 15…
 const RESOLVED_RECENT_MS = 60 * 60 * 1000;   // …plus every item resolved within the last hour (an open popup's in-place rows, chunk 4)…
 const RESOLVED_SNAPSHOT_MAX = 250;           // …never more than this (one resolve-many is ≤ 200 ids)

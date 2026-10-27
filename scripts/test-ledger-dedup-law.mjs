@@ -207,13 +207,13 @@ await leg('④', async () => {
   fs.truncateSync(sh, 3 * GiB); // SPARSE: 3 GiB of nothing on disk
   const uh = newUh(d), said = []; let remedy = null;
   uh.onShape = (e) => said.push(e);
-  uh.dedupShard = (f, o) => { remedy = { f: path.basename(f), why: o && o.why }; return new Promise(() => { }); }; // the remedy is asked; its 3 GiB pass is ⑦'s to prove
+  uh.dedupShard = (f, o) => { remedy = { f: path.basename(f), why: o && o.why }; const p = new Promise(() => { }); if (uh._dedupJobs) uh._dedupJobs.set(f, p); return p; }; // the remedy is asked (in flight, as the real one registers); its 3 GiB pass is ⑦'s to prove
   const [r] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(0, 50)));
   ok(r.paused && r.appended === 0 && size(sh) === 3 * GiB, `④ a 3 GiB shard: ${size(sh) - 3 * GiB} B appended, the machine's ingest PAUSED (the base appended the batch)`, r);
   const pz = (uh.ingestPaused?.() || [])[0];
   ok(said.length === 1 && said[0].kind === 'paused' && pz && pz.host === 'host-m' && pz.shard === SHARD && pz.why === 'size' && remedy && remedy.f === SHARD, '④ said ONCE (onShape: paused — what, how big, which machine) + the remedy started (the shard\'s streaming dedup)', { said, pz, remedy });
   const w = LSN && LSN.noticeOf(said[0] || {});
-  ok(w && /Usage of M is not being recorded/.test(w.text) && /3\.00 GiB/.test(w.text) && /events-2026-10/.test(w.detail) && /Which machine: M/.test(w.detail) && /What to do/.test(w.detail), '④ the notice names what (the file), how big, which machine, what happens now and what to do', w && [w.text, w.detail]);
+  ok(w && /Usage of M is not being recorded/.test(w.text) && /3\.00 GiB/.test(w.detail) && /events-2026-10/.test(w.detail) && /Which machine: M/.test(w.detail) && /What to do/.test(w.detail), '④ the notice names what (the file), how big, which machine, what happens now and what to do', w && [w.text, w.detail]);
   const [r2] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(0, 50)));
   ok(r2.paused && r2.paused.held === 100 && said.length === 1, '④ a second batch: still paused, counted (held 100 events on the device), not said again');
   fs.truncateSync(sh, small); // back in shape (what the dedup leaves)
@@ -304,12 +304,12 @@ await leg('⑦', async () => {
   const M = require(REPO + '/src/server/migrations.js').create({ rootDir: root });
   const m = M.MIGRATIONS.find((x) => x.id === '2026-10-usage-ledger-dedup');
   ok(!!m, '⑦ the registry row 2026-10-usage-ledger-dedup exists (src/server/migrations.js, through the shared runner)');
-  const r0 = process.resourceUsage().maxRSS, t0 = performance.now();
+  const r0 = process.resourceUsage().maxRSS;
   const [rep] = await quietAsync(async () => (m ? m.run() : null));
-  const ms = performance.now() - t0, rss = process.resourceUsage().maxRSS;
+  const rss = process.resourceUsage().maxRSS;
   const after = size(sh), tot1 = newUh(d).aggregate().totals;
   const line = rep && rep.journal && rep.journal[0];
-  ok(rep && after === uniqueBytes && Math.abs(after * 3 - before) <= 3 && line && line.shard === SHARD && line.before === before && line.after === after && line.removed === 2 * N, `⑦ the 3× shard: ${before} → ${after} B (⅓), journal {shard, before, after, removed: ${line && line.removed}} — ${ms.toFixed(0)} ms, peak RSS ${(rss / 1024).toFixed(0)} MiB (+${((rss - r0) / 1024).toFixed(0)})`, { rep, after, uniqueBytes });
+  ok(rep && after === uniqueBytes && Math.abs(after * 3 - before) <= 3 && line && line.shard === SHARD && line.before === before && line.after === after && line.removed === 2 * N, `⑦ the 3× shard: ${before} → ${after} B (⅓), journal {shard, before, after, removed: ${line && line.removed}} — peak RSS ${(rss / 1024).toFixed(0)} MiB (+${((rss - r0) / 1024).toFixed(0)})`, { rep, after, uniqueBytes });
   ok(JSON.stringify(tot0) === JSON.stringify(tot1) && tot0.requests === N, `⑦ the totals from a fresh ledger read are the SAME before and after (${tot0.requests} requests, $${(tot0.cost || 0).toFixed ? tot0.cost.toFixed(4) : tot0.cost})`, { tot0, tot1 });
   const [rep2] = await quietAsync(async () => (m ? m.run() : null));
   ok(rep2 && rep2.deduped === 0 && size(sh) === after, '⑦ run again: nothing repeated is left (the shard sampled in shape, untouched)');

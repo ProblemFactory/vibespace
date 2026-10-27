@@ -7,10 +7,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - The usage ledger no longer writes the same batch of events twice.
 - A paired machine's usage harvest no longer waits for your approval; the hub remembers how far it got.
-- A background task that keeps being refused takes one item in For you, not a new card every 10 minutes.
-- A usage ledger file that grows out of shape is said, and that machine's recording pauses until it is back in shape.
+- Each background task that keeps being refused takes its own single item in For you, which closes once the task is allowed or stops asking for a week.
+- A usage ledger file that grows out of shape is said and pauses that machine's recording until it is back in shape; if the cleanup fails, the notice says why.
 - The update removes the repeated rows from old usage ledger files once; the totals do not change.
 - The memory notice names the process holding the memory, its command line, and whether it came from outside the container.
+- While the usage ledger is still loading after a start, no estimate, learned rate or automatic pool switch is made from the part loaded so far.
 
 ## 2.369.360 — 2026-10-27
 

@@ -54,6 +54,9 @@ const KIND_OF = Object.freeze({
 const kindOf = (key) => (Object.prototype.hasOwnProperty.call(KIND_OF, String(key)) ? KIND_OF[String(key)] : 'run');
 /** The dedup key of a card: one machine, one kind. */
 const dedupKey = (hostId, kind) => `${String(hostId)}\n${KINDS.includes(kind) ? kind : 'run'}`;
+/** A BACKGROUND SUBJECT's key (lane ledger-dedup-law r2): one machine, one kind, WHO asks (`by`) — two subjects of one kind on
+ *  one machine are two subjects (their own hold, quiet window, count, standing item, Allow once). */
+const subjectKey = (hostId, kind, by) => `${dedupKey(hostId, kind)}\n${String(by || '')}`;
 /** A `by`'s kind ('human' | 'agent' | 'job' | 'system') or null — the spelling src/device-acts.js validates. */
 const BY_RE = /^(human|agent|job|system):[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,159}$/;
 const byKindOf = (by) => (typeof by === 'string' && BY_RE.test(by) ? by.slice(0, by.indexOf(':')) : null);
@@ -144,8 +147,8 @@ function cardOf({ by, name = null, machine = '', kind = 'run', summary = '' } = 
   return { text: fill(TITLE[k], p), detail: [fill(DETAIL_WHAT, p), fill(DETAIL_HOW, p)].join('\n'), i18n: { text: { key: TITLE[k], params: { who: p.who, machine: p.machine } }, detail: [{ key: DETAIL_WHAT, params: { summary: p.summary, by: p.by } }, { key: DETAIL_HOW, params: { machine: p.machine } }] } };
 }
 // lane ledger-dedup-law F3: THE STANDING ITEM's words — the consequence first (what is not happening), then who asks, how
-// often it was refused and when last, and what each answer does. The text is the item's identity (fixed at its filing:
-// machine × kind); the detail is re-worded in place as the count moves.
+// often it was refused and when last, and what each answer does. The text is the item's identity (fixed at its filing: the
+// SUBJECT — machine × kind × who asks, r2); the detail is re-worded in place as the count moves.
 const STANDING_TITLE = Object.freeze({
   usage: i18nKey('Usage of {machine} is not being recorded — VibeSpace\'s automation waits for your Allow there'),
   upgrade: i18nKey('The device agent on {machine} waits for an update — VibeSpace\'s automation waits for your Allow'),
@@ -192,5 +195,5 @@ function refusalText(code, { machine = '', kind = 'run', reason = '', until = nu
 module.exports = {
   KINDS, POLICIES, SETTING_KEY, SETTING_VALUES, INSTANCE_KINDS, ASK_TTL_MS, QUIET_MS, ANSWERS, REFUSALS, KIND_OF, KIND_WORDS, TITLE, DETAIL_WHAT, DETAIL_HOW, WAY_OUT,
   STANDING_TITLE, STANDING_DETAIL_WHO, STANDING_DETAIL_HOW,
-  kindOf, dedupKey, byKindOf, instanceKindOf, policyOf, askVerdict, answerVerdict, whoOf, cardOf, refusalText, standingOf, consequenceOf, background,
+  kindOf, dedupKey, subjectKey, byKindOf, instanceKindOf, policyOf, askVerdict, answerVerdict, whoOf, cardOf, refusalText, standingOf, consequenceOf, background,
 };

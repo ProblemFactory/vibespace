@@ -18,13 +18,16 @@
  * and who answered (`answeredBy`: the person's sign-in handle).
  *
  * THE STANDING ITEM (lane ledger-dedup-law F3, B-7f9e: 958 expired cards — 257 of them the usage harvest's — filled a fleet
- * owner's For-you list to its cap). A BACKGROUND subject (system / job) on an asking machine × kind is ONE item, filed at its
- * first ask and never expiring: its words name the consequence (hub-act-policy `standingOf`), its first act is held the
- * usual 60 s, and every later act of that machine × kind is refused AT ONCE (`ask_standing`, audit `standing`) and counted
- * on the item in place (the count, the last time; re-worded at most every STANDING_WRITE_MS) — never a card every
- * QUIET_MS. Its answers: Allow once (the subject's NEXT act goes, then it asks again) · Always on this machine (the list) ·
- * Deny (refused, counted no more). Closed by its ✓ (seen): refused quietly, back after STANDING_REMIND_MS if still refused.
- * A boot keeps an open standing item standing (a crash-looping instance files no new card per life).
+ * owner's For-you list to its cap). A BACKGROUND SUBJECT — machine × kind × WHO asks (`by`: system:usage-harvest and
+ * system:writer-sweep on one machine are two subjects, r2) — is ONE item, filed at its first ask and never expiring: its
+ * words name ITS consequence (hub-act-policy `standingOf`), its first act is held the usual 60 s, and every later act of
+ * that subject is refused AT ONCE (`ask_standing`, audit `standing`) and counted on its item in place (the count, the last
+ * time; re-worded at most every STANDING_WRITE_MS) — never a card every QUIET_MS. Its answers: Allow once (THAT subject's
+ * NEXT act goes — no other act — then it asks again) · Always on this machine (the list) · Deny (refused, counted no
+ * more). Closed by its ✓ (seen): refused quietly, back after STANDING_REMIND_MS if still refused. It CLOSES by itself (r2)
+ * when its subject's next act is allowed by any road, when the machine's list or the instance-wide setting allows it, and
+ * after STANDING_SILENT_MS without an act («no longer asked»); a boot re-judges each open one (`reevaluate`), never
+ * restoring one blindly.
  */
 const crypto = require('crypto');
 const P = require('../hub-act-policy.js');
@@ -36,7 +39,9 @@ const INBOX_KEY = 'machines'; // the tray's jump lands on Manage Agents → Mach
 const RECENT_MAX = 512, SETTLED_MAX = 256;
 const STANDING_WRITE_MS = 60e3;            // a standing item's count is re-worded at most this often (the exact count lives here)
 const STANDING_REMIND_MS = 24 * 3600e3;    // an item the owner closed with its ✓ comes back after this, if still refused
-/** A standing item's ask id — one per machine × kind, the same across restarts (the item it names is found again). */
+const STANDING_SILENT_MS = 7 * 24 * 3600e3; // r2: a subject with no act for this long is no longer asking — its item closes
+const STANDING_SWEEP_MS = 10 * 60e3;       // r2: how often the server re-judges the standing items (the setting has no event)
+/** A standing item's ask id — one per SUBJECT (machine × kind × by), the same across restarts (the item it names is found again). */
 const standingIdOf = (dk) => crypto.createHash('sha256').update('hub-act-standing\n' + dk).digest('hex').slice(0, 32);
 
 function namedError(code, message, extra = {}) { return Object.assign(new Error(message), { code, ...extra }); }
@@ -73,8 +78,14 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
   /** THE VERDICT (sync) of one payload on one machine. */
   function verdict(hostId, payload, { consent = false } = {}) {
     const key = DA.keyOf(payload);
-    const kind = P.kindOf(key), dk = P.dedupKey(hostId, kind);
-    return { ...P.askVerdict({ instanceKind: kindNow(), by: payload && payload.by, layer: DA.layerOf(payload), key, machinePolicy: machinePolicyOf(hostId), setting: settingNow(), consent: !!consent, pending: byKey.has(dk), recent: recent.get(dk) || null, now: now() }), dk };
+    const kind = P.kindOf(key), by = payload && payload.by;
+    // lane ledger-dedup-law r2: a BACKGROUND subject's hold, quiet window, count and standing item are its OWN (machine × kind ×
+    // who asks); a person's / an agent's card stays one per machine × kind (`ck`) — and a background act that comes while
+    // such a card is up JOINS it (one question; its answer settles every act waiting on it)
+    const ck = P.dedupKey(hostId, kind);
+    const dk = userTodos && P.background(P.byKindOf(by)) ? P.subjectKey(hostId, kind, by) : ck;
+    const pending = byKey.has(dk) || (dk !== ck && byKey.has(ck));
+    return { ...P.askVerdict({ instanceKind: kindNow(), by: payload && payload.by, layer: DA.layerOf(payload), key, machinePolicy: machinePolicyOf(hostId), setting: settingNow(), consent: !!consent, pending, recent: recent.get(dk) || null, now: now() }), dk, ck };
   }
   const refusal = (code, v, hostId, extra = {}) => ({ ok: false, code, error: P.refusalText(code, { machine: machineOf(hostId), kind: v.kind, reason: v.reason, until: v.until, error: extra.error }), ...extra });
   const AUDIT_OF = { nobody: 'never', quiet: 'quiet' };
@@ -85,7 +96,12 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
    */
   function check(hostId, payload, { consent = false } = {}) {
     const v = verdict(hostId, payload, { consent });
-    if (v.verdict === 'allow') return Promise.resolve(null);
+    if (v.verdict === 'allow') {
+      // r2: the subject's act is allowed by a road of its own (the machine's list, the setting, consent) — its standing item ends
+      const st = standing.get(v.dk);
+      if (st) endStanding(st, 'allowed', `its act was allowed (${v.reason})`);
+      return Promise.resolve(null);
+    }
     // lane ledger-dedup-law F3: a BACKGROUND subject on an asking machine × kind is its ONE standing item — no card per act
     if (userTodos && P.background(P.byKindOf(payload && payload.by)) && (v.verdict === 'ask' || v.reason === 'quiet')) {
       const st = standing.get(v.dk);
@@ -95,7 +111,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
     if (v.verdict === 'deny') return Promise.resolve(refusal(v.code, v, hostId, { ask: AUDIT_OF[v.reason] || 'denied' }));
     return new Promise((resolve) => {
       const waiter = { resolve, payload };
-      if (v.join) { const k = asks.get(byKey.get(v.dk)); if (k) { k.waiters.push(waiter); log(`${k.machine}: another ${k.kind} act by ${payload.by} joins the ask that is up (${k.waiters.length} waiting)`); return; } }
+      if (v.join) { const k = asks.get(byKey.get(v.dk)) || asks.get(byKey.get(v.ck)); if (k) { k.waiters.push(waiter); log(`${k.machine}: another ${k.kind} act by ${payload.by} joins the ask that is up (${k.waiters.length} waiting)`); return; } }
       open(hostId, v, payload, waiter);
     });
   }
@@ -253,16 +269,46 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
       for (const it of snap.open || []) {
         if (!it || !it.action || it.action.type !== ACTION_TYPE || asks.has(it.action.askId)) continue;
         if (it.action.standing && it.action.hostId && P.KINDS.includes(it.action.kind)) {
-          // lane ledger-dedup-law F3: a standing item from before the restart keeps standing (no new card for the next life)
-          const dk = P.dedupKey(it.action.hostId, it.action.kind);
-          if (!standing.has(dk)) standing.set(dk, { askId: it.action.askId, dk, hostId: it.action.hostId, machine: it.action.machine || it.action.hostId, kind: it.action.kind, by: it.action.by || 'system:unknown', consequence: it.action.consequence || null, count: Number(it.action.count) || 1, firstAt: Number(it.action.firstAt) || now(), lastAt: Number(it.action.lastAt) || now(), todoId: it.id, state: 'open', seenAt: 0, answeredBy: null, writtenAt: now(), timer: null, summary: '' });
+          // lane ledger-dedup-law F3: a standing item from before the restart is its subject's again (no new card for the
+          // next life) — r2: then RE-JUDGED below (the list, the setting, the machine, the silence), never kept blindly
+          const by = P.byKindOf(it.action.by) && P.background(P.byKindOf(it.action.by)) ? it.action.by : null;
+          if (!by) { selfClose(it.id, 'ask-over'); continue; } // a subject nobody can name (an item older than r2's key)
+          const dk = P.subjectKey(it.action.hostId, it.action.kind, by);
+          if (!standing.has(dk)) standing.set(dk, { askId: it.action.askId, dk, hostId: it.action.hostId, machine: it.action.machine || it.action.hostId, kind: it.action.kind, by, consequence: it.action.consequence || null, count: Number(it.action.count) || 1, firstAt: Number(it.action.firstAt) || now(), lastAt: Number(it.action.lastAt) || now(), todoId: it.id, state: 'open', seenAt: 0, answeredBy: null, writtenAt: now(), timer: null, summary: '' });
+          else selfClose(it.id, 'ask-over'); // a second item of one subject: the first one stands
           continue;
         }
         try { userTodos.setStatus(it.id, 'done', 'ask-expired'); n++; } catch { }
       }
+      reevaluate();
     } catch (e) { log(`hub-act ask reconcile failed: ${e.message}`); }
     return n;
   }
+  /** r2: RE-JUDGE every standing subject — the machine gone ⇒ closed (ask-over); its list or the instance-wide setting now
+   *  allows ⇒ closed (always); refuses ⇒ closed (denied); no act for STANDING_SILENT_MS ⇒ closed, «no longer asked».
+   *  At boot (reconcile), every STANDING_SWEEP_MS (wire), and by a suite. → how many it closed. */
+  function reevaluate() {
+    let n = 0;
+    for (const st of [...standing.values()]) {
+      if (st.state === 'once' || byKey.has(st.dk)) continue; // an Allow once waits for its subject's next act; a hold in flight settles first
+      if (!rawOf(st.hostId)) { endStanding(st, 'ask-over', 'its machine is gone'); n++; continue; }
+      const pol = policyFor(st.hostId).policy;
+      if (pol === 'everyone') { endStanding(st, 'always', `${st.machine}'s Hub automation allows it now`); n++; continue; }
+      if (pol === 'nobody') { endStanding(st, 'denied', `${st.machine}'s Hub automation refuses it now`); n++; continue; }
+      if (now() - (Number(st.lastAt) || 0) >= STANDING_SILENT_MS) { endStanding(st, 'no-longer-asked', `no act for ${Math.round(STANDING_SILENT_MS / 86400e3)} days — no longer asked`); n++; }
+    }
+    return n;
+  }
+  /** r2: a standing subject is over — its item closed (`outcome` = the item's resolvedBy) and the subject forgotten (its
+   *  next act asks afresh); one line says why. */
+  function endStanding(st, outcome, why) {
+    closeStanding(st, outcome);
+    st.state = 'ended'; // a hold still in flight never re-files it
+    standing.delete(st.dk);
+    recent.delete(st.dk);
+    log(`${st.machine}: ${st.by}'s standing ${st.kind} item closed — ${why}`);
+  }
+  function selfClose(id, outcome) { selfClosing = true; try { userTodos.setStatus(id, 'done', outcome); } catch { } finally { selfClosing = false; } }
   /** A machine unpaired: its cards settle (nothing left to act on). */
   function onMachineGone(hostId) {
     for (const k of [...asks.values()]) if (k.hostId === hostId) settle(k, 'denied', { why: 'gone' });
@@ -285,7 +331,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
     if (st.state === 'seen' && now() - st.seenAt >= STANDING_REMIND_MS) { st.state = 'open'; writeStanding(st, { force: true }); return; }
     if (st.state === 'open') writeStanding(st);
   }
-  /** File / re-word a standing item (one per machine × kind: the same text + ask id ⇒ the same item, reopened if it was
+  /** File / re-word a standing item (one per subject: the same text + ask id ⇒ the same item, reopened if it was
    *  closed). → true when the store took it. Throttled unless `force`: a later write is scheduled instead. */
   function writeStanding(st, { force = false, held = false } = {}) {
     if (!userTodos || st.state !== 'open') return false;
@@ -316,7 +362,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
   /** The standing subjects (a suite; the dialog): machine, kind, who, how many refusals, the last, the state. */
   function standingList() { return [...standing.values()].map((st) => ({ askId: st.askId, hostId: st.hostId, machine: st.machine, kind: st.kind, by: st.by, count: st.count, lastAt: st.lastAt, state: st.state, todoId: st.todoId })); }
   function list() { return [...asks.values()].map((k) => ({ askId: k.askId, hostId: k.hostId, machine: k.machine, kind: k.kind, by: k.by, summary: k.summary, waiting: k.waiters.length, askedAt: k.askedAt, expiresAt: k.askedAt + P.ASK_TTL_MS })); }
-  return { check, verdict, answer, reconcile, onMachineGone, onPolicyChanged, policyFor, list, standingList, get instanceKind() { return kindNow(); }, ACTION_TYPE, INBOX_KEY };
+  return { check, verdict, answer, reconcile, reevaluate, onMachineGone, onPolicyChanged, policyFor, list, standingList, get instanceKind() { return kindNow(); }, ACTION_TYPE, INBOX_KEY };
 }
 
 /**
@@ -338,7 +384,8 @@ function wire({ hosts, userTodos, exitProxy, settingOf, activeSessions, env = pr
   });
   hosts.hubActs = asker;
   setTimeout(() => { try { const n = asker.reconcile(); if (n) log(`${n} hub-act ask(s) from before the restart resolved expired`); } catch { } }, 3000).unref?.();
+  setInterval(() => { try { asker.reevaluate(); } catch { } }, STANDING_SWEEP_MS).unref?.(); // r2: the instance-wide setting has no change event
   return asker;
 }
 
-module.exports = { create, wire, ACTION_TYPE, INBOX_KEY, STANDING_WRITE_MS, STANDING_REMIND_MS, standingIdOf };
+module.exports = { create, wire, ACTION_TYPE, INBOX_KEY, STANDING_WRITE_MS, STANDING_REMIND_MS, STANDING_SILENT_MS, STANDING_SWEEP_MS, standingIdOf };

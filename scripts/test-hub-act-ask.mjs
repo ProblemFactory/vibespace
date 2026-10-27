@@ -223,13 +223,14 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   // lane ledger-dedup-law F3: a BACKGROUND subject's card is its ONE STANDING item — the held act refused, the item stays
   const it = w.userTodos.get(id);
   ok(it.status === 'open' && it.action.standing === true && !it.expiresAt && w.lines.length === 1 && w.lines[0].ask === 'expired' && w.lines[0].op === 'run-stream', 'the held act refused (expired); its standing item stays open, no end; ONE line says so', w.lines);
-  // every later act of that machine × kind by a background subject: refused at once, counted on the SAME item; an agent still asks
-  const q = await codeOf(w.dm.runCmd('ls', [], { by: 'system:usage-harvest' }));
-  ok(q === 'ask_standing' && w.cards().length === 1 && w.lines[1].ask === 'standing', 'a background act on that key ⇒ refused at once, counted on the standing item — no new card (a harvest a minute is not a card a minute)', w.lines[1]);
+  // every later act of THAT SUBJECT (machine × kind × who asks — lane ledger-dedup-law r2: another background subject is
+  // another item, test-ledger-whole-law ③): refused at once, counted on the SAME item; an agent still asks
+  const q = await codeOf(w.dm.runCmd('ls', [], { by: 'system:desktop-access' }));
+  ok(q === 'ask_standing' && w.cards().length === 1 && w.lines[1].ask === 'standing', 'the same subject\'s next act on that key ⇒ refused at once, counted on its standing item — no new card (a harvest a minute is not a card a minute)', w.lines[1]);
   const pa = w.dm.runCmd('ls', [], { by: 'agent:claude:c1' }); await settle();
   ok(w.cards().length === 2, 'an agent\'s act on that key still asks (its own 60 s card)');
   w.clock.t += 60000; w.fire(); await codeOf(pa);
-  w.clock.t += P.QUIET_MS; const qb = await codeOf(w.dm.runCmd('ls', [], { by: 'system:usage-harvest' })); await settle(); w.fire();
+  w.clock.t += P.QUIET_MS; const qb = await codeOf(w.dm.runCmd('ls', [], { by: 'system:desktop-access' })); await settle(); w.fire();
   const st = w.cards().filter((c) => c.action.standing);
   ok(qb === 'ask_standing' && st.length === 1 && st[0].id === id && st[0].action.count === 3, 'past the quiet window it is STILL the one standing item, its count moved in place (3) — never a card every QUIET_MS', st.map((c) => c.action));
 }
