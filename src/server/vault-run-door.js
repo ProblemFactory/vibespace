@@ -90,6 +90,15 @@ const { spawn } = require('child_process');
 const { StringDecoder } = require('string_decoder');
 const VR = require('../vault-run.js');
 const VI = require('../vault-inventory.js');
+// round 12 (BLOCKER): "the agent cannot write it" is OWNERSHIP, never mode bits — a path is the hub's to trust only when ROOT owns
+// it (st.uid === 0) AND it has no group/other write bit; a uid-owned path is one the agent (= the hub's uid) can chmod and replace.
+// statSync FOLLOWS symlinks (the unit bakes the PATH string; an agent cannot insert a link into a root-owned string; /bin → usr/bin
+// resolves to root). Injectable into create() as `isRootOwned` so a test, which cannot chown a scratch binary to root, can model a
+// root-owned install; the REAL rule is driven on real paths in test-vault-run ⑫.
+const rootOwnedNoWrite = (p) => { try { const st = fs.statSync(p); return st.uid === 0 && (st.mode & 0o022) === 0; } catch { return false; } };
+const isDirReal = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
+// the tool DIGEST, streamed (never a sync read of a 42 MB binary on the event loop) → sha256 hex, or null if unreadable
+function sha256File(p) { return new Promise((res) => { try { const h = crypto.createHash('sha256'); const rs = fs.createReadStream(p); rs.on('error', () => res(null)); rs.on('data', (d) => h.update(d)); rs.on('end', () => res(h.digest('hex'))); } catch { res(null); } }); }
 const VB = require('../vault-blocked.js');
 const SS = require('../secret-shapes.js');
 const HC = require('../hidden-chars.js');
@@ -110,7 +119,7 @@ const ASKING_TEXT = `More than ${ASKING_LINE_OVER} conversations are asking to u
 const ASKING_KEY = '{n} conversations are asking to use stored secrets';
 const ASKING_DETAIL = 'Each conversation asks on its own card in For you. This line goes when 8 or fewer are asking.';
 const REQUEST_QUIET_MS = 10 * 60e3;          // a Deny (or the card dismissed) quiets that conversation × entry 10 minutes (the automation card's rule)
-const USE_SKIP = new Set(['ask_pending', 'too_many_runs', 'spawn_failed', 'run_path_unsafe', 'storage_blocked']);   // a wait or the hub's own failure before any child ran — not a use's outcome (a child that ran is always one)
+const USE_SKIP = new Set(['ask_pending', 'too_many_runs', 'spawn_failed', 'run_path_unsafe', 'tool_changed', 'storage_blocked']);   // a wait or the hub's own failure before any child ran — not a use's outcome (a child that ran is always one)
 const STORE_FILE = 'vault-run.json';
 const MARK_LABEL = 'vault-run-store-v1';
 const RUN_DIR_PREFIX = 'vs-vault-run-';
@@ -129,7 +138,7 @@ const RUNS_MAX = 16, RUNS_PER_CALLER = 4;
 const STATUS = Object.freeze({
   vault_not_set_up: 409, vault_locked: 423, bad_flag: 400, bad_reference: 400, bad_env_name: 400, duplicate_name: 400, no_command: 400,
   cmd_too_long: 400, no_reference: 400, template_unread: 400, template_too_long: 400, hidden_chars: 400, card_too_long: 400,
-  env_refused: 403, argv_refused: 403, tool_prints_secrets: 403, tool_wraps_another: 403, tool_has_its_own_door: 403,
+  env_refused: 403, argv_refused: 403, tool_prints_secrets: 403, tool_wraps_another: 403, tool_has_its_own_door: 403, tool_changed: 409,
   entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, entry_too_short_to_mask: 403, use_not_granted: 403,
   job_no_use: 403, device_road_later: 403, cwd_refused: 403, template_refused: 403, tool_not_found: 404, unauthorized: 401,
   ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, caller_gone: 410, too_many_runs: 429,
@@ -144,7 +153,8 @@ const MORE_WORDS = Object.freeze({
   storage_blocked: `${DOOR.SENTENCE} (the run's folder, its program or a template is on it) — nothing ran`,
   request_too_large: `the run's words are over ${ARGS_MAX} characters or its folder over ${CWD_MAX} — refused before anything is read`,
   failed: 'the run door failed — nothing ran',
-  run_path_unsafe: 'no directory on the hub PATH is safe to run this tool from (every one is missing or writable by this user) — nothing ran',   // round 11 (MAJOR 2): a runSeal tool whose sealed PATH came out empty
+  run_path_unsafe: 'no directory on the hub PATH is safe to run this tool from — none is a root-owned system directory (every one is missing, or owned by this user, who could plant a program there) — nothing ran',   // round 11 (MAJOR 2) / round 12 (BLOCKER): a runSeal tool whose sealed PATH (ROOT-OWNED dirs only) came out empty
+  tool_changed: 'this tool sits in a directory this user owns, so its program can be replaced — its bytes do not match the pinned digest the hub recorded, and a replaced program never runs; re-pin the owner\'s own install with node scripts/gen-gh-grammar.mjs --repin',   // round 12 (BLOCKER-class): a uid-owned tool whose sha256 differs from the row\'s toolSha256 pin
   // lane vault-manual-and-lock: the request's own codes
   request_pending: 'you already asked the user for that entry — the question waits in their For you tray; `vibespace-vault uses` shows the answer when it comes',
   purpose_required: 'say what the entry is for: vibespace-vault request <vault://…> --for "<what you will run with it, and why>"',
@@ -259,7 +269,8 @@ function redactLong(text) {
 function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () => ({ ...process.env }), instanceKind = () => 'local', policy = () => null,
   liveOf = () => true, runRoot = () => process.env.XDG_RUNTIME_DIR || os.tmpdir(), home = os.homedir(), tmpDir = os.tmpdir(),
   now = () => Date.now(), log = () => {}, spawnImpl = spawn, killGraceMs = KILL_GRACE_MS, pipeGraceMs = PIPE_GRACE_MS,
-  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes } = {}) {
+  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes,
+  isRootOwned = rootOwnedNoWrite, toolDigest = sha256File } = {}) {   // round 12: the ownership predicate + the tool-digest hasher — injectable test seams (defaults are the real checks)
   if (!dataDir || !vault) throw new TypeError('vault-run-door: dataDir and vault are required');
   const FILE = path.join(dataDir, STORE_FILE);
   const asks = new Map();      // askId → the card up
@@ -756,11 +767,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // the tool's config-dir env and every XDG_* point at SEAL_NOWHERE — a path under / (root-owned) the agent cannot create or
   // write, so no planted file is ever read (gh needs no config dir to run an env-token verb). The HOST is pinned to the minted
   // value's --for host (never a file's default-host logic); gh's `git` child reads no user/system config. The PATH keeps only
-  // dirs that EXIST now AND the agent cannot write — re-checked EVERY spawn (no memo: a dir created or chmod'd between runs is
-  // caught); if none survive the run is refused BY NAME (run_path_unsafe), never a silent git-not-found.
-  const isWritableDir = (p) => { try { fs.accessSync(p, fs.constants.W_OK); return true; } catch { return false; } };
-  const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
-  const sealedPathOf = (b) => String((b && b.PATH) || '').split(':').filter((d) => d && d[0] === '/' && isDir(d) && !isWritableDir(d)).join(':');
+  // ROOT-OWNED dirs with no group/other write bit (round 12, BLOCKER: "the agent cannot write it" is OWNERSHIP, never mode bits —
+  // a uid-owned dir's owner, the agent, flips the write bit at will, so a 0555 uid dir is NEVER safe) — re-checked EVERY spawn (no
+  // memo: a dir baked / chmod'd between runs is re-judged); if none survive the run is refused BY NAME (run_path_unsafe), never a
+  // silent git-not-found. The TOOL itself is pinned by its sha256 DIGEST when its path is uid-owned (a replaceable gh runs only if
+  // its bytes match the row's toolSha256 — tool_changed otherwise; the owner's own install keeps working), and the agent's env is
+  // an ALLOWLIST (src/vault-run.js envRefusedOf): only the row's reviewed names + the credential (as a reference) pass.
+  // round 12 (BLOCKER): a path is the hub's to trust only when ROOT owns it (st.uid === 0) AND it has no group/other write bit —
+  // a uid-owned path is one the agent (= the hub's uid) can chmod and replace, whatever its bits. statSync FOLLOWS symlinks (the
+  // unit bakes the PATH string; an agent cannot insert a link into a root-owned string, and /bin → usr/bin resolves to root).
+  const sealedPathOf = (b) => String((b && b.PATH) || '').split(':').filter((d) => d && d[0] === '/' && isDirReal(d) && isRootOwned(d)).join(':');
   function sealEnvFor(row, b, forHost) {
     if (!row || !row.runSeal) return {};
     const dir = SEAL_NOWHERE;   // does not exist, cannot be made by this uid — every HOME/config/XDG read falls on nothing
@@ -806,8 +822,20 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const tp = readTemplates(req, place, caller.cwd);
     if (!tp.ok) return tp;
     if (Object.values(tp.templates).some((t) => HC.hiddenCharsOf(t, { allowCR: true, max: 1 }).length)) return named('hidden_chars');
-    const writable = (p) => { try { fs.accessSync(p, fs.constants.W_OK); return true; } catch { return false; } };
-    const programWritable = !!resolved && (writable(resolved) || writable(path.dirname(resolved)));   // an agent (the same uid) could have written it
+    // round 12 (BLOCKER-class): a tool whose binary OR its dir is NOT root-owned (uid-owned: ~/.local/bin, a brew prefix, nvm) is
+    // one the agent can REPLACE. Such a tool runs ONLY if its bytes match the row's pinned digest — a matching pin vouches for the
+    // exact binary (it runs ok:own, programWritable false, so the owner's own gh install keeps working); a different binary at a
+    // uid-owned path is refused BY NAME (tool_changed) before any spawn; a replaceable tool with NO pin blinds (today's behaviour).
+    const replaceable = !!resolved && !(isRootOwned(resolved) && isRootOwned(path.dirname(resolved)));
+    let programWritable = replaceable;
+    if (replaceable) {
+      const row0 = VR.knownToolOf(VR.toolNameOf(req.argv[0], resolved));
+      if (row0 && row0.toolSha256) {
+        const got = await toolDigest(resolved);
+        if (got === row0.toolSha256) programWritable = false;
+        else { note('tool_changed', { tool: VR.toolNameOf(req.argv[0], resolved), why: got ? 'its bytes differ from the pinned digest' : 'unreadable' }); return named('tool_changed', { tool: VR.toolNameOf(req.argv[0], resolved) }); }
+      }
+    }
     const spec = VR.planOf({ ...req, resolved, templates: tp.templates, programWritable });
     if (!spec.ok) { note(spec.code, { tool: resolved, why: spec.why || null }); return spec; }
     usedRefs = spec.refs;
@@ -874,7 +902,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     for (const a of spent) grants.delete(a.pair);
     // L3 (int331): a once-grant is spent only when a child RAN — restore it when nothing ran (entry_unknown / too-short / spawn_failed,
     // sync or the async spawn error) so a failure before the child does not burn the owner's one-time grant (the agent runs it again)
-    const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe']);
+    const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe', 'tool_changed']);
     const restoreOnce = (r) => { if (r && r.ok === false && BURNED.has(r.code)) for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); return r; };
     const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt });
     return out && typeof out.then === 'function' ? out.then(restoreOnce) : restoreOnce(out);
@@ -962,7 +990,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       };
       let child;
       try {
-        child = spawnImpl(spec.tool, m.argv.slice(1), { argv0: m.argv[0], cwd: place, env: { ...base, ...m.env, ...sealEnv, [MARK_ENV]: mark }, stdio: [m.stdin != null ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: true, windowsHide: true });
+        // round 12 (MINOR): home the credential to the run's host — the agent passed it as a GH_TOKEN reference (runSeal.credRef);
+        // the DOOR sets the env NAME gh honours for the pinned host (GH_TOKEN for github.com / *.ghe.com, GH_ENTERPRISE_TOKEN for a
+        // GHES host) and clears the other, so a value minted --for a GHES host reaches gh and the agent names neither name.
+        const credHome = (() => { const rs = spec.row && spec.row.runSeal; if (!rs || !rs.credRef || !sealHost) return {}; const ref = rs.credRef, name = VR.ghCredEnvFor(sealHost, spec.row), val = m.env[ref]; return (name && name !== ref && val !== undefined) ? { [name]: val, [ref]: undefined } : {}; })();
+        child = spawnImpl(spec.tool, m.argv.slice(1), { argv0: m.argv[0], cwd: place, env: { ...base, ...m.env, ...sealEnv, ...credHome, [MARK_ENV]: mark }, stdio: [m.stdin != null ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: true, windowsHide: true });
       } catch (e) { spawnError = String((e && e.code) || (e && e.message) || 'spawn').slice(0, 80); finish(null, null); return; }
       rec.child = child;
       runs.add(rec);
@@ -1017,4 +1049,4 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
 }
 
 const statusOf = (code) => STATUS[code] || 400;
-module.exports = { create, classOf, statusOf, STATUS, MORE_WORDS, ACTION_TYPE, REQUEST_TYPE, GRANT_MS, GRANT_ANSWERS, PURPOSE_MAX, REQUESTS_PER_CALLER, REQUEST_CALLERS_MAX, ASKING_LINE_OVER, ASKING_TEXT, ASKING_KEY, STORE_FILE, MARK_LABEL, RUN_DIR_PREFIX, OWNER_FILE, MARK_ENV, SEAL_NOWHERE, ARGS_MAX, CWD_MAX, readBounded, endMarked, KILL_GRACE_MS, HEAD_MAX, DETAIL_MAX, NO_ALWAYS, RUN_CLASS, NEVER_CLASS, redactLong };
+module.exports = { create, classOf, statusOf, STATUS, MORE_WORDS, ACTION_TYPE, REQUEST_TYPE, GRANT_MS, GRANT_ANSWERS, PURPOSE_MAX, REQUESTS_PER_CALLER, REQUEST_CALLERS_MAX, ASKING_LINE_OVER, ASKING_TEXT, ASKING_KEY, STORE_FILE, MARK_LABEL, RUN_DIR_PREFIX, OWNER_FILE, MARK_ENV, SEAL_NOWHERE, rootOwnedNoWrite, sha256File, ARGS_MAX, CWD_MAX, readBounded, endMarked, KILL_GRACE_MS, HEAD_MAX, DETAIL_MAX, NO_ALWAYS, RUN_CLASS, NEVER_CLASS, redactLong };

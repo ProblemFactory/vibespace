@@ -447,7 +447,7 @@ const hit0 = hit, PAGE0 = PAGE;
   const vault2 = VE.create({ dataDir: dataDir2, kdf: { N: 1024, r: 8, p: 1 }, log, idleTimer: false, register: false, signInPassword: (p) => auth.verifyPassword(p) });
   const userTodos = new UserTodoManager({ dataDir: dataDir2, expirySweepMs: 3600e3 });
   const contents = VC.create({ vault: vault2, sources: { mounts: () => mountsSrc }, runFacts: (row) => runDoor.rowFacts(row) });
-  const runDoor = DOOR.create({ dataDir: dataDir2, vault: vault2, sources: { mounts: () => mountsSrc }, userTodos, instanceKind: () => 'cluster', runRoot: () => RUNROOT, agentEnv: () => ({ ...process.env, PATH: BIN + ':' + process.env.PATH }), log: (m) => LOGS.push(String(m)) });
+  const runDoor = DOOR.create({ dataDir: dataDir2, vault: vault2, sources: { mounts: () => mountsSrc }, userTodos, instanceKind: () => 'cluster', runRoot: () => RUNROOT, agentEnv: () => ({ ...process.env, PATH: BIN + ':' + process.env.PATH }), isRootOwned: (p) => p === BIN || (typeof p === 'string' && p.startsWith(BIN + '/')), log: (m) => LOGS.push(String(m)) });   // round 12: a test cannot chown a scratch binary to root — model the fake-curl dir (the "a program no agent could have written" fixture) as root-owned (the ownership rule itself is driven in test-vault-run ⑫)
   const sessions2 = new Map([['s1', { agentToken: SESSION_TOKEN, backendSessionId: 'conv-r1', name: 'Route Lane', cwd: WORK }]]);
   const app2 = express();
   app2.use(auth.middleware());

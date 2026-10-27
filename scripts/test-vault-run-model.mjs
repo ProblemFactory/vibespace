@@ -163,7 +163,7 @@ console.log('③ THE REFUSAL TABLE — print / transform / pack / copy / trace /
   const wrong = R.filter(([req, code]) => { const p = V.planOf({ ...req, env: [['T', M1]] }); return p.code !== code; });
   ok(!wrong.length, 'the tool is argv[0] RESOLVED (the door\'s PATH lookup wins over the typed name), any directory, any case, .exe, a version suffix; VibeSpace\'s CLIs and the agent browser have their own doors; a wrapper is refused', wrong.map(([req, c]) => [req.argv[0], c, V.planOf({ ...req, env: [['T', M1]] }).code]));
   const RUN = [['bash', 'shell'], ['sh', 'shell'], ['zsh', 'shell'], ['/usr/bin/pwsh', 'shell'], ['cmd', 'shell'], ['python3.12', 'interpreter'], ['node', 'interpreter'], ['perl', 'interpreter'], ['curl', 'tool'], ['gh', 'tool'], ['terraform', 'tool'], ['./deploy.sh', 'tool']];
-  const off = RUN.filter(([t, kind]) => { const p = V.planOf({ argv: [t, '-c', 'x'], env: [['T', M1]] }); return !p.ok || p.kind !== kind; });
+  const off = RUN.filter(([t, kind]) => { const p = V.planOf({ argv: [t, '-c', 'x'], env: [[t === 'gh' ? 'GH_TOKEN' : 'T', M1]] }); return !p.ok || p.kind !== kind; });
   ok(!off.length, 'shells and interpreters are NOT refused (kind shell / interpreter); ordinary tools are tools', off);
 }
 
@@ -205,7 +205,7 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
   ok(sh('curl -H "X: $T" https://api.example.com/a') !== sh('curl -H "X: $T" https://api.example.com/b'), 'a shell\'s whole script IS the shape (one character changes it)');
   ok(k0.startsWith(`${V.SHAPE_V}:`) && V.SHAPE_NOTE.includes('positional arguments may change'), 'the key is versioned (vr1:) and the card\'s note says positionals may change');
   // THE HOSTS
-  const H = (argv, extra = {}) => { const p = V.planOf({ argv, env: [['T', M1]], ...extra }); if (!p.ok) throw new Error(JSON.stringify(p)); return V.shapeOf(p).hosts.join(' '); };
+  const H = (argv, extra = {}) => { const p = V.planOf({ argv, env: [[argv[0] === 'gh' ? 'GH_TOKEN' : 'T', M1]], ...extra }); if (!p.ok) throw new Error(JSON.stringify(p)); return V.shapeOf(p).hosts.join(' '); };
   const HOSTS = [
     [['curl', 'https://API.example.com/x'], 'api.example.com'], [['curl', 'https://h.example:8443/x', 'http://u:p@other.example/'], 'h.example:8443 other.example'],
     [['git', 'clone', 'git@github.com:org/repo.git'], 'github.com'], [['git', 'push', 'https://gitlab.example.com/x.git'], 'gitlab.example.com'],
@@ -218,9 +218,9 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
   ];
   const hb = HOSTS.filter(([argv, want]) => H(argv) !== want);
   ok(!hb.length, `the hosts (${HOSTS.length} rows): any URL (port kept, user stripped, lower case), scp-like targets, the ssh target (never a value flag's value), psql's host flag / URL, docker's registry (else its default), gh / aws defaults only when nothing names a host, a shell's URLs; none for a tool that names none`, hb.map(([a, w]) => [a.join(' '), w, H(a)]));
-  ok(H(['gh', 'api', '/user'], { env: [['T', M1], ['GH_HOST', 'ghe.corp.example']] }) === 'ghe.corp.example' && H(['kubectl', 'get', 'pods'], { env: [], file: [['KUBECONFIG', '@kc']], templates: { kc: 'clusters:\n- cluster:\n    server: https://k8s.example:6443\nusers:\n- user:\n    token: $VAULT{mounts/m1/secretKey}\n' } }) === 'k8s.example:6443', 'a host from the plain env a known tool reads (GH_HOST) and from a template the hub renders (a kubeconfig\'s server)');
+  ok(V.planOf({ argv: ['gh', 'api', '/user'], env: [['GH_TOKEN', M1], ['GH_HOST', 'ghe.corp.example']] }).code === 'env_refused' && H(['kubectl', 'get', 'pods'], { env: [], file: [['KUBECONFIG', '@kc']], templates: { kc: 'clusters:\n- cluster:\n    server: https://k8s.example:6443\nusers:\n- user:\n    token: $VAULT{mounts/m1/secretKey}\n' } }) === 'k8s.example:6443', 'round 12: an agent-set GH_HOST is refused by name (the DOOR pins the host for a gh run — the agent names none); a host from a template the hub renders (a kubeconfig\'s server) is still read');
   ok(!H(['curl', 'https://api.example.com'], { env: [['T', M1], ['U', M2.replace('vault', 'vault')]] }).includes('mounts'), 'a vault:// reference is never read as a host');
-  const A = (argv) => { const s = V.shapeOf(V.planOf({ argv, env: [['T', M1]] })); return `${s.always}:${s.noAlways}`; };
+  const A = (argv) => { const s = V.shapeOf(V.planOf({ argv, env: [[argv[0] === 'gh' ? 'GH_TOKEN' : 'T', M1]] })); return `${s.always}:${s.noAlways}`; };
   const ALW = [[['curl', 'https://api.example.com'], 'true:null'], [['gh', 'api', '/user'], 'true:null'], [['curl', '-K', '$VAULT_FILE{mounts/m2/secretKey}'], 'false:unknown-destination'], [['terraform', 'apply'], 'false:unknown-destination'], [['./deploy.sh', 'https://x.example'], 'false:unknown-destination'], [['bash', '-c', 'curl https://x.example'], 'false:shell'], [['python3', 'sdk.py'], 'false:interpreter']];
   const aw = ALW.filter(([a, w]) => A(a) !== w);
   ok(!aw.length, '«always» is offered only for a KNOWN tool that names its host — never a tool outside the table, one naming no host, a shell or an interpreter (destination unknown / the script is the program)', aw.map(([a, w]) => [a.join(' '), w, A(a)]));
@@ -317,7 +317,7 @@ console.log('⑤b THE OWN ROAD (lane vault-agent-own) — what an agent stored i
 function ownRoad(Vm) {
   const bad = [], NOW0 = 1_800_000_000_000, OWN = 'vault://agent:conv-own/tok';
   const say = (name, got, want) => { if (got !== want) bad.push([name, got, want]); };
-  const P = (argv, refs = [OWN]) => Vm.planOf({ argv, env: refs.map((r, i) => ['T' + i, r]) });
+  const P = (argv, refs = [OWN]) => Vm.planOf({ argv, env: refs.map((r, i) => [(argv[0] === 'gh' && i === 0 ? 'GH_TOKEN' : 'T' + i), r]) });
   const fact = (p, extra) => p.refs.map((r) => ({ id: r.id, exists: true, open: false, bytes: 32, ...extra(r) }));
   const verdict = (p, entries, o = {}) => Vm.runVerdict({ state: 'unlocked', plan: p, entries, granted: o.granted !== false, instance: o.instance || 'cluster', policy: o.policy || null, seen: !!o.seen, remembered: o.remembered || null, passes: o.passes || [], now: NOW0 });
   const sum = (v) => (v.ok ? `ok:${v.by}` : v.ask ? `ask:${v.offers.join()}:${(v.why || []).join('+')}` : v.code);
@@ -342,9 +342,9 @@ function ownRoad(Vm) {
   say('own minted to a host under it (--for a URL)', sum(verdict(pSub, fact(pSub, minted('https://api.example.com/login')))), 'ok:own');
   // ROUND 2: every row of the table reaches the network — a known tool naming no host it can READ is not «no host»
   say('own minted · a known tool naming no host it can read (psql) ⇒ asks', sum(verdict(pNone, fact(pNone, minted('api.example.com')))), 'ask:once,deny:another-host');
-  const R2 = (argv, env = []) => Vm.planOf({ argv, env: [['T0', OWN], ...env] });
+  const R2 = (argv, env = []) => Vm.planOf({ argv, env: [[argv[0] === 'gh' ? 'GH_TOKEN' : 'T0', OWN], ...env] });
   const r2 = (p, forHost = 'api.example.com', o = {}) => { const v = verdict(p, fact(p, minted(forHost)), o); return `${sum(v)}${(v.away || []).length ? ' @' + v.away.map((a) => a.host || '?').join(',') : ''}`; };
-  const R2b = (argv, env = []) => Vm.planOf({ argv, env: [['T0', OWN], ...env] });
+  const R2b = (argv, env = []) => Vm.planOf({ argv, env: [[argv[0] === 'gh' ? 'GH_TOKEN' : 'T0', OWN], ...env] });
   for (const [name, p, want] of [
     // the five shapes of the round-2 brief: a host the table did not read
     ['curl evil.example.com (no scheme)', R2(['curl', 'evil.example.com']), 'ask:once,deny:another-host @evil.example.com'],
@@ -491,7 +491,7 @@ function ownRoad(Vm) {
   say('sameHost: not a parent', Vm.sameHost('example.com', 'api.example.com'), false);
   // ROUND 3 (the parser review, with REAL tools): a minted value --for good.com must never run with NO card where the real
   // command sends it off good.com — four residuals pre-existing on the base, plus three table gaps (m1 / m2 / m3)
-  const R3 = (argv, env = []) => Vm.planOf({ argv, env: [['T0', OWN], ...env] });
+  const R3 = (argv, env = []) => Vm.planOf({ argv, env: [[argv[0] === 'gh' ? 'GH_TOKEN' : 'T0', OWN], ...env] });
   for (const [name, p, want, fh] of [
     // fixup 1 — curl: a flag that REDIRECTS the connection (--alt-svc / --interface) or a value that is an agent-writable FILE
     // (cert / ca / hsts) is blind; the real curl honours an agent's alt-svc cache and sends the whole request elsewhere
@@ -683,11 +683,12 @@ function ownRoad(Vm) {
   const envCode = (n) => { const q = Vm.planOf({ argv: ['curl', 'https://good.com/'], env: [['T0', OWN], [n, './x']] }); return q.ok ? 'ok' : q.code; };
   for (const n of ['HTTPIE_CONFIG_DIR', 'GH_CONFIG_DIR', 'MYSQL_HOME', 'PGSYSCONFDIR']) say(`m3: ${n} refused by name`, envCode(n), 'env_refused');
   for (const n of ['GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'GIT_SSL_CAINFO', 'CURL_CA_BUNDLE']) say(`round 11: ${n} (off-host credential / agent-chosen CA) refused by name`, envCode(n), 'env_refused');   // BLOCKER: the planted-config road's off-host-token and TLS-termination halves
-  // ROUND 7 MAJOR 4 + ROUND 8 MAJOR 2: gh reads GH_BROWSER / GH_EDITOR / GH_PAGER (and GH_PATH) FIRST (program-naming env, DERIVED from `gh help environment` into the gh row's envHijack) — a minted value must not run gh with one set. GH_PATH names the gh executable (round 8) — gh runs it as git's credential helper from an ok:own verb. GH_FORCE_TTY / GH_EXTENSION / GH_CONFIG_DIR are NOT program-naming (columns / a flag gh sets / a directory) so the derivation correctly does NOT refuse them
-  const ghEnvCode = (n) => { const q = Vm.planOf({ argv: ['gh', 'browse', '-R', 'o/r'], env: [['T0', OWN], [n, '/evil/script']] }); return q.ok ? 'ran' : q.code; };
+  // ROUND 7 MAJOR 4 + ROUND 8 MAJOR 2: gh reads GH_BROWSER / GH_EDITOR / GH_PAGER (and GH_PATH) FIRST (program-naming env, DERIVED from `gh help environment` into the gh row's envHijack) — a minted value must not run gh with one set. GH_PATH names the gh executable (round 8) — gh runs it as git's credential helper from an ok:own verb. ROUND 12: gh's env is now an ALLOWLIST, which SUBSUMES the hijack denylist — every name but the reviewed ones is env_refused, so GH_BROWSER/.../GH_PATH are refused by the allowlist (the hijack derivation lives on as the ⑤d ADVISORY census: no allowlist name may be one). The credential rides GH_TOKEN (the credRef), never an arbitrary name.
+  const ghEnvCode = (n) => { const q = Vm.planOf({ argv: ['gh', 'browse', '-R', 'o/r'], env: [['GH_TOKEN', OWN], [n, '/evil/script']] }); return q.ok ? 'ran' : q.code; };
   for (const n of ['GH_BROWSER', 'GH_EDITOR', 'GH_PAGER', 'GH_PATH', 'BROWSER', 'EDITOR', 'PAGER', 'VISUAL', 'GIT_EDITOR']) say(`gh env hijack: ${n} refused by name`, ghEnvCode(n), 'env_refused');
-  say('GH_PATH=/x gh gist view 1 (round 8 MAJOR 2: gh runs it as a program) ⇒ env_refused', (() => { const q = Vm.planOf({ argv: ['gh', 'gist', 'view', '1'], env: [['T0', OWN], ['GH_PATH', '/x']] }); return q.ok ? 'ran' : q.code; })(), 'env_refused');
-  for (const n of ['GH_FORCE_TTY', 'GH_EXTENSION']) say(`gh env: ${n} is NOT program-naming (derived out of the hijack list) ⇒ runs`, ghEnvCode(n), 'ran');   // GH_CONFIG_DIR is refused too, but by the config-dir mechanism (m3), not the hijack — its derivation-exclusion is pinned in ⑤d
+  say('GH_PATH=/x gh gist view 1 (round 8 MAJOR 2: gh runs it as a program) ⇒ env_refused', (() => { const q = Vm.planOf({ argv: ['gh', 'gist', 'view', '1'], env: [['GH_TOKEN', OWN], ['GH_PATH', '/x']] }); return q.ok ? 'ran' : q.code; })(), 'env_refused');
+  for (const n of ['GH_FORCE_TTY', 'NO_COLOR', 'TERM', 'LC_ALL']) say(`gh env: ${n} is in the reviewed allowlist ⇒ runs`, ghEnvCode(n), 'ran');   // round 12: an allowlisted name (a terminal / locale shaper, none program-naming) passes from the agent
+  for (const n of ['GH_EXTENSION', 'GH_CONFIG_DIR', 'GIT_TRACE2_EVENT', 'GIT_TRACE2_ENV_VARS', 'HTTPS_PROXY', 'SOME_RANDOM']) say(`round 12: ${n} (not in the allowlist) ⇒ env_refused by name`, ghEnvCode(n), 'env_refused');   // the allowlist closes GIT_TRACE2_* / *_PROXY / an unreviewed GH_ name without a denylist that can go stale
   return bad;
 }
 {
@@ -718,6 +719,7 @@ await (async () => {
     ok(!drift && canon(table) === canon(shipped), `the shipped gh grammar equals the live gh over the WHOLE tree (${Object.keys(shipped).length} reviewed-allowlist verbs @ gh ${pinned}) — no drift`, drift ? { added, removed, changed, helpFailed } : undefined);
     // round 9 (MAJOR 2): every allowlisted verb's live help-text sha must EQUAL its pinned ALLOWLIST sha — a reworded help (re-review the verb) or a version-pin move is RED BY NAME. The ok:own roster is pinned to the help a human reviewed, never re-derived from prose
     const hashDrift = GHG.allowHashDrift(shas);
+    ok(GHG.toolSha256Of(GHG.ghBinPath()) === gh.toolSha256, `round 12 (BLOCKER-class): the pinned toolSha256 EQUALS the live gh binary's sha256 @ gh ${pinned} — the digest the door enforces at spawn is THIS exact gh (a version roll / the owner's own install is re-pinned with --repin)`, { pin: gh.toolSha256, bin: GHG.ghBinPath() });
     ok(hashDrift.length === 0, `every allowlisted verb's live help equals its pinned review hash (${GHG.ALLOWLIST.length} verbs @ gh ${pinned}) — no help drift; on a drift: re-review the named verb(s), then \`node scripts/gen-gh-grammar.mjs --repin --reason "<why>"\``, hashDrift.length ? hashDrift : undefined);
     // round 8 (MAJOR 3) / round 9 (MINOR 3): the census pins envHijack through the SAME compare a stale-literal test drives (envHijackDrift) — a stale list (a dropped GH_BROWSER, a missing GH_PATH after gh grew it) is RED by name, not a silent drift the headers only CLAIMED
     const liveHijack = GHG.envHijack(), shippedHijack = gh.envHijack || [];
@@ -739,6 +741,14 @@ console.log('⑤d THE GENERATORS OWN HYGIENE (round 7/8/9) — the census walk, 
   const envHelp = ['`GH_EDITOR`, `EDITOR` (in order of precedence): the editor tool to use', 'for authoring text.', '', '`GH_BROWSER`, `BROWSER` (in order of precedence): the web browser to use for opening links.', '', '`GH_PAGER`, `PAGER` (in order of precedence): a terminal paging program to send output to.', '', '`GH_PATH`: set the path to the gh executable, useful for cygwin.', '', '`GH_EXTENSION`: set to 1 by gh when it invokes an extension as a standalone program.', '', '`GH_CONFIG_DIR`: the directory where gh will store configuration files.', '', '`GH_FORCE_TTY`: set to a number of columns for the viewport.', '', '`GH_TOKEN`: an authentication token.'].join('\n');
   const hj = GHG.parseEnvHijack(envHelp);
   ok(JSON.stringify(hj) === JSON.stringify(['BROWSER', 'EDITOR', 'GH_BROWSER', 'GH_EDITOR', 'GH_PAGER', 'GH_PATH', 'PAGER']), 'MAJOR 2/4: parseEnvHijack derives editor/browser/pager/executable names (GH_PATH IN), excludes GH_EXTENSION / GH_CONFIG_DIR / GH_FORCE_TTY / GH_TOKEN', { hj });
+  // ROUND 12 (MAJOR + BLOCKER-class + MINOR): the env ALLOWLIST, the TOOL DIGEST and the host→credential-name map are pinned beside
+  // the grammar (reviewed / generated in gen-gh-grammar.mjs). The allowlist is the agent's env road (everything else env_refused); the
+  // digest is the tool-tamper pin the door enforces; ghCredEnvFor is how the door homes the credential to the run's host.
+  const ghRow = V.knownToolOf('gh');
+  ok(JSON.stringify(ghRow.envAllow) === JSON.stringify(GHG.ENV_ALLOW) && JSON.stringify(ghRow.envAllowRe) === JSON.stringify(GHG.ENV_ALLOW_RE), 'round 12 (MAJOR): the gh row\'s env allowlist EQUALS the generator\'s reviewed ENV_ALLOW / ENV_ALLOW_RE — a drift is RED (the list is reviewed in the generator, written by --write)', { row: ghRow.envAllow, gen: GHG.ENV_ALLOW });
+  ok(GHG.envAllowAdvisory(hj).length === 0 && GHG.envAllowAdvisory(['GH_BROWSER'], ['GH_BROWSER', 'GH_REPO']).join() === 'GH_BROWSER', 'round 12 (ADVISORY census): no env-allowlist name is one gh names a program through (envAllow ∩ envHijack = ∅); the census REDs BY NAME when one is', GHG.envAllowAdvisory(hj));
+  ok(/^[0-9a-f]{64}$/.test(ghRow.toolSha256), 'round 12 (BLOCKER-class): the gh row carries a 64-hex sha256 TOOL DIGEST pin — the door refuses a uid-owned (replaceable) gh whose bytes differ, by name (tool_changed)', { toolSha256: ghRow.toolSha256 });
+  ok(V.ghCredEnvFor('github.com', ghRow) === 'GH_TOKEN' && V.ghCredEnvFor('api.github.com', ghRow) === 'GH_TOKEN' && V.ghCredEnvFor('tenant.ghe.com', ghRow) === 'GH_TOKEN' && V.ghCredEnvFor('ghe.corp.example', ghRow) === 'GH_ENTERPRISE_TOKEN' && V.ghCredEnvFor(null, ghRow) === 'GH_TOKEN', 'round 12 (MINOR): ghCredEnvFor homes the credential to the run\'s host — github.com / *.ghe.com ⇒ GH_TOKEN, any other (GHES) host ⇒ GH_ENTERPRISE_TOKEN, no --for host ⇒ GH_TOKEN', { ghe: V.ghCredEnvFor('ghe.corp.example', ghRow) });
   // round 9 (MINOR 3): the REAL ⑤c compare, driven against a STALE shipped literal — not the round-8 tautology (two lists differ) but envHijackDrift itself: an identical list ⇒ null, a shipped list that DROPPED GH_BROWSER ⇒ a drift naming live vs the stale list
   ok(GHG.envHijackDrift(hj, hj) === null, 'MINOR 3: envHijackDrift(live, live) === null — the ⑤c compare passes an identical list');
   const staleShipped = hj.filter((n) => n !== 'GH_BROWSER');
@@ -1056,11 +1066,11 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     ['a gh verb the table does not carry is NOT blind (round 6, items 1+2 — fail closed)', 'if (row.grammar && !vg) unread = true;', 'if (row.grammar && false) unread = true;', ownRoad],
     ['a one-word verb (api) is not found by the longest-key scan (round 6, item 1)', 'for (let n = ghLead.length; n >= 1 && !vg; n--)', 'for (let n = ghLead.length; n >= ghLead.length && !vg; n--)', ownRoad],
     ['the scp-like git@HOST:O/R spec is not read (round 7, BLOCKER 2 — repoHostOf)', 'm = /^git@([^/:]+):/i.exec(s);', 'm = null;', ownRoad],
-    ['a tool program-naming env (GH_BROWSER) is not refused (round 7, MAJOR 4)', "if (TOOL_ENV_HIJACK.has(n)) return 'the tool would start a program it names';", 'if (false) return undefined;', ownRoad],
+    ['round 12 (MAJOR): the env ALLOWLIST is skipped ⇒ a non-allowlisted name (GIT_TRACE2_EVENT) runs on gh', 'if (row && Array.isArray(row.envAllow)) {', 'if (false && Array.isArray(row.envAllow)) {', ownRoad],
     ['a conninfo URI in a -d / --dbname value is not read (round 4, item 2)', "...argv.slice(1), ...vals(['-d', '--dbname'])]", '...argv.slice(1)]', ownRoad],
     ['the $VAULT_FILE file-flag exception is a substring test (round 4, item 4)', '!fileFlagExempt(f, v, run)', '!/\\$VAULT_FILE\\{/.test(v)', ownRoad],
     // ROUND 8 — MAJOR 3: a stale shipped envHijack (a dropped GH_BROWSER) is caught — envRefusedOf stops refusing it ⇒ the GH_BROWSER-refused case goes RED
-    ['the shipped envHijack dropped GH_BROWSER (a stale literal, MAJOR 3)', '"GH_BROWSER","GH_EDITOR"', '"GH_EDITOR"', ownRoad],
+    ['round 12 (MAJOR): the env allowlist\'s LC_* pattern is broken ⇒ a locale env (LC_ALL) is refused that should pass', 'envAllowRe: ["^LC_[A-Z]+$"]', 'envAllowRe: ["^XX_NOPE$"]', ownRoad],
     // ROUND 8 — MINOR 1: repoHostOf without the host-shape guard reads a bareword part[0] as a host ⇒ a bogus @x card for a mis-TYPEd string flag ⇒ the ok:own control goes RED
     // ROUND 8 — MINOR 2: repoHostOf without the www. strip keeps www.HOST ⇒ a value minted --for www.HOST passes silently ⇒ RED
     ['a leading www. is not stripped (MINOR 2 — go-gh trims it)', "const strip = (h) => normHost(String(h).replace(/^www\\./i, ''));", 'const strip = (h) => normHost(String(h));', ownRoad],

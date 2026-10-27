@@ -32,7 +32,7 @@
 // executable), never a hand list — gh reads the GH_ ones FIRST, so a minted value must not run gh with one set. GH_FORCE_TTY /
 // GH_EXTENSION / GH_CONFIG_DIR name no program the user supplies and are correctly excluded by the derivation.
 import { execFileSync, execFile } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync, accessSync, constants } from 'node:fs';
 import { createHash } from 'node:crypto';
 
 export const helpSha = (text) => createHash('sha256').update(String(text)).digest('hex').slice(0, 16);   // round 9: a 64-bit fingerprint of a verb's live --help — the census REDs when the reviewed help changes or the version pin moves
@@ -41,6 +41,11 @@ export const ghHelp = (args) => { try { return execFileSync('gh', [...args, '--h
 export const ghHelpAsync = (args) => new Promise((res) => execFile('gh', [...args, '--help'], { encoding: 'utf8', timeout: 15000, maxBuffer: 8e6 }, (e, o) => res(e ? null : o)));   // the census fetches ~250 helps in parallel — the SAME parse (parseHelp), so no drift vs the serial generator
 export const ghHelpTopic = (name) => { try { return execFileSync('gh', ['help', name], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
 export const ghVersion = () => { try { const o = execFileSync('gh', ['--version'], { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }); const m = /gh version (\S+)/.exec(o); return m ? m[1] : null; } catch { return null; } };
+// round 12 (BLOCKER-class): the TOOL is pinned BY DIGEST — the door refuses a replaceable (uid-owned) gh whose bytes are not the
+// pinned sha256 (tool_changed), so a planted shim of the same name never runs. The pin follows the binary: a version roll or the
+// owner's own install is a new binary, re-pinned by `--repin`. ghBinPath resolves gh on PATH exactly as the door's resolveTool.
+export const ghBinPath = () => { for (const d of String(process.env.PATH || '').split(':')) { if (!d) continue; const p = `${d}/gh`; try { const st = statSync(p); if (st.isFile()) { accessSync(p, constants.X_OK); return p; } } catch { } } return null; };
+export const toolSha256Of = (p) => { try { return createHash('sha256').update(readFileSync(p)).digest('hex'); } catch { return null; } };
 
 // The subcommands a help lists, ONLY inside a *COMMANDS section (never EXAMPLES / HELP TOPICS / LEARN MORE). ALIAS COMMANDS and
 // EXTENSION COMMANDS are skipped BY NAME (an alias BLINDS; walking EXTENSION COMMANDS would exec a third-party binary in a test).
@@ -216,6 +221,15 @@ export function envHijack() { const t = ghHelpTopic('environment'); return t == 
 // the drift ({live, shipped}) or null when equal, so a test reds the COMPARE itself, not merely asserts that two lists differ.
 export function envHijackDrift(live, shipped) { return (live != null && JSON.stringify(live) === JSON.stringify(shipped)) ? null : { live: live == null ? null : live, shipped: shipped == null ? null : shipped }; }
 
+// round 12 (MAJOR): the agent-env ALLOWLIST for a gh run — the ONLY env names an agent may set; every other name is env_refused
+// by the door (a denylist cannot stay complete). Reviewed by hand against `gh help environment` at the pinned version: none of
+// these names a PROGRAM gh starts (the envHijack set) or a config it obeys — GH_REPO selects the repo, GH_FORCE_TTY / NO_COLOR /
+// CLICOLOR / TERM shape the terminal, LANG / LC_* / TZ the locale. The credential + the host + the config dir are the DOOR's.
+export const ENV_ALLOW = Object.freeze(['GH_REPO', 'GH_FORCE_TTY', 'NO_COLOR', 'CLICOLOR', 'TERM', 'LANG', 'TZ']);
+export const ENV_ALLOW_RE = Object.freeze(['^LC_[A-Z]+$']);
+// the ADVISORY census (⑤c drives it against the live `gh help environment`): an allowlisted name may never be one gh names a
+// program through (envHijack) — RETURNS the offending names, RED when non-empty. PURE.
+export function envAllowAdvisory(hijack, allow = ENV_ALLOW) { return (allow || []).filter((n) => (hijack || []).includes(n)); }
 function literalText(table) {
   const keys = Object.keys(table).sort();
   return '{\n' + keys.map((k) => `      ${JSON.stringify(k)}: ${JSON.stringify(table[k])}`).join(',\n') + ',\n    }';
@@ -269,8 +283,13 @@ if (process.argv[1] && process.argv[1].endsWith('gen-gh-grammar.mjs')) {
     const SRC = new URL('../src/vault-run.js', import.meta.url).pathname;
     let v = readFileSync(SRC, 'utf8');
     if (!/grammarVersion: '[^']*'/.test(v)) throw new Error("no `grammarVersion: '…'` in the gh row to pin");
-    writeFileSync(SRC, v.replace(/grammarVersion: '[^']*'/, `grammarVersion: '${ver}'`));
-    process.stderr.write(`re-pinned ${ALLOWLIST.length} help hashes + grammarVersion '${ver}' (reason: ${reason}).\nRe-review the verbs whose help changed: ${changed.length ? changed.join(', ') : '(none — only the version pin moved)'}\nThen node scripts/gen-gh-grammar.mjs --write if a reviewed shape changed.\n`);
+    v = v.replace(/grammarVersion: '[^']*'/, `grammarVersion: '${ver}'`);
+    const binp = ghBinPath(), tsha = binp ? toolSha256Of(binp) : null;   // round 12: the digest pin follows the binary (a version roll / the owner's own install is a new sha)
+    if (!tsha) throw new Error('refusing --repin: the gh binary could not be read to pin its sha256 — gh not on PATH as a readable file');
+    if (!/toolSha256: '[^']*'/.test(v)) throw new Error("no `toolSha256: '…'` in the gh row to pin");
+    v = v.replace(/toolSha256: '[^']*'/, `toolSha256: '${tsha}'`);
+    writeFileSync(SRC, v);
+    process.stderr.write(`re-pinned ${ALLOWLIST.length} help hashes + grammarVersion '${ver}' + toolSha256 '${tsha}' (reason: ${reason}).\nRe-review the verbs whose help changed: ${changed.length ? changed.join(', ') : '(none — only the version pin moved)'}\nThen node scripts/gen-gh-grammar.mjs --write if a reviewed shape changed.\n`);
   } else if (process.argv.includes('--allow-shas')) {
     const ver = ghVersion();
     const lines = ALLOWLIST.map((e) => { const h = ghHelp(e.path); return `${JSON.stringify(e.path.join(' '))}: ${JSON.stringify(h == null ? null : helpSha(h))}`; });
@@ -296,10 +315,20 @@ if (process.argv[1] && process.argv[1].endsWith('gen-gh-grammar.mjs')) {
       s = s.replace(/grammarVersion: '[^']*'/, `grammarVersion: '${ver}'`);
       if (!/envHijack: \[[^\]]*\]/.test(s)) throw new Error('no `envHijack: [...]` in the gh row to rewrite');
       s = s.replace(/envHijack: \[[^\]]*\]/, `envHijack: ${JSON.stringify(hijack)}`);
+      const adv = envAllowAdvisory(hijack);
+      if (adv.length) throw new Error(`refusing --write: an env allowlist name is one gh names a program through (envHijack): ${adv.join(', ')} — review ENV_ALLOW`);
+      const binp = ghBinPath(), tsha = binp ? toolSha256Of(binp) : null;
+      if (!tsha) throw new Error('refusing --write: the gh binary could not be read to pin its sha256 (gh not on PATH as a readable file)');
+      if (!/toolSha256: '[^']*'/.test(s)) throw new Error("no `toolSha256: '…'` in the gh row to rewrite");
+      s = s.replace(/toolSha256: '[^']*'/, `toolSha256: '${tsha}'`);
+      if (!/envAllow: \[[^\]]*\]/.test(s)) throw new Error('no `envAllow: [...]` in the gh row to rewrite');
+      s = s.replace(/envAllow: \[[^\]]*\]/, `envAllow: ${JSON.stringify(ENV_ALLOW)}`);
+      if (!/envAllowRe: \[[^\]]*\]/.test(s)) throw new Error('no `envAllowRe: [...]` in the gh row to rewrite');
+      s = s.replace(/envAllowRe: \[[^\]]*\]/, `envAllowRe: ${JSON.stringify(ENV_ALLOW_RE)}`);
       writeFileSync(SRC, s);
-      process.stderr.write(`wrote grammar (${keys.length} verbs, was ${shippedKeys.length}) + grammarVersion '${ver}' + envHijack ${JSON.stringify(hijack)} into src/vault-run.js\n`);
+      process.stderr.write(`wrote grammar (${keys.length} verbs, was ${shippedKeys.length}) + grammarVersion '${ver}' + toolSha256 '${tsha}' + envHijack ${JSON.stringify(hijack)} + envAllow ${JSON.stringify(ENV_ALLOW)} into src/vault-run.js\n`);
     } else {
-      process.stdout.write(`// gh ${ver}\n// envHijack ${JSON.stringify(hijack)}\n` + lit + '\n');
+      const bp = ghBinPath(); process.stdout.write(`// gh ${ver}\n// toolSha256 ${bp ? toolSha256Of(bp) : null}\n// envHijack ${JSON.stringify(hijack)}\n// envAllow ${JSON.stringify(ENV_ALLOW)} envAllowRe ${JSON.stringify(ENV_ALLOW_RE)}\n` + lit + '\n');
     }
   }
 }

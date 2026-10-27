@@ -206,6 +206,17 @@ function sameHost(host, forHost) {
   if (h.startsWith('*.')) { const s = h.slice(2); return f === s || f.endsWith('.' + s); }
   return h === f || h.endsWith('.' + f);
 }
+// round 12 (MINOR): gh honours GH_TOKEN only for github.com / *.ghe.com; any other (GHES) host reads GH_ENTERPRISE_TOKEN. The
+// DOOR homes the agent's credential REFERENCE to the right env NAME for the run's pinned host (the agent names neither — see
+// runSeal.credRef / credEnvOther). `host` null (a stored value, no --for host) or not-gh ⇒ the default credential name (GH_TOKEN).
+function ghCredEnvFor(host, row) {
+  const seal = (row && row.runSeal) || {};
+  const def = seal.credRef || null, other = seal.credEnvOther || null;
+  if (!def || !other || !host) return def;
+  const h = String(host).toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+  const github = h === 'github.com' || h === 'api.github.com' || /(?:^|\.)ghe\.com$/.test(h);
+  return github ? def : other;
+}
 /** Every reference-shaped piece of `text` → { refs: [{ …ref, at, len, form: 'url' | 'brace' | 'file', name? }], bad: [{ at, text }] }.
  *  `form` url = `vault://…`; brace = `$VAULT{…}`; file = `$VAULT_FILE{…}` (`name` set when it names a `--file NAME`). A
  *  `vault://` / `$VAULT{` / `$VAULT_FILE{` in any letter case that does not parse is BAD — never read as plain text. */
@@ -273,9 +284,22 @@ const ENV_CONFIG = Object.freeze([   // a plain value pointing at the agent's ow
   Object.freeze({ re: /^(?:HOME|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_CACHE_HOME)$/, why: 'it moves the home a tool reads its config from' }),   // lane vault-run-door (the security review)
   Object.freeze({ re: /^(?:https?_proxy|all_proxy|no_proxy|ftp_proxy)$/i, why: 'where a run may go is the hub\'s (vault-run-egress)' }),
 ]);
-/** NAME → why it is refused, or null. `as` = 'plain' | 'env' (a value) | 'file' (a path the hub renders). */
-function envRefusedOf(name, as = 'plain') {
+/** NAME → why it is refused, or null. `as` = 'plain' | 'env' (a value) | 'file' (a path the hub renders). `row` = the tool's
+ *  KNOWN_TOOLS row: a tool that declares an env ALLOWLIST (`row.envAllow`) refuses every name but the reviewed ones + the credential. */
+function envRefusedOf(name, as = 'plain', row = null) {
   const n = String(name || '');
+  // round 12 (MAJOR): the agent's env is an ALLOWLIST, not a denylist — for a tool that declares one (gh), only the reviewed
+  // names (and the credential, as a reference) pass; the host, the config dir and the credential env NAME are the DOOR's to set,
+  // refused BY NAME; every other name (GIT_* / SSL_* / *_PROXY / LD_* / NODE_OPTIONS / GIT_ASKPASS / SSH_* / GIT_TRACE2_*) is
+  // refused WITHOUT a denylist that can go stale. (The envHijack derivation stays an ADVISORY census: no allowlist name is one.)
+  if (row && Array.isArray(row.envAllow)) {
+    const seal = row.runSeal || {};
+    const doorSets = [seal.hostEnv, seal.configDirEnv, seal.credEnvOther, 'GITHUB_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'].filter(Boolean);
+    if (seal.credRef && n === seal.credRef) return as === 'env' ? null : 'the door sets the credential for the run — pass it as a vault reference, never a literal';
+    if (doorSets.includes(n)) return 'the door sets this for the run (the host, the config dir and the credential env name are the hub\'s) — the agent names none of them';
+    if (row.envAllow.includes(n) || (row.envAllowRe || []).some((p) => new RegExp(p).test(n))) return null;
+    return `it is not in ${row.name}'s reviewed env allowlist (${row.envAllow.join(', ')}${(row.envAllowRe || []).length ? ', ' + row.envAllowRe.join(', ') : ''} + the credential as a reference) — every other name is refused by name`;
+  }
   const h = ENV_HIJACK.find((r) => r.re.test(n));
   if (h) return h.why;
   if (TOOL_ENV_HIJACK.has(n)) return 'the tool would start a program it names';   // round 7 (MAJOR 4): GH_BROWSER / GH_EDITOR / GH_PAGER (gh reads the GH_ ones FIRST) — DERIVED into the gh row's envHijack from `gh help environment`
@@ -309,7 +333,7 @@ const KNOWN_TOOLS = Object.freeze([
   { name: 'curl', proxyEnv: true, bareHosts: 'all', globs: true, urlFlags: ['--url'], blindPrefixes: ['--expand-'], valueFlags: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config', ...CURL_VALUE_FLAGS], keyed: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc', '--interface'], configFlags: ['-K', '--config'], fileFlags: ['--cacert', '--capath', '-E', '--cert', '--key', '--netrc-file', '--hsts', '--etag-save', '--etag-compare'] },   // round 3: a flag that redirects the connection off the URL's host (--alt-svc / --interface) is keyed; a value that is an agent-writable FILE (cert / ca / netrc / hsts cache) is a config class — blind unless it is the vault's own $VAULT_FILE
   { name: 'wget', proxyEnv: true, bareHosts: 'all', prefixOpts: true, valueFlags: WGET_VALUE_FLAGS, keyed: ['-e', '--execute', '-B', '--base', '--bind-address', '--use-askpass'], configFlags: ['--config', '-i', '--input-file', '--input-metalink'], fileFlags: ['--ca-certificate', '--certificate', '--private-key', '--load-cookies', '--save-cookies'] },   // round 3 (m2): --input-metalink fetches every URL in its file (like -i); a cert / cookie file the agent writes is a config class
   { name: 'http', aka: ['https', 'httpie'], proxyEnv: true, bareHosts: 'first', valueFlags: HTTPIE_VALUE_FLAGS, keyed: ['--proxy'] },
-  { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'], hostFlags: ['--hostname'], repoFlags: ['-R', '--repo'], repoEnv: ['GH_REPO'], blindSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'sync'], ['pr', 'checkout'], ['extension', 'install'], ['extension', 'upgrade']], blindFlagSubs: [{ sub: ['pr', 'merge'], longs: ['--delete-branch'], shorts: ['-d'] }, { sub: ['repo', 'create'], longs: ['--push', '--clone'], shorts: ['-c'] }], needFlagSubs: [{ sub: ['pr', 'create'], need: ['--head', '-H'], repo: true }], runSeal: { configDirEnv: 'GH_CONFIG_DIR', hostEnv: 'GH_HOST', childEnv: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' } }, grammarVersion: '2.102.0', envHijack: ["BROWSER","EDITOR","GH_BROWSER","GH_EDITOR","GH_PAGER","GH_PATH","GIT_EDITOR","PAGER","VISUAL"], grammar: {
+  { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'], hostFlags: ['--hostname'], repoFlags: ['-R', '--repo'], repoEnv: ['GH_REPO'], blindSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'sync'], ['pr', 'checkout'], ['extension', 'install'], ['extension', 'upgrade']], blindFlagSubs: [{ sub: ['pr', 'merge'], longs: ['--delete-branch'], shorts: ['-d'] }, { sub: ['repo', 'create'], longs: ['--push', '--clone'], shorts: ['-c'] }], needFlagSubs: [{ sub: ['pr', 'create'], need: ['--head', '-H'], repo: true }], runSeal: { configDirEnv: 'GH_CONFIG_DIR', hostEnv: 'GH_HOST', credRef: 'GH_TOKEN', credEnvOther: 'GH_ENTERPRISE_TOKEN', childEnv: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' } }, grammarVersion: '2.102.0', toolSha256: '7469124f706944133d6a169691dd1c6c3511b12e85878d255e044e2948df4c9b', envAllow: ["GH_REPO","GH_FORCE_TTY","NO_COLOR","CLICOLOR","TERM","LANG","TZ"], envAllowRe: ["^LC_[A-Z]+$"], envHijack: ["BROWSER","EDITOR","GH_BROWSER","GH_EDITOR","GH_PAGER","GH_PATH","GIT_EDITOR","PAGER","VISUAL"], grammar: {
       "api": {"value":["--cache","--field","--header","--hostname","--input","--jq","--method","--preview","--raw-field","--template","-F","-H","-X","-f","-p","-q","-t"],"repoValues":[],"spec":0,"host":null},
       "config get": {"default":1},
       "issue close": {"value":["--comment","--duplicate-of","--reason","--repo","-R","-c","-r"],"repoValues":["--repo","-R"],"spec":0,"host":null},
@@ -425,7 +449,7 @@ function planOf(req = {}) {
   const claim = (n, as) => {
     if (!ENV_NAME.test(n)) return refuse('bad_env_name', { name: n });
     if (names.has(n)) return refuse('duplicate_name', { name: n });
-    const why = envRefusedOf(n, as);
+    const why = envRefusedOf(n, as, row);
     if (why) return refuse('env_refused', { name: n, why });
     names.add(n); return null;
   };
@@ -1096,7 +1120,7 @@ function maskText(text, secrets) { const m = createMasker(secrets); return m.pus
 
 module.exports = {
   SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
-  parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, ownsAgentEntry, forHostOf, sameHost, isFreeEntry, refFor: refOf,
+  parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, ownsAgentEntry, forHostOf, sameHost, ghCredEnvFor, isFreeEntry, refFor: refOf,
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
