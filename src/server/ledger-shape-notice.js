@@ -24,6 +24,10 @@
  * 'resumed' closes it whatever it says (r4 matched by text: a rename filed a second item and left the first open for
  * ever). A month back in shape whose held events could not be recorded (ENOSPC …) stays held and says so in its own
  * words (`drain-failed`) — it closes only once they are in the ledger.
+ * Round 6: the identity holds from the FIRST filing — the item is filed with its key (user-todos `itemKey` = host id ×
+ * file; its id derived from it), never matched by its words (r5 filed through add()'s text match: two machines of one
+ * display name shared ONE item, and one machine's resume closed it while the other's month was still held). Two open
+ * notices of one machine name are told apart by the host id's short form in their words («M (1a2b3c4d)»).
  * `wire({usageHistory, userTodos})` = server.js's one line (it sets `usageHistory.onShape`, reconciles 3 s after boot).
  */
 const INBOX_KEY = 'usage-ledger';
@@ -60,31 +64,35 @@ const D_TODO = {
 };
 const NO_SPACE = new Set(['ENOSPC', 'EDQUOT']);
 
+/** r6: a host id's short form in a notice's words («host-1a2b3c4d» → «1a2b3c4d», «host-dial-Laptop» → «dial-Laptop»). */
+const shortHost = (id) => String(id || '').replace(/^host-/, '').slice(0, 24);
+const fillOf = (k, q) => String(k).replace(/\{(\w+)\}/g, (_, n) => (q[n] == null ? '' : String(q[n])));
 const gib = (b) => `${(Math.max(0, Number(b) || 0) / 2 ** 30).toFixed(2)} GiB`;
 const hhmm = (t) => { const d = new Date(Number(t) || 0); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`; };
 /** The notice's words → {text, detail, i18n} (PURE). `remedy` = usage-history's `_remedyOf` ({state, code, error, removed,
  *  nextAt}); `host` and THE RULE that opened it (`why`, `exact`) ride the text's params (the boot reconcile reads them
  *  back). A state without words of its own is said as `none` (recording paused — no claim of what is being done). */
-function noticeOf({ hostName, host, shard, month, size, ratio, why, exact, remedy, held, dropped, holdMax, holdError, drain } = {}) {
+function noticeOf({ hostName, host, shard, month, size, ratio, why, exact, remedy, held, dropped, holdMax, holdError, drain, tag = '' } = {}) {
   // r5: a month whose held events could not be recorded says THAT (its file is back in shape — no remedy words)
   const drained = !!(drain && drain.state === 'failed');
   const r = drained ? { state: 'drain-failed', code: drain.code || null, error: drain.code || null } : remedy && typeof remedy === 'object' ? remedy : { state: 'none' };
   const state = drained ? 'drain-failed' : Object.prototype.hasOwnProperty.call(D_NOW, r.state) ? r.state : 'none';
   const sh = String(shard || '').slice(0, 60), mo = /^\d{4}-\d{2}$/.test(String(month || '')) ? String(month) : (/(\d{4}-\d{2})/.exec(sh) || [])[1] || 'this month';
-  const p = { machine: String(hostName || host || 'a machine').slice(0, 80), shard: sh, month: mo, size: gib(size), ratio: ratio == null ? '' : String(ratio), error: String(r.code ? `${r.code}${r.error && !String(r.error).startsWith(r.code) ? ` (${r.error})` : ''}` : r.error || 'no reason given').slice(0, 200), removed: String(Math.max(0, Number(r.removed) || 0)), next: r.nextAt ? hhmm(r.nextAt) : 'a while', held: String(Math.max(0, Number(held) || 0)), dropped: String(Math.max(0, Number(dropped) || 0)), bound: `${Math.round((Number(holdMax) || 64 * 2 ** 20) / 2 ** 20)} MiB`, holdError: String(holdError || '').slice(0, 80) };
+  const name = String(hostName || host || 'a machine').slice(0, 80), t = String(tag || '').slice(0, 24);
+  const p = { machine: t ? `${name} (${t})` : name, shard: sh, month: mo, size: gib(size), ratio: ratio == null ? '' : String(ratio), error: String(r.code ? `${r.code}${r.error && !String(r.error).startsWith(r.code) ? ` (${r.error})` : ''}` : r.error || 'no reason given').slice(0, 200), removed: String(Math.max(0, Number(r.removed) || 0)), next: r.nextAt ? hhmm(r.nextAt) : 'a while', held: String(Math.max(0, Number(held) || 0)), dropped: String(Math.max(0, Number(dropped) || 0)), bound: `${Math.round((Number(holdMax) || 64 * 2 ** 20) / 2 ** 20)} MiB`, holdError: String(holdError || '').slice(0, 80) };
   const what = drained ? D_WHAT.drain : state === 'proven-over' ? D_WHAT.proven : (why !== 'drain' && D_WHAT[why]) || D_WHAT.size;
   const who = drained ? D_HELD.drain : holdError ? D_HELD.failed : held == null ? D_HELD.counting : D_HELD.held;
   const now = drained ? D_DRAIN_FAILED : D_NOW[state];
   const todo = drained ? (NO_SPACE.has(r.code) ? D_TODO.drainSpace : D_TODO.look) : state === 'running' || state === 'judging' || state === 'none' ? D_TODO.wait : state === 'failed' && NO_SPACE.has(r.code) ? D_TODO.space : state === 'proven-over' || state === 'ids' ? D_TODO.stopped : D_TODO.look;
-  const lines = [{ key: what, params: { shard: p.shard, size: p.size, ratio: p.ratio } }, { key: who, params: { machine: p.machine, month: p.month, held: p.held, bound: p.bound, error: p.holdError } }];
+  const lines = [{ key: what, params: { shard: p.shard, size: p.size, ratio: p.ratio, month: p.month } }, { key: who, params: { machine: p.machine, month: p.month, held: p.held, bound: p.bound, error: p.holdError } }];
   if (Number(dropped) > 0) lines.push({ key: D_DROPPED, params: { dropped: p.dropped, month: p.month } }); // past the bound: counted, never silently
   lines.push({ key: now, params: { error: p.error, next: p.next, removed: p.removed, size: p.size, ...(drained ? { held: p.held } : {}) } }, { key: todo });
-  const fill = (k, q = p) => k.replace(/\{(\w+)\}/g, (_, n) => (q[n] == null ? '' : String(q[n])));
+  const fill = (k, q = p) => fillOf(k, q);
   const head = drained ? TEXT_DRAIN : TEXT;
   return {
     text: fill(head),
     detail: lines.map((l) => fill(l.key, { ...p, ...(l.params || {}) })).join('\n'),
-    i18n: { text: { key: head, params: { machine: p.machine, month: p.month, shard: p.shard, host: String(host || '').slice(0, 160), why: Object.prototype.hasOwnProperty.call(D_WHAT, why) ? why : 'size', exact: exact ? '1' : '' } }, detail: lines },
+    i18n: { text: { key: head, params: { machine: p.machine, name, tag: t, month: p.month, shard: p.shard, host: String(host || '').slice(0, 160), why: Object.prototype.hasOwnProperty.call(D_WHAT, why) ? why : 'size', exact: exact ? '1' : '' } }, detail: lines },
   };
 }
 
@@ -95,28 +103,47 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
   const close = (id, by) => { try { const it = userTodos.get?.(id); if (it && it.status === 'open') userTodos.setStatus(id, 'done', by); } catch { } };
   const paramsOf = (it) => (it && it.i18n && it.i18n.text && it.i18n.text.params) || {};
   const ours = (it) => !!(it && it.sessionKey === INBOX_KEY && it.kind === 'notice' && it.origin === 'server' && !it.clearedAt);
+  const nameOf = (it) => paramsOf(it).name || paramsOf(it).machine || '';
   /** r5: THE item of (host, file) — the one this process filed, else the newest the store holds for that key (open first,
-   *  read or closed after); a second OPEN one (r4 filed one per wording) is closed into it ('merged'). */
+   *  read or closed after); a second OPEN one (r4 filed one per wording) is closed into it ('merged'). r6: the store's key
+   *  first (`itemKey`), its words' params for a notice filed before it. */
   function itemOf(host, shard) {
-    const id = open.get(keyOf(host, shard)), had = id && userTodos.get?.(id);
+    const k = keyOf(host, shard), id = open.get(k), had = id && userTodos.get?.(id);
     if (ours(had)) return had;
-    const ids = typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => ours(i) && paramsOf(i).host === String(host) && paramsOf(i).shard === String(shard)) : [];
+    const ids = typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => ours(i) && (i.itemKey === k || (!i.itemKey && paramsOf(i).host === String(host) && paramsOf(i).shard === String(shard)))) : [];
     const all = ids.map((x) => userTodos.get(x)).filter(Boolean).sort((a, b) => (a.status === 'open') - (b.status === 'open') || (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0));
     const keep = all[all.length - 1] || null;
     for (const o of all) if (o !== keep && o.status === 'open') close(o.id, 'merged');
     if (keep) open.set(keyOf(host, shard), keep.id);
     return keep;
   }
+  /** r6: the OPEN notices of OTHER machines with this display name (two machines of one name: each told by its host id). */
+  const twinsOf = (host, name) => (typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => ours(i) && i.status === 'open' && nameOf(i) === name && paramsOf(i).host && paramsOf(i).host !== String(host)) : []).map((x) => userTodos.get(x)).filter(Boolean);
+  /** r6: an item's words re-filled with another machine label (its stored sentences, their params) — in place. */
+  function relabel(item, label) {
+    userTodos.reshapeItems((it) => {
+      if (it.id !== item.id || !it.i18n || !it.i18n.text || it.i18n.text.params.machine === label) return false;
+      const i18n = JSON.parse(JSON.stringify(it.i18n));
+      i18n.text.params.machine = label; i18n.text.params.tag = shortHost(i18n.text.params.host);
+      for (const l of i18n.detail || []) if (l.params && Object.prototype.hasOwnProperty.call(l.params, 'machine')) l.params.machine = label;
+      it.i18n = i18n; it.text = fillOf(i18n.text.key, i18n.text.params); it.detail = (i18n.detail || []).map((l) => fillOf(l.key, l.params || {})).join('\n');
+      return true;
+    });
+  }
   usageHistory.onShape = (ev) => {
     if (!ev || !userTodos) return;
     if (ev.kind === 'paused') {
       const prev = itemOf(ev.host, ev.shard);
       // a name the event does not know (a hold read back at boot names its host id only) keeps the one its notice said
-      const name = ev.hostName && ev.hostName !== ev.host ? ev.hostName : paramsOf(prev).machine || ev.hostName;
-      const w = noticeOf({ ...ev, hostName: name });
+      const name = ev.hostName && ev.hostName !== ev.host ? ev.hostName : nameOf(prev) || ev.hostName;
+      const twins = twinsOf(ev.host, name);
+      const w = noticeOf({ ...ev, hostName: name, tag: twins.length ? shortHost(ev.host) : '' });
       try {
+        // r6: each twin told by ITS host id too (its words re-filled in place)
+        for (const t of twins) relabel(t, `${name} (${shortHost(paramsOf(t).host)})`);
         if (!prev) {
-          const it = userTodos.add(INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Usage', text: w.text, detail: w.detail, i18n: w.i18n });
+          // r6: filed by its KEY (host id × file — the item's id derived from it), never matched by its words
+          const it = userTodos.add(INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Usage', text: w.text, detail: w.detail, i18n: w.i18n, itemKey: keyOf(ev.host, ev.shard) });
           if (it && it.id) open.set(keyOf(ev.host, ev.shard), it.id);
           return;
         }
@@ -156,7 +183,7 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
         const d0 = (Array.isArray(it.i18n && it.i18n.detail) && it.i18n.detail[0]) || {};
         const why = p.why || Object.keys(D_WHAT).find((k) => D_WHAT[k] === d0.key) || null;
         const rule = { why: why === 'proven' ? 'size' : why, exact: p.why ? p.exact === '1' : why !== 'size' && why !== 'proven', ratio: d0.params && d0.params.ratio };
-        if (p.host && p.shard) { open.set(keyOf(p.host, p.shard), it.id); try { rec = usageHistory.restorePause(p.host, p.machine, p.shard, rule); } catch { rec = null; } }
+        if (p.host && p.shard) { open.set(keyOf(p.host, p.shard), it.id); try { rec = usageHistory.restorePause(p.host, p.name || p.machine, p.shard, rule); } catch { rec = null; } }
         if (!rec) { if (p.host && open.get(keyOf(p.host, p.shard)) === it.id) open.delete(keyOf(p.host, p.shard)); close(it.id, 'shape-ok'); n++; }
       }
     } catch (e) { log(`the growth alarm's notices could not be reconciled: ${e.message}`); }

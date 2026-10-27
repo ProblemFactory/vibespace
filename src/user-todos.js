@@ -460,7 +460,7 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null, itemKey = null } = {}) {
     const _dataDir = path.dirname(this._file);   // agent-output-sinks: the belt finds the vault from here
     const rawText = typeof text === 'string' ? (origin === 'agent' ? belt.maskForSink(text.trim(), { dataDir: _dataDir }) : text.trim()) : '';   // agent-output-sinks: belt the AGENT's own ask (origin 'agent'), never a system producer's notice (vault / spend / channels / …)
     text = rawText.slice(0, TEXT_MAX);
@@ -537,7 +537,13 @@ class UserTodoManager {
       const idKey = ACTION_IDENTITY[action.type];
       return !idKey || i.action[idKey] === action[idKey];
     };
-    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && i.text === text && sameFiling(i) && !i.clearedAt);
+    // lane ledger-dedup-law r6: A SERVER PRODUCER'S IDENTITY — an item filed with an `itemKey` (the growth alarm's (host id,
+    // file)) is matched by (sessionKey, itemKey) alone, never by its words, and its id is derived from it (`_idOfKey`): two
+    // machines of one display name filed ONE item by text and one machine's resume closed the other's. A filing without
+    // one never merges into a keyed item.
+    itemKey = typeof itemKey === 'string' && itemKey ? itemKey.slice(0, 300) : null;
+    const existing = itemKey ? this._state.items.find((i) => i.sessionKey === sessionKey && i.itemKey === itemKey && !i.clearedAt)
+      : this._state.items.find((i) => i.sessionKey === sessionKey && i.text === text && sameFiling(i) && !i.itemKey && !i.clearedAt);
     const openCount = this._state.items.filter((i) => i.sessionKey === sessionKey && i.status === 'open').length;
     // a SERVER producer whose open items its own domain bounds (one per account row) may raise the per-key cap; the agent
     // route never passes it (lane oat-identity-fix-r2, L1)
@@ -570,6 +576,7 @@ class UserTodoManager {
         existing.expiresAt = expiresAt; changed = true;
       }
       if (reask) { existing.reasks = (Number(existing.reasks) || 0) + 1; existing.reaskedAt = this._now(); changed = true; }
+      if (itemKey && text !== existing.text) { existing.text = text; delete existing.judged; changed = true; } // r6: a keyed item's words are not its identity
       if (detail && detail !== existing.detail) { existing.detail = detail; delete existing.judged; changed = true; } // F2: new words, no old verdict
       if (urgency && urgency !== existing.urgency) { existing.urgency = urgency; changed = true; }
       if (kind && kind !== existing.kind) { existing.kind = kind; changed = true; }
@@ -590,7 +597,8 @@ class UserTodoManager {
     }
     if (openCount >= maxOpen) throw new Error(`this session already has ${openCount} open items — resolve some before adding more`);
     const item = {
-      id: 'ut-' + crypto.randomBytes(5).toString('hex'),
+      id: itemKey ? this._idOfKey(sessionKey, itemKey) : 'ut-' + crypto.randomBytes(5).toString('hex'),
+      ...(itemKey ? { itemKey } : {}), // r6: the producer's identity (a re-file of the same key is this item, whatever it says)
       sessionKey, text, detail,
       urgency: urgency || 'normal',
       kind: kind || 'action',
@@ -816,6 +824,15 @@ class UserTodoManager {
     // decision, rare, and small: ONE synchronous write (the stash's own rule, 2026-09-27 verify r3/r5).
     if (out.cleared.length) { this._save(); this.flush(); this._notify(); }
     return out;
+  }
+
+  /** r6: a keyed item's id — derived from (sessionKey, itemKey), the same shape as a minted one; the next derivation when an
+   *  item holds it already (a CLEARED item of the same key keeps its id). */
+  _idOfKey(sessionKey, itemKey) {
+    for (let n = 0; ; n++) {
+      const id = 'ut-' + crypto.createHash('sha256').update(`${sessionKey}\n${itemKey}${n ? `\n${n}` : ''}`).digest('hex').slice(0, 10);
+      if (!this._state.items.some((i) => i.id === id)) return id;
+    }
   }
 
   /** The ids of every item `pred` selects (a cleared JOB's items: `jobId` in the set). */

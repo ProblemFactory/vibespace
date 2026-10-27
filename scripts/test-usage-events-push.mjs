@@ -8,6 +8,9 @@
 // (src/hosts.js's push handler + server.js's `hosts.onUsageEvents`, its own source, over a real UsageHistory) against a
 // second real daemon: a proven-over October + a push of 5 October + 5 November events ⇒ acked, the daemon's cursor
 // committed, the next push carries only the new event (ff094d46: never acked — every push re-sends the window).
+// r6 (the acceptance of d2ff4026): what this suite spawns is stopped on EVERY path — one cleanup (each daemon by its own
+// pid, every scratch dir) run by the process's exit and by a signal (d2ff4026: a probe that threw skipped the kill — both
+// detached daemons kept running).
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 import { execFileSync } from 'node:child_process';
@@ -29,8 +32,17 @@ const dataDir = path.join(tmp, 'data'); fs.mkdirSync(dataDir, { recursive: true 
 
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e ? '\n    ' + e : ''}`); } };
-const pids = []; // the daemons this suite spawned — stopped by their own pid at the end (never by a name)
+const pids = []; // the daemons this suite spawned — stopped by their own pid (never by a name), on every path
 const pidLog = (m) => { const x = /spawned local daemon pid=(\d+)/.exec(String(m)); if (x) pids.push(Number(x[1])); };
+const more = []; // …and the scratch dirs it made (tmp + each block's own)
+let cleaned = false;
+const cleanup = () => {
+  if (cleaned) return; cleaned = true;
+  for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { } }
+  for (const d of [tmp, ...more]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
+};
+process.on('exit', cleanup); // a throw, a rejected await, process.exit — the exit runs it (sync: kill + rm)
+for (const [sig, n] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) process.on(sig, () => { cleanup(); process.exit(n); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const SID = 'aaaa1111-2222-3333-4444-555566667777';
@@ -89,6 +101,7 @@ try {
 // ── lane ledger-dedup-law r5: THE PUSH ROAD'S ACK IS DURABILITY ──
 {
   const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-uep-ack-'));
+  more.push(tmp2);
   const ROOT2 = path.join(tmp2, 'agentd'), home2 = path.join(tmp2, 'home'), proj2 = path.join(home2, '.claude', 'projects', '-home-u-y');
   fs.mkdirSync(proj2, { recursive: true });
   const was = { root: process.env.VIBESPACE_AGENTD_ROOT, home: process.env.HOME };
@@ -144,7 +157,6 @@ try {
     fs.rmSync(tmp2, { recursive: true, force: true });
   }
 }
-for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { } }
-fs.rmSync(tmp, { recursive: true, force: true });
+cleanup();
 console.log(failed ? `FAIL (${failed})` : `ALL PASS (${passed})`);
 process.exit(failed ? 1 : 0);

@@ -52,6 +52,14 @@
 //     once, the item stays denied; the store never reopens a decided item; check() reads the stored decision of a subject
 //     it holds no entry for (ff094d46: reopened, held 60 s, ask_expired)
 //   ⑥ re-derived: a month back in shape at boot is closed by its drain's end (the reconcile keeps it while its hold is on disk)
+// ROUND 6 (the acceptance of d2ff4026 — ⑮ ⑯ fail on d2ff4026; the push suite's cleanup: its own RED in the lane report):
+//   ⑮ F4 the dropped set is a set of ROWS — a window over the hold's bound re-sent six times is counted once (d2ff4026: the
+//     cut keyed by its place — re-held and still counted, then the segments it pushed out counted again), the segment road
+//     too, a restart reads it back; a re-sent dropped row the hold has room for is held and leaves the set; R1: a drained
+//     hold whose files could not be unlinked never names the next hold's rows (d2ff4026: the ids reused — 0/8 recorded)
+//   ⑯ F4 a notice is keyed by (host id, file) from its FIRST filing — two machines of one name are two items, told apart
+//     by the host id's short form; one resumes ⇒ the other's stays open (d2ff4026: ONE item by its words, closed by the
+//     first resume while the second month is still held)
 // In-process, no server; sparse files for every big shape (fs.truncateSync / a write at an offset — no disk, no load).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -534,10 +542,14 @@ await leg('⑫', async () => {
   const b = 'host-b';
   const rowsB = []; for (let k = 0; k < 12; k++) { const ids = [9500 + 4 * k, 9501 + 4 * k, 9502 + 4 * k, 9503 + 4 * k]; rowsB.push(...ids); quiet(() => uh.ingestRemoteEvents(b, 'B', ids.map((i) => remote(i)).join('\n') + '\n')); }
   const pb = uh.ingestPaused().find((p) => p.host === b) || {};
-  const files = fs.existsSync(heldDir) ? fs.readdirSync(heldDir).filter((f) => f.includes('~host-b.')) : [];
+  // r6 re-derived: it PINNED every file of B's hold under the bound — the dropped set lives BESIDE the hold now (its own
+  // file: the dropped rows' ids, never a position), so it PINS NOW the held rows' segments under the bound and the set
+  // file naming exactly the dropped rows
+  const all = fs.existsSync(heldDir) ? fs.readdirSync(heldDir).filter((f) => f.includes('~host-b.')) : [], files = all.filter((f) => f.endsWith('.ndjson'));
   const onDisk = files.reduce((a, f) => a + size(path.join(heldDir, f)), 0), keptB = files.sort((x, y) => Number(x.split('.')[1]) - Number(y.split('.')[1])).flatMap((f) => ridsOf(path.join(heldDir, f)));
-  ok(pb.dropped > 0 && pb.held + pb.dropped === rowsB.length && onDisk <= 4 * KiB && keptB.join() === rowsB.slice(pb.dropped).map((i) => hidOf(i, b)).join(),
-    `⑫ the hold is BOUNDED: ${onDisk} B on disk for B's October (≤ 4 KiB, the product's 64 MiB scaled) — past it the ${pb.dropped} OLDEST held rows dropped and COUNTED (${pb.held} held + ${pb.dropped} dropped = ${rowsB.length} sent), the newest kept in order`, { held: pb.held, dropped: pb.dropped, onDisk, files });
+  const setB = new Set(); for (const f of all.filter((x) => x.endsWith('.dropped'))) for (const l of fs.readFileSync(path.join(heldDir, f), 'utf8').split('\n')) { try { const j = JSON.parse(l); for (const r of j.gone || []) setB.add(r); for (const r of j.back || []) setB.delete(r); } catch { } }
+  ok(pb.dropped > 0 && pb.held + pb.dropped === rowsB.length && onDisk <= 4 * KiB && keptB.join() === rowsB.slice(pb.dropped).map((i) => hidOf(i, b)).join() && setB.size === pb.dropped && rowsB.slice(0, pb.dropped).every((i) => setB.has(hidOf(i, b))),
+    `⑫ the hold is BOUNDED: ${onDisk} B of held rows on disk for B's October (≤ 4 KiB, the product's 64 MiB scaled) — past it the ${pb.dropped} OLDEST held rows dropped and COUNTED (${pb.held} held + ${pb.dropped} dropped = ${rowsB.length} sent; the set beside it names those ${setB.size} rows), the newest kept in order`, { held: pb.held, dropped: pb.dropped, onDisk, files: all, set: setB.size });
   const nb = notices().find((i) => /^Usage of B for 2026-10/.test(i.text));
   ok(nb && new RegExp(`Past the bound: the ${pb.dropped} oldest held events of 2026-10 were dropped`).test(nb.detail) && N.ledgerNote({ ingestPaused: [pb] }).some((x) => x.words === N.LEDGER_NOTE_WORDS.pausedDropped && x.vars.dropped === String(pb.dropped)),
     `⑫ the drop is SAID, never silent: B's own notice «Past the bound: the ${pb.dropped} oldest held events of 2026-10 were dropped — counted here, never recorded» and the Usage window's pausedDropped row`, nb && nb.detail.split('\n'));
@@ -663,7 +675,8 @@ await leg('⑬', async () => {
     const W = world('w13d'), L1 = W.life(), host = 'host-c', sent = [];
     const send = (u, k) => { const ids = [0, 1, 2, 3].map((j) => 9600 + 4 * k + j); sent.push(...ids); quiet(() => u.ingestRemoteEvents(host, 'C', ids.map((i) => remote(i)).join('\n') + '\n')); };
     for (let k = 0; k < 3; k++) send(L1.uh, k); // three segments (~1 KiB each) of a 4 KiB hold
-    // THE CRASH: the fourth batch's append lands — its marker names the segment it drops — and the process dies before the unlink
+    // THE CRASH: the fourth batch's append lands — the set's line names the segment it drops (r6: by its rows) — and the
+    // process dies before the unlink
     const realUnlink = fs.unlinkSync;
     fs.unlinkSync = function (f, ...a) { if (String(f).includes(`${path.sep}_held${path.sep}`)) return undefined; return realUnlink.call(this, f, ...a); };
     try { send(L1.uh, 3); } finally { fs.unlinkSync = realUnlink; }
@@ -723,6 +736,137 @@ await leg('⑭', async () => {
   await a2.answer(u.action.askId, { answer: 'once', ...ANS });
   const go = await a2.check(w.hid, HARVEST);
   ok(go && go.ok === true && t2.get(u.id).status === 'done' && t2.get(u.id).resolvedBy === 'allowed', '⑭ …and the owner can still lift it: the item reopened by the owner and allowed once ⇒ the next act goes (the decision is final against a RE-FILE, never against the owner)', { go, item: [t2.get(u.id).status, t2.get(u.id).resolvedBy] });
+});
+
+console.log('⑮ F4 THE DROPPED SET IS A SET OF ROWS — a re-sent window over the bound counted once; R1: a stale hold never names a new one (round 6)');
+await leg('⑮', async () => {
+  const NOV = 800000; // remote(NOV + k): 2026-11-01
+  const seams = (uh) => { uh.shapeMaxBytes = 64 * KiB; uh.holdMaxBytes = 4 * KiB; uh.holdSegBytes = 1 * KiB; uh.dedupShard = (f) => { const p = new Promise(() => { }); uh._dedupJobs.set(f, p); return p; }; return uh; };
+  const world = (name) => {
+    const d = dirOf(name), sh = shardOf(d);
+    fs.writeFileSync(sh, Array.from({ length: 400 }, (_, i) => row(i)).join('\n') + '\n'); // 400 distinct rows, ~110 KiB: over the seam
+    const todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+    const notices = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
+    const life = () => { const uh = seams(newUh(d)); const wired = LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null }); return { uh, wired }; };
+    const heldDir = path.join(d, 'usage-history', '_held');
+    const heldFiles = (host) => (fs.existsSync(heldDir) ? fs.readdirSync(heldDir).filter((f) => f.includes(`~${host}.`)) : []);
+    return { d, sh, todos, notices, life, heldFiles };
+  };
+  const pausedOf = (uh, host) => uh.ingestPaused().find((p) => p.host === host && p.shard === SHARD) || null;
+  const sum = (uh, host) => { const p = pausedOf(uh, host) || {}; return { held: p.held, dropped: p.dropped, t: (p.held || 0) + (p.dropped || 0) }; };
+  const lines = (ids) => ids.map((i) => remote(i)).join('\n') + '\n';
+  const ledgerOf = (W, host) => ridsOf(W.sh).filter((r) => r.startsWith(`h:${host}:`));
+
+  // ── THE RE-SEND PROBE: one window of 30 events over the 4 KiB hold, sent, then re-sent six times ──
+  {
+    const W = world('w15a'), L1 = W.life(), host = 'host-r', ids = Array.from({ length: 30 }, (_, k) => 9700 + k), sums = [];
+    for (let k = 0; k < 7; k++) { quiet(() => L1.uh.ingestRemoteEvents(host, 'R', lines(ids))); sums.push(sum(L1.uh, host)); }
+    const nr = W.notices().find((i) => /^Usage of R\b/.test(i.text));
+    ok(sums[0].dropped > 0 && sums.every((x) => x.t === 30) && sums.every((x) => x.dropped === sums[0].dropped) && nr && new RegExp(`the ${sums[6].dropped} oldest held events`).test(nr.detail),
+      `⑮ a window of 30 events over the hold's bound, sent, then RE-SENT six times (an older daemon re-walks its window): held + dropped = ${sums.map((x) => x.t).join(' → ')} for 30 sent, the notice says ${sums[6].dropped} «never recorded» (d2ff4026: 30 → 45 → 61 → 77 → 93 → 109 → 125 — the cut keyed by its PLACE, re-held and still counted)`, sums);
+    // the set file compacted (its lines rewritten as the set, by a rename) — then a restart reads the set back
+    const h1 = L1.uh._holds.get([...L1.uh._holds.keys()].find((k) => k.includes('~host-r')));
+    if (h1 && typeof L1.uh._dropCompact === 'function') L1.uh._dropCompact(h1);
+    const sf = W.heldFiles(host).filter((f) => f.endsWith('.dropped')), sl = sf.length === 1 ? fs.readFileSync(path.join(W.d, 'usage-history', '_held', sf[0]), 'utf8').split('\n').filter(Boolean) : [];
+    ok(sl.length === 1 && (JSON.parse(sl[0]).gone || []).length === sums[6].dropped, `⑮ the set beside the hold: ONE file of the dropped rows' ids (${sl.length} line(s), ${sl[0] ? (JSON.parse(sl[0]).gone || []).length : 0} ids once compacted) — the re-sends wrote nothing to it`, sf);
+    const L2 = W.life(); quiet(() => L2.wired.reconcile()); // a restart reads the set back
+    const s2 = sum(L2.uh, host);
+    quiet(() => L2.uh.ingestRemoteEvents(host, 'R', lines(ids)));
+    const s3 = sum(L2.uh, host);
+    ok(s2.t === 30 && s2.dropped === sums[6].dropped && s3.t === 30 && s3.dropped === s2.dropped, `⑮ a restart reads the set back (${s2.held} held + ${s2.dropped} dropped) and the window once more: ${s3.t} for 30`, { s2, s3 });
+    L2.uh.shapeMaxBytes = 2 * GiB; // back in shape: drained at the machine's next ingest
+    quiet(() => L2.uh.ingestRemoteEvents(host, 'R', batchOf(NOV, 1)));
+    const got = ledgerOf(W, host), dropped = ids.filter((i) => !got.includes(hidOf(i, host)));
+    ok(got.length === s3.held && new Set(got).size === got.length && dropped.length === s3.dropped && got.length + dropped.length === 30 && !pausedOf(L2.uh, host),
+      `⑮ back in shape: ${got.length} recorded, each once + ${dropped.length} dropped = ${got.length + dropped.length} for 30 sent — the notice's «never recorded» is what the ledger lacks (d2ff4026: 127 said for 16 missing)`, { got: got.length, dropped: dropped.length, said: s3.dropped });
+  }
+  // ── THE SEGMENT ROAD: 12 batches (the oldest segments dropped), the same 12 re-sent in their order ──
+  {
+    const W = world('w15b'), L1 = W.life(), host = 'host-q', sent = Array.from({ length: 48 }, (_, k) => 9800 + k);
+    for (let k = 0; k < 12; k++) quiet(() => L1.uh.ingestRemoteEvents(host, 'Q', lines(sent.slice(4 * k, 4 * k + 4))));
+    const s1 = sum(L1.uh, host);
+    for (let k = 0; k < 12; k++) quiet(() => L1.uh.ingestRemoteEvents(host, 'Q', lines(sent.slice(4 * k, 4 * k + 4))));
+    const s2 = sum(L1.uh, host);
+    ok(s1.dropped > 0 && s1.t === 48 && s2.t === 48 && s2.dropped === s1.dropped, `⑮ the segment road: 12 batches past the bound (${s1.dropped} dropped with their segments), the same 12 re-sent in their order — ${s1.t} then ${s2.t} for 48 sent (d2ff4026: 48 then 96 — a dropped segment's rows forgotten, held again, counted again under a new id)`, { s1, s2 });
+  }
+  // ── ROOM AGAIN: a re-sent dropped row the hold has room for is HELD, and leaves the set ──
+  {
+    const W = world('w15c'), L1 = W.life(), host = 'host-p', ids = Array.from({ length: 30 }, (_, k) => 9850 + k);
+    quiet(() => L1.uh.ingestRemoteEvents(host, 'P', lines(ids)));
+    const s1 = sum(L1.uh, host);
+    L1.uh.holdMaxBytes = 64 * KiB; // the owner gives the hold room
+    const [r2] = quiet(() => L1.uh.ingestRemoteEvents(host, 'P', lines(ids)));
+    const s2 = sum(L1.uh, host);
+    L1.uh.shapeMaxBytes = 2 * GiB;
+    quiet(() => L1.uh.ingestRemoteEvents(host, 'P', batchOf(NOV, 1)));
+    const got = ledgerOf(W, host);
+    ok(s1.dropped > 0 && s2.held === 30 && s2.dropped === 0 && r2 && r2.ack === true && got.length === 30 && new Set(got).size === 30,
+      `⑮ room again: the ${s1.dropped} dropped events re-sent are HELD and leave the set (${s2.held} held + ${s2.dropped} dropped — recorded after all), then all 30 recorded, each once (d2ff4026: held AND still counted, 45 for 30)`, { s1, s2, got: got.length });
+  }
+  // ── R1: a drained hold whose files could not be unlinked never names the NEXT hold's rows ──
+  {
+    const W = world('w15d'), L1 = W.life(), host = 'host-s', old = Array.from({ length: 48 }, (_, k) => 9900 + k);
+    for (let k = 0; k < 12; k++) quiet(() => L1.uh.ingestRemoteEvents(host, 'S', lines(old.slice(4 * k, 4 * k + 4))));
+    const d0 = (pausedOf(L1.uh, host) || {}).dropped;
+    // back in shape, every unlink of the hold refused (EBUSY — a file still open on the data dir's NFS): drained, the files stay
+    L1.uh.shapeMaxBytes = 2 * GiB;
+    const realUnlink = fs.unlinkSync;
+    fs.unlinkSync = function (f, ...a) { if (String(f).includes(`${path.sep}_held${path.sep}`)) throw Object.assign(new Error('EBUSY: resource busy or locked, unlink'), { code: 'EBUSY' }); return realUnlink.call(this, f, ...a); };
+    try { quiet(() => L1.uh.ingestRemoteEvents(host, 'S', batchOf(NOV, 1))); } finally { fs.unlinkSync = realUnlink; }
+    const stale = W.heldFiles(host).length, resumed = !pausedOf(L1.uh, host), oldIn = ledgerOf(W, host).length;
+    // out of shape again: a NEW hold of the same month — 8 new events, two batches
+    L1.uh.shapeMaxBytes = 64 * KiB;
+    const fresh = Array.from({ length: 8 }, (_, k) => 9960 + k);
+    quiet(() => L1.uh.ingestRemoteEvents(host, 'S', lines(fresh.slice(0, 4))));
+    quiet(() => L1.uh.ingestRemoteEvents(host, 'S', lines(fresh.slice(4))));
+    const p1 = pausedOf(L1.uh, host) || {};
+    const L2 = W.life(); quiet(() => L2.wired.reconcile()); // a restart reads the holds back
+    const p2 = pausedOf(L2.uh, host) || {};
+    L2.uh.shapeMaxBytes = 2 * GiB;
+    quiet(() => L2.uh.ingestRemoteEvents(host, 'S', batchOf(NOV + 1, 1)));
+    const got = ledgerOf(W, host), rec = fresh.filter((i) => got.filter((r) => r === hidOf(i, host)).length === 1).length;
+    ok(d0 > 0 && resumed && stale > 0 && p1.held === 8 && !p1.dropped && p2.held === 8 && !p2.dropped && rec === 8 && new Set(got).size === got.length && got.length === oldIn + 8,
+      `⑮ R1: a drained hold whose ${stale} file(s) could not be unlinked (EBUSY) never names the NEXT hold's rows — the new hold of 8 read back after a restart: ${p2.held} held + ${p2.dropped || 0} dropped, then ${rec}/8 recorded, each once (d2ff4026: the new segments reused the old ids — the stale set dropped them at the read-back: 12 held + 36 dropped, 0/8 recorded)`, { d0, stale, p1: [p1.held, p1.dropped], p2: [p2.held, p2.dropped], rec, got: got.length, oldIn });
+  }
+});
+
+console.log('⑯ F4 A NOTICE IS KEYED BY (host id, file) FROM ITS FIRST FILING — two machines of one name are two items (round 6)');
+await leg('⑯', async () => {
+  const NOV = 800000;
+  const seams = (uh) => { uh.shapeMaxBytes = 64 * KiB; uh.holdMaxBytes = 4 * KiB; uh.holdSegBytes = 1 * KiB; uh.dedupShard = (f) => { const p = new Promise(() => { }); uh._dedupJobs.set(f, p); return p; }; return uh; };
+  const world = (name) => {
+    const d = dirOf(name), sh = shardOf(d);
+    fs.writeFileSync(sh, Array.from({ length: 400 }, (_, i) => row(i)).join('\n') + '\n');
+    const todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+    const notices = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
+    const life = () => { const uh = seams(newUh(d)); const wired = LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null }); return { uh, wired }; };
+    return { d, sh, todos, notices, life };
+  };
+  const pausedOf = (uh, host) => uh.ingestPaused().find((p) => p.host === host && p.shard === SHARD) || null;
+  const W = world('w16'), L1 = W.life(), A = 'host-1a2b3c4d', B = 'host-dial-M'; // an ssh machine and a paired one, both named «M»
+  quiet(() => L1.uh.ingestRemoteEvents(A, 'M', batchOf(9000, 3)));
+  quiet(() => L1.uh.ingestRemoteEvents(B, 'M', batchOf(9010, 2)));
+  const n1 = W.notices().filter((i) => i.status === 'open'), ia = n1.find((i) => i.text.includes('1a2b3c4d')), ib = n1.find((i) => i.text.includes('dial-M'));
+  ok(n1.length === 2 && ia && ib && ia.id !== ib.id && /^Usage of M \(1a2b3c4d\) for 2026-10 is held/.test(ia.text) && /3 events of 2026-10 held/.test(ia.detail) && /2 events of 2026-10 held/.test(ib.detail),
+    `⑯ two machines named «M» paused on one month: TWO items, told apart by the host id's short form — ${n1.map((i) => `«${i.text.slice(0, 32)}…»`).join(', ')} (d2ff4026: ONE item — the second filing matched the first by its words)`, n1.map((i) => [i.id, i.text.slice(0, 40), i.detail.split('\n')[1].slice(0, 60)]));
+  // the item's id is its key's: the same (host id, file) in another store is the same id
+  const V = world('w16b'), M1 = V.life();
+  quiet(() => M1.uh.ingestRemoteEvents(A, 'M', batchOf(9000, 1)));
+  const va = V.notices()[0];
+  ok(ia && va && va.id === ia.id, `⑯ the item's id is derived from (host id, file) — never minted by a text match: the same key in another store is the same id (${va && va.id})`, { a: ia && ia.id, v: va && va.id });
+  // a restart: the same two items, the same ids
+  const L2 = W.life(); quiet(() => L2.wired.reconcile());
+  const n2 = W.notices().filter((i) => i.status === 'open');
+  ok(n2.length === 2 && ia && ib && n2.some((i) => i.id === ia.id) && n2.some((i) => i.id === ib.id), `⑯ a restart reads both back: ${n2.length} open, the same ids`, n2.map((i) => i.id));
+  // the file back in shape: A's next ingest resumes A — B's month is still held until B's own ingest
+  L2.uh.shapeMaxBytes = 2 * GiB;
+  quiet(() => L2.uh.ingestRemoteEvents(A, 'M', batchOf(NOV, 1)));
+  const a3 = ia && W.todos.get(ia.id), b3 = ib && W.todos.get(ib.id), stillB = !!pausedOf(L2.uh, B);
+  ok(a3 && a3.status === 'done' && a3.resolvedBy === 'shape-ok' && b3 && b3.status === 'open' && stillB,
+    `⑯ A's month resumed: A's item closed (${a3 && `${a3.status}/${a3.resolvedBy}`}), B's still OPEN while B's month is held (${b3 && b3.status}; B paused: ${stillB}) (d2ff4026: the one shared item closed — B's held month said nowhere)`, { a3: a3 && [a3.status, a3.resolvedBy], b3: b3 && b3.status, stillB });
+  quiet(() => L2.uh.ingestRemoteEvents(B, 'M', batchOf(NOV + 1, 1)));
+  const b4 = ib && W.todos.get(ib.id);
+  ok(b4 && b4.status === 'done' && !pausedOf(L2.uh, B) && W.notices().every((i) => i.status !== 'open'), `⑯ …and B's own ingest resumes B and closes B's item (${b4 && `${b4.status}/${b4.resolvedBy}`})`, b4 && [b4.status, b4.resolvedBy]);
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });
