@@ -941,11 +941,13 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
 
 // ⑫ THE OWNERSHIP SEAL + TOOL DIGEST + ENV ALLOWLIST (lane vault-agent-own round 12) — the environment of a vault run is a place
 // NOBODY can write, made for THAT run, and the TOOL cannot be swapped. "Cannot write" is OWNERSHIP, never mode bits: a PATH dir is
-// kept only when ROOT owns it with no group/other write bit (a uid-owned 0555 dir is DROPPED — its owner chmods at will). The gh
-// binary is pinned by sha256: a uid-owned (replaceable) gh runs ONLY if its bytes match the row's toolSha256 (tool_changed else).
-// The credential is HOMED by the door to the run's host (GH_TOKEN for github / *.ghe.com, GH_ENTERPRISE_TOKEN for a GHES host).
-// The REAL ownership rule is driven here on real paths (DOOR.rootOwnedNoWrite); the gh "runs" legs inject a toolDigest that vouches
-// for the fake binary's path (no 42 MB copy). One GUARDED leg runs the REAL pinned gh so the streaming hash + the WIRE property hold.
+// kept only when ROOT owns it with no group/other write bit (a uid-owned 0555 dir is DROPPED — its owner chmods at will). round 14:
+// a pinned credential tool (gh) runs with the minted value ONLY when it is SEALED — its realpath chain is root-owned AND the open
+// fd's inode is root-owned (DOOR.sealedToolReal); a uid-owned tool is tool_not_sealed (the fd pins WHICH inode runs, root ownership
+// pins WHAT is in it — r13's fd exec'd the agent's CURRENT bytes after an in-place rewrite). The sha256 is then the DRIFT detector
+// (tool_changed on a package roll). The credential is HOMED to the run's ROUTING host (shape.routeHosts). A test cannot chown a
+// scratch binary to root, so the "runs" legs inject toolSealed (model GHREAL as root-owned) + a toolDigest that vouches; the REAL
+// rule is driven on /usr/bin/gh (an ownership control) and the GUARDED leg runs the REAL pinned gh (streaming hash + WIRE).
 {
   const sw = await world({ instance: 'cluster' });
   const NOWHERE = DOOR.SEAL_NOWHERE;
@@ -958,7 +960,8 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   fs.writeFileSync(path.join(GHREAL, 'gh'), "#!/usr/bin/env node\nprocess.stdout.write('gh\\n');\n", { mode: 0o755 });
   const GHREAL_GH = path.join(GHREAL, 'gh');
   const digestVouch = (fd) => { let tgt = null; try { tgt = fs.readlinkSync('/proc/self/fd/' + fd); } catch { } return Promise.resolve(tgt === GHREAL_GH ? GHSHA : 'dead'.repeat(16)); };   // r13: the door hands the OPEN fd — resolve it back to the path it holds; 64 hex != the pin for any other binary
-  const mkGh = (extra) => sw.mk(DOOR, { isRootOwned: REAL, toolDigest: digestVouch, ...extra });
+  const sealedVouch = (p, fd) => p === GHREAL_GH || DOOR.sealedToolReal(p, fd);   // round 14: model GHREAL as a ROOT-OWNED install (a test cannot chown to root); the REAL chain+fstat rule runs on every other path
+  const mkGh = (extra) => sw.mk(DOOR, { isRootOwned: REAL, toolDigest: digestVouch, toolSealed: sealedVouch, ...extra });
   // plant config.yml + hosts.yml where round 10 minted its dir — the seal must point NOWHERE near it
   const planted = path.join(sw.dataDir, 'vault-run-env'); fs.mkdirSync(planted, { recursive: true });
   fs.writeFileSync(path.join(planted, 'config.yml'), 'http_unix_socket: /tmp/evil.sock\n'); fs.writeFileSync(path.join(planted, 'hosts.yml'), 'evil.invalid:\n    user: u\n');
@@ -969,7 +972,7 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const dA = mkGh({ spawnImpl: A.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [WSEAL, NOTYET, GHREAL, '/usr/bin', '/bin'].join(':') }) });
   const rA = await dA.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work });
   const E = A.get() ? A.get().env : {};
-  ok(rA.ok && rA.by === 'own' && !!A.get(), 'round 12: gh issue list (own stored, uid-owned gh whose bytes MATCH the pin) ran ok:own — a pinned uid-owned tool is neither refused nor blinded', rA.code || rA);
+  ok(rA.ok && rA.by === 'own' && !!A.get(), 'round 12/14: gh issue list (own stored, a SEALED gh whose bytes MATCH the pin) ran ok:own — a sealed pinned tool is hashed (drift) + exec\'d as the SAME inode via /proc/fd, neither refused nor blinded', rA.code || rA);
   ok(E.HOME === NOWHERE && E.GH_CONFIG_DIR === NOWHERE && E.XDG_CONFIG_HOME === NOWHERE && E.XDG_STATE_HOME === NOWHERE && E.XDG_CACHE_HOME === NOWHERE && E.XDG_DATA_HOME === NOWHERE,
     'BLOCKER (r11): HOME, GH_CONFIG_DIR and every XDG_* point at SEAL_NOWHERE — a planted config / hosts / state is never read', { HOME: E.HOME, NOWHERE });
   ok(fs.readdirSync(planted).sort().join(',') === 'config.yml,hosts.yml', 'BLOCKER (r11): the door wrote NOTHING in the round-10 dir — it is no longer the run environment', fs.readdirSync(planted));
@@ -1001,36 +1004,84 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   ok(!!Y.get() && !dirsY.includes(MYLINK) && dirsY.includes('/usr/bin'),
     'round 13 (BLOCKER): an agent-owned symlink (PATH entry -> /usr/bin) is baked as its REALPATH /usr/bin, never the link STRING — re-pointing it after the spawn cannot redirect the child (base keeps the link name at the head)', { sealed: EY.PATH, hasLink: dirsY.includes(MYLINK) });
 
-  // DIGEST RED — a gh shim at a uid-owned dir whose bytes are NOT the pin ⇒ tool_changed BEFORE any spawn: the agent cannot swap
-  // the pinned gh for its own program (digestVouch returns a non-matching sha for any path but GHREAL_GH).
+  // tool_not_sealed RED (round 14 BLOCKER): a uid-owned gh (its dir this user can write) is NEVER pinnable — tool_not_sealed BEFORE
+  // the hash (the REAL sealed rule runs: no sealedVouch injection; the fixture's chain under /var/tmp is not root-owned-no-write).
+  // On base (b728667d) the SAME uid-owned gh with a matching pin ran ok:own — r13's fd exec'd an inode the agent owns (rewritable).
+  const NS = capOf();
+  const dNS = sw.mk(DOOR, { isRootOwned: REAL, toolDigest: digestVouch, spawnImpl: NS.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });   // DEFAULT toolSealed = the REAL chain+fstat rule
+  const rNS = await dNS.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work });
+  ok(!rNS.ok && rNS.code === 'tool_not_sealed' && !NS.get(), 'round 14 (BLOCKER): a uid-owned pinned gh is tool_not_sealed — its realpath chain / open fd are not root-owned, so it never runs with the minted value (base ran it ok:own); nothing spawned', { ok: rNS.ok, code: rNS.code, spawned: !!NS.get() });
+
+  // IN-PLACE REWRITE RED (round 14 BLOCKER, the reviewers' repro): a uid-owned gh REWRITTEN IN PLACE (truncate + write the SAME
+  // inode) by the digest seam. On base the fd exec'd the inode's CURRENT bytes — the SHIM ran with the token in env (O_RDONLY and
+  // /proc/<pid>/fd pin the inode, not its content). On mine the uid-owned tool is tool_not_sealed BEFORE the hash, so the rewrite
+  // seam never even runs — nothing spawned.
+  const IP = path.join(ROOT, 'inplace'); fs.mkdirSync(IP, { recursive: true });
+  const IPGH = path.join(IP, 'gh'), IPMARK = path.join(IP, 'who-ran');
+  fs.writeFileSync(IPGH, '#!/bin/sh\nprintf ORIGINAL > ' + IPMARK + '\n', { mode: 0o755 });
+  try { fs.unlinkSync(IPMARK); } catch { }
+  let rewrote = false;
+  const rewriteDigest = (fd) => { try { fs.truncateSync(IPGH, 0); fs.writeFileSync(IPGH, '#!/bin/sh\nprintf SHIM > ' + IPMARK + '\n', { mode: 0o755 }); rewrote = true; } catch { } return Promise.resolve(GHSHA); };
+  const dIP = sw.mk(DOOR, { isRootOwned: REAL, toolDigest: rewriteDigest, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [IP, '/usr/bin', '/bin'].join(':') }) });   // DEFAULT toolSealed = REAL; DEFAULT spawnImpl = REAL spawn
+  const rIP = await dIP.run({ caller: sw.caller, args: ['--timeout', '15', '--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', IPGH, 'issue', 'list'], cwd: sw.work });
+  await sleep(150);
+  const ipRan = (() => { try { return fs.readFileSync(IPMARK, 'utf8'); } catch { return '(none)'; } })();
+  ok(!rIP.ok && rIP.code === 'tool_not_sealed' && !rewrote && ipRan === '(none)', 'round 14 (BLOCKER, in-place rewrite): a uid-owned gh is tool_not_sealed BEFORE the hash — the rewrite seam never ran and nothing spawned (base: the fd exec\'d the rewritten SHIM with the token)', { code: rIP.code, rewrote, ipRan });
+
+  // DRIFT (round 14): a SEALED (root-owned, modeled) gh whose bytes do NOT match the pin is tool_changed — the sha256 stays the
+  // DRIFT detector (a package roll) on a sealed inode; the owner re-pins. (digestVouch returns a non-matching sha for any path but
+  // GHREAL_GH; here the sealed tool is the shim, modeled root-owned via toolSealed, so the sealed check passes and the hash fails.)
   const S = capOf();
   const GHSHIM = path.join(ROOT, 'ghshim'); fs.mkdirSync(GHSHIM, { recursive: true });
   fs.writeFileSync(path.join(GHSHIM, 'gh'), "#!/usr/bin/env node\nrequire('fs').writeFileSync(process.env.STEAL||'/dev/null', process.env.GH_TOKEN||'');\n", { mode: 0o755 });
-  const dS = mkGh({ spawnImpl: S.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHSHIM, '/usr/bin', '/bin'].join(':') }) });
-  const rS = await dS.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', path.join(GHSHIM, 'gh'), 'issue', 'list'], cwd: sw.work });
-  ok(!rS.ok && rS.code === 'tool_changed' && !S.get(), 'round 12 (BLOCKER-class): a uid-owned gh whose sha256 differs from the pin is refused BY NAME (tool_changed) — a planted shim of the same name never runs, nothing spawned', { ok: rS.ok, code: rS.code, spawned: !!S.get() });
+  const SHIMGH = path.join(GHSHIM, 'gh');
+  const dS = sw.mk(DOOR, { isRootOwned: REAL, toolDigest: digestVouch, toolSealed: (p, fd) => p === SHIMGH || DOOR.sealedToolReal(p, fd), spawnImpl: S.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHSHIM, '/usr/bin', '/bin'].join(':') }) });
+  const rS = await dS.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', SHIMGH, 'issue', 'list'], cwd: sw.work });
+  ok(!rS.ok && rS.code === 'tool_changed' && !S.get(), 'round 14: a SEALED gh whose sha256 differs from the pin is tool_changed (the DRIFT detector) — nothing spawned', { ok: rS.ok, code: rS.code, spawned: !!S.get() });
 
-  // HASH->SPAWN TOCTOU (round 13 MAJOR): a pinned uid-owned gh swapped for a shim BETWEEN the door's hash and its spawn. The door
-  // exec's the SAME inode it hashed via /proc/<pid>/fd, so the shim (a NEW inode renamed over the path) never runs — a REAL spawn
-  // writes a marker proving the ORIGINAL inode ran. On base (hash by path, exec by path) the renamed shim runs.
-  const TDIR = path.join(ROOT, 'toctou'); fs.mkdirSync(TDIR, { recursive: true });
-  const TOOLP = path.join(TDIR, 'gh'), SHIMP = path.join(TDIR, 'shim'), MARK = path.join(TDIR, 'who-ran');
-  fs.writeFileSync(TOOLP, '#!/bin/sh\nprintf ORIGINAL > ' + MARK + '\n', { mode: 0o755 });
-  fs.writeFileSync(SHIMP, '#!/bin/sh\nprintf SHIM > ' + MARK + '\n', { mode: 0o755 });
-  try { fs.unlinkSync(MARK); } catch { }
-  const swapDigest = (fd) => { try { fs.renameSync(SHIMP, TOOLP); } catch { } return Promise.resolve(GHSHA); };   // vouch (original bytes match the pin) AND swap a NEW inode over the path — the TOCTOU window
-  const dZ = sw.mk(DOOR, { isRootOwned: REAL, toolDigest: swapDigest, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [TDIR, '/usr/bin', '/bin'].join(':') }) });   // DEFAULT spawnImpl = REAL spawn
-  const rZ = await dZ.run({ caller: sw.caller, args: ['--timeout', '15', '--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', TOOLP, 'issue', 'list'], cwd: sw.work });
-  await sleep(200);
-  const whoRan = (() => { try { return fs.readFileSync(MARK, 'utf8'); } catch { return '(none)'; } })();
-  ok(rZ.ok && whoRan === 'ORIGINAL', 'round 13 (MAJOR, hash->spawn TOCTOU): a shim renamed over the pinned gh AFTER the door hashed it and BEFORE the spawn never ran — the door exec\'d the SAME inode via /proc/<pid>/fd (marker = ORIGINAL; base runs SHIM)', { ok: rZ.ok, whoRan, exit: rZ.exit });
+  // REAL-OWNERSHIP CONTROL (round 14 BLOCKER): the exported sealed predicate on the box's /usr/bin/gh (root-owned) vs a uid-owned
+  // fixture — the VERDICT says sealed/unsealed with NO vendor call (gh --version is not a vault verb).
+  const SYSGH = '/usr/bin/gh';
+  if (fs.existsSync(SYSGH)) {
+    const fdR = fs.openSync(SYSGH, 'r'); const sysSealed = DOOR.sealedToolReal(SYSGH, fdR); fs.closeSync(fdR);
+    const fdX = fs.openSync(GHREAL_GH, 'r'); const uidSealed = DOOR.sealedToolReal(GHREAL_GH, fdX); fs.closeSync(fdX);
+    ok(sysSealed === true && uidSealed === false, 'round 14 (BLOCKER, REAL ownership): /usr/bin/gh (root-owned chain + root-owned inode) IS sealed; the uid-owned fixture is NOT — the exported rule, no gh run', { sysSealed, uidSealed });
+  } else { console.log('  – ①② real /usr/bin/gh ownership control SKIPPED: no /usr/bin/gh on this box'); }
 
-  // tool_unpinnable (round 13 MAJOR): where /proc/<pid>/fd is unavailable (not Linux — hasProcFd injected false) a pinned uid-owned
-  // tool is refused BY NAME rather than exec'd by a second path lookup the digest cannot vouch for. Nothing spawned.
-  const U = capOf();
-  const dU = mkGh({ spawnImpl: U.spawn, hasProcFd: false, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
-  const rU = await dU.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work });
-  ok(!rU.ok && rU.code === 'tool_unpinnable' && !U.get(), 'round 13 (MAJOR): on a host without /proc/<pid>/fd a pinned uid-owned tool is tool_unpinnable (never exec\'d by a second path lookup) — nothing spawned', { ok: rU.ok, code: rU.code, spawned: !!U.get() });
+  // CAP RED (round 14 MAJOR): the digest is taken FIRST, before the cap check, with NO await between the cap check and runs.add —
+  // so 20 parallel own runs from one conversation spawn exactly RUNS_PER_CALLER (4) and the rest are too_many_runs by name (base:
+  // the digest await sat between the cap check and runs.add, so all 20 saw callerRuns 0 and spawned).
+  {
+    let spawns = 0;
+    const capSpawn = (cmd, args, opts) => { spawns++; const c = new EventEmitter(); c.pid = 93000 + spawns; c.stdout = new EventEmitter(); c.stdout.destroy = () => {}; c.stderr = new EventEmitter(); c.stderr.destroy = () => {}; c.stdin = null; setImmediate(() => { c.emit('exit', 0, null); c.emit('close', 0, null); }); return c; };
+    const dCap = mkGh({ spawnImpl: capSpawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const runs20 = await Promise.all(Array.from({ length: 20 }, () => dCap.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work })));
+    const ran = runs20.filter((r) => r.ok).length, capped = runs20.filter((r) => !r.ok && r.code === 'too_many_runs').length;
+    ok(ran === 4 && capped === 16 && spawns === 4, 'round 14 (MAJOR, caps): 20 parallel own runs ⇒ exactly 4 spawn + 16 too_many_runs by name (the digest is taken before the cap check; no await to runs.add) — base spawned all 20', { ran, capped, spawns });
+  }
+
+  // LOCK-DURING-HASH RED (round 14 MAJOR): the vault locks WHILE the digest streams. On mine the door re-reads the state after the
+  // await ⇒ vault_locked BY NAME, nothing spawned (base: the hash sat in spawnRun after the cap check, so valueOf then threw
+  // entry_unknown — the WRONG name — and a child was spawned then stopped).
+  {
+    const LK = capOf();
+    const lockDigest = () => { sw.vault.lock('door'); return Promise.resolve(GHSHA); };
+    const dLK = mkGh({ toolDigest: lockDigest, spawnImpl: LK.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const rLK = await dLK.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work });
+    ok(!rLK.ok && rLK.code === 'vault_locked' && !LK.get(), 'round 14 (MAJOR): a lock DURING the hash ⇒ vault_locked by name, nothing spawned (base: entry_unknown + a child spawned-then-stopped)', { code: rLK.code, spawned: !!LK.get() });
+    await sw.vault.unlock(PW);
+  }
+
+  // CALLER-GONE-DURING-HASH RED (round 14 MAJOR): the caller aborts WHILE the digest streams. On mine the door re-checks the signal
+  // after the await ⇒ caller_gone, nothing spawned (base: spawnRun had no signal re-check after the hash — spawn-then-stop).
+  {
+    const GN = capOf();
+    const ac = new AbortController();
+    const goneDigest = () => { ac.abort(); return Promise.resolve(GHSHA); };
+    const dGN = mkGh({ toolDigest: goneDigest, spawnImpl: GN.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+    const rGN = await dGN.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', GHREAL_GH, 'issue', 'list'], cwd: sw.work, signal: ac.signal });
+    ok(!rGN.ok && rGN.code === 'caller_gone' && !GN.get(), 'round 14 (MAJOR): a caller gone DURING the hash ⇒ caller_gone, nothing spawned (base: spawn-then-stop)', { code: rGN.code, spawned: !!GN.get() });
+  }
 
   // RUN B — own MINTED site-pw (--for api.example.com, a non-github host) ⇒ the door pins GH_HOST AND homes the credential to
   // GH_ENTERPRISE_TOKEN (the agent passed a GH_TOKEN reference and named neither the host nor the enterprise credential name).
@@ -1053,6 +1104,36 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const EDd = Dd.get() ? Dd.get().env : {};
   ok(rDd.ok && rDd.by === 'once' && EDd.GH_HOST === 'ghe.example.test' && EDd.GH_ENTERPRISE_TOKEN === 'agent-minted-ghv-0123456789abc' && EDd.GH_TOKEN === undefined,
     'round 13 (MINOR): a value minted --for github.com, the call -R ghe.example.test approved on a card ⇒ GH_HOST + GH_ENTERPRISE_TOKEN follow the APPROVED host, not the mint\'s --for (base pinned github.com + GH_TOKEN, reaching nowhere)', { ok: rDd.ok, by: rDd.by, GH_HOST: EDd.GH_HOST, ENT: !!EDd.GH_ENTERPRISE_TOKEN, TOK: EDd.GH_TOKEN, card: !!cardDd });
+
+  // ITEM-4 FORWARD RED (round 14 MAJOR, sealHost routing): a github-minted value, the call names -R o/r (routes to github.com) but
+  // mentions evil.test in the --body. The SEAL follows the ROUTING host (github.com) ⇒ GH_HOST=github.com + GH_TOKEN; evil.test (a
+  // body URL, the card's words) is never a routing host. On base the seal took the single non-default shape host ⇒ GH_HOST=evil.test
+  // + GH_ENTERPRISE_TOKEN (the token homed to a host named only in free text).
+  const F = capOf();
+  const dF = mkGh({ spawnImpl: F.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+  const pF = dF.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-mint', '--', GHREAL_GH, 'issue', 'create', '-R', 'o/r', '--title', 't', '--body', 'see https://evil.test/x'], cwd: sw.work });
+  const cardF = await waitCard(sw);
+  if (cardF) dF.answer(cardF.action.askId, { answer: 'once' });
+  const rF = await pF; const EF = F.get() ? F.get().env : {};
+  ok(rF.ok && EF.GH_HOST === 'github.com' && EF.GH_TOKEN === 'agent-minted-ghv-0123456789abc' && EF.GH_ENTERPRISE_TOKEN === undefined,
+    'round 14 (MAJOR, sealHost routing): a github-minted value with -R o/r + a --body evil.test URL homes to GH_HOST=github.com + GH_TOKEN (the routing host), NOT the body URL (base: GH_HOST=evil.test + GH_ENTERPRISE_TOKEN)', { GH_HOST: EF.GH_HOST, TOK: EF.GH_TOKEN, ENT: EF.GH_ENTERPRISE_TOKEN, card: !!cardF });
+
+  // ITEM-4 REVERSE RED (round 14 MAJOR): a value minted --for a GHES host (api.example.com), the call names -R github.com/o/r
+  // (routes to github.com) approved on a card. The SEAL follows the APPROVED routing host (github.com) ⇒ GH_HOST=github.com +
+  // GH_TOKEN. On base the seal stayed pinned to the mint's --for ⇒ GH_HOST=api.example.com + GH_ENTERPRISE_TOKEN (the wrong host).
+  const RV = capOf();
+  const dRV = mkGh({ spawnImpl: RV.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHREAL, '/usr/bin', '/bin'].join(':') }) });
+  const pRV = dRV.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/site-pw', '--', GHREAL_GH, 'issue', 'create', '-R', 'github.com/o/r', '--title', 't', '--body', 'b'], cwd: sw.work });
+  const cardRV = await waitCard(sw);
+  if (cardRV) dRV.answer(cardRV.action.askId, { answer: 'once' });
+  const rRV = await pRV; const ERV = RV.get() ? RV.get().env : {};
+  ok(rRV.ok && ERV.GH_HOST === 'github.com' && ERV.GH_TOKEN === 'agent-minted-pw-0123456789abc' && ERV.GH_ENTERPRISE_TOKEN === undefined,
+    'round 14 (MAJOR, sealHost both directions): a GHES-minted value used against -R github.com/o/r (approved) homes to GH_HOST=github.com + GH_TOKEN — the approved routing host wins over the mint\'s --for (base: GH_HOST=api.example.com + GH_ENTERPRISE_TOKEN)', { GH_HOST: ERV.GH_HOST, TOK: ERV.GH_TOKEN, ENT: ERV.GH_ENTERPRISE_TOKEN, card: !!cardRV });
+
+  // BOOT SEAL (round 14 MINOR): the sealed PATH + git-on-seal are computed ONCE at the door's construction (a boot step, < 250 ms),
+  // not on the event loop at the first spawn.
+  const bs = dA._bootSeal();
+  ok(typeof bs.ms === 'number' && bs.ms >= 0 && bs.gitOnSeal === true, 'round 14 (MINOR): the sealed PATH + git-on-seal are computed at BOOT (a finite ms, reported; the boot law < 250 ms is measured in the report, never asserted as a flaky wall-clock bound) — not lazily at the first spawn', bs);
 
   // RUN C — a runSeal tool resolved via an absolute path from a uid-owned dir, the agent PATH ALL uid-owned ⇒ the sealed PATH is
   // EMPTY ⇒ refused BY NAME (gh could not find git). A root hub, or git only under a writable prefix.
@@ -1088,11 +1169,11 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
     try {
       const pdir = path.join(sw.dir, 'planted-gh'); fs.mkdirSync(pdir, { recursive: true });
       fs.writeFileSync(path.join(pdir, 'config.yml'), `http_unix_socket: ${sockPath}\n`);   // if gh read this planted config, its API call would dial my socket — the seal (GH_CONFIG_DIR=NOWHERE) means it never does
-      const dW = sw.mk(DOOR, { isRootOwned: REAL, agentEnv: () => ({ ...process.env, HOME: pdir, GH_CONFIG_DIR: pdir, HTTPS_PROXY: 'http://127.0.0.1:1', HTTP_PROXY: 'http://127.0.0.1:1', PATH: [path.dirname(REALGH), '/usr/bin', '/bin'].join(':') }) });
+      const dW = sw.mk(DOOR, { isRootOwned: REAL, toolSealed: (p, fd) => p === REALGH || DOOR.sealedToolReal(p, fd), agentEnv: () => ({ ...process.env, HOME: pdir, GH_CONFIG_DIR: pdir, HTTPS_PROXY: 'http://127.0.0.1:1', HTTP_PROXY: 'http://127.0.0.1:1', PATH: [path.dirname(REALGH), '/usr/bin', '/bin'].join(':') }) });   // round 14: model the lane's pinned gh as root-owned (a test cannot chown it); the REAL streaming sha256 still verifies its bytes
       const rW = await dW.run({ caller: sw.caller, args: ['--timeout', '15', '--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', REALGH, 'pr', 'create', '-R', 'o/r', '--head', 'feat', '-t', 't', '-b', 'b'], cwd: sw.work });
       await sleep(150);
       ok(hits === 0 && got === 0, 'round 12 (minor 4, WIRE): the REAL pinned gh, run through the door with a planted config.yml (http_unix_socket → my live socket), connected to the socket ZERO times and sent ZERO bytes — the seal (GH_CONFIG_DIR=NOWHERE) means no planted config / hosts is read; the token never reached the agent socket', { hits, bytes: got, exit: rW.exit, stderr: (rW.stderr || '').slice(0, 90) });
-      ok(rW.ok === true && rW.by === 'own', 'round 12 (minor 4): the REAL gh passed the ownership + DIGEST gates (its bytes match the committed toolSha256) and RAN ok:own — the streaming sha256 the door computes on the live binary is the pin', { ok: rW.ok, by: rW.by, exit: rW.exit });
+      ok(rW.ok === true && rW.by === 'own', 'round 12/14 (minor 4): the REAL gh passed the SEALED (ownership) + DIGEST gates (its bytes match the committed toolSha256) and RAN ok:own — the streaming sha256 the door computes on the live binary IS the pin, exec\'d as the SAME inode via /proc/fd', { ok: rW.ok, by: rW.by, exit: rW.exit });
     } finally { server.close(); try { fs.unlinkSync(sockPath); } catch { } }
   }
 }
