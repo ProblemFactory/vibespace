@@ -11047,4 +11047,7 @@ export default {
   "approved": "承認済み",
   "withdrawn by the agent": "エージェントが取り下げ",
   "A form stays a window of its own": "フォームはいつも独立した小さなウィンドウです",
+  "The document changed while the link was being edited — select the text and press Link again": "リンクの編集中に文書が変わりました — テキストを選び直して、もう一度「リンク」を押してください",
+  "This file was published elsewhere while the dialog was open — it shows as it is now": "ダイアログを開いている間に、このファイルは別の場所で公開されました — 現在の状態を表示しています",
+  "This page was unpublished elsewhere while the dialog was open — it shows as it is now": "ダイアログを開いている間に、このページは別の場所で公開停止されました — 現在の状態を表示しています",
 };

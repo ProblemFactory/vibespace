@@ -67,6 +67,7 @@ function enterDesktop(app) {
   app._applyChromeArrangement?.();
   app.wm?.refitForViewport?.(false);
   app.updateTaskbar?.();
+  app.sheetsToForms?.(); // lane dialog-yield r2: LAST — a form's sheet whose home was the phone becomes its window again (what was typed kept)
 }
 
 /** Switch the page to `next` now (the watcher's settled crossing; a suite may call it). */

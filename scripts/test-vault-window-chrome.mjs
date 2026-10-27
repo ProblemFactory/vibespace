@@ -433,15 +433,15 @@ await evalJs(`(() => { if (window.__vsKeyGets == null) { window.__vsKeyGets = 0;
 check('⋯ ▸ Show key…', await showKey());
 check('a fresh page ⇒ 验证是你 first — in the click\'s own task, before any key request', !!(await until(visible('#vault-reveal-dialog'), { timeout: 8000 })) && (await evalJs('window.__vsKeyGets')) === 0, await evalJs('window.__vsKeyGets'));
 check('the 验证是你 text says a second tab asks again', /Another tab or window asks again/.test(await evalJs(`document.querySelector('#vault-reveal-dialog .vault-text')?.textContent || ''`)));
-const keyShown = `[...document.querySelectorAll('.dialog-overlay input')].some((i) => i.value === ${JSON.stringify(PLANT_KEY)})`;
+const keyShown = `[...document.querySelectorAll('.dialog-overlay input, .dialog-form input')].some((i) => i.value === ${JSON.stringify(PLANT_KEY)})`; // (lane dialog-yield r2: Show key…'s showInputDialog is a FORM)
 check('no key on the page before the password', !(await evalJs(keyShown)));
 await typeInto('#vault-reveal-pw', SECOND); await click('.vault-reveal-go');
 check('the right second password ⇒ the key in Show key…\'s dialog (ONE key request, inside the window)', !!(await until(keyShown, { timeout: 10000 })) && (await evalJs('window.__vsKeyGets')) === 1, await evalJs('window.__vsKeyGets'));
 await shot('vw-8-showkey.png');
-await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => { if ([...o.querySelectorAll('input')].some((i) => i.value)) o.remove(); })`);
+await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => { if ([...o.querySelectorAll('input')].some((i) => i.value)) o.remove(); })`);
 check('⋯ ▸ Show key… again', await showKey());
 check('… inside the window: the key at once, nothing asked', !!(await until(keyShown, { timeout: 8000 })) && !(await evalJs(`!!document.getElementById('vault-reveal-dialog')`)));
-await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove())`);
+await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove())`);
 
 console.log('⑦ a phone (375×812 — design q-047 §3.6)');
 await cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 2, mobile: true });
@@ -483,7 +483,7 @@ check('no value and no password in the server log or the audit', ![PLANT_INT, PL
 check('the audit holds the reveals (vault-reveal: who / ip / entry)', audit.split('\n').filter((l) => l.includes('"event":"vault-reveal"')).length >= 3 && /"entry":"cloud:browserless"/.test(audit));
 
 console.log('⑨ 立即锁定 from the header (lane vault-one-door; zh)');
-await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
 check('the header\'s words in Chinese: 「已解锁」, 「立即锁定」, 「修改第二密码…」', (await until(`document.querySelector('.vw-head .vw-state')?.textContent === '已解锁'`, { timeout: 5000 })) === true && (await evalJs(`[...document.querySelectorAll('.vw-head .vault-actions button')].map((b) => b.textContent).join('|')`)) === '立即锁定|修改第二密码…');
 await headShot('vw-head-3-unlocked-zh.png');
 await click('.vw-head .vault-do-lock');
@@ -500,7 +500,7 @@ const bootedRelock = await until(`!!(window.app && app.wm && app._localHome)`, {
 check('⑨L the load after the lock asks at once — the unlock dialog (a new lock is a new ask)', !!(bootedRelock && (await until(visible('#vault-unlock-dialog'), { timeout: 10000 }))), bootedRelock ? 'the unlock modal did not open within 10 s of the load reading the vault state' : 'the page did not finish its /api/home boot pass within 45 s of the load');
 check('⑨L … the ⚙ wears the red mark (its title in Chinese: 「保险库已锁定——点击解锁（「待你处理」里写明了在等它的事）」 — the chip\'s full words since int332) and the tray badge is urgent', !!(await until(`(() => { const b = document.getElementById('btn-global-settings'); const t = document.getElementById('taskbar-user-todos'); return !!b.querySelector('.vault-gear-mark') && b.classList.contains('vault-locked') && b.title === '保险库已锁定——点击解锁（「待你处理」里写明了在等它的事）' && t && t.dataset.urgency === 'urgent' && !!t.querySelector('.ut-seg-urgent'); })()`, { timeout: 8000 })), await evalJs(`({ title: document.getElementById('btn-global-settings').title, urgency: document.getElementById('taskbar-user-todos')?.dataset.urgency })`));
 await splashGone();
-await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); app.replayOpenSpec({ action: 'openVault' }); true`);
+await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); app.replayOpenSpec({ action: 'openVault' }); true`);
 check('signed in again: the hub says locked; the window lists nothing and says so (「解锁…」 in its header)', relogin9 === 200 && (await api('GET', '/api/vault/state')).json?.state === 'locked' && (await until(`document.querySelector('.vw-head')?.dataset.state === 'locked'`, { timeout: 15000 })) === true && (await evalJs(`document.querySelectorAll('.vw-row').length`)) === 0 && (await evalJs(`document.querySelector('.vw-head .vault-do-unlock')?.textContent`)) === '解锁…');
 await headShot('vw-head-4-locked-zh.png');
 

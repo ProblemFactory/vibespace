@@ -52,7 +52,7 @@ export function askRevealPassword() {
   if (asking) return asking;
   asking = new Promise((resolve) => {
     let opened = false;
-    const { dialog, body, close } = createModalShell({ id: 'vault-reveal-dialog', title: t('Verify it’s you'), dialogClass: 'vault-dialog-box', minWidth: 'min(420px, 92vw)', escapeToClose: true, onClose: () => { asking = null; resolve(opened); }, kind: 'decision' });
+    const { dialog, body, close } = createModalShell({ id: 'vault-reveal-dialog', title: t('Verify it’s you'), dialogClass: 'vault-dialog-box', minWidth: 'min(420px, 92vw)', escapeToClose: true, onClose: () => { asking = null; resolve(opened); }, kind: 'decision' }); // decision: the vault password before a secret shows — the caller awaits it, one password
     body.appendChild(rvEl('p', 'vault-text', t('Enter the second password to see stored values on this page for the next 5 minutes. Another tab or window asks again. Every value you open is recorded.')));
     const pw = rvEl('input', 'vault-pw');
     pw.type = 'password'; pw.id = 'vault-reveal-pw'; pw.autocomplete = 'off'; pw.spellcheck = false; pw.placeholder = t('Second password'); pw.setAttribute('aria-label', t('Second password'));

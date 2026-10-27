@@ -236,7 +236,7 @@ try {
   await p1.shot('callers.png', '[data-wh-callers-dialog]');
   const live = await p2.until(`(() => { const r = [...document.querySelectorAll('[data-wh-callers="deploys"] [data-wh-caller]')]; return r.length === 3 ? r.map((x) => x.querySelector('.chan-wh-caller-name').textContent) : null; })()`, 15000);
   ok(live && live.join('|') === 'CI deploy-bot|Monitor|Audit log', 'page 2: each new caller appeared in its open caller panel live (no reload)', live);
-  await p2.evaljs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+  await p2.evaljs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
 
   console.log('§5 a fact rule, a call per caller, the budget row');
   const cs = (await raw('GET', '/api/channels/webhook/paths')).j.paths.find((x) => x.hookUrl === '/hook/deploys').callers;
@@ -252,7 +252,7 @@ try {
   const woke = await waitFor(() => frames().length > f0, 20000);
   await sleep(1200);
   ok(woke && frames().length - f0 === 1 && JSON.stringify(frames().slice(f0)).includes('deploy failed on db1'), `the fact rule woke alpha ONCE (the disk call none): ${frames().length - f0} frame(s)`);
-  await p1.evaljs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); window.app.openChannel('webhook', 'deploys'); true`);
+  await p1.evaljs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); window.app.openChannel('webhook', 'deploys'); true`);
   const rows = await p1.until(`(() => { const w = [...document.querySelectorAll('.chanmsg')].filter((r) => /deploy failed on db1|disk at 91%/.test(r.textContent)); return w.length === 2 ? w.map((r) => r.textContent.slice(0, 160)) : null; })()`, 20000);
   ok(rows && rows.some((x) => x.includes('CI deploy-bot') && x.includes('deploy failed')) && rows.some((x) => x.includes('Monitor') && x.includes('disk at 91%')), 'two records in the window, each with its caller as the author', rows);
   const bud = await p1.until(`(() => { const b = document.querySelector('[data-wh-budget]'); return b && /1 \\/ 6/.test(b.textContent) ? b.textContent : null; })()`, 15000);
@@ -267,7 +267,7 @@ try {
   await p1.evaljs(`(() => { const it = [...document.querySelectorAll('.context-menu-item, [role="menuitem"]')].find((x) => /^Notify/.test(x.textContent.trim())); it.click(); return true; })()`);
   const nd = await p1.until(`(() => { const b = document.querySelector('[data-wh-budget-row]'); const r = [...document.querySelectorAll('.chan-af-rule')].find((x) => x.querySelector('select') && x.querySelector('select').value === 'fact'); return b && r ? { budget: b.textContent, key: r.querySelectorAll('input')[0].value, value: r.querySelectorAll('input')[1].value } : null; })()`, 15000);
   ok(nd && nd.key === 'event' && nd.value === 'deploy.failed' && /^path deploys: 1 \/ 6 wakes this hour — a digest by default here/.test(nd.budget), 'the Notify dialog draws the fact rule (key = event, value = deploy.failed) and the budget line', nd);
-  await p1.evaljs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+  await p1.evaljs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
 
   console.log('§6 a spent budget says the engine\'s words');
   const put = await raw('PUT', '/api/channels/webhook/paths/deploys', { body: { wakesPerHour: 1 } });
@@ -314,7 +314,7 @@ try {
   await p3.shot('phone.png');
 
   console.log('§10 the JOIN box (lane webhook-pair-join): the Webhook ⋯ → "Join with a pairing code…", against the fake peer' + ` (at ${((Date.now() - T0) / 1000).toFixed(0)} s)`);
-  await p1.evaljs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+  await p1.evaljs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
   await p1.evaljs(`(() => { const s = document.querySelector('.rail-panel-channels [data-adapter="webhook"]'); if (!s || !s.getBoundingClientRect().width) window.app.sidebar._railGo('channels'); return true; })()`);
   const MENU_PICK = (re) => `(() => { const it = [...document.querySelectorAll('.context-menu .context-menu-item, .ctx-menu-item, [role="menuitem"]')].find((x) => ${re}.test(x.textContent.trim())); if (!it) return false; it.click(); return true; })()`;
   const openJoin = async (pg, re) => {
@@ -354,7 +354,7 @@ try {
     && hp && hp.kind === 'peer' && hp.name === 'Hub A' && hp.delivery.replyUrl === `${PEER}/hook/ci`,
     'Pair: the fake peer accepts the frame (its hook = /hook/hub-a here); B made path hub-a with a `peer` caller "Hub A" replying to the peer\'s hook; the dialog shows only what it did (the box, the path field and Pair gone) and keeps no code', { dn, peerFrames, hp });
   await p1.shot('join-done.png', '[data-wh-join]');
-  await p1.evaljs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
+  await p1.evaljs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
   const j1 = await openJoin(p1, /^Join with a pairing code…$/);
   await paste(p1, CODE, /^Hub A offers its path ci/);
   await p1.evaljs(CLICK('[data-wh-join-go]'));
@@ -368,7 +368,7 @@ try {
     && peerFrames.length === 3 && peerFrames[1].why === 'spent' && peerFrames[2].why === 'signature' && pv3.j.paths.filter((x) => /^\/hook\/(ci|hub-a)/.test(x.hookUrl)).length === 1,
     'BY NAME after a post: the same code again ⇒ "Hub A says this code was already used…" (the peer\'s 409); an ALTERED code ⇒ "Hub A does not know this code…" (the peer\'s same-shape 401); nothing written', { used, unk, why: peerFrames.map((f) => f.why) });
   await p1.shot('join-unknown.png', '[data-wh-join]');
-  await p1.evaljs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+  await p1.evaljs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
 
   console.log('§11 the MINT door: a path\'s caller panel → "Pair with another VibeSpace…" → the code ONCE, its clock, Expired' + ` (at ${((Date.now() - T0) / 1000).toFixed(0)} s)`);
   await p1.evaljs(`window.app.openChannel('webhook', 'deploys'); true`);
@@ -392,10 +392,10 @@ try {
   await p1.evaljs(CLICK('[data-wh-pair-code-once] .dialog-footer .mounts-btn-primary'));
   await sleep(300);
   ok(!(await p1.evaljs(`document.documentElement.outerHTML.includes(${JSON.stringify((once && once.code) || 'x')})`)), 'after Done the code is nowhere in the page');
-  await p1.evaljs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+  await p1.evaljs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
 
   console.log('§12 the phone (390, zh): the join box fits and reads a code' + ` (at ${((Date.now() - T0) / 1000).toFixed(0)} s)`);
-  await p3.evaljs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+  await p3.evaljs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
   await p3.evaljs(`(() => { const sb = window.app.sidebar; if (!sb.isOpen) sb.toggle(true); if (sb._activeTab !== 'channels') sb._railGo('channels'); return true; })()`);
   await p3.until(`(() => { const b = document.querySelector('.rail-panel-channels [data-adapter="webhook"] .chan-sec-more'); return !!b && b.getBoundingClientRect().width > 0; })()`, 10000);
   const j3 = await openJoin(p3, /^用配对码加入…$/);

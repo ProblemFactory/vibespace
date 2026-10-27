@@ -174,7 +174,7 @@ async function newPage({ lang = 'zh', width = 1400, height = 1000, control = fal
     await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/bundle.js*', requestStage: 'Response' }] });
   }
   const evaljs = async (expr) => {
-    const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+    const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true, userGesture: true }); // (lane dialog-yield: a scripted press stands for the person's — the form it opens is theirs)
     if (r.result && r.result.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.result.exceptionDetails).slice(0, 600));
     return r.result && r.result.result ? r.result.result.value : undefined;
   };
@@ -190,6 +190,9 @@ async function newPage({ lang = 'zh', width = 1400, height = 1000, control = fal
   };
   return { cdp, on, evaljs, shot, loaded, close: () => { try { ws.close(); } catch {} } };
 }
+/** lane dialog-yield r2: the API access FORM stands in front — the active window, its dialog's middle under the pointer (a form
+ *  opened behind the chat photographed the chat after a 20 s wait, and the shot's ok() saw only that bytes existed) */
+const formInFront = (p) => p.evaljs(`(async () => { let o = null; for (let i = 0; i < 25; i++) { const d = document.getElementById('chan-api-dialog'); if (!d) return { open: false }; const w = d.closest('.window'); const win = w ? [...app.wm.windows.values()].find((x) => x.element === w) : null; const r = d.querySelector('.dialog').getBoundingClientRect(); const x = Math.round(r.left + r.width / 2), y = Math.round(Math.max(0, r.top) + Math.min(r.bottom, innerHeight) / 2 - Math.max(0, r.top) / 2); const hit = document.elementFromPoint(x, y); o = { open: true, window: !!w, active: !!win && app.wm.activeWindowId === win.id, onTop: !!hit && d.contains(hit), hit: hit ? String(hit.className || hit.tagName).slice(0, 60) : null, at: [x, y], rect: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)], vh: innerHeight, i }; if (o.active && o.onTop) return o; await new Promise((q) => setTimeout(q, 200)); } return o; })()`); // (a fresh form re-fits for a frame or two — read until it stands, ≤ 5 s)
 const CHAT = (sidSel) => `[...document.querySelectorAll('.chat-api-cards')].filter((b) => b.closest(${JSON.stringify(sidSel)}))`;
 const openChat = (p) => p.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const s = (app.sidebar._webuiSessions || []).find((x) => x.id === ${JSON.stringify(sessionId)}); if (s) { app.attachSession(s.id, s.name, s.cwd, { mode: 'chat', backend: 'claude' }); return true; } await new Promise((r) => setTimeout(r, 250)); } return false; })()`);
 const chatCards = (p) => p.evaljs(`[...document.querySelectorAll('.chat-api-cards .chan-api-card')].map((c) => ({ id: c.dataset.key, fate: c.dataset.fate, text: c.innerText, always: !!c.querySelector('.chan-api-always'), alwaysText: (c.querySelector('.chan-api-always') || {}).textContent || '', tech: (c.querySelector('.chan-api-tech') || {}).textContent || '', approve: !!c.querySelector('.chan-api-approve'), underCall: !!(c.closest('.chat-api-cards') && c.closest('.chat-api-cards').previousElementSibling && c.closest('.chat-api-cards').previousElementSibling.classList.contains('chat-channel-touches')) }))`);
@@ -205,7 +208,8 @@ await p1.evaljs('app.openChannelOutbox(); 1');
 const c1 = await agentCalls('POST', '/api/chat.postMessage', { channel: 'C0VIBE', text: 'hello from the API' });
 const pid1 = c1.json && c1.json.proposal && c1.json.proposal.id;
 ok(c1.status === 202 && c1.json && c1.json.code === 'api_pending' && pid1, `a write under "ask each" is a proposal (202 api_pending ${pid1})`, c1.raw);
-const seen1 = await until(async () => { const cc = await chatCards(p1), ob = await outboxRows(p1); return cc.length === 1 && ob.filter((r) => r.id === pid1).length === 1 ? { cc, ob } : null; }, 20000);
+// (lane dialog-yield r2: the card's frame lands a beat before its words — read it once its text is drawn; the empty-text red, base 2/4, was that race)
+const seen1 = await until(async () => { const cc = await chatCards(p1), ob = await outboxRows(p1); return cc.length === 1 && String(cc[0].text || '').trim() && ob.filter((r) => r.id === pid1).length === 1 ? { cc, ob } : null; }, 20000);
 ok(seen1 && seen1.cc[0].id === pid1 && seen1.cc[0].fate === 'pending' && seen1.cc[0].underCall, 'ONE card in the chat, keyed by the proposal, right under the call row\'s touch box', seen1 || await chatCards(p1));
 ok(seen1 && seen1.ob.length === 1 && seen1.ob[0].fate === 'pending', 'ONE Outbox "API calls" row for it (pending)', seen1 && seen1.ob);
 const fy1 = await until(async () => { const f = await forYou(p1); return Array.isArray(f) && f.filter((i) => i.id === pid1).length === 1 ? f : null; });
@@ -349,6 +353,7 @@ ok(me && me.tier === 'write-all' && me.opt === '完全信任 — 写和删除等
 ok(d9 && d9.note === '只给你完全信任的 agent；仍会记日志，每日上限照旧' && d9.noteColor === (me && me.color), 'the dialog: its second line says who it is for, that it is still logged and capped', d9 && d9.note);
 ok(all && all.tier === 'read' && all.disabled === true && all.opt === '完全信任只能给单个 agent 或对话；岗位、规则和“所有 agent”最高到“读 + 写，自动”', `the dialog: the All agents row's 完全信任 is refused, saying why — one agent only (tier-verify M1) (「${all && all.opt}」)`, all);
 ok(d9 && d9.logs.some((l) => /你授予了完全信任/.test(l)) && d9.logs.some((l) => /chat\.delete[\s\S]*完全信任 · 敏感/.test(l)), 'the dialog\'s API log: the grant line + the sensitive call that ran, in the warning colour', d9 && d9.logs);
+{ const f9 = await formInFront(p9); ok(f9 && f9.window && f9.active && f9.onTop, 'the API access form stands IN FRONT on the desktop (its window active, nothing over it) — dialog-desk.png is the form', f9); }
 ok(await p9.shot('dialog-desk.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *'), 'dialog-desk.png');
 p9.close();
 const p10 = await newPage({ lang: 'zh', width: 390, height: 844 });
@@ -386,6 +391,7 @@ console.log('⑩ the API log is never blank: the hub\'s shape under a full roste
   ok(hub && hub.rows === 20 && /api\/conversations\.history\/151 · 200 · 已执行/.test(hub.first) && !hub.note, `the log shows the hub's last 20 lines, newest first (${hub && hub.rows} rows)`, hub);
   ok(hub && hub.h >= Math.min(hub.sh, 170), `· measured: the log box keeps its height in the dialog's column — ${hub && hub.h} px of ${hub && hub.sh} (never squeezed to 0 by the roster above it)`, hub);
   ok(vis && vis.onTop && vis.h > 0, 'scrolled to, the newest line is on screen and on top (nothing covers it)', vis);
+  { const fH = await formInFront(pH); ok(fH && fH.window && fH.active && fH.onTop, 'the API access form stands IN FRONT (its window active, nothing over it) — api-log-hub-shape.png is the form', fH); }
   ok(await pH.shot('api-log-hub-shape.png', '#chan-api-dialog .modal-content, #chan-api-dialog > *'), 'api-log-hub-shape.png');
   // KEYED: a re-draw (the credential picked again) patches the rows in place — a new line lands on top, the rest are the same nodes
   await pH.evaljs(`(() => { document.querySelector('#chan-api-dialog .chan-api-logrow').__vsMark = 1; return 1; })()`);

@@ -616,12 +616,23 @@ export function installExplorerOps(FileExplorer) {
       body.querySelector('#pp-copy').onclick = () => { copyText(absUrl(existing.url)); showToast(t('Link copied')); };
       body.querySelector('#pp-open').onclick = () => { openPage(existing.url); close(); };
       body.querySelector('#pp-unpub').onclick = async () => {
+        if (await changed()) return;
         const r = await fetch(`/api/pages/${existing.id}`, { method: 'DELETE' }).then((x) => x.json()).catch(() => null);
         if (r?.ok) { showToast(t('Page unpublished')); close(); }
         else showToast(t('Unpublish failed: {err}', { err: r?.error || t('server unreachable') }), { type: 'error' });
       };
     }
+    /** RE-READ at the answer (lane dialog-yield r2): the form stays open beside the work — published or unpublished elsewhere
+     *  meanwhile ⇒ refused with words naming it, and the form drawn again as it is now (never a Republish over a page gone) */
+    const changed = async () => {
+      const now = (await fetch(`/api/pages/by-path?path=${encodeURIComponent(fullPath)}`).then((r) => r.json()).catch(() => null))?.page || null;
+      if ((now?.id || null) === (existing?.id || null)) return false;
+      showToast(now ? t('This file was published elsewhere while the dialog was open — it shows as it is now') : t('This page was unpublished elsewhere while the dialog was open — it shows as it is now'), { type: 'warn', duration: 6000 });
+      close(); this._publishPageDialog(fullPath, name);
+      return true;
+    };
     body.querySelector('#pp-go').onclick = async () => {
+      if (await changed()) return;
       const payload = { path: fullPath, name: body.querySelector('#pp-name').value.trim(), public: body.querySelector('#pp-public').checked };
       let r = await fetch('/api/pages/publish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then((x) => x.json()).catch(() => null);
       // source file gone but the page exists → apply the flags without a re-snapshot

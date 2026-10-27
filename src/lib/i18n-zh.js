@@ -11048,4 +11048,7 @@ export default {
   "approved": "已批准",
   "withdrawn by the agent": "已被 agent 撤回",
   "A form stays a window of its own": "表单始终是独立的小窗口",
+  "The document changed while the link was being edited — select the text and press Link again": "编辑链接期间文档已改变——请重新选中文字，再按「链接」",
+  "This file was published elsewhere while the dialog was open — it shows as it is now": "对话框打开期间，这个文件已在别处发布——现在显示的是它当前的状态",
+  "This page was unpublished elsewhere while the dialog was open — it shows as it is now": "对话框打开期间，这个页面已在别处取消发布——现在显示的是它当前的状态",
 };

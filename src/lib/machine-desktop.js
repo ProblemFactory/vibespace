@@ -91,7 +91,7 @@ function askCredentials(m, types, auth, sign = null) {
     const machine = nameOf(m);
     const wantUser = Array.isArray(types) && types.includes('username');
     const s = sign || {};
-    const { body, close } = createModalShell({ id: 'machine-desktop-signin', title: t('Sign in to {machine}', { machine }), dialogClass: 'machine-desktop-signin', escapeToClose: true, onClose: () => finish(null), kind: 'decision' });
+    const { body, close } = createModalShell({ id: 'machine-desktop-signin', title: t('Sign in to {machine}', { machine }), dialogClass: 'machine-desktop-signin', escapeToClose: true, onClose: () => finish(null), kind: 'decision' }); // decision: the machine's sign-in the caller awaits before it connects — one password, answered before anything goes on
     const form = document.createElement('form');
     const words = (kept) => (auth === 'ard'
       ? (kept ? t('{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.', { machine }) : t('{machine} asks for your Mac user name and password. VibeSpace does not keep them.', { machine }))
@@ -794,7 +794,7 @@ function confirmRun(m, line) {
     let done = false;
     const finish = (v) => { if (!done) { done = true; resolve(v); } };
     const machine = nameOf(m);
-    const { body, close } = createModalShell({ id: 'machine-desktop-confirm', title: t('Run on {machine}’s desktop?', { machine }), dialogClass: 'machine-desktop-confirm', escapeToClose: true, onClose: () => finish(false), kind: 'decision' });
+    const { body, close } = createModalShell({ id: 'machine-desktop-confirm', title: t('Run on {machine}’s desktop?', { machine }), dialogClass: 'machine-desktop-confirm', escapeToClose: true, onClose: () => finish(false), kind: 'decision' }); // decision: a consent — run it on the machine or not; nothing to fill
     const pre = el('pre', null, line); pre.className = 'desktop-install-pre machine-desktop-shown';
     const row = el('div'); row.className = 'desktop-install-actions';
     row.append(btn('file-tool-btn', t('Cancel'), () => close()), btn('btn-create', t('Run'), () => { finish(true); close(); }));

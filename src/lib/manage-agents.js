@@ -846,7 +846,8 @@ export function installManageAgents(App, ctx = {}) {
     // (a minted token waits on the hub — a reopened dialog shows its phase again — so the mint asks nothing here)
     const pasted = () => body.querySelector('#oat-paste');
     const { overlay, body, close: shut, dismiss } = createModalShell({ id: 'oat-dialog', title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); try { rawScr?.destroy(); } catch { } rawScr = null; },
-      unsaved: { isDirty: () => !!(pasted() && pasted().value.trim()), save: () => savePasted(), discard: () => { if (pasted()) pasted().value = ''; } }, kind: 'form' });
+      unsaved: { isDirty: () => !!(pasted() && pasted().value.trim()), save: () => savePasted(), discard: () => { if (pasted()) pasted().value = ''; } },
+      escapeToClose: true, onEscape: () => oatEscape(), kind: 'form' });
     const live = () => mint && !['saved', 'failed', 'cancelled'].includes(mint.phase);
     // 改绑 (lane oat-identity-postcheck): the rows the token may move to — Claude subscriptions holding no live token
     const rebindTo = (oatForeign(a) || oatIdentityAsk(a) || oatUnverified(a)) ? (this._accounts?.accounts || []).filter((x) => x && x.id !== id && x.type === 'subscription' && !x.pooled && (x.backend || 'claude') === (a.backend || 'claude') && !(x.oat && x.oatDaysLeft > 0)) : [];
@@ -1026,15 +1027,18 @@ export function installManageAgents(App, ctx = {}) {
       };
     };
     const off = this.ws?.onGlobal?.((msg) => { if (msg?.type === 'oat-mint' && msg.mint?.accountId === id) render(msg.mint); });
-    // Esc: a sign-in in flight is cancelled (asked first); otherwise it closes.
-    overlay.addEventListener('keydown', async (e) => {
-      if (e.key !== 'Escape') return;
-      e.stopPropagation();
-      if (!live()) { dismiss('escape'); return; }
-      if (!(await showConfirmDialog({ title: t('Cancel the sign-in?'), message: t('The sign-in for “{name}” is still running. Cancel it?', { name }), danger: true }))) return;
-      await mintApi(`/${encodeURIComponent(mint.id)}`, { method: 'DELETE' }).catch(() => null);
-      shut();
-    });
+    // Esc: a sign-in in flight is cancelled (asked first); otherwise it closes — the shell's ONE Escape door asks this hook
+    // FIRST (lane dialog-yield r2: a listener of its own on the root ran AFTER the shell's, which had closed the dialog under
+    // its «Cancel the sign-in?»; a pasted token's guard sheet was opened and put away by the same key)
+    const oatEscape = () => {
+      if (!live()) return true; // nothing running: the shell's door (the guard asks for a pasted token)
+      (async () => {
+        if (!(await showConfirmDialog({ title: t('Cancel the sign-in?'), message: t('The sign-in for “{name}” is still running. Cancel it?', { name }), danger: true }))) return;
+        await mintApi(`/${encodeURIComponent(mint.id)}`, { method: 'DELETE' }).catch(() => null);
+        shut();
+      })();
+      return false;
+    };
     render(null);
     // a reopened dialog (this client or another) picks up a sign-in still
     // RUNNING; a finished one is history, not a phase to show again
@@ -2772,8 +2776,8 @@ export function installManageAgents(App, ctx = {}) {
       // field per injection surface; each nudge condition is a full sentence
       // with the number input embedded.
       if (tab === 'instructions') {
-        const adv = document.createElement('div');
-        adv.className = 'agents-adv agents-adv-tab';
+        const advEl = document.createElement('div'); // (lane dialog-yield r2: was `adv` — it SHADOWED the shell's unsaved guard `adv` above, so the guard's dirty test was set on this div and never asked)
+        advEl.className = 'agents-adv agents-adv-tab';
         const body2 = document.createElement('div');
         body2.className = 'agents-adv-body';
         const note = document.createElement('div');
@@ -2864,8 +2868,8 @@ export function installManageAgents(App, ctx = {}) {
         adv.save = () => { save.onclick(); return true; };
         btnRow.appendChild(save);
         body2.appendChild(btnRow);
-        adv.appendChild(body2);
-        body.appendChild(adv);
+        advEl.appendChild(body2);
+        body.appendChild(advEl);
       }
 
       if (tab !== 'instructions') {

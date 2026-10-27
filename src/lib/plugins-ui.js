@@ -374,7 +374,7 @@ export function installPluginsUI(App) {
   /** the Voice row's chip: Connect with Fish Audio + the proposal cards (an action surface, not settings); `pasteKey` (lane
    *  dropline-connect-door) = the other door — the integration card the plugin row NAMES (`p.integration`), focused */
   _voiceSheet(p, rerender, { focus = null } = {}) {
-    const { body, close } = createModalShell({ id: 'voice-sheet', title: p.label, bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+    const { body, close } = createModalShell({ id: 'voice-sheet', title: p.label, bodyClass: 'mounts-dialog-body', escapeToClose: true, opener: 'person', kind: 'form' }); // (the person's: re-opened by its own Connect flow once the sign-in tab answers — in front, lane dialog-yield r2)
     const pasteKey = p.integration ? () => { close(); this.openIntegration?.(p.integration); } : null;
     // `focus` (lane foryou-plugin-notices: a For-you reminder's door) = the proposal to land on + its words chosen — the first draw only
     renderVoiceSheet(body, () => { close(); rerender(); this._voiceSheet(p, rerender); }, { pasteKey, focus });
@@ -412,7 +412,7 @@ export function installPluginsUI(App) {
     }
     return new Promise((resolve) => {
       let decided = false;
-      const { body, close } = createModalShell({ id: 'plugin-consent-dialog', title: readOnly ? t('Capabilities of {name}', { name: p.label || p.id }) : t('Enable "{name}" (trusted)?', { name: p.label || p.id }), minWidth: '460px', escapeToClose: true, onClose: () => { if (!decided) resolve(false); }, kind: 'decision' });
+      const { body, close } = createModalShell({ id: 'plugin-consent-dialog', title: readOnly ? t('Capabilities of {name}', { name: p.label || p.id }) : t('Enable "{name}" (trusted)?', { name: p.label || p.id }), minWidth: '460px', escapeToClose: true, onClose: () => { if (!decided) resolve(false); }, kind: 'decision' }); // decision: a consent — enable this plugin's code or not; nothing to fill
       const risky = items.some((it) => it.id === 'client-module' || it.id === 'child-process');
       body.innerHTML = `
         <div class="usage-note">${escHtml(readOnly ? t('This plugin declares:') : t('This plugin asks for more than the sandbox gives. Enable it only if you trust its author:'))}</div>
@@ -594,7 +594,7 @@ export function installPluginsUI(App) {
   _harnessServiceDialog(meta, st) {
     return new Promise((resolve) => {
       let decided = false;
-      const { body, close } = createModalShell({
+      const { body, close } = createModalShell({ // decision: a consent — install the harness service or not; nothing to fill
         id: 'harness-service-dialog', minWidth: '460px', escapeToClose: true,
         title: t('Turn on the {name} background service?', { name: meta.label || meta.id }),
         onClose: () => { if (!decided) resolve(false); }, kind: 'decision',

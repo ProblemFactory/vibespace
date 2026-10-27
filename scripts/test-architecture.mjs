@@ -2912,7 +2912,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/artifacts-window.js': [1, 'the Artifacts window\'s one-per-conversation re-open (lane artifacts-list-scale; a replay passes { replay })'],
     'src/lib/design-home.js': [1, 'the Design window home\'s one-per-client re-open (a replay passes { replay }) — lane design-systems-home'],
     'src/lib/machine-desktop.js': [3, 'a machine\'s whole-desktop window: a second open reveals it — design 014 D1; lane desktop-display-modes: the machine\'s ONE window (③ / ②), a display\'s own window (①), a replayed window\'s own id'],
-    'src/lib/form-window.js': [1, 'a Tab the person pressed into a FORM standing behind brings it in front (lane dialog-yield — the person named it with the key)'],
+    'src/lib/form-window.js': [2, 'a Tab the person pressed into a FORM standing behind brings it in front (lane dialog-yield — the person named it with the key) + the same form opened again by the person is raised, never replaced (lane dialog-yield r2)'],
     'src/lib/desktop-app-window.js': [3, 'the singleton re-open (a replay passes { replay }) + a satellite the app just opened, in front — design 016 S2 + the person\'s click on an app notification\'s toast raises its window (lane app-display-notify-sink)'],
     ...Object.fromEntries(['settings-ui', 'usage-window', 'task-log', 'task-detail', 'session-props', 'channel-window', 'channel-outbox', 'channels-panel', 'jobs-panel', 'integrations-window', 'sidebar-rail', 'browser-trace-view', 'desktop-window', 'browser-live-window', 'inbox-window', 'vault-window']
       .map((n) => ['src/lib/' + n + '.js', [1, n === 'browser-live-window' ? 'the fold-back (D3)' : 'the singleton re-open (a replay passes { replay })']])),
@@ -5641,59 +5641,143 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 // 聊天；打开别的窗口要让位»): ONE SHELL, TWO KINDS, DECLARED AT EVERY CALL. createModalShell (src/lib/utils.js) draws a
 // `decision` — a backdrop over everything, answered before anything goes on — or a `form` — what the person fills, reads or
 // picks from: a small window that yields (src/lib/form-window.js). `kind` has NO default: every createModalShell( call in
-// src/ names one (acorn: the first argument's own `kind` property, a 'form' / 'decision' literal; plugin-client's one row
-// hands a plugin's own choice through, both arms literals) — a call without one is RED by file:line. The FORM list is
-// printed, and so is the FORM-LATER list: a decision whose call line says `// form-later: <reason>` (counted, never silent).
+// src/ names one (acorn: the first argument's own `kind` property, a 'form' / 'decision' literal; the two dynamic rows —
+// plugin-client hands a plugin's own choice through, utils.js _modalShell serves showConfirmDialog (a decision) and
+// showInputDialog (a form unless its caller says otherwise) — both arms literals) — a call without one is RED by file:line.
+// Round 2 (acceptance r1) — REASONS ARE ROWS: every decision call says why on its line (`// decision: <reason>`; a decision
+// without one is RED), and the table prints per call its opener ('person' — the default — / 'system' / the caller's), its
+// Escape door ('closes' / 'asks first' — onEscape — / 'off'), and for a decision its reason and whether it carries a FIELD
+// (an input / textarea / select built in the same function). A caller's own keydown-Escape listener on a FORM's root is RED
+// (the shell's ONE door: the OAT sign-in's ran after the shell had closed it). And THE ONE «did the person open a dialog?»
+// predicate: a `.dialog-overlay` / `.dialog-form` selector, or a 'dialog-overlay' / 'dialog-form' class read, anywhere in src/
+// outside src/lib/form-yield.js is RED by file:line (keyboard-yield judged `.dialog-overlay` only — a form never held the keys
+// of a takeover); a root's className write (the shell, the form host) is its maker, not a reader.
 {
-  const DYN = (n) => n && n.type === 'ConditionalExpression' && [n.consequent, n.alternate].every((x) => x.type === 'Literal' && (x.value === 'form' || x.value === 'decision'));
+  const lit = (x) => x && x.type === 'Literal' && (x.value === 'form' || x.value === 'decision');
+  const DYN = (n) => n && n.type === 'ConditionalExpression' && [n.consequent, n.alternate].every(lit);
+  const FIELD_RE = /\b\w+\(\s*['"](input|textarea|select)['"]|<(input|textarea|select)[\s>]|type\s*=\s*['"]password['"]|\bpwInput\(/; // a field built in the call's own function (createElement / a local el() helper / markup / a password box)
   const census103 = (files) => {
-    const rows = [], bad = [];
+    const rows = [], bad = [], escRed = [];
     for (const [f, src] of files) {
       let ast;
       try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true }); } catch (e) { bad.push(`${f}: unparsable (${e.message})`); continue; }
       const lines = src.split('\n');
+      const fns = [];
       const walk = (n) => {
         if (!n || typeof n.type !== 'string') return;
+        const isFn = /Function/.test(n.type);
+        if (isFn) fns.push(n);
         if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name === 'createModalShell') {
-          const at = `${f}:${n.loc.start.line}`, line = lines[n.loc.start.line - 1] || '';
+          const at = `${f}:${n.loc.start.line}`;
+          const span = lines.slice(n.loc.start.line - 1, n.loc.end.line).join('\n');
           const arg = n.arguments[0];
-          const prop = arg && arg.type === 'ObjectExpression' ? arg.properties.find((p) => p.type === 'Property' && !p.computed && (p.key.name === 'kind' || p.key.value === 'kind')) : null;
-          const v = prop ? prop.value : null;
-          const kind = v && v.type === 'Literal' && (v.value === 'form' || v.value === 'decision') ? v.value : DYN(v) ? 'dynamic' : null;
-          const later = /\/\/\s*form-later:\s*(.*)$/.exec(line);
-          if (!kind) bad.push(`${at} — no kind (${prop ? 'not a form / decision literal' : 'missing'})`);
+          const props = arg && arg.type === 'ObjectExpression' ? arg.properties.filter((p) => p.type === 'Property' && !p.computed) : [];
+          const prop = (k) => props.find((p) => (p.key.name || p.key.value) === k) || null;
+          const v = prop('kind') ? prop('kind').value : null;
+          const kind = v && lit(v) ? v.value : DYN(v) ? 'dynamic' : null;
+          const later = /\/\/\s*form-later:\s*(.*)$/m.exec(span);
+          const why = /\/\/\s*decision:\s*(.*)$/m.exec(span);
+          const op = prop('opener') ? prop('opener').value : null;
+          const opener = !op ? 'person' : op.type === 'Literal' ? String(op.value) : 'the caller\'s';
+          const esc = prop('escapeToClose') ? prop('escapeToClose').value : null;
+          const escOn = !!esc && !(esc.type === 'Literal' && !esc.value);
+          const escape = prop('onEscape') ? 'asks first' : escOn ? 'closes' : 'off';
+          const fn = fns[fns.length - 1];
+          const field = FIELD_RE.test(fn ? src.slice(fn.start, fn.end) : src);
+          if (!kind) bad.push(`${at} — no kind (${prop('kind') ? 'not a form / decision literal' : 'missing'})`);
           else if (later && kind !== 'decision') bad.push(`${at} — a form-later marker on a ${kind} call`);
           else if (later && !later[1].trim()) bad.push(`${at} — a form-later marker without its reason`);
-          rows.push({ at, kind, later: later ? later[1].trim() : null });
+          else if (kind === 'decision' && !(why && why[1].trim())) bad.push(`${at} — a decision without its reason (// decision: <why> on its line)`);
+          rows.push({ at, kind, later: later ? later[1].trim() : null, why: why ? why[1].trim() : null, opener, escape, field });
+          // the root it returned — a caller's own Escape listener on it is RED (a FORM's Escape is its shell's ONE door)
+          if (kind === 'form') {
+            const scope = fn ? src.slice(fn.start, fn.end) : src;
+            const decl = /const\s*\{([^}]*)\}\s*=\s*$/.exec(src.slice(Math.max(0, n.start - 400), n.start)) || null;
+            const names = [];
+            if (decl) for (const part of decl[1].split(',')) { const m = /^\s*overlay\s*(?::\s*([A-Za-z_$][\w$]*))?\s*$/.exec(part); if (m) names.push(m[1] || 'overlay'); }
+            const sh = /(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(src.slice(Math.max(0, n.start - 200), n.start));
+            if (sh) names.push(`${sh[1]}.overlay`);
+            for (const nm of names) {
+              const re = new RegExp(`${nm.replace(/[.$]/g, '\\$&')}\\.addEventListener\\(\\s*['"]keydown['"]([\\s\\S]{0,600}?)\\}\\s*\\)`, 'g');
+              let m; while ((m = re.exec(scope))) if (/Escape/.test(m[1])) { const ln = (fn ? fn.loc.start.line : 1) + scope.slice(0, m.index).split('\n').length - 1; escRed.push(`${f}:${ln} — a keydown Escape listener on the form root \`${nm}\` (${at})`); }
+            }
+          }
         }
         for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach(walk); else if (c && typeof c.type === 'string') walk(c); }
+        if (isFn) fns.pop();
       };
       walk(ast);
     }
-    return { rows, bad };
+    return { rows, bad, escRed };
+  };
+  /** THE ONE PREDICATE's readers: a dialog-root selector or class read in src/ outside form-yield.js (acorn over every literal) */
+  const readers103 = (files) => {
+    const red = [];
+    for (const [f, src] of files) {
+      if (f === 'src/lib/form-yield.js') continue;
+      if (!/dialog-(overlay|form)/.test(src)) continue;
+      let ast;
+      try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true }); } catch { continue; }
+      const walk = (n, parent) => {
+        if (!n || typeof n.type !== 'string') return;
+        const texts = n.type === 'Literal' && typeof n.value === 'string' ? [n.value] : n.type === 'TemplateLiteral' ? n.quasis.map((q) => q.value.cooked || '') : [];
+        for (const v of texts) {
+          const selector = /\.dialog-(overlay|form)\b/.test(v);
+          const exact = v === 'dialog-overlay' || v === 'dialog-form';
+          // a maker: the root's className written (the shell, the form host's sheet / window); an id: the static #dialog-overlay
+          const maker = parent && parent.type === 'AssignmentExpression' && parent.left.type === 'MemberExpression' && parent.left.property.name === 'className';
+          const byId = (parent && parent.type === 'CallExpression' && parent.callee.type === 'MemberExpression' && parent.callee.property.name === 'getElementById')
+            || (parent && parent.type === 'BinaryExpression' && [parent.left, parent.right].some((x) => x.type === 'MemberExpression' && x.property.name === 'id')); // `o.id !== 'dialog-overlay'`: the static overlay named by its id
+          if (selector || (exact && !maker && !byId)) red.push(`${f}:${n.loc.start.line} — ${JSON.stringify(v).slice(0, 60)}`);
+        }
+        for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach((x) => walk(x, n)); else if (c && typeof c.type === 'string') walk(c, n); }
+      };
+      walk(ast, null);
+    }
+    return red;
   };
   const listJs = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? listJs(`${dir}/${d.name}`) : d.name.endsWith('.js') ? [`${dir}/${d.name}`] : []));
-  const files103 = listJs('src').map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]).filter(([, src]) => src.includes('createModalShell('));
+  const allSrc103 = listJs('src').map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]);
+  const files103 = allSrc103.filter(([, src]) => src.includes('createModalShell('));
   const real = census103(files103);
   const of = (k) => real.rows.filter((r) => r.kind === k);
+  const short = (r) => r.at.replace(/^src\/lib\//, '');
   console.log(`\n§103 every createModalShell( call declares its kind (lane dialog-yield): ${real.rows.length} calls in ${files103.length} files — ${of('form').length} form · ${of('decision').length} decision · ${of('dynamic').length} dynamic`);
-  console.log(`  FORMS (a small window that yields): ${of('form').map((r) => r.at.replace(/^src\/lib\//, '')).join(' · ')}`);
-  console.log(`  DECISIONS: ${of('decision').map((r) => r.at.replace(/^src\/lib\//, '')).join(' · ')}`);
-  console.log(`  FORM-LATER (${real.rows.filter((r) => r.later).length}): ${real.rows.filter((r) => r.later).map((r) => `${r.at.replace(/^src\/lib\//, '')} — ${r.later}`).join(' | ') || 'none'}`);
-  ok(real.rows.length >= 100 && real.bad.length === 0, `§103 every createModalShell( call in src/ names its kind — 'decision' or 'form' (${real.rows.length} calls)${real.bad.length ? ' — RED: ' + real.bad.join(' | ') : ''}`);
-  ok(of('form').length > of('decision').length && of('dynamic').length === 1 && of('dynamic')[0].at.startsWith('src/lib/plugin-client.js:'), `§103 the forms outnumber the decisions (${of('form').length} / ${of('decision').length}) and the ONE dynamic row is plugin-client's (a plugin declares its own)`);
+  console.log(`  FORMS (a small window that yields) — file:line · opener · Escape:\n${of('form').map((r) => `    ${short(r)} · ${r.opener} · ${r.escape}`).join('\n')}`);
+  console.log(`  DECISIONS — file:line · field · reason:\n${of('decision').map((r) => `    ${short(r)} · ${r.field ? 'FIELD' : 'no field'} · ${r.why || '(none)'}`).join('\n')}`);
+  console.log(`  DYNAMIC: ${of('dynamic').map((r) => `${short(r)} · ${r.opener} · ${r.why || ''}`).join(' | ')}`);
+  console.log(`  FORM-LATER (${real.rows.filter((r) => r.later).length}): ${real.rows.filter((r) => r.later).map((r) => `${short(r)} — ${r.later}`).join(' | ') || 'none'}`);
+  const inputCallers = allSrc103.flatMap(([f, src]) => src.split('\n').map((l, i) => [f, i + 1, l]).filter(([, , l]) => /\bshowInputDialog\(\{/.test(l) && !/export function showInputDialog/.test(l)));
+  const inputDecisions = inputCallers.filter(([, , l]) => /kind:\s*'decision'/.test(l));
+  console.log(`  showInputDialog (a FORM): ${inputCallers.length} callers — ${inputDecisions.length} ask for a decision${inputDecisions.length ? ': ' + inputDecisions.map(([f, n, l]) => `${f}:${n} — ${(/\/\/\s*decision:\s*(.*)$/.exec(l) || [, '(none)'])[1]}`).join(' | ') : ''}`);
+  ok(real.rows.length >= 100 && real.bad.length === 0, `§103 every createModalShell( call in src/ names its kind — 'decision' or 'form' — and every decision says why on its line (${real.rows.length} calls)${real.bad.length ? ' — RED: ' + real.bad.join(' | ') : ''}`);
+  ok(of('form').length > of('decision').length && of('dynamic').length === 2 && of('dynamic').some((r) => r.at.startsWith('src/lib/plugin-client.js:')) && of('dynamic').some((r) => r.at.startsWith('src/lib/utils.js:')), `§103 the forms outnumber the decisions (${of('form').length} / ${of('decision').length}) and the TWO dynamic rows are plugin-client's (a plugin declares its own) and utils.js _modalShell's (confirm = decision, input = form)`);
+  ok(inputDecisions.every(([, , l]) => /\/\/\s*decision:\s*\S/.test(l)), `§103 a showInputDialog caller that asks for a decision says why on its line (${inputDecisions.length})`);
+  ok(real.escRed.length === 0, `§103 no caller puts its own keydown-Escape listener on a FORM's root (the shell's ONE door — onEscape asks first)${real.escRed.length ? ' — RED: ' + real.escRed.join(' | ') : ''}`);
+  const readers = readers103(allSrc103);
+  console.log(`  THE ONE DIALOG PREDICATE (src/lib/form-yield.js — DIALOG_ROOTS / SHEET_ROOTS / FORM_ROOTS / BLOCKING_LAYERS / isPersonDialog / personDialogOf): readers outside it ${readers.length}`);
+  ok(readers.length === 0, `§103 every «did the person open a dialog?» reader in src/ asks form-yield.js's predicate — no .dialog-overlay / .dialog-form selector or class read elsewhere${readers.length ? ' — RED: ' + readers.join(' | ') : ''}`);
   const U = fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8'), FW = fs.readFileSync(path.join(REPO, 'src/lib/form-window.js'), 'utf8'), A103 = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8'), L103 = fs.readFileSync(path.join(REPO, 'src/lib/layout.js'), 'utf8');
-  ok(/export function createModalShell\(\{ kind, id,/.test(U) && /export function setFormHost\(/.test(U) && /kind === 'form' && formHost \? formHost\.open\(\{ id, title \}\) : null/.test(U), '§103 the shell takes `kind` with NO default and asks the form host (setFormHost) for a form');
+  ok(/export function createModalShell\(\{ kind, id,/.test(U) && /export function setFormHost\(/.test(U) && /kind === 'form' && formHost \? formHost\.open\(\{ id, title, opener:/.test(U), '§103 the shell takes `kind` with NO default and asks the form host (setFormHost) for a form, with its opener');
   ok(/registerWindowType\(\{ type: 'form',[\s\S]{0,300}?persist: false \}\)/.test(FW) && /installFormHost\(this\)/.test(A103) && /if \(win\.type === 'form'\) return null;/.test(L103), '§103 the host is wired: window type `form` (persist: false), app.js installFormHost, captureWin never records a form');
   const ctl = census103([
     ['src/lib/zz-a.js', "createModalShell({ id: 'a', title: 'A' });"],
     ['src/lib/zz-b.js', "createModalShell({ id: 'b', kind: 'modal' });"],
     ['src/lib/zz-c.js', "createModalShell({ id: 'c', kind: 'form' }); // form-later: it cannot yet"],
     ['src/lib/zz-d.js', "createModalShell({ id: 'd', kind: 'decision' }); // form-later:"],
-    ['src/lib/zz-e.js', "createModalShell({ id: 'e', kind: 'decision' }); // form-later: awaited where it was asked\ncreateModalShell({ unsaved: { kind: 'form' }, id: 'f' });"],
+    ['src/lib/zz-e.js', "createModalShell({ id: 'e', kind: 'decision' }); // decision: awaited where it was asked\ncreateModalShell({ unsaved: { kind: 'form' }, id: 'f' });"],
+    ['src/lib/zz-g.js', "createModalShell({ id: 'g', kind: 'decision' });"],
+    ['src/lib/zz-h.js', "function h() {\n  const { overlay, body } = createModalShell({ id: 'h', kind: 'form' });\n  overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') body.remove(); });\n}"],
   ]);
-  ok(ctl.bad.length === 5 && ctl.bad.some((b) => b.startsWith('src/lib/zz-a.js:1')) && ctl.bad.some((b) => b.startsWith('src/lib/zz-b.js:1')) && ctl.bad.some((b) => b.startsWith('src/lib/zz-c.js:1')) && ctl.bad.some((b) => b.startsWith('src/lib/zz-d.js:1')) && ctl.bad.some((b) => b.startsWith('src/lib/zz-e.js:2')) && ctl.rows.find((r) => r.at === 'src/lib/zz-e.js:1')?.later === 'awaited where it was asked',
-    `§103 NEGATIVE CONTROLS: a call without kind, a kind that is no kind, a form-later on a form, a form-later without its reason and a nested \`kind\` (not the call's own) are RED; a decision's form-later is counted with its reason (${JSON.stringify(ctl.bad)})`);
+  ok(ctl.bad.length === 6 && ['zz-a.js:1', 'zz-b.js:1', 'zz-c.js:1', 'zz-d.js:1', 'zz-e.js:2', 'zz-g.js:1'].every((k) => ctl.bad.some((b) => b.startsWith('src/lib/' + k))) && ctl.rows.find((r) => r.at === 'src/lib/zz-e.js:1')?.why === 'awaited where it was asked' && ctl.escRed.length === 1 && ctl.escRed[0].startsWith('src/lib/zz-h.js:3'),
+    `§103 NEGATIVE CONTROLS: a call without kind, a kind that is no kind, a form-later on a form, a form-later without its reason, a nested \`kind\` (not the call's own) and a decision without its reason are RED; a form root's own Escape listener is RED; a decision's reason is counted (${JSON.stringify({ bad: ctl.bad, esc: ctl.escRed })})`);
+  const rctl = readers103([
+    ['src/lib/zz-r1.js', "const open = document.querySelectorAll('.dialog-overlay');"],
+    ['src/lib/zz-r2.js', "if (el.classList.contains('dialog-form')) x();"],
+    ['src/lib/zz-r3.js', "el.className = 'dialog-overlay'; const s = document.getElementById('dialog-overlay');"],
+    ['src/lib/form-yield.js', "export const DIALOG_ROOTS = '.dialog-overlay, .dialog-form';"],
+  ]);
+  ok(rctl.length === 2 && rctl[0].startsWith('src/lib/zz-r1.js:1') && rctl[1].startsWith('src/lib/zz-r2.js:1'), `§103 NEGATIVE CONTROLS (the predicate): a .dialog-overlay selector and a dialog-form class read elsewhere are RED; a root's className write, the static overlay by id and form-yield.js itself are not (${JSON.stringify(rctl)})`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -264,8 +264,9 @@ try {
     !!z && z.inHead && z.label === 'Picture size' && z.values.join('|') === 'pane|1280x720|1920x1080|2560x1440|custom' && z.labels.join('|') === 'Follow the pane|1280×720|1920×1080|2560×1440|Custom…' && z.value === 'pane' && z.hint === null, z);
   check('desk: it sits in the head row beside the machine row / Install an app… (one row)', !!z && z.sameRow, z);
   await choose('custom');
-  check('Custom… opens the size question (a VibeSpace dialog, never a native prompt)', await waitFor(`[...document.querySelectorAll('.dialog-overlay')].some((o) => o.textContent.includes('Custom picture size'))`, 4000));
-  const ask = (v) => evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay')].pop(); const i = o.querySelector('input'); i.value = ${JSON.stringify(v)}; o.querySelector('.btn-create').click(); const e = o.querySelector('.dialog-error'); return { open: o.isConnected, err: e && !e.classList.contains('hidden') ? e.textContent : null, kept: i.value }; })()`);
+  check('Custom… opens the size question (a VibeSpace dialog, never a native prompt)', await waitFor(`[...document.querySelectorAll('.dialog-overlay, .dialog-form')].some((o) => o.textContent.includes('Custom picture size'))`, 4000)); // (lane dialog-yield r2: showInputDialog is a FORM — its root is .dialog-form in its window)
+  // (the size question by its words — lane dialog-yield r2: a form stands in its window, earlier in the page than the static overlay)
+  const ask = (v) => evalJs(`(() => { const o = [...document.querySelectorAll('.dialog-overlay:not(.hidden), .dialog-form')].filter((x) => x.textContent.includes('Custom picture size')).pop(); const i = o.querySelector('input'); i.value = ${JSON.stringify(v)}; o.querySelector('.btn-create').click(); const e = o.querySelector('.dialog-error'); return { open: o.isConnected, err: e && !e.classList.contains('hidden') ? e.textContent : null, kept: i.value }; })()`);
   const a1 = await ask('abc');
   check('"abc" is refused INLINE in parsePin\'s own words — the dialog stays, the box keeps the text', a1.open && /a size is WxH in pixels \(e\.g\. 1920x1080\) or auto — got "abc"/.test(a1.err || '') && a1.kept === 'abc', a1);
   await ask('1600x900'); await sleep(200);

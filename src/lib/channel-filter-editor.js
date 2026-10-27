@@ -32,6 +32,7 @@
 // dialog cannot draw a rule — or a watcher without access — the route would
 // refuse.
 import { fetchJson, showToast, createModalShell, showContextMenu } from './utils.js';
+import { personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { t } from './i18n.js';
 import { icon, el, btn } from './channel-chrome.js';
 import * as F from '../channel-filter.js';
@@ -297,7 +298,7 @@ function patternEditor(body, pat, onChange) {
  *  then deaf to the keyboard — a keyboard user who Tabbed to Save and pressed Enter could not leave a failed save
  *  without the mouse. When the focus fell out of the dialog, it goes back to the button (a no-op once the dialog closed). */
 function refocus(btn) {
-  try { if (btn && btn.isConnected && (document.activeElement === document.body || !btn.closest('.dialog-overlay, .dialog-form')?.contains(document.activeElement))) btn.focus({ preventScroll: true }); } catch {}
+  try { if (btn && btn.isConnected && (document.activeElement === document.body || !personDialogOf(btn)?.contains(document.activeElement))) btn.focus({ preventScroll: true }); } catch {}
 }
 export async function showGrantAccessDialog(app, target) {
   const st = await grainState(target);

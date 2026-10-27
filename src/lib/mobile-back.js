@@ -46,6 +46,7 @@
 // hands the pointers down on to the next go()'s watch; round 7 lost it there, and the exit went on under the finger.
 import { t } from './i18n.js';
 import { showToast, noteOwnGesture } from './utils.js';
+import { SHEET_ROOTS } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set — the phone shows every dialog as an overlay
 import { BACK_WINDOW_MS, BACK_DISMISS_EVENT, EXIT_HOPS, EXIT_INTENT_MS, isSentinel, bootStep, backTarget, backVerdict, exitPlan, exitHop, backCostLoad, slowExit } from './back-guard.js';
 import { navNote, navLogRead, prevDocTail, entriesShape, exitIntentRead, exitIntentWrite, exitIntentClear, DOC_ID } from './nav-log.js';
 
@@ -305,7 +306,7 @@ function goOn(from) {
 /** The open layers right now (backTarget's snapshot) and how each one closes. */
 function layersOf(app) {
   const sb = app.sidebar;
-  const shells = [...document.querySelectorAll('.dialog-overlay')].filter((o) => o.id !== 'dialog-overlay' && shown(o)); // createModalShell overlays (z 99998, above the static one)
+  const shells = [...document.querySelectorAll(SHEET_ROOTS)].filter((o) => o.id !== 'dialog-overlay' && shown(o)); // createModalShell overlays (z 99998, above the static one)
   const sheets = [...document.querySelectorAll('.usage-popup')].filter(shown); // the For-you tray + the usage popup — full-width sheets on a phone
   const backRow = sb?._mobileDrilldown ? sb.listEl?.querySelector('.mobile-folder-back') : null;
   const home = app.phoneHome; // lane phone-first-screen: the attention page (src/lib/user-todos-panel.js) — home while it has rows

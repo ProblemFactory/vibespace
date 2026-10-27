@@ -1306,9 +1306,9 @@ export function installSidebarMounts(Sidebar) {
           // FIRST settle wins).
           done({ privateKey: val, keyPassphrase: passIn.value || '' });
           ctx.close();
-        }, { onClose: () => done(null) });
+        }, { onClose: () => done(null), id: 'mounts-key-dialog' });
 
-        const ov = document.getElementById('mounts-dialog-overlay');
+        const ov = document.getElementById('mounts-key-dialog');
         const body = ov.querySelector('.dialog-body');
 
         const note = document.createElement('p');
@@ -1408,11 +1408,9 @@ export function installSidebarMounts(Sidebar) {
           ['paste', 'Paste or upload my own key…'],
         ], hint: 'An SSH key lets VibeSpace log in without a password. If unsure, pick the VibeSpace key — we’ll show you a line to add on the other machine.' },
       ], 'Add machine', async (v, { close, err }) => {
-       // A sub-dialog (key paste / generated public key) reuses the SAME
-       // overlay id, and createModalShell REMOVES the existing one — so from
-       // here on THIS dialog may be detached and _mountsDialog's inline error
-       // element would render into nothing. Anything thrown past that point is
-       // surfaced as a toast instead of failing silently.
+       // A sub-dialog (key paste / generated public key) stands BESIDE this one under its own id (lane dialog-yield r2: a form
+       // is never replaced — before, it reused this id and removed this dialog); a thrown error after this dialog closed is
+       // still surfaced as a toast instead of failing silently.
        try {
         let keyPath = null;
         let privateKey = null;
@@ -1429,8 +1427,8 @@ export function installSidebarMounts(Sidebar) {
             k = r.key;
             // surface the public key so the user can install it on the target
             await new Promise((done) => {
-              this._mountsDialog('Public key generated', [], 'Done', async (_, ctx) => { ctx.close(); done(); });
-              const ov = document.getElementById('mounts-dialog-overlay');
+              this._mountsDialog('Public key generated', [], 'Done', async (_, ctx) => { ctx.close(); done(); }, { id: 'mounts-key-dialog' });
+              const ov = document.getElementById('mounts-key-dialog');
               const body = ov.querySelector('.dialog-body');
               const ta = document.createElement('textarea');
               ta.readOnly = true; ta.value = k.publicKey; ta.style.minHeight = '64px'; ta.style.fontSize = '11px';
@@ -1842,7 +1840,7 @@ export function installSidebarMounts(Sidebar) {
       // No backdrop close: a stray click mid-bootstrap must not dismiss the progress view.
       const { overlay, body, close } = createModalShell({
         id: 'mounts-dialog-overlay', title: `Set up ${h.name}`, minWidth: '400px',
-        closeOnBackdrop: false, onClose: () => off?.(), kind: 'form',
+        closeOnBackdrop: false, escapeToClose: false, onClose: () => off?.(), kind: 'form', // (no Escape either: the set-up runs on — its ✕ is the one door)
       });
       body.innerHTML = `<div class="bs-steps"></div>
         <details class="bs-log-wrap"><summary>Log</summary><pre class="bs-log"></pre></details>
@@ -1931,7 +1929,7 @@ export function installSidebarMounts(Sidebar) {
     },
 
     _showRcloneConfDialog() {
-      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title: tr('Import rclone config'), kind: 'form' });
+      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title: tr('Import rclone config'), escapeToClose: true, kind: 'form' });
       const hint = document.createElement('div');
       hint.className = 'mounts-field-hint';
       hint.textContent = tr('Paste the contents of your rclone.conf (from `rclone config file` — usually ~/.config/rclone/rclone.conf). Every remote inside it becomes a mount you can pick.');

@@ -1224,6 +1224,38 @@ async function r3Legs(W, { S, pid, tag }) {
     await q('window.app.hideDialogs(); return 1;'); await sleep(300);
     await q(`${XQ} window.app.wm.closeWindow(fw.id); return 1;`); await sleep(300);
   }
+  // ── lane dialog-yield r2 (acceptance r1's MAJOR, 0.85 / 0.88): A FORM his press opened while he drives — Install plugin…, a WINDOW
+  // of its own (.dialog-form), not an overlay — TAKES the keys like the confirm above: its field focused, "pg" lands IN IT and never
+  // in the page; Escape is the form's (it asks about what was typed — never the page's); Discard closes it and the keys go back to
+  // the page ("fk"). On da9545e8 the form was judged null: its field's focus reclaimed, "pg" and the Escape went to the agent's page ──
+  {
+    await P.click(sid, 200, 140); await until(async () => ((await view()).owns && (W.inner(tag) || {}).act === 'b' ? true : null), LANDED_MS, 50);
+    const railBefore = await q('return { open: !!window.app.sidebar.isOpen, tab: window.app.sidebar._activeTab || null };'); // (restored after: the legs below press at the page's left edge)
+    await q('window.app.openPluginsDialog(); return 1;'); // the rail's Plugins panel (a script: no keys move)
+    const INSTALL = `return [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Install plugin…' && b.getClientRects().length) || null;`;
+    o.formPanel = !!(await until(() => q(`${INSTALL.replace('|| null', '? true : null')}`), 10000, 200));
+    await until(async () => ((await view()).owns ? true : null), LANDED_MS, 50);
+    const f0 = await view(); const bf = page();
+    o.formPress = await P.clickEl(INSTALL);
+    await until(async () => { const v = await view(); return (await q("return !!document.querySelector('#plugin-install-dialog');")) && (v.dialogTakes > f0.dialogTakes || v.dialogCues > f0.dialogCues || v.owns) ? true : null; }, LANDED_MS, 50);
+    await until(() => q("const a = document.activeElement; return a && a.closest && a.closest('#plugin-install-dialog') && a.tagName === 'INPUT' ? true : null;"), 3000, 50);
+    const f1 = await view();
+    o.formOpen = { form: await q("const f = document.getElementById('plugin-install-dialog'); return !!f && f.classList.contains('dialog-form') && !!f.closest('.window');"), takes: f1.dialogTakes - f0.dialogTakes, held: f1.dialogHeld, owns: f1.owns, chip: f1.chip, active: await q("const a = document.activeElement; return a ? (a.className || a.tagName) : null;") };
+    await P.type('pg');
+    await until(async () => ((await q("return (document.querySelector('#plugin-install-dialog .plugin-install-value')?.value || '').includes('pg') ? true : null;")) || page() !== bf ? true : null), LANDED_MS, 50);
+    o.formTyped = { value: await q("return document.querySelector('#plugin-install-dialog .plugin-install-value')?.value || '';"), page: page(), b: bf };
+    await P.key('Escape', { code: 'Escape', vk: 27 });
+    await until(async () => ((await q("return document.querySelector('#plugin-install-dialog .dialog-unsaved') ? true : null;")) || !(await q("return !!document.querySelector('#plugin-install-dialog');")) ? true : null), 3000, 50);
+    o.formEsc = { asked: await q("return !!document.querySelector('#plugin-install-dialog .dialog-unsaved');"), open: await q("return !!document.querySelector('#plugin-install-dialog');"), page: page(), b: bf };
+    o.formDiscard = await P.clickEl("return document.querySelector('#plugin-install-dialog .dialog-unsaved-discard');");
+    await until(async () => (!(await q("return !!document.querySelector('#plugin-install-dialog');")) ? true : null), 3000, 50);
+    if (await q("return !!document.querySelector('#plugin-install-dialog');")) { await q("document.getElementById('plugin-install-dialog')?.remove(); return 1;"); await sleep(300); } // (a pre-fix tree: nothing asked, the form still up)
+    await until(async () => ((await view()).owns ? true : null), LANDED_MS, 50);
+    await P.click(sid, 200, 140); await W.innerUntil(tag, (r) => r.act === 'b', LANDED_MS); const bk2 = page();
+    await P.type('fk'); await W.innerUntil(tag, (r) => r.b === bk2 + 'fk', LANDED_MS);
+    o.formAfter = { page: page(), b: bk2, owns: (await view()).owns };
+    await q(`const sb = window.app.sidebar, was = ${JSON.stringify(railBefore || {})}; if (!was.open) sb.toggle(false); else if (was.tab && was.tab !== sb._activeTab) sb._railGo(was.tab); return 1;`); await sleep(400); // the sidebar as it was (the rail panel folded again)
+  }
   // ── the census: THE CHANNEL COMPOSER (the fake adapters' named seam: fake-poll · Ops) — a real press yields, "ch" lands ──
   const HQ = `const hw = [...window.app.wm.windows.values()].find((x) => x && x._openSpec && x._openSpec.action === 'openChannel'); const cta = hw && hw.element.querySelector('.chanwin-composer textarea');`;
   for (let i = 0; i < 60; i++) { const r = await W.api('GET', '/api/channels'); if (((r.json && r.json.conversations) || []).some((c) => c.adapterId === 'fake-poll' && c.id === 'fake-poll-ops')) break; await sleep(250); }
@@ -1428,6 +1460,9 @@ if (want('r3')) {
   ok(r.selfDialog.open && r.selfDialog.takes === 0 && r.selfDialog.cues === 1 && r.selfDialog.why === 'pressed the page' && /Typing still goes to the browser — click the dialog’s buttons to answer it/.test(r.selfDialog.toasts) && r.selfDialog.active === 'sink' && r.selfDialog.owns
     && r.selfEnter.page === r.selfEnter.b + '\n' && r.selfEnter.open,
     `lane dialog-keys (THE PASSWORD GUARD, in chrome): the New-session dialog opened BY A SCRIPT 400 ms after nothing he pressed in the app is TAKEN BACK — its own field focus reclaimed, SAID once ("Typing still goes to the browser — click the dialog’s buttons to answer it"); its Enter reaches the PAGE (the dialog stays up — nothing submitted)`, JSON.stringify({ self: r.selfDialog, enter: r.selfEnter }));
+  ok(r.formPanel && r.formPress && r.formPress.ok && r.formOpen.form && r.formOpen.takes === 1 && r.formOpen.held && !r.formOpen.owns && /plugin-install-value/.test(String(r.formOpen.active))
+    && /pg/.test(r.formTyped.value) && r.formTyped.page === r.formTyped.b && r.formEsc.asked && r.formEsc.open && r.formEsc.page === r.formEsc.b && r.formDiscard && r.formDiscard.ok && r.formAfter.page === r.formAfter.b + 'fk' && r.formAfter.owns,
+    `lane dialog-yield r2 (THE ONE PREDICATE, in chrome): a FORM his press opened while he drives (Install plugin…, a window of its own) TAKES the keys like the confirm — its field focused ("${r.formOpen && r.formOpen.chip}"), "pg" lands in it (${JSON.stringify(r.formTyped && r.formTyped.value)}) and never in the page; Escape is the form's (it asks about what was typed); Discard closes it and "fk" reaches the page again`, JSON.stringify({ panel: r.formPanel, press: r.formPress, open: r.formOpen, typed: r.formTyped, esc: r.formEsc, discard: r.formDiscard, after: r.formAfter }));
   ok(r.chanUp && r.chanPress && r.chanPress.ok && r.chan.active === true && r.chan.view.yielded && !r.chan.view.owns && r.chanTyped.value === 'ch' && r.chanTyped.page === r.chanTyped.b0,
     `the census (text row): THE CHANNEL COMPOSER (fake-poll · Ops) — a real press YIELDS to it ("${r.chan && r.chan.view.chip}"), "ch" lands there, the page keeps ${JSON.stringify(r.chanTyped && r.chanTyped.b0)}`, JSON.stringify({ up: r.chanUp, press: r.chanPress, chan: r.chan, typed: r.chanTyped }));
   ok(r.listComposer.ok && r.listYielded.yielded && r.listYielded.composer === 'l1' && r.listPress.ok && r.list.yielded && r.list.where === 'none' && r.list.chip === 'Keyboard is not in a text box — click one to type there, or the picture to use the page' && r.listTyped.view.composer === 'l1' && r.listTyped.page === r.listTyped.b,

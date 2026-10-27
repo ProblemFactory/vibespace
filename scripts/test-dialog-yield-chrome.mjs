@@ -12,8 +12,8 @@
 //   ③ the form's 建立… (Set up…) opens Integrations IN FRONT of it, and the Plugin Git credential row's field there takes typed
 //     text; the form back from the taskbar still holds its own
 //   ④ Escape with the focus in the chat leaves the form open; Escape with the focus inside the form closes it (window + tile gone)
-//   ⑤ a form opened by NO click (no user activation — a broadcast, a wake) opens BEHIND the focused window: the chat stays the
-//     active window and keeps the caret, also after the form's own later update (its source switched, its rows redrawn)
+//   ⑤ a form the SYSTEM opened (its caller's `opener: 'system'` — a broadcast, a poll, a wake) opens BEHIND the focused window:
+//     the chat stays the active window and keeps the caret, also after the form's own later update (a row drawn, a script's focus)
 //   ⑥ CONTROL — a DECISION still blocks: a delete confirm (showConfirmDialog) is a .dialog-overlay, the composer is not under the
 //     pointer, a press on its backdrop closes it (answers no)
 //   ⑦ the buttons (R3): the install form's action row — Cancel left, the primary right (mounts-btn-primary, the accent fill), the
@@ -24,7 +24,16 @@
 //   ⑨ a form open on the desktop becomes its sheet when the page crosses into the phone tier (a fold, a narrowed browser) —
 //     the same element, what was typed kept; its ✕ / remove closes it
 //   ⑧ CONTROL — the phone tier (390 × 844, touch): Install plugin… is still the sheet (a .dialog-overlay, no form window)
-// On 6428c67e (the base — run the file on a `git archive` copy) ①–⑤ and ⑦ are RED; ⑥ and ⑧ hold on both.
+// ROUND 2 (acceptance r1): ⑪ typing in the chat, then a form opened with no press since — behind, «hello world» whole; ⑫ ONE
+// Escape door — Report a problem's typed note asked about, never lost; ⑬ the OAT sign-in running + Escape — «Cancel the
+// sign-in?» over the LIVE dialog, No keeps it; ⑭ the self-update progress (Escape left off) stays; ⑮ the same form opened again
+// is RAISED — one window, «AAA» kept, one broadcast handler, its guard still asks; ⑯ a form opened while a danger confirm is up
+// waits UNDER it (Delete pressable), the confirm answered — a window, the chat alive; ⑰ a form opened FROM the confirm is its
+// sheet and re-hosts as its window when the confirm closes; ⑱ role="dialog" named by its title, no aria-modal; ⑳ 900 × 480 —
+// the whole window inside the workspace, the body scrolls, the foot reachable; ⑨ back at 1280 the sheet is its window again;
+// ⑲ the welcome never counts a form.
+// On 6428c67e (the base — run the file on a `git archive` copy) ①–⑤ and ⑦ are RED; ⑥ and ⑧ hold on both. On da9545e8 (round 1)
+// the round-2 legs are RED (⑪–⑳, ⑨'s way back, ⑤'s system opener).
 // PNGs: DIALOG_YIELD_PNG_DIR (default: the scratch root) <prefix>-<leg>.png, prefix = DIALOG_YIELD_SHOT_PREFIX (default 'run').
 // Requires google-chrome (SKIP without). Run: node scripts/test-dialog-yield-chrome.mjs
 import { execSync, spawn } from 'node:child_process';
@@ -170,6 +179,7 @@ const PROBES = `window.__dy = {
   overlays: () => __dy.shown().map((o) => o.id || o.className),
   tag: (sel, text, name) => { document.querySelectorAll('[data-dy="' + name + '"]').forEach((x) => { delete x.dataset.dy; }); const b = [...document.querySelectorAll(sel)].find((x) => x.textContent.trim() === text && x.getClientRects().length); if (!b) return false; b.dataset.dy = name; return true; },
   chatWin: () => { for (const w of app.wm.windows.values()) if (w.type === 'chat' && w.element.querySelector('textarea.chat-input')) return w; return null; },
+  api: () => (window.__dyApi ||= app.pluginClient._hostApi({ id: 'dyprobe', version: '1' }, new AbortController())), // a plugin's dialog door (it says its own kind and opener)
 };
 true`;
 const load = async () => {
@@ -308,29 +318,32 @@ await step('④', async () => {
   await taskbarBack(id);
   await realClick('#plugin-install-dialog .plugin-install-value');
   await ESC();
+  // round 2: the form holds what was typed (the location) — its ONE Escape door ASKS before it drops it; Discard closes it
+  const q = await evalJs(`(() => { const f = document.getElementById('plugin-install-dialog'); const d = f?.querySelector('.dialog-unsaved-discard'); if (d) d.dataset.dy = 'discard'; return { open: !!f, asked: !!f?.querySelector('.dialog-unsaved'), value: f?.querySelector('.plugin-install-value')?.value || null }; })()`);
+  check('④ Escape with the focus inside the form is ITS door: the location typed into it is asked about (Discard / Keep editing), never dropped', q.open && q.asked && q.value === LOC, q);
+  const dp = await realClick('[data-dy="discard"]');
+  await sleep(400);
   const b = await evalJs(`({ open: !!document.getElementById('plugin-install-dialog'), win: app.wm.windows.has(${J(id)}), tile: !!document.querySelector('.taskbar-item[data-win-id="${id}"]') })`);
-  check('④ Escape with the focus inside the form closes it (its window and its taskbar tile gone)', !!id && !b.open && !b.win && !b.tile, { id, ...b });
+  check('④ …Discard closes it (its window and its taskbar tile gone)', !!id && dp && !b.open && !b.win && !b.tile, { id, dp, ...b });
   await evalJs(`(() => { document.getElementById('plugin-install-dialog')?.remove(); return true; })()`);
 });
 
-// ── ⑤ a form opened by no click opens BEHIND the focused window and never takes the caret ──
+// ── ⑤ a form the SYSTEM opened (its caller says opener: 'system' — a broadcast, a poll, a wake) opens BEHIND the focused window and never takes the caret ──
 await step('⑤', async () => {
   await pressChat();
-  const idle = await waitFor('!navigator.userActivation || !navigator.userActivation.isActive', 12000);
-  await evalJs(`(() => { app._pluginInstallDialog(() => {}); return true; })()`); // Runtime.evaluate: no user gesture — a broadcast's / a wake's open
-  await waitFor(`!!document.getElementById('plugin-install-dialog')`, 10000);
+  await sleep(1200); // (no typing since: the person's last act was a press)
+  await evalJs(`(() => { const sh = __dy.api().createModalShell({ id: 'probe', title: 'A form the system opened', kind: 'form', opener: 'system', escapeToClose: true }); sh.body.innerHTML = '<label>Name <input class="dy-probe-in"></label>'; window.__dyProbeShell = sh; return true; })()`);
+  await waitFor(`!!document.getElementById('plugin-dyprobe-probe')`, 10000);
   await sleep(1200);
-  const s = await evalJs(`(() => { const f = document.getElementById('plugin-install-dialog'), c = __dy.chatWin(); return { open: !!f, active: app.wm.activeWindowId === c?.id, fz: __dy.z(f), cz: __dy.z(c?.element), focus: document.activeElement?.dataset?.dy || document.activeElement?.className || null, overlays: __dy.overlays() }; })()`);
+  const s = await evalJs(`(() => { const f = document.getElementById('plugin-dyprobe-probe'), c = __dy.chatWin(); return { open: !!f, win: !!f && !!f.closest('.window'), active: app.wm.activeWindowId === c?.id, fz: __dy.z(f), cz: __dy.z(c?.element), focus: document.activeElement?.dataset?.dy || document.activeElement?.className || null, overlays: __dy.overlays() }; })()`);
   await shot('5-opened-behind');
-  check('⑤ (no user activation when it opened)', idle);
-  check('⑤ a form opened by no click opens BEHIND the focused chat (the chat stays the active window, above it)', s.open && s.active && s.fz < s.cz && s.overlays.length === 0, s);
+  check('⑤ a form the SYSTEM opened (opener: \'system\') opens BEHIND the focused chat (the chat stays the active window, above it)', s.open && s.win && s.active && s.fz < s.cz && s.overlays.length === 0, s);
   check('⑤ …and the caret stays in the chat\'s composer', s.focus === 'composer', s);
-  await evalJs(`(() => { const f = document.getElementById('plugin-install-dialog'); const sel = f.querySelector('.plugin-install-source'); sel.value = 'git'; sel.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`); // its own later update (rows shown, the credential read)
+  await evalJs(`(() => { const f = document.getElementById('plugin-dyprobe-probe'); const i = document.createElement('input'); i.className = 'dy-late'; f.querySelector('.dialog-body').appendChild(i); i.focus(); return true; })()`); // its own later update (a row drawn) and a script's focus into it
   await sleep(1500);
-  const u = await evalJs(`(() => { const f = document.getElementById('plugin-install-dialog'), c = __dy.chatWin(); return { active: app.wm.activeWindowId === c?.id, fz: __dy.z(f), cz: __dy.z(c?.element), focus: document.activeElement?.dataset?.dy || null }; })()`);
-  check('⑤ the form\'s later update (its source switched, its rows redrawn) neither raises it nor takes the caret', u.active && u.fz < u.cz && u.focus === 'composer', u);
-  const id = await formWinId();
-  if (id) await evalJs(`app.wm.closeWindow(${J(id)}); true`); else await evalJs(`document.getElementById('plugin-install-dialog')?.remove(); true`);
+  const u = await evalJs(`(() => { const f = document.getElementById('plugin-dyprobe-probe'), c = __dy.chatWin(); return { active: app.wm.activeWindowId === c?.id, fz: __dy.z(f), cz: __dy.z(c?.element), focus: document.activeElement?.dataset?.dy || null }; })()`);
+  check('⑤ the form\'s later update (a row drawn, a script\'s focus into it) neither raises it nor takes the caret', u.active && u.fz < u.cz && u.focus === 'composer', u);
+  await evalJs(`(() => { window.__dyProbeShell?.close(); return true; })()`);
   await sleep(300);
 });
 
@@ -388,6 +401,178 @@ await step('⑦', async () => {
   if (id) await evalJs(`app.wm.closeWindow(${J(id)}); true`); else await evalJs(`document.getElementById('plugin-install-dialog')?.remove(); true`);
 });
 
+
+// ════ ROUND 2 (acceptance r1 — lane dialog-yield r2) ════
+// ── ⑪ typing in the chat, then a form opened with no press since: it never takes the keys from that field ──
+await step('⑪', async () => {
+  await clearComposer();
+  await pressChat();
+  await cdp('Input.insertText', { text: 'hello wor' });
+  await sleep(300);
+  await evalJs(`(() => { app._pluginInstallDialog(() => {}); return true; })()`); // the caller's default (the person's) — yet the person was TYPING
+  await cdp('Input.insertText', { text: 'ld' });
+  await waitFor(`!!document.getElementById('plugin-install-dialog')`, 8000);
+  await sleep(700);
+  const s = await evalJs(`(() => { const f = document.getElementById('plugin-install-dialog'), c = __dy.chatWin(); return { composer: document.querySelector('[data-dy="composer"]')?.value || '', loc: f?.querySelector('.plugin-install-value')?.value || '', open: !!f, active: app.wm.activeWindowId === c?.id, fz: __dy.z(f), cz: __dy.z(c?.element) }; })()`);
+  await shot('11-typing-kept');
+  check('⑪ typing in the chat, then a form opened 300 ms later with no press since: it opens BEHIND — «hello world» whole in the composer, nothing in the form', s.open && s.composer === 'hello world' && s.loc === '' && s.active && s.fz < s.cz, s);
+  const id = await formWinId(); if (id) await evalJs(`app.wm.closeWindow(${J(id)}); true`);
+  await sleep(300);
+});
+
+// ── ⑫ ONE Escape door: Report a problem with a typed note + Escape ⇒ the shell ASKS, the note kept ──
+await step('⑫', async () => {
+  await sleep(1200);
+  await evalJs(`(() => { app.captureIncident(); return true; })()`);
+  await waitFor(`(() => { const n = [...document.querySelectorAll('textarea.dialog-input')].find((x) => /freezes the whole scene/.test(x.closest('.dialog')?.textContent || '')); if (!n) return false; n.dataset.dy = 'note'; return true; })()`, 10000);
+  await sleep(400);
+  const pressed = await realClick('[data-dy="note"]');
+  await typeText('the export froze');
+  await ESC();
+  const a = await evalJs(`(() => { const n = document.querySelector('[data-dy="note"]'); const root = n && n.closest('.dialog'); return { open: !!n && n.isConnected, note: n?.value || null, asked: !!root?.querySelector('.dialog-unsaved'), buttons: [...(root?.querySelectorAll('.dialog-unsaved-actions button') || [])].map((b) => b.textContent.trim()) }; })()`);
+  await shot('12-escape-asks');
+  check('⑫ Report a problem with a typed note + Escape ⇒ the shell ASKS (Discard / Keep editing) — the form open, the note kept', pressed && a.open && a.asked && a.note === 'the export froze' && a.buttons.join('|') === 'Discard|Keep editing', { pressed, ...a });
+  await ESC(); // Escape on the question = Keep editing
+  const b = await evalJs(`(() => { const n = document.querySelector('[data-dy="note"]'); const root = n && n.closest('.dialog'); return { open: !!n && n.isConnected, note: n?.value || null, asked: !!root?.querySelector('.dialog-unsaved') }; })()`);
+  check('⑫ …a second Escape is Keep editing: the question goes, the note stays', b.open && !b.asked && b.note === 'the export froze', b);
+  await evalJs(`(() => { const w = document.querySelector('[data-dy="note"]')?.closest('.window'); for (const x of app.wm.windows.values()) if (x.element === w) app.wm.closeWindow(x.id); return true; })()`);
+  await sleep(300);
+});
+
+// ── ⑬ the OAT sign-in running + Escape ⇒ «Cancel the sign-in?» over the LIVE dialog; No keeps it ──
+await step('⑬', async () => {
+  await sleep(1200);
+  await evalJs(`(() => { app._oatDialog('acc-dy', { name: 'Work Max' }, () => {}); return true; })()`);
+  await waitFor(`!!document.getElementById('oat-dialog')`, 10000);
+  await sleep(600);
+  await evalJs(`(() => { for (const h of app.ws.globalHandlers.slice()) { try { h({ type: 'oat-mint', mint: { id: 'mint-dy', accountId: 'acc-dy', phase: 'waiting-code', rev: 9, url: 'https://example.invalid/oauth/authorize' } }); } catch (e) { } } return true; })()`);
+  const live = await waitFor(`document.querySelector('#oat-mint')?.dataset.phase === 'waiting-code'`, 8000);
+  await evalJs(`(() => { const r = document.getElementById('oat-dialog'); const i = r.querySelector('#oat-code') || r.querySelector('input:not([type=hidden]), button') || r; i.focus(); return true; })()`);
+  await ESC();
+  await sleep(500);
+  const a = await evalJs(`(() => { const r = document.getElementById('oat-dialog'); const conf = __dy.shown().find((o) => /Cancel the sign-in/.test(o.textContent)); const no = conf?.querySelector('.dialog-footer .btn-cancel'); if (no) no.dataset.dy = 'oat-no'; return { oat: !!r && r.isConnected, inWindow: !!r?.closest('.window'), confirm: !!conf }; })()`);
+  await shot('13-oat-asks');
+  check('⑬ the OAT sign-in running + Escape ⇒ «Cancel the sign-in?» asked over the LIVE dialog (still open in its window)', live && a.oat && a.inWindow && a.confirm, { live, ...a });
+  const pressed = await realClick('[data-dy="oat-no"]');
+  await sleep(500);
+  const b = await evalJs(`(() => { const r = document.getElementById('oat-dialog'); return { oat: !!r && r.isConnected, confirm: __dy.shown().some((o) => /Cancel the sign-in/.test(o.textContent)), phase: document.querySelector('#oat-mint')?.dataset.phase || null }; })()`);
+  check('⑬ …No keeps the sign-in dialog (and its running phase)', pressed && b.oat && !b.confirm && b.phase === 'waiting-code', { pressed, ...b });
+  await evalJs(`(() => { const w = document.getElementById('oat-dialog')?.closest('.window'); for (const x of app.wm.windows.values()) if (x.element === w) app.wm.closeWindow(x.id); document.getElementById('oat-dialog')?.remove(); return true; })()`);
+  await sleep(300);
+});
+
+// ── ⑭ the self-update progress (its caller left Escape off) + Escape ⇒ it stays ──
+await step('⑭', async () => {
+  await sleep(600);
+  await evalJs(`(() => { if (!window.__dyFetch) { window.__dyFetch = window.fetch; window.fetch = (u, o) => { const s = String((u && u.url) || u); const j = (x) => Promise.resolve(new Response(JSON.stringify(x), { headers: { 'Content-Type': 'application/json' } })); if (/\\/api\\/self-update\\/status/.test(s)) return j({ log: 'Pulling the update…\\n' }); if (/\\/api\\/self-update/.test(s)) return j({ success: true }); return window.__dyFetch(u, o); }; } app._runSelfUpdate(); return true; })()`); // (the update itself stubbed in the page: nothing runs on the scratch server)
+  await waitFor(`!!document.getElementById('self-update-dialog')`, 10000);
+  await sleep(900);
+  await evalJs(`(() => { const r = document.getElementById('self-update-dialog'); r.focus(); return document.activeElement === r; })()`);
+  await ESC();
+  await sleep(500);
+  const a = await evalJs(`(() => { const r = document.getElementById('self-update-dialog'); return { open: !!r && r.isConnected, inWindow: !!r?.closest('.window') }; })()`);
+  check('⑭ the self-update progress + Escape from inside it ⇒ it STAYS (its caller left Escape off — the update runs on)', a.open, a);
+  await evalJs(`(() => { const w = document.getElementById('self-update-dialog')?.closest('.window'); for (const x of app.wm.windows.values()) if (x.element === w) app.wm.closeWindow(x.id); document.getElementById('self-update-dialog')?.remove(); if (window.__dyFetch) { window.fetch = window.__dyFetch; delete window.__dyFetch; } return true; })()`);
+  await sleep(300);
+});
+
+// ── ⑮ the same form opened again is RAISED, never replaced: what was typed, its handlers and its guard stay ──
+await step('⑮', async () => {
+  await sleep(1200);
+  const o = await openInstallByClick();
+  await realClick('#plugin-install-dialog .plugin-install-value'); await typeText('AAA');
+  const id1 = await formWinId();
+  await pressChat(); // the form goes behind the chat
+  const again = await openInstallByClick(); // its opener pressed a second time
+  await sleep(600);
+  const s = await evalJs(`(() => { const all = [...app.wm.windows.values()].filter((w) => w.type === 'form' && w.element.dataset.form === 'plugin-install-dialog'); const f = document.getElementById('plugin-install-dialog'); return { windows: all.length, same: all[0]?.id === ${J(id1)}, active: app.wm.activeWindowId === all[0]?.id, value: f?.querySelector('.plugin-install-value')?.value || null, roots: document.querySelectorAll('#plugin-install-dialog').length }; })()`);
+  await shot('15-raised');
+  check('⑮ the same form opened again (its opener pressed a second time): ONE window — the same one, raised in front — holding «AAA»', o.ok && again.pressed && s.windows === 1 && s.same && s.active && s.roots === 1 && s.value === 'AAA', { o, again, ...s });
+  { const id = await formWinId(); if (id) await evalJs(`app.wm.closeWindow(${J(id)}); true`); }
+  // a form whose open registers a broadcast handler (the Browser switcher), opened twice
+  const h0 = await evalJs('app.ws.globalHandlers.length');
+  await evalJs(`(() => { app.openBrowserSwitcher({ profileId: 'bp-dy' }); return true; })()`);
+  await waitFor(`!!document.getElementById('browser-switcher-dialog')`, 8000);
+  const h1 = await evalJs('app.ws.globalHandlers.length');
+  await evalJs(`(() => { app.openBrowserSwitcher({ profileId: 'bp-dy' }); return true; })()`);
+  await sleep(500);
+  const h2 = await evalJs(`({ n: app.ws.globalHandlers.length, wins: [...app.wm.windows.values()].filter((w) => w.type === 'form' && w.element.dataset.form === 'browser-switcher-dialog').length })`);
+  await evalJs(`(() => { const w = document.getElementById('browser-switcher-dialog')?.closest('.window'); for (const x of app.wm.windows.values()) if (x.element === w) app.wm.closeWindow(x.id); return true; })()`);
+  await sleep(300);
+  const h3 = await evalJs('app.ws.globalHandlers.length');
+  check('⑮ …a form whose open registers a broadcast handler, opened twice: ONE window and ONE handler (the second open\'s released at once); closed: back where it was', h1 === h0 + 1 && h2.n === h1 && h2.wins === 1 && h3 === h0, { h0, h1, h2, h3 });
+  // a GUARDED form opened again keeps what was typed AND its guard
+  const mk = `(() => { const sh = __dy.api().createModalShell({ id: 'guarded', title: 'A guarded form', kind: 'form', escapeToClose: true, unsaved: { isDirty: () => !!document.querySelector('#plugin-dyprobe-guarded .g-in')?.value, save: async () => true } }); sh.body.innerHTML = '<label>Name <input class="g-in"></label>'; return true; })()`;
+  await evalJs(mk);
+  await waitFor(`!!document.querySelector('#plugin-dyprobe-guarded .g-in')`, 5000);
+  await realClick('#plugin-dyprobe-guarded .g-in'); await typeText('AAA');
+  await evalJs(mk); // the same form again
+  await sleep(500);
+  const g = await evalJs(`(() => { const all = [...app.wm.windows.values()].filter((w) => w.type === 'form' && w.element.dataset.form === 'plugin-dyprobe-guarded'); if (all[0]) app.wm.requestClose(all[0].id); const f = document.getElementById('plugin-dyprobe-guarded'); return { windows: all.length, value: f?.querySelector('.g-in')?.value || null, asked: !!f?.querySelector('.dialog-unsaved'), open: !!f && f.isConnected }; })()`); // its window's ✕ (the person's close)
+  check('⑮ …a GUARDED form opened again keeps what was typed and its guard: its window\'s ✕ asks (Save / Discard / Keep editing)', g.windows === 1 && g.value === 'AAA' && g.asked && g.open, g);
+  await evalJs(`(() => { document.querySelector('#plugin-dyprobe-guarded .dialog-unsaved-discard')?.click(); document.getElementById('plugin-dyprobe-guarded')?.remove(); return true; })()`);
+  await sleep(300);
+});
+
+// ── ⑯ a form opened while a danger confirm is up (not from it) waits UNDER it; the confirm answered, the form is a window, the chat alive ──
+await step('⑯', async () => {
+  await sleep(1200);
+  await evalJs(`(() => { window.__dyAns = 'pending'; __dyProbe.showConfirmDialog({ title: 'Delete “payments-old”?', message: 'The conversation and its history go away.', confirmText: 'Delete', danger: true }).then((v) => { window.__dyAns = v; }); return true; })()`);
+  await waitFor(`__dy.overlays().length === 1`, 5000);
+  await sleep(400);
+  await evalJs(`(() => { app._pluginInstallDialog(() => {}); return true; })()`); // a form opened while the confirm stands — not by a press in it
+  await waitFor(`!!document.getElementById('plugin-install-dialog')`, 8000);
+  await sleep(700);
+  const s = await evalJs(`(() => { const o = __dy.shown().find((x) => /payments-old/.test(x.textContent)); const del = o?.querySelector('.dialog-footer .btn-create'), no = o?.querySelector('.dialog-footer .btn-cancel'); if (no) no.dataset.dy = 'confirm-no'; const f = document.getElementById('plugin-install-dialog'); return { sheet: !!f?.classList.contains('dialog-overlay'), win: !!f?.closest('.window'), delHit: del ? __dy.hitIn(del) : false, focusInConfirm: !!o && o.contains(document.activeElement) }; })()`);
+  await shot('16-under-the-confirm');
+  check('⑯ a form opened while a danger confirm is up waits UNDER it — a window, not a sheet: the confirm\'s Delete is under the pointer and keeps the focus', s.win && !s.sheet && s.delHit && s.focusInConfirm, s);
+  const pressedNo = await realClick('[data-dy="confirm-no"]');
+  await sleep(600);
+  await clearComposer();
+  const p = await pressChat();
+  await typeText('alive');
+  const a = await evalJs(`(() => { const f = document.getElementById('plugin-install-dialog'); return { overlays: __dy.overlays(), win: !!f?.closest('.window'), composer: document.querySelector('[data-dy="composer"]')?.value || '', ans: window.__dyAns }; })()`);
+  await shot('16-confirm-answered');
+  check('⑯ …the confirm answered: the form is a window, no blocking layer left — a press on the chat lands and its composer takes the text', pressedNo && a.ans === false && a.overlays.length === 0 && a.win && p.c && a.composer.includes('alive'), { pressedNo, p, ...a });
+  { const id = await formWinId(); if (id) await evalJs(`app.wm.closeWindow(${J(id)}); true`); else await evalJs(`document.getElementById('plugin-install-dialog')?.remove(); true`); }
+  await sleep(300);
+});
+
+// ── ⑰ a form opened FROM a blocking layer (a press inside it) is its sheet above it — and re-hosts as its window the moment the layer closes ──
+await step('⑰', async () => {
+  await sleep(1200);
+  await evalJs(`(() => { window.__dyAns = 'pending'; __dyProbe.showConfirmDialog({ title: 'Pick the plugin first?', message: 'Its install form opens from here.', confirmText: 'OK' }).then((v) => { window.__dyAns = v; }); return true; })()`);
+  await waitFor(`__dy.overlays().length === 1`, 5000);
+  await evalJs(`(() => { const o = __dy.shown().pop(); const b = document.createElement('button'); b.type = 'button'; b.className = 'btn-cancel'; b.textContent = 'Install plugin…'; b.dataset.dy = 'from-layer'; b.onclick = () => app._pluginInstallDialog(() => {}); o.querySelector('.dialog-body').appendChild(b); return true; })()`);
+  await sleep(300);
+  const pressed = await realClick('[data-dy="from-layer"]');
+  await waitFor(`!!document.getElementById('plugin-install-dialog')`, 8000);
+  await sleep(600);
+  const s = await evalJs(`(() => { const f = document.getElementById('plugin-install-dialog'); return { sheet: !!f && f.classList.contains('dialog-overlay') && f.classList.contains('form-sheet'), onTop: __dy.hitIn(f?.querySelector('.dialog')) }; })()`);
+  check('⑰ a form opened FROM a blocking layer (a press inside it) is its SHEET, above it', pressed && s.sheet && s.onTop, { pressed, ...s });
+  await realClick('#plugin-install-dialog .plugin-install-value'); await typeText('from/layer');
+  await evalJs(`(() => { __dy.shown().find((o) => /Pick the plugin first/.test(o.textContent))?.querySelector('.dialog-footer .btn-cancel')?.click(); return true; })()`); // the layer closes (answered by its own door)
+  await waitFor(`!!document.getElementById('plugin-install-dialog')?.closest('.window')`, 6000);
+  await sleep(500);
+  const a = await evalJs(`(() => { const f = document.getElementById('plugin-install-dialog'); return { win: !!f?.closest('.window'), dialogForm: !!f?.classList.contains('dialog-form'), value: f?.querySelector('.plugin-install-value')?.value || null, overlays: __dy.overlays() }; })()`);
+  await shot('17-rehosted');
+  check('⑰ …the layer closed: the sheet RE-HOSTS as its window (what was typed kept) and nothing blocks the chat', a.win && a.dialogForm && a.value === 'from/layer' && a.overlays.length === 0, a);
+  { const id = await formWinId(); if (id) await evalJs(`app.wm.closeWindow(${J(id)}); true`); else await evalJs(`document.getElementById('plugin-install-dialog')?.remove(); true`); }
+  await sleep(300);
+});
+
+// ── ⑱ the form is a NON-MODAL dialog for assistive tech ──
+await step('⑱', async () => {
+  const o = await openInstallByClick();
+  await sleep(400);
+  const d = await evalJs(`(() => { const f = document.getElementById('plugin-install-dialog'); const lb = f?.getAttribute('aria-labelledby'); return { role: f?.getAttribute('role') || null, modal: f?.getAttribute('aria-modal') || null, label: lb ? document.getElementById(lb)?.textContent || null : null }; })()`);
+  let ax = null;
+  try { const doc = await cdp('DOM.getDocument', { depth: 0 }); const q = await cdp('DOM.querySelector', { nodeId: doc.root.nodeId, selector: '#plugin-install-dialog' }); const tr = await cdp('Accessibility.getPartialAXTree', { nodeId: q.nodeId, fetchRelatives: false }); const n = (tr.nodes || []).find((x) => !x.ignored) || (tr.nodes || [])[0]; ax = { role: n?.role?.value || null, name: n?.name?.value || null }; } catch (e) { ax = { error: String((e && e.message) || e) }; }
+  check('⑱ the form is a NON-MODAL dialog for assistive tech: role="dialog", named by its title (aria-labelledby), no aria-modal — the accessibility tree reads «dialog · Install plugin»', o.ok && d.role === 'dialog' && d.modal === null && d.label === 'Install plugin' && ax && ax.role === 'dialog' && ax.name === 'Install plugin', { d, ax });
+  { const id = await formWinId(); if (id) await evalJs(`app.wm.closeWindow(${J(id)}); true`); }
+  await sleep(300);
+});
+
 check('no page error on the desktop walk', pageErrors.length === 0, pageErrors.slice(0, 4));
 
 // ── ⑩ a smaller desktop viewport and a press on the form's foot: the form stays inside the screen, its content never scrolled ──
@@ -414,6 +599,23 @@ await step('⑩', async () => {
   await sleep(600);
 });
 
+// ── ⑳ at 900 × 480 (below ~585 px of viewport height) a long form's WHOLE window stays inside the workspace: the dialog capped, its body scrolls, its foot reachable ──
+await step('⑳', async () => {
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 900, height: 480, deviceScaleFactor: 1, mobile: false });
+  await sleep(1000);
+  await evalJs(`(() => { const sh = __dy.api().createModalShell({ id: 'long', title: 'A long form', kind: 'form', escapeToClose: true }); sh.body.innerHTML = '<label>Name <input class="dy-l-in"></label><div style="height: 900px; flex: none">a long list</div>'; const foot = document.createElement('div'); foot.className = 'dialog-footer'; const go = document.createElement('button'); go.className = 'btn-create dy-l-go'; go.textContent = 'Save'; foot.append(go); sh.dialog.appendChild(foot); window.__dyLong = sh; return true; })()`);
+  await waitFor(`!!document.getElementById('plugin-dyprobe-long')?.closest('.window')`, 8000);
+  await sleep(1200);
+  const g = await evalJs(`(() => { const f = document.getElementById('plugin-dyprobe-long'), w = f.closest('.window'), ws = app.wm.workspace.getBoundingClientRect(), r = w.getBoundingClientRect(), d = f.querySelector('.dialog').getBoundingClientRect(), b = f.querySelector('.dialog-body'), go = f.querySelector('.dy-l-go'), c = w.querySelector('.window-content');
+    return { vh: innerHeight, wsTop: Math.round(ws.top), wsBottom: Math.round(ws.bottom), top: Math.round(r.top), bottom: Math.round(r.bottom), dBottom: Math.round(d.bottom), bodyScrolls: b.scrollHeight > b.clientHeight + 1, goHit: __dy.hitIn(go), scrolled: c ? c.scrollTop : null }; })()`);
+  await shot('20-short-viewport');
+  check('⑳ at 900 × 480 a long form\'s WHOLE window stays inside the workspace (the dialog capped at the workspace less the title bar)', g.top >= g.wsTop - 0.5 && g.bottom <= g.wsBottom + 0.5 && g.dBottom <= g.wsBottom + 0.5, g);
+  check('⑳ …its body scrolls and its foot (Save) is under the pointer without scrolling the window', g.bodyScrolls && g.goHit && g.scrolled === 0, g);
+  await evalJs(`(() => { window.__dyLong?.close(); return true; })()`);
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(800);
+});
+
 // ── ⑨ a crossing into the phone tier (a fold, a narrowed browser) turns an open form into its sheet, what was typed kept ──
 await step('⑨', async () => {
   const o = await openInstallByClick();
@@ -427,10 +629,31 @@ await step('⑨', async () => {
   await shot('9-crossing-sheet');
   check('⑨ a form open on the desktop becomes its SHEET when the page crosses into the phone tier (a .dialog-overlay, no form window, its ✕ shown, inside the screen)', o.ok && was.win && s.overlay && !s.inWindow && s.forms === 0 && s.close && s.inside, { o, was, ...s });
   check('⑨ …holding what was typed into it', s.value === 'kept/across@fold', s);
+  // round 2: …and BACK (390 → 1280): a sheet exists only while what made it holds — the dirty form is its window again, its value kept
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  const home = await waitFor(`!!document.getElementById('plugin-install-dialog')?.closest('.window')`, 10000);
+  await sleep(700);
+  const k = await evalJs(`(() => { const f = document.getElementById('plugin-install-dialog'); return { win: !!f?.closest('.window'), form: !!f?.classList.contains('dialog-form'), sheet: !!f?.classList.contains('dialog-overlay'), value: f?.querySelector('.plugin-install-value')?.value || null, overlays: __dy.overlays(), hit: __dy.hitIn(f?.querySelector('.dialog')) }; })()`);
+  await shot('9-crossing-back');
+  check('⑨ …and back at a desktop width (390 → 1280) the sheet is its WINDOW again — no blocking overlay left, what was typed kept', home && k.win && k.form && !k.sheet && k.overlays.length === 0 && k.value === 'kept/across@fold', k);
   await evalJs(`(() => { document.getElementById('plugin-install-dialog')?.remove(); return true; })()`);
   await sleep(300);
   const gone = await evalJs(`!document.getElementById('plugin-install-dialog')`);
   check('⑨ …and its ✕ path (the root\'s remove) closes the sheet', gone);
+});
+
+// ── ⑲ the welcome never counts a form: the last chat closed with a form open, then the form — the empty desktop shows its welcome ──
+await step('⑲', async () => {
+  await evalJs(`(() => { app._pluginInstallDialog(() => {}); return true; })()`);
+  const o = { ok: await waitFor(`!!document.getElementById('plugin-install-dialog')?.closest('.window')`, 8000) };
+  await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type !== 'form') app.wm.closeWindow(w.id); return true; })()`); // the chat closed (its conversation runs on)
+  await sleep(700);
+  const a = await evalJs(`!document.getElementById('welcome').classList.contains('hidden')`);
+  { const id = await formWinId(); if (id) await evalJs(`app.wm.closeWindow(${J(id)}); true`); }
+  await sleep(700);
+  const b = await evalJs(`({ welcome: !document.getElementById('welcome').classList.contains('hidden'), windows: app.wm.windows.size })`);
+  await shot('19-welcome');
+  check('⑲ the welcome never counts a form: the last chat closed while a form is open, then the form — the empty desktop shows its welcome', o.ok && b.welcome && b.windows === 0, { o, a, ...b });
 });
 
 // ── ⑧ CONTROL: the phone tier keeps the sheet ──

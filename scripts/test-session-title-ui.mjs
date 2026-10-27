@@ -330,7 +330,7 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
   console.log('\nf — NEGATIVE CONTROL: the answer\'s focus without its dialog guard (THE .228 MIRROR)');
   {
     const src = fs.readFileSync(path.join(repo, 'src/lib/session-lifecycle.js'), 'utf8');
-    const guard = "const lateFocus = (view) => { if (lateFocusVerdict(document.querySelectorAll('.dialog-overlay')) === 'take' && !document.activeElement?.closest?.('.dialog-form')) view.focus(); };"; // lane dialog-yield: + a form the person types in
+    const guard = "const lateFocus = (view) => { if (lateFocusVerdict(document.querySelectorAll(DIALOG_ROOTS), document.activeElement) === 'take') view.focus(); };"; // lane dialog-yield r2: ONE predicate — an open decision, or a form the person works in
     if (!ok(src.includes(guard), 'the answer sites\' focus guard is where the control cuts')) return;
     // the copy lives outside the tree: its relative imports name the scratch worktree's modules (the bundle's own sources)
     const cut = src.replace(guard, 'const lateFocus = (view) => view.focus(); // NEGATIVE CONTROL: the answer takes the keys whatever holds them')

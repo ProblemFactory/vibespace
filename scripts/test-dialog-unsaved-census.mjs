@@ -186,17 +186,21 @@ if (isMain) {
 
   console.log('— ③ the shell routes the person\'s dismissals through the guard');
   const U = fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8');
+  // lane dialog-yield r2: every Escape goes through the shell's ONE door (escDoor — the caller's onEscape first, then the guard /
+  // the typed ask, PURE escapeVerdict), and the door's close is the guard's dismiss
   const PINS = [
     ['✕', 'closeBtn.onclick = () => dismiss();'],
-    ['the backdrop', "if (e.target === overlay) dismiss(); });"],
-    ["the overlay's Escape", "if (e.key === 'Escape') { e.stopPropagation(); dismiss('escape'); } });"],
-    ['the idle Escape', "e.preventDefault(); dismiss('escape');"],
+    ['the backdrop', "if (e.target === overlay && (!fh || fh.mode() === 'sheet')) dismiss(); });"],
+    ["the overlay's Escape", "if (e.key === 'Escape') { e.stopPropagation(); escDoor(e); } });"],
+    ["a form's Escape", "if (escDoor(e) === 'none') return;"],
+    ['the idle Escape', "e.preventDefault(); escDoor(e);"],
+    ['the ONE door', "if (v === 'guard' || v === 'close') dismiss('escape');"],
   ];
   const pinned = (text) => PINS.filter(([, s]) => !text.includes(s)).map(([w]) => w);
   ok(pinned(U).length === 0, "✕, the backdrop and both Escapes call the guard's dismiss (never `close` straight)", pinned(U));
   const mut = U.replace('closeBtn.onclick = () => dismiss();', 'closeBtn.onclick = close;');
   ok(mut !== U && pinned(mut).includes('✕'), 'MUTANT ✕ straight to close ⇒ the pin is RED');
-  ok(/unsaved = null \} = \{\}\) \{/.test(U) && /function unsavedGuard\(/.test(U), 'createModalShell takes `unsaved` and owns the ONE guard (unsavedGuard)');
+  ok(/unsaved = null, onEscape = null, opener = 'person' \} = \{\}\) \{/.test(U) && /function unsavedGuard\(/.test(U), 'createModalShell takes `unsaved` and owns the ONE guard (unsavedGuard)');
 
   console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
   process.exit(fail ? 1 : 0);

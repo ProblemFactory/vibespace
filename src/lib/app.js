@@ -1201,7 +1201,7 @@ class App {
   // Update-confirm dialog: every changelog entry between the RUNNING version
   // and the canonical repo's latest, then an explicit "Update now".
   async _showUpdateConfirmDialog() {
-    const { body, close } = createModalShell({ id: 'update-confirm-dialog', title: t('Update VibeSpace'), bodyClass: 'update-confirm-body', minWidth: 'min(560px, 92vw)', escapeToClose: true, kind: 'decision' });
+    const { body, close } = createModalShell({ id: 'update-confirm-dialog', title: t('Update VibeSpace'), bodyClass: 'update-confirm-body', minWidth: 'min(560px, 92vw)', escapeToClose: true, kind: 'decision' }); // decision: a consent — update now or not (the page reloads after); nothing to fill
     body.innerHTML = `<div class="empty-hint">${t('Checking for updates\u2026')}</div>`;
     // The changelog in the DEVICE's language (the same value `vibespace.lang`
     // resolves to); an entry the canonical has not translated comes in English.
@@ -1249,7 +1249,7 @@ class App {
   // this dialog streams its log, survives the service restart by polling
   // /api/version, and reloads the page once the new version answers.
   async _runSelfUpdate() {
-    const { body } = createModalShell({ id: 'self-update-dialog', title: t('Updating VibeSpace'), kind: 'form' });
+    const { body } = createModalShell({ id: 'self-update-dialog', title: t('Updating VibeSpace'), escapeToClose: false, kind: 'form' }); // (no Escape: the update runs on — the page reloads by itself when it is up)
     body.innerHTML = `
       <div class="selfupd-phase"><span class="upload-active-spinner" aria-hidden="true"></span><span class="su-msg">${escHtml(t('Starting update…'))}</span></div>
       <pre class="selfupd-log"></pre>
@@ -2478,10 +2478,10 @@ class App {
     let hasWindows = false;
     if (activeDesk) {
       for (const [, win] of this.wm.windows) {
-        if (win._desktopId === activeDesk && !win._hiddenByDesktop) { hasWindows = true; break; }
+        if (win._desktopId === activeDesk && !win._hiddenByDesktop && win.type !== 'form') { hasWindows = true; break; }
       }
     } else {
-      hasWindows = this.wm.windows.size > 0;
+      hasWindows = [...this.wm.windows.values()].some((w) => w.type !== 'form'); // lane dialog-yield r2: a form is not a window the welcome counts (closing one re-checks — form-window.js)
     }
     if (!hasWindows) document.getElementById('welcome').classList.remove('hidden');
     else document.getElementById('welcome').classList.add('hidden');

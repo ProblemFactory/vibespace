@@ -187,8 +187,10 @@ function copyLine(value) {
 // that awaits a Promise from this dialog, or cancelling it hangs the
 // awaiting flow forever. Callers must make their resolve idempotent
 // (close() runs on the submit path too).
+// opts.id (lane dialog-yield r2): a sub-step that stands beside its opener (the key paste of Add remote machine) — a form is
+// never replaced under a shared id.
 export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
-  const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title, onClose: opts.onClose, kind: 'form' });
+  const { body, close } = createModalShell({ id: opts.id || 'mounts-dialog-overlay', title, onClose: opts.onClose, escapeToClose: true, kind: 'form' });
   const { inputs, applyConds, hasWhen } = renderFields(body, fields);
   const err = document.createElement('div');
   err.className = 'cfg-err';

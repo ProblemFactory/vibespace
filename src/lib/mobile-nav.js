@@ -1,6 +1,7 @@
 import { chipMode, titleMinText, billingPillForms, billingPillHtml } from './title-chips.js'; // lane phone-chip: the row's billing pill folds, never cuts
 import { t } from './i18n.js';
 import { escHtml, onOutsidePress, showContextMenu } from './utils.js';
+import { personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { showWindowContextMenu } from './taskbar.js';
 import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { getCommand, runCommand } from './contributions.js';
@@ -393,7 +394,7 @@ export class MobileNav {
     // TAP, so a scroll outside the list no longer dismisses it). Chained-popover rule (same as attachPopoverClose): a
     // context menu or dialog opened FROM a row (billing switcher + its confirm) is a child interaction, not a
     // dismissal of the list; a press ON the nav button itself is its toggle's.
-    onOutsidePress(pop, close, { ignore: (t) => t === anchor || !!anchor.contains?.(t) || !!t?.closest?.('.dialog-overlay, #dialog-overlay'), signal: ctl.signal });
+    onOutsidePress(pop, close, { ignore: (t) => t === anchor || !!anchor.contains?.(t) || !!personDialogOf(t), signal: ctl.signal });
   }
 
   _buildWindowItem(win, wm, close, rerender) {

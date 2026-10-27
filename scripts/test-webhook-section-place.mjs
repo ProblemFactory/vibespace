@@ -133,7 +133,7 @@ const judgeOrder = (D, label) => {
   ok(ids.join(',') === 'lark:a,gmail:a,webhook' && last && D.order.slice(0, -1).every((o) => o.b <= last.t + 1), `${label} ② the Webhook section is the LAST account section — after the person's Lark and Gmail, below them (the digest listed it first)`, JSON.stringify(D.order));
 };
 const WIZ = `(() => ({ wiz: !!document.querySelector('[data-wh-wizard]') }))()`;
-const CLOSE = `(() => { document.querySelectorAll('.dialog-overlay, .context-menu').forEach((e) => e.remove()); return true; })()`;
+const CLOSE = `(() => { document.querySelectorAll('.dialog-overlay, .dialog-form, .context-menu').forEach((e) => e.remove()); return true; })()`;
 const foldPatches = () => patches.filter((b) => b.includes('acct:webhook')).length;
 
 console.log('§1 desk (1100 px, the 520 px Channels window, zh, light)');

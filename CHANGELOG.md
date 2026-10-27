@@ -5,11 +5,18 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ## 2.369.361 — 2026-10-28
 
 ### Changed
-- Dialogs you fill in no longer cover the whole screen: installing a plugin or entering a credential opens a small window, and the chat still takes your typing.
+- Dialogs you fill in no longer cover the screen: installing a plugin, a credential or a rename opens a small window, and the chat still takes your typing.
 - Click another window and the form steps behind it; the taskbar brings it back with what you typed. Confirmations that need your decision stay as they were.
 
 ### Fixed
 - In Install plugin…, Cancel and Install now match every other dialog's buttons, Install stands out, and the Git-only rows show only for a Git source.
+- While you drive an agent's browser, a form you open (a vault paste, a sign-in, the Browser switcher) takes your typing and Escape, never the agent's page.
+- Escape in a form you have typed into asks before it drops your words.
+- A running Claude sign-in asks «Cancel the sign-in?» on Escape, and the update progress no longer closes on Escape.
+- Opening a form that is already open brings it back with what you typed, instead of a blank copy.
+- A form no longer stays stuck over the screen after a confirmation closes, or after the window goes from phone width back to desktop.
+- A form that opens while you are typing in the chat waits behind it.
+- New background job… has its Create button again, and the Agents window asks before closing over unsaved instructions.
 
 ## 2.369.360 — 2026-10-27
 

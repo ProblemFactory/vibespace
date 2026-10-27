@@ -17,12 +17,13 @@ import { carriedGeometry } from './stage-rules.js'; // the geometry a replaced w
 import { attachSlab } from './view-visibility.js'; // perf r1: the slab an attach asks for (floor | text)
 import { memberState, poolSubmenuModel, submenuNoteWords } from './pool-priority-model.js'; // THE CONVERSATION'S POOL PIN (2026-09-28): the pool row's submenu, as a PURE model
 import { deviceLocale } from './i18n.js';
+import { DIALOG_ROOTS } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE «did the person open a dialog?» selector
 import { SIGN_IN } from '../day-one.js'; // lane door-day-one-landing: a sign-in terminal is not a session row
 import { resumeAccountVerdict } from '../resume-account.js'; // lane resume-account-door: the pinned account is asked FIRST at the Resume press
 
 // lane mirror-green-228: a window's focus on the server's answer never takes the keys from an open app dialog (the Rename
 // dialog a double-click on its own sidebar row opened while the attach was in flight)
-const lateFocus = (view) => { if (lateFocusVerdict(document.querySelectorAll('.dialog-overlay')) === 'take' && !document.activeElement?.closest?.('.dialog-form')) view.focus(); }; // lane dialog-yield: a FORM the person types in keeps the keys too (it is no overlay any more)
+const lateFocus = (view) => { if (lateFocusVerdict(document.querySelectorAll(DIALOG_ROOTS), document.activeElement) === 'take') view.focus(); }; // lane dialog-yield r2: ONE predicate — an open decision, or a FORM the person works in (the focus inside it, its window the active one), keeps the keys (it is no overlay any more)
 
 export function installSessionLifecycle(App, ctx = {}) {
   Object.assign(App.prototype, {

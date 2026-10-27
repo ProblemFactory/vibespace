@@ -145,7 +145,7 @@ try {
   check('released: the catalog lands, then the doors show', await waitFor(`!!document.querySelector('#desktop-launch-dialog .desktop-launch-registry .desktop-launch-card') && document.querySelector('#desktop-launch-dialog .app-sec-install')?.getClientRects().length === 1`, 10000));
   check('a real click on Install an app… (catalog landed late)', await realClick('#desktop-launch-dialog .app-sec-install') === true);
   check('…opens the search dialog with its input focused', await waitFor(`!!document.querySelector('#app-search-dialog .app-search-input') && document.activeElement === document.querySelector('#app-search-dialog .app-search-input')`, 5000));
-  await evalJs(`window.fetch = window.__vsFetch0; document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+  await evalJs(`window.fetch = window.__vsFetch0; document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`); // (lane dialog-yield r2: the forms too — a form whose id is open is RAISED by the next open, never replaced)
 
   console.log('① the user\'s door: Desktop apps → Install an app… → search → plan → Install');
   await evalJs(`document.getElementById('btn-desktop-apps').click(); true`);
@@ -168,7 +168,7 @@ try {
   await evalJs(`document.querySelector('#desktop-install-dialog .dialog-close')?.click(); true`);
   check('"Your installed apps" lists it', await waitFor(`!!document.querySelector('#desktop-launch-dialog .app-sec-entry[data-entry="xterm"]') && /XTerm/.test(document.querySelector('#desktop-launch-dialog .app-sec-entry[data-entry="xterm"]').textContent)`, 10000));
 
-  await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`); // the Desktop apps dialog is modal — the For-you window lives under it
+  await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`); // the Desktop apps dialog is modal — the For-you window lives under it
   console.log('② the agent PROPOSES → For you → Install… → THE dialog → Install');
   const ws0 = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
   await new Promise((r) => ws0.on('open', r));
@@ -206,10 +206,10 @@ try {
   check('the agent\'s `wait` prints the move and done', w.code === 0 && /done/.test(w.out) && /approved by the user and is done/.test(w.out), w);
   const after = await api('GET', '/api/user-todos');
   check('the For-you item is resolved', !(after.body?.todos?.open || []).some((x) => x.id === item.id));
-  await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); document.getElementById('btn-desktop-apps').click(); true`);
+  await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); document.getElementById('btn-desktop-apps').click(); true`);
   check('"Your installed apps" lists hello too (proposed by the agent)', await waitFor(`!!document.querySelector('#desktop-launch-dialog .app-sec-entry[data-entry="hello"]') && /proposed by Image work/.test(document.querySelector('#desktop-launch-dialog .app-sec-entry[data-entry="hello"]').textContent)`, 10000));
 
-  await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+  await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
   console.log('③ Not now');
   const pr2 = await cli(['install', 'gimp', '--why', 'an image editor'], TOKEN);
   const pid2 = (/Proposed (ap-[0-9a-f]{6})/.exec(pr2.out) || [])[1];
@@ -227,7 +227,7 @@ try {
   check('POST /api/apps/install with the agent\'s token ⇒ 403 agent_forbidden', r403.status === 403 && r403.body && r403.body.code === 'agent_forbidden', r403);
 
   console.log('⑤ the phone');
-  await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); true`);
+  await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await sleep(400);
   await evalJs(`document.getElementById('btn-desktop-apps').click(); true`);
@@ -237,7 +237,7 @@ try {
   await shot('apps-phone');
 
   console.log('⑥ zh at 390 px — the card in the For-you sheet: Chinese words, one click');
-  await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); localStorage.setItem('vibespace.lang', 'zh'); true`);
+  await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); localStorage.setItem('vibespace.lang', 'zh'); true`);
   await cdp('Page.reload', {});
   await evalJs('new Promise((res, rej) => { const t0 = Date.now(); (function w() { if (window.app) return res(app.ready); if (Date.now() - t0 > 20000) return rej(new Error("no app after 20s")); setTimeout(w, 200); })(); })');
   await sleep(600);
@@ -284,7 +284,7 @@ try {
       status: d.querySelector('.app-sec-foot .app-sec-updates')?.textContent || '' };
   })()`;
   console.log('⑦ design 009: the Apps dialog in zh at 390 px and en at 1440 px — the rect census');
-  await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); localStorage.setItem('vibespace.lang', 'zh'); true`);
+  await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); localStorage.setItem('vibespace.lang', 'zh'); true`);
   await cdp('Page.reload', {});
   await sleep(600);
   await waitFor(`!!window.app && !!app._desktopAppsAvailable && !!document.getElementById('btn-desktop-apps') && !document.getElementById('loading-screen')`, 20000); // the page is ready (the splash is gone)
@@ -313,7 +313,7 @@ try {
   const clamp = await evalJs(`(() => { const l = document.querySelector('#desktop-launch-dialog .desktop-launch-card[data-planted] .desktop-launch-card-label'); const lh = parseFloat(getComputedStyle(l).lineHeight); return { h: l.getBoundingClientRect().height, lh, cut: l.scrollHeight > l.clientHeight + 1 }; })()`);
   check('zh 390: a planted long name (≥ 3 lines unclamped in its own card — constructed) clamps at EXACTLY two lines, inside its card, overlapping nothing (the census sees it)', !!planted && planted.lines >= 3 && !!zhLong && zhLong.bad.length === 0 && clamp.cut && Math.abs(clamp.h - 2 * clamp.lh) <= 2, { planted, bad: zhLong && zhLong.bad.slice(0, 3), clamp });
   await shot('apps-zh-390');
-  await evalJs(`document.querySelectorAll('.dialog-overlay').forEach((o) => o.remove()); localStorage.setItem('vibespace.lang', 'en'); true`);
+  await evalJs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); localStorage.setItem('vibespace.lang', 'en'); true`);
   await cdp('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await cdp('Page.reload', {});
   await sleep(600);

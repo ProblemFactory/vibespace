@@ -45,6 +45,7 @@
 // reclaim, a press in the view → resumed, xterm's host, a synthetic press, two views) + test-browser-live-input ⑥.
 import { focusVerdict, userPressFocus, yieldAfter, keyboardTransition, reclaimCue, yieldHomeVerdict } from '../browser-takeover.js';
 import { dialogOpener, dialogVerdict, dialogReturn, dialogReclaimCue } from '../browser-takeover.js'; // lane dialog-keys: a dialog the user's own act opened takes the keys
+import { isPersonDialog, isFormRoot, formHoldsNow, FORM_ROOTS } from './form-yield.js'; // lane dialog-yield r2: THE ONE answer to «did the person open a dialog?» — a decision's overlay AND a form's root (PURE)
 
 /** An element a caret can live in — the thing a takeover may not let the keyboard fall into by itself (moved here from
  *  browser-live-window.js, lane J r2: ONE definition for the view and this module). */
@@ -79,20 +80,27 @@ export function isStreamVideo(el) {
 }
 export function isKeyboardSurface(el) { return isPictureCanvas(el) || isStreamVideo(el); }
 const takesKeys = (el) => isEditable(el) || isKeyboardSurface(el);
-/** verify r3 (F4): an app DIALOG — src/lib/utils.js createModalShell's overlay (every dialog of the app: its own focus for
- *  Escape, a confirm's default button, an input dialog's box); lane dialog-keys: the static #dialog-overlay too */
-const DIALOG_HOSTS = '.dialog-overlay';
-/** lane dialog-keys: THE APP'S MODAL — the overlay element itself (createModalShell's, or the static #dialog-overlay) */
+/** verify r3 (F4): an app DIALOG — src/lib/utils.js createModalShell's root (every dialog of the app: its own focus for
+ *  Escape, a confirm's default button, an input dialog's box); lane dialog-keys: the static #dialog-overlay too; lane
+ *  dialog-yield r2: a FORM's root in its window too — ONE predicate (src/lib/form-yield.js isPersonDialog) for every reader.
+ *  Measured on da9545e8: a form announced as `.dialog-form` was judged null, its field's focus RECLAIMED, and the secret pasted
+ *  into «Paste a secret into the vault» went to the agent's page. */
 const classesOf = (el) => { try { return String((el && el.className) || '').split(/\s+/); } catch { return []; } };
-export function isModalOverlay(el) { return !!el && el.nodeType === 1 && classesOf(el).includes(DIALOG_HOSTS.slice(1)); }
-/** …and is it OPEN: in the document and not `.hidden` (the static overlay closes by the class; a shell's by its removal) */
-export function modalOpen(el) { try { return isModalOverlay(el) && el.isConnected !== false && !classesOf(el).includes('hidden') && !el.hidden; } catch { return false; } }
+export function isModalOverlay(el) { return isPersonDialog(el); }
+/** …and is it OPEN: in the document and not `.hidden` (the static overlay closes by the class; a shell's by its removal); a
+ *  FORM also while its window is on show (minimized, on another desktop ⇒ it holds nothing) */
+export function modalOpen(el) {
+  try {
+    if (!isModalOverlay(el) || el.isConnected === false || classesOf(el).includes('hidden') || el.hidden) return false;
+    return !isFormRoot(el) || isVisible(el);
+  } catch { return false; }
+}
 /** lane mirror-green-228 (THE .228 MIRROR): a focus that lands LATE — on a session window's server answer (`created` /
  *  `attached`, src/lib/session-lifecycle.js) — takes the keys only while no app dialog holds them. The double-click that
  *  opens the Rename dialog on a sidebar row also attaches its session; on the slow Actions runner the answer landed after
  *  the dialog had focused its box, so the new name and its Enter went to the chat composer and the rename never happened.
  *  PURE over the overlays the caller lists ('keep' = leave the focus where it is). */
-export function lateFocusVerdict(overlays) { try { return Array.from(overlays || []).some(modalOpen) ? 'keep' : 'take'; } catch { return 'take'; } }
+export function lateFocusVerdict(overlays, active = null) { try { return Array.from(overlays || []).some((o) => modalOpen(o) && (!isFormRoot(o) || formHoldsNow(o, active))) ? 'keep' : 'take'; } catch { return 'take'; } } // lane dialog-yield r2: a FORM keeps the keys while the person works in it (the focus inside, its window the active one) — a form left behind another window does not
 /** lane dialog-keys: where a dialog that TOOK the keys but focuses nothing itself gets them (the brief: "its first
  *  focusable / its input") — its first text box, else the overlay (a keydown there bubbles through the dialog's own
  *  handlers). Never a button: Enter on a primary button the dialog did not choose would act for the user. */
@@ -163,6 +171,15 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
   // took the keys [{overlay, back}] (newest last); `base` = where the keys were before the first ({to: 'sink'|'yield', el})
   const s = { yielded: false, kind: null, press: null, last: null, cue: null, lastCueAt: null, drove: null, opener: null, holds: [], base: null, dialogWhy: null, home: null }; // (`home` = the text box the keys were yielded to — a dialog opened from a yield gives them back there)
   const inView = (el) => { try { return !!el && !!root && (el === root || root.contains(el)); } catch { return false; } };
+  /** lane dialog-yield r2: the FORM root whose WINDOW holds `el` (its title bar too — a press on its ✕ is a press on the form) */
+  const formRootOf = (el) => {
+    try {
+      if (!el || typeof el.closest !== 'function') return null;
+      const w = el.closest('.window-form');
+      const r = el.closest(FORM_ROOTS) || (w && typeof w.querySelector === 'function' ? w.querySelector(FORM_ROOTS) : null);
+      return r && isFormRoot(r) ? r : null;
+    } catch { return null; }
+  };
   /** lane dialog-keys: the press landed on the view's PICTURE (`picture` = the element the page's pointer is forwarded from) */
   const onPicture = (el) => { try { const pic = typeof picture === 'function' ? picture() : picture; return !!el && !!pic && (el === pic || pic.contains(el)); } catch { return false; } };
   const heldOpen = () => s.holds.filter((h) => modalOpen(h.overlay));
@@ -175,11 +192,31 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
   return {
     get yielded() { return s.yielded; },
     get kind() { return s.kind; },
-    /** → 'resumed' | 'press-view' | 'noted' | null (the takeover is not this view's) */
+    /** → 'resumed' | 'press-view' | 'noted' | 'dialog' (lane dialog-yield r2: a press into an open FORM took the keys for it) |
+     *  null (the takeover is not this view's) */
     onPointerDown(e) {
       // lane dialog-keys: EVERY press is the opener evidence a dialog opening next is judged by (inside the view too — its
       // bar's Quit opens a confirm — but a press on the picture is the page's); trusted only by the browser's own flag
       s.opener = { at: now(), trusted: e.isTrusted === true, picture: onPicture(e.target) };
+      // lane dialog-yield r2: A FORM HOLDS THE KEYS WHILE IT IS WHERE THE PERSON WORKS — it is a window, not a backdrop: a press
+      // OUTSIDE its window (the live view, the chat, another window) gives the keys back to the rules below (the view re-claims
+      // on a press on it, a text box pressed yields), a trusted press INSIDE an open form's window takes them for it again
+      const formOf = (h) => isFormRoot(h.overlay);
+      const inHeld = (ov) => { try { const w = isFormRoot(ov) && typeof ov.closest === 'function' ? ov.closest('.window') || ov : ov; return !!e.target && (w === e.target || w.contains(e.target)); } catch { return false; } };
+      // (a press inside ANY held dialog — a confirm the form opened over itself — keeps the whole stack: it is the person's work)
+      if (s.holds.some(formOf) && !s.holds.some((h) => inHeld(h.overlay))) {
+        s.holds = s.holds.filter((h) => !formOf(h));
+        if (!s.holds.length) s.base = null;
+      }
+      if (e.isTrusted === true && (driving() || s.yielded) && !onPicture(e.target)) {
+        const root = formRootOf(e.target);
+        if (root && modalOpen(root) && !s.holds.some((h) => h.overlay === root)) {
+          if (!s.holds.length) s.base = s.yielded ? { to: 'yield', el: s.home } : { to: 'sink', el: null };
+          s.holds.push({ overlay: root, back: null });
+          s.press = null;
+          return 'dialog';
+        }
+      }
       // verify r1 (K3): a press on the view — or on what names it — ends a yield, even while the view is off screen or its
       // stream reconnects (the user pointed at the browser: his keys are the page's again once it drives). Before, a press
       // on the view's own tab / title bar kept the caret in the composer and what he typed next for the page went there.
@@ -254,6 +291,7 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
      *  is judged). */
     onDialogOpen(ov, { active = null } = {}) {
       if (!modalOpen(ov)) return null;
+      if (isFormRoot(ov) && !formHoldsNow(ov, active)) return null; // lane dialog-yield r2: a form that opened BEHIND (the system's) holds nothing — the keys stay where they are
       if (s.holds.some((h) => h.overlay === ov)) return 'held';
       const held = s.holds.length > 0;
       const o = dialogOpener({ press: s.opener, openAt: now() });

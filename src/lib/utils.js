@@ -7,6 +7,7 @@ import { enterSubmits } from './chat-enter-keys.js';
 import { arrivalVerdict } from '../sync-arrival.js'; // PURE: StateSync's arrival rule (lane statesync-last-arrival)
 import { VOICE_UI } from '../voice-focus.js'; // PURE: the voice UI outside every box — never an outside press (lane phone-tray-voice-done)
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
+import { DIALOG_ROOTS, SHEET_ROOTS, reopenVerdict, escapeVerdict, typedVerdict } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set + the shell's verdicts
 
 export function formatSize(b) { if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB'; }
 
@@ -47,27 +48,65 @@ export function announceModal(overlay) {
 // lane dialog-yield (the owner, 2026-10-26, on his hub: «尽可能减少 blocking popup 的使用；带填空的对话框不阻塞聊天；打开别的窗口要
 // 让位»): ONE shell, TWO kinds, DECLARED at every call — `kind` has NO default (test-architecture §103 reds a call without one,
 // by file:line, and prints the form list):
-//   'decision' — the person answers before anything goes on: a yes / no, a consent, a destructive confirm, the vault unlock,
-//     ONE password / ONE line (showConfirmDialog / showInputDialog). The overlay: a backdrop over everything (z 99998).
+//   'decision' — the person answers before anything goes on: a yes / no, a consent, a destructive confirm, the vault unlock
+//     (each decision call says why on its line: `// decision: <reason>`, printed by §103). The overlay: a backdrop over
+//     everything (z 99998).
 //   'form' — what the person FILLS, reads or picks from (install a plugin, a credential, mounts, a channel's editors, the
-//     Agents forms…): on the desktop tier a small WINDOW that yields (src/lib/form-window.js — no backdrop, the chat and every
-//     window stay interactive, it goes behind what the person focuses and comes back from the taskbar; ✕ / Cancel / Escape
-//     from a focus INSIDE it close it — the idle-Escape rule below is a decision's; the unsaved guard still asks). The phone
-//     tier and a page with no host keep the sheet: nothing beside it to block. A call that stays a decision for now says why
-//     on its own line (`// form-later: <reason>`), counted and printed by §103.
+//     Agents forms, a one-line input — showInputDialog…): on the desktop tier a small WINDOW that yields (src/lib/form-window.js
+//     — no backdrop, the chat and every window stay interactive, it goes behind what the person focuses and comes back from
+//     the taskbar). The phone tier and a form opened FROM a blocking layer keep the sheet — only while that holds.
+// Round 2 (acceptance r1, three MAJORs on da9545e8):
+//   • ONE ESCAPE DOOR, the shell's, and it honours the call (PURE escapeVerdict): `escapeToClose` as before (a site that left
+//     it off stays off — the self-update progress, a machine's set-up), the unsaved guard for a dirty form (Escape = the ✕: it
+//     asks), and a caller's ask-first hook `onEscape(e) → false` (it keeps the form — asks or answers itself) consulted BEFORE
+//     the close. A caller never puts its own Escape listener on the root (§103 reds it): the shell's ran first and closed the
+//     OAT sign-in under its own «Cancel the sign-in?». An unguarded FORM with something typed never loses it to an Escape: the
+//     shell asks (Keep editing / Discard — PURE typedVerdict: a field whose value differs from what it held when first entered).
+//   • THE SAME FORM IS NEVER REPLACED: a form whose id is open is RAISED (PURE reopenVerdict — the same title ⇒ the same form)
+//     with what was typed, its handlers and its guard; the caller gets a detached shell whose onClose runs at once (what it set
+//     up for this open is released). Another form under a shared id asks the open one's own door first. A caller that wants
+//     fresh content closes first (onClose runs). (A decision's id still replaces — nothing can be typed behind a backdrop.)
+//   • «Opened by the person» is the CALLER's fact: `opener: 'person' | 'system'` (default person; a broadcast / poll / wake
+//     path says 'system' — it opens behind). Whatever it says, a form never takes the keys from a field the person was typing in.
 // The shape returned is the same: `overlay` = the root holding the id (a form's: .dialog-form inside its window, whose
-// .remove() closes the window — the singleton dedup above and a caller's overlay.remove() keep working).
-let formHost = null;
+// .remove() closes the window — a caller's overlay.remove() keeps working).
+let formHost = null, formTitleSeq = 0;
 /** app.js wires the desktop tier's form host once (src/lib/form-window.js installFormHost); null = every form is a sheet */
 export function setFormHost(host) { formHost = host && typeof host.open === 'function' ? host : null; }
-export function createModalShell({ kind, id, title = '', dialogClass = '', bodyClass = '', minWidth = null, closeOnBackdrop = true, escapeToClose = false, onClose = null, unsaved = null } = {}) {
+const FIELD_SKIP = /^(button|submit|reset|image|hidden|search)$/i;   // a search box's words are its own (Escape never asks for them)
+const fieldOf = (el) => { try { if (!el || el.nodeType !== 1) return false; if (el.isContentEditable) return true; if (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return !el.disabled; return el.tagName === 'INPUT' && !el.disabled && !FIELD_SKIP.test(el.type || ''); } catch { return false; } };
+const fieldValue = (f) => (f.type === 'checkbox' || f.type === 'radio' ? f.checked : f.isContentEditable ? f.textContent : f.value);
+/** WHAT WAS TYPED in a form (round 2): each field's value when the person first entered it; dirty = one differs now */
+function typedWatch(scope) {
+  const was = new Map();
+  scope.addEventListener('focusin', (e) => { const f = e.target; if (fieldOf(f) && !was.has(f)) was.set(f, fieldValue(f)); }, true);
+  return { dirty: () => typedVerdict([...was].filter(([f]) => f.isConnected).map(([f, w]) => ({ was: w, now: fieldValue(f) }))) };
+}
+/** the same form opened again: a DETACHED shell for the caller — it builds into nothing, and its onClose runs at once so what
+ *  the caller set up for this open (a broadcast handler, a timer, a pending promise) is released */
+function idleShell({ title = '', dialogClass = '', bodyClass = '', onClose = null } = {}) {
+  const overlay = document.createElement('div'), dialog = document.createElement('div'), header = document.createElement('div'), h3 = document.createElement('h3'), closeBtn = document.createElement('button'), body = document.createElement('div');
+  dialog.className = 'dialog' + (dialogClass ? ' ' + dialogClass : ''); header.className = 'dialog-header'; h3.textContent = title; closeBtn.className = 'dialog-close'; body.className = 'dialog-body' + (bodyClass ? ' ' + bodyClass : '');
+  header.append(h3, closeBtn); dialog.append(header, body); overlay.appendChild(dialog);
+  let done = false;
+  const close = () => { if (done) return; done = true; try { onClose?.(); } catch (e) { console.warn('[createModalShell] onClose of a re-open:', e); } };
+  queueMicrotask(close);
+  const noop = () => {};
+  return { overlay, dialog, body, closeBtn, close, dismiss: close, markSaved: noop, markDirty: noop, isDirty: () => false, raised: true };
+}
+export function createModalShell({ kind, id, title = '', dialogClass = '', bodyClass = '', minWidth = null, closeOnBackdrop = true, escapeToClose = false, onClose = null, unsaved = null, onEscape = null, opener = 'person' } = {}) {
   if (kind !== 'decision' && kind !== 'form') { try { console.warn(`[createModalShell] ${id || title}: kind must be 'decision' or 'form' (test-architecture §103) — drawn as a decision`); } catch { /* a console is a courtesy */ } }
-  if (id) document.getElementById(id)?.remove();
-  const yieldWin = kind === 'form' && formHost ? formHost.open({ id, title }) : null;   // null = the phone tier: the sheet
+  if (id) {
+    const old = document.getElementById(id), sh = old && old._shell;
+    if (sh && kind === 'form' && sh.kind === 'form' && sh.live()) {
+      // THE SAME FORM AGAIN: raised, never replaced (another form under a shared id: the open one's own door first)
+      if (reopenVerdict({ openTitle: sh.title, nextTitle: title }) === 'door') sh.door();
+      if (sh.live()) { sh.raise(opener); return idleShell({ title, dialogClass, bodyClass, onClose }); }
+    } else if (old) old.remove();
+  }
+  const fh = kind === 'form' && formHost ? formHost.open({ id, title, opener: opener === 'system' ? 'system' : 'person' }) : null;   // null = no host (a page without app.js): the sheet
   const overlay = document.createElement('div');
   if (id) overlay.id = id;
-  if (yieldWin) overlay.className = 'dialog-form';
-  else { overlay.className = 'dialog-overlay'; overlay.style.zIndex = '99998'; }
   const dialog = document.createElement('div');
   dialog.className = 'dialog' + (dialogClass ? ' ' + dialogClass : '');
   if (minWidth) dialog.style.minWidth = minWidth;
@@ -80,31 +119,54 @@ export function createModalShell({ kind, id, title = '', dialogClass = '', bodyC
   body.className = 'dialog-body' + (bodyClass ? ' ' + bodyClass : '');
   dialog.append(header, body);
   overlay.appendChild(dialog);
-  (yieldWin ? yieldWin.content : document.body).appendChild(overlay);
+  if (fh) {
+    // a NON-MODAL dialog for assistive tech (round 2 — the window yields: no aria-modal, no focus trap), named by its title
+    // (every form the app draws has its host; a page without one keeps the overlay's markup exactly — test-mounts-dialog-extract)
+    overlay.setAttribute('role', 'dialog');
+    h3.id = id ? `${id}-title` : `dialog-title-${++formTitleSeq}`;   // deterministic: the same dialog draws the same markup (test-mounts-dialog-extract compares two renders)
+    overlay.setAttribute('aria-labelledby', h3.id);
+  }
+  if (fh) fh.adopt(overlay);   // its sheet (an overlay, z 99998) or its window's root (.dialog-form) — the host decides and may move it
+  else { overlay.className = 'dialog-overlay'; overlay.style.zIndex = '99998'; document.body.appendChild(overlay); }
   announceModal(overlay); // lane dialog-keys: in the opening act's own task, before the caller focuses anything in it
   pageKeysScroll(overlay, dialog); // lane door-healthy-chat: PageUp / PageDown move the dialog's scroll region
   let unbindEscape = null;
   let gone = false;   // a form ends ONCE: its own close, or its window closed by any other door (the ✕, a desktop's close)
   const ended = () => { if (gone) return false; gone = true; unbindEscape?.(); return true; };
-  const close = yieldWin ? () => { if (!ended()) return; yieldWin.close(); onClose?.(); } : () => { unbindEscape?.(); overlay.remove(); onClose?.(); };
+  const close = fh ? () => { if (!ended()) return; fh.close(); onClose?.(); } : () => { unbindEscape?.(); overlay.remove(); onClose?.(); };
   const guard = unsaved && typeof unsaved === 'object' ? unsavedGuard({ overlay, dialog, body, unsaved, close }) : null;
   const dismiss = guard ? guard.dismiss : close;   // the person's own ✕ / Escape / backdrop — asks first when dirty
+  // an unguarded FORM: what the person typed is watched, and an Escape (or another form under its id) asks before it goes
+  const typed = kind === 'form' && !guard && unsaved !== false ? typedWatch(body) : null;
+  let soft = null;
+  const softAsk = () => { soft = soft || unsavedGuard({ overlay, dialog, body, unsaved: { isDirty: () => !!typed && typed.dirty() }, close, soft: true }); soft.dismiss(); };
+  /** THE ONE ESCAPE DOOR (PURE escapeVerdict) → the verdict ('none' = not this shell's key) */
+  const escDoor = (e) => {
+    const hook = typeof onEscape === 'function';
+    let says = true;
+    if (hook) { try { says = onEscape(e) !== false; } catch (err) { console.warn('[createModalShell] onEscape:', err); } }
+    const v = escapeVerdict({ escapeToClose: !!escapeToClose, hook, callerSays: says, guarded: !!guard, typed: !!typed && typed.dirty() });
+    if (v === 'guard' || v === 'close') dismiss('escape');
+    else if (v === 'ask') softAsk();
+    return v;
+  };
   closeBtn.onclick = () => dismiss();
-  if (closeOnBackdrop && !yieldWin) overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) dismiss(); });
-  if (yieldWin) {
-    // A FORM: Escape closes it only from a focus INSIDE it (a menu over it closes first; an open picker keeps its key)
+  if (closeOnBackdrop) overlay.addEventListener('mousedown', (e) => { if (e.target === overlay && (!fh || fh.mode() === 'sheet')) dismiss(); });
+  if (fh) {
+    // A FORM: Escape is its door only from a focus INSIDE it (a menu over it closes first; an open picker keeps its key)
     overlay.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
       if (document.querySelector('[data-popover]')) return;
       try { if (e.target && e.target.matches && e.target.matches('select:open')) return; } catch { /* :open unknown: the key is the form's */ }
-      e.preventDefault(); e.stopPropagation(); dismiss('escape');
+      if (escDoor(e) === 'none') return;
+      e.preventDefault(); e.stopPropagation();
     });
-    overlay.remove = () => { if (ended()) yieldWin.close(); };   // the id's dedup / a caller's overlay.remove() close the form's window — WITHOUT onClose, as a decision's bare remove (refresh-live: remove, then finish(r))
-    yieldWin.bind({ dismiss: (how) => dismiss(how), closed: () => { if (ended()) onClose?.(); } }, overlay);
-    setTimeout(() => { try { if (yieldWin.active() && overlay.isConnected && !overlay.contains(document.activeElement)) overlay.focus({ preventScroll: true }); } catch { /* focus is a courtesy */ } }, 0);
+    overlay.remove = () => { if (ended()) fh.close(); };   // a caller's overlay.remove() closes the form — WITHOUT onClose, as a decision's bare remove (refresh-live: remove, then finish(r))
+    fh.bind({ dismiss: (how) => dismiss(how), closed: () => { if (ended()) onClose?.(); } });
+    setTimeout(() => { try { if (fh.active() && overlay.isConnected && !overlay.contains(document.activeElement)) overlay.focus({ preventScroll: true }); } catch { /* focus is a courtesy */ } }, 0);
   } else if (escapeToClose) {
     overlay.tabIndex = -1;
-    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); dismiss('escape'); } });
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); escDoor(e); } });
     // lane race-sweep (B-6b74, test-desktop-webrtc-chrome ⑪ 5/5 on 2 busy cpus): the overlay hears Escape only from a focus
     // INSIDE it — a control that disables / replaces itself (the window picker's 「停止」 swaps its row) drops the focus to
     // <body>, and Escape closed nothing: the picker stayed over the window. While NOTHING holds the focus, Escape is the
@@ -114,14 +176,23 @@ export function createModalShell({ kind, id, title = '', dialogClass = '', bodyC
       if (!overlay.isConnected) { unbindEscape(); return; }
       if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
       if (e.target !== document.body && e.target !== document.documentElement) return;   // something holds the keyboard
-      const open = [...document.querySelectorAll('.dialog-overlay')].filter((o) => o._escapeToClose);
+      const open = [...document.querySelectorAll(DIALOG_ROOTS)].filter((o) => o._escapeToClose);
       if (open[open.length - 1] !== overlay) return;   // the topmost one only
-      e.preventDefault(); dismiss('escape');
+      e.preventDefault(); escDoor(e);
     };
     document.addEventListener('keydown', onIdleEscape);
     unbindEscape = () => document.removeEventListener('keydown', onIdleEscape);
-    setTimeout(() => overlay.focus(), 0);
+    setTimeout(() => { if (!overlay.contains(document.activeElement)) overlay.focus(); }, 0);   // (never from the dialog's own field — lane dialog-yield r2: the mounts key step focuses its passphrase box)
+  } else if (typeof onEscape === 'function') {
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !e.isComposing) { e.stopPropagation(); escDoor(e); } });
   }
+  // what a second open of this id finds (round 2): the same form is raised, another one asks this one's door first
+  overlay._shell = {
+    kind, title,
+    live: () => !gone && overlay.isConnected,
+    raise: (by) => { if (fh) fh.raise({ opener: by }); else { try { overlay.focus({ preventScroll: true }); } catch { } } },
+    door: () => { if (guard) guard.dismiss(); else if (typed && typed.dirty()) softAsk(); else close(); },
+  };
   const noop = () => {};
   return { overlay, dialog, body, closeBtn, close, dismiss, markSaved: guard ? guard.markSaved : noop, markDirty: guard ? guard.markDirty : noop, isDirty: guard ? guard.isDirty : () => false };
 }
@@ -154,12 +225,13 @@ function pageKeysScroll(overlay, dialog) {
   });
 }
 /** The unsaved guard of ONE shell (lane dialog-unsaved-guard — the contract is createModalShell's `unsaved`, above). */
-function unsavedGuard({ overlay, dialog, body, unsaved, close }) {
+function unsavedGuard({ overlay, dialog, body, unsaved, close, soft = false }) {
+  // `soft` (lane dialog-yield r2): an UNGUARDED form's typed words on an Escape — the same sheet with no Save (Keep editing / Discard)
   let flagged = false;
   const own = typeof unsaved.isDirty !== 'function';
   if (own) { const flag = () => { flagged = true; }; body.addEventListener('input', flag); body.addEventListener('change', flag); }
   const isDirty = () => { if (own) return flagged; try { return !!unsaved.isDirty(); } catch { return true; } };   // a dirty test that throws asks — never a silent drop
-  dialog.classList.add('dialog-guarded');
+  if (!soft) dialog.classList.add('dialog-guarded');
   let sheet = null; let back = null;
   const keepEditing = () => {
     if (!sheet) return;
@@ -182,13 +254,13 @@ function unsavedGuard({ overlay, dialog, body, unsaved, close }) {
     const mk = (cls, text) => { const b = document.createElement('button'); b.type = 'button'; b.className = cls; b.textContent = text; return b; };
     const keepB = mk('btn-cancel dialog-unsaved-keep', t('Keep editing'));
     const dropB = mk('btn-cancel dialog-unsaved-discard', t('Discard'));
-    const saveB = mk('btn-create dialog-unsaved-save', unsaved.saveLabel || t('Save'));
-    row.append(keepB, dropB, saveB);
+    const saveB = soft ? keepB : mk('btn-create dialog-unsaved-save', unsaved.saveLabel || t('Save'));   // soft: no save to run — Keep editing is the default
+    if (soft) row.append(dropB, keepB); else row.append(keepB, dropB, saveB);
     card.append(words, err, row);
     sheet.appendChild(card);
     keepB.onclick = keepEditing;
     dropB.onclick = discard;
-    saveB.onclick = async () => {
+    if (!soft) saveB.onclick = async () => {
       saveB.disabled = dropB.disabled = true; err.hidden = true;
       let r; let thrown = null; const said = [];
       unsavedSaySink = said;
@@ -224,19 +296,25 @@ function unsavedGuard({ overlay, dialog, body, unsaved, close }) {
 //   if (await showConfirmDialog({ title: 'Delete?', message: '...', danger: true })) …
 // closeOnBackdrop off: the callers wire backdrop mousedown themselves so the
 // Promise resolves (a bare overlay.remove() would leave the await hanging).
-function _modalShell(title) {
-  const { overlay, dialog, body, closeBtn } = createModalShell({ kind: 'decision', title, closeOnBackdrop: false });
+function _modalShell(title, { kind = 'decision', onClose = null, opener = 'person' } = {}) {
+  // lane dialog-yield r2: showInputDialog is a FORM (the ruling «带填空的对话框不阻塞聊天» names no one-line exemption): a window
+  // that yields, Escape its shell's door (asks when the line was edited), its window's ✕ answers null (onClose); a caller that
+  // must hold everything until answered passes kind 'decision' with its reason. showConfirmDialog stays a decision.
+  const { overlay, dialog, body, closeBtn, close } = createModalShell({ kind: kind === 'form' ? 'form' : 'decision', title, closeOnBackdrop: false, escapeToClose: kind === 'form', onClose, opener }); // decision: a yes / no answered before anything goes on (showConfirmDialog; showInputDialog's caller may ask for one)
   const footer = document.createElement('div'); footer.className = 'dialog-footer';
   const cancelBtn = document.createElement('button'); cancelBtn.className = 'btn-cancel'; cancelBtn.textContent = t('Cancel');
   const okBtn = document.createElement('button'); okBtn.className = 'btn-create';
   footer.append(cancelBtn, okBtn);
   dialog.appendChild(footer);
-  return { overlay, body, okBtn, cancelBtn, closeBtn };
+  return { overlay, body, okBtn, cancelBtn, closeBtn, close };
 }
 
-export function showInputDialog({ title = t('Input'), label = '', value = '', placeholder = '', confirmText = t('OK'), multiline = false, decorate = null, validate = null } = {}) {
+export function showInputDialog({ title = t('Input'), label = '', value = '', placeholder = '', confirmText = t('OK'), multiline = false, decorate = null, validate = null, kind = 'form', opener = 'person' } = {}) {
   return new Promise((resolve) => {
-    const { overlay, body, okBtn, cancelBtn, closeBtn } = _modalShell(title);
+    let deco = null, settled = false;
+    const finish = (result) => { if (settled) return; settled = true; try { deco && deco.destroy && deco.destroy(); } catch { } resolve(result); };
+    const form = kind !== 'decision';
+    const { overlay, body, okBtn, cancelBtn, closeBtn, close } = _modalShell(title, { kind: form ? 'form' : 'decision', onClose: () => finish(null), opener });
     okBtn.textContent = confirmText;
     const wrap = document.createElement('label');
     if (label) wrap.appendChild(document.createTextNode(label));
@@ -248,8 +326,8 @@ export function showInputDialog({ title = t('Input'), label = '', value = '', pl
     wrap.appendChild(input);
     body.appendChild(wrap);
     // a multi-line box is a message: its caller may attach to it (the microphone — src/lib/voice-input.js; utils imports none of it)
-    const deco = multiline && typeof decorate === 'function' ? decorate(input) : null;
-    const done = (result) => { try { deco && deco.destroy && deco.destroy(); } catch { } overlay.remove(); resolve(result); };
+    deco = multiline && typeof decorate === 'function' ? decorate(input) : null;
+    const done = (result) => { finish(result); close(); };
     // lane launch-picture-size: `validate(value)` → '' | the refusal's words — said INLINE under the box (role alert), the dialog
     // stays open and the box keeps the text (a typed size refused never closes the question)
     const err = document.createElement('p'); err.className = 'dialog-hint dialog-error hidden'; err.setAttribute('role', 'alert');
@@ -266,7 +344,7 @@ export function showInputDialog({ title = t('Input'), label = '', value = '', pl
       if (e.isComposing || e.keyCode === 229) return;
       if (e.key === 'Enter' && !multiline) { e.preventDefault(); submit(); }
       if (e.key === 'Enter' && multiline && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(input.value); }
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); }
+      if (e.key === 'Escape' && !form) { e.preventDefault(); e.stopPropagation(); done(null); } // (a form's Escape is its shell's door: it asks when the line was edited)
     });
     setTimeout(() => { input.focus(); input.select(); }, 0);
   });
@@ -459,7 +537,7 @@ function _placeDeskToasts(stack) {
 const _toastTier = () => { try { return matchMedia(VC_PHONE_MEDIA).matches || isTouchDevice(); } catch { return false; } }; // int355: the phone paths' ONE media list (duo-build-1's law, test-viewport-class)
 /** the dialog of the topmost open app modal (createModalShell's overlay or the static #dialog-overlay), else null */
 function _openModalDialog() {
-  const ovs = [...document.querySelectorAll('.dialog-overlay')].filter((o) => !o.classList.contains('hidden') && o.getClientRects().length);
+  const ovs = [...document.querySelectorAll(SHEET_ROOTS)].filter((o) => !o.classList.contains('hidden') && o.getClientRects().length); // (a form's WINDOW is no modal: toasts stand clear of a sheet only)
   const ov = ovs[ovs.length - 1];
   return ov ? [...ov.children].find((d) => d.classList.contains('dialog') && !d.classList.contains('hidden') && d.getClientRects().length) || null : null;
 }

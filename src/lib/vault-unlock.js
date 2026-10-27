@@ -227,7 +227,7 @@ export function showUnlock({ then = null } = {}) {
     if (facts && facts.state === 'locked') dismissLock(facts);   // closed while still locked = set aside (an unlock is not)
     if (typeof then === 'function') setTimeout(then, 0);   // after the closing press: the menu's outside-click never sees it
   };
-  const { dialog, body, close } = createModalShell({ id: 'vault-unlock-dialog', title: t('Unlock the vault'), dialogClass: 'vault-dialog-box', minWidth: 'min(420px, 92vw)', closeOnBackdrop: false, escapeToClose: true, onClose, kind: 'decision' });
+  const { dialog, body, close } = createModalShell({ id: 'vault-unlock-dialog', title: t('Unlock the vault'), dialogClass: 'vault-dialog-box', minWidth: 'min(420px, 92vw)', closeOnBackdrop: false, escapeToClose: true, onClose, kind: 'decision' }); // decision: the product is locked until answered; the caller awaits (the vault's password)
   body.appendChild(el('p', 'vault-text', t('The credentials VibeSpace stores (accounts, mounts, channels, integrations, app logins, passkeys, the links to paired machines, the relay and voice sign-ins) stay locked until you enter the second password — after every restart and every lock.')));
   const pw = pwInput('vault-unlock-pw', t('Second password'));
   const err = el('div', 'vault-err'); err.setAttribute('role', 'alert');
@@ -262,7 +262,7 @@ export function unlockFirst(open) {
 /** THE SETUP MODAL — the second password, twice, with the plain warning. `nag` = the ask a stored secret raised (「稍后」 snoozes
  *  it for 3 days on this device — localStorage `vs-vault-later`, the epoch ms the chrome suites' scratch hubs preset too). */
 export function showSetup({ nag = false } = {}) {
-  const { dialog, body, close } = createModalShell({ id: 'vault-setup-dialog', title: t('Set a second password'), dialogClass: 'vault-dialog-box', minWidth: 'min(460px, 92vw)', closeOnBackdrop: false, kind: 'decision' });
+  const { dialog, body, close } = createModalShell({ id: 'vault-setup-dialog', title: t('Set a second password'), dialogClass: 'vault-dialog-box', minWidth: 'min(460px, 92vw)', closeOnBackdrop: false, kind: 'decision' }); // decision: the product is locked until answered; the caller awaits (the vault's first password, twice) — the owner may overrule at integration
   if (nag) body.appendChild(el('p', 'vault-text vault-why', t('A credential was just stored here — a second password keeps it sealed.')));
   body.appendChild(el('p', 'vault-text', t('Every credential VibeSpace stores is sealed in a vault that only this second password opens. After every restart, the first sign-in asks for it; until then nothing stored can be read.')));
   body.appendChild(el('p', 'vault-warn', t('There is no recovery: forget it and the stored credentials are gone — you would connect every account again. An export of the credentials is not part of this version.')));
@@ -291,7 +291,7 @@ export function showSetup({ nag = false } = {}) {
 
 /** 修改第二密码… (the Vault window's header, locked or unlocked — the change rewraps under the old password either way). */
 export function showChange() {
-  const { dialog, body, close } = createModalShell({ id: 'vault-change-dialog', title: t('Change the second password'), dialogClass: 'vault-dialog-box', minWidth: 'min(440px, 92vw)', escapeToClose: true, kind: 'decision' });
+  const { dialog, body, close } = createModalShell({ id: 'vault-change-dialog', title: t('Change the second password'), dialogClass: 'vault-dialog-box', minWidth: 'min(440px, 92vw)', escapeToClose: true, kind: 'decision' }); // decision: the vault's password changes before anything else reads it; the caller awaits — the owner may overrule at integration
   const o = pwInput('vault-old-pw', t('Current second password'));
   const a = pwInput('vault-new-pw', t('New second password'), 'new-password');
   const b = pwInput('vault-new-pw2', t('Repeat the second password'), 'new-password');

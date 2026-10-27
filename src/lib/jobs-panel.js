@@ -391,7 +391,7 @@ async function expandDetail(app, el, j, refresh) {
 }
 
 function openCreateDialog(app, onDone) {
-  const { body, okBtn, close } = createModalShell({ title: t('New background job'), minWidth: 440, kind: 'form' });
+  const { body, dialog, close } = createModalShell({ title: t('New background job'), minWidth: 440, escapeToClose: true, kind: 'form' });
   const f = {};
   const field = (label, el) => { const w = document.createElement('div'); w.className = 'jobs-form-row'; const l = document.createElement('label'); l.textContent = label; w.append(l, el); body.appendChild(w); return el; };
   const inp = (ph = '') => { const i = document.createElement('input'); i.placeholder = ph; return i; };
@@ -401,6 +401,13 @@ function openCreateDialog(app, onDone) {
   f.kind = field(t('Type'), (() => { const s2 = document.createElement('select'); for (const [v, l] of [['task', t('Task (runs once)')], ['service', t('Service (kept running)')], ['cron', t('Scheduled')]]) { const o = document.createElement('option'); o.value = v; o.textContent = l; s2.appendChild(o); } return s2; })());
   f.sched = field(t('Schedule (cron "41 9 * * *" / every 30m / at 2026-09-05 06:00)'), inp(''));
   f.ctx = field(t('Context brief (shown at every poll)'), inp(''));
+  // its action row (lane dialog-yield r2: the shell returns no okBtn — openCreateDialog threw «Cannot set properties of
+  // undefined» since its first day, and the dialog stood with no button); Cancel left, the primary right (§17)
+  const foot = document.createElement('div'); foot.className = 'dialog-footer';
+  const cancelBtn = document.createElement('button'); cancelBtn.type = 'button'; cancelBtn.className = 'btn-cancel'; cancelBtn.textContent = t('Cancel');
+  const okBtn = document.createElement('button'); okBtn.type = 'button'; okBtn.className = 'btn-create';
+  foot.append(cancelBtn, okBtn); dialog.appendChild(foot);
+  cancelBtn.onclick = () => close();
   okBtn.textContent = t('Create');
   okBtn.onclick = async () => {
     const kind = f.kind.value;
