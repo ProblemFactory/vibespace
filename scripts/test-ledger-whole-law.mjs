@@ -41,6 +41,17 @@
 //     ledger law, the hold gone, the notice closed — each machine's month at its own ingest
 //   ⑤ ⑦ ⑪ re-derived: their batches are held now (never refused), so «in shape» is proven by the shard holding each held
 //     event ONCE (the drain's, the re-send a duplicate), and ⑪'s notice is re-worded when its held count moves
+// ROUND 5 (the acceptance of ff094d46 — ⑬ ⑭ fail on ff094d46; the push road's ack: scripts/test-usage-events-push.mjs):
+//   ⑬ F4 a resume FOLLOWS a drain: a drain that fails (ENOSPC) keeps the month paused (drain-failed, its own words), tried
+//     again at the machine's every ingest (any month) and at a restart (ff094d46: resumed first — no pause, no notice, the
+//     rows stranded); ONE notice per (machine, file): a rename re-words the same item, a read one is reopened at a restart,
+//     'resumed' closes it whatever it says (ff094d46: a second item, the first open for ever); a hold write that fails is
+//     ITS month's (ff094d46: stamped on the batch's later months); the dropped count is a SET — a crash between a drop's
+//     marker and its unlink is counted once, and never drained (ff094d46: 24 dropped for 20 sent, «dropped» rows recorded)
+//   ⑭ a Deny is readable before the first act: Deny → restart → the subject's act before the boot reconcile ⇒ refused at
+//     once, the item stays denied; the store never reopens a decided item; check() reads the stored decision of a subject
+//     it holds no entry for (ff094d46: reopened, held 60 s, ask_expired)
+//   ⑥ re-derived: a month back in shape at boot is closed by its drain's end (the reconcile keeps it while its hold is on disk)
 // In-process, no server; sparse files for every big shape (fs.truncateSync / a write at an offset — no disk, no load).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -297,7 +308,10 @@ await leg('⑥', async () => {
   const L3 = life();
   const [n3] = quiet(() => (L3.wired && L3.wired.reconcile ? L3.wired.reconcile() : -1));
   const end = notices();
-  ok(n3 === 1 && end.length === 1 && end[0].status === 'done' && end[0].resolvedBy === 'shape-ok' && !L3.uh.ingestPaused().length, `⑥ a restart with the shard back in shape: the notice closes (${end[0] && end[0].resolvedBy}), nothing paused`, end.map((i) => [i.status, i.resolvedBy]));
+  // r5 re-derived — PINNED «the reconcile closes it» (n3 = 1, the held rows drained after); PINS NOW the drain FIRST: the
+  // reconcile keeps the notice while the month's hold is on disk (n3 = 0), the boot's drain records the 5 held events
+  // (each once), and only then the pause ends and the notice closes
+  ok(end.length === 1 && end[0].status === 'done' && end[0].resolvedBy === 'shape-ok' && !L3.uh.ingestPaused().length && onceIn(sh, [9000, 9001, 9002, 9003, 9004]), `⑥ a restart with the shard back in shape: its 5 held events drained first (each in the ledger once), then the notice closes (${end[0] && end[0].resolvedBy}), nothing paused`, end.map((i) => [i.status, i.resolvedBy]));
 });
 
 console.log('⑦ F4 THE SHAPE JUDGED WHOLE — head, middle, tail; a 448 MiB sparse shard, first 64 MiB unique, the rest 3×');
@@ -547,6 +561,168 @@ await leg('⑫', async () => {
   const tailB = ridsOf(sh).slice(400 + heldM.length);
   ok(r6 && r6.appended === 1 && tailB.join() === rowsB.slice(pb.dropped).map((i) => hidOf(i, b)).join() && !L2.uh.ingestPaused().length && notices().every((i) => i.status !== 'open'),
     `⑫ B's next ingest: its ${tailB.length} held events appended in order (the ${pb.dropped} dropped never), nothing paused, every notice closed`, { r6, tailB: tailB.length });
+});
+
+console.log('⑬ F4 A RESUME FOLLOWS A DRAIN; ONE NOTICE PER (machine, file); A HOLD ERROR IS ITS MONTH\'S; THE DROPPED COUNT IS A SET (round 5)');
+await leg('⑬', async () => {
+  const NOV = 800000; // remote(NOV + k): 2026-11-01
+  // the product's 2 GiB / 64 MiB / 16 MiB, scaled (a row is ~260 B); the month's dedup is not this leg's (it never ends)
+  const seams = (uh) => { uh.shapeMaxBytes = 64 * KiB; uh.holdMaxBytes = 4 * KiB; uh.holdSegBytes = 1 * KiB; uh.dedupShard = (f) => { const p = new Promise(() => { }); uh._dedupJobs.set(f, p); return p; }; return uh; };
+  const world = (name) => {
+    const d = dirOf(name), sh = shardOf(d);
+    fs.writeFileSync(sh, Array.from({ length: 400 }, (_, i) => row(i)).join('\n') + '\n'); // 400 distinct rows, ~110 KiB: over the seam
+    const todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+    const notices = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
+    const life = () => { const uh = seams(newUh(d)); const wired = LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null }); return { uh, wired }; };
+    const heldDir = path.join(d, 'usage-history', '_held');
+    const heldFiles = (host = 'host-m') => (fs.existsSync(heldDir) ? fs.readdirSync(heldDir).filter((f) => f.includes(`~${host}.`)) : []);
+    return { d, sh, todos, notices, life, heldFiles };
+  };
+  const pausedOf = (uh, host = 'host-m', shard = SHARD) => uh.ingestPaused().find((p) => p.host === host && p.shard === shard) || null;
+  const ENOSPC = () => Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+  /** The disk full for the files `when` picks: fs.appendFileSync refuses them until the returned undo. */
+  const refuseAppend = (when) => { const real = fs.appendFileSync; fs.appendFileSync = function (f, ...a) { if (when(String(f))) throw ENOSPC(); return real.call(this, f, ...a); }; return () => { fs.appendFileSync = real; }; };
+  const OCT5 = [9000, 9001, 9002, 9003, 9004].map((i) => hidOf(i));
+
+  // ── A RESUME FOLLOWS A DRAIN ──
+  {
+    const W = world('w13a'), L1 = W.life(), uh = L1.uh;
+    quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5))); // October out of shape: its 5 held
+    uh.shapeMaxBytes = 2 * GiB; // back in shape (the bound raised) …
+    let undo = refuseAppend((f) => f === W.sh); // … and the disk full for the month's file
+    quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(NOV, 2))); // the machine's next ingest (November): October's drain fails
+    const p1 = pausedOf(uh), n1 = W.notices();
+    ok(p1 && p1.drain && p1.drain.state === 'failed' && p1.drain.code === 'ENOSPC' && p1.held === 5 && n1.length === 1 && n1[0].status === 'open' && /5 held events could not be recorded: ENOSPC — retrying/.test(n1[0].detail) && W.heldFiles().length > 0 && ridsOf(W.sh).length === 400,
+      `⑬ a drain that FAILS (ENOSPC) once the month is back in shape: the month stays PAUSED (${p1 ? `drain-failed, ${p1.held} held` : 'no pause'}), its notice open and re-worded «5 held events could not be recorded: ENOSPC — retrying», the rows still held (ff094d46: resumed BEFORE the drain — no pause, the notice closed, the rows stranded)`, { p1, n: n1.map((i) => [i.status, i.text, i.detail.split('\n')[3]]) });
+    quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(NOV + 2, 1))); // still full: tried again at the machine's next ingest (any month)
+    const p2 = pausedOf(uh);
+    ok(p2 && p2.drain && p2.drain.tries === 2 && p2.held === 5 && W.notices().length === 1, `⑬ tried again at the machine's every ingest, ANY month (a November batch): still full ⇒ try ${p2 && p2.drain ? p2.drain.tries : 0}, still held, still one notice (ff094d46: never — the month was no longer paused)`, p2);
+    undo();
+    quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(NOV + 3, 1))); // room again: the machine's next ingest drains it
+    const n3 = W.notices();
+    ok(ridsOf(W.sh).slice(400).join() === OCT5.join() && !pausedOf(uh) && n3.length === 1 && n3[0].status === 'done' && n3[0].resolvedBy === 'shape-ok' && !W.heldFiles().length,
+      `⑬ room again, the machine's next ingest: the 5 held events recorded IN ORDER, THEN the pause ends and its one notice closes (${n3[0] && n3[0].resolvedBy}) — the hold gone (ff094d46: still stranded in the hold)`, { tail: ridsOf(W.sh).slice(400), n3: n3.map((i) => [i.status, i.resolvedBy]) });
+    // … and at a RESTART: still full ⇒ the boot tries (drain-failed, the same notice open); room ⇒ the boot drains it
+    const V = world('w13a2'), M1 = V.life();
+    quiet(() => M1.uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
+    M1.uh.shapeMaxBytes = 2 * GiB;
+    undo = refuseAppend((f) => f === V.sh);
+    quiet(() => M1.uh.ingestRemoteEvents('host-m', 'M', batchOf(NOV, 1)));
+    const M2 = V.life(); M2.uh.shapeMaxBytes = 2 * GiB;
+    quiet(() => M2.wired.reconcile());
+    const b1 = pausedOf(M2.uh), vb = V.notices().map((i) => ({ ...i })); // as the boot left them (the items are live)
+    undo();
+    const M3 = V.life(); M3.uh.shapeMaxBytes = 2 * GiB;
+    quiet(() => M3.wired.reconcile());
+    const ve = V.notices();
+    ok(b1 && b1.drain && b1.drain.state === 'failed' && vb.length === 1 && vb[0].status === 'open' && ridsOf(V.sh).slice(400).join() === OCT5.join() && !pausedOf(M3.uh) && ve.length === 1 && ve[0].status === 'done',
+      `⑬ at a restart: still full ⇒ the boot's try fails and the month stays paused (${b1 && b1.drain ? b1.drain.state : 'not paused'}, its one notice ${vb[0] && vb[0].status}); room ⇒ the boot drains it in order and the notice closes (ff094d46: no pause after the failure — nothing said)`, { b1, vb: vb.map((i) => i.status), ve: ve.map((i) => [i.status, i.resolvedBy]) });
+  }
+
+  // ── ONE NOTICE PER (machine, file) ──
+  {
+    const W = world('w13b'), L1 = W.life(), uh = L1.uh;
+    quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 3)));
+    const id0 = W.notices()[0] && W.notices()[0].id;
+    quiet(() => uh.ingestRemoteEvents('host-m', 'Build box', batchOf(9003, 2))); // the machine RENAMED while paused (2 more held)
+    const nb = W.notices();
+    ok(nb.length === 1 && nb[0].id === id0 && nb[0].status === 'open' && /^Usage of Build box for 2026-10 is held/.test(nb[0].text) && /5 events of 2026-10 held/.test(nb[0].detail),
+      `⑬ the machine RENAMED while paused: the SAME item re-worded in place («${nb[nb.length - 1] ? nb[nb.length - 1].text.slice(0, 40) : ''}…», 5 held) — ${nb.length} item(s) (ff094d46: a second item filed, the first one left open)`, nb.map((i) => [i.id === id0, i.status, i.text]));
+    W.todos.readNotices([id0], true, 'user'); // the owner marks it read
+    const L2 = W.life(); quiet(() => L2.wired.reconcile()); // a restart reads the hold back (the boot knows the host id only)
+    const nr = W.notices();
+    ok(nr.length === 1 && nr[0].id === id0 && nr[0].status === 'open' && /^Usage of Build box for 2026-10/.test(nr[0].text),
+      `⑬ marked read, then a restart reads the hold back: the SAME item reopened, still «Build box» — ${nr.length} item(s) (ff094d46: a second one, «Usage of host-m …»)`, nr.map((i) => [i.id === id0, i.status, i.text]));
+    L2.uh.shapeMaxBytes = 2 * GiB;
+    quiet(() => L2.uh.ingestRemoteEvents('host-m', 'Build box', batchOf(NOV, 1)));
+    const ne = W.notices();
+    ok(ne.length === 1 && ne.every((i) => i.status !== 'open') && ne[0].resolvedBy === 'shape-ok', `⑬ back in shape: 'resumed' closes its one item whatever it says (${ne.map((i) => `${i.status}/${i.resolvedBy}`).join(', ')}) — none left open`, ne.map((i) => [i.status, i.resolvedBy, i.text]));
+  }
+
+  // ── A HOLD ERROR IS ITS MONTH'S ──
+  {
+    const W = world('w13c'), L1 = W.life(), uh = L1.uh, SEP = 'events-2026-09.ndjson';
+    fs.writeFileSync(path.join(W.d, 'usage-history', SEP), Array.from({ length: 400 }, (_, i) => row(20000 + i)).join('\n') + '\n'); // September over the seam too
+    const sepAt = Date.UTC(2026, 8, 20, 12, 0, 0);
+    const sep = (n) => Array.from({ length: n }, (_, k) => JSON.stringify({ rid: 'req_sep_' + k, ts: sepAt + k * 1000, sid: 'sid-1', model: 'claude-opus-5-5', cwd: '/srv/work/app', origin: 'main', i: 10, cw5: 1, cw1: 0, cr: 5000, o: 300, tier: null })).join('\n') + '\n';
+    const undo = refuseAppend((f) => f.includes(`${path.sep}_held${path.sep}events-2026-09~`)); // September's hold cannot be written
+    const [r1] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', sep(3) + batchOf(9000, 3))); // September first, then October
+    undo();
+    const ps = pausedOf(uh, 'host-m', SEP), po = pausedOf(uh);
+    const ns = W.notices().find((i) => /for 2026-09/.test(i.text)), no = W.notices().find((i) => /for 2026-10/.test(i.text));
+    ok(ps && ps.holdError === 'ENOSPC' && po && !po.holdError && po.held === 3 && ns && /could not be held beside the file \(ENOSPC\)/.test(ns.detail) && no && /3 events of 2026-10 held until/.test(no.detail) && !/could not be held/.test(no.detail) && r1 && Array.isArray(r1.holdFailed) && r1.holdFailed.length === 1 && r1.holdFailed[0].month === '2026-09' && r1.ack === false,
+      `⑬ a hold write that fails is ITS month's: September «could not be held (ENOSPC)», October held and said so (${po ? po.held : 0} held${po && po.holdError ? `, yet stamped «${po.holdError}»` : ''}) — the answer names the month (holdFailed ${JSON.stringify(r1 && r1.holdFailed)}), not acked (ff094d46: October's notice said «could not be held» while its rows were held)`, { ps: ps && ps.holdError, po: po && [po.held, po.holdError], r1 });
+    const [r2] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', sep(3) + batchOf(9000, 3))); // the device sends it again, the disk has room
+    const ps2 = pausedOf(uh, 'host-m', SEP), ns2 = W.notices().find((i) => /for 2026-09/.test(i.text));
+    ok(ps2 && !ps2.holdError && ps2.held === 3 && ns2 && !/could not be held/.test(ns2.detail) && r2 && r2.ack === true && !r2.holdFailed && r2.held === 3 && r2.duplicates === 3,
+      `⑬ …reset per month: the re-sent batch with room ⇒ September held (${ps2 ? ps2.held : 0}), its error gone, October's 3 duplicates of its hold — acked`, { ps2, r2 });
+  }
+
+  // ── THE DROPPED COUNT IS A SET ──
+  {
+    const W = world('w13d'), L1 = W.life(), host = 'host-c', sent = [];
+    const send = (u, k) => { const ids = [0, 1, 2, 3].map((j) => 9600 + 4 * k + j); sent.push(...ids); quiet(() => u.ingestRemoteEvents(host, 'C', ids.map((i) => remote(i)).join('\n') + '\n')); };
+    for (let k = 0; k < 3; k++) send(L1.uh, k); // three segments (~1 KiB each) of a 4 KiB hold
+    // THE CRASH: the fourth batch's append lands — its marker names the segment it drops — and the process dies before the unlink
+    const realUnlink = fs.unlinkSync;
+    fs.unlinkSync = function (f, ...a) { if (String(f).includes(`${path.sep}_held${path.sep}`)) return undefined; return realUnlink.call(this, f, ...a); };
+    try { send(L1.uh, 3); } finally { fs.unlinkSync = realUnlink; }
+    const d1 = (pausedOf(L1.uh, host) || {}).dropped;
+    const L2 = W.life(); quiet(() => L2.wired.reconcile()); // the next life reads the hold back
+    const c2 = pausedOf(L2.uh, host) || {};
+    const nc = W.notices().find((i) => /^Usage of C for 2026-10/.test(i.text));
+    ok(d1 > 0 && c2.dropped === d1 && c2.held + c2.dropped === sent.length && nc && new RegExp(`the ${c2.dropped} oldest held events of 2026-10 were dropped`).test(nc.detail),
+      `⑬ a crash between a drop's marker and its unlink: the next life counts it ONCE — ${c2.held} held + ${c2.dropped} dropped = ${(c2.held || 0) + (c2.dropped || 0)} for ${sent.length} sent, the notice says ${c2.dropped} (ff094d46: the surviving segment held again beside its count)`, { d1, held: c2.held, dropped: c2.dropped, sent: sent.length });
+    send(L2.uh, 4); // the next drop: the set grows by one segment, never by the one it already holds
+    const c3 = pausedOf(L2.uh, host) || {};
+    ok(c3.held + c3.dropped === sent.length && c3.dropped > c2.dropped, `⑬ …and the next drop counts only what it drops: ${c3.held} held + ${c3.dropped} dropped = ${(c3.held || 0) + (c3.dropped || 0)} for ${sent.length} sent (ff094d46: 24 for 20 — the survivor dropped and counted twice)`, { held: c3.held, dropped: c3.dropped, sent: sent.length });
+    L2.uh.shapeMaxBytes = 2 * GiB;
+    quiet(() => L2.uh.ingestRemoteEvents(host, 'C', batchOf(NOV, 1))); // back in shape: drained
+    const got = ridsOf(W.sh).filter((r) => r.startsWith(`h:${host}:`)), want = sent.slice(c3.dropped).map((i) => hidOf(i, host));
+    ok(got.join() === want.join() && !sent.slice(0, c3.dropped).some((i) => got.includes(hidOf(i, host))), `⑬ drained: the ${got.length} held events recorded in order, none of the ${c3.dropped} «never recorded» among them — recorded + dropped = ${got.length + (c3.dropped || 0)} for ${sent.length} sent (ff094d46: dropped rows recorded too)`, { got: got.length, want: want.length, dropped: c3.dropped });
+  }
+});
+
+console.log('⑭ A DENY IS READABLE BEFORE THE FIRST ACT — the act in the 3 s before the boot reconcile (round 5)');
+await leg('⑭', async () => {
+  const ANS = { by: 'user', answeredBy: 'human:0123456789ab' };
+  const w = asker('w14');
+  await heldOut(w, HARVEST);
+  const u = w.items().find((i) => i.action.standing && i.action.by === 'system:usage-harvest');
+  await w.asker.answer(u.action.askId, { answer: 'deny', ...ANS });
+  w.todos.flush();
+  const timers = [];
+  const mkOn = (todos) => ASK.create({ hosts: w.hosts, userTodos: todos, log: () => { }, now: () => w.clock.t, instanceKind: 'cluster', settingOf: () => undefined, timers: { set: (fn, ms) => { const h = { fn, ms, live: true }; timers.push(h); return h; }, clear: (h) => { if (h) h.live = false; } } });
+  const fire = () => { for (const h of timers.splice(0)) if (h.live) { h.live = false; h.fn(); } };
+  // THE RESTART: the store read back from disk, the asker built — the subject's act comes before any reconcile
+  const t2 = new UserTodoManager({ dataDir: w.d, expirySweepMs: 0, now: () => w.clock.t });
+  const a2 = mkOn(t2);
+  const p = a2.check(w.hid, HARVEST); await tick();
+  const held = a2.list().some((k) => k.by === 'system:usage-harvest'), mid = t2.get(u.id);
+  w.clock.t += 61000; fire(); const g = await p;
+  const it2 = t2.get(u.id);
+  ok(!held && g && g.code === 'hub_act_denied' && mid && mid.status !== 'open' && it2 && it2.status !== 'open' && it2.resolvedBy === 'denied',
+    `⑭ Deny → restart → the subject's act before the boot reconcile: refused AT ONCE by the Deny (${g && (g.code || g.ask)}), its item stays denied (${it2 && `${it2.status}/${it2.resolvedBy}`}) (ff094d46: the item reopened, the act held 60 s, ask_expired)`, { held, g, mid: mid && [mid.status, mid.resolvedBy], it2: it2 && [it2.status, it2.resolvedBy] });
+  quiet(() => a2.reconcile());
+  const p2 = a2.check(w.hid, HARVEST); await tick(); w.clock.t += 61000; fire(); const g2 = await p2;
+  ok(g2 && g2.code === 'hub_act_denied' && t2.get(u.id).status !== 'open' && t2._state.items.filter((i) => i.action && i.action.standing).length === 1, `⑭ …and the boot reconcile after it changes nothing: still refused (${g2 && g2.code}), one item, denied`, { g2 });
+  // the store's own law: a re-file of a decided item is refused by the decision — returned as it is, never reopened
+  const it = t2.get(u.id);
+  const again = t2.add('machines', { origin: 'machines', text: it.text, detail: 'asked again', kind: 'action', by: 'agent', sessionName: 'Machines', action: it.action });
+  ok(again && again.decided === true && t2.get(u.id).status !== 'open' && t2.get(u.id).detail !== 'asked again', `⑭ the store: a re-file of the item the owner decided is the Deny's — returned decided (${again && again.decided}), never reopened (ff094d46: reopened with the new words)`, again && [again.status, again.decided]);
+  // check() reads the stored decision of a subject it holds no entry for (here: a store that took the item after the asker was built)
+  const t3 = new UserTodoManager({ dataDir: dirOf('w14b'), expirySweepMs: 0, now: () => w.clock.t });
+  const a3 = mkOn(t3);
+  t3._state.items.push(JSON.parse(JSON.stringify(t2.get(u.id))));
+  const p3 = a3.check(w.hid, HARVEST); await tick();
+  const held3 = a3.list().some((k) => k.by === 'system:usage-harvest');
+  w.clock.t += 61000; fire(); const g3 = await p3;
+  ok(!held3 && g3 && g3.code === 'hub_act_denied' && t3.get(u.id).status !== 'open', `⑭ check() with no entry for the subject consults its stored decision: refused at once (${g3 && (g3.code || g3.ask)}), the item not reopened (ff094d46: reopened, held, ${g3 && g3.code !== 'hub_act_denied' ? g3.code : 'ask_expired'})`, { held3, g3, st: t3.get(u.id).status });
+  // the owner allowing THAT subject still ends the Deny: its item reopened (by the owner) and allowed once ⇒ its next act goes
+  t2.setStatus(u.id, 'open', 'user');
+  await a2.answer(u.action.askId, { answer: 'once', ...ANS });
+  const go = await a2.check(w.hid, HARVEST);
+  ok(go && go.ok === true && t2.get(u.id).status === 'done' && t2.get(u.id).resolvedBy === 'allowed', '⑭ …and the owner can still lift it: the item reopened by the owner and allowed once ⇒ the next act goes (the decision is final against a RE-FILE, never against the owner)', { go, item: [t2.get(u.id).status, t2.get(u.id).resolvedBy] });
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });

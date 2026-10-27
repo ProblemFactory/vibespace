@@ -32,6 +32,13 @@
  * item) — no card's answer reaches another subject; a DENY holds until the owner allows that subject (its item reopened
  * and allowed, the machine's list, the instance-wide setting) — through the quiet window, the week of silence and a
  * restart (the item's `resolvedFact.denied` is read back at boot).
+ * r5: A DENY IS READABLE BEFORE THE FIRST ACT — the device agent's update ask fires at every daemon hello after a hub update,
+ * i.e. always inside the 3 s before the boot reconcile, and r3 read the Deny back only there: the act re-filed the item,
+ * the store REOPENED it (the same ask id and words) and the reconcile then skipped it — held 60 s, `ask_expired`, the Deny
+ * lost. Now the standing subjects (open and denied) are read from the item store when the asker is CONSTRUCTED (a bounded
+ * read of the store it holds, synchronous); `check()` consults the stored decision of a subject it holds no entry for; and
+ * the store never reopens a decided item (src/user-todos.js: `resolvedFact.decidedBy: 'person'` — decided is final, a
+ * re-ask after a Deny is refused by the Deny, never a new filing).
  */
 const crypto = require('crypto');
 const P = require('../hub-act-policy.js');
@@ -106,7 +113,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
     }
     // lane ledger-dedup-law F3: a BACKGROUND subject on an asking machine × kind is its ONE standing item — no card per act
     if (userTodos && P.background(P.byKindOf(payload && payload.by)) && (v.verdict === 'ask' || v.reason === 'quiet')) {
-      const st = standing.get(v.dk);
+      const st = standing.get(v.dk) || storedSubject(v.dk); // r5: no entry ⇒ the store's decision for this subject, if any
       if (st && st.state === 'once') { standing.delete(v.dk); log(`${st.machine}: ${payload.by}'s ${st.kind} act goes — the user allowed it once`); return Promise.resolve({ ok: true, ask: 'allowed', ...(st.answeredBy ? { answeredBy: st.answeredBy } : {}) }); }
       if (st && !v.join) { bump(st, payload); return Promise.resolve(st.state === 'denied' ? refusal('hub_act_denied', { ...v, reason: '' }, hostId, { ask: 'denied' }) : refusal('ask_standing', v, hostId, { ask: 'standing' })); }
     }
@@ -132,7 +139,13 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
       st.state = 'open'; st.summary = summary;
       k.askId = st.askId; k.standing = st;
       asks.set(k.askId, k); byKey.set(v.dk, k.askId);
-      if (!writeStanding(st, { force: true, held: true })) {
+      const wrote = writeStanding(st, { force: true, held: true });
+      if (wrote === 'decided') { // r5: the store holds the owner's Deny of this subject — final: refused by it, nothing filed
+        asks.delete(k.askId); byKey.delete(v.dk); st.state = 'denied';
+        waiter.resolve(refusal('hub_act_denied', { ...v, reason: '' }, hostId, { ask: 'denied', ...(st.answeredBy ? { answeredBy: st.answeredBy } : {}) }));
+        return;
+      }
+      if (!wrote) {
         asks.delete(k.askId); byKey.delete(v.dk); standing.delete(v.dk);
         waiter.resolve(refusal('ask_unfiled', v, hostId, { ask: 'unfiled', error: st.fileError || 'For you refused it' }));
         return;
@@ -182,7 +195,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
       const st = k.standing;
       if (outcome === 'expired') { st.count += k.waiters.length; st.lastAt = now(); writeStanding(st, { force: true }); }
       else if (outcome === 'denied' && String(why).startsWith('item-')) { st.count += k.waiters.length; st.lastAt = now(); st.state = 'seen'; st.seenAt = now(); }
-      else if (outcome === 'denied' && why === 'answered') { st.count += k.waiters.length; st.lastAt = now(); st.state = 'denied'; closeStanding(st, 'denied', { denied: true, by: answeredBy || 'user' }); }
+      else if (outcome === 'denied' && why === 'answered') { st.count += k.waiters.length; st.lastAt = now(); st.state = 'denied'; closeStanding(st, 'denied', { denied: true, by: answeredBy || 'user', decidedBy: 'person' }); }
       else { closeStanding(st, outcome === 'denied' ? (why === 'gone' ? 'ask-over' : 'denied') : outcome); standing.delete(st.dk); }
     } else if (k.todoId && userTodos) {
       try { const it = userTodos.get?.(k.todoId); if (it && it.status === 'open') userTodos.setStatus(k.todoId, 'done', outcome === 'expired' ? 'ask-expired' : why === 'gone' ? 'ask-over' : outcome); } catch { }
@@ -217,7 +230,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
         return { ok: true, state: 'always', machine: st.machine };
       }
       if (a === 'once') { st.state = 'once'; st.answeredBy = answeredBy; recent.delete(st.dk); closeStanding(st, 'allowed'); log(`${st.machine}: ${st.by}'s next ${st.kind} act may go (allowed once${answeredBy ? ` by ${answeredBy}` : ''})`); return { ok: true, state: 'allowed', machine: st.machine }; }
-      st.state = 'denied'; closeStanding(st, 'denied', { denied: true, by: answeredBy || 'user' });
+      st.state = 'denied'; closeStanding(st, 'denied', { denied: true, by: answeredBy || 'user', decidedBy: 'person' });
       return { ok: true, state: 'denied', machine: st.machine };
     }
     // answered before ⇒ ask_settled; refused after 60 s ⇒ ask_expired; never heard of (a guessed id, one from before a
@@ -262,6 +275,36 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
       settle(k, by === 'expired' ? 'expired' : 'denied', { why: by === 'expired' ? 'timeout' : `item-${String(status)}-by-${String(by || 'user')}` });
     });
   }
+  // ── r5: THE STORED DECISION — the standing subjects the item store holds, read at CONSTRUCTION (below) ──
+  /** A standing item the owner DENIED (its resolvedFact says so, and nothing re-stamped it since) — r3's rule. */
+  const deniedItem = (i) => i && i.status !== 'open' && !i.clearedAt && i.resolvedBy === 'denied' && i.resolvedFact && i.resolvedFact.denied === true && i.action && i.action.type === ACTION_TYPE && i.action.standing;
+  const openItem = (i) => i && i.status === 'open' && !i.clearedAt && i.action && i.action.type === ACTION_TYPE && i.action.standing;
+  /** One stored standing item → its subject's entry again (open: counting; denied: refused at once) | null (not one). */
+  function restoreItem(it) {
+    const a = it && it.action;
+    if (!a || !a.hostId || !P.KINDS.includes(a.kind) || !(P.byKindOf(a.by) && P.background(P.byKindOf(a.by)))) return null;
+    const dk = P.subjectKey(a.hostId, a.kind, a.by);
+    if (standing.has(dk)) return standing.get(dk);
+    const denied = deniedItem(it);
+    const st = { askId: a.askId, dk, hostId: a.hostId, machine: a.machine || a.hostId, kind: a.kind, by: a.by, consequence: a.consequence || null, count: Number(a.count) || 1, firstAt: Number(a.firstAt) || now(), lastAt: Number(a.lastAt) || now(), todoId: it.id, state: denied ? 'denied' : 'open', seenAt: 0, answeredBy: denied ? it.resolvedFact.by || null : null, writtenAt: now(), timer: null, summary: '' };
+    standing.set(dk, st);
+    return st;
+  }
+  /** The standing subjects of the store, open and denied (a bounded read: the store's own items, its cap) → how many. */
+  function restoreStanding() {
+    if (!userTodos || typeof userTodos.idsWhere !== 'function') return 0;
+    let n = 0;
+    for (const id of userTodos.idsWhere((i) => openItem(i) || deniedItem(i))) if (restoreItem(userTodos.get?.(id))) n++;
+    return n;
+  }
+  /** `check()`'s look-up for a subject it holds no entry for: the store's own item of it (the subject's ask id), open or
+   *  denied → its entry | null. */
+  function storedSubject(dk) {
+    if (!userTodos || typeof userTodos.idsWhere !== 'function') return null;
+    const askId = standingIdOf(dk);
+    const id = userTodos.idsWhere((i) => i.action && i.action.askId === askId && (openItem(i) || deniedItem(i)))[0];
+    return id ? restoreItem(userTodos.get?.(id)) : null;
+  }
   /** Boot: a card a previous process filed can never be answered (the acts it held died with it) — resolved `expired`. */
   function reconcile() {
     if (!userTodos) return 0;
@@ -272,25 +315,20 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
         if (!it || !it.action || it.action.type !== ACTION_TYPE || asks.has(it.action.askId)) continue;
         if (it.action.standing && it.action.hostId && P.KINDS.includes(it.action.kind)) {
           // lane ledger-dedup-law F3: a standing item from before the restart is its subject's again (no new card for the
-          // next life) — r2: then RE-JUDGED below (the list, the setting, the machine, the silence), never kept blindly
+          // next life) — r2: then RE-JUDGED below (the list, the setting, the machine, the silence), never kept blindly;
+          // r5: read already at construction — the subject's entry names THIS item, any other one of it is a second
           const by = P.byKindOf(it.action.by) && P.background(P.byKindOf(it.action.by)) ? it.action.by : null;
           if (!by) { selfClose(it.id, 'ask-over'); continue; } // a subject nobody can name (an item older than r2's key)
-          const dk = P.subjectKey(it.action.hostId, it.action.kind, by);
-          if (!standing.has(dk)) standing.set(dk, { askId: it.action.askId, dk, hostId: it.action.hostId, machine: it.action.machine || it.action.hostId, kind: it.action.kind, by, consequence: it.action.consequence || null, count: Number(it.action.count) || 1, firstAt: Number(it.action.firstAt) || now(), lastAt: Number(it.action.lastAt) || now(), todoId: it.id, state: 'open', seenAt: 0, answeredBy: null, writtenAt: now(), timer: null, summary: '' });
-          else selfClose(it.id, 'ask-over'); // a second item of one subject: the first one stands
+          const st = restoreItem(it);
+          if (st && st.todoId !== it.id) selfClose(it.id, 'ask-over'); // a second item of one subject: the first one stands
           continue;
         }
         try { userTodos.setStatus(it.id, 'done', 'ask-expired'); n++; } catch { }
       }
       // r3: A DENY HOLDS ACROSS A RESTART — a standing item the owner DENIED (its resolvedFact says so) is its subject's
-      // denied state again: refused at once, never re-asked (the item reopened) by the next life
-      const denied = typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => i.status !== 'open' && !i.clearedAt && i.resolvedBy === 'denied' && i.resolvedFact && i.resolvedFact.denied === true && i.action && i.action.type === ACTION_TYPE && i.action.standing) : [];
-      for (const id of denied) {
-        const it = userTodos.get?.(id), a = it && it.action;
-        if (!a || !a.hostId || !P.KINDS.includes(a.kind) || !P.background(P.byKindOf(a.by))) continue;
-        const dk = P.subjectKey(a.hostId, a.kind, a.by);
-        if (!standing.has(dk)) standing.set(dk, { askId: a.askId, dk, hostId: a.hostId, machine: a.machine || a.hostId, kind: a.kind, by: a.by, consequence: a.consequence || null, count: Number(a.count) || 1, firstAt: Number(a.firstAt) || now(), lastAt: Number(a.lastAt) || now(), todoId: it.id, state: 'denied', seenAt: 0, answeredBy: it.resolvedFact.by || null, writtenAt: now(), timer: null, summary: '' });
-      }
+      // denied state again: refused at once, never re-asked (the item reopened) by the next life (r5: read at construction
+      // too, so the acts before this reconcile meet it)
+      restoreStanding();
       reevaluate();
     } catch (e) { log(`hub-act ask reconcile failed: ${e.message}`); }
     return n;
@@ -364,6 +402,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
         action: { type: ACTION_TYPE, askId: st.askId, hostId: String(st.hostId).slice(0, 160), machine: String(st.machine).slice(0, 80), kind: st.kind, standing: true, by: String(st.by).slice(0, 160), consequence: st.consequence, count: st.count, firstAt: st.firstAt, lastAt: st.lastAt },
       });
       st.todoId = (it && it.id) || st.todoId; st.writtenAt = t; st.fileError = null;
+      if (it && it.decided) return 'decided'; // r5: the store never reopens a decided item — the Deny stands
       return true;
     } catch (e) { st.fileError = e.message; log(`${st.machine}: the standing item could not be filed in For you: ${e.message}`); return false; }
   }
@@ -384,6 +423,8 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
   /** The standing subjects (a suite; the dialog): machine, kind, who, how many refusals, the last, the state. */
   function standingList() { return [...standing.values()].map((st) => ({ askId: st.askId, hostId: st.hostId, machine: st.machine, kind: st.kind, by: st.by, count: st.count, lastAt: st.lastAt, state: st.state, todoId: st.todoId })); }
   function list() { return [...asks.values()].map((k) => ({ askId: k.askId, hostId: k.hostId, machine: k.machine, kind: k.kind, by: k.by, summary: k.summary, waiting: k.waiters.length, askedAt: k.askedAt, expiresAt: k.askedAt + P.ASK_TTL_MS })); }
+  // r5: the stored decisions are readable BEFORE the first act — never only 3 s later, at the boot reconcile
+  try { restoreStanding(); } catch (e) { log(`hub-act asks could not read the stored decisions: ${e.message}`); }
   return { check, verdict, answer, reconcile, reevaluate, onMachineGone, onPolicyChanged, policyFor, list, standingList, get instanceKind() { return kindNow(); }, ACTION_TYPE, INBOX_KEY };
 }
 

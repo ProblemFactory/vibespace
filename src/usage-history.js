@@ -203,12 +203,25 @@ const REMEDY_STATES = Object.freeze(['running', 'judging', 'failed', 'not-rewrit
 // hub's copy of the device cursor moves past the whole batch — nothing is refused whole. Bounded: ≤ HOLD_MAX_BYTES per
 // host × month, in segments of ≤ HOLD_SEG_BYTES; past the bound the OLDEST segment goes and every row it held is COUNTED
 // (`dropped`: the notice and the Usage window say how many; a marker line keeps the count across a restart).
+// r5: that count is a SET, never an increment — the dropped segments' ids (`s<seq>` → the rows it held) and the rows a batch
+// alone past the bound lost (`c<seq>@<offset>` → how many); every marker line carries the WHOLE set and is written BEFORE
+// the segments it names are unlinked, so a crash between the two leaves a segment the read-back drops WITHOUT counting it
+// again (an increment replayed after such a crash said 24 dropped for 20 sent, and called 4 recorded rows «never recorded»)
 const HOLD_MAX_BYTES = 64 * 1024 * 1024, HOLD_SEG_BYTES = 16 * 1024 * 1024;
 const HOLD_NAME_RE = /^(events-\d{4}-\d{2})~([A-Za-z0-9_-]+)\.(\d+)\.ndjson$/;
 // a host id in a file name, reversibly: [A-Za-z0-9-] kept, every other byte `_` + its two hex digits
 const holdHostKey = (host) => Array.from(Buffer.from(String(host), 'utf8')).map((b) => (b < 128 && /[A-Za-z0-9-]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : '_' + b.toString(16).padStart(2, '0'))).join('');
 const holdHostOf = (key) => { const out = []; for (let i = 0; i < key.length; i++) { if (key[i] === '_') { out.push(parseInt(key.slice(i + 1, i + 3), 16)); i += 2; } else out.push(key.charCodeAt(i)); } return Buffer.from(out).toString('utf8'); };
-const NO_HOLD = Object.freeze({ segs: Object.freeze([]), dropped: 0, none: true }); // a month with nothing held (no record kept)
+const NO_HOLD = Object.freeze({ segs: Object.freeze([]), gone: new Map(), none: true }); // a month with nothing held (no record kept)
+const HOLD_ENTRY_BYTES = 32; // r5: room one more entry of the dropped set takes in a marker line (`"s<seq>":<rows>,`)
+/** THE ACK (r5) — ONE verdict for every road that commits a device's cursor: the live push's ack (server.js
+ *  `hosts.onUsageEvents`) and the harvest's hub-kept cursor (`ingestRemoteEvents`). A batch is acked when EVERY row of it is
+ *  durable — appended, one the ledger or its hold already had, or HELD beside its month's file: a pause alone never
+ *  withholds it (r4's answer said `paused` whenever ANY month was out of shape, and the push road acked only without it —
+ *  the incident's re-send loop on the main road). Never acked: a batch deferred (an index or a hold still loading — the
+ *  device keeps it, bounded by the deferral) or one with a month whose hold could not be written (`holdFailed` names the
+ *  months; the device sends the batch again, the rest of it costs zero bytes). PURE. */
+function ackOf(r) { return !!(r && typeof r === 'object' && !r.deferred && !r.error && !(Array.isArray(r.holdFailed) && r.holdFailed.length)); }
 function probeHolds(fp, at, probe) {
   if (!probe || !probe.length) return true;
   let fd; try { fd = fs.openSync(fp, 'r'); } catch { return false; }
@@ -684,12 +697,15 @@ class UsageHistory {
    *  THE LEDGER LAW (lane ledger-dedup-law F1, B-7f9e): a re-emission costs ZERO bytes — an event whose rid the target
    *  shard already holds (the ingest's own rid index, `_ingestIndex`) or that the batch already carried is counted as a
    *  duplicate and never appended (the read-time dedup absorbed it, while a never-committed device cursor re-sent the same
-   *  window at every harvest and the shard grew 23.8 GiB). → `{added, appended, duplicates, held?, paused?}` (`added` =
-   *  `appended`, the callers' old field; r4: `held` = this batch's rows of a month out of shape, HELD beside the ledger —
-   *  that month paused and said in `paused`, every other month appended) | `{…, deferred}` (a big shard's index or a big
-   *  hold still loading in steps — nothing appended; the device keeps the events). `cursors` (F2): the device cursor this
-   *  batch was read from — committed beside the ledger AFTER the appends and the holds (the hub's durable ingest IS the
-   *  commit), never when the batch was deferred or a hold could not be written (`holdError`: the device sends it again). */
+   *  window at every harvest and the shard grew 23.8 GiB). → `{added, appended, duplicates, held?, paused?, pausedMonths?,
+   *  holdFailed?, ack}` (`added` = `appended`, the callers' old field; r4: `held` = this batch's rows of a month out of
+   *  shape, HELD beside the ledger — that month paused (`paused` = the first such month's record, `pausedMonths` every one,
+   *  r5), every other month appended; r5: `holdFailed` = [{month, shard, error}] — a month whose hold could not be written;
+   *  `ack` = `ackOf` of this answer) | `{…, deferred, ack: false}` (a big shard's index or a big hold still loading in steps
+   *  — nothing appended; the device keeps the events). `cursors` (F2): the device cursor this batch was read from —
+   *  committed beside the ledger AFTER the appends and the holds (the hub's durable ingest IS the commit) when the batch is
+   *  ACKED (r5: the push road's verdict, the same function). Write order: hold → ledger → cursor — crash-safe (a crash
+   *  between two re-sends rows that cost zero bytes), not fsync-durable (the project's appends never fsync). */
   ingestRemoteEvents(hostId, hostName, text, { cursors = null, since = null } = {}) {
     let added = 0;
     const shardBuffers = {};
@@ -757,31 +773,37 @@ class UsageHistory {
     for (const shard of shards) {
       const v = this._shapeVerdict(shard);
       let h = this._holdOf(shard, hostId);
-      if (!h) return { added: 0, appended: 0, duplicates: 0, deferred: 'ledger-hold-loading' }; // a big hold read in steps: the batch waits, the device keeps it
+      if (!h) return { added: 0, appended: 0, duplicates: 0, deferred: 'ledger-hold-loading', ack: false }; // a big hold read in steps: the batch waits, the device keeps it
       if (v.ok && this._holdBusy(h)) { if (this._pausedShards.has(this._pauseKey(hostId, shard))) this._resume(hostId, shard); else this._drainHold(h); h = this._holdOf(shard, hostId) || h; }
       if (!v.ok || this._holdBusy(h)) hold.push({ shard, v }); else go.push(shard);
     }
     // F1 — every appended shard's rid index ready (a big one loads in steps; the batch waits, the device keeps it)
-    for (const shard of go) if (!this._ingestIndex(shard)) return { added: 0, appended: 0, duplicates: 0, deferred: 'ledger-index-loading' };
-    let held = 0, heldDup = 0, holdError = null; const paused = [];
+    for (const shard of go) if (!this._ingestIndex(shard)) return { added: 0, appended: 0, duplicates: 0, deferred: 'ledger-index-loading', ack: false };
+    let held = 0, heldDup = 0; const paused = [], holdFailed = [];
     for (const { shard, v } of hold) {
+      // r5: a hold that could not be written is THAT month's — its notice, the answer's `holdFailed` — never stamped on the
+      // batch's other months (r4 carried one batch-level error into every later paused month's notice)
+      let holdError = null;
       try { const r = this._holdRows(this._holdOf(shard, hostId, true), shardBuffers[shard], hostName); held += r.held; heldDup += r.duplicates; }
-      catch (e) { holdError = (e && e.code) || String((e && e.message) || e).slice(0, 80); console.warn(`[usage] the rows of ${path.basename(shard)} from ${hostName || hostId} could not be held (${holdError}) — this batch's cursor is not committed: its device sends them again`); }
+      catch (e) { holdError = (e && e.code) || String((e && e.message) || e).slice(0, 80); holdFailed.push({ month: path.basename(shard).slice(7, 14), shard: path.basename(shard), error: holdError }); console.warn(`[usage] the rows of ${path.basename(shard)} from ${hostName || hostId} could not be held (${holdError}) — this batch is not acked: its device sends it again`); }
       if (!v.ok) paused.push(this._pause(hostId, hostName, shard, v, holdError));
     }
     // r4: this machine's other paused months judged again at its every ingest (a month split by hand, a bound raised, a
-    // dedup that ended) — a month with no new rows is never left paused for want of a batch
+    // dedup that ended) — a month with no new rows is never left paused for want of a batch; r5: a month whose drain failed
+    // is tried again here (any month's batch of the machine), and one out of shape again is a shape pause again
     for (const rec of this._pausedOf(hostId)) {
       const shard = this._shardPath(rec.shard);
       if (shardBuffers[shard]) continue;
       let v; try { v = this._shapeVerdict(shard); } catch { continue; }
-      if (v.ok) this._resume(hostId, shard);
+      if (v.ok) this._resume(hostId, shard); else if (rec.drain) this._pause(hostId, hostName || rec.hostName, shard, v);
     }
     const { appended, duplicates, lastTs, lastRid } = this._appendRemote(shardBuffers, go);
     if (duplicates + heldDup) this._noteDuplicates(hostId, appended, duplicates + heldDup);
-    // F2 — the batch is durable (appended, or held beside the ledger): the hub's copy of the device cursor moves past it
-    if (cursors && typeof cursors === 'object' && !holdError) this._writeHostCursor(hostId, { cursors, since: since || 'hub', lastTs: lastTs || null, lastRid, events: added });
-    return { added: appended, appended, duplicates: duplicates + heldDup, ...(hold.length ? { held } : {}), ...(paused.length ? { paused: paused[0] } : {}), ...(holdError ? { holdError } : {}) };
+    const answer = { added: appended, appended, duplicates: duplicates + heldDup, ...(hold.length ? { held } : {}), ...(paused.length ? { paused: paused[0], pausedMonths: paused } : {}), ...(holdFailed.length ? { holdFailed } : {}) };
+    answer.ack = ackOf(answer);
+    // F2 — r5: THE ACK commits the hub's copy of the device cursor (every row appended or held beside the ledger)
+    if (cursors && typeof cursors === 'object' && answer.ack) this._writeHostCursor(hostId, { cursors, since: since || 'hub', lastTs: lastTs || null, lastRid, events: added });
+    return answer;
   }
   /** F1's append (the ingest's and a drained hold's — r4): rows a shard's rid index (or this call) already has are
    *  duplicates, the rest appended in their order and the index told → {appended, duplicates, lastTs, lastRid}. Every
@@ -895,14 +917,14 @@ class UsageHistory {
     const key = this._pauseKey(hostId, shard), prev = this._pausedShards.get(key), now = Date.now(), base = path.basename(shard);
     const ratio = v.ratio == null || !Number.isFinite(Number(v.ratio)) ? null : Math.round(Number(v.ratio) * 10) / 10;
     const h = this._holdOf(shard, hostId);
-    const rec = { host: hostId, hostName: hostName || (prev && prev.hostName) || hostId, shard: base, month: base.slice(7, 14), size: v.size, ratio, why: v.why, exact: !!v.exact, since: prev ? prev.since : now, lastAt: now, held: h ? this._heldCount(h) : null, dropped: h ? h.dropped : (prev ? prev.dropped : 0), holdMax: this._holdMax(), ...(holdError ? { holdError } : {}), remedy: null };
+    const rec = { host: hostId, hostName: hostName || (prev && prev.hostName) || hostId, shard: base, month: base.slice(7, 14), size: v.size, ratio, why: v.why, exact: !!v.exact, since: prev ? prev.since : now, lastAt: now, held: h ? this._heldCount(h) : null, dropped: h ? this._droppedOf(h) : (prev ? prev.dropped : 0), holdMax: this._holdMax(), ...(holdError ? { holdError } : {}), remedy: null, drain: null };
     this._pausedShards.set(key, rec);
     const first = !prev;
     const started = this._remedy(shard, v);
     rec.remedy = this._remedyOf(shard);
     // r3: said again when what it says changes (the rule, the remedy's state) — e.g. «judging» → the index's verdict; r4:
     // and the counts it says (held, dropped)
-    const changed = !first && (prev.why !== rec.why || !prev.remedy || prev.remedy.state !== rec.remedy.state || prev.held !== rec.held || prev.dropped !== rec.dropped || prev.holdError !== rec.holdError);
+    const changed = !first && (prev.why !== rec.why || !prev.remedy || prev.remedy.state !== rec.remedy.state || prev.held !== rec.held || prev.dropped !== rec.dropped || prev.holdError !== rec.holdError || !!prev.drain || prev.hostName !== rec.hostName);
     if (first) console.warn(`[usage] ${rec.shard} is out of shape (${(rec.size / 2 ** 30).toFixed(2)} GiB${rec.ratio ? `, ~${rec.ratio}× its distinct rows` : ''}) — the usage of ${rec.hostName} for ${rec.month} is HELD beside it until it is back in shape (≤ ${Math.round(rec.holdMax / 2 ** 20)} MiB, then recorded in order; its other months are recorded as usual)${started ? '; removing the repeated rows now' : v.judging ? '; judged again by its index after the ledger loads' : ''}`);
     if (first || started || changed) this._emitShape({ kind: 'paused', ...rec });
     return { ...rec };
@@ -926,13 +948,13 @@ class UsageHistory {
    *  is being read in steps — the caller waits). A hold on disk is read back once: its rows' rids (a re-sent row is held
    *  once), counts and the dropped count (its marker lines); inline while ≤ INGEST_IX_INLINE_BYTES, else a step per turn. */
   _holdOf(shard, host, create = false) {
-    const key = `${path.basename(shard, '.ndjson')}~${holdHostKey(host)}`;
+    const key = this._holdKey(shard, host);
     let h = this._holds.get(key);
     if (h) return h.loading ? null : h;
     const seqs = (this._heldOnDisk().get(key) || []).sort((a, b) => a - b);
     if (!seqs.length && !create) return NO_HOLD;
     this._heldOnDisk().delete(key);
-    h = { key, base: path.basename(shard, '.ndjson'), host: String(host), hostName: null, segs: [], nextSeq: 0, dropped: 0, loading: null, draining: null };
+    h = { key, base: path.basename(shard, '.ndjson'), host: String(host), hostName: null, segs: [], nextSeq: 0, gone: new Map(), loading: null, draining: null };
     this._holds.set(key, h);
     if (!seqs.length) return h;
     const gen = this._holdLoadSteps(h, seqs), inline = this.ingestIndexInlineBytes || INGEST_IX_INLINE_BYTES;
@@ -944,6 +966,11 @@ class UsageHistory {
     });
     return null;
   }
+  _holdKey(shard, host) { return `${path.basename(shard, '.ndjson')}~${holdHostKey(host)}`; }
+  /** Is anything of (shard, host) held — in memory or on disk, not yet read back? (r5: a resume waits for it) */
+  _holdsAny(shard, host) { const k = this._holdKey(shard, host), h = this._holds.get(k); return h ? !!(h.loading || this._holdBusy(h)) : this._heldOnDisk().has(k); }
+  /** The dropped count — derived from the SET (r5): every dropped segment's rows + every cut batch's, each id once. */
+  _droppedOf(h) { let n = 0; for (const v of ((h && h.gone) || new Map()).values()) n += Number(v) || 0; return n; }
   *_holdLoadSteps(h, seqs) {
     let read = 0;
     for (const seq of seqs) {
@@ -955,7 +982,10 @@ class UsageHistory {
           lineEnd = at + (b - a) + 1;
           const rid = LD.ridAt(buf, a, b);
           if (rid) { seg.rows++; seg.rids.add(rid); return; }
-          try { const j = JSON.parse(buf.toString('utf8', a, b)); if (j && Number(j.heldDropped) > h.dropped) h.dropped = Number(j.heldDropped); } catch { } // the count dropped past the bound
+          try { // the dropped SET (r5; union of every marker line: each carries the whole set) — r4's marker was a running total
+            const j = JSON.parse(buf.toString('utf8', a, b)), d = j && j.heldDropped;
+            if (typeof d === 'number') { if (d > (h.gone.get('r4') || 0)) h.gone.set('r4', d); } else if (d && typeof d === 'object') for (const [k, n] of Object.entries(d)) if (Number(n) > (h.gone.get(k) || 0)) h.gone.set(k, Number(n));
+          } catch { }
         }, { limit: WARM_SLICE_BYTES });
         if (end === seg.bytes) break;
         read += end - seg.bytes; seg.bytes = end;
@@ -963,6 +993,9 @@ class UsageHistory {
       }
       seg.torn = seg.bytes > lineEnd; // a crash mid-append: the next append starts on a line of its own
     }
+    // r5: a segment the dropped set names was dropped — a crash came between its marker and its unlink: unlinked now, never
+    // counted again (its rows are in the set) and never drained (they were never recorded)
+    for (const seg of [...h.segs]) if (h.gone.has('s' + seg.seq)) { h.segs.splice(h.segs.indexOf(seg), 1); this._holdUnlink(h, seg.seq); }
   }
   _holdBusy(h) { return !!(h && (h.draining || h.segs.length)); }
   _heldCount(h) { return h.segs.reduce((a, s) => a + s.rows, 0); }
@@ -976,35 +1009,44 @@ class UsageHistory {
     return { held: kept.length, duplicates };
   }
   /** One append to a hold, BOUNDED: a batch alone past the bound keeps its newest rows; a segment past HOLD_SEG_BYTES starts
-   *  the next; past the bound the oldest segments go — every row dropped COUNTED (`h.dropped`, written as a marker line
-   *  `{"heldDropped": n}` before the rows, so a restart reads the count back) and said in one line. Nothing is dropped
-   *  unless the append landed (an append that throws — ENOSPC — leaves the hold as it was). */
+   *  the next; past the bound the oldest segments go — every row dropped COUNTED and said in one line. r5: the count is the
+   *  dropped SET (`h.gone`: `s<seq>` → a dropped segment's rows, `c<seq>@<offset>` → a cut batch's), the whole set written as
+   *  ONE marker line `{"heldDropped": {…}}` in the same append as the rows, BEFORE the segments it names are unlinked — a
+   *  crash between the two leaves a segment the read-back drops uncounted (`_holdLoadSteps`). Nothing is dropped unless the
+   *  append landed (an append that throws — ENOSPC — leaves the hold as it was). */
   _holdAppend(h, rows) {
     if (!rows.length) return;
     const max = this._holdMax(), segMax = Math.min(max, this.holdSegBytes || HOLD_SEG_BYTES);
     const len = rows.map((e) => Buffer.byteLength(e.line) + 1);
+    // room for the marker line: the set as it stands + an entry for every segment and the cut this append may add
+    const room = Buffer.byteLength(JSON.stringify({ heldDropped: Object.fromEntries(h.gone) })) + HOLD_ENTRY_BYTES * (h.segs.length + 2);
     let bytes = len.reduce((a, b) => a + b, 0), cut = 0;
-    while (bytes > max - 64 && cut < rows.length) bytes -= len[cut++]; // a batch alone over the bound: its oldest rows go
+    while (bytes > max - room && cut < rows.length) bytes -= len[cut++]; // a batch alone over the bound: its oldest rows go
     const last = h.segs[h.segs.length - 1], fresh = !last || (last.bytes && last.bytes + bytes > segMax);
     const seg = fresh ? { seq: h.nextSeq, rows: 0, bytes: 0, at: 0, rids: new Set(), torn: false } : last;
     const segs = fresh ? [...h.segs, seg] : h.segs, gone = [];
-    for (let total = segs.reduce((a, s) => a + s.bytes, 0); segs.length - gone.length > 1 && total + bytes + 64 > max;) { const old = segs[gone.length]; gone.push(old); total -= old.bytes; }
+    for (let total = segs.reduce((a, s) => a + s.bytes, 0); segs.length - gone.length > 1 && total + bytes + room > max;) { const old = segs[gone.length]; gone.push(old); total -= old.bytes; }
+    const set = new Map(h.gone);
+    for (const old of gone) set.set('s' + old.seq, old.rows);
+    if (cut) set.set(`c${seg.seq}@${seg.bytes}`, cut);
     const dropped = cut + gone.reduce((a, s) => a + s.rows, 0), keep = cut ? rows.slice(cut) : rows;
-    const text = (seg.torn ? '\n' : '') + (dropped ? JSON.stringify({ heldDropped: h.dropped + dropped }) + '\n' : '') + (keep.length ? keep.map((e) => e.line).join('\n') + '\n' : '');
+    const text = (seg.torn ? '\n' : '') + (dropped ? JSON.stringify({ heldDropped: Object.fromEntries(set) }) + '\n' : '') + (keep.length ? keep.map((e) => e.line).join('\n') + '\n' : '');
     timedSync('usage-held.write', () => { fs.mkdirSync(this.heldDir, { recursive: true }); fs.appendFileSync(this._holdFile(h, seg.seq), text); });
     if (fresh) { h.segs.push(seg); h.nextSeq++; }
+    h.gone = set; // the marker naming them landed: now the files go
     for (const old of gone) { h.segs.splice(h.segs.indexOf(old), 1); this._holdUnlink(h, old.seq); }
-    h.dropped += dropped;
     seg.torn = false; seg.bytes += Buffer.byteLength(text); seg.rows += keep.length;
     for (const e of keep) seg.rids.add(e.rid);
-    if (dropped) console.warn(`[usage] the rows of ${h.base} held for ${h.hostName || h.host} passed the hold's ${Math.round(max / 2 ** 20)} MiB: its ${dropped} oldest held row(s) were dropped — ${h.dropped} dropped so far, counted in its notice, never recorded`);
+    if (dropped) console.warn(`[usage] the rows of ${h.base} held for ${h.hostName || h.host} passed the hold's ${Math.round(max / 2 ** 20)} MiB: its ${dropped} oldest held row(s) were dropped — ${this._droppedOf(h)} dropped so far, counted in its notice, never recorded`);
   }
   _holdUnlink(h, seq) { try { fs.unlinkSync(this._holdFile(h, seq)); } catch { } }
   /** r4: a month back in shape — its held rows ingested IN ORDER (the oldest segment first) through the ingest's own law (the
    *  shard's rid index: a row the ledger already holds costs zero bytes), a slice at a time; each segment unlinked once read
    *  to its end. A small hold (≤ INGEST_IX_INLINE_BYTES, its shard's index current) drains in the calling turn; a bigger one
    *  a slice per loop turn, the rows the month gets meanwhile queued in the hold behind it. One drain per hold; a failed
-   *  append leaves the rest held (the month's next ingest drains again). → the sums (inline) | its promise | null. */
+   *  append leaves the rest held. r5: its end (`_drained`) is what ends the month's pause; its failure (`_drainFailed`)
+   *  keeps it, `drain-failed`, tried again at the machine's every ingest and at a restart. → the sums (inline) | its
+   *  promise | null. */
   _drainHold(h) {
     if (!h || h.none || h.loading) return null;
     if (h.draining) return h.draining;
@@ -1047,12 +1089,32 @@ class UsageHistory {
     h.segs.shift(); this._holdUnlink(h, seg.seq); // read to its end: every row of it is in the ledger
     return h.segs.length > 0;
   }
+  /** A hold drained to its end: its record gone — r5: and only NOW its month's pause ends (the shard judged again first: in
+   *  shape ⇒ resumed, its notice closed; out of shape again ⇒ a shape pause). A resume follows a drain, never precedes it. */
   _drained(h, sum) {
     if (h.segs.length) return;
     this._holds.delete(h.key);
-    console.log(`[usage] ${h.base}: the ${sum.rows} row(s) held for ${h.hostName || h.host} are in the ledger, in order — ${sum.appended} appended, ${sum.duplicates} it already held${h.dropped ? `; ${h.dropped} older held row(s) had been dropped past the hold's ${Math.round(this._holdMax() / 2 ** 20)} MiB` : ''}`);
+    const dropped = this._droppedOf(h);
+    console.log(`[usage] ${h.base}: the ${sum.rows} row(s) held for ${h.hostName || h.host} are in the ledger, in order — ${sum.appended} appended, ${sum.duplicates} it already held${dropped ? `; ${dropped} older held row(s) had been dropped past the hold's ${Math.round(this._holdMax() / 2 ** 20)} MiB` : ''}`);
+    const shard = this._shardPath(h.base + '.ndjson'), rec = this._pausedShards.get(this._pauseKey(h.host, shard));
+    if (!rec) return;
+    let v; try { v = this._shapeVerdict(shard); } catch { v = { ok: true }; }
+    if (v.ok) this._resumed(h.host, shard, rec, { drained: sum.rows, dropped }); else this._pause(h.host, rec.hostName, shard, v);
   }
-  _drainFailed(h, e) { console.warn(`[usage] the rows of ${h.base} held for ${h.hostName || h.host} could not be ingested (${(e && e.code) || (e && e.message) || e}) — they stay held; the month's next ingest tries again`); }
+  /** r5: A DRAIN THAT FAILED (ENOSPC …) — the rest stays held and the month stays PAUSED, in state `drain-failed` (its own
+   *  notice words and Usage-window row: «N held events could not be recorded: <code> — retrying»), tried again at every
+   *  ingest of that machine (any month) and at a restart. Said when it starts and when its error or its counts move. */
+  _drainFailed(h, e) {
+    const code = String((e && e.code) || (e && e.message) || e).slice(0, 80);
+    const shard = this._shardPath(h.base + '.ndjson'), key = this._pauseKey(h.host, shard), prev = this._pausedShards.get(key), now = Date.now();
+    const base = path.basename(shard), ix = this._ingestIx.get(shard);
+    const rec = { ...(prev || { host: h.host, shard: base, month: base.slice(7, 14), size: ix ? ix.size : 0, ratio: null, why: 'size', exact: false, since: now, remedy: { state: 'none' } }), hostName: h.hostName || (prev && prev.hostName) || h.host, lastAt: now, held: this._heldCount(h), dropped: this._droppedOf(h), holdMax: this._holdMax(), drain: { state: 'failed', code, tries: ((prev && prev.drain && prev.drain.tries) || 0) + 1, at: now } };
+    delete rec.holdError;
+    this._pausedShards.set(key, rec);
+    if (prev && prev.drain && prev.drain.state === 'failed' && prev.drain.code === code && prev.held === rec.held && prev.dropped === rec.dropped) return;
+    console.warn(`[usage] the ${rec.held} row(s) of ${base} held for ${rec.hostName} could not be recorded (${code}) — they stay held and ${rec.month} stays paused; tried again at the machine's next harvest and at a restart`);
+    this._emitShape({ kind: 'paused', ...rec });
+  }
   /** A hold read back (a restart, a big hold's steps): its month in shape ⇒ drained (its pause, if any, resumed); out of
    *  shape ⇒ that month paused and said with its counts (a hold with no notice gets its one). */
   _afterHoldLoad(h) {
@@ -1071,10 +1133,12 @@ class UsageHistory {
       const h = this._holdOf(this._shardPath(x[1] + '.ndjson'), holdHostOf(x[2]));
       if (h && !h.none) this._afterHoldLoad(h);
     }
+    // r5: a month the boot kept paused for its hold (restorePause) whose hold was read already (an ingest came first)
+    for (const rec of [...this._pausedShards.values()]) if (rec.drain && rec.drain.state === 'pending') this._resume(rec.host, this._shardPath(rec.shard));
     return n;
   }
   /** The holds now (a suite; the Usage window reads them through `ingestPaused`) → [{shard, host, held, dropped, bytes}]. */
-  holdsNow() { return [...this._holds.values()].map((h) => ({ shard: h.base + '.ndjson', host: h.host, held: this._heldCount(h), dropped: h.dropped, bytes: h.segs.reduce((a, s) => a + s.bytes, 0), loading: !!h.loading, draining: !!h.draining })); }
+  holdsNow() { return [...this._holds.values()].map((h) => ({ shard: h.base + '.ndjson', host: h.host, held: this._heldCount(h), dropped: this._droppedOf(h), bytes: h.segs.reduce((a, s) => a + s.bytes, 0), loading: !!h.loading, draining: !!h.draining })); }
   /** THE REMEDY of a paused shard (r2): its streaming dedup — one in flight; one that did not bring the shard back in shape
    *  (failed, not rewritten, still out of shape) runs again at a LATER pause once its backoff passed (REMEDY_RETRY_MS,
    *  doubling per try, ≤ REMEDY_RETRY_MAX_MS). r3: a dedup is a remedy for REPEATED rows only — a shard over the bound that
@@ -1137,7 +1201,7 @@ class UsageHistory {
    *  of the shard said again (its notice re-worded in place). `err` = the run threw (ENOSPC, EACCES …). */
   _remedyMissed(shard, r, err = null) {
     shard = this._shardPath(shard);
-    const base = path.basename(shard), held = [...this._pausedShards.values()].filter((x) => x.shard === base);
+    const base = path.basename(shard), held = [...this._pausedShards.values()].filter((x) => x.shard === base && !x.drain);
     if (!held.length) { this._remedies.delete(shard); return; }
     let v; try { v = this._shapeVerdict(shard); } catch { v = { ok: false }; }
     // r3: the run proved there is nothing left to remove (over the bound with no repeats; more distinct rows than the index
@@ -1167,18 +1231,40 @@ class UsageHistory {
     const shard = this._shardPath(shardName);
     if (why === 'ids' || (why === 'ratio' && exact)) this._judging.set(shard, { ino: null, why, ratio: Number(ratio) || null }); // its inode: the verdict's own stat below
     let v; try { v = this._shapeVerdict(shard); } catch { v = { ok: true }; }
-    return v.ok ? null : this._pause(hostId, hostName, shard, v);
+    if (!v.ok) return this._pause(hostId, hostName, shard, v);
+    // r5: in shape again, but the month's hold is still there — the pause stays, QUIETLY (its notice as it was), until the
+    // hold is drained (`restoreHolds` → `_afterHoldLoad` → `_resume`): a resume follows a drain, never precedes it
+    if (!this._holdsAny(shard, hostId)) return null;
+    const key = this._pauseKey(hostId, shard), base = path.basename(shard), now = Date.now();
+    const rec = this._pausedShards.get(key) || { host: hostId, hostName: hostName || hostId, shard: base, month: base.slice(7, 14), size: v.size || 0, ratio: Number(ratio) || null, why: why || 'size', exact: !!exact, since: now, lastAt: now, held: null, dropped: 0, holdMax: this._holdMax(), remedy: { state: 'none' }, drain: { state: 'pending' } };
+    this._pausedShards.set(key, rec);
+    return { ...rec };
   }
-  /** One month of a host back in shape (r4: per shard) → its pause gone, said, and its hold drained in order. */
+  /** One month of a host back in shape (r4: per shard). r5: THE DRAIN FIRST — a month with rows held is drained (in order),
+   *  and its pause ends only when the drain has (`_drained` → `_resumed`); while it runs the month stays paused
+   *  (`drain: {state: 'draining'}`, the rows it gets meanwhile queued behind), a failed one keeps it (`_drainFailed`). A
+   *  big hold still being read waits for its read (`_afterHoldLoad`). */
   _resume(hostId, shard) {
     const key = this._pauseKey(hostId, shard), rec = this._pausedShards.get(key);
     if (!rec) return;
+    const h = this._holdOf(this._shardPath(rec.shard), hostId);
+    if (!h) return;
+    if (this._holdBusy(h)) {
+      this._drainHold(h);
+      const now = this._pausedShards.get(key);
+      if (now && h.draining && (!now.drain || now.drain.state !== 'failed')) now.drain = { ...(now.drain || {}), state: 'draining' };
+      return;
+    }
+    this._resumed(hostId, shard, rec, { drained: 0, dropped: h.none ? rec.dropped || 0 : this._droppedOf(h) });
+  }
+  /** The pause of a month that is back in shape with nothing held: gone, said once, its notice closed ('resumed'). */
+  _resumed(hostId, shard, rec, { drained = 0, dropped = 0 } = {}) {
+    const key = this._pauseKey(hostId, shard);
+    if (this._pausedShards.get(key) !== rec) return;
     this._pausedShards.delete(key);
     if (![...this._pausedShards.values()].some((x) => x.shard === rec.shard)) { this._remedies.delete(this._shardPath(rec.shard)); this._judging.delete(this._shardPath(rec.shard)); }
-    const h = this._holdOf(this._shardPath(rec.shard), hostId), held = h ? this._heldCount(h) : null, dropped = h ? h.dropped : rec.dropped || 0;
-    console.log(`[usage] ${rec.shard} is back in shape — the usage of ${rec.hostName} for ${rec.month} is recorded again${held ? `; its ${held} held event(s) are recorded now, in order` : held == null ? '; its held events are recorded, in order, once their hold is read' : ''}${dropped ? ` (${dropped} older held event(s) had been dropped past the hold's bound)` : ''}`);
-    this._emitShape({ kind: 'resumed', ...rec, held, dropped, at: Date.now() });
-    if (h) this._drainHold(h);
+    console.log(`[usage] ${rec.shard} is back in shape — the usage of ${rec.hostName} for ${rec.month} is recorded again${drained ? `; its ${drained} held event(s) are in the ledger, in order` : ''}${dropped ? ` (${dropped} older held event(s) had been dropped past the hold's bound)` : ''}`);
+    this._emitShape({ kind: 'resumed', ...rec, held: 0, drained, dropped, at: Date.now() });
   }
   _emitShape(ev) { try { this.onShape?.(ev); } catch { } }
   /** The paused months — host × shard, r4 (the Usage panel's ledger note, /api/usage-stats `ingestPaused`). */
@@ -1219,7 +1305,7 @@ class UsageHistory {
       if (this._shapeVerdict(shard).ok) this._resume(rec.host, shard);
     }
     // r2: still paused after the run ⇒ the notice says what happened (not rewritten / still out of shape), retried later
-    if ([...this._pausedShards.values()].some((x) => x.shard === path.basename(shard))) this._remedyMissed(shard, r); else this._remedies.delete(shard);
+    if ([...this._pausedShards.values()].some((x) => x.shard === path.basename(shard) && !x.drain)) this._remedyMissed(shard, r); else this._remedies.delete(shard);
   }
   /** A shard's path as the ingest keys it (`_shardFor`'s spelling: this.dir + the name). */
   _shardPath(file) { return path.join(this.dir, path.basename(file)); }
@@ -2298,4 +2384,4 @@ class UsageHistory {
   }
 }
 
-module.exports = { UsageHistory, DEFAULT_PRICING, PRICE_ROW_FIELDS, SUPERSEDED_DEFAULTS, priceAt, REMEDY_STATES };
+module.exports = { UsageHistory, DEFAULT_PRICING, PRICE_ROW_FIELDS, SUPERSEDED_DEFAULTS, priceAt, REMEDY_STATES, ackOf };

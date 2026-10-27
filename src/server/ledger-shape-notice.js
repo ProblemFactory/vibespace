@@ -19,17 +19,24 @@
  * as usual, and this month's events are HELD beside the file (bounded) and recorded in order once it is back in shape. So
  * the notice is ONE per machine × file, and it says how many events are held, the bound, and how many of the oldest were
  * dropped past it (counted, never silently); a boot also reads every hold back (`restoreHolds`).
+ * Round 5: the notice's IDENTITY is (host, file) — never its words: new words (the machine renamed, a count moved, a drain
+ * that failed) re-word the SAME item in place, a notice the owner marked read is reopened, never filed again, and
+ * 'resumed' closes it whatever it says (r4 matched by text: a rename filed a second item and left the first open for
+ * ever). A month back in shape whose held events could not be recorded (ENOSPC …) stays held and says so in its own
+ * words (`drain-failed`) — it closes only once they are in the ledger.
  * `wire({usageHistory, userTodos})` = server.js's one line (it sets `usageHistory.onShape`, reconciles 3 s after boot).
  */
 const INBOX_KEY = 'usage-ledger';
 const i18nKey = (k) => k; // the extraction marker scripts/i18n-extract.mjs reads (the keys live in the zh / ja dictionaries)
 const TEXT = i18nKey('Usage of {machine} for {month} is held — the usage ledger file {shard} is out of shape');
-const D_WHAT = { size: i18nKey('What: data/usage-history/{shard} is {size} — past the 2 GiB a month of usage never needs.'), proven: i18nKey('What: data/usage-history/{shard} is {size} — over the 2 GiB bound, and a dedup pass found no repeated row in it.'), ratio: i18nKey('What: data/usage-history/{shard} is {size} and holds about {ratio}× its distinct rows — the same events written again and again.'), ids: i18nKey('What: data/usage-history/{shard} is {size} and holds more distinct ids than its index may keep.') };
+const TEXT_DRAIN = i18nKey('Usage of {machine} for {month} is held — its held events could not be recorded yet'); // r5: back in shape, its drain failed
+const D_WHAT = { size: i18nKey('What: data/usage-history/{shard} is {size} — past the 2 GiB a month of usage never needs.'), proven: i18nKey('What: data/usage-history/{shard} is {size} — over the 2 GiB bound, and a dedup pass found no repeated row in it.'), ratio: i18nKey('What: data/usage-history/{shard} is {size} and holds about {ratio}× its distinct rows — the same events written again and again.'), ids: i18nKey('What: data/usage-history/{shard} is {size} and holds more distinct ids than its index may keep.'), drain: i18nKey('What: data/usage-history/{shard} is back in shape — the events of {month} held beside it while it was not are recorded into it first, in order.') };
 // r4: what is held, and where — the month only (its other months are recorded as usual), the count, the bound
 const D_HELD = {
   held: i18nKey('Which machine: {machine} — only {month} is held; its other months are recorded as usual. {held} events of {month} held until the file is back in shape (beside it, at most {bound}); then they are recorded, in order.'),
   counting: i18nKey('Which machine: {machine} — only {month} is held; its other months are recorded as usual. Its held events of {month} (at most {bound}) are counted once their hold is read; they are recorded, in order, once the file is back in shape.'),
   failed: i18nKey('Which machine: {machine} — only {month} is paused; its other months are recorded as usual. Its events of {month} could not be held beside the file ({error}) — its device keeps them and sends them again.'),
+  drain: i18nKey('Which machine: {machine} — only {month} is held; its other months are recorded as usual. Its {held} held events of {month} (at most {bound}) wait beside the file until they are recorded, in order.'),
 };
 const D_DROPPED = i18nKey('Past the bound: the {dropped} oldest held events of {month} were dropped — counted here, never recorded.');
 const D_NOW = {
@@ -42,11 +49,14 @@ const D_NOW = {
   ids: i18nKey('What happened: the month holds more distinct records than the index keeps — removing repeated rows cannot help (a dedup removes repeats only), and VibeSpace does not split a month\'s file or raise the bound by itself, so it has stopped trying. Recording stays paused for this file.'),
   none: i18nKey('What happens now: recording stays paused while the file is out of shape.'),
 };
+// r5: the DRAIN's own state (never a remedy's — D_NOW is a row per REMEDY_STATES, exactly): back in shape, not recorded yet
+const D_DRAIN_FAILED = i18nKey('What happened: {held} held events could not be recorded: {error} — retrying at the machine\'s next harvest and at a restart.');
 const D_TODO = {
   wait: i18nKey('What to do: nothing, usually. If this notice is still here in an hour, send feedback from the gear menu — the file needs a look.'),
   space: i18nKey('What to do: free space on the disk that holds VibeSpace\'s data folder — removing the repeated rows writes a new copy of the file beside it.'),
   look: i18nKey('What to do: send feedback from the gear menu — the file needs a look. VibeSpace keeps trying meanwhile.'),
   stopped: i18nKey('What to do: send feedback from the gear menu — this month\'s file needs splitting or its bound raising, by hand. VibeSpace does not try again by itself.'),
+  drainSpace: i18nKey('What to do: free space on the disk that holds VibeSpace\'s data folder — the held events are written into the month\'s file.'),
 };
 const NO_SPACE = new Set(['ENOSPC', 'EDQUOT']);
 
@@ -55,43 +65,75 @@ const hhmm = (t) => { const d = new Date(Number(t) || 0); return `${String(d.get
 /** The notice's words → {text, detail, i18n} (PURE). `remedy` = usage-history's `_remedyOf` ({state, code, error, removed,
  *  nextAt}); `host` and THE RULE that opened it (`why`, `exact`) ride the text's params (the boot reconcile reads them
  *  back). A state without words of its own is said as `none` (recording paused — no claim of what is being done). */
-function noticeOf({ hostName, host, shard, month, size, ratio, why, exact, remedy, held, dropped, holdMax, holdError } = {}) {
-  const r = remedy && typeof remedy === 'object' ? remedy : { state: 'none' };
-  const state = Object.prototype.hasOwnProperty.call(D_NOW, r.state) ? r.state : 'none';
+function noticeOf({ hostName, host, shard, month, size, ratio, why, exact, remedy, held, dropped, holdMax, holdError, drain } = {}) {
+  // r5: a month whose held events could not be recorded says THAT (its file is back in shape — no remedy words)
+  const drained = !!(drain && drain.state === 'failed');
+  const r = drained ? { state: 'drain-failed', code: drain.code || null, error: drain.code || null } : remedy && typeof remedy === 'object' ? remedy : { state: 'none' };
+  const state = drained ? 'drain-failed' : Object.prototype.hasOwnProperty.call(D_NOW, r.state) ? r.state : 'none';
   const sh = String(shard || '').slice(0, 60), mo = /^\d{4}-\d{2}$/.test(String(month || '')) ? String(month) : (/(\d{4}-\d{2})/.exec(sh) || [])[1] || 'this month';
   const p = { machine: String(hostName || host || 'a machine').slice(0, 80), shard: sh, month: mo, size: gib(size), ratio: ratio == null ? '' : String(ratio), error: String(r.code ? `${r.code}${r.error && !String(r.error).startsWith(r.code) ? ` (${r.error})` : ''}` : r.error || 'no reason given').slice(0, 200), removed: String(Math.max(0, Number(r.removed) || 0)), next: r.nextAt ? hhmm(r.nextAt) : 'a while', held: String(Math.max(0, Number(held) || 0)), dropped: String(Math.max(0, Number(dropped) || 0)), bound: `${Math.round((Number(holdMax) || 64 * 2 ** 20) / 2 ** 20)} MiB`, holdError: String(holdError || '').slice(0, 80) };
-  const what = state === 'proven-over' ? D_WHAT.proven : D_WHAT[why] || D_WHAT.size;
-  const who = holdError ? D_HELD.failed : held == null ? D_HELD.counting : D_HELD.held;
-  const now = D_NOW[state];
-  const todo = state === 'running' || state === 'judging' || state === 'none' ? D_TODO.wait : state === 'failed' && NO_SPACE.has(r.code) ? D_TODO.space : state === 'proven-over' || state === 'ids' ? D_TODO.stopped : D_TODO.look;
+  const what = drained ? D_WHAT.drain : state === 'proven-over' ? D_WHAT.proven : (why !== 'drain' && D_WHAT[why]) || D_WHAT.size;
+  const who = drained ? D_HELD.drain : holdError ? D_HELD.failed : held == null ? D_HELD.counting : D_HELD.held;
+  const now = drained ? D_DRAIN_FAILED : D_NOW[state];
+  const todo = drained ? (NO_SPACE.has(r.code) ? D_TODO.drainSpace : D_TODO.look) : state === 'running' || state === 'judging' || state === 'none' ? D_TODO.wait : state === 'failed' && NO_SPACE.has(r.code) ? D_TODO.space : state === 'proven-over' || state === 'ids' ? D_TODO.stopped : D_TODO.look;
   const lines = [{ key: what, params: { shard: p.shard, size: p.size, ratio: p.ratio } }, { key: who, params: { machine: p.machine, month: p.month, held: p.held, bound: p.bound, error: p.holdError } }];
   if (Number(dropped) > 0) lines.push({ key: D_DROPPED, params: { dropped: p.dropped, month: p.month } }); // past the bound: counted, never silently
-  lines.push({ key: now, params: { error: p.error, next: p.next, removed: p.removed, size: p.size } }, { key: todo });
+  lines.push({ key: now, params: { error: p.error, next: p.next, removed: p.removed, size: p.size, ...(drained ? { held: p.held } : {}) } }, { key: todo });
   const fill = (k, q = p) => k.replace(/\{(\w+)\}/g, (_, n) => (q[n] == null ? '' : String(q[n])));
+  const head = drained ? TEXT_DRAIN : TEXT;
   return {
-    text: fill(TEXT),
+    text: fill(head),
     detail: lines.map((l) => fill(l.key, { ...p, ...(l.params || {}) })).join('\n'),
-    i18n: { text: { key: TEXT, params: { machine: p.machine, month: p.month, shard: p.shard, host: String(host || '').slice(0, 160), why: Object.prototype.hasOwnProperty.call(D_WHAT, why) ? why : 'size', exact: exact ? '1' : '' } }, detail: lines },
+    i18n: { text: { key: head, params: { machine: p.machine, month: p.month, shard: p.shard, host: String(host || '').slice(0, 160), why: Object.prototype.hasOwnProperty.call(D_WHAT, why) ? why : 'size', exact: exact ? '1' : '' } }, detail: lines },
   };
 }
 
 function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m), reconcileAfterMs = 3000 } = {}) {
   if (!usageHistory) return null;
-  const open = new Map(); // host × file → For-you item id (r4: ONE notice per paused month of a machine)
+  const open = new Map(); // host × file → For-you item id (r4: ONE notice per paused month of a machine; r5: its identity)
   const keyOf = (host, shard) => `${host}\n${shard}`;
   const close = (id, by) => { try { const it = userTodos.get?.(id); if (it && it.status === 'open') userTodos.setStatus(id, 'done', by); } catch { } };
+  const paramsOf = (it) => (it && it.i18n && it.i18n.text && it.i18n.text.params) || {};
+  const ours = (it) => !!(it && it.sessionKey === INBOX_KEY && it.kind === 'notice' && it.origin === 'server' && !it.clearedAt);
+  /** r5: THE item of (host, file) — the one this process filed, else the newest the store holds for that key (open first,
+   *  read or closed after); a second OPEN one (r4 filed one per wording) is closed into it ('merged'). */
+  function itemOf(host, shard) {
+    const id = open.get(keyOf(host, shard)), had = id && userTodos.get?.(id);
+    if (ours(had)) return had;
+    const ids = typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => ours(i) && paramsOf(i).host === String(host) && paramsOf(i).shard === String(shard)) : [];
+    const all = ids.map((x) => userTodos.get(x)).filter(Boolean).sort((a, b) => (a.status === 'open') - (b.status === 'open') || (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0));
+    const keep = all[all.length - 1] || null;
+    for (const o of all) if (o !== keep && o.status === 'open') close(o.id, 'merged');
+    if (keep) open.set(keyOf(host, shard), keep.id);
+    return keep;
+  }
   usageHistory.onShape = (ev) => {
     if (!ev || !userTodos) return;
     if (ev.kind === 'paused') {
-      const w = noticeOf(ev);
+      const prev = itemOf(ev.host, ev.shard);
+      // a name the event does not know (a hold read back at boot names its host id only) keeps the one its notice said
+      const name = ev.hostName && ev.hostName !== ev.host ? ev.hostName : paramsOf(prev).machine || ev.hostName;
+      const w = noticeOf({ ...ev, hostName: name });
       try {
-        const it = userTodos.add(INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Usage', text: w.text, detail: w.detail, i18n: w.i18n });
-        if (it && it.id) open.set(keyOf(ev.host, ev.shard), it.id);
-      } catch (e) { log(`the growth alarm's notice for ${ev.hostName || ev.host} was not filed: ${e.message}`); }
+        if (!prev) {
+          const it = userTodos.add(INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Usage', text: w.text, detail: w.detail, i18n: w.i18n });
+          if (it && it.id) open.set(keyOf(ev.host, ev.shard), it.id);
+          return;
+        }
+        // r5: the SAME item re-worded in place (a rename, a count, a drain that failed); a read one reopened — never a second
+        userTodos.reshapeItems((it, now) => {
+          if (it.id !== prev.id) return false;
+          const same = it.status === 'open' && it.text === w.text && it.detail === w.detail && JSON.stringify(it.i18n || null) === JSON.stringify(w.i18n);
+          if (same) return false;
+          it.text = w.text; it.detail = w.detail; it.i18n = w.i18n; it.urgency = 'high';
+          if (it.status !== 'open') { it.status = 'open'; it.resolvedAt = null; it.resolvedBy = null; it.expiresAt = null; it.createdAt = now; delete it.judged; }
+          return true;
+        });
+      } catch (e) { log(`the growth alarm's notice for ${name || ev.host} was not filed: ${e.message}`); }
     } else if (ev.kind === 'resumed') {
-      const id = open.get(keyOf(ev.host, ev.shard));
+      const it = itemOf(ev.host, ev.shard); // whatever it says (r5)
       open.delete(keyOf(ev.host, ev.shard));
-      if (id) close(id, 'shape-ok');
+      if (it) close(it.id, 'shape-ok');
     }
   };
   /** Boot: every open notice re-judged BY THE RULE THAT OPENED IT — its shard still out of shape ⇒ that month paused again
@@ -107,6 +149,7 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
         if (!it || it.sessionKey !== INBOX_KEY || it.kind !== 'notice' || it.origin !== 'server') continue;
         const p = (it.i18n && it.i18n.text && it.i18n.text.params) || {};
         if (open.get(keyOf(p.host, p.shard)) === it.id) continue;
+        if (p.host && p.shard) { const keep = itemOf(p.host, p.shard); if (keep && keep.id !== it.id) continue; } // r5: one per (host, file) — a second was merged into it
         let rec = null;
         // the rule: its params (r3); a notice filed before them is read by its first detail line, and judged by the index
         // unless that line says size (the sample may be the rule that cannot see it)
@@ -124,4 +167,4 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
   return { open, reconcile };
 }
 
-module.exports = { wire, noticeOf, INBOX_KEY, TEXT, D_WHAT, D_HELD, D_DROPPED, D_NOW, D_TODO };
+module.exports = { wire, noticeOf, INBOX_KEY, TEXT, TEXT_DRAIN, D_WHAT, D_HELD, D_DROPPED, D_NOW, D_DRAIN_FAILED, D_TODO };

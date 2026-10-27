@@ -882,7 +882,7 @@ const accounts = new AccountManager({
 // JSONL transcripts (terminal + chat), for the Usage window. resolveAccount
 // bakes WHICH account + its billing TYPE into each event so subscription and
 // API-key usage are never conflated. ──
-const { UsageHistory } = require('./src/usage-history');
+const { UsageHistory, ackOf: usageAckOf } = require('./src/usage-history');
 // Forward URL/token: user setting wins; the VIBESPACE_TELEMETRY_FORWARD_* env
 // vars are the DEPLOYMENT defaults (helm/compose set them fleet-wide so no
 // per-user settings edit is needed on managed instances).
@@ -1238,7 +1238,7 @@ hosts.onUsageEvents = (hostId, text) => {
     try { for (const [ik] of usageIdentityGroups()) usageEstimator.invalidate(ik); } catch { }
     try { kickPoolEval(); } catch { }
   }
-  return !(r.paused || r.deferred); // lane ledger-dedup-law: nothing made durable ⇒ unacked, the device keeps the batch
+  return usageAckOf(r); // lane ledger-dedup-law r5: THE ACK is durability — every row appended or held (a pause alone never withholds it); deferred or a month's hold unwritten ⇒ unacked, the device keeps the batch
 };
 {
   const dirtyTimers = new Map();

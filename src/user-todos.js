@@ -177,6 +177,9 @@ function normalizeOpen(x, plugin) {
 
 // THE MERGE RULE (lane chat-needs-you-card, amendment 1): derived from THE For-you action registry — a row's `identity`
 const { ACTION_IDENTITY } = require('./foryou-actions.js');
+/** lane ledger-dedup-law r5: an item's resolution is no longer a person's decision once another door re-stamps or reopens it
+ *  (its ✓, Mark all seen, a producer's own re-stamp) — the fact stays for its words, the mark goes (add() reopens it again). */
+function undecide(item) { if (item.resolvedFact && item.resolvedFact.decidedBy) { const f = { ...item.resolvedFact }; delete f.decidedBy; item.resolvedFact = f; } }
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
@@ -540,6 +543,11 @@ class UserTodoManager {
     // route never passes it (lane oat-identity-fix-r2, L1)
     const maxOpen = Number(openCap) > MAX_OPEN_PER_SESSION ? Math.min(Number(openCap), this._maxItems) : MAX_OPEN_PER_SESSION;
     if (existing) {
+      // lane ledger-dedup-law r5: A DECISION IS FINAL — an item a PERSON decided (its producer's answer door wrote
+      // `resolvedFact.decidedBy: 'person'` with the resolution, and no door re-stamped or reopened it since) is never
+      // reopened by a re-file: a re-ask after a Deny is refused by the Deny, never a new filing (a hub act's re-file
+      // reopened its denied item 3 s before the boot read the Deny back). Returned as it is, `decided: true`.
+      if (existing.status !== 'open' && existing.resolvedFact && existing.resolvedFact.decidedBy === 'person') return cut({ ...existing, existing: true, decided: true });
       let changed = false;
       // lane decision-inbox-rank: an agent filing the SAME words (text, and the same detail or none) of an item still open
       // is a RE-ASK — counted (the tray's judge reads "re-asked N times"; the 48 h decay restarts at the last one); new
@@ -647,6 +655,7 @@ class UserTodoManager {
     if (!item) throw new Error('item not found');
     const wasOpen = item.status === 'open';
     item.status = status;
+    undecide(item); // r5: what resolves the item now is this door, not the person's decision
     // a reopen is the user saying it still matters: it no longer expires
     if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
     else { item.resolvedAt = this._now(); item.resolvedBy = by; }
@@ -675,6 +684,7 @@ class UserTodoManager {
       if (!item) { unknown.push(id); continue; }
       const wasOpen = item.status === 'open';
       item.status = status;
+      undecide(item); // r5: as setStatus
       if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
       else { item.resolvedAt = now; item.resolvedBy = by; }
       changed.push(id);

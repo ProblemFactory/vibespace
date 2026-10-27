@@ -19,6 +19,9 @@ export const LEDGER_NOTE_WORDS = {
   // r4: a pause is ONE month's (its other months are recorded as usual) — what is held, the bound, what was dropped past it
   pausedHeld: '{held} events of {machine} for {month} held until its file is back in shape (at most {bound}; then recorded, in order) — its other months are recorded as usual',
   pausedDropped: 'Past the bound, the {dropped} oldest held events of {machine} for {month} were dropped — counted, never recorded',
+  // r5: a month back in shape stays held until its held events are in the ledger (a resume follows the drain)
+  pausedDraining: 'Usage of {machine} for {month} is held: its file is back in shape — its {held} held events are being recorded, in order',
+  pausedDrainFailed: 'Usage of {machine} for {month} is held: {held} held events could not be recorded ({error}) — retrying at its next harvest',
 };
 /** The remedy's state → its words (a state this window does not know is said as `none`: paused, no claim). */
 export const PAUSED_WORDS = { running: 'pausedRunning', judging: 'pausedJudging', failed: 'pausedFailed', 'not-rewritten': 'pausedNotRewritten', insufficient: 'pausedStill', 'proven-over': 'pausedProvenOver', ids: 'pausedIds', none: 'pausedNone' };
@@ -30,11 +33,12 @@ export function ledgerNote(d, now = Date.now()) {
   if (d && d.partial && d.partial.missingRows > 0) out.push({ kind: 'partial', words: LEDGER_NOTE_WORDS.partial, vars: { n: d.partial.missingRows } });
   if (d && Number.isFinite(d.asOf) && now - d.asOf > AS_OF_LAG_MS) out.push({ kind: 'asof', words: LEDGER_NOTE_WORDS.asOf, vars: { time: hhmm(d.asOf) } });
   for (const p of (d && Array.isArray(d.ingestPaused) ? d.ingestPaused : []).slice(0, 4)) {
-    const r = (p && p.remedy) || {}, words = LEDGER_NOTE_WORDS[(Object.prototype.hasOwnProperty.call(PAUSED_WORDS, r.state) && PAUSED_WORDS[r.state]) || 'pausedNone'];
+    const r = (p && p.remedy) || {}, dr = (p && p.drain) || null, draining = !!(dr && (dr.state === 'failed' || dr.state === 'draining'));
+    const words = dr && dr.state === 'failed' ? LEDGER_NOTE_WORDS.pausedDrainFailed : dr && dr.state === 'draining' ? LEDGER_NOTE_WORDS.pausedDraining : LEDGER_NOTE_WORDS[(Object.prototype.hasOwnProperty.call(PAUSED_WORDS, r.state) && PAUSED_WORDS[r.state]) || 'pausedNone'];
     const month = String(p.month || (/(\d{4}-\d{2})/.exec(String(p.shard || '')) || [])[1] || '');
-    const vars = { machine: String(p.hostName || p.host || ''), month, shard: String(p.shard || ''), size: `${((Number(p.size) || 0) / 2 ** 30).toFixed(2)} GiB`, error: String(r.code || r.error || '').slice(0, 120), time: r.nextAt ? hhmm(r.nextAt) : '', held: String(Number(p.held) || 0), dropped: String(Number(p.dropped) || 0), bound: `${Math.round((Number(p.holdMax) || 64 * 2 ** 20) / 2 ** 20)} MiB` };
+    const vars = { machine: String(p.hostName || p.host || ''), month, shard: String(p.shard || ''), size: `${((Number(p.size) || 0) / 2 ** 30).toFixed(2)} GiB`, error: String((dr && dr.code) || r.code || r.error || '').slice(0, 120), time: r.nextAt ? hhmm(r.nextAt) : '', held: String(Number(p.held) || 0), dropped: String(Number(p.dropped) || 0), bound: `${Math.round((Number(p.holdMax) || 64 * 2 ** 20) / 2 ** 20)} MiB` };
     out.push({ kind: 'paused', words, vars });
-    if (Number(p.held) > 0) out.push({ kind: 'paused', words: LEDGER_NOTE_WORDS.pausedHeld, vars });
+    if (Number(p.held) > 0 && !draining) out.push({ kind: 'paused', words: LEDGER_NOTE_WORDS.pausedHeld, vars }); // a drain's row says what is held
     if (Number(p.dropped) > 0) out.push({ kind: 'paused', words: LEDGER_NOTE_WORDS.pausedDropped, vars });
   }
   return out;

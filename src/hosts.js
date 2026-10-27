@@ -1354,9 +1354,11 @@ class HostManager {
           if (m.seq != null) {
             // ingest is synchronous today (ingestRemoteEvents appends + fsyncs
             // via appendFileSync) — ack only on success; a throw above leaves
-            // the batch unacked and it re-emits. `false` = nothing was made
-            // durable (a paused or deferred ingest, lane ledger-dedup-law):
-            // unacked, the device keeps the batch
+            // the batch unacked and it re-emits. `false` = not every row was
+            // made durable (lane ledger-dedup-law r5: usage-history `ackOf`,
+            // the harvest road's own verdict — deferred, or a month's hold
+            // unwritten; a pause alone acks: its rows are held): unacked,
+            // the device keeps the batch
             if (r !== false) dm.ackUsageEvents(m.seq);
           }
         } catch { held = m.seq == null; /* unacked → re-emitted → the write-time dedup keeps none of it twice */ }
