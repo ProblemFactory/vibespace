@@ -219,5 +219,18 @@ process.stdout.write(rows.join('\\n') + '\\n');
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// lane ledger-dedup-law F5: THE command-line reader is the shared module's — the memory notice names its stranger with it,
+// the bundled daemon carries the same function, and it reads the same command line the process table shows
+{
+  const si = require(REPO + '/src/sysinfo.js');
+  const bundle = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-agentd.js'), 'utf8');
+  ok(typeof si.cmdlineHead === 'function' && /function cmdlineHeadOf\(/.test(bundle), 'F5: cmdlineHead lives in src/sysinfo.js — the daemon bundle carries the same reader (one implementation)');
+  const table = await si.listProcs({ max: 2000 });
+  const me = table.procs.find((p) => p.pid === process.pid);
+  const head = await si.cmdlineHead(process.pid);
+  ok(me && head && me.cmd.startsWith(head.replace(/…$/, '').slice(0, 60)), `F5 parity: /proc/<pid>/cmdline's head = the process table's command for the same pid ("${head && head.slice(0, 50)}…")`, { head, cmd: me && me.cmd.slice(0, 120) });
+  ok(head && head.length <= si.CMDLINE_HEAD && (await si.cmdlineHead(2 ** 22 + 7)) === null, `F5: bounded (≤ ${si.CMDLINE_HEAD} chars); a pid that is gone answers null, never throws`);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

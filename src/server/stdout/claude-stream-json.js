@@ -1268,8 +1268,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
           // live via noteLive); this closes the LEDGER/billing-popup lag.
           if (msg.type === 'result' && session.host) {
             try {
-              hosts?.harvestUsage(session.host, { minIntervalMs: 60 * 1000, scannerPath: USAGE_SCANNER_PATH })
-                .then((txt) => { if (txt) usageHistory.ingestRemoteEvents(session.host, hosts.get(session.host)?.name, txt); })
+              hosts?.harvestUsage(session.host, { minIntervalMs: 60 * 1000, scannerPath: USAGE_SCANNER_PATH, ledger: usageHistory }) // lane ledger-dedup-law F2: it ingests, then commits the hub's cursor
                 .catch(() => { });
             } catch { }
           }

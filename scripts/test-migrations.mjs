@@ -45,6 +45,32 @@ try {
   const led = JSON.parse(fs.readFileSync(ledger, 'utf-8'));
   ok(led.applied.a && !led.applied.b, 'ledger records success only');
 
+  // ── a STEPPED migration (lane ledger-dedup-law): its run() returns a promise — the boot goes on at once, the ledger records
+  // it when it ENDS; a restart before that records nothing (it runs again); a rejection is a failure like any other ──
+  {
+    const sl = path.join(tmp, 'ledger-stepped.json');
+    let resolveS, rejectS, hung = 0; const late = [];
+    const steppedMig = [
+      { id: 's1', run: () => new Promise((r) => { resolveS = r; }) },
+      { id: 's2', run: () => { hung++; return new Promise(() => { }); } }, // the process dies before it ends
+      { id: 's3', run: () => new Promise((_, rj) => { rejectS = rj; }) },
+      { id: 's4', run: () => ({ n: 1 }) },
+    ];
+    const warned = [];
+    const r1 = runMigrations({ ledgerPath: sl, migrations: steppedMig, log: () => { }, warn: (m) => warned.push(m), onLate: (x) => late.push(x) });
+    const st = Object.fromEntries(r1.map((x) => [x.id, x.status]));
+    const led0 = JSON.parse(fs.readFileSync(sl, 'utf-8'));
+    ok(st.s1 === 'started' && st.s2 === 'started' && st.s3 === 'started' && st.s4 === 'ran' && !led0.applied.s1 && led0.applied.s4, 'a stepped migration: the boot goes on at once (started), nothing recorded yet — a sync one beside it is recorded as always', st);
+    resolveS({ shards: 2, deduped: 1 }); rejectS(new Error('ENOSPC'));
+    await new Promise((r) => setImmediate(r));
+    const led1 = JSON.parse(fs.readFileSync(sl, 'utf-8'));
+    ok(led1.applied.s1 && led1.reports.s1.deduped === 1 && led1.applied.s4 && !led1.applied.s2 && !led1.applied.s3, 'it is recorded when it ENDS (its report beside it; the ledger re-read, the sync one kept); the hung and the failed are not', led1);
+    ok(late.some((x) => x.id === 's1' && x.status === 'ran') && late.some((x) => x.id === 's3' && x.status === 'failed' && /ENOSPC/.test(x.error)) && warned.some((m) => /s3 FAILED \(will retry next boot\): ENOSPC/.test(m)), 'onLate hears the end (ran / failed); a failure is said VERBATIM like a sync one\'s', { late, warned });
+    const r2 = runMigrations({ ledgerPath: sl, migrations: steppedMig, log: () => { }, warn: () => { } });
+    const st2 = Object.fromEntries(r2.map((x) => [x.id, x.status]));
+    ok(st2.s1 === 'already' && st2.s2 === 'started' && st2.s3 === 'started' && hung === 2, 'the next boot: the ended one is skipped; the one a restart cut short and the failed one run again', st2);
+  }
+
   // ── the dormant-plan archive migration ──
   const rootDir = path.join(tmp, 'inst');
   fs.mkdirSync(path.join(rootDir, 'data'), { recursive: true });

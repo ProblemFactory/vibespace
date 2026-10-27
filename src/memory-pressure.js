@@ -17,6 +17,10 @@
  *   · pressureItem(...) — the words (text ≤ 500, detail ≤ 8000: user-todos' bounds) + their i18n keys.
  *   · ownChromeNotice(...) — the one line a conversation is told about its own Chrome processes.
  * ORIGIN RULE (one): the item is origin `server` ("This machine") — memory is the machine's, whoever holds it.
+ * THE STRANGER (lane ledger-dedup-law F5): an unknown group names its LARGEST process by pid and command-line head (the
+ * watch reads it through src/sysinfo.js cmdlineHead — `topCmd`, and its tree root's `rootCmd`) and says whether VibeSpace
+ * started it: a tree whose root has no parent in this pid namespace (ppid 0, not pid 1) is «an exec from outside the
+ * container» (`kubectl exec` / `docker exec`) — the fleet probe that filled a 32 Gi pod was named only "node".
  */
 const ON_PCT = 90;
 const OFF_PCT = 80;
@@ -66,8 +70,9 @@ function attribute(procs, ids = {}, { only = null } = {}) {
   const groups = new Map();
   const add = (key, base, p) => {
     let g = groups.get(key);
-    if (!g) { g = { ...base, key, pss: 0, n: 0, pids: [], approx: false }; groups.set(key, g); }
+    if (!g) { g = { ...base, key, pss: 0, n: 0, pids: [], approx: false, topPid: p.pid, topPss: -1 }; groups.set(key, g); }
     g.pss += Math.max(0, Number(p.pss) || 0); g.n++; if (g.pids.length < 20) g.pids.push(p.pid); if (p.approx) g.approx = true;
+    if ((Number(p.pss) || 0) > g.topPss) { g.topPss = Number(p.pss) || 0; g.topPid = p.pid; } // the group's largest process (F5)
     return g;
   };
   for (const p of byPid.values()) {
@@ -84,7 +89,9 @@ function attribute(procs, ids = {}, { only = null } = {}) {
       if (!(cur.ppid > 1)) break; // an unknown tree's root is the ancestor just below init — never init itself
       cur = byPid.get(cur.ppid);
     }
-    if (!owner) owner = { kind: 'unknown', key: 'unknown:' + root.pid, name: String(root.comm || argvOf(root)[0] || 'process').split('/').pop().slice(0, 60), rootPid: root.pid };
+    // an unknown tree: its root is the ancestor just below init; with ppid 0 (and not pid 1) it has NO parent in this pid
+    // namespace — a process exec'd into the container from outside (F5)
+    if (!owner) owner = { kind: 'unknown', key: 'unknown:' + root.pid, name: String(root.comm || argvOf(root)[0] || 'process').split('/').pop().slice(0, 60), rootPid: root.pid, outside: root.ppid === 0 && root.pid !== 1 };
     const g = add(owner.key, owner, p);
     if (owner.kind === 'own-chrome' && chromeRoot) {
       g.chromes = g.chromes || []; g.dirs = g.dirs || [];
@@ -107,6 +114,13 @@ function whoOf(g) {
   if (g.kind === 'session') return { text: `the conversation ${g.name}`, key: i18nKey('the conversation {name}'), params: { name: g.name } };
   if (g.kind === 'job') return { text: `the Background Work job ${g.name}`, key: i18nKey('the Background Work job {name}'), params: { name: g.name } };
   if (g.kind === 'app') return { text: `the desktop app ${g.name}`, key: i18nKey('the desktop app {name}'), params: { name: g.name } };
+  if (g.topCmd) { // F5: the largest process by pid + its own command line, and whether it came from outside the container
+    const params = { pid: g.topPid, cmd: g.topCmd };
+    return g.outside
+      ? { text: `pid ${g.topPid} (${g.topCmd}) — not started by VibeSpace, an exec from outside the container`, key: i18nKey('pid {pid} ({cmd}) — not started by VibeSpace, an exec from outside the container'), params }
+      : { text: `pid ${g.topPid} (${g.topCmd}) — not started by VibeSpace`, key: i18nKey('pid {pid} ({cmd}) — not started by VibeSpace'), params };
+  }
+  if (g.outside) return { text: `a process VibeSpace did not start: ${g.name} (${g.rootPid}) — an exec from outside the container`, key: i18nKey('a process VibeSpace did not start: {comm} ({pid}) — an exec from outside the container'), params: { comm: g.name, pid: g.rootPid } };
   return { text: `a process VibeSpace did not start: ${g.name} (${g.rootPid})`, key: i18nKey('a process VibeSpace did not start: {comm} ({pid})'), params: { comm: g.name, pid: g.rootPid } };
 }
 
@@ -126,6 +140,11 @@ function pressureItem({ pct, used, limit, groups = [], tmpfs = null, roots = [] 
     const size = `${gb(g.pss)} GB${g.approx ? ' (RSS)' : ''}`;
     lines.push(`- ${size} · ${w.text} · ${g.n} process${g.n === 1 ? '' : 'es'}`);
     rows.push({ key: i18nKey('- {size} · {who} · {n} processes'), params: { size, who: w.text, n: g.n } });
+  }
+  const st = top.find((g) => g.kind === 'unknown' && g.topCmd && g.rootCmd && g.rootPid !== g.topPid);
+  if (st) { // F5: who started the stranger — its tree's root, by pid and command line
+    lines.push('', `pid ${st.topPid} was started under pid ${st.rootPid}: ${st.rootCmd}${st.outside ? ' — which has no parent inside the container (an exec from outside)' : ''}`);
+    rows.push({ key: st.outside ? i18nKey('pid {pid} was started under pid {root}: {cmd} — which has no parent inside the container (an exec from outside)') : i18nKey('pid {pid} was started under pid {root}: {cmd}'), params: { pid: st.topPid, root: st.rootPid, cmd: st.rootCmd } });
   }
   if (tmpfs && Number(tmpfs.size) > 0) {
     lines.push('', `${tmpfs.mount || '/tmp'} is in RAM: ${gb(tmpfs.used)} of ${gb(tmpfs.size)} GB used — files there count as memory.`);

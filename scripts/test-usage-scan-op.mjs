@@ -99,6 +99,27 @@ const r4 = await dm.usageScan({ cursorFile: opCursor });
 const r4l = r4.ndjson.split('\n').filter(Boolean);
 ok(r4l.length === 2 && r4l.some((l) => JSON.parse(l).be === 'codex'), 'post-dirty harvest returns exactly the two appended events (claude + codex)');
 
+// ── lane ledger-dedup-law F2: THE HUB KEEPS THE CURSOR. The real daemon walks from the cursor map the hub hands it (stdin),
+// never reads or writes its own cursor file, and says so in the manifest; a daemon without the capability walks from its
+// own file and the answer says `unsupported` (the hub then keeps none of the re-read twice — F1) ──
+{
+  const hubFile = path.join(home, 'hub-never-written.json');
+  const conn0 = await dm.connect();
+  ok(conn0.info.capabilities.includes('usage-scan-hub-cursor'), 'the daemon advertises usage-scan-hub-cursor');
+  const h1 = await dm.usageScan({ cursorFile: hubFile, hubCursor: r4.cursors });
+  ok(h1.since === 'hub' && h1.ndjson === '' && !fs.existsSync(hubFile), 'walked from the HUB\'s cursor (r4\'s): nothing new, since hub, the device cursor file neither read nor written');
+  fs.appendFileSync(path.join(proj, SID + '.jsonl'), rec());
+  const h2 = await dm.usageScan({ cursorFile: hubFile, hubCursor: r4.cursors });
+  ok(h2.since === 'hub' && h2.ndjson.split('\n').filter(Boolean).length === 1 && !fs.existsSync(hubFile), 'one append past the hub\'s cursor ⇒ exactly that event, still no device-side write');
+  const h3 = await dm.usageScan({ cursorFile: hubFile, hubCursor: h2.cursors });
+  ok(h3.ndjson === '' && h3.since === 'hub', 'the hub advances its own copy (h2\'s map) ⇒ the next walk brings 0 events — no commit on the device at all');
+  const caps0 = conn0.info.capabilities;
+  conn0.info.capabilities = caps0.filter((c) => c !== 'usage-scan-hub-cursor');
+  const h4 = await dm.usageScan({ cursorFile: opCursor, hubCursor: h2.cursors });
+  conn0.info.capabilities = caps0;
+  ok(h4.since === 'unsupported' && h4.ndjson.split('\n').filter(Boolean).length === 3, 'an older daemon (no capability): it walks from its OWN cursor file (r3\'s — the 3 events since) — the answer says unsupported (the hub says since-unsupported once)', h4.ndjson.split('\n').filter(Boolean).length);
+}
+
 // capability gate: an old daemon (no usage-scan capability in its hello-ack)
 // must throw FAST pre-wire — unknown ops get no reply and would hang the
 // request until its timeout. Simulate by masking the live conn's caps.

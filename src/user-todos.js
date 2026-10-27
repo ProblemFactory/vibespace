@@ -227,7 +227,11 @@ function previewOf(item) {
   return { ...item, detail: item.detail.slice(0, DETAIL_PREVIEW), detailTruncated: true, ...(card ? { card } : {}) };
 }
 const MAX_OPEN_PER_SESSION = 20; // an agent looping on add must not flood the inbox
-const MAX_ITEMS = 1000;          // total ledger cap — oldest RESOLVED pruned first
+const MAX_ITEMS = 1000;          // total ledger cap — oldest RESOLVED pruned first (an EXPIRED one before any other: EXPIRED_BY)
+// lane ledger-dedup-law F3 (B-7f9e: 958 expired hub-act cards held 958 of a fleet owner's 1000 slots and evicted the items
+// he had answered): at the cap an item that ended UNANSWERED (its producer's end — the expiry sweep, an ask that ran out or
+// was over) goes before any item a person resolved, oldest first in each; an OPEN item is never evicted
+const EXPIRED_BY = new Set(['expired', 'ask-expired', 'ask-over']);
 const RESOLVED_TAIL = 15;                    // the snapshot's resolved tail: always the newest 15…
 const RESOLVED_RECENT_MS = 60 * 60 * 1000;   // …plus every item resolved within the last hour (an open popup's in-place rows, chunk 4)…
 const RESOLVED_SNAPSHOT_MAX = 250;           // …never more than this (one resolve-many is ≤ 200 ids)
@@ -249,8 +253,9 @@ class UserTodoManager {
    *  engine runs on, so a filing's createdAt and the engine's `now` agree at any
    *  wall-clock time (test-decision-inbox's ONE CLOCK census: no other wall-clock read in the class);
    *  the default reads the global per call, so a suite that swaps it still steers the store */
-  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS, onWriteError = null, now = () => Date.now() }) {
+  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS, onWriteError = null, maxItems = MAX_ITEMS, now = () => Date.now() }) {
     this._now = now;
+    this._maxItems = Number.isInteger(maxItems) && maxItems > 0 ? maxItems : MAX_ITEMS; // the total cap (a suite's seam)
     this._file = path.join(dataDir, 'user-todos.json');
     this._onChange = onChange || (() => {});
     this._onWriteError = typeof onWriteError === 'function' ? onWriteError : null; // lane-dead-bridge: session-status's twin — a failed background write is named, never a crash
@@ -338,11 +343,13 @@ class UserTodoManager {
   }
 
   _save() {
-    // Prune: drop oldest resolved items past the cap (open items never pruned).
-    if (this._state.items.length > MAX_ITEMS) {
+    // Prune: drop resolved items past the cap (open items never pruned) — the ones that ended unanswered first (EXPIRED_BY),
+    // then the rest, oldest first in each
+    if (this._state.items.length > this._maxItems) {
+      const age = (i) => i.resolvedAt || i.createdAt || 0, lapsed = (i) => (EXPIRED_BY.has(i.resolvedBy) ? 0 : 1);
       const resolved = this._state.items.filter((i) => i.status !== 'open')
-        .sort((a, b) => (a.resolvedAt || a.createdAt || 0) - (b.resolvedAt || b.createdAt || 0));
-      const drop = new Set(resolved.slice(0, this._state.items.length - MAX_ITEMS).map((i) => i.id));
+        .sort((a, b) => (lapsed(a) - lapsed(b)) || (age(a) - age(b)));
+      const drop = new Set(resolved.slice(0, this._state.items.length - this._maxItems).map((i) => i.id));
       if (drop.size) this._state.items = this._state.items.filter((i) => !drop.has(i.id));
     }
     this._dirty = true;
@@ -531,7 +538,7 @@ class UserTodoManager {
     const openCount = this._state.items.filter((i) => i.sessionKey === sessionKey && i.status === 'open').length;
     // a SERVER producer whose open items its own domain bounds (one per account row) may raise the per-key cap; the agent
     // route never passes it (lane oat-identity-fix-r2, L1)
-    const maxOpen = Number(openCap) > MAX_OPEN_PER_SESSION ? Math.min(Number(openCap), MAX_ITEMS) : MAX_OPEN_PER_SESSION;
+    const maxOpen = Number(openCap) > MAX_OPEN_PER_SESSION ? Math.min(Number(openCap), this._maxItems) : MAX_OPEN_PER_SESSION;
     if (existing) {
       let changed = false;
       // lane decision-inbox-rank: an agent filing the SAME words (text, and the same detail or none) of an item still open

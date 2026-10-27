@@ -54,7 +54,7 @@ const RUNAWAY_VOID_TEXT = 'stopped by the old resource guard (a per-process RSS 
 // `tasks` (lane task-group-context) is the LIVE TaskGroupManager (or a getter): it holds data/task-groups.json in memory
 // and saves it whole, so the Context-table migration goes THROUGH it (`migrateContextRows`), the file only when there is
 // none (a suite).
-function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null, hosts = null, accounts = null, plugins = null, integrations = null, grants = null, note = null, tasks = null }) {
+function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null, userTodos = null, desktopKeeper = null, browserKeeper = null, hosts = null, accounts = null, plugins = null, integrations = null, grants = null, note = null, tasks = null, usageHistory = null }) {
   const dataDir = path.join(rootDir, 'data');
   const archiveDir = path.join(dataDir, 'archive');
 
@@ -723,6 +723,38 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         return rep;
       },
     },
+    {
+      id: '2026-10-usage-ledger-dedup',
+      note: "A RE-EMISSION COSTS ZERO BYTES (lane ledger-dedup-law, B-7f9e, measured 2026-10-26 on a fleet instance): the usage harvest re-sent the whole window since its device cursor at every run (the cursor commit waited at the hub-act gate for an owner who never answered) and the ledger appended it again — the readers deduplicate by rid, so the totals stayed right while one monthly shard grew 1 GiB → 23.8 GiB (≥ 95 % repeats) and an outside probe that read it whole took the container down. From this release the ingest deduplicates at write time and the hub keeps the device cursor; this pass shrinks what was written before: every shard whose sampled rows / unique-rid ratio is over 1.2 (or that is over 1 GiB) is deduplicated by rid, keeping the FIRST row (what every reader already counted — the totals do not change), streaming through a tmp file renamed in, a copy whose bytes differ from the kept row archived first; STEPPED on the loop (≤ 40 ms a turn — the boot law), recorded when it ends, so a restart mid-way runs it again from the shard it was on (the tmp discarded). The ledger cache sees the new inode and rebuilds off the loop.",
+      run() {
+        const LD = require('../usage-ledger-dedup.js');
+        const dir = path.join(dataDir, 'usage-history');
+        let names = [];
+        try { names = fs.readdirSync(dir).filter((f) => LD.SHARD_RE.test(f)).sort(); } catch { }
+        if (!names.length) return { shards: 0, deduped: 0 };
+        const uh = typeof usageHistory === 'function' ? usageHistory() : usageHistory;
+        const turn = () => new Promise((r) => setImmediate(r));
+        return (async () => {
+          const rep = { shards: names.length, sampled: [], deduped: 0, before: 0, after: 0, removed: 0, archived: 0, journal: [] };
+          for (const f of names) {
+            await turn(); // one shard's sample per loop turn (≤ 16 MiB read)
+            let sh; try { sh = LD.shapeOf(path.join(dir, f)); } catch (e) { rep.sampled.push({ shard: f, error: e.code || e.message }); continue; }
+            const ratio = sh.ratio == null ? null : Math.round(sh.ratio * 100) / 100;
+            rep.sampled.push({ shard: f, size: sh.size, ratio });
+            if (!(sh.size > 1024 ** 3 || (ratio != null && ratio > 1.2))) continue;
+            const file = path.join(dir, f);
+            const r = uh && typeof uh.dedupShard === 'function' ? await uh.dedupShard(file, { why: 'the one-shot migration' }) : await LD.runStepped(LD.dedupSteps(file, { archiveDir }));
+            const line = { shard: f, before: r.before, after: r.after, removed: r.removed, archived: r.archived, renamed: r.renamed, ...(r.why ? { why: r.why } : {}) };
+            console.log('[migrate] usage-ledger-dedup', JSON.stringify(line));
+            rep.journal.push(line);
+            if (r.renamed) { rep.deduped++; rep.removed += r.removed; rep.archived += r.archived; }
+            rep.before += r.before; rep.after += r.after;
+          }
+          if (rep.deduped) { try { serverNotice?.('usage-ledger-deduped', `Usage bookkeeping repaired: ${rep.removed} repeated ledger row(s) were removed from ${rep.deduped} file(s) (${(rep.before / 2 ** 20).toFixed(0)} → ${(rep.after / 2 ** 20).toFixed(0)} MiB) — the first copy of each kept, the Usage window's totals unchanged.`, { level: 'info' }); } catch { } }
+          return rep;
+        })();
+      },
+    },
   ];
 
   /** 2026-10-grants-unify: every pre-unify who-list → rows of THE grants store (src/server/grants-migration.js). `ensure`
@@ -971,7 +1003,10 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   }
 
   function runLocalMigrations({ only = null } = {}) {   // `only` = ids (a suite's one boot of one migration)
-    const results = runMigrations({ ledgerPath: path.join(dataDir, 'migrations.json'), migrations: Array.isArray(only) ? MIGRATIONS.filter((m) => only.includes(m.id)) : MIGRATIONS });
+    const results = runMigrations({ ledgerPath: path.join(dataDir, 'migrations.json'), migrations: Array.isArray(only) ? MIGRATIONS.filter((m) => only.includes(m.id)) : MIGRATIONS, onLate: (r) => {
+      // a stepped migration that ended after the boot's pass (lane ledger-dedup-law): its failure is said like a sync one's
+      if (r.status === 'failed') { try { serverNotice?.('migration-failed:' + r.id, `Data migration ${r.id} failed (${r.error}) — will retry on next restart.`, { level: 'warn' }); } catch { } }
+    } });
     for (const r of results) if (r.id === '2026-10-grants-unify' && r.status === 'already') Object.assign(r, grantsStoreBoot());   // verify F2: the ledger stamped, the store deleted
     for (const r of results) {
       if (r.status === 'failed') {

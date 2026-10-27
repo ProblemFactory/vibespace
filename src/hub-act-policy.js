@@ -18,7 +18,11 @@
  *   · THE CARD is one per machine per KIND (run / files / input / forward / serve / install / upgrade): a second act of the
  *     same key joins the card that is up; its answer settles them all. 60 s unanswered ⇒ refused `ask_expired`;
  *   · a background subject (system / job) that was not allowed (denied or unanswered) is refused at once for QUIET_MS on
- *     that key — no new card (a harvest every minute is not a card every minute).
+ *     that key — no new card (a harvest every minute is not a card every minute);
+ *   · lane ledger-dedup-law F3 (B-7f9e — 958 expired cards filled a fleet owner's For-you list, 144 a day per kind per
+ *     machine): a background subject's card IS ONE STANDING ITEM — its words name the CONSEQUENCE (`standingOf`: «usage of
+ *     M is not being recorded» / «the device agent on M waits for an update»), it never expires, and every later refusal
+ *     of that machine × kind is counted on it in place (the count, the last time) — never a new card.
  * Gate: scripts/test-hub-act-ask.mjs (the verdict table, the words, the fake-daemon leg, the dialog's third list).
  */
 
@@ -30,7 +34,7 @@ const INSTANCE_KINDS = Object.freeze(['cluster', 'local']);
 const ASK_TTL_MS = 60000;            // the card's life (exit-reach's ASK_TTL_MS — test-hub-act-ask pins the two equal)
 const QUIET_MS = 10 * 60 * 1000;     // a background subject not allowed on a key: refused at once this long
 const ANSWERS = Object.freeze(['once', 'always', 'deny']);
-const REFUSALS = Object.freeze(['hub_act_denied', 'ask_expired', 'ask_unfiled', 'act_without_by']);
+const REFUSALS = Object.freeze(['hub_act_denied', 'ask_expired', 'ask_unfiled', 'act_without_by', 'ask_standing']);
 const WAY_OUT = 'the user can change it under "Who can use it" on the machine row (Remote tab) → Hub automation';
 
 // THE KIND of an act: its op family (src/device-acts.js keyOf spelling). An act op without a row is `run` (fail closed:
@@ -139,6 +143,31 @@ function cardOf({ by, name = null, machine = '', kind = 'run', summary = '' } = 
   const p = { who: whoOf(by, name), machine: fold(machine, 80) || 'a machine', summary: fold(summary, 240) || k, by: byKindOf(by) ? String(by).slice(0, 120) : 'nobody named' };
   return { text: fill(TITLE[k], p), detail: [fill(DETAIL_WHAT, p), fill(DETAIL_HOW, p)].join('\n'), i18n: { text: { key: TITLE[k], params: { who: p.who, machine: p.machine } }, detail: [{ key: DETAIL_WHAT, params: { summary: p.summary, by: p.by } }, { key: DETAIL_HOW, params: { machine: p.machine } }] } };
 }
+// lane ledger-dedup-law F3: THE STANDING ITEM's words — the consequence first (what is not happening), then who asks, how
+// often it was refused and when last, and what each answer does. The text is the item's identity (fixed at its filing:
+// machine × kind); the detail is re-worded in place as the count moves.
+const STANDING_TITLE = Object.freeze({
+  usage: i18nKey('Usage of {machine} is not being recorded — VibeSpace\'s automation waits for your Allow there'),
+  upgrade: i18nKey('The device agent on {machine} waits for an update — VibeSpace\'s automation waits for your Allow'),
+  // any other subject: the card's own title for its kind ("{who} wants to … on {machine}")
+});
+const STANDING_DETAIL_WHO = i18nKey('Asked by {by} — its last act: {summary}. Refused {count} time(s), the last at {last}. Nothing waits on it — each later act is refused at once and counted here, never a new card.');
+const STANDING_DETAIL_HOW = i18nKey('Allow once lets its next act go. Always on this machine sets Hub automation of {machine} to Always allow — every kind. Deny keeps it refused and stops counting here.');
+/** Which consequence a standing subject names: VibeSpace's usage harvest ⇒ `usage`; a device-agent update ⇒ `upgrade`. */
+const consequenceOf = (by, kind) => (String(by || '').startsWith('system:usage-harvest') ? 'usage' : kind === 'upgrade' ? 'upgrade' : 'other');
+/** THE STANDING ITEM's words → {text, detail, i18n}. `count` = refusals so far, `lastAt` = the last one (ms). */
+function standingOf({ by, machine = '', kind = 'run', count = 1, lastAt = 0, consequence = null, summary = '' } = {}) {
+  const k = KINDS.includes(kind) ? kind : 'run';
+  const c = consequence === 'usage' || consequence === 'upgrade' || consequence === 'other' ? consequence : consequenceOf(by, k);
+  const p = { machine: fold(machine, 80) || 'a machine', who: whoOf(by), by: byKindOf(by) ? String(by).slice(0, 120) : 'nobody named', summary: fold(summary, 240) || k, count: Math.max(1, Math.floor(Number(count) || 1)), last: hhmm(lastAt) };
+  const title = STANDING_TITLE[c] || TITLE[k];
+  return {
+    consequence: c,
+    text: fill(title, p),
+    detail: [fill(STANDING_DETAIL_WHO, p), fill(STANDING_DETAIL_HOW, p)].join('\n'),
+    i18n: { text: { key: title, params: { machine: p.machine, who: p.who } }, detail: [{ key: STANDING_DETAIL_WHO, params: { by: p.by, summary: p.summary, count: p.count, last: p.last } }, { key: STANDING_DETAIL_HOW, params: { machine: p.machine } }] },
+  };
+}
 const hhmm = (t) => { const d = new Date(Number(t) || 0); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`; };
 /** The refusal's sentence — what the agent's CLI, the route and the journal say (exit-proxy's grammar: what, that nothing
  *  was done, the way on — and never "retry"). */
@@ -150,6 +179,7 @@ function refusalText(code, { machine = '', kind = 'run', reason = '', until = nu
       if (reason === 'nobody') return `${M} does not let VibeSpace's automation ${what} there (its Hub automation list is Never) — nothing was done; do not retry: ${WAY_OUT}`;
       if (reason === 'quiet') return `the user did not allow VibeSpace to ${what} on ${M} a moment ago — nothing was done; it is not asked again until ${hhmm(until)}: ${WAY_OUT}`;
       return `the user denied it: VibeSpace may not ${what} on ${M} — nothing was done; do not retry in a loop: ${WAY_OUT}`;
+    case 'ask_standing': return `VibeSpace may not ${what} on ${M} until the user answers its item in For you — nothing was done; this refusal is counted there (no new card): ${WAY_OUT}`;
     case 'ask_expired':
       if (reason === 'quiet') return `nobody answered the last ask to ${what} on ${M} — refused, nothing was done; it is not asked again until ${hhmm(until)}: ${WAY_OUT}`;
       return `nobody answered within 60 s — VibeSpace did not ${what} on ${M}, nothing was done; do not retry in a loop: ask the user, or ${WAY_OUT}`;
@@ -161,5 +191,6 @@ function refusalText(code, { machine = '', kind = 'run', reason = '', until = nu
 
 module.exports = {
   KINDS, POLICIES, SETTING_KEY, SETTING_VALUES, INSTANCE_KINDS, ASK_TTL_MS, QUIET_MS, ANSWERS, REFUSALS, KIND_OF, KIND_WORDS, TITLE, DETAIL_WHAT, DETAIL_HOW, WAY_OUT,
-  kindOf, dedupKey, byKindOf, instanceKindOf, policyOf, askVerdict, answerVerdict, whoOf, cardOf, refusalText,
+  STANDING_TITLE, STANDING_DETAIL_WHO, STANDING_DETAIL_HOW,
+  kindOf, dedupKey, byKindOf, instanceKindOf, policyOf, askVerdict, answerVerdict, whoOf, cardOf, refusalText, standingOf, consequenceOf, background,
 };

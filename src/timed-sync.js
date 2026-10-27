@@ -37,6 +37,7 @@ const STORES = Object.freeze({
   'usage-shards.write': row('write', 'usage-history/events-<month>', 'src/usage-history.js', ['_walkAndAppend', 'ingestRemoteEvents']),
   'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_writeCursors']),
   'usage-cursors.read': row('read', 'usage-history/_cursors', 'src/usage-history.js'),
+  'usage-host-cursors.write': row('write', 'usage-history/_host-cursors/<host>', 'src/usage-history.js', ['_writeHostCursor']), // lane ledger-dedup-law F2: the hub keeps each machine's usage cursor
   'otel-truth.write': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),
   'otel-truth.append': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),
   'otel-truth.read': row('read', 'usage-history/otel-truth', 'src/server/otel-ingest.js'),

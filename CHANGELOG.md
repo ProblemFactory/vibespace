@@ -2,6 +2,16 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.361 — 2026-10-28
+
+### Fixed
+- The usage ledger no longer writes the same batch of events twice.
+- A paired machine's usage harvest no longer waits for your approval; the hub remembers how far it got.
+- A background task that keeps being refused takes one item in For you, not a new card every 10 minutes.
+- A usage ledger file that grows out of shape is said, and that machine's recording pauses until it is back in shape.
+- The update removes the repeated rows from old usage ledger files once; the totals do not change.
+- The memory notice names the process holding the memory, its command line, and whether it came from outside the container.
+
 ## 2.369.360 — 2026-10-27
 
 ### Added

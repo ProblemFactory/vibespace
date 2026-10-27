@@ -220,16 +220,18 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   w.clock.t += 60000; w.fire();
   const e = await p.catch((x) => x);
   ok(e.code === 'ask_expired' && /nobody answered within 60 s/.test(e.message) && /do not retry in a loop/.test(e.message) && w.sent.length === 0, '60 s unanswered ⇒ ask_expired (never retried), nothing sent', e.message);
-  ok(w.userTodos.get(id).status === 'done' && w.lines.length === 1 && w.lines[0].ask === 'expired' && w.lines[0].op === 'run-stream', 'the card resolved (expired); ONE line says so', w.lines);
-  // the quiet window: the same background subject on the same key is refused at once — no new card; an agent still asks
+  // lane ledger-dedup-law F3: a BACKGROUND subject's card is its ONE STANDING item — the held act refused, the item stays
+  const it = w.userTodos.get(id);
+  ok(it.status === 'open' && it.action.standing === true && !it.expiresAt && w.lines.length === 1 && w.lines[0].ask === 'expired' && w.lines[0].op === 'run-stream', 'the held act refused (expired); its standing item stays open, no end; ONE line says so', w.lines);
+  // every later act of that machine × kind by a background subject: refused at once, counted on the SAME item; an agent still asks
   const q = await codeOf(w.dm.runCmd('ls', [], { by: 'system:usage-harvest' }));
-  ok(q === 'ask_expired' && w.cards().length === 0 && w.lines[1].ask === 'quiet', 'a background act on that key inside the quiet window ⇒ refused at once, no new card (a harvest a minute is not a card a minute)', w.lines[1]);
+  ok(q === 'ask_standing' && w.cards().length === 1 && w.lines[1].ask === 'standing', 'a background act on that key ⇒ refused at once, counted on the standing item — no new card (a harvest a minute is not a card a minute)', w.lines[1]);
   const pa = w.dm.runCmd('ls', [], { by: 'agent:claude:c1' }); await settle();
-  ok(w.cards().length === 1, 'an agent\'s act on that key still asks');
+  ok(w.cards().length === 2, 'an agent\'s act on that key still asks (its own 60 s card)');
   w.clock.t += 60000; w.fire(); await codeOf(pa);
-  w.clock.t += P.QUIET_MS; const pb = w.dm.runCmd('ls', [], { by: 'system:usage-harvest' }); await settle();
-  ok(w.cards().length === 1, 'after the window the background act asks again');
-  w.fire(); await codeOf(pb);
+  w.clock.t += P.QUIET_MS; const qb = await codeOf(w.dm.runCmd('ls', [], { by: 'system:usage-harvest' })); await settle(); w.fire();
+  const st = w.cards().filter((c) => c.action.standing);
+  ok(qb === 'ask_standing' && st.length === 1 && st[0].id === id && st[0].action.count === 3, 'past the quiet window it is STILL the one standing item, its count moved in place (3) — never a card every QUIET_MS', st.map((c) => c.action));
 }
 {
   const w = world();
@@ -306,7 +308,7 @@ console.log('  · the agent update at hello');
   let destroyed = false;
   w.dm._askUpgrade('2.369.100', { mux: w.conn.mux, sock: { destroy: () => { destroyed = true; } } });
   await settle();
-  ok(w.cards().length === 1 && w.cards()[0].action.kind === 'upgrade' && /update the device agent on mac1/.test(w.cards()[0].text) && w.sent.length === 0, 'ONE card (kind upgrade) — nothing pushed yet', w.cards().map((c) => c.text));
+  ok(w.cards().length === 1 && w.cards()[0].action.kind === 'upgrade' && /The device agent on mac1 waits for an update/.test(w.cards()[0].text) && w.cards()[0].action.standing === true && w.sent.length === 0, 'ONE card (kind upgrade) — the standing item names the consequence (lane ledger-dedup-law F3) — nothing pushed yet', w.cards().map((c) => c.text));
   await w.asker.answer(w.cards()[0].action.askId, { answer: 'once', by: 'user', answeredBy: 'human:0123456789ab' });
   for (let i = 0; i < 20 && !destroyed; i++) await tick();
   const up = w.sent.filter((m) => m.op === 'upgrade');

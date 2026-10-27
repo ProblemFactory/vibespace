@@ -5,6 +5,8 @@
 export const LEDGER_NOTE_WORDS = {
   partial: '{n} rows from a missing ledger file were not counted — the ledger is being rebuilt',
   asOf: 'As of {time}',
+  // lane ledger-dedup-law F4: a machine's ingest PAUSED (its monthly file out of shape) — a state the window shows
+  paused: 'Usage of {machine} is not being recorded: its ledger file {shard} is out of shape ({size}) — the repeated rows are being removed, and recording resumes by itself',
 };
 export const AS_OF_LAG_MS = 60e3; // a walk answers as of its start; more than a minute behind now ⇒ the window says when
 const hhmm = (ms) => { const x = new Date(ms); return String(x.getHours()).padStart(2, '0') + ':' + String(x.getMinutes()).padStart(2, '0'); };
@@ -13,6 +15,9 @@ export function ledgerNote(d, now = Date.now()) {
   const out = [];
   if (d && d.partial && d.partial.missingRows > 0) out.push({ kind: 'partial', words: LEDGER_NOTE_WORDS.partial, vars: { n: d.partial.missingRows } });
   if (d && Number.isFinite(d.asOf) && now - d.asOf > AS_OF_LAG_MS) out.push({ kind: 'asof', words: LEDGER_NOTE_WORDS.asOf, vars: { time: hhmm(d.asOf) } });
+  for (const p of (d && Array.isArray(d.ingestPaused) ? d.ingestPaused : []).slice(0, 4)) {
+    out.push({ kind: 'paused', words: LEDGER_NOTE_WORDS.paused, vars: { machine: String(p.hostName || p.host || ''), shard: String(p.shard || ''), size: `${((Number(p.size) || 0) / 2 ** 30).toFixed(2)} GiB` } });
+  }
   return out;
 }
 /** The element under the totals (null when there is nothing to say); `t` = the window's translator. */

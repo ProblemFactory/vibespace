@@ -362,6 +362,29 @@ function history(rangeMs) {
 // Memory-pressure watch: amber ≥80%, red ≥92% of the container limit.
 // Re-alerts on ESCALATION immediately, otherwise once per 30min per level;
 // fully clears below 75% so a later climb alerts again.
+// ── A PROCESS'S COMMAND-LINE HEAD (lane ledger-dedup-law F5, B-7f9e) ──
+// The memory-pressure item said only "node" for the process that filled a fleet container: the admin's probe, exec'd into
+// the pod from outside (`runuser` with ppid 0 → `bash -lc … | base64 -d | node`) — the one fact the owner needed. THE
+// reader every surface names a process with: /proc/<pid>/cmdline (NUL-separated argv, ≤ CMDLINE_READ bytes read), secret
+// shapes redacted (src/secret-shapes.js — the one rule), cut at CMDLINE_HEAD chars. null = gone / unreadable / no /proc.
+const CMDLINE_HEAD = 120;
+const CMDLINE_READ = 4096;
+/** PURE: a cmdline file's bytes → its head (argv joined by spaces, control characters folded, secrets redacted, ≤ max). */
+function cmdlineHeadOf(buf, max = CMDLINE_HEAD) {
+  const raw = Buffer.from(buf || '').toString('utf8').replace(/\0+$/, '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
+  if (!raw) return null;
+  const s = require('./secret-shapes.js').redactSecrets(raw).text;
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
+}
+/** A process's command-line head (async; never throws) — see CMDLINE_HEAD. */
+async function cmdlineHead(pid, { max = CMDLINE_HEAD, procDir = '/proc' } = {}) {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  let fh;
+  try { fh = await fs.promises.open(path.join(procDir, String(pid), 'cmdline'), 'r'); } catch { return null; }
+  try { const buf = Buffer.alloc(CMDLINE_READ); const { bytesRead } = await fh.read(buf, 0, buf.length, 0); return cmdlineHeadOf(buf.subarray(0, bytesRead), max); }
+  catch { return null; } finally { try { await fh.close(); } catch { } }
+}
+
 function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null } = {}) {
   let lastLevel = 0, lastAlertAt = 0;
   // ── Event-loop lag watch (2.235.0, userL "卡了2h但CPU不高" incident): the
@@ -420,4 +443,4 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null } 
   return () => { clearInterval(t); clearInterval(lagT); clearInterval(persistT); persistHistory(); };
 }
 
-module.exports = { read, startWatch, memInfo, memInfoAsync, history, persistHistory, listProcs, parsePsProcs, capProcs, PS_COLUMNS };
+module.exports = { read, startWatch, memInfo, memInfoAsync, history, persistHistory, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD };
