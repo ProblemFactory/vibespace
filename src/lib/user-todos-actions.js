@@ -406,7 +406,7 @@ export function inboxModel(app) {
       // way the row's switch does, so Allow asks 验证是你 FIRST, in the press's own task (Deny is a click).
       if (answer !== 'deny' && !revealLeftMs() && !(await askRevealPassword())) return false;
       const r = await fetchJson(`/api/vault/request/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(answer !== 'deny' ? revealHeaders() : {}) }, body: JSON.stringify({ answer }) });
-      if (r && r.ok) { showToast(r.outcome === 'granted-8h' ? t('Granted for 8 hours — a lock ends it') : r.outcome === 'granted-once' ? t('Granted for its next run') : t('denied')); return true; }   // `outcome` (the vault door lays its facts' `state` over an answer)
+      if (r && r.ok) { const f = r.grantedFor || (r.outcome === 'granted-once' ? 'once' : r.outcome === 'granted' ? '8h' : null); showToast(f === '8h' ? t('Granted for 8 hours — a lock ends it') : f === 'once' ? t('Granted for its next run') : t('denied')); return true; }   // r6: `grantedFor` (additive; an answer without it reads its `outcome` as the production client does)   // `outcome` (the vault door lays its facts' `state` over an answer)
       const code = r && r.code;
       if (code === 'reveal_needs_password') forgetReveal();
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_unknown' ? t('That request is gone')
@@ -419,10 +419,13 @@ export function inboxModel(app) {
       // agent on its next turn; a refusal (locked, the field's rule) is said in the box and a toast — never with the value.
       return postSecretAnswer(rec, answer === 'store' ? 'store' : 'deny', { value: answer === 'store' && extra && typeof extra.value === 'string' ? extra.value : null, onRefusal: extra && extra.onRefusal });
     }
-    if (rec && rec.action && rec.action.type === 'channel-watch-request') {
+    if (rec && rec.action && ['channel-watch-request', 'channel-held-digest'].includes(rec.action.type)) {
       // lane channel-agent-watch W1: an agent asked to be WOKEN by a conversation — Approve writes exactly what the item
-      // says, through the access request's own decide route (the one door; never a second approval surface)
+      // says, through the access request's own decide route (the one door; never a second approval surface). r6: a held
+      // digest (hits a boot found older than their window × 24) is decided on the same route — Deliver / Discard
+      const held = rec.action.type === 'channel-held-digest';
       const r = await fetchJson(`/api/channels/reach-requests/${encodeURIComponent(rec.action.id)}/${answer === 'reject' ? 'deny' : 'approve'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      if (r && r.ok && held) { showToast(answer === 'reject' ? t('Discarded — nothing was sent') : r.delivered ? t('Delivered — one turn for the agent') : t('Not delivered now ({why}) — they go with its next delivery', { why: r.why || '' }), r.delivered === false && answer !== 'reject' ? { type: 'error' } : undefined); return true; }
       if (r && r.ok) { showToast(answer === 'reject' ? t('Denied — nothing changed') : t('Approved — the agent is woken by it from now on')); return true; }
       // r4: past its end (either side of the minute sweep) ⇒ ONE 409 `expired` with its end — said in the owner's language
       showToast((r && r.code === 'expired') ? t('This request expired on {date} — the agent can ask again', { date: clockWords(r.expiredAt) }) : (r && r.code === 'bad-state') ? t('That request was already decided') : (r && r.error) || t('server unreachable'), { type: 'error' });

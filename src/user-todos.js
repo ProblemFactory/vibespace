@@ -753,6 +753,24 @@ class UserTodoManager {
     return [...went, ...restamped].map((i) => i.id);
   }
 
+  /** lane wake-approve-card r6 (主开发: «a card's state follows the grant's life»): what happened AFTER a decision to what it
+   *  GRANTED — its END (`{endedAt, endedBy}`: a lock, a revoke, its one use, its time, a restart) — merged into the record's
+   *  `resolvedFact`; the decision itself (status, resolvedBy, decidedBy / decidedAt) is never touched, and the first end
+   *  stands. ONE save + ONE broadcast. → whether it was written. */
+  noteFact(id, patch) {
+    const it = this.get(id);
+    const endedAt = Number(patch && patch.endedAt);
+    if (!it || it.status === 'open' || !Number.isFinite(endedAt) || endedAt <= 0) return false;
+    const f = it.resolvedFact && typeof it.resolvedFact === 'object' ? it.resolvedFact : {};
+    if (f.endedAt) return false;
+    it.resolvedFact = { ...f, endedAt, endedBy: String((patch && patch.endedBy) || 'ended').slice(0, 20) };
+    this._save(); this._notify();
+    return true;
+  }
+  /** r6: the RESOLVED items of one action type (copies) — a producer reconciling the facts of what it decided (the vault's
+   *  grants at boot: the grant rows are memory, a restart ended them). */
+  resolvedOf(type) { return this._state.items.filter((i) => i.status !== 'open' && i.action && i.action.type === type).map((i) => ({ ...i })); }
+
   /** The user REPLIED to this item from the inbox and the reply reached the
    *  session (src/routes/user-todos-reply.js calls this only after the send
    *  succeeded). An OPEN item becomes done with `resolvedBy:'reply'`; an item

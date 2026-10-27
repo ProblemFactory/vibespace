@@ -116,7 +116,7 @@ function complete(input, deps) {
 /** A pending row as a store door hands it back — the shape judged, else null (a damaged row is dropped, never trusted). */
 function pendingRowOf(r) {
   if (!r || typeof r !== 'object' || !SLUG_RE.test(String(r.slug)) || !CALLER_RE.test(String(r.callerId)) || !TOKEN_RE.test(String(r.token)) || !NONCE_RE.test(String(r.nonce)) || !Number.isFinite(r.exp)) return null;
-  return { slug: r.slug, callerId: r.callerId, token: r.token, nonce: r.nonce, name: r.name ? cleanName(r.name) : null, repair: r.repair === true, mintedAt: Number.isFinite(r.mintedAt) ? r.mintedAt : null, exp: r.exp, spent: r.spent === true, spentAt: Number.isFinite(r.spentAt) ? r.spentAt : null };
+  return { slug: r.slug, callerId: r.callerId, token: r.token, nonce: r.nonce, name: r.name ? cleanName(r.name) : null, repair: r.repair === true, person: r.person === true, mintedAt: Number.isFinite(r.mintedAt) ? r.mintedAt : null, exp: r.exp, spent: r.spent === true, spentAt: Number.isFinite(r.spentAt) ? r.spentAt : null };
 }
 /**
  * The codes A minted — bounded (oldest out). A row lives until its deadline: spent, it stays a TOMBSTONE (so a frame that
@@ -138,7 +138,7 @@ function createPending({ max = PENDING_MAX, ttl = CODE_TTL_MS } = {}) {
       prune(t);
       m.delete(k(e.slug, e.callerId));
       while (m.size >= max) m.delete(m.keys().next().value);
-      const row = { slug: e.slug, callerId: e.callerId, token: e.token, nonce: e.nonce, name: e.name || null, repair: e.repair === true, mintedAt: t, exp: t + ttl, spent: false, spentAt: null };
+      const row = { slug: e.slug, callerId: e.callerId, token: e.token, nonce: e.nonce, name: e.name || null, repair: e.repair === true, person: e.person === true, mintedAt: t, exp: t + ttl, spent: false, spentAt: null };   // lane wake-approve-card r6: `person` = minted by a person on the owner's page (THE person verdict) — the completion's authority on a path that holds a wake
       m.set(k(e.slug, e.callerId), row);
       changed();
       return row;

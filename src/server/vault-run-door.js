@@ -269,6 +269,24 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const hubIdentity = (() => { try { return PI.identityOf(process.pid); } catch { return null; } })();   // written into every run folder (the boot sweep's proof)
   const vaultState = () => { try { return vault.state(); } catch { return 'locked'; } };
   const audit = (event, line) => { try { vault.audit(event, line); } catch (e) { log(`the audit line could not be written (${e.message})`); } };
+  /** A GRANT'S END IS WRITTEN ON ITS RECORD (lane wake-approve-card r6 — 主开发: «a card's state follows the grant's life»; the
+   *  record was a decision log that never fell: «allowed by you for 8 h · 09:38» at +9 h, +3 d and after a lock). The use check
+   *  reads the grant rows below (memory: `until`, a lock clears them); the request's For-you record carries the grant's facts
+   *  (`resolvedFact.grantedFor`, `until`) and, here, its END — a lock ('lock'), the entry's switch OFF ('revoked'), a
+   *  once-grant's run ('used'), its 8 hours ('time'), a restart (the vault locks at each start: 'restart') — through the
+   *  store's noteFact (the first end stands). The card, the tray and the window read it through foryou-actions grantLifeOf. */
+  const endTimers = new Map();   // pair → the timer that ends the grant at its `until`
+  function grantEnded(g, endedBy, t = now()) {
+    if (!g || !g.todoId || !userTodos || typeof userTodos.noteFact !== 'function') return;
+    try { userTodos.noteFact(g.todoId, { endedAt: endedBy === 'time' ? g.until : Math.min(t, Number(g.until) || t), endedBy }); } catch { }
+  }
+  function armGrantEnd(pair, g, onEnd = () => { if (grants.get(pair) === g) grants.delete(pair); }) {
+    const old = endTimers.get(pair);
+    if (old) { try { timers.clear(old); } catch { } }
+    const h = timers.set(() => { endTimers.delete(pair); onEnd(); grantEnded(g, 'time'); }, Math.max(0, Number(g.until) - now()));   // ≤ 8 hours (a 30-day «always» is read by its `until` — no timer that long)
+    try { h && h.unref && h.unref(); } catch { }
+    endTimers.set(pair, h);
+  }
 
   // ── THE STORE (marked by the vault) ──
   const bodyOf = (d) => JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: [...d.runnable].sort(), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)) });
@@ -283,7 +301,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     let next = { gen: lastGen, runnable: new Set(), always: [] };
     if (raw && !why) {
       try {
-        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40) })) };
+        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40), ...(typeof a.todoId === 'string' && /^ut-[\w-]{1,40}$/.test(a.todoId) ? { todoId: a.todoId } : {}) })) };
         const want = vault.macOf(MARK_LABEL, bodyOf(cand));
         const got = typeof raw.mark === 'string' && /^[0-9a-f]{64}$/.test(raw.mark) ? raw.mark : null;   // the review: a non-hex mark threw in timingSafeEqual
         if (!(want && got && cand.gen >= 0 && crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')))) why = 'its mark does not verify';
@@ -345,7 +363,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (on) runnable.add(key); else runnable.delete(key);
     // OFF takes back every «always» and seen shape that names this entry (the review: an «always» outlived its switch)
     const always = on ? d.always : d.always.filter((a) => !a.entries.includes(key));
-    if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) shortAlways.delete(p); for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); for (const [p, x] of grants) if (x.entries.includes(key)) grants.delete(p); }   // + the grants (lane vault-manual-and-lock: OFF = closed for every conversation)
+    if (!on) for (const a of d.always) if (a.entries.includes(key)) grantEnded(a, 'revoked');   // r6: each «always» record says «revoked»
+    if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) { shortAlways.delete(p); grantEnded(x, 'revoked'); } for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); for (const [p, x] of grants) if (x.entries.includes(key)) { grants.delete(p); grantEnded(x, 'revoked'); } }   // + the grants (lane vault-manual-and-lock: OFF = closed for every conversation; r6: each grant's record says «revoked»)
     const r = save({ runnable, always });
     if (!r.ok) return r;
     audit('vault-run-switch', { by: String(by).slice(0, 40), store: ref.store, entry: ref.entry, field: ref.field, open: !!on });
@@ -438,17 +457,19 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!liveOf(q.conv)) { settle(q, 'denied', 'gone'); return { ok: false, code: 'conversation_gone' }; }
     if (a === 'always') {
       const ms = VR.ALWAYS_TTLS[ttl], until = ms == null ? null : now() + ms;
-      if (ttl === '8h') shortAlways.set(q.pair, { until, entries: q.entries });
+      // r6: the «always» row remembers its card's record (`todoId`) — its END is written there (a switch OFF, a lock, its time)
+      if (ttl === '8h') { const g = { until, entries: q.entries, todoId: q.todoId || null }; shortAlways.set(q.pair, g); armGrantEnd(`always\n${q.pair}`, g, () => { if (shortAlways.get(q.pair) === g) shortAlways.delete(q.pair); }); }
       else {
         const d = load();
         if (!d) { settle(q, 'vault_locked'); return { ok: false, code: 'vault_locked' }; }
-        const r = save({ runnable: d.runnable, always: [...d.always.filter((x) => !(x.conv === q.conv && x.key === q.key)), { conv: q.conv, key: q.key, until, entries: q.entries, at: now(), by: String(by).slice(0, 40) }] });
+        const r = save({ runnable: d.runnable, always: [...d.always.filter((x) => !(x.conv === q.conv && x.key === q.key)), { conv: q.conv, key: q.key, until, entries: q.entries, at: now(), by: String(by).slice(0, 40), ...(q.todoId ? { todoId: q.todoId } : {}) }] });
         if (!r.ok) { settle(q, 'denied', r.code); return r; }
       }
       audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl, until });
     }
     seen.set(q.pair, { at: now(), entries: q.entries });
-    settle(q, a === 'always' ? 'always' : 'allowed', 'answered', mark());
+    // r6: an «always» record carries its grant's facts (`alwaysFor` = the ttl, `until`) — its card follows the grant's life
+    settle(q, a === 'always' ? 'always' : 'allowed', 'answered', a === 'always' ? { ...(mark() || {}), alwaysFor: ttl, until: VR.ALWAYS_TTLS[ttl] == null ? null : now() + VR.ALWAYS_TTLS[ttl] } : mark());
     return { ok: true, outcome: a === 'always' ? 'always' : 'allowed', ...(a === 'always' ? { ttl } : {}) };
   }
   // THE ITEM AND THE ASK ARE ONE STATE: the item leaving 'open' by another door settles the ask refused; a reopen of an ask that is over goes back to done
@@ -481,7 +502,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function grantOf(scope, id) {
     const p = pairOf(scope, id), g = grants.get(p);
     if (!g) return null;
-    if (!(g.until > now())) { grants.delete(p); return null; }
+    if (!(g.until > now())) { grants.delete(p); grantEnded(g, 'time'); return null; }
     return g;
   }
   const requestWords = (r) => [
@@ -615,13 +636,19 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!row) { settleRequest(q, 'denied', 'entry gone'); return { ok: false, code: 'entry_unknown' }; }
     if (!classOf(ref, row).runnable) { settleRequest(q, 'denied', 'its own door'); return { ok: false, code: 'entry_has_its_own_door' }; }
     const t = now(), until = t + GRANT_MS;
-    grants.set(q.pair, { conv: q.scope, key: null, entries: [q.id], until, once: a === 'once', at: t, by: said.by, askId: q.askId, purpose: q.purpose });
+    const prev = grants.get(q.pair);
+    if (prev) grantEnded(prev, 'replaced', t);
+    const g = { conv: q.scope, key: null, entries: [q.id], until, once: a === 'once', at: t, by: said.by, askId: q.askId, purpose: q.purpose, todoId: q.todoId || null };
+    grants.set(q.pair, g);
+    armGrantEnd(q.pair, g);
     audit('vault-grant', { ...said, answer: a, until });
-    // r4: the item says which of its verbs; r5 (主开发: «a record says only what was decided»): each verb its OWN value —
-    // `granted-8h` carries the duration (a record from before .360 stored `granted` for BOTH verbs: it reads «allowed»)
-    const end = a === 'once' ? 'granted-once' : 'granted-8h';
-    settleRequest(q, end, 'answered', mark());
-    return { ok: true, outcome: end, until };
+    // r4: the item says which of its verbs. r6 (主开发: «an answer never carries a value an old reader cannot name»): the
+    // record stays `granted` — what every reader knows (r5's `granted-8h` read RAW in an old tray) — its facts ADDITIVE
+    // (`grantedFor` 'once' | '8h', `until`: the new reader says the duration, an old one «allowed»); the answer's `outcome`
+    // stays the one the production client toasts (`granted-once` / `granted`) + the same `grantedFor`
+    const grantedFor = a === 'once' ? 'once' : '8h';
+    settleRequest(q, 'granted', 'answered', { ...(mark() || {}), grantedFor, until });
+    return { ok: true, outcome: a === 'once' ? 'granted-once' : 'granted', grantedFor, until };
   }
   /** lane vault-paste-request: THE PASTE IS THE GRANT — the owner pasted a NEW free entry into For you in answer to THIS
    *  conversation's request (its purpose on the card, src/server/vault-paste-door.js): the conversation may use that one
@@ -644,7 +671,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const scope = scopeOf(caller);
     if (!scope) return named('unauthorized');
     const t = now(), mine = [];
-    for (const [p, g] of grants) { if (!(g.until > t)) { grants.delete(p); continue; } if (g.conv === scope) mine.push(g); }
+    for (const [p, g] of grants) { if (!(g.until > t)) { grants.delete(p); grantEnded(g, 'time'); continue; } if (g.conv === scope) mine.push(g); }
     const refOfId = (id) => { const r = VI.parseRef(id); const x = r && VR.refFor(r.store, r.entry, r.field); return x ? x.ref : null; };
     return {
       ok: true,
@@ -828,7 +855,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // L3 (int331): a once-grant is spent only when a child RAN — restore it when nothing ran (entry_unknown / too-short / spawn_failed,
     // sync or the async spawn error) so a failure before the child does not burn the owner's one-time grant (the agent runs it again)
     const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed']);
-    const restoreOnce = (r) => { if (r && r.ok === false && BURNED.has(r.code)) for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); return r; };
+    const restoreOnce = (r) => { if (r && r.ok === false && BURNED.has(r.code)) { for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); } else for (const a of spent) grantEnded(a.g, 'used'); return r; };   // r6: a once-grant that ran ends on its record («allowed once · ended HH:MM»)
     const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt });
     return out && typeof out.then === 'function' ? out.then(restoreOnce) : restoreOnce(out);
   }
@@ -929,9 +956,19 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     asking.batch = true;   // B-4934: one recount after the whole withdrawal, not one per request
     try { for (const q of [...requests.values()]) settleRequest(q, 'vault_locked', 'locked'); } finally { asking.batch = false; }   // lane vault-manual-and-lock: every open request is withdrawn
     askingLine();
+    for (const g of grants.values()) grantEnded(g, 'lock');   // r6: each grant's record says it ended («allowed for 8 hours · ended HH:MM»)
+    for (const g of shortAlways.values()) grantEnded(g, 'lock');   // … and each 8-hour «always» (memory: a lock ends it)
+    for (const h of endTimers.values()) { try { timers.clear(h); } catch { } }
+    endTimers.clear();
     seen.clear(); shortAlways.clear(); grants.clear(); db = null; dbEpoch = -1;   // … and every grant ends (once / 8 hours)
   }
   if (typeof vault.onLock === 'function') vault.onLock((why) => onLocked(why));
+  // r6: A RESTART ENDS EVERY GRANT (the grant rows are memory; the vault locks at each start) — a record that still reads live
+  // (its `until` ahead, no end written: the hub stopped inside its 8 hours) says so now
+  if (userTodos && typeof userTodos.resolvedOf === 'function' && typeof userTodos.noteFact === 'function') {
+    try { const t0 = now(); for (const it of userTodos.resolvedOf(REQUEST_TYPE)) { const f = it.resolvedFact || {}; if (it.resolvedBy === 'granted' && Number(f.until) > t0 && !f.endedAt) userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); } } catch { }
+    try { const t0 = now(); for (const it of userTodos.resolvedOf(ACTION_TYPE)) { const f = it.resolvedFact || {}; if (it.resolvedBy === 'always' && f.alwaysFor === '8h' && Number(f.until) > t0 && !f.endedAt) userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); } } catch { }   // an 8-hour «always» is memory too
+  }
 
   /** Boot: a run directory a previous process left (it died with its child) — shredded. → how many. */
   function sweep() {

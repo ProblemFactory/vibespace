@@ -116,6 +116,7 @@ const eng = ENG.create({ dataDir, env: {}, broadcast: () => { }, log: quiet, del
 const servers = [];
 async function rig(Rmod) {
   Rmod.setup({ getEngine: () => eng, dataDir, serverSetting: (k) => settings[k] });
+  require('../src/routes/channels.js').setup({ getEngine: () => eng });   // lane wake-approve-card r6: THE ONE WIRING (channels-wiring.js) — the wake gate reads channels.js's engine
   const app = express(); app.use(Rmod.router);
   const srv = http.createServer(app); servers.push(srv);
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));

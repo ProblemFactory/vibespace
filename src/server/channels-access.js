@@ -44,6 +44,7 @@ function create(engineCtx) {
     store, adapterRecords, adapterFor, tiers, agentShareRefusal, isWatched, laneOf, effectiveConvCaps, rawFactsOf, viewOf, agentCopy, humanNameOf,
     vendorNameOf, notify, known, withView, NOT_A_THREAD, threadRead, vendorSearch, aroundFor, clearWakeTimer, coalesceSeconds, ownRecordOf,
     pathBudgetVerdict,
+    flushScope, flushPending,   // lane wake-approve-card r6: a held digest the owner releases goes out through the same flush
     judgedRoadFor,   // lane judged-watch-state: a judged rule's road, as its doors word it (the watch answer, --show, watches)
     CG,              // lane grants-unify: the channel doors' rows in THE grants store (src/server/channels-grants.js)
   } = engineCtx;
@@ -120,11 +121,15 @@ function create(engineCtx) {
    *  the field) — the engine's `pendingRoadOf` reads it (lane boot-flush-next-turn). */
   function pendingOf(en, pk, eff) {
     const firstPk = eff && eff.watchers[0] ? pkOf(eff.watchers[0].watcher.principal) : null;
-    const mine = (p) => p && (p.for ? p.for === pk : pk === firstPk);
+    // r6: a hit SET ASIDE for the owner's decision (`aside` — a held digest too old to deliver by itself) is no delivery's
+    const mine = (p) => p && !p.aside && (p.for ? p.for === pk : pk === firstPk);
     const list = (Array.isArray(en && en.pending) ? en.pending : []).filter(mine);
     const elidedTagged = Number(en && en.pendingElidedBy && en.pendingElidedBy[pk]) || 0;
     const elidedUntagged = pk === firstPk ? (Number(en && en.pendingElided) || 0) : 0;
-    return { hits: list.map((p) => ({ record: p.record, why: p.why || [], ...(p.sent ? { sent: p.sent } : {}) })), ids: new Set(list.map((p) => p.record && p.record.id).filter(Boolean)), roads: [...new Set(list.map((p) => p.road || null))], elidedTagged, elidedUntagged, elided: elidedTagged + elidedUntagged };
+    const ats = list.map((p) => Number(p.at)).filter((x) => Number.isFinite(x) && x > 0);
+    // r6: `oldest` = the oldest hit's parking time (a row with none ⇒ null: its age is unknown) — a held delivery says its age
+    const oldest = ats.length === list.length && ats.length ? Math.min(...ats) : null;
+    return { hits: list.map((p) => ({ record: p.record, why: p.why || [], ...(p.sent ? { sent: p.sent } : {}) })), ids: new Set(list.map((p) => p.record && p.record.id).filter(Boolean)), roads: [...new Set(list.map((p) => p.road || null))], elidedTagged, elidedUntagged, elided: elidedTagged + elidedUntagged, oldest };
   }
   /** Drop what one delivery CARRIED (and nothing else) from `pending`. */
   function clearCarried(e2, pk, eff, carried) {
@@ -237,13 +242,16 @@ function create(engineCtx) {
    *  (setGrain), the dialogs' lists (grainView) and a scope digest's own watcher (storedWatcherFor) read here — never a
    *  narrower view that drops a row (round 4 read a rule without the account's access: a live wake read «not held», and a
    *  vsst_ pattern edit deleted it). */
-  function readGrainHolder(adapterId, kind, h) {
+  function readGrainHolder(adapterId, kind, h, { without = null } = {}) {
     if (!h) return null;
+    // r6: `without` = {account: true} | {rule: id} — the same read with that grain's ACCESS left out (wakesBelow: does a row
+    // live by it alone?)
+    const skipAccount = !!(without && without.account), skipRule = (without && without.rule) || null;
     if (kind === 'conversation') {
       const o = overlay({ watchers: h.watchers }, 'conversation', h.key, legacyConvAssignment(h));   // lane grants-unify: the rows, never `en.access`
-      return { ...F.grainAsFired('conversation', { access: o.access, watchers: o.watchers }, { above: convInheritedOf(h) }), holder: h, except: o.except, watchExcept: o.watchExcept, grainRes: o.grainRes };
+      return { ...F.grainAsFired('conversation', { access: o.access, watchers: o.watchers }, { above: convInheritedOf(h, { skipAccount, skipRule }) }), holder: h, except: o.except, watchExcept: o.watchExcept, grainRes: o.grainRes };
     }
-    const above = { accountKeys: accountGrantKeys(adapterId), ...(kind === 'pattern' ? { account: accountGrainOf(adapterId) } : {}) };
+    const above = { accountKeys: accountGrantKeys(adapterId, { skipAccess: skipAccount }), ...(kind === 'pattern' ? { account: skipAccount ? null : accountGrainOf(adapterId) } : {}) };
     return { ...F.grainAsFired(kind, h, above), holder: h, except: h.except || [], watchExcept: h.watchExcept || [], grainRes: h.grainRes };
   }
   /** The grain a route / a writer names (`{kind:'conversation', convId} | {kind:'account'} | {kind:'pattern', id}`), read. */
@@ -282,11 +290,11 @@ function create(engineCtx) {
   /** Who holds access ABOVE one conversation: the account grain's rows + its grants, every matching rule's rows, and
    *  every visible grant that reaches it (an approved request, a hand-written grant) — `skipOwn` leaves out the
    *  conversation's own access rows (a write replacing them judges by the NEW list). */
-  function convInheritedOf(en, { skipOwn = false } = {}) {
-    const acc = CG.accessOf(CG.RES.account(en.adapterId));
+  function convInheritedOf(en, { skipOwn = false, skipAccount = false, skipRule = null } = {}) {
+    const acc = skipAccount ? [] : CG.accessOf(CG.RES.account(en.adapterId));
     const pats = [];
-    for (const pa of rawPatternsOf(en.adapterId)) if (pa && pa.pattern && F.matchConversation(pa.pattern, convFacts(en)).hit) pats.push(...CG.accessOf(CG.RES.rule(pa.id)));
-    const grants = visibleKeysOf(grantsOfConversation(en), skipOwn ? { skipOwnScope: { kind: 'conversation', id: en.key } } : {});
+    for (const pa of rawPatternsOf(en.adapterId)) if (pa && pa.pattern && pa.id !== skipRule && F.matchConversation(pa.pattern, convFacts(en)).hit) pats.push(...CG.accessOf(CG.RES.rule(pa.id)));
+    const grants = visibleKeysOf(grantsOfConversation(en, undefined, { skipAccount, skipRule }), skipOwn ? { skipOwnScope: { kind: 'conversation', id: en.key } } : {});
     return [...acc, ...pats, ...grants];
   }
   /** Who holds access above a grain being WRITTEN (setGrain's watcher check): a conversation's ancestors, an account's
@@ -501,16 +509,17 @@ function create(engineCtx) {
    *  list implies (R4: one per access row) — derived here at read time,
    *  never stored. A conversation's own access rows before the migration
    *  reached it (a legacy `assignment` with no reach row) grant too. */
-  function grantsOfConversation(en, target = { key: en.key, adapterId: en.adapterId }) {
+  function grantsOfConversation(en, target = { key: en.key, adapterId: en.adapterId }, { skipAccount = false, skipRule = null } = {}) {
     // lane grants-unify: every home is a row of the grants store (CG) — the conversation's own (its access, the owner's
     // hand-written rows, approved requests), the account's, a matching rule's (derived here, never stored) — each grant
     // carrying its row's `except`
     const derived = [];
     for (const pa of rawPatternsOf(en.adapterId)) {
-      if (!pa || !pa.pattern || !F.matchConversation(pa.pattern, convFacts(en)).hit) continue;
+      if (!pa || !pa.pattern || pa.id === skipRule || !F.matchConversation(pa.pattern, convFacts(en)).hit) continue;   // r6: `skipRule` — read without that rule's access
       derived.push(...CG.ruleGrants(pa.id, en.key));
     }
-    return ACL.grantsForConversation(target, { entries: CG.conversationGrants(en.key), accountGrants: accountScopeGrants(en.adapterId), patternGrants: derived });
+    const acct = accountScopeGrants(en.adapterId).filter((g) => !skipAccount || (g.origin !== 'access' && g.origin !== 'assignment'));   // r6: `skipAccount` — without the account grain's access rows
+    return ACL.grantsForConversation(target, { entries: CG.conversationGrants(en.key), accountGrants: acct, patternGrants: derived });
   }
   /** THE MEMBERSHIP CROSSWALK (lane notify-rules-r2): the live roster as `[{cid, groups}]` — the task groups each live
    *  session belongs to (server.js liveSessions: tasks.groupsForSession, the same crosswalk the group round-robin wakes
@@ -721,6 +730,7 @@ function create(engineCtx) {
     const key = `${adapterId}/${convId}`;
     const t = now();
     const scope = { kind: 'conversation', id: key };
+    const reach0 = wakeRowsNow(adapterId);   // r6: what this reach write revives is said
     // lane grants-unify: the owner's rows of a conversation are ONE row of the grants store (`conversation:<key>#user`),
     // written through its ONE writer — a refused write (an unreadable store) is said, nothing changed
     if (level === null || level === undefined) {
@@ -738,7 +748,8 @@ function create(engineCtx) {
     if (!w.ok) return { ok: false, code: w.code, error: w.error };
     try { store.audit({ kind: 'acl', op: 'grant', principal: v.grant.principal, scope, level, origin: 'user', at: t, by }); } catch {}
     notify([convId]);
-    return { ok: true, reach: reachView(store.index.peek(key)) };
+    const wakes = wakeReachDiff(adapterId, reach0);
+    return { ok: true, reach: reachView(store.index.peek(key)), ...(wakes ? { wakes } : {}) };
   }
   function reachView(en) {
     if (!en) return null;
@@ -958,7 +969,10 @@ function create(engineCtx) {
       return { ...(jr ? { judged: jr.line } : {}), setBy: F.watchOriginOf(w), as: w.principal.kind, ...(w.principal.kind === 'group' ? { group: w.principal.name || w.principal.id } : {}), ...(w.via ? { via: w.via } : {}),
         delivery: F.deliveryModeOf(w), notify: w.notify, mode: w.mode, filter: f ? { match: f.match, rules: f.rules } : null, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap,
         how: WS.watchHowWords(w), what: WS.watchWhatWords(w, f), expiresAt: w.expiresAt || null }; };
-    const rowsOf = (ws) => (Array.isArray(ws) ? ws : []).filter((w) => w && w.principal && F.rowNames(w, ctx)).map(view);
+    // r6 (主开发: the list read account and rule rows raw — an inert rule row listed as live, the inert room row gone): every
+    // grain read by THE one reader (`g` = readGrainHolder / grainReadAt); its STORED rows listed, an inert one marked
+    const INERT = { conversation: 'inert — no access to this conversation here or above it (its account, a rule) — it fires again only if a person grants it', account: 'inert — no access on the account — it fires again only if a person grants it', pattern: 'inert — no access on the rule or the account — it fires again only if a person grants it' };
+    const rowsOf = (g, kind) => (g ? g.stored : []).filter((w) => w && w.principal && F.rowNames(w, ctx)).map((w) => ({ ...view(w), ...(g.watchers.includes(w) ? {} : { inert: INERT[kind] }) }));
     const askView = (r) => ({ id: r.id, target: r.scope.kind === 'conversation' ? agentId(r.scope.id) : r.scope.id, how: WS.watchHowWords(r.watch), what: WS.watchWhatWords(r.watch), at: r.at, expiresAt: askEndOf(r) });   // r3: its end
     if (ref) {
       const tg = watchTargetOf(ctx, ref);
@@ -966,27 +980,30 @@ function create(engineCtx) {
       const scope = tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId };
       const ask = openWatchRequestsOf(pk).find((r) => r.scope && r.scope.kind === scope.kind && r.scope.id === scope.id);
       const blk = agentWatchBlockOf(scope, pk);
-      return { ok: true, target: tg.key ? agentId(tg.key) : tg.adapterId, title: tg.key ? agentTitle(tg.en, tg.en.id) : tg.title, grain: tg.grain.kind, rows: rowsOf(tg.grainNow().watchers), request: ask ? askView(ask) : null, removedByUser: blk ? { at: blk.at } : null };
+      return { ok: true, target: tg.key ? agentId(tg.key) : tg.adapterId, title: tg.key ? agentTitle(tg.en, tg.en.id) : tg.title, grain: tg.grain.kind, rows: rowsOf(grainReadAt(tg.adapterId, tg.grain), tg.grain.kind), request: ask ? askView(ask) : null, removedByUser: blk ? { at: blk.at } : null };
     }
     const out = [];
     const recs = new Map(adapterRecords().adapters.map((r) => [r.id, r]));
     for (const en of Object.values(store.index.live())) {   // B-f32b: read-only
       if (!en || !Array.isArray(en.watchers) || !en.watchers.some((w) => w && w.principal && F.rowNames(w, ctx))) continue;
       const rec = recs.get(en.adapterId);
-      if (!rec || rec.enabled === false || !ACL.canSee(reachFor(ctx, rec, en).level)) continue;
-      for (const r of rowsOf(convGrainOf(en).watchers)) out.push({ target: agentId(en.key), title: agentTitle(en, en.id), grain: 'conversation', ...r });
+      if (!rec || rec.enabled === false) continue;
+      // a conversation it can no longer read (its access gone with the account's): its rows there are listed BY ID — no title —
+      // and marked inert: every one was written while it held access (validateWatchers), so the conversation is one it knew;
+      // `unwatch` frees its own
+      const sees = ACL.canSee(reachFor(ctx, rec, en).level);
+      for (const r of rowsOf(readGrainHolder(en.adapterId, 'conversation', en), 'conversation')) out.push({ target: agentId(en.key), title: sees ? agentTitle(en, en.id) : null, grain: 'conversation', ...r });
     }
     for (const adapterId of Object.keys(store.index.table('accountAssignments') || {})) {
       const rec = recs.get(adapterId);
       if (!rec || rec.enabled === false) continue;
-      const g = accountGrainOf(adapterId);   // lane grants-unify: the watchers the watch row lists
-      for (const r of rowsOf(g && g.watchers)) out.push({ target: adapterId, title: rec.label || adapterId, grain: 'account', ...r });
+      for (const r of rowsOf(grainReadAt(adapterId, { kind: 'account' }), 'account')) out.push({ target: adapterId, title: rec.label || adapterId, grain: 'account', ...r });   // lane grants-unify: the watchers the watch row lists — r6: the one reader
     }
     for (const id of Object.keys(store.index.table('patternAssignments') || {})) {
       const g = patternById(id);
       const rec = g && recs.get(g.adapterId);
       if (!rec || rec.enabled === false) continue;
-      for (const r of rowsOf(g.watchers)) out.push({ target: null, adapterId: g.adapterId, title: `${rec.label || g.adapterId}: conversations matching ${F.patternSummary(g.pattern)}`, grain: 'pattern', ...r });
+      for (const r of rowsOf(grainReadAt(g.adapterId, { kind: 'pattern', id }), 'pattern')) out.push({ target: null, adapterId: g.adapterId, title: `${rec.label || g.adapterId}: conversations matching ${F.patternSummary(g.pattern)}`, grain: 'pattern', ...r });
     }
     return { ok: true, watches: out.slice(0, 200), more: Math.max(0, out.length - 200), requests: openWatchRequestsOf(pk).map(askView) };
   }
@@ -1005,7 +1022,9 @@ function create(engineCtx) {
     if (!own) return { ok: false, code: 'not-watching', error: 'nothing of yours to remove here — `vibespace-channels status` lists what notifies you (a notification the user set is theirs to remove)' };
     const adapterId = tg.ok ? tg.adapterId : r0.slice(0, i);
     const grain = tg.ok ? tg.grain : { kind: 'conversation', convId: r0.slice(i + 1) };
-    const r = await setGrain(adapterId, grain, { watchers: cur.watchers.filter((w) => !(w && pkOf(w.principal) === pk && F.watchOriginOf(w) === 'agent')) }, { by: `agent:${ctx.id}` });
+    // r6: the removal NAMES the stored row (`drop` — its key), inert or not: the rows in effect alone never named an inert row,
+    // which the writer then kept (removed:true, the row still stored, its slot held, the wake live again at a re-grant)
+    const r = await setGrain(adapterId, grain, { watchers: cur.watchers.filter((w) => !(w && pkOf(w.principal) === pk && F.watchOriginOf(w) === 'agent')), drop: [pk] }, { by: `agent:${ctx.id}` });
     if (!r || !r.ok) return r;
     try { store.audit({ kind: 'acl', op: 'agent-unwatch', principal: { kind: 'agent', id: ctx.id }, scope: grain.kind === 'conversation' ? { kind: 'conversation', id: `${adapterId}/${grain.convId}` } : { kind: 'adapter', id: adapterId }, at: now(), by: 'agent' }); } catch {}
     return { ok: true, removed: true };
@@ -1032,13 +1051,13 @@ function create(engineCtx) {
   const askTarget = (r) => (r && r.scope && r.scope.kind === 'conversation' ? agentId(r.scope.id) : agentId(r && r.scope ? r.scope.id : ''));
   const DAY_MS = 24 * 60 * 60 * 1000;
   const inWords = (ms) => (ms >= DAY_MS ? `${Math.round(ms / DAY_MS)} d` : ms >= 3600e3 ? `${Math.round(ms / 3600e3)} h` : `${Math.max(1, Math.ceil(ms / 60e3))} min`);
-  function openWatchRequestsOf(pk, t = now()) { return (store.index.table('watchRequests') || []).filter((r) => askLive(r, t) && r.principal && pkOf(r.principal) === pk); }
+  function openWatchRequestsOf(pk, t = now()) { return (store.index.table('watchRequests') || []).filter((r) => askLive(r, t) && r.kind !== 'held' && r.principal && pkOf(r.principal) === pk); }   // r6: a held digest's decision is the owner's, never one of the agent's asks
   /** W1: a WAKE watch is the user's money — ONE request with the frozen row, a For-you item whose Approve (the existing
    *  reach-request decide route) writes exactly it; a second ask while one is open is the same request. */
   async function fileWatchRequest(ctx, tg, row, why) {
     const t = now();
     const scope = tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId };
-    const open = (store.index.table('watchRequests') || []).find((r) => askLive(r, t) && r.principal && r.principal.id === ctx.id && r.scope && r.scope.kind === scope.kind && r.scope.id === scope.id);
+    const open = (store.index.table('watchRequests') || []).find((r) => askLive(r, t) && r.kind !== 'held' && r.principal && r.principal.id === ctx.id && r.scope && r.scope.kind === scope.kind && r.scope.id === scope.id);
     if (open) return { ok: true, proposed: true, already: true, request: { id: open.id, status: open.status, expiresAt: askEndOf(open) } };
     await expireWatchRequests(t);   // r3: an ask past its end leaves before this one is counted (the sweep's work, done now)
     // verify r1 F2: a bound on the wake asks one agent may have waiting, said with the count; the owner reads the totals
@@ -1109,6 +1128,7 @@ function create(engineCtx) {
     const t = now();
     // r3: an ask past its end is over even before the sweep wrote it — expired now, never approved late
     if (askEndOf(req0) <= t) { await expireWatchRequests(t); return expiredRefusal(req0); }
+    if (req0.kind === 'held') return decideHeld(req0, approve, by, { person });   // r6: a held digest — deliver / discard
     if (approve) {
       const pk = pkOf(req0.principal);
       const en1 = req0.grain && req0.grain.kind === 'conversation' ? store.index.peek(`${req0.adapterId}/${req0.grain.convId}`) : null;
@@ -1128,6 +1148,134 @@ function create(engineCtx) {
     notify([]);
     return { ok: true, request: { ...req0, status: approve ? 'approved' : 'denied' } };
   }
+  /** A HELD DELIVERY NOBODY CLICKED SAYS ITS AGE OR ASKS (lane wake-approve-card r6 — 主开发: a boot on old data delivered every
+   *  digest the old reader had held — hits possibly MONTHS old — with no click, labelled «3 messages in the last 60 min»). The
+   *  boot scheduler's plan of ONE delivery (channels-engine scheduleBootPending: `{kind:'scope'|'conversation', rec, item, pk,
+   *  convs:[{key, id, title, ids, elidedTagged, elidedUntagged}], oldest, n}`) whose oldest hit is older than F.HELD_AGE_WINDOWS
+   *  of its window: its hits are SET ASIDE (`pending[].aside` = the request's id — pendingOf skips them, so no window carries
+   *  them; their elided counts move onto the request) and ONE decision is filed — a `kind:'held'` request in the store the
+   *  wake asks live in (one decide route — the person verdict —, one lifetime) and the For-you item `channel-held-digest`
+   *  («12 messages for Worker held since 2026-07-14 — deliver or discard»). Deliver = the same flush, now, through the
+   *  ladder (the spend authorizer charges it — test-spend-paths' channels row), with its true span; Discard = the hits
+   *  dropped, nothing sent; unanswered for 7 days = discarded. A second boot's aged hits join the open request of the same
+   *  (scope, watcher). */
+  async function holdAside(plan) {
+    const t = now();
+    const { rec, item, pk } = plan;
+    const convs = Array.isArray(plan.convs) ? plan.convs : [];
+    if (!rec || !item || !convs.length) return { ok: false, why: 'nothing' };
+    const w = item.watcher;
+    const scope = plan.kind === 'scope' ? (item.source === 'account' ? { kind: 'adapter', id: rec.id } : { kind: 'pattern', id: item.patternId }) : { kind: 'conversation', id: convs[0].key };
+    const open = (store.index.table('watchRequests') || []).find((r) => r && r.kind === 'held' && r.status === 'open' && r.held && r.held.pk === pk && r.scope && r.scope.kind === scope.kind && r.scope.id === scope.id);
+    const since = plan.unknown || !Number.isFinite(plan.oldest) ? null : plan.oldest;
+    let req = null;
+    if (!open) {
+      const who = w.principal.kind === 'everyone' ? 'all agents' : String(w.principal.name || w.principal.id);
+      const where = scope.kind === 'adapter' ? `the whole account ${rec.label || rec.id}` : scope.kind === 'pattern' ? `the rule ${F.patternSummary((patternById(item.patternId) || {}).pattern || { rules: [] })} (${rec.label || rec.id})` : `${convs[0].title} (${rec.label || rec.id})`;
+      const day = since ? OF.when(since) : 'an unknown date';   // the owner's zone, named (owner-facts — never a sliced ISO time)
+      const n = Number(plan.n) || 0;
+      const ttlDays = Math.round(F.WATCH_REQUEST_TTL_MS / DAY_MS);
+      req = { id: `wr-${t.toString(36)}-${crypto.randomBytes(3).toString('hex')}`, kind: 'held', principal: w.principal, scope, adapterId: rec.id,
+        grain: scope.kind === 'conversation' ? { kind: 'conversation', convId: convs[0].id } : scope.kind === 'adapter' ? { kind: 'account' } : { kind: 'pattern', id: item.patternId },
+        held: { via: plan.kind === 'scope' ? 'scope' : 'conversation', pk, source: item.source, patternId: item.patternId || null, convs: [], n: 0, since }, why: '', at: t, expiresAt: t + F.WATCH_REQUEST_TTL_MS, status: 'open', todoId: null, decidedAt: null };
+      if (userTodos && typeof userTodos.add === 'function') {
+        try {
+          const it = userTodos.add(INBOX_KEY, {
+            origin: 'channels', by: 'system', sessionName: 'Channels', urgency: 'normal',
+            text: `${n} messages for ${who} held since ${day} — deliver or discard`,
+            detail: `They were held for ${who} on ${where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from ${day}. A delivery that old is never sent by itself.\nDeliver sends them to ${who} now, as one block (a billed turn). Discard drops them — nothing is sent.\nUnanswered, it expires in ${ttlDays} days — they are discarded then.`,
+            action: { type: 'channel-held-digest', id: req.id }, expiresAt: req.expiresAt,
+            i18n: {
+              text: { key: i18nKey('{n} messages for {agent} held since {date} — deliver or discard'), params: { n, agent: who, date: day } },
+              detail: [
+                { key: i18nKey('They were held for {agent} on {where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from {date}. A delivery that old is never sent by itself.'), params: { agent: who, where, date: day } },
+                { key: i18nKey('Deliver sends them to {agent} now, as one block (a billed turn). Discard drops them — nothing is sent.'), params: { agent: who } },
+                { key: i18nKey('Unanswered, it expires in {n} days — they are discarded then.'), params: { n: ttlDays } },
+              ],
+              source: INBOX_SOURCE,
+            },
+          });
+          if (it && it.id) req.todoId = it.id;
+        } catch (e) { log.warn(`[channels] ${scope.kind}:${scope.id}: the held digest's For-you item could not be filed (${(e && e.message) || e}) — its hits stay aside until it expires`); }
+      }
+    }
+    let moved = 0;
+    await store.index.update((ix) => {
+      const reqs = Array.isArray(ix.watchRequests) ? ix.watchRequests : (ix.watchRequests = []);
+      let r2 = open ? reqs.find((r) => r && r.id === open.id) : null;
+      if (!r2) { reqs.push(req); r2 = req; while (reqs.length > 100) { const i = reqs.findIndex((r) => !(r && r.status === 'open')); if (i < 0) break; reqs.splice(i, 1); } }
+      for (const c of convs) {
+        const e2 = store.index.entry(rec.id, c.id, { create: false });
+        if (!e2) continue;
+        healP2(e2);
+        const ids = new Set(c.ids || []);
+        let n = 0, el = 0;
+        for (const p of Array.isArray(e2.pending) ? e2.pending : []) if (p && !p.aside && p.record && ids.has(p.record.id) && (!p.for || p.for === pk)) { p.aside = r2.id; n++; }
+        if (c.elidedTagged && e2.pendingElidedBy && Number(e2.pendingElidedBy[pk]) > 0) { el += Number(e2.pendingElidedBy[pk]); delete e2.pendingElidedBy[pk]; }
+        if (c.elidedUntagged && Number(e2.pendingElided) > 0) { el += Number(e2.pendingElided); e2.pendingElided = 0; }
+        const was = r2.held.convs.find((x) => x.key === c.key);
+        if (was) { was.n += n; was.elided += el; } else r2.held.convs.push({ key: c.key, id: c.id, title: String(c.title).slice(0, 120), n, elided: el });   // `title` = the boot plan's (THE name ladder: humanNameOf)
+        r2.held.n += n + el; moved += n + el;
+      }
+      if (since && (!r2.held.since || since < r2.held.since)) r2.held.since = since;
+      req = r2;
+    });
+    try { store.audit({ kind: 'watch', op: 'held-aside', principal: w.principal, scope, requestId: req.id, n: moved, since, at: t, by: 'system' }); } catch {}
+    log.log(`[channels] ${scope.kind}:${scope.id}: ${moved} hit(s) for ${pk} held since ${since ? new Date(since).toISOString() : 'an unknown time'} — too old to deliver by itself; the owner decides (${req.id}, deliver / discard)`);
+    notify([]);
+    return { ok: true, requestId: req.id, n: moved };
+  }
+  /** A held request's hits back in play (`keep`: the aside mark lifted, the elided counts restored) or dropped — inside an
+   *  index update (`r2` = the live request row). → how many hits it touched. */
+  function releaseAside(r2, keep) {
+    const h = r2 && r2.held;
+    if (!h) return 0;
+    let n = 0;
+    for (const c of Array.isArray(h.convs) ? h.convs : []) {
+      const e2 = store.index.entry(r2.adapterId, c.id, { create: false });
+      if (!e2 || !Array.isArray(e2.pending)) continue;
+      if (keep) {
+        for (const p of e2.pending) if (p && p.aside === r2.id) { delete p.aside; n++; }
+        if (Number(c.elided) > 0) { healP2(e2); e2.pendingElidedBy[h.pk] = (Number(e2.pendingElidedBy[h.pk]) || 0) + Number(c.elided); }
+      } else {
+        const before = e2.pending.length;
+        e2.pending = e2.pending.filter((p) => !(p && p.aside === r2.id));
+        n += before - e2.pending.length;
+      }
+    }
+    return n;
+  }
+  /** THE OWNER'S DECISION on a held digest (the decide route — the person verdict): Deliver lifts the hits back and flushes
+   *  them NOW through the one flush (a billed turn: the ladder's spend authorizer; a refusal there — the daily cap, nobody
+   *  live — keeps them pending for the next delivery, said); Discard drops them. */
+  async function decideHeld(req0, approve, by, { person = false } = {}) {
+    const t = now();
+    let applied = false, touched = 0;
+    await store.index.update((ix) => {
+      const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
+      if (!r2 || r2.status !== 'open') return;
+      applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by;
+      touched = releaseAside(r2, !!approve);
+    });
+    if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
+    try { store.audit({ kind: 'watch', op: approve ? 'held-deliver' : 'held-discard', principal: req0.principal, scope: req0.scope, requestId: req0.id, n: touched, at: t, by }); } catch {}
+    if (req0.todoId && userTodos && typeof userTodos.get === 'function') {
+      try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open') userTodos.resolveAnswered([req0.todoId], approve ? 'delivered' : 'discarded', person ? { decidedBy: 'person', decidedAt: t } : null); } catch {}
+    }
+    let delivery = null;
+    if (approve && touched) {
+      const h = req0.held || {};
+      const rec = adapterRecords().adapters.find((r) => r.id === req0.adapterId);
+      try {
+        if (rec && h.via === 'scope') delivery = await flushScope(rec, h.source, h.patternId, h.pk, {});
+        else if (rec && Array.isArray(h.convs) && h.convs[0]) delivery = await flushPending(rec, h.convs[0].id, { kind: 'boot', pk: h.pk });
+      } catch (e) { delivery = { ok: false, why: (e && e.message) || String(e) }; }
+    }
+    notify([]);
+    const out = { ok: true, request: { ...req0, status: approve ? 'approved' : 'denied' } };
+    if (!approve) return { ...out, discarded: touched };
+    return { ...out, delivered: !!(delivery && delivery.ok), n: touched, ...(delivery && !delivery.ok ? { why: String(delivery.why || 'refused'), held: true, note: 'not delivered now — the hits stay pending for the next delivery' } : {}) };
+  }
   // THE ITEM AND THE REQUEST ARE ONE STATE (lane wake-approve-card — exit-proxy verify-r2 ask-b's law, which the hub-act,
   // automation and vault asks keep). Acceptance round 2: a wake request's item is a DECISION ROW — the store lets it leave
   // 'open' only by the decide route above (allowed / denied) or by its END (`expired`); a generic close (✓ Mark done / ✕
@@ -1140,7 +1288,7 @@ function create(engineCtx) {
   function settleFromItem(req, status, by) {
     const t = now();
     const ended = by === 'expired';
-    return store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req.id); if (!r2 || r2.status !== 'open') return; r2.status = ended ? 'expired' : 'denied'; r2.decidedAt = t; r2.decidedBy = ended ? 'expired' : `item-${String(status)}-by-${String(by || 'user')}`; })
+    return store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req.id); if (!r2 || r2.status !== 'open') return; r2.status = ended ? 'expired' : 'denied'; r2.decidedAt = t; r2.decidedBy = ended ? 'expired' : `item-${String(status)}-by-${String(by || 'user')}`; if (r2.kind === 'held') releaseAside(r2, false); })   // r6: a held digest nobody decided is discarded, never sent
       .then(() => { try { store.audit({ kind: 'acl', op: ended ? 'watch-expire' : 'watch-deny', principal: req.principal, scope: req.scope, requestId: req.id, at: t, by: ended ? 'system' : 'user', via: 'item' }); } catch { } notify([]); })
       .catch((e) => log.warn(`[channels] ${req.id}: its item left 'open' but the request could not be settled: ${(e && e.message) || e}`));
   }
@@ -1162,7 +1310,7 @@ function create(engineCtx) {
     const due = new Set((store.index.table('watchRequests') || []).filter((r) => r && r.status === 'open' && askEndOf(r) <= t).map((r) => r.id));
     if (!due.size) return [];
     const went = [];
-    await store.index.update((ix) => { for (const r2 of Array.isArray(ix.watchRequests) ? ix.watchRequests : []) if (r2 && r2.status === 'open' && due.has(r2.id)) { r2.status = 'expired'; r2.decidedAt = t; r2.decidedBy = 'expired'; went.push({ ...r2 }); } });
+    await store.index.update((ix) => { for (const r2 of Array.isArray(ix.watchRequests) ? ix.watchRequests : []) if (r2 && r2.status === 'open' && due.has(r2.id)) { r2.status = 'expired'; r2.decidedAt = t; r2.decidedBy = 'expired'; if (r2.kind === 'held') releaseAside(r2, false); went.push({ ...r2 }); } });   // r6: a held digest past its end is discarded
     for (const r of went) {
       try { store.audit({ kind: 'acl', op: 'watch-expire', principal: r.principal, scope: r.scope, requestId: r.id, at: t, by: 'system', via: 'lifetime' }); } catch { }
       if (r.todoId && userTodos && typeof userTodos.resolveAnswered === 'function') { try { userTodos.resolveAnswered([r.todoId], 'expired'); } catch { } }
@@ -1505,6 +1653,73 @@ function create(engineCtx) {
     return site.kind === 'conversation' ? `f-${site.key}|${pk}` : `f-${site.kind}-${site.id}|${pk}`;
   }
   const estimateOf = (e, t) => (e && typeof e === 'object' ? { matchedPerDay: Number(e.matchedPerDay) || 0, totalPerDay: Number(e.totalPerDay) || 0, windowDays: Number(e.windowDays) || 7, sampled: !!e.sampled, truncated: !!e.truncated, conversations: Number(e.conversations) || 0, at: t } : null);
+  const wakesIn = (list) => (Array.isArray(list) ? list : []).filter((w) => w && typeof w === 'object' && F.deliveryModeOf(w) === 'wake');
+  const NOT_HELD = Object.freeze({ held: false, rows: 0, inert: 0, why: null });
+  /** r6: ONE stored wake row, said — who it wakes, where it is stored, in effect or inert. → {grain, id, principal, who, where,
+   *  inert, words} (`words`: «Worker's wake on «Ops» is inert until a person re-grants» — the refusal's and the answer's). */
+  function wakeRowView(adapterId, kind, id, holder, w, inert, how = null) {
+    const rec = adapterRecords().adapters.find((r) => r.id === adapterId) || null;
+    const where = kind === 'conversation' ? String((holder && humanNameOf(rec, holder)) || id).slice(0, 80)   // THE name ladder
+      : kind === 'pattern' ? `the rule ${F.patternSummary(holder && holder.pattern)}`.slice(0, 100) : `the whole account ${(rec && rec.label) || adapterId}`;
+    const who = w.principal.kind === 'everyone' ? 'all agents' : String(w.principal.name || w.principal.id);
+    const state = how || (inert ? 'is inert until a person re-grants' : 'lives by this access');
+    return { grain: kind, id, principal: pkOf(w.principal), who, where, inert: !!inert, words: `${who}'s wake on «${where}» ${state}` };
+  }
+  /** The conversations of an account that store a notification row (a legacy assignment too) — the rows below its grains. */
+  const storingConvs = (adapterId) => Object.values(store.index.live()).filter((en) => en && en.adapterId === adapterId && ((Array.isArray(en.watchers) && en.watchers.length) || (en.assignment && en.assignment.principal)));
+  /** EVERY DOOR THAT CAN RE-ACTIVATE AN INERT ROW IS A WAKE DOOR (lane wake-approve-card r6 — 主开发: the r5 promise held only at
+   *  the room's reach door: a bare curl / vsst_ `PUT …/adapters/A/access` re-adding Worker made the inert room wake live, and so
+   *  did a bare `POST …/patterns {title, access:[Worker]}`). The STORED wake rows BELOW a grain whose state that grain's ACCESS
+   *  decides, read by the one reader: the ACCOUNT → every wake row of its rules and conversations that is inert (a grant on the
+   *  account makes it live) or lives by the account's access rows (a removal there stops it); a RULE → the same over the
+   *  conversations its pattern matches; a rule's NEW match (`pattern` proposed — a new rule, a pattern edit) → the inert rows
+   *  there its access (+ the proposed `access`) would make live. → [wakeRowView]. */
+  function wakesBelow(adapterId, grain, { pattern = null, access = null } = {}) {
+    const kind = grain && grain.kind;
+    if (kind !== 'account' && kind !== 'pattern') return [];
+    const covers = (rows) => { const keys = F.eligibleKeys({ access: Array.isArray(rows) ? rows : [] }); return (w) => F.eligibleFor(keys, w.principal, w); };
+    const out = [];
+    // a row the grain's access decides: INERT now (a grant there makes it live) or live now and NOT in effect without that
+    // access (`wo` — the same read with it left out: a removal there stops it); a row that lives by another grant is not held
+    const rowsOf = (gk, id, g, wo, pick) => { if (!g) return; const alive = new Set((wo ? wo.watchers : []).map((x) => pkOf(x.principal))); for (const w of wakesIn(g.stored)) { const inert = !g.watchers.includes(w); if (pick(w, inert, !alive.has(pkOf(w.principal)))) out.push(wakeRowView(adapterId, gk, id, g.holder, w, inert)); } };
+    if (kind === 'account') {
+      const pick = (w, inert, solely) => inert || solely;
+      for (const pa of rawPatternsOf(adapterId)) { const h = patternById(pa.id); rowsOf('pattern', pa.id, readGrainHolder(adapterId, 'pattern', h), readGrainHolder(adapterId, 'pattern', h, { without: { account: true } }), pick); }
+      for (const en of storingConvs(adapterId)) rowsOf('conversation', en.id, readGrainHolder(adapterId, 'conversation', en), readGrainHolder(adapterId, 'conversation', en, { without: { account: true } }), pick);
+      return out;
+    }
+    const pa = grain.id ? patternById(grain.id) : null;
+    if (grain.id && (!pa || pa.adapterId !== adapterId)) return [];
+    const pv = pattern ? F.validatePattern(pattern) : null;
+    const moved = pv && pv.ok ? pv.pattern : null;
+    const own = pa ? CG.accessOf(CG.RES.rule(pa.id)) : [];
+    const would = covers([...own, ...(Array.isArray(access) ? access.filter((x) => x && typeof x === 'object' && x.principal) : [])]);
+    for (const en of storingConvs(adapterId)) {
+      const facts = convFacts(en);
+      const now0 = !!(pa && pa.pattern && F.matchConversation(pa.pattern, facts).hit);
+      const then = !!(moved && F.matchConversation(moved, facts).hit);
+      if (!now0 && !then) continue;
+      // matched now: an inert row (a grant on the rule makes it live) or one that lives by the rule alone; a NEW match (a new
+      // rule, a moved pattern): an inert row its access (+ the proposed) would make live
+      rowsOf('conversation', en.id, readGrainHolder(adapterId, 'conversation', en), pa ? readGrainHolder(adapterId, 'conversation', en, { without: { rule: pa.id } }) : null,
+        (w, inert, solely) => (now0 && (inert || solely)) || (then && inert && would(w)));
+    }
+    return out;
+  }
+  const namesOf = (rows) => rows.slice(0, 3).map((x) => x.words).join('; ') + (rows.length > 3 ? `; and ${rows.length - 3} more` : '');
+  /** r5: the wake rows stored ON a grain (active or inert) — and a conversation's filter a wake row names. */
+  function ownWakes(adapterId, grain) {
+    const kind = grain && grain.kind;
+    const g = grainReadAt(adapterId, grain);
+    if (!g) return NOT_HELD;
+    const own = wakesIn(g.stored);
+    if (own.length) {
+      const views = own.map((w) => wakeRowView(adapterId, kind, kind === 'conversation' ? grain.convId : kind === 'pattern' ? grain.id : adapterId, g.holder, w, !g.watchers.includes(w), g.watchers.includes(w) ? 'is stored here' : null));
+      return { held: true, rows: own.length, inert: wakesIn(g.inert).length, why: 'watchers', names: namesOf(views) };
+    }
+    if (kind === 'conversation' && g.holder.filterId && wakeNamesFilter(adapterId, g.holder.filterId)) return { held: true, rows: 1, inert: 0, why: 'filter', names: 'a wake fires on this conversation\'s saved filter' };
+    return NOT_HELD;
+  }
   /** THE GRAIN HOLDS A WAKE (lane wake-approve-card, acceptance round 4 — 主开发: «the person verdict guards every write that
    *  CHANGES WHAT A WAKE FIRES ON, not only the write that creates one»). A grain holds a wake when a notification row stored
    *  ON it delivers as a wake (F.deliveryModeOf: a row that never said reads wake; a digest is a paced wake): every list,
@@ -1518,27 +1733,60 @@ function create(engineCtx) {
    *  counts, active or INERT (its principal's access gone: a write that gives it back — a reach, an access row — makes it
    *  live, so it is a wake write). A webhook PATH (`{kind:'path', convId: slug}`; null = a path not made yet) is a wake grain
    *  too: its options and callers decide which events its conversation gets and its facts (title, participants, kind) are
-   *  what a rule matches — held when its conversation holds a wake, or the account, or any rule of the account does.
-   *  → {held, rows, inert, why} (`why` 'watchers' | 'filter' | 'account' | 'rule' | null; an unknown grain or a NEW rule
-   *  holds nothing — the writer answers for it). */
-  const wakesIn = (list) => (Array.isArray(list) ? list : []).filter((w) => w && typeof w === 'object' && F.deliveryModeOf(w) === 'wake');
-  const NOT_HELD = Object.freeze({ held: false, rows: 0, inert: 0, why: null });
-  function wakeHeldAt(adapterId, grain) {
+   *  what a rule matches — held when its conversation holds a wake, or the account, or any rule of the account does (its
+   *  own rows: KEPT FAIL-CLOSED in r6 — every path verb rewrites the facts a rule matches over, so whether a rule reaches a
+   *  path is decided by the write itself; the refusal names the rule).
+   *  r6 (主开发: «every door that can re-activate an inert row is a wake door»): the account and a rule hold the stored wake
+   *  rows BELOW them whose state their access decides (wakesBelow — `proposed` = the write's pattern / access: a NEW rule holds
+   *  what its access would make live); `{kind:'adapter'}` = any wake row stored anywhere on the account (its on / off switch).
+   *  → {held, rows, inert, why, names} (`why` 'watchers' | 'filter' | 'below' | 'account' | 'rule' | 'adapter' | null;
+   *  `names` = the rows in words, for the refusal). */
+  function wakeHeldAt(adapterId, grain, proposed = {}) {
     const kind = grain && grain.kind;
     if (kind === 'path') {
       const above = [{ kind: 'account' }, ...rawPatternsOf(adapterId).map((pa) => ({ kind: 'pattern', id: pa.id }))];
       for (const g of [...(grain.convId ? [{ kind: 'conversation', convId: grain.convId }] : []), ...above]) {
-        const h = wakeHeldAt(adapterId, g);
-        if (h.held) return g.kind === 'conversation' ? h : { ...h, why: g.kind === 'account' ? 'account' : 'rule' };
+        const h = ownWakes(adapterId, g);
+        if (!h.held) continue;
+        if (g.kind === 'conversation') return h;
+        if (g.kind === 'account') return { ...h, why: 'account', names: `held by the account's own wake (${h.names}) — edit it on the page` };
+        const pa = patternById(g.id);
+        return { ...h, why: 'rule', rule: { id: g.id, summary: pa ? F.patternSummary(pa.pattern) : g.id }, names: `held by the rule ${pa ? F.patternSummary(pa.pattern) : g.id} — a wake on this account; every path verb rewrites the facts a rule matches, so edit it on the page` };
       }
       return NOT_HELD;
     }
-    const g = grainReadAt(adapterId, grain);
-    if (!g) return NOT_HELD;
-    const own = wakesIn(g.stored);
-    if (own.length) return { held: true, rows: own.length, inert: wakesIn(g.inert).length, why: 'watchers' };
-    if (kind === 'conversation' && g.holder.filterId && wakeNamesFilter(adapterId, g.holder.filterId)) return { held: true, rows: 1, inert: 0, why: 'filter' };
+    if (kind === 'adapter') {
+      for (const g of [{ kind: 'account' }, ...rawPatternsOf(adapterId).map((pa) => ({ kind: 'pattern', id: pa.id }))]) { const h = ownWakes(adapterId, g); if (h.held) return { ...h, why: 'adapter' }; }
+      for (const en of storingConvs(adapterId)) { const h = ownWakes(adapterId, { kind: 'conversation', convId: en.id }); if (h.held) return { ...h, why: 'adapter' }; }
+      return NOT_HELD;
+    }
+    const own = kind === 'pattern' && !grain.id ? NOT_HELD : ownWakes(adapterId, grain);
+    if (own.held) return own;
+    const below = wakesBelow(adapterId, grain, proposed || {});
+    if (below.length) return { held: true, rows: below.length, inert: below.filter((x) => x.inert).length, why: 'below', names: namesOf(below) };
     return NOT_HELD;
+  }
+  /** r6: every stored wake row of an account and whether it is in effect NOW (the one reader) — a write's before / after. */
+  function wakeRowsNow(adapterId) {
+    const m = new Map();
+    const add = (kind, id, g) => { if (g) for (const w of wakesIn(g.stored)) m.set(`${g.grainRes || kind + ':' + id}|${pkOf(w.principal)}`, { kind, id, holder: g.holder, w, live: g.watchers.includes(w) }); };
+    add('account', adapterId, grainReadAt(adapterId, { kind: 'account' }));
+    for (const pa of rawPatternsOf(adapterId)) add('pattern', pa.id, grainReadAt(adapterId, { kind: 'pattern', id: pa.id }));
+    for (const en of storingConvs(adapterId)) add('conversation', en.id, readGrainHolder(adapterId, 'conversation', en));
+    return m;
+  }
+  /** r6: what a write did to the wakes stored BEFORE it — the rows it made live again (`reactivated`: a person re-granted) and
+   *  the rows it left inert (`madeInert`) — said in the answer, never silent. Rows the write itself added are not counted. */
+  function wakeReachDiff(adapterId, before) {
+    const after = wakeRowsNow(adapterId);
+    const reactivated = [], madeInert = [];
+    for (const [k, b] of before) {
+      const a = after.get(k);
+      if (!a || a.live === b.live) continue;
+      (a.live ? reactivated : madeInert).push(wakeRowView(adapterId, a.kind, a.id, a.holder, a.w, !a.live, a.live ? 'is live again' : 'is inert now'));
+    }
+    if (!reactivated.length && !madeInert.length) return null;
+    return { reactivated, madeInert, said: [reactivated.length ? `this write re-activated ${reactivated.length} wake${reactivated.length === 1 ? '' : 's'} (a billed turn each time it fires): ${namesOf(reactivated)}` : '', madeInert.length ? `${madeInert.length} wake${madeInert.length === 1 ? '' : 's'} left inert: ${namesOf(madeInert)}` : ''].filter(Boolean).join(' · ') };
   }
   /** Does a wake row stored on any grain of this account (active or inert — the one reader) wake on filter `fid`? */
   function wakeNamesFilter(adapterId, fid) {
@@ -1567,6 +1815,7 @@ function create(engineCtx) {
     const site = grainSite(adapterId, grain, t);
     if (!site.ok) return site;
     const { rec, kind } = site;
+    const reach0 = wakeRowsNow(adapterId);   // r6: the stored wake rows in effect BEFORE — the answer says what this write revived
     // lane grants-unify: the lists as the rows hold them (+ the two rows' left-out members — part of the stamp)
     // lane wake-approve-card r5: read by THE one reader (readGrainHolder: the access above the grain included, as the wake
     // reads it — round 4 read the holder with its own access only: it dropped a rule's watcher whose access is the account's,
@@ -1637,6 +1886,8 @@ function create(engineCtx) {
       const keep = F.eligibleKeys({ access, inherited: siteInheritedOf(site) });
       watchers = cur.watchers.filter((w) => F.eligibleFor(keep, w.principal, w));
     }
+    const dropPk = new Set((Array.isArray(p.drop) ? p.drop : []).map(String));
+    if (dropPk.size) watchers = watchers.filter((w) => !dropPk.has(pkOf(w.principal)));
     const beforeA = new Set(cur.access.map((r) => pkOf(r.principal)));
     const beforeW = new Set(cur.watchers.map((w) => pkOf(w.principal)));
     const removedA = cur.access.filter((r) => !granted.has(pkOf(r.principal)));
@@ -1645,7 +1896,11 @@ function create(engineCtx) {
     const oldFilterIds = cur.watchers.map((w) => w.filterId).filter(Boolean);
     // r5: a stored row this write does not name stays as it was (inert); a list naming its principal replaces it; the
     // grain CLEARED (an assignment removed: `clear`) takes them too
-    const inertKept = p.clear === true ? [] : (rd ? rd.inert : []).filter((w) => !watchers.some((nw) => pkOf(nw.principal) === pkOf(w.principal)));
+    // r6 (主开发: «a removal names the STORED row it removes»): `drop` = the principal keys whose STORED row this write removes,
+    // inert or not — the agent's own unwatch names its row so (it wrote the rows in effect, its inert row stayed: removed:true,
+    // still stored, its slot held, the billed wake live again at the next re-grant)
+    const inertKept = p.clear === true ? [] : (rd ? rd.inert : []).filter((w) => !dropPk.has(pkOf(w.principal)) && !watchers.some((nw) => pkOf(nw.principal) === pkOf(w.principal)));
+    const droppedInert = p.clear === true ? (rd ? rd.inert : []) : (rd ? rd.inert : []).filter((w) => dropPk.has(pkOf(w.principal)));
     const stored = [...watchers, ...inertKept];
     const empty = !access.length && !stored.length;
     // verify r1 F1: a user's whole-list write that DROPS an agent's own row leaves a mark that agent cannot write over
@@ -1688,14 +1943,17 @@ function create(engineCtx) {
     });
     // every changed watcher's wake windows (its held hits stay pending — the
     // new shape delivers them, or the prune below drops the orphans)
-    for (const pk of changedW) { clearWakeTimer(kind === 'conversation' ? `${site.key}|${pk}` : `scope:${kind === 'account' ? 'acct' : 'pat'}:${site.id}|${pk}`); }
+    for (const pk of [...changedW, ...droppedInert.map((w) => pkOf(w.principal))]) { clearWakeTimer(kind === 'conversation' ? `${site.key}|${pk}` : `scope:${kind === 'account' ? 'acct' : 'pat'}:${site.id}|${pk}`); }
     await prunePending(adapterId, kind === 'conversation' ? site.key : null);
     for (const r of removedA) auditGrant('revoke', r.principal, site, t, by);
     for (const r of addedA) auditGrant('grant', r.principal, site, t, by);
     for (const pk of changedW) { const nw = watchers.find((w) => pkOf(w.principal) === pk); try { store.audit({ kind: 'watch', op: nw ? 'set' : 'unset', principal: (nw || prevW.get(pk)).principal, scope: site.scope, notify: nw ? nw.notify : null, at: t, by }); } catch {} }
     for (const w of watchers) if (!beforeW.has(pkOf(w.principal))) { try { store.audit({ kind: 'watch', op: 'set', principal: w.principal, scope: site.scope, notify: w.notify, at: t, by }); } catch {} }
+    for (const w of droppedInert) { try { store.audit({ kind: 'watch', op: 'unset', principal: w.principal, scope: site.scope, notify: w.notify, inert: true, at: t, by }); } catch {} }
     if (kind === 'conversation') notify([site.convId]); else notify([], { full: true });
-    return { ok: true, ...grainAnswer(rec, site, t) };
+    const wakes = wakeReachDiff(adapterId, reach0);   // r6: a person's re-grant that makes inert wakes live is SAID (and audited)
+    if (wakes) { try { store.audit({ kind: 'watch', op: 'reach', scope: site.scope, reactivated: wakes.reactivated.map((x) => `${x.principal}@${x.grain}:${x.id}`), madeInert: wakes.madeInert.map((x) => `${x.principal}@${x.grain}:${x.id}`), at: t, by }); } catch {} }
+    return { ok: true, ...grainAnswer(rec, site, t), ...(wakes ? { wakes } : {}) };
   }
   function auditGrant(op, principal, site, t, by) {
     try { store.audit({ kind: 'acl', op, principal, scope: site.scope, level: op === 'grant' ? 'visible' : null, origin: 'access', at: t, by }); } catch {}
@@ -2094,7 +2352,7 @@ function create(engineCtx) {
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, grainReadAt, heldRead, resurfacePointers, openAccessPointers,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, grainReadAt, heldRead, resurfacePointers, openAccessPointers, holdAside,
   };
 }
 

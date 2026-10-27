@@ -23,11 +23,18 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Editing a rule that notifies an agent through the account's access no longer deletes that notification.
 - A rule digest for an agent with access through the account now arrives instead of waiting for ever.
 - A stored-secret request answered before this update reads «allowed», as it never recorded Allow once or For 8 hours.
+- An agent removing its own notification that had stopped firing now deletes it; it no longer fires again when you give the agent access back.
+- Messages held for an agent for more than a day are no longer sent on their own after a restart; For you asks you to deliver or discard them.
+- A digest of held messages now says since when they were held, not «in the last 60 min».
+- A stored-secret approval shows when it ended or that you revoked it, instead of «allowed for 8 hours» for ever.
+- An agent's list of its notifications shows the ones that stopped firing, marked as such.
 
 ### Security
 - With sign-in off, an agent could widen a wake you approved by editing its rule or filter; changing what a wake reacts to now takes your click.
 - With sign-in off, an agent could turn a wake back on or edit a rule that wakes it through the account; that now takes your click.
 - With sign-in off, a script or an automation key could re-enable a webhook path that wakes an agent or add a caller; that now takes your click.
+- With sign-in off, granting an account or adding a rule that would turn a stopped wake back on now takes your click, and your own change says which it turned on.
+- A webhook pairing code not made on your page no longer completes once the path wakes an agent; make a new code on the page.
 
 ## 2.369.360 — 2026-10-27
 

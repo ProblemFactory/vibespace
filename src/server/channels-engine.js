@@ -1,4 +1,5 @@
 'use strict';
+const OF = require('./owner-facts.js');   // lane wake-approve-card r6: a held digest's span in the owner's zone, named
 /**
  * THE CHANNELS INGEST ENGINE — scheduler, single-flight, broadcast, and THE
  * SERIALIZED INDEX OWNER (docs/design-communication-panel.zh.md §5.1, §6.1,
@@ -7739,6 +7740,10 @@ function create(deps = {}) {
     for (const w of eff.watchers) { const k = pkOf(w.watcher.principal); if (!self(k) && out.has(k)) out.get(k).notify = w.watcher.notify; }
     return [...out.values()];
   }
+  /** r6: what a digest's header says of its span — a delivery with no window of its own (a boot's leftovers, a held digest the
+   *  owner released) names its oldest hit's time (unknown ⇒ «held for an unknown time»); a window's carry of older hits too;
+   *  else null (the window's own «in the last N min» is true). */
+  const heldSpanOf = (oldest, startedAt) => { const x = !startedAt ? (oldest || 'unknown') : (oldest && oldest < startedAt ? oldest : null); return x === 'unknown' ? 'held for an unknown time' : x ? `held since ${OF.when(x)}` : null; };   // in the owner's zone, named (owner-facts)
   /** Deliver ONE scope digest for ONE watcher: every conversation of the
    *  account whose EFFECTIVE watcher for this principal is this grain and
    *  that holds its pending hits. Paced by THIS watcher's own ledger; a
@@ -7784,7 +7789,8 @@ function create(deps = {}) {
       }
       const label = rec.label || rec.id;
       const scopeLabel = source === 'account' ? 'the whole account' : `the conversations matching a rule (${F.patternSummary(holder.pattern)})`;
-      const text = F.renderScopeDigestBlock({ adapterLabel: label, scopeLabel, groups, windowMinutes: startedAt ? Math.max(1, Math.round((t - startedAt) / 60e3)) : w.digestMinutes, others });
+      const oldest = held.some((h) => !h.carried.oldest) ? null : Math.min(...held.map((h) => h.carried.oldest));
+      const text = F.renderScopeDigestBlock({ adapterLabel: label, scopeLabel, groups, windowMinutes: startedAt ? Math.max(1, Math.round((t - startedAt) / 60e3)) : w.digestMinutes, others, since: heldSpanOf(oldest, startedAt) });   // r6: the TRUE span (a boot window has no start: was «the last 60 min» for hits months old)
       const n = groups.reduce((x, g) => x + g.hits.length + (g.elided || 0), 0);
       const fromName = `Channels · ${label}`;
       const cardText = `${groups.length} conversation${groups.length === 1 ? '' : 's'}: ${n} message${n === 1 ? '' : 's'} — digest`;
@@ -7861,6 +7867,7 @@ function create(deps = {}) {
           elided: pend.elided, fromPending: pend, pk: p,
           digest: kind === 'digest' || kind === 'boot',
           windowMinutes: kind === 'digest' ? (item.watcher.digestMinutes || F.DEFAULT_DIGEST_MINUTES) : Math.max(1, Math.round(seconds / 60)),
+          since: kind === 'boot' ? heldSpanOf(pend.oldest, null) : startedAt ? heldSpanOf(pend.oldest, startedAt) : null,   // r6: a boot's leftovers (no window) or hits older than this window say since when
           coalesced: kind === 'coalesce' && n > 1 ? { n, seconds } : null,
         })));
       }
@@ -8039,7 +8046,7 @@ function create(deps = {}) {
    * way. Reached ONLY through `wake()` / `flushPending()` (the serial
    * section — the conversation's, and for an inherited grain its scope's).
    */
-  async function wakeNow(rec, convId, freshHits, { origin = null, coalesced = null, elided = 0, digest = false, windowMinutes = null, fromPending = null, pk = null, batch = null } = {}) {
+  async function wakeNow(rec, convId, freshHits, { origin = null, coalesced = null, elided = 0, digest = false, windowMinutes = null, since = null, fromPending = null, pk = null, batch = null } = {}) {
     const t = now();
     const en = store.index.peek(`${rec.id}/${convId}`);
     const eff = wakeEffOf(en);
@@ -8107,7 +8114,7 @@ function create(deps = {}) {
     const inherited = item.source === 'conversation' ? null : { kind: item.source, label: item.source === 'pattern' ? F.patternSummary((patternById(item.patternId) || {}).pattern || { rules: [] }) : null };
     const others = othersFor(eff, pk);
     const text = digest
-      ? F.renderDigestBlock({ adapterLabel: label, title, convId, hits, elided: allElided, windowMinutes: windowMinutes || w.digestMinutes })
+      ? F.renderDigestBlock({ adapterLabel: label, title, convId, hits, elided: allElided, windowMinutes: windowMinutes || w.digestMinutes, since })   // r6: `since` — held hits say their true span
       : F.renderWakeBlock({ adapterLabel: label, title, convId, hits, elided: allElided, coalesced, inherited, others, factLine: wakeFactLineOf(rec) });
     const fromName = `Channels · ${label}`;
     const n = hits.length + allElided;
@@ -8217,6 +8224,7 @@ function create(deps = {}) {
     dropLive, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, withView, offerNow, NOT_A_THREAD, threadRead, threadRefresh,
     rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, recallMessage, vendorSearch, aroundFor, refreshConvCaps, retractUnsaved,
     retractFailure, track, wakeTimers, clearWakeTimer, coalesceSeconds, billedWake, pathBudgetVerdict,
+    flushScope, flushPending,   // lane wake-approve-card r6: a held digest the owner releases is delivered through the same flush (channels-access decideHeld)
     speakSignin, retractSignin,   // lane channel-reauth-visible: the dead sign-in's ONE item (an unfinished consent re-asserts it; a removal / a disconnect ends it)
     judgedRoadFor,   // lane judged-watch-state: the watch answers' judged-road line (channels-access)
     CG,              // lane grants-unify: the channel doors' rows (src/server/channels-grants.js)
@@ -8230,7 +8238,7 @@ function create(deps = {}) {
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, grainReadAt, heldRead, resurfacePointers, openAccessPointers,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, grainReadAt, heldRead, resurfacePointers, openAccessPointers, holdAside,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
@@ -8257,9 +8265,21 @@ function create(deps = {}) {
   /** Boot: hits left pending by a restart (a window that never fired) are
    *  delivered as ONE digest per (conversation, watcher) shortly after start
    *  — an inherited digest's leftovers as ONE scope digest per (scope,
-   *  watcher). Hits nobody waits for any more are left to `prunePending`. */
+   *  watcher). Hits nobody waits for any more are left to `prunePending`.
+   *  r6 (主开发: «a billed delivery nobody clicked says its age or asks»): each delivery the boot would start is judged by the
+   *  AGE of what it carries — its oldest hit parked longer than F.HELD_AGE_WINDOWS of the watcher's window (a day for a 60-min
+   *  digest) is NOT delivered by itself: its hits are set aside for ONE For-you decision (channels-access holdAside — deliver /
+   *  discard, the person verdict), never a burst of months-old turns; a younger one is delivered with its true span. */
   function scheduleBootPending() {
     const live = store.index.live();
+    const plan = new Map();   // r6: the boot's deliveries — key → {key, kind, rec, item, pk, convs:[{key, id, title, ids, elidedTagged, elidedUntagged}], oldest, n, unknown}
+    const joinPlan = (key, kind, rec, item, pk, en, pend) => {
+      const p0 = plan.get(key) || { key, kind, rec, item, pk, convs: [], oldest: Infinity, n: 0, unknown: false };
+      p0.convs.push({ key: en.key, id: en.id, title: humanNameOf(rec, en) || en.id, ids: [...pend.ids], elidedTagged: pend.elidedTagged, elidedUntagged: pend.elidedUntagged });
+      if (pend.oldest) p0.oldest = Math.min(p0.oldest, pend.oldest); else p0.unknown = true;
+      p0.n += pend.hits.length + pend.elided;
+      plan.set(key, p0);
+    };
     for (const k of Object.keys(live)) {
       const en0 = live[k];
       if (!en0 || !Array.isArray(en0.pending) || (!en0.pending.length && !elidedTotal(en0))) continue;
@@ -8277,18 +8297,27 @@ function create(deps = {}) {
           // an inherited digest's leftovers go out as ONE scope digest (a next-turn road's go to flushPending ⇒ the free stash)
           const sk = `scope:${scopeKeyOf(item, rec)}`;
           if (wakeTimers.has(sk)) continue;
-          const timer = setTimeout(() => { wakeTimers.delete(sk); track(flushScope(rec, item.source, item.patternId, pk, {})); }, BOOT_PENDING_DELAY_MS);
-          if (timer.unref) timer.unref();
-          wakeTimers.set(sk, { timer, kind: 'boot', startedAt: now() });
+          joinPlan(sk, 'scope', rec, item, pk, en, pend);
           continue;
         }
         const key = `${en.key}|${pk}`;
         if (wakeTimers.has(key)) continue;
-        const timer = setTimeout(() => { wakeTimers.delete(key); track(flushPending(rec, en.id, { kind: 'boot', pk })); }, BOOT_PENDING_DELAY_MS);
-        if (timer.unref) timer.unref();
-        wakeTimers.set(key, { timer, kind: 'boot', startedAt: now() });
+        if (pendingRoadOf(item.watcher, pend) !== 'wake') { armBoot(key, () => flushPending(rec, en.id, { kind: 'boot', pk })); continue; }   // the free stash — no age to ask about
+        joinPlan(key, 'conversation', rec, item, pk, en, pend);
       }
     }
+    const t = now();
+    for (const p0 of plan.values()) {
+      if (F.heldTooOld(p0.item.watcher, p0.unknown ? null : p0.oldest, t)) { track(holdAside(p0)); continue; }   // r6: too old to deliver by itself ⇒ the owner decides
+      if (p0.kind === 'scope') armBoot(p0.key, () => flushScope(p0.rec, p0.item.source, p0.item.patternId, p0.pk, {}));
+      else armBoot(p0.key, () => flushPending(p0.rec, p0.convs[0].id, { kind: 'boot', pk: p0.pk }));
+    }
+  }
+  /** One boot delivery, BOOT_PENDING_DELAY_MS after start. */
+  function armBoot(key, run) {
+    const timer = setTimeout(() => { wakeTimers.delete(key); track(run()); }, BOOT_PENDING_DELAY_MS);
+    if (timer.unref) timer.unref();
+    wakeTimers.set(key, { timer, kind: 'boot', startedAt: now() });
   }
 
   function tick() {
@@ -8356,17 +8385,24 @@ function create(deps = {}) {
    *  why a listed notification never fires. Returns `[{grain, id, principal}]`. */
   function orphanWatchers() {
     const out = [];
-    const check = (grain, id, raw) => {
+    const check = (grain, id, raw, read) => {
       const rawW = Array.isArray(raw && raw.watchers) ? raw.watchers.filter((w) => w && pkOf(w.principal)) : [];
-      // lane grants-unify: the grain's access is its row; a watcher its watch row does not list is inert too
-      const res = CG.grainResource(grain, id);
-      const kept = new Set(F.grainOf({ access: CG.accessOf(res), watchers: rawW.filter((w) => CG.watchLists(res, w.principal)) }, null).watchers.map((w) => pkOf(w.principal)));
+      // lane grants-unify: the grain's access is its row; a watcher its watch row does not list is inert too. lane
+      // wake-approve-card r6: read by THE one reader (the access ABOVE the grain counts — F.grainOf with none named a FIRING rule
+      // digest and room wake «without access at their grain» at every boot)
+      const kept = new Set((read ? read.watchers : []).map((w) => pkOf(w.principal)));
       for (const w of rawW) if (!kept.has(pkOf(w.principal))) out.push({ grain, id, principal: pkOf(w.principal) });
     };
-    for (const [id, g] of Object.entries(store.index.table('accountAssignments') || {})) check('account', id, g);
-    for (const [id, g] of Object.entries(store.index.table('patternAssignments') || {})) check('pattern', id, g);
-    for (const en of Object.values(store.index.live())) if (en) check('conversation', en.key, en);
+    for (const [id, g] of Object.entries(store.index.table('accountAssignments') || {})) check('account', id, g, grainReadAt(id, { kind: 'account' }));
+    for (const [id, g] of Object.entries(store.index.table('patternAssignments') || {})) check('pattern', id, g, g && g.adapterId ? grainReadAt(g.adapterId, { kind: 'pattern', id }) : null);
+    for (const en of Object.values(store.index.live())) if (en) check('conversation', en.key, en, grainReadAt(en.adapterId, { kind: 'conversation', convId: en.id }));
     return out;
+  }
+  /** r6: every grain's rows IN EFFECT, read by the one reader (`fn(row, grain, id)` for each) — the boot censuses below. */
+  function eachRowInEffect(fn) {
+    for (const id of Object.keys(store.index.table('accountAssignments') || {})) for (const w of (grainReadAt(id, { kind: 'account' }) || { watchers: [] }).watchers) fn(w, 'account', id);
+    for (const [id, g] of Object.entries(store.index.table('patternAssignments') || {})) if (g && g.adapterId) for (const w of (grainReadAt(g.adapterId, { kind: 'pattern', id }) || { watchers: [] }).watchers) fn(w, 'pattern', id);
+    for (const en of Object.values(store.index.live())) if (en) for (const w of (grainReadAt(en.adapterId, { kind: 'conversation', convId: en.id }) || { watchers: [] }).watchers) fn(w, 'conversation', en.key);
   }
   /** R4 verify r5 (money): RELEASE THE RESERVATIONS OF A DEAD BOOT. A wake
    *  reservation (reserveWake, written before the ladder) whose `bootId` is
@@ -8409,13 +8445,8 @@ function create(deps = {}) {
    *  would hide the choice). This names them once. */
   function capZeroDigests() {
     const out = [];
-    const check = (grain, id, holder) => {
-      const res = CG.grainResource(grain, id);   // lane grants-unify: access = the grain's row; watchers = those its watch row lists
-      for (const w of F.grainOf({ access: CG.accessOf(res), watchers: (Array.isArray(holder && holder.watchers) ? holder.watchers : []).filter((x) => x && x.principal && CG.watchLists(res, x.principal)) }, null).watchers) if (w && w.notify === 'digest' && Number(w.dailyWakeCap) === 0) out.push({ grain, id, principal: pkOf(w.principal) });
-    };
-    for (const [id, g] of Object.entries(store.index.table('accountAssignments') || {})) check('account', id, g);
-    for (const [id, g] of Object.entries(store.index.table('patternAssignments') || {})) check('pattern', id, g);
-    for (const en of Object.values(store.index.live())) if (en) check('conversation', en.key, en);
+    // r6: the rows in effect as THE one reader reads them (the access above each grain included)
+    eachRowInEffect((w, grain, id) => { if (w && w.notify === 'digest' && Number(w.dailyWakeCap) === 0) out.push({ grain, id, principal: pkOf(w.principal) }); });
     return out;
   }
   /** 2026-09-27: the per-watcher `receiptWake` opt-in is DEPRECATED (the
@@ -8423,13 +8454,7 @@ function create(deps = {}) {
    *  watchers still carrying `true`, counted for the ONE boot line. */
   function deprecatedReceiptWakes() {
     const out = [];
-    const check = (grain, id, holder) => {
-      const res = CG.grainResource(grain, id);   // lane grants-unify: access = the grain's row; watchers = those its watch row lists
-      for (const w of F.grainOf({ access: CG.accessOf(res), watchers: (Array.isArray(holder && holder.watchers) ? holder.watchers : []).filter((x) => x && x.principal && CG.watchLists(res, x.principal)) }, null).watchers) if (w && w.receiptWake === true) out.push({ grain, id, principal: pkOf(w.principal) });
-    };
-    for (const [id, g] of Object.entries(store.index.table('accountAssignments') || {})) check('account', id, g);
-    for (const [id, g] of Object.entries(store.index.table('patternAssignments') || {})) check('pattern', id, g);
-    for (const en of Object.values(store.index.live())) if (en) check('conversation', en.key, en);
+    eachRowInEffect((w, grain, id) => { if (w && w.receiptWake === true) out.push({ grain, id, principal: pkOf(w.principal) }); });   // r6: the one reader
     return out;
   }
   function start() {
@@ -8438,7 +8463,7 @@ function create(deps = {}) {
     if (timer.unref) timer.unref();
     healSelfAt().catch((err) => log.warn(`[channels] selfAt heal failed: ${(err && err.message) || err}`));
     try { const d = deprecatedReceiptWakes(); if (d.length) log.log(`[channels] ${d.length} watcher(s) still carry receiptWake:true — IGNORED since 2026-09-27 (a receipt's delivery is chosen at the Approve / Reject action: "tell it with its next message" or "wake it now"): ${d.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot receiptWake census failed: ${(err && err.message) || err}`); }
-    try { const orphans = orphanWatchers(); if (orphans.length) log.warn(`[channels] ${orphans.length} notification row(s) without access at their grain — inert until access is granted there: ${orphans.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot notification census failed: ${(err && err.message) || err}`); }
+    try { const orphans = orphanWatchers(); if (orphans.length) log.warn(`[channels] ${orphans.length} notification row(s) without access at their grain or above it (the account, a matching rule) — inert until a person grants it: ${orphans.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot notification census failed: ${(err && err.message) || err}`); }
     try { const z = capZeroDigests(); if (z.length) log.warn(`[channels] ${z.length} digest notification(s) stored with a daily cap of 0 — read as cap 1 (a digest is a paced wake and cap 0 never delivers); the store is not rewritten, edit each to set a real cap: ${z.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot digest-cap census failed: ${(err && err.message) || err}`); }
     try { track(releaseStaleReservations()); } catch (err) { log.warn(`[channels] boot reservation release failed: ${(err && err.message) || err}`); }
     reconcileReceiptFates().catch((err) => log.warn(`[channels] boot receipt-fate reconcile failed: ${(err && err.message) || err}`));

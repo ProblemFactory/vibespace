@@ -37,7 +37,7 @@ import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; //
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
-import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
+import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
@@ -91,9 +91,9 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'hidden') return ''; // r3: a hidden pointer's status word says it all (statusWords) — nothing was decided
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
   if (by === 'stored') return t('saved to the vault'); // lane vault-paste-request: a paste request answered by its paste
-  if (by === 'granted-8h') return t('allowed for 8 hours'); // r4: an agent's request for a stored secret (vault-grant-ask) answered For 8 hours — r5: the record carries the duration
-  if (by === 'granted-once') return t('allowed once'); // …or Allow once
-  if (by === 'granted') return t('allowed'); // r5: a record from before .360 (both verbs stored `granted`) — only what was decided
+  if (by === 'delivered') return t('delivered'); // r6: a held digest the owner released (Deliver)
+  if (by === 'discarded') return t('discarded — nothing was sent'); // …or dropped (Discard)
+  if (by === 'granted') { const gw = item ? grantWords(item, { t }) : null; return gw ? gw.text : t('allowed'); } // r4: an agent's request for a stored secret (vault-grant-ask) answered — r6: the duration its record carries (none ⇒ «allowed») and the grant's life (ended / revoked), THE reader foryou-actions grantWords
   // B-2198 part 2: a raw-API proposal's item is answered BY its outcome (the card's words: Ran · 200 · 1.2 KB / Rejected by you)
   if (by === 'channel-api' && item && item.resolvedFact && item.resolvedFact.apiOutcome) return t(item.resolvedFact.apiOutcome.key, item.resolvedFact.apiOutcome.params || {});
   // lane exit-item-heal: an unexpected-exit item answered by the conversation running again (its new session's start, this device's clock)
@@ -178,7 +178,7 @@ const secretAskHtml = (i, t, detail) => (isSecretAsk(i) ? `<div class="ut-propos
 /** lane browser-propose (2026-09-30): the agent's PROPOSAL, answered where it appears — its words (the card's, line for
  *  line: what Approve runs) ABOVE Approve / Reject, never folded (the exit-ask lesson: a folded detail below the button
  *  read as the whole story). ONE primary (Approve), a quiet Reject; open items only. */
-const PROPOSAL_ACTIONS = ['browser-proposal', 'channel-watch-request', 'channel-api-proposal'];   // B-2198 part 2: a raw-API proposal too   // lane channel-agent-watch: an agent's wake request is answered the same way
+const PROPOSAL_ACTIONS = ['browser-proposal', 'channel-watch-request', 'channel-api-proposal', 'channel-held-digest'];   // r6: a held digest's Deliver / Discard   // B-2198 part 2: a raw-API proposal too   // lane channel-agent-watch: an agent's wake request is answered the same way
 /** lane passkey-ui: a PASSKEY card (`pk-…`) answers with ITS choices (register: Allow once / Not now; sign-in: Allow once /
  *  Always allow / Not now / Never) — the words above them say what the agent may do after; the first = the primary. */
 const PK_CHOICES = ['once', 'always', 'no', 'never'];
@@ -208,7 +208,7 @@ const saveLoginAskHtml = (i, t, detail) => `<div class="ut-proposal-plan">${escH
   + `<button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Not now'))}</button></div>`;
 const proposalAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'save-login' && /^sl-[0-9a-f]{8}$/.test(String(i.action.id || '')) ? saveLoginAskHtml(i, t, detail) : i && i.action && i.action.type === 'browser-surface' && i.action.id ? surfaceAskHtml(i, t, detail) : i && i.action && i.action.type === 'browser-proposal' && /^pk-[0-9a-f]{8}$/.test(String(i.action.id || '')) ? passkeyAskHtml(i, t, detail) : i && i.action && PROPOSAL_ACTIONS.includes(i.action.type)
   ? `<div class="ut-proposal-plan">${apiChipHtml(apiCardOf(i), t)}${escHtml(detail || '')}</div>${apiTechHtml(apiCardOf(i), t)}`
-    + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Runs exactly what this card says'))}">${decideIcon(i, 'check')}${escHtml(t('Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${decideIcon(i, 'close')}${escHtml(PERSON_DECIDES.includes(i.action.type) ? t('Deny') : t('Reject'))}</button></div>` : '') : '');
+    + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t(verbsOf(i.action.type) ? verbsOf(i.action.type).title : 'Runs exactly what this card says'))}">${decideIcon(i, 'check')}${escHtml(t(verbsOf(i.action.type) ? verbsOf(i.action.type).approve : 'Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${decideIcon(i, 'close')}${escHtml(verbsOf(i.action.type) ? t(verbsOf(i.action.type).reject) : PERSON_DECIDES.includes(i.action.type) ? t('Deny') : t('Reject'))}</button></div>` : '') : '');   // r6: a row's own verbs (THE registry's `verbs` — a held digest's Deliver / Discard)
 /** lane wake-approve-card: a decision only a person's click makes (a wake request) wears its verb's icon beside its word —
  *  Approve ✓ / Deny ✕, theme-coloured (currentColor); every other proposal's buttons stay words. */
 const decideIcon = (i, k) => (i && i.action && PERSON_DECIDES.includes(i.action.type) ? `<span class="ut-decide-ico" aria-hidden="true">${UI_ICONS[k]}</span>` : '');

@@ -538,6 +538,16 @@ console.log('⑥b A RUN ENDS WHOLE; the store\'s mark; the bounds; the program o
   openRow(aw);
   const c3 = await runAnswered(aw, CA, { answer: 'deny' });
   ok(c1.r.by === 'always' && c2.r.by === 'always' && !c2.card && !!c3.card && c3.r.code === 'ask_denied', 'switching the entry OFF takes back its «always» (and its seen shapes): switched on again, the same shape asks', [c1.r.by, c2.r.by, !!c3.card]);
+  { // r6 (主开发: «a card's state follows the grant's life» — the Always + a revoke in the Vault window ⇒ the card says revoked)
+    const FAr = R('src/foryou-actions.js');
+    const ia = aw.userTodos.get(c1.card && c1.card.id), sa = ia && FAr.decidedStamp(ia);
+    ok(ia && ia.resolvedBy === 'always' && ia.resolvedFact?.alwaysFor === '30d' && ia.resolvedFact?.endedBy === 'revoked' && sa && /^always allowed · revoked (\d+\/\d+ )?\d\d:\d\d$/.test(sa.text) && FAr.decisionCard(ia).state === 'revoked', 'r6: the run card\'s «Always» record carries its grant (alwaysFor, until); the entry switched OFF in the Vault window ⇒ the card says «always allowed · revoked HH:MM» (was: «always allowed by you» for ever)', { fact: ia && ia.resolvedFact, stamp: sa && sa.text });
+    const a8 = await world(); openRow(a8);
+    const c8 = await runAnswered(a8, CA, { answer: 'always', reauthed: true, ttl: '8h' });
+    await a8.vault.lock('agent');
+    const i8 = a8.userTodos.get(c8.card && c8.card.id), s8 = i8 && FAr.decidedStamp(i8);
+    ok(c8.r.by === 'always' && i8 && i8.resolvedFact?.alwaysFor === '8h' && i8.resolvedFact?.endedBy === 'lock' && s8 && /^always allowed · ended /.test(s8.text) && FAr.decisionCard(i8).state === 'ended', 'r6: an 8-hour «Always» then a LOCK ⇒ its card «always allowed · ended HH:MM» at once', { fact: i8 && i8.resolvedFact, stamp: s8 && s8.text });
+  }
   // the bounds, the folder's characters, the program on the card
   const big = await aw.door.run({ caller: aw.caller, args: ['--env', 'P=' + 'a.'.repeat(40000), '--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', 'https://api.example.com'], cwd: aw.work });
   const bigCwd = await aw.door.run({ caller: aw.caller, args: ENV('env'), cwd: '/tmp/' + 'a/'.repeat(3000) });
@@ -657,17 +667,18 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   const nr = w.door.answerRequest(q1.askId, { answer: 'once' });
   ok(nr.code === 'reveal_needs_password' && reqsOf().length === 1 && !w.door._grants.size, 'Allow WITHOUT this page\'s 验证是你 ⇒ reveal_needs_password, the card stays up (a grant opens the entry as the switch does — the review: a click alone is forgeable on a hub with no sign-in)', nr);
   const g1 = w.door.answerRequest(q1.askId, { answer: 'once', reauthed: true, person: true });
-  ok(g1.ok && g1.outcome === 'granted-once' && !reqsOf().length && w.door._grants.size === 1 && !fs.existsSync(path.join(w.dataDir, DOOR.STORE_FILE)), 'Allow once ⇒ ONE grant row, in memory only (the store file holds no grant)', g1);
+  ok(g1.ok && g1.outcome === 'granted-once' && g1.grantedFor === 'once' && !reqsOf().length && w.door._grants.size === 1 && !fs.existsSync(path.join(w.dataDir, DOOR.STORE_FILE)), 'Allow once ⇒ ONE grant row, in memory only (the store file holds no grant)', g1);
   // lane wake-approve-card r4: vault-grant-ask is a DECISION ROW — its record says which of ITS verbs, and the person's stamp
   const FA = R('src/foryou-actions.js');
   const i1 = w.userTodos.get(it.id), st1 = FA.decidedStamp ? FA.decidedStamp(i1) : null;
-  ok(i1 && i1.status === 'done' && i1.resolvedBy === 'granted-once' && i1.resolvedFact && i1.resolvedFact.decidedBy === 'person' && st1 && /^allowed once by you · (\d+\/\d+ )?\d\d:\d\d$/.test(st1.text), 'r4: the record says the verb — «allowed once by you · HH:MM» (resolvedBy granted-once, the person verdict\'s mark)', { by: i1 && i1.resolvedBy, fact: i1 && i1.resolvedFact, stamp: st1 && st1.text });
+  ok(i1 && i1.status === 'done' && i1.resolvedBy === 'granted' && i1.resolvedFact && i1.resolvedFact?.decidedBy === 'person' && i1.resolvedFact?.grantedFor === 'once' && i1.resolvedFact?.until > Date.now() && st1 && /^allowed once by you · (\d+\/\d+ )?\d\d:\d\d$/.test(st1.text), 'r4: the record says the verb — «allowed once by you · HH:MM» (r6: resolvedBy `granted` — the value every reader names — + its facts {grantedFor: once, until}, the person verdict\'s mark)', { by: i1 && i1.resolvedBy, fact: i1 && i1.resolvedFact, stamp: st1 && st1.text });
   ok(w.door.answerRequest(q1.askId, { answer: 'once', reauthed: true }).code === 'ask_settled', 'a second answer ⇒ ask_settled');
   const ro = await w.door.run({ caller: other, args: ENV('env'), cwd: w.work });
   ok(ro.code === 'entry_not_runnable', 'the grant is THAT conversation\'s — another conversation\'s run of the same entry ⇒ entry_not_runnable');
   const run1 = await runAnswered(w, ENV('env'), { caller });
   ok(run1.card && run1.r.ok && run1.r.stdout.includes('[vault:mounts/m1/secretKey]') && !leaks(run1.r.stdout + run1.r.stderr, VALUE).length, 'THE GRANT IS HONOURED BY THE RUN VERDICT: the closed entry runs for this conversation — its new shape still draws the card first (the owner sees the command), the output scrubbed', run1.r && run1.r.code);
   ok(!w.door._grants.size, 'Allow once is SPENT by that run (before it started)');
+  { const i1b = w.userTodos.get(it.id), sb = FA.decidedStamp(i1b); ok(i1b.resolvedFact?.endedBy === 'used' && sb && /^allowed once · ended (\d+\/\d+ )?\d\d:\d\d$/.test(sb.text) && FA.decisionCard(i1b).state === 'ended', 'r6: A CARD FOLLOWS THE GRANT\'S LIFE — the once-grant that ran ends on its record: «allowed once · ended HH:MM» (the card\'s state ended)', { fact: i1b.resolvedFact, stamp: sb && sb.text }); }
   const run2 = await w.door.run({ caller, args: ENV('env'), cwd: w.work });
   ok(run2.code === 'entry_not_runnable', 'the same (now seen) shape again ⇒ entry_not_runnable — once is once');
   const uses = w.door.usesFor(caller).uses;
@@ -690,12 +701,15 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   const i3id = reqsOf()[0] && reqsOf()[0].id;
   const g3 = w.door.answerRequest(q3.askId, { answer: '8h', reauthed: true, person: true });
   const i3 = w.userTodos.get(i3id), st3 = FA.decidedStamp ? FA.decidedStamp(i3) : null;
-  ok(i3 && i3.resolvedBy === 'granted-8h' && st3 && /^allowed by you for 8 h · (\d+\/\d+ )?\d\d:\d\d$/.test(st3.text) && FA.decisionCard(i3).state === 'approved', 'r4: For 8 hours ⇒ «allowed by you for 8 h · HH:MM» (the card\'s state approved) — r5: the record `granted-8h` carries the duration (`granted` was both verbs\' before .360)', { by: i3 && i3.resolvedBy, stamp: st3 && st3.text });
+  ok(i3 && i3.resolvedBy === 'granted' && i3.resolvedFact?.grantedFor === '8h' && st3 && /^allowed by you for 8 h · (\d+\/\d+ )?\d\d:\d\d$/.test(st3.text) && FA.decisionCard(i3).state === 'approved', 'r4: For 8 hours ⇒ «allowed by you for 8 h · HH:MM» (the card\'s state approved) — r6: the record `granted` + {grantedFor: 8h, until} carries the duration', { by: i3 && i3.resolvedBy, stamp: st3 && st3.text });
   const ra = await w.door.run({ caller, args: ENV('env'), cwd: w.work }), rb = await w.door.run({ caller, args: ENV('env'), cwd: w.work });
-  ok(g3.outcome === 'granted-8h' && ra.ok && rb.ok && w.door._grants.size === 1 && [...w.door._grants.values()][0].until - Date.now() <= DOOR.GRANT_MS, 'For 8 hours ⇒ every run of the conversation (the seen shape without a card on a local instance), the grant stays — ≤ 8 hours', [ra.code, rb.code]);
+  ok(g3.outcome === 'granted' && g3.grantedFor === '8h' && ra.ok && rb.ok && w.door._grants.size === 1 && [...w.door._grants.values()][0].until - Date.now() <= DOOR.GRANT_MS, 'For 8 hours ⇒ every run of the conversation (the seen shape without a card on a local instance), the grant stays — ≤ 8 hours', [ra.code, rb.code]);
   ok(w.door.request({ caller, entry: M1, purpose: 'x' }).already === 'granted' && w.door.runnableFor(caller).entries.some((e) => e.ref === M1 && e.by === 'grant') && !w.door.runnableFor(other).entries.length, 'a request for an entry already granted answers so (nothing filed); `list` names it to THAT conversation alone');
+  { const i3n = w.userTodos.get(i3id), at9 = (i3n.resolvedFact?.until || 0) + 3600e3, s9 = FA.decidedStamp(i3n, { now: at9 });
+    ok(FA.decisionCard(i3n, { now: at9 }).state === 'ended' && s9 && /^allowed for 8 hours · ended (\d+\/\d+ )?\d\d:\d\d$/.test(s9.text) && FA.decisionCard(i3n, { now: (i3n.resolvedFact?.until || 0) + 3 * 86400e3 }).state === 'ended', 'r6: the SAME record read at +9 h (and +3 d) ⇒ «allowed for 8 hours · ended HH:MM», the card\'s state ended (was: «allowed by you for 8 h · …», approved, for ever)', { stamp: s9 && s9.text }); }
   openRow(w); w.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });
   ok(!w.door._grants.size, 'switching the entry OFF ends its grants too (OFF = closed for every conversation)');
+  { const i3r = w.userTodos.get(i3id), sr = FA.decidedStamp(i3r); ok(i3r.resolvedFact?.endedBy === 'revoked' && sr && /^allowed · revoked (\d+\/\d+ )?\d\d:\d\d$/.test(sr.text) && FA.decisionCard(i3r).state === 'revoked', 'r6: the entry\'s switch OFF in the Vault window REVOKES the grant ⇒ its record says «allowed · revoked HH:MM» (the card\'s state revoked)', { fact: i3r.resolvedFact, stamp: sr && sr.text }); }
   // the card closed elsewhere / a changed item / a gone conversation — no grant
   const q4 = w.door.request({ caller, entry: M1, purpose: PURPOSE });
   // r4 (主开发): a decision row — ✓ Mark done / ✕ Dismiss (a stale page's) / «Mark all seen» are REFUSED by name; the request stays
@@ -718,14 +732,45 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   w.door._reqQuiet.clear();
   const q7 = w.door.request({ caller, entry: M1, purpose: PURPOSE });
   const q8 = w.door.request({ caller, entry: 'vault://app-secrets/app1/item.0.1', purpose: 'log in to the app' });
+  const i8id = (reqsOf().find((x) => x.action.askId === q8.askId) || {}).id;
   w.door.answerRequest(q8.askId, { answer: '8h', reauthed: true });
   const i7 = reqsOf()[0];
   w.vault.lock('agent');
   const after = w.userTodos.get(i7.id);
   ok(q7.ok && after && after.status === 'done' && after.resolvedBy === 'vault_locked' && !w.door._requests.size && !w.door._grants.size, 'A LOCK withdraws every open request (its item resolved by vault_locked) and ends every grant', after && [after.status, after.resolvedBy]);
+  { const i8 = w.userTodos.get(i8id), s8 = i8 && FA.decidedStamp(i8); ok(i8 && i8.resolvedFact?.endedBy === 'lock' && s8 && /^allowed for 8 hours · ended (\d+\/\d+ )?\d\d:\d\d$/.test(s8.text) && FA.decisionCard(i8).state === 'ended', 'r6: …and each grant\'s RECORD says so: the 8-hour grant locked ⇒ «allowed for 8 hours · ended HH:MM» at once (was: «allowed for 8 h» after the lock)', { fact: i8 && i8.resolvedFact, stamp: s8 && s8.text }); }
   await w.vault.unlock(PW);
   const r9 = await w.door.run({ caller, args: ['--env', 'T=vault://app-secrets/app1/item.0.1', '--', NODE, PRINTER, 'env'], cwd: w.work });
   ok(r9.code === 'entry_not_runnable', 'after the unlock the 8-hour grant is gone — the entry is closed again');
+  { // r6: A RESTART ENDS EVERY GRANT (the grant rows are memory; the vault locks at each start) — a record still reading live says so
+    const qR = w.door.request({ caller, entry: M1, purpose: PURPOSE });
+    const iRid = (reqsOf().find((x) => x.action.askId === qR.askId) || {}).id;
+    w.door.answerRequest(qR.askId, { answer: '8h', reauthed: true, person: true });
+    const live0 = FA.decisionCard(w.userTodos.get(iRid)).state;
+    w.mk();   // a new door over the same For-you store — the hub's next start
+    const iR = w.userTodos.get(iRid), sR = FA.decidedStamp(iR);
+    ok(live0 === 'approved' && iR.resolvedFact?.endedBy === 'restart' && sR && /^allowed for 8 hours · ended /.test(sR.text), 'r6: a hub restart inside the 8 hours ⇒ the next start writes the grant\'s end on its record («allowed for 8 hours · ended HH:MM» — the grant rows were memory)', { live0, fact: iR.resolvedFact, stamp: sR && sR.text });
+  }
+  { // r6 (主开发: «an answer never carries a value an old reader cannot name»): what THIS door answers and records, read by the OLD
+    // clients — the production .357 client (fbaf6988 src/lib/user-todos-actions.js L393, its tray: no word for any grant — the raw
+    // value) and 4b8896e7's (its toast L409 and src/lib/user-todos-row.js L94–95), copied here as fixtures (CI has no history)
+    const OLD_TOAST = { '.357 (fbaf6988)': (r, t) => (r.outcome === 'granted' ? t('Granted for 8 hours — a lock ends it') : r.outcome === 'granted-once' ? t('Granted for its next run') : t('denied')),
+      '4b8896e7': (r, t) => (r.outcome === 'granted' ? t('Granted for 8 hours — a lock ends it') : r.outcome === 'granted-once' ? t('Granted for its next run') : t('denied')) };
+    const OLD_TRAY = { '.357 (fbaf6988)': (by) => by, '4b8896e7': (by) => (by === 'granted' ? 'allowed for 8 hours' : by === 'granted-once' ? 'allowed once' : by) };
+    const wo = await world();   // a fresh hub (the legs above left grants and quiet pairs behind)
+    const reqsO = () => (wo.userTodos.snapshot().open || []).filter((i) => i.action && i.action.type === 'vault-grant-ask');
+    const cO = { ...wo.caller, scope: 'webui-1' }, cO2 = { ...cO, conversationId: 'conv-9', sessionKey: 'claude:conv-9', name: 'Lane Nine', scope: 'webui-9' };
+    const qO = wo.door.request({ caller: cO, entry: M1, purpose: PURPOSE }), iOid = (reqsO().find((x) => x.action.askId === qO.askId) || {}).id;
+    const aO = wo.door.answerRequest(qO.askId, { answer: 'once', reauthed: true, person: true });
+    const q8b = wo.door.request({ caller: cO2, entry: M1, purpose: PURPOSE }), i8bid = (reqsO().find((x) => x.action.askId === q8b.askId) || {}).id;
+    const a8b = wo.door.answerRequest(q8b.askId, { answer: '8h', reauthed: true, person: true });
+    const tt = (x) => x;
+    const byOf = (id) => (wo.userTodos.get(id) || {}).resolvedBy;
+    const seen = Object.fromEntries(Object.keys(OLD_TOAST).map((k) => [k, { toastOnce: OLD_TOAST[k](aO, tt), toast8h: OLD_TOAST[k](a8b, tt), trayOnce: OLD_TRAY[k](byOf(iOid)), tray8h: OLD_TRAY[k](byOf(i8bid)) }]));
+    const old4 = seen['4b8896e7'], old357 = seen['.357 (fbaf6988)'];
+    ok(aO.ok && a8b.ok && Object.values(seen).every((v) => v.toastOnce !== 'denied' && v.toast8h !== 'denied') && old357.toastOnce === 'Granted for its next run' && old357.toast8h === 'Granted for 8 hours — a lock ends it' && /allowed/.test(old4.trayOnce) && /allowed/.test(old4.tray8h) && old357.tray8h === 'granted', `r6: the OLD clients read this door's answers and records — no «denied» for a grant (was: «denied» for a successful For 8 hours), the old tray «allowed…» (4b8896e7) / the raw \`granted\` the .357 tray always showed (was: raw \`granted-8h\`) — the new reader says the duration from \`grantedFor\``, seen);
+    ok(aO.grantedFor === 'once' && a8b.grantedFor === '8h' && ((wo.userTodos.get(i8bid) || {}).resolvedFact || {}).grantedFor === '8h', 'r6: the duration is ADDITIVE — the answer\'s and the record\'s `grantedFor` (once / 8h)', { aO, a8b });
+  }
   const lockedReq = (w.vault.lock('agent'), w.door.request({ caller, entry: M1, purpose: PURPOSE }));
   ok(lockedReq.code === 'vault_locked' && /already been told/.test(lockedReq.words) && w.vault.blockedSummary().actors.some((a) => a.verbs.includes('vibespace-vault request')), 'a LOCKED vault refuses a request first (the told words) and notes who it stopped', lockedReq);
   await w.vault.unlock(PW);

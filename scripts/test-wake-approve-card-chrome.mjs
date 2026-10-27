@@ -706,8 +706,9 @@ try {
     await A.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${ga && ga.id}"]'); const h = c && [...document.querySelectorAll('.chat-run-header')].filter((x) => x.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING).pop(); if (h && !c.offsetParent) h.click(); return !!h; })()`); await sleep(600);
     await A.evalJs(`document.querySelector('.cn-card[data-item="${ga && ga.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(400);
     await A.shot('r4-chat-vault-grant-allowed-1280.png');
-    // r5: For 8 hours records `granted-8h` (the duration on the record — a pre-.360 `granted` reads «allowed»); the toast reads that outcome
-    check(`…For 8 hours on the card (the second password first): the record «${gCard && gCard.line}» (${gDone && gDone.resolvedBy}, the person verdict's mark), the toast «${toast8}»`, !!p8 && p8.pressed && !!gDone && gDone.resolvedBy === 'granted-8h' && /Granted for 8 hours/.test(toast8 || '') && !!gDone.resolvedFact && gDone.resolvedFact.decidedBy === 'person' && !!gCard && gCard.line.includes(stampG) && gCard.closers === 0, { by: gDone && gDone.resolvedBy, fact: gDone && gDone.resolvedFact, line: gCard && gCard.line, toast: toast8 });
+    // r6: For 8 hours records `granted` (the value every reader names) + {grantedFor: '8h', until} (a pre-.360 `granted` with no
+    // duration reads «allowed»); the toast reads the answer's `grantedFor`
+    check(`…For 8 hours on the card (the second password first): the record «${gCard && gCard.line}» (${gDone && gDone.resolvedBy} + ${gDone && gDone.resolvedFact && gDone.resolvedFact.grantedFor}, the person verdict's mark), the toast «${toast8}»`, !!p8 && p8.pressed && !!gDone && gDone.resolvedBy === 'granted' && /Granted for 8 hours/.test(toast8 || '') && !!gDone.resolvedFact && gDone.resolvedFact.decidedBy === 'person' && gDone.resolvedFact.grantedFor === '8h' && Number(gDone.resolvedFact.until) > 0 && !!gCard && gCard.line.includes(stampG) && gCard.closers === 0, { by: gDone && gDone.resolvedBy, fact: gDone && gDone.resolvedFact, line: gCard && gCard.line, toast: toast8 });
   }
   await lap('⑦d done');
   check('no page threw', pageErrors.length === 0, pageErrors.slice(0, 3));

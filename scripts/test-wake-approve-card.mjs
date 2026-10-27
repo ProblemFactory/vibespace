@@ -80,6 +80,7 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import Module, { createRequire } from 'node:module';
+import * as ACORN from 'acorn';   // r6: the writer census reads the route files over their AST
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
@@ -163,8 +164,8 @@ console.log('② THE KINDS TABLE — which owner decisions are a card in the cha
   }
   const spendNotice = { id: 'ut-s', sessionKey: 'accounts', text: 'Auto-resume skipped: the daily ceiling is reached', status: 'open', origin: 'spend', kind: 'notice' };
   ok(FA.needOf(spendNotice) === null && FA.surfaceOf(spendNotice).at === 'notice', 'the spend guard\'s ceilings (src/server/spend-guard.js — kind \'notice\'): no card — nothing to decide (the brief\'s pointer: the guard files NO wake request; the wake request is channels-access.js fileWatchRequest\'s)', FA.surfaceOf(spendNotice));
-  ok(JSON.stringify([...FA.PERSON_DECIDES].sort()) === JSON.stringify(['channel-watch-request', 'hub-act-ask', 'open-channel', 'secret-request', 'vault-grant-ask', 'vault-run-ask']), 'PERSON_DECIDES = the reach-requests route\'s two rows + (r3) the vault\'s run ask and paste request and the hub-act ask + (r4) the vault\'s grant request — each behind a person\'s door (⑤)', FA.PERSON_DECIDES);
-  ok(JSON.stringify([...FA.DECISION_ROWS].sort()) === JSON.stringify(['channel-watch-request', 'hub-act-ask', 'secret-request', 'vault-grant-ask', 'vault-run-ask']), 'DECISION_ROWS (their own verbs, no other closer) = the person rows that DRAW their verbs — the wake request (r2), the vault\'s run ask and paste request and the hub-act ask (r3), the vault\'s grant request (r4: Allow once / For 8 hours / Deny); open-channel is a POINTER (⑩: it hides)', FA.DECISION_ROWS);
+  ok(JSON.stringify([...FA.PERSON_DECIDES].sort()) === JSON.stringify(['channel-held-digest', 'channel-watch-request', 'hub-act-ask', 'open-channel', 'secret-request', 'vault-grant-ask', 'vault-run-ask']), 'PERSON_DECIDES = the reach-requests route\'s rows (+ r6: a held digest\'s Deliver / Discard) + (r3) the vault\'s run ask and paste request and the hub-act ask + (r4) the vault\'s grant request — each behind a person\'s door (⑤)', FA.PERSON_DECIDES);
+  ok(JSON.stringify([...FA.DECISION_ROWS].sort()) === JSON.stringify(['channel-held-digest', 'channel-watch-request', 'hub-act-ask', 'secret-request', 'vault-grant-ask', 'vault-run-ask']), 'DECISION_ROWS (their own verbs, no other closer) = the person rows that DRAW their verbs — the wake request (r2), the vault\'s run ask and paste request and the hub-act ask (r3), the vault\'s grant request (r4: Allow once / For 8 hours / Deny), a held digest (r6: Deliver / Discard); open-channel is a POINTER (⑩: it hides)', FA.DECISION_ROWS);
 }
 
 // ── ③ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -283,6 +284,8 @@ const REACH = { server: ['src/routes/channels.js', "router.post('/api/channels/r
 const DOORS = {
   'channel-watch-request': { client: ['src/lib/user-todos-actions.js', '/api/channels/reach-requests/'], ...REACH },
   'open-channel': { client: ['src/lib/channel-reach-editor.js', 'reach-requests/'], ...REACH },
+  // r6: a held digest (hits a boot found older than their window × 24) — Deliver / Discard on the same decide route
+  'channel-held-digest': { client: ['src/lib/user-todos-actions.js', '/api/channels/reach-requests/'], ...REACH },
   // r3: the vault's two asks (the vault's own `person` wrapper = THE person verdict) and the hub-act ask
   'vault-run-ask': { client: ['src/lib/user-todos-actions.js', '/api/vault/run/asks/'], server: ['src/routes/vault.js', "app.post('/api/vault/run/asks/:askId'"], verdict: 'person((req)', engine: /run\.answer\(/, mark: 'person: true' },
   'secret-request': { client: ['src/lib/vault-paste-box.js', '/api/vault/secret-requests/'], server: ['src/routes/vault.js', "app.post('/api/vault/secret-requests/:id/answer'"], verdict: 'person((req)', engine: /paste\.answer\(/, mark: 'person: true' },
@@ -516,6 +519,7 @@ function stubWith(mod, held) {
   const writes = [], asked = [];
   const wrote = (what) => async (...a) => { writes.push({ what, a }); return { ok: true }; };
   mod.setup({ getEngine: () => ({
+    adapterRecords: () => ({ adapters: [{ id: 'fake-poll' }] }),   // r6: the gate asks only an engine that OWNS the adapter (the one wiring's)
     decideRequest: async () => ({ ok: true }),
     wakeHeldAt: (adapterId, grain) => { const k = `${adapterId}|${grain && grain.kind}|${(grain && (grain.id || grain.convId)) || ''}`; asked.push(k); return { held: held.has(k), rows: held.has(k) ? 1 : 0 }; },
     setWatchers: wrote('setWatchers'), setGrain: wrote('setGrain'), setAssignment: wrote('setAssignment'), setScopeAssignment: wrote('setScopeAssignment'),
@@ -575,7 +579,7 @@ const GATE_LINE = /^    if \(wakeRefused\(req, res, [^\n]*\)\) return;[^\n]*\n/g
  *  read has no gate; wakeRefused asks nothing of the grain. */
 const R3_GATE_FN = 'function wakeRefused(req, res, rows) {\n  if (!wakeRowsOf(rows).length) return false;\n  const who = personVerdict(req);\n  if (who.ok) return false;\n  bad(res, 403, WAKE_REFUSED[who.code] || WAKE_REFUSED.cross_site, { code: who.code });\n  return true;\n}\n';
 function r3Form(src) {
-  const i = src.indexOf('function wakeRefused(req, res, at, rows = [], eng = engine) {'), j = i < 0 ? -1 : src.indexOf('\n}\n', i) + 3;   // r5: the gate takes the caller's engine
+  const i = src.indexOf('function wakeRefused(req, res, at, rows = []) {'), j = i < 0 ? -1 : src.indexOf('\n}\n', i) + 3;   // r6: the gate reads the one wiring's engine (no argument)
   return (i < 0 ? src : src.slice(0, i) + R3_GATE_FN + src.slice(j))
     .replace(/if \(wakeRefused\(req, res, (?:accountGrain|ruleGrain|convGrain)\(req\), ([^\n]*)\)\) return;/g, 'if (wakeRefused(req, res, $1)) return;')
     .replace(/^    if \(wakeRefused\(req, res, (?:accountGrain|ruleGrain|convGrain)\(req\)\)\) return;[^\n]*\n/gm, '');
@@ -641,21 +645,12 @@ const ENGINE_ROADS = {   // the enclosing function → why it may call a grain w
 /** writers a route may call without the gate — each answers to its own road */
 const ROUTE_EXEMPT = { decideRequest: 'the decide route — its own person verdict, pinned in ⑤', agentWatch: 'the agent\'s own watch (next-turn; a wake is an ASK the owner approves)', agentUnwatch: 'the agent\'s own row removed' };
 /** routes whose AUTHORITY is another door: that door must carry the gate */
-const AUTHORITY_DOORS = { 'POST /api/channels/webhook/:slug/pair': { door: 'POST /api/channels/webhook/paths/:slug/pair-code', why: 'the pairing\'s completion (cookie-free) writes the caller the owner\'s code was minted for — the code is its authority' } };
+const AUTHORITY_DOORS = { 'POST /api/channels/webhook/:slug/pair': { door: 'POST /api/channels/webhook/paths/:slug/pair-code', alsoAsks: 'heldAtCompletion', why: 'the pairing\'s completion (cookie-free) writes the caller the owner\'s code was minted for — the code is its authority; r6: it asks the path AS IT IS at completion too (a code a person did not mint is refused on a held path)' } };
 /** names a writer shares with another engine (an exit's setAccess, an automation key's setReach): counted on a channels engine only */
-const AMBIGUOUS = new Set(['setAccess', 'setReach', 'decideRequest']);
-const CHANNEL_RECV = String.raw`(?:\bengine\(\)|\beng|\be|channelsEngine\(\)|getChannels\(\)|\bchannels|\bchan)`;
 /** the engine's functions (r4: `function` heads — an arrow const inside one stays part of its body) */
 function fnsOf(text) {
   const heads = [...text.matchAll(/(?:async )?function (\w+)\(/g)];
   return heads.map((h, k) => ({ name: h[1], at: h.index, body: text.slice(h.index + h[0].length, k + 1 < heads.length ? heads[k + 1].index : text.length) }));
-}
-/** a routes file's TOP-LEVEL functions (a `function` declaration or a column-0 arrow const), each ending where the next
- *  top-level declaration or route begins */
-function topFnsOf(text) {
-  const heads = [...text.matchAll(/^(?:async )?function (\w+)\(|^(?:const|let) (\w+) = (?:async )?(?:\([^)\n]*\)|\w+) =>/gm)];
-  const stops = [...text.matchAll(/^(?:(?:async )?function \w+\(|(?:const|let|var) \w+ =|(?:router|app)\.\w+\(|module\.exports)/gm)].map((m) => m.index);
-  return heads.map((h) => { const end = stops.find((x) => x > h.index); return { name: h[1] || h[2], at: h.index, body: text.slice(h.index + h[0].length, end === undefined ? text.length : end) }; });
 }
 function grainWriters(E) {
   const fns = fnsOf(E);
@@ -672,56 +667,218 @@ function wakeReadFields(files) {
   return [...new Set([...fieldsIn(cf && cf[1]), ...fieldsIn(pb && pb[1])])].sort();
 }
 const grainOfPath = (p) => (/^\/api\/channels\/webhook\//.test(p) ? 'pathGrain' : /\/patterns(\/|'|$)/.test(p) ? 'ruleGrain' : /^\/api\/channels\/adapters\/:id\//.test(p) ? 'accountGrain' : /^\/api\/channels\/:adapterId\/:convId\//.test(p) ? 'convGrain' : null);
-const ROUTE_HEAD = /^(?:router|app)\.(get|put|post|patch|delete)\('([^']+)'/gm;
+/** THE ROUTE SIDE OVER THE AST (lane wake-approve-card r6 — 主开发: the derivation missed an inline `en.participants =` inside a
+ *  route's `index.update`, `entry.participants =`, `Object.assign(en, {participants})`, a two-hop helper — the helper's file
+ *  joined, its calling route never named —, `ctx.getEngine().setWatchers(`, `const ce = engine(); ce.setWatchers(`): every
+ *  candidate file is PARSED (acorn) and judged over identifiers, never one spelling. A WRITE is ① a call of an engine grain
+ *  writer, whatever the receiver (a writer name another file also defines — `setAccess` of the exits, `setReach` of the
+ *  automation keys — counts only on a receiver that resolves, through its local aliases, to a channels engine getter); ② inside
+ *  a function handed to `<anything>.index.update(…)`, an assignment to a field the engine reads for wakes on ANY object, or an
+ *  `Object.assign(x, {<field>…})`. A FUNCTION is a writer when it writes or calls a writer — its own file's, or another file's
+ *  through `require` (a destructured binding or `M.fn`) — to a fixpoint; a ROUTE (`router|app.<verb>('/…', …)`) reaching one
+ *  asks the gate FIRST, at its handler's own level, for the grain its path writes (directly or through a local wrapper of
+ *  `wakeRefused`); a writer reached from no route is named. */
+const PARSED = new Map(), SCANNED = new Map(), WRITES_MEMO = new WeakMap();   // memo by the file's TEXT (a RED copy re-reads one or two files, never the tree)
+const PARSE = (src) => { if (PARSED.has(src)) return PARSED.get(src); let ast = null; for (const sourceType of ['module', 'script']) { try { ast = ACORN.parse(src, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, allowImportExportEverywhere: true, allowAwaitOutsideFunction: true }); break; } catch { /* the other */ } } PARSED.set(src, ast); return ast; };
+/** one pass over a file's text: the names it DEFINES (a function, a method, a property / binding holding one) and the names it
+ *  CALLS (`name(`), and whether it updates an index — the census's candidate filter and its shared-name derivation */
+function scanOf(src) {
+  if (SCANNED.has(src)) return SCANNED.get(src);
+  const defs = new Set(), calls = new Set();
+  for (const m of src.matchAll(/(?:function\s+(\w+)\s*\(|\b(\w+)\s*[:=]\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|\w+\s*=>)|^\s*(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{)/gm)) defs.add(m[1] || m[2] || m[3]);
+  for (const m of src.matchAll(/\b(\w+)\(/g)) calls.add(m[1]);
+  const v = { defs, calls, updates: src.includes('index.update('), requires: [...src.matchAll(/\brequire\(\s*['"](\.[^'"]+)['"]\s*\)/g)].map((m) => m[1]) };
+  SCANNED.set(src, v);
+  return v;
+}
+function walkAst(node, visit, parents = []) {
+  if (!node || typeof node.type !== 'string') return;
+  if (visit(node, parents) === false) return;
+  const next = parents.concat([node]);
+  for (const k in node) {
+    if (k === 'type' || k === 'start' || k === 'end') continue;
+    const v = node[k];
+    if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === 'string') walkAst(c, visit, next); } else if (v && typeof v.type === 'string') walkAst(v, visit, next);
+  }
+}
+const propName = (m) => (m && m.type === 'MemberExpression' ? (!m.computed && m.property.type === 'Identifier' ? m.property.name : m.property.type === 'Literal' ? String(m.property.value) : null) : null);
+const isFn = (n) => n && /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression)$/.test(n.type);
+/** the channels engine's getters (a receiver resolving to one of these is a channels engine — for the shared writer names only) */
+const ENGINE_GETTER = /^(engine|getEngine|channelsEngine|getChannels|channels|chan|eng|e)$/;
+/** the receiver's ROOT: the getter CALL it comes from (`engine()`, `ctx.getEngine()`, through a local alias `const ce = engine()`)
+ *  → its name; a bare identifier no alias resolves (a parameter: another engine handed in) → null */
+function resolveRoot(node, aliases, depth = 0) {
+  if (!node || depth > 4) return null;
+  if (node.type === 'CallExpression') return node.callee.type === 'Identifier' ? node.callee.name : propName(node.callee);
+  if (node.type === 'AwaitExpression') return resolveRoot(node.argument, aliases, depth + 1);
+  if (node.type === 'Identifier') return aliases.has(node.name) ? resolveRoot(aliases.get(node.name), aliases, depth + 1) : null;
+  return null;
+}
+/** a route's registration call (`router|app.<verb>('/…', …)`) */
+const isRouteCall = (n) => n && n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && /^(get|put|post|patch|delete|all)$/.test(propName(n.callee) || '') && n.callee.object.type === 'Identifier' && /^(router|app)$/.test(n.callee.object.name) && n.arguments[0] && n.arguments[0].type === 'Literal' && typeof n.arguments[0].value === 'string' && n.arguments[0].value.startsWith('/');
+/** inside one function: its own code — never a route it registers, nor a function it declares (each judged on its own) */
+const ownCode = (root) => (n) => (n !== root && (isRouteCall(n) || n.type === 'FunctionDeclaration' || (n.type === 'VariableDeclarator' && isFn(n.init)))) ? false : true;
 function writerCensus(files) {
-  const out = [], routes = [], derivedFiles = [];
+  const out = [], routes = [], derived = new Set();
   const E = files['src/server/channels-access.js'] || '';
   const { W, fns } = grainWriters(E);
   const fields = wakeReadFields(files);
-  const fieldWrite = new RegExp(`\\ben\\.(${fields.join('|')})\\s*=(?!=)`);
-  const wNames = [...W];
-  const callW = new RegExp(`${CHANNEL_RECV}\\.(${wNames.join('|')})\\(`);
-  for (const [rel, s] of Object.entries(files)) {
-    if (/^src\/server\/channels-[a-z]+\.js$/.test(rel)) continue;
-    // ② this file's own writers of a wake field (inside an index update), and every function of it calling one
-    const local = topFnsOf(s);
-    const L = new Set(local.filter((f) => /\bindex\.update\(/.test(f.body) && fieldWrite.test(f.body)).map((f) => f.name));
-    for (let grew = true; grew;) { grew = false; for (const f of local) if (!L.has(f.name) && [...L].some((w) => new RegExp(`(?<![\\w.])${w}\\(`).test(f.body))) { L.add(f.name); grew = true; } }
-    const callL = L.size ? new RegExp(`(?<![\\w.])(${[...L].join('|')})\\(`) : null;
-    const writes = (body) => { const m = body.match(callW); if (m && !(AMBIGUOUS.has(m[1]) && !new RegExp(`${CHANNEL_RECV}\\.${m[1]}\\(`).test(body))) return { w: m[1], at: m.index }; const l = callL && body.match(callL); return l ? { w: l[1], at: l.index, local: true } : null; };
-    if (!callW.test(s) && !L.size) continue;
-    derivedFiles.push(rel);
-    // the gate: `wakeRefused(req, res, <grain>(req)…)` or a local wrapper of it (its grain read off its definition)
-    const wrappers = Object.fromEntries([...s.matchAll(/const (\w+) = \(req, res[^)]*\) => wakeRefused\(req, res,[^\n]*?(\w+Grain)\(req/g)].map((m) => [m[1], m[2]]));
-    const direct = /^(?: {2}| {4})if \(wakeRefused\(req, res, (\w+)\(req\)[,)][^\n]*\n/m;
-    const viaWrapper = Object.keys(wrappers).length ? new RegExp(`^(?: {2}| {4})if \\((${Object.keys(wrappers).join('|')})\\(req, res[^\\n]*\\)\\) return;`, 'm') : null;
-    const heads = [...s.matchAll(ROUTE_HEAD)];
-    const bodies = heads.map((h, k) => { const next = k + 1 < heads.length ? heads[k + 1].index : s.length; const decl = s.slice(h.index + 1).search(/\n(?:function |async function |const |let |\/\*\*)/); return { door: `${h[1].toUpperCase()} ${h[2]}`, path: h[2], at: h.index, body: s.slice(h.index, decl < 0 ? next : Math.min(next, h.index + 1 + decl)) }; });
-    const gateOf = (body) => { const d = body.match(direct); if (d) return { at: d.index, grain: d[1] }; const w = viaWrapper && body.match(viaWrapper); return w ? { at: w.index, grain: wrappers[w[1]] } : null; };
-    for (const b of bodies) {
-      const w = writes(b.body);
-      if (!w) continue;
-      if (ROUTE_EXEMPT[w.w]) continue;
-      const auth = AUTHORITY_DOORS[b.door];
-      if (auth) { const d = bodies.find((x) => x.door === auth.door); if (!d || !gateOf(d.body)) out.push(`${rel} ${b.door}: its authority is ${auth.door}, which does not ask the gate`); continue; }
-      routes.push(b.door);
-      const want = grainOfPath(b.path), gate = gateOf(b.body);
-      if (!gate) { out.push(`${b.door}: calls ${w.w} without asking the person verdict for the grain it writes (no gate at the handler's own level, or one keyed on the body only)`); continue; }
-      if (gate.at > w.at) out.push(`${b.door}: asks the gate AFTER it calls ${w.w}`);
-      if (gate.grain !== want) out.push(`${b.door}: its gate names ${gate.grain} — the path writes the ${want}`);
+  const FIELDS = new Set(fields);
+  const ENGINE_FAMILY = (rel) => /^src\/server\/channels-[a-z]+\.js$/.test(rel);
+  const cand = Object.keys(files).filter((rel) => /^src\/.*\.js$/.test(rel) && !ENGINE_FAMILY(rel));
+  // a writer name another file ALSO defines (a function, a method, a property) is SHARED — derived, never a hand list
+  const SHARED = new Set([...W].filter((n) => cand.some((rel) => scanOf(files[rel]).defs.has(n))));
+  const asts = new Map(), info = new Map();
+  const astOf = (rel) => { if (!asts.has(rel)) asts.set(rel, PARSE(files[rel])); return asts.get(rel); };
+  const resolveReq = (rel, spec) => { if (typeof spec !== 'string' || !spec.startsWith('.')) return null; const p = path.posix.normalize(path.posix.join(path.posix.dirname(rel), spec)); return files[p] !== undefined ? p : files[p + '.js'] !== undefined ? p + '.js' : null; };
+  /** one file's facts: its functions (name → node), its require bindings, aliases, routes */
+  function factsOf(rel) {
+    if (info.has(rel)) return info.get(rel);
+    const ast = astOf(rel);
+    const f = { fnNodes: new Map(), imports: new Map(), modules: new Map(), aliases: new Map(), routes: [], ok: !!ast };
+    if (ast) walkAst(ast, (n) => {
+      if (n.type === 'FunctionDeclaration' && n.id) f.fnNodes.set(n.id.name, n);
+      if (n.type === 'VariableDeclarator' && n.init) {
+        if (n.id.type === 'Identifier' && isFn(n.init)) f.fnNodes.set(n.id.name, n.init);
+        const req = n.init.type === 'CallExpression' && n.init.callee.type === 'Identifier' && n.init.callee.name === 'require' && n.init.arguments[0] && n.init.arguments[0].type === 'Literal' ? resolveReq(rel, n.init.arguments[0].value) : null;
+        if (req && n.id.type === 'Identifier') f.modules.set(n.id.name, req);
+        if (req && n.id.type === 'ObjectPattern') for (const p of n.id.properties) if (p.type === 'Property' && p.key.type === 'Identifier' && p.value.type === 'Identifier') f.imports.set(p.value.name, { file: req, name: p.key.name });
+        if (!req && n.id.type === 'Identifier' && !isFn(n.init)) f.aliases.set(n.id.name, n.init);
+      }
+      if (isRouteCall(n)) f.routes.push({ door: `${propName(n.callee).toUpperCase()} ${n.arguments[0].value}`, path: n.arguments[0].value, node: n });
+    });
+    info.set(rel, f);
+    return f;
+  }
+  /** the DIRECT writes inside `node`: [{w, at}] — an engine writer call, a wake field written in an index update */
+  const SIG = `${[...W].sort().join()}|${fields.join()}|${[...SHARED].sort().join()}`;
+  function directWrites(rel, node) {
+    const memo = WRITES_MEMO.get(node);
+    if (memo && memo.has(SIG)) return memo.get(SIG);
+    const f = factsOf(rel), hits = [];
+    const own = ownCode(node);
+    walkAst(node, (n, parents) => {
+      if (!own(n)) return false;
+      if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression') {
+        const m = propName(n.callee);
+        if (m && W.has(m) && (!SHARED.has(m) || ENGINE_GETTER.test(resolveRoot(n.callee.object, f.aliases) || ''))) hits.push({ w: m, at: n.start });
+      }
+      const inUpdate = () => parents.some((p, i) => isFn(p) && parents[i - 1] && parents[i - 1].type === 'CallExpression' && propName(parents[i - 1].callee) === 'update' && propName(parents[i - 1].callee.object) === 'index');
+      if (n.type === 'AssignmentExpression' && n.left.type === 'MemberExpression' && FIELDS.has(propName(n.left) || '') && inUpdate()) hits.push({ w: `${propName(n.left)} =`, at: n.start, field: true });
+      if (n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && n.callee.object.type === 'Identifier' && n.callee.object.name === 'Object' && propName(n.callee) === 'assign' && n.arguments.slice(1).some((a) => a.type === 'ObjectExpression' && a.properties.some((p) => p.type === 'Property' && FIELDS.has(p.key.type === 'Identifier' ? p.key.name : String(p.key.value)))) && inUpdate()) hits.push({ w: 'Object.assign(…fields)', at: n.start, field: true });
+    });
+    if (!WRITES_MEMO.has(node)) WRITES_MEMO.set(node, new Map());
+    WRITES_MEMO.get(node).set(SIG, hits);
+    return hits;
+  }
+  /** the calls inside `node` of a function this file names (locally or through require): [{file, name, at}] */
+  function callsIn(rel, node) {
+    const f = factsOf(rel), calls = [];
+    const own = ownCode(node);
+    walkAst(node, (n) => {
+      if (!own(n)) return false;
+      if (n.type !== 'CallExpression') return;
+      if (n.callee.type === 'Identifier') { const nm = n.callee.name; if (f.imports.has(nm)) calls.push({ ...f.imports.get(nm), at: n.start }); else if (f.fnNodes.has(nm)) calls.push({ file: rel, name: nm, at: n.start }); }
+      else if (n.callee.type === 'MemberExpression' && n.callee.object.type === 'Identifier' && f.modules.has(n.callee.object.name)) calls.push({ file: f.modules.get(n.callee.object.name), name: propName(n.callee), at: n.start });
+    });
+    return calls;
+  }
+  // ① the files to parse: those holding a write's spelling, then (to a fixpoint) those naming a writer they reach
+  const writerFns = new Map();   // `${file}#${name}` → the first write it reaches ({w}) + every engine writer / field it ends in (`terms`)
+  const queue = cand.filter((rel) => { const sc = scanOf(files[rel]); return sc.updates || [...W].some((n) => sc.calls.has(n)); });
+  const seen = new Set(queue);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const rel of [...seen]) {
+      const f = factsOf(rel);
+      if (!f.ok) continue;
+      for (const [name, node] of f.fnNodes) {
+        const key = `${rel}#${name}`;
+        const ds = directWrites(rel, node);
+        const vias = callsIn(rel, node).filter((c) => writerFns.has(`${c.file}#${c.name}`));
+        if (!ds.length && !vias.length) continue;
+        const terms = new Set([...ds.map((x) => x.w), ...vias.flatMap((c) => [...writerFns.get(`${c.file}#${c.name}`).terms])]);
+        const had = writerFns.get(key);
+        if (had && had.terms.size === terms.size) continue;
+        writerFns.set(key, { w: ds[0] ? ds[0].w : `${vias[0].name}() → ${writerFns.get(`${vias[0].file}#${vias[0].name}`).w}`, terms });
+        grew = true;
+      }
     }
-    // a writer called outside every route (an engine road elsewhere, a timer, a helper) is named — its local writers' own bodies aside
-    let rest = s; for (const b of [...bodies].reverse()) rest = rest.slice(0, b.at) + rest.slice(b.at + b.body.length);
-    for (const f of topFnsOf(rest)) { if (L.has(f.name)) continue; const w = writes(f.body); if (w && !ROUTE_EXEMPT[w.w]) out.push(`${rel} ${f.name}(): calls the grain writer ${w.w}() outside a gated route`); }
+    // a file that REQUIRES a file holding a writer joins (its routes may reach it through the require)
+    const writerFiles = new Set([...writerFns.keys()].map((k) => k.split('#')[0]));
+    for (const rel of cand) {
+      if (seen.has(rel)) continue;
+      if (scanOf(files[rel]).requires.some((spec) => writerFiles.has(resolveReq(rel, spec)))) { seen.add(rel); grew = true; }
+    }
+  }
+  const reachedByRoute = new Set();
+  const wrappersOf = (rel) => {   // a local wrapper of the gate: its name → the grain it asks (an `…Grain` call inside its wakeRefused)
+    const f = factsOf(rel), out2 = new Map();
+    for (const [name, node] of f.fnNodes) walkAst(node, (n) => { if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name === 'wakeRefused') { let g = null; walkAst(n.arguments[2], (x) => { if (x.type === 'CallExpression' && x.callee.type === 'Identifier' && /Grain$/.test(x.callee.name)) g = g || x.callee.name; }); out2.set(name, g); } });
+    return out2;
+  };
+  for (const rel of seen) {
+    const f = factsOf(rel);
+    if (!f.ok) { out.push(`${rel}: does not parse — the census cannot read it`); continue; }
+    const wraps = wrappersOf(rel);
+    const gateIn = (fn) => {   // the gate at the handler's OWN level: an `if (<gate>) return;` in its body (or its top-level try's)
+      if (!fn || !fn.body || fn.body.type !== 'BlockStatement') return null;
+      const levels = [fn.body.body, ...fn.body.body.filter((st) => st.type === 'TryStatement').map((st) => st.block.body)];
+      for (const list of levels) for (const st of list) {
+        if (st.type !== 'IfStatement') continue;
+        const c = st.test.type === 'CallExpression' ? st.test : null;
+        if (!c || c.callee.type !== 'Identifier') continue;
+        if (c.callee.name === 'wakeRefused') { let g = null; walkAst(c.arguments[2], (x) => { if (x.type === 'CallExpression' && x.callee.type === 'Identifier' && /Grain$/.test(x.callee.name)) g = g || x.callee.name; }); if (g) return { at: st.start, grain: g }; continue; }   // keyed on the body only (no grain) is no gate for the grain
+        if (wraps.has(c.callee.name)) return { at: st.start, grain: wraps.get(c.callee.name) };
+      }
+      return null;
+    };
+    for (const r of f.routes) {
+      const handlers = r.node.arguments.slice(1).filter(isFn);
+      const wrapped = r.node.arguments.slice(1).filter((a) => a.type === 'CallExpression').flatMap((a) => a.arguments.filter(isFn));
+      const all = [...handlers, ...wrapped];
+      const hits = all.flatMap((h) => [...directWrites(rel, h).map((x) => ({ ...x, terms: [x.w] })), ...callsIn(rel, h).filter((c) => writerFns.has(`${c.file}#${c.name}`)).map((c) => { reachedByRoute.add(`${c.file}#${c.name}`); const wf = writerFns.get(`${c.file}#${c.name}`); return { w: c.name, at: c.at, via: wf.w, terms: [...wf.terms] }; })]).sort((a, b) => a.at - b.at);
+      if (!hits.length) continue;
+      derived.add(rel);
+      // exempt only when EVERY write it reaches ends in an exempt writer (the agent's own watch through a local helper)
+      const exemptHit = (x) => x.terms.every((tm) => ROUTE_EXEMPT[tm]);
+      if (hits.every(exemptHit)) continue;
+      const first = hits.find((x) => !exemptHit(x));
+      const auth = AUTHORITY_DOORS[r.door];
+      if (auth) {
+        const d = f.routes.find((x) => x.door === auth.door);
+        const dGate = d ? d.node.arguments.slice(1).filter(isFn).map(gateIn).find(Boolean) : null;
+        if (!dGate) out.push(`${rel} ${r.door}: its authority is ${auth.door}, which does not ask the gate`);
+        if (auth.alsoAsks && !all.some((h) => { let found = false; walkAst(h, (x) => { if (x.type === 'CallExpression' && x.callee.type === 'Identifier' && x.callee.name === auth.alsoAsks) found = true; }); return found; })) out.push(`${rel} ${r.door}: does not ask ${auth.alsoAsks}() — the path as it is at completion`);
+        continue;
+      }
+      routes.push(r.door);
+      const gate = all.map(gateIn).find(Boolean);
+      const what = first.via ? `${first.w} (→ ${first.via})` : first.w;
+      if (!gate) { out.push(`${r.door}: calls ${what} without asking the person verdict for the grain it writes (no gate at the handler's own level, or one keyed on the body only)`); continue; }
+      if (gate.at > first.at) out.push(`${r.door}: asks the gate AFTER it calls ${what}`);
+      const want = grainOfPath(r.path);
+      if (gate.grain !== want) out.push(`${r.door}: its gate names ${gate.grain} — the path writes the ${want}`);
+    }
+  }
+  // a writer reached from NO route (an engine road elsewhere, a timer, a helper nobody gates) is named
+  const callers = new Map();
+  for (const rel of seen) { const f = factsOf(rel); if (!f.ok) continue; for (const [name, node] of f.fnNodes) for (const c of callsIn(rel, node)) if (writerFns.has(`${c.file}#${c.name}`)) { const k = `${c.file}#${c.name}`; if (!callers.has(k)) callers.set(k, []); callers.get(k).push(`${rel}#${name}`); } }
+  const routed = (k, depth = 0) => reachedByRoute.has(k) || (depth < 6 && (callers.get(k) || []).some((c) => writerFns.has(c) && routed(c, depth + 1)));
+  for (const [k, v] of writerFns) {
+    const [rel, name] = k.split('#');
+    if (ROUTE_EXEMPT[name] || routed(k) || [...v.terms].every((tm) => ROUTE_EXEMPT[tm])) continue;
+    out.push(`${rel} ${name}(): calls the grain writer ${v.w}${/\(\)|=$/.test(v.w) ? '' : '()'} outside a gated route`);
   }
   for (const f of fns) for (const w of W) if (w !== f.name && new RegExp(`(?<![\\w.])${w}\\(`).test(f.body) && !ENGINE_ROADS[f.name]) out.push(`src/server/channels-access.js ${f.name}(): calls the grain writer ${w}() — a road the census does not know`);
-  return { routes, writers: [...W].sort(), fields, files: derivedFiles.sort(), problems: out };
+  for (const rel of seen) if (writerFns.size && [...writerFns.keys()].some((k) => k.startsWith(rel + '#'))) derived.add(rel);
+  return { routes, writers: [...W].sort(), fields, files: [...derived].sort(), shared: [...SHARED].sort(), problems: out };
 }
 const WEBHOOK = 'src/routes/webhook.js';
 const WH_SRC = SRC_FILES[WEBHOOK] || '';
 const WH_GATE = /^ {2,4}if \(pathRefused\(req, res[^\n]*\)\) return;[^\n]*\n/gm;
 {
-  const c = writerCensus(SRC_FILES);
+  const c = writerCensus(SRC_FILES), c0 = c;
   const ch = c.routes.filter((r) => !/\/webhook\//.test(r)), wh = c.routes.filter((r) => /\/webhook\//.test(r));
   ok(!c.problems.length && ch.length === 13, `THE WRITER CENSUS (r4): the engine's grain writers, derived (${c.writers.join(', ')}); the ${ch.length} routes of src/routes/channels.js that call one each ask the gate FIRST for the grain their path writes: ${ch.join(' · ')}`, c.problems);
   ok(JSON.stringify(c.fields) === JSON.stringify(['authors', 'kind', 'options', 'participants', 'stats', 'title']) && c.files.includes(WEBHOOK) && c.files.includes('src/routes/channels.js') && wh.length === 5 && !c.problems.length, `r5: THE FILE LIST IS DERIVED — the fields the engine reads for wakes off an entry (${c.fields.join(', ')}: what a rule matches, the per-path budget) and the writers of the engine name ${c.files.length} files (${c.files.join(', ')}); src/routes/webhook.js's ${wh.length} path verbs each ask the gate for the PATH: ${wh.join(' · ')} (the pairing's completion answers to the gated pair-code)`, { files: c.files, fields: c.fields, wh, problems: c.problems });
@@ -744,11 +901,24 @@ const WH_GATE = /^ {2,4}if \(pathRefused\(req, res[^\n]*\)\) return;[^\n]*\n/gm;
   const cut = WH_SRC.replace(WH_GATE, '');
   const r4w = writerCensus({ ...SRC_FILES, [WEBHOOK]: cut });
   const named = r4w.problems.filter((x) => /webhook/.test(x));
-  ok((WH_SRC.match(WH_GATE) || []).length === 6 && named.length === 6 && named.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: calls syncRow without asking/.test(x)) && named.some((x) => /its authority is POST \/api\/channels\/webhook\/paths\/:slug\/pair-code, which does not ask the gate/.test(x)), `RED COPY: the path verbs as 4b8896e7 had them (owner() only) — the census names all ${named.length}: ${named.map((x) => x.replace(/^src\/routes\/webhook\.js /, '').replace(/: (calls|its authority) .*$/, '').replace('/api/channels/webhook/', '…/')).join(' · ')}`, named);
+  ok((WH_SRC.match(WH_GATE) || []).length === 7 && named.length === 6 && named.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: calls syncRow\b.* without asking/.test(x)) && named.some((x) => /its authority is POST \/api\/channels\/webhook\/paths\/:slug\/pair-code, which does not ask the gate/.test(x)), `RED COPY: the path verbs as 4b8896e7 had them (owner() only) — the census names all ${named.length}: ${named.map((x) => x.replace(/^src\/routes\/webhook\.js /, '').replace(/: (calls|its authority) .*$/, '').replace('/api/channels/webhook/', '…/')).join(' · ')}`, named);
   const late = writerCensus({ ...SRC_FILES, [WEBHOOK]: WH_SRC.replace("  if (pathRefused(req, res)) return;   // r5: disabled / ipAllow / wakesPerHour / title — what a held wake fires on\n", '').replace("    await syncRow(slug, ov.options);\n    res.json({ ok: true, path: pathView(st, slug) });\n  } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }\n});\n/** THE OWNER'S \"Send", "    await syncRow(slug, ov.options);\n    if (pathRefused(req, res)) return;\n    res.json({ ok: true, path: pathView(st, slug) });\n  } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }\n});\n/** THE OWNER'S \"Send") });
   ok(late.problems.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: asks the gate AFTER it calls syncRow/.test(x)), 'RED COPY: a path verb asking the gate only AFTER its write (inside its try, past the write) is named', late.problems.filter((x) => /webhook/.test(x)));
   const plantedFile = writerCensus({ ...SRC_FILES, 'src/routes/hooks-extra.js': "const router = require('express').Router();\nfunction touch(e, slug, o) { return e.store.index.update(() => { const en = e.store.index.entry('webhook', slug); en.options = o; }); }\nrouter.put('/api/channels/webhook/extra/:slug', async (req, res) => {\n  await touch(engine(), req.params.slug, req.body);\n  res.json({ ok: true });\n});\n" });
-  ok(plantedFile.files.includes('src/routes/hooks-extra.js') && plantedFile.problems.some((x) => /^PUT \/api\/channels\/webhook\/extra\/:slug: calls touch without asking/.test(x)), 'RED COPY: a NEW routes file writing a field the engine reads for wakes (a path\'s options) joins the file list by itself — its route with no gate is named (never a hand list)', { files: plantedFile.files, problems: plantedFile.problems.slice(-2) });
+  ok(plantedFile.files.includes('src/routes/hooks-extra.js') && plantedFile.problems.some((x) => /^PUT \/api\/channels\/webhook\/extra\/:slug: calls touch\b.* without asking/.test(x)), 'RED COPY: a NEW routes file writing a field the engine reads for wakes (a path\'s options) joins the file list by itself — its route with no gate is named (never a hand list)', { files: plantedFile.files, problems: plantedFile.problems.slice(-2) });
+  // r6 (主开发, attack (d)): ONE RED COPY PER SHAPE the line-spelled census missed — each a NEW routes file, each route NAMED
+  const SHAPES = [
+    ['an inline `en.participants =` inside a route\'s own index.update', { 'src/routes/hooks-p1.js': "const router = require('express').Router();\nrouter.put('/api/channels/webhook/p1/:slug', async (req, res) => {\n  await engine().store.index.update((ix) => { const en = ix.entries['webhook/' + req.params.slug]; en.participants = req.body.participants; });\n  res.json({ ok: true });\n});\n" }, /^PUT \/api\/channels\/webhook\/p1\/:slug: calls participants = without asking/],
+    ['`entry.participants =` (not named en)', { 'src/routes/hooks-p1b.js': "const router = require('express').Router();\nrouter.put('/api/channels/webhook/p1b/:slug', async (req, res) => {\n  await engine().store.index.update((ix) => { const entry = ix.entries['webhook/' + req.params.slug]; entry.participants = req.body.participants; });\n  res.json({ ok: true });\n});\n" }, /^PUT \/api\/channels\/webhook\/p1b\/:slug: calls participants = without asking/],
+    ['`Object.assign(en, {participants})`', { 'src/routes/hooks-p1c.js': "const router = require('express').Router();\nrouter.put('/api/channels/webhook/p1c/:slug', async (req, res) => {\n  await engine().store.index.update((ix) => { const en = ix.entries['webhook/' + req.params.slug]; Object.assign(en, { participants: req.body.participants }); });\n  res.json({ ok: true });\n});\n" }, /^PUT \/api\/channels\/webhook\/p1c\/:slug: calls Object\.assign\(…fields\) without asking/],
+    ['a two-hop write through a helper MODULE (its calling route named, not only the helper\'s file)', { 'src/lib/path-facts.js': "function touchFacts(e, slug, p) { return e.store.index.update((ix) => { const en = ix.entries['webhook/' + slug]; en.participants = p; }); }\nmodule.exports = { touchFacts };\n", 'src/routes/hooks-p2.js': "const router = require('express').Router();\nconst PF = require('../lib/path-facts.js');\nrouter.put('/api/channels/webhook/p2/:slug', async (req, res) => {\n  await PF.touchFacts(engine(), req.params.slug, req.body.participants);\n  res.json({ ok: true });\n});\n" }, /^PUT \/api\/channels\/webhook\/p2\/:slug: calls touchFacts \(→ participants =\) without asking/],
+    ['`ctx.getEngine().setWatchers(`', { 'src/routes/hooks-p3.js': "const router = require('express').Router();\nrouter.put('/api/channels/:adapterId/:convId/w3', async (req, res) => {\n  await ctx.getEngine().setWatchers(req.params.adapterId, req.params.convId, req.body.rows);\n  res.json({ ok: true });\n});\n" }, /^PUT \/api\/channels\/:adapterId\/:convId\/w3: calls setWatchers without asking/],
+    ['`const ce = engine(); ce.setWatchers(`', { 'src/routes/hooks-p4.js': "const router = require('express').Router();\nrouter.put('/api/channels/:adapterId/:convId/w4', async (req, res) => {\n  const ce = engine();\n  await ce.setWatchers(req.params.adapterId, req.params.convId, req.body.rows);\n  res.json({ ok: true });\n});\n" }, /^PUT \/api\/channels\/:adapterId\/:convId\/w4: calls setWatchers without asking/],
+  ];
+  const shapes = SHAPES.map(([what, plant, re]) => { const c = writerCensus({ ...SRC_FILES, ...plant }); return { what, named: c.problems.some((x) => re.test(x)), joined: Object.keys(plant).every((f) => c.files.includes(f)), extra: c.problems.filter((x) => !c0.problems.includes(x)).slice(0, 3) }; });
+  ok(shapes.every((x) => x.named && x.joined), `RED COPIES — the census over the AST names the ROUTE for every shape it missed (${shapes.length}): ${shapes.map((x) => x.what + (x.named ? ' ✓' : ' ✗')).join(' · ')}`, shapes);
+  const shared = writerCensus({ ...SRC_FILES, 'src/routes/hooks-p6.js': "const router = require('express').Router();\nrouter.put('/api/exits/:id/access', async (req, res) => {\n  await exitProxy.setAccess(req.params.id, req.body, { by: 'user' });\n  res.json({ ok: true });\n});\n" });
+  ok(c0.shared.includes('setAccess') && !shared.problems.some((x) => /hooks-p6|\/api\/exits\//.test(x)), `CONTROL: a writer NAME another engine also defines (derived: ${c0.shared.join(', ')}) counts only on a channels engine — an exit's setAccess is no channel write`, { shared: c0.shared, problems: shared.problems.filter((x) => /exits/.test(x)) });
 }
 
 // ── ⑩ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -885,10 +1055,11 @@ try {
   // (c) vault-grant-ask: THE third vault card in the same chat (Allow once / For 8 hours / Deny) is a DECISION ROW
   const grant = { id: 'ut-grt0000001', sessionKey: 'claude:c-ops', text: 'ops asks to use a stored secret', detail: 'Secret: bucket — vault://mounts/m1/secretKey', status: 'open', urgency: 'high', origin: 'vault', kind: 'action', action: { type: 'vault-grant-ask', askId: 'c'.repeat(32) }, createdAt: NOW - 30e3 };
   const row = FA.ROW_OF['vault-grant-ask'];
-  ok(row.decide === 'person' && row.stamp === 'grant' && J(FA.endsOf(grant)) === J(['granted-once', 'granted-8h', 'denied', 'vault_locked', 'ask-changed', 'ask-over']) && FA.isDecisionRow(grant) && J(FA.closersOf(grant)) === '[]', 'THE registry: vault-grant-ask decided by a person, its own ends (Allow once / For 8 hours / Deny + a lock, a changed card, an ask that is over), no ✓ / ✕ (closersOf [])', { decide: row.decide, stamp: row.stamp, ends: FA.endsOf(grant) });
+  ok(row.decide === 'person' && row.stamp === 'grant' && J(FA.endsOf(grant)) === J(['granted', 'denied', 'vault_locked', 'ask-changed', 'ask-over']) && FA.isDecisionRow(grant) && J(FA.closersOf(grant)) === '[]', 'THE registry: vault-grant-ask decided by a person, its own ends (Allow once / For 8 hours / Deny + a lock, a changed card, an ask that is over), no ✓ / ✕ (closersOf [])', { decide: row.decide, stamp: row.stamp, ends: FA.endsOf(grant) });
   const mark = { decidedBy: 'person', decidedAt: NOW - 60e3 };
   const st = (by, fact = mark) => (FA.decidedStamp({ ...grant, status: 'done', resolvedBy: by, resolvedAt: NOW, resolvedFact: fact }, { now: NOW }) || {}).text || null;
-  const stamps = { once: st('granted-once'), h8: st('granted-8h'), deny: st('denied'), locked: st('vault_locked'), noMark: st('granted-8h', null), card: FA.decisionCard({ ...grant, status: 'done', resolvedBy: 'granted-8h', resolvedFact: mark }, { now: NOW }).state };   // r5: For 8 hours writes `granted-8h`
+  const g8 = { ...mark, grantedFor: '8h', until: NOW + 7 * 3600e3 };   // r6: the record stays `granted` + its facts (grantedFor, until)
+  const stamps = { once: st('granted', { ...mark, grantedFor: 'once', until: NOW + 7 * 3600e3 }), h8: st('granted', g8), deny: st('denied'), locked: st('vault_locked'), noMark: st('granted', { grantedFor: '8h', until: NOW + 7 * 3600e3 }), card: FA.decisionCard({ ...grant, status: 'done', resolvedBy: 'granted', resolvedFact: g8 }, { now: NOW }).state };
   ok(J(stamps) === J({ once: 'allowed once by you · 10:04', h8: 'allowed by you for 8 h · 10:04', deny: 'denied by you · 10:04', locked: null, noMark: null, card: 'approved' }), 'its stamps: «allowed once by you · HH:MM», «allowed by you for 8 h · HH:MM», «denied by you · HH:MM» — only with the person verdict\'s mark; a lock is no stamp', stamps);
   const lawG = (registry) => {
     const { m, done } = storeWith(registry);
@@ -896,7 +1067,7 @@ try {
       const it = m.add(grant.sessionKey, { origin: 'vault', by: 'agent', text: grant.text, urgency: 'high', action: grant.action });
       const tryS = (s2, by) => { try { m.setStatus(it.id, s2, by); return 'ok'; } catch (e) { return e.code || e.message; } };
       const r = { check: tryS('done', 'user'), seen: m.setStatusMany([it.id], 'dismissed', 'user').changed.length, status: m.get(it.id).status };
-      r.granted = m.resolveAnswered([it.id], 'granted-8h', mark).length;   // r5: the For 8 hours end
+      r.granted = m.resolveAnswered([it.id], 'granted', { ...mark, grantedFor: '8h', until: NOW + 7 * 3600e3 }).length;   // r6: the For 8 hours end — `granted` + its facts
       r.reopen = tryS('open', 'user');
       return r;
     } finally { done(); }
@@ -934,18 +1105,21 @@ try {
 try {
   // (b) THE ONE-READER CENSUS over the engine's source: every road that asks «held», writes a grain or draws its lists reads it
   // through readGrainHolder (→ F.grainAsFired); none reads a holder through the narrower F.grainOf; «held» counts the STORED rows
-  const ROADS = ['convGrainOf', 'readGrainHolder', 'grainReadAt', 'wakeHeldAt', 'wakeNamesFilter', 'setGrain', 'grainView', 'storedWatcherFor', 'removePattern', 'setScopeAssignment'];
-  const oneReader = (E, FS) => {
-    const fns = fnsOf(E), byName = Object.fromEntries(fns.map((f) => [f.name, f.body]));
+  // r6: + the rows BELOW a grain (wakesBelow), a write's before / after (wakeRowsNow), the agent's watch list (agentWatchesFor)
+  // and the engine's three boot censuses (orphanWatchers, capZeroDigests, deprecatedReceiptWakes — through eachRowInEffect)
+  const ROADS = ['convGrainOf', 'readGrainHolder', 'grainReadAt', 'ownWakes', 'wakesBelow', 'wakeRowsNow', 'wakeNamesFilter', 'setGrain', 'grainView', 'storedWatcherFor', 'removePattern', 'setScopeAssignment', 'agentWatchesFor', 'orphanWatchers', 'eachRowInEffect', 'capZeroDigests', 'deprecatedReceiptWakes'];
+  const oneReader = (E, FS, G = read('src/server/channels-engine.js')) => {
+    const fns = fnsOf(E + '\n' + G), byName = Object.fromEntries(fns.map((f) => [f.name, f.body]));
     const bad = [];
     for (const n of ROADS) {
       const b = byName[n];
       if (b === undefined) { bad.push(`${n}: missing`); continue; }
       if (/\bF\.grainOf\(/.test(b)) bad.push(`${n}: reads a grain through F.grainOf (a narrower view)`);
-      if (n !== 'readGrainHolder' && !/(?<![\w.])(readGrainHolder|grainReadAt|heldRead)\(/.test(b)) bad.push(`${n}: never reaches the one reader`);
+      if (n !== 'readGrainHolder' && !/(?<![\w.])(readGrainHolder|grainReadAt|heldRead|eachRowInEffect)\(/.test(b)) bad.push(`${n}: never reaches the one reader`);
     }
     if (!/F\.grainAsFired\(/.test(byName.readGrainHolder || '')) bad.push('readGrainHolder: does not read through F.grainAsFired');
-    if (!/wakesIn\(g\.stored\)/.test(byName.wakeHeldAt || '')) bad.push('wakeHeldAt: does not count every STORED wake row');
+    if (!/wakesIn\(g\.stored\)/.test(byName.ownWakes || '')) bad.push('ownWakes: does not count every STORED wake row');
+    if (!/(?<![\w.])ownWakes\(/.test(byName.wakeHeldAt || '') || !/(?<![\w.])wakesBelow\(/.test(byName.wakeHeldAt || '')) bad.push('wakeHeldAt: does not ask its own rows AND the rows below it');
     const eff = (/function effectiveGrants\([\s\S]*?\n\}\n/.exec(FS) || [''])[0];
     if ((eff.match(/grainAsFired\('(account|pattern|conversation)'/g) || []).length !== 3 || /\bgrainOf\(/.test(eff)) bad.push('effectiveGrants: its three grains are not read through grainAsFired');
     return bad;
@@ -955,22 +1129,21 @@ try {
   ok(!b14.length, `THE ONE-READER CENSUS: ${ROADS.length} roads of the engine (${ROADS.join(', ')}) read a grain through readGrainHolder → F.grainAsFired — the reader effectiveGrants fires with; «held» counts every stored wake row`, b14);
   const narrowSet = oneReader(E14.replace('    const rd = readGrainHolder(adapterId, kind, site.holder);\n', '    const rd = site.holder ? { ...F.grainOf(site.holder), inert: [] } : null;\n'), FS14);
   const activeOnly = oneReader(E14.replace('const own = wakesIn(g.stored);', 'const own = wakesIn(g.watchers);'), FS14);
-  ok(narrowSet.some((x) => /^setGrain: reads a grain through F\.grainOf/.test(x)) && activeOnly.some((x) => /^wakeHeldAt: does not count every STORED/.test(x)), 'RED COPIES: a writer reading the holder through F.grainOf (round 4\'s setGrain), a «held» counting only the rows in effect (round 4\'s — an inert wake read «not held») — each named', { narrowSet, activeOnly });
+  ok(narrowSet.some((x) => /^setGrain: reads a grain through F\.grainOf/.test(x)) && activeOnly.some((x) => /^ownWakes: does not count every STORED/.test(x)), 'RED COPIES: a writer reading the holder through F.grainOf (round 4\'s setGrain), a «held» counting only the rows in effect (round 4\'s — an inert wake read «not held») — each named', { narrowSet, activeOnly });
 } catch (e) { ok(false, '⑭ (b) threw on this tree: ' + ((e && e.message) || e)); }
 try {
-  // (c) A RECORD SAYS ONLY WHAT WAS DECIDED: an old `granted` (Allow once and For 8 hours both wrote it before .360) ⇒ «allowed»
+  // (c) A RECORD SAYS ONLY WHAT WAS DECIDED: an old `granted` (Allow once and For 8 hours both wrote it before .360) ⇒ «allowed»;
+  // r6: the record STAYS `granted` (every reader knows it) with its facts — `grantedFor` names the duration
   const tI = (x, p) => String(x).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] != null ? p[k] : ''));
   const old = { ...grantItem14(), status: 'done', resolvedBy: 'granted', resolvedAt: NOW };
-  const words = (R, by) => R.settledWords({ ...old, resolvedBy: by }, tI);
-  const rowWords = (by) => ROW3.resolvedByText(by, tI, { ...old, resolvedBy: by });
-  const r14c = { old: [words(FA, 'granted'), rowWords('granted'), FA.decisionCard(old, { now: NOW }).stamp], h8: [words(FA, 'granted-8h'), rowWords('granted-8h')], once: [words(FA, 'granted-once'), rowWords('granted-once')] };
-  ok(J(r14c) === J({ old: ['allowed', 'allowed', 'allowed'], h8: ['allowed for 8 hours', 'allowed for 8 hours'], once: ['allowed once', 'allowed once'] }), 'a stored {resolvedBy: \'granted\'} (before .360 — either verb) reads «allowed» on the card, the tray and the For-you window; only `granted-8h` (it carries the duration) says «allowed for 8 hours»', r14c);
+  const withFor = (gf) => ({ ...old, resolvedFact: { grantedFor: gf, until: NOW + 7 * 3600e3 } });
+  const words = (it) => [FA.settledWords(it, tI), ROW3.resolvedByText(it.resolvedBy, tI, it)];
+  const r14c = { old: [...words(old), FA.decisionCard(old, { now: NOW }).stamp], h8: words(withFor('8h')), once: words(withFor('once')) };
+  ok(J(r14c) === J({ old: ['allowed', 'allowed', 'allowed'], h8: ['allowed for 8 hours', 'allowed for 8 hours'], once: ['allowed once', 'allowed once'] }), 'a stored {resolvedBy: \'granted\'} with no duration (before .360 — either verb) reads «allowed» on the card, the tray and the For-you window; a record carrying `grantedFor` says «allowed for 8 hours» / «allowed once»', r14c);
   const ZH14 = read('src/lib/i18n-zh.js');
   ok(/\n {2}"allowed": "已允许",/.test(ZH14), 'zh: «allowed» = «已允许»');
   const DOOR = read('src/server/vault-run-door.js');
-  ok(/const end = a === 'once' \? 'granted-once' : 'granted-8h';\n {4}settleRequest\(q, end, 'answered', mark\(\)\);\n {4}return \{ ok: true, outcome: end, until \};/.test(DOOR) && !/settleRequest\(q, 'granted'/.test(DOOR), 'the door writes the two ends apart — Allow once ⇒ `granted-once`, For 8 hours ⇒ `granted-8h` (the answer\'s `outcome` the same) — and never `granted` again');
-  const r4G = registryFrom(read('src/foryou-actions.js').replace("  if (by === 'granted-8h') return t('allowed for 8 hours');", "  if (by === 'granted') return t('allowed for 8 hours');"));
-  ok(r4G.settledWords(old, tI) === 'allowed for 8 hours', 'RED CONTROL: the words as 4b8896e7 had them — the old record (maybe an Allow once) says «allowed for 8 hours»', r4G.settledWords(old, tI));
+  ok(/const grantedFor = a === 'once' \? 'once' : '8h';\n {4}settleRequest\(q, 'granted', 'answered', \{ \.\.\.\(mark\(\) \|\| \{\}\), grantedFor, until \}\);\n {4}return \{ ok: true, outcome: a === 'once' \? 'granted-once' : 'granted', grantedFor, until \};/.test(DOOR) && !/'granted-8h'/.test(DOOR), 'r6: the door writes `granted` (the value every reader names) + `grantedFor` / `until` on the record, and answers the outcome the production client toasts (`granted-once` / `granted`) + the same `grantedFor` — never `granted-8h`');
 } catch (e) { ok(false, '⑭ threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); }
 function grantItem14() { return { id: 'ut-grt0000002', sessionKey: 'claude:c-ops', text: 'ops asks to use a stored secret', status: 'open', origin: 'vault', kind: 'action', action: { type: 'vault-grant-ask', askId: 'd'.repeat(32) }, createdAt: NOW - 30e3 }; }
 

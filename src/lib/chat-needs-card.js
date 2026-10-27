@@ -370,10 +370,10 @@ export class NeedsCards {
     const model = inboxModel(this.app);
     if (e.resolved) {
       const words = model.wordsOf(e.item);
-      const sig = `done\u0000${e.item.status}\u0000${e.item.resolvedBy || ''}\u0000${words}`;
       // lane wake-approve-card: a decision only a person's click makes says WHO and WHEN — «approved by you · 09:41» (the
       // tray row's words, decidedStamp); every other record keeps «approved · 2 min ago»
       const stamp = decidedStamp(e.item, { t });
+      const sig = `done\u0000${e.item.status}\u0000${e.item.resolvedBy || ''}\u0000${stamp ? stamp.text : ''}\u0000${words}`;   // r6: a grant's life (ended / revoked) redraws the line
       const verb = stamp ? stamp.verb : settledWords(e.item, t, kind);
       const ago = stamp ? stamp.time : agoText(e.item.resolvedAt || e.item.createdAt, t);
       const line = `<span class="cn-line-mark" aria-hidden="true">${e.item.status === 'dismissed' || (stamp && stamp.denied) ? '✕' : '✓'}</span><span class="cn-line-verb">${escHtml(verb)}</span><span class="cn-line-ago"> · ${escHtml(ago)}</span><span class="cn-line-words"> — ${escHtml(words)}</span>`;

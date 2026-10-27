@@ -185,6 +185,19 @@ const MAX_OPEN_WATCH_REQUESTS = 2;
 // lane wake-approve-card r3 (主开发: «a wake ask has a lifetime»): an ask nobody answered for 7 days EXPIRES — the request
 // `expired` (nothing written; the agent can ask again), its item closed as expired, the bound above freed
 const WATCH_REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** A HELD DELIVERY SAYS ITS AGE OR ASKS (lane wake-approve-card r6 — 主开发: a boot on old data delivered every digest the old
+ *  reader had held — hits possibly MONTHS old — with no click, labelled «in the last 60 min»): hits a watcher's delivery
+ *  waited on longer than HELD_AGE_WINDOWS of its window (a digest's `digestMinutes`; a wake's 60 min ⇒ a day) are not
+ *  delivered at a boot by themselves — the owner decides (deliver / discard). */
+const HELD_AGE_WINDOWS = 24;
+const heldWindowMinutes = (w) => (w && w.notify === 'digest' && Number(w.digestMinutes) > 0 ? Number(w.digestMinutes) : 60);
+/** Too old to deliver by itself? `oldestAt` = the oldest held hit's parking time (no time ⇒ its age is unknown ⇒ too old). */
+function heldTooOld(w, oldestAt, t) {
+  const at = Number(oldestAt);
+  return !(Number.isFinite(at) && at > 0) || Number(t) - at > HELD_AGE_WINDOWS * heldWindowMinutes(w) * 60e3;
+}
+/** A block's span in words: «held since 2026-07-14 09:38 UTC» (the oldest hit's parking time) — an agent's text. */
+const heldSinceWords = (at) => { const d = new Date(Number(at)); return Number.isFinite(d.getTime()) ? `held since ${d.toISOString().slice(0, 16).replace('T', ' ')} UTC` : 'held for an unknown time'; };
 const MAX_WATCHER_ROWS = 16;
 /** The CONVERSATION-level rule set a pattern is made of — a closed set APART
  *  from the message-level `RULE_KINDS` (a pattern chooses conversations, a
@@ -1810,11 +1823,12 @@ function othersLine(others) {
  * budget; what does not fit is COUNTED, never silently dropped.
  * `groups` = `[{title, convId, hits:[{record, why}], elided?}]`.
  */
-function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', groups = [], windowMinutes = DEFAULT_DIGEST_MINUTES, elidedConversations = 0, others = null } = {}, { perConversation = 3, maxChars = 200, budget = BLOCK_MAX_BYTES } = {}) {
+function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', groups = [], windowMinutes = DEFAULT_DIGEST_MINUTES, elidedConversations = 0, others = null, since = null } = {}, { perConversation = 3, maxChars = 200, budget = BLOCK_MAX_BYTES } = {}) {
   const list = (Array.isArray(groups) ? groups : []).filter((g) => g && Array.isArray(g.hits) && g.hits.length);
   const msgs = list.reduce((n, g) => n + g.hits.length + (Number(g.elided) || 0), 0);
   const convs = list.length + (Number(elidedConversations) || 0);
-  const head = `### Channel digest — ${safeInline(adapterLabel, 60)} · ${convs} conversation${convs === 1 ? '' : 's'}, ${msgs} message${msgs === 1 ? '' : 's'} in the last ${Math.round(Number(windowMinutes) || 0)} min`;
+  // r6: the TRUE span — hits held past the window (a boot's leftovers, a refused window's) say since when, never «the last N min»
+  const head = `### Channel digest — ${safeInline(adapterLabel, 60)} · ${convs} conversation${convs === 1 ? '' : 's'}, ${msgs} message${msgs === 1 ? '' : 's'} ${since ? (typeof since === 'string' ? safeInline(since, 80) : heldSinceWords(since)) : `in the last ${Math.round(Number(windowMinutes) || 0)} min`}`;
   const lines = [head];
   if (scopeLabel) lines.push(`you are watching ${safeInline(scopeLabel, 160)}`);
   const ol = othersLine(others);
@@ -1842,10 +1856,10 @@ function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', gro
 }
 
 /** The digest: many hits, ONE turn. Same budget, same neutering. */
-function renderDigestBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, windowMinutes = DEFAULT_DIGEST_MINUTES } = {}, opts = {}) {
+function renderDigestBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, windowMinutes = DEFAULT_DIGEST_MINUTES, since = null } = {}, opts = {}) {
   const list = (Array.isArray(hits) ? hits : []).filter((h) => h && h.record);
   const total = list.length + (Number(elided) || 0);
-  const head = `### Channel digest — ${safeInline(adapterLabel, 60)} · ${safeInline(title || convId, 120)} — ${total} message${total === 1 ? '' : 's'} in the last ${Math.round(Number(windowMinutes) || 0)} min`;
+  const head = `### Channel digest — ${safeInline(adapterLabel, 60)} · ${safeInline(title || convId, 120)} — ${total} message${total === 1 ? '' : 's'} ${since ? (typeof since === 'string' ? safeInline(since, 80) : heldSinceWords(since)) : `in the last ${Math.round(Number(windowMinutes) || 0)} min`}`;   // r6: the true span (the engine's words: the owner's zone, named)
   const inner = renderWakeBlock({ adapterLabel, title, convId, hits: list, elided, coalesced: null, replyHint: true }, opts);
   return head + '\n' + inner.split('\n').slice(1).join('\n');
 }
@@ -1870,7 +1884,7 @@ module.exports = {
   // R4 (2026-09-27): access and notification — two lists per grain, access first
   // lane everyone-principal: ALL AGENTS — the principal, and the watcher fan-out (a ledger per running conversation)
   EVERYONE_ID, fanTargetOf, fanOfKey, fanStatsOf, fanWatcher, fanOutWatchers, ledgerRowsOf, pruneFan,
-  MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, MAX_AGENT_WATCHES, MAX_OPEN_WATCH_REQUESTS, WATCH_REQUEST_TTL_MS, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
+  MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, MAX_AGENT_WATCHES, MAX_OPEN_WATCH_REQUESTS, WATCH_REQUEST_TTL_MS, HELD_AGE_WINDOWS, heldWindowMinutes, heldTooOld, heldSinceWords, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
   // lane channel-agent-watch: the delivery choice, who wrote a row, and THE eligibility rule (access over the grain and its ancestors)
   DELIVERY_MODES, WATCH_ORIGINS, deliveryModeOf, watchOriginOf, eligibleKeys, eligibleFor,
   memberVia, memberStill, REGEX_MAX, REGEX_FLAGS, REGEX_TEXT_MAX, REGEX_REFUSALS, regexVerdict, regexText, regexSpan,

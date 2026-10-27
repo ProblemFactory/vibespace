@@ -401,7 +401,7 @@ async function reachLeg(ENGM, name) {
 try {
   const g = await reachLeg(ENG, 'e4e');
   ok(g.setup.approved && g.setup.delivery === 'wake' && g.setup.other === 'wake' && g.setup.otherMode === 'filtered' && g.setup.otherFilter === g.setup.fid && g.setup.P1 && g.setup.P2, 'setup: the agent\'s wake ask on the Ops room, APPROVED by the owner, beside the owner\'s wake for Other on the room\'s own filter («outage»); a rule holding the owner\'s wake; a rule and a room holding none', J2s(g.setup));
-  ok(g.marks && g.marks.conv && g.marks.rule && !g.marks.ann && !g.marks.p2 && !g.marks.account, 'the engine MARKS the grains that hold a wake (wakeHeldAt): the Ops room and the Ops rule — not the Announcements room, not the next-turn rule, not the account', J2s(g.marks));
+  ok(g.marks && g.marks.conv && g.marks.rule && !g.marks.ann && !g.marks.p2 && g.marks.account, 'the engine MARKS the grains that hold a wake (wakeHeldAt): the Ops room and the Ops rule — not the Announcements room, not the next-turn rule; r6: AND the account — the room\'s approved wake for Worker lives by the account\'s access alone (taking Worker off the account stops it: the account\'s access is a wake door)', J2s(g.marks));
   ok(g.held.pattern.status === 403 && g.held.pattern.code === 'human_only' && g.held.watchExcept.status === 403 && g.held.watchExcept.code === 'human_only' && g.held.filter.status === 403 && g.held.filter.code === 'human_only', 'THE REVIEWER\'S THREE CURLS from an agent\'s vsst_ on the grains holding the wake — the rule\'s pattern (match-all), its watchExcept ([]), the room\'s filter — ⇒ 403 human_only each', J2s(g.held));
   ok(g.bare.pattern === 403 && g.bare.watchExcept === 403 && g.bare.filter === 403, '…and from a bare curl (an instance whose sign-in is off) ⇒ 403 (cross_site)', J2s(g.bare));
   ok(g.after.pattern === J2s({ match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }) && g.after.filter === J2s([{ kind: 'keyword', value: 'outage' }]), 'nothing was widened: the rule still matches «Ops», Other\'s wake still fires on «outage» only', J2s(g.after));
@@ -499,6 +499,7 @@ async function pathLeg(ENGM, name) {
   const quiet = { log() {}, warn() {}, error() {} };
   const eng = ENGM.create({ dataDir, env: {}, broadcast: () => {}, log: quiet, deliver: { deliverToConversation: async () => ({ ok: true, lane: 'message' }), stashFor() {} }, serverSetting: () => undefined, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }], httpInbound: true });
   WR.setup({ getEngine: () => eng, dataDir, serverSetting: () => undefined });
+  require(path.join(REPO, 'src/routes/channels.js')).setup({ getEngine: () => eng });   // r6: THE ONE WIRING (channels-wiring.js hands both route files the same engine) — the gate reads it, never an argument
   const app = express(); app.use(WR.router);
   const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${srv.address().port}`;
@@ -533,6 +534,199 @@ try {
   ok(st(g.free.enable) === 200 && st(g.free.caller) === 200 && g.freeAfter === false, 'the SAME bare curls on the path with NO wake ⇒ 200 (enabled, a caller registered)', J2s({ enable: st(g.free.enable), caller: st(g.free.caller) }));
   ok(g.page.status === 200 && g.pageAfter === false, 'this instance\'s own page enables the held path ⇒ 200', J2s(g.page.status));
 } catch (e) { ok(false, '④g threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); }
+
+console.log('④h ROUND 6 (lane wake-approve-card): a removal names the STORED row; every door that can re-activate an inert row is a wake door; a held delivery says its age or asks; a gate judges at completion, with the ONE wiring\'s engine');
+const fires4h = (eng) => { const e = eng.effectiveFor(A, C); const w = e && e.watchers.find((x) => x.watcher.principal.id === AGENT.id); return w ? `${w.source}:${F.deliveryModeOf(w.watcher)}` : null; };
+const storedRows4h = (eng) => (eng.store.index.peek(KEY).watchers || []).filter((w) => w.principal.id === AGENT.id).map((w) => `${w.origin || '-'}:${F.deliveryModeOf(w)}`);
+// (1) the reviewers' probe (confirmed 0.96 / 0.95): an origin-agent wake, Worker taken off the account, unwatch ×2, the account given back
+try {
+  const { eng } = mkEngine('e4h-unwatch');
+  await eng.pass(A, { force: true });
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)] });
+  const ask = await eng.agentWatch(AG, KEY, { delivery: 'wake', why: 'on call' });
+  const ap = ask.request ? await eng.decideRequest(ask.request.id, true, 'user', { person: true }) : { ok: false };
+  const r = { approved: !!ap.ok, live: fires4h(eng) };
+  await eng.setGrain(A, { kind: 'account' }, { access: [] });   // the owner takes Worker off the account: its own row inert
+  r.inert = { stored: storedRows4h(eng), fires: fires4h(eng) };
+  const u1 = await eng.agentUnwatch(AG, KEY);
+  r.unwatch1 = { ok: u1.ok, removed: !!u1.removed, stored: storedRows4h(eng) };
+  const u2 = await eng.agentUnwatch(AG, KEY);
+  r.unwatch2 = { ok: u2.ok, code: u2.code || null };
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)] });   // later, the owner shares the account again
+  r.afterRegrant = { stored: storedRows4h(eng), fires: fires4h(eng) };
+  ok(r.approved && r.live === 'conversation:wake' && J2s(r.inert.stored) === '["agent:wake"]' && r.inert.fires === null, 'setup (the probe): the agent\'s wake ask approved — it fires; Worker taken off the account — its row stored, inert', J2s(r));
+  ok(r.unwatch1.ok && r.unwatch1.removed && J2s(r.unwatch1.stored) === '[]', 'the agent\'s own unwatch of its INERT row removes the STORED row (it names the row it removes — was: removed:true, the row still stored)', J2s(r.unwatch1));
+  ok(r.unwatch2.ok === false && r.unwatch2.code === 'not-watching', 'a second unwatch answers not-watching (was: removed:true again); its MAX_AGENT_WATCHES slot is free', J2s(r.unwatch2));
+  ok(J2s(r.afterRegrant.stored) === '[]' && r.afterRegrant.fires === null, 'the owner gives the account back ⇒ nothing fires (was: the BILLED wake live again with no approval)', J2s(r.afterRegrant));
+} catch (e) { ok(false, '④h (1) threw on this tree: ' + ((e && e.stack) || e)); }
+// (2) the reach doors: an inert room wake re-activated through the ACCOUNT's access and through a NEW rule — the real routes
+async function reach4h(ENGM, name, { wake = true } = {}) {
+  const express = require('express'), http = require('node:http');
+  const ROUTES = require(path.join(REPO, 'src/routes/channels.js'));
+  const { eng } = mkEngine(name, { ENGM });
+  await eng.pass(A, { force: true });
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER)] });
+  if (wake) await eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, delivery: 'wake' }] });   // the owner's Notify…: Worker woken by the room
+  const rule = await eng.setGrain(A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Announce' }] }, access: [acc(OTHER)], ...(wake ? { watchers: [{ principal: AGENT, delivery: 'wake' }] } : {}) });   // a rule wake for Worker through the account
+  const out = { live: fires4h(eng) };
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(OTHER)] });   // the owner takes Worker off the account: both rows inert
+  out.inert = fires4h(eng);
+  out.held = typeof eng.wakeHeldAt === 'function' ? eng.wakeHeldAt(A, { kind: 'account' }) : null;
+  out.newRuleHeld = typeof eng.wakeHeldAt === 'function' ? eng.wakeHeldAt(A, { kind: 'pattern', id: null }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [acc(AGENT)] }).held : null;
+  ROUTES.setup({ getEngine: () => eng });
+  const app = express(); app.use(express.json()); app.use(ROUTES.router);
+  const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const call = async (method, p, body, headers) => { const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) }); let j = {}; try { j = await r.json(); } catch { } return { status: r.status, code: j.code || null, error: j.error || null, held: j.held || null, wakes: j.wakes || null }; };
+  const PAGE = { 'Sec-Fetch-Site': 'same-origin' }, VSST = { Authorization: 'Bearer vsst_0123456789abcdef' };
+  try {
+    out.enableBare = await call('PUT', `/api/channels/adapters/${A}`, { enabled: true }, {});   // turning an account that stores a wake back on
+    out.acctBare = await call('PUT', `/api/channels/adapters/${A}/access`, { access: [acc(AGENT), acc(OTHER)] }, {});
+    out.acctVsst = await call('PUT', `/api/channels/adapters/${A}/access`, { access: [acc(AGENT), acc(OTHER)] }, VSST);
+    out.afterAcct = fires4h(eng);
+    if (out.acctBare.status === 200 || out.acctVsst.status === 200) await call('PUT', `/api/channels/adapters/${A}/access`, { access: [acc(OTHER)] }, PAGE);   // the base let one through: undo it for the next door
+    out.ruleBare = await call('POST', `/api/channels/adapters/${A}/patterns`, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [acc(AGENT)] }, {});
+    out.ruleVsst = await call('POST', `/api/channels/adapters/${A}/patterns`, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [acc(AGENT)] }, VSST);
+    out.afterRule = fires4h(eng);
+    out.ruleOther = await call('POST', `/api/channels/adapters/${A}/patterns`, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [acc(OTHER)] }, {});   // a new rule whose access makes nothing live
+    // the owner's own re-grant, from the page — the wake live, SAID in the answer
+    for (const id of Object.keys(eng.store.index.snapshot().patternAssignments || {})) if (id !== (rule.grain && rule.grain.id)) await eng.removePattern(A, id);   // the base's let-through rules out of the way
+    out.page = await call('PUT', `/api/channels/adapters/${A}/access`, { access: [acc(AGENT), acc(OTHER)] }, PAGE);
+    out.afterPage = fires4h(eng);
+  } finally { await new Promise((r) => srv.close(r)); }
+  return out;
+}
+try {
+  const r = await reach4h(ENG, 'e4h-reach');
+  ok(r.live === 'conversation:wake' && r.inert === null && r.held && r.held.held === true && r.held.why === 'below' && /Worker's wake on «.*» is inert until a person re-grants/.test(r.held.names || ''), `setup: the room wake live, then inert (Worker off the account) — wakeHeldAt(account) HOLDS it (r6: the stored wake rows BELOW the account its access decides): «${(r.held && r.held.names) || ''}»`, J2s({ live: r.live, inert: r.inert, held: r.held }));
+  ok(r.acctBare.status === 403 && r.acctBare.code === 'cross_site' && r.acctVsst.status === 403 && r.acctVsst.code === 'human_only' && /held: Worker's wake on/.test(r.acctBare.error || '') && r.afterAcct === null, 'a bare curl / a vsst_ `PUT …/adapters/A/access` re-adding Worker ⇒ 403 (cross_site / human_only), the refusal NAMES the row; the wake stays inert (was: 200 and live)', J2s({ bare: r.acctBare, vsst: r.acctVsst.status, after: r.afterAcct }));
+  ok(r.newRuleHeld === true && r.ruleBare.status === 403 && r.ruleVsst.status === 403 && r.afterRule === null, 'a bare / vsst_ `POST …/patterns {title Ops, access:[Worker]}` — a NEW rule whose access would make the inert room wake live ⇒ 403 each (was: 200 and live)', J2s({ held: r.newRuleHeld, bare: r.ruleBare.status, vsst: r.ruleVsst.status, after: r.afterRule }));
+  ok(r.ruleOther.status === 200, 'CONTROL: a bare new rule whose access makes NOTHING live (Other) ⇒ 200 — a rule is no wake door when it re-activates nothing', J2s(r.ruleOther));
+  const said = (r.page.wakes && r.page.wakes.reactivated) || [];
+  ok(r.page.status === 200 && r.afterPage === 'conversation:wake' && said.length >= 1 && /re-activated/.test((r.page.wakes && r.page.wakes.said) || ''), `the owner's own re-grant from the page ⇒ 200, the wake live — and SAID in the answer: «${(r.page.wakes && r.page.wakes.said) || ''}»`, J2s({ status: r.page.status, after: r.afterPage, wakes: r.page.wakes }));
+  const c0 = await reach4h(ENG, 'e4h-reach-free', { wake: false });
+  ok(c0.acctBare.status === 200 && c0.ruleBare.status === 200 && c0.enableBare.status === 200, 'CONTROL: the same bare account write, new rule and «enabled: true» on an account holding NO wake ⇒ 200 each (the agent\'s to edit, as before)', J2s({ acct: c0.acctBare.status, rule: c0.ruleBare.status, enable: c0.enableBare.status }));
+  ok(r.enableBare.status === 403 && r.enableBare.code === 'cross_site', 'a bare `PUT …/adapters/A {enabled: true}` on an account that stores a wake ⇒ 403 (turning it on makes every wake on it live — a wake write)', J2s(r.enableBare));
+} catch (e) { ok(false, '④h (2) threw on this tree: ' + ((e && e.stack) || e)); }
+// (3) a held delivery says its age or asks: a rule digest held for a while, then a boot
+async function aged4h(ENGM, name, ageMs) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const m1 = mkEngine(name, { ENGM });
+  const eng = m1.eng;
+  await eng.pass(A, { force: true });
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER)] });
+  const p = await eng.setGrain(A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [acc(OTHER)], watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 5 }] });
+  const P = p.grain && p.grain.id;
+  const rec = eng.adapterRecords().adapters.find((x) => x.id === A);
+  const recs = eng.messages(A, C, { limit: 3 });
+  await eng.onFresh(rec, C, (recs.records || recs).slice(-3), { origin: 'test' });
+  if (eng.settleWakes) await eng.settleWakes();
+  const t0 = m1.clock();
+  await eng.store.index.update(() => { const e2 = eng.store.index.entry(A, C, { create: false }); for (const x of e2.pending) x.at = t0 - ageMs; });   // the hits waited `ageMs` (a hub that ran the old reader)
+  const held0 = (eng.store.index.peek(KEY).pending || []).length;
+  eng.stop(); await sleep(10);
+  const m2 = mkEngine(name, { ENGM });
+  const eng2 = m2.eng;
+  eng2.start();
+  await sleep(10);
+  if (eng2.settleWakes) await eng2.settleWakes();
+  const windows = eng2.pendingWindows().filter((w) => w.kind === 'boot');
+  const items = m2.userTodos.openItems().filter((i) => i.action && i.action.type === 'channel-held-digest');
+  const reqs = (eng2.store.index.table('watchRequests') || []).filter((r) => r && r.kind === 'held');
+  const out = { P: !!P, held0, windows: windows.length, rows: items.length, text: items[0] ? items[0].text : null, reqs: reqs.length, aside: (eng2.store.index.peek(KEY).pending || []).filter((x) => x.aside).length, deliveredAtBoot: m2.delivered.length };
+  // what the boot timer does (BOOT_PENDING_DELAY_MS later), now — for the base, whose boot armed one
+  for (const w of windows) await eng2.flushScope(A, 'pattern', P, w.principal);
+  out.deliveredByWindow = m2.delivered.length;
+  out.head = m2.delivered[0] ? String(m2.delivered[0].text).split('\n')[0] : null;
+  return { out, eng: eng2, m: m2, reqs };
+}
+try {
+  const old = await aged4h(ENG, 'e4h-aged', 3 * 86400e3);
+  const o = old.out;
+  ok(o.P && o.held0 >= 1 && o.deliveredAtBoot === 0 && o.windows === 0 && o.deliveredByWindow === 0 && o.rows === 1 && o.reqs === 1 && o.aside === o.held0, `hits held 3 days (older than the digest's window × 24) ⇒ the boot delivers NOTHING by itself: ONE For-you decision «${o.text}», the ${o.held0} hits set aside (was: a boot window delivering them, «… in the last 60 min»)`, J2s(o));
+  const d = old.reqs[0] ? await old.eng.decideRequest(old.reqs[0].id, true, 'user', { person: true }) : { ok: false };
+  const head = old.m.delivered[0] ? String(old.m.delivered[0].text).split('\n')[0] : '';
+  const item = old.m.userTodos.resolvedOf('channel-held-digest')[0];
+  ok(d.ok && d.delivered === true && old.m.delivered.length === 1 && /held since \d{4}-\d\d-\d\d \d\d:\d\d \S+/.test(head) && !/in the last/.test(head) && item && item.resolvedBy === 'delivered' && (FA.decidedStamp(item, { now: Date.now() }) || {}).verb === 'delivered by you', `Deliver (the person verdict's decide route) ⇒ ONE block now, its header the TRUE span («${head.replace(/^### /, '')}»), the record «delivered by you»`, J2s({ d: { ok: d.ok, delivered: d.delivered, why: d.why }, n: old.m.delivered.length, head, by: item && item.resolvedBy }));
+  old.eng.stop();
+  const dis = await aged4h(ENG, 'e4h-aged-discard', 40 * 86400e3);
+  const dd = dis.reqs[0] ? await dis.eng.decideRequest(dis.reqs[0].id, false, 'user', { person: true }) : { ok: false };
+  const left = (dis.eng.store.index.peek(KEY).pending || []).length;
+  ok(dd.ok && dd.discarded >= 1 && left === 0 && dis.m.delivered.length === 0, 'Discard ⇒ the held hits dropped, nothing sent (40 days old — the fleet\'s months-old digests never burst)', J2s({ dd: { ok: dd.ok, discarded: dd.discarded }, left, delivered: dis.m.delivered.length }));
+  dis.eng.stop();
+  const young = await aged4h(ENG, 'e4h-young', 2 * 3600e3);
+  const y = young.out;
+  ok(y.windows === 1 && y.rows === 0 && y.deliveredByWindow === 1 && /held since \d{4}-\d\d-\d\d \d\d:\d\d \S+/.test(y.head || '') && !/in the last/.test(y.head || ''), `hits held 2 h (younger than a day) ⇒ the boot delivers them, the header naming the TRUE span «${(y.head || '').replace(/^### /, '')}» (was: «… in the last 60 min»)`, J2s(y));
+  young.eng.stop();
+} catch (e) { ok(false, '④h (3) threw on this tree: ' + ((e && e.stack) || e)); }
+// (5) a gate judges at COMPLETION: a pairing code minted while the path was free, the path then held
+async function webhook4h(name) {
+  const express = require('express'), http = require('node:http');
+  for (const f of ['src/routes/webhook.js', 'src/routes/channels.js']) delete require.cache[require.resolve(path.join(REPO, f))];   // ONE instance = its own wiring (two instances in one process)
+  const WR = require(path.join(REPO, 'src/routes/webhook.js'));
+  const CH = require(path.join(REPO, 'src/routes/channels.js'));
+  const dataDir = path.join(ROOT, name);
+  const settings = { 'webhook.allowPrivateReplyUrl': true };
+  const eng = ENG.create({ dataDir, env: {}, broadcast: () => {}, log: { log() {}, warn() {}, error() {} }, deliver: { deliverToConversation: async () => ({ ok: true, lane: 'message' }), stashFor() {} }, serverSetting: (k) => settings[k], liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }], httpInbound: true });
+  WR.setup({ getEngine: () => eng, dataDir, serverSetting: (k) => settings[k] });
+  CH.setup({ getEngine: () => eng });
+  const app = express(); app.use(WR.router);
+  const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  app.locals.instancePublicUrl = base;
+  const call = async (method, p, body = {}, headers = { 'Sec-Fetch-Site': 'same-origin' }) => { const r = await fetch(base + p, { method, headers: { 'Content-Type': 'application/json', ...headers }, ...(method === 'GET' ? {} : { body: JSON.stringify(body) }) }); let j = {}; try { j = await r.json(); } catch { } return { status: r.status, code: j.code || null, j }; };
+  const callers = async (slug) => { const r = await call('GET', '/api/channels/webhook/paths'); const p = (r.j.paths || []).find((x) => x.slug === slug); return p ? p.callers.filter((c) => !c.revokedAt).map((c) => c.kind) : null; };
+  return { eng, WR, CH, call, callers, close: async () => { await new Promise((r) => srv.close(r)); try { eng.stop(); } catch { } } };
+}
+try {
+  const Ai = await webhook4h('e4h-pairA'), Bi = await webhook4h('e4h-pairB');
+  const W = Ai.WR.ADAPTER_ID, VSAK = { Authorization: 'Bearer vsak_0123456789abcdef' };
+  try {
+    await Ai.call('POST', '/api/channels/webhook/paths', { slug: 'late', title: 'late', textPath: 'text' });
+    const code = await Ai.call('POST', '/api/channels/webhook/paths/late/pair-code', {}, VSAK);   // an automation key mints while the path is FREE
+    await Ai.eng.setGrain(W, { kind: 'conversation', convId: 'late' }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, delivery: 'wake' }] });   // the owner then sets a wake
+    const j = await Bi.call('POST', '/api/channels/webhook/join', { code: code.j.code }, {});   // a bare join with it
+    const lateCallers = await Ai.callers('late');
+    ok(code.status === 200 && j.status !== 200 && j.code === 'pair-wake-held' && /holds a wake/.test(j.j.error || '') && J2s(lateCallers) === '[]', `a code minted by a vsak_ while the path was free, the owner then sets a wake, a bare join ⇒ refused AT COMPLETION (${j.status} ${j.code}: «${String(j.j.error || '').slice(0, 120)}…»), no peer written (was: 200 and a peer on the held path)`, J2s({ mint: code.status, join: j.status, code: j.code, callers: lateCallers }));
+    await Ai.call('POST', '/api/channels/webhook/paths', { slug: 'held', title: 'held', textPath: 'text' });
+    await Ai.eng.setGrain(W, { kind: 'conversation', convId: 'held' }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, delivery: 'wake' }] });
+    const pc = await Ai.call('POST', '/api/channels/webhook/paths/held/pair-code', {});   // the owner's page mints on the held path
+    const j2 = await Bi.call('POST', '/api/channels/webhook/join', { code: pc.j.code }, {});
+    const heldCallers = await Ai.callers('held');
+    ok(pc.status === 200 && j2.status === 200 && J2s(heldCallers) === '["peer"]', 'CONTROL: the owner\'s page-minted code on a held path still completes (a person minted it) — the peer written', J2s({ mint: pc.status, join: j2.status, callers: heldCallers }));
+    // (6c) the gate resolves the engine from THE ONE WIRING: handed another engine (no wake there), it still judges by the wired one
+    const req0 = { headers: {}, get: () => undefined, header: () => undefined };
+    const mkRes = () => { const r = { code: null, body: null, status(c) { r.code = c; return r; }, json(b) { r.body = b; return r; }, set() { return r; } }; return r; };
+    const res0 = mkRes();
+    const refused = Ai.CH.wakeRefused(req0, res0, { adapterId: W, grain: { kind: 'path', convId: 'held' } }, [], () => Bi.eng);
+    ok(refused === true && res0.code === 403, 'the gate handed ANOTHER engine (the wrong-engine mutant: one with no wake on that path) ⇒ 403 — it judges with the one wiring\'s engine, never its argument (was: let through)', J2s({ refused, code: res0.code }));
+    // (6a) KEPT FAIL-CLOSED, NAMED: one rule wake on the webhook account holds every path verb — the refusal names the rule
+    await Bi.call('POST', '/api/channels/webhook/paths', { slug: 'beta', title: 'beta', textPath: 'text' });
+    await Bi.eng.setGrain(W, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'nothing-matches-this' }] }, access: [acc(AGENT)], watchers: [{ principal: AGENT, delivery: 'wake' }] });
+    const ov = await Bi.call('PUT', '/api/channels/webhook/paths/beta', { wakesPerHour: 30 }, {});
+    ok(ov.status === 403 && /held by the rule title contains "nothing-matches-this" — a wake on this account; every path verb rewrites the facts a rule matches, so edit it on the page/.test(ov.j.error || '') && ov.j.heldBy === 'rule', `(6a) a rule wake on the webhook account holds every path verb (kept fail-closed: a path verb rewrites the facts a rule matches) — and the refusal NAMES the rule: «${String(ov.j.error || '').split(' — held: ')[1] || ''}»`, J2s({ status: ov.status, heldBy: ov.j.heldBy }));
+  } finally { await Ai.close(); await Bi.close(); for (const f of ['src/routes/webhook.js', 'src/routes/channels.js']) delete require.cache[require.resolve(path.join(REPO, f))]; }
+} catch (e) { ok(false, '④h (5) threw on this tree: ' + ((e && e.stack) || e)); }
+// (6e) the boot census reads through the one reader; (6f) the agent's watch list marks an inert row
+try {
+  const lines = [];
+  const m0 = mkEngine('e4h-census', {});
+  const eng = m0.eng;
+  await eng.pass(A, { force: true });
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER)] });
+  await eng.setGrain(A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [acc(OTHER)], watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 5 }] });
+  await eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, delivery: 'wake' }] });
+  const firing = eng.effectiveFor(A, C).watchers.filter((x) => x.watcher.principal.id === AGENT.id).map((x) => x.source);
+  eng.stop(); await new Promise((r) => setTimeout(r, 10));
+  const m1 = mkEngine('e4h-census', { lines });
+  m1.eng.start(); await new Promise((r) => setTimeout(r, 20));   // the census lines are written in start() itself
+  const census = lines.filter((l) => /without access at their grain/.test(l));
+  ok(firing.length === 1 && census.length === 0, `(6e) the boot census reads by THE one reader: a FIRING rule digest and room wake (the access the account's) are not named «without access at their grain» (was: both named at every boot)`, J2s({ firing, census }));
+  await m1.eng.setGrain(A, { kind: 'account' }, { access: [acc(OTHER)] });   // Worker off the account: both rows inert
+  const list = m1.eng.agentWatchesFor(AG).watches.map((w) => `${w.grain}:${w.delivery}:${w.inert ? 'inert' : 'live'}`);
+  m1.eng.stop();
+  ok(J2s(list.sort()) === J2s(['conversation:wake:inert', 'pattern:wake:inert']), `(6f) the agent's watch list reads by the one reader: Worker off the account ⇒ the rule row AND the room row listed, each marked inert (was: the rule row «live», the room row gone): ${list.join(' · ')}`, J2s(list));
+} catch (e) { ok(false, '④h (6e/6f) threw on this tree: ' + ((e && e.stack) || e)); }
 
 console.log('⑤ W5: next-turn rides the free stash; a legacy row still wakes');
 async function deliveryLeg(ENGM, name) {

@@ -126,15 +126,18 @@ ok(JSON.stringify(Object.keys(JSON.parse(WP.peerBody({ text: 'x', name: 'A' })))
 
 console.log('§2 two instances in-process (real engines, real routes, loopback)');
 const routePath = require.resolve('../src/routes/webhook.js');
+const chanPath = require.resolve('../src/routes/channels.js');
 async function instance(tag, settings, o = {}) {
   const dataDir = o.dataDir || scratch('webhook-pair-' + tag);
   let skew = o.skew || 0;
   const now = () => Date.now() + skew;
   delete require.cache[routePath];
+  delete require.cache[chanPath];   // lane wake-approve-card r6: ONE instance = ITS wiring — the wake gate reads channels.js's engine (src/server/channels-wiring.js hands both route files the same one)
   const R = o.routes ? o.routes() : require(routePath);
   const bc = [];
   const eng = ENG.create({ dataDir, env: {}, broadcast: (m) => bc.push(m), log: { log() {}, warn() {}, error() {} }, deliver: { async deliverToConversation() { return { ok: true, lane: 'message' }; }, stashFor() {} }, serverSetting: (k) => settings[k], liveSessions: () => [], httpInbound: true });
   R.setup({ getEngine: () => eng, dataDir, serverSetting: (k) => settings[k], now });
+  require(chanPath).setup({ getEngine: () => eng });
   const app = express(); app.use(R.router);
   const srv = http.createServer(app);
   await new Promise((r) => srv.listen(o.port || 0, '127.0.0.1', r));

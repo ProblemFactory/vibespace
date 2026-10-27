@@ -808,12 +808,12 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   // src/channel-watch-spec.js (judged by the dialog's own validators; a refusal prints their words + [code]); this file
   // ships to other machines and parses nothing but `--spec @file` (the file is here). `--show` / `watches` read back.
   // lane judged-watch-state: a judged rule's row carries its road (`judged`, the server's words) on the line under it
-  const watchLine = (w) => `${w.how}, on ${w.what}, at most ${w.dailyWakeCap}/day${w.expiresAt ? `, until ${new Date(w.expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''} — ${w.setBy === 'agent' ? 'set by you (unwatch removes it)' : `set by the user${w.as === 'group' ? ` for your group ${w.group}` : w.as === 'everyone' ? ' for all agents' : ' for you'} — yours to read, theirs to change`}${w.judged ? `\n    ${w.judged}` : ''}`;
+  const watchLine = (w) => `${w.how}, on ${w.what}, at most ${w.dailyWakeCap}/day${w.expiresAt ? `, until ${new Date(w.expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''} — ${w.setBy === 'agent' ? 'set by you (unwatch removes it)' : `set by the user${w.as === 'group' ? ` for your group ${w.group}` : w.as === 'everyone' ? ' for all agents' : ' for you'} — yours to read, theirs to change`}${w.inert ? `\n    ${w.inert}` : ''}${w.judged ? `\n    ${w.judged}` : ''}`;   // lane wake-approve-card r6: an inert row says so
   if (verb === 'watches') {
     const r = await call('GET', '/api/agent/channels/watches');
     const ws = r.watches || [];
     if (!ws.length) console.log('nothing notifies you — `vibespace-channels watch <conv|account>` sets your own (next-turn: free)');
-    for (const w of ws) console.log(`${w.grain === 'pattern' ? `(a rule the user set) ${w.title}` : `${w.target} — ${w.title}${w.grain === 'account' ? ' (the whole account)' : ''}`}\n    ${watchLine(w)}`);
+    for (const w of ws) console.log(`${w.grain === 'pattern' ? `(a rule the user set) ${w.title}` : `${w.target} — ${w.title || 'a conversation you can no longer read'}${w.grain === 'account' ? ' (the whole account)' : ''}`}\n    ${watchLine(w)}`);
     if (r.more) console.log(`(${r.more} more)`);
     for (const q of r.requests || []) console.log(`waiting for the user: ${q.target} — ${q.how}, on ${q.what} (request ${q.id})`);
     return;

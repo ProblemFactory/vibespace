@@ -38,6 +38,8 @@
  *             «always allowed by you» (a held ask's Allow once / Always) · 'store' «stored · 09:41» (a paste request) ·
  *             'grant' «allowed once by you» / «allowed by you for 8 h» (an agent's request for a stored secret — r4)
  *   showsExpiry  the card and the tray row say its end («expires in 7 d» — a wake ask's lifetime, expiryWords)
+ *   verbs     a proposal-shaped row's own two words (r6: a held digest's Deliver / Discard) — {approve, reject, title}; absent =
+ *             Approve / Deny (Reject) — verbsOf(type)
  *   closer    'hide' = its item is a POINTER (acceptance round 3 — 主开发: «a pointer item hides, never decides»): a door to
  *             where its question lives (the Reach dialog, the Outbox, the conversation), so its ONE closer is ✕ «Hide» —
  *             no ✓ Mark done, no «done» record, no Undo, no ↺ (closersOf); the person's close is a HIDE in the store
@@ -75,6 +77,8 @@
  * `transcript` = the chat's loaded records as lean rows {id, ts, role, tool, cmd, out} (chat-needs-card.js maps them).
  */
 
+/** `i18nKey` = the extractor's marker for a declared human-visible string. */
+const i18nKey = (s) => s;
 /** The KINDS a card names (the chip's words, the agent's line). */
 const KINDS = Object.freeze(['approval', 'question', 'secret', 'browser', 'check']);
 
@@ -91,7 +95,7 @@ const ROWS = Object.freeze([
   // ── vault ──
   { type: 'automation-ask', identity: 'askId', producer: 'src/server/automation-engine.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-api', 'an automation key\'s first use', 'own'), scope: 'conversation' },
   { type: 'vault-run-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'run', 'wait'), scope: 'conversation', decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over', 'ask-changed', 'vault_locked'], stamp: 'allow' },
-  { type: 'vault-grant-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'request <vault://…>', 'filed'), scope: 'conversation', decide: 'person', ends: ['granted-once', 'granted-8h', 'denied', 'vault_locked', 'ask-changed', 'ask-over'], stamp: 'grant' },   // r4: Allow once / For 8 hours / Deny are its three verbs (+ a lock, a changed card, an ask that is over); r5: For 8 hours writes `granted-8h` (the duration on the record)
+  { type: 'vault-grant-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'request <vault://…>', 'filed'), scope: 'conversation', decide: 'person', ends: ['granted', 'denied', 'vault_locked', 'ask-changed', 'ask-over'], stamp: 'grant' },   // r4: Allow once / For 8 hours / Deny are its three verbs (+ a lock, a changed card, an ask that is over); r6: a grant is `granted` (every reader knows it) + `resolvedFact.grantedFor` — its life: grantLifeOf
   { type: 'secret-request', identity: 'requestId', producer: 'src/server/vault-paste-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'secret', cli: C('vibespace-vault', 'request "<what>"', 'filed'), scope: 'conversation', decide: 'person', ends: ['stored', 'denied', 'vault_locked', 'ask-over', 'expired'], stamp: 'store' },
   { type: 'vault-unlock', identity: null, producer: 'src/server/vault-hooks.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
   // the audit's two drifts (2026-10-26): a failed use was in no table; a rotate suggestion merged by its text — now by its entry
@@ -114,6 +118,7 @@ const ROWS = Object.freeze([
   { type: 'save-login', identity: null, producer: 'src/server/browser-logins.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'group' },
   // ── channels ──
   { type: 'channel-watch-request', identity: 'id', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'watch --mode wake', 'filed'), scope: 'about', decide: 'person', ends: ['allowed', 'denied', 'expired'], showsExpiry: true },
+  { type: 'channel-held-digest', identity: 'id', producer: 'src/server/channels-access.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'group', decide: 'person', ends: ['delivered', 'discarded', 'expired'], stamp: 'deliver', showsExpiry: true, verbs: Object.freeze({ approve: i18nKey('Deliver'), reject: i18nKey('Discard'), title: i18nKey('Sends them now, as one block — a billed turn') }) },   // lane wake-approve-card r6: hits a boot found held longer than their window × 24 — Deliver (a billed turn) / Discard, never sent by themselves
   { type: 'open-channel', identity: 'key', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'request', 'filed'), scope: 'about', decide: 'person', closer: 'hide' },
   { type: 'channel-api-proposal', identity: 'id', producer: 'src/server/channel-api-cards.js', builtIn: 'src/channel-api-card.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: false, owner: 'the raw-API card the chat draws where it was proposed (B-2198) — src/lib/channel-api-card-view.js', on: 'the API card in this conversation', scope: 'group' },
   { type: 'channel-reauth', identity: null, producer: 'src/server/channels-engine.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'check', scope: 'group' },
@@ -242,8 +247,6 @@ function placementOf(item, transcript, { resolved = false } = {}) {
 
 /** The default formatter (the suite and the hub pass none): English with `{param}` filled — the client passes its `t`. */
 const fmt = (s, p) => String(s).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] != null ? p[k] : ''));
-/** `i18nKey` = the extractor's marker for a declared human-visible string. */
-const i18nKey = (s) => s;
 const ONE = Object.freeze({ approval: i18nKey('an approval'), question: i18nKey('a question'), secret: i18nKey('a secret'), browser: i18nKey('a step in the browser'), check: i18nKey('something to check') });
 const MANY = Object.freeze({ approval: i18nKey('{n} approvals'), question: i18nKey('{n} questions'), secret: i18nKey('{n} secrets'), browser: i18nKey('{n} steps in the browser'), check: i18nKey('{n} things to check') });
 const kindOf = (e) => (e && KINDS.includes(e.kind) ? e.kind : 'check');
@@ -268,9 +271,10 @@ function settledWords(item, t = fmt, kind = null) {
   if (by === 'allowed') return k === 'approval' ? t('approved') : t('allowed');
   if (by === 'denied') return t('denied');
   if (by === 'stored') return t('saved to the vault');
-  if (by === 'granted-8h') return t('allowed for 8 hours');   // r4: an agent's request for a stored secret, answered — r5: only a record carrying the duration says it
-  if (by === 'granted-once') return t('allowed once');
-  if (by === 'granted') return t('allowed');   // r5: a record from before .360 (Allow once and For 8 hours both stored `granted`) says only what was decided
+  if (by === 'granted') { const gw = grantWords(item, { t }); return gw ? gw.text : t('allowed'); }   // r4: an agent's request for a stored secret, answered — r6: the duration its record carries (none ⇒ «allowed») and the grant's LIFE (ended / revoked)
+  if (by === 'delivered') return t('delivered');   // r6: a held digest the owner released
+  if (by === 'discarded') return t('discarded — nothing was sent');
+  if (by === 'expired' && item && item.action && item.action.type === 'channel-held-digest') return t('expired — discarded, nothing was sent');   // r6: its end discards
   if (by === 'expired' || by === 'ask-expired') return isDecisionRow(item) ? t('expired · the agent can ask again') : t('expired');   // r2: a decision's end
   if (by === HIDDEN_BY) return t('hidden — nothing was decided');   // r3: a pointer the person hid
   if (by === 'agent') return t('withdrawn by the agent');
@@ -369,24 +373,66 @@ const STAMPS = Object.freeze({
   approve: Object.freeze({ allowed: i18nKey('approved by you'), denied: i18nKey('denied by you') }),
   allow: Object.freeze({ allowed: i18nKey('allowed by you'), always: i18nKey('always allowed by you'), denied: i18nKey('denied by you') }),
   store: Object.freeze({ stored: i18nKey('stored'), denied: i18nKey('refused by you') }),
-  grant: Object.freeze({ 'granted-once': i18nKey('allowed once by you'), 'granted-8h': i18nKey('allowed by you for 8 h'), denied: i18nKey('denied by you') }),   // r4: vault-grant-ask's three verbs (r5: an old `granted` has no stamp — its own words, «allowed»)
+  deliver: Object.freeze({ delivered: i18nKey('delivered by you'), discarded: i18nKey('discarded by you') }),   // r6: a held digest's Deliver / Discard
+  grant: Object.freeze({ 'granted:once': i18nKey('allowed once by you'), 'granted:8h': i18nKey('allowed by you for 8 h'), denied: i18nKey('denied by you') }),   // r4: vault-grant-ask's three verbs — r6: keyed `granted:<grantedFor>` (the record's fact); an old `granted` (no duration) has no stamp — its own words, «allowed»
 });
+/** THE GRANT'S LIFE (lane wake-approve-card r6 — 主开发: «a card's state follows the grant's life»; the record was a decision
+ *  log that never fell: «allowed by you for 8 h · 09:38» at +9 h, +3 d and after a lock). An agent's request for a stored
+ *  secret answered with a grant (`resolvedBy: 'granted'`) → {state: 'live' | 'ended' | 'revoked', at, grantedFor, until}
+ *  read off its RECORD: `resolvedFact.grantedFor` ('once' | '8h'; absent on a record from before the field ⇒ «allowed»),
+ *  `until`, and the END the vault door writes (`endedAt` / `endedBy`: a lock, the entry's switch OFF = 'revoked', a
+ *  once-grant's run, its time, a restart — src/server/vault-run-door.js grantEnded). Past `until` with no end written ⇒ ended
+ *  at `until`. null for anything else. THE ONE READER of a grant's state for the card, the tray and the window (the use
+ *  check's truth is the door's grant rows; at the vault-use-grants integration the store's verdict — report.md «As-built —
+ *  integration note»). */
+function grantLifeOf(item, now = Date.now()) {
+  // the request's grant (`granted`) and the run card's «always» (`always`, its `alwaysFor` ttl) — the two grants a vault card makes
+  const req = !!(item && item.action && item.action.type === 'vault-grant-ask' && item.resolvedBy === 'granted');
+  const run = !!(item && item.action && item.action.type === 'vault-run-ask' && item.resolvedBy === 'always');
+  if (!req && !run) return null;
+  const f = item.resolvedFact && typeof item.resolvedFact === 'object' ? item.resolvedFact : {};
+  const grantedFor = run ? 'always' : f.grantedFor === 'once' || f.grantedFor === '8h' ? f.grantedFor : null;
+  const until = Number(f.until) > 0 ? Number(f.until) : null;
+  const endedAt = Number(f.endedAt) > 0 ? Number(f.endedAt) : null;
+  if (endedAt && f.endedBy === 'revoked') return { state: 'revoked', at: endedAt, grantedFor, until };
+  if (endedAt) return { state: 'ended', at: endedAt, grantedFor, until, by: String(f.endedBy || 'ended') };
+  if (until && now >= until) return { state: 'ended', at: until, grantedFor, until, by: 'time' };
+  return { state: 'live', at: null, grantedFor, until };
+}
+/** A row's own two verbs (`verbs` — the held digest's Deliver / Discard), or null (Approve / Deny). */
+const verbsOf = (type) => (ROW_OF[type] && ROW_OF[type].verbs) || null;
+const GRANT_VERB = Object.freeze({ '8h': i18nKey('allowed for 8 hours'), once: i18nKey('allowed once'), always: i18nKey('always allowed') });
+/** A granted record in words, its life said: «allowed for 8 hours» / «allowed once» / «allowed» (no duration on the record),
+ *  «allowed for 8 hours · ended 17:41», «allowed · revoked 17:41». → {verb, when, text, state} | null (not a grant). */
+function grantWords(item, { t = fmt, now = Date.now() } = {}) {
+  const life = grantLifeOf(item, now);
+  if (!life) return null;
+  if (life.state === 'revoked') { const verb = t(life.grantedFor === 'always' ? GRANT_VERB.always : 'allowed'), when = t('revoked {time}', { time: clockWords(life.at, now) }); return { verb, when, text: `${verb} · ${when}`, state: 'revoked' }; }
+  const verb = t(GRANT_VERB[life.grantedFor] || 'allowed');
+  if (life.state === 'ended') { const when = t('ended {time}', { time: clockWords(life.at, now) }); return { verb, when, text: `${verb} · ${when}`, state: 'ended' }; }
+  return { verb, when: null, text: verb, state: 'live' };
+}
 function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
   if (!item || item.status === 'open' || !item.action || !PERSON_DECIDES.includes(item.action.type)) return null;
   const by = item.resolvedBy;
-  const words = STAMPS[ROW_OF[item.action.type].stamp] || STAMPS.approve;
-  if (!Object.prototype.hasOwnProperty.call(words, by)) return null;
   const fact = item.resolvedFact && typeof item.resolvedFact === 'object' ? item.resolvedFact : null;
+  // r6: a grant that ENDED (or was revoked) says so, whoever decided it — «allowed for 8 hours · ended 17:41»
+  const gw = by === 'granted' || by === 'always' ? grantWords(item, { t, now }) : null;
+  if (gw && gw.state !== 'live') return { verb: gw.verb, time: gw.when, text: gw.text, denied: false, ended: gw.state };
+  const words = STAMPS[ROW_OF[item.action.type].stamp] || STAMPS.approve;
+  const key = by === 'granted' && fact && (fact.grantedFor === 'once' || fact.grantedFor === '8h') ? `granted:${fact.grantedFor}` : by;
+  if (!Object.prototype.hasOwnProperty.call(words, key)) return null;
   if (!fact || fact.decidedBy !== 'person') return null;
-  const verb = t(words[by]);
+  const verb = t(words[key]);
   const time = clockWords(Number(fact.decidedAt) || item.resolvedAt || item.createdAt, now);
-  return { verb, time, text: `${verb} · ${time}`, denied: by === 'denied' };   // `denied`: the card's quiet red
+  return { verb, time, text: `${verb} · ${time}`, denied: by === 'denied' || by === 'discarded' };   // `denied`: the card's quiet red
 }
 /** THE DECISION CARD'S MODEL (lane wake-approve-card) — `item` → {state, buttons, stamp, waiting}:
  *   'filed'         open, and this viewer may decide ⇒ buttons ['approve', 'deny'] (the row's own verbs — the tray's route)
  *   'waiting-owner' open, and this viewer may NOT (canDecide false) ⇒ NO buttons, `waiting` = the words it reads instead
  *   'approved' / 'denied' — decided; `stamp` = decidedStamp (a person row) or the settled verb
- *   'expired' / 'withdrawn' / 'settled' — over without a decision; never a button */
+ *   'expired' / 'withdrawn' / 'settled' — over without a decision; never a button
+ *   'ended' / 'revoked' — r6: a grant whose life is over (grantLifeOf: past its end, a lock, its one use / revoked) */
 function decisionCard(item, { role = VIEWER_ROLE, t = fmt, now = Date.now() } = {}) {
   const it = item || {};
   if (it.status === 'open') {
@@ -396,7 +442,8 @@ function decisionCard(item, { role = VIEWER_ROLE, t = fmt, now = Date.now() } = 
   }
   const st = decidedStamp(it, { t, now });
   const by = it.resolvedBy;
-  const state = by === 'allowed' || by === 'always' || by === 'stored' || by === 'granted' || by === 'granted-8h' || by === 'granted-once' ? 'approved' : by === 'denied' ? 'denied' : (by === 'expired' || by === 'ask-expired') ? 'expired' : by === 'agent' ? 'withdrawn' : 'settled';
+  const life = by === 'granted' || by === 'always' ? grantLifeOf(it, now) : null;   // r6: a grant's card follows its LIFE — 'ended' / 'revoked', never 'approved' for ever
+  const state = life && life.state !== 'live' ? life.state : by === 'allowed' || by === 'always' || by === 'stored' || by === 'granted' || by === 'delivered' ? 'approved' : by === 'denied' || by === 'discarded' ? 'denied' : (by === 'expired' || by === 'ask-expired') ? 'expired' : by === 'agent' ? 'withdrawn' : 'settled';
   return { state, buttons: [], stamp: st ? st.text : settledWords(it, t), waiting: null };
 }
 
@@ -437,4 +484,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf };

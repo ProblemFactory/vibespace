@@ -445,25 +445,39 @@ const wakeRowsOf = (rows) => (Array.isArray(rows) ? rows.filter((w) => w && type
 /** A pre-split assignment's watcher row (F.splitAssignment) carries no delivery — it is a wake whenever it is written. */
 const assignmentRowsOf = (a) => (a && typeof a === 'object' ? [{ principal: a.principal || null }] : []);
 /** THE GRAIN a route writes, off its PATH (r4 — never a body field): the account, a rule (no :pid = a NEW rule, which holds
- *  nothing yet), a conversation. */
+ *  nothing of its own yet), a conversation. r6: a rule write also says what it PROPOSES (`proposed` — its pattern and access:
+ *  a new rule, or a moved pattern, holds the inert wake rows its access would make live); the grain itself stays the path's. */
 const accountGrain = (req) => ({ adapterId: req.params.id, grain: { kind: 'account' } });
-const ruleGrain = (req) => ({ adapterId: req.params.id, grain: { kind: 'pattern', id: req.params.pid || null } });
+const ruleGrain = (req) => ({ adapterId: req.params.id, grain: { kind: 'pattern', id: req.params.pid || null }, proposed: { pattern: (req.body || {}).pattern, access: listOf(req.body, 'access') } });
 const convGrain = (req) => ({ adapterId: req.params.adapterId, grain: { kind: 'conversation', convId: req.params.convId } });
-/** Does the grain `at` hold a wake now (THE engine's mark)? An engine that cannot say ⇒ it does (fail closed: the person verdict). */
-function wakeHeld(at, eng = engine) {
-  try { const e = eng(); return typeof e.wakeHeldAt !== 'function' || !!(e.wakeHeldAt(at.adapterId, at.grain) || {}).held; } catch { return true; }
+/** r6: the account's on / off switch — every wake row stored anywhere on it (turning it back on makes them all live). */
+const switchGrain = (req) => ({ adapterId: req.params.id, grain: { kind: 'adapter' } });
+/** Does the grain `at` hold a wake now (THE engine's mark)? An engine that cannot say ⇒ it does (fail closed: the person verdict).
+ *  r6 (主开发: «the gate reads whatever engine it is handed»): the engine is THE ONE WIRING's (src/server/channels-wiring.js
+ *  hands this file and src/routes/webhook.js the same channels engine) — never a caller's argument — and it must OWN the
+ *  adapter it judges (an engine that does not know the account cannot say it holds no wake). → the engine's verdict. */
+function wakeHeld(at) {
+  try {
+    const e = engine();
+    if (typeof e.wakeHeldAt !== 'function' || typeof e.adapterRecords !== 'function') return { held: true, why: 'unknown' };
+    if (!(e.adapterRecords().adapters || []).some((r) => r && r.id === at.adapterId)) return { held: true, why: 'unknown-account' };
+    return e.wakeHeldAt(at.adapterId, at.grain, at.proposed || {}) || { held: false };
+  } catch { return { held: true, why: 'unknown' }; }
 }
 /** → true when it answered (403, by name): the grain `at` HOLDS a wake or `rows` (the body's) would write one, and the write is
- *  not a person's on this page. Every grain-writing route asks it first, whatever its body says. r5: `eng` = the engine the
- *  caller holds — src/routes/webhook.js asks THIS gate with its own (one gate, never a local copy). */
-function wakeRefused(req, res, at, rows = [], eng = engine) {
+ *  not a person's on this page. Every grain-writing route asks it first, whatever its body says. r5: src/routes/webhook.js asks
+ *  THIS gate (one gate, never a local copy); r6: with no engine of its own (above). The refusal NAMES what holds the grain
+ *  (`held`: «Worker's wake on «Ops» is inert until a person re-grants», the rule a path is held by). */
+function wakeRefused(req, res, at, rows = []) {
   const writes = wakeRowsOf(rows).length > 0;
-  const held = !writes && wakeHeld(at, eng);
+  const h = writes ? null : wakeHeld(at);
+  const held = !!(h && h.held);
   if (!writes && !held) return false;
   const who = personVerdict(req);
   if (who.ok) return false;
   const words = held ? WAKE_HELD_REFUSED : WAKE_REFUSED;
-  bad(res, 403, words[who.code] || words.cross_site, { code: who.code, ...(held ? { wakeHeld: true } : {}) });
+  const named = held && h.names ? String(h.names).slice(0, 600) : null;
+  bad(res, 403, (words[who.code] || words.cross_site) + (named ? ` — held: ${named}` : ''), { code: who.code, ...(held ? { wakeHeld: true, ...(h.why ? { heldBy: h.why } : {}), ...(named ? { held: named } : {}) } : {}) });
   return true;
 }
 /** lane grants-unify — «除了»: the members of a picked Task Group / All agents LEFT OUT (`except`, a list of
@@ -580,6 +594,8 @@ router.put('/api/channels/adapters/:id', async (req, res) => {
     forHost(req);
     if (refuseAgentBearer(req, res, ACCOUNT_IS_OWNERS)) return;   // verify r5: the Edit dialog's saves (a secret, the sending policy) are the owner's
     const b = req.body || {};
+    // r6: turning an account back ON makes every wake stored on it live again (an off account fires nothing) — a wake write
+    if (b.enabled === true && wakeRefused(req, res, switchGrain(req))) return;
     let out = { ok: true };
     if (typeof b.enabled === 'boolean') out = { ...out, ...(await engine().setEnabled(req.params.id, b.enabled)) };
     if (b.options !== undefined) out = { ...out, ...(await engine().setOptions(req.params.id, b.options)) };
@@ -1406,4 +1422,4 @@ router.post('/api/channel-groups/:id/:verb', async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
-module.exports = { router, setup, wakeRefused };   // r5: the webhook path verbs ask the same gate
+module.exports = { router, setup, wakeRefused, wakeHeld };   // r5: the webhook path verbs ask the same gate (r6: with this file's engine — the one wiring)
