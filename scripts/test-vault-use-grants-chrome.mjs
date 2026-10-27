@@ -17,6 +17,10 @@
 //   ⑤ 「Who may use it…」: THE principal picker (All agents + the live conversation), the hosts, the end; All agents added ⇒
 //      验证是你 first (a widening), then the chip; ✕ takes it back with a click
 //   ⑥ «no match» under a picked purpose («Kept by agents») names it + 「Search all」 ⇒ the row
+//   ⑦ THE POLICY JUDGE'S RECORD (R4; never a vendor): with the hub stopped, the REAL run door over the same data dir and a STUB
+//      judge approves one run (the way the window suite seeds its cards — no test door in the product); the hub boots, and
+//      the approval is where a run card's result is shown today — For you (the chat card chain is not on this base):
+//      «Approved by the policy judge · HH:MM · inside your policy (0.93)»; its door opens the entry's row, which says the policy
 //   --shots <dir> keeps vug-*.png (the search before / after, the picker, the card naming the grant).
 //   RED CONTROL: this suite over the base tree (6428c67e) — ② the row never appears without a reopen; ③–⑥ do not exist.
 // Run: node scripts/test-vault-use-grants-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
@@ -230,6 +234,49 @@ try {
   await A.evalJs(`(() => { const b = document.querySelector('.vw-nomatch-all'); if (b) b.click(); return !!b; })()`);
   check('「Search all」 ⇒ the row', !!(await A.until(`!!(${LIST_ROW(LABEL)})`, { timeout: 5000 })));
   check('no value in any page: the watching page\'s DOM and inputs', !(await A.evalJs(`document.documentElement.outerHTML + [...document.querySelectorAll('input')].map((i) => i.value).join('')`)).includes(VALUE));
+
+  console.log('⑦ THE POLICY JUDGE\'S RECORD — a stub judge approves one run (the hub stopped), the page shows it in For you');
+  await stopServer();
+  {
+    const r = (m) => require(path.join(wt, m));
+    const DATA = path.join(wt, 'data');
+    const vault = r('src/server/vault-engine.js').create({ dataDir: DATA, log: { log() {}, warn() {} }, idleTimer: false, register: false });
+    const un = await vault.unlock(SECOND);
+    const { UserTodoManager } = r('src/user-todos.js');
+    const ut = new UserTodoManager({ dataDir: DATA, expirySweepMs: 0 });
+    const door = r('src/server/vault-run-door.js').create({ dataDir: DATA, vault, userTodos: ut, sources: { secrets: () => r('src/server/vault-contents.js').secretSource({ vault }) }, instanceKind: () => 'cluster', home: fakeHome,
+      agentEnv: () => ({ ...process.env, PATH: fakeBin + ':' + process.env.PATH }), liveOf: () => true, policyOn: () => true,
+      policyJudge: async () => ({ ok: true, answers: [{ name: 'within_policy', probability: 0.93 }] }) });   // THE STUB — never a vendor
+    const id = REF.replace(/^vault:\/\/secrets\/(secret:[0-9a-f]{10})\/secret$/, 'secrets:$1#secret');
+    door.setRunnable({ id, on: true, reauthed: true });
+    const pol = door.setPolicy({ id, text: 'only 192.168.1.1, read-only status calls to read the WAN status', reauthed: true });
+    const ran = await door.run({ caller: { conversationId: SID, sessionKey: `claude:${SID}`, name: 'Home network', cwd: CWD, scope: SID }, args: ['--env', `T=${REF}`, '--', 'curl', '-sk', 'https://192.168.1.1/api/stat/sites'], cwd: CWD });
+    check('the REAL run door with a stub judge (0.93) runs it with no card — by: policy', un.ok && pol.ok && ran.ok && ran.by === 'policy', { un: un.ok, pol, by: ran.by, code: ran.code });
+    try { ut.flush?.(); } catch { } try { ut.stop?.(); } catch { }
+    try { vault.lock('close', { quiet: true }); } catch { }
+  }
+  startServer();
+  check('the hub boots again', await ready());
+  await A.cdp('Page.navigate', { url: URL });
+  await A.until(`!!(window.app && app.wm && document.getElementById('taskbar-user-todos'))`, { timeout: 30000 });
+  await A.until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
+  if (await A.evalJs(`!!document.getElementById('vault-unlock-dialog')`)) await A.evalJs(`document.getElementById('vault-unlock-dialog').remove(); true`);
+  const ul = await A.api('POST', '/api/vault/unlock', { password: SECOND });
+  check('the vault unlocked from the page', ul.status === 200, ul);
+  const rec = ((await A.api('GET', '/api/user-todos')).json.todos.open || []).find((i) => i.action && i.action.type === 'vault-policy-approved');
+  check('THE RECORD is in For you: «Home network: a command with a stored secret was approved by the policy judge» · «Approved by the policy judge · HH:MM · inside your policy (0.93)»', !!rec && rec.text === 'Home network: a command with a stored secret was approved by the policy judge' && /^Approved by the policy judge · \d\d:\d\d · inside your policy \(0\.93\)/.test(rec.detail) && !rec.detail.includes(VALUE), rec && { text: rec.text, detail: rec.detail });
+  await A.realClick('#taskbar-user-todos');
+  const shown = await A.until(`[...document.querySelectorAll('#user-todos-popup .ut-item')].some((e) => /approved by the policy judge/.test(e.textContent))`, { timeout: 10000 });
+  check('… the tray shows it', !!shown);
+  await A.evalJs(`(() => { const h = document.querySelector('#user-todos-popup .ut-notice-head'); if (h && h.getAttribute('aria-expanded') !== 'true') h.click(); return true; })()`);   // a notice: its fold opened (a grey count closed)
+  await sleep(400);
+  await A.evalJs(`(() => { for (const d of document.querySelectorAll('#user-todos-popup details.ut-detail-exp')) d.open = true; const it = [...document.querySelectorAll('#user-todos-popup .ut-item')].find((e) => /approved by the policy judge/.test(e.textContent)); if (it) it.scrollIntoView({ block: 'start' }); return true; })()`);
+  await sleep(300);
+  check('… among the tray\'s notices, its words drawn (the fold opened)', !!(await A.until(`(() => { const it = [...document.querySelectorAll('#user-todos-popup .ut-item')].find((e) => /approved by the policy judge/.test(e.textContent)); if (!it) return false; const r = it.getBoundingClientRect(); return r.height > 0 && /Approved by the policy judge · \\d\\d:\\d\\d · inside your policy \\(0\\.93\\)/.test(it.textContent); })()`, { timeout: 5000 })));
+  await A.shot('vug-6-policy-approved.png');
+  await A.evalJs(`(() => { const it = [...document.querySelectorAll('#user-todos-popup .ut-item')].find((e) => /approved by the policy judge/.test(e.textContent)); const t = it && it.querySelector('.ut-text'); if (t) t.click(); return !!t; })()`);
+  const row = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const p = r && r.querySelector('.vw-use-policy'); return p ? p.textContent : null; })()`, { timeout: 10000 });
+  check('its door opens the entry\'s row, which says the policy (and that the judge is off on this hub — its setting is the owner\'s)', /Policy for the judge: «only 192\.168\.1\.1, read-only status calls to read the WAN status» — the judge is off/.test(String(row)), row);
 } catch (e) {
   check('the run did not throw', false, e && e.stack);
 } finally {

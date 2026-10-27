@@ -120,6 +120,10 @@ const vaultUseFacts = (caller) => {
   return { conversationKeys: caller && caller.conversationId ? [caller.conversationId] : [] };
 };
 const vaultRun = require('./vault-run-door.js').create({ dataDir: path.join(rootDir, 'data'), vault, sources: vaultSources, userTodos, log: (m) => console.log('[vault-run]', m), useGrants: vaultUseGrants, useFacts: vaultUseFacts,
+  // lane vault-use-grants (R4, default OFF): the policy judge = the ONE decisions caller (decision-engine judge, use vault-use-policy —
+  // its gates: the LLM plugin, the key, the day's money); the owner's policy rides the question, the card's facts the input
+  policyOn: () => serverSetting('vault.policyJudge') === true,
+  policyJudge: (parts, { policy, memo }) => decisionEngine.judge('vault-use-policy', parts, { questions: [require('../decision-model.js').vaultPolicyQuestion(policy)], memo }),
   agentEnv: () => require('../agent-env.js').agentEnv(process.env, { drop: require('../harness-env.js').agentCredentialEnvNames(require('../harnesses').list()) }),
   instanceKind: () => require('../hub-act-policy.js').instanceKindOf(process.env, { presetsDir: (() => { try { return require('./cluster-presets.js').sharedPresets().dir || null; } catch { return null; } })() }),
   liveOf: (cid) => { for (const s of activeSessions.values()) if (s && cid && (s.backendSessionId || s.claudeSessionId) === cid) return true; return false; } });

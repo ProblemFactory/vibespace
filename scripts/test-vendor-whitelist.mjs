@@ -183,6 +183,16 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
   ok(Object.keys(ALLOW).length === 6 /* int332: 5 on the lane's .328 base; .329 added the provider-models row */ && ALLOW['src/server/decision-engine.js'].max === 1 && !ALLOW['src/server/channels-engine.js'] && !constructions['src/server/channels-engine.js'] && viaJudge === 1 && pre.length > 500 && !/\bfetch\s*\(|https?\.request\(|\.textModel\b/.test(pre) && dmText.includes("'reply-infer': Object.freeze({"),
     `lane dm-reply-infers: use reply-infer adds NO vendor site — the allowlist keeps its ${Object.keys(ALLOW).length} rows (the decisions row: decision-engine.js, max 1); the channels engine's pre-pass calls decisionEngine.judge('reply-infer', …) once and holds no request primitive`);
 }
+// lane vault-use-grants (R4): the vault's policy judge is a USE of the ONE decisions caller, never a new site — the ALLOW table
+// keeps its rows; the run door holds no request primitive and reaches the vendor for `vault-use-policy` only through the
+// wiring's ONE decisionEngine.judge call (the row's gates: budgetVerdict, pluginOn, the key — and the vault's own switch, off)
+{
+  const wire = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8');
+  const door = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf-8');
+  const viaJudge = wire.split('\n').filter((l) => /decisionEngine\.judge\('vault-use-policy'/.test(l)).length;
+  ok(Object.keys(ALLOW).length === 6 && ALLOW['src/server/decision-engine.js'].max === 1 && !ALLOW['src/server/vault-run-door.js'] && !constructions['src/server/vault-run-door.js'] && !constructions['src/server/mounts-plugins-wiring.js'] && viaJudge === 1 && /policyOn: \(\) => serverSetting\('vault\.policyJudge'\) === true/.test(wire) && !/\bfetch\s*\(|https?\.request\(/.test(door),
+    `lane vault-use-grants: use vault-use-policy adds NO vendor site — the allowlist keeps its ${Object.keys(ALLOW).length} rows; the wiring calls decisionEngine.judge('vault-use-policy', …) once behind vault.policyJudge (default off); the run door holds no request primitive`);
+}
 // lane rule-learning: the chat completions call is EXACTLY one site in ONE file (count exact); the gates live in the CODE (a
 // header that merely names them is no gate); CONTROLS — a copy planted beside the learn route (RED: outside the allowlist), a
 // second call in the client (RED: over its count), the routing literal taken out / the budget verdict taken out (RED: a code

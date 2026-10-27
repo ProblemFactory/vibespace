@@ -270,6 +270,7 @@ export const CENSUS = [
   ['vault-totp-row.js', 'details', 'control', '添加… ▸ 两步验证…\'s 「高级」 fold (digits · period · algorithm) — lane vault-totp-add'],
   ['vault-totp-row.js', 'select', 'choice', '添加… ▸ 两步验证…\'s 高级 pickers: 6 / 8 digits, 30 / 60 s, SHA1 / SHA256 / SHA512 — lane vault-totp-add'],
   ['vault-use-row.js', 'input', 'control', 'an entry\'s 「Who may use it…」: «the hosts it was stored for» (a checkbox) and the hosts field — el(\'input\'), lane vault-use-grants'],
+  ['vault-use-row.js', 'textarea', 'text', 'an entry\'s 「Who may use it…」 policy for the decision-API judge (R4, default off) — the owner\'s words, lane vault-use-grants'],
   ['vault-use-row.js', 'select', 'choice', 'an entry\'s 「Who may use it…」 end (none / 8 hours / 30 days / 90 days) — lane vault-use-grants'],
   ['vault-login-row.js', 'input', 'control', 'a web login\'s 「用于…」 picker (a radio per scope + a checkbox per conversation / Task Group / everyone) and 网站登录…\'s fields (site, user name, password, two-step name) — el(\'input\'), lane browser-login'],
   ['vault-login-row.js', 'datalist', 'choice', '网站登录…\'s two-step field offers the vault\'s two-step code names (GET /api/vault/totp — names only) — lane vault-totp-add'],

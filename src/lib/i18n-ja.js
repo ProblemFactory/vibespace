@@ -11092,4 +11092,20 @@ export default {
   "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用途：{hosts}——保管庫ウィンドウのその行（「誰が使えるか…」）で許可するまで、依頼した会話は使えません。", // lane vault-use-grants
   "A pasted secret may be used by the conversation that asked for it": "貼り付けた秘密を、依頼した会話が使えるようにする", // lane vault-use-grants
   "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it for those hosts without a card each time — the request box says so before you paste, and the Vault window's «Who may use it…» changes it or takes it back. OFF: it may use it for 8 hours, and every new kind of command asks you first.": "エージェントが秘密の貼り付けを依頼し、使うホストを指定した場合、依頼した会話はそのホスト向けに毎回カードなしで使えます——貼り付ける前に依頼ボックスがそう伝え、保管庫ウィンドウの「誰が使えるか…」で変更・取り消しできます。オフ：8 時間だけ使え、新しい種類のコマンドは毎回先に確認します。", // lane vault-use-grants
+  "Policy for the judge: «{text}»": "判定用ポリシー：「{text}」", // lane vault-use-grants
+  "Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)": "判定用ポリシー：「{text}」——ポリシー判定はオフです（設定 ▸ 連携）", // lane vault-use-grants
+  "Approved by the policy judge {n}× · last {time}": "ポリシー判定が {n} 回承認 · 最終 {time}", // lane vault-use-grants
+  "The commands the judge approved ask you again next time": "判定が承認したコマンドは次回また確認します", // lane vault-use-grants
+  "Revoked — those commands ask you again": "取り消しました——それらのコマンドはまた確認します", // lane vault-use-grants
+  "Policy for the judge (optional)": "判定用のポリシー（任意）", // lane vault-use-grants
+  "e.g. only 192.168.1.1, read-only status calls to read the WAN status": "例：192.168.1.1 のみ、WAN の状態を読む読み取り専用の呼び出し", // lane vault-use-grants
+  "The policy judge is ON: a run its grants do not cover is judged against these words by the decision API; a yes runs it (recorded in For you), anything else shows you the card. It never sees the value.": "ポリシー判定はオンです：許可でカバーされない実行は decision API がこの文で判定し、承認なら実行（「あなた宛て」に記録）、それ以外はカードを表示します。値は決して見えません。", // lane vault-use-grants
+  "The policy judge is OFF (Settings ▸ Integration ▸ «Let the policy judge approve vault uses») — the words are kept for when you turn it on.": "ポリシー判定はオフです（設定 ▸ 連携 ▸「ポリシー判定に保管庫の使用を承認させる」）——オンにしたときのために保存しておきます。", // lane vault-use-grants
+  "{who}: a command with a stored secret was approved by the policy judge": "{who}：保存された秘密を使うコマンドがポリシー判定で承認されました", // lane vault-use-grants
+  "Approved by the policy judge · {time} · {why}": "ポリシー判定が承認 · {time} · {why}", // lane vault-use-grants
+  "The command: {cmd}": "コマンド：{cmd}", // lane vault-use-grants
+  "Open the entry in the Vault window to see its policy — its Revoke makes this command ask you again next time.": "保管庫ウィンドウでその項目を開くとポリシーを確認できます——そこで取り消すと、このコマンドは次回また確認します。", // lane vault-use-grants
+  "Let the policy judge approve vault uses": "ポリシー判定に保管庫の使用を承認させる", // lane vault-use-grants
+  "An entry may carry your policy («only 192.168.1.1, read-only status calls») in the Vault window's «Who may use it…». ON: a run its grants do not cover is judged against that policy by the decision API (the LLM plugin, its key and its daily budget) — approved runs go without a card and are recorded in For you with a Revoke; a no, or a judge that cannot be asked, shows you the card. It never sees a value. OFF (default): every such run asks you.": "項目には保管庫ウィンドウの「誰が使えるか…」であなたのポリシー（「192.168.1.1 のみ、読み取り専用の状態確認」）を付けられます。オン：許可でカバーされない実行は decision API（LLM プラグイン、そのキーと 1 日の予算）がそのポリシーで判定し、承認された実行はカードなしで進み「あなた宛て」に取り消し付きで記録されます。否決や判定できない場合はカードを表示します。値は決して見えません。オフ（既定）：そうした実行は毎回確認します。", // lane vault-use-grants
+  "Vault policy": "保管庫ポリシー", // lane vault-use-grants
 };

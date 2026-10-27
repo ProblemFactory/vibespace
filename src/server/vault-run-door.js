@@ -75,6 +75,14 @@
  *     these hosts × the TTL — the same row the Vault window's «谁可以用…» edits) and, on a wider host, widens it. The «always»
  *     rows data/vault-run.json kept before (command shapes) are CARRIED into grants at the first verified read (the store is
  *     marked: it can be judged only unlocked) — ONE mechanism, not two.
+ *   · THE POLICY JUDGE (R4, default OFF — `vault.policyJudge`): an entry may carry the owner's POLICY (his words: the hosts, the
+ *     verbs, what it is for — kept in this file's marked store, so an agent cannot write one). A run that would draw its card,
+ *     is not admitted by a grant, and whose every entry has a policy is asked of the decision API (`policyJudge` → the ONE
+ *     caller decision-engine `judge('vault-use-policy', …)`) with the CARD's facts — the command (references), the program,
+ *     the hosts, a template's text, what the entry is for — never a value. A probability ≥ the model's threshold runs it
+ *     (`allowedBy: 'policy'`) and files ONE For-you record «approved by the policy judge · HH:MM · why» whose door opens the
+ *     entry's row, where 「Revoke」 makes that command ask again next time; a no, no answer, an error or an unavailable judge
+ *     FALLS BACK TO THE CARD (fail closed — the card says the judge's answer), never to a silent run.
  *
  * WHAT IT IS NOT — §8.6, THE THREE HOLES, said where the door is:
  *   ① the child runs under the agent's uid: the agent can read /proc/<child>/environ and the 0600 file while the child lives.
@@ -101,6 +109,7 @@ const HC = require('../hidden-chars.js');
 const DOOR = require('../mount-door.js');   // B-afc4: a blocked storage path is answered by name, never read (a cwd, a tool, a template)
 const PI = require('../proc-identity.js');   // a run folder's hub: its identity, never a bare pid (the boot sweep)
 const VUG = require('../vault-use-grant.js');   // lane vault-use-grants: PURE — a standing approval's verdict and the card's words
+const DM = require('../decision-model.js');   // lane vault-use-grants (R4): PURE — the policy's spelling, its question, the threshold
 
 const ACTION_TYPE = 'vault-run-ask';
 const REQUEST_TYPE = 'vault-grant-ask';      // lane vault-manual-and-lock: an agent's request for an entry (its For-you ask)
@@ -263,7 +272,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   liveOf = () => true, runRoot = () => process.env.XDG_RUNTIME_DIR || os.tmpdir(), home = os.homedir(), tmpDir = os.tmpdir(),
   now = () => Date.now(), log = () => {}, spawnImpl = spawn, killGraceMs = KILL_GRACE_MS, pipeGraceMs = PIPE_GRACE_MS,
   timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes,
-  useGrants = null, useFacts = () => null } = {}) {   // lane vault-use-grants: the vault-use writer (src/server/vault-use-grants.js) + a caller's admission facts ({conversationKeys, groupIds, groupsUnreadable})
+  useGrants = null, useFacts = () => null,
+  policyJudge = null, policyOn = () => false } = {}) {   // lane vault-use-grants (R4): (parts, {policy, memo}) → the decision engine's judge answer; the switch vault.policyJudge   // lane vault-use-grants: the vault-use writer (src/server/vault-use-grants.js) + a caller's admission facts ({conversationKeys, groupIds, groupsUnreadable})
   if (!dataDir || !vault) throw new TypeError('vault-run-door: dataDir and vault are required');
   const FILE = path.join(dataDir, STORE_FILE);
   const asks = new Map();      // askId → the card up
@@ -285,7 +295,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const audit = (event, line) => { try { vault.audit(event, line); } catch (e) { log(`the audit line could not be written (${e.message})`); } };
 
   // ── THE STORE (marked by the vault) ──
-  const bodyOf = (d) => JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: [...d.runnable].sort(), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)) });
+  const bodyOf = (d) => JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: [...d.runnable].sort(), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)),
+    ...(d.policies && Object.keys(d.policies).length ? { policies: Object.fromEntries(Object.keys(d.policies).sort().map((k) => [k, d.policies[k]])) } : {}),   // lane vault-use-grants (R4): only when there is one — a body without them is marked as before
+    ...(d.policyRevoked && d.policyRevoked.length ? { policyRevoked: d.policyRevoked.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)) } : {}) });
+  const okPolicy = (x) => x && typeof x === 'object' && typeof x.text === 'string' && x.text.length > 0 && x.text.length <= DM.VAULT_POLICY_MAX;
+  const policiesOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, x] of Object.entries(raw).slice(0, 256)) if (VI.parseRef(k) && okPolicy(x)) out[k] = { text: x.text, at: Number(x.at) || null, by: String(x.by || 'user').slice(0, 40) }; return out; };
+  const revokedOf = (raw) => (Array.isArray(raw) ? raw : []).filter((x) => x && typeof x.conv === 'string' && typeof x.key === 'string').slice(0, 512).map((x) => ({ conv: x.conv, key: x.key }));
   const okAlways = (a) => a && typeof a.conv === 'string' && typeof a.key === 'string' && a.key.startsWith(VR.SHAPE_V + ':') && (a.until === null || Number.isFinite(a.until)) && Array.isArray(a.entries);
   let lastGen = 0;   // the newest generation this hub read or wrote — an older copy is a replay (the review: a saved copy restored)
   /** The store as the vault vouches for it — null unless unlocked. Read once per unlock (the epoch), kept in memory. */
@@ -294,10 +309,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (db && dbEpoch === vault.epoch()) return db;
     let raw = null, why = null;
     try { raw = JSON.parse(readBounded(FILE, STORE_MAX).toString('utf8')); } catch (e) { if (!(e && e.code === 'ENOENT')) why = `unreadable (${e.code || 'not JSON'})`; }
-    let next = { gen: lastGen, runnable: new Set(), always: [] };
+    let next = { gen: lastGen, runnable: new Set(), always: [], policies: {}, policyRevoked: [] };
     if (raw && !why) {
       try {
-        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40) })) };
+        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40) })), policies: policiesOf(raw.policies), policyRevoked: revokedOf(raw.policyRevoked) };
         const want = vault.macOf(MARK_LABEL, bodyOf(cand));
         const got = typeof raw.mark === 'string' && /^[0-9a-f]{64}$/.test(raw.mark) ? raw.mark : null;   // the review: a non-hex mark threw in timingSafeEqual
         if (!(want && got && cand.gen >= 0 && crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')))) why = 'its mark does not verify';
@@ -320,7 +335,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     log(`data/${STORE_FILE}: ${c.carried} «always» member(s) carried into the vault-use grants (${c.expired} expired, ${c.hostless} with no host)${r.ok ? '' : ' — the store could not be rewritten; carried again at the next read'}`);
   }
   function save(next0) {
-    const next = { ...next0, gen: Math.max(lastGen, Number(db && db.gen) || 0) + 1 };
+    const next = { policies: (db && db.policies) || {}, policyRevoked: (db && db.policyRevoked) || [], ...next0, gen: Math.max(lastGen, Number(db && db.gen) || 0) + 1 };   // lane vault-use-grants (R4): a save that names no policy keeps them
     const mark = vault.macOf(MARK_LABEL, bodyOf(next));
     if (!mark) return named('vault_locked');
     try { writeJsonAtomic(FILE, { ...JSON.parse(bodyOf(next)), mark }); } catch (e) { return named('failed', { why: `data/${STORE_FILE} could not be written (${e.code || e.message})` }); }
@@ -354,6 +369,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const grantable = !!(useGrants && c.runnable && c.cls !== 'agent-entry');
     let use = null;
     if (grantable) { try { const r = ref && VR.refFor(ref.store, ref.entry, ref.field); const counts = typeof vault.useCounts === 'function' ? vault.useCounts() : {}; use = { ...useGrants.publicFor(row.id, r ? counts[r.ref] : null), entryHosts: Array.isArray(row.hosts) ? row.hosts : [], used: r && counts[r.ref] ? { uses: counts[r.ref].uses, convs: counts[r.ref].convs } : { uses: 0, convs: 0 } }; } catch { use = { unknown: true, to: [], except: [] }; } }
+    // lane vault-use-grants (R4): the entry's policy (the owner's words), whether the judge is on, what it approved since the boot
+    if (use && !use.unknown) { const pol = d && d.policies && d.policies[row.id]; const ap = approved.get(row.id); let on = false; try { on = !!policyOn(); } catch { on = false; } use.policy = pol ? { text: pol.text, at: pol.at } : null; use.judge = on ? 'on' : 'off'; use.approved = ap ? { n: ap.n, lastAt: ap.lastAt } : null; }
     return { can: c.runnable, open: !!(c.runnable && d && d.runnable.has(row.id)), ...(grantable ? { use } : {}) };
   }
   /** A PERSON's switch (src/routes/vault.js: people only; ON needs this page's 验证是你 window — `reauthed`). */
@@ -380,6 +397,94 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     audit('vault-run-switch', { by: String(by).slice(0, 40), store: ref.store, entry: ref.entry, field: ref.field, open: !!on });
     try { vault.contentsChanged && vault.contentsChanged('switch'); } catch { }   // lane vault-use-grants: every open Vault window shows the switch
     return { ok: true, id: key, open: !!on };
+  }
+  // ── THE POLICY (lane vault-use-grants R4) ──
+  const approved = new Map();   // entry id → { n, lastAt, items: [todoId], shapes: [{conv, key}] } — what the judge approved since the boot (the row's line, its Revoke)
+  /** A PERSON's door: the entry's policy (one paragraph, ≤ VAULT_POLICY_MAX). Setting one lets the judge approve uses — a
+   *  widening — so it needs this page's 验证是你 window (`reauthed`); clearing it is a click. */
+  function setPolicy({ id, text = '', reauthed = false, by = 'user' } = {}) {
+    const st = vaultState();
+    if (st !== 'unlocked') return named(st === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
+    const key = String(id || ''), ref = VI.parseRef(key);
+    if (!ref) return named('entry_unknown');
+    const row = rowOf(ref), c = classOf(ref, row);
+    if (!row) return named('entry_unknown');
+    if (!c.runnable || c.cls === 'agent-entry') return named('entry_has_its_own_door', { door: c.door || 'its own conversation only', words: `${VR.WORDS.entry_has_its_own_door}: ${c.door || 'its own conversation only'}` });
+    const t = DM.vaultPolicyText(text);
+    if (t && !reauthed) return { ok: false, code: 'reveal_needs_password' };
+    const d = load();
+    const policies = { ...d.policies };
+    if (t) policies[key] = { text: t, at: now(), by: String(by).slice(0, 40) }; else delete policies[key];
+    const r = save({ runnable: d.runnable, always: d.always, policies });
+    if (!r.ok) return r;
+    audit('vault-run-policy', { by: String(by).slice(0, 40), store: ref.store, entry: ref.entry, field: ref.field, set: !!t, chars: t.length });   // the owner's words stay in the store, not the audit
+    try { vault.contentsChanged && vault.contentsChanged('policy'); } catch { }
+    return { ok: true, id: key, policy: t || null };
+  }
+  /** A PERSON's 「Revoke」 (a click — a narrowing): every command the judge approved for this entry asks again next time (the
+   *  conversation × shape pairs go into the marked store); the For-you records of those approvals are closed. */
+  function revokeApprovals({ id, by = 'user' } = {}) {
+    if (vaultState() !== 'unlocked') return named('vault_locked');
+    const key = String(id || ''), ap = approved.get(key);
+    if (!ap) return { ok: true, revoked: 0 };
+    const d = load();
+    const have = new Set(d.policyRevoked.map((x) => `${x.conv}\n${x.key}`));
+    const policyRevoked = [...d.policyRevoked, ...ap.shapes.filter((x) => !have.has(`${x.conv}\n${x.key}`))].slice(-512);
+    const r = save({ runnable: d.runnable, always: d.always, policyRevoked });
+    if (!r.ok) return r;
+    approved.delete(key);
+    if (userTodos) for (const tid of ap.items) { try { const it = userTodos.get?.(tid); if (it && it.status === 'open') userTodos.setStatus(tid, 'done', 'vault'); } catch { } }
+    audit('vault-run-policy-revoked', { by: String(by).slice(0, 40), entry: key, shapes: ap.shapes.length });
+    try { vault.contentsChanged && vault.contentsChanged('policy'); } catch { }
+    return { ok: true, revoked: ap.shapes.length };
+  }
+  /** Ask the judge about ONE run with the CARD's facts (never a value). → { approve, p?, line? } — `line` = what the card says. */
+  async function judgePolicy({ caller, spec, shape, key, refs, policies }) {
+    const rows = refs.map((r) => rowOf(r));
+    const parts = {
+      command: `${cmdText(spec.argv)}\n(the secret${refs.length > 1 ? 's' : ''} ${refs.map((r) => r.ref).join(', ')} given as ${spec.injection.join(', ')} — a reference, never the value)`, program: String(spec.tool || ''), hosts: shape.hosts.length ? shape.hosts.join(', ') : 'unknown — the tool names none',
+      templates: spec.files.filter((f) => f.template != null).map((f) => `${f.name} (@${f.template}):\n${String(f.text)}`).join('\n\n'),
+      purpose: rows.map((x) => (x && x.detail) || '').filter(Boolean).join(' · ') || 'not said', entry: rows.map((x, i) => (x && x.label) || refs[i].ref).join(', '),
+    };
+    let res = null;
+    try { res = await policyJudge(parts, { policy: policies.join(' / '), memo: { id: `${caller.conversationId}\n${key}`, policy: policies.join('\n') } }); }
+    catch (e) { return { approve: false, line: `The policy judge could not be asked (${String((e && e.message) || e).slice(0, 80)}) — so this card asks you.` }; }
+    if (!res || !res.ok) return { approve: false, line: `The policy judge could not be asked (${String((res && (res.why || res.code)) || 'unavailable').slice(0, 80)}) — so this card asks you.` };
+    const a = Array.isArray(res.answers) ? res.answers[0] : null;
+    const p = a && !a.refused && typeof a.probability === 'number' ? a.probability : null;
+    if (p === null) return { approve: false, line: 'The policy judge gave no answer — so this card asks you.' };
+    if (p >= DM.VAULT_POLICY_THRESHOLD) return { approve: true, p };
+    return { approve: false, p, line: `The policy judge did not find it inside your policy (${p.toFixed(2)} < ${DM.VAULT_POLICY_THRESHOLD}) — so this card asks you.` };
+  }
+  /** THE RECORD of an approval: ONE For-you item (its door opens the entry's row — 「Revoke」 there) + the row's line. */
+  function recordApproval({ caller, spec, refs, p, key }) {
+    const who = String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80);
+    const at = now(), hhmm = new Date(at).toTimeString().slice(0, 5);
+    const why = typeof p === 'number' ? `inside your policy (${p.toFixed(2)})` : 'inside your policy';
+    for (const r of refs) {
+      const ap = approved.get(r.id) || { n: 0, lastAt: 0, items: [], shapes: [] };
+      ap.n++; ap.lastAt = at;
+      if (!ap.shapes.some((x) => x.conv === caller.conversationId && x.key === key)) ap.shapes.push({ conv: caller.conversationId, key });
+      approved.set(r.id, ap);
+    }
+    if (!userTodos) return;
+    const head = cmdText(spec.argv).slice(0, 200);
+    const lines = [
+      { key: 'Approved by the policy judge · {time} · {why}', params: { time: hhmm, why } },
+      { key: 'The command: {cmd}', params: { cmd: head } },
+      { key: 'Open the entry in the Vault window to see its policy — its Revoke makes this command ask you again next time.' },
+    ];
+    try {
+      const it = userTodos.add(caller.sessionKey || 'vault', {
+        origin: 'vault', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: who,
+        text: `${who}: a command with a stored secret was approved by the policy judge`,
+        detail: lines.map((l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m))).join('\n'),
+        i18n: { text: { key: '{who}: a command with a stored secret was approved by the policy judge', params: { who } }, detail: lines },
+        action: { type: 'vault-policy-approved', entry: refs[0].entry, id: refs[0].id },   // the door opens the entry's row (its Revoke)
+      });
+      const tid = it && it.id;
+      if (tid) for (const r of refs) { const ap = approved.get(r.id); if (ap && !ap.items.includes(tid)) ap.items.push(tid); }
+    } catch (e) { log(`${who}: the policy judge's approval could not be filed in For you: ${e.message}`); }
   }
   /** What THIS caller may reference (vibespace-vault list): the opened rows — a reference, a label, a kind; never a value —
    *  and (lane vault-manual-and-lock) the entries a grant opened for THIS conversation (`by: 'grant'`, its purpose and end). */
@@ -821,7 +926,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const facts = { ...uf, conversationKeys: [...new Set([caller.conversationId, ...(Array.isArray(uf.conversationKeys) ? uf.conversationKeys : [])].filter(Boolean).map(String))], groupIds: Array.isArray(uf.groupIds) ? uf.groupIds : [], groupsUnreadable: !!uf.groupsUnreadable };
       for (const r of spec.refs) { const row = rowOf(r); if (row) { try { standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: shape.hosts, destinationKnown: !!shape.always, entryHosts: row.hosts || [] })); } catch { /* unreadable: no standing approval */ } } }
     }
-    const detail = [detailOf(spec, shape, place), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${shape.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : [])].join('\n');
+    let detail = [detailOf(spec, shape, place), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${shape.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : [])].join('\n');
     if (detail.length > DETAIL_MAX) return named('card_too_long');
     const head = { tool: spec.tool, entries: spec.refs.map((r) => r.ref), shapeId, hosts: shape.hosts, injection: spec.injection, argvExposed: spec.argvExposed, cwd: place, cmd: utf8Head(SS.redactSecrets(cmdText(spec.argv)).text) };
     // THE FACTS the verdict reads: each entry's row (exists), its switch (open), its class (the engine's check) and its length
@@ -853,6 +958,22 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       for (const r of spec.refs) standingIds.set(r.id, standing.get(r.id).id);
       verdict = { ok: true, by: 'grant', grants: [...new Set(standingIds.values())] };
       head.grants = verdict.grants;
+    }
+    // lane vault-use-grants (R4): THE POLICY JUDGE (vault.policyJudge, default OFF) — a run that would ask, every entry with a policy,
+    // the pair not revoked ⇒ the decision API judges the card's facts; yes ⇒ it runs (recorded); anything else ⇒ the card says so
+    let policyOnNow = false;
+    try { policyOnNow = !!(policyJudge && policyOn()); } catch { policyOnNow = false; }
+    if (!verdict.ok && verdict.ask && policyOnNow && d && spec.refs.length) {
+      const pols = spec.refs.map((r) => (d.policies[r.id] ? d.policies[r.id].text : null));
+      const revoked = d.policyRevoked.some((x) => x.conv === caller.conversationId && x.key === key);
+      if (pols.every(Boolean) && revoked) detail = `${detail}\nYou revoked the policy judge's approval of this command — so this card asks you.`;
+      else if (pols.every(Boolean)) {
+        const j = await judgePolicy({ caller, spec, shape, key, refs: spec.refs, policies: pols });
+        if (signal && signal.aborted) { note('caller_gone', head); return named('caller_gone'); }
+        if (j.approve) { verdict = { ok: true, by: 'policy', p: j.p }; head.policy = { p: j.p }; recordApproval({ caller, spec, refs: spec.refs, p: j.p, key }); }
+        else detail = `${detail}\n${j.line}`;
+      }
+      if (detail.length > DETAIL_MAX) return named('card_too_long');
     }
     let askId = null, asked = null;
     if (!verdict.ok && verdict.ask) {
@@ -1008,7 +1129,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   /** The process ends: every child, its strays and its files with it (sync — an exit handler). */
   function closeAll() { for (const rec of [...runs]) { killGroup(rec, 'SIGKILL'); endMarked(rec.mark); shredDir(rec.dir); } runs.clear(); }
 
-  return { run, answer, setRunnable, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants,
+  return { run, answer, setRunnable, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals,
     listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet,
     listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen };
 }

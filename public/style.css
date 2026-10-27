@@ -8802,6 +8802,8 @@ button.vw-chip { cursor: pointer; }
 .vw-use-expired { opacity: 0.6; text-decoration: line-through; }
 .vw-use-except { color: var(--text-dim); }
 .vw-nomatch-all { margin-left: 8px; }
+.vw-use-approved { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vw-use-policy-in { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }
 .vw-ak-mint { margin-left: auto; font-weight: normal; }
 /* design q-047 L1 (lane vault-totp): a two-step code's row — 看码 → the code, its ring (the seconds left: --p) and the seconds; 用于… chips reuse .vw-ak-* */
 .vw-code { display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; font-weight: 700; letter-spacing: .1em; color: var(--text); white-space: nowrap; }

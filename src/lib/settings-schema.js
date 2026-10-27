@@ -906,6 +906,14 @@ const SETTINGS_SCHEMA = {
     description: t('When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it for those hosts without a card each time — the request box says so before you paste, and the Vault window\'s «Who may use it…» changes it or takes it back. OFF: it may use it for 8 hours, and every new kind of command asks you first.'),
     category: t('Integration'), liveApply: true,
   },
+  // lane vault-use-grants (R4): THE POLICY JUDGE — an entry's policy (its 「Who may use it…」) lets the decision API approve a run the
+  // card would ask about (the LLM plugin's key and budget). Default OFF; read at every run (src/server/vault-run-door.js).
+  'vault.policyJudge': {
+    type: 'boolean', default: false,
+    label: t('Let the policy judge approve vault uses'),
+    description: t('An entry may carry your policy («only 192.168.1.1, read-only status calls») in the Vault window\'s «Who may use it…». ON: a run its grants do not cover is judged against that policy by the decision API (the LLM plugin, its key and its daily budget) — approved runs go without a card and are recorded in For you with a Revoke; a no, or a judge that cannot be asked, shows you the card. It never sees a value. OFF (default): every such run asks you.'),
+    category: t('Integration'), liveApply: true,
+  },
   'agents.contextInjection': {
     type: 'boolean', default: true,
     label: t('Inject Task Group context'),

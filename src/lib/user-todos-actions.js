@@ -113,7 +113,7 @@ export function inboxModel(app) {
     // lane vault-relock-door: the restart notice's door opens the unlock dialog (its key 'vault' is no session; the body click used to end in "Session not found")
     if (item?.action?.type === 'vault-unlock') { close(); try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } return; }
     // lane vault-window-v2: a failed use / a rotate suggestion lands on ITS row in the Vault window (the window's 「需要你」 draws the same item)
-    if (item?.action?.type === 'vault-use-failed' || item?.action?.type === 'vault-rotate') { close(); app.replayOpenSpec?.({ action: 'openVault', focus: String(item.action.entry || '') }); return; }
+    if (item?.action?.type === 'vault-use-failed' || item?.action?.type === 'vault-rotate' || item?.action?.type === 'vault-policy-approved') { close(); app.replayOpenSpec?.({ action: 'openVault', focus: String(item.action.entry || '') }); return; }   // + vault-policy-approved (lane vault-use-grants R4): the entry's row — its policy and its Revoke
     // lane device-upgrade-stuck: a machine-level item (a device agent whose update failed) lands on Manage Agents → Machines
     if (key === 'machines') { close(); try { localStorage.setItem('vibespace.agentsTab', 'machines'); } catch { } app._showAgentsDialog?.(); return; }
     const s = sessionFor(key);
@@ -195,7 +195,7 @@ export function inboxModel(app) {
    *  conversation became «open the row in place» (lane foryou-honest P3-8). */
   const isDoor = (key, item) => !!(item?.jobId || item?.open?.kind === 'plugin-settings' || key === 'jobs' || key === 'accounts' || key === 'machines'
     || (item?.action?.type === 'open-channel' && item.action.adapterId && item.action.convId)
-    || ['vault-unlock', 'vault-use-failed', 'vault-rotate'].includes(item?.action?.type));
+    || ['vault-unlock', 'vault-use-failed', 'vault-rotate', 'vault-policy-approved'].includes(item?.action?.type));
   /** ✓ / ✕ ON AN ITEM (lane foryou-honest, the stress evaluation's P3-2: one press decided it — no toast, the ↺ two screens
    *  away): the status POST, then ONE toast with Undo for 6 s — the ↺ road (status open) on the same item. */
   const resolveOne = async (id, status) => {

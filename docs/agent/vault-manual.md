@@ -101,6 +101,12 @@ no card for <hosts>».
 You write a **reference** where the value goes; the hub puts the value into the command it starts for you and hands you
 back the output with the value blanked to `[vault:<store>/<row>/<field>]`.
 
+**No card each time** when the user gave this conversation a **standing approval** for the entry and the hosts your command
+reaches (the Vault window's «Who may use it…», or their «Always» on an earlier card — `vibespace-vault list` says «with no
+card for <hosts>»), or — if they turned it on — when their **policy judge** finds the command inside the policy they wrote
+for the entry. The answer then says `by: grant` / `by: policy`. Another host, or a command whose destination cannot be told
+(a shell, an interpreter, a config file), still shows them its card.
+
 - **How the value reaches the command** (never its command line — every user of the machine can read that):
   - `--env GH_TOKEN=vault://…` — an environment variable (the usual way: gh, aws, psql's PGPASSWORD, rclone);
   - `--file KEY=vault://…` — a 0600 file, its PATH in `$KEY`; `$VAULT_FILE{KEY}` (or `$VAULT_FILE{<store>/<row>/<field>}`)

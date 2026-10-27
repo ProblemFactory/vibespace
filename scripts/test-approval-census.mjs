@@ -436,6 +436,14 @@ const ROWS = [
     c: [decl('the keeper\'s leases and the user\'s own browsing move freely — both are what (b) re-reads at the press; an agent token is refused (THE one guard, RESTART_IS_USERS)')],
     d: [decl('the banner\'s words are PURE stuckWords (textContent); the page\'s own text passes pageText (frame-inert, bounded)')],
     gate: [['scripts/test-browser-stuck.mjs', 'token stops and restarts'], ['scripts/test-browser-human.mjs', 'THE TAB-RELEASE CENSUS (the .197 integration)']] },
+  // lane vault-use-grants (R4): the policy judge's RECORD — a notice of an approval the judge already gave, not an ask
+  { id: 'vault-policy-approved', surface: 'lane vault-use-grants R4 — the For-you notice «<conversation>: a command with a stored secret was approved by the policy judge» (its door opens the entry\'s row in the Vault window, where 「Revoke」 lives)',
+    doors: [['A', 'src/server/vault-run-door.js', /^vault-policy-approved$/]],
+    a: [decl('nothing is answered on the item: it records a run that already ran (the judge approved the card\'s facts); its door only OPENS the entry\'s row — the item carries the entry and its row id, no other field')],
+    b: [decl('「Revoke」 on the row is a narrowing (a click): the approved conversation × shape pairs go into the run door\'s MARKED store, so the next run of that command draws its card and the judge is not asked')],
+    c: [decl('the ONE writer of the record is the run door (recordApproval); the policy is written only by setPolicy behind 验证是你')],
+    d: [decl('the words are the door\'s own i18n lines (the time, «inside your policy (p)», the command head with its references — never a value, never vendor prose)')],
+    gate: [['scripts/test-vault-use-grants.mjs', 'THE RECORD where a run card']] },
   // lane browser-probe-transient (B-0b8c): the browser-version notice's Check again — a probe, not an approval
   { id: 'browser-floor-check', surface: 'lane browser-probe-transient — the For-you notice «Could not read the agent-browser version after N tries…» and its Check again',
     doors: [['A', 'src/server/browser-keeper.js', /^browser-floor-check$/]],

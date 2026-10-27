@@ -11093,4 +11093,20 @@ export default {
   "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用于：{hosts}——在你于保险库窗口该行（「谁可以用…」）允许之前，发起请求的对话不能使用它。", // lane vault-use-grants
   "A pasted secret may be used by the conversation that asked for it": "你粘贴的秘密可由请求它的对话使用", // lane vault-use-grants
   "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it for those hosts without a card each time — the request box says so before you paste, and the Vault window's «Who may use it…» changes it or takes it back. OFF: it may use it for 8 hours, and every new kind of command asks you first.": "当 agent 请你粘贴一个秘密并写明用于哪些主机时，发起请求的对话可以在这些主机上使用它而不再每次弹卡片——粘贴前请求框会说明这一点，保险库窗口的「谁可以用…」可以修改或收回。关闭：它只能用 8 小时，且每种新命令都会先问你。", // lane vault-use-grants
+  "Policy for the judge: «{text}»": "裁决策略：「{text}」", // lane vault-use-grants
+  "Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)": "裁决策略：「{text}」——策略裁决已关闭（设置 ▸ 集成）", // lane vault-use-grants
+  "Approved by the policy judge {n}× · last {time}": "策略裁决已批准 {n} 次 · 最近 {time}", // lane vault-use-grants
+  "The commands the judge approved ask you again next time": "裁决批准过的命令下次会重新询问你", // lane vault-use-grants
+  "Revoked — those commands ask you again": "已撤销——这些命令会重新询问你", // lane vault-use-grants
+  "Policy for the judge (optional)": "给裁决的策略（可选）", // lane vault-use-grants
+  "e.g. only 192.168.1.1, read-only status calls to read the WAN status": "例如：只用于 192.168.1.1，只读的状态查询，用来读取 WAN 状态", // lane vault-use-grants
+  "The policy judge is ON: a run its grants do not cover is judged against these words by the decision API; a yes runs it (recorded in For you), anything else shows you the card. It never sees the value.": "策略裁决已开启：授权未覆盖的运行会由 decision API 按这段话裁决；通过就运行（记录在「待你处理」里），其余情况都会给你弹卡片。它永远看不到值。", // lane vault-use-grants
+  "The policy judge is OFF (Settings ▸ Integration ▸ «Let the policy judge approve vault uses») — the words are kept for when you turn it on.": "策略裁决已关闭（设置 ▸ 集成 ▸「让策略裁决批准保险库使用」）——这段话会保留，等你开启时使用。", // lane vault-use-grants
+  "{who}: a command with a stored secret was approved by the policy judge": "{who}：一条使用存储秘密的命令已由策略裁决批准", // lane vault-use-grants
+  "Approved by the policy judge · {time} · {why}": "由策略裁决批准 · {time} · {why}", // lane vault-use-grants
+  "The command: {cmd}": "命令：{cmd}", // lane vault-use-grants
+  "Open the entry in the Vault window to see its policy — its Revoke makes this command ask you again next time.": "在保险库窗口打开该条目可查看它的策略——在那里撤销后，这条命令下次会重新询问你。", // lane vault-use-grants
+  "Let the policy judge approve vault uses": "让策略裁决批准保险库使用", // lane vault-use-grants
+  "An entry may carry your policy («only 192.168.1.1, read-only status calls») in the Vault window's «Who may use it…». ON: a run its grants do not cover is judged against that policy by the decision API (the LLM plugin, its key and its daily budget) — approved runs go without a card and are recorded in For you with a Revoke; a no, or a judge that cannot be asked, shows you the card. It never sees a value. OFF (default): every such run asks you.": "条目可以在保险库窗口的「谁可以用…」里带上你的策略（「只用于 192.168.1.1，只读状态查询」）。开启：授权未覆盖的运行由 decision API（LLM 插件、它的密钥和每日预算）按该策略裁决——批准的运行不弹卡片，并记录在「待你处理」里，可撤销；被否决或无法询问裁决时，会给你弹卡片。它永远看不到值。关闭（默认）：每次这样的运行都会问你。", // lane vault-use-grants
+  "Vault policy": "保险库策略", // lane vault-use-grants
 };

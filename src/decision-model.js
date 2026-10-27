@@ -283,6 +283,12 @@ const PLANS = Object.freeze({
   // 310 characters → 104). The memo = the candidate record + the sent message (+ the question's version): a record is
   // judged ONCE against one send, for ever
   'reply-infer': Object.freeze({ fixed: [], variable: [PART('sent', 1000), PART('reply', 1000), PART('gap', 60, { kind: 'line' }), PART('between', 300, { kind: 'line' })], fixedCeiling: 0, recordCeiling: 804, batch: 1, wakePath: true, memo: ['use', 'id', 'sent', 'question'] }),
+  // lane vault-use-grants (R4, default OFF — the owner 2026-10-27 「…自动 approve 机制（比如利用 decision api）」): is ONE vault run
+  // inside the owner's own policy for the entry? The record = the run CARD's facts — the command (references, never a value),
+  // the program, the hosts, a template's text, what the entry is for, its label; the owner's policy rides the QUESTION (his
+  // words, the ONE scrub). The memo = the run's shape + the policy (a repeat of the same command under the same words is
+  // judged once). Off the wake path; one record a call
+  'vault-use-policy': Object.freeze({ fixed: [], variable: [PART('command', 1200), PART('program', 300, { kind: 'line' }), PART('hosts', 300, { kind: 'line' }), PART('templates', 1500), PART('purpose', 300, { kind: 'line' }), PART('entry', 200, { kind: 'line' })], fixedCeiling: 0, recordCeiling: 1300, batch: 1, wakePath: false, memo: ['use', 'id', 'policy'] }),
   test: Object.freeze({ fixed: [], variable: [PART('body', 200)], fixedCeiling: 0, recordCeiling: 120, batch: 1, wakePath: false, memo: ['use', 'id'] }),
 });
 const USES = Object.freeze(Object.keys(PLANS));
@@ -809,6 +815,15 @@ const INBOX_QUESTION = Object.freeze({ type: 'choice', name: 'inbox_need', instr
 // v2 (lane reply-infer-owner-between, fb-377439b167): the record also says what was written BETWEEN (between) — a reply that
 // follows the chat owner's own message more closely is more likely an answer to THAT; a v1 answer (judged blind) is never reused
 const REPLY_INFER_VERSION = 2;   // the question's wording — a new wording is a new memo key (review r1)
+/** lane vault-use-grants (R4): THE ONE QUESTION of a vault-use-policy judgment — the owner's policy text (his words: hosts,
+ *  verbs, what the entry is for) rides its instructions; a policy is ONE paragraph (≤ VAULT_POLICY_MAX). The run is approved
+ *  only at a probability ≥ VAULT_POLICY_THRESHOLD (a stricter bar than the attention rubric's: an approval spends a secret). */
+const VAULT_POLICY_MAX = 600;
+const VAULT_POLICY_THRESHOLD = 0.8;
+const vaultPolicyText = (s) => str(s).replace(/[\u0000-\u0008\u000b-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, VAULT_POLICY_MAX);
+function vaultPolicyQuestion(policy) {
+  return { type: 'predicate', name: 'within_policy', instructions: `The [record] is ONE command an AI agent asked VibeSpace to run with a secret it never sees (the secret appears only as a reference such as vault://…, never its value): the command line, the program that runs, the hosts it reaches, the text of any template file it fills, what the secret is for and its label. The secret's owner wrote this policy for it: «${vaultPolicyText(policy)}». Answer true ONLY if the command plainly falls inside that policy — every host it reaches, what it does, and its purpose. Answer false if it reaches a host the policy does not name, does something the policy does not allow, sends the secret somewhere else, or you cannot tell.`, whenTrue: 'the command is inside the owner\'s policy', whenFalse: 'outside the policy, or it cannot be told' };
+}
 const REPLY_INFER_QUESTION = Object.freeze({ type: 'predicate', name: 'answers_sent', instructions: 'The [record] holds a message an agent sent into a chat (sent), a later message someone else wrote in the same chat (reply), the time between them (gap) and what else was written in the chat between the two (between: who wrote and what kind of message, never the words). Is the later message an answer or a reply to the agent\'s message — not a new topic, not small talk, not a message meant for someone else? When the person who owns this chat wrote their own message after the agent\'s, a reply that follows it more closely is more likely an answer to THAT message: score it low unless its words clearly answer the agent\'s message.', whenTrue: 'Yes — the later message answers the agent\'s message.', whenFalse: 'No — it is about something else, answers the chat owner\'s own later message, or it cannot be told.' });
 const inboxLevelsText = () => `Choices v${INBOX.version}: ${INBOX.choices.map((c) => c.value).join(' | ')} (the question describes each). Sort the For-you item below. Its facts line (age, what the agent did since the ask, a named date, re-asks) is the hub's own record: trust it over the item's words.`;
 /** Does the tray's judge sort this item at all? An OPEN action item of NORMAL urgency (a missing urgency is normal) with
@@ -996,8 +1011,8 @@ function inboxRank(items, now = 0) {
 // Settings › Spending. Words go through the caller's `t` (the client's device words; a `{name}` filler stands in
 // for a test). Money that moved is NEVER drawn as $0.00: under a cent with calls > 0 is 「< $0.01」.
 const READOUT_WARN_AT = 0.9;                                   // ≥ 90 % of the day's cap ⇒ the line turns red
-const READOUT_USES = Object.freeze(['attention', 'inbox', 'rule', 'routing', 'webhook', 'reply-infer', 'learn', 'test']);   // the title's order (+ learn: lane rule-learning; + reply-infer: lane dm-reply-infers)
-const useWord = (k, t) => ({ attention: t('Needs attention'), inbox: t('For-you tray'), rule: t('Rules'), routing: t('Routing'), webhook: t('Webhooks'), 'reply-infer': t('Plain replies'), learn: t('Block drafts'), test: t('Test') })[k] || k;
+const READOUT_USES = Object.freeze(['attention', 'inbox', 'rule', 'routing', 'webhook', 'reply-infer', 'vault-use-policy', 'learn', 'test']);   // the title's order (+ learn: lane rule-learning; + reply-infer: lane dm-reply-infers; + vault-use-policy: lane vault-use-grants)
+const useWord = (k, t) => ({ attention: t('Needs attention'), inbox: t('For-you tray'), rule: t('Rules'), routing: t('Routing'), webhook: t('Webhooks'), 'reply-infer': t('Plain replies'), 'vault-use-policy': t('Vault policy'), learn: t('Block drafts'), test: t('Test') })[k] || k;
 const fillWords = (s, v = {}) => String(s).replace(/\{(\w+)\}/g, (m, k) => (Object.prototype.hasOwnProperty.call(v, k) ? String(v[k]) : m));
 const num0 = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
 /** `$1.23` · `< $0.01` when anything moved under a cent · `$0` when nothing did. `fine` (the by-use title) keeps a
@@ -1057,6 +1072,7 @@ function monthSpend(rows, month, offsetMinOf = () => 0) {
 
 module.exports = {
   REPLY_INFER_QUESTION, REPLY_INFER_VERSION,   // lane dm-reply-infers (use reply-infer)
+  VAULT_POLICY_MAX, VAULT_POLICY_THRESHOLD, vaultPolicyText, vaultPolicyQuestion,   // lane vault-use-grants (use vault-use-policy)
   INBOX, INBOX_QUESTION, inboxLevelsText, inboxSorts, inboxEligible, inboxScoreInput, inboxVerdict, inboxMemoOf, datePhraseOf, inboxFacts, inboxFactsSig, inboxFactsLine, inboxStale, inboxPlace, inboxRank,   // lane inbox-decision-group (use ④) + lane decision-inbox-rank (v2)
   ATTENTION_THRESHOLD_RANGE, USER_BLOCK_MAX, EXAMPLES_KEPT, EXAMPLES_SENT, EXAMPLE_DIGEST_MAX, VERDICTS,   // lane decision-attention
   attentionThreshold, attentionHits, userBlockOf, attentionRecord, judgedOf, exampleOf, addExample, examplesForInput, criteriaQuestions,

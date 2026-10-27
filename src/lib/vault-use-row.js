@@ -7,6 +7,9 @@
 //     (a list, or «the hosts it was stored for» when the entry has them — never «any host»), the END (none / 8 hours / 30
 //     days / 90 days). Save = POST /api/vault/use-grants with the whole row; a save that gives anybody MORE asks 验证是你
 //     first (the hub refuses it otherwise — reveal_needs_password), in the press's own task.
+//   · R4 (default OFF — Settings ▸ «Let the policy judge approve vault uses»): the entry's POLICY for the decision-API judge, in
+//     the same dialog (setting one asks 验证是你; clearing is a click); the row says the policy, whether the judge is on, and
+//     what it approved («Approved by the policy judge 3× · last 14:02» + 「Revoke」: those commands ask again next time).
 // The grant's facts ride the Vault window's own list (row.run.use — src/server/vault-run-door.js rowFacts): every change of
 // them reaches every open window through the vault's ONE notify (`vault-contents`), patched in place.
 import { t } from './i18n.js';
@@ -75,6 +78,17 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
       host.append(chips);
     }
     if (u.used && u.used.uses) host.append(el('div', 'vw-ak-used vw-use-count', t('used {n}× by {m} conversations', { n: u.used.uses, m: u.used.convs })));
+    if (u.policy) host.append(el('div', 'vw-ak-used vw-use-policy', u.judge === 'on' ? t('Policy for the judge: «{text}»', { text: u.policy.text }) : t('Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)', { text: u.policy.text })));
+    if (u.approved && u.approved.n) {
+      const line = el('div', 'vw-ak-used vw-use-approved');
+      const at = (() => { try { return new Date(u.approved.lastAt).toTimeString().slice(0, 5); } catch { return ''; } })();
+      line.append(el('span', null, t('Approved by the policy judge {n}× · last {time}', { n: u.approved.n, time: at })));
+      const rv = el('button', 'vw-btn vw-use-revoke', t('Revoke'));
+      rv.type = 'button'; rv.title = t('The commands the judge approved ask you again next time');
+      rv.onclick = async () => { const res = await post('/api/vault/use-policy/revoke', { id: r.id }); if (!res || !res.ok) showToast(t('Not done — {reason}', { reason: (res && (res.error || res.code)) || t('server unreachable') }), { type: 'error' }); else showToast(t('Revoked — those commands ask you again')); refresh?.(); };
+      line.append(rv);
+      host.append(line);
+    }
   }
   box.append(host, useB);
   redraw(row);
@@ -94,10 +108,10 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   let picker = null;
   // the unsaved guard (test-dialog-unsaved-census): who, the hosts and the end as the dialog opened — a close with a change asks
   let start = null, saveNow = () => false;
-  const stateOf = () => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except().slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '']);
+  const stateOf = () => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except().slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '', polIn ? polIn.value.trim() : '']);
   const { body, close } = createModalShell({ id: 'vault-use-grant', title: t('Who may use «{name}»', { name: row.label }), dialogClass: 'vault-dialog-box vw-ak-dialog vw-use-dialog', escapeToClose: true, onClose: () => { try { picker && picker.close(); } catch { } },
     unsaved: { isDirty: () => start !== null && stateOf() !== start, save: () => saveNow() } });
-  let ownBox = null, hostsIn = null, endSel = null;
+  let ownBox = null, hostsIn = null, endSel = null, polIn = null;
   body.append(el('div', 'vw-ak-hint', t('They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.')));
   picker = principalPicker({ items: () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))], app, multi: true, selected: stored.selected, placeholder: t('Search sessions and groups…'), label: t('Who may use it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, except: { selected: stored.except, extra } });
   body.append(el('div', 'vw-ak-sec', t('Who')), picker.el);
@@ -124,6 +138,13 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   for (const [id] of ENDS) { if (id === 'keep' && !members.length) continue; const o = el('option', null, endWord(id)); o.value = id; endSel.append(o); }
   endSel.value = members.length ? 'keep' : '30d';
   body.append(endSel);
+  // R4: THE POLICY for the decision-API judge (default off): the owner's words — hosts, verbs, what it is for
+  body.append(el('div', 'vw-ak-sec', t('Policy for the judge (optional)')));
+  polIn = el('textarea', 'vault-pw vw-use-policy-in');
+  polIn.rows = 2; polIn.spellcheck = false; polIn.maxLength = 600;
+  polIn.placeholder = t('e.g. only 192.168.1.1, read-only status calls to read the WAN status');
+  polIn.value = (u.policy && u.policy.text) || '';
+  body.append(polIn, el('div', 'vw-ak-hint', u.judge === 'on' ? t('The policy judge is ON: a run its grants do not cover is judged against these words by the decision API; a yes runs it (recorded in For you), anything else shows you the card. It never sees the value.') : t('The policy judge is OFF (Settings ▸ Integration ▸ «Let the policy judge approve vault uses») — the words are kept for when you turn it on.')));
   const err = el('div', 'vault-secret-error'); err.setAttribute('role', 'status');
   body.append(err);
   const f = el('div', 'dialog-footer');
@@ -152,6 +173,13 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     const send = () => post('/api/vault/use-grants', { id: row.id, to, except: pick.except }, revealLeftMs() ? revealHeaders() : {});
     let r = await send();
     if (r && r.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; r = await send(); }
+    const polWas = (u.policy && u.policy.text) || '', polNow = polIn.value.trim();
+    if (r && r.ok && polNow !== polWas) {   // R4: the policy rides the same Save (a non-empty one asks 验证是你 too)
+      const sendP = () => post('/api/vault/use-policy', { id: row.id, text: polNow }, revealLeftMs() ? revealHeaders() : {});
+      let q = await sendP();
+      if (q && q.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; q = await sendP(); }
+      if (!q || !q.ok) { err.textContent = revealWords(q || {}); return false; }
+    }
     if (r && r.ok) { showToast(to.length ? t('Saved — they use it with no card for those hosts') : t('Saved — nobody uses it without a card')); close(); refresh?.(); return true; }
     err.textContent = r && r.code === 'hosts_required' ? t('Name the hosts it may be used for — a host name or address each (never «any host»)') : r && r.code === 'bad_principal' ? t('A host is a host name or address (no wildcard, no address with a path)') : revealWords(r || {});
     return false;

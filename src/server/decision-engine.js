@@ -71,7 +71,7 @@ const M = require('../decision-model.js');
 const A = require('../attention-model.js'); // PURE: THE attention list (lane foryou-folds) — the judge scores only a band-5 tie
 
 const ROW_ID = 'llm';   // lane llm-plugin-rename: the Language model row (the key) — its data files keep their decision-* names
-const FEATURE_OF = Object.freeze({ attention: 'attention', rule: 'rules', routing: 'routing', inbox: 'inbox', webhook: 'rules', 'reply-infer': 'rules', test: null });   // + reply-infer (lane dm-reply-infers): a reply rule's judgment rides the Rules switch
+const FEATURE_OF = Object.freeze({ attention: 'attention', rule: 'rules', routing: 'routing', inbox: 'inbox', webhook: 'rules', 'reply-infer': 'rules', 'vault-use-policy': null, test: null });   // + reply-infer (lane dm-reply-infers): a reply rule's judgment rides the Rules switch; + vault-use-policy (lane vault-use-grants): its switch is the vault's own (vault.policyJudge, default OFF) — the plugin, the key and the money still gate it
 const JOURNAL_MAX = 5000;
 const JOURNAL_DAYS = 30;
 const QUIET_MS = 5 * 60 * 1000;

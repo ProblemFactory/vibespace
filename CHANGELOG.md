@@ -7,6 +7,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - A vault entry can now say who may use it and for which hosts — those runs stop asking each time; «Always» on a run card is such a grant.
 - A password you paste for an agent's request may be used by that conversation for the hosts it named; you can change it in the Vault window.
+- An optional policy judge (off by default) can approve a vault use that fits rules you write for the entry; anything else still asks you.
 
 ### Fixed
 - The Vault window shows a newly stored entry at once, without closing it, and its search finds it by name, host or the conversation that asked.
