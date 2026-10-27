@@ -60,6 +60,23 @@ const [zh, ja] = [keySets.get('i18n-zh.js'), keySets.get('i18n-ja.js')];
 for (const k of zh.keys()) if (!ja.has(k)) { warns++; console.warn(`⚠ parity: in zh but missing from ja: ${k.slice(0, 60)}`); }
 for (const k of ja.keys()) if (!zh.has(k)) { warns++; console.warn(`⚠ parity: in ja but missing from zh: ${k.slice(0, 60)}`); }
 
+// round 18 (item 5): a userTodos / For-you NOTICE key (`i18n: { text: { key: '…' } }`) lives in SERVER source, not a t() call,
+// so the dict-only lint above never saw it — the vault drift-notice key «{tool} on this machine changed…» shipped with NO zh/ja
+// (a sibling of six translated vault keys). THE ROAD: scan the vault door's literal notice keys and REQUIRE each in BOTH dicts;
+// a missing one is a HARD FAIL like a duplicate. Scoped to the vault surface (where notices are FOR the owner); widen the list as
+// other surfaces adopt the shape. A key built from a variable (`key: ASKING_KEY`) is not a literal — out of this road by design.
+const NOTICE_SRC = ['src/server/vault-run-door.js'].map((p) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', p));
+// check PRESENCE in the raw dict text, not the dictEntries Map: a userTodos key lives in a region of the dict the Map parser does
+// not reach (it stops before the vault section), which — together with these keys being source literals, not t() calls — is the
+// TWO reasons the drift key slipped through; a raw contains is robust to both.
+const [zhRaw, jaRaw] = DICTS.map((f) => fs.readFileSync(f, 'utf8'));
+for (const f of NOTICE_SRC) {
+  const src = fs.readFileSync(f, 'utf8');
+  const re = /\bkey:\s*(['"])((?:\\.|(?!\1).)*)\1/g; let m; const keys = new Set();
+  while ((m = re.exec(src))) { const k = m[2].replace(/\\(.)/g, '$1'); if (/[{\s]/.test(k) && k.length > 8) keys.add(k); }   // a sentence-shaped literal key (holds a {param} or a space), never a short identifier
+  for (const k of keys) for (const [nm, raw] of [['i18n-zh.js', zhRaw], ['i18n-ja.js', jaRaw]]) if (!raw.includes(k)) { dupFail++; console.error(`✗ ${path.basename(f)}: userTodos/notice key is NOT translated in ${nm} — ${k.slice(0, 64)} — a For-you notice key needs zh+ja like any chrome string (add it to src/lib/${nm})`); }
+}
+
 if (dupFail) {
   console.error(`\ni18n check FAILED: ${dupFail} duplicate key(s). Fix before building.`);
   process.exit(1);

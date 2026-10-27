@@ -9890,6 +9890,7 @@ export default {
   "Extra Antigravity CLI args appended when starting an Antigravity session.": "Antigravity セッションの起動時に追加する Antigravity CLI 引数。",
   "Default (Antigravity’s own setting)": "既定（Antigravity 自身の設定）",
   "{who} wants to run a command with a stored secret": "{who} が保管庫のシークレットを使ってコマンドを実行しようとしています", // lane vault-run-door
+  "{tool} on this machine changed: {from} → {to} (a root-owned tool — runs continue)": "このマシンの {tool} が変更されました：{from} → {to}（root 所有のツール——実行は継続します）", // lane vault-agent-own r18 (item 5): the drift FYI notice
   "Always for this shape": "この形は常に許可", // lane vault-run-door
   "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同じツール・フラグ・ホスト・シークレットなら 30 日間確認せずに実行します — 先に第二パスワードを確認します", // lane vault-run-door
   "Allowed for this shape for 30 days": "この形を 30 日間許可しました", // lane vault-run-door

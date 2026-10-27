@@ -143,7 +143,7 @@ const ASKING_TEXT = `More than ${ASKING_LINE_OVER} conversations are asking to u
 const ASKING_KEY = '{n} conversations are asking to use stored secrets';
 const ASKING_DETAIL = 'Each conversation asks on its own card in For you. This line goes when 8 or fewer are asking.';
 const REQUEST_QUIET_MS = 10 * 60e3;          // a Deny (or the card dismissed) quiets that conversation × entry 10 minutes (the automation card's rule)
-const USE_SKIP = new Set(['ask_pending', 'too_many_runs', 'spawn_failed', 'run_path_unsafe', 'tool_not_sealed', 'git_not_on_seal', 'two_hosts', 'bad_host', 'storage_blocked']);   // a wait or the hub's own failure before any child ran — not a use's outcome (a child that ran is always one)
+const USE_SKIP = new Set(['ask_pending', 'too_many_runs', 'spawn_failed', 'run_path_unsafe', 'tool_not_sealed', 'git_not_on_seal', 'two_hosts', 'bad_host', 'url_userinfo', 'storage_blocked']);   // a wait or the hub's own failure before any child ran — not a use's outcome (a child that ran is always one)
 const STORE_FILE = 'vault-run.json';
 const MARK_LABEL = 'vault-run-store-v1';
 const RUN_DIR_PREFIX = 'vs-vault-run-';
@@ -162,7 +162,7 @@ const RUNS_MAX = 16, RUNS_PER_CALLER = 4;
 const STATUS = Object.freeze({
   vault_not_set_up: 409, vault_locked: 423, bad_flag: 400, bad_reference: 400, bad_env_name: 400, duplicate_name: 400, no_command: 400,
   cmd_too_long: 400, no_reference: 400, template_unread: 400, template_too_long: 400, hidden_chars: 400, card_too_long: 400,
-  env_refused: 403, argv_refused: 403, tool_prints_secrets: 403, tool_wraps_another: 403, tool_has_its_own_door: 403, tool_not_sealed: 409, two_hosts: 409, bad_host: 400,
+  env_refused: 403, argv_refused: 403, tool_prints_secrets: 403, tool_wraps_another: 403, tool_has_its_own_door: 403, tool_not_sealed: 409, two_hosts: 409, bad_host: 400, url_userinfo: 403,
   entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, entry_too_short_to_mask: 403, use_not_granted: 403,
   job_no_use: 403, device_road_later: 403, cwd_refused: 403, template_refused: 403, tool_not_found: 404, unauthorized: 401,
   ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, caller_gone: 410, too_many_runs: 429,
@@ -182,6 +182,7 @@ const MORE_WORDS = Object.freeze({
   tool_not_sealed: 'this tool lives in a directory this user can write, so its program could be replaced after the hub hashed it (the fd pins WHICH file runs, root ownership pins WHAT is in it) — a tool that runs with a minted secret must live where ONLY root writes: /usr/bin or /usr/local/bin (`sudo apt install gh`); nothing ran',   // round 14 (BLOCKER): a uid-owned pinned tool is unsealed — r13's fd exec'd the CURRENT bytes after an in-place rewrite
   two_hosts: 'this command names two different hosts it could contact (a URL in a positional vs -R / GH_HOST or a repo spec) — a sealed credential tool homes the token to ONE host, so which one receives it cannot be told; name a single host — nothing ran',   // round 16 (BLOCKER): a <url> positional whose host differs from the routing host is two route hosts
   bad_host: 'a host named in this command does not parse — an empty or malformed name in a host list (e.g. `-h ,db.example.com`); name each host plainly — nothing ran',   // round 16 (MINOR): a routing value that normalises to null never reaches the verdict as «null»
+  url_userinfo: 'a URL on this command line carries a user[:password] before the host (`https://user@host/…`) — a credential-carrying URL can disguise which host the tool really contacts (the userinfo runs up to the last `@`, not the first), and a stored secret is never routed by one; write the host plainly and pass any credential with --env / --file — nothing ran',   // round 18 (item 1): a URL\'s host is what the WHATWG parser says; a userinfo URL is never a route
   // lane vault-manual-and-lock: the request's own codes
   request_pending: 'you already asked the user for that entry — the question waits in their For you tray; `vibespace-vault uses` shows the answer when it comes',
   purpose_required: 'say what the entry is for: vibespace-vault request <vault://…> --for "<what you will run with it, and why>"',
@@ -798,9 +799,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if ((shape.mentions || []).length) L.push(`Mentions (named in the command, not where it is sent): ${shape.mentions.join(', ')}`);   // round 16 (MINOR): shape.mentions excludes the row's OWN defaults (never api.github.com) — only a FREE-TEXT host that is not a route
     if (run.plainEnv.length) L.push(`Env: ${run.plainEnv.map((e) => `${e.name}=${quote(e.value)}`).join(' ')}`);
     L.push(`Folder: ${cwd}`);
-    for (const f of run.files) if (f.template != null) { const t = String(f.text); if (Buffer.byteLength(t, 'utf8') <= VR.TEMPLATE_CARD_MAX) L.push(`Template ${f.name} (@${f.template}):`, t.replace(/\s+$/, '')); else L.push(`Template ${f.name} (@${f.template}): ${Buffer.byteLength(t, 'utf8')} bytes — too long to show in full, so «Always» is not offered`); }   // round 17 (item 1): a template within the render bound is shown verbatim (its bytes define the «always»); a larger one is a short note (the card stays within DETAIL_MAX and «always» is withheld)
+    for (const f of run.files) if (f.template != null) L.push(`Template ${f.name} (@${f.template}):`, String(f.text).replace(/\s+$/, ''));   // round 18 (item 2): a template is shown IN FULL \u2014 an over-bound one is refused card_too_long before this card is built (never a note that hides it while the run proceeds)
     L.push(`This shape = ${shape.kind === 'tool' ? 'the tool + its flags + the hosts + the secrets; positional arguments may change' : 'this whole command line'}.`);
-    if (!shape.always) L.push(`«Always» is not offered: ${NO_ALWAYS[shape.noAlways] || shape.noAlways}.`);
+    if (!shape.always) L.push(`«Always» is not offered: ${shape.configReads ? `the template reads ${shape.configReads} \u2014 a file this card cannot show` : (NO_ALWAYS[shape.noAlways] || shape.noAlways)}.`);   // round 18 (item 3): a shown config template that nests another agent-writable file names the directive, so the owner sees why a template the card DID show still cannot be «always»
     return L.join('\n').trim();
   }
 
@@ -919,9 +920,13 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!spec.ok) { note(spec.code, { tool: resolved, why: spec.why || null }); return spec; }
     usedRefs = spec.refs;
     const shape = VR.shapeOf(spec), key = VR.shapeKeyOf(shape), shapeId = shapeIdOf(key);
+    // round 18 (item 2): ONE verdict for every template whatever carries it — over the card render bound ⇒ card_too_long (the owner never approves what the card cannot show in full), its words naming the template, its size and how to shrink it; never a note that hides its contents while the run proceeds
+    if (shape.cardTooLong) { const c = shape.cardTooLong; return named('card_too_long', { template: c.name, words: `the template ${c.name} (@${c.template}) is ${c.bytes} bytes \u2014 longer than ${VR.TEMPLATE_CARD_MAX} bytes, so this card cannot show it in full and the user would be approving a run it cannot read; shorten the template (or pass its bytes a smaller way) \u2014 nothing ran` }); }
     const detail = detailOf(spec, shape, place);
     if (detail.length > DETAIL_MAX) return named('card_too_long');
     const head = { tool: spec.tool, entries: spec.refs.map((r) => r.ref), shapeId, hosts: shape.routeHosts, routeHosts: shape.routeHosts, mentions: shape.mentions, injection: spec.injection, argvExposed: spec.argvExposed, cwd: place, cmd: utf8Head(SS.redactSecrets(cmdText(spec.argv)).text) };
+    // round 18 (item 1 BLOCKER): a URL on the command line carries userinfo (`https://ghe.example.test'@evil.test/…`) — the WHATWG parser reads the host PAST the userinfo (evil.test) where URL_RE stopped at the quote (ghe.example.test); a credential-carrying URL is never a route, refuse by name before the host verdict
+    if (shape.userinfo) { note('url_userinfo', { ...head }); return named('url_userinfo'); }
     // round 16 (MINOR): a routing value named a host that does not parse (psql -h ,db.example.com) — refuse by name; «sends it to null» never reaches the verdict or the card
     if (shape.badHost) { note('bad_host', { ...head }); return named('bad_host'); }
     // round 16 (BLOCKER): a SEALED credential tool (gh) whose command names TWO different hosts it could contact — a URL in a
