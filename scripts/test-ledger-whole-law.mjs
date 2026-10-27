@@ -20,11 +20,25 @@
 //   ⑦ F4 the shape judged WHOLE — the sample spans head, middle and tail; a 448 MiB SPARSE shard whose first 64 MiB are unique
 //     and the rest one window three times ⇒ paused 'ratio' by the ingest index's exact count, deduped, resumed (e11e1f61:
 //     the sample reads it in shape and the batch is appended)
+// ROUND 3 (the acceptance of d9753fa8 — each leg fails on d9753fa8):
+//   ⑧ consent is per SUBJECT on every road — the JOIN: a background act never joins an agent's card (d9753fa8: a DENIED
+//     harvest joined the agent's card and went on the owner's Allow of the AGENT; an open item stayed open while its act
+//     went that way); the harvest's own Allow closes its item; a Deny holds through a silent week and a restart; the words
+//     name the subject they cover
+//   ⑨ F4 one notion of «proven» (by inode): a proven file rewritten under a new inode gets its dedup (d9753fa8: none, for
+//     the life of the process, under «the repeated rows are being removed»); proven and still over ⇒ `proven-over`, said
+//     once, never retried; every remedy state has its own row in the notice and the Usage window
+//   ⑩ F4 the boot judges by the rule that opened the notice: an exact-ratio notice is never closed by the sample — it waits
+//     for the index («judging», after the ledger loads), then the same rule judges it (d9753fa8: closed as shape-ok,
+//     reopened at the next ingest — a flap at every restart)
+//   ⑪ F4 an `ids` pause is no dedup loop: no run, its own words, said once (d9753fa8: a full-shard dedup at every backoff,
+//     each removing 0, under «rows were removed»)
 // In-process, no server; sparse files for every big shape (fs.truncateSync / a write at an offset — no disk, no load).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
@@ -294,6 +308,163 @@ await leg('⑦', async () => {
   const [res] = await quietAsync(async () => (job ? job : null));
   const [r3] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
   ok(res && res.renamed && res.removed === rows - distinct && r3.appended === 5 && !uh.ingestPaused().length, `⑦ the remedy dedups it (${res && res.removed} repeated rows removed — the holes stepped over, never copied: ${(size(sh) / KiB).toFixed(0)} KiB left) and the machine is recorded again (${r3.appended} appended)`, { res, r3 });
+});
+
+console.log('⑧ CONSENT IS PER SUBJECT ON EVERY ROAD — a background act never joins an agent\'s card (round 3)');
+await leg('⑧', async () => {
+  let setting = 'auto';
+  const w = asker('w8', { setting: () => setting });
+  const AGENT = act('agent:claude:c1', 'ls');
+  const countOf = (by) => ((w.asker.standingList ? w.asker.standingList() : []).find((x) => x.by === by) || {}).count;
+  const ANS = { by: 'user', answeredBy: 'human:0123456789ab' };
+  // the harvest's OPEN standing item (refused once, nobody answered) + an agent's card up on the same machine × kind
+  await heldOut(w, HARVEST);
+  const u = w.items().find((i) => i.action.standing && i.action.by === 'system:usage-harvest');
+  const pa = w.asker.check(w.hid, AGENT); await tick();
+  const card = w.items().find((i) => !i.action.standing && i.status === 'open');
+  let gh = null; const ph = w.asker.check(w.hid, HARVEST).then((x) => { gh = x; return x; }); await tick(); await tick();
+  const atOnce = gh;
+  await w.asker.answer(card.action.askId, { answer: 'once', ...ANS });
+  const ga = await pa; await ph;
+  ok(card && ga && ga.ok === true && atOnce && atOnce.code === 'ask_standing' && gh && gh.code === 'ask_standing' && w.todos.get(u.id).status === 'open' && countOf('system:usage-harvest') === 2,
+    `⑧ the harvest's act while an AGENT's card is up: refused at once on its OWN item (${gh && (gh.code || gh.ask)}, counted ${countOf('system:usage-harvest')}) — the owner's Allow of the agent let the agent's act go and no other (d9753fa8: it joined the agent's card and went, its item still open)`, { atOnce, gh, item: w.todos.get(u.id).status });
+  // the harvest's OWN Allow once: its item closes, its next act goes
+  await w.asker.answer(u.action.askId, { answer: 'once', ...ANS });
+  const g1 = await w.asker.check(w.hid, HARVEST);
+  ok(w.todos.get(u.id).status === 'done' && w.todos.get(u.id).resolvedBy === 'allowed' && g1 && g1.ok === true, `⑧ the harvest's OWN Allow once: its item closes (${w.todos.get(u.id).resolvedBy}) and its next act goes`, { item: w.todos.get(u.id), g1 });
+  // THE PROBE: a DENIED harvest + an agent's card allowed once ⇒ the harvest stays refused
+  await heldOut(w, HARVEST); // it asks afresh: its one item reopened
+  await w.asker.answer(u.action.askId, { answer: 'deny', ...ANS });
+  const pa2 = w.asker.check(w.hid, AGENT); await tick();
+  const card2 = w.items().find((i) => !i.action.standing && i.status === 'open');
+  let gd = null; const pd = w.asker.check(w.hid, HARVEST).then((x) => { gd = x; return x; }); await tick(); await tick();
+  await w.asker.answer(card2.action.askId, { answer: 'once', ...ANS });
+  const ga2 = await pa2; await pd;
+  ok(ga2 && ga2.ok === true && gd && gd.ok !== true && gd.code === 'hub_act_denied', `⑧ THE PROBE — a DENIED harvest + an agent's card allowed once: the agent's act goes, the harvest stays refused (${gd && (gd.code || gd.ask)}; d9753fa8: allowed — it joined the card)`, { gd });
+  // the Deny holds through a silent week …
+  w.clock.t += 7 * 24 * 3600e3 + 1000;
+  if (w.asker.reevaluate) w.asker.reevaluate();
+  const ps = w.asker.check(w.hid, HARVEST); await tick();
+  const heldAfterWeek = w.asker.list().some((k) => k.by === 'system:usage-harvest');
+  w.clock.t += 61000; w.fire(); const gs = await ps;
+  ok(!heldAfterWeek && gs && gs.code === 'hub_act_denied' && w.todos.get(u.id).status !== 'open', `⑧ the Deny HOLDS through a silent week: refused at once (${gs && (gs.code || gs.ask)}), never asked afresh (d9753fa8: «no longer asked» lifted it — held, its item reopened)`, { heldAfterWeek, gs, item: w.todos.get(u.id).status });
+  // … and a restart
+  const a2 = w.mk(); a2.reconcile();
+  const pr = a2.check(w.hid, HARVEST); await tick();
+  const heldAfterBoot = a2.list().some((k) => k.by === 'system:usage-harvest');
+  w.clock.t += 61000; w.fire(); const gr = await pr;
+  ok(!heldAfterBoot && gr && gr.code === 'hub_act_denied' && w.todos.get(u.id).status !== 'open' && w.todos.get(u.id).resolvedBy === 'denied', `⑧ the Deny HOLDS across a restart: the next life refuses the harvest at once (${gr && (gr.code || gr.ask)}), its item stays denied (d9753fa8: asked again, the denied item reopened)`, { heldAfterBoot, gr, item: [w.todos.get(u.id).status, w.todos.get(u.id).resolvedBy] });
+  // … until the owner allows THAT subject: its item reopened, Allow once
+  w.todos.setStatus(u.id, 'open', 'user');
+  await a2.answer(u.action.askId, { answer: 'once', ...ANS });
+  const go = await a2.check(w.hid, HARVEST);
+  ok(go && go.ok === true && w.todos.get(u.id).status === 'done' && w.todos.get(u.id).resolvedBy === 'allowed', '⑧ …until the owner allows THAT subject: its item reopened and allowed once ⇒ its next act goes and the item closes (allowed)', { go, item: [w.todos.get(u.id).status, w.todos.get(u.id).resolvedBy] });
+  // … or the instance-wide setting allows it — then the Deny is over for good: a next life asks again, never restores it
+  w.clock.t += P.QUIET_MS + 1000;
+  const pq = a2.check(w.hid, HARVEST); await tick(); w.clock.t += 61000; w.fire(); await pq;
+  await a2.answer(u.action.askId, { answer: 'deny', ...ANS });
+  setting = 'everyone';
+  const gAll = await a2.check(w.hid, HARVEST);
+  setting = 'auto';
+  const a3 = w.mk(); a3.reconcile();
+  const p3 = a3.check(w.hid, HARVEST); await tick();
+  const asksAgain = a3.list().some((k) => k.by === 'system:usage-harvest');
+  w.clock.t += 61000; w.fire(); await p3;
+  ok(gAll === null && w.todos.get(u.id).resolvedBy !== 'denied' && asksAgain, `⑧ a Deny the instance-wide setting overrode: the act goes, its item no longer says denied (${w.todos.get(u.id).resolvedBy}), and the next life asks again instead of restoring the Deny`, { gAll, item: w.todos.get(u.id).resolvedBy, asksAgain });
+  const how = (it) => String((it && it.detail) || '').split('\n')[1] || '';
+  ok(/with the other acts of this kind by agent:claude:c1 waiting beside it — no one else's/.test(how(card)) && /every kind and every asker/.test(how(card)) && /Allow once lets the next act of system:usage-harvest go — no one else's/.test(how(w.todos.get(u.id))) && /Deny keeps system:usage-harvest refused until you allow it/.test(how(w.todos.get(u.id))),
+    '⑧ the words name the subject they cover: the agent card\'s Allow once = that conversation\'s acts, no one else\'s; Always on this machine = every kind and every asker; the harvest\'s item names the harvest (d9753fa8: «with any act of the same kind waiting beside it»)', [how(card), how(w.todos.get(u.id))]);
+  w.fire();
+});
+
+console.log('⑨ F4 ONE NOTION OF «PROVEN» (by inode); proven and still over ⇒ proven-over; a row for every remedy state');
+const N = await import(pathToFileURL(REPO + '/src/lib/usage-ledger-note.js').href);
+const UHM = require(REPO + '/src/usage-history.js');
+await leg('⑨', async () => {
+  const d = dirOf('w9'), sh = shardOf(d);
+  fs.writeFileSync(sh, Array.from({ length: 400 }, (_, i) => row(i)).join('\n') + '\n');
+  const uh = newUh(d), todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+  uh.shapeMaxBytes = 64 * KiB; // the product's 2 GiB, scaled (400 distinct rows, ~130 KiB)
+  LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null });
+  const said = []; const on = uh.onShape; uh.onShape = (e) => { said.push(e); on && on(e); };
+  const real = uh.dedupShard.bind(uh); let runs = 0; uh.dedupShard = (f, o) => { runs++; return real(f, o); };
+  const notices = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
+  const drain = async () => { for (let i = 0; i < 400 && uh._dedupJobs.size; i++) await sleep(5); };
+  const remNow = () => (uh.ingestPaused()[0] || {}).remedy || {};
+  await quietAsync(async () => { uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)); await drain(); });
+  const s1 = remNow(), n1 = notices();
+  ok(runs === 1 && s1.state === 'proven-over' && n1.length === 1 && n1[0].status === 'open' && /already deduplicated/.test(n1[0].detail) && /stopped trying/.test(n1[0].detail) && !/removing the repeated rows in the background/.test(n1[0].detail),
+    `⑨ over the bound, and its dedup found no repeated row: paused, state ${s1.state || '—'}, said «over 2 GiB and already deduplicated» — removing rows cannot help, VibeSpace stopped trying (d9753fa8: resumed — a proven shard was never paused for its size)`, { s1, n: n1.map((i) => [i.status, i.resolvedBy]) });
+  const ino0 = fs.statSync(sh).ino;
+  fs.copyFileSync(sh, sh + '.repair'); fs.renameSync(sh + '.repair', sh); // a tmp + rename repair: the same rows under a NEW inode
+  await quietAsync(async () => { uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)); await drain(); });
+  const s2 = remNow();
+  ok(fs.statSync(sh).ino !== ino0 && runs === 2 && s2.state === 'proven-over', `⑨ the same file rewritten under a NEW inode: unproven again ⇒ it gets its dedup (${runs - 1} run), then ${s2.state || '—'} again (d9753fa8: no run — paused for size under state none, for the life of the process)`, { runs, s2 });
+  uh.remedyRetryMs = 1; // a backoff cannot bring a run back: there is none
+  const n0 = said.length;
+  for (let k = 0; k < 3; k++) { await sleep(5); await quietAsync(async () => { uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)); await drain(); }); }
+  ok(runs === 2 && said.length === n0 && notices().length === 1, `⑨ three later pauses: no dedup re-run (${runs - 2}), nothing said again (${said.length - n0}) — the remedy stopped, said once`, { runs, said: said.length - n0 });
+  const STATES = ['running', 'judging', 'failed', 'not-rewritten', 'insufficient', 'proven-over', 'ids', 'none'];
+  const running = N.LEDGER_NOTE_WORDS.pausedRunning || N.LEDGER_NOTE_WORDS.paused;
+  const rowsOf = STATES.map((state) => { const rec = { host: 'host-m', hostName: 'M', shard: SHARD, size: 3 * GiB, why: 'size', remedy: { state, code: 'EACCES', error: 'x', nextAt: Date.now() + 60e3 } }; return [state, (N.ledgerNote({ ingestPaused: [rec] })[0] || {}).words, LSN.noticeOf(rec).detail]; });
+  const bad = rowsOf.filter(([state, words, detail]) => !words || (state === 'running' ? words !== running : words === running || /removing the repeated rows in the background/.test(detail)));
+  ok(JSON.stringify(UHM.REMEDY_STATES) === JSON.stringify(STATES) && !bad.length && new Set(rowsOf.map(([, x]) => x)).size === STATES.length && Object.keys(LSN.D_NOW).sort().join() === [...STATES].sort().join(),
+    `⑨ every state the remedy can be in (${STATES.join(' / ')}) has its OWN row in the Usage window and the notice — none falls back to «the repeated rows are being removed» (falling back: ${rowsOf.filter(([s, x]) => s !== 'running' && x === running).map(([s]) => s).join(', ') || 'none'}; d9753fa8: judging, proven-over, ids, none)`, bad.map(([s, x]) => [s, x]));
+});
+
+console.log('⑩ F4 THE BOOT JUDGES BY THE RULE THAT OPENED IT — an exact-ratio notice waits for the index');
+await leg('⑩', async () => {
+  const d = dirOf('w10'), sh = shardOf(d);
+  // each row followed by a 1 MiB hole: 8 unique rows, then a 16-row window three times — 56 MiB the sample reads one row a window
+  const order = []; for (let i = 0; i < 8; i++) order.push(i); for (let k = 0; k < 3; k++) for (let i = 0; i < 16; i++) order.push(1000 + i);
+  const fd = fs.openSync(sh, 'w'); let at = 0;
+  try { for (const i of order) { const b = Buffer.from(row(i) + '\n'); fs.writeSync(fd, b, 0, b.length, at); at += b.length + MiB; } } finally { fs.closeSync(fd); }
+  fs.truncateSync(sh, at - MiB);
+  const s = LD.shapeOf(sh);
+  const todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+  const moves = []; todos.onStatus((it, { status, by }) => { if (it && it.sessionKey === 'usage-ledger') moves.push([status, by]); });
+  const notices = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
+  const life = () => {
+    const uh = newUh(d); uh.shapeRatioMinBytes = 0; // the product's 64 MiB, scaled (a 56 MiB sparse file)
+    uh.dedupShard = (f) => { const p = new Promise(() => { }); uh._dedupJobs.set(f, p); return p; }; // its pass is ⑦'s to prove
+    return { uh, wired: LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null }) };
+  };
+  const L1 = life();
+  quiet(() => L1.uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
+  await quietAsync(() => L1.uh.ingestIndexSettled());
+  const [r1] = quiet(() => L1.uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
+  const first = notices();
+  ok(s.ratio != null && s.ratio <= 2 && r1.paused && r1.paused.why === 'ratio' && r1.paused.ratio > 2 && first.length === 1 && first[0].status === 'open', `⑩ a shard the sample reads in shape (${s.ratio == null ? '—' : s.ratio.toFixed(2)}×) and its index out of it (${r1.paused && r1.paused.ratio}× — ${order.length} rows / ${new Set(order).size} distinct): paused by the exact count, ONE notice`, { s: s.ratio, r1 });
+  const L2 = life(); // a restart: no index loaded 3 s after boot
+  const [n2] = quiet(() => L2.wired.reconcile());
+  const mid = notices(), p2 = L2.uh.ingestPaused()[0];
+  ok(n2 === 0 && mid.length === 1 && mid[0].id === first[0].id && mid[0].status === 'open' && p2 && p2.remedy && p2.remedy.state === 'judging' && /judges the file by it/.test(mid[0].detail), `⑩ the restart's reconcile does NOT close it (closed ${n2}; d9753fa8: closed by the sample, shape-ok) — the machine stays paused «judging» until the index is read after the ledger loads`, { n2, items: mid.map((i) => [i.status, i.resolvedBy]), remedy: p2 && p2.remedy });
+  await quietAsync(async () => { await L2.uh.whenWarm(); for (let i = 0; i < 400 && L2.uh._judgeKick && L2.uh._judgeKick.size; i++) await sleep(5); });
+  const [r3] = quiet(() => L2.uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
+  const end = notices(), p3 = L2.uh.ingestPaused()[0];
+  ok(end.length === 1 && end[0].id === first[0].id && end[0].status === 'open' && !moves.length && r3.paused && r3.paused.why === 'ratio' && p3 && p3.remedy.state === 'running' && /removing the repeated rows in the background/.test(end[0].detail), `⑩ the index read, the SAME rule judges it: still ${r3.paused && r3.paused.ratio}× ⇒ paused, its dedup running — the one notice never closed nor reopened across the restart (${moves.length} status move(s); d9753fa8: closed at boot, reopened at the next ingest — a flap at every restart)`, { moves, r3 });
+});
+
+console.log('⑪ F4 AN `ids` PAUSE IS NO DEDUP LOOP — its own words, the remedy stops');
+await leg('⑪', async () => {
+  const d = dirOf('w11'), sh = shardOf(d);
+  fs.writeFileSync(sh, Array.from({ length: 300 }, (_, i) => row(i)).join('\n') + '\n');
+  const uh = newUh(d), todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+  uh.remedyRetryMs = 20; // the product's 10 min, scaled — a loop would run again at every later pause
+  LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null });
+  const said = []; const on = uh.onShape; uh.onShape = (e) => { said.push(e); on && on(e); };
+  const real = uh.dedupShard.bind(uh); let runs = 0; uh.dedupShard = (f, o) => { runs++; return real(f, o); };
+  const drain = async () => { for (let i = 0; i < 400 && uh._dedupJobs.size; i++) await sleep(5); };
+  const [r0] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
+  const ix = uh._ingestIx.get(sh);
+  if (ix) ix.over = true; // past the index's bound (LD.MAX_IDS = 5 000 000 distinct rids) — set by hand: a 5 M-row fixture is load
+  for (let k = 0; k < 4; k++) { await quietAsync(async () => { uh.ingestRemoteEvents('host-m', 'M', batchOf(9100 + k, 1)); await drain(); }); await sleep(30); }
+  const p = uh.ingestPaused()[0] || {}, rem = p.remedy || {}, n = todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
+  const paused = said.filter((e) => e.kind === 'paused').length;
+  ok(r0.appended === 5 && p.why === 'ids' && runs === 0 && rem.state === 'ids' && paused === 1 && n.length === 1 && /more distinct records than the index keeps/.test(n[0].detail) && /stopped trying/.test(n[0].detail) && !/were removed/.test(n[0].detail),
+    `⑪ a month with more distinct rows than the index keeps: paused 'ids', NO dedup (${runs} run(s) over 4 pauses past the backoff — d9753fa8: one at every backoff, each removing 0), state ${rem.state || '—'}, said ONCE (${paused}) in its own words, never «rows were removed»`, { runs, rem, paused, now: n[0] && n[0].detail.split('\n')[2] });
+  const note = N.ledgerNote({ ingestPaused: uh.ingestPaused() })[0];
+  ok(note && note.words === N.LEDGER_NOTE_WORDS.pausedIds, '⑪ the Usage window says it in a row of its own (pausedIds)', note);
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -15,14 +15,16 @@
  *     VIBESPACE_INSTANCE_NAME, or the shared presets folder) asks, a LOCAL one does not;
  *   · an act whose owner grant was judged already — vibespace-exit's own two lists (`use` / `run`, with their own "ask me
  *     each time") — never asks twice (`consent`);
- *   · THE CARD is one per machine per KIND (run / files / input / forward / serve / install / upgrade): a second act of the
- *     same key joins the card that is up; its answer settles them all. 60 s unanswered ⇒ refused `ask_expired`;
+ *   · THE CARD is one per SUBJECT — machine × KIND (run / files / input / forward / serve / install / upgrade) × who asks
+ *     (lane ledger-dedup-law r3: consent is per subject on every road): a second act of the same subject joins the card
+ *     that is up; its answer settles them all and no other subject's. 60 s unanswered ⇒ refused `ask_expired`;
  *   · a background subject (system / job) that was not allowed (denied or unanswered) is refused at once for QUIET_MS on
- *     that key — no new card (a harvest every minute is not a card every minute);
+ *     that subject — no new card (a harvest every minute is not a card every minute);
  *   · lane ledger-dedup-law F3 (B-7f9e — 958 expired cards filled a fleet owner's For-you list, 144 a day per kind per
  *     machine): a background subject's card IS ONE STANDING ITEM — its words name the CONSEQUENCE (`standingOf`: «usage of
  *     M is not being recorded» / «the device agent on M waits for an update»), it never expires, and every later refusal
- *     of that machine × kind is counted on it in place (the count, the last time) — never a new card.
+ *     of that subject is counted on it in place (the count, the last time) — never a new card; it never joins a person's
+ *     or an agent's card (r3).
  * Gate: scripts/test-hub-act-ask.mjs (the verdict table, the words, the fake-daemon leg, the dialog's third list).
  */
 
@@ -52,10 +54,10 @@ const KIND_OF = Object.freeze({
 });
 /** The kind of an act's table key (device-acts keyOf). */
 const kindOf = (key) => (Object.prototype.hasOwnProperty.call(KIND_OF, String(key)) ? KIND_OF[String(key)] : 'run');
-/** The dedup key of a card: one machine, one kind. */
+/** One machine, one kind — the first two parts of a subject's key. */
 const dedupKey = (hostId, kind) => `${String(hostId)}\n${KINDS.includes(kind) ? kind : 'run'}`;
-/** A BACKGROUND SUBJECT's key (lane ledger-dedup-law r2): one machine, one kind, WHO asks (`by`) — two subjects of one kind on
- *  one machine are two subjects (their own hold, quiet window, count, standing item, Allow once). */
+/** A SUBJECT's key (lane ledger-dedup-law r2, every card r3): one machine, one kind, WHO asks (`by`) — two askers of one kind
+ *  on one machine are two subjects (their own card or hold, quiet window, count, standing item, Allow once, Deny). */
 const subjectKey = (hostId, kind, by) => `${dedupKey(hostId, kind)}\n${String(by || '')}`;
 /** A `by`'s kind ('human' | 'agent' | 'job' | 'system') or null — the spelling src/device-acts.js validates. */
 const BY_RE = /^(human|agent|job|system):[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,159}$/;
@@ -85,7 +87,7 @@ function policyOf({ machinePolicy = null, instanceKind = 'local', setting = 'aut
  *   consent (vibespace-exit's own lists judged) ⇒ allow `consent`
  *   policy everyone                             ⇒ allow `everyone`
  *   policy nobody                               ⇒ deny `hub_act_denied` (`nobody`)
- *   policy ask + a card up for this key         ⇒ ask, join
+ *   policy ask + a card up for this subject     ⇒ ask, join
  *   policy ask + a background subject refused
  *     on this key in the last QUIET_MS          ⇒ deny by the last outcome (`hub_act_denied` / `ask_expired`), `quiet`
  *   policy ask                                  ⇒ ask
@@ -130,7 +132,7 @@ const TITLE = Object.freeze({
   upgrade: i18nKey('{who} wants to update the device agent on {machine}'),
 });
 const DETAIL_WHAT = i18nKey('It would: {summary} — asked by {by}.');
-const DETAIL_HOW = i18nKey('Allow once lets it go ahead (with any act of the same kind waiting beside it). Always on this machine sets Hub automation of {machine} to Always allow — every kind, no more asks. Deny refuses it. No answer in 60 s: refused.');
+const DETAIL_HOW = i18nKey('Allow once lets it go ahead, with the other acts of this kind by {who} waiting beside it — no one else\'s. Always on this machine sets Hub automation of {machine} to Always allow — every kind and every asker, no more asks. Deny refuses it. No answer in 60 s: refused.');
 const KIND_WORDS = Object.freeze({ run: 'run a command', files: 'change files', input: 'use the keyboard, mouse or windows', forward: 'reach other hosts through it', serve: 'share a folder or a browser from it', install: 'install or remove an app', upgrade: 'update its device agent' });
 const fold = (s, n) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
 const fill = (k, p) => k.replace(/\{(\w+)\}/g, (_, n) => (p[n] == null ? '' : String(p[n])));
@@ -144,7 +146,7 @@ function whoOf(by, name = null) {
 function cardOf({ by, name = null, machine = '', kind = 'run', summary = '' } = {}) {
   const k = KINDS.includes(kind) ? kind : 'run';
   const p = { who: whoOf(by, name), machine: fold(machine, 80) || 'a machine', summary: fold(summary, 240) || k, by: byKindOf(by) ? String(by).slice(0, 120) : 'nobody named' };
-  return { text: fill(TITLE[k], p), detail: [fill(DETAIL_WHAT, p), fill(DETAIL_HOW, p)].join('\n'), i18n: { text: { key: TITLE[k], params: { who: p.who, machine: p.machine } }, detail: [{ key: DETAIL_WHAT, params: { summary: p.summary, by: p.by } }, { key: DETAIL_HOW, params: { machine: p.machine } }] } };
+  return { text: fill(TITLE[k], p), detail: [fill(DETAIL_WHAT, p), fill(DETAIL_HOW, p)].join('\n'), i18n: { text: { key: TITLE[k], params: { who: p.who, machine: p.machine } }, detail: [{ key: DETAIL_WHAT, params: { summary: p.summary, by: p.by } }, { key: DETAIL_HOW, params: { machine: p.machine, who: p.who } }] } };
 }
 // lane ledger-dedup-law F3: THE STANDING ITEM's words — the consequence first (what is not happening), then who asks, how
 // often it was refused and when last, and what each answer does. The text is the item's identity (fixed at its filing: the
@@ -155,7 +157,7 @@ const STANDING_TITLE = Object.freeze({
   // any other subject: the card's own title for its kind ("{who} wants to … on {machine}")
 });
 const STANDING_DETAIL_WHO = i18nKey('Asked by {by} — its last act: {summary}. Refused {count} time(s), the last at {last}. Nothing waits on it — each later act is refused at once and counted here, never a new card.');
-const STANDING_DETAIL_HOW = i18nKey('Allow once lets its next act go. Always on this machine sets Hub automation of {machine} to Always allow — every kind. Deny keeps it refused and stops counting here.');
+const STANDING_DETAIL_HOW = i18nKey('Allow once lets the next act of {by} go — no one else\'s. Always on this machine sets Hub automation of {machine} to Always allow — every kind and every asker. Deny keeps {by} refused until you allow it (here, or by Hub automation) and stops counting here.');
 /** Which consequence a standing subject names: VibeSpace's usage harvest ⇒ `usage`; a device-agent update ⇒ `upgrade`. */
 const consequenceOf = (by, kind) => (String(by || '').startsWith('system:usage-harvest') ? 'usage' : kind === 'upgrade' ? 'upgrade' : 'other');
 /** THE STANDING ITEM's words → {text, detail, i18n}. `count` = refusals so far, `lastAt` = the last one (ms). */
@@ -168,7 +170,7 @@ function standingOf({ by, machine = '', kind = 'run', count = 1, lastAt = 0, con
     consequence: c,
     text: fill(title, p),
     detail: [fill(STANDING_DETAIL_WHO, p), fill(STANDING_DETAIL_HOW, p)].join('\n'),
-    i18n: { text: { key: title, params: { machine: p.machine, who: p.who } }, detail: [{ key: STANDING_DETAIL_WHO, params: { by: p.by, summary: p.summary, count: p.count, last: p.last } }, { key: STANDING_DETAIL_HOW, params: { machine: p.machine } }] },
+    i18n: { text: { key: title, params: { machine: p.machine, who: p.who } }, detail: [{ key: STANDING_DETAIL_WHO, params: { by: p.by, summary: p.summary, count: p.count, last: p.last } }, { key: STANDING_DETAIL_HOW, params: { machine: p.machine, by: p.by } }] },
   };
 }
 const hhmm = (t) => { const d = new Date(Number(t) || 0); return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`; };

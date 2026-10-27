@@ -194,6 +194,9 @@ const SHAPE_RATIO_MIN_BYTES = 64 * 1024 * 1024;
 const SHAPE_RESAMPLE_BYTES = 64 * 1024 * 1024, SHAPE_RESAMPLE_MS = 10 * 60e3; // a shard's sampled shape is read again past either
 const DUP_LOG_MS = 10 * 60e3; // the ingest's duplicates line: once per host per this, with the counts since the last line
 const REMEDY_RETRY_MS = 10 * 60e3, REMEDY_RETRY_MAX_MS = 6 * 3600e3; // r2: a paused shard's dedup that did not bring it back in shape runs again at a later pause past this (doubling per try)
+// r3: EVERY state a paused shard's remedy can be in — the notice (src/server/ledger-shape-notice.js D_NOW) and the Usage
+// window (src/lib/usage-ledger-note.js) each have a row for every one (test-ledger-whole-law ⑨ walks this list)
+const REMEDY_STATES = Object.freeze(['running', 'judging', 'failed', 'not-rewritten', 'insufficient', 'proven-over', 'ids', 'none']);
 function probeHolds(fp, at, probe) {
   if (!probe || !probe.length) return true;
   let fd; try { fd = fs.openSync(fp, 'r'); } catch { return false; }
@@ -281,7 +284,7 @@ class UsageHistory {
     this._lastScan = 0;
     // lane ledger-dedup-law: F1's per-shard rid index, F4's sampled shapes + paused hosts, the dedup jobs in flight, F2's
     // hub-kept device cursors (one file per machine beside the ledger), the duplicates journal's per-host counts
-    this._ingestIx = new Map(); this._shapes = new Map(); this._pausedHosts = new Map(); this._proven = new Map(); this._dedupJobs = new Map(); this._remedies = new Map();
+    this._ingestIx = new Map(); this._shapes = new Map(); this._pausedHosts = new Map(); this._proven = new Map(); this._dedupJobs = new Map(); this._remedies = new Map(); this._judging = new Map(); this._judgeKick = new Map();
     this._hostCursors = new Map(); this._dupLog = new Map();
     this.hostCursorsDir = path.join(this.dir, '_host-cursors');
     this.onShape = null; // (event) — {kind: 'paused' | 'resumed' | 'dedup', …}: server.js files / resolves the named notice
@@ -806,18 +809,27 @@ class UsageHistory {
   // ── F4 THE GROWTH ALARM (lane ledger-dedup-law) ─────────────────────────────────────────────────────────────────────────
   _shapeMaxBytes() { return this.shapeMaxBytes || SHAPE_MAX_BYTES; }
   _shapeRatioMinBytes() { return this.shapeRatioMinBytes != null ? this.shapeRatioMinBytes : SHAPE_RATIO_MIN_BYTES; }
-  /** Is a shard in shape for an append? → {ok: true} | {ok: false, why: 'size' | 'ratio' | 'ids', size, ratio, shard}. The
-   *  size is a stat per ingest; the ratio is the ingest index's own count once it read the shard (every `h:` row against
-   *  the distinct ones — r2: a sample of windows, head to tail, cannot see a repeat that lies far from its first copy, and
-   *  the incident's re-sent windows are exactly that), before it LD.shapeOf's sample (16 windows from the head to the
-   *  tail, ≤ 16 MiB read), read again only past SHAPE_RESAMPLE_BYTES of growth or SHAPE_RESAMPLE_MS; a shard a dedup pass
-   *  proved free of repeats is not paused for its size alone (its rows are distinct — a big month, not a repeated window). */
+  /** Is a shard in shape for an append? → {ok: true} | {ok: false, why: 'size' | 'ratio' | 'ids', size, ratio, shard, exact?,
+   *  proven?, judging?}. The size is a stat per ingest; the ratio is the ingest index's own count once it read the shard
+   *  (every `h:` row against the distinct ones — r2: a sample of windows, head to tail, cannot see a repeat that lies far
+   *  from its first copy, and the incident's re-sent windows are exactly that), before it LD.shapeOf's sample (16 windows
+   *  from the head to the tail, ≤ 16 MiB read), read again only past SHAPE_RESAMPLE_BYTES of growth or SHAPE_RESAMPLE_MS.
+   *  r3: a shard over the bound is out of shape even when a dedup pass proved it free of repeats (`proven` — keyed by the
+   *  inode the pass read, `_isProven`: a file rewritten since is unproven and gets its dedup); a pause the INDEX judged
+   *  before a restart (`_judging`, restorePause) is judged by the index again, never by the sample (`judging` until it is
+   *  read — after the ledger loads). */
   _shapeVerdict(shard) {
-    let st; try { st = fs.statSync(shard); } catch { return { ok: true }; }
-    const proven = this._proven.get(shard);
-    const ix = this._ingestIx.get(shard);
-    if (ix && ix.over && ix.ino === st.ino) return { ok: false, why: 'ids', size: st.size, ratio: null, shard };
-    if (st.size > this._shapeMaxBytes() && !(proven && proven.ino === st.ino)) return { ok: false, why: 'size', size: st.size, ratio: (this._shapes.get(shard) || {}).ratio ?? null, shard };
+    let st; try { st = fs.statSync(shard); } catch { this._judging.delete(shard); return { ok: true }; }
+    const ix = this._ingestIx.get(shard), j = this._judging.get(shard);
+    if (j && j.ino == null) j.ino = st.ino; // the file the boot found (restorePause judges at once)
+    // the ids bound and the size are exact rules of their own: either one judging it out ends a «judging» wait
+    if (ix && ix.over && ix.ino === st.ino) { this._judging.delete(shard); return { ok: false, why: 'ids', size: st.size, ratio: null, shard, exact: true }; }
+    if (st.size > this._shapeMaxBytes()) { this._judging.delete(shard); return { ok: false, why: 'size', size: st.size, ratio: (this._shapes.get(shard) || {}).ratio ?? null, shard, proven: this._isProven(shard, st) }; }
+    if (j && j.ino !== st.ino) this._judging.delete(shard); // rewritten since: judged afresh, like any file
+    else if (j) {
+      if (!(ix && !ix.loading && ix.ino === st.ino && ix.size > 0)) { this._judgeByIndex(shard); return { ok: false, why: j.why, size: st.size, ratio: j.ratio, shard, exact: true, judging: true }; }
+      this._judging.delete(shard); // the index read it: its count judges below
+    }
     if (st.size < this._shapeRatioMinBytes()) return { ok: true, size: st.size };
     if (ix && !ix.loading && ix.ino === st.ino && ix.size > 0 && ix.rids.size) {
       const ratio = (ix.rows || 0) / ix.rids.size;
@@ -836,33 +848,75 @@ class UsageHistory {
    *  the notice says what HAPPENED (r2), never a promise. THE REMEDY = the shard's streaming dedup (`_remedy`). */
   _pause(hostId, hostName, shard, v, events = 0) {
     const prev = this._pausedHosts.get(hostId), now = Date.now();
-    const rec = { host: hostId, hostName: hostName || hostId, shard: path.basename(shard), size: v.size, ratio: v.ratio == null ? null : Math.round(v.ratio * 10) / 10, why: v.why, since: prev && prev.shard === path.basename(shard) ? prev.since : now, lastAt: now, held: (prev ? prev.held : 0) + events, remedy: this._remedyOf(shard) };
+    const ratio = v.ratio == null || !Number.isFinite(Number(v.ratio)) ? null : Math.round(Number(v.ratio) * 10) / 10;
+    const rec = { host: hostId, hostName: hostName || hostId, shard: path.basename(shard), size: v.size, ratio, why: v.why, exact: !!v.exact, since: prev && prev.shard === path.basename(shard) ? prev.since : now, lastAt: now, held: (prev ? prev.held : 0) + events, remedy: null };
     this._pausedHosts.set(hostId, rec);
     const first = !prev || prev.shard !== rec.shard;
     const started = this._remedy(shard, v);
-    if (started) rec.remedy = this._remedyOf(shard);
-    if (first) console.warn(`[usage] ${rec.shard} is out of shape (${(rec.size / 2 ** 30).toFixed(2)} GiB${rec.ratio ? `, ~${rec.ratio}× its distinct rows` : ''}) — the usage of ${rec.hostName} is NOT recorded until it is back in shape (its device keeps the events)${started ? '; removing the repeated rows now' : ''}`);
-    if (first || started) this._emitShape({ kind: 'paused', ...rec });
+    rec.remedy = this._remedyOf(shard);
+    // r3: said again when what it says changes (the rule, the remedy's state) — e.g. «judging» → the index's verdict
+    const changed = !first && (prev.why !== rec.why || !prev.remedy || prev.remedy.state !== rec.remedy.state);
+    if (first) console.warn(`[usage] ${rec.shard} is out of shape (${(rec.size / 2 ** 30).toFixed(2)} GiB${rec.ratio ? `, ~${rec.ratio}× its distinct rows` : ''}) — the usage of ${rec.hostName} is NOT recorded until it is back in shape (its device keeps the events)${started ? '; removing the repeated rows now' : v.judging ? '; judged again by its index after the ledger loads' : ''}`);
+    if (first || started || changed) this._emitShape({ kind: 'paused', ...rec });
     return { ...rec };
   }
   /** THE REMEDY of a paused shard (r2): its streaming dedup — one in flight; one that did not bring the shard back in shape
    *  (failed, not rewritten, still out of shape) runs again at a LATER pause once its backoff passed (REMEDY_RETRY_MS,
-   *  doubling per try, ≤ REMEDY_RETRY_MAX_MS). → true when it started a run. */
+   *  doubling per try, ≤ REMEDY_RETRY_MAX_MS). r3: a dedup is a remedy for REPEATED rows only — a shard over the bound that
+   *  a pass proved free of them (`proven-over`) and a month with more distinct rows than the index keeps (`ids`) get none:
+   *  the remedy STOPS and says so (`_remedyStops`), never a dedup loop; a pause «judging» by the index waits for it. → true
+   *  when it started a run. */
   _remedy(shard, v) {
-    if (v.why === 'size' && this._proven.get(shard)) return false;
+    if (v.judging) return false;
+    if (v.why === 'ids') { this._remedyStops(shard, 'ids', v); return false; }
+    if (v.why === 'size' && v.proven) { this._remedyStops(shard, 'proven-over', v); return false; }
     if (this._dedupJobs.has(shard)) return false;
     const r = this._remedies.get(shard);
-    if (r && Date.now() < r.nextAt) return false;
+    if (r && !r.stopped && Date.now() < r.nextAt) return false;
     this.dedupShard(shard, { why: r ? `the growth alarm, try ${r.tries + 1}` : 'the growth alarm' }).catch(() => { });
     return true;
   }
-  /** A paused shard's remedy as the notice and the Usage window say it: {state: 'running' | 'failed' | 'not-rewritten' |
-   *  'insufficient' | 'none', tries, nextAt, …the last outcome (code, error, removed, after, verdict)}. */
+  /** A paused shard's remedy as the notice and the Usage window say it: {state: one of REMEDY_STATES, tries, nextAt (null
+   *  once it stopped), stopped?, …the last outcome (code, error, removed, after, verdict)}. */
   _remedyOf(shard) {
     shard = this._shardPath(shard);
     if (this._dedupJobs.has(shard)) return { state: 'running' };
+    if (this._judging.has(shard)) return { state: 'judging' };
     const r = this._remedies.get(shard);
-    return r ? { ...r.last, state: r.last.outcome, tries: r.tries, nextAt: r.nextAt } : { state: 'none' };
+    return r ? { ...r.last, state: r.last.outcome, tries: r.tries, nextAt: r.stopped ? null : r.nextAt, ...(r.stopped ? { stopped: true } : {}) } : { state: 'none' };
+  }
+  /** Has a dedup pass proved THIS file (the inode it read) free of repeated rows? The one notion `_shapeVerdict` and
+   *  `_remedy` share (r3: the inode-blind check left a file rewritten since paused with no remedy for the process's life). */
+  _isProven(shard, st) {
+    const p = this._proven.get(shard);
+    return !!(p && st && p.ino === st.ino);
+  }
+  /** r3: THE REMEDY STOPS — nothing VibeSpace does brings the shard back in shape (no repeated rows to remove): the state
+   *  kept (`proven-over` | `ids`), no retry, one line. → true when it is new. */
+  _remedyStops(shard, outcome, v) {
+    const prev = this._remedies.get(shard);
+    if (prev && prev.stopped && prev.last.outcome === outcome) return false;
+    this._remedies.set(shard, { tries: prev ? prev.tries : 0, nextAt: Infinity, stopped: true, last: { outcome, after: v.size == null ? null : v.size, at: Date.now() } });
+    const held = [...this._pausedHosts.values()].filter((x) => x.shard === path.basename(shard)).map((h) => h.hostName);
+    console.warn(`[usage] ${path.basename(shard)}: ${outcome === 'ids' ? `the month holds more distinct rows than the ingest index keeps (${LD.MAX_IDS})` : `${((v.size || 0) / 2 ** 30).toFixed(2)} GiB and already free of repeated rows`} — removing rows cannot bring it back in shape, so VibeSpace stops trying; the usage of ${held.join(', ') || 'its machines'} stays paused (the month's file needs splitting or its bound raising, by hand)`);
+    return true;
+  }
+  /** r3: judge a «judging» shard by its index — read once the ledger is warm (a step per turn, the ingest's own loader),
+   *  then every paused host of the shard judged again (`_rejudge`). One read in flight per shard. */
+  _judgeByIndex(shard) {
+    if (this._judgeKick.has(shard)) return;
+    const p = this.whenWarm().then(() => { if (this._ingestIndex(shard)) return null; const ix = this._ingestIx.get(shard); return ix && ix.loading; })
+      .then(() => { this._judgeKick.delete(shard); this._rejudge(shard); }, (e) => { this._judgeKick.delete(shard); console.warn(`[usage] ${path.basename(shard)} could not be judged by its index: ${(e && e.message) || e} — judged again at the next ingest`); });
+    this._judgeKick.set(shard, p);
+  }
+  /** Every paused host of a shard judged again now: in shape ⇒ resumed (its notice closes), else paused by the verdict. */
+  _rejudge(shard) {
+    const base = path.basename(shard);
+    for (const rec of [...this._pausedHosts.values()]) {
+      if (rec.shard !== base) continue;
+      let v; try { v = this._shapeVerdict(shard); } catch { continue; }
+      if (v.ok) this._resume(rec.host); else this._pause(rec.host, rec.hostName, shard, v, 0);
+    }
   }
   /** A remedy that ended without its shard back in shape: the outcome kept, the next try past the backoff, every paused host
    *  of the shard said again (its notice re-worded in place). `err` = the run threw (ENOSPC, EACCES …). */
@@ -870,8 +924,15 @@ class UsageHistory {
     shard = this._shardPath(shard);
     const base = path.basename(shard), held = [...this._pausedHosts.values()].filter((x) => x.shard === base);
     if (!held.length) { this._remedies.delete(shard); return; }
-    const prev = this._remedies.get(shard), tries = (prev ? prev.tries : 0) + 1, now = Date.now();
     let v; try { v = this._shapeVerdict(shard); } catch { v = { ok: false }; }
+    // r3: the run proved there is nothing left to remove (over the bound with no repeats; more distinct rows than the index
+    // keeps) ⇒ the remedy stops, said once — never retried
+    if (!err && !(r && r.why) && !v.ok && (v.why === 'ids' || (v.why === 'size' && v.proven))) {
+      this._remedyStops(shard, v.why === 'ids' ? 'ids' : 'proven-over', v);
+      for (const h of held) { const was = h.remedy && h.remedy.state; h.size = v.size; h.why = v.why; h.remedy = this._remedyOf(shard); if (was !== h.remedy.state) this._emitShape({ kind: 'paused', ...h }); }
+      return;
+    }
+    const prev = this._remedies.get(shard), tries = (prev && !prev.stopped ? prev.tries : 0) + 1, now = Date.now();
     const last = err ? { outcome: 'failed', code: (err && err.code) || null, error: String((err && err.message) || err).slice(0, 200) }
       : r && r.why ? { outcome: 'not-rewritten', code: null, error: String(r.why).slice(0, 200) }
       : { outcome: 'insufficient', removed: r ? r.removed : 0, after: v.size == null ? null : v.size, verdict: v.why || null, ratio: v.ratio == null ? null : Math.round(v.ratio * 10) / 10 };
@@ -883,10 +944,13 @@ class UsageHistory {
     for (const h of held) { if (!v.ok && v.size != null) { h.size = v.size; h.why = v.why; h.ratio = v.ratio == null ? null : Math.round(v.ratio * 10) / 10; } h.remedy = this._remedyOf(shard); this._emitShape({ kind: 'paused', ...h }); }
   }
   /** Boot (r2): a pause said before a restart (its notice still open), judged again now → the paused record (out of shape:
-   *  the host paused again, its ONE notice kept and re-worded in place) or null (in shape: the notice closes). */
-  restorePause(hostId, hostName, shardName) {
+   *  the host paused again, its ONE notice kept and re-worded in place) or null (in shape: the notice closes). r3: judged
+   *  by THE RULE THAT OPENED IT (`why`, `exact`) — a pause the index judged (an exact ratio, the ids bound) waits for the
+   *  index (`judging`, read after the ledger loads): the sample cannot see what the index counted, so it never closes it. */
+  restorePause(hostId, hostName, shardName, { why = null, exact = false, ratio = null } = {}) {
     if (!hostId || !shardName || !/^events-\d{4}-\d{2}\.ndjson$/.test(path.basename(String(shardName)))) return null;
     const shard = this._shardPath(shardName);
+    if (why === 'ids' || (why === 'ratio' && exact)) this._judging.set(shard, { ino: null, why, ratio: Number(ratio) || null }); // its inode: the verdict's own stat below
     let v; try { v = this._shapeVerdict(shard); } catch { v = { ok: true }; }
     return v.ok ? null : this._pause(hostId, hostName, shard, v, 0);
   }
@@ -894,7 +958,7 @@ class UsageHistory {
     const rec = this._pausedHosts.get(hostId);
     if (!rec) return;
     this._pausedHosts.delete(hostId);
-    if (![...this._pausedHosts.values()].some((x) => x.shard === rec.shard)) this._remedies.delete(this._shardPath(rec.shard));
+    if (![...this._pausedHosts.values()].some((x) => x.shard === rec.shard)) { this._remedies.delete(this._shardPath(rec.shard)); this._judging.delete(this._shardPath(rec.shard)); }
     console.log(`[usage] ${rec.shard} is back in shape — the usage of ${rec.hostName} is recorded again (${rec.held} event(s) were held on its device meanwhile)`);
     this._emitShape({ kind: 'resumed', ...rec, at: Date.now() });
   }
@@ -929,7 +993,9 @@ class UsageHistory {
   _afterDedup(file, r) {
     const shard = this._shardPath(file);
     if (r.renamed) { this._ingestIx.delete(shard); this._shapes.delete(shard); this.reloadEvents(); }
-    if (r.removed === 0 && !r.why) { try { this._proven.set(shard, { ino: fs.statSync(shard).ino }); } catch { } }
+    // the file the pass leaves holds no repeated row (nothing to remove, or a rewrite that kept no differing copy) — proven,
+    // for THIS inode (r3: a rewrite proves the new file; a later rewrite by anyone else is unproven again)
+    if (!r.why && (r.removed === 0 || (r.renamed && !r.keptDiffering))) { try { this._proven.set(shard, { ino: fs.statSync(shard).ino }); } catch { } }
     for (const rec of [...this._pausedHosts.values()]) {
       if (rec.shard !== path.basename(shard)) continue;
       if (this._shapeVerdict(shard).ok) this._resume(rec.host);
@@ -2014,4 +2080,4 @@ class UsageHistory {
   }
 }
 
-module.exports = { UsageHistory, DEFAULT_PRICING, PRICE_ROW_FIELDS, SUPERSEDED_DEFAULTS, priceAt };
+module.exports = { UsageHistory, DEFAULT_PRICING, PRICE_ROW_FIELDS, SUPERSEDED_DEFAULTS, priceAt, REMEDY_STATES };

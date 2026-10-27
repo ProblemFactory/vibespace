@@ -8,8 +8,9 @@
 //   ③ the words: one title per kind, who (a conversation's name quoted, a background subject by its `by`), poisoned names
 //      folded, the refusals name the dialog and never invite a retry loop; every key in the zh / ja dictionaries
 //   ④ THE ONE SEND POINT over a fake daemon link + the REAL asker + the REAL For-you store: an agent's run on a cluster
-//      instance is HELD (nothing sent), ONE urgent card for two same-key acts, Allow once ⇒ both run (their lines say
-//      allowed + who answered); Deny ⇒ hub_act_denied; 60 s ⇒ ask_expired; a person's act / a local instance / consent / a
+//      instance is HELD (nothing sent), ONE urgent card for two acts of one SUBJECT (another conversation's: its own card —
+//      lane ledger-dedup-law r3), Allow once ⇒ both run (their lines say allowed + who answered); Deny ⇒ hub_act_denied on
+//      its own subject only (a background act waits on its own item); 60 s ⇒ ask_expired; a person's act / a local instance / consent / a
 //      read never ask; Never ⇒ refused without a card; Always ⇒ the list written, every card of the machine settles;
 //      kinds apart; the quiet window; the item closed elsewhere; the store refusing; a boot's reconcile; a gate that throws;
 //      the agent update at hello (asked without holding the link, pushed over it on Allow); a RUNTIME MUTANT (no gate)
@@ -82,7 +83,8 @@ console.log('— ① the verdict table');
   const unkinded = actKeys.filter((k) => !Object.prototype.hasOwnProperty.call(P.KIND_OF, k));
   ok(actKeys.length >= 25 && unkinded.length === 0 && Object.values(P.KIND_OF).every((k) => P.KINDS.includes(k)), `every act / code row of the layer table (${actKeys.length}) has a kind of the ${P.KINDS.length} (${P.KINDS.join(' / ')})`, unkinded);
   ok(P.kindOf('brand-new-op') === 'run' && P.kindOf('upgrade') === 'upgrade' && P.kindOf('fs-op:write-stream') === 'files' && P.kindOf('desktop-serve:app-install') === 'install' && P.kindOf('tcp-connect') === 'forward', 'an act without a kind row is `run` (the strongest words); the families as named');
-  ok(P.dedupKey('h1', 'run') === P.dedupKey('h1', 'run') && P.dedupKey('h1', 'run') !== P.dedupKey('h1', 'files') && P.dedupKey('h1', 'run') !== P.dedupKey('h2', 'run'), 'the card key = machine + kind');
+  const sk = P.subjectKey;
+  ok(sk('h1', 'run', 'agent:a') === sk('h1', 'run', 'agent:a') && sk('h1', 'run', 'agent:a') !== sk('h1', 'run', 'agent:b') && sk('h1', 'run', 'agent:a') !== sk('h1', 'files', 'agent:a') && sk('h1', 'run', 'agent:a') !== sk('h2', 'run', 'agent:a'), 'the card key = machine + kind + who asks (lane ledger-dedup-law r3: one card per SUBJECT)');
   ok(P.ASK_TTL_MS === E.ASK_TTL_MS && P.ASK_TTL_MS === 60000, 'the card lives 60 s — the exit ask\'s own number');
   ok(P.answerVerdict({ askedAt: 0 }, { answer: 'once', by: 'agent', now: 1 }).code === 'human_only' && P.answerVerdict({ askedAt: 0 }, { answer: 'once', by: 'user', now: 60000 }).code === 'ask_expired' && P.answerVerdict({ askedAt: 0 }, { answer: 'maybe', by: 'user', now: 1 }).code === 'bad_answer' && P.answerVerdict({ askedAt: 0, settled: 'settled' }, { answer: 'once', by: 'user', now: 1 }).code === 'ask_settled' && P.answerVerdict({ askedAt: 0 }, { answer: 'always', by: 'user', now: 1 }).ok,
     'an answer: a person only, once, within 60 s, one of once / always / deny');
@@ -183,19 +185,25 @@ const ops = (sent) => sent.filter((m) => m.op !== 'fs-op' || m.action !== 'stat'
 console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and For-you store)');
 {
   const w = world();
+  // lane ledger-dedup-law r3: a card is ONE SUBJECT's (machine × kind × who asks) — two acts of one conversation share its
+  // card; another conversation's act of the same kind is a card of its own (no answer settles another subject's act)
   const p1 = w.dm.runCmd('sh', ['-c', 'echo one'], { by: 'agent:claude:c1' });
-  const p2 = w.dm.runShell('echo two', { by: 'agent:claude:c2' });
+  const p2 = w.dm.runShell('echo two', { by: 'agent:claude:c1' });
+  const p2b = w.dm.runCmd('ls', [], { by: 'agent:claude:c2' });
   await settle();
   const cs = w.cards();
-  ok(w.sent.length === 0 && cs.length === 1 && w.asker.list().length === 1 && w.asker.list()[0].waiting === 2, 'an agent\'s run on a cluster instance is HELD — nothing sent; two same-key acts share ONE card', { sent: w.sent, cards: cs.length, list: w.asker.list() });
-  const c = cs[0];
-  ok(c.urgency === 'urgent' && c.origin === 'machines' && c.kind !== 'notice' && c.action.kind === 'run' && c.action.machine === 'mac1' && c.text === '"ops review" wants to run a command on mac1' && /It would: sh -c echo one/.test(c.detail) && c.expiresAt === w.clock.t + 60000 && c.i18n.text.key === P.TITLE.run,
-    'the card: URGENT, origin machines, who (the conversation\'s name) + the machine + the kind, what it would do, 60 s', c);
+  const mine = w.asker.list().find((k) => k.by === 'agent:claude:c1'), theirs = w.asker.list().find((k) => k.by === 'agent:claude:c2');
+  ok(w.sent.length === 0 && cs.length === 2 && mine && mine.waiting === 2 && theirs && theirs.waiting === 1, 'an agent\'s run on a cluster instance is HELD — nothing sent; two acts of ONE subject share ONE card; another conversation\'s act of that kind is its own card', { sent: w.sent, cards: cs.length, list: w.asker.list() });
+  const c = cs.find((x) => x.action.askId === mine.askId);
+  ok(c.urgency === 'urgent' && c.origin === 'machines' && c.kind !== 'notice' && c.action.kind === 'run' && c.action.machine === 'mac1' && c.text === '"ops review" wants to run a command on mac1' && /It would: sh -c echo one/.test(c.detail) && /with the other acts of this kind by "ops review" waiting beside it — no one else's/.test(c.detail) && /every kind and every asker/.test(c.detail) && c.expiresAt === w.clock.t + 60000 && c.i18n.text.key === P.TITLE.run,
+    'the card: URGENT, origin machines, who (the conversation\'s name) + the machine + the kind, what it would do, whose acts its Allow once covers (no one else\'s), 60 s', c);
   const a = await w.asker.answer(c.action.askId, { answer: 'once', by: 'user', answeredBy: 'human:0123456789ab' });
   const r = await Promise.all([codeOf(p1), codeOf(p2)]);
-  ok(a.state === 'allowed' && r.join() === 'sent,sent' && ops(w.sent).join() === 'run-cmd,run-cmd', 'Allow once ⇒ BOTH run', { a, r, sent: w.sent });
+  ok(a.state === 'allowed' && r.join() === 'sent,sent' && ops(w.sent).join() === 'run-cmd,run-cmd' && w.asker.list().length === 1 && w.asker.list()[0].by === 'agent:claude:c2', 'Allow once ⇒ BOTH of its acts run — the other conversation\'s act is still held on its own card', { a, r, sent: w.sent, list: w.asker.list() });
   ok(w.lines.length === 2 && w.lines.every((l) => l.ask === 'allowed' && l.answeredBy === 'human:0123456789ab' && l.ok === true && l.layer === 'act'), 'each act\'s ONE audit line carries the verdict and who answered', w.lines);
-  ok(w.userTodos.get(c.id).status === 'done' && w.cards().length === 0, 'the card is resolved by the answer');
+  ok(w.userTodos.get(c.id).status === 'done' && w.cards().length === 1, 'the card is resolved by the answer (the other subject\'s card stays up)');
+  w.fire();
+  ok(await codeOf(p2b) === 'ask_expired' && ops(w.sent).length === 2, 'the other conversation\'s act: refused by ITS card\'s 60 s, never by the first card\'s Allow');
   let again = null; try { await w.asker.answer(c.action.askId, { answer: 'deny', by: 'user' }); } catch (e) { again = e.code; }
   let guess = null; try { await w.asker.answer('nope', { answer: 'once', by: 'user' }); } catch (e) { guess = e.code; }
   let agent = null; const p3 = w.dm.runCmd('true', [], { by: 'job:jb-1' }); await settle(); try { await w.asker.answer(w.cards()[0].action.askId, { answer: 'once', by: 'agent' }); } catch (e) { agent = e.code; }
@@ -203,13 +211,26 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   w.fire(); await codeOf(p3);
 }
 {
+  // THE DENY LEG, re-derived on the per-subject rule (lane ledger-dedup-law r3). It PINNED: an agent's act and a background
+  // subject's act (system:hosts) of one kind on one machine share the agent's card, and that card's Deny refuses both — the
+  // join that let a denied background subject go on the owner's Allow of an agent. It PINS NOW: the background act never
+  // joins the agent's card — it is held on ITS OWN standing item; the Deny on the agent's card refuses the agent's act
+  // alone; the background act is refused by ITS OWN Deny, which then holds (its next act refused at once)
   const w = world();
   const p1 = w.dm.runCmd('sh', ['-c', 'rm -rf x'], { by: 'agent:claude:c1' }), p2 = w.dm.runCmd('ls', [], { by: 'system:hosts' });
   await settle();
-  await w.asker.answer(w.cards()[0].action.askId, { answer: 'deny', by: 'user', answeredBy: 'human:0123456789ab' });
-  const e1 = await p1.catch((e) => e), e2 = await p2.catch((e) => e);
-  ok(e1.code === 'hub_act_denied' && e2.code === 'hub_act_denied' && w.sent.length === 0 && /the user denied it/.test(e1.message) && /Hub automation/.test(e1.message), 'Deny ⇒ every act on the card refused hub_act_denied, NOTHING sent, the sentence names the way on', [e1.message, w.sent]);
-  ok(w.lines.length === 2 && w.lines.every((l) => l.ok === false && l.code === 'hub_act_denied' && l.ask === 'denied' && l.answeredBy === 'human:0123456789ab'), 'each refused act = ONE line (denied, who answered)', w.lines);
+  const agentCard = w.cards().find((c) => !c.action.standing), item = w.cards().find((c) => c.action.standing);
+  ok(agentCard && item && item.action.by === 'system:hosts' && w.asker.list().length === 2 && w.asker.list().every((k) => k.waiting === 1), 'two subjects ⇒ two asks: the agent\'s card and the background subject\'s OWN standing item, one act held on each — no join', w.asker.list());
+  await w.asker.answer(agentCard.action.askId, { answer: 'deny', by: 'user', answeredBy: 'human:0123456789ab' });
+  const e1 = await p1.catch((e) => e);
+  let p2Done = false; p2.then(() => { p2Done = true; }, () => { p2Done = true; }); await settle();
+  ok(e1.code === 'hub_act_denied' && !p2Done && w.sent.length === 0 && /the user denied it/.test(e1.message) && /Hub automation/.test(e1.message), 'Deny on the agent\'s card ⇒ the agent\'s act refused hub_act_denied (the sentence names the way on); the background act is NOT settled by it — still held on its own item; nothing sent', [e1.message, p2Done, w.sent]);
+  ok(w.lines.length === 1 && w.lines[0].ok === false && w.lines[0].code === 'hub_act_denied' && w.lines[0].ask === 'denied' && w.lines[0].answeredBy === 'human:0123456789ab', 'ONE line so far: the agent\'s refused act (denied, who answered)', w.lines);
+  if (item) await w.asker.answer(item.action.askId, { answer: 'deny', by: 'user', answeredBy: 'human:0123456789ab' });
+  const e2 = await p2.catch((e) => e);
+  const p3 = w.dm.runCmd('ls', [], { by: 'system:hosts' }).catch((e) => e); await settle(); w.fire(); // a hold (never the case here) must not hang the suite
+  const e3 = await p3;
+  ok(item && e2.code === 'hub_act_denied' && e3.code === 'hub_act_denied' && w.lines.length === 3 && w.lines.slice(1).every((l) => l.ask === 'denied') && w.userTodos.get(item.id).resolvedBy === 'denied' && w.sent.length === 0, 'its OWN Deny refuses the background act (its item closes, denied); the Deny HOLDS — its next act is refused at once, no hold, no card', [e2.code, e3.code, w.lines.map((l) => l.ask)]);
 }
 {
   const w = world();
