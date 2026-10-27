@@ -319,7 +319,7 @@ and the chip all gate on that row:
 | **codex** | ✓ | remove · steer · steer-all · reorder · edit · run-now · run-all | the strip, a drag handle + edit + Run-this-one + Steer per row, "Run all now" and "Steer all" in the header |
 | **opencode** (ACP v1) | ✓ | remove · reorder · edit | the strip, a drag handle + edit + Remove per row |
 | **antigravity** (`agy` stream-json) | ✓ | remove · reorder · edit | the strip (the agy wrapper queues; agy's stream runs one turn per line) |
-| **claude** | ✓ | remove · reorder · edit | the strip, a drag handle + edit + Remove per row (since 2.369.354 the chat-wrapper HOLDS a message sent mid-turn — the CLI's own queue is never used; one held message runs per turn end, each as its own turn) |
+| **claude** | ✓ | remove · steer · steer-all · reorder · edit | **two doors since 2.369.361** (lane claude-steer-inject, the owner's ruling «A»): plain Enter HANDS the message to the running turn (the CLI's own default — the agent reads it at its next tool call), Alt+Enter / the ≤768px clock button HOLD it (the 2.369.354 strip: a drag handle + edit + ⚡ + Remove per row, «inject all» in the header; one held message runs per turn end, each as its own turn) |
 | **shell** | — | *(empty)* | n/a (terminal) |
 
 Adding a verb is one entry in that array plus its three implementations
@@ -712,7 +712,9 @@ impossible rather than a review promise.
   intersection (`_queueCaps()` = harness row ∧ the RUNNING wrapper's advert),
   the very object the strip's Steer buttons read, so the chord, the hint and the
   strip can never disagree — including the late-capability ordering that once
-  shipped a permanently dead chip (`setQueue` repaints both faces).
+  shipped a permanently dead chip (`setQueue` repaints both faces). (Claude
+  since 2.369.354 = «Enter queues» alone; since 2.369.361 «Enter sends now ·
+  Alt+Enter queues until the turn ends» — the two-doors bullet below.)
 - **≤768px: no chords, a BUTTON.** A phone has no Alt key, so the same verb gets
   a small bolt button beside **Send**, shown while a turn runs on a
   steer-capable session. The split is deliberate: **JS owns only the capability**
@@ -734,6 +736,39 @@ impossible rather than a review promise.
   verifier's minor). Pinned by the real-browser leg ⑨f of test-queue-steer,
   which counts headers for codex / opencode / claude / shell (2 lazy rows / 1 /
   1 / 0) and proves its own probe can see a duplicate.
+- **CLAUDE: TWO DOORS — ENTER HANDS IT TO THE RUNNING TURN, ALT+ENTER HOLDS IT
+  (2.369.361, lane claude-steer-inject — the owner 2026-10-27: «现在 claude 也是默认排队了吗？？
+  … 我没法插入啊», then ruling «A»: «Enter 立即送入，Alt+Enter 排队»).** MEASURED on
+  CLI 2.1.308 (a local mock API, the wrapper's own transport flags): a message
+  written to the CLI while a tool runs reaches the model INSIDE that turn, with
+  the next tool result («The user sent a new message while you were working:
+  …»); with no tool result left it runs as a turn of its own right after. So on
+  a Claude conversation **plain Enter (and Send) hands the message over** — the
+  `chat-input` frame carries `steer: true`, the wrapper writes it to the CLI at
+  once, it is never editable again, and its bubble says where it is: «Handed to
+  the turn» (dashed) → «Steered» where it landed (at the tool result that
+  carried it — never a new turn) — or no chip at all when the turn ended first
+  and it ran as its own turn. **Alt+Enter (`chat.holdNow`, a second contributed
+  command on the one chord) and the ≤768px clock button beside Send HOLD it**
+  until the turn ends — the 2.369.354 strip row (✎ edit, drag, ✕ remove, Stop
+  gives it back) plus **⚡ on the row** (queue-op `steer`: hand THAT one over
+  now) and **«inject all»** (`steer-all`). A slash command is held even on
+  Enter (the CLI runs a command between turns). The hint under the box reads
+  «Enter sends now · Alt+Enter queues until the turn ends» (zh «Enter 立即送入 ·
+  Alt+Enter 排队到回合结束»). ONE PURE table decides the default
+  (`SEND_DOOR_TABLE` in src/lib/agent-meta.js, the harness row's
+  `inputModes.enterDoor`: claude 'steer', every other 'queue'), and **a door is
+  drawn only where the RUNNING wrapper backs it**: the hand-over needs 'steer' in
+  the wrapper's hello (sidecar `caps.queueVerbs` + every `queue_changed`), so a
+  session spawned on a .354 wrapper keeps «Enter queues» alone (honestly — that
+  wrapper holds every frame) and one from before .354 shows no hint at all.
+  **Stop with a handed message:** it is the turn's — never put back into the
+  box; ONE toast counts it («N message(s) you sent into the turn stay with it»)
+  and its bubble reads «Stays with the stopped turn». When the CLI had not taken
+  it in yet, the CLI RUNS it +11 ms after the interrupt (measured) — the wrapper
+  interrupts that follow-up turn on its first line, so nothing answers after
+  Stop; the message stays in the conversation and the agent reads it with the
+  next one. A held message keeps the .354 rule (it comes back into the box).
 - **Removing a queued agent-to-agent / job message gives it back.** It was
   already reported delivered, so `remove` re-reports `peer_message_result
   ok:false` with the text and sender and the delivery ladder re-stashes it for
@@ -799,7 +834,9 @@ impossible rather than a review promise.
   after Stop, so VibeSpace's chat-wrapper now HOLDS a message sent mid-turn (it
   reaches the CLI only when the turn ends) — Stop drops it and puts it back as
   on every other harness, and nothing runs after Stop. A `/goal` set mid-turn
-  still goes to the CLI's own queue.
+  still goes to the CLI's own queue. Since 2.369.361 that is the HOLD door
+  (Alt+Enter); a message HANDED to the turn (plain Enter) is the turn's and stays
+  with it — the two-doors bullet above.
 - **Stop only claims what Stop actually did (round-2 review, three fixes).**
   ① The app-server can DRAIN an item between the sweep's `thread/queue/list` and
   its `thread/queue/delete`; it answers `{deleted:false}` (a verdict, not an

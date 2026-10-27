@@ -57,6 +57,10 @@ const isMemoryPath = (fp) => isAgentMemoryPath(fp);
 // AbortSignal and a `when` that scopes the chord to the window the keystroke
 // happened in.
 export const STEER_NOW_COMMAND = 'chat.steerNow';
+// …and its twin where the second key HOLDS (lane claude-steer-inject — the owner's ruling «A»: on a Claude conversation
+// plain Enter hands the message to the running turn, Alt+Enter keeps it until the turn ends). Two commands, two
+// mutually exclusive `when`s on the one chord: each id says exactly what it does.
+export const HOLD_NOW_COMMAND = 'chat.holdNow';
 // Every MOUNTED ChatView, so a document-level keystroke can find the view it
 // belongs to (the dispatcher's ctx is app-wide: `{ app, event }`). Entries are
 // added at construction and removed in dispose() — a Set of live views, never
@@ -88,6 +92,15 @@ if (!hasCommand(STEER_NOW_COMMAND)) {
     // no-op the composer would give.
     when: (ctx) => !!steerTargetView(ctx)?._canSteerComposer(),
     run: (ctx) => steerTargetView(ctx)?.steerComposerText() ?? false,
+  });
+}
+if (!hasCommand(HOLD_NOW_COMMAND)) {
+  registerCommand({
+    id: HOLD_NOW_COMMAND,
+    title: () => t('Queue it until the turn ends'),
+    icon: UI_ICONS.clock,
+    when: (ctx) => !!steerTargetView(ctx)?._canHoldComposer(),
+    run: (ctx) => steerTargetView(ctx)?.holdComposerText() ?? false,
   });
 }
 
@@ -1033,6 +1046,7 @@ class ChatView {
       // Alt+Enter in the composer runs the SAME contributed command the
       // registered keybinding does (owner: one verb, rebindable by plugins).
       onSteerChord: () => runCommand(STEER_NOW_COMMAND, { view: this }),
+      onHoldChord: () => runCommand(HOLD_NOW_COMMAND, { view: this }),
       onSteerSend: (msgId) => this._steerAfterSend(msgId),
     });
     this._chatInput.popupContainer = container;
@@ -1048,6 +1062,12 @@ class ChatView {
       key: 'alt+enter',
       command: STEER_NOW_COMMAND,
       when: (ctx) => steerTargetView(ctx) === this && this._canSteerComposer(),
+      signal: winInfo?._listenerCtl?.signal,
+    });
+    this._holdKeyDispose = registerKeybinding({
+      key: 'alt+enter',
+      command: HOLD_NOW_COMMAND,
+      when: (ctx) => steerTargetView(ctx) === this && this._canHoldComposer(),
       signal: winInfo?._listenerCtl?.signal,
     });
     this._setupChatDrop(container);
@@ -1601,7 +1621,9 @@ class ChatView {
     // cannot, so a queued notification is a billed turn waiting to happen and
     // the strip says so. Unknown (null) is never a hint.
     const notifSteerMissing = this._queueNotifSteer === false && notificationDeliveryFor(backend) === 'steer';
-    return { queue: !!row.queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs, notifSteerMissing };
+    // ⑤ the row's DECLARED default door (lane claude-steer-inject) rides along; composerSendModes draws it only where
+    // the verbs above back it
+    return { queue: !!row.queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs, notifSteerMissing, ...(row.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}) };
   }
 
   /** This view's harness id — the ONE resolution order (live session record,
@@ -1711,6 +1733,9 @@ class ChatView {
 
   /** Run the chord. @returns {boolean} whether a message went out. */
   steerComposerText() { return !!this._chatInput?.steerNow(); }
+  /** The hold door's twins (lane claude-steer-inject): Alt+Enter where Enter itself hands the message over. */
+  _canHoldComposer() { return !!this._chatInput?.holdChordAllowed; }
+  holdComposerText() { return !!this._chatInput?.holdNow(); }
 
   /** THE CHORD'S SECOND HALF. A steer NAMES A QUEUED ITEM — codex's
    *  `turn/steer` takes the app-server's queued-submission id and there is no
@@ -4564,6 +4589,8 @@ class ChatView {
       if (op.others > 0) parts.push(t('{k} other attachment(s) were not put back — attach them again', { k: op.others }));
       if (op.cut > 0) parts.push(t('{m} message(s) came back shortened', { m: op.cut }));
       if (op.omitted > 0) parts.push(t('{k} more queued message(s) were too long to put back', { k: op.omitted }));
+      // claude (lane claude-steer-inject): what the person had already HANDED to the turn is the turn's — never put back
+      if (op.kept > 0) parts.push(t('{k} message(s) you sent into the turn stay with it', { k: op.kept }));
       if (parts.length) showToast(parts.join(' · '), { duration: 6000 });
       return;
     }
@@ -7488,6 +7515,8 @@ class ChatView {
     // chord for a disposed view.
     try { this._steerKeyDispose?.(); } catch { }
     this._steerKeyDispose = null;
+    try { this._holdKeyDispose?.(); } catch { }
+    this._holdKeyDispose = null;
     this._clearPendingSteers();
     if (this._resetTimer) { clearTimeout(this._resetTimer); this._resetTimer = null; } // a pending rebuild dies with the view (B-63f1 ②)
     this._resetPending = null; this._resetQueue = null; this._resetOverflow = false;

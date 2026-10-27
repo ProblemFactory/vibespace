@@ -42,7 +42,7 @@ export class ChatInput {
    * @param {function} opts.getStateSync - returns StateSync instance
    * @param {function} opts.onInterrupt - called when user clicks Stop
    */
-  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getVoiceFacts, openPlugins, getUploadDir, isTouch, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onSteerSend, onPageKey, onLogin }) {
+  constructor(ws, sessionId, { onSend, onInterrupt, getCwd, getHost, getVoiceFacts, openPlugins, getUploadDir, isTouch, getTouchEnterSends, getEnterSends, onQueueOp, onSteerChord, onHoldChord, onSteerSend, onPageKey, onLogin }) {
     this._ws = ws;
     this._onLogin = onLogin || null; // lane signin-card-real-screen: a typed «/login» opens the sign-in card (the CLI answers «isn't available»)
     this._onPageKey = onPageKey || null; // lane door-healthy-chat: PageUp / PageDown page the conversation
@@ -68,6 +68,9 @@ export class ChatInput {
     // chord SENDS on the ordinary path and hands the msgId to the view, which
     // converts it the moment the harness reports it queued.
     this._onSteerSend = onSteerSend || null;
+    // …and where the second key HOLDS instead (lane claude-steer-inject: Enter hands a Claude message to the running
+    // turn, Alt+Enter keeps it for the turn's end) it routes through 'chat.holdNow' the same way
+    this._onHoldChord = onHoldChord || null;
     this._queue = [];
     this._queueCaps = { queue: false, steer: false, queueOps: false, queueVerbs: [] };
     // Per-ROW TRANSIENT OP state, keyed by the app-server's queue id:
@@ -306,9 +309,13 @@ export class ChatInput {
       // Alt+Enter as an ordinary send. GATED ON THE HARNESS CAPS, never on a
       // backend id: where steer is impossible this is not a chord at all and
       // the key does what it always did.
-      if (e.key === 'Enter' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && this.steerChordAllowed) {
+      // ONE chord, the session's SECOND door (lane claude-steer-inject — the owner's «Enter 立即送入，Alt+Enter 排队»):
+      // where plain Enter queues it injects (codex); where Enter itself hands the message to the running turn (claude) it
+      // HOLDS it until the turn ends (editable, Stop gives it back) — each through its own contributed command
+      if (e.key === 'Enter' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (this.steerChordAllowed || this.holdChordAllowed)) {
         e.preventDefault();
-        if (this._onSteerChord) this._onSteerChord(); else this.steerNow();
+        if (this.steerChordAllowed) { if (this._onSteerChord) this._onSteerChord(); else this.steerNow(); }
+        else if (this._onHoldChord) this._onHoldChord(); else this.holdNow();
         return;
       }
       // Enter: chat-enter-keys.js decides (PURE). Touch soft keyboards have no Shift — their enter key is the only way
@@ -469,6 +476,15 @@ export class ChatInput {
     this._steerBtn.setAttribute('aria-label', t('Send now — inject into the running turn'));
     this._steerBtn.innerHTML = UI_ICONS.bolt;
     this._steerBtn.onclick = () => { if (this._onSteerChord) this._onSteerChord(); else this.steerNow(); };
+    // …and its twin where the second door HOLDS (lane claude-steer-inject): Send hands a Claude message to the running
+    // turn, this button keeps it until the turn ends — same split (JS the capability, CSS the viewport)
+    this._holdBtn = document.createElement('button');
+    this._holdBtn.className = 'chat-hold-btn hidden';
+    this._holdBtn.type = 'button';
+    this._holdBtn.title = t('Queue it until the turn ends');
+    this._holdBtn.setAttribute('aria-label', t('Queue it until the turn ends'));
+    this._holdBtn.innerHTML = UI_ICONS.clock;
+    this._holdBtn.onclick = () => { if (this._onHoldChord) this._onHoldChord(); else this.holdNow(); };
 
     const sendCol = document.createElement('div');
     sendCol.className = 'chat-send-col';
@@ -533,7 +549,7 @@ export class ChatInput {
     this._textarea.addEventListener('focus', renderKbdLine);
     this._textarea.addEventListener('blur', renderKbdLine);
 
-    inputArea.append(this._stashStrip.el, this._queueStrip, this._attachArea, this._todoDisplay, this._streamStatus, this._kbdLine, inputWrap, this._steerBtn, sendCol, this._sendHint, this._imeHint);
+    inputArea.append(this._stashStrip.el, this._queueStrip, this._attachArea, this._todoDisplay, this._streamStatus, this._kbdLine, inputWrap, this._steerBtn, this._holdBtn, sendCol, this._sendHint, this._imeHint);
     inputArea.prepend(this._agentCards.el); // lane agent-window-no-pop: the agent's cards come first, above the stash strip
   }
 
@@ -680,6 +696,15 @@ export class ChatInput {
    *  predicate must not flicker per keystroke, and an empty composer is
    *  handled by `steerNow()` no-opping exactly like `_send()` does. */
   get steerChordAllowed() { return !!(this._isStreaming && this._sendModes().allowSteerChord); }
+  /** …and the second key where it HOLDS (lane claude-steer-inject) — the same capability-only answer. */
+  get holdChordAllowed() { return !!(this._isStreaming && this._sendModes().allowHoldChord); }
+
+  /** THE HOLD DOOR'S ACTION: the ordinary send WITHOUT the hand-over stamp — the wrapper keeps a frame that arrives
+   *  mid-turn (the .354 queue: a row on the strip, editable, given back by Stop). @returns {boolean} whether it went out */
+  holdNow() {
+    if (!this.holdChordAllowed) return false;
+    return typeof this._send({ hold: true }) === 'string';
+  }
 
   /** THE CHORD'S ACTION. A steer names a QUEUED ITEM (codex's `turn/steer`
    *  takes the app-server's queued-submission id — there is no "send this text
@@ -705,6 +730,7 @@ export class ChatInput {
     const modes = this._sendModes();
     const live = !!this._isStreaming;
     if (this._steerBtn) this._steerBtn.classList.toggle('hidden', !(live && modes.allowSteerChord));
+    if (this._holdBtn) this._holdBtn.classList.toggle('hidden', !(live && modes.allowHoldChord));
     if (!this._sendHint) return;
     const show = live && modes.showHint;
     this._sendHint.classList.toggle('hidden', !show);
@@ -715,15 +741,20 @@ export class ChatInput {
 
   /** PURE markup for the hint (DOM-free testable). Each segment is drawn ONLY
    *  where the harness backs it, so the line never teaches a key that does
-   *  nothing here. The KEY NAME lives inside the translated phrase (a physical
-   *  key is not translated, but "Enter queues" as a sentence is — the owner's
-   *  own wording is "Enter 排队 · Alt+Enter 立即注入"). */
+   *  nothing here — Enter's door first, then the second key's. The KEY NAME
+   *  lives inside the translated phrase (a physical key is not translated, but
+   *  "Enter queues" as a sentence is — the owner's own wording is "Enter 排队 ·
+   *  Alt+Enter 立即注入" on codex, «Enter 立即送入 · Alt+Enter 排队到回合结束» on
+   *  Claude since 2.369.361). `modes` = composerSendModes (enterDoor/altDoor). */
   static sendHintHtml(modes = {}, key = 'Enter') {
     const parts = [];
+    const seg = (s) => parts.push(`<span class="chat-send-hint-part">${escHtml(s)}</span>`);
     // chat.enterSends off: the line names the key that sends (Ctrl/⌘+Enter), on every harness
-    if (modes.sendSegment) parts.push(`<span class="chat-send-hint-part">${escHtml(t('{key} sends', { key }))}</span>`);
-    if (modes.queueSegment) parts.push(`<span class="chat-send-hint-part">${escHtml(modes.enterSends === false ? t('{key} queues', { key }) : t('Enter queues'))}</span>`);
-    if (modes.steerSegment) parts.push(`<span class="chat-send-hint-part">${escHtml(t('Alt+Enter injects now'))}</span>`);
+    if (modes.sendSegment) seg(t('{key} sends', { key }));
+    if (modes.enterDoor === 'queue') seg(modes.enterSends === false ? t('{key} queues', { key }) : t('Enter queues'));
+    if (modes.enterDoor === 'steer') seg(modes.enterSends === false ? t('{key} sends now', { key }) : t('Enter sends now'));
+    if (modes.altDoor === 'steer') seg(t('Alt+Enter injects now'));
+    if (modes.altDoor === 'queue') seg(t('Alt+Enter queues until the turn ends'));
     return parts.join('<span class="chat-send-hint-sep">·</span>');
   }
 
@@ -1303,7 +1334,7 @@ export class ChatInput {
    *      turns that into its own `false` so the control that fired it comes
    *      back (round-5), and `steerNow()` reports no steerable send.
    *  Every other caller is a user pressing Send and ignores it. */
-  _send() {
+  _send({ hold = false } = {}) {
     const text = this._textarea.value.trim();
     const hasAttachments = this._attachments.length > 0;
     if (!text && !hasAttachments) return false;
@@ -1438,6 +1469,10 @@ export class ChatInput {
       this._shortcutHint.textContent = '\u23CE';
     }
 
+    // THE HAND-OVER STAMP (lane claude-steer-inject): where Enter's door is «hand it to the running turn», every send
+    // through it says so — streaming or not (a stamped frame with no turn running is a plain send, so a lagging
+    // streaming flag can never turn the person's Enter into a hold); the hold door (Alt+Enter, the button) never does
+    const steer = !hold && this._sendModes().steerOnEnter ? { steer: true } : {};
     if (hasAttachments) {
       const content = [];
       for (const a of this._attachments) {
@@ -1445,11 +1480,11 @@ export class ChatInput {
       }
       if (text) content.push({ type: 'text', text });
       const msg = JSON.stringify({ type: 'user', message: { role: 'user', content } });
-      this._ws.send({ type: 'chat-input', sessionId: this._sessionId, text: msg, msgId });
+      this._ws.send({ type: 'chat-input', sessionId: this._sessionId, text: msg, msgId, ...steer });
       this._attachments = [];
       this._renderAttachments();
     } else {
-      this._ws.send({ type: 'chat-input', sessionId: this._sessionId, text, msgId });
+      this._ws.send({ type: 'chat-input', sessionId: this._sessionId, text, msgId, ...steer });
     }
 
     // Notify parent to handle scroll/pin
@@ -1511,7 +1546,7 @@ export class ChatInput {
 
   setQueue(items, caps) {
     this._queue = Array.isArray(items) ? items : [];
-    if (caps) this._queueCaps = { queue: !!caps.queue, steer: !!caps.steer, queueOps: !!caps.queueOps, queueVerbs: Array.isArray(caps.queueVerbs) ? caps.queueVerbs.slice() : [], notifSteerMissing: !!caps.notifSteerMissing };
+    if (caps) this._queueCaps = { queue: !!caps.queue, steer: !!caps.steer, queueOps: !!caps.queueOps, queueVerbs: Array.isArray(caps.queueVerbs) ? caps.queueVerbs.slice() : [], notifSteerMissing: !!caps.notifSteerMissing, ...(caps.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}) };
     // A row that left the queue cannot still be pending/refused/edited — the
     // republish IS the outcome (a spinner outliving its row is a lie).
     const live = new Set(this._queue.map((it) => String(it.id || '')));

@@ -4,6 +4,13 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.361 — 2026-10-27
+
+### claude-steer-inject — a message sent during a Claude turn can be HANDED to it again: Enter hands over, Alt+Enter holds (the owner on .359 «我没法插入啊»; ruling «A» «Enter 立即送入，Alt+Enter 排队»)
+- **R0 (measured, 2.1.308, a local mock /v1/messages — nothing billed; /var/tmp/vibespace-lanes/claude-steer-inject/measure):** a frame written mid-TOOL is taken into the turn at the next tool result («The user sent a new message while you were working: …» appended to the tool_result; 2 frames = 2 reminders; an image rides along); stdout says nothing; with no tool result left it runs as its own turn right after the result. The .354 refusal («takes no input into a running turn») was false. **Stop trap:** an untaken frame RUNS +11 ms after the interrupt; the uuid controls (`cancel_queued`, `cancel_async_message`) are inert outside -p ⇒ the wrapper interrupts the CLI's follow-up turn on its `init` line (6/6: no request).
+- **Built:** PURE `SEND_DOOR_TABLE` / `composerSendModes` doors (backend-caps `enterDoor`); `chat-input {steer:true}` → `webui_steer` → chat-wrapper `handOver` + the `input_handover` witness (handed / landed / own-turn / kept); claude `steer` / `steer-all` queue ops; `chat.holdNow` + the ≤768px clock button; chips 'handed' / 'kept'; `queue_dropped.kept` + its toast; the stand-in CLI's `TOOL-` turn.
+- **Gates:** test-claude-steer (fast, NEW, 0.2 s — the fast tier's 910 s sum had 0.77 s left) · test-claude-steer-chrome (heavy, NEW — §0 the real wrapper over the stand-in + RED legs on 6428c67e, §A the REAL CLI over a local mock, §B Chrome) · test-queue-steer / test-claude-wrapper-queue / test-queue-putback / test-harness-contract / test-chat-enter-ime pins re-derived (claude's steer refusal ⇒ the two doors).
+
 ## 2.369.360 — 2026-10-27
 
 ### ci358-reds (items 7 + 8 and round 2 — c083607d → 5bdb59fb; the .358 mirror's two fast-tier races)

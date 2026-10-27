@@ -78,7 +78,10 @@ function queueDroppedOf(record) {
     items.push({ id: typeof it.id === 'string' ? it.id : '', msgId: typeof it.msgId === 'string' ? it.msgId : '', ts: Number.isFinite(it.ts) ? it.ts : null, text, cut: it.cut === true || text.length < raw.length, attachments, ...(it.started === true ? { started: true } : {}) });
   }
   const omitted = Number.isSafeInteger(p.omitted) && p.omitted > 0 ? p.omitted : 0;
-  return { dropId, by: typeof p.by === 'string' && p.by ? p.by.slice(0, 32) : 'stop', turnId: typeof p.turnId === 'string' && p.turnId ? p.turnId : null, items, omitted };
+  // `kept` (lane claude-steer-inject, claude): messages the person had already HANDED to the turn Stop ends — never put
+  // back (they are the turn's), only counted so the toast can say so; a record may carry them and no items at all
+  const kept = Number.isSafeInteger(p.kept) && p.kept > 0 ? Math.min(p.kept, PUTBACK_MAX_ITEMS) : 0;
+  return { dropId, by: typeof p.by === 'string' && p.by ? p.by.slice(0, 32) : 'stop', turnId: typeof p.turnId === 'string' && p.turnId ? p.turnId : null, items, omitted, ...(kept ? { kept } : {}) };
 }
 
 /** THE MERGE (the server door's one rule): the put-back texts, oldest first, blank-line separated, IN FRONT of the draft
@@ -151,7 +154,8 @@ function landDraft({ focused, dirty, current, incoming, prepended, selStart, sel
 
 /** The toast's facts: n = rows whose text came back, images / others = attachments named but not restored, cut = rows
  *  shortened to 20000, omitted = rows past the record's 100000 chars (not carried at all), started = those of the n that
- *  had already started and were stopped (`started: true`, codex — the toast names them). */
+ *  had already started and were stopped (`started: true`, codex — the toast names them), kept = messages handed to the
+ *  stopped turn that stay with it (claude, lane claude-steer-inject). */
 function putbackNotice(d) {
   const items = d && Array.isArray(d.items) ? d.items : [];
   let n = 0, images = 0, others = 0, cut = 0, started = 0;
@@ -161,7 +165,8 @@ function putbackNotice(d) {
     if (it.cut) cut++;
     for (const a of Array.isArray(it.attachments) ? it.attachments : []) { if (a && IMAGE_TYPES.has(a.type)) images++; else if (a) others++; }
   }
-  return { n, images, others, cut, omitted: d && Number.isSafeInteger(d.omitted) && d.omitted > 0 ? d.omitted : 0, started };
+  const kept = d && Number.isSafeInteger(d.kept) && d.kept > 0 ? d.kept : 0;
+  return { n, images, others, cut, omitted: d && Number.isSafeInteger(d.omitted) && d.omitted > 0 ? d.omitted : 0, started, ...(kept ? { kept } : {}) };
 }
 
 /** A row the app-server DRAINED under codex's Stop sweep (`{deleted:false}` — it left the queue to run): was it STOPPED?

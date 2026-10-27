@@ -801,7 +801,10 @@ class ChatRenderers {
    *  turn, clickable to steer where the harness allows it), 'steered' (injected
    *  into the running turn), 'removed' or 'stopped' (it had started when Stop
    *  cut it off, and its words went back into the input box — codex, lane
-   *  codex-interrupted-putback). Idempotent: called on first render
+   *  codex-interrupted-putback), 'handed' (claude: written to the running turn,
+   *  the agent reads it at its next tool call) or 'kept' (claude: Stop came
+   *  before the agent read it — it stays in the conversation; lane
+   *  claude-steer-inject). Idempotent: called on first render
    *  AND on the queueState edit op, so the chip never doubles.
    *  STATIC + injected click handler: the DOM-free render test drives it
    *  without a ChatRenderers instance, and the chip text is the ONE place the
@@ -811,19 +814,22 @@ class ChatRenderers {
     const prev = el.querySelector(':scope > .chat-queue-chip');
     if (prev) prev.remove();
     const state = msg?.queueState;
-    if (state !== 'queued' && state !== 'steered' && state !== 'removed' && state !== 'stopped') return null;
+    if (state !== 'queued' && state !== 'steered' && state !== 'removed' && state !== 'stopped' && state !== 'handed' && state !== 'kept') return null;
     const chip = document.createElement('button');
     chip.className = `chat-queue-chip chat-queue-chip-${state}`;
     chip.type = 'button';
     chip.dataset.queueState = state;
-    const icon = state === 'queued' ? UI_ICONS.clock : state === 'steered' ? UI_ICONS.bolt : state === 'stopped' ? UI_ICONS.reply : UI_ICONS.close;
-    const label = state === 'queued' ? t('Queued') : state === 'steered' ? t('Steered') : state === 'stopped' ? t('Started, then stopped') : t('Removed');
+    const icon = state === 'queued' ? UI_ICONS.clock : state === 'steered' || state === 'handed' ? UI_ICONS.bolt : state === 'stopped' || state === 'kept' ? UI_ICONS.reply : UI_ICONS.close;
+    const label = state === 'queued' ? t('Queued') : state === 'steered' ? t('Steered') : state === 'stopped' ? t('Started, then stopped')
+      : state === 'handed' ? t('Handed to the turn') : state === 'kept' ? t('Stays with the stopped turn') : t('Removed');
     chip.innerHTML = `${icon}<span>${escHtml(label)}</span>`;
     chip.title = state === 'queued'
       ? t('Waiting behind the running turn — steering it injects it now, at the agent’s next reply')
       : state === 'steered' ? t('Injected into the running turn')
         : state === 'stopped' ? t('It had already started when Stop cut it off — its words are back in the input box')
-          : t('Removed from the queue — it will not run');
+          : state === 'handed' ? t('Handed to the running turn — the agent reads it at its next tool call')
+            : state === 'kept' ? t('Stop came before the agent read it — it stays in the conversation, and the agent reads it with your next message')
+              : t('Removed from the queue — it will not run');
     if (state === 'queued' && typeof onSteer === 'function') {
       chip.onclick = (e) => { e.stopPropagation(); onSteer(msg); };
     } else {

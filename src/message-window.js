@@ -221,7 +221,7 @@ class MessageWindow {
     if (seen.includes(d.dropId)) return;
     seen.push(d.dropId); if (seen.length > 32) seen.shift();
     const facts = putbackNotice(d);
-    if (emit && (facts.n || facts.images || facts.others || facts.cut || facts.omitted)) this._emit({ op: 'meta', subtype: 'queue-putback', dropId: d.dropId, ...facts }); // nothing to say ⇒ no toast (started ⊆ n)
+    if (emit && (facts.n || facts.images || facts.others || facts.cut || facts.omitted || facts.kept)) this._emit({ op: 'meta', subtype: 'queue-putback', dropId: d.dropId, ...facts }); // nothing to say ⇒ no toast (started ⊆ n)
   }
 
   // Session-state reads the attach payload asks every normalizer for; a

@@ -844,6 +844,7 @@ class MessageManager extends MessageWindow {
       case 'queue_changed': return this._processQueueChanged(raw, emit);
       case 'queue_op_result': return this._processQueueOpResult(raw, emit);
       case 'queue_dropped': return this._processQueueDropped(raw, emit); // Stop's put-back (the base's one method)
+      case 'input_handover': return this._processInputHandover(raw, emit); // 2.369.361: a frame handed to the running turn
       // the transcript's persisted PR pointer {prNumber, prUrl, prRepository} =
       // the same fact as system/code_change_published (design-unknown-records)
       case 'pr-link': return this._processCodeChange({ provider: null, url: raw.prUrl, repo: raw.prRepository, identifier: raw.prNumber != null ? String(raw.prNumber) : null, action: null }, emit);
@@ -1608,6 +1609,18 @@ class MessageManager extends MessageWindow {
     return true;
   }
 
+  /** `input_handover` (2.369.361, lane claude-steer-inject) — the wrapper wrote these frames to the CLI while a turn ran
+   *  (the person's Enter, or the ⚡ on a held row), and says what became of them: 'handed' (written — the agent reads it at
+   *  its next tool call), 'landed' (it rode a tool result into the turn and the model answered — «Steered», where it sits),
+   *  'own-turn' (the turn ended first: the CLI ran it as a turn of its own — an ordinary message, no chip), 'kept' (Stop
+   *  came first — it stays in the conversation, the agent reads it with the next message). No bubble ⇒ nothing to mark:
+   *  the frame reached the agent, which is never a silence worth a card. */
+  _processInputHandover(raw, emit) {
+    const state = { handed: 'handed', landed: 'steered', 'own-turn': null, kept: 'kept' }[raw.state];
+    if (state === undefined) return;
+    for (const msgId of Array.isArray(raw.msg_ids) ? raw.msg_ids : []) this._stampQueueChip(msgId, state, emit);
+  }
+
   /** `queued_input` — the chip on the bubble IS the notice; the card is the fallback for a held frame with no bubble. */
   _processQueuedInput(raw, emit) {
     if (this._queuePublished && this._stampQueueChip(raw.msg_id || raw.msgId, 'queued', emit)) return;
@@ -1645,7 +1658,7 @@ class MessageManager extends MessageWindow {
   static queueOpFailureText(rec) {
     switch (rec.reason) {
       case 'gone': return 'That message is no longer queued — it already ran.';
-      case 'not-steerable': return 'Claude Code takes no input into a running turn — the message runs when this turn ends.';
+      case 'not-steerable': return 'A command runs between turns — it stays queued and runs when this turn ends.';
       case 'not-startable': return 'A queued message starts as soon as the current turn ends.';
       case 'not-editable': return 'That message is not yours to rewrite — you can remove it instead.';
       case 'anchor-gone': return 'The message it was dropped after is no longer queued — nothing was moved.';

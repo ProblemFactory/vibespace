@@ -167,7 +167,9 @@ for (const id of chatHarnessIds()) {
   // on Stop — so its wrapper owes the ONE `queue_dropped` record (the person's rows, through the byte-identical twin)
   // the server's door writes back into the composer. Claude too since 2.369.354 (lane claude-wrapper-queue): MEASURED on
   // 2.1.308 the CLI's own queue RAN a queued frame right after the interrupt, so its wrapper now holds the frame itself.
-  ok(/function droppedRecordFor\(rows, \{ dropId, turnId \} = \{\}\) \{/.test(w) && /(record|emitTaskEvent)\('queue_dropped', droppedRecordFor\(/.test(w),
+  // (claude since 2.369.361: `{ ...droppedRecordFor(…), kept }` — the twin's payload plus the count of frames handed to
+  // the stopped turn, lane claude-steer-inject)
+  ok(/function droppedRecordFor\(rows, \{ dropId, turnId \} = \{\}\) \{/.test(w) && /(record|emitTaskEvent)\('queue_dropped', (?:\{ \.\.\.)?droppedRecordFor\(/.test(w),
     `${id}: a queue harness's wrapper emits ONE queue_dropped record on Stop (the put-back) through its droppedRecordFor twin (${path.basename(HARNESSES[id].wrapper)})`);
 }
 // …and the server READS that advert (wrapperCaps is the ONE reader of a

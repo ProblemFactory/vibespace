@@ -19,19 +19,36 @@
 // re-measured on 2026-10-27 — the same rows as 2.1.308) names the build in every init, and from 2.1.312 on every `result` carries
 // model_usage_since_last_result (measured on every result of a local stream-json 2.1.312; `{}` = nothing counted — the stand-in bills
 // nothing). STAND_IN_CLI_VERSION=2.1.308 writes the 2.1.308 result. test-record-shape judges both against src/record-shape.js.
-// Used by scripts/test-queue-putback.mjs §6 and scripts/test-queue-steer.mjs ⑯. Never a vendor call: no network at all.
+// A turn whose text holds `TOOL-` RUNS A TOOL (lane claude-steer-inject, the R0 recording in
+// /var/tmp/vibespace-lanes/claude-steer-inject/measure — 2.1.308, a local mock /v1/messages): init → an assistant
+// tool_use (Bash) → the tool works for $STAND_IN_LONG_MS → the user tool_result record → and a frame that arrived WHILE
+// the tool ran is TAKEN INTO THE TURN there (the real CLI appends «The user sent a new message while you were working:
+// <text>» to that tool result — stdout says nothing of it) → the assistant answers with it (`took in: …`) → result →
+// idle. A frame that arrives when the turn has no tool result left (a LONG- text turn, or after the tool) waits and runs
+// as a turn of its own right after the result (init with no idle between — measured). An interrupt while the tool runs
+// answers a rejected tool_result + «[Request interrupted by user for tool use]» + result/error_during_execution, then
+// the CLI RUNS what it was holding as a turn of its own (measured +11 ms); that follow-up turn is still before its
+// request for $STAND_IN_FOLLOW_MS (default 300 — the real one waits on the model), so an interrupt there ends it with
+// «[Request interrupted by user]» and no answer (measured 6/6 with a second interrupt on the follow-up init line).
+//   $STAND_IN_DELIVERED  every frame the "model" read, appended as {how: 'tool_result' | 'turn', text, turn}
+// Used by scripts/test-queue-putback.mjs §6, scripts/test-queue-steer.mjs ⑯ and scripts/test-claude-steer-chrome.mjs.
+// Never a vendor call: no network at all.
 const fs = require('fs');
 const CAP = process.env.STUB_CAPTURE || '';
+const DELIVERED = process.env.STAND_IN_DELIVERED || '';
 const LONG_MS = Number(process.env.STAND_IN_LONG_MS || 4000);
 const CLI_VERSION = process.env.STAND_IN_CLI_VERSION || '2.1.312';
 const atLeast = (v) => { const a = CLI_VERSION.split('.').map(Number), b = v.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); return true; };
 const SINCE_LAST = atLeast('2.1.312'); // the per-result usage delta 2.1.312 writes on every result
+const FOLLOW_MS = Number(process.env.STAND_IN_FOLLOW_MS || 300);
 const argv = process.argv.slice(2);
 const argAfter = (flag) => { const i = argv.indexOf(flag); return i >= 0 && argv[i + 1] ? argv[i + 1] : null; };
 const SID = argAfter('--session-id') || argAfter('--resume') || '00000000-0000-4000-8000-00000000c0de';
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\n');
 let busy = null;
 const queued = [];
+let turnSeq = 0;
+const delivered = (how, text) => { if (DELIVERED) fs.appendFileSync(DELIVERED, JSON.stringify({ how, text, turn: turnSeq }) + '\n'); };
 let state = 'idle';
 let helper = null;   // the background helper's timer while it works
 const setState = (st) => { if (st === state) return; state = st; out({ type: 'system', subtype: 'session_state_changed', state: st, session_id: SID }); };
@@ -39,14 +56,25 @@ const textOf = (f) => { const c = f.message && f.message.content; return typeof 
 function end(subtype) {
   if (!busy) return;
   clearTimeout(busy.timer);
-  out({ type: 'result', subtype, is_error: subtype !== 'success', result: busy.text, session_id: SID, duration_ms: 1, total_cost_usd: 0, ...(SINCE_LAST ? { model_usage_since_last_result: {} } : {}) });
+  const interrupted = subtype !== 'success';
+  if (interrupted && busy.tool) {
+    out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: busy.tool, content: "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.", is_error: true }] } });
+    out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } });
+  } else if (interrupted && busy.follow) {
+    out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } });
+  }
+  out({ type: 'result', subtype, is_error: interrupted, result: busy.text, session_id: SID, duration_ms: 1, total_cost_usd: 0, ...(SINCE_LAST ? { model_usage_since_last_result: {} } : {}) });
   busy = null;
-  if (queued.length) { setImmediate(() => start(queued.shift())); return; }
+  // what the CLI was holding runs as a turn of its own — after an interrupt too (measured); after an interrupt its
+  // request is still out for FOLLOW_MS when a second interrupt can end it
+  if (queued.length) { const fol = interrupted; setImmediate(() => start(queued.shift(), { follow: fol })); return; }
   if (!helper) setState('idle');
 }
-function start(f) {
+function start(f, { follow = false } = {}) {
   const text = textOf(f);
-  busy = { text, timer: null };
+  turnSeq++;
+  delivered('turn', text);
+  busy = { text, timer: null, follow };
   setState('running');
   if (/BGAGENT-/.test(text) && !helper) {
     helper = setTimeout(() => {
@@ -56,7 +84,24 @@ function start(f) {
     }, LONG_MS);
   }
   out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-sonnet-4-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: CLI_VERSION });
-  busy.timer = setTimeout(() => { out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_' + Date.now(), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: 'reply: ' + text }] } }); end('success'); }, /LONG-/.test(text) ? LONG_MS : 5);
+  const say = (t) => out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_' + Date.now(), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: t }] } });
+  if (/TOOL-/.test(text) && !follow) {
+    const toolId = 'toolu_stand_in_' + turnSeq;
+    busy.tool = toolId;
+    out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_t' + Date.now(), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: toolId, name: 'Bash', input: { command: 'sleep 8', description: 'Sleep 8 seconds' } }] } });
+    busy.timer = setTimeout(() => {
+      out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: '(Bash completed with no output)', is_error: false }] } });
+      busy.tool = null;
+      // every frame that arrived while the tool ran rides THIS tool result into the turn (the CLI's own queue — a
+      // slash command never does: it waits for its own turn)
+      const took = [];
+      for (let i = 0; i < queued.length;) { const t = textOf(queued[i]); if (/^\s*\//.test(t)) { i++; continue; } took.push(t); queued.splice(i, 1); }
+      for (const t of took) delivered('tool_result', t);
+      busy.timer = setTimeout(() => { say('done after the tool' + (took.length ? ' — took in: ' + took.join(' | ') : '')); end('success'); }, 5);
+    }, LONG_MS);
+    return;
+  }
+  busy.timer = setTimeout(() => { say('reply: ' + text); end('success'); }, follow ? FOLLOW_MS : (/LONG-/.test(text) ? LONG_MS : 5));
 }
 if (process.env.STAND_IN_BOOT_INIT === '1') out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-sonnet-4-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: CLI_VERSION });
 let buf = '';

@@ -155,7 +155,9 @@ ok('chat.enterSends off on a harness with no queue line: the hint is drawn with 
 ok('chat.enterSends off on a queueing harness: the queue segment names the key (no duplicate send segment)', (() => { const m = composerSendModes(q, { enterSends: false }); return m.showHint && m.queueSegment && !m.sendSegment && m.enterSends === false; })());
 ok('sendKeyName: Enter by default, Ctrl+Enter / ⌘+Enter when off', M.sendKeyName(true, false) === 'Enter' && M.sendKeyName(false, false) === 'Ctrl+Enter' && M.sendKeyName(false, true) === '⌘+Enter');
 const ci = read('src/lib/chat-input.js');
-ok('sendHintHtml draws "{key} sends" / "{key} queues" when off, and keeps "Enter queues" by default', /modes\.sendSegment\) parts\.push\([^\n]*t\('\{key\} sends', \{ key \}\)/.test(ci) && /modes\.enterSends === false \? t\('\{key\} queues', \{ key \}\) : t\('Enter queues'\)/.test(ci));
+// lane claude-steer-inject: the segments are drawn through one local `seg(…)` (Enter's door, then the second key's) —
+// and a Claude Enter that hands the message over names its key the same way ("{key} sends now")
+ok('sendHintHtml draws "{key} sends" / "{key} queues" when off, and keeps "Enter queues" by default', /modes\.sendSegment\) (?:parts\.push|seg)\([^\n]*t\('\{key\} sends', \{ key \}\)/.test(ci) && /modes\.enterSends === false \? t\('\{key\} queues', \{ key \}\) : t\('Enter queues'\)/.test(ci) && /modes\.enterSends === false \? t\('\{key\} sends now', \{ key \}\) : t\('Enter sends now'\)/.test(ci));
 const schema = read('src/lib/settings-schema.js');
 const row = (schema.match(/'chat\.enterSends': \{[\s\S]*?\n  \},/) || [''])[0];
 ok('schema row chat.enterSends: boolean, default true, category Chat, live', /type: 'boolean', default: true/.test(row) && /category: t\('Chat'\), liveApply: true/.test(row));

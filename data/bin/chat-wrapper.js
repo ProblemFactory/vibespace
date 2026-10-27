@@ -30,8 +30,34 @@
 // the CLI RUNS a frame it queued itself right after `control_request
 // interrupt` (+27 ms) — a queue the harness owns cannot be stopped by
 // VibeSpace, so VibeSpace holds what it must be able to drop (the 2026-09-07
-// law «Stop means stop»). The CLI's own queued-message bookkeeping is never
-// used for a VibeSpace-driven session.
+// law «Stop means stop»).
+//
+// …AND THE PERSON MAY HAND A MESSAGE TO THE RUNNING TURN (2.369.361, lane
+// claude-steer-inject — the owner, 2026-10-27, ruling «A»: «Enter 立即送入，
+// Alt+Enter 排队»). MEASURED on 2.1.308 (the R0 recording, a local mock API):
+// a user frame written to the CLI's stdin while a turn runs a tool is taken
+// INTO THAT TURN with the next tool result — the CLI appends «The user sent a
+// new message while you were working: <text>» to the tool_result the model
+// reads (two frames = two reminders, an image rides as its own block) and says
+// NOTHING on stdout about it; a frame that arrives when the turn has no tool
+// result left runs as a turn of its own right after the result. So a frame the
+// server stamps `webui_steer` (plain Enter on a Claude conversation — the
+// CLI's own default) is HANDED OVER at once: written to the CLI, never held,
+// never editable again, and witnessed — `input_handover {state}`: 'handed'
+// (written), 'landed' (a tool result after the write, then the model spoke —
+// it rode that request), 'own-turn' (the turn ended first: the CLI runs it as
+// a turn of its own, the gate waits for that turn before the next held frame),
+// 'kept' (Stop). An unstamped frame (Alt+Enter, every frame VibeSpace types,
+// a slash command — the CLI never takes a command into a turn) is HELD exactly
+// as above; `steer` / `steer-all` hand a held row over later (the ⚡).
+// STOP WITH A HANDED FRAME THE CLI HAS NOT TAKEN IN: measured, the CLI RUNS it
+// as a new turn +11 ms after the interrupt — and its uuid controls
+// (`cancel_queued`, `cancel_async_message`) do not act outside -p. This
+// wrapper answers that follow-up turn's `init` with a SECOND interrupt on the
+// line (6/6 measured: no request reaches the model; the frame stays in the
+// conversation as «[Request interrupted by user]» and the model reads it with
+// the next message) — it stays with the turn, nothing runs after Stop, and the
+// put-back record counts it (`kept`) so the toast says so.
 
 const fs = require('fs');
 const path = require('path');
@@ -90,15 +116,17 @@ try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); } catch {}
 // LONG-LIVED: sessions spawned before an update run old code forever.
 // inputQueue / queueVerbs / queueResync (2.369.354): THIS process owns the
 // mid-turn queue (see the head of this file) — it publishes `queue_changed`,
-// serves `queue-op` (three splices on a local array: remove / reorder / edit;
-// NOT steer — the CLI takes no input into a running turn, a frame sent there
-// is queued by the CLI itself, which is exactly the queue this file replaced)
-// and `queue-resync` (state the queue again, out loud — a rebuilt server's
-// `queue: []` is a guess). The server gates every queue frame on THIS advert
+// serves `queue-op` (splices on a local array: remove / reorder / edit, and
+// since 2.369.361 steer / steer-all = hand a held row to the running turn) and
+// `queue-resync` (state the queue again, out loud — a rebuilt server's
+// `queue: []` is a guess). 'steer' in the list IS the hand-over door's advert
+// (lane claude-steer-inject): a process that names it also honours a frame's
+// `webui_steer` stamp; a .354 process names no steer and holds every frame, so
+// the composer draws «Enter queues» alone there. The server gates every queue frame on THIS advert
 // (wrapperCaps), never on the harness row alone: a claude session spawned
 // before 2.369.354 runs an older wrapper that would forward a `queue-op` line
 // to the CLI verbatim.
-const CLAUDE_QUEUE_VERBS = ['remove', 'reorder', 'edit'];
+const CLAUDE_QUEUE_VERBS = ['remove', 'steer', 'steer-all', 'reorder', 'edit'];
 const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true, inputQueue: true, queueVerbs: CLAUDE_QUEUE_VERBS, queueResync: true }, queue: [] };
 let metaTimer = null;
 
@@ -189,6 +217,13 @@ const promptQueue = [];  // [{id, ts, line (the WHOLE stdin frame — images inc
 let queueSeq = 0;
 let dropSeq = 0;         // the put-back record's id: `${pid}-${n}` — the server's idempotency key
 const QUEUE_EDIT_MAX_CHARS = 20000;   // = codex/acp: a longer text offers no edit control (the server refuses a longer edit)
+// THE HAND-OVER (2.369.361 — the head of this file says why): frames given to the CLI while a turn runs
+const handed = [];          // [{id, msgId, ts, phase: 'handed' | 'riding'}] — written, not yet witnessed taken in
+let handedThisTurn = [];    // msgIds handed into the turn now running (taken in or not): what Stop says stays with it
+let cliOwesTurn = false;    // the turn ended before the CLI took handed frames in: it runs them as a turn of its own next
+let stopAsked = false;      // an interrupt went to the CLI during the turn now running
+let stopFollowUp = false;   // …and frames it still holds will start a turn of their own: that turn's init gets a 2nd interrupt
+let handSeq = 0;
 
 const frameBlocks = (o) => {
   const c = o && o.message ? o.message.content : null;
@@ -205,6 +240,8 @@ function framePreview(o) {
   const t = parts.join(' ').replace(/\s+/g, ' ').trim();
   return t.length > 120 ? t.slice(0, 119) + '…' : t;
 }
+/** A slash command never joins a running turn (the CLI runs a command between turns) — it is held, stamped or not. */
+const isCommandFrame = (o) => /^\s*\//.test(frameText(o));
 /** Attachments are NAMED on a put-back (descriptors), never restored — the draft is a string. */
 const frameAttachments = (o) => frameBlocks(o).filter((b) => b && typeof b.type === 'string' && b.type !== 'text')
   .map((b) => ({ type: b.type, mime: (b.source && typeof b.source.media_type === 'string' && b.source.media_type) || null, name: (typeof b.title === 'string' && b.title) || null }));
@@ -256,11 +293,30 @@ function forwardUser(line, o, buffered) {
   if (buffered) { buffer += line + '\n'; schedulePersist(); }
 }
 
-/** A user frame from the server: forwarded when no turn runs, else HELD (published + `queued_input` for its bubble). */
+/** A frame goes to the CLI WHILE A TURN RUNS: never held, never editable again — witnessed into the turn (processLine). */
+function handOver(line, { buffered = false, msgId = '', id = null, via = 'enter' } = {}) {
+  sendChild(line);
+  if (buffered) { buffer += line + '\n'; schedulePersist(); }
+  handed.push({ id: id || `h${++handSeq}-${process.pid}`, msgId, ts: Date.now(), phase: 'handed' });
+  if (msgId) handedThisTurn.push(msgId);
+  record('input_handover', { state: 'handed', msg_ids: msgId ? [msgId] : [], via });
+  log(`handed a frame to the running turn (${via}, ${handed.length} not yet taken in)`);
+}
+/** Resolve every handed frame at once (taken in / its own turn / kept by Stop) — one record for the lot. */
+function settleHanded(state) {
+  if (!handed.length) return [];
+  const ids = handed.splice(0, handed.length).map((h) => h.msgId).filter(Boolean);
+  record('input_handover', { state, msg_ids: ids });
+  return ids;
+}
+
+/** A user frame from the server: forwarded when no turn runs; while one runs, HANDED OVER when the person's door says so
+ *  (`webui_steer` — plain Enter on a Claude conversation), else HELD (published + `queued_input` for its bubble). */
 function submitUser(line, o, { buffered = false } = {}) {
-  if (!turnBusy || !opensTurn(o)) { forwardUser(line, o, buffered); return; }
+  if (!(turnBusy || cliOwesTurn) || !opensTurn(o)) { forwardUser(line, o, buffered); return; }
   const msgId = typeof o.webui_msg_id === 'string' ? o.webui_msg_id : '';
   const origin = typeof o.webui_origin === 'string' && o.webui_origin ? o.webui_origin : null;
+  if (o.webui_steer === true && !origin && !isCommandFrame(o)) { handOver(line, { buffered, msgId, via: 'enter' }); return; }
   promptQueue.push({ id: `q${++queueSeq}-${process.pid}`, ts: Date.now(), line, msgId, origin, text: frameText(o), preview: framePreview(o), attachments: frameAttachments(o), buffered });
   publishQueue();
   record('queued_input', { msg_id: msgId, turn_id: null });
@@ -269,7 +325,7 @@ function submitUser(line, o, { buffered = false } = {}) {
 
 /** The turn ended: ONE held frame goes, the next waits for the end of the turn it starts (order = the strip's order). */
 function drainPromptQueue() {
-  if (turnBusy || !promptQueue.length) return;
+  if (turnBusy || cliOwesTurn || !promptQueue.length) return;
   const next = promptQueue.shift();
   publishQueue();
   let o = null; try { o = JSON.parse(next.line); } catch {}
@@ -282,32 +338,62 @@ function drainPromptQueue() {
  *  "it ran"), then ONE `queue_dropped` of the person's rows (none ⇒ no record), then the emptied `queue_changed` —
  *  all BEFORE the interrupt reaches the CLI, so nothing held can run after it. */
 function dropHeldForStop() {
-  if (!promptQueue.length) return;
+  // a handed frame is the turn's now: Stop never takes it back (the toast counts it — `kept`); one the CLI still holds
+  // would RUN after the interrupt, so the turn it starts for it gets a second interrupt at its init (processLine)
+  const kept = handedThisTurn.length;
+  if (turnBusy) stopAsked = true;
+  else if (cliOwesTurn) stopFollowUp = true;
+  handedThisTurn = [];
+  if (!promptQueue.length) {
+    if (kept) record('queue_dropped', { ...droppedRecordFor([], { dropId: `${process.pid}-${++dropSeq}`, turnId: null }), kept });
+    return;
+  }
   const dropped = promptQueue.splice(0, promptQueue.length);
   for (const q of dropped) record('queue_op_result', { op: 'remove', id: q.id, ok: true, msg_id: q.msgId, reason: 'stopped' });
   const putBack = dropped.filter((q) => !q.origin);
-  if (putBack.length) record('queue_dropped', droppedRecordFor(putBack.map((q) => ({ id: q.id, msgId: q.msgId, ts: q.ts, text: q.text, attachments: q.attachments })), { dropId: `${process.pid}-${++dropSeq}`, turnId: null }));
+  if (putBack.length || kept) record('queue_dropped', { ...droppedRecordFor(putBack.map((q) => ({ id: q.id, msgId: q.msgId, ts: q.ts, text: q.text, attachments: q.attachments })), { dropId: `${process.pid}-${++dropSeq}`, turnId: null }), ...(kept ? { kept } : {}) });
   publishQueue();
-  log(`interrupt: dropped ${dropped.length} held frame(s) (put back=${putBack.length})`);
+  log(`interrupt: dropped ${dropped.length} held frame(s) (put back=${putBack.length}, ${kept} handed stay with the turn)`);
 }
 
-/** queue-op stdin verb — remove / reorder / edit (CLAUDE_QUEUE_VERBS): splices on the local array. The adapter and the
- *  ws layer refuse steer / run-now / run-all before a frame is built; the arm below REPORTS one that reaches us anyway
- *  (never a silent drop). `afterId` null = the front of the queue (the codex vocabulary verbatim). */
+/** Hand ONE held row over (the ⚡ / «inject all»): while a turn runs it joins that turn like an Enter frame; with no turn
+ *  running it is a plain send (it starts the turn — never lost). A slash command is refused: it only runs between turns. */
+function steerHeld(entry, op) {
+  let o = null; try { o = JSON.parse(entry.line); } catch {}
+  if (!opensTurn(o) || isCommandFrame(o)) {
+    record('queue_op_result', { op, id: entry.id, ok: false, reason: 'not-steerable', detail: 'a command runs between turns — it runs when this turn ends', msg_id: entry.msgId });
+    return false;
+  }
+  promptQueue.splice(promptQueue.indexOf(entry), 1);
+  record('queue_op_result', { op, id: entry.id, ok: true, msg_id: entry.msgId });
+  if (turnBusy || cliOwesTurn) handOver(entry.line, { buffered: entry.buffered, msgId: entry.msgId, id: entry.id, via: 'steer' });
+  else forwardUser(entry.line, o, entry.buffered);
+  return true;
+}
+
+/** queue-op stdin verb — remove / reorder / edit / steer / steer-all (CLAUDE_QUEUE_VERBS): splices on the local array.
+ *  The adapter and the ws layer refuse run-now / run-all before a frame is built; the arm below REPORTS one that reaches
+ *  us anyway (never a silent drop). `afterId` null = the front of the queue (the codex vocabulary verbatim). */
 function handleQueueOp(msg) {
   const op = String(msg?.op || '');
   const id = String(msg?.id || '');
   if (!CLAUDE_QUEUE_VERBS.includes(op)) {
     record('queue_op_result', {
       op, id, ok: false,
-      reason: /^steer/.test(op) ? 'not-steerable' : /^run-/.test(op) ? 'not-startable' : 'unknown-op',
-      detail: /^steer/.test(op) ? 'Claude Code takes no input into a running turn — the message runs when this turn ends'
-        : /^run-/.test(op) ? 'a held message starts as soon as the current turn ends' : `this agent has no queue action "${op}"`,
+      reason: /^run-/.test(op) ? 'not-startable' : 'unknown-op',
+      detail: /^run-/.test(op) ? 'a held message starts as soon as the current turn ends' : `this agent has no queue action "${op}"`,
     });
+    return;
+  }
+  if (op === 'steer-all') {
+    // in queue order, each its own frame (images ride with their own words); a command stays held and says why
+    for (const entry of promptQueue.slice()) steerHeld(entry, op);
+    publishQueue();
     return;
   }
   const idx = promptQueue.findIndex((q) => q.id === id);
   if (idx < 0) { record('queue_op_result', { op, id, ok: false, reason: 'gone', detail: 'it is no longer queued' }); publishQueue(); return; }
+  if (op === 'steer') { if (steerHeld(promptQueue[idx], op)) publishQueue(); return; }
   if (op === 'reorder') {
     const afterId = msg?.afterId === null || msg?.afterId === undefined ? null : String(msg.afterId);
     const [moved] = promptQueue.splice(idx, 1);
@@ -408,8 +494,43 @@ function processLine(line) {
     const busyWord = cliState === 'running' || cliState === 'requires_action';
     const starts = msg.type === 'system' && msg.subtype === 'init' && busyWord;
     const idle = msg.type === 'system' && msg.subtype === 'session_state_changed' && msg.state === 'idle';
-    if (starts) { turnBusy = true; awaitingStart = false; }
-    else if (msg.type === 'result' || (idle && !awaitingStart)) { turnBusy = false; awaitingStart = false; turnEnded = true; }
+    // THE WITNESS (2.369.361): a handed frame rides the request the CLI builds after a tool result (not one Stop
+    // rejected), and the model speaking after it is that request answered
+    if (handed.length) {
+      if (msg.type === 'user' && !stopAsked && Array.isArray(msg.message?.content) && msg.message.content.some((b) => b && b.type === 'tool_result')) {
+        for (const h of handed) if (h.phase === 'handed') h.phase = 'riding';
+      } else if (msg.type === 'assistant' && handed.some((h) => h.phase === 'riding')) {
+        const landed = handed.filter((h) => h.phase === 'riding');
+        for (const h of landed) handed.splice(handed.indexOf(h), 1);
+        record('input_handover', { state: 'landed', msg_ids: landed.map((h) => h.msgId).filter(Boolean) });
+      }
+    }
+    if (starts) {
+      turnBusy = true; awaitingStart = false;
+      if (cliOwesTurn) {
+        // the CLI's own turn for what it was still holding: after a Stop it gets a SECOND interrupt on this very line
+        cliOwesTurn = false;
+        if (stopFollowUp) {
+          stopFollowUp = false; stopAsked = true;
+          sendChild(JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-${process.pid}-${++handSeq}`, request: { subtype: 'interrupt' } }));
+          const ids = settleHanded('kept');
+          log(`interrupt: the CLI started a turn for ${ids.length} handed frame(s) after Stop — interrupted on its init`);
+        } else handedThisTurn = settleHanded('own-turn');
+      }
+    } else if (msg.type === 'result' || (idle && !awaitingStart)) {
+      turnBusy = false; awaitingStart = false; turnEnded = true;
+      if (msg.type === 'result' && handed.length) {
+        // the turn ended before the CLI took these in: it runs them as a turn of its own next (measured), and no held
+        // frame may cut in before that turn — after a Stop, that turn is stopped at its init
+        cliOwesTurn = true;
+        if (stopAsked) stopFollowUp = true;
+      } else if (idle && cliOwesTurn) {
+        // …unless the CLI went idle instead: it holds nothing — they went into the conversation with the last request
+        cliOwesTurn = false; stopFollowUp = false;
+        settleHanded('landed');
+      }
+      if (!cliOwesTurn) { stopAsked = false; handedThisTurn = []; }
+    }
   }
 
   // Track streaming state. Local-command echoes ("<local-command-stdout>...")
@@ -459,7 +580,8 @@ function processLine(line) {
   // Append to buffer and tee to stdout
   buffer += line + '\n';
   try { process.stdout.write(line + '\n'); } catch {}
-  // …and only THEN the next held frame: the turn end is on the wire before the queue that follows it
+  // …and only THEN the next held frame: the turn end is on the wire before the queue that follows it (not while the CLI
+  // still owes a turn for frames handed to the one that just ended — drainPromptQueue waits for that turn)
   if (turnEnded) drainPromptQueue();
 }
 
@@ -723,7 +845,7 @@ try {
         if (parsed.type === 'queue-op') { handleQueueOp(parsed); continue; }
         if (parsed.type === 'queue-resync') { publishQueue(); continue; }
         // Stop: what is held is dropped (and put back) BEFORE the interrupt reaches the CLI — then the interrupt goes
-        // through as it always did (the server's 2 s SIGINT fallback is unchanged)
+        // through as it always did (the server's 2 s SIGINT fallback is unchanged); a handed frame stays with the turn
         if (parsed.type === 'control_request' && parsed.request && parsed.request.subtype === 'interrupt') dropHeldForStop();
         // Handle goal commands from WebUI
         if (parsed.type === 'set-goal') {

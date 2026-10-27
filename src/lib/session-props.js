@@ -583,15 +583,19 @@ export function openSessionProps(app, sessionRef, { syncId } = {}) {
     // ── What a send DURING a running turn does here (2026-09-07) ──
     // The HARNESS row, not the live intersection: a properties panel describes
     // what this KIND of agent does, and it is opened on stopped sessions too.
-    // A harness with no queue surface (claude's CLI holds the message and
-    // publishes nothing; shell has no turn) gets NO row — the owner's rule for
-    // the chord is the same one here: 不支持queue的就不显示.
+    // A harness with no queue surface (shell has no turn) gets NO row — the
+    // owner's rule for the chord is the same one here: 不支持queue的就不显示.
+    // Claude reads «Enter hands it to the running turn · Alt+Enter queues it»
+    // since 2.369.361 (lane claude-steer-inject, the owner's ruling «A»).
     {
       const sm = composerSendModes(getBackendMeta(s.backend || 'claude')?.caps?.inputModes);
       if (sm.showHint) {
+        // Enter's door first, then the second key's — the SAME table the composer draws (lane claude-steer-inject)
         const bits = [];
-        if (sm.queueSegment) bits.push(t('Enter queues it — it runs after this turn'));
-        if (sm.steerSegment) bits.push(t('Alt+Enter injects it into the running turn (the agent sees it at its next reply)'));
+        if (sm.enterDoor === 'queue') bits.push(t('Enter queues it — it runs after this turn'));
+        if (sm.enterDoor === 'steer') bits.push(t('Enter hands it to the running turn — the agent reads it at its next tool call'));
+        if (sm.altDoor === 'steer') bits.push(t('Alt+Enter injects it into the running turn (the agent sees it at its next reply)'));
+        if (sm.altDoor === 'queue') bits.push(t('Alt+Enter queues it until the turn ends — editable until then'));
         row(cfgSection(), t('Sending during a turn'), escHtml(bits.join(' \u00b7 ')));
       }
     }

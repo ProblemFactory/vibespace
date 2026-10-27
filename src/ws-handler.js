@@ -748,7 +748,8 @@ function registerWsHandler(wss, ctx) {
           // two SEND refusals answer this socket (code 'input-rejected' — a send
           // refusal, never an attach failure: inc-mt2arppw); no live session / not a
           // chat session stay a silent no-op, exactly as before the extraction.
-          const r = sendUserInput(data.sessionId, data.text, { msgId: data.msgId, origin: 'ws' });
+          // `steer` = the person's door (2.369.361): hand it to the running turn — only `true` counts
+          const r = sendUserInput(data.sessionId, data.text, { msgId: data.msgId, origin: 'ws', steer: data.steer === true });
           if (!r.ok && (r.code === 'input_rejected' || r.code === 'too_large')) {
             try { ws.send(JSON.stringify({ type: 'error', code: 'input-rejected', sessionId: data.sessionId, error: r.error, message: r.error })); } catch { }
           }
