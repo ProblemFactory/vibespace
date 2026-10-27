@@ -59,7 +59,7 @@ function deliveryPicker(d = { mode: 'none' }) {
 /** THE "New path…" WIZARD — slug (judged live by the server's own rule), name, the reply name, the mapping, declared
  *  facts, rate, allow-list (+ the proxy note), policy, wake budget; on create the address with Copy. */
 export function showNewPathDialog(app, { adapterId = 'webhook' } = {}) {
-  const m = createModalShell({ id: 'chan-wh-new', title: t('New webhook path'), dialogClass: 'chan-wh-dialog', escapeToClose: true });
+  const m = createModalShell({ id: 'chan-wh-new', title: t('New webhook path'), dialogClass: 'chan-wh-dialog', escapeToClose: true, kind: 'form' });
   m.dialog.dataset.whWizard = '1';
   const slug = whInput('', 'deploys'); slug.dataset.whSlug = '1';
   const slugNote = whNote('', true); slugNote.dataset.whSlugNote = '1';
@@ -141,7 +141,7 @@ export function showTokenOnce({ caller, token, rotated = false }) {
   let secret = String(token || '');
   const name = (caller && caller.name) || '';
   const m = createModalShell({ id: 'chan-wh-token', title: rotated ? t('New token for {name}', { name }) : t('Token for {name}', { name }), dialogClass: 'chan-wh-dialog', closeOnBackdrop: false, escapeToClose: true,
-    onClose: () => { secret = ''; } });
+    onClose: () => { secret = ''; }, kind: 'form' });
   m.dialog.dataset.whTokenOnce = '1';
   m.body.appendChild(whNote(t('Shown once — rotate to get a new one.'), true));
   const code = el('code', 'chan-wh-token', secret);
@@ -169,7 +169,7 @@ export function showCallersDialog(app, slug, { adapterId = 'webhook', title = ''
     unsaved: {
       isDirty: () => [...edits].some((x) => x.dirty()),
       save: async () => { for (const x of [...edits]) if (x.dirty()) { const r = await x.save(); if (r !== true) return r || false; } return true; },
-    } });
+    }, kind: 'form' });
   m.dialog.dataset.whCallersDialog = slug;
   m.body.appendChild(urlRow(slug));
   const list = el('div', 'chan-wh-list');
@@ -307,7 +307,7 @@ async function mintPairCode(slug, title = '') {
 export function showPairCodeOnce({ code, expiresAt, path = '' }) {
   let secret = String(code || ''), tick = null;
   const m = createModalShell({ id: 'chan-wh-paircode', title: t('Pairing code for {path}', { path }), dialogClass: 'chan-wh-dialog', closeOnBackdrop: false, escapeToClose: true,
-    onClose: () => { secret = ''; if (tick) clearInterval(tick); tick = null; } });
+    onClose: () => { secret = ''; if (tick) clearInterval(tick); tick = null; }, kind: 'form' });
   m.dialog.dataset.whPairCodeOnce = '1';
   m.body.appendChild(whNote(t('Shown once — paste it on the other VibeSpace: Channels → Webhook ⋯ → Join with a pairing code…'), true));
   const shown = el('code', 'chan-wh-token', secret);
@@ -340,7 +340,7 @@ export function showJoinDialog(app) {
   const box = el('textarea', 'chan-opt-input chan-wh-paste');
   box.rows = 3; box.spellcheck = false; box.autocapitalize = 'off'; box.placeholder = 'vswp_…'; box.setAttribute('autocomplete', 'off');
   box.dataset.whJoinCode = '1'; box.dataset.noDictation = '1'; // a pairing code is a credential: never a dictation's context (lane voice-follows-focus)
-  const m = createModalShell({ id: 'chan-wh-join', title: t('Join another VibeSpace'), dialogClass: 'chan-wh-dialog', escapeToClose: true, onClose: () => { box.value = ''; seq++; clearTimeout(timer); } });
+  const m = createModalShell({ id: 'chan-wh-join', title: t('Join another VibeSpace'), dialogClass: 'chan-wh-dialog', escapeToClose: true, onClose: () => { box.value = ''; seq++; clearTimeout(timer); }, kind: 'form' });
   m.dialog.dataset.whJoin = '1';
   const intro = whNote(t('Paste the pairing code the other VibeSpace\'s owner gave you. It starts vswp_, works once and lives 10 minutes.'));
   m.body.appendChild(intro);
@@ -418,7 +418,7 @@ export async function showSendToCallersDialog(app, slug, { title = '' } = {}) {
   if (!r || !r.ok) { showToast(t('Could not read the callers: {why}', { why: why(r) }), { type: 'error' }); return; }
   const p = (r.paths || []).find((x) => x.hookUrl === `/hook/${slug}`);
   const callers = p ? p.callers || [] : [];
-  const m = createModalShell({ id: 'chan-wh-send', title: t('Send a message on {path}', { path: title || slug }), dialogClass: 'chan-wh-dialog', escapeToClose: true });
+  const m = createModalShell({ id: 'chan-wh-send', title: t('Send a message on {path}', { path: title || slug }), dialogClass: 'chan-wh-dialog', escapeToClose: true, kind: 'form' });
   m.dialog.dataset.whSend = slug;
   const picks = V.pickerRows(callers);
   const boxes = [];

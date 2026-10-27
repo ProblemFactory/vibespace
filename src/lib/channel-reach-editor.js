@@ -167,7 +167,7 @@ export async function showAccountReachDialog(app, adapter) {
   // lane dialog-unsaved-guard: section ② (the access rows) changed and not saved ⇒ ✕ / Esc / the backdrop asks; the policy
   // (section ①) saves at its pick
   const { body, close } = createModalShell({ id: 'chan-account-reach-dialog', title: t('Reach & policy — {title}', { title: st.name }), dialogClass: 'chan-dialog chan-assign chan-access chan-reach', escapeToClose: true, onClose: () => { if (part) part.picker.close(); },
-    unsaved: { isDirty: () => !!part && part.isDirty(), save: () => part && part.save() } });
+    unsaved: { isDirty: () => !!part && part.isDirty(), save: () => part && part.save() }, kind: 'form' });
   let pol = st.adapter.policy || null;
   const polHost = el('div', 'chan-account-policy');
   const drawPolicy = () => {
@@ -202,7 +202,7 @@ export async function showReachDialog(app, conv0) {
   const conv = full.conversation;
   // the picker's roster listener (and its open popover) end WITH the dialog (verify round 2)
   let who = null;
-  const { body, close } = createModalShell({ id: 'chan-reach-dialog', title: t('Reach & policy — {title}', { title: conv.title || conv.id }), dialogClass: 'chan-dialog chan-reach', bodyClass: 'chan-flow-body', escapeToClose: true, onClose: () => { if (who) who.close(); } });
+  const { body, close } = createModalShell({ id: 'chan-reach-dialog', title: t('Reach & policy — {title}', { title: conv.title || conv.id }), dialogClass: 'chan-dialog chan-reach', bodyClass: 'chan-flow-body', escapeToClose: true, onClose: () => { if (who) who.close(); }, kind: 'form' });
   let current = conv;
   // "Grant reach to…": ONE picker for the dialog's life (a repaint re-appends it — never re-created, a
   // popover the person has open survives a broadcast); its rows are the live roster, re-read on its broadcasts

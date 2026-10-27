@@ -22,7 +22,7 @@ import { resumeAccountVerdict } from '../resume-account.js'; // lane resume-acco
 
 // lane mirror-green-228: a window's focus on the server's answer never takes the keys from an open app dialog (the Rename
 // dialog a double-click on its own sidebar row opened while the attach was in flight)
-const lateFocus = (view) => { if (lateFocusVerdict(document.querySelectorAll('.dialog-overlay')) === 'take') view.focus(); };
+const lateFocus = (view) => { if (lateFocusVerdict(document.querySelectorAll('.dialog-overlay')) === 'take' && !document.activeElement?.closest?.('.dialog-form')) view.focus(); }; // lane dialog-yield: a FORM the person types in keeps the keys too (it is no overlay any more)
 
 export function installSessionLifecycle(App, ctx = {}) {
   Object.assign(App.prototype, {

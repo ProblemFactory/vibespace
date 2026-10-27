@@ -11047,4 +11047,5 @@ export default {
   "you replied": "你已回复",
   "approved": "已批准",
   "withdrawn by the agent": "已被 agent 撤回",
+  "A form stays a window of its own": "表单始终是独立的小窗口",
 };

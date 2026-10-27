@@ -4,6 +4,18 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.361 — 2026-10-28
+
+### dialog-yield — a dialog with fields never blocks the chat: a FORM is a small window that yields, a MODAL is only a decision (the owner on his hub at 2.369.358, 2026-10-26: «尽可能减少 blocking popup 的使用；带填空的对话框不阻塞聊天；打开别的窗口要让位»)
+- **Reproduced first (headless Chrome, the runner's shape — DejaVu Sans through a scratch fontconfig, the page ×4 throttled):** Install plugin… = createModalShell's `.dialog-overlay` (z 99998): a press on the chat's title bar / composer landed on the overlay; the form's 建立… opened Integrations at z 106 UNDER it; the action row's `.mounts-btn` 20 px / 11 px / the input grey beside a confirm's 26 px / 12 px footer buttons, Install no primary; the Credential row (a bare div: 13 px name, 28 px select, 20 px button) shown for every source.
+- **R1 — one shell, two kinds:** `createModalShell({ kind })`, NO default; `'decision'` = the overlay; `'form'` = src/lib/form-window.js's window (`type: 'form'`, persist: false; `.dialog-form` root keeps the id; its head = the window's title bar; ✕ = dismiss through the unsaved guard; one end) — fixed to its dialog's box, centred once; captureWin / the Stage / tab groups skip it; the phone and a blocking layer keep the sheet. PURE verdicts: src/lib/form-yield.js.
+- **R4 — 104 calls classified (test-architecture §103 prints them):** 90 form · 13 decision · 1 dynamic (plugin-client: the plugin's own `opts.kind`) · 1 form-later (doc-window-ui's link dialog: the editor applies the answer at the selection it captured).
+- **A form stays whole inside the workspace** — every fit (its dialog grew after its first place, the viewport resized) moves it by the least it takes (PURE `formInside`); its content clips (`overflow: clip` — a scrollIntoView on its foot had shifted the dialog above the screen).
+- **A crossing into the phone tier** (a fold, a narrowed browser) re-hosts each open form as its sheet — the same root, its values kept (the phone shows one window, the phone navigation's, so a form window stood hidden; test-channels-aggregate-ui's 390 px leg caught it).
+- **R5 — focus is the person's:** opened by no user activation ⇒ behind the focused window (placeBehind + markArrived), no script focus enters a form that is not the active window (a Tab raises it through revealWindow, §62's door); session-lifecycle's lateFocus never takes the keys from a form either.
+- **R3 — the buttons in the shared CSS:** `.dialog-actions > .mounts-btn / .btn-create / .btn-cancel` at the footer's size (5 × 14, 12 px, `--radius-sm`); `.mounts-btn-primary:hover` = `--accent-hover` (was an opacity); Install = `.mounts-btn-primary`; the Credential row = `.dialog-field-row` / `.dialog-field-line`; the git-only rows' `.hidden` rules.
+- **Gates:** NEW heavy scripts/test-dialog-yield-chrome.mjs (35; base 6428c67e RED 22 — ①–⑤ and ⑦, the controls ⑥ decision + ⑧ phone green on both), NEW fast scripts/test-dialog-yield.mjs (22, mutants RED on their rows), test-architecture §103 (+5 rows, 5 negative controls) + §62 (form-window's Tab door counted), test-session-title-ui's control re-pinned to the extended lateFocus line.
+
 ## 2.369.360 — 2026-10-27
 
 ### ci358-reds (items 7 + 8 and round 2 — c083607d → 5bdb59fb; the .358 mirror's two fast-tier races)

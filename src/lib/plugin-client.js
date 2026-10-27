@@ -204,7 +204,7 @@ export class PluginClient {
       id, version: m.version, manifest: m, signal: ctl.signal, app,
       t,
       showToast: (text, opts) => showToast(String(text ?? '').slice(0, 300), opts),
-      createModalShell: (opts) => createModalShell({ ...opts, id: `plugin-${id}-${opts?.id || 'dialog'}` }),
+      createModalShell: (opts) => createModalShell({ ...opts, id: `plugin-${id}-${opts?.id || 'dialog'}`, kind: opts?.kind === 'form' ? 'form' : 'decision' }),
       registerWindowType: ({ id: wid, label, icon, render, persist = true } = {}) => {
         if (typeof wid !== 'string' || !/^[a-z0-9-]+$/.test(wid) || typeof render !== 'function') throw new Error('api.registerWindowType expects { id: slug, label, render(winInfo) }');
         const type = `plugin:${id}:${wid}`, action = `openPlugin:${id}:${wid}`;

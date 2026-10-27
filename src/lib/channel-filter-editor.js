@@ -297,7 +297,7 @@ function patternEditor(body, pat, onChange) {
  *  then deaf to the keyboard — a keyboard user who Tabbed to Save and pressed Enter could not leave a failed save
  *  without the mouse. When the focus fell out of the dialog, it goes back to the button (a no-op once the dialog closed). */
 function refocus(btn) {
-  try { if (btn && btn.isConnected && (document.activeElement === document.body || !btn.closest('.dialog-overlay')?.contains(document.activeElement))) btn.focus({ preventScroll: true }); } catch {}
+  try { if (btn && btn.isConnected && (document.activeElement === document.body || !btn.closest('.dialog-overlay, .dialog-form')?.contains(document.activeElement))) btn.focus({ preventScroll: true }); } catch {}
 }
 export async function showGrantAccessDialog(app, target) {
   const st = await grainState(target);
@@ -307,7 +307,7 @@ export async function showGrantAccessDialog(app, target) {
   let part = null;
   // lane dialog-unsaved-guard: ✕ / Esc / the backdrop with a row changed asks (grantAccessBody says what changed)
   const { body, close } = createModalShell({ id: 'chan-access-dialog', title: t('Who may read and act here?'), dialogClass: 'chan-dialog chan-assign chan-access', escapeToClose: true, onClose: () => { if (part) part.picker.close(); },
-    unsaved: { isDirty: () => !!part && part.isDirty(), save: () => part && part.save() } });
+    unsaved: { isDirty: () => !!part && part.isDirty(), save: () => part && part.save() }, kind: 'form' });
   part = grantAccessBody(app, st, body, { close, target });
 }
 /** THE GRANT ACCESS BODY (lane account-policy-door): the ONE renderer of a grain's access rows — Grant access… draws
@@ -1014,7 +1014,7 @@ export async function showNotifyDialog(app, target) {
   let dirtyNow = () => false;
   let saveNow = async () => true;
   const { body, close } = createModalShell({ id: 'chan-notify-dialog', title: grainTitle(st, 'notify'), dialogClass: 'chan-dialog chan-assign chan-notify', escapeToClose: true,
-    unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() } });
+    unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });
   const principals = st.access.map((r) => ({ value: pkOf(r.principal), label: principalText(r.principal), kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null, authority: r.authority }));
   for (const r of st.eligibleAbove || []) if (r && r.principal && !principals.some((x) => x.value === pkOf(r.principal))) principals.push({ value: pkOf(r.principal), label: `${principalText(r.principal)} ${r.via === 'pattern' ? t('(rule)') : r.via === 'grant' ? t('(approved request)') : t('(account)')}`, kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null, authority: null });
   // lane notify-rules-r2 (owner inc-muxt96t5-pk42): a group that holds access reaches its MEMBER SESSIONS — each is

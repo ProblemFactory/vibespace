@@ -188,7 +188,7 @@ function copyLine(value) {
 // awaiting flow forever. Callers must make their resolve idempotent
 // (close() runs on the submit path too).
 export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
-  const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title, onClose: opts.onClose });
+  const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title, onClose: opts.onClose, kind: 'form' });
   const { inputs, applyConds, hasWhen } = renderFields(body, fields);
   const err = document.createElement('div');
   err.className = 'cfg-err';
@@ -533,7 +533,7 @@ export function wireStepPaste(ctx, { tokenKey, configPage, start, callback, whyT
 // (optional) render through `renderFields` between the hint and the button —
 // the channel accounts' OAuth-client select.
 export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, savingText = null, pasteHint = null, pasteSecret = false, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
-  const { body, close } = createModalShell({ id, title, bodyClass: 'mounts-dialog-body', escapeToClose: true });
+  const { body, close } = createModalShell({ id, title, bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
   const hint = document.createElement('div');
   hint.className = 'mounts-field-hint';
   hint.textContent = hintText;

@@ -224,8 +224,16 @@ try {
   // THE RECT CENSUS at 860 / 360
   await P.cdp('Emulation.setDeviceMetricsOverride', { width: 860, height: 760, deviceScaleFactor: 1, mobile: false });
   await sleep(300);
+  // lane dialog-yield: P is a BACKGROUND tab here (P2 opened in front) and a background tab renders nothing — no resize reaches
+  // the page; the exit dialog is a FORM window that re-fits inside the viewport on it (an overlay was laid out by CSS alone). P
+  // renders for the census — in front while the page is 860 px wide (the viewport's own switch settles at this size) — then
+  // P2 goes back in front: the legs after it run in the suite's world as before
+  await P.cdp('Page.bringToFront');
+  await sleep(500);
   ok((await P.evalJs(rectCensusJs('#exit-access-dialog .dialog', '.exit-access-mode', 20))).ok, 'RECT CENSUS 860 px: the dialog inside the viewport, no horizontal overflow', await P.evalJs(rectCensusJs('#exit-access-dialog .dialog', '.exit-access-mode', 20)));
   await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-close').click(); true`);
+  await P2.cdp('Page.bringToFront'); // lane dialog-yield: P back behind P2, as the suite ran before the census
+  await sleep(300);
   await P.cdp('Emulation.setDeviceMetricsOverride', { width: 360, height: 740, deviceScaleFactor: 1, mobile: true });
   await sleep(300);
   // open it on the phone the way the Machines card's button does (the same component)

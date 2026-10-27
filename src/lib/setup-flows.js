@@ -31,7 +31,7 @@ export function installSetupFlows(App) {
      */
     runGuidedCli({ title, cmd, hint, checkDone }) {
       return new Promise((resolve) => {
-        const { body, close } = createModalShell({ id: 'guided-cli-dialog', title, dialogClass: 'guided-cli-dialog', bodyClass: 'guided-cli-body' });
+        const { body, close } = createModalShell({ id: 'guided-cli-dialog', title, dialogClass: 'guided-cli-dialog', bodyClass: 'guided-cli-body', kind: 'form' });
         body.innerHTML = `
           <div class="guided-cli-status"><span class="upload-active-spinner" aria-hidden="true"></span><span class="gc-msg">${escHtml(t('Follow the prompts in the terminal below — this closes automatically when done.'))}</span></div>
           ${hint ? `<div class="mounts-field-hint">${escHtml(hint)}</div>` : ''}
@@ -89,7 +89,7 @@ export function installSetupFlows(App) {
     _modal(title, { wide = false } = {}) {
     const { overlay, body, close } = createModalShell({
       id: 'cfg-dialog-overlay', title, bodyClass: 'cfg-dialog-body',
-      minWidth: wide ? '440px' : null, escapeToClose: true,
+      minWidth: wide ? '440px' : null, escapeToClose: true, kind: 'form',
     });
     return { overlay, body, close };
   },
@@ -454,7 +454,7 @@ export function installSetupFlows(App) {
   // server writes a rollback point before every layout SHAPE change; this is
   // the one click that uses them.
   async _showLayoutHistory() {
-    const { body, close } = createModalShell({ id: 'layout-history-dialog', title: t('Restore a previous layout'), minWidth: '460px', escapeToClose: true });
+    const { body, close } = createModalShell({ id: 'layout-history-dialog', title: t('Restore a previous layout'), minWidth: '460px', escapeToClose: true, kind: 'form' });
     body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
     const r = await fetchJson('/api/layout-history').catch(() => null);
     const entries = r?.entries || [];

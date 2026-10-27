@@ -391,7 +391,7 @@ async function expandDetail(app, el, j, refresh) {
 }
 
 function openCreateDialog(app, onDone) {
-  const { body, okBtn, close } = createModalShell({ title: t('New background job'), minWidth: 440 });
+  const { body, okBtn, close } = createModalShell({ title: t('New background job'), minWidth: 440, kind: 'form' });
   const f = {};
   const field = (label, el) => { const w = document.createElement('div'); w.className = 'jobs-form-row'; const l = document.createElement('label'); l.textContent = label; w.append(l, el); body.appendChild(w); return el; };
   const inp = (ph = '') => { const i = document.createElement('input'); i.placeholder = ph; return i; };

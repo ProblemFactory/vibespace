@@ -877,7 +877,7 @@ export function installSidebarMounts(Sidebar) {
       // lane win-input-elevated: a Windows device at normal rights ⇒ the door to raise it (the owner runs the consent-prompted
       // re-registration). Shown iff we KNOW it is Windows and NOT elevated; never for a Mac/Linux device (elevation is Windows-only).
       if (winDev && !deviceElevated) actions.append(ibtn(MI.bolt, tr('Run as administrator…'), async () => {
-        const { body, close } = createModalShell({ id: 'device-elevate-dialog', title: tr('Run "{name}"’s device agent as administrator', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+        const { body, close } = createModalShell({ id: 'device-elevate-dialog', title: tr('Run "{name}"’s device agent as administrator', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
         const p1 = document.createElement('p'); p1.className = 'agents-note';
         p1.textContent = tr('When the device agent runs as administrator, agents can type into windows you opened as administrator — and you choose which, in the allow list. VibeSpace never elevates on its own; Windows asks you to confirm.');
         const p2 = document.createElement('p'); p2.className = 'agents-note';
@@ -1139,7 +1139,7 @@ export function installSidebarMounts(Sidebar) {
     // server here over the device link. Detected ports + a manual box; each
     // becomes http://127.0.0.1:<localPort> opened in the embedded browser.
     async _showPortsDialog(h) {
-      const { body, close } = createModalShell({ id: 'ports-dialog', title: tr('Forward a port from "{name}"', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+      const { body, close } = createModalShell({ id: 'ports-dialog', title: tr('Forward a port from "{name}"', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
       // The forward binds on THIS SERVER's loopback (the browser can't reach
       // it directly), so "Open" routes through the embedded browser's proxy
       // (node-unblocker on the server → the server's loopback → the tunnel).
@@ -1628,7 +1628,7 @@ export function installSidebarMounts(Sidebar) {
     // need this — Add machine installs the agent over ssh at first use.
     async _showDevicePairDialog(h = null) {
       const existing = !!(h && h.deviceId);
-      const { body, close } = createModalShell({ id: 'device-pair-dialog', title: existing ? tr('Pairing command — "{name}"', { name: h.name }) : tr('Pair a device'), bodyClass: 'device-pair-body', escapeToClose: true });
+      const { body, close } = createModalShell({ id: 'device-pair-dialog', title: existing ? tr('Pairing command — "{name}"', { name: h.name }) : tr('Pair a device'), bodyClass: 'device-pair-body', escapeToClose: true, kind: 'form' });
       if (existing) {
         // the sheet's head: the device's dial state, so the user sees whether the OLD command ever worked
         const stp = document.createElement('p');
@@ -1789,7 +1789,7 @@ export function installSidebarMounts(Sidebar) {
 
     // B-6640: upgrade an ssh machine to a dial-out device (or roll it back).
     async _showGraduateDialog(h) {
-      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title: h.graduated ? tr('Dial-out — "{name}"', { name: h.name }) : tr('Upgrade "{name}" to dial-out', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title: h.graduated ? tr('Dial-out — "{name}"', { name: h.name }) : tr('Upgrade "{name}" to dial-out', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
       if (h.graduated) {
         const st = document.createElement('div'); st.className = 'tiny'; st.style.marginBottom = '10px';
         st.innerHTML = h.dialLive
@@ -1842,7 +1842,7 @@ export function installSidebarMounts(Sidebar) {
       // No backdrop close: a stray click mid-bootstrap must not dismiss the progress view.
       const { overlay, body, close } = createModalShell({
         id: 'mounts-dialog-overlay', title: `Set up ${h.name}`, minWidth: '400px',
-        closeOnBackdrop: false, onClose: () => off?.(),
+        closeOnBackdrop: false, onClose: () => off?.(), kind: 'form',
       });
       body.innerHTML = `<div class="bs-steps"></div>
         <details class="bs-log-wrap"><summary>Log</summary><pre class="bs-log"></pre></details>
@@ -1931,7 +1931,7 @@ export function installSidebarMounts(Sidebar) {
     },
 
     _showRcloneConfDialog() {
-      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title: tr('Import rclone config') });
+      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title: tr('Import rclone config'), kind: 'form' });
       const hint = document.createElement('div');
       hint.className = 'mounts-field-hint';
       hint.textContent = tr('Paste the contents of your rclone.conf (from `rclone config file` — usually ~/.config/rclone/rclone.conf). Every remote inside it becomes a mount you can pick.');
@@ -2372,7 +2372,7 @@ export function installSidebarMounts(Sidebar) {
       try { cfg = await api(`/api/mounts/${m.id}/config`, { headers: revealHeaders() }); }
       catch (e) { showToast(e.message || tr('Failed to load connection'), { type: 'error' }); return; }
       const name = cfg.name || m.name;
-      const { body, close } = createModalShell({ id: 'mount-edit-dialog', title: `${tr('Edit')} "${name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true, unsaved: { save: () => form.onsubmit({ preventDefault() {} }) } });
+      const { body, close } = createModalShell({ id: 'mount-edit-dialog', title: `${tr('Edit')} "${name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true, unsaved: { save: () => form.onsubmit({ preventDefault() {} }) }, kind: 'form' });
       const form = document.createElement('form');
       form.className = 'mounts-form';
       let editPresets = [];

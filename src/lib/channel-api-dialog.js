@@ -36,7 +36,7 @@ export async function showApiAccessDialog(app, cred) {
   // lane dialog-unsaved-guard: a grant's tier / cap / tick changed and not saved ⇒ ✕ or the backdrop asks
   let grantsNow = () => ''; let grantsBase = ''; let saveGrants = async () => true;
   const { body, dialog, close } = createModalShell({ id: 'chan-api-dialog', title: t('API access'), dialogClass: 'chan-api-dialog', minWidth: 'min(560px, 96vw)',
-    unsaved: { isDirty: () => grantsNow() !== grantsBase, save: () => saveGrants() } });
+    unsaved: { isDirty: () => grantsNow() !== grantsBase, save: () => saveGrants() }, kind: 'form' });
   // THE API LOG (lane channel-api-log-blank, the owner: 「这个 API 日志为啥一直是空的」) — ONE box for the dialog's life,
   // kept across re-draws, its rows keyed and patched in place. It says «Loading…» at once, then the lines (newest first),
   // «No calls yet», or ONE line saying why the log could not be read (a failed read, a line that cannot be worded) —

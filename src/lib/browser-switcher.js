@@ -53,7 +53,7 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
   const st = { view: null, error: null, gen: 0, closed: false, pending: null, timer: null, entries: new Map(), warned: new Set() };
   const onGlobal = (m) => { if (m && m.type === 'browser-profiles-updated' && !st.closed) schedule(); };
   const shell = createModalShell({ id: 'browser-switcher-dialog', title: t('Browser'), dialogClass: 'browser-switcher', bodyClass: 'brsw-body', escapeToClose: true,
-    onClose: () => { st.closed = true; if (st.timer) clearTimeout(st.timer); try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } } });
+    onClose: () => { st.closed = true; if (st.timer) clearTimeout(st.timer); try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } }, kind: 'form' });
   const { dialog, body, close } = shell;
   const h3 = dialog.querySelector('.dialog-header h3');
   const footer = document.createElement('div'); footer.className = 'dialog-footer';

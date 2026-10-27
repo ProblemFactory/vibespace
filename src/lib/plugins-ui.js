@@ -54,7 +54,7 @@ function relayFact(r) {
 /** the relay chip's sheet: the identity, its names, the line(s) for the relay admin, the doors */
 function relaySheet(p, api, rerender) {
   const r = p.relay || {};
-  const { body, close } = createModalShell({ id: 'relay-identity', title: t('Relay identity'), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+  const { body, close } = createModalShell({ id: 'relay-identity', title: t('Relay identity'), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
   const knockWords = r.retired ? t('no longer sent — it left this instance') : { on: t('sent while the relay\'s grace lasts'), locked: t('waits for the vault (sent once it is unlocked)'), off: t('no longer sent — the relay takes this instance\'s own token alone'), none: t('none') }[r.knock] || '';
   const names = [...(r.prefixes || []).map((x) => x + '…'), ...(r.subdomains || [])].join(' · ');
   const lines = Array.isArray(r.lines) ? r.lines : [];
@@ -144,7 +144,7 @@ export function installPluginsUI(App) {
   async openPluginsDialog({ container } = {}) {
     // rail mode: render into the sidebar panel instead of a modal (one source)
     if (!container && !this.isMobile && this.sidebar?._railEl) { this.sidebar.toggle?.(true); this.sidebar._railGo?.('plugins'); return; }
-    const shell = container ? { body: container, close: () => {} } : createModalShell({ id: 'plugins-dialog', title: t('Plugins'), bodyClass: 'mounts-dialog-body', escapeToClose: true });
+    const shell = container ? { body: container, close: () => {} } : createModalShell({ id: 'plugins-dialog', title: t('Plugins'), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
     // rail panel: same body class as the modal so one stylesheet serves both
     if (container) container.classList.add('mounts-dialog-body');
     const { body, close } = shell;
@@ -374,7 +374,7 @@ export function installPluginsUI(App) {
   /** the Voice row's chip: Connect with Fish Audio + the proposal cards (an action surface, not settings); `pasteKey` (lane
    *  dropline-connect-door) = the other door — the integration card the plugin row NAMES (`p.integration`), focused */
   _voiceSheet(p, rerender, { focus = null } = {}) {
-    const { body, close } = createModalShell({ id: 'voice-sheet', title: p.label, bodyClass: 'mounts-dialog-body', escapeToClose: true });
+    const { body, close } = createModalShell({ id: 'voice-sheet', title: p.label, bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
     const pasteKey = p.integration ? () => { close(); this.openIntegration?.(p.integration); } : null;
     // `focus` (lane foryou-plugin-notices: a For-you reminder's door) = the proposal to land on + its words chosen — the first draw only
     renderVoiceSheet(body, () => { close(); rerender(); this._voiceSheet(p, rerender); }, { pasteKey, focus });
@@ -386,7 +386,7 @@ export function installPluginsUI(App) {
     if (res.done) { showToast(t('Already connected')); rerender(); return; }
     if (res.pending) { showToast(t('Waiting for the sign-in page…')); return; }
     if (!res.authUrl) return;
-    const { body, close } = createModalShell({ id: 'tailscale-login', title: t('Log in…'), escapeToClose: true });
+    const { body, close } = createModalShell({ id: 'tailscale-login', title: t('Log in…'), escapeToClose: true, kind: 'form' });
     body.innerHTML = `<div class="mounts-field-hint">${escHtml(t('Open this link, approve the device, then come back — the status updates by itself:'))}</div>
       <div class="plugin-auth-url"><a href="${escHtml(res.authUrl)}" target="_blank" rel="noopener">${escHtml(res.authUrl)}</a>
       <button class="mounts-btn plugin-copy">${escHtml(t('Copy'))}</button></div>`;
@@ -412,7 +412,7 @@ export function installPluginsUI(App) {
     }
     return new Promise((resolve) => {
       let decided = false;
-      const { body, close } = createModalShell({ id: 'plugin-consent-dialog', title: readOnly ? t('Capabilities of {name}', { name: p.label || p.id }) : t('Enable "{name}" (trusted)?', { name: p.label || p.id }), minWidth: '460px', escapeToClose: true, onClose: () => { if (!decided) resolve(false); } });
+      const { body, close } = createModalShell({ id: 'plugin-consent-dialog', title: readOnly ? t('Capabilities of {name}', { name: p.label || p.id }) : t('Enable "{name}" (trusted)?', { name: p.label || p.id }), minWidth: '460px', escapeToClose: true, onClose: () => { if (!decided) resolve(false); }, kind: 'decision' });
       const risky = items.some((it) => it.id === 'client-module' || it.id === 'child-process');
       body.innerHTML = `
         <div class="usage-note">${escHtml(readOnly ? t('This plugin declares:') : t('This plugin asks for more than the sandbox gives. Enable it only if you trust its author:'))}</div>
@@ -427,7 +427,7 @@ export function installPluginsUI(App) {
       actions.appendChild(cancel);
       if (!readOnly) {
         const okb = document.createElement('button');
-        okb.className = 'mounts-btn plugin-consent-accept'; okb.textContent = t('Enable (trusted)');
+        okb.className = 'mounts-btn mounts-btn-primary plugin-consent-accept'; okb.textContent = t('Enable (trusted)');
         okb.onclick = () => { decided = true; close(); resolve(true); };
         actions.appendChild(okb);
       }
@@ -437,7 +437,7 @@ export function installPluginsUI(App) {
   /** Install dialog (Plugin Ph4): path / git / .vsp upload / GitHub release →
    *  POST /api/plugins/install. Errors reach the user verbatim (inline + toast). */
   _pluginInstallDialog(onDone) {
-    const { body, close } = createModalShell({ id: 'plugin-install-dialog', title: t('Install plugin'), minWidth: '460px', escapeToClose: true });
+    const { body, close } = createModalShell({ id: 'plugin-install-dialog', title: t('Install plugin'), minWidth: '460px', escapeToClose: true, kind: 'form' });
     const SOURCES = [
       { value: 'path', label: t('Local folder path'), placeholder: '/path/to/plugin (holds vibespace-plugin.json)' },
       { value: 'git', label: t('Git repository URL'), placeholder: 'https://github.com/owner/plugin.git#main' },
@@ -449,11 +449,11 @@ export function installPluginsUI(App) {
       <label class="plugin-install-row plugin-install-value-row"><span>${escHtml(t('Location'))}</span><input type="text" class="plugin-install-value" spellcheck="false"></label>
       <label class="plugin-install-row plugin-install-file-row hidden"><span>${escHtml(t('File'))}</span><input type="file" class="plugin-install-file" accept=".vsp,.zip"></label>
       <label class="plugin-install-row plugin-install-ref-row hidden"><span>${escHtml(t('Ref'))}</span><input type="text" class="plugin-install-ref" spellcheck="false" placeholder="${escHtml(t('a tag, a branch or a full commit sha (empty = the default branch)'))}"></label>
-      <div class="plugin-install-row plugin-install-cred-row hidden"><span>${escHtml(t('Credential'))}</span><select class="plugin-install-cred"><option value="">${escHtml(t('None (a public repository)'))}</option><option value="plugin-git">${escHtml(t('Plugin Git credential'))}</option></select><button type="button" class="mounts-btn plugin-install-cred-open">${escHtml(t('Set up…'))}</button></div>
+      <div class="plugin-install-row plugin-install-cred-row dialog-field-row hidden"><span>${escHtml(t('Credential'))}</span><div class="dialog-field-line"><select class="plugin-install-cred"><option value="">${escHtml(t('None (a public repository)'))}</option><option value="plugin-git">${escHtml(t('Plugin Git credential'))}</option></select><button type="button" class="mounts-btn plugin-install-cred-open">${escHtml(t('Set up…'))}</button></div></div>
       <div class="plugin-cfg-hint plugin-install-cred-hint hidden">${escHtml(t('A private repository is read with the Plugin Git credential kept in Integrations (sealed by the vault) — a token is never typed here.'))}</div>
       <div class="plugin-cfg-hint">${escHtml(t('The package is validated before it is placed under data/plugins/<id>/. Plugins that ask for capabilities beyond the sandbox are enabled only after you review them.'))}</div>
       <div class="plugin-detail plugin-cfg-warn plugin-install-error hidden"></div>
-      <div class="dialog-actions"><button class="mounts-btn plugin-install-cancel">${escHtml(t('Cancel'))}</button><button class="mounts-btn plugin-install-go">${escHtml(t('Install'))}</button></div>`;
+      <div class="dialog-actions"><button class="mounts-btn plugin-install-cancel">${escHtml(t('Cancel'))}</button><button class="mounts-btn mounts-btn-primary plugin-install-go">${escHtml(t('Install'))}</button></div>`;
     const srcSel = body.querySelector('.plugin-install-source'), val = body.querySelector('.plugin-install-value'), fileRow = body.querySelector('.plugin-install-file-row'), valRow = body.querySelector('.plugin-install-value-row'), fileIn = body.querySelector('.plugin-install-file'), errEl = body.querySelector('.plugin-install-error'), go = body.querySelector('.plugin-install-go');
     // lane engine-distribution: a git source names its ref and picks the credential (the integration row — never typed here)
     const refRow = body.querySelector('.plugin-install-ref-row'), refIn = body.querySelector('.plugin-install-ref'), credRow = body.querySelector('.plugin-install-cred-row'), credSel = body.querySelector('.plugin-install-cred'), credHint = body.querySelector('.plugin-install-cred-hint');
@@ -597,7 +597,7 @@ export function installPluginsUI(App) {
       const { body, close } = createModalShell({
         id: 'harness-service-dialog', minWidth: '460px', escapeToClose: true,
         title: t('Turn on the {name} background service?', { name: meta.label || meta.id }),
-        onClose: () => { if (!decided) resolve(false); },
+        onClose: () => { if (!decided) resolve(false); }, kind: 'decision',
       });
       body.innerHTML = `
         <div class="usage-note">${escHtml(t('{name} keeps its conversations in its own database rather than in files, so VibeSpace cannot read a STOPPED conversation without asking {name} itself.', { name: meta.label || meta.id }))}</div>
@@ -613,7 +613,7 @@ export function installPluginsUI(App) {
       later.className = 'mounts-btn'; later.textContent = t('Not now');
       later.onclick = () => { decided = true; close(); resolve(false); };
       const go = document.createElement('button');
-      go.className = 'mounts-btn plugin-consent-accept'; go.textContent = t('Enable & start');
+      go.className = 'mounts-btn mounts-btn-primary plugin-consent-accept'; go.textContent = t('Enable & start');
       go.onclick = () => { decided = true; close(); resolve(true); };
       actions.append(later, go);
       setTimeout(() => go.focus(), 0);

@@ -76,7 +76,7 @@ export function commentSentText(r) {
 
 /** The publish dialog (the explorer's twin): title + public → POST /api/design/publish → the link. Also the chip's door. */
 export function openDesignPublishDialog(app, { host = '', dir = '', title = '' } = {}) {
-  const { body, close } = createModalShell({ title: t('Publish design'), escapeToClose: true, minWidth: '380px', dialogClass: 'design-publish-dialog' });
+  const { body, close } = createModalShell({ title: t('Publish design'), escapeToClose: true, minWidth: '380px', dialogClass: 'design-publish-dialog', kind: 'form' });
   const nameLab = mk('label', 'design-publish-field');
   nameLab.append(document.createTextNode(t('Page title')));
   const name = mk('input', 'dialog-input');
@@ -121,7 +121,7 @@ export function openDesignPublishDialog(app, { host = '', dir = '', title = '' }
     if (!r || !r.page) { showToast(t('Publish failed: {err}', { err: (r && (r.why || r.error)) || t('server unreachable') }), { type: 'error' }); return; }
     close();
     const url = absUrl(r.page.url || r.page.path || '');
-    const { body: b2, close: c2 } = createModalShell({ title: t('Page published'), escapeToClose: true, minWidth: '380px' });
+    const { body: b2, close: c2 } = createModalShell({ title: t('Page published'), escapeToClose: true, minWidth: '380px', kind: 'form' });
     const u = mk('div', 'design-publish-url'); u.textContent = url;
     const v = mk('div', 'design-publish-where'); v.textContent = r.page.public ? t('Public — anyone with the link can view (no login)') : t('Private — viewers need a VibeSpace login');
     const f2 = mk('div', 'dialog-footer');
@@ -429,7 +429,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
     if (composer) { composer.pick = pick; composer.quote.textContent = quoteLine(pick); composer.ta.focus(); return; } // a second pick re-points it; the words typed stay
     const parts = composerBody(pick);
     if (phone) {
-      const shell = createModalShell({ title: t('Comment on this element'), escapeToClose: true, dialogClass: 'design-composer-sheet', onClose: () => { composer = null; } });
+      const shell = createModalShell({ title: t('Comment on this element'), escapeToClose: true, dialogClass: 'design-composer-sheet', onClose: () => { composer = null; }, kind: 'form' });
       shell.body.appendChild(parts.box);
       composer = { ...parts, pick, close: shell.close };
     } else {
@@ -487,7 +487,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
 
   // ── the artboards list (a bottom sheet on the phone) ──
   function openBoards() {
-    const { body, close } = createModalShell({ title: t('Artboards'), escapeToClose: true, dialogClass: 'design-sheet' });
+    const { body, close } = createModalShell({ title: t('Artboards'), escapeToClose: true, dialogClass: 'design-sheet', kind: 'form' });
     const pages = canvas.pages();
     if (pages.length > 1) {
       const row = mk('div', 'design-sheet-pages');

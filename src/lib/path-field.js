@@ -673,7 +673,7 @@ export function pathField(input, opts = {}) {
     if (!K.sel) K.sel = (inputsNow().bases[0] || { path: '~' }).path;
     for (let q = K.sel; q && q.includes('/'); q = parentOf(q)) K.open.add(q);
     K.open.add(K.sel);
-    const shell = createModalShell({ title: kind === 'file' ? t('Pick a file or folder') : t('Pick a folder'), dialogClass: 'pf-picker', escapeToClose: true, onClose: () => { st.picking = false; input.focus(); } });
+    const shell = createModalShell({ title: kind === 'file' ? t('Pick a file or folder') : t('Pick a folder'), dialogClass: 'pf-picker', escapeToClose: true, onClose: () => { st.picking = false; input.focus(); }, kind: 'form' });
     const { body, dialog } = shell;
     if (h) dialog.querySelector('.dialog-header h3').append(Object.assign(document.createElement('span'), { className: 'pf-pk-sub', textContent: ' · ' + hostName(h) }));
     body.innerHTML = `<div class="pf-pk-main"><div class="pf-pk-left"><div class="pf-pk-search">${UI_ICONS.search}<input type="text" class="pf-pk-q" placeholder="${escHtml(t('Search folders (a few letters anywhere in the path)'))}" autocomplete="off" spellcheck="false"></div><div class="pf-pk-tree"></div></div><div class="pf-pk-right"></div></div><div class="dialog-footer pf-pk-foot"></div>`;

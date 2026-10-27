@@ -2895,6 +2895,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/browser-live-window.js': [1, 0, 'the fallback for an app without goToWinId (a stub app in a suite) — goToWinId IS the door'],
     'src/lib/taskbar.js': [0, 1, 'the window menu\'s Restore — a frame\'s own menu restores the frame'],
     'src/lib/session-lifecycle.js': [0, 1, '_focusExistingSession\'s REPLAY branch (a layout replay found the window already open)'],
+    'src/lib/form-window.js': [1, 0, 'a FORM that closes gives the active window back to the one it was opened over (lane dialog-yield — the opener\'s focus restored, never a window the person names)'],
   };
   // THE DOORS: [revealWindow calls, where]
   const DOORS = {
@@ -2911,6 +2912,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/artifacts-window.js': [1, 'the Artifacts window\'s one-per-conversation re-open (lane artifacts-list-scale; a replay passes { replay })'],
     'src/lib/design-home.js': [1, 'the Design window home\'s one-per-client re-open (a replay passes { replay }) — lane design-systems-home'],
     'src/lib/machine-desktop.js': [3, 'a machine\'s whole-desktop window: a second open reveals it — design 014 D1; lane desktop-display-modes: the machine\'s ONE window (③ / ②), a display\'s own window (①), a replayed window\'s own id'],
+    'src/lib/form-window.js': [1, 'a Tab the person pressed into a FORM standing behind brings it in front (lane dialog-yield — the person named it with the key)'],
     'src/lib/desktop-app-window.js': [3, 'the singleton re-open (a replay passes { replay }) + a satellite the app just opened, in front — design 016 S2 + the person\'s click on an app notification\'s toast raises its window (lane app-display-notify-sink)'],
     ...Object.fromEntries(['settings-ui', 'usage-window', 'task-log', 'task-detail', 'session-props', 'channel-window', 'channel-outbox', 'channels-panel', 'jobs-panel', 'integrations-window', 'sidebar-rail', 'browser-trace-view', 'desktop-window', 'browser-live-window', 'inbox-window', 'vault-window']
       .map((n) => ['src/lib/' + n + '.js', [1, n === 'browser-live-window' ? 'the fold-back (D3)' : 'the singleton re-open (a replay passes { replay })']])),
@@ -5633,6 +5635,65 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(bare.length === 0, `§102 every client fetch / fetchJson with a JSON.stringify body names its content type (headers) — a bare one is text/plain to express.json() and the route reads an empty body${bare.length ? ': ' + bare.join(' ') : ''}`);
   const control = bareJsonCalls("const r = await fetchJson('/api/x', { method: 'POST', body: JSON.stringify({ a: 1 }) });\nawait fetch('/api/y', { method: 'POST', headers: H, body: JSON.stringify({}) });");
   ok(control.length === 1 && control[0] === 1, `§102 CONTROL: the census sees a bare JSON POST (line 1) and spares the one with headers (${JSON.stringify(control)})`);
+}
+
+// ── §103 (lane dialog-yield, 2.369.360 — the owner on his hub, 2026-10-26: «尽可能减少 blocking popup 的使用；带填空的对话框不阻塞
+// 聊天；打开别的窗口要让位»): ONE SHELL, TWO KINDS, DECLARED AT EVERY CALL. createModalShell (src/lib/utils.js) draws a
+// `decision` — a backdrop over everything, answered before anything goes on — or a `form` — what the person fills, reads or
+// picks from: a small window that yields (src/lib/form-window.js). `kind` has NO default: every createModalShell( call in
+// src/ names one (acorn: the first argument's own `kind` property, a 'form' / 'decision' literal; plugin-client's one row
+// hands a plugin's own choice through, both arms literals) — a call without one is RED by file:line. The FORM list is
+// printed, and so is the FORM-LATER list: a decision whose call line says `// form-later: <reason>` (counted, never silent).
+{
+  const DYN = (n) => n && n.type === 'ConditionalExpression' && [n.consequent, n.alternate].every((x) => x.type === 'Literal' && (x.value === 'form' || x.value === 'decision'));
+  const census103 = (files) => {
+    const rows = [], bad = [];
+    for (const [f, src] of files) {
+      let ast;
+      try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true }); } catch (e) { bad.push(`${f}: unparsable (${e.message})`); continue; }
+      const lines = src.split('\n');
+      const walk = (n) => {
+        if (!n || typeof n.type !== 'string') return;
+        if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name === 'createModalShell') {
+          const at = `${f}:${n.loc.start.line}`, line = lines[n.loc.start.line - 1] || '';
+          const arg = n.arguments[0];
+          const prop = arg && arg.type === 'ObjectExpression' ? arg.properties.find((p) => p.type === 'Property' && !p.computed && (p.key.name === 'kind' || p.key.value === 'kind')) : null;
+          const v = prop ? prop.value : null;
+          const kind = v && v.type === 'Literal' && (v.value === 'form' || v.value === 'decision') ? v.value : DYN(v) ? 'dynamic' : null;
+          const later = /\/\/\s*form-later:\s*(.*)$/.exec(line);
+          if (!kind) bad.push(`${at} — no kind (${prop ? 'not a form / decision literal' : 'missing'})`);
+          else if (later && kind !== 'decision') bad.push(`${at} — a form-later marker on a ${kind} call`);
+          else if (later && !later[1].trim()) bad.push(`${at} — a form-later marker without its reason`);
+          rows.push({ at, kind, later: later ? later[1].trim() : null });
+        }
+        for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach(walk); else if (c && typeof c.type === 'string') walk(c); }
+      };
+      walk(ast);
+    }
+    return { rows, bad };
+  };
+  const listJs = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? listJs(`${dir}/${d.name}`) : d.name.endsWith('.js') ? [`${dir}/${d.name}`] : []));
+  const files103 = listJs('src').map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]).filter(([, src]) => src.includes('createModalShell('));
+  const real = census103(files103);
+  const of = (k) => real.rows.filter((r) => r.kind === k);
+  console.log(`\n§103 every createModalShell( call declares its kind (lane dialog-yield): ${real.rows.length} calls in ${files103.length} files — ${of('form').length} form · ${of('decision').length} decision · ${of('dynamic').length} dynamic`);
+  console.log(`  FORMS (a small window that yields): ${of('form').map((r) => r.at.replace(/^src\/lib\//, '')).join(' · ')}`);
+  console.log(`  DECISIONS: ${of('decision').map((r) => r.at.replace(/^src\/lib\//, '')).join(' · ')}`);
+  console.log(`  FORM-LATER (${real.rows.filter((r) => r.later).length}): ${real.rows.filter((r) => r.later).map((r) => `${r.at.replace(/^src\/lib\//, '')} — ${r.later}`).join(' | ') || 'none'}`);
+  ok(real.rows.length >= 100 && real.bad.length === 0, `§103 every createModalShell( call in src/ names its kind — 'decision' or 'form' (${real.rows.length} calls)${real.bad.length ? ' — RED: ' + real.bad.join(' | ') : ''}`);
+  ok(of('form').length > of('decision').length && of('dynamic').length === 1 && of('dynamic')[0].at.startsWith('src/lib/plugin-client.js:'), `§103 the forms outnumber the decisions (${of('form').length} / ${of('decision').length}) and the ONE dynamic row is plugin-client's (a plugin declares its own)`);
+  const U = fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8'), FW = fs.readFileSync(path.join(REPO, 'src/lib/form-window.js'), 'utf8'), A103 = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8'), L103 = fs.readFileSync(path.join(REPO, 'src/lib/layout.js'), 'utf8');
+  ok(/export function createModalShell\(\{ kind, id,/.test(U) && /export function setFormHost\(/.test(U) && /kind === 'form' && formHost \? formHost\.open\(\{ id, title \}\) : null/.test(U), '§103 the shell takes `kind` with NO default and asks the form host (setFormHost) for a form');
+  ok(/registerWindowType\(\{ type: 'form',[\s\S]{0,300}?persist: false \}\)/.test(FW) && /installFormHost\(this\)/.test(A103) && /if \(win\.type === 'form'\) return null;/.test(L103), '§103 the host is wired: window type `form` (persist: false), app.js installFormHost, captureWin never records a form');
+  const ctl = census103([
+    ['src/lib/zz-a.js', "createModalShell({ id: 'a', title: 'A' });"],
+    ['src/lib/zz-b.js', "createModalShell({ id: 'b', kind: 'modal' });"],
+    ['src/lib/zz-c.js', "createModalShell({ id: 'c', kind: 'form' }); // form-later: it cannot yet"],
+    ['src/lib/zz-d.js', "createModalShell({ id: 'd', kind: 'decision' }); // form-later:"],
+    ['src/lib/zz-e.js', "createModalShell({ id: 'e', kind: 'decision' }); // form-later: awaited where it was asked\ncreateModalShell({ unsaved: { kind: 'form' }, id: 'f' });"],
+  ]);
+  ok(ctl.bad.length === 5 && ctl.bad.some((b) => b.startsWith('src/lib/zz-a.js:1')) && ctl.bad.some((b) => b.startsWith('src/lib/zz-b.js:1')) && ctl.bad.some((b) => b.startsWith('src/lib/zz-c.js:1')) && ctl.bad.some((b) => b.startsWith('src/lib/zz-d.js:1')) && ctl.bad.some((b) => b.startsWith('src/lib/zz-e.js:2')) && ctl.rows.find((r) => r.at === 'src/lib/zz-e.js:1')?.later === 'awaited where it was asked',
+    `§103 NEGATIVE CONTROLS: a call without kind, a kind that is no kind, a form-later on a form, a form-later without its reason and a nested \`kind\` (not the call's own) are RED; a decision's form-later is counted with its reason (${JSON.stringify(ctl.bad)})`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

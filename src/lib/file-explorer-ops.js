@@ -534,7 +534,7 @@ export function installExplorerOps(FileExplorer) {
     const fp = name ? this.currentPath + '/' + name : this.currentPath;
     // Open INSTANTLY with placeholders; a recursive-size du on a big tree can
     // take many seconds and a click with no response reads as broken.
-    const { overlay, body, close: done } = createModalShell({ title: t('Properties'), escapeToClose: true });
+    const { overlay, body, close: done } = createModalShell({ title: t('Properties'), escapeToClose: true, kind: 'form' });
     overlay.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); done(); } });
     const rows = [
       ['Name', fp.split('/').pop() || '/'],
@@ -598,7 +598,7 @@ export function installExplorerOps(FileExplorer) {
   // path-mount semantics (default private = login-only; public = anyone).
   async _publishPageDialog(fullPath, name) {
     const existing = (await fetch(`/api/pages/by-path?path=${encodeURIComponent(fullPath)}`).then((r) => r.json()).catch(() => null))?.page || null;
-    const { body, close } = createModalShell({ title: existing ? t('Published page') : t('Publish page'), escapeToClose: true, minWidth: '420px' });
+    const { body, close } = createModalShell({ title: existing ? t('Published page') : t('Publish page'), escapeToClose: true, minWidth: '420px', kind: 'form' });
     const esc = (x) => String(x || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     body.innerHTML = `
       <label style="display:block;margin-bottom:8px">${t('Page name')}<input class="dialog-input" id="pp-name" value="${esc(existing?.name || name.replace(/\.html?$/i, ''))}"></label>
@@ -630,7 +630,7 @@ export function installExplorerOps(FileExplorer) {
       }
       if (!r?.page) { showToast(t('Publish failed: {err}', { err: r?.error || t('server unreachable') }), { type: 'error' }); return; }
       close();
-      const { body: b2, close: c2 } = createModalShell({ title: t('Page published'), escapeToClose: true, minWidth: '420px' });
+      const { body: b2, close: c2 } = createModalShell({ title: t('Page published'), escapeToClose: true, minWidth: '420px', kind: 'form' });
       b2.innerHTML = `
         <div style="font-size:12px;word-break:break-all;margin-bottom:6px">${esc(absUrl(r.page.url))}</div>
         <div style="font-size:11px;opacity:.7;margin-bottom:10px">${r.page.public ? t('Public — anyone with the link can view (no login)') : t('Private — viewers need a VibeSpace login')}</div>

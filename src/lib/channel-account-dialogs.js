@@ -806,7 +806,7 @@ function refText(ref, outboxN) {
   return String(ref.kind || '');
 }
 export function showRemoveRefusedDialog(app, a, refs) {
-  const { body, close } = createModalShell({ id: 'chan-remove-refused', title: tr('Cannot remove "{name}"', { name: accountName(a) }), dialogClass: 'chan-dialog', escapeToClose: true });
+  const { body, close } = createModalShell({ id: 'chan-remove-refused', title: tr('Cannot remove "{name}"', { name: accountName(a) }), dialogClass: 'chan-dialog', escapeToClose: true, kind: 'form' });
   body.dataset.chanDialog = 'remove-refused';
   const warn = el('div', 'chan-flow-refusal chan-warn');
   warn.append(icon('alert', 12), el('span', '', tr('This account is still referenced — release these first:')));

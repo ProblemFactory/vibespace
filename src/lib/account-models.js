@@ -21,7 +21,7 @@ export async function openAccountModelsDialog({ accountId, name = '', onTest = n
   // lane dialog-unsaved-guard: a model typed / removed / a capability ticked and not saved ⇒ ✕ / Esc / the backdrop asks
   const guard = { dirty: () => false, save: async () => true };
   const { body, close } = createModalShell({ id: 'account-models-dialog', title: t('Models — {name}', { name }), minWidth: 'min(660px, 94vw)', escapeToClose: true, onClose,
-    unsaved: { isDirty: () => guard.dirty(), save: () => guard.save() } });
+    unsaved: { isDirty: () => guard.dirty(), save: () => guard.save() }, kind: 'form' });
   body.classList.add('am-body');
   body.textContent = t('Loading…');
   const r = await fetchJson(`/api/accounts/${encodeURIComponent(accountId)}/models`);

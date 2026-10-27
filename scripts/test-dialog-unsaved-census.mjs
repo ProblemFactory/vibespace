@@ -156,7 +156,7 @@ if (isMain) {
   console.log('— ② the controls');
   const NOTIFY = 'src/lib/channel-filter-editor.js';
   const src = fs.readFileSync(path.join(REPO, NOTIFY), 'utf8');
-  const cut = src.replace("unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() } });\n  const principals", "unsavedX: { isDirty: () => dirtyNow(), save: () => saveNow() } });\n  const principals");
+  const cut = src.replace("unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });\n  const principals", "unsavedX: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });\n  const principals"); // lane dialog-yield: the call declares its kind (a form)
   ok(cut !== src, 'mutant: Notify… loses `unsaved`');
   const m1 = censusSaveDialogs({ files: [NOTIFY], override: { [NOTIFY]: cut } });
   ok(m1.bad.some((x) => x.fn === 'showNotifyDialog' && x.decl === 'missing'), 'Notify… without `unsaved:` ⇒ RED (missing)', m1.bad);

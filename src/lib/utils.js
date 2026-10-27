@@ -44,12 +44,30 @@ export function announceModal(overlay) {
 // No `isDirty` ⇒ the shell's own flag: any input / change event inside the body after open, cleared by `markSaved()`
 // (`markDirty()` for a change no event reports). `unsaved: false` = nothing in the dialog changes until its Save — said at
 // the call with the reason; scripts/test-dialog-unsaved-census.mjs keeps every Save dialog on one of the two.
-export function createModalShell({ id, title = '', dialogClass = '', bodyClass = '', minWidth = null, closeOnBackdrop = true, escapeToClose = false, onClose = null, unsaved = null } = {}) {
+// lane dialog-yield (the owner, 2026-10-26, on his hub: «尽可能减少 blocking popup 的使用；带填空的对话框不阻塞聊天；打开别的窗口要
+// 让位»): ONE shell, TWO kinds, DECLARED at every call — `kind` has NO default (test-architecture §103 reds a call without one,
+// by file:line, and prints the form list):
+//   'decision' — the person answers before anything goes on: a yes / no, a consent, a destructive confirm, the vault unlock,
+//     ONE password / ONE line (showConfirmDialog / showInputDialog). The overlay: a backdrop over everything (z 99998).
+//   'form' — what the person FILLS, reads or picks from (install a plugin, a credential, mounts, a channel's editors, the
+//     Agents forms…): on the desktop tier a small WINDOW that yields (src/lib/form-window.js — no backdrop, the chat and every
+//     window stay interactive, it goes behind what the person focuses and comes back from the taskbar; ✕ / Cancel / Escape
+//     from a focus INSIDE it close it — the idle-Escape rule below is a decision's; the unsaved guard still asks). The phone
+//     tier and a page with no host keep the sheet: nothing beside it to block. A call that stays a decision for now says why
+//     on its own line (`// form-later: <reason>`), counted and printed by §103.
+// The shape returned is the same: `overlay` = the root holding the id (a form's: .dialog-form inside its window, whose
+// .remove() closes the window — the singleton dedup above and a caller's overlay.remove() keep working).
+let formHost = null;
+/** app.js wires the desktop tier's form host once (src/lib/form-window.js installFormHost); null = every form is a sheet */
+export function setFormHost(host) { formHost = host && typeof host.open === 'function' ? host : null; }
+export function createModalShell({ kind, id, title = '', dialogClass = '', bodyClass = '', minWidth = null, closeOnBackdrop = true, escapeToClose = false, onClose = null, unsaved = null } = {}) {
+  if (kind !== 'decision' && kind !== 'form') { try { console.warn(`[createModalShell] ${id || title}: kind must be 'decision' or 'form' (test-architecture §103) — drawn as a decision`); } catch { /* a console is a courtesy */ } }
   if (id) document.getElementById(id)?.remove();
+  const yieldWin = kind === 'form' && formHost ? formHost.open({ id, title }) : null;   // null = the phone tier: the sheet
   const overlay = document.createElement('div');
   if (id) overlay.id = id;
-  overlay.className = 'dialog-overlay';
-  overlay.style.zIndex = '99998';
+  if (yieldWin) overlay.className = 'dialog-form';
+  else { overlay.className = 'dialog-overlay'; overlay.style.zIndex = '99998'; }
   const dialog = document.createElement('div');
   dialog.className = 'dialog' + (dialogClass ? ' ' + dialogClass : '');
   if (minWidth) dialog.style.minWidth = minWidth;
@@ -62,16 +80,29 @@ export function createModalShell({ id, title = '', dialogClass = '', bodyClass =
   body.className = 'dialog-body' + (bodyClass ? ' ' + bodyClass : '');
   dialog.append(header, body);
   overlay.appendChild(dialog);
-  document.body.appendChild(overlay);
+  (yieldWin ? yieldWin.content : document.body).appendChild(overlay);
   announceModal(overlay); // lane dialog-keys: in the opening act's own task, before the caller focuses anything in it
   pageKeysScroll(overlay, dialog); // lane door-healthy-chat: PageUp / PageDown move the dialog's scroll region
   let unbindEscape = null;
-  const close = () => { unbindEscape?.(); overlay.remove(); onClose?.(); };
+  let gone = false;   // a form ends ONCE: its own close, or its window closed by any other door (the ✕, a desktop's close)
+  const ended = () => { if (gone) return false; gone = true; unbindEscape?.(); return true; };
+  const close = yieldWin ? () => { if (!ended()) return; yieldWin.close(); onClose?.(); } : () => { unbindEscape?.(); overlay.remove(); onClose?.(); };
   const guard = unsaved && typeof unsaved === 'object' ? unsavedGuard({ overlay, dialog, body, unsaved, close }) : null;
   const dismiss = guard ? guard.dismiss : close;   // the person's own ✕ / Escape / backdrop — asks first when dirty
   closeBtn.onclick = () => dismiss();
-  if (closeOnBackdrop) overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) dismiss(); });
-  if (escapeToClose) {
+  if (closeOnBackdrop && !yieldWin) overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) dismiss(); });
+  if (yieldWin) {
+    // A FORM: Escape closes it only from a focus INSIDE it (a menu over it closes first; an open picker keeps its key)
+    overlay.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || e.isComposing) return;
+      if (document.querySelector('[data-popover]')) return;
+      try { if (e.target && e.target.matches && e.target.matches('select:open')) return; } catch { /* :open unknown: the key is the form's */ }
+      e.preventDefault(); e.stopPropagation(); dismiss('escape');
+    });
+    overlay.remove = () => { if (ended()) yieldWin.close(); };   // the id's dedup / a caller's overlay.remove() close the form's window — WITHOUT onClose, as a decision's bare remove (refresh-live: remove, then finish(r))
+    yieldWin.bind({ dismiss: (how) => dismiss(how), closed: () => { if (ended()) onClose?.(); } }, overlay);
+    setTimeout(() => { try { if (yieldWin.active() && overlay.isConnected && !overlay.contains(document.activeElement)) overlay.focus({ preventScroll: true }); } catch { /* focus is a courtesy */ } }, 0);
+  } else if (escapeToClose) {
     overlay.tabIndex = -1;
     overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); dismiss('escape'); } });
     // lane race-sweep (B-6b74, test-desktop-webrtc-chrome ⑪ 5/5 on 2 busy cpus): the overlay hears Escape only from a focus
@@ -194,7 +225,7 @@ function unsavedGuard({ overlay, dialog, body, unsaved, close }) {
 // closeOnBackdrop off: the callers wire backdrop mousedown themselves so the
 // Promise resolves (a bare overlay.remove() would leave the await hanging).
 function _modalShell(title) {
-  const { overlay, dialog, body, closeBtn } = createModalShell({ title, closeOnBackdrop: false });
+  const { overlay, dialog, body, closeBtn } = createModalShell({ kind: 'decision', title, closeOnBackdrop: false });
   const footer = document.createElement('div'); footer.className = 'dialog-footer';
   const cancelBtn = document.createElement('button'); cancelBtn.className = 'btn-cancel'; cancelBtn.textContent = t('Cancel');
   const okBtn = document.createElement('button'); okBtn.className = 'btn-create';

@@ -52,7 +52,7 @@ export function remoteappCardRefusal(r, machine) {
 export function openRemoteappSettings(app, m) {
   const machine = m.name || m.hostId;
   const host = encodeURIComponent(m.hostId);
-  const { body, close } = createModalShell({ id: 'remoteapp-settings', title: t('RemoteApp settings — {machine}', { machine }), dialogClass: 'remoteapp-settings', escapeToClose: true });
+  const { body, close } = createModalShell({ id: 'remoteapp-settings', title: t('RemoteApp settings — {machine}', { machine }), dialogClass: 'remoteapp-settings', escapeToClose: true, kind: 'form' });
   const lead = el('p', 'ra-lead', t('Open {machine}’s apps as their own windows through Remote Desktop. Set it up once here.', { machine }));
   const factsHead = el('div', 'ra-head', t('What {machine} needs', { machine }));
   const factsBox = el('div', 'ra-facts');

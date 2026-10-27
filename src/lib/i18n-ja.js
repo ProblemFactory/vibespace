@@ -11046,4 +11046,5 @@ export default {
   "you replied": "返信済み",
   "approved": "承認済み",
   "withdrawn by the agent": "エージェントが取り下げ",
+  "A form stays a window of its own": "フォームはいつも独立した小さなウィンドウです",
 };

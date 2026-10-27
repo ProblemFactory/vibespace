@@ -235,7 +235,7 @@ function limitsFollowOpen(boxes, limWrap) {
 export function showEditDialog(key, data, { refresh } = {}) {
   // lane dialog-unsaved-guard: a verb or a limit changed and not saved ⇒ ✕ / Esc / the backdrop asks
   const { body, close } = createModalShell({ id: 'vault-ak-edit', title: t('Edit "{name}"', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
-    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() } });
+    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() }, kind: 'form' });
   const vp = verbPicks(key.scopes);
   body.append(el('div', 'vw-ak-sec', t('What it may do')), vp.node,
     el('div', 'vw-ak-hint vw-ak-grant-hint', t('A verb you add works at once wherever this key is granted — a grant is for the key and a conversation, not for each verb; a verb you take away is refused from its next call.')));
@@ -268,7 +268,7 @@ export function showEditDialog(key, data, { refresh } = {}) {
 
 /** 审计…: the key's audit lines, newest first (who · verb · allowed or the refusal's code) — names and ids only. */
 export async function showAuditDialog(key, data) {
-  const { body, close } = createModalShell({ id: 'vault-ak-audit', title: t('Audit of "{name}"', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true });
+  const { body, close } = createModalShell({ id: 'vault-ak-audit', title: t('Audit of "{name}"', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true, kind: 'form' });
   const list = el('div', 'vw-ak-audit-list');
   body.append(list);
   const f = el('div', 'dialog-footer');
@@ -531,7 +531,7 @@ function reachRows(initial, data, { id }) {
 export function showReachDialog(key, g, data, { refresh } = {}) {
   // lane dialog-unsaved-guard: the reach changed and not saved ⇒ ✕ / Esc / the backdrop asks
   const { body, close } = createModalShell({ id: 'vault-ak-reach', title: t('Reach of "{name}" for {subject}', { name: key.name, subject: subjectName(g.subject, data) }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
-    unsaved: { isDirty: () => JSON.stringify(rows.value()) !== base, save: () => doSave() } });
+    unsaved: { isDirty: () => JSON.stringify(rows.value()) !== base, save: () => doSave() }, kind: 'form' });
   body.append(el('div', 'vw-ak-hint', t('Which other conversations that conversation may rename, end or archive with this key. What it opened, what a grant names and itself are always within reach.')));
   const rows = reachRows(g.reach, data, { id: g.id });
   body.append(rows.node);
@@ -564,7 +564,7 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   // lane dialog-unsaved-guard: a pick or the new grants' reach changed and not saved ⇒ ✕ / Esc / the backdrop asks
   let picker = null;
   const { body, close } = createModalShell({ id: 'vault-ak-grant', title: t('Grant "{name}" to', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
-    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() }, onClose: () => { if (picker) picker.close(); } });
+    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() }, onClose: () => { if (picker) picker.close(); }, kind: 'form' });
   const subjects = (data && data.subjects) || { sessions: [], groups: [] };
   const always = key.grants.filter((g) => g.mode === 'always');
   const had = new Map(always.map((g) => [g.subject, g.id]));
@@ -628,7 +628,7 @@ export function showMintDialog({ refresh, data = null } = {}) {
   // lane dialog-unsaved-guard: a name typed or a verb ticked and not minted ⇒ ✕ / Esc / the backdrop asks (Mint / Discard /
   // Keep editing); Discard clears what was typed from the page
   const { body, close } = createModalShell({ id: 'vault-ak-mint', title: t('Mint an automation key'), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
-    unsaved: { isDirty: () => !!name.value.trim() || boxes.some((b) => b.checked), save: () => doMint(), saveLabel: t('Mint'), discard: () => { name.value = ''; for (const b of boxes) b.checked = false; } } });
+    unsaved: { isDirty: () => !!name.value.trim() || boxes.some((b) => b.checked), save: () => doMint(), saveLabel: t('Mint'), discard: () => { name.value = ''; for (const b of boxes) b.checked = false; } }, kind: 'form' });
   const name = el('input', 'vw-ak-name');
   name.type = 'text'; name.maxLength = 60; name.placeholder = t('Name'); name.setAttribute('aria-label', t('Name')); name.spellcheck = false;
   body.append(name, el('div', 'vw-ak-sec', t('What it may do')));

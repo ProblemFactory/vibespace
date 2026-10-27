@@ -38,7 +38,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   const names = nameHelpers(app);
   const sb = (app && app.sidebar) || {};
   const shell = createModalShell({ id: DIALOG_ID, title: adopt ? t('New persistent profile') : t('New profile'), dialogClass: 'bwho-dialog bnew-dialog', bodyClass: 'bwho-body bnew-body', escapeToClose: true,
-    onClose: () => { st.closed = true; try { picker.close(); } catch { /* none */ } try { app.ws?.offGlobal?.(onGlobal); } catch { /* none */ } if (!st.created && !st.handoff) { try { onDismissed?.(); } catch { /* none */ } } } }); // (verify r3: a handoff to the reopened dialog is no dismissal)
+    onClose: () => { st.closed = true; try { picker.close(); } catch { /* none */ } try { app.ws?.offGlobal?.(onGlobal); } catch { /* none */ } if (!st.created && !st.handoff) { try { onDismissed?.(); } catch { /* none */ } } }, kind: 'form' }); // (verify r3: a handoff to the reopened dialog is no dismissal)
   const body = shell.body;
 
   // ── the name ──

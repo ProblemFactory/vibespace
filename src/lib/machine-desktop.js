@@ -91,7 +91,7 @@ function askCredentials(m, types, auth, sign = null) {
     const machine = nameOf(m);
     const wantUser = Array.isArray(types) && types.includes('username');
     const s = sign || {};
-    const { body, close } = createModalShell({ id: 'machine-desktop-signin', title: t('Sign in to {machine}', { machine }), dialogClass: 'machine-desktop-signin', escapeToClose: true, onClose: () => finish(null) });
+    const { body, close } = createModalShell({ id: 'machine-desktop-signin', title: t('Sign in to {machine}', { machine }), dialogClass: 'machine-desktop-signin', escapeToClose: true, onClose: () => finish(null), kind: 'decision' });
     const form = document.createElement('form');
     const words = (kept) => (auth === 'ard'
       ? (kept ? t('{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.', { machine }) : t('{machine} asks for your Mac user name and password. VibeSpace does not keep them.', { machine }))
@@ -794,7 +794,7 @@ function confirmRun(m, line) {
     let done = false;
     const finish = (v) => { if (!done) { done = true; resolve(v); } };
     const machine = nameOf(m);
-    const { body, close } = createModalShell({ id: 'machine-desktop-confirm', title: t('Run on {machine}’s desktop?', { machine }), dialogClass: 'machine-desktop-confirm', escapeToClose: true, onClose: () => finish(false) });
+    const { body, close } = createModalShell({ id: 'machine-desktop-confirm', title: t('Run on {machine}’s desktop?', { machine }), dialogClass: 'machine-desktop-confirm', escapeToClose: true, onClose: () => finish(false), kind: 'decision' });
     const pre = el('pre', null, line); pre.className = 'desktop-install-pre machine-desktop-shown';
     const row = el('div'); row.className = 'desktop-install-actions';
     row.append(btn('file-tool-btn', t('Cancel'), () => close()), btn('btn-create', t('Run'), () => { finish(true); close(); }));
@@ -872,7 +872,7 @@ function installedList(m, { onPick }) {
 export function showMachineDesktopDialog(app, m0, { install = null, recheck = null, closeOpener = null } = {}) {
   let m = m0;
   const machine = nameOf(m);
-  const { body, close: closeDialog } = createModalShell({ id: 'machine-desktop-dialog', title: t('{machine} — its desktop', { machine }), dialogClass: 'machine-desktop-dialog', escapeToClose: true });
+  const { body, close: closeDialog } = createModalShell({ id: 'machine-desktop-dialog', title: t('{machine} — its desktop', { machine }), dialogClass: 'machine-desktop-dialog', escapeToClose: true, kind: 'form' });
   // inc-mv51w0ow-crw3 (owner: "选择打开桌面之后不会自动关闭无关对话框直接展示桌面连接窗口"): a press that opens a window closes
   // this dialog AND the one it was opened from (the Apps dialog, `closeOpener`) — the window is what the person asked to see
   const toWindow = () => { closeDialog(); try { closeOpener?.(); } catch { /* the opener is gone already */ } };

@@ -106,7 +106,7 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
   // lane dialog-unsaved-guard: who / commands / the hub's answer changed and not saved ⇒ ✕ / Esc / the backdrop asks
   let dirtyNow = () => false; let saveNow = async () => true;
   const { body, close, dialog } = createModalShell({ id: 'exit-access-dialog', title: t('Who can use {machine}?', { machine: name || hostId }), dialogClass: 'exit-access-dialog', bodyClass: 'exit-access-body', escapeToClose: true,
-    unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() } });
+    unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });
   body.textContent = t('Loading…');
   let data;
   try { data = await fetchView(hostId); }

@@ -62,7 +62,7 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   // lane dialog-unsaved-guard: a pick changed and not saved ⇒ ✕ / Esc / the backdrop asks (the picker is drawn right below)
   const shell = createModalShell({ id: DIALOG_ID, title: t('Who can use {label}?', { label: title }), dialogClass: 'bwho-dialog', bodyClass: 'bwho-body', escapeToClose: true,
     onClose: () => { closed = true; try { picker.close(); } catch { /* none */ } },
-    unsaved: { isDirty: () => picker.selected().slice().sort().join('\n') !== initial.slice().sort().join('\n') || picker.except().slice().sort().join('\n') !== initialExcept.slice().sort().join('\n'), save: () => doSave() } });
+    unsaved: { isDirty: () => picker.selected().slice().sort().join('\n') !== initial.slice().sort().join('\n') || picker.except().slice().sort().join('\n') !== initialExcept.slice().sort().join('\n'), save: () => doSave() }, kind: 'form' });
   shell.dialog.dataset.profileId = id;
   const body = shell.body;
 

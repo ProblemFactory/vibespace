@@ -315,7 +315,8 @@
    "hex-viewer": "opened by the viewer's own openFile on a binary file — it has no open action of its own",
    "machine-app": "needs a paired machine's live app stream (a desktop host) — test-machine-app-chrome opens it",
    "machine-desktop": "needs a paired machine's live desktop (a VNC host) — test-machine-desktop & co. open it",
-   "stage-placeholder": "Stage's own slot stand-in — never opened by itself (stage-manager makes one per parked window)"
+   "stage-placeholder": "Stage's own slot stand-in — never opened by itself (stage-manager makes one per parked window)",
+   "form": "a createModalShell FORM's small window (lane dialog-yield) — this client's own, opened by its dialog's caller, never from a spec"
   },
   "spec": {
    "openArtifacts": {

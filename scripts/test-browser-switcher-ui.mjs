@@ -325,10 +325,12 @@ else await (async () => {
           if (!fontProof && lang === 'en') {
             await send('DOM.enable'); await send('CSS.enable');
             const doc = await send('DOM.getDocument', { depth: 0 });
-            const n = await send('DOM.querySelector', { nodeId: doc.result.root.nodeId, selector: '#browser-switcher-dialog .dialog-header h3' });
+            // lane dialog-yield: on the desktop the dialog is a FORM window — its title is drawn in the window's title bar (the
+            // dialog's own head is hidden); the phone's sheet draws its h3. The first in document order is the one drawn.
+            const n = await send('DOM.querySelector', { nodeId: doc.result.root.nodeId, selector: '.window[data-form="browser-switcher-dialog"] .window-title, #browser-switcher-dialog .dialog-header h3' });
             const f = n.result && n.result.nodeId ? await send('CSS.getPlatformFontsForNode', { nodeId: n.result.nodeId }) : null;
             fontProof = ((f && f.result && f.result.fonts) || []).map((x) => x.familyName).join(' + ');
-            ok(/DejaVu Sans/.test(fontProof), `the dialog is drawn in DejaVu Sans (the platform font of its h3: ${fontProof})`);
+            ok(/DejaVu Sans/.test(fontProof), `the dialog is drawn in DejaVu Sans (the platform font of its title: ${fontProof})`);
           }
           const title = await q('#browser-switcher-dialog .dialog-header h3');
           const want = tr(lang, 'Browser for “{label}”', P);

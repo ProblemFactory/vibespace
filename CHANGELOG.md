@@ -2,6 +2,15 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.361 — 2026-10-28
+
+### Changed
+- Dialogs you fill in no longer cover the whole screen: installing a plugin or entering a credential opens a small window, and the chat still takes your typing.
+- Click another window and the form steps behind it; the taskbar brings it back with what you typed. Confirmations that need your decision stay as they were.
+
+### Fixed
+- In Install plugin…, Cancel and Install now match every other dialog's buttons, Install stands out, and the Git-only rows show only for a Git source.
+
 ## 2.369.360 — 2026-10-27
 
 ### Added

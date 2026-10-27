@@ -24,7 +24,7 @@ export async function openBuildDialog(app, profileId, { label = '', onDone = nul
   const name = String(view.label || label || id);
   const local = !view.host;
   const st = { busy: false, closed: false, picked: null, confirm: false, picker: null };
-  const shell = createModalShell({ id: DIALOG_ID, title: t('Chrome build for {label}', { label: name }), dialogClass: 'bwho-dialog bbuild-dialog', bodyClass: 'bwho-body bbuild-body', escapeToClose: true, onClose: () => { st.closed = true; if (st.picker) st.picker.stop(); } });
+  const shell = createModalShell({ id: DIALOG_ID, title: t('Chrome build for {label}', { label: name }), dialogClass: 'bwho-dialog bbuild-dialog', bodyClass: 'bwho-body bbuild-body', escapeToClose: true, onClose: () => { st.closed = true; if (st.picker) st.picker.stop(); }, kind: 'form' });
   shell.dialog.dataset.profileId = id;
   const body = shell.body;
   const now = cardBuildLine({ buildChoice: view.buildChoice, choice: view.choice, running: view.running, missing: view.missing, live: view.live }, t);

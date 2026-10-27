@@ -351,7 +351,7 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
  *  it; lane stream-window-fixes) says so, with 「停止」. `onOpen()` = the opener (the machine's dialog) steps aside. */
 export async function openWindowPicker(app, m, { fp16 = false, openDesktop = null, onOpen = null } = {}) {
   const machine = nameOf(m);
-  const shell = createModalShell({ title: t('Stream one window of {machine}', { machine }), dialogClass: 'machine-window-picker', escapeToClose: true });
+  const shell = createModalShell({ title: t('Stream one window of {machine}', { machine }), dialogClass: 'machine-window-picker', escapeToClose: true, kind: 'form' });
   const note = el('p', null, t('Listing the windows open on {machine}…', { machine })); note.className = 'machine-apps-note';
   const list = el('div'); list.className = 'machine-apps-list'; list.hidden = true;
   shell.body.append(note, list);

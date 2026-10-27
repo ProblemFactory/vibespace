@@ -278,7 +278,8 @@ for (const lang of ['en', 'ja']) {
   const p = await newPage({ lang });
   await openChat(p);
   await p.evaljs(`(async () => { for (let i = 0; i < 60; i++) { const row = document.querySelector('.chat-channel-touches .chat-channel-touch'); if (row) { row.click(); return 1; } await new Promise((r) => setTimeout(r, 250)); } return 0; })()`);
-  const tx = await until(() => p.evaljs(`(() => { const d = document.getElementById('chan-api-dialog'); return d && d.querySelector('.chan-api-shape') ? d.innerText : null; })()`), 15000);
+  // lane dialog-yield: API access… is a FORM window on the desktop — its title is drawn in the window's title bar (the dialog's head is hidden)
+  const tx = await until(() => p.evaljs(`(() => { const d = document.getElementById('chan-api-dialog'); if (!d || !d.querySelector('.chan-api-shape')) return null; const w = d.closest('.window'); return (w ? w.querySelector('.window-title').textContent + '\\n' : '') + d.innerText; })()`), 15000);
   const want = lang === 'en' ? /API access[\s\S]*Always allowed[\s\S]*Revoke/ : /常に許可|取り消/;
   ok(tx && want.test(tx) && (lang === 'en' || !/Always allowed|Waiting for you/.test(tx)), `${lang}: the dialog speaks ${lang}`, tx && tx.slice(0, 400));
   p.close();

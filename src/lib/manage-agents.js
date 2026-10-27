@@ -619,7 +619,7 @@ export function installManageAgents(App, ctx = {}) {
   // its raw screen; `onClose` tells the opener (the tour re-checks its cards).
   _openSignInCard({ rawFirst = false, onClose = null } = {}) {
     let card = null;
-    const { body, close } = createModalShell({ id: 'signin-dialog', title: t('Sign in with Claude'), minWidth: rawFirst ? 'min(640px, 94vw)' : 'min(460px, 92vw)', escapeToClose: true, onClose: () => { try { card?.destroy(); } catch { } try { onClose?.(); } catch { } } });
+    const { body, close } = createModalShell({ id: 'signin-dialog', title: t('Sign in with Claude'), minWidth: rawFirst ? 'min(640px, 94vw)' : 'min(460px, 92vw)', escapeToClose: true, onClose: () => { try { card?.destroy(); } catch { } try { onClose?.(); } catch { } }, kind: 'form' });
     const host = document.createElement('div');
     body.appendChild(host);
     card = new SignInCard({ ws: this.ws, hasWaiting: () => false, rawFirst, onConnected: () => { try { this.refresh?.(); } catch { } setTimeout(() => { try { close(); } catch { } }, 1500); } });
@@ -846,7 +846,7 @@ export function installManageAgents(App, ctx = {}) {
     // (a minted token waits on the hub — a reopened dialog shows its phase again — so the mint asks nothing here)
     const pasted = () => body.querySelector('#oat-paste');
     const { overlay, body, close: shut, dismiss } = createModalShell({ id: 'oat-dialog', title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); try { rawScr?.destroy(); } catch { } rawScr = null; },
-      unsaved: { isDirty: () => !!(pasted() && pasted().value.trim()), save: () => savePasted(), discard: () => { if (pasted()) pasted().value = ''; } } });
+      unsaved: { isDirty: () => !!(pasted() && pasted().value.trim()), save: () => savePasted(), discard: () => { if (pasted()) pasted().value = ''; } }, kind: 'form' });
     const live = () => mint && !['saved', 'failed', 'cancelled'].includes(mint.phase);
     // 改绑 (lane oat-identity-postcheck): the rows the token may move to — Claude subscriptions holding no live token
     const rebindTo = (oatForeign(a) || oatIdentityAsk(a) || oatUnverified(a)) ? (this._accounts?.accounts || []).filter((x) => x && x.id !== id && x.type === 'subscription' && !x.pooled && (x.backend || 'claude') === (a.backend || 'claude') && !(x.oat && x.oatDaysLeft > 0)) : [];
@@ -1295,7 +1295,7 @@ export function installManageAgents(App, ctx = {}) {
     const fresh = (list?.accounts || []).find((x) => x.id === poolId) || a || {};
     // lane dialog-unsaved-guard: members / placement / order changed and not saved ⇒ ✕ / Esc / the backdrop asks
     const { body, close } = createModalShell({ id: 'pool-members-dialog', title: t('Pool members — {name}', { name: a?.name || '' }), minWidth: '460px', escapeToClose: true,
-      unsaved: { isDirty: () => JSON.stringify(st) !== st0, save: () => save() } });
+      unsaved: { isDirty: () => JSON.stringify(st) !== st0, save: () => save() }, kind: 'form' });
     const explicit = Array.isArray(fresh.members) && fresh.members.length ? fresh.members : null;
     // the dialog's own state; nothing is saved until Save (the one act — gather — is immediate)
     const st = {
@@ -2062,7 +2062,7 @@ export function installManageAgents(App, ctx = {}) {
     const shell = container ? { body: container, close: () => {} } : createModalShell({
       id: 'agents-dialog-overlay', title: t('Agents'), dialogClass: 'agents-dialog',
       bodyClass: 'agents-dialog-body', escapeToClose: true, onClose,
-      unsaved: { isDirty: () => adv.dirty(), save: () => adv.save() },
+      unsaved: { isDirty: () => adv.dirty(), save: () => adv.save() }, kind: 'form',
     });
     // rail panel: carry the SAME body class so one stylesheet (incl. the
     // container queries) serves modal and panel — the panel's narrow-width

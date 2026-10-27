@@ -48,6 +48,7 @@ function unscrollFrame() {
 }
 
 function enterPhone(app) {
+  app.formsToSheets?.(); // lane dialog-yield: FIRST — an open form window becomes its sheet before any phone rule sees a window (a focused one would fold the sidebar for good)
   if (app._customize?.active) { try { app._customize.exit(); } catch { } }
   app.sidebar?.setPhoneMode?.(true);
   if (!app._mobileNav) {

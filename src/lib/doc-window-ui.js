@@ -702,7 +702,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   pane.addEventListener('mouseleave', () => linkBar.hover(null), { signal });
   /** The Link dialog (the house modal): the address + the link's text, prefilled when editing; Enter applies, Esc / Cancel ⇒ null. */
   const linkDialog = (title, href, text) => new Promise((resolve) => {
-    const sh = createModalShell({ title, dialogClass: 'doc-link-dialog', onClose: () => resolve(null) });
+    const sh = createModalShell({ title, dialogClass: 'doc-link-dialog', onClose: () => resolve(null), kind: 'decision' }); // form-later: the doc editor applies the answer at the selection it captured when it asked — an edit in the document meanwhile would move it
     const field = (label, value, placeholder) => { const w = mk('label', null, label), i = mk('input'); i.type = 'text'; i.value = value || ''; i.placeholder = placeholder; w.appendChild(i); sh.body.appendChild(w); return i; };
     const hrefIn = field(t('Link address'), href, 'https://'), textIn = field(t('Link text'), text, '');
     hrefIn.className = 'doc-link-href'; textIn.className = 'doc-link-text';
@@ -960,7 +960,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     const acts = mk('div', 'doc-note-acts'); const cancel = mk('button', null, t('Cancel')); const add = mk('button', 'doc-note-add', t('Add'));
     acts.append(cancel, add); box.append(qq, voiceField(ta, attachDictation(ta)), acts);
     let close;
-    if (isPhone()) { const sh = createModalShell({ title: t('Add comment'), escapeToClose: true, dialogClass: 'doc-note-sheet' }); sh.body.appendChild(box); close = () => sh.close(); }
+    if (isPhone()) { const sh = createModalShell({ title: t('Add comment'), escapeToClose: true, dialogClass: 'doc-note-sheet', kind: 'form' }); sh.body.appendChild(box); close = () => sh.close(); }
     else { const p = createPopover(pane, 'doc-note-pop', { position: 'cursor', x: c.left, y: c.bottom + 4 }); p.appendChild(box); close = () => p.remove(); }
     cancel.addEventListener('click', () => close());
     add.addEventListener('click', () => {

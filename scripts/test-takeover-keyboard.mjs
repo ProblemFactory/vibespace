@@ -1439,7 +1439,7 @@ ok(miss.length === 0 && zh.includes('"键盘在对话框 — 点画面继续操�
   const U = src('src/lib/utils.js'), AP = src('src/lib/app.js');
   const shell = U.slice(U.indexOf('export function createModalShell('), U.indexOf('\n}\n', U.indexOf('export function createModalShell(')));
   ok(/export const MODAL_OPEN_EVENT = 'vs-modal-open';/.test(U) && /export function announceModal\(overlay\) \{\n  try \{ document\.dispatchEvent\(new CustomEvent\(MODAL_OPEN_EVENT, \{ detail: \{ overlay \} \}\)\); \}/.test(U)
-    && /\n  document\.body\.appendChild\(overlay\);\n  announceModal\(overlay\);/.test(shell),
+    && /\n  \(yieldWin \? yieldWin\.content : document\.body\)\.appendChild\(overlay\);\n  announceModal\(overlay\);/.test(shell), // lane dialog-yield: a form's root goes into its window, a decision's onto <body> — announced alike
     'utils.js: createModalShell ANNOUNCES its overlay right after the append (the opening act\'s own task, before the caller focuses anything in it); the event carries the overlay only — no evidence of its own, so a forged one hands nothing the keys');
   const sd = body(AP, '  _showDialog(id) {');
   ok(/document\.getElementById\(id\)\.classList\.remove\('hidden'\);\n    announceModal\(overlay\);/.test(sd) && /hideDialogs\(\) \{ document\.getElementById\('dialog-overlay'\)\.classList\.add\('hidden'\);/.test(AP) && /import \{[^}]*\bannounceModal \} from '\.\/utils\.js';/.test(AP),
@@ -1449,10 +1449,12 @@ ok(miss.length === 0 && zh.includes('"键盘在对话框 — 点画面继续操�
   const MAKER = /className\s*=\s*['"`][^'"`]*\bdialog-overlay\b|classList\.add\(\s*['"]dialog-overlay['"]|class=\\?["'][^"']*\bdialog-overlay\b/;
   const makersOf = (files) => files.filter(([, t]) => MAKER.test(t)).map(([f]) => f);
   const libFiles = walkLib('src/lib').filter((f) => f.endsWith('.js')).map((f) => [f, src(f)]);
-  const makers = makersOf(libFiles);
-  ok(JSON.stringify(makers) === '["src/lib/utils.js"]' && /<div id="dialog-overlay" class="dialog-overlay hidden">/.test(src('public/index.html')),
+  const makers = makersOf(libFiles).sort();
+  // lane dialog-yield: form-window.js turns a FORM's own root (built and announced by createModalShell) into its sheet when the
+  // page crosses into the phone tier — the same element, announced at its birth; it builds no overlay of its own
+  ok(JSON.stringify(makers) === '["src/lib/form-window.js","src/lib/utils.js"]' && /root\.className = 'dialog-overlay'; root\.style\.zIndex = '99998';/.test(src('src/lib/form-window.js')) && (src('src/lib/form-window.js').match(/dialog-overlay'/g) || []).length === 1 && /<div id="dialog-overlay" class="dialog-overlay hidden">/.test(src('public/index.html')),
     'every app modal is ANNOUNCED: the one `.dialog-overlay` the client builds is createModalShell\'s (src/lib/utils.js) + index.html\'s static #dialog-overlay (app._showDialog) — a hand-rolled overlay would never be judged', makers.join(' | '));
-  ok(JSON.stringify(makersOf([...libFiles, ['src/lib/x.js', "const ov = document.createElement('div'); ov.className = 'dialog-overlay my';"]])) === '["src/lib/utils.js","src/lib/x.js"]', 'NEGATIVE CONTROL (a hand-rolled overlay added): the census names its maker');
+  ok(JSON.stringify(makersOf([...libFiles, ['src/lib/x.js', "const ov = document.createElement('div'); ov.className = 'dialog-overlay my';"]]).sort()) === '["src/lib/form-window.js","src/lib/utils.js","src/lib/x.js"]', 'NEGATIVE CONTROL (a hand-rolled overlay added): the census names its maker');
   const mo = LW.slice(LW.indexOf('  document.addEventListener(MODAL_OPEN_EVENT, (e) => {'), LW.indexOf('  }, { signal: winInfo._listenerCtl?.signal });', LW.indexOf('  document.addEventListener(MODAL_OPEN_EVENT')));
   ok(/import \{ MODAL_OPEN_EVENT \} from '\.\/utils\.js';/.test(LW) && /if \(!st\.claimed \|\| st\.closed\) return;\n    settleDialogs\(\);/.test(mo) && /const v = ky\.onDialogOpen\(ov, \{ active: document\.activeElement \}\);\n    if \(v === 'take'\) \{\n      st\.dialogTakes\+\+;\n      watchDialogs\(\);\n      syncKeyboard\(\);/.test(mo)
     && /if \(a && a !== document\.body && typeof ov\.contains === 'function' && ov\.contains\(a\)\) return;\n        focusDialog\(ov\);\n      \}, 0\);/.test(mo) && /if \(v === 'reclaim' && iOwn\(\) && ky\.dialogCue\(v\)\) \{ st\.dialogCues\+\+; showToast\(t\('Typing still goes to the browser — click the dialog’s buttons to answer it'\), \{ duration: 3500 \}\); \}/.test(mo),

@@ -105,7 +105,7 @@ export function openPermissionRulesDialog({ backend, accountId = '', accountName
   const { body } = createModalShell({
     id: 'perm-rules-dialog',
     title: accountName ? t('Permission rules — {name}', { name: accountName }) : t('Permission rules — {backend}', { backend: label }),
-    minWidth: '520px', escapeToClose: true,
+    minWidth: '520px', escapeToClose: true, kind: 'form',
   });
   const note = document.createElement('div');
   note.className = 'agents-note';
@@ -127,7 +127,7 @@ export async function runLocalOracle({ id, label, accountId = '', accountName = 
   const { body } = createModalShell({
     id: 'local-oracle-dialog',
     title: accountName ? `${label} — ${accountName}` : label,
-    minWidth: '520px', escapeToClose: true,
+    minWidth: '520px', escapeToClose: true, kind: 'form',
   });
   const note = document.createElement('div');
   note.className = 'agents-note';

@@ -142,7 +142,9 @@ try {
   await A.click(`${POP} [data-id="agent-feedback"]`);
   const opened = await until(() => A.js(`document.querySelectorAll('#feedback-sheet .fb-row').length === 2 && !document.querySelector('${POP}')`), 5000);
   ok(opened, 'a click closes the popover and opens the sheet with the 2 OPEN reports');
-  ok(await A.js(`document.querySelector('#feedback-sheet').dataset.popover === '1' && !!document.querySelector('#feedback-sheet .dialog.fb-dialog .dialog-header h3') && document.querySelector('#feedback-sheet .dialog-header h3').textContent === 'Agent feedback'`), 'a createModalShell sheet titled "Agent feedback", marked data-popover');
+  // lane dialog-yield: on the desktop the sheet is a createModalShell FORM — a small window titled «Agent feedback» (no backdrop,
+  // no data-popover: a press elsewhere leaves it, an Escape from inside it closes it — below); the phone keeps the data-popover sheet
+  ok(await A.js(`(() => { const s = document.querySelector('#feedback-sheet'), w = s && s.closest('.window.window-form'); return !!w && s.classList.contains('dialog-form') && !s.dataset.popover && !!s.querySelector('.dialog.fb-dialog .dialog-header h3') && s.querySelector('.dialog-header h3').textContent === 'Agent feedback' && w.querySelector('.window-title').textContent === 'Agent feedback'; })()`), 'a createModalShell FORM titled "Agent feedback" (a window of its own, no backdrop)');
   let rows = await A.js(ROW_TEXTS);
   ok(rows.map((r) => r.id).join(' ') === 'fb-0000000003 fb-0000000001', `newest REPORT first: the plant (1 min ago), then alpha's (last repeated 10 min ago) — ${rows.map((r) => r.id).join(' ')}`);
   const alpha = rows.find((r) => r.id === 'fb-0000000001');

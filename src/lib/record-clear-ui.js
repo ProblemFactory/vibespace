@@ -58,7 +58,7 @@ export function confirmClear(rows) {
   return new Promise((resolve) => {
     const { overlay, dialog, body, closeBtn } = createModalShell({
       id: 'record-clear-dialog', title: n === 1 ? t('Clear content?') : t('Clear the content of {n} records?', { n }),
-      dialogClass: 'rc-dialog', closeOnBackdrop: false, minWidth: 'min(460px, 92vw)',
+      dialogClass: 'rc-dialog', closeOnBackdrop: false, minWidth: 'min(460px, 92vw)', kind: 'decision',
     });
     const ul = document.createElement('div');
     ul.className = 'rc-list';

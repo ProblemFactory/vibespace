@@ -514,7 +514,7 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
   let scope = convId ? { convId: String(convId), title: String(convTitle || convId) } : null;
   const titleText = () => (scope ? t('Search: {q} — {conversation}', { q: initial, conversation: scope.title }) : scope === null && (convId || group) ? t('Search: {q}', { q: initial })
     : accounts.length === 1 ? t('Search messages — {label}', { label: accounts[0].label || accounts[0].id }) : t('Search messages…'));
-  const { dialog, body, close } = createModalShell({ id: 'chan-search-dialog', title: titleText(), dialogClass: 'chan-dialog chan-search', escapeToClose: true });
+  const { dialog, body, close } = createModalShell({ id: 'chan-search-dialog', title: titleText(), dialogClass: 'chan-dialog chan-search', escapeToClose: true, kind: 'form' });
   const row = document.createElement('div');
   row.className = 'chan-search-row';
   const input = document.createElement('input');
@@ -566,7 +566,7 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
     return { sec, h, note, rows };
   };
   const openAround = async (acc, hit) => {
-    const { body: sb, close: sclose } = createModalShell({ id: 'chan-around-sheet', title: t('Around this message'), dialogClass: 'chan-dialog chan-around', escapeToClose: true });
+    const { body: sb, close: sclose } = createModalShell({ id: 'chan-around-sheet', title: t('Around this message'), dialogClass: 'chan-dialog chan-around', escapeToClose: true, kind: 'form' });
     const note = chanLine('chan-flow-status', t("This is {vendor}'s history — VibeSpace did not save it", { vendor: vendorOf(acc) }));
     // lane around-sheet-fix (the owner's 2026-10-03 screenshot: names cut at the left, the avatar ON the name and the first
     // line, a sideways scrollbar): the rows sit in THE WINDOW'S LIST CLASS — `.chanmsg` lays out against its gutter
@@ -767,7 +767,7 @@ export async function openSearchResults(app, { adapterIds = [], q = '', convId =
 function showOptionsDialog(app, a) {
   // lane dialog-unsaved-guard: an option changed and not saved ⇒ ✕ / Esc / the backdrop asks
   const { body, close } = createModalShell({ id: 'chan-options-dialog', title: t('Options — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-options', escapeToClose: true,
-    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() } });
+    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() }, kind: 'form' });
   const fields = [];
   for (const o of a.optionsSchema || []) {
     const wrap = document.createElement('div');
@@ -842,7 +842,7 @@ function showPushDialog(app, a) {
   const p = a.push || {};
   // lane dialog-unsaved-guard: the switch or the claim changed and not saved ⇒ ✕ / Esc / the backdrop asks
   const { body, close } = createModalShell({ id: 'chan-push-dialog', title: t('Push lane — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-options', escapeToClose: true,
-    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() } });
+    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() }, kind: 'form' });
   // WHAT PUSH IS, first (the owner: "'推送'按钮是干啥的？我没看明白，是gmail特有的吗") — both vendors' requirements, one line
   body.appendChild(chanLine('chan-flow-intro chan-push-intro', pushWhat(a)));
   body.appendChild(chanLine('chan-flow-intro', chanCaps.pushLaneText(p, a.lane, { t, now: Date.now() })));
@@ -2433,7 +2433,7 @@ function openAttentionDoor(app, anchor) {
   let close = () => { };
   const more = btn(t('Open in Settings'), () => { close(); ui.open({ search: t('Needs attention · how it is decided') }); }, 'chan-attn-more');
   if (app.isMobile) {
-    const shell = createModalShell({ id: 'chan-attn-sheet', title: t('How "needs attention" is decided'), dialogClass: 'chan-dialog chan-attn-sheet', escapeToClose: true });
+    const shell = createModalShell({ id: 'chan-attn-sheet', title: t('How "needs attention" is decided'), dialogClass: 'chan-dialog chan-attn-sheet', escapeToClose: true, kind: 'form' });
     shell.body.append(block, more);
     close = shell.close;
   } else {

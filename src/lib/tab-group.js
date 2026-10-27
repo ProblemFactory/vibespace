@@ -457,6 +457,7 @@ const tabGroupMethods = {
    *  setting's own result (v2 verify r1 ③) — while nothing else has moved. */
   bindSplit(anchorWin, guestWin, { side = 'right', announce = false, focus = 'guest', freeRect = null, unsplitAction = false, unsplitOrder = null, quiet = false } = {}) {
     if (!anchorWin || !guestWin || anchorWin.id === guestWin.id) return null;
+    if (anchorWin.type === 'form' || guestWin.type === 'form') return null; // lane dialog-yield: a form is never a pane
     let snap = null;
     if (announce) {
       // the element that SHOWS a window right now: a chain guest is drawn by its host
@@ -692,6 +693,7 @@ const tabGroupMethods = {
    *  (_afterUserMerge) runs ONCE with the target chain's layout from BEFORE the drop (the undo of a drop onto a
    *  chain that was already split puts that layout back — v2 verify r1 ④). */
   _mergeDrop(targetWin, win, { x, y, from = null } = {}) {
+    if (targetWin?.type === 'form' || win?.type === 'form') { showToast(t('A form stays a window of its own')); return; } // lane dialog-yield: a form is its dialog's size, never a tab
     // MULTIVIEW D3: the drop between two LIVE VIEWS OF THE SAME SESSION folds the
     // dragged one back into the other (PURE foldBackTarget over the target and,
     // when it heads a group, its members) — never a chain of two views of one session

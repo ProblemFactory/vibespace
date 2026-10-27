@@ -91,7 +91,7 @@ export function createHandover({ app, hostId, machine, strip, before = null, pan
     const s = streamOf();
     if (!s || !s.key) { showToast(giveRefusalText({ code: 'stream_not_live' }, machine)); return; }
     let chosen = [];
-    const { body, close } = createModalShell({ id: 'machine-desktop-handover', title: t('Hand {machine}’s desktop to an agent', { machine }), dialogClass: 'machine-desktop-handover', escapeToClose: true });
+    const { body, close } = createModalShell({ id: 'machine-desktop-handover', title: t('Hand {machine}’s desktop to an agent', { machine }), dialogClass: 'machine-desktop-handover', escapeToClose: true, kind: 'form' });
     const note = mk('p', 'machine-desktop-handover-note', t('It sees this display and uses its keyboard and pointer through this window’s stream. Any key, click or scroll of yours here pauses it; Take back ends it — closing this window ends it too.'));
     const why = mk('p', 'machine-desktop-handover-why'); why.hidden = true;
     const ok = button('btn-create', t('Hand over'), async () => {

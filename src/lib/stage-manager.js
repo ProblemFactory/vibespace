@@ -951,6 +951,7 @@ export class StageManager {
     // _ensurePlaceholder sets the _isStagePlaceholder flag (smoke-caught bug:
     // the placeholder got tagged transient and swept on materialization).
     if (win.type === 'stage-placeholder' || win._isStagePlaceholder || win.type === 'chat' || win.type === 'terminal') return;
+    if (win.type === 'form') return; // lane dialog-yield: a form is this client's own — never bound into a stage record
     if (this._heroWinId) {
       this._boundAux.set(win.id, this._heroKey || '__pending__');
       this._scheduleRecord(); // live-mirror the new aux to other staged clients
