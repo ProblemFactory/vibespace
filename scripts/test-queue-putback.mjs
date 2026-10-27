@@ -431,8 +431,8 @@ console.log('§5 wiring pins');
   ok(/const theirs = \(q\) => !q\.opts\?\.peer && !q\.opts\?\.nudge && !q\.opts\?\.retry && !q\.opts\?\.silentQueue;/.test(agy) && /activePrompt && !activePrompt\.dispatched && typeof activePrompt\.text === 'string' && theirs\(activePrompt\)/.test(agy) && /dispatched: false, opts, text \}/.test(agy), 'agy-wrapper: the same filter, the undispatched prompt first (the claim carries its text)');
   ok(/if \(known \? known\.kind !== 'peer' : !\/\^\(peer\|notif\)-\\d\+-\\d\+\$\/\.test\(cid\)\) \{\n\s+putBack\.push\(/.test(cx), 'codex-chat-wrapper: only deleted:true rows of the person — an INHERITED peer-/notif- row is judged by the wrapper\'s own cid convention');
   const cw = read('data/bin/chat-wrapper.js');
-  ok(order(cw, /for \(const q of dropped\) record\('queue_op_result', \{ op: 'remove', id: q\.id, ok: true, msg_id: q\.msgId, reason: 'stopped' \}\);/, /if \(putBack\.length \|\| kept\) record\('queue_dropped', \{ \.\.\.droppedRecordFor\(/, /\n  publishQueue\(\);\n  log\(`interrupt: dropped/)
-    && /if \(parsed\.type === 'control_request' && parsed\.request && parsed\.request\.subtype === 'interrupt'\) dropHeldForStop\(\);/.test(cw), 'chat-wrapper (2.369.354): per-item stopped results → ONE queue_dropped (since 2.369.361 it may also count the frames handed to the stopped turn — `kept`, lane claude-steer-inject) → the emptied republish, all BEFORE the interrupt line goes on to the CLI');
+  ok(order(cw, /for \(const q of dropped\) record\('queue_op_result', \{ op: 'remove', id: q\.id, ok: true, msg_id: q\.msgId, reason: 'stopped' \}\);/, /if \(putBack\.length \|\| keptIds\.length \|\| landedIds\.length\) \{\n\s+record\('queue_dropped', \{\n\s+\.\.\.droppedRecordFor\(/, /\n  if \(dropped\.length\) publishQueue\(\);\n  log\(`interrupt: dropped/)
+    && /if \(parsed\.type === 'control_request' && parsed\.request && parsed\.request\.subtype === 'interrupt'\) dropHeldForStop\(\);/.test(cw), 'chat-wrapper (2.369.354): per-item stopped results → ONE queue_dropped (since 2.369.361 it also says what became of each frame handed to the stopped turn — `keptIds` / `landedIds`, lane claude-steer-inject r2) → the emptied republish, all BEFORE the interrupt line goes on to the CLI');
   ok(/const putBack = dropped\.filter\(\(q\) => !q\.origin\);/.test(cw), 'chat-wrapper: only the person\'s rows come back — a frame VibeSpace typed (webui_origin: auto-resume / dispatch) is dropped, never put into the composer');
   ok(!/'queue-cleared'/.test(acp) && !/send \$\{userDropped/.test(acp), 'acp-wrapper: the «send them again» queue-cleared notice is retired (the toast is the ONE notice on every harness)');
   const ws = read('src/ws-handler.js');
@@ -501,7 +501,7 @@ console.log('§6 claude, live — the REAL chat-wrapper over a stand-in CLI, its
   // after the interrupt, exactly what the 2.1.308 measurement saw. A copy of the wrapper with its hold switched off.
   const ctlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-putback-claude-ctl-'));
   const cwSrc = read('data/bin/chat-wrapper.js');
-  const ctlSrc = cwSrc.replace("if (!(turnBusy || cliOwesTurn) || !opensTurn(o)) { forwardUser(line, o, buffered); return; }", "{ forwardUser(line, o, buffered); return; }");
+  const ctlSrc = cwSrc.replace("if (!(turnBusy || cliOwesTurn || stopping) || !opensTurn(o)) { forwardUser(line, o, buffered); return; }", "{ forwardUser(line, o, buffered); return; }");
   fs.mkdirSync(path.join(ctlDir, 'data', 'bin'), { recursive: true });
   fs.symlinkSync(path.join(REPO, 'src'), path.join(ctlDir, 'src'));
   fs.writeFileSync(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'), ctlSrc);

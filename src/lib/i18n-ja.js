@@ -3306,6 +3306,7 @@ export default {
   "Handed to the running turn — the agent reads it at its next tool call": "実行中のターンに渡しました · 次のツール呼び出しで届きます",
   "Stop came before the agent read it — it stays in the conversation, and the agent reads it with your next message": "エージェントが読む前に停止しました — 会話には残り、次のメッセージと一緒に読まれます",
   "{k} message(s) you sent into the turn stay with it": "ターンに送った {k} 件のメッセージはそのターンに残ります",
+  "{k} message(s) you sent into the turn had already reached the agent": "ターンに送った {k} 件のメッセージはすでにエージェントに届いていました",
   "Enter hands it to the running turn — the agent reads it at its next tool call": "Enter で実行中のターンに渡す — エージェントは次のツール呼び出しで読みます",
   "Alt+Enter queues it until the turn ends — editable until then": "Alt+Enter でターン終了までキュー — それまでは編集できます",
   "Enter queues it — it runs after this turn": "Enter でキュー —— このターンの後に実行",

@@ -696,8 +696,10 @@ export class ChatInput {
    *  predicate must not flicker per keystroke, and an empty composer is
    *  handled by `steerNow()` no-opping exactly like `_send()` does. */
   get steerChordAllowed() { return !!(this._isStreaming && this._sendModes().allowSteerChord); }
-  /** …and the second key where it HOLDS (lane claude-steer-inject) — the same capability-only answer. */
-  get holdChordAllowed() { return !!(this._isStreaming && this._sendModes().allowHoldChord); }
+  /** …and the second key where it HOLDS (lane claude-steer-inject) — the CAPABILITY alone, never this client's streaming
+   *  flag (acceptance r2: a second tab whose flag lagged turned the person's HOLD into a stamped Enter — a hand-over).
+   *  An unstamped frame with no turn running is a plain send, so the hold door is always safe to open where it exists. */
+  get holdChordAllowed() { return !!this._sendModes().allowHoldChord; }
 
   /** THE HOLD DOOR'S ACTION: the ordinary send WITHOUT the hand-over stamp — the wrapper keeps a frame that arrives
    *  mid-turn (the .354 queue: a row on the strip, editable, given back by Stop). @returns {boolean} whether it went out */
@@ -730,7 +732,8 @@ export class ChatInput {
     const modes = this._sendModes();
     const live = !!this._isStreaming;
     if (this._steerBtn) this._steerBtn.classList.toggle('hidden', !(live && modes.allowSteerChord));
-    if (this._holdBtn) this._holdBtn.classList.toggle('hidden', !(live && modes.allowHoldChord));
+    // the phone's clock button is the hold door's face: the capability alone, like the chord (acceptance r2)
+    if (this._holdBtn) this._holdBtn.classList.toggle('hidden', !modes.allowHoldChord);
     if (!this._sendHint) return;
     const show = live && modes.showHint;
     this._sendHint.classList.toggle('hidden', !show);
@@ -2034,7 +2037,8 @@ export class ChatInput {
         ? `<button type="button" class="chat-queue-all" data-queue-op="run-all" title="${escHtml(t('Run the whole queue now, without waiting for the current turn'))}">${UI_ICONS.playAll}<span>${escHtml(t('Run all now'))}</span></button>`
         : ''
     }${
-      has('steer-all') && items.length > 1
+      // a row the wrapper marks `steerable: false` (claude: a command, a frame VibeSpace typed) has no ⚡ and joins no «all»
+      has('steer-all') && items.filter((it) => it.steerable !== false).length > 1
         ? `<button type="button" class="chat-queue-all" data-queue-op="steer-all" title="${escHtml(t('Inject every queued message into the running turn, in order'))}">${UI_ICONS.bolt}<span>${escHtml(t('Steer all'))}</span></button>`
         : ''
     }</div>`;
@@ -2065,7 +2069,7 @@ export class ChatInput {
           : btn('edit', it.id, UI_ICONS.pencil, t('Edit this queued message')))
         : '';
       const runNow = has('run-now') ? btn('run-now', it.id, UI_ICONS.play, t('Run this one now')) : '';
-      const steer = has('steer') ? btn('steer', it.id, UI_ICONS.bolt, t('Steer now — the agent sees it at its next reply')) : '';
+      const steer = has('steer') && it.steerable !== false ? btn('steer', it.id, UI_ICONS.bolt, t('Steer now — the agent sees it at its next reply')) : '';
       const remove = has('remove')
         ? (notif
           ? btn('remove', it.id, UI_ICONS.close, t('Remove — it is delivered with the next prompt instead, without a billed turn'), 'chat-queue-btn-remove chat-queue-btn-suggest')

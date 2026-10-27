@@ -183,6 +183,8 @@ function peerDisplayName(origin, text) {
 // (since lane S3) our notice head. Anywhere else it is somebody QUOTING it (a
 // group wake carrying a member's words), which must never name the record.
 const escRe = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** A user record's words, its text blocks joined — the key a wrapper copy and the CLI's own record of a frame share. */
+const textOfBlocks = (blocks) => (Array.isArray(blocks) ? blocks : []).filter((b) => b && b.type === 'text').map((b) => b.text || '').join('');
 const NOTICE_AT_START_RE = new RegExp('^\\s*(?:Another Claude session sent a message:\\s*)?' + escRe(VIBESPACE_NOTICE_HEAD));
 const BW_AT_START_RE = new RegExp('^\\s*(?:Another Claude session sent a message:\\s*)?(?:' + escRe(VIBESPACE_NOTICE_HEAD) + '\\s*)?\\[VibeSpace Background Work\\] \\w+ "([^"]+)"');
 /**
@@ -318,6 +320,7 @@ class MessageManager extends MessageWindow {
     // THE WRAPPER'S QUEUE (2.369.354, lane claude-wrapper-queue): data/bin/chat-wrapper.js HOLDS a frame sent mid-turn
     // and says so on the acp/codex wire — queued_input / queue_changed / queue_op_result / queue_dropped, top-level lines
     this.userMessageIds = new Map();      // webui msgId → message id (the bubble a queue row belongs to)
+    this._webuiCopies = new Map();        // msgId → {text, at}: a wrapper's copy of a mid-turn frame the CLI's own record may claim
     this._queue = [];                     // the wrapper's promptQueue, as published
     this._queuedMsgIds = new Set();       // bubbles currently wearing a 'queued' chip
     this._queuePublished = false;         // has this wrapper ever published a queue? (in-band capability signal)
@@ -1503,7 +1506,8 @@ class MessageManager extends MessageWindow {
       }
       for (let i = this.messages.length - 1, seen = 0; i >= 0 && seen < 12; i--, seen++) {
         const m = this.messages[i];
-        if (m.role === 'user' && (m[PEER_RECORDED] || (m.content || []).map((b) => b.text || '').join('')) === text) return;
+        // (a wrapper's copy of the same mid-turn frame drew it: this attachment is its record — the copy is claimed)
+        if (m.role === 'user' && (m[PEER_RECORDED] || (m.content || []).map((b) => b.text || '').join('')) === text) { this._claimWebuiCopy(blocks); return; }
       }
       if (a.origin?.kind === 'peer' && a.origin.msg_id && this._peerMsgIds.has(a.origin.msg_id)) return; // already rendered (msg_id is authoritative)
       this.turnIndex++;
@@ -1595,6 +1599,20 @@ class MessageManager extends MessageWindow {
   // whose wrapper predates it never publishes, so they answer [] / false / null
   // — null = "named no verb list", not "serves none".
 
+  /** The CLI's own record of words a wrapper copy already drew (src/server/session-store.js keeps that copy through a
+   *  restart): claimed — never a second bubble. Only a copy a few records back, once, and never one Stop put back. */
+  _claimWebuiCopy(content) {
+    if (!this._webuiCopies.size) return false;
+    const text = textOfBlocks(content);
+    if (!text.trim()) return false;
+    for (const [msgId, c] of this._webuiCopies) {
+      if (c.text !== text || this.messages.length - c.at > 60) continue;
+      this._webuiCopies.delete(msgId);
+      return true;
+    }
+    return false;
+  }
+
   /** Stamp the queue chip on the bubble a held message belongs to; false when there is no such bubble (the acp / codex
    *  rule — the caller then draws a visible notice, so a held message is never silent). */
   _stampQueueChip(msgId, state, emit) {
@@ -1602,6 +1620,8 @@ class MessageManager extends MessageWindow {
     const id = this.userMessageIds.get(String(msgId));
     const msg = id ? this.messageIndex.get(id) : null;
     if (!msg) return false;
+    // a frame Stop put back (or the person removed) never ran: no later record of the CLI is ITS record
+    if (state === 'removed' || state === 'stopped') this._webuiCopies.delete(String(msgId));
     if (msg.queueState === state) return true;
     msg.queueState = state;
     if (state === 'queued') this._queuedMsgIds.add(String(msgId)); else this._queuedMsgIds.delete(String(msgId));
@@ -1612,8 +1632,9 @@ class MessageManager extends MessageWindow {
   /** `input_handover` (2.369.361, lane claude-steer-inject) — the wrapper wrote these frames to the CLI while a turn ran
    *  (the person's Enter, or the ⚡ on a held row), and says what became of them: 'handed' (written — the agent reads it at
    *  its next tool call), 'landed' (it rode a tool result into the turn and the model answered — «Steered», where it sits),
-   *  'own-turn' (the turn ended first: the CLI ran it as a turn of its own — an ordinary message, no chip), 'kept' (Stop
-   *  came first — it stays in the conversation, the agent reads it with the next message). No bubble ⇒ nothing to mark:
+   *  'own-turn' (the turn ended first: the CLI ran it as a turn of its own — an ordinary message, no chip). What Stop
+   *  meant for each one is said by Stop's ONE `queue_dropped` (`keptIds` → 'kept', `landedIds` → 'steered' — message-
+   *  window `_processQueueDropped`); a 'kept' state here is still read (a record of an earlier build). No bubble ⇒ nothing to mark:
    *  the frame reached the agent, which is never a silence worth a card. */
   _processInputHandover(raw, emit) {
     const state = { handed: 'handed', landed: 'steered', 'own-turn': null, kept: 'kept' }[raw.state];
@@ -1658,7 +1679,11 @@ class MessageManager extends MessageWindow {
   static queueOpFailureText(rec) {
     switch (rec.reason) {
       case 'gone': return 'That message is no longer queued — it already ran.';
-      case 'not-steerable': return 'A command runs between turns — it stays queued and runs when this turn ends.';
+      // the claude wrapper says WHY a held row may not join the turn (lane claude-steer-inject r2); no `why` = a command
+      case 'not-steerable': return rec.why === 'origin' ? "VibeSpace's own message runs between turns — it stays queued and runs when this turn ends."
+        : rec.why === 'stopping' ? 'The turn is being stopped — it stays queued and runs as soon as the stop settles.'
+          : rec.why === 'unproven' ? 'This agent has not shown yet that it can take a message into a running turn — it stays queued and runs when this turn ends.'
+            : 'A command runs between turns — it stays queued and runs when this turn ends.';
       case 'not-startable': return 'A queued message starts as soon as the current turn ends.';
       case 'not-editable': return 'That message is not yours to rewrite — you can remove it instead.';
       case 'anchor-gone': return 'The message it was dropped after is no longer queued — nothing was moved.';
@@ -1839,9 +1864,19 @@ class MessageManager extends MessageWindow {
       // inc-mu6bfv1t-4drq; or the device stream filling a gap the parse already
       // rendered) is the SAME message — never a second card.
       if (raw.origin?.kind === 'peer' && raw.origin.msg_id && this._peerMsgIds.has(raw.origin.msg_id)) return;
+      // A MID-TURN FRAME THE PERSON SENT (lane claude-steer-inject r2): the claude wrapper copies it into its history
+      // buffer (`webui_copy`) so a restart keeps its bubble and chip — and the SAME message is drawn ONCE: a record whose
+      // msgId already has a bubble is that bubble (the live send's or the copy's), and the CLI's own record of those words
+      // a little later (the turn they ran as, a held frame drained, a kept frame's interrupted follow-up) claims the copy.
+      if (raw._fromWebui && raw.msgId && this.userMessageIds.has(String(raw.msgId)) && (raw.webui_copy || this._webuiCopies.has(String(raw.msgId)))) return;
+      if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent)) return;
       this.turnIndex++;
       // Use original msgId if present (for dedup with client-side local preview)
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });
+      if (raw.webui_copy && raw._fromWebui && raw.msgId) {
+        this._webuiCopies.set(String(raw.msgId), { text: textOfBlocks(normalizedContent), at: this.messages.length });
+        if (this._webuiCopies.size > 32) this._webuiCopies.delete(this._webuiCopies.keys().next().value);
+      }
       // Provenance for the notification classifier: promptSource = the CLI's
       // marker on HUMAN-submitted prompts (JSONL 'sdk'; our own live sends
       // stamp it too), isSynthetic = CLI-synthesized records (hook feedback on

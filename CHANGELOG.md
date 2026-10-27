@@ -7,6 +7,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Changed
 - A message sent while a Claude conversation works now reaches it at its next tool call, as in the CLI; to hold it for the turn's end or edit it, use Alt+Enter.
 
+### Fixed
+- A message you send while a Claude reply runs stays in the chat after the server restarts, with its label; it used to disappear.
+
 ## 2.369.360 — 2026-10-27
 
 ### Added

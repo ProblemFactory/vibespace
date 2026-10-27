@@ -9,7 +9,11 @@
 //   §2 the composer: Enter's send carries the hand-over stamp, the hold door never does; the hint's words
 //   §3 the adapter + the typing path: `webui_steer` on the frame; steer / steer-all queue ops for claude
 //   §4 the normalizer: input_handover → the bubble's chip (handed → steered / own-turn → none / kept)
-//   §5 Stop's put-back record counts what stays with the turn (`kept`) — the toast's facts
+//   §5 Stop's ONE record says each handed frame's fate — `kept` (the CLI still held it) / `landed` (the model read it) —
+//      and the chips and the toast are drawn from it (acceptance r2: a frame that rode a tool result was counted kept)
+//   §6 (r2) a mid-turn frame the person sent is a RECORD of the conversation: the wrapper's buffer copy draws its bubble
+//      after a restart — ONCE (the live send's msgId, the CLI's own later record of the same words claim it)
+//   §7 (r2) the strip draws no ⚡ on a row the wrapper marks `steerable: false`; each refusal says why in its own words
 // THE REAL WRAPPER over the stand-in (the hand-over, the witness, Stop's follow-up interrupt, the RED legs on the 6428c67e
 // wrapper) is §0 of scripts/test-claude-steer-chrome.mjs — the fast tier's 910 s sum had 0.77 s left.
 import fs from 'node:fs';
@@ -89,15 +93,17 @@ await guard('§2 the composer', () => {
   ok(!('steer' in o.frames[0]), 'claude on an OLD wrapper: no stamp (that wrapper would hold it anyway, and its hint says so)', o.frames);
   const x = mkCI(live(capsOf('codex').inputModes, null)); x.ci._send();
   ok(!('steer' in x.frames[0]), 'codex: no stamp (its steer is a queue op on the item, never a send shape)', x.frames);
-  const ia = mkCI(live(cl, NEW), { _isStreaming: false });
-  ok(ia.ci.holdChordAllowed === false && mkCI(live(cl, NEW)).ci.holdChordAllowed === true && mkCI(live(cl, W354)).ci.holdChordAllowed === false, 'the hold chord: only while a turn runs, only where the wrapper backs both doors');
+  // r2: the HOLD door is the capability's alone — a client whose streaming flag lags (a second tab) still holds; at idle an
+  // unstamped frame is a plain send (eeece327 gated it on the flag: the lagging tab's Alt+Enter fell through to a STAMPED send)
+  const ia = mkCI(live(cl, NEW), { _isStreaming: false }); const iaHeld = ia.ci.holdNow();
+  ok(ia.ci.holdChordAllowed === true && iaHeld === true && ia.frames.length === 1 && !('steer' in ia.frames[0]) && mkCI(live(cl, NEW)).ci.holdChordAllowed === true && mkCI(live(cl, W354)).ci.holdChordAllowed === false, 'the hold chord: the CAPABILITY alone — a lagging client (flag false) still HOLDS, unstamped; never where the wrapper does not back both doors', ia.frames);
   const att = mkCI(live(cl, NEW), { _attachments: [{ mediaType: 'image/png', base64: 'iVBORw0KGgo=' }], _renderAttachments() { } }); att.ci._send();
   ok(att.frames[0].steer === true && /"type":"image"/.test(att.frames[0].text), 'attachments ride a stamped frame as on a plain send (one frame: the image blocks + the words)', att.frames);
 });
 const ciSrc = read('src/lib/chat-input.js'), cvSrc = read('src/lib/chat-view.js');
 ok(/e\.key === 'Enter' && e\.altKey && !e\.ctrlKey && !e\.metaKey && !e\.shiftKey && \(this\.steerChordAllowed \|\| this\.holdChordAllowed\)\) \{\n\s+e\.preventDefault\(\);\n\s+if \(this\.steerChordAllowed\) \{ if \(this\._onSteerChord\) this\._onSteerChord\(\); else this\.steerNow\(\); \}\n\s+else if \(this\._onHoldChord\) this\._onHoldChord\(\); else this\.holdNow\(\);/.test(ciSrc) && (ciSrc.match(/e\.key === 'Enter' && e\.altKey/g) || []).length === 1, 'ONE Alt+Enter chord, the session\'s second door: steer (chat.steerNow) or — here — HOLD (chat.holdNow); still the only chord');
 ok(/export const HOLD_NOW_COMMAND = 'chat\.holdNow';/.test(cvSrc) && /command: HOLD_NOW_COMMAND,\n\s+when: \(ctx\) => steerTargetView\(ctx\) === this && this\._canHoldComposer\(\),/.test(cvSrc) && /onHoldChord: \(\) => runCommand\(HOLD_NOW_COMMAND, \{ view: this \}\)/.test(cvSrc) && /this\._holdKeyDispose\?\.\(\)/.test(cvSrc), 'chat.holdNow: registered once, keybound per view with its own `when` (mutually exclusive with chat.steerNow on the one chord), disposed with the view');
-ok(/this\._holdBtn\.classList\.toggle\('hidden', !\(live && modes\.allowHoldChord\)\)/.test(ciSrc) && /this\._holdBtn\.innerHTML = UI_ICONS\.clock;/.test(ciSrc) && /\.chat-hold-btn:not\(\.hidden\)/.test(read('public/chat.css')), '≤ 768 px: the hold button beside Send (Send itself hands the message over), shown on the same capability, placed by CSS');
+ok(/this\._holdBtn\.classList\.toggle\('hidden', !modes\.allowHoldChord\)/.test(ciSrc) && /get holdChordAllowed\(\) \{ return !!this\._sendModes\(\)\.allowHoldChord; \}/.test(ciSrc) && /this\._holdBtn\.innerHTML = UI_ICONS\.clock;/.test(ciSrc) && /\.chat-hold-btn:not\(\.hidden\)/.test(read('public/chat.css')), '≤ 768 px: the hold button beside Send (Send itself hands the message over), shown on the capability alone like the chord (r2), placed by CSS');
 
 // ── §3 THE ADAPTER + THE TYPING PATH ──
 console.log('§3 the adapter and the typing path');
@@ -148,7 +154,7 @@ await guard('§4 the normalizer', () => {
 
 // ── §5 STOP'S PUT-BACK COUNTS WHAT STAYS ──
 console.log('§5 Stop: what was handed stays with the turn — counted, never put back');
-await guard('§5 the put-back count', () => {
+await guard('§5 the put-back count', async () => {
   const PB = require(path.join(REPO, 'src/queue-putback.js'));
   const d = PB.queueDroppedOf({ type: 'queue_dropped', dropId: '9-1', by: 'stop', turnId: null, items: [], omitted: 0, kept: 2 });
   ok(d && d.kept === 2 && d.items.length === 0, 'queueDroppedOf reads `kept` (a record may carry it and no rows at all)', d);
@@ -160,6 +166,66 @@ await guard('§5 the put-back count', () => {
   const meta = ops.filter((o) => o.op === 'meta' && o.subtype === 'queue-putback');
   ok(meta.length === 1 && meta[0].kept === 1 && meta[0].n === 0, 'a Stop that put nothing back but ends a turn holding a handed message still says ONE toast', meta);
   ok(/if \(op\.kept > 0\) parts\.push\(t\('\{k\} message\(s\) you sent into the turn stay with it', \{ k: op\.kept \}\)\);/.test(cvSrc), 'the toast\'s words: «{k} message(s) you sent into the turn stay with it»');
+  // r2: ONE record says EACH frame's fate, and the chips are drawn from it
+  const d2 = PB.queueDroppedOf({ type: 'queue_dropped', dropId: '9-3', items: [{ id: 'q1', msgId: 'm-p', text: 'put back' }], kept: 1, keptIds: ['m-k'], landed: 1, landedIds: ['m-l'] });
+  ok(d2 && S(d2.keptIds) === S(['m-k']) && S(d2.landedIds) === S(['m-l']) && d2.landed === 1 && S(PB.putbackNotice(d2)) === S({ n: 1, images: 0, others: 0, cut: 0, omitted: 0, started: 0, kept: 1, landed: 1 }), 'queueDroppedOf names each handed frame (keptIds / landedIds) and the toast\'s facts count both', { d2, facts: PB.putbackNotice(d2) });
+  const mm2 = createMessageManager('claude', 'steer-fates');
+  const ops2 = []; mm2.onOp((o) => ops2.push(o));
+  for (const id of ['m-p', 'm-k', 'm-l']) mm2.processLive(ad.formatChatInput('words ' + id, id, { steer: id !== 'm-p' }).userMsg);
+  mm2.processLive({ type: 'input_handover', state: 'handed', msg_ids: ['m-k', 'm-l'], via: 'enter' });
+  mm2.processLive({ type: 'queue_dropped', dropId: '9-3', by: 'stop', turnId: null, items: [{ id: 'q1', msgId: 'm-p', text: 'words m-p' }], omitted: 0, kept: 1, keptIds: ['m-k'], landed: 1, landedIds: ['m-l'] });
+  const chip2 = (id) => mm2.messages.find((x) => x.webuiMsgId === id)?.queueState;
+  const meta2 = ops2.filter((o) => o.op === 'meta' && o.subtype === 'queue-putback');
+  ok(chip2('m-p') === 'removed' && chip2('m-k') === 'kept' && chip2('m-l') === 'steered' && meta2.length === 1 && meta2[0].kept === 1 && meta2[0].landed === 1, 'the chips come from THE record: put back «Removed», kept «Stays with the stopped turn», read «Steered» — and ONE toast', { chips: ['m-p', 'm-k', 'm-l'].map(chip2), meta2 });
+  ok(/if \(op\.landed > 0\) parts\.push\(t\('\{k\} message\(s\) you sent into the turn had already reached the agent', \{ k: op\.landed \}\)\);/.test(cvSrc), 'the toast names a read one in its own words — never «stays with it»: «{k} message(s) you sent into the turn had already reached the agent»');
+  const ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default || {};
+  ok(!!zh['{k} message(s) you sent into the turn had already reached the agent'] && !!ja['{k} message(s) you sent into the turn had already reached the agent'], '…in zh and ja too');
+});
+
+// ── §6 A MID-TURN FRAME IS A RECORD OF THE CONVERSATION (r2) ──
+console.log('§6 a mid-turn frame survives a restart: the wrapper\'s buffer copy, drawn once');
+await guard('§6 the buffer copy', () => {
+  const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
+  const copy = (text, msgId) => ({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] }, msgId, _fromWebui: true, webui_copy: true, timestamp: new Date().toISOString() });
+  const users = (mm, text) => mm.messages.filter((m) => m.role === 'user' && S(m.content).includes(text));
+  // a restart's history: the copy, the wrapper's records about it — the bubble comes back with its last chip
+  const a = createMessageManager('claude', 'copy-a');
+  a.processLive(copy('B handed mid tool', 'm-b'));
+  a.processLive({ type: 'input_handover', state: 'handed', msg_ids: ['m-b'], via: 'enter' });
+  a.processLive({ type: 'input_handover', state: 'landed', msg_ids: ['m-b'] });
+  a.processLive({ type: 'attachment', attachment: { type: 'queued_command', prompt: [{ type: 'text', text: 'B handed mid tool' }] } });
+  ok(users(a, 'B handed mid tool').length === 1 && users(a, 'B handed mid tool')[0].queueState === 'steered' && users(a, 'B handed mid tool')[0].webuiMsgId === 'm-b', 'the copy draws the bubble (its msgId, «Steered»); the CLI\'s own attachment of the same words claims it — ONE bubble', users(a, 'B handed mid tool'));
+  const b = createMessageManager('claude', 'copy-b');
+  b.processLive(ad.formatChatInput('C sent live', 'm-c', { steer: true }).userMsg);
+  b.processLive(copy('C sent live', 'm-c'));
+  ok(users(b, 'C sent live').length === 1, 'the live send and the copy of it (one msgId) are ONE bubble', users(b, 'C sent live'));
+  const c = createMessageManager('claude', 'copy-c');
+  c.processLive(copy('D held, then ran', 'm-d'));
+  c.processLive({ type: 'queued_input', msg_id: 'm-d', turn_id: null });
+  c.processLive({ type: 'user', promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: 'D held, then ran' }] } });
+  ok(users(c, 'D held, then ran').length === 1, 'the CLI\'s own record of the turn it ran (a held frame drained, a kept frame\'s follow-up) claims the copy — ONE bubble', users(c, 'D held, then ran'));
+  const e = createMessageManager('claude', 'copy-e');
+  e.processLive(copy('E put back', 'm-e'));
+  e.processLive({ type: 'queue_dropped', dropId: '9-9', by: 'stop', turnId: null, items: [{ id: 'q', msgId: 'm-e', text: 'E put back' }], omitted: 0 });
+  e.processLive({ type: 'user', promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: 'E put back' }] } });
+  ok(users(e, 'E put back').length === 2 && users(e, 'E put back')[0].queueState === 'removed', 'a frame Stop PUT BACK never ran: the person\'s resend of the same words is its own bubble (the copy keeps «Removed»)', users(e, 'E put back').map((m) => m.queueState || null));
+  ok(/if \(msg\._fromWebui && msg\.timestamp && !msg\.webui_copy\) \{/.test(read('src/session-store.js')), 'the history merge keeps a copy whatever user record follows it (a tool_result is one) — src/session-store.js');
+  const wr = read('data/bin/chat-wrapper.js');
+  ok(/if \(!origin && msgId && !isCommandFrame\(o\) && recordPersonFrame\(o, msgId\)\) buffered = false;/.test(wr) && /buffer \+= JSON\.stringify\(\{ type: 'user', message: \{ role: 'user', content \}, msgId, _fromWebui: true, webui_copy: true, timestamp: new Date\(\)\.toISOString\(\) \}\) \+ '\\n';/.test(wr), 'the wrapper writes the copy into its HISTORY BUFFER only (never stdout — the live view drew it at send), for the person\'s mid-turn frames (never a slash command — the CLI records the command it runs its own way)');
+});
+
+// ── §7 THE STRIP AND THE REFUSALS (r2) ──
+console.log('§7 the strip: no ⚡ where the wrapper says it cannot join; each refusal in its own words');
+await guard('§7 the strip', () => {
+  const caps = { queueVerbs: NEW };
+  const html = ChatInput.queueStripHtml([{ id: 'q1', msgId: 'm1', preview: 'mine', text: 'mine', kind: 'user' }, { id: 'q2', msgId: 'm2', preview: '/cost', text: '/cost', kind: 'user', steerable: false }, { id: 'q3', msgId: 'm3', preview: 'a dispatch', kind: 'system', steerable: false }], caps);
+  const steers = (html.match(/data-queue-op="steer" data-queue-id="([^"]+)"/g) || []).map((s) => s.replace(/.*data-queue-id="([^"]+)"/, '$1'));
+  ok(S(steers) === S(['q1']) && !/data-queue-op="steer-all"/.test(html), 'a row marked `steerable: false` (a command, a frame VibeSpace typed) has no ⚡, and «Steer all» counts only rows that may join (one ⇒ none drawn)', steers);
+  const html2 = ChatInput.queueStripHtml([{ id: 'q1', msgId: 'm1', preview: 'a', kind: 'user' }, { id: 'q2', msgId: 'm2', preview: 'b', kind: 'user' }], caps);
+  ok((html2.match(/data-queue-op="steer"/g) || []).length === 2 && /data-queue-op="steer-all"/.test(html2), 'CONTROL: rows that say nothing keep their ⚡ (codex / agy / acp unchanged)');
+  const MM = require(path.join(REPO, 'src/message-manager.js'));
+  const txt = (why) => (MM.MessageManager || MM).queueOpFailureText({ reason: 'not-steerable', ...(why ? { why } : {}) });
+  ok(/^VibeSpace's own message runs between turns/.test(txt('origin')) && /^The turn is being stopped/.test(txt('stopping')) && /^This agent has not shown yet/.test(txt('unproven')) && /^A command runs between turns/.test(txt('command')) && /^A command runs between turns/.test(txt()), 'not-steerable says WHY: VibeSpace\'s own message / the stop settling / an unproven CLI / a command (no why = a command, an older wrapper)', ['origin', 'stopping', 'unproven', 'command', null].map(txt));
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

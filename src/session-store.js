@@ -806,7 +806,10 @@ class SessionMessages {
       const isControl = msg.type === 'control_request' || msg.type === 'control_response' || msg.type === 'control_cancel_request';
       if (!isControl) {
         if (isSubagentMessage(msg)) { this._noteHelperResult(msg); continue; }
-        if (msg._fromWebui && msg.timestamp) {
+        // a claude wrapper's copy of a MID-TURN frame (`webui_copy`, lane claude-steer-inject r2) is the only record of
+        // those words the transcript may hold — never dropped for a later user record (a tool_result is one); the
+        // normalizer draws it once (src/message-manager.js _processUser)
+        if (msg._fromWebui && msg.timestamp && !msg.webui_copy) {
           if (jsonl.some(m => m.type === 'user' && m.timestamp >= msg.timestamp)) continue;
         }
       }

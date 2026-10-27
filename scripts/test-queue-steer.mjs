@@ -1197,7 +1197,9 @@ console.log('— wiring + docs pins');
     // does not — a pre-.354 claude wrapper would forward a queue-op line to the CLI verbatim)
     const clw = read('data/bin/chat-wrapper.js');
     ok('the claude chat-wrapper serves queue-op AND queue-resync, never forwarding either to the CLI', /if \(parsed\.type === 'queue-op'\) \{ handleQueueOp\(parsed\); continue; \}/.test(clw) && /if \(parsed\.type === 'queue-resync'\) \{ publishQueue\(\); continue; \}/.test(clw));
-    ok('…and adverts inputQueue + its verb list + queueResync in the sidecar it writes', /caps: \{ frameFile: true, inputQueue: true, queueVerbs: CLAUDE_QUEUE_VERBS, queueResync: true \}/.test(clw) && /const CLAUDE_QUEUE_VERBS = \['remove', 'steer', 'steer-all', 'reorder', 'edit'\];/.test(clw));
+    // (acceptance r2, lane claude-steer-inject: the advert STARTS as the .354 three and gains the steer pair at the CLI's
+    // first state word — proveState writes the sidecar at once; a CLI that says none never advertises the hand-over)
+    ok('…and adverts inputQueue + its verb list + queueResync in the sidecar it writes', /caps: \{ frameFile: true, inputQueue: true, queueVerbs: CLAUDE_HOLD_VERBS, queueResync: true \}/.test(clw) && /const CLAUDE_QUEUE_VERBS = \['remove', 'steer', 'steer-all', 'reorder', 'edit'\];/.test(clw) && /const CLAUDE_HOLD_VERBS = \['remove', 'reorder', 'edit'\];/.test(clw) && /function proveState\(\) \{\n\s+stateProven = true;\n\s+meta\.caps\.queueVerbs = CLAUDE_QUEUE_VERBS;/.test(clw));
   }
   ok('the ACP unknown-verb message lists queue-op (the wrapper tells the truth about what it serves)', /chat-input\/interrupt\/queue-op\//.test(aw));
   // DISTINCT phrases per file (a loose grep matched 'queue-operation' in an
@@ -6030,10 +6032,15 @@ console.log('— ⑯ claude: the wrapper holds a mid-turn frame (remove / reorde
     await until16(() => fs.existsSync(path.join(dir16, 's.json')) && !!lastQueue());
     const side = JSON.parse(fs.readFileSync(path.join(dir16, 's.json'), 'utf8'));
     // (five verbs since 2.369.361 — steer / steer-all hand a held row to the running turn, and 'steer' in this hello is the
-    // hand-over door's advert: lane claude-steer-inject)
-    ok('⑯ the sidecar adverts the queue (inputQueue, the five verbs, queueResync) and the BASELINE publication is an empty queue with its verbs', side.caps?.inputQueue === true && JSON.stringify(side.caps.queueVerbs) === JSON.stringify(['remove', 'steer', 'steer-all', 'reorder', 'edit']) && side.caps.queueResync === true && lastQueue().items.length === 0 && JSON.stringify(lastQueue().verbs) === JSON.stringify(['remove', 'steer', 'steer-all', 'reorder', 'edit']), side.caps);
+    // hand-over door's advert: lane claude-steer-inject — and since its acceptance r2 only once the CLI has said a state
+    // word: at boot the hello names the .354 three)
+    const FIVE = JSON.stringify(['remove', 'steer', 'steer-all', 'reorder', 'edit']), THREE = JSON.stringify(['remove', 'reorder', 'edit']);
+    ok('⑯ the sidecar adverts the queue (inputQueue, the .354 three until the CLI proves its state words, queueResync) and the BASELINE publication is an empty queue with its verbs', side.caps?.inputQueue === true && JSON.stringify(side.caps.queueVerbs) === THREE && side.caps.queueResync === true && lastQueue().items.length === 0 && JSON.stringify(lastQueue().verbs) === THREE, side.caps);
     send(ad.formatChatInput('LONG-1 the running turn', 'm-1').stdinPayload);
     await until16(() => running() >= 1);
+    await until16(() => JSON.stringify(lastQueue()?.verbs) === FIVE);
+    const side2 = JSON.parse(fs.readFileSync(path.join(dir16, 's.json'), 'utf8'));
+    ok('⑯ …the CLI\'s first state word proves it: the sidecar AND a fresh publication name the five (the hand-over door)', JSON.stringify(side2.caps?.queueVerbs) === FIVE && JSON.stringify(lastQueue().verbs) === FIVE, { sidecar: side2.caps?.queueVerbs, inBand: lastQueue()?.verbs });
     // an image paste (the client's own frame shape) is held WHOLE; a typed text; a frame VibeSpace typed (auto-resume)
     const IMG = 'iVBORw0KGgo' + 'A'.repeat(400);
     send(ad.formatChatInput(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: IMG } }, { type: 'text', text: 'what is in this picture' }] } }), 'm-img').stdinPayload);

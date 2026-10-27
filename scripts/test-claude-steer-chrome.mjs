@@ -8,7 +8,14 @@
 //      it to the turn's end) · ② the ⚡ on a held row (RED: refused) · ③ «inject all» · ④ a command is held · ⑤ no tool
 //      result left ⇒ its own turn, and a held frame waits behind it · ⑥ Stop with a frame the CLI still holds ⇒ its
 //      follow-up turn is interrupted on its init, nothing answers (CONTROL: without it the CLI answers) · ⑦ a stamped frame
-//      with no turn running is a plain send · ⑧ the hello names the steer door
+//      with no turn running is a plain send · ⑧ the hello names the steer door — only from the CLI's first state word
+//      ACCEPTANCE r2 (each RED on the eeece327 tree, the round it fixed): ⑨ a CLI that says NO state word: the door is never
+//      advertised, a stamped frame is held, a dispatch at idle still runs, Stop answers nothing · ⑩ the STOP WINDOW: a
+//      stamped frame right after Stop is HELD (its own turn once the stop settles), and with the split shape EVERY
+//      follow-up turn is interrupted · ⑪ ONE record per Stop says each frame's fate: one that rode a tool result is
+//      `landed` (never kept), a frame whose own turn Stop ended is in no count · ⑫ a row VibeSpace typed is never
+//      steerable · ⑬ the Stop window is BOUNDED (2 s after the last result, one log line) · ⑭ the follow-up interrupt
+//      leaves in the init line's own tick (the in-process CLI; CONTROL: a 25 ms-late copy is not)
 //   §A THE REAL CLI behind the REAL wrapper, talking only to a LOCAL MOCK of POST /v1/messages (a scratch HOME, a
 //      loopback ANTHROPIC_BASE_URL, a fake key built by concatenation, nonessential traffic off: no vendor request,
 //      nothing billed — the R0 recording as a regression). Evidence-SKIP without the binary ($VS_CLAUDE_BIN, `claude` on
@@ -17,6 +24,9 @@
 //        carries «The user sent a new message while you were working: <text>»; the wrapper says handed → landed; ONE turn
 //      ② Stop while the CLI still holds it: the CLI starts a turn for it, the wrapper interrupts that turn on its init —
 //        no request reaches the model after Stop; the next message's request carries it (it stayed in the conversation)
+//      ③ (r2) a message C typed δ = 0 / 20 / 45 ms after Stop is HELD and runs as the next turn once the stop settles: the
+//        frame the CLI held is never answered on its own (eeece327 answered one billed request at δ = 20)
+//      ④ (r2) Stop after the frame rode a tool result: the record says `landed`, never kept
 //   §B THE CHAT WINDOW in a REAL browser (the runner's shape: DejaVu fontconfig, the page's CPU throttled ×$VS_CPU_THROTTLE
 //      (default 4), trusted input, realClicker): a worktree server (the working tree overlaid), claude chat sessions on the
 //      stand-in CLI (scripts/fixtures/claude-stand-in-cli.cjs — the R0 turn shape):
@@ -28,7 +38,11 @@
 //        segment, no hold button, no ⚡ on its row
 //      ⑤ Stop with a handed message ⇒ ONE toast «1 message(s) you sent into the turn stay with it», the bubble reads
 //        «Stays with the stopped turn», nothing answers it, the box stays empty
-//      ⑥ ≤ 768 px: the hold button beside Send (the hint hidden), and it holds
+//      ⑥ ≤ 768 px: the hold button beside Send (the hint hidden), and it holds — at idle too (the capability's, r2)
+//      ⑦ (r2) a SECOND TAB whose streaming flag lags (pinned false): its Alt+Enter mid-tool still HOLDS (eeece327 stamped
+//        it — the hold became a hand-over)
+//      ⑧ (r2) the server RESTARTS and the page reloads: every mid-turn bubble comes back ONCE with its last chip
+//        («Steered», «Stays with the stopped turn», a still-held «Queued»)
 // Shots: $VS_STEER_SHOTS (a dir) — the hint, the ⚡, an injected row, the phone face.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -42,6 +56,7 @@ const require = createRequire(import.meta.url);
 const WebSocket = require('ws');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STAND_IN = path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs');
+const INPROC = path.join(REPO, 'scripts/fixtures/claude-inproc-cli.cjs');
 const BASE = '6428c67e';
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : '')); } return !!c; };
@@ -53,11 +68,17 @@ const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.
 const ad = new ClaudeCodeAdapter({ buffersDir: os.tmpdir() });
 const SHOTS = process.env.VS_STEER_SHOTS || '';
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
+// THIS SUITE'S TEARDOWN RUNS FIRST AT EXIT (r2 hygiene): registered before any scratch dir is minted — scratch.mjs removes
+// those at exit too, in registration order, and a browser still alive then wrote its profile back (an 8 KB
+// /tmp/vs-cst-chrome-<pid> left by every run that ended early). Each section pushes what ends its processes.
+const atExit = [];
+process.on('exit', () => { for (const f of atExit.splice(0)) { try { f(); } catch { } } });
 
 // ── §0 THE REAL WRAPPER over the stand-in CLI (moved from the fast suite: the fast tier's 910 s sum had 0.77 s left) ──
 console.log('§0 the REAL chat-wrapper over the stand-in CLI (the R0 turn shape)');
 const NEW = ['remove', 'steer', 'steer-all', 'reorder', 'edit'];
 const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-claude-steer-'));
+atExit.push(() => fs.rmSync(scratchRoot, { recursive: true, force: true }));
 /** A wrapper copy in a scratch tree (its src/ = this repo's: it requires only PURE src modules). */
 function wrapperCopy(name, src) {
   const dir = path.join(scratchRoot, 'copy-' + name);
@@ -70,10 +91,12 @@ let baseSrc = null;
 try { baseSrc = execFileSync('git', ['-C', REPO, 'show', `${BASE}:data/bin/chat-wrapper.js`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { baseSrc = null; }
 const BASE_WRAPPER = baseSrc ? wrapperCopy('base', baseSrc) : null;
 const LANE_WRAPPER = path.join(REPO, 'data/bin/chat-wrapper.js');
-async function boot(wrapperPath, label, { toolMs = 1500 } = {}) {
+async function boot(wrapperPath, label, { toolMs = 1500, env = {}, inproc = false } = {}) {
   const dir = fs.mkdtempSync(path.join(scratchRoot, label + '-'));
-  const cap = path.join(dir, 'cli-got.jsonl'), dlv = path.join(dir, 'delivered.jsonl');
-  const w = spawn(process.execPath, [wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STUB_CAPTURE: cap, STAND_IN_DELIVERED: dlv, STAND_IN_LONG_MS: String(toolMs), VIBESPACE_SKIP_AGENT_HOOKS: '1' } });
+  const cap = path.join(dir, 'cli-got.jsonl'), dlv = path.join(dir, 'delivered.jsonl'), inOut = path.join(dir, 'inproc.jsonl');
+  // ⑭ the in-process CLI (scripts/fixtures/claude-inproc-cli.cjs) is preloaded INTO the wrapper's own process
+  const argv = inproc ? ['-r', INPROC, wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), 'inproc-claude'] : [wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN];
+  const w = spawn(process.execPath, argv, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STUB_CAPTURE: cap, STAND_IN_DELIVERED: dlv, INPROC_OUT: inOut, STAND_IN_LONG_MS: String(toolMs), VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env } });
   const recs = []; let lb = '';
   w.stdout.setEncoding('utf8');
   w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { const r = JSON.parse(l); r.__at = Date.now(); recs.push(r); } catch { } } });
@@ -91,6 +114,13 @@ async function boot(wrapperPath, label, { toolMs = 1500 } = {}) {
     queueItems: () => { const q = recs.filter((r) => r.type === 'queue_changed'); return q.length ? q[q.length - 1].items || [] : []; },
     idx: (pred) => recs.findIndex(pred),
     meta: () => { try { return JSON.parse(fs.readFileSync(path.join(dir, 's.json'), 'utf8')); } catch { return null; } },
+    inproc: () => lines(inOut),
+    log: () => { try { return fs.readFileSync(path.join(dir, 'chat-wrapper.log'), 'utf8'); } catch { return ''; } },
+    stop: () => w.stdin.write(ad.formatInterrupt() + '\n'),
+    queued: (msgId) => recs.some((r) => r.type === 'queued_input' && r.msg_id === msgId),
+    follows: () => lines(cap).filter((f) => f.type === 'control_request' && /^vs-stop-follow-/.test(f.request_id || '')).length,
+    // Stop's ONE record, each frame's fate (r2): put back / kept by the CLI / already read
+    drops: () => recs.filter((r) => r.type === 'queue_dropped').map((d) => ({ items: (d.items || []).map((it) => it.msgId), kept: d.kept || 0, keptIds: d.keptIds || [], landed: d.landed || 0, landedIds: d.landedIds || [] })),
     // the wrapper is stopped (SIGTERM, its exit awaited) before its dir goes — §55
     kill: () => stopWrapper(w, { dir }),
   };
@@ -194,11 +224,10 @@ async function legStop(wp, label, { withHeld = false } = {}) {
   h.write(ad.formatInterrupt());
   await until(() => h.results() >= 2, 6000);
   await sleep(900);   // the stand-in's follow-up turn answers 300 ms in — anything that would answer B has by now
-  const drop = h.of('queue_dropped');
   const out = {
-    drop: drop.map((d) => ({ items: (d.items || []).map((it) => it.msgId), kept: d.kept || 0 })),
-    followInterrupt: h.got().filter((f) => f.type === 'control_request' && /^vs-stop-follow-/.test(f.request_id || '')).length,
-    kept: h.hand('kept').flatMap((r) => r.msg_ids || []),
+    drop: h.drops().map((d) => ({ items: d.items, kept: d.kept })),
+    followInterrupt: h.follows(),
+    kept: h.drops().flatMap((d) => d.keptIds),
     answeredB: said(h, /reply: B handed, then Stop/),
     cReached: h.got().some((f) => f.type === 'user' && JSON.stringify(f).includes('C held, then Stop')),
     results: h.results(),
@@ -207,8 +236,162 @@ async function legStop(wp, label, { withHeld = false } = {}) {
   return out;
 }
 
+/** ⑨ (r2) a CLI that says NO state word (before 2.1.257, or the switch unset): nothing proves "the turn ended, it runs
+ *  what it holds", so the wrapper never advertises the door and holds a stamped frame — the base's order holds. */
+async function legNoState(wp) {
+  const h = await boot(wp, 'nostate', { toolMs: 800, env: { STAND_IN_NO_STATE: '1' } });
+  h.say('LONG-A a text turn', 'm-a', { steer: true });
+  await sleep(200);
+  h.say('B stamped mid text turn', 'm-b', { steer: true });
+  await until(() => h.results() >= 2, 6000);
+  await sleep(200);
+  h.say('H typed by VibeSpace at idle', 'm-h', { origin: 'dispatch' });
+  await until(() => h.results() >= 3, 3000);
+  const verbs = { sidecar: h.meta()?.caps?.queueVerbs, inBand: (h.of('queue_changed').pop() || {}).verbs };
+  h.say('TOOL-C run the slow command', 'm-c');
+  await until(h.toolUse, 4000);
+  await sleep(100);
+  h.say('D stamped mid tool, then Stop', 'm-d', { steer: true });
+  await sleep(150);
+  h.stop();
+  await sleep(1500);
+  const out = { verbs, bHeld: h.queued('m-b'), handed: h.hand().flatMap((r) => r.msg_ids || []), ranH: h.delivered().some((d) => /H typed/.test(d.text)), drops: h.drops(), answeredD: said(h, /D stamped mid tool/), dReached: h.got().some((f) => f.type === 'user' && S(f).includes('D stamped')) };
+  await h.kill();
+  return out;
+}
+/** ⑩ (r2) THE STOP WINDOW: C, stamped, reaches the wrapper `delay` ms after Stop — it is HELD, then runs as a turn of its
+ *  own once the stop settles; the frame the CLI held at Stop is never answered. */
+async function legLateC(wp, label, { delay = 0 } = {}) {
+  const h = await boot(wp, label, { toolMs: 3000 });
+  h.say('TOOL-A run the slow command', 'm-a');
+  await until(h.toolUse, 4000);
+  h.say('B handed, then Stop', 'm-b', { steer: true });
+  await until(() => h.hand('handed').some((r) => (r.msg_ids || []).includes('m-b')), 3000);
+  h.stop();
+  if (delay) await sleep(delay);
+  h.say('C typed right after Stop', 'm-c', { steer: true });
+  await until(() => h.delivered().some((d) => d.how === 'turn' && d.text === 'C typed right after Stop'), 4000);
+  await sleep(400);
+  const out = { cHeld: h.queued('m-c'), cHanded: h.hand('handed').some((r) => (r.msg_ids || []).includes('m-c')), follows: h.follows(), answeredB: said(h, /reply:[^"]*B handed, then Stop/), cOwnTurn: h.delivered().some((d) => d.how === 'turn' && d.text === 'C typed right after Stop'), drops: h.drops() };
+  await h.kill();
+  return out;
+}
+/** ⑩ (r2) the SPLIT shape ($STAND_IN_SPLIT_FOLLOW — the real CLI's for a frame that reached it 15–22 ms after Stop): the CLI
+ *  starts one follow-up turn per frame it held — EVERY one is interrupted on its init, nothing is answered. */
+async function legSplit(wp) {
+  const h = await boot(wp, 'split', { toolMs: 3000, env: { STAND_IN_SPLIT_FOLLOW: '1' } });
+  h.say('TOOL-A run the slow command', 'm-a');
+  await until(h.toolUse, 4000);
+  h.say('B1 handed', 'm-b1', { steer: true });
+  h.say('B2 handed', 'm-b2', { steer: true });
+  await until(() => h.hand('handed').length >= 2, 3000);
+  h.stop();
+  await sleep(1500);
+  const out = { follows: h.follows(), answered: said(h, /reply: B/), drops: h.drops(), settled: /stop settled \(idle\): 2 frame\(s\) the CLI held at Stop, 2 follow-up/.test(h.log()) };
+  await h.kill();
+  return out;
+}
+/** ⑪ (r2) the record's truth: Stop after B RODE a tool result (the model reads it in the request Stop cut) ⇒ `landed`. */
+async function legRide(wp) {
+  const h = await boot(wp, 'ride', { toolMs: 600, env: { STAND_IN_POST_MS: '1500' } });
+  h.say('TOOL-A run the slow command', 'm-a');
+  await until(h.toolUse, 4000);
+  h.say('B handed mid tool', 'm-b', { steer: true });
+  await until(() => h.recs.some(isToolResult), 4000);
+  await sleep(200);
+  h.stop();
+  await sleep(800);
+  const out = { tookIn: h.delivered().filter((d) => d.how === 'tool_result').map((d) => d.text), drops: h.drops(), follows: h.follows() };
+  await h.kill();
+  return out;
+}
+/** ⑪ (r2) …and Stop while B's OWN turn runs a tool: that is a stopped turn, no message is kept. */
+async function legOwnStop(wp) {
+  const h = await boot(wp, 'ownstop', { toolMs: 1500 });
+  h.say('LONG-A a text turn', 'm-a');
+  await sleep(200);
+  h.say('TOOL-B handed with no tool result left', 'm-b', { steer: true });
+  await until(h.toolUse, 6000);
+  await sleep(200);
+  h.stop();
+  await sleep(800);
+  const out = { own: h.hand('own-turn').flatMap((r) => r.msg_ids || []), drops: h.drops(), follows: h.follows() };
+  await h.kill();
+  return out;
+}
+/** ⑫ (r2) a row VibeSpace typed (a dispatch) is never the person's to push into the turn. */
+async function legOrigin(wp) {
+  const h = await boot(wp, 'origin', { toolMs: 2000 });
+  h.say('TOOL-A run the slow command', 'm-a');
+  await until(h.toolUse, 4000);
+  h.say('a dispatch frame', 'm-o', { origin: 'dispatch' });
+  await until(() => h.held('m-o'), 3000);
+  const row = h.queueItems().find((it) => it.msgId === 'm-o') || {};
+  h.write(S({ type: 'queue-op', op: 'steer', id: row.id }));
+  await until(() => h.of('queue_op_result').length >= 1, 3000);
+  const out = { steerable: row.steerable, res: h.of('queue_op_result').map((r) => `${r.ok}:${r.reason}:${r.why || ''}`), reached: h.got().some((f) => f.type === 'user' && S(f).includes('a dispatch frame')) && !h.queueItems().some((it) => it.msgId === 'm-o') };
+  await h.kill();
+  return out;
+}
+/** ⑬ (r2) the Stop window is BOUNDED: a background helper keeps the CLI 'running' past the interrupted result (no idle) —
+ *  2 s after that result the window closes with ONE log line and the frame held in it runs. */
+async function legBound(wp) {
+  const h = await boot(wp, 'bound', { toolMs: 600, env: { STAND_IN_POST_MS: '1500', STAND_IN_HELPER_MS: '8000' } });
+  h.say('TOOL-A BGAGENT-x run the slow command', 'm-a');
+  await until(h.toolUse, 4000);
+  await until(() => h.recs.some(isToolResult), 4000);
+  await sleep(100);
+  h.stop();
+  await sleep(50);
+  h.say('C typed after Stop', 'm-c', { steer: true });
+  const t0 = Date.now();
+  await until(() => h.got().some((f) => f.type === 'user' && S(f).includes('C typed after Stop')), 5000);
+  const out = { cHeld: h.queued('m-c'), reachedMs: Date.now() - t0, boundLines: h.log().split('\n').filter((l) => /bound: nothing settled 2000 ms after the CLI's last result — disarmed the Stop window/.test(l)).length };
+  await h.kill();
+  return out;
+}
+/** ⑭ (r2) the follow-up interrupt leaves IN THE SAME TICK as the init line's parse (the in-process CLI looks at once). */
+async function legSameTick(wp, label) {
+  const h = await boot(wp, label, { inproc: true });
+  h.say('TOOL-A run the slow command', 'm-a');
+  await until(h.toolUse, 4000);
+  h.say('B handed, then Stop', 'm-b', { steer: true });
+  await until(() => h.hand('handed').length >= 1, 3000);
+  h.stop();
+  await until(() => h.inproc().length >= 1, 3000);
+  await sleep(200);
+  const out = { inproc: h.inproc(), answered: said(h, /reply: B handed/) };
+  await h.kill();
+  return out;
+}
+/** ⑧ the hello: the .354 three at boot, the steer pair from the CLI's first state word on (r2). */
+async function legAdvert(wp) {
+  const h = await boot(wp, 'advert');
+  await until(() => h.of('queue_changed').length >= 1, 3000);
+  const atBoot = { sidecar: h.meta()?.caps?.queueVerbs, inBand: h.of('queue_changed')[0]?.verbs };
+  h.say('first turn', 'm-1');
+  await until(() => h.results() >= 1, 4000);
+  const proven = { sidecar: h.meta()?.caps?.queueVerbs, inBand: (h.of('queue_changed').pop() || {}).verbs };
+  await h.kill();
+  return { atBoot, proven };
+}
+
 const followMutant = wrapperCopy('no-follow-interrupt', fs.readFileSync(LANE_WRAPPER, 'utf8').replace("sendChild(JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-", "void (JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-"));
+// ⑭'s CONTROL: the same interrupt, 25 ms late (what a timer between the init line and the write would do)
+const lateMutant = wrapperCopy('late-follow-interrupt', fs.readFileSync(LANE_WRAPPER, 'utf8').replace("sendChild(JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-", "setTimeout(sendChild, 25, JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-"));
 const leg = (p) => p.catch((e) => ({ threw: String(e && e.message || e) }));
+const [noState, late0, lateAfter, split, ride, ownStop, origin, bound, sameTick, sameTickCtl] = await Promise.all([
+  leg(legNoState(LANE_WRAPPER)),
+  leg(legLateC(LANE_WRAPPER, 'late0', { delay: 0 })),
+  leg(legLateC(LANE_WRAPPER, 'late-after', { delay: 400 })),
+  leg(legSplit(LANE_WRAPPER)),
+  leg(legRide(LANE_WRAPPER)),
+  leg(legOwnStop(LANE_WRAPPER)),
+  leg(legOrigin(LANE_WRAPPER)),
+  leg(legBound(LANE_WRAPPER)),
+  leg(legSameTick(LANE_WRAPPER, 'sametick')),
+  leg(legSameTick(lateMutant, 'sametick-ctl')),
+]);
 const [enter, enterBase, steer1, steer1Base, steerAll, cmd, own, stop, stopCtl, stopHeld, advert] = await Promise.all([
   leg(legEnter(LANE_WRAPPER, 'enter')),
   BASE_WRAPPER ? leg(legEnter(BASE_WRAPPER, 'base-enter')) : null,
@@ -220,7 +403,7 @@ const [enter, enterBase, steer1, steer1Base, steerAll, cmd, own, stop, stopCtl, 
   leg(legStop(LANE_WRAPPER, 'stop')),
   leg(legStop(followMutant, 'stop-ctl')),
   leg(legStop(LANE_WRAPPER, 'stop-held', { withHeld: true })),
-  leg((async () => { const h = await boot(LANE_WRAPPER, 'advert'); await until(() => h.of('queue_changed').length >= 1, 3000); const out = { sidecar: h.meta()?.caps?.queueVerbs, inBand: h.of('queue_changed')[0]?.verbs }; await h.kill(); return out; })()),
+  leg(legAdvert(LANE_WRAPPER)),
 
 ]);
 ok(enter.aPlain, '⑦ a stamped frame with NO turn running is a plain send (no hand-over record — it opens the turn)', enter);
@@ -239,7 +422,24 @@ ok(S(stop.drop) === S([{ items: [], kept: 1 }]), '⑥ Stop with a handed frame: 
 ok(stop.followInterrupt === 1 && S(stop.kept) === S(['m-b']) && !stop.answeredB, '⑥ the CLI started a turn for the frame it still held — the wrapper interrupted it on its init: NOTHING answers after Stop (the 2026-09-07 law), the frame stays in the conversation', stop);
 ok(stopCtl.followInterrupt === 0 && stopCtl.answeredB, '⑥ CONTROL: a wrapper copy without that second interrupt — the CLI ANSWERS the frame after Stop (the measured 2.1.308 behaviour; the leg above can say no)', stopCtl);
 ok(S(stopHeld.drop) === S([{ items: ['m-c'], kept: 1 }]) && !stopHeld.cReached && !stopHeld.answeredB, '⑥ Stop with BOTH: the held one comes back into the box (the .354 rule), the handed one stays with the turn — one record says both', stopHeld);
-ok(S(advert.sidecar) === S(NEW) && S(advert.inBand) === S(NEW), '⑧ the hello names the steer door: the sidecar caps AND every queue_changed say [remove, steer, steer-all, reorder, edit] (a .354 wrapper names no steer — its sessions stay queue-only)', advert);
+const HOLD3 = ['remove', 'reorder', 'edit'];
+ok(S(advert.atBoot?.sidecar) === S(HOLD3) && S(advert.atBoot?.inBand) === S(HOLD3), '⑧ at boot the hello names NO steer — the sidecar caps and the first queue_changed say the .354 three (nothing has proven the CLI says its turn state yet)', advert);
+ok(S(advert.proven?.sidecar) === S(NEW) && S(advert.proven?.inBand) === S(NEW), '⑧ …from the CLI\'s first state word on, both say [remove, steer, steer-all, reorder, edit] — the door the composer draws', advert);
+// ── ACCEPTANCE r2 ──
+ok(S(noState.verbs?.sidecar) === S(HOLD3) && S(noState.verbs?.inBand) === S(HOLD3) && noState.bHeld && !noState.handed?.length, '⑨ a CLI with NO state words: the door is never advertised and a STAMPED frame mid-turn is HELD (never written to a turn whose end nothing can prove)', noState);
+ok(noState.ranH, '⑨ …a frame VibeSpace types at idle still RUNS (eeece327: held for the life of the wrapper)', noState);
+ok(!noState.answeredD && !noState.dReached && noState.drops?.some((d) => d.items.includes('m-d')), '⑨ …and Stop there answers nothing after it: the held frame comes back into the box', noState);
+// (the stand-in settles a Stop in a few ms — the real CLI's 40–80 ms window, δ = 0 / 20 / 45, is §A ③)
+ok(late0.cHeld && !late0.cHanded && late0.cOwnTurn, '⑩ the Stop window: C stamped right after Stop is HELD as a plain queued send, never handed — it ran as a turn of its own once the stop settled (eeece327: handed into the stopping turn)', late0);
+ok(late0.follows === 1 && !late0.answeredB && S(late0.drops?.map((x) => x.keptIds)) === S([['m-b']]), '⑩ …the frame the CLI held at Stop is never answered (its follow-up interrupted), and the ONE record keeps it', late0);
+ok(!lateAfter.cHeld && !lateAfter.cHanded && lateAfter.cOwnTurn && lateAfter.follows === 1 && !lateAfter.answeredB, '⑩ CONTROL: C typed once the stop has SETTLED is a plain send at idle (the window closed — it holds nothing for ever)', lateAfter);
+ok(split.follows === 2 && !split.answered && S(split.drops?.map((x) => x.keptIds)) === S([['m-b1', 'm-b2']]) && split.settled, '⑩ the split shape: the CLI started a follow-up turn PER held frame — EVERY one interrupted on its init (eeece327: the second was answered); one record, kept 2', split);
+ok(S(ride.tookIn) === S(['B handed mid tool']) && S(ride.drops) === S([{ items: [], kept: 0, keptIds: [], landed: 1, landedIds: ['m-b'] }]) && ride.follows === 0, '⑪ Stop after B RODE the tool result: the record says `landed` (the model has it as read), NOT kept (eeece327: kept 1)', ride);
+ok(S(ownStop.own) === S(['m-b']) && !ownStop.drops?.length && ownStop.follows === 0, '⑪ Stop while B\'s OWN turn runs a tool: a stopped turn — no record counts B as kept (eeece327: kept 1)', ownStop);
+ok(origin.steerable === false && S(origin.res) === S(['false:not-steerable:origin']), '⑫ a row VibeSpace typed: `steerable: false` on the row (no ⚡) and the wrapper refuses «VibeSpace\'s own message runs between turns» (eeece327: handed it)', origin);
+ok(bound.cHeld && bound.reachedMs >= 1500 && bound.reachedMs < 4000 && bound.boundLines === 1, '⑬ the Stop window is BOUNDED: no idle came (a helper kept the CLI running) — 2 s after the last result ONE log line disarms it and the frame held in it runs', bound);
+ok(sameTick.inproc?.length === 1 && sameTick.inproc[0].sameTick === true && !sameTick.answered, '⑭ the follow-up interrupt is written IN THE SAME TICK as the init line\'s parse (the in-process CLI saw it before init() returned)', sameTick);
+ok(sameTickCtl.inproc?.length === 1 && sameTickCtl.inproc[0].sameTick === false, '⑭ CONTROL: a copy that writes it 25 ms late (a timer between) is caught — the pin can say no', sameTickCtl);
 
 try { fs.rmSync(scratchRoot, { recursive: true, force: true }); } catch { }
 
@@ -253,12 +453,12 @@ const claudeBin = (() => {
 /** The mock (R0's): a main-loop request (its tools name Bash) whose last user message holds `TOOL-<n>S` answers ONE Bash
  *  `sleep <n>`; one that carries a tool_result answers text; anything else answers text at once. Every main request is
  *  logged with the FLAT text of its last user message (tool_result content included) and every mark in the request. */
-async function startMock() {
+async function startMock({ postMs = 0 } = {}) {
   const reqs = [];
   const flat = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => (b.type === 'text' ? b.text : b.type === 'tool_result' ? flat(b.content) : '')).join(' | ') : '');
   const srv = http.createServer((req, res) => {
     let raw = ''; req.on('data', (d) => { raw += d; });
-    req.on('end', () => {
+    req.on('end', async () => {
       let body = null; try { body = JSON.parse(raw); } catch { }
       const msgs = Array.isArray(body?.messages) ? body.messages : [];
       const last = [...msgs].reverse().find((m) => m.role === 'user');
@@ -271,6 +471,8 @@ async function startMock() {
         res.end(S({ id: 'msg_mock', type: 'message', role: 'assistant', model: body?.model || 'mock', content: [{ type: 'text', text: 'ok' }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 1, output_tokens: 1 } }));
         return;
       }
+      // ④ the model takes `postMs` to answer after a tool result — the window a person presses Stop in after the frame rode it
+      if (main && hasTool && postMs > 0) { let closed = false; res.on('close', () => { closed = true; }); await sleep(postMs); if (closed) return; }
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
       const ev = (type, data) => { try { res.write(`event: ${type}\ndata: ${S({ type, ...data })}\n\n`); } catch { } };
       ev('message_start', { message: { id: 'msg_mock_' + reqs.length, type: 'message', role: 'assistant', model: body.model || 'mock', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 1 } } });
@@ -299,19 +501,20 @@ const cliEnv = (home, port) => ({
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_AUTOUPDATER: '1', DISABLE_ERROR_REPORTING: '1', DISABLE_BUG_COMMAND: '1', CLAUDE_CODE_ENABLE_TELEMETRY: '0',
   CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1',
 });
-async function realWrapper(label) {
-  const mock = await startMock();
+async function realWrapper(label, { postMs = 0 } = {}) {
+  const mock = await startMock({ postMs });
   const dir = scratchDir('cst-real-' + label);
   const home = path.join(dir, 'home'), work = path.join(dir, 'work');
   fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(work, { recursive: true });
   const w = spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), path.join(dir, 's.buf'), path.join(dir, 's.json'), claudeBin, '--model', 'claude-sonnet-4-5'], { cwd: work, env: cliEnv(home, mock.port), stdio: ['pipe', 'pipe', 'pipe'] });
+  atExit.push(() => { try { w.kill('SIGKILL'); } catch { } try { endRootedProcesses(dir); } catch { } });
   const recs = []; let lb = '';
   w.stdout.setEncoding('utf8');
   w.stdout.on('data', (d) => {
     lb += d; let i;
     while ((i = lb.indexOf('\n')) >= 0) {
       const l = lb.slice(0, i); lb = lb.slice(i + 1); let r; try { r = JSON.parse(l); } catch { continue; }
-      recs.push(r);
+      r.__at = Date.now(); recs.push(r);
       // the product answers a permission ask over stdio: allow the one Bash the mock asked for
       if (r.type === 'control_request' && r.request?.subtype === 'can_use_tool') w.stdin.write(S({ type: 'control_response', response: { subtype: 'success', request_id: r.request_id, response: { behavior: 'allow', updatedInput: r.request.input } } }) + '\n');
     }
@@ -324,13 +527,42 @@ async function realWrapper(label) {
     hand: (state) => recs.filter((r) => r.type === 'input_handover' && r.state === state).flatMap((r) => r.msg_ids || []),
     results: () => recs.filter((r) => r.type === 'result').length,
     toolUse: () => recs.some((r) => r.type === 'assistant' && S(r.message?.content || []).includes('"tool_use"')),
-    end: () => { try { w.kill('SIGKILL'); } catch { } mock.close(); },
+    queued: (msgId) => recs.some((r) => r.type === 'queued_input' && r.msg_id === msgId),
+    drops: () => recs.filter((x) => x.type === 'queue_dropped').map((d) => ({ items: (d.items || []).length, kept: d.kept || 0, keptIds: d.keptIds || [], landed: d.landed || 0, landedIds: d.landedIds || [] })),
+    follows: () => recs.filter((x) => x.type === 'control_response' && /^vs-stop-follow-/.test(x.response?.request_id || '')).length,
+    // the wrapper ends its CLI with it (SIGTERM, its exit awaited), then whatever is still rooted in the leg's dir
+    end: async () => { await stopWrapper(w); try { endRootedProcesses(dir); } catch { } mock.close(); },
   };
+}
+/** §A ③ (r2): C, stamped, δ ms after a Stop that found B still held by the CLI. */
+async function realLateC(delta) {
+  const r = await realWrapper('late' + delta);
+  r.say('TOOL-5S run a slow command', 'm-a');
+  await until(r.toolUse, 30000);
+  await sleep(1200);
+  r.say('MARK-B handed while the Bash runs', 'm-b', { steer: true });
+  await sleep(1200);
+  const reqsAtStop = r.mock.reqs.length;
+  r.stop();
+  if (delta) { const tgt = Date.now() + delta; while (Date.now() < tgt) await sleep(1); }
+  r.say('MARK-C sent after Stop', 'm-c', { steer: true });
+  await sleep(3500);
+  // C left the held queue (the drain) at…
+  const iq = r.recs.findIndex((y) => y.type === 'queued_input' && y.msg_id === 'm-c');
+  const drained = iq < 0 ? null : r.recs.slice(iq + 1).find((x) => x.type === 'queue_changed' && !(x.items || []).some((it) => it.msgId === 'm-c'));
+  const drainAt = drained ? drained.__at : null;
+  const after = r.mock.reqs.slice(reqsAtStop);
+  const out = {
+    delta, cHeld: r.queued('m-c'), cHanded: r.hand('handed').includes('m-c'), follows: r.follows(), drops: r.drops(),
+    reqsAfterStop: after.map((q) => ({ beforeDrain: drainAt === null || q.t < drainAt, carries: q.all })),
+    answeredC: r.recs.some((x) => x.type === 'assistant' && /MARK-C/.test(S(x.message?.content || []))),
+  };
+  await r.end(); return out;
 }
 if (!claudeBin) skip('§A', 'no claude binary ($VS_CLAUDE_BIN, PATH, ~/.local/bin/claude) — the stand-in legs below still run');
 else {
   console.log(`  (claude ${(() => { try { return execFileSync(claudeBin, ['--version'], { encoding: 'utf8', timeout: 20000, env: { HOME: os.tmpdir(), PATH: '/usr/bin:/bin' } }).trim(); } catch { return '?'; } })()})`);
-  const [lands, stops] = await Promise.all([
+  const [lands, stops, rl0, rl20, rl45, rride] = await Promise.all([
     (async () => {
       const r = await realWrapper('lands');
       r.say('TOOL-6S run a slow command', 'm-a');
@@ -341,7 +573,7 @@ else {
       await sleep(800);
       const after = r.mock.reqs.filter((q) => q.hasTool);
       const out = { handed: r.hand('handed'), landed: r.hand('landed'), results: r.results(), afterTool: after.map((q) => q.lastText.slice(0, 400)), reqs: r.mock.reqs.length };
-      r.end(); return out;
+      await r.end(); return out;
     })(),
     (async () => {
       const r = await realWrapper('stop');
@@ -355,15 +587,30 @@ else {
       await until(() => r.results() >= 2, 15000);
       await sleep(2500);
       const reqsAfterStop = r.mock.reqs.length - reqsAtStop;
-      const follow = r.recs.filter((x) => x.type === 'control_response' && /^vs-stop-follow-/.test(x.response?.request_id || '')).length;
-      const kept = r.hand('kept');
-      const drop = r.recs.filter((x) => x.type === 'queue_dropped').map((d) => ({ items: (d.items || []).length, kept: d.kept || 0 }));
+      const follow = r.follows();
+      const kept = r.drops().flatMap((d) => d.keptIds);
+      const drop = r.drops().map((d) => ({ items: d.items, kept: d.kept }));
       r.say('MARK-D the next message after Stop', 'm-d');
       await until(() => r.mock.reqs.length > reqsAtStop + reqsAfterStop, 20000);
       await sleep(500);
       const next = r.mock.reqs[r.mock.reqs.length - 1];
       const out = { reqsAfterStop, follow, kept, drop, nextCarries: next ? next.all : null };
-      r.end(); return out;
+      await r.end(); return out;
+    })(),
+    realLateC(0), realLateC(20), realLateC(45),
+    (async () => {
+      // ④ B rides the tool result, the model takes 1.5 s to answer it — Stop in that window
+      const r = await realWrapper('ride', { postMs: 1500 });
+      r.say('TOOL-3S run a slow command', 'm-a');
+      await until(r.toolUse, 30000);
+      await sleep(800);
+      r.say('MARK-B handed while the Bash runs', 'm-b', { steer: true });
+      await until(() => r.mock.reqs.some((q) => q.hasTool), 20000);
+      await sleep(300);
+      r.stop();
+      await sleep(2000);
+      const out = { rodeWith: (r.mock.reqs.find((q) => q.hasTool) || {}).lastText?.includes('MARK-B') || false, drops: r.drops(), follows: r.follows() };
+      await r.end(); return out;
     })(),
   ]);
   ok(lands.afterTool.length === 1 && /The user sent a new message while you were working:\s*MARK-B handed while the Bash runs/.test(lands.afterTool[0]) && lands.results === 1, '§A ① the REAL CLI took the stamped frame INTO THE RUNNING TURN: the request after the tool result carries «The user sent a new message while you were working: …» — one turn', lands);
@@ -371,6 +618,11 @@ else {
   ok(stops.follow === 1 && S(stops.kept) === S(['m-b']) && stops.reqsAfterStop === 0, '§A ② Stop while the CLI held it: the CLI started a turn for it, the wrapper interrupted it on its init — NO request reached the model after Stop', stops);
   ok(S(stops.drop) === S([{ items: 0, kept: 1 }]), '§A ② …ONE queue_dropped that puts nothing back and counts the handed frame (the toast\'s «stays with the turn»)', stops);
   ok(Array.isArray(stops.nextCarries) && stops.nextCarries.includes('MARK-B') && stops.nextCarries.includes('MARK-D'), '§A ② …and it stayed in the conversation: the next message\'s request carries it too', stops);
+  for (const l of [rl0, rl20, rl45]) {
+    ok(l.cHeld && !l.cHanded && S(l.drops?.map((d) => d.keptIds)) === S([['m-b']]), `§A ③ the REAL CLI, C stamped δ=${l.delta} ms after Stop: HELD (the Stop window), never handed — ONE record keeps B`, l);
+    ok(l.reqsAfterStop?.length === 1 && l.reqsAfterStop.every((q) => !q.beforeDrain) && l.answeredC, `§A ③ …δ=${l.delta}: NO request reached the model before the stop settled; the one after it is C's own turn (eeece327 at δ=20: a billed follow-up answered B and C)`, l);
+  }
+  ok(rride.rodeWith && S(rride.drops) === S([{ items: 0, kept: 0, keptIds: [], landed: 1, landedIds: ['m-b'] }]) && rride.follows === 0, '§A ④ the REAL CLI, Stop after B rode the tool result: the record says `landed` (the next request has it as read) — never kept (eeece327: kept 1)', rride);
 }
 
 // ── §B THE CHAT WINDOW IN A REAL BROWSER ──
@@ -383,17 +635,21 @@ else {
   const VNC_ENV = await vncEnv();
   const procs = new Set();
   const wt = scratch('cst-wt');
-  const cleanup = () => {
-    for (const p of procs) { try { p.kill('SIGKILL'); } catch { } }
-    try { endRootedProcesses(wt); } catch { }
-    try { execSync(`git worktree remove --force ${wt}`, { cwd: REPO, stdio: 'ignore' }); } catch { }
-    try { fs.rmSync(wt, { recursive: true, force: true }); } catch { }
-  };
-  process.on('exit', cleanup);
-  for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
   const home = scratchHome('cst-home', fs);
   const cwd = scratchDir('cst-cwd');
   const capDir = scratchDir('cst-cap');
+  const chromeDir = scratchDir('cst-chrome');
+  // HYGIENE (r2): every process this leg started — the browser (its profile dir names it), the server and what it
+  // spawned (HOME: the device daemon, the dtach masters, the wrappers), the CLIs (their cwd) — ends BEFORE the scratch
+  // dirs go: scratch.mjs removes them at exit, and a browser still running then wrote its profile back (8 KB left each run)
+  const cleanup = () => {
+    for (const p of procs) { try { p.kill('SIGKILL'); } catch { } }
+    for (const root of [chromeDir, home, wt, cwd, capDir]) { try { endRootedProcesses(root); } catch { } }
+    try { execSync(`git worktree remove --force ${wt}`, { cwd: REPO, stdio: 'ignore' }); } catch { }
+    try { fs.rmSync(wt, { recursive: true, force: true }); } catch { }
+  };
+  atExit.push(cleanup);
+  for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
   const cap = path.join(capDir, 'cli-got.jsonl'), dlv = path.join(capDir, 'delivered.jsonl');
   // the CLI the server spawns: answers the boot probes, else the stand-in (a TOOL- turn's Bash works 6 s)
   const launcher = path.join(scratchDir('cst-bin'), 'claude');
@@ -402,17 +658,29 @@ else {
   execSync(`git worktree add --detach ${wt} HEAD`, { cwd: REPO, stdio: 'ignore' });
   for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`rm -rf ${wt}/${f} && cp -r ${REPO}/${f} ${wt}/${f}`);
   fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(wt, 'node_modules'));
-  const bv = path.join(wt, 'src/lib/build-version.js');
-  if (!fs.existsSync(bv)) fs.writeFileSync(bv, `export const BUILD_VERSION = ${S(JSON.parse(fs.readFileSync(path.join(wt, 'package.json'), 'utf8')).version)};\n`);
+  // ALWAYS this tree's own version (the copied src/ may carry a stale generated one — the page then reloads itself mid-leg)
+  fs.writeFileSync(path.join(wt, 'src/lib/build-version.js'), `export const BUILD_VERSION = ${S(JSON.parse(fs.readFileSync(path.join(wt, 'package.json'), 'utf8')).version)};\n`);
   execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: wt, stdio: 'ignore' });
   const laneWrapperSrc = fs.readFileSync(path.join(wt, 'data/bin/chat-wrapper.js'), 'utf8');
   const [PORT, CDP_PORT] = await freePorts(2);
   let journal = '';
   const { DBUS_SESSION_BUS_ADDRESS: _bus, ...envNoBus } = process.env;   // a scratch server never reaches the desktop bus
-  const srv = spawn(process.execPath, ['server.js'], { cwd: wt, stdio: ['ignore', 'pipe', 'pipe'], env: { ...envNoBus, ...VNC_ENV, PORT: String(PORT), HOME: home, CLAUDE_CMD: launcher, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
-  procs.add(srv);
-  srv.stdout.on('data', (d) => { journal = (journal + d).slice(-8000); }); srv.stderr.on('data', (d) => { journal = (journal + d).slice(-8000); });
-  const chromeDir = scratchDir('cst-chrome');
+  let srv = null;
+  const startServer = () => {
+    srv = spawn(process.execPath, ['server.js'], { cwd: wt, stdio: ['ignore', 'pipe', 'pipe'], env: { ...envNoBus, ...VNC_ENV, PORT: String(PORT), HOME: home, CLAUDE_CMD: launcher, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
+    procs.add(srv);
+    srv.stdout.on('data', (d) => { journal = (journal + d).slice(-8000); }); srv.stderr.on('data', (d) => { journal = (journal + d).slice(-8000); });
+  };
+  // ⑧ a server restart: SIGTERM (its sessions live on in their own processes — the product's promise), its exit awaited
+  const restartServer = async () => {
+    const s = srv; const exited = new Promise((r) => s.once('exit', r));
+    try { s.kill('SIGTERM'); } catch { }
+    const t = setTimeout(() => { try { s.kill('SIGKILL'); } catch { } }, 8000);
+    await exited; clearTimeout(t); procs.delete(s);
+    startServer();
+    return until(async () => (await fetch(`http://127.0.0.1:${PORT}/api/home`)).ok, 60000, 200);
+  };
+  startServer();
   const fontEnv = runnerFontEnv(scratchDir('cst-fonts'));
   const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,950', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...envNoBus, ...fontEnv } });
   procs.add(chrome);
@@ -430,13 +698,15 @@ else {
   // ④'s session: spawned while the tree still had the OLD wrapper (a session that predates the update) — then the new one
   // goes back in place; a wrapper process runs the code it started with for the rest of its life
   let s2 = null;
-  const sidecarVerbs = () => { const d = path.join(wt, 'data', 'session-buffers'); try { return fs.readdirSync(d).filter((f) => f.endsWith('.json')).map((f) => { try { return S(JSON.parse(fs.readFileSync(path.join(d, f), 'utf8')).caps?.queueVerbs || null); } catch { return null; } }); } catch { return []; } };
+  // a wrapper process that has loaded its code has written its sidecar (both start with the .354 three: this one gains the
+  // steer pair at its CLI's first state word, r2) — so the swap waits on the COUNT of sidecars carrying caps
+  const sidecars = () => { const d = path.join(wt, 'data', 'session-buffers'); try { return fs.readdirSync(d).filter((f) => f.endsWith('.json')).filter((f) => { try { return Array.isArray(JSON.parse(fs.readFileSync(path.join(d, f), 'utf8')).caps?.queueVerbs); } catch { return false; } }).length; } catch { return 0; } };
   if (baseWrapperSrc) {
-    await until(() => sidecarVerbs().includes(S(['remove', 'steer', 'steer-all', 'reorder', 'edit'])), 15000, 100);   // s1's wrapper is up
+    await until(() => sidecars() >= 1, 15000, 100);   // s1's wrapper is up
     fs.writeFileSync(path.join(wt, 'data/bin/chat-wrapper.js'), baseWrapperSrc);
     s2 = await create('c2', 'steer old wrapper');
-    // the old process has loaded its code once its sidecar says so — only then does the new file go back
-    await until(() => sidecarVerbs().includes(S(['remove', 'reorder', 'edit'])), 15000, 100);
+    // the old process has loaded its code once its sidecar exists — only then does the new file go back
+    await until(() => sidecars() >= 2, 15000, 100);
     fs.writeFileSync(path.join(wt, 'data/bin/chat-wrapper.js'), laneWrapperSrc);
   }
   ok(!!s1 && (!baseWrapperSrc || !!s2), '§B two claude chat sessions: one on this wrapper, one on the 6428c67e wrapper (④)', S(frames.filter((m) => m.reqId === 'c1' || m.reqId === 'c2')).slice(0, 400));
@@ -482,7 +752,56 @@ else {
   const bubble = (k, text) => ev(`(() => { const m = (window.__${k}._messages || []).filter((x) => x.role === 'user' && JSON.stringify(x.content).includes(${S(text)})).pop(); const el = m && document.querySelector('[data-steer-leg="${k}"] [data-msg-id="' + m.id + '"]'); const chip = el && el.querySelector('[data-queue-state]'); return { state: m ? m.queueState || null : null, chip: chip ? chip.dataset.queueState : null, label: chip ? chip.textContent : null }; })()`);
   const STRIP = (k) => `(() => { const s = document.querySelector('[data-steer-leg="${k}"] .chat-queue-strip'); return { visible: !!(s && !s.classList.contains('hidden') && s.getBoundingClientRect().height > 0), text: s ? s.textContent : '', edits: s ? s.querySelectorAll('[data-queue-op="edit"]').length : 0, removes: s ? s.querySelectorAll('[data-queue-op="remove"]').length : 0, steers: s ? s.querySelectorAll('[data-queue-op="steer"]').length : 0 }; })()`;
   const HINT = (k) => `(() => { const root = document.querySelector('[data-steer-leg="${k}"]'); const h = root && root.querySelector('.chat-send-hint'); const hb = root && root.querySelector('.chat-hold-btn'); const sb = root && root.querySelector('.chat-steer-btn'); const vis = (e) => !!e && getComputedStyle(e).display !== 'none' && e.getBoundingClientRect().width > 0; return { hint: h && vis(h) ? h.textContent : '', hold: vis(hb), bolt: vis(sb) }; })()`;
-  const waitTurnEnd = (k) => until(async () => !(await streaming(k)), 20000, 150);
+  const waitTurnEnd = (k, ms = 20000) => until(async () => !(await streaming(k)), ms, 150);
+  /** Every user bubble holding `text` in window `k`: how many, and each one's chip (⑧ — the same message is drawn once). */
+  const bubbles = (k, text) => ev(`(window.__${k}._messages || []).filter((x) => x.role === 'user' && JSON.stringify(x.content).includes(${S(text)})).map((m) => { const el = document.querySelector('[data-steer-leg="${k}"] [data-msg-id="' + m.id + '"]'); const chip = el && el.querySelector('[data-queue-state]'); return { state: m.queueState || null, chip: chip ? chip.dataset.queueState : null }; })`);
+  /** The window of `created` in this page — the one the restored layout drew, else a fresh attach — once its history is in. */
+  const reopen = (created, key, name) => ev(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    let v = null;
+    for (let i = 0; i < 40 && !v; i++) { v = [...window.app.sessions.values()].find((x) => x && x._chatInput && !x._disposed && x.sessionId === ${S(created.sessionId)}) || null; if (!v) await sleep(250); }
+    if (!v) { const winId = window.app.attachSession(${S(created.sessionId)}, ${S(name)}, ${S(cwd)}, { mode: 'chat', backend: 'claude' }).id; for (let i = 0; i < 150; i++) { v = window.app.sessions.get(winId); if (v && v._chatInput && !v._readOnly) break; await sleep(200); } }
+    for (let i = 0; i < 150 && v && !(v._messages || []).length; i++) await sleep(200);
+    if (v) { window[${S('__' + key)}] = v; v._container.dataset.steerLeg = ${S(key)}; }
+    return { ok: !!(v && v._chatInput), ro: v ? !!v._readOnly : null, n: v ? (v._messages || []).length : 0 };
+  })()`);
+  /** ⑦ A SECOND TAB on the same conversation (its own CDP socket). Its layout never travels — a second tab saving its
+   *  layout closes the first one's window (the acceptance probe's isolation, kept): only the conversation is shared. */
+  const openTab = async (created, name) => {
+    const t = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
+    const sock = new WebSocket(t.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
+    await new Promise((r) => sock.on('open', r));
+    let sq = 0; const pd = new Map();
+    sock.on('message', (d) => { const m = JSON.parse(d); if (m.id && pd.has(m.id)) { pd.get(m.id)(m); pd.delete(m.id); } if (m.method === 'Runtime.exceptionThrown') pageErrors.push('tab 2: ' + (m.params?.exceptionDetails?.exception?.description || m.params?.exceptionDetails?.text || '?')); });
+    const c2 = (method, params = {}) => new Promise((res) => { const id = ++sq; pd.set(id, res); sock.send(S({ id, method, params })); });
+    const e2 = async (expr) => { const r = await c2('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error(S(r.result.exceptionDetails).slice(0, 600)); return r.result?.result?.value; };
+    await c2('Runtime.enable'); await c2('Page.enable');
+    await c2('Emulation.setCPUThrottlingRate', { rate: THROTTLE });
+    await c2('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+    await c2('Page.navigate', { url: `http://127.0.0.1:${PORT}/?cb=${Date.now()}-tab2` });
+    await until(() => e2('!!(window.app && window.app.ready)'), 45000, 250);
+    await e2('window.app.ready.then(() => true)');
+    await e2('(() => { const lm = window.app.layoutManager; lm._handleRemoteSync = () => {}; lm.scheduleAutoSave = () => {}; return true; })()');
+    const o = await e2(`(async () => {
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+      let v = [...window.app.sessions.values()].find((x) => x && x._chatInput && !x._disposed && x.sessionId === ${S(created.sessionId)}) || null;
+      if (!v) { const winId = window.app.attachSession(${S(created.sessionId)}, ${S(name)}, ${S(cwd)}, { mode: 'chat', backend: 'claude' }).id; for (let i = 0; i < 150; i++) { v = window.app.sessions.get(winId); if (v && v._chatInput && !v._readOnly) break; await sleep(200); } }
+      window.__vt = v; return { ok: !!(v && v._chatInput && !v._readOnly) };
+    })()`);
+    const altEnter = async (text) => {
+      await c2('Page.bringToFront');
+      await e2('(() => { const t = window.__vt._chatInput._textarea; t.focus(); return document.activeElement === t; })()');
+      await c2('Input.insertText', { text });
+      for (const type of ['keyDown', 'keyUp']) await c2('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, modifiers: 1 });
+    };
+    // THE LAG: this composer believes no turn runs — a pinned getter (every event that would flip it is kept aside)
+    const lag = (on) => e2(on
+      ? '(() => { const ci = window.__vt._chatInput; ci.__real = ci._isStreaming; Object.defineProperty(ci, "_isStreaming", { get() { return false; }, set(v) { ci.__real = v; }, configurable: true }); return ci._isStreaming; })()'
+      : '(() => { const ci = window.__vt._chatInput; const r = ci.__real; delete ci._isStreaming; ci._isStreaming = r; delete ci.__real; return ci._isStreaming; })()');
+    const sent = () => e2('(window.__vtSent || [])');
+    await e2('(() => { const ws = window.__vt._chatInput._ws; const orig = ws.send.bind(ws); window.__vtSent = []; ws.send = (m) => { try { if (m && m.type === "chat-input") window.__vtSent.push({ steer: m.steer === true, text: String(m.text || "").slice(0, 60) }); } catch { } return orig(m); }; return true; })()');
+    return { o, altEnter, lag, sent, ev: e2, close: async () => { try { sock.close(); } catch { } try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t.id}`); } catch { } await cdp('Page.bringToFront'); } };
+  };
   /** What the CLI got, where the stand-in took it, and the wrapper's own log — printed beside a red assert. */
   const dump = () => {
     let wlog = ''; try { wlog = fs.readFileSync(path.join(wt, 'data', 'session-buffers', 'chat-wrapper.log'), 'utf8').split('\n').slice(-25).join('\n'); } catch { }
@@ -551,13 +870,39 @@ else {
     ok(stopped && toasts.filter((t) => /1 message\(s\) you sent into the turn stay with it/.test(t)).length === 1, '⑤ Stop with a handed message ⇒ ONE toast «1 message(s) you sent into the turn stay with it»', { stopped, toasts });
     ok(dChip.chip === 'kept' && /Stays with the stopped turn/.test(dChip.label || '') && !answeredD && box === '', '⑤ …the bubble reads «Stays with the stopped turn», NOTHING answered it after Stop, and the box stays empty (it is the turn\'s, never put back)', { dChip, answeredD, box });
 
+    // ⑦ (r2) A SECOND TAB whose streaming flag LAGS: its Alt+Enter mid-tool is still the person's HOLD
+    const tab2 = await openTab(s1, 'steer new');
+    ok(tab2.o && tab2.o.ok, '§B ⑦ a second tab opened the same conversation live', tab2.o);
+    await typeSend('v1', 'TOOL-5 a turn two tabs watch');
+    await until(() => streaming('v1'), 10000, 100);
+    await until(async () => (await toolCards('v1')) >= 4, 10000, 100);
+    await until(() => tab2.ev('!!window.__vt._chatInput._isStreaming'), 5000, 100);
+    const lagged = await tab2.lag(true);
+    await tab2.altEnter('LAG-G held from the lagging tab');
+    const reachedMidTurn = await until(() => cliGot('LAG-G held'), 1500, 50);
+    await cdp('Page.bringToFront');
+    await until(async () => (await ev(STRIP('v1'))).visible, 4000, 100);
+    const strip7 = await ev(STRIP('v1'));
+    const gChip = await until(async () => (await bubble('v1', 'LAG-G')).chip === 'queued', 3000, 80) ? await bubble('v1', 'LAG-G') : await bubble('v1', 'LAG-G');
+    const sent7 = await tab2.sent();
+    await tab2.lag(false);
+    await waitTurnEnd('v1');
+    await until(() => delivered().some((d) => d.how === 'turn' && d.text === 'LAG-G held from the lagging tab'), 8000, 100);
+    const gOwn = delivered().some((d) => d.how === 'turn' && d.text === 'LAG-G held from the lagging tab');
+    await tab2.close();
+    ok(lagged === false && S(sent7) === S([{ steer: false, text: 'LAG-G held from the lagging tab' }]) && !reachedMidTurn, '⑦ the lagging tab\'s Alt+Enter went out UNSTAMPED and the CLI never got it mid-turn (eeece327: stamped — the hold became a hand-over)', { lagged, sent7, reachedMidTurn });
+    ok(strip7.visible && /LAG-G held from the lagging tab/.test(strip7.text) && gChip.chip === 'queued' && gOwn, '⑦ …a strip row and «Queued» on the bubble, and it ran as its own turn after this one', { strip7, gChip, gOwn });
+    await waitTurnEnd('v1');
+
     // ⑥ ≤ 768 px: the hold button beside Send (Send itself hands the message over). ⑤'s toast sits over the composer's
     // controls on a phone for its 6 s — a person taps after it is gone, so the leg starts after it too
     await until(async () => !(await ev(`document.querySelectorAll('#global-toasts .global-toast').length`)), 12000, 200);
     await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
     await sleep(800);
     // the phone face sends with its Send button (a touch keyboard's Enter is a newline there)
-    await focus('v1'); await cdp('Input.insertText', { text: 'TOOL-4 a phone turn' });
+    const phoneIdle = await ev(HINT('v1'));
+    // ⑧ needs this turn alive across a server restart: its tool runs three times as long (LONGER-)
+    await focus('v1'); await cdp('Input.insertText', { text: 'TOOL-4 LONGER- a phone turn' });
     await realClick('[data-steer-leg="v1"] .chat-send-btn');
     await until(() => streaming('v1'), 10000, 100);
     await sleep(400);
@@ -568,9 +913,30 @@ else {
     const strip6 = await ev(STRIP('v1'));
     await shot('6-phone-hold-button');
     ok(phone.hold && !phone.bolt && phone.hint === '', '⑥ ≤ 768 px mid-turn: the hold button shows beside Send (no bolt — Send itself hands it over), the hint line is hidden', phone);
+    ok(phoneIdle.hold && !phoneIdle.bolt, '⑥ …and at IDLE too: the hold door is the capability\'s, never the streaming flag\'s (r2 — a lagging client still has it; at idle it is a plain send)', phoneIdle);
     ok(held6 && strip6.visible && /PHONE-E held with the button/.test(strip6.text) && !cliGot('PHONE-E held'), '⑥ …a tap on it HOLDS the message (a strip row; the CLI never got it)', { held6, miss: realClick.lastMiss, strip6 });
     await cdp('Emulation.clearDeviceMetricsOverride');
-    await waitTurnEnd('v1');
+
+    // ⑧ (r2) THE SERVER RESTARTS while PHONE-E is still held, and the page reloads: every message the person sent mid-turn
+    // is a record of the conversation — its bubble comes back ONCE, with its last chip
+    const restarted = await restartServer();
+    await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?cb=${Date.now()}-restarted` });
+    await until(() => ev('!!(window.app && window.app.ready)'), 45000, 250);
+    await ev('window.app.ready.then(() => true)');
+    const o1r = await reopen(s1, 'v1', 'steer new');
+    await until(async () => (await bubbles('v1', 'PHONE-E')).some((b) => b.chip === 'queued'), 8000, 150);
+    const after8 = {};
+    for (const t of ['ENTER-B', 'ALT-C', 'STOP-D', 'LAG-G', 'PHONE-E']) after8[t] = await bubbles('v1', t);
+    const strip8 = await ev(STRIP('v1'));
+    await shot('8-after-restart');
+    ok(restarted && o1r && o1r.ok, '§B ⑧ the server restarted mid-turn and the reloaded page reopened the conversation live', { restarted, o1r, journal: journal.slice(-600) });
+    ok(S(after8['ENTER-B'].map((b) => b.chip)) === S(['steered']) && S(after8['ALT-C'].map((b) => b.chip)) === S(['steered']) && S(after8['STOP-D'].map((b) => b.chip)) === S(['kept']) && S(after8['LAG-G'].map((b) => b.chip)) === S([null]), '⑧ after the restart each handed message is back ONCE with its last chip — «Steered», «Steered», «Stays with the stopped turn» — and the one that was held and ran, once with none (eeece327: gone)', after8);
+    ok(S(after8['PHONE-E'].map((b) => b.chip)) === S(['queued']) && strip8.visible && /PHONE-E held with the button/.test(strip8.text), '⑧ …the message STILL HELD across it: its bubble «Queued» and its strip row (the base lost a held bubble the same way)', { phoneE: after8['PHONE-E'], strip8 });
+    await waitTurnEnd('v1', 40000);
+    await until(() => delivered().some((d) => d.how === 'turn' && d.text === 'PHONE-E held with the button'), 8000, 100);
+    await sleep(600);
+    const eAfter = await bubbles('v1', 'PHONE-E');
+    ok(S(eAfter.map((b) => b.chip)) === S([null]) && delivered().some((d) => d.how === 'turn' && d.text === 'PHONE-E held with the button'), '⑧ …and when the turn ended it ran — still one bubble', eAfter);
   }
 
   // ④ the OLD wrapper's session: its hello names no steer
@@ -593,6 +959,9 @@ else {
   ok(pageErrors.length === 0, '§B no page exceptions', pageErrors.slice(0, 3));
   try { cdpWs.close(); } catch { }
   try { ctl.close(); } catch { }
+  // the browser, the server, its daemon and every session process end NOW — before the exit hook removes their dirs
+  cleanup();
+  await sleep(500);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skipped} skipped)` : `\nALL PASS (${pass}${skipped ? `, ${skipped} skipped` : ''})`);

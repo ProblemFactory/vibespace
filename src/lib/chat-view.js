@@ -1876,11 +1876,18 @@ class ChatView {
     const queued = new Map();
     for (const m of this._messages || []) if (m?.queueState) queued.set(m.id, m);
     if (!queued.size) return;   // nothing on screen claims a queue state
-    const onSteer = this._queueCaps().steer ? (m) => this._steerQueuedMessage(m) : null;
     for (const [id, el] of this._elements) {
       const msg = queued.get(id);
-      if (msg && el) ChatRenderers.applyQueueChip(el, msg, onSteer);
+      if (msg && el) ChatRenderers.applyQueueChip(el, msg, this._queueChipSteer(msg));
     }
+  }
+
+  /** The chip's ⚡ for THIS bubble: only where the harness steers AND its queue row may join the turn — claude marks a
+   *  command and a frame VibeSpace typed `steerable: false` (lane claude-steer-inject r2): no control that only refuses. */
+  _queueChipSteer(msg) {
+    if (!this._queueCaps().steer) return null;
+    const row = (this._queue || []).find((it) => it.msgId && this._msgIdOf(msg) === it.msgId);
+    return row && row.steerable === false ? null : (m) => this._steerQueuedMessage(m);
   }
 
   /** THE choke point for every queue action (strip buttons, row Enter, bubble
@@ -4225,7 +4232,7 @@ class ChatView {
     // the whole bubble (markdown, images, fold state) for a one-word badge.
     if ('queueState' in fields) {
       const el = this._elements.get(id);
-      if (el) ChatRenderers.applyQueueChip(el, msg, this._queueCaps().steer ? (m) => this._steerQueuedMessage(m) : null);
+      if (el) ChatRenderers.applyQueueChip(el, msg, this._queueChipSteer(msg));
     }
 
     // Status transitions
@@ -4589,7 +4596,9 @@ class ChatView {
       if (op.others > 0) parts.push(t('{k} other attachment(s) were not put back — attach them again', { k: op.others }));
       if (op.cut > 0) parts.push(t('{m} message(s) came back shortened', { m: op.cut }));
       if (op.omitted > 0) parts.push(t('{k} more queued message(s) were too long to put back', { k: op.omitted }));
-      // claude (lane claude-steer-inject): what the person had already HANDED to the turn is the turn's — never put back
+      // claude (lane claude-steer-inject): what the person had already HANDED to the turn is the turn's — never put back:
+      // read by the agent already, or still held by the CLI (it stays in the conversation, unanswered)
+      if (op.landed > 0) parts.push(t('{k} message(s) you sent into the turn had already reached the agent', { k: op.landed }));
       if (op.kept > 0) parts.push(t('{k} message(s) you sent into the turn stay with it', { k: op.kept }));
       if (parts.length) showToast(parts.join(' · '), { duration: 6000 });
       return;

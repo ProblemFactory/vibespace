@@ -216,12 +216,15 @@ class MessageWindow {
     const d = queueDroppedOf(record);
     if (!d) return;
     for (const it of d.items) this._stampQueueChip(it.msgId, it.started ? 'stopped' : 'removed', emit);
+    // claude (lane claude-steer-inject r2): the handed frames' chips come from THIS record — read, or kept by the CLI
+    for (const id of d.landedIds || []) this._stampQueueChip(id, 'steered', emit);
+    for (const id of d.keptIds || []) this._stampQueueChip(id, 'kept', emit);
     // ONE toast per Stop: the same record fed twice (the door's own idempotency key, bounded) says nothing new
     const seen = this._putbackToasted || (this._putbackToasted = []);
     if (seen.includes(d.dropId)) return;
     seen.push(d.dropId); if (seen.length > 32) seen.shift();
     const facts = putbackNotice(d);
-    if (emit && (facts.n || facts.images || facts.others || facts.cut || facts.omitted || facts.kept)) this._emit({ op: 'meta', subtype: 'queue-putback', dropId: d.dropId, ...facts }); // nothing to say ⇒ no toast (started ⊆ n)
+    if (emit && (facts.n || facts.images || facts.others || facts.cut || facts.omitted || facts.kept || facts.landed)) this._emit({ op: 'meta', subtype: 'queue-putback', dropId: d.dropId, ...facts }); // nothing to say ⇒ no toast (started ⊆ n)
   }
 
   // Session-state reads the attach payload asks every normalizer for; a

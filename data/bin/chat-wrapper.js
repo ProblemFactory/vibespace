@@ -46,8 +46,8 @@
 // never editable again, and witnessed — `input_handover {state}`: 'handed'
 // (written), 'landed' (a tool result after the write, then the model spoke —
 // it rode that request), 'own-turn' (the turn ended first: the CLI runs it as
-// a turn of its own, the gate waits for that turn before the next held frame),
-// 'kept' (Stop). An unstamped frame (Alt+Enter, every frame VibeSpace types,
+// a turn of its own, the gate waits for that turn before the next held frame);
+// what Stop meant for each is Stop's own record (below). An unstamped frame (Alt+Enter, every frame VibeSpace types,
 // a slash command — the CLI never takes a command into a turn) is HELD exactly
 // as above; `steer` / `steer-all` hand a held row over later (the ⚡).
 // STOP WITH A HANDED FRAME THE CLI HAS NOT TAKEN IN: measured, the CLI RUNS it
@@ -57,7 +57,34 @@
 // line (6/6 measured: no request reaches the model; the frame stays in the
 // conversation as «[Request interrupted by user]» and the model reads it with
 // the next message) — it stays with the turn, nothing runs after Stop, and the
-// put-back record counts it (`kept`) so the toast says so.
+// put-back record names it (`keptIds`) so the toast says so.
+//
+// THE DOOR NEEDS PROOF, STOP IS A WINDOW, ONE RECORD SAYS EACH FRAME'S FATE
+// (acceptance r2). The hand-over trusts the CLI's STATE WORDS
+// (`session_state_changed`, 2.1.257+ with CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS):
+// only they tell "the turn ended and the CLI now runs what it holds" from "it
+// went idle". A CLI that never says one (an older build on a host, the switch
+// unset) left this process waiting for a turn it never saw — every later held
+// frame stuck for the life of the wrapper. So the door is ADVERTISED ('steer' /
+// 'steer-all' in the sidecar caps and every queue_changed) only from the FIRST
+// state word this process reads, and a stamped frame that arrives before it is
+// held like any other (the real CLI says 'running' before its first init, so a
+// session proves itself the moment its first turn starts). Stop opens a WINDOW
+// that lasts until the CLI settles (its 'idle' after the interrupted result; the
+// result itself on a CLI without state words): a frame that arrives inside it is
+// HELD as a plain queued send and runs when the window closes, in order — never
+// handed to a turn being stopped (measured: a frame 15–22 ms after Stop became a
+// SECOND follow-up turn, answered) — and EVERY turn the CLI starts inside it for
+// frames it held at Stop is interrupted on its init line IN THE SAME TICK (the
+// CLI's request leaves ~12 ms after that line, a second interrupt is acked in
+// 8–10 ms: 25 ms late was answered). Nothing here waits for ever: 2 s after the
+// CLI's last result (its own follow-up starts within ~14 ms of it) the window
+// and the owed turn are DISARMED with one log line naming them. Stop's ONE
+// `queue_dropped` says what happened to EACH frame: `items` (held here — back in
+// the box), `keptIds` (handed, still held by the CLI — they stay in the
+// conversation as «[Request interrupted by user]»), `landedIds` (the model had
+// read them already); a frame whose OWN turn Stop ended is a stopped turn, in
+// none of them.
 
 const fs = require('fs');
 const path = require('path');
@@ -125,9 +152,12 @@ try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); } catch {}
 // the composer draws «Enter queues» alone there. The server gates every queue frame on THIS advert
 // (wrapperCaps), never on the harness row alone: a claude session spawned
 // before 2.369.354 runs an older wrapper that would forward a `queue-op` line
-// to the CLI verbatim.
+// to the CLI verbatim. The advert starts as the .354 three and gains the steer
+// pair at the CLI's first state word (proveState — the head of this file says
+// why): until then this process holds every frame, exactly like a .354 one.
 const CLAUDE_QUEUE_VERBS = ['remove', 'steer', 'steer-all', 'reorder', 'edit'];
-const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true, inputQueue: true, queueVerbs: CLAUDE_QUEUE_VERBS, queueResync: true }, queue: [] };
+const CLAUDE_HOLD_VERBS = ['remove', 'reorder', 'edit'];
+const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true, inputQueue: true, queueVerbs: CLAUDE_HOLD_VERBS, queueResync: true }, queue: [] };
 let metaTimer = null;
 
 // replaced, never rewritten in place (ci358-reds item 7): a hub read between writeFileSync's truncate and its bytes saw an
@@ -219,11 +249,14 @@ let dropSeq = 0;         // the put-back record's id: `${pid}-${n}` — the serv
 const QUEUE_EDIT_MAX_CHARS = 20000;   // = codex/acp: a longer text offers no edit control (the server refuses a longer edit)
 // THE HAND-OVER (2.369.361 — the head of this file says why): frames given to the CLI while a turn runs
 const handed = [];          // [{id, msgId, ts, phase: 'handed' | 'riding'}] — written, not yet witnessed taken in
-let handedThisTurn = [];    // msgIds handed into the turn now running (taken in or not): what Stop says stays with it
+let landedThisTurn = [];    // msgIds witnessed INTO the turn now running (the model read them): Stop's record names them
 let cliOwesTurn = false;    // the turn ended before the CLI took handed frames in: it runs them as a turn of its own next
-let stopAsked = false;      // an interrupt went to the CLI during the turn now running
-let stopFollowUp = false;   // …and frames it still holds will start a turn of their own: that turn's init gets a 2nd interrupt
+let stateProven = false;    // this CLI has said a state word: the door is advertised and a stamp is honoured (r2)
+let stopping = null;        // THE STOP WINDOW: {held, follows} from the person's Stop until the CLI settles (r2)
+let boundTimer = null;      // the ceiling on cliOwesTurn / stopping: armed at a result, never while a turn runs
+const SETTLE_BOUND_MS = 2000;
 let handSeq = 0;
+const queueVerbs = () => (stateProven ? CLAUDE_QUEUE_VERBS : CLAUDE_HOLD_VERBS);
 
 const frameBlocks = (o) => {
   const c = o && o.message ? o.message.content : null;
@@ -278,11 +311,24 @@ function publishQueue() {
     ts: q.ts,
     kind: q.origin ? 'system' : 'user',
     from: null,
+    // a row VibeSpace typed, or a command, never joins a running turn — the strip draws no ⚡ on it (steerHeld says why)
+    ...(q.origin || /^\s*\//.test(q.text || '') ? { steerable: false } : {}),
   }));
   meta.queue = items;
   scheduleMeta();
   // `verbs` rides every publication — the in-band twin of the sidecar advert.
-  record('queue_changed', { items, turn_id: null, verbs: CLAUDE_QUEUE_VERBS });
+  record('queue_changed', { items, turn_id: null, verbs: queueVerbs() });
+}
+
+/** THE PROOF (acceptance r2): the CLI's first state word — from here on the hand-over door is advertised (the sidecar
+ *  NOW, not in 500 ms: the server gates a ⚡ on it) and a `webui_steer` stamp is honoured. Never revoked. */
+function proveState() {
+  stateProven = true;
+  meta.caps.queueVerbs = CLAUDE_QUEUE_VERBS;
+  if (metaTimer) { clearTimeout(metaTimer); metaTimer = null; }
+  persistMeta();
+  publishQueue();
+  log('the CLI says its turn state — the hand-over door is advertised');
 }
 
 /** A frame goes to the CLI: the gate opens (when the frame can open a turn) and a frame-file body joins the history
@@ -293,12 +339,27 @@ function forwardUser(line, o, buffered) {
   if (buffered) { buffer += line + '\n'; schedulePersist(); }
 }
 
+/** A MID-TURN FRAME THE PERSON SENT IS A RECORD OF THE CONVERSATION (acceptance r2). The CLI says nothing of it on stdout
+ *  and its transcript keeps it only as an attachment (taken in) or not at all (held here, or still waiting in the CLI),
+ *  so after a server restart its bubble — and the chip the records below stamp on it — was gone. ONE copy goes into the
+ *  HISTORY BUFFER only (never stdout: the live view drew the bubble at send), shaped as the server's own record of a
+ *  sent message (`_fromWebui` + `msgId`) and marked `webui_copy`: src/server/session-store.js keeps it through a restart,
+ *  src/message-manager.js draws it once (the same msgId is the same bubble; the CLI's own later record of the same words
+ *  claims it). A frame over 256 KB is copied as its words alone (the 500 KB ring is the conversation's, not a picture's).
+ *  It replaces a frame-file body's raw line (returns true): one record per frame. */
+function recordPersonFrame(o, msgId) {
+  let content = o.message.content;
+  if (JSON.stringify(content).length > 256 * 1024) content = frameBlocks(o).filter((b) => b && b.type === 'text');
+  buffer += JSON.stringify({ type: 'user', message: { role: 'user', content }, msgId, _fromWebui: true, webui_copy: true, timestamp: new Date().toISOString() }) + '\n';
+  schedulePersist();
+  return true;
+}
+
 /** A frame goes to the CLI WHILE A TURN RUNS: never held, never editable again — witnessed into the turn (processLine). */
 function handOver(line, { buffered = false, msgId = '', id = null, via = 'enter' } = {}) {
   sendChild(line);
   if (buffered) { buffer += line + '\n'; schedulePersist(); }
   handed.push({ id: id || `h${++handSeq}-${process.pid}`, msgId, ts: Date.now(), phase: 'handed' });
-  if (msgId) handedThisTurn.push(msgId);
   record('input_handover', { state: 'handed', msg_ids: msgId ? [msgId] : [], via });
   log(`handed a frame to the running turn (${via}, ${handed.length} not yet taken in)`);
 }
@@ -310,13 +371,34 @@ function settleHanded(state) {
   return ids;
 }
 
+/** The ceiling on every "until the CLI says so" flag (acceptance r2): armed at a result while the CLI owes a turn or a
+ *  Stop has not settled — its own follow-up starts within ~14 ms of that result (measured), so 2 s of silence means it
+ *  is not coming — and never while a turn runs (that turn's own result comes first). ONE log line names what it ends. */
+function armBound() {
+  clearTimeout(boundTimer);
+  boundTimer = (cliOwesTurn || stopping) && !turnBusy ? setTimeout(onBound, SETTLE_BOUND_MS) : null;
+}
+function onBound() {
+  boundTimer = null;
+  if (turnBusy) return;
+  const what = [];
+  if (cliOwesTurn) { cliOwesTurn = false; what.push(`the turn owed for ${settleHanded('own-turn').length} handed frame(s)`); }
+  if (stopping) { what.push(`the Stop window (${stopping.held} frame(s) the CLI held, ${stopping.follows} follow-up turn(s) interrupted)`); stopping = null; }
+  if (what.length) log(`bound: nothing settled ${SETTLE_BOUND_MS} ms after the CLI's last result — disarmed ${what.join(' + ')}`);
+  drainPromptQueue();
+}
+
 /** A user frame from the server: forwarded when no turn runs; while one runs, HANDED OVER when the person's door says so
- *  (`webui_steer` — plain Enter on a Claude conversation), else HELD (published + `queued_input` for its bubble). */
+ *  (`webui_steer` — plain Enter on a Claude conversation) AND this CLI has proven its state words AND no Stop is
+ *  settling, else HELD (published + `queued_input` for its bubble) — a stamp is a request, never a bypass of the gate. */
 function submitUser(line, o, { buffered = false } = {}) {
-  if (!(turnBusy || cliOwesTurn) || !opensTurn(o)) { forwardUser(line, o, buffered); return; }
+  if (!(turnBusy || cliOwesTurn || stopping) || !opensTurn(o)) { forwardUser(line, o, buffered); return; }
   const msgId = typeof o.webui_msg_id === 'string' ? o.webui_msg_id : '';
   const origin = typeof o.webui_origin === 'string' && o.webui_origin ? o.webui_origin : null;
-  if (o.webui_steer === true && !origin && !isCommandFrame(o)) { handOver(line, { buffered, msgId, via: 'enter' }); return; }
+  // the person's words are a record of the conversation the moment they reach us — before any chip names them (a slash
+  // command is not: the CLI records the command it runs in a shape of its own)
+  if (!origin && msgId && !isCommandFrame(o) && recordPersonFrame(o, msgId)) buffered = false;
+  if (o.webui_steer === true && !origin && !isCommandFrame(o) && stateProven && !stopping) { handOver(line, { buffered, msgId, via: 'enter' }); return; }
   promptQueue.push({ id: `q${++queueSeq}-${process.pid}`, ts: Date.now(), line, msgId, origin, text: frameText(o), preview: framePreview(o), attachments: frameAttachments(o), buffered });
   publishQueue();
   record('queued_input', { msg_id: msgId, turn_id: null });
@@ -325,7 +407,7 @@ function submitUser(line, o, { buffered = false } = {}) {
 
 /** The turn ended: ONE held frame goes, the next waits for the end of the turn it starts (order = the strip's order). */
 function drainPromptQueue() {
-  if (turnBusy || cliOwesTurn || !promptQueue.length) return;
+  if (turnBusy || cliOwesTurn || stopping || !promptQueue.length) return;
   const next = promptQueue.shift();
   publishQueue();
   let o = null; try { o = JSON.parse(next.line); } catch {}
@@ -335,33 +417,65 @@ function drainPromptQueue() {
 
 /** STOP MEANS STOP (the 2026-09-07 law) AND PUTS IT BACK (2026-10-24): every held frame is dropped — its own
  *  `queue_op_result {reason:'stopped'}` FIRST (the normalizer clears a chip that left the queue without a result as
- *  "it ran"), then ONE `queue_dropped` of the person's rows (none ⇒ no record), then the emptied `queue_changed` —
- *  all BEFORE the interrupt reaches the CLI, so nothing held can run after it. */
+ *  "it ran"), then ONE `queue_dropped` that says what happened to EACH frame of this turn (none ⇒ no record), then the
+ *  emptied `queue_changed` — all BEFORE the interrupt reaches the CLI, so nothing held can run after it. And the STOP
+ *  WINDOW opens (acceptance r2): until the CLI settles, every frame is held and every turn it starts for a frame it
+ *  still holds is interrupted on its init (processLine). */
 function dropHeldForStop() {
-  // a handed frame is the turn's now: Stop never takes it back (the toast counts it — `kept`); one the CLI still holds
-  // would RUN after the interrupt, so the turn it starts for it gets a second interrupt at its init (processLine)
-  const kept = handedThisTurn.length;
-  if (turnBusy) stopAsked = true;
-  else if (cliOwesTurn) stopFollowUp = true;
-  handedThisTurn = [];
-  if (!promptQueue.length) {
-    if (kept) record('queue_dropped', { ...droppedRecordFor([], { dropId: `${process.pid}-${++dropSeq}`, turnId: null }), kept });
-    return;
-  }
+  // EACH handed frame's fate, as the wrapper witnessed it: one the model already read (`riding` — the tool result took it
+  // in — or landed) stays in the conversation as read; one the CLI still holds would RUN after the interrupt (measured),
+  // so it is KEPT — the turn the CLI starts for it is interrupted on its init. Neither is put back: they are the turn's.
+  const keptIds = handed.filter((h) => h.phase === 'handed').map((h) => h.msgId).filter(Boolean);
+  const landedIds = landedThisTurn.concat(handed.filter((h) => h.phase === 'riding').map((h) => h.msgId).filter(Boolean));
+  const held = handed.filter((h) => h.phase === 'handed').length + (stopping ? stopping.held : 0);
+  const live = turnBusy || cliOwesTurn || !!stopping;
+  handed.length = 0; landedThisTurn = []; cliOwesTurn = false;
+  if (live) { stopping = { held, follows: stopping ? stopping.follows : 0 }; armBound(); }
   const dropped = promptQueue.splice(0, promptQueue.length);
   for (const q of dropped) record('queue_op_result', { op: 'remove', id: q.id, ok: true, msg_id: q.msgId, reason: 'stopped' });
   const putBack = dropped.filter((q) => !q.origin);
-  if (putBack.length || kept) record('queue_dropped', { ...droppedRecordFor(putBack.map((q) => ({ id: q.id, msgId: q.msgId, ts: q.ts, text: q.text, attachments: q.attachments })), { dropId: `${process.pid}-${++dropSeq}`, turnId: null }), ...(kept ? { kept } : {}) });
-  publishQueue();
-  log(`interrupt: dropped ${dropped.length} held frame(s) (put back=${putBack.length}, ${kept} handed stay with the turn)`);
+  if (putBack.length || keptIds.length || landedIds.length) {
+    record('queue_dropped', {
+      ...droppedRecordFor(putBack.map((q) => ({ id: q.id, msgId: q.msgId, ts: q.ts, text: q.text, attachments: q.attachments })), { dropId: `${process.pid}-${++dropSeq}`, turnId: null }),
+      ...(keptIds.length ? { kept: keptIds.length, keptIds } : {}),
+      ...(landedIds.length ? { landed: landedIds.length, landedIds } : {}),
+    });
+  }
+  if (dropped.length) publishQueue();
+  log(`interrupt: dropped ${dropped.length} held frame(s) (put back=${putBack.length}); handed: ${keptIds.length} kept, ${landedIds.length} landed${live ? ' — the Stop window is open' : ''}`);
+}
+/** The Stop window closes: the CLI settled (its idle — or its result, where it says no state word). */
+function settleStop(why) {
+  if (!stopping) return;
+  log(`stop settled (${why}): ${stopping.held} frame(s) the CLI held at Stop, ${stopping.follows} follow-up turn(s) interrupted`);
+  stopping = null;
+  armBound();
+}
+
+/** Why a held row may NOT be handed over (null = it may): a command only runs between turns; a row VibeSpace typed is
+ *  never the person's to push into the turn; a Stop that has not settled takes nothing in; a CLI that never said a
+ *  state word cannot be trusted to run what it was handed (acceptance r2). */
+const NOT_STEERABLE = {
+  command: 'a command runs between turns — it runs when this turn ends',
+  origin: "VibeSpace's own message runs between turns — it runs when this turn ends",
+  stopping: 'the turn is being stopped — it runs as soon as the stop settles',
+  unproven: 'this agent has not shown it can take a message into a running turn — it runs when this turn ends',
+};
+function notSteerable(entry, o) {
+  if (entry.origin) return 'origin';
+  if (!opensTurn(o) || isCommandFrame(o)) return 'command';
+  if (stopping) return 'stopping';
+  if (!stateProven) return 'unproven';
+  return null;
 }
 
 /** Hand ONE held row over (the ⚡ / «inject all»): while a turn runs it joins that turn like an Enter frame; with no turn
- *  running it is a plain send (it starts the turn — never lost). A slash command is refused: it only runs between turns. */
+ *  running it is a plain send (it starts the turn — never lost). notSteerable() refuses the rest, each saying why. */
 function steerHeld(entry, op) {
   let o = null; try { o = JSON.parse(entry.line); } catch {}
-  if (!opensTurn(o) || isCommandFrame(o)) {
-    record('queue_op_result', { op, id: entry.id, ok: false, reason: 'not-steerable', detail: 'a command runs between turns — it runs when this turn ends', msg_id: entry.msgId });
+  const why = notSteerable(entry, o);
+  if (why) {
+    record('queue_op_result', { op, id: entry.id, ok: false, reason: 'not-steerable', why, detail: NOT_STEERABLE[why], msg_id: entry.msgId });
     return false;
   }
   promptQueue.splice(promptQueue.indexOf(entry), 1);
@@ -490,46 +604,60 @@ function processLine(line) {
   // a helper's record (parent_tool_use_id), and never an idle that belongs to the turn before a frame we just wrote
   let turnEnded = false;
   if (!msg.parent_tool_use_id && !msg.isSidechain) {
-    if (msg.type === 'system' && msg.subtype === 'session_state_changed' && typeof msg.state === 'string') cliState = msg.state;
+    if (msg.type === 'system' && msg.subtype === 'session_state_changed' && typeof msg.state === 'string') {
+      cliState = msg.state;
+      if (!stateProven) proveState();
+    }
     const busyWord = cliState === 'running' || cliState === 'requires_action';
     const starts = msg.type === 'system' && msg.subtype === 'init' && busyWord;
     const idle = msg.type === 'system' && msg.subtype === 'session_state_changed' && msg.state === 'idle';
     // THE WITNESS (2.369.361): a handed frame rides the request the CLI builds after a tool result (not one Stop
     // rejected), and the model speaking after it is that request answered
     if (handed.length) {
-      if (msg.type === 'user' && !stopAsked && Array.isArray(msg.message?.content) && msg.message.content.some((b) => b && b.type === 'tool_result')) {
+      if (msg.type === 'user' && !stopping && Array.isArray(msg.message?.content) && msg.message.content.some((b) => b && b.type === 'tool_result')) {
         for (const h of handed) if (h.phase === 'handed') h.phase = 'riding';
       } else if (msg.type === 'assistant' && handed.some((h) => h.phase === 'riding')) {
         const landed = handed.filter((h) => h.phase === 'riding');
         for (const h of landed) handed.splice(handed.indexOf(h), 1);
-        record('input_handover', { state: 'landed', msg_ids: landed.map((h) => h.msgId).filter(Boolean) });
+        const ids = landed.map((h) => h.msgId).filter(Boolean);
+        landedThisTurn.push(...ids);
+        record('input_handover', { state: 'landed', msg_ids: ids });
       }
     }
     if (starts) {
       turnBusy = true; awaitingStart = false;
-      if (cliOwesTurn) {
-        // the CLI's own turn for what it was still holding: after a Stop it gets a SECOND interrupt on this very line
+      clearTimeout(boundTimer); boundTimer = null;
+      if (stopping && stopping.held > 0) {
+        // A TURN THE CLI STARTS INSIDE THE STOP WINDOW for frames it held at Stop — EVERY one (it may split them into
+        // several): a second interrupt on THIS line, IN THIS TICK. Its request leaves ~12 ms after this init (measured);
+        // a timer or an await here lets it through (a 25 ms-late copy was answered — scripts/test-claude-steer-chrome §0)
+        sendChild(JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-${process.pid}-${++handSeq}`, request: { subtype: 'interrupt' } }));
+        stopping.follows++;
+        log(`interrupt: the CLI started follow-up turn ${stopping.follows} for what it held at Stop — interrupted on its init`);
+      } else if (cliOwesTurn) {
+        // the CLI's own turn for what it was still holding: theirs now — a Stop in it stops a TURN, it keeps no message
         cliOwesTurn = false;
-        if (stopFollowUp) {
-          stopFollowUp = false; stopAsked = true;
-          sendChild(JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-${process.pid}-${++handSeq}`, request: { subtype: 'interrupt' } }));
-          const ids = settleHanded('kept');
-          log(`interrupt: the CLI started a turn for ${ids.length} handed frame(s) after Stop — interrupted on its init`);
-        } else handedThisTurn = settleHanded('own-turn');
+        settleHanded('own-turn');
       }
     } else if (msg.type === 'result' || (idle && !awaitingStart)) {
       turnBusy = false; awaitingStart = false; turnEnded = true;
-      if (msg.type === 'result' && handed.length) {
+      if (msg.type === 'result') {
+        // a frame that rode this turn's last request is in the conversation as read, whatever the model said after
+        const rode = handed.filter((h) => h.phase === 'riding');
+        if (rode.length) { for (const h of rode) handed.splice(handed.indexOf(h), 1); record('input_handover', { state: 'landed', msg_ids: rode.map((h) => h.msgId).filter(Boolean) }); }
         // the turn ended before the CLI took these in: it runs them as a turn of its own next (measured), and no held
-        // frame may cut in before that turn — after a Stop, that turn is stopped at its init
-        cliOwesTurn = true;
-        if (stopAsked) stopFollowUp = true;
-      } else if (idle && cliOwesTurn) {
+        // frame may cut in before that turn
+        if (handed.length && !stopping) cliOwesTurn = true;
+        landedThisTurn = [];
+        // a CLI that says no state word settles a Stop at its result (the base's inference — it was handed nothing)
+        if (stopping && !stateProven) settleStop('result');
+      } else if (cliOwesTurn) {
         // …unless the CLI went idle instead: it holds nothing — they went into the conversation with the last request
-        cliOwesTurn = false; stopFollowUp = false;
+        cliOwesTurn = false;
         settleHanded('landed');
       }
-      if (!cliOwesTurn) { stopAsked = false; handedThisTurn = []; }
+      if (idle) settleStop('idle');
+      armBound();
     }
   }
 

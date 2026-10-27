@@ -769,6 +769,29 @@ impossible rather than a review promise.
   interrupts that follow-up turn on its first line, so nothing answers after
   Stop; the message stays in the conversation and the agent reads it with the
   next one. A held message keeps the .354 rule (it comes back into the box).
+  **Acceptance r2 (the same 2.369.361):** the hand-over door needs PROOF — the
+  wrapper advertises 'steer' only from the CLI's FIRST `session_state_changed`
+  (the real CLI says 'running' before its first init, so a session proves itself
+  as its first turn starts); a CLI that never says one (before 2.1.257, or the
+  switch unset) keeps «Enter queues» and a stamped frame is held — nothing else
+  tells "the turn ended, the CLI now runs what it holds" from "it went idle".
+  **Stop is a WINDOW** until the CLI settles (its idle after the interrupted
+  result; at most 2 s after its last result, one wrapper log line): a message
+  sent inside it is held (chip «Queued») and runs once the stop settles, in
+  order — never handed to a turn being stopped — and EVERY turn the CLI starts
+  in it for what it still held is interrupted on its first line, in that tick.
+  **ONE record per Stop names each handed message's fate**, and the toast and
+  the chips are drawn from it: read already («N message(s) you sent into the
+  turn had already reached the agent», «Steered»), still held by the CLI («…stay
+  with it», «Stays with the stopped turn»), held by VibeSpace (back in the box);
+  a message whose OWN turn Stop ended is a stopped turn, in no count. **The hold
+  door is the capability's**: Alt+Enter and the ≤768px clock button hold
+  whatever this tab's streaming flag says (a second tab that lags still holds;
+  at idle it is a plain send — the clock shows at idle too). A row VibeSpace
+  typed (a dispatch, auto-resume) and a slash command have no ⚡ (`steerable:
+  false`). A message sent mid-turn **survives a server restart and a reload**
+  with its last chip — the wrapper keeps a copy in its history buffer (a held
+  «Queued» bubble too, which .354 lost the same way).
 - **Removing a queued agent-to-agent / job message gives it back.** It was
   already reported delivered, so `remove` re-reports `peer_message_result
   ok:false` with the text and sender and the delivery ladder re-stashes it for

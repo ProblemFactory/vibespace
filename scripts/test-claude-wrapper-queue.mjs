@@ -141,7 +141,7 @@ if (!claudeBin) {
   // a copy of the wrapper with the HOLD switched off (every user frame forwarded at once — the pre-.354 behaviour)
   const ctlDir = scratchDir('cwq-ctl-tree');
   const cwSrc = fs.readFileSync(LANE, 'utf8');
-  const HOLD = 'if (!(turnBusy || cliOwesTurn) || !opensTurn(o)) { forwardUser(line, o, buffered); return; }';   // the gate line (2.369.361 adds the CLI-owes-a-turn clause, lane claude-steer-inject)
+  const HOLD = 'if (!(turnBusy || cliOwesTurn || stopping) || !opensTurn(o)) { forwardUser(line, o, buffered); return; }';   // the gate line (2.369.361 adds the CLI-owes-a-turn clause, lane claude-steer-inject — and the Stop window, its acceptance r2)
   const ctlSrc = cwSrc.replace(HOLD, '{ forwardUser(line, o, buffered); return; }');
   fs.mkdirSync(path.join(ctlDir, 'data', 'bin'), { recursive: true });
   fs.symlinkSync(path.join(REPO, 'src'), path.join(ctlDir, 'src'));
@@ -182,7 +182,9 @@ if (!claudeBin) {
   });
   ok(s3.heldDuringA, '③ while A runs the held frame is nowhere in the CLI — no request, no transcript row (the CLI\'s own enqueue never happened)', s3);
   ok(s3.bAfterIdleMs !== null && s3.bAfterIdleMs >= 0 && s3.bAfterIdleMs < 5000 && s3.bUserRecord && s3.lastEnqueueAfterIdle, `③ …A's turn end releases it: ONE frame, at the mock ${s3.bAfterIdleMs} ms after A's idle, run as a turn of its own (a plain user record, enqueued only at the drain)`, s3);
-  ok(S(s3.qc) === S([0, 1, 0]), '③ …and the strip saw it come and go: the baseline [], one row, [] at the drain', s3.qc);
+  // (acceptance r2, lane claude-steer-inject: the CLI's first state word republishes the empty queue with the steer pair
+  // named — the hand-over door is advertised only from there)
+  ok(S(s3.qc) === S([0, 0, 1, 0]), '③ …and the strip saw it come and go: the baseline [], the proof\'s republication [], one row, [] at the drain', s3.qc);
   ok(!s3.keyInTranscript, '⑤ the frame\'s VibeSpace keys (webui_msg_id) never reach the transcript — the CLI strips unknown keys', s3);
   const s4 = await realRun('burst', LANE, 3000, async ({ send, recs, reqFor }) => {
     const at = send(frame('LONG-A the turn starter', 'm-a'));
