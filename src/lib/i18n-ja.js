@@ -9891,6 +9891,7 @@ export default {
   "Default (Antigravity’s own setting)": "既定（Antigravity 自身の設定）",
   "{who} wants to run a command with a stored secret": "{who} が保管庫のシークレットを使ってコマンドを実行しようとしています", // lane vault-run-door
   "{tool} on this machine changed: {from} → {to} (a root-owned tool — runs continue)": "このマシンの {tool} が変更されました：{from} → {to}（root 所有のツール——実行は継続します）", // lane vault-agent-own r18 (item 5): the drift FYI notice
+  "{tool} ({path}) is sealed by root ownership, so the vault trusts whatever root installs there. Its bytes changed since the last run ({from} → {to}) — root (a package roll or a reinstall) replaced it, and runs continue. This is a notice; nothing to do.": "このマシンの {tool}（{path}）は root 所有によって封印されているため、vault は root がそこにインストールするものをすべて信頼します。前回の実行以降、バイト列が変更されました（{from} → {to}）——root（パッケージ更新または再インストール）が置き換えたもので、実行は継続します。これは通知です。対応は不要です。", // lane vault-agent-own r19 (MINOR): the drift FYI DETAIL paragraph
   "Always for this shape": "この形は常に許可", // lane vault-run-door
   "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同じツール・フラグ・ホスト・シークレットなら 30 日間確認せずに実行します — 先に第二パスワードを確認します", // lane vault-run-door
   "Allowed for this shape for 30 days": "この形を 30 日間許可しました", // lane vault-run-door

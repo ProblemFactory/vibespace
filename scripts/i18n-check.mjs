@@ -10,75 +10,101 @@
 //
 // WARN (non-fatal) on: zh/ja key parity gaps, and translations that lose a
 // {param} or an HTML tag present in their key.
+//
+// HARD FAIL on a MISSING For-you NOTICE translation (round 18/19): a userTodos
+// notice carries `i18n: { text: { key: '…' }, detail: [{ key: '…' }] }` in
+// SERVER source — NOT a t() call, so the dict-only lint above never sees it
+// (the r18 drift-notice TEXT key, and the r19 DETAIL paragraph, each a sibling
+// of translated vault keys). THE ROAD (exported + pinned by test-vault-run-model's
+// RED mutants) scans the vault door's literal `key:` AND `detail:` notice keys
+// (single/double/backtick-quoted, a ${…} template skipped) and REQUIRES each as
+// a REAL dict ENTRY in BOTH dicts (a quoted key then `:`, outside a full-line
+// comment — so a prose/comment mention never falsely passes).
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dictEntries } from './i18n-extract.mjs';
 
 const lib = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib');
 const DICTS = ['i18n-zh.js', 'i18n-ja.js'].map((f) => path.join(lib, f));
-
-// Quote-AGNOSTIC (2.227.1, real miss: python-inserted single-quoted entries
-// were invisible to every check — a mixed-quote duplicate of "this machine"
-// shipped without a peep). Keys/values are DECODED before comparison —
-// dictEntries (scripts/i18n-extract.mjs) is the one entry parser.
-let dupFail = 0, warns = 0;
-const keySets = new Map();
-
-for (const file of DICTS) {
-  const name = path.basename(file);
-  const seen = new Map(); // key -> { line, value }
-  const entries = new Map();
-  for (const { key: k, value: v, line } of dictEntries(fs.readFileSync(file, 'utf8'))) {
-    if (seen.has(k)) {
-      dupFail++;
-      const prev = seen.get(k);
-      const conflict = prev.value !== v;
-      console.error(`✗ ${name}: duplicate key ${k.slice(0, 60)} @${prev.line} and @${line}${conflict ? ` — CONFLICTING translations (${prev.value.slice(0, 24)}… vs ${v.slice(0, 24)}…); the later silently overrides the earlier EVERYWHERE. Same word, different meaning? use tc(ctx, str)` : ' (identical — delete one)'}`);
-    } else {
-      seen.set(k, { line, value: v });
-      entries.set(k, v);
-    }
-  }
-  keySets.set(name, entries);
-  // param/tag preservation: every {param} and <tag in the key must appear in
-  // the translation (a lost param renders the raw placeholder to users)
-  for (const [k, v] of entries) {
-    for (const p of k.match(/\{[a-zA-Z0-9_]+\}/g) || []) {
-      if (!v.includes(p)) { warns++; console.warn(`⚠ ${name}: ${k.slice(0, 50)} translation loses ${p}`); }
-    }
-    // real HTML tags only — keys also contain placeholder angle brackets
-    // like <device>/<folder> that translations legitimately localize
-    for (const tag of k.match(/<(?:b|i|em|strong|code|br|span|a|u|small)[ />]/g) || []) {
-      if (!v.includes(tag)) { warns++; console.warn(`⚠ ${name}: ${k.slice(0, 50)} translation loses ${tag.trim()}`); }
-    }
-  }
-}
-
-// zh/ja parity — a key translated in one language but forgotten in the other
-const [zh, ja] = [keySets.get('i18n-zh.js'), keySets.get('i18n-ja.js')];
-for (const k of zh.keys()) if (!ja.has(k)) { warns++; console.warn(`⚠ parity: in zh but missing from ja: ${k.slice(0, 60)}`); }
-for (const k of ja.keys()) if (!zh.has(k)) { warns++; console.warn(`⚠ parity: in ja but missing from zh: ${k.slice(0, 60)}`); }
-
-// round 18 (item 5): a userTodos / For-you NOTICE key (`i18n: { text: { key: '…' } }`) lives in SERVER source, not a t() call,
-// so the dict-only lint above never saw it — the vault drift-notice key «{tool} on this machine changed…» shipped with NO zh/ja
-// (a sibling of six translated vault keys). THE ROAD: scan the vault door's literal notice keys and REQUIRE each in BOTH dicts;
-// a missing one is a HARD FAIL like a duplicate. Scoped to the vault surface (where notices are FOR the owner); widen the list as
-// other surfaces adopt the shape. A key built from a variable (`key: ASKING_KEY`) is not a literal — out of this road by design.
+// the server surfaces whose literal notice keys are FOR the owner (widen as other surfaces adopt the i18n-notice shape)
 const NOTICE_SRC = ['src/server/vault-run-door.js'].map((p) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', p));
-// check PRESENCE in the raw dict text, not the dictEntries Map: a userTodos key lives in a region of the dict the Map parser does
-// not reach (it stops before the vault section), which — together with these keys being source literals, not t() calls — is the
-// TWO reasons the drift key slipped through; a raw contains is robust to both.
-const [zhRaw, jaRaw] = DICTS.map((f) => fs.readFileSync(f, 'utf8'));
-for (const f of NOTICE_SRC) {
-  const src = fs.readFileSync(f, 'utf8');
-  const re = /\bkey:\s*(['"])((?:\\.|(?!\1).)*)\1/g; let m; const keys = new Set();
-  while ((m = re.exec(src))) { const k = m[2].replace(/\\(.)/g, '$1'); if (/[{\s]/.test(k) && k.length > 8) keys.add(k); }   // a sentence-shaped literal key (holds a {param} or a space), never a short identifier
-  for (const k of keys) for (const [nm, raw] of [['i18n-zh.js', zhRaw], ['i18n-ja.js', jaRaw]]) if (!raw.includes(k)) { dupFail++; console.error(`✗ ${path.basename(f)}: userTodos/notice key is NOT translated in ${nm} — ${k.slice(0, 64)} — a For-you notice key needs zh+ja like any chrome string (add it to src/lib/${nm})`); }
+
+/** every `key:` / `detail:` sentence-shaped string literal in server source — single/double/backtick-quoted; a `${…}` template
+ *  (a key built at run time) is skipped, a short identifier is skipped. Round 19: `detail:` and backtick quotes are now seen. */
+export function noticeKeyLiterals(src) {
+  const keys = new Set(); const re = /\b(?:key|detail):\s*(['"`])((?:\\.|(?!\1)[^])*?)\1/g; let m;
+  while ((m = re.exec(String(src)))) { if (m[1] === '`' && /\$\{/.test(m[2])) continue; const k = m[2].replace(/\\(.)/g, '$1'); if (/[{\s]/.test(k) && k.length > 8) keys.add(k); }
+  return [...keys];
+}
+/** is `key` a REAL object-key entry in the dict text — a quoted key (any quote) followed by `:`, outside a full-line `//` comment?
+ *  Round 19: a prose / comment mention of the key string (no trailing `:`, or a full-line comment) never passes (the r18 raw
+ *  `includes` falsely passed a comment-only key). Full-line comments only (an inline `// note` after an entry keeps the entry; a
+ *  value holding `https://…` is never a full-line comment, so it is never stripped). */
+export function dictHasEntry(dictText, key) {
+  const code = String(dictText).split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  const q = String(key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('([\'"`])' + q + '\\1\\s*:').test(code);
+}
+/** the notice-key road: srcTexts × their literal notice keys × dicts → every (dict, key) whose translation is MISSING. */
+export function noticeKeyFailures(srcTexts, dicts) {
+  const out = [];
+  for (const src of srcTexts) for (const k of noticeKeyLiterals(src)) for (const d of dicts) if (!dictHasEntry(d.text, k)) out.push({ dict: d.name, key: k });
+  return out;
 }
 
-if (dupFail) {
-  console.error(`\ni18n check FAILED: ${dupFail} duplicate key(s). Fix before building.`);
-  process.exit(1);
+function runCli() {
+  let dupFail = 0, missFail = 0, warns = 0;
+  const keySets = new Map();
+  for (const file of DICTS) {
+    const name = path.basename(file);
+    const seen = new Map(); // key -> { line, value }
+    const entries = new Map();
+    for (const { key: k, value: v, line } of dictEntries(fs.readFileSync(file, 'utf8'))) {
+      if (seen.has(k)) {
+        dupFail++;
+        const prev = seen.get(k);
+        const conflict = prev.value !== v;
+        console.error(`✗ ${name}: duplicate key ${k.slice(0, 60)} @${prev.line} and @${line}${conflict ? ` — CONFLICTING translations (${prev.value.slice(0, 24)}… vs ${v.slice(0, 24)}…); the later silently overrides the earlier EVERYWHERE. Same word, different meaning? use tc(ctx, str)` : ' (identical — delete one)'}`);
+      } else {
+        seen.set(k, { line, value: v });
+        entries.set(k, v);
+      }
+    }
+    keySets.set(name, entries);
+    // param/tag preservation: every {param} and <tag in the key must appear in
+    // the translation (a lost param renders the raw placeholder to users)
+    for (const [k, v] of entries) {
+      for (const p of k.match(/\{[a-zA-Z0-9_]+\}/g) || []) {
+        if (!v.includes(p)) { warns++; console.warn(`⚠ ${name}: ${k.slice(0, 50)} translation loses ${p}`); }
+      }
+      // real HTML tags only — keys also contain placeholder angle brackets
+      // like <device>/<folder> that translations legitimately localize
+      for (const tag of k.match(/<(?:b|i|em|strong|code|br|span|a|u|small)[ />]/g) || []) {
+        if (!v.includes(tag)) { warns++; console.warn(`⚠ ${name}: ${k.slice(0, 50)} translation loses ${tag.trim()}`); }
+      }
+    }
+  }
+
+  // zh/ja parity — a key translated in one language but forgotten in the other
+  const [zh, ja] = [keySets.get('i18n-zh.js'), keySets.get('i18n-ja.js')];
+  for (const k of zh.keys()) if (!ja.has(k)) { warns++; console.warn(`⚠ parity: in zh but missing from ja: ${k.slice(0, 60)}`); }
+  for (const k of ja.keys()) if (!zh.has(k)) { warns++; console.warn(`⚠ parity: in ja but missing from zh: ${k.slice(0, 60)}`); }
+
+  // the For-you NOTICE-key road (exported above; pinned by test-vault-run-model)
+  const srcTexts = NOTICE_SRC.map((f) => fs.readFileSync(f, 'utf8'));
+  const dicts = DICTS.map((f) => ({ name: path.basename(f), text: fs.readFileSync(f, 'utf8') }));
+  for (const { dict, key } of noticeKeyFailures(srcTexts, dicts)) {
+    missFail++;
+    console.error(`✗ a For-you notice key is MISSING its translation in ${dict} — ${key.slice(0, 72)}… — a key/detail literal in the vault door needs zh+ja like any chrome string (add it to src/lib/${dict})`);
+  }
+
+  if (dupFail || missFail) {
+    const parts = [dupFail ? `${dupFail} duplicate key(s)` : null, missFail ? `${missFail} missing translation(s)` : null].filter(Boolean);
+    console.error(`\ni18n check FAILED: ${parts.join(' + ')}. Fix before building.`);
+    process.exit(1);
+  }
+  console.log(`i18n check ok (${zh.size} zh / ${ja.size} ja keys${warns ? `, ${warns} warning(s)` : ''})`);
 }
-console.log(`i18n check ok (${zh.size} zh / ${ja.size} ja keys${warns ? `, ${warns} warning(s)` : ''})`);
+
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) runCli();

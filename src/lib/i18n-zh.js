@@ -9892,6 +9892,7 @@ export default {
   "Default (Antigravity’s own setting)": "默认（Antigravity 自己的设置）",
   "{who} wants to run a command with a stored secret": "{who} 想用保险库里的密钥运行一条命令", // lane vault-run-door
   "{tool} on this machine changed: {from} → {to} (a root-owned tool — runs continue)": "本机的 {tool} 已变更：{from} → {to}（由 root 安装的工具——运行照常继续）", // lane vault-agent-own r18 (item 5): the drift FYI notice
+  "{tool} ({path}) is sealed by root ownership, so the vault trusts whatever root installs there. Its bytes changed since the last run ({from} → {to}) — root (a package roll or a reinstall) replaced it, and runs continue. This is a notice; nothing to do.": "本机的 {tool}（{path}）由 root 所有权封存，因此 vault 信任 root 在那里安装的任何内容。它的字节自上次运行以来发生了变更（{from} → {to}）——是 root（软件包滚动或重新安装）替换了它，运行照常继续。这只是一条通知；无需处理。", // lane vault-agent-own r19 (MINOR): the drift FYI DETAIL paragraph
   "Always for this shape": "此形状总是", // lane vault-run-door
   "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同一工具、旗标、主机与密钥 30 天内不再问——先要再输一次第二密码", // lane vault-run-door
   "Allowed for this shape for 30 days": "此形状 30 天内总是允许", // lane vault-run-door
