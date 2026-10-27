@@ -7,12 +7,16 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - A wake request now shows its Approve / Deny card in the chat that asked for it, too; one click decides. Only your click counts, never a typed «approve».
 - A decided request says who and when, on its card and in For you: «approved by you · 09:41».
+- An unanswered wake request expires after 7 days; its card says «expires in 7 d», and the agent can ask again.
+- A vault command an agent wants to run and an action on a paired machine show their card in the chat that asked, like a paste request.
 
 ### Fixed
 - With sign-in off, a script or an agent's token could approve a channel request by calling its route; now only a click on this page decides one.
 - Two wake requests with the same words are two cards again, and asking again after a Deny is a new card; the denied one keeps its line.
 - A wake request offers only Approve and Deny: Mark done, Dismiss and Mark all seen no longer close it unanswered, and a decision is final.
 - With sign-in off, an agent's token could also give itself a wake through the Notify settings; that now takes your click on this page too.
+- Mark done on an access request in For you said «done» while the request stayed open; it now offers only Hide, which decides nothing.
+- Vault asks and machine actions end only with their own buttons now, never Mark done or Dismiss, and say «allowed by you · 09:41».
 
 ## 2.369.360 — 2026-10-27
 

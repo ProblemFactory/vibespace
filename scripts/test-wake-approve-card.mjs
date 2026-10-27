@@ -44,6 +44,23 @@
 //     route calling a watch writer asks it first; every setGrain call inside the engine is named (the agent's own road writes
 //     next-turn only — a wake is its ASK); no other file calls a writer. RED COPIES: the route file without its gate (a vsst_
 //     wake write ⇒ 200, the census names every door), a planted engine writer
+// ACCEPTANCE ROUND 3 (主开发 — «a pointer item hides, never decides; a wake ask has a lifetime»; the owner's two vault asks and
+// the hub-act ask «不在聊天里»):
+//   ⑩ A POINTER HIDES — THE registry's `closer: 'hide'` rows (open-channel: the access request's item, the Outbox's pointer):
+//     closersOf = ✕ Hide only (nothing once hidden); the store writes the person's close (✓ a stale page draws, «Mark all
+//     seen») as a HIDE («hidden — nothing was decided», never «✓ done»), its producer's retraction stays its own, a decision
+//     lands on a hidden pointer («approved by you»); the row draws ✕ «Hide» and no ↺, the window «hide»; the press toasts
+//     with no Undo. RED CONTROL: a registry without the row's closer — ✓ records «done» by the user
+//   ⑪ A WAKE ASK HAS A LIFETIME — the card's and the tray row's «expires in 7 d» (expiryWords; «… h» / «… min» near its end;
+//     nothing for a closed ask or another row), the window's «expires in N d». RED CONTROL: the row without `showsExpiry`
+//   ⑫ THE VAULT'S TWO ASKS AND THE HUB-ACT ASK ARE CARDS IN THE ASKING CHAT, decided by a person — registry rows (chat, decide
+//     'person', their own ends and stamps): the chat draws each where its producer files it (the run ask and the paste
+//     request under the asking conversation's key, the hub-act ask `about` it); «allowed by you · HH:MM» / «always allowed by
+//     you» / «stored · HH:MM» / «refused by you», only with the person verdict's mark; the store law per row's ends (a ✓ is
+//     refused by name, the held ask's 60 s closes it, a decision is final); the row draws their own verbs and no ✓ / ✕; the
+//     paste box says «wrong name or kind — refuse, the agent asks again». ⑤'s census holds their doors (THE person verdict
+//     before the answer, the mark handed in). RED CONTROL: the rows as the base had them — the hub-act card filed as the base
+//     filed it is drawn in no chat, ✓ closes a run ask «done», no stamp
 // Run: node scripts/test-wake-approve-card.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -133,8 +150,8 @@ console.log('② THE KINDS TABLE — which owner decisions are a card in the cha
   }
   const spendNotice = { id: 'ut-s', sessionKey: 'accounts', text: 'Auto-resume skipped: the daily ceiling is reached', status: 'open', origin: 'spend', kind: 'notice' };
   ok(FA.needOf(spendNotice) === null && FA.surfaceOf(spendNotice).at === 'notice', 'the spend guard\'s ceilings (src/server/spend-guard.js — kind \'notice\'): no card — nothing to decide (the brief\'s pointer: the guard files NO wake request; the wake request is channels-access.js fileWatchRequest\'s)', FA.surfaceOf(spendNotice));
-  ok(JSON.stringify([...FA.PERSON_DECIDES].sort()) === JSON.stringify(['channel-watch-request', 'open-channel']), 'PERSON_DECIDES = exactly the two rows the reach-requests route decides', FA.PERSON_DECIDES);
-  ok(JSON.stringify(FA.DECISION_ROWS) === JSON.stringify(['channel-watch-request']), 'round 2: DECISION_ROWS (two verbs, no other closer) = the person rows that DRAW their verbs — the wake request; open-channel\'s item is a door to the Reach dialog and the Outbox\'s pointer shares its type (its producer retracts it)', FA.DECISION_ROWS);
+  ok(JSON.stringify([...FA.PERSON_DECIDES].sort()) === JSON.stringify(['channel-watch-request', 'hub-act-ask', 'open-channel', 'secret-request', 'vault-run-ask']), 'PERSON_DECIDES = the reach-requests route\'s two rows + (r3) the vault\'s run ask and paste request and the hub-act ask — each behind a person\'s door (⑤)', FA.PERSON_DECIDES);
+  ok(JSON.stringify([...FA.DECISION_ROWS].sort()) === JSON.stringify(['channel-watch-request', 'hub-act-ask', 'secret-request', 'vault-run-ask']), 'DECISION_ROWS (their own verbs, no other closer) = the person rows that DRAW their verbs — the wake request (r2), the vault\'s run ask and paste request and the hub-act ask (r3); open-channel is a POINTER (⑩: it hides)', FA.DECISION_ROWS);
 }
 
 // ── ③ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -249,10 +266,17 @@ console.log('⑤ THE CENSUS — person-only doors, the engine\'s one caller, the
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(dir, e.name)) : e.name.endsWith('.js') ? [path.join(dir, e.name)] : []));
 const SRC_FILES = Object.fromEntries(walk(SRC).map((f) => [path.relative(REPO, f), fs.readFileSync(f, 'utf8')]));
 /** THE DOORS of the person-decided rows: the client branch's route, and the server handler that must ask the verdict */
+const REACH = { server: ['src/routes/channels.js', "router.post('/api/channels/reach-requests/:id/:verdict'"], verdict: 'personVerdict(req)', engine: /engine\(\)\.decideRequest\(/, mark: '{ person: true }' };
 const DOORS = {
-  'channel-watch-request': { client: ['src/lib/user-todos-actions.js', '/api/channels/reach-requests/'], server: ['src/routes/channels.js', "router.post('/api/channels/reach-requests/:id/:verdict'"] },
-  'open-channel': { client: ['src/lib/channel-reach-editor.js', 'reach-requests/'], server: ['src/routes/channels.js', "router.post('/api/channels/reach-requests/:id/:verdict'"] },
+  'channel-watch-request': { client: ['src/lib/user-todos-actions.js', '/api/channels/reach-requests/'], ...REACH },
+  'open-channel': { client: ['src/lib/channel-reach-editor.js', 'reach-requests/'], ...REACH },
+  // r3: the vault's two asks (the vault's own `person` wrapper = THE person verdict) and the hub-act ask
+  'vault-run-ask': { client: ['src/lib/user-todos-actions.js', '/api/vault/run/asks/'], server: ['src/routes/vault.js', "app.post('/api/vault/run/asks/:askId'"], verdict: 'person((req)', engine: /run\.answer\(/, mark: 'person: true' },
+  'secret-request': { client: ['src/lib/vault-paste-box.js', '/api/vault/secret-requests/'], server: ['src/routes/vault.js', "app.post('/api/vault/secret-requests/:id/answer'"], verdict: 'person((req)', engine: /paste\.answer\(/, mark: 'person: true' },
+  'hub-act-ask': { client: ['src/lib/user-todos-actions.js', '/api/hub-acts/asks/'], server: ['src/server/exit-routes.js', "app.post('/api/hub-acts/asks/:askId'"], verdict: 'personVerdict(req)', engine: /hosts\.hubActs\.answer\(/, mark: 'person: true' },
 };
+/** THE person verdict each door's file asks — routes/vault.js's own, never a local copy */
+const VERDICT_FROM = { 'src/routes/channels.js': /const \{ personVerdict \} = require\('\.\/vault\.js'\);/, 'src/server/exit-routes.js': /const \{ personVerdict \} = require\('\.\.\/routes\/vault\.js'\);/, 'src/routes/vault.js': /const person = \(fn\) => async \(req, res\) => \{\n    const v = personVerdict\(req\);/ };
 function doorProblems(rows, files) {
   const out = [];
   for (const ty of rows) {
@@ -260,12 +284,14 @@ function doorProblems(rows, files) {
     if (!d) { out.push(`'${ty}' is decided by a person only but names no door`); continue; }
     if (!String(files[d.client[0]] || '').includes(d.client[1])) out.push(`'${ty}': ${d.client[0]} no longer posts to ${d.client[1]}`);
     const s = String(files[d.server[0]] || ''), i = s.indexOf(d.server[1]);
-    const body = i < 0 ? '' : s.slice(i, s.indexOf('\n});', i));
-    const v = body.indexOf('personVerdict(req)'), e = body.search(/engine\(\)\.decideRequest\(/);
+    const line = i < 0 ? '' : s.slice(i, s.indexOf('\n', i));
+    const body = i < 0 ? '' : (/\}\)\);(\s+\/\/.*)?$/.test(line) ? line : s.slice(i, s.indexOf('\n});', i)));   // a one-line door, else its block
+    const v = body.indexOf(d.verdict), e = body.search(d.engine);
     if (i < 0) out.push(`'${ty}': its route ${d.server[1]} is gone`);
     else if (v < 0 || e < 0 || v > e) out.push(`'${ty}': ${d.server[0]} decides before (or without) asking THE person verdict`);
+    else if (d.mark && !body.slice(e).includes(d.mark)) out.push(`'${ty}': ${d.server[0]} decides without handing in the person verdict's mark (${d.mark}) — its record could never say «by you»`);
   }
-  if (!/const \{ personVerdict \} = require\('\.\/vault\.js'\);/.test(String(files['src/routes/channels.js']))) out.push('src/routes/channels.js: the person verdict is not routes/vault.js\'s (one verdict, never a local copy)');
+  for (const [f, re] of Object.entries(VERDICT_FROM)) if (Object.values(DOORS).some((d) => d.server[0] === f) && !re.test(String(files[f]))) out.push(`${f}: the person verdict is not routes/vault.js's (one verdict, never a local copy)`);
   return out;
 }
 {
@@ -275,6 +301,11 @@ function doorProblems(rows, files) {
   ok(doorProblems([...FA.PERSON_DECIDES, 'ghost-wake'], SRC_FILES).some((x) => /'ghost-wake' is decided by a person only but names no door/.test(x)), 'RED COPY: a person-decided row with no door is named');
   const local = { ...SRC_FILES, 'src/routes/channels.js': SRC_FILES['src/routes/channels.js'].replace("const { personVerdict } = require('./vault.js');", 'const personVerdict = () => ({ ok: true });') };
   ok(doorProblems(FA.PERSON_DECIDES, local).some((x) => /one verdict, never a local copy/.test(x)), 'RED COPY: a local verdict in place of routes/vault.js\'s is named');
+  // r3: the hub-act door as the base had it (a bearer check only — a bare curl answered it) and a vault door that drops the mark
+  const hubBase = { ...SRC_FILES, 'src/server/exit-routes.js': SRC_FILES['src/server/exit-routes.js'].replace("  const who = personVerdict(req);\n  if (!who.ok) return res.status(403)", "  if (isAnyBearer(req)) return res.status(403)") };
+  ok(doorProblems(FA.PERSON_DECIDES, hubBase).some((x) => /'hub-act-ask': src\/server\/exit-routes\.js decides before \(or without\)/.test(x)), 'RED COPY (r3): the hub-act door as the base had it (a bearer check, no page verdict) is named', doorProblems(FA.PERSON_DECIDES, hubBase));
+  const noMark = { ...SRC_FILES, 'src/routes/vault.js': SRC_FILES['src/routes/vault.js'].replace("by: 'user', person: true }); }));   // r3: «allowed by you · 09:41»", "by: 'user' }); }));") };
+  ok(doorProblems(FA.PERSON_DECIDES, noMark).some((x) => /'vault-run-ask': .*without handing in the person verdict's mark/.test(x)), 'RED COPY (r3): the run ask\'s door without the mark is named (its record could never say «by you»)', doorProblems(FA.PERSON_DECIDES, noMark));
 }
 /** who calls the engine's decide: exactly routes/channels.js; no agent route and no automation verb names the decide road */
 function decideCallers(files) {
@@ -417,7 +448,7 @@ console.log('⑧ …AND EVERY DOOR DRAWS THEM — the tray row (the tray, the mi
   ok(JSON.stringify(w1) === '["proposal-approve","proposal-reject","copy"]' && JSON.stringify(w2) === '["copy"]', `the For-you window: an open wake request's verbs ${JSON.stringify(w1)} (no Mark done / Dismiss), its decided record ${JSON.stringify(w2)} (no Reopen)`, { w1, w2 });
   ok(JSON.stringify(w3) === '["done","dismiss","copy"]', 'CONTROL: any other item\'s verbs in the window are as before', w3);
   const IW = read('src/lib/inbox-window.js');
-  ok(/'proposal-reject': \(it\) => \(isDecisionRow\(it\) \? actBtn\('proposal-reject', UI_ICONS\.close, t\('Deny'\)/.test(IW) && /closers: offersClosers\(it\)/.test(IW), 'the window asks THE registry: its second verb says «Deny» on a decision row (Approve / Deny on every door), and its verbs are offersClosers\'');
+  ok(/'proposal-reject': \(it\) => \(isDecisionRow\(it\) \? actBtn\('proposal-reject', UI_ICONS\.close, t\('Deny'\)/.test(IW) && /closers: closersOf\(it, /.test(IW), 'the window asks THE registry: its second verb says «Deny» on a decision row (Approve / Deny on every door), and its closers are closersOf\'s (r3)');
   // RED CONTROL: the base's verbs (no closers flag asked) — Mark done / Dismiss beside Approve / Reject, Reopen on the decided record
   const b1 = L.itemView(wr(), { ...ictx(wr()), closers: undefined }).actions, b2 = L.itemView(decided, { ...ictx(decided), closers: undefined }).actions;
   ok(b1.includes('done') && b1.includes('dismiss') && b2.includes('reopen'), `RED CONTROL: the base's window — ${JSON.stringify(b1)} on the open request, ${JSON.stringify(b2)} on the decided one`, { b1, b2 });
@@ -532,6 +563,115 @@ function writerProblems(files) {
   const other = writerProblems({ ...SRC_FILES, 'src/server/automation-engine.js': SRC_FILES['src/server/automation-engine.js'] + '\nasync function x(eng) { return eng.setWatchers("a", { kind: "account" }, []); }\n' });
   ok(other.some((x) => /automation-engine\.js: calls a watch writer/.test(x)), 'RED COPY: a second file calling a writer is named', other);
 }
+
+// ── ⑩ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('⑩ A POINTER HIDES, NEVER DECIDES (r3) — an access request\'s item (and the Outbox\'s pointer): ✕ Hide only, the record «hidden»');
+const J = (x) => JSON.stringify(x);
+const tt3 = (x, p) => String(x).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] != null ? p[k] : ''));
+const rctx3 = { t: tt3, nameFor: () => 'Channels', wordsOf: (i) => i.text, detailOf: (i) => i.detail || '', replyState: () => ({ show: false }), optionsOf: () => [] };
+const ROW3 = await import(pathToFileURL(path.join(SRC, 'lib', 'user-todos-row.js')).href);
+const rq = (o = {}) => ({ id: 'ut-rq00000001', sessionKey: 'channels', text: 'ops-agent requests access to Ops room', status: 'open', origin: 'channels', about: 'claude:c-ops', action: { type: 'open-channel', adapterId: 'lark', convId: 'oc_ops', key: 'lark/oc_ops' }, createdAt: NOW - 3600e3, resolvedAt: null, resolvedBy: null, ...o });
+const plainItem = { id: 'ut-p', sessionKey: 'claude:c-ops', text: 'Which branch should I deploy?', status: 'open', urgency: 'normal', origin: 'agent', createdAt: NOW - 60e3 };
+try {
+  ok(J(FA.POINTER_ROWS) === '["open-channel"]' && FA.isPointer(rq()) && !FA.isDecisionRow(rq()) && FA.CLOSERS.includes('hide'), 'THE registry names its pointers (`closer: \'hide\'`): open-channel — the access request\'s item and the Outbox\'s pointer, each a door to where its question lives', FA.POINTER_ROWS);
+  const cl = { open: FA.closersOf(rq()), hidden: FA.closersOf(rq({ status: 'dismissed', resolvedBy: 'hidden' })), decision: FA.closersOf(wr()), plain: FA.closersOf(plainItem), plainDone: FA.closersOf({ ...plainItem, status: 'done' }) };
+  ok(J(cl) === J({ open: ['hide'], hidden: [], decision: [], plain: ['done', 'dismiss'], plainDone: ['reopen'] }), 'closersOf (one answer, every surface): a pointer ✕ Hide only and nothing once hidden; a decision row none; any other item ✓ ✕ / ↺', cl);
+  const runStore = (registry) => {
+    const { m, done } = storeWith(registry);
+    try {
+      const add = (o) => m.add('channels', { origin: 'channels', by: 'agent', sessionName: 'Channels', ...o });
+      const p1 = add({ text: 'ops-agent requests access to Ops room', about: 'claude:c-ops', action: rq().action });
+      m.setStatus(p1.id, 'done', 'user');   // ✓ — the button a stale page still draws
+      const h1 = { ...m.get(p1.id) };
+      const p2 = add({ text: 'Proposals awaiting approval in Ops room', action: { type: 'open-channel', adapterId: 'lark', convId: 'oc_ops', key: 'outbox-ptr' } });
+      const many = m.setStatusMany([p2.id], 'dismissed', 'user');   // «Mark all seen»
+      const p3 = add({ text: 'Proposals awaiting approval in Dev room', action: { type: 'open-channel', adapterId: 'lark', convId: 'oc_dev', key: 'lark/oc_dev' } });
+      m.setStatus(p3.id, 'done', 'system');   // its producer retracts it
+      const ans = m.resolveAnswered([p1.id], 'allowed', { decidedBy: 'person', decidedAt: NOW });   // decided in the Reach dialog while hidden
+      return { h1: { status: h1.status, by: h1.resolvedBy, words: FA.settledWords(h1) }, many: { changed: many.changed.length, status: m.get(p2.id).status, by: m.get(p2.id).resolvedBy }, retracted: { status: m.get(p3.id).status, by: m.get(p3.id).resolvedBy }, answered: { ids: ans.length, status: m.get(p1.id).status, by: m.get(p1.id).resolvedBy, stamp: (FA.decidedStamp(m.get(p1.id), { now: NOW }) || {}).text || null } };
+    } finally { done(); }
+  };
+  const g = runStore(FA);
+  ok(g.h1.status === 'dismissed' && g.h1.by === 'hidden' && g.h1.words === 'hidden — nothing was decided', 'the person\'s ✓ on an access request\'s item is written as a HIDE — «hidden — nothing was decided», never «✓ done» (the request untouched)', g.h1);
+  ok(g.many.changed === 1 && g.many.status === 'dismissed' && g.many.by === 'hidden', '«Mark all seen» hides a pointer too', g.many);
+  ok(g.retracted.status === 'done' && g.retracted.by === 'system', 'CONTROL: its producer\'s own retraction stays its own (done · automatically — the Outbox pointer, test-channel-names F2)', g.retracted);
+  ok(g.answered.ids === 1 && g.answered.status === 'done' && g.answered.by === 'allowed' && g.answered.stamp === 'approved by you · 10:05', 'a decision lands on a HIDDEN pointer (the Reach dialog decided it): «approved by you · 10:05» — the record says what was decided', g.answered);
+  const red = runStore(registryFrom(read('src/foryou-actions.js').replace(", decide: 'person', closer: 'hide' },", ", decide: 'person' },")));
+  ok(red.h1.status === 'done' && red.h1.by === 'user' && red.h1.words === 'done', 'RED CONTROL: the registry without the row\'s closer (the base) — ✓ records «done» by the user while the request stands open', red.h1);
+  const L = await import(pathToFileURL(path.join(SRC, 'lib', 'inbox-window-layout.js')).href);
+  const oh = ROW3.renderRow({ item: rq(), resolved: false, band: 5 }, rctx3).innerHTML;
+  const hh = ROW3.renderRow({ item: rq({ status: 'dismissed', resolvedBy: 'hidden', resolvedAt: NOW }), resolved: true, tail: true }, rctx3).innerHTML;
+  const rowV = { hide: /class="ut-act ut-dismiss ut-hide"[^>]*data-label="Hide">✕</.test(oh), done: /class="ut-act ut-done"/.test(oh), reopen: /ut-reopen/.test(hh), meta: (/<div class="ut-meta">([\s\S]*?)<\/div>/.exec(hh) || [])[1] || '' };
+  ok(rowV.hide && !rowV.done && !rowV.reopen && /hidden — nothing was decided/.test(rowV.meta) && !/\bdone\b/.test(rowV.meta), 'the tray row (and the chat card — one renderer): an open access request draws ✕ «Hide» and no ✓; its hidden record «hidden — nothing was decided», no ↺', rowV);
+  const ictx = (item) => ({ t: tt3, words: item.text, detail: '', name: 'Channels', origin: { origin: 'channels', label: 'Channels' }, notice: false, reply: { show: false }, ago: () => '', expires: () => '', resolvedBy: () => '', statusWords: (i) => ROW3.statusWords(i, tt3), closers: FA.closersOf(item) });
+  const hiddenRq = rq({ status: 'dismissed', resolvedBy: 'hidden', resolvedAt: NOW });
+  const wv = { open: L.itemView(rq(), ictx(rq())).actions, hidden: L.itemView(hiddenRq, ictx(hiddenRq)).actions, status: L.itemView(hiddenRq, ictx(hiddenRq)).meta.find((x) => x.kind === 'status').text };
+  ok(J(wv) === J({ open: ['hide', 'copy'], hidden: ['copy'], status: 'hidden — nothing was decided' }), 'the For-you window: «Hide» in place of Mark done / Dismiss, nothing once hidden, its status «hidden — nothing was decided»', wv);
+  const UA = read('src/lib/user-todos-actions.js');
+  ok(/const hide = isPointer\(byId\(id\)\);/.test(UA) && /if \(ok && hide\) \{ showToast\(t\('Hidden — nothing was decided; it comes back while it is still open'\), \{ duration: 6000 \}\); return ok; \}/.test(UA), 'the press says it — «Hidden — nothing was decided; it comes back while it is still open» — with NO Undo (it comes back by itself)');
+} catch (e) { ok(false, '⑩ threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
+
+// ── ⑪ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('⑪ A WAKE ASK HAS A LIFETIME (r3) — the card\'s and the tray row\'s «expires in 7 d»');
+try {
+  const DAY = 86400e3;
+  const F7 = require(path.join(SRC, 'channel-filter.js'));
+  const run = { ...wr(), action: { type: 'vault-run-ask', askId: 'a'.repeat(32) }, expiresAt: NOW + 60e3 };
+  const words = { week: FA.expiryWords(wr({ expiresAt: NOW + 7 * DAY }), { now: NOW }), day6: FA.expiryWords(wr({ expiresAt: NOW + 7 * DAY }), { now: NOW + 6 * DAY }), h: FA.expiryWords(wr({ expiresAt: NOW + 23 * 3600e3 }), { now: NOW }), min: FA.expiryWords(wr({ expiresAt: NOW + 30 * 60e3 }), { now: NOW }),
+    closed: FA.expiryWords(wr({ expiresAt: NOW + DAY, status: 'done', resolvedBy: 'denied' }), { now: NOW }), past: FA.expiryWords(wr({ expiresAt: NOW - 1 }), { now: NOW }), heldAsk: FA.expiryWords(run, { now: NOW }) };
+  ok(J(words) === J({ week: 'expires in 7 d', day6: 'expires in 1 d', h: 'expires in 23 h', min: 'expires in 30 min', closed: null, past: null, heldAsk: null }), 'expiryWords: «expires in 7 d» at filing, «1 d» on day 6, hours and minutes near its end; nothing for a closed ask, a past end, or a row that says its own (a held ask\'s 60 s)', words);
+  ok(F7.WATCH_REQUEST_TTL_MS === 7 * DAY && FA.ROW_OF['channel-watch-request'].showsExpiry === true, 'the lifetime is ONE number (src/channel-filter.js WATCH_REQUEST_TTL_MS = 7 days); the row says its end (`showsExpiry`)', F7.WATCH_REQUEST_TTL_MS);
+  const html = ROW3.renderRow({ item: wr({ expiresAt: Date.now() + 7 * DAY - 60e3, createdAt: Date.now() - 60e3 }), resolved: false, band: 5 }, rctx3).innerHTML;
+  ok(/expires in 7 d/.test(html) && ROW3.expiresText(Date.now() + 7 * DAY - 60e3, tt3) === 'expires in 7 d', 'the tray row (and the chat card — one renderer) says «expires in 7 d»; the For-you window\'s expiry words say days too', (/<div class="ut-meta">([\s\S]*?)<\/div>/.exec(html) || [])[1]);
+  const RED = registryFrom(read('src/foryou-actions.js').replace(", ends: ['allowed', 'denied', 'expired'], showsExpiry: true },", ", ends: ['allowed', 'denied', 'expired'] },"));
+  ok(RED.expiryWords(wr({ expiresAt: NOW + 7 * DAY }), { now: NOW }) === null, 'RED CONTROL: the row without `showsExpiry` (the base) — the card says nothing of its end');
+} catch (e) { ok(false, '⑪ threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
+
+// ── ⑫ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('⑫ THE VAULT\'S TWO ASKS AND THE HUB-ACT ASK — cards in the asking chat, decided by a person, their own verbs (r3)');
+try {
+  const ME = ['claude:c-ops', 'webui:sess-ops'];   // the asking chat's keys (keysForWin)
+  const askOf = { runAsk: { id: 'ut-run0000001', sessionKey: 'claude:c-ops', text: 'ops asks to run a command with a vault secret', status: 'open', urgency: 'urgent', origin: 'vault', kind: 'action', action: { type: 'vault-run-ask', askId: 'a'.repeat(32), always: true }, createdAt: NOW - 30e3, expiresAt: NOW + 30e3 },
+    paste: { id: 'ut-sec0000001', sessionKey: 'claude:c-ops', text: 'ops asks you for a secret: UniFi UCG-Fiber local admin', status: 'open', urgency: 'high', origin: 'vault', kind: 'action', action: { type: 'secret-request', requestId: 'sr-0123456789ab', into: '', kind: 'password', conv: 'c-ops', scope: 'sess-ops' }, createdAt: NOW - 20e3 },
+    hubAct: { id: 'ut-hub0000001', sessionKey: 'machines', about: 'claude:c-ops', text: 'ops wants to run a command on mac1', status: 'open', urgency: 'urgent', origin: 'machines', kind: 'action', action: { type: 'hub-act-ask', askId: 'b'.repeat(32), hostId: 'h1', machine: 'mac1', kind: 'run' }, createdAt: NOW - 10e3, expiresAt: NOW + 50e3 } };
+  const rows = Object.fromEntries(['vault-run-ask', 'secret-request', 'hub-act-ask'].map((t) => { const r = FA.ROW_OF[t]; return [t, { chat: r.chat, card: r.card, decide: r.decide, scope: r.scope, stamp: r.stamp }]; }));
+  ok(J(rows) === J({ 'vault-run-ask': { chat: true, card: 'row', decide: 'person', scope: 'conversation', stamp: 'allow' }, 'secret-request': { chat: true, card: 'row', decide: 'person', scope: 'conversation', stamp: 'store' }, 'hub-act-ask': { chat: true, card: 'row', decide: 'person', scope: 'about', stamp: 'allow' } }), 'THE registry rows: each a card in the chat (one renderer), decided by a person only; the run ask and the paste request filed under the asking conversation\'s own key, the hub-act ask `about` it', rows);
+  const drawn = FA.needsOf(Object.values(askOf), ME).map((e) => e.item.action.type);
+  ok(J(drawn) === J(['vault-run-ask', 'secret-request', 'hub-act-ask']), 'the asking chat draws all three where their producers file them (the hub-act ask by its `about`) — never the tray only', drawn);
+  const HA = read('src/server/hub-act-ask.js');
+  ok(/let about = null; try \{ about = P\.byKindOf\(by\) === 'agent' \? aboutOf\(by\) : null; \} catch \{ \}/.test(HA) && /\.\.\.\(about \? \{ about \} : \{\}\),/.test(HA) && /aboutOf: \(by\) => \{/.test(HA), 'src/server/hub-act-ask.js files an AGENT\'s act `about` the conversation that asked (wire()\'s aboutOf — test-hub-act-ask drives it on the real asker)');
+  const mark = { decidedBy: 'person', decidedAt: NOW - 60e3 };
+  const st = (it, by, fact = mark) => (FA.decidedStamp({ ...it, status: 'done', resolvedBy: by, resolvedAt: NOW, resolvedFact: fact }, { now: NOW }) || {}).text || null;
+  const stamps = { once: st(askOf.runAsk, 'allowed'), always: st(askOf.runAsk, 'always'), deny: st(askOf.hubAct, 'denied'), hubOnce: st(askOf.hubAct, 'allowed'), stored: st(askOf.paste, 'stored'), refused: st(askOf.paste, 'denied'), expired: st(askOf.runAsk, 'ask-expired'), noMark: st(askOf.runAsk, 'allowed', null) };
+  ok(J(stamps) === J({ once: 'allowed by you · 10:04', always: 'always allowed by you · 10:04', deny: 'denied by you · 10:04', hubOnce: 'allowed by you · 10:04', stored: 'stored · 10:04', refused: 'refused by you · 10:04', expired: null, noMark: null }), 'the decided stamps: «allowed by you · HH:MM» / «always allowed by you» / «denied by you» (the held asks), «stored · HH:MM» / «refused by you» (the paste request) — only with the person verdict\'s mark; an end is no stamp', stamps);
+  const law = (registry) => {
+    const { m, done } = storeWith(registry);
+    try {
+      const add = (it) => m.add(it.sessionKey, { origin: it.origin, by: 'agent', text: it.text, urgency: it.urgency, action: it.action, ...(it.about ? { about: it.about } : {}) });
+      const tryS = (id, s2, by) => { try { m.setStatus(id, s2, by); return 'ok'; } catch (e) { return e.code || e.message; } };
+      const a = add(askOf.runAsk), b = add(askOf.paste), c = add(askOf.hubAct);
+      const r = { check: tryS(a.id, 'done', 'user'), seen: m.setStatusMany([b.id, c.id], 'dismissed', 'user').decisions.length, own: tryS(c.id, 'done', 'ask-over'), stored: m.resolveAnswered([b.id], 'stored', mark).length };
+      r.reopen = tryS(b.id, 'open', 'user');
+      r.expire = tryS(a.id, 'done', 'ask-expired');
+      return r;
+    } finally { done(); }
+  };
+  const g = law(FA);
+  ok(J(g) === J({ check: 'decision_row', seen: 2, own: 'ok', stored: 1, reopen: 'decision_final', expire: 'ok' }), 'the store law per row\'s ends: ✓ on a run ask refused by name (decision_row), «Mark all seen» passes the paste request and the hub-act ask by; their producers\' own ends close them (ask-over, the 60 s, stored); a decision is final', g);
+  // (a paste request's row appends its box as DOM nodes — the node stub gets an element that takes them, then is put back)
+  const docCE = globalThis.document.createElement;
+  const boxEl = () => { const e = docCE(); return Object.assign(e, { append() {}, querySelector: (q) => (q === ':scope > .ut-body' ? { append() {} } : null) }); };
+  const cls = (it) => { globalThis.document.createElement = boxEl; let h; try { h = ROW3.renderRow({ item: it, resolved: false, band: 1 }, rctx3).innerHTML; } finally { globalThis.document.createElement = docCE; } return { closers: [...h.matchAll(/class="ut-act (ut-done|ut-dismiss|ut-reopen)/g)].map((x) => x[1]), own: [...h.matchAll(/data-answer="(\w+)"/g)].map((x) => x[1]) }; };
+  const drawnV = { runAsk: cls(askOf.runAsk), paste: cls(askOf.paste), hubAct: cls(askOf.hubAct) };
+  ok(drawnV.runAsk.closers.length === 0 && drawnV.paste.closers.length === 0 && drawnV.hubAct.closers.length === 0 && drawnV.runAsk.own.length >= 2 && drawnV.hubAct.own.length >= 2, 'the row (the tray, the chat card): the held asks draw their own Allow once / Always / Deny and NO ✓ / ✕; the paste request its box and NO ✓ / ✕', drawnV);
+  const VBX = read('src/lib/vault-paste-box.js');
+  ok(/const note = mk\('div', 'ut-secret-note', t\('Wrong name or kind\? Refuse — the agent can ask again with the right one\.'\)\);/.test(VBX) && /box\.append\(row, note, state\);/.test(VBX), 'the paste box (the tray row and the chat card — one box) says «Wrong name or kind? Refuse — the agent can ask again with the right one.»');
+  const base = registryFrom(read('src/foryou-actions.js').replace(/(\{ type: '(?:vault-run-ask|hub-act-ask|secret-request)'[^\n]*?), decide: 'person', ends: \[[^\]]*\], stamp: '\w+' \}/g, '$1 }').replace("chat: true, kind: 'approval', scope: 'about' }", "chat: true, kind: 'approval', scope: 'group' }"));
+  const baseHub = { ...askOf.hubAct }; delete baseHub.about;   // the base's hub-act ask: filed under Machines, naming no conversation
+  const rb = law(base);
+  const redV = { drawn: base.needsOf([askOf.runAsk, askOf.paste, baseHub], ME).map((e) => e.item.action.type), check: rb.check, stamp: (base.decidedStamp({ ...askOf.runAsk, status: 'done', resolvedBy: 'allowed', resolvedFact: mark }, { now: NOW }) || {}).text || null, decision: base.isDecisionRow(askOf.runAsk), scope: base.ROW_OF['hub-act-ask'].scope };
+  ok(J(redV) === J({ drawn: ['vault-run-ask', 'secret-request'], check: 'ok', stamp: null, decision: false, scope: 'group' }), 'RED CONTROL: the rows as the base had them — the hub-act ask (filed as the base filed it) is drawn in no chat, ✓ closes a run ask «done», no «allowed by you»', redV);
+} catch (e) { ok(false, '⑫ threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

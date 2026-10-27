@@ -34,6 +34,18 @@
 //   SHOTS: before (no card), the two cards (desk + phone), the waiting-owner branch, the decided records; round 2: the phone's
 //     decision row (r2-phone-decision-row-375.png), the tray's decision rows (r2-tray-decision-rows-1280.png), after the phone
 //     press (r2-phone-after-press-375.png).
+// ACCEPTANCE ROUND 3 (主开发 + the owner's items 3–4): ⑦a A POINTER HIDES — the agent's access request (rq-) is a card in the
+//     asking chat with ONE closer, ✕ Hide (on the base: ✓ Mark done / ✕ Dismiss — the ✓ pressed recorded «✓ done» with the request
+//     open); the press records «hidden — nothing was decided», the request stays open in the Reach dialog, the toast has no Undo;
+//     the agent's re-ask brings it back · ⑦b a new wake ask's card says «expires in 7 d», the agent told when it ends · ⑦c THE
+//     VAULT'S TWO ASKS IN THE ASKING CHAT: the paste request's FORM card (the masked field, Save to vault / Refuse, «Wrong name or
+//     kind? Refuse — …», no ✓ / ✕) pasted and saved IN the card (the tray's route; «stored · HH:MM», the value nowhere on the
+//     page), then the run the agent makes with it — its card with Allow once / Deny and no ✓ / ✕ (desk + phone), Deny ⇒ «denied by
+//     you · HH:MM» and the run refused; THE WIRE (主开发's pin): the value is in no WebSocket frame a page saw (both ways), no hub
+//     broadcast, not the server log, not what reached the agent (its stdin, tool output, next turn) — a control proves the frames
+//     carry the request; «ALWAYS» in the chat whenever the tray offers it (a known tool naming a host: chat = tray = once / always
+//     / deny; an interpreter: once / deny on both). SHOTS r3-chat-pointer(-hidden)-1280, r3-chat-vault-always-1280, r3-chat-vault-request / -cards / -records-1280,
+//     r3-phone-vault-cards-375. (The hub-act ask needs a paired machine: test-hub-act-ask drives the real asker — its `about`.)
 // Requires google-chrome (SKIP without) and a fresh `npm run build`. Run: node scripts/test-wake-approve-card-chrome.mjs [--shots <dir>]
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -94,11 +106,23 @@ const watch = (conv) => ['vibespace-channels', ['watch', conv, '--mode', 'wake',
 // the AGENT trying to approve its own request: its own token on the person's route and on an agent-side twin of it
 const SELF = 'const id = require("fs").readFileSync(' + JSON.stringify(DIR + '/wr-id') + ', "utf8").trim(); const H = { Authorization: "Bearer " + process.env.VIBESPACE_SESSION_TOKEN, "Content-Type": "application/json" };'
   + ' (async () => { for (const p of ["/api/channels/reach-requests/" + id + "/approve", "/api/agent/channels/reach-requests/" + id + "/approve"]) { const r = await fetch(' + JSON.stringify(${JSON.stringify(ORIGIN)}) + ' + p, { method: "POST", headers: H, body: "{}" }); let j = null; try { j = await r.json(); } catch {} console.log(p.split("/")[2] + " " + r.status + " " + ((j && j.code) || "-")); } })();';
+// round 3: the agent runs a command with the entry the owner pasted (its ref read off \`vibespace-vault list\`) — a NEW shape: a card
+const VRUN = 'const { spawnSync } = require("child_process"); const B = ' + JSON.stringify(BIN) + ';'
+  + ' const l = spawnSync(process.execPath, [B + "/vibespace-vault", "list"], { env: process.env, encoding: "utf8" }); const ref = String(l.stdout).split(" ").find((w) => w.startsWith("vault://"));'
+  + ' if (!ref) { console.log("vibespace-vault list: " + l.stdout + l.stderr); process.exit(3); }'
+  + ' const r = spawnSync(process.execPath, [B + "/vibespace-vault", "run", "--env", "PW=" + ref, "--", process.execPath, "-e", "console.log(process.env.PW ? 1 : 0)"], { env: process.env, encoding: "utf8", timeout: 90000 });'
+  + ' console.log("vibespace-vault run: rc=" + r.status + " " + String(r.stdout) + String(r.stderr)); process.exit(r.status || 0);';
 const VERBS = {
   watch2: [watch(${JSON.stringify(POLL)}), watch(${JSON.stringify(PUSH)})],
   watchnt: [['vibespace-channels', ['watch', ${JSON.stringify(POLL)}, '--mode', 'next-turn', '--keyword', 'outage', '--why', 'tell me about outages on my next turn']]],   // round 2: the agent's own NON-wake road
   unwatchnt: [['vibespace-channels', ['unwatch', ${JSON.stringify(POLL)}]]],
   selfapprove: [['node', ['-e', SELF]]],
+  // round 3: an access request (a POINTER to the Reach dialog), a wake ask on one chat, the vault's paste request and its run
+  request: [['vibespace-channels', ['request', 'fake-poll/fake-poll-announce', 'to read the incident thread before I open an incident']]],
+  watchpoll: [watch(${JSON.stringify(POLL)})], watchpush: [watch(${JSON.stringify(PUSH)})],
+  vreq: [['vibespace-vault', ['request', 'UniFi UCG-Fiber local admin', '--purpose', 'log in to the controller to read the WAN state', '--kind', 'password', '--name', 'UniFi UCG-Fiber local admin (agent-ops)']]],
+  vrun: [['node', ['-e', VRUN]]],
+  vrunall: [['node', ['-e', VRUN.replace('process.execPath, "-e", "console.log(process.env.PW ? 1 : 0)"', '"curl", "-s", "https://api.example.com/v1/items"')]]],   // round 3: a known tool naming a host — «Always» offered
 };
 let n = 0, buf = '';
 const turn = (line) => {
@@ -163,6 +187,7 @@ for (let i = 0; i < 120; i++) { try { await fetch(`${ORIGIN}/api/home`); break; 
 const WebSocket = require('ws');
 let seq = 0; let mutant = null;
 const pageErrors = [];
+const WS_SEEN = [];   // round 3: every WebSocket frame a page saw, received AND sent (the wire assert of a pasted value)
 async function connect(target) {
   const sock = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => sock.on('open', r));
@@ -170,6 +195,7 @@ async function connect(target) {
   sock.on('message', (d) => {
     const m = JSON.parse(d);
     if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); PENDS.delete(m.id); return; }
+    if (m.method === 'Network.webSocketFrameReceived' || m.method === 'Network.webSocketFrameSent') WS_SEEN.push(String((m.params.response && m.params.response.payloadData) || ''));
     if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown');
     if (m.method === 'Fetch.requestPaused') {
       const p = m.params, u = new URL(p.request.url);
@@ -187,7 +213,7 @@ async function connect(target) {
     return r.result.value;
   };
   const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch { } await sleep(120); } try { return await evalJs(expr); } catch { return false; } };
-  await cdp('Runtime.enable'); await cdp('Page.enable');
+  await cdp('Runtime.enable'); await cdp('Page.enable'); await cdp('Network.enable');
   await cdp('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }] });
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
   await cdp('Emulation.setCPUThrottlingRate', { rate: 2 }); // the runner's slower CPU
@@ -512,6 +538,131 @@ try {
     check(`RED CONTROL: the base's record words — «${red && red.line.slice(0, 60)}»: neither who decided nor when`, !!red && red.done && /approved · /.test(red.line) && !/by you/.test(red.line), red);
   } catch (e) { fail++; console.log('  ✗ ⑥ RED threw: ' + (e?.message || e)); } finally { mutant = null; }
   await lap('⑥ done');
+
+  console.log('⑦ ROUND 3 — a pointer hides; a wake ask says its end; the vault\'s request and its run are cards in the asking chat');
+  await A.front(); await A.load(); await openChat(A);
+  const J3 = (x) => JSON.stringify(x);
+  // ⑦a A POINTER HIDES, NEVER DECIDES — the agent's access request (rq-): its card offers ✕ Hide only; the press hides it, the
+  // request stays open in the Reach dialog; the agent asking again brings it back. (Whatever closer is drawn is PRESSED — on the
+  // base its ✓: what it records is the finding.)
+  const ANN = 'fake-poll/fake-poll-announce';
+  await A.evalJs(`fetch('/api/channels/${ANN}/reach', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ principal: { kind: 'agent', id: ${J3(env && env.sid)} }, level: 'requestable' }) }).then((r) => r.status)`);
+  say('now do:request'); await logHas(/### request 0 rc=/);
+  const rqItem = await until(async () => (await api()).open.find((i) => i.action && i.action.type === 'open-channel' && i.action.convId === 'fake-poll-announce') || null);
+  await A.waitFor(`!!document.querySelector('.cn-card[data-item="${rqItem && rqItem.id}"]')`, 15000);
+  await A.evalJs(`document.querySelector('.cn-card[data-item="${rqItem && rqItem.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(400);
+  const hideSel = `.cn-card[data-item="${rqItem && rqItem.id}"] .ut-hide`, tickSel = `.cn-card[data-item="${rqItem && rqItem.id}"] .ut-done`;
+  const has = await A.evalJs(`({ hide: !!document.querySelector(${J3(hideSel)})?.offsetParent, tick: !!document.querySelector(${J3(tickSel)})?.offsetParent })`);
+  const rc0 = await A.evalJs(CARD(rqItem && rqItem.id));
+  await A.shot('r3-chat-pointer-1280.png');
+  check(`r3 ⑦a: the access request's card in the asking chat offers ONE closer, ✕ Hide — no ✓ Mark done (${J3(rc0 && rc0.verbs)})`, !!rqItem && has.hide && !has.tick, { has, verbs: rc0 && rc0.verbs });
+  const rqPress = (has.hide || has.tick) ? await A.restThenPress(has.hide ? hideSel : tickSel) : null;
+  await sleep(900);
+  const rqAfter = ((await api()).resolved || []).find((i) => i.id === (rqItem && rqItem.id)) || null;
+  const annView = await (await fetch(`${ORIGIN}/api/channels/${ANN}`)).json().catch(() => ({}));
+  const rqReq = ((((annView && annView.conversation) || {}).reach || {}).requests || []).find((r) => r.todoId === (rqItem && rqItem.id)) || null;   // the Reach dialog's own read
+  const rc1 = await A.evalJs(CARD(rqItem && rqItem.id));
+  await A.shot('r3-chat-pointer-hidden-1280.png');
+  check(`…its press HIDES it: the record «${rc1 && rc1.line}» (${rqAfter && rqAfter.resolvedBy}) says nothing about a decision; the request is still ${rqReq && rqReq.status} in the Reach dialog; the toast «${rqPress && rqPress.toast}» offers no Undo`, !!rqAfter && rqAfter.resolvedBy === 'hidden' && !!rc1 && /hidden — nothing was decided/.test(rc1.line) && !!rqReq && rqReq.status === 'open' && /Hidden — nothing was decided/.test((rqPress && rqPress.toast) || '') && !/Undo/.test((rqPress && rqPress.toast) || ''), { pressed: has.hide ? 'hide' : 'tick', by: rqAfter && rqAfter.resolvedBy, status: rqAfter && rqAfter.status, line: rc1 && rc1.line, request: rqReq && rqReq.status, toast: rqPress && rqPress.toast });
+  say('now do:request'); await logHas(/### request 0 rc=[\s\S]*### request 0 rc=/);
+  const rqBack = await until(async () => (await api()).open.find((i) => i.id === (rqItem && rqItem.id)) || null, 8000);
+  const reaskOut = cliLog().split('### request 0 rc=').pop();
+  check('…the agent asks again while it is open ⇒ the SAME request, its pointer back in the tray and the chat (the CLI says so)', !!rqBack && /already open/.test(reaskOut) && /it is back in their For-you tray/.test(reaskOut), reaskOut.slice(0, 300));
+  await lap('⑦a done');
+  // ⑦b A WAKE ASK SAYS ITS END — a new ask on the chat whose earlier ask was denied: «expires in 7 d» on its card; the agent told when
+  const pollBy = ((await api()).resolved.find((i) => i.id === (wrPoll && wrPoll.id)) || {}).resolvedBy;
+  const wv3 = pollBy === 'denied' ? 'watchpoll' : 'watchpush';
+  say('now do:' + wv3); await logHas(new RegExp('### ' + wv3 + ' 0 rc='));
+  const nw = await until(async () => (await wakeItems()).open[0] || null);
+  await A.waitFor(`!!document.querySelector('.cn-card[data-item="${nw && nw.id}"]')`, 15000);
+  const nc = await A.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${nw && nw.id}"]'); const m = c && c.querySelector('.ut-meta'); return c ? { text: (m ? m.textContent : '').trim(), metaShown: !!(m && m.offsetParent) } : null; })()`);   // the card's meta line (its age · its end)
+  const nwOut = cliLog().split('### ' + wv3 + ' 0 rc=').pop();
+  check(`r3 ⑦b: a new wake ask's card says its end — «${((nc && nc.text) || '').match(/expires in [^·]*/) || '—'}» (its meta line: «${nc && nc.text}»)`, !!nc && nc.metaShown && /expires in 7 d/.test(nc.text), nc);
+  check('…and the agent was told it: «Unanswered, it expires <when> UTC — then you can ask again.»', /Unanswered, it expires \d{4}-\d\d-\d\d \d\d:\d\d UTC — then you can ask again\./.test(nwOut), nwOut.slice(0, 400));
+  if (nw) await A.evalJs(`fetch('/api/channels/reach-requests/${nw.action.id}/deny', { method: 'POST' }).then((r) => r.status)`);   // a wake row wakes — never left standing
+  await lap('⑦b done');
+  // ⑦c THE VAULT'S TWO ASKS IN THE ASKING CHAT (the owner: «他的索要和使用请求都不在聊天里») — the paste request's FORM card, answered
+  // there through the tray's own route; then the run the agent makes with it: its card, its own verbs, no ✓ / ✕
+  const SECOND = 'wake card second password 7';
+  const VALUE = ['paste', 'leg', 'admin', 'pw', Date.now().toString(36)].join('-');
+  const su = await A.evalJs(`fetch('/api/vault/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${J3(SECOND)} }) }).then(async (r) => ({ status: r.status, state: (await r.json().catch(() => ({}))).state }))`);
+  check('setup: the vault\'s second password set from the page (unlocked)', su && su.state === 'unlocked', su);
+  say('now do:vreq'); await logHas(/### vreq 0 rc=/);
+  const sr = await until(async () => (await api()).open.find((i) => i.action && i.action.type === 'secret-request') || null);
+  await A.waitFor(`!!document.querySelector('.cn-card[data-item="${sr && sr.id}"] input.ut-secret-input')`, 15000);
+  await A.evalJs(`document.querySelector('.cn-card[data-item="${sr && sr.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(400);
+  const sc = await A.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${sr && sr.id}"]'); if (!c) return null; const i = c.querySelector('input.ut-secret-input'); return { type: i && i.type, save: (c.querySelector('.ut-secret-save')?.textContent || '').trim(), deny: (c.querySelector('.ut-secret-deny')?.textContent || '').trim(), note: (c.querySelector('.ut-secret-note')?.textContent || '').trim(), closers: [...c.querySelectorAll('.ut-done, .ut-dismiss, .ut-reopen')].filter((x) => x.offsetParent).length, text: (c.textContent || '').slice(0, 220) }; })()`);
+  await A.shot('r3-chat-vault-request-1280.png');
+  check(`r3 ⑦c: the vault's REQUEST is a card in the asking chat — the masked field (${sc && sc.type}), «${sc && sc.save}» / «${sc && sc.deny}», the note «${sc && sc.note}», no ✓ / ✕ (${sc && sc.closers})`, !!sc && sc.type === 'password' && sc.save === 'Save to vault' && /Wrong name or kind\? Refuse/.test(sc.note) && sc.closers === 0 && /UniFi UCG-Fiber local admin/.test(sc.text), sc);
+  await A.evalJs(`document.querySelector('.cn-card[data-item="${sr && sr.id}"] input.ut-secret-input').focus(); true`);
+  await A.cdp('Input.insertText', { text: VALUE });
+  const svPress = await A.restThenPress(`.cn-card[data-item="${sr && sr.id}"] .ut-secret-save`);
+  const srDone = await until(async () => (await api()).resolved.find((i) => i.id === (sr && sr.id)) || null, 10000);
+  const stampSr = 'stored · ' + await hm(A, srDone && srDone.resolvedFact && srDone.resolvedFact.decidedAt);
+  await A.waitFor(`(document.querySelector('.cn-card[data-item="${sr && sr.id}"] .cn-line')?.textContent || '').includes(${J3(stampSr)})`, 8000);
+  const srCard = await A.evalJs(CARD(sr && sr.id));
+  const leakPage = await A.evalJs(`(document.documentElement.outerHTML + (document.body ? document.body.innerText : '') + [...document.querySelectorAll('input, textarea')].map((i) => i.value).join('')).includes(${J3(VALUE)})`);
+  check(`…pasted and saved IN THE CHAT CARD (the tray's own route): the card reads «${srCard && srCard.line}», its tray row resolved with it (${srDone && srDone.resolvedBy}); the value is nowhere on the page`, !!srDone && srDone.resolvedBy === 'stored' && !!srCard && srCard.line.includes(stampSr) && !leakPage && !!svPress && svPress.pressed, { by: srDone && srDone.resolvedBy, fact: srDone && srDone.resolvedFact, line: srCard && srCard.line, leakPage, toast: svPress && svPress.toast });
+  // 主开发's pin — A WIRE ASSERT, not a DOM one: the pasted value (raw, hex, base64, base64url) is in NO frame any page saw
+  // (both directions), no hub broadcast, not the server's log, not what reached the agent (its stdin, its tool output, its
+  // next-turn context); the field stayed masked (type password, no autocomplete)
+  const forms = (v) => [v, Buffer.from(v).toString('hex'), Buffer.from(v).toString('base64'), Buffer.from(v).toString('base64url')];
+  const hits = (text) => forms(VALUE).filter((f) => String(text).includes(f)).length;
+  const ctxTurn = await fetch(`${ORIGIN}/api/agent/prompt-context`, { headers: { Authorization: 'Bearer ' + (env && env.token) } }).then((r) => r.json()).then((j) => String(j.context || '')).catch(() => '');
+  const wire = { pageFrames: WS_SEEN.length, pageHits: hits(WS_SEEN.join('\n')), hubFrames: frames.length, hubHits: hits(frames.join('\n')), serverLog: hits(fs.readFileSync(path.join(SHOTS, 'server.log'), 'utf8')),
+    agentStdin: hits(fs.readFileSync(path.join(stubDir, 'seen.log'), 'utf8')), agentTools: hits(cliLog()), nextTurn: hits(ctxTurn), receipt: /STORED/.test(ctxTurn), masked: sc && sc.type === 'password',
+    seesTheRequest: !!sr && WS_SEEN.join('\n').includes(sr.action.requestId) && frames.join('\n').includes(sr.action.requestId) };   // CONTROL: the frames DO carry the request (its sr- id) — a 0 is a real absence
+  check(`…THE WIRE: the pasted value is in none of ${wire.pageFrames} page WebSocket frames (both ways) nor ${wire.hubFrames} hub broadcasts, not the server log, not the agent's stdin / tool output / next turn (which says STORED); the field stayed masked`, wire.pageFrames > 0 && wire.hubFrames > 0 && wire.pageHits === 0 && wire.hubHits === 0 && wire.serverLog === 0 && wire.agentStdin === 0 && wire.agentTools === 0 && wire.nextTurn === 0 && wire.receipt && wire.masked && wire.seesTheRequest, wire);
+  // 主开发's pin — the run card shows «Always» in the chat WHENEVER the tray offers it (one verdict: the item's `action.always`)
+  const rungs = async (id) => {
+    const chat = await A.evalJs(`[...document.querySelectorAll('.cn-card[data-item="${id}"] [data-answer]')].filter((b) => b.offsetParent).map((b) => b.dataset.answer)`);
+    await A.evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (!p || p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`);
+    await A.waitFor(`!!document.querySelector('#user-todos-popup .ut-item[data-id="${id}"]')`, 8000);
+    const tray = await A.evalJs(`[...document.querySelectorAll('#user-todos-popup .ut-item[data-id="${id}"] [data-answer]')].filter((b) => b.offsetParent).map((b) => b.dataset.answer)`);
+    await A.evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`); await sleep(300);
+    return { chat, tray };
+  };
+  say('now do:vrunall');
+  const rAll = await until(async () => (await api()).open.find((i) => i.action && i.action.type === 'vault-run-ask') || null, 30000);
+  await A.waitFor(`!!document.querySelector('.cn-card[data-item="${rAll && rAll.id}"] [data-answer="deny"]')`, 15000);
+  const rgAll = await rungs(rAll && rAll.id);
+  await A.evalJs(`document.querySelector('.cn-card[data-item="${rAll && rAll.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(400);
+  await A.shot('r3-chat-vault-always-1280.png');
+  check(`…the run card shows «Always» in the chat when the tray offers it (a known tool naming a host — action.always ${rAll && rAll.action.always}): chat ${J3(rgAll.chat)} = tray ${J3(rgAll.tray)}`, !!rAll && rAll.action.always === true && rgAll.chat.includes('always') && J3(rgAll.chat) === J3(rgAll.tray), { always: rAll && rAll.action.always, ...rgAll });
+  await A.restThenPress(`.cn-card[data-item="${rAll && rAll.id}"] [data-answer="deny"]`);
+  await until(async () => (await api()).resolved.find((i) => i.id === (rAll && rAll.id)) || null, 10000);
+  await logHas(/### vrunall 0 rc=/, 30000);
+  say('now do:vrun');
+  const ra = await until(async () => (await api()).open.find((i) => i.action && i.action.type === 'vault-run-ask') || null, 30000);
+  await A.waitFor(`!!document.querySelector('.cn-card[data-item="${ra && ra.id}"] [data-answer="deny"]')`, 15000);
+  await A.evalJs(`document.querySelector('.cn-card[data-item="${ra && ra.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
+  const rcRun = await A.evalJs(CARD(ra && ra.id));
+  await A.shot('r3-chat-vault-cards-1280.png');
+  check(`r3 ⑦c: …then the RUN the agent makes with it is a card in the same chat — its own verbs ${J3(rcRun && rcRun.verbs)}, no ✓ / ✕ (${rcRun && rcRun.closers})`, !!rcRun && rcRun.closers === 0 && rcRun.verbs.some((v) => /^Allow once/.test(v)) && rcRun.verbs.some((v) => /^Deny/.test(v)), rcRun);
+  const rgNo = await rungs(ra && ra.id);
+  check(`…and NO «Always» in the chat when the tray offers none (an interpreter — action.always ${ra && ra.action.always}): chat ${J3(rgNo.chat)} = tray ${J3(rgNo.tray)}`, !!ra && ra.action.always === false && !rgNo.chat.includes('always') && J3(rgNo.chat) === J3(rgNo.tray), { always: ra && ra.action.always, ...rgNo });
+  await B.front(); await B.device(375, 812); await B.load();
+  await B.waitFor(`document.documentElement.dataset.vc === 'compact'`, 8000);
+  await B.evalJs(`app.phoneHome?.hide?.(); true`).catch(() => null); await openChat(B);
+  await B.waitFor(`!!document.querySelector('.cn-card[data-item="${ra && ra.id}"] [data-answer="deny"]')`, 12000);
+  await B.evalJs(`document.querySelector('.cn-card[data-item="${ra && ra.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
+  const phRun = await B.evalJs(CARD(ra && ra.id));
+  await B.shot('r3-phone-vault-cards-375.png');
+  check(`…on a phone (375 touch) the run card stands in the chat with its own verbs and no ✓ / ✕ (${J3(phRun && phRun.verbs)})`, !!phRun && phRun.closers === 0 && phRun.verbs.some((v) => /^Deny/.test(v)), phRun);
+  await B.device(1280, 800, { mouse: true }); await B.load();
+  await A.front();
+  const dPress = await A.restThenPress(`.cn-card[data-item="${ra && ra.id}"] [data-answer="deny"]`);
+  const raDone = await until(async () => (await api()).resolved.find((i) => i.id === (ra && ra.id)) || null, 10000);
+  const stampRa = 'denied by you · ' + await hm(A, raDone && raDone.resolvedFact && raDone.resolvedFact.decidedAt);
+  await A.waitFor(`(document.querySelector('.cn-card[data-item="${ra && ra.id}"] .cn-line')?.textContent || '').includes(${J3(stampRa)})`, 8000);
+  const raCard = await A.evalJs(CARD(ra && ra.id));
+  const ranOut = await logHas(/### vrun 0 rc=/, 30000) ? cliLog().split('### vrun 0 rc=').pop().slice(0, 300) : '';
+  check(`…Deny on the card: the record «${raCard && raCard.line}» (the person verdict's mark); the agent's run refused (${(ranOut.match(/ask_denied|denied|refused/) || ['?'])[0]})`, !!raDone && raDone.resolvedBy === 'denied' && !!raCard && raCard.line.includes(stampRa) && /ask_denied|denied/.test(ranOut) && !!dPress && dPress.pressed, { by: raDone && raDone.resolvedBy, line: raCard && raCard.line, ranOut });
+  await A.evalJs(`document.querySelector('.cn-card[data-item="${sr && sr.id}"]')?.scrollIntoView({ block: 'center' }); true`); await sleep(400);
+  await A.shot('r3-chat-vault-records-1280.png');
+  const wireEnd = { pageFrames: WS_SEEN.length, hits: hits(WS_SEEN.join('\n')) + hits(frames.join('\n')) + hits(fs.readFileSync(path.join(SHOTS, 'server.log'), 'utf8')) + hits(fs.readFileSync(path.join(stubDir, 'seen.log'), 'utf8')) + hits(cliLog()) };
+  check(`…and after both runs: still 0 hits of the value over ${wireEnd.pageFrames} page frames, every hub broadcast, the server log and all the agent saw`, wireEnd.hits === 0, wireEnd);
+  await lap('⑦c done');
   check('no page threw', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 

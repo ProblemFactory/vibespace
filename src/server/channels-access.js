@@ -727,7 +727,8 @@ function create(engineCtx) {
     const reason = String(why || '').trim().slice(0, 500);
     if (!reason) return { ok: false, code: 'bad-request', error: 'a reason is required — the user reads it' };
     const open = (en.reachRequests || []).find((r) => r.status === 'open' && r.principal && r.principal.kind === 'agent' && r.principal.id === ctx.id);
-    if (open) return { ok: true, request: { ...open }, already: true };
+    // lane wake-approve-card r3: the agent asks again while its request is open — a pointer the owner HID comes back to the tray
+    if (open) return { ok: true, request: { ...open }, already: true, ...(resurface(open) ? { resurfaced: true } : {}) };
     const req = { id: `rq-${t.toString(36)}-${Math.random().toString(36).slice(2, 8)}`, principal: { kind: 'agent', id: ctx.id, name: ctx.name || null }, scope: { kind: 'conversation', id: en.key }, why: reason, at: t, status: 'open', todoId: null, decidedAt: null };
     if (userTodos && typeof userTodos.add === 'function') {
       try {
@@ -756,6 +757,19 @@ function create(engineCtx) {
     try { store.audit({ kind: 'acl', op: 'request', principal: req.principal, scope: req.scope, why: reason, at: t, by: 'agent' }); } catch {}
     notify([convId]);
     return { ok: true, request: { ...req }, ...(req.todoId ? { filed: CN.filedLine('open-channel', req.id, OF.tray()) } : {}) };
+  }
+  /** A POINTER HIDES, NEVER DECIDES (lane wake-approve-card r3): an access request's item is a pointer to the Reach dialog —
+   *  the owner's ✕ Hide (src/user-todos.js: 'dismissed', resolvedBy 'hidden') leaves the request open and decidable there,
+   *  and the pointer COMES BACK while it is: at the next boot reconcile (reconcileAsks) or when the agent asks again —
+   *  reopened as it was (its id, its words), never filed twice. → true when it came back. */
+  function resurface(req) {
+    if (!req || req.status !== 'open' || !req.todoId || !userTodos || typeof userTodos.get !== 'function') return false;
+    try {
+      const it = userTodos.get(req.todoId);
+      if (!it || it.sessionKey !== INBOX_KEY || !CN.isHidden(it)) return false;
+      userTodos.setStatus(req.todoId, 'open', 'system');
+      return true;
+    } catch { return false; }
   }
   /** `person` (lane wake-approve-card r2): the decide route asked THE person verdict first — the request records
    *  `decidedBy: 'person'` + the time, and its item carries the same mark (`resolvedFact`), the only record that may
@@ -796,7 +810,8 @@ function create(engineCtx) {
     if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
     try { store.audit({ kind: 'acl', op: approve ? 'grant' : 'deny', principal: req.principal, scope: req.scope, level: approve ? 'visible' : null, origin: 'request', requestId, at: t, by }); } catch {}
     if (req.todoId && userTodos && typeof userTodos.get === 'function') {
-      try { const it = userTodos.get(req.todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.resolveAnswered([req.todoId], approve ? 'allowed' : 'denied', person ? { decidedBy: 'person', decidedAt: t } : null); } catch {}   // lane chat-needs-you-card: the card's record says which; r2: and whose (the person verdict's mark)
+      // r3: a pointer the owner HID takes the decision too (the record then says what was decided, never «hidden»)
+      try { const it = userTodos.get(req.todoId); if (it && (it.status === 'open' || CN.isHidden(it)) && it.sessionKey === INBOX_KEY) userTodos.resolveAnswered([req.todoId], approve ? 'allowed' : 'denied', person ? { decidedBy: 'person', decidedAt: t } : null); } catch {}   // lane chat-needs-you-card: the card's record says which; r2: and whose (the person verdict's mark)
     }
     notify([en.id]);
     return { ok: true, request: { ...req, status: approve ? 'approved' : 'denied' }, grant };
@@ -910,7 +925,7 @@ function create(engineCtx) {
         delivery: F.deliveryModeOf(w), notify: w.notify, mode: w.mode, filter: f ? { match: f.match, rules: f.rules } : null, digestMinutes: w.digestMinutes, dailyWakeCap: w.dailyWakeCap,
         how: WS.watchHowWords(w), what: WS.watchWhatWords(w, f), expiresAt: w.expiresAt || null }; };
     const rowsOf = (ws) => (Array.isArray(ws) ? ws : []).filter((w) => w && w.principal && F.rowNames(w, ctx)).map(view);
-    const askView = (r) => ({ id: r.id, target: r.scope.kind === 'conversation' ? agentId(r.scope.id) : r.scope.id, how: WS.watchHowWords(r.watch), what: WS.watchWhatWords(r.watch), at: r.at });
+    const askView = (r) => ({ id: r.id, target: r.scope.kind === 'conversation' ? agentId(r.scope.id) : r.scope.id, how: WS.watchHowWords(r.watch), what: WS.watchWhatWords(r.watch), at: r.at, expiresAt: askEndOf(r) });   // r3: its end
     if (ref) {
       const tg = watchTargetOf(ctx, ref);
       if (!tg.ok) return tg;
@@ -975,22 +990,38 @@ function create(engineCtx) {
     for (const tb of ['accountAssignments', 'patternAssignments']) for (const g of Object.values(store.index.table(tb) || {})) count(g && g.watchers);
     return n;
   }
-  function openWatchRequestsOf(pk) { return (store.index.table('watchRequests') || []).filter((r) => r && r.status === 'open' && r.principal && pkOf(r.principal) === pk); }
+  /** A WAKE ASK HAS A LIFETIME (lane wake-approve-card r3 — 主开发): its END = `expiresAt` (stamped at filing: the filing +
+   *  WATCH_REQUEST_TTL_MS, 7 days), else — an ask filed before the lifetime — its filing + the same. An ask past its end is
+   *  no longer waiting (the bound, `already`), whatever the sweep has written yet. */
+  const askEndOf = (r) => (Number(r && r.expiresAt) > 0 ? Number(r.expiresAt) : Number(r && r.at) + F.WATCH_REQUEST_TTL_MS);
+  const askLive = (r, t) => !!r && r.status === 'open' && askEndOf(r) > t;
+  const askTarget = (r) => (r && r.scope && r.scope.kind === 'conversation' ? agentId(r.scope.id) : agentId(r && r.scope ? r.scope.id : ''));
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const inWords = (ms) => (ms >= DAY_MS ? `${Math.round(ms / DAY_MS)} d` : ms >= 3600e3 ? `${Math.round(ms / 3600e3)} h` : `${Math.max(1, Math.ceil(ms / 60e3))} min`);
+  function openWatchRequestsOf(pk, t = now()) { return (store.index.table('watchRequests') || []).filter((r) => askLive(r, t) && r.principal && pkOf(r.principal) === pk); }
   /** W1: a WAKE watch is the user's money — ONE request with the frozen row, a For-you item whose Approve (the existing
    *  reach-request decide route) writes exactly it; a second ask while one is open is the same request. */
   async function fileWatchRequest(ctx, tg, row, why) {
     const t = now();
     const scope = tg.key ? { kind: 'conversation', id: tg.key } : { kind: 'adapter', id: tg.adapterId };
-    const open = (store.index.table('watchRequests') || []).find((r) => r && r.status === 'open' && r.principal && r.principal.id === ctx.id && r.scope && r.scope.kind === scope.kind && r.scope.id === scope.id);
-    if (open) return { ok: true, proposed: true, already: true, request: { id: open.id, status: open.status } };
+    const open = (store.index.table('watchRequests') || []).find((r) => askLive(r, t) && r.principal && r.principal.id === ctx.id && r.scope && r.scope.kind === scope.kind && r.scope.id === scope.id);
+    if (open) return { ok: true, proposed: true, already: true, request: { id: open.id, status: open.status, expiresAt: askEndOf(open) } };
+    await expireWatchRequests(t);   // r3: an ask past its end leaves before this one is counted (the sweep's work, done now)
     // verify r1 F2: a bound on the wake asks one agent may have waiting, said with the count; the owner reads the totals
     const pkR = pkOf(row.principal);
-    const waiting = openWatchRequestsOf(pkR);
-    if (waiting.length >= F.MAX_OPEN_WATCH_REQUESTS) return { ok: false, code: 'watch-request-limit', error: `${waiting.length} wake asks of yours are already waiting for the user — no more until they decide; --mode next-turn (free) needs no approval` };
+    const waiting = openWatchRequestsOf(pkR, t);
+    if (waiting.length >= F.MAX_OPEN_WATCH_REQUESTS) {
+      // r3: the refusal names the OLDEST open ask and its end — the agent knows when it may ask again without the owner
+      const oldest = waiting.reduce((a, b) => (Number(b.at) < Number(a.at) ? b : a));
+      const end = askEndOf(oldest);
+      return { ok: false, code: 'watch-request-limit', oldest: { id: oldest.id, target: askTarget(oldest), at: oldest.at, expiresAt: end },
+        error: `${waiting.length} wake asks of yours are already waiting for the user — no more until they decide or one expires: the oldest, ${oldest.id} (for ${askTarget(oldest)}), expires unanswered ${OF.when(end)} (in ${inWords(end - t)}); --mode next-turn (free) needs no approval` };
+    }
     const own = agentWatchCount(pkR);
     const reason = String(why || '').trim().slice(0, 500);
     const kws = row.filter ? row.filter.rules.map((x) => F.ruleWhy(x)) : [];   // lane agent-watch-parity: every rule kind in words (was: the keywords' values)
-    const req = { id: `wr-${t.toString(36)}-${crypto.randomBytes(3).toString('hex')}`, kind: 'watch', principal: row.principal, scope, adapterId: tg.adapterId, grain: tg.grain, watch: row, why: reason, at: t, status: 'open', todoId: null, decidedAt: null };
+    const req = { id: `wr-${t.toString(36)}-${crypto.randomBytes(3).toString('hex')}`, kind: 'watch', principal: row.principal, scope, adapterId: tg.adapterId, grain: tg.grain, watch: row, why: reason, at: t, expiresAt: t + F.WATCH_REQUEST_TTL_MS, status: 'open', todoId: null, decidedAt: null };   // r3: its END (a wake ask has a lifetime)
+    const ttlDays = Math.round(F.WATCH_REQUEST_TTL_MS / DAY_MS);
     if (userTodos && typeof userTodos.add === 'function') {
       try {
         const title = String(tg.title || tg.key || tg.adapterId).slice(0, 120);
@@ -999,8 +1030,9 @@ function create(engineCtx) {
         const item = userTodos.add(INBOX_KEY, {
           origin: 'channels',
           text: `${ctx.name || ctx.id} asks to be woken by ${where}`,
-          detail: `Approve writes: wake ${ctx.name || ctx.id} now (a billed turn) ${what} in ${where}, at most ${row.dailyWakeCap} wakes a day.${row.notify === 'digest' ? `\nAs a digest: one billed turn every ${row.digestMinutes} minutes at most.` : ''}${reason ? `\nReason: ${reason}` : ''}\nIt already has ${own} notifications of its own and ${waiting.length} wake asks waiting.\nDeny changes nothing. Without it, the agent can still ask for the news on its next turn (free).`,
+          detail: `Approve writes: wake ${ctx.name || ctx.id} now (a billed turn) ${what} in ${where}, at most ${row.dailyWakeCap} wakes a day.${row.notify === 'digest' ? `\nAs a digest: one billed turn every ${row.digestMinutes} minutes at most.` : ''}${reason ? `\nReason: ${reason}` : ''}\nIt already has ${own} notifications of its own and ${waiting.length} wake asks waiting.\nDeny changes nothing. Without it, the agent can still ask for the news on its next turn (free).\nUnanswered, it expires in ${ttlDays} days — the agent can ask again.`,
           urgency: 'normal', by: 'agent', sessionName: 'Channels', action: { type: 'channel-watch-request', id: req.id },
+          expiresAt: req.expiresAt,   // r3: the store's sweep ends it as `expired` (the hook below settles the request); the card says «expires in 7 d»
           about: ctx.sessionKey || null,   // lane chat-needs-you-card: the ASKING conversation — its chat draws the card
           i18n: {
             text: { key: i18nKey('{agent} asks to be woken by {where}'), params: { agent: ctx.name || ctx.id, where } },
@@ -1010,6 +1042,7 @@ function create(engineCtx) {
               ...(reason ? [{ key: i18nKey('Reason: {reason}'), params: { reason } }] : []),
               { key: i18nKey('It already has {n} notifications of its own and {m} wake asks waiting.'), params: { n: own, m: waiting.length } },
               { key: i18nKey('Deny changes nothing. Without it, the agent can still ask for the news on its next turn (free).') },
+              { key: i18nKey('Unanswered, it expires in {n} days — the agent can ask again.'), params: { n: ttlDays } },
             ],
             source: INBOX_SOURCE,
           },
@@ -1026,7 +1059,7 @@ function create(engineCtx) {
     await store.index.update((ix) => { const list = Array.isArray(ix.watchRequests) ? ix.watchRequests : (ix.watchRequests = []); list.push(req); while (list.length > 100) { const i = list.findIndex((r) => !(r && r.status === 'open')); if (i < 0) break; list.splice(i, 1); } });
     try { store.audit({ kind: 'acl', op: 'watch-request', principal: req.principal, scope, delivery: 'wake', at: t, by: 'agent' }); } catch {}
     notify([]);
-    return { ok: true, proposed: true, request: { id: req.id, status: 'open' }, dailyWakeCap: row.dailyWakeCap, ...(req.todoId ? { filed: CN.filedLine('channel-watch-request', req.id, OF.tray()) } : {}) };
+    return { ok: true, proposed: true, request: { id: req.id, status: 'open', expiresAt: req.expiresAt }, dailyWakeCap: row.dailyWakeCap, expiresAt: req.expiresAt, ...(req.todoId ? { filed: CN.filedLine('channel-watch-request', req.id, OF.tray()) } : {}) };
   }
   /** Approve = EXACTLY the frozen row, written through `setGrain` (the access rule re-judged now); deny = nothing. */
   async function decideWatchRequest(requestId, approve, by = 'user', { person = false } = {}) {
@@ -1034,6 +1067,8 @@ function create(engineCtx) {
     if (!req0) return { ok: false, code: 'not-found', error: 'No such request' };
     if (req0.status !== 'open') return { ok: false, code: 'bad-state', error: `request already ${req0.status}` };
     const t = now();
+    // r3: an ask past its end is over even before the sweep wrote it — expired now, never approved late
+    if (askEndOf(req0) <= t) { await expireWatchRequests(t); return { ok: false, code: 'expired', error: 'this wake ask expired unanswered — the agent can ask again' }; }
     if (approve) {
       const pk = pkOf(req0.principal);
       const en1 = req0.grain && req0.grain.kind === 'conversation' ? store.index.peek(`${req0.adapterId}/${req0.grain.convId}`) : null;
@@ -1060,17 +1095,56 @@ function create(engineCtx) {
   // so there is NO reopen branch here any more (round 1's sent a decided record back to «ask-over» while its watch stood).
   // What is left for this law: an item that ENDED without a decision (the store's expiry sweep) settles its request
   // `expired` — nothing written, the agent's two-open bound (MAX_OPEN_WATCH_REQUESTS) freed, «the agent can ask again».
+  /** THE request `req` settled by its item's end (`status`, `by`) — `expired` (nothing written, the agent can ask again), any
+   *  other close `denied`. The hook below, and the boot reconcile for an item that ended while nobody listened. */
+  function settleFromItem(req, status, by) {
+    const t = now();
+    const ended = by === 'expired';
+    return store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req.id); if (!r2 || r2.status !== 'open') return; r2.status = ended ? 'expired' : 'denied'; r2.decidedAt = t; r2.decidedBy = ended ? 'expired' : `item-${String(status)}-by-${String(by || 'user')}`; })
+      .then(() => { try { store.audit({ kind: 'acl', op: ended ? 'watch-expire' : 'watch-deny', principal: req.principal, scope: req.scope, requestId: req.id, at: t, by: ended ? 'system' : 'user', via: 'item' }); } catch { } notify([]); })
+      .catch((e) => log.warn(`[channels] ${req.id}: its item left 'open' but the request could not be settled: ${(e && e.message) || e}`));
+  }
   if (userTodos && typeof userTodos.onStatus === 'function') {
     userTodos.onStatus((it, { status, by } = {}) => {
       if (status === 'open') return;   // never a decided one (the store refuses it: decision_final)
       const req = it && it.id ? (store.index.table('watchRequests') || []).find((r) => r && r.todoId === it.id) : null;   // THE request this item is
       if (!req || req.status !== 'open') return;
-      const t = now();
-      const ended = by === 'expired';
-      store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req.id); if (!r2 || r2.status !== 'open') return; r2.status = ended ? 'expired' : 'denied'; r2.decidedAt = t; r2.decidedBy = ended ? 'expired' : `item-${String(status)}-by-${String(by || 'user')}`; })
-        .then(() => { try { store.audit({ kind: 'acl', op: ended ? 'watch-expire' : 'watch-deny', principal: req.principal, scope: req.scope, requestId: req.id, at: t, by: ended ? 'system' : 'user', via: 'item' }); } catch { } notify([]); })
-        .catch((e) => log.warn(`[channels] ${req.id}: its item left 'open' but the request could not be settled: ${(e && e.message) || e}`));
+      settleFromItem(req, status, by);
     });
+  }
+  /** A WAKE ASK HAS A LIFETIME (lane wake-approve-card r3): every OPEN wake ask past its end (askEndOf) EXPIRES — the
+   *  request `expired` (decidedBy 'expired', nothing written: the agent can ask again, its two-open bound freed), audited
+   *  `watch-expire` via 'lifetime', its item closed as expired (a decision row's END — «expired · the agent can ask again»).
+   *  The engine runs it at boot (reconcileAsks) and on its minute sweep; an ask filed before the lifetime (no `expiresAt`, its
+   *  item lasting) ends here too. Either road (this, or the store's sweep of the item through the hook) ends in the same
+   *  state. → the ids expired. */
+  async function expireWatchRequests(t = now()) {
+    const due = new Set((store.index.table('watchRequests') || []).filter((r) => r && r.status === 'open' && askEndOf(r) <= t).map((r) => r.id));
+    if (!due.size) return [];
+    const went = [];
+    await store.index.update((ix) => { for (const r2 of Array.isArray(ix.watchRequests) ? ix.watchRequests : []) if (r2 && r2.status === 'open' && due.has(r2.id)) { r2.status = 'expired'; r2.decidedAt = t; r2.decidedBy = 'expired'; went.push({ ...r2 }); } });
+    for (const r of went) {
+      try { store.audit({ kind: 'acl', op: 'watch-expire', principal: r.principal, scope: r.scope, requestId: r.id, at: t, by: 'system', via: 'lifetime' }); } catch { }
+      if (r.todoId && userTodos && typeof userTodos.resolveAnswered === 'function') { try { userTodos.resolveAnswered([r.todoId], 'expired'); } catch { } }
+    }
+    if (went.length) notify([]);
+    return went.map((r) => r.id);
+  }
+  /** THE BOOT RECONCILE of the asks this module filed (lane wake-approve-card r3 — the engine's start): ① every wake ask past
+   *  its end expires; ② a wake ask whose item ended while nobody listened (the store's own expiry sweep runs as it loads,
+   *  before this module subscribes) is settled as the hook would; ③ an OPEN access request whose pointer the owner hid comes
+   *  back to the tray. → {expired, settled, resurfaced}. */
+  async function reconcileAsks(t = now()) {
+    const expired = await expireWatchRequests(t);
+    let settled = 0, resurfaced = 0;
+    if (userTodos && typeof userTodos.get === 'function') {
+      for (const r of (store.index.table('watchRequests') || []).filter((x) => x && x.status === 'open' && x.todoId)) {
+        let it = null; try { it = userTodos.get(r.todoId); } catch { }
+        if (it && it.status !== 'open') { await settleFromItem(r, it.status, it.resolvedBy); settled++; }
+      }
+      for (const en of Object.values(store.index.live())) for (const r of (en && en.reachRequests) || []) if (resurface(r)) resurfaced++;
+    }
+    return { expired, settled, resurfaced };
   }
 
   // ── the agent-facing reads (§11) — reach FIRST, uniform not-found ────────
@@ -1911,7 +1985,7 @@ function create(engineCtx) {
     convFor, stillSees, effectiveForAccount, accountScopeGrants, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest,
     directoryLists, setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers,
     removePattern, setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks,
   };
 }
 

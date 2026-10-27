@@ -181,7 +181,7 @@ export function itemView(item, ctx = {}) {
   const meta = [];
   if (resolved) {
     const by = typeof ctx.resolvedBy === 'function' ? ctx.resolvedBy(i.resolvedBy, i) : '';
-    meta.push({ kind: 'status', text: i.status === 'dismissed' ? t('dismissed') : t('done') });
+    meta.push({ kind: 'status', text: typeof ctx.statusWords === 'function' ? ctx.statusWords(i) : i.status === 'dismissed' ? t('dismissed') : t('done') }); // r3: a hidden pointer's words (the caller's)
     if (by) meta.push({ kind: 'by', text: by });
   } else {
     meta.push({ kind: notice ? 'notice' : 'urgency', text: notice ? t('notice') : t(urgency) });
@@ -232,9 +232,11 @@ export function itemView(item, ctx = {}) {
   // lane controls-that-lie: an ask that names a GRANT carries the grant — «Let this conversation use …», first (it DOES it)
   const grantAsk = !resolved && !i.clearedAt && i.action && i.action.type === 'browser-grant' && i.action.profileId ? { profileId: String(i.action.profileId), label: String(i.action.label || i.action.profileId) } : null;
   const actions = resolved ? ['reopen', 'copy'] : [...(grantAsk ? ['browser-grant'] : []), ...(appNoteAsk ? ['desktop-app-show'] : []), ...(restartAsk ? ['browser-restart'] : []), ...(floorAsk ? ['browser-floor-check'] : []), ...(reauthAsk ? ['channel-reauth'] : []), ...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(hubAsk ? ['hub-once', ...(hubAsk.type === 'vault-grant-ask' ? ['grant-8h'] : hubAsk.type === 'vault-run-ask' ? (hubAsk.always ? ['shape-always'] : []) : [hubAsk.type === 'automation-ask' ? 'auto-always' : hubAsk.type === 'pool-cross-provider' ? 'pool-always' : 'hub-always']), 'hub-deny'] : []), ...(secretAsk ? ['secret-paste', 'secret-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
-  // lane wake-approve-card r2: A DECISION ROW HAS TWO VERBS — `ctx.closers` false (the caller asks the registry's offersClosers;
-  // this file imports nothing) draws no Mark done / Dismiss beside its Approve / Deny, and no Reopen once it is decided
-  const verbs = ctx.closers === false ? actions.filter((a) => a !== 'done' && a !== 'dismiss' && a !== 'reopen') : actions;
+  // lane wake-approve-card r2: A DECISION ROW HAS TWO VERBS — `ctx.closers` (the caller asks the registry's closersOf; this file
+  // imports nothing): false / [] draws no Mark done / Dismiss beside its Approve / Deny, and no Reopen once it is decided;
+  // r3: ['hide'] = A POINTER — its Dismiss is «Hide» (no Mark done; nothing once hidden — it comes back by itself)
+  const closers = Array.isArray(ctx.closers) ? ctx.closers : ctx.closers === false ? [] : null;
+  const verbs = !closers ? actions : actions.flatMap((a) => (a !== 'done' && a !== 'dismiss' && a !== 'reopen' ? [a] : closers.includes(a) ? [a] : a === 'dismiss' && closers.includes('hide') ? ['hide'] : []));
   const title = String(ctx.words != null ? ctx.words : (i.text || ''));
   const detail = String(ctx.detail != null ? ctx.detail : (i.detail || ''));
   const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text ? i.reply.text : null;

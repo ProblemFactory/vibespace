@@ -371,14 +371,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
 
   // ── THE CARD (exit-proxy's ask: one per conversation × shape, 60 s, the item and the ask ONE state) ──
   const pairOf = (conv, key) => `${conv}\n${key}`;
-  function settle(q, outcome, why = outcome) {
+  /** `fact` (lane wake-approve-card r3): the PERSON's mark — the answer came through THE person verdict (src/routes/vault.js
+   *  `person`), so the item's record says «allowed by you · 09:41» (resolvedFact {decidedBy: 'person', decidedAt}). */
+  function settle(q, outcome, why = outcome, fact = null) {
     if (!asks.has(q.askId)) return false;
     asks.delete(q.askId);
     if (byPair.get(q.pair) === q.askId) byPair.delete(q.pair);
     settled.set(q.askId, outcome === 'expired' ? 'expired' : 'settled');
     while (settled.size > SETTLED_MAX) settled.delete(settled.keys().next().value);
     try { timers.clear(q.timer); } catch { }
-    if (q.todoId && userTodos) { try { const it = userTodos.get?.(q.todoId); if (it && it.status === 'open') userTodos.setStatus(q.todoId, 'done', outcome === 'expired' ? 'ask-expired' : why === 'gone' ? 'ask-over' : outcome === 'changed' ? 'ask-changed' : outcome); } catch { } }
+    if (q.todoId && userTodos) { try { const it = userTodos.get?.(q.todoId); const by = outcome === 'expired' ? 'ask-expired' : why === 'gone' ? 'ask-over' : outcome === 'changed' ? 'ask-changed' : outcome; if (it && it.status === 'open') { if (fact && typeof userTodos.resolveAnswered === 'function') userTodos.resolveAnswered([q.todoId], by, fact); else userTodos.setStatus(q.todoId, 'done', by); } } catch { } }
     log(`${q.who}: the run card for \`${q.head}\` ${outcome === 'expired' ? 'got no answer in 60 s' : outcome}`);
     try { q.resolve({ outcome, askId: q.askId }); } catch { }
     return true;
@@ -415,13 +417,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     });
   }
   /** A PERSON's answer (src/routes/vault.js: people only; «always» needs this page's 验证是你 window — `reauthed`). */
-  function answer(askId, { answer: a, ttl = VR.ALWAYS_DEFAULT, reauthed = false, by = 'user' } = {}) {
+  function answer(askId, { answer: a, ttl = VR.ALWAYS_DEFAULT, reauthed = false, by = 'user', person = false } = {}) {
     const id = String(askId || '');
     const q = asks.get(id);
+    const mark = () => (person ? { decidedBy: 'person', decidedAt: now() } : null);   // r3: the person verdict's mark (the route's `person`)
     if (!q) return { ok: false, code: settled.get(id) === 'expired' ? 'ask_expired' : settled.has(id) ? 'ask_settled' : 'ask_unknown' };
     if (now() - q.askedAt >= VR.ASK_TTL_MS) { settle(q, 'expired', 'timeout'); return { ok: false, code: 'ask_expired' }; }
     if (!['once', 'always', 'deny'].includes(a)) return { ok: false, code: 'bad_answer' };
-    if (a === 'deny') { settle(q, 'denied', 'answered'); return { ok: true, outcome: 'denied' }; }   // `outcome` (the route lays the vault's facts — its `state` — over the answer)
+    if (a === 'deny') { settle(q, 'denied', 'answered', mark()); return { ok: true, outcome: 'denied' }; }   // `outcome` (the route lays the vault's facts — its `state` — over the answer)
     if (a === 'always' && !q.always) return { ok: false, code: 'always_not_offered' };
     if (a === 'always' && !Object.prototype.hasOwnProperty.call(VR.ALWAYS_TTLS, ttl)) return { ok: false, code: 'bad_answer' };
     if (a === 'always' && !reauthed) return { ok: false, code: 'reveal_needs_password' };
@@ -445,7 +448,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl, until });
     }
     seen.set(q.pair, { at: now(), entries: q.entries });
-    settle(q, a === 'always' ? 'always' : 'allowed', 'answered');
+    settle(q, a === 'always' ? 'always' : 'allowed', 'answered', mark());
     return { ok: true, outcome: a === 'always' ? 'always' : 'allowed', ...(a === 'always' ? { ttl } : {}) };
   }
   // THE ITEM AND THE ASK ARE ONE STATE: the item leaving 'open' by another door settles the ask refused; a reopen of an ask that is over goes back to done

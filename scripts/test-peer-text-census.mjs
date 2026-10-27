@@ -961,6 +961,8 @@ const PRINTS = {
     'c.watched.delivery': `${V}:the delivery enum`, 'c.watched.setBy': `${V}:the origin enum`, 'target': `${O}:the conversation key / account the agent typed`,
     'r.dailyWakeCap': `${V}:a count`, 'r.target': 'judged:agentId — the watched key as a line piece (agentWatch)', 'r.title': 'judged:agentTitle (agentWatch)', 'r.replaced': `${V}:a boolean`,
     'on': `${O}:the keywords the agent typed, echoed`, 'r.keywords': `${O}:the keywords the agent typed (validated)`,
+    // lane wake-approve-card r3: a wake ask's end (the hub's timestamp, printed as a UTC date) and a hidden pointer brought back (a boolean)
+    'r.expiresAt': `${V}:a timestamp`, 'r.request.expiresAt': `${V}:a timestamp`, 'r.resurfaced': `${V}:a boolean`,
     // lane agent-watch-parity: `watch --show` / `watches` (the read-back) + the grammar's answer
     'r.watches': `${V}:the read-back list (agentWatchesFor)`, 'r.rows': `${V}:the read-back rows at one grain (agentWatchesFor)`, 'r.requests': `${V}:the agent's own open wake asks`,
     'w': `${V}:a read-back row (the line helper prints its judged fields)`, 'w.grain': `${V}:the grain enum`, 'w.target': 'judged:agentId — the key / account id (agentWatchesFor)', 'w.title': 'judged:agentTitle / the account label the user gave (agentWatchesFor)',

@@ -239,11 +239,16 @@ console.log('⑥ REFUSE — 拒绝, the quiet, ✕ by another door');
   ok(q.status === 429 && q.json.code === 'request_quiet' && q.json.until, 'the same place again ⇒ 429 request_quiet (until …)', q.json);
   const b = await S.agent(W.SESSION_TOKEN, { words: 'a deploy token', purpose: 'deploy the preview', kind: 'secret', name: 'Preview deploy token' });
   const it = openReqs(W).find((i) => i.action.requestId === b.json.requestId);
-  W.userTodos.setStatus(it.id, 'dismissed', 'user');
+  // lane wake-approve-card r3: A DECISION ROW HAS ITS OWN VERBS — the tray's ✕ (another door) is refused BY NAME, the request
+  // still waits; its own Refuse ends it (the receipt), and a decision is FINAL (no reopen)
+  let dc = null; try { W.userTodos.setStatus(it.id, 'dismissed', 'user'); } catch (x) { dc = x.code; }
+  ok(dc === 'decision_row' && W.userTodos.get(it.id).status === 'open' && !stashOf('cid-asker-1').some((e) => e.ref === b.json.requestId), 'the item dismissed in the tray (✕ — another door) ⇒ refused BY NAME (decision_row): the request still waits, the agent is told nothing', dc);
+  const rf = await S.hit(`/api/vault/secret-requests/${b.json.requestId}/answer`, { body: { answer: 'deny' } });
   const rd = stashOf('cid-asker-1').filter((e) => e.ref === b.json.requestId);
-  ok(rd.length === 1 && /REFUSED/.test(rd[0].text) && /dismissed/.test(rd[0].text), 'the item dismissed in the tray (✕ — another door) ⇒ the receipt says the user dismissed it', rd[0] && rd[0].text);
-  W.userTodos.setStatus(it.id, 'open', 'user');
-  ok(W.userTodos.get(it.id).status === 'done', 'a reopen of an answered request goes back to done (it is over — the agent can ask again)', W.userTodos.get(it.id).status);
+  const rr = W.userTodos.get(it.id);
+  ok(rf.status === 200 && rd.length === 1 && /REFUSED/.test(rd[0].text) && rr.resolvedBy === 'denied' && rr.resolvedFact && rr.resolvedFact.decidedBy === 'person', 'its own Refuse (the person door) ⇒ the receipt says REFUSED; the record «refused by you» (the person verdict\'s mark)', { text: rd[0] && rd[0].text, by: rr.resolvedBy, fact: rr.resolvedFact });
+  let ro = null; try { W.userTodos.setStatus(it.id, 'open', 'user'); } catch (x) { ro = x.code; }
+  ok(ro === 'decision_final' && W.userTodos.get(it.id).status === 'done', 'a reopen of an answered request is refused BY NAME (decision_final) — it is over; the agent can ask again', ro);
   const late = await S.hit(`/api/vault/secret-requests/${b.json.requestId}/answer`, { body: { answer: 'store', value: S_ENTRY } });
   ok(late.status === 409 && late.json.code === 'ask_settled', 'a paste on a dismissed request ⇒ 409 ask_settled (nothing stored)', late);
 }
@@ -364,7 +369,8 @@ async function runRoad(name, { door, routes } = {}) {
   let m2;
   try { m2 = await runRoad('m-receipt', { door: mutant('src/server/vault-paste-door.js', "settle(q, 'stored', { ref, grantHours, receipt });", "settle(q, 'stored', { ref, grantHours, receipt, value: vv.value });") }); } finally { P0.exports = keep; }
   ok(m2.hits.length > 0 && m2.hits.some((h) => /stash/.test(h)), 'MUTANT the receipt carries the value ⇒ the sweep is RED (the stash)', m2.hits.slice(0, 2));
-  const m3 = await runRoad('m-echo', { routes: mutant('src/routes/vault.js', "app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user' }); }));", "app.post('/api/vault/secret-requests/:id/answer', person((req) => { const b = req.body || {}; const r = paste.answer(String(req.params.id), { answer: b.answer, value: b.value, by: 'user' }); return r.ok ? { ...r, echo: b } : r; }));") });
+  const VAULT_ROUTES = fs.readFileSync(path.join(REPO, 'src/routes/vault.js'), 'utf8');   // the door as this tree spells it (r3 hands in the person mark)
+  const m3 = await runRoad('m-echo', { routes: mutant('src/routes/vault.js', VAULT_ROUTES.includes("app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true }); }));   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)") ? "app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true }); }));   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)" : "app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user' }); }));",  "app.post('/api/vault/secret-requests/:id/answer', person((req) => { const b = req.body || {}; const r = paste.answer(String(req.params.id), { answer: b.answer, value: b.value, by: 'user' }); return r.ok ? { ...r, echo: b } : r; }));") });
   ok(m3.hits.length > 0 && m3.hits.some((h) => /answer/.test(h)), 'MUTANT the route keeps the value on the body and echoes it ⇒ the sweep is RED (an answer)', m3.hits.slice(0, 2));
   const m4 = await runRoad('m-bearer', { routes: mutant('src/routes/vault.js', "app.post('/api/vault/secret-requests/:id/answer', person((req) => {", "app.post('/api/vault/secret-requests/:id/answer', ((fn) => async (req, res) => res.json(await fn(req)))((req) => {") });
   ok(m4.bearerStored, 'MUTANT the answer door without person() ⇒ a BEARER stores (RED — the real door refuses it human_only)', m4);

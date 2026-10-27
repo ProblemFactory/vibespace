@@ -182,6 +182,9 @@ const MAX_ACCESS_ROWS = 16;
 // verify r1 F2 (lane channel-agent-watch): what ONE agent may hold of its own — rows across every grain, and wake asks waiting
 const MAX_AGENT_WATCHES = 20;
 const MAX_OPEN_WATCH_REQUESTS = 2;
+// lane wake-approve-card r3 (主开发: «a wake ask has a lifetime»): an ask nobody answered for 7 days EXPIRES — the request
+// `expired` (nothing written; the agent can ask again), its item closed as expired, the bound above freed
+const WATCH_REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_WATCHER_ROWS = 16;
 /** The CONVERSATION-level rule set a pattern is made of — a closed set APART
  *  from the message-level `RULE_KINDS` (a pattern chooses conversations, a
@@ -1843,7 +1846,7 @@ module.exports = {
   // R4 (2026-09-27): access and notification — two lists per grain, access first
   // lane everyone-principal: ALL AGENTS — the principal, and the watcher fan-out (a ledger per running conversation)
   EVERYONE_ID, fanTargetOf, fanOfKey, fanStatsOf, fanWatcher, fanOutWatchers, ledgerRowsOf, pruneFan,
-  MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, MAX_AGENT_WATCHES, MAX_OPEN_WATCH_REQUESTS, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
+  MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, MAX_AGENT_WATCHES, MAX_OPEN_WATCH_REQUESTS, WATCH_REQUEST_TTL_MS, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
   // lane channel-agent-watch: the delivery choice, who wrote a row, and THE eligibility rule (access over the grain and its ancestors)
   DELIVERY_MODES, WATCH_ORIGINS, deliveryModeOf, watchOriginOf, eligibleKeys, eligibleFor,
   memberVia, memberStill, REGEX_MAX, REGEX_FLAGS, REGEX_TEXT_MAX, REGEX_REFUSALS, regexVerdict, regexText, regexSpan,

@@ -28,7 +28,7 @@ const RECENT_MAX = 512, SETTLED_MAX = 256;
 
 function namedError(code, message, extra = {}) { return Object.assign(new Error(message), { code, ...extra }); }
 
-function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(), instanceKind = 'local', settingOf = () => undefined, setHubPolicy = null, nameOf = () => null,
+function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(), instanceKind = 'local', settingOf = () => undefined, setHubPolicy = null, nameOf = () => null, aboutOf = () => null,
   timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) } } = {}) {
   const asks = new Map();    // askId → {askId, key, hostId, machine, kind, by, name, summary, askedAt, waiters, todoId, timer}
   const byKey = new Map();   // dedup key (machine + kind) → askId
@@ -81,6 +81,9 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
     const machine = machineOf(hostId);
     const by = String(payload.by);
     let name = null; try { name = P.byKindOf(by) === 'agent' ? nameOf(by) : null; } catch { }
+    // lane wake-approve-card r3 (the owner: «这个索要通知在聊天框里完全没有»): an AGENT's act is a card in the conversation that asked —
+    // the item names it (`about`: its For-you key), filed under Machines as before (the tray's group)
+    let about = null; try { about = P.byKindOf(by) === 'agent' ? aboutOf(by) : null; } catch { }
     const summary = DA.summaryOf(payload);
     const askedAt = now();
     const k = { askId, key: v.dk, hostId, machine, kind: v.kind, by, name, summary, askedAt, waiters: [waiter], todoId: null, timer: null };
@@ -92,6 +95,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
           origin: 'machines', text: w.text, detail: w.detail, i18n: w.i18n, urgency: 'urgent', kind: 'action', by: 'agent', sessionName: 'Machines',
           expiresAt: askedAt + P.ASK_TTL_MS,
           action: { type: 'hub-act-ask', askId, hostId: String(hostId).slice(0, 160), machine: String(machine).slice(0, 80), kind: v.kind },
+          ...(about ? { about } : {}),
         });
         k.todoId = it && it.id;
       } catch (e) {
@@ -107,7 +111,8 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
     k.timer?.unref?.();
   }
   /** Settle one card: every waiting act gets the outcome; the item is resolved by it; the quiet window noted. */
-  function settle(k, outcome, { answeredBy = null, why = outcome } = {}) {
+  /** `fact` (lane wake-approve-card r3): the PERSON's mark (the route asked THE person verdict) — «allowed by you · 09:41». */
+  function settle(k, outcome, { answeredBy = null, why = outcome, fact = null } = {}) {
     if (!asks.has(k.askId)) return false;
     asks.delete(k.askId);
     if (byKey.get(k.key) === k.askId) byKey.delete(k.key);
@@ -119,7 +124,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
       while (recent.size > RECENT_MAX) recent.delete(recent.keys().next().value);
     } else recent.delete(k.key);
     if (k.todoId && userTodos) {
-      try { const it = userTodos.get?.(k.todoId); if (it && it.status === 'open') userTodos.setStatus(k.todoId, 'done', outcome === 'expired' ? 'ask-expired' : why === 'gone' ? 'ask-over' : outcome); } catch { }
+      try { const it = userTodos.get?.(k.todoId); const by = outcome === 'expired' ? 'ask-expired' : why === 'gone' ? 'ask-over' : outcome; if (it && it.status === 'open') { if (fact && typeof userTodos.resolveAnswered === 'function') userTodos.resolveAnswered([k.todoId], by, fact); else userTodos.setStatus(k.todoId, 'done', by); } } catch { }
     }
     const allowed = outcome === 'allowed' || outcome === 'always';
     log(`${k.machine}: the ask to ${P.KIND_WORDS[k.kind]} ${allowed ? 'was allowed' : outcome === 'expired' ? 'got no answer in 60 s' : 'was denied'}${answeredBy ? ` by ${answeredBy}` : ''} — ${k.waiters.length} act(s) ${allowed ? 'go' : 'refused'}`);
@@ -133,8 +138,9 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
     return true;
   }
   /** POST /api/hub-acts/asks/:askId — a PERSON's answer (`by: 'user'`: the cookie route refuses a bearer first). */
-  async function answer(askId, { answer: a, by, answeredBy = null } = {}) {
+  async function answer(askId, { answer: a, by, answeredBy = null, person = false } = {}) {
     const id = String(askId || '');
+    const fact = person ? { decidedBy: 'person', decidedAt: now() } : null;   // r3: the person verdict's mark (the route's `person`)
     const k = asks.get(id);
     // answered before ⇒ ask_settled; refused after 60 s ⇒ ask_expired; never heard of (a guessed id, one from before a
     // restart) ⇒ ask_unknown — exit-proxy's three answers
@@ -149,10 +155,10 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
       if (typeof setHubPolicy !== 'function') throw namedError('no_policy_writer', 'this server cannot change the machine\'s list');
       writingFor = k.hostId;
       try { await setHubPolicy(k.hostId, 'everyone', { by: answeredBy || 'user' }); } finally { writingFor = null; }
-      for (const o of [...asks.values()]) if (o.hostId === k.hostId) settle(o, 'always', { answeredBy, why: 'answered' });
+      for (const o of [...asks.values()]) if (o.hostId === k.hostId) settle(o, 'always', { answeredBy, why: 'answered', fact });
       return { ok: true, state: 'always', machine: k.machine };
     }
-    settle(k, v.answer === 'once' ? 'allowed' : 'denied', { answeredBy, why: 'answered' });
+    settle(k, v.answer === 'once' ? 'allowed' : 'denied', { answeredBy, why: 'answered', fact });
     return { ok: true, state: v.answer === 'once' ? 'allowed' : 'denied', machine: k.machine };
   }
   // THE ITEM AND THE ASK ARE ONE STATE (exit-proxy verify-r2 ask-b): the item leaving 'open' by any door but our own answer
@@ -206,6 +212,15 @@ function wire({ hosts, userTodos, exitProxy, settingOf, activeSessions, env = pr
     nameOf: (by) => {
       const key = String(by).slice('agent:'.length);
       for (const [id, s] of activeSessions) { try { if (R.callerKeys(s, id).includes(key)) return s.name || s.webuiName || null; } catch { } }
+      return null;
+    },
+    // r3: the asking conversation's For-you key — the spelling the vault's doors file under (`<backend>:<conversation id>`), else
+    // its `webui:<id>` (a conversation with no id yet); its chat draws the card
+    aboutOf: (by) => {
+      const key = String(by).slice('agent:'.length);
+      for (const [id, s] of activeSessions) {
+        try { if (!R.callerKeys(s, id).includes(key)) continue; const cid = s.backendSessionId || s.claudeSessionId || null; return cid ? `${s.backend || 'claude'}:${cid}` : `webui:${id}`; } catch { }
+      }
       return null;
     },
   });

@@ -376,7 +376,7 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
     if (!r || !r.ok) return refusal(res, r || { code: 'unfiled' });
     return res.json({ ok: true, requestId: r.requestId, target: r.target, ...(r.already ? { already: r.already } : { filed: CN.filedLine('secret-request', r.requestId, OF.tray()) }), tray: OF.tray() });
   });
-  app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user' }); }));
+  app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true }); }));   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)
   app.post('/api/vault/secrets', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.addEntry({ label: b.label, note: b.note, kind: b.kind, value, by: 'user' }); }));
   app.delete('/api/vault/secrets/:id', person((req) => paste.dropEntry(String(req.params.id), { by: 'user' })));
 }
@@ -465,7 +465,7 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
   const whoOf = (req) => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } };
   const reauthedOf = (req, page) => !!(contents && contents.windowFacts(whoOf(req), typeof page === 'string' ? page : pageHeader(req)).open);
   app.post('/api/vault/runnable', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.setRunnable({ id: b.id, on: b.on === true, reauthed: b.on === true && reauthedOf(req, page), by: 'user' }); }));
-  app.post('/api/vault/run/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; if (b.answer === 'once' && whoOf(req) === 'sign-in-off' && !reauthedOf(req, page)) return { ok: false, code: 'reveal_needs_password' }; return run.answer(String(req.params.askId), { answer: b.answer, ttl: b.ttl || undefined, reauthed: b.answer === 'always' && reauthedOf(req, page), by: 'user' }); }));
+  app.post('/api/vault/run/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; if (b.answer === 'once' && whoOf(req) === 'sign-in-off' && !reauthedOf(req, page)) return { ok: false, code: 'reveal_needs_password' }; return run.answer(String(req.params.askId), { answer: b.answer, ttl: b.ttl || undefined, reauthed: b.answer === 'always' && reauthedOf(req, page), by: 'user', person: true }); }));   // r3: «allowed by you · 09:41»
   app.post('/api/vault/request/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.answerRequest(String(req.params.askId), { answer: b.answer, reauthed: b.answer !== 'deny' && reauthedOf(req, page), by: 'user' }); }));   // lane vault-manual-and-lock: once | 8h need this page's 验证是你 (a grant opens the entry as the switch does); deny is a click
 }
 

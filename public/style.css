@@ -8150,6 +8150,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .ut-secret .ut-act { width: auto; height: 26px; padding: 0 10px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); flex: none; }
 .ut-secret .ut-secret-save { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
 .ut-secret .ut-secret-deny { color: var(--text); border: 1px solid var(--border); }
+.ut-secret-note { margin-top: 3px; font-size: 11px; color: var(--text-dim); }   /* lane wake-approve-card r3: «wrong label — ask again» */
 .ut-secret-state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--attn-text); }
 .ut-secret-state button { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
 .vault-paste-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }

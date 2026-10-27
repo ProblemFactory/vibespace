@@ -460,6 +460,19 @@ question about another machine is the failure the rule exists to stop.
     written. A write with no wake row (a next-turn row, a removal, `[]`) is
     as before; an agent's own road to a wake is its ask (`POST
     /api/agent/channels/watch` `--mode wake` ⇒ a `wr-…` request).
+    **A WAKE ASK HAS A LIFETIME (acceptance round 3):** the `wr-…` request
+    and its item carry `expiresAt` (filing + 7 days, `WATCH_REQUEST_TTL_MS`);
+    the answer says it (`expiresAt`, `request.expiresAt`; `watch --show`'s
+    `request.expiresAt`); at the bound (2 waiting) `watch-request-limit`
+    carries `oldest: {id, target, at, expiresAt}` and names it in `error`;
+    past its end the engine expires it (request `expired`, item «expired ·
+    the agent can ask again») and a decide answers `{code:'expired'}`.
+    **A POINTER HIDES (round 3):** an access request's item (`open-channel`,
+    a `closer: 'hide'` row — and the Outbox's pointer) closed by the person
+    (`POST /api/user-todos/:id`, resolve-many) is stored `dismissed` /
+    `resolvedBy:'hidden'` — never «done»; the request stays open; `POST
+    /api/agent/channels/request` on a request still open answers `already`
+    + `resurfaced: true` when its hidden item came back.
     **mirror-193 (2026-09-27): every `…/access` and `…/watchers` PUT (and a
     rule's `PUT …/patterns/:pid`) takes `base` = the STAMP of the two lists the
     writer drew them from (PURE `F.grainStamp` over `{access, watchers}` — each
@@ -1337,7 +1350,7 @@ Auth: **cookie** = a signed-in person; **vsst_** = a live conversation's token (
 | `GET /api/exits/asks` | cookie | — | `{asks:[{askId, hostId, machine, sessionId, name, cmd, askedAt, expiresAt}]}` |
 | `POST /api/exits/asks/:askId` | cookie ONLY | `{answer: 'allow'|'deny'}` | `{ok, state: allowed|denied}`; `403 human_only` (any bearer), `409 ask_settled` (answered before), `409 ask_changed` (verify-r5 X1: an ALLOW whose For-you item is no longer open, no longer this ask's, or no longer shows the command as its detail — settled `changed` (verify-r6 W1; it said denied), nothing runs; the waiting agent call answers `409 ask_changed`), `410 ask_expired` (refused after 60 s) — the last 256 settled asks are remembered —, `410 conversation_gone` (verify-r2 ask-a: the conversation that asked is gone — the ask settles, the item says so, nothing runs), `404 ask_unknown` (a guessed id / from before a restart; 128-bit ids) |
 | `GET /api/hub-acts/asks` | cookie ONLY (any bearer ⇒ 403 `human_only`) | — | **lane hub-act-ask:** `{asks:[{askId, hostId, machine, kind, by, summary, waiting, askedAt, expiresAt}]}` — the held hub acts' cards that are up |
-| `POST /api/hub-acts/asks/:askId` | cookie ONLY (any bearer ⇒ 403 `human_only`) | `{answer: 'once'|'always'|'deny'}` | `{ok, state: allowed|always|denied, machine}` — `always` writes the machine's Hub automation list to everyone (every kind) and settles every card of it; who answered (the sign-in's handle) rides the acts' audit lines; `409 ask_settled`, `410 ask_expired`, `404 ask_unknown`, `400 bad_answer` |
+| `POST /api/hub-acts/asks/:askId` | a PERSON on this page — THE person verdict (src/routes/vault.js `personVerdict`, lane wake-approve-card r3: any bearer ⇒ 403 `human_only`, not this page ⇒ 403 `cross_site`; was a bearer check only) | `{answer: 'once'|'always'|'deny'}` | `{ok, state: allowed|always|denied, machine}` — the item's record carries the person's mark (`resolvedFact {decidedBy:'person', decidedAt}` ⇒ «allowed by you · 09:41»); an agent's act's item names the conversation that asked (`about`) — a card in its chat; `always` writes the machine's Hub automation list to everyone (every kind) and settles every card of it; who answered (the sign-in's handle) rides the acts' audit lines; `409 ask_settled`, `410 ask_expired`, `404 ask_unknown`, `400 bad_answer` |
 | `GET /api/agent/exit` | vsst_ | — | `{exits:[{id, name, transport, online, active, localPort, grants:{use, run, runAsk}}]}` — only the machines THIS conversation may use |
 | `POST /api/agent/exit/use` | vsst_ | `{machine?}` | `{machine, hostId, localPort, url}`; `403 not_granted {grant:'use', has:{run}}`, `409 groups_unreadable / fork_pending / unknown_shape / remote_session` (verify-r4 F2: the conversation runs on another machine — the url is this machine's loopback), `404 no_machine / no_exits`, `400 ambiguous`, `503 offline` |
 | `POST /api/agent/exit/run` | vsst_ | `{machine?, cmd}` | `{machine, code, stdout, stderr, ms, timedOut, asked, revokedDuringRun, line, interpreter, platform}` (lane-exit-run-output: `interpreter` = what the MACHINE ran it under — `cmd.exe` on a Windows daemon advertising `run-shell`, else `sh`; `platform` = the daemon's); **a child that never started ⇒ `502 spawn_failed {error (the sentence), spawnError:{code, message}, interpreter, platform, exitCode: 127|126|1}`** — the CLI exits by `exitCode`; bounded by the daemon's 30 s (EXIT_RUN_TIMEOUT_MS; the old 120 s was never honoured); with "ask me each time" it answers only after the user's Allow (≤ 60 s); `400 bad_command` (not a string / empty / > 4096 bytes), `403 not_granted {grant:'run', has:{use}}`, `409 groups_unreadable / fork_pending / ask_pending`, `409 ask_unfiled` (For you refused the item — the conversation's 20 open items; refused at once, never a silent 60 s wait), `403 ask_denied / ask_expired`, `410 conversation_gone` (verify-r2 ask-a: the conversation ended / the call gave up while its ask waited — nothing ran), `503 offline`, `502 run_failed` |

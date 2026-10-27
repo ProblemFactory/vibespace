@@ -37,7 +37,7 @@ import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; //
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
-import { decidedStamp, PERSON_DECIDES, offersClosers } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card
+import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
@@ -53,7 +53,19 @@ export function expiresText(ts, t) {
   if (!(typeof ts === 'number' && Number.isFinite(ts))) return '';
   const m = Math.ceil((ts - Date.now()) / 60000);
   if (m <= 0) return '';
-  return m < 60 ? t('expires in {n} min', { n: m }) : t('expires in {n} h', { n: Math.round(m / 60) });
+  return m < 60 ? t('expires in {n} min', { n: m }) : m < 24 * 60 ? t('expires in {n} h', { n: Math.round(m / 60) }) : t('expires in {n} d', { n: Math.round(m / 1440) }); // r3: a lifetime in days
+}
+/** The END a row says under its age: a notice's window (expiresText), an open decision row's lifetime (lane wake-approve-card
+ *  r3 — THE registry's expiryWords: «expires in 7 d»), nothing for any other item. */
+export function itemExpiryText(i, t, notice = false) {
+  if (notice) return expiresText(i && i.expiresAt, t);
+  return expiryWords(i, { t }) || '';
+}
+/** The status word of a resolved row — «done» / «dismissed», and a POINTER the person hid «hidden — nothing was decided»
+ *  (lane wake-approve-card r3: never «done»: hiding decides nothing). */
+export function statusWords(i, t) {
+  if (isHidden(i)) return t('hidden — nothing was decided');
+  return i && i.status === 'dismissed' ? t('dismissed') : t('done');
 }
 /** Who resolved it, in words ('expired' = the store's sweep, 'reply' = the
  *  user's own inbox reply, design-user-inbox-reply D1.4). `item` = the
@@ -66,7 +78,7 @@ export function resolvedByText(by, t, item = null) {
   if (stamp) return stamp.text;
   if (by === 'agent') return t('by the agent');
   if (by === 'system') return t('automatically');
-  if (by === 'expired') return t('expired');
+  if (by === 'expired') return item && isDecisionRow(item) ? t('expired · the agent can ask again') : t('expired'); // r3: a wake ask's END (its lifetime) — the card's words
   if (by === 'reply') return t('by your reply');
   if (by === 'handed-back') return t('handed back'); // lane browser-takeover-queue: a takeover request answered by the handback
   // lane-pairing ⑥: an exit's "ask me each time" item is resolved BY its outcome
@@ -76,6 +88,7 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'ask-expired') return t('expired (no answer in 60 s)');
   if (by === 'ask-changed') return t('not run — it changed after it was shown'); // verify-r6 W1
   if (by === 'ask-over') return t('this request is over — the agent can ask again'); // verify-r6 W2: a reopened ask that is over
+  if (by === 'hidden') return ''; // r3: a hidden pointer's status word says it all (statusWords) — nothing was decided
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
   if (by === 'stored') return t('saved to the vault'); // lane vault-paste-request: a paste request answered by its paste
   // B-2198 part 2: a raw-API proposal's item is answered BY its outcome (the card's words: Ran · 200 · 1.2 KB / Rejected by you)
@@ -282,11 +295,11 @@ function partsOf(entry, ctx) {
     const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text
       ? ' · ' + escHtml(t('You replied: {text}', { text: i.reply.text.length > REPLY_SNIPPET ? i.reply.text.slice(0, REPLY_SNIPPET) + '…' : i.reply.text })) : '';
     meta = (tail ? `<span class="ut-sess" title="${escHtml(t('Go to this session'))}">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
-      + escHtml(i.status === 'dismissed' ? t('dismissed') : t('done'))
+      + escHtml(statusWords(i, t)) // r3: a hidden pointer reads «hidden — nothing was decided», never «done»
       + (by ? ' · ' + escHtml(by) : '') + replied
       + (tail ? `<span class="ut-age"> · ${escHtml(agoText(i.resolvedAt || i.createdAt, t))}</span>` : '');
   } else {
-    const exp = notice ? expiresText(i.expiresAt, t) : '';
+    const exp = itemExpiryText(i, t, notice); // a notice's window; r3: a wake ask's lifetime («expires in 7 d»)
     // lane foryou-folds: a row of the tray's attention list (`entry.band`) names its conversation — the bands are flat, no
     // group head — with THE running dot of a real session in front (D1.7: the panel patches it live, never the row)
     const dot = entry.band && typeof i.sessionKey === 'string' && i.sessionKey.includes(':') ? `<span class="ut-live-dot" data-key="${escHtml(i.sessionKey)}" role="img"></span>` : '';
@@ -307,15 +320,17 @@ function partsOf(entry, ctx) {
   const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}" data-label="${escHtml(t('Open'))}">⤢</button>`;
   // design 009: a card's Reply / Mark done / Ignore / Copy / Clear content… live behind its ⋯ (two buttons on its face)
   const more = `<button type="button" class="ut-act ut-more" title="${escHtml(t('More'))}" aria-label="${escHtml(t('More'))}" data-label="${escHtml(t('More'))}">⋯</button>`;
-  // lane wake-approve-card r2: A DECISION ROW HAS TWO VERBS (foryou-actions offersClosers) — its Approve / Deny above, no ✓ / ✕
-  // beside them (a generic close was a silent Deny), and no ↺ once decided (a decision is final)
-  const closers = offersClosers(i);
+  // lane wake-approve-card r2: A DECISION ROW HAS TWO VERBS (foryou-actions closersOf) — its Approve / Deny above, no ✓ / ✕
+  // beside them (a generic close was a silent Deny), and no ↺ once decided (a decision is final); r3: A POINTER HIDES — ONE
+  // ✕ «Hide» (no ✓: a pointer is never «done»; hiding decides nothing) and no ↺ once hidden (it comes back by itself)
+  const closers = closersOf(i, resolved);
   const actions = resolved
-    ? `<span class="ut-actions">${view}${closers ? `<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}" data-label="${escHtml(t('Reopen'))}">↺</button>` : ''}</span>`
+    ? `<span class="ut-actions">${view}${closers.includes('reopen') ? `<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}" data-label="${escHtml(t('Reopen'))}">↺</button>` : ''}</span>`
     : card ? `<span class="ut-actions">${view}${more}</span>`
     : `<span class="ut-actions">${actionBtnHtml(i, t)}${reauthBtnHtml(i, t)}${takeoverBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}" data-label="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
-      + (closers ? `<button class="ut-act ut-done" title="${escHtml(i.open && i.open.done ? t(i.open.done) : t('Handled — mark done'))}" data-label="${escHtml(t('Mark done'))}">✓</button>` // lane foryou-plugin-notices: a door's `done` = what this ✓ does (the plugin applies it)
-      + `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}" data-label="${escHtml(tc('inbox', 'Dismiss'))}">✕</button>` : '') + '</span>';
+      + (closers.includes('done') ? `<button class="ut-act ut-done" title="${escHtml(i.open && i.open.done ? t(i.open.done) : t('Handled — mark done'))}" data-label="${escHtml(t('Mark done'))}">✓</button>` : '') // lane foryou-plugin-notices: a door's `done` = what this ✓ does (the plugin applies it)
+      + (closers.includes('dismiss') ? `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}" data-label="${escHtml(tc('inbox', 'Dismiss'))}">✕</button>` : '')
+      + (closers.includes('hide') ? `<button class="ut-act ut-dismiss ut-hide" title="${escHtml(t('Hide — decides nothing; what it points at stays open in the conversation'))}" data-label="${escHtml(t('Hide'))}">✕</button>` : '') + '</span>';
   return { cls, dot, body, actions, sig: cls + '\u0000' + dot + '\u0000' + body + '\u0000' + actions };
 }
 

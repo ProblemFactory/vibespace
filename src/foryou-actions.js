@@ -31,6 +31,18 @@
  *             (never reopened, never re-stamped): src/user-todos.js refuses the rest by name. open-channel is no decision
  *             row: its item is a DOOR (`card: 'none'` — its Approve / Deny are the Reach dialog's) and the Outbox's pointer
  *             («Proposals awaiting approval in …», retracted by its producer) shares its type
+ *   ends      a DECISION ROW's ends (acceptance round 3): the `resolvedBy` values its producer may close its item with — its
+ *             verbs and its own ends (a held ask's 60 s, a locked vault, a gone conversation); nothing else closes it (absent =
+ *             DECISION_ENDS: allowed / denied / expired)
+ *   stamp     the decided stamp's words (STAMPS): 'approve' «approved by you · 09:41» (the default) · 'allow' «allowed by you» /
+ *             «always allowed by you» (a held ask's Allow once / Always) · 'store' «stored · 09:41» (a paste request)
+ *   showsExpiry  the card and the tray row say its end («expires in 7 d» — a wake ask's lifetime, expiryWords)
+ *   closer    'hide' = its item is a POINTER (acceptance round 3 — 主开发: «a pointer item hides, never decides»): a door to
+ *             where its question lives (the Reach dialog, the Outbox, the conversation), so its ONE closer is ✕ «Hide» —
+ *             no ✓ Mark done, no «done» record, no Undo, no ↺ (closersOf); the person's close is a HIDE in the store
+ *             (src/user-todos.js: 'dismissed', resolvedBy 'hidden' — «hidden — nothing was decided») and the question it
+ *             points at stays open where it lives (an rq- request comes back to the tray at the next boot reconcile, or
+ *             when the agent asks again); absent = the generic closers (✓ / ✕ while open, ↺ once resolved)
  * Every older table is DERIVED here (ACTION_IDENTITY · WAIT_ACTIONS · CARD_ACTION_TYPES · ANSWER_ACTION_TYPES);
  * scripts/test-foryou-actions-census.mjs fails on a type a producer files with no row, a row nobody files, a `handled` row
  * with no branch, a `card: 'row'` row the row does not draw, a `chat` row the card does not draw.
@@ -53,6 +65,9 @@
  *                                  decision THE PERSON VERDICT MARKED (resolvedFact.decidedBy 'person' — the decide route's;
  *                                  null otherwise: an older record keeps «approved») — THE stamp the chat card AND the tray say
  *   isDecisionRow(item) · offersClosers(item) · DECISION_ENDS → a decision row has two verbs and no generic closer
+ *   closersOf(item, resolved)    → the closer verbs a surface draws: ['done', 'dismiss'] / ['reopen'] (any item) ·
+ *                                  ['hide'] / [] (a POINTER — isPointer, `closer: 'hide'`) · [] (a decision row) — isHidden(item)
+ *   expiryWords(item, {t, now})  → «expires in 7 d» for an OPEN decision row (a wake ask's lifetime) — null otherwise
  *   decisionCard(item, {role})   → {state, buttons, stamp, waiting} — the PURE card model: filed / approved / denied /
  *                                  expired / waiting-owner (a viewer who may not decide: the words, no buttons)
  *   VIEWERS · canDecide(role)    → WHO may decide: an IDENTITY fact (the owner's cookie), never a view's — one row per role
@@ -71,12 +86,12 @@ const ROWS = Object.freeze([
   { type: 'browser-grant', identity: 'profileId', producer: 'src/agent-routes/status.js', builtIn: 'src/ask-grant.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-ask', '--grant browser:<profile>', 'filed'), scope: 'conversation' },
   // ── machines ──
   { type: 'exit-run-ask', identity: 'askId', producer: 'src/exit-proxy.js', waits: true, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-exit', 'run / push / pull', 'wait'), scope: 'conversation' },
-  { type: 'hub-act-ask', identity: 'askId', producer: 'src/server/hub-act-ask.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'group' },
+  { type: 'hub-act-ask', identity: 'askId', producer: 'src/server/hub-act-ask.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'about', decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over'], stamp: 'allow' },   // r3: `about` = the asking conversation (an agent's act) — its chat draws the card
   // ── vault ──
   { type: 'automation-ask', identity: 'askId', producer: 'src/server/automation-engine.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-api', 'an automation key\'s first use', 'own'), scope: 'conversation' },
-  { type: 'vault-run-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'run', 'wait'), scope: 'conversation' },
+  { type: 'vault-run-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'run', 'wait'), scope: 'conversation', decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over', 'ask-changed', 'vault_locked'], stamp: 'allow' },
   { type: 'vault-grant-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'request <vault://…>', 'filed'), scope: 'conversation' },
-  { type: 'secret-request', identity: 'requestId', producer: 'src/server/vault-paste-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'secret', cli: C('vibespace-vault', 'request "<what>"', 'filed'), scope: 'conversation' },
+  { type: 'secret-request', identity: 'requestId', producer: 'src/server/vault-paste-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'secret', cli: C('vibespace-vault', 'request "<what>"', 'filed'), scope: 'conversation', decide: 'person', ends: ['stored', 'denied', 'vault_locked', 'ask-over', 'expired'], stamp: 'store' },
   { type: 'vault-unlock', identity: null, producer: 'src/server/vault-hooks.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
   // the audit's two drifts (2026-10-26): a failed use was in no table; a rotate suggestion merged by its text — now by its entry
   { type: 'vault-use-failed', identity: null, producer: 'src/server/vault-hooks.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group', merge: 'by its text on purpose — the dedupe text is the head (who used which key for which verb) + its cause (lane vault-key-row-compact)' },
@@ -97,8 +112,8 @@ const ROWS = Object.freeze([
   { type: 'browser-surface', identity: null, producer: 'src/server/browser-dialogs.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'browser', scope: 'group' },
   { type: 'save-login', identity: null, producer: 'src/server/browser-logins.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'group' },
   // ── channels ──
-  { type: 'channel-watch-request', identity: 'id', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'watch --mode wake', 'filed'), scope: 'about', decide: 'person' },
-  { type: 'open-channel', identity: 'key', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'request', 'filed'), scope: 'about', decide: 'person' },
+  { type: 'channel-watch-request', identity: 'id', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'watch --mode wake', 'filed'), scope: 'about', decide: 'person', ends: ['allowed', 'denied', 'expired'], showsExpiry: true },
+  { type: 'open-channel', identity: 'key', producer: 'src/server/channels-access.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'approval', cli: C('vibespace-channels', 'request', 'filed'), scope: 'about', decide: 'person', closer: 'hide' },
   { type: 'channel-api-proposal', identity: 'id', producer: 'src/server/channel-api-cards.js', builtIn: 'src/channel-api-card.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: false, owner: 'the raw-API card the chat draws where it was proposed (B-2198) — src/lib/channel-api-card-view.js', on: 'the API card in this conversation', scope: 'group' },
   { type: 'channel-reauth', identity: null, producer: 'src/server/channels-engine.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: true, kind: 'check', scope: 'group' },
   // ── an app on the desktop ──
@@ -106,6 +121,7 @@ const ROWS = Object.freeze([
 ].map((r) => Object.freeze(r)));
 const ANSWERS = Object.freeze(['card', 'buttons', 'reply']);
 const CARDS = Object.freeze(['row', 'inbox-window', 'none']);
+const CLOSERS = Object.freeze(['hide']);   // a row's `closer` (absent = the generic ✓ / ✕ / ↺)
 const ROW_OF = Object.freeze(Object.fromEntries(ROWS.map((r) => [r.type, r])));
 const typesWhere = (pred) => Object.freeze(ROWS.filter(pred).map((r) => r.type));
 /** DERIVED — the store's merge rule (src/user-todos.js add): an item carrying one of these types merges only with a re-file
@@ -252,6 +268,7 @@ function settledWords(item, t = fmt, kind = null) {
   if (by === 'denied') return t('denied');
   if (by === 'stored') return t('saved to the vault');
   if (by === 'expired' || by === 'ask-expired') return isDecisionRow(item) ? t('expired · the agent can ask again') : t('expired');   // r2: a decision's end
+  if (by === HIDDEN_BY) return t('hidden — nothing was decided');   // r3: a pointer the person hid
   if (by === 'agent') return t('withdrawn by the agent');
   if (by === 'handed-back') return t('handed back');
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
@@ -270,6 +287,8 @@ const PERSON_DECIDES = typesWhere((r) => r.decide === 'person');
  *  (decision_row / decision_final); the row (user-todos-row.js) and the For-you window (inbox-window-layout.js) draw
  *  `offersClosers` — one answer, three surfaces. */
 const DECISION_ENDS = Object.freeze(['allowed', 'denied', 'expired']);
+/** A decision row's own ends (its row's `ends`, else DECISION_ENDS) — what src/user-todos.js lets close its item. */
+function endsOf(item) { const r = item && item.action && ROW_OF[item.action.type]; return r && Array.isArray(r.ends) ? r.ends : DECISION_ENDS; }
 /** The `decide: 'person'` rows whose item DRAWS its two verbs (`card: 'row'`) — the wake request. open-channel is not one: its
  *  item is a door to the Reach dialog (where its Approve / Deny are), and the Outbox's pointer item shares its type (its
  *  producer retracts it — a law that refused that close would leave the pointer standing: test-channel-names F2). */
@@ -277,6 +296,39 @@ const DECISION_ROWS = typesWhere((r) => r.decide === 'person' && r.card === 'row
 function isDecisionRow(item) { return !!(item && item.action && typeof item.action === 'object' && DECISION_ROWS.includes(item.action.type)); }
 /** Does this item offer the generic closers (✓ Mark done / ✕ Dismiss while open, ↺ Reopen once resolved)? Never a decision row. */
 function offersClosers(item) { return !isDecisionRow(item); }
+/** A POINTER HIDES, NEVER DECIDES (lane wake-approve-card, acceptance round 3 — 主开发: «an rq- access item is a POINTER to the
+ *  Reach dialog (like the Outbox pointer)»). Was: ✓ Mark done on an access request's item recorded «✓ done» while the request
+ *  stood open in the Reach dialog — a record that read like an answer nobody gave. A `closer: 'hide'` row's item offers ONE
+ *  closer, ✕ «Hide»; the person's close is written as a HIDE (src/user-todos.js: status 'dismissed', `resolvedBy: 'hidden'`)
+ *  whatever door sent it (the ✓ a stale page draws, «Mark all seen»); the record says «hidden — nothing was decided»; no
+ *  Undo and no ↺ (it comes back by itself while the question is open — channels-access's boot reconcile, the agent's re-ask);
+ *  its producer's answer still lands on it (a decision in the Reach dialog stamps the hidden pointer «approved by you»). */
+const HIDDEN_BY = 'hidden';
+const POINTER_ROWS = typesWhere((r) => r.closer === 'hide');
+function isPointer(item) { return !!(item && item.action && typeof item.action === 'object' && POINTER_ROWS.includes(item.action.type)); }
+function isHidden(item) { return !!(item && item.status !== 'open' && item.resolvedBy === HIDDEN_BY); }
+/** THE CLOSERS a surface draws for `item` (the tray row, the mini inbox and the chat card — one renderer — and the For-you
+ *  window): ['done', 'dismiss'] while open / ['reopen'] once resolved; a POINTER ['hide'] / []; a decision row [] (its two
+ *  verbs end it). `resolved` = the surface's view (a row resolved in place leads its item's status by a broadcast). */
+function closersOf(item, resolved = !!(item && item.status && item.status !== 'open')) {
+  if (isDecisionRow(item)) return [];
+  if (isPointer(item)) return resolved ? [] : ['hide'];
+  return resolved ? ['reopen'] : ['done', 'dismiss'];
+}
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** A WAKE ASK HAS A LIFETIME (acceptance round 3): an OPEN decision row's `expiresAt` in words — «expires in 7 d» (whole
+ *  days, rounded), «expires in 5 h» under a day, «expires in 12 min» under an hour; null for anything else (a closed one, an
+ *  item of another row — a notice words its own window, src/lib/user-todos-row.js expiresText). The card in the chat and
+ *  the tray row say it (one renderer); the For-you window too. */
+function expiryWords(item, { t = fmt, now = Date.now() } = {}) {
+  if (!item || item.status !== 'open' || !isDecisionRow(item) || !ROW_OF[item.action.type].showsExpiry) return null;
+  const at = Number(item.expiresAt);
+  if (!Number.isFinite(at) || at <= now) return null;
+  const m = Math.ceil((at - now) / 60000);
+  if (m < 60) return t('expires in {n} min', { n: m });
+  if (m < 24 * 60) return t('expires in {n} h', { n: Math.round(m / 60) });
+  return t('expires in {n} d', { n: Math.round((at - now) / DAY_MS) });
+}
 
 /** WHO MAY DECIDE (lane wake-approve-card — 主开发's ruling 2026-10-27: canDecide is an IDENTITY fact, never a VIEW fact).
  *  The person holding the owner's cookie decides from EVERY view they open — the live chat, a view-* history, a sub-*
@@ -307,15 +359,23 @@ function clockWords(ts, now = Date.now()) {
  *  «BY YOU» IS A FACT THE RECORD CARRIES (acceptance round 2): only an item the decide route resolved AFTER THE PERSON
  *  VERDICT — `resolvedFact: {decidedBy: 'person', decidedAt}` (channels-access) — says it, at that time; a record decided
  *  before the verdict stood (a bearer, a curl on the base route) or by any other road keeps its old words («approved»). */
+/** THE STAMP'S WORDS per row (`stamp`; acceptance round 3 — 主开发: a held ask's record says «allowed by you · HH:MM», a paste
+ *  request's «stored · HH:MM»): resolvedBy → the verb. A resolution the table does not name has no stamp (its own words). */
+const STAMPS = Object.freeze({
+  approve: Object.freeze({ allowed: i18nKey('approved by you'), denied: i18nKey('denied by you') }),
+  allow: Object.freeze({ allowed: i18nKey('allowed by you'), always: i18nKey('always allowed by you'), denied: i18nKey('denied by you') }),
+  store: Object.freeze({ stored: i18nKey('stored'), denied: i18nKey('refused by you') }),
+});
 function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
   if (!item || item.status === 'open' || !item.action || !PERSON_DECIDES.includes(item.action.type)) return null;
   const by = item.resolvedBy;
-  if (by !== 'allowed' && by !== 'denied') return null;
+  const words = STAMPS[ROW_OF[item.action.type].stamp] || STAMPS.approve;
+  if (!Object.prototype.hasOwnProperty.call(words, by)) return null;
   const fact = item.resolvedFact && typeof item.resolvedFact === 'object' ? item.resolvedFact : null;
   if (!fact || fact.decidedBy !== 'person') return null;
-  const verb = by === 'allowed' ? t('approved by you') : t('denied by you');
+  const verb = t(words[by]);
   const time = clockWords(Number(fact.decidedAt) || item.resolvedAt || item.createdAt, now);
-  return { verb, time, text: `${verb} · ${time}`, denied: by === 'denied' };
+  return { verb, time, text: `${verb} · ${time}`, denied: by === 'denied' };   // `denied`: the card's quiet red
 }
 /** THE DECISION CARD'S MODEL (lane wake-approve-card) — `item` → {state, buttons, stamp, waiting}:
  *   'filed'         open, and this viewer may decide ⇒ buttons ['approve', 'deny'] (the row's own verbs — the tray's route)
@@ -331,7 +391,7 @@ function decisionCard(item, { role = VIEWER_ROLE, t = fmt, now = Date.now() } = 
   }
   const st = decidedStamp(it, { t, now });
   const by = it.resolvedBy;
-  const state = by === 'allowed' ? 'approved' : by === 'denied' ? 'denied' : (by === 'expired' || by === 'ask-expired') ? 'expired' : by === 'agent' ? 'withdrawn' : 'settled';
+  const state = by === 'allowed' || by === 'always' || by === 'stored' ? 'approved' : by === 'denied' ? 'denied' : (by === 'expired' || by === 'ask-expired') ? 'expired' : by === 'agent' ? 'withdrawn' : 'settled';
   return { state, buttons: [], stamp: st ? st.text : settledWords(it, t), waiting: null };
 }
 
@@ -372,4 +432,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, isDecisionRow, offersClosers, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard };

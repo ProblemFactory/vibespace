@@ -17,6 +17,13 @@
 //      holds at most MAX_AGENT_WATCHES rows of its own and MAX_OPEN_WATCH_REQUESTS wake asks waiting (said with the
 //      count); the For-you item tells the owner the agent's totals; the tray's cap REFUSES the ask (never a request
 //      without an item); the request table drops decided rows first, never an open one; the CLI's default is next-turn
+//   ④c lane wake-approve-card r3 — A POINTER HIDES, NEVER DECIDES: an access request's (rq-) item closed by the person (the
+//      ✓ a stale page draws, «Mark all seen») is HIDDEN — the request stays open; the pointer comes back when the agent asks
+//      again and at the boot reconcile; a decision in the Reach dialog stamps the hidden pointer «approved by you»
+//   ④d lane wake-approve-card r3 — A WAKE ASK HAS A LIFETIME (7 days): filed with its end (the request + the item), the card
+//      says «expires in 7 d»; the refusal at the bound names the oldest ask and its end; past it the sweep expires it
+//      («expired · the agent can ask again», the bound freed); an Approve after its end is refused `expired`; an ask filed
+//      before the lifetime and an item that ended while nobody listened are settled at the boot reconcile
 //   CONTROLS (scripts/mutant-copy.mjs, scratch copies): a filter without the inherited rule refuses ③; an engine
 //   dispatch without the next-turn branch bills ⑤; an engine without the removed-by-user check lets ⑦ re-register.
 import fs from 'node:fs';
@@ -32,6 +39,7 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const F = require(path.join(REPO, 'src/channel-filter.js'));
 const ACL = require(path.join(REPO, 'src/channel-acl.js'));
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
+const FA = require(path.join(REPO, 'src/foryou-actions.js'));   // lane wake-approve-card r3: THE registry's words (a hide, an expiry)
 const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
 const FAKE = require(path.join(REPO, 'src/channels/fake.js'));
 const { createChannelRegistry } = require(path.join(REPO, 'src/channels/index.js'));
@@ -221,6 +229,102 @@ async function oneStateLeg(ENGM, name) {
   const r = await oneStateLeg(E3, 'e3b-red');
   ok(cut !== src && r.expired.item === 'expired' && r.expired.request === 'open' && r.again.already, `CONTROL: an engine without the hook — the expired item leaves its request OPEN (${r.expired.request}) and the agent's next ask is «already filed» behind an item nobody can see`, J2s(r));
 }
+
+console.log('④c A POINTER HIDES, NEVER DECIDES (lane wake-approve-card r3): an access request\'s item is a pointer to the Reach dialog');
+async function pointerLeg(ENGM, name) {
+  const { eng, userTodos } = mkEngine(name, { ENGM });
+  await eng.pass(A, { force: true });
+  await eng.setAgentDirectory(A, { groups: false });
+  await eng.setReach(A, C, { principal: AGENT, level: 'requestable' });
+  const rq = await eng.request(AG, A, C, 'to read the incident thread');
+  const reqOf = () => ((eng.store.index.peek(KEY) || {}).reachRequests || []).find((r) => rq.request && r.id === rq.request.id) || {};
+  const todoId = reqOf().todoId;
+  if (!todoId) return { rq };
+  const snap = () => { const it = userTodos.get(todoId); return { status: it.status, by: it.resolvedBy, words: FA.settledWords(it), closers: FA.closersOf ? FA.closersOf(it) : null, stamp: (FA.decidedStamp(it) || {}).text || null }; };
+  const open0 = snap();
+  let press = null; try { userTodos.setStatus(todoId, 'done', 'user'); press = 'ok'; } catch (e) { press = e.code || e.message; }   // the ✓ a stale page still draws
+  const hidden = { ...snap(), request: reqOf().status };
+  const again = await eng.request(AG, A, C, 'to read the incident thread');   // the agent asks again while it is open
+  const back = { ...snap(), resurfaced: !!again.resurfaced, already: !!again.already, sameId: again.request && again.request.id === rq.request.id };
+  const seen = userTodos.setStatusMany([todoId], 'dismissed', 'user');   // «Mark all seen» on its band
+  const seenAll = { changed: seen.changed.length, ...snap() };
+  const boot = typeof eng.reconcileAsks === 'function' ? await eng.reconcileAsks() : { resurfaced: 0 };   // the next boot
+  const atBoot = { ...snap(), resurfaced: boot.resurfaced };
+  userTodos.setStatus(todoId, 'dismissed', 'user');   // hidden once more, then decided in the Reach dialog
+  const dec = await eng.decideRequest(rq.request.id, true, 'user', { person: true });
+  const decided = { ok: dec.ok, request: reqOf().status, ...snap() };
+  return { open0, press, hidden, back, seenAll, atBoot, decided };
+}
+try {
+  const g = await pointerLeg(ENG, 'e4c');
+  ok(g.open0 && g.open0.status === 'open' && J2s(g.open0.closers) === '["hide"]', 'an open access request\'s item offers ONE closer — Hide (no ✓ Mark done)', J2s(g));
+  ok(g.press === 'ok' && g.hidden.status === 'dismissed' && g.hidden.by === 'hidden' && g.hidden.words === 'hidden — nothing was decided' && g.hidden.request === 'open' && J2s(g.hidden.closers) === '[]', 'the ✓ a stale page still sends is a HIDE: the record «hidden — nothing was decided» (never «✓ done»), no ↺ — the request still OPEN in the Reach dialog', J2s(g.hidden));
+  ok(g.back.resurfaced && g.back.already && g.back.sameId && g.back.status === 'open', 'the agent asks again while it is open ⇒ the SAME request, its pointer back in the tray (resurfaced: true) — never a second filing', J2s(g.back));
+  ok(g.seenAll.changed === 1 && g.seenAll.status === 'dismissed' && g.seenAll.by === 'hidden', '«Mark all seen» hides it too (never «done»)', J2s(g.seenAll));
+  ok(g.atBoot.resurfaced === 1 && g.atBoot.status === 'open', 'the next boot reconcile: the request still open ⇒ its hidden pointer comes back', J2s(g.atBoot));
+  ok(g.decided.ok && g.decided.request === 'approved' && g.decided.status === 'done' && g.decided.by === 'allowed' && /^approved by you · (\d+\/\d+ )?\d\d:\d\d$/.test(g.decided.stamp || ''), 'decided in the Reach dialog while hidden ⇒ the pointer takes the decision: «approved by you · HH:MM» (never «hidden» over an answered request)', J2s(g.decided));
+  // CONTROL: the engine whose pointer never comes back (resurface cut) — a hidden pointer stays hidden over an open request
+  const src = engineSource(REPO);
+  const anchor = '  function resurface(req) {\n';
+  const cut = src.split(anchor).length === 2 ? src.replace(anchor, '  function resurface(req) { return false;\n') : src;
+  const E4 = MUT.load('src/server/channels-engine.js', cut, 'no-resurface');
+  const r = await pointerLeg(E4, 'e4c-red');
+  ok(cut !== src && r.hidden.status === 'dismissed' && !r.back.resurfaced && r.back.status === 'dismissed' && r.atBoot.status === 'dismissed', 'CONTROL: an engine without the resurface — the agent\'s re-ask and the boot leave the pointer hidden over an open request', J2s({ back: r.back, atBoot: r.atBoot }));
+} catch (e) { ok(false, '④c threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
+
+console.log('④d A WAKE ASK HAS A LIFETIME (lane wake-approve-card r3): 7 days, said on the card, the bound freed at its end');
+async function lifetimeLeg(ENGM, name) {
+  const { eng, userTodos, clock } = mkEngine(name, { ENGM });
+  await eng.pass(A, { force: true });
+  await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)] });
+  const reqOf = (id) => (eng.store.index.table('watchRequests') || []).find((r) => r.id === id) || {};
+  const DAY = 86400e3, t0 = clock();
+  const a = await eng.agentWatch(AG, KEY, { delivery: 'wake', why: 'on call' });
+  clock.advance(3600e3);
+  const b = await eng.agentWatch(AG, `${A}/fake-poll-announce`, { delivery: 'wake', why: 'on call too' });
+  const full = await eng.agentWatch(AG, A, { delivery: 'wake', why: 'the whole account' });   // the bound (2) is full
+  const ra = reqOf(a.request && a.request.id), ia = ra.todoId ? userTodos.get(ra.todoId) : null;
+  const filed = { at: ra.at, expiresAt: ra.expiresAt || null, itemExpires: ia ? ia.expiresAt : null, answer: a.expiresAt || null, words: ia && FA.expiryWords ? FA.expiryWords(ia, { now: clock() }) : null };
+  const show = eng.agentWatchesFor(AG, KEY);
+  clock.advance(6 * DAY - 3600e3);   // day 6
+  const day6 = { words: ia && FA.expiryWords ? FA.expiryWords(userTodos.get(ra.todoId), { now: clock() }) : null, open: reqOf(ra.id).status };
+  clock.advance(DAY + 60e3);   // a is 7 days + 1 min old, b 1 h younger
+  const swept = typeof eng.expireWatchRequests === 'function' ? await eng.expireWatchRequests() : [];   // the engine's minute sweep
+  const ia2 = ra.todoId ? userTodos.get(ra.todoId) : null;
+  const ended = { request: reqOf(ra.id).status, decidedBy: reqOf(ra.id).decidedBy || null, item: ia2 && ia2.status, by: ia2 && ia2.resolvedBy, words: ia2 ? FA.settledWords(ia2) : null, b: reqOf(b.request && b.request.id).status };
+  const next = await eng.agentWatch(AG, A, { delivery: 'wake', why: 'the whole account' });   // its bound freed
+  clock.advance(2 * 3600e3);   // b is past its end now — never swept yet
+  const late = await eng.decideRequest(b.request.id, true, 'user', { person: true });
+  // BOOT: an ask filed BEFORE the lifetime (no end of its own, its item lasting) 8 days old; an item that ended while nobody listened
+  const old = userTodos.add('channels', { origin: 'channels', text: 'Worker asks to be woken by an old room', action: { type: 'channel-watch-request', id: 'wr-legacy' } });
+  const dark = userTodos.add('channels', { origin: 'channels', text: 'Worker asks to be woken by a dark room', action: { type: 'channel-watch-request', id: 'wr-dark' } });
+  const darkIt = userTodos._state.items.find((x) => x.id === dark.id); darkIt.status = 'done'; darkIt.resolvedBy = 'expired'; darkIt.resolvedAt = clock();   // the store's load-time sweep, before the hook listened
+  await eng.store.index.update((ix) => { ix.watchRequests.push({ id: 'wr-legacy', kind: 'watch', principal: AGENT, scope: { kind: 'conversation', id: `${A}/legacy` }, adapterId: A, grain: { kind: 'conversation', convId: 'legacy' }, watch: { principal: AGENT }, why: '', at: clock() - 8 * DAY, status: 'open', todoId: old.id, decidedAt: null });
+    ix.watchRequests.push({ id: 'wr-dark', kind: 'watch', principal: OTHER, scope: { kind: 'conversation', id: `${A}/dark` }, adapterId: A, grain: { kind: 'conversation', convId: 'dark' }, watch: { principal: OTHER }, why: '', at: clock() - DAY, expiresAt: clock() + 6 * DAY, status: 'open', todoId: dark.id, decidedAt: null }); });
+  const boot = typeof eng.reconcileAsks === 'function' ? await eng.reconcileAsks() : null;
+  for (let i = 0; i < 40 && reqOf('wr-dark').status === 'open'; i++) await new Promise((r) => setTimeout(r, 25));
+  return { t0, filed, show: show && show.request, day6, full: { code: full.code, error: full.error || '', oldest: full.oldest || null }, a: ra.id, swept, ended, next: { ok: !!next.ok, proposed: !!next.proposed, code: next.code || null },
+    late: { code: late.code || null, ok: !!late.ok, request: reqOf(b.request.id).status }, boot: { legacy: reqOf('wr-legacy').status, legacyItem: userTodos.get(old.id).resolvedBy, dark: reqOf('wr-dark').status, darkBy: reqOf('wr-dark').decidedBy || null, settled: boot && boot.settled } };
+}
+try {
+  const g = await lifetimeLeg(ENG, 'e4d');
+  const WEEK = F.WATCH_REQUEST_TTL_MS;
+  ok(WEEK === 7 * 86400e3 && g.filed.expiresAt === g.filed.at + WEEK && g.filed.itemExpires === g.filed.expiresAt && g.filed.answer === g.filed.expiresAt, 'a wake ask is filed WITH its end — the request, its item and the agent\'s answer: its filing + 7 days', J2s(g.filed));
+  ok(g.filed.words === 'expires in 7 d' && g.day6.words === 'expires in 1 d' && g.day6.open === 'open', 'the card and the tray row say it: «expires in 7 d» at filing, «expires in 1 d» on day 6', J2s({ f: g.filed.words, d6: g.day6 }));
+  ok(g.show && g.show.expiresAt === g.filed.expiresAt, '`watch --show` reads it back: the waiting ask\'s end', J2s(g.show));
+  ok(g.full.code === 'watch-request-limit' && g.full.oldest && g.full.oldest.id === g.a && g.full.oldest.expiresAt === g.filed.expiresAt && g.full.error.includes(g.a) && /expires unanswered .* \(in 7 d\)/.test(g.full.error), 'the refusal at the bound NAMES the oldest open ask and its end («… the oldest, wr-… (for …), expires unanswered <when> (in 7 d)»)', g.full.error);
+  ok(g.swept.includes(g.a) && g.ended.request === 'expired' && g.ended.decidedBy === 'expired' && g.ended.item === 'done' && g.ended.by === 'expired' && g.ended.words === 'expired · the agent can ask again' && g.ended.b === 'open', 'past 7 days the sweep EXPIRES it: the request `expired` (nothing written), its item closed «expired · the agent can ask again»; the younger ask still waits', J2s(g.ended));
+  ok(g.next.ok && g.next.proposed, 'its bound is freed: the agent\'s next wake ask is filed', J2s(g.next));
+  ok(g.late.code === 'expired' && !g.late.ok && g.late.request === 'expired', 'an Approve after its end (before the sweep wrote it) is refused `expired` — never approved late', J2s(g.late));
+  ok(g.boot.legacy === 'expired' && g.boot.legacyItem === 'expired' && g.boot.dark === 'expired' && g.boot.darkBy === 'expired' && g.boot.settled >= 1, 'the boot reconcile: an ask filed before the lifetime (8 days old, its item lasting) expires; an item that ended while nobody listened settles its request', J2s(g.boot));
+  // CONTROL: the engine whose asks never end (the base: no lifetime) — 8 days on, the ask is open for ever and the bound stays full
+  const src = engineSource(REPO);
+  const anchor = 'const askEndOf = (r) => (Number(r && r.expiresAt) > 0 ? Number(r.expiresAt) : Number(r && r.at) + F.WATCH_REQUEST_TTL_MS);';
+  const cut = src.split(anchor).length === 2 ? src.replace(anchor, 'const askEndOf = () => Infinity;') : src;
+  const E5 = MUT.load('src/server/channels-engine.js', cut, 'no-lifetime');
+  const r = await lifetimeLeg(E5, 'e4d-red');
+  ok(cut !== src && r.ended.request === 'open' && r.next.code === 'watch-request-limit' && r.boot.legacy === 'open', 'CONTROL: an engine whose asks never end — 7 days on the ask is still OPEN, the agent\'s next ask refused at the bound, the 8-day-old one still open after the boot', J2s({ ended: r.ended, next: r.next, legacy: r.boot.legacy }));
+} catch (e) { ok(false, '④d threw on this tree (an API it asks for is missing): ' + ((e && e.message) || e)); }
 
 console.log('⑤ W5: next-turn rides the free stash; a legacy row still wakes');
 async function deliveryLeg(ENGM, name) {

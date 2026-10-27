@@ -379,9 +379,15 @@ async function newShapeCards(doorMod) {
   // the card closed by another door / a changed item / no answer / a second run / the caller gone
   const d1 = cw.door.run({ caller: cw.caller, args: ENV('env', 'closed'), cwd: cw.work });
   const it1 = await waitCard(cw);
-  cw.userTodos.setStatus(it1.id, 'done', 'user');
+  // lane wake-approve-card r3: A DECISION ROW HAS ITS OWN VERBS — the ✓ on the row / Mark all seen are refused BY NAME (the run
+  // still waits on its card), its own Deny ends it
+  let cc1 = null; try { cw.userTodos.setStatus(it1.id, 'done', 'user'); } catch (x) { cc1 = x.code; }
+  const m1 = cw.userTodos.setStatusMany([it1.id], 'dismissed', 'user');
+  ok(cc1 === 'decision_row' && m1.changed.length === 0 && m1.decisions.includes(it1.id) && cw.userTodos.get(it1.id).status === 'open', 'the card closed by another door (the ✓ on the row, Mark all seen) ⇒ refused BY NAME (decision_row) / passed by — the run still waits on its card', { cc1, m1 });
+  cw.door.answer(it1.action.askId, { answer: 'deny', person: true });
   const d1r = await d1;
-  ok(d1r.code === 'ask_denied', 'the card closed by another door (the ✓ on the row, Mark all seen) settles the run NOT allowed — ask_denied, nothing ran', d1r.code);
+  const r1 = cw.userTodos.get(it1.id);
+  ok(d1r.code === 'ask_denied' && r1.resolvedBy === 'denied' && r1.resolvedFact && r1.resolvedFact.decidedBy === 'person', 'its own Deny (the person\'s) ⇒ ask_denied, nothing ran; the record «denied» with the person\'s mark', { code: d1r.code, by: r1.resolvedBy, fact: r1.resolvedFact });
   const d2 = cw.door.run({ caller: cw.caller, args: ENV('env', 'changed'), cwd: cw.work });
   const it2 = await waitCard(cw);
   const held = cw.userTodos._state.items.find((x) => x.id === it2.id); held.detail = held.detail.replace('changed', 'Changed');
@@ -406,8 +412,9 @@ async function newShapeCards(doorMod) {
   const lw = await world();
   openRow(lw);
   const l1 = lw.door.run({ caller: lw.caller, args: ENV('ran', path.join(lw.work, 'ran.txt')), cwd: lw.work });
-  const li = await waitCard(lw); lw.userTodos.setStatus(li.id, 'dismissed', 'user');
-  ok((await l1).code === 'ask_denied' && !fs.existsSync(path.join(lw.work, 'ran.txt')), 'the card closed by another door (dismissed) on a local instance: nothing ran (the child never started)');
+  const li = await waitCard(lw); let lc = null; try { lw.userTodos.setStatus(li.id, 'dismissed', 'user'); } catch (x) { lc = x.code; }
+  lw.door.answer(li.action.askId, { answer: 'deny' });   // r3: the ✕ is refused by name; its own Deny ends it
+  ok(lc === 'decision_row' && (await l1).code === 'ask_denied' && !fs.existsSync(path.join(lw.work, 'ran.txt')), 'the card\'s ✕ refused by name on a local instance, its Deny ends it: nothing ran (the child never started)', lc);
 }
 
 console.log('④ THE LOCK — a lock mid-run ends the child within its bound; the answer is vault_locked');

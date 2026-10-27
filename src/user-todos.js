@@ -177,20 +177,30 @@ function normalizeOpen(x, plugin) {
 
 // THE MERGE RULE (lane chat-needs-you-card, amendment 1): derived from THE For-you action registry — a row's `identity`
 const { ACTION_IDENTITY } = require('./foryou-actions.js');
-const { isDecisionRow, DECISION_ENDS } = require('./foryou-actions.js');   // lane wake-approve-card r2: THE registry's decision rows
+const { isDecisionRow, endsOf } = require('./foryou-actions.js');   // lane wake-approve-card r2: THE registry's decision rows (r3: each row's own ends)
+const { isPointer, isHidden, HIDDEN_BY } = require('./foryou-actions.js');   // lane wake-approve-card r3: THE registry's pointers
 /** A DECISION ROW HAS TWO VERBS (lane wake-approve-card, acceptance round 2 — the registry's DECISION_ROWS: a `decide:
- *  'person'` row that draws its own Approve / Deny — the wake request). Its item leaves 'open' only by its decision (`allowed` / `denied`, the decide route's
- *  engine) or its end (`expired`); a generic close — the ✓ / ✕ a stale page still draws, a script, «Mark all seen», a reply —
+ *  'person'` row that draws its own verbs — the wake request; r3: the vault's run ask and paste request, the hub-act ask). Its item leaves 'open' only by
+ *  its decision (`allowed` / `denied` / `always` / `stored`, the person door's engine) or its own end (`expired`, a held ask's
+ *  `ask-expired` / `ask-over`… — the row's `ends`); a generic close — the ✓ / ✕ a stale page still draws, a script, «Mark all seen», a reply —
  *  is refused BY NAME (`decision_row`), and a decided one is final (`decision_final`: never reopened, never re-stamped). Was:
  *  ✓ Mark done beside Approve DENIED a wake request silently, its record read «✓ done», and the 6 s Undo reopened a request
  *  that was over. → null (lawful) | {code, error}. */
 function decisionRefusal(item, status, by) {
   if (!isDecisionRow(item)) return null;
   if (item.status !== 'open') return status === item.status && by === item.resolvedBy ? null : { code: 'decision_final', error: `${item.id} was decided (${item.resolvedBy || item.status}) — a decision is final; the agent can ask again` };
-  if (status !== 'open' && !DECISION_ENDS.includes(by)) return { code: 'decision_row', error: `${item.id} is a decision — only its Approve or Deny ends it (nothing else closes it)` };
+  if (status !== 'open' && !endsOf(item).includes(by)) return { code: 'decision_row', error: `${item.id} is a decision — only its own verbs end it (nothing else closes it)` };
   return null;
 }
 const decisionError = (no) => Object.assign(new Error(no.error), { code: no.code });
+/** A POINTER HIDES, NEVER DECIDES (lane wake-approve-card, acceptance round 3 — the registry's `closer: 'hide'` rows: an
+ *  access request's item, the Outbox's pointer). The PERSON's close of one (`by` 'user': the ✕ Hide, the ✓ a stale page still
+ *  draws, «Mark all seen») is written as a HIDE — status 'dismissed', `resolvedBy: 'hidden'` («hidden — nothing was decided»),
+ *  never «✓ done»; the question it points at is untouched (still open where it lives). A producer's own close (its
+ *  retraction, its answer) is its own. Was: ✓ on an rq- item recorded «✓ done» with the request open. → {status, by}. */
+function hideOf(item, status, by) {
+  return status !== 'open' && by === 'user' && isPointer(item) ? { status: 'dismissed', by: HIDDEN_BY } : { status, by };
+}
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
@@ -655,6 +665,7 @@ class UserTodoManager {
     if (!item) throw new Error('item not found');
     const no = decisionRefusal(item, status, by);   // lane wake-approve-card r2: a decision row's two verbs only, and final
     if (no) throw decisionError(no);
+    ({ status, by } = hideOf(item, status, by));   // r3: a pointer's close by the person is a hide
     const wasOpen = item.status === 'open';
     item.status = status;
     // a reopen is the user saying it still matters: it no longer expires
@@ -686,10 +697,11 @@ class UserTodoManager {
       const item = this._state.items.find((i) => i.id === id);
       if (!item) { unknown.push(id); continue; }
       if (decisionRefusal(item, status, by)) { if (item.status === 'open') decisions.push(id); continue; }
+      const h = hideOf(item, status, by);   // r3: «Mark all seen» HIDES a pointer (never «done»)
       const wasOpen = item.status === 'open';
-      item.status = status;
-      if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
-      else { item.resolvedAt = now; item.resolvedBy = by; }
+      item.status = h.status;
+      if (h.status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
+      else { item.resolvedAt = now; item.resolvedBy = h.by; }
       changed.push(id);
       if (wasOpen && status !== 'open') went.push(item);
     }
@@ -726,16 +738,19 @@ class UserTodoManager {
    *  exactly as it is. ONE save + ONE broadcast; the status listeners hear it as they hear setStatus.
    *  @returns the ids resolved */
   resolveAnswered(ids, by, fact = null) {
-    const went = [], now = this._now();
+    const went = [], restamped = [], now = this._now();
     for (const id of new Set(Array.isArray(ids) ? ids : [])) {
       const item = this._state.items.find((i) => i.id === id);
-      if (!item || item.status !== 'open' || decisionRefusal(item, 'done', by)) continue;
+      // lane wake-approve-card r3: a HIDDEN pointer was never answered — its producer's answer still lands on it (the
+      // record then says what was decided, «approved by you · 09:41»), without a second leave-'open' event
+      const hidden = !!item && isHidden(item);
+      if (!item || (item.status !== 'open' && !hidden) || decisionRefusal(item, 'done', by)) continue;
       item.status = 'done'; item.resolvedAt = now; item.resolvedBy = by;
       if (fact) item.resolvedFact = { ...fact };
-      went.push(item);
+      (hidden ? restamped : went).push(item);
     }
-    if (went.length) { this._save(); this._notify(); this._emitStatus(went, by); }
-    return went.map((i) => i.id);
+    if (went.length || restamped.length) { this._save(); this._notify(); if (went.length) this._emitStatus(went, by); }
+    return [...went, ...restamped].map((i) => i.id);
   }
 
   /** The user REPLIED to this item from the inbox and the reply reached the

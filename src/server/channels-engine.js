@@ -8230,7 +8230,7 @@ function create(deps = {}) {
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
@@ -8298,7 +8298,7 @@ function create(deps = {}) {
     syncPushLanes().catch((err) => console.warn('[channels] push lanes sync failed:', err && err.message));
     // P3: the outbox TTL sweep, once a minute (a proposal nobody decided on
     // expires with a receipt — §9.1).
-    if (now() - lastExpirySweep >= EXPIRY_SWEEP_MS) { lastExpirySweep = now(); track(expireSweep()); track(filesSweep().catch((err) => log.warn(`[channels] the attachments sweep failed: ${(err && err.message) || err}`))); }
+    if (now() - lastExpirySweep >= EXPIRY_SWEEP_MS) { lastExpirySweep = now(); track(expireSweep()); track(filesSweep().catch((err) => log.warn(`[channels] the attachments sweep failed: ${(err && err.message) || err}`))); track(expireWatchRequests().catch((err) => log.warn(`[channels] the wake-ask lifetime sweep failed: ${(err && err.message) || err}`))); }   // lane wake-approve-card r3: a wake ask has a lifetime
     const t = now();
     for (const rec of adapterRecords().adapters) {
       if (rec.enabled === false) continue;
@@ -8443,6 +8443,10 @@ function create(deps = {}) {
     try { track(releaseStaleReservations()); } catch (err) { log.warn(`[channels] boot reservation release failed: ${(err && err.message) || err}`); }
     reconcileReceiptFates().catch((err) => log.warn(`[channels] boot receipt-fate reconcile failed: ${(err && err.message) || err}`));
     try { scheduleBootPending(); } catch (err) { log.warn(`[channels] boot pending scan failed: ${(err && err.message) || err}`); }
+    // lane wake-approve-card r3: the asks' boot reconcile — wake asks past their lifetime expire, one whose item ended while
+    // nobody listened is settled, an open access request's hidden pointer comes back to the tray
+    reconcileAsks().then((r) => { if (r.expired.length || r.settled || r.resurfaced) log.log(`[channels] boot asks: ${r.expired.length} wake ask(s) expired, ${r.settled} settled by their item, ${r.resurfaced} hidden access pointer(s) back in For you`); })
+      .catch((err) => log.warn(`[channels] boot asks reconcile failed: ${(err && err.message) || err}`));
     // inc-muk9jj0j-rel3: a verdict judged before the account's LAST credential change (a re-authorization that landed
     // before this code) is re-judged once at boot — the read path re-judges on the way out anyway; this persists it
     for (const rec of adapterRecords().adapters) rejudgeConvCaps(rec, 'boot').catch(() => {});
@@ -8642,6 +8646,7 @@ function create(deps = {}) {
     reconcile: (id, o) => onProposal(id, () => reconcile(id, o)), sweepSending, sweepReplaces, releaseHeld, setSenderHonesty, honestyLineFor, deprecatedReceiptWakes,   // verify r2: two Check-outcome presses ask the adapter ONCE
     collectReceipt,   // lane channel-direct-send-sync: the drafting CLI reads a direct send's receipt inline (GET status?id&collect=1)
     setPolicy, policyFor, setReach, reachView, reachFor, request, decideRequest,
+    expireWatchRequests, reconcileAsks,   // lane wake-approve-card r3: a wake ask's lifetime + the asks' boot reconcile (suites drive them)
     agentWatch, agentUnwatch, agentWatchesFor, setAgentDirectory, directoryLists,   // lane channel-agent-watch
     attention, setJudge, labelJudged,   // lane decision-attention: the judged rows' scan, the account's "never judge", a label
     owedPass, judgedRoadFor,   // lane judged-watch-state: the owed re-judgment's look (a suite drives it by hand) + the doors' reading of a judged road

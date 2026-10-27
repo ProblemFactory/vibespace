@@ -31,9 +31,9 @@ import { registerMenuItem } from './contributions.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: an automation card's reach choices in the pane
 import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
-import { reconcileKeyed, agoText, expiresText, resolvedByText, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml } from './user-todos-row.js'; // THE keyed reconciler + the row words
+import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml } from './user-todos-row.js'; // THE keyed reconciler + the row words
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
-import { offersClosers, isDecisionRow } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer
+import { closersOf, isDecisionRow } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's box, as a dialog over this window
 
@@ -170,7 +170,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const bits = [];
     if (!st.scopeKey || e.notice || e.tail) bits.push(model.nameFor(i.sessionKey, [i]));
     bits.push(agoText(e.resolved ? (i.resolvedAt || i.createdAt) : i.createdAt, t));
-    if (e.resolved) bits.push(i.status === 'dismissed' ? t('dismissed') : t('done'));
+    if (e.resolved) bits.push(statusWords(i, t)); // r3: a hidden pointer «hidden — nothing was decided»
     else if (model.optionsFor(i).length) bits.push(t('{n} options', { n: model.optionsFor(i).length })); // lane foryou-honest: a parsed «A …；B …» counts too
     const urg = e.resolved ? '' : (e.notice ? 'notice' : (i.urgency || 'normal'));
     return { words, sub, meta: bits.join(' · '), urg, sig: [words, sub, bits.join('\u0001'), urg, e.resolved ? 1 : 0].join('\u0000') };
@@ -329,6 +329,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     reply: () => actBtn('reply', UI_ICONS.send, t('Reply'), t('Send reply (Enter) · newline (Shift+Enter)'), 'iw-act-primary'),
     done: () => actBtn('done', UI_ICONS.check, t('Mark done'), t('Handled — mark done'), 'iw-act-done'),
     dismiss: () => actBtn('dismiss', UI_ICONS.close, tc('inbox', 'Dismiss'), t('Dismiss (not going to act on this)'), 'iw-act-dismiss'),
+    hide: () => actBtn('hide', UI_ICONS.close, t('Hide'), t('Hide — decides nothing; what it points at stays open in the conversation'), 'iw-act-dismiss'), // lane wake-approve-card r3: a pointer's one closer
     reopen: () => actBtn('reopen', UI_ICONS.refresh, t('Reopen'), t('Reopen')),
     copy: () => actBtn('copy', UI_ICONS.copy, t('Copy'), t('Copy the whole item')),
     producer: () => actBtn('producer', UI_ICONS.refresh, t('Use a reset credit…'), t('Use a reset credit…'), 'iw-act-producer'),
@@ -373,7 +374,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
   const viewOf = (it, e) => itemView(it, {
     t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : model.wordsOf(it), detail: model.detailOf(it), options: model.optionsFor(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
     origin: { origin: originOf(it), label: ORIGIN_LABELS[originOf(it)] || '' }, notice: isNotice(it), resolved: !!(e && e.resolved) || it.status !== 'open',
-    reply: model.replyState(it), closers: offersClosers(it), ago: (ts) => agoText(ts, t), expires: (ts) => expiresText(ts, t), resolvedBy: (by, item) => resolvedByText(by, t, item),
+    reply: model.replyState(it), closers: closersOf(it, !!(e && e.resolved) || it.status !== 'open'), ago: (ts) => agoText(ts, t), expires: (ts) => expiresText(ts, t), statusWords: (item) => statusWords(item, t), resolvedBy: (by, item) => resolvedByText(by, t, item),
     detailState: !it.detailTruncated ? 'whole' : (st.loadErr && st.loadErr.id === it.id ? 'failed' : 'loading'), loadError: st.loadErr && st.loadErr.id === it.id ? st.loadErr.why : '',
   });
   /** The session's board chip beside its name (the popup's chunk-4 chip: needs input / blocked / review / working). */
@@ -756,7 +757,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       return;
     }
     if (a === 'reopen') { await model.setStatus(id, 'open'); return; }
-    if (a === 'done' || a === 'dismiss') { if (await model.setStatus(id, a === 'done' ? 'done' : 'dismissed')) advance(id); }
+    if (a === 'done' || a === 'dismiss' || a === 'hide') { if (await model.setStatus(id, a === 'done' ? 'done' : 'dismissed')) advance(id); } // r3: Hide = the store's hide (a pointer's 'dismissed' by the person)
   };
 
   // ── events (all bound to this window's life: the listener controller's signal) ──

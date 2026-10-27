@@ -99,7 +99,8 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     forget(q);
     if (outcome === 'refused') { quiet.set(`${q.conv}\n${q.place}`, now() + P.QUIET_MS); for (const [k, u] of quiet) if (!(u > now())) quiet.delete(k); }
     if (userTodos && q.todoId) {
-      try { const it = userTodos.get?.(q.todoId); if (it && it.status === 'open') { settling.add(q.todoId); try { userTodos.setStatus(q.todoId, 'done', outcome === 'stored' ? 'stored' : outcome === 'withdrawn' ? 'vault_locked' : (extra.why === 'gone' ? 'ask-over' : 'denied')); } finally { settling.delete(q.todoId); } } } catch (e) { log(`${q.who}: the item of ${q.requestId} could not be closed: ${e.message}`); }
+      // r3 (lane wake-approve-card): the PERSON's answer carries the person verdict's mark — the record says «stored · 09:41»
+      try { const it = userTodos.get?.(q.todoId); if (it && it.status === 'open') { settling.add(q.todoId); try { const by = outcome === 'stored' ? 'stored' : outcome === 'withdrawn' ? 'vault_locked' : (extra.why === 'gone' ? 'ask-over' : 'denied'); if (q.fact && typeof userTodos.resolveAnswered === 'function') userTodos.resolveAnswered([q.todoId], by, q.fact); else userTodos.setStatus(q.todoId, 'done', by); } finally { settling.delete(q.todoId); } } } catch (e) { log(`${q.who}: the item of ${q.requestId} could not be closed: ${e.message}`); }
     }
     tell(q, { outcome, ...extra });
   }
@@ -146,15 +147,16 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
    * THE OWNER ANSWERS (the route: a person on this page; the value already taken off the request body).
    * answer 'store' + value ⇒ the ONE writer of the place · 'deny' ⇒ refused. → { ok: true, outcome, … } | a refusal.
    */
-  function answer(requestId, { answer: a, value = null, by = 'user' } = {}) {
+  function answer(requestId, { answer: a, value = null, by = 'user', person = false } = {}) {
     const id = String(requestId || '');
     index();
     const q = open.get(id);
     if (!q) return named(settled.has(id) ? 'ask_settled' : 'ask_unknown');
+    const mark = () => { if (person) q.fact = { decidedBy: 'person', decidedAt: now() }; };   // r3: the person verdict's mark (the route's `person`) — the record's, never the agent's receipt
     // THE BELT: the item still open, still this request's (the owner answers what the tray shows — the item IS the record)
     const it = userTodos && typeof userTodos.get === 'function' ? userTodos.get(q.todoId) : null;
     if (!it || it.status !== 'open' || !it.action || it.action.type !== P.ACTION_TYPE || it.action.requestId !== id) { forget(q); return named('ask_settled'); }
-    if (a === 'deny') { settle(q, 'refused', { why: 'denied' }); audit('vault-secret-refused', { by: String(by).slice(0, 40), conv: q.scope, requestId: id }); return { ok: true, outcome: 'refused' }; }
+    if (a === 'deny') { mark(); settle(q, 'refused', { why: 'denied' }); audit('vault-secret-refused', { by: String(by).slice(0, 40), conv: q.scope, requestId: id }); return { ok: true, outcome: 'refused' }; }
     if (a !== 'store') return named('bad_answer');
     const vv = P.valueOf(value);
     if (!vv.ok) return vv;
@@ -184,6 +186,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     let receipt = null;
     try { receipt = (vault.noteUse(entry, { by: 'agent', door: 'paste', conv: q.scope }, { outcome: 'ok', purpose: q.purpose, actor: who }) || {}).receipt || null; } catch { /* the store answered: the use line is the audit's */ }
     audit('vault-secret-stored', { by: String(by).slice(0, 40), conv: q.scope, requestId: id, place: q.target.kind === 'field' ? P.intoOf(q.target) : entry, receipt });
+    mark();
     settle(q, 'stored', { ref, grantHours, receipt });
     return { ok: true, outcome: 'stored', ...(q.target.kind === 'field' ? { into: P.intoOf(q.target) } : { entry, ref }) };
   }

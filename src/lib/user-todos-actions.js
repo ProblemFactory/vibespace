@@ -34,6 +34,7 @@ import { openTakeover } from './browser-takeover-queue.js'; // lane browser-take
 import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «Who can use it»'s own refusal words (the dialog's)
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
+import { isPointer } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo
 import { askOptions } from '../ask-options.js'; // PURE (lane foryou-honest): an ask's chips — the explicit options, else its detail's «A …；B …» / «是 / 否» parsed
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
@@ -199,7 +200,9 @@ export function inboxModel(app) {
   /** ✓ / ✕ ON AN ITEM (lane foryou-honest, the stress evaluation's P3-2: one press decided it — no toast, the ↺ two screens
    *  away): the status POST, then ONE toast with Undo for 6 s — the ↺ road (status open) on the same item. */
   const resolveOne = async (id, status) => {
+    const hide = isPointer(byId(id)); // lane wake-approve-card r3: A POINTER HIDES — said as such, no Undo (it comes back by itself while it is open)
     const ok = await setStatus(id, status);
+    if (ok && hide) { showToast(t('Hidden — nothing was decided; it comes back while it is still open'), { duration: 6000 }); return ok; }
     if (ok) showToast(status === 'done' ? t('Marked done') : t('Dismissed'), { duration: 6000, actions: [{ label: t('Undo'), run: () => setStatus(id, 'open') }] });
     return ok;
   };
