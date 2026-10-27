@@ -146,6 +146,7 @@ fs.writeFileSync(path.join(GHBIN, 'gh'), "#!/usr/bin/env node\nprocess.stdout.wr
 fs.chmodSync(GHBIN, 0o555);
 const WSEAL = path.join(ROOT, 'wseal'); fs.mkdirSync(WSEAL, { recursive: true });   // agent-writable (0755) — a shim at the PATH head
 fs.writeFileSync(path.join(WSEAL, 'git'), "#!/usr/bin/env node\nrequire('fs').writeFileSync(process.env.STEAL||'/dev/null', process.env.GH_TOKEN||'');\n", { mode: 0o755 });
+const NOTYET = path.join(ROOT, 'notyet-bin');   // round 11 (MAJOR 2): a dir that does NOT exist yet — the sealed PATH must DROP it (the unit bakes $HOME/.local/bin before the agent makes it), re-checked every spawn
 const { EventEmitter } = require('node:events');
 
 // THE ORACLE: does `text` carry any byte of `value` — raw, any 10-character window of it, or after decoding every base64 /
@@ -932,42 +933,64 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   ok(!!owner.card && owner.r.ok && /Stored by: vault:\/\/mounts\/m1\/secretKey — you/.test(od) && /Why it asks: another conversation is using it — this conversation did not store it/.test(od), 'the OWNER\'s entry keeps today\'s card (the switch + a card per run on a cluster) — now saying who stored it and why it asks', od.split('\n').filter((l) => /^(Stored by|Why it asks)/.test(l)));
 }
 
-// ⑫ THE SPAWN-ENV SEAL (lane vault-agent-own round 10, BLOCKER 1b) — a runSeal tool (gh) spawns with the HUB's environment, never
-// the agent's: HOME + GH_CONFIG_DIR at a hub-owned EMPTY dir minted once under data/ (gh reads no ~/.config/gh config, writes
-// nothing of the agent's), a PATH with every same-uid-writable dir dropped (no `git`/`xdg-open` shim at the head), the minted
-// token still on env. A capturing spawnImpl reads the child's env; a non-seal tool (the printer) is untouched.
+// ⑫ THE SPAWN-ENV SEAL (lane vault-agent-own round 11, BLOCKER + MAJOR 2) — the environment of a vault run is a place NOBODY can
+// write, made for THAT run: HOME + GH_CONFIG_DIR + every XDG_* at SEAL_NOWHERE (a path under / this uid cannot create, so no planted
+// config.yml / hosts.yml / .gitconfig is ever read — round 10's data/ dir was same-uid writable and persistent), GH_HOST pinned to
+// the minted value's --for host, gh's git child config-less (GIT_CONFIG_GLOBAL=/dev/null, NOSYSTEM, no prompt), a PATH re-checked
+// EVERY spawn that keeps only EXISTING non-writable system dirs (empty ⇒ run_path_unsafe BY NAME). A capturing spawnImpl reads the
+// child env; a non-seal tool is untouched. The REAL-gh wire proof (planted config → socket gets nothing, host pinned) is in the report.
 {
-  const sw = await world({ instance: 'cluster' });   // a cluster asks every run of anything else; an own STORED entry is ok:own
-  let cap = null;
-  const sealSpawn = (cmd, args, opts) => {
-    cap = { cmd, env: opts.env, cwd: opts.cwd };
-    const child = new EventEmitter(); child.pid = 99001;
-    child.stdout = new EventEmitter(); child.stdout.destroy = () => {};
-    child.stderr = new EventEmitter(); child.stderr.destroy = () => {};
-    child.stdin = null;
-    setImmediate(() => { child.emit('exit', 0, null); child.emit('close', 0, null); });
-    return child;
-  };
-  const sealDoor = sw.mk(DOOR, { spawnImpl: sealSpawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [WSEAL, GHBIN, '/usr/bin', '/bin'].join(':') }) });
-  const r = await sealDoor.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', 'gh', 'issue', 'list'], cwd: sw.work });
-  const sealed = path.join(sw.dataDir, 'vault-run-env');
-  const dirMode = (() => { try { return (fs.statSync(sealed).mode & 0o777).toString(8); } catch { return null; } })();
-  const dirEmpty = (() => { try { return fs.readdirSync(sealed).length === 0; } catch { return false; } })();
-  const E = cap ? cap.env : {};
-  ok(r.ok && !!cap, 'gh issue list (own stored, cluster) ran ok:own with no card — the seal spawn captured the child env', r.code || r);
-  ok(E.HOME === sealed && E.GH_CONFIG_DIR === sealed, 'BLOCKER 1b: HOME and GH_CONFIG_DIR both point at the hub-owned dir under data/ — gh reads no ~/.config/gh config, its hosts.yml would live in an EMPTY dir', { HOME: E.HOME, GH_CONFIG_DIR: E.GH_CONFIG_DIR, sealed });
-  ok(dirMode === '700' && dirEmpty, 'BLOCKER 1b: the sealed config dir is 0700, hub-owned and EMPTY (no browser:/editor: keys)', { dirMode, dirEmpty });
-  const dirs = (E.PATH || '').split(':');
-  ok(!dirs.includes(WSEAL) && dirs.includes(GHBIN) && dirs.includes('/usr/bin'), 'BLOCKER 1b: the child PATH drops the agent-writable head (WSEAL, with its `git` shim) and keeps the non-writable dirs — gh resolves `git`/`xdg-open` from a system dir the agent cannot write', { WSEAL_dropped: !dirs.includes(WSEAL), GHBIN_kept: dirs.includes(GHBIN) });
-  ok(E.GH_TOKEN === 'agent-minted-value-0123456789', 'BLOCKER 1b: the minted token still rides the child env (the seal moves HOME/PATH/config, never the injected value)', { present: !!E.GH_TOKEN });
-  // a NON-seal tool (the printer) is spawned on the agent env unchanged — the seal is row-driven (gh only), no regression
-  let cap2 = null;
-  const pSpawn = (cmd, args, opts) => { cap2 = opts.env; return sealSpawn(cmd, args, opts); };
-  const printDoor = sw.mk(DOOR, { spawnImpl: pSpawn, agentEnv: () => ({ ...process.env, MARKER_XYZ: 'kept', PATH: [WSEAL, BIN, '/usr/bin', '/bin'].join(':') }) });
-  await printDoor.run({ caller: sw.caller, args: ['--env', 'T=vault://agent:conv-1/gh-token', '--', NODE, PRINTER, 'ran', path.join(sw.work, 'x.txt')], cwd: sw.work });
-  ok(cap2 && cap2.MARKER_XYZ === 'kept' && (cap2.PATH || '').split(':').includes(WSEAL) && cap2.GH_CONFIG_DIR === undefined, 'BLOCKER 1b: a NON-runSeal tool (node) is spawned on the agent env UNCHANGED (the writable PATH head kept, no GH_CONFIG_DIR, MARKER_XYZ through) — the seal is row-driven, no blanket regression', { MARKER_XYZ: cap2 && cap2.MARKER_XYZ, hasWseal: cap2 && (cap2.PATH||'').split(':').includes(WSEAL) });
-}
+  const sw = await world({ instance: 'cluster' });   // a cluster asks every run of anything else; an own entry is ok:own
+  const NOWHERE = DOOR.SEAL_NOWHERE;
+  const capOf = () => { let cap = null; const spawn = (cmd, args, opts) => { cap = { cmd, env: opts.env, cwd: opts.cwd }; const c = new EventEmitter(); c.pid = 99001; c.stdout = new EventEmitter(); c.stdout.destroy = () => {}; c.stderr = new EventEmitter(); c.stderr.destroy = () => {}; c.stdin = null; setImmediate(() => { c.emit('exit', 0, null); c.emit('close', 0, null); }); return c; }; return { get: () => cap, spawn }; };
+  // plant config.yml + hosts.yml where ROUND 10 minted its dir (data/vault-run-env) — the seal must point NOWHERE near it
+  const planted = path.join(sw.dataDir, 'vault-run-env'); fs.mkdirSync(planted, { recursive: true });
+  fs.writeFileSync(path.join(planted, 'config.yml'), 'http_unix_socket: /tmp/evil.sock\n'); fs.writeFileSync(path.join(planted, 'hosts.yml'), 'evil.invalid:\n    user: u\n');
 
+  // RUN A — own STORED gh-token, `gh issue list` (ok:own on a cluster); PATH has a writable head (WSEAL) + a not-yet dir (NOTYET)
+  const A = capOf();
+  const dA = sw.mk(DOOR, { spawnImpl: A.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [WSEAL, NOTYET, GHBIN, '/usr/bin', '/bin'].join(':') }) });
+  const rA = await dA.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', 'gh', 'issue', 'list'], cwd: sw.work });
+  const E = A.get() ? A.get().env : {};
+  ok(rA.ok && !!A.get(), 'gh issue list (own stored, cluster) ran ok:own with no card — the seal spawn captured the child env', rA.code || rA);
+  ok(E.HOME === NOWHERE && E.GH_CONFIG_DIR === NOWHERE && E.XDG_CONFIG_HOME === NOWHERE && E.XDG_STATE_HOME === NOWHERE && E.XDG_CACHE_HOME === NOWHERE && E.XDG_DATA_HOME === NOWHERE,
+    'BLOCKER: HOME, GH_CONFIG_DIR and every XDG_* point at SEAL_NOWHERE — gh reads config / hosts / state from a path that holds nothing', { HOME: E.HOME, GH_CONFIG_DIR: E.GH_CONFIG_DIR, XDG_CONFIG_HOME: E.XDG_CONFIG_HOME, NOWHERE });
+  const cantMake = (() => { try { fs.mkdirSync(NOWHERE, { recursive: true }); return false; } catch { return true; } })();
+  ok(E.HOME !== planted && !fs.existsSync(NOWHERE) && cantMake, 'BLOCKER: SEAL_NOWHERE is NOT round 10’s data/ dir, does not exist, and this uid CANNOT create it (mkdir throws) — a planted config.yml / hosts.yml is never read', { sealed: E.HOME, planted, exists: fs.existsSync(NOWHERE) });
+  ok(fs.readdirSync(planted).sort().join(',') === 'config.yml,hosts.yml', 'BLOCKER: the door minted / wrote NOTHING in the round-10 dir — it is no longer the run environment (only my two planted files remain)', fs.readdirSync(planted));
+  const dirs = (E.PATH || '').split(':');
+  ok(!dirs.includes(WSEAL) && !dirs.includes(NOTYET) && dirs.includes(GHBIN) && dirs.includes('/usr/bin'), 'MAJOR 2: the sealed PATH drops the agent-writable head (WSEAL) AND the not-yet-existing dir (NOTYET), keeps only EXISTING non-writable system dirs (GHBIN, /usr/bin)', { WSEAL: !dirs.includes(WSEAL), NOTYET: !dirs.includes(NOTYET), GHBIN: dirs.includes(GHBIN) });
+  ok(E.GIT_CONFIG_GLOBAL === '/dev/null' && E.GIT_CONFIG_NOSYSTEM === '1' && E.GIT_TERMINAL_PROMPT === '0', 'BLOCKER: gh’s `git` child reads no user / system config — GIT_CONFIG_GLOBAL=/dev/null, GIT_CONFIG_NOSYSTEM=1, no terminal prompt', { GIT_CONFIG_GLOBAL: E.GIT_CONFIG_GLOBAL, NOSYSTEM: E.GIT_CONFIG_NOSYSTEM, PROMPT: E.GIT_TERMINAL_PROMPT });
+  ok(E.GH_TOKEN === 'agent-minted-value-0123456789' && E.GH_HOST === undefined, 'BLOCKER: the injected token still rides the child env; a STORED value (no --for host) pins NO GH_HOST', { token: !!E.GH_TOKEN, GH_HOST: E.GH_HOST });
+
+  // RUN A2 — the agent MAKES NOTYET (0555, non-writable) between runs; the SAME door must RE-CHECK (no memo) and now KEEP it
+  fs.mkdirSync(NOTYET, { recursive: true }); fs.chmodSync(NOTYET, 0o555);
+  await dA.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', 'gh', 'issue', 'list'], cwd: sw.work });
+  const E2 = A.get().env; const dirs2 = (E2.PATH || '').split(':');
+  ok(dirs2.includes(NOTYET), 'MAJOR 2: once the agent creates NOTYET (now existing + non-writable) the NEXT spawn KEEPS it — the sealed PATH is recomputed every spawn (no memo of the first, absent, result)', { kept: dirs2.includes(NOTYET) });
+
+  // RUN B — own MINTED site-pw (--for api.example.com), `gh issue list -R api.example.com/o/r` (ok:own, on its for-host); the door
+  // pins GH_HOST to the --for host though the agent passed none — a hosts.yml / default-host logic cannot steer the request
+  const B = capOf();
+  const dB = sw.mk(DOOR, { spawnImpl: B.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [GHBIN, '/usr/bin', '/bin'].join(':') }) });
+  const rB = await dB.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/site-pw', '--', 'gh', 'issue', 'list', '-R', 'api.example.com/o/r'], cwd: sw.work });
+  const EB = B.get() ? B.get().env : {};
+  ok(rB.ok && rB.by === 'own' && EB.GH_HOST === 'api.example.com' && EB.HOME === NOWHERE, 'BLOCKER: a MINTED value pins GH_HOST to its --for host (api.example.com) — the DOOR sets it (the agent passed no GH_HOST), the host is the hub’s not a file’s', { GH_HOST: EB.GH_HOST, by: rB.by, code: rB.code });
+
+  // RUN C — gh resolved from a NON-writable dir (absolute argv[0] → ok:own), but the agent PATH is ALL writable → the sealed PATH
+  // is EMPTY → refused BY NAME (gh would otherwise fail to find `git` with no door-side word). A root hub / git-under-a-writable-prefix.
+  const C = capOf();
+  const dC = sw.mk(DOOR, { spawnImpl: C.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [WSEAL].join(':') }) });
+  const rC = await dC.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', path.join(GHBIN, 'gh'), 'issue', 'list'], cwd: sw.work });
+  ok(!rC.ok && rC.code === 'run_path_unsafe' && !C.get(), 'MAJOR 2: a runSeal tool whose sealed PATH comes out empty (every dir writable or absent) is refused BY NAME — nothing spawned', { ok: rC.ok, code: rC.code, spawned: !!C.get() });
+
+  // a NON-seal tool (the printer) is spawned on the agent env unchanged — the seal is row-driven (gh only), no regression
+  const P = capOf();
+  const printDoor = sw.mk(DOOR, { spawnImpl: P.spawn, agentEnv: () => ({ ...process.env, MARKER_XYZ: 'kept', PATH: [WSEAL, BIN, '/usr/bin', '/bin'].join(':') }) });
+  await printDoor.run({ caller: sw.caller, args: ['--env', 'T=vault://agent:conv-1/gh-token', '--', NODE, PRINTER, 'ran', path.join(sw.work, 'x.txt')], cwd: sw.work });
+  const EP = P.get() ? P.get().env : {};
+  ok(EP.MARKER_XYZ === 'kept' && (EP.PATH || '').split(':').includes(WSEAL) && EP.GH_CONFIG_DIR === undefined && EP.HOME !== NOWHERE && EP.GIT_CONFIG_GLOBAL === undefined, 'BLOCKER: a NON-runSeal tool (node) is spawned on the agent env UNCHANGED (writable PATH head kept, no GH_CONFIG_DIR / nowhere-HOME / git-child seal, MARKER_XYZ through) — the seal is row-driven, no blanket regression', { MARKER_XYZ: EP.MARKER_XYZ, hasWseal: (EP.PATH||'').split(':').includes(WSEAL), HOME: EP.HOME });
+}
 try { fs.chmodSync(BIN, 0o755); } catch { }   // the read-only bin given back (the scratch dir is removed)
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
 process.exit(fail ? 1 : 0);

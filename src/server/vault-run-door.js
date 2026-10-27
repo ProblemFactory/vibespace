@@ -110,13 +110,13 @@ const ASKING_TEXT = `More than ${ASKING_LINE_OVER} conversations are asking to u
 const ASKING_KEY = '{n} conversations are asking to use stored secrets';
 const ASKING_DETAIL = 'Each conversation asks on its own card in For you. This line goes when 8 or fewer are asking.';
 const REQUEST_QUIET_MS = 10 * 60e3;          // a Deny (or the card dismissed) quiets that conversation × entry 10 minutes (the automation card's rule)
-const USE_SKIP = new Set(['ask_pending', 'too_many_runs', 'spawn_failed', 'storage_blocked']);   // a wait or the hub's own failure before any child ran — not a use's outcome (a child that ran is always one)
+const USE_SKIP = new Set(['ask_pending', 'too_many_runs', 'spawn_failed', 'run_path_unsafe', 'storage_blocked']);   // a wait or the hub's own failure before any child ran — not a use's outcome (a child that ran is always one)
 const STORE_FILE = 'vault-run.json';
 const MARK_LABEL = 'vault-run-store-v1';
 const RUN_DIR_PREFIX = 'vs-vault-run-';
 const OWNER_FILE = '.owner';                 // the run folder's hub identity { pid, starttime, bootId }
 const MARK_ENV = 'VS_RUN_MARK';      // every child of a run carries its folder's name here (the end's /proc scan)
-const SEAL_DIR_NAME = 'vault-run-env';   // round 10 (BLOCKER 1b): a hub-owned EMPTY dir under data/ — HOME + GH_CONFIG_DIR for a runSeal tool (gh), so it reads no HOME config and writes nothing of the agent's
+const SEAL_NOWHERE = '/nonexistent/vibespace-vault-run';   // round 11 (BLOCKER): a runSeal tool's HOME / config dir / XDG — a path the hub uid CANNOT create (/ is root-owned on every hub) and so can never hold a planted config.yml / hosts.yml / .gitconfig; gh 2.102.0 runs an allowlisted verb on an env token with no config dir at all (wire-proven), so the seal is a place NOBODY can write, not a relocation
 const ARGS_MAX = 65536, CWD_MAX = 4096;      // the request's words (the review: an unbounded value stalled the loop)
 const STORE_MAX = 1024 * 1024;               // data/vault-run.json read bounded (a FIFO / a huge file never stalls the hub)
 const KILL_GRACE_MS = 5000;
@@ -133,7 +133,7 @@ const STATUS = Object.freeze({
   entry_has_its_own_door: 403, entry_unknown: 404, entry_not_runnable: 403, entry_too_short_to_mask: 403, use_not_granted: 403,
   job_no_use: 403, device_road_later: 403, cwd_refused: 403, template_refused: 403, tool_not_found: 404, unauthorized: 401,
   ask_pending: 409, ask_denied: 403, ask_expired: 403, ask_unfiled: 503, ask_changed: 409, caller_gone: 410, too_many_runs: 429,
-  spawn_failed: 500, failed: 500, storage_blocked: 503, request_too_large: 400,
+  spawn_failed: 500, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500,
   request_pending: 409, request_quiet: 429, purpose_required: 400, purpose_too_long: 400, too_many_requests: 429,   // lane vault-manual-and-lock
   too_many_askers: 429,   // B-4934
 });
@@ -144,6 +144,7 @@ const MORE_WORDS = Object.freeze({
   storage_blocked: `${DOOR.SENTENCE} (the run's folder, its program or a template is on it) — nothing ran`,
   request_too_large: `the run's words are over ${ARGS_MAX} characters or its folder over ${CWD_MAX} — refused before anything is read`,
   failed: 'the run door failed — nothing ran',
+  run_path_unsafe: 'no directory on the hub PATH is safe to run this tool from (every one is missing or writable by this user) — nothing ran',   // round 11 (MAJOR 2): a runSeal tool whose sealed PATH came out empty
   // lane vault-manual-and-lock: the request's own codes
   request_pending: 'you already asked the user for that entry — the question waits in their For you tray; `vibespace-vault uses` shows the answer when it comes',
   purpose_required: 'say what the entry is for: vibespace-vault request <vault://…> --for "<what you will run with it, and why>"',
@@ -749,21 +750,24 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    * `args` = the CLI's words after `run`; `cwd` = where the agent stood. → { ok: true, exit, signal, timedOut, truncated, ms,
    * stdout, stderr, scrubbed, redacted, by } | { ok: false, code, words, … }.
    */
-  // round 10 (BLOCKER 1b): a tool that declares runSeal (gh) spawns with the HUB's environment, never the agent's — so gh
-  // resolves its browser:/editor: launcher (BLOCKER 1a blinds the flag; this is the second, independent layer) and its `git`
-  // child from a config dir + a PATH the agent cannot steer, not from the agent's own ~/.config/gh/config.yml or a shim at the
-  // head of the hub's PATH (~/.local/bin). HOME + the tool's config-dir env point at a hub-owned EMPTY dir minted once under
-  // data/ (gh's hosts.yml would live there and holds nothing — the token rides env); the PATH keeps only the hub's absolute
-  // dirs the agent (same uid) CANNOT write (so the round-9 note's "git from the PATH head" is moot: no agent dir is on it).
+  // round 11 (BLOCKER): the environment of a vault run is a place NOBODY can write, made for THAT run — not a relocation. Round
+  // 10 pointed HOME / GH_CONFIG_DIR at a hub-minted dir under data/, but that dir is the hub UID's (= the agent's uid), 0700 yet
+  // persistent: a same-uid leg plants config.yml (http_unix_socket) or hosts.yml and the NEXT run reads it (wire-proven). So HOME,
+  // the tool's config-dir env and every XDG_* point at SEAL_NOWHERE — a path under / (root-owned) the agent cannot create or
+  // write, so no planted file is ever read (gh needs no config dir to run an env-token verb). The HOST is pinned to the minted
+  // value's --for host (never a file's default-host logic); gh's `git` child reads no user/system config. The PATH keeps only
+  // dirs that EXIST now AND the agent cannot write — re-checked EVERY spawn (no memo: a dir created or chmod'd between runs is
+  // caught); if none survive the run is refused BY NAME (run_path_unsafe), never a silent git-not-found.
   const isWritableDir = (p) => { try { fs.accessSync(p, fs.constants.W_OK); return true; } catch { return false; } };
-  let sealDir = null, sealPath = null;
-  const runSealDir = () => { if (!sealDir) { const d = path.join(dataDir, SEAL_DIR_NAME); try { fs.mkdirSync(d, { recursive: true }); fs.chmodSync(d, 0o700); } catch { } sealDir = d; } return sealDir; };
-  const sealedPathOf = (b) => { if (sealPath == null) sealPath = String((b && b.PATH) || '').split(':').filter((d) => d && d[0] === '/' && !isWritableDir(d)).join(':'); return sealPath; };
-  function sealEnvFor(row, b) {
+  const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
+  const sealedPathOf = (b) => String((b && b.PATH) || '').split(':').filter((d) => d && d[0] === '/' && isDir(d) && !isWritableDir(d)).join(':');
+  function sealEnvFor(row, b, forHost) {
     if (!row || !row.runSeal) return {};
-    const dir = runSealDir();
-    const out = { HOME: dir, PATH: sealedPathOf(b) };
-    if (row.runSeal.configDirEnv) out[row.runSeal.configDirEnv] = dir;
+    const dir = SEAL_NOWHERE;   // does not exist, cannot be made by this uid — every HOME/config/XDG read falls on nothing
+    const out = { HOME: dir, XDG_CONFIG_HOME: dir, XDG_STATE_HOME: dir, XDG_CACHE_HOME: dir, XDG_DATA_HOME: dir, PATH: sealedPathOf(b) };
+    if (row.runSeal.configDirEnv) out[row.runSeal.configDirEnv] = dir;   // GH_CONFIG_DIR
+    if (row.runSeal.hostEnv && forHost) out[row.runSeal.hostEnv] = forHost;   // GH_HOST pinned to the minted value's --for host
+    if (row.runSeal.childEnv) Object.assign(out, row.runSeal.childEnv);   // gh's git child: GIT_CONFIG_GLOBAL=/dev/null, NOSYSTEM, no prompt
     return out;
   }
   async function run({ caller = {}, args = [], cwd = null, signal = null } = {}) {
@@ -870,13 +874,23 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     for (const a of spent) grants.delete(a.pair);
     // L3 (int331): a once-grant is spent only when a child RAN — restore it when nothing ran (entry_unknown / too-short / spawn_failed,
     // sync or the async spawn error) so a failure before the child does not burn the owner's one-time grant (the agent runs it again)
-    const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed']);
+    const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe']);
     const restoreOnce = (r) => { if (r && r.ok === false && BURNED.has(r.code)) for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); return r; };
     const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt });
     return out && typeof out.then === 'function' ? out.then(restoreOnce) : restoreOnce(out);
   }
 
   function spawnRun({ caller, spec, head, verdict, askId, place, base, signal, t0, note, receipt }) {
+    // round 11: the sealed env is built HERE, at the spawn (no memo). The HOST is the ONE minted --for host of this run's entries
+    // (none — a stored value — or more than one leaves GH_HOST to the sealed default). The PATH is re-checked every spawn; if a
+    // runSeal tool has no safe system dir to run from (a root hub, or git only under a writable prefix) the run is refused BY NAME.
+    const sealHost = (() => {
+      if (!spec.row || !spec.row.runSeal || !spec.row.runSeal.hostEnv) return null;
+      const hs = [...new Set(spec.refs.map((r) => { const rw = rowOf(r); const pv = (rw && rw.provenance) || {}; return pv.prov === 'minted' ? VR.forHostOf(pv.forHost) : null; }).filter(Boolean))];
+      return hs.length === 1 ? hs[0] : null;
+    })();
+    const sealEnv = sealEnvFor(spec.row, base, sealHost);
+    if (spec.row && spec.row.runSeal && !sealEnv.PATH) { note('run_path_unsafe', { ...head }); return named('run_path_unsafe'); }
     // THE VALUES — read now, held in this closure only for the spawn and the scrubbers; never stored, never logged
     let values = new Map();
     for (const r of spec.refs) {
@@ -948,7 +962,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       };
       let child;
       try {
-        child = spawnImpl(spec.tool, m.argv.slice(1), { argv0: m.argv[0], cwd: place, env: { ...base, ...sealEnvFor(spec.row, base), ...m.env, [MARK_ENV]: mark }, stdio: [m.stdin != null ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: true, windowsHide: true });
+        child = spawnImpl(spec.tool, m.argv.slice(1), { argv0: m.argv[0], cwd: place, env: { ...base, ...m.env, ...sealEnv, [MARK_ENV]: mark }, stdio: [m.stdin != null ? 'pipe' : 'ignore', 'pipe', 'pipe'], detached: true, windowsHide: true });
       } catch (e) { spawnError = String((e && e.code) || (e && e.message) || 'spawn').slice(0, 80); finish(null, null); return; }
       rec.child = child;
       runs.add(rec);
@@ -1003,4 +1017,4 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
 }
 
 const statusOf = (code) => STATUS[code] || 400;
-module.exports = { create, classOf, statusOf, STATUS, MORE_WORDS, ACTION_TYPE, REQUEST_TYPE, GRANT_MS, GRANT_ANSWERS, PURPOSE_MAX, REQUESTS_PER_CALLER, REQUEST_CALLERS_MAX, ASKING_LINE_OVER, ASKING_TEXT, ASKING_KEY, STORE_FILE, MARK_LABEL, RUN_DIR_PREFIX, OWNER_FILE, MARK_ENV, ARGS_MAX, CWD_MAX, readBounded, endMarked, KILL_GRACE_MS, HEAD_MAX, DETAIL_MAX, NO_ALWAYS, RUN_CLASS, NEVER_CLASS, redactLong };
+module.exports = { create, classOf, statusOf, STATUS, MORE_WORDS, ACTION_TYPE, REQUEST_TYPE, GRANT_MS, GRANT_ANSWERS, PURPOSE_MAX, REQUESTS_PER_CALLER, REQUEST_CALLERS_MAX, ASKING_LINE_OVER, ASKING_TEXT, ASKING_KEY, STORE_FILE, MARK_LABEL, RUN_DIR_PREFIX, OWNER_FILE, MARK_ENV, SEAL_NOWHERE, ARGS_MAX, CWD_MAX, readBounded, endMarked, KILL_GRACE_MS, HEAD_MAX, DETAIL_MAX, NO_ALWAYS, RUN_CLASS, NEVER_CLASS, redactLong };
