@@ -99,6 +99,7 @@ const SCHEME = 'vault://';
 const MIN_MASK_BYTES = 8;                        // a shorter value cannot be scrubbed without scrubbing ordinary text
 const CMD_MAX = 4096;                            // bytes of the command line (exit run's bound)
 const TEMPLATE_MAX = 65536;                      // bytes of one template (its text is part of the shape key)
+const TEMPLATE_CARD_MAX = 4096;                  // round 17 (item 1): the card renders a config template IN FULL up to this (under DETAIL_MAX, so a shown-in-full template never overflows the card); a larger one is shown as a one-line note and is not vouched — «always» is not offered (the card cannot show what it reads in full)
 const TIMEOUT_DEFAULT_S = 120;
 const TIMEOUT_MAX_S = 600;
 const OUTPUT_MAX_BYTES = 2 * 1024 * 1024;        // per run, the device's bound
@@ -612,6 +613,16 @@ function fileFlagExempt(f, v, run) {
   if (ENV_NAME.test(inner)) { const file = run.files.find((x) => x.name === inner); return !!file && file.template == null && file.ref != null && !agentScopeOf(parseRef(file.ref)); }
   return !agentScopeOf(innerRef(inner));
 }
+/** round 17 (item 1): a config-file flag value the card renders IN FULL — a whole $VAULT_FILE{NAME} placeholder naming a
+ *  `--file NAME=@template` (the agent's own text, shown verbatim on the card) within the card render bound. A
+ *  $VAULT_FILE{store/row/field} (an owner-secret FILE, its bytes never shown), an opaque path, or a template past the
+ *  render bound is NOT shown ⇒ no «always» (the card cannot show what the tool reads). */
+function configTemplateShown(v, run) {
+  const m = /^\$VAULT_FILE\{([^}]*)\}$/.exec(String(v));
+  if (!m || !ENV_NAME.test(m[1])) return false;
+  const file = run.files.find((x) => x.name === m[1]);
+  return !!file && file.template != null && typeof file.text === 'string' && bytesOf(file.text) <= TEMPLATE_CARD_MAX;
+}
 /** getopt's short-flag cluster: the first letter that takes a value takes the rest of the word (`-hHOST`, `-sSo out`) or the next word. */
 function shortSplit(a, takes) { for (let i = 1; i < a.length; i++) { const f = '-' + a[i]; if (takes.includes(f)) { let v = i + 1 < a.length ? a.slice(i + 1) : null; if (v && v[0] === '=') v = v.slice(1); return { f, head: a.slice(0, i + 1), v }; } } return null; }   // round 2b: `-s=https://…` (Go flags) drops the `=`
 const HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$|^localhost$/i;
@@ -627,7 +638,7 @@ function argClassOf(a) {
 function shapeOf(run) {
   const row = run.row, kind = run.kind, argv = run.argv;
   const flags = new Set(), sub = [], args = [], positionals = [], keyed = [], valued = [];
-  let script = null, afterDashes = false, valueNext = null, configFile = false, unread = false, gitDriven = false;
+  let script = null, afterDashes = false, valueNext = null, configFile = false, unread = false, gitDriven = false, configOpaque = false;
   const isKeyed = (f) => !!(row && (row.keyed || []).includes(f));
   const ghLead = [];   // round 5/6: gh's grammar is PER VERB — collect the LEADING non-dash words (gh wants the command first), stopping at the FIRST dash. A dash before the verb words is a flag the reader cannot place (cobra skips an unknown flag + its arg at every level and re-parses at the leaf), so no key matches ⇒ vg null ⇒ BLIND (fail closed — gh repo -d x edit evil/o/r is not read as repo edit)
   const ghDepth = row && row.grammar ? gramDepthOf(row.grammar) : 0;   // round 7 (5b): the grammar's longest key, so a 3-word verb (repo autolink create) is matched, not capped at row.sub
@@ -687,7 +698,7 @@ function shapeOf(run) {
     if (row.blindFlagSubs) for (const b of row.blindFlagSubs) if (b.sub.every((w, i) => sub[i] === w) && boolFlagOn(argv, b.longs || [], b.shorts || [], vg)) { unread = true; gitDriven = true; }   // round 3/4/5: a verb that drives git only with a bool flag (gh pr merge --delete-branch/-d, repo create --push/--clone/-c) — boolFlagOn matches every pflag spelling (long, =true not =false, a short alone or in a cluster, -x=true); round 5: a cluster's =value binds to the LAST letter only (the grammar says which letters take a value)
     if (vg && vg.launch && boolFlagOn(argv, vg.launch.filter((f) => f.startsWith('--')), vg.launch.filter((f) => /^-[A-Za-z]$/.test(f)), vg)) unread = true;   // round 10 (BLOCKER 1a): an allowlisted verb with --web/-w or --editor/-e opens a launcher gh resolves from its config file's browser:/editor: key or exec.LookPath on the child's PATH, with the minted value in that program's env — BLIND (the card asks); the launch set is GENERATED per verb from the help and help-hash pinned
     if (row.needFlagSubs) for (const b of row.needFlagSubs) if (b.sub.every((w, i) => sub[i] === w) && !(vals(b.need).length && (!b.repo || vals(row.repoFlags || []).length || envs(row.repoEnv || []).length))) { unread = true; gitDriven = true; }   // round 10 (MAJOR 2): gh pr create resolves the CWD repo (git status over core.fsmonitor) and PUSHES the head (git push over the repo's pre-push hook / core.hooksPath) UNLESS --head names the branch AND -R (or GH_REPO) names the repo — every other shape BLINDS (gh then touches no local git)
-    if (row.fileFlags) for (const [f, v] of valued) if (row.fileFlags.includes(f) && !fileFlagExempt(f, v, run)) configFile = true;   // round 3/4: a cert / config FILE the agent can write ⇒ config class — blind unless the WHOLE value is a $VAULT_FILE placeholder (fileFlagExempt) for an owner-store entry (a template / an agent-put entry / a substring blinds)
+    if (row.fileFlags) for (const [f, v] of valued) if (row.fileFlags.includes(f) && !fileFlagExempt(f, v, run)) { configFile = true; configOpaque = true; }   // round 17 (item 1): a cert / cookie FILE is opaque — never shown, so «always» stays off even beside a shown config template; round 3/4: a cert / config FILE the agent can write ⇒ config class — blind unless the WHOLE value is a $VAULT_FILE placeholder (fileFlagExempt) for an owner-store entry (a template / an agent-put entry / a substring blinds)
     if (row.passDashes && flags.has('--')) { unread = true; gitDriven = true; }   // round 2b: gh passes args after `--` to git
     if ([...argv.slice(1), ...run.plainEnv.map((e) => e.value), ...run.files.map((f) => f.text || '')].some(blindAuthority)) unread = true;   // round 2b (HIGH-1): a URL authority our host read cannot be trusted for
     if (!hosts.size && row.hosts) row.hosts.forEach((h) => hosts.add(h));
@@ -701,7 +712,9 @@ function shapeOf(run) {
   const rowHosts = new Set((row && row.hosts) || []);   // round 16 (MINOR): a row's OWN default hosts (gh: api.github.com) are NEVER a «mention» — the row defaults are route hosts; a Mentions line names only a FREE-TEXT host (a --body / --title / template URL) that is not a route
   const mentions = [...hosts].filter((h) => h && !routeHosts.has(h) && !rowHosts.has(h)).sort();
   const known = !!row && kind === 'tool';   // round 2: `unread` (a curl glob, a bare number) is part of an UNKNOWN destination — never «always»
-  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size || unread ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile ? 'config-file' : run.programWritable ? 'program-writable' : null;
+  const cfgVals = row && kind === 'tool' && row.configFlags ? valued.filter(([f]) => row.configFlags.includes(f)).map(([, v]) => v) : [];   // round 17 (item 1): the config-flag values (curl -K / --config …)
+  const configShown = configFile && !configOpaque && cfgVals.length > 0 && cfgVals.every((v) => configTemplateShown(v, run));   // every config value is a $VAULT_FILE template the card renders IN FULL ⇒ the owner sees the agent's ONLY written input ⇒ «always» may be offered (keyed on the template bytes, already in the shape key)
+  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size || unread ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile && !configShown ? 'config-file' : run.programWritable ? 'program-writable' : null;
   return {
     v: SHAPE_V, tool: run.tool, name: run.name, kind, sub, flags: [...flags].sort(), args, hosts: [...hosts].sort(), routeHosts: [...routeHosts].sort(), mentions, badHost,
     entries: run.refs.map((r) => r.ref).sort(), injection: [...run.injection].sort(), env: run.plainEnv.map((e) => `${e.name}=${e.value}`).sort(), keyed: keyed.sort(),
@@ -1130,7 +1143,7 @@ function createMasker(secrets) {
 function maskText(text, secrets) { const m = createMasker(secrets); return m.push(text) + m.end(); }
 
 module.exports = {
-  SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
+  SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TEMPLATE_CARD_MAX, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
   parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, ownsAgentEntry, forHostOf, sameHost, ghCredEnvFor, isFreeEntry, refFor: refOf,
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts,

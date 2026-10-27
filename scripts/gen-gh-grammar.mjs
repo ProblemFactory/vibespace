@@ -231,6 +231,22 @@ export const ENV_ALLOW_RE = Object.freeze(['^LC_[A-Z]+$']);
 // the ADVISORY census (⑤c drives it against the live `gh help environment`): an allowlisted name may never be one gh names a
 // program through (envHijack) — RETURNS the offending names, RED when non-empty. PURE.
 export function envAllowAdvisory(hijack, allow = ENV_ALLOW) { return (allow || []).filter((n) => (hijack || []).includes(n)); }
+/** round 17 (item 2): replace `key: [ … ]` whose JSON-array value may itself hold a `]` inside a quoted regex literal
+ *  (envAllowRe: ["^LC_[A-Z]+$"]). A string-aware bracket-depth scan finds the array's REAL close — the old
+ *  /key: \[[^\]]*\]/ stopped at the FIRST `]` (the one closing [A-Z]) and corrupted the row, so --write never round-tripped. */
+export function spliceJsonArray(src, key, value) {
+  const at = src.indexOf(`${key}: [`);
+  if (at < 0) throw new Error(`no \`${key}: [...]\` in the gh row to rewrite`);
+  const open = at + `${key}: `.length;   // index of the `[`
+  let i = open, depth = 0, inStr = false;
+  for (; i < src.length; i++) {
+    const c = src[i];
+    if (inStr) { if (c === '\\') i++; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true; else if (c === '[') depth++; else if (c === ']' && --depth === 0) { i++; break; }
+  }
+  if (depth !== 0) throw new Error(`unterminated \`${key}: [...]\` array in the gh row`);
+  return src.slice(0, open) + JSON.stringify(value) + src.slice(i);
+}
 function literalText(table) {
   const keys = Object.keys(table).sort();
   return '{\n' + keys.map((k) => `      ${JSON.stringify(k)}: ${JSON.stringify(table[k])}`).join(',\n') + ',\n    }';
@@ -314,18 +330,15 @@ if (process.argv[1] && process.argv[1].endsWith('gen-gh-grammar.mjs')) {
       s = s.slice(0, g0) + 'grammar: ' + lit + s.slice(close + '\n    }'.length);
       if (!/grammarVersion: '[^']*'/.test(s)) throw new Error("no `grammarVersion: '…'` in the gh row to pin");
       s = s.replace(/grammarVersion: '[^']*'/, `grammarVersion: '${ver}'`);
-      if (!/envHijack: \[[^\]]*\]/.test(s)) throw new Error('no `envHijack: [...]` in the gh row to rewrite');
-      s = s.replace(/envHijack: \[[^\]]*\]/, `envHijack: ${JSON.stringify(hijack)}`);
+      s = spliceJsonArray(s, 'envHijack', hijack);   // round 17 (item 2): a bracket-depth splice, not /…\[[^\]]*\]/
       const adv = envAllowAdvisory(hijack);
       if (adv.length) throw new Error(`refusing --write: an env allowlist name is one gh names a program through (envHijack): ${adv.join(', ')} — review ENV_ALLOW`);
       const binp = ghBinPath(), tsha = binp ? toolSha256Of(binp) : null;
       if (!tsha) throw new Error('refusing --write: the gh binary could not be read to pin its sha256 (gh not on PATH as a readable file)');
       if (!/toolSha256: '[^']*'/.test(s)) throw new Error("no `toolSha256: '…'` in the gh row to rewrite");
       s = s.replace(/toolSha256: '[^']*'/, `toolSha256: '${tsha}'`);
-      if (!/envAllow: \[[^\]]*\]/.test(s)) throw new Error('no `envAllow: [...]` in the gh row to rewrite');
-      s = s.replace(/envAllow: \[[^\]]*\]/, `envAllow: ${JSON.stringify(ENV_ALLOW)}`);
-      if (!/envAllowRe: \[[^\]]*\]/.test(s)) throw new Error('no `envAllowRe: [...]` in the gh row to rewrite');
-      s = s.replace(/envAllowRe: \[[^\]]*\]/, `envAllowRe: ${JSON.stringify(ENV_ALLOW_RE)}`);
+      s = spliceJsonArray(s, 'envAllow', ENV_ALLOW);
+      s = spliceJsonArray(s, 'envAllowRe', ENV_ALLOW_RE);   // round 17 (item 2): ["^LC_[A-Z]+$"] carries a `]` inside the regex — the depth scan finds the array's real close
       writeFileSync(SRC, s);
       process.stderr.write(`wrote grammar (${keys.length} verbs, was ${shippedKeys.length}) + grammarVersion '${ver}' + toolSha256 '${tsha}' + envHijack ${JSON.stringify(hijack)} + envAllow ${JSON.stringify(ENV_ALLOW)} into src/vault-run.js\n`);
     } else {

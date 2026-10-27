@@ -344,7 +344,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const firstNotice = prev.noticedSha !== sha; rec.noticedSha = sha;
       store.tools[toolPath] = rec; toolsSave();
       audit('vault-run-tool-drift', { tool: toolName, path: toolPath, from, to, firstNotice });   // the drift RECORD — a root-owned tool the hub trusts changed (a package roll); it RUNS
-      if (firstNotice) log(`vault-run-door: ${toolName} changed since the last run: ${from} → ${to} (a root-owned tool — it runs; the seal is the content fence, the digest is a drift record)`);
+      if (firstNotice) {
+        log(`vault-run-door: ${toolName} changed since the last run: ${from} → ${to} (a root-owned tool — it runs; the seal is the content fence, the digest is a drift record)`);
+        if (userTodos) try { userTodos.add(VAULT_INBOX_KEY, { origin: 'vault', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Vault', text: `${toolName} on this machine changed: ${from} → ${to} (a root-owned tool — runs continue)`, detail: `${toolName} (${toolPath}) is sealed by root ownership, so the vault trusts whatever root installs there. Its bytes changed since the last run (${from} → ${to}) — root (a package roll or a reinstall) replaced it, and runs continue. This is a notice; nothing to do.`, i18n: { text: { key: '{tool} on this machine changed: {from} → {to} (a root-owned tool — runs continue)', params: { tool: toolName, from, to } } } }); } catch (e) { try { log(`vault-run-door: the ${toolName} drift notice could not be filed (${(e && e.message) || e})`); } catch { } }   // round 17 (item 3): ONE For-you FYI row (no decision) per (tool, hub) until the next drift — noticedSha dedupes; the store write above already recorded the drift, so a notice failure never disturbs the record
+      }
     } catch (e) { try { log(`vault-run-door: the tool drift store could not be read/updated (${(e && e.code) || e}) — the run proceeds (the seal is the content fence)`); } catch { } }
   };
 
@@ -361,7 +364,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     let next = { gen: lastGen, runnable: new Set(), always: [] };
     if (raw && !why) {
       try {
-        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40) })) };
+        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40), ...(typeof a.templateHash === 'string' ? { templateHash: a.templateHash, templateBytes: Number(a.templateBytes) || 0 } : {}) })) };
         const want = vault.macOf(MARK_LABEL, bodyOf(cand));
         const got = typeof raw.mark === 'string' && /^[0-9a-f]{64}$/.test(raw.mark) ? raw.mark : null;   // the review: a non-hex mark threw in timingSafeEqual
         if (!(want && got && cand.gen >= 0 && crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')))) why = 'its mark does not verify';
@@ -474,7 +477,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     return new Promise((resolve) => {
       const askId = randomBytes(16).toString('hex');
       const who = String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80);
-      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, always: always == null ? !!shape.always : !!always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), askedAt: now(), todoId: null, timer: null, resolve };
+      const tpls = (run.files || []).filter((f) => f.template != null && typeof f.text === 'string');   // round 17 (item 1): the template(s) the card renders IN FULL — their hash + byte count ride the «always» row for lane vault-use-grants (matching stays byte-exact via the shape key, which carries the template text)
+      const templateHash = tpls.length ? crypto.createHash('sha256').update(JSON.stringify(tpls.map((f) => [f.name, f.text]))).digest('hex') : null;
+      const templateBytes = tpls.length ? tpls.reduce((n, f) => n + Buffer.byteLength(f.text, 'utf8'), 0) : null;
+      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, always: always == null ? !!shape.always : !!always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), askedAt: now(), todoId: null, timer: null, resolve, templateHash, templateBytes };
       asks.set(askId, q); byPair.set(pair, askId);
       if (userTodos) {
         try {
@@ -523,7 +529,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       else {
         const d = load();
         if (!d) { settle(q, 'vault_locked'); return { ok: false, code: 'vault_locked' }; }
-        const r = save({ runnable: d.runnable, always: [...d.always.filter((x) => !(x.conv === q.conv && x.key === q.key)), { conv: q.conv, key: q.key, until, entries: q.entries, at: now(), by: String(by).slice(0, 40) }] });
+        const r = save({ runnable: d.runnable, always: [...d.always.filter((x) => !(x.conv === q.conv && x.key === q.key)), { conv: q.conv, key: q.key, until, entries: q.entries, at: now(), by: String(by).slice(0, 40), ...(q.templateHash ? { templateHash: q.templateHash, templateBytes: q.templateBytes } : {}) }] });
         if (!r.ok) { settle(q, 'denied', r.code); return r; }
       }
       audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl, until });
@@ -792,7 +798,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if ((shape.mentions || []).length) L.push(`Mentions (named in the command, not where it is sent): ${shape.mentions.join(', ')}`);   // round 16 (MINOR): shape.mentions excludes the row's OWN defaults (never api.github.com) — only a FREE-TEXT host that is not a route
     if (run.plainEnv.length) L.push(`Env: ${run.plainEnv.map((e) => `${e.name}=${quote(e.value)}`).join(' ')}`);
     L.push(`Folder: ${cwd}`);
-    for (const f of run.files) if (f.template != null) L.push(`Template ${f.name} (@${f.template}):`, String(f.text).replace(/\s+$/, ''));
+    for (const f of run.files) if (f.template != null) { const t = String(f.text); if (Buffer.byteLength(t, 'utf8') <= VR.TEMPLATE_CARD_MAX) L.push(`Template ${f.name} (@${f.template}):`, t.replace(/\s+$/, '')); else L.push(`Template ${f.name} (@${f.template}): ${Buffer.byteLength(t, 'utf8')} bytes — too long to show in full, so «Always» is not offered`); }   // round 17 (item 1): a template within the render bound is shown verbatim (its bytes define the «always»); a larger one is a short note (the card stays within DETAIL_MAX and «always» is withheld)
     L.push(`This shape = ${shape.kind === 'tool' ? 'the tool + its flags + the hosts + the secrets; positional arguments may change' : 'this whole command line'}.`);
     if (!shape.always) L.push(`«Always» is not offered: ${NO_ALWAYS[shape.noAlways] || shape.noAlways}.`);
     return L.join('\n').trim();

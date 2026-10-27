@@ -337,8 +337,10 @@ console.log('② THE SCRUB — every form of the value, cut across chunks, on bo
   const got = [];
   for (const [args, code] of REF) got.push((await w.door.run({ caller: w.caller, args, cwd: w.work })).code);
   ok(REF.every(([, code], i) => got[i] === code) && cardsOf(w).length === before, `refused BY NAME, no card, nothing spawned: ${REF.map(([, c, why], i) => `${why} ⇒ ${got[i]}`).join(' · ')}`, got);
-  fs.writeFileSync(path.join(w.work, 'long.txt'), 'x'.repeat(DETAIL_MAX) + '$VAULT{mounts/m1/secretKey}');
-  const cut = await w.door.run({ caller: w.caller, args: ['--file', 'CFG=@long.txt', '--', NODE, PRINTER, 'template', '$VAULT_FILE{CFG}'], cwd: w.work });
+  // round 17 (item 1): a template within the card render bound is shown IN FULL — TWO such templates together overflow DETAIL_MAX ⇒ card_too_long (a single over-bound template is now a short note, below)
+  fs.writeFileSync(path.join(w.work, 'long1.txt'), 'x'.repeat(3900) + '$VAULT{mounts/m1/secretKey}');
+  fs.writeFileSync(path.join(w.work, 'long2.txt'), 'y'.repeat(3900) + '$VAULT{mounts/m1/secretKey}');
+  const cut = await w.door.run({ caller: w.caller, args: ['--file', 'C1=@long1.txt', '--file', 'C2=@long2.txt', '--', NODE, PRINTER, 'template', '$VAULT_FILE{C1}', '$VAULT_FILE{C2}'], cwd: w.work });
   const job = await w.door.run({ caller: { job: true, name: 'nightly' }, args: ENV('env'), cwd: w.work });
   const remote = await w.door.run({ caller: { ...w.caller, remote: true }, args: ENV('env'), cwd: w.work });
   const fence = await w.door.run({ caller: w.caller, args: ENV('env'), cwd: '/etc' });
@@ -905,6 +907,31 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const k1r = await k1.r, k2 = await w.door.run({ caller: w.caller, args: kyArgs, cwd: w.work });
   ok(!!k1.card && k1.card.action.always === true && kNo && kNo.code === 'reveal_needs_password' && kYes && kYes.ok && k1r.ok && k1r.by === 'always' && k2.ok && k2.by === 'always' && !leaks((k1r.stdout || '') + (k2.stdout || ''), MINT_V).length,
     'a blind shape with «always» on offer (curl --resolve): «always» without the second password is refused, with it the run goes and the same shape runs again with NO card (allowedBy always)', { always: k1.card && k1.card.action.always, no: kNo && kNo.code, by: [k1r.by || k1r.code, k2.by || k2.code] });
+  // round 17 (item 1): curl -K whose config is a $VAULT_FILE template the card RENDERS IN FULL ⇒ «always» IS offered (the owner
+  // sees the agent's ONLY written input; the pass is keyed on the template bytes, already in the shape key). The owner's UniFi case.
+  fs.writeFileSync(path.join(w.work, 'unifi.cfg'), 'header = "X-API-KEY: $VAULT{agent:conv-1/site-pw}"\nheader = "Accept: application/json"\ninsecure\nsilent\n');
+  const uArgs = ['--file', 'CFG=@unifi.cfg', '--', 'curl', '-s', '-K', '$VAULT_FILE{CFG}', 'https://192.168.4.1/proxy/network/integration/v1/sites'];
+  const u1 = await runAnswered(w, uArgs, { answer: null });
+  const ud = (u1.card && u1.card.detail) || '';
+  const uNoPw = u1.card ? w.door.answer(u1.card.action.askId, { answer: 'always', ttl: '30d' }) : null;
+  const uYes = u1.card ? w.door.answer(u1.card.action.askId, { answer: 'always', ttl: '30d', reauthed: true }) : null;
+  const u1r = await u1.r;
+  const u2 = await w.door.run({ caller: w.caller, args: uArgs, cwd: w.work });
+  const ust = JSON.parse(fs.readFileSync(path.join(w.dataDir, DOOR.STORE_FILE), 'utf8'));
+  const urow = (ust.always || []).find((a) => typeof a.templateHash === 'string');
+  ok(!!u1.card && u1.card.action.always === true && /Template CFG \(@unifi\.cfg\):/.test(ud) && /X-API-KEY: \$VAULT\{agent:conv-1\/site-pw\}/.test(ud) && !/«Always» is not offered/.test(ud) && uNoPw && uNoPw.code === 'reveal_needs_password' && uYes && uYes.ok && u1r.ok && u1r.by === 'always' && u2.ok && u2.by === 'always' && !u2.card && !leaks((u1r.stdout || '') + (u2.stdout || ''), MINT_V).length && urow && /^[0-9a-f]{64}$/.test(urow.templateHash) && urow.templateBytes > 0,
+    'round 17 (item 1): curl -K whose config is a $VAULT_FILE template the card RENDERS IN FULL ⇒ «always» IS offered (the owner sees the agent\'s only written input); the card shows the template, the second password grants it, an identical re-run runs with NO card (by «always»), and the persisted «always» row carries templateHash + templateBytes for lane vault-use-grants', { always: u1.card && u1.card.action.always, by: [u1r.by || u1r.code, u2.by || u2.code], templateHash: urow && urow.templateHash, templateBytes: urow && urow.templateBytes });
+  // a template with one header ADDED ⇒ a NEW card (the stored «always» no longer matches; the card shows the template with the added line)
+  fs.writeFileSync(path.join(w.work, 'unifi.cfg'), 'header = "X-API-KEY: $VAULT{agent:conv-1/site-pw}"\nheader = "Accept: application/json"\nheader = "X-Extra: added-by-agent"\ninsecure\nsilent\n');
+  const uEdit = await runAnswered(w, uArgs, { answer: 'deny' });
+  ok(!!uEdit.card && uEdit.card.action.always === true && /X-Extra: added-by-agent/.test(uEdit.card.detail || '') && uEdit.r.code === 'ask_denied',
+    'round 17 (item 1): the SAME command with ONE header ADDED to the template ⇒ a NEW card (the «always» was keyed on the old bytes) that shows the template with the added header — «always» still on offer for the new template', { always: uEdit.card && uEdit.card.action.always, named: /X-Extra/.test(uEdit.card.detail || '') });
+  // a config template PAST the card render bound: the card shows a short NOTE (not the bytes), keeps «Always not offered», and stays within DETAIL_MAX (no card_too_long)
+  fs.writeFileSync(path.join(w.work, 'big.cfg'), 'x = "$VAULT{agent:conv-1/site-pw}"\n' + '# filler to pass the card render bound\n'.repeat(400));
+  const uBig = await runAnswered(w, ['--file', 'CFG=@big.cfg', '--', 'curl', '-s', '-K', '$VAULT_FILE{CFG}', 'https://192.168.4.1/sites'], { answer: 'deny' });
+  const ubd = (uBig.card && uBig.card.detail) || '';
+  ok(!!uBig.card && uBig.card.action.always === false && /Template CFG \(@big\.cfg\): \d+ bytes — too long to show in full/.test(ubd) && !/filler to pass/.test(ubd) && /«Always» is not offered: it reads a config file this card cannot show/.test(ubd) && uBig.r.code === 'ask_denied',
+    'round 17 (item 1): a config template PAST the card render bound ⇒ the card shows a short NOTE (its byte count, not the bytes), stays within DETAIL_MAX (not card_too_long), and keeps «Always» not offered: it reads a config file this card cannot show (base: config-file always)', { always: uBig.card && uBig.card.action.always, code: uBig.r.code });
   // a LOCAL instance keeps the base rule: one 允许, then that shape runs with no card this unlock
   const wl = await world({ instance: 'local' });
   const l1 = await runAnswered(wl, shellArgs, { answer: 'once' });
@@ -1041,6 +1068,26 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const toolsStore = fs.existsSync(toolsFile) ? JSON.parse(fs.readFileSync(toolsFile, 'utf8')) : null;
   const shimRec = toolsStore && toolsStore.tools && toolsStore.tools[SHIMGH];
   ok(rS.ok && rS.by === 'own' && !!S.get() && shimRec && shimRec.sha256 === 'dead'.repeat(16), 'round 15 (BLOCKER): a SEALED gh whose bytes ≠ the shipped pin RUNS ok:own and its digest is DRIFT-RECORDED in data/vault-run-tools.json (the seal is the content fence; the digest is a record, never a gate) — base refused it tool_changed', { ok: rS.ok, by: rS.by, spawned: !!S.get(), recorded: shimRec && shimRec.sha256 });
+
+  // round 17 (item 3): a SEALED tool whose bytes drifted since the last run files ONE For-you FYI notice (no decision), per (tool, hub) until the next drift
+  {
+    const DGH = path.join(ROOT, 'ghdrift'); fs.mkdirSync(DGH, { recursive: true });
+    fs.writeFileSync(path.join(DGH, 'gh'), "#!/usr/bin/env node\nprocess.stdout.write('d\\n');\n", { mode: 0o755 });
+    const DGHGH = path.join(DGH, 'gh'), dst = fs.statSync(DGHGH), DW = capOf();
+    const dDW = sw.mk(DOOR, { isRootOwned: REAL, toolDigest: (fd) => { let t = null; try { t = fs.readlinkSync('/proc/self/fd/' + fd); } catch { } return Promise.resolve(t === DGHGH ? GHSHA : 'dead'.repeat(16)); }, toolSealed: (p, fd) => p === DGHGH || DOOR.sealedToolReal(p, fd), spawnImpl: DW.spawn, agentEnv: () => ({ ...process.env, HOME: os.homedir(), PATH: [DGH, '/usr/bin', '/bin'].join(':') }) });
+    const tf = path.join(sw.dataDir, 'vault-run-tools.json');
+    const cur = fs.existsSync(tf) ? JSON.parse(fs.readFileSync(tf, 'utf8')) : { v: 1, tools: {} };
+    cur.tools[DGHGH] = { path: DGHGH, dev: dst.dev, ino: dst.ino, size: dst.size, mtime: Math.round(dst.mtimeMs), sha256: 'bb'.repeat(32), version: '2.100.0' };   // a PRIOR record with a different sha + no noticedSha ⇒ the next run is a first-notice drift
+    fs.writeFileSync(tf, JSON.stringify(cur));
+    const driftNotes = () => (sw.userTodos.snapshot().open || []).filter((i) => i.kind === 'notice' && !i.action && /on this machine changed/.test(i.text || ''));
+    const dn0 = driftNotes().length;
+    const rd1 = await dDW.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', DGHGH, 'issue', 'list'], cwd: sw.work });
+    const dn1 = driftNotes().length;
+    await dDW.run({ caller: sw.caller, args: ['--env', 'GH_TOKEN=vault://agent:conv-1/gh-token', '--', DGHGH, 'issue', 'list'], cwd: sw.work });
+    const dn2 = driftNotes().length, dnote = driftNotes().find((i) => /machine changed/.test(i.text));
+    ok(rd1.ok && rd1.by === 'own' && dn1 - dn0 === 1 && dn2 - dn0 === 1 && dnote && /gh on this machine changed: 2\.100\.0 → 2\.102\.0 .*runs continue/.test(dnote.text) && dnote.origin === 'vault' && !dnote.action && dnote.i18n && dnote.i18n.text.params.from === '2.100.0',
+      'round 17 (item 3): a SEALED gh whose bytes drifted files ONE For-you FYI notice (no decision) — «gh on this machine changed: 2.100.0 → 2.102.0 … runs continue»; a second run after the SAME drift files no second item (base: a log + audit line only, no For-you notice)', { dn0, dn1, dn2, text: dnote && dnote.text });
+  }
 
   // REAL-OWNERSHIP CONTROL (round 14 BLOCKER): the exported sealed predicate on the box's /usr/bin/gh (root-owned) vs a uid-owned
   // fixture — the VERDICT says sealed/unsealed with NO vendor call (gh --version is not a vault verb).
