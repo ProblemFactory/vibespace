@@ -213,12 +213,18 @@ await leg('④', async () => {
   const pz = (uh.ingestPaused?.() || [])[0];
   ok(said.length === 1 && said[0].kind === 'paused' && pz && pz.host === 'host-m' && pz.shard === SHARD && pz.why === 'size' && remedy && remedy.f === SHARD, '④ said ONCE (onShape: paused — what, how big, which machine) + the remedy started (the shard\'s streaming dedup)', { said, pz, remedy });
   const w = LSN && LSN.noticeOf(said[0] || {});
-  ok(w && /Usage of M is not being recorded/.test(w.text) && /3\.00 GiB/.test(w.detail) && /events-2026-10/.test(w.detail) && /Which machine: M/.test(w.detail) && /What to do/.test(w.detail), '④ the notice names what (the file), how big, which machine, what happens now and what to do', w && [w.text, w.detail]);
+  // r4 (a pause is ONE month's, its rows HELD at the hub): the words name the month held, and how many of its events
+  ok(w && /Usage of M for 2026-10 is held/.test(w.text) && /3\.00 GiB/.test(w.detail) && /events-2026-10/.test(w.detail) && /Which machine: M/.test(w.detail) && /50 events of 2026-10 held/.test(w.detail) && /What to do/.test(w.detail), '④ the notice names what (the file), how big, which machine, what is held (50 events of 2026-10), what happens now and what to do', w && [w.text, w.detail]);
   const [r2] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(0, 50)));
-  ok(r2.paused && r2.paused.held === 100 && said.length === 1, '④ a second batch: still paused, counted (held 100 events on the device), not said again');
+  // r4 re-derived: it PINNED «held 100 events on the device» (the same 50 refused twice); it PINS NOW the same 50 held ONCE
+  // at the hub (the re-send is 50 duplicates), so nothing new to say
+  ok(r2.paused && r2.paused.held === 50 && r2.duplicates === 50 && said.length === 1, '④ a second batch (the same 50 re-sent): still paused, held ONCE at the hub (50 held, 50 duplicates), not said again');
   fs.truncateSync(sh, small); // back in shape (what the dedup leaves)
   const [r3] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(100, 50)));
   ok(r3.appended === 50 && said.length === 2 && said[1].kind === 'resumed' && !(uh.ingestPaused?.() || []).length, '④ back in shape ⇒ recorded again (50 appended), said (resumed), the pause gone from the Usage window\'s state', { r3, said: said.map((e) => e.kind) });
+  const tail = fs.readFileSync(sh, 'utf-8').split('\n').filter(Boolean).slice(3).map((l) => JSON.parse(l).rid);
+  const want = [...Array.from({ length: 47 }, (_, k) => 3 + k), ...Array.from({ length: 50 }, (_, k) => 100 + k)].map((i) => 'h:host-m:req_' + String(i).padStart(8, '0'));
+  ok(tail.join() === want.join(), `④ r4: the 50 events held while paused are in the ledger first, in order — the 3 it already held (req 0–2) cost 0 bytes, the ledger law — then the batch that found it in shape (${tail.length} rows after the 3)`, tail.slice(0, 2).concat(tail.slice(45, 49)));
   // the ratio rule (from 64 MiB in the product — a seam here): a shard ~3× its distinct rows ⇒ paused, why 'ratio'
   const d2 = dirOf('f4-ratio'), rows = [];
   for (let k = 0; k < 3; k++) for (let i = 0; i < 400; i++) rows.push(row(i));

@@ -33,6 +33,14 @@
 //     reopened at the next ingest — a flap at every restart)
 //   ⑪ F4 an `ids` pause is no dedup loop: no run, its own words, said once (d9753fa8: a full-shard dedup at every backoff,
 //     each removing 0, under «rows were removed»)
+// ROUND 4 (the acceptance of 4e94e377 — ⑫ fails on 4e94e377):
+//   ⑫ F4 a pause is a fact about ONE shard (host × month), never the host: a proven-over October + a batch of October and
+//     November ⇒ November appended, October HELD and counted, the cursor past the batch (4e94e377: the whole batch refused,
+//     November never written); a re-send held once; the hold BOUNDED — past it the oldest held rows dropped and COUNTED;
+//     the counts read back after a restart; back in shape (the bound raised) ⇒ the held rows ingested in order through the
+//     ledger law, the hold gone, the notice closed — each machine's month at its own ingest
+//   ⑤ ⑦ ⑪ re-derived: their batches are held now (never refused), so «in shape» is proven by the shard holding each held
+//     event ONCE (the drain's, the re-send a duplicate), and ⑪'s notice is re-worded when its held count moves
 // In-process, no server; sparse files for every big shape (fs.truncateSync / a write at an offset — no disk, no load).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -73,6 +81,11 @@ const row = (i, host = 'host-m') => JSON.stringify({ rid: `h:${host}:req_${Strin
 const remote = (i) => JSON.stringify({ rid: 'req_' + String(i).padStart(8, '0'), ts: T0 + i * 1000, sid: 'sid-' + (i % 7), model: 'claude-opus-5-5', cwd: '/srv/work/app', origin: 'main', i: 10, cw5: 1, cw1: 0, cr: 5000, o: 300, tier: null });
 const batchOf = (from, n) => Array.from({ length: n }, (_, k) => remote(from + k)).join('\n') + '\n';
 const loadedRows = (uh) => (uh._evCache ? uh._evCache.events.length + uh._evCache.cold.n : 0);
+/** The rids of a ledger / hold file, in its order (small fixtures — a whole read). */
+const ridsOf = (f) => { try { return fs.readFileSync(f, 'utf-8').split('\n').map((l) => { try { return JSON.parse(l).rid || null; } catch { return null; } }).filter(Boolean); } catch { return []; } };
+const hidOf = (i, host = 'host-m') => `h:${host}:req_${String(i).padStart(8, '0')}`;
+/** Is every one of these events in the file exactly once? */
+const onceIn = (f, ids, host) => { const all = ridsOf(f); return ids.every((i) => all.filter((r) => r === hidOf(i, host)).length === 1); };
 
 console.log('① NO MONEY DECISION FROM A PARTIAL LEDGER — 20 000 rows, two warm steps in');
 await leg('①', async () => {
@@ -251,7 +264,10 @@ await leg('⑤', async () => {
   await quietAsync(async () => { if (job) await job.catch(() => { }); });
   const [r4] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
   const n4 = notices();
-  ok(r3.paused && job && r4.appended === 5 && !uh.ingestPaused().length && n4.length === 1 && n4[0].status === 'done' && n4[0].resolvedBy === 'shape-ok', `⑤ past the backoff the next pause RETRIES (a run in flight: ${!!job}); in shape ⇒ recorded again (${r4.appended} appended) and the one notice closes (${n4[0] && n4[0].resolvedBy}) — e11e1f61: never retried, paused for good`, { r3: !!r3.paused, r4, n: n4.map((i) => [i.status, i.resolvedBy]) });
+  // r4 re-derived: it PINNED «in shape ⇒ the re-sent batch appended (5)»; the batch was refused whole while paused. It PINS
+  // NOW: the 5 events were HELD at the pauses (once), and in shape they are in the ledger exactly once — the hold's drain
+  // appended them, the re-sent batch is 5 duplicates
+  ok(r3.paused && job && onceIn(sh, [9000, 9001, 9002, 9003, 9004]) && r4.duplicates === 5 && !uh.ingestPaused().length && n4.length === 1 && n4[0].status === 'done' && n4[0].resolvedBy === 'shape-ok', `⑤ past the backoff the next pause RETRIES (a run in flight: ${!!job}); in shape ⇒ recorded again: the 5 events held across the pauses are in the ledger ONCE (the hold drained; the re-sent batch ${r4.duplicates} duplicates) and the one notice closes (${n4[0] && n4[0].resolvedBy}) — e11e1f61: never retried, paused for good`, { r3: !!r3.paused, r4, n: n4.map((i) => [i.status, i.resolvedBy]) });
   ok(wired && typeof wired.reconcile === 'function', '⑤ the wiring answers {open, reconcile} (the boot door ⑥ proves)');
 });
 
@@ -307,7 +323,9 @@ await leg('⑦', async () => {
   const job = uh._dedupJobs && [...uh._dedupJobs.values()][0];
   const [res] = await quietAsync(async () => (job ? job : null));
   const [r3] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5)));
-  ok(res && res.renamed && res.removed === rows - distinct && r3.appended === 5 && !uh.ingestPaused().length, `⑦ the remedy dedups it (${res && res.removed} repeated rows removed — the holes stepped over, never copied: ${(size(sh) / KiB).toFixed(0)} KiB left) and the machine is recorded again (${r3.appended} appended)`, { res, r3 });
+  // r4 re-derived: it PINNED «resumed ⇒ the re-sent batch appended (5)»; it PINS NOW: the batch held at the pause is in the
+  // ledger ONCE after the dedup (the hold drained at the resume), the re-sent batch 5 duplicates
+  ok(res && res.renamed && res.removed === rows - distinct && onceIn(sh, [9000, 9001, 9002, 9003, 9004]) && r3.duplicates === 5 && !uh.ingestPaused().length, `⑦ the remedy dedups it (${res && res.removed} repeated rows removed — the holes stepped over, never copied: ${(size(sh) / KiB).toFixed(0)} KiB left) and the machine is recorded again: the 5 held events in the ledger once (the re-sent batch ${r3.duplicates} duplicates)`, { res, r3 });
 });
 
 console.log('⑧ CONSENT IS PER SUBJECT ON EVERY ROAD — a background act never joins an agent\'s card (round 3)');
@@ -460,11 +478,75 @@ await leg('⑪', async () => {
   if (ix) ix.over = true; // past the index's bound (LD.MAX_IDS = 5 000 000 distinct rids) — set by hand: a 5 M-row fixture is load
   for (let k = 0; k < 4; k++) { await quietAsync(async () => { uh.ingestRemoteEvents('host-m', 'M', batchOf(9100 + k, 1)); await drain(); }); await sleep(30); }
   const p = uh.ingestPaused()[0] || {}, rem = p.remedy || {}, n = todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
-  const paused = said.filter((e) => e.kind === 'paused').length;
-  ok(r0.appended === 5 && p.why === 'ids' && runs === 0 && rem.state === 'ids' && paused === 1 && n.length === 1 && /more distinct records than the index keeps/.test(n[0].detail) && /stopped trying/.test(n[0].detail) && !/were removed/.test(n[0].detail),
-    `⑪ a month with more distinct rows than the index keeps: paused 'ids', NO dedup (${runs} run(s) over 4 pauses past the backoff — d9753fa8: one at every backoff, each removing 0), state ${rem.state || '—'}, said ONCE (${paused}) in its own words, never «rows were removed»`, { runs, rem, paused, now: n[0] && n[0].detail.split('\n')[2] });
+  // r4 re-derived: it PINNED one 'paused' emission over the 4 pauses; each pause now HOLDS its new row, and a held count
+  // that moves is news (the same item re-worded in place) — it PINS NOW one emission per count (1 → 4), each in state ids
+  const pz = said.filter((e) => e.kind === 'paused'), paused = pz.length, counts = pz.map((e) => e.held);
+  ok(r0.appended === 5 && p.why === 'ids' && runs === 0 && rem.state === 'ids' && paused === 4 && counts.join() === '1,2,3,4' && pz.every((e) => e.remedy && e.remedy.state === 'ids') && n.length === 1 && /more distinct records than the index keeps/.test(n[0].detail) && /stopped trying/.test(n[0].detail) && !/were removed/.test(n[0].detail) && /4 events of 2026-10 held/.test(n[0].detail),
+    `⑪ a month with more distinct rows than the index keeps: paused 'ids', NO dedup (${runs} run(s) over 4 pauses past the backoff — d9753fa8: one at every backoff, each removing 0), state ${rem.state || '—'}, said in its own words, ONE item re-worded only as its held count moved (${counts.join(' → ')}), never «rows were removed»`, { runs, rem, counts, now: n[0] && n[0].detail.split('\n')[2] });
   const note = N.ledgerNote({ ingestPaused: uh.ingestPaused() })[0];
   ok(note && note.words === N.LEDGER_NOTE_WORDS.pausedIds, '⑪ the Usage window says it in a row of its own (pausedIds)', note);
+});
+
+console.log('⑫ F4 A PAUSE IS PER SHARD (host × month) — a proven-over October never stops November; held, counted, bounded, drained in order (round 4)');
+await leg('⑫', async () => {
+  const d = dirOf('w12'), sh = shardOf(d), nov = path.join(d, 'usage-history', 'events-2026-11.ndjson'), heldDir = path.join(d, 'usage-history', '_held');
+  fs.writeFileSync(sh, Array.from({ length: 400 }, (_, i) => row(i)).join('\n') + '\n'); // 400 distinct rows, ~110 KiB
+  const NOV = 800000; // remote(NOV + k): 2026-11-01 (T0 + 800 000 s)
+  const seams = (uh) => { uh.shapeMaxBytes = 64 * KiB; uh.holdMaxBytes = 4 * KiB; uh.holdSegBytes = 1 * KiB; return uh; }; // the product's 2 GiB / 64 MiB / 16 MiB, scaled (a row is ~260 B)
+  const todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+  const notices = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
+  const life = () => { const uh = seams(newUh(d)); const wired = LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null }); return { uh, wired }; };
+  const L1 = life(), uh = L1.uh;
+  await quietAsync(() => uh.dedupShard(sh)); // a real pass over THIS inode: no repeated row — proven
+  const oct0 = size(sh);
+  // the batch: 5 October events (the over month) + 5 November ones, read from the device cursor {…}
+  const [r1] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 5) + batchOf(NOV, 5), { cursors: { '/home/u/.claude/projects/p/a.jsonl': 4242 }, since: 'hub' }));
+  const cur = uh.hostCursorOf ? uh.hostCursorOf('host-m') : null;
+  ok(r1 && r1.appended === 5 && onceIn(nov, [NOV, NOV + 1, NOV + 2, NOV + 3, NOV + 4]) && size(sh) === oct0 && r1.held === 5 && r1.paused && r1.paused.why === 'size' && r1.paused.remedy && r1.paused.remedy.state === 'proven-over' && r1.paused.held === 5 && cur && cur.cursors && cur.cursors['/home/u/.claude/projects/p/a.jsonl'] === 4242,
+    `⑫ a proven-over October + a batch of October and November: November APPENDED (${r1 && r1.appended}), October HELD and counted (${r1 && r1.held}; its file untouched), the hub's cursor past the whole batch — here November's file holds ${ridsOf(nov).length} row(s) (4e94e377: the whole batch refused, 0 appended, November never written)`, { r1, cur: cur && cur.cursors });
+  const n1 = notices(), w0 = LSN.noticeOf ? LSN.noticeOf({ ...(r1 && r1.paused), holdMax: undefined }) : {};
+  ok(n1.length === 1 && n1[0].status === 'open' && /^Usage of M for 2026-10 is held/.test(n1[0].text) && /5 events of 2026-10 held until the file is back in shape/.test(n1[0].detail) && /its other months are recorded as usual/.test(n1[0].detail) && /at most 64 MiB/.test(w0.detail || ''),
+    `⑫ said: ONE notice for M × 2026-10 — «${n1[0] ? n1[0].text : ''}», «5 events of 2026-10 held until the file is back in shape», the other months recorded, the bound named (64 MiB in the product)`, n1.map((i) => [i.text, i.detail.split('\n')[1]]));
+  const notes = N.ledgerNote({ ingestPaused: uh.ingestPaused() });
+  ok(notes.length === 2 && notes[0].words === N.LEDGER_NOTE_WORDS.pausedProvenOver && notes[1].words === N.LEDGER_NOTE_WORDS.pausedHeld && notes[1].vars.held === '5' && notes[1].vars.month === '2026-10', '⑫ the Usage window says it: the month\'s row (pausedProvenOver) and what is held (pausedHeld: 5 of 2026-10)', notes);
+  // a November-only batch: appended; October stays paused and held
+  const [r2] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(NOV + 5, 3)));
+  // a re-send of the same October window + 3 new and one the LEDGER already holds (req 5: in the October file)
+  const [r3] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(9000, 8) + remote(5) + '\n'));
+  const p3 = uh.ingestPaused().find((p) => p.host === 'host-m') || {};
+  ok(r2 && r2.appended === 3 && p3.shard === SHARD && r3 && r3.appended === 0 && r3.held === 4 && r3.duplicates === 5 && p3.held === 9 && size(sh) === oct0,
+    `⑫ November alone: appended (${r2 && r2.appended}), October still paused; the window re-sent: held ONCE (+${r3 && r3.held}, ${r3 && r3.duplicates} duplicates — ${p3.held} held), the October file untouched`, { r2, r3, held: p3.held });
+  // THE BOUND: another machine's October, 12 batches of 4 rows (~1 KiB each) into a 4 KiB hold of 1 KiB segments
+  const b = 'host-b';
+  const rowsB = []; for (let k = 0; k < 12; k++) { const ids = [9500 + 4 * k, 9501 + 4 * k, 9502 + 4 * k, 9503 + 4 * k]; rowsB.push(...ids); quiet(() => uh.ingestRemoteEvents(b, 'B', ids.map((i) => remote(i)).join('\n') + '\n')); }
+  const pb = uh.ingestPaused().find((p) => p.host === b) || {};
+  const files = fs.existsSync(heldDir) ? fs.readdirSync(heldDir).filter((f) => f.includes('~host-b.')) : [];
+  const onDisk = files.reduce((a, f) => a + size(path.join(heldDir, f)), 0), keptB = files.sort((x, y) => Number(x.split('.')[1]) - Number(y.split('.')[1])).flatMap((f) => ridsOf(path.join(heldDir, f)));
+  ok(pb.dropped > 0 && pb.held + pb.dropped === rowsB.length && onDisk <= 4 * KiB && keptB.join() === rowsB.slice(pb.dropped).map((i) => hidOf(i, b)).join(),
+    `⑫ the hold is BOUNDED: ${onDisk} B on disk for B's October (≤ 4 KiB, the product's 64 MiB scaled) — past it the ${pb.dropped} OLDEST held rows dropped and COUNTED (${pb.held} held + ${pb.dropped} dropped = ${rowsB.length} sent), the newest kept in order`, { held: pb.held, dropped: pb.dropped, onDisk, files });
+  const nb = notices().find((i) => /^Usage of B for 2026-10/.test(i.text));
+  ok(nb && new RegExp(`Past the bound: the ${pb.dropped} oldest held events of 2026-10 were dropped`).test(nb.detail) && N.ledgerNote({ ingestPaused: [pb] }).some((x) => x.words === N.LEDGER_NOTE_WORDS.pausedDropped && x.vars.dropped === String(pb.dropped)),
+    `⑫ the drop is SAID, never silent: B's own notice «Past the bound: the ${pb.dropped} oldest held events of 2026-10 were dropped — counted here, never recorded» and the Usage window's pausedDropped row`, nb && nb.detail.split('\n'));
+  // A RESTART: the holds read back — the counts and the dropped count the same, the same notices
+  const before = notices().map((i) => i.id).sort().join();
+  const L2 = life();
+  quiet(() => L2.wired && L2.wired.reconcile && L2.wired.reconcile());
+  await quietAsync(async () => { for (let i = 0; i < 400 && L2.uh._dedupJobs.size; i++) await sleep(5); }); // its one dedup pass after a restart (proven is in memory)
+  const m2 = L2.uh.ingestPaused().find((p) => p.host === 'host-m') || {}, b2 = L2.uh.ingestPaused().find((p) => p.host === b) || {};
+  ok(m2.held === 9 && b2.held === pb.held && b2.dropped === pb.dropped && notices().filter((i) => i.status === 'open').map((i) => i.id).sort().join() === before,
+    `⑫ a restart reads every hold back: M ${m2.held} held, B ${b2.held} held + ${b2.dropped} dropped (the marker line) — the same two notices, open`, { m2: [m2.held, m2.dropped], b2: [b2.held, b2.dropped] });
+  // BACK IN SHAPE — the owner raises the bound: each machine's month at its own next ingest (a November batch)
+  L2.uh.shapeMaxBytes = 2 * GiB;
+  const [r5] = quiet(() => L2.uh.ingestRemoteEvents('host-m', 'M', batchOf(NOV + 8, 2)));
+  const octRids = ridsOf(sh), tailM = octRids.slice(400);
+  const heldM = [9000, 9001, 9002, 9003, 9004, 9005, 9006, 9007].map((i) => hidOf(i));
+  const nm = notices().find((i) => /^Usage of M for 2026-10/.test(i.text)), stillB = L2.uh.ingestPaused().some((p) => p.host === b);
+  ok(r5 && r5.appended === 2 && tailM.join() === heldM.join() && octRids.filter((r) => r === hidOf(5)).length === 1 && nm && nm.status === 'done' && nm.resolvedBy === 'shape-ok' && stillB && !(fs.existsSync(heldDir) && fs.readdirSync(heldDir).some((f) => f.includes('~host-m.'))),
+    `⑫ the bound raised, M's next ingest: its October RESUMED — the ${heldM.length} held events appended IN ORDER (req 5 the ledger already had: 0 bytes, the ledger law), its hold gone, its notice closed (${nm && nm.resolvedBy}); B's October waits for B's own ingest`, { r5, tailM, nm: nm && [nm.status, nm.resolvedBy], stillB });
+  const [r6] = quiet(() => L2.uh.ingestRemoteEvents(b, 'B', batchOf(NOV + 20, 1)));
+  const tailB = ridsOf(sh).slice(400 + heldM.length);
+  ok(r6 && r6.appended === 1 && tailB.join() === rowsB.slice(pb.dropped).map((i) => hidOf(i, b)).join() && !L2.uh.ingestPaused().length && notices().every((i) => i.status !== 'open'),
+    `⑫ B's next ingest: its ${tailB.length} held events appended in order (the ${pb.dropped} dropped never), nothing paused, every notice closed`, { r6, tailB: tailB.length });
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });

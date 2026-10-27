@@ -498,7 +498,7 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
     'src/server/unexpected-exit.js': 'agent', // B-f698: a conversation that exited unexpectedly while working — restarted once, or why not
     'src/exit-proxy.js': 'machines', // lane-pairing ⑥: "Allow <conversation> to run a command on <machine>?" (Allow / Deny, 60 s)
     'src/server/memory-pressure-watch.js': 'server', // lane browser-resource-care: "Memory is N% full … — the most is held by <who>", ONE per pressure episode
-    'src/server/ledger-shape-notice.js': 'server', // lane ledger-dedup-law F4: "Usage of <machine> is not being recorded — the usage ledger file … is out of shape", ONE per paused machine
+    'src/server/ledger-shape-notice.js': 'server', // lane ledger-dedup-law F4: "Usage of <machine> for <month> is held — the usage ledger file … is out of shape", ONE per paused machine × month (r4)
     'src/plugins/frp.js': 'plugin', // lane relay-token-per-instance (design q-051): a public name the relay refused (name_in_use:<holder> / name_not_yours) — ONE item per name, the frp plugin's own (it declares 'reminders')
     'src/server/decision-engine.js': 'plugin', // lane judged-watch-state (B-f42e): the LLM plugin's ONE low row a day when its budget paused judged notification rules (notePaused — the door = its settings)
     'src/server/voice-teach-engine.js': 'plugin', // lane foryou-plugin-notices: a PLUGIN's reminder now (was 'server'); lane voice-p1-oauth-teach: "Dropline 建议加入词库：…" with 加入词库 / 忽略 — ONE per proposal (≤ 1/h per conversation, teach ON only)

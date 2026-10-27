@@ -8,7 +8,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The usage ledger no longer writes the same batch of events twice.
 - A paired machine's usage harvest no longer waits for your approval; the hub remembers how far it got.
 - Each background task that keeps being refused takes its own single item in For you, which closes once the task is allowed or stops asking for a week.
-- A usage ledger file that grows out of shape is said and pauses that machine's recording until it is back in shape; if cleanup fails or cannot help, it says so.
+- A usage ledger file out of shape is said; only that machine's usage for that month waits (up to 64 MiB) until it is back in shape, and failed cleanup is said.
 - Your answer to one task's or conversation's request in For you no longer lets another one's through, and a Deny stays until you allow it.
 - The update removes the repeated rows from old usage ledger files once; the totals do not change.
 - The memory notice names the process holding the memory, its command line, and whether it came from outside the container.
