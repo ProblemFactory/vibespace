@@ -723,6 +723,18 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         return rep;
       },
     },
+    {
+      id: '2026-10-vault-always-to-grants',
+      note: "«ALWAYS» IS A GRANT (lane vault-use-grants, the owner 2026-10-27: 「每个密码请求都要我同意太麻烦了！」): a run card's «Always» now writes a vault-use grant (this conversation × the run's hosts, the grants store) instead of a command-shape row in data/vault-run.json. The old «always» rows are CARRIED into grants by the run door at its FIRST verified read — the store is marked under a key derived from the vault's DEK, so it can be judged only while the vault is unlocked (a boot is locked; an unverified row an agent could have written is never carried). This boot half counts what waits (read bounded, never trusted) so the ledger says what the upgrade found.",
+      run() {
+        const f = path.join(dataDir, 'vault-run.json');
+        let n = 0, present = false;
+        try { const st = fs.statSync(f); present = st.isFile(); if (present && st.size <= 1024 * 1024) { const d = JSON.parse(fs.readFileSync(f, 'utf-8')); n = Array.isArray(d && d.always) ? d.always.length : 0; } } catch { /* absent / unreadable: nothing waits */ }
+        const rep = { store: present, alwaysRows: n, carriedAt: n ? 'the first unlocked read of the run door (the mark verified)' : 'nothing to carry' };
+        console.log('[migrate] vault-always-to-grants:', JSON.stringify(rep));
+        return rep;
+      },
+    },
   ];
 
   /** 2026-10-grants-unify: every pre-unify who-list → rows of THE grants store (src/server/grants-migration.js). `ensure`

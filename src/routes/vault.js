@@ -38,6 +38,7 @@ const STATUS = Object.freeze({
   // lane vault-run-door: the switch and the run card's answer (people's doors)
   entry_has_its_own_door: 403, entry_unknown: 404, ask_settled: 409, ask_unknown: 404, ask_expired: 410, ask_changed: 409, bad_answer: 400,
   always_not_offered: 400, conversation_gone: 410,
+  hosts_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, not_written: 500, store_unreadable: 503, no_use_grants: 404,   // lane vault-use-grants: «谁可以用…»
   bad_scope: 400, bad_length: 400, bad_charset: 400, value_required: 400, value_in_argv: 400, // lane vault-mint-put
   bad_grant_answer: 400, // lane vault-manual-and-lock: the answer to an agent's request
   // lane vault-paste-request: a paste request's answer / a free entry (src/server/vault-paste-door.js)
@@ -371,7 +372,7 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
     if (!caller) return refusal(res, { code: 'unauthorized' });
     if (carried) return refusal(res, { code: 'value_in_request', words: 'a paste request never carries a value — the user pastes it into the box in their tray' });
     let r;
-    try { r = paste.request({ caller, words: b.words, purpose: b.purpose, into: b.into, kind: b.kind, name: b.name }); }
+    try { r = paste.request({ caller, words: b.words, purpose: b.purpose, into: b.into, kind: b.kind, name: b.name, hosts: b.hosts }); }   // hosts: lane vault-use-grants (`--host`)
     catch (e) { return refusal(res, { code: 'unfiled' }); }
     if (!r || !r.ok) return refusal(res, r || { code: 'unfiled' });
     return res.json({ ok: true, requestId: r.requestId, target: r.target, ...(r.already ? { already: r.already } : { filed: CN.filedLine('secret-request', r.requestId, OF.tray()) }), tray: OF.tray() });
@@ -394,6 +395,9 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
  * own use lines (references, purposes, times, outcomes, receipts — never a value) · a PERSON answers a request: POST
  * /api/vault/request/asks/:askId {answer: once | 8h | deny, page} → the grant row the run door honours (memory only; a lock
  * ends it) — once / 8h need this page's 验证是你 window like the switch (a grant opens an entry), deny is a click.
+ * lane vault-use-grants: A PERSON edits who may use an entry with NO card — POST /api/vault/use-grants {id, to, except, page}
+ * (the whole vault-use row: each `to` member its `hosts` and optional `until`; a widening needs this page's 验证是你 window,
+ * reveal_needs_password otherwise) · POST /api/vault/use-grants/revoke {id, principal} (one member out — a click).
  * THE THREE HOLES this door does NOT close (design §8.6 — said here, in the door's own header and on the manual): ① the child
  * runs under the agent's uid — /proc/<child>/environ and the 0600 file are readable to it while the child lives (hygiene and
  * audit, not isolation; q-040 closes it); ② a tool can send the value elsewhere — the card shows the hosts and the whole
@@ -466,6 +470,10 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
   const reauthedOf = (req, page) => !!(contents && contents.windowFacts(whoOf(req), typeof page === 'string' ? page : pageHeader(req)).open);
   app.post('/api/vault/runnable', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.setRunnable({ id: b.id, on: b.on === true, reauthed: b.on === true && reauthedOf(req, page), by: 'user' }); }));
   app.post('/api/vault/run/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; if (b.answer === 'once' && whoOf(req) === 'sign-in-off' && !reauthedOf(req, page)) return { ok: false, code: 'reveal_needs_password' }; return run.answer(String(req.params.askId), { answer: b.answer, ttl: b.ttl || undefined, reauthed: b.answer === 'always' && reauthedOf(req, page), by: 'user' }); }));
+  // lane vault-use-grants: «谁可以用…» — the entry's vault-use row (给谁 / 除了, each member its hosts and its end): a save that WIDENS
+  // (a new member, a new host, a later end, an exception taken away) needs THIS page's 验证是你 window; a narrowing and ✕ are clicks
+  app.post('/api/vault/use-grants', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; const ug = run.useGrants; if (!ug) return { ok: false, code: 'no_use_grants' }; return ug.setRow(String(b.id || ''), { to: Array.isArray(b.to) ? b.to : [], except: Array.isArray(b.except) ? b.except : [] }, { by: 'user', reauthed: reauthedOf(req, page) }); }));
+  app.post('/api/vault/use-grants/revoke', person((req) => { const b = req.body || {}; const ug = run.useGrants; if (!ug) return { ok: false, code: 'no_use_grants' }; return ug.revoke(String(b.id || ''), String(b.principal || ''), { by: 'user' }); }));
   app.post('/api/vault/request/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.answerRequest(String(req.params.askId), { answer: b.answer, reauthed: b.answer !== 'deny' && reauthedOf(req, page), by: 'user' }); }));   // lane vault-manual-and-lock: once | 8h need this page's 验证是你 (a grant opens the entry as the switch does); deny is a click
 }
 

@@ -8796,6 +8796,12 @@ button.vw-chip { cursor: pointer; }
 .vw-ak-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px 1px 8px; border: 1px solid var(--border); border-radius: 10px; color: var(--text); }
 .vw-ak-x { border: 0; background: none; color: var(--text-dim); cursor: pointer; padding: 0 4px; font: inherit; }
 .vw-ak-x:hover { color: var(--bad-text); }
+/* lane vault-use-grants: «Who may use it» — the members as the key / login chips, the door under them (the door column keeps its width) */
+.vw-use-host { display: flex; flex-direction: column; gap: 3px; }
+.vw-use .vw-use-grant { align-self: flex-start; }
+.vw-use-expired { opacity: 0.6; text-decoration: line-through; }
+.vw-use-except { color: var(--text-dim); }
+.vw-nomatch-all { margin-left: 8px; }
 .vw-ak-mint { margin-left: auto; font-weight: normal; }
 /* design q-047 L1 (lane vault-totp): a two-step code's row — 看码 → the code, its ring (the seconds left: --p) and the seconds; 用于… chips reuse .vw-ak-* */
 .vw-code { display: inline-flex; align-items: center; gap: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; font-weight: 700; letter-spacing: .1em; color: var(--text); white-space: nowrap; }

@@ -385,11 +385,11 @@ export function inboxModel(app) {
     }
     if (rec && rec.action && rec.action.type === 'vault-run-ask') {
       // lane vault-run-door (design q-043 §8.3): THE person's answer to an agent's run held on its card (cookie route; any
-      // bearer is refused human_only) — once (this run) / always (this command SHAPE for this conversation, 30 days: the
+      // bearer is refused human_only) — once (this run) / always (lane vault-use-grants: a STANDING APPROVAL — this conversation × the run's HOSTS, 30 days: the
       // second password again — 验证是你 opens FIRST, in the press's own task, never a round trip late) / deny.
       if (answer === 'always' && !revealLeftMs() && !(await askRevealPassword())) return false;
       const r = await fetchJson(`/api/vault/run/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(answer === 'always' ? revealHeaders() : {}) }, body: JSON.stringify({ answer }) });
-      if (r && r.ok) { showToast(r.outcome === 'always' ? t('Allowed for this shape for 30 days') : r.outcome === 'allowed' ? t('allowed') : t('denied')); return true; }   // `outcome` (the vault door lays its facts' `state` over an answer)
+      if (r && r.ok) { showToast(r.outcome === 'always' ? t('A standing approval: this conversation may use it for these hosts for 30 days — the Vault window lists it') : r.outcome === 'allowed' ? t('allowed') : t('denied')); return true; }   // `outcome` (the vault door lays its facts' `state` over an answer) — lane vault-use-grants: «Always» = a vault-use grant
       const code = r && r.code;
       if (code === 'reveal_needs_password') forgetReveal();
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone')

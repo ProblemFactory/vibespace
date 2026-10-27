@@ -8,7 +8,7 @@
 //     Vault window's «last used» reads the same field), through WHICH door (a store's own read is `store`, the Vault window
 //     `vault-window`, the attach child's `link-token`, a person's door by its name …), for WHICH conversation (`conv`: the
 //     session's conversation key / `job-<id>`; null for a person or the hub).
-//   · THE AUDIT LINE — `useLine` → { at, event: 'vault-use', entry, purpose, by, door, conv, actor, outcome, receipt, ip }: a
+//   · THE AUDIT LINE — `useLine` → { at, event: 'vault-use', entry, purpose, by, door, conv, actor, outcome, receipt, ip, grant }: a
 //     CLOSED key set (whatever else a door hands the writer is dropped — a value can never ride along), every field a
 //     bounded one-line string or null. Written for every use by a BEARER (`BEARERS`), allowed or refused; a person's doors
 //     keep their own lines (vault-reveal, vault-unlock-failed …) and the hub's own store reads write none (one line per read
@@ -20,6 +20,9 @@
 //   · AN AGENT'S OWN RECEIPTS (lane vault-manual-and-lock, design D4 — `vibespace-vault uses`): `usesOf(text, conv)` reads the
 //     audit file's tail back — the `vault-use` lines of ONE conversation (its `conv`), newest first, each the line's own closed
 //     fields (entry, purpose, when, door, outcome, receipt). A line never holds a value, and another conversation's are skipped.
+//   · THE COUNTS (lane vault-use-grants — the Vault window's «used 12× by 3 conversations»): `countsOf(text)` over the same tail —
+//     per entry, the uses that OPENED (outcome ok) and how many conversations made them, and the same per GRANT (`grant` = the
+//     vault-use grant's id, src/vault-use-grant.js, when a standing approval admitted the use — the run door writes it).
 // PURE: imports nothing (scripts/test-architecture.mjs PURE set).
 
 const BY = Object.freeze(['human', 'agent', 'job', 'automation', 'system']);
@@ -29,7 +32,8 @@ const CONTENTS_ENTRY = 'contents';  // the stored values as a list (the Vault wi
 const FAIL_PER_DAY = 20;            // design q-043 §2 T7: ≥ 20 failures in a day ⇒ the owner's card
 const DAY_MS = 864e5;
 const MAX_PAIRS = 200;
-const LINE_KEYS = Object.freeze(['at', 'event', 'entry', 'purpose', 'by', 'door', 'conv', 'actor', 'outcome', 'receipt', 'ip']);
+const LINE_KEYS = Object.freeze(['at', 'event', 'entry', 'purpose', 'by', 'door', 'conv', 'actor', 'outcome', 'receipt', 'ip', 'grant']);
+const GRANT_ID_RE = /^vg-[0-9a-f]{8}$/;   // lane vault-use-grants: the vault-use grant that admitted the use (src/vault-use-grant.js grantIdOf)
 const DOOR_RE = /^[a-z][a-z0-9-]{0,39}$/;
 const OUTCOME_RE = /^[a-z][a-z0-9_:-]{0,59}$/;
 const RECEIPT_RE = /^vr-[0-9a-f]{8,32}$/;
@@ -55,7 +59,7 @@ const outcomeOf = (x) => (x == null || x === true ? 'ok' : OUTCOME_RE.test(Strin
 const counts = (x) => { const o = outcomeOf(x); return !UNCOUNTED.includes(o) && !o.includes('vault_locked'); };
 
 /** THE `vault-use` AUDIT LINE — the closed key set (LINE_KEYS, in that order), never a value. */
-function useLine({ at, entry, purpose, use, actor, outcome, receipt, ip } = {}) {
+function useLine({ at, entry, purpose, use, actor, outcome, receipt, ip, grant } = {}) {
   const u = useOf(use, at);
   const line = {
     at: new Date(u.at || 0).toISOString(),
@@ -69,6 +73,7 @@ function useLine({ at, entry, purpose, use, actor, outcome, receipt, ip } = {}) 
     outcome: outcomeOf(outcome),
     receipt: RECEIPT_RE.test(String(receipt || '')) ? String(receipt) : null,
     ip: clean(ip, 64) || null,
+    grant: GRANT_ID_RE.test(String(grant || '')) ? String(grant) : null,
   };
   return Object.fromEntries(LINE_KEYS.map((k) => [k, line[k]]));
 }
@@ -139,5 +144,30 @@ function usesOf(text, conv, limit = USES_MAX) {
   }
   return out;
 }
+/** lane vault-use-grants: THE COUNTS over the audit tail `text` — `vault-use` lines that OPENED (outcome ok) → { <entry>:
+ *  { uses, convs, grants: { <grant id>: { uses, convs } } } } (`convs` = how many conversations; a line with no conversation
+ *  counts as a use only). Each line re-checked (a line the file holds is read, never trusted whole). */
+function countsOf(text) {
+  const acc = new Map();
+  for (const l of String(text == null ? '' : text).split('\n')) {
+    if (!l || l.indexOf('"vault-use"') < 0) continue;
+    let o = null;
+    try { o = JSON.parse(l); } catch { continue; }
+    if (!o || typeof o !== 'object' || o.event !== 'vault-use' || outcomeOf(o.outcome) !== 'ok') continue;
+    const entry = clean(o.entry, 200), conv = clean(o.conv, 160);
+    if (!entry) continue;
+    let e = acc.get(entry);
+    if (!e) acc.set(entry, (e = { uses: 0, convs: new Set(), grants: new Map() }));
+    e.uses++; if (conv) e.convs.add(conv);
+    if (GRANT_ID_RE.test(String(o.grant || ''))) {
+      let g = e.grants.get(o.grant);
+      if (!g) e.grants.set(o.grant, (g = { uses: 0, convs: new Set() }));
+      g.uses++; if (conv) g.convs.add(conv);
+    }
+  }
+  const out = {};
+  for (const [k, e] of acc) out[k] = { uses: e.uses, convs: e.convs.size, grants: Object.fromEntries([...e.grants].map(([id, g]) => [id, { uses: g.uses, convs: g.convs.size }])) };
+  return out;
+}
 
-module.exports = { useOf, useLine, outcomeOf, counts, entryLabel, createFailures, usesOf, BY, BEARERS, VAULT_ENTRY, CONTENTS_ENTRY, FAIL_PER_DAY, DAY_MS, LINE_KEYS, USES_MAX, RECEIPT_RE };
+module.exports = { useOf, useLine, outcomeOf, counts, entryLabel, createFailures, usesOf, countsOf, BY, BEARERS, VAULT_ENTRY, CONTENTS_ENTRY, FAIL_PER_DAY, DAY_MS, LINE_KEYS, USES_MAX, RECEIPT_RE, GRANT_ID_RE };

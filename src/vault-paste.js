@@ -19,11 +19,17 @@
  *     POST body only, straight to the writer, and is never kept anywhere else).
  *   · THE RECEIPT — at the agent's next turn: what was stored, where, and for what — never the value; or that the owner
  *     refused it (the 拒绝 press, or the item leaving the tray by ✓ / ✕ without a paste), with how long not to ask again.
+ *   · THE HOSTS AND THE DEFAULT GRANT (lane vault-use-grants, the owner 2026-10-27 「每个密码请求都要我同意太麻烦了！」): a new entry's
+ *     request may name the hosts it is for (`--host 192.168.1.1,router.lan` — host names / addresses, ≤ 8, never a
+ *     wildcard). With them, and the setting `vault.requestGrantsRequester` on (default), the card SAYS that the conversation
+ *     that asked will be allowed to use it for those hosts (the agent asked for it, the owner types it — one card he would
+ *     otherwise press «Always» on), and the paste writes that vault-use grant; the receipt tells the agent.
  */
 const IR = require('./integration-registry.js');
 const HC = require('./hidden-chars.js');
 const SS = require('./secret-shapes.js');
 const PT = require('./peer-text.js');
+const GM = require('./grant-model.js');   // lane vault-use-grants: ONE spelling of a host (hostListOf)
 
 const ACTION_TYPE = 'secret-request';
 const REQUEST_ID_RE = /^sr-[0-9a-f]{12}$/;
@@ -32,7 +38,7 @@ const REQUEST_ID_RE = /^sr-[0-9a-f]{12}$/;
 const ENTRY_PREFIX = 'secret:';
 const FREE_ENTRY_RE = /^secret:[0-9a-f]{10}$/;
 const ENTRY_FIELD = 'secret';
-const LIMITS = Object.freeze({ words: 200, purpose: 200, name: 80, note: 400, value: 8192, openPerConversation: 4, openHubWide: 64 });
+const LIMITS = Object.freeze({ words: 200, purpose: 200, name: 80, note: 400, value: 8192, openPerConversation: 4, openHubWide: 64, hosts: 8 });
 /** After a refusal the same conversation does not ask for the same place again for this long (the run door's request rule). */
 const QUIET_MS = 10 * 60e3;
 /** A free entry's kinds (src/vault-inventory.js KINDS spells them; the CLI's `apikey` is `api-key`). */
@@ -44,6 +50,8 @@ const i18nKey = (s) => s;
 /** The two card lines the request's purpose and a new entry's label ride (wordsOfItem reads them back by their keys). */
 const PURPOSE_LINE = i18nKey('What for, in the agent\'s words: {purpose}');
 const ENTRY_LINE = i18nKey('Where it goes: a new vault entry «{label}» ({kind})');
+/** lane vault-use-grants: the request box's line when the paste grants the asker (read back by its key: `grantOfItem`). */
+const GRANT_LINE = i18nKey('The conversation that asked will be allowed to use it for {hosts} without asking each time; change it in the Vault window («Who may use it…»).');
 /** The kind's words (English keys the page says in its language — the inventory's own KIND_WORDS spelling). */
 const KIND_WORDS = Object.freeze({ 'api-key': i18nKey('API key'), password: i18nKey('Password'), secret: i18nKey('Secret') });
 
@@ -67,7 +75,18 @@ const WORDS = Object.freeze({
   name_with_into: '--name labels a NEW vault entry; an Integrations field already has its name — drop --name or --into',
   value_required: 'paste the value first',
   value_too_long: `a value is at most ${LIMITS.value} characters`,
+  bad_host: `--host names where the new entry is used: host names or addresses (e.g. 192.168.1.1,router.lan), at most ${LIMITS.hosts}, comma-separated — never a wildcard`,   // lane vault-use-grants
+  hosts_with_into: '--host names where a NEW vault entry is used; an Integrations field is used by VibeSpace itself — drop --host or --into',
 });
+/** lane vault-use-grants: the request's hosts (a comma / space separated string, or a list) → the one spelling | null when
+ *  absent | false when malformed. */
+function hostsOf(raw) {
+  if (raw == null || raw === '') return null;
+  const list = Array.isArray(raw) ? raw : String(raw).split(/[\s,]+/).filter(Boolean);
+  if (!list.length) return null;
+  if (list.length > LIMITS.hosts || list.some((h) => String(h).trim() === '@entry')) return false;
+  return GM.hostListOf(list) || false;
+}
 const refuse = (code, extra = {}) => ({ ok: false, code, words: WORDS[code] || code, ...extra });
 
 /** ONE LINE of the agent's words → { ok, text } (bounded, folded to one line, a secret shape «redacted») | a refusal. */
@@ -84,9 +103,12 @@ function lineOf(raw, max, what) {
 /** THE PLACE the value goes. `into` = `<row>.<field>` (a row id may hold `:` — the field is after the LAST dot); else a
  *  free entry of `kind` labelled `name` (no name: the words, cut to the label's bound). → { ok, target } | a refusal.
  *  target = { kind: 'field', row, field, rowLabel, fieldLabel } | { kind: 'entry', entryKind, label }. */
-function targetOf({ into = null, kind = null, name = null, words = '' } = {}) {
+function targetOf({ into = null, kind = null, name = null, words = '', hosts = null } = {}) {
   const hasInto = into != null && String(into).trim() !== '', hasKind = kind != null && String(kind).trim() !== '';
   if (hasInto && hasKind) return refuse('bad_target');
+  const hs = hostsOf(hosts);   // lane vault-use-grants
+  if (hs === false) return refuse('bad_host');
+  if (hasInto && hs) return refuse('hosts_with_into');
   if (hasInto) {
     if (name != null && String(name).trim() !== '') return refuse('name_with_into');
     const s = String(into).trim();
@@ -106,16 +128,16 @@ function targetOf({ into = null, kind = null, name = null, words = '' } = {}) {
   const hasName = name != null && String(name).trim() !== '';
   const l = lineOf(hasName ? name : String(words || '').slice(0, LIMITS.name), LIMITS.name, 'name');
   if (!l.ok) return l;
-  return { ok: true, target: { kind: 'entry', entryKind: k, label: l.text } };
+  return { ok: true, target: { kind: 'entry', entryKind: k, label: l.text, hosts: hs || [] } };
 }
 
 /** THE ASK as the agent sent it → { ok, words, purpose, target } | a refusal (its code + its words). */
-function requestVerdict({ words, purpose, into, kind, name } = {}) {
+function requestVerdict({ words, purpose, into, kind, name, hosts } = {}) {
   const w = lineOf(words, LIMITS.words, 'words');
   if (!w.ok) return w;
   const p = lineOf(purpose, LIMITS.purpose, 'purpose');
   if (!p.ok) return p;
-  const t = targetOf({ into, kind, name, words: w.text });
+  const t = targetOf({ into, kind, name, words: w.text, hosts });
   if (!t.ok) return t;
   return { ok: true, words: w.text, purpose: p.text, target: t.target };
 }
@@ -136,14 +158,14 @@ function wordsOfItem(it) {
  *  → target | null (a cleared entry request has no label left: no target). */
 function targetOfAction(a, { label = '' } = {}) {
   if (!a || a.type !== ACTION_TYPE || !REQUEST_ID_RE.test(String(a.requestId || ''))) return null;
-  const t = a.into ? targetOf({ into: a.into }) : label ? targetOf({ kind: a.kind || 'secret', name: label }) : { ok: false };
+  const t = a.into ? targetOf({ into: a.into }) : label ? targetOf({ kind: a.kind || 'secret', name: label, hosts: a.hosts || null }) : { ok: false };   // hosts: lane vault-use-grants (the action's space-joined scalar)
   return t.ok ? t.target : null;
 }
 
 /** THE CARD: the item's text (the English dedupe key) + its words as lines (i18n keys; a row's / a field's / a kind's
  *  label rides as WORDS `{key}` — the client says it in its language). `replaces` = the field holds a value of the
  *  owner's now (the paste replaces it — said). */
-function cardOf({ who, words, purpose, target, replaces = false }) {
+function cardOf({ who, words, purpose, target, replaces = false, grant = null }) {
   const where = target.kind === 'field'
     ? { key: i18nKey('Where it goes: {row} › {field} on the Integrations card ({id})'), params: { row: { key: target.rowLabel }, field: { key: target.fieldLabel }, id: intoOf(target) } }
     : { key: ENTRY_LINE, params: { label: target.label, kind: { key: KIND_WORDS[target.entryKind] || 'Secret' } } };
@@ -152,6 +174,8 @@ function cardOf({ who, words, purpose, target, replaces = false }) {
     { key: PURPOSE_LINE, params: { purpose } },
     where,
     ...(replaces ? [{ key: i18nKey('It replaces the value saved there now.') }] : []),
+    // lane vault-use-grants: THE DEFAULT, said where the owner pastes — the conversation that asked × the hosts it named
+    ...(target.kind === 'entry' && target.hosts && target.hosts.length ? [grant ? { key: GRANT_LINE, params: { hosts: target.hosts.join(', ') } } : { key: i18nKey('For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).'), params: { hosts: target.hosts.join(', ') } }] : []),
     { key: i18nKey('Paste it below and press Save to vault — it goes straight into the vault. The agent is told only that it is stored and where, never the value.') },
   ];
   const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => { const v = l.params && l.params[k]; return v == null ? m : typeof v === 'object' ? String(v.key) : String(v); });
@@ -180,7 +204,9 @@ function receiptText(o = {}) {
   if (o.outcome === 'stored') {
     const rc = o.receipt ? ` Receipt ${piece(o.receipt, 32)}.` : '';
     if (t.kind === 'field') return `${head}: STORED — «${piece(o.words)}» is saved in ${piece(intoOf(t), 200)} (${piece(t.rowLabel, 80)} › ${piece(t.fieldLabel, 80)}) for: ${piece(o.purpose)}. VibeSpace uses it there itself; you never see the value — never ask for it in the chat.${rc}`;
-    const use = o.grantHours ? `This conversation may use it in a command for ${Number(o.grantHours)} hours (a vault lock ends it; a new kind of command still shows the user its card): vibespace-vault run --env NAME=${piece(o.ref, 120)} -- <command>.` : `To use it in a command, ask for it: vibespace-vault request ${piece(o.ref, 120)} --for "<what you will run>".`;
+    // lane vault-use-grants: the default grant landed ⇒ a STANDING approval for the hosts the request named
+    const standing = o.standing && Array.isArray(o.standing.hosts) && o.standing.hosts.length ? `The user allowed this conversation to use it for ${piece(o.standing.hosts.join(', '), 300)} without asking (a standing approval they can change in the Vault window): vibespace-vault run --env NAME=${piece(o.ref, 120)} -- <command>. Another host still shows them its card.` : null;
+    const use = standing || (o.grantHours ? `This conversation may use it in a command for ${Number(o.grantHours)} hours (a vault lock ends it; a new kind of command still shows the user its card): vibespace-vault run --env NAME=${piece(o.ref, 120)} -- <command>.` : `To use it in a command, ask for it: vibespace-vault request ${piece(o.ref, 120)} --for "<what you will run>".`);
     return `${head}: STORED — «${piece(t.label, 80)}» (${KIND_WORDS[t.entryKind] || 'Secret'}) is the vault entry ${piece(o.ref, 120)} for: ${piece(o.purpose)}. You never see the value. ${use}${rc}`;
   }
   if (o.outcome === 'withdrawn') return `${head}: WITHDRAWN — the user locked the vault, which ends every open request («${piece(o.words)}»). Nothing was stored. Ask again once the vault is unlocked (vibespace-vault status says so) — do not ask the user to unlock it.`;
@@ -212,6 +238,6 @@ function valueOf(raw) {
 }
 
 module.exports = {
-  ACTION_TYPE, REQUEST_ID_RE, ENTRY_PREFIX, FREE_ENTRY_RE, ENTRY_FIELD, LIMITS, QUIET_MS, ENTRY_KINDS, KIND_WORDS, WORDS,
+  ACTION_TYPE, REQUEST_ID_RE, ENTRY_PREFIX, FREE_ENTRY_RE, ENTRY_FIELD, LIMITS, QUIET_MS, ENTRY_KINDS, KIND_WORDS, WORDS, GRANT_LINE, hostsOf,
   requestVerdict, targetOf, targetOfAction, wordsOfItem, intoOf, cardOf, receiptText, entryMetaOf, valueOf,
 };

@@ -46,11 +46,13 @@ const USAGE = [
   '                             ask the user for an entry, with what you will run with it: ONE question in their For you tray;',
   '                             nothing waits on it — `uses` shows their answer (once: your next run · 8h: every run for 8 hours)',
   '  vibespace-vault request "<what you need, in the user\'s words>" --purpose "<what you will do with it>"',
-  '                             [--into <row>.<field> | --kind api-key|password|secret] [--name <label>]',
+  '                             [--into <row>.<field> | --kind api-key|password|secret] [--name <label>] [--host <h>[,<h>…]]',
   '                             ask the user to PASTE a secret you do not have (a password, an API key): ONE item in their For you',
   '                             tray with a masked box — the value goes straight into the vault, never to you. --into = an',
   '                             Integrations field (e.g. llm.apiKey — VibeSpace uses it there itself); otherwise a NEW vault entry',
-  '                             (--kind, --name = its label). Nothing waits on it: your next turn says «stored» (where) or «refused».',
+  '                             (--kind, --name = its label; --host = where you will use it, e.g. 192.168.1.1 — then, unless the user',
+  '                             turned it off, THIS conversation may use it for those hosts with no card each time; the card says so).',
+  '                             Nothing waits on it: your next turn says «stored» (where) or «refused».',
   '                             Never ask for a secret in the chat — this is the way.',
   '  vibespace-vault uses       what THIS conversation holds: its grants, its open requests and its own uses of the vault',
   '                             (entry, purpose, when, outcome, receipt) — never a value',
@@ -122,10 +124,10 @@ async function callCoded(method, route, body, verb) {
 }
 
 async function requestCmd(rest) {
-  const { out, positional } = parseFlags(rest, { '--for': 'value', '--purpose': 'value', '--into': 'value', '--kind': 'value', '--name': 'value' });
+  const { out, positional } = parseFlags(rest, { '--for': 'value', '--purpose': 'value', '--into': 'value', '--kind': 'value', '--name': 'value', '--host': 'value' });
   // lane vault-paste-request: words (not a vault:// reference) ⇒ the PASTE shape — the user pastes a secret you do not have
   if (positional.length === 1 && !positional[0].startsWith('vault://')) return pasteCmd(positional[0], out);
-  if (out['--into'] !== undefined || out['--kind'] !== undefined || out['--name'] !== undefined) { console.error('vibespace-vault: --into / --kind / --name belong to a paste request: vibespace-vault request "<what you need>" --purpose "<why>" — for a stored entry it is: request <vault://…> --for "<purpose>"'); process.exit(2); }
+  if (out['--into'] !== undefined || out['--kind'] !== undefined || out['--name'] !== undefined || out['--host'] !== undefined) { console.error('vibespace-vault: --into / --kind / --name / --host belong to a paste request: vibespace-vault request "<what you need>" --purpose "<why>" — for a stored entry it is: request <vault://…> --for "<purpose>"'); process.exit(2); }
   const why = out['--for'] !== undefined ? out['--for'] : out['--purpose'];
   if (positional.length !== 1 || why === undefined) { console.error('vibespace-vault: request <vault://…> --for "<what you will run with it, and why>"  ·  or ask the user to paste one: request "<what>" --purpose "<why>"'); process.exit(2); }
   const d = await callCoded('POST', '/api/agent/vault/request', { entry: positional[0], purpose: why }, 'request');
@@ -146,9 +148,10 @@ async function pasteCmd(words, out) {
   if (out['--into'] !== undefined) body.into = out['--into'];
   if (out['--kind'] !== undefined) body.kind = out['--kind'];
   if (out['--name'] !== undefined) body.name = out['--name'];
+  if (out['--host'] !== undefined) body.hosts = out['--host'];   // lane vault-use-grants: the hub judges the list (one spelling)
   const d = await callCoded('POST', '/api/agent/vault/secret-request', body, 'request');
   const t = d.target || {};
-  const where = t.into ? `${t.into} (${t.row} › ${t.field}) — VibeSpace uses it there itself` : `a new vault entry «${t.label}» (${t.kind})`;
+  const where = t.into ? `${t.into} (${t.row} › ${t.field}) — VibeSpace uses it there itself` : `a new vault entry «${t.label}» (${t.kind})${t.hosts && t.hosts.length ? ` for ${t.hosts.join(', ')}` : ''}`;
   const tray = (d.tray && (d.tray.phrase || d.tray.name)) || 'their For you tray';
   if (d.already === 'open') console.log(`already asked (${d.requestId}) — the paste box still waits in ${tray}; nothing waits on it`);
   else if (d.filed) { console.log(`asked the user to paste it — a masked paste box; nothing waits on it`); console.log(d.filed); }   // lane chat-needs-you-card: the hub's line (the card + the tray)
@@ -268,7 +271,7 @@ async function main() {
   if (cmd === 'list') {
     const d = await call('GET', '/api/agent/vault/runnable');
     if (!d.entries || !d.entries.length) { console.log('no stored secret is open for your runs — ask the user for one with its purpose: vibespace-vault request <vault://…> --for "<why>" (they open it in ⚙ System ▸ Vault…, or grant it to you from For you)'); return; }
-    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : ''}`);
+    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : e.by === 'standing' ? `  yours to use with no card for ${(e.hosts || []).join(', ')}${e.until ? ` until ${whenAt(e.until)}` : ''} (${e.grant})` : ''}`);   // standing: lane vault-use-grants
     return;
   }
   if (cmd === 'uses') return usesCmd();

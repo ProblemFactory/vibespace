@@ -31,7 +31,8 @@ import { showUnlock, showSetup, showChange, vaultFacts, onVaultFacts, refreshVau
 import { revealLeftMs, revealHeaders, onRevealChange, noteRevealLeft, forgetReveal, endReveal, revealValue, revealWords, askRevealPassword } from './vault-reveal.js'; // r2: THE PAGE's window (its secret in page memory)
 import { removeAccount, showReauthAccountDialog } from './channel-account-dialogs.js';
 import { passkeyDeleteWords } from './browser-panel-model.js';
-import { KIND_WORDS, countdownText, CLIPBOARD_CLEAR_MS, PURPOSES, purposeOf, PROVENANCES, provenanceOf, PROVENANCE_FILTERS, stateChipsOf, viewOf, bandItemsOf, bandDoorsOf } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
+import { KIND_WORDS, countdownText, CLIPBOARD_CLEAR_MS, PURPOSES, purposeOf, PROVENANCES, provenanceOf, PROVENANCE_FILTERS, stateChipsOf, viewOf, bandItemsOf, bandDoorsOf, SEARCHED_FIELDS } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
+import { useExtras, useSigOf } from './vault-use-row.js'; // lane vault-use-grants: «Who may use it» — the members (hosts, end, uses) + 「Who may use it…」
 import { loadAutomation, automationExtras, showMintDialog } from './vault-automation.js'; // design q-046: «Automation keys» — mint, grant, revoke (never a value)
 import { loadLogins, loginExtras, showLoginAddDialog } from './vault-login-row.js'; // lane browser-login: a website login's row — 用于… (this account / any account on this site / any site) + 网站登录…
 import { loadTotp, totpExtras, showTotpAddDialog } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…; lane vault-totp-add: 添加… ▸ 两步验证…
@@ -73,7 +74,7 @@ const whenShort = (ms) => (ms ? new Date(ms).toLocaleString(undefined, { month: 
 const WORDED = new Set(['integrations', 'secrets']);
 const labelWord = (row) => (WORDED.has(row.store) ? String(row.label).split(' · ').map((p, i) => (i ? p : t(p))).join(' · ') : row.label);
 const purposeWord = (id) => t((PURPOSES.find((p) => p.id === id) || { label: 'Other' }).label);
-const PROV_ICON = { me: 'person', scan: 'qr', 'hub-mint': 'key', 'agent-mint': 'bot', 'agent-put': 'bot', system: 'lock' };
+const PROV_ICON = { me: 'person', scan: 'qr', 'hub-mint': 'key', 'agent-mint': 'bot', 'agent-put': 'bot', system: 'lock', request: 'person' };
 /** The provenance chip's help — where the value came from (a fact of its making; a later reveal does not change it). */
 const PROV_HELP = {
   me: () => t('A person stored it — in this window, a card or Settings'),
@@ -82,8 +83,11 @@ const PROV_HELP = {
   'agent-mint': () => t('An agent had VibeSpace make it — the agent never saw the value'),
   'agent-put': () => t('An agent stored a value it had seen — rotate it'),
   system: () => t('VibeSpace uses it itself — it is never shown'),
+  request: () => t('You typed it in at an agent\'s request — the conversation that asked is named'),   // lane vault-use-grants
 };
 const provWord = (id) => t((PROVENANCES.find((p) => p.id === id) || PROVENANCES[0]).label);
+/** lane vault-use-grants: a ROW's provenance words — a request-made entry names the conversation that asked. */
+const provWordOf = (row) => { const id = provenanceOf(row) || 'me'; return id === 'request' ? t('Filled by you · asked for by {who}', { who: (row.askedBy && row.askedBy.name) || t('an agent') }) : provWord(id); };
 /** THE REVEAL DOOR'S HELP (the owner's confusion note 2026-10-20): why a value is shown is the 「显示」 button's own help. */
 const showHelp = (row) => (row.store === 'automation'
   ? t('Show the key\'s value — only to hand it to an outside system; agents inside use it by grant and never need to see it')
@@ -340,7 +344,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   // a row's signature leaves its last use out: a reveal moves the store key's last use, and an open value must survive the
   // next refresh — the 「最近使用」 cell is patched in place instead
   const loginOf = (row) => (isLogin(row) && st.logins ? ((st.logins.entries || []).find((e) => e.name === row.entry) || null) : null);   // lane browser-login: a web login's grant chips are part of its row's facts
-  const sigOf = (row) => JSON.stringify([{ ...row, lastUsed: null }, autoOf(row), row.store === 'automation' ? !!st.auto : 0, loginOf(row)]);
+  const sigOf = (row) => JSON.stringify([{ ...row, lastUsed: null, run: row.run ? { ...row.run, use: !!row.run.use } : row.run }, autoOf(row), row.store === 'automation' ? !!st.auto : 0, loginOf(row)]);   // lane vault-use-grants: a member moving patches the row's «Who may use it» box in place (an open value stays open)
   // lane vault-key-row-compact: an automation key's 最近使用 is its last USE by a conversation (the head's one — the old extra line went)
   const keyUsed = (row) => { const k = autoOf(row); return k ? (k.lastUsedAt ? whenShort(k.lastUsedAt) : t('Never used')) : null; };
   const usedText = (row) => keyUsed(row) ?? (row.lastUsed ? (row.lastUsed.by === 'human' ? t('{when} · you', { when: whenShort(row.lastUsed.at) }) : t('{when} · VibeSpace', { when: whenShort(row.lastUsed.at) })) : '');
@@ -373,6 +377,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     meta.push(kindWord(row.kind));
     if (!(row.store === 'secrets' && row.size === 'unknown')) meta.push(t('length: {size}', { size: (SIZE_WORDS[row.size] || SIZE_WORDS.unknown)() }));   // a hub secret: names and dates only
     if (row.createdAt) meta.push(t('saved {when}', { when: whenShort(row.createdAt) }));
+    if (Array.isArray(row.hosts) && row.hosts.length) meta.push(t('for {hosts}', { hosts: row.hosts.join(', ') }));   // lane vault-use-grants: the hosts its request named
     // lane vault-key-row-compact: an automation key's head is ONE line — its kind is the chip and a minted value's length says
     // nothing, so the meta line goes; the name's title keeps when it was made
     if (row.store === 'automation') label.title = row.createdAt ? `${labelWord(row)} · ${t('saved {when}', { when: whenText(row.createdAt) })}` : labelWord(row);
@@ -382,8 +387,8 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     chips.append(vwEl('span', 'vw-chip vw-chip-kind', kindWord(row.kind)));
     const pc = vwEl('span', `vw-chip vw-chip-prov vw-prov-${prov}`);
     pc.dataset.prov = prov; pc.title = PROV_HELP[prov] ? PROV_HELP[prov]() : '';
-    pc.append(glyph(PROV_ICON[prov] || 'person', 11), vwEl('span', 'vw-chip-words', provWord(prov)));   // lane vault-key-row-compact: the words in a span (a phone's key row shows the glyph; aria-label keeps them)
-    pc.setAttribute('aria-label', provWord(prov));
+    pc.append(glyph(PROV_ICON[prov] || 'person', 11), vwEl('span', 'vw-chip-words', provWordOf(row)));   // lane vault-key-row-compact: the words in a span (a phone's key row shows the glyph; aria-label keeps them)
+    pc.setAttribute('aria-label', provWordOf(row));
     chips.append(pc);
     for (const c of stateChipsOf(row, Date.now())) { const s = vwEl('span', 'vw-chip vw-chip-state'); s.dataset.state = c.id; s.append(glyph('warn', 11), document.createTextNode(stateWord(c))); chips.append(s); }
     const used = vwEl('div', 'vw-used', usedText(row));
@@ -418,6 +423,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     const doors = vwEl('div', 'vw-doors');
     let wide = null;   // lane vault-key-row-compact: an automation key's head chips count, its limits line + grants fold sit UNDER the head (full width)
     if (row.store === 'automation' && st.auto) { const ex = automationExtras(row, st.auto, { refresh }); chips.append(...(ex.chips || [])); wide = ex.box; doors.append(...ex.doors); }
+    if (row.run && row.run.use) { const ux = useExtras(row, { app, refresh }); main.append(ux.box); doors.append(...ux.doors); x.use = ux; x.useSig = useSigOf(row); }   // lane vault-use-grants: who may use it with no card
     if (totpTx) { main.append(totpTx.box); doors.append(...totpTx.doors); }   // design q-047 L1: the code's grant chips + 用于…
     if (isLogin(row) && st.logins) { const lx = loginExtras(row, st.logins, { refresh, show }); main.append(lx.box); doors.append(...lx.doors); }   // lane browser-login: who may have it filled + 用于…
     if (row.doors && row.doors.rotate) { const b = btnEl(t('Renew…'), 'vw-renew'); b.onclick = () => doRenew(row); doors.append(b); }
@@ -440,7 +446,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     for (const [id, x] of rowEls) if (!live.has(id)) { x.stopCode?.(); hideValue(x); x.el.remove(); rowEls.delete(id); }
     for (const row of rows) {
       const old = rowEls.get(row.id);
-      if (old && old.sig === sigOf(row)) { old.row = row; const u = usedText(row); if (old.used.textContent !== u) { old.used.textContent = u; old.used.title = usedHelp(row); } continue; }
+      if (old && old.sig === sigOf(row)) { old.row = row; const u = usedText(row); if (old.used.textContent !== u) { old.used.textContent = u; old.used.title = usedHelp(row); } if (old.use && old.useSig !== useSigOf(row)) { old.use.redraw(row); old.useSig = useSigOf(row); } continue; }
       if (old) { old.stopCode?.(); hideValue(old); old.el.remove(); }
       rowEls.set(row.id, rowFor(row));
     }
@@ -454,7 +460,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
     headEls.set(id, { el: h, n, mint: null });
     return headEls.get(id);
   }
-  const wordsOf = (r) => [kindWord(r.kind), purposeWord(purposeOf(r)), provWord(provenanceOf(r)), labelWord(r)];
+  const wordsOf = (r) => [kindWord(r.kind), purposeWord(purposeOf(r)), provWordOf(r), labelWord(r)];
   /** THE VIEW → the rail, the group heads and the rows in place (nodes MOVED, never rebuilt). */
   function place() {
     const d = st.data;
@@ -475,11 +481,24 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
       if (!g.rows.length) { want.push(emptyEl(t('Nothing stored here'), `empty-${g.id}`)); continue; }
       for (const r of g.rows) { const x = rowEls.get(r.id); if (x) want.push(x.el); }
     }
-    if (!v.rows.length && filtered) want.push(emptyEl(st.q ? t('No stored value matches “{q}”', { q: st.q }) : t('No stored value matches these filters'), 'empty-match'));
+    if (!v.rows.length && filtered) want.push(st.q ? noMatchEl(v) : emptyEl(t('No stored value matches these filters'), 'empty-match'));
     else if (!v.rows.length && st.purpose === 'all') want.push(emptyEl(t('Nothing stored here'), 'empty-all'));
     reconcile(list, want);
     railCounts(v.counts);
     if (st.focus) { const f = st.focus; st.focus = null; focusRow(f); }
+  }
+  // lane vault-use-grants: «no match» NAMES what was searched — the fields, and the purpose when one is picked (a value
+  // under another purpose is one press away: 「Search all」) — the owner's «Unifi» answered nothing while the rail stood elsewhere
+  let noMatch = null;
+  function noMatchEl(v) {
+    if (!noMatch) { noMatch = { el: vwEl('div', 'vw-empty vw-nomatch'), txt: vwEl('span', 'vw-nomatch-text'), all: btnEl(t('Search all'), 'vw-nomatch-all') }; noMatch.el.dataset.key = 'empty-match'; noMatch.all.onclick = () => { st.purpose = 'all'; place(); }; noMatch.el.append(noMatch.txt, noMatch.all); }
+    const fields = SEARCHED_FIELDS.map((f) => t(f)).join(', ');
+    const elsewhere = st.purpose !== 'all' ? (v.counts && v.counts.all) || 0 : 0;
+    const text = st.purpose === 'all' ? t('No stored value matches “{q}” — searched: {fields}', { q: st.q, fields })
+      : t('No stored value matches “{q}” in «{purpose}» — searched: {fields}', { q: st.q, purpose: purposeWord(st.purpose), fields }) + (elsewhere ? ' · ' + t('{n} match under other purposes', { n: elsewhere }) : '');
+    if (noMatch.txt.textContent !== text) noMatch.txt.textContent = text;
+    noMatch.all.hidden = st.purpose === 'all';
+    return noMatch.el;
   }
   const empties = new Map();
   function emptyEl(text, key) { let e = empties.get(key); if (!e) { e = vwEl('div', 'vw-empty'); e.dataset.key = key; empties.set(key, e); } if (e.textContent !== text) e.textContent = text; return e; }
@@ -686,7 +705,19 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   };
   hideAllB.onclick = () => { hideAll(); drawTimer(); };
   // a lock anywhere (another tab, an agent's lock, the idle lock) hides every value at once
+  // lane vault-use-grants (the owner 2026-10-27 «我现在完全无法在 vault 里看到刚才建立的密码» — measured: an OPEN window learnt nothing
+  // until it was reopened): the vault's ONE notify (`vault-contents`, a counter — a paste, mint / put, a delete, a grant, in this
+  // tab or any other client) ⇒ the list read again and PATCHED in place (keyed rows: the search box, the scroll and an open
+  // value stay; a row the search now matches shows, the counts and the «N stored values» line follow). One read at a time.
+  let contentsDue = null, contentsBusy = false, contentsAgain = false;
+  const contentsMoved = () => {
+    if (st.closed || !st.data || st.data.state === 'locked') return;
+    if (contentsBusy) { contentsAgain = true; return; }
+    clearTimeout(contentsDue);
+    contentsDue = setTimeout(async () => { contentsBusy = true; try { await refresh(); } finally { contentsBusy = false; if (contentsAgain && !st.closed) { contentsAgain = false; contentsMoved(); } } }, 120);
+  };
   const off = app.ws?.onGlobal?.((msg) => {
+    if (msg && msg.type === 'vault-contents') { contentsMoved(); return; }
     if (!msg || msg.type !== 'vault-state' || st.closed) return;
     if (msg.state !== 'unlocked') { if (st.data && st.data.state !== msg.state) lockedNow(); else { forgetReveal(); hideAll(); drawTimer(); } }
     else if (st.data && st.data.state !== 'unlocked') refresh();
@@ -694,6 +725,7 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   const offFacts = onVaultFacts(() => { if (!st.closed) hd.draw(); });
   sig?.addEventListener('abort', () => {
     st.closed = true;
+    clearTimeout(contentsDue);   // lane vault-use-grants
     offFacts();
     hideAll();
     clearInterval(tick);

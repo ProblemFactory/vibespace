@@ -11046,4 +11046,50 @@ export default {
   "you replied": "返信済み",
   "approved": "承認済み",
   "withdrawn by the agent": "エージェントが取り下げ",
+  "As each has it now": "それぞれ今の設定のまま", // lane vault-use-grants
+  "No end": "期限なし", // lane vault-use-grants
+  "8 hours": "8 時間", // lane vault-use-grants
+  "the hosts it was stored for ({hosts})": "保存時に指定したホスト（{hosts}）", // lane vault-use-grants
+  "Who may use it…": "誰が使えるか…", // lane vault-use-grants
+  "Let a conversation, a Task Group or all agents run commands with it for the hosts you name — no card each time. Another host still asks you.": "会話・タスクグループ・すべてのエージェントに、指定したホストでこれを使ってコマンドを実行させます——毎回カードは出ません。別のホストは引き続き確認します。", // lane vault-use-grants
+  "Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.": "「誰が使えるか」を読み取れません——そのまま拒否します（広く解釈しません）。保存し直すと直ります。", // lane vault-use-grants
+  "Used with no card by:": "カードなしで使用：", // lane vault-use-grants
+  "used {n}×": "{n} 回使用", // lane vault-use-grants
+  "until {when}": "{when} まで", // lane vault-use-grants
+  "Take this back": "取り消す", // lane vault-use-grants
+  "except {name}": "{name} を除く", // lane vault-use-grants
+  "used {n}× by {m} conversations": "{m} 件の会話で {n} 回使用", // lane vault-use-grants
+  "Who may use «{name}»": "「{name}」を誰が使えるか", // lane vault-use-grants
+  "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.": "下のホスト向けなら、毎回カードなしでこれを使ってコマンドを実行できます（vibespace-vault run）。値そのものは見えません。別のホストや、送り先を判断できないコマンド（シェル、スクリプト）は引き続き確認します。", // lane vault-use-grants
+  "Who may use it": "誰が使えるか", // lane vault-use-grants
+  "Who": "誰に", // lane vault-use-grants
+  "For which hosts": "どのホスト向けか", // lane vault-use-grants
+  "The hosts it was stored for ({hosts})": "保存時に指定したホスト（{hosts}）", // lane vault-use-grants
+  "Each keeps its own hosts — or type hosts for all": "それぞれ自分のホストのまま——または全員分のホストを入力", // lane vault-use-grants
+  "Host names or addresses, e.g. 192.168.1.1, router.lan": "ホスト名またはアドレス（例：192.168.1.1、router.lan）", // lane vault-use-grants
+  "Until": "期限", // lane vault-use-grants
+  "Name the hosts it may be used for — a host name or address each (never «any host»)": "使えるホストを指定してください——ホスト名かアドレスを 1 つずつ（「任意のホスト」は不可）", // lane vault-use-grants
+  "Saved — they use it with no card for those hosts": "保存しました——そのホスト向けならカードなしで使えます", // lane vault-use-grants
+  "Saved — nobody uses it without a card": "保存しました——カードなしで使える人はいません", // lane vault-use-grants
+  "A host is a host name or address (no wildcard, no address with a path)": "ホストはホスト名かアドレスです（ワイルドカードやパス付きは不可）", // lane vault-use-grants
+  "You typed it in at an agent's request — the conversation that asked is named": "エージェントの依頼であなたが入力しました——依頼した会話を表示しています", // lane vault-use-grants
+  "Filled by you · asked for by {who}": "あなたが入力 · {who} の依頼", // lane vault-use-grants
+  "for {hosts}": "{hosts} 向け", // lane vault-use-grants
+  "Search all": "すべてを検索", // lane vault-use-grants
+  "No stored value matches “{q}” — searched: {fields}": "「{q}」に一致する保存値はありません——検索対象：{fields}", // lane vault-use-grants
+  "No stored value matches “{q}” in «{purpose}» — searched: {fields}": "「{purpose}」に「{q}」に一致する保存値はありません——検索対象：{fields}", // lane vault-use-grants
+  "{n} match under other purposes": "ほかの用途に {n} 件一致", // lane vault-use-grants
+  "names": "名前", // lane vault-use-grants
+  "kinds": "種類", // lane vault-use-grants
+  "purposes": "用途", // lane vault-use-grants
+  "hosts": "ホスト", // lane vault-use-grants
+  "where they came from": "出どころ", // lane vault-use-grants
+  "ids": "ID", // lane vault-use-grants
+  "Always let this conversation use it (these hosts)": "この会話に常に使わせる（このホスト）", // lane vault-use-grants
+  "A standing approval: this conversation may use it for these hosts for 30 days — the Vault window lists it": "常設の許可：この会話は 30 日間このホスト向けに使えます——保管庫ウィンドウに表示されます", // lane vault-use-grants
+  "A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first": "常設の許可：この会話は 30 日間、このホスト向けならこれらの秘密でコマンドを確認なしに実行できます——保管庫ウィンドウに表示され、取り消せます。先に第二パスワードを求めます", // lane vault-use-grants
+  "The conversation that asked will be allowed to use it for {hosts} without asking each time; change it in the Vault window («Who may use it…»).": "依頼した会話は {hosts} 向けに毎回確認なしで使えるようになります。保管庫ウィンドウ（「誰が使えるか…」）で変更できます。", // lane vault-use-grants
+  "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用途：{hosts}——保管庫ウィンドウのその行（「誰が使えるか…」）で許可するまで、依頼した会話は使えません。", // lane vault-use-grants
+  "A pasted secret may be used by the conversation that asked for it": "貼り付けた秘密を、依頼した会話が使えるようにする", // lane vault-use-grants
+  "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it for those hosts without a card each time — the request box says so before you paste, and the Vault window's «Who may use it…» changes it or takes it back. OFF: it may use it for 8 hours, and every new kind of command asks you first.": "エージェントが秘密の貼り付けを依頼し、使うホストを指定した場合、依頼した会話はそのホスト向けに毎回カードなしで使えます——貼り付ける前に依頼ボックスがそう伝え、保管庫ウィンドウの「誰が使えるか…」で変更・取り消しできます。オフ：8 時間だけ使え、新しい種類のコマンドは毎回先に確認します。", // lane vault-use-grants
 };

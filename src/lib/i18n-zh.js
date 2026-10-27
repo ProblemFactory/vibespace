@@ -11047,4 +11047,50 @@ export default {
   "you replied": "你已回复",
   "approved": "已批准",
   "withdrawn by the agent": "已被 agent 撤回",
+  "As each has it now": "各自保持现有设置", // lane vault-use-grants
+  "No end": "不设期限", // lane vault-use-grants
+  "8 hours": "8 小时", // lane vault-use-grants
+  "the hosts it was stored for ({hosts})": "保存时指定的主机（{hosts}）", // lane vault-use-grants
+  "Who may use it…": "谁可以用…", // lane vault-use-grants
+  "Let a conversation, a Task Group or all agents run commands with it for the hosts you name — no card each time. Another host still asks you.": "让某个对话、任务组或所有 agent 在你指定的主机上用它运行命令——不再每次弹卡片。其他主机仍会问你。", // lane vault-use-grants
+  "Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.": "无法读取「谁可以用」——按原样拒绝（绝不放宽解读）。重新保存即可修复。", // lane vault-use-grants
+  "Used with no card by:": "无需卡片即可使用：", // lane vault-use-grants
+  "used {n}×": "已用 {n} 次", // lane vault-use-grants
+  "until {when}": "至 {when}", // lane vault-use-grants
+  "Take this back": "收回", // lane vault-use-grants
+  "except {name}": "除了 {name}", // lane vault-use-grants
+  "used {n}× by {m} conversations": "已被 {m} 个对话使用 {n} 次", // lane vault-use-grants
+  "Who may use «{name}»": "谁可以用「{name}」", // lane vault-use-grants
+  "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.": "他们可以用它运行命令（vibespace-vault run），发往下面的主机时不再每次弹卡片；他们永远看不到它。其他主机，或无法判断发往何处的命令（shell、脚本），仍会问你。", // lane vault-use-grants
+  "Who may use it": "谁可以用", // lane vault-use-grants
+  "Who": "给谁", // lane vault-use-grants
+  "For which hosts": "用于哪些主机", // lane vault-use-grants
+  "The hosts it was stored for ({hosts})": "保存时指定的主机（{hosts}）", // lane vault-use-grants
+  "Each keeps its own hosts — or type hosts for all": "各自保留自己的主机——或输入主机统一设置", // lane vault-use-grants
+  "Host names or addresses, e.g. 192.168.1.1, router.lan": "主机名或地址，例如 192.168.1.1、router.lan", // lane vault-use-grants
+  "Until": "期限", // lane vault-use-grants
+  "Name the hosts it may be used for — a host name or address each (never «any host»)": "请写明可用于哪些主机——每个写一个主机名或地址（不能是「任意主机」）", // lane vault-use-grants
+  "Saved — they use it with no card for those hosts": "已保存——他们用于这些主机时不再弹卡片", // lane vault-use-grants
+  "Saved — nobody uses it without a card": "已保存——现在没有人可以免卡片使用", // lane vault-use-grants
+  "A host is a host name or address (no wildcard, no address with a path)": "主机是主机名或地址（不能用通配符，也不能带路径）", // lane vault-use-grants
+  "You typed it in at an agent's request — the conversation that asked is named": "你应 agent 的请求填写的——注明了发起请求的对话", // lane vault-use-grants
+  "Filled by you · asked for by {who}": "你填写的 · 应 {who} 的请求", // lane vault-use-grants
+  "for {hosts}": "用于 {hosts}", // lane vault-use-grants
+  "Search all": "搜索全部", // lane vault-use-grants
+  "No stored value matches “{q}” — searched: {fields}": "没有与「{q}」匹配的存储值——已搜索：{fields}", // lane vault-use-grants
+  "No stored value matches “{q}” in «{purpose}» — searched: {fields}": "「{purpose}」中没有与「{q}」匹配的存储值——已搜索：{fields}", // lane vault-use-grants
+  "{n} match under other purposes": "其他用途下有 {n} 个匹配", // lane vault-use-grants
+  "names": "名称", // lane vault-use-grants
+  "kinds": "类型", // lane vault-use-grants
+  "purposes": "用途", // lane vault-use-grants
+  "hosts": "主机", // lane vault-use-grants
+  "where they came from": "出处", // lane vault-use-grants
+  "ids": "ID", // lane vault-use-grants
+  "Always let this conversation use it (these hosts)": "总是允许这个对话用它（这些主机）", // lane vault-use-grants
+  "A standing approval: this conversation may use it for these hosts for 30 days — the Vault window lists it": "已设为长期授权：这个对话 30 天内可用于这些主机——保险库窗口里能看到它", // lane vault-use-grants
+  "A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first": "长期授权：这个对话 30 天内对这些主机使用这些秘密运行命令无需再问——保险库窗口列出它，也可收回；先要输入第二密码", // lane vault-use-grants
+  "The conversation that asked will be allowed to use it for {hosts} without asking each time; change it in the Vault window («Who may use it…»).": "发起请求的对话将被允许在 {hosts} 上使用它，不再每次询问；可在保险库窗口里修改（「谁可以用…」）。", // lane vault-use-grants
+  "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用于：{hosts}——在你于保险库窗口该行（「谁可以用…」）允许之前，发起请求的对话不能使用它。", // lane vault-use-grants
+  "A pasted secret may be used by the conversation that asked for it": "你粘贴的秘密可由请求它的对话使用", // lane vault-use-grants
+  "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it for those hosts without a card each time — the request box says so before you paste, and the Vault window's «Who may use it…» changes it or takes it back. OFF: it may use it for 8 hours, and every new kind of command asks you first.": "当 agent 请你粘贴一个秘密并写明用于哪些主机时，发起请求的对话可以在这些主机上使用它而不再每次弹卡片——粘贴前请求框会说明这一点，保险库窗口的「谁可以用…」可以修改或收回。关闭：它只能用 8 小时，且每种新命令都会先问你。", // lane vault-use-grants
 };

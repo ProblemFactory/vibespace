@@ -223,8 +223,8 @@ console.log('⑤ A FREE ENTRY — the vault\'s secret:<id>, the asker granted it
   ok(rc.length === 1 && /STORED/.test(rc[0].text) && rc[0].text.includes(r.json.ref) && /vibespace-vault run --env NAME=/.test(rc[0].text) && /8 hours/.test(rc[0].text) && !rc[0].text.includes(S_ENTRY), 'the receipt names the reference and the run line — never the value', rc[0] && rc[0].text);
   const rows = VC.secretSource({ vault: W.vault }).vaultRows();
   const row = VI.rowOf('secrets', rows.find((x) => x.entry === r.json.entry));
-  ok(row && row.label === 'Payments sandbox key' && row.kind === 'api-key' && VI.purposeOf(row) === 'keys' && VI.provenanceOf(row) === 'me' && row.revealable === true && row.doors.delete && row.doors.delete.path === `/api/vault/secrets/${r.json.entry.slice(7)}`,
-    'its Vault-window row: the label, API key, purpose «Passwords & keys», «By you», revealable, its own delete door', row);
+  ok(row && row.label === 'Payments sandbox key' && row.kind === 'api-key' && VI.purposeOf(row) === 'keys' && VI.provenanceOf(row) === 'request' && VI.provenanceFilterOf(row) === 'me' && row.askedBy && row.askedBy.name === 'Lane asker' && row.revealable === true && row.doors.delete && row.doors.delete.path === `/api/vault/secrets/${r.json.entry.slice(7)}`,
+    'its Vault-window row: the label, API key, purpose «Passwords & keys», «Filled by you · asked for by Lane asker» (the 我自己 filter — lane vault-use-grants), revealable, its own delete door', row);
   globalThis.__ENTRY = r.json.entry;
 }
 
@@ -362,7 +362,7 @@ async function runRoad(name, { door, routes } = {}) {
   const P0 = require.cache[path.join(REPO, 'src/vault-paste.js')];
   const keep = P0.exports; P0.exports = pasteMutant;
   let m2;
-  try { m2 = await runRoad('m-receipt', { door: mutant('src/server/vault-paste-door.js', "settle(q, 'stored', { ref, grantHours, receipt });", "settle(q, 'stored', { ref, grantHours, receipt, value: vv.value });") }); } finally { P0.exports = keep; }
+  try { m2 = await runRoad('m-receipt', { door: mutant('src/server/vault-paste-door.js', "settle(q, 'stored', { ref, grantHours, receipt, standing });", "settle(q, 'stored', { ref, grantHours, receipt, standing, value: vv.value });") }); } finally { P0.exports = keep; }
   ok(m2.hits.length > 0 && m2.hits.some((h) => /stash/.test(h)), 'MUTANT the receipt carries the value ⇒ the sweep is RED (the stash)', m2.hits.slice(0, 2));
   const m3 = await runRoad('m-echo', { routes: mutant('src/routes/vault.js', "app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user' }); }));", "app.post('/api/vault/secret-requests/:id/answer', person((req) => { const b = req.body || {}; const r = paste.answer(String(req.params.id), { answer: b.answer, value: b.value, by: 'user' }); return r.ok ? { ...r, echo: b } : r; }));") });
   ok(m3.hits.length > 0 && m3.hits.some((h) => /answer/.test(h)), 'MUTANT the route keeps the value on the body and echoes it ⇒ the sweep is RED (an answer)', m3.hits.slice(0, 2));

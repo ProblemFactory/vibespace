@@ -22,6 +22,11 @@
  *     dropped — never on the item, the audit, a log line, a broadcast, an answer or the receipt.
  *   · THE USE LAW: a stored paste is a `vault-use` of its entry for the conversation that asked (door `paste`, its purpose,
  *     a receipt) — `vibespace-vault uses` reads it back; the agent's receipt names the same receipt.
+ *   · THE DEFAULT GRANT (lane vault-use-grants): a new entry's request that names its hosts (`--host`) — and the setting
+ *     `vault.requestGrantsRequester` on (default) — says on its card that the conversation that asked will be allowed to use
+ *     it for those hosts; the paste writes that vault-use grant (src/server/vault-use-grants.js, by 'request') and the entry
+ *     records the hosts and who asked (the Vault window's search, its «filled by you · asked for by …» origin). The setting
+ *     is read again at the paste: switched off meanwhile ⇒ no grant (the 8-hour run grant of before, as without hosts).
  *   · BOUNDS: 4 open requests per conversation and 64 on the hub (then too_many_requests); the same conversation × place
  *     while one is open ⇒ its id again (already: 'open'); after a refusal the same place is quiet for 10 minutes
  *     (request_quiet — the agent was told so in its receipt).
@@ -63,7 +68,9 @@ const statusOf = (code) => STATUS[code] || 400;
  * @param {object} [o.deliver]     the delivery ladder (stashFor — the receipt rides the asking conversation's next turn)
  * @param {object} [o.vaultRun]    src/server/vault-run-door.js (grantPasted — the asker may use a NEW free entry in runs)
  */
-function create({ vault, integrations = null, userTodos = null, deliver = null, vaultRun = null, log = () => {}, now = () => Date.now() } = {}) {
+function create({ vault, integrations = null, userTodos = null, deliver = null, vaultRun = null, useGrants = null, setting = () => undefined, log = () => {}, now = () => Date.now() } = {}) {
+  // lane vault-use-grants: does a request that names its hosts grant the asker? (Settings ▸ vault.requestGrantsRequester — default on)
+  const grantsAsker = () => { if (!useGrants) return false; let v; try { v = setting('vault.requestGrantsRequester'); } catch { v = undefined; } return v !== false && v !== 'false'; };
   if (!vault) throw new TypeError('vault-paste-door: vault is required');
   const open = new Map();      // requestId → { requestId, todoId, conv, scope, sessionKey, who, words, purpose, target, place }
   const quiet = new Map();     // `${conv}\n${place}` → until (after a refusal)
@@ -78,7 +85,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const w = P.wordsOfItem(it);
     const target = P.targetOfAction(a, { label: w.label });
     return { requestId: a.requestId, todoId: it.id, conv: String(a.conv || ''), scope: String(a.scope || a.conv || ''), sessionKey: it.sessionKey || null, who: String(it.sessionName || 'a conversation'),
-      words: w.words, purpose: w.purpose, target, place: target ? placeOf(target) : null };
+      words: w.words, purpose: w.purpose, target, place: target ? placeOf(target) : null, grant: a.grant === true };
   };
   /** THE INDEX from the store (once — the items outlive a restart; a request is the item). */
   function index() {
@@ -110,10 +117,10 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
    * AN AGENT ASKS. `caller` = { conversationId (the stash's id), scope (the use law's conv), sessionKey, name, job? };
    * words / purpose / into / kind / name as the CLI sent them. → { ok: true, requestId, target, already? } | a refusal.
    */
-  function request({ caller = {}, words, purpose, into, kind, name } = {}) {
+  function request({ caller = {}, words, purpose, into, kind, name, hosts } = {}) {
     if (caller.job) return named('job_no_use');
     if (!caller.conversationId) return named('unauthorized');
-    const v = P.requestVerdict({ words, purpose, into, kind, name });
+    const v = P.requestVerdict({ words, purpose, into, kind, name, hosts });
     if (!v.ok) return v;
     if (!userTodos) return named('unfiled');
     index();
@@ -124,23 +131,24 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if ([...open.values()].filter((q) => q.conv === conv).length >= P.LIMITS.openPerConversation || open.size >= P.LIMITS.openHubWide) return named('too_many_requests');
     const requestId = `sr-${crypto.randomBytes(6).toString('hex')}`;
     const who = String(VB.actorName(caller.name, 'a conversation')).slice(0, 80);
-    const card = P.cardOf({ who, words: v.words, purpose: v.purpose, target: v.target, replaces: replacesOf(v.target) });
+    const grant = v.target.kind === 'entry' && v.target.hosts.length > 0 && grantsAsker();   // lane vault-use-grants: the card says the default
+    const card = P.cardOf({ who, words: v.words, purpose: v.purpose, target: v.target, replaces: replacesOf(v.target), grant: grant ? { hosts: v.target.hosts } : null });
     const scope = String(caller.scope || conv);
     let it;
     try {
       it = userTodos.add(caller.sessionKey || 'vault', {
         origin: 'vault', kind: 'action', urgency: 'high', by: 'agent', sessionName: who,   // NO expiresAt: it waits for the owner (a restart keeps it)
         text: card.text, detail: card.detail, i18n: card.i18n,
-        action: { type: 'secret-request', requestId, into: P.intoOf(v.target), kind: v.target.kind === 'entry' ? v.target.entryKind : '', conv, scope },   // = P.ACTION_TYPE (spelled for the approval census's grep) — ids and the place; the words are the item's own (a clear takes them), never a value
+        action: { type: 'secret-request', requestId, into: P.intoOf(v.target), kind: v.target.kind === 'entry' ? v.target.entryKind : '', conv, scope, ...(v.target.kind === 'entry' && v.target.hosts.length ? { hosts: v.target.hosts.join(' '), grant } : {}) },   // hosts + grant: lane vault-use-grants (scalars: the action's fields are)   // = P.ACTION_TYPE (spelled for the approval census's grep) — ids and the place; the words are the item's own (a clear takes them), never a value
       });
     } catch (e) { log(`${who}: the paste request could not be filed in For you: ${e.message}`); return named('unfiled'); }
     if (!it || !it.id) return named('unfiled');
-    open.set(requestId, { requestId, todoId: it.id, conv, scope, sessionKey: caller.sessionKey || null, who, words: v.words, purpose: v.purpose, target: v.target, place });
+    open.set(requestId, { requestId, todoId: it.id, conv, scope, sessionKey: caller.sessionKey || null, who, words: v.words, purpose: v.purpose, target: v.target, place, grant });
     audit('vault-secret-request', { by: { kind: 'agent', key: caller.sessionKey || null, name: caller.name || null }, conv: scope, place: v.target.kind === 'field' ? P.intoOf(v.target) : `a new ${v.target.entryKind} entry`, purpose: v.purpose, requestId });
     return { ok: true, requestId, target };
   }
   /** The target as an answer says it (no label of the owner's: the agent's own words and the registry's names). */
-  function publicTarget(t) { return t.kind === 'field' ? { into: P.intoOf(t), row: t.rowLabel, field: t.fieldLabel } : { entry: 'new', kind: t.entryKind, label: t.label }; }
+  function publicTarget(t) { return t.kind === 'field' ? { into: P.intoOf(t), row: t.rowLabel, field: t.fieldLabel } : { entry: 'new', kind: t.entryKind, label: t.label, ...(t.hosts && t.hosts.length ? { hosts: t.hosts } : {}) }; }
 
   /**
    * THE OWNER ANSWERS (the route: a person on this page; the value already taken off the request body).
@@ -161,7 +169,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!q.target) { settle(q, 'refused', { why: 'gone' }); return named('ask_unknown'); }   // its place left the registry since it was filed
     const st = vault.state();
     const who = VB.actorName(q.who, 'a conversation');
-    let entry = null, ref = null, grantHours = null;
+    let entry = null, ref = null, grantHours = null, standing = null;
     if (q.target.kind === 'field') {
       if (st === 'locked') return named('vault_locked');   // the box says it, 解锁… inline — nothing written, the item stays
       if (!integrations || typeof integrations.setIntegration !== 'function') return named('store_failed');
@@ -173,18 +181,24 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
         return named('store_failed');
       }
       entry = `integrations:${q.target.row}#${q.target.field}`;
+      try { vault.contentsChanged && vault.contentsChanged('paste'); } catch { }   // lane vault-use-grants: every open Vault window re-reads (the field's row is new)
     } else {
       if (st !== 'unlocked') return named(st === 'locked' ? 'vault_locked' : 'vault_not_set_up');
       entry = `${P.ENTRY_PREFIX}${crypto.randomBytes(5).toString('hex')}`;
-      const r = vault.secretPut(entry, vv.value, { prov: 'owner', actor: who, label: q.target.label, kind: q.target.entryKind, note: `Asked for by ${who}: ${q.purpose}`.slice(0, P.LIMITS.note) });
+      const r = vault.secretPut(entry, vv.value, { prov: 'owner', actor: who, label: q.target.label, kind: q.target.entryKind, note: `Asked for by ${who}: ${q.purpose}`.slice(0, P.LIMITS.note), hosts: q.target.hosts || [], askedBy: { conv: q.conv, name: who } });
       if (!r || !r.ok) { const c = String((r && r.code) || ''); return named(c.includes('vault_locked') ? 'vault_locked' : c === 'vault_not_set_up' ? 'vault_not_set_up' : 'store_failed'); }
       ref = `vault://secrets/${entry}/${P.ENTRY_FIELD}`;
-      if (vaultRun && typeof vaultRun.grantPasted === 'function') { try { const g = vaultRun.grantPasted({ scope: q.scope, ref, purpose: q.purpose, by, requestId: id }); if (g && g.ok) grantHours = g.hours; } catch (e) { log(`${q.requestId}: the run grant could not be written: ${e.message}`); } }
+      // lane vault-use-grants: THE DEFAULT GRANT the card said — the conversation that asked × the hosts it named (the setting read
+      // again now: switched off since ⇒ the 8-hour run grant below, as a request without hosts)
+      if (q.grant && q.target.hosts && q.target.hosts.length && grantsAsker()) {
+        try { const g = useGrants.addMember(`secrets:${entry}#${P.ENTRY_FIELD}`, { kind: 'conversation', key: q.conv, name: who }, { hosts: q.target.hosts }, { by: 'request' }); if (g && g.ok) standing = { hosts: q.target.hosts.slice(), grant: g.grant }; else log(`${q.requestId}: the default grant was not written (${g && g.code})`); } catch (e) { log(`${q.requestId}: the default grant could not be written: ${e.message}`); }
+      }
+      if (!standing && vaultRun && typeof vaultRun.grantPasted === 'function') { try { const g = vaultRun.grantPasted({ scope: q.scope, ref, purpose: q.purpose, by, requestId: id }); if (g && g.ok) grantHours = g.hours; } catch (e) { log(`${q.requestId}: the run grant could not be written: ${e.message}`); } }
     }
     let receipt = null;
     try { receipt = (vault.noteUse(entry, { by: 'agent', door: 'paste', conv: q.scope }, { outcome: 'ok', purpose: q.purpose, actor: who }) || {}).receipt || null; } catch { /* the store answered: the use line is the audit's */ }
     audit('vault-secret-stored', { by: String(by).slice(0, 40), conv: q.scope, requestId: id, place: q.target.kind === 'field' ? P.intoOf(q.target) : entry, receipt });
-    settle(q, 'stored', { ref, grantHours, receipt });
+    settle(q, 'stored', { ref, grantHours, receipt, standing });
     return { ok: true, outcome: 'stored', ...(q.target.kind === 'field' ? { into: P.intoOf(q.target) } : { entry, ref }) };
   }
 
@@ -226,6 +240,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const r = vault.secretDrop(entry);
     if (!r || !r.ok) return named('store_failed');
     if (r.already) return named('entry_unknown_id');
+    if (useGrants) { try { useGrants.drop(`secrets:${entry}#${P.ENTRY_FIELD}`, { by }); } catch (e) { log(`${entry}: its vault-use grant row was not removed — ${e.message}`); } }   // lane vault-use-grants: the entry is gone, so is who may use it
     audit('vault-secret-deleted', { by: String(by).slice(0, 40), entry });
     return { ok: true, entry };
   }
