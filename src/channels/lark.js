@@ -342,8 +342,18 @@ const FIRST_INGEST_MAX = 200;
 const WALK_TTL_MS = 5 * 60 * 1000;
 /** Chat member names are looked up ONCE per conversation per this window. */
 const MEMBERS_TTL_MS = 6 * 60 * 60 * 1000;
-/** Refresh the access token when it is inside this margin of expiring. */
-const REFRESH_MARGIN_MS = 60 * 1000;
+/** Refresh the access token when it is inside this margin of expiring. lane lark-refresh-stall R3 (the owner's hub
+ *  2026-10-26 13:34 PT + 2026-10-27 19:17 PT): a QUARTER HOUR of the access token's two hours, never the last minute — a
+ *  refresh that starts with 15 min to spare outlives a held loop shorter than that with the old bearer still good, and
+ *  the engine's pass renews inside it on its own (`auth.renew`), not only when a request needs a bearer. */
+const REFRESH_MARGIN_MS = 15 * 60 * 1000;
+/** The tenant token's own margin (the vendor re-answers a cached tenant token with ≥ 30 min left; not single-use). */
+const TENANT_MARGIN_MS = 60 * 1000;
+/** lane lark-refresh-stall R1: the token refresh's bound — LIVE loop time (`liveDeadline`), never a wall-clock timer. */
+const REFRESH_BOUND_MS = 20000;
+/** lane lark-refresh-stall R3: inside the margin the bearer still lives — a refresh that failed retryably (a lost answer, a
+ *  5xx, a rate refusal) is no failure of the request: it goes on with the bearer it holds, the refresh asked again after this. */
+const REFRESH_RETRY_MS = 60 * 1000;
 /**
  * EVERY OUTBOUND CALL THIS ADAPTER MAKES OUTSIDE `api()` — THE GATE (lane R5
  * verify r4). The census in test-channels-lark-shape reads the markers off the
@@ -1046,23 +1056,58 @@ function requiredScopesOf(msg) {
   return out;
 }
 
-/** A bounded JSON round trip; a network failure is `transport` (retryable). */
-async function callJson(fetchFn, url, { method = 'GET', headers = {}, body = null, what = 'lark', signal = null } = {}) {
+/**
+ * A BOUND ON LIVE LOOP TIME (lane lark-refresh-stall R1 — the owner's hub, 2026-10-26 13:34 PT: the loop held 12–17 s
+ * several times in a row; 2026-10-27 19:17 PT: an 89.5-min NFS hold). The token refresh ran under
+ * `AbortSignal.timeout(20000)`: the timer came due WHILE the loop was held, and libuv runs due timers BEFORE it polls the
+ * sockets, so the abort fired with the vendor's answer already waiting in the socket — the single-use refresh token was
+ * spent, its successor dropped, and the retry was refused 20064. Here a 1 s MONOTONIC tick counts only the time the loop
+ * RAN: a tick that comes late (the loop was held) counts one tick, adds the rest to `heldMs` and never fires on that turn,
+ * so the poll phase after it reads whatever the socket holds first. The socket's own bounds stay (undici's connect /
+ * headers / body timers count loop ticks — `fastNow += TICK_MS` — so a held loop expires none of them).
+ * `end()` stops it and answers the held milliseconds it measured (the stall the words name).
+ */
+const LIVE_TICK_MS = 1000;
+function liveDeadline(boundMs, { tickMs = LIVE_TICK_MS, mono = () => performance.now() } = {}) {
+  const ctl = new AbortController();
+  let last = mono(), live = 0, heldMs = 0, ended = false;
+  const step = () => { const at = mono(); const gap = at - last; last = at; if (gap > 2 * tickMs) { heldMs += gap - tickMs; live += tickMs; return false; } live += gap; return true; };
+  const timer = setInterval(() => {
+    if (!step() || live < boundMs) return;   // a turn after a held loop never fires
+    ended = true; clearInterval(timer);
+    ctl.abort(new Error(`no answer in ${Math.round(live / 1000)} s of running time${heldMs >= 1000 ? ` (the loop was held ${Math.round(heldMs / 1000)} s besides)` : ''}`));
+  }, tickMs);
+  if (timer.unref) timer.unref();
+  return { signal: ctl.signal, end: () => { if (!ended) { ended = true; clearInterval(timer); step(); } return Math.round(heldMs); } };
+}
+/** The failures that prove the request never LEFT (no connection was made) — anything else after the send is a LOST
+ *  answer: the vendor may have acted on it. */
+const NOT_SENT_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_CONNECT_TIMEOUT']);
+const notSent = (e) => !!(e && e.cause && (NOT_SENT_CODES.has(e.cause.code) || (Array.isArray(e.cause.errors) && e.cause.errors.length && e.cause.errors.every((x) => x && NOT_SENT_CODES.has(x.code)))));
+
+/** A bounded JSON round trip; a network failure is `transport` (retryable). `liveMs` (the token refresh): bounded by
+ *  live loop time instead of a wall-clock timer, and a failure after the request may have left — an abort, a cut socket,
+ *  a body that never came — is `transport` with `detail.lost` + the `heldMs` the request waited through. */
+async function callJson(fetchFn, url, { method = 'GET', headers = {}, body = null, what = 'lark', signal = null, liveMs = 0 } = {}) {
   // client-from-mount verify r4: what this request CARRIES in its secret fields (the app secret, a refresh
   // token, the Bearer) never comes back in a refusal's words — scrubbed by exact value before the error is built
   const sent = sentSecrets({ fields: body, headers });
+  const clock = liveMs > 0 && !signal ? liveDeadline(liveMs) : null;
+  const lost = (e) => { const left = !notSent(e); return new ChannelError('transport', withoutSent(`${what}: ${left ? 'the answer was lost — ' : ''}${(e && e.message) || e}`, sent), { retryable: true, detail: { lost: left, heldMs: clock.end() } }); };
   let r;
   try {
     r = await fetchFn(url, {
       method, headers: { Accept: 'application/json', ...(body != null ? { 'Content-Type': 'application/json; charset=utf-8' } : {}), ...headers },
       body: body == null ? undefined : JSON.stringify(body),
-      signal: signal || AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: signal || (clock ? clock.signal : AbortSignal.timeout(REQUEST_TIMEOUT_MS)),
     });
   } catch (e) {
+    if (clock) throw lost(e);
     throw new ChannelError('transport', withoutSent(`${what}: ${(e && e.message) || e}`, sent), { retryable: true });
   }
   let parsed = null;
-  try { parsed = await r.json(); } catch { parsed = null; }
+  try { parsed = await r.json(); } catch (e) { if (clock && r.ok) throw lost(e); parsed = null; }
+  if (clock) clock.end();
   if (!r.ok || !parsed || (parsed.code !== undefined && Number(parsed.code) !== 0)) throw typedFailure(r.status, withoutSent(parsed, sent), what, retryAfterSeconds(r.headers));
   return parsed;
 }
@@ -1240,14 +1285,16 @@ function create(record = {}, deps = {}) {
    *  (`invalidGrantAt`): the account logged itself out and asked the owner to
    *  re-authorize. Now siblings wait for the one refresh and read what it wrote. */
   let refreshing = null;
+  let refreshPausedUntil = 0;   // lane lark-refresh-stall R3: a retryable refresh failure while the bearer lives waits REFRESH_RETRY_MS
   async function accessToken(depth = 0) {   // verify r4 F1: `depth` bounds the re-entry (a superseded refresh re-reads ONCE)
     const cred = credential();
     if (!cred.values) throw vaultLockedWhy(cred.why) ? notConnectedError('Lark', cred.why) : new ChannelError('auth-expired', `Lark app credential missing: ${cred.why}`, { retryable: false, detail: { needsCredentials: true } });
     const { token, why } = readToken();
     if (!token) throw notConnectedError('Lark', why);   // lane vault-e2e-password-fix-r2: a LOCKED vault is `vault-locked`, never "expired"
-    if (token.invalidGrantAt) throw new ChannelError('auth-expired', 'Lark refresh token was refused — re-authorize', { retryable: false, detail: { cause: token.invalidGrantCause || 'refresh-refused' } });   // verify r5: a dead grant is not POSTed again per request (auth.state already said needs-reauth)
+    if (token.invalidGrantAt) throw new ChannelError('auth-expired', 'Lark refresh token was refused — re-authorize', { retryable: false, detail: { cause: token.invalidGrantCause || 'refresh-refused', ...(token.invalidGrantHeldMs ? { heldMs: token.invalidGrantHeldMs } : {}) } });   // verify r5: a dead grant is not POSTed again per request (auth.state already said needs-reauth)
     if (unsaved && unsaved.token === token) await persistToken(token, unsaved.supersedes);   // verify r5: the store's next chance at a token it could not persist
     if (token.access_token && Number(token.expiresAt) > now() + REFRESH_MARGIN_MS) return token.access_token;
+    if (token.access_token && Number(token.expiresAt) > now() && refreshPausedUntil > now()) return token.access_token;   // lane lark-refresh-stall R3: the bearer still lives; the failed refresh waits its pause
     if (!token.refresh_token) throw new ChannelError('auth-expired', 'Lark access token expired and no refresh token is held — re-authorize', { retryable: false, detail: { cause: 'token-expired' } });
     if (Number(token.refreshExpiresAt) && Number(token.refreshExpiresAt) <= now()) throw new ChannelError('auth-expired', 'Lark refresh token expired — re-authorize', { retryable: false, detail: { cause: 'token-expired' } });
     if (refreshing) { await refreshing; return accessToken(depth + 1); }   // a sibling's refresh: wait for it, then read what it wrote
@@ -1287,6 +1334,16 @@ function create(record = {}, deps = {}) {
     persisting = { token: next, p };
     return p;
   }
+  /** lane lark-refresh-stall R2: the refresh's answer was LOST after the request left — the fact goes on the token record
+   *  it tried (only while the store still holds that token: the same compare-and-swap as every token write), with the
+   *  longest stall a lost answer waited through; said once per loss in the hub's log. */
+  async function noteLost(token, e) {
+    const heldMs = Math.max(Number(token.refreshLostHeldMs) || 0, Number(e.detail.heldMs) || 0);
+    log.warn && log.warn(`[channels] lark: the token refresh's answer was lost after the request left (${String(e.message || '').slice(0, 200)}${heldMs >= 1000 ? `; the hub's loop was held ${Math.round(heldMs / 1000)} s while it waited` : ''}) — the outcome is unknown (Lark may have spent the single-use refresh token); the next refresh tries it once`);
+    const cur = readToken().token;
+    if (!cur || String(cur.refresh_token || '') !== String(token.refresh_token || '')) return;
+    try { await tokens.write({ ...cur, refreshLostAt: Number(cur.refreshLostAt) || now(), refreshLostHeldMs: heldMs }, { expiresAt: cur.refreshExpiresAt || null, scopes: cur.scopes || [], supersedes: String(cur.refresh_token || '') }); } catch { /* the fact stays in this error's words; the next refresh decides */ }
+  }
   async function refreshAccessToken(cred, token) {
     let d;
     try {
@@ -1298,11 +1355,19 @@ function create(record = {}, deps = {}) {
       if (String(t2.refresh_token || '') !== String(token.refresh_token || '')) return null;
       meter(1);
       d = await callJson(fetchFn, `${H.open}/open-apis/authen/v2/oauth/token`, {   // gated-inline: token-refresh
-        method: 'POST', what: 'lark token refresh',
+        method: 'POST', what: 'lark token refresh', liveMs: REFRESH_BOUND_MS,
         body: { grant_type: 'refresh_token', client_id: cred.values.appId, client_secret: cred.values.appSecret, refresh_token: token.refresh_token },
       });
     } catch (e) {
       e = refreshFailure(e);   // lane channel-reauth-visible: 20064 & co. are a dead grant at the FIRST answer, never 3 vendor-errors
+      // lane lark-refresh-stall R2: an answer LOST after the request left is an UNKNOWN outcome (the vendor may have spent
+      // the single-use refresh token), recorded on the token; the next refresh tries the same token ONCE, and a refusal
+      // that follows a recorded loss is `refresh-lost` (the true cause, with the stall it waited through) — never
+      // «signed in elsewhere», which is said only when no lost answer precedes it
+      if (e instanceof ChannelError && e.code === 'transport' && e.detail && e.detail.lost && tokens) await noteLost(token, e);
+      else if (e instanceof ChannelError && e.code === 'auth-expired' && token.refreshLostAt && e.detail && (e.detail.cause === 'revoked-elsewhere' || e.detail.cause === 'refresh-refused')) {
+        e = new ChannelError('auth-expired', e.message, { retryable: false, detail: { ...e.detail, cause: 'refresh-lost', vendorCause: e.detail.cause, lostAt: token.refreshLostAt, heldMs: Number(token.refreshLostHeldMs) || 0 } });
+      }
       // A refresh the vendor REFUSES is a fact about the token record, so it
       // is stamped on it: `auth.state()` answers `needs-reauth` from now on
       // (the row's re-authorize control), instead of retrying a dead grant
@@ -1314,8 +1379,11 @@ function create(record = {}, deps = {}) {
         // verify r5: a refusal for a token the store has since REPLACED (a re-authorize, a sibling entry's rotation
         // that landed first — the straggler of a rotation) is superseded, not a fact about the account
         if (cur && !cur.invalidGrantAt && String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;
-        if (cur && String(cur.refresh_token || '') === String(token.refresh_token || '')) await tokens.write({ ...cur, invalidGrantAt: now(), invalidGrantCause: (e.detail && e.detail.cause) || 'refresh-refused' }, { expiresAt: cur.refreshExpiresAt || null, scopes: cur.scopes || [], supersedes: String(cur.refresh_token || '') });
+        if (cur && String(cur.refresh_token || '') === String(token.refresh_token || '')) await tokens.write({ ...cur, invalidGrantAt: now(), invalidGrantCause: (e.detail && e.detail.cause) || 'refresh-refused', ...(e.detail && e.detail.cause === 'refresh-lost' ? { invalidGrantHeldMs: Number(e.detail.heldMs) || 0 } : {}) }, { expiresAt: cur.refreshExpiresAt || null, scopes: cur.scopes || [], supersedes: String(cur.refresh_token || '') });
       }
+      // lane lark-refresh-stall R3: the refresh ran early, so the bearer usually still lives — a RETRYABLE failure (a lost
+      // answer, a 5xx, a rate refusal; never a drop or a pace abort) serves the bearer held, and the refresh waits its pause
+      if (e instanceof ChannelError && e.retryable && !(e.detail && (e.detail.tokenDropped || e.detail.paceAborted)) && token.access_token && Number(token.expiresAt) > now()) { refreshPausedUntil = now() + REFRESH_RETRY_MS; return token.access_token; }
       throw e;
     }
     // verify r4 F1: an answer without an access token is not a token — nothing stored, the request not sent (it used to be stored as '' and refreshed again for ever)
@@ -1529,7 +1597,7 @@ function create(record = {}, deps = {}) {
   let tenant = null;   // {token, until}
   let tenantInflight = null;
   async function tenantToken() {
-    if (tenant && tenant.until > now() + REFRESH_MARGIN_MS) return tenant.token;
+    if (tenant && tenant.until > now() + TENANT_MARGIN_MS) return tenant.token;
     if (tenantInflight) return tenantInflight;
     tenantInflight = (async () => {
       const cred = credential();
@@ -1952,6 +2020,14 @@ function create(record = {}, deps = {}) {
         if (refreshExpiresAt && refreshExpiresAt <= now()) return { state: 'needs-reauth', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: 'refresh-token-expired', credentialSource: cred.source, credentialKey };
         if (token.invalidGrantAt) return { state: 'needs-reauth', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: 'refresh-refused', credentialSource: cred.source, credentialKey };
         return { state: 'connected', expiresAt: refreshExpiresAt, scopes: token.scopes || [], why: null, credentialSource: cred.source, clusterKey: cred.clusterKey || null, credentialKey, user: token.name || token.openId || null, brand, renews: true, renewWindowMs: RENEW_WINDOW_MS };
+      },
+      /** lane lark-refresh-stall R3: the engine's pass renews a sign-in INSIDE its margin on its own — the refresh runs
+       *  with a quarter hour to spare, never only when a request needs a bearer. `false` = nothing to renew now. */
+      async renew() {
+        const t = readToken().token;
+        if (!t || !t.access_token || !t.refresh_token || t.invalidGrantAt || Number(t.expiresAt) > now() + REFRESH_MARGIN_MS) return false;
+        await accessToken();
+        return true;
       },
       /** The FIXED-mode loopback flow (§12.4): the vendor consent URL is built
        *  with the REGISTERED redirect_uri; the exchange mints the user token
@@ -2650,7 +2726,7 @@ const MINUTES_GRANT = Object.freeze({ scopes: Object.freeze([...MINUTES_SCOPES, 
 module.exports = {
   attachmentPlan, LARK_IMAGE_MAX, LARK_FILE_MAX, SEND_HOLD_DEFAULT_SEC,
   kind: KIND, caps, create, manifest: MANIFEST, api: API_ROW, sendGrant: SEND_GRANT, reactionsGrant: REACTIONS_GRANT, feedGrant: FEED_GRANT, peopleGrant: PEOPLE_GRANT, filesGrant: FILES_GRANT, minutesGrant: MINUTES_GRANT, API_ROW, consent: CONSENT, label: LABEL, integration: INTEGRATION, integrationTest, OPTIONS, UNGATED, RATE_OK,
-  EGRESS, HOSTS, BRANDS, SCOPES, SEND_SCOPES, FIRST_INGEST_MAX, WALK_TTL_MS, UUID_WINDOW_MS, UUID_MAX, RECONCILE_SLACK_MS, RECONCILE_SCAN_MAX, RENEW_WINDOW_MS,
+  EGRESS, HOSTS, BRANDS, SCOPES, SEND_SCOPES, FIRST_INGEST_MAX, WALK_TTL_MS, UUID_WINDOW_MS, UUID_MAX, RECONCILE_SLACK_MS, RECONCILE_SCAN_MAX, RENEW_WINDOW_MS, REFRESH_MARGIN_MS, REFRESH_BOUND_MS, REFRESH_RETRY_MS, liveDeadline,
   toRecord, textOf, mentionsOf, attachmentsOf, typedFailure, avatarUrlOf, AVATAR_ORIGINS, nextToken, uuidFor, hasSendScopes, vendorNameOf,
   SEND_GRANT, blocksOf: Blocks.larkStoredBlocks, sendCapsOf,
   // lane dc-channels-blocks: the record's vendor facts by name + the live lane's words for its parked codes

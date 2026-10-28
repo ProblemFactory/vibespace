@@ -10660,6 +10660,10 @@ export default {
   "{account}: sign-in expired — re-authorize": "{account} 登录失效，需要重新授权",
   "the vendor refused the refresh token": "服务方拒绝了刷新令牌",
   "your account signed in to this app from another VibeSpace": "你的账号在另一个 VibeSpace 上登录了这个应用",
+  // lane lark-refresh-stall: a refresh whose answer was lost — the true cause, with the stall it waited through
+  "the hub stalled {minutes} min while refreshing the sign-in (NAS / disk), and its single-use refresh token was used up": "hub 在刷新令牌时卡住了 {minutes} 分钟（NAS/磁盘），飞书的一次性刷新令牌已被用掉",
+  "the hub stalled {seconds} s while refreshing the sign-in (NAS / disk), and its single-use refresh token was used up": "hub 在刷新令牌时卡住了 {seconds} 秒（NAS/磁盘），飞书的一次性刷新令牌已被用掉",
+  "the answer to the sign-in's refresh was lost on the way, and its single-use refresh token was used up": "刷新令牌的应答在途中丢失，飞书的一次性刷新令牌已被用掉",
   "the sign-in reached the end of its lifetime": "登录已到期",
   "the vendor refused the OAuth client": "服务方拒绝了 OAuth 客户端",
   "its OAuth client is no longer set up here": "这里已不再配置它的 OAuth 客户端",

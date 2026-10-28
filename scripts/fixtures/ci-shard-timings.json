@@ -90,6 +90,7 @@
   "test-foryou-honest-chrome": 200000,
   "test-chat-needs-card-chrome": 270000,
   "test-lark-consent-chain": 8350,
+  "test-lark-refresh-stall": 27000,
   "test-channel-revisions-ui": 18790,
   "test-channel-store": 31530,
   "test-channel-threads-ui": 85295,

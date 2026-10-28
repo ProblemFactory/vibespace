@@ -513,8 +513,11 @@ const CONV_CAPS_FAIL_WHYS = Object.freeze(['rate-limited', 'backoff', 'not-conne
  *   client-refused      the vendor refused the OAuth client itself (Google `invalid_client`)
  *   client-missing      the account's OAuth client is no longer configured on this instance
  *   consent-unfinished  the person's re-authorize ended without a sign-in (timed out, cancelled, refused)
+ *   refresh-lost        lane lark-refresh-stall: the refresh's answer was LOST after it left (the hub's loop held, a cut
+ *                       socket) and the vendor had spent its single-use refresh token — the refusal that followed is this,
+ *                       never `revoked-elsewhere`; `heldMs` = the stall the lost answer waited through (the words name it)
  */
-const SIGNIN_CAUSES = Object.freeze(['refresh-refused', 'revoked-elsewhere', 'token-expired', 'client-refused', 'client-missing', 'consent-unfinished']);
+const SIGNIN_CAUSES = Object.freeze(['refresh-refused', 'revoked-elsewhere', 'token-expired', 'client-refused', 'client-missing', 'consent-unfinished', 'refresh-lost']);
 /** Is this vendor failure a DEAD SIGN-IN? `auth-expired`, except the engine's own race words (a disconnect that landed
  *  while the request waited — `tokenDropped`: the owner's act, said by the disconnect itself). A vault-locked read is
  *  `vault-locked` (the vault's own banner), never this. */
@@ -533,15 +536,31 @@ function signinCauseOf(err) {
 }
 /** THE ACCOUNT VIEW'S THREE FACTS: `authState` = 'expired' (a dead sign-in) | 'pending' (dead, and a consent is in
  *  flight now) | 'ok' (no dead sign-in is known); `authCause` = a SIGNIN_CAUSES code or null; `authSince` = when the
- *  first refused pass landed (ms) or null. `running` = a consent flow of this account is in flight. */
+ *  first refused pass landed (ms) or null. `running` = a consent flow of this account is in flight. lane lark-refresh-stall:
+ *  `authHeldMs` rides a `refresh-lost` (the stall its words name). */
 function signinView(rec, { running = false } = {}) {
   const d = rec && rec.signinDead && typeof rec.signinDead === 'object' ? rec.signinDead : null;
   if (!d) return { authState: 'ok', authCause: null, authSince: null };
-  return { authState: running ? 'pending' : 'expired', authCause: SIGNIN_CAUSES.includes(d.cause) ? d.cause : null, authSince: num(d.since) };
+  return { authState: running ? 'pending' : 'expired', authCause: SIGNIN_CAUSES.includes(d.cause) ? d.cause : null, authSince: num(d.since), ...(d.cause === 'refresh-lost' && num(d.heldMs) ? { authHeldMs: num(d.heldMs) } : {}) };
 }
-/** The cause in the person's words (an English t() key; '' = none known). */
-function signinCauseText(cause, { t = defaultT } = {}) {
+/** lane lark-refresh-stall: a stall in the person's unit — whole minutes past one (one decimal below ten), else seconds;
+ *  null under a second (no stall was measured). */
+function stallSpanOf(ms) {
+  const v = num(ms);
+  if (v === null || v < 1000) return null;
+  if (v >= 60000) { const m = v / 60000; return { minutes: m >= 10 ? Math.round(m) : Math.round(m * 10) / 10 }; }
+  return { seconds: Math.round(v / 1000) };
+}
+/** The cause in the person's words (an English t() key; '' = none known). `heldMs` = a `refresh-lost`'s stall. The
+ *  engine passes a `t` that answers `{key, params}` — the For-you item carries the words as structure. */
+function signinCauseText(cause, { t = defaultT, heldMs = null } = {}) {
   switch (String(cause || '')) {
+    case 'refresh-lost': {
+      const s = stallSpanOf(heldMs);
+      if (s && s.minutes !== undefined) return t("the hub stalled {minutes} min while refreshing the sign-in (NAS / disk), and its single-use refresh token was used up", { minutes: s.minutes });
+      if (s) return t("the hub stalled {seconds} s while refreshing the sign-in (NAS / disk), and its single-use refresh token was used up", { seconds: s.seconds });
+      return t("the answer to the sign-in's refresh was lost on the way, and its single-use refresh token was used up");
+    }
     case 'refresh-refused': return t('the vendor refused the refresh token');
     case 'revoked-elsewhere': return t('your account signed in to this app from another VibeSpace');
     case 'token-expired': return t('the sign-in reached the end of its lifetime');
@@ -559,7 +578,7 @@ function signinLineText(a, { t = defaultT, when = null } = {}) {
   if (st === 'pending') return t('Re-authorizing… (in the tab that opened)');
   if (st !== 'expired') return '';
   const bits = [t('Sign-in expired — re-authorize')];
-  const c = signinCauseText(a.authCause, { t });
+  const c = signinCauseText(a.authCause, { t, heldMs: a.authHeldMs });
   if (c) bits.push(c);
   const w = num(a.authSince) !== null && typeof when === 'function' ? when(num(a.authSince)) : '';
   if (w) bits.push(t('since {time}', { time: w }));
@@ -1561,7 +1580,7 @@ module.exports = {
   CONV_CAPS_TTL_MS, HOST_FACTS_TTL_MS, PUSH_HEARTBEAT_MS, SCAN_SOURCE_ORDER, OFFER_WHAT,
   PUSH_MISS_THRESHOLD, PUSH_MISS_MIN_SAMPLES, PUSH_MISS_WINDOW_MS, PUSH_MISS_MIN_KEEP, PUSH_CLAIMS,
   laneState, scanState, convCapsState, offers, authState, recallRowOf,
-  SIGNIN_CAUSES, signinDeadOf, signinCauseOf, signinView, signinCauseText, signinLineText,   // lane channel-reauth-visible
+  SIGNIN_CAUSES, signinDeadOf, signinCauseOf, signinView, signinCauseText, signinLineText, stallSpanOf,   // lane channel-reauth-visible; stallSpanOf: lane lark-refresh-stall
   identityWarning, identityWarningText, freshnessClaim, freshnessText, humanAge,
   // 2026-09-26: the per-conversation cadence, the override choices, the vendor budget + push remedies
   TIER_DEFAULTS, COLD_MAX_SEC, REFRESH_CHOICES, validRefresh, pollTier, tierUntil, cadenceFor, budgetText, learnedBudgetText, passStateText, firstReadText, pushUnavailableText,

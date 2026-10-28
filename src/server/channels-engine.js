@@ -2393,7 +2393,7 @@ function create(deps = {}) {
         // ONE standing urgent item per account with its Reconnect (`speakSignin`), never the 3-strike ladder's item. Only a
         // sign-in the record HOLDS can die: a Connect never finished / a disconnected account (no token) keeps the ladder
         const deadSignin = caps.signinDeadOf(err instanceof ChannelError ? err : null) && !!(rec.auth && rec.auth.tokenEnc);
-        if (deadSignin) await speakSignin(rec, caps.signinCauseOf(err), { vendorWords: String((err && err.message) || '') });
+        if (deadSignin) await speakSignin(rec, caps.signinCauseOf(err), { vendorWords: String((err && err.message) || ''), heldMs: err && err.detail ? Number(err.detail.heldMs) || null : null });   // lane lark-refresh-stall: a refresh-lost names its stall
         else if (!rate && e.failures === FAILURES_BEFORE_LOUD) {
           log.warn(`[channels] ${rec.id}: ${e.failures} consecutive failures (${code}): ${(err && err.message) || err}`);
           await speakFailure(rec, code, err);
@@ -2472,6 +2472,12 @@ function create(deps = {}) {
         // those passes run, fail with the vendor's typed refusal, and SPEAK
         // (fence 8), because the user has something to act on.
         const connected = !(st && ((st.state === 'unknown' && st.why === 'never-authenticated') || st.state === 'vault-locked'));   // r2: a LOCKED vault builds no request, counts no failure
+        // lane lark-refresh-stall R3: a sign-in INSIDE its refresh margin is renewed by the pass itself, with the margin to
+        // spare — never only when a request needs a bearer. Best effort: a failure here meets the pass's first request at
+        // the same door (accessToken), which says it once through failPass
+        if (connected && st && st.state === 'connected' && e.adapter.auth && typeof e.adapter.auth.renew === 'function') {
+          try { await e.adapter.auth.renew(); } catch { /* said by the pass's own request */ }
+        }
         // `scan.hostFacts` TRIGGER ③ (design §4 / §5 invariant 7, r6): a scan-lane pass asks the host's facts of the RESOLVER, once, before its first fetch (Drain rule 14)
         const scanLane = laneOrScan(rec, {}).via === 'scan';
         e.dq = Drain.open(e.dq, { origin, force, backoff, timerDue: e.timerDue, hostScan: scanLane });
@@ -6998,7 +7004,9 @@ function create(deps = {}) {
    *  `channel-reauth` action (its Reconnect opens the account's Re-authorize dialog). A failing pass with nothing new says
    *  nothing again (no write, no reopen: the person's own dismissal stands); a NEW cause — or `reassert` (a consent that
    *  ended unfinished) — re-files the SAME item (same text ⇒ same id, its words updated, reopened). Retracted only by
-   *  `retractSignin`: the first pass that went through, the account's removal, the owner's own disconnect. */
+   *  `retractSignin`: the first pass that went through, a consent that LANDED (lane lark-refresh-stall R5 — the landing's
+   *  broadcast carries it; a refusal after it raises the item again at once), the account's removal, the owner's own
+   *  disconnect. */
   const SIGNIN_KEYS = Object.freeze({
     kc: i18nKey('{account} ({kind}): sign-in expired — re-authorize ({cause})'), k: i18nKey('{account} ({kind}): sign-in expired — re-authorize'),
     c: i18nKey('{account}: sign-in expired — re-authorize ({cause})'), n: i18nKey('{account}: sign-in expired — re-authorize'),
@@ -7010,20 +7018,23 @@ function create(deps = {}) {
     const user = rec.auth && typeof rec.auth.user === 'string' && rec.auth.user && !label.includes(rec.auth.user) ? rec.auth.user : '';
     return { account: user || label, kind: user ? label : '' };
   };
-  async function speakSignin(rec, cause0, { reassert = false, vendorWords = '' } = {}) {
+  async function speakSignin(rec, cause0, { reassert = false, vendorWords = '', heldMs = null } = {}) {
     const prev = rec.signinDead && typeof rec.signinDead === 'object' ? rec.signinDead : null;
     // a failure that names no cause keeps the one already known (Lark's stamped grant says only "refused" after 20064)
     const cause = caps.SIGNIN_CAUSES.includes(cause0) ? cause0 : prev && caps.SIGNIN_CAUSES.includes(prev.cause) ? prev.cause : null;
+    // lane lark-refresh-stall R2/R4: a `refresh-lost` carries the stall the lost answer waited through — the log line, the item and the row name it
+    const stallMs = cause !== 'refresh-lost' ? null : Number(heldMs) > 0 ? Number(heldMs) : prev && prev.cause === cause && Number(prev.heldMs) > 0 ? Number(prev.heldMs) : null;
     const held = prev && prev.item && userTodos && typeof userTodos.get === 'function' ? userTodos.get(prev.item.id) : null;
     if (prev && !reassert && (prev.cause || null) === cause && (held ? !held.clearedAt : !userTodos)) return;   // nothing new: the item stands as it is
     const since = prev && Number(prev.since) ? Number(prev.since) : now();
-    if (!prev) log.warn(`[channels] ${rec.id}: the sign-in expired${cause ? ` (${cause})` : ''} — a "For you" item asks the owner to re-authorize: ${String(vendorWords).slice(0, 300)}`);
+    if (!prev) log.warn(`[channels] ${rec.id}: the sign-in expired${cause ? ` (${cause}${stallMs ? `; the hub's loop was held ${Math.round(stallMs / 1000)} s while the refresh's answer waited` : ''})` : ''} — a "For you" item asks the owner to re-authorize: ${String(vendorWords).slice(0, 300)}`);
     let item = prev && prev.item ? prev.item : null;
     if (userTodos && typeof userTodos.add === 'function') {
       const { account, kind } = signinWho(rec);
       const text = `${kind ? `${account} (${kind})` : account}: sign-in expired — re-authorize`;
       const key = SIGNIN_KEYS[(kind ? 'k' : '') + (cause ? 'c' : '') || 'n'];
-      const causeWords = caps.signinCauseText(cause);
+      const causeWords = caps.signinCauseText(cause, { heldMs: stallMs });
+      const causeLine = caps.signinCauseText(cause, { heldMs: stallMs, t: (key, params) => ({ key, ...(params ? { params } : {}) }) });   // the item's words as structure (a stall's length rides as a param)
       try {
         if (rec.failureItem) await retractFailure(rec, 'the dead sign-in item took over');   // ONE item per account: the ladder's goes
         const it = userTodos.add(INBOX_KEY, {
@@ -7034,12 +7045,12 @@ function create(deps = {}) {
           action: { type: 'channel-reauth', adapterId: rec.id, signin: 'expired' },
           // ONE open item per account row: the producer's own bound (the agents' cap of 20 is shared by every account's items under one key)
           openCap: Math.max(20, 4 * (adapterRecords().adapters.length + 1)),
-          i18n: { text: { key: i18nKey(key), params: { account, ...(kind ? { kind } : {}), ...(cause ? { cause: { key: causeWords } } : {}) } }, source: INBOX_SOURCE },   // the cause: channel-caps signinCauseText's own key
+          i18n: { text: { key: i18nKey(key), params: { account, ...(kind ? { kind } : {}), ...(cause ? { cause: causeLine } : {}) } }, source: INBOX_SOURCE },   // the cause: channel-caps signinCauseText's own key (+ its params)
         });
         if (it && it.id) item = { id: it.id, text };
       } catch (e) { log.warn(`[channels] ${rec.id}: could not file the dead sign-in in the inbox: ${(e && e.message) || e}`); }
     }
-    await store.adapters.update(() => { rec.signinDead = { cause, since, item, at: now() }; });
+    await store.adapters.update(() => { rec.signinDead = { cause, since, item, at: now(), ...(stallMs ? { heldMs: stallMs } : {}) }; });
     notify([], { full: false });   // the account views (the rail badge, the red line) carry it at once
   }
   async function retractSignin(rec, why = 'a pass went through') {

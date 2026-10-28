@@ -7,6 +7,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - Lark re-authorize: once you finish signing in in another browser, the dialog completes at once instead of waiting for the next read.
 - «Sign in without the N extra permissions» shows only where Lark can really refuse; permissions already granted no longer count.
+- Your Lark sign-in no longer expires when VibeSpace stalls on a slow disk or network drive; if a sign-in does expire, the notice says why.
+- When a re-authorize finishes, the account's «Sign-in expired» line goes away at once, in every open tab.
 
 ## 2.369.360 — 2026-10-27
 

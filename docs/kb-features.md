@@ -2816,6 +2816,15 @@ the failure this design argues against.
   "unknown". The account hold is in memory (src/channels/vendor-hold.js — the
   one shape Slack's per-method 429 hold uses); the 429'd send itself stays
   failed / partly sent as before.
+- **Lark: a sign-in survives a hub stall** (lane lark-refresh-stall, .361). The
+  token refresh runs with 15 minutes to spare (the pass renews on its own) and
+  is bounded by the time the hub's loop actually ran, so a hold of the loop
+  (a NAS, a disk) never aborts it over an answer already received. An answer
+  truly lost after the request left is recorded; the same refresh token is
+  tried once, and if Lark then refuses it the account says «hub 在刷新令牌时卡住了
+  N 分钟（NAS/磁盘），飞书的一次性刷新令牌已被用掉» (cause `refresh-lost`) in the
+  hub's log, the For-you item and the red line — never «another VibeSpace».
+  A re-authorize that lands ends the red line in its own broadcast, every tab.
 
 ### Communication panel — P1b: the push lane (2026-09-16; design §6.4, fence 11, decisions 18 + 20)
 

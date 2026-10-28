@@ -39,13 +39,20 @@ const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…"
 function normalizeI18n(x) {
   if (x == null) return null;
   if (typeof x !== 'object' || Array.isArray(x)) throw new Error('i18n must be an object');
+  // lane lark-refresh-stall: a WORDS param (`{key}`) may carry its own scalar params (a dead sign-in's cause names the stall's length)
+  const nestedParams = (p) => {
+    if (!p || typeof p !== 'object' || Array.isArray(p)) return {};
+    const o = {};
+    for (const [k, v] of Object.entries(p).slice(0, 8)) { if (typeof v === 'string') o[k] = v.slice(0, 200); else if (typeof v === 'number' && Number.isFinite(v)) o[k] = v; }
+    return Object.keys(o).length ? { params: o } : {};
+  };
   const line = (l, what) => {
     if (!l || typeof l !== 'object' || typeof l.key !== 'string' || !l.key.trim()) throw new Error(`i18n.${what} needs a key`);
     const out = { key: l.key.slice(0, 400) };
     if (l.params != null) {
       if (typeof l.params !== 'object' || Array.isArray(l.params)) throw new Error(`i18n.${what}.params must be an object`);
       out.params = {};
-      for (const [k, v] of Object.entries(l.params)) { if (typeof v === 'string') out.params[k] = v.slice(0, 600); else if (typeof v === 'number' && Number.isFinite(v)) out.params[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.key === 'string' && v.key.trim()) out.params[k] = { key: v.key.slice(0, 400) }; }
+      for (const [k, v] of Object.entries(l.params)) { if (typeof v === 'string') out.params[k] = v.slice(0, 600); else if (typeof v === 'number' && Number.isFinite(v)) out.params[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.key === 'string' && v.key.trim()) out.params[k] = { key: v.key.slice(0, 400), ...nestedParams(v.params) }; }
     }
     return out;
   };

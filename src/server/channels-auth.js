@@ -642,6 +642,7 @@ function create(engineCtx) {
     await refreshAuth(e);
     e.failures = 0; e.nextAt = 0; e.rateStrikes = 0; e.backoffKind = null;
     await retractFailure(rec);
+    if (rec.signinDead) await retractSignin(rec, 'a new sign-in landed');   // lane lark-refresh-stall R5: as at the record's own door (onAuthDone)
     await rejudgeConvCaps(rec, 're-authorized');   // inc-muk9jj0j-rel3: every conversation, BEFORE the one whole digest
     if (!engineCtx.stopped) notify([]);
     if (!engineCtx.stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after re-authorize failed:', err && err.message));
@@ -945,8 +946,12 @@ function create(engineCtx) {
     if (r && r.ok) log.log(`[channels] ${rec.id}: connected${rec.auth && rec.auth.user ? ` as ${rec.auth.user}` : ''}`);
     else log.warn(`[channels] ${rec.id}: consent flow failed: ${(r && r.error) || 'unknown'}`);
     // lane channel-reauth-visible: a consent that ended without a sign-in on a DEAD account re-asserts its item (the same one,
-    // the words say the sign-in was not finished); one that landed retracts nothing — the next pass that goes through does
+    // the words say the sign-in was not finished). lane lark-refresh-stall R5 (the owner's hub 2026-10-27: his consent landed
+    // 20:57:33, the row kept «登录失效 — 需要重新授权 · …» until a pass went through at 21:02:03): one that LANDED ends the dead
+    // sign-in here, in the landing's own broadcast — the vendor just issued a fresh token; a pass the vendor refuses after
+    // it raises the same item again at its first refusal (speakSignin)
     if (!(r && r.ok) && rec.signinDead) await speakSignin(rec, 'consent-unfinished', { reassert: true, vendorWords: String((r && r.error) || '') });
+    if (r && r.ok && rec.signinDead) await retractSignin(rec, 'a new sign-in landed');
     // inc-muk9jj0j-rel3: A CONSENT CHANGES WHAT EVERY CONVERSATION MAY DO — re-judged HERE, at the write, for the whole
     // account (the pass below visits only what is due), then ONE whole digest carries the fresh verdicts
     if (r && r.ok) await rejudgeConvCaps(rec, 'connected');

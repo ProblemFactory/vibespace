@@ -853,6 +853,8 @@ function createChannelRegistry({ channelSettings } = {}) {
       state: wrap('auth.state', (impl.auth && impl.auth.state ? impl.auth.state.bind(impl.auth) : async () => ({ state: 'unknown', why: 'adapter declares no auth state' }))),
       begin: impl.auth && impl.auth.begin ? wrap('auth.begin', impl.auth.begin.bind(impl.auth)) : async () => { throw new ChannelError('not-supported', `${kind}.auth.begin is not implemented`); },
       finish: impl.auth && impl.auth.finish ? wrap('auth.finish', impl.auth.finish.bind(impl.auth)) : async () => { throw new ChannelError('not-supported', `${kind}.auth.finish is not implemented`); },
+      // lane lark-refresh-stall R3: the engine's pass renews a sign-in inside its refresh margin (an adapter without one: nothing to renew)
+      renew: impl.auth && impl.auth.renew ? wrap('auth.renew', impl.auth.renew.bind(impl.auth)) : async () => false,
     };
 
     const rawConvCaps = gated('convCaps', impl.convCaps && impl.convCaps.bind(impl));

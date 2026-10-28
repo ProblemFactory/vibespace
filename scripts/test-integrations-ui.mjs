@@ -715,6 +715,9 @@ const p2 = await newPage();
   // owner's at his press — its last pass the refusal (auth-expired) that made him re-authorize
   const lp0 = ((await accounts()).find((a) => a.id === B.id) || {}).lastPass || null;
   ok(!!lp0 && lp0.ok === false && lp0.code === 'auth-expired', `setup: the dead account's last pass is the refusal (${JSON.stringify(lp0 && { ok: lp0.ok, code: lp0.code })}) — the record the owner's landing carried`);
+  // lane lark-refresh-stall R5: a SECOND tab shows the same dead row before the press — its panel open, so the heal can reach it
+  // only by the broadcast (never a fetch of its own, never a reload)
+  ok(await p2.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && c.querySelector('.chan-sec-reauth')); }`)), 'R5 setup: a second tab, its Channels panel open, draws the same red line');
   stubMode({ email: 'ben@example.test', refresh: 'ok', expiresIn: 3600, gmailHold: true });
   await p1.evaljs(`${DLG('reauth')}.querySelector(':scope > .mounts-btn-primary').click(); 1`);
   const url3 = await p1.evaljs(consentUrlIn('#chan-reauth-dialog .mounts-oauth-link input'));
@@ -724,6 +727,13 @@ const p2 = await newPage();
   ok(await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if (!document.querySelector('#chan-reauth-dialog')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'the dialog closes when the new sign-in LANDS — the pass after it still held (lane lark-signin-dialog; 2.369.358 kept «sign-in page opened» until that pass ended)');
   const lp1 = ((await accounts()).find((a) => a.id === B.id) || {}).lastPass || null;
   ok(!(lp1 && lp1.ok === true), `…closed BEFORE the pass after the landing finished (lastPass ${JSON.stringify(lp1)}) — the dialog never waits on the account's health`);
+  // lane lark-refresh-stall R5 (the owner's hub 2026-10-27 on 2.369.358: his consent landed 20:57:33, the row kept «登录失效 —
+  // 需要重新授权 · …» until a pass went through at 21:02:03): the dead sign-in leaves WITH the landing's broadcast — this tab and
+  // the second, ≤ 2 s after the dialog closed, no reload, the pass after the landing still held
+  const gone = (pg) => pg.evaljs(`(async () => { const t0 = performance.now(); for (let i = 0; i < 20; i++) { const c = ${card(B.id)}; if (c && !c.querySelector('.chan-sec-reauth')) return Math.round(performance.now() - t0); await new Promise((r) => setTimeout(r, 100)); } return -1; })()`);
+  const g1 = await gone(p1), g2 = await gone(p2);
+  const st5 = (await accounts()).find((a) => a.id === B.id) || {};
+  ok(g1 >= 0 && g2 >= 0 && st5.authState === 'ok' && !(st5.lastPass && st5.lastPass.ok === true), `R5: the dead row leaves WITH the landing — this tab ${g1} ms, a second tab ${g2} ms (≤ 2 s, no reload), the account's authState ${st5.authState}, the pass after it still held (lastPass ${JSON.stringify(st5.lastPass || null)})`);
   stubMode({ email: 'ben@example.test', refresh: 'ok', expiresIn: 3600 });   // the held pass goes on
   ok(await p1.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && !c.querySelector('.mounts-errline') && !c.querySelector('.chan-sec-reauth') && c.querySelector('.chan-sec-health')); }`)), 'the card heals (lane channel-reauth-visible: the red line too — the good pass after the consent retracts it): the error line is gone, the health line is back');
 

@@ -77,7 +77,7 @@ export function inboxModel(app) {
   // card grammar (lane card-grammar-exceptions): a raw-API proposal says its CARD's title (`card.head`, the words the
   // chat card and the Outbox row say — never the raw path), worded here like the card does
   // lane vault-key-row-compact: a param may be WORDS (`{key}` — a verb's own words): said in this language before the sentence is filled
-  const said = (l) => t(l.key, Object.fromEntries(Object.entries(l.params || {}).map(([k, v]) => [k, v && typeof v === 'object' && typeof v.key === 'string' ? t(v.key) : v])));
+  const said = (l) => t(l.key, Object.fromEntries(Object.entries(l.params || {}).map(([k, v]) => [k, v && typeof v === 'object' && typeof v.key === 'string' ? t(v.key, v.params || undefined) : v])));   // lane lark-refresh-stall: words carry their own params
   const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.card && i.card.kind === 'api-call' && i.card.head ? titleWords(i.card.head, { t, lang: resolveLang() }) : i && i.i18n && i.i18n.text ? said(i.i18n.text) : (i && i.text) || '');
   /** The detail as LINES (the Vault window's band: its first line is a use failure's cause, the rest sit under one fold). */
   const detailLinesOf = (i) => (isCleared(i) ? [] : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map(said) : String((i && i.detail) || '').split('\n').filter(Boolean));

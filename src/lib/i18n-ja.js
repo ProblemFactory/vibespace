@@ -10659,6 +10659,10 @@ export default {
   "{account}: sign-in expired — re-authorize": "{account} のサインインが切れました — 再認証してください",
   "the vendor refused the refresh token": "サービス側が更新トークンを拒否しました",
   "your account signed in to this app from another VibeSpace": "あなたのアカウントが別の VibeSpace からこのアプリにサインインしました",
+  // lane lark-refresh-stall: a refresh whose answer was lost — the true cause, with the stall it waited through
+  "the hub stalled {minutes} min while refreshing the sign-in (NAS / disk), and its single-use refresh token was used up": "サインインの更新中に hub が {minutes} 分間止まり（NAS / ディスク）、Lark の一度しか使えないリフレッシュトークンが使い切られました",
+  "the hub stalled {seconds} s while refreshing the sign-in (NAS / disk), and its single-use refresh token was used up": "サインインの更新中に hub が {seconds} 秒間止まり（NAS / ディスク）、Lark の一度しか使えないリフレッシュトークンが使い切られました",
+  "the answer to the sign-in's refresh was lost on the way, and its single-use refresh token was used up": "サインイン更新の応答が途中で失われ、Lark の一度しか使えないリフレッシュトークンが使い切られました",
   "the sign-in reached the end of its lifetime": "サインインの有効期限が切れました",
   "the vendor refused the OAuth client": "サービス側が OAuth クライアントを拒否しました",
   "its OAuth client is no longer set up here": "この環境にはその OAuth クライアントがもう設定されていません",
