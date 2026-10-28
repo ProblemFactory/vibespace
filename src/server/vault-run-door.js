@@ -39,7 +39,7 @@
  *     own process group; a hard timeout (120 s by default, ≤ 600 s: SIGTERM, then SIGKILL 5 s later); stdout and stderr
  *     through ONE streaming scrubber per run, fed in arrival order (a StringDecoder each → createRunMasker: the value in every
  *     spelling of vault-run.js's FORMS over ONE window — a value split between the two pipes is seen whole; lane
- *     vault-scrub-forms), ≤ 2 MiB together, then secret-shapes (a name stays, its value «redacted»). ONLY that reaches the
+ *     vault-scrub-forms), ≤ 2 MiB together — VALUE-based only (round 21: the name-based secret-shapes rules never run over a child's own output). ONLY that reaches the
  *     agent. A stream CUT (the bound, the timeout, a lock, the caller gone) never flushes the scrubber's held tail: a value
  *     begun there is dropped whole.
  *   · A RUN ENDS WHOLE (the security review): when its child is gone, the child's process group is SIGKILLed (a backgrounded
@@ -1185,17 +1185,24 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         killGroup(rec, 'SIGKILL');
         const strays = endMarked(mark);
         shredDir(dir);
-        // A CUT STREAM (the 2 MiB bound, a timeout, a lock, the caller gone) keeps its held tail BACK for good: a value that
-        // began in the last (longest form − 1) characters may be only half there — flushed, its half would pass unscrubbed
+        // round 21 («never drop a byte»): a CUT stream (the 2 MiB bound, a timeout, a lock, the caller gone) FLUSHES its held tail
+        // SCRUBBED — scrub.end(cut) masks every complete value in it and masks the one trailing partial-value prefix a cut can leave
+        // (was: the tail dropped for good, so bytes vanished; a naive raw flush leaked the half value — the masker now does both)
         const cut = truncated || !!rec.stopped || rec.piped;   // + the pipes cut 2 s after the child's exit (the review)
         for (const k of ['out', 'err']) handOn(scrub.push(k, dec[k].end()));
-        if (!cut) handOn(scrub.end());
+        handOn(scrub.end(cut));
         values = null;
         const ms = now() - t0;
-        const outT = redactLong(parts.out.join('')), errT = redactLong(parts.err.join(''));
+        // round 21 (fb-93219e801a): the run's output scrubber is VALUE-based ONLY — createRunMasker (`scrub`) above masked the
+        // injected values and their encodings; the NAME-based secret-shapes rules (R2/R5/R6/R7/R8) do NOT run over a child's own
+        // output — a JSON field named `key`/`auth`/`token` the tool returns is the tool's data, not a secret (unless its VALUE is
+        // an injected value, which createRunMasker already caught), and the name-based bare-value rule SWALLOWS a one-line JSON
+        // (the owner's agent got 1008 bytes of «redacted» for a 10 KB response). The name-based belt is for text whose values are
+        // UNKNOWN (chat, logs, the group feed, the judge input), never a run's output. See kb-design-lessons, the vault-run row (THE TWO SCRUBBERS).
+        const outT = { text: parts.out.join(''), redacted: 0 }, errT = { text: parts.err.join(''), redacted: 0 };
         const scrubbed = { hits: scrub.hits, bytes: scrub.bytes, byForm: Object.fromEntries(VR.FORMS.map((f) => [f, scrub.byForm[f] || 0]).filter(([, n]) => n)) };
         // the run's RECEIPT (minted at the run's start): the agent's answer, its audit line and each entry's use line carry the same one (design D1: a use + a receipt)
-        const line = { ...head, receipt, allowedBy: verdict.by, askId, exit: Number.isInteger(code) ? code : null, signal: sig || null, ms, timedOut: rec.stopped === 'timeout', truncated, tailDropped: cut, strays, scrubbed, redacted: outT.redacted + errT.redacted, stdout: utf8Head(outT.text), stderr: utf8Head(errT.text) };
+        const line = { ...head, receipt, allowedBy: verdict.by, askId, exit: Number.isInteger(code) ? code : null, signal: sig || null, ms, timedOut: rec.stopped === 'timeout', truncated, tailDropped: false, strays, scrubbed, redacted: outT.redacted + errT.redacted, stdout: utf8Head(outT.text), stderr: utf8Head(errT.text) };
         if (spawnError) { const { receipt: _r, ...noRun } = line; note('spawn_failed', { ...noRun, why: spawnError }); resolve(named('spawn_failed', { why: spawnError })); return; }   // no child ran: no receipt, no use
         if (rec.stopped === 'lock') { note('vault_locked', { ...line, killed: true }); try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } resolve(named('vault_locked', { killed: true })); return; }
         if (rec.stopped === 'gone') { note('caller_gone', { ...line, killed: true }); resolve(named('caller_gone')); return; }

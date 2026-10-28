@@ -151,7 +151,7 @@ function redactContinuations(text) {
 // R2: `NAME = value` / `NAME: value` / `"name": "value"` / `--name=value` — the HEAD is matched, the value's extent is
 // decided in code (a regex that consumed the value either stopped a bare value at a space — `Authorization: Bearer
 // abc` kept `abc` — or swallowed the next key of `a=1 token=x`): a quoted value to its closing quote on the line, a
-// bare value to the end of its line (`token=abc ms=5` hides `ms=5` too — a stored head hides more, never less)
+// bare value to the end of its line, OR the first `,` `}` `]` `)` (round 21 / B-5a9a: a one-line JSON is never swallowed) — a space is NOT a delimiter (`Bearer abc`, `token=a ms=5` keep reading); a stored head hides more, never less
 const KV_HEAD = /(^|[\s,;{(\[:/])(-{0,2})(["']?)([A-Za-z_][A-Za-z0-9_.\-]{0,80})\3([ \t]*[:=][ \t]*)/gm;   // verify r2 F4: `:` and `/` open a name too (.npmrc's `//registry…/:_authToken=<uuid>`)
 /** Is the character at `i` preceded by an ODD run of backslashes (escaped)? */
 function escapedAt(text, i) { let k = 0; while (i - 1 - k >= 0 && text[i - 1 - k] === '\\') k++; return k % 2 === 1; }
@@ -169,6 +169,8 @@ function redactKv(text) {
     if (q) {   // verify r2 F5: a backslash-escaped quote inside the value does not close it (`"ab\"cd"` kept `cd"`); verify r5 F1: nor a doubled one (`'it''s'` kept `s'`)
       const close = nextClose(text, headEnd + 1, q, lineEnd);
       if (close >= 0) valEnd = close + 1;
+    } else {   // round 21 (B-5a9a): a BARE value stops at the first `,` `}` `]` `)` (and the line end) so a one-line JSON / a trailing `Password=x,\u2026` is never swallowed whole; a space is still NOT a delimiter (`Authorization: Bearer abc` keeps `abc`, `token=a ms=5` still hides `ms=5` — a stored head hides more, never less)
+      for (let p = headEnd; p < lineEnd; p++) { const c = text.charCodeAt(p); if (c === 44 || c === 125 || c === 93 || c === 41) { valEnd = p; break; } }
     }
     // verify r2 F2: the WHOLE value, to its closing quote or its line end — a cut at VALUE_MAX replaced the first 4096
     // characters and KEPT the rest of the line: a 6 KB bearer JWT (an Azure token), a kubeconfig `client-key-data` of an

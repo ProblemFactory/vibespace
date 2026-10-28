@@ -103,6 +103,7 @@ const [mode, arg] = process.argv.slice(2);
     return;
   }
   if (mode === 'ran') { fs.writeFileSync(arg, 'ran'); return; }
+  if (mode === 'json') { const v = process.env.T, b = Buffer.from(v); process.stdout.write('{"meta":{"rc":"ok"},"key":"6a358d5d88b53304a7bc8213","use_auth":false,"site":"HQ","auth":"' + b.toString('base64') + '","raw":"' + v + '","ok":true}\\n'); return; }
   if (mode === 'split') { const v = process.env.T, h = v.length >> 1; process.stdout.write('<' + v.slice(0, h)); await sleep(40); process.stderr.write(v.slice(h) + '>\\n'); await sleep(40); process.stdout.write(' tail\\n'); return; }   // ONE value, half on each pipe
   if (mode === 'edge2') { process.stdout.write('x'.repeat(2 * 1024 * 1024 - 60) + [...process.env.T].map((c) => '&#' + c.codePointAt(0) + ';').join('') + 'y'.repeat(4096)); return; }   // a LONG new form across the 2 MiB cut
   if (mode === 'edge3') { process.stdout.write(Buffer.concat([Buffer.from('x'.repeat(2 * 1024 * 1024 - 40)), Buffer.from(process.env.T, 'utf16le'), Buffer.from('y'.repeat(4096))])); return; }
@@ -315,7 +316,7 @@ console.log('② THE SCRUB — every form of the value, cut across chunks, on bo
   for (const [mode, what, dec] of [['edge2', 'its HTML entities (~200 characters, 60 inside the bound)', (s) => s.replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d))], ['edge3', 'its UTF-16LE bytes (40 inside the bound)', (s) => s.replace(/\0/g, '')]]) {
     const e2 = await runAnswered(w, ENV(mode));
     const t2 = (e2.r.stdout || '').slice(-1200), d2 = dec(t2);
-    ok(e2.r.ok && e2.r.truncated === true && !leaks(t2, VALUE).length && !d2.includes(VALUE.slice(0, 6)) && /x$/.test(t2), `a value printed ACROSS the 2 MiB cut as ${what}: the held tail is the window as the VIEW reads it (longest form − 1 characters of the value, its escapes and NULs beside them) — dropped at the cut, not even 6 characters of it arrive`, { truncated: e2.r.truncated, tail: JSON.stringify(t2.slice(-80)) });
+    ok(e2.r.ok && e2.r.truncated === true && !leaks(t2, VALUE).length && !d2.includes(VALUE.slice(0, 6)) && t2.endsWith('[vault:\u2026]'), `a value printed ACROSS the 2 MiB cut as ${what}: round 21 («never drop a byte») — the held tail (the window where a value is HALF present in that VIEW) is FLUSHED as ONE placeholder [vault:…] (not dropped silently, not half a value), not even 6 characters of it arrive`, { truncated: e2.r.truncated, tailDropped: e2.r.tailDropped, tail: JSON.stringify(t2.slice(-80)) });
   }
   const app = await runAnswered(w, ['--env', 'T=vault://app-secrets/app1/item.0.1', '--', NODE, PRINTER, 'env']);
   ok(app.r.ok && !leaks(app.r.stdout + app.r.stderr, VALUE2).length && /\[vault:app-secrets\/app1\/item\.0\.1\]/.test(app.r.stdout), 'an app login opened for runs: the same — its placeholder, 0 bytes of it', app.r.code);
@@ -536,6 +537,30 @@ console.log('⑬ THE LATE CARD past its life — the 24 h end (said), the lock, 
   ok(keptLate.status === 'open' && keptLate.action.late === true && fresh._lateAsks.size === 1 && deadLive.status === 'done' && deadLive.resolvedBy === 'ask-expired', 'round 20b: the boot reconcile KEEPS a late card open (re-registered, still answerable) while a LIVE card a dead process left is settled ask-expired', { late: keptLate.status, live: deadLive.status, lateAsks: fresh._lateAsks.size })
 }
 
+console.log('⑭ THE RUN OUTPUT IS VALUE-ONLY (lane vault-agent-own r21; fb-93219e801a) — the injected values go, the tool\'s own named fields stay, no byte dropped');
+{
+  const w = await world(); openRow(w);
+  const j = await runAnswered(w, ENV('json'), { answer: 'once' });
+  const out = (await j.r).stdout || '';
+  ok(/"key":"6a358d5d88b53304a7bc8213"/.test(out) && /"use_auth":false/.test(out) && /"ok":true\}/.test(out) && out.trim().endsWith('}'), 'round 21: the tool\'s OWN fields named key / use_auth survive and the one-line JSON is WHOLE (ends "ok":true}) — the value scrubber never name-redacts, never swallows (54f757df redacted key/auth by name and cut the JSON to 1008 bytes)', out.slice(0, 160));
+  ok(/"auth":"\[vault:/.test(out) && /"raw":"\[vault:/.test(out) && !leaks(out, VALUE).length, 'round 21: the INJECTED value (raw AND base64) is redacted to [vault:…] in both fields — the value scrubber masks the values and their encodings, nothing of the value leaks', out.slice(0, 200));
+
+  // the held-tail flush on a CUT (the value across the 2 MiB bound): the tail is FLUSHED scrubbed (tailDropped false now), the value never leaks
+  const bw = await world(); openRow(bw);
+  const e = await runAnswered(bw, ENV('edge'), { answer: 'once' });
+  const er = await e.r;
+  ok(er.truncated === true && (er.stdout || '').endsWith('[vault:\u2026]') && !leaks((er.stdout || '').slice(-400), VALUE).length, 'round 21 («never drop a byte»): a CUT stream FLUSHES its held tail SCRUBBED (it ends with the [vault:…] placeholder, not a silent drop) and the value split by the 2 MiB cut never leaks', { truncated: er.truncated, tail: (er.stdout || '').slice(-30) });
+
+  // RED CONTROL (the 54f757df behaviour): a door that runs the name-based redactLong over the run output over-redacts the tool's fields and/or swallows the one-line JSON
+  const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+  const FROM = "const outT = { text: parts.out.join(''), redacted: 0 }, errT = { text: parts.err.join(''), redacted: 0 };";
+  const nm = SRC.split(FROM).length - 1;
+  const mod = nm === 1 ? M.load('src/server/vault-run-door.js', SRC.replace(FROM, "const outT = redactLong(parts.out.join('')), errT = redactLong(parts.err.join(''));"), 'nameredact') : null;
+  let mout = null;
+  if (mod) { const mw = await world({ doorMod: mod }); openRow(mw); const mj = await runAnswered(mw, ENV('json'), { answer: 'once' }); mout = (await mj.r).stdout || ''; }
+  ok(nm === 1 && mout && (/"key":"«redacted»"/.test(mout) || !/"ok":true\}/.test(mout)), 'MUTANT «the name-based pass runs over the run output» (the 54f757df behaviour): the patch hits once and the leg goes RED — the tool\'s key field is name-redacted and/or the one-line JSON is swallowed; the shipped door leaves them whole', { keyRedacted: /"key":"«redacted»"/.test(mout || ''), whole: /"ok":true\}/.test(mout || '') });
+}
+
 console.log('④ THE LOCK — a lock mid-run ends the child within its bound; the answer is vault_locked');
 {
   const w = await world({ killGraceMs: 400 });
@@ -697,7 +722,7 @@ console.log('⑦ MUTANTS — patched copies of the door, each RED on its leg');
   if (m3.mod) { const w3 = await world({ doorMod: m3.mod }); openRow(w3); r3 = await splitLeg(w3); }
   ok(m3.n === 1 && r3 && r3.lk.length > 0, `MUTANT «two scrubbers, one per pipe» (the pre-lane shape): the patch hits once and the split leg goes RED (the oracle finds ${r3 && r3.lk.join(', ')}); the shipped door's ONE scrubber masks it`, r3);
   // a CUT keeps the held tail back: flushed, a long new form begun inside the bound would arrive in part
-  const m4 = mutate('if (!cut) handOn(scrub.end());', 'handOn(scrub.end());', 'cutflush');
+  const m4 = mutate('handOn(scrub.end(cut));', 'handOn(scrub.end());', 'cutflush');   // round 21: dropping the cut arg flushes the held tail RAW (cut=false ⇒ no maskTail) and leaks the half value
   let r4 = null;
   if (m4.mod) { const w4 = await world({ doorMod: m4.mod }); openRow(w4); const e = await runAnswered(w4, ENV('edge2')); const tl = (e.r.stdout || '').slice(-1200); r4 = { truncated: e.r.truncated, lk: leaks(tl, VALUE), head: tl.replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d)).includes(VALUE.slice(0, 6)) }; }
   ok(m4.n === 1 && r4 && r4.truncated && (r4.lk.length > 0 || r4.head), 'MUTANT «a cut flushes the held tail»: the patch hits once and the edge leg goes RED (the first characters of the value\'s entities arrive); the shipped door drops them', r4);

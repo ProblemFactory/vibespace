@@ -1334,6 +1334,23 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
     held = next;
     return out;
   }
+  // round 21 (fb-93219e801a, «never drop a byte»): on a CUT (the 2 MiB bound / a timeout / a lock / the caller gone) the held tail
+  // was DROPPED for good — a value begun in the last (W) characters might be only half there, and flushed raw its half would leak.
+  // Now the tail is FLUSHED but SCRUBBED: step(true) masks every COMPLETE value in it, then maskTail masks the longest trailing
+  // run that is a non-empty PREFIX of some value's encoding (the only thing a cut can leave half) with that value's placeholder —
+  // so nothing is dropped and no half value passes. A normal end has no partial (the stream is whole), so `cut` leaves it alone.
+  const CUT_PH = placeholderOf({ label: '\u2026' });   // the cut tail's placeholder «[vault:\u2026]» — an uncertain window, not any one value
+  function endStep(cut) {
+    if (!cut || !re) return step(true);   // a COMPLETE stream (or no secrets): flush all, every complete match masked — no partial to fear
+    // a CUT (an incomplete stream): the pushes already flushed everything SAFE; the held tail (\u2264 W per stream) is the window where a
+    // value could be HALF present in ANY form (raw or a decoded view), so it cannot be flushed raw (a half value would leak) nor dropped
+    // silently (\u00abnever drop a byte\u00bb). It is emitted as ONE placeholder per stream \u2014 scrubbed as far as it can be told.
+    const out = {}; for (const k of names) out[k] = '';
+    const own = new Map(); for (const [k, x] of held) own.set(k, (own.get(k) || '') + x);
+    for (const [k, x] of own) if (x) { out[k] = CUT_PH; st.hits++; st.bytes += bytesOf(x); }
+    held = [];
+    return out;
+  }
   return {
     push(stream, chunk) {
       if (!names.includes(stream)) throw new TypeError(`no such stream: ${stream}`);
@@ -1341,14 +1358,14 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
       if (t) { const last = held[held.length - 1]; if (last && last[0] === stream) last[1] += t; else held.push([stream, t]); }
       return step(false);
     },
-    end: () => step(true),
+    end: (cut = false) => endStep(cut),
     get hits() { return st.hits; }, get bytes() { return st.bytes; }, get byForm() { return { ...st.byForm }; }, window: W, streams: names,
   };
 }
 /** ONE stream's scrubber (a whole text, the belt's): the run masker with one stream. → { push(chunk) → text, end() → text, hits, bytes, byForm, window }. */
 function createMasker(secrets) {
   const m = createRunMasker(secrets, ['out']);
-  return { push: (chunk) => m.push('out', chunk).out, end: () => m.end().out, get hits() { return m.hits; }, get bytes() { return m.bytes; }, get byForm() { return m.byForm; }, window: m.window };
+  return { push: (chunk) => m.push('out', chunk).out, end: (cut) => m.end(cut).out, get hits() { return m.hits; }, get bytes() { return m.bytes; }, get byForm() { return m.byForm; }, window: m.window };
 }
 /** One whole text scrubbed (a card's command, a short output, the output belt's sink text). */
 function maskText(text, secrets) { const m = createMasker(secrets); return m.push(text) + m.end(); }

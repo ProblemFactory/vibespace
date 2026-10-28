@@ -129,6 +129,7 @@ back the output with the value blanked to `[vault:<store>/<row>/<field>]`.
 - **It runs on this instance**, in your folder (the project, the temp folder or ~/Downloads), 120 s by default
   (`--timeout`, ≤ 600 s), output ≤ 2 MiB; the exit code is the command's. When it ends, anything it left running ends
   too. A remote conversation and `--on` are not here yet (`device_road_later`).
+- **The output scrubber replaces the VALUES you injected, never a field by its name, and never cuts the output** (round 21): it blanks each injected value and its common encodings (raw, base64, hex, URL, JSON-escaped, UTF-16, …) to `[vault:<store>/<row>/<field>]` wherever they appear — a JSON field the tool returns that happens to be named `key` / `auth` / `token` is the tool's own data and is left alone (it is not a secret unless its VALUE is one you injected), and the whole output arrives (a value cut off by the 2 MiB bound shows a `[vault:…]` placeholder at the end, never a dropped byte).
 - **The scrubber is a sieve, not a wall**: the output is scrubbed of the value's common spellings; a command that
   re-encodes it can still show it — the owner sees the whole command before it runs. (The spellings: itself, base64,
   base32, URL-encoded, JSON-, HTML- or backslash-escaped, hex, UTF-16, quoted-printable, coloured or wrapped. A part of a

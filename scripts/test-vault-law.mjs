@@ -205,7 +205,7 @@ console.log('④ the agent side has no unlock');
   const cliRuns = /\/api\/agent\/vault\/run'/.test(cli) && /\/api\/agent\/vault\/runnable'/.test(cli);
   ok(cliRuns, 'data/bin/vibespace-vault calls run and runnable (lane vault-run-door) — and still no unlock / setup / change (above)');
   // THE RUN DOOR'S ANSWER (lane vault-run-door): every chunk of the child's stdout / stderr reaches `parts` only through the
-  // run's scrubber, the tail at the end too; the answer's two streams are those parts through secret-shapes — nothing else.
+  // run's scrubber, the tail at the end too; the answer's two streams are those VALUE-masked parts ONLY (round 21: not secret-shapes — a tool's own named field is not a secret) — nothing else.
   // Lane vault-scrub-forms: ONE scrubber per run (createRunMasker, both pipes in arrival order — one window): `parts` is
   // written in ONE place, `handOn`, and `handOn` is handed only what that scrubber's push / end answer
   const door = tree.get('src/server/vault-run-door.js') || '';
@@ -215,7 +215,7 @@ console.log('④ the agent side has no unlock');
     return writes.join(' ') === 'parts.out.push(o.out); parts.err.push(o.err);'
       && /const handOn = \(o\) => \{ parts\.out\.push\(o\.out\); parts\.err\.push\(o\.err\); \};/.test(t)
       && handed.length === 3 && handed.every((a) => /^scrub\.(push|end)\(/.test(a)) && /scrub = VR\.createRunMasker\(secrets, \['out', 'err'\]\)/.test(t)
-      && /const outT = redactLong\(parts\.out\.join\(''\)\), errT = redactLong\(parts\.err\.join\(''\)\);/.test(t)
+      && /const outT = \{ text: parts\.out\.join\(''\), redacted: 0 \}, errT = \{ text: parts\.err\.join\(''\), redacted: 0 \};/.test(t)
       && /stdout: outT\.text, stderr: errT\.text/.test(t) && !/stdout: (?!outT\.text|utf8Head\(outT\.text\))/.test(t) && !/stderr: (?!errT\.text|utf8Head\(errT\.text\))/.test(t);
   };
   ok(scrubbedOnly(door), 'the run door hands the agent ONLY scrubbed text: each stream chunk enters its parts through the run\'s ONE scrubber (createRunMasker\'s push, the end\'s tail too — one place, handOn), the answer\'s stdout / stderr are those parts through secret-shapes — no other stdout / stderr field');

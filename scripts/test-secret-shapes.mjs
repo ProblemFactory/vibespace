@@ -97,5 +97,20 @@ console.log('§3 THE BELT’S MASKABLE-ENTRY ENUMERATION — host: / file: are n
   }
 }
 
+{
+  const S = r('src/secret-shapes.js');
+  // round 21 (B-5a9a): the generic R2 bare value stops at `,` `}` `]` `)` (and the line end) so a one-line JSON / a trailing flag is never SWALLOWED whole
+  const j = S.redactSecrets('{"use_auth":false,"token":"abc123def456ghi","ok":true,"n":5}').text;
+  ok(j === '{"use_auth":«redacted»,"token":"«redacted»","ok":true,"n":5}', 'R2 keeps a one-line JSON WHOLE: a bare value (use_auth:false) stops at the `,`, the quoted token is redacted, and the following keys + the closing `}` survive (B-5a9a: the swallow is gone)', j);
+  const brace = S.redactSecrets('{"password":hunter2hunter2}').text;
+  ok(brace === '{"password":«redacted»}', 'R2 bare value stops at `}` — the object close survives (B-5a9a: not swallowed to the line end)', brace);
+  const msg = S.redactSecrets('password=hunter2hunter2, then restart the box').text;
+  ok(msg === 'password=«redacted», then restart the box', 'R2 keeps a sentence after a bare value whole — a group message is not cut after the password (B-5a9a: a trailing `Password=x, …` ended a feed message)', msg);
+  const brk = S.redactSecrets('[password=secret1234567]').text;
+  ok(brk === '[password=«redacted»]', 'R2 bare value stops at `]` too — the bracket close survives', brk);
+  const bearer = S.redactSecrets('Authorization: Bearer abc123def456ghijkl and more').text;
+  ok(bearer === 'Authorization: «redacted»', 'a space is still NOT a delimiter — the whole line-tail after an auth name is redacted (R2 hides more, never less; the `Bearer <token> and more` goes to the line end)', bearer);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
