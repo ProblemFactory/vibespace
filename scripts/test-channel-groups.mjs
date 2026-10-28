@@ -1034,6 +1034,10 @@ console.log('§3k a renamed member session: the panel\'s count and the server\'s
   const pv2 = r1.group ? wakePreview(r1.group, text2).length : -1;
   const r2 = await ownerPost(text2, pv2);
   ok(pv2 === 2 && r2.ok === true && r2.woke.length === 2, '…so the SECOND click, @ the live name, counts against live names and is sent (the preview says who it truly wakes)', JSON.stringify({ pv2, ok: r2.ok }));
+  // lane owner-press-attended: the USER's own post (G.OWNER — the cookie-only owner routes, the wake count echoed first)
+  // wakes under the ATTENDED `owner-group-wake` — never refused by, never counted against, the unattended budget; an
+  // agent's post (§3's invite by A) stays `peer-message`
+  ok(f.auths.length >= 2 && f.auths.slice(-2).every((x) => x.reason === 'owner-group-wake'), 'the user\'s own post wakes its 2 members under owner-group-wake (attended), not peer-message', JSON.stringify(f.auths.slice(-2)));
   // and a rename is ANNOUNCED: the roster's entry point asks the engine, which broadcasts only on a change
   f.roster[2].name = 'gamma-renamed';
   const b0 = f.bcasts.length;
@@ -1782,7 +1786,10 @@ console.log('§5 censuses');
   }
   const eng = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
   const calls = [...eng.matchAll(/deliverToConversation\(([^;]*)\)/g)];
-  ok(calls.length === 1 && calls.every((m) => /spendReason: 'peer-message'/.test(m[1])), 'the groups engine has ONE ladder call and it carries spendReason peer-message', calls.map((m) => m[0].slice(0, 80)).join(' | '));
+  // lane owner-press-attended: the ONE call spreads `paid` — the USER's own post (`self`) is the attended
+  // `owner-group-wake`, an agent's stays `peer-message`; both literals sit on the ONE line above the call
+  ok(calls.length === 1 && calls.every((m) => /\.\.\.paid\b/.test(m[1])) && /const paid = self \? \{ spendReason: 'owner-group-wake' \} : \{ spendReason: 'peer-message' \};/.test(eng),
+    'the groups engine has ONE ladder call; it carries spendReason owner-group-wake for the user\'s own post (attended) and peer-message for an agent\'s', calls.map((m) => m[0].slice(0, 80)).join(' | '));
   ok(!/stashFor\(/.test(eng), 'a refused wake is never stashed by the engine (the report is its durable fallback)');
 }
 

@@ -559,9 +559,11 @@ function trackedServerSource() {
     const hits = censusOver(REPO, files);
     const allowKey = (h) => h.file + '#' + h.prim;
     const allowSet = new Set(ALLOW.map((a) => a.file + '#' + a.prim));
+    // lane owner-press-attended: the ATTENDED column — the attended reasons a site file spells (§2b fences their doors)
+    const attendedIn = (f) => Object.keys(A.SPEND_REASONS).filter((r) => A.SPEND_REASONS[r].attended === true && read(f).includes(`spendReason: '${r}'`));
     console.log('    producer SITES found (' + hits.length + ' in ' + new Set(hits.map((h) => h.file)).size + ' files):');
     for (const h of [...hits].sort((a, b) => (a.file + a.prim).localeCompare(b.file + b.prim)))
-      console.log(`      ${h.gated ? 'GATED   ' : allowSet.has(allowKey(h)) ? 'allowed ' : 'UNWIRED '} ${h.file}:${h.line}  [${h.prim}]${h.via ? '  ← ' + h.via : ''}`);
+      console.log(`      ${h.gated ? 'GATED   ' : allowSet.has(allowKey(h)) ? 'allowed ' : 'UNWIRED '} ${h.file}:${h.line}  [${h.prim}]${h.via ? '  ← ' + h.via : ''}${attendedIn(h.file).length ? '  · attended: ' + attendedIn(h.file).join(', ') : ''}`);
     const unwired = hits.filter((h) => !h.gated && !allowSet.has(allowKey(h))).map((h) => `${h.file}:${h.line} [${h.prim}]`);
     ok('§2 every SITE that can open an unattended turn is under the authorizer (or allowlisted WITH a reason)', unwired.length === 0, unwired.join(', '));
     const deadAllow = ALLOW.filter((a) => !hits.some((h) => h.file === a.file && h.prim === a.prim));
@@ -782,6 +784,151 @@ function trackedServerSource() {
     /spendGuard\.flush\(\)/.test(srv) && /function shutdown\(\)[\s\S]{0,900}spendGuard\.flush\(\)/.test(srv));
   ok('§2 §ban-safety: the vendor whitelist is untouched by this change (design §7 — if it needed a change, the design is wrong)',
     !/spend-authorizer|spend-guard|spend-budget/.test(read('scripts/test-vendor-whitelist.mjs')));
+}
+
+// ── §2b THE ATTENDED LAW (lane owner-press-attended) ────────────────────────
+// userW (measured 2026-10-28 00:33–00:48 PT): five presses of the strip's «Hand over now · starts a turn» were refused
+// `hour-cap` (an agent's @-mention fan-out had spent the account's 30), and the sixth — after the cap was raised — was
+// CHARGED. A per-occurrence press on a cookie-only door is an ATTENDED turn: the ceiling neither refuses nor counts it.
+// THE FENCE: every attended reason is spelled at ONE site file only, and every door that reaches that site refuses
+// EVERY bearer (vsst_ / jbt_ / an automation key's vsak_) as its first act. The reason set and the spellings are
+// DERIVED (src/spend-authorizer.js + the tracked tree); the doors are DECLARED here, each read for its refusal.
+console.log('\n§2b the attended law: a person\'s press is neither refused nor counted; every attended site is a cookie-only door');
+const ATTENDED_DOORS = {
+  'stash-handover': { site: 'src/server/stash-handover.js', doors: [['src/server/stash-handover.js', "app.post('/api/sessions/:id/stash/hand-over'"]] },
+  'window-share-request': { site: 'src/server/window-request.js', doors: [['src/routes/desktop-apps.js', "router.post('/api/desktop/apps/:id/reach/request'"]] },
+  'owner-group-wake': { site: 'src/server/groups-engine.js', doors: [['src/routes/channels.js', "router.post('/api/channel-groups'"], ['src/routes/channels.js', "router.post('/api/channel-groups/:id/:verb'"]] },
+  'outbox-wake-now': { site: 'src/server/channels-outbound.js', doors: [['src/routes/channels.js', "router.post('/api/channels/outbox/:id/approve'"], ['src/routes/channels.js', "router.post('/api/channels/outbox/:id/reject'"]] },
+  'owner-channel-send': { site: 'src/channels/agents.js', doors: [['src/routes/channels.js', "router.post('/api/channels/:adapterId/:convId/send'"], ['src/routes/channels.js', "router.post('/api/channels/:adapterId/:convId/propose'"], ['src/routes/channels.js', "router.post('/api/channels/outbox/:id/approve'"]] },
+  'browser-handback': { site: 'src/server/browser-handback.js', doors: [['src/routes/browser.js', "router.post('/api/browser/handback'"], ['src/routes/browser.js', "router.post('/api/browser/takeovers/:id/done'"], ['src/routes/browser.js', "router.post('/api/browser/proposals/:id/approve'"], ['src/routes/desktop-apps.js', "router.post('/api/desktop/apps/:id/handback'"], ['src/routes/window-targets.js', "router.post('/api/window/desktop/:handle/resume'"]],
+    other: "the live view's own socket (src/server/browser-stream.js handbackFor — the page's stream, requestAuthed at the handshake) and the user's ✓ on a takeover request's For-you item (browser-handback onItemStatus `by === 'user'`)" },
+};
+// A door refuses EVERY bearer when its first act (after `try {` and the host guard — `refuseHost` / `forHost`, which only
+// answer 501 for another machine) is `pressBearer(req.headers)` — or the file's own `refuseAgentBearer` WHEN that helper is
+// the any-bearer refusal (src/routes/browser.js, src/routes/channels.js: its definition asks pressBearer).
+const REFUSES_FIRST = /^\s*if \((?:pressBearer\(req\.headers\)|refusePressBearer\(req, res\)|refuseAgentBearer\(req, res[^)]*\))\)/;
+const anyBearerHelper = (src) => /function refuseAgentBearer\([^)]*\) \{\s*if \(!isAgentBearer\(req\) && !pressBearer\(req\.headers\)\) return false;/.test(src);
+/** A door's handler: does it refuse a bearer before anything else (`try {` and the host guard aside)? */
+function doorRefusesFirst(src, head) {
+  const at = src.indexOf(head);
+  if (at < 0 || src.indexOf(head, at + 1) >= 0) return { ok: false, why: at < 0 ? 'route not found' : 'route registered twice' };
+  const body = src.slice(src.indexOf('\n', at) + 1).split('\n').filter((l) => l.trim() && !/^\s*\/\//.test(l));
+  let i = 0;
+  while (i < body.length && (/^\s*try \{\s*$/.test(body[i]) || /^\s*if \(refuseHost\(req, res\)\) return;/.test(body[i]) || /^\s*forHost\(req\);\s*$/.test(body[i]))) i++;
+  const first = body[i] || '';
+  const viaHelper = /refuseAgentBearer\(/.test(first);
+  return { ok: REFUSES_FIRST.test(first) && (!viaHelper || anyBearerHelper(src)), why: first.trim().slice(0, 90) };
+}
+{
+  const attended = Object.keys(A.SPEND_REASONS).filter((r) => A.SPEND_REASONS[r].attended === true).sort();
+  ok('§2b the attended set is the declared door table, both ways (' + attended.join(', ') + ')',
+    attended.length >= 6 && JSON.stringify(attended) === JSON.stringify(Object.keys(ATTENDED_DOORS).sort()) && attended.every((r) => A.SPEND_REASONS[r].turn === true),
+    JSON.stringify({ attended, table: Object.keys(ATTENDED_DOORS).sort() }));
+  // every attended reason is spelled at its ONE site — an attended literal in any other tracked file is a door nobody fenced
+  let files = [];
+  try { files = trackedServerSource(); } catch { files = []; }
+  const spelled = {};
+  for (const f of files) { const s = read(f); for (const r of attended) if (s.includes(`spendReason: '${r}'`)) (spelled[r] = spelled[r] || []).push(f); }
+  ok('§2b every attended reason is spelled at its ONE declared site (' + attended.map((r) => `${r}@${(spelled[r] || []).join('+')}`).join(' · ') + ')',
+    files.length > 50 && attended.every((r) => JSON.stringify(spelled[r] || []) === JSON.stringify([ATTENDED_DOORS[r].site])), JSON.stringify(spelled));
+  const rows = [];
+  for (const [r, row] of Object.entries(ATTENDED_DOORS)) for (const [f, head] of row.doors) rows.push({ r, f, head, v: doorRefusesFirst(read(f), head) });
+  console.log('    attended doors (reason · door · bearer):');
+  for (const x of rows) console.log(`      ${x.r.padEnd(20)} ${x.head.replace(/^(?:app|router)\.post\('/, 'POST ').replace(/'$/, '')} (${x.f})  ${x.v.ok ? 'refused first' : 'NOT REFUSED — ' + x.v.why}`);
+  ok('§2b THE FENCE: every door that reaches an attended site refuses EVERY bearer as its first act (' + rows.length + ' doors)', rows.length >= 12 && rows.every((x) => x.v.ok), JSON.stringify(rows.filter((x) => !x.v.ok).map((x) => [x.r, x.head, x.v.why])));
+  // CONTROL: the same reader over a door whose refusal was removed (the 6428c67e shape for the group routes) reads it unfenced
+  const ch = read('src/routes/channels.js');
+  const cut = ch.replace("router.post('/api/channel-groups/:id/:verb', async (req, res) => {\n  try {\n    if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;\n", "router.post('/api/channel-groups/:id/:verb', async (req, res) => {\n  try {\n");
+  ok('§2b …CONTROL: the group verb route without its refusal reads NOT refused (the reader is not vacuous)', cut !== ch && !doorRefusesFirst(cut, "router.post('/api/channel-groups/:id/:verb'").ok && doorRefusesFirst(ch, "router.post('/api/channel-groups/:id/:verb'").ok);
+  const br = read('src/routes/browser.js');
+  const brOld = br.replace('if (!isAgentBearer(req) && !pressBearer(req.headers)) return false;', 'if (!isAgentBearer(req)) return false;');
+  ok('§2b …CONTROL: browser.js\'s refuseAgentBearer back at vsst_ / jbt_ only (6428c67e) — its hand-back door reads NOT refused (an automation key\'s vsak_ would press it)',
+    brOld !== br && doorRefusesFirst(br, "router.post('/api/browser/handback'").ok && !doorRefusesFirst(brOld, "router.post('/api/browser/handback'").ok);
+  ok('§2b the bearer predicate refuses vsst_, jbt_ and vsak_ alike and no cookie request',
+    ['Bearer vsst_' + 'a'.repeat(32), 'Bearer jbt_' + 'b'.repeat(32), 'Bearer vsak_' + 'c'.repeat(43), 'bearer x'].every((h) => require(path.join(REPO, 'src/write-origin.js')).pressBearer({ authorization: h }))
+      && !require(path.join(REPO, 'src/write-origin.js')).pressBearer({ cookie: 'vs_token=' + 'd'.repeat(48) }) && !require(path.join(REPO, 'src/write-origin.js')).pressBearer({}));
+
+  // THE PURE LAW over the measured ledger: 30 stamps this hour (peer-message), the default cap 30
+  const now = Date.parse('2026-10-28T07:47:34Z');
+  const st = [...Array(30)].map((_, i) => ({ at: Date.parse('2026-10-28T07:21:33Z') + i * 1e4, reason: 'peer-message' }));
+  const full = { v: 1, identities: { k: st }, instance: st, notices: {} };
+  const who = { key: 'k', name: 'acct-1' };
+  const ask = (M, reason, extra = {}) => M.authorizeUnattendedSpend({ reason, identity: who, state: full, limits: M.budgetLimits(() => undefined), now, ...extra });
+  const press = ask(A, 'stash-handover');
+  const retry = ask(A, 'stash-retry');
+  ok('§2b a FULL hour (30 stamps, cap 30) AUTHORIZES the press `stash-handover` as attended — and still refuses its automatic twin `stash-retry` (hour-cap, next free 08:21:33Z)',
+    press.ok === true && press.attended === true && retry.ok === false && retry.why === 'hour-cap' && retry.retryAfter === Date.parse('2026-10-28T08:21:33Z'), JSON.stringify({ press: [press.ok, press.attended], retry: [retry.ok, retry.why] }));
+  const others = Object.keys(A.SPEND_REASONS).filter((r) => A.SPEND_REASONS[r].turn && !A.SPEND_REASONS[r].attended);
+  ok('§2b …every attended reason passes a full hour, every other turn reason is refused by it (' + others.length + ' gated)',
+    attended.every((r) => ask(A, r).ok === true) && others.every((r) => ask(A, r).why === 'hour-cap'));
+  const n = A.noteUnattendedSpend(full, { identity: who, at: now + 36000, reason: 'stash-handover' });
+  ok('§2b …and the press is NEVER CHARGED: no stamp (30 stay 30), no 80 % notice — only the attended tally (1)',
+    n.state.identities.k.length === 30 && n.state.instance.length === 30 && n.warn === null && n.state.attended.length === 1 && n.state.attended[0].reason === 'stash-handover');
+  const over = ask(A, 'stash-handover', { overage: { inUse: 'yes', ageMs: 60000 } });
+  ok('§2b only the BUDGET is exempt: paid overage still refuses a press (a press is not an opt-in to paying overage)', over.ok === false && over.why === 'overage-in-use');
+  const M0 = mutantModule('src/spend-authorizer.js', [["  if (isAttended(reason)) return { ok: true, attended: true,", "  if (false) return { ok: true, attended: true,"]]);
+  const p0 = M0.mod ? ask(M0.mod, 'stash-handover') : null;
+  ok('§2b CONTROL (the 6428c67e law, a patched copy): without the attended line the same press is refused hour-cap — the measured refusal', !!p0 && p0.ok === false && p0.why === 'hour-cap', M0.err || JSON.stringify(p0 && [p0.ok, p0.why]));
+
+  // THE REAL GUARD over the same ledger on disk: no hold, no stamp, the tally in the snapshot; the twin refused and journaled
+  const dir = tmpdir('vs-spend-attended-');
+  fs.writeFileSync(path.join(dir, 'spend-budget.json'), JSON.stringify({ v: 1, budget: full }));
+  const lines = [], items = [];
+  const g = guardMod.create({ dataDir: dir, serverSetting: () => undefined, getUserTodos: () => ({ add: (k, it) => { items.push(it); return it; } }), log: (l) => lines.push(l) });
+  const gv = g.authorize({ reason: 'stash-handover', identity: who, cid: 'conv-1', now });
+  g.note({ reason: 'stash-handover', identity: gv.identity, hold: gv.hold || null, now: now + 1000 });
+  const snap = g.snapshot();
+  ok('§2b the REAL guard: a press on a full ledger is authorized with NO hold, charged NO stamp, and the snapshot counts it as attended',
+    gv.ok === true && gv.attended === true && !gv.hold && snap.holdsOpen === 0 && (snap.budget.identities.k || []).length === 30 && snap.attended['stash-handover'] === 1, JSON.stringify({ gv: [gv.ok, gv.attended, gv.hold], stamps: (snap.budget.identities.k || []).length, att: snap.attended }));
+  const r1 = g.authorize({ reason: 'stash-retry', identity: who, cid: 'conv-1', now: now + 2000 });
+  g.authorize({ reason: 'stash-retry', identity: who, cid: 'conv-1', now: now + 3000 });
+  g.authorize({ reason: 'stash-retry', identity: who, cid: 'conv-1', now: now + 4000 });
+  g.authorize({ reason: 'stash-retry', identity: who, cid: 'conv-1', now: now + 5 * 60e3 + 3000 });
+  const spoke = lines.filter((l) => /^\[spend\] refused stash-retry/.test(l));
+  ok('§2b R4: the refusal journal NAMES the conversation and SAYS what its 5-min dedupe swallowed (2 lines for 4 refusals, the second "(+2 more …)")',
+    r1.ok === false && spoke.length === 2 && spoke.every((l) => l.includes('for conversation conv-1')) && /\(\+2 more in the 5 min after the previous line\)$/.test(spoke[1]) && !/\(\+/.test(spoke[0]), JSON.stringify(spoke));
+  const it = items[0];
+  ok('§2b R2: the For-you refusal carries its words as STRUCTURE — the account, the cap and the next free slot as an EPOCH ({time:{at}}) — and its English line names the instant in UTC (Z), never a hub-zone clock',
+    !!it && it.i18n && it.i18n.text.params.account === 'acct-1' && it.i18n.text.params.cap === 30 && it.i18n.text.params.time.at === Date.parse('2026-10-28T08:21:33Z') && /\{time\}/.test(it.i18n.text.key)
+      && /Next allowed after 2026-10-28T08:21:33Z\./.test(it.text) && !/\b(AM|PM)\b/.test(it.text), JSON.stringify(it && { text: it.text, i18n: it.i18n }));
+
+  // THE OWNER'S CHANNELS SEND: the adapter's reason follows a PERSON's decision (P.userDecidedSend), never the drafter alone
+  const P = require(path.join(REPO, 'src/channel-policy.js'));
+  ok('§2b userDecidedSend: the user composed it, or pressed Approve on it ⇒ attended; an agent\'s draft sent by POLICY ⇒ not',
+    P.userDecidedSend({ draftedBy: { kind: 'user' }, approvedBy: 'policy' }) && P.userDecidedSend({ draftedBy: { kind: 'agent', id: 'c' }, approvedBy: 'user' })
+      && !P.userDecidedSend({ draftedBy: { kind: 'agent', id: 'c' }, approvedBy: 'policy' }) && !P.userDecidedSend(null) && !P.userDecidedSend({}));
+  const sent = [];
+  const ag = require(path.join(REPO, 'src/channels/agents.js')).create({ id: 'agents' }, { deliver: { deliverToConversation: async (cid, text, o) => { sent.push(o.spendReason); return { ok: true, lane: 'message' }; } } });
+  await ag.send('conv-x', { text: 'hi', idemKey: 'p-1', byUser: true });
+  await ag.send('conv-x', { text: 'hi', idemKey: 'p-2' });
+  ok('§2b the Agents adapter sends a person\'s decision as owner-channel-send (attended) and anything else as peer-message', JSON.stringify(sent) === JSON.stringify(['owner-channel-send', 'peer-message']), JSON.stringify(sent));
+  ok('§2b …and the outbound engine hands the adapter that decision on its ONE send line', /e\.adapter\.send\(p\.convId, \{[^\n]*\.\.\.files, byUser: P\.userDecidedSend\(p\), /.test(read('src/server/channels-outbound.js')));
+
+  // THE DOOR, LIVE: the REAL hand-over route over express — every bearer 403 by name, a cookie-less browser request reaches it
+  const express = require(path.join(REPO, 'node_modules/express'));
+  const http = require('node:http');
+  const drive = async (mod) => {
+    const app = express(); app.use(express.json());
+    const logs = [], events = [];
+    const ev0 = global.__vsEvent;
+    global.__vsEvent = (k, v) => { events.push(`${k}:${v}`); };
+    mod.create({ activeSessions: new Map(), getDeliver: () => null, renderMsgStash: () => ({ text: '', shown: [], rest: [] }), renderNotifStash: () => '', log: { log: (l) => logs.push(l), warn() {} } }).register(app);
+    const srv = await new Promise((res) => { const s = app.listen(0, '127.0.0.1', () => res(s)); });
+    const hit = (auth) => new Promise((res) => { const rq = http.request({ host: '127.0.0.1', port: srv.address().port, path: '/api/sessions/s1/stash/hand-over', method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { authorization: auth } : {}) } }, (r) => { let b = ''; r.on('data', (c) => { b += c; }); r.on('end', () => res({ status: r.statusCode, code: (() => { try { return JSON.parse(b).code; } catch { return null; } })() })); }); rq.end('{}'); });
+    const out = { vsst: await hit('Bearer vsst_' + 'a'.repeat(32)), jbt: await hit('Bearer jbt_' + 'b'.repeat(32)), vsak: await hit('Bearer vsak_' + 'c'.repeat(43)), none: await hit(null), again: await hit(null) };
+    await new Promise((r) => srv.close(r));
+    global.__vsEvent = ev0;
+    return { ...out, logs, events };
+  };
+  const live = await drive(require(path.join(REPO, 'src/server/stash-handover.js')));
+  ok('§2b the REAL hand-over door: vsst_, jbt_ and vsak_ bearers are each 403 agent_forbidden; a request with no bearer reaches the route (404 no_session)',
+    ['vsst', 'jbt', 'vsak'].every((k) => live[k].status === 403 && live[k].code === 'agent_forbidden') && live.none.status === 404 && live.none.code === 'no_session', JSON.stringify(live));
+  ok('§2b R4: a press refused for a reason that is NOT the ceiling is journaled ONCE per (conversation, code) per 5 min and counted in telemetry EVERY time (2 presses ⇒ 1 line, 2 events)',
+    live.logs.filter((l) => /^\[stash\] hand-over refused for conversation s1 — no_session: /.test(l)).length === 1 && live.events.filter((e) => e === 'stash-handover-refused:no_session').length === 2, JSON.stringify({ logs: live.logs, events: live.events }));
+  const Mh = mutantModule('src/server/stash-handover.js', [["        if (pressBearer(req.headers)) return res.status(403)", "        if (/^Bearer\\s+(vsst_|jbt_)/i.test(String(req.headers.authorization || ''))) return res.status(403)"]]);
+  const old = Mh.mod ? await drive(Mh.mod) : null;
+  ok('§2b CONTROL (the 6428c67e door, a patched copy): vsst_ / jbt_ were already 403, an automation key\'s vsak_ REACHED the press — and the fence reader calls that door unfenced',
+    !!old && old.vsst.status === 403 && old.jbt.status === 403 && old.vsak.status === 404 && !doorRefusesFirst(fs.readFileSync(Mh.file, 'utf8'), "app.post('/api/sessions/:id/stash/hand-over'").ok, Mh.err || JSON.stringify(old));
 }
 
 // ── §3 THE ORCH GUARD ───────────────────────────────────────────────────────

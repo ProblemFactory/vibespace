@@ -41,6 +41,18 @@
 // The set is CLOSED and it holds only reasons a producer passes TODAY: a
 // declared-but-unused reason is a slot the next producer slides into without
 // anyone deciding anything (test-spend-paths asserts both directions).
+// `attended: true` (lane owner-press-attended, userW measured 2026-10-28 00:33–00:48 PT — five presses of the strip's
+// «Hand over now · starts a turn» refused `hour-cap`, the sixth CHARGED): A PER-OCCURRENCE PRESS ON A COOKIE-ONLY DOOR
+// IS AN ATTENDED TURN. The reason's only door is a person's press whose own button carries the money word, and that
+// door refuses every bearer (vsst_ / jbt_ / vsak_) by name — so the ceiling neither refuses nor counts it:
+// `authorizeUnattendedSpend` answers {ok, attended} BEFORE the caps and the guard takes no hold; `noteUnattendedSpend`
+// writes no stamp, only the `attended` tally (the census and the snapshot still see every press). The credential,
+// spend-control and paid-overage refusals still bind — a press is not an opt-in to paying overage. Each attended
+// reason's AUTOMATIC twin keeps its own gated reason (stash-handover ↔ stash-retry, browser-handback ↔
+// browser-handback-idle, outbox-wake-now ↔ channel-receipt, owner-group-wake / owner-channel-send ↔ peer-message).
+// On an instance nobody signs in to the press still passes the write-origin verdict and the owner routes' wake PACER
+// (the groups engine's `mayWake`) — only the BUDGET is exempt. scripts/test-spend-paths.mjs §2b: every attended
+// reason's site is a cookie-only door.
 const SPEND_REASONS = Object.freeze({
   'auto-resume': { turn: true, what: 'the continue after a usage limit' },
   'stop-nudge': { turn: true, what: 'the Stop bookkeeping mini-turn' },
@@ -69,24 +81,43 @@ const SPEND_REASONS = Object.freeze({
   // free-lane prediction failed and the wrapper's own verdict charged it.
   // Producer: src/server/channels-engine.js.
   'channel-receipt': { turn: true, what: 'an outbox receipt handed back to the drafting agent' },
+  // lane owner-press-attended: the receipt the DECIDER chose to deliver now — «Approve / Reject and wake the agent now»
+  // on the outbox card (POST /api/channels/outbox/:id/approve|reject, cookie only): its own reason, because
+  // `channel-receipt` also covers the free-lane prediction that may fail (that one stays gated). ONE per proposal.
+  'outbox-wake-now': { turn: true, attended: true, what: 'an outbox receipt the user chose to deliver now' },
+  // lane owner-press-attended: the user's OWN message to an agent from the Channels panel — composed and sent by the
+  // user, or an agent's draft the user approved (src/channels/agents.js). A draft sent by POLICY for an agent stays
+  // `peer-message` (nobody pressed anything).
+  'owner-channel-send': { turn: true, attended: true, what: "the user's own message to an agent from the Channels panel" },
+  // lane owner-press-attended: a group message the USER posted (the group window's Send, «Wake now» in the create /
+  // invite dialog — routes/channels.js, cookie only, the wake count echoed back first) waking its members now; an
+  // agent's post stays `peer-message`.
+  'owner-group-wake': { turn: true, attended: true, what: 'a group message the user posted, waking its members now' },
   // agent browser P3 (design-agent-browser-v2 §4.3.1): the browser control
   // handback — an explicit handback (the click) and, only when
   // browser.announceIdleHandback is ON, an idle/viewer-left one. The producer
   // is src/server/browser-handback.js, through the delivery ladder.
-  'browser-handback': { turn: true, what: 'the browser control handback announcement' },
+  // lane owner-press-attended: the CLICK («Hand back (wakes N)», the person's Done) is attended; the idle / viewer-left
+  // announcement — nobody's action, only with browser.announceIdleHandback ON — is its gated twin
+  'browser-handback': { turn: true, attended: true, what: 'the browser control handback the user pressed' },
+  'browser-handback-idle': { turn: true, what: 'the idle / viewer-left browser handback announcement' },
   // desktop lane E (D3, 2026-09-25): the user's "Ask <agent> to take control" from a desktop-app window, when they
   // tick "wake it now" — the default rides the agent's next turn for free (the stash). The producer is
   // src/server/window-request.js, through the delivery ladder.
-  'window-share-request': { turn: true, what: 'a window control request the user sent from a desktop-app window (wake now)' },
+  'window-share-request': { turn: true, attended: true, what: 'a window control request the user sent from a desktop-app window (wake now)' },
   // 2026-09-27 (the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): the chat's strip above the composer shows
   // what waits for the agent's next turn, and its "Hand over now" delivers the whole stash at once — ONE ladder call,
   // ONE turn. The producer is src/server/stash-handover.js (POST /api/sessions/:id/stash/hand-over, cookie only).
-  'stash-handover': { turn: true, what: 'the user handed a conversation its waiting notices now' },
+  'stash-handover': { turn: true, attended: true, what: 'the user handed a conversation its waiting notices now' },
   // lane notify-retry (R3, 2026-10-01): the waiting notices that did not fit a prompt's inline context are posted as
   // their own message the moment that turn ends — the hand-over's own machinery, run by the turn end instead of a click;
   // declared beside its producer (src/server/stash-handover.js, the auto path)
   'stash-retry': { turn: true, what: 'the waiting notices that did not fit a prompt, posted when its turn ended' },
 });
+/** Is this reason ATTENDED (see the header of SPEND_REASONS)? Read off the table — never a second list. */
+const isAttended = (reason) => !!(reason && Object.prototype.hasOwnProperty.call(SPEND_REASONS, reason) && SPEND_REASONS[reason].attended === true);
+// the attended tally keeps a day of presses (the census's window), at most this many
+const ATTENDED_KEEP = 500;
 
 // D6's proposal, as shipped defaults. They are SETTINGS (see
 // src/lib/settings-schema.js `spend.*`); these are the values a caller that
@@ -180,7 +211,7 @@ function budgetLimits(get = () => undefined) {
 }
 
 /** PURE. An empty ledger. */
-function emptyBudget() { return { v: 1, identities: {}, instance: [], notices: {} }; }
+function emptyBudget() { return { v: 1, identities: {}, instance: [], notices: {}, attended: [] }; }
 
 // A LEDGER STAMP CARRIES ITS REASON (2026-09-15, owner: after the spend cap
 // stashed every Background Work notification nobody could say WHICH producer
@@ -217,7 +248,9 @@ function pruneBudget(state, now = Date.now(), limits = null) {
   }
   const notices = {};
   for (const [k, v] of Object.entries(s.notices || {})) if (Number(v) > cut) notices[k] = Number(v);
-  return { v: 1, identities, instance: keep(s.instance), notices };
+  // the ATTENDED tally (lane owner-press-attended): `{at, reason, key}` per press, a day, never a stamp any cap reads
+  const attended = Array.isArray(s.attended) ? s.attended.filter((t) => stampAt(t) > cut).slice(-ATTENDED_KEEP) : [];
+  return { v: 1, identities, instance: keep(s.instance), notices, attended };
 }
 
 /** PURE. What this identity (and the instance) has spent inside each window. */
@@ -535,6 +568,9 @@ function authorizeUnattendedSpend({
     const seen = Number(overage.ageMs) > 0 ? ` (last reported ${Math.round(overage.ageMs / 60000)} min ago)` : '';
     return no('overage-in-use', `${name} is billing paid overage${seen} — unattended turns are refused while real money is being spent`, overage.resetsAt ? overage.resetsAt * 1000 : 0);
   }
+  // ATTENDED (lane owner-press-attended): a person's per-occurrence press — the BUDGET neither refuses nor counts it.
+  // Answered BEFORE the caps (a full hour of stamps does not refuse it) and with no hold (spend-guard reads `attended`).
+  if (isAttended(reason)) return { ok: true, attended: true, why: null, detail: null, retryAfter: 0, counts, inFlight, limits: L, reason, identity: identity || null };
   // THE HOLD IS PART OF THE SUM. `retryAfter` still speaks only of STAMPS: a
   // hold settles when its producer answers, not on a window boundary, so
   // promising an instant for it would be a guess (0 = "no promise about when",
@@ -557,6 +593,8 @@ function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET
   const L = { ...BUDGET_DEFAULTS, ...(limits || {}) };
   const key = identity && identity.key ? String(identity.key) : null;
   const s = pruneBudget(state, at, L);
+  // ATTENDED: no stamp — the press joins the tally only (it never fills a window, never crosses the 80 % line)
+  if (isAttended(reason)) { s.attended = [...s.attended, { at, reason, key }].slice(-ATTENDED_KEEP); return { state: s, warn: null }; }
   if (!key) return { state: s, warn: null };
   const cap = stampCap(L);
   // the stamp names its producer (5b ②) — a SPEND_REASONS member or null
@@ -594,10 +632,31 @@ function refusalText(v, { sessionName = null } = {}) {
   const who = v.identity && (v.identity.name || v.identity.key) ? (v.identity.name || v.identity.key) : 'this account';
   const what = SPEND_REASONS[v.reason]?.what || v.reason;
   const where = sessionName ? ` in "${sessionName}"` : '';
-  const when = v.retryAfter > 0 ? ` Next allowed after ${new Date(v.retryAfter).toLocaleString()}.` : '';
+  // THE INSTANT IS NAMED IN UTC, ZONE SAID (lane owner-press-attended): `toLocaleString()` printed the HUB's zone with no
+  // zone word — userW's pod (Etc/UTC) said «8:21:33 AM», read in PT as 7.5 h away. A viewer reads the For-you item in
+  // their own zone through `refusalI18n` (the client renders the epoch); this English line is the journal's and the key's.
+  const when = v.retryAfter > 0 ? ` Next allowed after ${new Date(v.retryAfter).toISOString().replace(/\.\d{3}Z$/, 'Z')}.` : '';
   const spentBy = producersText(v.producers);
   const spent = spentBy ? ` Spent by: ${spentBy}.` : '';
   return `VibeSpace refused ${what}${where}: ${v.detail}.${when}${spent}`;
+}
+
+/** PURE. THE REFUSAL AS STRUCTURE (lane owner-press-attended) — the For-you item's `i18n`: the account, the cap, the
+ *  window and the next free slot as an EPOCH (`{at}` — the client says it in the viewer's zone through t(), never a
+ *  time string the hub rendered). null for an allowed verdict. Keys are English sentences the dictionaries carry. */
+function refusalI18n(v) {
+  if (!v || v.ok) return null;
+  const account = (v.identity && (v.identity.name || v.identity.key)) || '';
+  const L = v.limits || {};
+  const at = Number(v.retryAfter) > 0 ? { at: Number(v.retryAfter) } : null;
+  const withAt = (key, keyNoAt, params) => (at ? { key, params: { ...params, time: at } } : { key: keyNoAt, params });
+  let text;
+  if (v.why === 'hour-cap') text = withAt('{account} has used its {cap} turns nobody typed this hour — VibeSpace held the next one. The next frees at {time}.', '{account} has used its {cap} turns nobody typed this hour — VibeSpace held the next one.', { account, cap: Number(L.perIdentityHour) || 0 });
+  else if (v.why === 'day-cap') text = withAt('{account} has used its {cap} turns nobody typed in 24 hours — VibeSpace held the next one. The next frees at {time}.', '{account} has used its {cap} turns nobody typed in 24 hours — VibeSpace held the next one.', { account, cap: Number(L.perIdentityDay) || 0 });
+  else if (v.why === 'instance-cap') text = withAt('This instance has used its {cap} turns nobody typed in 24 hours — VibeSpace held the next one. The next frees at {time}.', 'This instance has used its {cap} turns nobody typed in 24 hours — VibeSpace held the next one.', { cap: Number(L.perInstanceDay) || 0 });
+  else if (v.why === 'overage-in-use') text = { key: '{account} is billing paid overage — VibeSpace refuses the turns it would start by itself on it.', params: { account } };
+  else text = { key: 'VibeSpace refused a turn nobody typed on {account}.', params: { account } };
+  return { text, detail: [{ key: 'Turns you type, and the buttons you press that say «starts a turn», are never counted. Change the limits in Settings → Spending.' }] };
 }
 
 /** PURE. The 80% line. */
@@ -617,5 +676,5 @@ module.exports = {
   budgetLimits, emptyBudget, pruneBudget, spendCounts, stampAt, stampReason, producerCounts, producersText,
   pendingCounts, reservePending, releasePending, expirePending,
   overageState, overageAllowed, overageText, spendControlState,
-  authorizeUnattendedSpend, noteUnattendedSpend, refusalText, noticeText,
+  authorizeUnattendedSpend, noteUnattendedSpend, refusalText, refusalI18n, noticeText,
 };

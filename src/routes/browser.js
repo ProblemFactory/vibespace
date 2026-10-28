@@ -638,7 +638,11 @@ const USE_IS_USERS = 'who may use a profile is the user\'s choice (Agent browser
 const ADOPT_IS_USERS = 'a persistent profile made from a conversation\'s browser is the user\'s act (the picker\'s "New persistent profile…") — an agent token may not adopt a conversation\'s kept browser, its own or another\'s; an agent\'s `new --adopt` is the door for a folder of its own'; // verify r3 (Y4)
 const BUILDS_DOWNLOAD_IS_USERS = 'downloading or removing a Chrome build is the user\'s act (Agent browser panel → Change build… → Download another build…) — an agent token may not do it, nor read Google\'s lists through VibeSpace; `vibespace-browser providers` lists the builds this machine has';
 const RESTART_IS_USERS = 'restarting a browser is the user\'s act — an agent token may not do it; tell the user which page is not responding';
-function refuseAgentBearer(req, res, error = OWN_BROWSING_IS_USERS) { if (!isAgentBearer(req)) return false; res.status(403).json({ error, code: 'agent_forbidden' }); return true; }
+const { pressBearer } = require('../write-origin.js');
+// lane owner-press-attended: every route here that refuses an agent is the USER's alone — and several are ATTENDED doors (a
+// hand-back, a takeover's Done, a proposal's Approve: presses the spend ceiling neither refuses nor counts) — so the refusal
+// covers EVERY bearer (vsst_, jbt_ and an automation key's vsak_; `pressBearer`), never only the two agent prefixes
+function refuseAgentBearer(req, res, error = OWN_BROWSING_IS_USERS) { if (!isAgentBearer(req) && !pressBearer(req.headers)) return false; res.status(403).json({ error, code: 'agent_forbidden' }); return true; }
 router.post('/api/browser/profiles/:id/browse', async (req, res) => {
   if (refuseHost(req, res)) return;
   if (refuseAgentBearer(req, res)) return;
@@ -1074,6 +1078,7 @@ router.post('/api/browser/session/:sessionId/restart', async (req, res) => {
  *  flips the lease and the announcer delivers through the gated ladder. */
 router.post('/api/browser/handback', (req, res) => {
   if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, HANDBACK_IS_USERS)) return;   // lane owner-press-attended: an attended door — every bearer refused
   const k = keeperOr503(res); if (!k) return;
   const f = needKey(res, sessionFacts(String(req.body?.sessionId || ''))); if (!f) return;
   try {

@@ -213,6 +213,8 @@ function hostParam(req, res) {
 function bodyOf(req) { const b = { ...(req.body || {}) }; delete b.host; delete b.share; delete b.fileHost; return b; }
 /** Lane E: a share is the USER's act — an agent's session / job token is refused (the reset-credit / inbox-reply rule). */
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
+const { pressBearer } = require('../write-origin.js');   // lane owner-press-attended: an ATTENDED door (a press that wakes an agent) refuses every bearer
+const PRESS_IS_USERS = 'a press that wakes an agent is the user\'s — a bearer token (an agent, a job, an automation key) cannot make one';
 /** lane app-launch-singleton: WHO a launch request comes from — an agent's session token names its session (the window
  *  engine's token table), a job token an unnamed agent; anything else is the person's own door. */
 function launchedByOfReq(req) {
@@ -945,6 +947,7 @@ router.post('/api/desktop/apps/:id/viewers/takeover', (req, res) => {
   } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps/:id/handback', (req, res) => {
+  if (pressBearer(req.headers)) return fail(res, { code: 'agent_forbidden', message: PRESS_IS_USERS });
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   const engine = engineOr503(res); if (!engine) return;
   const viewerId = req.body?.viewerId != null && VIEWER_RE.test(String(req.body.viewerId)) ? String(req.body.viewerId) : null;
@@ -990,6 +993,7 @@ router.put('/api/desktop/apps/:id/reach/mode', (req, res) => {
   try { res.json(engine.setShareMode(req.params.id, req.body && req.body.mode)); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps/:id/reach/request', async (req, res) => {
+  if (pressBearer(req.headers)) return fail(res, { code: 'agent_forbidden', message: PRESS_IS_USERS });
   const engine = reachGate(req, res); if (!engine) return;
   if (!ctx.windowRequest) return fail(res, { code: 'no-engine', message: 'window requests are not wired in this process' });
   const b = req.body || {};

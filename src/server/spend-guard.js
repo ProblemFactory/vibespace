@@ -95,7 +95,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       if (raw.nudge && typeof raw.nudge === 'object') nudge = raw.nudge;
     }
   } catch { }
-  const spoke = new Map();   // journal dedup: `${reason}|${key}|${why}` -> ts
+  const spoke = new Map();   // journal dedup: `${reason}|${key}|${why}` -> {at, more} (`more` = refusals the window swallowed)
   let chargesUnhinted = 0;   // charges that made this module resolve the identity itself (see identityFor)
   let lastUnhintedLog = 0;
   let pending = [];          // the live HOLDS (see the header) — in memory only
@@ -189,21 +189,23 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     } catch { return null; }
   }
 
-  function fileInbox(text, detail, urgency, expiresAt) {
+  function fileInbox(text, detail, urgency, expiresAt, i18n = null) {
     let userTodos = null;
     try { userTodos = getUserTodos(); } catch { userTodos = null; }
     if (!userTodos) return false;
     // kind 'notice' (2.369.118): a spend ceiling is FOR THE USER'S INFORMATION —
     // it sits in the popup's own Notices section and never in the red badge
     // …and it dies with the window it is about (`expiresAt`, see NOTICE_TTL_MS)
-    try { userTodos.add(INBOX_KEY, { origin: 'spend', text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt }); return true; }
+    // `i18n` (lane owner-press-attended): the refusal as STRUCTURE — the client says the next free slot in the viewer's
+    // zone from its epoch (A.refusalI18n), never a time string this hub rendered
+    try { userTodos.add(INBOX_KEY, { ...(i18n ? { i18n } : {}), origin: 'spend', text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt }); return true; }
     catch (e) { log('[spend] could not file the inbox item: ' + e.message); return false; }
   }
 
   /** THE GATE. Every producer of a turn nobody typed calls this BEFORE it
    *  spends, and nothing else may decide. Returns the PURE verdict; the side
    *  effects of a refusal (journal + telemetry + inbox) happen here, once. */
-  function authorize({ reason, session = null, sessionId = null, sessionName = null, identity: identityHint = null, hold: takeHold = true, now = Date.now() } = {}) {
+  function authorize({ reason, session = null, sessionId = null, sessionName = null, cid = null, identity: identityHint = null, hold: takeHold = true, now = Date.now() } = {}) {
     sweepHolds(now);
     const identity = identityFor(session, identityHint);
     const key = identity && identity.key;
@@ -223,6 +225,9 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // identity the continue actually lands on. Measured with the real module at
     // cap 1/hour: with the first call reserving, the second refused its own
     // request and NOTHING ever fired. The charging call is the one that holds.
+    // AN ATTENDED VERDICT HOLDS NOTHING (lane owner-press-attended): a person's press is never a slot of the ceiling —
+    // `note()` turns it into the attended tally, never a stamp
+    if (v.ok && v.attended) return v;
     if (v.ok && key && takeHold) {
       const hold = `h${++holdSeq}`;
       pending = A.reservePending(pending, { id: hold, key, at: now });
@@ -230,13 +235,17 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     }
     if (v.ok) return v;
     const sig = `${reason}|${key || '?'}|${v.why}`;
-    const last = spoke.get(sig) || 0;
+    const last = spoke.get(sig) || { at: 0, more: 0 };
     const text = A.refusalText(v, { sessionName });
-    if (now - last > REFUSE_LOG_MS) {
-      spoke.set(sig, now);
+    // THE LINE NAMES THE CONVERSATION and SAYS WHAT IT COLLAPSED (lane owner-press-attended: userW's five refused presses
+    // showed as three lines «for a session» — the ladder passes the cid, the 5-min dedupe hid two with no word)
+    if (now - last.at > REFUSE_LOG_MS) {
+      spoke.set(sig, { at: now, more: 0 });
       if (spoke.size > 400) spoke.clear();
-      log(`[spend] refused ${reason} for ${sessionId || 'a session'} on ${identity ? identity.name : 'an unknown identity'} — ${v.why}: ${v.detail}`);
-    }
+      const who = sessionId || (cid ? `conversation ${cid}` : 'a session');
+      const more = last.more > 0 ? ` (+${last.more} more in the 5 min after the previous line)` : '';
+      log(`[spend] refused ${reason} for ${who} on ${identity ? identity.name : 'an unknown identity'} — ${v.why}: ${v.detail}${more}`);
+    } else last.more++;
     try { global.__vsEvent?.('spend-refused', `${reason}:${v.why}`); } catch { }
     // NO SILENT FAILURES: a refused automatic turn is a promise the product
     // stops keeping, so the user is told once per (identity, why) per 6h. The
@@ -251,7 +260,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
         + `(instance ${v.counts.instanceDay}/${v.limits.perInstanceDay}).\n\n`
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + 'Background Work notifications and messages from other sessions. Adjust them in Settings → Spending, or act on the account named above.',
-        v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now));
+        v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v));
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;
@@ -334,6 +343,8 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     snapshot: () => ({
       budget: A.pruneBudget(state, Date.now(), limits()), nudge: { ...nudge },
       chargesUnhinted, holdsOpen: A.expirePending(pending, Date.now()).live.length, holdsExpired,
+      // lane owner-press-attended: the presses the ceiling neither refused nor counted, by reason (the last 24 h)
+      attended: A.producerCounts(A.pruneBudget(state, Date.now(), limits()).attended),
     }),
     _file: file,
   };

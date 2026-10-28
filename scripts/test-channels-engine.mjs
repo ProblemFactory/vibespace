@@ -109,6 +109,32 @@ function dayStartClock() {
   return () => day0 + (Date.now() - t0);
 }
 
+// ── lane owner-press-attended (R4): «last wake held» CLEARS WHEN A HAND-OVER DELIVERED THE HELD BLOCK ─────────────
+// userW's Channels row stayed amber after his 00:48:10 PT hand-over delivered the Lark message the ceiling had held: the
+// tag read `lastWake.ok === false` until the rule's NEXT successful wake. The hand-over (src/server/stash-handover.js)
+// now tells the engine which channel blocks it delivered; the refused wake row is stamped `handedOverAt` — no wake row is
+// added (a hand-over is not a rule's wake; the per-rule daily cap counts wake rows).
+{
+  const { eng } = mkEngine({ name: 'handover-held' });
+  const A = 'fake-poll', C = 'fake-poll-ops';
+  await eng.pass(A, { force: true });
+  const lastWake = () => { const e = eng.store.index.snapshot().conversations[`${A}/${C}`]; const w = (e && e.stats && e.stats.wakes) || []; return { n: w.length, lw: w[w.length - 1] || null }; };
+  await eng.store.index.update(() => { const e = eng.store.index.entry(A, C, { create: false }); e.stats = e.stats || {}; e.stats.wakes = [...(e.stats.wakes || []), { at: Date.now(), ok: false, lane: 'stash', why: 'the spend ceiling held it', refused: 'spend' }]; });
+  const v0 = eng.conversationView(A, C), w0 = lastWake();
+  const stamped = await eng.noteHandedOver('cid-x', [{ source: 'channel', kind: 'notification', text: 'a held block', about: { keys: [`${A}/${C}`] } }, { source: 'agent', kind: 'peer', text: 'a peer', about: { keys: [`${A}/elsewhere`] } }]);
+  const v1 = eng.conversationView(A, C), w1 = lastWake();
+  ok(v0 && v0.held === true && v1 && v1.held === false && JSON.stringify(stamped) === JSON.stringify([`${A}/${C}`]) && w1.n === w0.n && w1.lw.ok === false && w1.lw.handedOverAt > 0 && w1.lw.handedOverTo === 'cid-x',
+    'R4 a refused wake reads «last wake held»; the hand-over that DELIVERED its block clears it — the wake row stamped handedOverAt (still ok:false, no row added), a non-channel entry ignored',
+    JSON.stringify({ v0: v0 && v0.held, v1: v1 && v1.held, stamped, w0, w1 }));
+  const again = await eng.noteHandedOver('cid-y', [{ source: 'channel', about: { keys: [`${A}/${C}`] } }]);
+  ok(again.length === 0 && lastWake().lw.handedOverTo === 'cid-x', 'R4 …a second hand-over stamps nothing (the first one is the fact)');
+  const src0 = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+  const sh = src0('src/server/stash-handover.js');
+  ok(/const tookStashed = shownStashed\.length \? d\.drainStash\(cid, new Set\(shownStashed\)\) : \[\];\n[^\n]*\n[^\n]*\n\s*try \{ const ch = getChannels\(\); if \(ch && typeof ch\.noteHandedOver === 'function'\) ch\.noteHandedOver\(cid, tookStashed\)/.test(sh)
+    && /getChannels: \(\) => \{ try \{ return channelsWiring\.channels; \} catch \{ return null; \} \}/.test(src0('server.js')),
+    'R4 wiring: the hand-over tells the engine exactly what it drained (server.js hands it the channels engine)');
+}
+
 // ── ① A TRANSIENT APPEND FAILURE COSTS A RE-READ, NEVER A SKIP ────────────
 // The reproduction, end to end: mark a conversation tracked, make its log
 // un-appendable for exactly one pass, heal the disk, and let the engine run
@@ -1247,6 +1273,9 @@ console.log('⑩ the inline filter at the account and pattern grains (the owner\
 // wakes only the drafter whose OWN watcher opted in; the compose verb
 // (B-6acc) rides the outbox; the agent's search is filtered by reach.
 console.log('⑪ R4 access and notification (two operations), compose, search');
+// lane owner-press-attended: a receipt rides `channel-receipt` (next turn, noWake) or — the decider's «wake it now» — its own
+// attended reason `outbox-wake-now` (noWake false); both are THE receipt
+const isReceipt = (o) => !!o && (o.spendReason === 'channel-receipt' || o.spendReason === 'outbox-wake-now');
 {
   const { makeRecord, makeConversation } = require(path.join(REPO, 'src/channel-record.js'));
   const A = 'r4', OPS = 'ops', LOUNGE = 'lounge';
@@ -1352,18 +1381,18 @@ console.log('⑪ R4 access and notification (two operations), compose, search');
   ok(pr.ok && pr.proposal.state === 'awaiting-approval', 'Alpha (draft authority) proposes — awaiting approval');
   const c1 = ladder.calls.length;
   await eng.approve(pr.proposal.id, {});
-  const rcA = ladder.calls.slice(c1).find((c) => c.cid === 'agent-A' && c.opts.spendReason === 'channel-receipt');
+  const rcA = ladder.calls.slice(c1).find((c) => c.cid === 'agent-A' && isReceipt(c.opts));
   ok(rcA && rcA.opts.noWake === true, 'Alpha\'s watcher still carries receiptWake:true — IGNORED: a plain approve (no choice ⇒ next-turn) rides its next turn (noWake true)');
   const pr2 = await eng.propose({ kind: 'agent', id: 'agent-W', name: 'Worker', groups: ['tg-work'] }, A, OPS, { text: 'noted' });
   const c2 = ladder.calls.length;
   await eng.approve(pr2.proposal.id, { deliver: 'wake-now' });
-  const rcW = ladder.calls.slice(c2).find((c) => c.cid === 'agent-W' && c.opts.spendReason === 'channel-receipt');
+  const rcW = ladder.calls.slice(c2).find((c) => c.cid === 'agent-W' && isReceipt(c.opts));
   const q2 = eng.store.outbox.snapshot().proposals[pr2.proposal.id];
   ok(rcW && rcW.opts.noWake === false && q2.receiptChoice === 'wake-now' && q2.receiptWake && q2.receiptWake.ok === true && q2.receiptWake.reserved === false, 'Worker has NO watcher at all — the decider chose "wake it now" ⇒ its receipt WAKES it (noWake false), the proposal holds its ONE wake row', JSON.stringify(q2.receiptWake));
   const pr3 = await eng.propose({ kind: 'agent', id: 'agent-A', name: 'Alpha', groups: ['tg-ops'] }, A, OPS, { text: 'again' });
   const c3 = ladder.calls.length;
   await eng.approve(pr3.proposal.id, { deliver: 'next-turn' });
-  const rcG = ladder.calls.slice(c3).find((c) => c.cid === 'agent-A' && c.opts.spendReason === 'channel-receipt');
+  const rcG = ladder.calls.slice(c3).find((c) => c.cid === 'agent-A' && isReceipt(c.opts));
   ok(rcG && rcG.opts.noWake === true && !eng.store.outbox.snapshot().proposals[pr3.proposal.id].receiptWake, '"tell it with its next message" ⇒ noWake, no wake row — whatever the watcher config says');
   // (f) the AUTHORITY is the access row's, per principal, finest grain
   const capped = await eng.setAccess(A, { kind: 'account' }, [{ principal: BE, authority: 'send' }]);
@@ -1398,7 +1427,7 @@ console.log('⑪ R4 access and notification (two operations), compose, search');
   ok(todos.filter((x) => /New messages awaiting approval/.test(x.text)).every((x) => x.status === 'done'), 'the pointer is retracted by the engine when nothing awaits');
   const audit = eng.store.auditTail().filter((l) => l.kind === 'outbox' && l.proposalId === cm.proposal.id).map((l) => l.op).join();
   ok(audit === 'propose,approve,attempt,outcome', `the audit carries propose → approve → attempt → outcome (${audit})`);
-  const rcB = ladder.calls.find((c) => c.cid === 'agent-B' && c.opts.spendReason === 'channel-receipt');
+  const rcB = ladder.calls.find((c) => c.cid === 'agent-B' && isReceipt(c.opts));
   ok(rcB && /Channel receipt — R4 mail · Weekly report/.test(rcB.text), 'the receipt reaches the drafter, named by its subject');
   // direct: the account policy says direct AND Beta's access holds send AND no guard fires
   await eng.setAccountPolicy(A, 'direct');
@@ -1484,7 +1513,7 @@ const esrc2 = engineSource(REPO);
     for (let i = 0; i < 5; i++) { const r = await e.propose(Actx, A, OPS, { text: `draft ${i}`, why: 'x' }); ids.push(r.proposal.id); }
     for (const id of ids) await e.reject(id, { by: 'user', reason: 'no', deliver: 'wake-now' });
     const again = await Promise.all([e.receipt(ids[0]), e.receipt(ids[0]), e.receipt(ids[1])]);   // the same receipts asked again, concurrently
-    const rc = ladder.calls.slice(c0).filter((c) => c.cid === 'agent-A' && c.opts.spendReason === 'channel-receipt');
+    const rc = ladder.calls.slice(c0).filter((c) => c.cid === 'agent-A' && isReceipt(c.opts));
     const rows = ids.map((id) => e.store.outbox.snapshot().proposals[id].receiptWake);
     // a next-turn reject never wakes
     const pn = await e.propose(Actx, A, OPS, { text: 'quiet', why: 'x' });
@@ -1552,7 +1581,7 @@ const esrc2 = engineSource(REPO);
       if (!layer) return resolve({ status: 0, body: { error: 'no such route' } });
       Promise.resolve(layer.route.stack[0].handle(req, res, () => {})).catch((err) => resolve({ status: 500, body: { error: String(err && err.message) } }));
     });
-    const billedN = () => ladder.calls.filter((c) => c.cid === 'agent-A' && c.opts.spendReason === 'channel-receipt' && c.opts.noWake === false).length;
+    const billedN = () => ladder.calls.filter((c) => c.cid === 'agent-A' && isReceipt(c.opts) && c.opts.noWake === false).length;
     const pr = await e.propose(Actx, A, OPS, { text: 'route', why: 'x' });
     // r6 verify F6: the approve route REQUIRES `shown` — the digest of the card being approved (the card's own PURE function)
     const SHOWN = (view) => require(path.join(REPO, 'src/channel-policy.js')).shownDigest(view);

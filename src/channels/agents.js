@@ -89,10 +89,13 @@ function create(record = {}, deps = {}) {
      *  failure with the ladder's own reason; a throw inside the ladder
      *  surfaces as the registry's `vendor-error {threw}` and lands the
      *  proposal in `unknown`. */
-    async send(convId, { text, idemKey, as } = {}) {
+    async send(convId, { text, idemKey, as, byUser = false } = {}) {
       if (!deliver) return { ok: false, code: 'transport', retryable: false, detail: { reason: 'no delivery ladder wired' } };
       const framed = `Message from the user (via VibeSpace Channels, approved in the Outbox):\n${String(text || '')}`;
-      const r = await deliver.deliverToConversation(convId, framed, { kind: 'peer', spendReason: 'peer-message', fromName: 'You · via Channels', cardText: String(text || '') });
+      // lane owner-press-attended: `byUser` (the engine's PURE P.userDecidedSend — the user composed it or pressed
+      // Approve on it, both cookie-only routes) is an ATTENDED turn; a draft sent by POLICY for an agent is peer-message
+      const paid = byUser === true ? { spendReason: 'owner-channel-send' } : { spendReason: 'peer-message' };
+      const r = await deliver.deliverToConversation(convId, framed, { kind: 'peer', ...paid, fromName: 'You · via Channels', cardText: String(text || '') });
       if (r && r.ok) return { ok: true, vendorMessageId: `agents-${idemKey || clock()}`, at: clock(), sentAs: as || 'user', lane: r.lane || null };
       return { ok: false, code: 'transport', retryable: true, detail: { reason: (r && r.reason) || 'undelivered', refused: (r && r.refused) || null } };
     },

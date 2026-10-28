@@ -1915,6 +1915,13 @@ for (const [edge] of EXCEPTIONS) {
   ok(wakeBlocks.length >= 5, `§49 census scope is non-vacuous (${wakeBlocks.length} owner routes can start a billed turn)`);
   const bad = judge(src);
   ok(bad.length === 0, `§49 every wake-capable owner route hands its door the consent echo AND the pacer${bad.length ? ' — ' + bad.join('; ') : ''}`);
+  // lane owner-press-attended: these doors are ATTENDED (a person's press — the spend ceiling neither refuses nor counts it,
+  // src/spend-authorizer.js `attended`), so each refuses EVERY bearer (vsst_ / jbt_ / vsak_) as its first act
+  // (the file's refuseAgentBearer asks pressBearer — any bearer; each wake-capable block calls it before it touches an engine)
+  const anyBearer = /function refuseAgentBearer\([^)]*\) \{\s*if \(!isAgentBearer\(req\) && !pressBearer\(req\.headers\)\) return false;/.test(src);
+  const noBearer = (text) => blocks(text).filter((b) => WAKES.test(b)).filter((b) => { const w = b.search(WAKES); const r = b.search(/\n\s*if \(refuseAgentBearer\(req, res(?:, [A-Z_]+)?\)\) return;/); return r < 0 || r > w; }).map((b) => b.split('\n')[0].slice(0, 90));
+  ok(anyBearer && noBearer(src).length === 0, `§49 …and every one refuses EVERY bearer (refuseAgentBearer, which asks pressBearer) before it wakes — they are attended doors${noBearer(src).length ? ' — ' + noBearer(src).join('; ') : ''}`);
+  ok(noBearer(src.replace("router.post('/api/channel-groups', async (req, res) => {\n  try {\n    if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;\n", "router.post('/api/channel-groups', async (req, res) => {\n  try {\n")).length === 1, '§49 CONTROL: the group create route without its bearer refusal is flagged');
   ok(judge("router.post('/api/x/:id/send', async (req, res) => {\n  answer3(res, await engine().propose({ kind: 'user' }, a, b, { text }));\n});") .length === 1 && judge("router.post('/api/x/:id/send', async (req, res) => {\n  answer3(res, await engine().propose({ kind: 'user' }, a, b, { text }, wakeGuards(b)));\n});").length === 0, '§49 NEGATIVE CONTROL: a planted side door with no guards is caught; the guarded spelling passes');
 }
 

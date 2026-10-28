@@ -17,7 +17,7 @@
 //
 // `inboxModel(app)` is memoized on the app: the first caller (the panel's
 // install at boot) builds it, the window asks for the same one.
-import { t, resolveLang } from './i18n.js';
+import { t, resolveLang, deviceLocale } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
 import { showInstallDialog, launchDpr, launchUiScale } from './desktop-app-launcher.js';
@@ -34,6 +34,7 @@ import { openTakeover } from './browser-takeover-queue.js'; // lane browser-take
 import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «Who can use it»'s own refusal words (the dialog's)
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
+import { clockAt } from '../stash-summary.js'; // PURE (lane owner-press-attended): an `{at}` param — an instant in THIS device's zone
 import { askOptions } from '../ask-options.js'; // PURE (lane foryou-honest): an ask's chips — the explicit options, else its detail's «A …；B …» / «是 / 否» parsed
 
 /** The badge's tiers — ONE spelling shared by the taskbar / nav button, the
@@ -77,7 +78,8 @@ export function inboxModel(app) {
   // card grammar (lane card-grammar-exceptions): a raw-API proposal says its CARD's title (`card.head`, the words the
   // chat card and the Outbox row say — never the raw path), worded here like the card does
   // lane vault-key-row-compact: a param may be WORDS (`{key}` — a verb's own words): said in this language before the sentence is filled
-  const said = (l) => t(l.key, Object.fromEntries(Object.entries(l.params || {}).map(([k, v]) => [k, v && typeof v === 'object' && typeof v.key === 'string' ? t(v.key) : v])));
+  // lane owner-press-attended: a param may be an INSTANT (`{at}` — an epoch): said in this device's zone, never the hub's
+  const said = (l) => t(l.key, Object.fromEntries(Object.entries(l.params || {}).map(([k, v]) => [k, v && typeof v === 'object' && typeof v.key === 'string' ? t(v.key) : v && typeof v === 'object' && Number.isFinite(v.at) ? clockAt(v.at, { locale: deviceLocale() }) : v])));
   const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.card && i.card.kind === 'api-call' && i.card.head ? titleWords(i.card.head, { t, lang: resolveLang() }) : i && i.i18n && i.i18n.text ? said(i.i18n.text) : (i && i.text) || '');
   /** The detail as LINES (the Vault window's band: its first line is a use failure's cause, the rest sit under one fold). */
   const detailLinesOf = (i) => (isCleared(i) ? [] : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map(said) : String((i && i.detail) || '').split('\n').filter(Boolean));

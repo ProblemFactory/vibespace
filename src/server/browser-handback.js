@@ -109,8 +109,11 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
   /** THE ONE BILLED SITE of this module — through the gated ladder, under the declared reason (§4.3.1). `noWake` (lane
    *  browser-propose: an approved switch is TOLD, never a wake) = deliver only where it costs nothing — a notification
    *  steered into a turn already running — else the ladder refuses `no-wake` and the caller stashes for the next turn. */
-  function viaLadder(cid, text, { noWake = false } = {}) {
-    return deliver.deliverToConversation(cid, text, { kind: 'notification', spendReason: 'browser-handback', fromName: FROM_NAME, cardText: text, ...(noWake ? { noWake: true } : {}) }); // the LITERAL is what the census reads; it equals T.SPEND_REASON (pinned by the suite)
+  function viaLadder(cid, text, { noWake = false, idle = false } = {}) {
+    // lane owner-press-attended: the person's click is `browser-handback` (attended); the idle / viewer-left announcement
+    // (nobody's action, browser.announceIdleHandback ON) is its gated twin — the verdict names which (T.announceVerdict)
+    const paid = idle ? { spendReason: 'browser-handback-idle' } : { spendReason: 'browser-handback' };
+    return deliver.deliverToConversation(cid, text, { kind: 'notification', ...paid, fromName: FROM_NAME, cardText: text, ...(noWake ? { noWake: true } : {}) }); // the LITERAL is what the census reads; it equals T.SPEND_REASON (pinned by the suite)
   }
   function queueNotice(sess, n) {
     if (!notice || !sess) return false;
@@ -161,7 +164,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
       return out;
     }
     let r = null;
-    try { r = await viaLadder(cid, text); } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
+    try { r = await viaLadder(cid, text, { idle: verdict.reason === T.IDLE_SPEND_REASON }); } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
     if (r && r.ok) {
       out.delivered = true;
       log.log?.(`[browser] handback (${cause}) for ${sess.id}: announced into the conversation (${r.via || r.mode || 'delivered'})`);

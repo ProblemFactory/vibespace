@@ -3558,7 +3558,7 @@ function create(deps = {}) {
       // R4: WHO HAS ACCESS and WHO IS WOKEN, each principal once (its finest grain)
       access: eff ? eff.access.map((x) => ({ principal: { kind: x.row.principal.kind, id: x.row.principal.id, name: x.row.principal.name || null }, authority: F.effectiveAuthority(x.row, authorityCapsFor(rec, en, t)).authority, source: x.source })) : [],
       watchers: eff ? eff.watchers.map((x) => ({ principal: { kind: x.watcher.principal.kind, id: x.watcher.principal.id, name: x.watcher.principal.name || null }, notify: x.watcher.notify, mode: x.watcher.mode, digestMinutes: x.watcher.digestMinutes, source: x.source })) : [],
-      held: !!(lw && lw.ok === false),
+      held: wakeHeld(lw),
       outbox: { awaiting: ob.awaiting, unknown: ob.unknown },
       // R3 (§23, the owner 2026-09-26: "开头不要把所有消息都放进来 … 只放重要消息/conversation"): the FACTS the
       // first screen's attention list is decided from (PURE src/lib/channel-focus.js) — present only on a row
@@ -3582,11 +3582,36 @@ function create(deps = {}) {
    *  src/lib/channel-focus.js `heldPending` reads it with the row's `watchers`
    *  so an open digest window is never drawn as "held". `pending` stays the
    *  total (every tagged elision counted). */
+  /** lane owner-press-attended (R4): is this conversation's last wake STILL held? A refused wake whose stashed block a
+   *  hand-over then DELIVERED (`handedOverAt`, stamped by noteHandedOver) is not — the row's «last wake held» clears then,
+   *  not at the rule's next successful wake. The wake row itself stays what happened (no row is added: a hand-over is not
+   *  a rule's wake, and the per-rule daily cap counts wake rows). */
+  function wakeHeld(lw) { return !!(lw && lw.ok === false && !lw.handedOverAt); }
+  /** A hand-over (src/server/stash-handover.js) delivered these stash entries into `cid`: every channel block among them
+   *  (`source: 'channel'`, its `about.keys` = `<adapter>/<conversation>`) whose conversation's LAST wake was refused gets
+   *  that wake stamped `handedOverAt`. Returns the keys it stamped. */
+  async function noteHandedOver(cid, entries) {
+    const keys = new Set();
+    for (const e of Array.isArray(entries) ? entries : []) if (e && e.source === 'channel' && e.about && Array.isArray(e.about.keys)) for (const k of e.about.keys) if (typeof k === 'string' && k.includes('/')) keys.add(k);
+    if (!keys.size || engineCtx.stopped) return [];
+    const t = Date.now();
+    const stamped = [];
+    await store.index.update(() => {
+      for (const k of keys) {
+        const at = k.indexOf('/');
+        const e2 = store.index.entry(k.slice(0, at), k.slice(at + 1), { create: false });
+        const w = e2 && e2.stats && Array.isArray(e2.stats.wakes) && e2.stats.wakes.length ? e2.stats.wakes[e2.stats.wakes.length - 1] : null;
+        if (w && w.ok === false && !w.handedOverAt) { w.handedOverAt = t; w.handedOverTo = String(cid || '') || null; stamped.push(k); }
+      }
+    });
+    if (stamped.length) notify(stamped);
+    return stamped;
+  }
   function touchView(en, lw, ob) {
     const reads = Array.isArray(en.agentReads) ? en.agentReads : [];
     let read = null;
     for (const r of reads) if (r && Number(r.at) > 0 && (!read || Number(r.at) > read.at)) read = { id: r.id || null, name: r.name || null, at: Number(r.at), upTo: Number(r.upTo) || 0 };
-    const wake = lw ? { at: Number(lw.at) || 0, ok: lw.ok !== false, lane: lw.lane || null, n: Number(lw.n) || 0, name: lw.name || null } : null;
+    const wake = lw ? { at: Number(lw.at) || 0, ok: !wakeHeld(lw), lane: lw.lane || null, n: Number(lw.n) || 0, name: lw.name || null } : null;
     const list = Array.isArray(en.pending) ? en.pending : [];
     const per = new Map();
     const slot = (p) => { let x = per.get(p); if (!x) { x = { p, n: 0, oldest: 0 }; per.set(p, x); } return x; };
@@ -8550,6 +8575,7 @@ function create(deps = {}) {
   function apiAccounts() { return adapterRecords().adapters.filter((r) => r && r.enabled !== false && declaresApi(r.kind)).map((r) => ({ id: r.id, kind: r.kind, label: r.label || r.id })); }
   return {
     store, registry, digest, notify, pass, refreshConvCaps, markRead, messages,
+    noteHandedOver,   // lane owner-press-attended: a hand-over delivered a held wake's block — the row's «last wake held» clears
     retryConvCaps,   // lane gmail-reply-known: the owner's Retry on a refused send row
     // 2026-09-26: the aggregated IM — the reader surface, the scheduler's
     // override, the agent refresh, the three assignment grains, the migration

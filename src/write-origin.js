@@ -85,4 +85,12 @@ function pageVerdict(headers = {}, own = '') {
   return ours && offered && offered === ours ? { ok: true, why: 'origin' } : { ok: false, why: offered ? 'origin' : 'no-browser' };
 }
 
-module.exports = { crossSiteVerdict, pageVerdict, ownOriginOf, normOrigin, WRITES };
+/** lane owner-press-attended: A PERSON'S PRESS CARRIES NO BEARER. An ATTENDED door — a press the spend ceiling neither
+ *  refuses nor counts (src/spend-authorizer.js `attended`) — refuses EVERY `Authorization: Bearer …` by name: an agent's
+ *  vsst_, a Background Work job's jbt_, an automation key's vsak_. The owner's page never sends one (its credential is the
+ *  cookie — src/auth.js reads nothing else), so this refuses no person. scripts/test-spend-paths.mjs §2b reads every
+ *  attended door for it. */
+const PRESS_BEARER_RE = /^Bearer\s+\S/i;
+function pressBearer(headers) { return PRESS_BEARER_RE.test(String((headers && headers.authorization) || '')); }
+
+module.exports = { crossSiteVerdict, pageVerdict, ownOriginOf, normOrigin, WRITES, pressBearer };

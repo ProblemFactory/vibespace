@@ -1153,7 +1153,7 @@ const SETTINGS_SCHEMA = {
   'spend.unattendedPerIdentityHour': {
     type: 'number', default: 30, min: 0, max: 200, step: 1,
     label: t('Unattended turns per account per hour'),
-    description: t('The most turns VibeSpace may start by itself on ONE account in a rolling hour — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications and messages from other sessions all count. Turns YOU type are never counted. 0 = no automatic turns at all on any account. When a budget is spent the refusal is journalled and filed in the \u201cFor you\u201d inbox; nothing is lost — a notification that cannot be delivered live is injected into the conversation\u2019s next turn instead.'),
+    description: t('The most turns VibeSpace may start by itself on ONE account in a rolling hour — the auto-continue after a usage limit, the Stop bookkeeping nudge, Background Work notifications and messages from other sessions all count. Turns YOU type are never counted, and neither is a button you press that says \u201cstarts a turn\u201d (Hand over now, Wake now, Hand back). 0 = no automatic turns at all on any account. When a budget is spent the refusal is journalled and filed in the \u201cFor you\u201d inbox; nothing is lost — a notification that cannot be delivered live is injected into the conversation\u2019s next turn instead.'),
     category: t('Spending'), liveApply: true,
   },
   'spend.unattendedPerIdentityDay': {

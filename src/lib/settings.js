@@ -12,7 +12,37 @@ class SettingsManager {
     this._listeners = {};    // path → Set<callback>
     this._saveTimer = null;
     this._loaded = false;
+    // A TYPED VALUE IS NOT LIVE UNTIL THE SERVER HAS IT — AND THE ROW SAYS SO (lane owner-press-attended: userW typed 200
+    // at 00:40, his 00:47 press was refused, the file was written at 00:48:01; nothing on the panel said "not saved").
+    // Per path: `_dirty` = changed since the last save went out (the 500 ms debounce), `_inflight` = carried by the POST
+    // on its way, `_failed` = that POST did not land. `_server` = the values the SERVER last confirmed (load / refetch /
+    // a broadcast / a save it answered) — what it USES, before any echo. `_live` = the server's own echo of its last
+    // save (`{spend: budgetLimits}` — the numbers its spend guard reads, a clamp included).
+    this._dirty = new Set();
+    this._inflight = new Set();
+    this._failed = new Set();
+    this._saved = new Set();
+    this._saveListeners = new Set();
+    this._server = {};
+    this._live = null;
   }
+
+  /** lane owner-press-attended: a path's save state — 'pending' (typed, the debounce has not fired) | 'saving' (the POST
+   *  is on its way) | 'failed' (it did not land) | 'saved' (the server has it — said once, then 'idle') | 'idle'. */
+  saveStateOf(path) {
+    if (this._dirty.has(path)) return 'pending';
+    if (this._inflight.has(path)) return 'saving';
+    if (this._failed.has(path)) return 'failed';
+    if (this._saved.has(path)) return 'saved';
+    return 'idle';
+  }
+  /** Subscribe to save-state changes: fn(path, state). Returns the unsubscribe. */
+  onSaveState(fn) { if (typeof fn !== 'function') return () => {}; this._saveListeners.add(fn); return () => this._saveListeners.delete(fn); }
+  _emitSave(paths) { for (const p of paths) { const st = this.saveStateOf(p); for (const fn of [...this._saveListeners]) { try { fn(p, st); } catch (e) { console.error(`Settings save listener error [${p}]:`, e); } } } }
+  /** The value the SERVER holds for a path (its last confirmed snapshot; the schema default when it holds none). */
+  serverValue(path) { return path in this._server ? this._server[path] : SETTINGS_SCHEMA[path]?.default; }
+  /** The server's echo of its last save (`{spend}`), or null before one. */
+  liveEcho() { return this._live; }
 
   /** Load settings from server, fall back to localStorage. Returns a promise. */
   async load() {
@@ -20,6 +50,7 @@ class SettingsManager {
       const res = await fetch('/api/settings');
       if (res.ok) {
         this._values = await res.json();
+        this._server = { ...this._values };
       } else {
         this._loadFromLocalStorage();
       }
@@ -43,6 +74,7 @@ class SettingsManager {
       const res = await fetch('/api/settings');
       if (!res.ok) return;
       const fresh = await res.json();
+      this._server = { ...fresh };
       for (const [path, val] of Object.entries(fresh)) {
         if (JSON.stringify(this._values[path]) !== JSON.stringify(val)) {
           const old = this._values[path];
@@ -86,7 +118,9 @@ class SettingsManager {
     if (JSON.stringify(old) !== JSON.stringify(now)) {
       this._notify(path, now, old);
     }
+    this._dirty.add(path); this._failed.delete(path); this._saved.delete(path);
     this._scheduleSave();
+    this._emitSave([path]);
   }
 
   /** Reset a single setting to its default. */
@@ -133,6 +167,7 @@ class SettingsManager {
     if (this._saveTimer) return;
     const old = { ...this._values };
     this._values = data;
+    this._server = { ...(data || {}) };
     // localStorage backup
     try { localStorage.setItem('webui-settings', JSON.stringify(this._values)); } catch {}
     // Notify changed paths
@@ -189,15 +224,30 @@ class SettingsManager {
     const data = this.toJSON();
     // Always write to localStorage as backup
     try { localStorage.setItem('webui-settings', JSON.stringify(data)); } catch {}
+    // lane owner-press-attended: what this POST carries is 'saving' until the server answers
+    const carried = [...this._dirty];
+    this._dirty.clear();
+    for (const p of carried) this._inflight.add(p);
+    this._emitSave(carried);
+    let landed = false;
     // Write to server
     try {
-      await fetch('/api/settings', {
+      const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
+      landed = !!(res && res.ok);
+      if (landed) {
+        this._server = { ...data };
+        let j = null;
+        try { j = await res.json(); } catch { j = null; }
+        if (j && j.spend && typeof j.spend === 'object') this._live = { spend: j.spend };
+      }
     } catch {} finally {
       if (this._saveTimer === myTimer) this._saveTimer = null;
+      for (const p of carried) { this._inflight.delete(p); if (landed) this._saved.add(p); else this._failed.add(p); }
+      this._emitSave(carried);
     }
   }
 }

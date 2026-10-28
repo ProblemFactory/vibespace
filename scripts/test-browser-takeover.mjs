@@ -174,7 +174,7 @@ console.log('— ① the input side, the three moments, the refusal, the confirm
   ok(T.takeoverIdleMs(undefined) === T.DEFAULT_TAKEOVER_IDLE_MS && T.takeoverIdleMs('x') === T.DEFAULT_TAKEOVER_IDLE_MS && T.takeoverIdleMs(0) === 0 && T.takeoverIdleMs(5000) === T.MIN_TAKEOVER_IDLE_MS && T.takeoverIdleMs(120000) === 120000, 'the setting: unreadable ⇒ default, 0 ⇒ never, floor 30 s');
   ok(T.announceVerdict({ cause: 'explicit' }).deliver === true && T.announceVerdict({ cause: 'explicit' }).reason === 'browser-handback', 'an explicit handback DELIVERS under the declared reason');
   ok(T.announceVerdict({ cause: 'idle' }).deliver === false && T.announceVerdict({ cause: 'viewer-left' }).deliver === false, 'idle / viewer-left deliver NOTHING by default (zero-spend by construction)');
-  ok(T.announceVerdict({ cause: 'idle', announceIdle: true }).deliver === true && T.announceVerdict({ cause: 'idle', announceIdle: true }).reason === 'browser-handback', '…and browser.announceIdleHandback ON routes it through the same reason');
+  ok(T.announceVerdict({ cause: 'idle', announceIdle: true }).deliver === true && T.announceVerdict({ cause: 'idle', announceIdle: true }).reason === 'browser-handback-idle' && T.IDLE_SPEND_REASON === 'browser-handback-idle', '…and browser.announceIdleHandback ON routes it through its OWN gated reason (lane owner-press-attended: the click is attended, nobody\'s idle is not)');
   ok(T.announceVerdict({ cause: 'restart', announceIdle: true }).deliver === false && T.announceVerdict({ cause: 'detach', announceIdle: true }).deliver === false, 'restart / detach are state changes only, whatever the setting');
   // LANE H VERIFY r6 LOW 3: a panel Stop while the user drives ends the browser the takeover was on — a handback cause of its own
   ok(T.HANDBACK_CAUSES.includes('stop') && T.decideHandback({ state: t0.state, cause: 'stop', now: 200 }).cause === 'stop' && T.announceVerdict({ cause: 'stop', announceIdle: true }).deliver === false, 'r6 LOW 3: `stop` is a handback cause (a Stop while the user drives) — a state change, never a delivered turn, whatever the setting');
@@ -523,7 +523,7 @@ console.log('— ③ the announcer: three moments, one billed site, a refusal lo
   ok(!r3s.delivered && delivered.length === 1 && inbox.length === 1 && notices.length === 3 && notices[2].n.cause === 'stop' && /stopped/.test(T.renderHandbackNotice(notices[2].n)), 'r6 LOW 3: STOP ⇒ nothing delivered, no inbox item, the zero-spend notice queued (cause stop) — the conversation hears it on its next message');
   settings2['browser.announceIdleHandback'] = true;
   const r4 = await ann.announce(ev('idle'));
-  ok(r4.delivered && delivered.length === 2 && delivered[1].opts.spendReason === 'browser-handback' && /lapsed/.test(delivered[1].text) && inbox.length === 2, 'IDLE with browser.announceIdleHandback ON ⇒ delivered under the same reason (the inbox item is still filed)');
+  ok(r4.delivered && delivered.length === 2 && delivered[1].opts.spendReason === 'browser-handback-idle' && /lapsed/.test(delivered[1].text) && inbox.length === 2, 'IDLE with browser.announceIdleHandback ON ⇒ delivered under its own gated reason browser-handback-idle (the inbox item is still filed)');
   settings2['browser.announceIdleHandback'] = false;
   refuse = true;
   const r5 = await ann.announce(ev('explicit'));

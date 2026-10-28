@@ -789,7 +789,7 @@ async function sweepWindowLeg(ENGmod, name) {
   const { eng, deliver, delivered } = W;
   deliver.wakeOk = true;
   await prime(eng);
-  const billed = () => delivered.filter((d) => d.opts.spendReason === 'channel-receipt' && d.opts.noWake === false).length;
+  const billed = () => delivered.filter((d) => d.opts.spendReason === 'outbox-wake-now' && !d.opts.noWake).length;   // lane owner-press-attended: the decider's wake has its own (attended) reason
   const p1 = await eng.propose(AGENT, A, C, { text: 'double click' });
   const [a1, a2] = await Promise.all([eng.approve(p1.proposal.id, { deliver: 'wake-now' }), eng.approve(p1.proposal.id, { deliver: 'wake-now' })]);
   const a3 = await eng.approve(p1.proposal.id, { deliver: 'wake-now' });
@@ -809,7 +809,7 @@ async function sweepWindowLeg(ENGmod, name) {
   const { eng, deliver, delivered } = W;
   deliver.wakeOk = true;
   await prime(eng);
-  const billed = () => delivered.filter((d) => d.opts.spendReason === 'channel-receipt' && d.opts.noWake === false).length;
+  const billed = () => delivered.filter((d) => d.opts.spendReason === 'outbox-wake-now' && !d.opts.noWake).length;   // lane owner-press-attended: the decider's wake has its own (attended) reason
   const p3 = await eng.propose(AGENT, A, C, { text: 'vendor says no' });
   const a4 = await eng.approve(p3.proposal.id, { deliver: 'wake-now' });
   const q3 = eng.store.outbox.snapshot().proposals[p3.proposal.id];
@@ -1183,7 +1183,7 @@ async function rowWriteLeg(engMod, name) {
   W.ladder.wakeOk = true;
   const r = await eng.reject(p.proposal.id, { reason: 'no', deliver: 'wake-now' }).catch((e) => ({ threw: e.message }));
   eng.store.outbox.update = origU;
-  const billed = delivered.filter((d) => d.opts.spendReason === 'channel-receipt' && d.opts.noWake === false).length;
+  const billed = delivered.filter((d) => d.opts.spendReason === 'outbox-wake-now' && !d.opts.noWake).length;   // lane owner-press-attended: the decider's wake has its own (attended) reason
   const q = eng.store.outbox.snapshot().proposals[p.proposal.id];
   eng.stop();
   const f = P.receiptFateOf(q);

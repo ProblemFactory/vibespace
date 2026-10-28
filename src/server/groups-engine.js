@@ -468,7 +468,11 @@ function create({
         // sender → the group, the message that woke it — keyed like a report's (a later re-report renders no second)
         const self = !!(rec.author && rec.author.id === G.OWNER);
         const wc = wakeCardOf(rep, rec);
-        r = await deliver.deliverToConversation(member, rep.text, { kind: 'peer', spendReason: 'peer-message', fromName: `${displayName(g, rec.author.id)} · ${g.name}`, cardText: wc.text, group: { id: g.id, name: g.name, at: rec.at, from: self ? null : displayName(g, rec.author.id), self, via: 'wake', ...wc.authors } });
+        // lane owner-press-attended: the USER's own post (G.OWNER — only routes/channels.js's cookie-only owner routes
+        // author it, the wake count echoed back first) is an ATTENDED turn; an agent's post stays peer-message. Both
+        // literals spelled (the spend census reads them); ONE ladder site.
+        const paid = self ? { spendReason: 'owner-group-wake' } : { spendReason: 'peer-message' };
+        r = await deliver.deliverToConversation(member, rep.text, { kind: 'peer', ...paid, fromName: `${displayName(g, rec.author.id)} · ${g.name}`, cardText: wc.text, group: { id: g.id, name: g.name, at: rec.at, from: self ? null : displayName(g, rec.author.id), self, via: 'wake', ...wc.authors } });
       } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
     }
     try { store.audit({ kind: 'group-wake', groupId: gid, member, why, ok: !!(r && r.ok), lane: (r && r.lane) || null, reason: r && !r.ok ? r.reason || null : null, refused: (r && r.refused) || null, spendWhy: (r && r.why) || null }); } catch { }

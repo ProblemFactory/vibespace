@@ -730,7 +730,12 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const data = req.body;
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
     writeSettings(data);
-    res.json({ success: true });
+    // lane owner-press-attended: the save ECHOES what the server now USES for the spend ceiling — the spend guard reads
+    // `budgetLimits(serverSetting)` over this very cache on its next check (a clamp at CAP_MAX included), so the Settings
+    // row says the live number, not the typed one
+    let spend = null;
+    try { const cur = readSettings(); spend = require('../spend-authorizer.js').budgetLimits((k) => cur[k]); } catch { spend = null; }
+    res.json({ success: true, ...(spend ? { spend } : {}) });
   });
 
   router.patch('/api/settings', (req, res) => {

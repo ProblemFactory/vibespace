@@ -372,6 +372,34 @@ globalThis.document = { createElement: (t) => new El(t) };   // what the strip b
   ok(/^Not handed over — the limit for turns nobody typed/.test(SS.handOverRefusalText({ code: 'spend_refused' })) && /could not be reached/.test(SS.handOverRefusalText({ code: 'unreachable' })) && SS.handOverRefusalText({ error: 'boom' }) === 'Hand-over failed: boom'
     && /already in progress/.test(SS.handOverRefusalText({ code: 'in_flight' })) && /predates mid-turn notifications/.test(SS.handOverRefusalText({ code: 'held_for_next_turn' })),
     'a refusal is SAID in the device\'s words, by its code (incl. in_flight and held_for_next_turn)');
+  // lane owner-press-attended (R2): THE MEASURED 429 BODY — userW's 00:47:34 PT press on account acct-1 (cap 30, the next slot
+  // 08:21:33Z): said WITH its facts and its door. The pre-fix strip said the fact-less sentence for it (no account, no cap,
+  // no time, no door) and he pressed five times; that sentence is now only what a fact-less body (an older hub) reads.
+  {
+    const body = { ok: false, code: 'spend_refused', id: 'ho-x-7', why: 'hour-cap', retryAfter: Date.parse('2026-10-28T08:21:33Z'), identity: { key: 'sub-x', name: 'acct-1' }, cap: 30, error: 'spend budget: acct-1 has spent 30 unattended turns this hour (cap 30)' };
+    const now = Date.parse('2026-10-28T07:47:34Z');
+    const w = S.handOverRefusalWords(body, tEn, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+    ok(w.door === 'spending' && w.text === 'Not handed over — acct-1 has used its 30 turns nobody typed this hour; the next frees at 01:21 AM (in 34 min). The notices keep waiting.',
+      'R2 the measured 429 body is SAID: the account (acct-1), the cap (30), the next free slot in the VIEWER\'s zone (01:21 AM PT — the hub said 8:21:33 AM, its UTC, unnamed) and in how long — with the door to Settings → Spending', JSON.stringify(w));
+    const sz = S.handOverRefusalWords(body, tEn, { now, locale: 'zh-CN', timeZone: 'Asia/Shanghai' });
+    ok(/the next frees at 16:21 \(in 34 min\)/.test(sz.text), 'R2 …the same instant in another viewer\'s zone and locale (16:21 in Shanghai) — the hub\'s clock is the fact, the zone is the rendering', sz.text);
+    const strip = SS.handOverRefusalText(body, { now });
+    ok(/\bacct-1\b/.test(strip) && /\b30\b/.test(strip) && /\(in 34 min\)/.test(strip), 'R2 …and the strip\'s own export speaks it (account, cap, minutes)', strip);
+    const pre = S.handOverRefusalWords({ code: 'spend_refused' }, tEn, { now });
+    ok(pre.text === 'Not handed over — the limit for turns nobody typed is reached; the notices keep waiting for the next turn' && !/acct-1|30|01:21/.test(pre.text),
+      'R2 CONTROL: the pre-fix sentence (what 6428c67e said for THIS body) names no account, no cap, no time — now only a fact-less body reads it', pre.text);
+    const day = S.handOverRefusalWords({ ...body, why: 'day-cap', cap: 200, retryAfter: Date.parse('2026-10-29T07:00:00Z') }, tEn, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+    const inst = S.handOverRefusalWords({ ...body, why: 'instance-cap', cap: 800, identity: null }, tEn, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+    const over = S.handOverRefusalWords({ ...body, why: 'overage-in-use', cap: null, retryAfter: 0 }, tEn, { now });
+    const out = S.handOverRefusalWords({ ...body, why: 'identity-cannot-serve', cap: null, retryAfter: 0 }, tEn, { now });
+    const zero = S.handOverRefusalWords({ ...body, cap: 0, retryAfter: 0 }, tEn, { now });
+    ok(/in 24 hours; the next frees at Thu 12:00 AM \(in 23 h 13 min\)/.test(day.text) && day.door === 'spending' && /this instance has used its 800/.test(inst.text) && inst.door === 'spending'
+      && /acct-1 is billing paid overage/.test(over.text) && over.door === 'spending' && /acct-1 cannot sign requests right now/.test(out.text) && out.door === null && /set to 0/.test(zero.text) && zero.door === 'spending',
+      'R2 every refusal that remains after the attended law has its own words — another day names its weekday; overage and a cap of 0 carry the Settings door, a signed-out account does not', JSON.stringify([day.text, inst.text, over.text, out.text, zero.text]));
+    const src = read('src/lib/stash-strip.js');
+    ok(/if \(!r \|\| r\.error \|\| !r\.ok\) \{ showRefusal\(r\); return; \}/.test(src) && /w\.door === 'spending' && settings && typeof settings\.open === 'function' \? \{ label: t\('Open Settings → Spending'\), run: \(\) => settings\.open\(\{ category: t\('Spending'\) \}\) \}/.test(src),
+      'R2 the strip\'s refusal toast carries the door: «Open Settings → Spending» opens the Settings window on its Spending section');
+  }
   // the card hint
   const list = new El('div');
   const card = new El('div'); card.className = 'session-item-card'; card._webuiId = 'w1';

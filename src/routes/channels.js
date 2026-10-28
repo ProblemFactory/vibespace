@@ -53,8 +53,14 @@ function refuseAgentMountChoice(req, res) {
  *  is the owner's act (a browser page they approve), and since r3 the
  *  consent machine ends the OLDEST open sign-in when a 33rd begins, so a
  *  bearer that could begin 33 could end the owner's. */
+// lane owner-press-attended: every route here that refuses an agent is the OWNER's alone — and the wake-capable ones are
+// ATTENDED doors (a press the spend ceiling neither refuses nor counts, src/spend-authorizer.js `attended`) — so the refusal
+// covers EVERY bearer (vsst_, jbt_ and an automation key's vsak_; `pressBearer`); the owner's page rides the cookie.
+// test-architecture §49 reads every wake-capable route here for it.
+const { pressBearer } = require('../write-origin.js');
+const PRESS_IS_OWNERS = 'a press that wakes an agent is the user\'s — a bearer token (an agent, a job, an automation key) cannot make one';
 function refuseAgentBearer(req, res, what = 'an account\'s configuration is the owner\'s — an agent token may not read it') {
-  if (!isAgentBearer(req)) return false;
+  if (!isAgentBearer(req) && !pressBearer(req.headers)) return false;
   bad(res, 403, what, { code: 'agent-forbidden' });
   return true;
 }
@@ -1131,6 +1137,7 @@ router.get('/api/channels/outbox', (req, res) => {
  *  the owner's pace applies (`429 rate-floor`, nothing created). */
 router.post('/api/channels/:adapterId/:convId/propose', async (req, res) => {
   try {
+    if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
     forHost(req);
     const b = req.body || {};
     answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}), ...(b.replyAll !== undefined ? { replyAll: b.replyAll } : {}) }, wakeGuards(b)));
@@ -1173,6 +1180,7 @@ function deliverOf(b) {
 // nothing sent). A request without it (a tab from before this rule) is refused by name.
 router.post('/api/channels/outbox/:id/approve', async (req, res) => {
   try {
+    if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
     forHost(req);
     const b = req.body || {};
     const d = deliverOf(b);
@@ -1183,6 +1191,7 @@ router.post('/api/channels/outbox/:id/approve', async (req, res) => {
 });
 router.post('/api/channels/outbox/:id/reject', async (req, res) => {
   try {
+    if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
     forHost(req);
     const b = req.body || {};
     const d = deliverOf(b);
@@ -1299,6 +1308,7 @@ router.get('/api/channel-groups/:id/messages', (req, res) => {
 });
 router.post('/api/channel-groups', async (req, res) => {
   try {
+    if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
     forHost(req);
     const b = req.body || {};
     const ge = groupsEngine();
@@ -1307,6 +1317,7 @@ router.post('/api/channel-groups', async (req, res) => {
 });
 router.post('/api/channel-groups/:id/:verb', async (req, res) => {
   try {
+    if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
     forHost(req);
     const b = req.body || {};
     const ge = groupsEngine();

@@ -1375,7 +1375,7 @@ function create(engineCtx) {
       else if (fv && !fv.ok) r = { ok: false, code: 'attachment-changed', retryable: false, detail: { reason: `${fv.why} — nothing was sent` } };
       else {
         sendLeft.add(id);   // only a request that is really handed to the adapter may have LEFT (r4's refund rule)
-        try { r = p.compose ? await e.adapter.compose({ to: p.compose.to, cc: p.compose.cc, subject: p.compose.subject, text: wire, idemKey: p.id, as: p.sendAs, onHandle, ...files }) : await e.adapter.send(p.convId, { text: wire, replyTo: p.replyTo, idemKey: p.id, as: p.sendAs, onHandle, placement: P.placementOf(p), ...(anchor ? { replyAnchor: anchor } : {}), ...files, ...(p.prepared ? { prepared: p.prepared } : {}), ...(p.replyEnvelope ? { envelope: p.replyEnvelope } : {}) }); }
+        try { r = p.compose ? await e.adapter.compose({ to: p.compose.to, cc: p.compose.cc, subject: p.compose.subject, text: wire, idemKey: p.id, as: p.sendAs, onHandle, ...files }) : await e.adapter.send(p.convId, { text: wire, replyTo: p.replyTo, idemKey: p.id, as: p.sendAs, onHandle, placement: P.placementOf(p), ...(anchor ? { replyAnchor: anchor } : {}), ...files, byUser: P.userDecidedSend(p), ...(p.prepared ? { prepared: p.prepared } : {}), ...(p.replyEnvelope ? { envelope: p.replyEnvelope } : {}) }); }
         catch (err) {
           r = err && typeof err.toJSON === 'function' ? err.toJSON() : { ok: false, code: (err && err.code) || 'vendor-error', retryable: false, detail: { threw: true, message: (err && err.message) || String(err) } };
           if (err && err.message && !r.message) r.message = err.message;
@@ -2079,7 +2079,9 @@ function create(engineCtx) {
     let r = null, stashed = false, stashErr = null;
     if (!deliver || typeof deliver.deliverToConversation !== 'function') r = { ok: false, reason: 'no delivery ladder wired', refused: 'unwired' };
     else {
-      try { r = await deliver.deliverToConversation(cid, text, { kind: 'notification', noWake: !wake, spendReason: 'channel-receipt', fromName, cardText, ...(channel ? { channel } : {}) }); }
+      // lane owner-press-attended: the decider's «… and wake the agent now» is its OWN, attended reason (one per proposal,
+      // the row above reserved it); the next-turn receipt keeps `channel-receipt` — its free-lane prediction may fail
+      try { r = await deliver.deliverToConversation(cid, text, { kind: 'notification', ...(wake ? { noWake: false, spendReason: 'outbox-wake-now' } : { noWake: true, spendReason: 'channel-receipt' }), fromName, cardText, ...(channel ? { channel } : {}) }); }
       catch (err) { r = { ok: false, reason: `ladder threw: ${(err && err.message) || err}`, refused: 'error' }; }
       if (!(r && r.ok) && typeof deliver.stashFor === 'function') {
         // lane channel-direct-send-sync: WHY the hub held it (for the drain's heading, not "unreachable") — a turn
