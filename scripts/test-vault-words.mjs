@@ -54,6 +54,14 @@ const ROWS = {
   'src/lib/vault-totp-row.js': [['The vault is locked — unlock it first, then preview again', 'label', '添加… ▸ 两步验证…\'s preview-time verdict line (lane vault-totp-add) — 「解锁…」 beside the words is the door; a field verdict while the person is in the dialog, not a background refusal']],
   // int331 seam — sites from lanes that landed after this census's base (.326): relay status words, the provider-config save verdict,
   // and the 使用失败 For-you card's count/hint detail — all LABELS/status, not the tool-refusal sentences the two-facts rule (decision 5) targets
+  // lane wake-approve-card r8: a DECIDED card's end in words — a vault ask the lock settled (resolvedBy 'vault_locked') reads its
+  // outcome on its record; the lock itself is told by the vault's own For-you item and strip (their rows), so this is a LABEL
+  'src/foryou-actions.js': [
+    ['the vault locked before it was answered', 'label', 'a settled card\'s outcome words (settledWords — resolvedBy vault_locked): the record of an ask the lock ended, never a refusal sentence; the lock\'s own For-you item says who was told and where to unlock'],
+  ],
+  'src/lib/user-todos-row.js': [
+    ['the vault locked before it was answered', 'label', 'the same outcome words on the tray row / the For-you window (resolvedByText) — a record\'s end, the lock told by its own item'],
+  ],
   'src/model-providers.js': [
     ['Unlock the vault first', 'label', 'the provider-config dialog\'s own save-time verdict shown while the person is in the dialog (lane provider-record) — a field verdict, not a background tool refusal (the two-facts rule is for refusals)'],
   ],

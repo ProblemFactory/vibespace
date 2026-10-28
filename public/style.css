@@ -5163,6 +5163,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go svg { width: 18px; height: 18px; }
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go::after { content: attr(data-label); font-size: 14px; line-height: 1.1; white-space: nowrap; }
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body:has(> .ut-go) > :is(.ut-text, .ut-meta) { margin-right: 60px; }
+  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body:has(> .ut-go) > .ut-deadline { margin-right: 60px; } /* r8 (the acceptance's 390 shots): a folded row's deadline line keeps clear of the Chat door too — «它下次运行» lost «次运行» under it */
   /* THE OPEN ROW (acceptance round 2): the door keeps the QUESTION LINE as its row — the question | the door, centred on the
      question's first line — and everything else runs full width BELOW the door's bottom edge (the detail box never under it) */
   :is(#user-todos-popup, #phone-home) .ut-item.ut-open > .ut-body:has(> .ut-go) { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; }
@@ -8157,13 +8158,16 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .iw-detail .ut-run { white-space: normal; } /* the pane's words keep their line breaks; the card's own boxes say how they wrap */
 .iw-detail .ut-run-cmd { font-size: 12px; padding: 6px 8px; }
 .iw-detail .ut-run-facts, .iw-detail .ut-run-tech { font-size: 12px; }
-/* r7 addendum — A CARD WITH A DEADLINE SHOWS IT: the time left under the question (the page ticker moves it), the warning accent
-   under 15 s; past it the late answer's words (the answers stay) or «timed out» (the answers withdrawn — the record keeps its place) */
+/* r7 addendum — A CARD WITH A DEADLINE SHOWS IT: the time left by the SERVER's clock under the question (the page ticker moves
+   it), the warning accent under 15 s; past it «time is up … waiting for the server» or the late answer's words — the answers
+   always stay (r8: only the producer's settle withdraws them, never this device's clock) */
 .ut-deadline { margin-top: 2px; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 .ut-deadline-warn { color: var(--warn-text); font-weight: 600; }
-.ut-deadline[data-state="late"], .ut-deadline[data-state="timed-out"] { color: var(--bad-text); }
+.ut-deadline[data-state="late"] { color: var(--bad-text); }
 .iw-deadline { margin-top: 6px; font-size: 12px; }
-.ut-item.ut-timed-out .ut-exit-answer, .iw-item.ut-timed-out .iw-act-exit { display: none; }
+.ut-run-cut { margin: 2px 0 4px; font-size: 11px; color: var(--warn-text); } /* r8: the body's command is a cut — the whole is in the fold */
+.ut-run-cmd-full { max-height: 16em; overflow: auto; margin: 0; } /* r8: the fold's whole command (≤ 4 096 characters) scrolls inside its box */
+.ut-end-code, .iw-meta-code { font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace); font-size: 0.95em; } /* r8: an end this client cannot classify — its code, typed */
 .ut-action-proposal { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); } /* lane browser-propose: a WORDED button on the 24 px .ut-act icon box — its own width (the exit ask's rule) */
 .ut-proposal-answer .ut-action-proposal { height: 24px; min-width: 64px; }
 .ut-proposal-answer .ut-proposal-approve { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }

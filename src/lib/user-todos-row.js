@@ -37,7 +37,7 @@ import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; //
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
-import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, deadlineOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
+import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
@@ -66,7 +66,14 @@ export function itemExpiryText(i, t, notice = false) {
 export function statusWords(i, t) {
   if (isHidden(i)) return t('hidden — nothing was decided');
   if (i && i.resolvedBy === 'ask-expired' && i.action) return t('timed out — the agent\'s command was refused (it may ask again)'); // r7 addendum: an ask nobody answered in time keeps its place, its outcome said (never «done»)
+  const end = endOf(i);
+  if (end && end.unknown) return t('outcome unknown'); // r8: a decision row's end this client cannot classify — its code beside it (endCodeOf), never «done»
   return i && i.status === 'dismissed' ? t('dismissed') : t('done');
+}
+/** r8: the code of an end this client cannot classify (THE registry's endOf) — drawn monospace beside «outcome unknown»; '' else. */
+export function endCodeOf(i) {
+  const end = endOf(i);
+  return end && end.unknown ? end.unknown : '';
 }
 /** Who resolved it, in words ('expired' = the store's sweep, 'reply' = the
  *  user's own inbox reply, design-user-inbox-reply D1.4). `item` = the
@@ -77,14 +84,19 @@ export function resolvedByText(by, t, item = null) {
   // the For-you window all word a resolved row here
   const stamp = item ? decidedStamp(item, { t }) : null;
   if (stamp) return stamp.text;
+  const end = item ? endOf(item) : null;
+  if (end && end.unknown) return ''; // r8: statusWords says «outcome unknown», endCodeOf draws its code — never the raw word here
+  if (end && end.mapped) { item = ruledOf(item); by = item.resolvedBy; } // r8: a producer's outcome-in-the-fact settle reads as the ruled one
   if (by === 'agent') return t('by the agent');
   if (by === 'system') return t('automatically');
   if (by === 'expired') return item && isDecisionRow(item) ? t('expired · the agent can ask again') : t('expired'); // r3: a wake ask's END (its lifetime) — the card's words
   if (by === 'reply') return t('by your reply');
   if (by === 'handed-back') return t('handed back'); // lane browser-takeover-queue: a takeover request answered by the handback
   // lane-pairing ⑥: an exit's "ask me each time" item is resolved BY its outcome
+  if (by === 'allowed' && item && item.resolvedFact && item.resolvedFact.late === true) return t('let through once · waiting for it to run again'); // r8: a late Allow without the person mark
   if (by === 'allowed') return t('allowed');
   if (by === 'denied') return t('denied');
+  if (by === 'vault_locked') return t('the vault locked before it was answered'); // r8: never the raw word
   if (by === 'revoked') return t('access removed');
   if (by === 'ask-expired') return item && item.action ? '' : t('expired'); // r7 addendum: the status word says it all (statusWords — «timed out — the agent's command was refused …»)
   if (by === 'ask-changed') return t('not run — it changed after it was shown'); // verify-r6 W1
@@ -152,7 +164,7 @@ const HUB_ANSWERS = ['once', 'always', 'deny'];
   const HELD_ASKS = ['hub-act-ask', 'automation-ask', 'pool-cross-provider', 'vault-run-ask', 'vault-grant-ask']; // q-053 P0b (decision ①): a pool's move to ANOTHER provider waits for the owner — 允许一次 / 这个池一直允许 / 拒绝
   const GRANT_ANSWERS = ['once', '8h', 'deny']; // lane vault-manual-and-lock (design q-043 D4): 允许一次 (its next run) / 8 小时 (every run, 8 h) / 拒绝; it waits for nobody, never expires (a lock withdraws it)
   const hubAnswerWord = (a, t, type = 'hub-act-ask') => (a === 'once' ? t('Allow once') : a === '8h' ? t('For 8 hours') : a === 'always' ? (type === 'automation-ask' ? t('Always for this conversation') : type === 'pool-cross-provider' ? t('Always for this pool') : type === 'vault-run-ask' ? t('Always for this shape') : t('Always on this machine')) : t('Deny'));
-  const heldAnswers = (i) => (i.action.type === 'vault-grant-ask' ? GRANT_ANSWERS : HUB_ANSWERS.filter((a) => a !== 'always' || !(i.action.type === 'vault-run-ask' && i.action.always === false)));
+  const heldAnswers = (i) => (i.action.type === 'vault-grant-ask' ? GRANT_ANSWERS : HUB_ANSWERS.filter((a) => a !== 'always' || (!(i.action.type === 'vault-run-ask' && i.action.always === false) && !(i.action.type === 'vault-run-ask' && i.action.late)))).filter((a) => a === 'deny' || !(i.action.type === 'vault-run-ask' && i.action.late && i.action.restartLost === true)); // r8: a LATE run card offers 允许一次 / 拒绝 only — its door refuses «Always» (a card never offers what its door refuses); after a restart (r23's restartLost) an Allow would mint nothing — 拒绝 alone, the line says why
 // lane vault-scrub-forms (q-043 verify M1): a RUN card says what the scrubbing does not promise — the owner reads the command
 // lane key-instance-scope: an AUTOMATION card offers the grant's REACH beside its answers — 只有它开的会话 (the default) · 这些岗位的会话
 // (only when the caller is in one: action.groups) · 整个 VibeSpace (red, its title says it reaches the owner's own conversations too);
@@ -187,33 +199,41 @@ export function runFactsHtml(i, t, { buttons = true } = {}) {
   const rows = v.rows.map((r) => `<div class="ut-run-row${r.warn ? ' ut-run-warn' : ''}" data-fact="${r.key}"><span class="ut-run-lbl">${escHtml(r.label)}</span><span class="ut-run-val">${linesHtml(r.lines)}</span></div>`).join('');
   const answers = buttons && i.action.askId ? heldAnswers(i) : [];
   const row = answers.length ? `<div class="ut-exit-answer ut-hub-answer ut-run-answer">${answers.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}${answers.includes('always') ? '' : runHintHtml(v)}</div>` : '';
-  const fold = v.fold.length ? `<details class="ut-detail-exp ut-run-fold"><summary>${escHtml(t('Technical details'))}</summary><div class="ut-run-tech">${v.fold.map((f) => `<div class="ut-run-row"><span class="ut-run-lbl">${escHtml(f.label)}</span><span class="ut-run-val">${linesHtml(f.lines)}</span></div>`).join('')}</div></details>` : '';
-  return `<div class="ut-run"><pre class="ut-run-cmd">${escHtml(v.cmd)}</pre><div class="ut-run-facts">${rows}</div>${row}${fold}</div>`;
+  const fold = v.fold.length ? `<details class="ut-detail-exp ut-run-fold"><summary>${escHtml(t('Technical details'))}</summary><div class="ut-run-tech">${v.fold.map((f) => `<div class="ut-run-row"><span class="ut-run-lbl">${escHtml(f.label)}</span><span class="ut-run-val">${f.cmd != null ? `<pre class="ut-run-cmd ut-run-cmd-full">${escHtml(f.cmd)}</pre>` : linesHtml(f.lines)}</span></div>`).join('')}</div></details>` : '';
+  const cut = v.cut ? `<div class="ut-run-cut">${escHtml(v.cut.text)}</div>` : ''; // r8: a command longer than the body's bound says it is a cut (the whole: the fold)
+  return `<div class="ut-run"><pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>${cut}<div class="ut-run-facts">${rows}</div>${row}${fold}</div>`;
 }
 
 /** A CARD WITH A DEADLINE SHOWS IT (r7 addendum): THE model's line (foryou-actions deadlineOf) under the question — «valid for
- *  60 s · 42 s left», the warning accent under 15 s, then the late answer's words (the run card: its buttons stay) or
- *  «timed out — …» (the row's answers withdrawn: `.ut-timed-out`). The tray row, the chat card (the same row) and the For-you
- *  window draw it; ONE page ticker re-reads every such line once a second (tickDeadlines). */
-const deadlineAttrs = (i, d) => `data-deadline-at="${d.at}" data-deadline-from="${d.from}" data-deadline-type="${escHtml(String((i.action && i.action.type) || ''))}"${i.action && i.action.late ? ' data-deadline-late="1"' : ''}`;
-export const deadlineHtml = (i, t, d = deadlineOf(i, { t })) => { return d ? `<div class="ut-deadline${d.warn ? ' ut-deadline-warn' : ''}" data-state="${d.state}" ${deadlineAttrs(i, d)}>${escHtml(d.text)}</div>` : ''; };
+ *  60 sec · 42 sec left by the server's clock», the warning accent under 15 s, then «time is up by the server's clock —
+ *  waiting for the server» (its answers KEPT — r8: only the producer's settle withdraws them) or, on a card its producer
+ *  marked late, the late answer's words (the run card: its two buttons stay). The tray row, the chat card (the same row) and
+ *  the For-you window draw it; ONE page ticker re-reads every such line once a second (tickDeadlines).
+ *  A CLOCK IS THE HUB'S (r8): every For-you broadcast and snapshot carries the server's `now`; noteHubClock keeps this tab's
+ *  offset from it and hubNow() is the time every line counts by — never the device's own clock against hub stamps. */
+let hubOffset = 0;
+export function noteHubClock(serverNow, at = Date.now()) {
+  const n = Number(serverNow);
+  if (Number.isFinite(n) && n > 0) hubOffset = n - at;
+  return hubOffset;
+}
+export const hubNow = (at = Date.now()) => at + hubOffset;
+const deadlineAttrs = (i, d) => `data-deadline-at="${d.at}" data-deadline-from="${d.from}"${i.action && i.action.late ? ' data-deadline-late="1"' : ''}${i.action && i.action.late && i.action.restartLost === true ? ' data-deadline-lost="1"' : ''}`;
+export const deadlineHtml = (i, t, d = deadlineOf(i, { t, now: hubNow() })) => { return d ? `<div class="ut-deadline${d.warn ? ' ut-deadline-warn' : ''}" data-state="${d.state}" ${deadlineAttrs(i, d)}>${escHtml(d.text)}</div>` : ''; };
 /** THE DEADLINE TICKER: ONE interval for the page, armed when a line is drawn, re-reading every `[data-deadline-at]` still in
- *  the document through deadlineOf — its words, its accent, its state; a row whose time ran out with no late answer loses its
- *  answers (`.ut-timed-out`; the producer's settle follows and the record keeps its place). It stops itself when no line is
- *  counting: a row taken out of the document takes its line with it — nothing per row to tear down (the listener-lifecycle
- *  law). → the number of lines still counting. */
+ *  the document through deadlineOf at the HUB's time — its words, its accent, its state. It never touches an answer (r8). It
+ *  stops itself when no line is counting: a row taken out of the document takes its line with it — nothing per row to tear
+ *  down (the listener-lifecycle law). → the number of lines still counting. */
 let deadlineTimer = null;
-export function tickDeadlines(root = document, now = Date.now()) {
+export function tickDeadlines(root = document, now = hubNow()) {
   let counting = 0;
   for (const el of root.querySelectorAll('[data-deadline-at]')) {
-    const late = el.dataset.deadlineLate === '1';
-    const d = deadlineOf({ status: 'open', kind: 'action', expiresAt: Number(el.dataset.deadlineAt), createdAt: Number(el.dataset.deadlineFrom), action: { type: el.dataset.deadlineType || '', ...(late ? { late: true } : {}) } }, { t: tr, now });
+    const late = el.dataset.deadlineLate === '1', lost = el.dataset.deadlineLost === '1';
+    const d = deadlineOf({ status: 'open', kind: 'action', expiresAt: Number(el.dataset.deadlineAt), createdAt: Number(el.dataset.deadlineFrom), action: { type: 'deadline', ...(late ? { late: true } : {}), ...(lost ? { restartLost: true } : {}) } }, { t: tr, now });
     if (!d) continue;
     if (el.textContent !== d.text) el.textContent = d.text;
     el.classList.toggle('ut-deadline-warn', d.warn);
     if (el.dataset.state !== d.state) el.dataset.state = d.state;
-    const row = el.closest('.ut-item, .iw-item');
-    if (row) row.classList.toggle('ut-timed-out', d.state === 'timed-out');
     if (d.state === 'live') counting++;
   }
   return counting;
@@ -326,8 +346,8 @@ function partsOf(entry, ctx) {
   const notice = !!entry.notice && !resolved;
   const tail = !!entry.tail;
   // a CLEARED item ("Clear content…", 2026-09-28): its words are the cleared sentence (ctx.wordsOf) — dimmed, in its place
-  const dline = resolved ? null : deadlineOf(i, { t }); // r7 addendum: its deadline (a row whose time ran out with no late answer draws no answer)
-  const cls = 'ut-item' + (notice ? ' ut-item-notice' : '') + (resolved ? ' ut-item-resolved' : '') + (resolved && !tail ? ' ut-item-inplace' : '') + (i && i.clearedAt ? ' ut-item-cleared' : '') + (dline && dline.state === 'timed-out' ? ' ut-timed-out' : '');
+  const dline = resolved ? null : deadlineOf(i, { t, now: hubNow() }); // r7 addendum: its deadline — r8: at the HUB's time; it never withdraws an answer (the producer's settle does)
+  const cls = 'ut-item' + (notice ? ' ut-item-notice' : '') + (resolved ? ' ut-item-resolved' : '') + (resolved && !tail ? ' ut-item-inplace' : '') + (i && i.clearedAt ? ' ut-item-cleared' : '');
   const card = isAppCard(i) ? i.card : null; // design 009: an app install's ONE card (a cleared item has none left)
   const lang = typeof ctx.lang === 'function' ? ctx.lang() : (ctx.lang || 'en');
   const run = card ? null : runCardOf(i, { t }); // r7: the run card's facts — its headline is the row's question
@@ -356,7 +376,7 @@ function partsOf(entry, ctx) {
       ? ' · ' + escHtml(t('You replied: {text}', { text: i.reply.text.length > REPLY_SNIPPET ? i.reply.text.slice(0, REPLY_SNIPPET) + '…' : i.reply.text })) : '';
     meta = (tail ? `<span class="ut-sess" title="${escHtml(t('Go to this session'))}">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
       + escHtml(statusWords(i, t)) // r3: a hidden pointer reads «hidden — nothing was decided», never «done»
-      + (by ? ' · ' + escHtml(by) : '') + replied
+      + (by ? ' · ' + escHtml(by) : '') + (endCodeOf(i) ? ` · <code class="ut-end-code">${escHtml(endCodeOf(i))}</code>` : '') + replied // r8: an end this client cannot classify — its code, typed
       + (tail ? `<span class="ut-age"> · ${escHtml(agoText(i.resolvedAt || i.createdAt, t))}</span>` : '');
   } else {
     const exp = itemExpiryText(i, t, notice); // a notice's window; r3: a wake ask's lifetime («expires in 7 d»)

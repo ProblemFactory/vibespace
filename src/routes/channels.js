@@ -476,7 +476,7 @@ function wakeRefused(req, res, at, rows = []) {
   const who = personVerdict(req);
   if (who.ok) return false;
   const words = held ? WAKE_HELD_REFUSED : WAKE_REFUSED;
-  const named = held && h.names ? String(h.names).slice(0, 600) : null;
+  const named = held && (h.agentNames || h.names) ? String(h.agentNames || '').slice(0, 600) || null : null;   // r8: the caller is never the person here — the BELTED words only (a conversation's name is a peer's)
   bad(res, 403, (words[who.code] || words.cross_site) + (named ? ` — held: ${named}` : ''), { code: who.code, ...(held ? { wakeHeld: true, ...(h.why ? { heldBy: h.why } : {}), ...(named ? { held: named } : {}) } : {}) });
   return true;
 }
@@ -488,7 +488,7 @@ router.put('/api/channels/adapters/:id/access', async (req, res) => {
     forHost(req);
     const list = listOf(req.body, 'access');
     if (list === undefined) return bad(res, 400, 'access is required (a list of {principal, authority}; [] removes everyone)', { code: 'bad-request' });
-    if (wakeRefused(req, res, accountGrain(req))) return;
+    if (wakeRefused(req, res, { ...accountGrain(req), proposed: { access: list, ...exceptOf(req.body) } })) return;   // r8: the write's whole new list — a row whose reach it cannot change is not held by it
     scopeAnswer(res, await engine().setAccess(req.params.id, { kind: 'account' }, list, { base: req.body.base, ...exceptOf(req.body) }));
   } catch (e) { fail(res, e); }
 });

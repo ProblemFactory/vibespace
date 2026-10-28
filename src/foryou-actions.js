@@ -94,7 +94,7 @@ const ROWS = Object.freeze([
   { type: 'hub-act-ask', identity: 'askId', producer: 'src/server/hub-act-ask.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'about', decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over'], stamp: 'allow' },   // r3: `about` = the asking conversation (an agent's act) — its chat draws the card
   // ── vault ──
   { type: 'automation-ask', identity: 'askId', producer: 'src/server/automation-engine.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-api', 'an automation key\'s first use', 'own'), scope: 'conversation' },
-  { type: 'vault-run-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'run', 'wait'), scope: 'conversation', lateAnswer: true, decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over', 'ask-changed', 'vault_locked'], stamp: 'allow' },   // r7c (the owner's ruling «A»): past its 60 s the command is refused and the card stays answerable — an Allow then lets the agent's next run of that command through once
+  { type: 'vault-run-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'run', 'wait'), scope: 'conversation', decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over', 'ask-changed', 'vault_locked'], stamp: 'allow' },   // r7c (the owner's ruling «A»): past its 60 s the command is refused and the card stays answerable — an Allow then lets the agent's next run of that command through once (r8: the door marks it `action.late`; the client never infers it from its own clock)
   { type: 'vault-grant-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'request <vault://…>', 'filed'), scope: 'conversation', decide: 'person', ends: ['granted', 'denied', 'vault_locked', 'ask-changed', 'ask-over'], stamp: 'grant' },   // r4: Allow once / For 8 hours / Deny are its three verbs (+ a lock, a changed card, an ask that is over); r6: a grant is `granted` (every reader knows it) + `resolvedFact.grantedFor` — its life: grantLifeOf
   { type: 'secret-request', identity: 'requestId', producer: 'src/server/vault-paste-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'secret', cli: C('vibespace-vault', 'request "<what>"', 'filed'), scope: 'conversation', decide: 'person', ends: ['stored', 'denied', 'vault_locked', 'ask-over', 'expired'], stamp: 'store' },
   { type: 'vault-unlock', identity: null, producer: 'src/server/vault-hooks.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
@@ -263,14 +263,47 @@ function chipWords(needs, t = fmt) {
   return { text: t('waiting for you · {what}', { what }), title: t('This conversation is waiting for you: {all} — click to go to the newest card', { all }), n: list.length };
 }
 
+/** THE END A RECORD SAYS (lane wake-approve-card r8 — the acceptance drove vault-agent-own 4ff55fb4's real door: its late
+ *  settles wrote resolvedBy the person ('user') or 'vault' with the outcome in resolvedFact.outcome; the store skipped them and
+ *  the late card stayed open with its buttons after the one-run pass was granted, a lock read «完成 · vault», the ruled
+ *  'vault_locked' its raw word). A decision row's record reads in 主开发's RULED shape — resolvedBy IS the outcome word, one
+ *  of its row's `ends`. A producer that wrote the outcome in its fact instead is read the same (OUTCOME_ENDS — 'late-allowed'
+ *  is a late 'allowed') until it writes the ruled one; the store maps it the same way at the write (src/user-todos.js
+ *  resolveAnswered). Anything else is an end this client CANNOT CLASSIFY — {unknown: <code>}, worded «outcome unknown ·
+ *  <code>» (the code monospace), never «done» and never a bare raw word. → {by, late, mapped} | {unknown} | null (open, or no
+ *  decision row: its own words). */
+const OUTCOME_ENDS = Object.freeze({ allowed: 'allowed', 'late-allowed': 'allowed', denied: 'denied', expired: 'expired', vault_locked: 'vault_locked' });
+/** The ends these words name beyond a row's own (a record from before the decision law: «withdrawn by the agent», …). */
+const WORDED_ENDS = Object.freeze(['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over', 'ask-changed', 'vault_locked', 'granted', 'stored', 'delivered', 'discarded', 'agent', 'conversation-gone', 'handed-back']);
+function endOf(item) {
+  if (!item || item.status === 'open' || !isDecisionRow(item)) return null;
+  const by = item.resolvedBy, f = item.resolvedFact && typeof item.resolvedFact === 'object' ? item.resolvedFact : {};
+  const late = f.late === true || f.outcome === 'late-allowed';
+  if (typeof by === 'string' && (endsOf(item).includes(by) || WORDED_ENDS.includes(by))) return { by, late, mapped: false };
+  const o = typeof f.outcome === 'string' && Object.prototype.hasOwnProperty.call(OUTCOME_ENDS, f.outcome) ? OUTCOME_ENDS[f.outcome] : null;
+  if (o && endsOf(item).includes(o)) return { by: o, late, mapped: true };
+  return { unknown: String(by || f.outcome || item.status || '?').slice(0, 40) };
+}
+/** The record in the ruled shape (endOf's mapping applied: resolvedBy the outcome word, `late` on its fact), else as it is. */
+function ruledOf(item) {
+  const e = endOf(item);
+  return e && e.mapped ? { ...item, resolvedBy: e.by, resolvedFact: { ...item.resolvedFact, ...(e.late ? { late: true } : {}) } } : item;
+}
+
 /** The quiet record's VERB — how a resolved card reads in its line («approved · 2 min ago»). */
 function settledWords(item, t = fmt, kind = null) {
+  const end = endOf(item);
+  if (end && end.unknown) return t('outcome unknown');   // r8: the caller draws the code beside it (monospace)
+  item = ruledOf(item);
   const by = item && item.resolvedBy;
   const k = kind || (needOf(item) || {}).kind;
   if (item && item.reply && item.reply.text) return t('you replied');
+  if (by === 'allowed' && item.resolvedFact && item.resolvedFact.late === true) return t('let through once · waiting for it to run again');   // r8: a late Allow without the person mark (its stamp says «by you» when it has one)
   if (by === 'allowed') return k === 'approval' ? t('approved') : t('allowed');
   if (by === 'denied') return t('denied');
+  if (by === 'vault_locked') return t('the vault locked before it was answered');   // r8: never the raw word
   if (by === 'stored') return t('saved to the vault');
+  if (by === 'always') { const gw = grantWords(item, { t }); return gw ? gw.text : t(GRANT_VERB.always); }   // r8: the run card's «always» without the person mark — its grant's words (was «done»)
   if (by === 'granted') { const gw = grantWords(item, { t }); return gw ? gw.text : t('allowed'); }   // r4: an agent's request for a stored secret, answered — r6: the duration its record carries (none ⇒ «allowed») and the grant's LIFE (ended / revoked)
   if (by === 'delivered') return t('delivered');   // r6: a held digest the owner released
   if (by === 'discarded') return t('discarded — nothing was sent');
@@ -342,17 +375,24 @@ function expiryWords(item, { t = fmt, now = Date.now() } = {}) {
 /** A CARD WITH A DEADLINE SHOWS IT (lane wake-approve-card r7 addendum — the owner: «这种 approval 卡片如果我一直不管，那边指令就会
  *  超时？会发生什么？是不是应该显示个倒计时警告一下用户？»; the run card waited its 60 s in silence, then left). EVERY open ACTION
  *  item carrying `expiresAt` — a generic rule, never one kind's: the run card, a hub act, an automation call, an exit ask —
- *  whose window is ≤ DEADLINE_LIVE_MS counts down BY THE SECOND: «valid for 60 sec · 42 sec left», the warning accent under
- *  DEADLINE_WARN_MS (a longer window — the 7-day wake ask — keeps expiryWords' «expires in 7 d»). Past its end: a row with a
- *  LATE ANSWER (`lateAnswer` — r7c, the owner's ruling «A»: the agent's command was refused, an Allow now lets its next run of
- *  that command through once) keeps its buttons and says so — as does an item its producer marked `action.late`; any other
- *  row says «timed out — …» and draws no answer (its producer's settle follows; the record keeps its place). → {at, from,
- *  left, total, warn, state: 'live' | 'late' | 'timed-out', text} | null (no live deadline: a notice words its own window). */
+ *  whose window is ≤ DEADLINE_LIVE_MS counts down BY THE SECOND: «valid for 60 sec · 42 sec left by the server's clock», the
+ *  warning accent under DEADLINE_WARN_MS (a longer window — the 7-day wake ask — keeps expiryWords' «expires in 7 d»).
+ *  A CLOCK IS THE HUB'S (r8 — the acceptance: a device 60 s fast hid the Allow / Deny of a live 60 s ask from the start, a
+ *  device behind kept counting after the hub refused): `now` is the HUB's time as this tab reads it (the caller's — the client
+ *  passes user-todos-row's hubNow(): the device clock plus the offset the server's own `now` on every For-you broadcast set),
+ *  the countdown only ADVISES, and NO state here withdraws an answer — only the producer's settle does (the item leaves
+ *  'open'). Past its end with no settle yet: 'due' («time is up by the server's clock — waiting for the server»), the buttons
+ *  kept (a press answers with the door's own words: «too late»). An item its producer marked `action.late` (r7c, the owner's
+ *  ruling «A»: the agent's command was refused, an Allow now lets its next run of that command through once — r20b's door)
+ *  keeps its buttons and says so. → {at, from, left, total, warn, state: 'live' | 'due' | 'late', text} | null (no live
+ *  deadline: a notice words its own window). DEADLINE_WORDS['timed-out'] = a SETTLED ask nobody answered (`ask-expired`). */
 const DEADLINE_LIVE_MS = 60 * 60e3;
 const DEADLINE_WARN_MS = 15e3;
 const DEADLINE_WORDS = Object.freeze({
-  live: i18nKey('valid for {total} · {left} left'),
+  live: i18nKey('valid for {total} · {left} left by the server\'s clock'),
+  due: i18nKey('time is up by the server\'s clock — waiting for the server'),
   late: i18nKey('timed out — the agent\'s command was refused; Allow now = its next run of this command goes through (once)'),
+  'late-lost': i18nKey('timed out — the agent\'s command was refused; the server restarted since, so an Allow now would let nothing through — its next run asks again'),   // r8: vault-agent-own r23's `action.restartLost` (the late pass cannot be minted — fails safe)
   'timed-out': i18nKey('timed out — the agent\'s command was refused (it may ask again)'),
 });
 const spanWords = (ms, t) => {
@@ -363,13 +403,13 @@ const spanWords = (ms, t) => {
 };
 function deadlineOf(item, { t = fmt, now = Date.now() } = {}) {
   if (!item || item.status !== 'open' || item.kind === 'notice' || item.clearedAt) return null;
-  const row = item.action && typeof item.action.type === 'string' ? ROW_OF[item.action.type] : null;
-  const marked = !!(item.action && item.action.late);   // the producer says the deadline passed and the card still answers
+  const marked = !!(item.action && item.action.late);   // the PRODUCER says the deadline passed and the card still answers
   const at = Number(item.expiresAt), from = Number(item.createdAt);
   if (!marked && !(Number.isFinite(at) && Number.isFinite(from) && at > from && at - from <= DEADLINE_LIVE_MS)) return null;
   const left = Number.isFinite(at) ? at - now : 0, total = Number.isFinite(at) && Number.isFinite(from) ? at - from : 0;
-  const state = marked || (left <= 0 && row && row.lateAnswer) ? 'late' : left <= 0 ? 'timed-out' : 'live';
-  const text = state === 'live' ? t(DEADLINE_WORDS.live, { total: spanWords(total, t), left: spanWords(left, t) }) : t(DEADLINE_WORDS[state]);
+  const state = marked ? 'late' : left <= 0 ? 'due' : 'live';
+  const lost = marked && item.action.restartLost === true;   // r8: a restart since — an Allow would mint nothing (r23); said, and not offered
+  const text = state === 'live' ? t(DEADLINE_WORDS.live, { total: spanWords(total, t), left: spanWords(left, t) }) : t(DEADLINE_WORDS[lost ? 'late-lost' : state]);
   return { at, from, left: Math.max(0, left), total, warn: state !== 'live' || left < DEADLINE_WARN_MS, state, text };
 }
 
@@ -449,6 +489,7 @@ function grantWords(item, { t = fmt, now = Date.now() } = {}) {
 }
 function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
   if (!item || item.status === 'open' || !item.action || !PERSON_DECIDES.includes(item.action.type)) return null;
+  item = ruledOf(item);   // r8: a producer's outcome-in-the-fact settle reads as the ruled one
   const by = item.resolvedBy;
   const fact = item.resolvedFact && typeof item.resolvedFact === 'object' ? item.resolvedFact : null;
   // r6: a grant that ENDED (or was revoked) says so, whoever decided it — «allowed for 8 hours · ended 17:41»
@@ -471,6 +512,12 @@ function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
  *  «Always» remembers, the masking, the templates — never in the body). A value is SEGMENTS: {text} words, {mono} data (a
  *  path, a host, a variable), {aside} a parenthesis, {code} a code these tables have no words for — drawn monospace, never guessed into a
  *  sentence. null = no facts this client reads (v ≠ 1, another kind): the record's prose `detail`, exactly as before. */
+/** THE ONE BOUND of a run card's command (r8 — /var/tmp/vibespace-lanes/vault-card-contract.md, both lanes): the body shows
+ *  ≤ RUN_CMD_BODY_MAX characters (a longer one: its start + «…», `cmdCut: true`), the fold holds the whole ≤ RUN_CMD_MAX
+ *  (`cmdFull` — the door's HEAD_MAX, 4 096 bytes, is never more characters); every other facts string ≤ RUN_CMD_BODY_MAX.
+ *  src/user-todos.js clips at the write (never throws); the door clips at the same bound. */
+const RUN_CMD_BODY_MAX = 2000;
+const RUN_CMD_MAX = 4096;
 const RUN_ALWAYS_WHY = Object.freeze({   // = vault-run.js's ALWAYS_WHY (int-C: its export is the census's list)
   'destination-unknown': i18nKey('where it sends what it reads is unknown'),
   'program-writable': i18nKey('the program sits in a folder an agent can write'),
@@ -499,7 +546,7 @@ const RUN_DECIDES = Object.freeze({ 'destination-unknown': 'hosts', redirect: 'h
 const RUN_ROWS = Object.freeze(['hosts', 'program', 'folder', 'secrets']);
 const RUN_LABEL = Object.freeze({ hosts: i18nKey('Sends to'), program: i18nKey('Program'), folder: i18nKey('Working folder'), secrets: i18nKey('Secrets') });
 function runCardOf(item, { t = fmt } = {}) {
-  const f = item && item.action && item.action.type === 'vault-run-ask' && item.facts && typeof item.facts === 'object' && item.facts.v === 1 ? item.facts : null;
+  const f = item && item.action && item.action.type === 'vault-run-ask' && item.facts && typeof item.facts === 'object' && (item.facts.v === 1 || item.facts.v === 2) ? item.facts : null;   // r8: v 2 = vault-agent-own r23 (the chunked folds, env, the templates' text, the reason)
   if (!f) return null;
   const str = (x) => (typeof x === 'string' ? x : '');
   const own = (table, code) => typeof code === 'string' && Object.prototype.hasOwnProperty.call(table, code);
@@ -546,15 +593,34 @@ function runCardOf(item, { t = fmt } = {}) {
     .map((key) => ({ key, label: t(RUN_LABEL[key]), lines: lines[key], warn: key === decides || (key === 'hosts' && !known) }));
   const hint = a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: str(a.directive) }] : [])];
   const templates = (Array.isArray(f.templates) ? f.templates : []).filter((x) => x && typeof x === 'object');
+  // r8 (a store clips and says, never throws): a command longer than the body's RUN_CMD_BODY_MAX — `cmd` its start, `cmdCut`,
+  // the whole (≤ RUN_CMD_MAX) in `cmdFull` (chunks — r23's shape; the store folds an older producer's the same way); the body
+  // SAYS it is a cut (drawn with «…») and the fold holds it all, reassembled
+  const joined = (x) => (Array.isArray(x) ? x.filter((c) => typeof c === 'string').join('') : str(x));
+  const full = f.cmdCut === true && joined(f.cmdFull) ? joined(f.cmdFull) : null;
+  // r8: WHY IT ASKS (r23 `reason`): a secret another conversation stored, a value minted for one host that this run sends to another
+  const rs = f.reason && typeof f.reason === 'object' ? f.reason : null;
+  const away = (rs && Array.isArray(rs.away) ? rs.away : []).filter((x) => x && typeof x === 'object');
+  const why = [...(rs && rs.notOwn === true ? [[{ text: t('it uses a secret another conversation stored') }]] : []),
+    ...away.map((x) => [{ mono: str(x.ref) }, { text: ' ' }, { text: x.unknown === true || !str(x.host) ? t('was minted for {host} — where this run sends it cannot be told', { host: str(x.forHost) || '?' }) : t('was minted for {host} — this run sends it to {to}', { host: str(x.forHost) || '?', to: str(x.host) }) }])];
+  const cut = (Array.isArray(f.cut) ? f.cut : []).filter((x) => typeof x === 'string' && x).slice(0, 16);
+  const env = (Array.isArray(f.env) ? f.env : []).filter((x) => x && typeof x === 'object' && str(x.name));   // r8: a run's plain (not secret) --env, when the door says it
   const fold = [
+    ...(why.length ? [{ label: t('Why it asks'), lines: why }] : []),
+    ...(full ? [{ label: t('Whole command'), lines: [], cmd: full }] : []),
+    ...(cut.length ? [{ label: t('Shortened'), lines: [[{ text: t('too long to keep whole, cut at the card\'s bound:') }, { text: ' ' }, ...list(cut.map((x) => [{ code: x }]))]] }] : []),
     { label: t(RUN_LABEL.program), lines: [[{ mono: path }]] },
+    ...(env.length ? [{ label: t('Environment'), lines: env.map((x) => [{ mono: `${str(x.name)}=${str(x.value)}` }]) }] : []),
     ...(secrets.length ? [{ label: t(RUN_LABEL.secrets), lines: secrets.map((s) => [{ text: str(s.name) }, { text: ' — ' }, { mono: str(s.ref) }, { text: ' → ' }, ...asOf(s.as)]) }] : []),
     ...(known ? [{ label: t(RUN_LABEL.hosts), lines: hosts.map((x) => [{ mono: x }]) }] : []),
     ...(f.shape ? [{ label: t('Shape'), lines: [said(RUN_SHAPE, f.shape)] }] : []),
     ...(f.masking ? [{ label: t('Output'), lines: [said(RUN_MASKING, f.masking)] }] : []),
     ...(templates.length ? [{ label: t('Templates'), lines: templates.map((x) => [{ mono: str(x.label) }, { text: ' · ' + t('{n} bytes', { n: Number(x.bytes) || 0 }) + (x.shown === false ? ' · ' + t('not shown on this card') : '') }]) }] : []),
+    ...templates.filter((x) => x.shown !== false && (str(x.text) || joined(x.textFull))).map((x) => ({ label: str(x.label) || t('Templates'), lines: [], cmd: joined(x.textFull) || str(x.text) })),   // r8: a template's text (its chunked fold reassembled — r23)
   ];
-  return { headline, cmd: str(f.cmd), rows, always: { offered: a.offered === true, hint }, fold };
+  const cmd0 = str(f.cmd), shown = full ? cmd0.replace(/\u2026$/, '').length : cmd0.length;
+  const cmd = full && !/\u2026$/.test(cmd0) ? cmd0 + '\u2026' : cmd0;   // the body's cut is drawn as one
+  return { headline, cmd, cut: full ? { n: full.length, shown, text: t('The command is {n} characters long; the card shows its first {m} — the whole command is under “{fold}”.', { n: full.length, m: shown, fold: t('Technical details') }) } : null, rows, always: { offered: a.offered === true, hint }, fold };
 }
 /** THE DECISION CARD'S MODEL (lane wake-approve-card) — `item` → {state, buttons, stamp, waiting}:
  *   'filed'         open, and this viewer may decide ⇒ buttons ['approve', 'deny'] (the row's own verbs — the tray's route)
@@ -563,7 +629,7 @@ function runCardOf(item, { t = fmt } = {}) {
  *   'expired' / 'withdrawn' / 'settled' — over without a decision; never a button
  *   'ended' / 'revoked' — r6: a grant whose life is over (grantLifeOf: past its end, a lock, its one use / revoked) */
 function decisionCard(item, { role = VIEWER_ROLE, t = fmt, now = Date.now() } = {}) {
-  const it = item || {};
+  const it = ruledOf(item) || {};
   if (it.status === 'open') {
     return canDecide(role)
       ? { state: 'filed', buttons: ['approve', 'deny'], stamp: null, waiting: null }
@@ -613,4 +679,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, RUN_ALWAYS_WHY, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, RUN_ALWAYS_WHY, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

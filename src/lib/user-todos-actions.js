@@ -34,6 +34,7 @@ import { openTakeover } from './browser-takeover-queue.js'; // lane browser-take
 import { refusalWords as whoRefusalWords } from './browser-who-model.js'; // «Who can use it»'s own refusal words (the dialog's)
 import { titleWords } from '../channel-api-card.js'; // PURE (lane card-grammar-exceptions): a raw-API proposal's item says its card's title
 import { postSecretAnswer } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's answer (the value rides ONE body, never a toast)
+import { noteHubClock } from './user-todos-row.js'; // lane wake-approve-card r8: THE hub clock a card's countdown counts by (every snapshot — the broadcast, the GETs — carries the server's `now`; setTodos notes it)
 import { isPointer, clockWords } from '../foryou-actions.js'; // PURE (lane wake-approve-card r3): a pointer hides — its ✕ is «Hide», no Undo; r4: an expired ask's end in words
 import { askOptions } from '../ask-options.js'; // PURE (lane foryou-honest): an ask's chips — the explicit options, else its detail's «A …；B …» / «是 / 否» parsed
 
@@ -392,7 +393,7 @@ export function inboxModel(app) {
       // second password again — 验证是你 opens FIRST, in the press's own task, never a round trip late) / deny.
       if (answer === 'always' && !revealLeftMs() && !(await askRevealPassword())) return false;
       const r = await fetchJson(`/api/vault/run/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(answer === 'always' ? revealHeaders() : {}) }, body: JSON.stringify({ answer }) });
-      if (r && r.ok) { showToast(r.outcome === 'always' ? t('Allowed for this shape for 30 days') : r.outcome === 'allowed' ? t('allowed') : t('denied')); return true; }   // `outcome` (the vault door lays its facts' `state` over an answer)
+      if (r && r.ok) { showToast(r.outcome === 'always' ? t('Allowed for this shape for 30 days') : r.outcome === 'allowed' ? t('allowed') : r.outcome === 'late-allowed' ? t('let through once · waiting for it to run again') : r.outcome === 'denied' ? t('denied') : `${t('outcome unknown')} · ${String(r.outcome || '')}`); return true; }   // `outcome` (the vault door lays its facts' `state` over an answer) — r8: a LATE Allow (r20b's 'late-allowed') is never read as «denied»; an outcome these words do not know is said as one
       const code = r && r.code;
       if (code === 'reveal_needs_password') forgetReveal();
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone')
@@ -425,7 +426,7 @@ export function inboxModel(app) {
       // digest (hits a boot found older than their window × 24) is decided on the same route — Deliver / Discard
       const held = rec.action.type === 'channel-held-digest';
       const r = await fetchJson(`/api/channels/reach-requests/${encodeURIComponent(rec.action.id)}/${answer === 'reject' ? 'deny' : 'approve'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-      if (r && r.ok && held) { showToast(answer === 'reject' ? t('Discarded — nothing was sent') : r.delivered ? t('Delivered — one turn for the agent') : t('Not delivered now ({why}) — they go with its next delivery', { why: r.why || '' }), r.delivered === false && answer !== 'reject' ? { type: 'error' } : undefined); return true; }
+      if (r && r.ok && held) { showToast(answer === 'reject' ? t('Discarded {n} messages — nothing was sent', { n: Number(r.discarded) || 0 }) : r.delivered ? (Number(r.carried) > Number(r.n) ? t('Delivered {n} held messages with {m} newer ones — one turn for the agent', { n: Number(r.n) || 0, m: Number(r.carried) - Number(r.n) }) : t('Delivered {n} messages — one turn for the agent', { n: Number(r.n) || 0 })) : r.why === 'nothing-left' ? t('Nothing was left to deliver — its conversations are gone') : t('Not delivered now ({why}) — they go with its next delivery', { why: r.why || t('refused') }), r.delivered === false && answer !== 'reject' ? { type: 'error' } : undefined); return true; }   // r8: the count the press touched (the decision's own store — exactly the card's)
       if (r && r.ok) { showToast(answer === 'reject' ? t('Denied — nothing changed') : t('Approved — the agent is woken by it from now on')); return true; }
       // r4: past its end (either side of the minute sweep) ⇒ ONE 409 `expired` with its end — said in the owner's language
       showToast((r && r.code === 'expired') ? t('This request expired on {date} — the agent can ask again', { date: clockWords(r.expiredAt) }) : (r && r.code === 'bad-state') ? t('That request was already decided') : (r && r.error) || t('server unreachable'), { type: 'error' });
@@ -599,7 +600,7 @@ export function inboxModel(app) {
   // every snapshot applied bumps `gen`: a list FETCHED before a newer snapshot landed never replaces it (lane-redact verify
   // r5 — the reconnect resync's answer could arrive after a clear's broadcast and bring the item's words back on screen)
   let gen = 0;
-  const setTodos = (next) => { gen++; const r = restoreDetails(next || { open: [], resolved: [] }, fullById); todos = r.todos; fullById = r.fullById; loaded = true; emit('todos', todos); };
+  const setTodos = (next) => { gen++; noteHubClock(next && next.now); const r = restoreDetails(next || { open: [], resolved: [] }, fullById); todos = r.todos; fullById = r.fullById; loaded = true; emit('todos', todos); };
   const detailLoads = new Map(); // id → the in-flight load (single-flight)
   /** Resolves to `{detail, error}`: the item's whole detail (the item patched in place and
    *  a `todos` emit when the rest arrives), or the reason it could not be loaded — the

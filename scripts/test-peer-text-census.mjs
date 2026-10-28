@@ -117,6 +117,10 @@ const DOORS = ['deliverToConversation(', 'stashFor(', 'pushNotice(', 'postToPeer
   'dialogText(', 'renderDialogNotice(', 'answeredNote(', 'answerDoneText(', 'stuckAgentText(', 'loadingText(', 'alertsNote(', 'pageText(', 'agentCopy(', 'readThreadFor(', 'searchFor(',
   // lane channel-attach-read (B-d6b9): the agent's ATTACHMENT answer — who sent it, where, the vendor's type (one header the CLI prints)
   'agentAttachmentAnswer(',
+  // lane wake-approve-card r8: the wake gate's REFUSAL (src/routes/channels.js wakeRefused — a 403 to a caller that is never the
+  // person: a vsst_ agent, a job, an automation key) names the stored wake rows — a conversation's name (a peer's words, THE
+  // name ladder) and the principal's name, each a line piece of the belt (was: the raw title, newlines kept)
+  'agentWakeWords(',
   'reboundNoteText(', // verify r1 (lane profile-lock-roll F8): the rebound note the CLI prints as [tab_rebound] — the page's url rides it
   // verify r1 F1: the three agent-facing GROUP answers (`vibespace-msg list / group list / read` print them line by line)
   'msgPeerRow(', 'msgGroupsAnswer(', 'msgReadAnswer(',
@@ -228,6 +232,7 @@ const TABLE = {
   'src/agent-routes.js :: nudgeText(': { rules: ['declared:src/backlog-select.js renders (its row)'], pin: null, why: 'call site' },
   'src/server/channels-engine.js :: agentCopy(': { rules: ['re-judged-at-read', ...BELT], pin: /text: agentText\(x\.text, \{ kind: 'block' \}\)/, why: 'THE agent\'s copy of a stored record (read / thread read): judged on the way OUT — a record stored before the rule, a hand-written log line' },
   'src/server/channels-engine.js :: agentAttachmentAnswer(': { rules: BELT, pin: /mime: meta\.mime \? agentText\(meta\.mime, \{ kind: 'line', max: 128 \}\) : null,\s+from: who \? agentText\(who, \{ kind: 'line', max: 200 \}\) : null,\s+conversation: \{ key: agentId\(en\.key\), adapterId, id: agentId\(convId\), title: agentTitle\(en, convId\) \}/, why: 'lane channel-attach-read: the attachment answer an agent gets beside the bytes — the sender (the read view + agentCopy, then the line rule), the conversation key / id / title, the vendor\'s type: each a line piece' },
+  'src/server/channels-access.js :: agentWakeWords(': { rules: BELT, pin: /const agentWakeWords = \(who, where, kind, state\) => `\$\{agentText\(who, \{ kind: 'line', max: 120 \}\)\}'s wake on «\$\{kind === 'conversation' \? agentText\(where, \{ kind: 'line', max: 80 \}\) : where\}» \$\{state\}`;/, why: 'lane wake-approve-card r8: the wake gate\'s refusal to an agent / a job / a key (wakeRowView.agentWords → wakeHeldAt.agentNames → src/routes/channels.js wakeRefused): the conversation\'s name and the principal\'s name, each a line piece; a rule\'s summary and the account label are the user\'s words' },
   'src/server/channels-access.js :: searchFor(': { rules: BELT, pin: /text: agentText\(ax\.text, \{ kind: 'block', max: 400 \}\)/, why: 'each search hit\'s 400-character cut, judged after the cut' },
   'src/server/channels-access.js :: readThreadFor(': { rules: ['declared:answers through withView(agent:true) → agentCopy — its row above'], pin: /threadRead\(adapterId, convId, msg, \{ limit, agent: true \}\)/, why: 'the thread read is the same agent copy' },
   'src/server/channels-engine.js :: stashFor(': { rules: ['frame-inert', 'bounded', 'declared:the reaction digest line is src/channel-reactions.js reactionDigestLine (inertFrameLine); a wake / receipt stash carries channel-filter\'s block or channel-policy\'s receipt (their pieces inertFrames + inertFrameLine)'], pin: /const title = agentText\(en\.title \|\| convId, \{ kind: 'line', max: 120 \}\)/, why: 'a vendor title as one piece through the belt; the rest composed by judged producers' },
@@ -810,6 +815,7 @@ const JUDGED_DOORS = {   // door → [file, a pin on its belt call]
   // lane channels-proposals-recall: a recall's quote of the user's own message (the drafter's view), the proposals list's summary
   agentRecallQuote: ['src/server/channels-outbound.js', /quote: \{ author: agentText\(v\.recall\.quote\.author, \{ kind: 'line', max: 200 \}\), text: agentText\(v\.recall\.quote\.text, \{ kind: 'line', max: 200 \}\) \}/],
   agentProposalRow: ['src/server/channels-access.js', /summary: s \? agentText\(s, \{ kind: 'line', max: 160 \}\) : null,/],
+  agentWakeWords: ['src/server/channels-access.js', /agentWords: agentWakeWords\(who, where, kind, state\)/],   // lane wake-approve-card r8: the wake gate's refusal names
 };
 const V = 'vibespace', O = 'own';
 const rows = (file, table) => Object.fromEntries(Object.entries(table).map(([k, v]) => [`${file} :: ${k}`, v]));
@@ -974,7 +980,7 @@ const PRINTS = {
     // lane gmail-draft-not-a-message: the read's unsent drafts — a count in the header, a count of the binned ones, the kind enum
     'drafts': `${V}:a count (the records whose kind is draft)`, 'm.kind': `${V}:the record kind enum (system | draft)`, 'r.draftsTrashed': `${V}:a count (readFor's binned drafts)`,
     'j.appended': `${V}:a count`, 'j.joined': `${V}:a flag`, 'j.retryAfterSec': `${V}:a wait`, 'j.code': `${V}:a refusal code`, 'j.why': `${V}:a why code`,
-    'j.error': `${V}:the channels engine's refusal sentence (its words and the caller's own values — no title or name rides one: the derived census in §5)`,
+    'j.error': 'judged:agentWakeWords — the channels routes\' refusal sentences: our words and the caller\'s own values; the wake gate\'s 403 (wakeRefused) names the stored wake rows ONLY through the belt — a conversation\'s title and a principal\'s name each a line piece (r8: it quoted the raw title, newlines kept)',
     'm.at': `${V}:an instant`, 'm.author': 'judged:peerName — the author\'s name (agentCopy), else its id (agentId)', 'm.author.id': 'judged:agentId — an author id as a line piece (agentCopy; verify r3 F6: printed when the author has no name)', 'm.author.name': 'judged:peerName with the line rule (agentCopy)',
     'm.key': 'judged:agentId — a search hit\'s conversation key (searchFor; verify r3 F6)', 'm.reactionsText': 'judged:agentReactionsLine — our catalog\'s words and counts under the line rule', 'm.revisionText': 'judged:agentRevisionLine — our words and the recall instant under the line rule (lane channel-record-revisions)', 'm.versions': `${V}:the version rows (v.* — rows)`, 'i': `${V}:a loop index (the version's number)`, 'v.original': `${V}:a flag`, 'v.at': `${V}:an instant`, 'v.text': 'judged:agentCopy — a version\'s text, the belt as a block (revisionView, agent copy)', 'm.factsText': 'judged:agentFactLines — the message\'s facts (agentFacts: names by peerName, addresses and lines by the belt) as one line under the line rule', 'm.text': 'judged:agentCopy / searchFor — the belt as a block', 'm.title': 'judged:agentTitle (searchFor\'s visible map)', 'm.vendorId': 'judged:agentId — the message id the agent hands back, a no-op on a real id (agentCopy / searchFor; verify r3 F6)',
     'p.adapterId': `${V}:an adapter id`, 'p.at': `${V}:an instant`, 'p.updatedAt': `${V}:an instant`, 'p.ttlAt': `${V}:an instant`,

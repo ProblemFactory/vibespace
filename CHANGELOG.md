@@ -9,7 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A decided request says who and when, on its card and in For you: «approved by you · 09:41».
 - An unanswered wake request expires after 7 days; its card says «expires in 7 d», and the agent can ask again.
 - A vault command an agent wants to run and an action on a paired machine show their card in the chat that asked, like a paste request.
-- A vault command card now reads in your language: who wants to run which program with which secret, the command in its own box, where it sends what it reads first (marked when that is unknown), and the technical details folded away.
+- A vault command card now reads in your language: who runs which program with which secret, the command in its own box, and where it sends what it reads first.
 - A card that waits for your answer only briefly shows the time it has left, counting down, and turns amber in its last 15 seconds.
 
 ### Fixed
@@ -31,6 +31,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A stored-secret approval shows when it ended or that you revoked it, instead of «allowed for 8 hours» for ever.
 - An agent's list of its notifications shows the ones that stopped firing, marked as such.
 - A vault command card nobody answered in time no longer disappears; it stays in place and says it timed out and that the agent's command was refused.
+- A vault command longer than 2,000 characters gets its card again; the card shows its start and keeps the whole command under Technical details.
+- An expired vault command card you answer now closes and says what you chose, and it no longer offers «Always», which an expired card cannot take.
+- Held messages are counted exactly: Discard drops what the card says, and new messages no longer push held ones into the next digest.
+- Every held-messages decision gets its card, even with many at once, so none are discarded unseen.
+- Countdowns follow the server's clock, so a device whose clock is off no longer hides the Allow and Deny buttons too early.
+- VibeSpace starts quickly again on an instance with many channel conversations.
+- With sign-in off, adding an agent to an account no longer needs your click when it cannot turn a stopped wake back on.
 
 ### Security
 - With sign-in off, an agent could widen a wake you approved by editing its rule or filter; changing what a wake reacts to now takes your click.
@@ -38,6 +45,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - With sign-in off, a script or an automation key could re-enable a webhook path that wakes an agent or add a caller; that now takes your click.
 - With sign-in off, granting an account or adding a rule that would turn a stopped wake back on now takes your click, and your own change says which it turned on.
 - A webhook pairing code not made on your page no longer completes once the path wakes an agent; make a new code on the page.
+- A refusal that tells an agent a wake depends on a conversation now shows that conversation's title as one plain line.
+- A refused webhook pairing no longer tells the other side the names of your agents, conversations or rules.
+- An agent's list of its notifications no longer names conversations it cannot read.
 
 ## 2.369.360 — 2026-10-27
 

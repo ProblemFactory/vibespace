@@ -31,7 +31,7 @@ import { registerMenuItem } from './contributions.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: an automation card's reach choices in the pane
 import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
-import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml, runFactsHtml, armDeadlines } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
+import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, endCodeOf, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml, runFactsHtml, armDeadlines, hubNow } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
 import { closersOf, isDecisionRow, runCardOf, deadlineOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
@@ -377,7 +377,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
   const viewOf = (it, e) => itemView(it, {
     t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : (runCardOf(it, { t }) || { headline: model.wordsOf(it) }).headline, detail: model.detailOf(it), options: model.optionsFor(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
     origin: { origin: originOf(it), label: ORIGIN_LABELS[originOf(it)] || '' }, notice: isNotice(it), resolved: !!(e && e.resolved) || it.status !== 'open',
-    reply: model.replyState(it), closers: closersOf(it, !!(e && e.resolved) || it.status !== 'open'), ago: (ts) => agoText(ts, t), expires: (ts) => { const d = deadlineOf(it, { t }); return d && d.state !== 'late' ? '' : expiresText(ts, t); }, statusWords: (item) => statusWords(item, t), resolvedBy: (by, item) => resolvedByText(by, t, item),
+    reply: model.replyState(it), closers: closersOf(it, !!(e && e.resolved) || it.status !== 'open'), ago: (ts) => agoText(ts, t), expires: (ts) => { const d = deadlineOf(it, { t, now: hubNow() }); return d && d.state !== 'late' ? '' : expiresText(ts, t); }, statusWords: (item) => statusWords(item, t), resolvedBy: (by, item) => resolvedByText(by, t, item), endCode: (item) => endCodeOf(item),
     detailState: !it.detailTruncated ? 'whole' : (st.loadErr && st.loadErr.id === it.id ? 'failed' : 'loading'), loadError: st.loadErr && st.loadErr.id === it.id ? st.loadErr.why : '',
   });
   /** The session's board chip beside its name (the popup's chunk-4 chip: needs input / blocked / review / working). */
@@ -456,19 +456,19 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     c.el.classList.toggle('iw-item-cleared', model.isCleared(it)); // "Clear content…": the cleared sentence, dimmed
     // the words: the title and the detail at FULL width, THE tray's renderer (plain + links, escaped), selectable
     if (c.sig.title !== v.title) { wordsInto(c.title, v.title); c.sig.title = v.title; } // lane foryou-attachments: its paths / links press-to-open (lane foryou-honest: wordsHtml makes them)
-    // r7 addendum: THE deadline line (foryou-actions deadlineOf — «valid for 60 sec · 42 sec left», then the late answer's words or
-    // «timed out — …»); the page ticker (user-todos-row tickDeadlines) moves it every second, this paint only (re)arms it
-    const dln = v.resolved ? null : deadlineOf(it, { t });
-    const dlSig = dln ? [dln.at, dln.from, dln.state, it.action && it.action.type, it.action && it.action.late ? 1 : 0].join('\u0000') : '';
+    // r7 addendum: THE deadline line (foryou-actions deadlineOf — «valid for 60 sec · 42 sec left by the server's clock», then
+    // «time is up …» or the late answer's words); the page ticker (user-todos-row tickDeadlines) moves it every second at the
+    // HUB's time (r8), this paint only (re)arms it — it never withdraws the answers (the producer's settle does)
+    const dln = v.resolved ? null : deadlineOf(it, { t, now: hubNow() });
+    const dlSig = dln ? [dln.at, dln.from, dln.state, it.action && it.action.late ? 1 : 0, it.action && it.action.restartLost ? 1 : 0].join('\u0000') : '';
     if (c.sig.deadline !== dlSig) {
-      for (const k of ['deadlineAt', 'deadlineFrom', 'deadlineType', 'deadlineLate']) delete c.dl.dataset[k];
+      for (const k of ['deadlineAt', 'deadlineFrom', 'deadlineLate', 'deadlineLost']) delete c.dl.dataset[k];
       if (dln) {
-        Object.assign(c.dl.dataset, { deadlineAt: String(dln.at), deadlineFrom: String(dln.from), deadlineType: String((it.action && it.action.type) || ''), state: dln.state }, it.action && it.action.late ? { deadlineLate: '1' } : {});
+        Object.assign(c.dl.dataset, { deadlineAt: String(dln.at), deadlineFrom: String(dln.from), state: dln.state }, it.action && it.action.late ? { deadlineLate: '1' } : {}, it.action && it.action.late && it.action.restartLost === true ? { deadlineLost: '1' } : {});
         c.dl.textContent = dln.text;
         c.dl.classList.toggle('ut-deadline-warn', dln.warn);
         armDeadlines();
       }
-      c.el.classList.toggle('ut-timed-out', !!dln && dln.state === 'timed-out');
       c.dl.style.display = dln ? '' : 'none';
       c.sig.deadline = dlSig;
     }

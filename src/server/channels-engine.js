@@ -7641,9 +7641,10 @@ function create(deps = {}) {
       for (const h of hits) e2.pending.push({ record: h.record, why: h.why || [], ...(h.sent ? { sent: h.sent } : {}), at: now(), road, ...(pk ? { for: pk } : {}) });
       if (!pk) { e2.pendingElided += Number(elided) || 0; return; }
       if (Number(elided) > 0) e2.pendingElidedBy[pk] = (Number(e2.pendingElidedBy[pk]) || 0) + Number(elided);
-      // PENDING_CAP per (conversation, watcher): the oldest of THIS watcher's go
+      // PENDING_CAP per (conversation, watcher): the oldest of THIS watcher's go — never a hit set aside for the owner's
+      // decision (r8: those live in the decision's own store; an r6 row marked `aside` in place is skipped the same way)
       const idx = [];
-      e2.pending.forEach((p, i) => { if (p && p.for === pk) idx.push(i); });
+      e2.pending.forEach((p, i) => { if (p && p.for === pk && !p.aside) idx.push(i); });
       if (idx.length > PENDING_CAP) {
         const drop = new Set(idx.slice(0, idx.length - PENDING_CAP));
         e2.pendingElidedBy[pk] = (Number(e2.pendingElidedBy[pk]) || 0) + drop.size;
@@ -8238,7 +8239,7 @@ function create(deps = {}) {
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, grainReadAt, heldRead, resurfacePointers, openAccessPointers, holdAside,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, reconcileAsks, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
@@ -8395,14 +8396,15 @@ function create(deps = {}) {
     };
     for (const [id, g] of Object.entries(store.index.table('accountAssignments') || {})) check('account', id, g, grainReadAt(id, { kind: 'account' }));
     for (const [id, g] of Object.entries(store.index.table('patternAssignments') || {})) check('pattern', id, g, g && g.adapterId ? grainReadAt(g.adapterId, { kind: 'pattern', id }) : null);
-    for (const en of Object.values(store.index.live())) if (en) check('conversation', en.key, en, grainReadAt(en.adapterId, { kind: 'conversation', convId: en.id }));
+    for (const en of Object.values(store.index.live())) { const rd = grainReadLive(en); if (rd) check('conversation', en.key, en, rd); }   // r8: the live row, read only when it stores a row (no copy)
     return out;
   }
-  /** r6: every grain's rows IN EFFECT, read by the one reader (`fn(row, grain, id)` for each) — the boot censuses below. */
+  /** r6: every grain's rows IN EFFECT, read by the one reader (`fn(row, grain, id)` for each) — the boot censuses below. r8: a
+   *  conversation's through grainReadLive (the live row, never a copy; one that stores no row has none in effect). */
   function eachRowInEffect(fn) {
     for (const id of Object.keys(store.index.table('accountAssignments') || {})) for (const w of (grainReadAt(id, { kind: 'account' }) || { watchers: [] }).watchers) fn(w, 'account', id);
     for (const [id, g] of Object.entries(store.index.table('patternAssignments') || {})) if (g && g.adapterId) for (const w of (grainReadAt(g.adapterId, { kind: 'pattern', id }) || { watchers: [] }).watchers) fn(w, 'pattern', id);
-    for (const en of Object.values(store.index.live())) if (en) for (const w of (grainReadAt(en.adapterId, { kind: 'conversation', convId: en.id }) || { watchers: [] }).watchers) fn(w, 'conversation', en.key);
+    for (const en of Object.values(store.index.live())) for (const w of (grainReadLive(en) || { watchers: [] }).watchers) fn(w, 'conversation', en.key);
   }
   /** R4 verify r5 (money): RELEASE THE RESERVATIONS OF A DEAD BOOT. A wake
    *  reservation (reserveWake, written before the ladder) whose `bootId` is

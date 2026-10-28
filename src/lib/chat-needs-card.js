@@ -53,7 +53,7 @@ import { escHtml, showToast } from './utils.js';
 import { pressVerdict } from './press-arm.js'; // round 4 (#1): what an open moved under the pointer answers nothing for ARM_MS
 import { UI_ICONS } from './icons.js';
 import { inboxModel } from './user-todos-actions.js';
-import { agoText, boxInUse } from './user-todos-row.js';
+import { agoText, boxInUse, endCodeOf } from './user-todos-row.js';
 import { needsOf, recordsOf, placementOf, chipWords, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
 
 /** A chat record as the PURE placement reads it: {id, ts, role, tool, cmd (a Bash call's command), out (its result)}. */
@@ -376,7 +376,8 @@ export class NeedsCards {
       const sig = `done\u0000${e.item.status}\u0000${e.item.resolvedBy || ''}\u0000${stamp ? stamp.text : ''}\u0000${words}`;   // r6: a grant's life (ended / revoked) redraws the line
       const verb = stamp ? stamp.verb : settledWords(e.item, t, kind);
       const ago = stamp ? stamp.time : agoText(e.item.resolvedAt || e.item.createdAt, t);
-      const line = `<span class="cn-line-mark" aria-hidden="true">${e.item.status === 'dismissed' || (stamp && stamp.denied) ? '✕' : '✓'}</span><span class="cn-line-verb">${escHtml(verb)}</span><span class="cn-line-ago"> · ${escHtml(ago)}</span><span class="cn-line-words"> — ${escHtml(words)}</span>`;
+      const code = endCodeOf(e.item); // r8: an end this client cannot classify — «outcome unknown · <code>», never «done»
+      const line = `<span class="cn-line-mark" aria-hidden="true">${code ? '?' : e.item.status === 'dismissed' || (stamp && stamp.denied) ? '✕' : '✓'}</span><span class="cn-line-verb">${escHtml(verb)}</span>${code ? ` · <code class="ut-end-code">${escHtml(code)}</code>` : ''}<span class="cn-line-ago"> · ${escHtml(ago)}</span><span class="cn-line-words"> — ${escHtml(words)}</span>`;
       // THE row's keep rule (round 3, #4 — an answer from another client wiped the lines being typed here): a box in use
       // stays — the quiet line above it, the row resolved AROUND it (patchRow keeps a box in use); it folds on leaving
       const rows = card.querySelector(':scope > .cn-rows');

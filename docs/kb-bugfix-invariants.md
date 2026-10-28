@@ -762,6 +762,28 @@
 - (2026-10-27) THE BOX'S CLAUDE SELF-UPDATED TO 2.1.312 AND EVERY CLAUDE CONVERSATION'S RESULT GREW A «NEW FIELDS» CARD (cli-2-1-312-records). 不变量 = a record is known by its measured shape and version; a release re-measures what it claims of a CLI on each build it pins ⇒ kb-bugfix-invariants
 - (2026-10-27) A WAKE REQUEST'S APPROVE SAT ONLY IN THE TRAY; A BEARER COULD DECIDE IT; ✓ DENIED IT; ITS RULE WIDENED IT (wake-approve-card). 不变量 = a decision the owner must click is offered where the owner looks; one decider, its own verbs; what a wake reaches is the person's, read as it fires.
 - (2026-10-27) THE RUN CARD WAS AN ENGLISH PROSE WALL AND LEFT IN SILENCE AT 60 S (the owner, wake-approve-card r7). 不变量 = a card is actor + verb + object, the deciding fact first, worded by the viewer's client from codes; a deadline is shown and its end keeps its place (kb-bugfix-invariants)
+- (2026-10-28) A 2 973-CHARACTER COMMAND GOT NO CARD; HELD HITS WERE EVICTED FROM THEIR OWN DECISION (wake-approve-card r8). 不变量 = a store clips and says, never throws; a count is what the action will touch; a clock is the hub's ⇒ kb-bugfix-invariants.md
+
+## A 2 973-CHARACTER COMMAND GOT NO CARD; HELD HITS WERE EVICTED FROM THEIR OWN DECISION; THE COUNTDOWN HID ANSWERS BY THE DEVICE'S CLOCK (lane wake-approve-card round 8 — the r6 + r7 acceptance, 11 Opus reviewers, 2026-10-28)
+
+- **WHAT FELL (each measured, most against vault-agent-own 4ff55fb4's REAL door):**
+  - the store's `facts` walk was the card's: a string over 2 000 characters THREW; the door (HEAD_MAX 4 096 bytes) turned the throw into ask_unfiled — a 2 973-character curl got no card and failed, where the base store filed its prose card;
+  - the hits a boot SET ASIDE for the owner's decision stayed in the conversation's live `pending`: PENDING_CAP evicted them first — the card said 30, Discard dropped 18, the next billed digest said «24 messages» (12 discarded ones in it);
+  - the three boot censuses deep-copied every conversation (grainReadAt → peek) three times: 42 → 708 ms at 10 000;
+  - the wake gate's 403 quoted the RAW peer-written title (newline kept) to a vsst_ caller; the pairing completion's 403 told the REMOTE peer the hub's agent names and rules;
+  - the store skipped the vault lane's late settles (resolvedBy 'user' / 'vault', the outcome in the fact) in silence — the late card stayed open with its buttons after the pass was granted; a lock read «完成 · vault»; a late card filed with «Always» still drew it; the press toasted a late Allow «已拒绝»;
+  - the countdown compared the DEVICE's Date.now() with hub stamps and its `.ut-timed-out` hid the answers — a device 60 s fast never showed Allow / Deny;
+  - a CHANGELOG bullet of 231 characters hid behind «the known red» (a count, not a leg).
+- **THE FIX:** `normalizeCardFacts` clips (the door's shape — cmd its first 2 000 + `cmdCut` + `cmdFull` chunks ≤ 4 096 in all, vault-agent-own r23 sends the same; every other string ≤ 2 000; each cut named, `factsCut`; never throws — the bound in the shared contract); the held hits MOVE into the request's own bounded store (`held.convs[k].rows`), the card's count = that store, Discard / Deliver touch exactly it; `grainReadLive` reads the live row only where a row is stored; `agentWakeWords` belts the refusal's names (a census row) and the completion answers `pair-wake-held` + one sentence; `endOf` / `ruledOf` read both settle shapes and say «结果未知 · <code>» for the rest, the store maps the outcome-in-the-fact settle and SAYS a refusal; a late card offers once / deny only; `noteHubClock` / `hubNow` — every For-you read carries the server's `now`, and only the producer's settle withdraws an answer.
+- **不变量:**
+  - a store clips and says, never throws on a long string — one bound, written in the contract both producer and store keep;
+  - a count is what the action will touch — what is set aside for a decision lives outside every other cap;
+  - a boot reads without copying;
+  - a refusal to an agent carries peer text only through the one belt; a refusal to a peer carries a code, never the hub's names;
+  - a card never offers what its door refuses;
+  - a clock is the hub's — a device never withdraws an answer by its own clock;
+  - a known red is ONE named leg, never a count.
+- **GATES:** test-wake-approve-card ⑮ (the hub clock: +0 / +50 / +61 s, a device 61 s fast / 45 s slow) + ⑯ (the store clip 1 999 … 5 000, the card's cut line, the late settles fixture through the store and the reader, «结果未知», the press); test-channel-agent-watch ⑥ (the belted 403, the add-only write, the aside store under new traffic, the census with no copy) + the completion's answer to the peer; test-peer-text-census (the `agentWakeWords` row; its RED copy); test-changelog-style at .360 (all 40 legs named).
 
 ## THE RUN CARD WAS A PROSE WALL IN ENGLISH, AND A 60-SECOND CARD LEFT IN SILENCE (the owner, 2026-10-27 — lane wake-approve-card round 7, the client half beside lane vault-agent-own r20)
 

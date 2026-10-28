@@ -129,8 +129,60 @@ function normalizeCard(x, name = 'card') {
 /** lane wake-approve-card r7 (the owner: «这个卡片的可读性很差» — the vault-run card was an English prose wall): a producer's
  *  FACTS about what it asks (vault-run-door's `cardFactsOf` — {v, who, tool, cmd, folder, secrets, hosts, shape, always,
  *  templates, masking}; every reason a CODE, never a sentence). The client words them with its own t()
- *  (src/foryou-actions.js runCardOf); `detail` stays the old clients' prose. The same plain-data bounds as a card. */
-const normalizeCardFacts = (x) => normalizeCard(x, 'facts');
+ *  (src/foryou-actions.js runCardOf); `detail` stays the old clients' prose.
+ *  A STORE CLIPS AND SAYS, NEVER THROWS (r8 — the acceptance: the card walk threw on a string over 2 000 characters, the door
+ *  turned the throw into `ask_unfiled`, and a 2 973-character command got NO card and failed). The ONE bound (THE registry's
+ *  RUN_CMD_BODY_MAX / RUN_CMD_MAX = vault-agent-own r23's CARD_STRING_MAX; the shared contract): every string ≤ 2 000. The
+ *  command keeps the door's shape (r23 `facts` v2): `cmd` = its first 2 000 units, `cmdCut: true`, the WHOLE in `cmdFull` —
+ *  chunks of ≤ 2 000 the client reassembles (≤ RUN_CMD_MAX in all); a producer that sent a longer `cmd` (an older door) is
+ *  folded the same way here. Any other string past 2 000 keeps its start + «…»; a list past 64, an object past 32 fields, a
+ *  part nested past 4 is cut — each cut NAMED in the facts' `cut` (≤ 16 paths, the fold says it) and on the returned record
+ *  (`factsCut`). Idempotent: facts inside the bound (the door's own) are kept EXACTLY. A whole past 24 KB, or no object at
+ *  all, is dropped (the card draws the prose `detail`, as before r7) — still filed. → {facts | null, cut: [paths]}. */
+const clipText = (v, max) => {
+  if (v.length <= max) return v;
+  let n = max - 1;
+  if (/[\ud800-\udbff]/.test(v[n - 1])) n--;   // never half a surrogate pair
+  return v.slice(0, n) + '…';
+};
+/** The first `max` units (no marker — the door's own clip) / the whole in ≤ `max` chunks; both surrogate-safe. */
+const headOf = (v, max) => { let n = Math.min(max, v.length); if (n < v.length && /[\ud800-\udbff]/.test(v[n - 1])) n--; return v.slice(0, n); };
+const chunksOf = (v, max) => { const out = []; for (let i = 0; i < v.length;) { const c = headOf(v.slice(i), max); out.push(c); i += c.length || max; } return out.length ? out : ['']; };
+function normalizeCardFacts(x) {
+  if (x == null) return { facts: null, cut: [] };
+  if (typeof x !== 'object' || Array.isArray(x)) return { facts: null, cut: ['facts'] };
+  const cut = (Array.isArray(x.cut) ? x.cut : []).filter((p) => typeof p === 'string' && p).map((p) => p.slice(0, 80)).slice(0, 16);   // the door's own cuts stay said
+  const said = (at) => { if (cut.length < 16 && !cut.includes(at)) cut.push(at); };
+  const walk = (v, depth, at) => {
+    if (v === null || typeof v === 'boolean') return v;
+    if (typeof v === 'number') { if (Number.isFinite(v)) return v; said(at); return null; }
+    if (typeof v === 'string') { if (v.length > RUN_CMD_BODY_MAX) said(at); return clipText(v, RUN_CMD_BODY_MAX); }
+    if (depth >= 4 || typeof v !== 'object') { said(at); return null; }
+    if (Array.isArray(v)) { if (v.length > 64) said(at); return v.slice(0, 64).map((y, k) => walk(y, depth + 1, `${at}[${k}]`)); }
+    const out = {};
+    let n = 0;
+    for (const [k, y] of Object.entries(v)) {
+      if (y === undefined) continue;
+      if (!/^[a-zA-Z][a-zA-Z0-9]{0,40}$/.test(k) || ++n > 32) { said(at); continue; }
+      out[k] = walk(y, depth + 1, at ? `${at}.${k}` : k);
+    }
+    return out;
+  };
+  // THE COMMAND: its whole is the door's fold (`cmdFull` chunks — r23; a string from an older shape), else `cmd` itself
+  const { cmd, cmdFull } = x;
+  const parts = Array.isArray(cmdFull) ? cmdFull.filter((c) => typeof c === 'string') : typeof cmdFull === 'string' ? [cmdFull] : [];
+  const whole = parts.length ? parts.join('') : typeof cmd === 'string' ? cmd : null;
+  if (whole != null && whole.length > RUN_CMD_MAX) said('cmdFull');
+  const command = whole == null ? {} : whole.length > RUN_CMD_BODY_MAX ? { cmd: headOf(whole, RUN_CMD_BODY_MAX), cmdCut: true, cmdFull: chunksOf(headOf(whole, RUN_CMD_MAX), RUN_CMD_BODY_MAX) } : { cmd: whole };
+  const top = { ...x };   // the producer's key order kept (its facts come back byte-identical when inside the bound)
+  for (const k of ['cmdCut', 'cmdFull', 'cut']) delete top[k];
+  if (!('cmd' in top) && whole != null) top.cmd = '';
+  const out = {};
+  for (const [k, v] of Object.entries(walk({ ...top, cmd: null }, 0, ''))) { if (k === 'cmd') Object.assign(out, command); else out[k] = v; }
+  if (cut.length) out.cut = cut;
+  if (JSON.stringify(out).length > 24000) return { facts: null, cut: ['facts'] };
+  return { facts: out, cut };
+}
 
 // THE DOOR (lane foryou-plugin-notices, owner 2026-10-19 on Dropline's 「建议加入词库」 rows: 「这个部分点击应该要自动跳转」): where a
 // click on the item's BODY takes the owner — declared by the producer at filing, validated like `action`:
@@ -182,7 +234,7 @@ function normalizeOpen(x, plugin) {
 
 // THE MERGE RULE (lane chat-needs-you-card, amendment 1): derived from THE For-you action registry — a row's `identity`
 const { ACTION_IDENTITY } = require('./foryou-actions.js');
-const { isDecisionRow, endsOf } = require('./foryou-actions.js');   // lane wake-approve-card r2: THE registry's decision rows (r3: each row's own ends)
+const { isDecisionRow, endsOf, OUTCOME_ENDS, RUN_CMD_BODY_MAX, RUN_CMD_MAX } = require('./foryou-actions.js');   // lane wake-approve-card r2: THE registry's decision rows (r3: each row's own ends; r8: a producer's outcome-in-the-fact settle, the run card's ONE bound)
 const { isPointer, isHidden, HIDDEN_BY } = require('./foryou-actions.js');   // lane wake-approve-card r3: THE registry's pointers
 /** A DECISION ROW HAS TWO VERBS (lane wake-approve-card, acceptance round 2 — the registry's DECISION_ROWS: a `decide:
  *  'person'` row that draws its own verbs — the wake request; r3: the vault's run ask and paste request, the hub-act ask). Its item leaves 'open' only by
@@ -198,6 +250,16 @@ function decisionRefusal(item, status, by) {
   return null;
 }
 const decisionError = (no) => Object.assign(new Error(no.error), { code: no.code });
+/** r8 (the acceptance, with vault-agent-own 4ff55fb4's real door): a decision row's producer that settles with the PERSON or
+ *  'vault' as `by` and the outcome in `fact.outcome` ('late-allowed' / 'denied' / 'expired' / 'vault_locked') was skipped
+ *  here in silence — the late card stayed open with its buttons after the one-run pass was granted. Until it writes the ruled
+ *  shape (resolvedBy = the outcome word) its outcome IS the end (THE registry's OUTCOME_ENDS — the client reads such a record
+ *  the same way: foryou-actions endOf), `late` kept on the fact. Anything else: `by` as given (the law judges it). */
+function outcomeEnd(item, by, fact) {
+  if (!isDecisionRow(item) || endsOf(item).includes(by)) return by;
+  const o = fact && typeof fact.outcome === 'string' && Object.prototype.hasOwnProperty.call(OUTCOME_ENDS, fact.outcome) ? OUTCOME_ENDS[fact.outcome] : null;
+  return o && endsOf(item).includes(o) ? o : by;
+}
 /** A POINTER HIDES, NEVER DECIDES (lane wake-approve-card, acceptance round 3 — the registry's `closer: 'hide'` rows: an
  *  access request's item, the Outbox's pointer). The PERSON's close of one (`by` 'user': the ✕ Hide, the ✓ a stale page still
  *  draws, «Mark all seen») is written as a HIDE — status 'dismissed', `resolvedBy: 'hidden'` («hidden — nothing was decided»),
@@ -496,7 +558,8 @@ class UserTodoManager {
     i18n = normalizeI18n(i18n);
     action = normalizeAction(action); // a server producer's decision payload (reset credit, §5), or null
     card = normalizeCard(card); // a server producer's view of the item (design 009: an app install's one card), or null
-    facts = normalizeCardFacts(facts); // r7: a producer's facts the client words (the vault-run card), or null
+    const fx = normalizeCardFacts(facts); // r7: a producer's facts the client words (the vault-run card), or null — r8: clipped and named, never a throw
+    facts = fx.facts;
     options = normalizeOptions(options); // option chips (vibespace-ask --options "A|B|C"): ≤6 distinct labels ≤40 chars, else THROWS by name — or null
     const arts = normalizeArtifacts(artifacts); // lane foryou-attachments: vibespace-ask --artifact — ≤8 rows, the cut named, a bad shape THROWS by name
     artifacts = arts.artifacts;
@@ -533,7 +596,7 @@ class UserTodoManager {
     detail = rawDetail ? rawDetail.slice(0, DETAIL_MAX) : null;
     const detailCut = rawDetail.length > DETAIL_MAX ? DETAIL_MAX : 0;
     // the cut is named on the RETURNED record only (the ledger never carries it)
-    const named = (o) => (arts.cut ? { ...o, artifactsCut: arts.cut } : o); // lane foryou-attachments: the attachments' cap, named the same way
+    const named = (o) => (arts.cut || fx.cut.length ? { ...o, ...(arts.cut ? { artifactsCut: arts.cut } : {}), ...(fx.cut.length ? { factsCut: fx.cut } : {}) } : o); // lane foryou-attachments: the attachments' cap, named the same way (r8: the facts' cuts too)
     const cut = (o) => (textCut || detailCut ? { ...named(o), ...(textCut ? { textCut } : {}), ...(detailCut ? { detailCut } : {}) } : named(o));
     // Idempotent BY TEXT across ALL statuses: re-filing an open question
     // refreshes it; re-filing a RESOLVED/DISMISSED one REOPENS the same item
@@ -752,9 +815,12 @@ class UserTodoManager {
       // lane wake-approve-card r3: a HIDDEN pointer was never answered — its producer's answer still lands on it (the
       // record then says what was decided, «approved by you · 09:41»), without a second leave-'open' event
       const hidden = !!item && isHidden(item);
-      if (!item || (item.status !== 'open' && !hidden) || decisionRefusal(item, 'done', by)) continue;
-      item.status = 'done'; item.resolvedAt = now; item.resolvedBy = by;
-      if (fact) item.resolvedFact = { ...fact };
+      const end = item ? outcomeEnd(item, by, fact) : by;   // r8: a producer's outcome-in-the-fact settle, written as the ruled word
+      if (!item || (item.status !== 'open' && !hidden)) continue;
+      const no = decisionRefusal(item, 'done', end);
+      if (no) { console.warn(`[user-todos] ${id}: a producer's settle (${String(by)}${fact && fact.outcome ? ` / ${String(fact.outcome)}` : ''}) is not one of its row's ends — the item stays open (${no.code})`); continue; }   // r8: said, never silent
+      item.status = 'done'; item.resolvedAt = now; item.resolvedBy = end;
+      if (fact) item.resolvedFact = end !== by ? { ...fact, ...(fact.outcome === 'late-allowed' ? { late: true } : {}) } : { ...fact };
       (hidden ? restamped : went).push(item);
     }
     if (went.length || restamped.length) { this._save(); this._notify(); if (went.length) this._emitStatus(went, by); }

@@ -79,7 +79,13 @@
 //     → 允许一次 (primary) · 拒绝 with the «Always» hint in their row → «技术细节»; every closed code with zh + ja words, an
 //     unknown one monospace; a record WITHOUT facts draws today's prose byte for byte; a CARD WITH A DEADLINE SHOWS IT (a
 //     fake clock at +0 / +50 / +61 s, the ticker), a late run card stays answerable, an end stays in words. RED CONTROL:
-//     98b6fdf7 has no facts renderer, no deadline, and words an unanswered ask «expired (no answer in 60 s)»
+//     98b6fdf7 has no facts renderer, no deadline, and words an unanswered ask «expired (no answer in 60 s)». r8: the deadline
+//     counts by the HUB's clock (noteHubClock / hubNow — a device 61 s fast or 45 s slow) and never withdraws an answer
+//   ⑯ ROUND 8 — a store clips and says, never throws (facts strings 1 999 … 5 000: cmdCut + cmdFull + `cut`, every one filed;
+//     the card's cut line and its fold); the late card's settles as vault-agent-own 4ff55fb4's door writes them
+//     (scripts/fixtures/vault-run-late-settles.json) through the store and the reader, beside the ruled shape; an end this client
+//     cannot classify «结果未知 · <code>»; the press reads a late Allow. RED CONTROL: 2a5e9ce8 threw from 2 001 characters and
+//     skipped every late settle (the card stayed open with its buttons)
 // Run: node scripts/test-wake-approve-card.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -588,7 +594,8 @@ function r3Form(src) {
   const i = src.indexOf('function wakeRefused(req, res, at, rows = []) {'), j = i < 0 ? -1 : src.indexOf('\n}\n', i) + 3;   // r6: the gate reads the one wiring's engine (no argument)
   return (i < 0 ? src : src.slice(0, i) + R3_GATE_FN + src.slice(j))
     .replace(/if \(wakeRefused\(req, res, (?:accountGrain|ruleGrain|convGrain)\(req\), ([^\n]*)\)\) return;/g, 'if (wakeRefused(req, res, $1)) return;')
-    .replace(/^    if \(wakeRefused\(req, res, (?:accountGrain|ruleGrain|convGrain)\(req\)\)\) return;[^\n]*\n/gm, '');
+    .replace(/^    if \(wakeRefused\(req, res, (?:accountGrain|ruleGrain|convGrain)\(req\)\)\) return;[^\n]*\n/gm, '')
+    .replace(/^    if \(wakeRefused\(req, res, \{ \.\.\.(?:accountGrain|ruleGrain|convGrain)\(req\), proposed: [^\n]*\}\)\) return;[^\n]*\n/gm, '');   // r8: the account access route names its whole new list
 }
 /** the r4 legs: EVERY grain door, its body writing no wake — on grains that HOLD one (rule p1, conversation fake-poll-ops) and on
  *  grains that do not (rule p2, conversation fake-poll-dev; the account holds none here) */
@@ -907,7 +914,7 @@ const WH_GATE = /^ {2,4}if \(pathRefused\(req, res[^\n]*\)\) return;[^\n]*\n/gm;
   const cut = WH_SRC.replace(WH_GATE, '');
   const r4w = writerCensus({ ...SRC_FILES, [WEBHOOK]: cut });
   const named = r4w.problems.filter((x) => /webhook/.test(x));
-  ok((WH_SRC.match(WH_GATE) || []).length === 7 && named.length === 6 && named.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: calls syncRow\b.* without asking/.test(x)) && named.some((x) => /its authority is POST \/api\/channels\/webhook\/paths\/:slug\/pair-code, which does not ask the gate/.test(x)), `RED COPY: the path verbs as 4b8896e7 had them (owner() only) — the census names all ${named.length}: ${named.map((x) => x.replace(/^src\/routes\/webhook\.js /, '').replace(/: (calls|its authority) .*$/, '').replace('/api/channels/webhook/', '…/')).join(' · ')}`, named);
+  ok((WH_SRC.match(WH_GATE) || []).length === 6 && named.length === 6 && named.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: calls syncRow\b.* without asking/.test(x)) && named.some((x) => /its authority is POST \/api\/channels\/webhook\/paths\/:slug\/pair-code, which does not ask the gate/.test(x)), `RED COPY: the path verbs as 4b8896e7 had them (owner() only) — the census names all ${named.length}: ${named.map((x) => x.replace(/^src\/routes\/webhook\.js /, '').replace(/: (calls|its authority) .*$/, '').replace('/api/channels/webhook/', '…/')).join(' · ')}`, named);
   const late = writerCensus({ ...SRC_FILES, [WEBHOOK]: WH_SRC.replace("  if (pathRefused(req, res)) return;   // r5: disabled / ipAllow / wakesPerHour / title — what a held wake fires on\n", '').replace("    await syncRow(slug, ov.options);\n    res.json({ ok: true, path: pathView(st, slug) });\n  } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }\n});\n/** THE OWNER'S \"Send", "    await syncRow(slug, ov.options);\n    if (pathRefused(req, res)) return;\n    res.json({ ok: true, path: pathView(st, slug) });\n  } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }\n});\n/** THE OWNER'S \"Send") });
   ok(late.problems.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: asks the gate AFTER it calls syncRow/.test(x)), 'RED COPY: a path verb asking the gate only AFTER its write (inside its try, past the write) is named', late.problems.filter((x) => /webhook/.test(x)));
   const plantedFile = writerCensus({ ...SRC_FILES, 'src/routes/hooks-extra.js': "const router = require('express').Router();\nfunction touch(e, slug, o) { return e.store.index.update(() => { const en = e.store.index.entry('webhook', slug); en.options = o; }); }\nrouter.put('/api/channels/webhook/extra/:slug', async (req, res) => {\n  await touch(engine(), req.params.slug, req.body);\n  res.json({ ok: true });\n});\n" });
@@ -1168,15 +1175,15 @@ try {
   const C0 = FX.codes || {};
   const CONTRACT = { always: C0.always_why, hosts: C0.hosts_why, masking: C0.masking, shape: C0.shape, as: ['env', 'file', 'arg', 'stdin'] };
   const PINNED = { always: ['destination-unknown', 'program-writable', 'config-reads', 'card-too-long', 'redirect', 'brace-var', 'opaque-route', 'agent-template'], hosts: ['tool-names-none', 'opaque', 'config-driven'], masking: ['common-encodings'], shape: ['tool', 'line'] };
-  const KEYS = ['v', 'who', 'tool', 'cmd', 'folder', 'secrets', 'hosts', 'shape', 'always', 'templates', 'masking'];
+  const KEYS = ['v', 'who', 'tool', 'cmd', 'folder', 'secrets', 'env', 'hosts', 'shape', 'always', 'reason', 'templates', 'masking'];   // r8: v 2 (vault-agent-own r23 — + env, reason; the chunked folds)
   const REF_OK = (r) => /^vault:\/\/\S+$/.test(r) || /^[\w-]+:[0-9a-f]{6}$/.test(r);   // a reference, or the short id of one the door cannot name — never a value
   const shapeBad = Object.entries(V).flatMap(([n, f]) => [
-    ...(J(Object.keys(f)) === J(KEYS) ? [] : [`${n}: keys ${Object.keys(f)}`]), ...(f.v === 1 ? [] : [`${n}: v ${f.v}`]),
+    ...(J(Object.keys(f)) === J(KEYS) ? [] : [`${n}: keys ${Object.keys(f)}`]), ...(f.v === 2 ? [] : [`${n}: v ${f.v}`]),
     ...f.secrets.filter((s) => !(typeof s.name === 'string' && typeof s.entry === 'string' && REF_OK(s.ref) && s.as && CONTRACT.as.includes(s.as.kind) && typeof s.as.name === 'string')).map((s) => `${n}: secret ${J(s)}`),
     ...(f.hosts.known ? [] : CONTRACT.hosts.includes(f.hosts.why) ? [] : [`${n}: hosts.why ${f.hosts.why}`]), ...(CONTRACT.shape.includes(f.shape) ? [] : [`${n}: shape`]), ...(CONTRACT.masking.includes(f.masking) ? [] : [`${n}: masking`]),
     ...(f.always.offered || CONTRACT.always.includes(f.always.why) ? [] : [`${n}: always.why ${f.always.why}`]), ...(/^~|^\//.test(f.tool.path) && !/^\/home\//.test(f.tool.path) ? [] : [`${n}: tool.path ${f.tool.path}`])]);
   const pinOk = Object.entries(PINNED).every(([k, xs]) => J([...(CONTRACT[k] || [])].sort()) === J([...xs].sort()));
-  ok(['hosts-unknown', 'hosts-known-always', 'config-reads'].every((n) => n in V) && FX.v === 1 && pinOk && !shapeBad.length, `the fixture scripts/fixtures/vault-run-card-facts.json (the SAME bytes as lane vault-agent-own's — int-C diffs them): its variants (hosts-unknown / hosts-known-always / config-reads), each {${KEYS.join(', ')}}, every reason a code of its closed tables (\`codes\` = the contract's lists), a secret {name, entry, ref, as}, a path home-relative`, { shapeBad, codes: FX.codes });
+  ok(['hosts-unknown', 'hosts-known-always', 'config-reads', 'late'].every((n) => n in V) && FX.v === 2 && pinOk && !shapeBad.length, `the fixture scripts/fixtures/vault-run-card-facts.json (the SAME bytes as lane vault-agent-own's — r23 0cc421d4, v 2; int-C diffs them): its variants (hosts-unknown / hosts-known-always / config-reads / late), each {${KEYS.join(', ')}}, every reason a code of its closed tables (\`codes\` = the contract's lists), a secret {name, entry, ref, as}, a path home-relative`, { shapeBad, codes: FX.codes });
   const tables = { always: FA.RUN_ALWAYS_WHY, hosts: FA.RUN_HOSTS_WHY, masking: FA.RUN_MASKING, shape: FA.RUN_SHAPE };
   const cover = Object.entries(tables).map(([k, tb]) => [k, J(Object.keys(tb || {}).sort()) === J([...CONTRACT[k]].sort()), Object.values(tb || {}).filter((w) => !(w in DICT.zh) || !(w in DICT.ja))]);
   ok(cover.every(([, same, miss]) => same && !miss.length), 'EVERY CODE HAS ITS WORDS: the client\'s tables (runCardOf) name exactly the contract\'s closed lists — always.why ×8, hosts.why ×3, masking ×1, shape ×2 — each with an en key and its zh + ja entries', cover);
@@ -1231,19 +1238,36 @@ try {
   const dl = (it, s, t = T.zh) => (FA.deadlineOf ? FA.deadlineOf(it, { t, now: T0 + s * 1000 }) : null);
   const clock = [0, 50, 61].map((s) => { const d = dl(ask('vault-run-ask'), s); return d && [d.state, d.warn, d.text]; });
   const hub61 = dl(ask('hub-act-ask'), 61), lateMark = dl(ask('vault-run-ask', { expiresAt: T0 + 86400e3, action: { type: 'vault-run-ask', askId: 'f'.repeat(32), late: true } }), 61), wake = dl(ask('channel-watch-request', { expiresAt: T0 + 7 * DAY }), 0), notice = dl(ask('vault-run-ask', { kind: 'notice' }), 0);
-  ok(J(clock) === J([['live', false, '60 秒内有效 · 还剩 60 秒'], ['live', true, '60 秒内有效 · 还剩 10 秒'], ['late', true, '已超时 — agent 的命令被拒绝；现在允许 = 它下次运行这条命令时直接放行（1 次）']]) && hub61 && hub61.state === 'timed-out' && hub61.text === '已超时 — agent 的命令被拒绝（它可能会再问）' && lateMark && lateMark.state === 'late' && wake === null && notice === null,
-    'THE FAKE CLOCK (zh): +0 s «60 秒内有效 · 还剩 60 秒» · +50 s the warning accent «还剩 10 秒» · +61 s the run card\'s late words (its buttons stay); a hub act at +61 s «已超时 — … （它可能会再问）»; the server\'s `late` mark reads late whatever the clock; the 7-day wake ask keeps «expires in 7 d» (no ticker), a notice its own window', { clock, hub61, lateMark, wake, notice });
+  const DUE = '按服务器时间已到期 — 等服务器确认';
+  ok(J(clock) === J([['live', false, '60 秒内有效 · 按服务器时间还剩 60 秒'], ['live', true, '60 秒内有效 · 按服务器时间还剩 10 秒'], ['due', true, DUE]]) && hub61 && hub61.state === 'due' && hub61.text === DUE && lateMark && lateMark.state === 'late' && lateMark.text === '已超时 — agent 的命令被拒绝；现在允许 = 它下次运行这条命令时直接放行（1 次）' && wake === null && notice === null,
+    'THE FAKE CLOCK (zh, the HUB\'s time — r8): +0 s «60 秒内有效 · 按服务器时间还剩 60 秒» · +50 s the warning accent «还剩 10 秒» · +61 s with no settle yet «按服务器时间已到期 — 等服务器确认» (the run card and a hub act alike — the client never infers «late» or «timed out» by its own clock); the server\'s `late` mark reads late whatever the clock; the 7-day wake ask keeps «expires in 7 d» (no ticker), a notice its own window', { clock, hub61, lateMark, wake, notice });
   const at = (s, type = 'vault-run-ask', x = {}) => ask(type, { createdAt: Date.now() - s * 1000, expiresAt: Date.now() - s * 1000 + 60e3, ...x });
   const drawn = (it) => { const h = rowHtml(it, T.zh); return { deadline: ((/<div class="ut-deadline[^"]*"[^>]*>([^<]*)</.exec(h) || [])[1]) || null, warn: /class="ut-deadline ut-deadline-warn"/.test(h), timedOut: /ut-timed-out/.test(ROW3.renderRow({ item: it, resolved: false, band: 1 }, { ...rctx3, t: T.zh }).className), answers: answersOf(h) }; };
-  const d0 = drawn(at(0)), d50 = drawn(at(50)), d61 = drawn(at(61)), h61 = drawn(at(61, 'hub-act-ask'));
-  ok(d0.deadline === '60 秒内有效 · 还剩 60 秒' && !d0.warn && d50.warn && /还剩 10 秒/.test(d50.deadline) && /^已超时/.test(d61.deadline || '') && !d61.timedOut && J(d61.answers) === J(['once', 'deny']) && h61.timedOut && /它可能会再问/.test(h61.deadline || ''),
-    'THE ROW (the tray, the chat card): the line under the question at +0 / +50 s (the accent under 15 s); at +61 s the run card keeps 允许一次 / 拒绝 under the late words, a hub act\'s row is `.ut-timed-out` (its answers withdrawn by the style)', { d0, d50, d61, h61 });
-  // the ticker: ONE page interval re-reads every line (a stub page: two lines, one past its end)
-  const mkLine = (it) => { const ds = {}; const m = /data-deadline-at="(\d+)" data-deadline-from="(\d+)" data-deadline-type="([^"]*)"/.exec(rowHtml(it, tt3)) || []; Object.assign(ds, { deadlineAt: m[1], deadlineFrom: m[2], deadlineType: m[3], state: 'live' }); const cl = new Set(); return { dataset: ds, textContent: '', classList: { toggle: (c, on) => (on ? cl.add(c) : cl.delete(c)), has: (c) => cl.has(c) }, closest: () => ({ classList: { toggle: (c, on) => (on ? cl.add('row:' + c) : cl.delete('row:' + c)) } }), cl }; };
+  const d0 = drawn(at(0)), d50 = drawn(at(50)), d61 = drawn(at(61)), h61 = drawn(at(61, 'hub-act-ask')), l61 = drawn(at(61, 'vault-run-ask', { expiresAt: Date.now() + 86400e3, action: { type: 'vault-run-ask', askId: 'f'.repeat(32), always: true, late: true } }));
+  ok(d0.deadline === '60 秒内有效 · 按服务器时间还剩 60 秒' && !d0.warn && d50.warn && /还剩 10 秒/.test(d50.deadline) && d61.deadline === DUE && !d61.timedOut && J(d61.answers) === J(['once', 'deny']) && !h61.timedOut && h61.deadline === DUE && h61.answers.includes('once') && h61.answers.includes('deny') && /^已超时/.test(l61.deadline || '') && J(l61.answers) === J(['once', 'deny']),
+    'THE ROW (the tray, the chat card): the line under the question at +0 / +50 s (the accent under 15 s); at +61 s with no settle the answers STAY on the run card and a hub act alike (r8: only the producer\'s settle withdraws them — no `.ut-timed-out`); a card the server marked LATE offers 允许一次 / 拒绝 ONLY — never «Always», even when its filed card offered it (r8: its door refuses it)', { d0, d50, d61, h61, l61 });
+  // the ticker: ONE page interval re-reads every line (a stub page: two lines, the run card's and a hub act's)
+  const mkLine = (it) => { const ds = {}; const m = /data-deadline-at="(\d+)" data-deadline-from="(\d+)"/.exec(rowHtml(it, tt3)) || []; Object.assign(ds, { deadlineAt: m[1], deadlineFrom: m[2], state: 'live' }); const cl = new Set(); return { dataset: ds, textContent: '', classList: { toggle: (c, on) => (on ? cl.add(c) : cl.delete(c)), has: (c) => cl.has(c) }, closest: () => ({ classList: { toggle: (c, on) => (on ? cl.add('row:' + c) : cl.delete('row:' + c)) } }), cl }; };
   const lines = [mkLine(at(0)), mkLine(at(0, 'hub-act-ask'))];
   const counting = typeof ROW3.tickDeadlines === 'function' ? [ROW3.tickDeadlines({ querySelectorAll: () => lines }, Date.now() + 50e3), ROW3.tickDeadlines({ querySelectorAll: () => lines }, Date.now() + 61e3)] : null;
-  ok(!!counting && J(counting) === J([2, 0]) && lines[0].dataset.state === 'late' && lines[1].dataset.state === 'timed-out' && lines[1].cl.has('row:ut-timed-out') && !lines[0].cl.has('row:ut-timed-out') && lines[0].cl.has('ut-deadline-warn'),
-    'THE TICKER: at +50 s both lines count (2), at +61 s none (0 — the interval stops itself); the run card\'s line turns late (its answers stay), the hub act\'s row loses its answers', counting && { counting, states: lines.map((x) => x.dataset.state), text: lines.map((x) => x.textContent) });
+  ok(!!counting && J(counting) === J([2, 0]) && lines.every((x) => x.dataset.state === 'due' && ![...x.cl].some((c) => /timed-out/.test(c)) && x.cl.has('ut-deadline-warn')),
+    'THE TICKER: at +50 s both lines count (2), at +61 s none (0 — the interval stops itself); both lines say «… 已到期 — 等服务器确认» and NO row loses its answers (r8)', counting && { counting, states: lines.map((x) => x.dataset.state), text: lines.map((x) => x.textContent), cls: lines.map((x) => [...x.cl]) });
+  // r8 A CLOCK IS THE HUB'S: a device 61 s FAST (the hub's own `now` on the For-you read sets the tab's offset) still counts the
+  // live ask from 60; a device 45 s SLOW reads the hub's end, not its own (RED: 2a5e9ce8 read Date.now() — the fast device drew
+  // «timed out» with no answers from the start)
+  const skew = typeof ROW3.noteHubClock === 'function' ? (() => {
+    const hubFast = Date.now() - 61e3;   // this device reads 61 s AHEAD of the hub: the hub's now (its broadcast's `now`) is 61 s behind it
+    ROW3.noteHubClock(hubFast, Date.now());
+    const fast = drawn(ask('hub-act-ask', { createdAt: hubFast, expiresAt: hubFast + 60e3 }));   // stamped by the hub, just now
+    const hubSlow = Date.now() + 45e3;   // …and 45 s BEHIND it: the hub refused 1 s ago, this device's own clock would say 44 s left
+    ROW3.noteHubClock(hubSlow, Date.now());
+    const slowLine = mkLine(ask('hub-act-ask', { createdAt: hubSlow - 61e3, expiresAt: hubSlow - 1e3 }));
+    const slow = ROW3.tickDeadlines({ querySelectorAll: () => [slowLine] });
+    ROW3.noteHubClock(Date.now(), Date.now());
+    return { fast, slow, slowState: slowLine.dataset.state };
+  })() : null;
+  ok(!!skew && /按服务器时间还剩 (60|59) 秒/.test(skew.fast.deadline || '') && skew.fast.answers.includes('once') && skew.slow === 0 && skew.slowState === 'due',
+    'r8 A CLOCK IS THE HUB\'S: a device 61 s ahead of the hub still shows a live 60 s ask «按服务器时间还剩 60 秒» with its answers; a device 45 s behind reads the hub\'s end (the line stops counting) — the countdown is advisory and says «按服务器时间»', skew);
   // (g) its END stays, in words: an ask nobody answered (the server's 'ask-expired') keeps its place «timed out — …»; a LATE
   // Allow records «let through once by you · waiting for it to run again · HH:MM»; the 24 h end of a late card «expired»
   const ended = { ...ask('vault-run-ask'), status: 'done', resolvedBy: 'ask-expired', resolvedAt: T0 + 60e3 };
@@ -1253,6 +1277,95 @@ try {
   ok(e3[0].status === 'timed out — the agent\'s command was refused (it may ask again)' && e3[1].status === '已超时 — agent 的命令被拒绝（它可能会再问）' && /^タイムアウト/.test(e3[2].status) && e3.every((x) => x.by === '' && x.card === x.status) && /^你已放行 1 次 · 等它重跑 · \d\d:\d\d$/.test(la.card) && la.by === la.card && /^已过期/.test(late24.card),
     'ITS END STAYS IN WORDS — an ask nobody answered (\'ask-expired\') reads «已超时 — agent 的命令被拒绝（它可能会再问）» on the row, the window and the chat card (en / ja too; RED: the base said «expired (no answer in 60 s)» — the raw outcome\'s words); a late Allow «你已放行 1 次 · 等它重跑 · HH:MM» (the person mark); the late card\'s 24 h end «已过期»', { e3, la, late24 });
 } catch (e) { ok(false, '⑮ threw on this tree (an API it asks for is missing): ' + ((e && e.stack) || e)); }
+
+// ── ⑯ ROUND 8 ──────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('⑯ ROUND 8 — a store clips and says, never throws; a late card offers what its door takes; an end this client cannot classify is said as one');
+const DICT8 = { zh: (await import(pathToFileURL(path.join(SRC, 'lib', 'i18n-zh.js')).href)).default };
+const Z = (x, p) => String(DICT8.zh[x] || x).replace(/\{(\w+)\}/g, (m0, k) => (p && p[k] != null ? String(p[k]) : m0));
+const LS = JSON.parse(read('scripts/fixtures/vault-run-late-settles.json'));
+try {
+  const FX8 = JSON.parse(read('scripts/fixtures/vault-run-card-facts.json'));
+  const base8 = FX8.variants[0].facts;
+  // (a) THE STORE CLIPS: a facts string over the card's bound never throws — the door files its card (2a5e9ce8: `facts.cmd is
+  // longer than 2000 characters` ⇒ the door's ask_unfiled ⇒ no card, the run failed — measured with vault-agent-own 4ff55fb4's door)
+  const { m, done } = storeWith(FA);
+  try {
+    const sizes = [1999, 2000, 2001, 2973, 4096, 5000].map((n) => {
+      const facts = { ...base8, cmd: 'curl ' + 'x'.repeat(n - 5), always: { ...base8.always, directive: n === 5000 ? 'd'.repeat(2311) : null } };
+      try { const r = m.add('claude:r8-' + n, { text: 'run ' + n, origin: 'vault', action: { type: 'vault-run-ask', askId: 'a'.repeat(31) + (n % 10) }, facts }); const it = m.get(r.id); return [n, it.facts.cmd.length, it.facts.cmdCut === true, (it.facts.cmdFull || []).map((c) => c.length).join('+'), (it.facts.cut || []).join(','), (r.factsCut || []).join(',')]; } catch (e) { return [n, 'THROWS: ' + e.message]; }
+    });
+    ok(J(sizes) === J([[1999, 1999, false, '', '', ''], [2000, 2000, false, '', '', ''], [2001, 2000, true, '2000+1', '', ''], [2973, 2000, true, '2000+973', '', ''], [4096, 2000, true, '2000+2000+96', '', ''], [5000, 2000, true, '2000+2000+96', 'cmdFull,always.directive', 'cmdFull,always.directive']]) && FA.RUN_CMD_BODY_MAX === 2000 && FA.RUN_CMD_MAX === 4096,
+      'THE STORE CLIPS AND SAYS, NEVER THROWS (the ONE bound — vault-agent-own r23\'s CARD_STRING_MAX, the shared contract: the body ≤ 2 000, the fold ≤ 4 096): 1 999 / 2 000 file whole; 2 001 / 2 973 / 4 096 are folded in the door\'s own shape — `cmd` its first 2 000, `cmdCut: true`, the whole in `cmdFull` chunks of ≤ 2 000; 5 000 (past the door\'s 4 096) and a 2 311-character directive are clipped and NAMED (`cut`, the returned record\'s `factsCut`) — every one filed (2a5e9ce8 threw from 2 001)', sizes);
+    const kept0 = J(m.get(m.snapshot().open.find((i) => i.text === 'run 2973').id).facts);
+    const again = m.add('claude:r8-2973', { text: 'run 2973', origin: 'vault', action: { type: 'vault-run-ask', askId: 'a'.repeat(31) + '3' }, facts: JSON.parse(kept0) });   // the door's own clip at the same bound
+    const odd = [m.add('claude:r8-odd1', { text: 'odd 1', origin: 'vault', action: { type: 'vault-run-ask', askId: 'b'.repeat(32) }, facts: 'not an object' }), m.add('claude:r8-odd2', { text: 'odd 2', origin: 'vault', action: { type: 'vault-run-ask', askId: 'c'.repeat(32) }, facts: { ...base8, secrets: Array.from({ length: 64 }, (_, k) => ({ name: 'n'.repeat(400) + k, entry: 'e' + k, ref: 'vault://secrets/secret:k/secret', as: { kind: 'env', name: 'V' + k } })) } })];
+    ok(J(m.get(again.id).facts) === kept0 && !again.factsCut && odd.every((r) => !!r.id) && odd.map((r) => (r.factsCut || []).join(',')).join('|') === 'facts|facts' && odd.every((r) => !m.get(r.id).facts),
+      'idempotent (facts already cut re-file as they are, nothing re-cut); a facts that is no object, or past 24 KB as a whole, is DROPPED and said (`factsCut: [facts]`) — the item still filed, the card drawing its prose', odd.map((r) => r.factsCut));
+    // the card: the body's command box holds the cut, a line says so, the fold holds it whole
+    const it = m.get(m.snapshot().open.find((i) => i.text === 'run 2973').id);
+    const h = ROW3.runFactsHtml(it, Z);
+    const body = (/<pre class="ut-run-cmd">([^<]*)<\/pre>/.exec(h) || [])[1] || '', whole = (/<pre class="ut-run-cmd ut-run-cmd-full">([^<]*)<\/pre>/.exec(h) || [])[1] || '';
+    const cutLine = (/<div class="ut-run-cut">([^<]*)</.exec(h) || [])[1] || null;
+    ok(body.length === 2001 && body.endsWith('…') && whole.length === 2973 && cutLine === '命令共 2973 个字符，这里只显示前 2000 个 — 完整命令在「技术细节」里。' && h.indexOf('ut-run-cut') < h.indexOf('ut-run-facts') && h.indexOf('ut-run-cmd-full') > h.indexOf('ut-run-fold'),
+      `the card: the body's box holds the first 2 000 drawn with «…»; under it «${cutLine}»; the «技术细节» fold holds the whole 2 973 reassembled (its own scrolling box)`, J({ body: body.length, whole: whole.length, cutLine }));
+    // r8 — THE DOOR'S v 2 (vault-agent-own r23 0cc421d4): every fixture variant files BYTE-IDENTICAL; a long command in its chunked
+    // fold too; its template text (`textFull`) reassembled, its `reason` and `env` in the fold; a late card after a RESTART
+    // (`action.restartLost` — an Allow would mint nothing) says so and offers 拒绝 alone
+    const same = FX8.variants.map((v) => { const r = m.add('claude:r8-v2-' + v.name, { text: 'v2 ' + v.name, origin: 'vault', action: { type: 'vault-run-ask', askId: v.name.padEnd(32, 'b') }, facts: v.facts }); return J(m.get(r.id).facts) === J(v.facts) && !r.factsCut; });
+    const W2 = 'curl -d ' + 'z'.repeat(2965), T2 = 'tpl '.repeat(700);
+    const long2 = {}; for (const [k, v] of Object.entries(FX8.variants[0].facts)) { if (k === 'cmd') Object.assign(long2, { cmd: W2.slice(0, 2000), cmdCut: true, cmdFull: [W2.slice(0, 2000), W2.slice(2000)] }); else long2[k] = v; }
+    long2.templates = [{ label: 'CFG', bytes: T2.length, shown: true, text: T2.slice(0, 2000), textFull: [T2.slice(0, 2000), T2.slice(2000)] }];
+    long2.env = [{ name: 'API_BASE', value: 'https://collector.example.net/x' }];
+    long2.reason = { notOwn: true, away: [{ ref: 'vault://secrets/mint-token/token', forHost: 'auth.internal.example', host: 'api.external.example', unknown: false, keep: true }] };
+    const r2 = m.add('claude:r8-v2-long', { text: 'v2 long', origin: 'vault', action: { type: 'vault-run-ask', askId: 'c'.repeat(32) }, facts: long2 });
+    const it2 = m.get(r2.id), h2 = ROW3.runFactsHtml(it2, Z);
+    const pres = [...h2.matchAll(/<pre class="ut-run-cmd ut-run-cmd-full">([^<]*)<\/pre>/g)].map((x) => x[1].length);
+    ok(same.every(Boolean) && J(it2.facts) === J(long2) && J(pres) === J([2973, T2.length]) && h2.includes('为什么要问') && h2.includes('它用到了另一个对话存入的密钥') && h2.includes('是为 auth.internal.example 生成的 — 这次运行把它发往 api.external.example') && h2.includes('API_BASE=https://collector.example.net/x'),
+      `THE DOOR'S v 2 (r23): its four fixture variants and a long command in its chunked fold file BYTE-IDENTICAL; the fold reassembles the whole command (2 973) and the template's text (${T2.length}), says WHY IT ASKS and the plain env`, J({ same, pres }));
+    const lost = { ...it2, facts: FX8.variants.find((v) => v.name === 'late').facts, action: { type: 'vault-run-ask', askId: 'c'.repeat(32), always: true, late: true, lateAt: Date.now(), restartLost: true }, expiresAt: Date.now() + 86400e3, createdAt: Date.now() - 61e3 };
+    const hl = ROW3.renderRow({ item: lost, resolved: false, band: 1 }, { ...rctx3, t: Z }).innerHTML;
+    ok(J([...hl.matchAll(/data-answer="(\w+)"/g)].map((x) => x[1])) === J(['deny']) && hl.includes('之后服务器重启过，现在允许也不会放行任何东西') && /data-deadline-lost="1"/.test(hl),
+      'a LATE card after a restart (r23 `action.restartLost` — the door would mint no pass) says «…之后服务器重启过，现在允许也不会放行任何东西 — 它下次运行时会再问» and offers 拒绝 alone (a card never offers what its door would not do)', hl.slice(0, 300));
+  } finally { done(); }
+} catch (e) { ok(false, '⑯ (a) threw on this tree: ' + ((e && e.message) || e)); }
+try {
+  // (b) THE LATE CARD'S SETTLES — scripts/fixtures/vault-run-late-settles.json (vault-agent-own 4ff55fb4's door, driven by this lane
+  // through its store: the open late card + each settle as the door writes it, beside the RULED shape both lanes agreed)
+  const WANT = { 'late-allow': ['allowed', '已放行 1 次 · 等它重跑', /^你已放行 1 次 · 等它重跑 · /], 'late-deny': ['denied', '已拒绝', /^你已拒绝 · /], 'late-24h-end': ['expired', '已过期 · 助手可以再次请求', null], 'late-lock': ['vault_locked', '回答前保险库已锁定', null] };
+  const look8 = [];
+  for (const st of LS.settles) {
+    const [end, words, stampRe] = WANT[st.name];
+    const s0 = storeWith(FA);
+    try {
+      const r = s0.m.add(LS.item.sessionKey, { text: LS.item.text, origin: LS.item.origin, kind: LS.item.kind, action: { ...LS.item.action }, expiresAt: Date.now() + 3600e3 });
+      const went = s0.m.resolveAnswered([r.id], st.by, st.fact);   // the door's own call, as 4ff55fb4 makes it
+      const kept = s0.m.get(r.id);
+      const raw = { ...LS.item, status: 'done', resolvedBy: st.by, resolvedFact: st.fact };   // the same record as a store that did not map it kept it
+      const ruled = { ...LS.item, status: 'done', resolvedBy: st.ruled.by, resolvedFact: st.ruled.fact, resolvedAt: Date.now() };
+      const w = (x) => [ROW3.statusWords(x, Z), ROW3.resolvedByText(x.resolvedBy, Z, x), FA.settledWords(x, Z), typeof ROW3.endCodeOf === 'function' ? ROW3.endCodeOf(x) : '(no endCodeOf)'];
+      look8.push({ name: st.name, went: went.length, kept: [kept.status, kept.resolvedBy], words: w(kept), raw: w(raw), ruledStamp: (FA.decidedStamp(ruled, { t: Z }) || {}).text || null, ruledWords: FA.settledWords(ruled, Z) });
+      ok(went.length === 1 && kept.status === 'done' && kept.resolvedBy === end && w(kept)[1] === words && w(kept)[2] === words && w(raw)[1] === words && w(raw)[2] === words && !w(raw)[3] && (stampRe ? stampRe.test((FA.decidedStamp(ruled, { t: Z }) || {}).text || '') : FA.settledWords(ruled, Z) === words),
+        `${st.name}: the door's settle (by «${st.by}», outcome «${st.fact.outcome}») CLOSES the card as «${end}» — «${words}» — and the same record kept unmapped reads the same; the ruled shape ${stampRe ? 'stamps «by you · HH:MM»' : 'reads the same'} (2a5e9ce8: the store skipped it — the card stayed open with its buttons after the door had answered)`, J(look8[look8.length - 1]));
+    } finally { s0.done(); }
+  }
+} catch (e) { ok(false, '⑯ (b) threw on this tree: ' + ((e && e.message) || e)); }
+try {
+  // (c) AN END THIS CLIENT CANNOT CLASSIFY is said as one — «结果未知 · <code>» (the code monospace), never «完成», never a bare raw word;
+  // the store refuses such a settle BY NAME in its journal (was: skipped in silence)
+  const unk = { ...LS.item, status: 'done', resolvedBy: 'user', resolvedFact: { outcome: 'moon-phase' } };
+  const meta = ROW3.renderRow({ item: unk, resolved: true, band: 1, tail: true }, { ...rctx3, t: Z }).innerHTML;
+  const warns = []; const cw = console.warn; console.warn = (x) => warns.push(String(x));
+  const s1 = storeWith(FA);
+  let left = null;
+  try { const r = s1.m.add(LS.item.sessionKey, { text: LS.item.text, origin: 'vault', action: { ...LS.item.action } }); s1.m.resolveAnswered([r.id], 'user', { outcome: 'moon-phase' }); left = s1.m.get(r.id).status; } finally { console.warn = cw; s1.done(); }
+  ok(ROW3.statusWords(unk, Z) === '结果未知' && ROW3.endCodeOf(unk) === 'user' && ROW3.resolvedByText('user', Z, unk) === '' && FA.settledWords(unk, Z) === '结果未知' && /结果未知 · <code class="ut-end-code">user<\/code>/.test(meta) && !/完成/.test(meta) && left === 'open' && warns.some((x) => /is not one of its row's ends — the item stays open \(decision_row\)/.test(x)),
+    'an end this client cannot classify (resolvedBy «user», an outcome no table names) reads «结果未知 · <code>user</code>» on the row (and the chat card / the window through endCodeOf) — never «完成», never the raw word as a sentence; the store refuses that settle and SAYS so in its journal', J({ meta: (/<div class="ut-meta">(.*?)<\/div>/.exec(meta) || [])[1], left, warns }));
+} catch (e) { ok(false, '⑯ (c) threw on this tree: ' + ((e && e.message) || e)); }
+try {
+  // (d) the press: a LATE Allow's answer (r20b's {ok, outcome:'late-allowed'}) is never toasted «denied»
+  const ACT8 = read('src/lib/user-todos-actions.js');
+  ok(/r\.outcome === 'late-allowed' \? t\('let through once · waiting for it to run again'\) : r\.outcome === 'denied' \? t\('denied'\) : `\$\{t\('outcome unknown'\)\} · \$\{String\(r\.outcome \|\| ''\)\}`/.test(ACT8), 'the vault-run press reads a late Allow\'s outcome («已放行 1 次 · 等它重跑»), a Deny as «已拒绝», anything else as «结果未知 · <outcome>» (2a5e9ce8: everything not allowed/always toasted «已拒绝»)');
+} catch (e) { ok(false, '⑯ (d) threw on this tree: ' + ((e && e.message) || e)); }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
