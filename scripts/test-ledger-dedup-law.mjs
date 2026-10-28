@@ -266,7 +266,9 @@ await leg('⑤', async () => {
   const secret = SI.cmdlineHeadOf && SI.cmdlineHeadOf(Buffer.from(`curl\0-H\0Authorization: Bearer ${tok}\0https://x\0`));
   ok(typeof secret === 'string' && !secret.includes(tok.slice(0, 16)) && /«redacted»/.test(secret), '⑤ a secret on a command line is redacted (secret-shapes, the one rule)', secret);
   const own = await (SI.cmdlineHead ? SI.cmdlineHead(process.pid) : Promise.resolve(null));
-  ok(typeof own === 'string' && own.startsWith(process.argv0.split('/').pop()) && own.length <= 120, '⑤ the shared reader on a live process: /proc/<pid>/cmdline, ≤ 120 chars', own);
+  // r10 (int361's train fact): /proc/<pid>/cmdline starts with argv[0] AS THE SPAWNER PASSED IT — `process.argv0`, a bare `node` or
+  // the full path ci.mjs spawns (process.execPath); r1–r9 compared its basename, red under ci.mjs (green by hand)
+  ok(typeof own === 'string' && own.startsWith(String(process.argv0).slice(0, 100)) && own.length <= 120, '⑤ the shared reader on a live process: /proc/<pid>/cmdline, ≤ 120 chars', own);
   const watch = fs.readFileSync(path.join(REPO, 'src/server/memory-pressure-watch.js'), 'utf8');
   ok(/SI\.cmdlineHead\(g\.topPid\)/.test(watch) && !/['"`]\/cmdline/.test(watch.replace(/\/\/.*$/gm, '')), '⑤ the watch names strangers through sysinfo\'s reader (the shared module) — no /proc cmdline reader of its own');
 });

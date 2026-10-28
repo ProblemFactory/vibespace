@@ -44,7 +44,7 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
   try { if (dataDir) require('./sync-fs-witness.js').create({ rootDir: path.dirname(dataDir), dataDir }).start(); } catch (e) { console.warn('[sync-fs] the witness did not start —', e && e.message); }
   if (one) return one;
   const startAt = now(), steps = [], spans = [], gaps = [], ops = [], notes = [];
-  let label = null, sticky = null, last = startAt, mainMs = null, mainEndAt = null, listenAt = null, closed = false, resolveDone;
+  let label = null, sticky = null, last = startAt, mainMs = null, mainEndAt = null, listenAt = null, closed = false, resolveDone, turns = 0;
   const done = new Promise((r) => { resolveDone = r; });
   const eld = monitorEventLoopDelay({ resolution: 20 }); eld.enable();
   const tick = () => {
@@ -55,11 +55,11 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
     }
     const gap = t - last - TICK_MS;
     if (gap >= HOLD_MS) gaps.push({ at: Math.round(last), ms: Math.round(gap), label: label || sticky });
-    last = t; sticky = null;
+    last = t; sticky = null; turns++;
     if (t - startAt >= windowMs) close();
   };
   const timer = setInterval(tick, TICK_MS); if (timer.unref) timer.unref();
-  const unwrap = env.VIBESPACE_BOOT_TRACE === '1' ? wrapSync({ ops, now }) : () => { };
+  const unwrap = env.VIBESPACE_BOOT_TRACE === '1' ? wrapSync({ ops, now, turn: () => turns }) : () => { };
   const nameOf = (g) => {
     if (g.label) return g.label;
     const overlap = (x) => Math.max(0, Math.min(g.at + g.ms, x.at + x.ms) - Math.max(g.at, x.at));
@@ -68,13 +68,10 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
     const sp = spans.filter((x) => x.at <= g.at && (x.ms == null || g.at <= x.at + x.ms)).sort((a, b) => b.at - a.at)[0];
     return sp ? sp.name : null;
   };
-  const sitesOf = (g) => {
-    const by = new Map();
-    for (const o of ops) if (o.at >= g.at - 1 && o.at < g.at + g.ms && !o.nested) { const k = `${o.op} ${o.site}`; by.set(k, (by.get(k) || 0) + o.ms); }
-    return [...by].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, ms]) => ({ ms: Math.round(ms), what: k }));
-  };
+  // a hold is the span between two turns of the clock: [last, t] = [at, at + ms + TICK_MS] (1 ms of rounding before it)
+  const holdSites = (g) => sitesOf(ops, { at: g.at - 1, ms: g.ms + TICK_MS + 1 });
   function report() {
-    const holds = gaps.slice().sort((a, b) => b.ms - a.ms).slice(0, KEEP).map((g) => ({ at: g.at, ms: g.ms, name: nameOf(g), ...(ops.length ? { sites: sitesOf(g) } : {}) }));
+    const holds = gaps.slice().sort((a, b) => b.ms - a.ms).slice(0, KEEP).map((g) => ({ at: g.at, ms: g.ms, name: nameOf(g), ...(ops.length ? { sites: holdSites(g) } : {}) }));
     return { pid: process.pid, startedAt: Math.round(performance.timeOrigin + startAt), startAt: Math.round(startAt), mainMs, listenAt: listenAt == null ? null : Math.round(listenAt), windowMs, closed, traced: env.VIBESPACE_BOOT_TRACE === '1',
       maxHoldMs: gaps.reduce((m, g) => Math.max(m, g.ms), 0), eldMaxMs: Math.round(eld.max / 1e6), holds, steps: steps.map((s) => ({ name: s.name, at: Math.round(s.at), ms: Math.round(s.ms) })), spans: spans.map((s) => ({ name: s.name, at: Math.round(s.at), ms: s.ms == null ? null : Math.round(s.ms), ...(s.facts || {}) })), notes: notes.slice() };
   }
@@ -110,11 +107,33 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
  *  Lane ledger-dedup-law r9: A SITE IS NAMED BY ITS CALLS, never by a 1 ms floor — every call is kept, a run of calls at one
  *  site (each starting ≤ 1 ms after the one before ended) folded into one op (`n` calls, their summed ms): a hold made of
  *  many short calls (the ledger warm's sync tail read, TAIL_STEP_BYTES slices under 1 ms each since e11e1f61) named no
- *  site at all. Bounded: OPS_MAX ops, the rest counted (`dropped`). */
+ *  site at all. Bounded: OPS_MAX ops, the rest counted (`dropped`).
+ *  r10: A FOLD NEVER CROSSES A HOLD — an op is closed when the loop turns (`turn()`, the boot clock's tick count: a hold is
+ *  the span between two ticks, so an op lies inside one) or once it spans FOLD_MS (the bound when no clock turns — a pure
+ *  run); r9 folded a run across holds into ONE op credited whole to the first (300 ms of a 240 ms hold, the next `sites: []`).
+ *  A run is keyed by (depth, call, its path / fd) — each its own open op, so a call made INSIDE another (readFileSync's
+ *  openSync + readSync) and a second file read in turn no longer break every run; the stack is captured ONCE per op, at its
+ *  first call (a call that joins an open op is timed, never walked). */
 const OPS_MAX = 200000;
-function wrapSync({ ops, now }) {
+const FOLD_MS = HOLD_MS / 2;
+const OPEN_MAX = 1024;   // open runs kept per turn (distinct depth × call × path); past it they are closed
+/** The ms each site spent INSIDE a window w = {at, ms} — PURE over wrapSync's ops: an op's calls are spread over its span and
+ *  credited by OVERLAP (an op that began before the window or ends after it gives it only its share), never by where it
+ *  began; a call made inside another traced call (`nested`) is its caller's time. Top `top`, longest first. */
+function sitesOf(ops, w, top = 3) {
+  const by = new Map(), a0 = w.at, a1 = w.at + w.ms;
+  for (const o of ops) {
+    if (o.nested) continue;
+    const b0 = o.at, b1 = o.at + (o.span || 0);
+    const share = b1 > b0 ? o.ms * Math.max(0, Math.min(a1, b1) - Math.max(a0, b0)) / (b1 - b0) : (b0 >= a0 && b0 < a1 ? o.ms : 0);
+    if (share > 0) { const k = `${o.op} ${o.site}`; by.set(k, (by.get(k) || 0) + share); }
+  }
+  return [...by].sort((a, b) => b[1] - a[1]).slice(0, top).map(([k, ms]) => ({ ms: Math.round(ms), what: k }));
+}
+function wrapSync({ ops, now, turn = () => 0 }) {
   const root = path.join(__dirname, '..', '..') + path.sep, undo = [];
-  let depth = 0;
+  let depth = 0, openTurn = null;
+  const open = new Map(); // `${depth} ${call} ${path | fd}` → the op its next call may join (this turn only)
   const site = () => {
     const lim = Error.stackTraceLimit; Error.stackTraceLimit = 12; const o = {}; Error.captureStackTrace(o, site); Error.stackTraceLimit = lim;
     const fr = String(o.stack).split('\n').slice(1).map((l) => l.trim()).filter((l) => l.includes(root) && !l.includes('node_modules') && !l.includes('boot-trace.js'));
@@ -128,11 +147,14 @@ function wrapSync({ ops, now }) {
       try { return orig.apply(this, a); } finally {
         depth--; const ms = now() - t0;
         if (keep(a)) {
-          let what = ''; try { what = typeof a[0] === 'string' ? a[0].split(root).join('').slice(0, 120) : ''; } catch { }
-          const s = `${site()}${what ? ' ' + what : ''}`, last = ops[ops.length - 1], nested = depth > 0;
-          if (last && last.op === label && last.site === s && last.nested === nested && t0 - (last.at + last.span) <= 1) { last.ms += ms; last.n++; last.span = t0 + ms - last.at; }
-          else if (ops.length < OPS_MAX) ops.push({ op: label, at: t0, ms, span: ms, n: 1, site: s, nested });
-          else ops.dropped = (ops.dropped || 0) + 1;
+          const tn = turn(); if (tn !== openTurn || open.size > OPEN_MAX) { open.clear(); openTurn = tn; } // the loop turned: every run is closed
+          const arg = typeof a[0] === 'string' ? a[0] : typeof a[0] === 'number' ? '#' + a[0] : '', key = `${depth} ${label} ${arg}`, o = open.get(key);
+          if (o && t0 - (o.at + o.span) <= 1 && t0 + ms - o.at <= FOLD_MS) { o.ms += ms; o.n++; o.span = t0 + ms - o.at; }
+          else if (ops.length < OPS_MAX) {
+            let what = ''; try { what = typeof a[0] === 'string' ? a[0].split(root).join('').slice(0, 120) : ''; } catch { }
+            const op = { op: label, at: t0, ms, span: ms, n: 1, site: `${site()}${what ? ' ' + what : ''}`, nested: depth > 0 };
+            ops.push(op); open.set(key, op);
+          } else ops.dropped = (ops.dropped || 0) + 1;
         }
       }
     };
@@ -145,4 +167,4 @@ function wrapSync({ ops, now }) {
   return () => { for (const u of undo.splice(0)) u(); };
 }
 
-module.exports = { start, wrapSync, TICK_MS, HOLD_MS, WINDOW_MS };
+module.exports = { start, wrapSync, sitesOf, TICK_MS, HOLD_MS, WINDOW_MS, FOLD_MS };

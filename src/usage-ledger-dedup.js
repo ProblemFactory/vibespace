@@ -160,8 +160,11 @@ function eachLine(file, from, to, fn, { step = STEP_BYTES, limit = Infinity } = 
  *  does not exist → {end: from, lineEnd: from, eof: true, missing: true}. `fn(buf, a, b, offset)` as eachLine's. */
 async function eachLineAsync(file, from, fn, { step = STEP_BYTES, limit = Infinity, io = null } = {}) {
   const on = io || ((f, p) => p); // r9 (ledger-dedup-law): the caller's wrapper of each file call (usage-history `_holdIO`: bounded and said)
+  // r10: an error names the FILE it read — FileHandle.read's errors carry no `path` (a read-back that failed mid-read was
+  // said by its hold's key, no file of it)
+  const named = (e) => { if (e && typeof e === 'object' && !e.path) { try { e.path = file; } catch { } } return e; };
   let fh;
-  try { fh = await on(file, fs.promises.open(file, 'r')); } catch (e) { if (e && e.code === 'ENOENT') return { end: from, lineEnd: from, eof: true, missing: true }; throw e; }
+  try { fh = await on(file, fs.promises.open(file, 'r')); } catch (e) { if (e && e.code === 'ENOENT') return { end: from, lineEnd: from, eof: true, missing: true }; throw named(e); }
   try {
     let buf = Buffer.alloc(step), pos = from, lineEnd = from, carry = 0; // buf[0, carry) = an unfinished line read at `pos`
     for (;;) {
@@ -181,7 +184,7 @@ async function eachLineAsync(file, from, fn, { step = STEP_BYTES, limit = Infini
       if (lineEnd - from >= limit) return { end: lineEnd, lineEnd, eof: false };
       if (buf.length > step && carry < step) { const b2 = Buffer.alloc(step); buf.copy(b2, 0, 0, carry); buf = b2; }
     }
-  } finally { await fh.close().catch(() => { }); }
+  } catch (e) { throw named(e); } finally { await on(file, fh.close()).catch(() => { }); } // r10: the close is a file call of the road too — bounded and said like the open and the read
 }
 
 /** A tmp file written in batches of ≥ `step` bytes → { keep(buf, a, b), flush(), bytes, close() }. */

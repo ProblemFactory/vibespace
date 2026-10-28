@@ -14,7 +14,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The memory notice names the process holding the memory, its command line, and whether it came from outside the container.
 - While the usage ledger is still loading after a start, no estimate, learned rate or automatic pool switch is made from the part loaded so far.
 - If the folder that keeps held usage cannot be read, one notice in For you says so; other months are still recorded, and it closes once the folder can be read.
-- If one machine's held usage file cannot be read, one notice names the file; that machine's other months are still recorded.
+- If one machine's held usage file cannot be read, one notice names it; its other months are still recorded, and the notice closes once the file can be read.
+- Held usage events are no longer dropped while their month starts being recorded again.
 - Held usage events dropped past the limit are counted in a notice in For you, also after a restart, and are never shown as zero.
 
 ## 2.369.360 — 2026-10-27

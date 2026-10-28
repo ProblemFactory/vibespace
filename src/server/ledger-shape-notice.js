@@ -70,6 +70,7 @@ const isDropKey = (k) => k === D_DROPPED || k === D_DROPPED_MAYBE;
 const D_DROPPED_EARLIER = i18nKey('Earlier: {dropped} held events of {month} had been dropped past the bound — counted, never recorded.');
 // r9: a hold whose file could not be read back — ONE notice per hold, closed when it is read
 const READ_KEY = 'hold-read';
+const READ_SETTLE_MS = 60e3; // r10: the boot reconcile's bound on a read-back it started (a disk that does not answer: its own 'ok' closes it later)
 const TEXT_READ = i18nKey('The held usage of {machine} for {month} cannot be read ({code}) — that month waits');
 const D_READ = [
   i18nKey('What: data/usage-history/_held/{file} could not be read ({code}) since {since} — the events of {month} held for {machine} stay on the disk, unread. Until it is read, the new events of {month} from that machine wait (it keeps them and sends them again) unless the month\'s file is in shape; its other months are recorded as usual.'),
@@ -117,7 +118,8 @@ const hhmm = (t) => { const d = new Date(Number(t) || 0); return `${String(d.get
 /** The notice's words → {text, detail, i18n} (PURE). `remedy` = usage-history's `_remedyOf` ({state, code, error, removed,
  *  nextAt}); `host` and THE RULE that opened it (`why`, `exact`) ride the text's params (the boot reconcile reads them
  *  back). A state without words of its own is said as `none` (recording paused — no claim of what is being done). */
-function noticeOf({ hostName, host, shard, month, size, ratio, why, exact, remedy, held, dropped, unchecked = false, holdMax, holdError, drain, tag = '', gen = null, earlier = 0 } = {}) {
+function noticeOf({ hostName, host, shard, month, size, ratio, why, exact, remedy, held, dropped, unchecked = false, holdMax, holdError, drain, tag = '', gen = null, earlier = 0, ended = null } = {}) {
+  if (ended) earlier = sumOf(ended);
   // r5: a month whose held events could not be recorded says THAT (its file is back in shape — no remedy words)
   const drained = !!(drain && drain.state === 'failed');
   const r = drained ? { state: 'drain-failed', code: drain.code || null, error: drain.code || null } : remedy && typeof remedy === 'object' ? remedy : { state: 'none' };
@@ -138,14 +140,36 @@ function noticeOf({ hostName, host, shard, month, size, ratio, why, exact, remed
   return {
     text: fill(head),
     detail: lines.map((l) => fill(l.key, { ...p, ...(l.params || {}) })).join('\n'),
-    i18n: { text: { key: head, params: { machine: p.machine, name, tag: t, month: p.month, shard: p.shard, host: String(host || '').slice(0, 160), why: Object.prototype.hasOwnProperty.call(D_WHAT, why) ? why : 'size', exact: exact ? '1' : '', ...genParams(gen, earlier) } }, detail: lines },
+    i18n: { text: { key: head, params: { machine: p.machine, name, tag: t, month: p.month, shard: p.shard, host: String(host || '').slice(0, 160), why: Object.prototype.hasOwnProperty.call(D_WHAT, why) ? why : 'size', exact: exact ? '1' : '', ...genParams(gen, earlier, ended) } }, detail: lines },
   };
 }
-/** r9: the generation an item's count is of, and the count of the ones that ended before it (text params). */
-const genParams = (gen, earlier) => ({ ...(gen != null && gen !== '' ? { gen: String(gen) } : {}), ...(Number(earlier) > 0 ? { earlier: String(Math.floor(Number(earlier))) } : {}) });
+/** r9: the generation an item's count is of, and the count of the ones that ended before it (text params). r10: each
+ *  ended generation's own count (`ended`: «gen:count,…», `?` = a count of no known generation) — an older generation's
+ *  count read late REPLACES its own entry, never adds to the sum (`earlier` = their sum, the words'). */
+const ENDED_MAX = 64;
+const endedOf = (q) => {
+  const m = new Map();
+  for (const part of String((q && q.ended) || '').split(',')) { const x = /^(\d+|\?):(\d+)$/.exec(part); if (x) m.set(x[1], Number(x[2])); }
+  const sum = [...m.values()].reduce((a, b) => a + b, 0), legacy = Math.max(0, Math.floor(Number(q && q.earlier) || 0) - sum); // an item of r9's words: its sum, no generation known
+  if (legacy) m.set('?', (m.get('?') || 0) + legacy);
+  return m;
+};
+const endedText = (m) => {
+  let q = 0; const all = [];
+  for (const [g, n] of m || new Map()) { if (!(n > 0)) continue; if (g === '?') q += n; else all.push([g, n]); }
+  all.sort((x, y) => Number(x[0]) - Number(y[0]));
+  while (all.length > ENDED_MAX - 1) q += all.shift()[1]; // bounded: the oldest folded into «?» (their sum kept)
+  return [...(q ? [['?', q]] : []), ...all].map(([g, n]) => `${g}:${n}`).join(',');
+};
+const sumOf = (m) => [...(m || new Map())].reduce((a, [, n]) => a + n, 0);
+const genParams = (gen, earlier, ended = null) => {
+  const e = ended ? sumOf(ended) : Math.floor(Number(earlier) || 0), t = ended ? endedText(ended) : '';
+  return { ...(gen != null && gen !== '' ? { gen: String(gen) } : {}), ...(e > 0 ? { earlier: String(e) } : {}), ...(t ? { ended: t } : {}) };
+};
 
 /** r8: the words of a count said where no pause carries it (PURE) → {text, detail, i18n}. */
-function droppedNoticeOf({ hostName, host, shard, month, dropped, holdMax, tag = '', gen = null, earlier = 0 } = {}) {
+function droppedNoticeOf({ hostName, host, shard, month, dropped, holdMax, tag = '', gen = null, earlier = 0, ended = null } = {}) {
+  if (ended) earlier = sumOf(ended);
   const sh = String(shard || '').slice(0, 60), mo = /^\d{4}-\d{2}$/.test(String(month || '')) ? String(month) : (/(\d{4}-\d{2})/.exec(sh) || [])[1] || 'this month';
   const name = String(hostName || host || 'a machine').slice(0, 80), t = String(tag || '').slice(0, 24);
   const p = { machine: t ? `${name} (${t})` : name, shard: sh, month: mo, dropped: String(Math.max(0, Number(dropped) || 0)), bound: `${Math.round((Number(holdMax) || 64 * 2 ** 20) / 2 ** 20)} MiB` };
@@ -153,7 +177,7 @@ function droppedNoticeOf({ hostName, host, shard, month, dropped, holdMax, tag =
   return {
     text: fillOf(TEXT_DROPPED, p),
     detail: lines.map((l) => fillOf(l.key, { ...p, ...(l.params || {}) })).join('\n'),
-    i18n: { text: { key: TEXT_DROPPED, params: { machine: p.machine, name, tag: t, month: p.month, shard: p.shard, dropped: p.dropped, host: String(host || '').slice(0, 160), why: 'drain', exact: '', ...genParams(gen, earlier) } }, detail: lines },
+    i18n: { text: { key: TEXT_DROPPED, params: { machine: p.machine, name, tag: t, month: p.month, shard: p.shard, dropped: p.dropped, host: String(host || '').slice(0, 160), why: 'drain', exact: '', ...genParams(gen, earlier, ended) } }, detail: lines },
   };
 }
 /** r9: the words of a hold whose file could not be read back (PURE). */
@@ -219,16 +243,28 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
     });
   }
   /** r9: THE COUNT IS THE GENERATION'S — what an item says (its generation `gen`, its «Past the bound» count, `earlier`: the
-   *  ended generations') against an event of generation `ev.gen` → {dropped, unchecked, gen, earlier}: the event's count
-   *  REPLACES the item's when both are of one generation (never summed — r8's `carried` said 66 for the 33 of one
+   *  ended generations') against an event of generation `ev.gen` → {dropped, unchecked, gen, earlier, ended}: the event's
+   *  count REPLACES the item's when both are of one generation (never summed — r8's `carried` said 66 for the 33 of one
    *  generation read back after a crash); the item's count of ANOTHER generation (one that ended) joins `earlier`; a count
-   *  the event does not know (null: its hold still being read) keeps the item's. */
+   *  the event does not know (null: its hold still being read) keeps the item's. r10: `ended` holds each ended
+   *  generation's count by its number — an OLDER generation's count (a set file read at a boot beside a newer one's)
+   *  replaces its own entry and leaves the item's line alone (or IS the line when the item has none); a newer one's moves
+   *  the item's count into it. Order-free: older-then-newer and newer-then-older say the same. */
   function countsOf(prev, ev) {
     const q = paramsOf(prev), line = dropLineOf(prev), said = line && line.params ? Math.max(0, Number(line.params.dropped) || 0) : 0;
     const was = q.gen != null && q.gen !== '' ? String(q.gen) : null, gen = ev.gen != null && ev.gen !== '' ? String(ev.gen) : null;
-    const earlier = Math.max(0, Number(q.earlier) || 0);
-    if (ev.dropped == null) return { dropped: said || null, unchecked: line ? line.key === D_DROPPED_MAYBE : !!ev.unchecked, gen: was, earlier };
-    return { dropped: Math.max(0, Number(ev.dropped) || 0), unchecked: !!ev.unchecked, gen: gen != null ? gen : was, earlier: earlier + (said && was !== gen ? said : 0) };
+    const ended = endedOf(q), unchecked0 = line ? line.key === D_DROPPED_MAYBE : !!ev.unchecked;
+    const out = (dropped, unchecked, g) => ({ dropped, unchecked, gen: g, ended, earlier: sumOf(ended) });
+    if (ev.dropped == null) return out(said || null, unchecked0, was);
+    const n = Math.max(0, Number(ev.dropped) || 0);
+    if (gen === null || gen === was) return out(n, !!ev.unchecked, gen !== null ? gen : was);
+    if (was !== null && Number(gen) < Number(was)) { // an OLDER generation's count
+      if (said > 0) { if (n > 0) ended.set(gen, n); else ended.delete(gen); return out(said, unchecked0, was); }
+      ended.delete(gen); return out(n, !!ev.unchecked, gen); // the item says no count: the older one's is its line
+    }
+    if (said > 0) ended.set(was === null ? '?' : was, (was === null ? ended.get('?') || 0 : 0) + said);
+    ended.delete(gen);
+    return out(n, !!ev.unchecked, gen);
   }
   /** r7: the «Past the bound» line re-said with the count the hold ENDED with (rows dropped while it drained — a harvest
    *  mid-drain pushed out a segment not drained yet) — in place, before 'resumed' closes the item. r9: `c` = countsOf's
@@ -242,16 +278,16 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
       if (n === '0') { if (at >= 0) d.splice(at, 1); } else { const line = { key: c.unchecked ? D_DROPPED_MAYBE : D_DROPPED, params: { dropped: n, month: mo } }; if (at >= 0) d[at] = line; else d.splice(Math.min(2, d.length), 0, line); }
       const ea = d.findIndex((l) => l && l.key === D_DROPPED_EARLIER);
       if (e === '0') { if (ea >= 0) d.splice(ea, 1); } else { const line = { key: D_DROPPED_EARLIER, params: { dropped: e, month: mo } }; if (ea >= 0) d[ea] = line; else { const after = d.findIndex((l) => l && isDropKey(l.key)); d.splice(after >= 0 ? after + 1 : Math.min(2, d.length), 0, line); } }
-      delete p.gen; delete p.earlier; delete p.carried; Object.assign(p, genParams(c.gen, c.earlier));
+      delete p.gen; delete p.earlier; delete p.ended; delete p.carried; Object.assign(p, genParams(c.gen, c.earlier, c.ended));
       if (i18n.text.key === TEXT_DROPPED && n !== '0') p.dropped = n;
       if (JSON.stringify(i18n) === JSON.stringify(it.i18n)) return false;
       it.i18n = i18n; it.text = fillOf(i18n.text.key, p); it.detail = d.map((l) => fillOf(l.key, l.params || {})).join('\n');
       return true;
     });
   }
-  // r9: every generation an item names is one usage-history has seen — a month's next hold is minted past it (a restart with
+  // r9: every generation an item names is one usage-history has seen (r10: and every ended one it keeps a count of) — a month's next hold is minted past it (a restart with
   // no file of it left minted generation 0 again: the new hold's count read as the ended one's)
-  try { if (typeof userTodos.idsWhere === 'function' && typeof usageHistory.holdGenSeen === 'function') for (const id of userTodos.idsWhere((i) => ours(i) && paramsOf(i).gen != null)) { const q = paramsOf(userTodos.get(id)); usageHistory.holdGenSeen(q.host, q.shard, q.gen); } } catch { }
+  try { if (typeof userTodos.idsWhere === 'function' && typeof usageHistory.holdGenSeen === 'function') for (const id of userTodos.idsWhere((i) => ours(i) && paramsOf(i).gen != null)) { const q = paramsOf(userTodos.get(id)); usageHistory.holdGenSeen(q.host, q.shard, q.gen); for (const g of endedOf(q).keys()) if (g !== '?') usageHistory.holdGenSeen(q.host, q.shard, g); } } catch { }
   usageHistory.onShape = (ev) => {
     if (!ev || !userTodos) return;
     if (ev.kind === 'paused') {
@@ -337,7 +373,7 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
       const c = it ? countsOf(it, ev) : { dropped: Number(n), gen: ev.gen, earlier: 0, unchecked: !!ev.unchecked };
       if (it && it.status === 'open') { redrop(it, c, ev.month); return flushed(); }
       const name = ev.hostName && ev.hostName !== ev.host ? ev.hostName : nameOf(it) || ev.hostName;
-      const w = droppedNoticeOf({ ...ev, hostName: name, gen: c.gen, earlier: c.earlier, tag: twinsOf(ev.host, name).length ? shortHost(ev.host) : '' });
+      const w = droppedNoticeOf({ ...ev, dropped: c.dropped, unchecked: c.unchecked, hostName: name, gen: c.gen, earlier: c.earlier, ended: c.ended, tag: twinsOf(ev.host, name).length ? shortHost(ev.host) : '' });
       if (!it) {
         const made = fileItem(w, keyOf(ev.host, ev.shard));
         if (made && made.id) open.set(keyOf(ev.host, ev.shard), made.id);
@@ -378,12 +414,20 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
     // r8: the listing's notice from before the restart — closed when this process listed the folder (a failure re-says it)
     try { const it = listItem(); if (it && it.status === 'open' && !(usageHistory.holdListFailed && usageHistory.holdListFailed())) { close(it.id, 'listed'); n++; } } catch { }
     // r9: a hold read-back's notice from before the restart — closed when its hold is no longer waiting to be read (gone from
-    // the disk, or read by now); one whose read is still pending is closed by its read (a failure re-says it)
+    // the disk, or read by now); one whose read is still pending is closed by its read (a failure re-says it). r10: a hold
+    // this reconcile's own restoreHolds is reading back is judged AFTER that read settles (bounded) — never at the instant
+    // it started it (r9: «pending», skipped, and its success said nothing: the item open for ever); its read's 'ok' closes
+    // it too (usage-history `_readBack`, every read-back that works)
     try {
+      const pending = (p) => !!(usageHistory.holdReadPending && usageHistory.holdReadPending(p.host, p.shard));
       for (const it of (userTodos.snapshot?.() || {}).open || []) {
         if (!ours(it) || !isRead(it)) continue;
         const p = paramsOf(it);
-        if (!(usageHistory.holdReadPending && usageHistory.holdReadPending(p.host, p.shard))) { close(it.id, 'read'); n++; }
+        if (!pending(p)) { close(it.id, 'read'); n++; continue; }
+        if (typeof usageHistory.holdReadSettled !== 'function') continue;
+        let t = null;
+        const late = new Promise((r) => { t = setTimeout(r, READ_SETTLE_MS); t.unref?.(); });
+        Promise.race([usageHistory.holdReadSettled(p.host, p.shard), late]).then(() => { clearTimeout(t); try { if (!pending(p)) close(it.id, 'read'); } catch { } });
       }
     } catch { }
     return n;
