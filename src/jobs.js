@@ -1155,6 +1155,11 @@ class JobManager {
       this._touch(job);
     } catch { }
   }
+  /** an AGENT's own words bound for a person (a notify cron's --text) through THE ONE BELT (src/agent-output-belt.js) —
+   *  required lazily (only a notify fire pays for it); never throws */
+  _agentWords(s) {
+    try { return require('./agent-output-belt.js').maskForSink(String(s == null ? '' : s), { dataDir: this.d.dataDir }); } catch { return String(s == null ? '' : s); }
+  }
   _secretsFor(job) {
     if (!job.envFrom || !job.envFrom.length) return {};
     try {
@@ -1426,17 +1431,22 @@ class JobManager {
       // user's inbox spammed agent-facing instructions at the human
       // (inc-mt27t0bg follow-up report). The agent decides what the user
       // needs and relays via chat/vibespace-ask.
+      // lane job-notify-user r2: the agent's words pass the agent-output belt before EITHER lane carries them — the
+      // For-you copy, the owner (and subscriber) message, its stash and its retry meta all hold the masked words (read
+      // at each sink, `a.text` in place: test-record-clear-census follows the field to both)
       if (M.notifyUserOf(job)) {
-        try {
-          this.d.notifyUser({ text: a.text || job.name, urgency: a.urgency || 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null });
-          this._notifyLogPush(job, { lane: 'user-inbox', ok: true });
-        } catch { }
+        // THE STORE'S VERDICT is the journal (r2): a refused copy (an urgency outside the store's set, For you full) is
+        // `user-inbox ✗ — why`, never a ✓ for a copy that did not land; a dep that answers nothing is taken at its word
+        let v;
+        try { v = this.d.notifyUser({ text: this._agentWords(a.text || job.name), urgency: a.urgency || 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch (e) { v = { ok: false, why: e.message }; }
+        if (v && typeof v === 'object' && v.ok === false) this._notifyLogPush(job, { lane: 'user-inbox', ok: false, reason: String(v.why || 'the For you store refused it').slice(0, 200) });
+        else this._notifyLogPush(job, { lane: 'user-inbox', ok: true });
       }
       // THE 设备运维大师 gap (2.361.5): a notify action only reached the USER
       // inbox — the agent that scheduled its own reminder was never messaged
       // (an agent-created dated obligation woke nobody). Owner-conversation
       // delivery rides the same toggles/rate-floor/stash as every job event.
-      this._notifyOwner(job, { what: a.text || job.name });
+      this._notifyOwner(job, { what: this._agentWords(a.text || job.name) });
       this._event(job, 'cron fired: notify');
     } else if (a.type === 'spawn-task') {
       // ONE persistent child per cron (2.343.3, owner report: every fire used
@@ -1508,7 +1518,7 @@ class JobManager {
       untilOutput: spec.untilOutput || null, stdinOpen: !!spec.stdinOpen, notifyUser: M.notifyUserOf(spec), // lane job-notify-user: the one reader
       notify: spec.notify === 'on' || spec.notify === 'off' ? spec.notify : undefined, // owner auto-notify override; undefined = inherit group/global
       notifyOk: !!spec.notifyOk, // scheduled successes opt INTO events+notify (quiet-success is only the default)
-      schedule: spec.schedule || null, catchUp: spec.catchUp || 'once', action: spec.action || null,
+      schedule: spec.schedule || null, catchUp: spec.catchUp || 'once', action: M.storedAction(spec.action),
       context: spec.context || null, interaction: { pending: null, answers: [] },
       owner: spec.owner, access: spec.access || { view: 'group', control: 'session' },
       stopWithOwner: !!spec.stopWithOwner, desiredUp: true,
@@ -1633,11 +1643,15 @@ class JobManager {
       // full creation parameters (2.347.0, owner ask: agents must be able to
       // re-inspect what they registered) — env VALUES stay out (names only)
       cmd: job.cmd ? { argv: job.cmd.argv, cwd: job.cmd.cwd || null, envKeys: Object.keys(job.cmd.env || {}) } : null,
-      envFrom: job.envFrom || [], restart: job.restart || null, timeoutMs: job.timeoutMs || null,
+      // a cron's action TYPE (an enum: 'notify' | 'spawn-task' | null) — the panel words what --notify-user does per kind
+      // (lane job-notify-user r2: the snapshot carried no action, so a notify cron read «when each run ends»)
+      actionType: (job.action && typeof job.action.type === 'string' && job.action.type) || null,
+      // a cron PARENT's run carries its own timeout / until inside the embedded task (verdict r1 F5: show printed «—»)
+      envFrom: job.envFrom || [], restart: job.restart || null, timeoutMs: job.timeoutMs || M.spawnTaskOf(job).timeoutMs || null,
       // B-644d: a cron PARENT's fires run its embedded spawn-task, whose notifyOk the child inherits — the parent's own
       // field is never read (`vibespace-job run --at … --notify-ok` showed notifyOk=false for fires that notify);
       // notifyUser is the one reader's answer (lane job-notify-user: `show` printed nothing about the For-you copy)
-      untilOutput: job.untilOutput || null, notifyUser: M.notifyUserOf(job), notifyOk: !!job.notifyOk || !!(job.action && job.action.type === 'spawn-task' && job.action.task && job.action.task.notifyOk),
+      untilOutput: job.untilOutput || M.spawnTaskOf(job).untilOutput || null, notifyUser: M.notifyUserOf(job), notifyOk: !!job.notifyOk || !!(job.action && job.action.type === 'spawn-task' && job.action.task && job.action.task.notifyOk),
       catchUp: job.catchUp || null, stopWithOwner: !!job.stopWithOwner, singleInstance: job.singleInstance !== false,
       run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '' } : null,
       runsCount: (job.runs || []).length,

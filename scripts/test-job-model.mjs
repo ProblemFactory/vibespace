@@ -170,6 +170,22 @@ ok(M.notifyEffective({ notify: 'off' }, true, true).on === false && M.notifyEffe
 ok(M.notifyEffective({}, false, true).on === false && M.notifyEffective({}, false, true).source === 'group', 'group OFF beats global ON');
 ok(M.notifyEffective({}, true, false).on === true, 'group ON beats global OFF');
 ok(M.notifyEffective({}, null, undefined).on === true && M.notifyEffective({}, null, false).on === false, 'inherit falls to global; default ON');
+// lane job-notify-user r2: THE ONE READER of the For-you copy (notifyUserOf) — the legacy nested read is pinned HERE, in the
+// fast tier (verdict r1: cutting it left every fast suite green; only a heavy real-spawn leg saw it)
+{
+  const st = (t) => ({ action: { type: 'spawn-task', task: t } });
+  ok(M.notifyUserOf({ notifyUser: true }) === true && M.notifyUserOf({ notifyUser: false }) === false && M.notifyUserOf({}) === false, 'notifyUserOf: the top-level field (true / false / absent)');
+  ok(M.notifyUserOf(st({ notifyUser: true })) === true, 'notifyUserOf: a scheduled run an older CLI made (the flag only in its spawn-task, no top-level) ⇒ true');
+  ok(M.notifyUserOf({ action: { type: 'notify', text: 'x', task: { notifyUser: true } } }) === false && M.notifyUserOf({ action: { task: { notifyUser: true } } }) === false, 'notifyUserOf: a nested field on any action but spawn-task is nobody\'s ⇒ false');
+  ok(M.notifyUserOf({ notifyUser: false, ...st({ notifyUser: true }) }) === true, 'notifyUserOf: the two DISAGREE only in a record an engine ≤ 2.369.360 stored (top false beside the user\'s nested true) ⇒ true — «top-level wins» would silence it');
+  ok(M.notifyUserOf({ notifyUser: true, ...st({ notifyUser: false }) }) === true, 'notifyUserOf: a top-level true beside a nested false ⇒ true (either field true)');
+  ok(M.notifyUserOf({ kind: 'service', notifyUser: true }) === false && M.notifyUserOf({ kind: 'task', notifyUser: true }) === true, 'notifyUserOf: a SERVICE ⇒ false (nothing tells at its end); a task with the same field ⇒ true');
+  ok([null, undefined, 'yes', 7, []].every((x) => M.notifyUserOf(x) === false) && M.notifyUserOf({ action: { type: 'spawn-task', task: 'x' } }) === false, 'notifyUserOf: garbage ⇒ false, never a throw');
+  const sa = M.storedAction({ type: 'spawn-task', task: { cmd: { argv: ['true'] }, notifyUser: true, notifyOk: true } });
+  ok(sa && !('notifyUser' in sa.task) && sa.task.notifyOk === true && sa.type === 'spawn-task', 'storedAction drops ONLY the wire\'s compatibility copy (the store keeps the top-level field alone)', JSON.stringify(sa));
+  const na = { type: 'notify', text: 'x' };
+  ok(M.storedAction(na) === na && M.storedAction(null) === null && M.storedAction(undefined) === null, 'storedAction: any other action is stored as sent; none ⇒ null');
+}
 const nj = { id: 'jb-abc', kind: 'task', name: '数据迁移-' + 'x'.repeat(80), state: 'done', context: { payload: '这是很长的context payload。'.repeat(100) } };
 const ntext = M.renderOwnerNotify(nj, { what: 'done exit=0 ok (12m)' });
 ok([...ntext].length <= 1000 && ntext.includes('jb-abc') && ntext.includes('vibespace-job poll jb-abc') && ntext.includes('not a user instruction'), 'owner notify ≤1000cp, carries id + poll pointer + non-instruction marker');

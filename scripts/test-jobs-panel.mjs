@@ -46,7 +46,9 @@ execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 // ── the fixture, seeded BEFORE the first boot ──
 const T0 = Date.now();
 const fx = makeFixture(T0);
-fx.jobs.find((j) => j.id === fx.ids.cron).notifyUser = true;   // lane job-notify-user: the cron made with --notify-user (the service without)
+fx.jobs.find((j) => j.id === fx.ids.cron).notifyUser = true;   // lane job-notify-user: the cron made with --notify-user (a task without)
+fx.jobs.find((j) => j.id === fx.ids.service).notifyUser = true;   // r2: a service the agent POSTed with the flag — nothing tells at its end, so no row
+{ const c = fx.jobs.find((j) => j.id === fx.ids.cron); fx.ids.notifyCron = 'jb-0ffe01'; fx.jobs.push({ ...c, id: fx.ids.notifyCron, name: 'standup-note', action: { type: 'notify', text: 'Standup notes are due at 10:00', urgency: 'normal' }, notifyUser: true, runs: [] }); }   // r2: a notify-cron made with --notify-user
 const strip = (o) => JSON.parse(JSON.stringify(o, (k, v) => (k.startsWith('_') ? undefined : v)));
 const dataDir = path.join(wt, 'data');
 fs.mkdirSync(dataDir, { recursive: true });
@@ -163,16 +165,22 @@ try {
   check('after a RELOAD the collapsed group stays collapsed (the persisted fold outranks the default)', again && again.expanded === 'false' && again.cards === 0, again);
   check('…while its siblings keep their defaults', rail2 && rail2.groups.filter((g) => g.attn && g.key !== victim).every((g) => g.expanded === 'true'));
   check('a reload fetches the archive ZERO times until the row is clicked again', (await archiveFetches()) === 0);
-  // lane job-notify-user: a job's detail says whether it ALSO tells you in For you (one row, through t())
+  // lane job-notify-user: a job's detail says whether it ALSO tells you in For you, as what the flag DOES for its kind (r2:
+  // a service has no such row — nothing tells at its end), and beside it, for every kind, what always reaches you
   const forYouRow = async (id) => {
     const card = `document.querySelector('.rail-panel-jobs .jobs-card[data-job=' + ${JSON.stringify(JSON.stringify(id))} + ']')`;
     await p.evalJs(`${card}.click(); true`);
-    const txt = await until(() => p.evalJs(`${card}?.querySelector('.jobs-notify-user')?.textContent || null`), 10000, 200);
+    const aw = await until(() => p.evalJs(`${card}?.querySelector('.jobs-notify-always')?.textContent || null`), 10000, 200);
+    const fu = await p.evalJs(`${card}?.querySelector('.jobs-notify-user')?.textContent || null`);
     await p.evalJs(`${card}.click(); true`);
-    return txt;
+    return { fu, aw };
   };
-  const fyYes = await forYouRow(fx.ids.cron), fyNo = await forYouRow(fx.ids.service);
-  check('a job\'s detail says whether it also tells you in For you: the cron made with --notify-user «yes», the service «no»', fyYes === 'Also tells you in For you: yes' && fyNo === 'Also tells you in For you: no', { fyYes, fyNo });
+  const ALWAYS = 'Asks, missed times and parks always reach you in For you';
+  const fyCron = await forYouRow(fx.ids.cron), fyNote = await forYouRow(fx.ids.notifyCron), fyTask = await forYouRow(fx.ids.running), fySvc = await forYouRow(fx.ids.service);
+  check('a job\'s detail says what --notify-user DOES for its kind: the scheduled run made with it «when each run ends: yes», the notify-cron «when it fires: yes», a task without it «when it ends: no»',
+    fyCron.fu === 'Tells you in For you when each run ends: yes' && fyNote.fu === 'Tells you in For you when it fires: yes' && fyTask.fu === 'Tells you in For you when it ends: no', { fyCron, fyNote, fyTask });
+  check('…a service has NO such row (nothing tells at its end), even one stored with the flag', fySvc.fu === null, fySvc);
+  check('…and every kind says what always reaches you, whatever the flag', [fyCron, fyNote, fyTask, fySvc].every((r) => r.aw === ALWAYS), { fyCron, fyNote, fyTask, fySvc });
 
   // ── 375×667: the window fallback (no rail on mobile) ──
   await p.cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 2, mobile: true });

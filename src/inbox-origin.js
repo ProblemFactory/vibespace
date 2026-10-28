@@ -50,6 +50,13 @@
  */
 
 const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'vault', 'apps', 'plugin', 'agent', 'server']);
+// THE ORIGINS WHOSE WORDS AN AGENT CHOSE (lane job-notify-user r2): the store passes their text, detail and i18n params
+// through the agent-output belt before they land — `agent` (vibespace-ask: the agent's own item) and `jobs` (a job's
+// NAME and a notify cron's --text are the agent's; --notify-user made that the documented road to a person, and a
+// `token=…` in it reached the tray raw). Keyed on the origin, never on `by`: add()'s `by` defaults to 'agent', so every
+// producer that names none would be belted, exit-proxy's approval command (the detail a person reads above Allow) too.
+// A new origin is a decision: scripts/test-agent-output-sinks.mjs classifies every one (agent words or a system notice).
+const AGENT_WORDS_ORIGINS = Object.freeze(['agent', 'jobs']);
 
 // The group / chip words — English t() keys (the panel words them per device;
 // i18nKey is the extraction marker scripts/i18n-extract.mjs reads).
@@ -81,4 +88,4 @@ function normalizeOrigin(x) {
   return x;
 }
 
-module.exports = { INBOX_ORIGINS, ORIGIN_LABELS, normalizeOrigin };
+module.exports = { INBOX_ORIGINS, AGENT_WORDS_ORIGINS, ORIGIN_LABELS, normalizeOrigin };

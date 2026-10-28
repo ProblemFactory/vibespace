@@ -328,12 +328,30 @@ function notifyEffective(job, groupNotify, globalOn) {
 // lane job-notify-user: does this record's work ALSO copy the user's For you tray (`--notify-user`)? THE ONE READER — a
 // notify cron's fire, a task's end, a cron child (handed its parent's answer at every fire), the snapshot `show` and the
 // Jobs panel print. The CLI sends ONE top-level field for every shape; a scheduled run made by an older CLI (2.369.360
-// and before) carried it only inside its embedded spawn-task (action.task.notifyUser) — still read here, never written.
+// and before) carried it only inside its embedded spawn-task (action.task.notifyUser) — still read here; create stores
+// the top-level answer alone (storedAction drops the nested copy). The rules (scripts/test-job-model.mjs pins each):
+//   · either field true ⇒ true. The two disagree ONLY in a record an engine ≤ 2.369.360 stored — it wrote
+//     `notifyUser: false` at the top beside the user's nested true — so «top-level wins» would silence every such
+//     scheduled run; a top-level true beside a nested false (a hand-built body) is true too
+//   · a nested field on any action but spawn-task is nobody's (a notify action has no task) ⇒ false
+//   · a SERVICE ⇒ false: no engine path tells the user at a service's end (its park files For you whatever the flag)
 function notifyUserOf(rec) {
-  if (!rec || typeof rec !== 'object') return false;
+  if (!rec || typeof rec !== 'object' || rec.kind === 'service') return false;
   if (rec.notifyUser) return true;
-  const a = rec.action;
-  return !!(a && typeof a === 'object' && a.type === 'spawn-task' && a.task && typeof a.task === 'object' && a.task.notifyUser);
+  return !!spawnTaskOf(rec).notifyUser;
+}
+// the embedded task a cron's fire runs (action.type 'spawn-task'), or {} — the fields a cron PARENT keeps for its runs
+function spawnTaskOf(rec) {
+  const a = rec && typeof rec === 'object' ? rec.action : null;
+  return a && typeof a === 'object' && a.type === 'spawn-task' && a.task && typeof a.task === 'object' ? a.task : {};
+}
+// the action create STORES: the wire's compatibility copy of the For-you flag (action.task.notifyUser — what an engine ≤
+// 2.369.360 reads, building the child from `{...a.task}`) is dropped, so the store keeps ONE field (the top-level one)
+function storedAction(action) {
+  if (!action || typeof action !== 'object') return null;
+  if (action.type !== 'spawn-task' || !action.task || typeof action.task !== 'object' || !('notifyUser' in action.task)) return action;
+  const { notifyUser, ...task } = action.task;
+  return { ...action, task };
 }
 
 // The message text posted into the owner conversation's inbox socket. The
@@ -592,6 +610,6 @@ module.exports = {
   SUPERVISE, onServiceExit, resolveName,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
-  notifyEffective, notifyUserOf, renderOwnerNotify, renderNotifStash,
+  notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash,
   agentJobView,
 };

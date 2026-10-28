@@ -365,11 +365,18 @@ async function expandDetail(app, el, j, refresh) {
     d.appendChild(nr);
   }
   // lane job-notify-user: whether the job ALSO puts a copy in your For you tray (`--notify-user`) — the snapshot's
-  // one-reader answer (a cron's own setting; its run inherits it), said in words
+  // one-reader answer, said as what the flag DOES for this kind (r2: «yes» for a service was false — nothing tells at a
+  // service's end, so a service has no such row); beside it, for every kind, what reaches you whatever the flag
   {
-    const fu = document.createElement('div'); fu.className = 'jobs-meta jobs-notify-user';
-    fu.textContent = job.notifyUser ? t('Also tells you in For you: yes') : t('Also tells you in For you: no');
-    d.appendChild(fu);
+    const yes = !!job.notifyUser;
+    const when = job.kind === 'service' ? null
+      : job.kind === 'task' ? (yes ? t('Tells you in For you when it ends: yes') : t('Tells you in For you when it ends: no'))
+        : job.actionType === 'notify' ? (yes ? t('Tells you in For you when it fires: yes') : t('Tells you in For you when it fires: no'))
+          : (yes ? t('Tells you in For you when each run ends: yes') : t('Tells you in For you when each run ends: no'));
+    if (when) { const fu = document.createElement('div'); fu.className = 'jobs-meta jobs-notify-user'; fu.textContent = when; d.appendChild(fu); }
+    const aw = document.createElement('div'); aw.className = 'jobs-meta jobs-notify-always';
+    aw.textContent = t('Asks, missed times and parks always reach you in For you');
+    d.appendChild(aw);
   }
   // delivery journal (2.361.5, owner ask): every delivery ATTEMPT with lane +
   // outcome — the monitoring view for "did my reminder actually reach anyone".

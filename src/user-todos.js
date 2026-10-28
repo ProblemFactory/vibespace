@@ -27,7 +27,7 @@ const path = require('path');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const crypto = require('crypto');
 const { normalizeOptions, REPLY_MAX } = require('./inbox-reply.js'); // PURE: the option-chip rule the route, the CLI and the panel share (design-user-inbox-reply D3a)
-const { normalizeOrigin } = require('./inbox-origin.js'); // PURE: the closed set of PRODUCERS an item names (B-328d) — the Notices area groups by it; a filing that names none is REFUSED (r2)
+const { normalizeOrigin, AGENT_WORDS_ORIGINS } = require('./inbox-origin.js'); // PURE: the closed set of PRODUCERS an item names (B-328d) — the Notices area groups by it; a filing that names none is REFUSED (r2)
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a For-you item's text / detail never carries a credential in the clear
 const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — what a clear replaces; this store holds the door (clearItems)
 
@@ -56,6 +56,12 @@ function normalizeI18n(x) {
   }
   if (x.source != null) out.source = { key: line(x.source, 'source').key };
   return out;
+}
+
+/** lane job-notify-user r2: an agent's item's i18n STRING params through `mask` (the keys are the producer's English) */
+function maskI18nParams(x, mask) {
+  const line = (l) => (l && l.params ? { ...l, params: Object.fromEntries(Object.entries(l.params).map(([k, v]) => [k, typeof v === 'string' ? mask(v) : v])) } : l);
+  return { ...x, text: line(x.text), ...(x.detail ? { detail: x.detail.map(line) } : {}) };
 }
 
 /** lane decision-inbox-rank (the LLM plugin's INBOX v2): the board's FACTS of an item as the store keeps them —
@@ -452,7 +458,11 @@ class UserTodoManager {
 
   add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null } = {}) {
     const _dataDir = path.dirname(this._file);   // agent-output-sinks: the belt finds the vault from here
-    const rawText = typeof text === 'string' ? (origin === 'agent' ? belt.maskForSink(text.trim(), { dataDir: _dataDir }) : text.trim()) : '';   // agent-output-sinks: belt the AGENT's own ask (origin 'agent'), never a system producer's notice (vault / spend / channels / …)
+    // agent-output-sinks: belt an AGENT's own words — the origins in AGENT_WORDS_ORIGINS (lane job-notify-user r2: `jobs` too —
+    // a job's name, a notify cron's --text); never a system producer's notice (vault / spend / channels / machines / …)
+    const agentWords = AGENT_WORDS_ORIGINS.includes(origin);
+    const rawText = typeof text === 'string' ? (agentWords ? belt.maskForSink(text.trim(), { dataDir: _dataDir }) : text.trim()) : '';
+    if (agentWords && typeof sessionName === 'string' && sessionName) sessionName = belt.maskForSink(sessionName, { dataDir: _dataDir });   // the tray's group label: jobs-wiring files the job's NAME there
     text = rawText.slice(0, TEXT_MAX);
     const textCut = rawText.length > TEXT_MAX ? TEXT_MAX : 0; // the cap it hit, named on the return
     // EXPIRY (2.369.152): optional; only a future ms epoch counts (validExpiry)
@@ -465,6 +475,7 @@ class UserTodoManager {
     // name — so a zh/ja inbox does not read "Channels: Proposals awaiting
     // approval in …". Validated here; a malformed shape is refused by name.
     i18n = normalizeI18n(i18n);
+    if (agentWords && i18n) i18n = maskI18nParams(i18n, (s) => belt.maskForSink(s, { dataDir: _dataDir }));   // lane job-notify-user r2: a param can carry the agent's words (the dropped-notice's job names)
     action = normalizeAction(action); // a server producer's decision payload (reset credit, §5), or null
     card = normalizeCard(card); // a server producer's view of the item (design 009: an app install's one card), or null
     options = normalizeOptions(options); // option chips (vibespace-ask --options "A|B|C"): ≤6 distinct labels ≤40 chars, else THROWS by name — or null
@@ -493,13 +504,13 @@ class UserTodoManager {
       if (this._pluginGate && !this._pluginGate(plugin)) throw new Error(`plugin ${plugin} does not declare 'reminders' — it cannot file For-you items`);
     } else if (plugin != null) throw new Error("plugin: only a plugin's item names one (origin 'plugin')");
     open = normalizeOpen(open, origin === 'plugin' ? plugin : null);
-    if (urgency != null && !URGENCIES.includes(urgency)) throw new Error(`urgency must be one of ${URGENCIES.join('/')}`);
+    if (urgency != null && !URGENCIES.includes(urgency)) throw Object.assign(new Error(`urgency must be one of ${URGENCIES.join('/')}`), { code: 'urgency' });   // the code: a producer journals the refusal by name (lane job-notify-user r2)
     // KIND (2.369.118, owner: spend notices are DISTRACTING beside real asks):
     // 'action' = the user must do something (default, every older item);
     // 'notice' = for their information only — its own section in the popup,
     // never in the red badge. A PRODUCER declares it; nothing infers it.
     if (kind != null && !KINDS.includes(kind)) throw new Error(`kind must be one of ${KINDS.join('/')}`);
-    const rawDetail = typeof detail === 'string' ? (origin === 'agent' ? belt.maskForSink(detail.trim(), { dataDir: _dataDir }) : detail.trim()) : '';   // agent-output-sinks: AGENT asks only
+    const rawDetail = typeof detail === 'string' ? (agentWords ? belt.maskForSink(detail.trim(), { dataDir: _dataDir }) : detail.trim()) : '';   // agent-output-sinks: an agent's words only (AGENT_WORDS_ORIGINS)
     detail = rawDetail ? rawDetail.slice(0, DETAIL_MAX) : null;
     const detailCut = rawDetail.length > DETAIL_MAX ? DETAIL_MAX : 0;
     // the cut is named on the RETURNED record only (the ledger never carries it)
@@ -539,7 +550,7 @@ class UserTodoManager {
       // words are an edit (F2 below), and a server producer's periodic re-file is not an ask
       const reask = existing.status === 'open' && origin === 'agent' && (!detail || detail === existing.detail);
       if (existing.status !== 'open') {
-        if (openCount >= maxOpen) throw new Error(`this session already has ${openCount} open items — resolve some before adding more`);
+        if (openCount >= maxOpen) throw Object.assign(new Error(`this session already has ${openCount} open items — resolve some before adding more`), { code: 'full', open: openCount });
         existing.status = 'open'; existing.resolvedAt = null; existing.resolvedBy = null;
         existing.createdAt = this._now();
         // a re-file of a resolved item is a NEW filing: its own expiry or none
@@ -573,7 +584,7 @@ class UserTodoManager {
       if (changed) { this._save(); this._notify(); }
       return cut({ ...existing, existing: true });
     }
-    if (openCount >= maxOpen) throw new Error(`this session already has ${openCount} open items — resolve some before adding more`);
+    if (openCount >= maxOpen) throw Object.assign(new Error(`this session already has ${openCount} open items — resolve some before adding more`), { code: 'full', open: openCount });
     const item = {
       id: 'ut-' + crypto.randomBytes(5).toString('hex'),
       sessionKey, text, detail,

@@ -5036,24 +5036,33 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
   // lands, so a reader (the owner's tray, a peer, the disk) never sees a credential in the clear. Pinned: the belt forks
   // no scrubber, its callers are a CLOSED set (a new or dropped one is RED — classify the writer), and the detached job
   // wrapper carries the shape half. (WHICH module owns each store file is test-record-clear-census §A; this is the masking.)
-  console.log('§93 the agent-output sink belt (the five writers mask before text lands)');
+  console.log('§93 the agent-output sink belt (the six writers mask before text lands)');
   const belt93 = read('src/agent-output-belt.js');
   ok(/require\('\.\/secret-shapes\.js'\)/.test(belt93) && !/function\s+redactSecrets|function\s+maskText\b/.test(belt93),
     '§93 the belt chains the existing scrubbers (secret-shapes + the guarded vault-run require) and forks neither');
   ok(/require\('\.\/vault-run\.js'\)/.test(belt93), '§93 the belt reuses src/vault-run.js maskText (the P0-e seam — a guarded require)');
-  const EXPECTED93 = ['src/server/conversation-deliver.js', 'src/server/groups-engine.js', 'src/session-status.js', 'src/task-groups.js', 'src/user-todos.js'];
+  // lane job-notify-user r2: + src/jobs.js — a notify cron's fire belts the agent's --text before the owner message and the For-you copy
+  const EXPECTED93 = ['src/jobs.js', 'src/server/conversation-deliver.js', 'src/server/groups-engine.js', 'src/session-status.js', 'src/task-groups.js', 'src/user-todos.js'];
   const srcFiles93 = [];
   const walk93 = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) { if (e.name !== 'node_modules') walk93(rel); } else if (e.name.endsWith('.js')) srcFiles93.push(rel); } };
   walk93('src');
   const callers93 = srcFiles93.filter((f) => /\.maskForSink\s*\(/.test(read(f))).sort();
-  ok(JSON.stringify(callers93) === JSON.stringify(EXPECTED93), `§93 the belt's callers are EXACTLY the five sink writers${callers93.join() !== EXPECTED93.join() ? ` — got: ${callers93.join(', ') || '(none)'}` : ''}`);
+  ok(JSON.stringify(callers93) === JSON.stringify(EXPECTED93), `§93 the belt's callers are EXACTLY the six sink writers${callers93.join() !== EXPECTED93.join() ? ` — got: ${callers93.join(', ') || '(none)'}` : ''}`);
   for (const f of EXPECTED93) ok(/require\('[^']*agent-output-belt\.js'\)/.test(read(f)), `§93 ${f} requires the belt`);
   const jw93 = read('data/bin/job-wrapper.js');
   ok(/secret-shapes\.js/.test(jw93) && /child\.stdout\.on\('data', \(b\) => writeLog\(maskChunk\(b\)\)\)/.test(jw93),
     '§93 the detached job wrapper masks the child output through the shape census (shapes only — no engine in a wrapper process)');
+  // THE JOBS ROAD (lane job-notify-user r2): src/server/jobs-wiring.js files a job's For-you copy with origin 'jobs' — an
+  // AGENT-WORDS origin the store belts (src/inbox-origin.js AGENT_WORDS_ORIGINS); the store keys its belt on that set
+  const ut93 = read('src/user-todos.js'), io93 = read('src/inbox-origin.js'), jw93w = read('src/server/jobs-wiring.js');
+  const words93 = (src) => { const m = /const AGENT_WORDS_ORIGINS = Object\.freeze\(\[([^\]]*)\]\)/.exec(src); return m ? [...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]) : []; };
+  const jobsRoad93 = (io, ut) => words93(io).includes('jobs') && /const agentWords = AGENT_WORDS_ORIGINS\.includes\(origin\);/.test(ut) && /\(agentWords \? belt\.maskForSink\(text\.trim\(\)/.test(ut);
+  ok(/origin: 'jobs'/.test(jw93w) && jobsRoad93(io93, ut93), '§93 the jobs road: jobs-wiring files origin \'jobs\', an agent-words origin the store belts (text, detail, label, params)');
   const c93 = [
     ['a caller with its belt stripped', /\.maskForSink\s*\(/.test(read('src/user-todos.js').replace(/belt\.maskForSink\(([^,]+),[^)]*\)/g, '$1'))],
-    ['a sixth, unlisted caller', JSON.stringify([...callers93, 'src/ghost.js'].sort()) === JSON.stringify(EXPECTED93)],
+    ['a seventh, unlisted caller', JSON.stringify([...callers93, 'src/ghost.js'].sort()) === JSON.stringify(EXPECTED93)],
+    ['the jobs origin dropped from the agent-words set', jobsRoad93(io93.replace("Object.freeze(['agent', 'jobs'])", "Object.freeze(['agent'])"), ut93)],
+    ['the store belting origin \'agent\' only (514a962c)', jobsRoad93(io93, ut93.replace('const agentWords = AGENT_WORDS_ORIGINS.includes(origin);', "const agentWords = origin === 'agent';"))],
   ];
   ok(c93.every(([, v]) => v === false), `§93 CONTROLS: ${c93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
 }

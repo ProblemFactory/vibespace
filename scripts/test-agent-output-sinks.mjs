@@ -75,6 +75,7 @@ const spellingsOf = (v) => {
   ];
 };
 const readFile = (f) => { try { return fs.readFileSync(path.join(dataDir, f), 'utf8'); } catch { return ''; } };
+const readFileIn = (d, f) => { try { return fs.readFileSync(path.join(d, f), 'utf8'); } catch { return ''; } };
 
 // ---------------------------------------------------------------------------
 console.log('§1 the five writers pass a SHAPE sentinel through the belt before it lands');
@@ -223,6 +224,55 @@ console.log('§3 the JOB LOG — the real job-wrapper masks a fake child’s out
 }
 
 // ---------------------------------------------------------------------------
+// lane job-notify-user r2: THE JOBS ROAD TO A PERSON — --notify-user made it the documented way to reach the owner's tray,
+// and a notify cron's --text (`token=…`) landed there raw: src/server/jobs-wiring.js files with origin 'jobs', and the store
+// belted only origin 'agent'. Now `jobs` is an AGENT-WORDS origin (src/inbox-origin.js) and the fire belts its words for
+// the owner message too (src/jobs.js) — the real wiring over a real store, a job's NAME as well as its text
+console.log('§3b the JOBS ROAD — the real jobs wiring: a job\'s For-you copy and its owner message are belted');
+{
+  const JW = r('src/server/jobs-wiring.js');
+  const dj = scratch('aos-jobs-road');
+  fs.mkdirSync(dj, { recursive: true });
+  const tj = new UserTodoManager({ dataDir: dj, onChange: () => {} });
+  const told = [];
+  const w = JW.create({ app: { get() {}, post() {}, put() {}, delete() {}, patch() {}, use() {} }, dataDir: dj, broadcastAll() {}, userTodos: tj, log() {}, serverSetting: () => undefined, taskGroups: null, activeSessions: new Map(),
+    deliver: { peerReachable: () => true, deliverToConversation: async (cid, text) => { told.push(text); return { ok: true, lane: 'message' }; }, onRetry() {}, registerStashJudge() {} } });
+  const E = w.jm;
+  E.init(); for (const t of E._timers || []) clearInterval(t);
+  E._spawn = (job, trigger) => { job.runs = job.runs || []; job.runs.push({ startedAt: Date.now(), trigger }); job.state = 'up'; };
+  const owner = { conversation: { id: 'conv-road' }, sessionId: 'sess-road', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
+  const caller = { conversationId: 'conv-road', sessionId: 'sess-road', sessionCreatedAt: 1, groups: new Set() };
+  const nc = E.jobs.get(E.create({ kind: 'cron', name: 'road-nc', schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: 'deploy ' + MARKER + ' ' + SHAPE + ' ' + KV }, notifyUser: true, owner }, caller).job.id);
+  nc.nextFireAt = Date.now() - 1000;
+  await E._cronTick(); await new Promise((res) => setTimeout(res, 30));
+  const tk = E.jobs.get(E.create({ kind: 'task', name: 'road ' + SHAPE, cmd: { argv: ['true'] }, notifyUser: true, owner }, caller).job.id);
+  E._finalizeRun(tk, tk.runs[tk.runs.length - 1], { code: 0, endedAt: Date.now() }, 'sweep');
+  tj._flush();
+  const f = readFileIn(dj, 'user-todos.json');
+  ok(tj.snapshot().open.filter((i) => i.origin === 'jobs').length === 2 && !leaks(f, SHAPEMAT) && !leaks(f, KVMAT) && leaks(f, '«redacted»') && leaks(f, MARKER), 'user-todos.json: a job\'s two For-you copies (a notify cron\'s --text, a task\'s NAME) carry no raw secret, the marker survives');
+  ok(told.length >= 1 && told.every((t) => !leaks(t, SHAPEMAT) && !leaks(t, KVMAT)) && told.some((t) => leaks(t, '«redacted»')), 'the owner conversation\'s message of that fire carries the masked words too');
+  try { E.shutdown(); } catch { }
+}
+{
+  // THE ORIGIN CENSUS: every For-you origin is classified — the agent's words (belted) or a producer's own sentence; the
+  // belted ones ARE the store's set (a new origin is a decision, red by name until it is made)
+  const { INBOX_ORIGINS, AGENT_WORDS_ORIGINS } = r('src/inbox-origin.js');
+  const ORIGIN_CLASS = {
+    agent: 'agent words: vibespace-ask — the agent\'s own item',
+    jobs: 'agent words: a job\'s NAME and a notify cron\'s --text (src/server/jobs-wiring.js, lane job-notify-user r2)',
+    spend: 'producer: the spend engine\'s sentence (a cap, a total)', login: 'producer: a login-expiry notice', pool: 'producer: the account pool\'s notice',
+    channels: 'producer: a channel card drawn from the call\'s facts (vibespace-channels\' own lane and its redaction)', browser: 'producer: a browser login / profile notice',
+    machines: 'producer: exit-proxy\'s approval card — its detail is the command a person reads above Allow (exit-reach.js\'s law, not this belt)',
+    vault: 'producer: a vault notice (entry names, never a value)', apps: 'producer: the apps engine\'s proposal card', plugin: 'producer: a built-in plugin\'s own reminder', server: 'producer: the server\'s own notice',
+  };
+  const unclassified = (origins) => origins.filter((o) => !(o in ORIGIN_CLASS));
+  ok(unclassified([...INBOX_ORIGINS]).length === 0, `every For-you origin is classified (${INBOX_ORIGINS.length})${unclassified([...INBOX_ORIGINS]).length ? ' — unclassified: ' + unclassified([...INBOX_ORIGINS]).join(', ') : ''}`);
+  const words = Object.entries(ORIGIN_CLASS).filter(([, v]) => v.startsWith('agent words')).map(([k]) => k).sort();
+  ok(JSON.stringify(words) === JSON.stringify([...AGENT_WORDS_ORIGINS].sort()), `the store belts EXACTLY the agent-words origins (${words.join(', ')})`);
+  ok(unclassified([...INBOX_ORIGINS, 'ghost']).join() === 'ghost', 'CONTROL: one more origin the census does not know is RED by name');
+}
+
+// ---------------------------------------------------------------------------
 console.log('§4 MUTANT 1 — a writer with its belt stripped LEAKS the sentinel (the belt is load-bearing)');
 {
   const Module = require('module');
@@ -242,6 +292,17 @@ console.log('§4 MUTANT 1 — a writer with its belt stripped LEAKS the sentinel
   mut._flush();
   const fM = (() => { try { return fs.readFileSync(path.join(dirM, 'user-todos.json'), 'utf8'); } catch { return ''; } })();
   ok(leaks(fM, SHAPEMAT) || leaks(fM, KVMAT), 'MUTANT 1: the belt-stripped writer LEAKS the sentinel (so the real belt is what stops it)');
+  // MUTANT 4 (lane job-notify-user r2): 514a962c's rule — only origin 'agent' belted — LEAKS a job's For-you copy
+  const src4 = before.replace('const agentWords = AGENT_WORDS_ORIGINS.includes(origin);', "const agentWords = origin === 'agent';");
+  ok(src4 !== before, 'MUTANT 4 setup: the agent-words rule was found and narrowed to origin \'agent\' in a user-todos copy');
+  const m4 = new Module(abs); m4.filename = abs; m4.paths = Module._nodeModulePaths(path.dirname(abs));
+  m4._compile(src4, abs);
+  const dir4 = scratch('aos-mutant-jobs');
+  fs.mkdirSync(dir4, { recursive: true });
+  const mut4 = new m4.exports.UserTodoManager({ dataDir: dir4, onChange: () => {} });
+  mut4.add('claude:conv-m4', { origin: 'jobs', by: 'agent', text: 'Task road ' + SHAPE + ': done (ok)', detail: 'via ' + KV });
+  mut4._flush();
+  ok(leaks(readFileIn(dir4, 'user-todos.json'), SHAPEMAT), 'MUTANT 4: a store that belts only origin \'agent\' LEAKS a job\'s name into For you (so the agent-words set is what stops it)');
 }
 
 // ---------------------------------------------------------------------------
@@ -255,7 +316,7 @@ console.log('§5 THE BIN CENSUS — every agent CLI that can carry text to a sin
     'vibespace-ask': 'sink: user-todos For-you text/detail — belted (src/user-todos.js add)',
     'vibespace-status': 'sink: session-status notice reason/detail — belted (src/session-status.js _validate)',
     'vibespace-msg': 'sink: group log + msg-stash — belted (groups-engine appendIn, conversation-deliver stashFor)',
-    'vibespace-job': 'sink: job log — the job-wrapper masks the child output (data/bin/job-wrapper.js)',
+    'vibespace-job': 'sink: job log + For you + the owner message — the job-wrapper masks the child output (data/bin/job-wrapper.js); a fire belts its words (src/jobs.js), a job\'s For-you copy is an agent-words origin (src/user-todos.js add)',
     'vibespace-channels': 'no agent-authored sink: a send is a PROPOSAL the owner edits; raw-api output has its own redaction',
     'vibespace-feedback': 'no store a reader shares: feedback goes to the maintainers’ own store (feedback-store)',
     'vibespace-page': 'no agent-text sink in this lane: a published page is the owner’s surface',

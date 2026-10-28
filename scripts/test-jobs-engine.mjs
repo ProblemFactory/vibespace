@@ -199,10 +199,11 @@ try {
     });
     const [bYes, bNo] = await Promise.all([cliBody(['run', 'true', '--name', 'cli-at-user', '--at', '+1h', '--notify-user']), cliBody(['run', 'true', '--name', 'cli-at-plain', '--at', '+1h'])]);
     rec.close();
-    ok(bYes && bYes.notifyUser === true && bYes.action && bYes.action.type === 'spawn-task' && !('notifyUser' in bYes.action.task) && bNo && bNo.notifyUser === false,
-      'the CLI\'s scheduled-run body: ONE top-level notifyUser (true with --notify-user, false without), none inside the task', JSON.stringify([bYes, bNo]));
+    ok(bYes && bYes.notifyUser === true && bYes.action && bYes.action.type === 'spawn-task' && bYes.action.task.notifyUser === true && bNo && bNo.notifyUser === false && bNo.action.task.notifyUser === false,
+      'the CLI\'s scheduled-run body: the top-level notifyUser (true with --notify-user, false without) + the same in the task — the compatibility copy for an engine ≤ 2.369.360 (r2)', JSON.stringify([bYes, bNo]));
     const legacy = bYes && { ...bYes, name: 'cli-at-legacy', notifyUser: undefined, action: { ...bYes.action, task: { ...bYes.action.task, notifyUser: true } } };
     const made = [bYes, bNo, legacy].filter(Boolean).map((b) => C.jobs.get(C.create({ ...b, owner }, caller).job.id));
+    ok(made.length === 3 && made.every((j) => j.action && j.action.task && !('notifyUser' in j.action.task)) && made.map((j) => j.notifyUser).join() === 'true,false,true', 'the STORE keeps one field: each cron record holds notifyUser at the top (the older body\'s nested flag read once), its task none', JSON.stringify(made.map((j) => [j.notifyUser, j.action && j.action.task && j.action.task.notifyUser])));
     for (const j of made) j.nextFireAt = Date.now() - 1000;
     const before = notifications.length;
     await C._cronTick();

@@ -40,13 +40,20 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         if (ownerCid && activeSessions) for (const s of activeSessions.values()) {
           if ((s.claudeSessionId || s.backendSessionId) === ownerCid) { sessName = s.name || null; break; }
         }
-        userTodos.add(sessKey, {
+        // origin 'jobs' is an AGENT-WORDS origin (src/inbox-origin.js): the store belts the job's name and its text
+        const it = userTodos.add(sessKey, {
           origin: 'jobs', // B-328d
           text, urgency: urgency || 'normal', by: 'agent', jobId,
           detail: (jobId ? `Background job ${jobId}` : '') + (ownerCid && jobName ? ` · via ${jobName}` : ''),
           sessionName: ownerCid ? (sessName ? `${sessName} · ${jobName || 'job'}` : (jobName || 'background job')) : (jobName || 'background job'),
         });
-      } catch (e) { log('[jobs] notify failed:', e.message); }
+        return { ok: true, id: (it && it.id) || null };
+      } catch (e) {
+        // THE STORE'S VERDICT, RETURNED (lane job-notify-user r2): the engine journals it — the Delivery log said
+        // «user-inbox ✓» for a copy the store refused (an urgency outside its set, a conversation at its open cap)
+        log('[jobs] notify failed:', e.message);
+        return { ok: false, why: e && e.code === 'full' ? `For you is full (${e.open} open)` : String((e && e.message) || 'refused').slice(0, 200) };
+      }
     },
     // B-dfb4: notifications to a conversation fell off the 30-entry stash cap — ONE For-you notice (≤ 1 per conversation
     // per hour, decided by the engine), filed under the owner conversation like notifyUser's asks, worded per device

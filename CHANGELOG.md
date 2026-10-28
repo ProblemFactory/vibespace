@@ -6,7 +6,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - A background reminder made with --notify-user now really puts a copy in your For you when it fires; before, the option was lost and only the agent was woken.
-- vibespace-job show and a job's details in Background Work now say whether the job also tells you in For you.
+- Reminders made with --notify-user before this update did not keep the option: recreate them (vibespace-job show prints notifyUser=false for those).
+- A job's details and vibespace-job show now say when the job tells you in For you; questions, missed times and parked services always reach you.
+- A secret in a job's message to you is hidden before it reaches For you, and a copy For you refused now shows as not delivered instead of ✓.
 
 ## 2.369.360 — 2026-10-27
 

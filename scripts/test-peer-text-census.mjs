@@ -1054,6 +1054,11 @@ const PRINTS = {
     'j.lastNotify': 'judged:agentJobView — its `to` is the ladder\'s peerName, the owner\'s session name (verify r6 F2)', 'j.lastNotify.lane': `${V}:a lane name`, 'j.lastNotify.ok': `${V}:a flag`,
     'j.logTail': 'judged:agentJobView — the log tail of a process ANOTHER agent started (verify r5 F1); the owner lineage\'s own raw (log)', 'j.mine': `${V}:a flag`, 'j.mySubscription': `${O}:the caller's own subscription`, 'j.mySubscription.filter': `${O}:its own filter`,
     'j.name': 'judged:agentJobView — a job record visible to this session (owner lineage raw; another lineage\'s through the belt)', 'j.nextFireAt': `${V}:an instant`, 'j.notify': `${V}:the notify setting`, 'j.notifyOk': `${V}:a flag`, 'j.notifyUser': `${V}:a flag (lane job-notify-user: the For-you copy, show's params line)`,
+    // lane job-notify-user r2: forYouLine(j) — the journal's newest For-you entry; its `reason` is the For you store's refusal
+    // (src/server/jobs-wiring.js: the store's own sentence or «For you is full (N open)»), through agentJobView's notif()
+    // belt for another lineage like every journal reason; the create echo's `isNotify` is the verb the caller typed
+    'j.notifyLog': 'judged:agentJobView — the delivery journal (each entry\'s `to` / `reason` through notif(), verify r6 F2)', 'e.lane': `${V}:a lane name`,
+    'fy.ok': `${V}:a flag`, 'fy.reason': 'judged:agentJobView — the For you store\'s refusal sentence (a journal reason, notif())', 'isNotify': `${O}:the verb the caller typed (notify-cron)`,
     'j.progress': 'judged:agentJobView — written by the job\'s process OR ANY VIEWER (the act needs view only), judged for everyone', 'j.restart': `${V}:the restart policy`, 'j.run.cause': `${V}:the run's cause`, 'j.run.exit': `${V}:an exit code`, 'j.run.startedAt': `${V}:an instant`, 'j.runsCount': `${V}:a count`,
     'j.schedule': 'lineage:the creator\'s own schedule', 'j.singleInstance': `${V}:a flag`, 'j.state': `${V}:the job state`, 'j.stopWithOwner': `${V}:a flag`, 'j.subscribersCount': `${V}:a count`, 'j.timeoutMs': `${V}:a number`, 'j.untilOutput': 'judged:agentJobView — another lineage\'s marker',
     // lane job-publish-stable: the published service's public URL line (pubLine(j) — the job snapshot handed over; it prints only the rows below)
