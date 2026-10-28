@@ -3019,7 +3019,8 @@ console.log('§63 every agent channel route that touches a conversation records 
     const hs = handlers(src);
     const bad = hs.filter((h) => !EXEMPT[h.route] && !/\btouchChannel\(/.test(h.body)).map((h) => `${h.route} never calls touchChannel`);
     for (const r of Object.keys(EXEMPT)) if (!hs.some((h) => h.route === r)) bad.push(`exemption '${r}' matches no handler (a dead exemption)`);
-    if (!/const touchChannel = \(id, touches\) => \{[^\n]*\.recordMany\(id, touches\)/.test(src)) bad.push('touchChannel is not the witness\'s recordMany');
+    // lane touch-chip-cause: …and it names its cause — every touch these verbs record is the AGENT's own act
+    if (!/const touchChannel = \(id, touches\) => \{[^\n]*\.recordMany\(id, touches, \{ cause: 'agent' \}\)/.test(src)) bad.push('touchChannel is not the witness\'s recordMany with cause \'agent\'');
     return { n: hs.length, bad };
   };
   const ar = read('src/agent-routes.js');

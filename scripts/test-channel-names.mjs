@@ -220,7 +220,7 @@ ok(real.receipt && !real.receipt.stashed && /^Bob: receipt — sent/.test(real.r
 {
   const sessions = new Map([['w1', { sockName: null, _channelTouches: [] }]]);
   const T = Touches.create({ sessions: () => sessions, broadcast: () => {}, metaStore: () => null, accountOf: () => ({ label: 'Lark', kind: 'lark' }), nameOf: (a, c) => (c === 'oc_dm' ? 'Bob' : null), persistDelayMs: 1e6, broadcastMs: 1e6 });
-  const got = T.recordMany('w1', [{ op: 'read', adapterId: 'lark-1', convId: 'oc_dm', title: 'oc_dm', count: 3 }, { op: 'read', adapterId: 'lark-1', convId: 'oc_x', title: 'oc_x', count: 1 }]);
+  const got = T.recordMany('w1', [{ op: 'read', adapterId: 'lark-1', convId: 'oc_dm', title: 'oc_dm', count: 3 }, { op: 'read', adapterId: 'lark-1', convId: 'oc_x', title: 'oc_x', count: 1 }], { cause: 'agent' });
   ok(got[0] && got[0].title === 'Bob' && got[1] && got[1].title === 'oc_x', 'the touches store names a touch by the ladder over the agent answer\'s raw id (③ only when the engine knows nothing)', JSON.stringify(got.map((x) => x && x.title)));
   try { T.flush && T.flush(); } catch {}
 }
@@ -249,7 +249,7 @@ const swap = (src, from, to) => { if (!src.includes(from)) throw new Error('cont
   const TP = MUT.load('src/server/channel-touches.js', pre, 'touch-pre');
   const sessions = new Map([['w1', { sockName: null, _channelTouches: [] }]]);
   const T = TP.create({ sessions: () => sessions, broadcast: () => {}, metaStore: () => null, accountOf: () => null, nameOf: () => 'Bob', persistDelayMs: 1e6, broadcastMs: 1e6 });
-  ok(T.recordMany('w1', [{ op: 'read', adapterId: 'lark-1', convId: 'oc_dm', title: 'oc_dm', count: 1 }])[0].title === 'oc_dm', 'CONTROL the pre-fix touches store keeps the agent answer\'s raw id as the row\'s name');
+  ok(T.recordMany('w1', [{ op: 'read', adapterId: 'lark-1', convId: 'oc_dm', title: 'oc_dm', count: 1 }], { cause: 'agent' })[0].title === 'oc_dm', 'CONTROL the pre-fix touches store keeps the agent answer\'s raw id as the row\'s name');
 }
 {
   const view = NS.noticeCardView(null, NS.vibespaceNoticeText(wb), { facts: () => null });

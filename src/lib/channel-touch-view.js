@@ -22,6 +22,15 @@
 //     `observe(el)` is called from ChatView `_applyElementMarks` — the ONE hook
 //     every element-making path passes (create / swap / gap) — so a rebuilt
 //     history, a paged-in slab and a live card all get their rows.
+//     lane touch-chip-cause (the owner 2026-10-28, 「这个展开方式对吗？」): a row
+//     hangs on the act that CAUSED it — a call is a candidate only when it could
+//     have run the channels CLI (PURE callCauses); a touch no rendered call could
+//     have caused hangs on the turn's VibeSpace NOTE row («VibeSpace gave the
+//     assistant its task context»), which draws the SAME keyed box. In a closed
+//     run's one-line strip a chip never goes below its READABLE MINIMUM (glyph +
+//     account + 12 characters of the title, measured): what does not fit folds
+//     into "+N more", and "+N more" expands into ROWS — one ResizeObserver per
+//     view re-fits a strip when its width changes.
 //  ② THE CHIP: this turn's touches (at or after the turn's start — the
 //     server's, or the newest live user message) → the status bar's keyed
 //     `channels` chip ("Channels · <latest title>"), gone when a new turn
@@ -61,6 +70,20 @@ export function openTouchRow(app, row) {
   else if (v.open !== 'outbox') app.openChannel(v.adapterId, v.convId);
   else if (typeof app.openChannelOutbox === 'function') app.openChannelOutbox();   // a composed message has no conversation until it is sent
 }
+
+/** lane touch-chip-cause: what a card's call IS for the cause rule (PURE T.CALL_KINDS): a `command` (a shell call), a
+ *  helper (an Agent / Task call — a prompt; its own calls run under this session's token), anything else. */
+function callKind(cardEl) {
+  const m = cardEl && cardEl._rawMsg;
+  const b = m && m.content && m.content[0];
+  const input = b && b.input;
+  if (!input || typeof input !== 'object') return 'other';
+  if (toolCommandText(input)) return 'command';
+  return typeof input.prompt === 'string' ? 'helper' : 'other';
+}
+/** A VibeSpace note row's key (its message id — never a tool id). */
+const noteKey = (n) => (n && n.dataset && n.dataset.msgId ? `note:${n.dataset.msgId}` : '');
+const isNote = (n) => !!(n && n.classList && n.classList.contains('chat-vs-note'));
 
 /** What a card's call RAN (its command, or an agent call's prompt) — the evidence `bindToCall` prefers. */
 function callText(cardEl) {
@@ -108,20 +131,29 @@ export function createChannelTouchView(view) {
         const v = Number(n.dataset.ts);
         if (v > start) { end = v; break; }
       }
-      return { id: c.dataset.toolId, start, end, text: callText(c), el: c };
+      return { id: c.dataset.toolId, start, end, text: callText(c), kind: callKind(c), el: c };
     });
+  }
+  /** lane touch-chip-cause: the VibeSpace note rows (where a touch no call caused hangs) and the user messages (each
+   *  starts a turn — a note of an earlier turn never takes a later turn's touch). */
+  function notesOf(list) {
+    return [...list.querySelectorAll('.chat-msg.chat-vs-note')].map((n) => ({ id: noteKey(n), at: Number(n.dataset.ts) || 0, el: n })).filter((n) => n.id && n.at > 0);
+  }
+  function turnsOf(list) {
+    return [...list.querySelectorAll('.chat-msg.chat-msg-user')].map((u) => Number(u.dataset.ts) || 0).filter((v) => v > 0);
   }
   function rebind() {
     if (st.disposed) return;
     const list = view._messageList;
     if (list && st.touches.length) {
-      const calls = callsOf(list);
+      const calls = callsOf(list), notes = notesOf(list);
       const tail = !view._teleported && !(view._windowEnd < view._total);
-      const { byCall } = T.bindToCall(st.touches, calls, { tail });
-      st.lastByCall = byCall;
+      const { byCall, byNote } = T.bindToCall(st.touches, calls, { tail, notes, turns: turnsOf(list) });
+      const bound = { ...byCall, ...byNote };
+      st.lastByCall = bound;
       let flipped = false;
-      for (const c of calls) {
-        const mine = byCall[c.id];
+      for (const c of [...calls, ...notes]) {
+        const mine = bound[c.id];
         const had = c.el.classList.contains('chat-channel-touched');
         if (mine && mine.length) renderBox(c.el, mine);
         else clearBox(c.el);
@@ -130,6 +162,7 @@ export function createChannelTouchView(view) {
       // a card that gained / lost rows leaves / joins the fold (ChatView's run pass keeps a touched card inline —
       // the image-member rule); the pass only watches the list's children, so it is asked here
       if (flipped && typeof view._updateRuns === 'function') view._updateRuns();
+      sweepBoxes();
     }
     updateChip();
   }
@@ -154,10 +187,10 @@ export function createChannelTouchView(view) {
     const box = boxOf(cardEl, true);
     box.hidden = false;
     cardEl.classList.add('chat-channel-touched');   // stays visible inside a folded run (ChatView _updateRuns)
-    box.setAttribute('aria-label', t('Channel conversations this call read or drafted'));
+    box.setAttribute('aria-label', isNote(cardEl) ? t('Channel conversations of this turn that no call shown here ran') : t('Channel conversations this call read or drafted'));
     const rows = T.foldTouches(touches);
     const expanded = box.dataset.expanded === '1';
-    const { shown, hidden } = T.foldView(rows, { expanded });
+    const { shown } = T.foldView(rows, { expanded });
     const have = new Map([...box.querySelectorAll(':scope > .chat-channel-touch')].map((e) => [e.dataset.key, e]));
     let i = 0;
     for (const r of shown) {
@@ -189,33 +222,132 @@ export function createChannelTouchView(view) {
       i++;
     }
     for (const gone of have.values()) gone.remove();
-    // the fold: "+N more" / "Show less", one keyed control after the rows
-    let more = box.querySelector(':scope > .chat-channel-touches-more');
-    if (rows.length > T.FOLD_SHOWN) {
-      if (!more) {
-        more = document.createElement('button');
-        more.type = 'button';
-        more.className = 'chat-channel-touches-more chat-status-dim';
-        more.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          // .212: the tail of ONE search's rows is that search, unscoped (every conversation, grouped) — not more rows
-          const tv = box.dataset.expanded === '1' ? { open: 'expand' } : T.tailVerdict(more._rows || []);
-          if (tv.open === 'search-all' && typeof view.app?.openChannelSearch === 'function') { view.app.openChannelSearch({ adapterIds: tv.adapterIds, q: tv.query, group: true, memo: tv.memo || null, searchedAt: tv.searchedAt || 0 }); return; }
-          box.dataset.expanded = box.dataset.expanded === '1' ? '0' : '1'; rebind();
-        });
-      }
-      more._rows = rows;
-      const text = expanded ? t('Show less') : t('+{n} more', { n: hidden });
-      if (more.textContent !== text) more.textContent = text;
-      const moreTip = !expanded && T.tailVerdict(rows).open === 'search-all' ? t('Show every conversation this search found') : '';
-      if (more.title !== moreTip) more.title = moreTip;
-      if (box.lastElementChild !== more) box.appendChild(more);
-    } else if (more) more.remove();
+    // the fold: "+N more" / "Show less", one keyed control after the rows — its count is the fit's (fitStrip)
+    box._rows = rows;
+    fitStrip(box);
+    watchBox(box);
     chatApiCards(view.app, cardEl, rows.filter((r) => r.ops && r.ops.api && r.proposalId).map((r) => r.proposalId));
     // lane chat-proposal-card: the proposals THIS call filed — the card after the rows, a chip on its row; a decision
     // moves the run fold's count («· 1 条提案待批准»), so the ChatView re-words its heads
     chatProposalCards(view.app, cardEl, T.filedProposals(touches), { onCount: () => { if (typeof view._updateRuns === 'function') view._updateRuns(); } });
   }
+  /** The box's ONE "+N more" / "Show less" control (created on demand, keyed by its class; its click reads the box). */
+  function moreOf(box, create) {
+    let more = box.querySelector(':scope > .chat-channel-touches-more');
+    if (!more && create) {
+      more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'chat-channel-touches-more chat-status-dim';
+      more.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        // .212: the tail of ONE search's rows is that search, unscoped (every conversation, grouped) — not more rows
+        const tv = box.dataset.expanded === '1' ? { open: 'expand' } : T.tailVerdict(more._rows || [], { max: more._shown ?? T.FOLD_SHOWN });
+        if (tv.open === 'search-all' && typeof view.app?.openChannelSearch === 'function') { view.app.openChannelSearch({ adapterIds: tv.adapterIds, q: tv.query, group: true, memo: tv.memo || null, searchedAt: tv.searchedAt || 0 }); return; }
+        box.dataset.expanded = box.dataset.expanded === '1' ? '0' : '1'; rebind();
+      });
+    }
+    return more;
+  }
+  /** Say the fold: `shown` chips are on screen, the rest are "+N more" (or "Show less" while expanded). A box with no
+   *  hidden row and no expansion has no control at all (three rows need no fold). */
+  function setMore(box, rows, shown) {
+    const expanded = box.dataset.expanded === '1';
+    const hidden = Math.max(0, rows.length - shown);
+    const more = moreOf(box, expanded || hidden > 0);
+    if (!more) return;
+    if (!expanded && !hidden) { more.remove(); return; }
+    more._rows = rows;
+    more._shown = shown;
+    const text = expanded ? t('Show less') : t('+{n} more', { n: hidden });
+    if (more.textContent !== text) more.textContent = text;
+    const moreTip = !expanded && T.tailVerdict(rows, { max: shown }).open === 'search-all' ? t('Show every conversation this search found') : '';
+    if (more.title !== moreTip) more.title = moreTip;
+    if (box.lastElementChild !== more) box.appendChild(more);
+  }
+  /** A chip's READABLE MINIMUM (px): from its left edge to the end of the name's readable prefix (T.readableCut — the
+   *  account whole + 12 code points of the title, + the «…» a longer name is cut with), laid out by `ruler` in the
+   *  name's own font, + the gap before its words, its right padding and border. 0 when it cannot be measured (the CSS
+   *  floor stands). */
+  function readableMin(chip, ruler) {
+    const name = chip.querySelector('.cct-name');
+    const row = chip._row;
+    if (!name || !row || !ruler) return 0;
+    const text = name.textContent || '';
+    const cut = Math.min(text.length, T.readableCut(row));
+    const cs = getComputedStyle(chip), ns = getComputedStyle(name);
+    for (const p of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing']) ruler.style[p] = ns[p];
+    ruler.textContent = text.slice(0, cut) + (cut < text.length ? '…' : '');
+    const w = ruler.getBoundingClientRect().width;
+    const left = name.getBoundingClientRect().left - chip.getBoundingClientRect().left;
+    const words = chip.querySelector('.cct-words');
+    const gap = words && getComputedStyle(words).display !== 'none' ? parseFloat(cs.columnGap) || 0 : 0;
+    return Math.ceil(left + w + gap + (parseFloat(cs.paddingRight) || 0) + (parseFloat(cs.borderRightWidth) || 0) + 1);
+  }
+  /**
+   * A STRIP NEVER SQUEEZES A CHIP UNREADABLE (lane touch-chip-cause — the owner's screenshot: «+14 more» pressed, ten
+   * chips squeezed to «Lar…» / «Gm…» on one line). While the card is COMPACT (a closed run's one line) and the box is
+   * not expanded, every chip's min-width is its measured readable minimum; the chips that fit the box beside the fold
+   * stay, the rest join "+N more" (always at least one chip — the box drops under its head, the card's flex-wrap, when
+   * one readable chip and the fold do not fit beside it). Expanded, or not compact, the rows are ROWS (CSS) and every
+   * inline width this pass set is cleared. Re-run on every render and on every width change (the view's ONE observer).
+   */
+  function fitStrip(box) {
+    const chips = [...box.querySelectorAll(':scope > .chat-channel-touch')];
+    const rows = box._rows || [];
+    const card = box.closest('.chat-msg');
+    const strip = !!card && card.classList.contains('chat-channel-compact') && box.dataset.expanded !== '1';
+    if (!strip) {
+      for (const c of chips) { if (c.hidden) c.hidden = false; if (c.style.minWidth) c.style.minWidth = ''; }
+      if (box.style.minWidth) box.style.minWidth = '';
+      setMore(box, rows, chips.length);
+      return;
+    }
+    if (!box.getClientRects().length) { setMore(box, rows, chips.length); return; }   // not laid out: the observer fits it when it is
+    for (const c of chips) if (c.hidden) c.hidden = false;
+    // ONE ruler for this fit: a hidden span laid out like the name (the browser's own shaping — CJK, a fallback font), gone after
+    const ruler = document.createElement('span');
+    ruler.style.cssText = 'position:fixed;left:-9999px;top:0;visibility:hidden;white-space:pre;pointer-events:none';
+    document.body.appendChild(ruler);
+    const mins = chips.map((c) => readableMin(c, ruler));
+    ruler.remove();
+    chips.forEach((c, i) => { const v = mins[i] ? `${mins[i]}px` : ''; if (c.style.minWidth !== v) c.style.minWidth = v; });
+    const gap = parseFloat(getComputedStyle(box).columnGap) || 0;
+    // the fold's widest words: one chip shown, the rest behind it
+    let moreW = 0;
+    if (rows.length > 1) {
+      const more = moreOf(box, true);
+      const keep = more.textContent;
+      more.textContent = t('+{n} more', { n: rows.length - 1 });
+      if (box.lastElementChild !== more) box.appendChild(more);
+      moreW = Math.ceil(more.getBoundingClientRect().width);
+      more.textContent = keep;
+    }
+    const lineW = (box.parentElement && box.parentElement.clientWidth) || 0;
+    const floor = Math.ceil((mins[0] || 0) + (rows.length > 1 ? gap + moreW : 0));
+    const bm = floor > 0 ? `${lineW ? Math.min(floor, lineW) : floor}px` : '';
+    if (box.style.minWidth !== bm) box.style.minWidth = bm;
+    const avail = box.clientWidth;
+    let k = 0, used = 0;
+    for (; k < chips.length; k++) {
+      const w = used + (k ? gap : 0) + (mins[k] || 0);
+      if (k > 0 && w + (rows.length > k + 1 ? gap + moreW : 0) > avail) break;
+      used = w;
+    }
+    chips.forEach((c, i) => { const h = i >= k; if (c.hidden !== h) c.hidden = h; });
+    setMore(box, rows, k);
+  }
+  // ONE ResizeObserver per view (the listener-lifecycle law: never a per-render listener): a strip re-fits when its box
+  // changes width — a resize, its run closing / opening, the box dropping under its head. Fitted in the next frame
+  // (never inside the observer's own delivery); a box no longer in the document is let go at the next rebind.
+  const watched = new Set(), fitDue = new Set();
+  let fitFrame = 0;
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver((entries) => {
+    if (st.disposed) return;
+    for (const e of entries) fitDue.add(e.target);
+    if (!fitFrame) fitFrame = requestAnimationFrame(() => { fitFrame = 0; const due = [...fitDue]; fitDue.clear(); if (!st.disposed) for (const b of due) if (b.isConnected) fitStrip(b); });
+  }) : null;
+  function watchBox(box) { if (ro && !watched.has(box)) { watched.add(box); ro.observe(box); } }
+  function sweepBoxes() { if (ro) for (const b of [...watched]) if (!b.isConnected) { ro.unobserve(b); watched.delete(b); fitDue.delete(b); } }
   function turnAt() { return Math.max(st.turnAtServer, st.turnAtLocal); }
   function updateChip() {
     const v = T.chipView(st.touches, turnAt());
@@ -230,7 +362,7 @@ export function createChannelTouchView(view) {
     ensureLoaded();
     // a card RE-MADE for a message whose rows were already bound (a tool completion's swap, a page-in) gets them
     // at once — before the fold pass's frame, so it never folds and un-folds; the debounced rebind confirms
-    const id = root.dataset && root.dataset.toolId;
+    const id = root.dataset && (root.dataset.toolId || (isNote(root) ? noteKey(root) : ''));
     const had = id ? st.lastByCall[id] : null;
     if (had && had.length) renderBox(root, had);
     if (st.touches.length) schedule();
@@ -260,6 +392,9 @@ export function createChannelTouchView(view) {
     st.disposed = true;
     if (st.timer) clearTimeout(st.timer);
     if (st.refetch) clearTimeout(st.refetch);
+    if (ro) ro.disconnect();
+    if (fitFrame) cancelAnimationFrame(fitFrame);
+    watched.clear(); fitDue.clear();
   }
   return { observe, onTouch, onAttached, noteTurn, dispose, rebind, state: () => ({ touches: st.touches.length, loaded: st.loaded, turnAt: turnAt(), chip: st.chipKey }) };
 }

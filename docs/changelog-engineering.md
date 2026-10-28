@@ -4,6 +4,13 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.361 — 2026-10-28
+
+### touch-chip-cause — a conversation entry hangs on the act that caused it; a strip never squeezes a chip unreadable (BUILD on 90c995a3 = 2.369.360; the owner 2026-10-28: 「这个展开方式对吗？」)
+- **The cause, measured:** no hub delivery records a touch — the witness's only writer is agent-routes `touchChannel` (every `/api/agent/channels/*` verb). The 17 rows on the owner's `vibespace-status` card were the agent's own CLI acts bound to a call that could not have made them (`bindToCall`'s «latest running call» fallback). The coordinator ruled: no new delivery writer; `delivery` declared and DEFERRED.
+- **Built:** `cause` on every record (the witness refuses a writer naming none; the census in test-channel-touch ⑧); `callCauses` (a shell call without the CLI is never the cause; a helper may be); the turn's VibeSpace note row takes what no call in view caused (and every `delivery`); a chained command's compact head opens at its `vibespace-channels` segment; the strip's measured readable minimum + «+N more» fitted to the width (one ResizeObserver per view) + the expansion into rows.
+- **Gates:** test-channel-touch ⑧ (tables, the owner's shape, H1/H2/H3, the writer census, seven patched copies) · heavy test-fold-ux (1280 + 390, real presses, shots, a patched-view RED control; on 90c995a3 the new legs read 12 red) · test-architecture §63 pins `recordMany(id, touches, { cause: 'agent' })`.
+
 ## 2.369.360 — 2026-10-27
 
 ### ci358-reds (items 7 + 8 and round 2 — c083607d → 5bdb59fb; the .358 mirror's two fast-tier races)

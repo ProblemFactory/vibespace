@@ -2,6 +2,13 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.361 — 2026-10-28
+
+### Fixed
+- Conversation links in a chat now sit on the command that read them; links no shown command made sit on that turn's VibeSpace line, never on an unrelated step.
+- A folded command that updates the status and then searches the channels now shows its search part.
+- With many conversation links a folded line shows only those that fit legibly plus «+N more», which lists them one per row instead of squeezing them.
+
 ## 2.369.360 — 2026-10-27
 
 ### Added

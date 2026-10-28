@@ -1654,9 +1654,27 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-msg.chat-channel-compact .chat-channel-touch { width: auto; flex: 0 1 auto; min-width: 4em; max-width: 22em; padding-top: 1px; padding-bottom: 1px; }
 .chat-msg.chat-channel-compact .chat-channel-touch .cct-time { display: none; }
 /* a chip short of room gives up its words before the conversation's name (the name is what the jump is to) */
-.chat-msg.chat-channel-compact .chat-channel-touch .cct-name { flex: 0 1 auto; min-width: 2.5em; }
+.chat-msg.chat-channel-compact .chat-channel-touch .cct-name { flex: 0 0 auto; min-width: 0; max-width: calc(100% - 24px); } /* lane touch-chip-cause: the name never shrinks while the words can (a fractional shrink drew «…» over its last glyph); it is cut only to the chip's width — the glyph + the two 6px gaps — never below the readable minimum the fit gives the chip */
 .chat-msg.chat-channel-compact .chat-channel-touch .cct-words { flex: 0 1000 auto; min-width: 0; }
 .chat-msg.chat-channel-compact .chat-channel-touches-more { flex: none; white-space: nowrap; }
+/* lane touch-chip-cause: the turn's VibeSpace NOTE row («VibeSpace gave the assistant its task context») carries the
+   conversations no call shown here caused — the same box; closed run ⇒ the same one line: its sentence, then the chips
+   (before the expanded rule below: an expanded box is rows on a note row too) */
+.chat-msg.chat-vs-note.chat-channel-compact { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 4px 8px; text-align: left; }
+.chat-msg.chat-vs-note.chat-channel-compact > .chat-hook-details { flex: 0 1 auto; min-width: 5em; max-width: 38%; }
+.chat-msg.chat-vs-note.chat-channel-compact > .chat-hook-details > .chat-hook-summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-msg.chat-vs-note.chat-channel-compact > .chat-hook-details[open] { flex-basis: 100%; max-width: 100%; }
+.chat-msg.chat-vs-note.chat-channel-compact > .chat-channel-touches { flex: 1 1 0; min-width: 0; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 4px; margin: 0; overflow: hidden; }
+/* lane touch-chip-cause (the owner 2026-10-28, 「这个展开方式对吗？」 — «+14 more» pressed, ten chips squeezed to «Lar…»):
+   the strip's chips get their MEASURED readable minimum inline (channel-touch-view fitStrip — what does not fit folds
+   into «+N more»), and «+N more» expands into ROWS: the box leaves the head's line, one full row per conversation with
+   its words and its time, never more chips */
+.chat-msg.chat-channel-compact .chat-channel-touches[data-expanded="1"] { flex: 1 1 100%; flex-direction: column; flex-wrap: nowrap; align-items: stretch; overflow: visible; }
+.chat-msg.chat-channel-compact .chat-channel-touches[data-expanded="1"] > .chat-channel-touch { flex: none; width: 100%; min-width: 0; max-width: none; }
+.chat-msg.chat-channel-compact .chat-channel-touches[data-expanded="1"] > .chat-channel-touch .cct-name { flex: 0 1 auto; max-width: none; }
+.chat-msg.chat-channel-compact .chat-channel-touches[data-expanded="1"] > .chat-channel-touch .cct-words { flex: 1 1 auto; }
+.chat-msg.chat-channel-compact .chat-channel-touches[data-expanded="1"] > .chat-channel-touch .cct-time { display: inline; }
+.chat-msg.chat-channel-compact .chat-channel-touches[data-expanded="1"] > .chat-channel-touches-more { align-self: flex-start; }
 .chat-msg.chat-channel-compact .chat-tool-use > .chat-api-cards, .chat-msg.chat-channel-compact .chat-tool-use > .chat-chan-props { flex: 1 1 100%; }
 .chat-msg.chat-channel-compact .chat-tool-use > .chat-chan-props[hidden] { display: none; }
 .chat-msg.chat-channel-compact .chat-channel-touch.has-prop { max-width: 100%; flex-wrap: wrap; }

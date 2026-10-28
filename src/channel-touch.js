@@ -30,6 +30,15 @@
  *    start. Nothing contains it ⇒ the view's LATEST card when the view shows
  *    the conversation's tail (the spec's "the session's latest tool card"),
  *    else unbound (its card is not rendered here; it binds when it is).
+ *    lane touch-chip-cause (the owner 2026-10-28, 「这个展开方式对吗？」 — 17 conversation rows hung on a
+ *    `vibespace-status` call): A CONVERSATION ENTRY HANGS ON THE ACT THAT CAUSED IT. Every record carries its
+ *    `cause` (CAUSES: `agent` — the agent's own channel verb, the only writer there is; `delivery` — the hub handing
+ *    a conversation's words to the agent, declared and DEFERRED: no writer records one). A call is a candidate only
+ *    when it COULD have caused the touch (`callCauses`): its command names it, or it is a shell call that runs
+ *    `vibespace-channels`, or a helper (an Agent / Task call — its own calls run the CLI with this session's token);
+ *    a shell call that never runs the CLI (`vibespace-status …`) is never the cause. A touch no rendered call could
+ *    have caused hangs on the turn's VibeSpace NOTE row (`notes` — «VibeSpace gave the assistant its task context»),
+ *    never silently on a neighbour; a `delivery` touch always does.
  *  - `foldTouches` / `foldView`: one ROW per conversation — the ops counted
  *    (read = messages read, search = hits, reply / compose / refresh /
  *    request / status = calls), replied or composed first, then by the last
@@ -65,6 +74,17 @@ const SKEW_MS = 1500;
 const BATCH_MS = 1500;
 /** Rows shown before "+N more". */
 const FOLD_SHOWN = 3;
+/** lane touch-chip-cause: WHO CAUSED A TOUCH — the closed set the witness stamps at every writer (src/server/
+ *  channel-touches.js refuses a writer without one). `agent` = the agent's own read / search / reply / compose (every
+ *  /api/agent/channels/* verb); `delivery` = the hub handed the conversation's words to the agent as context — declared,
+ *  no writer yet (test-channel-touch's census names it DEFERRED), bound to the turn's VibeSpace note row, never a call. */
+const CAUSES = Object.freeze(['agent', 'delivery']);
+/** What a rendered call IS, for the cause rule: a `command` (a shell call — its command text is known), a `helper` (an Agent /
+ *  Task call: its own calls run under this session's token), anything `other` (a Read, an Edit, an MCP call). */
+const CALL_KINDS = Object.freeze(['command', 'helper', 'other']);
+/** lane touch-chip-cause: a chip in a one-line strip keeps the account and at least this many code points of its title
+ *  (the owner's screenshot: ten chips squeezed to «Lar…» / «Gm…»). */
+const READABLE_TITLE_CHARS = 12;
 /** One search records at most this many conversations (by hits) — a search is one card, not a ring flush. */
 const SEARCH_MAX_CONVS = 20;
 /** A search touch keeps at most this many hit refs per conversation ({msgId, at} — never the words), the newest. */
@@ -134,6 +154,8 @@ function normalizeTouch(x) {
     ...(op === 'reply' && TOUCH_PLACEMENTS.includes(x.placement) ? { placement: x.placement } : {}),
     // lane channel-search-view (.212): a search remembers WHAT was searched — the query + bounded hit refs
     ...(op === 'search' && x.query ? { query: str(x.query, QUERY_MAX), hits: hitRefs(x.hits), ...(memoOk(x.memo) ? { memo: x.memo } : {}) } : {}),
+    // lane touch-chip-cause: who caused it (a value outside the closed set is dropped — the record reads as an old one)
+    ...(CAUSES.includes(x.cause) ? { cause: x.cause } : {}),
     at,
   };
 }
@@ -186,17 +208,32 @@ function namesTouch(text, t) {
   return false;
 }
 
+/** lane touch-chip-cause: the cause a record carries. A record with none was written before the cause existed — and
+ *  every writer then was an agent verb (agent-routes touchChannel), so it is the agent's. */
+function causeOf(t) { return t && CAUSES.includes(t.cause) ? t.cause : 'agent'; }
+/** COULD THIS CALL HAVE CAUSED THIS TOUCH? Its command / prompt names it; or a shell call that runs the channels CLI;
+ *  or a helper. A shell call without the CLI, or another tool, never did. A call with no `kind` (a caller that knows
+ *  only the instants) is judged by the time rules alone, as before the cause rule. */
+function callCauses(c, t) {
+  if (!c) return false;
+  if (namesTouch(c.text, t)) return true;
+  if (c.kind === 'command') return commandTouchesChannels(c.text);
+  if (c.kind === 'helper') return true;
+  return c.kind === undefined || c.kind === null;
+}
+
 /**
  * WHICH CARD EACH TOUCH BELONGS TO.
  * @param touches [{…touch}]
- * @param calls   [{id, start, end: number|null, text}] — the view's tool cards in conversation order; `end` = the
- *                next non-tool message's instant (null: nothing after it yet)
- * @param opts    {tail: the view shows the conversation's newest message, skewMs, batchMs}
- * @returns {{byCall: Object<string, touch[]>, unbound: touch[]}}
+ * @param calls   [{id, start, end: number|null, text, kind}] — the view's tool cards in conversation order; `end` = the
+ *                next non-tool message's instant (null: nothing after it yet); `kind` ∈ CALL_KINDS (callCauses)
+ * @param opts    {tail: the view shows the conversation's newest message, notes: [{id, at}] the view's VibeSpace note
+ *                rows, turns: [instant] the view's user messages (a turn's start), skewMs, batchMs}
+ * @returns {{byCall: Object<string, touch[]>, byNote: Object<string, touch[]>, unbound: touch[]}}
  */
-function bindToCall(touches, calls, { tail = false, skewMs = SKEW_MS, batchMs = BATCH_MS } = {}) {
+function bindToCall(touches, calls, { tail = false, notes = [], turns = [], skewMs = SKEW_MS, batchMs = BATCH_MS } = {}) {
   const cs = (Array.isArray(calls) ? calls : [])
-    .map((c, i) => ({ id: String(c.id), start: num(c.start), end: c.end === null || c.end === undefined ? null : num(c.end), text: c.text || '', i }))
+    .map((c, i) => ({ id: String(c.id), start: num(c.start), end: c.end === null || c.end === undefined ? null : num(c.end), text: c.text || '', kind: CALL_KINDS.includes(c.kind) ? c.kind : undefined, i }))
     .filter((c) => c.id && c.start > 0)
     .sort((a, b) => a.start - b.start || a.i - b.i);
   // the instant each call stops RUNNING: the next call outside its batch, or its own end, whichever is first
@@ -207,24 +244,39 @@ function bindToCall(touches, calls, { tail = false, skewMs = SKEW_MS, batchMs = 
     }
     cs[i].stop = stop;
   }
+  // lane touch-chip-cause: THE TURN'S NOTE ROW — the newest VibeSpace note at (or a skew after) the touch, unless a
+  // user message started another turn between that note and the touch
+  const ns = (Array.isArray(notes) ? notes : []).map((n) => ({ id: String(n && n.id), at: num(n && n.at) })).filter((n) => n.id && n.at > 0).sort((a, b) => a.at - b.at);
+  const us = (Array.isArray(turns) ? turns : []).map(num).filter((v) => v > 0);
+  const noteFor = (at) => {
+    let best = null;
+    for (const n of ns) { if (n.at <= at + skewMs) best = n; else break; }
+    return best && !us.some((u) => u > best.at + skewMs && u <= at) ? best : null;
+  };
   const byCall = {};
+  const byNote = {};
   const unbound = [];
   for (const t of Array.isArray(touches) ? touches : []) {
     if (!t) continue;
     const at = num(t.at);
-    const running = cs.filter((c) => c.start - skewMs <= at && (c.stop === null || at < c.stop + skewMs));
     let pick = null;
-    if (running.length) {
-      const named = running.filter((c) => namesTouch(c.text, t));
-      const pool = named.length ? named : running;
-      pick = pool[pool.length - 1];
-    } else if (tail && cs.length && at >= cs[cs.length - 1].start - skewMs) {
-      pick = cs[cs.length - 1];
+    if (causeOf(t) === 'agent') {
+      const running = cs.filter((c) => c.start - skewMs <= at && (c.stop === null || at < c.stop + skewMs));
+      const able = running.filter((c) => callCauses(c, t));
+      if (able.length) {
+        const named = able.filter((c) => namesTouch(c.text, t));
+        const pool = named.length ? named : able;
+        pick = pool[pool.length - 1];
+      } else if (!running.length && tail && cs.length && at >= cs[cs.length - 1].start - skewMs && callCauses(cs[cs.length - 1], t)) {
+        pick = cs[cs.length - 1];
+      }
     }
-    if (!pick) { unbound.push(t); continue; }
-    (byCall[pick.id] || (byCall[pick.id] = [])).push(t);
+    if (pick) { (byCall[pick.id] || (byCall[pick.id] = [])).push(t); continue; }
+    const note = noteFor(at);
+    if (note) (byNote[note.id] || (byNote[note.id] = [])).push(t);
+    else unbound.push(t);
   }
-  return { byCall, unbound };
+  return { byCall, byNote, unbound };
 }
 
 /** One ROW per conversation: ops counted, replied / composed first, then by the last touch (newest first). */
@@ -348,6 +400,17 @@ function rowName(row) {
   return row && row.account ? `${row.account} › ${title}` : title;
 }
 
+/** lane touch-chip-cause: THE READABLE MINIMUM of a row drawn as a chip — how many UTF-16 units of `rowName(row)` a
+ *  one-line strip may never cut: the account and its ` › ` whole, then the first `chars` code points of the title (the
+ *  whole name when it is shorter, or when there is no title). The view measures that prefix's width. */
+function readableCut(row, chars = READABLE_TITLE_CHARS) {
+  const name = rowName(row);
+  const title = (row && (row.title || row.convId)) || '';
+  if (!title) return name.length;
+  const head = row && row.account ? name.length - title.length : 0;
+  return Math.min(name.length, head + [...title].slice(0, Math.max(0, chars)).join('').length);
+}
+
 /** The library glyphs a row may wear — the adapter's DECLARED `caps.glyph` (lane dc-channels-blocks, C7). */
 const GLYPHS = Object.freeze(['chat', 'mail', 'robot']);
 /** Which library glyph a row wears: the row's `icon` (its adapter's declared caps.glyph, stamped by the witness);
@@ -422,6 +485,7 @@ function searchTouches(results, { max = SEARCH_MAX_CONVS, query = '', memo = nul
 
 module.exports = {
   OPS, DRAFT_OPS, FILED_OPS, RING_MAX, MERGE_MS, SKEW_MS, BATCH_MS, FOLD_SHOWN, SEARCH_MAX_CONVS, SEARCH_HITS_MAX, QUERY_MAX, TITLE_MAX, LABEL_MAX, TOUCH_PLACEMENTS,
+  CAUSES, CALL_KINDS, READABLE_TITLE_CHARS, causeOf, callCauses, readableCut,
   touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, bindToCall, foldTouches, filedProposals, foldView, rowWords, replyWords, rowName,
   GLYPHS, glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, tailVerdict,
 };

@@ -7,9 +7,13 @@
  * the agent never has to say where it was: nothing is injected, no tool is
  * added, the agent's manual gains one sentence.
  *
- * `record(webuiId, touch)` / `recordMany(webuiId, touches)` — called by those
- * routes AFTER an answer the agent was allowed to see (a hidden conversation is
- * the uniform not-found and leaves no touch: no oracle) — keeps a per-session
+ * `record(webuiId, touch, {cause})` / `recordMany(webuiId, touches, {cause})` —
+ * called by those routes AFTER an answer the agent was allowed to see (a hidden
+ * conversation is the uniform not-found and leaves no touch: no oracle). Every
+ * writer names its CAUSE (lane touch-chip-cause — PURE T.CAUSES: `agent` for
+ * those routes; `delivery` declared, no writer yet) and the record carries it, so
+ * the chat hangs the row on the act that caused it; a writer naming none (or one
+ * outside the set) records nothing and says so in the log. It keeps a per-session
  * RING (PURE src/channel-touch.js appendTouch: the newest RING_MAX, a repeat
  * inside MERGE_MS folds) on `session._channelTouches`, persists it in the
  * session meta (`channelTouches`, debounced, flushed at shutdown; boot-restore
@@ -70,9 +74,11 @@ function create({ sessions = () => null, broadcast = () => {}, metaStore = () =>
     timers.set(id, tm);
   }
 
-  /** Record what one agent call touched. Returns the touches as stored (merged ones under their kept id). */
-  function recordMany(webuiId, inputs) {
+  /** Record what one agent call touched. Returns the touches as stored (merged ones under their kept id). `cause` is
+   *  the writer's (T.CAUSES) — required: a touch that cannot say what caused it would hang on a neighbour's row. */
+  function recordMany(webuiId, inputs, { cause } = {}) {
     const id = String(webuiId || '');
+    if (!T.CAUSES.includes(cause)) { log.warn(`[channel-touches] ${id}: a writer named no cause (${JSON.stringify(cause === undefined ? null : cause)}) — nothing recorded`); return []; }
     const s = sessionOf(id);
     if (!s || !Array.isArray(inputs) || !inputs.length) return [];
     const ring = Array.isArray(s._channelTouches) ? s._channelTouches : (s._channelTouches = []);
@@ -88,7 +94,7 @@ function create({ sessions = () => null, broadcast = () => {}, metaStore = () =>
       let named = null;
       try { named = x.convId ? nameOf(x.adapterId, x.convId) || null : null; } catch { named = null; }
       const t = T.normalizeTouch({
-        ...x, id: mint(), at,
+        ...x, id: mint(), at, cause,
         title: inert(named || x.title, T.TITLE_MAX),
         account: inert(x.account || (acc && acc.label) || '', T.LABEL_MAX),
         kind: x.kind || (acc && acc.kind) || null,
@@ -119,7 +125,7 @@ function create({ sessions = () => null, broadcast = () => {}, metaStore = () =>
     try { broadcast({ type: 'channel-touch', sessionId: id, touches: touches.map((x) => ({ ...x })), turnAt: turnAtOf(s) }); }
     catch (e) { log.warn(`[channel-touches] broadcast failed: ${(e && e.message) || e}`); }
   }
-  const record = (webuiId, touch) => recordMany(webuiId, [touch]);
+  const record = (webuiId, touch, opts) => recordMany(webuiId, [touch], opts);
   /** A row restored from before the declared glyph (lane dc-channels-blocks) wears its adapter's caps.glyph at read. */
   function withIcon(x) {
     if (!x || x.icon) return { ...x };

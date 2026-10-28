@@ -5449,6 +5449,7 @@ export default {
   "Access asked by {name} · {ago}": "{name} が{ago}にアクセスを申請",
   "Read by {name} · {ago}": "{name} が{ago}に既読",
   "Channel conversations this call read or drafted": "この呼び出しで読んだ・下書きしたチャンネルの会話",
+  "Channel conversations of this turn that no call shown here ran": "このターンで触れたが、ここに表示されたどの呼び出しにもよらないチャンネルの会話", // lane touch-chip-cause: the note row's box
   "Open this conversation": "この会話を開く",
   "Not sent yet — open the Outbox": "まだ送信されていません — 送信箱を開く",
   "Show less": "折りたたむ",

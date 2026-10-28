@@ -25,6 +25,14 @@
 //     says 「· 4 条带会话入口」; open ⇒ whole; closed again ⇒ the SAME row elements, a REAL click on one still jumps;
 //     a run of ONLY touched cards gets no header (whole); RED CONTROL: the pre-lane rule on a patched bundle
 //     (pairing-ui-harness buildPatchedBundle) ⇒ closed height == open height.
+//   lane touch-chip-cause (the owner, 2026-10-28: 「这个展开方式对吗？」 — a closed run 「VibeSpace 把任务背景交给了助手 ·
+//     4 条 Bash · 3 条带会话入口」 whose `vibespace-status` row held 17 conversations, and «另有 14 个» pressed ⇒ ten chips
+//     squeezed to «Lar…» / «Gm…»): a row hangs on the act that caused it — the 17 touched while vibespace-status ran
+//     hang on the turn's VibeSpace note row, a chained command's head opens at its vibespace-channels segment, a parallel
+//     batch's unnamed reads are the CLI loop's; at 1280 and at 390 every visible chip keeps its readable minimum (the
+//     account + 12 characters of the title, measured by an independent probe), the rest fold into «另有 N 个», and a
+//     REAL press expands into ROWS (one per conversation, stacked, full width, with a time); RED CONTROL: a patched
+//     view without the cause / the fit ⇒ the 17 on vibespace-status, the chips below their readable minimum.
 // Run: node scripts/test-fold-ux.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -107,6 +115,11 @@ check('files/errors/running composition', S.runSummaryLabel({ byKind: S.countKin
     S.commandHeadWords('\n  vibespace-channels   search "季度"\t--all\nsecond line') === 'vibespace-channels search "季度" --all'
     && [...S.commandHeadWords('词'.repeat(300))].length === S.HEAD_WORDS_MAX && S.commandHeadWords('词'.repeat(300)).endsWith('…')
     && S.commandHeadWords('ls -la') === 'ls -la' && S.commandHeadWords('') === '' && S.commandHeadWords(undefined) === '' && S.commandHeadWords('\n \n') === '');
+  check('lane touch-chip-cause: a CHAINED command opens at its vibespace-channels segment after "… " (its rows are what that segment touched — the head that read `vibespace-status working…` named an act that touched nothing); a path to the CLI belongs to the segment; a lone CLI call and a word that merely contains the name keep their words',
+    S.commandHeadWords('vibespace-status working --reason "pairing review" && vibespace-channels search "pairing review" --full') === '… vibespace-channels search "pairing review" --full'
+    && S.commandHeadWords('vibespace-status working\nvibespace-channels read lark/oc_1') === '… vibespace-channels read lark/oc_1'
+    && S.commandHeadWords('/opt/x/bin/vibespace-channels read a/b') === '/opt/x/bin/vibespace-channels read a/b' && S.commandHeadWords('vibespace-status x && /opt/x/bin/vibespace-channels read a/b') === '… /opt/x/bin/vibespace-channels read a/b'
+    && S.commandHeadWords('echo vibespace-channelsX') === 'echo vibespace-channelsX' && S.commandHeadWords('  vibespace-channels list') === 'vibespace-channels list');
 }
 check('mcpParts splits mcp__server__tool and rejects the rest', JSON.stringify(S.mcpParts('mcp__a__b_c')) === '{"server":"a","tool":"b_c"}' && S.mcpParts('Bash') === null && S.mcpParts('') === null);
 check('the pure module imports nothing but PURE rules (DOM-free by construction; B-40f8: src/assistant-note.js; lane exit-calls-in-history: src/exit-call.js)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/(?:assistant-note|exit-call)\.js';/.test(l)));
@@ -243,6 +256,7 @@ const SID = 'f01d0000-0000-4000-8000-00000000ffee';
 const IMG_SID = 'f01d0000-0000-4000-8000-00000000f11e';
 const CH_SID = 'f01d0000-0000-4000-8000-00000000c0c7'; // lane run-fold-channel-compact: the owner's run of channel searches
 const CH_PLAIN = 2; // the plain (failed) card of that run — the one card without conversation rows
+const TC_SID = 'f01d0000-0000-4000-8000-00000000cc17'; // lane touch-chip-cause: the owner's turn + the chained command + the parallel batch
 const IMG_PATH = `${CWD}/shot.png`;
 // a real 8×8 opaque PNG — the thumbnail must actually decode (naturalWidth > 0)
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGMwnnkGK2IYWhIAtNFmAVCW3mYAAAAASUVORK5CYII=';
@@ -340,6 +354,39 @@ const NBASH = 28, NTAIL = 8, NMCP = 2;
   for (const k of [5, 6]) bash(k, `vibespace-channels search "季度汇报 ${k}" --adapter lark`, `1 conversation\n${HITS}`);
   say('Both checked.');
   fs.writeFileSync(path.join(proj, `${CH_SID}.jsonl`), cl.join('\n') + '\n');
+
+  // ── lane touch-chip-cause: THE OWNER'S TURN — VibeSpace's task-context note, then 4 Bash (vibespace-status, a read of
+  // one Lark chat, two more); then H1 (a CHAINED `vibespace-status … && vibespace-channels search …`); then H2 (a
+  // PARALLEL batch: a read loop beside vibespace-status, 40 ms apart). Every name and id is invented.
+  const tl = [];
+  let tts0 = Date.now() - 900e3, tq = 0;
+  const tts = (d = 5e3) => new Date((tts0 += d)).toISOString();
+  const tpush = (o) => tl.push(JSON.stringify(o));
+  const tuse = (k, command, d) => tpush({ type: 'assistant', message: { id: `tmsg_${k}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'tool_use', id: `toolu_t${k}`, name: 'Bash', input: { command, description: 'x' } }], usage: {} }, uuid: `ttu-${tq++}`, timestamp: tts(d) });
+  const tres = (k, out, d) => tpush({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu_t${k}`, is_error: false, content: out }] }, uuid: `ttr-${tq++}`, timestamp: tts(d) });
+  const tsay = (text) => tpush({ type: 'assistant', message: { id: `tmsg_s${tq}`, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text }], usage: { input_tokens: 1, output_tokens: 1 } }, uuid: `tts-${tq++}`, timestamp: tts() });
+  const tuser = (text) => tpush({ type: 'user', message: { role: 'user', content: text }, uuid: `tum-${tq++}`, timestamp: tts() });
+  const tnote = (text) => tpush({ type: 'attachment', attachment: { type: 'hook_additional_context', content: [text] }, uuid: `ttn-${tq++}`, timestamp: tts(800) });
+  const tbash = (k, cmd, out) => { tuse(k, cmd); tres(k, out, 3e3); };
+  tuser('follow up on the pairing review thread');
+  tnote('<vibespace-task-context>\n# Fixture group\n- Task ID: T-fixture\n</vibespace-task-context>');
+  tbash(0, 'vibespace-status working --reason "pairing review follow-up"', 'status: working');
+  tbash(1, 'vibespace-channels read lark/oc_f1x7ure0 --limit 60', '60 messages');
+  tbash(2, 'vibespace-task progress "pairing review: read the thread"', 'logged');
+  tbash(3, 'git status --short', '');
+  tsay('Read the thread.');
+  tuser('search for it');
+  tnote('<vibespace-reminder>update your status</vibespace-reminder>');
+  tbash(4, 'vibespace-status working --reason "pairing review" && vibespace-channels search "pairing review" --full', '17 conversations');
+  tbash(5, 'git log -1 --oneline', 'abc1234 fixture');
+  tsay('Found it.');
+  tuser('read the queue');
+  tnote('<vibespace-reminder>update your status</vibespace-reminder>');
+  tuse(6, 'for c in $(cat queue.txt); do vibespace-channels read "$c" --limit 20; done'); tuse(7, 'vibespace-status working --reason "reading the queue"', 40);
+  tres(6, '3 conversations read', 4e3); tres(7, 'status: working', 40);
+  tbash(8, 'ls', 'queue.txt');
+  tsay('Queue read.');
+  fs.writeFileSync(path.join(proj, `${TC_SID}.jsonl`), tl.join('\n') + '\n');
 }
 // ── F5 fixture (2026-09-26): workflow RUN DIRS in the real files' KEY shapes (values synthetic) under
 // the view's own session — the owner's shape: 5 phases (1/7/1/1/1), 11 started, 10 results, no
@@ -1078,10 +1125,10 @@ await chShot(cdp, evaljs, 'channel-run-closed.png');
 const cardsOf = (st, ks) => ks.map((k) => st?.cards?.[k]).filter(Boolean);
 check(`CLOSED (the default): ONE header over the owner's run, and it says what stays — 「${chC?.label}」 names 「4 条带会话入口」 beside 「5 条 Bash · 1 ✗」`,
   chC?.header && !chC.open && chC.label === '5 条 Bash · 1 ✗ · 4 条带会话入口', JSON.stringify({ label: chC?.label, header: chC?.header, open: chC?.open }));
-check('CLOSED: the 4 touched cards are COMPACT and on screen — the head drawn with the first words of the command, every row visible and inside its card, the input/output bodies hidden',
+check('CLOSED: the 4 touched cards are COMPACT and on screen — the head drawn with the first words of the command, every row visible and inside its card (lane touch-chip-cause: or folded into "+N more" by the readable-minimum fit), the input/output bodies hidden',
   cardsOf(chC, TOUCHED).length === 4 && cardsOf(chC, TOUCHED).every((c) => c.compact && !c.collapsed && c.display !== 'none' && c.headVis && /^vibespace-channels search "季度汇报 \d" --adapter lark/.test(c.cmd)
-    && c.rows > 0 && c.rowsVis === c.rows && c.rowsClipped === 0 && c.bodies === 2 && c.bodiesVis === 0),
-  JSON.stringify(cardsOf(chC, TOUCHED)));
+    && c.rows > 0 && c.rowsVis >= 1 && (c.rowsVis === c.rows || c.more) && c.rowsClipped === 0 && c.bodies === 2 && c.bodiesVis === 0),
+  JSON.stringify(cardsOf(chC, TOUCHED).map((c) => ({ k: c.k, compact: c.compact, collapsed: c.collapsed, head: c.headVis, rows: c.rows, vis: c.rowsVis, clip: c.rowsClipped, more: c.more, bodies: `${c.bodiesVis}/${c.bodies}`, cmd: c.cmd.slice(0, 24) }))));
 check('CLOSED: each compact card is ONE line (its rows ride the head\'s line; the card with four conversations keeps its "+1 more"), never wider than its card',
   cardsOf(chC, TOUCHED).every((c) => c.oneLine && c.overflowX <= 1) && chC.cards[3].rows === 3 && chC.cards[3].more, JSON.stringify(cardsOf(chC, TOUCHED).map((c) => ({ k: c.k, oneLine: c.oneLine, ox: c.overflowX, rows: c.rows, more: c.more }))));
 check('CLOSED: the plain card (no conversation rows) is folded away (display:none)', chC?.cards?.[CH_PLAIN]?.collapsed && chC.cards[CH_PLAIN].display === 'none', JSON.stringify(chC?.cards?.[CH_PLAIN]));
@@ -1098,7 +1145,7 @@ console.log(`    the owner's run (5 Bash · 4 touched): ${chC?.runH} px closed v
 const chC2 = await evaljs(`(async () => { const st = await window.__ch.toggle(); const now = [...window.__ch.list.querySelectorAll(':scope > .chat-msg .chat-channel-touch')];
   return { ...st, same: now.length === window.__chRows.length && now.every((e, i) => e === window.__chRows[i]) }; })()`);
 check('CLOSED AGAIN: compact again with the SAME row elements (CSS only — nothing re-rendered, the rows keep their listeners)',
-  !chC2?.open && chC2.same && cardsOf(chC2, TOUCHED).every((c) => c.compact && c.rowsVis === c.rows) && TOUCHED.every((k) => Math.abs(chC2.cards[k].h - chC.cards[k].h) <= 1), JSON.stringify({ same: chC2?.same, open: chC2?.open }));
+  !chC2?.open && chC2.same && cardsOf(chC2, TOUCHED).every((c) => c.compact && c.rowsVis === chC.cards[c.k].rowsVis) && TOUCHED.every((k) => Math.abs(chC2.cards[k].h - chC.cards[k].h) <= 1), JSON.stringify({ same: chC2?.same, open: chC2?.open }));
 // THE JUMP from a compact row: a REAL press at the row's centre (what is under the pointer is that row) reaches the
 // row's own door — a read row opens the conversation, a search row the search; the run stays closed
 const jumpAt = async (k) => {
@@ -1176,6 +1223,196 @@ check('a REAL press on a compact row still jumps — the read row opens its conv
   try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/activate/${target.id}`); } catch {}
   await sleep(300);
 }
+// ── lane touch-chip-cause (the owner, 2026-10-28 11:4x PT, 「这个展开方式对吗？」 — two screenshots of one chat: the
+// closed run 「▸ VibeSpace 把任务背景交给了助手 · 4 条 Bash · 3 条带会话入口」 with a `vibespace-status working --reason …`
+// row holding three chips + «另有 14 个», and after «另有 14 个» ten chips squeezed to «Lar…» / «Gm…» on one line).
+// The witness's touches arrive through the view's OWN door (onTouch) at instants inside the calls, like real ones.
+const TC_KIT = `(() => {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const vis = (el) => !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
+  const findCv = () => [...window.app.sessions.values()].find((s) => s && s._messageList && s._messageList.querySelector(':scope > .chat-msg[data-tool-id="toolu_t0"]'));
+  const GM = ['Re: Client onboarding checklist', 'RE: Fixture renewal terms (external)', 'Quarterly numbers for the board pack', 'Invoice 4471 overdue reminder', 'Fwd: Pairing schedule for next week',
+    'Re: Support escalation for the dock', 'Shipping window moved to Thursday', 'Re: Re: Contract redlines round two', 'Welcome aboard — first-week plan', 'Fixture survey results are in', 'Re: Office move logistics', 'Training slots open for review'];
+  const LK = ['Ops desk', '季度汇报群 · 数字核对', 'Pairing room (night shift)', 'Release train coordination', '客户支持升级处理'];
+  window.__tc = {
+    async open({ maximize } = {}) {
+      let cv = findCv();
+      if (!cv) window.app.viewSession(${JSON.stringify(TC_SID)}, ${JSON.stringify(CWD)}, 'touch cause');
+      for (let i = 0; i < 80 && !(cv = findCv()); i++) await sleep(250);
+      if (!cv) return { err: 'no touch-cause ChatView' };
+      this.cv = cv; this.list = cv._messageList;
+      for (let i = 0; i < 40 && !(this.card(0) && this.card(8) && this.note(2)); i++) await sleep(150);
+      if (maximize) { const w = [...window.app.wm.windows.values()].find((x) => x.element && x.element.contains(this.list)); if (w && !w.isMaximized) window.app.wm.toggleMaximize(w.id); }
+      await sleep(600);
+      const at = (k, d) => Number(this.card(k).dataset.ts) + d;
+      const touches = [];
+      // the OWNER's shape: 17 conversations (5 Lark, 12 Gmail) touched while vibespace-status ran — no call in view ran the CLI then
+      for (let i = 0; i < 17; i++) { const lark = i % 4 === 0 && i < 20 && touches.filter((x) => x.adapterId === 'lark').length < 5;
+        touches.push({ id: 'tc-o' + i, op: 'read', adapterId: lark ? 'lark' : 'gmail', convId: 'fx-o' + i, title: lark ? LK[touches.filter((x) => x.adapterId === 'lark').length] : GM[i % GM.length] + (i >= 12 ? ' #' + i : ''), account: lark ? 'Lark / 飞书' : 'Gmail', icon: lark ? 'chat' : 'mail', kind: lark ? 'group' : 'gmail', count: 1 + (i % 4), at: at(0, 1500 + i * 10) }); }
+      // …and the read the agent ran itself (its read call names it)
+      touches.push({ id: 'tc-r', op: 'read', adapterId: 'lark', convId: 'oc_f1x7ure0', title: 'Ops desk', account: 'Lark / 飞书', icon: 'chat', kind: 'group', count: 60, at: at(1, 1500) });
+      // H1: the chained command's search — 17 conversations, one instant
+      for (let i = 0; i < 17; i++) touches.push({ id: 'tc-s' + i, op: 'search', adapterId: i % 5 ? 'gmail' : 'lark', convId: 'fx-s' + i, title: (i % 5 ? GM[(i + 3) % GM.length] : LK[(i / 5) % LK.length]) + ' · s' + i, account: i % 5 ? 'Gmail' : 'Lark / 飞书', icon: i % 5 ? 'mail' : 'chat', kind: 'gmail', count: 2, query: 'pairing review', at: at(4, 1800) });
+      // H2: the read loop's three unnamed reads (the batch's vibespace-status started 40 ms later)
+      for (let i = 0; i < 3; i++) touches.push({ id: 'tc-q' + i, op: 'read', adapterId: 'lark', convId: 'fx-q' + i, title: 'Queue item ' + i, account: 'Lark / 飞书', icon: 'chat', kind: 'p2p', count: 20, at: at(6, 1500 + i * 400) });
+      cv._channelTouches.onTouch({ sessionId: cv.sessionId, touches });
+      for (let i = 0; i < 60 && !(this.total(this.card(1)) && this.total(this.card(4))); i++) await sleep(100);
+      await sleep(600);
+      return { ok: !!(this.total(this.card(1)) && this.total(this.card(4))) };
+    },
+    card(k) { return this.list && this.list.querySelector(':scope > .chat-msg[data-tool-id="toolu_t' + k + '"]'); },
+    note(i) { return this.list ? [...this.list.querySelectorAll(':scope > .chat-msg.chat-vs-note')][i] || null : null; },
+    /** how many conversations a card / note row carries (its rows + what its fold holds) */
+    total(el) { const box = el && el.querySelector('.chat-channel-touches'); if (!box || box.hidden) return 0; const more = box.querySelector(':scope > .chat-channel-touches-more'); return more && more._rows ? more._rows.length : box.querySelectorAll(':scope > .chat-channel-touch').length; },
+    holder() { const n = this.note(0); return this.total(n) ? n : this.card(0); },   // whichever row carries the owner's 17
+    state() {
+      const r1 = (this.cv._runs || []).find((r) => r.members.includes(this.card(0)));
+      const cmd = this.card(4) && this.card(4).querySelector('.chat-channel-compact-cmd');
+      return { cards: [0, 1, 2, 3, 4, 5, 6, 7, 8].map((k) => this.total(this.card(k))), notes: [0, 1, 2].map((i) => this.total(this.note(i))),
+        noteIn: !!(r1 && r1.members.includes(this.note(0))), label: r1 && r1.header ? r1.header.querySelector('.chat-run-label').textContent.trim() : '', open: !!(r1 && r1.open),
+        holderCompact: this.holder().classList.contains('chat-channel-compact'), head4: vis(cmd) ? cmd.textContent : '' };
+    },
+    /** the strip as a reader sees it — readable judged by an INDEPENDENT probe: the account + 12 characters of the title laid out
+     *  in the name's own font, against the name's drawn width */
+    strip(el) {
+      const box = el.querySelector('.chat-channel-touches'), br = box.getBoundingClientRect();
+      const chips = [...box.querySelectorAll(':scope > .chat-channel-touch')].filter(vis);
+      const more = box.querySelector(':scope > .chat-channel-touches-more');
+      const probe = document.createElement('span'); probe.style.cssText = 'position:fixed;left:-9999px;top:0;visibility:hidden;white-space:pre'; document.body.appendChild(probe);
+      const facts = chips.map((c) => {
+        const name = c.querySelector('.cct-name'), ns = getComputedStyle(name), row = c._row || {};
+        probe.style.fontFamily = ns.fontFamily; probe.style.fontSize = ns.fontSize; probe.style.fontWeight = ns.fontWeight; probe.style.fontStyle = ns.fontStyle;
+        // the readable part: the account + 12 characters of the title — and the «…» that says a longer one goes on; a name
+        // that short is drawn WHOLE (a fractional shrink that puts «…» over its last glyph is not readable)
+        const full = String(name.textContent || ''), title = [...String(row.title || row.convId || '')];
+        const part = (row.account ? row.account + ' › ' : '') + title.slice(0, 12).join('');
+        probe.textContent = title.length > 12 ? part + '…' : full;
+        const need = probe.getBoundingClientRect().width, have = name.getBoundingClientRect().width, r = c.getBoundingClientRect();
+        return { need: Math.round(need * 10) / 10, have: Math.round(have * 10) / 10, readable: have + 0.01 >= need, inside: r.left >= br.left - 1 && r.right <= br.right + 1, top: Math.round(r.top + r.height / 2), w: Math.round(r.width), tw: vis(c.querySelector('.cct-time')) };
+      });
+      probe.remove();
+      const mr = more && vis(more) ? more.getBoundingClientRect() : null;
+      return { n: facts.length, facts, total: this.total(el), readable: facts.filter((f) => f.readable).length, inside: facts.every((f) => f.inside), oneLine: new Set(facts.map((f) => Math.round(f.top / 4))).size <= 1,
+        stacked: facts.every((f, i) => i === 0 || f.top > facts[i - 1].top + 6), fullWidth: facts.every((f) => f.w >= br.width * 0.9), times: facts.filter((f) => f.tw).length,
+        more: mr ? more.textContent : '', moreInside: mr ? mr.right <= br.right + 1 && mr.left >= br.left - 1 : null, boxW: Math.round(br.width), expanded: box.dataset.expanded === '1', compact: el.classList.contains('chat-channel-compact') };
+    },
+    async moreAt(el) {
+      const more = el.querySelector('.chat-channel-touches > .chat-channel-touches-more');
+      if (!more) return null;
+      more.scrollIntoView({ block: 'center' }); await sleep(250);
+      const b = more.getBoundingClientRect(); const x = b.left + b.width / 2, y = b.top + b.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      return { x, y, hit: !!hit && more.contains(hit), text: more.textContent };
+    },
+  };
+  return true;
+})()`;
+const tcShot = async (call, ev, name) => {
+  if (!process.env.VS_SHOT_DIR) return;
+  await ev(`(() => { const h = window.__tc.holder(); h.scrollIntoView({ block: 'start' }); window.__tc.list.scrollTop -= 60; return true; })()`); await sleep(300);
+  const r = await call('Page.captureScreenshot', { format: 'png' });
+  fs.mkdirSync(process.env.VS_SHOT_DIR, { recursive: true }); fs.writeFileSync(path.join(process.env.VS_SHOT_DIR, name), Buffer.from(r.result.data, 'base64'));
+};
+const tcPress = async (call, ev, which) => {
+  const at = await ev(`window.__tc.moreAt(${which})`);
+  if (!at) return null;
+  await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: at.x, y: at.y });
+  await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: at.x, y: at.y, button: 'left', clickCount: 1 });
+  await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: at.x, y: at.y, button: 'left', clickCount: 1 });
+  await sleep(500);
+  return at;
+};
+const tcLoad = async (call, ev, metrics) => {
+  await call('Emulation.setDeviceMetricsOverride', metrics);
+  await call('Page.reload', {});
+  for (let i = 0; i < 100; i++) { if (await ev('!!(window.app && window.app.ready && window.app.wm)').catch(() => false)) break; await sleep(300); }
+  await ev('window.app.ready.then(() => true)').catch(() => {});
+  await sleep(900);
+  await ev(TC_KIT);
+};
+const D1280 = { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false }, P390 = { width: 390, height: 844, deviceScaleFactor: 2, mobile: true };
+const tcSize = async (call, ev, tag, size, metrics, shots) => {
+  await tcLoad(call, ev, metrics);
+  const o = await ev(`window.__tc.open({ maximize: ${size === 1280} })`);
+  const st = await ev(`window.__tc.state()`);
+  const closed = await ev(`window.__tc.strip(window.__tc.holder())`);
+  const h1 = await ev(`window.__tc.strip(window.__tc.card(4))`);
+  if (shots) await tcShot(call, ev, `touch-chip-cause-${size}-closed${tag}.png`);
+  const p1 = await tcPress(call, ev, 'window.__tc.holder()');
+  const open = await ev(`window.__tc.strip(window.__tc.holder())`);
+  if (shots) await tcShot(call, ev, `touch-chip-cause-${size}-expanded${tag}.png`);
+  const p2 = await tcPress(call, ev, 'window.__tc.holder()');
+  const again = await ev(`window.__tc.strip(window.__tc.holder())`);
+  return { o, st, closed, h1, p1, open, p2, again };
+};
+const tcStrip = (s) => JSON.stringify({ n: s?.n, total: s?.total, readable: s?.readable, inside: s?.inside, oneLine: s?.oneLine, more: s?.more, moreInside: s?.moreInside, boxW: s?.boxW, facts: s?.facts?.map((f) => `${f.have}/${f.need}`) });
+for (const [size, metrics] of [[1280, D1280], [390, P390]]) {
+  const r = await tcSize(cdp, evaljs, '', size, metrics, true);
+  const st = r.st;
+  if (size === 1280) {
+    check('touch-chip-cause fixture: the owner\'s turn, the chained command and the parallel batch are drawn; the witness\'s touches bound', r.o?.ok, JSON.stringify(r.o));
+    check(`THE OWNER'S SHAPE: the 17 conversations touched while \`vibespace-status\` ran hang on the turn's VibeSpace NOTE row (「VibeSpace 把任务背景交给了助手」) — vibespace-status carries NONE; the read stays on its read call (1)`,
+      st?.notes?.[0] === 17 && st.cards[0] === 0 && st.cards[1] === 1 && st.cards[2] === 0 && st.cards[3] === 0, JSON.stringify({ notes: st?.notes, cards: st?.cards }));
+    check(`…the note row is a member of the closed run and COMPACT, and the run's head counts it among its linked rows: 「${st?.label}」`,
+      st?.noteIn && !st.open && st.holderCompact && /把任务背景交给了助手/.test(st.label) && /4 条 Bash/.test(st.label) && /2 条带会话入口/.test(st.label), JSON.stringify(st));
+    check(`H1 the CHAINED command keeps its 17 search rows, and its compact head opens at the channels segment: 「${st?.head4}」`, st?.cards?.[4] === 17 && st.head4 === '… vibespace-channels search "pairing review" --full', JSON.stringify({ c4: st?.cards?.[4], head4: st?.head4 }));
+    check('H2 the PARALLEL batch: the read loop (it runs the CLI) owns its three unnamed reads — not vibespace-status, which started 40 ms later', st?.cards?.[6] === 3 && st.cards[7] === 0, JSON.stringify({ c6: st?.cards?.[6], c7: st?.cards?.[7] }));
+  }
+  const c = r.closed;
+  check(`${size}: the closed strip of the 17 — every visible chip READABLE (the account + 12 characters of its title drawn: ${c?.facts?.map((f) => `${f.have}≥${f.need}`).join(', ')}), inside its box, on one line; the rest fold into 「${c?.more}」`,
+    c && c.compact && !c.expanded && c.total === 17 && c.n >= 1 && c.n <= 3 && c.readable === c.n && c.inside && c.oneLine && c.more === `另有 ${17 - c.n} 个` && c.moreInside, tcStrip(c));
+  const h = r.h1;
+  check(`${size}: the chained command's strip of 17 search rows keeps the same law (${h?.n} readable chip(s) + 「${h?.more}」)`,
+    h && h.total === 17 && h.n >= 1 && h.readable === h.n && h.inside && h.oneLine && h.more === `另有 ${17 - h.n} 个`, tcStrip(h));
+  const e = r.open;
+  check(`${size}: a REAL press on 「${r.p1?.text}」 expands into ROWS — all 17, one per line (stacked), each the box's full width with its time; 「${e?.more}」 folds them back`,
+    r.p1?.hit && e && e.expanded && e.n === 17 && e.stacked && e.fullWidth && e.times === 17 && e.more === '收起', JSON.stringify({ p1: r.p1, n: e?.n, stacked: e?.stacked, fullWidth: e?.fullWidth, times: e?.times, more: e?.more, boxW: e?.boxW }));
+  const a = r.again;
+  check(`${size}: 「收起」 (a real press) gives the strip back — the same readable chips and fold`, r.p2?.hit && a && !a.expanded && a.n === c?.n && a.readable === a.n && a.more === c?.more, tcStrip(a));
+}
+// RED CONTROL: the pre-lane view — a patched channel-touch-view.js whose calls carry no kind and whose binder sees no note
+// rows (the pre-lane binding: time alone) and whose strip is never fitted — served to a second page at 390: the owner's 17
+// land on vibespace-status, H2's reads on vibespace-status, and the chips sit below their readable minimum
+{
+  const TVSRC = read('src/lib/channel-touch-view.js');
+  const CUTS = [
+    ["      return { id: c.dataset.toolId, start, end, text: callText(c), kind: callKind(c), el: c };", "      return { id: c.dataset.toolId, start, end, text: callText(c), el: c };"],
+    ["const { byCall, byNote } = T.bindToCall(st.touches, calls, { tail, notes, turns: turnsOf(list) });", "const { byCall, byNote } = T.bindToCall(st.touches, calls, { tail });"],
+    ["const strip = !!card && card.classList.contains('chat-channel-compact') && box.dataset.expanded !== '1';", "const strip = false;"],
+  ];
+  check('control: each pre-lane cut finds its line exactly once in channel-touch-view.js', CUTS.every(([from]) => TVSRC.split(from).length === 2));
+  const MUT = mutantCopies('fold-ux-touch-cause', repo);
+  const bundleText = await buildPatchedBundle(MUT, 'src/lib/channel-touch-view.js', CUTS.reduce((s, [from, to]) => s.split(from).join(to), TVSRC), 'pre-cause');
+  for (const row of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 1, label: 'touch-cause ' })) check(row.name, row.pass, row.detail);
+  const t3 = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
+  const s3 = new WebSocket(t3.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
+  await new Promise((r) => s3.on('open', r));
+  let seq3 = 0, served3 = 0; const pend3 = new Map(); const body3 = Buffer.from(bundleText).toString('base64');
+  const cdp3 = (method, params = {}) => new Promise((res) => { const id = ++seq3; pend3.set(id, res); s3.send(JSON.stringify({ id, method, params })); });
+  s3.on('message', (d) => {
+    const m = JSON.parse(d);
+    if (m.id && pend3.has(m.id)) { pend3.get(m.id)(m); pend3.delete(m.id); }
+    if (m.method === 'Runtime.exceptionThrown') { try { pageErrors.push('[tc-control] ' + (m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown')); } catch {} }
+    if (m.method !== 'Fetch.requestPaused') return;
+    const id = m.params.requestId;
+    if (/\/bundle\.js(\?|$)/.test(m.params.request.url)) { served3++; cdp3('Fetch.fulfillRequest', { requestId: id, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }], body: body3 }); }
+    else cdp3('Fetch.continueRequest', { requestId: id });
+  });
+  const eval3 = async (expr) => { const r = await cdp3('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails).slice(0, 600)); return r.result?.result?.value; };
+  await cdp3('Runtime.enable'); await cdp3('Page.enable');
+  await cdp3('Fetch.enable', { patterns: [{ urlPattern: '*bundle.js*', requestStage: 'Request' }] });
+  await cdp3('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp3('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+  const k = await tcSize(cdp3, eval3, '-pre-lane-control', 390, P390, true);
+  check(`RED CONTROL: the page served the PATCHED view (${served3}×) — the owner's 17 land on \`vibespace-status\` (${k.st?.cards?.[0]}) and its note row carries none (${k.st?.notes?.[0]}); H2's reads land on vibespace-status (${k.st?.cards?.[7]}) — the binding legs above read RED there`,
+    served3 > 0 && k.o?.ok && k.st?.cards?.[0] === 17 && k.st.notes[0] === 0 && k.st.cards[7] === 3 && k.st.cards[6] === 0, JSON.stringify({ served3, o: k.o, cards: k.st?.cards, notes: k.st?.notes }));
+  check(`RED CONTROL: …and its strip is never fitted — ${k.closed?.n} chips, ${k.closed ? k.closed.n - k.closed.readable : '?'} below the readable minimum (${k.closed?.facts?.map((f) => `${f.have}<${f.need}`).join(', ')}) — the strip leg reads RED there`,
+    k.closed && k.closed.n === 3 && k.closed.readable < k.closed.n, tcStrip(k.closed));
+  try { s3.close(); } catch {}
+  try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${t3.id}`); } catch {}
+  try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/activate/${target.id}`); } catch {}
+  await sleep(300);
+}
+await cdp('Emulation.clearDeviceMetricsOverride', {});
 await evaljs(`localStorage.removeItem('vibespace.lang'); true`);
 
 check('zero uncaught page exceptions during the whole flow', pageErrors.length === 0, pageErrors.slice(0, 3).join(' | '));
