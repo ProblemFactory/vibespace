@@ -65,7 +65,7 @@ const BANDS = Object.freeze([
 ]);
 const BADGE_BANDS = Object.freeze([1, 2, 3, 4]); // the For-you badge + a chat window's title-bar badge count these
 const TOAST_BANDS = Object.freeze([1, 2]);       // only these raise an arrival toast (the rest move a number)
-const WAIT_ACTIONS = Object.freeze(['main-ask', 'helper-ask', 'exit-run-ask']); // an agent's tool call held on the owner's Allow
+const { WAIT_ACTIONS } = require('./foryou-actions.js'); // an agent's tool call held on the owner's Allow — derived from THE For-you action registry (a row's `waits`; lane chat-needs-you-card)
 const FOLD_HEAD = '{n} more — expand';           // a fold's words (an English t() key; zh 还有 {n} 条 — 展开)
 const POLICY = Object.freeze({ cap: CAP, parkDays: PARK_DAYS, pluginFoldDays: PLUGIN_FOLD_DAYS, tieMs: TIE_MS, expanded: Object.freeze([]), off: Object.freeze([]) });
 // lane attention-predicate-shared (decision 4 — the owner accepted it 2026-10-19): EACH BAND IS THE OWNER'S SWITCH and the first

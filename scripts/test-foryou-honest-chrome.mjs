@@ -121,8 +121,8 @@ try {
   R2_BUNDLE = fs.readFileSync(path.join(MUT2, 'bundle-mut.js'));
   let css = fs.readFileSync(path.join(repo, 'public/style.css'), 'utf8');
   const cut = (from, to) => { if (css.split(from).length !== 2) throw new Error(`mutant anchor public/style.css: ${from.slice(0, 60)}`); css = css.replace(from, to); };
-  cut('  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-meta { display: block; line-height: 22px; padding-block: 11px; margin-top: 4px; }\n  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-meta .ut-sess { padding-block: 15px; overflow-wrap: anywhere; }\n',
-    '  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-meta { display: flex; flex-wrap: wrap; align-items: center; column-gap: 4px; margin-top: 4px; }\n  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-meta .ut-sess { display: inline-flex; align-items: center; min-height: 44px; }\n');
+  cut('  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-meta { display: block; line-height: 22px; padding-block: 11px; margin-top: 4px; }\n  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-meta .ut-sess { padding-block: 15px; overflow-wrap: anywhere; }\n',
+    '  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-meta { display: flex; flex-wrap: wrap; align-items: center; column-gap: 4px; margin-top: 4px; }\n  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-meta .ut-sess { display: inline-flex; align-items: center; min-height: 44px; }\n');
   const a = css.indexOf('  /* THE OPEN ROW (acceptance round 2)'), b = css.indexOf('.ut-band > .ut-fold { display: flex;');
   if (a < 0 || b < a) throw new Error('mutant anchor public/style.css: the open row\'s question row + the fold row');
   css = css.slice(0, a) + css.slice(css.indexOf('\n', b) + 1);

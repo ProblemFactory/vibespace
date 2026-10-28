@@ -98,7 +98,7 @@ function mkWorld({ dir = null, healthy = true, ignoreWorkedFlag = false, arModul
   if (!am.poolSupported()) return null;
   const login = (id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r', expiresAt: Date.now() + 36e5, subscriptionType: 'max' } }), { mode: 0o600 });
   const FISH = am.createSubscription({ name: 'Fish Max' }).id; login(FISH);       // the OTel-observed (spawn-time) org
-  const LINK = am.createSubscription({ name: 'PandyMax' }).id; login(LINK);      // the credential slot: cache says healthy, the CLI rejects
+  const LINK = am.createSubscription({ name: 'userP' }).id; login(LINK);      // the credential slot: cache says healthy, the CLI rejects
   const SPARE = am.createSubscription({ name: 'B-Stack Max' }).id; login(SPARE); // the other healthy-looking member
   const P = am.createPool({ name: '全部' }).id;
   am.setPoolTarget(P, LINK);
@@ -221,7 +221,7 @@ if (!probe) {
     const n = await drive(w, { oldAttribution: true, oldBreaker: true });
     const lines = cap.done();
     ok('NEGATIVE CONTROL: with the wall attributed away from the credential slot AND no memory of a failed fire, the session re-fires without bound (≥10 billed continues)', n >= 10, 'fires=' + n);
-    ok('…and the reproduction is the journal we have: every cycle re-armed "switched to a usable account" naming the LINK the CLI keeps rejecting', lines.filter((l) => /armed for .*switched to a usable account \(PandyMax\)/.test(l)).length >= 10, lines.slice(0, 3).join(' | '));
+    ok('…and the reproduction is the journal we have: every cycle re-armed "switched to a usable account" naming the LINK the CLI keeps rejecting', lines.filter((l) => /armed for .*switched to a usable account \(userP\)/.test(l)).length >= 10, lines.slice(0, 3).join(' | '));
     ok("…the linked member's cache never learned it was blocked (the whole mechanism of the incident)", (w.readCache(w.LINK) || {}).source === 'cli-usage' && w.readCache(w.LINK).fiveHour.utilization === 0.1, JSON.stringify(w.readCache(w.LINK)));
     ok('…and every one of those continues was a real send of the CLI\'s continue prompt', w.fired.length === n && w.fired.every((f) => f.text === CONTINUE_PROMPT));
   }
@@ -234,7 +234,7 @@ if (!probe) {
     ok('FIX ①: with the rejection attributed to the credential slot, the loop is over after at most one continue', n <= 1, 'fires=' + n);
     const c = w.readCache(w.LINK);
     ok('…because the LINKED member is what got demoted — utilization 1, source wall, on the FIRST rejection', c.fiveHour.utilization === 1 && c.source === 'wall' && c.fiveHour.status === 'limited', JSON.stringify(c));
-    ok("…journaled as a credential-slot demotion, not a guess", lines.some((l) => /\[wall\] demoted PandyMax 5h until \S+ \(1 walls \/ credential slot\)/.test(l)), lines.filter((l) => /demoted/.test(l)).join(' | '));
+    ok("…journaled as a credential-slot demotion, not a guess", lines.some((l) => /\[wall\] demoted userP 5h until \S+ \(1 walls \/ credential slot\)/.test(l)), lines.filter((l) => /demoted/.test(l)).join(' | '));
     ok('…and the OTel label is neither the target nor in the log (a machine-wide label since the 2026-09-30 measurement — it corroborates nothing)', !lines.some((l) => /OTel observed/.test(l)) && !lines.some((l) => /demoted Fish Max/.test(l)), lines.filter((l) => /walled turn/.test(l)).join(' | '));
   }
 
@@ -244,7 +244,7 @@ if (!probe) {
     const n = await drive(w, { oldAttribution: true, oldBreaker: false });
     const lines = cap.done();
     ok(`FIX ②: with the attribution defect still present, the breaker alone caps the damage at ${FIRE_MAX_IMMEDIATE} continues instead of 130`, n >= 1 && n <= FIRE_MAX_IMMEDIATE, 'fires=' + n);
-    ok('…and every refused fire is journaled ONCE with its reason (never one line per cycle)', lines.filter((l) => /refused a (timed|immediate) continue onto PandyMax \((same-identity|backoff|hourly-cap|fire-pending)/.test(l)).length >= 1 && lines.filter((l) => /refused a /.test(l)).length <= 4, lines.filter((l) => /refused/.test(l)).join(' | '));
+    ok('…and every refused fire is journaled ONCE with its reason (never one line per cycle)', lines.filter((l) => /refused a (timed|immediate) continue onto userP \((same-identity|backoff|hourly-cap|fire-pending)/.test(l)).length >= 1 && lines.filter((l) => /refused a /.test(l)).length <= 4, lines.filter((l) => /refused/.test(l)).join(' | '));
     ok('…the rejection of our own continue is recorded by name', lines.some((l) => /the continue onto sub-\w+ was rejected again \(limit rejection\) — not re-firing there/.test(l)), lines.filter((l) => /rejected again/.test(l)).join(' | '));
     ok('…and the conversation was told AT MOST ONCE, not ~150 times', w.notes.filter((t) => /已自动继续这个任务/.test(t)).length <= 1, JSON.stringify(w.notes));
   }
@@ -257,7 +257,7 @@ if (!probe) {
     ok('SHIPPED: at most one immediate continue, then the session waits', n <= 1, 'fires=' + n);
     const st = w.ar.statusFor(w.SID);
     ok('…still ARMED afterwards, on a real reset time rather than a 45s re-try (the wait is what a blocked pool deserves)', st.armed === true && st.resetsAt > Date.now() + 60000, JSON.stringify(st));
-    ok('…the arm reason names the buckets that are dead, per member', /PandyMax:|B-Stack Max:|Fish Max:/.test(String(st.reason || '')), String(st.reason));
+    ok('…the arm reason names the buckets that are dead, per member', /userP:|B-Stack Max:|Fish Max:/.test(String(st.reason || '')), String(st.reason));
     ok('…no member was silently re-selected after refusing this conversation', !lines.some((l) => /re-point, same target/.test(l)), lines.filter((l) => /per-session switch/.test(l)).join(' | '));
   }
 }
@@ -712,7 +712,7 @@ if (!probe) {
     const label = steps.join('→');
     const { w, lines } = await oneRejection(steps);
     const spare = w.readCache(w.SPARE);
-    ok(`ONE turn, both producers (${label}): only the member that was the slot when the rejection ARRIVED is demoted`, lines.some((l) => /\[wall\] demoted PandyMax (5h|7d) until \S+ \(1 walls \/ credential slot\)/.test(l)) && !lines.some((l) => /demoted B-Stack Max/.test(l)), lines.filter((l) => /demoted/.test(l)).join(' | '));
+    ok(`ONE turn, both producers (${label}): only the member that was the slot when the rejection ARRIVED is demoted`, lines.some((l) => /\[wall\] demoted userP (5h|7d) until \S+ \(1 walls \/ credential slot\)/.test(l)) && !lines.some((l) => /demoted B-Stack Max/.test(l)), lines.filter((l) => /demoted/.test(l)).join(' | '));
     ok(`…and the member the pool MOVED TO is untouched — its cache still the reading it had (${label})`, spare && spare.source === 'cli-usage' && spare.fiveHour.utilization === 0.2 && spare.sevenDay.utilization === 0.35, JSON.stringify(spare));
     ok(`…it is not recorded as having rejected this conversation either (${label})`, [...w.eng.sessionWalledMembers(w.SID)].join(',') === w.LINK, JSON.stringify([...w.eng.sessionWalledMembers(w.SID)].map(w.nameOf)));
     const st = w.ar.statusFor(w.SID);
@@ -1342,7 +1342,7 @@ if (!probe) {
 }
 
 // ── §B-73fe THE ARM NAMES ITS TARGET (owner 2026-09-17 "明明当前hit limit的账号7am就会reset 5h，但你却提示12pm") ──
-// 02:30:43 PDT: the link (PandyMax) hit its 5h (resets 7am) while its Fable
+// 02:30:43 PDT: the link (userP) hit its 5h (resets 7am) while its Fable
 // sat at 98 % (2 % left < the 5 % floor, resets 9/20); every other member's
 // Fable was spent and Member L's week rolled first (12pm). The wait is the MIN
 // over members of the MAX over each member's dead resets — 12pm — which is
@@ -1364,9 +1364,9 @@ if (!probe) {
   ok('B-73fe: the arm waits for the SOONEST member (Fish Max\'s Fable week) plus the one-minute landing grace (2026-09-18), not the rejector\'s own 5h — the wait itself was right', st.armed === true && st.resetsAt === (RL + 60) * 1000, JSON.stringify(st));
   ok('…and the arm CARRIES its cause: soonest = Fish Max / Fable @ RL, the same instant as the arm', !!(st.cause && st.cause.scope === 'pool' && st.cause.soonest && st.cause.soonest.id === w.FISH && st.cause.soonest.bucket && st.cause.soonest.bucket.label === 'Fable' && st.cause.soonest.bucket.resetsAt === st.resetsAt - 60 * 1000), JSON.stringify(st.cause)); // the cause names the STATED instant; the arm fires a minute after it
   const rj = st.cause && st.cause.rejector;
-  ok('…rejector = PandyMax with its OWN wall (5h @ R5, from the demotion) and the floor bucket that keeps it dead past it (Fable 2 % < 5 % @ R7)', !!(rj && rj.id === w.LINK && rj.ownWall && rj.ownWall.label === '5h' && rj.ownWall.resetsAt === w.R5 * 1000 && rj.floor && rj.floor.length === 1 && rj.floor[0].label === 'Fable' && rj.floor[0].remaining === 2 && rj.floor[0].line === 5 && rj.floor[0].resetsAt === w.R7 * 1000), JSON.stringify(rj));
+  ok('…rejector = userP with its OWN wall (5h @ R5, from the demotion) and the floor bucket that keeps it dead past it (Fable 2 % < 5 % @ R7)', !!(rj && rj.id === w.LINK && rj.ownWall && rj.ownWall.label === '5h' && rj.ownWall.resetsAt === w.R5 * 1000 && rj.floor && rj.floor.length === 1 && rj.floor[0].label === 'Fable' && rj.floor[0].remaining === 2 && rj.floor[0].line === 5 && rj.floor[0].resetsAt === w.R7 * 1000), JSON.stringify(rj));
   const text = arMod.armNoticeFor(st.reason, st.resetsAt, Date.now(), st.cause);
-  ok('…the card names both: the rejector\'s own reset AND why it is not the target, then the member whose reset it waits for', text === `PandyMax 的 5h 将在 ${L(w.R5)} 重置，但它的 Fable 仅剩 2%（低于 5% 门槛，视为用尽，${L(w.R7)} 重置）。最早可用的成员是 Fish Max（Fable ${L(RL)} 重置），已安排在重置约 1 分钟后自动继续；任一成员提前可用会立即继续（状态栏可取消）。`, text);
+  ok('…the card names both: the rejector\'s own reset AND why it is not the target, then the member whose reset it waits for', text === `userP 的 5h 将在 ${L(w.R5)} 重置，但它的 Fable 仅剩 2%（低于 5% 门槛，视为用尽，${L(w.R7)} 重置）。最早可用的成员是 Fish Max（Fable ${L(RL)} 重置），已安排在重置约 1 分钟后自动继续；任一成员提前可用会立即继续（状态栏可取消）。`, text);
   ok('…the journal line says via whom', lines.some((l) => /armed for .* via Fish Max\/Fable\)/.test(l)), lines.filter((l) => /armed for/.test(l)).join(' | '));
   ok('…NEGATIVE CONTROL: a cause-less arm keeps the old sentence byte for byte', arMod.armNoticeFor('5h 0% < 10%', st.resetsAt, Date.now()) === `用量已达上限。已安排在 ${new Date(st.resetsAt).toLocaleString()} 重置后自动继续（状态栏可取消）。`);
   ok('…rejector === soonest reads as one member\'s own reset (no "but" clause, no second member)', /^Fish Max 的 Fable 将在 .+ 重置，重置约 1 分钟后自动继续这个任务（状态栏可取消）。$/.test(arMod.armNoticeFor('x', RL * 1000, Date.now(), { ...st.cause, rejector: { id: w.FISH, name: 'Fish Max', ownWall: { label: 'Fable', resetsAt: RL * 1000 }, floor: [] } })));
@@ -1406,8 +1406,8 @@ if (!probe) {
   ok('§7 全B: …ARMED with the removal as its cause — the turn it let finish did not disarm it (the result boundary\'s "turn completed normally")', !!a && !a.fired && !!a.cause && a.cause.kind === 'removed-member' && a.cause.member.id === w.LINK, JSON.stringify(a));
   ok('§7 全B: …the hold itself fires nothing (fired 0)', w.fired.length === 0);
   const card = a ? arMod.armNoticeFor(a.reason, a.resetsAt, Date.now(), a.cause) : '';
-  ok('§7 全B: the card names the removal and the member it waits on — never "usage limit"', /PandyMax 已被移出账号池/.test(card) && /B-Stack Max/.test(card) && !/用量已达上限/.test(card), card);
-  ok('§7 全B: …the conversation is told it stopped and continues by itself', w.notices.some((t) => /PandyMax was removed from the pool and no other member can take over — conversation "work" stopped after its turn and continues automatically when a member can serve it\.$/.test(t)), JSON.stringify(w.notices));
+  ok('§7 全B: the card names the removal and the member it waits on — never "usage limit"', /userP 已被移出账号池/.test(card) && /B-Stack Max/.test(card) && !/用量已达上限/.test(card), card);
+  ok('§7 全B: …the conversation is told it stopped and continues by itself', w.notices.some((t) => /userP was removed from the pool and no other member can take over — conversation "work" stopped after its turn and continues automatically when a member can serve it\.$/.test(t)), JSON.stringify(w.notices));
   // the member wake: Fish Max is usable again ⇒ the conversation moves onto it and gets ONE continue
   w.writeCache(w.FISH, cacheOf(0.1, w.R5, 0.3, w.R7));
   const capW = capture(); w.eng.onMemberReadingFresh(w.FISH, 'test'); await sleep(80); const lw = capW.done();

@@ -10,6 +10,7 @@
  */
 
 const crypto = require('crypto');
+const CN = require('../foryou-actions.js'); // PURE (lane chat-needs-you-card): THE For-you action registry — the agent's ONE line after a filing (the card in its chat + the tray)
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const caps = require('../channel-caps.js');
 const F = require('../channel-filter.js');
@@ -735,6 +736,7 @@ function create(engineCtx) {
           origin: 'channels', // B-328d
           text: `${ctx.name || ctx.id} requests access to ${title}`,
           action: { type: 'open-channel', adapterId: en.adapterId, convId: en.id, key: en.key },   // B-c127: a click opens the conversation (its Reach dialog is there)
+          about: ctx.sessionKey || null,   // lane chat-needs-you-card: the ASKING conversation — its chat draws the card
           detail: `Agent session ${ctx.name || ''} (${ctx.id}) asks to see ${rec.label || rec.id} · ${title}.\nReason: ${reason}\n\nApprove or deny from the conversation's Reach dialog (rail → Channels → row menu → Reach…). Approving grants that ONE session visibility on that ONE conversation; group defaults are untouched.`,
           urgency: 'normal', by: 'agent', sessionName: 'Channels',
           i18n: {
@@ -753,7 +755,7 @@ function create(engineCtx) {
     await store.index.update(() => { const e2 = store.index.entry(adapterId, convId, { create: false }); if (!e2) return; healP2(e2); e2.reachRequests.push(req); if (e2.reachRequests.length > 50) e2.reachRequests.splice(0, e2.reachRequests.length - 50); });
     try { store.audit({ kind: 'acl', op: 'request', principal: req.principal, scope: req.scope, why: reason, at: t, by: 'agent' }); } catch {}
     notify([convId]);
-    return { ok: true, request: { ...req } };
+    return { ok: true, request: { ...req }, ...(req.todoId ? { filed: CN.filedLine('open-channel', req.id, OF.tray()) } : {}) };
   }
   async function decideRequest(requestId, approve, by = 'user') {
     // B-f32b: the scan reads the live rows; only the row holding the request is copied
@@ -791,7 +793,7 @@ function create(engineCtx) {
     if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
     try { store.audit({ kind: 'acl', op: approve ? 'grant' : 'deny', principal: req.principal, scope: req.scope, level: approve ? 'visible' : null, origin: 'request', requestId, at: t, by }); } catch {}
     if (req.todoId && userTodos && typeof userTodos.get === 'function') {
-      try { const it = userTodos.get(req.todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(req.todoId, 'done', RESOLVED_BY); } catch {}
+      try { const it = userTodos.get(req.todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(req.todoId, 'done', approve ? 'allowed' : 'denied'); } catch {}   // lane chat-needs-you-card: the card's record says which
     }
     notify([en.id]);
     return { ok: true, request: { ...req, status: approve ? 'approved' : 'denied' }, grant };
@@ -996,6 +998,7 @@ function create(engineCtx) {
           text: `${ctx.name || ctx.id} asks to be woken by ${where}`,
           detail: `Approve writes: wake ${ctx.name || ctx.id} now (a billed turn) ${what} in ${where}, at most ${row.dailyWakeCap} wakes a day.${row.notify === 'digest' ? `\nAs a digest: one billed turn every ${row.digestMinutes} minutes at most.` : ''}${reason ? `\nReason: ${reason}` : ''}\nIt already has ${own} notifications of its own and ${waiting.length} wake asks waiting.\nDeny changes nothing. Without it, the agent can still ask for the news on its next turn (free).`,
           urgency: 'normal', by: 'agent', sessionName: 'Channels', action: { type: 'channel-watch-request', id: req.id },
+          about: ctx.sessionKey || null,   // lane chat-needs-you-card: the ASKING conversation — its chat draws the card
           i18n: {
             text: { key: i18nKey('{agent} asks to be woken by {where}'), params: { agent: ctx.name || ctx.id, where } },
             detail: [
@@ -1020,7 +1023,7 @@ function create(engineCtx) {
     await store.index.update((ix) => { const list = Array.isArray(ix.watchRequests) ? ix.watchRequests : (ix.watchRequests = []); list.push(req); while (list.length > 100) { const i = list.findIndex((r) => !(r && r.status === 'open')); if (i < 0) break; list.splice(i, 1); } });
     try { store.audit({ kind: 'acl', op: 'watch-request', principal: req.principal, scope, delivery: 'wake', at: t, by: 'agent' }); } catch {}
     notify([]);
-    return { ok: true, proposed: true, request: { id: req.id, status: 'open' }, dailyWakeCap: row.dailyWakeCap };
+    return { ok: true, proposed: true, request: { id: req.id, status: 'open' }, dailyWakeCap: row.dailyWakeCap, ...(req.todoId ? { filed: CN.filedLine('channel-watch-request', req.id, OF.tray()) } : {}) };
   }
   /** Approve = EXACTLY the frozen row, written through `setGrain` (the access rule re-judged now); deny = nothing. */
   async function decideWatchRequest(requestId, approve, by = 'user') {
@@ -1042,7 +1045,7 @@ function create(engineCtx) {
     if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
     try { store.audit({ kind: 'acl', op: approve ? 'watch-approve' : 'watch-deny', principal: req0.principal, scope: req0.scope, requestId, at: t, by }); } catch {}
     if (req0.todoId && userTodos && typeof userTodos.get === 'function') {
-      try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(req0.todoId, 'done', RESOLVED_BY); } catch {}
+      try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open' && it.sessionKey === INBOX_KEY) userTodos.setStatus(req0.todoId, 'done', approve ? 'allowed' : 'denied'); } catch {}   // lane chat-needs-you-card: the card's record says which
     }
     notify([]);
     return { ok: true, request: { ...req0, status: approve ? 'approved' : 'denied' } };

@@ -361,13 +361,13 @@ console.log('— §3c the pool row summarises the pool');
       ['sub-pf', 'ProblemFactory Max', RNOW + 9 * 24 * H],
       ['sub-pers', 'Personal Max', RNOW - 116 * H, true],
       ['sub-bs', 'B-Stack Max', RNOW + 16 * H],
-      ['sub-pandy', 'PandyMax', RNOW + 12 * 24 * H],
+      ['sub-pandy', 'userP', RNOW + 12 * 24 * H],
     ], { members: null, current: 'sub-bs' });
     cleanup.push(s.dir);
     const ls = s.row().loginState;
     ck('IMPLICIT pool: three signed-out non-members + one expiring CURRENT target ⇒ the row reads EXPIRING', ls.state === 'expiring');
     ck('...and names the member that earned it — the one the pool actually routes to', ls.worstId === 'sub-bs' && ls.worstName === 'B-Stack Max');
-    ck('...over exactly the routing candidates, no signed-out passengers', ls.members.map((m) => m.name).sort().join() === 'B-Stack Max,PandyMax,ProblemFactory Max');
+    ck('...over exactly the routing candidates, no signed-out passengers', ls.members.map((m) => m.name).sort().join() === 'B-Stack Max,ProblemFactory Max,userP');
     ck('...which is exactly poolMembers() (membership for an implicit pool has ONE definition)',
       ls.members.map((m) => m.id).sort().join() === s.am.poolMembers('pool-1').map((m) => m.id).sort().join());
   }

@@ -424,6 +424,7 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   const { wrapperCaps } = require(path.join(REPO, 'src/server/wrapper-files.js'));
   const M = require(path.join(REPO, 'src/job-model.js'));
   const AGY_WRAPPER = path.join(REPO, 'data/bin/agy-wrapper.js'), AGY_STUB = path.join(REPO, 'scripts/fixtures/antigravity-agy');
+  const HOLD = path.join(REPO, 'scripts/fixtures/sidecar-write-hold.cjs');
   const D = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-agy-peer-'));
   const BUF = path.join(D, 'session-buffers');
   fs.mkdirSync(BUF, { recursive: true });
@@ -434,32 +435,43 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
   const ADVERT = 'caps: { frameFile: true, peerMessage: true, notificationSteer: false,';
   const RED = path.join(D, 'red', 'data', 'bin', 'agy-wrapper.js');
   fs.writeFileSync(RED, wsrc.replace(ADVERT, 'caps: { frameFile: true, peerMessage: false,'));
+  // …and the same red copy with the PRE-.358 sidecar write (in place: truncate, then the bytes) — ④'s negative control
+  const ATOMIC = 'fs.writeFileSync(tmp, JSON.stringify(meta)); fs.renameSync(tmp, metaFile);';
+  fs.mkdirSync(path.join(D, 'inplace', 'data', 'bin'), { recursive: true });
+  fs.symlinkSync(path.join(REPO, 'src'), path.join(D, 'inplace', 'src'));
+  const INPLACE = path.join(D, 'inplace', 'data', 'bin', 'agy-wrapper.js');
+  fs.writeFileSync(INPLACE, fs.readFileSync(RED, 'utf8').replace(ATOMIC, 'fs.writeFileSync(metaFile, JSON.stringify(meta));'));
   const until = async (pred, ms, what) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = pred(); if (v) return v; await new Promise((r) => setTimeout(r, 15)); } throw new Error('timeout: ' + what); };
   const env0 = { ...process.env };
   for (const k of Object.keys(env0)) if (/^VIBESPACE_|^ACP_WEBUI_|^AGY_|^CLAUDE_CODE_/.test(k)) delete env0[k];
   const ACID = 'a9e7c0de-1111-4222-8333-444455556666', RCID = 'a9e7c0de-1111-4222-8333-777788889999';
-  const AWID = 'sess-90-1000', RWID = 'sess-91-1000';
+  const AWID = 'sess-90-1000', RWID = 'sess-91-1000', OWID = 'sess-93-1000';
+  const OCID = 'a9e7c0de-1111-4222-8333-aaaabbbbcccc';
   const stubLog = (wid) => path.join(D, wid + '.stub.log');
   const lines = (wid) => { try { return fs.readFileSync(stubLog(wid), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.stdin).map((x) => JSON.parse(x.stdin).message.content); } catch { return []; } };
   // HOME = the scratch dir: the wrapper's store reads and the fake agy see nobody's real store
-  const startAgy = (wrapper, wid, cid) => spawn(process.execPath, [wrapper, path.join(BUF, wid + '.buf'), path.join(BUF, wid + '.json'), AGY_STUB], {
-    env: { ...env0, HOME: D, AGY_WEBUI_CWD: D, AGY_WEBUI_BACKEND: 'antigravity', AGY_WEBUI_RESUME_ID: cid, AGY_WEBUI_AUTH_GRACE_MS: '400', AGY_STUB_SLOW_MS: '900', AGY_STUB_LOG: stubLog(wid) },
+  // `hold` = a dir: the wrapper runs under the hold preload (its next sidecar write, once armed, held between truncate and bytes)
+  const startAgy = (wrapper, wid, cid, hold = null) => spawn(process.execPath, [...(hold ? ['--require', HOLD] : []), wrapper, path.join(BUF, wid + '.buf'), path.join(BUF, wid + '.json'), AGY_STUB], {
+    env: { ...env0, HOME: D, AGY_WEBUI_CWD: D, AGY_WEBUI_BACKEND: 'antigravity', AGY_WEBUI_RESUME_ID: cid, AGY_WEBUI_AUTH_GRACE_MS: '400', AGY_STUB_SLOW_MS: '900', AGY_STUB_LOG: stubLog(wid), ...(hold ? { VS_HOLD_DIR: hold } : {}) },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  const kids = [startAgy(AGY_WRAPPER, AWID, ACID), startAgy(RED, RWID, RCID)];
-  const [A, R] = kids;
+  const HOLD_R = path.join(D, 'hold-red'), HOLD_O = path.join(D, 'hold-inplace');
+  for (const h of [HOLD_R, HOLD_O]) fs.mkdirSync(h);
+  const kids = [startAgy(AGY_WRAPPER, AWID, ACID), startAgy(RED, RWID, RCID, HOLD_R), startAgy(INPLACE, OWID, OCID, HOLD_O)];
+  const [A, R, O] = kids;
   try {
     // the session the hub holds: backendSessionId comes from the wrapper's own `session` record (the consumer adopts it)
     const S = { backend: 'antigravity', mode: 'chat', backendSessionId: null, claudeSessionId: null, name: 'AgyPeer', host: null, buffer: '', sockName: null, socketPath: path.join(D, 'cw-' + AWID), pty: { write: (s) => { frames.push(String(s)); A.stdin.write(s); } } };
     const RS = { backend: 'antigravity', mode: 'chat', backendSessionId: RCID, claudeSessionId: null, name: 'AgyOld', host: null, buffer: '', sockName: null, socketPath: path.join(D, 'cw-' + RWID), pty: { write: (s) => { redFrames.push(String(s)); R.stdin.write(s); } } };
+    const IS = { backend: 'antigravity', mode: 'chat', backendSessionId: OCID, claudeSessionId: null, name: 'AgyInPlace', host: null, buffer: '', sockName: null, socketPath: path.join(D, 'cw-' + OWID), pty: { write: (s) => { inFrames.push(String(s)); O.stdin.write(s); } } };
     const OS = { backend: 'opencode', mode: 'chat', backendSessionId: 'oc-live-1', claudeSessionId: null, name: 'Oc', host: null, pty: { write: () => { } } };
-    const frames = [], redFrames = [];
+    const frames = [], redFrames = [], inFrames = [];
     const money = { auth: 0, note: 0, release: 0 };
     const L = require(path.join(REPO, 'src/server/conversation-deliver.js')).create({
       dataDir: D,
       peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false, reason: 'unused' }), postChannelEvent: async () => ({ ok: false }) },
       getHosts: () => null, getConvIndex: () => null, serverSetting: () => false,
-      activeSessions: new Map([[AWID, S], [RWID, RS], ['sess-92-1000', OS]]), emitPeerCard: () => true,
+      activeSessions: new Map([[AWID, S], [RWID, RS], ['sess-92-1000', OS], [OWID, IS]]), emitPeerCard: () => true,
       authorizeSpend: () => { money.auth++; return { ok: true, identity: { key: 'slot-a', name: 'A' }, hold: { id: 'h' + money.auth } }; },
       noteSpend: () => { money.note++; }, releaseSpend: () => { money.release++; },
       log: () => { },
@@ -475,7 +487,8 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
       C.attach(S, AWID, { onData: (cb) => { A.stdout.setEncoding('utf8'); A.stdout.on('data', cb); } }, { feedLive: noop, broadcastToSession: noop, broadcastActiveSessions: noop, readSessionMeta: () => null, writeSessionMeta: noop, updateSessionTodos: noop });
       await until(() => S.backendSessionId === ACID, 8000, 'the session record adopted');
       ok('agy-peer-wake: the live agy session is ADDRESSED by its own conversation id (addressableId = the backendSessionId its wrapper journaled — the cid vibespace-msg resolves; agy has no fork, so the verify-r6 rule never hides it)', addressableId(S) === ACID && S.claudeSessionId === null, JSON.stringify({ a: addressableId(S), b: S.backendSessionId }));
-      await until(() => fs.existsSync(path.join(BUF, AWID + '.json')) && fs.existsSync(path.join(BUF, RWID + '.json')), 5000, 'both sidecars');
+      // the CONTENT, never the file (ci358-reds item 7): an in-place sidecar exists from its first truncate on
+      await until(() => [AWID, RWID, OWID].every((w) => wrapperCaps(BUF, w, null).reason === 'ok'), 5000, 'the three sidecars, each carrying its caps');
       ok("agy-peer-wake: the antigravity row rides rung 1.5 — peerDelivery 'rpc-queue' — and the REAL wrapper's sidecar adverts peerMessage", capsOf('antigravity').peerDelivery === 'rpc-queue' && wrapperCaps(BUF, AWID, S.socketPath).peerMessage === true && L.peerReachable(ACID) === true);
       // ① IDLE ⇒ THE WAKE
       const t0 = Date.now();
@@ -508,10 +521,33 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
       ok('agy-peer-wake ③: Stop drops the queue (the owner\'s law) and the two queued frames come BACK — the REAL consumer re-stashes their words with their sender and path', r4.ok === true && st.some((e) => e.text === 'one more thing' && e.fromName === 'session C' && e.kind === 'peer') && st.some((e) => /task "nightly"/.test(e.text) && e.kind === 'notification'), JSON.stringify(st.map((e) => [e.text, e.fromName, e.kind])));
       ok("agy-peer-wake ③: …and those answers settle NOTHING ('not-ours' — mode-less, about earlier frames): every frame was charged exactly once", settles.slice(3).every((s) => s.v === 'not-ours' && s.mode === null) && settles.slice(3).length === 2 && money.note === 3, JSON.stringify({ tail: settles.slice(3), money }));
       // ④ THE RED COPY: the same wrapper with peerMessage:false — findRpcPeer skips it, nothing is written, and the miss
-      // names the cure (the owner's own conversation: its wrapper predates this lane until the session restarts)
+      // names the cure (the owner's own conversation: its wrapper predates this lane until the session restarts).
+      // ASKED WHILE ITS SIDECAR IS BEING WRITTEN (ci358-reds item 7, the .358 mirror's fast red: the runner's ④ landed on
+      // the copy's own sidecar write, which truncated the file before its bytes — the ladder read it EMPTY, 'no-sidecar',
+      // and said «no live inbox … any reachable machine»). Both copies' next sidecar write is HELD between its truncate and
+      // its bytes (armed, then a queue-resync makes the write) and ④ asks inside the hold: the runner's order, every run.
+      for (const h of [HOLD_R, HOLD_O]) fs.writeFileSync(path.join(h, 'arm'), '');
+      for (const k of [R, O]) k.stdin.write(JSON.stringify({ type: 'queue-resync' }) + '\n');
+      await until(() => fs.existsSync(path.join(HOLD_R, 'held')) && fs.existsSync(path.join(HOLD_O, 'held')), 5000, 'both copies\' next sidecar write held (armed + a queue-resync)');
+      const heldOf = (h) => fs.readFileSync(path.join(h, 'held'), 'utf8');
+      const seen = (wid) => { let bytes = -1; try { bytes = fs.statSync(path.join(BUF, wid + '.json')).size; } catch { } return { bytes, read: wrapperCaps(BUF, wid, null).reason }; };   // what the leg saw
       const rr = await L.deliverToConversation(RCID, 'wake up, old one', { fromName: 'session B' });
-      ok('agy-peer-wake ④: RED COPY (peerMessage:false, the base advert) — findRpcPeer SKIPS it: no frame, the ladder misses', wsrc.includes(ADVERT) && wrapperCaps(BUF, RWID, RS.socketPath).peerMessage === false && rr.ok === false && redFrames.length === 0 && !rr.notRunning, JSON.stringify(rr));
-      ok('agy-peer-wake ④: …and the miss SAYS it is running with a process that predates live messages + the cure (restart), never «no live inbox … any reachable machine»', /running, but its agent's process predates live messages — restart the session/.test(rr.reason) && !/no live inbox/.test(rr.reason) && M.heldKind(rr, rr.reason) === 'not-reachable', rr.reason);
+      const seenR = seen(RWID);
+      ok('agy-peer-wake ④: RED COPY (peerMessage:false, the base advert) — findRpcPeer SKIPS it: no frame, the ladder misses (asked while its sidecar write is held: the held bytes are a temp file\'s, the sidecar stays whole)', wsrc.includes(ADVERT) && heldOf(HOLD_R).startsWith(path.join(BUF, RWID + '.json.')) && seenR.read === 'ok' && wrapperCaps(BUF, RWID, RS.socketPath).peerMessage === false && rr.ok === false && redFrames.length === 0 && !rr.notRunning, JSON.stringify({ rr, sidecar: seenR, held: heldOf(HOLD_R) }));
+      ok('agy-peer-wake ④: …and the miss SAYS it is running with a process that predates live messages + the cure (restart), never «no live inbox … any reachable machine»', /running, but its agent's process predates live messages — restart the session/.test(rr.reason) && !/no live inbox/.test(rr.reason) && M.heldKind(rr, rr.reason) === 'not-reachable', rr.reason + ' | sidecar ' + JSON.stringify(seenR));
+      const ri = await L.deliverToConversation(OCID, 'wake up, old one', { fromName: 'session B' });
+      const seenI = seen(OWID);
+      ok('agy-peer-wake ④: NEGATIVE CONTROL — the pre-.358 IN-PLACE sidecar write under the same hold shows the ladder an EMPTY file: «no live inbox … any reachable machine», notRunning — the runner\'s ✗ (the two legs above can go red)', wsrc.split(ATOMIC).length === 2 && heldOf(HOLD_O) === path.join(BUF, OWID + '.json') && seenI.bytes === 0 && seenI.read === 'no-sidecar' && ri.ok === false && ri.notRunning === true && /no live inbox for this conversation on any reachable machine/.test(ri.reason) && inFrames.length === 0, JSON.stringify({ ri, sidecar: seenI, held: heldOf(HOLD_O) }));
+      for (const h of [HOLD_R, HOLD_O]) fs.writeFileSync(path.join(h, 'release'), '');
+      // …and every chat wrapper the hub reads with wrapperCaps writes its sidecar the same way (a temp file renamed over it)
+      const persistOf = (f) => { const t = read(f), i = t.indexOf('function persistMeta() {'); return i < 0 ? '' : t.slice(i, t.indexOf(t[i + 24] === '\n' ? '\n}\n' : '\n', i)); };
+      const WRAPPERS = ['data/bin/chat-wrapper.js', 'data/bin/codex-chat-wrapper.js', 'data/bin/acp-wrapper.js', 'data/bin/agy-wrapper.js'];
+      ok('…every chat wrapper REPLACES its sidecar (temp file + rename), none rewrites it in place (ci358-reds item 7)', WRAPPERS.every((f) => /fs\.renameSync\(tmp, metaFile\)/.test(persistOf(f)) && !/writeFileSync\(metaFile/.test(persistOf(f))), WRAPPERS.filter((f) => !/fs\.renameSync\(tmp, metaFile\)/.test(persistOf(f)) || /writeFileSync\(metaFile/.test(persistOf(f))));
+      // ci358-reds round 2: the pin's scope is the WHOLE file — the boot write included (chat-wrapper's went through writeFileSync(metaFile)
+      // until round 2); the one in-place write left is the exit record (overwriteIfPresent: opened r+, never truncated, padded to the
+      // old length — it must never recreate a sidecar the hub already removed)
+      ok('…no chat wrapper writes its sidecar with writeFileSync(metaFile, …) ANYWHERE — the boot write is persistMeta\'s too (ci358-reds round 2)', WRAPPERS.every((f) => !/writeFileSync\(metaFile/.test(read(f))) && /\{ const e = persistMeta\(\); if \(e\) log\(`meta write failed/.test(read('data/bin/chat-wrapper.js')), WRAPPERS.filter((f) => /writeFileSync\(metaFile/.test(read(f))).join(' ') || 'chat-wrapper\'s boot write is not persistMeta');
+      ok('…and a write or rename that throws unlinks its own temp (best-effort) — a temp is left only by a wrapper killed between the two, the age sweep\'s business', WRAPPERS.every((f) => /catch(?: \(e\))? \{ try \{ fs\.unlinkSync\(tmp\); \} catch \{ ?\}/.test(persistOf(f))), WRAPPERS.filter((f) => !/catch(?: \(e\))? \{ try \{ fs\.unlinkSync\(tmp\); \} catch \{ ?\}/.test(persistOf(f))).join(' '));
       const ro = await L.deliverToConversation('oc-live-1', 'hello opencode', { fromName: 'session B' });
       ok('agy-peer-wake ④: a RUNNING session whose harness has no live lane (opencode, stash-only) is said as running — not "not running"', ro.ok === false && /running, but its agent takes no message mid-session/.test(ro.reason) && !ro.notRunning, JSON.stringify(ro));
       const rn = await L.deliverToConversation('no-such-conversation', 'hello?', { fromName: 'session B' });
@@ -519,9 +555,30 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
     } finally { console.log = log0; }
   } catch (e) { ok('agy-peer-wake: the round trip ran to its end (a timeout here = a leg above never got its answer)', false, e.message); }
   finally {
+    for (const h of [HOLD_R, HOLD_O]) { try { fs.writeFileSync(path.join(h, 'release'), ''); } catch { } }   // a leg that threw inside the hold
     await Promise.all(kids.map((k) => stopWrapper(k)));   // §55: the wrapper's SIGTERM record lands before the dir goes
     await stopWrapper(null, { dir: D });
   }
+}
+
+// ── ci358-reds round 2: THE AGE SWEEP reaps a sidecar temp a dead wrapper left (killed between its temp write and the rename) ──
+{
+  const { sweepAgedWrapperFiles } = require(path.join(REPO, 'src/server/wrapper-files.js'));
+  const SD = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-agesweep-'));
+  const now = Date.now(), cutoff = now - 7 * 86400000, aged = (now - 8 * 86400000) / 1000;
+  const plant = (fn, old) => { const p = path.join(SD, fn); fs.writeFileSync(p, '{"pid":4242}'); if (old) fs.utimesSync(p, aged, aged); return p; };
+  const deadTmp = plant('sess-7-1000.json.4242.tmp', true), deadBuf = plant('sess-7-1000.buf', true), deadSide = plant('sess-7-1000.json', true);
+  const youngTmp = plant('sess-8-1000.json.4343.tmp', false), liveTmp = plant('sess-9-1000.json.4444.tmp', true), stranger = plant('notes.json.tmp', true);
+  let n = null;
+  try { n = sweepAgedWrapperFiles(SD, { cutoff, isActive: (id) => id === 'sess-9-1000' }); } catch (e) { n = 'threw: ' + e.message; }
+  const left = `swept ${n}; left: ${fs.readdirSync(SD).sort().join(' ')}`;
+  ok('age sweep (ci358-reds round 2): a sidecar TEMP untouched for longer than the age, of a session not live, is REAPED', !fs.existsSync(deadTmp), left);
+  ok('age sweep: …beside the old law\'s own files — the dead session\'s aged .buf and .json go too (3 unlinked)', !fs.existsSync(deadBuf) && !fs.existsSync(deadSide) && n === 3, left);
+  ok('age sweep CONTROL: a temp YOUNGER than the age is left alone', fs.existsSync(youngTmp), left);
+  ok('age sweep CONTROL: a LIVE session\'s aged temp is left alone (the same id rule as its .buf / .json)', fs.existsSync(liveTmp), left);
+  ok('age sweep CONTROL: a file not shaped <id>.buf / <id>.json / <id>.json.<pid>.tmp is never touched', fs.existsSync(stranger), left);
+  ok('age sweep WIRING: server.js\'s boot sweep IS this function over BUFFERS_DIR with the live-session check — no inline pattern of its own', /sweepAgedWrapperFiles\(BUFFERS_DIR, \{ cutoff, isActive: \(id\) => activeSessions\.has\(id\) \}\)/.test(srv) && !srv.includes('(buf|json)'));
+  fs.rmSync(SD, { recursive: true, force: true });
 }
 
 fs.rmSync(dataDir, { recursive: true, force: true });

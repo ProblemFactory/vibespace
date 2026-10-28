@@ -226,7 +226,7 @@ console.log('⑥ the tab\'s navigation diary (lane phone-back-reload)');
   // the function never passed around as a value (an alias the census could not follow).
   // round 2: came (a way in: back / forward / other), ek (8 chars of the browser's random entry key — no URL, no title),
   // the hop rows' n / stay / why / drop
-  const KEYS = new Set(['k', 'type', 'step', 'st', 'len', 'ents', 'disc', 'ref', 'vis', 'v', 'tg', 'ex', 'ms', 'landed', 'push', 'skip', 'load', 'p', 'b', 's', 'd2', 'capture', 'id', 'came', 'ek', 'n', 'stay', 'why', 'drop', 'slow']);
+  const KEYS = new Set(['k', 'type', 'step', 'st', 'len', 'ents', 'disc', 'ref', 'vis', 'v', 'tg', 'ex', 'ms', 'landed', 'push', 'skip', 'load', 'p', 'b', 's', 'd2', 'capture', 'id', 'came', 'ek', 'n', 'stay', 'why', 'drop', 'slow', 'abort']);
   const FNS = new Map([['navNote', KEYS], ['exitIntentWrite', new Set(['t', 'hop', 'key', 'to'])]]);
   const acorn = require('acorn');
   const URLISH = /href|url|title|text|name|search|hash|referr|origin|host|path|cookie|location|document/i;

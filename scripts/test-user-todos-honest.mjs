@@ -273,8 +273,20 @@ console.log('⑥ THE WIRING — every door counts honestly, the row marks, the w
   // THE TOUCH SCALE (the owner 2026-10-25: 「按钮这么大，字这么小」): ONE touch-only block, its floors, the phone's first-screen page outside it
   const blkA = CSS.indexOf('/* ── lane foryou-honest: THE TOUCH SCALE'), blkB = CSS.indexOf('/* ── end of the touch scale (lane foryou-honest) ── */');
   const blk = blkA >= 0 && blkB > blkA ? CSS.slice(blkA, blkB) : '';
-  ok(/@media \(hover: none\) and \(pointer: coarse\) \{/.test(blk) && /#user-todos-popup \*, \.ut-mini-popover \*, #phone-home \*, \.iw \*, \.ut-sess-mark, \.ut-sess-mark \* \{ font-size: max\(14px, 1em\) !important; \}/.test(blk) && (blk.match(/min-height: 44px !important/g) || []).length === 1 && /  #phone-home :is\(button, \[role="button"\], summary/.test(blk) && /:is\(#user-todos-popup, \.ut-mini-popover, #phone-home, \.iw\) :is\(textarea, select, input:not\(\[type="radio"\], \[type="checkbox"\]\)\) \{ font-size: 16px !important; \}/.test(blk) && CSS.split('/* ── lane foryou-honest: THE TOUCH SCALE').length === 2,
+  ok(/@media \(hover: none\) and \(pointer: coarse\) \{/.test(blk) && /#user-todos-popup \*, \.ut-mini-popover \*, \.cn-card \*, #phone-home \*, \.iw \*, \.ut-sess-mark, \.ut-sess-mark \* \{ font-size: max\(14px, 1em\) !important; \}/.test(blk) && (blk.match(/min-height: 44px !important/g) || []).length === 1 && /  #phone-home :is\(button, \[role="button"\], summary/.test(blk) && /:is\(#user-todos-popup, \.ut-mini-popover, \.cn-card, #phone-home, \.iw\) :is\(textarea, select, input:not\(\[type="radio"\], \[type="checkbox"\]\)\) \{ font-size: 16px !important; \}/.test(blk) && CSS.split('/* ── lane foryou-honest: THE TOUCH SCALE').length === 2,
     'THE TOUCH SCALE is ONE touch-only block (hover: none, pointer: coarse — the mouse keeps its sizes): text ≥ 14 px and targets ≥ 44 px on the tray, the mini inbox, the phone\'s first-screen page, the window and the marker; every field 16 px (iOS never zooms)');
+  // lane chat-needs-you-card: the chat's needs card is ONE more surface of the same row — the same scale, the same renderer, the same chips
+  // + acceptance round 2 (the accordion in the chat): a FOLDED card (.cn-card.cn-fold) is the sheet's folded row — the accordion's
+  // own rules, never a bare .cn-card in them (the open card keeps the whole row)
+  ok(/\.cn-card :is\(button, \[role="button"\], summary, textarea/.test(blk) && (blk.match(/:is\(#user-todos-popup, \.ut-mini-popover, \.cn-card, #phone-home\)/g) || []).length >= 15 && !/:is\(#user-todos-popup, #phone-home(?:, \.cn-card\.cn-fold)?\)[^{,]*\.cn-card/.test(blk)
+    && (blk.match(/:is\(#user-todos-popup, #phone-home, \.cn-card\.cn-fold\) \.ut-item:not\(\.ut-open\)/g) || []).length === 5 && !/:is\(#user-todos-popup, #phone-home, \.cn-card(?!\.cn-fold)/.test(blk),
+    'the chat\'s needs card takes THE touch scale beside the mini inbox (16 px words, 44 px targets, the detail fold a row) — and the sheet\'s folded row only when FOLDED (.cn-card.cn-fold: the accordion in the chat, acceptance round 2)');
+  { const CARD = read('src/lib/chat-needs-card.js'), P2 = read('src/lib/user-todos-panel.js');
+    ok(/reconcile: \(container, entries\) => reconcileRows\(container, entries, null, miniCtx, \{ arm: false \}\)/.test(P2) && /const reconcileRows = \(container, entries, head = null, ctx = rowCtx, \{ arm = true \} = \{\}\) => \{\s*reconcileKeyed\(container, entries, \{[\s\S]{0,160}create: \(e\) => renderRow\(e, ctx\), patch: \(row, e\) => patchRow\(row, e, ctx\)/.test(P2) && /this\.app\.foryouRows\?\.reconcile\(rows, \[\{ item: e\.item \}\]\);/.test(CARD) && !/innerHTML = [^;]*ut-text/.test(CARD),
+      'ONE RENDERER in the chat too: the needs card\'s row is renderRow / patchRow (the panel\'s reconcileRows, the mini inbox\'s context) — the card writes no row of its own');
+    ok(/const miniCtx = \{ \.\.\.rowCtx, mini: true \};/.test(P2) && /rowCtx: \{ t, nameFor, wordsOf, detailOf, replyState, optionsOf: optionsFor, lang: resolveLang \}/.test(ACT),
+      'the needs card\'s chips are the tray\'s (the model\'s optionsFor — explicit, else the detail\'s parsed choice) through the same context');
+  }
   const ROWS = read('src/lib/user-todos-row.js');
   const labelled = ['Open', 'Reply', 'Mark done', 'Reopen', 'More'].every((w) => ROWS.includes('data-label="${escHtml(t(\'' + w + '\'))}"')) && ROWS.includes('data-label="${escHtml(tc(\'inbox\', \'Dismiss\'))}"') && /\.ut-actions > \.ut-act\[data-label\]::after \{ content: attr\(data-label\);/.test(blk);
   ok(labelled, 'every verb of a row carries its WORD (data-label: Reply · Open · Mark done · Dismiss · Reopen · More) — a touch screen draws it under the icon (::after; the button text, title and aria unchanged)');
@@ -282,8 +294,8 @@ console.log('⑥ THE WIRING — every door counts honestly, the row marks, the w
   // ONE ROW SHAPE on a phone (主开发's pick A, 2026-10-25): the sheet's and the page's rows FOLD on a touch screen — the question
   // + one meta line, the whole row the tap, its trailing conversation door; ONE open at a time; an answer folds it
   const acc = {
-    css: /:is\(#user-todos-popup, #phone-home\) \.ut-item:not\(\.ut-open\) > \.ut-body > :not\(\.ut-go, \.ut-text, \.ut-meta\) \{ display: none !important; \}/.test(blk)
-      && /:is\(#user-todos-popup, #phone-home\) \.ut-item:not\(\.ut-open\) > \.ut-body > :is\(\.ut-text, \.ut-meta\) \* \{ pointer-events: none; \}/.test(blk)
+    css: /:is\(#user-todos-popup, #phone-home, \.cn-card\.cn-fold\) \.ut-item:not\(\.ut-open\) > \.ut-body > :not\(\.ut-go, \.ut-text, \.ut-meta\) \{ display: none !important; \}/.test(blk)
+      && /:is\(#user-todos-popup, #phone-home, \.cn-card\.cn-fold\) \.ut-item:not\(\.ut-open\) > \.ut-body > :is\(\.ut-text, \.ut-meta\) \* \{ pointer-events: none; \}/.test(blk)
       && /\.ut-item:not\(\.ut-open\) > \.ut-body > \.ut-text \{ display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1 !important;/.test(blk)
       && /:is\(#user-todos-popup, #phone-home\) \.ut-item > \.ut-body > \.ut-go \{ display: inline-flex;[^}]*min-width: 52px; min-height: 44px;/.test(blk) && /^\.ut-go \{ display: none; \}/m.test(CSS),
     js: /if \(expand && isTouchDevice\(\)\) \{\n\s+if \(!item\.classList\.contains\('ut-open'\)\) \{ openOne\(item\); return; \}/.test(P)

@@ -86,8 +86,9 @@ const PERMISSION_OUTCOMES = Object.freeze(['allowed', 'denied', 'cancelled', 'un
  *  2.1.296 → 2.1.306 (lane cli-2-1-306-records): the 2.1.306 dump's `sentences` — the SAME 14 (names ep/wp/Ur), no `until`. The Dx
  *  sentence (2.1.306 `D0`) MOVED: it now opens its line, so the extractor reads its whole declaration (scripts/claude-cli-dump.mjs).
  *  2.1.306 → 2.1.307 (lane cli-2-1-307-records): the 2.1.307 dump's `sentences` — the SAME 14 (names rp/Bp/Br, suffix gwt), no `until`.
- *  2.1.307 → 2.1.308 (lane cli-2-1-308-records): the 2.1.308 dump's `sentences` — the SAME 14 under the SAME names, no `until`. */
-const PERMISSION_OUTCOME_CLI_VERSION = '2.1.308';
+ *  2.1.307 → 2.1.308 (lane cli-2-1-308-records): the 2.1.308 dump's `sentences` — the SAME 14 under the SAME names, no `until`.
+ *  2.1.308 → 2.1.312 (lane claude-steer-inject r3): the 2.1.312 dump's `sentences` — the SAME 14 on the same lists (names Qu/Im/Kr), no `until`. */
+const PERMISSION_OUTCOME_CLI_VERSION = '2.1.312';
 
 const row = (id, outcome, match, text, since, binary, evidence) => Object.freeze({ id, outcome, match, text, since, binary, evidence });
 

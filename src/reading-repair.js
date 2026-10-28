@@ -534,7 +534,7 @@ function findJournal(dataDir) {
 // dir are one decision — and only with enough of them to be a fact rather than
 // a coincidence. Candidates for RE-FILING are further restricted to identities
 // whose account is still on the roster: a removed subscription cannot receive
-// readings, and on this instance one removed account shares PandyMax's weekly
+// readings, and on this instance one removed account shares userP's weekly
 // phase, which would make every genuinely re-filable entry ambiguous.
 const MIN_OWN_READINGS = 5;   // fewer than this is a coincidence, not a window
 const OWN_DOMINANCE = 0.9;    // a stream whose own panel readings disagree with themselves establishes nothing

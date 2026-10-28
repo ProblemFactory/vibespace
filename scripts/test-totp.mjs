@@ -13,6 +13,10 @@
 //   ⑦ names: the default name, the entry name's grammar
 //   ⑧ the grants: grantOf's rows, useVerdict — locked first, a conversation in THIS run, a Task Group, a view, another entry
 //   ⑨ PURE: no require / import (acorn tokens); the HMAC is injected (none ⇒ a TypeError, never a silent default)
+//   ⑩ THE ADD DIALOG'S MODEL (lane vault-totp-add — the Vault window's 添加… ▸ 两步验证…, addPlanOf): the link's facts and the
+//      name they make (a typed name wins), the seed as people paste it, the standard's defaults and 高级's choices, the body
+//      each way sends (never both ways' fields), every refusal by name with its field (no link, a hotp link, a short seed, a
+//      non-base32 seed, no name, a bad name, 5 digits), and the model computes no code (no hmac reaches it)
 import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -159,6 +163,54 @@ console.log('⑨ PURE');
   ok(!names.includes('require') && !toks.some((t) => t.type.keyword === 'import') && !/\bcrypto\b|\bBuffer\b|process\./.test(src.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')), 'src/totp.js imports nothing and names no crypto / Buffer / process (comments never count)');
   let threw = null; try { T.totp(Buffer.from('k'), { now: 0 }); } catch (e) { threw = e; }
   ok(threw instanceof TypeError, 'no hmac injected ⇒ TypeError (never a silent default)');
+}
+
+console.log('⑩ THE ADD DIALOG\'S MODEL (lane vault-totp-add — addPlanOf)');
+{
+  const P = T.addPlanOf;
+  const link = `otpauth://totp/GitHub:owner%40example.com?secret=${HELLO}&issuer=GitHub`;
+  const a = P({ way: 'link', uri: `  ${link}  ` });
+  ok(a.ok && a.way === 'link' && a.name === 'github-owner' && JSON.stringify(a.facts) === JSON.stringify({ issuer: 'GitHub', account: 'owner@example.com', digits: 6, period: 30, algorithm: 'SHA1' }) && JSON.stringify(a.body) === JSON.stringify({ uri: link, name: 'github-owner' }),
+    'a pasted link ⇒ its facts (issuer · account · 6 digits · 30 s · SHA1), the name from them (github-owner), the body = the link trimmed + the name', a);
+  ok(!JSON.stringify(a.facts).includes(HELLO) && !('seed' in a.body), 'the facts carry no seed; the link way sends the link, never a seed field');
+  const a2 = P({ way: 'link', uri: link, name: '  work-github ' });
+  ok(a2.ok && a2.name === 'work-github' && a2.body.name === 'work-github', 'a name a person typed wins over the link\'s');
+  const a8 = P({ way: 'link', uri: `otpauth://totp/ACME:dev?secret=${HELLO}&digits=8&period=60&algorithm=sha256` });
+  ok(a8.ok && a8.facts.digits === 8 && a8.facts.period === 60 && a8.facts.algorithm === 'SHA256' && a8.facts.issuer === 'ACME' && a8.name === 'acme-dev', 'the link\'s own settings are the facts (8 digits · 60 s · SHA256), the issuer from the label', a8);
+  const noWho = P({ way: 'link', uri: `otpauth://totp/?secret=${HELLO}` });
+  ok(noWho.ok && noWho.name === 'code' && noWho.facts.issuer === '' && noWho.facts.account === '', 'a link with no issuer or account ⇒ the name «code» (the person renames it)', noWho);
+  const pasted = HELLO.toLowerCase().replace(/(.{4})/g, '$1 ').trim() + '==';
+  const b = P({ way: 'seed', seed: pasted, name: 'bank' });
+  ok(b.ok && b.way === 'seed' && b.name === 'bank' && b.body.seed === HELLO && b.body.digits === 6 && b.body.period === 30 && b.body.algorithm === 'SHA1' && !('uri' in b.body),
+    'the seed as people paste it (lower case, spaces, padding) ⇒ the canonical seed; empty settings ⇒ the standard (6 · 30 s · SHA1); never a uri field', b);
+  ok(JSON.stringify(T.ADD_DEFAULTS) === JSON.stringify({ digits: 6, period: 30, algorithm: 'SHA1' }) && T.ADD_CHOICES.digits.join() === '6,8' && T.ADD_CHOICES.period.join() === '30,60' && T.ADD_CHOICES.algorithm.join() === 'SHA1,SHA256,SHA512' && T.ADD_WAYS.join() === 'link,seed',
+    '高级\'s defaults = the standard; its choices: 6 / 8 digits, 30 / 60 s, SHA1 / SHA256 / SHA512; the two ways');
+  const b2 = P({ way: 'seed', seed: HELLO, name: 'bank', digits: '8', period: '60', algorithm: 'SHA512' });
+  ok(b2.ok && b2.body.digits === 8 && b2.body.period === 60 && b2.body.algorithm === 'SHA512', '高级\'s picks (as the selects give them: strings) ⇒ numbers in the body', b2.body);
+  const R = (x) => [x.ok, x.code, x.field].join();
+  const refusals = [
+    [P({ way: 'link', uri: '' }), 'false,bad_uri,uri', 'no link'],
+    [P({ way: 'link', uri: 'https://example.com/2fa' }), 'false,bad_uri,uri', 'not an otpauth link'],
+    [P({ way: 'link', uri: `otpauth://hotp/X:y?secret=${HELLO}&counter=1` }), 'false,hotp_unsupported,uri', 'a counter-based link'],
+    [P({ way: 'link', uri: 'otpauth://totp/X:y?issuer=X' }), 'false,bad_seed,uri', 'a link with no secret'],
+    [P({ way: 'link', uri: `otpauth://totp/X:y?secret=${HELLO}&digits=5` }), 'false,bad_digits,uri', 'a link with 5 digits'],
+    [P({ way: 'link', uri: link, name: 'a b' }), 'false,bad_name,name', 'a typed name with a space'],
+    [P({ way: 'seed', seed: '', name: 'x' }), 'false,bad_seed,seed', 'no seed'],
+    [P({ way: 'seed', seed: '0189ABCD', name: 'x' }), 'false,bad_seed,seed', 'a seed that is not base32 (0, 1, 8, 9)'],
+    [P({ way: 'seed', seed: HELLO.slice(0, 8), name: 'x' }), 'false,seed_too_short,seed', 'a seed of 5 bytes'],
+    [P({ way: 'seed', seed: HELLO, name: '' }), 'false,name_required,name', 'the typed way with no name (required, never guessed)'],
+    [P({ way: 'seed', seed: HELLO, name: 'x', digits: '9' }), 'false,bad_digits,settings', '9 digits'],
+    [P({ way: 'seed', seed: HELLO, name: 'x', algorithm: 'MD5' }), 'false,bad_algorithm,settings', 'MD5'],
+    [P({ way: 'scan' }), 'false,bad_way,uri', 'a way the dialog has not'],
+  ];
+  const off = refusals.filter(([x, want]) => R(x) !== want).map(([x, want, what]) => `${what}: ${R(x)} ≠ ${want}`);
+  ok(!off.length, `every refusal by name with its field (${refusals.length}: ${refusals.map((r) => r[2]).join(' · ')})`, off);
+  ok(P({ way: 'seed', seed: HELLO, name: '' }).facts.digits === 6 && P({ way: 'link', uri: link, name: 'a b' }).facts.issuer === 'GitHub', 'a refusal of the NAME keeps the facts (the dialog still shows what the link says)');
+  ok(refusals.every(([x]) => !JSON.stringify(x).includes(HELLO)), 'no refusal carries the seed');
+  // the model computes NO code: it has no hmac to call (the PREVIEW is the hub's)
+  const src = fs.readFileSync(path.join(REPO, 'src/totp.js'), 'utf8');
+  const body = src.slice(src.indexOf('function addPlanOf('), src.indexOf('\nmodule.exports'));
+  ok(body.length > 400 && !/\bhmac\b|\btotp\(|\bhotp\(/.test(body), 'addPlanOf computes no code (no hmac, totp or hotp in it) — the preview is the hub\'s, nothing stored');
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass}) — ${Date.now() - t0} ms`);

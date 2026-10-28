@@ -937,8 +937,13 @@ try {
     const filed20 = [];
     for (let k = 0; k < LENS.length; k++) filed20.push(await fileItem(token, { text: words(LENS[k], k), detail: words(LENS[(k + 3) % 8] + 50, k + 1), urgency: 'normal', ...(k === 1 || k === 4 ? { options: ['Run now', 'Wait for backup'] } : {}) }));
     check('8 production-shaped asks are filed (2 decisions with chips, 6 plain asks)', filed20.every((r) => r && r.success), filed20.map((r) => r && r.error));
-    // a FRESH open once the page holds all 8 (the broadcasts of the filings may trail the route's answers)
+    // a FRESH open once the page holds all 8 (the broadcasts of the filings may trail the route's answers). The page's OWN copy
+    // of the store is read BEFORE each open (lane chat-needs-you-card, acceptance round 3): the band counts read AFTER it
+    // cannot tell a fresh open from one that landed among the broadcasts and appended the rest (the slot law — an arrival
+    // into an open popup never opens a fold): under load that open drew 6, appended 2 and passed the counts — 8 rows, no fold
+    const ids20 = JSON.stringify(filed20.map((r) => r && r.item && r.item.id).filter(Boolean));
     for (let k = 0; k < 20; k++) {
+      await waitFor(`(() => { const o = new Set((app._inboxModel?.todos?.open || []).map((i) => i.id)); return ${ids20}.every((id) => o.has(id)); })()`, 10000);
       await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (!p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); document.getElementById('taskbar-user-todos').click(); return true; })()`);
       await sleep(300);
       if (await evalJs(`document.querySelector('#user-todos-popup .ut-band[data-band="5"] .ut-band-n')?.textContent === '6' && document.querySelector('#user-todos-popup .ut-band[data-band="4"] .ut-band-n')?.textContent === '2'`)) break;

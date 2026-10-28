@@ -438,7 +438,7 @@ console.log('P the fleet\'s custom browser kernel (customBrowser.* → override/
   const PL = (await import(path.join(REPO, 'src/preset-layers.js'))).default; // CJS through import (this suite is ESM with top-level await)
   const ENGN = (await import(path.join(REPO, 'src/browser-engines.js'))).default;
   const SHA = 'ab'.repeat(32);
-  const PIN = '7085e75f53efa707fb26c7b297d6789d6c9df0b0'; // lane engine-distribution: the kernel side's v0.1.2 — a FULL sha (D2's anchor)
+  const PIN = 'e21f1064e3e38511b11e45c4cab6d60b48fbcce0'; // lane engine-distribution: a FULL sha (D2's anchor) — lane kernel-asset-credential: the kernel side's v0.1.4
   const CB = { enabled: true, default: true, preinstall: true, source: { git: 'git@git.example.test:fleet/kernel-plugin.git', ref: PIN }, kernel: { url: 'https://dl.example.test/kernel-linux-x64.tar.zst', sha256: SHA } };
   const def = render(CHART, C), off = render(CHART, { ...C, customBrowser: { ...CB, enabled: false } }), on = render(CHART, { ...C, customBrowser: CB });
   const fOn = fleetOf(on);

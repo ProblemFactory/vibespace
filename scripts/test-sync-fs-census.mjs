@@ -35,7 +35,7 @@ const ok = (c, n, detail) => { if (c) { pass++; console.log('  ✓ ' + n); } els
 const PROOFS = new Set(['local-only', 'via-safefs', 'guarded']);
 // [file, scope, n, proof, why, match?]
 const ROWS = [
-  ["server.js", "<module>", 8, "local-only", "GET / reads <checkout>/public/index.html + its asset stats; the 30 s boot sweep walks data/session-buffers, data/agentd, data/chat-frames."],
+  ["server.js", "<module>", 6, "local-only", "GET / reads <checkout>/public/index.html + its asset stats; the 30 s boot sweep walks data/agentd, data/chat-frames (data/session-buffers' walk is src/server/wrapper-files.js sweepAgedWrapperFiles since ci358-reds round 2)."],
   ["server.js", "migrateHomeRename", 7, "local-only", "marker <checkout>/data/.home-migrated-*; stores = data/{mounts,layouts,task-groups,machine-mounts}.json + data/session-meta/*."],
   ["server.js", "ensureDir", 2, "local-only", "callers pass only data dirs: USAGE_CACHE_FILE's dir (usage-routes), SOCKETS_DIR/BUFFERS_DIR (ws-create), AGENTD_DIR (spawn/ssh, spawn/dial)."],
   ["server.js", "refreshWebuiPids", 1, "local-only", "metaPath = BUFFERS_DIR/<session id>.json; BUFFERS_DIR = <checkout>/data/session-buffers."],
@@ -314,7 +314,7 @@ const ROWS = [
   ["src/server/vault-totp.js", "writeJsonAtomic", 3, "local-only", "only caller writeGrants passes FILE = <dataDir>/vault-grants.json (the vault's data dir)."],
   ["src/server/voice-teach-engine.js", "*", 1, "local-only", "ledgerFile = <checkout>/data/voice-suggestions.json (mounts-plugins-wiring)"],
   ["src/server/window-targets-engine.js", "*", 5, "local-only", "lease/reach stores and screenshots under dataDir=<checkout>/data (window-live-wiring): window-shots/<handle>-<ts>-<pid>.png"],
-  ["src/server/wrapper-files.js", "*", 3, "local-only", "BUFFERS_DIR (data/buffers) sidecar/buf pair, or the buf path a dtach master wrapper argv names, read from /proc/<pid>/cmdline"],
+  ["src/server/wrapper-files.js", "*", 6, "local-only", "BUFFERS_DIR (data/buffers) sidecar/buf pair, or the buf path a dtach master wrapper argv names, read from /proc/<pid>/cmdline; + the boot's 30 s age sweep of BUFFERS_DIR (sweepAgedWrapperFiles: readdir / stat / unlink, moved out of server.js by ci358-reds round 2)"],
   ["src/session-store.js", "probeCandidate", 1, "guarded", "the project-dir decode's ONE probe: a storage path never reaches the existsSync (storageRootOf answers: a mount point is there, below it is not probed); a home / network path is witnessed"],
   ["src/session-store.js", "tmuxOnPath", 1, "local-only", "the hub process's PATH dirs + \"tmux\" (TTL-memoized)"],
   ["src/session-store.js", "*", 18, "local-only", "transcripts under ~/.claude/projects (cwd only names the projDir), ~/.claude/sessions, <checkout>/data/remote-jsonl, <dataDir>/session-buffers"],

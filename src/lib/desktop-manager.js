@@ -3,7 +3,9 @@ import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag do
 import { t } from './i18n.js';
 import { switcherForm, TILE_MIN_PX, STRIP_MIN_TILES } from './taskbar-fit.js'; // PURE (lane desktop-small): the switcher folds to ONE button when the desktops crowd the tiles out
 import { sheetRows } from './desktop-switch-sheet.js'; // int358 seam: the compact list's rows = the phone sheet's (PURE desktopRows over ONE input)
+import { desktopDoors, doorItems } from '../desktop-switch.js'; // lane desktop-doors-table: THE desktop doors — one PURE table for every surface
 import { UI_ICONS } from './icons.js'; // a compact-list row's ⋯ (lane desktop-small r2 ①)
+import { menuPlace } from './menu-place.js'; // PURE: THE ONE placement — the compact list at its open and after every patch (lane desktop-doors-table r4)
 import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal, in words (PURE)
 import { mergeDesktopRecord, windowIds, captureForViewport, PHONE_KEEPS } from './desktop-record.js'; // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
 import { deferKeysOf } from './layout-model.js'; // B-4767: a desktop's deferred records wait in one slot per writer class (PURE)
@@ -695,6 +697,7 @@ export class DesktopManager {
 
   _onRemoteDesktopUpdated(msg) {
     if (msg.desktops) {
+      const before = JSON.stringify(this._desktops.map((d) => [d.id, d.name])); // what an open list drew (r2 ①)
       const oldIds = new Set(this._desktops.map(d => d.id));
       const newIds = new Set(msg.desktops.map(d => d.id));
       this._desktops = msg.desktops;
@@ -740,14 +743,32 @@ export class DesktopManager {
         this.switchTo(activeHome || this._desktops[0].id);
       }
       this._renderSwitcher();
+      this._followOpenLists(before);
     }
   }
 
   /** Update desktop metadata from layout-sync message */
   updateFromMeta(desktopMeta) {
     if (!desktopMeta?.length) return;
+    const before = JSON.stringify(this._desktops.map((d) => [d.id, d.name]));
     this._desktops = desktopMeta;
     this._renderSwitcher();
+    this._followOpenLists(before);
+  }
+
+  /** AN OPEN LIST FOLLOWS A REMOTE CHANGE (lane desktop-doors-table r2 ①): the compact list, the phone sheet and the window
+   *  switcher are body-level popovers that outlive the switcher's render — a desktop renamed, moved, added or deleted on
+   *  another screen redraws each one that is open (PURE followDesktops): a deleted one keeps its row in place, greyed WITH
+   *  the why that names it — never a live-looking row whose doors open on nothing, never a row gone from under a pointer or
+   *  a held drag (the next row would take the tap, the drop). The compact list is the manager's own — PATCHED IN PLACE, row
+   *  by row (its `_follow`, r3 ②: r2 rebuilt the whole popover, so the row under the pointer or a held drag was a new node);
+   *  the phone's two hear `vs-desktops`. `before` = the list's [id, name] pairs before the change. */
+  _followOpenLists(before) {
+    if (JSON.stringify(this._desktops.map((d) => [d.id, d.name])) === before) return;
+    const list = document.querySelector('.desktop-switch-menu'), btn = document.querySelector('#desktop-previews .desktop-switch-compact');
+    if (list?._follow && btn) list._follow(); // the same list, its rows patched — a sprung one stays the drag's list, its scroll where it was
+    else if (list?._follow) { list.remove(); if (this._springList === list) this._springList = null; } // no compact button (the previews have room again): the list has no home
+    window.dispatchEvent(new CustomEvent('vs-desktops'));
   }
 
   /** Broadcast a specific desktop's state (used during switch) */
@@ -866,8 +887,7 @@ export class DesktopManager {
       // the Stage preview also carries `.desktop-preview` (+ `stage-preview`)
       // and sits BEFORE these, so an index map lands the window one desktop to
       // the right when the Stage is active (real report)
-      preview.dataset.desktopId = desk.id;
-      preview.title = desk.name;
+      preview.dataset.desktopId = desk.id; // (no title of its own: the tile's — the wrapper's switch door — covers the thumbnail too)
 
       // Collect windows for this desktop and draw miniature rectangles
       // All windows exist in DOM (visibility:hidden for non-active), so check live state
@@ -937,6 +957,7 @@ export class DesktopManager {
       label.className = 'desktop-preview-label';
       label.textContent = desk.name;
       wrapper.append(preview, label);
+      wrapper.title = this._doorLabel('switch', desk.id); // the tile IS the switch door (lane desktop-doors-table: its words are the table's)
 
       // Click to switch (leaving the stage view first when active)
       wrapper.addEventListener('click', () => {
@@ -992,7 +1013,7 @@ export class DesktopManager {
     const addBtn = document.createElement('button');
     addBtn.className = 'desktop-preview-add';
     addBtn.textContent = '+';
-    addBtn.title = 'Add desktop';
+    addBtn.title = this._doorLabel('new'); // THE 'new' door's words (lane desktop-doors-table: an untranslated English literal here, «New desktop» on the phone)
     addBtn.addEventListener('click', () => {
       const id = this.createDesktop();
       this.switchTo(id);
@@ -1036,7 +1057,7 @@ export class DesktopManager {
     btn.append(word, pos);
     btn.setAttribute('aria-label', stage?.isActive ? t('Stage') : (desk?.name || '') + ' — ' + t('Desktop {k}/{n}', { k: i + 1, n: this._desktops.length }));
     btn.insertAdjacentHTML('beforeend', '<svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 6l4.5 4.5L12.5 6"/></svg>');
-    btn.title = t('Switch desktop — {name}', { name: stage?.isActive ? t('Stage') : (desk?.name || '') });
+    btn.title = stage?.isActive ? t('Stage — sessions materialize here with their workspace') : this._doorLabel('switch', desk?.id); // the desktop on show's switch door — the table's words (r2 ④: the fence found it hand-written); the Stage: its tile's words
     if ([...this.app.wm.windows.values()].some((w) => w._desktopId && w._desktopId !== this._activeId && w.element?.classList.contains('window-waiting'))) btn.classList.add('desktop-switch-waiting');
     btn.addEventListener('click', (e) => { e.stopPropagation(); this._openDesktopList(btn); });
     btn.addEventListener('dragover', () => this.dragHover(btn)); // a taskbar tile held here springs the list open too (its rows take the drop)
@@ -1047,56 +1068,154 @@ export class DesktopManager {
   /** THE COMPACT LIST'S ROWS — ONE named source: the phone sheet's (int358: its sheetRows = master's
    *  PURE desktopRows over the page's built windows and each held record's unbuilt ones — the same rows, the same counts on
    *  both surfaces); the Stage first when it is on, then every desktop with its window count; `desk` = the manager's own
-   *  desktop (the row's doors); `on` = the one on show. */
-  _desktopListRows() {
+   *  desktop (the row's doors); `on` = the one on show. `drawn` = the rows an open list shows (a remote change patches it,
+   *  r2 ① / r3 ②): a desktop deleted elsewhere keeps its row, `why` = the switch door's shut words (by the name it showed). */
+  _desktopListRows(drawn = null) {
     const stage = this.app.stage;
     const rows = [];
     if (stage?.enabled) rows.push({ kind: 'stage', name: t('Stage'), count: null, on: !!stage.isActive });
-    for (const r of sheetRows({ desktopManager: this, wm: this.app.wm })) {
+    for (const r of sheetRows({ desktopManager: this, wm: this.app.wm }, drawn)) {
       const desk = this._desktops.find((d) => d.id === r.id);
       if (desk) rows.push({ kind: 'desktop', id: r.id, desk, name: r.name, count: r.windows, on: !stage?.isActive && r.active });
+      else if (r.gone) rows.push({ kind: 'desktop', id: r.id, desk: { id: r.id, name: r.name }, name: r.name, count: null, on: false, gone: true, why: this._doorLabel('switch', r.id, r.name) });
     }
     return rows;
   }
 
   /** The compact switcher's list (above the button on a bottom taskbar — PURE menuPlace keeps it inside the viewport): a row
-   *  switches, its right-click / ⋯ opens the desktop's doors, it takes a window's drop (_rowDoors); «Add desktop» last. */
+   *  switches, its right-click / ⋯ opens the desktop's doors, it takes a window's drop (_rowDoors); «New desktop» last. Open,
+   *  it FOLLOWS a remote change IN PLACE (`menu._follow`, from _followOpenLists — r3 ②, kb-patterns' keyed rows): each row
+   *  found by its desktop id is re-worded (_paintListRow), a desktop added elsewhere gets a new row at its place, a moved one
+   *  moves alone, a deleted one stays greyed with its why — its tap says it, its doors say it, a drop on it is refused by its
+   *  name (dropOnRow); never a new node under the pointer or a held drag. Placed by ONE door (_placeList — r4) once its
+   *  words are painted and again after every patch. */
   _openDesktopList(anchor) {
     const stage = this.app.stage, rows = this._desktopListRows();
     const more = `<span class="dsc-more" role="button" aria-label="${escHtml(t('More'))}" title="${escHtml(t('More'))}">${UI_ICONS.more}</span>`;
-    const html = (r) => `<span class="dsc-mark">${r.on ? '\u2713' : ''}</span><span class="dsc-name">${escHtml(r.name)}</span>${r.count == null ? '' : `<span class="dsc-count" title="${escHtml(t('{n} windows', { n: r.count }))}">${r.count}</span>`}${r.kind === 'desktop' ? more : ''}`; // labelHtml: every part escaped (a desktop's name is the person's)
-    const items = rows.map((r) => ({ labelHtml: html(r), action: r.kind === 'stage' ? () => { if (!stage.isActive) stage.enter(); } : () => { if (stage?.isActive) return stage.leave(r.id); this.switchTo(r.id); } }));
+    const html = (r) => `<span class="dsc-mark"></span><span class="dsc-name"></span><span class="dsc-why"></span><span class="dsc-count"></span>${r.kind === 'desktop' ? more : ''}`; // the row's parts — _paintListRow writes their words (as text: a desktop's name is the person's)
+    // a row switches — judged on the list as it is NOW (r2 ②): a desktop gone meanwhile is refused with the table's why, by the
+    // name its row shows (r3 ④: ONE sayer, _doorRefused)
+    const go = (id) => { const shown = menu._deskRows.find((x) => x.id === id) || { id, name: '' }; if (this._doorRefused(shown, 'switch')) return; if (stage?.isActive) return stage.leave(id); this.switchTo(id); };
+    const items = rows.map((r) => ({ labelHtml: html(r), action: r.kind === 'stage' ? () => { if (!stage.isActive) stage.enter(); } : () => go(r.id) }));
     items.push({ separator: true });
-    items.push({ label: '+ ' + t('Add desktop'), action: () => { const id = this.createDesktop(); this.switchTo(id); } });
+    items.push({ label: '+ ' + this._doorLabel('new'), action: () => { const id = this.createDesktop(); this.switchTo(id); } });
     const r = anchor.getBoundingClientRect();
     const menu = showContextMenu(r.left, r.top, items, 'context-menu', { up: r.top > window.innerHeight / 2, extraClass: 'desktop-switch-menu' }); // styled BEFORE it is measured
     const els = menu.querySelectorAll(':scope > .context-menu-item');
     rows.forEach((row, k) => { if (row.kind === 'desktop' && els[k]) this._rowDoors(els[k], row.desk); });
+    rows.forEach((row, k) => { if (els[k]) this._paintListRow(els[k], row); });
+    this._placeList(menu); // its words painted: placed as it reads (showContextMenu measured empty rows — a long name ran it past the edge)
+    menu._deskRows = rows.filter((r) => r.kind === 'desktop').map((r) => ({ id: r.id, name: r.name, gone: !!r.gone })); // what it shows — a remote change follows from it
+    const head = rows[0]?.kind === 'stage' ? els[0] : null; // the Stage's row stays first
+    menu._follow = () => {
+      const stood = menu.getBoundingClientRect(); // the box as it stood before the patch — the placement keeps its top
+      const now = this._desktopListRows(menu._deskRows).filter((x) => x.kind === 'desktop');
+      const byId = new Map([...menu.querySelectorAll(':scope > [data-desktop-id]')].map((el) => [el.dataset.desktopId, el]));
+      let prev = head;
+      for (const row of now) {
+        let el = byId.get(row.id);
+        if (!el) { // a desktop added on another screen: showContextMenu's own row (its class, its parts, close-then-act), its doors
+          el = document.createElement('div'); el.className = 'context-menu-item'; el.innerHTML = html(row); el.onclick = () => { menu.remove(); go(row.id); };
+          this._rowDoors(el, row.desk);
+        }
+        const at = prev ? prev.nextElementSibling : menu.firstElementChild;
+        if (el !== at) menu.insertBefore(el, at); // only a row whose place changed moves (a reorder moves one row, never the list)
+        this._paintListRow(el, row);
+        prev = el;
+      }
+      menu._deskRows = now.map((x) => ({ id: x.id, name: x.name, gone: !!x.gone }));
+      this._placeList(menu, stood); // THE ONE placement again (r4 — never a correction by hand: it lifted the list past the top)
+    };
     return menu;
   }
 
-  /** THE DESKTOP'S DOORS (lane desktop-small r2 ①: the compact form dropped them — exactly the person with many desktops
-   *  lost Rename, Delete and the order): the preview's right-click and a compact-list row's (its right-click or its ⋯) offer
-   *  the same items with the same handlers — Rename…, Delete (never the last desktop) and, for a row, Move up / Move down (a
-   *  preview reorders by drag; the list has none). `after` runs once the act is done — never after a cancel (r3 ④). */
-  _deskItems(desk, { order = false, after = null } = {}) {
+  /** THE compact list's placement — at its open and after every patch (lane desktop-doors-table r4: the patch corrected the
+   *  box by hand, with no floor and no cap — 3 desktops added to 17 at 951×585 put its top at −61, its first rows out of
+   *  reach, nothing to scroll; a name wider than the screen ran it 2 574 px wide). PURE menuPlace over the list's own box:
+   *  it KEEPS its top — a row added grows it downward (every row it shows stays where it was: the pointer and a held drag
+   *  keep their row), past the viewport's foot it is capped there and scrolls; never above the top, never wider than the
+   *  viewport (a long name is cut by its ellipsis). Measured whole: a capped list with what it scrolls, its width uncapped;
+   *  `stood` = its box before the change (a patch grew it already). Scrolled, it KEEPS ITS OFFSET (r5 — the room grown, a
+   *  remote change lifted its cap whole: the offset fell to 0, every row came down by it under the pointer): its cap lifts
+   *  only as far as its rows stay where they stood, and the offset is written back. */
+  _placeList(menu, stood = menu.getBoundingClientRect()) {
+    const Z = uiScale(), s = menu.scrollTop; // the offset it shows — read before a style is written
+    menu.style.maxWidth = '';
+    const b = menu.getBoundingClientRect(), k = menu.offsetHeight ? b.height / menu.offsetHeight : 1; // viewport px per layout px
+    const h = b.height + Math.max(0, menu.scrollHeight - menu.clientHeight) * k;
+    const at = menuPlace({ x: b.left, y: stood.top, w: b.width, h, vw: window.innerWidth, vh: window.innerHeight, keep: stood.height, scrolled: s * k });
+    menu.style.maxHeight = at.maxH == null ? '' : (at.maxH / Z) + 'px'; menu.style.overflowY = at.maxH == null ? '' : 'auto';
+    menu.style.maxWidth = at.maxW == null ? '' : (at.maxW / Z) + 'px';
+    menu.style.left = (at.left / Z) + 'px'; menu.style.top = (at.top / Z) + 'px';
+    if (at.scroll != null) menu.scrollTop = at.scroll / k; // kept: the same offset — every row where it stood
+  }
+
+  /** A compact-list row's words — written at the open and again IN PLACE by a remote change (r3 ②): the mark, the name, a
+   *  gone desktop's why (its name hidden — style.css), the window count, the switch door's title (a gone one: its why),
+   *  greyed; and the row's desktop, which its doors and its drop read (_rowDoors). */
+  _paintListRow(el, r) {
+    const part = (k) => el.querySelector(':scope > .dsc-' + k), why = part('why'), n = part('count');
+    part('mark').textContent = r.on ? '\u2713' : '';
+    part('name').textContent = r.name;
+    why.textContent = r.why || ''; why.hidden = !r.why;
+    n.textContent = r.count == null ? '' : String(r.count); n.hidden = r.count == null; n.title = r.count == null ? '' : t('{n} windows', { n: r.count });
+    el.classList.toggle('dsc-gone', !!r.gone);
+    if (r.kind === 'desktop') { el.title = this._doorLabel('switch', r.id, r.name); el._desk = r.desk; }
+  }
+
+  /** THE DESKTOP'S DOORS — the ONE menu builder of every surface (lane desktop-small r2 ①: the compact form dropped them;
+   *  lane desktop-doors-table: they were five hand-written lists, and the phone sheet's long press offered Rename · Delete
+   *  only — a phone has no drag, so it could not reorder). The rows are THE PURE table's (src/desktop-switch.js
+   *  desktopDoors → doorItems), the handlers the manager's own. `tier` = how they are drawn: 'desk' — the preview's
+   *  right-click (its order is its drag: `order` false) and a compact-list row's right-click / ⋯ (`order` true: Move up /
+   *  Move down), a shut door left out; 'phone' — the sheet's and the window switcher's long press: every door, a shut one
+   *  greyed WITH its why. `after` runs once the act is done — never after a cancel (r3 ④), on both tiers.
+   *  Round 2: the table is asked with the name the row SHOWED (a desktop gone meanwhile is said by it, never by its id —
+   *  and on the desk too: every door greyed with that why, never an empty menu); a menu is a picture of the list when it
+   *  opened, so each act is judged AGAIN at the press on the list as it is now (its neighbours too) — a shut one SAYS why
+   *  and runs nothing, `after` included (_doorRefused). */
+  _deskItems(desk, { order = false, after = null, tier = 'desk' } = {}) {
     const done = (p) => Promise.resolve(p).then((r) => { if (r !== false) after?.(); }); // a cancelled act (Rename… dismissed) leaves everything shut (r3 ④)
-    const items = [{ label: t('Rename…'), action: () => done(this._startRename(desk)) }];
-    if (this._desktops.length > 1) items.push({ label: t('Delete'), action: () => done(this.deleteDesktop(desk.id)), style: 'color:var(--red, #e55)' });
-    const i = order ? this._desktops.findIndex((d) => d.id === desk.id) : -1, prev = i > 0 ? this._desktops[i - 1] : null, next = i >= 0 ? this._desktops[i + 1] : null;
-    if (prev || next) items.push({ separator: true });
-    if (prev) items.push({ label: t('Move up'), action: () => done(this.reorderDesktop(desk.id, prev.id)) });
-    if (next) items.push({ label: t('Move down'), action: () => done(this.reorderDesktop(next.id, desk.id)) });
-    return items;
+    const at = (id, run) => () => { // THE VERDICT AT THE ACT (r2 ②)
+      if (this._doorRefused(desk, id)) return Promise.resolve(false);
+      const i = this._desktops.findIndex((d) => d.id === desk.id);
+      return run(this._desktops[i - 1], this._desktops[i + 1]);
+    };
+    const act = {
+      rename: at('rename', () => done(this._startRename(desk))),
+      delete: at('delete', () => done(this.deleteDesktop(desk.id))),
+      'move-up': at('move-up', (prev) => done(this.reorderDesktop(desk.id, prev.id))),
+      'move-down': at('move-down', (prev, next) => done(this.reorderDesktop(next.id, desk.id))),
+    };
+    return doorItems(desktopDoors({ desk: desk.id, name: desk.name, desktops: this._desktops, order, tier }), { t }).map((d) => (d.separator ? d
+      : d.enabled ? { door: d.id, label: d.label, action: act[d.id], ...(d.danger ? { style: 'color:var(--red, #e55)' } : {}) }
+      : { door: d.id, label: d.label, labelHtml: `<span class="door-label">${escHtml(d.label)}</span> <span class="door-why">${escHtml(d.why)}</span>`, title: d.why, disabled: true })); // a shut door says why (never greyed with no words)
+  }
+
+  /** A door's words from THE table (desktopDoors) — the «+»'s ('new'), a row's / tile's switch title ('switch'): its label,
+   *  or when it is shut its why (a row whose desktop is gone, by the `name` it showed — r2 ①③). */
+  _doorLabel(id, deskId = null, name = '') {
+    const d = desktopDoors({ desk: deskId, name, desktops: this._desktops }).find((x) => x.id === id);
+    return d ? t(d.enabled ? d.label : d.why, d.params) : '';
+  }
+
+  /** THE VERDICT AT THE ACT (r2 ②: a door's verdict was frozen when its menu opened — another screen deleted the desktop or
+   *  its neighbour, and the press then did nothing while `after` counted it done): the door `id` of `desk` asked AGAIN of the
+   *  table on the list as it is now. Shut ⇒ its why is SAID (a toast, the words its row would show) and true; open ⇒ false. */
+  _doorRefused(desk, id) {
+    const d = desktopDoors({ desk: desk.id, name: desk.name, desktops: this._desktops }).find((x) => x.id === id);
+    if (!d || d.enabled) return false;
+    showToast(t(d.why, d.params), { type: 'warn', duration: 6000 });
+    return true;
   }
 
   /** A compact-list row's doors (r2 ①): its right-click and its ⋯ open the desktop's items (with the order) — the list
    *  comes back on its new state after the act; and it is a DROP target — a title-bar drag released on it (window.js hit-tests
    *  `.desktop-switch-row`) or a taskbar tile dropped on it moves that window there, the preview drop's road. */
   _rowDoors(el, desk) {
-    el.classList.add('desktop-switch-row'); el.dataset.desktopId = desk.id;
+    el.classList.add('desktop-switch-row'); el.dataset.desktopId = desk.id; el._desk = desk; // the row's desktop as it shows NOW — a remote change re-sets it (_paintListRow: renamed, gone)
     const back = () => setTimeout(() => { const b = document.querySelector('#desktop-previews .desktop-switch-compact'); if (b) this._openDesktopList(b); }, 0);
-    const open = (x, y) => showContextMenu(x, y, this._deskItems(desk, { order: true, after: back }), 'context-menu', { up: y > window.innerHeight / 2 });
+    const open = (x, y) => showContextMenu(x, y, this._deskItems(el._desk, { order: true, after: back }), 'context-menu', { up: y > window.innerHeight / 2 });
     el.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); open(e.clientX, e.clientY); });
     el.querySelector('.dsc-more')?.addEventListener('click', (e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); open(r.right, r.top); });
     el.addEventListener('dragover', (e) => { e.preventDefault(); el.classList.add('desktop-preview-drop'); });
@@ -1105,7 +1224,7 @@ export class DesktopManager {
       e.preventDefault(); const list = el.closest('.desktop-switch-menu');
       const winId = e.dataTransfer.getData('text/window-id');
       this.dragDone(); list?.remove(); // the drag is over: the list (sprung or clicked open) and its ref go (r3 ①)
-      if (winId) this.dropOnRow(winId, desk.id, desk.name); // a taskbar tile dropped here: a refusal is said
+      if (winId) this.dropOnRow(winId, el._desk.id, el._desk.name); // a taskbar tile dropped here: a refusal is said
     });
   }
 
@@ -1148,19 +1267,27 @@ export class DesktopManager {
 
   /** A window dropped on a compact-list ROW — both roads (window.js _dropOnDeskRow, a tile's drop). The row may be stale (r3
    *  ③: its desktop deleted on another screen while the list was open), so the move goes only to a desktop that IS here, as
-   *  the preview drop checks; a gone one is refused BY NAME and the window stays where it is. */
+   *  the preview drop checks; a gone one is refused BY NAME and the window stays where it is — the switch door's why, the
+   *  table's words (desktop-doors-table r3 ④: it kept a «{name}» sentence of its own). */
   dropOnRow(winId, deskId, name) {
     if (!this._desktops.some((d) => d.id === deskId)) {
-      showToast(t('«{name}» is no longer there — the window stays where it is', { name: name || '' }), { type: 'warn', duration: 6000 });
+      showToast(t('{why} — the window stays where it is', { why: this._doorLabel('switch', deskId, name) }), { type: 'warn', duration: 6000 });
       return { ok: false, code: 'no-desktop' };
     }
     return this.moveWindowToDesktop(winId, deskId, { speak: true });
   }
 
   async _startRename(desk) {
-    const name = await showInputDialog({ title: 'Rename Desktop', label: 'Desktop name', value: desk.name, confirmText: 'Rename' });
+    const w = desktopDoors({ desk: desk.id, name: desk.name, desktops: this._desktops }).find((d) => d.id === 'rename').dialog; // the Rename door's own dialog — its words are the table's (r2 ④)
+    const now = this._desktops.find((d) => d.id === desk.id) || desk; // its name as it is now (renamed elsewhere since the menu opened)
+    const name = await showInputDialog({ title: t(w.title), label: t(w.label), value: now.name, confirmText: t(w.confirm) });
     if (!(name && name.trim())) return false; // cancelled — false: nothing comes back (r3 ④)
-    this.renameDesktop(desk.id, name.trim());
+    if (this._doorRefused(desk, 'rename')) return false; // deleted on another screen while the dialog was open: SAID, the typed name never dropped in silence (r2 ②)
+    const typed = name.trim(), live = this._desktops.find((d) => d.id === desk.id);
+    // renamed on ANOTHER screen while the dialog was open (r3 ⑤): the typed name lands — the person's own last act — and the
+    // name it replaces is SAID, never overwritten in silence (renamed there to the same name: nothing to say)
+    if (live.name !== now.name && live.name !== typed) showToast(t(w.meanwhile, { was: now.name, now: live.name, name: typed }), { type: 'warn', duration: 8000 });
+    this.renameDesktop(desk.id, typed);
     return true;
   }
 

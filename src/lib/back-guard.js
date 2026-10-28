@@ -24,6 +24,9 @@
 // A SLOW EXIT IS STILL AN EXIT (acceptance round 4): a page whose go() did not end within its 3 s bound stays, but that
 // go() may only be slow — it keeps the intent, so the document a late commit lands on still goes on (exitHop), and one
 // that lands too late to go on boots and says so (slowExit).
+// A DOCUMENT THAT WENT ON FILES NOTHING (acceptance round 5): a chain of slow pages — the late landing hops, and its own
+// go() is slow too, so it stays at its own bound and boots — is the exit going on, told by its hop rows; slowExit is for
+// a landing that could not go on.
 
 /** A second back inside this window after the 「再返回一次退出」 toast leaves; later it re-arms. */
 export const BACK_WINDOW_MS = 2000;
@@ -105,12 +108,15 @@ export function backCostLoad({ navType = '', prev = [], now = 0, withinMs = COST
 
 /** Did THIS load come from an exit that LEFT LATE (round 4)? The previous document stayed through its go() (no pagehide
  *  within the 3 s bound) and left after all — its diary's slow row (a leave or a hop with `slow` ms, written at that late
- *  pagehide) — and this load did not go on (the wiring asks only when exitHop said no hop: the intent past its window,
- *  or a tap on the stayed page dropped it). The person sees VibeSpace load after their exit: an incident («a slow
- *  exit»), unlike the exit's own named load. The same frame as backCostLoad: navType back_forward, the rows from under
- *  `withinMs` ago, never a forward press or a page of another site. */
-export function slowExit({ navType = '', prev = [], now = 0, withinMs = COST_WINDOW_MS, came = '' } = {}) {
+ *  pagehide) — and this load did not go on: no live intent (past its window, or a tap on the stayed page dropped it).
+ *  The person sees VibeSpace load after their exit: an incident («a slow exit»), unlike the exit's own named load. The
+ *  same frame as backCostLoad: navType back_forward, the rows from under `withinMs` ago, never a forward press or a page
+ *  of another site. Round 5: never a document that DID go on — `mine` (this document's own rows so far) holds a hop
+ *  row of its own: it read a live intent and hopped, then stayed at its own bound or its cap (a chain of slow pages:
+ *  the diary's hop rows say so); a drop row (an intent not this load's) is no such hop. */
+export function slowExit({ navType = '', prev = [], now = 0, withinMs = COST_WINDOW_MS, came = '', mine = [] } = {}) {
   if (navType !== 'back_forward' || !prev.length || came === 'forward' || came === 'other') return false;
+  if (mine.some((r) => r && r.k === 'hop' && !r.drop)) return false;
   const last = prev[prev.length - 1];
   if (!(last && now >= last.t && now - last.t < withinMs)) return false;
   return prev.some((r) => r && (r.k === 'leave' || r.k === 'hop') && r.slow > 0);

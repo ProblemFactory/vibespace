@@ -841,6 +841,8 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const on = r.what || ((r.keywords && r.keywords.length) ? `messages with: ${r.keywords.join(', ')}` : 'every new message');
     if (r.already && r.setBy === 'user') console.log(r.note);
     else if (r.proposed && r.already) console.log(`a wake request of yours for ${target} is already waiting for the user (${r.request.id}); they decide.`);
+    // lane chat-needs-you-card: THE line to quote is the hub's (`filed` — the card in this conversation + the tray); an older hub says the tray only
+    else if (r.proposed && r.filed) { console.log(`requested — a wake or a digest is a billed turn, so the user approves it (at most ${r.dailyWakeCap} wakes a day); until then nothing wakes you.`); console.log(r.filed); }
     else if (r.proposed) console.log(`requested — a wake or a digest is a billed turn, so the user approves it: their For-you tray shows what Approve writes (at most ${r.dailyWakeCap} wakes a day). Until then nothing wakes you (request ${r.request.id}).`);
     else console.log(`watching ${r.target}${r.title ? ` (${r.title})` : ''} — ${on} rides your NEXT turn (free; nothing wakes you)${r.replaced ? '; your earlier watch here was replaced' : ''}. Read back: vibespace-channels watch --show ${r.target} · undo: vibespace-channels unwatch ${r.target}`);
     if (r.judged) console.log(r.judged);   // lane judged-watch-state: the answer's LAST line — the judged rule's road (saved either way; exit 0)
@@ -932,6 +934,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const r = await call('POST', '/api/agent/channels/request', { conv, why });
     if (r.already && r.level) console.log(r.via === 'everyone' ? `already allowed — the user gave every agent access to ${conv} (All agents); no request was filed.` : `you can already see ${conv} (${r.level}).`);
     else if (r.already) console.log(`a request of yours is already open for ${conv} (${r.request.id}); the user decides.`);
+    else if (r.filed) { console.log(`requested — the user sees "${why}" and decides; approval grants YOU visibility on this ONE conversation.`); console.log(r.filed); }   // lane chat-needs-you-card: the hub's line (the card + the tray)
     else console.log(`requested — the user sees "${why}" in their For-you inbox and decides; approval grants YOU visibility on this ONE conversation (request ${r.request.id}).`);
     if (!r.already) console.log('  ' + TX.sentLine(r, why));   // lane cli-one-text-arg
     return;

@@ -943,7 +943,8 @@ function createSessionMessages(session, sessionId) {
     // measured version · the fleet's boot job — ONE For-you producer, origin plugin)
     const browserEngines = require('./browser-engines.js').create({ loader: pluginLoader, plugins, dataDir: path.join(rootDir, 'data'), log: console });
     engineDistribution = require('./engine-distribution.js').create({ dataDir: path.join(rootDir, 'data'), engines: browserEngines, loader: pluginLoader, fleetFacts: () => { try { return require('./cluster-presets.js').sharedPresets().fleet(); } catch { return null; } },
-      env: () => process.env, userTodos: () => userTodos, notify: () => { try { bcastAll({ type: 'browser-engines-updated' }); } catch { /* no clients */ } }, log: console });
+      env: () => process.env, userTodos: () => userTodos, notify: () => { try { bcastAll({ type: 'browser-engines-updated' }); } catch { /* no clients */ } }, log: console,
+      integrations: () => integrations }); // lane kernel-asset-credential: the Plugin Git credential for a kernel on the plugin's own repository
     { const ids = browserBackend.registerTests(); if (ids.length) console.log(`[browser] key rows' Test runners registered: ${ids.join(', ')}`); }
     // P6 (§6.2 / §6.5 / D6): the CDP-mediating proxy — LAZY (listens on
     // nothing until the first mediated lease), owned by the keeper (its

@@ -20,6 +20,7 @@
 const { ownOriginOf, pageVerdict } = require('../write-origin.js');   // THE origin rule (its strict form: a person on this page)
 const VU = require('../vault-use.js');   // PURE: the use's shape and the entry words (lane vault-use-law)
 const { sameToken } = require('../pairing-token.js');
+const CN = require('../foryou-actions.js'); // PURE (lane chat-needs-you-card): THE For-you action registry — the agent's ONE line after a filing (the card in its chat + the tray)
 const OF = require('../server/owner-facts.js'); // lane agent-context-owner-facts (B-7960): the agent's state answer carries the lock time + the tray in the hub's words
 const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
 const { runOfToken } = require('../server/vault-totp.js');
@@ -373,7 +374,7 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
     try { r = paste.request({ caller, words: b.words, purpose: b.purpose, into: b.into, kind: b.kind, name: b.name }); }
     catch (e) { return refusal(res, { code: 'unfiled' }); }
     if (!r || !r.ok) return refusal(res, r || { code: 'unfiled' });
-    return res.json({ ok: true, requestId: r.requestId, target: r.target, ...(r.already ? { already: r.already } : {}), tray: OF.tray() });
+    return res.json({ ok: true, requestId: r.requestId, target: r.target, ...(r.already ? { already: r.already } : { filed: CN.filedLine('secret-request', r.requestId, OF.tray()) }), tray: OF.tray() });
   });
   app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user' }); }));
   app.post('/api/vault/secrets', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.addEntry({ label: b.label, note: b.note, kind: b.kind, value, by: 'user' }); }));
@@ -450,7 +451,7 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
     let r;
     try { r = run.request({ caller, entry: typeof b.entry === 'string' ? b.entry : '', purpose: typeof b.purpose === 'string' ? b.purpose : '' }); }
     catch (e) { return refusal(res, { code: 'failed', words: DOOR.MORE_WORDS.failed }); }
-    return r && r.ok ? res.json(r) : refusal(res, r || { code: 'failed' });
+    return r && r.ok ? res.json({ ...r, ...(r.todoId ? { filed: CN.filedLine('vault-grant-ask', r.todoId, OF.tray()) } : {}) }) : refusal(res, r || { code: 'failed' });
   });
   app.get('/api/agent/vault/uses', (req, res) => {
     res.set('Cache-Control', 'no-store');

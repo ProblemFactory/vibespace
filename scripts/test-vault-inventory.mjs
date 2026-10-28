@@ -23,7 +23,8 @@
 //      per row, the rules in order); the row's two new named fields (origin closed, expiresAt — the accounts' long-lived token
 //      says when it stops); the state chips; the window's view (counts per purpose = the group's rows, the provenance filter,
 //      只看可显示, the page's own words in the search); the band's items and doors; the use-failure hour; MUTANTS: a row of no
-//      purpose ⇒ RED, a row in two purposes ⇒ RED; the window's band reads For you only and answers through it (pinned)
+//      purpose (lane vault-totp-add: the channel FAMILY of the kind registry, src/vault-kinds.js, given a category the rail has
+//      not) ⇒ RED, a row in two purposes ⇒ RED; the window's band reads For you only and answers through it (pinned)
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -474,11 +475,19 @@ console.log('⑧ THE PURPOSES AND THE PROVENANCE (lane vault-window-v2, design q
   // MUTANTS — compiled in memory at the real path (nothing written under src/)
   const Mod = require('module'), mf = path.join(REPO, 'src/vault-inventory.js'), srcI = fs.readFileSync(mf, 'utf8');
   const compile = (code) => { const m = new Mod(mf); m.filename = mf; m.paths = Mod._nodeModulePaths(path.dirname(mf)); m._compile(code, mf); return m.exports; };
-  const noPurpose = srcI.replace("if (store === 'channels') return 'integrations';", "if (store === 'channels') return null;");
+  // lane vault-totp-add: a row's purpose is its kind family's (src/vault-kinds.js) — the registry is mutated, compiled at its real
+  // path and put in front of the inventory's require for the one compile
+  const kf = path.join(REPO, 'src/vault-kinds.js'), srcK = fs.readFileSync(kf, 'utf8');
+  const withKinds = (kindsCode, code) => {
+    const k = new Mod(kf); k.filename = kf; k.paths = Mod._nodeModulePaths(path.dirname(kf)); k._compile(kindsCode, kf); k.loaded = true;
+    const prev = Mod._cache[kf]; Mod._cache[kf] = k;
+    try { return compile(code); } finally { if (prev) Mod._cache[kf] = prev; else delete Mod._cache[kf]; }
+  };
+  const noPurposeK = srcK.replace("category: 'integrations', stores: ['channels']", "category: 'nowhere', stores: ['channels']");
   const twoPurposes = srcI.replace('for (const r of rows || []) { const p = purposeOf(r); if (by.has(p)) by.get(p).push(r); }', "for (const r of rows || []) { const p = purposeOf(r); if (by.has(p)) by.get(p).push(r); if (r.store === 'mounts') by.get('other').push(r); }");
-  const m1 = compile(noPurpose), m2 = compile(twoPurposes);
+  const m1 = withKinds(noPurposeK, srcI), m2 = compile(twoPurposes);
   const lost = onceIn(m1, inv.rows), twice = onceIn(m2, inv.rows);
-  ok(noPurpose !== srcI && lost.length >= 3 && lost.every(([id, n]) => id.startsWith('channels:') && n === 0), 'MUTANT (a row of NO purpose — channels answer none) ⇒ RED: its rows land nowhere', lost);
+  ok(noPurposeK !== srcK && lost.length >= 3 && lost.every(([id, n]) => id.startsWith('channels:') && n === 0), 'MUTANT (a row of NO purpose — channels answer none) ⇒ RED: its rows land nowhere', lost);
   ok(twoPurposes !== srcI && twice.length === byStore('mounts').length && twice.every(([, n]) => n === 2), 'MUTANT (a row in TWO purposes) ⇒ RED: each mount counted twice', twice);
 }
 

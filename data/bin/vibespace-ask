@@ -193,6 +193,7 @@ async function fileItem(typed) {
   const tray = answer.tray && typeof answer.tray === 'object' ? answer.tray : {};
   const trayName = tray.name || 'the user\'s tray', trayPhrase = tray.phrase || trayName;
   console.log((item.existing ? 'already in ' + trayName + ' (refreshed): ' : 'added to ' + trayPhrase + ': ') + item.text + '  (' + item.id + ')');
+  if (answer.filed && !item.existing) console.log(answer.filed);   // lane chat-needs-you-card: THE line to quote — the hub's words (the card in this conversation + the tray)
   console.log('  ' + TX.sentLine(answer, text, detail));   // lane cli-one-text-arg: the route's count — a cut is visible here
   if (Array.isArray(item.options) && item.options.length) console.log('  options: ' + item.options.join(' | ') + '  (a chip reply arrives as exactly that label)');
   if (item.action && item.action.type === 'browser-grant') console.log('  grant: the user sees «Let this conversation use ' + item.action.label + '» — one press adds this conversation to the profile\'s «Who can use it» and answers you');

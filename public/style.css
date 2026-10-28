@@ -1349,6 +1349,14 @@ body.wm-dragging .window iframe, body.wm-dragging .window canvas, body.wm-draggi
 .desktop-switch-menu .dsc-more { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin: -2px -6px -2px 0; border-radius: var(--radius-sm); color: var(--text-dim); }
 .desktop-switch-menu .dsc-more:hover { background: var(--bg-hover); color: var(--text); }
 .desktop-switch-menu .desktop-switch-row.desktop-preview-drop { background: var(--accent-dim); box-shadow: inset 0 0 0 1.5px var(--accent); }
+/* lane desktop-doors-table r2 ①: a desktop deleted on another screen while the list was open keeps its row — greyed, the why
+   that names it in place of its name and count (its tap, its doors and a drop on it say the same words); the doors menu of
+   such a desktop greys every door with that why */
+.desktop-switch-menu .dsc-gone .dsc-name { display: none; }
+.desktop-switch-menu .dsc-why { flex: 1; min-width: 0; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-menu-item.disabled:has(> .door-why) { flex-direction: column; align-items: flex-start; gap: 2px; }
+.context-menu-item.disabled .door-label { white-space: nowrap; }
+.context-menu-item.disabled .door-why { color: var(--text-dim); }
 .desktop-switch-row > .desktop-preview-win { display: none; }
 .taskbar-usage {
   display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 0; cursor: pointer;
@@ -2574,6 +2582,13 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
   .mdesk-menu .mdesk-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .mdesk-menu .mdesk-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .mdesk-menu .mdesk-titles { font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* a desktop's doors on a phone (lane desktop-doors-table): THE table's every door in 44 px rows — a shut one greyed with
+     its why on a second line (never greyed with no words) */
+  .context-menu.mdesk-doors { min-width: 200px; max-width: calc(100vw - 16px); }
+  .mdesk-doors .context-menu-item { min-height: 44px; display: flex; flex-direction: column; justify-content: center; align-items: flex-start; gap: 2px; }
+  .mdesk-doors .door-why { font-size: 12px; color: var(--text-dim); white-space: normal; }
+  /* r2 ①: a desktop deleted on another screen while the sheet was open keeps its row, greyed — its why on its second line */
+  .mdesk-menu .context-menu-item.mdesk-gone { opacity: 0.55; }
   /* the 文件 card under the For-you page's bands (the first screen stays the attention list's) */
   #phone-home .ph-files { margin: 16px 0 4px; padding: 10px 12px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-window); }
   #phone-home .ph-files-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--text); }
@@ -5112,35 +5127,37 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
    this block cut out). ── */
 @media (hover: none) and (pointer: coarse) {
   /* THE FLOORS: no text under 14 px, no target under 44 × 44 */
-  #user-todos-popup *, .ut-mini-popover *, #phone-home *, .iw *, .ut-sess-mark, .ut-sess-mark * { font-size: max(14px, 1em) !important; }
+  #user-todos-popup *, .ut-mini-popover *, .cn-card *, #phone-home *, .iw *, .ut-sess-mark, .ut-sess-mark * { font-size: max(14px, 1em) !important; }
   #user-todos-popup :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"])),
   .ut-mini-popover :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"])),
+  .cn-card :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"])),
   #phone-home :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"])),
   .iw :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"]), .iw-row) { min-height: 44px !important; min-width: 44px; box-sizing: border-box; }
   /* fields read at 16 px (iOS never zooms a focused field) — the 14 px floor above must not shrink them; a box with the mic is
      48 px tall so the 44 px mic sits inside it */
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home, .iw) :is(textarea, select, input:not([type="radio"], [type="checkbox"])) { font-size: 16px !important; }
-  html:not(.voice-absent) :is(#user-todos-popup, .ut-mini-popover, #phone-home, .iw) .voice-field > textarea { min-height: 48px !important; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home, .iw) :is(textarea, select, input:not([type="radio"], [type="checkbox"])) { font-size: 16px !important; }
+  html:not(.voice-absent) :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home, .iw) .voice-field > textarea { min-height: 48px !important; }
   .iw .iw-back { font-size: 18px !important; }
   #user-todos-popup .ut-count, #phone-home .ut-count, .iw .ut-count { height: 20px; line-height: 20px; min-width: 20px; padding: 0 6px; box-sizing: border-box; }
   :is(#user-todos-popup, #phone-home) .ut-band-bar { flex-wrap: wrap; row-gap: 4px; } /* a band's name is never squeezed to «Othe…» — its buttons wrap below it */
   :is(#user-todos-popup, #phone-home) .ut-band-bar > .ut-band-name { flex: 0 0 auto; }
   /* a row: the question (16 px), its detail as a full-width row, the chips, the meta with its conversation door, the verbs */
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item > .ut-body { display: flex; flex-direction: column; min-width: 0; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-text { font-size: 16px !important; line-height: 1.4; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item > .ut-body { display: flex; flex-direction: column; min-width: 0; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-text { font-size: 16px !important; line-height: 1.4; }
   /* the meta is ONE run of text in a 44 px band (22 px lines + 11 px above and below; the name's door padded to 44 px inside
      it): a long conversation name wraps INSIDE itself and the age rides glued to it (« · 3min ago», one nowrap span) — no
      line starts with «·» (acceptance round 2) */
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-meta { display: block; line-height: 22px; padding-block: 11px; margin-top: 4px; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-meta .ut-sess { padding-block: 15px; overflow-wrap: anywhere; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-meta { display: block; line-height: 22px; padding-block: 11px; margin-top: 4px; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-meta .ut-sess { padding-block: 15px; overflow-wrap: anywhere; }
   /* THE FOLDED ROW (the accordion): the question + one meta line; the whole row opens it — its trailing door aside */
   :is(#user-todos-popup, #phone-home) .ut-item { position: relative; }
-  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > :not(.ut-go, .ut-text, .ut-meta) { display: none !important; }
-  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > .ut-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1 !important; line-clamp: 1 !important; overflow: hidden; } /* ONE line folded: at 14 px a band bar holding its «Mark all seen» and «N more — expand» wraps to 92 px — six two-line rows + the production shape's five heads end at 889 px at 375×812; one-line rows (52 px) end inside it */
-  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > .ut-meta { display: block; line-height: inherit; padding-block: 0; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
+  /* + lane chat-needs-you-card (acceptance round 2): the chat's folded needs card (.cn-card.cn-fold) is the sheet's folded row */
+  :is(#user-todos-popup, #phone-home, .cn-card.cn-fold) .ut-item:not(.ut-open) > .ut-body > :not(.ut-go, .ut-text, .ut-meta) { display: none !important; }
+  :is(#user-todos-popup, #phone-home, .cn-card.cn-fold) .ut-item:not(.ut-open) > .ut-body > .ut-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1 !important; line-clamp: 1 !important; overflow: hidden; } /* ONE line folded: at 14 px a band bar holding its «Mark all seen» and «N more — expand» wraps to 92 px — six two-line rows + the production shape's five heads end at 889 px at 375×812; one-line rows (52 px) end inside it */
+  :is(#user-todos-popup, #phone-home, .cn-card.cn-fold) .ut-item:not(.ut-open) > .ut-body > .ut-meta { display: block; line-height: inherit; padding-block: 0; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
   :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > .ut-meta .ut-sess { display: inline; min-height: 0; padding-block: 0; }
-  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > :is(.ut-text, .ut-meta),
-  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > :is(.ut-text, .ut-meta) * { pointer-events: none; }
+  :is(#user-todos-popup, #phone-home, .cn-card.cn-fold) .ut-item:not(.ut-open) > .ut-body > :is(.ut-text, .ut-meta),
+  :is(#user-todos-popup, #phone-home, .cn-card.cn-fold) .ut-item:not(.ut-open) > .ut-body > :is(.ut-text, .ut-meta) * { pointer-events: none; }
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go { display: inline-flex; position: absolute; top: 4px; right: 0; min-width: 52px; min-height: 44px; padding: 3px 4px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-window); color: var(--accent); cursor: pointer; }
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go svg { width: 18px; height: 18px; }
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go::after { content: attr(data-label); font-size: 14px; line-height: 1.1; white-space: nowrap; }
@@ -5154,22 +5171,25 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   :is(#user-todos-popup, #phone-home) .ut-item.ut-open:has(> .ut-body > .ut-go) > .ut-dot { margin-top: calc(4px + (44px - 22.4px) / 2); } /* the dot follows its line down */
   /* the fold (acceptance round 2): a full-width row AFTER the band's shown rows (user-todos-panel.js drawBands — on touch) */
   :is(#user-todos-popup, #phone-home) .ut-band > .ut-fold { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 0 12px 0 22px; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-detail { max-height: none; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-detail-exp > summary { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 12px; margin-top: 6px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-detail-exp > summary::before { content: none; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-detail-exp > summary::after { content: '▾'; content: '▾' / ""; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-detail-exp[open] > summary::after { content: '▴'; content: '▴' / ""; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-opts { gap: 6px; margin-top: 8px; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-opt, .iw .iw-opt { max-width: 100%; padding: 10px 14px; font-size: 15px !important; line-height: 1.35; white-space: normal; text-align: left; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; border-radius: 14px; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-actions { order: 2; float: none; width: 100%; margin: 8px 0 0; display: flex; gap: 6px; opacity: 1; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-reply { order: 3; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-actions > .ut-act { flex: 1 1 0; width: auto; height: auto; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px 2px; font-size: 16px !important; line-height: 1; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-actions > .ut-act[data-label]::after { content: attr(data-label); font-size: 14px; line-height: 1.2; white-space: nowrap; }
-  :is(#user-todos-popup, .ut-mini-popover, #phone-home) .ut-item .ut-actions > .ut-reply-btn { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-detail { max-height: none; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-detail-exp > summary { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 12px; margin-top: 6px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-detail-exp > summary::before { content: none; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-detail-exp > summary::after { content: '▾'; content: '▾' / ""; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-detail-exp[open] > summary::after { content: '▴'; content: '▴' / ""; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-opts { gap: 6px; margin-top: 8px; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-opt, .iw .iw-opt { max-width: 100%; padding: 10px 14px; font-size: 15px !important; line-height: 1.35; white-space: normal; text-align: left; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; border-radius: 14px; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions { order: 2; float: none; width: 100%; margin: 8px 0 0; display: flex; gap: 6px; opacity: 1; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-reply { order: 3; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions > .ut-act { flex: 1 1 0; width: auto; height: auto; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px 2px; font-size: 16px !important; line-height: 1; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions > .ut-act[data-label]::after { content: attr(data-label); font-size: 14px; line-height: 1.2; white-space: nowrap; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions > .ut-reply-btn { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
   /* the For-you window: its title and words read as body text */
   .iw .iw-title { font-size: 17px !important; }
   .iw .iw-detail, .iw .iw-row-title, .iw .iw-reply-input, .iw .iw-filter { font-size: 16px !important; }
   .iw .iw-act { justify-content: center; }
+  /* lane chat-needs-you-card: the chat's needs card takes the mini inbox's scale — its head and its quiet record read at 14 px+ */
+  .cn-card .cn-head { font-size: 15px !important; }
+  .cn-card .cn-line { min-height: 44px; line-height: 40px; }
 }
 /* ── end of the touch scale (lane foryou-honest) ── */
 
@@ -8135,6 +8155,35 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .vault-secret-label { color: var(--text-dim); }
 .vault-secret-kind { padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
 .vault-secret-error { min-height: 1em; font-size: 12px; color: var(--attn-text); }
+/* lane vault-totp-add: 添加… ▸ 两步验证… (design q-047 §3's mock) — two ways in (a segmented pair), a masked field + its 显示, the
+   link's facts, 高级's settings, the hub's preview (code · ring · seconds), the refusal line with 解锁… when locked */
+.dialog.vault-totp-add-dialog { width: min(520px, 94vw); }
+.vault-totp-add-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; }
+.vt-ways { display: flex; gap: 6px; flex-wrap: wrap; }
+.vt-ways .vt-way { height: 26px; padding: 0 12px; font-size: 12px; }
+.vt-pane { display: flex; flex-direction: column; gap: 6px; }
+.vt-pane[hidden] { display: none; }
+.vt-masked { display: flex; gap: 6px; align-items: center; }
+.vt-masked .vault-pw { flex: 1 1 auto; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.vt-reveal { flex: none; }
+.vt-facts { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 6px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); font-size: 12px; overflow-wrap: anywhere; }
+.vt-facts[hidden] { display: none; }
+.vt-facts .vt-who { color: var(--text); }
+.vt-facts .vt-set-words { color: var(--text-dim); }
+.vt-adv > summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); }
+.vt-adv-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 10px; margin-top: 6px; }
+.vt-set { padding: 5px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; }
+.vt-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; min-height: 30px; }
+.vt-same { font-size: 12px; color: var(--text-dim); }
+.vt-same[hidden] { display: none; }
+.vt-err-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vt-err-row .vt-err { flex: 1 1 200px; }
+.vt-unlock[hidden], .vt-save[hidden] { display: none; }
+@media (max-width: 600px) {
+  .vt-adv-grid { grid-template-columns: 1fr; }
+  .vt-ways .vt-way, .vt-reveal, .vt-preview-b, .vt-unlock { min-height: 36px; }
+  .vt-masked .vault-pw, .vault-totp-add-dialog .vt-name { min-height: 40px; font-size: 16px; }
+}
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) {
   .ut-secret-row { flex-wrap: wrap; }
   .ut-secret-input.vault-pw { flex: 1 1 100%; min-height: 40px; font-size: 16px; }
@@ -8808,6 +8857,18 @@ button.vw-chip { cursor: pointer; }
 @container vw (min-width: 1180px) {
   .vw-row[data-store="automation"] { grid-template-columns: fit-content(30%) minmax(0, 1fr) max-content max-content; }
   .vw-row[data-store="automation"] > .vw-act { grid-column: auto; justify-content: flex-end; }
+}
+/* lane vault-totp-add: a two-step row's value (看码 · the code · 复制 · the mask · 显示) and its doors (用于… · 删除) ran past a 980-px
+   window's edge (删除 cut, the list scrolled sideways) — the automation key's shape: the head on one line, the value and the doors
+   under it; one line from a 1180-px-wide window; a phone stacks it like every row */
+.vw-row[data-purpose="two-step"] { grid-template-columns: fit-content(40%) minmax(0, 1fr) max-content; }
+.vw-row[data-purpose="two-step"] > .vw-act { grid-column: 1 / -1; justify-content: flex-start; }
+@container vw (min-width: 1180px) {
+  .vw-row[data-purpose="two-step"] { grid-template-columns: minmax(200px, 1.2fr) minmax(170px, 1fr) 140px minmax(250px, auto); }
+  .vw-row[data-purpose="two-step"] > .vw-act { grid-column: auto; justify-content: flex-end; }
+}
+@container vw (max-width: 640px) {
+  .vw-row[data-purpose="two-step"] { grid-template-columns: minmax(0, 1fr); }
 }
 .vw-ak:empty { display: none; }
 .vw-ak-verbs-chip, .vw-ak-grants-chip { color: var(--text); }

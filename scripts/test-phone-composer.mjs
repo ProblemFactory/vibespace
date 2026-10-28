@@ -82,7 +82,7 @@ console.log('④ the fold table (PURE phoneBarFold; lane phone-bar-billing-nofol
 const row = (model, bill) => [['search', 36], ['model', model], ['effort', 51], ['goal', 20], ['style', 80], ['autoresume', 20], ['design', 20], ['billing', bill.full], ['perm', 51]]
   .map(([key, w]) => (key === 'billing' ? { key, w, forms: bill } : { key, w }));
 const plan = (fold, model, bill, room = 322) => { const p = fold({ chips: row(model, bill), room, gap: 8 }); return { folded: [...p.folded].join(','), billing: p.billing }; };
-ok('the never-fold set: search · model · turn state · health · the billing chip (who pays)', ['search', 'model', 'turnstate', 'health', 'billing'].every((k) => PHONE_BAR_NEVER_FOLD.includes(k)) && PHONE_BAR_NEVER_FOLD.length === 5, PHONE_BAR_NEVER_FOLD);
+ok('the never-fold set: search · model · what waits on you (the conversation\'s For-you cards — lane chat-needs-you-card) · turn state · health · the billing chip (who pays)', ['search', 'model', 'foryou', 'turnstate', 'health', 'billing'].every((k) => PHONE_BAR_NEVER_FOLD.includes(k)) && PHONE_BAR_NEVER_FOLD.length === 6, PHONE_BAR_NEVER_FOLD);
 const hub = plan(phoneBarFold, 66, { full: 117, compact: 63, icon: 19 }), runner = plan(phoneBarFold, 74, { full: 121, compact: 64, icon: 19 });
 ok('hub fonts: billing full; effort · style · perm fold', hub.billing === 'full' && hub.folded === 'effort,style,perm', hub);
 ok('runner fonts: billing STILL full — design folds instead', runner.billing === 'full' && runner.folded === 'effort,style,design,perm', runner);

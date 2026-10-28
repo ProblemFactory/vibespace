@@ -28,10 +28,26 @@
 // stay keeps the intent for the document a late commit lands on, re-arms by a new sentinel (a traversal while one is
 // pending ABORTS that one — measured), and the diary tells the late commit; a tap while the go() is pending aborts it by
 // the step onto the sentinel above (window.stop() aborts no traversal — measured).
+// THE LATE WATCH HOLDS (acceptance round 5, measured on Chrome 154 with the cache off and on): a tap AFTER the stay
+// aborts the suspended traversal too — the stay's new sentinel has nothing above it, so the step goes DOWN onto the
+// page's own entry (any same-document traversal aborts a pending one), then a new sentinel; a #fragment link's
+// navigation is a push that aborts nothing, so it ends no watch; a step that cannot abort — none to take, refused, or
+// onto the stale copy of its own entry that the document a late commit landed on lists (it moves nothing) — keeps the
+// intent and re-arms, so a commit still to come lands where the landing document's rule decides.
+// A TAP ENDS IN A POINTERUP (acceptance round 6, measured on Chrome 154 with the cache off and on): in the late watch a
+// press the browser takes — a pan, a gesture: a pointercancel — is no tap, and neither is the browser's own back or
+// forward, by a key or by a mouse's back / forward button (ONE predicate, navInput): each reaches the page before the
+// browser steps, and read as a tap the step ran ahead of the browser's back.
+// ONE TAP IN BOTH PHASES (acceptance round 7): while the exit's go() is still pending, a tap is the same — a pointerdown
+// that ends in a pointerup on the page, a key at its keydown, never the browser's own back or forward (tapOf) — round 6
+// told it in the late watch alone, so a pan 1 s into a slow exit still cancelled the exit and the same pan 4 s in did not.
+// ONE PRESS ACROSS A HOP (acceptance round 8): a press whose pointerdown came before a go() was told «nothing» (700 ms:
+// an iframe-only step, the exit goes on with the next hop) and whose pointerup comes after is a tap still — nothing()
+// hands the pointers down on to the next go()'s watch; round 7 lost it there, and the exit went on under the finger.
 import { t } from './i18n.js';
 import { showToast, noteOwnGesture } from './utils.js';
 import { BACK_WINDOW_MS, BACK_DISMISS_EVENT, EXIT_HOPS, EXIT_INTENT_MS, isSentinel, bootStep, backTarget, backVerdict, exitPlan, exitHop, backCostLoad, slowExit } from './back-guard.js';
-import { navNote, navLogRead, prevDocTail, entriesShape, exitIntentRead, exitIntentWrite, exitIntentClear } from './nav-log.js';
+import { navNote, navLogRead, prevDocTail, entriesShape, exitIntentRead, exitIntentWrite, exitIntentClear, DOC_ID } from './nav-log.js';
 
 export const BACK_SETTING = 'mobile.backGuard';
 const shown = (el) => !!el && !el.classList.contains('hidden');
@@ -62,6 +78,8 @@ function bootFacts() {
 const CAPTURE_EVERY_MS = 30 * 60e3;
 /** The entry the page stands on: the browser's random key, cut to 8 ('' without the Navigation API). */
 const entryKey = () => { try { return String(globalThis.navigation?.currentEntry?.key || '').slice(0, 8); } catch { return ''; } };
+/** The same key, whole (navigation.traverseTo's). */
+const fullKey = () => { try { return String(globalThis.navigation?.currentEntry?.key || ''); } catch { return ''; } };
 /** How this document was reached (navigation.activation, Chrome 123+): the key of the entry it came FROM (null = a page
  *  of another site; undefined = no such API) and the way — 'back' (from a higher entry), 'forward', 'other', '' (cannot be
  *  told). */
@@ -88,83 +106,148 @@ const GO_WAIT_MS = 700;
 const GONE_WAIT_MS = 3000;
 /** A stayed go() is watched this long after it for a late commit (the diary's slow row); a later one is not told. */
 const SLOW_WATCH_MS = 30000;
-const INPUTS = ['pointerdown', 'keydown'];
+/** A tap's events, in both phases of a watched go() (round 6 for the late watch, round 7 while the go() is pending): a tap
+ *  is a pointerdown that ENDS in a pointerup on the page — a pointercancel (a pan, a gesture the browser or the system
+ *  took) is none (measured on Chrome 154: a touch the browser pans gives the page its pointerdown, then a pointercancel
+ *  70–90 ms in). */
+const TAPS = ['pointerdown', 'pointerup', 'pointercancel', 'keydown'];
+/** The browser's own back or forward, never use of the page — ONE predicate for every form, so they cannot drift: a key
+ *  (Alt+← / →, ⌘ held, a BrowserBack / BrowserForward key — round 5) or a mouse's back / forward button (button 3 / 4 on a
+ *  pointer or mouse event — round 6). Each reaches the page BEFORE the browser steps (measured on Chrome 154: the
+ *  keydown before the back; the button's pointerdown and mousedown, the back at its release), and read as a tap the late
+ *  watch's step down ran ahead of the browser's own back (round 5's key: the two went back past the page — the older
+ *  document loaded). Android's own back — the gesture, the bar's button — is reasoned to give the page no input event
+ *  at all (the system takes it); that is NOT measured on a device. */
+const navInput = (e) => !!e && (e.type === 'keydown' ? !!e.altKey || !!e.metaKey || e.key === 'BrowserBack' || e.key === 'BrowserForward' : e.button === 3 || e.button === 4);
+/** ONE tap, for both phases of a watched go() (round 7): a key at its keydown, a pointer at its pointerup after its
+ *  pointerdown — `downs` holds the pointers down on the page —; a pointercancel ends the press untold, a pointerup whose
+ *  pointerdown came before the watch is none, and the browser's own back or forward (navInput) never is one. */
+const tapOf = (downs, e) => {
+  if (navInput(e)) return false;
+  const id = e.pointerId ?? 0;
+  if (e.type === 'pointerdown') { downs.add(id); return false; }
+  if (e.type === 'pointercancel') { downs.delete(id); return false; } // a pan, a gesture the browser or the system took
+  if (e.type === 'pointerup') return downs.delete(id); // false: a press that began before the watch
+  return e.type === 'keydown';
+};
 /** Can this browser say where a load came from (navigation.activation: Chrome 123+, Safari 26.2+)? Without it a load
  *  the exit's go() lands on cannot be told from a later forward press, so the exit writes no intent (round 3): one go(),
  *  round 1's ONE named load at most when an unseen step stops it short. */
 const tellsArrival = () => { try { return !!globalThis.navigation?.activation; } catch { return false; } };
 
 /** The end() of the go() this page STAYED through (round 4), still watched for a late commit — one at a time: a new go()
- *  and a back press (a same-document step aborts a pending traversal — measured) end it. */
+ *  and a back press (a same-document traversal aborts a pending one — measured) end it; a #fragment link's navigation
+ *  does not (round 5: a push aborts nothing — measured). */
 let lingering = null;
-/** A traversal of this document still pending, ABORTED by a same-document step onto the entry above (round 4, measured
- *  on Chrome 154 with the cache off and on: window.stop() aborts no traversal — it commits as if nothing happened;
- *  navigation.forward() onto a same-document entry aborts it and lands there; history.go(1) aborts it too, but Chrome
- *  counts it from the PENDING entry, so it lands nowhere). The exit's page stands on its page entry with the sentinel
- *  above: the abort IS the re-arm. A promise of whether the step landed (false: the commit came first), or null when no
- *  same-document entry stands above. */
-function abortGo() {
+/** abortGo's step on its way (round 5): its popstate is the page's own, never a back press. */
+let ownStep = false;
+/** The booted page's re-arm (installMobileBack's rearm) — null in a document the exit's go() loaded until its app boots. */
+let rearmHere = null;
+/** The last currententrychange's navigationType — it comes right before each popstate (round 5, measured on Chrome 154):
+ *  'traverse' for a back or a step, 'push' for a #fragment link's navigation; '' without the Navigation API. */
+let entryHow = '';
+/** A traversal of this document still pending, ABORTED by a same-document traversal (round 4, measured on Chrome 154 with
+ *  the cache off and on: window.stop() aborts no traversal — it commits as if nothing happened; a step onto an entry of
+ *  this document aborts it and lands there; history.go() is no sure step — Chrome counted a go(1) from the PENDING entry,
+ *  so it landed nowhere). By key (navigation.traverseTo): UP onto the entry above — the sentinel, so the abort IS the
+ *  re-arm —, else DOWN onto `home`, the page's own entry (round 5: after the stay's new sentinel nothing stands above —
+ *  measured: the step down aborts it as well). Never onto a copy of the page's own entry (round 5: the document a late
+ *  commit landed on lists one, index -1, its own key, right above it — measured: a step onto it commits at once, moves
+ *  nothing and aborts nothing). A promise of whether the page now stands where it stepped (false: refused, moved nothing,
+ *  or the commit came first), or null when no such entry stands here. */
+function abortGo(home = '') {
   try {
-    const nav = globalThis.navigation, list = nav.entries(), at = indexIn(nav, list), up = at >= 0 ? list[at + 1] : null;
-    if (!up || !up.sameDocument) return null;
-    const step = nav.forward();
+    const nav = globalThis.navigation, list = nav.entries(), cur = nav.currentEntry, at = indexIn(nav, list);
+    if (!(at >= 0)) return null;
+    const up = list.slice(at + 1).find((e) => !e || e.key !== cur.key); // the entry above, past a copy of the page's own
+    const to = up && up.sameDocument && up.index >= 0 ? up : home ? list.find((e) => e && e.sameDocument && e.key === home && e.key !== cur.key) : null;
+    if (!to) return null;
+    ownStep = true;
+    const step = nav.traverseTo(to.key);
     step.finished?.catch?.(() => { });
-    return step.committed.then(() => true, () => false);
-  } catch { return null; }
+    return step.committed.then(() => nav.currentEntry?.key === to.key, () => false).then((landed) => { if (!landed) ownStep = false; return landed; });
+  } catch { ownStep = false; return null; }
 }
 
-/** ONE go(n) meant to LEAVE this document, watched to its end: `nothing()` when no traversal began within GO_WAIT_MS (out
- *  of range, an iframe-only step); `input()` at a person's tap or key before one began (they are using the page: the
- *  intent ends). Once one began (beforeunload) the page STAYS — `stayed(why, abort)` — when it is still here GONE_WAIT_MS
- *  later ('cancelled': a 204, a stopped load — or only a slow one) or at a person's tap or key ('input' — every one
- *  counts: the traversal is aborted where it can be, `abort` = abortGo's promise, null where it cannot). Each outcome,
- *  and the pagehide that ends the page, removes every listener it added. A stayed go() is SUSPENDED, never forgotten
- *  (round 4): its intent kept for a late commit's landing — dropped only at a tap or key here (an abort that landed is
- *  one) or when its window ends —, and the late commit itself told in the diary (`hop`: the hop's number; null = the
- *  exit's own go()). */
-function watchedGo(n, { nothing, input = () => { }, stayed, hop = null }) {
+/** ONE go(n) meant to LEAVE this document, watched to its end: `nothing(downs)` when no traversal began within GO_WAIT_MS
+ *  (out of range, an iframe-only step) — the pointers still down handed on, so the next go()'s watch starts with them
+ *  (`held` — round 8: a press across that boundary is the tap it would have been); `input()` at a person's tap or key
+ *  before one began (they are using the page: the intent ends). Once one began (beforeunload) the page STAYS —
+ *  `stayed(why)` — when it is still here GONE_WAIT_MS later
+ *  ('cancelled': a 204, a stopped load — or only a slow one) or at a person's tap or key ('input'). Each outcome, and the
+ *  pagehide that ends the page, removes every listener it added. A stayed go() is SUSPENDED, never forgotten (round 4):
+ *  its intent kept for a late commit's landing, and the late commit itself told in the diary (`hop`: the hop's number;
+ *  null = the exit's own go()). A tap or key on the stayed page — while the go() is pending ('input') or after the stay
+ *  ('input-late', round 5); in both phases ONE tap (tapOf: round 6 in the late watch, round 7 while the go() is pending)
+ *  — ABORTS it where a same-document step can (abortGo): landed, the exit is over — the intent dropped, the watch ended;
+ *  else (no entry to step onto, the step refused or moving nothing — round 5) NOT aborted: the
+ *  intent kept for the landing document's rule (inside its window it goes on, past it it boots and files «a slow
+ *  exit»), the watch on, a later tap tried again. Either way the page stands on a sentinel again (rearm, abort 1 | 0). */
+function watchedGo(n, { nothing, input = () => { }, stayed, hop = null, held = null }) {
   lingering?.();
-  const t0 = Date.now(), mine = exitIntentRead(); // the intent this go() leaves behind (null: none was written)
+  const t0 = Date.now(), mine = exitIntentRead(), home = fullKey(); // the intent this go() leaves behind (null: none was written); the page's own entry
   const ours = () => { const i = exitIntentRead(); return !!mine && !!i && i.t === mine.t && i.hop === mine.hop; };
   const drop = () => { if (ours()) exitIntentClear(); };
-  let began = false, bound = null, wait = null;
+  let began = false, gone = false, watching = false, saidKept = false, bound = null, wait = null, cap = null;
+  const downs = new Set(held); // the pointers down while the go() is watched (tapOf: a tap is one that comes up; held: a
+  // go() before it in this exit began nothing while they were down — round 8)
   const off = () => {
     clearTimeout(wait); clearTimeout(bound);
     window.removeEventListener('beforeunload', onLeave); window.removeEventListener('pagehide', onHide);
-    for (const ev of INPUTS) window.removeEventListener(ev, onInput, true);
+    for (const ev of TAPS) window.removeEventListener(ev, onPendingInput, true);
   };
-  /** The stayed go(), watched SLOW_WATCH_MS more: a tap or key drops the intent, so does the end of its window; the late
-   *  commit's pagehide writes the slow row and keys the intent to the entry the page leaves from (measured: a sentinel
-   *  stood up while the traversal is pending becomes the landing document's activation from). */
+  /** The stayed go(), watched SLOW_WATCH_MS more (linger): a tap or key tries to abort it (tapped), the end of its window
+   *  drops the intent; the late commit's pagehide writes the slow row and keys the intent to the entry the page leaves
+   *  from (measured: a sentinel stood up while the traversal is pending becomes the landing document's activation from). */
+  const end = () => {
+    watching = false; clearTimeout(cap);
+    window.removeEventListener('pagehide', onLate); stopTaps();
+    if (lingering === end) lingering = null;
+  };
+  const stopTaps = () => { downs.clear(); for (const ev of TAPS) window.removeEventListener(ev, onLateInput, true); };
+  const onLate = () => {
+    gone = true;
+    if (ours()) exitIntentWrite({ t: mine.t, hop: mine.hop, key: entryKey(), to: 'below' });
+    navNote(hop === null ? { k: 'leave', slow: Date.now() - t0 } : { k: 'hop', n: hop, slow: Date.now() - t0 });
+    end();
+  };
+  /** A tap in the late watch (tapOf — round 6). */
+  const onLateInput = (e) => { if (tapOf(downs, e)) { stopTaps(); tapped('input-late'); } };
+  const listenTaps = () => { if (watching) for (const ev of TAPS) window.addEventListener(ev, onLateInput, true); };
   const linger = () => {
-    let cap = null;
-    const end = () => { clearTimeout(cap); window.removeEventListener('pagehide', onLate); for (const ev of INPUTS) window.removeEventListener(ev, drop, true); if (lingering === end) lingering = null; };
-    const onLate = () => {
-      if (ours()) exitIntentWrite({ t: mine.t, hop: mine.hop, key: entryKey(), to: 'below' });
-      navNote(hop === null ? { k: 'leave', slow: Date.now() - t0 } : { k: 'hop', n: hop, slow: Date.now() - t0 });
-      end();
-    };
-    window.addEventListener('pagehide', onLate); for (const ev of INPUTS) window.addEventListener(ev, drop, true);
+    watching = true;
+    window.addEventListener('pagehide', onLate);
     cap = setTimeout(end, SLOW_WATCH_MS);
     if (mine) setTimeout(drop, Math.max(0, mine.t + EXIT_INTENT_MS - Date.now()));
     lingering = end;
-    return end;
   };
-  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); stayed('cancelled', null); linger(); }, GONE_WAIT_MS); };
-  const onHide = () => { began = true; off(); };
+  /** A tap or key on the stayed page: the abort, then what it says (above) — the re-arm after the step's own popstate
+   *  (that comes after its committed — measured); a go() not aborted is said once. */
+  const tapped = (why) => {
+    const abort = abortGo(home);
+    const after = (landed) => {
+      if (gone) return; // the commit came first: this page is gone
+      if (landed) { drop(); end(); } else listenTaps();
+      if (!landed && saidKept) return;
+      if (!landed && rearmHere) saidKept = true;
+      setTimeout(() => { ownStep = false; rearmHere?.(why, landed ? 1 : 0); }, 0);
+    };
+    if (abort) abort.then(after); else after(false);
+  };
+  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); stayed('cancelled'); linger(); listenTaps(); }, GONE_WAIT_MS); };
+  const onHide = () => { began = true; gone = true; off(); };
   const onInput = () => {
     off();
     if (!began) { drop(); input(); return; }
-    const abort = abortGo();
-    if (!abort) drop();
-    stayed('input', abort);
-    const end = linger();
-    abort?.then((landed) => { if (landed) { drop(); end(); } });
+    stayed('input'); linger(); tapped('input');
   };
+  /** A tap while the go() is pending: the late watch's own (tapOf — round 7; round 6 tapped here at the first pointerdown
+   *  or keydown, any button, so a pan 1 s into a slow exit cancelled it). */
+  const onPendingInput = (e) => { if (tapOf(downs, e)) onInput(); };
   window.addEventListener('beforeunload', onLeave); window.addEventListener('pagehide', onHide);
-  for (const ev of INPUTS) window.addEventListener(ev, onInput, true);
+  for (const ev of TAPS) window.addEventListener(ev, onPendingInput, true);
   history.go(n);
-  wait = setTimeout(() => { if (!began) { off(); nothing(); } }, GO_WAIT_MS);
+  wait = setTimeout(() => { if (!began) { off(); nothing(downs); } }, GO_WAIT_MS);
 }
 
 /** An intent this document will not act on: dropped, and the diary says why (the cap reached, or not this load's). */
@@ -205,7 +288,7 @@ function goOn(from) {
     if (step === 'hop') { hop = Number(intent.hop) || 0; once(); } else stay(step === 'stay' ? 'cap' : 'show');
   };
   window.addEventListener('pageshow', onShow);
-  const once = () => {
+  const once = (held = null) => { // held: the pointers still down when the go() before it began nothing (round 8)
     if (settled) return;
     const e = entriesNow();
     if (!e) { stay('api'); return; }
@@ -213,7 +296,7 @@ function goOn(from) {
     hop++;
     exitIntentWrite({ t: Date.now(), hop, key: entryKey(), to: 'below' });
     navNote({ k: 'hop', n: hop, skip: e.current + 1, ents: entriesShape(e.list, e.current, location.pathname) });
-    watchedGo(-(e.current + 1), { nothing: once, input: () => stay('input'), stayed: (why) => stay(why, true), hop });
+    watchedGo(-(e.current + 1), { nothing: once, input: () => stay('input'), stayed: (why) => stay(why, true), hop, held });
   };
   once();
   return settledP;
@@ -260,6 +343,16 @@ export function installMobileBack(app) {
   let baseHref = location.href; // the page entry the sentinel stands above (pushState('') keeps the URL)
   const push = () => { baseHref = location.href; history.pushState({ vs: 1 }, ''); };
   const shapeNow = () => { const e = entriesNow(); return e ? entriesShape(e.list, e.current, location.pathname) : ''; };
+  /** A page that stayed through its go() stands on a sentinel again (round 4: a new one, never a traversal while one may be
+   *  pending — it would ABORT that one, measured) — unless one stands here already (a tap's step landed on it); the
+   *  diary's rearm row says why, and for a tap whether its step aborted the go() (abort 1 | 0 — round 5). */
+  const rearm = (why, abort) => {
+    if (!enabled() || app.isMobile === false) return;
+    if (!isSentinel(history.state)) push();
+    navNote(abort === undefined ? { k: 'rearm', why } : { k: 'rearm', why, abort });
+  };
+  rearmHere = rearm;
+  try { globalThis.navigation?.addEventListener?.('currententrychange', (e) => { entryHow = String(e?.navigationType || ''); }); } catch { }
   /** Step back onto the sentinel; when no forward entry answers (a same-document navigation dropped it), push one. */
   const forward = () => {
     restand = null;
@@ -280,16 +373,12 @@ export function installMobileBack(app) {
     const g = ++gen;
     watchedGo(-skip, {
       // nothing stood before the block after all (an entry outside it was a forward one): go(-skip) started nothing —
-      // the tab's first entry then, the ONE named load
+      // the tab's first entry then, the ONE named load (unwatched since round 1: no watch to hand a press still down to)
       nothing: () => { exitIntentClear(); const e = entriesNow(); if (g === gen && e && e.current > 0) { navNote({ k: 'leave', skip: e.current, load: 1 }); history.go(-e.current); } },
       // the booted page STAYS (round 4): its go() suspended (watchedGo keeps the intent for a late commit) and the page
-      // RE-ARMED, so the next back is ours again (the 「再返回一次退出」 toast) — the abort's own step lands on the
-      // sentinel; else a new one, never a traversal while one may be pending (it would ABORT that one — measured)
-      stayed: (why, abort) => {
-        navNote({ k: 'leave', why });
-        if (abort) abort.then((landed) => { if (landed) navNote({ k: 'rearm', why }); });
-        else if (enabled() && app.isMobile !== false) { push(); navNote({ k: 'rearm', why }); }
-      },
+      // RE-ARMED, so the next back is ours again (the 「再返回一次退出」 toast); a tap's re-arm is watchedGo's (round 5:
+      // after its abort's step)
+      stayed: (why) => { navNote({ k: 'leave', why }); if (why === 'cancelled') rearm(why); },
     });
   };
   // THE BOOT (lane phone-back-reload): what loaded this document, the rebuild when the entry below is not ours, the row
@@ -304,8 +393,9 @@ export function installMobileBack(app) {
   if (step === 'push' || step === 'rebuild') push();
   navNote({ k: 'boot', type: facts.type, step, st: stateWord(stateAtBoot), len: history.length, ents: shapeAtBoot, disc: facts.disc ? 1 : 0, ref: facts.ref, vis: facts.vis, came: came });
   // a load the exit's go() reached LATE (round 4: the page before stayed through it, then left — its slow row) and that
-  // did not go on (no live intent: past its window, or a tap there dropped it): an incident of its own
-  const late = slowExit({ navType: facts.type, prev, now: Date.now(), came });
+  // did not go on (no live intent: past its window, or a tap there dropped it — round 5: a document that went on, its own
+  // hop rows, never: it only stayed at its own bound): an incident of its own
+  const late = slowExit({ navType: facts.type, prev, now: Date.now(), came, mine: navLogRead().filter((r) => r && r.d === DOC_ID) });
   if (late || backCostLoad({ navType: facts.type, prev, now: Date.now(), came })) {
     const why = `${prev.map((r) => r.k + (r.v ? ':' + r.v : '') + (r.slow ? ` slow ${r.slow} ms` : '')).join(' > ')} → ${facts.type} boot (${step}, ${shapeAtBoot || 'no navigation API'})`;
     const recent = navLogRead().some((r) => r.k === 'capture' && Date.now() - r.t < CAPTURE_EVERY_MS);
@@ -324,7 +414,12 @@ export function installMobileBack(app) {
   });
   window.addEventListener('popstate', (e) => {
     gen++;
-    lingering?.(); // a same-document step: a traversal still pending is aborted by it (round 4 — measured)
+    const how = entryHow; entryHow = '';
+    if (ownStep) { ownStep = false; return; } // abortGo's own step (round 5): the go() it aborted, never a back press
+    // a same-document TRAVERSAL aborts a traversal still pending (round 4 — measured): the late watch ends; a #fragment
+    // link's navigation is a push that aborts none (round 5 — measured): the watch goes on (no Navigation API: the
+    // fragment rule below — another URL than the page's)
+    if (how ? how === 'traverse' : location.href === baseHref) lingering?.();
     if (isSentinel(e.state)) { if (fwdAt) { navNote({ k: 'go1', ms: Date.now() - fwdAt }); fwdAt = 0; } return; } // our own step forward landing
     // a same-document navigation to another URL (a #fragment link in rendered markdown) is no back press: stand above it
     if (location.href !== baseHref) { clearTimeout(restand); restand = null; push(); return; }

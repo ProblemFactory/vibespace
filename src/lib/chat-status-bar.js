@@ -16,7 +16,7 @@ const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.mat
 export const NARROW_BAR_PX = 480;
 export const SHORT_WINDOW_PX = 300;
 /** The regular class's one-row bar keeps these (the model, the billing icon, a dropped ssh pipe's amber chip); the rest fold behind ﹀. */
-const REGULAR_BAR_KEEP = new Set(['model', 'billing', 'remote']);
+const REGULAR_BAR_KEEP = new Set(['model', 'billing', 'remote', 'foryou']); // + lane chat-needs-you-card: what waits on the person never folds
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
 import { billingAuthKey, placementNote } from './pool-priority-model.js'; // PURE: THE ONE billing re-render key + the placement note (the title chip's twin)
 import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
@@ -76,7 +76,7 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onJumpToNeed = null, onChannelOpen = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null }) {
     this._ws = ws;
     // §26 (B-099e): the conversations THIS TURN read or drafted (PURE chipView over the witness's ring — the
     // view hands it over) and the one door that opens one; null = the turn touched nothing (no chip)
@@ -89,6 +89,8 @@ export class ChatStatusBar {
     // first) and its click goes there — null = the view cannot jump (no chip click)
     this._pendingAsks = [];
     this._onJumpToAsk = onJumpToAsk;
+    this._onJumpToNeed = onJumpToNeed; // lane chat-needs-you-card: the «waiting for you · N» chip lands the newest needs card
+    this._needs = null; // {text, title, n} — PURE foryou-actions chipWords, or null (no chip)
     // The touch face of Ctrl+F (docs/design-mobile-gaps.md #4): a magnifier
     // chip the stylesheet shows only ≤768px (the steer bolt's split). null =
     // the view has no search bar (never rendered).
@@ -669,6 +671,17 @@ export class ChatStatusBar {
     this.render();
   }
 
+  /** lane chat-needs-you-card: this conversation's own open For-you items (src/lib/chat-needs-card.js) — the chip's words
+   *  (PURE chipWords: «waiting for you · an approval» / «· 3 approvals» / «· 3»), or null = no chip. */
+  setNeeds(words) {
+    const next = words && words.text ? { text: String(words.text), title: String(words.title || ''), n: Number(words.n) || 0 } : null;
+    const sig = next ? `${next.text}\u0000${next.title}` : '';
+    if (sig === (this._needsSig || '')) return;
+    this._needsSig = sig;
+    this._needs = next;
+    this.render();
+  }
+
   setReviewEnabled(enabled) {
     this._reviewEnabled = !!enabled;
     this.render();
@@ -780,6 +793,10 @@ export class ChatStatusBar {
       const canJump = wc.clickable && typeof this._onJumpToAsk === 'function';
       chip('turnstate', `chat-status-turnstate chat-status-needs-action${canJump ? ' chat-status-clickable' : ''}`, wc.title, `${UI_ICONS.hourglass} ${escHtml(t('waiting for you'))}`);
     }
+    // lane chat-needs-you-card (the owner 2026-10-26: «这个界面里是不是应该有个地方能让我看到需要approve？»): THIS conversation's own
+    // For-you items — a channel watch's approval, an ask with its choices, a secret to paste — are cards in the chat; the
+    // chip names how many wait and of what kind, and its click lands the newest card whole and flashes it (S1's jump)
+    if (this._needs) chip('foryou', `chat-status-foryou chat-status-needs-action${typeof this._onJumpToNeed === 'function' ? ' chat-status-clickable' : ''}`, this._needs.title, `${UI_ICONS.inbox} ${escHtml(this._needs.text)}`);
 
     // SESSION HEALTH (§2.6, round 4) — the init frame's non-working MCP
     // servers / config entries / plugins, on the ONE surface that does not
@@ -1408,6 +1425,7 @@ export class ChatStatusBar {
     if (e.target.closest('.chat-status-search')) { e.stopPropagation(); this._onSearch?.(); return; }
     if (e.target.closest('.chat-status-vault-wait')) { e.stopPropagation(); window.dispatchEvent(new CustomEvent('vs-vault-door')); return; }   // r2: the vault's door
     if (e.target.closest('.chat-status-turnstate.chat-status-clickable')) { e.stopPropagation(); this._onJumpToAsk?.(); return; } // lane S1: go to the card that waits
+    if (e.target.closest('.chat-status-foryou.chat-status-clickable')) { e.stopPropagation(); this._onJumpToNeed?.(); return; } // lane chat-needs-you-card: the newest needs card
     if (e.target.closest('.chat-status-kinds')) { e.stopPropagation(); this._app?._openDiagnostics?.(); return; } // lane door-healthy-chat: the record kinds → ⚙ Diagnostics
     const wfChip = e.target.closest('.chat-status-wf');
     if (wfChip && this._onOpenWorkflow && wfChip.dataset.wfRun) {

@@ -131,7 +131,8 @@ async function requestCmd(rest) {
   const d = await callCoded('POST', '/api/agent/vault/request', { entry: positional[0], purpose: why }, 'request');
   if (d.already === 'open') { console.log(`${d.ref} is already open for runs — run it (a new kind of command still shows the user its card first)`); return; }
   if (d.already === 'granted') { console.log(`${d.ref} is already granted to this conversation (${d.once ? 'for one run' : 'for every run'} until ${whenAt(d.until)}) — run it`); return; }
-  console.log(`asked the user for ${d.ref} — the question is in their For you tray; nothing waits on it`);
+  if (d.filed) { console.log(`asked the user for ${d.ref}; nothing waits on it`); console.log(d.filed); }   // lane chat-needs-you-card: the hub's line (the card + the tray)
+  else console.log(`asked the user for ${d.ref} — the question is in their For you tray; nothing waits on it`);
   console.log('  their answer: once (your next run with it) · 8h (every run for 8 hours) · deny; a lock ends a grant');
   console.log('  `vibespace-vault uses` shows it when it comes; do other work meanwhile, and do not ask again in the chat');
 }
@@ -150,6 +151,7 @@ async function pasteCmd(words, out) {
   const where = t.into ? `${t.into} (${t.row} › ${t.field}) — VibeSpace uses it there itself` : `a new vault entry «${t.label}» (${t.kind})`;
   const tray = (d.tray && (d.tray.phrase || d.tray.name)) || 'their For you tray';
   if (d.already === 'open') console.log(`already asked (${d.requestId}) — the paste box still waits in ${tray}; nothing waits on it`);
+  else if (d.filed) { console.log(`asked the user to paste it — a masked paste box; nothing waits on it`); console.log(d.filed); }   // lane chat-needs-you-card: the hub's line (the card + the tray)
   else console.log(`asked the user to paste it (${d.requestId}) — a masked paste box is in ${tray}; nothing waits on it`);
   console.log('  where it goes: ' + where);
   console.log('  your next turn says «stored» (where, and how to use it) or «refused» — never the value; do other work meanwhile,');
@@ -173,7 +175,7 @@ async function usesCmd() {
 
 async function runCmd(rest) {
   // the hub parses the words (the CLI ships to other hosts — one spelling of the flags, src/vault-run.js parseRunArgs)
-  const note = setTimeout(() => console.error('# vibespace-vault run: still waiting — a new command shape waits for the user\'s answer in For you (up to 60 s), or the command is still running'), 3000);
+  const note = setTimeout(() => console.error('# vibespace-vault run: still waiting — a new command shape waits for the user\'s answer on the card in this conversation or in For you (up to 60 s), or the command is still running'), 3000);   // lane chat-needs-you-card: the note names the card
   let r;
   try { r = await postLong('/api/agent/vault/run', { args: rest, cwd: process.cwd() }); } finally { clearTimeout(note); }
   const d = r.data || {};

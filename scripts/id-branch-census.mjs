@@ -23,6 +23,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+// lane chat-needs-you-card (amendment 1 — the owner's registry law): the For-you ACTION TYPES are the registry's rows
+const FORYOU_TYPES = createRequire(import.meta.url)('../src/foryou-actions.js').ROWS.map((r) => r.type);
 
 export const FAMILIES = {
   harness: { ids: ['claude', 'codex', 'opencode', 'antigravity', 'acp', 'shell'], owners: [{ dir: 'src/harnesses/' }, { dir: 'src/adapters/' }] },
@@ -35,6 +38,9 @@ export const FAMILIES = {
   appkind: { ids: ['apt', 'deb', 'appimage', 'uv-tool', 'npm', 'installer'], owners: [{ dir: 'src/app-kinds/' }] },
   // lane dc-mount-providers (rv-server M6): a storage provider is src/mount-providers/<id>.js + one index line
   mount: { ids: ['s3', 'drive', 'gmail', 'onedrive', 'cloud', 'webdav', 'vibespace', 'sftp', 'rclone', 'cephfs'], owners: [{ dir: 'src/mount-providers/' }] },
+  // lane chat-needs-you-card (amendment 1): a For-you ACTION TYPE is ONE row of src/foryou-actions.js — every other line that
+  // branches on a quoted type is counted; the ratchet lets the count only fall (a new surface reads the registry's fields)
+  foryou: { ids: FORYOU_TYPES, owners: [{ file: 'src/foryou-actions.js' }] },
 };
 
 // FALSE POSITIVES — a line the regexes match that is not a branch on a family member. Each row: the family, the
@@ -195,6 +201,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     fs.writeFileSync(BASE, JSON.stringify(counts, null, 1) + '\n');
   } else if (process.argv.includes('--lower')) {
     fs.writeFileSync(BASE, JSON.stringify(lowered(JSON.parse(fs.readFileSync(BASE, 'utf8')), counts), null, 1) + '\n');
+  } else if (process.argv.includes('--seed-family')) {
+    // a NEW family's first counts (lane chat-needs-you-card: the foryou family) — refused for a family the baseline has
+    const fam = process.argv[process.argv.indexOf('--seed-family') + 1], base = JSON.parse(fs.readFileSync(BASE, 'utf8'));
+    if (!FAMILIES[fam] || base[fam]) { console.error(`--seed-family ${fam}: ${!FAMILIES[fam] ? 'no such family' : 'the baseline has it — use --lower'}`); process.exit(1); }
+    base[fam] = counts[fam]; fs.writeFileSync(BASE, JSON.stringify(base, null, 1) + '\n');
   } else if (process.argv.includes('--lines')) {
     for (const [fam, rows] of Object.entries(lines)) for (const r of rows) console.log(`${fam}\t${r.file}:${r.line}\t${r.text}`);
   }

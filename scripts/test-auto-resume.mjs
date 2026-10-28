@@ -171,7 +171,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ar-c-'));
   const f = mk({ dflt: true, dir: d3 });
   f.sessions.set('s1', sess());
-  const cause = { scope: 'pool', floorRule: { fiveHour: 10, weekly: 5 }, soonest: { id: 'lu', name: 'Member L', bucket: { label: 'Fable', resetsAt: T0 + 7200000 } }, rejector: { id: 'pandy', name: 'PandyMax', ownWall: { label: '5h', resetsAt: T0 + 3600000 }, floor: [{ label: 'Fable', kind: 'weekly', remaining: 2, line: 5, resetsAt: T0 + 86400000 }] } };
+  const cause = { scope: 'pool', floorRule: { fiveHour: 10, weekly: 5 }, soonest: { id: 'lu', name: 'Member L', bucket: { label: 'Fable', resetsAt: T0 + 7200000 } }, rejector: { id: 'pandy', name: 'userP', ownWall: { label: '5h', resetsAt: T0 + 3600000 }, floor: [{ label: 'Fable', kind: 'weekly', remaining: 2, line: 5, resetsAt: T0 + 86400000 }] } };
   f.ar.armIfEnabled('s1', f.sessions.get('s1'), T0 + 7200000, 'Member L: Fable 0% < 5%', { bucket: 'fiveHour', cause });
   const g = mk({ dflt: true, dir: d3 });
   g.sessions.set('s1', sess());

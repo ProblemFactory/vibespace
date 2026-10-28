@@ -2,6 +2,26 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.360 — 2026-10-27
+
+### Added
+- On a phone you can reorder desktops (a long press: Move up, Move down); an open desktop list follows your other screens, and a step it can’t take says why.
+- Vault → Add… → Two-step code… saves an authenticator code from its otpauth link or its seed, showing the current code to compare before you save it.
+- The Website login dialog's two-step field lists the two-step codes your vault keeps.
+- What a conversation asks of you — a question, an approval, a secret to paste — is also a card in that chat; answer it there or in For you.
+- The chat's status bar says «waiting for you · N» and names what waits; click it to go to the newest card. Answered anywhere, a card stays as one line.
+- When several things wait in one chat, only the newest card is open and the others fold to one line each; tap or click one to open it.
+- The custom browser kernel can ship in its plugin's private repository: it downloads with the Plugin Git credential, which goes only to that repository.
+
+### Fixed
+- On a phone, when going back out of VibeSpace is slow, a tap on the page while you wait keeps you there instead of throwing you onto an older VibeSpace page.
+- While you wait, scrolling the page or pressing a mouse's back button no longer counts as a tap.
+- VibeSpace no longer reports a slow exit when only the pages you went back to were slow.
+- A two-step code's row fits the Vault window: its Use for… and Delete buttons no longer run off the right edge.
+- An Allow or Approve pressed right after you scrolled no longer says it "moved under the pointer"; it counts once it has been still for a moment.
+- Suggestions to renew two stored keys that read the same are two items again; the second no longer replaced the first.
+- After Claude Code updates itself to 2.1.312, chats no longer show a red unknown-event card for its records: VibeSpace now knows that version.
+
 ## 2.369.359 — 2026-10-26
 
 ### Fixed

@@ -178,7 +178,7 @@ export const ROWS = [
   ['src/server/usage-probe-log.js', 'own-tree', 3, null, CLI],
   ['src/server/git-identity.js', 'own-tree', 1, null, `${CLI} — lane door-day-one-landing: ~/.claude.json's oauthAccount (the sign-in's email + name, git's default identity)`],
   ['src/server/window-targets-engine.js', 'own-tree', 4, null, DATA],
-  ['src/server/wrapper-files.js', 'own-tree', 4, null, PROC],
+  ['src/server/wrapper-files.js', 'own-tree', 6, null, PROC], // ci358-reds round 2 +2: the boot's age sweep (readdir + stat of BUFFERS_DIR), moved out of server.js
   ['src/session-status.js', 'own-tree', 1, null, DATA],
   ['src/session-store.js', 'own-tree', 27, null, `${CLI}; lane hub-fuse-sync-guard −2: the project-dir decode's three probes are ONE (probeCandidate: never below a storage mount)`],
   ['src/slot-transitions.js', 'own-tree', 4, null, DATA],

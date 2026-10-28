@@ -1824,19 +1824,9 @@ probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(
   // WRITTEN, so age is race-free by construction: only files untouched for
   // 7 days are ever deleted, and never for a currently-active session.
   setTimeout(() => {
-    let swept = 0;
     const cutoff = Date.now() - 7 * 86400000;
-    try {
-      for (const fn of fs.readdirSync(BUFFERS_DIR)) {
-        const m = fn.match(/^(.+)\.(buf|json)$/);
-        if (!m || activeSessions.has(m[1])) continue;
-        try {
-          const st = fs.statSync(path.join(BUFFERS_DIR, fn));
-          if (st.mtimeMs > cutoff) continue; // recently written → possibly a live-but-unadopted session
-          fs.unlinkSync(path.join(BUFFERS_DIR, fn)); swept++;
-        } catch {}
-      }
-    } catch {}
+    // <id>.buf / <id>.json / <id>.json.<pid>.tmp (a wrapper killed between its sidecar temp and the rename, ci358-reds round 2) — src/server/wrapper-files.js
+    let swept = require('./src/server/wrapper-files.js').sweepAgedWrapperFiles(BUFFERS_DIR, { cutoff, isActive: (id) => activeSessions.has(id) });
     // data/agentd/session-*.json attach configs (0600, vsht_ host token +
     // full spawn command) — the kill-path unlink needs the live session, so
     // pod recreation leaked one per dial/agentd session forever (audit

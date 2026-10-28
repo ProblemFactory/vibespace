@@ -5,7 +5,9 @@
 // release legs are scripts/test-window-drag.mjs §2 (f)).
 //   §1 the release + the recovery (src/lib/drag-end.js releaseBox / reachable / insideBox / releasePoint) + the resize's
 //      release (resizeRelease — acceptance r2 ③)
-//   §2 the one placement of a menu (src/lib/menu-place.js menuPlace)
+//   §2 the one placement of a menu (src/lib/menu-place.js menuPlace) — and of an OPEN one (`keep`: it keeps its top, capped at
+//      the foot; `maxW`: never wider than the viewport — lane desktop-doors-table r4; `scrolled`: a wheeled one keeps its
+//      offset, its cap lifted only as far as its rows stay — r5)
 //   §3 the taskbar at a small screen (src/lib/taskbar-fit.js stripHidden / wheelScroll / switcherForm + TILE_MIN_PX = the
 //      stylesheet's tile floor)
 //   §4 the cascade that buries nothing (src/lib/window-min-size.js cascadeBox)
@@ -85,14 +87,24 @@ const releaseTable = (rb) => [
 // ── §2 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('§2 the one placement of a menu (menu-place.js)');
 const menuTable = (mp) => [
-  ['P2-3 951×585: a 430 px title menu opened upward from y 294 — no room above, none below: clamped inside', mp({ x: 345, y: 294, w: 243, h: 430, vw: 951, vh: 585, up: true }), { left: 345, top: 151, maxH: null, side: 'clamped' }],
-  ['P2-3 1024×600: 414 px from y 318 upward', mp({ x: 365, y: 318, w: 247, h: 414, vw: 1024, vh: 600, up: true }), { left: 365, top: 182, maxH: null, side: 'clamped' }],
-  ['upward with room above: its bottom on the point', mp({ x: 100, y: 500, w: 200, h: 214, vw: 1024, vh: 600, up: true }), { left: 100, top: 286, maxH: null, side: 'above' }],
-  ['upward without room above, room below: below (the flip)', mp({ x: 100, y: 60, w: 200, h: 214, vw: 1024, vh: 600, up: true }), { left: 100, top: 60, maxH: null, side: 'below' }],
-  ['downward with room: below the point', mp({ x: 100, y: 60, w: 200, h: 214, vw: 1024, vh: 600 }), { left: 100, top: 60, maxH: null, side: 'below' }],
-  ['downward without room below: clamped to the bottom edge (as before)', mp({ x: 100, y: 500, w: 200, h: 214, vw: 1024, vh: 600 }), { left: 100, top: 382, maxH: null, side: 'clamped' }],
-  ['taller than the viewport: capped, scrolls, at the top pad', mp({ x: 100, y: 300, w: 200, h: 900, vw: 1024, vh: 600, up: true }), { left: 100, top: 4, maxH: 592, side: 'clamped' }],
-  ['past the right edge: slid left', mp({ x: 950, y: 60, w: 200, h: 100, vw: 1024, vh: 600 }), { left: 820, top: 60, maxH: null, side: 'below' }],
+  ['P2-3 951×585: a 430 px title menu opened upward from y 294 — no room above, none below: clamped inside', mp({ x: 345, y: 294, w: 243, h: 430, vw: 951, vh: 585, up: true }), { left: 345, top: 151, maxH: null, maxW: null, scroll: null, side: 'clamped' }],
+  ['P2-3 1024×600: 414 px from y 318 upward', mp({ x: 365, y: 318, w: 247, h: 414, vw: 1024, vh: 600, up: true }), { left: 365, top: 182, maxH: null, maxW: null, scroll: null, side: 'clamped' }],
+  ['upward with room above: its bottom on the point', mp({ x: 100, y: 500, w: 200, h: 214, vw: 1024, vh: 600, up: true }), { left: 100, top: 286, maxH: null, maxW: null, scroll: null, side: 'above' }],
+  ['upward without room above, room below: below (the flip)', mp({ x: 100, y: 60, w: 200, h: 214, vw: 1024, vh: 600, up: true }), { left: 100, top: 60, maxH: null, maxW: null, scroll: null, side: 'below' }],
+  ['downward with room: below the point', mp({ x: 100, y: 60, w: 200, h: 214, vw: 1024, vh: 600 }), { left: 100, top: 60, maxH: null, maxW: null, scroll: null, side: 'below' }],
+  ['downward without room below: clamped to the bottom edge (as before)', mp({ x: 100, y: 500, w: 200, h: 214, vw: 1024, vh: 600 }), { left: 100, top: 382, maxH: null, maxW: null, scroll: null, side: 'clamped' }],
+  ['taller than the viewport: capped, scrolls, at the top pad', mp({ x: 100, y: 300, w: 200, h: 900, vw: 1024, vh: 600, up: true }), { left: 100, top: 4, maxH: 592, maxW: null, scroll: null, side: 'clamped' }],
+  ['past the right edge: slid left', mp({ x: 950, y: 60, w: 200, h: 100, vw: 1024, vh: 600 }), { left: 820, top: 60, maxH: null, maxW: null, scroll: null, side: 'below' }],
+  ['a menu wider than the viewport: capped across, at the left pad', mp({ x: 300, y: 60, w: 1200, h: 100, vw: 1024, vh: 600 }), { left: 4, top: 60, maxH: null, maxW: 1016, scroll: null, side: 'below' }],
+  ['doors-table r4: an OPEN list (17 desktops at 951×585, 552 px from y 29) and three rows added there — it KEEPS its top, capped at the foot, scrolling (the hand correction lifted it to y −61)', mp({ x: 738, y: 29, w: 160, h: 642, vw: 951, vh: 585, keep: 552 }), { left: 738, top: 29, maxH: 552, maxW: null, scroll: 0, side: 'kept' }],
+  ['doors-table r4: …then a name wider than the viewport — capped across at the left pad, its top kept', mp({ x: 738, y: 29, w: 2570, h: 642, vw: 951, vh: 585, keep: 552 }), { left: 4, top: 29, maxH: 552, maxW: 943, scroll: 0, side: 'kept' }],
+  ['doors-table r4: an open list that still fits below its top — grows downward, no cap', mp({ x: 100, y: 200, w: 180, h: 300, vw: 951, vh: 585, keep: 270 }), { left: 100, top: 200, maxH: null, maxW: null, scroll: 0, side: 'kept' }],
+  ['doors-table r4: an open box no longer inside (the viewport shrank under it) — placed afresh, downward', mp({ x: 100, y: 400, w: 180, h: 300, vw: 951, vh: 585, keep: 300 }), { left: 100, top: 281, maxH: null, maxW: null, scroll: null, side: 'clamped' }],
+  ['doors-table r5: a list wheeled 100 px, the room grown till its content fits (25 desktops, 951×900) — it KEEPS ITS OFFSET: its cap lifts only as far as what it shows past it (5a98bf0f: lifted whole — the offset 0, every row 100 px down)', mp({ x: 738, y: 4, w: 160, h: 792, vw: 951, vh: 900, keep: 577, scrolled: 100 }), { left: 738, top: 4, maxH: 692, maxW: null, scroll: 100, side: 'kept' }],
+  ['doors-table r5: a list wheeled 100 px whose content shrank under its cap — the offset kept, the box shorter at its foot', mp({ x: 100, y: 29, w: 180, h: 500, vw: 951, vh: 585, keep: 552, scrolled: 100 }), { left: 100, top: 29, maxH: 400, maxW: null, scroll: 100, side: 'kept' }],
+  ['doors-table r5: …wheeled back to the top — the cap lifts whole (no dead scroll room)', mp({ x: 738, y: 4, w: 160, h: 792, vw: 951, vh: 900, keep: 692, scrolled: 0 }), { left: 738, top: 4, maxH: null, maxW: null, scroll: 0, side: 'kept' }],
+  ['doors-table r5: a wheeled list still taller than the room — capped at the foot, the offset carried', mp({ x: 738, y: 4, w: 160, h: 792, vw: 951, vh: 585, keep: 577, scrolled: 100 }), { left: 738, top: 4, maxH: 577, maxW: null, scroll: 100, side: 'kept' }],
+  ['doors-table r5: a wheeled box no longer inside — placed afresh, its offset left to the browser', mp({ x: 100, y: 400, w: 180, h: 300, vw: 951, vh: 585, keep: 300, scrolled: 50 }), { left: 100, top: 281, maxH: null, maxW: null, scroll: null, side: 'clamped' }],
 ];
 {
   const rows = menuTable(MP.menuPlace);
@@ -102,6 +114,29 @@ const menuTable = (mp) => [
   let n = 0, out = [];
   for (let vh = 300; vh <= 900; vh += 37) for (let h = 20; h <= 1000; h += 53) for (let y = 0; y <= vh; y += 29) for (const up of [false, true]) { n++; const p = MP.menuPlace({ x: 10, y, w: 100, h, vw: 800, vh, up }); if (!inside(p, h, vh)) out.push({ vh, h, y, up, p }); }
   ok(out.length === 0, `menuPlace: a sweep of ${n} (viewport height × menu height × point × direction) — every menu inside the viewport`, out.slice(0, 3));
+  // doors-table r4: an OPEN box (`keep` = its height as it stands) — standing inside, it keeps its top whatever it gained
+  // (capped exactly when it no longer fits below it); no longer inside, it is placed afresh — inside either way
+  const pad = MP.MENU_PAD, within = (p, h, vh) => p.top >= pad && p.top + (p.maxH ?? h) <= vh - pad;
+  let nk = 0, nf = 0; const outK = [];
+  for (let vh = 300; vh <= 900; vh += 37) for (let y = pad; y <= vh - pad - 20; y += 23) for (let k = 20; k <= 900; k += 41) for (let h = k; h <= k + 600; h += 47) {
+    const p = MP.menuPlace({ x: 10, y, w: 100, h, vw: 800, vh, keep: k });
+    if (y + k <= vh - pad) { nk++; if (p.side !== 'kept' || p.top !== y || !within(p, h, vh) || (p.maxH == null) !== (y + h <= vh - pad)) outK.push({ vh, y, k, h, p }); }
+    else if (y + k > vh - pad + 1) { nf++; if (p.side === 'kept' || !within(p, h, vh)) outK.push({ vh, y, k, h, p }); }
+  }
+  ok(outK.length === 0 && nk > 1000 && nf > 1000, `menuPlace keep (r4): a sweep of ${nk} open boxes standing inside — the top KEPT, capped exactly when it no longer fits below, inside — and ${nf} a shrunk viewport left outside, placed afresh inside`, outK.slice(0, 3));
+  // doors-table r5: a SCROLLED open box (`scrolled` = its offset, 0 … h − k) keeps it — its rows stay where they stood: the
+  // offset still reachable, the box as tall as the room and that offset allow (never shorter than it stood), inside; at 0
+  // it is r4's box; a box placed afresh leaves the offset to the browser
+  let ns = 0, na = 0; const outS = [];
+  for (let vh = 300; vh <= 900; vh += 37) for (let y = pad; y <= vh - pad - 20; y += 29) for (let k = 20; k <= 900; k += 47) for (let h = k; h <= k + 600; h += 53) for (const sc of new Set([0, 1, Math.floor((h - k) / 2), h - k].filter((v) => v <= h - k))) {
+    const p = MP.menuPlace({ x: 10, y, w: 100, h, vw: 800, vh, keep: k, scrolled: sc }), tall = p.maxH ?? h, below = vh - pad - y;
+    if (y + k <= vh - pad) { ns++; if (p.side !== 'kept' || p.top !== y || p.scroll !== sc || h - tall < sc || tall !== Math.min(below, h - sc) || tall < k || !within(p, h, vh) || (sc === 0 && p.maxH !== (h > below ? below : null))) outS.push({ vh, y, k, h, sc, p }); }
+    else if (y + k > vh - pad + 1) { na++; if (p.side === 'kept' || p.scroll !== null || !within(p, h, vh)) outS.push({ vh, y, k, h, sc, p }); }
+  }
+  ok(outS.length === 0 && ns > 10000 && na > 1000, `menuPlace scrolled (r5): a sweep of ${ns} wheeled open boxes standing inside — the offset KEPT and reachable, as tall as the room and the offset allow (never shorter than it stood), at 0 the r4 box — and ${na} placed afresh (the offset left to the browser)`, outS.slice(0, 3));
+  let nw = 0; const outW = [];
+  for (let vw = 300; vw <= 1400; vw += 61) for (let x = 0; x <= vw; x += 37) for (let w = 50; w <= 2000; w += 89) { nw++; const p = MP.menuPlace({ x, y: 10, w, h: 50, vw, vh: 600 }); if (p.left < pad || p.left + (p.maxW ?? w) > vw - pad || (p.maxW == null) !== (w <= vw - 2 * pad)) outW.push({ vw, x, w, p }); }
+  ok(outW.length === 0, `menuPlace maxW (r4): a sweep of ${nw} (viewport width × point × menu width) — never past an edge, capped exactly when wider than the viewport`, outW.slice(0, 3));
 }
 
 // ── §3 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -201,16 +236,16 @@ console.log('§6 the wiring — every door asks its rule');
   ok(/if \(this\._springList && !this\._springList\.isConnected\) this\._springList = null;/.test(hov) && /this\._springArm\(\);/.test(hov) && /if \(b && this\._springLife\) this\._springList = this\._openDesktopList\(b\);/.test(hov) && /this\._springStop\(\);\s*if \(this\._springList\) \{ this\._springList\.remove\(\); this\._springList = null; \}\s*if \(this\._springLife\) \{ this\._springLife\.abort\(\); this\._springLife = null; \}/.test(done) && /this\.dragDone\(\); list\?\.remove\(\);/.test(DM),
     'r3 ① ONE lifecycle for both roads: dragHover arms it (a list closed by its own door drops its ref), the timer opens a list only while armed, dragDone clears timer + list + ref + listeners, a row drop ends it');
   const dropRow = body(DM, '  dropOnRow(winId, deskId, name) {');
-  ok(/if \(!this\._desktops\.some\(\(d\) => d\.id === deskId\)\) \{\s*showToast\(t\('«\{name\}» is no longer there — the window stays where it is', \{ name: name \|\| '' \}\), \{ type: 'warn', duration: 6000 \}\);\s*return \{ ok: false, code: 'no-desktop' \};/.test(dropRow) && /return this\.moveWindowToDesktop\(winId, deskId, \{ speak: true \}\);/.test(dropRow) && /if \(winId\) this\.dropOnRow\(winId, desk\.id, desk\.name\);/.test(DM),
+  ok(/if \(!this\._desktops\.some\(\(d\) => d\.id === deskId\)\) \{\s*showToast\(t\('\{why\} — the window stays where it is', \{ why: this\._doorLabel\('switch', deskId, name\) \}\), \{ type: 'warn', duration: 6000 \}\);\s*return \{ ok: false, code: 'no-desktop' \};/.test(dropRow) && /return this\.moveWindowToDesktop\(winId, deskId, \{ speak: true \}\);/.test(dropRow) && /if \(winId\) this\.dropOnRow\(winId, el\._desk\.id, el\._desk\.name\);/.test(DM),
     'r3 ③ a row drop (both roads) moves only to a desktop that IS here — a gone one refused by name, the window kept where it is');
-  ok(/const done = \(p\) => Promise\.resolve\(p\)\.then\(\(r\) => \{ if \(r !== false\) after\?\.\(\); \}\);/.test(DM) && /if \(!\(name && name\.trim\(\)\)\) return false;\s*this\.renameDesktop\(desk\.id, name\.trim\(\)\);\s*return true;/.test(body(DM, '  async _startRename(desk) {')),
-    'r3 ④ a cancelled Rename… (false) brings nothing back — the list stays shut');
-  ok(/const items = this\._deskItems\(desk\);/.test(DM) && /showContextMenu\(x, y, this\._deskItems\(desk, \{ order: true, after: back \}\), 'context-menu',/.test(DM) && /this\.reorderDesktop\(desk\.id, prev\.id\)/.test(DM) && /this\.reorderDesktop\(next\.id, desk\.id\)/.test(DM) && /done\(this\._startRename\(desk\)\)/.test(DM) && /done\(this\.deleteDesktop\(desk\.id\)\)/.test(DM),
+  ok(/const done = \(p\) => Promise\.resolve\(p\)\.then\(\(r\) => \{ if \(r !== false\) after\?\.\(\); \}\);/.test(DM) && /if \(!\(name && name\.trim\(\)\)\) return false;[^\n]*\n\s*if \(this\._doorRefused\(desk, 'rename'\)\) return false;[^\n]*\n\s*const typed = name\.trim\(\), live = [^\n]*\n[\s\S]*?\n\s*this\.renameDesktop\(desk\.id, typed\);\s*return true;/.test(body(DM, '  async _startRename(desk) {')),
+    'r3 ④ a cancelled Rename… (false) brings nothing back — the list stays shut (desktop-doors-table r2 ②: nor a refused one — the desktop deleted elsewhere while the dialog was open)');
+  ok(/const items = this\._deskItems\(desk\);/.test(DM) && /showContextMenu\(x, y, this\._deskItems\(el\._desk, \{ order: true, after: back \}\), 'context-menu',/.test(DM) && /this\.reorderDesktop\(desk\.id, prev\.id\)/.test(DM) && /this\.reorderDesktop\(next\.id, desk\.id\)/.test(DM) && /done\(this\._startRename\(desk\)\)/.test(DM) && /done\(this\.deleteDesktop\(desk\.id\)\)/.test(DM),
     'r2 ① the preview\'s menu and a compact-list row\'s (right-click / ⋯) are ONE item set, the same handlers (Rename…, Delete, + Move up / Move down for a row)');
   ok(/const stage = this\.app\.stage, rows = this\._desktopListRows\(\);/.test(DM) && /rows\.forEach\(\(row, k\) => \{ if \(row\.kind === 'desktop' && els\[k\]\) this\._rowDoors\(els\[k\], row\.desk\); \}\);/.test(DM) && /extraClass: 'desktop-switch-menu'/.test(DM) && /if \(extraClass\) pop\.classList\.add\(/.test(U),
     'r2 ① ⑥ the list\'s rows come from ONE named source (_desktopListRows — the seam for desktopRows), each row gets its doors; the list is styled before it is measured (extraClass)');
-  const listRows = body(DM, '  _desktopListRows() {');
-  ok(/import \{ sheetRows \} from '\.\/desktop-switch-sheet\.js';/.test(DM) && /for \(const r of sheetRows\(\{ desktopManager: this, wm: this\.app\.wm \}\)\) \{/.test(listRows) && /rows\.push\(\{ kind: 'desktop', id: r\.id, desk, name: r\.name, count: r\.windows, on: !stage\?\.isActive && r\.active \}\);/.test(listRows) && !/_savedStates|wm\.windows/.test(listRows),
+  const listRows = body(DM, '  _desktopListRows(drawn = null) {');
+  ok(/import \{ sheetRows \} from '\.\/desktop-switch-sheet\.js';/.test(DM) && /for \(const r of sheetRows\(\{ desktopManager: this, wm: this\.app\.wm \}, drawn\)\) \{/.test(listRows) && /rows\.push\(\{ kind: 'desktop', id: r\.id, desk, name: r\.name, count: r\.windows, on: !stage\?\.isActive && r\.active \}\);/.test(listRows) && !/_savedStates|wm\.windows/.test(listRows),
     'int358 seam (c): the compact list\'s desktop rows ARE the phone sheet\'s (sheetRows → PURE desktopRows) — the same names and counts on both surfaces, no second counter; the row keeps the manager\'s own desktop for its doors');
   ok(/const at = menuPlace\(\{ x: r\.right - pr\.width, y: up \? room : 0, w: pr\.width, h: pr\.height, vw: window\.innerWidth, vh: room, up \}\);/.test(TB) && /if \(at\.maxH != null\) \{ pop\.style\.maxHeight = \(at\.maxH \/ Z\) \+ 'px'; pop\.style\.overflowY = 'auto'; \}/.test(TB) && !/const above = r\.top - pr\.height - 4;/.test(TB),
     'r2 ② the «+N» list is placed by menuPlace in the room on its chip\'s side — capped and scrolling (no self-placement left)');
@@ -227,6 +262,12 @@ console.log('§7 controls — each rule\'s base form, on its own table');
   ok(releaseTable(deNoTop.releaseBox).filter(([, g, w]) => !same(g, w)).length >= 3, 'CONTROL releaseBox without the floor clamp: the walk\'s buried releases stay buried (RED)');
   const mpNoFlip = await patched('src/lib/menu-place.js', [["const side = up && fitsAbove ? 'above' : fitsBelow ? 'below' : 'clamped';", "const side = up ? 'above' : fitsBelow ? 'below' : 'clamped';"]], 'menu-up-always');
   ok(menuTable(mpNoFlip.menuPlace).filter(([, g, w]) => !same(g, w)).length >= 3, 'CONTROL menuPlace opening upward unconditionally (the base\'s bottom anchor): the lower-row title menus run off the top (RED)');
+  const mpNoKeep = await patched('src/lib/menu-place.js', [['  if (keep > 0 && y >= pad - 1 && y + keep <= vh - pad + 1) {', '  if (false) {']], 'menu-no-keep');
+  ok(menuTable(mpNoKeep.menuPlace).filter(([n, g, w]) => /^doors-table r4: (an OPEN|…then|an open list that)/.test(n) && !same(g, w)).length === 3, 'CONTROL menuPlace without `keep` (doors-table r4): an open list that gained rows is placed afresh — lifted, its rows slide under the pointer (RED)');
+  const mpNoCap = await patched('src/lib/menu-place.js', [['  const maxW = w > across ? across : null, ww = maxW == null ? w : across;', '  const maxW = null, ww = w;']], 'menu-no-maxw');
+  ok(menuTable(mpNoCap.menuPlace).filter(([n, g, w]) => /wider than the viewport/.test(n) && !same(g, w)).length === 2, 'CONTROL menuPlace without `maxW` (doors-table r4): a menu wider than the viewport runs past its right edge (RED)');
+  const mpNoOffset = await patched('src/lib/menu-place.js', [['    const tall = Math.min(below, h - scroll);', '    const tall = Math.min(below, h);']], 'menu-no-offset');
+  ok(menuTable(mpNoOffset.menuPlace).filter(([n, g, w]) => /^doors-table r5: a list wheeled 100 px(, the room grown| whose content shrank)/.test(n) && !same(g, w)).length === 2, 'CONTROL menuPlace lifting a wheeled box\'s cap whole (5a98bf0f): the offset dropped — every row comes down by it (RED)');
   const tfNoCut = await patched('src/lib/taskbar-fit.js', [['    if (l >= -0.5 && r <= width + 0.5) continue;', '    if (l >= -0.5 && l <= width) continue;']], 'strip-cut-counts');
   ok(!same(tfNoCut.stripHidden({ tiles: Array.from({ length: 8 }, (_, i) => ({ id: 'w' + i, left: i * 92 - 60, width: 90 })), width: 500 }).hidden, ['w0', 'w6', 'w7']), 'CONTROL stripHidden counting a cut tile as shown: the «+N» list misses it (RED)');
   const deNoCut = await patched('src/lib/drag-end.js', [['export function resizeRelease(box, ws, dir = \'\', keep = RELEASE_KEEP, min = null) {\n', 'export function resizeRelease(box, ws, dir = \'\', keep = RELEASE_KEEP, min = null) {\n  if (box) return { ...box, moved: false };\n']], 'resize-no-release');

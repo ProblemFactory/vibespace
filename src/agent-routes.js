@@ -1946,6 +1946,9 @@ function channelPrincipal(s, id) {
   const endpoints = _msgEndpoints(id);
   return {
     kind: 'agent', id: cid || `webui:${id}`, name: s.name || null, groups: myGroups,
+    // lane chat-needs-you-card: the CONVERSATION's own key — a request the engine files under 'channels' names it (`about`),
+    // so its chat draws the card; never part of a stored principal (every record builds its own {kind, id, name})
+    sessionKey: (() => { try { return sessionStatusKey(s, id); } catch { return `webui:${id}`; } })(),
     msgLevelFor: (targetCid) => {
       if (!cid || targetCid === cid) return 'none';
       const ep = endpoints.find((e) => e.cid === targetCid);

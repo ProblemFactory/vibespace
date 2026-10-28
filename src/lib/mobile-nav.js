@@ -7,8 +7,8 @@ import { getCommand, runCommand } from './contributions.js';
 import { openDesktopPicker } from './desktop-picker.js';
 import { installNavFilesDoor } from './phone-files.js'; // lane phone-files-door: the nav's 文件 — one tap to the files
 import { installTrailingBar } from './trailing-bar.js'; // lane duo-build-1: the regular class's trailing bar (this nav, standing)
-import { openDesktopSheet } from './desktop-switch-sheet.js'; // lane desktop-switch-phone: the desktops' sheet (the nav's Desktops door)
-import { doorState } from '../desktop-switch.js';
+import { openDesktopSheet, untilGone } from './desktop-switch-sheet.js'; // lane desktop-switch-phone: the desktops' sheet (the nav's Desktops door)
+import { doorState, followDesktops } from '../desktop-switch.js';
 
 const SHOWN_KEY = 'vibespace.phoneShown'; // { [desktopId]: winId } — this tab's window on show per desktop (§6b guard 10)
 function readShown() {
@@ -265,7 +265,7 @@ export class MobileNav {
   _showWindowSwitcher(anchor = this._titleEl) {
     if (!anchor) return;
     const existing = document.querySelector('.mobile-win-switcher');
-    if (existing) { existing.remove(); return; }
+    if (existing) { existing._close(); return; } // the title tapped again: THE close (r3 ①)
 
     const pop = document.createElement('div');
     pop.className = 'mobile-win-switcher';
@@ -281,12 +281,20 @@ export class MobileNav {
 
     const wm = this.app.wm;
     const dm = this.app.desktopManager;
-    const desktops = dm?.desktops || [];
+    let tabsDrawn = []; // the desktop tabs this list shows — a remote change redraws them from it (r2 ①)
+    // THE ONE CLOSE (r3 ①): the title's toggle, an outside tap and a row's tap call it — the list leaves the page and its
+    // listeners go with it (the remote-change redraw, the outside-press watch); a road that only removes the node (the
+    // phone's Back, a class change) aborts them too (untilGone). 25151f0b kept one listener + its detached list per open.
+    const ctl = new AbortController();
+    const close = () => { ctl.abort(); pop.remove(); };
+    pop._close = close;
 
     // Window list container (rebuilt on desktop switch)
     const winList = document.createElement('div');
 
-    const renderContent = () => {
+    // `follow` = a redraw by a REMOTE change (the manager's `vs-desktops`): a desktop deleted elsewhere keeps its tab, greyed
+    // with its why (PURE followDesktops); every other redraw — the person's own act — draws the list as it is
+    const renderContent = (follow = false) => {
       // FRESH each render (inc-mtfici94: a stale open-time snapshot showed
       // nothing after a switch materialized the lazy-replayed windows — the
       // popup had to be reopened to see them)
@@ -304,7 +312,10 @@ export class MobileNav {
       };
       // Desktop tabs — ALWAYS rendered now (design-mobile-gaps #7): the "+"
       // tab is the phone's only way to create a desktop (the taskbar previews
-      // are hidden ≤768px), and a long-press on a tab renames / deletes it.
+      // are hidden ≤768px), and a long-press on a tab opens the desktop's doors
+      // (lane desktop-doors-table: THE table's, through the manager's ONE builder
+      // on the phone tier — Rename… · Delete · Move up · Move down, a shut one
+      // greyed with its why; was a hand-written Rename · Delete, no order).
       if (dm) {
         const oldTabs = pop.querySelector('.mobile-desk-tabs');
         if (oldTabs) oldTabs.remove();
@@ -312,26 +323,29 @@ export class MobileNav {
         tabBar.className = 'mobile-desk-tabs';
         tabBar.style.cssText = 'display:flex;gap:0;border-bottom:2px solid var(--border);overflow-x:auto;-webkit-overflow-scrolling:touch;flex-shrink:0';
         const tabCss = (isActive) => `flex-shrink:0;min-height:40px;padding:10px 14px;border:none;background:none;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;color:${isActive ? 'var(--accent)' : 'var(--text-dim)'};border-bottom:2px solid ${isActive ? 'var(--accent)' : 'transparent'};margin-bottom:-2px`;
-        for (const desk of desktops) {
+        // the list as it is NOW, every render (it read the list once, at open: a desktop deleted elsewhere kept its tab)
+        tabsDrawn = followDesktops({ drawn: follow ? tabsDrawn : [], desktops: dm.desktops });
+        for (const desk of tabsDrawn) {
           const tab = document.createElement('button');
           tab.className = 'mobile-desk-tab';
-          const isActive = desk.id === dm.activeDesktopId;
+          const isActive = !desk.gone && desk.id === dm.activeDesktopId;
           const deskWindows = allWindows.filter(w => w._desktopId === desk.id);
-          tab.textContent = `${desk.name} (${deskWindows.length + savedCount(desk.id)})`;
-          tab.style.cssText = tabCss(isActive);
-          tab.onclick = () => { this.switchDesktop(desk.id).then(afterSwitch); }; // the window on show follows the desktop (§6b guard 10)
+          tab.textContent = desk.gone ? desk.name : `${desk.name} (${deskWindows.length + savedCount(desk.id)})`;
+          tab.title = dm._doorLabel('switch', desk.id, desk.name); // the tab IS the switch door: the table's words (a gone one's: its why, by the name it showed)
+          tab.style.cssText = tabCss(isActive) + (desk.gone ? ';opacity:0.5' : '');
+          tab.onclick = desk.gone ? () => dm._doorRefused(desk, 'switch') : () => { this.switchDesktop(desk.id).then(afterSwitch); }; // a gone one: the table's why (r3 ④); the window on show follows the desktop (§6b guard 10)
           tab.addEventListener('contextmenu', (e) => {
             e.preventDefault(); e.stopPropagation();
-            const items = [{ label: t('Rename'), action: async () => { await dm._startRename(desk); rerender(); } }];
-            if (desktops.length > 1) items.push({ label: t('Delete'), style: 'color:var(--red, #e55)', action: async () => { await dm.deleteDesktop(desk.id); afterSwitch(); } });
-            showContextMenu(e.clientX, e.clientY, items);
+            // once an act is done (never after a cancel): a delete re-shows the desktop on show, any other re-draws the tabs
+            const after = () => (dm.desktops.some((d) => d.id === desk.id) ? rerender() : afterSwitch());
+            showContextMenu(e.clientX, e.clientY, dm._deskItems(desk, { tier: 'phone', after }), 'context-menu', { extraClass: 'mdesk-doors' });
           });
           tabBar.appendChild(tab);
         }
         const addTab = document.createElement('button');
         addTab.className = 'mobile-desk-tab mobile-desk-add';
         addTab.textContent = '+';
-        addTab.title = t('Add desktop');
+        addTab.title = dm._doorLabel('new'); // THE 'new' door's words (the sheet's «New desktop»)
         addTab.style.cssText = tabCss(false) + ';font-size:16px;padding:6px 14px';
         addTab.onclick = () => { const id = dm.createDesktop(); this.switchDesktop(id).then(afterSwitch); };
         tabBar.appendChild(addTab);
@@ -344,7 +358,7 @@ export class MobileNav {
         winList.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-dim);font-size:13px">${escHtml(t('No windows on this desktop'))}</div>`;
       } else {
         for (const win of windows) {
-          winList.appendChild(this._buildWindowItem(win, wm, pop, rerender));
+          winList.appendChild(this._buildWindowItem(win, wm, close, rerender));
         }
       }
       // Minimized windows (design-mobile-gaps #10): WindowManager.minimize is a
@@ -360,9 +374,9 @@ export class MobileNav {
         head.textContent = t('Minimized');
         winList.appendChild(head);
         for (const win of minimized) {
-          const item = this._buildWindowItem(win, wm, pop, rerender);
+          const item = this._buildWindowItem(win, wm, close, rerender);
           item.classList.add('mobile-win-minimized');
-          item.onclick = () => { pop.remove(); wm.revealWindow(win.id); }; // restores the group AND shows this tab (a host too)
+          item.onclick = () => { close(); wm.revealWindow(win.id); }; // restores the group AND shows this tab (a host too)
           winList.appendChild(item);
         }
       }
@@ -372,14 +386,17 @@ export class MobileNav {
     renderContent();
 
     document.body.appendChild(pop);
+    untilGone(pop, ctl);
+    // a remote change redraws the tabs while the list is open (r2 ①: the manager's _followOpenLists says when)
+    window.addEventListener('vs-desktops', () => renderContent(true), { signal: ctl.signal });
     // An outside tap closes the list — THE ONE closer (utils.js onOutsidePress: capture phase, a touch counts as a
     // TAP, so a scroll outside the list no longer dismisses it). Chained-popover rule (same as attachPopoverClose): a
     // context menu or dialog opened FROM a row (billing switcher + its confirm) is a child interaction, not a
     // dismissal of the list; a press ON the nav button itself is its toggle's.
-    onOutsidePress(pop, () => pop.remove(), { ignore: (t) => t === anchor || !!anchor.contains?.(t) || !!t?.closest?.('.dialog-overlay, #dialog-overlay') });
+    onOutsidePress(pop, close, { ignore: (t) => t === anchor || !!anchor.contains?.(t) || !!t?.closest?.('.dialog-overlay, #dialog-overlay'), signal: ctl.signal });
   }
 
-  _buildWindowItem(win, wm, pop, rerender) {
+  _buildWindowItem(win, wm, close, rerender) {
     const item = document.createElement('div');
     item.className = 'mobile-win-row';
     item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background 0.1s';
@@ -439,7 +456,7 @@ export class MobileNav {
     item.addEventListener('pointerdown', () => { item.style.background = 'var(--bg-hover)'; });
     // THE ROW NAMES THE WINDOW — reveal it as itself (inc-muiq348r-jwb5: a tab group's HOST row, tapped while the group
     // showed a guest, only raised the frame — the guest stayed on screen under the host's title and highlight)
-    item.onclick = () => { pop.remove(); wm.revealWindow(win.id); };
+    item.onclick = () => { close(); wm.revealWindow(win.id); };
     return item;
   }
 

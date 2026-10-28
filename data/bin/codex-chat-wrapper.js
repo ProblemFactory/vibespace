@@ -494,12 +494,16 @@ function persistBuffer() {
   } catch {}
 }
 
+// replaced, never rewritten in place (ci358-reds item 7): a hub read between writeFileSync's truncate and its bytes saw an
+// EMPTY sidecar (wrapperCaps 'no-sidecar') — the temp file is renamed over it, a reader sees the old record or the new
 function persistMeta() {
   metaTimer = null;
+  const tmp = `${metaFile}.${process.pid}.tmp`;
   try {
     fs.mkdirSync(path.dirname(metaFile), { recursive: true });
-    fs.writeFileSync(metaFile, JSON.stringify(meta));
-  } catch {}
+    fs.writeFileSync(tmp, JSON.stringify(meta));
+    fs.renameSync(tmp, metaFile);
+  } catch { try { fs.unlinkSync(tmp); } catch {} }
 }
 
 function schedulePersist() {

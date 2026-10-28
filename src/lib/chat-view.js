@@ -38,6 +38,7 @@ import { serviceHref, serviceOpenSpec, publishArtifacts } from './artifact-card.
 import { requestPhrases } from '../command-words.js'; // PURE (lane door-healthy-chat): the waiting line's plain question
 import { stallVerdict, waitingOnUser } from '../turn-state.js'; // PURE (lane parked-ask-stall): the delivery-stall verdict + "is the turn waiting on the user"
 import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — the fold rule + the waiting chip's words
+import { NeedsCards } from './chat-needs-card.js'; // lane chat-needs-you-card: this conversation's own For-you items as cards in its chat + the «waiting for you · N» chip
 
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
 // session declared them, the per-backend BACKEND_META regexes otherwise
@@ -399,6 +400,7 @@ class ChatView {
       // so a read-only viewer gets the chip as well (a phone has no Ctrl+F).
       onSearch: () => this._search?.open(),
       onJumpToAsk: () => { this.jumpToPendingAsk().catch(() => {}); }, // lane S1: the waiting chip goes to the card that waits
+      onJumpToNeed: () => { this._needsCards?.jumpToNewest(); }, // lane chat-needs-you-card: the «waiting for you · N» chip lands the newest needs card
       // agent browser P2 (§3.8 ③): the Browser chip's three actions
       onBrowserAction: (what, ev) => this._onBrowserAction(what, ev),
       // §26 (B-099e): the channels chip opens a touched conversation through the ONE door
@@ -546,6 +548,9 @@ class ChatView {
     if (this._chatScale !== 1) this._messageList.style.zoom = this._chatScale;
     container.appendChild(this._messageList);
     container.appendChild(this._posIndicator);
+    // lane chat-needs-you-card: what THIS conversation asks of you (its For-you items) — cards inside the records that filed them
+    this._needsCards = new NeedsCards(this);
+    this._needsCards.start(winInfo?._listenerCtl?.signal);
 
     // Scroll minimap — semantic scrollbar showing turns
     // The minimap's pointer events live on the CONTAINER, not on the message
@@ -5014,8 +5019,14 @@ class ChatView {
         if (run.linked?.has(oldEl)) { run.linked.delete(oldEl); run.linked.add(newEl); }
       }
     }
+    // lane chat-needs-you-card: the needs cards ride the record they sit in — the SAME nodes (a reply box being typed in keeps its
+    // text; its focus is given back), never re-made by a tool result landing on the card that filed them
+    const needs = oldEl.querySelector?.(':scope > .cn-cards');
+    const needsFocus = needs && needs.contains(document.activeElement) ? document.activeElement : null;
+    if (needs) newEl.append(needs);
     const wasRendered = oldEl.offsetParent != null;   // loose: a detached / display:none / non-DOM node reads null or undefined
     oldEl.replaceWith(newEl);
+    if (needsFocus && needsFocus.isConnected) { try { needsFocus.focus({ preventScroll: true }); } catch { } }
     if (wasRendered) this._reserveFreshHeights([newEl], { live: true });
     // Only re-point the map when it really pointed HERE: a gap-loaded element
     // is not in `_elements` at all, and clobbering a different live element's
@@ -7000,6 +7011,9 @@ class ChatView {
         if (m.permission && !m.permission.resolved) return null;
         // …and so must a helper card holding its helper's unanswered ask (lane S1)
         if (hasPendingHelperAsk(m)) return null;
+        // …and so must a record holding a For-you card that waits, or one answered elsewhere while its reply box is in use
+        // (lane chat-needs-you-card; round 3 — folding the record hid the focused box, and the blur folded it)
+        if (el.querySelector(':scope > .cn-cards > :is(.cn-card.cn-open, .cn-card.cn-kept)')) return null;
         // pending/running cards collapse too (user directive — the bottom
         // streaming indicator already shows live activity)
         const mk = memberKind(el);
@@ -7462,6 +7476,7 @@ class ChatView {
 
   dispose() {
     this._statusBar?.dispose?.();
+    try { this._needsCards?.stop(); } catch { } // lane chat-needs-you-card
     try { this._signInCard?.destroy(); } catch { } // lane door-signin-card
     this._disposed = true;
     try { this.app?._reconnectQueue?.cancel(this); } catch { } // a disposed view never takes its reconnect slot (perf ⑤b)

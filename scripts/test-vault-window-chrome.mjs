@@ -239,7 +239,7 @@ check('NO GREYED CONTROL anywhere in the window (a door a row has not is not dra
 check('unlocked ⇒ 「添加…」 in the bar', !!(await until(visible('.vw-add'), { timeout: 3000 })));
 await click('.vw-add');
 const addMenu = await until(`[...document.querySelectorAll('.context-menu .context-menu-item')].map((e) => e.textContent).join('|') || null`, { timeout: 3000 });
-check('添加… lists the doors that add a value — each the store\'s own (an account, an integration key, a channel account, an automation key) and (lane vault-paste-request, the owner\'s 「我压根没法添加啊」) any other key or password', addMenu === 'Account…|Integration key…|Channel account…|Automation key…|Website login…|Other key or password…', addMenu);   // lane browser-login: + 网站登录…
+check('添加… lists the doors that add a value — each the store\'s own (an account, an integration key, a channel account, an automation key) and (lane vault-paste-request, the owner\'s 「我压根没法添加啊」) any other key or password', addMenu === 'Account…|Integration key…|Channel account…|Two-step code…|Automation key…|Website login…|Other key or password…', addMenu);   // lane browser-login: + 网站登录… · lane vault-totp-add: + 两步验证… (the kind registry's order)
 await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); true`);
 await shot('vw-v2-list.png');
 

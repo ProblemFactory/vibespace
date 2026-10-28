@@ -41,7 +41,12 @@
 //     counts + «New desktop», a tap on the second shows its window in the conversation column (the list column stays); the
 //     conversation's head (its title bar) opens the window switcher with both desktop tabs; the landscape list column's ☰
 //     hides it (the conversation 0–895), a reload keeps the choice, ☰ again shows it; 382 touch: the same door on the top
-//     bar, the phone's sheet, a tap on the second desktop shows its window (a lazy replay on this page)
+//     bar, the phone's sheet, a tap on the second desktop shows its window (a lazy replay on this page); 375×812 (lane
+//     desktop-doors-table — a phone could not reorder): a row's long press = THE table's doors — a middle desktop's four
+//     open, the first's Move up / the last's Move down greyed WITH its why, 44 px rows inside the viewport; the last's Move
+//     up from the phone reorders, the sheet comes back in the new order, a reload keeps it (the hub stored it); r2 ①: the
+//     sheet open, a desktop deleted on another client — kept greyed with its why, its doors greyed; r3 ①: the window
+//     switcher and the sheet opened and closed 5× each by every closer — no `vs-desktops` listener left (CDP's count)
 //   ⑨ THE ⧉ LIST + THE DOOR CENSUS (lane desktop-switch-phone): a mouse desktop's ⧉ list keeps the active desktop's windows
 //     and folds «Other desktops (1)»; its row «<title> · Desk B» switches AND raises (a held window: built by the switch,
 //     then revealed); the census presses every control of the phone chrome on screen and counts the ones that open desktop
@@ -453,6 +458,19 @@ try {
       const vis = (e) => { if (!e) return 0; const r = e.getBoundingClientRect(); return Math.max(0, Math.min(r.right, innerWidth, b.right) - Math.max(r.left, 0, b.left)); };
       return { l: Math.round(b.left), r: Math.round(b.right), t: Math.round(b.top), btm: Math.round(b.bottom), w: Math.round(b.width), vw: innerWidth, vh: innerHeight, colL: Math.round(ws.left), colR: Math.round(ws.right),
         names: [...m.querySelectorAll('.context-menu-item')].map((it) => { const n = it.querySelector('.mdesk-name'); return { text: n ? n.textContent : '', vis: Math.round(vis(n)), w: n ? Math.round(n.getBoundingClientRect().width) : 0 }; }) }; })()`;
+    /** A desktop's doors menu (lane desktop-doors-table): each row's label, a shut one's why (on the row, inside the menu), 44 px. */
+    const DESK_DOORS = `(() => { const m = document.querySelector('.context-menu.mdesk-doors'); if (!m) return null; const b = m.getBoundingClientRect();
+      return { inside: b.left >= -0.5 && b.top >= -0.5 && b.right <= innerWidth + 0.5 && b.bottom <= innerHeight + 0.5, sheet: !!document.querySelector('.mdesk-menu'),
+        items: [...m.querySelectorAll(':scope > .context-menu-item')].map((it) => { const r = it.getBoundingClientRect(), w = it.querySelector('.door-why'), wr = w && w.getBoundingClientRect();
+          return { label: (it.querySelector('.door-label') || it).textContent.trim(), why: w ? w.textContent.trim() : '', off: it.classList.contains('disabled'), h: Math.round(r.height), x: r.left + r.width / 2, y: r.top + r.height / 2,
+            whyIn: !!wr && wr.width > 0 && wr.height > 0 && wr.left >= b.left - 0.5 && wr.right <= b.right + 0.5 && wr.top >= r.top - 0.5 && wr.bottom <= r.bottom + 0.5 }; }) }; })()`;
+    /** A long press on the sheet's row of desktop `id` (a touch held 800 ms — the synthesized contextmenu). */
+    const holdRow = async (id) => {
+      const at = await evalJs(`(() => { const e = document.querySelector('.mdesk-menu .context-menu-item[data-desktop-id="${id}"]'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      if (!at) return;
+      await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] }); await sleep(800);
+      await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await sleep(400);
+    };
     const inside = (g, { col = false } = {}) => !!g && g.l >= 0 && g.r <= g.vw && g.t >= 0 && g.btm <= g.vh && (!col || (g.l >= g.colL && g.r <= g.colR && g.w <= 480)) && g.names.length >= 2 && g.names.every((n) => n.vis > 0 && n.vis >= Math.min(n.w, 40));
     const SHOWN = `(() => { const w = app.wm.windows.get(app.wm.activeWindowId); const el = w && w.element; const r = el && el.getBoundingClientRect(); const sb = document.getElementById('sidebar'); const sr = sb.getBoundingClientRect();
       return { desk: app.desktopManager.activeDesktopId, type: w ? w.type : null, onDesk: w ? w._desktopId : null, visible: !!el && getComputedStyle(el).visibility !== 'hidden' && getComputedStyle(el).display !== 'none', l: r ? Math.round(r.left) : null, w: r ? Math.round(r.width) : null, list: getComputedStyle(sb).display !== 'none' ? { l: Math.round(sr.left), w: Math.round(sr.width) } : null, badge: document.querySelector('#mobile-nav-desktops .mnav-badge')?.textContent || '' }; })()`;
@@ -465,12 +483,11 @@ try {
     const g0 = await evalJs(GEOM);
     check('⑧ …and WHERE it stands: inside the viewport AND over the conversation column (≤ 480 px, right of the list, left of the bar); every row\'s name visible on screen', inside(g0, { col: true }), g0);
     check('⑧ …each row\'s window titles under its name, greyed (the two conversations; the explorer)', /^Session \d.* · Session \d/.test(m0.rows[0].titles) && /vs-duo-layout-home|~|Files/.test(m0.rows[1].titles), m0.rows.map((r) => r.titles));
-    { // a long press on a row = the desktop's own verbs (Rename · Delete — the switcher tab's long press)
-      const at = await evalJs(`(() => { const r = document.querySelector('.mdesk-menu .context-menu-item[data-desktop-id="${deskB}"]').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
-      await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [at] }); await sleep(800);
-      await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await sleep(400);
-      const verbs = await evalJs(`[...document.querySelectorAll('.context-menu:not(.mdesk-menu) .context-menu-item')].map((r) => r.textContent.trim())`);
-      check('⑧ …a long press on a row: Rename · Delete (the manager\'s own verbs; the sheet gives way to them)', JSON.stringify(verbs) === JSON.stringify(['Rename', 'Delete']) && !(await evalJs(`!!document.querySelector('.mdesk-menu')`)), verbs);
+    { // a long press on a row = the desktop's doors — THE table's (lane desktop-doors-table; was Rename · Delete, no order)
+      await holdRow(deskB);
+      const dd = await evalJs(DESK_DOORS);
+      check(`⑧ …a long press on a row: the desktop's doors, the sheet gives way — Desk B is the last: Move down greyed WITH its why (${dd && dd.items.map((x) => x.label + (x.off ? ' [' + x.why + ']' : '')).join(' · ')})`,
+        !!dd && !dd.sheet && JSON.stringify(dd.items.map((x) => x.label)) === JSON.stringify(['Rename…', 'Delete', 'Move up', 'Move down']) && dd.items[3].off && dd.items[3].why === 'Already the last desktop' && dd.items[3].whyIn && dd.items.slice(0, 3).every((x) => !x.off) && dd.inside, dd);
       await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
       await tap('#mobile-nav-desktops');
     }
@@ -529,6 +546,76 @@ try {
     await shot('desktops-door-669.png');
     check('⑧ 669 (the inner portrait): the menu under the bar lying over the conversation, inside the conversation column, every row\'s name visible', inside(g2, { col: true }) && g2.t >= nav2, { g2, nav2 });
     await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
+    // 375×812, a phone (lane desktop-doors-table): the desktop's doors from the sheet — THE table's, and a phone reorders
+    await device(375, 812); await settle(375);
+    const deskC = await evalJs(`app.desktopManager.createDesktop('Desk C')`); await sleep(500);
+    const ORDER = `app.desktopManager.desktops.map((d) => d.id)`;
+    const doorsOf = async (id, png) => { await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`); await tap('#mobile-nav-desktops'); await holdRow(id); const dd = await evalJs(DESK_DOORS); if (png) await shot(png); return dd; };
+    const said = (dd) => (dd ? dd.items.map((x) => x.label + (x.off ? ' [' + x.why + ']' : '')).join(' · ') : 'no menu');
+    const four = (dd) => !!dd && JSON.stringify(dd.items.map((x) => x.label)) === JSON.stringify(['Rename…', 'Delete', 'Move up', 'Move down']) && dd.inside && dd.items.every((x) => x.h >= 44);
+    const mid = await doorsOf(deskB, 'desktop-doors-375-middle.png');
+    check(`⑧ 375 (a phone): a middle desktop's long press — the four doors, every one open, 44 px rows inside the viewport (${said(mid)})`, four(mid) && mid.items.every((x) => !x.off), mid);
+    const fst = await doorsOf(desk1, 'desktop-doors-375-first.png');
+    check(`⑧ 375: the first desktop — Move up greyed WITH its why on the row (never greyed with no words) (${said(fst)})`, four(fst) && fst.items[2].off && fst.items[2].why === 'Already the first desktop' && fst.items[2].whyIn && [0, 1, 3].every((k) => !fst.items[k].off), fst);
+    const lst = await doorsOf(deskC, 'desktop-doors-375-last.png');
+    check(`⑧ 375: the last desktop — Move down greyed WITH its why (${said(lst)})`, four(lst) && lst.items[3].off && lst.items[3].why === 'Already the last desktop' && lst.items[3].whyIn && [0, 1, 2].every((k) => !lst.items[k].off), lst);
+    const up = lst && lst.items[2];
+    if (up) await tapAt(up.x, up.y);
+    await waitFor(`JSON.stringify(${ORDER}) === ${JSON.stringify(JSON.stringify([desk1, deskC, deskB]))} && !!document.querySelector('.mdesk-menu')`, 4000); await sleep(400);
+    const back = await evalJs(`({ order: ${ORDER}, sheet: [...document.querySelectorAll('.mdesk-menu .context-menu-item[data-desktop-id]')].map((r) => r.dataset.desktopId) })`);
+    await shot('desktop-doors-375-moved.png');
+    check('⑧ 375: the last desktop\'s Move up FROM THE PHONE reorders (a phone had no way to) — and the sheet comes back in the new order', JSON.stringify(back.order) === JSON.stringify([desk1, deskC, deskB]) && JSON.stringify(back.sheet) === JSON.stringify(back.order), back);
+    await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`); await sleep(800);
+    await load(); await waitFor(`!!window.app && !!app.desktopManager && app.desktopManager.desktops.length === 3`, 10000); await sleep(400);
+    const kept = await evalJs(ORDER);
+    check('⑧ 375: …a reload keeps the order (the hub stored the phone\'s reorder — the manager\'s own road)', JSON.stringify(kept) === JSON.stringify([desk1, deskC, deskB]), kept);
+    // r2 ①: the sheet OPEN, Desk C deleted on ANOTHER client (a raw /ws — what a second screen sends): the sheet redraws, Desk C
+    // KEPT at its place greyed WITH the why that names it; its long press opens its doors greyed with that why (8c680dcf: the
+    // row stayed a live one, and its long press opened nothing) — and the world is back: [desk 1, Desk B]
+    await evalJs(`app.desktopManager.reorderDesktop(${JSON.stringify(deskB)}, ${JSON.stringify(deskC)}); 1`); await sleep(600);
+    await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`); await tap('#mobile-nav-desktops'); await sleep(400);
+    const gws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); await new Promise((r, j) => { gws.on('open', r); gws.on('error', j); });
+    gws.send(JSON.stringify({ type: 'desktop-delete', desktopId: deskC })); await sleep(300); try { gws.close(); } catch { }
+    const goneIn = await waitFor(`app.desktopManager.desktops.length === 2`, 8000); await sleep(500);
+    const fl = await evalJs(`[...document.querySelectorAll('.mdesk-menu .context-menu-item[data-desktop-id]')].map((r) => ({ id: r.dataset.desktopId, gone: r.classList.contains('mdesk-gone'), sub: (r.querySelector('.mdesk-titles') || {}).textContent || '', title: r.title, op: +getComputedStyle(r).opacity }))`);
+    await shot('desktop-doors-375-gone.png');
+    const gC = (fl || []).find((x) => x.id === deskC);
+    check(`⑧ 375 (r2 ①): the sheet OPEN, Desk C deleted on ANOTHER client — the sheet redraws: Desk C kept at its place, greyed WITH «“Desk C” is no longer there» (${JSON.stringify(fl)})`, goneIn && !!gC && gC.gone && gC.sub === '“Desk C” is no longer there' && gC.title === gC.sub && gC.op < 1 && JSON.stringify(fl.map((x) => x.id)) === JSON.stringify([desk1, deskB, deskC]) && fl.filter((x) => x.id !== deskC).every((x) => !x.gone), fl);
+    await holdRow(deskC);
+    const gd = await evalJs(DESK_DOORS);
+    await shot('desktop-doors-375-gone-doors.png');
+    check(`⑧ 375 (r2 ①): …its long press opens ITS DOORS, every one greyed with the why that names it (${said(gd)})`, four(gd) && gd.items.every((x) => x.off && x.why === '“Desk C” is no longer there' && x.whyIn), gd);
+    await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`); await sleep(300);
+    // r3 ① THE LISTENER LIFECYCLE (主开发's major on 25151f0b): the window switcher opened and closed five times — by each of
+    // its closers — and the sheet five times — by each of its dismissals — with NO remote change; then the page's own
+    // `vs-desktops` listeners counted (CDP DOMDebugger.getEventListeners on window — the real list, nothing patched): none
+    // left (25151f0b: one per closed switcher, each holding its detached list, and the last dismissed sheet's)
+    const vsCount = async () => { const w = await cdp('Runtime.evaluate', { expression: 'window' }); try { return (await cdp('DOMDebugger.getEventListeners', { objectId: w.result.objectId })).listeners.filter((l) => l.type === 'vs-desktops').length; } finally { cdp('Runtime.releaseObject', { objectId: w.result.objectId }).catch(() => { }); } };
+    const OUT = (sel) => `(() => { const p = document.querySelector(${JSON.stringify(sel)}); const b = p ? p.getBoundingClientRect().bottom : 60; const c = document.querySelector('.window.window-active .chat-input'); const top = c ? c.getBoundingClientRect().top : innerHeight - 60; return { x: Math.round(innerWidth / 2), y: Math.round(Math.min(b + 40, (b + top) / 2)) }; })()`;
+    const outside = async (sel) => { const p = await evalJs(OUT(sel)); await tapAt(p.x, p.y); await sleep(300); };
+    const escKey = async () => { await evalJs(`(document.activeElement && document.activeElement !== document.body && document.activeElement.blur(), 1)`); for (const type of ['keyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 }); await sleep(300); };
+    const isOpen = (sel) => evalJs(`!!document.querySelector(${JSON.stringify(sel)})`);
+    const SW = '.mobile-win-switcher', SH = '.mdesk-menu';
+    // the window on show is put back after (a row's tap reveals its window — the legs after this one load with the layout it leaves)
+    const winBefore = await evalJs('app.wm.activeWindowId');
+    const ownRow = async () => { const p = await evalJs(`(() => { const w = app.wm.windows.get(app.wm.activeWindowId); const r = [...document.querySelectorAll('.mobile-win-switcher .mobile-win-row')].find((x) => w && x.textContent.includes(w.title)) || document.querySelector('.mobile-win-switcher .mobile-win-row'); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.left + Math.min(80, b.width / 3), y: b.top + b.height / 2 }; })()`); if (p) { await tapAt(p.x, p.y); await sleep(300); } };
+    const v0 = await vsCount(), swRuns = [], shRuns = [];
+    for (const [how, shut] of [['the title again', () => tap('#mobile-nav-title')], ['an outside tap', () => outside(SW)], ['the row of the window on show', ownRow], ['the title again', () => tap('#mobile-nav-title')], ['an outside tap', () => outside(SW)]]) {
+      await tap('#mobile-nav-title'); const opened = await isOpen(SW), live = (await vsCount()) - v0;
+      await shut(); await sleep(200);
+      swRuns.push({ how, opened, live, closed: !(await isOpen(SW)) });
+    }
+    const v1 = await vsCount();
+    for (const [how, shut] of [['an outside tap', () => outside(SH)], ['Esc', escKey], ['the row of the desktop on show', async () => tap(`.mdesk-menu .context-menu-item[data-desktop-id="${await evalJs('app.desktopManager.activeDesktopId')}"]`)], ['its button again (it opens anew — then an outside tap)', async () => { await tap('#mobile-nav-desktops'); await outside(SH); }], ['an outside tap', () => outside(SH)]]) {
+      await tap('#mobile-nav-desktops'); const opened = await isOpen(SH), live = (await vsCount()) - v1;
+      await shut(); await sleep(200);
+      shRuns.push({ how, opened, live, closed: !(await isOpen(SH)) });
+    }
+    const v2 = await vsCount();
+    const leak = { before: v0, switcher: v1 - v0, sheet: v2 - v1, swRuns, shRuns };
+    if ((await evalJs('app.wm.activeWindowId')) !== winBefore) { await evalJs(`(app.wm.revealWindow(${JSON.stringify(winBefore)}), 1)`); await sleep(800); }
+    check(`⑧ 375 (r3 ①): the window switcher opened and closed 5× — its title again, an outside tap, a window's row — each open holding ONE vs-desktops listener; after the closes the page holds ${leak.switcher} more (25151f0b: one per closed switcher, each with its detached list)`, swRuns.every((x) => x.opened && x.closed && x.live === 1) && leak.switcher === 0, leak);
+    check(`⑧ 375 (r3 ①): …the sheet opened and dismissed 5× — an outside tap, Esc, a row's tap, its button again — each open holding ONE; after them ${leak.sheet} more (25151f0b: the last dismissed sheet's)`, shRuns.every((x) => x.opened && x.closed && x.live === 1) && leak.sheet === 0, leak);
   }
   console.log('⑨ the ⧉ window list\'s «Other desktops» group (1280×800, a mouse) + THE DOOR CENSUS (every phone-chrome control that opens desktop rows)');
   {

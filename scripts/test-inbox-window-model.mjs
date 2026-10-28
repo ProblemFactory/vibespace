@@ -305,7 +305,7 @@ console.log('⑦ wiring pins — the window really calls every rule; the doors; 
   ok(/openInbox\(opts\) \{ return openInboxWindow\(this, opts \|\| \{\}\); \}/.test(read('src/lib/app.js')), 'app.openInbox is THE door (app.js)');
   ok(/if \(e\.target\.closest\('\.ut-tabs > \.ut-open-win'\)\) \{ hidePopup\('open-win'\); app\.openInbox\(\{ scope: 'all' \}\); return; \}/.test(panel) && /else if \(scope === 'all'\) st\.scopeKey = null;/.test(w), 'door (a): the popup\'s ⤢ opens the whole inbox — an open window another device scoped is WIDENED to all sessions (lane foryou-honest P3-7)');
   ok(/else \{ hidePopup\('view'\); app\.openInbox\(\{ itemId: rec\.id \}\); \}/.test(panel) && /app\.openInbox\(\{ itemId: rec\.id, sessionKey: rec\.sessionKey \}\)/.test(panel), 'door (b): a row\'s ⤢ opens the window ON that item (the mini inbox\'s scoped to its session)');
-  ok(/if \(e\.target\.closest\('\.ut-mini-head > \.ut-open-win'\)\) \{ pop\.remove\(\); app\.openInbox\(\{ sessionKey: primaryKey\(mini\?\.keys \|\| keys\) \}\); return; \}/.test(panel), 'door (c): the mini inbox\'s head ⤢ opens the window scoped to that session');
+  ok(/if \(e\.target\.closest\('\.ut-mini-head > \.ut-open-win'\)\) \{ pop\.remove\(\); app\.openInbox\(\{ sessionKey: primaryKey\(mini\?\.keys \|\| keys\) \}\); \}/.test(panel) && /wireMiniRows\(pop, \{ close: \(\) => pop\.remove\(\) \}\);/.test(panel), 'door (c): the mini inbox\'s head ⤢ opens the window scoped to that session');
   ok(/menu: 'gear', parent: 'comm', order: 5, icon: ICON,/.test(w) && /label: \(\) => t\('For you…'\),\s*run: \(c\) => c\.app\.openInbox\(\),/.test(w), 'door (d): ⚙ Communication ▸ For you…');
   // the viewer modal is retired — one door
   const css = read('public/style.css');

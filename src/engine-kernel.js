@@ -21,6 +21,13 @@
  *   without rehashing 1.2 GB — the kernel side's `/probe` answers `integrity` after `stat.size === bytes`).
  *   THE VERSION (`versionOf` / `versionFact`): `<kernel> --version` run ONCE by VibeSpace after the install (the plugin has
  *   no childProcess) — «measured x» beats «declared x (not measured)»; a probe's own version is the plugin's word.
+ *   THE CREDENTIAL (`kernelCredentialVerdict`, lane kernel-asset-credential — the owner 2026-10-26: 「内核是支持文件，应该放到
+ *   仓库里」): the kernel may be a release asset of the plugin's OWN repository; the Plugin Git credential rides its download
+ *   ONLY then — the install record a git source on the credential's host, the kernel URL that repository's release asset.
+ *   Round 2: GitHub's browser form (`releases/download/…`) never gets it (GitHub serves that form to a session, not a token);
+ *   `gitRepoOf` is THE ONE git-source grammar — plugin-install's gitSpecOf installs exactly what it parses.
+ *   Round 3: ONE PARSED RECORD (`gitSourceVerdict`) — its `url` is the very string git receives, a space or a control
+ *   character anywhere in the value is refused, and every refusal names its reason (GIT_SOURCE_REFUSALS).
  */
 const SCHEMA = 1;
 const RECEIPT_FILE = 'install-receipt.json';
@@ -107,6 +114,121 @@ function kernelManifestVerdict(doc, { tag = 'linux-x64', fleet = null, id = '', 
   // the fleet's own archive: its length is the package's only when it is the SAME archive (the same sha256)
   const bytes = flSha && String(p.sha256 || '').toLowerCase() !== sha ? null : declaredBytes;
   return { ok: true, tag, version, url: u.url, host: u.host, sha256: sha, bytes, source: fl ? 'fleet' : 'package', layout: { archiveFormat: layout.archiveFormat, stripComponents: strip, binaryRelPath: BINARY, requiredFiles } };
+}
+
+// ── THE CREDENTIAL'S ROAD (lane kernel-asset-credential) ─────────────────────────────────────────────────────────────
+// round 2: THE ONE git-source grammar — plugin-install's gitSpecOf installs exactly what this parses, so a repository that
+// installs is a repository the verdict knows. git's own three forms (a `user@host/path` is a local path to git, an
+// `ssh://user@host:path` a bad port — neither is one); the path's empty segments fold (`git@host:/o/r`, `o//r`: git's hosts
+// fold them), a `.` / `..` segment is never a repository's.
+// round 3: ONE PARSED RECORD — `url` is the very string git receives (the value trimmed, its `#ref` cut off: the string this
+// parsed, never a caller's own slice), `ref` the fragment; a space, a tab, a line break or a control character ANYWHERE in the
+// value (before or after `#`) is refused, so gitSpecOf and gitHostOf read the same record and cannot disagree. Every refusal
+// has its reason (the closed set GIT_SOURCE_REFUSALS — kb-file-structure's table; test-browser-builds R1 pins each).
+const GIT_PATH_MAX = 512;
+const GIT_SOURCE_RES = Object.freeze([
+  { re: /^https:\/\/([A-Za-z0-9.-]+)(?::(\d{1,5}))?\/(.*)$/, def: '443', https: true },
+  { re: /^ssh:\/\/[A-Za-z0-9._-]+@([A-Za-z0-9.-]+)(?::(\d{1,5}))?\/(.*)$/, def: '22', https: false },
+  { re: /^[A-Za-z0-9._-]+@([A-Za-z0-9.-]+):()(.*)$/, def: '', https: false },
+]);
+const GIT_SPACE_RE = /[\s\u0000-\u001f\u007f-\u009f]/;
+/** Why a value is no git source (round 3) — the closed set, each in words; gitSpecOf's refusal (plugin_git_spec) says it. */
+const GIT_SOURCE_REFUSALS = Object.freeze({
+  space: 'it has a space, a tab, a line break or a control character in it (before or after #)',
+  form: "it is none of git's three forms (https://host[:port]/owner/repo, user@host:owner/repo, ssh://user@host[:port]/owner/repo — no user or password in an https URL, no query)",
+  port: 'its port is not 1 to 5 digits',
+  'ssh-colon': "an ssh:// URL's colon names a port (digits, then /) — ssh://user@host:path is not one (the scp form is user@host:path)",
+  'scp-slash': 'user@host/path is a local path to git — the scp form is user@host:path',
+  'scp-port': 'the scp form has no port — user@host:port:path names the path "port:path" (ssh://user@host:port/path does)',
+  chars: 'its path has a character other than A–Z, a–z, 0–9, ".", "_", "-" and "/"',
+  long: `its path is longer than ${GIT_PATH_MAX} characters`,
+  empty: 'its path names no repository (empty, only slashes, or only ".git")',
+  dot: 'its path has a "." or ".." segment (the host would resolve it to another repository)',
+});
+/** A git source (a git install's URL, the install record's `value`: `https://host[:port]/owner/repo(.git)`,
+ *  `git@host:owner/repo(.git)`, `ssh://git@host[:port]/owner/repo`, each optionally `#ref`) → THE PARSED RECORD `{ok: true,
+ *  host, web, path, https, url, ref}` | `{ok: false, reason, why}`. `host` = the credential row's form (the default port
+ *  dropped), `web` = the host its https pages answer on (an ssh port is not a web port), `path` = `owner/repo` (a host with
+ *  sub-groups: every segment; one segment on a host that serves repositories at its root), `.git` dropped, `https` = the
+ *  token's form (else the deploy key's), `url` = the value trimmed with its `#ref` cut off — THE string git is handed, as
+ *  written (case, `.git`, a port kept: an ssh path's leading slash is the host's business), `ref` = the fragment | null. */
+function gitSourceVerdict(value) {
+  const no = (reason) => ({ ok: false, reason, why: GIT_SOURCE_REFUSALS[reason] });
+  const v = String(value == null ? '' : value).trim();
+  if (GIT_SPACE_RE.test(v)) return no('space');
+  const hash = v.indexOf('#');
+  const url = hash >= 0 ? v.slice(0, hash) : v, ref = hash >= 0 && hash < v.length - 1 ? v.slice(hash + 1) : null;
+  for (const g of GIT_SOURCE_RES) {
+    const m = g.re.exec(url);
+    if (!m) continue;
+    const p = m[3];
+    if (p.length > GIT_PATH_MAX) return no('long');
+    if (!g.def && p.includes(':')) return no('scp-port');
+    if (!/^[A-Za-z0-9._/-]*$/.test(p)) return no('chars');
+    const segs = p.split('/').filter(Boolean);
+    if (segs.length) segs[segs.length - 1] = segs[segs.length - 1].replace(/\.git$/i, '');
+    if (segs.some((x) => x === '.' || x === '..')) return no('dot');
+    if (!segs.length || !segs[segs.length - 1]) return no('empty');
+    const name = m[1].toLowerCase(), port = m[2] && m[2] !== g.def ? m[2] : '';
+    return { ok: true, host: name + (port ? ':' + port : ''), web: name + (g.https && port ? ':' + port : ''), path: segs.join('/'), https: g.https, url, ref };
+  }
+  if (/^(?:https:\/\/[A-Za-z0-9.-]+|ssh:\/\/[A-Za-z0-9._-]+@[A-Za-z0-9.-]+):\d{6,}\//.test(url)) return no('port');
+  if (/^ssh:\/\/[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:/.test(url)) return no('ssh-colon');
+  if (/^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+\//.test(url)) return no('scp-slash');
+  return no('form');
+}
+/** The parsed record of a git source without its verdict's `ok` (the kernel's credential verdict reads it) | null. */
+function gitRepoOf(value) {
+  const r = gitSourceVerdict(value);
+  if (!r.ok) return null;
+  const rec = { ...r };
+  delete rec.ok;
+  return rec;
+}
+const hostKey = (h) => String(h || '').trim().toLowerCase().replace(/:443$/, '');
+/**
+ * MAY THE PLUGIN GIT CREDENTIAL RIDE THIS KERNEL'S DOWNLOAD? (PURE — never sees a secret.) `kernelUrl` = the address the
+ * download dials first; `install` = the loader's install record of the plugin (`{source, value}`); `integration` = the
+ * `plugin-git` row's non-secret `{host}` (null = none set or none readable). → `{use, host, why, asset, repository}`:
+ *   `use: true` ONLY when the install is a git source whose host IS the row's host AND the kernel URL is THAT repository's
+ *   release asset — on GitHub `https://api.github.com/repos/<owner>/<repo>/releases/assets/<n>` (the API form: the one GitHub
+ *   serves a token for a private repository, with `Accept: application/octet-stream`); on any other git host (a Gitea /
+ *   GitLab) the SAME host and a path under `/<owner>/<repo>/`. `host` = the host the credential rides to (the first hop's).
+ *   `asset` = the URL is the repository's own whatever the credential (the ORCH then reads the row — and says why none rode
+ *   when the anonymous try is refused); `form` = 'api' | 'browser' | 'path' (another git host). The no's, by name:
+ *   `not-https` · `not-a-git-install` · `other-host` (the URL is on another host — it never sees the credential) ·
+ *   `not-the-repository` (that host, another repository or not a release asset) · `browser-form` (round 2: GitHub's
+ *   `releases/download/…` serves a browser's session, never a token — the row is not even read; a private repository's
+ *   kernel.json must name the API form) · `no-credential` (no row host) · `credential-other-host` (the row is for another git
+ *   host).
+ */
+function kernelCredentialVerdict({ kernelUrl = '', install = null, integration = null } = {}) {
+  const s = String(kernelUrl == null ? '' : kernelUrl).trim();
+  const u = URL_RE.exec(s);
+  const no = (why, extra = {}) => ({ use: false, host: null, why, asset: false, repository: null, form: null, ...extra });
+  if (!u || s.length > 2000) return no('not-https');
+  const kHost = hostKey(u[1] + (u[2] ? ':' + u[2] : '')), kPath = u[3] || '/';
+  // a dot segment (raw or %-encoded) or an encoded slash would leave the repository's path once the address is normalized
+  const dotty = kPath.split('/').slice(1).some((x) => { let d; try { d = decodeURIComponent(x); } catch { return true; } return d === '.' || d === '..' || d.includes('/') || d.includes('\\'); });
+  if (!isObj(install) || install.source !== 'git') return no('not-a-git-install');
+  const repo = gitRepoOf(install.value);
+  if (!repo) return no('not-a-git-install');
+  const lc = (x) => String(x).toLowerCase();
+  const segs = repo.path.split('/');
+  let related = false, asset = false, form = 'path';
+  if (hostKey(repo.web) === 'github.com') {
+    // GitHub: the repository's pages on github.com, its API on api.github.com — owner / repo names are case-insensitive
+    if (kHost === 'api.github.com') { related = true; form = 'api'; const m = /^\/repos\/([^/]+)\/([^/]+)\/releases\/assets\/(\d{1,20})$/.exec(kPath); asset = !!m && segs.length === 2 && lc(m[1]) === lc(segs[0]) && lc(m[2]) === lc(segs[1]); }
+    else if (kHost === 'github.com') { related = true; form = 'browser'; const m = /^\/([^/]+)\/([^/]+)\/releases\/download\/[^/]+\/[^/]+$/.exec(kPath); asset = !!m && segs.length === 2 && lc(m[1]) === lc(segs[0]) && lc(m[2]) === lc(segs[1]); }
+  } else if (kHost === hostKey(repo.web)) { related = true; asset = lc(kPath).startsWith('/' + lc(repo.path) + '/'); }
+  if (!related) return no('other-host');
+  if (!asset || dotty) return no('not-the-repository');
+  const repository = { host: repo.host, path: repo.path };
+  if (form === 'browser') return no('browser-form', { asset: true, repository, form });
+  const rowHost = isObj(integration) ? hostKey(integration.host) : '';
+  if (!rowHost) return no('no-credential', { asset: true, repository, form });
+  if (rowHost !== hostKey(repo.host)) return no('credential-other-host', { asset: true, repository, form });
+  return { use: true, host: kHost, why: 'plugin-repository', asset: true, repository, form };
 }
 
 /** THE PLAN — the paths of one kernel install, all inside the kernel's root folder (`<data>/plugins-state/<id>/kernel/`):
@@ -332,5 +454,5 @@ function versionFact({ measuredVersion = null, version = null, declaredVersion =
   return { kind: 'none', version: null };
 }
 
-module.exports = { SCHEMA, RECEIPT_FILE, KERNEL_FILE, ARCHIVE_FORMATS, BINARY, BYTES_MAX, ENTRIES_MAX, NODE_FLOOR, safeRel, httpsUrlOf, kernelManifestVerdict, kernelPlan,
+module.exports = { SCHEMA, RECEIPT_FILE, KERNEL_FILE, ARCHIVE_FORMATS, BINARY, BYTES_MAX, ENTRIES_MAX, NODE_FLOOR, safeRel, httpsUrlOf, kernelManifestVerdict, kernelPlan, GIT_SOURCE_REFUSALS, gitSourceVerdict, gitRepoOf, kernelCredentialVerdict,
   tarHeader, tarParser, tarEntryVerdict, tarShapeVerdict, fileModeOf, receiptOf, receiptVerdict, versionOf, versionFact };

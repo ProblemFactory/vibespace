@@ -143,4 +143,25 @@ function notificationSteerOf(wc, { inBand = null, published = false } = {}) {
   return published ? false : null;
 }
 
-module.exports = { resolveWrapperFiles, wrapperCaps, notificationSteerOf, LEGACY_QUEUE_VERBS, QUEUE_EDIT_MAX_CHARS, QUEUE_OP_MAX_BYTES };
+/** THE AGE SWEEP OF THE WRAPPERS' FILES (2.89.1's law; moved here out of server.js's boot by ci358-reds round 2 so a
+ *  leg drives the code the hub runs): <id>.buf, <id>.json and <id>.json.<pid>.tmp — the temp a wrapper's persistMeta
+ *  renames over its sidecar (ci358-reds item 7), left behind when the wrapper is killed between its write and its rename.
+ *  A file is unlinked only when untouched since `cutoff` AND its id is not live: a dead wrapper's files stop being
+ *  written, so age is race-free by construction. Returns the count unlinked. */
+const AGED_WRAPPER_FILE = /^(.+)\.(buf|json|json\.\d+\.tmp)$/;
+function sweepAgedWrapperFiles(BUFFERS_DIR, { cutoff, isActive = () => false } = {}) {
+  let swept = 0, names;
+  try { names = fs.readdirSync(BUFFERS_DIR); } catch { return 0; }
+  for (const fn of names) {
+    const m = fn.match(AGED_WRAPPER_FILE);
+    if (!m || isActive(m[1])) continue;
+    try {
+      const st = fs.statSync(path.join(BUFFERS_DIR, fn));
+      if (st.mtimeMs > cutoff) continue; // recently written → possibly a live-but-unadopted session
+      fs.unlinkSync(path.join(BUFFERS_DIR, fn)); swept++;
+    } catch {}
+  }
+  return swept;
+}
+
+module.exports = { resolveWrapperFiles, wrapperCaps, notificationSteerOf, sweepAgedWrapperFiles, LEGACY_QUEUE_VERBS, QUEUE_EDIT_MAX_CHARS, QUEUE_OP_MAX_BYTES };

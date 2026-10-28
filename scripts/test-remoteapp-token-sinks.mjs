@@ -470,9 +470,31 @@ await section('§8 the sealed row — the card\'s doors, the first connection, t
   // a changed certificate
   serverPem = PEM_B;
   const c = await postS('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
-  const ce = c.json && c.json.id ? await endedS(c.json.id) : null;
+  // THE REASON, never the state alone (ci358-reds item 8, the .358 mirror's fast red: fail() flips the state at the app's
+  // exit, rdp.ended lands only after rdpEndOf's async read of app.log — the runner's endedS returned between the two and
+  // the view was read with no reason yet: refused null, while the ✗ printed the live record, reason filled in by then).
+  // endedWhy = the .290 rule (§1's legs), here too; what the leg judged is a copy taken at its wait.
+  const ce = c.json && c.json.id ? await endedWhy(() => keeperS.get(c.json.id)) : null;
+  const ceSeen = ce ? { id: ce.id, state: ce.state, rdp: { ...ce.rdp } } : null;
   const gv = await getS(`/api/desktop/machine-desktop/remoteapp/setup?host=${HOST}`);
-  ok(ce && ce.rdp.ended === 'rdp_cert_changed' && gv.json?.setup?.refused?.code === 'rdp_cert_changed' && gv.json.setup.refused.id === ce.id, 'the machine shows ANOTHER certificate ⇒ the launch ends rdp_cert_changed, and the card\'s view says refused (under the pin still in force)', { ended: ce && ce.rdp, refused: gv.json?.setup?.refused });
+  ok(ceSeen && ceSeen.rdp.ended === 'rdp_cert_changed' && gv.json?.setup?.refused?.code === 'rdp_cert_changed' && gv.json.setup.refused.id === ceSeen.id, 'the machine shows ANOTHER certificate ⇒ the launch ends rdp_cert_changed, and the card\'s view says refused (under the pin still in force)', ceSeen ? { ended: ceSeen.rdp, refused: gv.json?.setup?.refused } : `waited 10 s for launch ${c.json && c.json.id}'s reason (rdp.ended) — none came; the record: ${JSON.stringify(c.json && c.json.id ? keeperS.get(c.json.id) : c.json)}`);
+  await until(() => accS.forwards().length === 0);
+  // RED CONTROL (item 8): the same launch with rdpEndOf's read of app.log HELD 600 ms — the runner's order, made to last.
+  // endedS (the pre-.358 wait: the state alone) returns inside the hold with NO reason, and the view read then says
+  // refused null — the runner's ✗; endedWhy waits through the same hold for the reason, and the view says refused.
+  const open0 = fs.promises.open;
+  fs.promises.open = async function (f, ...r) { if (String(f).startsWith(keeperS.logRoot) && String(f).endsWith(`${path.sep}app.log`)) await sleep(600); return open0.call(this, f, ...r); };
+  let early = null, gvEarly = null, late = null, gvLate = null;
+  try {
+    const c0 = await postS('/api/desktop/machine-desktop/remoteapp', { host: HOST, program: PROGRAM });
+    const e0 = c0.json && c0.json.id ? await endedS(c0.json.id) : null;
+    early = e0 ? { id: e0.id, state: e0.state, ended: (e0.rdp && e0.rdp.ended) || null } : null;
+    gvEarly = await getS(`/api/desktop/machine-desktop/remoteapp/setup?host=${HOST}`);
+    late = c0.json && c0.json.id ? await endedWhy(() => keeperS.get(c0.json.id)) : null;
+    gvLate = await getS(`/api/desktop/machine-desktop/remoteapp/setup?host=${HOST}`);
+  } finally { fs.promises.open = open0; }
+  ok(early && early.ended === null && !['launching', 'ready'].includes(early.state) && gvEarly.json?.setup && gvEarly.json.setup.refused === null, 'RED CONTROL: rdpEndOf\'s read of app.log held 600 ms — the pre-.358 wait (endedS, the state alone) returns with NO reason yet, and the view read then says refused null: the runner\'s ✗', { early, refused: gvEarly && gvEarly.json?.setup?.refused });
+  ok(late && late.rdp.ended === 'rdp_cert_changed' && gvLate.json?.setup?.refused?.id === late.id && late.id === early?.id, '…endedWhy waits through the same hold for the reason (rdp_cert_changed), and the view says refused', { ended: late && late.rdp && late.rdp.ended, refused: gvLate && gvLate.json?.setup?.refused });
   await until(() => accS.forwards().length === 0);
   const re = await postS('/api/desktop/machine-desktop/remoteapp/trust', { host: HOST });
   ok(re.status === 200 && re.json?.setup?.values?.certFp === fpOf(PEM_B) && re.json.setup.changed === true && re.json.setup.refused === null && audits.some((a) => a.includes(`"replaced":"${fpOf(PEM_A)}"`)), '「重新信任」 pins the new certificate (changed, the old one named in the audit line), and the refusal no longer stands', re.json && re.json.setup && { fp: re.json.setup.values.certFp, changed: re.json.setup.changed, refused: re.json.setup.refused, audit: audits.slice(-1) });

@@ -50,5 +50,25 @@
   "src/app-system-serve.js": 1,
   "src/app-system.js": 1
  },
- "mount": {}
+ "mount": {},
+ "foryou": {
+  "data/bin/vibespace-ask": 1,
+  "src/app-serve.js": 5,
+  "src/exit-proxy.js": 3,
+  "src/lib/chat-renderers.js": 1,
+  "src/lib/chat-view.js": 1,
+  "src/lib/desktop-app-window.js": 1,
+  "src/lib/inbox-window-layout.js": 13,
+  "src/lib/inbox-window.js": 18,
+  "src/lib/user-todos-actions.js": 25,
+  "src/lib/user-todos-row.js": 16,
+  "src/lib/vault-window.js": 2,
+  "src/server/apps-engine.js": 1,
+  "src/server/browser-keeper.js": 1,
+  "src/server/helper-asks.js": 1,
+  "src/server/usage-pool-engine.js": 1,
+  "src/server/vault-hooks.js": 2,
+  "src/session-status.js": 2,
+  "src/vault-inventory.js": 4
+ }
 }

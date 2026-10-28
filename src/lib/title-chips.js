@@ -149,7 +149,7 @@ export function billingPillHtml(forms, esc) {
  * rest fold too; effort + style always fold (the model chip's sheet carries them).
  * → { folded: Set of keys, billing: 'full' | 'compact' | 'icon' | null (no billing chip) }
  */
-export const PHONE_BAR_NEVER_FOLD = Object.freeze(['search', 'model', 'turnstate', 'health', 'billing']);
+export const PHONE_BAR_NEVER_FOLD = Object.freeze(['search', 'model', 'foryou', 'turnstate', 'health', 'billing']); // + lane chat-needs-you-card: the conversation's own For-you cards («waiting for you · N»)
 export function phoneBarFold({ chips = [], room = 0, gap = 0 } = {}) {
   const px = (v) => (Number.isFinite(fin(v)) ? v : 0);
   const used = (w) => (w > 0 ? w + px(gap) : 0);

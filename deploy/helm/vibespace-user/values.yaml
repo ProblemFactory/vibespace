@@ -276,9 +276,11 @@ presets:
 # integrations: [{id: plugin-git, values: {host, token}}]), `ref` = the FULL
 # commit sha it pins (a tag can move: only a sha is the trust anchor — the
 # cluster's plugin is pre-trusted only at that sha, D2; the kernel side's
-# v0.1.2 is 7085e75f53efa707fb26c7b297d6789d6c9df0b0). `kernel` = its binary
+# v0.1.4 is e21f1064e3e38511b11e45c4cab6d60b48fbcce0). `kernel` = its binary
 # (url + sha256 on the fleet's own artifact host; empty = the plugin's
-# kernel.json). `preinstall: true` downloads the kernel (≈1.2 GB, onto the
+# kernel.json — from v0.1.4 a Release asset of the plugin's own repository,
+# downloaded with the same plugin-git credential, sent to that repository
+# only). `preinstall: true` downloads the kernel (≈1.2 GB, onto the
 # PVC) right after the pod starts; false = at its first use. The image never
 # carries the kernel. The volume form only (presets.volume), like the relay page.
 customBrowser:

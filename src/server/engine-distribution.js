@@ -32,6 +32,23 @@
  *   transient: nothing moved, nothing said, asked again next time; an aside copy beside a kernel IN its place is a leftover
  *   (the landing's rm failed; an NFS silly-rename) — deleted, never put back over it; a record dropped once is healed by the
  *   next measure that finds the kernel in its place (its receipt's facts).
+ *   THE CREDENTIAL (lane kernel-asset-credential, the owner 2026-10-26: 「内核是支持文件，应该放到仓库里」): a kernel that is a
+ *   release asset of the plugin's OWN repository (a private GitHub repository's `api.github.com/repos/<o>/<r>/releases/
+ *   assets/<n>`) downloads with the Plugin Git credential — PURE kernelCredentialVerdict says when (the loader's install record
+ *   a git source on the row's host, the URL that repository's asset); the row is read through the integration store
+ *   (`resolveIntegration('plugin-git')`) at that moment, before any byte, and its token rides ONE header, `Authorization:
+ *   Bearer`, on the first hop's host only: a redirect to another host (the release's file host, whose signed address refuses
+ *   a second credential) drops it for good, `Accept: application/octet-stream` stays on every hop. Never in a URL, an argv,
+ *   an env, a log line or the engine record. Any other URL never makes the row be read at all. ROUND 2: the credential is
+ *   OPTIONAL — a row that cannot serve (the vault locked, the store unreadable, a deploy key only, a token that is not one
+ *   printable line) never stops the download before a byte: it goes anonymous (a public repository answers, as before this
+ *   lane), for a person and the fleet alike, and only a 401 / 403 / 404 of that anonymous try names the reason
+ *   (vault_locked · kernel_credential_unusable · the store's own words); GitHub's browser form (`releases/download/…`) never
+ *   gets the token — its refusal is kernel_asset_browser_form (kernel.json must name the API form). A transport error is
+ *   said by its code, never its message (a library may quote the header). ROUND 3: a first use (`answer: true` — the
+ *   keeper's launch) waits for the download's FIRST ANSWER, at most ANSWER_MS: the archive answering ⇒ started; a refusal at
+ *   that answer (the private asset's 404 asked without a credential, a length that is not the archive's) is THROWN by name like
+ *   one before any byte — so the launch says «downloading» only when bytes really flow; no answer in time ⇒ `answered: false`.
  *   THE MEASURED VERSION (`measure`). The plugin has no childProcess (the kernel side, settled 2026-10-25): VibeSpace runs
  *   `<kernel> --version` ONCE after the install and before the first launch (the keeper asks — a child, 5 s, serviceEnv),
  *   keyed by the receipt's sha256 (a kernel placed by hand: its size + mtime) — `measuredVersion` + `measuredAt` on THE
@@ -59,14 +76,15 @@ const { serviceEnv } = require('../agent-env.js');
 const RECORD_FILE = 'browser-engines.json';
 const VERSION_MS = 5000;
 const STALL_MS = 120000;
+const ANSWER_MS = 10000;
 const MANIFEST_MAX = 256 * 1024;
 const UNPACKED_MAX = 17 * 1024 * 1024 * 1024;
 const clip = (s, n = 200) => String(s == null ? '' : s).replace(/[\0-\x1f\x7f]/g, ' ').slice(0, n);
 const named = (code, error, extra = {}) => Object.assign(new Error(String(error)), { code, ...extra });
 
 function create({ dataDir, engines = null, loader = null, fleetFacts = () => null, fetchImpl = (...a) => globalThis.fetch(...a), resolveUrl = null, platform = process.platform, arch = process.arch,
-  env = () => process.env, userTodos = null, notify = () => {}, log = console, now = () => Date.now(), stallMs = STALL_MS, versionMs = VERSION_MS, freeOf: freeOfIn = null,
-  zlib: zlibIn = zlib, nodeVersion = process.versions.node, io: ioIn = null } = {}) {
+  env = () => process.env, userTodos = null, notify = () => {}, log = console, now = () => Date.now(), stallMs = STALL_MS, answerMs = ANSWER_MS, versionMs = VERSION_MS, freeOf: freeOfIn = null,
+  zlib: zlibIn = zlib, nodeVersion = process.versions.node, io: ioIn = null, integrations = null } = {}) {
   // the file doors a suite bends (a write that fails, a rename that fails) — the real fs otherwise
   const io = { createWriteStream: (f, o) => fs.createWriteStream(f, o), rename: (a, b) => fsp.rename(a, b), stat: (f) => fsp.stat(f), ...(ioIn || {}) };
   const nodeNow = String(nodeVersion || '');
@@ -74,6 +92,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
   const R = () => { try { return typeof engines === 'function' ? engines() : engines; } catch { return null; } };
   const L = () => { try { return typeof loader === 'function' ? loader() : loader; } catch { return null; } };
   const T = () => { try { return typeof userTodos === 'function' ? userTodos() : userTodos; } catch { return null; } };
+  const I = () => { try { return typeof integrations === 'function' ? integrations() : integrations; } catch { return null; } };
   const recordFile = path.join(String(dataDir || '.'), RECORD_FILE);
   let record = { v: 1, engines: {} };
   const ready = (async () => { try { const j = JSON.parse(await fsp.readFile(recordFile, 'utf8')); if (j && typeof j === 'object' && j.engines && typeof j.engines === 'object') record = { v: 1, engines: j.engines }; } catch { /* none yet */ } })();
@@ -158,18 +177,63 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     return { version: m.version, bytes: m.bytes, host: m.host, source: m.source, sha256: m.sha256 };
   }
 
+  // lane kernel-asset-credential round 2: the door a refused credential names, and the locked vault's words (the vault-words
+  // census: a person is told WHERE to unlock and that For you names it)
+  const INTEGRATIONS_DOOR = ' (Integrations → Plugins → Plugin Git repository)';
+  const CREDENTIAL_SEALED = 'the Plugin Git credential is sealed in the locked vault — unlock it and try again (Unlock… at the top of the page; For you names what is waiting on it)';
+  /** THE CREDENTIAL'S ROAD for this download (lane kernel-asset-credential) — BEFORE any byte: PURE kernelCredentialVerdict over
+   *  the loader's install record and the plugin-git row's host. A URL that is not the plugin repository's own asset — or is
+   *  GitHub's browser form, which serves a session and never a token — never reads the row. The row is read through the
+   *  integration store NOW (never kept). ROUND 2: the credential is OPTIONAL — a row that cannot serve this download (the
+   *  vault locked, the store unreadable, undecryptable, none / for another host, a deploy key only, a token that is not one
+   *  printable line) never stops it: it goes anonymous (a public repository answers) and `without` keeps the reason —
+   *  `{code, why, door}` — said only when the anonymous try is refused (refusalOf). A person's download, a first use and the
+   *  fleet's boot job alike. → `{road, token, without}` (the token only when it rides). */
+  function credentialOf(sid, url) {
+    let inst = null; try { const l = L(); inst = l && typeof l.installRecord === 'function' ? l.installRecord(sid) : null; } catch { inst = null; }
+    const pre = EK.kernelCredentialVerdict({ kernelUrl: url, install: inst, integration: null });
+    if (!pre.asset || pre.form === 'browser') return { road: pre, token: null, without: null };
+    const anon = (road, code, why, door = INTEGRATIONS_DOOR) => ({ road, token: null, without: { code, why, door } });
+    const store = I();
+    let r = null, unread = null;
+    if (!store || typeof store.resolveIntegration !== 'function') return anon(pre, 'build_fetch_failed', 'this instance has no integration store', '');
+    try { r = store.resolveIntegration('plugin-git'); } catch (e) { unread = clip(String((e && (e.message || e.code)) || e).replace(/\s+/g, ' '), 160) || 'it threw'; }
+    if (!unread && r && r.source === 'none' && r.whyCode === 'store-unreadable') unread = clip(r.why, 160) || 'store-unreadable';
+    if (unread) return anon(pre, 'build_fetch_failed', `the Integrations store could not be read (${unread})`);
+    if (r && r.source === 'none' && r.whyCode === 'vault-locked') return anon(pre, 'vault_locked', CREDENTIAL_SEALED, '');
+    if (r && r.source === 'none' && r.whyCode === 'undecryptable') return anon(pre, 'kernel_credential_unusable', `the Plugin Git credential cannot be read (${clip(r.why, 160)})`);
+    const v = r && r.source !== 'none' && r.values ? r.values : {};
+    const road = EK.kernelCredentialVerdict({ kernelUrl: url, install: inst, integration: v.host ? { host: v.host } : null });
+    if (!road.use) return anon(road, 'build_fetch_failed', road.why === 'credential-other-host' ? 'the Plugin Git credential is for another git host' : 'no Plugin Git credential is set');
+    const token = v.token == null ? '' : String(v.token).trim(), off = { ...road, use: false, host: null };
+    if (!token) return anon({ ...off, why: 'no-token' }, 'kernel_credential_unusable', v.deployKey ? 'the Plugin Git credential is a deploy key; a release asset needs a token' : 'the Plugin Git credential holds no access token; a release asset needs one');
+    // round 2: a token is ONE printable line — a control character would make the header itself throw, and that error quote it
+    if (!/^[\x21-\x7e]{1,4096}$/.test(token)) return anon({ ...off, why: 'token-unprintable' }, 'kernel_credential_unusable', "the Plugin Git credential's token is not one printable line (a space, a line break or a control character is in it)");
+    return { road, token, without: null };
+  }
+
   // ── THE FETCH: https only, every redirect hop https (the sha256 is the authenticity), the stall bound ──
-  async function kernelFetch(url, { signal, hops = 3 } = {}) {
+  // lane kernel-asset-credential round 2: a transport error is said by its CODE (ECONNREFUSED, UND_ERR_…) or its kind
+  // (TypeError) — never its message: a library may quote a request header in it (undici quotes an invalid header value whole)
+  const transportWhy = (e) => { const c = String((e && e.cause && e.cause.code) || (e && e.code) || ''); if (/^[A-Z][A-Z0-9_]{1,40}$/.test(c)) return c; const n = String((e && e.name) || ''); return /^[A-Za-z]{1,40}$/.test(n) ? n : 'error'; };
+  // lane kernel-asset-credential: `auth` = {host, token} — the token rides the FIRST hop's host only; a hop to another host
+  // drops it for good (a signed blob address refuses a second credential), Accept stays on every hop
+  async function kernelFetch(url, { signal, hops = 3, auth = null } = {}) {
     let u = String(url || '');
+    let carry = !!(auth && auth.token);
+    const bound = carry ? String(auth.host).toLowerCase().replace(/:443$/, '') : null;
     for (let i = 0; i <= hops; i++) {
       const x = EK.httpsUrlOf(u);
       if (!x) throw named('build_fetch_failed', `the kernel's download is not an https address (${clip(u, 120)}) — nothing was fetched from it`);
+      if (carry && x.host.replace(/:443$/, '') !== bound) carry = false;
+      const headers = { 'user-agent': 'vibespace-kernel-download', accept: 'application/octet-stream' };
+      if (carry) headers.authorization = `Bearer ${auth.token}`;
       let res;
-      try { res = await fetchImpl(resolveUrl ? resolveUrl(x.url) : x.url, { redirect: 'manual', signal, headers: { 'user-agent': 'vibespace-kernel-download' } }); }
-      catch (e) { if (signal && signal.aborted) throw named('build_fetch_failed', `the download from ${x.host} stalled (no byte for ${Math.round(stallMs / 1000)} s)`); throw named('build_fetch_failed', `${x.host} could not be reached (${clip((e && e.cause && e.cause.code) || (e && e.message) || e, 120)})`); }
+      try { res = await fetchImpl(resolveUrl ? resolveUrl(x.url) : x.url, { redirect: 'manual', signal, headers }); }
+      catch (e) { if (signal && signal.aborted) throw named('build_fetch_failed', `the download from ${x.host} stalled (no byte for ${Math.round(stallMs / 1000)} s)`); throw named('build_fetch_failed', `${x.host} could not be reached (${transportWhy(e)})`); }
       const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
       if (loc) { try { await res.body?.cancel(); } catch { /* none */ } try { u = new URL(loc, x.url).href; } catch { throw named('build_fetch_failed', `${x.host} redirected to a bad location`); } continue; }
-      return { res, host: x.host };
+      return { res, host: x.host, carried: carry };
     }
     throw named('build_fetch_failed', `more than ${hops} redirects from ${clip(url, 120)}`);
   }
@@ -197,8 +261,11 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
    * DOWNLOAD a kernel into its place. The refusals before any byte (no place, one already running, kernel.json, the two hard
    * rows) are THROWN; the rest runs on (`wait: true` awaits it — the boot job and the suites) and is said through `kernelFact`.
    * `by`: 'user' (a person's click — the card shows it) | 'fleet' (the boot job) | 'first-use' (a launch found it absent).
+   * `answer` (round 3 of lane kernel-asset-credential — the keeper's first use): wait for the download's FIRST ANSWER (at most
+   * `answerMs`) — the archive answering ⇒ `{started: true}`; a refusal at that answer is thrown by name; none in time ⇒
+   * `{started: true, answered: false}`.
    */
-  async function installKernel(id, { by = 'user', wait = false } = {}) {
+  async function installKernel(id, { by = 'user', wait = false, answer = false } = {}) {
     await ready;
     const sid = String(id || '');
     if (!BE.ID_RE.test(sid)) throw named('browser_engine_missing', `"${clip(sid, 80)}" is not a browser engine plugin id`);
@@ -206,7 +273,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     if (running.has(sid)) { const r0 = running.get(sid); throw named('install_running', `${who(sid)}'s kernel is already downloading (${r0.total ? Math.floor((100 * r0.bytes) / r0.total) + ' %' : r0.step}) — one at a time`); }
     const st = { step: 'restore', bytes: 0, total: null, startedAt: now(), by, abort: new AbortController() };
     running.set(sid, st);
-    let m, fr;
+    let m, fr, cr = null;
     try {
       // round 3: an aside copy beside an empty place (a landing stopped between its renames) comes BACK first — a first use or
       // the fleet's boot then needs no download; one that cannot be put back is refused by name (engine_kernel_aside)
@@ -225,16 +292,43 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
       if (hr.hard.length) throw named(hr.hard[0].code, hr.hard[0].code === 'disk' ? `${who(sid)}'s kernel ${hr.hard[0].error} — nothing was downloaded` : hr.hard[0].error, { kernel: { need: hr.needBytes, free: fr.free, path: fr.path } });
       m = EK.kernelManifestVerdict(doc, { tag: plan.tag, fleet: fleetKernelFor(sid), id: sid, label: labelOf(sid) });
       if (!m.ok) throw named(m.code, m.error);
+      // lane kernel-asset-credential: the credential's road (and its refusals) before any byte
+      cr = credentialOf(sid, m.url);
+      st.credential = cr.road.use ? 'plugin-git' : null;
     } catch (e) { running.delete(sid); await noteFailure(sid, e, st.step, by); throw e; }
     st.total = m.bytes;
-    log.log?.(`[browser] downloading ${who(sid)}'s kernel ${m.version} (${m.bytes || '?'} bytes) from ${m.host} into ${plan.targetDir} (${by}; ${m.source === 'fleet' ? 'the fleet\'s artifact' : 'its kernel.json'})`);
+    log.log?.(`[browser] downloading ${who(sid)}'s kernel ${m.version} (${m.bytes || '?'} bytes) from ${m.host} into ${plan.targetDir} (${by}; ${m.source === 'fleet' ? 'the fleet\'s artifact' : 'its kernel.json'}${cr.road.use ? '; a release asset of its plugin\'s repository, with the Plugin Git credential' : ''})`);
     notify();
-    const job = runInstall(sid, plan, m, st).then(async (out) => { running.delete(sid); notify(); return out; }, async (e) => { running.delete(sid); await dropPartials(plan); await noteFailure(sid, e, st.step, by); notify(); throw e; });
+    const auth = cr.token ? { host: cr.road.host, token: cr.token } : null;
+    let answered = () => {};
+    const first = new Promise((r) => { answered = r; });
+    const job = runInstall(sid, plan, m, st, { auth, road: cr.road, without: cr.without, onAnswer: () => answered({ ok: true }) }).then(async (out) => { running.delete(sid); notify(); answered({ ok: true }); return out; }, async (e) => { running.delete(sid); await dropPartials(plan); await noteFailure(sid, e, st.step, by, st.credential); notify(); answered({ error: e }); throw e; });
     if (wait) return job;
     job.catch(() => {}); // said through kernelFact + the journal (+ For-you when nobody watched)
-    return { ok: true, started: true, id: sid, version: m.version, bytes: m.bytes, host: m.host };
+    const out = { ok: true, started: true, id: sid, version: m.version, bytes: m.bytes, host: m.host };
+    if (!answer) return out;
+    // round 3: «downloading» only when the archive answered — a refusal at the first answer is the caller's, by name
+    let late = null;
+    const a = await Promise.race([first, new Promise((r) => { late = setTimeout(() => r(null), answerMs); if (late.unref) late.unref(); })]);
+    clearTimeout(late);
+    if (!a) return { ...out, answered: false };
+    if (a.error) throw a.error;
+    return out;
   }
-  async function runInstall(sid, plan, m, st) {
+  /** lane kernel-asset-credential: a refusal (401 / 403 / 404) of the plugin repository's own asset, said with its road → the
+   *  error to throw. Round 2: GitHub's browser form ⇒ kernel_asset_browser_form (kernel.json must name the API form — the token
+   *  is never sent there); asked without a credential ⇒ the reason under its own code (`without`: vault_locked ·
+   *  kernel_credential_unusable · build_fetch_failed). */
+  function refusalOf(g, sid, m, road, without) {
+    const head = `${g.host} answered ${g.res.status} for ${who(sid)}'s kernel ${m.version}`;
+    if (![401, 403, 404].includes(g.res.status) || !road || !road.asset) return named('build_fetch_failed', head);
+    const repo = `${road.repository.host}/${road.repository.path}`;
+    if (road.form === 'browser') return named('kernel_asset_browser_form', `${head} — the plugin's kernel.json names the browser download form (github.com/${road.repository.path}/releases/download/…); a private repository's asset needs the API form (api.github.com/repos/${road.repository.path}/releases/assets/<id>) — tell the plugin's author`);
+    if (g.carried) return named('build_fetch_failed', `${head} with the Plugin Git credential — its token cannot read ${repo}'s release assets${INTEGRATIONS_DOOR}`);
+    if (!without) return named('build_fetch_failed', head);
+    return named(without.code, `${head} — it is a release asset of its plugin's own repository (${repo}), asked without a credential: ${without.why}${without.door}`);
+  }
+  async function runInstall(sid, plan, m, st, { auth = null, road = null, without = null, onAnswer = null } = {}) {
     // ① FETCH → .part, hashed as it lands
     st.step = 'fetch';
     await fsp.rm(plan.part, { force: true }).catch(() => {});
@@ -244,12 +338,13 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     const h = crypto.createHash('sha256');
     let out = null, got = 0;
     try {
-      const g = await kernelFetch(m.url, { signal: st.abort.signal });
-      if (!g.res.ok) throw named('build_fetch_failed', `${g.host} answered ${g.res.status} for ${who(sid)}'s kernel ${m.version}`);
+      const g = await kernelFetch(m.url, { signal: st.abort.signal, auth });
+      if (!g.res.ok) throw refusalOf(g, sid, m, road, without);
       const len = Number(g.res.headers.get('content-length'));
       if (m.bytes != null && Number.isFinite(len) && len > 0 && len !== m.bytes) throw named('build_verify_failed', `${g.host} announces ${len} bytes, ${EK.KERNEL_FILE} says ${m.bytes} — not the declared archive; nothing was kept`);
       const cap = m.bytes != null ? m.bytes : Number.isFinite(len) && len > 0 ? len : EK.BYTES_MAX;
       st.total = m.bytes != null ? m.bytes : Number.isFinite(len) && len > 0 ? len : null;
+      if (onAnswer) onAnswer(); // round 3: the archive answered — the download really started
       out = fileWriter(plan.part);
       const wf = (e) => writeFailure(e, { sid, what: 'the download', code: 'build_fetch_failed', where: plan.root });
       for await (const chunk of g.res.body) {
@@ -262,9 +357,9 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
       try { await out.end(); } catch (e) { throw wf(e); }
       out = null;
     } catch (e) {
-      if (e && /^(?:build_[a-z_]+|disk)$/.test(String(e.code || ''))) throw e;
+      if (e && /^(?:build_[a-z_]+|disk|vault_locked|kernel_credential_unusable|kernel_asset_browser_form)$/.test(String(e.code || ''))) throw e;
       if (st.abort.signal.aborted) throw named('build_fetch_failed', `the download stalled (no byte for ${Math.round(stallMs / 1000)} s) — nothing was kept`);
-      throw named('build_fetch_failed', `the download of ${who(sid)}'s kernel failed (${clip(e && e.message, 160)})`);
+      throw named('build_fetch_failed', `the download of ${who(sid)}'s kernel failed (${transportWhy(e)})`);
     } finally { clearTimeout(stall); if (out) { try { out.destroy(); } catch { /* none */ } } }
     // ② VERIFY the archive: its length and its sha256 against the manifest's
     st.step = 'verify'; notify();
@@ -335,7 +430,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     if (had) await fsp.rm(plan.removingDir, { recursive: true, force: true }).catch((e) => log.warn?.(`[browser] the previous kernel at ${plan.removingDir} could not be deleted (${e && e.message})`));
     await fsp.rm(plan.part, { force: true }).catch(() => {});
     const rec = recOf(sid);
-    rec.kernel = { version: m.version, sha256: sha, archiveBytes: got, bytes: exeStat.size, host: m.host, source: m.source, installedAt: now(), by: st.by };
+    rec.kernel = { version: m.version, sha256: sha, archiveBytes: got, bytes: exeStat.size, host: m.host, source: m.source, installedAt: now(), by: st.by, credential: st.credential || null };
     delete rec.failure;
     await save();
     log.log?.(`[browser] ${who(sid)}'s kernel ${m.version} is installed (sha256 ${sha.slice(0, 12)}…, verified; ${shape.files} files)`);
@@ -419,11 +514,12 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     if (out.length) notify();
     return out;
   }
-  async function noteFailure(sid, e, step, by) {
+  async function noteFailure(sid, e, step, by, credential = null) {
     const rec = recOf(sid);
     const code = (e && e.code) || 'build_fetch_failed', error = clip(e && e.message, 400);
     const again = rec.failure && rec.failure.code === code && rec.failure.filed;
-    rec.failure = { code, error, step: step || 'plan', at: now(), by, filed: !!again, ...(e && e.node ? { node: String(e.node), need: String(e.need || EK.NODE_FLOOR) } : {}) };
+    const road = (e && e.credential) || credential || null; // lane kernel-asset-credential: the road the download took
+    rec.failure = { code, error, step: step || 'plan', at: now(), by, filed: !!again, ...(e && e.node ? { node: String(e.node), need: String(e.need || EK.NODE_FLOOR) } : {}), ...(road ? { credential: road } : {}) };
     log.warn?.(`[browser] ${who(sid)}'s kernel download failed at ${step || 'plan'} [${code}] — ${error}`);
     if (by !== 'user' && !again && code !== 'install_running') rec.failure.filed = fileNotice(sid, { what: 'kernel', code, error });
     await save();
@@ -435,7 +531,7 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
     const name = labelOf(id) || id;
     const aside = what === 'kernel' && code === 'engine_kernel_aside';
     const text = aside ? `${name}: its browser kernel is set aside and could not be put back` : what === 'kernel' ? `${name}: its browser kernel could not be downloaded` : `${name}: the cluster's plugin could not be installed`;
-    const detail = `${clip(error, 300)} [${code}]${what !== 'kernel' ? ' — ⚙ → Plugins shows it; the next restart tries again' : code === 'engine_node_unsupported' ? ` — update Node on this computer to ${EK.NODE_FLOOR} or later; nothing is downloaded until then` : aside ? ' — Settings → Agent browser shows the engine; it is put back at the next start or use' : ' — Settings → Agent browser shows the engine; the download is tried again at the next use'}`;
+    const detail = `${clip(error, 300)} [${code}]${what !== 'kernel' ? ' — ⚙ → Plugins shows it; the next restart tries again' : code === 'engine_node_unsupported' ? ` — update Node on this computer to ${EK.NODE_FLOOR} or later; nothing is downloaded until then` : code === 'vault_locked' ? ' — the download is tried again at the next use once it is unlocked' : code === 'kernel_credential_unusable' ? ' — Integrations → Plugins → Plugin Git repository; the download is tried again at the next use' : code === 'kernel_asset_browser_form' ? ' — the plugin\'s author fixes its kernel.json; the download is tried again at the next use' : aside ? ' — Settings → Agent browser shows the engine; it is put back at the next start or use' : ' — Settings → Agent browser shows the engine; the download is tried again at the next use'}`;
     try {
       ut.add('engine-distribution', { origin: 'plugin', plugin: 'engine-distribution', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Plugins', text, detail,
         i18n: { text: { key: aside ? '{name}: its browser kernel is set aside and could not be put back' : what === 'kernel' ? '{name}: its browser kernel could not be downloaded' : "{name}: the cluster's plugin could not be installed", params: { name } } } });
@@ -504,6 +600,9 @@ function create({ dataDir, engines = null, loader = null, fleetFacts = () => nul
       measuredVersion: mv && mv.version ? mv.version : null, measuredAt: mv && mv.version ? mv.at : null, measureError: mv && !mv.version ? mv.error || null : null,
       code: !run && f ? f.code : null, error: !run && f ? f.error : null, failedAt: !run && f ? f.at : null,
       node: !run && f && f.node ? f.node : null, need: !run && f && f.need ? f.need : null,
+      // lane kernel-asset-credential: the road of the download in flight / the last one ('plugin-git' = the plugin repository's
+      // release asset, with the Plugin Git credential) — STRUCTURE, the card words it
+      credential: run ? run.credential || null : f ? f.credential || null : k ? k.credential || null : null,
     };
   }
 

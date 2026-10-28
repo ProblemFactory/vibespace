@@ -48,6 +48,28 @@
 //      hub), the drag released on the row — the title-bar road and the tile road: refused BY NAME (a toast), the window stays
 //      on this desktop, on show and reachable
 //   ⑱ A CANCELLED Rename… (r3 ④): a row's right-click → Rename… → Cancel ⇒ nothing comes back (no list, no menu, no dialog)
+//   ⑲ AN OPEN LIST FOLLOWS ANOTHER CLIENT (lane desktop-doors-table r2 ①②, 951×585, 8 desktops): the list open (clicked), a
+//      desktop deleted and another renamed on ANOTHER client (a raw /ws) — the list redraws: the renamed row by its new name,
+//      the deleted one KEPT AT ITS PLACE greyed WITH the why that names it; its right-click opens its doors greyed with that
+//      why (8c680dcf: an EMPTY box); a press on such a row says the why and switches nowhere. ROUND 3 (r3 ②): the list is
+//      PATCHED IN PLACE — the pointer resting on the row about to be renamed, every node the list shows held, a desktop also
+//      ADDED there: the same list, the rows it showed the same nodes (in it still), the pointer on the renamed row's own node,
+//      the added desktop a NEW row at its place, the list grown downward inside the viewport (every row it showed where it
+//      was — 25151f0b: a new popover, every node new); ⑰'s drop refusal is the table's why (“name”, r3 ④). ROUND 4 (r4): ONE
+//      placement door — the list open NEAR THE VIEWPORT'S HEIGHT (as many desktops as it holds uncapped), the pointer resting
+//      on desktop 3's row, three desktops added on another client: the list stays INSIDE the viewport, capped and scrolling,
+//      its first row reachable, the pointer's row unmoved (its node, its height, under the pointer); a desktop renamed there
+//      WIDER than the viewport: inside on all four sides, every ⋯ on screen; the wheel brings «+ New desktop» in. ROUND 5
+//      (r5): a SCROLLED list keeps its offset — the list capped, the wheel on it 100 px down, the pointer resting on a row,
+//      the viewport grown to 951×900 (a deleted desktop keeps its row, so the room is what lets the list fit), a desktop
+//      renamed on another client: the offset kept, the pointer's row unmoved, the list grown downward as far as its rows
+//      allow; wheeled back to the top, the next remote change lifts the cap whole and no row moves
+//   RED CONTROL r6 — a sixth esbuild bundle of THIS tree with 5a98bf0f's _placeList put back (the offset neither read nor
+//   kept): ⑲ r5 ① goes RED there (the cap lifted whole, the offset 0, the pointer's row 100 px down).
+//   RED CONTROL r5 — a fifth esbuild bundle of THIS tree with daf19adf's placement put back (the open placed before its words,
+//   the patch lifting the list by hand — no floor, no cap): ⑲ r4 goes RED there (the top negative, no scroll, past the edge).
+//   RED CONTROL r4 — a fourth esbuild bundle of THIS tree with 8c680dcf's rules put back (an open list never told; a desk
+//   menu leaves a gone desktop's shut doors out): ⑲ goes RED there.
 //   RED CONTROL r3 — a third esbuild bundle of THIS tree with round 2's rules put back (no dragleave, no tile dragend, no
 //   document listeners, the row drop keeps the ref; no existence check; Rename… always reopens): ⑯ ⑰ ⑱ go RED there.
 //   RED CONTROL r2 — a second esbuild bundle of THIS tree with the round-1 rules put back (a row with no doors, no ⋯, no
@@ -205,6 +227,52 @@ const MUTANT3 = {};
   MUTANT3.bundle = fs.readFileSync(path.join(MUT3, 'bundle-mut.js'));
 }
 
+// ── the RED CONTROL r4: this source with 8c680dcf's rules put back (lane desktop-doors-table r2 ① undone), one esbuild ──
+const MUT4 = scratch('desk-small-mut4');
+const MUTANT4 = {};
+{
+  fs.mkdirSync(MUT4, { recursive: true });
+  execSync(`cp -r ${repo}/src ${MUT4}/src`);
+  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT4, 'node_modules'));
+  const sub = (rel, from, to) => { const f = path.join(MUT4, rel); const s = fs.readFileSync(f, 'utf8'); if (s.split(from).length !== 2) throw new Error(`mutant r4 anchor ${rel}: ${from.slice(0, 70)}`); fs.writeFileSync(f, s.replace(from, to)); };
+  // ① an open list is never told of a remote change; a desk menu leaves every shut door out, a gone desktop's too
+  sub('src/lib/desktop-manager.js', '    if (JSON.stringify(this._desktops.map((d) => [d.id, d.name])) === before) return;\n', '    return;\n');
+  sub('src/desktop-switch.js', "draw: form === 'item' && !enabled && !phone && i >= 0 ? 'off' : form", "draw: form === 'item' && !enabled && !phone ? 'off' : form");
+  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT4 });
+  MUTANT4.bundle = fs.readFileSync(path.join(MUT4, 'bundle-mut.js'));
+}
+
+// ── the RED CONTROL r5: this source with daf19adf's placement put back (lane desktop-doors-table r4 undone), one esbuild ──
+const MUT5 = scratch('desk-small-mut5');
+const MUTANT5 = {};
+{
+  fs.mkdirSync(MUT5, { recursive: true });
+  execSync(`cp -r ${repo}/src ${MUT5}/src`);
+  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT5, 'node_modules'));
+  const sub = (rel, from, to) => { const f = path.join(MUT5, rel); const s = fs.readFileSync(f, 'utf8'); if (s.split(from).length !== 2) throw new Error(`mutant r5 anchor ${rel}: ${from.slice(0, 70)}`); fs.writeFileSync(f, s.replace(from, to)); };
+  // the open placed by showContextMenu alone (before its rows' words); the patch lifts the list by its overflow, by hand
+  sub('src/lib/desktop-manager.js', '    this._placeList(menu); // its words painted', '    // its words painted');
+  sub('src/lib/desktop-manager.js', '      this._placeList(menu, stood); //', "      const b = menu.getBoundingClientRect(), Z = uiScale();\n      if (b.bottom > window.innerHeight - 4) menu.style.top = (parseFloat(menu.style.top) - (b.bottom - (window.innerHeight - 4)) / Z) + 'px';\n      if (b.right > window.innerWidth - 4) menu.style.left = Math.max(4 / Z, parseFloat(menu.style.left) - (b.right - (window.innerWidth - 4)) / Z) + 'px';\n      void stood; //");
+  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT5 });
+  MUTANT5.bundle = fs.readFileSync(path.join(MUT5, 'bundle-mut.js'));
+}
+
+// ── the RED CONTROL r6: this source with 5a98bf0f's _placeList put back (lane desktop-doors-table r5 undone), one esbuild ──
+const MUT6 = scratch('desk-small-mut6');
+const MUTANT6 = {};
+{
+  fs.mkdirSync(MUT6, { recursive: true });
+  execSync(`cp -r ${repo}/src ${MUT6}/src`);
+  fs.symlinkSync(path.join(repo, 'node_modules'), path.join(MUT6, 'node_modules'));
+  const sub = (rel, from, to) => { const f = path.join(MUT6, rel); const s = fs.readFileSync(f, 'utf8'); if (s.split(from).length !== 2) throw new Error(`mutant r6 anchor ${rel}: ${from.slice(0, 70)}`); fs.writeFileSync(f, s.replace(from, to)); };
+  // the offset neither read, nor asked for, nor written back: a lifted cap drops it
+  sub('src/lib/desktop-manager.js', '    const Z = uiScale(), s = menu.scrollTop; // the offset it shows', '    const Z = uiScale(); //');
+  sub('src/lib/desktop-manager.js', ', keep: stood.height, scrolled: s * k });', ', keep: stood.height });');
+  sub('src/lib/desktop-manager.js', '    if (at.scroll != null) menu.scrollTop = at.scroll / k; //', '    //');
+  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: MUT6 });
+  MUTANT6.bundle = fs.readFileSync(path.join(MUT6, 'bundle-mut.js'));
+}
+
 // ── throwaway server in a worktree (the tree's src/ + built public/) ──
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -219,7 +287,7 @@ const cleanup = () => {
   try { srv.kill('SIGKILL'); } catch { }
   for (const root of [wt, fakeHome, stubDir, chromeDir]) { try { endRootedProcesses(root); } catch { } } // the server, dtach, the wrapper, the stub, Chrome (§57b)
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  for (const d of [chromeDir, fakeHome, stubDir, fontsDir, MUT, MUT2, MUT3]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
+  for (const d of [chromeDir, fakeHome, stubDir, fontsDir, MUT, MUT2, MUT3, MUT4, MUT5, MUT6]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { } }
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
@@ -409,6 +477,24 @@ const STRIP = `(() => { const s = document.getElementById('taskbar-items'); cons
     compact: (() => { const b = document.querySelector('.desktop-switch-compact'); return b ? [...b.querySelectorAll('span')].map((x) => x.textContent.trim()).filter(Boolean).join(' ') : null; })(), previews: document.querySelectorAll('#desktop-previews .desktop-preview').length }; })()`;
 
 // ═════════════════════════════════════════ the four viewports ═════════════════════════════════════════
+/** int360: the state a tile press assumes, polled (≤ 2 s): {waitedMs, ok, active, reachable, min, box} */
+const tileReady = async (id, want) => {
+  const t0 = Date.now(); let st = null;
+  for (;;) {
+    st = await evalJs(`(() => { const w = app.wm.windows.get(${J(id)}); const e = w && w.element; const r = e ? e.getBoundingClientRect() : null;
+      return { active: app.wm.activeWindowId === ${J(id)}, reachable: app.wm.isReachable ? app.wm.isReachable(${J(id)}) !== false : true, min: !!(w && w.isMinimized),
+        box: r ? [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)] : null }; })()`).catch(() => null) || {};
+    if (want(st) || Date.now() - t0 >= 2000) break;
+    await sleep(50);
+  }
+  return { waitedMs: Date.now() - t0, ok: !!want(st), ...st };
+};
+/** int360: one tile press's wait, printed; over 450 ms or on the bound = a NAMED row (never a failure by itself) */
+const tilePress = (tag, n, r, what) => {
+  const facts = `{waitedMs ${r.waitedMs}, active ${r.active}, reachable ${r.reachable}, min ${r.min}, box ${J(r.box)}}`;
+  if (r.waitedMs > 450 || !r.ok) console.log(`  ⓘ NAMED ① ${tag}: tile press ${n} waited ${r.waitedMs} ms for «${what}»${r.ok ? '' : ' and ended on the 2 s bound'} ${facts}`);
+  else console.log(`    ① ${tag}: tile press ${n} after ${r.waitedMs} ms (${what}) ${facts}`);
+};
 /** the legs RED in the control, shared by both runs (`red` = the mutant: the verdicts are inverted) */
 const legDragOverTaskbar = async (tag) => {
   await closeAll(); await attach(0); await attach(1); await attach(2);
@@ -420,9 +506,22 @@ const legDragOverTaskbar = async (tag) => {
   await dragTo(a, { x: a.x + 40, y: ws.b + 14 });
   const after = await evalJs(BOX(id));
   await shot(`${tag}-p21-release-over-taskbar.png`);
-  // the buried window's tile, clicked twice (the walk: minimized, then restored to the same buried place)
+  // the buried window's tile, clicked twice (the walk: minimized, then restored to the same buried place). Each press waits for
+  // the state it assumes (int360 — 主开发's ruling, the 450 ms clock before the first press was a race: 2 reds in 4 whole runs,
+  // {min, active} = press 1 took the tile handler's activate road): press 1 = the dragged window ACTIVE and REACHABLE by the wm's
+  // own reading (isReachable, the handler's branch; the RED copy's window is buried by design — active only), press 2 = it
+  // minimized; each bounded 2 s and printed. A wait over 450 ms or one that ended on the bound is a NAMED row, not a failure
+  // (product evidence: a drop whose active / reachable state settles asynchronously — the backlog line's next step).
+  const red = tag === 'RED';
+  const p1 = await tileReady(id, (s) => s.active && (red || s.reachable));
+  tilePress(tag, 1, p1, red ? 'active' : 'active and reachable');
   const tile = await centre(`.taskbar-item[data-win-id="${id}"]`);
-  if (tile) { await click(tile); await sleep(300); await click(tile); await sleep(300); }
+  if (tile) {
+    await click(tile);
+    const p2 = await tileReady(id, (s) => s.min);
+    tilePress(tag, 2, p2, 'minimized');
+    await click(tile); await sleep(300);
+  }
   const afterTiles = await evalJs(BOX(id));
   return { id, ws, after, afterTiles };
 };
@@ -752,6 +851,7 @@ const legDoors = async (red) => {
   await openDeskList();
   const r0 = await rowOf(0); if (r0) await rclick(r0);
   out.rowMenu = await evalJs(`[...document.querySelectorAll('.context-menu:not(.desktop-switch-menu) > .context-menu-item')].map((x) => x.textContent.trim())`);
+  await shot(`${red ? 'RED-' : ''}r2-row-doors.png`); // lane desktop-doors-table: the row's doors menu as drawn (THE table's desk tier)
   const ren = await rowMenuItem('Rename…');
   if (ren) {
     await click(ren);
@@ -867,7 +967,7 @@ const legSpringHtml5 = async () => {
 };
 /** ⑰: the window's state after a drop on a STALE row (its desktop deleted on the other client while the list was open) */
 const STALE = (fid) => `(() => { const w = app.wm.windows.get(${J(fid)}), dm = app.desktopManager; return { n: dm.desktops.length, known: !!w && dm.desktops.some((d) => d.id === w._desktopId), here: !!w && w._desktopId === dm.activeDesktopId, hidden: !!w && !!w._hiddenByDesktop, toast: [...document.querySelectorAll('.global-toast-body')].map((x) => x.textContent).join(' | '), list: !!document.querySelector('.desktop-switch-menu') }; })()`;
-const staleOk = (x, name) => !!x && x.row && x.stale && x.known && x.here && !x.hidden && !x.list && x.toast.includes('«' + name + '»') && x.toast.includes('no longer there') && reachableBar(x.box);
+const staleOk = (x, name) => !!x && x.row && x.stale && x.known && x.here && !x.hidden && !x.list && x.toast.includes('“' + name + '” is no longer there') && x.toast.includes('the window stays where it is') && reachableBar(x.box);
 /** ANOTHER CLIENT of the hub deletes a desktop — what a second screen sends on the wire (a raw /ws connection; a second page
  *  target would turn this page into a background tab — no rAF, no title-bar hit test) */
 const deleteElsewhere = async (id) => {
@@ -927,6 +1027,192 @@ const legRenameCancel = async () => {
   return { name0, menu: !!ren, dialog, ...(await evalJs(`({ name: app.desktopManager.desktops[0].name, list: !!document.querySelector('.desktop-switch-menu'), menus: document.querySelectorAll('.context-menu').length, open: [...document.querySelectorAll('.dialog-footer .btn-cancel')].some((x) => x.getBoundingClientRect().width > 0) })`)) };
 };
 
+// ═════════════════════════════ lane desktop-doors-table r2 — an OPEN list follows ANOTHER client ═════════════════════════════
+/** ANOTHER CLIENT of the hub renames a desktop (deleteElsewhere's raw /ws — what a second screen sends) */
+const renameElsewhere = async (id, name) => {
+  const w = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); await new Promise((r, j) => { w.on('open', r); w.on('error', j); });
+  w.send(JSON.stringify({ type: 'desktop-rename', desktopId: id, name })); await sleep(300); try { w.close(); } catch { }
+};
+/** ANOTHER CLIENT of the hub adds a desktop (r3 ②: a new row at its place, every other row the same node) */
+const createElsewhere = async (id, name) => {
+  const w = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); await new Promise((r, j) => { w.on('open', r); w.on('error', j); });
+  w.send(JSON.stringify({ type: 'desktop-create', id, name })); await sleep(300); try { w.close(); } catch { }
+};
+/** r3 ②: hold the open list and every row node it shows (the pointer rests on one of them meanwhile) */
+const HOLD_LIST = `(() => { const m = document.querySelector('.desktop-switch-menu'); window.__heldList = m; window.__heldRows = m ? [...m.querySelectorAll(':scope > [data-desktop-id]')] : []; return window.__heldRows.length; })()`;
+/** …after the remote change: the same list? the held rows still in it? the pointer still on the renamed row's OWN node (a
+ *  row added never slides another under it)? the added desktop's row — new, where? the list inside the viewport? */
+const KEPT_LIST = (rid, aid) => `(() => { const m = document.querySelector('.desktop-switch-menu'), held = window.__heldRows || [], b = document.querySelector('.desktop-switch-compact'); if (!m) return null;
+  const rows = [...m.querySelectorAll(':scope > [data-desktop-id]')], under = m.querySelector('[data-desktop-id]:hover'), add = rows.find((x) => x.dataset.desktopId === ${J(aid)}), mb = m.getBoundingClientRect(), bb = b ? b.getBoundingClientRect() : null;
+  return { same: m === window.__heldList, held: held.length, inPage: held.filter((x) => x.isConnected && m.contains(x)).length, underSame: !!under && under === held.find((x) => x.dataset.desktopId === ${J(rid)}), underId: under ? under.dataset.desktopId : null,
+    added: add ? { at: rows.indexOf(add), fresh: !held.includes(add), name: (add.querySelector('.dsc-name') || {}).textContent || '' } : null, rows: rows.length, inside: mb.left >= 0 && mb.top >= 0 && mb.right <= innerWidth + 0.5 && mb.bottom <= innerHeight + 0.5, box: [Math.round(mb.left), Math.round(mb.top), Math.round(mb.right), Math.round(mb.bottom)], btnTop: bb ? Math.round(bb.top) : null }; })()`;
+/** the open compact list's desktop rows: id, the name (and whether it is drawn), greyed, its why, its title */
+const FOLLOW_LIST = `(() => { const m = document.querySelector('.desktop-switch-menu'); if (!m) return null; return [...m.querySelectorAll(':scope > .context-menu-item[data-desktop-id]')].map((r) => { const n = r.querySelector('.dsc-name'); return { id: r.dataset.desktopId, name: n ? n.textContent : '', nameShown: !!n && n.getBoundingClientRect().width > 0, gone: r.classList.contains('dsc-gone'), why: (r.querySelector('.dsc-why') || {}).textContent || '', title: r.title }; }); })()`;
+/** the doors menu over the list (a row's right-click): its rows — label, a shut one's why, greyed — and its box */
+const ROW_DOORS = `(() => { const m = [...document.querySelectorAll('.context-menu')].find((x) => !x.classList.contains('desktop-switch-menu')); if (!m) return null; const b = m.getBoundingClientRect(); return { h: Math.round(b.height), w: Math.round(b.width), items: [...m.querySelectorAll(':scope > .context-menu-item')].map((x) => ({ label: (x.querySelector('.door-label') || x).textContent.trim(), why: ((x.querySelector('.door-why') || {}).textContent || '').trim(), off: x.classList.contains('disabled') })) }; })()`;
+const legFollow = async (red) => {
+  await closeAll(); await eightDesktops(); await sleep(300);
+  const pick = (k) => evalJs(`({ id: app.desktopManager.desktops[${k}].id, name: app.desktopManager.desktops[${k}].name })`);
+  const rowAt = (id) => evalJs(`(() => { const r = document.querySelector('.desktop-switch-menu .context-menu-item[data-desktop-id="${id}"]'); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.left + Math.min(50, b.width / 3), y: b.top + b.height / 2 }; })()`);
+  const out = {};
+  // A — the list open; desktop 5 deleted, desktop 3 renamed and one ADDED on the other client (r3 ②: the pointer resting on
+  // desktop 3's row, every node held); then the deleted row's right-click
+  {
+    const v = await pick(4), r = await pick(2), added = { id: 'desk-added-' + Date.now().toString(36), name: 'Added elsewhere' };
+    await openDeskList();
+    const before = await evalJs(FOLLOW_LIST);
+    const onR = await rowAt(r.id); if (onR) await hover(onR.x, onR.y);
+    await evalJs(HOLD_LIST);
+    await deleteElsewhere(v.id); await renameElsewhere(r.id, 'Renamed elsewhere'); await createElsewhere(added.id, added.name);
+    const arrived = await waitFor(`app.desktopManager.desktops.length === 8 && app.desktopManager.desktops.some((d) => d.name === 'Renamed elsewhere') && app.desktopManager.desktops.some((d) => d.id === ${J(added.id)})`, 8000);
+    await sleep(300);
+    const after = await evalJs(FOLLOW_LIST), kept = await evalJs(KEPT_LIST(r.id, added.id));
+    await shot(`${red ? 'RED-' : ''}r4-follow-list.png`);
+    const at = await rowAt(v.id);
+    let doors = null;
+    if (at) { await rclick(at); doors = await evalJs(ROW_DOORS); await shot(`${red ? 'RED-' : ''}r4-gone-doors.png`); }
+    await esc(); await sleep(250);
+    out.a = { v, r, added, arrived, before, after, kept, doors };
+  }
+  // B — the list open again; desktop 4 deleted there; a press on its row
+  {
+    const v = await pick(3), active0 = await evalJs('app.desktopManager.activeDesktopId'), n0 = await evalJs('app.desktopManager.desktops.length');
+    await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); document.querySelectorAll('.global-toast').forEach((t) => t.remove()); 1`);
+    await openDeskList();
+    await deleteElsewhere(v.id);
+    const arrived = await waitFor(`app.desktopManager.desktops.length === ${n0 - 1}`, 8000); await sleep(300);
+    const at = await rowAt(v.id);
+    if (at) await click(at);
+    await sleep(500);
+    out.b = { v, row: !!at, arrived, active0, ...(await evalJs(`({ active: app.desktopManager.activeDesktopId, toast: [...document.querySelectorAll('.global-toast-body')].map((x) => x.textContent).join(' | '), list: !!document.querySelector('.desktop-switch-menu') })`)) };
+  }
+  return out;
+};
+const followOk = (a) => {
+  if (!a || !a.arrived || !Array.isArray(a.before) || !Array.isArray(a.after)) return false;
+  const why = '“' + a.v.name + '” is no longer there', g = a.after.find((x) => x.id === a.v.id), rn = a.after.find((x) => x.id === a.r.id);
+  return !!g && g.gone && g.why === why && g.title === why && !g.nameShown && a.after.findIndex((x) => x.id === a.v.id) === a.before.findIndex((x) => x.id === a.v.id) && !!rn && rn.name === 'Renamed elsewhere' && a.after.filter((x) => !x.gone).length === 8 && a.after.filter((x) => !x.gone).every((x) => x.nameShown && !x.why);
+};
+/** r3 ②: patched in place — the same list, the 8 rows it showed the same nodes in it, the pointer on the renamed row's own
+ *  node, the added desktop a new row LAST (the live order), 9 rows, the list inside the viewport */
+const keptOk = (a) => !!a && !!a.kept && a.kept.same && a.kept.held === 8 && a.kept.inPage === 8 && a.kept.underSame && !!a.kept.added && a.kept.added.fresh && a.kept.added.name === 'Added elsewhere' && a.kept.added.at === 8 && a.kept.rows === 9 && a.kept.inside;
+
+// ═════════════════════════════ lane desktop-doors-table r4 — the patched list is placed by THE ONE placement ═════════════════════════════
+/** r4: the open list as it stands — its box (inside the viewport on all four sides?), capped and scrolling?, its first row and
+ *  its last («+ New desktop») REACHABLE (the element at the row's point is the row), the pointer's row (the node held before,
+ *  its top, under the pointer still), every row's ⋯ on screen */
+const PLACED = (rid) => `(() => { const m = document.querySelector('.desktop-switch-menu'); if (!m) return null;
+  const mb = m.getBoundingClientRect(), rows = [...m.querySelectorAll(':scope > .context-menu-item')], first = rows[0], last = rows[rows.length - 1];
+  const hit = (el) => { if (!el) return false; const r = el.getBoundingClientRect(), cx = r.left + Math.min(30, r.width / 2), cy = r.top + r.height / 2; if (cx < 0 || cy < 0 || cx > innerWidth || cy > innerHeight) return false; const h = document.elementFromPoint(cx, cy); return !!h && el.contains(h); };
+  const pr = m.querySelector(':scope > [data-desktop-id="${rid}"]'), pb = pr && pr.getBoundingClientRect(), under = m.querySelector(':scope > [data-desktop-id]:hover');
+  return { box: [mb.left, mb.top, mb.right, mb.bottom].map(Math.round), h: mb.height, inside: mb.left >= -0.5 && mb.top >= -0.5 && mb.right <= innerWidth + 0.5 && mb.bottom <= innerHeight + 0.5,
+    scrolls: m.scrollHeight > m.clientHeight + 1 && /auto|scroll/.test(getComputedStyle(m).overflowY), n: rows.filter((x) => x.dataset.desktopId).length,
+    firstHit: hit(first), lastHit: hit(last), last: last ? last.textContent.trim() : '',
+    row: pb ? { top: pb.top, held: pr === (window.__heldRows || []).find((x) => x.dataset.desktopId === ${J(rid)}), under: under === pr } : null,
+    moreInside: [...m.querySelectorAll('.dsc-more')].every((x) => { const r = x.getBoundingClientRect(); return r.left >= -0.5 && r.right <= innerWidth + 0.5; }) }; })()`;
+const legPlace = async (red) => {
+  await closeAll(); await eightDesktops(); await sleep(300);
+  // the list NEAR THE VIEWPORT'S HEIGHT, uncapped: as many desktops as it holds (≈ 18 rows at 951×585)
+  await openDeskList();
+  const g = await evalJs(`(() => { const m = document.querySelector('.desktop-switch-menu'), r = m && m.querySelector(':scope > [data-desktop-id]'); return m && r ? { h: m.getBoundingClientRect().height, row: r.getBoundingClientRect().height, room: innerHeight - 8 } : null; })()`);
+  await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
+  const n = g ? 8 + Math.floor((g.room - g.h) / g.row) : 8;
+  await evalJs(`(() => { const dm = app.desktopManager; while (dm.desktops.length < ${n}) dm.createDesktop(); return dm.desktops.length; })()`); await sleep(700);
+  await openDeskList();
+  // the pointer rests on desktop 3's row; every node the list shows held
+  const rid = await evalJs('app.desktopManager.desktops[2].id');
+  const at = await evalJs(`(() => { const r = document.querySelector('.desktop-switch-menu > [data-desktop-id="${rid}"]'); if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.left + Math.min(50, b.width / 3), y: b.top + b.height / 2 }; })()`);
+  if (at) await hover(at.x, at.y);
+  await evalJs(HOLD_LIST);
+  const p0 = await evalJs(PLACED(rid));
+  // three desktops added on ANOTHER client
+  const stamp = Date.now().toString(36);
+  for (let k = 0; k < 3; k++) await createElsewhere(`desk-r4-${stamp}-${k}`, `Added there ${k + 1}`);
+  const arrived = await waitFor(`app.desktopManager.desktops.length === ${n + 3}`, 8000); await sleep(400);
+  const p1 = await evalJs(PLACED(rid));
+  await shot(`${red ? 'RED-' : ''}r5-place-grown.png`);
+  // a desktop renamed there WIDER than the viewport (the reviewer's second attack)
+  const wid = await evalJs('app.desktopManager.desktops[4].id'), wide = 'Wide ' + 'W'.repeat(240);
+  await renameElsewhere(wid, wide);
+  const renamed = await waitFor(`app.desktopManager.desktops.some((d) => d.name === ${J(wide)})`, 8000); await sleep(400);
+  const p2 = await evalJs(PLACED(rid));
+  await shot(`${red ? 'RED-' : ''}r5-place-wide.png`);
+  // the list's tail: the wheel on the list brings «+ New desktop» in, and it is the element at its point
+  const c = await evalJs(`(() => { const m = document.querySelector('.desktop-switch-menu'); if (!m) return null; const b = m.getBoundingClientRect(), t = Math.max(b.top, 0), u = Math.min(b.bottom, innerHeight); return { x: b.left + Math.min(60, b.width / 2), y: (t + u) / 2 }; })()`);
+  for (let i = 0; i < 10 && c; i++) { const p = await evalJs(PLACED(rid)); if (!p || p.lastHit) break; await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: c.x, y: c.y, deltaX: 0, deltaY: 240 }); await sleep(200); }
+  const p3 = await evalJs(PLACED(rid));
+  await shot(`${red ? 'RED-' : ''}r5-place-tail.png`);
+  await esc(); await sleep(250);
+  return { n, g, rid, arrived, renamed, p0, p1, p2, p3 };
+};
+/** the list stood near the viewport's height before: inside, uncapped, three more rows past the room */
+const placeNear = (p) => !!p && !!p.g && !!p.p0 && p.p0.inside && !p.p0.scrolls && p.p0.h + 3 * p.g.row > p.g.room && !!p.p0.row && p.p0.row.under;
+/** …the RED r5 copy's own set-up (int360): its open is placed by showContextMenu alone, BEFORE its rows' words paint (the mutant
+ *  drops that _placeList), so in DejaVu — the acceptance blocks' face since the .358 font legs — wider words leave its right edge a
+ *  few px past the viewport (measured: 958 of 951; 947 in the box's face). r4's attack is the VERTICAL one: read the open's top and
+ *  bottom only. */
+const placeNearRed = (p) => !!p && !!p.g && !!p.p0 && p.p0.box[1] >= -0.5 && p.p0.box[3] <= p.g.room + 8 + 0.5 && !p.p0.scrolls && p.p0.h + 3 * p.g.row > p.g.room && !!p.p0.row && p.p0.row.under;
+/** the pointer's row: the node it rested on, at the same height, under the pointer still */
+const rowKept = (p, q) => !!q && !!q.row && q.row.held && q.row.under && Math.abs(q.row.top - p.p0.row.top) < 0.5;
+/** r4 ①: three rows added — inside, capped and scrolling, the first row reachable, the pointer's row unmoved, three more rows */
+const grownOk = (p) => placeNear(p) && p.arrived && !!p.p1 && p.p1.inside && p.p1.scrolls && p.p1.firstHit && rowKept(p, p.p1) && p.p1.n === p.p0.n + 3;
+/** r4 ②: a name wider than the viewport — inside on all four sides, every ⋯ on screen, the pointer's row unmoved */
+const wideOk = (p) => grownOk(p) && p.renamed && !!p.p2 && p.p2.inside && p.p2.moreInside && p.p2.firstHit && rowKept(p, p.p2);
+
+// ═════════════════════════════ lane desktop-doors-table r5 — a scrolled list keeps its offset when its cap lifts ═════════════════════════════
+/** r5: the open list's offset (how far it is scrolled, how far it can be) and the desktop row under the pointer */
+const OFFSET = `(() => { const m = document.querySelector('.desktop-switch-menu'); if (!m) return null; const u = m.querySelector(':scope > [data-desktop-id]:hover'); return { st: m.scrollTop, room: m.scrollHeight - m.clientHeight, under: u ? u.dataset.desktopId : null }; })()`;
+const legOffset = async (red) => {
+  await closeAll(); await eightDesktops(); await sleep(300);
+  // the list CAPPED with room to scroll: as many desktops as it holds uncapped at 951×585, and eight more
+  await openDeskList();
+  const g = await evalJs(`(() => { const m = document.querySelector('.desktop-switch-menu'), r = m && m.querySelector(':scope > [data-desktop-id]'); return m && r ? { h: m.getBoundingClientRect().height, row: r.getBoundingClientRect().height, room: innerHeight - 8 } : null; })()`);
+  await evalJs(`document.querySelectorAll('.context-menu').forEach((m) => m.remove()); 1`);
+  const n = g ? 8 + Math.floor((g.room - g.h) / g.row) + 8 : 24;
+  await evalJs(`(() => { const dm = app.desktopManager; while (dm.desktops.length < ${n}) dm.createDesktop(); return dm.desktops.length; })()`); await sleep(700);
+  await openDeskList();
+  const o0 = await evalJs(OFFSET);
+  // the wheel on the list, 100 px down; the pointer stays — the row under it is the pointer's row now; every node held
+  const c = await evalJs(`(() => { const m = document.querySelector('.desktop-switch-menu'); if (!m) return null; const b = m.getBoundingClientRect(); return { x: Math.round(b.left + Math.min(60, b.width / 2)), y: Math.round((b.top + b.bottom) / 2) }; })()`);
+  if (c) { await hover(c.x, c.y); await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: c.x, y: c.y, deltaX: 0, deltaY: 100 }); await sleep(500); await hover(c.x, c.y + 1); await hover(c.x, c.y); }
+  const o1 = await evalJs(OFFSET), rid = o1 && o1.under;
+  await evalJs(HOLD_LIST);
+  const p1 = rid ? await evalJs(PLACED(rid)) : null;
+  await shot(`${red ? 'RED-' : ''}r6-offset-wheeled.png`);
+  // the room grows (the browser window made taller): nothing re-places the list yet
+  await device(951, 900); await sleep(600);
+  if (c) await hover(c.x, c.y);
+  const o2 = await evalJs(OFFSET), p2 = rid ? await evalJs(PLACED(rid)) : null;
+  // a desktop renamed on ANOTHER client: the patch places the list again, in the room it has now — its content fits there
+  const nid = await evalJs(`app.desktopManager.desktops[app.desktopManager.desktops.length - 1].id`);
+  await renameElsewhere(nid, 'Renamed there');
+  const renamed = await waitFor(`app.desktopManager.desktops.some((d) => d.name === 'Renamed there')`, 8000); await sleep(400);
+  const o3 = await evalJs(OFFSET), p3 = rid ? await evalJs(PLACED(rid)) : null;
+  await shot(`${red ? 'RED-' : ''}r6-offset-kept.png`);
+  // wheeled back to the top, then the next remote change: the cap lifts whole (no dead scroll room), no row moves
+  for (let i = 0; i < 8 && c; i++) { const o = await evalJs(OFFSET); if (!o || o.st <= 0) break; await cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: c.x, y: c.y, deltaX: 0, deltaY: -240 }); await sleep(250); }
+  if (c) { await hover(c.x, c.y + 1); await hover(c.x, c.y); }
+  const o4 = await evalJs(OFFSET), rid2 = o4 && o4.under;
+  await evalJs(HOLD_LIST);
+  const p4 = rid2 ? await evalJs(PLACED(rid2)) : null;
+  await renameElsewhere(nid, 'Renamed there again');
+  const renamed2 = await waitFor(`app.desktopManager.desktops.some((d) => d.name === 'Renamed there again')`, 8000); await sleep(400);
+  const o5 = await evalJs(OFFSET), p5 = rid2 ? await evalJs(PLACED(rid2)) : null;
+  await shot(`${red ? 'RED-' : ''}r6-offset-top.png`);
+  await esc(); await sleep(250);
+  await device(951, 585); await sleep(300);
+  return { n, g, c, rid, rid2, renamed, renamed2, o0, o1, o2, o3, o4, o5, p1, p2, p3, p4, p5 };
+};
+/** the list capped with room to scroll, the wheel ≈ 100 px down (room left past it), the pointer resting on a row */
+const offNear = (o) => !!o.o0 && o.o0.room > 120 && !!o.o1 && o.o1.st >= 80 && o.o1.st <= 120 && o.o1.room - o.o1.st > 20 && !!o.rid && !!o.p1 && o.p1.inside && o.p1.scrolls && !!o.p1.row && o.p1.row.under;
+/** the pointer's row: the node held, at the same height (±0.5 px), under the pointer still */
+const rowStays = (a, b) => !!a && !!b && !!a.row && !!b.row && b.row.held && b.row.under && Math.abs(b.row.top - a.row.top) < 0.5;
+/** r5 ①: the room grown (nothing placed yet — the same offset, the row where it was), then a remote change: the offset KEPT,
+ *  the pointer's row unmoved, the list inside and grown downward as far as its rows allow (scrolling still: its first rows above) */
+const offKept = (o) => offNear(o) && !!o.o2 && Math.abs(o.o2.st - o.o1.st) < 1 && rowStays(o.p1, o.p2) && o.renamed && !!o.o3 && Math.abs(o.o3.st - o.o1.st) < 1 && rowStays(o.p1, o.p3) && o.p3.inside && o.p3.scrolls && o.p3.box[3] > o.p1.box[3];
+/** r5 ②: back at the top, the next remote change lifts the cap whole — nothing left to scroll, both ends reachable, no row moved */
+const offTop = (o) => offNear(o) && !!o.o4 && o.o4.st === 0 && !!o.rid2 && o.renamed2 && !!o.o5 && o.o5.st === 0 && !!o.p5 && !o.p5.scrolls && o.p5.inside && o.p5.firstHit && o.p5.lastHit && rowStays(o.p4, o.p5);
+
 const acceptanceAndControls = async () => {
   console.log('\n═══ acceptance r2 — the compact form\'s doors, the «+N» list\'s tail, the resize\'s release (951×585) ═══');
   await step('acceptance r2', async () => {
@@ -964,6 +1250,42 @@ const acceptanceAndControls = async () => {
     const rc = await legRenameCancel();
     check('⑱ r3: a row\'s Rename… cancelled ⇒ nothing comes back — no list, no menu, no dialog, the name kept', rc.menu && rc.dialog && !rc.list && rc.menus === 0 && !rc.open && rc.name === rc.name0, rc);
     check('⑫ r3: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
+  });
+
+  console.log('\n═══ lane desktop-doors-table r2 — an OPEN list follows ANOTHER client; a gone desktop\'s doors say so (951×585) ═══');
+  await step('doors-table r2', async () => {
+    pageErrors.length = 0;
+    await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+    const f = await legFollow(false);
+    const why = f.a && '“' + f.a.v.name + '” is no longer there';
+    check(`⑲ r2 ①: the compact list OPEN, desktop 5 deleted and desktop 3 renamed on ANOTHER client — the list redraws: the renamed row by its new name, the deleted one KEPT AT ITS PLACE, greyed WITH «${why}» (${J((f.a.after || []).map((x) => (x.gone ? '[' + x.why + ']' : x.name)))})`, followOk(f.a), f.a);
+    check(`⑲ r3 ②: …the list is PATCHED IN PLACE — the same list, the ${f.a.kept && f.a.kept.held} rows it showed the same nodes (${f.a.kept && f.a.kept.inPage} in it still), the pointer still on the renamed row's own node, the desktop added there a NEW row at its place (${J(f.a.kept && f.a.kept.added)}), the list grown downward inside the viewport (25151f0b: a new popover)`, keptOk(f.a), f.a.kept);
+    check('⑲ r2 ①: …that row\'s right-click opens ITS DOORS — four, every one greyed with the why that names it (8c680dcf: an empty box)', !!f.a.doors && J(f.a.doors.items.map((x) => x.label)) === J(['Rename…', 'Delete', 'Move up', 'Move down']) && f.a.doors.items.every((x) => x.off && x.why === why) && f.a.doors.h > 40, f.a.doors);
+    check(`⑲ r2 ②: …a press on a row deleted elsewhere says its why and switches nowhere (${J(f.b && f.b.toast)})`, !!f.b && f.b.arrived && f.b.row && f.b.active === f.b.active0 && f.b.toast.includes('“' + f.b.v.name + '” is no longer there') && !f.b.list, f.b);
+    check('⑫ doors-table r2: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
+  });
+
+  console.log('\n═══ lane desktop-doors-table r4 — the patched list is placed by THE ONE placement, PURE menuPlace (951×585) ═══');
+  await step('doors-table r4', async () => {
+    pageErrors.length = 0;
+    await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+    const p = await legPlace(false);
+    check(`⑲ r4: the compact list open NEAR THE VIEWPORT'S HEIGHT, uncapped (${p.n} desktops, ${p.p0 && Math.round(p.p0.h)} of ${p.g && p.g.room} px — three more rows overflow it), the pointer resting on desktop 3's row`, placeNear(p), { g: p.g, p0: p.p0 });
+    check(`⑲ r4 ①: …three desktops added on ANOTHER client — the list stays INSIDE the viewport (${J(p.p1 && p.p1.box)}), capped and scrolling, its first row reachable, the pointer's row unmoved (its own node, under the pointer still) (daf19adf: the top negative, the first rows out of reach, no scroll)`, grownOk(p), p.p1);
+    check(`⑲ r4 ②: …a desktop renamed there WIDER than the viewport — the list inside on all four sides (${J(p.p2 && p.p2.box)}), every row's ⋯ on screen, the pointer's row unmoved`, wideOk(p), p.p2);
+    check(`⑲ r4 ③: …the wheel on the list brings its last row («${p.p3 && p.p3.last}») in — the element at its point`, !!p.p3 && p.p3.lastHit && p.p3.inside, p.p3);
+    check('⑫ doors-table r4: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
+  });
+
+  console.log('\n═══ lane desktop-doors-table r5 — a scrolled list keeps its offset when its cap lifts (951×585, then 951×900) ═══');
+  await step('doors-table r5', async () => {
+    pageErrors.length = 0;
+    await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+    const o = await legOffset(false);
+    check(`⑲ r5: the compact list CAPPED (${o.n} desktops, ${o.o0 && Math.round(o.o0.room)} px to scroll), the wheel on it ${o.o1 && Math.round(o.o1.st)} px down, the pointer resting on a row`, offNear(o), { g: o.g, o0: o.o0, o1: o.o1, p1: o.p1 });
+    check(`⑲ r5 ①: …the viewport grown to 951×900, a desktop renamed on ANOTHER client — the list KEEPS ITS OFFSET (${o.o3 && Math.round(o.o3.st)} px), the pointer's row unmoved (its node, its height, under the pointer), grown downward inside the viewport (${J(o.p1 && o.p1.box)} → ${J(o.p3 && o.p3.box)}), scrolling still (5a98bf0f: the cap lifted whole, the offset 0, every row 100 px down)`, offKept(o), { o2: o.o2, o3: o.o3, p2: o.p2, p3: o.p3 });
+    check(`⑲ r5 ②: …wheeled back to the top, the next remote change lifts the cap whole (${J(o.p5 && o.p5.box)}) — nothing left to scroll, its first and last rows reachable, the pointer's row unmoved`, offTop(o), { o4: o.o4, o5: o.o5, p4: o.p4, p5: o.p5 });
+    check('⑫ doors-table r5: zero page errors', pageErrors.length === 0, pageErrors.slice(0, 4));
   });
 
   // ═════════════════════════════════════════ THE RED CONTROL (1024×600) ═════════════════════════════════════════
@@ -1015,6 +1337,38 @@ const acceptanceAndControls = async () => {
     check('RED r3 ③: a stale row moves the window under the gone desktop\'s id — off every desktop, hidden', !!st.pointer && !st.pointer.known && st.pointer.hidden, st);
     const rc = await legRenameCancel();
     check('RED r3 ④: a cancelled Rename… brings the list back', rc.dialog && rc.list, rc);
+    mutantOn = null;
+  });
+
+  // ═════════════════════════════════════════ THE RED CONTROL r4 (951×585) ═════════════════════════════════════════
+  console.log('\n═══ RED CONTROL r4 — 8c680dcf\'s rules put back (an open list never told; a gone desktop\'s desk doors left out), 951×585 ═══');
+  await step('RED CONTROL r4', async () => {
+    mutantOn = MUTANT4;
+    await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+    const f = await legFollow(true);
+    const g = f.a && Array.isArray(f.a.after) ? f.a.after.find((x) => x.id === f.a.v.id) : null;
+    check('RED r4 ①: an open list is never told — the row of a desktop deleted elsewhere stays a LIVE row (no why, its name drawn), the renamed one keeps its old name, and its right-click opens an EMPTY box', !!g && !g.gone && !g.why && g.nameShown && !f.a.after.some((x) => x.name === 'Renamed elsewhere') && !!f.a.doors && f.a.doors.items.length === 0, f.a);
+    mutantOn = null;
+  });
+
+  // ═════════════════════════════════════════ THE RED CONTROL r5 (951×585) ═════════════════════════════════════════
+  console.log('\n═══ RED CONTROL r5 — daf19adf\'s placement put back (the patch lifts the list by hand: no floor, no cap), 951×585 ═══');
+  await step('RED CONTROL r5', async () => {
+    mutantOn = MUTANT5;
+    await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+    const p = await legPlace(true);
+    check(`RED r5: three desktops added there lift the list PAST THE TOP (${J(p.p1 && p.p1.box)} — its first row out of reach, nothing scrolls, the pointer's row moved) and a name wider than the viewport runs it past the right edge (${J(p.p2 && p.p2.box)})`, placeNearRed(p) && !!p.p1 && p.p1.box[1] < 0 && !p.p1.firstHit && !p.p1.scrolls && !rowKept(p, p.p1) && !!p.p2 && p.p2.box[2] > 951 && !p.p2.moreInside, { p0: p.p0, p1: p.p1, p2: p.p2 });
+    mutantOn = null;
+  });
+
+  // ═════════════════════════════════════════ THE RED CONTROL r6 (951×585 → 951×900) ═════════════════════════════════════════
+  console.log('\n═══ RED CONTROL r6 — 5a98bf0f\'s _placeList put back (the offset neither read nor kept), 951×585 → 951×900 ═══');
+  await step('RED CONTROL r6', async () => {
+    mutantOn = MUTANT6;
+    await load(951, 585); await closeAll(); await evalJs(`app.sidebar.toggle(true)`); await sleep(500);
+    const o = await legOffset(true);
+    const moved = o.p1 && o.p1.row && o.p3 && o.p3.row ? o.p3.row.top - o.p1.row.top : null;
+    check(`RED r6: the wheeled list, the room grown, a remote change — the cap lifted whole, the offset ${o.o3 && Math.round(o.o3.st)} (was ${o.o1 && Math.round(o.o1.st)}), the pointer's row ${moved == null ? '?' : Math.round(moved)} px DOWN`, offNear(o) && !!o.o3 && o.o3.st === 0 && moved != null && Math.abs(moved - o.o1.st) < 1.5 && !!o.p3 && !o.p3.scrolls, { o1: o.o1, o3: o.o3, p1: o.p1, p3: o.p3 });
     mutantOn = null;
   });
 };

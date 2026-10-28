@@ -164,8 +164,8 @@ console.log("§1b the window's groups");
 console.log('§1c the plugin-git row');
 {
   const g = R.rowById('plugin-git');
-  ok(g && !R.checkRow(g).length && g.test.kind === 'reachability' && g.test.caveat && JSON.stringify(g.consumers) === '["src/server/plugin-install.js"]' && !g.wiredIn && !g.bindsPerAccount && !g.bindsPerMachine && g.clusterEnv && g.clusterEnv.json === 'VIBESPACE_INTEGRATIONS' && !g.setup,
-    'plugin-git: ONE card row — a reachability Test (git ls-remote) with its caveat, consumed by the plugin installer (landed WITH its consumer: no wiredIn, decision 25), the cluster ships it through integrations.json');
+  ok(g && !R.checkRow(g).length && g.test.kind === 'reachability' && g.test.caveat && JSON.stringify(g.consumers) === '["src/server/plugin-install.js","src/server/engine-distribution.js"]' && !g.wiredIn && !g.bindsPerAccount && !g.bindsPerMachine && g.clusterEnv && g.clusterEnv.json === 'VIBESPACE_INTEGRATIONS' && !g.setup,
+    'plugin-git: ONE card row — a reachability Test (git ls-remote) with its caveat, consumed by the plugin installer (landed WITH its consumer: no wiredIn, decision 25) and — lane kernel-asset-credential — the kernel\'s download (a release asset of the plugin\'s own repository), still a Plugins row; the cluster ships it through integrations.json');
   ok(JSON.stringify(g.fields.map((f) => [f.key, !!f.secret, !!f.required, !!f.multiline])) === JSON.stringify([['host', false, true, false], ['username', false, false, false], ['token', true, false, false], ['deployKey', true, false, true]]), 'its fields: host (the ONE host the credential goes to), username (optional), token (secret, https), deployKey (secret, ssh, several lines)');
   ok(R.fieldDecls(g).find((f) => f.key === 'deployKey').multiline === true && !('multiline' in R.fieldDecls(g).find((f) => f.key === 'token')), 'the wire declares the several-line field (the card draws a text box for it), nothing else');
   const v = (patch) => R.validateValues(g, patch);

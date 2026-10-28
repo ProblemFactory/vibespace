@@ -1157,7 +1157,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const d = eds();
     const k = d && typeof d.kernelFact === 'function' ? d.kernelFact(f.id) : null;
     if (!k) return f;
-    return { ...f, measuredVersion: f.installed ? k.measuredVersion : null, measuredAt: f.installed ? k.measuredAt : null, kernel: { state: k.state, step: k.step, bytes: k.bytes, total: k.total, code: k.code, error: k.error, node: k.node, need: k.need } };
+    return { ...f, measuredVersion: f.installed ? k.measuredVersion : null, measuredAt: f.installed ? k.measuredAt : null, kernel: { state: k.state, step: k.step, bytes: k.bytes, total: k.total, code: k.code, error: k.error, node: k.node, need: k.need, credential: k.credential || null } };
   }
   /** The engine table as the USER's surfaces read it (Change build…, New profile…, Settings): each row's probe FACT, never its
    *  path (the kernel's place stays here). A paired machine's dialog has none. */
@@ -1201,7 +1201,9 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       if (k.state === 'downloading') fetching = k;
       // round 2: a Node this kernel cannot be unpacked on is REMEMBERED (the engine record, for that Node) — no download asked again
       else if (k.state === 'failed' && k.code === 'engine_node_unsupported') refused = { code: k.code, message: k.error };
-      else { try { fetching = await d.installKernel(c.id, { by: 'first-use' }); } catch (e) { fetching = null; refused = e; log.warn?.(`[browser] ${p.id} "${p.label}": its engine's kernel cannot be downloaded — ${e && e.message}`); } }
+      // lane kernel-asset-credential round 3: the launch waits for the download's FIRST ANSWER (bounded) — «downloading» only when
+      // the archive answered; a refusal before any byte or at that answer is said by its name (one already running is downloading)
+      else { try { fetching = await d.installKernel(c.id, { by: 'first-use', answer: true }); } catch (e) { fetching = e && e.code === 'install_running' ? d.kernelFact(c.id) : null; refused = fetching ? null : e; if (refused) log.warn?.(`[browser] ${p.id} "${p.label}": its engine's kernel cannot be downloaded — ${e && e.message}`); } }
       // round 3: the previous kernel PUT BACK in its place (a landing stopped between its renames) — no download: asked again
       if (fetching && fetching.restored) { fetching = null; engine = await engineFactOf(c.id, { host: p.host || null }); }
     }
@@ -1210,8 +1212,10 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (d && engine && !engine.code && engine.installed && engine.executable && (!engine.measuredVersion || unrecorded)) { try { await d.measure(c.id); } catch { /* the version stays the plugin's word */ } engine = withKernelFact(engine); }
     const v = BB.browserChoiceVerdict({ choice: c, provider: p.provider, by: 'user', engine, label: p.label });
     if (!v.ok && !fetching && refused && refused.code === 'engine_node_unsupported' && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace cannot download it here: ${refused.message}`;
-    if (!v.ok && !fetching && refused && refused.code === 'engine_kernel_aside' && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — ${refused.message}`;
-    if (!v.ok && fetching && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace is downloading it now (${fetching.total || fetching.bytes ? `${Math.round(Number(fetching.total || fetching.bytes) / 1e6)} MB` : 'its kernel.json\'s archive'}); start the browser again when it is done`;
+    else if (!v.ok && !fetching && refused && refused.code === 'engine_kernel_aside' && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — ${refused.message}`;
+    else if (!v.ok && !fetching && refused && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace could not download it: ${refused.message || refused.code}`;
+    if (!v.ok && fetching && fetching.answered === false && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace has asked ${fetching.host} for it and has no answer yet; start the browser again in a moment`;
+    else if (!v.ok && fetching && v.code === 'browser_engine_kernel_missing') v.error = `${v.error} — VibeSpace is downloading it now (${fetching.total || fetching.bytes ? `${Math.round(Number(fetching.total || fetching.bytes) / 1e6)} MB` : 'its kernel.json\'s archive'}); start the browser again when it is done`;
     if (!v.ok) { if (v.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, v, engine); throw namedError(v.code, v.error, { engine: c.id }); }
     const lo = await engs().launchOptions(c.id, { profileId: p.id, binaryPath: v.executablePath, ...(p.dir ? { userDataDir: p.dir } : {}) });
     if (!lo.ok) { if (lo.code !== 'browser_engine_unanswered') noteBuildMissing(p, c, lo, engine); throw namedError(lo.code, lo.error, { engine: c.id }); }

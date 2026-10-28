@@ -26,7 +26,7 @@
 // store — sealed, the vault's key), resolved HERE at install time and handed to git ONLY through files: https ⇒ GIT_ASKPASS
 // names a 0700 script that cats a 0600 token file; ssh ⇒ GIT_SSH_COMMAND names a 0600 key file. Both live in a 0700 folder
 // inside the stage and are SHREDDED (overwritten, then unlinked) on every way out — never argv, never a URL with the token
-// (GIT_HTTPS_RE refuses `user@` anyway), never an env value: every git child is serviceEnv + named git switches (§94 FIXED
+// (the git-source grammar refuses `user@` in an https URL anyway), never an env value: every git child is serviceEnv + named git switches (§94 FIXED
 // row), `-c credential.helper=` so no configured helper stores it; round 2: GIT_CONFIG_GLOBAL=/dev/null beside
 // GIT_CONFIG_NOSYSTEM=1 — the hub user's HOME git config (a url.insteadOf would send the clone, and the askpass's token, to
 // another host than the one the credential is bound to) is never read by a plugin's git child; a throw while the files are
@@ -44,6 +44,7 @@ const { validateManifest } = require('../plugin-manifest');
 const { serviceEnv } = require('../agent-env.js');
 const { shredFile } = require('../secret-file.js');
 const IR = require('../integration-registry.js'); // PURE: the credential's `why` in words (a locked vault, none set)
+const EK = require('../engine-kernel.js'); // PURE: THE ONE git-source grammar (gitSourceVerdict / gitRepoOf) — the kernel's credential verdict reads the same
 
 const MANIFEST = 'vibespace-plugin.json';
 const MAX_ZIP_BYTES = 50 * 1024 * 1024;       // upload / release asset cap
@@ -51,8 +52,6 @@ const MAX_PACKAGE_BYTES = 200 * 1024 * 1024;  // unpacked cap (path/git/zip)
 const MAX_PACKAGE_FILES = 20000;
 const MAX_PACKAGE_DEPTH = 32;                 // a bounded walk (symlinks are refused, but depth is still capped)
 const GIT_TIMEOUT_MS = 60000;
-const GIT_HTTPS_RE = /^https:\/\/[A-Za-z0-9.-]+(?::\d+)?\/[A-Za-z0-9._\/-]+$/;
-const GIT_SSH_RE = /^(?:ssh:\/\/)?[A-Za-z0-9._-]+@[A-Za-z0-9.-]+(?::\d+)?[:/][A-Za-z0-9._\/-]+$/;
 const GH_SPEC_RE = /^([A-Za-z0-9-]+)\/([A-Za-z0-9._-]+)(?:@([A-Za-z0-9._\/-]+))?$/;
 /** lane engine-distribution: a git ref — a tag, a branch or a full sha (no leading `-`, no `..`, no `@{`). */
 const GIT_REF_RE = /^(?!-)(?!.*\.\.)(?!.*@\{)[A-Za-z0-9._\/-]{1,100}$/;
@@ -60,7 +59,7 @@ const GIT_SHA_RE = /^[0-9a-f]{40}$/;
 /** The ONE integration row a private repository's credential is kept in (src/integration-registry.js). */
 const GIT_CREDENTIAL_ROW = 'plugin-git';
 /** Every named refusal of a git install (the route answers `{error, code}`; the panel and the boot notice say them). */
-const GIT_CODES = Object.freeze(['plugin_git_auth', 'plugin_git_ref_missing', 'plugin_git_timeout', 'plugin_git_credential', 'plugin_git_failed', 'plugin_tree_rejected']);
+const GIT_CODES = Object.freeze(['plugin_git_spec', 'plugin_git_auth', 'plugin_git_ref_missing', 'plugin_git_timeout', 'plugin_git_credential', 'plugin_git_failed', 'plugin_tree_rejected']);
 const codedErr = (status, code, msg) => Object.assign(httpErr(status, msg), { code, payload: { code } });
 
 const run = (cmd, args, opts = {}) => new Promise((resolve, reject) => {
@@ -144,24 +143,26 @@ async function stageFromPath(value, stage) {
   return dest;
 }
 
-/** The host a git URL names (`host` or `host:port`, lower case) — what a credential is bound to. */
+/** The host a git URL names (`host` or `host:port`, lower case, the default port dropped) — what a credential is bound to.
+ *  Lane kernel-asset-credential round 2: read by THE ONE git-source grammar (PURE EK.gitRepoOf), the one the kernel's
+ *  credential verdict reads — a repository that installs is a repository that verdict knows. Round 3: the same PARSED RECORD
+ *  gitSpecOf reads (EK.gitSourceVerdict), so the two cannot disagree on a value. */
 function gitHostOf(url) {
-  const u = String(url || '');
-  let m = /^https:\/\/([A-Za-z0-9.-]+)(?::(\d+))?\//.exec(u);
-  if (m) return m[1].toLowerCase() + (m[2] && m[2] !== '443' ? ':' + m[2] : '');
-  m = /^ssh:\/\/[A-Za-z0-9._-]+@([A-Za-z0-9.-]+)(?::(\d+))?\//.exec(u);
-  if (m) return m[1].toLowerCase() + (m[2] && m[2] !== '22' ? ':' + m[2] : '');
-  m = /^[A-Za-z0-9._-]+@([A-Za-z0-9.-]+):/.exec(u);
-  return m ? m[1].toLowerCase() : null;
+  const r = EK.gitSourceVerdict(url);
+  return r.ok ? r.host : null;
 }
-/** A git URL + ref, judged before any child runs: `value` may carry `#<ref>` (the older form) — `ref` names it otherwise. */
+/** A git URL + ref, judged before any child runs: `value` may carry `#<ref>` (the older form) — `ref` names it otherwise.
+ *  Round 3: the URL git is handed is the PARSED RECORD's `url` (the value trimmed, `#ref` cut off — the string the grammar
+ *  judged, never a slice of the caller's own); a space or a control character anywhere in the value, before or after `#`, is
+ *  refused like every other shape: plugin_git_spec, with the grammar's reason. */
 function gitSpecOf(value, refIn = null) {
-  let url = String(value || '').trim(), ref = refIn == null || refIn === '' ? null : String(refIn).trim();
-  const hash = url.indexOf('#');
-  if (hash > 0) { const r = url.slice(hash + 1); url = url.slice(0, hash); if (ref && r && r !== ref) throw httpErr(400, `git: the URL names #${r.slice(0, 40)} and the ref field names ${ref.slice(0, 40)} — give one`); ref = ref || r || null; }
-  if (!GIT_HTTPS_RE.test(url) && !GIT_SSH_RE.test(url)) throw httpErr(400, 'git: URL must be https://host/owner/repo(.git) or git@host:owner/repo.git (optionally #branch)');
-  if (ref && !GIT_REF_RE.test(ref)) throw httpErr(400, 'git: invalid ref (a tag, a branch or a full 40-character sha)');
-  return { url, ref, https: GIT_HTTPS_RE.test(url), host: gitHostOf(url) };
+  const src = EK.gitSourceVerdict(value);
+  if (!src.ok) throw codedErr(400, 'plugin_git_spec', `git: URL must be https://host/owner/repo(.git) or git@host:owner/repo.git (optionally #branch) — ${src.why}`);
+  let ref = refIn == null || refIn === '' ? null : String(refIn).trim();
+  if (ref && src.ref && src.ref !== ref) throw codedErr(400, 'plugin_git_spec', `git: the URL names #${src.ref.slice(0, 40)} and the ref field names ${ref.slice(0, 40)} — give one`);
+  ref = ref || src.ref;
+  if (ref && !GIT_REF_RE.test(ref)) throw codedErr(400, 'plugin_git_spec', 'git: invalid ref (a tag, a branch or a full 40-character sha)');
+  return { url: src.url, ref, https: src.https, host: src.host };
 }
 /** POSIX single-quoting for the askpass script's file paths (the stage path is ours; quoted anyway). */
 const shq = (p) => `'${String(p).replace(/'/g, `'\\''`)}'`;
@@ -433,5 +434,5 @@ function create({ rootDir, hostVersion = null, forbiddenRoots = [], log = consol
   return { install, trash, testCredential, pluginsDir, stateDir, trashDir, stagingDir };
 }
 
-module.exports = { create, auditTree, findPackageRoot, stageFromZip, GIT_HTTPS_RE, GIT_SSH_RE, GH_SPEC_RE, MAX_ZIP_BYTES, MANIFEST,
+module.exports = { create, auditTree, findPackageRoot, stageFromZip, GH_SPEC_RE, MAX_ZIP_BYTES, MANIFEST,
   GIT_REF_RE, GIT_SHA_RE, GIT_CODES, GIT_CREDENTIAL_ROW, gitHostOf, gitSpecOf, credentialFiles, shredCredentials }; // lane engine-distribution

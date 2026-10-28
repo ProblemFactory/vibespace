@@ -36,11 +36,13 @@ export function engineNote(e, t) {
   const plugin = String(e.label || e.id || '');
   if (e.code) return buildRefusalWords({ code: e.code }, t) || t(i18nKey('{plugin} does not answer as a browser engine.'), { plugin });
   const k = e.kernel && typeof e.kernel === 'object' ? e.kernel : null;
+  // lane kernel-asset-credential: the road the download takes — a release asset of the plugin's own repository, with its credential
+  const road = k && k.credential === 'plugin-git' ? ' · ' + t(i18nKey("from the plugin repository's Release (with the Plugin Git credential)")) : '';
   if (!e.installed) {
-    if (k && k.state === 'downloading') return k.total ? t(i18nKey('{plugin} · downloading its kernel… {pct}%'), { plugin, pct: Math.min(100, Math.floor((100 * Number(k.bytes || 0)) / Number(k.total))) }) : t(i18nKey('{plugin} · downloading its kernel…'), { plugin });
+    if (k && k.state === 'downloading') return (k.total ? t(i18nKey('{plugin} · downloading its kernel… {pct}%'), { plugin, pct: Math.min(100, Math.floor((100 * Number(k.bytes || 0)) / Number(k.total))) }) : t(i18nKey('{plugin} · downloading its kernel…'), { plugin })) + road;
     if (k && k.state === 'failed' && k.code === 'engine_node_unsupported') return t(i18nKey('{plugin} · its kernel needs Node {need} or later to unpack — this VibeSpace runs on Node {node}; nothing was downloaded'), { plugin, need: String(k.need || '22.15'), node: String(k.node || '?') });
     if (k && k.state === 'failed' && k.code === 'engine_kernel_aside') return t(i18nKey('{plugin} · its previous kernel is set aside and could not be put back in its place — VibeSpace tries again at the next start'), { plugin });
-    if (k && k.state === 'failed' && k.code) return t(i18nKey('{plugin} · its kernel could not be downloaded: {why}'), { plugin, why: kernelFailWords(k.code, t) });
+    if (k && k.state === 'failed' && k.code) return t(i18nKey('{plugin} · its kernel could not be downloaded: {why}'), { plugin, why: kernelFailWords(k.code, t) }) + (/^(?:vault_locked|kernel_credential_unusable|kernel_asset_browser_form)$/.test(k.code) ? '' : road);
     return t(i18nKey('{plugin} · its kernel is not installed on this computer.'), { plugin });
   }
   if (!e.executable) return t(i18nKey("{plugin} · its kernel can't be run."), { plugin });
@@ -61,6 +63,10 @@ function kernelFailWords(code, t) {
     case 'browser_engine_protocol': return t(i18nKey('its kernel.json cannot be read'));
     case 'engine_url_not_https': return t(i18nKey('the cluster names a kernel address that is not https'));
     case 'engine_sha_malformed': return t(i18nKey('the cluster pins a kernel sha256 that is not 64 hex digits'));
+    case 'vault_locked': return t(i18nKey('The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)')); // lane kernel-asset-credential (the vault-words census's K1)
+    case 'kernel_credential_unusable': return t(i18nKey('the Plugin Git credential cannot download it — a release asset needs an access token (https)'));
+    // round 2: GitHub serves `releases/download/…` to a browser's session, never a token — the fix is the plugin's kernel.json
+    case 'kernel_asset_browser_form': return t(i18nKey("the plugin's kernel.json names the browser download form; a private repository's asset needs the API form (api.github.com/repos/<owner>/<repo>/releases/assets/<id>) — tell the plugin's author"));
     default: return String(code);
   }
 }

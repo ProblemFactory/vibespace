@@ -1,7 +1,7 @@
 'use strict';
 /**
- * THE VAULT'S CONTENTS — PURE (imports nothing; CJS so the hub's collector, the routes, the page and the suites share ONE
- * set of rules). Lane vault-contents-window, 2026-10-19 (the owner: "vault 能不能加一个查看现在所有存储内容的功能，类似 google
+ * THE VAULT'S CONTENTS — PURE (imports only the kind registry, src/vault-kinds.js — PURE → PURE; CJS so the hub's collector,
+ * the routes, the page and the suites share ONE set of rules). Lane vault-contents-window, 2026-10-19 (the owner: "vault 能不能加一个查看现在所有存储内容的功能，类似 google
  * password manager，需要输入密码才能查看一段时间").
  *
  * THE INVENTORY is every secret-bearing FIELD the sealed stores hold — not the vault's entries (those are the six store
@@ -36,9 +36,12 @@
  * clock stepped back cannot stretch it (the monotonic clock bounds it too).
  */
 
-/** An extraction marker (scripts/i18n-extract.mjs): a string the PAGE words with t() — lane vault-window-v2's purposes,
- *  provenance chips and For-you card sentences are DECLARED here and worded by the client. */
+/** An extraction marker (scripts/i18n-extract.mjs): a string the PAGE words with t() — lane vault-window-v2's provenance chips
+ *  and For-you card sentences are DECLARED here and worded by the client (the purposes' words: the kind registry's). */
 const i18nKey = (s) => s;
+/** THE KIND REGISTRY (lane vault-totp-add): one row per kind family — the rail's categories and the row → category mapping
+ *  below READ it (no second list); scripts/test-vault-kinds-census.mjs checks every surface a family declares. */
+const VK = require('./vault-kinds.js');
 /** The sealed stores, in the window's order — the ids of src/server/vault-engine.js STORE_KEYS `store` (each one key). */
 const STORES = Object.freeze([
   Object.freeze({ store: 'accounts', label: 'Accounts' }),
@@ -172,22 +175,23 @@ function parseRef(id) {
 
 // ── THE DOORS: the store's own; this window opens them, it never re-implements one ──
 const enc = (v) => encodeURIComponent(String(v));
-/** → { delete: { method, path, confirm } | { open, id } | null, rotate: { open, id } | null }. `confirm` names the card's
- *  own confirm words (the page words each from the same keys the card uses). */
+/** → { delete: { method, path, confirm } | { open, id } | null, rotate: { open, id } | null }. `confirm` = the row's family's
+ *  `confirmKey` (src/vault-kinds.js — the page words it from its CONFIRM_WORDS, keyed by the registry; acceptance r2). */
 function doorsOf({ store, entry, field }) {
   const e = String(entry || ''), f = String(field || '');
-  if (store === 'accounts') return { delete: f === 'oat' ? { method: 'DELETE', path: `/api/accounts/${enc(e)}/oat`, confirm: 'oat' } : { method: 'DELETE', path: `/api/accounts/${enc(e)}`, confirm: 'account' }, rotate: null };
-  if (store === 'mounts') return { delete: e === 'my-storage' ? null : { method: 'DELETE', path: `/api/mounts/${enc(e)}`, confirm: 'mount' }, rotate: null };
-  if (store === 'integrations') return e.includes('/') ? { delete: null, rotate: null } : { delete: { method: 'DELETE', path: `/api/integrations/${enc(e)}`, confirm: 'integration' }, rotate: { open: 'integration', id: e } };
+  const cf = VK.confirmKeyOf(store, e);
+  if (store === 'accounts') return { delete: f === 'oat' ? { method: 'DELETE', path: `/api/accounts/${enc(e)}/oat`, confirm: cf } : { method: 'DELETE', path: `/api/accounts/${enc(e)}`, confirm: cf }, rotate: null };
+  if (store === 'mounts') return { delete: e === 'my-storage' ? null : { method: 'DELETE', path: `/api/mounts/${enc(e)}`, confirm: cf }, rotate: null };
+  if (store === 'integrations') return e.includes('/') ? { delete: null, rotate: null } : { delete: { method: 'DELETE', path: `/api/integrations/${enc(e)}`, confirm: cf }, rotate: { open: 'integration', id: e } };
   if (store === 'channels') return f.startsWith('caller.') ? { delete: null, rotate: null } : { delete: { open: 'channel-remove', id: e }, rotate: { open: 'channel-reauth', id: e } };
-  if (store === 'passkeys') { const i = e.indexOf('/'); return i > 0 ? { delete: { method: 'DELETE', path: `/api/browser/passkeys/${enc(e.slice(0, i))}/${enc(e.slice(i + 1))}`, confirm: 'passkey' }, rotate: null } : { delete: null, rotate: null }; }
-  if (store === 'app-secrets') return { delete: { method: 'POST', path: `/api/desktop/apps/${enc(e)}/secrets/forget`, confirm: 'app-logins' }, rotate: null };
+  if (store === 'passkeys') { const i = e.indexOf('/'); return i > 0 ? { delete: { method: 'DELETE', path: `/api/browser/passkeys/${enc(e.slice(0, i))}/${enc(e.slice(i + 1))}`, confirm: cf }, rotate: null } : { delete: null, rotate: null }; }
+  if (store === 'app-secrets') return { delete: { method: 'POST', path: `/api/desktop/apps/${enc(e)}/secrets/forget`, confirm: cf }, rotate: null };
   // design q-047 L1 (lane vault-totp): a two-step code — its own delete door (its grants go with it) and THE CODE door (a
   // person's GET, no 「验证是你」, audited); no 换新 (a site that changed the seed = delete + add — design §4 #9)
   // lane vault-paste-request: a free entry — its own delete door (the run door's switch and grants on it go with it)
-  if (store === 'secrets' && FREE_ENTRY_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/secrets/${enc(e.slice(7))}`, confirm: 'secret' }, rotate: null };
-  if (store === 'secrets' && WEB_LOGIN_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/web-logins/${enc(e)}`, confirm: 'web-login' }, rotate: null, login: { name: e } };   // lane browser-login: its own delete door (its grant row goes with it) + 用于…
-  if (store === 'secrets' && /^totp:[\w.-]{1,120}$/.test(e)) { const p = `/api/vault/totp/${enc(e.slice(5))}`; return { delete: { method: 'DELETE', path: p, confirm: 'totp' }, rotate: null, code: { path: p } }; }
+  if (store === 'secrets' && FREE_ENTRY_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/secrets/${enc(e.slice(7))}`, confirm: cf }, rotate: null };
+  if (store === 'secrets' && WEB_LOGIN_RE.test(e)) return { delete: { method: 'DELETE', path: `/api/vault/web-logins/${enc(e)}`, confirm: cf }, rotate: null, login: { name: e } };   // lane browser-login: its own delete door (its grant row goes with it) + 用于…
+  if (store === 'secrets' && /^totp:[\w.-]{1,120}$/.test(e)) { const p = `/api/vault/totp/${enc(e.slice(5))}`; return { delete: { method: 'DELETE', path: p, confirm: cf }, rotate: null, code: { path: p } }; }
   return { delete: null, rotate: null };
 }
 
@@ -264,42 +268,18 @@ function sortRows(rows, by = 'name', { byStore = true } = {}) {
 // ── THE PURPOSES (lane vault-window-v2, design q-047 §3.1 — the owner's decision ④: the window groups by what a secret is
 // FOR, the store is named under 技术细节). ONE row ⇒ ONE purpose (purposeOf answers exactly one id for every row a store
 // lists — scripts/test-vault-inventory.mjs ⑧ walks the real stores; a row of no purpose, or a row in two, is RED).
-// The order is the rail's (the mock's: designs/vault-window-v2). `Other` shows only when something lands in it.
-const PURPOSES = Object.freeze([
-  Object.freeze({ id: 'two-step', label: i18nKey('Two-step codes') }),          // secrets `totp:` (lane vault-totp's entries)
-  Object.freeze({ id: 'accounts', label: i18nKey('Accounts & sign-in') }),      // accounts
-  Object.freeze({ id: 'integrations', label: i18nKey('Integrations & channels') }),   // integrations (not a machine's row) + channels
-  Object.freeze({ id: 'machines', label: i18nKey('Machines & relay') }),        // an integration's per-machine row (`<row>/<host>`) + secrets `host:` / `frp:`
-  Object.freeze({ id: 'storage', label: i18nKey('Storage') }),                  // mounts
-  Object.freeze({ id: 'app-logins', label: i18nKey('App logins') }),            // app-secrets
-  Object.freeze({ id: 'passkeys', label: i18nKey('Passkeys') }),                // passkeys
-  Object.freeze({ id: 'web-logins', label: i18nKey('Web logins') }),            // secrets `web-login:` (lane browser-login: a website's login the custom kernel fills)
-  Object.freeze({ id: 'automation', label: i18nKey('Automation keys') }),       // automation (`apikey:`)
-  Object.freeze({ id: 'keys', label: i18nKey('Passwords & keys') }),            // secrets `secret:` (lane vault-paste-request: a free entry — pasted for an agent, or added in this window)
-  Object.freeze({ id: 'agents', label: i18nKey('Kept by agents') }),            // an `agent:` entry (q-043 §9 mint / put) — BEFORE every rule above
-  Object.freeze({ id: 'other', label: i18nKey('Other'), onlyWhenAny: true }),   // nothing above (a sealed file's key …)
-]);
-const PURPOSE_IDS = Object.freeze(PURPOSES.map((p) => p.id));
-/** A row → its ONE purpose id. A machine's row is known by the shape its store already gives it (`<row>/<host>`, the same
- *  test doorsOf makes); what cannot be told lands in its store's purpose, never a guess. */
+// lane vault-totp-add: the purposes ARE the kind registry's categories (src/vault-kinds.js CATEGORIES, the rail's order — the
+// mock's: designs/vault-window-v2; `Other` shows only when something lands in it), and a row's purpose is its FAMILY's (the
+// first family whose stores and entry shape hold it: an `agent:` entry first, an integration's per-machine row `<row>/<host>`
+// and the hub's `host:` / `frp:` entries → machines, a hub secret no family holds → other).
+const PURPOSES = VK.CATEGORIES;
+const PURPOSE_IDS = VK.CATEGORY_IDS;
+/** A row → its ONE purpose id — its kind family's category (src/vault-kinds.js); a store the window has not is none. */
 function purposeOf(row) {
   if (!row || typeof row !== 'object') return null;
   const store = row.store, entry = String(row.entry == null ? '' : row.entry);
   if (!GROUP_IDS.includes(store)) return null;
-  if (/^agent:/.test(entry)) return 'agents';
-  if (store === 'accounts') return 'accounts';
-  if (store === 'integrations') return entry.includes('/') ? 'machines' : 'integrations';
-  if (store === 'channels') return 'integrations';
-  if (store === 'mounts') return 'storage';
-  if (store === 'app-secrets') return 'app-logins';
-  if (store === 'passkeys') return 'passkeys';
-  if (store === 'automation') return 'automation';
-  if (/^(?:host|frp):/.test(entry)) return 'machines';
-  if (/^web-login:/.test(entry)) return 'web-logins';   // lane browser-login
-  if (/^totp:/.test(entry)) return 'two-step';
-  if (/^secret:/.test(entry)) return 'keys';
-  if (/^apikey:/.test(entry)) return 'automation';
-  return 'other';
+  return VK.categoryOf(store, entry);
 }
 /** Rows → the purpose groups in the rail's order: [{ id, label, rows }] — every purpose (an empty one too: the rail counts
  *  0), `Other` only when it holds a row. Each row lands in exactly one group. */

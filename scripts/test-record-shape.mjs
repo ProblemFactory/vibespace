@@ -28,7 +28,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -413,6 +413,17 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
       }
     }
     const nb = nestedOf(text, helpers); // the nested objects, read while the dump is still in memory (lane cli-2-1-307-records)
+    // THE REMOTE-TRANSPORT GATE (lane claude-steer-inject r3): inherited_asks_settled is DECLARED_UPSTREAM_UNSEEN because 2.1.312 writes
+    // it only behind `reportKept`, and every `reportKept:` the bundle computes is `…isRemoteTransport()&&…` (the stdio transport's
+    // isRemoteTransport() is `return!1`) — read off the installed bundle, so a build that drops the gate fails HERE, by name
+    {
+      const writer = text.includes('subtype:"inherited_asks_settled",kept_request_ids:');
+      // every site that COMPUTES reportKept (a bare identifier is the writer's own destructured parameter, `{…,reportKept:y}`)
+      const gates = [...text.matchAll(/reportKept:([^,}]{0,160})/g)].map((m) => m[1]).filter((g) => !/^[A-Za-z_$][\w$]*$/.test(g));
+      const words = /subtype:[A-Za-z_$][\w$]*\("inherited_asks_settled"\)[^]{0,400}?\.describe\("@internal A cloud worker's report, before its first turn, of which asks it inherited and keeps\. Any ask stored before this event that it does not name is over\."\)/.test(text);
+      if (!writer && !/inherited_asks_settled/.test(text)) console.log('    inherited_asks_settled: not in this build (SHAPE_SINCE ' + R.SHAPE_SINCE['system/inherited_asks_settled'] + ')');
+      else oracleOk(`inherited_asks_settled is written only behind reportKept, and every reportKept the bundle computes is gated on isRemoteTransport() (${gates.length} site${gates.length === 1 ? '' : 's'}: ${gates.map((g) => g.slice(0, 70)).join(' · ')}) — the stdio stream-json the wrapper speaks never carries it; the record's own words: «A cloud worker's report, before its first turn, of which asks it inherited and keeps»`, writer && words && gates.length >= 1 && gates.every((g) => /\.isRemoteTransport\(\)&&/.test(g)) && /isRemoteTransport\(\)\{return!1\}/.test(text), { writer, words, gates });
+    }
     text = '';
     oracleOk('the extractor found the union\'s anchor in the installed bundle (a new spelling fails HERE, by name)', !exErr, exErr);
     const keys = Object.keys(union);
@@ -503,7 +514,7 @@ console.log('§4b the CLI 2.1.280 pass (2026-09-22): the latency reason told tru
 
 console.log('§4c the CLI 2.1.281 pass (2026-09-23): the pinned build, six fields on three shapes, one new subtype routed to the fall-back card');
 {
-  ok('2.1.281 stays a PINNED build beside 2.1.288, 2.1.296, 2.1.306, 2.1.307 and 2.1.308 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296,2.1.306,2.1.307,2.1.308' && R.SCHEMA_CLI_VERSION === '2.1.308', R.SCHEMA_CLI_VERSIONS);
+  ok('2.1.281 stays a PINNED build beside 2.1.288, 2.1.296, 2.1.306, 2.1.307, 2.1.308 and 2.1.312 (SCHEMA_CLI_VERSIONS; SCHEMA_CLI_VERSION = the newest)', R.SCHEMA_CLI_VERSIONS.join() === '2.1.281,2.1.288,2.1.296,2.1.306,2.1.307,2.1.308,2.1.312' && R.SCHEMA_CLI_VERSION === '2.1.312', R.SCHEMA_CLI_VERSIONS);
   const ADDED = [['system/init', 'per_turn_effort_active'], ['system/init', 'view_mode'], ['assistant', 'local_command_outcome'], ['conversation_reset', 'trigger'], ['conversation_reset', 'user_message_uuid'], ['conversation_reset', 'timestamp']];
   ok('the six fields 2.1.281 added are declared IGNORED (never known — known is the 2.1.274 dump), each with a reason naming the build', ADDED.every(([k, f]) => { const sp = R.SHAPES['claude:stream:' + k]; return !sp.known.has(f) && /2\.1\.281/.test(sp.ignored.get(f) || '') && sp.ignored.get(f).length > 60; }), ADDED.map(([k, f]) => k + '.' + f + ' = ' + R.SHAPES['claude:stream:' + k].ignored.get(f)));
   const pte = R.SHAPES['claude:stream:system/per_turn_effort_changed'];
@@ -587,7 +598,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const PO = require(path.join(REPO, 'src/permission-outcome.js'));
     for (const d of dumps) { const c = outcomeCensus(d.sentences.rows || [], PO.PERMISSION_OUTCOME_ROWS, ''); ok(`${d.version}: §4d ${(d.sentences.rows || []).length} permission sentences, none unresolved, each a row of src/permission-outcome.js`, (d.sentences.rows || []).length === 14 && d.sentences.unresolved.length === 0 && c.unclassified.length === 0, { unresolved: d.sentences.unresolved, c: c.unclassified }); }
     const texts = (d) => JSON.stringify(d.sentences.rows.map((x) => x.text).sort());
-    ok('§4d 2.1.281 → 2.1.288 → 2.1.296 → 2.1.306 → 2.1.307 → 2.1.308: the same sentences (none added, none vanished — no row needs `until`), PERMISSION_OUTCOME_CLI_VERSION 2.1.308 (the newest pinned)', dumps.every((d) => texts(d) === texts(dumps[0])) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.308' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
+    ok('§4d 2.1.281 → 2.1.288 → 2.1.296 → 2.1.306 → 2.1.307 → 2.1.308 → 2.1.312: the same sentences (none added, none vanished — no row needs `until`), PERMISSION_OUTCOME_CLI_VERSION 2.1.312 (the newest pinned)', dumps.every((d) => texts(d) === texts(dumps[0])) && PO.PERMISSION_OUTCOME_CLI_VERSION === '2.1.312' && PO.PERMISSION_OUTCOME_CLI_VERSION === R.SCHEMA_CLI_VERSION);
     // THE EIGHT DECISIONS, each on its evidence (the dump's zod literal)
     const z = dumps[1].zod || {};
     const EIGHT = ['session_metadata', 'instruction_size_warning', 'ui_invalidate', 'ui_log', 'ui_toast', 'ui_status', 'ui_scroll', 'ui_focus'];
@@ -732,6 +743,62 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const d308x = d308 && { ...d308, union: { ...d308.union, command_lifecycle: [...d308.union.command_lifecycle, 'x_308_probe'] }, nested: { ...d308.nested, 'rate_limit_event.rate_limit_info': [...d308.nested['rate_limit_event.rate_limit_info'], 'x308Probe'] } };
     const n308x = d308x ? [...judgeDump(R, d308x), ...nestedUndeclared(R, d308x.nested)] : null;
     ok('CONTROL: the 2.1.308 dump with one undeclared field on command_lifecycle and one inside rate_limit_info ⇒ both NAMED (the equality above is a judgement, not a skip)', !!n308x && n308x.length === 2 && n308x.some((x) => /^UNDECLARED .*command_lifecycle\.x_308_probe/.test(x)) && n308x.includes('UNDECLARED rate_limit_event.rate_limit_info.x308Probe'), n308x);
+    // THE 2.1.312 PIN (lane claude-steer-inject r3) — the box's claude SELF-UPDATED to 2.1.312 (2026-10-27 18:44 PT): its dump (strings
+    // over a 0644 copy) minus the 2.1.308 dump, each decision on the dump — and the real 2.1.312 RUN against a loopback mock for what a
+    // CLI VibeSpace runs WRITES (scripts/fixtures/claude-cli/2.1.312-frames.jsonl: its stdout records, ids and paths replaced)
+    const d312 = dumps.find((d) => d.version === '2.1.312');
+    const z312 = (d312 && d312.zod) || {};
+    const [, lit12] = (/^([^/]+)\/([^ ]+) @/.exec((d312 && d312.helpers[0]) || '') || []).slice(1);
+    const no312 = { ...R, SHAPES: Object.fromEntries(Object.entries(R.SHAPES).map(([k, sp]) => [k, R.FIELDS_312[k] ? { ...sp, ignored: new Map([...sp.ignored].filter(([f]) => !(f in R.FIELDS_312[k]))) } : sp])) };
+    const n312 = d312 ? judgeDump(no312, d312) : null;
+    ok('CONTROL: a copy without FIELDS_312 is red on the 2.1.312 dump (13 fields named, result/success\'s twins included — the shell_* set the brief named among them) and still green on 2.1.308', !!n312 && n312.every((x) => x.startsWith('UNDECLARED ')) && new Set(n312.map((x) => x.replace('result/success.', 'result.'))).size === 13 && n312.includes('UNDECLARED result/success.shell_cpu_ms_turn') && judgeDump(no312, d308).length === 0, n312);
+    const f312 = Object.entries(R.FIELDS_312).flatMap(([k, fs]) => Object.entries(fs).map(([f, note]) => [k, f, note]));
+    ok('FIELDS_312: 13 fields on two shapes (result 12, turn_handoff_available 1), each IGNORED with a one-line reason naming 2.1.312 (no reader in the tree), never known', f312.length === 13 && new Set(f312.map(([k]) => k)).size === 2 && f312.filter(([k]) => k === 'claude:stream:result').length === 12 && f312.every(([k, f, note]) => typeof note === 'string' && /2\.1\.312/.test(note) && note.length > 60 && R.SHAPES[k].ignored.get(f) === note && !R.SHAPES[k].known.has(f)), f312.filter(([k, f, n]) => !/2\.1\.312/.test(n || '')));
+    const grown12 = d312 ? [...new Set(Object.keys(d312.union).filter((k) => k in d308.union && R.SHAPES[shapeOf(k)]).flatMap((k) => d312.union[k].filter((f) => !d308.union[k].includes(f)).map((f) => shapeOf(k) + '.' + f)))].sort() : null;
+    ok('…and they ARE the dump diff, computed: every field 2.1.312 added to a declared stream shape (its dump minus the 2.1.308 dump) is a FIELDS_312 row, and no row lies outside it (sdk.connectorId grew on an MCP server CONFIG, not a stream shape)', JSON.stringify(grown12) === JSON.stringify(f312.map(([k, f]) => k + '.' + f).sort()) && !R.SHAPES['claude:stream:sdk'] && (d312.union.sdk || []).includes('connectorId'), { grown12, rows: f312.map(([k, f]) => k + '.' + f).sort() });
+    const sys308 = Object.keys(d308.union).filter((k) => k.startsWith('system/'));
+    const ias = R.SHAPES['claude:stream:system/inherited_asks_settled'];
+    ok('2.1.312 adds ONE system subtype and no stream record type: inherited_asks_settled — its zod literal in the dump (kept_request_ids: «The request ids of the earlier worker\'s asks that this worker keeps answerable.» — the record\'s own words are read off the binary in §4), a stream shape row of exactly the literal\'s fields, SHAPE_SINCE 2.1.312', !!d312 && sysOf(d312) === [...sys308, 'system/inherited_asks_settled'].sort().join() && recsOf(d312) === recsOf(d308) && (z312['system/inherited_asks_settled'] || '').includes('subtype:' + lit12 + '("inherited_asks_settled")') && /kept_request_ids:[^]{0,40}\.describe\("The request ids of the earlier worker's asks that this worker keeps answerable\."\)/.test(z312['system/inherited_asks_settled'] || '') && !!ias && [...ias.known].join() === d312.union['system/inherited_asks_settled'].filter((f) => f !== 'uuid' && f !== 'session_id').join() && R.SHAPE_SINCE['system/inherited_asks_settled'] === '2.1.312', { lit12, ias: ias && [...ias.known] });
+    const iasWhy = R.DECLARED_UPSTREAM_UNSEEN.system.inherited_asks_settled || '';
+    ok('…it is DECLARED_UPSTREAM_UNSEEN — neither HANDLED nor KNOWN_IGNORED — and its disposition names the gate (the remote transport: reportKept = isRemoteTransport() && …), the measurement (a 2.1.312 killed with an ask unanswered and resumed said nothing of it) and what a card would do (close the permission cards it does not name); the §4 oracle reads the gate off the installed bundle', !HANDLED.has('inherited_asks_settled') && !IGN.has('inherited_asks_settled') && /isRemoteTransport\(\)/.test(iasWhy) && /MEASURED/.test(iasWhy) && /close the permission cards it does not name/.test(iasWhy), iasWhy);
+    const nonRec12 = Object.keys(z312).filter((k) => !k.startsWith('system/')).sort();
+    ok('every non-system zod key of the 2.1.312 dump is a ZOD_NON_RECORDS row, each on its literal — active / inactive (an API refusal body\'s cyber_verification), search_result_location (a web-search citation inside a text block), source_revision_not_on_remote_error / source_revision_stale_on_remote_error (a remote-session start\'s answer): none a stream record (no uuid / session_id), none a 2.1.308 key, and no row outside the dump', !!lit12 && nonRec12.join() === Object.keys(R.ZOD_NON_RECORDS).sort().join() && nonRec12.length === 5 && nonRec12.every((k) => /^ignored — \(2\.1\.312\)/.test(R.ZOD_NON_RECORDS[k]) && R.ZOD_NON_RECORDS[k].length > 60 && z312[k].includes('type:' + lit12 + '("' + k + '")') && !(d312.union[k] || []).includes('uuid') && !(d312.union[k] || []).includes('session_id') && !(k in d308.union)), nonRec12);
+    const same14c = !!d312 && d308.sentences.rows.every((r) => d312.sentences.rows.some((x) => x.text === r.text && x.from === r.from));
+    ok('§4d 2.1.312: the same 14 sentences on the same lists, only RENAMED (anchor ' + d308.sentences.anchor + ' → ' + (d312 && d312.sentences.anchor) + ', list ' + d308.sentences.list + ' → ' + (d312 && d312.sentences.list) + ', set ' + d308.sentences.set + ' → ' + (d312 && d312.sentences.set) + ') — no row moves list, none needs `until`; the nested objects equal 2.1.308\'s', same14c && d312.sentences.rows.length === 14 && d312.sentences.unresolved.length === 0 && d312.sentences.anchor !== d308.sentences.anchor && JSON.stringify(d312.nested) === JSON.stringify(d308.nested), d312 && d312.sentences.rows.map((x) => x.name + ':' + x.from));
+    // what the REAL 2.1.312 writes (a loopback mock — a tool turn that took a frame in, a turn with a subagent, a Stop answered by the
+    // second interrupt on its follow-up init): the one new field it carries, through the REAL normalizer — and the card it drew before this pin
+    const FR12 = read('scripts/fixtures/claude-cli/2.1.312-frames.jsonl').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    const res12 = FR12.filter((r) => r.type === 'result');
+    ok('the real 2.1.312\'s stdout (scripts/fixtures/claude-cli/2.1.312-frames.jsonl, ' + FR12.length + ' records): every init names 2.1.312, EVERY result carries model_usage_since_last_result (' + res12.length + ' results, the interrupted ones too), NONE a shell_* / process_* / main_stream_* field (sent only by a worker Anthropic hosts), no inherited_asks_settled', FR12.filter((r) => r.subtype === 'init').length >= 3 && FR12.filter((r) => r.subtype === 'init').every((r) => r.claude_code_version === '2.1.312') && res12.length >= 5 && res12.some((r) => r.subtype === 'error_during_execution') && res12.every((r) => r.model_usage_since_last_result && typeof r.model_usage_since_last_result === 'object') && res12.every((r) => !Object.keys(r).some((k) => /^(shell_|process_|main_stream_)/.test(k))) && !FR12.some((r) => r.subtype === 'inherited_asks_settled'), res12.map((r) => Object.keys(r).filter((k) => /since_last|^shell_|^process_|^main_stream_/.test(k))));
+    const SIDS12 = [...new Set(FR12.map((r) => r.session_id).filter(Boolean))];
+    const live12 = (MMx) => SIDS12.map((conv) => {
+      const x = MMx === MM ? createMessageManager('claude', conv) : new MMx.MessageManager(conv);
+      for (const r of FR12.filter((y) => y.session_id === conv)) x.processLive(JSON.parse(JSON.stringify(r)));
+      const cards = driftCards(x);
+      return { cards: cards.length, fields: cards.flatMap((m) => m.content[0].fields).sort().join(), shapes: cards.map((m) => m.content[0].shape).join(), cli: cards.map((m) => m.content[0].cli).join(), rows: ledgerOf(conv, MMx).length };
+    });
+    const real12 = live12(MM);
+    ok('the REAL normalizer on the real 2.1.312 stdout, conversation by conversation (' + SIDS12.length + ') ⇒ no drift card, no ledger row', SIDS12.length >= 3 && real12.every((c) => c.cards === 0 && c.rows === 0), real12);
+    const M12 = mutantCopies('record-312', REPO);
+    const FILL12 = 'for (const [key, fields] of Object.entries(FIELDS_312)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);';
+    const rsSrc12 = read('src/record-shape.js'), mmSrc12 = read('src/message-manager.js');
+    const MM12 = rsSrc12.split(FILL12).length === 2 && mmSrc12.split(REQ7).length === 2 ? require(M12.write('src/message-manager.js', mmSrc12.replace(REQ7, 'require(' + JSON.stringify(M12.write('src/record-shape.js', rsSrc12.replace(FILL12, '/* FIELDS_312 not filled (control) */'), 'no-312')) + ')'), 'mm-no-312')) : null;
+    const ctl12 = MM12 && live12(MM12);
+    ok('RED CONTROL: the same stdout on a copy without FIELDS_312 (the 7df30f96 tree on 2.1.312) ⇒ the card is back in EVERY conversation — ONE drift card on result naming model_usage_since_last_result alone, CLI 2.1.312, and its ledger row', !!ctl12 && ctl12.every((c) => c.cards === 1 && c.shapes === 'result' && c.fields === 'model_usage_since_last_result' && c.cli === '2.1.312' && c.rows === 1), ctl12);
+    // THE STAND-IN (scripts/fixtures/claude-stand-in-cli.cjs's shape, version-keyed by $STAND_IN_CLI_VERSION): a 2.1.312 stand-in writes
+    // the measured 2.1.312 result (model_usage_since_last_result on every result), a 2.1.308 one the 2.1.308 result — both clean
+    const standIn = (ver) => new Promise((resolve) => {
+      const c = spawn(process.execPath, [path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs')], { stdio: ['pipe', 'pipe', 'ignore'], env: { PATH: process.env.PATH, ...(ver ? { STAND_IN_CLI_VERSION: ver } : {}) } });
+      let buf = '';
+      const recs = [];
+      const done = () => { clearTimeout(t); try { c.kill(); } catch { } resolve({ init: (recs.find((x) => x.subtype === 'init') || {}).claude_code_version, results: recs.filter((x) => x.type === 'result'), drift: recs.map((x) => R.unknownFields('claude', 'stream', x)).filter(Boolean) }); };
+      const t = setTimeout(done, 5000);
+      c.stdout.setEncoding('utf8');
+      c.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); try { recs.push(JSON.parse(l)); } catch { } if (recs.some((x) => x.type === 'result')) return done(); } });
+      c.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'hello' }] } }) + '\n');
+    });
+    const [si12, si08] = await Promise.all([standIn(null), standIn('2.1.308')]);
+    ok('the stand-in CLI is version-keyed: by default it IS 2.1.312 (init claude_code_version 2.1.312, every result carries model_usage_since_last_result); STAND_IN_CLI_VERSION=2.1.308 writes the 2.1.308 result (no such field); both clean under the declarations', si12.init === '2.1.312' && si12.results.length >= 1 && si12.results.every((x) => x.model_usage_since_last_result && typeof x.model_usage_since_last_result === 'object') && si08.init === '2.1.308' && si08.results.length >= 1 && si08.results.every((x) => !('model_usage_since_last_result' in x)) && si12.drift.length === 0 && si08.drift.length === 0, { si12: { init: si12.init, results: si12.results.length, drift: si12.drift }, si08: { init: si08.init, results: si08.results.length } });
   }
 }
 

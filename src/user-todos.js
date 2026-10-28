@@ -137,6 +137,11 @@ function normalizeCard(x) {
 // title says so; absent ⇒ ✓ marks it handled). null = no door (the jump to the item's session, as before).
 const OPEN_KINDS = ['plugin-settings'];
 const PLUGIN_ID_RE = /^[a-z][a-z0-9-]{0,40}$/;
+/** lane chat-needs-you-card: the CONVERSATION an item addresses when its producer files it under its own group key (a
+ *  channel watch / access request under 'channels' names the asking agent's conversation) — a sessionKey
+ *  (`backend:id` / `webui:id`), or null. The chat of that conversation draws the item as a card (src/foryou-actions.js). */
+const ABOUT_RE = /^[a-z][a-z0-9-]{0,40}:[^\s]{1,200}$/;
+const normalizeAbout = (x) => (typeof x === 'string' && ABOUT_RE.test(x) ? x : null);
 const OPEN_FIELDS = ['kind', 'plugin', 'panel', 'prefill', 'done'];
 function normalizeOpen(x, plugin) {
   if (x == null) return null;
@@ -170,7 +175,8 @@ function normalizeOpen(x, plugin) {
   return out;
 }
 
-const ACTION_IDENTITY = Object.freeze({ 'exit-run-ask': 'askId', 'hub-act-ask': 'askId', 'automation-ask': 'askId', 'pool-cross-provider': 'askId', 'vault-run-ask': 'askId', 'vault-grant-ask': 'askId', 'secret-request': 'requestId', 'browser-proposal': 'id', 'app-install': 'id', 'browser-grant': 'profileId', 'browser-takeover': 'requestId', 'open-channel': 'key', 'channel-api-proposal': 'id', 'main-ask': 'requestId' }); // lane browser-propose: one item per proposal (each is a different switch); Layer 0 apps (verify-r1 F2): one item per app proposal — another proposal of the same words never re-points this one's Install; channel-names verify r1 F2: one item per CONVERSATION (two rooms of one name merged — the click opened the last filer's, deciding one retracted both) // lane browser-takeover-queue: one item per takeover request (a re-ask re-files the SAME item; another request is another)
+// THE MERGE RULE (lane chat-needs-you-card, amendment 1): derived from THE For-you action registry — a row's `identity`
+const { ACTION_IDENTITY } = require('./foryou-actions.js');
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
@@ -444,7 +450,7 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null } = {}) {
     const _dataDir = path.dirname(this._file);   // agent-output-sinks: the belt finds the vault from here
     const rawText = typeof text === 'string' ? (origin === 'agent' ? belt.maskForSink(text.trim(), { dataDir: _dataDir }) : text.trim()) : '';   // agent-output-sinks: belt the AGENT's own ask (origin 'agent'), never a system producer's notice (vault / spend / channels / …)
     text = rawText.slice(0, TEXT_MAX);
@@ -468,6 +474,7 @@ class UserTodoManager {
     // against them (resolution for OPENING only, never a spawn)
     cwd = typeof cwd === 'string' && cwd.startsWith('/') ? cwd.slice(0, 4096) : null;
     hostId = typeof hostId === 'string' && hostId && hostId !== 'local' ? hostId.slice(0, 120) : null;
+    about = normalizeAbout(about); // lane chat-needs-you-card: the conversation it addresses (its chat draws the card), or null
     // ORIGIN (B-328d, 2026-09-24): WHO filed it — a closed set (src/inbox-origin.js).
     // REQUIRED (r2, fail closed): a caller naming none THROWS `origin required
     // (one of …)` and a value outside the set THROWS by name — either files
@@ -558,6 +565,7 @@ class UserTodoManager {
       if (artifacts && JSON.stringify(artifacts) !== JSON.stringify(existing.artifacts || null)) { existing.artifacts = artifacts; changed = true; } // lane foryou-attachments: the same rule as options
       if (cwd && cwd !== existing.cwd) { existing.cwd = cwd; changed = true; }
       if (hostId && hostId !== existing.hostId) { existing.hostId = hostId; changed = true; }
+      if (about && about !== existing.about) { existing.about = about; changed = true; } // lane chat-needs-you-card
       if (open && JSON.stringify(open) !== JSON.stringify(existing.open || null)) { existing.open = open; changed = true; } // lane foryou-plugin-notices: the door follows the latest filing (its prefill)
       // a DECLARED origin is kept (the item's producer does not change on a re-file);
       // an item filed before the field existed takes the re-filer's declaration
@@ -581,6 +589,7 @@ class UserTodoManager {
       options, // the one-click answers (≤6 labels), or null — a chip's reply IS its label (design-user-inbox-reply D3a)
       ...(artifacts ? { artifacts } : {}), // lane foryou-attachments: what the agent asks the owner to open (chips → the one artifact door)
       ...(cwd ? { cwd } : {}), ...(hostId ? { hostId } : {}), // where its words' paths resolve (the asker's cwd on its host)
+      ...(about ? { about } : {}), // lane chat-needs-you-card: the conversation it ADDRESSES (filed under a group key) — its chat draws the card
       ...(origin === 'plugin' ? { plugin } : {}), ...(open ? { open } : {}), // lane foryou-plugin-notices: WHICH plugin, and where a click on the item opens
       reply: null, // {text, at} once the user replied from the inbox (resolveByReply)
       origin, // the PRODUCER (B-328d): spend|login|pool|jobs|channels|browser|agent — REQUIRED (r2), the Notices area groups by it
@@ -799,7 +808,10 @@ class UserTodoManager {
   rekey(fromKey, toKey) {
     if (fromKey === toKey) return;
     let changed = false;
-    for (const i of this._state.items) if (i.sessionKey === fromKey) { i.sessionKey = toKey; changed = true; }
+    for (const i of this._state.items) {
+      if (i.sessionKey === fromKey) { i.sessionKey = toKey; changed = true; }
+      if (i.about === fromKey) { i.about = toKey; changed = true; } // lane chat-needs-you-card: the conversation it addresses moves with it
+    }
     if (changed) { this._save(); this._notify(); }
   }
 }

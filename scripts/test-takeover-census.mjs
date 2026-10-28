@@ -101,6 +101,7 @@ export const CENSUS = [
   ['chat-input.js', 'textarea', 'text', 'THE CHAT COMPOSER'],
   ['chat-input.js', 'tabindex', 'widget', 'the queue strip\'s items'],
   ['chat-minimap.js', 'input', 'text', 'the TOC filter'],
+  ['chat-needs-card.js', 'tabindex', 'control', 'a FOLDED needs card\'s row (0, role button, Enter / Space open it in place — lane chat-needs-you-card, acceptance round 2: the accordion in the chat)'],
   ['chat-renderers.js', 'input', 'text', 'AskUserQuestion\'s own answer; an inline edit'],
   ['chat-renderers.js', 'tabindex', 'control', 'role=link names (a peer, a collab agent)'],
   ['chat-search.js', 'input', 'text', 'the chat\'s search box (Ctrl+F)'],
@@ -265,8 +266,11 @@ export const CENSUS = [
   // lane takeover-census-fast (B-aacd, 2026-10-20): the .329 base was RED again — two surfaces the heavy road hid (int328 + int329), each
   // read in its file and classed by the census's own rules; from this lane on the census runs in every fast gate
   ['account-models.js', 'input', 'text', '模型…\'s rows on Manage agents: a configured provider\'s model id / display name / context boxes (template inputs; the new row\'s id box takes the focus — design q-053 r1, lane provider-record; joined at the 2.369.329 integration)'],
-  ['vault-totp-row.js', 'input', 'control', '「用于…」\'s grant picker: a checkbox per running conversation / Task Group (el(\'input\') + type checkbox — design q-047 L1, lane vault-totp; joined at the 2.369.328 integration)'],
+  ['vault-totp-row.js', 'input', 'control', '「用于…」\'s grant picker: a checkbox per running conversation / Task Group (el(\'input\') + type checkbox — design q-047 L1, lane vault-totp; joined at the 2.369.328 integration) · lane vault-totp-add: 添加… ▸ 两步验证…\'s masked link and seed fields (type password, a 显示 toggle) and its name'],
+  ['vault-totp-row.js', 'details', 'control', '添加… ▸ 两步验证…\'s 「高级」 fold (digits · period · algorithm) — lane vault-totp-add'],
+  ['vault-totp-row.js', 'select', 'choice', '添加… ▸ 两步验证…\'s 高级 pickers: 6 / 8 digits, 30 / 60 s, SHA1 / SHA256 / SHA512 — lane vault-totp-add'],
   ['vault-login-row.js', 'input', 'control', 'a web login\'s 「用于…」 picker (a radio per scope + a checkbox per conversation / Task Group / everyone) and 网站登录…\'s fields (site, user name, password, two-step name) — el(\'input\'), lane browser-login'],
+  ['vault-login-row.js', 'datalist', 'choice', '网站登录…\'s two-step field offers the vault\'s two-step code names (GET /api/vault/totp — names only) — lane vault-totp-add'],
   // ── verify r4 (attack 5): the rows the r3 grep could not see — element helpers, conditional tags, index.html, the new kinds ──
   ['browser-replay-window.js', 'combobox', 'widget', 'the sessions / actions lists (role=listbox: ← → Home End Space)'],
   ['channel-filter-editor.js', 'select', 'choice', 'the filter\'s pickers (selectBox — el(\'select\') from channel-chrome.js)'],

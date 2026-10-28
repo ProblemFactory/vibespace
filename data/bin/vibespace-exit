@@ -169,7 +169,7 @@ async function main() {
     const need = cmd === 'pull' ? 'vibespace-exit pull <machine> <remote-path> [<local-path>] [--overwrite]' : 'vibespace-exit push <local-path> <machine> <remote-path> [--overwrite]';
     if (words.length < (cmd === 'pull' ? 2 : 3) || words.length > 3) { console.error('usage: ' + need); process.exit(2); }
     // "ask me each time": the call waits for the user's Allow first — said once it outlives a second
-    const note = setTimeout(() => console.error("# waiting for the user's approval (up to 60 s) if the machine asks…"), 1000);
+    const note = setTimeout(() => console.error("# waiting for the user's approval (up to 60 s) if the machine asks… — an approval card in this conversation and in the For-you tray"), 1000);   // lane chat-needs-you-card
     if (cmd === 'pull') {
       const [machine, remote, word] = words;
       let local = path.resolve(word || nameOf(remote));
@@ -224,7 +224,8 @@ async function main() {
         const { exits } = res.ok ? await res.json() : { exits: [] };
         const r0 = String(machine || '').toLowerCase();
         const hit = (exits || []).filter((e) => !r0 || e.id === machine || String(e.name).toLowerCase().includes(r0));
-        if (hit.some((e) => e.grants && e.grants.runAsk)) console.error("# waiting for the user's approval (up to 60 s)…");
+        // lane chat-needs-you-card: the line to quote names where it is answered — the card in this conversation, or the tray
+        if (hit.some((e) => e.grants && e.grants.runAsk)) console.error("# waiting for the user's approval (up to 60 s)… Filed for you: an approval — answer it on the card in this conversation or in the For-you tray");
       } catch { }
     }, 1000);
     const r = await post('/api/agent/exit/run', { machine, cmd: command }, { cls: 'wake', ms: 105000 });   // the user's Allow ≤ 60 s + the run ≤ 30 s

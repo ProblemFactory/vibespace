@@ -583,7 +583,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     requests.set(askId, q); reqByPair.set(pair, askId);
     askingLine();
     audit('vault-request', { by: { kind: 'agent', key: caller.sessionKey || null, name: caller.name || null }, conv: scope, entry: ref.ref, purpose: said, askId });
-    return { ok: true, askId, ref: ref.ref };
+    return { ok: true, askId, ref: ref.ref, todoId: q.todoId || null };   // lane chat-needs-you-card: the item the agent's line names
   }
   /** A PERSON's answer to a request (src/routes/vault.js: people only): once | 8h | deny → the grant row. A grant opens a
    *  closed entry for a conversation — the per-row switch's job — so it needs the switch's 验证是你 (`reauthed`: this page's

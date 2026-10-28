@@ -13,7 +13,10 @@
 //           (round 3: the exit's go() was announced and did not end within 3 s — a 204, a stopped load, or only a slow
 //           one —, or a tap came while it was pending: the page stays; round 4: its intent kept for a late commit); or
 //           slow (ms — round 4: that go() committed after all, this late: the page's pagehide after the stay)
-//   rearm — why (cancelled | input): a page that stayed through its go() stands on a sentinel again (round 4)
+//   rearm — why (cancelled | input | input-late): a page that stayed through its go() stands on a sentinel again (round
+//           4); a tap's — while the go() is pending (input) or after the stay (input-late, round 5) — says whether its
+//           step aborted the go(): abort 1 (the exit is over), 0 (no entry to step onto, refused or moving nothing —
+//           the intent kept for the landing document)
 //   hop   — a document the exit's go() LOADED went on back without booting the app (back-guard.js exitHop): n (the hop),
 //           skip, ents; or n + stay 1 + why (cap | input | api | show | cancelled — the page stays and boots: the ONE
 //           named load); or n + slow (ms: a stayed hop's go() committed late); or drop 1 (an intent not this load's)

@@ -129,7 +129,7 @@ function mkWorld({ auto = true, hot = true, host = null, withFireNow = true, new
       JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken, expiresAt, refreshTokenExpiresAt: Date.now() + 29 * 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
 
   const FISH = am.createSubscription({ name: 'Fish Max' }).id; login(FISH);
-  const PANDY = am.createSubscription({ name: 'PandyMax' }).id; login(PANDY);
+  const PANDY = am.createSubscription({ name: 'userP' }).id; login(PANDY);
   // The owner's new subscription. AT 02:18:33 IT WAS LOGGED IN AND UNREAD —
   // that is the incident's state, and it is the only state in which the pool
   // would move anybody onto it (`poolMembers` filters on the roster's
@@ -406,7 +406,7 @@ console.log('\n§2 "no reading" is a refusal to act, never a verdict of 0%');
     w.writeCache(w.NEW, { ...w.healthy(), sevenDay: { utilization: 0.1, resetsAt: foreignWeekly } });
     const r = w.eng.onMemberReadingFresh(w.NEW, 'manual refresh');
     ok('a FOREIGN reading (its weekly window is another member\'s) ⇒ refuse, and say whose',
-      r.acted === false && r.reason === 'foreign-reading' && /PandyMax/.test(String(r.detail)), JSON.stringify(r));
+      r.acted === false && r.reason === 'foreign-reading' && /userP/.test(String(r.detail)), JSON.stringify(r));
     ok('…and the edge composes with the ONE predicate rather than copying it (src/reading-lag.js decideReadingTarget, rule ②)',
       /decideReadingTarget/.test(read('src/server/usage-pool-engine.js').split('function readingForeignForWake')[1].slice(0, 600)));
     ok('…READ-ONLY: refusing to wake never archives or moves the reading (guardReadingTarget is the write path, this is not)',

@@ -106,7 +106,11 @@ const meta = {
 
 let buffer = '', writeTimer = null, metaTimer = null;
 function persistBuffer() { writeTimer = null; try { fs.mkdirSync(path.dirname(bufferFile), { recursive: true }); fs.writeFileSync(bufferFile, buffer); } catch { } }
-function persistMeta() { metaTimer = null; try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); fs.writeFileSync(metaFile, JSON.stringify(meta)); } catch { } }
+// THE SIDECAR IS REPLACED, NEVER REWRITTEN IN PLACE (ci358-reds item 7, the .358 mirror's fast red): writeFileSync truncates
+// it first, and a hub read in that instant (src/server/wrapper-files.js wrapperCaps) found it EMPTY — 'no-sidecar' — so the
+// ladder said a LIVE session had «no live inbox … on any reachable machine». The bytes go to a temp file beside it, renamed
+// over it: a reader sees the old record or the new one, whole.
+function persistMeta() { metaTimer = null; const tmp = `${metaFile}.${process.pid}.tmp`; try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); fs.writeFileSync(tmp, JSON.stringify(meta)); fs.renameSync(tmp, metaFile); } catch { try { fs.unlinkSync(tmp); } catch { } } }
 function schedulePersist() { if (!writeTimer) writeTimer = setTimeout(persistBuffer, 1000); }
 function scheduleMeta() { if (!metaTimer) metaTimer = setTimeout(persistMeta, 200); }
 function writeRecord(rec) {

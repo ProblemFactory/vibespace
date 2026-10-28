@@ -19,8 +19,10 @@ const VERBS = Object.freeze(['run', 'push', 'pull', 'list', 'runs', 'use', 'url'
 const INFO_VERBS = Object.freeze(['list', 'runs', 'use', 'url']);
 const BIN = /^(?:[A-Za-z0-9_.\-/]*\/)?vibespace-exit$/;
 const ENV_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
-// the CLI's own lines (data/bin/vibespace-exit — test-exit-call pins each against the file)
-const WAIT_NOTES = Object.freeze(["# waiting for the user's approval (up to 60 s)…", "# waiting for the user's approval (up to 60 s) if the machine asks…"]);
+// the CLI's own lines (data/bin/vibespace-exit — test-exit-call pins each against the file); lane chat-needs-you-card: they name
+// the card in the conversation now — the words before it stay in history (a re-read call card filters both)
+const WAIT_NOTES = Object.freeze(["# waiting for the user's approval (up to 60 s)… Filed for you: an approval — answer it on the card in this conversation or in the For-you tray", "# waiting for the user's approval (up to 60 s) if the machine asks… — an approval card in this conversation and in the For-you tray"]);
+const WAIT_NOTES_BEFORE = Object.freeze(["# waiting for the user's approval (up to 60 s)…", "# waiting for the user's approval (up to 60 s) if the machine asks…"]);
 const WAY_OUT_LINE = '  way out: ask the user to allow this conversation under "Who can use it" on the machine row (Remote tab)';
 const REFUSAL = /^vibespace-exit(?: push)?: (.+)$/;
 const RAN = /^# ran on (.+) — (?:exit (-?\d+)|timed out after \d+ s), (\d+\.\d) s(?: — OUTPUT CUT \(.*\))? \(recorded\)$/;
@@ -126,7 +128,7 @@ function exitCallOf(command, result, { error = false } = {}) {
   if (!!error !== exitCode > 0) return null;   // "Exit code N" is claude's mark of a failed call — and only that
   const lines = text.split('\n');
   while (lines.length && (!lines[lines.length - 1].trim() || HARNESS_TAIL.test(lines[lines.length - 1]))) lines.pop();
-  const kept = lines.filter((l) => !WAIT_NOTES.includes(l));
+  const kept = lines.filter((l) => !WAIT_NOTES.includes(l) && !WAIT_NOTES_BEFORE.includes(l));
   const out = { ...call, machine: '', kind: call.verb === 'run' ? 'run' : INFO_VERBS.includes(call.verb) ? 'info' : 'copy', outcome: 'failed', code: null, ms: 0, timedOut: false, truncated: false, said: '', output: '' };
   // a refusal: the server's sentence (and the way out when a grant is missing) is ALL the call printed
   const way = kept.length && kept[kept.length - 1] === WAY_OUT_LINE ? 1 : 0;
@@ -278,4 +280,4 @@ function cardMatcher(card) {
   return (command) => cardBelongsTo(command, facts);
 }
 
-module.exports = { cardMatcher, VERBS, INFO_VERBS, WAIT_NOTES, WAY_OUT_LINE, commandsOf, argsOf, exitCommandOf, exitCallOf, exitCallCard, callWords, INFO_WORDS, infoWordsOf, cardBelongsTo };
+module.exports = { cardMatcher, VERBS, INFO_VERBS, WAIT_NOTES, WAIT_NOTES_BEFORE, WAY_OUT_LINE, commandsOf, argsOf, exitCommandOf, exitCallOf, exitCallCard, callWords, INFO_WORDS, infoWordsOf, cardBelongsTo };

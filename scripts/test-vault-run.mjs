@@ -743,7 +743,7 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
   ok(view.actions.slice(0, 3).join() === 'hub-once,grant-8h,hub-deny' && !view.actions.includes('reply'), 'the For-you window: Allow once / For 8 hours / Deny first — no reply box', view.actions);
   const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
   ok(/const GRANT_ANSWERS = \['once', '8h', 'deny'\];/.test(read('src/lib/user-todos-row.js')) && /a === '8h' \? t\('For 8 hours'\)/.test(read('src/lib/user-todos-row.js')) && /a === 'grant-8h' \? '8h'/.test(read('src/lib/inbox-window.js'))
-    && /\/api\/vault\/request\/asks\//.test(read('src/lib/user-todos-actions.js')) && R('src/inbox-reply.js').ANSWER_ACTION_TYPES.includes('vault-grant-ask') && /'vault-grant-ask': 'askId'/.test(read('src/user-todos.js')), 'the popup row and the window answer once / 8h / deny through POST /api/vault/request/asks/:askId; a typed reply never answers it; one item per request');
+    && /\/api\/vault\/request\/asks\//.test(read('src/lib/user-todos-actions.js')) && R('src/inbox-reply.js').ANSWER_ACTION_TYPES.includes('vault-grant-ask') && /\{ type: 'vault-grant-ask', identity: 'askId',/.test(read('src/foryou-actions.js')), 'the popup row and the window answer once / 8h / deny through POST /api/vault/request/asks/:askId; a typed reply never answers it; one item per request (THE For-you action registry\'s row)');
 }
 
 console.log('⑩b THE CAP\'S SHAPE (B-4934, q-043 verify L2): 8 open asks per conversation; hub-wide a count of CONVERSATIONS (32); «N conversations are asking»');

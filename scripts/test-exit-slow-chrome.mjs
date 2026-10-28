@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // THE EXIT ON A SLOW LINK — A STAYED go() IS SUSPENDED, NEVER FORGOTTEN, in a real Chrome both ways of the back/forward
-// cache (lane phone-back-reload, acceptance round 4). test-exit-hop-chrome's harness: a throwaway server in a git
+// cache (lane phone-back-reload, acceptance rounds 4 and 7). test-exit-hop-chrome's harness: a throwaway server in a git
 // worktree (the built public/ overlaid), another site beside it (the page before VibeSpace; the older document's
 // embedded page), headless Chrome over raw CDP at 382×580 (an Android UA, touch, hover:none / pointer:coarse), the
 // BROWSER's own back (Alt+Left); the network is slowed per document with the Fetch domain (the older document's HTML
 // held — a cold cache on a slow link; the HTTP cache off while it is held). Chrome is launched twice — the cache OFF,
 // then ON — and each road runs on a bundle rebuilt with ROUND 3's rules (RED: the bound drops the intent and watches
-// nothing after, no re-arm, a tap only drops the intent, no incident for a late landing) then on the shipped one:
+// nothing after, no re-arm, a tap only drops the intent, no incident for a late landing) — ⑨ ⑩ on ROUND 6's (cb8c0a86:
+// while the go() is pending, a tap at the first pointerdown or keydown) — then on the shipped one:
 //   ⑤ the exit on a slow link: G7's road (one iframe link followed inside the older document, so the exit's go() lands
 //      ON it), the older document's HTML answering in 3.5 s — round 3 dropped the intent at the 3 s bound and the older
 //      document booted with none, filing nothing (the owner's silent load); shipped: it goes on — the tab ends on the
@@ -16,10 +17,18 @@
 //   ⑦ a cancelled exit, then a back: G3's road onto a page before VibeSpace that answers 204 — after the stay, the next
 //      back is ours: the 「再返回一次退出」 toast on the same document (round 3: no sentinel above the page — the
 //      browser's own back LOADED the older document)
-//   ⑧ a tap while the exit's go() is pending (G7's road, the older document answering in 6 s; the tap 1 s in): the go()
-//      is ABORTED by the step onto the sentinel above — the page stays, re-armed, the older document never loads (round 3:
-//      the traversal went on and the older document booted — the tap lost)
-// Its own clock: 780 s (suite-watchdog); run bare it assumes its ci.mjs row's budget (900 s) and says so at start.
+//   ⑧ a tap while the exit's go() is pending (G7's road, the older document answering in 6 s; the tap — its pointerdown
+//      and pointerup, round 7 — 1 s in): the go() is ABORTED by the step onto the sentinel above — the page stays,
+//      re-armed, the older document never loads (round 3: the traversal went on and the older document booted — the tap
+//      lost)
+//   ⑨ a PAN while the exit's go() is pending (the same road; CDP touch moves 1 s in — the page gets a pointerdown, then
+//      the pointercancel of the touch the browser took): no tap — the stay at 3 s, the commit at 6 s, the older document
+//      goes on, the tab outside (round 6: the pointerdown was the tap — the step up cancelled the exit)
+//   ⑩ a MOUSE's back button while the exit's go() is pending (CDP Input.dispatchMouseEvent button 'back' 1 s in — the
+//      page gets its pointerdown and pointerup, button 3, and the browser goes back at the release): no tap — no step;
+//      the browser's own back aborts the pending go() and takes the tab onto the page before VibeSpace, the older
+//      document never loads (round 6: read as a tap — the step up ran, the exit cancelled)
+// Its own clock: 840 s (suite-watchdog); run bare it assumes its ci.mjs row's budget (900 s) and says so at start.
 // Requires google-chrome (SKIP without) and a fresh `npm run build`. Run: node scripts/test-exit-slow-chrome.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -78,7 +87,7 @@ for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); proc
 const PENDS = new Map();
 // run bare (no gate) the suite assumes its ci.mjs row's budget (budgetFor: a chrome heavy row, 900 s) and says so
 const BARE = !process.env.VIBESPACE_SUITE_BUDGET_MS;
-const WD = armWatchdog({ capMs: 780e3, env: BARE ? { ...process.env, VIBESPACE_SUITE_BUDGET_MS: '900000' } : process.env, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
+const WD = armWatchdog({ capMs: 840e3, env: BARE ? { ...process.env, VIBESPACE_SUITE_BUDGET_MS: '900000' } : process.env, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
 console.log(`watchdog: ${Math.round(WD.deadline.ms / 1000)} s (${WD.deadline.capped ? "the suite's own ceiling" : 'the budget − 30 s'}; the budget ${Math.round(WD.deadline.budgetMs / 1000)} s — ${BARE ? "a bare run: its ci.mjs row's" : "the gate's"})`);
 for (let i = 0; i < 80; i++) { try { await fetch(`${ORIGIN}/api/home`); break; } catch { await sleep(250); } }
 
@@ -143,6 +152,19 @@ const tapAt = async (x, y) => {
   await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] }); await sleep(50);
   await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await sleep(250);
 };
+/** A mouse's back button pressed and released (CDP: a command sent while a traversal is pending is answered at once —
+ *  measured, round 6; only Runtime.evaluate waits for the commit). */
+const mouseBack = async (x, y) => {
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, button: 'none', buttons: 0 });
+  await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'back', buttons: 8, clickCount: 1 }); await sleep(60);
+  await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'back', buttons: 0, clickCount: 1 });
+};
+/** A touch the browser takes: a vertical pan over the side bar (its pointerdown, then a pointercancel — measured). */
+const pan = async (x, y0, y1) => {
+  await cdp('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y: y0 }] });
+  for (let y = y0; y1 < y0 ? y >= y1 : y <= y1; y += y1 < y0 ? -20 : 20) { await sleep(16); await cdp('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y }] }); }
+  await sleep(30); await cdp('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+};
 const phone = async () => {
   await cdp('Emulation.setDeviceMetricsOverride', { width: 382, height: 580, deviceScaleFactor: 2.75, mobile: true });
   await cdp('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Mobile Safari/537.36', platform: 'Linux armv8l' });
@@ -164,26 +186,31 @@ const TOLD = new Set(['leave', 'rearm', 'hop', 'cost']);
 const told = (rows) => rows.filter((r) => TOLD.has(r.k)).map(row).join(' ');
 const row = (r) => (r.k === 'rearm' ? `rearm:${r.why}` : r.k === 'leave' ? (r.why || (r.slow ? `slow:${r.slow}` : `${r.skip}/${r.load}`)) : r.k === 'hop' ? (r.slow ? `hop-slow:${r.slow}` : r.stay ? `hop-stay:${r.why}` : r.drop ? 'hop-drop' : `hop${r.n}`) : r.k === 'cost' ? `cost:${r.why || 'back'}` : r.k);
 
-// ── the bundles: the shipped one, and the client rebuilt with ROUND 3's rules ──
+// ── the bundles: the shipped one, and the client rebuilt with ROUND 3's and with ROUND 6's rules ──
 const bundleFile = path.join(wt, 'public/bundle.js');
 const realBundle = fs.readFileSync(bundleFile);
 const useBundle = (buf) => fs.writeFileSync(bundleFile, buf); // the index route stamps ?v=<mtime> per request: the next load runs it
 /** Round 3's rules, from the tree's own mobile-back.js: the bound drops the intent and watches nothing after, a stay never
  *  re-arms, a tap while the go() is pending only drops the intent, and a late landing files nothing. */
 const ROUND3 = [
-  ["  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); stayed('cancelled', null); linger(); }, GONE_WAIT_MS); };", "  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); drop(); stayed('cancelled', null); }, GONE_WAIT_MS); };"],
-  ["  const onInput = () => {\n    off();\n    if (!began) { drop(); input(); return; }\n    const abort = abortGo();\n    if (!abort) drop();\n    stayed('input', abort);\n    const end = linger();\n    abort?.then((landed) => { if (landed) { drop(); end(); } });\n  };", "  const onInput = () => { off(); drop(); if (began) stayed('input', null); else input(); };"],
-  ["        else if (enabled() && app.isMobile !== false) { push(); navNote({ k: 'rearm', why }); }\n", ''],
-  ['  const late = slowExit({ navType: facts.type, prev, now: Date.now(), came });', '  const late = false;'],
+  ["  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); stayed('cancelled'); linger(); listenTaps(); }, GONE_WAIT_MS); };", "  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); drop(); stayed('cancelled'); }, GONE_WAIT_MS); };"],
+  ["  const onInput = () => {\n    off();\n    if (!began) { drop(); input(); return; }\n    stayed('input'); linger(); tapped('input');\n  };", "  const onInput = () => { off(); drop(); if (began) stayed('input'); else input(); };"],
+  [" if (why === 'cancelled') rearm(why);", ''],
+  ['  const late = slowExit({ navType: facts.type, prev, now: Date.now(), came, mine: navLogRead().filter((r) => r && r.d === DOC_ID) });', '  const late = false;'],
 ];
-const buildRound3 = async () => {
+/** Round 6's rules (cb8c0a86's pending phase): while the go() is pending, a tap at the first pointerdown or keydown — any
+ *  button, any key (the late watch's tap already ends in a pointerup). */
+const ROUND6 = [
+  ['  const onPendingInput = (e) => { if (tapOf(downs, e)) onInput(); };', "  const onPendingInput = (e) => { if (e.type === 'pointerdown' || e.type === 'keydown') onInput(); };"],
+];
+const buildRound = async (swaps, tag) => {
   const esbuild = require(path.join(repo, 'node_modules/esbuild'));
   const src = fs.readFileSync(path.join(wt, 'src/lib/mobile-back.js'), 'utf8');
-  if (!ROUND3.every(([a]) => src.split(a).length === 2)) return null;
-  const red = ROUND3.reduce((t, [a, b]) => t.replace(a, b), src);
-  const out = await esbuild.build({ entryPoints: [path.join(wt, 'src/client.js')], outfile: path.join(wt, 'public/bundle.round-3.js'), bundle: true, write: false, format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, minify: true, logLevel: 'silent',
-    plugins: [{ name: 'round-3', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]mobile-back\.js$/ }, () => ({ contents: red, loader: 'js' })); } }] });
-  const js = out.outputFiles.find((f) => f.path.endsWith('bundle.round-3.js'));
+  if (!swaps.every(([a]) => src.split(a).length === 2)) return null;
+  const red = swaps.reduce((t, [a, b]) => t.replace(a, b), src);
+  const out = await esbuild.build({ entryPoints: [path.join(wt, 'src/client.js')], outfile: path.join(wt, `public/bundle.${tag}.js`), bundle: true, write: false, format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, minify: true, logLevel: 'silent',
+    plugins: [{ name: tag, setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]mobile-back\.js$/ }, () => ({ contents: red, loader: 'js' })); } }] });
+  const js = out.outputFiles.find((f) => f.path.endsWith(`bundle.${tag}.js`));
   return js ? Buffer.from(js.contents) : null;
 };
 
@@ -243,13 +270,14 @@ const cancelBackRoad = async () => {
   const rows = await diaryFrom(t0);
   return { armed, asked, stayed, loads, restored, onApp: onApp(n), same, said, rows: told(rows) };
 };
-/** ⑧ — G7's road, the older document's HTML held 6 s; a tap 1 s into the exit's pending go(). The tap: a pointerdown the
- *  page dispatches to itself on a timer set just before the back (a CDP command waits while a traversal is pending —
- *  measured in round 3: it would land after the commit, on the next document). */
+/** ⑧ — G7's road, the older document's HTML held 6 s; a tap 1 s into the exit's pending go(). The tap: a pointerdown and
+ *  its pointerup (round 7: a tap ends in one) the page dispatches to itself on a timer set just before the back
+ *  (Runtime.evaluate waits while a traversal is pending — measured in round 3: it would land after the commit, on the
+ *  next document; ⑨ ⑩ send theirs by CDP's Input domain, which answers at once — measured, round 6). */
 const tapRoad = async () => {
   const armed = await iframeRoad(`${AUX}/plain-${++nth}`, 'tap');
   const l0 = appLoads, r0 = restores;
-  await evalJs(`window.__exitMark = 1; setTimeout(() => window.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })), 1100); true`);
+  await evalJs(`window.__exitMark = 1; setTimeout(() => { for (const t of ['pointerdown', 'pointerup']) window.dispatchEvent(new PointerEvent(t, { bubbles: true, pointerId: 1, pointerType: 'touch', isPrimary: true })); }, 1100); true`);
   await slowNet(6000);
   const t0 = Date.now();
   await browserBack(100); // the exit: its go() pending on the held older document; the tap 1 s in
@@ -262,18 +290,50 @@ const tapRoad = async () => {
   const rows = await diaryFrom(t0);
   return { armed, loads, restored, onApp: onApp(n), same, st, rows: told(rows) };
 };
+/** The page's own record of the pointer events it got from now on (the tab's sessionStorage — read after the diary). */
+const PTR = 'exit-slow.ptr';
+const ptrWatch = () => evalJs(`sessionStorage.setItem('${PTR}', '[]'); for (const t of ['pointerdown', 'pointerup', 'pointercancel']) addEventListener(t, (e) => { try { const l = JSON.parse(sessionStorage.getItem('${PTR}') || '[]'); l.push(t + ':' + e.button); sessionStorage.setItem('${PTR}', JSON.stringify(l)); } catch { } }, true); true`);
+const ptrRead = async () => (await evalJs(`sessionStorage.getItem('${PTR}') || '[]'`).then(JSON.parse).catch(() => [])).join(' ');
+/** ⑨ ⑩ — G7's road, the older document's HTML held 6 s; 1.1 s into the exit (its go() pending, before the 3 s stay) the
+ *  press, by CDP: `pan` — a touch the browser takes, `mouse` — a mouse's back button (the browser's back at its release). */
+const pendingRoad = async (kind) => {
+  const armed = await iframeRoad(`${AUX}/plain-${++nth}`, `pending-${kind}`);
+  await evalJs('window.__exitMark = 1; true'); await ptrWatch();
+  const i0 = (await incidents()).length, l0 = appLoads, r0 = restores, h0 = held.length;
+  await slowNet(6000);
+  const t0 = Date.now();
+  await browserBack(100); // the exit: its go() pending on the held older document
+  await sleep(1100 - (Date.now() - t0));
+  const sent = Date.now() - t0;
+  if (kind === 'mouse') await mouseBack(191, 300); else await pan(191, 440, 180);
+  const answered = Date.now() - t0;
+  await sleep(8500 - (Date.now() - t0));
+  await slowNet(0);
+  let n = await nav();
+  const same = onApp(n) && await evalJs('window.__exitMark === 1').catch(() => false);
+  const st = same ? await evalJs('history.state').catch(() => null) : null;
+  const booted = !same && onApp(n) && await waitFor('!!(window.app && app.ready)', 12000);
+  if (booted) await sleep(1500); // the incident's POST
+  n = await nav();
+  const all = await incidents(), inc = all.slice(0, all.length - i0); // newest first
+  const loads = appLoads - l0, restored = restores - r0; // before the diary's own read
+  const rows = await diaryFrom(t0);
+  return { armed, sent, answered, held: held.length - h0, outside: n.url.startsWith(AUX), onApp: onApp(n), same, st, booted, loads, restored, rows: told(rows), ptr: await ptrRead(), incidents: inc.map((x) => String(x.note || '').slice(0, 40)) };
+};
 
 try {
-  const round3 = await buildRound3();
+  const round3 = await buildRound(ROUND3, 'round-3'), round6 = await buildRound(ROUND6, 'round-6');
   check('the client rebuilds with round 3\'s rules from the tree\'s own mobile-back.js (every anchor found once)', !!round3);
+  check('…and with round 6\'s (cb8c0a86: while the go() is pending, a tap at the first pointerdown or keydown)', !!round6);
   for (const cache of ['off', 'on']) {
     console.log(`${cache === 'off' ? 'I' : 'II'}  the back/forward cache ${cache.toUpperCase()} — each road on round 3's rules (RED), then the shipped ones`);
     await launch(cache);
     const R = {}, G = {};
     if (round3) { useBundle(round3); try { R.late = await slowRoad(3500); R.later = await slowRoad(12000); R.back = await cancelBackRoad(); R.tap = await tapRoad(); } finally { useBundle(realBundle); } }
-    G.late = await slowRoad(3500); G.later = await slowRoad(12000); G.back = await cancelBackRoad(); G.tap = await tapRoad();
-    console.log(`  · round 3 ${JSON.stringify(R).slice(0, 1400)}`);
-    console.log(`  · shipped ${JSON.stringify(G).slice(0, 1400)}`);
+    if (round6) { useBundle(round6); try { R.pan = await pendingRoad('pan'); R.mouse = await pendingRoad('mouse'); } finally { useBundle(realBundle); } }
+    G.late = await slowRoad(3500); G.later = await slowRoad(12000); G.back = await cancelBackRoad(); G.tap = await tapRoad(); G.pan = await pendingRoad('pan'); G.mouse = await pendingRoad('mouse');
+    console.log(`  · round 3/6 ${JSON.stringify(R).slice(0, 2400)}`);
+    console.log(`  · shipped ${JSON.stringify(G).slice(0, 2400)}`);
     const C = cache === 'off' ? 'I' : 'II';
     check(`${C}⑤ RED (round 3): the exit on a slow link (the older document's HTML at 3.5 s) — the bound dropped the intent; the older document booted with none and filed NOTHING (the owner's silent load)`,
       !!R.late && R.late.armed && R.late.held >= 1 && R.late.onApp && R.late.booted && R.late.incidents.length === 0 && !/slow:/.test(R.late.rows), R.late);
@@ -291,6 +351,15 @@ try {
       !!R.tap && R.tap.armed && !R.tap.same && R.tap.onApp && R.tap.loads === 1, R.tap);
     check(`${C}⑧ the shipped rules: the tap ABORTS the pending go() by the step onto the sentinel above — the page stays, re-armed (leave why input, rearm why input), the older document never loads`,
       G.tap.armed && G.tap.same && G.tap.st?.vs === 1 && G.tap.loads === 0 && /input rearm:input/.test(G.tap.rows), G.tap);
+    // round 7 — the press sent by CDP while the go() is pending, answered at once (sent → answered)
+    check(`${C}⑨ RED (round 6, cb8c0a86): a pan 1 s into the exit's pending go() (a pointerdown, then the pointercancel of the touch the browser took) — the pointerdown was the tap: the step up CANCELLED the exit (leave why input, rearm why input), the page stays`,
+      !!R.pan && R.pan.armed && /^pointerdown:0 pointercancel:/.test(R.pan.ptr) && R.pan.same && R.pan.loads === 0 && /^3\/0 input rearm:input\b/.test(R.pan.rows) && R.pan.answered - R.pan.sent < 1500, R.pan);
+    check(`${C}⑨ the shipped rules: the pan is no tap — no step; the stay at 3 s, the commit at 6 s told (leave slow): the older document goes on, the tab outside, nothing filed`,
+      G.pan.armed && G.pan.held >= 1 && /^pointerdown:0 pointercancel:/.test(G.pan.ptr) && !/pointerup/.test(G.pan.ptr) && G.pan.outside && G.pan.loads === 1 && /^3\/0 cancelled rearm:cancelled slow:\d+ hop1\b/.test(G.pan.rows) && !/\binput/.test(G.pan.rows) && G.pan.incidents.length === 0, G.pan);
+    check(`${C}⑩ RED (round 6, cb8c0a86): a mouse's back button 1 s into the exit's pending go() (pointerdown and pointerup, button 3) — read as a tap: the step up ran (leave why input, rearm why input), the exit cancelled`,
+      !!R.mouse && R.mouse.armed && /^pointerdown:3 pointerup:3\b/.test(R.mouse.ptr) && /^3\/0 input rearm:input\b/.test(R.mouse.rows) && R.mouse.answered - R.mouse.sent < 1500, R.mouse);
+    check(`${C}⑩ the shipped rules: the mouse's back button is no tap — no step; the browser's own back at the release: the tab outside on the page before VibeSpace, the older document never loads, nothing filed`,
+      G.mouse.armed && /^pointerdown:3 pointerup:3\b/.test(G.mouse.ptr) && !/\binput/.test(G.mouse.rows) && G.mouse.outside && G.mouse.loads === 0 && G.mouse.incidents.length === 0, G.mouse);
     await quit();
   }
   check('no page errors', pageErrors.length === 0, pageErrors.slice(0, 5));

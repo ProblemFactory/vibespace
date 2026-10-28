@@ -51,6 +51,7 @@ const ROWS = {
   'src/server/browser-logins.js': [['the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page; no account was registered', 'agent', 'lane browser-login: a signup the vault could not seal before the fill (vault_locked) — nothing filled, no account made'],
     ['the vault is locked — unlock it, then save', 'label', 'the owner\'s own save doors (网站登录… in the Vault window, the save-login card\'s Save) answer it as a field verdict while the person is at the door — not a background refusal', { count: 2 }]],
   'src/lib/vault-login-row.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'the 网站登录… dialog\'s save-time verdict line (the same words as the paste box\'s) — a field verdict while the person is in the dialog, not a background refusal']],
+  'src/lib/vault-totp-row.js': [['The vault is locked — unlock it first, then preview again', 'label', '添加… ▸ 两步验证…\'s preview-time verdict line (lane vault-totp-add) — 「解锁…」 beside the words is the door; a field verdict while the person is in the dialog, not a background refusal']],
   // int331 seam — sites from lanes that landed after this census's base (.326): relay status words, the provider-config save verdict,
   // and the 使用失败 For-you card's count/hint detail — all LABELS/status, not the tool-refusal sentences the two-facts rule (decision 5) targets
   'src/model-providers.js': [
@@ -101,6 +102,10 @@ const ROWS = {
   'src/lib/channel-words.js': [[K1N, 'person', 'a channel account\'s health words (the panel)']],
   'src/integration-registry.js': [[K1N, 'person', 'an integration row whose sign-in is sealed']],
   'src/lib/key-file-words.js': [[K1N, 'person', 'a store whose key the locked vault keeps closed (the key-file law\'s words)']],
+  // lane kernel-asset-credential: a kernel that is a release asset of the plugin's own repository needs the Plugin Git credential —
+  // the vault locked refuses its download by name (vault_locked): the engine card's kernel line, the refusal itself
+  'src/lib/browser-build-model.js': [[K1N, 'person', 'the engine card\'s kernel line (Change build… / Settings) when the kernel\'s download was refused vault_locked']],
+  'src/server/engine-distribution.js': [['the Plugin Git credential is sealed in the locked vault', 'person', 'the kernel download\'s refusal after its anonymous try was refused (round 2: the credential is optional — the engine record\'s failure, the card, a first use\'s / the fleet\'s For-you detail)']],
   'src/lib/manage-agents.js': [[K1N, 'person', 'the accounts window\'s key-unreadable reason']],
   'src/lib/oauth-connect-row.js': [[K1N, 'person', 'an OAuth plugin row whose sign-in is sealed']],
   'src/lib/vault-reveal.js': [[K1N, 'person', 'the Vault window\'s reveal refused while locked']],

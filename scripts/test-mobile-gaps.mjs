@@ -626,8 +626,10 @@ try {
   const sw1 = await evalJs(`(() => { const p = document.querySelector('.mobile-win-switcher'); return { open: !!p, tabs: [...(p?.querySelectorAll('.mobile-desk-tab:not(.mobile-desk-add)') || [])].map((t) => t.textContent.trim()), desks: app.desktopManager.desktops.length, active: app.desktopManager.activeDesktopId, lastId: app.desktopManager.desktops[app.desktopManager.desktops.length - 1].id }; })()`);
   check(`"+" creates a desktop and switches to it (${sw1.desks} desktops, tabs: ${sw1.tabs.join(' | ')})`, sw1.open && sw1.desks === sw0.desks + 1 && sw1.tabs.length === sw1.desks && sw1.active === sw1.lastId, sw1);
   await longPress('.mobile-win-switcher .mobile-desk-tab:not(.mobile-desk-add)');
-  const deskMenu = await evalJs(`[...document.querySelectorAll('.context-menu .context-menu-item')].map((el) => el.textContent.trim())`);
-  check(`a long-press on a desktop tab offers Rename / Delete (${deskMenu.join(' / ')})`, deskMenu.length === 2 && deskMenu[0] === 'Rename' && deskMenu[1] === 'Delete', deskMenu);
+  const deskMenu = await evalJs(`[...document.querySelectorAll('.context-menu .context-menu-item')].map((el) => ({ label: (el.querySelector('.door-label') || el).textContent.trim(), why: el.querySelector('.door-why')?.textContent.trim() || '', off: el.classList.contains('disabled') }))`);
+  // lane desktop-doors-table: the desktop's doors are THE table's (src/desktop-switch.js) — the first desktop's Move up greyed WITH its why
+  check(`a long-press on a desktop tab offers the desktop's doors — Rename… / Delete / Move up / Move down, the first one's Move up greyed with its why (${deskMenu.map((x) => x.label + (x.off ? ' [' + x.why + ']' : '')).join(' / ')})`,
+    JSON.stringify(deskMenu.map((x) => x.label)) === JSON.stringify(['Rename…', 'Delete', 'Move up', 'Move down']) && deskMenu[2].off && deskMenu[2].why === 'Already the first desktop' && !deskMenu[0].off && !deskMenu[1].off && !deskMenu[3].off, deskMenu);
   check('…and the switcher stays open underneath (a child popover is not a dismissal)', await evalJs(`!!document.querySelector('.mobile-win-switcher')`));
   await evalJs(`[...document.querySelectorAll('.context-menu .context-menu-item')].find((el) => el.textContent.trim() === 'Delete').click(); true`); await sleep(1200);
   check('Delete removes the new desktop and the tabs re-render', await evalJs(`app.desktopManager.desktops.length === ${sw0.desks} && document.querySelectorAll('.mobile-win-switcher .mobile-desk-tab:not(.mobile-desk-add)').length === ${sw0.desks}`));

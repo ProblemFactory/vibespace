@@ -341,23 +341,48 @@ export function installUserTodos(app) {
   /** Bring `container`'s rows (after `head`, when given) to `entries`, keyed by
    *  data-id. A node moves only when it is out of place — never the common case
    *  while the layout is append-only (moving a focused textarea would blur it). */
-  const reconcileRows = (container, entries, head = null, ctx = rowCtx) => {
+  const reconcileRows = (container, entries, head = null, ctx = rowCtx, { arm = true } = {}) => {
     reconcileKeyed(container, entries, {
       head, isRow: (c) => c.classList.contains('ut-item'), create: (e) => renderRow(e, ctx), patch: (row, e) => patchRow(row, e, ctx),
     });
-    armExitButtons();
+    if (arm) armExitButtons(); // the chat's needs cards arm their own list, once, after a pass that changed one (round 4, #3)
     container.querySelectorAll(':scope > .ut-item .ut-live-dot').forEach((d) => patchDot(d)); // lane foryou-folds: a band row's running dot (a new / re-drawn row starts unpainted)
   };
   // verify-r6 V1: every "Allow … to run a command?" button in the page, re-stamped after each row pass — one that
   // appeared or MOVED (a resolved row above it shrank, an expiry) starts its ARM_MS again (PURE src/lib/press-arm.js)
-  const armExitButtons = () => {
-    const now = performance.now();
-    for (const b of document.querySelectorAll('.ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve, .ut-action-app.ut-app-install, .ut-action-grant')) { // lane browser-propose: an Approve is armed the same way; design 009: so is a card's one-click Install
-      const top = b.getBoundingClientRect().top;
-      b._armSince = armAfterLayout({ prevTop: b._armTop ?? null, top, prevSince: b._armSince ?? null, now });
-      b._armTop = top;
-    }
+  const stampArm = (b, now) => {
+    const top = b.getBoundingClientRect().top;
+    b._armSince = armAfterLayout({ prevTop: b._armTop ?? null, top, prevSince: b._armSince ?? null, now });
+    b._armTop = top;
   };
+  const armExitButtons = (root = document) => {
+    const now = performance.now();
+    for (const b of root.querySelectorAll('.ut-action-exit.ut-exit-allow, .ut-action-proposal.ut-proposal-approve, .ut-action-app.ut-app-install, .ut-action-grant')) { // lane browser-propose: an Approve is armed the same way; design 009: so is a card's one-click Install
+      stampArm(b, now);
+      armed.add(b);
+    }
+    syncArmScroll();
+  };
+  // lane chat-needs-you-card: a SCROLL moves every armed button too — the chat's needs cards ride the transcript, the tray's
+  // rows its own scroll — so they are re-stamped AS they move (one pass a frame; a capture listener hears every element's
+  // scroll): a press counts once the button has sat still for ARM_MS since the scroll stopped, never against the reading of
+  // the last row pass before the scroll (which refused every first press after one). Round 3 (m4): the listener is on the
+  // page ONLY while a stamped button is (the set below — added at the first stamp, removed when the last one has left), and
+  // a scroll re-stamps that set, never a query over the document (an xterm, the sidebar, an editor scroll all the time)
+  const armed = new Set();
+  let armRaf = 0, armHears = false;
+  const onArmScroll = () => {
+    if (armRaf) return;
+    armRaf = requestAnimationFrame(() => { armRaf = 0; const now = performance.now(); for (const b of armed) { if (b.isConnected) stampArm(b, now); else armed.delete(b); } syncArmScroll(); });
+  };
+  function syncArmScroll() {
+    for (const b of armed) if (!b.isConnected) armed.delete(b);
+    const want = armed.size > 0;
+    if (want === armHears) return;
+    armHears = want;
+    if (want) document.addEventListener('scroll', onArmScroll, { capture: true, passive: true });
+    else document.removeEventListener('scroll', onArmScroll, { capture: true });
+  }
   const patchDot = (dot) => model.patchDot(dot); // THE running dot (D1.7: liveDotState over the model's live fact)
   // A BAND (lane foryou-folds) = its BAR — the band's name, its open count and, on every band but 紧急, 「全部标为已看」
   // (a button never nests in a button) — its SHOWN rows (keyed, patched in place), and its FOLD last: 「还有 N 条 — 展开」
@@ -597,11 +622,16 @@ export function installUserTodos(app) {
     }
     box.querySelector('textarea').focus();
   };
-  const foldBox = (box) => {
+  /** THE ONE EXIT FROM A REPLY BOX (lane chat-needs-you-card, round 4 #2): Esc, the fold verb, a blur on a card that kept
+   *  it, a sent reply (`sent` — its text is no draft) — the text a draft, the box gone, and `ut-box-left` from its row: a
+   *  surface that kept a box past an answer (the chat's needs cards) re-decides it in its next pass, never at an unrelated
+   *  broadcast minutes later */
+  const foldBox = (box, { sent = false } = {}) => {
     const row = rowOf(box);
     const ta = box.querySelector('textarea');
-    if (row && ta && ta.value) drafts.set(row.dataset.id, ta.value); else if (row) drafts.delete(row.dataset.id);
+    if (row && ta && ta.value && !sent) drafts.set(row.dataset.id, ta.value); else if (row) drafts.delete(row.dataset.id);
     box.remove();
+    row?.dispatchEvent(new CustomEvent('ut-box-left', { bubbles: true }));
   };
   const sendReply = async (row, text, { chip = false } = {}) => {
     const id = row.dataset.id;
@@ -614,7 +644,7 @@ export function installUserTodos(app) {
     // failures); on a failure the box keeps its text
     const sent = await model.postReply(id, body);
     delete row.dataset.sending;
-    if (sent && !chip) { const box = row.querySelector(':scope > .ut-body > .ut-reply'); if (box) box.remove(); }
+    if (sent && !chip) { const box = row.querySelector(':scope > .ut-body > .ut-reply'); if (box) foldBox(box, { sent: true }); }
     const item1 = byId(id);
     if (item1 && row.isConnected) applyLive(row, item1, rowCtx);
   };
@@ -699,29 +729,48 @@ export function installUserTodos(app) {
     const empty = mk('div', 'empty-hint ut-mini-empty', t('all clear'));
     pop.append(head, rows, empty);
     pop.addEventListener('click', (e) => {
-      if (fyPress(e, () => pop.remove())) return; // lane foryou-attachments: a chip / a link in the words
-      if (e.target.closest('.ut-detail-exp')) return;
-      if (e.target.closest('.ut-mini-head > .ut-open-win')) { pop.remove(); app.openInbox({ sessionKey: primaryKey(mini?.keys || keys) }); return; }
-      const item = e.target.closest('.ut-item');
-      if (item) rowClick(e, item, { mini: true });
+      if (e.target.closest('.ut-mini-head > .ut-open-win')) { pop.remove(); app.openInbox({ sessionKey: primaryKey(mini?.keys || keys) }); }
     });
-    pop.addEventListener('keydown', (e) => {
-      // Esc in a reply box folds the box (its text kept as a draft) and the
-      // popover stays; any other Esc falls through to the global layer closer
-      if (e.key === 'Escape' && !e.isComposing) {
-        const box = e.target?.closest?.('.ut-reply');
-        if (box && pop.contains(box)) { foldBox(box); e.preventDefault(); e.stopPropagation(); }
-        return;
-      }
-      replyKeys(e);
-    });
-    pop.addEventListener('input', growOnInput);
-    pop.addEventListener('contextmenu', rowMenu);
+    wireMiniRows(pop, { close: () => pop.remove() });
     mini = { pop, winId, keys, layout: null, rows, dot, name, empty };
     renderMini();
     return pop;
   };
   app.openMiniInbox = openMiniInbox;
+  /** THE ROWS OF A SURFACE INSIDE A CONVERSATION'S OWN WINDOW — the title-bar mini inbox above and the chat's needs cards
+   *  (lane chat-needs-you-card, src/lib/chat-needs-card.js): one wiring for both — a chip / a link in the words, the
+   *  detail fold, every verb through rowClick({mini: true}) (the SAME routes as the tray; a body tap never jumps — the
+   *  surface is already IN the conversation), the reply keys (Esc folds the box, kept as a draft), the row menu. */
+  function wireMiniRows(root, { close = () => {} } = {}) {
+    root.addEventListener('click', (e) => {
+      if (fyPress(e, close)) return; // lane foryou-attachments: a chip / a link in the words
+      if (e.target.closest('.ut-detail-exp')) return;
+      const item = e.target.closest('.ut-item');
+      if (item && root.contains(item)) rowClick(e, item, { mini: true });
+    });
+    root.addEventListener('keydown', (e) => {
+      // Esc in a reply box folds the box (its text kept as a draft) and the
+      // popover stays; any other Esc falls through to the global layer closer
+      if (e.key === 'Escape' && !e.isComposing) {
+        const box = e.target?.closest?.('.ut-reply');
+        if (box && root.contains(box)) { foldBox(box); e.preventDefault(); e.stopPropagation(); }
+        return;
+      }
+      replyKeys(e);
+    });
+    root.addEventListener('input', growOnInput);
+    root.addEventListener('contextmenu', rowMenu);
+  }
+  // lane chat-needs-you-card: the chat's needs cards draw THE rows (renderRow / patchRow, the mini inbox's context) and wire
+  // THE verbs through the panel — never a second implementation of a row or of an answer
+  app.foryouRows = {
+    wire: wireMiniRows,
+    reconcile: (container, entries) => reconcileRows(container, entries, null, miniCtx, { arm: false }), // round 4 (#3): the card stamps once per pass that changed
+    keysForWin,
+    arm: (root) => armExitButtons(root), // acceptance round 2: a card the accordion opened shows its Allow just now — armed afresh (round 4: its list's only)
+    stash: stashDrafts, // round 3 (#4): a card's typed reply is a draft before its words are replaced
+    fold: (box) => foldBox(box), // …and a box kept on an answered card folds (its text a draft) when the person leaves it — THE one exit
+  };
   app._syncInboxBadges = scheduleBadges;
 
   // «NEEDS YOU · N» ON A SESSION ROW (lane foryou-honest — the stress evaluation's P2-4 and the owner's B, 2026-10-25): the
@@ -1059,7 +1108,10 @@ export function installUserTodos(app) {
     else if (e.target.closest('.ut-dismiss')) model.resolveOne(id, 'dismissed');
     else if (e.target.closest('.ut-reopen')) setStatus(id, 'open');
     else {
-      if (mini) return; // the mini inbox lives in this session's own window — nothing to jump to
+      // the mini inbox and the chat's needs cards live in this session's own window — nothing to jump to; but an item whose
+      // answer is its own DOOR (an access request's channel conversation, the vault's dialog — model.isDoor) opens it, as
+      // its tray row does (lane chat-needs-you-card: «whatever the item's kind offers in the tray»)
+      if (mini) { const rec = byId(id); if (rec && model.isDoor(rec.sessionKey, rec) && !String(window.getSelection?.() || '')) jump(rec.sessionKey, rec); return; }
       // a real text SELECTION inside the row must not jump-and-close
       if (String(window.getSelection?.() || '')) return;
       const rec = byId(id);

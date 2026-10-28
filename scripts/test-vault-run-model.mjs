@@ -517,7 +517,7 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
 {
   const dir = scratchDir('vault-run-model');
   fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
-  for (const f of ['vault-inventory.js', 'vault-blocked.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
+  for (const f of ['vault-inventory.js', 'vault-kinds.js', 'vault-blocked.js']) fs.copyFileSync(path.join(REPO, 'src', f), path.join(dir, 'src', f));
   const real = fs.readFileSync(SRC, 'utf8');
   const mutant = (name, from, to) => { const n = real.split(from).length - 1; const f = path.join(dir, 'src', `vault-run-${name}.js`); fs.writeFileSync(f, real.replace(from, to)); return { hit: n === 1, M: require(f) }; };
   const argvLeg = (Vm) => ['curl', 'gh', 'terraform'].filter((t) => Vm.planOf({ argv: [t, `--token=${M1}`] }).code !== 'argv_refused');

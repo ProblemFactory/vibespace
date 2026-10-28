@@ -188,7 +188,7 @@ const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
   const rowsNow = ownRows(eng, KEY);
   ok(dec.ok && dec.grant && dec.grant.origin === 'request' && dec.grant.level === 'visible' && dec.grant.principal.id === 'agent-1', 'approval writes EXACTLY ONE visible grant for (that agent, that conversation) with origin request');
   ok(rowsNow.length === 2 && JSON.stringify(rowsNow.filter((g) => g.origin !== 'request')) === groupBefore, 'NEGATIVE CONTROL: the group\'s requestable default is byte-identical after the approval');
-  ok(userTodos.get(rq.request.todoId).status === 'done' && userTodos.get(rq.request.todoId).resolvedBy === 'system', 'the request\'s For-you item is resolved by the producer');
+  ok(userTodos.get(rq.request.todoId).status === 'done' && userTodos.get(rq.request.todoId).resolvedBy === 'allowed', 'the request\'s For-you item is resolved by the producer — `allowed` (lane chat-needs-you-card: the card\'s record says «approved»)');
   ok(eng.readFor(AG, A, C, {}).ok && eng.listFor(AG).conversations.find((c) => c.key === KEY).level === 'visible', 'the agent now reads it');
   ok(eng.listFor({ ...AG, id: 'agent-2' }).conversations.find((c) => c.key === KEY).level === 'requestable', 'another member of the group is still only requestable (the approval touched no default)');
   ok(!(await eng.decideRequest(rq.request.id, true)).ok, 'deciding twice is refused');

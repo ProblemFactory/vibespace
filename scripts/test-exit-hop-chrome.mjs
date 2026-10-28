@@ -162,8 +162,8 @@ const useBundle = (buf) => fs.writeFileSync(bundleFile, buf); // the index route
  *  nothing, the exit writes its intent with or without navigation.activation, and exitHop lets the clock alone decide. */
 const ROUND2 = {
   'mobile-back.js': [
-    ["  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); stayed('cancelled', null); linger(); }, GONE_WAIT_MS); };", '  const onLeave = () => { began = true; };'],
-    ["  const onInput = () => {\n    off();\n    if (!began) { drop(); input(); return; }\n    const abort = abortGo();\n    if (!abort) drop();\n    stayed('input', abort);\n    const end = linger();\n    abort?.then((landed) => { if (landed) { drop(); end(); } });\n  };", '  const onInput = () => { if (!began) { off(); drop(); input(); } };'],
+    ["  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); stayed('cancelled'); linger(); listenTaps(); }, GONE_WAIT_MS); };", '  const onLeave = () => { began = true; };'],
+    ["  const onInput = () => {\n    off();\n    if (!began) { drop(); input(); return; }\n    stayed('input'); linger(); tapped('input');\n  };", '  const onInput = () => { if (!began) { off(); drop(); input(); } };'],
     ['    if (tellsArrival()) exitIntentWrite({ t: Date.now(), hop: 0, key: entryKey(), to: \'below\' });', '    exitIntentWrite({ t: Date.now(), hop: 0, key: entryKey(), to: \'below\' });']],
   'back-guard.js': [["  if (!(typeof fromKey === 'string' && fromKey !== '' && fromKey === intent.key)) return 'clear';", "  if (fromKey !== undefined && fromKey !== intent.key) return 'clear';"]],
 };

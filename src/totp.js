@@ -16,6 +16,9 @@
  *   · THE GRANTS (`grantOf`, `useVerdict`): a person grants an entry's CODE to a running conversation (`session:<id>`, held
  *     for THAT RUN — `run` = its session token's digest) or a Task Group (`group:<id>`); nothing else opens the agent door.
  *   · `verify(key, code, { now, window })` is ±window steps — kept for a later sign-in door, wired to none (design §1.3).
+ *   · THE ADD DIALOG'S MODEL (`addPlanOf`, lane vault-totp-add — the Vault window's 添加… ▸ 两步验证…): what the dialog holds →
+ *     the body POST /api/vault/totp takes, the link's facts shown read-only, the name it would take — or a refusal by name
+ *     with the field it is about. It computes no code: the PREVIEW is the hub's (the route's `preview`, nothing stored).
  * Refused by name, never trimmed. The gate: scripts/test-totp.mjs (RFC 6238 appendix B, RFC 4226 appendix D, the base32
  * edges, the otpauth forms, the clock rows).
  */
@@ -219,7 +222,45 @@ function useVerdict({ grants = [], entry = '', caller = null, vaultState = 'lock
   return g ? { ok: true, grant: g } : named('not_granted');
 }
 
+// ── the add dialog's model (lane vault-totp-add — design q-047 §3's mock: ONE dialog, TWO ways in) ──
+/** The standard (RFC 6238 and every authenticator's default) — the 输入密钥 way's 高级 starts here. */
+const ADD_DEFAULTS = Object.freeze({ digits: 6, period: 30, algorithm: 'SHA1' });
+/** 高级's choices (a link may carry any setting configOf takes; the typed way offers the ones sites hand out). */
+const ADD_CHOICES = Object.freeze({ digits: Object.freeze([6, 8]), period: Object.freeze([30, 60]), algorithm: ALGORITHMS });
+const ADD_WAYS = Object.freeze(['link', 'seed']);
+/** What the dialog holds → { ok, way, facts: { issuer, account, digits, period, algorithm }, name, body } (`body` = POST
+ *  /api/vault/totp's — the caller adds `preview`) | { ok: false, code, why?, field: 'uri' | 'seed' | 'settings' | 'name', facts? }.
+ *  `way` 'link' = 粘贴 otpauth 链接: the link's own issuer / account / settings are the FACTS, the name defaults to them
+ *  (nameOf); 'seed' = 输入密钥: the seed (base32 — spaces, dashes, lower case and padding tolerated), its settings (the
+ *  standard's when left empty) and a NAME — required, never guessed. A name a person typed always wins. */
+function addPlanOf({ way = 'link', uri = '', seed = '', name = '', digits = null, period = null, algorithm = null } = {}, { now = 0 } = {}) {
+  const typed = String(name == null ? '' : name).trim();
+  const nameVerdict = (n) => (!n ? { ...named('name_required', 'give it a name'), field: 'name' } : !NAME_RE.test(n) ? { ...named('bad_name', 'a name is 1–120 letters, digits, ".", "_" or "-"'), field: 'name' } : null);
+  if (!ADD_WAYS.includes(way)) return { ...named('bad_way'), field: 'uri' };
+  if (way === 'link') {
+    const link = String(uri == null ? '' : uri).trim();
+    if (!link) return { ...named('bad_uri', 'paste the otpauth:// link'), field: 'uri' };
+    const v = parseOtpauth(link, { now, source: 'paste' });
+    if (!v.ok) return { ...v, field: 'uri' };
+    const facts = { issuer: v.value.issuer, account: v.value.account, digits: v.value.digits, period: v.value.period, algorithm: v.value.algorithm };
+    v.value.seed = null;
+    const n = typed || nameOf(facts.issuer, facts.account);
+    const bad = nameVerdict(n);
+    return bad ? { ...bad, facts } : { ok: true, way, facts, name: n, body: { uri: link, name: n } };
+  }
+  const pick = (v, d) => (v == null || String(v).trim() === '' ? d : v);
+  const cfg = { digits: pick(digits, ADD_DEFAULTS.digits), period: pick(period, ADD_DEFAULTS.period), algorithm: pick(algorithm, ADD_DEFAULTS.algorithm) };
+  const v = valueOf({ seed, ...cfg }, { now, source: 'manual' });
+  if (!v.ok) return { ...v, field: v.code === 'bad_seed' || v.code === 'seed_too_short' ? 'seed' : 'settings' };
+  const facts = { issuer: '', account: '', digits: v.value.digits, period: v.value.period, algorithm: v.value.algorithm };
+  const text = v.value.seed;
+  v.value.seed = null;
+  const bad = nameVerdict(typed);
+  return bad ? { ...bad, facts } : { ok: true, way, facts, name: typed, body: { seed: text, name: typed, digits: facts.digits, period: facts.period, algorithm: facts.algorithm } };
+}
+
 module.exports = {
   ALGORITHMS, DIGITS_MIN, DIGITS_MAX, PERIOD_MIN, PERIOD_MAX, SEED_MIN_BYTES, SEED_MAX_BYTES, NAME_RE, ENTRY_PREFIX, SOURCES, SUBJECT_RE, VIEW_PACE_MAX, VIEW_PACE_CEILING, USE_PACE_MAX,
   base32Decode, base32Encode, hotp, totp, verify, configOf, valueOf, recordOf, parseOtpauth, uriOf, nameOf, entryOf, nameOfEntry, grantOf, useVerdict,
+  ADD_DEFAULTS, ADD_CHOICES, ADD_WAYS, addPlanOf,   // lane vault-totp-add: the add dialog's model
 };

@@ -7,7 +7,8 @@
 // A THROWAWAY server in a git worktree (own data/, a scratch HOME) + headless chrome over raw CDP (test-chat-hygiene-ui's
 // skeleton). A stub `claude` 2.1.309 (a build this release has not registered) runs behind the REAL chat-wrapper through
 // the REAL create path: turn 1 plays a long answer with Bash cards, `api-request-blob` / `api-request` records and a
-// result that grew `model_usage_since_last_result` (exactly the studies' records); turns 2–3 answer one line (the minimap
+// result that grew a field no pinned build declares (the studies saw `model_usage_since_last_result` grow — 2.1.312 registered
+// it, int360 — so the fixture's grown field is an invented one); turns 2–3 answer one line (the minimap
 // needs three turns); turn 4 asks three permissions like the CLI (`control_request can_use_tool`): a pip install + reads,
 // a Write of Summary.md (the file lands only when allowed), a shell loop.
 //   ① no record kind in the chat: zero failed ops while the turn streamed (the `msg` create key threw on every unknown
@@ -157,7 +158,7 @@ process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n'
   }
   if (m.type === 'user') {
     turn++;
-    if (turn === 1) { let j = 0; const next = () => { if (j < PLAY1.length) { out({ ...PLAY1[j], session_id: SID, uuid: 'sc-' + j }); j++; setTimeout(next, 30); return; } result(0.47, { model_usage_since_last_result: { x: 1 } }); }; setTimeout(next, 150); }
+    if (turn === 1) { let j = 0; const next = () => { if (j < PLAY1.length) { out({ ...PLAY1[j], session_id: SID, uuid: 'sc-' + j }); j++; setTimeout(next, 30); return; } result(0.47, { model_usage_since_a_later_build: { x: 1 } }); }; setTimeout(next, 150); }
     else if (turn <= 3) { const n = turn; setTimeout(() => { out({ type: 'assistant', message: { id: 'msg_turn' + n, type: 'message', role: 'assistant', model: 'claude-sonnet-5-5', content: [{ type: 'text', text: 'Short answer ' + n + '.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }, session_id: SID, uuid: 'turn-' + n }); result(0.47); }, 150); }
     else { k = 0; setTimeout(ask, 300); }
     continue;

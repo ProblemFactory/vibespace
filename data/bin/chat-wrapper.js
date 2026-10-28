@@ -102,16 +102,19 @@ const CLAUDE_QUEUE_VERBS = ['remove', 'reorder', 'edit'];
 const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true, inputQueue: true, queueVerbs: CLAUDE_QUEUE_VERBS, queueResync: true }, queue: [] };
 let metaTimer = null;
 
+// replaced, never rewritten in place (ci358-reds item 7): a hub read between writeFileSync's truncate and its bytes saw an
+// EMPTY sidecar (wrapperCaps 'no-sidecar') — the temp file is renamed over it, a reader sees the old record or the new
 function persistMeta() {
   metaTimer = null;
-  try { fs.writeFileSync(metaFile, JSON.stringify(meta)); } catch {}
+  const tmp = `${metaFile}.${process.pid}.tmp`;
+  try { fs.writeFileSync(tmp, JSON.stringify(meta)); fs.renameSync(tmp, metaFile); return null; } catch (e) { try { fs.unlinkSync(tmp); } catch {} return e; }
 }
 
 function scheduleMeta() {
   if (!metaTimer) metaTimer = setTimeout(persistMeta, 500);
 }
 
-try { fs.writeFileSync(metaFile, JSON.stringify(meta)); } catch (e) { log(`meta write failed: ${e.message}`); }
+{ const e = persistMeta(); if (e) log(`meta write failed: ${e.message}`); } // the boot write is replaced too (ci358-reds round 2)
 
 // Ensure buffer directory exists and start with empty buffer
 try { fs.mkdirSync(path.dirname(bufferFile), { recursive: true }); } catch {}

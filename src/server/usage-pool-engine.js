@@ -2060,7 +2060,7 @@ function quotaVerdictFor(scope, { model, session = null } = {}) {
     // B-73fe (2026-09-17, owner "7am 重置却提示 12pm"): the blocked verdict NAMES
     // its wait — `soonest` = the member whose blockedUntil IS the min and the
     // bucket that set it (Member L / Fable @ 12pm), `rejector` = the member that
-    // rejected this session with every dead bucket it holds (PandyMax: 5h @
+    // rejected this session with every dead bucket it holds (userP: 5h @
     // 7am AND Fable 2 % < 5 % @ 9/20 — the reason its own 7am is not the
     // target). Reporting only: no decision reads these; the arm card and the
     // status-bar chip say them. Milliseconds, like blockedUntil.

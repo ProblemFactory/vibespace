@@ -1389,6 +1389,289 @@ console.log('— ⑧ lane engine-distribution: kernel.json, the download over a 
   ok(m14.ok && n14.kernelFact(EID).state === 'installed' && JSON.stringify(recAt('data-ed13i').kernel) === JSON.stringify(k13), '(the same record healed by the product\'s measure — its own record again)', recAt('data-ed13i'));
   const rRe = await thrK(ED.installKernel(EID, { wait: true })); // the kernel back in its place
   ok(!rRe && fs.existsSync(KP) && !leftovers().length, '(the kernel reinstalled; nothing left beside it)', rRe && rRe.message);
+
+  // ═══ ⑧c lane kernel-asset-credential: THE KERNEL ON THE PLUGIN'S OWN REPOSITORY (a GitHub Release asset) ═════════════════════
+  // The owner 2026-10-26: 「内核是支持文件，应该放到仓库里」. PURE kernelCredentialVerdict (R1) + the REAL engine-distribution over
+  // loopback fakes in GitHub's shape — THE RULE RELIED ON (docs.github.com «Get a release asset»: set `Accept:
+  // application/octet-stream`; «the API will either redirect the client to the location, or stream it directly»; API clients
+  // handle 200 or 302): a PRIVATE repository's asset answers the API form `api.github.com/repos/<o>/<r>/releases/assets/<n>` to
+  // `Authorization: Bearer <token>` with a 302 to a SIGNED file-host address (404 without the token); the file host answers 400
+  // when an Authorization arrives beside the signature; the browser form `github.com/<o>/<r>/releases/download/<tag>/<file>` is
+  // a browser's (a session cookie) — a token gets 404 there. And a STRANGER host. The token is built at runtime (never one literal).
+  // ROUND 2 (acceptance r2): `pub` turns the fake repository PUBLIC (the API and the browser form answer without a token) — the
+  // credential is OPTIONAL: a row that cannot serve (locked, unreadable, a deploy key) goes anonymous and is said only on a 404.
+  console.log('— ⑧c lane kernel-asset-credential: a kernel on the plugin\'s own repository (a release asset) downloads with the Plugin Git credential');
+  {
+    const TOKEN = ['fx', 'kpat', 'R2d7', 'mQ94', 'Zt1x'].join('-');
+    const KEYTEXT = ['-----BEGIN OPENSSH ', 'PRIVATE KEY-----\n', 'Zml4dHVyZS1rZXJuZWwta2V5', '\n-----END OPENSSH ', 'PRIVATE KEY-----'].join('');
+    const OWN = 'https://github.com/acme/kernel-plugin.git';
+    const ASSET = 'https://api.github.com/repos/acme/kernel-plugin/releases/assets/5550001';
+    const FORM = 'https://github.com/acme/kernel-plugin/releases/download/v0.1.4/k.tar.zst';
+    const STRANGER = 'https://mirror.stranger.test/k.tar.zst';
+    // ── R1: PURE ──
+    const KCV = typeof EK.kernelCredentialVerdict === 'function' ? EK.kernelCredentialVerdict : null;
+    const cv = (kernelUrl, value = OWN, host = 'github.com', source = 'git') => (KCV ? KCV({ kernelUrl, install: value == null ? null : { source, value }, integration: host ? { host } : null }) : { use: null, why: 'engine-kernel.js has no kernelCredentialVerdict' });
+    const yes = [[ASSET], [ASSET, 'git@github.com:Acme/Kernel-Plugin.git'], [ASSET, 'ssh://git@github.com/acme/kernel-plugin'], ['https://git.example.test/team/kp/releases/download/v1/k.tar.zst', 'https://git.example.test/team/kp.git', 'git.example.test']].map((a) => cv(...a));
+    ok(yes.every((v) => v.use === true && v.why === 'plugin-repository') && yes[0].host === 'api.github.com' && yes[0].form === 'api' && yes[3].host === 'git.example.test' && yes[3].form === 'path',
+      'R1 (PURE kernelCredentialVerdict): use ONLY for the plugin repository\'s own release asset — GitHub\'s API form of the SAME owner/repo (https, git@ and ssh:// sources; names case-insensitive), a Gitea / GitLab path under /<owner>/<repo>/ on the SAME host', yes.map((v) => `${v.use}:${v.host || v.why}`));
+    const vForm = cv(FORM);
+    ok(vForm.use === false && vForm.why === 'browser-form' && vForm.asset === true && vForm.form === 'browser' && vForm.repository && vForm.repository.path === 'acme/kernel-plugin',
+      'R1 round 2 (minor 1): GitHub\'s BROWSER form of the plugin\'s own repository (github.com/<o>/<r>/releases/download/…) is the repository\'s asset but NEVER a use — GitHub serves it to a session, not a token (why browser-form)', vForm);
+    const nos = [
+      [[STRANGER], 'other-host'], [['https://objects.githubusercontent.com/x/k.tar.zst'], 'other-host'], [['https://evil.test/team/kp/k', 'https://git.example.test/team/kp.git', 'git.example.test'], 'other-host'],
+      [['https://api.github.com/repos/acme/other/releases/assets/1'], 'not-the-repository'], [['https://api.github.com/repos/acme/kernel-plugin/releases/1'], 'not-the-repository'],
+      [['https://github.com/acme/kernel-plugin/releases/download/../../x/k'], 'not-the-repository'], [['https://git.example.test/team/kpx/k.tar.zst', 'https://git.example.test/team/kp.git', 'git.example.test'], 'not-the-repository'],
+      [['https://git.example.test/team/kp/%2e%2e/evil/k', 'https://git.example.test/team/kp.git', 'git.example.test'], 'not-the-repository'],
+      [[ASSET, null], 'not-a-git-install'], [[ASSET, 'acme/kernel-plugin', 'github.com', 'github-release'], 'not-a-git-install'], [[ASSET, '/srv/plugins/kernel-plugin', 'github.com', 'path'], 'not-a-git-install'],
+      [[ASSET, OWN, null], 'no-credential'], [[ASSET, OWN, 'gitlab.example.test'], 'credential-other-host'], [['http://api.github.com/repos/acme/kernel-plugin/releases/assets/1'], 'not-https'],
+    ].map(([a, why]) => { const v = cv(...a); return [v.use === false ? v.why : `use=${v.use}`, why]; });
+    ok(nos.every(([a, b]) => a === b) && cv(ASSET, OWN, null).asset === true && cv(STRANGER).asset === false,
+      'R1: every no BY NAME — another host (a stranger, the release\'s file host) never sees it; another repository / not a release asset / a dot segment ⇒ not-the-repository; no git install ⇒ not-a-git-install; no row ⇒ no-credential; a row for another git host ⇒ credential-other-host; `asset` = the URL is the repository\'s own whatever the row', nos.filter(([a, b]) => a !== b));
+    // ROUND 3 (minor 2a): THE GRAMMAR'S REFUSALS, each by its reason — the closed set GIT_SOURCE_REFUSALS (kb-file-structure's
+    // table); the 13 shapes the round-2 unification narrowed (git cannot clone them) + the 4 it widened (a space before #ref)
+    const GSV = typeof EK.gitSourceVerdict === 'function' ? EK.gitSourceVerdict : () => ({ ok: null, reason: 'engine-kernel.js has no gitSourceVerdict' });
+    const GWHY = EK.GIT_SOURCE_REFUSALS || {};
+    const WHY = [
+      ['https://h.example/o/r #main', 'space'], ['https://h.example/o/r\n#main', 'space'], ['https://h.example/o/r\t#main', 'space'], ['git@h.example:o/r #v1', 'space'], ['https://h.example/o/r\r#main', 'space'], ['https://h.example/o/r#ma in', 'space'], ['https://h.example/o/r#main\u0000', 'space'],
+      ['https://h.example:123456/o/r', 'port'], ['ssh://git@h.example:123456/o/r', 'port'],
+      ['https://h.example/o/./r', 'dot'], ['https://h.example/o/../r', 'dot'], ['git@h.example:o/../r', 'dot'],
+      ['https://h.example/.git', 'empty'], ['https://h.example/o/.git', 'empty'], ['https://h.example//', 'empty'], ['git@h.example:.git', 'empty'],
+      ['https://h.example/' + 'b'.repeat(600), 'long'], ['git@h.example:2222:o/r', 'scp-port'], ['git@h.example/o/r', 'scp-slash'], ['ssh://git@h.example:o/r', 'ssh-colon'],
+      ['https://h.example/o/k%2Fp', 'chars'], ['https://h.example/o/r?x=1', 'chars'], ['https://user@h.example/o/r', 'form'], ['http://h.example/o/r', 'form'], ['file:///tmp/x', 'form'], ['ssh://h.example/o/r', 'form'],
+    ];
+    const whyR = WHY.map(([v, want]) => { const r = GSV(v); return { v: JSON.stringify(v).slice(0, 48), want, got: r.ok === false ? r.reason : `ok=${r.ok}`, said: !!r.why && r.why === GWHY[want] }; });
+    const reasonsG = Object.keys(GWHY);
+    ok(whyR.every((r) => r.got === r.want && r.said) && reasonsG.length === 10 && reasonsG.every((k) => WHY.some(([, w]) => w === k)),
+      'round 3 (minor 2a): EVERY refusal of the ONE git grammar by its reason (the closed set of 10, each in words): a space / tab / CR / LF / control character before or after #ref · a port of 6+ digits · a ./.. segment · an empty / slashes-only / .git-only path · a path > 512 · user@host:port:path · user@host/path · ssh://user@host:path · a character outside the path\'s set · none of git\'s three forms',
+      whyR.filter((r) => r.got !== r.want || !r.said));
+    const recG = GSV('  https://GitHub.com/acme/kernel-plugin.git#v1  '), recS = GSV('git@github.com:/acme/kernel-plugin.git');
+    ok(recG.ok === true && recG.url === 'https://GitHub.com/acme/kernel-plugin.git' && recG.ref === 'v1' && recG.host === 'github.com' && recG.path === 'acme/kernel-plugin' && recG.https === true
+      && recS.ok === true && recS.url === 'git@github.com:/acme/kernel-plugin.git' && recS.ref === null && recS.path === 'acme/kernel-plugin' && recS.https === false,
+      'round 3 (major): THE PARSED RECORD — `url` = the value trimmed with its #ref cut off, as written (THE string git receives), `ref` the fragment; host lower-cased, .git dropped and empty segments folded only in `path` (the verdict\'s key)', { recG, recS });
+    // ── the fakes ──
+    const seen = { api: [], blob: [], stranger: [] };
+    const SIGNED = '/github-production-release-asset/7770001/k?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=fx0sig&response-content-type=application%2Foctet-stream';
+    const recQ = (q) => ({ url: q.url, auth: q.headers.authorization || null, accept: q.headers.accept || null });
+    let pub = false; // round 2: a PUBLIC repository — its asset answers without a token (the API and the browser form alike)
+    const api = http.createServer((q, r) => {
+      seen.api.push(recQ(q));
+      const authed = q.headers.authorization === `Bearer ${TOKEN}`, bin = q.headers.accept === 'application/octet-stream';
+      if (q.url.startsWith('/acme/kernel-plugin/releases/download/')) { if (pub) { r.writeHead(302, { location: 'https://objects.githubusercontent.com' + SIGNED }); return r.end(); } r.writeHead(404); return r.end('Not Found'); } // a browser's route: a token is not a session
+      if (!authed && !pub) { r.writeHead(404, { 'content-type': 'application/json' }); return r.end('{"message":"Not Found"}'); } // a private repository
+      if (q.url === '/repos/acme/kernel-plugin/releases/assets/7') { r.writeHead(302, { location: '/repos/acme/kernel-plugin/releases/assets/5550001' }); return r.end(); } // a hop on the SAME host
+      if (q.url === '/repos/acme/kernel-plugin/releases/assets/8' && bin) { r.writeHead(200, { 'content-length': ARCH.length, 'content-type': 'application/octet-stream' }); return r.end(ARCH); } // streamed directly
+      if (q.url === '/repos/acme/kernel-plugin/releases/assets/9') return; // round 3: an asset that never answers (the stall ends it)
+      if (q.url !== '/repos/acme/kernel-plugin/releases/assets/5550001') { r.writeHead(404); return r.end(); }
+      if (!bin) { r.writeHead(200, { 'content-type': 'application/json' }); return r.end('{"id":5550001,"name":"k.tar.zst"}'); } // the metadata, not the bytes
+      r.writeHead(302, { location: 'https://objects.githubusercontent.com' + SIGNED }); r.end();
+    });
+    const blob = http.createServer((q, r) => { seen.blob.push(recQ(q)); if (q.headers.authorization) { r.writeHead(400, { 'content-type': 'application/xml' }); return r.end('<Error><Code>InvalidArgument</Code><Message>Only one auth mechanism allowed</Message></Error>'); } if (q.url !== SIGNED) { r.writeHead(403); return r.end(); } r.writeHead(200, { 'content-length': ARCH.length, 'content-type': 'application/octet-stream' }); r.end(ARCH); });
+    const stranger = http.createServer((q, r) => { seen.stranger.push(recQ(q)); if (q.url !== '/k.tar.zst') { r.writeHead(404); return r.end(); } r.writeHead(200, { 'content-length': ARCH.length }); r.end(ARCH); });
+    for (const sv of [api, blob, stranger]) await new Promise((res) => sv.listen(0, '127.0.0.1', res));
+    process.on('exit', () => { for (const sv of [api, blob, stranger]) { try { sv.close(); } catch { /* gone */ } } });
+    const at = (sv) => `http://127.0.0.1:${sv.address().port}`;
+    const resolveC = (u) => u.replace(/^https:\/\/(?:api\.)?github\.com(?=[/?:]|$)/, at(api)).replace(/^https:\/\/objects\.githubusercontent\.com(?=[/?:]|$)/, at(blob)).replace(/^https:\/\/mirror\.stranger\.test(?=[/?:]|$)/, at(stranger));
+    // ── the Plugin Git row (a store), the plugin's install record (a loader), one engine-distribution per leg ──
+    let row = { host: 'github.com', token: TOKEN }; // null = none set; 'locked' = the vault locked; 'throws' / 'unreadable' = the store cannot be read
+    const reads = [];
+    const store = { resolveIntegration: (id) => { reads.push(id); if (id !== 'plugin-git') throw new Error('unknown integration'); if (row === 'locked') return { source: 'none', values: {}, whyCode: 'vault-locked', why: 'the vault is locked' };
+      if (row === 'throws') throw new Error('the integrations store is being rewritten');
+      if (row === 'unreadable') return { source: 'none', values: {}, whyCode: 'store-unreadable', why: 'integrations.json exists but cannot be read (EIO) — every write is refused until it can be read' }; return row ? { source: 'user', values: { ...row }, whyCode: null, why: null } : { source: 'none', values: {}, whyCode: 'no-values', why: 'no key of your own and no cluster default' }; } };
+    const PIN = 'e21f1064e3e38511b11e45c4cab6d60b48fbcce0';
+    let inst = { source: 'git', value: OWN, ref: PIN, sha: PIN };
+    const loaderC = { list: () => LDR.list(), installRecord: (id) => (id === EID && inst ? { ...inst } : null), install: async () => { throw new Error('the fleet\'s plugin is already installed — never asked'); } };
+    const logs = [], todosC = [];
+    const logC = { log: (l) => logs.push(String(l)), warn: (l) => logs.push(String(l)) };
+    const edC = (name, url, opts = {}, mod = EDM) => {
+      const dd = path.join(ROOT, name); fs.rmSync(dd, { recursive: true, force: true }); fs.mkdirSync(path.join(dd, 'plugins', EID), { recursive: true });
+      fs.writeFileSync(path.join(dd, 'plugins', EID, 'kernel.json'), JSON.stringify(kjson({}, { url, sha256: sha(ARCH), bytes: ARCH.length })));
+      return mod.create({ dataDir: dd, engines: ENGR, loader: loaderC, resolveUrl: resolveC, integrations: () => store, log: logC, userTodos: { add: (k, item) => { todosC.push(item); return 'ut-c' + todosC.length; } }, ...opts });
+    };
+    const reset = () => { for (const k of Object.keys(seen)) seen[k].length = 0; reads.length = 0; };
+    const recOfC = (name) => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, name, 'browser-engines.json'), 'utf8')).engines[EID] || {}; } catch { return {}; } };
+    const receiptNow = () => { try { return JSON.parse(fs.readFileSync(path.join(kdir, 'install-receipt.json'), 'utf8')); } catch { return {}; } };
+    const said = (e) => (e ? `${e.code}: ${e.message}` : 'landed');
+    // R2 (a) THE ASSET of a PRIVATE repository: the first hop Accept + Authorization: Bearer → 302 → the signed file host WITHOUT it
+    reset(); const t0a = Date.now();
+    const EDa = edC('data-kac-a', ASSET);
+    const ea = await thrK(EDa.installKernel(EID, { wait: true }));
+    const rca = receiptNow(), reca = recOfC('data-kac-a');
+    console.log(`  … (a) the asset download: ${said(ea)}`);
+    ok(!ea && rca.sha256 === sha(ARCH) && rca.verifiedAt >= t0a && reca.kernel && reca.kernel.sha256 === sha(ARCH) && reca.kernel.credential === 'plugin-git' && EDa.kernelFact(EID).state === 'installed' && EDa.kernelFact(EID).credential === 'plugin-git' && !leftovers().length,
+      'R2 (a): a kernel.json naming the API form of the plugin\'s OWN private repository ⇒ the archive LANDS (sha256 verified, the receipt written) — the engine record says it came by the Plugin Git credential (credential: plugin-git)', said(ea));
+    ok(seen.api.length === 1 && seen.api[0].auth === `Bearer ${TOKEN}` && seen.api[0].accept === 'application/octet-stream' && reads.length === 1 && reads[0] === 'plugin-git',
+      'R2 (a): the FIRST hop (api.github.com) carries Accept: application/octet-stream + Authorization: Bearer <the row\'s token> — the row read ONCE through the integration store (resolveIntegration(\'plugin-git\'))', { api: seen.api.map((x) => ({ ...x, auth: x.auth ? (x.auth === `Bearer ${TOKEN}` ? 'Bearer <token>' : 'OTHER') : null })), reads });
+    ok(seen.blob.length === 1 && seen.blob[0].auth === null && seen.blob[0].accept === 'application/octet-stream' && seen.blob[0].url === SIGNED,
+      'R2 (c): the 302 to the release\'s file host (ANOTHER host, a signed address) carries NO Authorization — Accept kept; the fake file host answers 400 the moment one arrives', seen.blob.map((x) => ({ url: x.url.slice(0, 40), auth: !!x.auth, accept: x.accept })));
+    // a hop on the SAME host keeps it; the API streaming the bytes itself (200) lands too
+    reset();
+    const ea2 = await thrK(edC('data-kac-a2', ASSET.replace(/5550001$/, '7')).installKernel(EID, { wait: true }));
+    const sameHop = seen.api.map((x) => x.auth === `Bearer ${TOKEN}`), blob2 = seen.blob.map((x) => !!x.auth);
+    reset();
+    const ea3 = await thrK(edC('data-kac-a3', ASSET.replace(/5550001$/, '8')).installKernel(EID, { wait: true }));
+    ok(!ea2 && sameHop.length === 2 && sameHop.every(Boolean) && blob2.length === 1 && !blob2[0] && !ea3 && seen.api.length === 1 && seen.blob.length === 0,
+      'R2: a redirect on the SAME host (api.github.com → api.github.com) keeps Authorization, the next one to the file host drops it; an API that streams the bytes itself (200, GitHub\'s other answer) lands too', { e2: said(ea2), sameHop, blob2, e3: said(ea3) });
+    // R2 (b) A KERNEL URL ON ANOTHER HOST with the same row + the same git install: the stranger NEVER sees the credential
+    reset();
+    const eb = await thrK(edC('data-kac-b', STRANGER).installKernel(EID, { wait: true }));
+    ok(!eb && seen.stranger.length === 1 && seen.stranger[0].auth === null && reads.length === 0 && recOfC('data-kac-b').kernel && recOfC('data-kac-b').kernel.credential === null,
+      'R2 (b): a kernel.json naming ANOTHER host (same Plugin Git row, same git install) ⇒ the stranger records NO Authorization header — the row is not even read; the record says no credential', { e: said(eb), stranger: seen.stranger.map((x) => !!x.auth), reads });
+    // ROUND 2 (minor 1) the browser form: the token is NOT sent there (GitHub serves it to a session, never a token), the row is not
+    // even read; a private repository's 404 names the real cause — the plugin's kernel.json — never the credential
+    reset();
+    const EDf = edC('data-kac-f', FORM);
+    const ef = await thrK(EDf.installKernel(EID, { wait: true }));
+    ok(ef && ef.code === 'kernel_asset_browser_form' && /github\.com answered 404/.test(ef.message) && /the plugin's kernel\.json names the browser download form \(github\.com\/acme\/kernel-plugin\/releases\/download\/…\); a private repository's asset needs the API form \(api\.github\.com\/repos\/acme\/kernel-plugin\/releases\/assets\/<id>\) — tell the plugin's author/.test(ef.message) && !/Integrations/.test(ef.message)
+      && seen.api.length === 1 && seen.api[0].auth === null && reads.length === 0 && EDf.kernelFact(EID).code === 'kernel_asset_browser_form' && EDf.kernelFact(EID).credential === null,
+      'round 2 (minor 1): the browser form of the plugin\'s own PRIVATE repository ⇒ asked WITHOUT the token (the row not even read), its 404 refused kernel_asset_browser_form «the plugin\'s kernel.json names the browser download form; a private repository\'s asset needs the API form (api.github.com/repos/acme/kernel-plugin/releases/assets/<id>) — tell the plugin\'s author» — never sent to Integrations', { e: ef && `${ef.code}: ${ef.message}`, auth: seen.api.map((x) => !!x.auth), reads });
+    pub = true; reset();
+    const efPub = await thrK(edC('data-kac-fp', FORM).installKernel(EID, { wait: true }));
+    ok(!efPub && seen.api.length === 1 && seen.api[0].auth === null && seen.blob.length === 1 && seen.blob[0].auth === null,
+      'round 2: the browser form of a PUBLIC repository still lands anonymously (the base\'s road)', { e: said(efPub) });
+    pub = false;
+    // a deploy key only (a person / a first use): round 2 — the credential is OPTIONAL: the anonymous try goes, a private
+    // repository's 404 is then refused kernel_credential_unusable by name (a public one would have answered)
+    row = { host: 'github.com', deployKey: KEYTEXT }; reset();
+    const EDk = edC('data-kac-k', ASSET);
+    const ek = await thrK(EDk.installKernel(EID, { wait: true }));
+    const ek2 = await thrK(edC('data-kac-k2', ASSET).installKernel(EID, { wait: true, by: 'first-use' }));
+    ok(ek && ek.code === 'kernel_credential_unusable' && /asked without a credential: the Plugin Git credential is a deploy key; a release asset needs a token \(Integrations → Plugins → Plugin Git repository\)/.test(ek.message) && ek2 && ek2.code === 'kernel_credential_unusable' && seen.api.length === 2 && seen.api.every((x) => x.auth === null) && seen.blob.length + seen.stranger.length === 0 && EDk.kernelFact(EID).code === 'kernel_credential_unusable',
+      'R2 + round 2: a deploy-key-only Plugin Git row cannot download over https ⇒ ONE anonymous try (no Authorization), its 404 refused kernel_credential_unusable BY NAME (a person\'s download and a first use); the record names the code', { e: ek && ek.message, hits: seen.api.map((x) => !!x.auth) });
+    // ROUND 2 (minor 2) THE VAULT LOCKED: the credential is OPTIONAL — a private asset's anonymous 404 ⇒ vault_locked by name
+    row = 'locked'; reset();
+    const el = await thrK(edC('data-kac-l', ASSET).installKernel(EID, { wait: true }));
+    const elAsked = seen.api.map((x) => x.auth);
+    ok(el && el.code === 'vault_locked' && elAsked.every((x) => x === null),
+      'round 2 (minor 2): the vault locked + a PRIVATE asset ⇒ refused vault_locked BY NAME (on b43799e5 before any byte; now after the anonymous try\'s 404) — no Authorization ever', { e: el && `${el.code}: ${el.message}`, asked: elAsked });
+    ok(el && /asked without a credential: the Plugin Git credential is sealed in the locked vault — unlock it and try again \(Unlock… at the top of the page; For you names what is waiting on it\)/.test(el.message) && elAsked.length === 1,
+      'round 2 (minor 2): its words — «the Plugin Git credential is sealed in the locked vault — unlock it and try again (Unlock… …)», after ONE anonymous request', el && el.message);
+    pub = true; reset();
+    const EDlp = edC('data-kac-lp', ASSET);
+    const elp = await thrK(EDlp.installKernel(EID, { wait: true }));
+    const elpAsked = seen.api.map((x) => x.auth), elpReads = reads.length;
+    reset();
+    const elp2 = await thrK(edC('data-kac-lp2', ASSET).installKernel(EID, { wait: true, by: 'first-use' }));
+    reset();
+    const elp3 = await thrK(edC('data-kac-lp3', ASSET).installKernel(EID, { wait: true, by: 'fleet' }));
+    pub = false;
+    ok(!elp && !elp2 && !elp3 && elpAsked.length === 1 && elpAsked[0] === null && elpReads === 1 && EDlp.kernelFact(EID).state === 'installed' && EDlp.kernelFact(EID).credential === null && fs.existsSync(KP),
+      'round 2 (minor 2): the vault locked + a PUBLIC asset (the fake answers anonymously) ⇒ DOWNLOADED, anonymously — a person\'s download, a first use and the fleet alike (on b43799e5 refused vault_locked before any byte)', { user: said(elp), firstUse: said(elp2), fleet: said(elp3), asked: elpAsked });
+    reset();
+    const elOther = await thrK(edC('data-kac-l2', STRANGER).installKernel(EID, { wait: true }));
+    ok(!elOther && seen.stranger.length === 1 && reads.length === 0,
+      'R2: a kernel on another host is not stopped by the locked vault — the row is never read for it', { other: said(elOther) });
+    // ROUND 2 (minor 3) THE STORE UNREADABLE (it throws / answers store-unreadable): its own words, never «no credential is set»
+    row = 'throws'; reset();
+    const eu = await thrK(edC('data-kac-u', ASSET).installKernel(EID, { wait: true }));
+    const euAsked = seen.api.map((x) => x.auth);
+    row = 'unreadable'; reset();
+    const eu2 = await thrK(edC('data-kac-u2', ASSET).installKernel(EID, { wait: true }));
+    ok(eu && eu.code === 'build_fetch_failed' && /asked without a credential: the Integrations store could not be read \(the integrations store is being rewritten\)/.test(eu.message) && !/no Plugin Git credential is set/.test(eu.message)
+      && eu2 && /the Integrations store could not be read \(integrations\.json exists but cannot be read \(EIO\)/.test(eu2.message) && !/no Plugin Git credential is set/.test(eu2.message) && euAsked.length === 1 && euAsked[0] === null,
+      'round 2 (minor 3): an integration store that THROWS / answers store-unreadable ⇒ the anonymous try\'s 404 says «the Integrations store could not be read (<why>)», never «no Plugin Git credential is set»', { throws: eu && eu.message, unreadable: eu2 && eu2.message });
+    // no row / a row for another git host / not a git install ⇒ anonymous, and the 404 says why
+    row = null; reset();
+    const en = await thrK(edC('data-kac-n', ASSET).installKernel(EID, { wait: true }));
+    const n1 = seen.api.map((x) => x.auth);
+    row = { host: 'gitlab.example.test', token: TOKEN }; reset();
+    const eo = await thrK(edC('data-kac-o', ASSET).installKernel(EID, { wait: true }));
+    const o1 = seen.api.map((x) => x.auth);
+    row = { host: 'github.com', token: TOKEN }; inst = { source: 'path', value: '/srv/plugins/kernel-plugin' }; reset();
+    const ep = await thrK(edC('data-kac-p', ASSET).installKernel(EID, { wait: true }));
+    const p1 = seen.api.map((x) => x.auth), pReads = reads.length;
+    inst = { source: 'git', value: OWN, ref: PIN, sha: PIN };
+    ok(en && en.code === 'build_fetch_failed' && /answered 404/.test(en.message) && /no Plugin Git credential is set/.test(en.message) && n1.length === 1 && n1[0] === null
+      && eo && /the Plugin Git credential is for another git host/.test(eo.message) && o1.length === 1 && o1[0] === null && ep && ep.code === 'build_fetch_failed' && p1.length === 1 && p1[0] === null && pReads === 0,
+      'no row ⇒ anonymous (the 404 says «a release asset of its plugin\'s own repository … no Plugin Git credential is set»); a row for ANOTHER git host ⇒ its token never goes; a plugin not installed from git ⇒ anonymous, the row never read', { n: en && en.message, o: eo && eo.message, p: ep && ep.message });
+    // R3 THE FLEET'S PRESINSTALL (customBrowser.preinstall → bootFleet): the same road, 'auto' — a deploy key ⇒ anonymous
+    const fleetC = { browserEngine: { plugin: EID, source: { git: OWN, ref: PIN }, preinstall: true } };
+    const keptC = path.join(ROOT, 'kernel-kept-kac'); fs.rmSync(keptC, { recursive: true, force: true }); fs.renameSync(kdir, keptC);
+    row = { host: 'github.com', token: TOKEN }; reset();
+    const bf = await edC('data-kac-fleet', ASSET, { fleetFacts: () => fleetC }).bootFleet();
+    const bfAuth = seen.api.map((x) => x.auth === `Bearer ${TOKEN}`), bfBlob = seen.blob.map((x) => !!x.auth);
+    ok(bf.ok && bf.outcome === 'same' && bf.kernel && bf.kernel.ok && bf.kernel.sha256 === sha(ARCH) && fs.existsSync(KP) && bfAuth.length === 1 && bfAuth[0] && bfBlob.length === 1 && !bfBlob[0] && recOfC('data-kac-fleet').kernel.by === 'fleet' && recOfC('data-kac-fleet').kernel.credential === 'plugin-git',
+      'R3: the boot job\'s fleet preinstall rides the same road — the kernel absent, the fleet\'s plugin already the recorded git source ⇒ downloaded with the Plugin Git credential on the first hop only', { kernel: bf.kernel && (bf.kernel.code || 'ok'), bfAuth, bfBlob });
+    fs.rmSync(kdir, { recursive: true, force: true }); todosC.length = 0;
+    row = { host: 'github.com', deployKey: KEYTEXT }; reset();
+    const bk = await edC('data-kac-fleet2', ASSET, { fleetFacts: () => fleetC }).bootFleet();
+    ok(bk.ok && bk.kernel && bk.kernel.ok === false && bk.kernel.code === 'kernel_credential_unusable' && /asked without a credential: the Plugin Git credential is a deploy key; a release asset needs a token/.test(bk.kernel.error) && seen.api.length === 1 && seen.api[0].auth === null && todosC.length === 1 && /could not be downloaded/.test(todosC[0].text),
+      'R3: \'auto\' for the fleet — a deploy-key row does not fit an https asset ⇒ an ANONYMOUS try (never refused before it: a public repository would answer), its 404 refused kernel_credential_unusable with the reason (round 2: the same road as a person\'s); ONE For-you notice', { k: bk.kernel && bk.kernel.error, todos: todosC.length });
+    fs.rmSync(kdir, { recursive: true, force: true }); fs.renameSync(keptC, kdir); row = { host: 'github.com', token: TOKEN };
+    // ROUND 3 (minor 2b) A FIRST USE'S WORDS: the launch that finds the kernel absent says «downloading» only when the archive
+    // answered — a refusal before any byte (the platform) or at the first answer (a private asset asked without a credential)
+    // is said BY NAME; no answer in time says it asked. Each leg: the profile made with the kernel in place, then it is absent.
+    const keptU = path.join(ROOT, 'kernel-kept-kac3');
+    const firstUse = async (name, url, { prep = null, opts = {} } = {}) => {
+      const EDx = edC(name, url, opts); if (prep) prep(path.join(ROOT, name, 'plugins', EID, 'kernel.json'));
+      const kx = mkKeeper(path.join(ROOT, 'data-eng-' + name), { engines: ENGR, engineDistribution: EDx, fleetFacts: () => null });
+      const px = kx.createProfile({ label: 'First use ' + name, browser: { kind: 'plugin', id: EID } }, { engine: await kx.engineFactOf(EID) });
+      fs.rmSync(keptU, { recursive: true, force: true }); fs.renameSync(kdir, keptU); reset();
+      const e = await thrK(kx.start(px.id, { why: 'test' }));
+      const t = Date.now(); while (!['installed', 'failed'].includes(EDx.kernelFact(EID).state) && Date.now() - t < 8000) await new Promise((r) => setTimeout(r, 25)); // the outcome RECORDED (a failure is noted after the run ends)
+      const out = { e, msg: e ? String(e.message) : 'launched', asked: seen.api.map((x) => x.auth), fact: EDx.kernelFact(EID) };
+      fs.rmSync(kdir, { recursive: true, force: true }); fs.renameSync(keptU, kdir);
+      return out;
+    };
+    row = 'locked';
+    const fuL = await firstUse('data-kac-fu-l', ASSET);
+    row = { host: 'github.com', deployKey: KEYTEXT };
+    const fuK = await firstUse('data-kac-fu-k', ASSET);
+    row = 'locked'; pub = true;
+    const fuP = await firstUse('data-kac-fu-p', ASSET);
+    pub = false; row = { host: 'github.com', token: TOKEN };
+    const fuX = await firstUse('data-kac-fu-x', ASSET, { prep: (f) => fs.writeFileSync(f, JSON.stringify(kjson({ platforms: { 'windows-x64': kjson({}, { url: ASSET, sha256: sha(ARCH), bytes: ARCH.length }).platforms['linux-x64'] } }))) });
+    const fuS = await firstUse('data-kac-fu-s', ASSET.replace(/5550001$/, '9'), { opts: { answerMs: 50, stallMs: 250 } });
+    const DLW = /VibeSpace is downloading it now/;
+    ok(fuL.e && fuL.e.code === 'browser_engine_kernel_missing' && !DLW.test(fuL.msg) && /VibeSpace could not download it: api\.github\.com answered 404 .*the Plugin Git credential is sealed in the locked vault — unlock it and try again/.test(fuL.msg) && fuL.asked.length === 1 && fuL.asked[0] === null && fuL.fact.code === 'vault_locked',
+      'round 3 (minor 2b): the vault locked + a PRIVATE asset, its FIRST USE ⇒ the launch says the download\'s NAMED refusal («VibeSpace could not download it: … sealed in the locked vault — unlock it and try again») after ONE anonymous request — never «downloading it now» (9d02b48f promised a download that failed a moment later)', fuL.msg);
+    ok(fuK.e && !DLW.test(fuK.msg) && /VibeSpace could not download it: .*the Plugin Git credential is a deploy key; a release asset needs a token/.test(fuK.msg) && fuK.fact.code === 'kernel_credential_unusable',
+      'round 3 (minor 2b): a deploy-key-only row + a private asset, its first use ⇒ the named refusal (a release asset needs a token), never «downloading»', fuK.msg);
+    ok(fuP.e && DLW.test(fuP.msg) && fuP.fact.state === 'installed' && fuP.asked.length === 1 && fuP.asked[0] === null,
+      'round 3 (minor 2b) control: the vault locked + a PUBLIC asset — the archive answers ⇒ «VibeSpace is downloading it now», and it lands (anonymously)', { msg: fuP.msg, st: fuP.fact.state });
+    ok(fuX.e && !DLW.test(fuX.msg) && /VibeSpace could not download it: .*offers no kernel for linux-x64 computers \(it has windows-x64\) — nothing was downloaded/.test(fuX.msg) && fuX.asked.length === 0,
+      'round 3 (minor 2b): a kernel.json with no kernel for this machine, its first use ⇒ the launch names it (build_platform_unsupported: «offers no kernel for linux-x64 computers (it has windows-x64)»), no request', fuX.msg);
+    ok(fuS.e && !DLW.test(fuS.msg) && /VibeSpace has asked api\.github\.com for it and has no answer yet; start the browser again in a moment/.test(fuS.msg) && fuS.fact.state === 'failed',
+      'round 3 (minor 2b): an asset that has not answered within the bound ⇒ «VibeSpace has asked api.github.com for it and has no answer yet» — not «downloading»; the stall then ends it by name', { msg: fuS.msg, st: fuS.fact.state, code: fuS.fact.code });
+    // R3 THE WORDS: the server answers STRUCTURE (kernel.credential), the card words it (zh / ja / en)
+    const keC = mkKeeper(path.join(ROOT, 'data-eng-kac'), { engines: ENGR, engineDistribution: EDa, fleetFacts: () => null });
+    const roC = (await keC.engineRowsView()).find((e) => e.id === EID);
+    const ROADW = "from the plugin repository's Release (with the Plugin Git credential)";
+    const nDl = BMm.engineNote({ id: EID, installed: false, executable: false, kernel: { state: 'downloading', bytes: 5, total: 10, credential: 'plugin-git' } }, tW);
+    const nFail = BMm.engineNote({ id: EID, installed: false, kernel: { state: 'failed', code: 'build_fetch_failed', credential: 'plugin-git' } }, tW);
+    const nPlain = BMm.engineNote({ id: EID, installed: false, executable: false, kernel: { state: 'downloading', bytes: 5, total: 10, credential: null } }, tW);
+    const nKey = BMm.engineNote({ id: EID, installed: false, kernel: { state: 'failed', code: 'kernel_credential_unusable', credential: 'plugin-git' } }, tW);
+    const nLock = BMm.engineNote({ id: EID, installed: false, kernel: { state: 'failed', code: 'vault_locked', credential: 'plugin-git' } }, tW);
+    const FORMW = "the plugin's kernel.json names the browser download form; a private repository's asset needs the API form (api.github.com/repos/<owner>/<repo>/releases/assets/<id>) — tell the plugin's author";
+    const nForm = BMm.engineNote({ id: EID, installed: false, kernel: { state: 'failed', code: 'kernel_asset_browser_form', credential: null } }, tW);
+    const ZH = (await import('../src/lib/i18n-zh.js')).default, JA = (await import('../src/lib/i18n-ja.js')).default;
+    ok(roC && roC.kernel && roC.kernel.credential === 'plugin-git' && nDl.endsWith('downloading its kernel… 50% · ' + ROADW) && nFail.endsWith(' · ' + ROADW) && !nPlain.includes('Release') && /a release asset needs an access token/.test(nKey) && /The vault is locked — unlock it first \(Unlock…/.test(nLock) && !nKey.includes(ROADW)
+      && ZH[ROADW] === '从插件仓库的 Release 下载（用插件 Git 凭据）' && /Release/.test(JA[ROADW] || '') && ZH['The vault is locked — unlock it first (Unlock… at the top of the page; For you names what is waiting on it)'] && JA['the Plugin Git credential cannot download it — a release asset needs an access token (https)'],
+      'R3: GET /api/browser/engines\' row carries kernel.credential (STRUCTURE); the card says «… · 从插件仓库的 Release 下载（用插件 Git 凭据）» while downloading / after a failure, nothing for another road, and the two refusals by their code (zh / ja / en through t())', { row: roC && roC.kernel, nDl, nKey, nLock });
+    ok(nForm.endsWith(': ' + FORMW) && /^插件的 kernel\.json 写的是浏览器下载形式；私有仓库的附件要用 API 形式（api\.github\.com\/repos\/<owner>\/<repo>\/releases\/assets\/<id>）— 请告诉插件作者$/.test(ZH[FORMW] || '') && /kernel\.json/.test(JA[FORMW] || '') && /api\.github\.com\/repos\/<owner>\/<repo>\/releases\/assets\/<id>/.test(JA[FORMW] || ''),
+      'round 2 (minor 1): the card words kernel_asset_browser_form «… could not be downloaded: the plugin\'s kernel.json names the browser download form; … needs the API form (api.github.com/repos/<owner>/<repo>/releases/assets/<id>) — tell the plugin\'s author» (zh / ja / en through t())', { nForm, zh: ZH[FORMW], ja: JA[FORMW] });
+    // THE CREDENTIAL'S CENSUS: the token in no URL asked, no log line, no error, no engine record, no fact, no For-you item
+    const allUrls = [...seen.api, ...seen.blob, ...seen.stranger].map((x) => x.url).join('\n');
+    const recTexts = fs.readdirSync(ROOT).filter((n) => /^data-kac-/.test(n)).map((n) => { try { return fs.readFileSync(path.join(ROOT, n, 'browser-engines.json'), 'utf8'); } catch { return ''; } }).join('\n');
+    const errs = [ea, ea2, ea3, eb, ef, efPub, ek, ek2, el, elp, elp2, elp3, elOther, eu, eu2, en, eo, ep, fuL.e, fuK.e, fuP.e, fuX.e, fuS.e].filter(Boolean).map((e) => e.message).join('\n') + JSON.stringify([bf, bk]);
+    const leaksC = { url: allUrls.includes(TOKEN), log: logs.some((l) => l.includes(TOKEN)), error: errs.includes(TOKEN), record: recTexts.includes(TOKEN), fact: JSON.stringify([EDa.kernelFact(EID), EDk.kernelFact(EID), roC]).includes(TOKEN), todo: JSON.stringify(todosC).includes(TOKEN), env: Object.values(process.env).some((v) => String(v).includes(TOKEN)) };
+    ok(!Object.values(leaksC).some(Boolean) && recTexts.length > 200 && logs.some((l) => /with the Plugin Git credential/.test(l)),
+      `the credential's census: the token is in no URL asked, no log line (the journal says only «with the Plugin Git credential»), no error, no engine record, no card fact, no For-you item, no env (${Object.entries(leaksC).filter(([, v]) => v).map(([k]) => k).join(', ') || 'clean'})`, leaksC);
+    // ── THE RED CONTROLS: patched copies of engine-distribution.js, each turning a leg above red ──
+    const EDC = read('src/server/engine-distribution.js');
+    const ctrl = async (tag, edits, url) => {
+      let t = EDC; for (const [from, to] of edits) { if (!t.includes(from)) return { anchor: from }; t = t.replace(from, to); }
+      reset(); const e = await thrK(edC('data-kac-ctl-' + tag, url, {}, M8.load('src/server/engine-distribution.js', t, 'kac-' + tag)).installKernel(EID, { wait: true }));
+      return { e, api: seen.api.map((x) => !!x.auth), blob: seen.blob.map((x) => !!x.auth), stranger: seen.stranger.map((x) => !!x.auth) };
+    };
+    const c1 = await ctrl('none', [["      st.credential = cr.road.use ? 'plugin-git' : null;", "      cr = { road: { use: false, why: 'control', asset: false }, token: null }; st.credential = null;"]], ASSET);
+    ok(c1.e && c1.e.code === 'build_fetch_failed' && /answered 404/.test(c1.e.message) && c1.api.length === 1 && !c1.api[0], 'control (a): a copy that sends no credential (today\'s downloader) fails the private asset — build_fetch_failed «api.github.com answered 404» — RED against R2 (a)', c1.anchor || (c1.e && c1.e.message));
+    const C2_AT = "    let inst = null; try { const l = L(); inst = l && typeof l.installRecord === 'function' ? l.installRecord(sid) : null; } catch { inst = null; }\n    const pre = EK.kernelCredentialVerdict(";
+    const c2 = await ctrl('anyhost', [[C2_AT, "    return { road: { use: true, host: EK.httpsUrlOf(url).host, why: 'control', asset: true, repository: { host: 'x', path: 'y' } }, token: I().resolveIntegration('plugin-git').values.token };\n" + C2_AT]], STRANGER);
+    ok(!c2.anchor && c2.stranger.length === 1 && c2.stranger[0] === true, 'control (b): a copy that sends the credential to whatever host kernel.json names hands the STRANGER an Authorization header — RED against R2 (b)', c2.anchor || c2);
+    const c3 = await ctrl('keep', [["      if (carry && x.host.replace(/:443$/, '') !== bound) carry = false;", '      ;']], ASSET);
+    ok(c3.e && c3.e.code === 'build_fetch_failed' && /objects\.githubusercontent\.com answered 400/.test(c3.e.message) && c3.blob.length === 1 && c3.blob[0] === true, 'control (c): a copy that keeps Authorization on the redirect to the file host — the signed address answers 400 (build_fetch_failed) — RED against R2 (c)', c3.anchor || (c3.e && c3.e.message));
+    ok(!fs.existsSync(KP) ? false : !leftovers().length, '(the kernel is in its place after the controls; nothing left beside it)', leftovers());
+  }
   setMode(null);
 }
 

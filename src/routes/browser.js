@@ -178,7 +178,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   backend_unavailable: 400, backend_no_key: 409, backend_seat_taken: 409, backend_seat_ceiling: 409, downgrade_refused: 409, downgrade_unknown: 409,
   switch_refused: 400, switch_export_only: 400, switch_noop: 409, browser_restarting: 409, hint_tier_with_backend: 400, host_underivable: 400, no_profile: 409,
   // §7.4 failure form (1): the INSTALL action's typed refusals (src/browser-switch.js INSTALL_CODES)
-  install_local_only: 400, already_installed: 409, install_running: 409, install_precondition_unmet: 409, install_unmeasured_platform: 409, install_unavailable: 503,
+  install_local_only: 400, already_installed: 409, install_running: 409, kernel_credential_unusable: 409 /* lane kernel-asset-credential */, install_precondition_unmet: 409, install_unmeasured_platform: 409, install_unavailable: 503,
   // takeover C3 (design-browser-takeover §5): the managed ephemeral browser — the shared ceiling (D2), a record that is
   // never attached / edited by id, pairs that name no browser of this conversation, the real CLI missing on this machine
   browser_cap: 409, not_attachable: 409, not_editable: 409, not_managed: 409, binary_absent: 503,

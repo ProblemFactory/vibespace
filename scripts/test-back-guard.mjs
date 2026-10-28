@@ -45,6 +45,35 @@
 //      the diary says so and the older document goes on; a hop slower than the bound leaves late and says so. RED
 //      controls from round 3: the intent dropped at the bound, no re-arm, no abort, no incident for the late landing;
 //      and the late pagehide's re-key removed (the measured from of a pending traversal after a new sentinel)
+//      ACCEPTANCE ROUND 5: the fake Navigation API steps by key (traverseTo — a step onto the entry the page stands on
+//      commits at once and moves nothing, as one onto Chrome's stale copy does; an entry may REFUSE a step), lists the
+//      stale copy of its own entry that the document a late commit landed on shows (index -1, right above it —
+//      measured), and tells each popstate's navigationType first (currententrychange: traverse / push); slowExit's rows
+//      for a document that went on. Legs: a tap AFTER the stay aborts the suspended go() by the step down onto the
+//      page's own entry (re-armed, nothing commits, no toast: the step is no back press) — or, the commit first, the
+//      older document goes on; a chain of slow pages (the landing hops, stays at its own bound and boots) files
+//      nothing; a #fragment link during the late watch keeps it (the slow row, the re-key: the older document goes on);
+//      on such a landing document a tap's step skips the stale copy (aborted), and a refused step re-arms and keeps the
+//      intent. RED controls from round 4, one per finding: the late tap only drops the intent, slowExit without this
+//      document's rows, every popstate ends the watch, round 4's abortGo (forward() onto the copy: it moves nothing),
+//      a refusal that does nothing.
+//      ACCEPTANCE ROUND 6: a tap ends in a pointerup (the person's tap is a pointerdown and its pointerup), a press the
+//      browser takes ends in a pointercancel; the world counts the steps by key. Legs, each after the stay: a mouse's
+//      back button (button 3, its back at the release — also the release before anything the press set off ran), its
+//      forward button (4) and a pan (pointerdown, pointercancel) are no tap — no step, the suspended go() pending until the
+//      browser's own back aborts it (the toast) or it commits late (the older document goes on). RED controls from
+//      36df506a: a predicate for keys alone (the button steps — and with the quick release, a LOAD), a tap at the
+//      pointerdown (the pan steps).
+//      ACCEPTANCE ROUND 7: ONE tap in both phases. Legs 1 s into the exit, the go() still pending: a pan, a mouse's back
+//      button and the browser's back by key are no tap (no step: the stay, the late commit, the older document goes on);
+//      a real tap there still aborts the go() by the step UP; a press that began before the stay and ends after it is
+//      the late watch's tap. RED control from cb8c0a86: the pending phase taps at the first pointerdown or keydown (the
+//      pan steps: the exit cancelled).
+//      ACCEPTANCE ROUND 8: a press across a hop's 700 ms. On the older document the exit lands on, its first hop an
+//      iframe-only step (nothing() at 700 ms, the next hop's go()): a press down at 600 ms and up at 750 ms is ONE tap —
+//      the next hop's go() pending, its step aborts it (hop stay why input); both hops starting nothing, the page stays
+//      at the release (hop stay why input, no cap); a pan across it is none (the exit goes on). RED control from
+//      bd7dd961: nothing() hands no pointers on (the press lost: the exit goes on under the finger).
 //   §4 wiring pins: app.js installs it only when isMobile, ONE pushState in the wiring, the For-you tray closes
 //      through hidePopup, the setting row (Mobile, default on) is read, the overscroll rule is coarse-pointer only,
 //      zh + ja words
@@ -205,6 +234,13 @@ const SLOW_ROWS = [ // round 4 — slowExit: [name, input, bool]
   ['a reload ⇒ false', { navType: 'reload', came: 'back', prev: [{ k: 'hide', t: T0 - 100 }, { k: 'leave', slow: 4000, t: T0 - 100 }], now: T0 }, false],
   ['the previous document\'s last row 5 s old ⇒ false', { navType: 'back_forward', came: 'back', prev: [{ k: 'hide', t: T0 - 5000 }, { k: 'leave', slow: 4000, t: T0 - 5000 }], now: T0 }, false],
 ];
+// round 5 — the previous document's stay and late pagehide, and THIS document's own rows so far (mine)
+const LATE_PREV = [{ k: 'leave', why: 'cancelled', t: T0 - 6600 }, { k: 'rearm', why: 'cancelled', t: T0 - 6600 }, { k: 'hide', t: T0 - 3100 }, { k: 'leave', slow: 3500, t: T0 - 3100 }];
+SLOW_ROWS.push(
+  ['round 5 — a document that WENT ON (hop 1, then its own go() slow too: hop 1 stay why cancelled — a chain of slow pages) ⇒ false', { navType: 'back_forward', came: '', prev: LATE_PREV, mine: [{ k: 'hop', n: 1, skip: 1, ents: '*SSx' }, { k: 'hop', n: 1, stay: 1, why: 'cancelled' }, { k: 'boot', type: 'back_forward' }], now: T0 }, false],
+  ['…one at its cap (hop 3 stay why cap: the ONE named load) ⇒ false', { navType: 'back_forward', came: '', prev: LATE_PREV, mine: [{ k: 'hop', n: 3, stay: 1, why: 'cap' }], now: T0 }, false],
+  ['…an intent that was NOT this load\'s (hop drop 1: past its window) ⇒ true — it could not go on', { navType: 'back_forward', came: '', prev: LATE_PREV, mine: [{ k: 'hop', n: 0, drop: 1 }, { k: 'boot', type: 'back_forward' }], now: T0 }, true],
+);
 const judgeSlow = (M) => SLOW_ROWS.filter(([, inp, want]) => M.slowExit(inp) !== want).map(([n]) => n);
 for (const [name, inp, want] of SLOW_ROWS) ok(BG.slowExit(inp) === want, `slow: ${name}`);
 
@@ -234,7 +270,9 @@ function el(cls, { id = '' } = {}) {
   return e;
 }
 /** One phone page: history [prev page, VibeSpace] (index 1), the layers, the app duck. */
-function world({ search = '', startState = null, enabled = true, sidebarOpen = false, entries = null, index = 1, doc = 'A', navType = '', discarded = false, navApi = false, store = null, activation = undefined, commitMs = 0 } = {}) {
+/** No tap listener left on the page (round 6: the late watch listens to pointerup and pointercancel too). */
+const NO_TAPS = (w) => ['pointerdown', 'pointerup', 'pointercancel', 'keydown'].every((t) => w.listeners(t) === 0);
+function world({ search = '', startState = null, enabled = true, sidebarOpen = false, entries = null, index = 1, doc = 'A', navType = '', discarded = false, navApi = false, store = null, activation = undefined, commitMs = 0, ghost = -1 } = {}) {
   let now = 1e6, seq = 0; const q = [];
   globalThis.setTimeout = (fn, ms = 0) => { const id = ++seq; q.push({ id, at: now + ms, fn }); return id; };
   globalThis.clearTimeout = (id) => { const i = q.findIndex((x) => x.id === id); if (i >= 0) q.splice(i, 1); };
@@ -249,9 +287,13 @@ function world({ search = '', startState = null, enabled = true, sidebarOpen = f
   // document in H.kept was kept by the back/forward cache: a traversal onto it SHOWS it again (pageshow persisted), never a load;
   // ms = how long a traversal onto THIS entry takes to commit (round 4; commitMs otherwise); race = its commit comes
   // before any abort (it answered just then — round 4); H.lost = the document a traversal committed onto after a
-  // pushState made while it was pending: its Navigation API says index -1 (measured on Chrome 154 — round 4)
-  const H = { entries: entries || [{ prev: true, state: null, href: 'data:prev' }, { state: startState, href: BASE, doc }], index, doc, pushes: 0, replaces: 0, left: false, loads: 0, loadedAt: -1, popsHandled: 0, commitMs, kept: {}, restores: 0, pending: null, aborts: 0, from: -1, lost: false };
-  let pop = [], wl = {}, keySeq = 0;
+  // pushState made while it was pending: its Navigation API says index -1 (measured on Chrome 154 — round 4); refuse = a
+  // step by key onto it is refused (round 5); H.ghost = the entry whose stale COPY that document's list shows right above
+  // it, index -1, its key (measured on Chrome 154 after its own push and a back — round 5)
+  const H = { entries: entries || [{ prev: true, state: null, href: 'data:prev' }, { state: startState, href: BASE, doc }], index, doc, pushes: 0, replaces: 0, left: false, loads: 0, loadedAt: -1, popsHandled: 0, commitMs, kept: {}, restores: 0, pending: null, aborts: 0, from: -1, lost: false, ghost, steps: 0 };
+  let pop = [], wl = {}, navL = {}, keySeq = 0;
+  /** currententrychange — the Navigation API's, right before each popstate (measured on Chrome 154 — round 5). */
+  const cec = (type) => { for (const fn of navL.currententrychange || []) fn({ navigationType: type }); };
   const w = { H, toasts: [], gestures: 0, advance, toggles: [], hides: 0, settingCbs: [], enabled, activation };
   globalThis.__w = w;
   globalThis.window = { addEventListener: (t, fn, o) => { if (t === 'popstate') pop.push(fn); else (wl[t] ||= []).push({ fn, once: !!(o && o.once) }); }, removeEventListener: (t, fn) => { if (wl[t]) wl[t] = wl[t].filter((x) => x.fn !== fn); } };
@@ -289,13 +331,13 @@ function world({ search = '', startState = null, enabled = true, sidebarOpen = f
     }
     const same = mainOf(to) === mainOf(H.index); H.index = to;
     if (same) return true; // an iframe-only step: no popstate on the page
-    globalThis.location.href = e.href; H.popsHandled++; for (const fn of pop) fn({ state: e.state });
+    globalThis.location.href = e.href; H.popsHandled++; cec('traverse'); for (const fn of pop) fn({ state: e.state });
     return true;
   };
   globalThis.history = {
     get state() { return H.entries[H.index].state; },
     get length() { return H.entries.length; },
-    pushState(state) { if (H.pending) H.pending.pushed = true; H.lost = false; H.entries.splice(H.index + 1); H.entries.push({ state, href: globalThis.location.href, doc: H.doc }); H.index++; H.pushes++; },
+    pushState(state) { if (H.pending) H.pending.pushed = true; H.lost = false; H.entries.splice(H.index + 1); H.entries.push({ state, href: globalThis.location.href, doc: H.doc }); H.index++; H.pushes++; cec('push'); },
     replaceState(state) { H.entries[H.index] = { ...H.entries[H.index], state, doc: H.doc, lie: false }; H.replaces++; },
     go(n) { globalThis.setTimeout(() => traverse(n), 0); },
     back() { this.go(-1); },
@@ -303,15 +345,37 @@ function world({ search = '', startState = null, enabled = true, sidebarOpen = f
   /** The Navigation API over H: the contiguous block of the app's entries around the current one (another site's are hidden). */
   const block = () => { let a = H.index, b = H.index; const app = (e) => e && !e.prev && !e.other; while (app(H.entries[a - 1])) a--; while (app(H.entries[b + 1])) b++; const at = []; for (let i = a; i <= b; i++) if (!H.entries[i].sub) at.push(i); return at; };
   if (navApi) globalThis.navigation = {
-    entries: () => { const l = block().map((i, k) => ({ url: H.entries[i].href, sameDocument: !!H.entries[i].lie || H.entries[i].doc === H.doc, key: keyOf(i), index: k })); return H.lost ? [...l.slice(0, -1), { ...l[block().indexOf(mainOf(H.index))], index: -1 }] : l; }, // H.lost: the pushed entry's place holds a copy of the current one (measured)
-    get currentEntry() { const m = mainOf(H.index); return { index: H.lost ? -1 : block().indexOf(m), key: keyOf(m) }; },
+    entries: () => {
+      const l = block().map((i, k) => ({ url: H.entries[i].href, sameDocument: !!H.entries[i].lie || H.entries[i].doc === H.doc, key: keyOf(i), index: k }));
+      if (H.lost) return [...l.slice(0, -1), { ...l[block().indexOf(mainOf(H.index))], index: -1 }]; // the pushed entry's place holds a copy of the current one (measured)
+      const g = H.ghost >= 0 ? block().indexOf(H.ghost) : -1;
+      if (g < 0) return l;
+      const out = [...l.slice(0, g + 1), { ...l[g], index: -1 }, ...l.slice(g + 1)]; // the stale copy right above its entry (measured)
+      out.forEach((e, k) => { if (e.index !== -1) e.index = k; });
+      return out;
+    },
+    get currentEntry() { const m = mainOf(H.index), key = keyOf(m); return { index: H.lost ? -1 : this.entries().findIndex((e) => e.key === key && e.index >= 0), key }; },
     get activation() { return w.activation; },
-    /** The step onto the entry above: its committed promise rejects when it did not land there (round 4). */
+    addEventListener(t, fn) { (navL[t] ||= []).push(fn); },
+    /** Chrome's: the step onto the entry its list shows above the current one (round 5 — onto the stale copy: at once,
+     *  nothing moves). */
     forward() {
-      const list = block(), up = list[list.indexOf(mainOf(H.index)) + 1];
-      if (up === undefined) throw new Error('InvalidStateError: no entry above');
+      const list = this.entries(), next = list[this.currentEntry.index + 1];
+      if (!next) throw new Error('InvalidStateError: no entry above');
+      return this.traverseTo(next.key);
+    },
+    /** The step by key (round 5): onto the entry the page stands on — Chrome's stale copy carries its key — it commits at
+     *  once, moves nothing and aborts nothing (measured); a refusing entry or an unknown key rejects; else the traversal,
+     *  committed when it landed there. */
+    traverseTo(key) {
+      H.steps++;
       let yes = null, no = null; const committed = new Promise((a, b) => { yes = a; no = b; });
-      globalThis.setTimeout(() => { if (traverse(up - H.index) && H.index === up) yes(); else no(new Error('AbortError: the step did not land')); }, 0);
+      const at = block().find((i) => keyOf(i) === key);
+      globalThis.setTimeout(() => {
+        if (key === keyOf(mainOf(H.index))) { yes(); return; }
+        if (at === undefined || H.entries[at].refuse) { no(new Error('AbortError: refused')); return; }
+        if (traverse(at - H.index) && mainOf(H.index) === at) yes(); else no(new Error('AbortError: the step did not land'));
+      }, 0);
       return { committed, finished: committed };
     },
   };
@@ -319,7 +383,7 @@ function world({ search = '', startState = null, enabled = true, sidebarOpen = f
   /** A KEPT document shown again: its own listeners back, navigation.activation names the entry it came from (measured
    *  on Chrome 154: a restore updates it), pageshow persisted. */
   const show = (d, from) => {
-    ({ wl, pop } = H.kept[d]); delete H.kept[d]; H.doc = d; H.restores++;
+    ({ wl, pop, navL } = H.kept[d]); delete H.kept[d]; H.doc = d; H.restores++;
     globalThis.location.href = H.entries[H.index].href;
     w.activation = { from: { index: 9, key: keyOf(from) }, entry: { index: 0 } };
     fire('pageshow', { persisted: true });
@@ -347,11 +411,20 @@ function world({ search = '', startState = null, enabled = true, sidebarOpen = f
     autoCaptureIncident: (reason, detail, opts) => { w.captures.push({ reason, detail, opts }); return Promise.resolve('inc-test-' + w.captures.length); },
   };
   /** A same-document navigation to a #fragment (a link in rendered markdown): a new entry, then a popstate with state null. */
-  w.fragment = (hash) => { H.entries.splice(H.index + 1); const href = BASE + hash; H.entries.push({ state: null, href, doc: H.doc }); H.index++; globalThis.location.href = href; for (const fn of pop) fn({ state: null }); advance(1); };
+  w.fragment = (hash) => { if (H.pending) H.pending.pushed = true; H.entries.splice(H.index + 1); const href = BASE + hash; H.entries.push({ state: null, href, doc: H.doc }); H.index++; globalThis.location.href = href; cec('push'); for (const fn of pop) fn({ state: null }); advance(1); };
   /** The person's back gesture = the browser's history back. */
   w.back = () => { globalThis.history.go(-1); advance(1); };
-  /** The person's tap. */
-  w.input = () => fire('pointerdown', { isTrusted: true });
+  /** The person's tap: a pointerdown, then its pointerup (round 6 — a tap ends in one). */
+  w.input = () => { for (const t of ['pointerdown', 'pointerup']) fire(t, { type: t, isTrusted: true, pointerId: 1, pointerType: 'touch', button: 0 }); };
+  /** A mouse button pressed and released on the page (round 6): 3 = back, 4 = forward — the browser's own step comes at
+   *  the release (measured on Chrome 154), so a leg follows it with w.back() for the back. */
+  w.mouse = (button) => { for (const t of ['pointerdown', 'pointerup']) fire(t, { type: t, isTrusted: true, pointerId: 1, pointerType: 'mouse', button }); };
+  /** A touch the browser takes (a pan, a gesture): its pointerdown, then a pointercancel (measured on Chrome 154 — round 6). */
+  w.pan = () => { for (const t of ['pointerdown', 'pointercancel']) fire(t, { type: t, isTrusted: true, pointerId: 2, pointerType: 'touch', button: 0 }); };
+  /** One pointer's pointerdown or its pointerup, each when the leg says (round 7: a press across the stay). */
+  w.ptr = (t) => fire(t, { type: t, isTrusted: true, pointerId: 3, pointerType: 'touch', button: 0 });
+  /** A key pressed on the page (its keydown). */
+  w.key = (k) => fire('keydown', { type: 'keydown', isTrusted: true, ...k });
   w.intent = () => JSON.parse(S.get('vibespace.exitIntent') || 'null');
   w.keyAt = (i) => keyOf(mainOf(i)).slice(0, 8);
   /** The entry the last commit LEFT from — what the next document's navigation.activation names as «from» (round 4). */
@@ -361,7 +434,7 @@ function world({ search = '', startState = null, enabled = true, sidebarOpen = f
   w.arrivalNow = () => (H.lost ? { from: { index: -1, key: w.lastFrom() }, entry: { index: -1 } } : { from: { index: 9, key: w.lastFrom() }, entry: { index: 0 } });
   /** The document a traversal LOADED boots: a fresh window (its own listeners), its navigation type, how it was reached. */
   w.newDoc = ({ doc: d, navType: ty = 'back_forward', activation: a } = {}) => {
-    H.doc = d; pop = []; wl = {}; w.activation = a;
+    H.doc = d; pop = []; wl = {}; navL = {}; w.activation = a; H.ghost = -1;
     globalThis.location.href = H.entries[H.index].href;
     Object.defineProperty(globalThis, 'performance', { value: { getEntriesByType: (k) => (k === 'navigation' && ty ? [{ type: ty }] : []), now: () => now }, configurable: true, writable: true });
   };
@@ -371,9 +444,9 @@ function world({ search = '', startState = null, enabled = true, sidebarOpen = f
    *  the next document (a fresh window) on a new entry. */
   w.navigateTo = ({ doc: d, href, keep = false, activation: a = { from: null, entry: { index: 0 } } }) => {
     fire('pagehide', { persisted: keep });
-    if (keep) H.kept[H.doc] = { wl, pop };
+    if (keep) H.kept[H.doc] = { wl, pop, navL };
     H.entries.splice(H.index + 1); H.entries.push({ state: null, href, doc: d }); H.index++;
-    H.doc = d; pop = []; wl = {}; w.activation = a;
+    H.doc = d; pop = []; wl = {}; navL = {}; w.activation = a;
     globalThis.location.href = href; globalThis.location.search = new URL(href).search;
     Object.defineProperty(globalThis, 'performance', { value: { getEntriesByType: (k) => (k === 'navigation' ? [{ type: 'navigate' }] : []), now: () => now }, configurable: true, writable: true });
   };
@@ -662,7 +735,7 @@ async function reloadLegs(M, M2) { // M2: a second instance of the same wiring �
       const last = w.diary().filter((r) => r.k === 'hop').at(-1), kept = w.intent(), held = ['beforeunload', 'pagehide', 'pageshow', 'pointerdown', 'keydown'].map((t) => w.listeners(t));
       w.advance(7000); await flush(); const windowEnd = w.intent();
       w.advance(25000); await flush();
-      const none = ['beforeunload', 'pagehide', 'pageshow', 'pointerdown', 'keydown'].every((t) => w.listeners(t) === 0);
+      const none = ['beforeunload', 'pagehide', 'pageshow', 'pointerdown', 'pointerup', 'pointercancel', 'keydown'].every((t) => w.listeners(t) === 0);
       R[tag] = !!hop && pending && last?.stay === 1 && last.why === why && none && !w.H.left && (tag === 'cancel'
         ? early === null && why === 'cancelled' && kept?.hop === 1 && held.join() === '0,1,0,1,1' && windowEnd === null
         : why === 'input' && w.H.aborts === 1 && w.H.index === 2 && kept === null);
@@ -686,6 +759,22 @@ async function reloadLegs(M, M2) { // M2: a second instance of the same wiring �
     w.advance(7000);
     R.exitCancel = had && !!kept && kept.hop === 0 && !w.intent() && !w.H.left && w.H.loads === 0 && rows.map((r) => `${r.k}:${r.why}`).join() === 'leave:cancelled,rearm:cancelled' && armed && w.listeners('beforeunload') === 0;
     R.exitCancelDetail = { had, kept, intent: w.intent(), left: w.H.left, loads: w.H.loads, rows, armed, pushes: w.H.pushes, toasts: w.toasts.length };
+  }
+  { // round 5 — the same cancelled exit, then the browser's own back BY KEY (Alt+←: its keydown reaches the page first —
+    // measured on Chrome 154, test-exit-slow-chrome ⑦): the key is no use of the page — no abort, no input-late row; the
+    // back it is lands on the page's entry: the toast (read as a tap, the late watch's step ran ahead of the browser's
+    // back and the two went back past the page)
+    const w = world({ navApi: true, doc: 'B', navType: 'reload', sidebarOpen: true, index: 3, activation: ACT,
+      entries: [{ prev: true, state: null, href: 'data:prev', cancel: true }, { state: null, href: PG, doc: 'A' }, { state: { vs: 1 }, href: PG, doc: 'A' }, { state: null, href: PG, doc: 'B' }] });
+    M.installMobileBack(w.app);
+    w.back(); w.advance(300); w.back(); w.advance(10);
+    w.advance(3100); await flush();
+    const aborts = w.H.aborts;
+    w.key({ key: 'ArrowLeft', altKey: true }); w.advance(10); await flush(); w.advance(10); await flush();
+    const mid = { aborts: w.H.aborts - aborts, index: w.H.index, rows: w.diary().filter((r) => r.k === 'rearm').map((r) => r.why).join() };
+    w.back(); w.advance(600);
+    R.backKey = mid.aborts === 0 && mid.rows === 'cancelled' && w.toasts.length === 2 && w.onSentinel() && !w.H.left && w.H.loads === 0;
+    R.backKeyDetail = { mid, toasts: w.toasts.length, left: w.H.left, loads: w.H.loads };
   }
   { // round 4 — THE EXIT ON A SLOW LINK (G7's road, the older document's HTML answering in 3.5 s): the exit's go(-3) is not
     // gone within the 3 s bound — the page stays, re-armed by a new sentinel (the commit still comes — measured), its
@@ -734,7 +823,7 @@ async function reloadLegs(M, M2) { // M2: a second instance of the same wiring �
       let hop = null;
       if (tag === 'tapRace') { w.newDoc({ doc: 'A', activation: { from: { index: 9, key: mid.from }, entry: { index: 0 } } }); hop = M2.continueExit(); w.advance(10); await flush(); }
       R[tag] = tag === 'tapAbort'
-        ? w.H.aborts === 1 && w.H.loads === 0 && !w.H.left && w.onSentinel() && mid.intent === null && bRows === '3/0,input,rearm:input' && w.listeners('beforeunload') === 0 && w.listeners('pointerdown') === 0
+        ? w.H.aborts === 1 && w.H.loads === 0 && !w.H.left && w.onSentinel() && mid.intent === null && bRows === '3/0,input,rearm:input' && w.listeners('beforeunload') === 0 && NO_TAPS(w)
         : mid.loads === 1 && w.H.aborts === 0 && /^3\/0,input,slow:10\d\d$/.test(bRows) && mid.intent?.hop === 0 && !!hop && w.H.left;
       R[tag + 'Detail'] = { mid, aborts: w.H.aborts, loads: w.H.loads, left: w.H.left, bRows, hop: !!hop };
     }
@@ -755,6 +844,205 @@ async function reloadLegs(M, M2) { // M2: a second instance of the same wiring �
     const first = w.diary()[0].d, mine = w.diary().filter((r) => r.d !== first && r.k === 'hop').map((r) => (r.slow ? `slow:${r.slow}` : r.stay ? `stay:${r.why}` : `n${r.n}`)).join();
     R.hopSlow = !!hop && stayed && w.H.left && mine === 'n1,stay:cancelled,slow:4000' && w.captures.length === 0;
     R.hopSlowDetail = { hop: !!hop, why, stayed, left: w.H.left, mine };
+  }
+  /** The rows a document wrote about its exit (leave / rearm), as the suites print them. */
+  const exitRows = (w, d) => w.diary().filter((r) => r.d === d && (r.k === 'leave' || r.k === 'rearm')).map((r) => (r.k === 'rearm' ? `rearm:${r.why}${r.abort === 0 ? '/0' : ''}` : r.why || (r.slow ? `slow:${r.slow}` : `${r.skip}/${r.load}`))).join();
+  { // round 5 — a TAP AFTER THE STAY (G7's road, the older document answering in 6 s; the stay at 3 s, the tap at 4 s): the
+    // stay's new sentinel has nothing above it, so the tap's step goes DOWN onto the page's own entry — a same-document
+    // traversal, so the suspended go() is ABORTED (measured on Chrome 154) — then a new sentinel (rearm why input-late);
+    // the intent dropped, nothing ever commits, the step's popstate no back press (no second toast). Round 4's late tap
+    // only dropped the intent: the commit came at 6 s and the older document loaded and booted. The commit FIRST (it
+    // answered just then — `race`): the intent, kept for it, makes the older document go on
+    for (const tag of ['lateTap', 'lateRace']) {
+      const w = world({ navApi: true, doc: 'B', navType: 'navigate', search: '?session=x', sidebarOpen: true, index: 4, activation: ACT,
+        entries: [{ prev: true, state: null, href: 'data:prev' }, { state: null, href: PG, doc: 'A', ms: 6000, race: tag === 'lateRace' }, { state: { vs: 1 }, href: PG, doc: 'A' }, { state: { vs: 1 }, href: PG, doc: 'A', sub: true }, { state: null, href: PG + '?session=x', doc: 'B' }] });
+      M.installMobileBack(w.app);
+      w.back(); w.advance(500); w.back(); w.advance(10);
+      w.advance(3100); await flush(); // the stay: a new sentinel, the intent kept
+      const stay = { sentinel: w.onSentinel(), intent: w.intent(), pushes: w.H.pushes };
+      w.advance(900); w.input(); w.advance(10); await flush(); w.advance(10); await flush();
+      const mid = { index: w.H.index, sentinel: w.onSentinel(), intent: w.intent(), loads: w.H.loads, pushes: w.H.pushes, toasts: w.toasts.length }, first = w.diary()[0].d;
+      let hop = null; // the race's landing boots at its commit (the fake clock would run the gone document's timers on)
+      if (tag === 'lateRace') { w.newDoc({ doc: 'A', activation: w.arrivalNow() }); hop = M2.continueExit(); w.advance(10); await flush(); }
+      w.advance(7000); await flush();
+      const bRows = exitRows(w, first);
+      R[tag] = tag === 'lateTap'
+        ? stay.sentinel && stay.intent?.hop === 0 && w.H.aborts === 1 && w.H.loads === 0 && !w.H.left && w.onSentinel() && mid.intent === null && mid.pushes === stay.pushes + 1 && mid.toasts === 1
+          && bRows === '3/0,cancelled,rearm:cancelled,rearm:input-late' && w.listeners('beforeunload') === 0 && NO_TAPS(w)
+        : mid.loads === 1 && w.H.aborts === 0 && /^3\/0,cancelled,rearm:cancelled,slow:40\d\d$/.test(bRows) && mid.intent?.hop === 0 && !!hop && w.H.left;
+      R[tag + 'Detail'] = { stay, mid, aborts: w.H.aborts, loads: w.H.loads, left: w.H.left, bRows, hop: !!hop, toasts: w.toasts.length };
+    }
+  }
+  { // round 6 — the late watch (G7's road, the older document answering in 6 s; the stay at 3 s), then at 4 s a press
+    // that is NO tap: a mouse's BACK button (its pointerdown and pointerup, button 3 — measured on Chrome 154: both reach
+    // the page, the browser's back comes at the release) — no step, no input-late row, the suspended go() pending until
+    // the browser's own back (a traversal from the new sentinel: it aborts the pending go() and lands on the page's
+    // entry — measured): the toast, nothing loads; `Quick`: that back queued before anything the press set off ran (a
+    // quick click, a busy page) — the same; the FORWARD button (4): nothing above — the go() commits late as without it,
+    // the intent kept: the older document goes on; a PAN (a pointerdown, then the pointercancel of a touch the browser
+    // took — measured: ~70 ms in): the same late commit, the older document goes on. Read as a tap (36df506a: a tap at
+    // the pointerdown, a predicate for keys alone) each one steps down onto the page's entry — the exit cancelled by a
+    // press that was none; and the quick back then goes from the page's entry onto the older document: a LOAD
+    for (const tag of ['mouseBack', 'mouseBackQuick', 'mouseFwd', 'pan']) {
+      const w = world({ navApi: true, doc: 'B', navType: 'navigate', search: '?session=x', sidebarOpen: true, index: 4, activation: ACT,
+        entries: [{ prev: true, state: null, href: 'data:prev' }, { state: null, href: PG, doc: 'A', ms: 6000 }, { state: { vs: 1 }, href: PG, doc: 'A' }, { state: { vs: 1 }, href: PG, doc: 'A', sub: true }, { state: null, href: PG + '?session=x', doc: 'B' }] });
+      M.installMobileBack(w.app);
+      w.back(); w.advance(500); w.back(); w.advance(10);
+      w.advance(3100); await flush(); // the stay: a new sentinel, the intent kept
+      w.advance(900);
+      if (tag === 'pan') w.pan(); else w.mouse(tag === 'mouseFwd' ? 4 : 3);
+      if (tag === 'mouseBackQuick') w.back();
+      w.advance(10); await flush(); w.advance(10); await flush();
+      if (tag === 'mouseBack') { w.back(); w.advance(600); await flush(); } // the browser's back, at the release
+      const first = w.diary()[0].d;
+      const mid = { steps: w.H.steps, aborts: w.H.aborts, loads: w.H.loads, sentinel: w.onSentinel(), toasts: w.toasts.length, intent: w.intent(), rows: exitRows(w, first) };
+      const late = tag === 'mouseFwd' || tag === 'pan';
+      for (let i = 0; late && i < 40 && w.H.loads === 0; i++) w.advance(100); // the late commit at 6 s
+      let hop = null; // the landing boots at its commit (the fake clock would run the gone document's timers on)
+      if (late && w.H.loads === 1) { w.newDoc({ doc: 'A', activation: w.arrivalNow() }); hop = M2.continueExit(); w.advance(10); await flush(); }
+      w.advance(7000); await flush();
+      const bRows = exitRows(w, first);
+      R[tag] = mid.steps === 0 && !/input-late/.test(bRows) && (late
+        ? mid.aborts === 0 && mid.loads === 0 && mid.intent?.hop === 0 && !!hop && w.H.left && /^3\/0,cancelled,rearm:cancelled,slow:60\d\d$/.test(bRows) && w.captures.length === 0
+        : mid.aborts === 1 && mid.loads === 0 && mid.sentinel && mid.toasts === 2 && w.H.loads === 0 && !w.H.left && bRows === '3/0,cancelled,rearm:cancelled' && NO_TAPS(w));
+      R[tag + 'Detail'] = { mid, steps: w.H.steps, loads: w.H.loads, left: w.H.left, bRows, hop: !!hop, captures: w.captures.length };
+    }
+  }
+  { // round 7 — ONE TAP IN BOTH PHASES: 1 s into the exit (G7's road, the older document answering in 6 s — the go() still
+    // PENDING, before the 3 s stay) a press that is NO tap: a PAN (a pointerdown, then the pointercancel of a touch the
+    // browser took), a mouse's BACK button (button 3), the browser's back BY KEY (Alt+←) — no step, no input row: the stay
+    // at 3 s, the late commit at 6 s told, the older document goes on (the browser's own back at the button's release or
+    // the key is the browser's — Chrome counts it from the pending entry, measured by lane probe h12 — so the world sends
+    // none); a real TAP there (its pointerdown and its pointerup) still aborts the go() by the step UP onto the sentinel
+    // (round 4: leave why input, rearm why input); a press that began while the go() was pending and ends after the stay
+    // is the late watch's tap (the step down: rearm why input-late). cb8c0a86 tapped there at the first pointerdown or
+    // keydown: the pan, the button and the key each stepped — the exit cancelled by a press that was none
+    for (const tag of ['panPending', 'mousePending', 'keyPending', 'tapPending', 'acrossStay']) {
+      const w = world({ navApi: true, doc: 'B', navType: 'navigate', search: '?session=x', sidebarOpen: true, index: 4, activation: ACT,
+        entries: [{ prev: true, state: null, href: 'data:prev' }, { state: null, href: PG, doc: 'A', ms: 6000 }, { state: { vs: 1 }, href: PG, doc: 'A' }, { state: { vs: 1 }, href: PG, doc: 'A', sub: true }, { state: null, href: PG + '?session=x', doc: 'B' }] });
+      M.installMobileBack(w.app);
+      w.back(); w.advance(500); w.back(); w.advance(10);
+      if (tag === 'acrossStay') { w.advance(2900); w.ptr('pointerdown'); await flush(); w.advance(300); await flush(); w.ptr('pointerup'); } else {
+        w.advance(1000);
+        if (tag === 'panPending') w.pan(); else if (tag === 'mousePending') w.mouse(3); else if (tag === 'keyPending') w.key({ key: 'ArrowLeft', altKey: true }); else w.input();
+      }
+      w.advance(10); await flush(); w.advance(10); await flush();
+      const first = w.diary()[0].d;
+      const mid = { steps: w.H.steps, aborts: w.H.aborts, loads: w.H.loads, sentinel: w.onSentinel(), intent: w.intent(), rows: exitRows(w, first) };
+      const none = tag !== 'tapPending' && tag !== 'acrossStay'; // no tap: the go() goes on
+      for (let i = 0; none && i < 60 && w.H.loads === 0; i++) w.advance(100); // the late commit at 6 s
+      let hop = null; // the landing boots at its commit (the fake clock would run the gone document's timers on)
+      if (none && w.H.loads === 1) { w.newDoc({ doc: 'A', activation: w.arrivalNow() }); hop = M2.continueExit(); w.advance(10); await flush(); }
+      w.advance(7000); await flush();
+      const bRows = exitRows(w, first);
+      R[tag] = none
+        ? mid.steps === 0 && mid.aborts === 0 && mid.intent?.hop === 0 && !/input/.test(bRows) && !!hop && w.H.left && /^3\/0,cancelled,rearm:cancelled,slow:60\d\d$/.test(bRows) && w.captures.length === 0
+        : w.H.steps === 1 && w.H.aborts === 1 && w.H.loads === 0 && !w.H.left && w.onSentinel() && w.intent() === null && w.listeners('beforeunload') === 0 && NO_TAPS(w)
+          && bRows === (tag === 'tapPending' ? '3/0,input,rearm:input' : '3/0,cancelled,rearm:cancelled,rearm:input-late');
+      R[tag + 'Detail'] = { mid, steps: w.H.steps, aborts: w.H.aborts, loads: w.H.loads, left: w.H.left, bRows, hop: !!hop, captures: w.captures.length };
+    }
+  }
+  { // round 8 — A PRESS ACROSS A HOP'S 700 ms: the exit's go(-3) lands on the older document ON an iframe link's joint
+    // step (G7's road, one more iframe link inside that document), so its first hop is an iframe-only step that starts
+    // nothing; a press there — down at 600 ms, up at 750 ms, after nothing() at 700 ms went on to the next hop — is ONE
+    // tap: that hop's go() (onto the page before VibeSpace, answering in 2 s) pending, the step aborts it — the page stays
+    // (hop stay why input), the intent dropped, nothing commits, no listener left; `straddleIdle` (the whole tab
+    // VibeSpace's, every hop starting nothing — hopCap's road): the page stays at the release (hop stay why input), no
+    // third hop, no cap; a PAN across it (the pointercancel at 750 ms) is none: the exit goes on, the tab outside.
+    // bd7dd961 lost the press at the boundary (nothing() took the pending listener and its pointers with it): the exit
+    // went on under the person's finger; cb8c0a86 stopped it at the pointerdown
+    const hopRows = (w, first) => w.diary().filter((r) => r.d !== first && r.k === 'hop').map((r) => (r.slow ? `slow:${r.slow}` : r.stay ? `stay:${r.why}` : `n${r.n}`)).join();
+    for (const tag of ['straddle', 'straddlePan', 'straddleIdle']) {
+      const idle = tag === 'straddleIdle';
+      const w = idle
+        ? world({ navApi: true, doc: 'B', navType: 'reload', sidebarOpen: true, index: 2, activation: ACT,
+          entries: [{ state: null, href: PG, doc: 'A' }, { state: null, href: PG, doc: 'A', sub: true }, { state: null, href: PG, doc: 'B' }] })
+        : world({ navApi: true, doc: 'B', navType: 'navigate', search: '?session=x', sidebarOpen: true, index: 5, activation: ACT,
+          entries: [{ prev: true, state: null, href: 'data:prev', ms: 2000 }, { state: null, href: PG, doc: 'A' }, { state: null, href: PG, doc: 'A', sub: true }, { state: { vs: 1 }, href: PG, doc: 'A' }, { state: { vs: 1 }, href: PG, doc: 'A', sub: true }, { state: null, href: PG + '?session=x', doc: 'B' }] });
+      M.installMobileBack(w.app);
+      w.back(); w.advance(idle ? 300 : 500); w.back(); w.advance(10);
+      const landed = w.H.loads === 1 && w.H.loadedAt === (idle ? 0 : 2), first = w.diary()[0].d;
+      w.newDoc({ doc: 'A', activation: w.arrivalNow() });
+      const hop = M2.continueExit(); let why = null; hop?.then((x) => { why = x; });
+      w.advance(600); await flush(); w.ptr('pointerdown'); await flush();
+      w.advance(150); await flush(); // nothing() at 700 ms: the next hop's go()
+      const at = { rows: hopRows(w, first), listeners: w.listeners('pointerup') };
+      w.ptr(tag === 'straddlePan' ? 'pointercancel' : 'pointerup'); w.advance(10); await flush(); w.advance(10); await flush();
+      const mid = { steps: w.H.steps, aborts: w.H.aborts, why, intent: w.intent(), left: w.H.left };
+      if (why) { M2.installMobileBack(w.app); await flush(); } // the page stayed: it boots
+      w.advance(5000); await flush();
+      const rows = hopRows(w, first);
+      R[tag] = landed && !!hop && at.rows === 'n1,n2' && at.listeners === 1 && (tag === 'straddlePan'
+        ? mid.steps === 0 && mid.why === null && w.H.left && rows === 'n1,n2' && w.captures.length === 0
+        : mid.why === 'input' && mid.intent === null && !w.H.left && w.H.loads === 1 && w.listeners('beforeunload') === 0 && NO_TAPS(w)
+          && (idle ? mid.steps === 0 && rows === 'n1,n2,stay:input' : mid.steps === 1 && mid.aborts === 1 && rows === 'n1,n2,stay:input'));
+      R[tag + 'Detail'] = { landed, hop: !!hop, at, mid, left: w.H.left, loads: w.H.loads, rows, captures: w.captures.length };
+    }
+  }
+  { // round 5 — A CHAIN OF SLOW PAGES (G7's road): the older document's HTML at 3.5 s (the exit's go() stays at its bound
+    // and leaves late), then its hop's go() onto the page before VibeSpace slow too (5 s): the older document goes on
+    // (hop 1), stays at its own bound (hop 1 stay why cancelled) and boots — it went on, so it files nothing (round 4: its
+    // boot read the exit's slow row and filed «a slow exit»); its commit then leaves it — the tab outside
+    const w = world({ navApi: true, doc: 'B', navType: 'navigate', search: '?session=x', sidebarOpen: true, index: 4, activation: ACT,
+      entries: [{ prev: true, state: null, href: 'data:prev', ms: 5000 }, { state: null, href: PG, doc: 'A', ms: 3500 }, { state: { vs: 1 }, href: PG, doc: 'A' }, { state: { vs: 1 }, href: PG, doc: 'A', sub: true }, { state: null, href: PG + '?session=x', doc: 'B' }] });
+    M.installMobileBack(w.app);
+    w.back(); w.advance(500); w.back(); w.advance(10);
+    w.advance(3500); // the late commit onto the older document
+    const landed = w.H.loads === 1 && w.H.loadedAt === 1, first = w.diary()[0].d;
+    w.newDoc({ doc: 'A', activation: w.arrivalNow() });
+    const hop = M2.continueExit(); let why = null; hop?.then((x) => { why = x; });
+    w.advance(3100); await flush(); // its own bound
+    if (why) { M2.installMobileBack(w.app); await flush(); }
+    w.advance(2500); await flush(); // its go() commits
+    const mine = w.diary().filter((r) => r.d !== first && r.k === 'hop').map((r) => (r.slow ? `slow:${r.slow}` : r.stay ? `stay:${r.why}` : `n${r.n}`)).join();
+    R.chain = landed && !!hop && why === 'cancelled' && w.H.left && /^n1,stay:cancelled,slow:5\d\d\d$/.test(mine) && w.captures.length === 0 && !w.diary().some((r) => r.k === 'cost');
+    R.chainDetail = { landed, hop: !!hop, why, left: w.H.left, mine, captures: w.captures.map((c) => c.reason) };
+  }
+  { // round 5 — a #FRAGMENT LINK during the late watch (G7's road, the older document answering in 6 s; at 4 s, after the
+    // stay, a link to a heading in rendered markdown followed with no tap — an assistive technology's activation): its
+    // navigation is a push that aborts nothing (measured on Chrome 154), so the late commit still comes at 6 s and the
+    // watch holds — the slow row, the re-key — and the older document goes on. Round 4: the fragment's popstate ended
+    // the watch — no slow row, no re-key: the older document's activation named the fragment's sentinel, not the
+    // intent's entry, and it booted, filing nothing
+    const w = world({ navApi: true, doc: 'B', navType: 'navigate', search: '?session=x', sidebarOpen: true, index: 4, activation: ACT,
+      entries: [{ prev: true, state: null, href: 'data:prev' }, { state: null, href: PG, doc: 'A', ms: 6000 }, { state: { vs: 1 }, href: PG, doc: 'A' }, { state: { vs: 1 }, href: PG, doc: 'A', sub: true }, { state: null, href: PG + '?session=x', doc: 'B' }] });
+    M.installMobileBack(w.app);
+    w.back(); w.advance(500); w.back(); w.advance(10);
+    w.advance(3100); await flush();
+    w.advance(900); w.fragment('#heading'); await flush();
+    const mid = { sentinel: w.onSentinel(), intent: w.intent(), pushes: w.H.pushes, loads: w.H.loads };
+    w.advance(2100); await flush(); // the commit at 6 s
+    const landed = w.H.loads === 1 && w.H.loadedAt === 1, first = w.diary()[0].d, bRows = exitRows(w, first);
+    w.newDoc({ doc: 'A', activation: w.arrivalNow() });
+    const hop = M2.continueExit(); w.advance(10); await flush();
+    let booted = false;
+    if (!hop) { M2.installMobileBack(w.app); await flush(); booted = true; }
+    R.fragLate = landed && mid.loads === 0 && mid.sentinel && mid.intent?.hop === 0 && /^3\/0,cancelled,rearm:cancelled,slow:60\d\d$/.test(bRows) && !!hop && !booted && w.H.left && w.captures.length === 0;
+    R.fragLateDetail = { landed, mid, bRows, hop: !!hop, booted, left: w.H.left, captures: w.captures.map((c) => c.reason) };
+  }
+  { // round 5 — the document a late commit landed on (its list shows a stale COPY of its own entry right above it, index
+    // -1, its key — measured on Chrome 154 after its own push and a back), with an older VibeSpace document below it: its
+    // exit's go() pending (the page before answering in 6 s), a tap 1 s in. Its step skips the copy — onto the real
+    // sentinel above: ABORTED, re-armed (round 4's forward() went onto the copy: it committed at once, moved nothing and
+    // aborted nothing — the commit came and the tap was lost). A step the sentinel REFUSES: not aborted — the page
+    // stays and re-arms (a new sentinel: rearm why input abort 0) and the intent is KEPT for a commit still to come
+    // (round 4: neither re-armed nor its intent dropped)
+    for (const tag of ['ghostTap', 'refused']) {
+      const X = PG + '?session=x';
+      const w = world({ navApi: true, doc: 'A', navType: 'reload', search: '?session=x', sidebarOpen: true, index: 4, activation: ACT, ghost: 3,
+        entries: [{ prev: true, state: null, href: 'data:prev' }, { other: true, state: null, href: 'https://other.test/', ms: 6000 }, { state: null, href: PG, doc: 'O' }, { state: null, href: X, doc: 'A' }, { state: { vs: 1 }, href: X, doc: 'A', refuse: tag === 'refused' }] });
+      M.installMobileBack(w.app);
+      const boot = w.diary()[0];
+      w.back(); w.advance(500); w.back(); w.advance(10);
+      w.advance(1000); w.input(); w.advance(10); await flush(); w.advance(10); await flush();
+      const mid = { index: w.H.index, sentinel: w.onSentinel(), intent: w.intent(), loads: w.H.loads, aborts: w.H.aborts, pushes: w.H.pushes }, first = boot.d;
+      w.advance(7000); await flush();
+      const bRows = exitRows(w, first);
+      R[tag] = boot.step === 'keep' && (tag === 'ghostTap'
+        ? mid.aborts === 1 && mid.sentinel && mid.index === 4 && mid.intent === null && !w.H.left && bRows === '2/0,input,rearm:input' && NO_TAPS(w)
+        : mid.aborts === 0 && mid.sentinel && mid.intent?.hop === 0 && mid.pushes === 1 && /^2\/0,input,rearm:input\/0,slow:60\d\d$/.test(bRows) && w.H.left);
+      R[tag + 'Detail'] = { boot: boot.step, mid, left: w.H.left, bRows };
+    }
   }
   { // round 3 — the exit's go() lands on an older document the back/forward cache KEPT: shown again (pageshow persisted, its
     // activation FROM the entry the intent names) it goes on — ONE go(-1) onto the page before VibeSpace (round 2: its
@@ -865,6 +1153,25 @@ ok(R5.later, 'round 4: …answering in 12 s (past the intent\'s window — dropp
 ok(R5.tapAbort, 'round 4: a TAP while the exit\'s go() is pending (the older document answering in 6 s): the go() ABORTED by the step onto the sentinel above — re-armed (leave why input, rearm why input), the intent dropped, nothing commits, no listener left', R5.tapAbortDetail);
 ok(R5.tapRace, 'round 4: …the commit FIRST (it answered just then): the diary says so (leave why input, then leave slow) and the intent, kept for it, makes the older document go on — the landing document\'s rule', R5.tapRaceDetail);
 ok(R5.hopSlow, 'round 4: a HOP\'s go() slower than the bound (4 s): the older document stays at 3 s and boots, then leaves after all — the diary says so (hop 1 slow 4000), the tab outside, no incident', R5.hopSlowDetail);
+ok(R5.lateTap, 'round 5: a TAP AFTER THE STAY (the older document answering in 6 s, the tap at 4 s): the step DOWN onto the page\'s own entry ABORTS the suspended go() — a new sentinel (rearm why input-late), the intent dropped, nothing commits, the step no back press (one toast), no listener left', R5.lateTapDetail);
+ok(R5.lateRace, 'round 5: …the commit FIRST (it answered just then): the intent, kept for it, makes the older document go on — the tab outside', R5.lateRaceDetail);
+ok(R5.backKey, 'round 5: after a cancelled exit\'s stay, the browser\'s own back BY KEY (Alt+←, its keydown first) is no tap — no abort, no input-late row — and the back it is shows the toast', R5.backKeyDetail);
+ok(R5.mouseBack, 'round 6: after the stay (the older document answering in 6 s), a MOUSE\'S BACK BUTTON (button 3, the browser\'s back at the release) is no tap — no step, no input-late row; the browser\'s own back aborts the suspended go(): the toast, nothing loads, no listener left', R5.mouseBackDetail);
+ok(R5.mouseBackQuick, 'round 6: …its back queued before anything the press set off ran (a quick click, a busy page): the same — no step, the toast, nothing loads', R5.mouseBackQuickDetail);
+ok(R5.mouseFwd, 'round 6: …the mouse\'s FORWARD button (4): no step — nothing above, the go() commits late as without it, the intent kept: the older document goes on, nothing filed', R5.mouseFwdDetail);
+ok(R5.pan, 'round 6: …a PAN (a pointerdown, then the pointercancel of a touch the browser took): no tap — no step, the late commit told, the older document goes on, nothing filed', R5.panDetail);
+ok(R5.panPending, 'round 7: ONE TAP IN BOTH PHASES — 1 s into the exit, the go() still PENDING (the older document answering in 6 s), a PAN (a pointerdown, then the pointercancel of a touch the browser took): no tap — no step, no input row; the stay at 3 s, the late commit told, the older document goes on, nothing filed', R5.panPendingDetail);
+ok(R5.mousePending, 'round 7: …a MOUSE\'S BACK BUTTON there (button 3): no tap — no step (the browser\'s own back at the release is the browser\'s)', R5.mousePendingDetail);
+ok(R5.keyPending, 'round 7: …the browser\'s back BY KEY there (Alt+←, its keydown first): no tap — no step', R5.keyPendingDetail);
+ok(R5.tapPending, 'round 7: …a real TAP there (its pointerdown and its pointerup) still aborts the go() by the step UP onto the sentinel — re-armed (leave why input, rearm why input), the intent dropped, nothing commits, no listener left', R5.tapPendingDetail);
+ok(R5.acrossStay, 'round 7: a press that began while the go() was pending (2.9 s) and ends after the stay (3.2 s) is ONE tap — the late watch\'s: the step down aborts the suspended go() (rearm why input-late), nothing commits, no listener left', R5.acrossStayDetail);
+ok(R5.straddle, 'round 8: A PRESS ACROSS A HOP\'S 700 ms — on the older document the exit lands on, its first hop an iframe-only step: a press down at 600 ms and up at 750 ms (after nothing() went on to the next hop) is ONE tap — that hop\'s go() pending, the step aborts it: the page stays (hop stay why input), the intent dropped, nothing commits, no listener left', R5.straddleDetail);
+ok(R5.straddleIdle, 'round 8: …every hop starting nothing (the whole tab VibeSpace\'s): the page stays at the release (hop stay why input) — no third hop, no cap', R5.straddleIdleDetail);
+ok(R5.straddlePan, 'round 8: …a PAN across that boundary (the pointercancel at 750 ms) is no tap: the exit goes on, the tab outside, nothing filed', R5.straddlePanDetail);
+ok(R5.chain, 'round 5: A CHAIN OF SLOW PAGES — the late landing goes on (hop 1), its own go() slow too: it stays at its own bound and boots, then leaves (hop 1 stay why cancelled, hop 1 slow) — and files NOTHING', R5.chainDetail);
+ok(R5.fragLate, 'round 5: a #FRAGMENT LINK during the late watch (a push: it aborts nothing) keeps the watch — the late commit\'s slow row and re-key — and the older document goes on, nothing filed', R5.fragLateDetail);
+ok(R5.ghostTap, 'round 5: on a late landing document (a stale COPY of its own entry listed right above it, index -1) a tap\'s step skips the copy: onto the real sentinel — ABORTED, re-armed (leave why input, rearm why input)', R5.ghostTapDetail);
+ok(R5.refused, 'round 5: …a step the sentinel REFUSES: NOT aborted — the page stays and re-arms (a new sentinel: rearm why input abort 0), the intent KEPT for the commit still to come (it comes: leave slow)', R5.refusedDetail);
 ok(R5.kept, 'round 3: the exit\'s go() lands on an older document the cache KEPT — shown again, activation from the entry the intent names: it goes on (show, hop 1 skip 1), onto the page before VibeSpace; no load', R5.keptDetail);
 ok(R5.noApi && R5.noAct, 'round 3: NO KEY, NO HOP — an intent inside 10 s on a back_forward load (a) with no Navigation API, (b) with entries() but no navigation.activation: dropped (a drop row), the app boots', { a: R5.noApiDetail, b: R5.noActDetail });
 ok(R5.noActExit, 'round 3: …and on such a browser the exit writes NO intent — one go(-3) past every older entry', R5.noActExitDetail);
@@ -941,6 +1248,10 @@ const bgSrc = read('src/lib/back-guard.js');
   const M6 = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from6s, "  return prev.some((r) => r && (r.k === 'leave' || r.k === 'hop'));\n"), 'slow-any-leave')).href);
   const bad6 = judgeSlow(M6);
   ok(bgSrc.includes(from6s) && bad6.length === 2 && bad6.every((n) => /in time|never committed/.test(n)), 'CONTROL: a slowExit that never asks for the slow row fails exactly the in-time exit and the never-committed stay', bad6);
+  const from6m = "  if (mine.some((r) => r && r.k === 'hop' && !r.drop)) return false;\n";
+  const M6m = await import(pathToFileURL(MUT.write('src/lib/back-guard.js', bgSrc.replace(from6m, ''), 'slow-went-on')).href);
+  const bad6m = judgeSlow(M6m);
+  ok(bgSrc.includes(from6m) && bad6m.length === 2 && bad6m.every((n) => /WENT ON|its cap/.test(n)), 'CONTROL (RED from round 4): a slowExit blind to this document\'s own rows fails exactly the document that went on and the one at its cap', bad6m);
 }
 { // the wiring's controls — the pre-fix shapes over the same documents
   const from = 'const step = bootStep({ phone: true, enabled: enabled(), state: stateAtBoot, navType: facts.type, wasDiscarded: facts.disc, belowSame });';
@@ -962,8 +1273,8 @@ const bgSrc = read('src/lib/back-guard.js');
   const RU = await legsOf(wiringSrc.replace(from6, "  window.addEventListener('pagehide', onHide);\n"), 'pagehide-judge');
   ok(wiringSrc.includes(from6) && !RU.slow && RU.slowDetail.loads === 1, 'CONTROL (RED from round 1): pagehide as the fallback\'s judge — the go() onto a slow page is taken for one that started nothing, and the fallback LOADS the tab\'s first entry', RU.slowDetail);
   // round 3's controls — round 2's shapes over the same documents
-  const from7a = "  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); stayed('cancelled', null); linger(); }, GONE_WAIT_MS); };\n";
-  const from7b = '  const onInput = () => {\n    off();\n    if (!began) { drop(); input(); return; }\n    const abort = abortGo();\n    if (!abort) drop();\n    stayed(\'input\', abort);\n    const end = linger();\n    abort?.then((landed) => { if (landed) { drop(); end(); } });\n  };\n';
+  const from7a = "  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); stayed('cancelled'); linger(); listenTaps(); }, GONE_WAIT_MS); };\n";
+  const from7b = '  const onInput = () => {\n    off();\n    if (!began) { drop(); input(); return; }\n    stayed(\'input\'); linger(); tapped(\'input\');\n  };\n';
   const RC = await legsOf(wiringSrc.replace(from7a, '  const onLeave = () => { began = true; };\n').replace(from7b, '  const onInput = () => { if (!began) { off(); drop(); input(); } };\n'), 'unbounded');
   ok(wiringSrc.includes(from7a) && wiringSrc.includes(from7b) && !RC.cancel && RC.cancelDetail.why === null && RC.cancelDetail.held[0] === 1 && !RC.cancelTap && !RC.exitCancel && RC.iframe && RC.slow,
     'CONTROL (RED from round 2): an unbounded go() whose tap is ignored while pending — the hop\'s cancelled go() never settles (the splash for good, its beforeunload listener held), the tap does nothing, the exit\'s intent lingers; the iframe and slow roads hold', { cancel: RC.cancelDetail, tap: RC.cancelTapDetail, exit: RC.exitCancelDetail });
@@ -977,18 +1288,18 @@ const bgSrc = read('src/lib/back-guard.js');
     await bundleWiring(wiringSrc, 'clock-alone-next', clockAlone));
   ok(wiringSrc.includes(from9) && bgSrc.includes(keyLine) && !RN.noApi && !RN.noAct && !RN.noActExit && RN.iframe && RN.kept, 'CONTROL (RED from round 2): the clock-alone exitHop + an intent written without activation — a back_forward load inside 10 s HOPS with no key (a, b) and the exit writes its intent anyway; the keyed roads hold', { a: RN.noApiDetail, b: RN.noActDetail, exit: RN.noActExitDetail });
   // round 4's controls — round 3's shapes over the same documents, one finding each
-  const RD = await legsOf(wiringSrc.replace(from7a, "  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); drop(); stayed('cancelled', null); }, GONE_WAIT_MS); };\n"), 'drop-at-bound');
+  const RD = await legsOf(wiringSrc.replace(from7a, "  const onLeave = () => { began = true; clearTimeout(bound); bound = setTimeout(() => { off(); drop(); stayed('cancelled'); }, GONE_WAIT_MS); };\n"), 'drop-at-bound');
   ok(!RD.late && RD.lateDetail.booted && RD.lateDetail.captures.length === 0 && !RD.later && RD.laterDetail.captures.length === 0 && !RD.exitCancel && !RD.hopSlow && RD.tapAbort && RD.iframe && RD.kept,
     'CONTROL (RED from round 3): the bound DROPS the intent and watches nothing after — the exit on a slow link lands on the older document, which boots with no intent and files NOTHING (the owner\'s silent load), the 12 s landing too; the abort and the loaded roads hold', { late: RD.lateDetail, later: RD.laterDetail });
-  const fromA = "        else if (enabled() && app.isMobile !== false) { push(); navNote({ k: 'rearm', why }); }\n";
+  const fromA = " if (why === 'cancelled') rearm(why);";
   const RA = await legsOf(wiringSrc.replace(fromA, ''), 'no-rearm');
   ok(wiringSrc.includes(fromA) && !RA.rearm && RA.exitCancelDetail.loads === 1 && RA.lateDetail.hop && RA.tapAbort && RA.iframe,
     'CONTROL (RED from round 3): a stay that never re-arms — the next back after the cancelled exit is the browser\'s own onto the older document: a LOAD, no toast; the slow road (it still goes on) and the abort hold', RA.exitCancelDetail);
-  const fromB = "  const onInput = () => { off(); drop(); if (began) stayed('input', null); else input(); };\n";
+  const fromB = "  const onInput = () => { off(); drop(); if (began) stayed('input'); else input(); };\n";
   const RB2 = await legsOf(wiringSrc.replace(from7b, fromB), 'no-abort');
   ok(!RB2.tapAbort && RB2.tapAbortDetail.loads === 1 && !RB2.tapRace && !RB2.cancelTap && RB2.late && RB2.exitCancel && RB2.leaveInput,
     'CONTROL (RED from round 3): a tap that only drops the intent — the pending traversal goes on and the older document LOADS (the tap lost), the race leaves it with no intent, the hop\'s tap aborts nothing; the slow and cancelled roads hold', { tap: RB2.tapAbortDetail, race: RB2.tapRaceDetail, hop: RB2.cancelTapDetail });
-  const fromK = "      if (ours()) exitIntentWrite({ t: mine.t, hop: mine.hop, key: entryKey(), to: 'below' });\n";
+  const fromK = "    if (ours()) exitIntentWrite({ t: mine.t, hop: mine.hop, key: entryKey(), to: 'below' });\n";
   const RK2 = await legsOf(wiringSrc.replace(fromK, ''), 'no-rekey');
   ok(wiringSrc.includes(fromK) && !RK2.late && RK2.lateDetail.hop === false && RK2.lateDetail.captures.join() === 'a slow exit' && RK2.tapRace && RK2.later,
     'CONTROL: no re-key at the late pagehide — the older document\'s activation names the NEW sentinel, not the entry the intent was written on: no hop (it boots and files «a slow exit»); the race, which left from the page entry, holds', RK2.lateDetail);
@@ -1000,10 +1311,57 @@ const bgSrc = read('src/lib/back-guard.js');
   const RW = await legsOf(wiringSrc.replace(fromW, ''), 'way-other');
   ok(wiringSrc.includes(fromW) && !RW.later && RW.laterDetail.captures.length === 0 && RW.late,
     'CONTROL (Chrome 154, measured): both activation indexes -1 read as another site\'s page — the late landing past the window files nothing; the hop holds', RW.laterDetail);
-  const fromL = '  const late = slowExit({ navType: facts.type, prev, now: Date.now(), came });\n';
+  const fromL = '  const late = slowExit({ navType: facts.type, prev, now: Date.now(), came, mine: navLogRead().filter((r) => r && r.d === DOC_ID) });\n';
   const RL = await legsOf(wiringSrc.replace(fromL, '  const late = false;\n'), 'no-late-incident');
   ok(wiringSrc.includes(fromL) && !RL.later && RL.laterDetail.captures.length === 0 && RL.late && RL.capture,
     'CONTROL (RED from round 3): no slowExit at the boot — the landing past the window boots and files nothing; the back\'s own capture holds', RL.laterDetail);
+  // round 5's controls — round 4's shapes over the same documents, one finding each
+  const fromT = "  const onLateInput = (e) => { if (tapOf(downs, e)) { stopTaps(); tapped('input-late'); } };\n";
+  const RT = await legsOf(wiringSrc.replace(fromT, '  const onLateInput = () => { stopTaps(); drop(); };\n'), 'late-tap-drops');
+  ok(wiringSrc.includes(fromT) && !RT.lateTap && RT.lateTapDetail.loads === 1 && RT.lateTapDetail.aborts === 0 && RT.tapAbort && RT.late,
+    'CONTROL (RED from round 4): a late tap that only drops the intent — the suspended go() commits at 6 s and the older document LOADS (the person yanked to it); the pending tap\'s abort and the slow road hold', RT.lateTapDetail);
+  const fromM = ', mine: navLogRead().filter((r) => r && r.d === DOC_ID) });';
+  const RM = await legsOf(wiringSrc.replace(fromM, ' });'), 'slow-blind');
+  ok(wiringSrc.includes(fromM) && !RM.chain && RM.chainDetail.captures.join() === 'a slow exit' && RM.chainDetail.left && RM.later,
+    'CONTROL (RED from round 4): a boot blind to its own hop rows — the chain\'s landing, which went on and only stayed at its own bound, files «a slow exit»; the 12 s landing\'s incident holds', RM.chainDetail);
+  const fromF = "    if (how ? how === 'traverse' : location.href === baseHref) lingering?.();\n";
+  const RF = await legsOf(wiringSrc.replace(fromF, '    lingering?.();\n'), 'every-pop-ends');
+  ok(wiringSrc.includes(fromF) && !RF.fragLate && RF.fragLateDetail.booted && RF.fragLateDetail.captures.length === 0 && !/slow:/.test(RF.fragLateDetail.bRows) && RF.lateTap && RF.late,
+    'CONTROL (RED from round 4): every popstate ends the late watch — the fragment link\'s ends it: no slow row, no re-key, the older document boots and files nothing (the owner\'s silent load); the late tap and the slow road hold', RF.fragLateDetail);
+  const fromG = wiringSrc.slice(wiringSrc.indexOf('function abortGo(home = \'\') {'), wiringSrc.indexOf('\n}\n', wiringSrc.indexOf('function abortGo(home = \'\') {')) + 3);
+  const round4Go = "function abortGo() {\n  try {\n    const nav = globalThis.navigation, list = nav.entries(), at = indexIn(nav, list), up = at >= 0 ? list[at + 1] : null;\n    if (!up || !up.sameDocument) return null;\n    const step = nav.forward();\n    step.finished?.catch?.(() => { });\n    return step.committed.then(() => true, () => false);\n  } catch { return null; }\n}\n";
+  const RG2 = await legsOf(wiringSrc.replace(fromG, round4Go), 'round-4-abort');
+  ok(fromG.length > 400 && wiringSrc.split(fromG).length === 2 && !RG2.ghostTap && RG2.ghostTapDetail.mid.aborts === 0 && RG2.ghostTapDetail.left && !RG2.lateTap && RG2.lateTapDetail.loads === 1 && RG2.tapAbort,
+    'CONTROL (RED from round 4): round 4\'s abortGo — forward() onto the entry listed above: on the late landing document that is the stale COPY (it commits at once, moves nothing, aborts nothing — the exit goes on, the tap lost), and after the stay there is none (the late tap lost); the pending tap on a plain page holds', { ghost: RG2.ghostTapDetail, late: RG2.lateTapDetail });
+  const fromN = '  if (navInput(e)) return false;\n';
+  const RN2 = await legsOf(wiringSrc.replace(fromN, ''), 'nav-key-taps');
+  ok(wiringSrc.includes(fromN) && !RN2.backKey && RN2.backKeyDetail.mid.aborts === 1 && /input-late/.test(RN2.backKeyDetail.mid.rows) && RN2.lateTap,
+    'CONTROL (Chrome 154, measured): the browser\'s back key read as a tap — the late watch\'s step runs ahead of the browser\'s own back (an abort, rearm why input-late); the late tap holds', RN2.backKeyDetail);
+  // round 6's controls — 36df506a's late watch, one rule each
+  const fromBtn = "const navInput = (e) => !!e && (e.type === 'keydown' ? !!e.altKey || !!e.metaKey || e.key === 'BrowserBack' || e.key === 'BrowserForward' : e.button === 3 || e.button === 4);\n";
+  const RMB = await legsOf(wiringSrc.replace(fromBtn, "const navInput = (e) => !!e && e.type === 'keydown' && (!!e.altKey || !!e.metaKey || e.key === 'BrowserBack' || e.key === 'BrowserForward');\n"), 'mouse-taps');
+  ok(wiringSrc.includes(fromBtn) && !RMB.mouseBack && RMB.mouseBackDetail.steps === 1 && /input-late/.test(RMB.mouseBackDetail.bRows) && !RMB.mouseBackQuick && RMB.mouseBackQuickDetail.loads === 1 && !RMB.mouseFwd && RMB.backKey && RMB.lateTap && RMB.pan,
+    'CONTROL (RED from 36df506a, Chrome 154 measured): a predicate for keys alone — the mouse\'s back button is a tap: the step down onto the page\'s entry (rearm why input-late), the exit cancelled by the browser\'s own back; its quick release then goes from there onto the older document: a LOAD; the forward button steps too; the back key, the late tap and the pan hold', { back: RMB.mouseBackDetail, quick: RMB.mouseBackQuickDetail, fwd: RMB.mouseFwdDetail });
+  const fromDown = "  if (e.type === 'pointerdown') { downs.add(id); return false; }\n";
+  const RPC = await legsOf(wiringSrc.replace(fromDown, "  if (e.type === 'pointerdown') return true;\n"), 'down-taps');
+  ok(wiringSrc.includes(fromDown) && !RPC.pan && RPC.panDetail.steps === 1 && /input-late/.test(RPC.panDetail.bRows) && !RPC.panDetail.left && RPC.lateTap && RPC.mouseBack,
+    'CONTROL (RED from 36df506a): a tap at the pointerdown — the pan steps down onto the page\'s entry (rearm why input-late): the exit cancelled by a touch the browser took; the late tap and the mouse\'s back button hold', RPC.panDetail);
+  // round 7's control — cb8c0a86's pending phase: a tap at the first pointerdown or keydown, any button, any key
+  const fromP = '  const onPendingInput = (e) => { if (tapOf(downs, e)) onInput(); };\n';
+  const RP7 = await legsOf(wiringSrc.replace(fromP, "  const onPendingInput = (e) => { if (e.type === 'pointerdown' || e.type === 'keydown') onInput(); };\n"), 'pending-down-taps');
+  ok(wiringSrc.includes(fromP) && !RP7.panPending && RP7.panPendingDetail.mid.steps === 1 && RP7.panPendingDetail.mid.aborts === 1 && RP7.panPendingDetail.mid.intent === null && RP7.panPendingDetail.bRows === '3/0,input,rearm:input' && !RP7.panPendingDetail.left
+    && !RP7.mousePending && !RP7.keyPending && !RP7.acrossStay && RP7.tapPending && RP7.pan && RP7.lateTap,
+    'CONTROL (RED from cb8c0a86): the pending phase taps at the first pointerdown or keydown — a pan 1 s into the slow exit steps UP onto the sentinel: the exit CANCELLED (leave why input, rearm why input, the intent dropped) by a touch the browser took; the mouse\'s back button and the back key step too, the press across the stay taps at its pointerdown; the real tap, the late watch\'s pan and tap hold', { pan: RP7.panPendingDetail, mouse: RP7.mousePendingDetail, key: RP7.keyPendingDetail, across: RP7.acrossStayDetail });
+  // round 8's control — bd7dd961's nothing() road: no pointer handed on to the next hop's watch
+  const fromH = '  wait = setTimeout(() => { if (!began) { off(); nothing(downs); } }, GO_WAIT_MS);\n';
+  const RH8 = await legsOf(wiringSrc.replace(fromH, '  wait = setTimeout(() => { if (!began) { off(); nothing(); } }, GO_WAIT_MS);\n'), 'nothing-drops-downs');
+  ok(wiringSrc.includes(fromH) && !RH8.straddle && RH8.straddleDetail.mid.steps === 0 && RH8.straddleDetail.mid.why === null && RH8.straddleDetail.left && RH8.straddleDetail.rows === 'n1,n2'
+    && !RH8.straddleIdle && RH8.straddleIdleDetail.rows === 'n1,n2,n3,stay:cap' && RH8.straddlePan && RH8.tapPending && RH8.panPending && RH8.acrossStay && RH8.hopInput && RH8.hopCap,
+    'CONTROL (RED from bd7dd961): nothing() hands no pointer on — the press across the hop\'s 700 ms is no tap anywhere: no step, the next hop\'s go() commits, the exit goes on under the finger (every hop starting nothing: on to the cap); the pan across it, the pending tap and pan, the press across the stay, the hop\'s own tap and the cap hold', { straddle: RH8.straddleDetail, idle: RH8.straddleIdleDetail });
+  const fromR = '      if (!landed && saidKept) return;\n';
+  const RR2 = await legsOf(wiringSrc.replace(fromR, '      if (!landed) return;\n'), 'refusal-idle');
+  ok(wiringSrc.includes(fromR) && !RR2.refused && RR2.refusedDetail.mid.sentinel === false && RR2.refusedDetail.mid.intent?.hop === 0 && RR2.ghostTap && RR2.lateTap,
+    'CONTROL (RED from round 4): a step that did not land does nothing — the refused step leaves the page NOT re-armed and its intent neither dropped nor said; the landed steps hold', RR2.refusedDetail);
 }
 
 // ── §4 wiring pins ──
@@ -1015,8 +1373,8 @@ ok(importers.join() === 'app.js,viewport-switch.js' && read('src/lib/viewport-sw
   'mobile-back.js has TWO importers: app.js (a phone boot) and viewport-switch.js (the first fold to the phone, once — lane duo-build-1)', importers);
 ok((wiringSrc.match(/history\.pushState\(/g) || []).length === 1 && /const push = \(\) => \{ baseHref = location\.href; history\.pushState\(\{ vs: 1 \}, ''\); \};/.test(wiringSrc) && wiringSrc.includes('history.go(1);'), 'the wiring has ONE pushState (the sentinel) and re-arms by traversal (history.go(1))');
 const noComments = wiringSrc.replace(/\/\*\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-ok(wiringSrc.includes("        else if (enabled() && app.isMobile !== false) { push(); navNote({ k: 'rearm', why }); }") && /if \(!up \|\| !up\.sameDocument\) return null;\n    const step = nav\.forward\(\);/.test(wiringSrc) && !/window\.stop\(/.test(noComments),
-  'round 4: a stay re-arms with push() — never a traversal, which would ABORT a pending one (measured) — and a tap aborts one only by the step onto a same-document entry above (navigation.forward()); window.stop() appears nowhere (it aborts no traversal — measured)');
+ok(wiringSrc.includes(" if (why === 'cancelled') rearm(why);") && wiringSrc.includes('    if (!isSentinel(history.state)) push();\n') && /    ownStep = true;\n    const step = nav\.traverseTo\(to\.key\);/.test(wiringSrc) && !/\.forward\(\)|window\.stop\(/.test(noComments),
+  'round 4: a stay re-arms with push() — never a traversal, which would ABORT a pending one (measured); round 5: a tap aborts one only by a step BY KEY onto an entry of this document (navigation.traverseTo — no forward(), which goes onto whatever the list shows above); window.stop() appears nowhere (it aborts no traversal — measured)');
 ok(!/from '\.\/|import /.test(bgSrc.replace(/^\/\/.*$/gm, '')), 'back-guard.js imports nothing (PURE)');
 ok((wiringSrc.match(/history\.replaceState\(/g) || []).length === 1 && wiringSrc.includes("  if (step === 'rebuild') history.replaceState(null, '');\n  if (step === 'push' || step === 'rebuild') push();"), 'lane phone-back-reload: ONE replaceState — null state, no URL — and only on the rebuild, right before the sentinel\'s push');
 ok(read('src/lib/incident-recorder.js').includes('try { out.navLog = navLogRead(); } catch { }'), 'the incident snapshot carries the tab\'s diary (snapshot.navLog)');
@@ -1025,9 +1383,14 @@ ok(client.includes("const exitHop = continueExit();\ninstallTelemetry();") && cl
   'round 2: client.js asks continueExit before anything boots, and builds the App only when it settles (an older page the exit lands on never boots)');
 ok(/\n    if \(tellsArrival\(\)\) exitIntentWrite\(\{ t: Date\.now\(\), hop: 0, key: entryKey\(\), to: 'below' \}\);\n    const g = \+\+gen;\n    watchedGo\(-skip, \{/.test(wiringSrc) && /exitIntentWrite\(\{ t: Date\.now\(\), hop, key: entryKey\(\), to: 'below' \}\);[^\n]*\n[^\n]*\n\s*watchedGo\(-\(e\.current \+ 1\), /.test(wiringSrc),
   'round 2: the intent is written BEFORE each go() — the exit\'s (round 3: only where navigation.activation can name the landing) and every hop\'s');
-ok(/  window\.addEventListener\('beforeunload', onLeave\); window\.addEventListener\('pagehide', onHide\);\n  for \(const ev of INPUTS\) window\.addEventListener\(ev, onInput, true\);\n  history\.go\(n\);/.test(wiringSrc)
-  && /window\.removeEventListener\('beforeunload', onLeave\); window\.removeEventListener\('pagehide', onHide\);\n    for \(const ev of INPUTS\) window\.removeEventListener\(ev, onInput, true\);/.test(wiringSrc) && (wiringSrc.replace(/^\s*\/\/.*$/gm, '').match(/history\.go\(-/g) || []).length === 2,
+ok(/  window\.addEventListener\('beforeunload', onLeave\); window\.addEventListener\('pagehide', onHide\);\n  for \(const ev of TAPS\) window\.addEventListener\(ev, onPendingInput, true\);\n  history\.go\(n\);/.test(wiringSrc)
+  && /window\.removeEventListener\('beforeunload', onLeave\); window\.removeEventListener\('pagehide', onHide\);\n    for \(const ev of TAPS\) window\.removeEventListener\(ev, onPendingInput, true\);/.test(wiringSrc) && (wiringSrc.replace(/^\s*\/\/.*$/gm, '').match(/history\.go\(-/g) || []).length === 2,
   'round 3: the exit\'s go()s go through watchedGo — its judges listen BEFORE the go(), and off() removes each listener it added (the only bare go(-n) left: the named load and the fallback\'s)');
+ok((noComments.match(/tapOf\(downs, e\)/g) || []).length === 2 && /const onLateInput = \(e\) => \{ if \(tapOf\(downs, e\)\)/.test(noComments) && /const onPendingInput = \(e\) => \{ if \(tapOf\(downs, e\)\) onInput\(\); \};/.test(noComments)
+  && (noComments.match(/const TAPS = /g) || []).length === 1 && !/\bINPUTS\b/.test(noComments),
+  'round 7: ONE tap in both phases — the pending go()\'s listener and the late watch\'s each ask tapOf, over ONE list of events (TAPS)');
+ok(/  const downs = new Set\(held\);/.test(noComments) && /\{ off\(\); nothing\(downs\); \}/.test(noComments) && (noComments.match(/nothing: once,/g) || []).length === 1 && /hop, held \}\);/.test(noComments),
+  'round 8: a go() told «nothing» hands the pointers still down to the next hop\'s watch (nothing(downs) → once(held) → watchedGo({ held }))');
 const todos = read('src/lib/user-todos-panel.js');
 ok(/popup\.addEventListener\(BACK_DISMISS_EVENT, \(e\) => \{ e\.preventDefault\(\); hidePopup\('back'\); \}\);/.test(todos) && BG.BACK_DISMISS_EVENT === 'vs-back-dismiss', 'the For-you tray answers the back\'s dismiss through hidePopup (drafts stashed, rows dropped)');
 const schema = read('src/lib/settings-schema.js');

@@ -131,7 +131,7 @@ console.log('⑦ the For-you item');
   eq(it.action, { type: 'browser-takeover', requestId: 'tr-0000aaaa', profileId: 'bp-bank', browserKey: 'bk-aaaa', ephemeral: false }, 'the action names the request (its identity: src/user-todos.js ACTION_IDENTITY browser-takeover → requestId)');
   ok(/"Log in to the bank and solve the captcha"/.test(it.detail) && /Page: Sign in — Bank \(https:\/\/bank\.example\/login\)/.test(it.detail), 'the English detail: the words and the page');
   const UT = fs.readFileSync(path.join(ROOT, 'src/user-todos.js'), 'utf8');
-  ok(/'browser-takeover': 'requestId'/.test(UT), 'the store merges an item only with a filing of the same request');
+  ok(/\{ type: 'browser-takeover', identity: 'requestId',/.test(fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8')) && /const \{ ACTION_IDENTITY \} = require\('\.\/foryou-actions\.js'\);/.test(UT), 'the store merges an item only with a filing of the same request (THE For-you action registry\'s row — the store reads it)');
   eq(['handback', 'done', 'withdraw', 'lease-gone'].map((h) => R.resolvedByOf(R.transition(r, h, {}).rec)), ['handed-back', 'user', 'agent', 'conversation-gone'], 'who resolved the item: the handback · the person · the agent · the lease ended');
 }
 

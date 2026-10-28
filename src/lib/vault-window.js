@@ -34,7 +34,8 @@ import { passkeyDeleteWords } from './browser-panel-model.js';
 import { KIND_WORDS, countdownText, CLIPBOARD_CLEAR_MS, PURPOSES, purposeOf, PROVENANCES, provenanceOf, PROVENANCE_FILTERS, stateChipsOf, viewOf, bandItemsOf, bandDoorsOf } from '../vault-inventory.js'; // PURE: the rows' rules (test-vault-inventory)
 import { loadAutomation, automationExtras, showMintDialog } from './vault-automation.js'; // design q-046: «Automation keys» — mint, grant, revoke (never a value)
 import { loadLogins, loginExtras, showLoginAddDialog } from './vault-login-row.js'; // lane browser-login: a website login's row — 用于… (this account / any account on this site / any site) + 网站登录…
-import { loadTotp, totpExtras } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…
+import { loadTotp, totpExtras, showTotpAddDialog } from './vault-totp-row.js'; // design q-047 L1 (lane vault-totp): a two-step code's row — 看码 + its ring (GET /api/vault/totp/:name), 用于…; lane vault-totp-add: 添加… ▸ 两步验证…
+import { addOrderOf } from '../vault-kinds.js'; // PURE: THE KIND REGISTRY — which 添加… doors must exist, in its order (scripts/test-vault-kinds-census.mjs)
 import { inboxModel } from './user-todos-actions.js'; // lane vault-window-v2: 「需要你」 = For you's own items (one store, one set of answers)
 import { showSecretAddDialog, showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: 「其他密钥或密码…」 + an agent's paste request answered here (THE box, as a dialog)
 
@@ -93,18 +94,24 @@ const isTotp = (row) => row.kind === 'totp' || !!(row.doors && row.doors.code);
 const isLogin = (row) => row.kind === 'login' && !!(row.doors && row.doors.login);   // lane browser-login
 const SORT_CHOICES = [['used', () => t('Recently used')], ['name', () => t('Name')], ['kind', () => t('Kind')], ['created', () => t('Newest')]];   // design q-047 §3.2: 最近使用 first
 
-/** The store card's own confirm words for its delete door (the same keys the card uses). */
+/** 删除'S CONFIRM WORDS, keyed by the registry's `confirmKey` (src/vault-kinds.js — doorsOf hands it on as the door's
+ *  `confirm`): the store cards' own words, one entry per key a family names and none it does not (scripts/
+ *  test-vault-kinds-census.mjs reads this table's keys — acceptance r2: no hand-keyed per-kind list outside the registry). */
+const CONFIRM_WORDS = {
+  account: (row) => (row.field === 'oat'   // an account's long-lived token (the account stays)
+    ? { title: t('Remove token'), message: t('Remove the long-lived token from “{name}”? Machines relying on it lose access at their next spawn (running sessions keep working).', { name: row.label }), confirm: t('Remove') }
+    : { title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working.', { name: row.label }), confirm: t('Remove') }),
+  mount: (row) => ({ title: t('Remove "{name}"?', { name: row.label }), message: t('The mount record and local mountpoint go away. Nothing is deleted remotely.'), confirm: t('Remove') }),
+  integration: (row) => ({ title: t('Clear my keys'), message: t('Clear the keys you entered for {label}? The row falls back to the cluster default when one exists.', { label: row.label }), confirm: t('Clear') }),
+  passkey: (row) => { const [site, user] = String(row.label).split(' · '); const w = passkeyDeleteWords({ site, user: user || '' }, { w: t }); return { title: w.title, message: w.message, confirm: w.confirm }; },
+  'app-logins': () => ({ title: t('Forget the logins this app keeps?'), message: t('VibeSpace keeps this app\'s logins for it in its own session; after you forget them the app asks again.'), confirm: t('Forget') }),
+  secret: (row) => ({ title: t('Delete "{name}"?', { name: row.label }), message: t('The value leaves the vault. A conversation that uses it in a command loses it at its next run.'), confirm: t('Delete') }),   // lane vault-paste-request: a free entry
+  'web-login': (row) => ({ title: t('Delete the login "{name}"?', { name: row.label }), message: t('Its password leaves the vault and this account\'s own grant goes with it. Agents can no longer be signed in there with it.'), confirm: t('Delete') }),   // lane browser-login
+  totp: (row) => ({ title: t('Delete the two-step code "{name}"?', { name: row.label }), message: t('Its seed leaves the vault and every grant of its code stops. A site that asks for this code needs it set up again.'), confirm: t('Delete') }),
+};
 function confirmWords(key, row) {
-  if (key === 'account') return { title: t('Remove account'), message: t('Remove "{name}" from VibeSpace? Sessions already running keep working.', { name: row.label }), confirm: t('Remove') };
-  if (key === 'oat') return { title: t('Remove token'), message: t('Remove the long-lived token from “{name}”? Machines relying on it lose access at their next spawn (running sessions keep working).', { name: row.label }), confirm: t('Remove') };
-  if (key === 'mount') return { title: t('Remove "{name}"?', { name: row.label }), message: t('The mount record and local mountpoint go away. Nothing is deleted remotely.'), confirm: t('Remove') };
-  if (key === 'integration') return { title: t('Clear my keys'), message: t('Clear the keys you entered for {label}? The row falls back to the cluster default when one exists.', { label: row.label }), confirm: t('Clear') };
-  if (key === 'passkey') { const [site, user] = String(row.label).split(' · '); const w = passkeyDeleteWords({ site, user: user || '' }, { w: t }); return { title: w.title, message: w.message, confirm: w.confirm }; }
-  if (key === 'app-logins') return { title: t('Forget the logins this app keeps?'), message: t('VibeSpace keeps this app\'s logins for it in its own session; after you forget them the app asks again.'), confirm: t('Forget') };
-  if (key === 'secret') return { title: t('Delete "{name}"?', { name: row.label }), message: t('The value leaves the vault. A conversation that uses it in a command loses it at its next run.'), confirm: t('Delete') };   // lane vault-paste-request: a free entry
-  if (key === 'web-login') return { title: t('Delete the login "{name}"?', { name: row.label }), message: t('Its password leaves the vault and this account\'s own grant goes with it. Agents can no longer be signed in there with it.'), confirm: t('Delete') };   // lane browser-login
-  if (key === 'totp') return { title: t('Delete the two-step code "{name}"?', { name: row.label }), message: t('Its seed leaves the vault and every grant of its code stops. A site that asks for this code needs it set up again.'), confirm: t('Delete') };
-  return { title: t('Delete'), message: row.label, confirm: t('Delete') };
+  const w = Object.prototype.hasOwnProperty.call(CONFIRM_WORDS, key) ? CONFIRM_WORDS[key] : null;
+  return w ? w(row) : { title: t('Delete'), message: row.label, confirm: t('Delete') };
 }
 
 const STATE_WORD = { unlocked: () => t('Unlocked'), locked: () => t('Locked'), not_set_up: () => t('Not set up') };
@@ -156,22 +163,30 @@ async function channelAccount(id) {
   return { a: (d && Array.isArray(d.adapters) ? d.adapters.find((x) => x && x.id === id) : null) || null, kinds: (d && d.kinds) || [] };
 }
 
-/** 添加… — the doors that add a stored value, each its own (this window never re-implements one). A lane that adds a kind
- *  (lane vault-totp: 两步验证…) registers its door here: { id, label: () => string, order, run: (app, ctx) => void }. */
+/** 添加… — the doors that add a stored value, each its own (this window never re-implements one): { id, label: () => string,
+ *  run: (app, ctx) => void }. THE KIND REGISTRY (src/vault-kinds.js, lane vault-totp-add — the owner 2026-10-26: 「这种不是应该有个
+ *  统一的注册表之类的吗」) says which doors must exist and in what order: a door it does not name is refused, and
+ *  scripts/test-vault-kinds-census.mjs fails a kind family whose declared door is not registered here (两步验证 had a rail
+ *  category, a row and a route — and no door). */
 const ADD_DOORS = [];
 export function registerVaultAdd(door) {
-  if (!door || typeof door.id !== 'string' || typeof door.run !== 'function' || ADD_DOORS.some((d) => d.id === door.id)) return false;
-  ADD_DOORS.push(door); ADD_DOORS.sort((a, b) => (a.order || 0) - (b.order || 0));
+  const order = door && typeof door.id === 'string' ? addOrderOf(door.id) : null;
+  if (order == null || typeof door.run !== 'function' || ADD_DOORS.some((d) => d.id === door.id)) return false;
+  ADD_DOORS.push({ ...door, order }); ADD_DOORS.sort((a, b) => a.order - b.order);
   return true;
 }
-registerVaultAdd({ id: 'account', order: 10, label: () => t('Account…'), run: (app) => app._showAgentsDialog?.() });
-registerVaultAdd({ id: 'integration', order: 20, label: () => t('Integration key…'), run: (app) => app.openIntegration?.() });
-registerVaultAdd({ id: 'channel', order: 30, label: () => t('Channel account…'), run: (app) => app.openChannels?.() });
-registerVaultAdd({ id: 'automation', order: 40, label: () => t('Automation key…'), run: (app, c) => showMintDialog({ refresh: c.refresh, data: c.auto() }) });
+registerVaultAdd({ id: 'account', label: () => t('Account…'), run: (app) => app._showAgentsDialog?.() });
+registerVaultAdd({ id: 'integration', label: () => t('Integration key…'), run: (app) => app.openIntegration?.() });
+registerVaultAdd({ id: 'channel', label: () => t('Channel account…'), run: (app) => app.openChannels?.() });
+// lane vault-totp-add (design q-047 §3 — the L2 the owner found missing): a two-step code — an otpauth link or the seed, the
+// hub's preview first. Registered HERE, beside its siblings: vault-totp-row.js is imported by this module (a registration
+// from there would run before ADD_DOORS exists in the bundle)
+registerVaultAdd({ id: 'totp', label: () => t('Two-step code…'), run: (app, c) => showTotpAddDialog({ refresh: c.refresh }) });
+registerVaultAdd({ id: 'automation', label: () => t('Automation key…'), run: (app, c) => showMintDialog({ refresh: c.refresh, data: c.auto() }) });
 // lane vault-paste-request (the owner 2026-10-23: 「我压根没法添加啊」): a plain secret the registry lists no row for — a password, an
 // API key, an OAuth client secret — a FREE entry `secret:<id>` (name, kind, value, note), the same masked field as For you's paste box
-registerVaultAdd({ id: 'web-login', order: 45, label: () => t('Website login…'), run: (app, c) => showLoginAddDialog({ refresh: c.refresh }) });   // lane browser-login: the owner's own login (the custom kernel fills it; agents never see it)
-registerVaultAdd({ id: 'secret', order: 50, label: () => t('Other key or password…'), run: (app, c) => showSecretAddDialog({ refresh: c.refresh }) });
+registerVaultAdd({ id: 'web-login', label: () => t('Website login…'), run: (app, c) => showLoginAddDialog({ refresh: c.refresh }) });   // lane browser-login: the owner's own login (the custom kernel fills it; agents never see it)
+registerVaultAdd({ id: 'secret', label: () => t('Other key or password…'), run: (app, c) => showSecretAddDialog({ refresh: c.refresh }) });
 
 /** THE WINDOW (singleton). `focus` = a row (or an entry) to bring into view — a 「需要你」 item's door. */
 export function openVaultWindow(app, { syncId, focus = null } = {}) {

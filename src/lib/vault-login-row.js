@@ -8,6 +8,7 @@
 // 添加 → 「网站登录…」: the owner's own login (the site's address, the user name, the password, an optional paired two-step entry).
 import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
+import { loadTotp } from './vault-totp-row.js';   // lane vault-totp-add: the two-step field lists the vault's own codes
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const failWords = (r) => t('Not done — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') });
@@ -136,13 +137,19 @@ export function showLoginAddDialog({ refresh = () => {} } = {}) {
   const pw = input('vault-login-pass', 'password', t('Its password'));
   pw.autocomplete = 'new-password';
   const otp = input('vault-login-otp', 'text', t('Optional — the name of its two-step code in this vault'));
+  // lane vault-totp-add: the field offers the two-step codes the vault holds (names only — GET /api/vault/totp; a code added in
+  // 添加… ▸ 两步验证… is listed at once)
+  const otpNames = el('datalist');
+  otpNames.id = 'vault-login-otp-names';
+  otp.setAttribute('list', otpNames.id);
+  loadTotp().then((d) => { for (const e of (d && d.entries) || []) { const o = el('option'); o.value = e.name; otpNames.append(o); } }).catch(() => {});
   const err = el('div', 'vault-secret-error'); err.setAttribute('role', 'status');
   const foot = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));
   const save = el('button', 'btn-create', t('Save to vault'));
   cancel.type = save.type = 'button';
   foot.append(cancel, save);
-  body.append(field(t('Site'), site), field(t('User name'), user), field(t('Password'), pw), field(t('Two-step code'), otp), el('div', 'vw-ak-hint', t('Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.')), err);
+  body.append(field(t('Site'), site), field(t('User name'), user), field(t('Password'), pw), field(t('Two-step code'), otp), el('div', 'vw-ak-hint', t('Only the site itself (its exact address, over https) is ever filled with it — never another site, never a frame of one.')), err, otpNames);
   dialog.append(foot);
   cancel.onclick = () => { pw.value = ''; close(); };
   save.onclick = saveNow = async () => {

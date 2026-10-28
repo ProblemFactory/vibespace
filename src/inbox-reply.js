@@ -61,9 +61,10 @@ const REPLY_HIDDEN_CODES = Object.freeze(['no_session', 'job_item', 'card_item',
 // disabled for any code — a send the verdict refuses is answered by name.
 const REOPEN_CODES = Object.freeze(['no_live_session']);
 // The action kinds answered by their own buttons on the item (Allow / Deny), never by a typed reply.
-  const ANSWER_ACTION_TYPES = Object.freeze(['exit-run-ask', 'hub-act-ask', 'automation-ask', 'pool-cross-provider', 'vault-run-ask', 'vault-grant-ask', 'secret-request']); // lane vault-paste-request: a paste request is answered in its own masked box (Save to vault / Refuse) — a typed reply goes into the CHAT, where a secret must never land // q-053 P0b: a pool's cross-provider card (Allow once / Always for this pool / Deny) // lane hub-act-ask: a held hub act too (Allow once / Always on this machine / Deny); design q-046: a held automation call (Allow once / Always for this conversation / Deny); lane vault-run-door: a held run (Allow once / Always for this shape / Deny)
+// …derived from THE For-you action registry (lane chat-needs-you-card, amendment 1): a row's `answer: 'buttons'`
+const { ANSWER_ACTION_TYPES, CARD_ACTION_TYPES } = require('./foryou-actions.js');
 // The action kinds that are answered on a card, never by a typed reply.
-const CARD_ACTION_TYPES = Object.freeze(['helper-ask', 'main-ask']); // lane parked-ask-inbox: a conversation's own ask too
+// (CARD_ACTION_TYPES: a row's `answer: 'card'` — S1's helper ask, lane parked-ask-inbox's own ask; required above)
 // lane S1 verify r3: what a typed reply DOES to a helper's ask is the ask's own transition table's
 // `reply` row (src/helper-ask.js) — an open item means the ask is still `asked` (the item is released
 // the moment it leaves), and the table says a reply from there REFUSES. This module decides nothing

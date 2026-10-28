@@ -8,10 +8,10 @@
  * the turn — and that rule is still right. What it could not know is that the
  * slot moves while requests are IN FLIGHT:
  *
- *   05:27:00  the pool re-points 9 sessions PandyMax → Personal Max
- *   05:27:16  a response to a request made 39 s earlier WITH PANDYMAX'S TOKEN
+ *   05:27:00  the pool re-points 9 sessions userP → Personal Max
+ *   05:27:16  a response to a request made 39 s earlier WITH userP'S TOKEN
  *             arrives; `readingSlotFor` resolves the slot at the turn's first
- *             reading = Personal, so PandyMax's 93 % 7d is filed on Personal
+ *             reading = Personal, so userP's 93 % 7d is filed on Personal
  *   05:28:38  the pool reads Personal as "5 % left" and moves everything to
  *             Fish Max — a second switch inside 98 s, caused by our own write
  *   05:29:39  Personal's own /usage panel restores it to 13 %
@@ -43,7 +43,7 @@
  *      re-filed when exactly one account's window matches, else archived with
  *      the reason. This one also catches the mirror-image defect the same
  *      journal shows at 06:10:46Z, where a turn pin held from before three
- *      re-points filed PandyMax's fresh numbers on Fish Max.
+ *      re-points filed userP's fresh numbers on Fish Max.
  *
  * R2 — TWO CORRECTIONS, both reproduced against the real corpus before being
  * believed, and both of the same species: a fact was trusted further than the
