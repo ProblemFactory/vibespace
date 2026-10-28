@@ -33,6 +33,10 @@ vibespace-vault request "<what you need>" --purpose "<why>" [--into <row>.<field
 vibespace-vault uses                your grants, your open requests, your own uses (entry, purpose, when, outcome, receipt)
 ```
 
+## When a run card goes unanswered
+
+If the user does not answer your run card within its minute, your `vibespace-vault run` is refused `ask_expired` — but the card does **not** disappear. It stays in their For you tray as a *late* card for 24 hours, and if they allow it late, **your next run of the same command passes once** with no new card (then it is spent — run it again and a fresh card appears). So on `ask_expired`, do not re-file a `vibespace-ask` or nag in chat: do other work and simply run the same command again later — a late allow will let that next run through. A late deny, a lock, or the 24 hours ends it.
+
 ## When the vault is locked
 
 **When a tool you need says the vault is locked (`vault_locked`), the user has already been told** — VibeSpace notes every

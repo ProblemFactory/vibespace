@@ -157,6 +157,7 @@ const PIPE_GRACE_MS = 2000;                  // after the child's exit, a pipe a
 const HEAD_MAX = 4096;               // bytes of a head on the audit line (the command, each stream)
 const DETAIL_MAX = 8000;             // the For-you store's detail bound — a card that would be cut is refused (what you approve is what runs)
 const SETTLED_MAX = 256;
+const LATE_TTL_MS = 24 * 3600 * 1000;   // lane vault-agent-own r20b: a late card (an expired run card the owner may still allow one run) lives 24 h
 const RUNS_MAX = 16, RUNS_PER_CALLER = 4;
 // THE HTTP status of each answer (src/routes/vault.js reads it) — a refusal is a 4xx by name; a run that ran is 200 whatever its exit
 const STATUS = Object.freeze({
@@ -307,6 +308,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const seen = new Map();      // pair → at — the owner allowed this shape once, THIS unlock (a local instance asks no more)
   const shortAlways = new Map(); // pair → until — an 8-hour «always» (memory only: a lock ends it)
   const hostPasses = new Map();  // lane vault-agent-own: `${scope}\n${entry id}\n${host}` → { scope, id, host, at } — the owner let a minted value go there (a lock ends it)
+  const lateOnce = new Map();    // lane vault-agent-own r20b: pair → { until, entries, askId } — a LATE «allow once» (the owner answered after the 60 s); the agent's NEXT run of this shape passes once with no card, consumed then (memory only, a lock ends it — beside shortAlways)
+  const lateAsks = new Map();    // askId → lq — an EXPIRED run card the owner may still answer (allow once / deny) for 24 h (the agent's run already returned ask_expired)
+  const latePair = new Map();    // pair → askId — the one open late card for a (conversation, shape), so a second run re-asks it, never a second card
   const runs = new Set();      // the children running now
   // lane vault-manual-and-lock: an agent's REQUESTS (one For-you ask each, open until answered or the lock) and the GRANT ROWS
   // their answers write (memory only — the «always» rows' shape + once + purpose; a lock ends them all)
@@ -501,7 +505,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
           return;
         }
       }
-      q.timer = timers.set(() => settle(q, 'expired', 'timeout'), VR.ASK_TTL_MS);
+      q.timer = timers.set(() => goLate(q), VR.ASK_TTL_MS);   // lane vault-agent-own r20b (the owner's ruling A): at 60 s the COMMAND is refused ask_expired, but the CARD stays as `late` for 24 h — a late «allow once» still counts
       q.timer?.unref?.();
       if (signal && typeof signal.addEventListener === 'function') signal.addEventListener('abort', () => settle(q, 'gone', 'gone'), { once: true });
     });
@@ -510,8 +514,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function answer(askId, { answer: a, ttl = VR.ALWAYS_DEFAULT, reauthed = false, by = 'user' } = {}) {
     const id = String(askId || '');
     const q = asks.get(id);
-    if (!q) return { ok: false, code: settled.get(id) === 'expired' ? 'ask_expired' : settled.has(id) ? 'ask_settled' : 'ask_unknown' };
-    if (now() - q.askedAt >= VR.ASK_TTL_MS) { settle(q, 'expired', 'timeout'); return { ok: false, code: 'ask_expired' }; }
+    if (!q) { const lq = lateAsks.get(id); if (lq) return answerLate(lq, { answer: a, reauthed, by }); return { ok: false, code: settled.get(id) === 'expired' ? 'ask_expired' : settled.has(id) ? 'ask_settled' : 'ask_unknown' }; }
+    if (now() - q.askedAt >= VR.ASK_TTL_MS) { goLate(q); const lq = lateAsks.get(id); if (lq) return answerLate(lq, { answer: a, reauthed, by }); return { ok: false, code: 'ask_expired' }; }   // lane vault-agent-own r20b: a live card answered in the 60 s→go-late race is answered as the late card it just became
     if (!['once', 'always', 'deny'].includes(a)) return { ok: false, code: 'bad_answer' };
     if (a === 'deny') { settle(q, 'denied', 'answered'); return { ok: true, outcome: 'denied' }; }   // `outcome` (the route lays the vault's facts — its `state` — over the answer)
     if (a === 'always' && !q.always) return { ok: false, code: 'always_not_offered' };
@@ -548,15 +552,69 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const q = (req ? requests : asks).get(String(it.action.askId || ''));
       if (status === 'open') { if (!q) { try { userTodos.setStatus(it.id, 'done', 'ask-over'); } catch { } } return; }
       if (req) { if (q && q.todoId === it.id) settleRequest(q, 'denied', `item-${String(status)}-by-${String(by || 'user')}`); return; }   // a request's card closed elsewhere = not granted
-      if (!q || q.todoId !== it.id) return;
+      if (!q || q.todoId !== it.id) { const lq = lateAsks.get(String(it.action.askId || '')); if (lq && lq.todoId === it.id) removeLate(lq, null); return; }   // lane vault-agent-own r20b: a late card closed elsewhere — drop the in-memory late ask (the store already settled the item)
       settle(q, by === 'expired' ? 'expired' : 'denied', by === 'expired' ? 'timeout' : `item-${String(status)}-by-${String(by || 'user')}`);
     });
   }
-  /** Boot: a card a previous process filed can never be answered (the run it held died with it). */
+  // ── LATE CARDS (lane vault-agent-own r20b; the owner's ruling A: a late «allow once» still counts) ──
+  function lateItemFact(outcome, by) { return { outcome, late: true, decidedBy: by && by !== 'vault' ? by : null, decidedAt: now() }; }
+  function reshapeLate(todoId, askId, { lateAt, shapeId, until }) {
+    if (!(todoId && userTodos && typeof userTodos.reshapeItems === 'function')) return;
+    try { userTodos.reshapeItems((it) => { if (it.id !== todoId || !it.action || it.action.type !== ACTION_TYPE || it.action.askId !== askId) return false; if (!(it.status === 'open' || it.resolvedBy === 'expired')) return false; it.status = 'open'; it.resolvedAt = null; it.resolvedBy = null; it.action = { ...it.action, late: true, lateAt, shapeId }; it.expiresAt = until; return true; }); } catch { }   // the item stays OPEN as a late card; it reclaims itself if a store-expiry sweep settled it in the 60 s race (never an owner dismissal — that settled the q and cleared this timer first)
+  }
+  /** The 60 s lapsed with no answer: the agent's run is refused ask_expired (the COMMAND settles), but the For-you item / the chat decision row stays OPEN as a `late` card the owner may still allow (one run) or deny for 24 h. */
+  function goLate(q) {
+    if (!asks.has(q.askId)) return;
+    asks.delete(q.askId); if (byPair.get(q.pair) === q.askId) byPair.delete(q.pair);
+    try { timers.clear(q.timer); } catch { }
+    const lateAt = now(), until = lateAt + LATE_TTL_MS, shapeId = shapeIdOf(q.key);
+    const lq = { askId: q.askId, pair: q.pair, conv: q.conv, key: q.key, entries: q.entries, who: q.who, head: q.head, detail: q.detail, todoId: q.todoId, shapeId, lateAt, until, timer: null };
+    lateAsks.set(q.askId, lq); latePair.set(q.pair, q.askId);
+    lq.timer = timers.set(() => removeLate(lq, 'expired', 'vault'), LATE_TTL_MS); lq.timer?.unref?.();
+    reshapeLate(q.todoId, q.askId, { lateAt, shapeId, until });
+    log(`${q.who}: the run card for \`${q.head}\` got no answer in 60 s — kept as a late card (allow = one run) for 24 h`);
+    try { q.resolve({ outcome: 'expired', askId: q.askId }); } catch { }
+  }
+  function removeLate(lq, outcome, by = 'user') {
+    if (!lateAsks.has(lq.askId)) return false;
+    lateAsks.delete(lq.askId); if (latePair.get(lq.pair) === lq.askId) latePair.delete(lq.pair);
+    try { timers.clear(lq.timer); } catch { }
+    if (outcome && lq.todoId && userTodos) { try { const it = userTodos.get?.(lq.todoId); if (it && it.status === 'open') { if (typeof userTodos.resolveAnswered === 'function') userTodos.resolveAnswered([lq.todoId], by, lateItemFact(outcome, by)); else userTodos.setStatus(lq.todoId, 'done', outcome); } } catch { } }
+    return true;
+  }
+  function restartLate(lq) {   // a second run of the same shape while the late card is open: the ONE card is asked again, its 24 h countdown restarts (no second card)
+    lq.lateAt = now(); lq.until = lq.lateAt + LATE_TTL_MS;
+    try { timers.clear(lq.timer); } catch { }
+    lq.timer = timers.set(() => removeLate(lq, 'expired', 'vault'), LATE_TTL_MS); lq.timer?.unref?.();
+    reshapeLate(lq.todoId, lq.askId, { lateAt: lq.lateAt, shapeId: lq.shapeId, until: lq.until });
+  }
+  function consumeLate(pair) { lateOnce.delete(pair); }
+  /** The owner answers a LATE card (src/routes/vault.js, people only). `once` writes a one-run pass the next identical run consumes (no reauth — «allow once» never needed it, and a late card offers no «always»); `deny` settles it; a locked vault is vault_locked as today. */
+  function answerLate(lq, { answer: a, reauthed = false, by = 'user' }) {
+    if (!['once', 'deny'].includes(a)) return { ok: false, code: a === 'always' ? 'always_not_offered' : 'bad_answer' };
+    if (vaultState() !== 'unlocked') { removeLate(lq, 'vault_locked', 'vault'); return { ok: false, code: 'vault_locked' }; }
+    if (lq.todoId && userTodos && typeof userTodos.get === 'function') { let it = null; try { it = userTodos.get(lq.todoId); } catch { } if (!(it && it.status === 'open' && it.action && it.action.type === ACTION_TYPE && it.action.askId === lq.askId && it.action.late && String(it.detail || '') === String(lq.detail || ''))) { removeLate(lq, null); return { ok: false, code: 'ask_changed' }; } }   // the belt: still the open late card for this ask, its detail the very text shown
+    if (a === 'deny') { removeLate(lq, 'denied', by); return { ok: true, outcome: 'denied' }; }
+    if (lq.pair && lq.key) lateOnce.set(lq.pair, { until: now() + LATE_TTL_MS, entries: lq.entries || [], askId: lq.askId });   // the one-run pass; a reregistered-after-restart lq has no key (its shape is gone) so no pass is minted — the next run shows a fresh card (fails safe, never over-permits)
+    removeLate(lq, 'late-allowed', by);
+    audit('vault-run-late-answer', { by: String(by).slice(0, 40), conv: lq.conv, shapeId: lq.shapeId, outcome: 'allowed', minted: !!(lq.pair && lq.key) });
+    return { ok: true, outcome: 'late-allowed', ...(lq.pair && lq.key ? {} : { note: 'the card survived a restart; the next run shows a fresh card' }) };
+  }
+  function reregisterLate(it) {   // boot reconcile keeps a late card: re-register a minimal in-memory ask so the owner may still deny it or it expires at 24 h (a late allow cannot mint a pass without the shape key, which died with the old process — it fails safe)
+    const askId = String(it.action.askId || ''); if (!askId || lateAsks.has(askId)) return;
+    const until = (typeof it.expiresAt === 'number' && it.expiresAt > now()) ? it.expiresAt : now() + LATE_TTL_MS;
+    const lq = { askId, pair: null, conv: null, key: null, entries: [], who: it.sessionName || '', head: '', detail: String(it.detail || ''), todoId: it.id, shapeId: String(it.action.shapeId || ''), lateAt: Number(it.action.lateAt) || now(), until, timer: null };
+    lateAsks.set(askId, lq);
+    lq.timer = timers.set(() => removeLate(lq, 'expired', 'vault'), Math.max(1, until - now())); lq.timer?.unref?.();
+  }
+  /** Boot: a LIVE card a previous process filed can never be answered (the run it held died with it); a LATE card is KEPT (the owner may still allow one run). */
   function reconcile() {
     if (!userTodos) return 0;
     let n = 0;
-    try { for (const it of (userTodos.snapshot?.() || {}).open || []) if (it && it.action && ((it.action.type === ACTION_TYPE && !asks.has(it.action.askId)) || (it.action.type === REQUEST_TYPE && !requests.has(it.action.askId)))) { try { userTodos.setStatus(it.id, 'done', it.action.type === REQUEST_TYPE ? 'vault_locked' : 'ask-expired'); n++; } catch { } } } catch (e) { log(`run card reconcile failed: ${e.message}`); }
+    try { for (const it of (userTodos.snapshot?.() || {}).open || []) if (it && it.action) {
+      if (it.action.type === ACTION_TYPE && !asks.has(it.action.askId)) { if (it.action.late) reregisterLate(it); else { try { userTodos.setStatus(it.id, 'done', 'ask-expired'); n++; } catch { } } }
+      else if (it.action.type === REQUEST_TYPE && !requests.has(it.action.askId)) { try { userTodos.setStatus(it.id, 'done', 'vault_locked'); n++; } catch { } }
+    } } catch (e) { log(`run card reconcile failed: ${e.message}`); }
     try { for (const it of (userTodos.snapshot?.() || {}).open || []) if (it && it.sessionKey === VAULT_INBOX_KEY && !it.action && it.text === ASKING_TEXT && it.id !== asking.id) userTodos.setStatus(it.id, 'done', 'vault'); } catch { }   // B-4934: a previous process's «N are asking» (its requests died with it)
     return n;
   }
@@ -999,6 +1057,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         if (gitOnSeal === false) { note('git_not_on_seal', { ...head, tool: toolName }); return named('git_not_on_seal'); }
       }
       let verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries, granted, remembered, seen: seen.has(pair), instance: instanceKind(), policy: policy(), passes: passes(), now: now() });
+      if (!verdict.ok && verdict.ask) {   // lane vault-agent-own r20b: a late «allow once» pass runs this shape ONCE with no card (consumed); an open late card for this shape re-asks the one card
+        const lp = lateOnce.get(pair);
+        if (lp && lp.until > now()) { consumeLate(pair); audit('vault-run-late-allow', { ...head, shapeId: shapeIdOf(key) }); verdict = { ok: true, by: 'late' }; }
+        else { if (lp) consumeLate(pair); const lid = latePair.get(pair); if (lid && lateAsks.has(lid)) { restartLate(lateAsks.get(lid)); note('ask_pending', { ...head, askId: lid }); return named('ask_pending'); } }
+      }
       let askId = null, asked = null;
       if (!verdict.ok && verdict.ask) {
         // round 18/19 (item 2 + item 5): a template over the card render bound ⇒ card_too_long — but ONLY here, where a card is DRAWN (an owner entry needing approval). An own-entry run or a remembered pass returned verdict.ok above and never reached this bound (base ran an own 7 KB body by:own; daade1a7 refused it with words about an approval that never happens on that road).
@@ -1172,6 +1235,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     try { for (const q of [...requests.values()]) settleRequest(q, 'vault_locked', 'locked'); } finally { asking.batch = false; }   // lane vault-manual-and-lock: every open request is withdrawn
     askingLine();
     lockGen++;   // round 14: the lock epoch moves — restoreOnce never brings a spent once-grant back across it
+    for (const lq of [...lateAsks.values()]) removeLate(lq, 'vault_locked', 'vault');   // lane vault-agent-own r20b: an open late card settles vault_locked, its pass ends
+    lateOnce.clear();
     seen.clear(); shortAlways.clear(); grants.clear(); hostPasses.clear(); db = null; dbEpoch = -1;   // … and every grant ends (once / 8 hours) — and every host pass (lane vault-agent-own)
   }
   if (typeof vault.onLock === 'function') vault.onLock((why) => onLocked(why));
@@ -1203,8 +1268,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
 
   return { run, answer, setRunnable, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
     listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet,
-    listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen };
+    listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce };
 }
 
 const statusOf = (code) => STATUS[code] || 400;
-module.exports = { create, classOf, statusOf, STATUS, MORE_WORDS, ACTION_TYPE, REQUEST_TYPE, GRANT_MS, GRANT_ANSWERS, PURPOSE_MAX, REQUESTS_PER_CALLER, REQUEST_CALLERS_MAX, ASKING_LINE_OVER, ASKING_TEXT, ASKING_KEY, STORE_FILE, MARK_LABEL, RUN_DIR_PREFIX, OWNER_FILE, MARK_ENV, SEAL_NOWHERE, rootOwnedNoWrite, sha256File, sha256Fd, sealDirReal, sealedToolReal, ARGS_MAX, CWD_MAX, readBounded, endMarked, KILL_GRACE_MS, HEAD_MAX, DETAIL_MAX, NO_ALWAYS, RUN_CLASS, NEVER_CLASS, redactLong };
+module.exports = { create, classOf, statusOf, STATUS, MORE_WORDS, ACTION_TYPE, REQUEST_TYPE, GRANT_MS, GRANT_ANSWERS, PURPOSE_MAX, REQUESTS_PER_CALLER, REQUEST_CALLERS_MAX, ASKING_LINE_OVER, ASKING_TEXT, ASKING_KEY, STORE_FILE, MARK_LABEL, RUN_DIR_PREFIX, OWNER_FILE, MARK_ENV, SEAL_NOWHERE, rootOwnedNoWrite, sha256File, sha256Fd, sealDirReal, sealedToolReal, ARGS_MAX, CWD_MAX, readBounded, endMarked, KILL_GRACE_MS, HEAD_MAX, DETAIL_MAX, LATE_TTL_MS, NO_ALWAYS, RUN_CLASS, NEVER_CLASS, redactLong };

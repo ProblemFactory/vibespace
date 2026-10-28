@@ -202,7 +202,7 @@ const ROWS = {
 const sourceOf = (store) => ({ vaultRows: () => ROWS[store].map(({ v, ...r }) => r), vaultReveal: (e, f) => { const r = ROWS[store].find((x) => x.entry === e && x.field === f); return r ? r.v : null; } });
 const CALLER = { conversationId: 'conv-1', sessionKey: 'claude:conv-1', name: 'Lane X', cwd: null };
 let worldN = 0;
-async function world({ instance = 'local', killGraceMs = 400, askMs = null, doorMod = DOOR, setup = true, pipeGraceMs = 300 } = {}) {
+async function world({ instance = 'local', killGraceMs = 400, askMs = null, lateMs = null, doorMod = DOOR, setup = true, pipeGraceMs = 300 } = {}) {
   const dir = path.join(ROOT, 'w' + (++worldN)); const dataDir = path.join(dir, 'data'), work = path.join(dir, 'work'), runRoot = path.join(dir, 'run');
   for (const d of [dataDir, work, runRoot]) fs.mkdirSync(d, { recursive: true });
   const vault = VE.create({ dataDir, kdf: { N: 1024, r: 8, p: 1 }, log: { log() {}, warn() {} }, idleTimer: false, register: false });
@@ -210,7 +210,7 @@ async function world({ instance = 'local', killGraceMs = 400, askMs = null, door
   const userTodos = new UserTodoManager({ dataDir, expirySweepMs: 3600e3 });
   const logs = [];
   const timerLog = [];   // every bound the door set (ms) — a bound is proven by the timer the door armed, never by a wall clock
-  const timers = { set: (fn, ms) => { timerLog.push(ms); return setTimeout(fn, askMs != null && ms === VR.ASK_TTL_MS ? askMs : ms); }, clear: (h) => clearTimeout(h) };
+  const timers = { set: (fn, ms) => { timerLog.push(ms); return setTimeout(fn, askMs != null && ms === VR.ASK_TTL_MS ? askMs : lateMs != null && ms === DOOR.LATE_TTL_MS ? lateMs : ms); }, clear: (h) => clearTimeout(h) };
   const gone = new Set();
   const mk = (mod = doorMod, extra = {}) => mod.create({ dataDir, vault, userTodos, sources: Object.fromEntries(Object.keys(ROWS).map((s) => [s, () => sourceOf(s)])), instanceKind: () => instance,
     runRoot: () => runRoot, home: os.homedir(), agentEnv: () => ({ ...process.env, PATH: BIN + ':' + process.env.PATH }), killGraceMs, pipeGraceMs, timers, liveOf: (cid) => !gone.has(cid), log: (m) => logs.push(String(m)), isRootOwned: isRootOwnedTest, ...extra });   // round 10: extra deps (a capturing spawnImpl, a PATH-with-a-writable-head agentEnv) for the spawn-env seal test
@@ -431,7 +431,31 @@ async function newShapeCards(doorMod) {
   const ew = await world({ instance: 'cluster', askMs: 80 });
   openRow(ew);
   const ex = await runAnswered(ew, ENV('env'), { answer: null });
-  ok(!!ex.card && (await ex.r).code === 'ask_expired' && !cardsOf(ew).length, 'no answer within the card\'s life (60 s; 80 ms here) ⇒ ask_expired, nothing ran', (await ex.r).code);
+  const exR = await ex.r;
+  const lateCard = cardsOf(ew)[0];
+  ok(exR.code === 'ask_expired' && !!lateCard && lateCard.status === 'open' && lateCard.action.late === true && typeof lateCard.action.lateAt === 'number' && typeof lateCard.action.shapeId === 'string' && lateCard.expiresAt === lateCard.action.lateAt + DOOR.LATE_TTL_MS,
+    'round 20b (the owner ruled A): no answer in 60 s ⇒ the COMMAND is ask_expired (nothing ran), but the CARD stays OPEN as `late` (action.late/lateAt/shapeId; expiresAt → +24 h) — on 54f757df the item vanished', { code: exR.code, late: lateCard && lateCard.action });
+  // a late «allow once» writes a one-run pass: the NEXT identical run passes ONCE with no card (by: late), audited; the same shape after that asks again; a late card offers no «always»
+  ok(ew.door.answer(lateCard.action.askId, { answer: 'always', reauthed: true }).code === 'always_not_offered', 'round 20b: a late card offers no «always» (allow once / deny only)');
+  const la = ew.door.answer(lateCard.action.askId, { answer: 'once' });
+  const settledLate = ew.userTodos.get(lateCard.id);
+  ok(la.ok && la.outcome === 'late-allowed' && !cardsOf(ew).length && settledLate.status === 'done' && settledLate.resolvedFact && settledLate.resolvedFact.outcome === 'late-allowed' && settledLate.resolvedFact.late === true, 'round 20b: a late «allow once» settles the card done with resolvedFact {outcome: late-allowed, late:true} (the client reads it) — one card gone', [la, settledLate.resolvedFact]);
+  const otherShape = await runAnswered(ew, ENV('env', 'a-different-shape'), { answer: 'deny' });
+  ok(!!otherShape.card && !otherShape.card.action.late && otherShape.r.code === 'ask_denied', 'round 20b: a DIFFERENT shape still asks (its own card) — the late pass is for the one shape', [!!otherShape.card, otherShape.r.code]);
+  const pass1 = await runAnswered(ew, ENV('env'), { answer: null });
+  const pass1R = await pass1.r;
+  ok(pass1R.ok && pass1R.by === 'late' && !pass1.card && /vault-run-late-allow/.test(auditOf(ew)), 'round 20b: the NEXT identical run passes ONCE with no card (by: late), the pass consumed and audited vault-run-late-allow', [pass1R.by, !!pass1.card]);
+  const reRun = await runAnswered(ew, ENV('env'), { answer: null });
+  ok(!!reRun.card && !reRun.card.action.late && reRun.card.action.askId !== lateCard.action.askId, 'round 20b: the pass is ONE run — the same shape after it draws a fresh LIVE card again (no standing pass)');
+  ew.door.answer(reRun.card.action.askId, { answer: 'deny' }); await reRun.r;
+  // a SECOND run while a late card is open ⇒ ask_pending, no second card, the open card's 24 h countdown restarts
+  const sw = await world({ instance: 'cluster', askMs: 60 }); openRow(sw);
+  const se = await runAnswered(sw, ENV('env'), { answer: null }); await se.r;
+  const lc = cardsOf(sw)[0]; const at0 = lc.action.lateAt;
+  await sleep(5);
+  const sec = await sw.door.run({ caller: sw.caller, args: ENV('env'), cwd: sw.work });
+  const lc2 = cardsOf(sw)[0];
+  ok(sec.code === 'ask_pending' && cardsOf(sw).length === 1 && lc2.id === lc.id && lc2.action.lateAt >= at0, 'round 20b: a second run of the same shape while the late card is open ⇒ ask_pending, the ONE card stays (no second card), its 24 h countdown restarts', [sec.code, cardsOf(sw).length, lc2.action.lateAt >= at0]);
   // the card closed by another door — the gate's words, again on a LOCAL instance
   const lw = await world();
   openRow(lw);
@@ -468,6 +492,48 @@ console.log('⑫ THE CARD FACTS (lane vault-agent-own r20; the owner «这个卡
   const rc = real.card;
   ok(!!rc && /^curl /.test(rc.detail.split('\n')[0]) && /Hosts: api\.example\.com/.test(rc.detail) && /the tool \+ its flags \+ the hosts \+ the secrets; positional arguments may change/.test(rc.detail) && /Folder: /.test(rc.detail),
     'detail stays as today for older clients: the For-you record keeps the full prose `detail` (the command, the hosts, the shape, the folder) unchanged — facts is an ADDITIVE field, never a replacement', rc && rc.detail);
+}
+
+console.log('⑬ THE LATE CARD past its life — the 24 h end (said), the lock, the boot reconcile (lane vault-agent-own r20b)');
+{
+  // the 24 h: a late card with no answer settles from `late` to expired (SAID, not silent) — status done, resolvedFact outcome 'expired'
+  const w = await world({ instance: 'cluster', askMs: 40, lateMs: 80 }); openRow(w);
+  const e = await runAnswered(w, ENV('env'), { answer: null }); await e.r;
+  const card = cardsOf(w)[0];
+  ok(!!card && card.action.late, 'the card went late');
+  const t = Date.now(); while (Date.now() - t < 400) { const it = w.userTodos.get(card.id); if (it.status !== 'open') break; await sleep(10); }
+  const done = w.userTodos.get(card.id);
+  ok(done.status === 'done' && done.resolvedFact && done.resolvedFact.outcome === 'expired' && !w.door._lateAsks.size, 'round 20b: a late card unanswered for 24 h settles done «expired» (said, not silently removed) and the in-memory late ask is gone', { status: done.status, fact: done.resolvedFact });
+
+  // a late DENY settles the card denied; the next run asks (no pass)
+  const wd = await world({ instance: 'cluster', askMs: 40 }); openRow(wd);
+  const ed = await runAnswered(wd, ENV('env'), { answer: null }); await ed.r;
+  const dc = cardsOf(wd)[0];
+  const dr = wd.door.answer(dc.action.askId, { answer: 'deny' });
+  ok(dr.ok && dr.outcome === 'denied' && !cardsOf(wd).length && !wd.door._lateOnce.size, 'round 20b: a late «deny» settles the card denied, writes no pass');
+  const next = await runAnswered(wd, ENV('env'), { answer: 'deny' });
+  ok(!!next.card && next.r.code === 'ask_denied', 'round 20b: after a late deny the same shape asks again (no standing pass)');
+
+  // a LOCK ends every late pass and settles every open late card vault_locked (as it does shortAlways)
+  const wl = await world({ instance: 'cluster', askMs: 40 }); openRow(wl);
+  const a1 = await runAnswered(wl, ENV('env'), { answer: null }); await a1.r;   // a late card, then ALLOWED -> a pass waiting to be consumed
+  wl.door.answer(cardsOf(wl)[0].action.askId, { answer: 'once' });
+  const a2 = await runAnswered(wl, ENV('env', 'two'), { answer: null }); await a2.r;   // a late card left UNANSWERED
+  const openLate = cardsOf(wl)[0];
+  ok(wl.door._lateAsks.size === 1 && wl.door._lateOnce.size === 1 && openLate.action.askId === a2.card.action.askId, 'one unanswered late card + one late pass');
+  wl.door.onLocked('test');
+  const lockedItem = wl.userTodos.get(openLate.id);
+  ok(!wl.door._lateAsks.size && !wl.door._lateOnce.size && lockedItem.status === 'done' && lockedItem.resolvedFact && lockedItem.resolvedFact.outcome === 'vault_locked', 'round 20b: a LOCK ends every late pass and settles every open late card vault_locked (as it does shortAlways)', { lateAsks: wl.door._lateAsks.size, lateOnce: wl.door._lateOnce.size, status: lockedItem.status, fact: lockedItem.resolvedFact });
+
+  // the BOOT reconcile KEEPS a late card (the owner may still allow one run); a LIVE card a dead process left is settled ask-expired
+  const wr = await world({ instance: 'cluster', askMs: 40 }); openRow(wr);
+  const er = await runAnswered(wr, ENV('env'), { answer: null }); await er.r;   // -> a late card
+  const lateId = cardsOf(wr)[0].id;
+  const fake = wr.userTodos.add(wr.caller.sessionKey, { origin: 'vault', text: 'x', urgency: 'urgent', kind: 'action', by: 'agent', action: { type: 'vault-run-ask', askId: 'reconcile-live-fake', always: false } });   // an open vault-run-ask card a dead process left (no backing q, not late)
+  const fresh = wr.mk();   // a NEW door over the SAME For-you store — a restart
+  fresh.reconcile();
+  const keptLate = wr.userTodos.get(lateId), deadLive = wr.userTodos.get(fake.id);
+  ok(keptLate.status === 'open' && keptLate.action.late === true && fresh._lateAsks.size === 1 && deadLive.status === 'done' && deadLive.resolvedBy === 'ask-expired', 'round 20b: the boot reconcile KEEPS a late card open (re-registered, still answerable) while a LIVE card a dead process left is settled ask-expired', { late: keptLate.status, live: deadLive.status, lateAsks: fresh._lateAsks.size })
 }
 
 console.log('④ THE LOCK — a lock mid-run ends the child within its bound; the answer is vault_locked');
@@ -635,6 +701,15 @@ console.log('⑦ MUTANTS — patched copies of the door, each RED on its leg');
   let r4 = null;
   if (m4.mod) { const w4 = await world({ doorMod: m4.mod }); openRow(w4); const e = await runAnswered(w4, ENV('edge2')); const tl = (e.r.stdout || '').slice(-1200); r4 = { truncated: e.r.truncated, lk: leaks(tl, VALUE), head: tl.replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(+d)).includes(VALUE.slice(0, 6)) }; }
   ok(m4.n === 1 && r4 && r4.truncated && (r4.lk.length > 0 || r4.head), 'MUTANT «a cut flushes the held tail»: the patch hits once and the edge leg goes RED (the first characters of the value\'s entities arrive); the shipped door drops them', r4);
+  // round 20b: the base behaviour (54f757df) is RED — the card vanishes on expiry, and a late answer answers ask_expired
+  const m5 = mutate('q.timer = timers.set(() => goLate(q), VR.ASK_TTL_MS)', "q.timer = timers.set(() => settle(q, 'expired', 'timeout'), VR.ASK_TTL_MS)", 'nolate');
+  let r5 = null;
+  if (m5.mod) { const w5 = await world({ instance: 'cluster', askMs: 60, doorMod: m5.mod }); openRow(w5); const e5 = await runAnswered(w5, ENV('env'), { answer: null }); await e5.r; r5 = { cards: cardsOf(w5).length }; }
+  ok(m5.n === 1 && r5 && r5.cards === 0, 'MUTANT «expiry settles the card done» (the 54f757df behaviour): the patch hits once and the leg goes RED — the card VANISHED on expiry; the shipped door keeps it as a late card', r5);
+  const m6 = mutate('if (!q) { const lq = lateAsks.get(id); if (lq) return answerLate(lq, { answer: a, reauthed, by }); return', 'if (!q) { return', 'nolateanswer');
+  let r6 = null;
+  if (m6.mod) { const w6 = await world({ instance: 'cluster', askMs: 60, doorMod: m6.mod }); openRow(w6); const e6 = await runAnswered(w6, ENV('env'), { answer: null }); await e6.r; const c6 = cardsOf(w6)[0]; r6 = { ans: c6 ? w6.door.answer(c6.action.askId, { answer: 'once' }) : null }; }
+  ok(m6.n === 1 && r6 && r6.ans && r6.ans.ok === false && (r6.ans.code === 'ask_expired' || r6.ans.code === 'ask_unknown'), 'MUTANT «a late answer is not handled» (the 54f757df behaviour): the patch hits once and the leg goes RED — a late «allow once» is REFUSED (no pass written); the shipped door writes a one-run pass', r6);
   for (const c of copiesCensus(M.files, M.dir, REPO, { minCopies: 2 })) ok(c.pass, c.name, c.detail);
 }
 
