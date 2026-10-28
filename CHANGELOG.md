@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.361 — 2026-10-28
+
+### Changed
+- Opening a conversation from For you takes you to where the agent asked, with its card open there; an old question with no place left waits at the end.
+
+### Fixed
+- The end of a chat no longer fills with old questions: only the newest one whose place is off screen waits there; «waiting for you · N» lists them all.
+
 ## 2.369.360 — 2026-10-27
 
 ### Added

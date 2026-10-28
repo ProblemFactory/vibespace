@@ -400,7 +400,7 @@ class ChatView {
       // so a read-only viewer gets the chip as well (a phone has no Ctrl+F).
       onSearch: () => this._search?.open(),
       onJumpToAsk: () => { this.jumpToPendingAsk().catch(() => {}); }, // lane S1: the waiting chip goes to the card that waits
-      onJumpToNeed: () => { this._needsCards?.jumpToNewest(); }, // lane chat-needs-you-card: the «waiting for you · N» chip lands the newest needs card
+      onJumpToNeed: (id) => { (id ? this._needsCards?.land(id) : this._needsCards?.jumpToNewest())?.catch?.(() => {}); }, // lane chat-needs-you-card: the «waiting for you · N» chip lands a needs card — lane needs-card-tail: the row chosen in its list (THE ONE LANDING), else the newest
       // agent browser P2 (§3.8 ③): the Browser chip's three actions
       onBrowserAction: (what, ev) => this._onBrowserAction(what, ev),
       // §26 (B-099e): the channels chip opens a touched conversation through the ONE door
@@ -3667,8 +3667,9 @@ class ChatView {
    *  about what lies above it yet, so «No earlier messages» waits. */
   noteHistoryInFlight(on) { this._historyInFlight = !!on; }
 
-  // Jump to a specific message index: replace window entirely
-  async jumpToIndex(targetIdx) {
+  // Jump to a specific message index: replace window entirely. `land` (lane needs-card-tail — the needs cards' landing):
+  // called with the target element in place of the default landing (its own element, a card inside it, landed whole)
+  async jumpToIndex(targetIdx, { land = null } = {}) {
     this._noteUserNav('jumpToIndex');   // a chosen destination — the resume re-tail must never overrule it
     this._trace('jumpToIndex', { idx: targetIdx });
     this._traceExpect('jumpToIndex');
@@ -3712,7 +3713,8 @@ class ChatView {
     this._updateRuns();
     const relIdx = targetIdx - start;
     const allMsgs = this._messageList.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
-    if (relIdx >= 0 && relIdx < allMsgs.length) {
+    if (land) land(relIdx >= 0 && relIdx < allMsgs.length ? allMsgs[relIdx] : null);
+    else if (relIdx >= 0 && relIdx < allMsgs.length) {
       const targetEl = allMsgs[relIdx];
       for (const d of targetEl.querySelectorAll('details:not([open])')) d.open = true;
       targetEl.style.contentVisibility = 'visible';
@@ -5522,6 +5524,10 @@ class ChatView {
     if (a.kind === 'helper') return card.querySelector(`.chat-helper-ask[data-request-id="${esc(a.requestId)}"]`) || card;
     return card.querySelector('.chat-permission-inline') || card;
   }
+
+  /** lane needs-card-tail (R5): a For-you door to this conversation lands `item` at the record that filed it — THE ONE
+   *  LANDING (chat-needs-card.js land: its card opened there, the history loaded up to it, or the dock at the end). */
+  landOnItem(item) { return this._needsCards ? this._needsCards.land(item) : Promise.resolve(null); }
 
   /** THE WAITING CHIP's click (lane S1): go to the ask the user must answer — the first one, or
    *  `requestId` — scrolled to the middle and flashed. A card outside the rendered window is paged in

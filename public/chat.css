@@ -657,6 +657,18 @@
   .cn-card.cn-fold .ut-item:not(.ut-open) > .ut-body > :is(.ut-text, .ut-meta) * { pointer-events: none; }
   .cn-card.cn-fold .ut-item:not(.ut-open):is(:hover, :focus-visible) > .ut-body > .ut-text { color: var(--accent); }
 }
+/* THE DOCK (lane needs-card-tail, the owner 2026-10-28: «这个应该同时堆叠在页面最下吗？» — six asks whose records were not on
+   screen stood stacked at the end): at most ONE card stands at the end for an ask whose record is not on screen, and its dock
+   line says so — where it was asked, how many wait, where — open or folded (the fold hides the head, never this line). */
+.cn-dock { font-size: 11px; line-height: 16px; color: var(--text-dim); margin: 0 0 2px; }
+.cn-card.cn-fold > .cn-dock { padding-top: 2px; }
+/* THE CHIP's list (lane needs-card-tail): every open ask, newest first — the question · its age on ONE line, the age kept (the
+   question gives way, never the age), each row a ≥ 28 px target that lands its ask (44 on touch, style.css). */
+.chat-needs-list-head { padding: 4px 12px 2px; font-size: 11px; color: var(--text-dim); }
+.chat-status-dropdown-item.chat-needs-pick { display: flex; align-items: center; width: 100%; min-height: 28px; border: none; background: none; font: inherit; font-size: 12px; text-align: left; white-space: nowrap; }
+.chat-needs-pick-words { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.chat-needs-pick-ago { flex: none; color: var(--text-dim); }
+.chat-status-dropdown-item.chat-needs-pick:is(:hover, :focus-visible) .chat-needs-pick-words { color: var(--accent); }
 /* THE CHIP is a clickable chip like the bar's others (acceptance round 2, P2 — it was a 154×14 text target): ≥ 24 × 24 for a
    mouse (the .358 law, lane desktop-small P2-6 — the same box its .chat-status-clickable rule gives every chip there), and
    44 px tall on a touch screen — its pill painted as the bar's 36 px chips, the rest a transparent border (the model chip's

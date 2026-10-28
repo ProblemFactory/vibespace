@@ -606,7 +606,7 @@ const RO = require(path.join(REPO, 'src/inbox-reopen.js'));
   const notInClient = sentKeys.filter((k) => !new RegExp(`[{,\\s]${k}[:,]`).test(createMsg));
   ok(createMsg.length > 500 && notInClient.length === 0, `every key reopenCreate sends is a key of the page's createMsg (${sentKeys.length} keys)`, notInClient);
   const jumpSrc = read('src/lib/user-todos-actions.js');
-  ok(/else if \(s\.status === 'stopped'\) app\.resumeSession\(s\.sessionId, s\.cwd, displayName\(s\), \{ backend: s\.backend, hostId: s\.hostId \|\| s\.host \|\| undefined \}\);/.test(jumpSrc), 'the For-you\'s own "open the session" door is that resume (jump: resumeSession(id, cwd, name, {backend, hostId}) — no mode, no model: what reopenCreate mirrors)');
+  ok(/else if \(s\.status === 'stopped'\) (?:\{ )?app\.resumeSession\(s\.sessionId, s\.cwd, displayName\(s\), \{ backend: s\.backend, hostId: s\.hostId \|\| s\.host \|\| undefined \}\);/.test(jumpSrc), 'the For-you\'s own "open the session" door is that resume (jump: resumeSession(id, cwd, name, {backend, hostId}) — no mode, no model: what reopenCreate mirrors)'); // (lane needs-card-tail: a block now — the resume, then the landing on the filing record)
 }
 console.log('§8a PURE replyBoxView — the box both surfaces draw, never disabled');
 {

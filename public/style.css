@@ -5190,6 +5190,8 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   /* lane chat-needs-you-card: the chat's needs card takes the mini inbox's scale — its head and its quiet record read at 14 px+ */
   .cn-card .cn-head { font-size: 15px !important; }
   .cn-card .cn-line { min-height: 44px; line-height: 40px; }
+  /* lane needs-card-tail: the chip's list rows are the sheet's 44 px targets, its words body text */
+  .chat-status-dropdown-item.chat-needs-pick { min-height: 44px; font-size: 15px; }
 }
 /* ── end of the touch scale (lane foryou-honest) ── */
 

@@ -325,9 +325,9 @@ ok(/function wireMiniRows\(root, \{ close = \(\) => \{\} \} = \{\}\) \{[\s\S]{0,
 ok(/import \{ NeedsCards \} from '\.\/chat-needs-card\.js';/.test(CV) && /this\._needsCards = new NeedsCards\(this\);\n\s+this\._needsCards\.start\(winInfo\?\._listenerCtl\?\.signal\);/.test(CV) && /this\._needsCards\?\.stop\(\)/.test(CV), 'the chat view starts the cards for its window and stops them with the view');
 ok(/const needs = oldEl\.querySelector\?\.\(':scope > \.cn-cards'\);[\s\S]{0,200}if \(needs\) newEl\.append\(needs\);/.test(CV), 'a swap (a tool result landing) carries the SAME card nodes into the new record element');
 ok(/if \(hasPendingHelperAsk\(m\)\) return null;\n(?:[^\n]*\n){2}\s+if \(el\.querySelector\(':scope > \.cn-cards > :is\(\.cn-card\.cn-open, \.cn-card\.cn-kept\)'\)\) return null;/.test(CV) && /card\.classList\.add\('cn-kept'\);/.test(CARD), 'a run never folds a record holding a card that waits — nor one whose answered card keeps a box in use (S1\'s rule beside it)');
-ok(/onJumpToNeed: \(\) => \{ this\._needsCards\?\.jumpToNewest\(\); \}/.test(CV) && /chip\('foryou', `chat-status-foryou/.test(BAR) && /\.chat-status-foryou\.chat-status-clickable'\)\) \{ e\.stopPropagation\(\); this\._onJumpToNeed\?\.\(\)/.test(BAR), 'the chip: drawn from setNeeds, its click lands the newest card');
+ok(/onJumpToNeed: \(id\) => \{ \(id \? this\._needsCards\?\.land\(id\) : this\._needsCards\?\.jumpToNewest\(\)\)\?\.catch\?\.\(\(\) => \{\}\); \}/.test(CV) && /chip\('foryou', `chat-status-foryou/.test(BAR) && /const needsChip = e\.target\.closest\('\.chat-status-foryou\.chat-status-clickable'\);\n\s+if \(needsChip\) \{\n\s+e\.stopPropagation\(\);\n\s+const rows = this\._needRows \|\| \[\];\n\s+if \(rows\.length < 2\) \{ this\._onJumpToNeed\?\.\(rows\.length \? rows\[0\]\.id : null\); return; \}/.test(BAR) && /b\.onclick = \(ev\) => \{ ev\.stopPropagation\(\); list\.remove\(\); this\._onJumpToNeed\?\.\(r\.id\); \};/.test(BAR), 'the chip: drawn from setNeeds — THE INDEX (lane needs-card-tail): one ask ⇒ its click lands it, several ⇒ its list (newest first), a row lands that one through the cards\' ONE landing');
 // acceptance round 2 (P3): ONE SOURCE — the chip's words are the open cards this pass drew, never the store's list beside them
-ok(/view\._statusBar\?\.setNeeds\?\.\(chipWords\(shown, t\)\);/.test(CARD) && !/chipWords\(open/.test(CARD) && /placed\.add\(e\.item\.id\);\n\s+if \(!e\.resolved\) shown\.push\(e\);/.test(CARD), 'ONE SOURCE: the chip counts the open cards this pass DREW (a filing ⇒ N+1 both, an answer ⇒ N both — never the list beside them)');
+ok(/view\._statusBar\?\.setNeeds\?\.\(this\._chipOf\(plan\)\);/.test(CARD) && !/\bshown\b/.test(CARD.slice(CARD.indexOf('  _pass() {'), CARD.indexOf('  _create(e) {'))) && /const w = chipWords\(plan\.waiting, t\);/.test(CARD) && /const plan = tailPlan\(open, transcript, \{ rendered: \(id\) => this\._onScreen\(id\), atEnd, pick: this\._dockPick \}\);/.test(CARD), 'ONE PASS (lane needs-card-tail — was «the chip counts the cards drawn»): the chip lists EVERY open ask (PURE tailPlan\'s waiting — the cards are a subset now) from the same pass that draws the cards (a filing ⇒ N+1 and its card, an answer ⇒ N and the dock moved, in one frame)');
 ok(/try \{ if \(!card\) card = this\._create\(e\); else this\._patch\(card, e\); \} catch \(err\) \{ console\.warn\('\[chat-needs\] a card failed to draw:'[^}]*continue; \}/.test(CARD), 'ONE card that throws is said and skipped — the pass still reaches the chip');
 // acceptance round 2 (P2): THE ACCORDION — one open slot (the person's pick while it waits, else the newest; a filing takes it back)
 ok(/const fresh = open\.filter\(\(e\) => !this\._seen\.has\(e\.item\.id\)\);\n\s+if \(fresh\.length\) this\._slot = newestOf\(fresh\)\.item\.id;\n\s+this\._seen = new Set\(open\.map\(\(e\) => e\.item\.id\)\);\n\s+const openSlot = this\._slot;/.test(CARD) && /fold: x\.item\.id !== openSlot/.test(CARD) && /card\.classList\.toggle\('cn-fold', fold\);/.test(CARD) && /row\.classList\.toggle\('ut-open', !fold\);/.test(CARD) && /const fold = !!e\.fold && !boxInUse\(card\.querySelector\('\.ut-reply'\)\);/.test(CARD) && /card\.addEventListener\('click', \(ev\) => \{\n\s+if \(unfold\(ev\) \|\| card\._openedAt == null/.test(CARD), 'THE ACCORDION: ONE open card (the slot: a FILING\'s newest id, a tap, the chip), the rest folded rows whose whole row opens them; a reply box in use is never folded');
@@ -422,6 +422,87 @@ console.log('⑨ every surface that shows a conversation its own items is a SURF
   { const r = { ...CN.SURFACES }; delete r['mini-inbox']; ok(surfaceCensus(r).some((p) => /miniInboxEntries\(\) picks a conversation's items by sessionKey — a surface missing/.test(p)), 'RED: a surface dropped from the registry is named'); }
   { const r = { ...CN.SURFACES, 'title-badge': { ...CN.SURFACES['title-badge'], about: true } }; ok(surfaceCensus(r).some((p) => /SURFACES\.title-badge: inboxBadgeFor claims `about` but never reads it/.test(p)), 'RED: a deferred surface claimed as done is named'); }
   { const fl = { ...files, 'src/lib/user-todos-layout.js': files['src/lib/user-todos-layout.js'].replace('export function sessionMark(open, keys) {', 'export function sessionMark(open, keys) { if (keys && keys.about) return null;') }; ok(surfaceCensus(CN.SURFACES, fl).some((p) => /SURFACES\.session-marker: sessionMark reads `about` now — its row must say true/.test(p)), 'RED: a deferred surface that starts reading `about` is named until its row says so'); }
+}
+
+
+// ── ⑩ THE TAIL (lane needs-card-tail) ────────────────────────────────────────────────────────────────────────────────
+// the owner on 2.369.360 (2026-10-28, owner-screenshot-59): «这个应该同时堆叠在页面最下吗？» — a 200-turn chat loaded at its tail
+// showed SIX cards stacked under its newest message (five folded rows dated 10/25 · 10/26 · 10/26 · 8 h · 6 h and one open
+// card), the status bar already saying «等你操作 · 6 个问题»: every open ask whose record was far above the window fell back
+// to the END. THE LAW: at most ONE docked card (the person's pick, else the NEWEST of them), the chip lists every one.
+console.log('⑩ THE TAIL — a card whose record is not on screen is not stacked at the end: ONE docks (the newest, or the pick), the chip lists every one, the landing reads the history upward');
+{
+  const H = 3600e3, NOW = Date.UTC(2026, 9, 28, 10, 50, 0);
+  const has = typeof CN.tailPlan === 'function', hasFind = typeof CN.filingIndex === 'function';
+  ok(has && hasFind, 'PURE tailPlan + filingIndex exist (src/foryou-actions.js — the pass and the landing draw from them)');
+  const tailPlan = has ? CN.tailPlan : () => ({ at: new Map(), dock: null, waiting: [], loose: [] });
+  const ask = (k, ts) => ({ item: { ...FIX['agents: an ask'], id: `ut-tail0000${k}`, text: `the ask ${k}`, createdAt: ts }, kind: 'question' });
+  // the owner's six, oldest first as needsOf gives them: 10/25, 10/26, 10/26, 8 h ago, 6 h ago, 6 h ago
+  const SIX = [ask(1, NOW - 74 * H), ask(2, NOW - 50 * H), ask(3, NOW - 46 * H), ask(4, NOW - 8 * H), ask(5, NOW - 6 * H - 60e3), ask(6, NOW - 6 * H)];
+  // the window loaded at the chat's tail: its last 50 records, the last two hours (a tool card every third)
+  const WIN = Array.from({ length: 50 }, (_, k) => ({ id: `w${k}`, role: k % 3 ? 'assistant' : 'tool', ts: NOW - 2 * H + k * 60e3, tool: k % 3 ? null : 'Bash', cmd: k % 3 ? '' : 'git status', out: '' }));
+  const onScreen = new Set(WIN.map((r) => r.id)), rendered = (id) => onScreen.has(id);
+  // THE BASE's rule, as 90c995a3's _pass ran it (chat-needs-card.js:274–279 «an anchor not rendered = no card there; an open
+  // card's fallback is the end»): every open card whose record is not on screen is drawn at the end
+  const baseAtEnd = (open, tr) => open.filter((e) => { const p = CN.placementOf(e.item, tr); return !(p.how !== 'end' && p.at != null && rendered(p.at)); }).length;
+  eq(baseAtEnd(SIX, WIN), 6, 'RED (the base\'s rule over the owner\'s six — their records far above the window): SIX cards at the end');
+  const plan = tailPlan(SIX, WIN, { rendered });
+  ok(plan.at.size === 0 && plan.dock === 'ut-tail00006', 'R1 the six ⇒ ONE docked card — the NEWEST (6 h ago); none of them in place', { at: [...plan.at], dock: plan.dock });
+  eq(plan.waiting.map((e) => e.item.id), ['ut-tail00006', 'ut-tail00005', 'ut-tail00004', 'ut-tail00003', 'ut-tail00002', 'ut-tail00001'], 'R2 the chip lists all SIX, newest first (the rest wait there)');
+  { const w = CN.chipWords(plan.waiting); ok(!!w && w.n === 6 && w.text === 'waiting for you · 6 questions' && /— click to list them, choose one to go to it$/.test(w.title), 'R2 «waiting for you · 6 questions» — its click lists them', w); }
+  ok(/— click to go to it$/.test((CN.chipWords([SIX[0]]) || {}).title || ''), '…one ask: its click goes to it');
+  // 2 anchored (the CLI call before it; the result naming it) + the 4 oldest with no record on screen
+  const A7 = { item: { ...FIX['agents: an ask'], id: 'ut-tail00007', text: 'the ask 7', createdAt: WIN[40].ts + 1500 }, kind: 'question' };
+  const A8 = { item: { ...FIX['agents: an ask'], id: 'ut-tail00008', text: 'the ask 8', createdAt: WIN[44].ts + 1000 }, kind: 'question' };
+  const WIN2 = WIN.map((r, k) => (k === 40 ? { ...r, role: 'tool', tool: 'Bash', cmd: 'vibespace-ask "the ask 7"', out: '' } : k === 45 ? { ...r, role: 'tool', tool: 'Bash', cmd: 'vibespace-ask "the ask 8"', out: 'Filed for you: a question — answer it on the card in this conversation or in the For-you tray (ut-tail00008)' } : r));
+  const MIX = [SIX[0], SIX[1], SIX[2], SIX[3], A7, A8];
+  eq(baseAtEnd(MIX, WIN2), 4, 'RED (the base\'s rule): 2 in place + FOUR at the end');
+  const p2 = tailPlan(MIX, WIN2, { rendered });
+  ok(p2.at.size === 2 && p2.at.get('ut-tail00007') === 'w40' && p2.at.get('ut-tail00008') === 'w45' && p2.dock === 'ut-tail00004', 'R1 2 anchored + 4 not ⇒ 2 IN PLACE (the CLI call · the result naming it — unchanged) + 1 DOCKED (the newest of the four, 8 h ago)', { at: [...p2.at], dock: p2.dock });
+  ok(p2.waiting.length === 6 && p2.waiting[0].item.id === 'ut-tail00008', 'R2 …the chip lists all six, newest first');
+  // R3: answered anywhere ⇒ the dock goes to the next newest (or empties) — the chip's count and the cards in the same pass
+  const p3 = tailPlan(SIX.slice(0, 5), WIN, { rendered });
+  ok(p3.dock === 'ut-tail00005' && p3.waiting.length === 5 && CN.chipWords(p3.waiting).n === 5, 'R3 the docked ask answered (the tray, a phone, the card) ⇒ the dock goes to the next newest; the chip says 5 from the same plan', { dock: p3.dock });
+  ok(tailPlan(SIX.slice(0, 1), WIN, { rendered }).dock === 'ut-tail00001' && tailPlan([], WIN, { rendered }).dock === null && CN.chipWords([]) === null, 'R3 …down to the last one; all answered ⇒ the dock empties and the chip goes');
+  // R2: a chip row whose ask has no record takes the dock (the person's pick) — answered, the newest docks again
+  ok(tailPlan(SIX, WIN, { rendered, pick: 'ut-tail00002' }).dock === 'ut-tail00002' && tailPlan(SIX.filter((e) => e.item.id !== 'ut-tail00002'), WIN, { rendered, pick: 'ut-tail00002' }).dock === 'ut-tail00006', 'R2 a landed ask with no record takes the dock; answered, the newest takes it back');
+  ok(tailPlan(MIX, WIN2, { rendered, pick: 'ut-tail00007' }).dock === 'ut-tail00004', '…a pick whose record IS on screen never docks (it stands at its record)');
+  // the landing's window: loaded MID-HISTORY around ask 2's filing (jumpToIndex) — no dock there, the newer asks NOT stacked
+  // on the window's last record
+  const MID = Array.from({ length: 50 }, (_, k) => ({ id: `m${k}`, role: 'assistant', ts: SIX[1].item.createdAt - 20 * 60e3 + k * 60e3 }));
+  const midOn = new Set(MID.map((r) => r.id));
+  const pm = tailPlan(SIX, MID, { rendered: (id) => midOn.has(id), atEnd: false });
+  ok(pm.at.size === 1 && pm.at.get('ut-tail00002') === 'm20' && pm.dock === null && pm.waiting.length === 6, 'a window loaded mid-history (the landing): the landed ask at its record, NO dock (its end is not the chat\'s), every other in the chip', { at: [...pm.at], dock: pm.dock });
+  ok(CN.placementOf(SIX[5].item, MID).how === 'turn' && CN.placementOf(SIX[5].item, MID, { more: true }).how === 'end' && CN.placementOf(SIX[1].item, MID, { more: true }).at === 'm20', 'RED (placementOf without `more`): an ask filed AFTER a mid-history window lands «at the filing» on its LAST record (the stack again, one window up); with `more` it is not there — and one inside it still is');
+  // THE READ UPWARD (R2 / R5's «above the window ⇒ load up to it»): a 300-record conversation, an ask filed at record 40, the
+  // window its last 50 — the pages above read from the window's top, the index of the record that filed it
+  const CONV = Array.from({ length: 300 }, (_, k) => ({ id: `c${k}`, role: k % 2 ? 'assistant' : 'tool', ts: NOW - 300 * 60e3 + k * 60e3, tool: k % 2 ? null : 'Bash', cmd: k === 40 ? 'vibespace-ask "the ask at 40"' : '', out: '' }));
+  const at40 = { ...FIX['agents: an ask'], id: 'ut-tail00040', text: 'the ask at 40', createdAt: CONV[40].ts + 1200 };
+  const reads = [];
+  const readPage = async (offset, limit) => { reads.push([offset, limit]); return CONV.slice(offset, offset + limit); };
+  const find = hasFind ? CN.filingIndex : async () => undefined;
+  const W0 = 250, after = CONV.slice(W0, W0 + 40);
+  eq(baseAtEnd([{ item: at40, kind: 'question' }], CONV.slice(W0)), 1, 'RED (the base): the ask filed at record 40 of 300, the window loaded at the tail ⇒ its card at the END (its record out of sight)');
+  eq(await find(at40, readPage, { start: W0, after }), 40, 'the read upward finds record 40 (the CLI call that filed it)');
+  eq(reads, [[50, 200], [0, 50]], '…a page at a time from the window\'s top (200, then the rest) — never the whole conversation at once');
+  eq(await find({ ...at40, createdAt: CONV[0].ts - 3 * H }, readPage, { start: W0, after }), -1, 'an ask filed before the conversation\'s first record ⇒ -1 (no record: it docks at the end and says why)');
+  eq(await find(at40, async () => { throw new Error('500'); }, { start: W0, after }), null, 'a page that fails ⇒ null (unknown — never claimed «no record»)');
+  eq(await find({ ...at40, createdAt: CONV[120].ts + 500 }, readPage, { start: W0, after }), 120, 'an ask with no CLI record (the record at the filing) ⇒ that record');
+  { const named = CONV.map((r, k) => (k === 77 ? { ...r, role: 'tool', out: 'Filed for you … (ut-tail00040)' } : r)); eq(await find(at40, async (o, l) => named.slice(o, o + l), { start: W0, after }), 77, 'the result naming it wins (placementOf\'s named rung) when that page is read'); }
+  // THE WORDS (R4): the dock line names where it was asked and how many wait where; zh + ja for every new string
+  const keysNew = ['Docked here — it was asked further up the conversation', 'Docked here — asked before this conversation\'s record was kept', '{n} waiting — the status bar lists them all', 'Waiting for you — newest first', 'This conversation is waiting for you: {all} — click to go to it', 'This conversation is waiting for you: {all} — click to list them, choose one to go to it'];
+  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const s = read(f); const miss = keysNew.filter((k) => !s.includes(JSON.stringify(k) + ':')); ok(!miss.length, `R4 ${f}: the dock line, the chip's list and its titles are worded`, miss); }
+  // THE WIRING (source pins): the pass draws from the plan; the dock line; ONE landing for the chip AND every For-you door
+  const CARD10 = read('src/lib/chat-needs-card.js'), CV10 = read('src/lib/chat-view.js'), UTA = read('src/lib/user-todos-actions.js'), CSS10 = read('public/chat.css');
+  const ps = CARD10.slice(CARD10.indexOf('  _pass() {'), CARD10.indexOf('  _onScreen(id) {'));
+  ok(/const atEnd = !view\._teleported && !\(view\._windowEnd < view\._total\);/.test(ps) && /else if \(plan\.at\.has\(e\.item\.id\)\) el = view\._elements\.get\(plan\.at\.get\(e\.item\.id\)\);\n\s+else if \(plan\.dock === e\.item\.id && lastId != null\) \{/.test(ps) && !/!e\.resolved && lastId != null\) el = view\._elements\.get\(lastId\)/.test(ps), 'R1 the pass: a card at its record (plan.at), ONE at the end (plan.dock), none for the rest — the base\'s «any open card without a rendered anchor ⇒ the end» is gone');
+  ok(/if \(this\._dockPick != null && !plan\.loose\.includes\(this\._dockPick\)\) this\._dockPick = null;/.test(ps) && /e\.dock = \{ n: open\.length, noRecord: this\._noRecord\.has\(e\.item\.id\) \|\| !\(view\._windowStart > 0\) \};/.test(ps), 'R2/R3 the pick holds the dock only while it waits with no record on screen; the dock knows how many wait and whether it has a record at all');
+  ok(/const where = e\.dock\.noRecord \? t\('Docked here — asked before this conversation\\'s record was kept'\) : t\('Docked here — it was asked further up the conversation'\);/.test(CARD10) && /const words = e\.dock\.n > 1 \? `\$\{where\} · \$\{t\('\{n\} waiting — the status bar lists them all', \{ n: e\.dock\.n \}\)\}` : where;/.test(CARD10) && /\.cn-card\.cn-fold > \.cn-head \{ display: none; \}/.test(CSS10) && !/\.cn-card\.cn-fold > \.cn-dock \{ display: none/.test(CSS10), 'R4 the docked card says it is docked — where it was asked (or that it has no record), how many wait, where (the status bar) — open or folded (the fold hides the head, never the dock line)');
+  const land = CARD10.slice(CARD10.indexOf('  async land(x) {'), CARD10.indexOf('  _show(el) {'));
+  ok(land.indexOf('const now = here();') > 0 && land.indexOf('await this._anchorIndex(item)') > land.indexOf('const now = here();') && /await view\.jumpToIndex\(idx, \{ land: \(\) => \{ landed = here\(\); \} \}\);/.test(land) && /this\._dockPick = item\.id;/.test(land) && /else if \(idx === -1\) this\._noRecord\.add\(item\.id\);/.test(land), 'R2 THE ONE LANDING: its card / record in the window ⇒ there; above it ⇒ the read upward + jumpToIndex (the road S1\'s chip takes), then there; no record ⇒ the dock at the end, saying why');
+  ok(/return filingIndex\(item, readPage, \{ start: view\._windowStart \|\| 0, after: /.test(CARD10) && /if \(land\) land\(relIdx >= 0 && relIdx < allMsgs\.length \? allMsgs\[relIdx\] : null\);\n\s+else if \(relIdx >= 0 && relIdx < allMsgs\.length\) \{/.test(CV10) && /landOnItem\(item\) \{ return this\._needsCards \? this\._needsCards\.land\(item\) : Promise\.resolve\(null\); \}/.test(CV10), '…the read upward is PURE filingIndex over the view\'s own page read; jumpToIndex hands its landing to the cards; the view\'s landOnItem is that landing');
+  ok(/\} else landOnFiling\(item\); \/\/ lane needs-card-tail \(R5\)/.test(UTA) && /app\.resumeSession\(s\.sessionId, s\.cwd, displayName\(s\), \{ backend: s\.backend, hostId: s\.hostId \|\| s\.host \|\| undefined \}\); landOnFiling\(item\); \}/.test(UTA) && /if \(loaded && \(\(v\._messages && v\._messages\.length\) \|\| v\._total > 0\)\) \{ v\.landOnItem\(item\)\.catch\(\(\) => \{\}\); return; \}/.test(UTA), 'R5 every For-you door (model.jump — the tray row, its name, the Chat door, the For-you window, the phone\'s page) lands through the SAME landing once the view stands (an open window, a re-attach, a resume)');
+  ok(!/\bjumpToNewest\(\)\s*\{[^}]*querySelectorAll/.test(CARD10) && /return open\.length \? this\.land\(open\[open\.length - 1\]\.item\) : Promise\.resolve\(null\);/.test(CARD10), 'the chip with no row chosen lands the newest through the same landing (no second jump)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

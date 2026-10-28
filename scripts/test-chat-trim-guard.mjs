@@ -313,7 +313,7 @@ ok('every off-list navigation surface stamps: minimap (index + time), search rev
   && /_noteUserNav\('minimap-time'\); return this\._jumpToFileTime/.test(cv)
   && /onNav: \(\) => this\._noteUserNav\('search-reveal'\)/.test(cv)
   && /_landOnHeader\(run\) \{[\s\S]{0,400}this\._noteUserNav\('runBar'\);/.test(cv)
-  && /async jumpToIndex\(targetIdx\) \{\s*this\._noteUserNav\('jumpToIndex'\);/.test(cv)
+  && /async jumpToIndex\(targetIdx(?:, \{ land = null \} = \{\})?\) \{\s*this\._noteUserNav\('jumpToIndex'\);/.test(cv) // (lane needs-card-tail: its optional `land` — the needs cards' landing — never moves the stamp off the first line)
   && /async jumpToBottom\(\{ user = true \} = \{\}\) \{\s*if \(user\) this\._noteUserNav\('jumpToBottom'\);/.test(cv));
 {
   const sch = fs.readFileSync(path.join(REPO, 'src/lib/chat-search.js'), 'utf8');

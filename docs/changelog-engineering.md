@@ -4,6 +4,14 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.361 — 2026-10-28
+
+### needs-card-tail — ONE docked card at a chat's end, the chip is the index, every For-you door lands at the filing record (BUILD on 90c995a3 = 2.369.360; the owner on .360: «这个应该同时堆叠在页面最下吗？» + R5 «inbox点消息跳转会对话的时候…直接跳转到对应的上下文»)
+- **The cause (owner-screenshot-59, a ~200-turn chat at its tail, six cards under the newest message):** chat-needs-card.js's pass docked EVERY open ask whose record was not on screen at the end, oldest first; the chip counted the cards drawn. Two more found while building the landing: placementOf's at-the-filing rung put every ask filed after a MID-history window on its last record, and jumpToIndex folded the new window's runs before the cards were drawn (the landed card inside a folded run).
+- **The build:** PURE `tailPlan` (one dock — the pick, else the newest; none mid-history) + `filingIndex` (the read upward, a page of 200 at a time from the window's top) + `placementOf(…, {more})` in src/foryou-actions.js; `NeedsCards.land` = THE ONE LANDING (card in place → record → read upward + `jumpToIndex(idx, {land})` → the dock at the live end, «asked before this conversation's record was kept»); the chip's list (chat-status-bar.js `_fillNeedsList`, newest first, the age kept); `landOnFiling` in user-todos-actions.js `jump` (R5); the pass's run-fold signature names the record each open card stands in.
+- **Gates:** test-conversation-needs ⑩ (RED on 90c995a3: 30 failed) · test-user-todos-layout ㉕ the door census (RED: 1) · test-chat-needs-card-chrome ⑬ + ② through the list (RED: 10 failed; ~300 s, the row's 900 s budget).
+- **Found, not changed:** chat-view `_updateRuns` anchors the reader on the topmost visible element; when it is itself a run member the pass folds (a new turn folds the turn before), the reader rises by its height (196 px measured).
+
 ## 2.369.360 — 2026-10-27
 
 ### ci358-reds (items 7 + 8 and round 2 — c083607d → 5bdb59fb; the .358 mirror's two fast-tier races)

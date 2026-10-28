@@ -89,7 +89,7 @@ export class ChatStatusBar {
     // first) and its click goes there — null = the view cannot jump (no chip click)
     this._pendingAsks = [];
     this._onJumpToAsk = onJumpToAsk;
-    this._onJumpToNeed = onJumpToNeed; // lane chat-needs-you-card: the «waiting for you · N» chip lands the newest needs card
+    this._onJumpToNeed = onJumpToNeed; // lane chat-needs-you-card: the «waiting for you · N» chip lands a needs card (lane needs-card-tail: (id) — the row chosen in its list, else the newest)
     this._needs = null; // {text, title, n} — PURE foryou-actions chipWords, or null (no chip)
     // The touch face of Ctrl+F (docs/design-mobile-gaps.md #4): a magnifier
     // chip the stylesheet shows only ≤768px (the steer bolt's split). null =
@@ -675,11 +675,43 @@ export class ChatStatusBar {
    *  (PURE chipWords: «waiting for you · an approval» / «· 3 approvals» / «· 3»), or null = no chip. */
   setNeeds(words) {
     const next = words && words.text ? { text: String(words.text), title: String(words.title || ''), n: Number(words.n) || 0 } : null;
+    // lane needs-card-tail: THE INDEX's rows (every open ask, newest first — {id, words, ago}); an open list follows them in
+    // place, so an answer anywhere drops its row in the pass that drops the count
+    this._needRows = next && Array.isArray(words.rows) ? words.rows.filter((r) => r && typeof r.id === 'string') : [];
+    this._fillNeedsList();
     const sig = next ? `${next.text}\u0000${next.title}` : '';
     if (sig === (this._needsSig || '')) return;
     this._needsSig = sig;
     this._needs = next;
     this.render();
+  }
+
+  /** lane needs-card-tail: the chip's list — every open ask, newest first, one row each (the question · its age — the age
+   *  kept, the last thing on the line); a row lands its ask and closes the list. `dd` = the list just opened, else the open
+   *  one is refilled in place (none open ⇒ nothing; no row left ⇒ it closes). */
+  _fillNeedsList(dd = null) {
+    const list = dd || (this._popupContainer || this._element?.parentElement)?.querySelector?.('.chat-status-dropdown.chat-needs-list');
+    if (!list) return;
+    const rows = this._needRows || [];
+    if (!rows.length) { list.remove(); return; }
+    const sig = rows.map((r) => `${r.id}\u0000${r.words}\u0000${r.ago}`).join('\u0001');
+    if (list.dataset.sig === sig) return;
+    list.dataset.sig = sig;
+    list.replaceChildren();
+    const head = document.createElement('div');
+    head.className = 'chat-needs-list-head';
+    head.textContent = t('Waiting for you — newest first');
+    list.append(head);
+    for (const r of rows) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chat-status-dropdown-item chat-needs-pick';
+      b.dataset.item = r.id;
+      b.title = String(r.words || '');
+      b.innerHTML = `<span class="chat-needs-pick-words">${escHtml(String(r.words || ''))}</span><span class="chat-needs-pick-ago">\u00a0·\u00a0${escHtml(String(r.ago || ''))}</span>`;
+      b.onclick = (ev) => { ev.stopPropagation(); list.remove(); this._onJumpToNeed?.(r.id); };
+      list.append(b);
+    }
   }
 
   setReviewEnabled(enabled) {
@@ -1425,7 +1457,6 @@ export class ChatStatusBar {
     if (e.target.closest('.chat-status-search')) { e.stopPropagation(); this._onSearch?.(); return; }
     if (e.target.closest('.chat-status-vault-wait')) { e.stopPropagation(); window.dispatchEvent(new CustomEvent('vs-vault-door')); return; }   // r2: the vault's door
     if (e.target.closest('.chat-status-turnstate.chat-status-clickable')) { e.stopPropagation(); this._onJumpToAsk?.(); return; } // lane S1: go to the card that waits
-    if (e.target.closest('.chat-status-foryou.chat-status-clickable')) { e.stopPropagation(); this._onJumpToNeed?.(); return; } // lane chat-needs-you-card: the newest needs card
     if (e.target.closest('.chat-status-kinds')) { e.stopPropagation(); this._app?._openDiagnostics?.(); return; } // lane door-healthy-chat: the record kinds → ⚙ Diagnostics
     const wfChip = e.target.closest('.chat-status-wf');
     if (wfChip && this._onOpenWorkflow && wfChip.dataset.wfRun) {
@@ -1511,6 +1542,20 @@ export class ChatStatusBar {
       return dropdown;
     };
 
+    // lane chat-needs-you-card: the «waiting for you · N» chip — lane needs-card-tail (the owner 2026-10-28: «这个应该同时堆叠在
+    // 页面最下吗？»): THE INDEX — one ask ⇒ its click lands it; several ⇒ the list (newest first, the question · its age) and
+    // choosing a row lands that one (the needs cards' ONE landing: its record, the history loaded up to it, or the dock)
+    const needsChip = e.target.closest('.chat-status-foryou.chat-status-clickable');
+    if (needsChip) {
+      e.stopPropagation();
+      const rows = this._needRows || [];
+      if (rows.length < 2) { this._onJumpToNeed?.(rows.length ? rows[0].id : null); return; }
+      const dropdown = showDropdown(needsChip, { minWidth: 260, maxWidth: 480 });
+      if (!dropdown) return;
+      dropdown.classList.add('chat-needs-list');
+      this._fillNeedsList(dropdown);
+      return;
+    }
     // Collapsed multi-workflow chip → dropdown, one row per run
     const wfMulti = e.target.closest('.chat-status-wf-multi');
     if (wfMulti && this._runningWorkflows().length) {

@@ -88,6 +88,28 @@ export function inboxModel(app) {
     return (s && displayName(s)) || (spoken && t(spoken.i18n.source.key)) || items.find((i) => i.sessionName)?.sessionName
       || (key.includes(':') ? key.split(':')[1].slice(0, 8) : key);
   };
+  /** THE ONE LANDING of a For-you door (lane needs-card-tail R5 — the owner 2026-10-28: «inbox点消息跳转会对话的时候，可以考虑
+   *  直接跳转到对应的上下文（agent发送这个inbox消息的时候的聊天位置）可能更有用一些»): once the conversation's chat view
+   *  stands (a window opened just now learns its history and the store a moment later — retried for a few seconds), `item`
+   *  lands at the record that filed it (chat-view.js landOnItem → chat-needs-card.js land: its card opened there, the
+   *  history loaded up to it, else the dock at the end). A door is a PRESS — nothing else calls it, so a broadcast never
+   *  moves a reader. scripts/test-user-todos-layout.mjs's door census: every conversation open from a For-you row is in
+   *  `jump`, and each lands through here. */
+  const landOnFiling = (item) => {
+    if (!item || !item.id) return;
+    const keys = [item.sessionKey, item.about].filter((k) => typeof k === 'string' && k);
+    let n = 0;
+    const tryLand = () => {
+      for (const [winId, v] of app.sessions || []) {
+        if (!v || v._disposed || typeof v.landOnItem !== 'function') continue;
+        const wk = app.foryouRows?.keysForWin?.(winId) || [];
+        if (!wk.some((k) => keys.includes(k))) continue;
+        if (loaded && ((v._messages && v._messages.length) || v._total > 0)) { v.landOnItem(item).catch(() => {}); return; }
+      }
+      if (++n < 40) setTimeout(tryLand, 250);
+    };
+    setTimeout(tryLand, 50);
+  };
   /** Go to where an item is answered. `close` = the calling surface's own
    *  "I am leaving" (the popup hides itself; the window stays). */
   const jump = (key, item, { close = () => {} } = {}) => {
@@ -136,9 +158,9 @@ export function inboxModel(app) {
           if (++n < 20) setTimeout(tryJump, 250);
         };
         setTimeout(tryJump, 50);
-      }
+      } else landOnFiling(item); // lane needs-card-tail (R5): every other item lands at the record that filed it
     } else if (s.status === 'tmux') app.attachTmuxSession(s.tmuxTarget, displayName(s), s.cwd);
-    else if (s.status === 'stopped') app.resumeSession(s.sessionId, s.cwd, displayName(s), { backend: s.backend, hostId: s.hostId || s.host || undefined });
+    else if (s.status === 'stopped') { app.resumeSession(s.sessionId, s.cwd, displayName(s), { backend: s.backend, hostId: s.hostId || s.host || undefined }); landOnFiling(item); }
     else showToast(t('This session is running outside VibeSpace'), { type: 'error' });
   };
   // ── WHAT AN ITEM SHOWS (lane foryou-attachments, owner 2026-10-09 "经常 agent 会让我 review 一个产物/文件/网页，我却没法
