@@ -356,11 +356,18 @@ function isDisplayMessage(msg) {
   return msg.type === 'user' || msg.type === 'assistant' || msg.type === 'result' || (msg.type === 'system' && msg.subtype === 'init');
 }
 
+/** THE PATH RULE (pure — no fs): where the CLI writes a conversation started in `cwd` on this machine. The person's CLI
+ *  index carries it (src/server/local-index.js — the writer never LISTS a folder: lane human-cli r2); the locate below
+ *  tries it first. null when the cwd is unknown. */
+function transcriptPathOf(claudeSessionId, cwd) {
+  if (!claudeSessionId || !cwd) return null;
+  return path.join(os.homedir(), '.claude', 'projects', cwdToProjectDir(cwd), claudeSessionId + '.jsonl');
+}
+
 function findSessionJsonlPath(claudeSessionId, cwd) {
   const projectsDir = path.join(os.homedir(), '.claude', 'projects');
-  const projDir = cwdToProjectDir(cwd || '');
   const candidates = [];
-  if (cwd) candidates.push(path.join(projectsDir, projDir, claudeSessionId + '.jsonl'));
+  if (cwd) candidates.push(transcriptPathOf(claudeSessionId, cwd));
   try {
     for (const dir of fs.readdirSync(projectsDir)) {
       const fp = path.join(projectsDir, dir, claudeSessionId + '.jsonl');
@@ -1421,6 +1428,7 @@ module.exports = {
   dedupWebuiSockets,
   isPidAlive,
   cwdToProjectDir,
+  transcriptPathOf,
   recoverCwdFromProjDir,
   getTmuxPaneMapAsync,
   tmuxOnPath,

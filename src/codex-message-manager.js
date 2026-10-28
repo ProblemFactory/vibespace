@@ -270,6 +270,7 @@ const SKIPPED_RECORD_TYPES = new Set([
   // work: it names the vendor response id for the token_count that follows
   'inter_agent_communication_metadata', // {trigger_turn} marker preceding an agent_message item
   'compacted',                          // the compaction summary line; event_msg context_compacted renders the notice
+  '_stdin_nack',                        // the WRAPPER's receipt for a torn stdin line (lane human-cli r2) — its words ride the task_failed beside it
   '_stdin_ack',                         // the WRAPPER's own stdin ack, consumed by the server (session._stdinAckReceived) — it leaked into the codex reader once (2.369.75 census); claude's list has had it since 2.369.119
 ]);
 const SKIPPED_RESPONSE_ITEM_TYPES = new Set([

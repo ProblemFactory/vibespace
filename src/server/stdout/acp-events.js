@@ -57,7 +57,7 @@ function create({ engine, noteHarnessModels, deliverRef, permissionRulesRef }) {
         let msg;
         try { msg = JSON.parse(line); } catch { broadcastToSession(session, id, { type: 'output', sessionId: id, data: line + '\n' }); continue; }
         try {
-          if (msg.type === '_stdin_ack') { session._stdinAckReceived = true; continue; }
+          if (msg.type === '_stdin_ack' || msg.type === '_stdin_nack') { session._stdinAckReceived = true; continue; }
           if (msg.type !== 'acp') { feedLive(session, msg); continue; } // e.g. the echoed permission-response frame
           // a SUBAGENT's own step (lane agy-subagent-cards): its virtual session's, never the parent's cards / label
           if (msg.kind === 'sub') { require('../acp-subagents.js').feed(session, id, msg, broadcastToSession); continue; }

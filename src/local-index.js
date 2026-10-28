@@ -11,9 +11,12 @@
  * while the dtach sessions kept running on local disks. The owner could not list them (`ls data/sockets` hung) nor talk
  * to one (`dtach -a` by hand reaches a terminal only; a chat session is a stream-json wrapper, not a screen).
  *
- * THE INDEX — `<place>/sessions.json`, written by the hub (src/server/local-index.js, the ONE writer, fed by the session
- * list's ONE notify point) on the machine's OWN disk: the place ladder below never picks a network or FUSE mount. A
- * row names what a person needs to reach a session with no hub: id, name, kind, backend, folder, the dtach socket, the
+ * THE INDEX — ONE FILE PER HUB ROOT, `<place>/sessions.<rootDigest>.json` (round 2: two hubs on one HOME never share a
+ * file — a crash, a stop or a restart of one never touches the other's rows), written by that hub (src/server/local-index.js,
+ * the ONE writer, fed by the session list's ONE notify point) on the machine's OWN disk: the place ladder below never picks
+ * a network or FUSE mount — judged by where the folder LANDS (its symlinks followed without touching a mount), never by
+ * the path's spelling. The person's place (`~/.vibespace/local`) holds only INSTALLED hubs' files; a throwaway hub (a
+ * worktree, a temp root, a test harness — src/server-root.js's verdict) writes under its OWN root. A row names what a person needs to reach a session with no hub: id, name, kind, backend, folder, the dtach socket, the
  * buffer, the transcript, the CLI's pid + birth. Closed keys (ROW_KEYS) — never a token, an env, an account. The hub's
  * own part carries its pid + birth and a heartbeat (`seenAt`), so a reader tells a hub that is DOWN from one that is
  * FROZEN (its process runs; its loop has written nothing for minutes).
@@ -27,9 +30,13 @@
  * codex). Gate: scripts/test-local-index.mjs (fast).
  */
 
-const INDEX_VERSION = 1;
+const INDEX_VERSION = 2;
 const INDEX_KIND = 'vibespace-local-index';
-const INDEX_FILE = 'sessions.json';
+// one file per hub root: `sessions.<the first 12 hex of sha256(root)>.json` (the writer names it; a reader lists them all)
+const INDEX_FILE_RE = /^sessions\.([0-9a-f]{12})\.json$/;
+const indexFileOf = (digest) => `sessions.${String(digest || '').toLowerCase().replace(/[^0-9a-f]/g, '').slice(0, 12)}.json`;
+const OWN_ROOT_DIR = 'data/local-index';   // a THROWAWAY hub's place: under its own root, never the person's HOME
+const SWEEP_MS = 24 * 3600 * 1000;       // a DOWN hub's file whose sessions are all gone is swept after a day
 const HEARTBEAT_MS = 30000;              // the hub rewrites the index this often even when nothing moved (its loop's pulse)
 const FRESH_MS = 3 * HEARTBEAT_MS;       // a pulse older than three beats = the hub's loop wrote nothing: not fresh
 // = src/mount-path-class.js NET_FSTYPE (test-local-index pins the two equal): a network or FUSE file system — the kind
@@ -59,31 +66,93 @@ function mountOf(p, mountinfoText) {
 const trimSlash = (s) => String(s || '').replace(/\/+$/, '') || '/';
 
 /**
- * THE PLACE — decided ONCE by the hub at its start (and said in its log), recomputed identically by the CLI: the first
- * rung whose folder is on the machine's own disk.
+ * WHERE A PATH LANDS (round 2, G1: `~/.vibespace` a symlink onto a FUSE mount read as «the machine's own disk» and one
+ * flush held the hub's loop 4.6 s). Walks the path one component at a time and follows each symlink — but before it
+ * TOUCHES a component (lstat / readlink) it asks the mount table which file system that component lives on: a network or
+ * FUSE mount is never touched; the walk stops there and says so. `lstat(p)` → {symlink: bool} | null (missing);
+ * `readlink(p)` → target. A missing component ends the walk: the rest lands where its parent lands.
+ * → {path} | {blocked: {at, fstype}} | {loop: true}.
+ */
+function landedPathOf(p, { lstat = null, readlink = null, mountinfo = '' } = {}) {
+  let todo = String(p || '').split('/').filter(Boolean);
+  if (!String(p || '').startsWith('/')) return { path: String(p || '') };
+  let cur = '';
+  for (let hops = 0; todo.length;) {
+    const part = todo.shift();
+    if (part === '.') continue;
+    if (part === '..') { cur = cur.slice(0, cur.lastIndexOf('/')); continue; }
+    const next = cur + '/' + part;
+    const m = mountinfo ? mountOf(next, mountinfo) : null;
+    if (m && NET_FSTYPE.test(m.fstype)) return { blocked: { at: next, fstype: m.fstype } };
+    if (typeof lstat !== 'function') { cur = next; continue; }
+    let st = null; try { st = lstat(next); } catch { st = null; }
+    if (!st) {   // missing: the rest lands where it reads — judged as a whole (a mount point further down is still a mount)
+      const full = [next, ...todo].join('/');
+      const mf = mountinfo ? mountOf(full, mountinfo) : null;
+      return mf && NET_FSTYPE.test(mf.fstype) ? { blocked: { at: mf.target, fstype: mf.fstype } } : { path: full };
+    }
+    if (!st.symlink) { cur = next; continue; }
+    if (++hops > 40) return { loop: true };
+    let to = ''; try { to = String(readlink(next) || ''); } catch { return { path: [next, ...todo].join('/') }; }
+    todo = [...to.split('/').filter(Boolean), ...todo];
+    if (to.startsWith('/')) cur = '';
+  }
+  return { path: cur || '/' };
+}
+
+/**
+ * THE PLACE — decided by the hub at its start (and said in its log), recomputed identically by the CLI: the first rung
+ * whose folder LANDS on the machine's own disk (landedPathOf — a symlink is followed, a mount never touched) and whose
+ * folder, if it exists, passes the rung law (rungFolderOf: no symlink, the uid's own, 0700).
  *   1. home         <home>/.vibespace/local
  *   2. var-tmp      /var/tmp/vibespace-<uid>          (the home folder is itself a network mount)
  *   3. runtime-dir  <XDG_RUNTIME_DIR>/vibespace        (RAM: lost at a restart — and so is every dtach session)
- * No mount table (macOS) ⇒ the home rung. → {dir, file, bin, via, fstype, why, tried} | {dir: null, code, why, tried}.
+ * `own` = {root} for a THROWAWAY hub: its ONE rung is <root>/data/local-index (never the HOME).
+ * `facts(dir)` → the lstat facts of the folder itself ({exists, symlink, dir, uid, mode}) — null = not asked (pure tests).
+ * No mount table (macOS) ⇒ the home rung. → {dir, bin, via, fstype, why, tried} | {dir: null, code, why, tried}.
  */
-function indexPlaceOf({ home = '', uid = null, mountinfo = '', xdgRuntimeDir = '', varTmp = '/var/tmp' } = {}) {
+function indexPlaceOf({ home = '', uid = null, mountinfo = '', xdgRuntimeDir = '', varTmp = '/var/tmp', own = null, lstat = null, readlink = null, facts = null } = {}) {
   const rungs = [];
-  if (String(home).startsWith('/')) rungs.push(['home', trimSlash(home) + '/.vibespace/local']);
-  if (Number.isInteger(uid) && uid >= 0) rungs.push(['var-tmp', trimSlash(varTmp) + '/vibespace-' + uid]);
-  if (String(xdgRuntimeDir || '').startsWith('/')) rungs.push(['runtime-dir', trimSlash(xdgRuntimeDir) + '/vibespace']);
+  if (own && String(own.root || '').startsWith('/')) rungs.push(['own-root', trimSlash(own.root) + '/' + OWN_ROOT_DIR]);
+  else {
+    if (String(home).startsWith('/')) rungs.push(['home', trimSlash(home) + '/.vibespace/local']);
+    if (Number.isInteger(uid) && uid >= 0) rungs.push(['var-tmp', trimSlash(varTmp) + '/vibespace-' + uid]);
+    if (String(xdgRuntimeDir || '').startsWith('/')) rungs.push(['runtime-dir', trimSlash(xdgRuntimeDir) + '/vibespace']);
+  }
   const tried = [];
   for (const [via, dir] of rungs) {
-    const m = mountinfo ? mountOf(dir, mountinfo) : null;
+    const land = landedPathOf(dir, { lstat, readlink, mountinfo });
+    if (land.blocked) { tried.push({ via, dir, fstype: land.blocked.fstype, why: `lands on a ${land.blocked.fstype} mount (${land.blocked.at})` }); continue; }
+    if (land.loop) { tried.push({ via, dir, fstype: null, why: 'a symlink loop' }); continue; }
+    const m = mountinfo ? mountOf(land.path, mountinfo) : null;   // the words only: landedPathOf judged every component
     const fstype = m ? m.fstype : null;
-    tried.push({ via, dir, fstype });
-    if (m && NET_FSTYPE.test(fstype)) continue;
+    const f = typeof facts === 'function' ? facts(dir) : null;
+    const law = rungFolderOf(f, { uid, dir });
+    if (!law.ok) { tried.push({ via, dir, fstype, why: law.why }); continue; }
+    tried.push({ via, dir, fstype, why: null });
+    const landed = land.path !== dir ? ` (it lands at ${land.path})` : '';
     const first = tried[0];
     const why = tried.length === 1
-      ? `${via === 'home' ? 'the home folder' : dir} is on the machine's own disk (${fstype || 'no mount table'})`
-      : `${first.dir} is on a ${first.fstype} mount — the index lives where a stalled mount cannot hold it: ${dir} (${fstype || 'no mount table'})`;
-    return { dir, file: dir + '/' + INDEX_FILE, bin: dir + '/bin', via, fstype, why, tried };
+      ? `${via === 'home' ? 'the home folder' : via === 'own-root' ? 'this hub\'s own root' : dir} is on the machine's own disk (${fstype || 'no mount table'})${landed}`
+      : `${first.dir} ${first.why} — the index lives where a stalled mount cannot hold it: ${dir} (${fstype || 'no mount table'})${landed}`;
+    return { dir, bin: via === 'own-root' ? null : dir + '/bin', via, fstype, landed: land.path, why, tried };
   }
-  return { dir: null, file: null, bin: null, code: 'no_local_disk', why: `every candidate folder is on a network or FUSE mount (${tried.map((t) => `${t.dir}: ${t.fstype}`).join('; ') || 'no home, no uid'})`, tried };
+  return { dir: null, bin: null, code: 'no_local_disk', why: `no candidate folder is usable (${tried.map((t) => `${t.dir}: ${t.why}`).join('; ') || 'no home, no uid'})`, tried };
+}
+
+/**
+ * THE RUNG LAW (round 2, G2: another local user can make `/var/tmp/vibespace-<your uid>` first — /var/tmp is world-
+ * writable — a symlink to their 0777 folder; the index and the CLI then landed there). The folder itself, by its lstat
+ * facts: missing = fine (the writer makes it 0700); a symlink, not a folder, another uid's, or open to anyone (mode &
+ * 077) = REFUSED by name. f = {exists, symlink, dir, uid, mode} | null (not asked).
+ */
+function rungFolderOf(f, { uid = null, dir = '' } = {}) {
+  if (!f || !f.exists) return { ok: true };
+  if (f.symlink) return { ok: false, why: `${dir} is a symlink someone made — refused (the rung's folder is made by the hub itself, 0700)` };
+  if (!f.dir) return { ok: false, why: `${dir} is not a folder — refused` };
+  if (Number.isInteger(uid) && Number.isInteger(f.uid) && f.uid !== uid) return { ok: false, why: `${dir} belongs to uid ${f.uid}, not ${uid} — refused` };
+  if (Number.isInteger(f.mode) && (f.mode & 0o077)) return { ok: false, why: `${dir} is open to others (mode ${(f.mode & 0o777).toString(8)}) — refused until it is 0700 (chmod 700 ${dir})` };
+  return { ok: true };
 }
 
 const str = (v, max = 400) => (typeof v === 'string' && v ? v.slice(0, max) : null);
@@ -94,6 +163,8 @@ const ROW_KEYS = Object.freeze(['id', 'name', 'kind', 'backend', 'cwd', 'host', 
   'transcript', 'conversationId', 'input', 'child', 'createdAt', 'attachedAt', 'clients', 'turn', 'inputHeld']);
 const HUB_KEYS = Object.freeze(['pid', 'starttime', 'bootId', 'root', 'throwaway', 'host', 'port', 'version', 'unit', 'startedAt', 'seenAt',
   'stoppedAt', 'dataDir', 'dataFs', 'place']);
+// throwaway = false (an INSTALLED hub: the person's place) | the root verdict's kind ('worktree' | 'tmp' | 'override' |
+// 'unknown' — src/server-root.js): such a hub writes under its own root and installs nothing
 
 /** Why a CHAT session would not take a line now, in the hub's own words for it (the card's remoteState) — or null. */
 function inputHeldOf(s = {}) {
@@ -196,6 +267,19 @@ function judgeRow(row = {}, { child = null, socket = null, rebooted = false } = 
   }
 }
 
+/**
+ * THE ESC BELT (round 2): every string the CLI prints from the wire — a transcript, a buffer, a session's name, a hub's log —
+ * is shown, never obeyed: an agent could otherwise write the person's clipboard (OSC 52), retitle the window, erase a
+ * line and fake a «you:» line. A whole escape sequence (CSI / OSC / DCS / a two-byte ESC) becomes «␛» + its printable
+ * rest; any other C0 / C1 control or DEL becomes its visible picture (␀…␟, ␡, ‹9b›). `keep` = the controls kept as-is
+ * ('\n' for a message body; nothing for a table cell).
+ */
+function clean(s, { keep = '' } = {}) {
+  return String(s == null ? '' : s)
+    .replace(/\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)?|\u001b[PX^_][^\u001b]*(?:\u001b\\)?|\u001b[ -~]?/g, (m) => '␛' + m.slice(1).replace(/[\u0000-\u001f\u007f]/g, ''))
+    .replace(/[\u0000-\u001f\u007f\u0080-\u009f]/g, (c) => (keep.includes(c) ? c : c === '\u007f' ? '␡' : c < ' ' ? String.fromCharCode(0x2400 + c.charCodeAt(0)) : `‹${c.charCodeAt(0).toString(16)}›`));
+}
+
 /** Milliseconds → «5s» «3m» «2h» «4d». */
 function ageWords(ms) {
   const s = Math.max(0, Math.round(Number(ms) / 1000) || 0);
@@ -227,34 +311,50 @@ function judgeHub(hub, { http = null, proc = null, now = 0 } = {}) {
   return { state: 'unknown', why: `its process (pid ${hub.pid}) could not be judged${pulseWords}` };
 }
 
-/** THE ORDER every listing and every number uses: oldest first (a number stays put while new sessions arrive). */
+/** THE ORDER inside one hub: oldest first (a number stays put while new sessions arrive — not when an older one ends:
+ *  that is why a number is a terminal's word only, see pickSession). */
 function orderRows(rows = []) {
   return rows.slice().sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) || String(a.id).localeCompare(String(b.id)));
 }
 
-/** `<session>` → {row, n} | {ambiguous: [rows]} | {none: true}: its number in `ls`, its id (or ≥ 4 chars of its end or
- *  start), its name, or a unique part of its name (case-insensitive). */
-function pickSession(rows = [], query = '') {
-  const list = orderRows(rows);
+/** THE HUB ORDER (one file per hub root): the hub the systemd unit runs first, then the others by root. docs = [{doc, file}]. */
+function orderHubs(docs = []) {
+  const unitOf = (d) => !!(d && d.doc && d.doc.hub && d.doc.hub.unit && !d.doc.hub.throwaway);
+  return docs.slice().sort((a, b) => (unitOf(b) - unitOf(a)) || String((a.doc.hub || {}).root || '').localeCompare(String((b.doc.hub || {}).root || '')) || String(a.file || '').localeCompare(String(b.file || '')));
+}
+/** Every hub's rows as ONE numbered list (the hub order, then oldest first) → [{row, hub: the doc's index in docs, n}]. */
+function entriesOf(docs = []) {
+  const out = [];
+  docs.forEach((d, h) => { for (const row of orderRows((d.doc && d.doc.sessions) || [])) out.push({ row, hub: h, n: out.length + 1 }); });
+  return out;
+}
+
+/** `<session>` → {row, n, by} | {ambiguous: [rows]} | {none: true} | {code: 'number_not_tty'}: its number in `ls` (ONLY
+ *  when `numbers` — a terminal, where the CLI then confirms the name: a number moves when an older session ends, so a
+ *  piped line could reach the wrong conversation), its id (or ≥ 4 chars of its end or start), its exact name, or (a
+ *  terminal again) a unique part of its name (case-insensitive). `list` = the rows in `ls` order (entriesOf). */
+function pickSession(list = [], query = '', { numbers = true } = {}) {
   const q = String(query || '').trim();
   if (!q) return { none: true };
   const nOf = (r) => list.indexOf(r) + 1;
-  const one = (r) => ({ row: r, n: nOf(r) });
+  const one = (r, by) => ({ row: r, n: nOf(r), by });
   const m = /^#?(\d{1,4})$/.exec(q);
-  if (m && list[Number(m[1]) - 1]) return one(list[Number(m[1]) - 1]);
+  if (m && !numbers) return { code: 'number_not_tty', n: Number(m[1]) };
+  if (m && list[Number(m[1]) - 1]) return one(list[Number(m[1]) - 1], 'number');
   const exact = list.find((r) => r.id === q);
-  if (exact) return one(exact);
+  if (exact) return one(exact, 'id');
   const lq = q.toLowerCase();
   const named = list.filter((r) => (r.name || '').toLowerCase() === lq);
-  if (named.length === 1) return one(named[0]);
+  if (named.length === 1) return one(named[0], 'name');
   if (named.length > 1) return { ambiguous: named };
   if (q.length >= 4) {
     const byId = list.filter((r) => r.id.endsWith(q) || r.id.startsWith(q));
-    if (byId.length === 1) return one(byId[0]);
+    if (byId.length === 1) return one(byId[0], 'id');
     if (byId.length > 1) return { ambiguous: byId };
   }
+  if (!numbers) return { none: true };
   const part = list.filter((r) => (r.name || '').toLowerCase().includes(lq));
-  if (part.length === 1) return one(part[0]);
+  if (part.length === 1) return one(part[0], 'part');
   if (part.length > 1) return { ambiguous: part };
   return { none: true };
 }
@@ -287,20 +387,20 @@ const homeShort = (p, home) => (home && p && (p === home || p.startsWith(home + 
  * THE TABLE `vibespace ls` prints. items = [{row, verdict}] (any order — numbered by orderRows), `turnFresh` = the
  * hub's pulse is fresh (a stale turn word would lie: shown as «?»). → lines (no trailing newline).
  */
-function tableOf(items = [], { now = 0, width = 120, home = '', turnFresh = false } = {}) {
+function tableOf(items = [], { now = 0, width = 120, home = '', turnFresh = false, start = 1 } = {}) {
   const ordered = orderRows(items.map((i) => i.row)).map((r) => items.find((i) => i.row === r));
   const fixed = { n: 3, state: 7, turn: 9, kind: 8, agent: 8, age: 4, id: 0 };
   fixed.id = Math.max(10, ...ordered.map((i) => cellWidth(i.row.id)));
   const gaps = 9; // between the 10 columns: 2 spaces each, minus the first
   const left = Math.max(24, width - 2 * gaps - Object.values(fixed).reduce((a, b) => a + b, 0));
   const nameW = Math.max(10, Math.floor(left * 0.4)), cwdW = Math.max(12, left - nameW);
-  const line = (c) => [fitCell(c.n, fixed.n), fitCell(c.state, fixed.state), fitCell(c.turn, fixed.turn), fitCell(c.kind, fixed.kind),
-    fitCell(c.agent, fixed.agent), fitCell(c.name, nameW), fitCell(c.cwd, cwdW), fitCell(c.age, fixed.age), c.id].join('  ').replace(/\s+$/, '');
+  const line = (c) => [fitCell(c.n, fixed.n), fitCell(c.state, fixed.state), fitCell(c.turn, fixed.turn), fitCell(clean(c.kind), fixed.kind),
+    fitCell(clean(c.agent), fixed.agent), fitCell(clean(c.name), nameW), fitCell(clean(c.cwd), cwdW), fitCell(c.age, fixed.age), clean(c.id)].join('  ').replace(/\s+$/, '');
   const out = [line({ n: '#', state: 'STATE', turn: 'TURN', kind: 'KIND', agent: 'AGENT', name: 'NAME', cwd: 'FOLDER', age: 'AGE', id: 'ID' })];
   ordered.forEach((it, i) => {
     const r = it.row, v = it.verdict || { state: 'unknown' };
     const turn = r.kind !== 'chat' || v.state !== 'alive' ? '—' : !turnFresh ? '?' : (TURN_WORDS[r.turn] || '—');
-    out.push(line({ n: String(i + 1), state: v.state, turn, kind: r.kind, agent: r.backend || '', name: r.name || '(no name)',
+    out.push(line({ n: String(start + i), state: v.state, turn, kind: r.kind, agent: r.backend || '', name: r.name || '(no name)',
       cwd: (r.host ? (r.hostName || r.host) + ':' : '') + homeShort(r.cwd, home), age: r.createdAt ? ageWords(now - r.createdAt) : '?', id: r.id }));
   });
   return out;
@@ -347,6 +447,18 @@ function fillFrame(tpl, { text = '', id = '' } = {}) {
   return fill(tpl);
 }
 
+// ── the wrapper's RECEIPTS (round 2): a frame carrying `webui_receipt: true` is acked INTO the wrapper's buffer (the CLI
+//    never stays attached — it reads the buffer), the ack naming the frame's own id; a line that came in TORN (two
+//    writers at once, a dropped byte) is refused with a nack — never a user message. ──
+const RECEIPT_FLAG = 'webui_receipt';
+/** A buffer record → {kind: 'ack', id} | {kind: 'nack', reason, bytes} | null. */
+function receiptOf(rec) {
+  if (!rec || typeof rec !== 'object') return null;
+  if (rec.type === '_stdin_ack') return { kind: 'ack', id: typeof rec.msg_id === 'string' ? rec.msg_id : null, at: Number(rec.timestamp) || null };
+  if (rec.type === '_stdin_nack') return { kind: 'nack', reason: String(rec.reason || 'torn'), bytes: Number(rec.bytes) || null, at: Number(rec.timestamp) || null };
+  return null;
+}
+
 // ── the records → lines. {who: 'you'|'agent'|'tool'|'turn'|'note', text, chunk?} — the same records the web renders
 //    (the user's and the agent's text; a tool call as ONE line; the turn's end) ──
 const oneLine = (s, max = 160) => { const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return t.length > max ? t.slice(0, max - 1) + '…' : t; };
@@ -370,7 +482,8 @@ function personText(t) {
   if (/^Caveat: /.test(s)) return null;
   return s;
 }
-function recordLines(rec) {
+function recordLines(rec) { return rawRecordLines(rec).map((l) => ({ ...l, text: clean(l.text, { keep: '\n\t' }) })); }
+function rawRecordLines(rec) {
   if (!rec || typeof rec !== 'object') return [];
   const out = [];
   // claude: stream-json on stdout AND the transcript (~/.claude/projects/…/<id>.jsonl) share these shapes
@@ -422,13 +535,15 @@ function recordLines(rec) {
 }
 
 /** JSON-lines text → its messages, oldest first (consecutive chunks of one speaker joined), the last `max`. */
+const shownLines = recordLines;   // recordLines already belts every text (a message keeps its new lines)
+
 function historyOf(text, { max = 20 } = {}) {
   const msgs = [];
   for (const ln of String(text || '').split('\n')) {
     const t = ln.replace(/\r$/, '').trim();
     if (!t || t[0] !== '{') continue;
     let rec; try { rec = JSON.parse(t); } catch { continue; }
-    for (const l of recordLines(rec)) {
+    for (const l of shownLines(rec)) {
       const last = msgs[msgs.length - 1];
       if (l.chunk && last && last.chunk && last.who === l.who) { last.text += l.text; continue; }
       msgs.push({ ...l });
@@ -437,7 +552,9 @@ function historyOf(text, { max = 20 } = {}) {
   return msgs.filter((m) => !m.chunk || m.text.trim()).map((m) => (m.chunk ? { who: m.who, text: m.text.trim() } : m)).slice(-Math.max(1, max));
 }
 
-/** /proc/<pid>/cgroup text → the systemd unit the process runs in ({unit, user}) — the hub's log is that unit's journal. */
+/** /proc/<pid>/cgroup text → the systemd unit the process runs in ({unit, user}) — the hub's log is that unit's journal.
+ *  The cgroup alone over-attributes (round 2): a hub started INSIDE a session of the unit's hub sits in the unit's cgroup
+ *  too — the writer attributes the unit only when this process IS the unit's main process (unitOwnedBy). */
 function unitOfCgroup(text) {
   for (const ln of String(text || '').split('\n')) {
     const p = ln.split(':').slice(2).join(':');
@@ -447,9 +564,17 @@ function unitOfCgroup(text) {
   return null;
 }
 
+/** Is this process the unit's MAIN process? systemd ≥ 248 hands every unit process SYSTEMD_EXEC_PID = the pid it
+ *  exec'd (scripts/install-service.sh: ExecStart=node server.js ⇒ the hub itself); without it, the parent is the
+ *  manager (`systemd`). A hub inside a session has neither. */
+function unitOwnedBy({ pid, execPid = null, ppid = null, parentComm = null } = {}) {
+  if (execPid != null && String(execPid).trim() !== '') return Number(execPid) === Number(pid);
+  return ppid != null && String(parentComm || '').trim() === 'systemd';
+}
+
 module.exports = {
-  INDEX_VERSION, INDEX_KIND, INDEX_FILE, HEARTBEAT_MS, FRESH_MS, NET_FSTYPE, ROW_KEYS, HUB_KEYS, SOCKET_FACTS, DTACH, TURN_WORDS,
-  FRAME_TEXT, FRAME_ID, mountOf, indexPlaceOf, inputHeldOf, rowOf, docOf, parseIndex, procStat, procVerdict, socketFactOf, judgeRow, judgeHub,
-  ageWords, orderRows, pickSession, cellWidth, fitCell, tableOf, dtachPacket, dtachPush, dtachAttach, frameTemplatesOf, fillFrame,
-  toolLine, personText, recordLines, historyOf, unitOfCgroup,
+  INDEX_VERSION, INDEX_KIND, INDEX_FILE_RE, OWN_ROOT_DIR, SWEEP_MS, HEARTBEAT_MS, FRESH_MS, NET_FSTYPE, ROW_KEYS, HUB_KEYS, SOCKET_FACTS, DTACH, TURN_WORDS,
+  FRAME_TEXT, FRAME_ID, RECEIPT_FLAG, indexFileOf, mountOf, landedPathOf, indexPlaceOf, rungFolderOf, inputHeldOf, rowOf, docOf, parseIndex, procStat,
+  procVerdict, socketFactOf, judgeRow, judgeHub, clean, ageWords, orderRows, orderHubs, entriesOf, pickSession, cellWidth, fitCell, tableOf,
+  dtachPacket, dtachPush, dtachAttach, frameTemplatesOf, fillFrame, receiptOf, toolLine, personText, recordLines, historyOf, unitOfCgroup, unitOwnedBy,
 };

@@ -5632,7 +5632,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 }
 
 // ── §103 (lane human-cli, 2026-10-28 — the 89-minute hub freeze of 2026-10-27): THE PERSON'S SESSION INDEX HAS ONE WRITER
-// AND EVERY SESSION STATE CHANGE REACHES IT. The index (<home>/.vibespace/local/sessions.json — what `vibespace ls /
+// AND EVERY SESSION STATE CHANGE REACHES IT. The index (<home>/.vibespace/local/sessions.<rootDigest>.json — what `vibespace ls /
 // attach / chat` read with no hub) is written by src/server/local-index.js only, fed by the session list's ONE notify
 // point (server.js broadcastActiveSessions), a client attach, the boot and the shutdown. A session that enters or leaves
 // the list without reaching that notify point is a session the person cannot find when the hub is gone (the census
@@ -5641,6 +5641,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 //   (b) the notify point calls the writer's note('sessions'); the attach case notes 'attach'; the boot configures it; the
 //       shutdown stops it — and nothing else requires the writer
 //   (c) the index's file name and folder are spelled in the PURE module only; the CLI never writes, renames or deletes
+//   (d) round 2: the writer's fs CALLEES through any module (driven, not read) — procfs, its own place, its own two install files
 {
   const acorn = (await import('node:module')).createRequire(import.meta.url)('acorn');
   const parse = (src) => acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true });
@@ -5676,17 +5677,88 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(/require\('\.\/src\/server\/local-index\.js'\)\.note\('sessions'\)/.test(notify), '§103b the session list\'s ONE notify point (server.js broadcastActiveSessions) feeds the index writer: note(\'sessions\')');
   ok(/require\('\.\/src\/server\/local-index\.js'\)\.stop\(\)/.test(fnBody(server, 'shutdownNow')), '§103b the shutdown tells the index the hub STOPPED (shutdownNow → stop())');
   ok((server.match(/require\('\.\/src\/server\/local-index\.js'\)\.configure\(/g) || []).length === 1 && /hub\.listen\(PORT, HOST, \(\) => \{[\s\S]{0,1200}local-index\.js'\)\.configure\(\{ rootDir: __dirname/.test(server), '§103b the boot configures it ONCE, at listen (the place decided once, the whole list written)');
+  ok(/local-index\.js'\)\.configure\(\{[^\n]*owner: \(\(\) => \{ try \{ return ownerWriteRefusal\(\); \}/.test(server) && !/local-index\.js'\)\.configure\(\{[^\n]*throwaway: throwawayRoot/.test(server), '§103b WHO IS INSTALLED is the root verdict\'s (src/server-root.js via ownerWriteRefusal — the one rule for every owner-file write): a worktree / temp / SKIP_AGENT_HOOKS hub writes under its own root, never the person\'s HOME');
   const wsh = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
   const attachCase = (wsh.split("case 'attach': {")[1] || '').slice(0, 1500);
   ok(/require\('\.\/server\/local-index\.js'\)\.note\('attach', data\.sessionId\)/.test(attachCase), '§103b a client attach is noted (the row\'s attachedAt) in ws-handler\'s attach case');
   const requirers = files.concat(['data/bin/vibespace']).filter((f) => /local-index\.js'\)/.test(fs.readFileSync(path.join(REPO, f), 'utf8').replace(/^\s*\/\/.*$/gm, '')) && /server\/local-index\.js'\)/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
   ok(JSON.stringify(requirers.sort()) === JSON.stringify(['server.js', 'src/ws-handler.js']), `§103b nothing else drives the ONE writer (${requirers.join(', ')})`);
 
-  const spelled = files.filter((f) => f !== 'src/local-index.js' && /['"`]sessions\.json['"`]|\.vibespace\/local\b|'\.vibespace', 'local'/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
+  const spelled = files.filter((f) => f !== 'src/local-index.js' && /['"`]sessions\.json['"`]|['"`]sessions\.\$\{|\.vibespace\/local\b|'\.vibespace', 'local'|data\/local-index\b/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
   ok(spelled.length === 0, `§103c the index's file and folder are spelled ONCE (src/local-index.js indexPlaceOf) — also: ${spelled.join(', ') || 'none'}`);
   const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
   const writes = cli.match(/\b(writeFileSync|writeFile|appendFileSync|renameSync|unlinkSync|rmSync|rmdirSync|mkdirSync|chmodSync|process\.kill)\(/g) || [];
   ok(writes.length === 0, `§103c the person's CLI never writes, renames, deletes or kills (${writes.join(', ') || 'none'})`);
+
+  // (d) THE WRITER'S FS CALLEES (lane human-cli round 2 — acceptance r1: a fresh chat's transcript LOCATE, an INDIRECT call
+  // through the harness store, readdirSync'd <checkout>/data/remote-jsonl on the main loop at a heartbeat and held it 35 s
+  // on a stopped bindfs; the sync-fs census reads ONE file's own calls and could not see it). The writer is DRIVEN — the
+  // boot, a note, the heartbeat, the stop — over a scratch home with the REAL harness registry and adapters (a claude chat
+  // whose transcript does not exist yet, a terminal), every fs call it reaches through ANY module recorded with the first
+  // caller outside node's own code (file:line). Allowed, sync: procfs (the hub's own facts) and the place's own path (the
+  // ladder's lstat/readlink of its components, the stop's write). Allowed, async: the place's own path, and the install's
+  // two reads of this hub's own files (once per boot). Anything else is red by file:line. A warm-up cycle first: a module
+  // load (require) is the loader's read, not the writer's.
+  {
+    const req = (await import('node:module')).createRequire(import.meta.url);
+    const fsm = req('fs');
+    const os = req('os');
+    const calls = []; let armed = false;
+    const callerOf = () => {
+      for (const l of new Error().stack.split('\n').slice(3)) {
+        const m = /\((\/[^)]+):(\d+):\d+\)$/.exec(l) || /at (\/[^ ]+):(\d+):\d+$/.exec(l);
+        if (m && !m[1].startsWith('node:') && !m[1].endsWith('test-architecture.mjs')) return `${path.relative(REPO, m[1])}:${m[2]}`;
+      }
+      return '?';
+    };
+    const spy = (obj, kind) => {
+      const saved = [];
+      for (const k of Object.keys(obj)) {
+        if (typeof obj[k] !== 'function' || (kind === 'sync' && !/Sync$/.test(k)) || /^(Dirent|Stats|ReadStream|WriteStream|FileReadStream|FileWriteStream|constants)$/.test(k)) continue;
+        const orig = obj[k];
+        saved.push([k, orig]);
+        obj[k] = function (...a) { if (armed && typeof a[0] !== 'number' && !(a[0] && typeof a[0] === 'object' && !(a[0] instanceof URL))) calls.push({ kind, fn: k, arg: String(a[0]), at: callerOf() }); return orig.apply(this, a); };   // an fd / a handle = inside a call already recorded by its path
+      }
+      return () => { for (const [k, orig] of saved) obj[k] = orig; };
+    };
+    const D = fsm.mkdtempSync(path.join(os.tmpdir(), 'vs-arch-li-'));
+    const home = path.join(D, 'home'), root = path.join(D, 'root');
+    fsm.mkdirSync(path.join(root, 'data', 'bin'), { recursive: true }); fsm.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fsm.writeFileSync(path.join(root, 'data', 'bin', 'vibespace'), '// cli\n'); fsm.writeFileSync(path.join(root, 'src', 'local-index.js'), '// pure\n');
+    const savedHome = process.env.HOME; process.env.HOME = home;
+    const unspy = [spy(fsm, 'sync'), spy(fsm.promises, 'async')];
+    let W = null, place = null, err = null, ctl = [];
+    try {
+      W = req(path.join(REPO, 'src/server/local-index.js'));
+      const { createAdapterRegistry } = req(path.join(REPO, 'src/adapters/index.js'));
+      const live = new Map([['sess-1-1', { mode: 'terminal', backend: 'shell', name: 't', cwd: '/w', socketPath: path.join(root, 'data/sockets/cw-1-1'), createdAt: 1, clients: new Map() }],
+        ['sess-2-2', { mode: 'chat', backend: 'claude', name: 'a fresh chat', cwd: path.join(D, 'cwd'), socketPath: path.join(root, 'data/sockets/cw-2-2'), createdAt: 2, claudeSessionId: 'e2e00000-0000-4000-8000-0000000000aa', clients: new Map() }]]);
+      const cycle = async (harnesses = null) => {
+        W._reset();
+        W.configure({ rootDir: root, port: 1, sessions: () => live, harnesses, buffersDir: path.join(root, 'data/session-buffers'), dataDir: path.join(root, 'data'), home, heartbeatMs: 3600000, adapters: createAdapterRegistry({}), log: { log() { }, warn() { } }, varTmp: path.join(D, 'vt'), xdgRuntimeDir: path.join(D, 'run') });
+        if (W.ready) await W.ready();
+        live.get('sess-2-2').name = 'renamed ' + Date.now(); W.note('sessions'); await W.flush('sessions');
+        await W.flush('heartbeat');
+        place = (W.placeOf() || {}).dir || null;
+        W.stop();
+      };
+      await cycle();                     // the warm-up: every module the writer reaches is loaded now
+      armed = true; await cycle(); armed = false;
+      // the CONTROL: a harness whose path rule LISTS data/ (what r1's locate did) — an indirect call, named by the census
+      const planted = { get: (b) => (b === 'claude' ? { spawn: { conversationIdField: 'claudeSessionId' }, store: { transcriptPathOf: () => { fsm.readdirSync(path.join(root, 'data')); return null; } } } : null) };
+      const real = calls.splice(0, calls.length);
+      armed = true; await cycle(planted); armed = false;
+      ctl = calls.splice(0, calls.length); calls.push(...real);
+    } catch (e) { err = e; } finally { armed = false; for (const u of unspy) u(); process.env.HOME = savedHome; try { W && W._reset(); } catch { } }
+    const underPlace = (p) => !!place && (p === place || p.startsWith(place + '/') || place.startsWith(p + '/'));
+    const installSrc = new Set([path.join(root, 'data', 'bin', 'vibespace'), path.join(root, 'src', 'local-index.js')]);
+    const bad = calls.filter((c) => !(c.kind === 'sync' ? (c.arg.startsWith('/proc/') || underPlace(c.arg)) : (underPlace(c.arg) || (c.fn === 'readFile' && installSrc.has(c.arg)))));
+    const show = (c) => `${c.kind} ${c.fn} ${c.arg.replace(D, '<scratch>').replace(REPO, '<checkout>')} @ ${c.at}`;
+    ok(!err && !!place && calls.length > 0 && bad.length === 0, `§103d the ONE writer's fs callees, through ANY module (the boot, a note, the heartbeat, the stop): only procfs, its own place and its own two install files — ${err ? 'THREW ' + err.message : `${calls.length} calls${bad.length ? '; OUTSIDE: ' + [...new Set(bad.map(show))].slice(0, 6).join(' | ') : ''}`}`);
+    const ctlBad = ctl.filter((c) => c.kind === 'sync' && c.fn === 'readdirSync' && c.arg === path.join(root, 'data'));
+    ok(ctlBad.length > 0 && ctlBad.every((c) => /^src\/server\/local-index\.js:\d+$/.test(c.at)), `§103d CONTROL: a planted harness path rule that lists <checkout>/data is named, with the writer's line that reached it (${ctlBad.map(show).slice(0, 2).join(' | ') || 'not seen'})`);
+    try { fsm.rmSync(D, { recursive: true, force: true }); } catch { }
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

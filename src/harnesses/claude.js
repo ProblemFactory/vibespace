@@ -176,6 +176,7 @@ module.exports = {
   store: {
     discover: store.discoverClaudeSessions,        // async ({activeSessions, webuiPids, devSnap}) → session entries
     locate: (id, cwd) => store.findSessionJsonlPath(id, cwd), // (sessionId, cwd) → path|null
+    transcriptPathOf: (id, cwd) => store.transcriptPathOf(id, cwd), // (sessionId, cwd) → path|null — PURE (no fs): the person's CLI index carries it
     // RESUME CONTINUITY (B-6b6d, round 2): claude declares NEITHER
     // `lastTurnModel` NOR `lastTurnEffort`, and the ABSENCE is the whole
     // declaration (src/resume-continuity.js: a knob with no source sends

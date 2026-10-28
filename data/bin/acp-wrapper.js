@@ -161,7 +161,7 @@ const meta = {
   // reports an EMPTY queue it merely guessed. The per-PROCESS skew law again:
   // an older wrapper answers an unknown verb with a VISIBLE error notice
   // (`unknown-verb` below), so the server must not ask one.
-  caps: { frameFile: true, peerMessage: false, inputQueue: true, queueVerbs: ACP_QUEUE_VERBS, permissionRules: true, queueResync: true },
+  caps: { frameFile: true, peerMessage: false, inputQueue: true, queueVerbs: ACP_QUEUE_VERBS, permissionRules: true, queueResync: true, receipts: true },
   queue: [],
 };
 
@@ -177,6 +177,8 @@ function persistMeta() {
   try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); fs.writeFileSync(metaFile, JSON.stringify(meta)); } catch {}
 }
 function schedulePersist() { if (!writeTimer) writeTimer = setTimeout(persistBuffer, 1000); }
+/** A receipt is waited for (the person's CLI reads the buffer file — lane human-cli r2): the pending persist runs now. */
+function persistSoon() { if (writeTimer) clearTimeout(writeTimer); writeTimer = setTimeout(persistBuffer, 50); }
 function scheduleMeta() { if (!metaTimer) metaTimer = setTimeout(persistMeta, 200); }
 
 function writeRecord(rec) {
@@ -595,6 +597,7 @@ function loadFrameFile(msg) {
 function rejectStdinLine(line) {
   const head = line.slice(0, 48).replace(/\s+/g, ' ');
   log(`stdin line unparseable (${line.length} bytes, starts ${JSON.stringify(head)}) — dropped`);
+  writeRecord({ type: '_stdin_nack', timestamp: Date.now(), reason: 'torn', bytes: line.length }); persistSoon();   // the sender's receipt (lane human-cli r2)
   notice('error', `Your message did not reach the agent: the input line was corrupted in transit (${line.length} bytes, unparseable) — please send it again.`, 'lost-input');
 }
 
@@ -964,9 +967,14 @@ async function boot() {
       const line = stdinBuf.slice(0, idx).replace(/\r/g, '').trim();
       stdinBuf = stdinBuf.slice(idx + 1);
       if (!line) continue;
-      // ack BEFORE parsing: "the pipe is alive", not "the line was valid"
-      try { process.stdout.write(JSON.stringify({ type: '_stdin_ack', timestamp: Date.now() }) + '\n'); } catch {}
+      // the ack: "the pipe is alive" (also for a line that is not valid) — naming its frame's msgId (lane human-cli r2); a
+      // frame that asks for a RECEIPT (`webui_receipt`, the person's CLI reads the buffer) gets it in the buffer too
       let msg = safeJsonParse(line);
+      const receipt = !!(msg && typeof msg === 'object' && msg.webui_receipt === true);
+      if (receipt) delete msg.webui_receipt;
+      const ack = { type: '_stdin_ack', timestamp: Date.now(), ...(msg && typeof msg === 'object' && (msg.msgId || msg.webui_msg_id) ? { msg_id: String(msg.msgId || msg.webui_msg_id) } : {}) };
+      if (receipt) { writeRecord(ack); persistSoon(); }
+      else try { process.stdout.write(JSON.stringify(ack) + '\n'); } catch {}
       if (!msg || typeof msg !== 'object') { rejectStdinLine(line); continue; }
       if (msg.type === '_frame_file') { msg = loadFrameFile(msg); if (!msg) continue; }
       handleInput(msg).catch((err) => { log(`stdin handler error: ${err.message}`); notice('error', err.message, 'handler-error'); });
