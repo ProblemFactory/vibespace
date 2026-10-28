@@ -149,10 +149,16 @@ const clipText = (v, max) => {
 const headOf = (v, max) => { let n = Math.min(max, v.length); if (n < v.length && /[\ud800-\udbff]/.test(v[n - 1])) n--; return v.slice(0, n); };
 const chunksOf = (v, max) => { const out = []; for (let i = 0; i < v.length;) { const c = headOf(v.slice(i), max); out.push(c); i += c.length || max; } return out.length ? out : ['']; };
 function normalizeCardFacts(x) {
-  if (x == null) return { facts: null, cut: [] };
-  if (typeof x !== 'object' || Array.isArray(x)) return { facts: null, cut: ['facts'] };
+  if (x == null) return { facts: null, cut: [], fresh: [] };
+  // r9 (a store says when it DROPS — the acceptance: a facts object past 24 KB was dropped with `factsCut` on the return only,
+  // said nowhere; the card fell back to prose): a dropped whole files a STUB that says why ({dropped, cut: ['facts']} — no
+  // `v`, so no client draws it as facts); the card draws «事实太大，未保存 — 只显示文字» (foryou-actions factsDroppedWords)
+  if (typeof x !== 'object' || Array.isArray(x)) return { facts: { dropped: 'not-an-object', cut: ['facts'] }, cut: ['facts'], fresh: ['facts'] };
+  if (typeof x.dropped === 'string' && FACTS_DROPPED.includes(x.dropped) && x.v === undefined) return { facts: { dropped: x.dropped, cut: ['facts'] }, cut: ['facts'], fresh: [] };   // a re-filed stub: the same stub
   const cut = (Array.isArray(x.cut) ? x.cut : []).filter((p) => typeof p === 'string' && p).map((p) => p.slice(0, 80)).slice(0, 16);   // the door's own cuts stay said
-  const said = (at) => { if (cut.length < 16 && !cut.includes(at)) cut.push(at); };
+  const fresh = [];
+  const said = (at) => { if (cut.length < 16 && !cut.includes(at)) { cut.push(at); fresh.push(at); } };
+  const keyPath = (at, k) => { const w = String(k).replace(/[^\w.-]/g, '?').slice(0, 40) || '?'; return at ? `${at}.${w}` : w; };   // r9: a dropped key is NAMED (was the parent's path: «» at the top)
   const walk = (v, depth, at) => {
     if (v === null || typeof v === 'boolean') return v;
     if (typeof v === 'number') { if (Number.isFinite(v)) return v; said(at); return null; }
@@ -163,7 +169,7 @@ function normalizeCardFacts(x) {
     let n = 0;
     for (const [k, y] of Object.entries(v)) {
       if (y === undefined) continue;
-      if (!/^[a-zA-Z][a-zA-Z0-9]{0,40}$/.test(k) || ++n > 32) { said(at); continue; }
+      if (!/^[a-zA-Z][a-zA-Z0-9]{0,40}$/.test(k) || ++n > 32) { said(keyPath(at, k)); continue; }
       out[k] = walk(y, depth + 1, at ? `${at}.${k}` : k);
     }
     return out;
@@ -172,17 +178,23 @@ function normalizeCardFacts(x) {
   const { cmd, cmdFull } = x;
   const parts = Array.isArray(cmdFull) ? cmdFull.filter((c) => typeof c === 'string') : typeof cmdFull === 'string' ? [cmdFull] : [];
   const whole = parts.length ? parts.join('') : typeof cmd === 'string' ? cmd : null;
+  if (whole == null && cmd != null) said('cmd');   // r9: a command that is no text is dropped AND named (was: silently gone, the card had no command box and still offered 允许一次)
   if (whole != null && whole.length > RUN_CMD_MAX) said('cmdFull');
   const command = whole == null ? {} : whole.length > RUN_CMD_BODY_MAX ? { cmd: headOf(whole, RUN_CMD_BODY_MAX), cmdCut: true, cmdFull: chunksOf(headOf(whole, RUN_CMD_MAX), RUN_CMD_BODY_MAX) } : { cmd: whole };
   const top = { ...x };   // the producer's key order kept (its facts come back byte-identical when inside the bound)
   for (const k of ['cmdCut', 'cmdFull', 'cut']) delete top[k];
   if (!('cmd' in top) && whole != null) top.cmd = '';
   const out = {};
-  for (const [k, v] of Object.entries(walk({ ...top, cmd: null }, 0, ''))) { if (k === 'cmd') Object.assign(out, command); else out[k] = v; }
+  for (const [k, v] of Object.entries(walk('cmd' in top ? { ...top, cmd: null } : top, 0, ''))) { if (k === 'cmd') Object.assign(out, command); else out[k] = v; }   // r9: no `cmd` placeholder on facts that carry none (it was cut as a 33rd field)
   if (cut.length) out.cut = cut;
-  if (JSON.stringify(out).length > 24000) return { facts: null, cut: ['facts'] };
-  return { facts: out, cut };
+  if (JSON.stringify(out).length > 24000) return { facts: { dropped: 'too-large', cut: ['facts'] }, cut: ['facts'], fresh: ['facts'] };
+  return { facts: out, cut, fresh };
 }
+/** Why a facts whole was dropped (the stub's `dropped`): past 24 KB, or not an object. */
+const FACTS_DROPPED = ['too-large', 'not-an-object'];
+const i18nKey = (s) => s;   // marks an English sentence as a dictionary key (the i18n check reads it)
+/** r9: the set-aside notice's group key (a For-you notice of the store itself — one per boot that set a file aside). */
+const SET_ASIDE_KEY = 'for-you-store';
 
 // THE DOOR (lane foryou-plugin-notices, owner 2026-10-19 on Dropline's 「建议加入词库」 rows: 「这个部分点击应该要自动跳转」): where a
 // click on the item's BODY takes the owner — declared by the producer at filing, validated like `action`:
@@ -350,11 +362,21 @@ class UserTodoManager {
     this._pluginGate = null; // lane foryou-plugin-notices: setPluginGate(fn) — does plugin <id> declare 'reminders'? (the server's; null = shape rules only)
     this._state = { items: [] };
     this._writeTimer = null; this._dirty = false; this._lastWritten = null;
+    // r9 (THE ATOMIC-WRITE + NO-SILENT-FAILURE LAWS — the acceptance: a truncated user-todos.json started the store FRESH with
+    // nothing said, and a held decision lost its card): a MISSING file is an empty store; one that exists but cannot be read,
+    // parsed, or has the wrong shape is SET ASIDE beside itself exactly as the channel store's index.json is
+    // (`user-todos.json.corrupt-<ts>`, its bytes kept, never unlinked), with ONE named log line and ONE For-you notice naming
+    // where the bytes are (filed below, once the store is up); the channels engine's boot reconcile files a held decision's
+    // card again from its request row.
+    let setAside = null;
     try {
-      const parsed = timedSync('user-todos.read', () => JSON.parse(fs.readFileSync(this._file, 'utf-8')));
-      if (parsed && Array.isArray(parsed.items)) this._state = parsed;
-      this._lastWritten = JSON.stringify(this._state, null, 2);
-    } catch { /* fresh */ }
+      const text = timedSync('user-todos.read', () => fs.readFileSync(this._file, 'utf-8'));
+      let parsed = null, why = null;
+      try { parsed = JSON.parse(text); } catch (e) { why = `corrupt JSON (${String((e && e.message) || e).slice(0, 80)})`; }
+      if (!why && !(parsed && Array.isArray(parsed.items))) why = 'not the expected shape';
+      if (why) setAside = this._setAside(why);
+      else { this._state = parsed; this._lastWritten = JSON.stringify(this._state, null, 2); }
+    } catch (e) { if (!(e && e.code === 'ENOENT')) setAside = this._setAside(`unreadable (${(e && e.code) || (e && e.message)})`); }
     // EXPIRY (2.369.152, "SPEND NOTICES LIVED FOREVER AS ACTIONS"): a notice
     // about a WINDOW (this hour's / today's unattended-turn budget, a 6 h
     // refusal) carries the window's end as `expiresAt` and dies with it. The
@@ -363,11 +385,40 @@ class UserTodoManager {
     // interval — the store's OWN timer, because server.js has no shared sweep
     // cadence other stores hook into (each keeper runs its own).
     this._expiryTimer = null;
+    if (setAside) this._fileSetAside(setAside);
     this.expireDue();
     if (expirySweepMs > 0) {
       this._expiryTimer = setInterval(() => { try { this.expireDue(); } catch { } }, expirySweepMs);
       if (this._expiryTimer.unref) this._expiryTimer.unref();
     }
+  }
+
+  /** r9: the unreadable file RENAMED beside itself (a copy when the rename cannot be done) → {why, to | null}. */
+  _setAside(why) {
+    const dir = path.dirname(this._file);
+    const to = `user-todos.json.corrupt-${new Date(this._now()).toISOString().replace(/[:.]/g, '-')}`;
+    try { fs.renameSync(this._file, path.join(dir, to)); }
+    catch (e) {
+      try { fs.copyFileSync(this._file, path.join(dir, to)); }
+      catch (e2) { console.warn(`[user-todos] user-todos.json is ${why} and could NOT be set aside (${(e2 && e2.code) || (e2 && e2.message)}) — the next save replaces it`); return { why, to: null }; }
+    }
+    console.warn(`[user-todos] user-todos.json was ${why} — set aside as ${to} (its bytes kept, never overwritten); For you starts empty`);
+    return { why, to };
+  }
+  /** r9: ONE notice naming where the set-aside bytes are (said where the owner looks — never a log line only). */
+  _fileSetAside({ why, to }) {
+    try {
+      this.add(SET_ASIDE_KEY, {
+        origin: 'server', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'For you',
+        text: to ? `For you could not read its saved list and set it aside as ${to} — the list started empty` : `For you could not read its saved list and could NOT set it aside — the next save replaces it`,
+        detail: `user-todos.json was ${why}.\n${to ? `Its bytes are kept as data/${to} — nothing was deleted. A held channel decision is filed again from its request; other open items are not in the new list.` : 'It could not be renamed or copied.'}`,
+        i18n: {
+          text: to ? { key: i18nKey('For you could not read its saved list and set it aside as {where} — the list started empty'), params: { where: to } } : { key: i18nKey('For you could not read its saved list and could NOT set it aside — the next save replaces it') },
+          detail: [{ key: i18nKey('Nothing was deleted. Fix the JSON and move it back while the server is stopped, or keep the new store and delete the copy once you no longer need it.') }],
+          source: { key: i18nKey('For you') },
+        },
+      });
+    } catch (e) { console.warn(`[user-todos] the set-aside notice could not be filed: ${(e && e.message) || e}`); }
   }
 
   /** The manager's last act (suites, a migration's private manager): the
@@ -560,6 +611,7 @@ class UserTodoManager {
     card = normalizeCard(card); // a server producer's view of the item (design 009: an app install's one card), or null
     const fx = normalizeCardFacts(facts); // r7: a producer's facts the client words (the vault-run card), or null — r8: clipped and named, never a throw
     facts = fx.facts;
+    if (fx.fresh.length) console.warn(`[user-todos] ${String(sessionKey).slice(0, 80)}: ${fx.fresh.includes('facts') ? `the card's facts were ${facts && facts.dropped === 'not-an-object' ? 'not an object' : 'larger than 24 KB'} — dropped, the card shows its text only` : `the card's facts were cut — named in its fold: ${fx.fresh.join(', ')}`} (r9: every drop named on the card and here)`);
     options = normalizeOptions(options); // option chips (vibespace-ask --options "A|B|C"): ≤6 distinct labels ≤40 chars, else THROWS by name — or null
     const arts = normalizeArtifacts(artifacts); // lane foryou-attachments: vibespace-ask --artifact — ≤8 rows, the cut named, a bad shape THROWS by name
     artifacts = arts.artifacts;

@@ -37,7 +37,7 @@ import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; //
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
-import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
+import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
@@ -105,6 +105,7 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
   if (by === 'stored') return t('saved to the vault'); // lane vault-paste-request: a paste request answered by its paste
   if (by === 'delivered') return t('delivered'); // r6: a held digest the owner released (Deliver)
+  if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'watch-removed') return t('the rule they were held for was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 }); // r9: no watcher left to deliver to
   if (by === 'discarded') return t('discarded — nothing was sent'); // …or dropped (Discard)
   if (by === 'granted') { const gw = item ? grantWords(item, { t }) : null; return gw ? gw.text : t('allowed'); } // r4: an agent's request for a stored secret (vault-grant-ask) answered — r6: the duration its record carries (none ⇒ «allowed») and the grant's life (ended / revoked), THE reader foryou-actions grantWords
   // B-2198 part 2: a raw-API proposal's item is answered BY its outcome (the card's words: Ran · 200 · 1.2 KB / Rejected by you)
@@ -178,7 +179,8 @@ const reachPickHtml = (i, t) => {
 };
 const hubAskHtml = (i, t, detail) => (i && i.action && HELD_ASKS.includes(i.action.type)
   ? runCardOf(i, { t }) ? runFactsHtml(i, t) // r7: the run card's FACTS, worded here (a record without them: its prose, below — unchanged)
-  : `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
+  : (factsDroppedWords(i, { t }) ? `<div class="ut-run-cut ut-facts-dropped">${escHtml(factsDroppedWords(i, { t }))}</div>` : '') // r9: facts the store dropped — said above the text
+    + `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
     + (i.action.type === 'vault-run-ask' ? `<div class="ut-exit-note">${escHtml(t('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.'))}</div>` : '')
     + (i.action.type === 'automation-ask' && i.action.askId ? reachPickHtml(i, t) : '')
     + (i.action.askId ? `<div class="ut-exit-answer ut-hub-answer">${heldAnswers(i).map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}</div>` : '')
@@ -211,15 +213,18 @@ export function runFactsHtml(i, t, { buttons = true } = {}) {
  *  the For-you window draw it; ONE page ticker re-reads every such line once a second (tickDeadlines).
  *  A CLOCK IS THE HUB'S (r8): every For-you broadcast and snapshot carries the server's `now`; noteHubClock keeps this tab's
  *  offset from it and hubNow() is the time every line counts by — never the device's own clock against hub stamps. */
-let hubOffset = 0;
+let hubOffset = 0, hubKnown = false;
 export function noteHubClock(serverNow, at = Date.now()) {
   const n = Number(serverNow);
-  if (Number.isFinite(n) && n > 0) hubOffset = n - at;
+  if (Number.isFinite(n) && n > 0) { hubOffset = n - at; hubKnown = true; }
   return hubOffset;
 }
 export const hubNow = (at = Date.now()) => at + hubOffset;
+/** r9: whose clock hubNow() is — 'hub' once a snapshot said the server's `now`, else 'device' (an older hub sends none: the
+ *  line then says «by this device's clock», never «by the server's»). */
+export const hubClock = () => (hubKnown ? 'hub' : 'device');
 const deadlineAttrs = (i, d) => `data-deadline-at="${d.at}" data-deadline-from="${d.from}"${i.action && i.action.late ? ' data-deadline-late="1"' : ''}${i.action && i.action.late && i.action.restartLost === true ? ' data-deadline-lost="1"' : ''}`;
-export const deadlineHtml = (i, t, d = deadlineOf(i, { t, now: hubNow() })) => { return d ? `<div class="ut-deadline${d.warn ? ' ut-deadline-warn' : ''}" data-state="${d.state}" ${deadlineAttrs(i, d)}>${escHtml(d.text)}</div>` : ''; };
+export const deadlineHtml = (i, t, d = deadlineOf(i, { t, now: hubNow(), clock: hubClock() })) => { return d ? `<div class="ut-deadline${d.warn ? ' ut-deadline-warn' : ''}" data-state="${d.state}" ${deadlineAttrs(i, d)}>${escHtml(d.text)}</div>` : ''; };
 /** THE DEADLINE TICKER: ONE interval for the page, armed when a line is drawn, re-reading every `[data-deadline-at]` still in
  *  the document through deadlineOf at the HUB's time — its words, its accent, its state. It never touches an answer (r8). It
  *  stops itself when no line is counting: a row taken out of the document takes its line with it — nothing per row to tear
@@ -229,7 +234,7 @@ export function tickDeadlines(root = document, now = hubNow()) {
   let counting = 0;
   for (const el of root.querySelectorAll('[data-deadline-at]')) {
     const late = el.dataset.deadlineLate === '1', lost = el.dataset.deadlineLost === '1';
-    const d = deadlineOf({ status: 'open', kind: 'action', expiresAt: Number(el.dataset.deadlineAt), createdAt: Number(el.dataset.deadlineFrom), action: { type: 'deadline', ...(late ? { late: true } : {}), ...(lost ? { restartLost: true } : {}) } }, { t: tr, now });
+    const d = deadlineOf({ status: 'open', kind: 'action', expiresAt: Number(el.dataset.deadlineAt), createdAt: Number(el.dataset.deadlineFrom), action: { type: 'deadline', ...(late ? { late: true } : {}), ...(lost ? { restartLost: true } : {}) } }, { t: tr, now, clock: hubClock() });
     if (!d) continue;
     if (el.textContent !== d.text) el.textContent = d.text;
     el.classList.toggle('ut-deadline-warn', d.warn);
@@ -346,7 +351,7 @@ function partsOf(entry, ctx) {
   const notice = !!entry.notice && !resolved;
   const tail = !!entry.tail;
   // a CLEARED item ("Clear content…", 2026-09-28): its words are the cleared sentence (ctx.wordsOf) — dimmed, in its place
-  const dline = resolved ? null : deadlineOf(i, { t, now: hubNow() }); // r7 addendum: its deadline — r8: at the HUB's time; it never withdraws an answer (the producer's settle does)
+  const dline = resolved ? null : deadlineOf(i, { t, now: hubNow(), clock: hubClock() }); // r7 addendum: its deadline — r8: at the HUB's time; it never withdraws an answer (the producer's settle does)
   const cls = 'ut-item' + (notice ? ' ut-item-notice' : '') + (resolved ? ' ut-item-resolved' : '') + (resolved && !tail ? ' ut-item-inplace' : '') + (i && i.clearedAt ? ' ut-item-cleared' : '');
   const card = isAppCard(i) ? i.card : null; // design 009: an app install's ONE card (a cleared item has none left)
   const lang = typeof ctx.lang === 'function' ? ctx.lang() : (ctx.lang || 'en');

@@ -31,9 +31,9 @@ import { registerMenuItem } from './contributions.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: an automation card's reach choices in the pane
 import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
-import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, endCodeOf, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml, runFactsHtml, armDeadlines, hubNow } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
+import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, endCodeOf, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml, runFactsHtml, armDeadlines, hubNow, hubClock } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
-import { closersOf, isDecisionRow, runCardOf, deadlineOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
+import { closersOf, isDecisionRow, runCardOf, deadlineOf, factsDroppedWords } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's box, as a dialog over this window
 
@@ -377,7 +377,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
   const viewOf = (it, e) => itemView(it, {
     t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : (runCardOf(it, { t }) || { headline: model.wordsOf(it) }).headline, detail: model.detailOf(it), options: model.optionsFor(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
     origin: { origin: originOf(it), label: ORIGIN_LABELS[originOf(it)] || '' }, notice: isNotice(it), resolved: !!(e && e.resolved) || it.status !== 'open',
-    reply: model.replyState(it), closers: closersOf(it, !!(e && e.resolved) || it.status !== 'open'), ago: (ts) => agoText(ts, t), expires: (ts) => { const d = deadlineOf(it, { t, now: hubNow() }); return d && d.state !== 'late' ? '' : expiresText(ts, t); }, statusWords: (item) => statusWords(item, t), resolvedBy: (by, item) => resolvedByText(by, t, item), endCode: (item) => endCodeOf(item),
+    reply: model.replyState(it), closers: closersOf(it, !!(e && e.resolved) || it.status !== 'open'), ago: (ts) => agoText(ts, t), expires: (ts) => { const d = deadlineOf(it, { t, now: hubNow(), clock: hubClock() }); return d && d.state !== 'late' ? '' : expiresText(ts, t); }, statusWords: (item) => statusWords(item, t), resolvedBy: (by, item) => resolvedByText(by, t, item), endCode: (item) => endCodeOf(item),
     detailState: !it.detailTruncated ? 'whole' : (st.loadErr && st.loadErr.id === it.id ? 'failed' : 'loading'), loadError: st.loadErr && st.loadErr.id === it.id ? st.loadErr.why : '',
   });
   /** The session's board chip beside its name (the popup's chunk-4 chip: needs input / blocked / review / working). */
@@ -459,7 +459,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     // r7 addendum: THE deadline line (foryou-actions deadlineOf — «valid for 60 sec · 42 sec left by the server's clock», then
     // «time is up …» or the late answer's words); the page ticker (user-todos-row tickDeadlines) moves it every second at the
     // HUB's time (r8), this paint only (re)arms it — it never withdraws the answers (the producer's settle does)
-    const dln = v.resolved ? null : deadlineOf(it, { t, now: hubNow() });
+    const dln = v.resolved ? null : deadlineOf(it, { t, now: hubNow(), clock: hubClock() });
     const dlSig = dln ? [dln.at, dln.from, dln.state, it.action && it.action.late ? 1 : 0, it.action && it.action.restartLost ? 1 : 0].join('\u0000') : '';
     if (c.sig.deadline !== dlSig) {
       for (const k of ['deadlineAt', 'deadlineFrom', 'deadlineLate', 'deadlineLost']) delete c.dl.dataset[k];
@@ -487,16 +487,18 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     // design 009: an app install's ONE card — its lines, progress and Details fold (escaped; its buttons are the action row)
     const card = it.card && it.action && it.action.type === 'app-install' ? it.card : null;
     const run = card ? null : runCardOf(it, { t }); // r7: the run card's FACTS (a record without them: its prose, as before)
-    const detailSig = card ? 'card\u0000' + (v.resolved ? 'r' : 'o') + JSON.stringify(card) : run ? 'run\u0000' + JSON.stringify(it.facts) : (plain ? 'cmd\u0000' : 'txt\u0000') + v.detail;
+    const dropped = card || run ? null : factsDroppedWords(it, { t }); // r9: facts the store dropped — one line above the text
+    const detailSig = card ? 'card\u0000' + (v.resolved ? 'r' : 'o') + JSON.stringify(card) : run ? 'run\u0000' + JSON.stringify(it.facts) : (plain ? 'cmd\u0000' : 'txt\u0000') + v.detail + (dropped ? '\u0000' + dropped : '');
     if (run && c.sig.detail !== detailSig) { c.detail.innerHTML = runFactsHtml(it, t, { buttons: false }); c.detail.style.display = ''; c.sig.detail = detailSig; } // r7: its answers are this pane's action row; the masking sentence is in its fold
     if (c.sig.detail !== detailSig) {
       if (card) { c.detail.innerHTML = appCardHtml(it, t, { lang: resolveLang(), resolved: v.resolved, buttons: false }); c.detail.style.display = ''; }
       else if (plain) { const pre = mk('pre', 'iw-exit-cmd'); pre.textContent = v.detail; c.detail.replaceChildren(pre); }
       else wordsInto(c.detail, v.detail); // lane foryou-honest: THE tray's renderer (never markdown)
       // lane vault-scrub-forms (q-043 verify M1): a RUN card says what the scrubbing does not promise — the owner reads the command
+      if (dropped) c.detail.prepend(mk('div', 'ut-run-cut ut-facts-dropped', dropped));
       if (!card && it.action && it.action.type === 'vault-run-ask') c.detail.append(mk('div', 'iw-run-note', t('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.')));
       if (plain) linkifyInto(c.detail); // lane foryou-attachments: text nodes only — the words stay as written (a command's <pre>; the words' own renderer makes its links)
-      if (!card) c.detail.style.display = v.detail ? '' : 'none';
+      if (!card) c.detail.style.display = v.detail || dropped ? '' : 'none';
       c.sig.detail = detailSig;
     }
     // a PREVIEWED detail (a resolved item's snapshot): the rest is loaded once, and the pane SAYS it is not whole yet

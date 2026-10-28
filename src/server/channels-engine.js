@@ -8472,7 +8472,7 @@ function create(deps = {}) {
     try { scheduleBootPending(); } catch (err) { log.warn(`[channels] boot pending scan failed: ${(err && err.message) || err}`); }
     // lane wake-approve-card r3: the asks' boot reconcile — wake asks past their lifetime expire, one whose item ended while
     // nobody listened is settled, an open access request's hidden pointer comes back to the tray
-    reconcileAsks().then((r) => { if (r.expired.length || r.settled || r.resurfaced) log.log(`[channels] boot asks: ${r.expired.length} wake ask(s) expired, ${r.settled} settled by their item, ${r.resurfaced} hidden access pointer(s) back in For you`); })
+    reconcileAsks().then((r) => { if (r.expired.length || r.settled || r.resurfaced || r.refiled) log.log(`[channels] boot asks: ${r.expired.length} wake ask(s) expired, ${r.settled} settled by their item, ${r.resurfaced} hidden access pointer(s) back in For you, ${r.refiled || 0} held decision card(s) filed again`); })
       .catch((err) => log.warn(`[channels] boot asks reconcile failed: ${(err && err.message) || err}`));
     // inc-muk9jj0j-rel3: a verdict judged before the account's LAST credential change (a re-authorization that landed
     // before this code) is re-judged once at boot — the read path re-judges on the way out anyway; this persists it

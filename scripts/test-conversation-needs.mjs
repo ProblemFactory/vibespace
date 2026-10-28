@@ -78,6 +78,7 @@ const PRODUCERS = {
   'src/server/engine-distribution.js': { origin: 'plugin', scope: 'group', types: [], why: 'int360 seam (lane engine-distribution, after this census\'s base): a kernel / cluster plugin that could not be put in place' },
   'src/server/voice-teach-engine.js': { origin: 'plugin', scope: 'group', types: [] },
   'src/server/csp-reports.js': { origin: 'server', scope: 'group', types: [] },
+  'src/user-todos.js': { origin: 'server', scope: 'group', types: [] },   // lane wake-approve-card r9: the store's own set-aside notice
   'src/server/tls.js': { origin: 'server', scope: 'group', types: [] },
   'src/server/desktop-app-keeper.js': { origin: 'server', scope: 'group', types: ['desktop-app-notify'] },
   'src/server/mount-health-watch.js': { origin: 'server', scope: 'group', types: [] },

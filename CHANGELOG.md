@@ -38,6 +38,15 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Countdowns follow the server's clock, so a device whose clock is off no longer hides the Allow and Deny buttons too early.
 - VibeSpace starts quickly again on an instance with many channel conversations.
 - With sign-in off, adding an agent to an account no longer needs your click when it cannot turn a stopped wake back on.
+- A vault command too long to keep whole now says so and points to its run record, instead of claiming the whole command is under Technical details.
+- Removing a rule now closes its held-messages card and says how many were discarded; Deliver no longer queues them for an agent nobody watches for.
+- Requests you closed with Mark done or Dismiss before the decision buttons read «done» or «dismissed» again, not «outcome unknown».
+- A card whose details were too large to keep now says so above its text.
+- If For you cannot read its saved list at start, it sets the file aside instead of overwriting it, says where, and brings back held-messages cards.
+- On a server too old to send its time, a countdown says it follows this device's clock.
+- A vault command card says a secret is «tied to no host» instead of showing «?».
+- Saving access that turns stopped wakes back on now says how many it turned on, instead of «nobody is woken».
+- In Japanese, a request you denied now says that you denied it.
 
 ### Security
 - With sign-in off, an agent could widen a wake you approved by editing its rule or filter; changing what a wake reacts to now takes your click.
@@ -48,6 +57,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A refusal that tells an agent a wake depends on a conversation now shows that conversation's title as one plain line.
 - A refused webhook pairing no longer tells the other side the names of your agents, conversations or rules.
 - An agent's list of its notifications no longer names conversations it cannot read.
+- With sign-in off, an agent could turn a stopped group wake back on by adding an extra field when editing the account's access; that now takes your click.
+- A webhook pairing is now refused if a wake was turned on for its path while the pairing was completing.
 
 ## 2.369.360 — 2026-10-27
 

@@ -280,6 +280,10 @@ function endOf(item) {
   const by = item.resolvedBy, f = item.resolvedFact && typeof item.resolvedFact === 'object' ? item.resolvedFact : {};
   const late = f.late === true || f.outcome === 'late-allowed';
   if (typeof by === 'string' && (endsOf(item).includes(by) || WORDED_ENDS.includes(by))) return { by, late, mapped: false };
+  // r9 (the acceptance: a record a person closed with the generic ✓ / ✕ BEFORE the decision law — resolvedBy 'user', or the
+  // engine's 'system' — read «outcome unknown · user»): with no outcome fact it keeps the base's word for its STORED status
+  // («dismissed» / «done» / «done · automatically»); «outcome unknown» is only for an end nobody worded
+  if ((by === 'user' || by === 'system') && !(typeof f.outcome === 'string' && f.outcome)) return { by, late: false, mapped: false, legacy: true };
   const o = typeof f.outcome === 'string' && Object.prototype.hasOwnProperty.call(OUTCOME_ENDS, f.outcome) ? OUTCOME_ENDS[f.outcome] : null;
   if (o && endsOf(item).includes(o)) return { by: o, late, mapped: true };
   return { unknown: String(by || f.outcome || item.status || '?').slice(0, 40) };
@@ -306,6 +310,7 @@ function settledWords(item, t = fmt, kind = null) {
   if (by === 'always') { const gw = grantWords(item, { t }); return gw ? gw.text : t(GRANT_VERB.always); }   // r8: the run card's «always» without the person mark — its grant's words (was «done»)
   if (by === 'granted') { const gw = grantWords(item, { t }); return gw ? gw.text : t('allowed'); }   // r4: an agent's request for a stored secret, answered — r6: the duration its record carries (none ⇒ «allowed») and the grant's LIFE (ended / revoked)
   if (by === 'delivered') return t('delivered');   // r6: a held digest the owner released
+  if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'watch-removed') return t('the rule they were held for was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 });   // r9: no watcher left to deliver to — the store ended it, said
   if (by === 'discarded') return t('discarded — nothing was sent');
   if (by === 'expired' && item && item.action && item.action.type === 'channel-held-digest') return t('expired — discarded, nothing was sent');   // r6: its end discards
   if (by === 'ask-expired' && item && item.action) return t(DEADLINE_WORDS['timed-out']);   // r7 addendum: a held ask nobody answered in time (a command: exit / run / hub act / automation) keeps its place with its outcome
@@ -394,6 +399,10 @@ const DEADLINE_WORDS = Object.freeze({
   late: i18nKey('timed out — the agent\'s command was refused; Allow now = its next run of this command goes through (once)'),
   'late-lost': i18nKey('timed out — the agent\'s command was refused; the server restarted since, so an Allow now would let nothing through — its next run asks again'),   // r8: vault-agent-own r23's `action.restartLost` (the late pass cannot be minted — fails safe)
   'timed-out': i18nKey('timed out — the agent\'s command was refused (it may ask again)'),
+  // r9 (the acceptance: a snapshot with no `now` — an older hub — counted by the DEVICE's clock while saying «by the server's
+  // clock»): the same two lines when the hub's time is not known, saying whose clock they count by
+  'live-device': i18nKey('valid for {total} · {left} left by this device\'s clock'),
+  'due-device': i18nKey('time is up by this device\'s clock — waiting for the server'),
 });
 const spanWords = (ms, t) => {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -401,7 +410,7 @@ const spanWords = (ms, t) => {
   const m = Math.round(s / 60);
   return m < 120 ? t('{n} min', { n: m }) : t('{n} h', { n: Math.round(m / 60) });
 };
-function deadlineOf(item, { t = fmt, now = Date.now() } = {}) {
+function deadlineOf(item, { t = fmt, now = Date.now(), clock = 'hub' } = {}) {   // `clock`: whose time `now` is — 'hub' (the server's, known) | 'device'
   if (!item || item.status !== 'open' || item.kind === 'notice' || item.clearedAt) return null;
   const marked = !!(item.action && item.action.late);   // the PRODUCER says the deadline passed and the card still answers
   const at = Number(item.expiresAt), from = Number(item.createdAt);
@@ -409,7 +418,8 @@ function deadlineOf(item, { t = fmt, now = Date.now() } = {}) {
   const left = Number.isFinite(at) ? at - now : 0, total = Number.isFinite(at) && Number.isFinite(from) ? at - from : 0;
   const state = marked ? 'late' : left <= 0 ? 'due' : 'live';
   const lost = marked && item.action.restartLost === true;   // r8: a restart since — an Allow would mint nothing (r23); said, and not offered
-  const text = state === 'live' ? t(DEADLINE_WORDS.live, { total: spanWords(total, t), left: spanWords(left, t) }) : t(DEADLINE_WORDS[lost ? 'late-lost' : state]);
+  const dev = clock === 'device' ? '-device' : '';
+  const text = state === 'live' ? t(DEADLINE_WORDS['live' + dev], { total: spanWords(total, t), left: spanWords(left, t) }) : t(DEADLINE_WORDS[lost ? 'late-lost' : state === 'due' ? 'due' + dev : state]);
   return { at, from, left: Math.max(0, left), total, warn: state !== 'live' || left < DEADLINE_WARN_MS, state, text };
 }
 
@@ -514,7 +524,9 @@ function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
  *  sentence. null = no facts this client reads (v ≠ 1, another kind): the record's prose `detail`, exactly as before. */
 /** THE ONE BOUND of a run card's command (r8 — /var/tmp/vibespace-lanes/vault-card-contract.md, both lanes): the body shows
  *  ≤ RUN_CMD_BODY_MAX characters (a longer one: its start + «…», `cmdCut: true`), the fold holds the whole ≤ RUN_CMD_MAX
- *  (`cmdFull` — the door's HEAD_MAX, 4 096 bytes, is never more characters); every other facts string ≤ RUN_CMD_BODY_MAX.
+ *  (`cmdFull`); a longer whole is cut THERE and said — r9: the door sends the QUOTED argv (1 000 single quotes make a
+ *  2 035-byte argv a 5 037-character cmd), so the fold can be cut: `cut` names cmdFull and the card's line states only a
+ *  total it can prove (the door's `cmdLen`, else «over 4 096»); every other facts string ≤ RUN_CMD_BODY_MAX.
  *  src/user-todos.js clips at the write (never throws); the door clips at the same bound. */
 const RUN_CMD_BODY_MAX = 2000;
 const RUN_CMD_MAX = 4096;
@@ -598,16 +610,29 @@ function runCardOf(item, { t = fmt } = {}) {
   // SAYS it is a cut (drawn with «…») and the fold holds it all, reassembled
   const joined = (x) => (Array.isArray(x) ? x.filter((c) => typeof c === 'string').join('') : str(x));
   const full = f.cmdCut === true && joined(f.cmdFull) ? joined(f.cmdFull) : null;
+  // r9 (a store never states a length it cannot prove — the acceptance: a 2 035-byte argv with 1 000 quotes is a 5 037-char
+  // quoted cmd; the store kept 4 096 and the line said «命令共 4096 个字符 … 完整命令在「技术细节」里»): the fold is CUT when a
+  // store cut it (`cut` names cmdFull) or the door's own total (`cmdLen`, its fact) is longer than what arrived; the total is
+  // the door's cmdLen, else the chunks' sum only while the fold is whole — a cut fold with no cmdLen says «over {max}»
+  const cmdLen = Number.isInteger(f.cmdLen) && f.cmdLen > 0 ? f.cmdLen : null;
+  const foldCut = !!full && ((Array.isArray(f.cut) && f.cut.includes('cmdFull')) || (cmdLen != null && cmdLen > full.length));
+  const total = !full ? null : cmdLen != null && cmdLen >= full.length ? cmdLen : foldCut ? null : full.length;
   // r8: WHY IT ASKS (r23 `reason`): a secret another conversation stored, a value minted for one host that this run sends to another
   const rs = f.reason && typeof f.reason === 'object' ? f.reason : null;
   const away = (rs && Array.isArray(rs.away) ? rs.away : []).filter((x) => x && typeof x === 'object');
+  // r9 (the acceptance: «是为 ? 生成的» — r23's fixture variant 1 has forHost null): a value minted for NO host says so in words
+  const awayWords = (x) => {
+    const to = x.unknown === true || !str(x.host) ? null : str(x.host), fh = str(x.forHost);
+    if (!fh) return to ? t('is tied to no host — this run sends it to {to}', { to }) : t('is tied to no host — where this run sends it cannot be told');
+    return to ? t('was minted for {host} — this run sends it to {to}', { host: fh, to }) : t('was minted for {host} — where this run sends it cannot be told', { host: fh });
+  };
   const why = [...(rs && rs.notOwn === true ? [[{ text: t('it uses a secret another conversation stored') }]] : []),
-    ...away.map((x) => [{ mono: str(x.ref) }, { text: ' ' }, { text: x.unknown === true || !str(x.host) ? t('was minted for {host} — where this run sends it cannot be told', { host: str(x.forHost) || '?' }) : t('was minted for {host} — this run sends it to {to}', { host: str(x.forHost) || '?', to: str(x.host) }) }])];
+    ...away.map((x) => [{ mono: str(x.ref) }, { text: ' ' }, { text: awayWords(x) }])];
   const cut = (Array.isArray(f.cut) ? f.cut : []).filter((x) => typeof x === 'string' && x).slice(0, 16);
   const env = (Array.isArray(f.env) ? f.env : []).filter((x) => x && typeof x === 'object' && str(x.name));   // r8: a run's plain (not secret) --env, when the door says it
   const fold = [
     ...(why.length ? [{ label: t('Why it asks'), lines: why }] : []),
-    ...(full ? [{ label: t('Whole command'), lines: [], cmd: full }] : []),
+    ...(full ? [{ label: foldCut ? t('Command (its first {n} characters)', { n: full.length }) : t('Whole command'), lines: [], cmd: full }] : []),
     ...(cut.length ? [{ label: t('Shortened'), lines: [[{ text: t('too long to keep whole, cut at the card\'s bound:') }, { text: ' ' }, ...list(cut.map((x) => [{ code: x }]))]] }] : []),
     { label: t(RUN_LABEL.program), lines: [[{ mono: path }]] },
     ...(env.length ? [{ label: t('Environment'), lines: env.map((x) => [{ mono: `${str(x.name)}=${str(x.value)}` }]) }] : []),
@@ -620,7 +645,18 @@ function runCardOf(item, { t = fmt } = {}) {
   ];
   const cmd0 = str(f.cmd), shown = full ? cmd0.replace(/\u2026$/, '').length : cmd0.length;
   const cmd = full && !/\u2026$/.test(cmd0) ? cmd0 + '\u2026' : cmd0;   // the body's cut is drawn as one
-  return { headline, cmd, cut: full ? { n: full.length, shown, text: t('The command is {n} characters long; the card shows its first {m} — the whole command is under “{fold}”.', { n: full.length, m: shown, fold: t('Technical details') }) } : null, rows, always: { offered: a.offered === true, hint }, fold };
+  const cutText = !full ? null : !foldCut ? t('The command is {n} characters long; the card shows its first {m} — the whole command is under “{fold}”.', { n: total, m: shown, fold: t('Technical details') })
+    : total != null ? t('The command is {n} characters long — over {max}, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { n: total, max: RUN_CMD_MAX, m: shown })
+      : t('The command is over {max} characters, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { max: RUN_CMD_MAX, m: shown });
+  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, rows, always: { offered: a.offered === true, hint }, fold };
+}
+/** r9 (a store says when it DROPS): a run card whose facts the store dropped files a stub `{dropped, cut: ['facts']}` (no `v` —
+ *  runCardOf reads it as no facts: the prose, as before) and its card says so in ONE line above the text. → words | null */
+const FACTS_DROPPED_WORDS = Object.freeze({ 'too-large': i18nKey('The facts were too large to keep — the card shows its text only'), 'not-an-object': i18nKey('The facts could not be read — the card shows its text only') });
+function factsDroppedWords(item, { t = fmt } = {}) {
+  const f = item && item.facts;
+  if (!f || typeof f !== 'object' || typeof f.dropped !== 'string') return null;
+  return t(Object.prototype.hasOwnProperty.call(FACTS_DROPPED_WORDS, f.dropped) ? FACTS_DROPPED_WORDS[f.dropped] : FACTS_DROPPED_WORDS['not-an-object']);
 }
 /** THE DECISION CARD'S MODEL (lane wake-approve-card) — `item` → {state, buttons, stamp, waiting}:
  *   'filed'         open, and this viewer may decide ⇒ buttons ['approve', 'deny'] (the row's own verbs — the tray's route)
@@ -679,4 +715,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, RUN_ALWAYS_WHY, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

@@ -1180,6 +1180,35 @@ function create(engineCtx) {
   const heldWho = (w) => (w.principal.kind === 'everyone' ? 'all agents' : String(w.principal.name || w.principal.id));
   const heldLine = (n, who, day) => `${n} messages for ${who} held since ${day} — deliver or discard`;
   const heldKey = (n, who, day) => ({ key: i18nKey('{n} messages for {agent} held since {date} — deliver or discard'), params: { n, agent: who, date: day } });
+  /** THE HELD CARD, from its REQUEST ROW (r9 — the acceptance: a truncated user-todos.json started For you empty and the held
+   *  decision lost its card, said nowhere): holdAside files it when it sets the hits aside; the boot reconcile files it AGAIN
+   *  for an open held request whose item is gone (reconcileAsks). → the item id | null (no store). */
+  function fileHeldCard(req, rec, { n = heldCountOf(req), convTitle = null } = {}) {
+    if (!userTodos || typeof userTodos.add !== 'function' || !rec) return null;
+    const h = req.held || {}, scope = req.scope || {};
+    const who = heldWho({ principal: req.principal });
+    const c0 = Array.isArray(h.convs) && h.convs[0] ? h.convs[0] : null;
+    const title = convTitle || (c0 && c0.title) || (() => { const en = c0 ? store.index.peek(c0.key) : null; return en ? humanNameOf(rec, en) : 'a conversation'; })();   // the boot plan's name (THE ladder), else the ladder now — never the id
+    const where = scope.kind === 'adapter' ? `the whole account ${rec.label || rec.id}` : scope.kind === 'pattern' ? `the rule ${F.patternSummary((patternById(h.patternId) || {}).pattern || { rules: [] })} (${rec.label || rec.id})` : `${title} (${rec.label || rec.id})`;
+    const day = h.since ? OF.when(h.since) : 'an unknown date';   // the owner's zone, named (owner-facts — never a sliced ISO time)
+    const ttlDays = Math.round(F.WATCH_REQUEST_TTL_MS / DAY_MS);
+    const it = userTodos.add(INBOX_KEY, {
+      origin: 'channels', by: 'system', sessionName: 'Channels', urgency: 'normal', openCap: HELD_OPEN_CAP,
+      text: heldLine(n, who, day),
+      detail: `They were held for ${who} on ${where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from ${day}. A delivery that old is never sent by itself.\nDeliver sends them to ${who} now, as one block (a billed turn). Discard drops them — nothing is sent.\nUnanswered, it expires in ${ttlDays} days — they are discarded then.`,
+      action: { type: 'channel-held-digest', id: req.id }, expiresAt: req.expiresAt,
+      i18n: {
+        text: heldKey(n, who, day),
+        detail: [
+          { key: i18nKey('They were held for {agent} on {where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from {date}. A delivery that old is never sent by itself.'), params: { agent: who, where, date: day } },
+          { key: i18nKey('Deliver sends them to {agent} now, as one block (a billed turn). Discard drops them — nothing is sent.'), params: { agent: who } },
+          { key: i18nKey('Unanswered, it expires in {n} days — they are discarded then.'), params: { n: ttlDays } },
+        ],
+        source: INBOX_SOURCE,
+      },
+    });
+    return it && it.id ? it.id : null;
+  }
   async function holdAside(plan) {
     const t = now();
     const { rec, item, pk } = plan;
@@ -1192,33 +1221,12 @@ function create(engineCtx) {
     const who = heldWho(w);
     let req = null;
     if (!open) {
-      const where = scope.kind === 'adapter' ? `the whole account ${rec.label || rec.id}` : scope.kind === 'pattern' ? `the rule ${F.patternSummary((patternById(item.patternId) || {}).pattern || { rules: [] })} (${rec.label || rec.id})` : `${convs[0].title} (${rec.label || rec.id})`;
-      const day = since ? OF.when(since) : 'an unknown date';   // the owner's zone, named (owner-facts — never a sliced ISO time)
       const n = Number(plan.n) || 0;
-      const ttlDays = Math.round(F.WATCH_REQUEST_TTL_MS / DAY_MS);
       req = { id: `wr-${t.toString(36)}-${crypto.randomBytes(3).toString('hex')}`, kind: 'held', principal: w.principal, scope, adapterId: rec.id,
         grain: scope.kind === 'conversation' ? { kind: 'conversation', convId: convs[0].id } : scope.kind === 'adapter' ? { kind: 'account' } : { kind: 'pattern', id: item.patternId },
         held: { via: plan.kind === 'scope' ? 'scope' : 'conversation', pk, source: item.source, patternId: item.patternId || null, convs: [], n: 0, since }, why: '', at: t, expiresAt: t + F.WATCH_REQUEST_TTL_MS, status: 'open', todoId: null, decidedAt: null };
-      if (userTodos && typeof userTodos.add === 'function') {
-        try {
-          const it = userTodos.add(INBOX_KEY, {
-            origin: 'channels', by: 'system', sessionName: 'Channels', urgency: 'normal', openCap: HELD_OPEN_CAP,
-            text: heldLine(n, who, day),
-            detail: `They were held for ${who} on ${where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from ${day}. A delivery that old is never sent by itself.\nDeliver sends them to ${who} now, as one block (a billed turn). Discard drops them — nothing is sent.\nUnanswered, it expires in ${ttlDays} days — they are discarded then.`,
-            action: { type: 'channel-held-digest', id: req.id }, expiresAt: req.expiresAt,
-            i18n: {
-              text: heldKey(n, who, day),
-              detail: [
-                { key: i18nKey('They were held for {agent} on {where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from {date}. A delivery that old is never sent by itself.'), params: { agent: who, where, date: day } },
-                { key: i18nKey('Deliver sends them to {agent} now, as one block (a billed turn). Discard drops them — nothing is sent.'), params: { agent: who } },
-                { key: i18nKey('Unanswered, it expires in {n} days — they are discarded then.'), params: { n: ttlDays } },
-              ],
-              source: INBOX_SOURCE,
-            },
-          });
-          if (it && it.id) req.todoId = it.id;
-        } catch (e) { log.warn(`[channels] ${scope.kind}:${scope.id}: the held digest's For-you item could not be filed (${(e && e.message) || e}) — nothing is set aside: its hits stay where they were, and the next boot asks again`); }
-      }
+      try { req.todoId = fileHeldCard(req, rec, { n, convTitle: convs[0].title }); }
+      catch (e) { log.warn(`[channels] ${scope.kind}:${scope.id}: the held digest's For-you item could not be filed (${(e && e.message) || e}) — nothing is set aside: its hits stay where they were, and the next boot asks again`); }
       if (!req.todoId) return { ok: false, why: 'unfiled' };   // r8: never set aside what the owner cannot see (was: discarded unseen at its 7 days)
     }
     let moved = 0;
@@ -1265,9 +1273,12 @@ function create(engineCtx) {
   function releaseAside(r2, keep) {
     const h = r2 && r2.held;
     if (!h) return 0;
-    let n = 0;
+    let n = 0, skipped = 0;
     for (const c of Array.isArray(h.convs) ? h.convs : []) {
-      const rows = Array.isArray(c.rows) ? c.rows : [];
+      if (!c || typeof c !== 'object') { skipped++; continue; }
+      const rows0 = Array.isArray(c.rows) ? c.rows : [];
+      const rows = rows0.filter((p) => p && typeof p === 'object');   // r9: a row that is not one (a hand edit, a torn write) is skipped and SAID — never a throw that sticks the request 'approved'
+      skipped += rows0.length - rows.length;
       const e2 = store.index.entry(r2.adapterId, c.id, { create: false });
       if (keep && e2) {
         healP2(e2);
@@ -1281,6 +1292,7 @@ function create(engineCtx) {
       }
       c.n = 0; c.elided = 0; c.rows = [];   // the store is spent — the request keeps its decision, never the records
     }
+    if (skipped) { h.skipped = (Number(h.skipped) || 0) + skipped; log.warn(`[channels] ${r2.id}: ${skipped} held row(s) unreadable (not a record) — skipped, the rest ${keep ? 'delivered' : 'discarded'}`); }
     return n;
   }
   /** THE OWNER'S DECISION on a held digest (the decide route — the person verdict): Deliver puts the request's hits back and
@@ -1288,13 +1300,14 @@ function create(engineCtx) {
    *  nobody live — keeps them pending for the next delivery, said); Discard drops them. Both touch exactly the card's count. */
   async function decideHeld(req0, approve, by, { person = false } = {}) {
     const t = now();
-    let applied = false, touched = 0;
+    let applied = false, touched = 0, skipped = 0;
     await store.index.update((ix) => {
       const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
       if (!r2 || r2.status !== 'open') return;
       applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by;
       touched = releaseAside(r2, !!approve);
       r2.held.n = touched;   // the record keeps what the decision touched
+      skipped = Number(r2.held.skipped) || 0;
     });
     if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
     try { store.audit({ kind: 'watch', op: approve ? 'held-deliver' : 'held-discard', principal: req0.principal, scope: req0.scope, requestId: req0.id, n: touched, at: t, by }); } catch {}
@@ -1312,7 +1325,7 @@ function create(engineCtx) {
     }
     notify([]);
     const held = req0.held ? { ...req0.held, n: touched, convs: (req0.held.convs || []).map(({ rows, ...c }) => c) } : undefined;   // the answer never echoes the records
-    const out = { ok: true, request: { ...req0, ...(held ? { held } : {}), status: approve ? 'approved' : 'denied' } };
+    const out = { ok: true, request: { ...req0, ...(held ? { held } : {}), status: approve ? 'approved' : 'denied' }, ...(skipped ? { skipped } : {}) };   // r9: unreadable rows skipped — said
     if (!approve) return { ...out, discarded: touched };
     if (!touched) return { ...out, delivered: false, n: 0, why: 'nothing-left', note: 'nothing was left to deliver — its conversations are gone' };
     const carried = delivery && delivery.ok && Number(delivery.n) > touched ? { carried: Number(delivery.n) } : {};   // the same block took the watcher's newer hits too — said, never folded into «n»
@@ -1366,15 +1379,24 @@ function create(engineCtx) {
    *  back to the tray. → {expired, settled, resurfaced}. */
   async function reconcileAsks(t = now()) {
     const expired = await expireWatchRequests(t);
-    let settled = 0, resurfaced = 0;
+    let settled = 0, resurfaced = 0, refiled = 0;
     if (userTodos && typeof userTodos.get === 'function') {
       for (const r of (store.index.table('watchRequests') || []).filter((x) => x && x.status === 'open' && x.todoId)) {
         let it = null; try { it = userTodos.get(r.todoId); } catch { }
         if (it && it.status !== 'open') { await settleFromItem(r, it.status, it.resolvedBy); settled++; }
+        if (!it && r.kind === 'held') {   // r9: its card is GONE (a For-you store set aside) — filed again from the request row, said
+          let id = null;
+          try { id = fileHeldCard(r, adapterRecords().adapters.find((x) => x.id === r.adapterId)); } catch (e) { log.warn(`[channels] ${r.id}: its held decision's card is gone and could not be filed again (${(e && e.message) || e})`); }
+          if (id) {
+            await store.index.update((ix) => { const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((x) => x && x.id === r.id); if (r2 && r2.status === 'open') r2.todoId = id; });
+            refiled++;
+            log.log(`[channels] ${r.id}: its held decision's card was gone (${r.todoId}) — filed again from the request row (${id})`);
+          }
+        }
       }
       resurfaced = resurfacePointers();
     }
-    return { expired, settled, resurfaced };
+    return { expired, settled, resurfaced, refiled };
   }
   /** Every OPEN access request's hidden pointer back in For you (resurface) → how many came back. The boot reconcile, and
    *  the one-shot 2026-10-closed-access-pointers-hidden (src/server/migrations.js — it runs after the engine started). */
@@ -1704,6 +1726,9 @@ function create(engineCtx) {
    *  conversation's name (a peer's words — THE name ladder) and the principal's name each a LINE piece of the belt
    *  (agentWakeWords — a test-peer-text-census row); the wake gate's refusal (src/routes/channels.js wakeRefused — a caller
    *  that is never the person) says only these. */
+  /** THE ONE ACCESS NORMALISER (r9): a write's access list → the rows it STORES (F.validateAccess → cleanPrincipal: a group's
+   *  `target` dropped, an id cut at 256; null = []) — setGrain stores with it and the wake gate (wakesBelow) judges with it. */
+  const accessVerdict = (list, caps = {}) => F.validateAccess(list === null ? [] : list, caps);
   const agentWakeWords = (who, where, kind, state) => `${agentText(who, { kind: 'line', max: 120 })}'s wake on «${kind === 'conversation' ? agentText(where, { kind: 'line', max: 80 }) : where}» ${state}`;
   function wakeRowView(adapterId, kind, id, holder, w, inert, how = null) {
     const rec = adapterRecords().adapters.find((r) => r.id === adapterId) || null;
@@ -1726,6 +1751,12 @@ function create(engineCtx) {
     const kind = grain && grain.kind;
     if (kind !== 'account' && kind !== 'pattern') return [];
     const covers = (rows) => { const keys = F.eligibleKeys({ access: Array.isArray(rows) ? rows : [] }); return (w) => F.eligibleFor(keys, w.principal, w); };
+    // r9 (the acceptance's BLOCKER — r8 keyed the RAW body: a group row with a `target` folded into its key, `group:g-x>zz`,
+    // so the gate read «covers nothing» while the write stored the cleaned `group:g-x` and an inert billed wake went live
+    // with no click): the gate judges the rows the write will STORE — accessVerdict, setGrain's own normaliser. A list the
+    // write would refuse proposes nothing provable ⇒ fail-closed (null).
+    const av = Array.isArray(access) ? accessVerdict(access) : null;
+    const stored = !av ? [] : av.ok ? av.access : null;
     const out = [];
     // a row the grain's access decides: INERT now (a grant there makes it live) or live now and NOT in effect without that
     // access (`wo` — the same read with it left out: a removal there stops it); a row that lives by another grant is not held
@@ -1736,7 +1767,7 @@ function create(engineCtx) {
       // can change that row's reach — an inert row its list would make live, a live one it would stop (the list no longer
       // covers its principal). A write that does not say its list, or that changes the account's exceptions, stays
       // fail-closed: every row whose state the account's access decides
-      const next = Array.isArray(access) && except === undefined ? covers(access.filter((x) => x && typeof x === 'object' && x.principal)) : null;
+      const next = Array.isArray(access) && except === undefined && stored ? covers(stored) : null;
       const pick = (w, inert, solely) => (next ? (inert && next(w)) || (solely && !inert && !next(w)) : inert || solely);
       for (const pa of rawPatternsOf(adapterId)) { const h = patternById(pa.id); rowsOf('pattern', pa.id, readGrainHolder(adapterId, 'pattern', h), readGrainHolder(adapterId, 'pattern', h, { without: { account: true } }), pick); }
       for (const en of storingConvs(adapterId)) rowsOf('conversation', en.id, readGrainHolder(adapterId, 'conversation', en), readGrainHolder(adapterId, 'conversation', en, { without: { account: true } }), pick);
@@ -1747,7 +1778,7 @@ function create(engineCtx) {
     const pv = pattern ? F.validatePattern(pattern) : null;
     const moved = pv && pv.ok ? pv.pattern : null;
     const own = pa ? CG.accessOf(CG.RES.rule(pa.id)) : [];
-    const would = covers([...own, ...(Array.isArray(access) ? access.filter((x) => x && typeof x === 'object' && x.principal) : [])]);
+    const would = stored ? covers([...own, ...stored]) : () => true;
     for (const en of storingConvs(adapterId)) {
       const facts = convFacts(en);
       const now0 = !!(pa && pa.pattern && F.matchConversation(pa.pattern, facts).hit);
@@ -1839,7 +1870,9 @@ function create(engineCtx) {
     for (const [k, b] of before) {
       const a = after.get(k);
       if (!a || a.live === b.live) continue;
-      (a.live ? reactivated : madeInert).push(wakeRowView(adapterId, a.kind, a.id, a.holder, a.w, !a.live, a.live ? 'is live again' : 'is inert now'));
+      // r9: the answer carries the BELTED words only — the caller may be no person (a bare write the gate let through)
+      const v = wakeRowView(adapterId, a.kind, a.id, a.holder, a.w, !a.live, a.live ? 'is live again' : 'is inert now');
+      (a.live ? reactivated : madeInert).push({ grain: v.grain, id: v.id, principal: v.principal, inert: v.inert, words: v.agentWords, agentWords: v.agentWords });
     }
     if (!reactivated.length && !madeInert.length) return null;
     return { reactivated, madeInert, said: [reactivated.length ? `this write re-activated ${reactivated.length} wake${reactivated.length === 1 ? '' : 's'} (a billed turn each time it fires): ${namesOf(reactivated)}` : '', madeInert.length ? `${madeInert.length} wake${madeInert.length === 1 ? '' : 's'} left inert: ${namesOf(madeInert)}` : ''].filter(Boolean).join(' · ') };
@@ -1896,7 +1929,7 @@ function create(engineCtx) {
     // ① ACCESS
     let access = cur.access;
     if (p.access !== undefined) {
-      const va = F.validateAccess(p.access === null ? [] : p.access, site.caps);
+      const va = accessVerdict(p.access, site.caps);
       if (!va.ok) return { ok: false, code: va.code, error: va.error, ...(va.why ? { why: va.why } : {}), ...(va.principal ? { principal: va.principal } : {}), ...(va.index !== undefined ? { index: va.index } : {}) };
       const prevA = new Map(cur.access.map((r) => [pkOf(r.principal), r]));
       access = va.access.map((r) => { const pr = prevA.get(pkOf(r.principal)); const same = pr && pr.authority === r.authority; return { ...r, createdAt: pr ? (pr.createdAt || t) : t, updatedAt: same ? (pr.updatedAt || pr.createdAt || t) : t, createdBy: pr ? (pr.createdBy || by) : by }; });
@@ -2025,11 +2058,44 @@ function create(engineCtx) {
     for (const tbName of ['accountAssignments', 'patternAssignments']) for (const g of Object.values(ix[tbName] || {})) if (g && ((g.filterId === fid) || (Array.isArray(g.watchers) && g.watchers.some((w) => w && w.filterId === fid)))) return true;
     return false;
   }
+  /** A HELD DECISION ENDS WITH ITS WATCHER (r9 — the acceptance: the set-aside rows sat in the request, outside the prune;
+   *  after the rule was removed the card still said 30, Deliver pushed 30 rows into pending for nobody, toasted «they go with
+   *  its next delivery» and recorded «delivered»). Every open held request of the account whose watcher is no longer in
+   *  effect where its hits wait — a scope digest's stored watcher (storedWatcherFor, as its flush reads it), a conversation's
+   *  effective one (wakeEffOf) — is RESOLVED: its rows dropped (releaseAside), the request `denied` by the system, the card
+   *  «the rule they were held for was removed — N messages discarded» (no person mark: nobody decided). */
+  const heldWatched = (r) => {
+    const h = r.held || {};
+    if (h.via === 'scope') return !!storedWatcherFor(h.source === 'account' ? accountGrainOf(r.adapterId) : patternById(h.patternId), h.pk);
+    return (Array.isArray(h.convs) ? h.convs : []).some((c) => { const eff = wakeEffOf(store.index.peek(c.key)); return !!eff && eff.watchers.some((x) => itemIs(x, h.pk)); });
+  };
+  async function pruneHeld(adapterId) {
+    const gone = (store.index.table('watchRequests') || []).filter((r) => r && r.kind === 'held' && r.status === 'open' && r.adapterId === adapterId && !heldWatched(r));
+    for (const r0 of gone) {
+      const t = now();
+      let touched = null;
+      await store.index.update((ix) => {
+        const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === r0.id);
+        if (!r2 || r2.status !== 'open') return;
+        r2.status = 'denied'; r2.decidedAt = t; r2.decidedBy = 'watch-removed';
+        touched = releaseAside(r2, false);
+        r2.held.n = touched;
+      });
+      if (touched === null) continue;
+      try { store.audit({ kind: 'watch', op: 'held-discard', principal: r0.principal, scope: r0.scope, requestId: r0.id, n: touched, at: t, by: 'system', why: 'watch-removed' }); } catch {}
+      if (r0.todoId && userTodos && typeof userTodos.get === 'function') {
+        try { const it = userTodos.get(r0.todoId); if (it && it.status === 'open') userTodos.resolveAnswered([r0.todoId], 'discarded', { n: touched, why: 'watch-removed' }); } catch (e) { log.warn(`[channels] ${r0.id}: its watcher is gone and its ${touched} held hit(s) were discarded, but the card could not be closed (${(e && e.message) || e})`); }
+      }
+      log.log(`[channels] ${r0.id}: the watch its ${touched} held hit(s) waited for (${(r0.held && r0.held.pk) || '?'}) is gone — discarded, the card says so`);
+    }
+    if (gone.length) notify([]);
+  }
   /** Pending hits wait for a WATCHER; one no watcher in effect names any more
    *  (it was removed, or its principal lost access) would sit in the count
    *  for ever — dropped here, after a grain changed. `onlyKey` narrows the
    *  scan to one conversation (the conversation grain). */
   async function prunePending(adapterId, onlyKey = null) {
+    await pruneHeld(adapterId);
     const drop = [];
     for (const en of Object.values(store.index.live())) {
       if (!en || en.adapterId !== adapterId || (onlyKey && en.key !== onlyKey)) continue;

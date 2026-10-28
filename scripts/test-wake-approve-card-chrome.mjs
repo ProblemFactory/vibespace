@@ -196,6 +196,9 @@ fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 // and, while R7_LATE exists, keeps a card nobody answered OPEN at its 60 s, marked `late` (its expiresAt + 24 h) — the agent's
 // command refused all the same. A door that has cardFactsOf is left exactly as it is (int-C runs this leg on the real one)
 const R7_FACTS = path.join(stubDir, 'r7-facts.json'), R7_LATE = path.join(stubDir, 'r7-late');
+// ROUND 9: while R9_RULED exists the scratch door settles the next card it settles in THE RULED SHAPE written there ({by, fact} —
+// vault-agent-own r24's late allow / lock settles, which this tree's door cannot make) — the ruled words LOOKED at and shot
+const R9_RULED = path.join(stubDir, 'r9-ruled.json');
 {
   const f = path.join(wt, 'src', 'server', 'vault-run-door.js');
   let d = fs.readFileSync(f, 'utf8');
@@ -204,7 +207,7 @@ const R7_FACTS = path.join(stubDir, 'r7-facts.json'), R7_LATE = path.join(stubDi
     const OPEN = "why === 'gone' ? 'ask-over' : outcome === 'changed' ? 'ask-changed' : outcome; if (it && it.status === 'open') {";   // the RUN card's settle (its 'expired')
     if (d.split(ACT).length !== 2 || d.split(OPEN).length !== 2) throw new Error('r7 stand-in: the door\'s anchors moved');
     d = d.replace(ACT, ACT + ` ...(() => { try { return { facts: JSON.parse(require('fs').readFileSync(${JSON.stringify(R7_FACTS)}, 'utf8')) }; } catch { return {}; } })(),`);
-    d = d.replace(OPEN, OPEN.replace("if (it && it.status === 'open') {", `if (it && it.status === 'open' && outcome === 'expired' && require('fs').existsSync(${JSON.stringify(R7_LATE)})) { it.action = { ...it.action, late: true, lateAt: now() }; it.expiresAt = now() + 86400e3; userTodos._save(); userTodos._notify(); } else if (it && it.status === 'open') {`));
+    d = d.replace(OPEN, OPEN.replace("if (it && it.status === 'open') {", `if (it && it.status === 'open' && outcome === 'expired' && require('fs').existsSync(${JSON.stringify(R7_LATE)})) { it.action = { ...it.action, late: true, lateAt: now() }; it.expiresAt = now() + 86400e3; userTodos._save(); userTodos._notify(); } else if (it && it.status === 'open' && require('fs').existsSync(${JSON.stringify(R9_RULED)})) { const rl = JSON.parse(require('fs').readFileSync(${JSON.stringify(R9_RULED)}, 'utf8')); userTodos.resolveAnswered([it.id], rl.by, { ...rl.fact, ...(rl.fact && rl.fact.decidedBy ? { decidedAt: now() } : {}) }); } else if (it && it.status === 'open') {`));
     fs.writeFileSync(f, d);
     console.log('  (r7: the scratch door stands in for the server half — facts from the fixture, the late mark)');
   }
@@ -811,6 +814,7 @@ try {
     const HEAD = { zh: 'ops watch 想用「UniFi 账号」运行 unifi-api.sh', en: 'ops watch wants to run unifi-api.sh with “UniFi 账号”', ja: 'ops watch が「UniFi 账号」を使って unifi-api.sh を実行しようとしています' };
     const facts = { ...V7['hosts-unknown'], who: 'ops watch' };
     const look7 = {};
+    let lateItem7 = null;
     for (const l of ['zh', 'en', 'ja']) {
       await lang(A, l, false); await lang(B, l, true);
       await A.front();
@@ -833,6 +837,7 @@ try {
       await sleep(Math.max(0, Number(it.expiresAt) - Date.now() + 1500));
       const marked = await until(async () => (await api()).open.find((i) => i.id === it.id && i.action && i.action.late) || null, 15000);
       await A.waitFor(`/已超时/.test(document.querySelector('${CARD7(it.id)}')?.textContent || '')`, 8000);
+      lateItem7 = it;   // r9: the en / ja late shots look at THIS card (it stays open, late)
       const late = await surfaces(A, it, 'zh-1280-late');
       await B.front(); await B.waitFor(`!!document.querySelector('${CARD7(it.id)}')`, 8000); await unfold(B, CARD7(it.id)); await B.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
       late.phone = await B.evalJs(LOOK7(CARD7(it.id))); await B.shot('r7-zh-390-late-chat.png'); await A.front();
@@ -858,6 +863,64 @@ try {
       await release(it);
     }
     await lap('⑧ done');
+    // ⑨ ROUND 9 — SHOTS THE r8 SUITE NEVER TOOK (the acceptance): the late card in en / ja, the clip note (a whole fold and a cut
+    // one), the RULED words of a closed run card in zh / en / ja — each LOOKED at, each shot
+    console.log('⑨ ROUND 9 — the late card in en / ja, the clip note, the ruled words (zh / en / ja), shot');
+    const LATE9 = { en: 'timed out — the agent\'s command was refused; Allow now = its next run of this command goes through (once)', ja: null };
+    for (const l of ['en', 'ja']) {
+      if (!lateItem7) break;
+      await lang(A, l, false); await A.front(); await quiet(A);
+      const late = await surfaces(A, lateItem7, `${l}-1280-late`);
+      const all = [late.chat, late.tray, late.win];
+      check(`r9 ⑨ the LATE card in ${l} (chat, tray, window — shot r7-${l}-1280-late-*.png): «${(late.chat || {}).deadline}» in place of the countdown; ${l === 'en' ? 'Allow once' : '1 回だけ許可'} (primary) / ${l === 'en' ? 'Deny' : '拒否'} — never «Always»`,
+        all.every((o) => !!o && !!o.deadline && o.dlState === 'late' && !!o.once && o.once.primary && !!o.deny && !o.always) && (l !== 'en' || all.every((o) => o.deadline === LATE9.en)), all);
+    }
+    await lang(A, 'zh', false); await A.front(); await quiet(A);
+    const chunks9 = (x) => { const o = []; for (let i = 0; i < x.length; i += 2000) o.push(x.slice(i, i + 2000)); return o; };
+    const long9 = (n) => (UNIFI.join(' ') + ' --note \'' + "a'\\''".repeat(1400)).slice(0, n);
+    const clip = [['2973', { ...facts, cmd: long9(2973).slice(0, 2000), cmdCut: true, cmdFull: chunks9(long9(2973)) }, '命令共 2973 个字符，这里只显示前 2000 个 — 完整命令在「技术细节」里。'],
+      ['5037', { ...facts, cmd: long9(5037).slice(0, 2000), cmdCut: true, cmdFull: chunks9(long9(5037)) }, '命令超过 4096 个字符，完整命令未保存 — 请在保险库窗口查看运行记录。这里只显示前 2000 个。']];
+    for (const [name, f, line] of clip) {
+      const it = await runCard(f);
+      await A.waitFor(`!!document.querySelector('${CARD7(it.id)}')`, 15000); await unfold(A, CARD7(it.id));
+      await A.evalJs(`document.querySelector('${CARD7(it.id)} .ut-run-cut')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
+      const said = await A.evalJs(`(() => { const c = document.querySelector('${CARD7(it.id)}'); const x = c && c.querySelector('.ut-run-cut'); return x ? x.textContent.trim() : null; })()`);
+      await A.shot(`r9-zh-1280-clip-${name}.png`);
+      const langs = {};
+      if (name === '2973') for (const l of ['en', 'ja']) { await lang(A, l, false); await A.front(); await quiet(A); await A.waitFor(`!!document.querySelector('${CARD7(it.id)} .ut-run-cut')`, 15000); await A.evalJs(`document.querySelector('${CARD7(it.id)} .ut-run-cut')?.scrollIntoView({ block: 'center' }); true`); await sleep(500); langs[l] = await A.evalJs(`document.querySelector('${CARD7(it.id)} .ut-run-cut')?.textContent.trim() || null`); await A.shot(`r9-${l}-1280-clip-${name}.png`); }
+      if (name === '2973') { await lang(A, 'zh', false); await A.front(); await quiet(A); }
+      check(`r9 ⑨ the clip note (${name} characters, the chat card — shot r9-*-1280-clip-${name}.png): «${said}»${name === '2973' ? ` · en «${langs.en}» · ja «${langs.ja}»` : ' (the fold cut at 4 096: never «the whole is under 技术细节»)'}`,
+        said === line && (name !== '2973' || (/^The command is 2973 characters long; the card shows its first 2000/.test(langs.en || '') && /^コマンドは 2973 文字あります/.test(langs.ja || ''))), { said, langs });
+      await release(it);
+    }
+    // THE RULED WORDS: three closed run cards — r24's late allow and its lock settle (the stand-in), the door's own person deny
+    const ruled = [['late-allow', { by: 'allowed', fact: { late: true, decidedBy: 'person' } }], ['deny', null], ['lock', { by: 'vault_locked', fact: { decidedBy: null } }]];
+    const closed = [];
+    for (const [name, r] of ruled) {
+      const it = await runCard(facts);
+      if (r) fs.writeFileSync(R9_RULED, JSON.stringify(r)); else fs.rmSync(R9_RULED, { force: true });
+      await release(it);
+      fs.rmSync(R9_RULED, { force: true });
+      closed.push([name, await until(async () => (await api()).resolved.find((i) => i.id === it.id) || null, 15000)]);
+    }
+    const WANT9 = { zh: ['你已放行 1 次 · 等它重跑', '你已拒绝', '回答前保险库已锁定'], en: ['let through once by you · waiting for it to run again', 'denied by you', 'the vault locked before it was answered'], ja: ['あなたが 1 回だけ通しました · 再実行待ち', 'あなたが拒否しました', '回答の前に保管庫がロックされました'] };
+    // a decided card folds into its tool run: open the run that holds it (the nearest preceding run header) before looking
+    const reveal9 = (id) => A.evalJs(`(() => { const c = document.querySelector('.cn-card[data-item="${id}"]'); if (!c) return 'none'; if (c.getClientRects().length) return 'shown'; const h = [...document.querySelectorAll('.chat-run-header')].filter((x) => x.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING).pop(); if (h) h.click(); return h ? 'opened' : 'hidden'; })()`);
+    for (const l of ['zh', 'en', 'ja']) {
+      await lang(A, l, false); await A.front(); await quiet(A);
+      const words = [];
+      for (const [name, it] of closed) {
+        if (!it) { words.push(null); continue; }
+        await A.waitFor(`!!document.querySelector('${CARD7(it.id)}')`, 15000);
+        if ((await reveal9(it.id)) === 'opened') await sleep(500);
+        await A.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(400);
+        words.push(await A.evalJs(`(() => { const c = document.querySelector('${CARD7(it.id)}'); const v = c && c.querySelector('.cn-line-verb'), a = c && c.querySelector('.cn-line-ago'); return v ? { verb: v.textContent.trim(), ago: a ? a.textContent.replace(/^\\s*·\\s*/, '').trim() : null, shown: !!c.getClientRects().length } : null; })()`));
+        await A.shot(`r9-${l}-1280-ruled-${name}.png`);
+      }
+      check(`r9 ⑨ THE RULED WORDS in ${l} (the chat card's record line — shots r9-${l}-1280-ruled-*.png): ${words.map((w) => w ? `«${w.verb} · ${w.ago}»` : '—').join(' · ')} (the two a person decided stamped with their time)`,
+        words.length === 3 && words.every((w, k) => !!w && w.shown && w.verb === WANT9[l][k]) && /^\d\d:\d\d$/.test(words[0].ago || '') && /^\d\d:\d\d$/.test(words[1].ago || ''), { words, by: closed.map(([n, it]) => it && [n, it.resolvedBy, it.resolvedFact]) });
+    }
+    await lap('⑨ done');
   } catch (e) { fail++; console.log('  ✗ ⑧ threw: ' + (e?.stack || e)); }
   check('no page threw', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }

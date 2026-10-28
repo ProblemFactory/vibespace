@@ -326,6 +326,7 @@ const ROWS = [
   ["src/sysinfo.js", "memStat", 1, "local-only", "callers pass /sys/fs/cgroup/memory.stat, /sys/fs/cgroup/memory/memory.stat or /proc/meminfo."],
   ["src/sysinfo.js", "loadHistory", 1, "local-only", "_histFile = <dataDir>/sysinfo-history.json; dataDir = <checkout>/data (server.js:731 startWatch)."],
   ["src/sysinfo.js", "persistHistory", 2, "local-only", "tmp/_histFile = <checkout>/data/sysinfo-history.json (set by loadHistory from server.js:731)."],
+  ["src/user-todos.js", "UserTodoManager._setAside", 2, "local-only", "lane wake-approve-card r9: an unreadable data/user-todos.json SET ASIDE at boot — renamed (else copied) beside itself as user-todos.json.corrupt-<ts>; both paths are the instance's own data dir (the store's file)"],
   ["src/task-groups.js", "TaskGroupManager._listContextFiles > walk", 2, "guarded", "the Context-table folder walk (a person/agent-named folder): a row on a STORAGE mount takes the SafeFs road (contextFiles, src/storage-facts.js) — this walk runs for a local / home folder only"],
   ["src/task-groups.js", "TaskGroupManager._kindOf", 1, "guarded", "a Context row's stat: a STORAGE row answers from its SafeFs fact (stat, src/storage-facts.js; never read yet = reading) — this stat runs for a local / home row only"],
   ["src/task-groups.js", "TaskGroupManager._stat", 1, "guarded", "a Context row's stat (size / mtime): a STORAGE row answers from its SafeFs fact — this stat runs for a local / home row only"],

@@ -763,6 +763,23 @@
 - (2026-10-27) A WAKE REQUEST'S APPROVE SAT ONLY IN THE TRAY; A BEARER COULD DECIDE IT; ✓ DENIED IT; ITS RULE WIDENED IT (wake-approve-card). 不变量 = a decision the owner must click is offered where the owner looks; one decider, its own verbs; what a wake reaches is the person's, read as it fires.
 - (2026-10-27) THE RUN CARD WAS AN ENGLISH PROSE WALL AND LEFT IN SILENCE AT 60 S (the owner, wake-approve-card r7). 不变量 = a card is actor + verb + object, the deciding fact first, worded by the viewer's client from codes; a deadline is shown and its end keeps its place (kb-bugfix-invariants)
 - (2026-10-28) A 2 973-CHARACTER COMMAND GOT NO CARD; HELD HITS WERE EVICTED FROM THEIR OWN DECISION (wake-approve-card r8). 不变量 = a store clips and says, never throws; a count is what the action will touch; a clock is the hub's ⇒ kb-bugfix-invariants.md
+- (2026-10-28) A GROUP ROW WITH AN EXTRA FIELD REVIVED A BILLED WAKE WITH NO CLICK; A CUT LINE STATED 4096 FOR A 5037-CHAR COMMAND (wake-approve-card r9). 不变量 = a gate judges the rows the write will STORE; a store never states a length it cannot prove.
+
+## A GROUP ROW WITH AN EXTRA FIELD REVIVED A BILLED WAKE WITH NO CLICK; A CUT LINE STATED 4096 FOR A 5037-CHARACTER COMMAND (lane wake-approve-card round 9 — the r8 delta verdict, 2026-10-28)
+
+- **WHAT FELL (each measured):**
+  - BLOCKER, a regression r8 made: the account access gate's new coverage keyed the RAW body rows (principalKey folds a group's `target` into the key, `group:g-x>zz`) while setGrain stored the cleaned rows (cleanPrincipal drops it) — a vsst_ PUT naming the group with `target` was judged «cannot change this row's reach» ⇒ 200, and the inert group wake went live with no person's click; the 200 quoted the unbelted title;
+  - the door sends the QUOTED argv: 1 000 single quotes make a 2 035-byte argv a 5 037-character cmd; the store kept 4 096 and the line said «命令共 4096 个字符 … 完整命令在「技术细节」里» — 941 characters nowhere;
+  - the set-aside rows sat outside prunePending: after the rule was removed, Deliver pushed 30 rows into pending for nobody and recorded «delivered»;
+  - pre-law ✓/✕ records read «outcome unknown · user»; r8 dropped r6's second join check; facts drops were said nowhere; a torn user-todos.json started For you empty in silence.
+- **THE FIX:** `accessVerdict` (the ONE normaliser — setGrain stores with it, wakesBelow judges with it); the cut line reads the door's `cmdLen` or the chunks' sum only while the fold is whole, else «over 4 096 — not kept»; `pruneHeld` resolves a held request whose watcher is gone; `endOf` keeps a status word for a 'user' / 'system' record with no outcome; the join judges again at the write; every facts drop named (stub, path, log); the store sets a torn file aside as index.json does and the reconcile re-files the held card.
+- **不变量:**
+  - a gate judges exactly the rows the write will store — one normaliser, both sides;
+  - a store never states a length it cannot prove;
+  - a removed rule ends the decisions it held;
+  - an old record keeps its word; «unknown» is only for an end nobody worded;
+  - every drop is named where the owner looks, and once in the log.
+- **GATES:** test-channel-agent-watch ⑦ (a) the target bypass through the real route + the mutant «the gate fed raw rows» red by name, (b) the gone watcher + its prune-less RED copy, (c) the null row, (d) the join's write race, (e) the torn store; test-wake-approve-card ⑰ (the 1 000-quote line, the old records, the «?» host, the ja stamp, the toast) + ⑯ (the drops, the clock fallback).
 
 ## A 2 973-CHARACTER COMMAND GOT NO CARD; HELD HITS WERE EVICTED FROM THEIR OWN DECISION; THE COUNTDOWN HID ANSWERS BY THE DEVICE'S CLOCK (lane wake-approve-card round 8 — the r6 + r7 acceptance, 11 Opus reviewers, 2026-10-28)
 

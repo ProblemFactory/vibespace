@@ -704,15 +704,18 @@ function scanOf(src) {
   SCANNED.set(src, v);
   return v;
 }
+/** `parents` is ONE stack pushed and popped along the walk (a visitor reads it synchronously, never keeps it) — a copy per
+ *  node made the census quadratic in the depth (835 ms of the suite's 2.1 s, measured r9) */
 function walkAst(node, visit, parents = []) {
   if (!node || typeof node.type !== 'string') return;
   if (visit(node, parents) === false) return;
-  const next = parents.concat([node]);
+  parents.push(node);
   for (const k in node) {
     if (k === 'type' || k === 'start' || k === 'end') continue;
     const v = node[k];
-    if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === 'string') walkAst(c, visit, next); } else if (v && typeof v.type === 'string') walkAst(v, visit, next);
+    if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === 'string') walkAst(c, visit, parents); } else if (v && typeof v.type === 'string') walkAst(v, visit, parents);
   }
+  parents.pop();
 }
 const propName = (m) => (m && m.type === 'MemberExpression' ? (!m.computed && m.property.type === 'Identifier' ? m.property.name : m.property.type === 'Literal' ? String(m.property.value) : null) : null);
 const isFn = (n) => n && /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression)$/.test(n.type);
@@ -889,7 +892,7 @@ function writerCensus(files) {
 }
 const WEBHOOK = 'src/routes/webhook.js';
 const WH_SRC = SRC_FILES[WEBHOOK] || '';
-const WH_GATE = /^ {2,4}if \(pathRefused\(req, res[^\n]*\)\) return;[^\n]*\n/gm;
+const WH_GATE = /^ {2,4}if \(pathRefused\(req, res[^\n]*\)\) (?:return;|\{[^\n]*return; \})[^\n]*\n/gm;   // r9: + the join's judgement AT THE WRITE (a refusal that also writes its journal line)
 {
   const c = writerCensus(SRC_FILES), c0 = c;
   const ch = c.routes.filter((r) => !/\/webhook\//.test(r)), wh = c.routes.filter((r) => /\/webhook\//.test(r));
@@ -914,7 +917,7 @@ const WH_GATE = /^ {2,4}if \(pathRefused\(req, res[^\n]*\)\) return;[^\n]*\n/gm;
   const cut = WH_SRC.replace(WH_GATE, '');
   const r4w = writerCensus({ ...SRC_FILES, [WEBHOOK]: cut });
   const named = r4w.problems.filter((x) => /webhook/.test(x));
-  ok((WH_SRC.match(WH_GATE) || []).length === 6 && named.length === 6 && named.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: calls syncRow\b.* without asking/.test(x)) && named.some((x) => /its authority is POST \/api\/channels\/webhook\/paths\/:slug\/pair-code, which does not ask the gate/.test(x)), `RED COPY: the path verbs as 4b8896e7 had them (owner() only) — the census names all ${named.length}: ${named.map((x) => x.replace(/^src\/routes\/webhook\.js /, '').replace(/: (calls|its authority) .*$/, '').replace('/api/channels/webhook/', '…/')).join(' · ')}`, named);
+  ok((WH_SRC.match(WH_GATE) || []).length === 7 && named.length === 6 && named.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: calls syncRow\b.* without asking/.test(x)) && named.some((x) => /its authority is POST \/api\/channels\/webhook\/paths\/:slug\/pair-code, which does not ask the gate/.test(x)), `RED COPY: the path verbs as 4b8896e7 had them (owner() only) — the census names all ${named.length}: ${named.map((x) => x.replace(/^src\/routes\/webhook\.js /, '').replace(/: (calls|its authority) .*$/, '').replace('/api/channels/webhook/', '…/')).join(' · ')}`, named);
   const late = writerCensus({ ...SRC_FILES, [WEBHOOK]: WH_SRC.replace("  if (pathRefused(req, res)) return;   // r5: disabled / ipAllow / wakesPerHour / title — what a held wake fires on\n", '').replace("    await syncRow(slug, ov.options);\n    res.json({ ok: true, path: pathView(st, slug) });\n  } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }\n});\n/** THE OWNER'S \"Send", "    await syncRow(slug, ov.options);\n    if (pathRefused(req, res)) return;\n    res.json({ ok: true, path: pathView(st, slug) });\n  } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }\n});\n/** THE OWNER'S \"Send") });
   ok(late.problems.some((x) => /^PUT \/api\/channels\/webhook\/paths\/:slug: asks the gate AFTER it calls syncRow/.test(x)), 'RED COPY: a path verb asking the gate only AFTER its write (inside its try, past the write) is named', late.problems.filter((x) => /webhook/.test(x)));
   const plantedFile = writerCensus({ ...SRC_FILES, 'src/routes/hooks-extra.js': "const router = require('express').Router();\nfunction touch(e, slug, o) { return e.store.index.update(() => { const en = e.store.index.entry('webhook', slug); en.options = o; }); }\nrouter.put('/api/channels/webhook/extra/:slug', async (req, res) => {\n  await touch(engine(), req.params.slug, req.body);\n  res.json({ ok: true });\n});\n" });
@@ -1243,6 +1246,12 @@ try {
     'THE FAKE CLOCK (zh, the HUB\'s time — r8): +0 s «60 秒内有效 · 按服务器时间还剩 60 秒» · +50 s the warning accent «还剩 10 秒» · +61 s with no settle yet «按服务器时间已到期 — 等服务器确认» (the run card and a hub act alike — the client never infers «late» or «timed out» by its own clock); the server\'s `late` mark reads late whatever the clock; the 7-day wake ask keeps «expires in 7 d» (no ticker), a notice its own window', { clock, hub61, lateMark, wake, notice });
   const at = (s, type = 'vault-run-ask', x = {}) => ask(type, { createdAt: Date.now() - s * 1000, expiresAt: Date.now() - s * 1000 + 60e3, ...x });
   const drawn = (it) => { const h = rowHtml(it, T.zh); return { deadline: ((/<div class="ut-deadline[^"]*"[^>]*>([^<]*)</.exec(h) || [])[1]) || null, warn: /class="ut-deadline ut-deadline-warn"/.test(h), timedOut: /ut-timed-out/.test(ROW3.renderRow({ item: it, resolved: false, band: 1 }, { ...rctx3, t: T.zh }).className), answers: answersOf(h) }; };
+  // r9 (the acceptance's low: a snapshot with no `todos.now` — an older hub — counted by the DEVICE's clock while saying «按服务器
+  // 时间»): before any snapshot named the hub's time the line says whose clock it counts by; then the hub's (offset 0 here)
+  const dev0 = drawn(at(0)), dev61 = drawn(at(61));
+  ok(dev0.deadline === '60 秒内有效 · 按本机时间还剩 60 秒' && dev61.deadline === '按本机时间已到期 — 等服务器确认' && J(dev61.answers) === J(['once', 'deny']),
+    `THE CLOCK FALLBACK (r9): no snapshot has said the hub's time yet ⇒ «${dev0.deadline}» / «${dev61.deadline}» — never «按服务器时间» on the device's own clock (db19b0a2: «按服务器时间还剩 60 秒»), the answers kept`, J({ dev0, dev61 }));
+  if (typeof ROW3.noteHubClock === 'function') ROW3.noteHubClock(Date.now());   // a snapshot said the hub's time (this box's — offset 0)
   const d0 = drawn(at(0)), d50 = drawn(at(50)), d61 = drawn(at(61)), h61 = drawn(at(61, 'hub-act-ask')), l61 = drawn(at(61, 'vault-run-ask', { expiresAt: Date.now() + 86400e3, action: { type: 'vault-run-ask', askId: 'f'.repeat(32), always: true, late: true } }));
   ok(d0.deadline === '60 秒内有效 · 按服务器时间还剩 60 秒' && !d0.warn && d50.warn && /还剩 10 秒/.test(d50.deadline) && d61.deadline === DUE && !d61.timedOut && J(d61.answers) === J(['once', 'deny']) && !h61.timedOut && h61.deadline === DUE && h61.answers.includes('once') && h61.answers.includes('deny') && /^已超时/.test(l61.deadline || '') && J(l61.answers) === J(['once', 'deny']),
     'THE ROW (the tray, the chat card): the line under the question at +0 / +50 s (the accent under 15 s); at +61 s with no settle the answers STAY on the run card and a hub act alike (r8: only the producer\'s settle withdraws them — no `.ut-timed-out`); a card the server marked LATE offers 允许一次 / 拒绝 ONLY — never «Always», even when its filed card offered it (r8: its door refuses it)', { d0, d50, d61, h61, l61 });
@@ -1299,8 +1308,17 @@ try {
     const kept0 = J(m.get(m.snapshot().open.find((i) => i.text === 'run 2973').id).facts);
     const again = m.add('claude:r8-2973', { text: 'run 2973', origin: 'vault', action: { type: 'vault-run-ask', askId: 'a'.repeat(31) + '3' }, facts: JSON.parse(kept0) });   // the door's own clip at the same bound
     const odd = [m.add('claude:r8-odd1', { text: 'odd 1', origin: 'vault', action: { type: 'vault-run-ask', askId: 'b'.repeat(32) }, facts: 'not an object' }), m.add('claude:r8-odd2', { text: 'odd 2', origin: 'vault', action: { type: 'vault-run-ask', askId: 'c'.repeat(32) }, facts: { ...base8, secrets: Array.from({ length: 64 }, (_, k) => ({ name: 'n'.repeat(400) + k, entry: 'e' + k, ref: 'vault://secrets/secret:k/secret', as: { kind: 'env', name: 'V' + k } })) } })];
-    ok(J(m.get(again.id).facts) === kept0 && !again.factsCut && odd.every((r) => !!r.id) && odd.map((r) => (r.factsCut || []).join(',')).join('|') === 'facts|facts' && odd.every((r) => !m.get(r.id).facts),
-      'idempotent (facts already cut re-file as they are, nothing re-cut); a facts that is no object, or past 24 KB as a whole, is DROPPED and said (`factsCut: [facts]`) — the item still filed, the card drawing its prose', odd.map((r) => r.factsCut));
+    ok(J(m.get(again.id).facts) === kept0 && !again.factsCut && odd.every((r) => !!r.id) && odd.map((r) => (r.factsCut || []).join(',')).join('|') === 'facts|facts' && J(odd.map((r) => m.get(r.id).facts)) === J([{ dropped: 'not-an-object', cut: ['facts'] }, { dropped: 'too-large', cut: ['facts'] }]),
+      'idempotent (facts already cut re-file as they are, nothing re-cut); a facts that is no object, or past 24 KB as a whole, is DROPPED and said (`factsCut: [facts]`) — the item still filed with a STUB that says why (r9: {dropped, cut} — no `v`, so the card draws its prose)', odd.map((r) => [r.factsCut, m.get(r.id).facts]));
+    // r9 (THE STORE SAYS WHEN IT DROPS — the acceptance: a 24 KB drop said nowhere, a non-text cmd dropped silently, a bad key cut as
+    // «» and the re-file losing that cut): every drop NAMED — on the card, in the fold, in the journal — and filing twice gives equal cuts
+    const big = m.get(odd[1].id), bigHtml = ROW3.renderRow({ item: big, resolved: false, band: 1 }, { ...rctx3, t: Z }).innerHTML;
+    const shapes = { cmdObject: { ...base8, cmd: { not: 'text' } }, snake: { ...base8, snake_case: 1 }, fields40: { ...base8, ...Object.fromEntries(Array.from({ length: 40 }, (_, k) => ['f' + k, 1])) } };
+    const twice = Object.entries(shapes).map(([k, f], j) => { const r1 = m.add('claude:r9-' + k, { text: 'r9 ' + k, origin: 'vault', action: { type: 'vault-run-ask', askId: String(j).repeat(32) }, facts: f }); const f1 = m.get(r1.id).facts; const r2 = m.add('claude:r9b-' + k, { text: 'r9b ' + k, origin: 'vault', action: { type: 'vault-run-ask', askId: String(j + 5).repeat(32) }, facts: JSON.parse(J(f1)) }); return [k, f1.cut || null, m.get(r2.id).facts.cut || null]; });
+    ok(!FA.runCardOf(big, { t: Z }) && /<div class="ut-run-cut ut-facts-dropped">事实太大，未保存 — 只显示文字<\/div>/.test(bigHtml)
+      && J(twice.slice(0, 2)) === J([['cmdObject', ['cmd'], ['cmd']], ['snake', ['snake_case'], ['snake_case']]])
+      && J(twice[2][1]) === J(Array.from({ length: 16 }, (_, k) => 'f' + (32 - Object.keys(base8).length + k))) && J(twice[2][2]) === J(twice[2][1]),   // the 33rd field on, each by name (the list's own bound: 16)
+      `THE STORE SAYS WHEN IT DROPS (r9): a facts past 24 KB ⇒ the card's line «事实太大，未保存 — 只显示文字» above its text; a non-text cmd ⇒ cut «cmd»; a bad key / a 33rd field ⇒ cut by its OWN name (never «»); filing twice ⇒ equal cuts (db19b0a2: said nowhere; «cmd» silent; cut [""], the re-file losing it)`, J({ twice, line: (/ut-facts-dropped">([^<]*)</.exec(bigHtml) || [])[1] || null }));
     // the card: the body's command box holds the cut, a line says so, the fold holds it whole
     const it = m.get(m.snapshot().open.find((i) => i.text === 'run 2973').id);
     const h = ROW3.runFactsHtml(it, Z);
@@ -1366,6 +1384,62 @@ try {
   const ACT8 = read('src/lib/user-todos-actions.js');
   ok(/r\.outcome === 'late-allowed' \? t\('let through once · waiting for it to run again'\) : r\.outcome === 'denied' \? t\('denied'\) : `\$\{t\('outcome unknown'\)\} · \$\{String\(r\.outcome \|\| ''\)\}`/.test(ACT8), 'the vault-run press reads a late Allow\'s outcome («已放行 1 次 · 等它重跑»), a Deny as «已拒绝», anything else as «结果未知 · <outcome>» (2a5e9ce8: everything not allowed/always toasted «已拒绝»)');
 } catch (e) { ok(false, '⑯ (d) threw on this tree: ' + ((e && e.message) || e)); }
+
+// ── ⑰ ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('⑰ ROUND 9 — a store never states a length it cannot prove; an old ✓/✕ keeps its word; a value minted for no host is worded; the stamps and the toast say what happened');
+const JA9 = (await import(pathToFileURL(path.join(SRC, 'lib', 'i18n-ja.js')).href)).default;
+const JA = (x, p) => String(JA9[x] || x).replace(/\{(\w+)\}/g, (m0, k) => (p && p[k] != null ? String(p[k]) : m0));
+try {
+  // (a) THE 1 000-QUOTE ARGV (the acceptance's claim-run 1 through the real a1f79c42 door): a 2 035-byte argv whose quoting makes a
+  // 5 037-char cmd — the door sends it whole in cmdFull (2000+2000+1037); the store keeps 4 096 and SAYS it cut the fold
+  const FX9 = JSON.parse(read('scripts/fixtures/vault-run-card-facts.json'));
+  const base9 = FX9.variants[0].facts;
+  const whole = ('curl -d ' + "'a'\\''".repeat(1000) + ' https://api.example.test').slice(0, 5037);
+  const chunks = (x) => { const o = []; for (let i = 0; i < x.length; i += 2000) o.push(x.slice(i, i + 2000)); return o; };
+  const { m, done } = storeWith(FA);
+  try {
+    const file = (extra, k) => { const r = m.add('claude:r9-q' + k, { text: 'quotes ' + k, origin: 'vault', action: { type: 'vault-run-ask', askId: String(k).repeat(32) }, facts: { ...base9, cmd: whole.slice(0, 2000), cmdCut: true, cmdFull: chunks(whole), ...extra } }); return m.get(r.id); };
+    const a = file({}, 1), b = file({ cmdLen: 5037 }, 2);
+    const va = FA.runCardOf(a, { t: Z }), vb = FA.runCardOf(b, { t: Z });
+    const foldA = va && va.fold ? (va.fold.find((x) => x.cmd) || {}).label : (JSON.stringify(va || {}).match(/"label":"(命令（前 \d+ 个字符）|完整命令)"/) || [])[1];
+    ok(whole.length === 5037 && J((a.facts.cmdFull || []).map((c) => c.length)) === J([2000, 2000, 96]) && J(a.facts.cut) === J(['cmdFull'])
+      && va && va.cut && va.cut.text === '命令超过 4096 个字符，完整命令未保存 — 请在保险库窗口查看运行记录。这里只显示前 2000 个。' && va.cut.n === null && va.cut.whole === false
+      && vb && vb.cut && vb.cut.text === '命令共 5037 个字符，超过 4096 个字符，完整命令未保存 — 请在保险库窗口查看运行记录。这里只显示前 2000 个。' && vb.cut.n === 5037
+      && /命令（前 4096 个字符）/.test(JSON.stringify(va)) && !/完整命令在「技术细节」里/.test(JSON.stringify(va)),
+      `(a) A STORE NEVER STATES A LENGTH IT CANNOT PROVE: the fold cut at 4 096 ⇒ «${va && va.cut && va.cut.text}»; with the door's own \`cmdLen\` ⇒ «${vb && vb.cut && vb.cut.text}»; the fold is titled «命令（前 4096 个字符）» (db19b0a2: «命令共 4096 个字符 … 完整命令在「技术细节」里。» — 941 characters nowhere)`, J({ a: va && va.cut, b: vb && vb.cut, foldA }));
+    const c = file({}, 3), whole2 = whole.slice(0, 2973), d = m.get(m.add('claude:r9-q4', { text: 'quotes 4', origin: 'vault', action: { type: 'vault-run-ask', askId: '4'.repeat(32) }, facts: { ...base9, cmd: whole2.slice(0, 2000), cmdCut: true, cmdFull: chunks(whole2) } }).id);
+    const vd = FA.runCardOf(d, { t: Z });
+    ok(!!c && vd && vd.cut && vd.cut.text === '命令共 2973 个字符，这里只显示前 2000 个 — 完整命令在「技术细节」里。', '(a) CONTROL (green on both trees): a WHOLE fold (nothing cut, no cmdLen) states the chunks\' sum — the r8 line, unchanged', vd && vd.cut);
+  } finally { done(); }
+} catch (e) { ok(false, '⑰ (a) threw on this tree: ' + ((e && e.stack) || e)); }
+try {
+  // (b) AN OLD ✓/✕ KEEPS ITS WORD (the acceptance, skep8-old-records.cjs): a decision-row record a person closed with the generic ✓ / ✕
+  // BEFORE the decision law (resolvedBy 'user'), or the engine's 'system' — no outcome fact
+  const NOW9 = Date.now();
+  const rec = (type, status, by) => ({ id: 'ut-old9' + type.length + status.length + by.length, sessionKey: 'claude:c-a', text: 'an old ask', urgency: 'normal', origin: 'vault', status, resolvedBy: by, resolvedAt: NOW9 - 60e3, createdAt: NOW9 - 120e3, kind: 'action', action: { type, ...(type === 'channel-watch-request' ? { id: 'wr-1' } : { askId: 'a'.repeat(32) }) } });
+  const olds = [rec('hub-act-ask', 'dismissed', 'user'), rec('vault-run-ask', 'done', 'user'), rec('channel-watch-request', 'done', 'system')];
+  const seen = olds.map((it) => { const h = ROW3.renderRow({ item: it, resolved: true, band: 1, tail: true }, rctx3).innerHTML; return [FA.settledWords(it, tt3), ROW3.statusWords(it, tt3), ROW3.endCodeOf(it), /ut-end-code/.test(h), /outcome unknown/.test(h)]; });
+  ok(J(seen.map((x) => x[0])) === J(['dismissed', 'done', 'done']) && seen.every((x) => !x[2] && !x[3] && !x[4]),
+    `(b) AN OLD ✓/✕ KEEPS ITS WORD: pre-law records (resolvedBy user / system, no outcome) read ${seen.map((x) => `«${x[0]}»`).join(' / ')} — never «outcome unknown · user» (db19b0a2); «unknown» stays for an end nobody worded (⑯ (c))`, J(seen));
+} catch (e) { ok(false, '⑰ (b) threw on this tree: ' + ((e && e.stack) || e)); }
+try {
+  // (c) WORDS: r23's fixture variant 1 has a value minted for NO host (forHost null) — «是为 ? 生成的» before; the ja deny stamp; the
+  // page's re-grant toast reads the write's own `wakes` (DEFECT 2 — a re-grant that re-activated 2 wakes toasted «nobody is woken»)
+  const FX9 = JSON.parse(read('scripts/fixtures/vault-run-card-facts.json'));
+  const v1 = FX9.variants.find((x) => JSON.stringify(x.facts.reason || {}).includes('"forHost":null')) || FX9.variants[1];
+  const it = { id: 'ut-r9-host', sessionKey: 'claude:c1', text: 'run?', status: 'open', kind: 'action', origin: 'vault', createdAt: Date.now(), action: { type: 'vault-run-ask', askId: 'e'.repeat(32) }, facts: v1.facts };
+  const why = (t) => JSON.stringify(FA.runCardOf(it, { t }) || {});
+  const words = { zh: why(Z), en: why(tt3), ja: why(JA) };
+  ok(!!v1 && !/为 \? 生成|minted for \?|\? 向け/.test(JSON.stringify(words)) && /不属于任何主机/.test(words.zh) && /is tied to no host/.test(words.en) && /どのホストにも紐づいていません/.test(words.ja),
+    '(c) a value minted for NO host (r23 variant 1, forHost null) is worded — «不属于任何主机 …» / «is tied to no host …» / «…どのホストにも紐づいていません …» — never a raw «?»', J({ zh: (words.zh.match(/[^"]*不属于任何主机[^"]*/) || [])[0] || words.zh.slice(0, 200) }));
+  const deny = { id: 'ut-r9-deny', sessionKey: 'claude:c1', text: 'wake?', status: 'done', kind: 'action', origin: 'channels', createdAt: Date.now() - 9e4, resolvedAt: Date.now() - 6e4, resolvedBy: 'denied', resolvedFact: { decidedBy: 'person', decidedAt: Date.now() - 6e4 }, action: { type: 'channel-watch-request', id: 'wr-9' } };
+  const st = FA.decidedStamp(deny, { t: JA });
+  ok(st && /^あなたが拒否しました · /.test(st.text), `(c) the ja person stamp of a deny says WHO: «${st && st.text}» (was «拒否済み» — pre-existing from r1)`, st);
+  const FE = read('src/lib/channel-filter-editor.js');
+  const ZH9 = DICT8.zh;
+  ok(/const woke = r\.wakes && Array\.isArray\(r\.wakes\.reactivated\) \? r\.wakes\.reactivated\.length : 0;/.test(FE) && /woke \? t\('Access saved: \{list\} — this re-activated \{n\} wake\(s\) \(a billed turn each time one fires\)', \{ list: names, n: woke \}\)/.test(FE) && !!ZH9['Access saved: {list} — this re-activated {n} wake(s) (a billed turn each time one fires)'] && !!JA9['Access saved: {list} — this re-activated {n} wake(s) (a billed turn each time one fires)'],
+    '(c) DEFECT 2: the page\'s access toast reads the write\'s own `wakes.reactivated` — «访问权限已保存：… — 这次重新启用了 2 个唤醒…» when it woke rows (the answer\'s words belted: test-channel-agent-watch ⑦ (a)), «…不会唤醒任何人» only when it woke none');
+} catch (e) { ok(false, '⑰ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
