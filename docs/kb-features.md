@@ -739,7 +739,7 @@ impossible rather than a review promise.
 - **CLAUDE: TWO DOORS — ENTER HANDS IT TO THE RUNNING TURN, ALT+ENTER HOLDS IT
   (2.369.361, lane claude-steer-inject — the owner 2026-10-27: «现在 claude 也是默认排队了吗？？
   … 我没法插入啊», then ruling «A»: «Enter 立即送入，Alt+Enter 排队»).** MEASURED on
-  CLI 2.1.308 (a local mock API, the wrapper's own transport flags): a message
+  CLI 2.1.308 and again on 2.1.312 (a local mock API, the wrapper's own transport flags): a message
   written to the CLI while a tool runs reaches the model INSIDE that turn, with
   the next tool result («The user sent a new message while you were working:
   …»); with no tool result left it runs as a turn of its own right after. So on

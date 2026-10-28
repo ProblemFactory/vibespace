@@ -15,10 +15,6 @@
 // the turn still ends in `result`, but the session stays 'running' (NO idle) until the helper ends; a prompt sent
 // meanwhile runs at once (init → … → result, no state event); when the helper ends, the CLI runs a turn of its own for
 // its notification, and only then says 'idle'. The state is said only when it CHANGES.
-// Its records are VERSION-KEYED (lane claude-steer-inject r3): $STAND_IN_CLI_VERSION (default 2.1.312, the build the R0 table was
-// re-measured on 2026-10-27 — the same rows as 2.1.308) names the build in every init, and from 2.1.312 on every `result` carries
-// model_usage_since_last_result (measured on every result of a local stream-json 2.1.312; `{}` = nothing counted — the stand-in bills
-// nothing). STAND_IN_CLI_VERSION=2.1.308 writes the 2.1.308 result. test-record-shape judges both against src/record-shape.js.
 // A turn whose text holds `TOOL-` RUNS A TOOL (lane claude-steer-inject, the R0 recording in
 // /var/tmp/vibespace-lanes/claude-steer-inject/measure — 2.1.308, a local mock /v1/messages): init → an assistant
 // tool_use (Bash) → the tool works for $STAND_IN_LONG_MS → the user tool_result record → and a frame that arrived WHILE
@@ -42,20 +38,24 @@
 // A TOOL- turn whose text also holds `LONGER-` runs its tool three times as long (a turn that outlives a server restart).
 //   $STAND_IN_HELPER_MS  how long a BGAGENT- helper works (default $STAND_IN_LONG_MS) — past a Stop, the session stays
 //                      'running' with no idle (the shape a Stop window must not wait on for ever)
+// Its records are VERSION-KEYED (lane claude-steer-inject r3): $STAND_IN_CLI_VERSION (default 2.1.312, the build the R0 table was
+// re-measured on 2026-10-27 — the same rows as 2.1.308) names the build in every init, and from 2.1.312 on every `result` carries
+// model_usage_since_last_result (measured on every result of a local stream-json 2.1.312; `{}` = nothing counted — the stand-in bills
+// nothing). STAND_IN_CLI_VERSION=2.1.308 writes the 2.1.308 result. test-record-shape judges both against src/record-shape.js.
 // Used by scripts/test-queue-putback.mjs §6, scripts/test-queue-steer.mjs ⑯ and scripts/test-claude-steer-chrome.mjs.
 // Never a vendor call: no network at all.
 const fs = require('fs');
 const CAP = process.env.STUB_CAPTURE || '';
 const DELIVERED = process.env.STAND_IN_DELIVERED || '';
 const LONG_MS = Number(process.env.STAND_IN_LONG_MS || 4000);
-const CLI_VERSION = process.env.STAND_IN_CLI_VERSION || '2.1.312';
-const atLeast = (v) => { const a = CLI_VERSION.split('.').map(Number), b = v.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); return true; };
-const SINCE_LAST = atLeast('2.1.312'); // the per-result usage delta 2.1.312 writes on every result
 const FOLLOW_MS = Number(process.env.STAND_IN_FOLLOW_MS || 300);
 const SPLIT_FOLLOW = process.env.STAND_IN_SPLIT_FOLLOW === '1';
 const NO_STATE = process.env.STAND_IN_NO_STATE === '1';
 const POST_MS = Number(process.env.STAND_IN_POST_MS || 5);
 const HELPER_MS = Number(process.env.STAND_IN_HELPER_MS || LONG_MS);
+const CLI_VERSION = process.env.STAND_IN_CLI_VERSION || '2.1.312';
+const atLeast = (v) => { const a = CLI_VERSION.split('.').map(Number), b = v.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); return true; };
+const SINCE_LAST = atLeast('2.1.312'); // the per-result usage delta 2.1.312 writes on every result
 const argv = process.argv.slice(2);
 const argAfter = (flag) => { const i = argv.indexOf(flag); return i >= 0 && argv[i + 1] ? argv[i + 1] : null; };
 const SID = argAfter('--session-id') || argAfter('--resume') || '00000000-0000-4000-8000-00000000c0de';

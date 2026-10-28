@@ -772,6 +772,20 @@
 
 **Fix (registered, never hidden).** scripts/fixtures/claude-cli/2.1.312.json (the dump); SCHEMA_CLI_VERSIONS + 2.1.312 and PERMISSION_OUTCOME_CLI_VERSION 2.1.312. FIELDS_312: 13 `ignored` rows, each naming the build and why nothing reads it. `inherited_asks_settled`: a stream shape row, SHAPE_SINCE 2.1.312, DECLARED_UPSTREAM_UNSEEN with its gate as the disposition; were it ever to arrive, close the permission cards it does not name. ZOD_NON_RECORDS covers the five objects the CLI parses: an API refusal body's cyber_verification `active` / `inactive`, a web-search citation, and a remote-session start's two `source_revision_*` answers. scripts/fixtures/claude-cli/2.1.312-frames.jsonl (the measured stdout, ids and paths replaced) is judged by §1 and the 2.1.312 pin. The stand-in CLI is version-keyed (`$STAND_IN_CLI_VERSION`, default 2.1.312: `model_usage_since_last_result` on every result) — in .360 as four lines ported into the .359 stand-in (the steer rounds' stand-in replaces it). The §4 oracle now reads the remote-transport gate off the installed bundle.
 
+**The hand-over rules on 2.1.312 (R0 re-measured row by row, same probes, same mock; 2.1.308 re-run the same evening):**
+
+| row | 2.1.312 |
+|---|---|
+| tool / tool2 / tool-img | B (and C) taken in at the next tool result; the model-side message byte-identical to 2.1.308's |
+| text / tail | its own turn right after the result |
+| tool-stop | B runs as a follow-up after the interrupted result |
+| the second interrupt on the follow-up init | 6/6, no request; B stays in the conversation |
+| the first state word | none before the first input; 'running' 4 ms after the write, init 33 ms |
+| the Stop window, raw | δ 0/10 ms ⇒ ONE follow-up (B+C); δ ≥ 20 ms ⇒ a SECOND follow-up for C |
+| the Stop window, every follow-up init interrupted (the r2 rule) | 0 answered at δ 0–30 ms; δ 45 ms arrived after the settle ⇒ a plain next turn |
+
+Only the timing moved: the interrupted result comes 16–26 ms after Stop (2.1.308 that evening: 11–16 ms), and the follow-up's request leaves 12–17 ms after its init. No r2 rule was re-derived.
+
 **不变量.** A record is known by its measured shape AND version: a box on 2.1.308 still passes, the 2.1.312 subtype excused there by SHAPE_SINCE. A release re-measures what it claims of a CLI's behaviour on each build it pins, never assumes it. A fixture that plays an unknown field must pick a name no registry declares — a declared name stops being unknown when the registry learns it (test-chat-scroll's stub grew `model_usage_since_last_result`, which 2.1.312 registered: its chip counted 2 kinds, not 3; the stub now grows an invented field).
 
 **Gates.** test-record-shape 149 with no binary / 169 STRICT on 2.1.312 / 168 STRICT on 2.1.308 (base 6428c67e on 2.1.312: 152 ✓ / 2 ✗, the two lines above). New legs: the CONTROL (a copy without FIELDS_312 names 13 fields on the 2.1.312 dump and stays green on 2.1.308), the measured stdout through the real normalizer + its RED CONTROL, the remote-transport gate, the version-keyed stand-in.

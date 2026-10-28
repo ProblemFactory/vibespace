@@ -34,7 +34,8 @@
 //
 // …AND THE PERSON MAY HAND A MESSAGE TO THE RUNNING TURN (2.369.361, lane
 // claude-steer-inject — the owner, 2026-10-27, ruling «A»: «Enter 立即送入，
-// Alt+Enter 排队»). MEASURED on 2.1.308 (the R0 recording, a local mock API):
+// Alt+Enter 排队»). MEASURED on 2.1.308 (the R0 recording, a local mock API;
+// re-measured row by row on 2.1.312 on 2026-10-27 — every row the same):
 // a user frame written to the CLI's stdin while a turn runs a tool is taken
 // INTO THAT TURN with the next tool result — the CLI appends «The user sent a
 // new message while you were working: <text>» to the tool_result the model
@@ -77,7 +78,9 @@
 // SECOND follow-up turn, answered) — and EVERY turn the CLI starts inside it for
 // frames it held at Stop is interrupted on its init line IN THE SAME TICK (the
 // CLI's request leaves ~12 ms after that line, a second interrupt is acked in
-// 8–10 ms: 25 ms late was answered). Nothing here waits for ever: 2 s after the
+// 8–14 ms: 25 ms late was answered; on 2.1.312 the request leaves 12–17 ms
+// after the init, the second interrupt ends it in 10–19 ms and no guarded
+// follow-up sent one). Nothing here waits for ever: 2 s after the
 // CLI's last result (its own follow-up starts within ~14 ms of it) the window
 // and the owed turn are DISARMED with one log line naming them. Stop's ONE
 // `queue_dropped` says what happened to EACH frame: `items` (held here — back in
@@ -220,7 +223,8 @@ function record(type, fields = {}) {
   try { process.stdout.write(line + '\n'); } catch {}
 }
 
-// THE TURN GATE — the predicate that decides held vs forwarded (every number measured on 2.1.308, a local mock):
+// THE TURN GATE — the predicate that decides held vs forwarded (every number measured on 2.1.308, a local mock; the rows
+// re-measured on 2.1.312, 2026-10-27, unchanged):
 //   · OPENED by the wrapper itself the moment it writes a user frame to the CLI — a second frame one millisecond later
 //     is held: there is no echo to race (in stream-json the CLI never echoes a prompt on stdout);
 //   · OPENED by the CLI's own turn start — a top-level `system/init` said while the CLI's last state word is 'running'

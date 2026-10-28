@@ -4,7 +4,7 @@
 // stand-in that lives in the wrapper's own process and drives its stdout SYNCHRONOUSLY (an 'data' emit runs the
 // wrapper's line handler before it returns). That turns a timing question into a yes/no one: after a Stop, the CLI's
 // follow-up turn for a frame it held sends its request ~12 ms after its `system/init` line (measured on 2.1.308, the R0
-// recording), and a second interrupt is acked in 8–10 ms — so the wrapper must write that interrupt IN THE SAME TICK as
+// recording; 12–17 ms on 2.1.312), and a second interrupt is acked in 8–10 ms (10–19 ms on 2.1.312) — so the wrapper must write that interrupt IN THE SAME TICK as
 // it parses the init line (a 25 ms-late copy was answered). This fake emits the init and looks at once:
 // {sameTick: true|false} is appended to $INPROC_OUT. The turn shape is the stand-in's (scripts/fixtures/
 // claude-stand-in-cli.cjs), cut to what that question needs: a `TOOL-` frame opens a turn whose tool runs until an
@@ -28,9 +28,9 @@ cp.spawn = function spawn(cmd, ...rest) {
   let state = 'idle', busy = null, interrupts = 0, lb = '';
   const held = [];
   const setState = (st) => { if (st !== state) { state = st; emit({ type: 'system', subtype: 'session_state_changed', state: st, session_id: SID }); } };
-  const init = () => emit({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-sonnet-4-5', tools: [], claude_code_version: '2.1.308' });
+  const init = () => emit({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-sonnet-4-5', tools: [], claude_code_version: '2.1.312' });
   const textOf = (f) => { const c = f && f.message && f.message.content; return typeof c === 'string' ? c : (Array.isArray(c) ? c.filter((b) => b && b.type === 'text').map((b) => b.text).join(' ') : ''); };
-  const result = (subtype, text) => emit({ type: 'result', subtype, is_error: subtype !== 'success', result: text, session_id: SID });
+  const result = (subtype, text) => emit({ type: 'result', subtype, is_error: subtype !== 'success', result: text, session_id: SID, model_usage_since_last_result: {} }); // the 2.1.312 result
   const say = (text) => emit({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_inproc_' + Date.now(), role: 'assistant', content: [{ type: 'text', text }] } });
   function follow() {
     const text = held.splice(0, held.length).map(textOf).join(' ');
