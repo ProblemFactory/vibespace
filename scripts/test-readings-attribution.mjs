@@ -4117,7 +4117,10 @@ esac
       d3 && d3.parsed && d3.skipped.length === 0 && d3.sessionId === w.SID && d3.target === w.SPARE && d3.identityVerified === true && /matches Member B/.test(d3.why), JSON.stringify(d3 && { t: d3.target, iv: d3.identityVerified, why: d3.why, sk: d3.skipped }));
 
     // ⑥ the ⟳ route on an identity refusal answers the refusal and does NOT fall to the token ladder
-    w.login(w.LINK, { wiped: true });   // safety net: were the ladder reached, there is no token to spend on a vendor call
+    // safety net: were the ladder reached, there is no token to spend on a vendor call — an EXPIRED access token (the ladder
+    // uses only a currently-valid one and never refreshes). (lane pool-silent-members R3: a WIPED login, the net until
+    // .360, is now refused at the door itself — the ⟳ door asks the loop's eligibility, and a no-login row is never spawned)
+    w.login(w.LINK, { expiresAt: Date.now() - 36e5 });
     w.setMode('force-foreign');
     const { call: call2 } = w.mkUsage({ probe: false });
     const capG = quiet(); const a2 = await w.withHome(() => call2({ account: w.LINK })); capG.done();

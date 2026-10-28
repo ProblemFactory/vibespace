@@ -9,6 +9,11 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const { bucketRemaining, accountRemaining, weeklyDeadline, decidePoolSwitch, poolBlockedNotice, classifyAuthFailure, conversationDisplayName } = require(path.resolve('src/account-pool-auto.js'));
 
+// the byte-identity sweeps below compare DECISIONS against older commits; lane pool-silent-members R2 added four NAMING
+// fields to a blocked verdict (who is out of quota / refused / unplaceable / not better — reporting only, no decision
+// reads them), so the sweeps compare the verdict without them (the naming has its own legs: test-account-verdicts)
+const withoutNames = (d) => { if (!d || typeof d !== 'object') return d; const { quotaBlocked, rejectedMembers, unplaceable, notBetter, ...rest } = d; void quotaBlocked; void rejectedMembers; void unplaceable; void notBetter; return rest; };
+
 let pass = 0, fail = 0;
 const ck = (n, c) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n); } };
 /** THE PRE-FIX COPY a byte-identity sweep compares against (lane-mirror-197, 2026-09-29): `git show <ref>:<file>` needs the ref
@@ -41,7 +46,10 @@ ck('bucket: reset PASSED → full again (stale reading is meaningless)', bucketR
   const { RESET_GRACE_SEC, quotaVerdict } = require(path.resolve('src/account-pool-auto.js'));
   ck('reset grace is one minute', RESET_GRACE_SEC === 60);
   ck('a stated reset that passed 30 s ago has NOT landed: the bucket keeps its stale (dead) remaining', bucketRemaining({ utilization: 0.98, resetsAt: NOW - 30 }, NOW) === 2);
-  ck('…exactly at the grace edge it is still dead (strict)', bucketRemaining({ utilization: 0.98, resetsAt: NOW - RESET_GRACE_SEC }, NOW) === 2);
+  // ONE INEQUALITY (lane pool-silent-members R4, inc-mvsjhna7): landed ⇔ reset + grace <= now. 90c995a3 asked `<` here and
+  // `>` in quotaVerdict, so at exactly reset + grace — the second a timed fire is armed for — a bucket was neither
+  ck('…one second BEFORE the grace edge it is still dead', bucketRemaining({ utilization: 0.98, resetsAt: NOW - RESET_GRACE_SEC + 1 }, NOW) === 2);
+  ck('…exactly AT the grace edge it has landed (one inequality, reset + grace <= now — no longer «still dead» beside a verdict with no future reset)', bucketRemaining({ utilization: 0.98, resetsAt: NOW - RESET_GRACE_SEC }, NOW) === 100 && quotaVerdict({ fiveHour: { utilization: 0.98, resetsAt: NOW - RESET_GRACE_SEC } }, NOW).usable === true);
   ck('…one second past the grace it is full again', bucketRemaining({ utilization: 0.98, resetsAt: NOW - RESET_GRACE_SEC - 1 }, NOW) === 100);
   ck('a stated reset 40 s in the FUTURE is dead, as before (the 09:59:15Z shape: the pool moved 45 s early)', bucketRemaining({ utilization: 1, resetsAt: NOW + 40 }, NOW) === 0);
   const g = quotaVerdict({ fiveHour: { utilization: 1, resetsAt: NOW - 30 }, sevenDay: { utilization: 0.5, resetsAt: NOW + 3 * D } }, NOW);
@@ -74,7 +82,8 @@ ck('bucket: reset PASSED → full again (stale reading is meaningless)', bucketR
   const at = STATED + 15;
   ck('B-a4f1: 15 s past a stated weekly reset the estimator does NOT re-base it — the overlay keeps the raw dead Fable bucket', view(pm, at).scopedWeekly[0].utilization === 1 && accountRemaining(view(pm, at), at).remaining === 0, JSON.stringify(view(pm, at).scopedWeekly));
   ck('B-a4f1: …so the pool does NOT move the conversations onto Personal Max at 15:59:15Z', decideAt(at)?.to !== 'pm', JSON.stringify(decideAt(at)));
-  ck('B-a4f1: …at the grace edge it still waits (the estimator and bucketRemaining agree on the edge)', decideAt(STATED + RESET_GRACE_SEC)?.to !== 'pm');
+  ck('B-a4f1: …one second before the grace edge it still waits (the estimator and bucketRemaining agree on the edge)', decideAt(STATED + RESET_GRACE_SEC - 1)?.to !== 'pm');
+  ck('B-a4f1: …AT the grace edge both have it landed — the estimator rolls the week and the pool moves (the ONE inequality, quota-model resetLanded)', view(pm, STATED + RESET_GRACE_SEC).scopedWeekly[0].resetsAt === STATED + 7 * D && decideAt(STATED + RESET_GRACE_SEC)?.to === 'pm', JSON.stringify(view(pm, STATED + RESET_GRACE_SEC).scopedWeekly));
   ck('B-a4f1: one second past the grace the estimator rolls the week (re-based at 0, next reset a week on) and the pool moves',
     view(pm, STATED + RESET_GRACE_SEC + 1).scopedWeekly[0].resetsAt === STATED + 7 * D && decideAt(STATED + RESET_GRACE_SEC + 1)?.to === 'pm');
 }
@@ -554,7 +563,7 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('WIRING PIN: the pool-default site computes NO inTurn (the soft hold is dropped) but still hands `warm: defaultWarm` to the decision',
     !/inTurn: conversationInTurn\(\{ isStreaming: s\._isStreaming, turnState: s\._turnState \}\)/.test(eng)
     && /const w = warmCache\(\{ lastActivityMs: s\._lastPtyDataAt, nowMs: now, model: cacheModelFor\(s\) \}\);/.test(eng)
-    && /creditsIds, warm: defaultWarm, explain: true \}\);/.test(eng));
+    && /creditsIds, warm: defaultWarm, explain: true[^;\n]*\}\);/.test(eng)); // (+ the roster thunk, lane pool-silent-members R2)
   ck('WIRING PIN: the per-session site journals a warm-soft-defer through noteWarmHold under a :soft key (nothing else is recorded — the stop re-decides from the facts); the default site has none',
     (eng.match(/reason === 'warm-soft-defer'\) \{ noteWarmHold\([^\n]*sid \+ ':soft'\); continue; \}/g) || []).length === 1
     && !/':default:soft'/.test(eng) // …and the default no longer journals one (it never defers a soft move)
@@ -712,7 +721,7 @@ await (async () => {
   ck('WIRING PIN: the per-session lead is 0 for a warm conversation, and its decision reads `viewFor`',
     /const lead = warm\.warm \? 0 : PROJECTION_LEAD_SEC;/.test(eng) && /decidePoolSwitch\(\{ currentId: curFor, members, readCache: viewFor,/.test(eng));
   ck('WIRING PIN: the pool default projects only while no follower is warm',
-    /const defaultView = defaultWarm \? readCache : \(id\) => projectCacheAhead\(readCache\(id\), burnOf\(id\), now \/ 1000, PROJECTION_LEAD_SEC\);/.test(eng) && /readCache: defaultView,[^\n]*warm: defaultWarm/.test(eng));
+    /const defaultView = defaultWarm \? readCache : \(id\) => projectCacheAhead\(readCache\(id\), burnOf\(id\), nowSecOf\(now\), PROJECTION_LEAD_SEC\);/.test(eng) && /readCache: defaultView,[^\n]*warm: defaultWarm/.test(eng));
   fs.rmSync(scr, { recursive: true, force: true });
 })();
 
@@ -742,9 +751,10 @@ await (async () => {
   const r5 = dm({ membership: ['b', 'c'], caches: { a: acct(0.3, 3 * D), b: acct(0.99, 3 * D), c: acct(0.995, 3 * D) } });
   // the owner's 全B (2026-09-28): nobody can take it ⇒ it is HELD (stops after its turn, parked on the member usable soonest)
   ck('member: nobody can take it ⇒ the outcome is the HOLD (removed-hold: nobody to move it TO, parked on the member usable soonest, the blocked reason kept) — never "keep running"', r5.to === null && r5.reason === 'removed-hold' && r5.blockedWhy === 'no-members' && r5.holdTo === 'b' && r5.notMember && r5.notMember.id === 'a', JSON.stringify(r5));
-  const txt = poolBlockedNotice(r5, { poolName: '全部', currentName: 'Martin Max' });
+  const txt = poolBlockedNotice(r5, { poolName: '全部', currentName: 'acct-1' });
   ck('member: …and the sentence names it — no longer a member, nobody can take over, the fix (never "out of quota" about a member with 70 % left)',
-    /^Pool "全部": Martin Max is no longer a member of the pool and no member can take over its conversations — every other member is out of quota\. Its conversations stop after their current turn and wait until a member can serve them — add a member to continue sooner\.$/.test(txt), txt);
+    // (lane pool-silent-members R2: «out of quota» now NAMES each member with its spent bucket and when it resets)
+    /^Pool "全部": acct-1 is no longer a member of the pool and no member can take over its conversations — every other member is out of quota\. Out of quota: B \(7d \d+% until \d\d:\d\d:\d\dZ\), C \(7d \d+% until \d\d:\d\d:\d\dZ\)\. Its conversations stop after their current turn and wait until a member can serve them — add a member to continue sooner\.$/.test(txt), txt);
   // (2) a SIGNED-OUT member is still a member — its wall is the login, and it keeps the re-login words
   const lo = { a: { state: 'logged-out' }, b: { state: 'ok' }, c: { state: 'ok' } };
   const r6 = dm({ membership: ['a', 'b', 'c'], readLogin: (id) => lo[id] });
@@ -771,7 +781,7 @@ await (async () => {
       const want = JSON.stringify((master || { decidePoolSwitch }).decidePoolSwitch(base));
       for (const extra of [{}, { membership: [...ids] }, { membership: new Set([cur, ...mem.map((m) => m.id)]) }]) {
         n++;
-        const got = JSON.stringify(decidePoolSwitch({ ...base, ...extra }));
+        const got = JSON.stringify(withoutNames(decidePoolSwitch({ ...base, ...extra })));
         if (got === want) same++; else if (!diff) diff = { i, extra: Object.keys(extra), want, got };
       }
     }
@@ -960,7 +970,7 @@ await (async () => {
       const base = { currentId: ids[Math.floor(rnd() * 4)], members: ms, readCache: (id) => caches[id] ?? null, nowSec: NOW, proactive: rnd() < 0.5, explain: true, warm: rnd() < 0.3 ? { warm: rnd() < 0.5, agoSec: 5, ttlSec: 300, inTurn: rnd() < 0.5 } : null };
       base.hot = base.proactive;
       const want = JSON.stringify(ref.decidePoolSwitch(base));
-      for (const pr of [null, [], undefined]) { n++; const got = JSON.stringify(decidePoolSwitch({ ...base, priority: pr })); if (got === want) same++; else if (!diff) diff = { i, pr, want, got }; }
+      for (const pr of [null, [], undefined]) { n++; const got = JSON.stringify(withoutNames(decidePoolSwitch({ ...base, priority: pr }))); if (got === want) same++; else if (!diff) diff = { i, pr, want, got }; }
       const wantR = JSON.stringify(ref.rankPoolMembers({ members: ms, readCache: base.readCache, nowSec: NOW }));
       n++; if (JSON.stringify(rankPoolMembers({ members: ms, readCache: base.readCache, nowSec: NOW, priority: [] })) === wantR) same++; else if (!diff) diff = { i, rank: true };
     }
@@ -1077,7 +1087,7 @@ await (async () => {
         (id) => ({ ...(caches[id] || {}), spareScoped: lane }),             // every member the SAME spare lane — a tie at every rank
         view('fable', caches),                                              // the real fable projection
       ];
-      for (const rc of views) for (const pl of [undefined, false]) { n++; const got = JSON.stringify(decidePoolSwitch({ ...base, readCache: rc, placing: pl })); if (got === want) same++; else if (!diff) diff = { i, want, got }; }
+      for (const rc of views) for (const pl of [undefined, false]) { n++; const got = JSON.stringify(withoutNames(decidePoolSwitch({ ...base, readCache: rc, placing: pl }))); if (got === want) same++; else if (!diff) diff = { i, want, got }; }
       // the chooser's own shape: with no spare lane that differs, `placing` never changes WHERE a conversation starts
       for (const rc of [raw, view('fable', caches)]) {
         placed++;
@@ -1381,7 +1391,7 @@ await (async () => {
       base.hot = base.proactive;
       n++;
       const dp = decidePinnedPlacement({ ...base, pin: null });
-      const got = dp === null ? JSON.stringify(decidePoolSwitch(base)) : 'pinned!';
+      const got = dp === null ? JSON.stringify(withoutNames(decidePoolSwitch(base))) : 'pinned!';
       if (got === JSON.stringify((master || { decidePoolSwitch }).decidePoolSwitch(base))) same++; else if (!diff) diff = { i, got };
     }
     ck(`pin: ${n} seeded worlds with NO pin decide byte-identically to ${master ? 'master' : 'the pool verdict (ref-free)'} (the pin path returns null, the pool verdict is ${master ? "master's" : 'untouched'})`, same === n, JSON.stringify(diff));

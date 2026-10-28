@@ -178,9 +178,14 @@ function oatFileState(o, now) {
  * (oatExpired — 'oat-expired' stays the spawn reason).
  */
 function withOat(info, oat, now = Date.now()) {
-  if (!info || !DEAD_STATES.includes(info.state)) return info;
+  // …and over a MISSING credential file (lane pool-silent-members R1, inc-mvsjhna7): the 2.1.312 take-back left six rows
+  // reading 'unknown' — «not logged in» to the probe loop and the ⟳ door — while each held a valid long-lived token its
+  // own sessions spawned on. A missing file + a live token IS «long-lived token only» (login 'none', like our own file)
+  const absent = !!info && info.state === 'unknown' && info.absent === true;
+  if (!info || !(DEAD_STATES.includes(info.state) || absent)) return info;
   const validUntil = oat && oat.present ? finite(oat.validUntil) : null;
   if (validUntil == null) return info;
+  if (absent) return validUntil > now ? { ...info, state: OAT_ONLY, login: 'none', oatValidUntil: validUntil, msLeft: validUntil - now } : info;
   if (validUntil > now) return { ...info, state: OAT_ONLY, login: info.state, oatValidUntil: validUntil, msLeft: validUntil - now };
   return { ...info, oatValidUntil: validUntil, oatExpired: true };
 }
@@ -352,8 +357,9 @@ function warnStageFor(info) {
   if (ms < STAGE_MS['24h']) return '24h';
   // the LOW "the login ended, the token carries its sessions" rung is the ROW's news;
   // a materialized file (oatFile) has no login to have ended — its row says the
-  // token sits in the folder, and only the token's own 24h / 1h / expired rungs speak
-  return info?.state === OAT_ONLY && !info.oatFile ? OAT_ONLY : null;
+  // token sits in the folder, and only the token's own 24h / 1h / expired rungs speak — nor does a MISSING file folded in
+  // (lane pool-silent-members R1: `absent` — no login there to have ended)
+  return info?.state === OAT_ONLY && !info.oatFile && !info.absent ? OAT_ONLY : null;
 }
 
 /** The deadline a warning LEDGER is keyed by. A login's own deadline, except:
@@ -440,10 +446,13 @@ function reviewWarnings(info, entry, now = Date.now(), opts = {}) {
  *   read-failed     the file could not be READ (EACCES / EIO / EMFILE …): refused by name, nothing archived or written
  *   dir-symlink     the member dir is a symlink: refused, nothing written through it
  *   keep-login      a live OAuth login (a refresh token, loginUsable): the login is the authority
- *   cli-unmeasured  this CLI version was never measured: nothing new is written; cleanup ours — only for a KNOWN
- *                   version and only while no link names the member (`held` = it stays for the sessions on it);
- *                   an unknown version (a probe that failed) takes nothing back. A STALE ours (an older token of
- *                   this row) is still replaced in place: the window stops writes, never the swap of our own token
+ *   cli-unmeasured  this CLI version was never measured: nothing new is written, and NOTHING IS TAKEN BACK — our
+ *                   file stays (`held`) whether a link names the member or not, for a known version and an unknown
+ *                   one alike (lane pool-silent-members R1, inc-mvsjhna7: the take-back on the 2.1.312 auto-update
+ *                   deleted six members' files with no word said, and the pool lost them as «not logged in»; the
+ *                   pool still places nothing new on it — accounts._placeable — and names it unplaceable WITH its
+ *                   reason). A STALE ours (an older token of this row) is still replaced in place while a link names
+ *                   it or the version is unknown: the window stops writes, never the swap of our own token
  *   no-scopes       no subscription shape known (the CLI would read "Not logged in"): refused; cleanup ours
  *   written         our file already holds exactly this: nothing to do
  *   materialize     write it (the CLI's other keys kept); `archive` = rename the login there first (dead / wiped /
@@ -465,8 +474,9 @@ function materializeVerdict(member, now = Date.now()) {
   if (!(m.caps && m.caps.ok === true)) {
     const known = !!(m.caps && m.caps.known);
     if (ours && !m.current && shaped && !(known && !m.linked)) return { verdict: 'materialize', archive: false, cleanup: false };
-    if (ours && known && m.linked) return { verdict: 'cli-unmeasured', archive: false, cleanup: false, held: true };
-    return { verdict: 'cli-unmeasured', archive: false, cleanup: ours && known };
+    // a CLI update never shrinks a pool in silence (R1): the file the sessions and the roster read is never taken
+    // back for a version reason — `held` whenever it is ours, linked or not
+    return { verdict: 'cli-unmeasured', archive: false, cleanup: false, ...(ours ? { held: true } : {}) };
   }
   if (!shaped) return { verdict: 'no-scopes', archive: false, cleanup: ours };
   if (ours && m.current) return { verdict: 'written', archive: false, cleanup: false };

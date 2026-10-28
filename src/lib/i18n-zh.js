@@ -11047,4 +11047,10 @@ export default {
   "you replied": "你已回复",
   "approved": "已批准",
   "withdrawn by the agent": "已被 agent 撤回",
+  "The Claude CLI updated to {v}; 1 account cannot be placed by the pool until this version is measured — its login is kept": "Claude CLI 已更新到 {v}；这个版本测量完成之前，账号池无法使用 1 个账号——它的登录会保留",
+  "The Claude CLI updated to {v}; {n} accounts cannot be placed by the pool until this version is measured — their logins are kept": "Claude CLI 已更新到 {v}；这个版本测量完成之前，账号池无法使用 {n} 个账号——它们的登录都会保留",
+  "Accounts: {names}.": "账号：{names}。",
+  "Each keeps its long-lived token in its folder, and a conversation started on it directly keeps working; the pool names it in its notices with this reason.": "每个账号的长期 token 都留在它的文件夹里，直接在它上面开的对话照常工作；账号池的通知会点名它并说明这个原因。",
+  "To use one in the pool now, re-login it in Manage Agents. This item resolves itself once CLI {v} is measured.": "想现在就让它进入账号池，请在「管理 agent」里重新登录。CLI {v} 测量完成后，这一项会自动消失。",
+  "Long-lived token in its folder: claude {cli} prints no quota lines for it — refreshes when a session uses it": "长期 token 在它的文件夹里：claude {cli} 不会为它显示额度——有会话用到它时才会刷新",
 };

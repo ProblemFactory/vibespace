@@ -94,4 +94,26 @@ function withMeasured(fixture, record) {
   return { ...base, versions: Object.fromEntries(Object.keys(all).sort(byVersion).map((k) => [k, all[k]])) };
 }
 
-module.exports = { oatInFile, cliVersionOf, measuredVersions, withMeasured, OAT_VARIANTS, OAT_IN_FILE_GATE };
+// THE UNMEASURED CLI'S ONE FOR-YOU ITEM (lane pool-silent-members R1, inc-mvsjhna7): the hub's claude auto-updated to a
+// version this fixture never measured and the pool lost the members it can only reach through their token file — on
+// 10-27 that was one journal line and six silent members for 17 h. The words name the version, how many accounts and
+// which, and the two ways out; `i18n` carries the same sentences as {key, params} for zh / ja (the dict: src/lib/i18n-*.js).
+const i18nKey = (s) => s;
+function cliUnmeasuredItem({ cli, names = [] } = {}) {
+  const v = cliVersionOf(cli) || String(cli || '?').slice(0, 40);
+  const list = (Array.isArray(names) ? names : []).map((n) => String(n || '').slice(0, 80)).filter(Boolean);
+  const n = list.length;
+  const head = n === 1
+    ? { text: `The Claude CLI updated to ${v}; 1 account cannot be placed by the pool until this version is measured — its login is kept`, key: i18nKey('The Claude CLI updated to {v}; 1 account cannot be placed by the pool until this version is measured — its login is kept'), params: { v } }
+    : { text: `The Claude CLI updated to ${v}; ${n} accounts cannot be placed by the pool until this version is measured — their logins are kept`, key: i18nKey('The Claude CLI updated to {v}; {n} accounts cannot be placed by the pool until this version is measured — their logins are kept'), params: { v, n } };
+  const lines = [], rows = [];
+  const say = (text, key, params) => { lines.push(text); rows.push(params ? { key, params } : { key }); };
+  say(`Accounts: ${list.join(', ')}.`, i18nKey('Accounts: {names}.'), { names: list.join(', ') });
+  say('Each keeps its long-lived token in its folder, and a conversation started on it directly keeps working; the pool names it in its notices with this reason.', i18nKey('Each keeps its long-lived token in its folder, and a conversation started on it directly keeps working; the pool names it in its notices with this reason.'));
+  say(`To use one in the pool now, re-login it in Manage Agents. This item resolves itself once CLI ${v} is measured.`, i18nKey('To use one in the pool now, re-login it in Manage Agents. This item resolves itself once CLI {v} is measured.'), { v });
+  return { text: head.text, detail: lines.join('\n'), i18n: { text: { key: head.key, params: head.params }, detail: rows } };
+}
+/** the prefix every such item's text starts with, for version `v` (the sweep finds its own item by it) */
+const cliUnmeasuredPrefix = (v) => `The Claude CLI updated to ${cliVersionOf(v) || String(v || '?').slice(0, 40)}; `;
+
+module.exports = { oatInFile, cliVersionOf, measuredVersions, withMeasured, cliUnmeasuredItem, cliUnmeasuredPrefix, OAT_VARIANTS, OAT_IN_FILE_GATE };

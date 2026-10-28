@@ -127,6 +127,39 @@
      "note": "REFUSED or changed: msg1 no request said error \"Not logged in · Please run /login\"; files untouched — the materialized file must carry the row's real scopes/subscriptionType · 10 proxy escapes refused"
     }
    }
+  },
+  "2.1.312": {
+   "cliVersion": "2.1.312",
+   "measuredAt": "2026-10-28",
+   "script": "scripts/measure-claude-cred-read.mjs",
+   "netns": false,
+   "rung": "loopback-real",
+   "variants": {
+    "oat-file": {
+     "verdict": "PASS",
+     "note": "msg1 O:200, msg2 O:200 (bearer = the file's oat), 0 refresh calls, files untouched · 4 proxy escapes refused"
+    },
+    "oat-env": {
+     "verdict": "FAIL",
+     "note": "heads differ: body.model: file=\"claude-opus-5-5\" | env=\"claude-sonnet-5-5\"; file-only call /v1/messages stream claude-opus-5-5; env-only call /v1/messages stream claude-sonnet-5-5"
+    },
+    "oat-file-401": {
+     "verdict": "PASS",
+     "note": "msg1 O:200; msg2 (401) O:401 O:401 said error \"Failed to authenticate. API Error: 401 OAuth token has expired. Please obtain a new token \"; 0 refresh calls; msg3 after it cleared O:200 (recovered); files untouched · 4 proxy escapes refused"
+    },
+    "oat-file-near": {
+     "verdict": "PASS",
+     "note": "msg1 inside the refresh window O:200 (0 refresh calls), msg2 past expiresAt O:200 (0 refresh calls) said success \"ok from O\"; files untouched · 4 proxy escapes refused"
+    },
+    "oat-file-switch": {
+     "verdict": "PASS",
+     "note": "A ⇒ msg1 A:200; link→O ⇒ msg2 O:200; link→A ⇒ msg3 A:200; 0 refresh calls; files untouched · 4 proxy escapes refused"
+    },
+    "oat-file-scopes": {
+     "verdict": "FAIL",
+     "note": "REFUSED or changed: msg1 no request said error \"Not logged in · Please run /login\"; files untouched — the materialized file must carry the row's real scopes/subscriptionType"
+    }
+   }
   }
  }
 }

@@ -23,7 +23,7 @@
 // as it stays roughly stable. Pod-exclusive accounts converge to 1/full.
 const fs = require('fs');
 const path = require('path');
-const { RESET_GRACE_SEC } = require('./quota-model.js');
+const { resetLanded } = require('./quota-model.js');
 const { evictIdle, cacheRow, ESTIMATOR_LINES_MAX_BYTES, ESTIMATOR_LINES_IDLE_MS, ESTIMATOR_LIVE_MAX_BYTES } = require('./cache-bounds.js'); // PURE (B-9428)
 
 // Δu-equivalent weight of the prior pseudo-observation.
@@ -306,13 +306,13 @@ function estimateBuckets({ anchor, rates, costFn, nowMs, lagS = 20 }) {
       // grace to it. Re-basing here handed the pool a 0 % Fable bucket 15 s after
       // a panel's "8:59am" (true reset 16:00:00Z) — 2026-09-18 15:59:15Z, nine
       // conversations moved onto Personal Max and the vendor rejected them.
-      if ((resetSec + RESET_GRACE_SEC) * 1000 >= nowMs) return null;
+      if (!resetLanded(resetSec, nowMs / 1000)) return null; // THE one inequality (quota-model resetLanded, lane pool-silent-members R4)
       // new weekly window(s): re-base at the last reset boundary whose grace
       // has passed — a LATER boundary still inside its landing minute stays
       // this window's (stated) reset, and `bucketRemaining` applies the grace
       // to it (verify r1: an anchor a week old crossed the first boundary and
       // rolled the next one on its bare stated instant)
-      while ((resetSec + RESET_GRACE_SEC) * 1000 < nowMs) { fromMs = resetSec * 1000; resetSec += WEEK_SEC; }
+      while (resetLanded(resetSec, nowMs / 1000)) { fromMs = resetSec * 1000; resetSec += WEEK_SEC; }
       baseU = 0;
     }
     let c = costForKey(key, cost(fromMs));

@@ -84,6 +84,7 @@ const PRODUCERS = {
   'src/server/hooks-late.js': { origin: 'agent', scope: 'group', types: [] },
   'src/server/apps-engine.js': { origin: 'apps', scope: 'mixed', types: ['app-install'] },
   'src/server/oat-identity.js': { origin: 'login', scope: 'group', types: [] },
+  'src/server/cli-unmeasured-notice.js': { origin: 'pool', scope: 'group', types: [] },
   'src/server/vault-paste-door.js': { origin: 'vault', scope: 'conversation', types: ['secret-request'] },
   'src/server/feedback-forward.js': { origin: 'server', scope: 'group', types: [] },
 };

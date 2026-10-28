@@ -462,7 +462,9 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   const SCOPES = ['user:file_upload', 'user:inference', 'user:mcp_servers', 'user:plugins', 'user:profile', 'user:sessions:claude_code']; // the hub's six (measured)
   const oatRow = (o = {}) => row({ oat: true, loginState: { state: 'oat-only', login: 'none', oatFile: true }, oatScopes: SCOPES, oatCli: { cli: '2.1.306', measured: true }, oatFile: { state: 'written', cli: '2.1.306' }, ...o });
   const TABLE = [
-    ['an oat-only row whose token carries user:profile, on a measured CLI, written in its folder (the owner\'s six, measured)', oatRow(), AC.PROBEABLE],
+    // R3 (lane pool-silent-members, inc-mvsjhna7): the owner's log says every such probe since 10-26 answered the bare
+    // subscription header — the panel serves live logins only; the 2.369.342 «PROBEABLE» here is retired
+    ['an oat-only row whose token carries user:profile, on a measured CLI, written in its folder (the owner\'s six) — the panel prints no quota line for it', oatRow(), AC.OAT_FOLDER_NO_PANEL],
     ['…the token WITHOUT user:profile (the measured oat-file-scopes refusal)', oatRow({ oatScopes: SCOPES.filter((x) => x !== 'user:profile') }), AC.OAT_NO_PROFILE],
     ['…no recorded scopes at all', oatRow({ oatScopes: undefined }), AC.OAT_NO_PROFILE],
     ['…the hub\'s claude not measured with a token in the folder (a held file)', oatRow({ oatCli: { cli: '2.1.308', measured: false }, oatFile: { state: 'held', reason: 'cli-unmeasured', cli: '2.1.308' } }), AC.CLI_UNMEASURED],
@@ -482,8 +484,19 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   ok(AC.probeEligibility(row({}), { quotaProbe: null }) === null && AC.probeEligibility(null) === null && AC.probeEligibility('x') === null && AC.probeEligibility(row({ loginState: 'oat-only' })) === AC.PROBEABLE
     && AC.probeEligibility(oatRow({ oatCli: { measured: 'yes' } })) === AC.CLI_UNMEASURED && AC.probeEligibility(oatRow({ oatScopes: 'user:profile' })) === AC.OAT_NO_PROFILE,
     '§10a a harness without the cli-usage rung / hostile input ⇒ null; a garbage loginState is no oat-only claim; a truthy-but-not-true measured / a scopes STRING are no facts');
-  ok(AC.PROBE_ELIGIBILITY.join() === 'probeable,unprobeable:oat-no-profile,unprobeable:cli-unmeasured,unprobeable:oat-not-in-folder,unprobeable:no-login' && AC.PROBE_ELIGIBILITY.slice(1).every(AC.isUnprobeable) && !AC.isUnprobeable(AC.PROBEABLE) && !AC.isUnprobeable('unprobeable:oat-only') && AC.PROFILE_SCOPE === 'user:profile',
-    '§10a the closed table: one probeable state, three named oat-only facts + no login; the retired blanket `unprobeable:oat-only` is no state');
+  ok(AC.PROBE_ELIGIBILITY.join() === 'probeable,unprobeable:oat-no-profile,unprobeable:cli-unmeasured,unprobeable:oat-not-in-folder,unprobeable:oat-folder-no-panel,unprobeable:no-login' && AC.PROBE_ELIGIBILITY.slice(1).every(AC.isUnprobeable) && !AC.isUnprobeable(AC.PROBEABLE) && !AC.isUnprobeable('unprobeable:oat-only') && AC.PROFILE_SCOPE === 'user:profile',
+    '§10a the closed table: one probeable state (a LIVE login), four named oat-only facts + no login; the retired blanket `unprobeable:oat-only` is no state');
+  ok(AC.notProbedWords(AC.OAT_FOLDER_NO_PANEL, { oatCli: { cli: '2.1.312' } }) === 'long-lived token in the account\'s folder: claude 2.1.312 prints no quota lines for a folder-token login; refreshes when a session uses it', '§10a R3: the folder-token row is said with the CLI that prints nothing for it', AC.notProbedWords(AC.OAT_FOLDER_NO_PANEL, { oatCli: { cli: '2.1.312' } }));
+  // R3: A PANEL ANSWER WITH NO QUOTA LINE IS CLASSED BY WHAT THE CLI SAID (the two shapes in the owner's log, 10-28)
+  const COST = 'Total cost:            $0.0000\nTotal duration (API):  0s\nTotal duration (wall): 1s\nTotal code changes:    0 lines added, 0 lines removed\nUsage:                 0 input, 0 output, 0 cache read, 0 cache write\n';
+  const HEAD = 'You are currently using your subscription to power your Claude Code usage\n';
+  ok(AC.panelAnswerClass({ rawStdout: COST }) === 'no-login' && AC.panelAnswerClass({ rawStdout: HEAD, folderToken: true }) === 'folder-token' && AC.panelAnswerClass({ rawStdout: HEAD }) === null && AC.panelAnswerClass({ rawStdout: HEAD + 'Current session: 3% used\n', folderToken: true }) === null && AC.panelAnswerClass({ rawStdout: 'Total cost: none\n' }) === null,
+    '§10a R3 panelAnswerClass: the non-subscriber cost summary ⇒ no-login; the bare header from a folder-token row ⇒ folder-token; the header from a live login, a panel WITH a quota line, a cost line with no dollar figure ⇒ no class');
+  ok(AC.probeFailWhy({ exitCode: 0, rawStdout: COST }) === 'no login in the folder — the CLI answered as a non-subscriber: Total cost: $0.0000'
+    && AC.probeFailWhy({ exitCode: 0, rawStdout: HEAD, folderToken: true, cli: '2.1.312' }) === 'the CLI prints no quota lines for a folder-token login on 2.1.312: You are currently using your subscription to power your Claude Code usage'
+    && AC.probeFailWhy({ exitCode: 0, rawStdout: HEAD, folderToken: true }) === 'the CLI prints no quota lines for a folder-token login: You are currently using your subscription to power your Claude Code usage'
+    && AC.probeFailWhy({ exitCode: 1, rawStdout: COST }) === 'exit 1: Total cost: $0.0000',
+    '§10a R3 probeFailWhy: «no login in the folder — the CLI answered as a non-subscriber» / «the CLI prints no quota lines for a folder-token login on 2.1.312», never «no quota lines in its answer» for either; a non-zero exit keeps its exit class');
   ok(AC.notProbedWords(AC.OAT_NO_PROFILE) === 'long-lived token only, without the user:profile scope the usage panel reads; refreshes when a session uses it'
     && AC.notProbedWords(AC.CLI_UNMEASURED, { oatCli: { cli: '2.1.308' } }) === 'long-lived token only, and claude 2.1.308 is not measured with it in the account\'s folder; refreshes when a session uses it'
     && AC.notProbedWords(AC.OAT_NOT_IN_FOLDER, { oatFile: { reason: 'write-failed' } }) === 'long-lived token only, not written to the account\'s folder (write-failed); refreshes when a session uses it'
@@ -518,13 +531,18 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   const BASE_LOOP = path.join(scratch, 'loop-base-filter.js'); fs.writeFileSync(BASE_LOOP, loopTxt.replace(CUT[0], CUT[1]));
   // RED CONTROLS 2 + 3: the verdict with ONE of its checks cut (the same loop, re-pointed at the patched verdict)
   const modelTxt = fs.readFileSync(REAL_MODEL, 'utf8').replace(/require\('\.\/([\w.-]+)'\)/g, (_, f) => `require(${JSON.stringify(path.join(SRC, f))})`);
-  const mutant = (name, cut) => {
-    if (!modelTxt.includes(cut)) throw new Error('mutant anchor missing: ' + cut.slice(0, 60));
-    const m = path.join(scratch, name + '-model.js'); fs.writeFileSync(m, modelTxt.replace(cut, '    // CUT\n'));
+  const mutant = (name, ...cuts) => {
+    let txt = modelTxt;
+    for (const cut of cuts) { if (!txt.includes(cut)) throw new Error('mutant anchor missing: ' + cut.slice(0, 60)); txt = txt.replace(cut, '    // CUT\n'); }
+    const m = path.join(scratch, name + '-model.js'); fs.writeFileSync(m, txt);
     const l = path.join(scratch, name + '-loop.js'); fs.writeFileSync(l, loopOf(fs.readFileSync(REAL_LOOP, 'utf8'), m)); return l;
   };
-  const NO_PROFILE_LOOP = mutant('no-profile', "    if (!(Array.isArray(row.oatScopes) && row.oatScopes.includes(PROFILE_SCOPE))) return OAT_NO_PROFILE;\n");
-  const NO_MEASURE_LOOP = mutant('no-measure', "    if (!(row.oatCli && row.oatCli.measured === true)) return CLI_UNMEASURED;\n");
+  // (R3: a folder-token row is never probed, so each check's control runs over the 2.369.342 premise restored — the check
+  // cut AND the folder-token refusal cut — and the premise alone is its own control: it SENDS the owner's six)
+  const PREMISE = "    return OAT_FOLDER_NO_PANEL; // the folder holds the token the CLI spends — but the panel prints no quota line for it (R3)\n";
+  const PREMISE_LOOP = mutant('premise', PREMISE);
+  const NO_PROFILE_LOOP = mutant('no-profile', "    if (!(Array.isArray(row.oatScopes) && row.oatScopes.includes(PROFILE_SCOPE))) return OAT_NO_PROFILE;\n", PREMISE);
+  const NO_MEASURE_LOOP = mutant('no-measure', "    if (!(row.oatCli && row.oatCli.measured === true)) return CLI_UNMEASURED;\n", PREMISE);
   const T0 = 1_800_000_000_000, H = 3600e3;
   const world = ({ loopFile = REAL_LOOP, stateFile = null } = {}) => {
     const { createAutoCliLoop } = require(loopFile);
@@ -590,8 +608,8 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     await w.run(6 * 60);
     const day2 = linesOf(w, 'sub-np', /not probed/);
     ok(day2.length === 2 && day2[1] === NP_LINE, '§10b …and one more after a day, without the cleared note (nothing left to clear)', day2);
-    const oat = of(w, 'sub-oat'), oatOk = linesOf(w, 'sub-oat', /: ok \(/);
-    ok(oat.length >= 25 && oatOk.length === oat.length && !linesOf(w, 'sub-oat', /not probed/).length, `§10b THE ADDENDUM: an oat-only row whose token carries user:profile, on a measured CLI, written in its folder, IS probed on the idle rung (${oat.length} reads in 30 h), never "not probed"`);
+    const oat = of(w, 'sub-oat');
+    ok(oat.length === 0 && linesOf(w, 'sub-oat', /not probed — long-lived token in the account's folder: claude 2\.1\.306 prints no quota lines for a folder-token login; refreshes when a session uses it$/).length === 2, `§10b R3: an oat-only row whose token (user:profile, a measured CLI) is written in its folder is NEVER probed (${oat.length} in 30 h) — said once a day by name, read passively instead (the 2.369.342 addendum's premise retired)`, linesOf(w, 'sub-oat', /./));
     const bad = linesOf(w, 'sub-bad', /: failed \(/), good = linesOf(w, 'sub-ok', /: ok \(/);
     ok(of(w, 'sub-bad').length >= 4 && of(w, 'sub-bad').length <= 12 && (w.state().fails || {})['sub-bad'] >= 4, `§10b a probeable failing row is still asked, paced by the failure backoff (${of(w, 'sub-bad').length} attempts in 30 h, fails ${(w.state().fails || {})['sub-bad']})`);
     ok(bad.length === of(w, 'sub-bad').length && bad.every((l) => / — exit 1: Error: token sk-«redacted» rejected \[exit\]$/.test(l)), '§10b …EVERY failed line names its reason: the CLI\'s line + the class', bad.slice(0, 2));
@@ -609,6 +627,11 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
   // each check alone holds its row: the profile-less row (measured, written) and the hub before it knows its CLI version
   // (`cli: null` — the folder door still says written) are sent by NOTHING but the cut check
   const BOOT_UM = (w) => { w.rows[1] = oatRow({ id: 'sub-um', oatCli: { cli: null, measured: false }, oatFile: { state: 'written', cli: null } }); };
+  {
+    const real = world(); await real.run(6 * 60);
+    const w = world({ loopFile: PREMISE_LOOP }); await w.run(6 * 60);
+    ok(of(real, 'sub-oat').length === 0 && of(w, 'sub-oat').length >= 1 && of(w, 'sub-np').length === 0 && of(w, 'sub-um').length === 0, `§10b RED CONTROL (the 2.369.342 premise restored): the same world SENDS the folder-token row (${of(w, 'sub-oat').length}× in 6 h; the real verdict 0×) while the profile and measured checks still hold theirs`, { real: of(real, 'sub-oat').length, premise: of(w, 'sub-oat').length });
+  }
   for (const [label, file, key, other, shape] of [['the profile check cut', NO_PROFILE_LOOP, 'sub-np', 'sub-um', null], ['the measured check cut', NO_MEASURE_LOOP, 'sub-um', 'sub-np', BOOT_UM]]) {
     const real = world(); if (shape) shape(real);
     await real.run(6 * 60);
@@ -624,16 +647,16 @@ ok(decideCliRefresh(null, NOW).length === 0 && decideCliRefresh([{}, null], NOW)
     ok(of(w, 'sub-bad').length === 0 && linesOf(w, 'sub-bad', /not probed — long-lived token only, not written to the account's folder \(write-failed\);/).length === 1, '§10b a row whose login ended and whose token is not in its folder is unprobeable from its next tick, the folder\'s refusal named', w.logs.filter((l) => l.includes('sub-bad')));
     w.rows[3] = { ...w.rows[3], loginState: { state: 'oat-only', login: 'none', oatFile: true }, oatFile: { state: 'written', cli: '2.1.306' } }; // the sweep wrote it
     await w.run(30);
-    ok(of(w, 'sub-bad').length >= 1, '§10b …and the token written to its folder makes it probeable (the verdict is read each tick, nothing is remembered against it)');
+    ok(of(w, 'sub-bad').length === 0 && linesOf(w, 'sub-bad', /not probed — long-lived token in the account's folder: claude 2\.1\.306 prints no quota lines/).length === 1, '§10b …and the token written to its folder is said by its NEW kind (R3: a folder token is read passively, never probed — the verdict is read each tick, its say-memory per kind)', w.logs.filter((l) => l.includes('sub-bad')).slice(-2));
   }
   // WIRING PINS: the loop reads the PURE verdict; the door asks it before the spawn; the door's verdict names the failure; the row carries the facts
   const loopSrc = fs.readFileSync(REAL_LOOP, 'utf8'), ur = fs.readFileSync(new URL('../src/usage-routes.js', import.meta.url), 'utf8'), acc = fs.readFileSync(new URL('../src/accounts.js', import.meta.url), 'utf8');
   ok(/const el = probeEligibility\(a\);/.test(loopSrc) && /require\('\.\.\/auto-cli-model\.js'\)/.test(loopSrc) && /const sk = `\$\{a\.id\}\|\$\{el\}`;/.test(loopSrc), 'WIRING PIN: the loop asks src/auto-cli-model.js probeEligibility for every rung subject, its say-memory per kind');
   ok(/const pv = d\.usage\.panelVerdictFor\?\.\(key\); if \(pv && pv\.at >= now && pv\.why\) failWhy = `\$\{probeWhyText\(pv\.why\)\} \[/.test(loopSrc), 'WIRING PIN: a failed pick\'s line carries the door\'s verdict for THIS attempt, through the ONE scrub');
-  const fnAt = ur.indexOf('async function refreshViaCliPanel('), askAt = ur.indexOf("const oatEl = acctMeta.loginState && acctMeta.loginState.state === 'oat-only' ? probeEligibility(acctMeta) : null;", fnAt), spawnAt = ur.indexOf('spawnPanelProbe(bin', fnAt);
-  ok(fnAt > 0 && askAt > fnAt && spawnAt > askAt && /&& isUnprobeable\(oatEl\)\) \{\n\s*panelSays\(key, \{ at: Date\.now\(\), outcome: 'login-needed', code: 'login'/.test(ur), 'WIRING PIN: the probe door asks the SAME verdict before the spawn and refuses an unprobeable oat-only row by name (code login, no spawn)');
-  ok(/panelSays\(key, \{ at: Date\.now\(\), outcome: probeRec\.exitCode === 0 \? 'no-buckets-parsed' : 'spawn-failed', code: probeRec\.exitCode === 0 \? 'parse' : 'exit', identityVerified: false, why: probeFailWhy\(probeRec\), rung: 'panel' \}\);/.test(ur) && !/_panelVerdict\[key\] = \{/.test(ur),
-    'WIRING PIN: the door names its two silent failures (exit / parse), and EVERY verdict goes through panelSays (the record\'s one writer call)');
+  const fnAt = ur.indexOf('async function refreshViaCliPanel('), askAt = ur.indexOf('const el = probeEligibility(acctMeta);', fnAt), spawnAt = ur.indexOf('spawnPanelProbe(bin', fnAt);
+  ok(fnAt > 0 && askAt > fnAt && spawnAt > askAt && /const el = probeEligibility\(acctMeta\);\n\s*if \(isUnprobeable\(el\)\) \{\n[^\n]*\n\s*panelSays\(key, \{ at: Date\.now\(\), outcome: 'login-needed', code: 'login'/.test(ur), 'WIRING PIN: the probe door asks the SAME verdict before the spawn and refuses EVERY unprobeable row by name — the no-login one too (R3; code login, no spawn)');
+  ok(/panelSays\(key, \{ at: Date\.now\(\), outcome: cls === 'no-login' \? 'login-needed' : probeRec\.exitCode === 0 \? 'no-buckets-parsed' : 'spawn-failed', code: cls === 'no-login' \? 'login' : cls === 'folder-token' \? 'folder-token' : probeRec\.exitCode === 0 \? 'parse' : 'exit', identityVerified: false, why: failWhy, rung: 'panel' \}\);/.test(ur) && !/_panelVerdict\[key\] = \{/.test(ur),
+    'WIRING PIN: the door names its silent failures — exit / parse, and (R3) the two classed answers no-login / folder-token — and EVERY verdict goes through panelSays (the record\'s one writer call)');
   ok(/const pe = probeEligibility\(row, \{ quotaProbe: capsOf\(backend\)\.quotaProbe \}\);/.test(acc) && /row\.oatCli = \{ cli: caps\.cli, measured: !!caps\.ok \};/.test(acc) && /row\.oatScopes = a\.oatShape && Array\.isArray\(a\.oatShape\.scopes\)/.test(acc), 'WIRING PIN: the roster row carries the verdict AND its facts (oatScopes from the recorded shape, oatCli from oatFileCaps)');
   ok(!/require\(['"](https?|child_process|net)['"]\)|fetch\(/.test(fs.readFileSync(REAL_MODEL, 'utf8')), '§ban-safety: the verdict module makes no call of any kind (no http/https/net/child_process/fetch)');
 }

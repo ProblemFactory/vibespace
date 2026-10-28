@@ -129,6 +129,61 @@ console.log('── macOS local-only (PR #23) ──');
   check('linux manager (this one) marks nothing localOnly', accounts.list().accounts.every((x) => !x.localOnly));
 }
 
+// ── THE POOL VERDICT NAMES EVERY MEMBER (lane pool-silent-members R2, inc-mvsjhna7 12:56:40 PT) ──
+// The incident's roster: 14 members, 6 with a live login (the current one soft-spent on 5h, 3 out of quota, 2 under the
+// 15 % reserve floor), 6 living on a long-lived token whose file the 2.1.312 update took away (the CLI unmeasured), 2 with
+// wiped logins. 90c995a3's notice could name only what reached the decision — the 2 under the floor — and said «every
+// other member is held back by your spending limits» while 3 were simply out of quota. THE CENSUS: every member the
+// roster lists is named in the notice (a miss is RED by name), and the verdict puts each other member in exactly one bucket.
+console.log('── the pool verdict names every member of its roster (R2) ──');
+{
+  const APA = require('../src/account-pool-auto.js');
+  const { decidePoolSwitch, poolBlockedNotice } = APA;
+  const FX = JSON.parse(fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'oat-in-file.json'), 'utf-8'));
+  const { '2.1.312': _r312, ...upTo308 } = FX.versions;
+  const dirR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-verdicts-roster-'));
+  const fxF = path.join(dirR, 'fx-to-2.1.308.json'); fs.writeFileSync(fxF, JSON.stringify({ versions: upTo308 }));
+  const am = new AM({ dataDir: dirR, onChange: () => {}, oatFixture: fxF });
+  const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
+  const live = (id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, ...SH } }), { mode: 0o600 });
+  const wiped = (id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 864e5, ...SH } }), { mode: 0o600 });
+  const id = {};
+  for (let i = 1; i <= 14; i++) id[i] = am.createSubscription({ name: `acct-${i}` }).id;
+  for (let i = 1; i <= 6; i++) live(id[i]);
+  for (let i = 7; i <= 12; i++) am.setOat(id[i], ['sk', '-ant-oat01-'].join('') + 'ROSTERfake_' + String.fromCharCode(96 + i).repeat(40)); // a token, NO file in the folder
+  wiped(id[13]); wiped(id[14]);
+  am.noteCliVersion('2.1.312 (Claude Code)'); // the box's CLI — this fixture never measured it
+  await am.oatFileSettled();
+  const P = am.createPool({ name: 'All' }).id;
+  const nowSec = Math.floor(Date.now() / 1000), H = 3600, D = 86400;
+  const c = (u5, u7, extra = {}) => ({ fetchedAt: Date.now(), fiveHour: { utilization: u5, resetsAt: nowSec + 2 * H }, sevenDay: { utilization: u7, resetsAt: nowSec + 3 * D }, scopedWeekly: [], ...extra });
+  const caches = {
+    [id[1]]: c(0.92, 0.42),                       // the CURRENT member: 5h nearly spent on a hot pool
+    [id[2]]: c(0.10, 0.97), [id[3]]: c(0.10, 0.97), // under the 15 % reserve floor (3 % weekly)
+    [id[4]]: c(0.97, 0.40), [id[5]]: c(1, 0.36),    // out of quota on 5h
+    [id[6]]: c(0.20, 0.30, { scopedWeekly: [{ name: 'Fable', utilization: 0.99, resetsAt: nowSec + 2 * D }] }), // out of quota on its model cap
+  };
+  const members = am.poolMembers(P);
+  const roster = typeof am.poolRoster === 'function' ? am.poolRoster(P) : am.poolMembership(P).map((x) => ({ id: x, name: am.get(x).name }));
+  const d = decidePoolSwitch({ currentId: id[1], members, roster, readCache: (x) => caches[x] || null, nowSec, hot: true, proactive: true, reserveFloorPct: 15, readLogin: (x) => am.loginStateOf(x, Date.now(), { slot: true }), explain: true });
+  const txt = poolBlockedNotice(d, { poolName: 'All', currentName: 'acct-1' });
+  check(`(the incident's shape: the candidate list holds the 6 live logins of 14 — ${members.length} — and the decision is blocked: ${d && d.reason})`, members.length === 6 && roster.length === 14 && !!d && d.to === null);
+  const missing = roster.filter((r) => !new RegExp(`\\b${r.name}\\b`).test(txt)).map((r) => r.name);
+  check(`CENSUS: every member of the roster is NAMED in the pool's notice — ${14 - missing.length} of 14${missing.length ? `; unnamed: ${missing.join(', ')}` : ''}`, missing.length === 0);
+  const named = typeof APA.namedMembersOf === 'function' ? APA.namedMembersOf(d) : [];
+  const others = roster.filter((r) => r.id !== id[1]).map((r) => r.id);
+  const twice = named.filter((x, i) => named.indexOf(x) !== i);
+  check(`CENSUS: the verdict puts every OTHER member in exactly ONE named bucket (${new Set(named).size} of ${others.length}${twice.length ? `; twice: ${twice.map((x) => am.get(x).name).join(', ')}` : ''})`, others.every((x) => named.includes(x)) && !twice.length && named.every((x) => others.includes(x)));
+  check('…out of quota is a NAMED list with the spent bucket and its reset — «acct-4 (5h 3% until …)», «acct-5 (5h 0% until …)», «acct-6 (Fable 1% until …)» — never a count', /Out of quota: acct-4 \(5h 3% until \d\d:\d\d:\d\dZ\), acct-5 \(5h 0% until \d\d:\d\d:\d\dZ\), acct-6 \(Fable 1% until \d\d:\d\d:\d\dZ\)\./.test(txt));
+  check('…the members the pool cannot place are named WITH the store\'s reason — «acct-7: no credential file in its folder (CLI 2.1.312 unmeasured) — re-login or wait for the measurement» … «acct-13: signed out (its login was wiped) — re-login»', /The pool cannot place: acct-7: no credential file in its folder \(CLI 2\.1\.312 unmeasured\) — re-login or wait for the measurement; acct-8: /.test(txt) && /acct-13: signed out \(its login was wiped\) — re-login; acct-14: signed out/.test(txt));
+  check('…«held back by your spending limits» is NOT said: three others are out of quota (barsOnly reads every OTHER member)', !/held back by your spending limits/.test(txt) && /Held back by the 15% reserve floor: acct-2 \(3% weekly\), acct-3 \(3% weekly\)\./.test(txt));
+  // the positive control: when every other member really IS held by a bar, the sentence is true and is said
+  const onlyBars = decidePoolSwitch({ currentId: id[1], members: members.filter((m) => [id[1], id[2], id[3]].includes(m.id)), roster: roster.filter((r) => [id[1], id[2], id[3]].includes(r.id)), readCache: (x) => caches[x] || null, nowSec, hot: true, proactive: true, reserveFloorPct: 15, readLogin: (x) => am.loginStateOf(x, Date.now(), { slot: true }), explain: true });
+  check('CONTROL: a roster whose every other member sits under the reserve floor still reads «every other member is held back by your spending limits»', /every other member is held back by your spending limits/.test(poolBlockedNotice(onlyBars, { poolName: 'All', currentName: 'acct-1' })));
+  if (fail) console.log('    notice: ' + txt);
+  fs.rmSync(dirR, { recursive: true, force: true });
+}
+
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);
 fs.rmSync(tmp, { recursive: true, force: true });
 process.exit(fail ? 1 : 0);

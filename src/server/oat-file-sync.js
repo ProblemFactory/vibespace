@@ -15,6 +15,8 @@
  * This module never touches a credential file itself: the store is the actor.
  * The same tick tells `onCliVersion` the version it read (lane cli-2-1-308-records: src/server/cli-registration.js
  * says ONCE when that build is one the record oracle does not know) — one --version read serves both.
+ * A KNOWN UNMEASURED CLI KEEPS EVERY TOKEN FILE (lane pool-silent-members R1): the store holds them, the pool names the
+ * members unplaceable, and src/server/cli-unmeasured-notice.js (the pool engine's tick) files the ONE For-you item.
  */
 const RECHECK_MS = 15 * 60e3;
 const BOOT_DELAY_MS = 20e3;
@@ -34,7 +36,7 @@ function start({ accounts, machineProbes, claudeCmd, onCliVersion = null, log = 
       if (!caps.changed) await accounts.syncOatFiles(); // else: a login that died since the last tick
       else await accounts.oatFileSettled();
       const words = `${caps.cli || 'unknown'}:${caps.ok}`;
-      if (words !== said) { said = words; log(`[oat-file] claude CLI ${caps.cli || '(unknown)'} — ${caps.ok ? 'measured: a member with no usable login gets its long-lived token in its folder' : `not measured (fixture: ${caps.measured || 'none'}): no long-lived token goes into a member folder, nothing new is placed on one already there, and those stay while a session's link names their member`}`); }
+      if (words !== said) { said = words; log(`[oat-file] claude CLI ${caps.cli || '(unknown)'} — ${caps.ok ? 'measured: a member with no usable login gets its long-lived token in its folder' : `not measured (fixture: ${caps.measured || 'none'}): no long-lived token goes into a member folder and nothing new is placed on one already there; the files already there STAY (the pool names those members unplaceable)`}`); }
     } catch (e) { log('[oat-file] sweep failed:', (e && e.message) || e); }
     return caps;
   }

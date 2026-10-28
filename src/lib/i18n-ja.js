@@ -11046,4 +11046,10 @@ export default {
   "you replied": "返信済み",
   "approved": "承認済み",
   "withdrawn by the agent": "エージェントが取り下げ",
+  "The Claude CLI updated to {v}; 1 account cannot be placed by the pool until this version is measured — its login is kept": "Claude CLI が {v} に更新されました。このバージョンの測定が終わるまで、アカウントプールは 1 件のアカウントを使えません——ログインは保持されます",
+  "The Claude CLI updated to {v}; {n} accounts cannot be placed by the pool until this version is measured — their logins are kept": "Claude CLI が {v} に更新されました。このバージョンの測定が終わるまで、アカウントプールは {n} 件のアカウントを使えません——どのログインも保持されます",
+  "Accounts: {names}.": "アカウント：{names}。",
+  "Each keeps its long-lived token in its folder, and a conversation started on it directly keeps working; the pool names it in its notices with this reason.": "各アカウントの長期トークンはそのフォルダーに残り、そのアカウントで直接始めた会話はそのまま動きます。プールの通知はこの理由とともにそのアカウントを名指しします。",
+  "To use one in the pool now, re-login it in Manage Agents. This item resolves itself once CLI {v} is measured.": "今すぐプールで使うには、「エージェントを管理」で再ログインしてください。CLI {v} の測定が終わると、この項目は自動で解決します。",
+  "Long-lived token in its folder: claude {cli} prints no quota lines for it — refreshes when a session uses it": "長期トークンはフォルダー内にあります：claude {cli} はこれについて使用量を表示しません——セッションが使ったときに更新されます",
 };

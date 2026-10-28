@@ -867,6 +867,37 @@ if (!probe) {
   ok('CONTROL: an arm that simply came due on a healthy link says the limit reset (and fires onto the same account)', did === true && w.linkNow() === w.LINK && w.notes.length === 0 && w.fired.length === 1 && w.fired[0].note === '用量上限已重置，已自动继续这个任务。', JSON.stringify({ link: w.nameOf(w.linkNow()), note: w.fired[0] && w.fired[0].note, notes: w.notes }));
 }
 
+// ── §4h THE EXACT SECOND (lane pool-silent-members R4, inc-mvsjhna7 13:01:00 PT) ──
+// A member's 5h window reset at 13:00:00; the fire was armed for reset + 60 s. The gate's switch (a FRACTIONAL clock)
+// saw the window landed and moved the conversation onto that member; the money verdict (a FLOORED clock, the opposite
+// strict inequality) saw it at 1 % with no future reset, `filter(Boolean)` dropped it, and the fire re-armed for the
+// NEXT member's reset 100 minutes later. One clock (the gate's `now`) and one inequality (resetLanded) — the fire
+// continues on the member whose window just landed, and the gate probes THAT member (the switch runs first).
+{
+  const w = mkWorld();
+  const realNow = Date.now;
+  const RU = Math.floor(realNow() / 1000) + 120;   // the landing member's stated 5h reset, on a fake clock two minutes out
+  const T = (RU + 60) * 1000 + 300;                  // the fire: EXACTLY reset + grace, +300 ms (the fraction that split the clocks)
+  const far = RU + 100 * 60;                         // every other member: spent until much later
+  w.writeCache(w.LINK, { fetchedAt: realNow() - 60000, source: 'cli-usage', fiveHour: { utilization: 1, status: 'limited', resetsAt: far }, sevenDay: { utilization: 0.4, resetsAt: w.R7 } });
+  w.writeCache(w.FISH, { fetchedAt: realNow() - 60000, source: 'cli-usage', fiveHour: { utilization: 1, status: 'limited', resetsAt: far + 600 }, sevenDay: { utilization: 0.4, resetsAt: w.R7 } });
+  w.writeCache(w.SPARE, { fetchedAt: realNow() - 60000, source: 'cli-usage', fiveHour: { utilization: 0.99, resetsAt: RU }, sevenDay: { utilization: 0.36, resetsAt: w.R7 } });
+  w.ar.armIfEnabled(w.SID, w.session, (RU + 60) * 1000, '5h 1% < 10%');
+  const cap = capture();
+  Date.now = () => T;
+  let did = false;
+  try { did = await w.tickFire(); } finally { Date.now = realNow; }
+  const lines = cap.done();
+  ok('EXACT SECOND: a fire at reset + grace (the fractional clock) CONTINUES on the member whose window just landed', did === true && w.linkNow() === w.SPARE && w.fired.length === 1, JSON.stringify({ did, link: w.nameOf(w.linkNow()), fired: w.fired.length, lines: lines.filter((l) => /re-armed|refused|continued|armed for/.test(l)).slice(-3) }));
+  ok('…never a re-arm for the NEXT member\'s reset at the fire (the incident: «re-armed at fire: … via <next member>/5h»)', !lines.some((l) => /re-armed at fire/.test(l)), lines.filter((l) => /re-armed/.test(l)).join(' | '));
+}
+{
+  // THE GATE PROBES THE MEMBER IT IS MOVING TO (R4): the switch runs BEFORE the probe target is read
+  const eng = read('src/server/usage-pool-engine.js');
+  const body = (() => { const i = eng.indexOf('async function beforeAutoResumeFire(id, session) {'); return i < 0 ? '' : eng.slice(i, eng.indexOf('\n}\n', i)); })();
+  const sw = body.indexOf('maybePoolAutoSwitch(session, { now });'), tg = body.indexOf('sessionBillingMember(session, scope).id'), pr = body.indexOf('probeQuotaForKey(target'), vd = body.indexOf('quotaVerdictFor(scope, { model, session, now })');
+  ok('WIRING: the pre-fire gate switches FIRST, then reads the billing member, probes it and judges with the SAME `now`', sw > 0 && tg > sw && pr > tg && vd > pr && /const now = Date\.now\(\);/.test(body.slice(0, sw)), JSON.stringify({ sw, tg, pr, vd }));
+}
 // ── §4f WHAT MAY CLEAR THE BREAKER (round 4, the r3 verifier's finding) ────
 // Round 1 cleared the ENTIRE loop-breaker record inside noteRecovered, for
 // every caller — and `noteRecovered` is not one signal. Its loudest caller is

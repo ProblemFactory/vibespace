@@ -40,7 +40,7 @@ const quotaModel = require('./quota-model.js');
 const { authoritativeScopesOf } = quotaModel;
 
 const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe ring (2.369.109)
-const { probeFailWhy, probeWhyText, probeEligibility, isUnprobeable, notProbedWords } = require('./auto-cli-model.js'); // PURE: may the probe PROVE this row, a failed probe's reason + THE ONE scrub (lane auto-cli-oat-unprobeable)
+const { probeFailWhy, probeWhyText, probeEligibility, isUnprobeable, notProbedWords, panelAnswerClass } = require('./auto-cli-model.js'); // PURE: may the probe PROVE this row, a failed probe's reason + THE ONE scrub (lane auto-cli-oat-unprobeable)
 // THE PANEL PROBE'S ARGV (B-9b40): `/usage` and no MCP server at all. Measured on
 // the claude 2.1.288 binary: print mode loads the account's claude.ai connectors
 // unless the MCP config is strict (`headlessSyncsClaudeAiConnectors: !strictConfig
@@ -617,9 +617,13 @@ async function refreshViaCliPanel(key) {
     // auto-cli-oat-unprobeable + its addendum): a token with user:profile, on a CLI measured with it in the folder, and
     // written there, IS probed — the same spawn below reads the folder's token (CLAUDE_SECURESTORAGE_CONFIG_DIR; the env
     // token is stripped as ever); any other oat-only row is refused by name with no spawn (re-login is the fix).
-    const oatEl = acctMeta.loginState && acctMeta.loginState.state === 'oat-only' ? probeEligibility(acctMeta) : null;
-    if (acctMeta.loginState && acctMeta.loginState.state === 'oat-only' && isUnprobeable(oatEl)) {
-      panelSays(key, { at: Date.now(), outcome: 'login-needed', code: 'login', identityVerified: false, why: `the OAuth login ended and the long-lived token cannot be probed (${oatEl}: ${notProbedWords(oatEl, acctMeta)}); re-login to refresh usage`, rung: 'panel' });
+    // THE LOOP'S ELIGIBILITY, WHOLE (lane pool-silent-members R3, inc-mvsjhna7 12:58:18 PT): 90c995a3 refused only an
+    // oat-only row, so a row the loop already called `unprobeable:no-login` (its folder empty) was spawned anyway — the CLI
+    // printed its non-subscriber cost summary and the row booked it as a parse failure. ONE predicate for ⟳ and the loop.
+    const el = probeEligibility(acctMeta);
+    if (isUnprobeable(el)) {
+      const oat = acctMeta.loginState && acctMeta.loginState.state === 'oat-only';
+      panelSays(key, { at: Date.now(), outcome: 'login-needed', code: 'login', identityVerified: false, why: oat ? `the OAuth login ended and the long-lived token cannot be probed (${el}: ${notProbedWords(el, acctMeta)}); re-login to refresh usage` : `not probed (${el}: ${notProbedWords(el, acctMeta)}) — re-login to refresh usage`, rung: 'panel' });
       return false;
     }
   }
@@ -681,7 +685,15 @@ async function refreshViaCliPanel(key) {
     // …and the failure SAYS WHY (lane auto-cli-oat-unprobeable): the class (`exit` — the CLI failed / `parse` — it answered
     // without a quota line) + the CLI's first line, scrubbed (probeFailWhy → probeWhyText). The ⟳ route's ladder is unchanged:
     // it stops only on `login` / `identity` / `write`, so these two codes fall through to the token rungs exactly as before.
-    panelSays(key, { at: Date.now(), outcome: probeRec.exitCode === 0 ? 'no-buckets-parsed' : 'spawn-failed', code: probeRec.exitCode === 0 ? 'parse' : 'exit', identityVerified: false, why: probeFailWhy(probeRec), rung: 'panel' });
+    // …and an answer with no quota line is CLASSED by what the CLI said (R3): the non-subscriber cost summary = no login in
+    // the folder (code `login`: nothing to fall through to); the bare subscription header = a folder-token login the panel
+    // prints nothing for (code `folder-token`) — never «parse» (no parser drifted: 85/85 live logins parsed that day)
+    const folderToken = !!(acctMeta && acctMeta.loginState && acctMeta.loginState.oatFile === true);
+    const cls = probeRec.exitCode === 0 ? panelAnswerClass({ ...probeRec, folderToken }) : null;
+    const hubCli = (() => { try { return accounts.oatFileCaps().cli; } catch { return null; } })();
+    const failWhy = probeFailWhy({ ...probeRec, cli: hubCli, folderToken });
+    if (cls) probeRec.why = failWhy; // the raw log names the class too
+    panelSays(key, { at: Date.now(), outcome: cls === 'no-login' ? 'login-needed' : probeRec.exitCode === 0 ? 'no-buckets-parsed' : 'spawn-failed', code: cls === 'no-login' ? 'login' : cls === 'folder-token' ? 'folder-token' : probeRec.exitCode === 0 ? 'parse' : 'exit', identityVerified: false, why: failWhy, rung: 'panel' });
     logProbe(probeRec.exitCode === 0 ? 'no-buckets-parsed' : 'spawn-failed'); return false;
   }
   // THE ROSTER IS ASKED AGAIN AT THE WRITE, NOT ONLY AT THE SPAWN (r3, the

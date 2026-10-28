@@ -46,5 +46,15 @@ const DEC = Date.UTC(2026, 11, 30, 12, 0);
 const r3 = parseCliUsageText('Current session: 1% used · resets Jan 2, 3am (America/Los_Angeles)', DEC);
 ok(r3.fiveHour.resetsAt * 1000 > DEC, 'January reset parsed in December lands in the FUTURE (next year)', r3.fiveHour.resetsAt);
 
+// THE TWO ANSWERS WITH NO QUOTA LINE (lane pool-silent-members R3, the owner's probe log 2026-10-28): neither is a parser
+// drift (85/85 live-login probes parsed the full panel on the same claude 2.1.312 that day) — the parser gives null, never a
+// fabricated zero, and the class names what the CLI said (src/auto-cli-model.js panelAnswerClass)
+const { panelAnswerClass } = require('../src/auto-cli-model.js');
+const COST = 'Total cost:            $0.0000\nTotal duration (API):  0s\nTotal duration (wall): 1s\nTotal code changes:    0 lines added, 0 lines removed\nUsage:                 0 input, 0 output, 0 cache read, 0 cache write\n';
+const HEAD = 'You are currently using your subscription to power your Claude Code usage\n';
+ok(parseCliUsageText(COST, NOW) === null && panelAnswerClass({ rawStdout: COST }) === 'no-login', 'R3: the non-subscriber cost summary (an EMPTY folder, the env token stripped) → null, classed no-login — never a zero reading');
+ok(parseCliUsageText(HEAD, NOW) === null && panelAnswerClass({ rawStdout: HEAD, folderToken: true }) === 'folder-token' && panelAnswerClass({ rawStdout: HEAD }) === null, 'R3: the bare subscription header (a long-lived token in the folder) → null, classed folder-token; the same header from a live login keeps no class');
+ok(!!parseCliUsageText(FIXTURE, NOW) && panelAnswerClass({ rawStdout: FIXTURE, folderToken: true }) === null, 'R3: …a panel WITH its quota lines is never classed (the header above them is the full panel\'s own first line)');
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

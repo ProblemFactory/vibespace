@@ -301,7 +301,8 @@ console.log('— §3 pool decisions');
     // NEGATIVE CONTROLS — every sentence that was already right stays right.
     const quotaOnly = say(dec2({ a: spent5, q1: spent5 }, null));
     ck('NEGATIVE CONTROL: a pure QUOTA wall keeps the shipped sentence verbatim',
-      quotaOnly === 'Pool "P": no member can serve it — spent: 5h 0% (still available: 7d 90%). Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool.');
+      // (lane pool-silent-members R2: the sibling that is ALSO out of quota is NAMED with its spent bucket — it used to be a count)
+      quotaOnly === `Pool "P": no member can serve it — Cur is spent: 5h 0% (still available: 7d 90%). Out of quota: Quota1 (5h 0% until ${new Date((S + 3600) * 1000).toISOString().slice(11, 19)}Z). Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool.`, quotaOnly);
     const otherLogins = say(dec2({ a: spent5, q1: healthy }, { a: L.ok, q1: L.expired }));
     ck("NEGATIVE CONTROL: 'all-logins-expired' with a HEALTHY current login is unchanged (round 2's sentence)",
       otherLogins === 'Pool "P": no member can take it — Quota1 (login expired). Re-login those accounts in Manage Agents.');
@@ -909,7 +910,7 @@ console.log('— §5 wiring');
   // the STRING (it was composed inline here, so no test ever read it — and it
   // rendered the current member's dead login as a spent quota bucket). The
   // engine must CALL it and must not have grown a second copy.
-  ck('the engine composes the blocked notice through the PURE poolBlockedNotice', /poolBlockedNotice\(d, \{ poolName: a\.name, currentName: nameOf\(currentId\) \}\)/.test(eng)
+  ck('the engine composes the blocked notice through the PURE poolBlockedNotice', /poolBlockedNotice\(d, \{ poolName: a\.name, currentName: nameOf\(currentId\), when: \(ms\) => OF\.when\(ms, \{ now \}\) \}\)/.test(eng)
     && /poolBlockedNotice,? .*= require\('\.\.\/account-pool-auto\.js'\)/.test(eng));
   // INTEGRATION r2: the twin check reads EXECUTABLE lines only. A comment must
   // stay free to quote the retired sentence — this repo's rule is "the comments

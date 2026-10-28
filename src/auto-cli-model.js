@@ -45,8 +45,13 @@ const OAT_NO_PROFILE = 'unprobeable:oat-no-profile';
 const CLI_UNMEASURED = 'unprobeable:cli-unmeasured';
 const OAT_NOT_IN_FOLDER = 'unprobeable:oat-not-in-folder';
 const NO_LOGIN = 'unprobeable:no-login';
-const PROBE_ELIGIBILITY = Object.freeze([PROBEABLE, OAT_NO_PROFILE, CLI_UNMEASURED, OAT_NOT_IN_FOLDER, NO_LOGIN]);
-const OAT_KINDS = Object.freeze([OAT_NO_PROFILE, CLI_UNMEASURED, OAT_NOT_IN_FOLDER]); // the oat-only row's three named facts
+// THE PANEL SERVES LIVE LOGINS ONLY (lane pool-silent-members R3, inc-mvsjhna7): every probe of a token-in-folder row in
+// the owner's log since 10-26 (six rows, 4–14 probes each — on 2.1.308 as well as 2.1.312) answered only «You are currently
+// using your subscription to power your Claude Code usage» with no quota line. The 2.369.342 premise («the folder's token IS
+// probed») does not hold: such a row is read passively (a session on it) or by the owner's own session, never spawned for.
+const OAT_FOLDER_NO_PANEL = 'unprobeable:oat-folder-no-panel';
+const PROBE_ELIGIBILITY = Object.freeze([PROBEABLE, OAT_NO_PROFILE, CLI_UNMEASURED, OAT_NOT_IN_FOLDER, OAT_FOLDER_NO_PANEL, NO_LOGIN]);
+const OAT_KINDS = Object.freeze([OAT_NO_PROFILE, CLI_UNMEASURED, OAT_NOT_IN_FOLDER, OAT_FOLDER_NO_PANEL]); // the oat-only row's four named facts
 const PROFILE_SCOPE = 'user:profile'; // the scope the /usage panel reads the account with (measured: oat-file-scopes)
 const VERSION_RE = /^[0-9A-Za-z.+-]{1,40}$/;
 const NOT_PROBED_SAY_MS = 24 * 3600e3; // one "not probed" line per account per day
@@ -61,7 +66,7 @@ function probeEligibility(row, { quotaProbe = 'cli-usage' } = {}) {
     if (!(Array.isArray(row.oatScopes) && row.oatScopes.includes(PROFILE_SCOPE))) return OAT_NO_PROFILE;
     if (!(row.oatCli && row.oatCli.measured === true)) return CLI_UNMEASURED;
     if (!(ls.oatFile === true && row.oatFile && row.oatFile.state === 'written')) return OAT_NOT_IN_FOLDER;
-    return PROBEABLE; // the folder holds the token the CLI spends — the same door, the same spawn
+    return OAT_FOLDER_NO_PANEL; // the folder holds the token the CLI spends — but the panel prints no quota line for it (R3)
   }
   if (!row.loggedIn) return NO_LOGIN;
   return PROBEABLE;
@@ -74,6 +79,7 @@ function notProbedWords(el, row = null) {
   if (el === OAT_NO_PROFILE) return 'long-lived token only, without the user:profile scope the usage panel reads; refreshes when a session uses it';
   if (el === CLI_UNMEASURED) return `long-lived token only, and claude ${cli} is not measured with it in the account's folder; refreshes when a session uses it`;
   if (el === OAT_NOT_IN_FOLDER) return `long-lived token only, not written to the account's folder${why ? ` (${why})` : ''}; refreshes when a session uses it`;
+  if (el === OAT_FOLDER_NO_PANEL) return `long-lived token in the account's folder: claude ${cli} prints no quota lines for a folder-token login; refreshes when a session uses it`;
   if (el === NO_LOGIN) return 'not logged in; nothing to read its quota with until it is';
   return '';
 }
@@ -94,10 +100,32 @@ function firstLine(text) {
   }
   return '';
 }
-/** A failed panel spawn's record → its reason (already scrubbed): what the CLI said, not a bare `failed`. */
-function probeFailWhy({ exitCode = null, rawStdout = '', rawStderr = '', why = null } = {}) {
+// A PANEL ANSWER WITH NO QUOTA LINE, BY WHAT THE CLI SAID (lane pool-silent-members R3, measured in the owner's log 10-28):
+//   'no-login'      the CLI's non-subscriber cost summary («Total cost: $0.0000 / Total duration (API) / … / Usage: N
+//                   input…») — printed when the folder holds NO credential (the env token is stripped): a missing login,
+//                   never a parser drift (85/85 live-login probes parsed the full panel on the same 2.1.312 that day)
+//   'folder-token'  only the subscription header («You are currently using your subscription…») from a row whose folder
+//                   holds OUR long-lived-token file (`folderToken`) — the CLI prints no quota lines for it (every such probe
+//                   since 10-26, on 2.1.308 too); the same header from a live login keeps the generic words
+const COST_SUMMARY_RE = /^\s*Total cost:\s*\$\s*\d/m;
+const SUB_HEADER_RE = /You are currently using your subscription/;
+const QUOTA_LINE_RE = /^\s*Current (?:session|week)\b/m;
+function panelAnswerClass({ rawStdout = '', rawStderr = '', folderToken = false } = {}) {
+  const out = String(rawStdout == null ? '' : rawStdout).slice(0, 64 * 1024);
+  if (QUOTA_LINE_RE.test(out)) return null;
+  if (COST_SUMMARY_RE.test(out)) return 'no-login';
+  if (folderToken === true && (SUB_HEADER_RE.test(out) || SUB_HEADER_RE.test(String(rawStderr || '').slice(0, 64 * 1024)))) return 'folder-token';
+  return null;
+}
+/** A failed panel spawn's record → its reason (already scrubbed): what the CLI said, not a bare `failed`. `cli` = the hub's
+ *  claude version, named in the folder-token class. */
+function probeFailWhy({ exitCode = null, rawStdout = '', rawStderr = '', why = null, cli = null, folderToken = false } = {}) {
   const said = firstLine(rawStderr) || firstLine(rawStdout) || firstLine(why);
-  const head = exitCode === 0 ? 'no quota lines in its answer' : exitCode === 'killed' ? 'killed (the 60 s limit)' : `exit ${exitCode == null ? '?' : exitCode}`;
+  const cls = exitCode === 0 ? panelAnswerClass({ rawStdout, rawStderr, folderToken }) : null;
+  const v = typeof cli === 'string' && VERSION_RE.test(cli) ? cli : null;
+  const head = cls === 'no-login' ? 'no login in the folder — the CLI answered as a non-subscriber'
+    : cls === 'folder-token' ? `the CLI prints no quota lines for a folder-token login${v ? ` on ${v}` : ''}`
+    : exitCode === 0 ? 'no quota lines in its answer' : exitCode === 'killed' ? 'killed (the 60 s limit)' : `exit ${exitCode == null ? '?' : exitCode}`;
   return probeWhyText(said ? `${head}: ${said}` : head);
 }
 /** An account record's `probe` fact, bounded — a hand-edited or older file never reaches a row raw. */
@@ -109,4 +137,4 @@ function probeRecordOf(raw) {
   return why ? { at, ok: false, why } : null;
 }
 
-module.exports = { PROBEABLE, OAT_NO_PROFILE, CLI_UNMEASURED, OAT_NOT_IN_FOLDER, NO_LOGIN, PROBE_ELIGIBILITY, OAT_KINDS, PROFILE_SCOPE, NOT_PROBED_SAY_MS, WHY_MAX, probeEligibility, isUnprobeable, notProbedWords, probeWhyText, probeFailWhy, probeRecordOf };
+module.exports = { PROBEABLE, OAT_NO_PROFILE, CLI_UNMEASURED, OAT_NOT_IN_FOLDER, OAT_FOLDER_NO_PANEL, NO_LOGIN, PROBE_ELIGIBILITY, OAT_KINDS, PROFILE_SCOPE, NOT_PROBED_SAY_MS, WHY_MAX, probeEligibility, isUnprobeable, notProbedWords, probeWhyText, panelAnswerClass, probeFailWhy, probeRecordOf };
