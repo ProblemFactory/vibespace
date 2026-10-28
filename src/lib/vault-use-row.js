@@ -78,7 +78,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
         chip.title = `${m.id || ''}${m.convs > 1 ? ' · ' + t('{n} conversations', { n: m.convs }) : ''}`;
         const x = el('button', 'vw-ak-x vw-use-x', '✕');
         x.type = 'button'; x.title = t('Take this back'); x.setAttribute('aria-label', x.title);
-        x.onclick = async () => { const res = await post('/api/vault/use-grants/revoke', { id: r.id, principal: m.principal }); if (!res || !res.ok) showToast(t('Not done — {reason}', { reason: (res && (res.error || res.code)) || t('server unreachable') }), { type: 'error' }); refresh?.(); };
+        x.onclick = async () => { const res = await post('/api/vault/use-grants/revoke', { id: r.id, principal: m.principal }); if (!res || !res.ok) showToast(t('Not done — {reason}', { reason: res ? revealWords(res) : t('server unreachable') }), { type: 'error' }); refresh?.(); };
         chip.append(x);
         chips.append(chip);
       }
@@ -94,7 +94,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
       line.append(el('span', null, t('Approved by the policy judge {n}× · last {time}', { n: u.approved.n, time: at })));
       const rv = el('button', 'vw-btn vw-use-revoke', t('Revoke'));
       rv.type = 'button'; rv.title = t('The commands the judge approved ask you again next time');
-      rv.onclick = async () => { const res = await post('/api/vault/use-policy/revoke', { id: r.id }); if (!res || !res.ok) showToast(t('Not done — {reason}', { reason: (res && (res.error || res.code)) || t('server unreachable') }), { type: 'error' }); else showToast(t('Revoked — those commands ask you again')); refresh?.(); };
+      rv.onclick = async () => { const res = await post('/api/vault/use-policy/revoke', { id: r.id }); if (!res || !res.ok) showToast(t('Not done — {reason}', { reason: res ? revealWords(res) : t('server unreachable') }), { type: 'error' }); else showToast(t('Revoked — those commands ask you again')); refresh?.(); };
       line.append(rv);
       host.append(line);
     }
@@ -118,7 +118,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // the unsaved guard (test-dialog-unsaved-census): who, the hosts and the end as the dialog opened — a close with a change asks
   let start = null, saveNow = () => false;
   const stateOf = () => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except().slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '', polIn ? polIn.value.trim() : '']);
-  const { body, close } = createModalShell({ id: 'vault-use-grant', title: t('Who may use «{name}»', { name: row.label }), dialogClass: 'vault-dialog-box vw-ak-dialog vw-use-dialog', escapeToClose: true, onClose: () => { try { picker && picker.close(); } catch { } },
+  const { body, close } = createModalShell({ id: 'vault-use-grant', kind: 'form', title: t('Who may use «{name}»', { name: row.label }), dialogClass: 'vault-dialog-box vw-ak-dialog vw-use-dialog', escapeToClose: true, onClose: () => { try { picker && picker.close(); } catch { } },
     unsaved: { isDirty: () => start !== null && stateOf() !== start, save: () => saveNow() } });
   let ownBox = null, hostsIn = null, endSel = null, polIn = null;
   body.append(el('div', 'vw-ak-hint', t('They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.')));
@@ -175,6 +175,10 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       const h = hosts.length ? hosts : was ? was.hosts : [];
       if (!h.length) { err.textContent = t('Name the hosts it may be used for — a host name or address each (never «any host»)'); return false; }
       const m = { ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), hosts: h };
+      // lane vault-use-grants round 5 (MAJOR item 4): carry the per-host tool scope back — a wildcard host (`*.amazonaws.com`)
+      // keeps the CLI that minted it, so a whole-row Save never silently re-scopes it to every tool. The store refuses a
+      // wildcard host with no tool by name (`tool_required`).
+      if (was && was.toolFor && typeof was.toolFor === 'object' && Object.keys(was.toolFor).length) m.toolFor = was.toolFor;
       if (endId === 'keep') { if (was && was.until) m.until = was.until; }
       else if (endMs) m.until = Date.now() + endMs;
       to.push(m);
@@ -190,7 +194,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       if (!q || !q.ok) { err.textContent = revealWords(q || {}); return false; }
     }
     if (r && r.ok) { showToast(to.length ? t('Saved — they use it with no card for those hosts') : t('Saved — nobody uses it without a card')); close(); refresh?.(); return true; }
-    err.textContent = r && r.code === 'hosts_required' ? t('Name the hosts it may be used for — a host name or address each (never «any host»)') : r && r.code === 'bad_principal' ? t('A host is a host name or address (no wildcard, no address with a path)') : revealWords(r || {});
+    err.textContent = r && r.code === 'hosts_required' ? t('Name the hosts it may be used for — a host name or address each (never «any host»)') : r && r.code === 'tool_required' ? t('A wildcard host (like *.example.com) is scoped to the tool that first used it — add it from a run card with «Always», not here') : r && r.code === 'bad_principal' ? t('A host is a host name or address (no wildcard, no address with a path)') : revealWords(r || {});
     return false;
   }
   save.onclick = () => { doSave(); };

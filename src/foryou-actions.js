@@ -65,6 +65,11 @@ const ROWS = Object.freeze([
   // the audit's two drifts (2026-10-26): a failed use was in no table; a rotate suggestion merged by its text — now by its entry
   { type: 'vault-use-failed', identity: null, producer: 'src/server/vault-hooks.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group', merge: 'by its text on purpose — the dedupe text is the head (who used which key for which verb) + its cause (lane vault-key-row-compact)' },
   { type: 'vault-rotate', identity: 'entry', producer: 'src/server/vault-hooks.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
+  // the vault run door's notices (lane vault-use-grants r3/r4): the marked run store failed its mark (fail closed), a grants.json
+  // member no longer verified (forged / widened / replayed), the policy judge approved a run (its door is the entry's row + Revoke)
+  { type: 'vault-store-refused', identity: null, producer: 'src/server/vault-run-door.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
+  { type: 'vault-grant-stale', identity: null, producer: 'src/server/vault-run-door.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
+  { type: 'vault-policy-approved', identity: null, producer: 'src/server/vault-run-door.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'conversation' },
   // ── the account pool ──
   { type: 'pool-cross-provider', identity: 'askId', producer: 'src/server/usage-pool-engine.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'conversation' },
   { type: 'reset-credit', identity: null, producer: 'src/server/usage-pool-engine.js', waits: false, answer: 'reply', card: 'row', handled: true, chat: false, owner: 'the limit wall card\'s «Use a reset credit» (design-reset-credits) — src/lib/chat-renderers.js', on: 'the limit card in this conversation', scope: 'conversation' },

@@ -220,6 +220,18 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
     && RO(['scp', 'backup', 'root@192.168.1.1:/x']) === false,
     'the backslash-before-@ and userinfo authorities are opaque (the card); a clean git-over-https URL and `scp backup host:/x` are not (routine granted runs draw no card)',
     { bs: RO(['curl', 'http://127.0.0.5:9\\@127.0.0.1:7001/x']), gitls: RO(['git', 'ls-remote', 'https://github.com/o/r']), scp: RO(['scp', 'backup', 'root@192.168.1.1:/x']) });
+  // round 5 (BLOCKER item 1): the ssh family's TARGET host is an alias in EVERY spelling; r4 wrongly exempted every `://` target
+  ok(['ssh ssh://router', 'sftp sftp://router', 'scp backup scp://router/x', 'git clone ssh://router/repo', 'git clone git+ssh://router/repo', 'ssh router', 'scp backup router:/x', 'rsync -a backup router:/x'].every((c) => RO(c.split(' ')) === true),
+    'ssh-family: a single-label alias is OPAQUE in every spelling (bare / host:path / ssh:// / scp:// / sftp:// / git+ssh://)',
+    ['ssh ssh://router', 'scp backup scp://router/x', 'git clone ssh://router/repo'].map((c) => [c, RO(c.split(' '))]));
+  ok(RO(['git', 'clone', 'ssh://git@github.com/o/r']) === false && RO(['ssh', 'git@github.com', 'x']) === false && RO(['git', 'clone', 'https://router/r']) === false,
+    'a DOTTED ssh host / a single-label HTTPS host (not ssh) is NOT an alias — no over-blinding of git-https or a dotted ssh target');
+  // round 5 (MAJOR item 5): a scheme-shaped token is never a bare host; a proxy value's authority is cut at the first # / ?
+  ok(RO(['curl', 'http:/127.0.0.1:80/x']) === true && RO(['curl', 'ftp:ftp']) === true && RO(['curl', 'smtp:/127.0.0.1/x']) === true && RO(['curl', 'localhost:9999/x']) === false,
+    'a one-slash `S:/HOST` and a bare `S:HOST` for a known scheme are BLIND; `localhost:9999` (not a scheme) is read as a host');
+  const px = (v) => V.shapeOf(V.planOf({ argv: ['curl', 'http://own.example/x', '-x', v], env: [['T', M1]] })).routeHosts;
+  ok(px('127.0.0.1:3128#@own.example:3129').includes('127.0.0.1:3128') && px('127.0.0.1:3128?@own.example:3129').includes('127.0.0.1:3128') && !px('127.0.0.1:3128#@own.example:3129').includes('own.example:3129'),
+    'a proxy value\'s authority is cut at the first # / ? — curl connects to host:port, not the fragment/query host (round 5 item 5)');
 }
 
 console.log('①b AN AGENT\'S OWN ENTRY (lane vault-run-door × lane vault-mint-put) — vault://agent:<scope>/<name>');

@@ -51,7 +51,6 @@ const i18nKey = (s) => s;
 const PURPOSE_LINE = i18nKey('What for, in the agent\'s words: {purpose}');
 const ENTRY_LINE = i18nKey('Where it goes: a new vault entry «{label}» ({kind})');
 /** lane vault-use-grants: the request box's line when the paste grants the asker (read back by its key: `grantOfItem`). */
-const GRANT_LINE = i18nKey('The conversation that asked will be allowed to use it for {hosts} without asking each time; change it in the Vault window («Who may use it…»).');
 /** The kind's words (English keys the page says in its language — the inventory's own KIND_WORDS spelling). */
 const KIND_WORDS = Object.freeze({ 'api-key': i18nKey('API key'), password: i18nKey('Password'), secret: i18nKey('Secret') });
 
@@ -174,8 +173,14 @@ function cardOf({ who, words, purpose, target, replaces = false, grant = null })
     { key: PURPOSE_LINE, params: { purpose } },
     where,
     ...(replaces ? [{ key: i18nKey('It replaces the value saved there now.') }] : []),
-    // lane vault-use-grants: THE DEFAULT, said where the owner pastes — the conversation that asked × the hosts it named
-    ...(target.kind === 'entry' && target.hosts && target.hosts.length ? [grant ? { key: GRANT_LINE, params: { hosts: target.hosts.join(', ') } } : { key: i18nKey('For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).'), params: { hosts: target.hosts.join(', ') } }] : []),
+    // lane vault-use-grants round 5 (MAJOR item 2): said where the owner pastes — a paste opens ONLY an 8-hour run grant to
+    // the conversation that asked (requestGrantsRequester, default on); the «Usable by agent runs» switch (who may use it without
+    // a time limit, read again at the paste) is the owner's own act and nothing else flips it.
+    ...(target.kind === 'entry' ? [grant
+      ? (target.hosts && target.hosts.length
+        ? { key: i18nKey('It said it needs it for: {hosts}. If you paste it, the conversation that asked may use it in commands for 8 hours (a vault lock ends it; a new kind of command still shows you its card). To let it be used without that limit, turn on «Usable by agent runs» on its row in the Vault window.'), params: { hosts: target.hosts.join(', ') } }
+        : { key: i18nKey('If you paste it, the conversation that asked may use it in commands for 8 hours (a vault lock ends it; a new kind of command still shows you its card). To let it be used without that limit, turn on «Usable by agent runs» on its row in the Vault window.') })
+      : { key: i18nKey('The conversation that asked is not allowed to use it in runs until you turn on «Usable by agent runs» on its row in the Vault window.') }] : []),
     { key: i18nKey('Paste it below and press Save to vault — it goes straight into the vault. The agent is told only that it is stored and where, never the value.') },
   ];
   const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => { const v = l.params && l.params[k]; return v == null ? m : typeof v === 'object' ? String(v.key) : String(v); });
@@ -238,6 +243,6 @@ function valueOf(raw) {
 }
 
 module.exports = {
-  ACTION_TYPE, REQUEST_ID_RE, ENTRY_PREFIX, FREE_ENTRY_RE, ENTRY_FIELD, LIMITS, QUIET_MS, ENTRY_KINDS, KIND_WORDS, WORDS, GRANT_LINE, hostsOf,
+  ACTION_TYPE, REQUEST_ID_RE, ENTRY_PREFIX, FREE_ENTRY_RE, ENTRY_FIELD, LIMITS, QUIET_MS, ENTRY_KINDS, KIND_WORDS, WORDS, hostsOf,
   requestVerdict, targetOf, targetOfAction, wordsOfItem, intoOf, cardOf, receiptText, entryMetaOf, valueOf,
 };

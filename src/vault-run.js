@@ -490,13 +490,38 @@ function splitAuthority(a) {
   return { host: p.length > 2 ? s : p[0], port: null };   // > 2 colons = a bare IPv6 literal
 }
 const schemeOff = (s) => String(s == null ? '' : s).replace(/^[a-z][a-z0-9+.-]{0,31}:\/\//i, '');
+// lane vault-use-grants round 5 (MAJOR item 5): the scheme words curl 8.18 treats as a URL (its Protocols line). A positional
+// whose prefix is one of these and is NOT spelled `scheme://host` — `ftp:/127.0.0.1:P/x` (one slash) or `ftp:HOST` (none) —
+// is read by curl as a URL to the host after it, while the BARE reader would name the SCHEME WORD as the host; it is BLIND.
+const CURL_SCHEMES = new Set(['dict', 'file', 'ftp', 'ftps', 'gopher', 'gophers', 'http', 'https', 'imap', 'imaps', 'ipfs', 'ipns', 'ldap', 'ldaps', 'mqtt', 'pop3', 'pop3s', 'rtmp', 'rtmpe', 'rtmps', 'rtmpt', 'rtmpte', 'rtmpts', 'rtsp', 'scp', 'sftp', 'smb', 'smbs', 'smtp', 'smtps', 'telnet', 'tftp', 'ws', 'wss']);
+// lane vault-use-grants round 5 (BLOCKER item 1): the ssh family (ssh / scp / sftp / rsync / git-over-ssh) resolves a
+// single-label host through ~/.ssh/config (`ssh -G ssh://router` prints the alias' HostName, exactly as the bare form) in
+// EVERY spelling — bare `host`, `user@host`, `host:path`, `ssh://`, `scp://`, `sftp://`, `git+ssh://`, `-o HostName=`, `-F`.
+// A host that is not a dotted name / an address / localhost is an ALIAS the agent can redefine ⇒ OPAQUE (the card, no «always»).
+const SSH_SCHEME = /^(?:ssh|sftp|scp|git\+ssh|ssh\+git|svn\+ssh)$/i;
+const sshAlias = (h) => { const x = String(h || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, ''); return !!x && x !== 'localhost' && !/[.:]/.test(x) && !/^[a-z]$/.test(x); };   // a single label (no dot = not a dotted name, no colon = not a bare IPv6), not localhost, not a one-letter drive
+/** The host of an ssh-family target positional, in EVERY spelling (scheme URI → new URL; `host:path` → before the first `:`;
+ *  bare `[user@]host`), or null if the positional is not a target (a local path, a refspec). */
+function sshTargetHost(p, row) {
+  const s = String(p);
+  const sm = /^([a-z][a-z0-9+.-]*):\/\//i.exec(s);
+  if (sm) { if (!SSH_SCHEME.test(sm[1])) return null; try { return new URL(s).hostname || null; } catch { return null; } }   // only SSH-transport schemes resolve through ~/.ssh/config — http(s)/git:// do not
+  if (row.scpLike) { const m = /^(?:[\w.+-]+@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9.-]{1,253}):(?!\/\/)/i.exec(s); if (m) return m[1]; }
+  if (row.sshTarget) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253})$/.exec(s); if (m) return m[1]; }
+  return null;
+}
+/** A proxy / preproxy / socks value → its authority as the ONE parser reads it: scheme stripped, cut at the first `/`, `?` or
+ *  `#` (a `#@host` / `?@host` tail is a fragment/query the tool drops, NEVER userinfo), then host[:port]. (round 5 item 5.) */
+const proxyAuthority = (val) => splitAuthority(schemeOff(String(val == null ? '' : val).trim()).split(/[\/?#]/)[0]);
 const BARE_RE = /^(?:[^\s@\/\\?#]*@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)?(?::(\d{0,5}))?(?:[\/?#]\S*)?$/i;
 /** A URL tool's bare positional → { host } | { unread:true } (a glob {a,b}/[1-9], or a NUMERIC address not in dotted-quad
  *  form — 2130706433 / 0x7f000001 / 127.1 — which the shape cannot list, so it is blind) | {} (not a target). */
 function targetOf(a) {
   const s = String(a);
   if (/[{}]|\[(?![0-9a-f:.]+\])/i.test(s)) return { unread: true };   // curl glob
-  if (/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(s)) return urlHosts(s).length ? {} : { unread: true };
+  if (/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(s)) return urlHosts(s).length ? {} : { unread: true };   // scheme://… → the ONE parser
+  const sch = /^([a-z][a-z0-9+.-]*):/i.exec(s);
+  if (sch && CURL_SCHEMES.has(sch[1].toLowerCase())) return { unread: true };   // round 5 item 5: a scheme the tool knows, NOT a clean scheme://host (`ftp:/HOST`, `ftp:HOST`) — curl connects where the bare reader names the SCHEME WORD; BLIND
   const m = BARE_RE.exec(s);
   if (!m || (!m[1] && m[2] == null)) return { unread: true };
   if (!m[1]) return { host: normHost('localhost', m[2] || null) };   // `:3000` = localhost:3000
@@ -512,24 +537,25 @@ function routeTargetsOf(row, kind, hosts, keyed, positionals, plainEnv) {
   if (row.proxyEnv) for (const e of plainEnv || []) if (/^(?:https?|all|ftp)_proxy$/i.test(e.name) && String(e.value || '').trim()) opaque = true;   // a proxy env var intercepts every request — where it goes cannot be told
   for (const kv of keyed || []) {
     const i = kv.indexOf('='); const flag = kv.slice(0, i), val = kv.slice(i + 1);
-    if (flag === '-x' || flag === '--proxy' || flag === '--preproxy' || flag === '--proxy1.0' || /^--socks[45]/.test(flag)) { const a = splitAuthority(schemeOff(val)); if (a.host) add(a.host, a.port); else if (val.trim()) opaque = true; }
+    if (flag === '-x' || flag === '--proxy' || flag === '--preproxy' || flag === '--proxy1.0' || /^--socks[45]/.test(flag)) { const a = proxyAuthority(val); if (a.host) add(a.host, a.port); else if (val.trim()) opaque = true; }   // round 5 item 5: the authority is cut at the first / ? # — `host:port#@other` connects to host:port, not other
     else if (flag === '--connect-to') { const f = val.split(':'); if (f[2]) add(f[2], /^\d{1,5}$/.test(f[3] || '') ? f[3] : null); else if (val.trim()) opaque = true; }   // HOST1:PORT1:HOST2:PORT2 → connects to HOST2
     else if (flag === '--resolve') { const m = /^\+?[^:]+:\d+:(.+)$/.exec(val); if (m) for (const addr of m[1].split(',')) { const a = splitAuthority(addr.trim()); if (a.host) add(a.host); } }   // HOST:PORT:ADDR[,ADDR] → routes to ADDR
     else if (flag === '--doh-url') { const hs = urlHosts(val); if (hs.length) hs.forEach((h) => out.add(h)); else if (val.trim()) opaque = true; }
     else if (flag === '--unix-socket' || flag === '--abstract-unix-socket' || flag === '--dns-servers' || flag === '--alt-svc') { if (val.trim() || flag.includes('unix')) opaque = true; }   // a local socket / an attacker-chosen resolver / an alt route — a destination the grant can never name
     else if (flag === '-e' || flag === '--execute' || flag === '--rsh') { if (row.name === 'rsync') opaque = true; else if (!WGET_SAFE_E.has(String(val).split('=')[0].trim().toLowerCase())) opaque = true; }   // rsync -e <remote shell>; wget -e <.wgetrc cmd> opaque unless a reviewed non-routing command (round 4: -e input=FILE leaked)
-    else if (flag === '-o') { const e = val.indexOf('='), ve = val.indexOf(' '), c = e < 0 ? ve : ve < 0 ? e : Math.min(e, ve); const k = (c < 0 ? val : val.slice(0, c)).trim().toLowerCase(), rest = c < 0 ? '' : val.slice(c + 1).trim(); if (SSH_LOCAL_O.has(k)) opaque = true; else if (k === 'proxyjump' || k === 'hostname') for (const h of rest.split(/[,\s]+/)) { const a = splitAuthority(h); if (a.host) add(a.host, a.port); } }   // ssh -o
+    else if (flag === '-o') { const e = val.indexOf('='), ve = val.indexOf(' '), c = e < 0 ? ve : ve < 0 ? e : Math.min(e, ve); const k = (c < 0 ? val : val.slice(0, c)).trim().toLowerCase(), rest = c < 0 ? '' : val.slice(c + 1).trim(); if (SSH_LOCAL_O.has(k)) opaque = true; else if (k === 'proxyjump' || k === 'hostname') for (const h of rest.split(/[,\s]+/)) { const a = splitAuthority(h); if (a.host) { add(a.host, a.port); if (sshAlias(a.host)) opaque = true; } } }   // ssh -o; round 5 item 1: an `-o HostName=` carrying a single-label alias is subject to the alias law (`-F <config>` stays `config-file` — it withholds «always»; a remap of a dotted host through a config is the acknowledged ~/.ssh/config gap, open on both trees)
     else if (flag === '-J') { for (const h of val.split(',')) { const a = splitAuthority(h.trim()); if (a.host) add(a.host, a.port); } }   // ssh jump host(s)
     else if (flag === '-W') { const a = splitAuthority(val); if (a.host) add(a.host, a.port); }   // ssh -W host:port
     else if (flag === '-c' || flag === '--config-env' || flag === '-D' || flag === '-S' || flag === '-L' || flag === '-R') opaque = true;   // git config / a forward can redirect where it goes
   }
   if (/^(?:curl|wget)$/.test(row.name)) for (const p of positionals) { const t = targetOf(p); if (t.host) add(t.host); else if (t.unread) opaque = true; }   // every bare positional is a destination; a glob / numeric address is blind
   else if (/^(?:http|https|httpie)$/.test(row.name)) for (const p of httpieTarget(positionals)) { const t = targetOf(p); if (t.host) add(t.host); else if (t.unread) opaque = true; }
-  // lane vault-use-grants round 4 (MAJOR item 2): the single-label-alias rule applies ONLY to the positional that IS a
-  // target — for ssh the `[user@]host` positional; for scp / rsync / git a positional that is scp-like BY SHAPE (`host:` with
-  // NO `://`). A scheme URL (`https://github.com/o/r`) is read by urlParse, and a local path (`backup`, no `:`) is never a host.
-  if (row.sshTarget && positionals.length) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253})$/.exec(positionals[0]); if (m && !/\./.test(m[1]) && !/^localhost$/i.test(m[1])) opaque = true; }
-  if (row.scpLike) for (const p of (row.name === 'git' ? positionals.slice(0, 1) : positionals)) { if (/:\/\//.test(p)) continue; const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253}):/.exec(p); if (m && !/\./.test(m[1]) && !/^localhost$/i.test(m[1]) && !/^[A-Za-z]$/.test(m[1])) opaque = true; }   // git: only the REMOTE (positionals[0]); the rest are refspecs (HEAD:main), never hosts
+  // lane vault-use-grants round 5 (BLOCKER item 1): the ssh family's TARGET host is subject to the alias law in EVERY
+  // spelling (`sshTargetHost` reads it from a bare `[user@]host`, a `host:path`, or an `ssh://`/`scp://`/`sftp://`/`git+ssh://`
+  // URI — r4's rule wrongly exempted every `://` target, reopening `ssh ssh://router`). git: only the REMOTE (positionals[0]);
+  // the rest are refspecs. A git https URL is NOT ssh (sshTargetHost returns null for it) — its host is read by urlParse.
+  if (row.sshTarget && positionals.length) { const h = sshTargetHost(positionals[0], row); if (h && sshAlias(h)) opaque = true; }
+  if (row.scpLike) for (const p of (row.name === 'git' ? positionals.slice(0, 1) : positionals)) { const h = sshTargetHost(p, row); if (h && sshAlias(h)) opaque = true; }
   return { hosts: [...out].filter(Boolean), opaque };
 }
 /** THE reader the card and the grant share: { hosts, opaque } — the hosts the run will CONTACT. (The seam above.) */

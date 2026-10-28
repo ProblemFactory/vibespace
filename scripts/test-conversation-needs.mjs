@@ -51,7 +51,7 @@ const PRODUCERS = {
   'src/server/device-alerts.js': { origin: 'machines', scope: 'group', types: [] },
   'src/server/hub-act-ask.js': { origin: 'machines', scope: 'group', types: ['hub-act-ask'], why: 'the asker is named only in the act\'s `by` — OPEN: no `about` yet' },
   'src/server/automation-engine.js': { origin: 'vault', scope: 'conversation', types: ['automation-ask'] },
-  'src/server/vault-run-door.js': { origin: 'vault', scope: 'mixed', types: ['vault-run-ask', 'vault-grant-ask'] },
+  'src/server/vault-run-door.js': { origin: 'vault', scope: 'mixed', types: ['vault-run-ask', 'vault-grant-ask', 'vault-store-refused', 'vault-grant-stale', 'vault-policy-approved'] },
   'src/server/vault-hooks.js': { origin: 'vault', scope: 'group', types: ['vault-unlock', 'vault-use-failed', 'vault-rotate'] },
   'src/server/dial-health-watch.js': { origin: 'machines', scope: 'group', types: [] },
   'src/server/usage-pool-engine.js': { origin: 'pool', scope: 'mixed', types: ['reset-credit', 'pool-cross-provider'] },

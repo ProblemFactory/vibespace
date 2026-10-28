@@ -321,7 +321,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const hoursOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, v] of Object.entries(raw).slice(0, HOUR_MAX)) if (typeof k === 'string' && Array.isArray(v)) out[k] = v.map((t) => Math.floor(Number(t)) || 0).filter((t) => t > 0).slice(-POLICY_PER_HOUR); return out; };
   const hourWin = (d, hk) => ((d && d.policyHours && d.policyHours[hk]) || []).filter((t) => t > now() - 3600e3);
   /** BOOK a judge call synchronously (no check-then-write race): over the limit ⇒ { ok:false }; else persist +now() and return its token. */
-  const reserveHour = (hk) => { const d = load(); if (!d || d.refused) return { ok: false }; const a = hourWin(d, hk); if (a.length >= POLICY_PER_HOUR) return { ok: false }; const ts = now(); const r = save({ runnable: d.runnable, always: d.always, policyHours: { ...d.policyHours, [hk]: [...a, ts] } }); return r.ok ? { ok: true, ts } : { ok: false }; };
+  // round 5 (MINOR, item 6): prune EXPIRED pairs (every timestamp older than the hour) FIRST, so the HOUR_MAX=64 cap never
+  // evicts a LIVE conversation×entry pair in favour of a dead one — r4 kept ≤ 64 keys sorted, so after 64 pairs a live pair's
+  // count was lost on a restart and the hour bound reset for it. (bodyOf / hoursOf stay now()-independent so the mark verifies.)
+  const reserveHour = (hk) => { const d = load(); if (!d || d.refused) return { ok: false }; const a = hourWin(d, hk); if (a.length >= POLICY_PER_HOUR) return { ok: false }; const ts = now(); const kept = {}; for (const [k, v] of Object.entries(d.policyHours || {})) { const live = (v || []).filter((t) => t > now() - 3600e3); if (live.length) kept[k] = live; } const r = save({ runnable: d.runnable, always: d.always, policyHours: { ...kept, [hk]: [...a, ts] } }); return r.ok ? { ok: true, ts } : { ok: false }; };
   /** A refused judgment frees ITS slot (one occurrence of the token) so the hour is not spent on a NO. */
   const releaseHour = (hk, ts) => { const d = load(); if (!d || d.refused) return; const arr = hourWin(d, hk); const i = arr.indexOf(ts); if (i < 0) return; arr.splice(i, 1); const next = { ...d.policyHours }; if (arr.length) next[hk] = arr; else delete next[hk]; save({ runnable: d.runnable, always: d.always, policyHours: next }); };
   /** The owner's For-you row when the run store fails closed (round 3, MAJOR item 2): a log line is not enough. */
@@ -668,6 +671,13 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         const w = useGrants.addMember(id, { kind: 'conversation', key: q.conv, name: q.who }, { hosts: q.hosts, until, tool: q.tool }, { by: String(by).slice(0, 40) });
         if (!w.ok) { settle(q, 'denied', w.code); return { ok: false, code: w.code, error: w.error }; }
         made.push(w.grant);
+        // lane vault-use-grants round 5 (MAJOR item 3): «Always» with 验证是你 OPENS the entry for agent runs in the SAME act —
+        // the person proved identity for it, and a vault-use member is honoured only when the switch is ON (r4's allow-list). On
+        // an entry opened only by an 8-hour paste grant, r4 wrote a member that never stood (the next shape asked, and after 8 h
+        // it was entry_not_runnable). The card said «这也会打开此条目供 agent 运行使用» when the switch was off. (The switch is the
+        // owner's 验证是你 act — item 2 — and this IS one.)
+        const sr = setRunnable({ id, on: true, reauthed: true, by: String(by).slice(0, 40) });
+        if (!sr.ok) { settle(q, 'denied', sr.code); return { ok: false, code: sr.code }; }
       }
       audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl, until, grants: made, hosts: q.hosts });
     } else if (a === 'always') {
@@ -1032,8 +1042,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const open = sw || !!g;   // round 4 (MAJOR item 4): ON is an ALLOW-LIST — only the owner's switch (`runnable`, trusted store) or the once-grant his answer wrote opens the entry; a standing vault-use grant is honoured ONLY when the switch is ON too (a refused / wiped / replayed store lists nothing ON ⇒ fail closed; an entry with a grant but never switched ON is PAUSED — A7)
       let bytes = 0;
       if (row && open) { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } }
-      entries.push({ id: r.id, exists: !!row, open, bytes });
+      entries.push({ id: r.id, exists: !!row, open, bytes, on: sw });
     }
+    // lane vault-use-grants round 5 (item 3): when «Always» is offered on an entry that is NOT already switched on, the card
+    // says pressing «Always» (with 验证是你) ALSO opens it for agent runs — the switch flips in the same act (option b).
+    if (useGrants && shape.always && entries.some((e) => e.exists && !e.on)) detail = `${detail}\n«Always» (with the second password) also turns on «Usable by agent runs» for this entry, so the agent may use it in runs you do not see each time. / 按「总是允许」（需验证是你）也会打开此条目供 agent 运行使用。`;
     const pair = pairOf(caller.conversationId, key);
     const stored = d ? d.always.find((a) => a.conv === caller.conversationId && a.key === key) : null;
     const short = shortAlways.get(pair);

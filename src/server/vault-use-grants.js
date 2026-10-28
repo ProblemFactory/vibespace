@@ -32,9 +32,10 @@ function writeJsonAtomic(file, obj) {
   fs.renameSync(tmp, file);
 }
 
-const STATUS = Object.freeze({ hosts_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
+const STATUS = Object.freeze({ hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
 const WORDS = Object.freeze({
   hosts_required: 'name the hosts it may be used for — a host name or address each (or «the hosts it was stored for»); never «any host»',
+  tool_required: 'a wildcard host (like *.example.com) is scoped to the tool that first used it — it cannot be saved without one; add it from a run card with «Always»',
   too_many_hosts: `at most ${GM.HOSTS_MAX} hosts per member`,
   unknown_shape: 'that grant could not be read — it is refused as it is, never read wider; remove it and grant again',
   reveal_needs_password: 'giving a conversation more needs the second password again (验证是你)',
@@ -54,6 +55,10 @@ function widens(was, next) {
     if ((e.hosts || []).some((h) => !(o.hosts || []).includes(h))) return true;
     const oe = Number(o.until) > 0 ? Number(o.until) : null, ne = Number(e.until) > 0 ? Number(e.until) : null;
     if (oe != null && (ne == null || ne > oe)) return true;
+    // lane vault-use-grants round 5 (MAJOR item 4): a wildcard's minting TOOL dropped or changed widens who may use it (one
+    // CLI's `*.amazonaws.com` becoming every CLI's) ⇒ 验证是你. (A wildcard with NO tool at all is refused by name in setRow.)
+    const ot = o.toolFor && typeof o.toolFor === 'object' ? o.toolFor : {}, nt = e.toolFor && typeof e.toolFor === 'object' ? e.toolFor : {};
+    for (const h of e.hosts || []) if (String(h).startsWith('*.') && ot[h] && (!nt[h] || nt[h] !== ot[h])) return true;
   }
   const nx = new Set((next.except || []).map(GM.principalKey));
   return (w.except || []).some((x) => !nx.has(GM.principalKey(x)));
@@ -95,14 +100,27 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     genSeq = Math.max(genSeq, g); markGen = g; genByRes = Object.assign(Object.create(null), res);
   };
   const saveGen = () => { if (!MARK_FILE) return; try { const body = genBody(genSeq, genByRes); const mark = vault.macOf(GEN_LABEL, body); if (!mark) return; writeJsonAtomic(MARK_FILE, { ...JSON.parse(body), mark }); markGen = genSeq; } catch (e) { log(`[vault-use] the mark generation could not be written (${e.message})`); } };
-  const bumpGen = (id) => { loadGen(); genSeq = Math.max(genSeq, markGen) + 1; genByRes[String(id)] = genSeq; staleNoted.delete(String(id)); saveGen(); return genSeq; };   // a fresh owner write clears the stale notice for this resource
+  // lane vault-use-grants round 5 (MINOR, item 6): the generation moves in TWO steps — `nextGen` computes the generation a
+  // write WILL take (it does NOT persist), and `commitGen` records it only AFTER the grants write landed. r4 bumped+persisted
+  // BEFORE the write, so a refused 257th member (too_many) or a failed grants.json write invalidated every existing member of
+  // the entry (their macs were made at the old generation, which no longer verified) ⇒ a false «forged» alarm.
+  const nextGen = () => { loadGen(); return Math.max(genSeq, markGen) + 1; };
+  const commitGen = (id, gen) => { const g = Number(gen) || 0; genSeq = Math.max(genSeq, g); genByRes[String(id)] = g; staleNoted.delete(String(id)); saveGen(); return g; };   // a fresh owner write clears the stale notice for this resource
 
   const canonMember = (id, e, xc, gen) => JSON.stringify([String(id), GM.principalKey(GM.bareOf(e)) || '', (e.hosts || []).map(String).slice().sort(), e.toolFor && typeof e.toolFor === 'object' && !Array.isArray(e.toolFor) ? Object.keys(e.toolFor).sort().map((k) => [k, String(e.toolFor[k]).toLowerCase()]) : null, Number(e.until) > 0 ? Math.floor(Number(e.until)) : null, typeof e.name === 'string' ? e.name : null, Array.isArray(xc) ? xc : [], Number(gen) || 0]);
   const macFor = (id, e, xc, gen) => { try { return vault && typeof vault.macOf === 'function' ? vault.macOf('vault-use', canonMember(id, e, xc, gen)) : null; } catch { return null; } };
-  const stamp = (id, to, except, gen) => { const xc = exceptCanon(except); return (Array.isArray(to) ? to : []).map((e) => { const m = macFor(id, e, xc, gen); const { mac, ...rest } = e; return m ? { ...rest, mac: m } : rest; }); };   // re-stamp every member over the WHOLE row (except + gen changed); a locked vault yields no mac (but a locked write is refused before this)
+  // re-stamp every member over the WHOLE row (except + gen changed); a locked vault yields no mac (but a locked write is
+  // refused before this). round 5 (MINOR, item 6): the mac is computed over the member AS THE STORE WILL KEEP IT — each is run
+  // through the store's ONE normaliser (GM.normEntry: cleanName on the name, normalised hosts/toolFor) FIRST, so a trailing
+  // space or a control character in a conversation's name never leaves the stored (cleaned) member failing its own mac.
+  const stamp = (id, to, except, gen) => { const xc = exceptCanon(except); return (Array.isArray(to) ? to : []).map((e0) => { const { mac, ...bare } = e0; const e = GM.normEntry(bare, U.DOOR) || bare; const m = macFor(id, e, xc, gen); return m ? { ...e, mac: m } : e; }); };
   const verifyMember = (id, e, xc, gen) => { const want = macFor(id, e, xc, gen); const got = e && typeof e.mac === 'string' && /^[0-9a-f]{64}$/.test(e.mac) ? e.mac : null; if (!want || !got) return false; try { return crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')); } catch { return false; } };
   const verifiedRow = (row) => {
     if (!row) return row;
+    // lane vault-use-grants round 5 (MINOR, item 6): a LOCKED vault cannot compute a mac (vault.macOf → null). That is «cannot
+    // verify now», NOT «every member forged»: keep the members (the door refuses the run with vault_locked anyway) and file NO
+    // stale alarm. Only a COMPUTED mismatch (below, with an unlocked vault) is a forged / widened / replayed row.
+    if (!unlocked()) return row;
     loadGen();
     const xc = exceptCanon(row.except), gen = genByRes[row.resource] || 0;
     const to = (row.to || []).filter((e) => verifyMember(row.resource, e, xc, gen));
@@ -123,11 +141,16 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     for (const e of Array.isArray(to) ? to : []) if (!GM.hostListOf(e && e.hosts)) return named('hosts_required', { principal: GM.principalKey(GM.bareOf(e)) });
     const v = GM.validateWrite(U.DOOR, String(id), { to, except });
     if (!v.ok) return named(v.code, { error: v.error });
+    // lane vault-use-grants round 5 (MAJOR item 4): a wildcard host MUST carry the tool that minted it — a whole-row Save that
+    // drops `toolFor` (the r4 picker rebuilt each member from principal + name + hosts + end only) is refused BY NAME, never
+    // silently re-scoping `*.amazonaws.com` from aws to every tool.
+    for (const e of v.row.to) for (const h of e.hosts || []) if (String(h).startsWith('*.') && !(e.toolFor && e.toolFor[h])) return named('tool_required', { principal: GM.principalKey(GM.bareOf(e)), host: h });
     const was = rowOf(id);
     if (widens(was, v.row) && !reauthed) return named('reveal_needs_password');
     const g = store();
-    const gen = bumpGen(id);
+    const gen = nextGen();
     const w = v.row.to.length || v.row.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, v.row.to, v.row.except, gen), except: v.row.except }, by) : g.remove(U.DOOR, String(id), by);
+    if (w && w.ok) commitGen(id, gen);
     return landed(w, { id: String(id), members: v.row.to.length });
   }
   /** ONE member added or widened (the card's «Always», the request default, the carry). `tool` scopes a wildcard PER HOST. */
@@ -136,9 +159,12 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     if (!unlocked()) return named('vault_locked');
     const plan = U.withMember(verifiedRow(rowOf(id)), principal, { hosts, until, tool });
     if (!plan.ok) return named(plan.code);
+    const v = GM.validateWrite(U.DOOR, String(id), { to: plan.to, except: plan.except });   // round 5 (MINOR): validate the plan BEFORE any generation move (a bad plan never bumps the gen)
+    if (!v.ok) return named(v.code, { error: v.error });
     const g = store();
-    const gen = bumpGen(id);
+    const gen = nextGen();
     const w = g.set(U.DOOR, String(id), { to: stamp(id, plan.to, plan.except, gen), except: plan.except }, by);
+    if (w && w.ok) commitGen(id, gen);
     return landed(w, { id: String(id), grant: U.grantIdOf(String(id), GM.principalKey(GM.bareOf(principal))), widened: plan.widened, added: plan.added });
   }
   /** ONE member out (a click: a narrowing). */
@@ -150,8 +176,9 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const plan = U.withoutMember(was, principalKey);
     if (!plan.ok) return named(plan.code);
     const g = store();
-    const gen = bumpGen(id);
+    const gen = nextGen();
     const w = plan.to.length || plan.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, plan.to, plan.except, gen), except: plan.except }, by) : g.remove(U.DOOR, String(id), by);
+    if (w && w.ok) commitGen(id, gen);
     return landed(w, { removed: plan.removed });
   }
   /** The entry is gone: its row goes too. */
@@ -159,8 +186,10 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     if (!okId(id) || !rowOf(id)) return { ok: true, removed: false };
     if (!unlocked()) return named('vault_locked');
     const g = store();
-    bumpGen(id);   // a dropped row cannot be replayed back: the generation moves on
-    return landed(g.remove(U.DOOR, String(id), by), { removed: true });
+    const gen = nextGen();
+    const w = g.remove(U.DOOR, String(id), by);
+    if (w && w.ok) commitGen(id, gen);   // a dropped row cannot be replayed back: the generation moves on — but only once the removal landed
+    return landed(w, { removed: true });
   }
   /** THE CARRY: data/vault-run.json's «always» rows (read by the run door, its mark verified) → members, through the ONE
    *  writer, by 'migration'. → { carried, expired, hostless, failed }. */

@@ -117,6 +117,11 @@ const HOSTS_MAX = 16;
 // wildcard over a MULTI-TENANT registrable domain (`*.amazonaws.com`, `*.github.io`) is allowed but said in words on the card.
 const PUBLIC_SUFFIXES = new Set(['co.uk', 'org.uk', 'gov.uk', 'ac.uk', 'me.uk', 'ltd.uk', 'plc.uk', 'net.uk', 'sch.uk', 'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'id.au', 'co.nz', 'net.nz', 'org.nz', 'govt.nz', 'co.jp', 'ne.jp', 'or.jp', 'go.jp', 'ac.jp', 'co.za', 'org.za', 'com.br', 'net.br', 'gov.br', 'com.cn', 'net.cn', 'org.cn', 'gov.cn', 'com.mx', 'com.sg', 'com.hk', 'co.in', 'co.kr', 'com.tr', 'co.il']);
 const ipv4ok = (h) => !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(h) || h.split('.').every((o) => Number(o) <= 255);   // round 3 (MINOR): a dotted-quad's octets are ≤ 255 (1.2.3.999 refused)
+// lane vault-use-grants round 5 (MAJOR item 5): a single-label host spelled like a URL scheme the tools know (curl's
+// Protocols + the ssh family) is NEVER grantable — a command's scheme-shaped token (`ftp:/HOST`, `http://http/`) would read
+// the SCHEME WORD as a host and falsely match such a grant, sending the value where the word, not the owner, points. The
+// grant is refused at mint (`scheme_word_host`); the run always draws the card. (The reader also BLINDS the token — src/vault-run.js.)
+const SCHEME_WORD_HOSTS = new Set(['dict', 'file', 'ftp', 'ftps', 'gopher', 'gophers', 'http', 'https', 'imap', 'imaps', 'ipfs', 'ipns', 'ldap', 'ldaps', 'mqtt', 'pop3', 'pop3s', 'rtmp', 'rtmpe', 'rtmps', 'rtmpt', 'rtmpte', 'rtmpts', 'rtsp', 'scp', 'sftp', 'smb', 'smbs', 'smtp', 'smtps', 'telnet', 'tftp', 'ws', 'wss', 'ssh', 'svn', 'git', 'rsync']);
 /** A single host token is valid: the shape grammar + a port in 1..65535 + IPv4 octets ≤ 255 + a wildcard base that is
  *  neither numeric nor a public suffix (round 3, item 5 + ports MINOR). → the normalized token | null. */
 function hostTokenOk(h) {
@@ -133,6 +138,7 @@ function hostTokenOk(h) {
     if (/^\d+$/.test(labels[labels.length - 1])) return null;   // a wildcard never ends in a numeric label (never an address: *.1.1, *.168.1.1)
     if (PUBLIC_SUFFIXES.has(base)) return null;                 // a wildcard over a public suffix is refused
   }
+  if (!bare.includes('.') && !bare.includes(':') && !bare.startsWith('*') && SCHEME_WORD_HOSTS.has(bare)) return null;   // round 5 item 5: a single label that IS a URL scheme word is not grantable
   return n;
 }
 /** A `hosts` value → its normal list (lower-cased, a trailing dot and IPv6 brackets dropped, deduplicated, ≤ HOSTS_MAX) |

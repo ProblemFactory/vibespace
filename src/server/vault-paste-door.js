@@ -70,7 +70,9 @@ const statusOf = (code) => STATUS[code] || 400;
  */
 function create({ vault, integrations = null, userTodos = null, deliver = null, vaultRun = null, useGrants = null, setting = () => undefined, log = () => {}, now = () => Date.now() } = {}) {
   // lane vault-use-grants: does a request that names its hosts grant the asker? (Settings ▸ vault.requestGrantsRequester — default on)
-  const grantsAsker = () => { if (!useGrants) return false; let v; try { v = setting('vault.requestGrantsRequester'); } catch { v = undefined; } return v !== false && v !== 'false'; };
+  // lane vault-use-grants round 5 (MAJOR item 2): the setting gates the 8-HOUR run grant (via vaultRun.grantPasted) — it no
+  // longer needs useGrants (r4's standing member, which did, is gone). Default on; off ⇒ the asker must `request` to use it.
+  const grantsAsker = () => { let v; try { v = setting('vault.requestGrantsRequester'); } catch { v = undefined; } return v !== false && v !== 'false'; };
   if (!vault) throw new TypeError('vault-paste-door: vault is required');
   const open = new Map();      // requestId → { requestId, todoId, conv, scope, sessionKey, who, words, purpose, target, place }
   const quiet = new Map();     // `${conv}\n${place}` → until (after a refusal)
@@ -131,7 +133,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if ([...open.values()].filter((q) => q.conv === conv).length >= P.LIMITS.openPerConversation || open.size >= P.LIMITS.openHubWide) return named('too_many_requests');
     const requestId = `sr-${crypto.randomBytes(6).toString('hex')}`;
     const who = String(VB.actorName(caller.name, 'a conversation')).slice(0, 80);
-    const grant = v.target.kind === 'entry' && v.target.hosts.length > 0 && grantsAsker();   // lane vault-use-grants: the card says the default
+    const grant = v.target.kind === 'entry' && grantsAsker();   // lane vault-use-grants round 5: the paste gives the asker an 8-hour run grant (not a standing host-scoped member) — the card says so
     const card = P.cardOf({ who, words: v.words, purpose: v.purpose, target: v.target, replaces: replacesOf(v.target), grant: grant ? { hosts: v.target.hosts } : null });
     const scope = String(caller.scope || conv);
     let it;
@@ -188,16 +190,12 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
       const r = vault.secretPut(entry, vv.value, { prov: 'owner', actor: who, label: q.target.label, kind: q.target.entryKind, note: `Asked for by ${who}: ${q.purpose}`.slice(0, P.LIMITS.note), hosts: q.target.hosts || [], askedBy: { conv: q.conv, name: who } });
       if (!r || !r.ok) { const c = String((r && r.code) || ''); return named(c.includes('vault_locked') ? 'vault_locked' : c === 'vault_not_set_up' ? 'vault_not_set_up' : 'store_failed'); }
       ref = `vault://secrets/${entry}/${P.ENTRY_FIELD}`;
-      // lane vault-use-grants: THE DEFAULT GRANT the card said — the conversation that asked × the hosts it named (the setting read
-      // again now: switched off since ⇒ the 8-hour run grant below, as a request without hosts)
-      if (q.grant && q.target.hosts && q.target.hosts.length && grantsAsker()) {
-        try { const id = `secrets:${entry}#${P.ENTRY_FIELD}`; const g = useGrants.addMember(id, { kind: 'conversation', key: q.conv, name: who }, { hosts: q.target.hosts }, { by: 'request' }); if (g && g.ok) { standing = { hosts: q.target.hosts.slice(), grant: g.grant };
-          // round 4 (item 4): a grant is honoured only when the entry is switched ON (the allow-list). The owner filled this
-          // request to let the asker USE the new secret for those hosts with no card, so enable runs for it (their 验证是你 filled it).
-          if (vaultRun && typeof vaultRun.setRunnable === 'function') { try { vaultRun.setRunnable({ id, on: true, reauthed: true, by: 'request' }); } catch (e) { log(`${q.requestId}: the entry was granted but not switched on (${e.message})`); } }
-        } else log(`${q.requestId}: the default grant was not written (${g && g.code})`); } catch (e) { log(`${q.requestId}: the default grant could not be written: ${e.message}`); }
-      }
-      if (!standing && vaultRun && typeof vaultRun.grantPasted === 'function') { try { const g = vaultRun.grantPasted({ scope: q.scope, ref, purpose: q.purpose, by, requestId: id }); if (g && g.ok) grantHours = g.hours; } catch (e) { log(`${q.requestId}: the run grant could not be written: ${e.message}`); } }
+      // lane vault-use-grants round 5 (MAJOR item 2): THE PASTE OPENS NOTHING BUT ITS OWN 8-HOUR GRANT to the REQUESTING
+      // conversation (grantPasted — scoped to q.scope, bounded, ended by a lock; a new kind of command still draws its card).
+      // The entry's «Usable by agent runs» switch is the owner's 验证是你 act and NOTHING else flips it: r4 forged
+      // `reauthed:true` here, so one paste opened the new secret to EVERY conversation's run door (ON is an allow-list). To let
+      // it be used without the 8-hour limit (and by whoever the owner lists), the owner turns the switch on in the Vault window.
+      if (grantsAsker() && vaultRun && typeof vaultRun.grantPasted === 'function') { try { const g = vaultRun.grantPasted({ scope: q.scope, ref, purpose: q.purpose, by, requestId: id }); if (g && g.ok) grantHours = g.hours; } catch (e) { log(`${q.requestId}: the run grant could not be written: ${e.message}`); } }
     }
     let receipt = null;
     try { receipt = (vault.noteUse(entry, { by: 'agent', door: 'paste', conv: q.scope }, { outcome: 'ok', purpose: q.purpose, actor: who }) || {}).receipt || null; } catch { /* the store answered: the use line is the audit's */ }
@@ -241,10 +239,13 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   function dropEntry(id, { by = 'user' } = {}) {
     const entry = `${P.ENTRY_PREFIX}${String(id || '')}`;
     if (!/^secret:[\w.-]{1,160}$/.test(entry)) return named('entry_unknown_id');
+    // lane vault-use-grants round 5 (MINOR item 6): the entry and WHO MAY USE IT go together — remove the vault-use grant row
+    // FIRST (it refuses while locked, needing the generation sidecar). If it cannot (a locked vault), REFUSE the whole delete by
+    // name, so an entry is never gone while its grant row dangles (r4 deleted the secret and silently ignored the row's refusal).
+    if (useGrants) { let dr = null; try { dr = useGrants.drop(`secrets:${entry}#${P.ENTRY_FIELD}`, { by }); } catch (e) { log(`${entry}: its vault-use grant row could not be removed — ${e.message}`); return named('store_failed'); } if (dr && !dr.ok) return named(dr.code === 'vault_locked' ? 'vault_locked' : 'store_failed'); }
     const r = vault.secretDrop(entry);
     if (!r || !r.ok) return named('store_failed');
     if (r.already) return named('entry_unknown_id');
-    if (useGrants) { try { useGrants.drop(`secrets:${entry}#${P.ENTRY_FIELD}`, { by }); } catch (e) { log(`${entry}: its vault-use grant row was not removed — ${e.message}`); } }   // lane vault-use-grants: the entry is gone, so is who may use it
     audit('vault-secret-deleted', { by: String(by).slice(0, 40), entry });
     return { ok: true, entry };
   }

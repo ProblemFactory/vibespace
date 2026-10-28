@@ -314,35 +314,42 @@ console.log('⑦ THE REQUEST DEFAULT — the conversation that asked × the host
   const rq = w.paste.request({ caller: c, words: 'the UniFi admin password', purpose: 'log in to the UniFi gateway to read the WAN status', kind: 'password', name: LABEL, hosts: '192.168.1.1' });
   const item = (w.userTodos.snapshot().open || []).find((i) => i.action && i.action.type === P.ACTION_TYPE && i.action.requestId === rq.requestId);
   ok(rq.ok && rq.target.hosts.join() === '192.168.1.1' && item && item.action.hosts === '192.168.1.1' && item.action.grant === true, 'the request names its hosts (the item\'s action: a scalar, as every action field)', item && item.action);
-  ok(item && item.detail.includes('The conversation that asked will be allowed to use it for 192.168.1.1 without asking each time; change it in the Vault window') && item.i18n.detail.some((l) => l.key === P.GRANT_LINE), 'THE CARD SAYS THE DEFAULT where the owner pastes (an i18n line)', item && item.detail);
+  // round 5 (MAJOR item 2): the paste opens an 8-HOUR run grant to the asker (requestGrantsRequester) — NOT a standing
+  // host-scoped member, and it NEVER flips the «Usable by agent runs» switch (r4 forged `reauthed:true`, opening the new
+  // secret to EVERY conversation's run door).
+  ok(item && item.detail.includes('It said it needs it for: 192.168.1.1') && item.detail.includes('may use it in commands for 8 hours') && item.detail.includes('Usable by agent runs'), 'THE CARD SAYS the 8-hour run grant where the owner pastes (the switch is the owner\'s own act)', item && item.detail);
   const an = w.paste.answer(rq.requestId, { answer: 'store', value: VALUE });
   ok(an.ok && an.outcome === 'stored' && /^secret:[0-9a-f]{10}$/.test(an.entry), 'the owner pastes ⇒ stored', an);
-  const id = `secrets:${an.entry}#secret`, row = w.useGrants.rowsOf(id)[0];
-  ok(row && row.to.length === 1 && row.to[0].key === 'cid-asker-1' && row.to[0].hosts.join() === '192.168.1.1' && !('until' in row.to[0]), '… and the paste WROTE the grant: the asker × 192.168.1.1 (no end)', row);
-  ok(grantAudit(w).some((l) => l.door === 'vault-use' && l.resource === id && l.by === 'request'), 'through the ONE writer, by: request');
+  const id = `secrets:${an.entry}#secret`;
+  const gFor = (entryId) => [...w.door._grants.values()].filter((g) => g.conv === 'cid-asker-1' && g.entries.includes(entryId) && g.until > Date.now());
+  ok(!w.useGrants.rowsOf(id).length && gFor(id).some((g) => !g.once), '… and the paste opened an 8-hour run grant to the asker — NO standing member, NO switch flipped', { members: w.useGrants.rowsOf(id).length, grants: gFor(id).length });
+  ok(!w.door.rowFacts({ id, store: 'secrets', entry: an.entry, field: 'secret' }).open, 'the «Usable by agent runs» switch stays OFF (a paste never flips it)');
   const sn = w.vault.secretNames().find((x) => x.name === an.entry);
   ok(sn && sn.hosts.join() === '192.168.1.1' && sn.askedBy.conv === 'cid-asker-1' && sn.askedBy.name === 'Home network', 'the entry records the hosts and who asked (words — never a value)', sn);
   const rc = w.stash.filter((x) => x.cid === 'cid-asker-1').pop();
-  ok(rc && /STORED/.test(rc.text) && /allowed this conversation to use it for 192\.168\.1\.1 without asking/.test(rc.text) && !rc.text.includes(VALUE), 'the agent\'s receipt says it may use it for those hosts with no card', rc && rc.text);
-  const run = await runAnswered(w, CURL(`vault://secrets/${an.entry}/secret`, 'https://192.168.1.1/api/auth/login'));
-  ok(run.r.ok && run.r.by === 'grant' && !run.card, '… and its first run (a cluster) asks NOTHING — the card the owner would have pressed «Always» on', { by: run.r.by, code: run.r.code });
+  ok(rc && /STORED/.test(rc.text) && /use it in a command for 8 hours/.test(rc.text) && !rc.text.includes(VALUE), 'the agent\'s receipt says it may use it for 8 hours with no card', rc && rc.text);
+  const run = await runAnswered(w, CURL(`vault://secrets/${an.entry}/secret`, 'https://192.168.1.1/api/auth/login'), { answer: 'always', reauthed: true, ttl: '30d' });
+  ok(run.card && run.r.ok, '… the 8-hour grant makes the entry RUNNABLE: its first run draws a card the owner approves (vs entry_not_runnable with no grant); «Always» then opens it fully', { by: run.r.by, code: run.r.code, card: !!run.card });
+  const run2 = await runAnswered(w, CURL(`vault://secrets/${an.entry}/secret`, 'https://192.168.1.1/api/status'));
+  ok(run2.r.ok && run2.r.by === 'grant' && !run2.card, '… and after «Always» (which opened the switch), another shape runs with NO card', { by: run2.r.by, code: run2.r.code });
   const d = w.paste.dropEntry(an.entry.slice(7));
-  ok(d.ok && !w.useGrants.rowsOf(id).length, 'deleting the entry removes who may use it (its row)');
+  ok(d.ok && !w.useGrants.rowsOf(id).length, 'deleting the entry succeeds (no dangling grant row)');
   w.setting['vault.requestGrantsRequester'] = false;
   const r2 = w.paste.request({ caller: c, words: 'the NAS admin password', purpose: 'read the disk health', kind: 'password', name: 'NAS admin', hosts: 'nas.lan' });
   const it2 = (w.userTodos.snapshot().open || []).find((i) => i.action && i.action.requestId === r2.requestId);
-  ok(it2 && !it2.detail.includes('will be allowed') && it2.detail.includes('is not allowed to use it until you allow it') && it2.action.grant === false, 'the setting OFF ⇒ the card says the asker is NOT allowed until the owner allows it', it2 && it2.detail);
+  ok(it2 && !it2.detail.includes('may use it in commands for 8 hours') && it2.detail.includes('is not allowed to use it in runs until you turn on') && it2.action.grant === false, 'the setting OFF ⇒ the card says the asker is NOT allowed until the owner turns on the switch', it2 && it2.detail);
   const an2 = w.paste.answer(r2.requestId, { answer: 'store', value: VALUE });
-  ok(an2.ok && !w.useGrants.rowsOf(`secrets:${an2.entry}#secret`).length && w.door._grants.size >= 1, '… the paste writes NO grant (the 8-hour run grant of before)', an2);
+  const id2 = `secrets:${an2.entry}#secret`;
+  ok(an2.ok && !w.useGrants.rowsOf(id2).length && ![...w.door._grants.values()].some((g) => g.entries.includes(id2)), '… the setting OFF ⇒ the paste writes NO run grant for it (the asker must request)', an2);
   w.setting['vault.requestGrantsRequester'] = true;
   const r3 = w.paste.request({ caller: c, words: 'the printer token', purpose: 'print', kind: 'secret', name: 'Printer', hosts: 'printer.lan' });
   w.setting['vault.requestGrantsRequester'] = false;
   const an3 = w.paste.answer(r3.requestId, { answer: 'store', value: VALUE });
-  ok(an3.ok && !w.useGrants.rowsOf(`secrets:${an3.entry}#secret`).length, 'switched OFF between the card and the paste ⇒ read again at the paste: no grant');
+  ok(an3.ok && ![...w.door._grants.values()].some((g) => g.entries.includes(`secrets:${an3.entry}#secret`)), 'switched OFF between the card and the paste ⇒ read again at the paste: no grant');
   w.setting['vault.requestGrantsRequester'] = true;
   const r4 = w.paste.request({ caller: c, words: 'a key', purpose: 'build', kind: 'api-key', name: 'Build key' });
   const it4 = (w.userTodos.snapshot().open || []).find((i) => i.action && i.action.requestId === r4.requestId);
-  ok(it4 && !it4.detail.includes('will be allowed') && !('hosts' in it4.action), 'a request that names NO host ⇒ no default (never «any host»)');
+  ok(it4 && it4.detail.includes('may use it in commands for 8 hours'), 'a request that names NO host ⇒ still the 8-hour grant (it supplied the value), no host line');
   const b1 = w.paste.request({ caller: c, words: 'x', purpose: 'y', kind: 'password', hosts: '*' });   // round 2: a lone «*» (any host) is still refused; a *.domain wildcard is now a valid host
   const b2 = w.paste.request({ caller: c, words: 'x', purpose: 'y', into: 'llm.apiKey', hosts: 'api.example.com' });
   const b3 = w.paste.request({ caller: c, words: 'x', purpose: 'y', kind: 'password', hosts: '*.amazonaws.com' });
@@ -838,6 +845,46 @@ console.log('㉗ ROUND 4 (MAJOR item 5) — the per-hour bound is BOOKED synchro
   for (let i = 0; i < 400 && !after; i++) { const c = cardsOf(w); if (c.length) { d2.answer(c[c.length - 1].action.askId, { answer: 'deny' }); } const r = await Promise.race([run, sleep(4).then(() => null)]); if (r) after = r; }
   after = after || (await run);
   ok(after.by !== 'policy', 'after a restart, a run in the same hour is bounded by the persisted count (never a fresh 30) — not by: policy', { by: after.by || after.code });
+}
+
+console.log('㉘ ROUND 5 (MAJOR item 4) — a wildcard\'s per-host tool survives the whole-row Save; dropping it is refused, changing it is a widening');
+{
+  const w = await world();
+  const e = entryOf(w);
+  const aw = w.useGrants.addMember(e.id, { kind: 'conversation', key: 'cid-asker-1', name: 'A' }, { hosts: ['*.amazonaws.com'], tool: 'aws' });
+  const m0 = w.useGrants.publicFor(e.id).to[0];
+  ok(aw.ok && m0.toolFor && m0.toolFor['*.amazonaws.com'] === 'aws', 'a wildcard grant carries the tool that minted it (toolFor per host)', m0 && m0.toolFor);
+  const sv = w.useGrants.setRow(e.id, { to: [{ kind: 'conversation', key: 'cid-asker-1', name: 'A', hosts: ['*.amazonaws.com'] }] }, { reauthed: true });   // the r4 client's shape — NO toolFor
+  ok(!sv.ok && sv.code === 'tool_required', 'a whole-row Save that DROPS a wildcard\'s tool is refused BY NAME (tool_required) — never silently re-scoped to every tool (by: grant for curl on cabd3c56)', sv);
+  ok((w.useGrants.publicFor(e.id).to[0].toolFor || {})['*.amazonaws.com'] === 'aws', 'the stored wildcard keeps its tool (the refused Save changed nothing)');
+  const sv2 = w.useGrants.setRow(e.id, { to: [{ kind: 'conversation', key: 'cid-asker-1', name: 'A', hosts: ['*.amazonaws.com'], toolFor: { '*.amazonaws.com': 'curl' } }] }, { reauthed: false });
+  ok(!sv2.ok && sv2.code === 'reveal_needs_password', 'CHANGING a wildcard\'s tool (aws → curl) is a WIDENING ⇒ 验证是你', sv2);
+  const sw = w.useGrants.addMember(e.id, { kind: 'conversation', key: 'cid-x' }, { hosts: ['http'] });
+  ok(!sw.ok, 'a grant for a scheme-word host (http / ftp / ssh) is refused at mint (item 5 — a run\'s scheme-shaped token would falsely match it)', sw);
+}
+
+console.log('㉙ ROUND 5 (MINOR) — the mac is over the CLEANED name; a refused write never invalidates the row; a locked read/delete file no false alarm');
+{
+  const w = await world();
+  const e = entryOf(w);
+  const ad = w.useGrants.addMember(e.id, { kind: 'conversation', key: 'cid-asker-1', name: 'Home network ' }, { hosts: ['192.168.1.1'] });   // a trailing space
+  const vn = w.useGrants.verdictFor(e.id, { conversationKeys: ['cid-asker-1'] }, { hosts: ['192.168.1.1'], destinationKnown: true });
+  ok(ad.ok && vn.ok && !w.staleRows.includes(e.id), 'the mac is over the CLEANED name (what the store keeps) — a trailing space / control char never drops the grant as «forged» (not_granted + a false alarm on cabd3c56)', { ok: vn.ok, stale: w.staleRows.slice() });
+  const w2 = await world();
+  const e2 = entryOf(w2);
+  for (let i = 0; i < 256; i++) w2.useGrants.addMember(e2.id, { kind: 'conversation', key: `cid-m-${i}` }, { hosts: ['192.168.1.1'] });
+  const over = w2.useGrants.addMember(e2.id, { kind: 'conversation', key: 'cid-m-256' }, { hosts: ['192.168.1.1'] });
+  const v7 = w2.useGrants.verdictFor(e2.id, { conversationKeys: ['cid-m-7'] }, { hosts: ['192.168.1.1'], destinationKnown: true });
+  ok(!over.ok && v7.ok && w2.useGrants.rowsOf(e2.id)[0].to.length === 256 && !w2.staleRows.includes(e2.id), 'a refused 257th member (too_many) does NOT invalidate the 256 existing members (0 dropped on the new tree; all dropped + 1 stale on cabd3c56) — the generation bumps only on a successful write', { over: over.code, m7: v7.ok, kept: w2.useGrants.rowsOf(e2.id)[0].to.length });
+  const w3 = await world();
+  const e3 = entryOf(w3);
+  w3.useGrants.addMember(e3.id, { kind: 'conversation', key: 'cid-asker-1' }, { hosts: ['192.168.1.1'] });
+  w3.vault.lock();
+  w3.useGrants.publicFor(e3.id);   // a READ while LOCKED
+  const del = w3.paste.dropEntry(e3.name.slice(7));   // a DELETE while LOCKED (the entry has a grant)
+  await w3.vault.unlock(PW);
+  ok(!w3.staleRows.includes(e3.id), 'a READ while the vault is LOCKED files NO «forged» alarm (a mac that cannot be computed is «cannot verify now», not a mismatch)', { stale: w3.staleRows.slice() });
+  ok(!del.ok && del.code === 'vault_locked' && w3.useGrants.rowsOf(e3.id).length === 1, 'deleting an entry that has a grant while LOCKED is refused BY NAME — never an entry gone with a dangling grant row', { del: del.code, rows: w3.useGrants.rowsOf(e3.id).length });
 }
 
 console.log(fail ? `\n${pass} passed, ${fail} failed` : `\nALL PASS (${pass})`);

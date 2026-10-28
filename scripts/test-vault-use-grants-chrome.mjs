@@ -158,7 +158,7 @@ try {
   const reqId = a1b.id;
   const todo = async () => (await A.api('GET', '/api/user-todos')).json.todos;
   const item = ((await todo()).open || []).find((i) => i.action && i.action.requestId === reqId);
-  check('THE REQUEST BOX SAYS THE DEFAULT before the paste: «The conversation that asked will be allowed to use it for 192.168.1.1 without asking each time; change it in the Vault window»', !!item && /The conversation that asked will be allowed to use it for 192\.168\.1\.1 without asking each time; change it in the Vault window/.test(item.detail), item && item.detail);
+  check('THE REQUEST BOX SAYS THE 8-HOUR GRANT before the paste (r5 item 2 — a paste opens no switch): «It said it needs it for: 192.168.1.1. If you paste it, the conversation that asked may use it in commands for 8 hours … turn on «Usable by agent runs» …»', !!item && /It said it needs it for: 192\.168\.1\.1\. If you paste it, the conversation that asked may use it in commands for 8 hours/.test(item.detail) && /turn on «Usable by agent runs»/.test(item.detail), item && item.detail);
   // THE STORING PAGE: a second page of the same sign-in answers the request through the request route
   const tB = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const B = await pageOf(tB);
@@ -177,12 +177,23 @@ try {
   check('its origin: «Filled by you · asked for by Home network»; its meta names the host', !!prov && prov.prov === 'request' && prov.chip === 'Filled by you · asked for by Home network' && /for 192\.168\.1\.1/.test(prov.meta), prov);
   await A.shot('vug-2-search-after.png');
 
-  console.log('③ NO CARD — the conversation that asked runs with it for the host it named');
-  const r1 = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-sk', 'https://192.168.1.1/api/auth/login'], TOKEN);
+  console.log('③ THE 8-HOUR PASTE GRANT + «Always» (r5 item 2/3) — the first run draws a card; «Always» (验证是你) writes the standing member and opens «Usable by agent runs»');
   const cards = async () => ((await todo()).open || []).filter((i) => i.action && i.action.type === 'vault-run-ask');
-  check('`vibespace-vault run … curl https://192.168.1.1/…` ⇒ ran at once with NO card (the default grant), its output scrubbed', r1.code === 0 && /^curl got \[vault:secrets\//m.test(r1.out) && !r1.out.includes(VALUE) && !(await cards()).length, r1.out);
-  const chip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && r.querySelector('.vw-use-chip'); return c && /used 1×/.test(c.textContent) ? c.textContent : null; })()`, { timeout: 6000 });
-  check('the row\'s chip arrives by itself: «Home network · 192.168.1.1 · used 1×» (+ ✕)', /^Home network · 192\.168\.1\.1 · used 1×✕$/.test(String(chip)), chip);
+  const runP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-sk', 'https://192.168.1.1/api/auth/login'], TOKEN, { timeout: 70000 });
+  let runCard = null;
+  for (let i = 0; i < 60 && !runCard; i++) { runCard = (await cards())[0] || null; if (!runCard) await sleep(200); }
+  check('the first run draws a card that offers «Always» (the 8-hour paste grant opened the entry; a new command shape still asks)', !!runCard && runCard.action.always === true && /also turns on «Usable by agent runs»/.test(runCard.detail), runCard && runCard.detail);
+  // ANSWER «Always» through the reveal window (验证是你) — open the page secret, then POST with X-Vault-Page. The reliable
+  // path: a run card's button carries a press-guard (lane attention-policy-ui-red) a synthetic click cannot satisfy; the
+  // picker's reveal (⑤) proves the reveal mechanism itself.
+  const rs = await A.api('POST', '/api/vault/reveal-session', { password: SECOND });
+  check('验证是你 — the second password opens the page reveal window', rs.status === 200 && rs.json.ok && typeof rs.json.page === 'string', rs.json);
+  const ans = await A.evalJs(`fetch('/api/vault/run/asks/${runCard.action.askId}', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Vault-Page': ${JSON.stringify(rs.json.page || '')} }, body: JSON.stringify({ answer: 'always', ttl: '30d' }) }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }))`);
+  check('«Always» (with 验证是你) ⇒ ok, by:always — the standing member is written and «Usable by agent runs» opened in the same act', ans.status === 200 && ans.json.ok && ans.json.outcome === 'always', ans.json);
+  const r1 = await runP;
+  check('`vibespace-vault run … curl https://192.168.1.1/…` ⇒ ran by:always, its output scrubbed', r1.code === 0 && /^curl got \[vault:secrets\//m.test(r1.out) && !r1.out.includes(VALUE), r1.out);
+  const chip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /^Home network/.test(x.textContent)); return c ? c.textContent : null; })()`, { timeout: 8000 });
+  check('the row\'s chip arrives: «Home network · 192.168.1.1 · until …» (the 30-day «Always») (+ ✕)', /^Home network · 192\.168\.1\.1 · (used \d+×|until .+)✕$/.test(String(chip)), chip);
 
   console.log('④ THE CARD THAT NAMES THE GRANT — another host');
   const pend = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', 'https://10.0.0.9/collect'], TOKEN, { timeout: 70000 });
