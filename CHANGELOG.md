@@ -10,6 +10,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A number you type in Settings is saved when you press Enter or leave the field, never half-typed; its row says «Not saved yet», «Saving…», then «Saved».
 - The Spending notice in For you says what was held and where, in your language and time zone, and «now» once the next turn is free.
 - A turn held because an account is signed out now points to the Usage window instead of the spending limits.
+- Approving a browser switch the agent proposed tells the agent right away again, even when the limit on turns nobody typed is used up.
+- A Spending notice also says which turns are still in flight and when paid overage was last reported; Copy includes every producer.
 
 ## 2.369.360 — 2026-10-27
 

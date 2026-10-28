@@ -189,14 +189,14 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
    * failed}`. The chat's card of those words is drawn where the agent receives them (the steer's own record, the stash's
    * drain) — the proposal card already says "the agent hears it with your next message".
    */
-  async function tellProposal({ sessionId = null, browserKey = null, text = '' } = {}) {
+  async function tellProposal({ sessionId = null, browserKey = null, text = '', pressed = null } = {}) {   // lane owner-press-attended r3: the person's Approve carries its door's PRESS
     const sess = sessionFor(sessionId, browserKey);
     if (!sess || !text) return { told: 'failed', why: !sess ? 'no live session carries this browser key' : 'nothing to tell' };
     const cid = conversationIdOf(sess.s);
     const noticeOnly = () => (queueNotice(sess, { kind: 'browser-proposal', text, at: Date.now() }) ? { told: 'noticed' } : { told: 'failed', why: 'the notice queue is not wired' });
     if (!cid || !deliver || typeof deliver.deliverToConversation !== 'function') return noticeOnly();
     let r = null;
-    try { r = await viaLadder(cid, text, { noWake: true }); } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
+    try { r = await viaLadder(cid, text, { noWake: true, pressed }); } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
     if (r && r.ok) { log.log?.(`[browser] proposal told to ${sess.id} in its running turn (${r.lane || 'delivered'})`); return { told: 'steered' }; }
     try {
       if (typeof deliver.stashFor === 'function') {

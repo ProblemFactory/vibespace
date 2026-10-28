@@ -75,27 +75,43 @@ import { replyVerdict, REPLY_HIDDEN_CODES } from '../inbox-reply.js';
 import { rowOf, needsMe, placeOf, badgeRows, bandInfo, policyOf } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds, design q-044) — the tray's bands, cap and folds; `policy` = the owner's (src/attention-model.js settingsPolicy, lane attention-predicate-shared)
 import { INBOX_ORIGINS, ORIGIN_LABELS } from '../inbox-origin.js';
 import { clockAt } from '../stash-summary.js'; // PURE: an instant in the viewer's zone (lane owner-press-attended)
+import { NEXT_WORDS } from '../spend-authorizer.js'; // PURE: the instant clause's words (r3: a clause that lost its key says these)
 
 /** PURE. THE WORDS OF ONE i18n LINE (`{key, params}`) — the ONE renderer every For-you surface uses (user-todos-actions'
  *  said()) and the suites read (lane owner-press-attended r2: test-spend-paths §10 reads a spend notice RENDERED, never
- *  its English source). A param is a string / number, or WORDS (`{key}` — said in this language before the sentence is
- *  filled, a verb's own words, lane vault-key-row-compact), or an INSTANT (`{at}` — the clock in the viewer's zone), or
- *  an INSTANT CLAUSE (`{at, key, gone}` — `key` filled with that clock while the instant is ahead, `gone` once it has
- *  passed: «the next is free now», computed HERE at render; the stored epoch never changes). */
+ *  its English source). A param is a string / number, or WORDS (`{key, params?}` — said in this language before the
+ *  sentence is filled, a verb's own words, lane vault-key-row-compact; their OWN params filled too, lane
+ *  lark-refresh-stall — never a «{minutes}» left in a sentence), or an INSTANT (`{at}` — the clock in the viewer's
+ *  zone), or an INSTANT CLAUSE (`{at, key, gone}` — `key` filled with that clock while the instant is ahead, `gone`
+ *  once it has passed: «the next is free now», computed HERE at render; the stored epoch never changes). r3: a clause
+ *  that lost its `key` (a `{at, gone}`, or a bare `{at}` in THE clause's slot `next`) says the DEFAULT words — the same
+ *  as the complete clause's (spend-authorizer NEXT_WORDS, the one table) — never a bare clock that stays when its
+ *  instant has passed. */
+export const CLAUSE_DEFAULTS = Object.freeze([NEXT_WORDS.cap, NEXT_WORDS.overage]);
+function clauseOf(name, v) {
+  if (!Number.isFinite(v.at)) return null;
+  if (typeof v.key === 'string' && v.key) return v;
+  if (typeof v.gone === 'string' && v.gone) return { ...(CLAUSE_DEFAULTS.find((d) => d.gone === v.gone) || CLAUSE_DEFAULTS[0]), at: v.at, gone: v.gone };
+  return name === 'next' ? { ...CLAUSE_DEFAULTS[0], at: v.at } : null;
+}
 export function saidLine(l, t, { now = Date.now(), locale = undefined, timeZone = undefined } = {}) {
-  const word = (v) => {
+  const word = (name, v) => {
     if (!v || typeof v !== 'object') return v;
-    if (Number.isFinite(v.at) && typeof v.key === 'string') return v.at > now ? t(v.key, { time: clockAt(v.at, { now, locale, timeZone }) }) : t(typeof v.gone === 'string' && v.gone ? v.gone : v.key, { time: clockAt(v.at, { now, locale, timeZone }) });
-    if (typeof v.key === 'string') return t(v.key);
+    const c = clauseOf(name, v);
+    if (c) return t(c.at > now || !(typeof c.gone === 'string' && c.gone) ? c.key : c.gone, { time: clockAt(c.at, { now, locale, timeZone }) });
+    if (typeof v.key === 'string') return t(v.key, v.params || undefined);   // lane lark-refresh-stall: words carry their own params
     if (Number.isFinite(v.at)) return clockAt(v.at, { now, locale, timeZone });
     return v;
   };
-  return String(t(l.key, Object.fromEntries(Object.entries((l && l.params) || {}).map(([k, v]) => [k, word(v)])))).trim();
+  return String(t(l.key, Object.fromEntries(Object.entries((l && l.params) || {}).map(([k, v]) => [k, word(k, v)])))).trim();
 }
 /** PURE. An item's sentence: its i18n words when it filed them, else its own text (an agent's ask). */
 export function itemTextOf(i, said) { return i && i.i18n && i.i18n.text ? said(i.i18n.text) : (i && i.text) || ''; }
 /** PURE. An item's detail as LINES: its i18n lines when it filed them, else its stored detail split on newlines. */
 export function itemDetailLinesOf(i, said) { return i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map(said) : String((i && i.detail) || '').split('\n').filter(Boolean); }
+/** PURE. The detail as the RECORD a Copy says (lane owner-press-attended r3: «the fold is for the eye, not the record»):
+ *  a line that folds rows (`more` — «And 6 more producers.») is said as the rows it folds; every other line as itself. */
+export function itemRecordLinesOf(i, said) { return i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.flatMap((l) => (l && Array.isArray(l.more) && l.more.length ? l.more.map(said) : [said(l)])) : itemDetailLinesOf(i, said); }
 
 /**
  * WHERE THE TRAY IS (lane S3, naive-user study 2: the assistant said "I've

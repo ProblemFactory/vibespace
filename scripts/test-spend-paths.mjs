@@ -832,8 +832,9 @@ const CONTROL_DOORS = [
   ['src/routes/channels.js', "router.post('/api/channels/:adapterId/:convId/propose'"],
   ['src/routes/browser.js', "router.post('/api/browser/handback'"],
   ['src/routes/browser.js', "router.post('/api/browser/takeovers/:id/done'"],
+  ['src/routes/browser.js', "router.post('/api/browser/proposals/:id/approve'"],   // r3: the person's Approve (tellProposal) — r1's row, dropped by r2 (accept-r2 confirmed[1])
   ['server.js', "app.post('/api/user-todos/:id'"],   // r2: the 15th door (accept-r1 claim run (a))
-  ['src/server/browser-stream.js', 'handleUpgrade'],   // r2: the live view's own socket (its Hand back)
+  ['src/server/browser-stream.js', 'onViewerMessage'],   // r2: the live view's own socket (its Hand back) — r3: the MESSAGE mints, never the handshake
 ];
 // A door refuses EVERY bearer when its first act (after `try {` and the host guard — `refuseHost` / `forHost`, which only
 // answer 501 for another machine) is `pressBearer(req.headers)` — or the file's own `refuseAgentBearer` WHEN that helper is
@@ -1025,8 +1026,9 @@ function pressCensus(override = {}) {
   const doors = new Map();   // key → {f, unit, mints:[n]}
   const walks = {}, holes = [];
   const fenced = [];
+  const walked = new Set();   // r3: every file the walk passed a press through
   const stateKey = (s) => `${s.f}#${s.fn.start}#${s.i}#${s.mode}`;
-  const noteDoor = (f, parents, n) => { const u = unitAt(f, parents); const k = f + ' ' + (u.kind === 'route' ? u.name : u.name); if (!doors.has(k)) doors.set(k, { f, u, at: [] }); doors.get(k).at.push(n); return k; };
+  const noteDoor = (f, parents, n) => { const u = unitAt(f, parents); const k = f + ' ' + (u.kind === 'route' ? u.name : u.name); if (!doors.has(k)) doors.set(k, { f, u, at: [], ps: [] }); doors.get(k).at.push(n); doors.get(k).ps.push(parents); return k; };
   const resolveIdent = (f, parents, name) => {   // an identifier handed on: a param of a named unit, a listener's param, or a local object — innermost scope outwards
     for (let at = parents.length - 1; at >= 0; at--) {
       const fn = parents[at];
@@ -1085,6 +1087,7 @@ function pressCensus(override = {}) {
     while (queue.length) {
       const st = queue.shift();
       const k = stateKey(st); if (seen.has(k)) continue; seen.add(k);
+      walked.add(st.f);
       if (!st.name) { holes.push(`${s.reason}: an unnamed unit takes the press (${st.f})`); continue; }
       const names = new Set([st.name, ...(aliasOf.get(st.f + '#' + st.name) || [])]);
       let callers = 0;
@@ -1106,6 +1109,19 @@ function pressCensus(override = {}) {
       if (!callers && st.mode !== 'object') { /* a press-taking unit nobody hands a press: its callers are the gated roads */ }
     }
   }
+  // (2b) r3 — THE PRESS IS NEVER KEPT (the capability-token law: a press binds to its request): it rides ONE request's chain
+  // as a call's argument; an object literal that carries a press anywhere else (a viewer record, a module table, a returned
+  // record) or a `.pressed =` assignment keeps it past its act — r2's live view kept the HANDSHAKE's on `viewer.pressed`.
+  // Read over the press universe: the files holding the press API and every file the walk passed a press through (a
+  // `pressed` elsewhere — src/channel-drain.js's verdict field — is another word)
+  const kept = [];
+  const hostOf = (p) => { for (let i = p.parents.length - 1; i >= 0; i--) { const n = p.parents[i]; if (!/^(ObjectExpression|SpreadElement|ConditionalExpression|LogicalExpression|Property)$/.test(n.type)) return n; } return null; };
+  for (const p of props) {
+    if (!(pressFile.has(p.f) || walked.has(p.f))) continue;
+    const h = hostOf(p);
+    if (!h || (h.type !== 'CallExpression' && h.type !== 'NewExpression')) kept.push(`${p.f}:${srcOf[p.f].slice(0, p.n.start).split('\n').length} kept in a ${h ? h.type : 'module'}`);
+  }
+  for (const a of assigns) if (pressFile.has(a.f) || walked.has(a.f)) kept.push(`${a.f}:${srcOf[a.f].slice(0, a.n.start).split('\n').length} .pressed = …`);
   // (4) every door refuses every bearer before it mints
   const doorVerdicts = [];
   for (const [k, d] of doors) {
@@ -1124,19 +1140,21 @@ function pressCensus(override = {}) {
       if (!mintsOwnReq) why = 'a press minted from something that is not this request';
       why = why || t.split('\n')[0].slice(0, 90);
     } else {
-      // a SOCKET door (the live view): the handshake records the bearer beside the press, and every hop that hands the
-      // view's press on is preceded, in its block, by the refusal of a view a bearer opened
-      const fnSrc = src.slice(d.u.fn.start, d.u.fn.end);
-      const hops = calls.filter((c) => c.f === d.f && c.n.arguments.some((a) => a.type === 'MemberExpression' && kname(a.property) === 'pressed'));
-      const guarded = (c) => { for (let i = c.parents.length - 1; i >= 0; i--) { const b = c.parents[i]; if (b.type !== 'BlockStatement') continue; const st = b.body.find((x) => x.start <= c.n.start && x.end >= c.n.end); for (const y of b.body) { if (y === st) break; if (y.type === 'IfStatement' && /\.bearer\b/.test(src.slice(y.test.start, y.test.end)) && returns(y.consequent)) return true; } return false; } return false; };
-      ok0 = /\bpressBearer\(req\.headers\)/.test(fnSrc) && hops.length > 0 && hops.every(guarded);
-      why = `socket: ${hops.length} hop(s) of the view's press, ${hops.filter(guarded).length} behind the bearer refusal`;
+      // a SOCKET door (the live view) — r3: each Hand back MESSAGE mints its OWN press from the page the handshake proved
+      // (`pressOf(viewer.page, …)`), behind, in its block, the refusal of a view a bearer opened; the handshake records the
+      // bearer beside the page (`bearer: pressBearer(req.headers), page: pageOfUpgrade(req)`) and never a press
+      const guarded = (n, parents) => { for (let i = parents.length - 1; i >= 0; i--) { const b = parents[i]; if (b.type !== 'BlockStatement') continue; const st = b.body.find((x) => x.start <= n.start && x.end >= n.end); for (const y of b.body) { if (y === st) break; if (y.type === 'IfStatement' && /\.bearer\b/.test(src.slice(y.test.start, y.test.end)) && returns(y.consequent)) return true; } return false; } return false; };
+      const fromPage = (m) => m.type === 'CallExpression' && m.arguments[0] && m.arguments[0].type === 'MemberExpression' && kname(m.arguments[0].property) === 'page';
+      const handshake = /\bbearer: pressBearer\(req\.headers\), page: pageOfUpgrade\(req\)/.test(src);
+      const n = d.at.filter((m, i) => fromPage(m) && guarded(m, d.ps[i])).length;
+      ok0 = handshake && d.at.length > 0 && n === d.at.length;
+      why = `socket: ${d.at.length} mint(s) per message, ${n} from the handshake's page behind the bearer refusal${handshake ? '' : ' — the handshake records no bearer beside the page'}`;
     }
     doorVerdicts.push({ k, f: d.f, name: d.u.name, kind: d.u.kind, ok: ok0, why });
   }
   const reachedDoors = new Set(Object.values(walks).flatMap((x) => [...x]));
   const strayMints = mints.map((m) => noteDoor(m.f, m.parents, m.n)).filter((k) => !reachedDoors.has(k));
-  return { files, sites, fenced, taint, doors: doorVerdicts, walks, holes: [...new Set(holes)], strayMints: [...new Set(strayMints)], carriers: carriers.length, bad };
+  return { files, sites, fenced, taint, kept, doors: doorVerdicts, walks, holes: [...new Set(holes)], strayMints: [...new Set(strayMints)], carriers: carriers.length, bad };
 }
 {
   const attended = ATT;
@@ -1160,6 +1178,7 @@ function pressCensus(override = {}) {
     attended.every((r) => ((bySite[r] || []).length === 1 && !deferred.has(r)) || (!(bySite[r] || []).length && deferred.has(r))) && DEFERRED_ATTENDED.every((d) => attended.includes(d.reason)), JSON.stringify(Object.fromEntries(attended.map((r) => [r, (bySite[r] || []).length]))));
   ok('§2b every attended site is SELECTED on the press — its attended branch unreachable without isPress(pressed)', PC.fenced.length > 0 && PC.fenced.every((s) => s.how), JSON.stringify(PC.fenced.filter((s) => !s.how).map((s) => `${s.reason}@${s.f}:${s.line}`)));
   ok('§2b TAINT: every `pressed` anywhere is minted by a door (pressOf) or handed on — never built from a body, a record or a literal', PC.taint.length === 0, PC.taint.join(' | '));
+  ok('§2b r3 THE PRESS IS NEVER KEPT: every press rides a call\'s argument down ONE request\'s chain — no record, viewer or table holds one, no `.pressed =`', PC.kept.length === 0, PC.kept.join(' | '));
   ok('§2b THE WALK: every attended site reaches its doors along the press hops, with no unreadable hop', PC.holes.length === 0 && Object.values(PC.walks).every((x) => x.size > 0), PC.holes.join(' | '));
   ok('§2b THE FENCE: every DERIVED door refuses EVERY bearer before it mints the press (' + PC.doors.length + ' doors)', PC.doors.length >= 14 && PC.doors.every((d) => d.ok), JSON.stringify(PC.doors.filter((d) => !d.ok)));
   ok('§2b every press a door mints reaches an attended site (no decorative press)', PC.strayMints.length === 0, PC.strayMints.join(' | '));
@@ -1202,7 +1221,42 @@ function pressCensus(override = {}) {
       && WO.isPress(WO.pressOf({ headers: { 'sec-fetch-site': 'same-origin' } })) && WO.isPress(WO.pressOf({ headers: { origin: 'http://h:1', host: 'h:1' } }))
       && !WO.pressOf({ headers: {} }) && !WO.pressOf({ headers: { 'sec-fetch-site': 'same-origin', authorization: 'Bearer vsak_x' } }) && !WO.pressOf({ headers: { 'sec-fetch-site': 'cross-site' } })
       && !WO.isPress(JSON.parse(JSON.stringify({ p: WO.pressOf({ headers: { 'sec-fetch-site': 'same-origin' } }) })).p) && !WO.isPress(true) && !WO.isPress({}));
-  console.log(`    the census's cost: ${ms} ms over the tree, ${Date.now() - t1} ms for 8 patched copies (one file re-read each)`);
+  // r3 THE CAPABILITY LAW (accept-r2 claim 1 (b): r2's press was ONE module-level singleton — pressOf(reqA) === pressOf(reqB),
+  // bound to nothing, so any callee holding it could hand it to an unrelated wake): a press is minted PER REQUEST, a frozen
+  // {at, route, reqId}, and is a press only inside the chain of the request that minted it
+  const bound = await (async () => {
+    await null;   // a chain of its own: the mints below never become the suite's
+    const page = (url) => ({ method: 'POST', url, headers: { 'sec-fetch-site': 'same-origin' } });
+    const chain = async (url, ms) => { await null; const p = WO.pressOf(page(url)); await new Promise((r) => setTimeout(r, ms)); await null; return { p, mine: WO.isPress(p) }; };
+    const [a, b] = await Promise.all([chain('/api/door-a', 15), chain('/api/door-b', 5)]);
+    const atB = await (async () => { await null; const pb = WO.pressOf(page('/api/door-b')); return { a: WO.isPress(a.p), b: WO.isPress(pb) }; })();
+    const timer = await (async () => { await null; const p = WO.pressOf(page('/api/door-t')); return new Promise((r) => setTimeout(() => r(WO.isPress(p)), 3)); })();
+    return { a, b, atB, timer, outside: WO.isPress(a.p), copy: WO.isPress(Object.freeze({ ...a.p })) };
+  })();
+  ok('§2b r3 A PRESS IS MINTED PER REQUEST: two requests\' presses are two frozen {at, route, reqId} — each a press in its OWN chain across its awaits and timers; door A\'s press presented in door B\'s chain, outside any chain, or as a copy is NOT a press',
+    bound.a.p !== bound.b.p && Object.isFrozen(bound.a.p) && JSON.stringify(Object.keys(bound.a.p).sort()) === '["at","reqId","route","toJSON"]' && bound.a.p.route === 'POST /api/door-a' && bound.b.p.route === 'POST /api/door-b' && bound.a.p.reqId !== bound.b.p.reqId
+      && bound.a.mine === true && bound.b.mine === true && bound.timer === true && bound.atB.a === false && bound.atB.b === true && bound.outside === false && bound.copy === false && JSON.stringify({ p: bound.a.p }) === '{}',
+    JSON.stringify({ a: bound.a.mine, b: bound.b.mine, atB: bound.atB, timer: bound.timer, outside: bound.outside, copy: bound.copy, routes: [bound.a.p.route, bound.b.p.route] }));
+  // the r2 live view, re-planted: the HANDSHAKE's press kept on the viewer for every later Hand back on the socket
+  const bsR2 = bs.replace('bearer: pressBearer(req.headers), page: pageOfUpgrade(req) });', 'bearer: pressBearer(req.headers), pressed: pressOf(req) });')
+    .replace('agent = false, bearer = false, page = null }) {', 'agent = false, bearer = false, pressed = null }) {')
+    .replace('agent: !!agent, bearer: !!bearer, page };', 'agent: !!agent, bearer: !!bearer, pressed };')
+    .replace("v.expectWakes, pressOf(viewer.page, 'WS /api/browser/stream hand-back'));", 'v.expectWakes, viewer.pressed);');
+  const m8 = pressCensus({ 'src/server/browser-stream.js': bsR2 });
+  ok('§2b r3 CONTROL: e03ad393\'s live view (the HANDSHAKE\'s press kept on `viewer.pressed`, handed to every later Hand back) reads KEPT — and its door is no longer a per-message mint',
+    bsR2 !== bs && (bsR2.match(/viewer\.pressed\)/g) || []).length === 1 && m8.kept.some((k) => /browser-stream\.js/.test(k)) && m8.doors.some((d) => /browser-stream/.test(d.f) && !d.ok), JSON.stringify({ kept: m8.kept, doors: m8.doors.filter((d) => /browser-stream/.test(d.f)) }));
+  // THE ACCEPTED BLIND SPOT, NAMED (accept-r2 claim 1 (c)): a COMPUTED name — `WO['press' + 'Of']`, `o['press' + 'ed']` —
+  // is no identifier the AST walk can follow; the grep beside it reads every server file for that spelling. (The brief's
+  // `press\s*\+|\[['"]press` also matches four innocent lines — «Impress + the», `['press-allow'`, «press+release»,
+  // `['press', 'granted'` — so the grep keys on a member ACCESS, `x['press…`, and on a 'press' string concatenated.)
+  const COMPUTED_PRESS_RE = /[\w$)\]]\s*\[\s*['"`]press|['"`]press['"`]\s*\+|`press\$\{/;
+  const computed = trackedServerSource().filter((f) => COMPUTED_PRESS_RE.test(read(f)));
+  ok('§2b r3 THE BLIND SPOT the AST census cannot read (a computed-name access to the press) — the grep beside it finds NONE in the tree', computed.length === 0, 'computed press access in: ' + computed.join(' '));
+  const planted = { 'zz-mint.js': "const WO = require('../write-origin.js'); const mint = WO['press' + 'Of'];", 'zz-hop.js': "const p = o['press' + 'ed'];", 'zz-tpl.js': "const p = o[`press${'ed'}`];" };
+  const named = Object.entries(planted).filter(([, src]) => COMPUTED_PRESS_RE.test(src)).map(([f]) => f);
+  ok('§2b r3 CONTROL: the grep is red BY NAME for each computed spelling (' + named.join(', ') + ') and silent on the four innocent lines',
+    named.length === 3 && !['LibreOffice Writer / Calc / Impress + the Start Center', "Object.freeze(['press-allow', 'press-deny'])", 'emits `button-action` press+release pairs', "Object.freeze(['press', 'granted'])"].some((x) => COMPUTED_PRESS_RE.test(x)));
+  console.log(`    the census's cost: ${ms} ms over the tree, ${Date.now() - t1} ms for 9 patched copies (one file re-read each)`);
   const emptyWalks = Object.entries(PC.walks).filter(([, x]) => x.size === 0).map(([k]) => k);
   if (emptyWalks.length) console.log('    walks that reached no door: ' + emptyWalks.join(', '));
   // THE PURE LAW over the measured ledger: 30 stamps this hour (peer-message), the default cap 30
@@ -3154,6 +3208,50 @@ console.log('\n§10r the For-you spend notice, rendered in en / zh / ja: every f
   const r1 = { text: { key: '{account} has used its {cap} turns nobody typed this hour — VibeSpace held the next one. The next frees at {time}.', params: { account: 'acct-1', cap: 30, time: { at: Date.parse('2026-10-28T08:21:33Z') } } }, detail: [{ key: 'Turns you type, and the buttons you press that say «starts a turn», are never counted. Change the limits in Settings → Spending.' }] };
   const r1o = render('en', { i18n: r1 });
   ok('§10r CONTROL (the b8d2d98e notice, as it was filed): rendered, it carries NO producer, NO conversation, NO counts, NO «Spent by»', !has(r1o, /continue after a usage limit|build-bot|30 of 30|Spent by/));
+  // r3 (accept-r2 claim 0: three facts of the stored English were not in the rendered notice, one toast still said «the
+  // limit is reached» for a refusal with no why, and the Copy of a 12-producer notice said 6 of them)
+  {
+    // (a) IN FLIGHT: a cap of 3 reached by 3 holds — the English said «has spent 0 (+3 in flight)», the notice now says it
+    const fl = fileWith((g) => { for (let i = 0; i < 3; i++) g.authorize({ reason: 'job-notification', identity: id, sessionName: 'nightly', hold: true, now: now - 1000 + i }); }, { reason: 'job-notification', identity: id, sessionName: 'nightly' }, { 'spend.unattendedPerIdentityHour': 3 });
+    const of = render('en', fl), ofz = render('zh', fl);
+    ok('§10r r3 IN FLIGHT: a cap reached by holds says them — «(+3 in flight)» in the English, «Also in flight: 3 …» rendered (en / zh), beside «0 of 3 this hour»',
+      !!fl && /\(\+3 in flight\)/.test(fl.text) && has(of, /Also in flight: 3 started and not yet answered/) && has(of, /Turns nobody typed: 0 of 3 this hour/) && has(ofz, /另有 3 个已开始/), fl && [fl.text, of.lines.join(' | ')].join(' ⇒ '));
+    // (b) THE OVERAGE EVIDENCE: «(last reported 7 min ago)» — rendered as the INSTANT it was reported, in the viewer's zone
+    const ovDir = tmpdir('vs-spend-notice-ovg-');
+    const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+    const ovStore = new UserTodoManager({ dataDir: ovDir, expirySweepMs: 0 });
+    const nowR = Date.now();   // the guard judges an overage reading's age on the real clock
+    const ovg = guardMod.create({ dataDir: ovDir, serverSetting: () => undefined, readCacheFor: () => ({ overage: { inUse: true, asOf: nowR - 7 * 60e3, resetsAt: Math.round((nowR + 3 * 3600e3) / 1000) } }), getUserTodos: () => ovStore });
+    ovg.authorize({ reason: 'job-notification', identity: id, sessionName: 'nightly', hold: false, now: nowR });
+    const ov = (ovStore.snapshot().open || []).find((x) => x.origin === 'spend' && x.i18n); ovStore.stop();
+    const oo = render('en', ov, nowR), ooj = render('ja', ov, nowR);
+    const seenClock = require(path.join(REPO, 'src/stash-summary.js')).clockAt(nowR - 7 * 60e3, { now: nowR, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+    ok('§10r r3 THE OVERAGE EVIDENCE: «last reported 7 min ago» is rendered as the instant — «Paid overage was last reported at ' + seenClock + '.» (the viewer\'s zone; ja too)',
+      !!ov && /last reported 7 min ago/.test(ov.text) && oo.lines.includes(`Paid overage was last reported at ${seenClock}.`) && has(ooj, /有料の超過利用が最後に報告されたのは/), ov && oo.lines.join(' | '));
+    // (c) identity-unknown: the English said «(instance 7/800)» — the instance's count is rendered with no account
+    const iu = fileWith((g) => { for (let i = 0; i < 7; i++) g.note({ reason: 'peer-message', identity: id, now: now - 60e3 + i }); }, { reason: 'job-notification', identity: null, sessionName: 'nightly' });
+    const ou = render('en', iu);
+    ok('§10r r3 identity-unknown says the INSTANCE\'s count (no account): «Turns nobody typed on this instance: 7 of 800 in 24 hours.»',
+      !!iu && /\(instance 7\/800\)/.test(iu.detail) && has(ou, /Turns nobody typed on this instance: 7 of 800 in 24 hours\./) && has(ou, /Account: not known/), iu && ou.lines.join(' | '));
+    // (d) TWELVE PRODUCERS: the eye folds after six («And 6 more producers.»); the RECORD a Copy says carries all twelve
+    const twelve = [...Object.keys(A.SPEND_REASONS).filter((r) => !A.SPEND_REASONS[r].attended), 'unknown'].slice(0, 12);   // every gated reason (11) + the legacy stamp
+    const v12 = { ok: false, why: 'hour-cap', reason: 'auto-resume', identity: id, limits: A.BUDGET_DEFAULTS, counts: { hour: 78, day: 78, instanceDay: 78 }, retryAfter: now + 600e3, producers: Object.fromEntries(twelve.map((r, i) => [r, 12 - i])) };
+    const sDir = tmpdir('vs-spend-notice-12-');
+    const st12 = new UserTodoManager({ dataDir: sDir, expirySweepMs: 0 });
+    st12.add('spend|twelve', { text: A.refusalText(v12, { sessionName: 'ops' }), origin: 'spend', kind: 'notice', i18n: A.refusalI18n(v12, { sessionName: 'ops' }) });
+    const i12 = (st12.snapshot().open || []).find((x) => x.i18n); st12.stop();
+    const said12 = (l) => LY.saidLine(l, T.en, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+    const eye = LY.itemDetailLinesOf(i12, said12), rec = LY.itemRecordLinesOf(i12, said12);
+    console.log(`    12 producers: the eye ${eye.filter((l) => /^Spent by /.test(l)).length} rows + «${eye.find((l) => /^And /.test(l))}», the record (Copy) ${rec.filter((l) => /^Spent by /.test(l)).length} rows`);
+    ok('§10r r3 THE FOLD IS FOR THE EYE: twelve producers show six «Spent by» rows and «And 6 more producers.»; the RECORD (what Copy says — user-todos-actions recordOf) carries all twelve rows, through the real store',
+      twelve.length === 12 && !!i12 && eye.filter((l) => /^Spent by /.test(l)).length === 6 && eye.includes('And 6 more producers.') && rec.filter((l) => /^Spent by /.test(l)).length === 12 && !rec.some((l) => /^And \d+ more/.test(l)) && i12.i18n.detail.length <= 12,
+      JSON.stringify({ eye, rec }));
+    // (e) THE TOAST WITH NO WHY (the authorizer threw — conversation-deliver fails closed with refused:'spend', no why)
+    const SSm = require(path.join(REPO, 'src/stash-summary.js'));
+    const nw = SSm.handOverRefusalWords({ code: 'spend_refused' }, T.en, { now });
+    ok('§10r r3 a hand-over refused with NO why is not a cap — the toast says the check refused without saying why, never «the limit … is reached», and names no Spending door',
+      !/limit/.test(nw.text) && /without saying why/.test(nw.text) && nw.door === null, JSON.stringify(nw));
+  }
 }
 
 // ── §10b PLACEMENT NEVER STARTS A TURN (2026-09-28, lane-pool-pin) ─────────

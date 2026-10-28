@@ -1204,7 +1204,11 @@ router.post('/api/browser/proposals/:id/approve', (req, res) => {
   const shown = typeof req.body?.shown === 'string' ? req.body.shown.slice(0, 40) : null;
   if (!shown) return res.status(400).json({ error: 'an Approve names the card it was pressed on (`shown`)', code: 'shown_required' });
   if (String(req.params.id).startsWith('pk-')) return passkeyAnswer(req, res, typeof req.body?.choice === 'string' ? req.body.choice : 'once', shown); // lane passkey-store-core
-  try { const r = pr.approve(req.params.id, { shown, by: 'user' }); if (!r.ok) return failVerdict(res, r); res.json(r); } catch (e) { fail(res, e); }
+  // lane owner-press-attended r3: the person's Approve is ATTENDED — its PRESS rides the run to the agent's tell
+  // (browser-propose run → tell → browser-handback tellProposal → viaLadder's browser-handback); acceptance r2 measured
+  // r2's press-less tell as the gated browser-handback-idle, refused at a full hour cap and called «nobody pressed»
+  const press = pressOf(req);
+  try { const r = pr.approve(req.params.id, { shown, by: 'user', pressed: press }); if (!r.ok) return failVerdict(res, r); res.json(r); } catch (e) { fail(res, e); }
 });
 router.post('/api/browser/proposals/:id/reject', (req, res) => {
   if (refuseHost(req, res)) return;

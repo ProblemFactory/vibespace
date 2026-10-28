@@ -280,7 +280,9 @@ function handOverRefusalWords(r, t, { now = Date.now(), locale = undefined, time
     if (why === 'spend-control-reached') return { text: account ? t('Not handed over — {account} has reached its spend control, so its requests are refused. The notices keep waiting.', p) : t('Not handed over — the account this turn would bill has reached its spend control, so its requests are refused. The notices keep waiting.'), door: null };
     if (why === 'identity-unknown') return { text: t('Not handed over — VibeSpace could not tell which account this turn would bill. The notices keep waiting.'), door: 'usage' };
     if (why) return { text: t('Not handed over — the spend ceiling refused this turn ({why}). The notices keep waiting.', { why: String(why).slice(0, 60) }), door: null };
-    return { text: t('Not handed over — the limit for turns nobody typed is reached; the notices keep waiting for the next turn'), door: 'spending' };   // an older hub's body: no `why` at all
+    // r3 (accept-r2 claim 0): a refusal with NO `why` is not a cap — the current hub sends one when the authorizer itself
+    // threw (conversation-deliver fails closed with refused:'spend' and no why); never «the limit is reached» for it
+    return { text: t('Not handed over — the spend check refused this turn without saying why (it fails closed when it cannot decide). The notices keep waiting; the hub log’s [spend] lines name the reason.'), door: null };
   }
   if (code === 'unreachable') return { text: t('Not handed over — the agent could not be reached; the notices keep waiting for its next turn'), door: null };
   if (code === 'in_flight') return { text: t('A hand-over for this agent is already in progress'), door: null };

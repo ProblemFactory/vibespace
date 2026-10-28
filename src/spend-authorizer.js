@@ -99,7 +99,7 @@ const SPEND_REASONS = Object.freeze({
   // is src/server/browser-handback.js, through the delivery ladder.
   // lane owner-press-attended: the CLICK («Hand back (wakes N)», the person's Done) is attended; the idle / viewer-left
   // announcement — nobody's action, only with browser.announceIdleHandback ON — is its gated twin
-  'browser-handback': { turn: true, attended: true, what: 'the browser control handback the user pressed' },
+  'browser-handback': { turn: true, attended: true, what: 'the browser control handback the user pressed, or the browser proposal the user approved' },   // r3: + the person's Approve (tellProposal)
   'browser-handback-idle': { turn: true, what: 'a browser handback nobody pressed (idle, the viewer left)' },   // r2: + an explicit one with no door's press
   // desktop lane E (D3, 2026-09-25): the user's "Ask <agent> to take control" from a desktop-app window, when they
   // tick "wake it now" — the default rides the agent's next turn for free (the stash). The producer is
@@ -571,7 +571,7 @@ function authorizeUnattendedSpend({
     // used to print an instant in the PAST (a resetsAt that has already come
     // round — now an expiry rung inside overageState, so it cannot reach here).
     const seen = Number(overage.ageMs) > 0 ? ` (last reported ${Math.round(overage.ageMs / 60000)} min ago)` : '';
-    return no('overage-in-use', `${name} is billing paid overage${seen} — unattended turns are refused while real money is being spent`, overage.resetsAt ? overage.resetsAt * 1000 : 0);
+    return no('overage-in-use', `${name} is billing paid overage${seen} — unattended turns are refused while real money is being spent`, overage.resetsAt ? overage.resetsAt * 1000 : 0, null, Number(overage.ageMs) > 0 ? { overageSeenAt: now - Number(overage.ageMs) } : null);   // r3: the notice says WHEN it was last reported (an instant, said in the viewer's zone)
   }
   // ATTENDED (lane owner-press-attended): a person's per-occurrence press — the BUDGET neither refuses nor counts it.
   // Answered BEFORE the caps (a full hour of stamps does not refuse it) and with no hold (spend-guard reads `attended`).
@@ -683,6 +683,9 @@ const LINE_WORDS = Object.freeze({
   account: 'Account: {account}',
   accountUnknown: 'Account: not known',
   counts: 'Turns nobody typed: {hour} of {hourCap} this hour, {day} of {dayCap} in 24 hours; this instance {instance} of {instanceCap} in 24 hours.',
+  countsInstance: 'Turns nobody typed on this instance: {instance} of {instanceCap} in 24 hours.',   // r3: the account unknown — the instance's count still said
+  inFlight: 'Also in flight: {n} started and not yet answered — they count against the cap until they settle.',   // r3: «(+N in flight)»
+  overageSeen: 'Paid overage was last reported at {time}.',   // r3: «(last reported N min ago)», as the instant
   spentBy: 'Spent by {producer}: {n}',
   more: 'And {n} more producers.',
   legacy: 'older builds (no reason recorded)',
@@ -725,9 +728,17 @@ function refusalI18n(v, { sessionName = null } = {}) {
   const detail = [{ key: LINE_WORDS.held, params: { producer, reason: String(v.reason == null ? '?' : v.reason).slice(0, 80) } }];
   detail.push(account ? { key: LINE_WORDS.account, params: { account } } : { key: LINE_WORDS.accountUnknown });
   if (account && v.counts) detail.push({ key: LINE_WORDS.counts, params: { hour: c.hour || 0, hourCap: Number(L.perIdentityHour) || 0, day: c.day || 0, dayCap: Number(L.perIdentityDay) || 0, instance: c.instanceDay || 0, instanceCap: Number(L.perInstanceDay) || 0 } });
+  else if (v.counts) detail.push({ key: LINE_WORDS.countsInstance, params: { instance: c.instanceDay || 0, instanceCap: Number(L.perInstanceDay) || 0 } });   // r3: identity-unknown kept «(instance 7/800)» only in English
+  // r3: what the English line says as «(+N in flight)» — the holds a cap sums with the stamps (a cap reached by holds alone
+  // read «used its 3 turns» beside «0 of 3»)
+  const flying = capOf ? Number((v.inFlight || {})[v.why === 'instance-cap' ? 'instance' : 'identity']) || 0 : 0;
+  if (flying > 0) detail.push({ key: LINE_WORDS.inFlight, params: { n: flying } });
+  if (row === 'overage-in-use' && Number(v.overageSeenAt) > 0) detail.push({ key: LINE_WORDS.overageSeen, params: { time: { at: Number(v.overageSeenAt) } } });
   const by = Object.entries(v.producers || (c.producers && c.producers.hour) || {}).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
-  for (const [r, n] of by.slice(0, SPENT_ROWS)) detail.push({ key: LINE_WORDS.spentBy, params: { producer: producerWords(r), n } });
-  if (by.length > SPENT_ROWS) detail.push({ key: LINE_WORDS.more, params: { n: by.length - SPENT_ROWS } });
+  const spentRow = ([r, n]) => ({ key: LINE_WORDS.spentBy, params: { producer: producerWords(r), n } });
+  for (const x of by.slice(0, SPENT_ROWS)) detail.push(spentRow(x));
+  // r3: the fold is for the EYE, not the record — «And N more» carries the folded rows (`more`); Copy says every producer
+  if (by.length > SPENT_ROWS) detail.push({ key: LINE_WORDS.more, params: { n: by.length - SPENT_ROWS }, more: by.slice(SPENT_ROWS).map(spentRow) });
   const door = ROW_DOOR[row];
   detail.push(door === 'usage' ? { key: DOOR_WORDS.usage, params: { account } } : { key: DOOR_WORDS[door] });
   return { text, detail, door };

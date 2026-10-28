@@ -31,6 +31,8 @@ const { normalizeOrigin } = require('./inbox-origin.js'); // PURE: the closed se
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a For-you item's text / detail never carries a credential in the clear
 const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — what a clear replaces; this store holds the door (clearItems)
 
+/** lane lark-refresh-stall: the params a WORDS param may carry (each a string or a finite number) — more is refused by name. */
+const NESTED_PARAMS_MAX = 8;
 /** `{text:{key,params}, detail?:[{key,params}…], source?:{key}}` → the same,
  *  clamped, or null; a shape that is not that throws by name. Params are
  *  strings/numbers only (they are interpolated into a sentence, never HTML) —
@@ -43,24 +45,45 @@ const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…"
 function normalizeI18n(x) {
   if (x == null) return null;
   if (typeof x !== 'object' || Array.isArray(x)) throw new Error('i18n must be an object');
+  // lane lark-refresh-stall: a WORDS param (`{key}`) may carry its own scalar params (a dead sign-in's cause names the stall's
+  // length) — r2: at most NESTED_PARAMS_MAX, each a string or a finite number; any other shape is REFUSED by name (the
+  // producer says it and files its words without them — never a sentence with a «{minutes}» left in it)
+  const nestedParams = (p, what) => {
+    if (p == null) return {};
+    if (typeof p !== 'object' || Array.isArray(p)) throw new Error(`i18n.${what}.params must be an object of strings / numbers`);
+    const ents = Object.entries(p);
+    if (ents.length > NESTED_PARAMS_MAX) throw new Error(`i18n.${what}.params carries ${ents.length} params — at most ${NESTED_PARAMS_MAX}`);
+    const o = {};
+    for (const [k, v] of ents) {
+      if (typeof v === 'string') o[k] = v.slice(0, 200);
+      else if (typeof v === 'number' && Number.isFinite(v)) o[k] = v;
+      else throw new Error(`i18n.${what}.params.${k} must be a string or a finite number (${Array.isArray(v) ? 'an array' : v === null ? 'null' : typeof v} refused)`);
+    }
+    return ents.length ? { params: o } : {};
+  };
   const line = (l, what) => {
     if (!l || typeof l !== 'object' || typeof l.key !== 'string' || !l.key.trim()) throw new Error(`i18n.${what} needs a key`);
     const out = { key: l.key.slice(0, 400) };
     if (l.params != null) {
       if (typeof l.params !== 'object' || Array.isArray(l.params)) throw new Error(`i18n.${what}.params must be an object`);
       out.params = {};
-      for (const [k, v] of Object.entries(l.params)) { if (typeof v === 'string') out.params[k] = v.slice(0, 600); else if (typeof v === 'number' && Number.isFinite(v)) out.params[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && Number.isFinite(v.at) && v.at > 0 && typeof v.key === 'string' && v.key.trim()) out.params[k] = { at: v.at, key: v.key.slice(0, 400), ...(typeof v.gone === 'string' && v.gone.trim() ? { gone: v.gone.slice(0, 400) } : {}) }; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.key === 'string' && v.key.trim() && v.at === undefined) out.params[k] = { key: v.key.slice(0, 400) }; else if (v && typeof v === 'object' && !Array.isArray(v) && Number.isFinite(v.at) && v.at > 0) out.params[k] = { at: v.at }; }
+      for (const [k, v] of Object.entries(l.params)) { if (typeof v === 'string') out.params[k] = v.slice(0, 600); else if (typeof v === 'number' && Number.isFinite(v)) out.params[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && Number.isFinite(v.at) && v.at > 0 && typeof v.key === 'string' && v.key.trim()) out.params[k] = { at: v.at, key: v.key.slice(0, 400), ...(typeof v.gone === 'string' && v.gone.trim() ? { gone: v.gone.slice(0, 400) } : {}) }; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.key === 'string' && v.key.trim() && v.at === undefined) out.params[k] = { key: v.key.slice(0, 400), ...nestedParams(v.params, `${what}.params.${k}`) }; else if (v && typeof v === 'object' && !Array.isArray(v) && Number.isFinite(v.at) && v.at > 0) out.params[k] = { at: v.at, ...(typeof v.gone === 'string' && v.gone.trim() ? { gone: v.gone.slice(0, 400) } : {}) }; }   // r3: a clause missing its key keeps its `gone` (the renderer gives it the default key — never a bare clock that lies)
     }
     return out;
   };
   const out = { text: line(x.text, 'text') };
   if (x.detail != null) {
     if (!Array.isArray(x.detail)) throw new Error('i18n.detail must be an array of lines');
-    out.detail = x.detail.slice(0, 12).map((l, i) => line(l, `detail[${i}]`));
+    // lane owner-press-attended r3: a fold's rows (`more` — «And N more producers.» carries the producers it folds) are
+    // kept for the RECORD a Copy says whole (the fold is for the eye, never the record); a row carries no fold of its own
+    out.detail = x.detail.slice(0, 12).map((l, i) => { const o = line(l, `detail[${i}]`); if (Array.isArray(l.more) && l.more.length) o.more = l.more.slice(0, MORE_LINES_MAX).map((m, j) => line(m, `detail[${i}].more[${j}]`)); return o; });
   }
   if (x.source != null) out.source = { key: line(x.source, 'source').key };
   return out;
 }
+
+/** lane owner-press-attended r3: the rows a detail line's fold (`more`) may carry — the record a Copy says whole. */
+const MORE_LINES_MAX = 24;
 
 /** lane decision-inbox-rank (the LLM plugin's INBOX v2): the board's FACTS of an item as the store keeps them —
  *  {state, dated (≤ 40 characters of the item's own words, a date phrase), due, reasks, askedAt} — or null. Counts,

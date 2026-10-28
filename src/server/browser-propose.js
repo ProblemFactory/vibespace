@@ -96,11 +96,11 @@ function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = nul
   // ── the runner ──
   const running = new Map(); // proposal id → the run in flight (ONE per proposal)
   /** THE USER's Approve: the PURE step (actor, state, the digest of the card that was pressed), then the run. */
-  function approve(id, { shown = null, by = 'user' } = {}) {
+  function approve(id, { shown = null, by = 'user', pressed = null } = {}) {   // lane owner-press-attended r3: + the Approve door's PRESS (the tell is attended on it)
     if (running.has(String(id))) return { ok: false, code: 'proposal_state', error: 'this proposal is already running' };
     const st = keeper.stepProposal(id, { event: 'approve', by, shown });
     if (!st.ok) return st;
-    const job = run(st.entry).catch((e) => log.warn?.(`[browser-propose] ${id}: the run threw — ${e && e.message}`)).finally(() => running.delete(String(id)));
+    const job = run(st.entry, { pressed }).catch((e) => log.warn?.(`[browser-propose] ${id}: the run threw — ${e && e.message}`)).finally(() => running.delete(String(id)));
     running.set(String(id), job);
     return { ok: true, started: true, proposal: SW.proposalCardBlock(st.entry) };
   }
@@ -110,8 +110,8 @@ function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = nul
     log.log?.(`[browser-propose] ${id}: rejected by the user — the agent is told at its next navigation to ${st.entry.proposal.site}`);
     return { ok: true, proposal: SW.proposalCardBlock(st.entry) };
   }
-  async function run(entry) {
-    if (entry && entry.proposal && entry.proposal.kind === 'site-reset') return runSiteReset(entry); // lane site-reset
+  async function run(entry, { pressed = null } = {}) {
+    if (entry && entry.proposal && entry.proposal.kind === 'site-reset') return runSiteReset(entry, { pressed }); // lane site-reset
     const id = entry.id;
     const p = entry.proposal;
     let step = 'starting';
@@ -213,7 +213,7 @@ function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = nul
       progress('tell');
       let told = 'failed';
       const text = SW.approvedText({ ...p, outcome });
-      if (typeof tell === 'function') { try { const r = await tell({ sessionId: entry.sessionId, browserKey: entry.browserKey, text }); told = (r && r.told) || 'failed'; } catch (e) { log.warn?.(`[browser-propose] ${id}: the agent was not told — ${e && e.message}`); } }
+      if (typeof tell === 'function') { try { const r = await tell({ sessionId: entry.sessionId, browserKey: entry.browserKey, text, pressed }); told = (r && r.told) || 'failed'; } catch (e) { log.warn?.(`[browser-propose] ${id}: the agent was not told — ${e && e.message}`); } }
       try { if (typeof keeper.tell === 'function' && entry.browserKey) keeper.tell(entry.browserKey); } catch { /* the set's fingerprint: our message IS the telling */ }
       const done = keeper.stepProposal(id, { event: 'done', outcome: { ...outcome, told } });
       log.log?.(`[browser-propose] ${id}: done — ${outcome.code} (profile ${outcome.profileId || '?'}), ${outcome.siteAdded ? p.site + ' added to the cloak sites' : p.site + ' already on the cloak sites'}, the agent ${told}`);
@@ -221,7 +221,7 @@ function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = nul
     } catch (e) { return fail(e && e.message ? e.message : String(e)); }
   }
   /** lane site-reset: THE USER's Approve of a site-reset proposal — exactly the frozen (profile, host), nothing else. */
-  async function runSiteReset(entry) {
+  async function runSiteReset(entry, { pressed = null } = {}) {
     const id = entry.id;
     const p = entry.proposal;
     let step = 'starting';
@@ -248,7 +248,7 @@ function create({ keeper, feedCard = null, userTodos = null, sessionKeyFor = nul
       const outcome = { code: 'cleared', cookies: Number(r.cookies) || 0 };
       let told = 'failed';
       const text = SW.approvedText({ ...p, outcome });
-      if (typeof tell === 'function' && sessionFor(entry)) { try { const t = await tell({ sessionId: entry.sessionId, browserKey: entry.browserKey, text }); told = (t && t.told) || 'failed'; } catch (e) { log.warn?.(`[browser-propose] ${id}: the agent was not told — ${e && e.message}`); } }
+      if (typeof tell === 'function' && sessionFor(entry)) { try { const t = await tell({ sessionId: entry.sessionId, browserKey: entry.browserKey, text, pressed }); told = (t && t.told) || 'failed'; } catch (e) { log.warn?.(`[browser-propose] ${id}: the agent was not told — ${e && e.message}`); } }
       const done = keeper.stepProposal(id, { event: 'done', outcome: { ...outcome, told } });
       log.log?.(`[browser-propose] ${id}: done — ${p.site}'s stored login cleared in ${p.profileId} (${outcome.cookies} cookie(s), storage of ${(r.origins || []).join(', ') || 'no origin'}), the agent ${told}`);
       return done;

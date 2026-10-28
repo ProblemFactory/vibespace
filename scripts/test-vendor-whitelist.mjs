@@ -905,7 +905,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
     const PROPOSE = 'src/server/browser-propose.js';
     const ext = callers.filter((c) => !c.startsWith(routesRel + ':') && c !== PROPOSE + ':installCloak');
     const pr = strip(texts[PROPOSE] || '');
-    const proposeOk = (pr.match(/inst\.start\(/g) || []).length === 1 && /async function run\(entry\) \{[\s\S]*inst\.start\(/.test(pr) && (pr.match(/[^.\w]run\(/g) || []).length === 2 && /function approve\([\s\S]{0,600}run\(st\.entry\)/.test(pr)
+    const proposeOk = (pr.match(/inst\.start\(/g) || []).length === 1 && /async function run\(entry(?:, \{ pressed = null \} = \{\})?\) \{[\s\S]*inst\.start\(/.test(pr) && (pr.match(/[^.\w]run\(/g) || []).length === 2 && /function approve\([\s\S]{0,700}run\(st\.entry(?:, \{ pressed \})?\)/.test(pr)   // lane owner-press-attended r3: + the Approve's press
       && /router\.post\('\/api\/browser\/proposals\/:id\/approve'[\s\S]{0,120}refuseAgentBearer\(req, res, PROPOSAL_IS_USERS\)/.test(r);
     rows.push(['USER-ONLY: installCli / installCloak are called only from src/routes/browser.js and the proposal runner\'s user-approved run (no timer, no boot path, no other module)', ext.length === 0 && callers.filter((c) => c.startsWith(routesRel)).length === 2 && proposeOk, callers.join(', ') + (proposeOk ? '' : ' · the proposal runner\'s install is not approve-only')]);
     const route = (p) => { const at = r.indexOf(`router.post('${p}'`); if (at < 0) return ''; const end = r.indexOf('\n});', at); return end < 0 ? '' : r.slice(at, end); };

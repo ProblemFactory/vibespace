@@ -194,7 +194,7 @@ ok(r.status === 400 && r.json.code === 'shown_required', 'an Approve naming no c
 // ═══ ③ Approve: exactly the frozen fields ══════════════════════════════════════
 console.log('— ③ Approve runs exactly what the card showed: install, the one site, a new CloakBrowser profile, the page, the agent told');
 const launches0 = fake.launches().length;
-r = await j('POST', `/api/browser/proposals/${idB}/approve`, { shown: eB.proposal.digest });
+r = await j('POST', `/api/browser/proposals/${idB}/approve`, { shown: eB.proposal.digest }, { 'Sec-Fetch-Site': 'same-origin' });   // lane owner-press-attended r3: the person's page (the door mints the PRESS)
 ok(r.status === 200 && r.json.ok && r.json.started && r.json.proposal.state === 'approved', 'the user\'s Approve with the card\'s digest ⇒ started', r.json);
 const doneB = await settle(idB);
 const pB = doneB && doneB.proposal;
@@ -210,7 +210,7 @@ ok(newP && newP.provider === 'cloak' && Number.isInteger(newP.fingerprintSeed) &
 ok(L1.length === 1 && L1[0].exe === fake.cloakExe && /--fingerprint=\d+/.test(L1[0].args) && /--proxy-server=http:\/\/127\.0\.0\.1:\d+/.test(L1[0].args) && O1.some((o) => o.verb === 'tab new' && o.session === 'vs-' + sB._browserKey), '(c) CloakBrowser launched (its program, its seed, the egress proxy) and the claim\'s page opened in THIS conversation\'s tab', { L1, O1 });
 const tellCall = ladder.calls.find((c) => /Approved: your browser is now CloakBrowser/.test(c.text));
 const stashed = ladder.stash.find((s) => /Approved: your browser is now CloakBrowser/.test(s.text));
-ok(tellCall && tellCall.opts.noWake === true && tellCall.opts.kind === 'notification' && tellCall.opts.spendReason === 'browser-handback-idle' && tellCall.cid === sB.claudeSessionId && stashed && stashed.kind === 'notification' && new RegExp('Re-run the sign-in at ' + SIGNIN.replace(/[?.]/g, '\\$&')).test(stashed.text) && /new — sign in there once/.test(stashed.text), '(d) the agent TOLD through the handback\'s ONE ladder site with noWake (never a wake; lane owner-press-attended r2: no press rides it, so its reason is the gated twin) — a claude turn cannot join for free, so the words wait for its next turn', { tellCall, stashed });
+ok(tellCall && tellCall.opts.noWake === true && tellCall.opts.kind === 'notification' && tellCall.opts.spendReason === 'browser-handback' && tellCall.cid === sB.claudeSessionId && stashed && stashed.kind === 'notification' && new RegExp('Re-run the sign-in at ' + SIGNIN.replace(/[?.]/g, '\\$&')).test(stashed.text) && /new — sign in there once/.test(stashed.text), '(d) the agent TOLD through the handback\'s ONE ladder site with noWake (never a wake; lane owner-press-attended r3: the person\'s Approve is ATTENDED — the door\'s press rides the run to the tell) — a claude turn cannot join for free, so the words wait for its next turn', { tellCall, stashed });
 const opsB = cardOps('sess-b', idB);
 ok(opsB.filter((o) => o.op === 'create').length === 1 && opsB.slice(1).every((o) => o.op === 'edit' && Object.keys(o.fields).join() === 'content') && opsB.some((o) => o.op === 'edit' && o.fields.content[0].progress && o.fields.content[0].progress.step === 'install' && o.fields.content[0].progress.percent === 34) && opsB.at(-1).fields.content[0].state === 'done',
   'THE CARD: created ONCE; every change an in-place `edit` of its content (never a status — never a swap); the download\'s progress streamed onto it (34 %); it ends done', opsB.map((o) => o.op + ':' + (o.op === 'edit' ? o.fields.content[0].state + '/' + JSON.stringify(o.fields.content[0].progress) : 'create')));
@@ -260,8 +260,13 @@ ok(eA.proposal.plan.kind === 'switch' && eA.proposal.plan.profileId === portal.i
 ok(SW.proposalLines(SW.proposalCardBlock(eA)).plan.some((l) => /Switch this conversation's browser "\{label\}" to CloakBrowser\. Your logins in it stay in the profile/.test(l.key) && l.params.label === 'Portal'), 'the words say what it does: the same profile, the logins stay, the page reopened');
 ladder.steerNext = true;
 const allowBeforeA = settings['browser.cloak.egressAllowlist'];
-r = await j('POST', `/api/browser/proposals/${idA}/approve`, { shown: eA.proposal.digest });
+const callsBeforeA = ladder.calls.length;
+r = await j('POST', `/api/browser/proposals/${idA}/approve`, { shown: eA.proposal.digest });   // no page headers: a script
 const doneA = await settle(idA);
+// lane owner-press-attended r3: a header-less Approve (no page — a script on an instance nobody signs in to) still runs,
+// but mints no press: its tell is the gated twin, asked of the ceiling like any turn nobody pressed
+const tellA = ladder.calls.slice(callsBeforeA).find((c) => c.opts && c.opts.noWake);
+ok(tellA && tellA.opts.spendReason === 'browser-handback-idle', 'a header-less Approve runs, but its tell is the GATED twin (browser-handback-idle — no press rides it)', tellA && tellA.opts);
 const pp = keeper.profile(portal.id);
 ok(doneA && doneA.proposal.state === 'done' && doneA.proposal.outcome.code === 'switched' && doneA.proposal.outcome.reopened === 1 && pp.provider === 'cloak' && pp.dir === portal.dir && doneA.proposal.outcome.told === 'steered', 'done: "Portal" runs on CloakBrowser in place (the same directory), its tab reopened, the agent told IN its running turn (the free steer)', { p: doneA && doneA.proposal, provider: pp.provider });
 ok(settings['browser.cloak.egressAllowlist'] === allowBeforeA + ',portal.example' && !eA.proposal.alsoSites && inst.starts === 1, 'ONLY portal.example added (a vendor the sign-in table does not know stays one host); nothing installed again', settings['browser.cloak.egressAllowlist']);
@@ -547,9 +552,9 @@ const swSrc = fs.readFileSync(path.join(REPO, 'src/browser-switch.js'), 'utf8');
 }
 { // c5 — the tell without noWake
   const hSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-handback.js'), 'utf8');
-  const cut = "    try { r = await viaLadder(cid, text, { noWake: true }); }";
+  const cut = "    try { r = await viaLadder(cid, text, { noWake: true, pressed }); }";   // lane owner-press-attended r3: + the Approve's press
   ok(hSrc.includes(cut), 'c5: the tell asks the ladder with noWake where the control cuts it');
-  const Hm = M.load('src/server/browser-handback.js', hSrc.replace(cut, '    try { r = await viaLadder(cid, text); }'), 'wake');
+  const Hm = M.load('src/server/browser-handback.js', hSrc.replace(cut, '    try { r = await viaLadder(cid, text, { pressed }); }'), 'wake');
   const calls5 = [];
   const h5 = Hm.create({ keeper, deliver: { async deliverToConversation(cid, text, o) { calls5.push(o); return { ok: true, lane: 'message' }; }, stashFor() {} }, activeSessions: active, log: quiet });
   const t5 = await h5.tellProposal({ sessionId: 'sess-a', browserKey: sA._browserKey, text: 'Approved: x' });
