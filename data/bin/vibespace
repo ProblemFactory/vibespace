@@ -1,0 +1,440 @@
+#!/usr/bin/env node
+'use strict';
+// vibespace — THE PERSON'S CLI (lane human-cli, 2026-10-28; the owner after the 89-minute hub freeze: «今天的停机事件给了我
+// 一些 idea，我感觉你应该做一个给人用的 cli，这样在 hub 挂掉的时候我可以从机器上快速用指令列出来有哪些 session，attach 进一个
+// session 和 session 交互»). For a person at a terminal on the machine — the OPPOSITE of the agent CLIs (vibespace-*:
+// each speaks HTTP to the hub with a session token): this one works with NO hub. It reads the machine's own facts —
+// the index the hub keeps on the machine's own disk (src/local-index.js says where), /proc, the dtach sockets — and
+// never waits on the hub: `status` asks it once, bounded; anything that may touch a stalled mount (a socket, a buffer,
+// data/) runs in a child process with a clock. It never reads the vault or an account store, never kills, never deletes.
+// The hub copies this file and its PURE half onto the machine's own disk at every start (`<place>/bin/`, usually
+// ~/.vibespace/local/bin) — a CLI under data/ would hang with data/. Manual: docs/human-cli.md.
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const net = require('net');
+const http = require('http');
+const cp = require('child_process');
+const readline = require('readline');
+const { StringDecoder } = require('string_decoder');
+
+function loadPure() {
+  try { return require(path.join(__dirname, 'vibespace-local-index.js')); } catch { }
+  try { return require(path.join(__dirname, '..', '..', 'src', 'local-index.js')); } catch { }   // a checkout before its first boot
+  return null;
+}
+const LI = loadPure();
+if (!LI) { process.stderr.write('vibespace: its PURE half (vibespace-local-index.js) is missing beside it — the hub copies both at every start; copy src/local-index.js there by hand\n'); process.exit(3); }
+
+const USAGE = `vibespace — your sessions on THIS machine, with or without the hub
+
+  vibespace ls [--json]            the sessions: alive / dead / unknown, kind, agent, name, folder, age
+  vibespace status [--json]        the hub (answers? frozen? down?), data/ (answers?), the load, the hub's last log lines
+  vibespace attach <session>       a TERMINAL session's live screen — detach with Ctrl-\\ (the session keeps running)
+  vibespace chat <session> [-n N]  a CHAT session: its last N messages (20), then type a line + Enter to send it;
+                                   Esc or /stop = Stop the running turn · Ctrl-C = leave (the session keeps running)
+
+  <session> = its number in \`vibespace ls\`, its id (or the end of it), or its name (or a unique part of it).
+  Over ssh: \`ssh <box> vibespace ls\` · \`ssh -t <box> vibespace attach 3\` (a screen needs -t).
+  Reads the index the hub keeps on this machine's own disk; never calls the hub first, never kills, never deletes.`;
+
+const PROBE_MS = 2000;      // the clock on every child that may touch a mount, and on the one HTTP ask
+const ACK_MS = 3000;        // a wrapper acks each stdin line at once; none in this long = the line did not reach it
+const CHUNK = 1500000;      // the tail of a transcript / buffer the history reads
+
+const say = (s = '') => process.stdout.write(s + '\n');
+const warn = (s) => process.stderr.write(s + '\n');
+/** A child the clock gave up on: killed AND its pipes dropped — a child stuck in a mount's kernel wait cannot even be
+ *  killed (measured on a stopped FUSE daemon: state D), and an open pipe to it would hold this process forever. */
+function abandon(ch) { if (!ch) return; try { ch.kill('SIGKILL'); } catch { } for (const s of [ch.stdout, ch.stderr]) { try { if (s) s.destroy(); } catch { } } try { ch.unref(); } catch { } }
+const readProc = (rel) => { try { return fs.readFileSync('/proc/' + rel, 'utf8'); } catch { return null; } };
+const HAS_PROC = readProc('self/stat') != null;
+const BOOT_ID = (readProc('sys/kernel/random/boot_id') || '').trim();
+const HOME = os.homedir();
+const tildeOf = (p) => (p && (p === HOME || p.startsWith(HOME + '/')) ? '~' + p.slice(HOME.length) : p);
+const clock = (ms) => { const d = new Date(ms); return Number.isFinite(d.getTime()) ? `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '?'; };
+
+// ── the index ──────────────────────────────────────────────────────────────────────────────────────────────────────
+function placeNow() {
+  return LI.indexPlaceOf({ home: HOME, uid: typeof process.getuid === 'function' ? process.getuid() : null,
+    mountinfo: readProc('self/mountinfo') || '', xdgRuntimeDir: process.env.XDG_RUNTIME_DIR || '' });
+}
+/** → {place, doc} or exits with the door: «no VibeSpace hub has run here». */
+function needIndex() {
+  const place = placeNow();
+  if (!place.file) { warn(`vibespace: ${place.why} — no hub can keep a session index on this machine`); process.exit(1); }
+  let text = null; try { text = fs.readFileSync(place.file, 'utf8'); } catch (e) { text = null; if (e.code !== 'ENOENT') { warn(`vibespace: ${tildeOf(place.file)} cannot be read (${e.message})`); process.exit(1); } }
+  if (text == null) { noHubHere(place); process.exit(1); }
+  const r = LI.parseIndex(text);
+  if (!r.ok) { warn(`vibespace: ${tildeOf(place.file)}: ${r.why}`); process.exit(1); }
+  return { place, doc: r.doc };
+}
+function noHubHere(place) {
+  warn(`no VibeSpace hub has run here — there is no session index at ${tildeOf(place.file)}.`);
+  let paired = [];
+  if (place.via === 'home') { try { paired = fs.readdirSync(path.join(HOME, '.vibespace')).filter((n) => /^device@./.test(n)).map((n) => n.slice('device@'.length)); } catch { paired = []; } }
+  for (const h of paired) warn(`  · this machine is paired with the hub at ${h}: its sessions are listed there — \`ssh ${h.replace(/:\d+$/, '')} vibespace ls\`, or open that hub's page`);
+  if (!paired.length) warn('  · if this machine is a paired device or an ssh host of a hub, its sessions are listed by that hub: `ssh <hub> vibespace ls`, or open the hub\'s page');
+  warn('  · a hub writes this index on every session change from 2.369.361 on; start (or update) the hub on this machine and it appears');
+}
+
+// ── the kernel's facts (bounded: a child process does every socket connect and data/ stat) ─────────────────────────
+const PROBE_CHILD = `
+const net = require('net'), fs = require('fs');
+const { sockets, stats } = JSON.parse(process.argv[1]);
+const out = (o) => { try { fs.writeSync(1, JSON.stringify(o) + '\\n'); } catch { } };
+for (const p of stats) { try { const st = fs.statSync(p); out({ stat: p, ok: true, dir: st.isDirectory() }); } catch (e) { out({ stat: p, ok: false, code: e.code || 'error' }); } }
+let left = sockets.length;
+const done = () => { if (--left <= 0) process.exit(0); };
+if (!left) process.exit(0);
+for (const p of sockets) {
+  let c;
+  try { c = net.createConnection(p); } catch (e) { out({ sock: p, code: e.code || 'error' }); done(); continue; }
+  c.on('connect', () => { out({ sock: p, code: 'ok' }); c.destroy(); done(); });
+  c.on('error', (e) => { out({ sock: p, code: e.code || 'error' }); done(); });
+}`;
+/** → {sock: Map(path → SOCKET_FACTS word), stat: Map(path → {ok, code}|'no-answer')}; whatever did not answer in time is 'no-answer'. */
+function probe({ sockets = [], stats = [], timeoutMs = PROBE_MS } = {}) {
+  return new Promise((resolve) => {
+    const sock = new Map(), stat = new Map();
+    const finish = () => { for (const p of sockets) if (!sock.has(p)) sock.set(p, 'no-answer'); for (const p of stats) if (!stat.has(p)) stat.set(p, 'no-answer'); resolve({ sock, stat }); };
+    if (!sockets.length && !stats.length) return finish();
+    let ch, buf = '', settled = false;
+    const end = () => { if (settled) return; settled = true; clearTimeout(t); abandon(ch); finish(); };
+    try { ch = cp.spawn(process.execPath, ['-e', PROBE_CHILD, JSON.stringify({ sockets, stats })], { stdio: ['ignore', 'pipe', 'ignore'], env: {} }); } catch { return finish(); }
+    const t = setTimeout(end, timeoutMs);
+    ch.stdout.on('data', (d) => {
+      buf += d;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const ln = buf.slice(0, i); buf = buf.slice(i + 1);
+        let o; try { o = JSON.parse(ln); } catch { continue; }
+        if (o.sock) sock.set(o.sock, LI.socketFactOf(o.code)); else if (o.stat) stat.set(o.stat, { ok: !!o.ok, code: o.code || null });
+      }
+    });
+    ch.on('exit', () => setImmediate(end));
+    ch.on('error', end);
+    ch.unref();
+  });
+}
+const TAIL_CHILD = `
+const fs = require('fs');
+const [p, n] = JSON.parse(process.argv[1]);
+try { const fd = fs.openSync(p, 'r'); const size = fs.fstatSync(fd).size; const len = Math.min(size, n); const b = Buffer.alloc(len); fs.readSync(fd, b, 0, len, size - len); process.stdout.write(b); }
+catch (e) { process.stderr.write(e.code || 'error'); process.exit(2); }`;
+/** The tail of a file in a child with a clock → {ok, text} | {ok: false, why}. */
+function readTail(file, bytes = CHUNK, timeoutMs = PROBE_MS) {
+  return new Promise((resolve) => {
+    if (!file) return resolve({ ok: false, why: 'no file' });
+    let ch, out = [], err = '', settled = false;
+    const end = (r) => { if (settled) return; settled = true; clearTimeout(t); abandon(ch); resolve(r); };
+    try { ch = cp.spawn(process.execPath, ['-e', TAIL_CHILD, JSON.stringify([file, bytes])], { stdio: ['ignore', 'pipe', 'pipe'], env: {} }); } catch (e) { return resolve({ ok: false, why: e.message }); }
+    const t = setTimeout(() => end({ ok: false, why: `no answer in ${timeoutMs / 1000} s (its file system is not answering)` }), timeoutMs);
+    ch.stdout.on('data', (d) => out.push(d));
+    ch.stderr.on('data', (d) => { err += d; });
+    ch.on('exit', (code) => setImmediate(() => end(code === 0 ? { ok: true, text: Buffer.concat(out).toString('utf8') } : { ok: false, why: err === 'ENOENT' ? 'it does not exist' : (err || 'unreadable') })));
+    ch.on('error', (e) => end({ ok: false, why: e.message }));
+    ch.unref();
+  });
+}
+/** A short command's output in a child with a clock → text | null. */
+function runShort(cmd, args, timeoutMs = PROBE_MS) {
+  return new Promise((resolve) => {
+    let ch, out = '', settled = false;
+    const end = (v) => { if (settled) return; settled = true; clearTimeout(t); abandon(ch); resolve(v); };
+    try { ch = cp.spawn(cmd, args, { stdio: ['ignore', 'pipe', 'ignore'], env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME, LANG: process.env.LANG || 'C.UTF-8', XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || '' } }); } catch { return resolve(null); }   // a named env (the spawn-env census §94): what journalctl needs, nothing else
+    const t = setTimeout(() => end(out || null), timeoutMs);
+    ch.stdout.on('data', (d) => { out += d; });
+    ch.on('exit', () => setImmediate(() => end(out)));
+    ch.on('error', () => end(null));
+    ch.unref();
+  });
+}
+/** The hub's port, asked ONCE with a clock → 'answers' | 'no-answer' | 'refused' | null (no port known). */
+function askHub(hub, timeoutMs = PROBE_MS) {
+  return new Promise((resolve) => {
+    if (!hub || !Number(hub.port)) return resolve(null);
+    const host = !hub.host || hub.host === '0.0.0.0' || hub.host === '::' ? '127.0.0.1' : hub.host;
+    let settled = false;
+    const end = (v) => { if (!settled) { settled = true; resolve(v); } };
+    const req = http.get({ host, port: Number(hub.port), path: '/api/home', timeout: timeoutMs, headers: { 'user-agent': 'vibespace-cli' } }, (res) => { res.resume(); end({ word: 'answers', status: res.statusCode }); });
+    req.on('timeout', () => { req.destroy(); end({ word: 'no-answer' }); });
+    req.on('error', (e) => end({ word: e.code === 'ECONNREFUSED' ? 'refused' : (settled ? null : 'no-answer'), code: e.code }));
+  });
+}
+
+function childVerdict(rec) { return LI.procVerdict(rec, { stat: rec && rec.pid ? readProc(rec.pid + '/stat') : null, bootId: BOOT_ID, hasProc: HAS_PROC }); }
+/** Every row judged now + the hub judged (no HTTP unless asked). */
+async function judgeAll(doc, { ask = false } = {}) {
+  const sockets = [...new Set(doc.sessions.map((r) => r.socket).filter(Boolean))];
+  const stats = ask && doc.hub && doc.hub.dataDir ? [doc.hub.dataDir] : [];
+  const [facts, http] = await Promise.all([probe({ sockets, stats }), ask ? askHub(doc.hub) : Promise.resolve(null)]);
+  const rebooted = !!(doc.hub && doc.hub.bootId && BOOT_ID && doc.hub.bootId !== BOOT_ID);
+  const items = doc.sessions.map((row) => ({ row, verdict: LI.judgeRow(row, { child: row.child ? childVerdict(row.child) : null, socket: row.socket ? facts.sock.get(row.socket) : null, rebooted }) }));
+  const hubProc = doc.hub ? childVerdict(doc.hub) : null;
+  const hub = LI.judgeHub(doc.hub, { http: http ? http.word : null, proc: hubProc, now: Date.now() });
+  return { items, hub, http, facts, rebooted };
+}
+const turnFreshOf = (doc, hub) => (hub.state === 'up') && Number(doc.hub && doc.hub.seenAt) > 0 && Date.now() - doc.hub.seenAt < LI.FRESH_MS;
+const listed = (doc) => LI.orderRows(doc.sessions);
+
+// ── ls ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+async function cmdLs(opts) {
+  const { place, doc } = needIndex();
+  const { items, hub } = await judgeAll(doc);
+  const order = listed(doc);
+  if (opts.json) {
+    say(JSON.stringify({ index: place.file, writtenAt: doc.writtenAt, hub: { ...doc.hub, state: hub.state, why: hub.why },
+      sessions: order.map((r, i) => { const it = items.find((x) => x.row === r); return { n: i + 1, ...r, state: it.verdict.state, why: it.verdict.why }; }) }, null, 1));
+    return 0;
+  }
+  const stale = hub.state !== 'up';
+  say(`hub: ${hub.state} — ${hub.why}`);
+  if (stale) say(`      the list below is what the hub last wrote (${clock(doc.writtenAt)}); each session is judged NOW by this machine`);
+  if (!order.length) { say('no sessions.'); return 0; }
+  for (const l of LI.tableOf(items, { now: Date.now(), width: process.stdout.columns || 140, home: HOME, turnFresh: turnFreshOf(doc, hub) })) say(l);
+  const n = (s) => items.filter((i) => i.verdict.state === s).length;
+  const unknown = items.filter((i) => i.verdict.state === 'unknown');
+  say(`${items.length} session(s): ${n('alive')} alive, ${n('dead')} dead, ${unknown.length} unknown · \`vibespace attach <#>\` (terminal) · \`vibespace chat <#>\` (chat)`);
+  if (unknown.length) say(`unknown = ${unknown[0].verdict.why}`);
+  const stalled = items.filter((i) => /not answering/.test(i.verdict.why || ''));
+  if (stalled.length) say(`${stalled.length} session(s) have their socket on a mount that is not answering — attach / chat cannot reach them until it answers (\`vibespace status\` says which)`);
+  return 0;
+}
+
+// ── status ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+async function cmdStatus(opts) {
+  const { place, doc } = needIndex();
+  const { items, hub, http, facts } = await judgeAll(doc, { ask: true });
+  const h = doc.hub || {};
+  const dataFact = h.dataDir ? facts.stat.get(h.dataDir) : null;
+  const dataWord = !h.dataDir ? 'unknown' : dataFact === 'no-answer' ? 'no-answer' : dataFact && dataFact.ok ? 'answers' : `error ${dataFact && dataFact.code}`;
+  const load = (readProc('loadavg') || '').split(' ').slice(0, 3).join(' ') || null;
+  const log = h.unit && h.unit.unit ? await runShort('journalctl', [...(h.unit.user ? ['--user'] : []), '-u', h.unit.unit, '-n', '8', '--no-pager', '-o', 'short-iso'], PROBE_MS) : null;
+  const n = (s) => items.filter((i) => i.verdict.state === s).length;
+  if (opts.json) {
+    say(JSON.stringify({ index: place.file, writtenAt: doc.writtenAt, hub: { ...h, state: hub.state, why: hub.why, http: http || null }, data: { dir: h.dataDir || null, fs: h.dataFs || null, state: dataWord },
+      sessions: { total: items.length, alive: n('alive'), dead: n('dead'), unknown: n('unknown') }, load, log: log ? log.trim().split('\n') : null }, null, 1));
+    return 0;
+  }
+  say(`hub       ${hub.state} — ${hub.why}`);
+  say(`          http://${!h.host || h.host === '0.0.0.0' || h.host === '::' ? '127.0.0.1' : h.host}:${h.port || '?'} — ${!http ? 'not asked (no port)' : http.word === 'answers' ? `answers (HTTP ${http.status})` : http.word === 'refused' ? 'refused (nothing listens)' : `no answer in ${PROBE_MS / 1000} s`}`);
+  say(`          ${tildeOf(h.root || '?')} · v${h.version || '?'}${h.unit ? ` · unit ${h.unit.unit}` : ''} · started ${h.startedAt ? LI.ageWords(Date.now() - h.startedAt) + ' ago' : '?'}`);
+  say(`data/     ${dataWord === 'answers' ? 'answers' : dataWord === 'no-answer' ? `NOT answering in ${PROBE_MS / 1000} s — every socket, buffer and meta under it waits with it` : dataWord} (${tildeOf(h.dataDir || '?')}${h.dataFs ? ', ' + h.dataFs : ''})`);
+  say(`index     ${tildeOf(place.file)} — written ${doc.writtenAt ? LI.ageWords(Date.now() - doc.writtenAt) + ' ago' : '?'} (${place.why})`);
+  say(`sessions  ${n('alive')} alive · ${n('dead')} dead · ${n('unknown')} unknown — \`vibespace ls\``);
+  if (load) say(`load      ${load} (${os.cpus().length} cpus) · memory ${(os.freemem() / 2 ** 30).toFixed(1)} GB free of ${(os.totalmem() / 2 ** 30).toFixed(1)} GB`);
+  if (h.unit && h.unit.unit) {
+    say(`hub log   journalctl ${h.unit.user ? '--user ' : ''}-u ${h.unit.unit} -n 8`);
+    for (const l of String(log || '').trim().split('\n').filter(Boolean)) say('  ' + l.slice(0, 220));
+    if (!log) say('  (the journal gave nothing in time)');
+  } else say('hub log   not under systemd — the hub logs to the terminal that started it');
+  return 0;
+}
+
+// ── picking a session ──────────────────────────────────────────────────────────────────────────────────────────────
+function pickOrExit(doc, q, verb) {
+  if (!q) { warn(`usage: vibespace ${verb} <session> — its number in \`vibespace ls\`, its id, or its name`); process.exit(2); }
+  const p = LI.pickSession(doc.sessions, q);
+  if (p.row) return p;
+  if (p.ambiguous) {
+    warn(`vibespace: «${q}» names ${p.ambiguous.length} sessions — say which:`);
+    const order = listed(doc);
+    for (const r of p.ambiguous) warn(`  ${order.indexOf(r) + 1}  ${r.kind}  ${r.name || '(no name)'}  ${r.id}`);
+    process.exit(2);
+  }
+  warn(`vibespace: no session «${q}» in the index — \`vibespace ls\` lists them`);
+  process.exit(2);
+}
+const label = (r) => `«${r.name || r.id}» (${r.id})`;
+
+// ── attach (a terminal session) ────────────────────────────────────────────────────────────────────────────────────
+const DTACH_CANDIDATES = ['/usr/bin/dtach', '/usr/local/bin/dtach', '/opt/homebrew/bin/dtach', '/bin/dtach'];
+function dtachBin(hubRoot) {
+  for (const p of DTACH_CANDIDATES) { try { fs.accessSync(p, fs.constants.X_OK); return p; } catch { } }
+  for (const d of String(process.env.PATH || '').split(':')) {
+    if (!d.startsWith('/') || (hubRoot && (d === hubRoot || d.startsWith(hubRoot + '/')))) continue;   // never a PATH entry under the hub's checkout (it may be the stalled mount)
+    try { fs.accessSync(path.join(d, 'dtach'), fs.constants.X_OK); return path.join(d, 'dtach'); } catch { }
+  }
+  return null;
+}
+function goneWords(row, fact) {
+  if (fact === 'no-answer') return `its socket ${tildeOf(row.socket)} sits on a mount that is not answering — nothing can reach the session until it answers (\`vibespace status\` says which)`;
+  if (fact === 'missing') return `the session is gone — its socket ${tildeOf(row.socket)} no longer exists`;
+  if (fact === 'refused' || fact === 'not-socket') return `the session is gone — nothing listens on its socket ${tildeOf(row.socket)}`;
+  return `its socket ${tildeOf(row.socket)} could not be reached (${fact})`;
+}
+async function cmdAttach(q) {
+  const { doc } = needIndex();
+  const { row, n } = pickOrExit(doc, q, 'attach');
+  if (row.kind === 'chat') { warn(`vibespace: ${label(row)} is a CHAT session — it has no screen; talk to it with \`vibespace chat ${n}\``); return 2; }
+  if (!row.socket) { warn(`vibespace: ${label(row)} has no dtach socket (a daemon pipe session) — only the hub reaches it`); return 1; }
+  const facts = await probe({ sockets: [row.socket] });
+  const fact = facts.sock.get(row.socket);
+  if (fact !== 'accepts') {
+    warn(`vibespace: cannot attach to ${label(row)}: ${goneWords(row, fact)}.`);
+    if (row.buffer) warn(`  its last screen is in ${tildeOf(row.buffer)} (raw terminal bytes: \`tail -c 20000 ${tildeOf(row.buffer)}\`)`);
+    return 1;
+  }
+  const dtach = dtachBin(doc.hub && doc.hub.root);
+  if (!dtach) { warn('vibespace: dtach is not installed on this machine (/usr/bin/dtach) — install it: apt install dtach / brew install dtach'); return 1; }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) { warn(`vibespace: attach needs a terminal — over ssh: \`ssh -t <box> vibespace attach ${n}\``); return 2; }
+  say(`attaching to ${label(row)} — ${tildeOf(row.cwd || '')}`);
+  say('detach with Ctrl-\\ — the session keeps running. (The hub\'s own view shares this screen: your window size becomes its size.)');
+  // = the hub's pty bridge (src/server/session-stdout.js: `dtach -a <socket> -E -r winch`) with the detach key dtach is
+  // known by — ^\ — instead of -E (a bridge must pass every byte; a person must be able to leave)
+  const r = cp.spawnSync(dtach, ['-a', row.socket, '-e', '^\\', '-r', 'winch'], { stdio: 'inherit' });
+  say(`\ndetached from ${label(row)} — it keeps running.`);
+  return r.status == null ? 1 : r.status;
+}
+
+// ── chat (a chat session) ──────────────────────────────────────────────────────────────────────────────────────────
+function historySources(row) {
+  const out = [];
+  if (row.transcript) out.push(['transcript', row.transcript]);   // what the harness's own store located (the person's words are there)
+  if (row.buffer) out.push(['buffer', row.buffer]);
+  return out;
+}
+async function historyOf(row, max) {
+  const tried = [];
+  for (const [kind, file] of historySources(row)) {
+    const r = await readTail(file);
+    if (!r.ok) { tried.push(`${kind} ${tildeOf(file)}: ${r.why}`); continue; }
+    const msgs = LI.historyOf(r.text, { max });
+    if (msgs.length) return { msgs, kind, file, tried };
+    tried.push(`${kind} ${tildeOf(file)}: no messages`);
+  }
+  return { msgs: [], kind: null, file: null, tried };
+}
+const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
+const dim = (s) => (COLOR ? `\x1b[2m${s}\x1b[0m` : s);
+const bold = (s) => (COLOR ? `\x1b[1m${s}\x1b[0m` : s);
+function msgText(m, agentName) {
+  if (m.who === 'you') return `${bold('you')}: ${m.text.replace(/\n/g, '\n     ')}`;
+  if (m.who === 'agent') return `${bold(agentName)}: ${m.text.replace(/\n/g, '\n' + ' '.repeat(agentName.length + 2))}`;
+  if (m.who === 'tool') return dim(`  · ${m.text}`);
+  if (m.who === 'turn') return dim(`  — ${m.text}`);
+  return dim(`  (${m.text})`);
+}
+const HELD_WORDS = { 'vault-locked': 'the hub\'s vault is locked and the session waits for it — Unlock… at the top of the hub\'s page (For you names what is waiting on it)' };
+async function cmdChat(q, opts) {
+  const { doc } = needIndex();
+  const { row, n } = pickOrExit(doc, q, 'chat');
+  if (row.kind !== 'chat') { warn(`vibespace: ${label(row)} is a TERMINAL session — see its screen with \`vibespace attach ${n}\``); return 2; }
+  const agentName = row.backend || 'agent';
+  const [hist, facts] = await Promise.all([historyOf(row, opts.n), row.socket ? probe({ sockets: [row.socket] }) : Promise.resolve(null)]);
+  const fact = facts ? facts.sock.get(row.socket) : null;
+  say(dim(`${label(row)} · ${agentName} · ${tildeOf(row.cwd || '')}`));
+  if (hist.msgs.length) { say(dim(`the last ${hist.msgs.length} message(s), from its ${hist.kind} ${tildeOf(hist.file)}:`)); for (const m of hist.msgs) say(msgText(m, agentName)); }
+  else say(dim(`no earlier messages could be read${hist.tried.length ? ' (' + hist.tried.join('; ') + ')' : ''}`));
+  if (!row.socket) { warn(`vibespace: ${label(row)} has no dtach socket (a daemon pipe session) — only the hub reaches it; read-only`); return 1; }
+  if (fact !== 'accepts') { warn(`vibespace: ${label(row)} is read-only here: ${goneWords(row, fact)} — the wrapper is not reachable; above is the last it wrote.`); return 1; }
+  let readOnly = !row.input ? 'the hub did not write how this session takes a line (a hub before 2.369.361) — read-only' : row.inputHeld ? `${HELD_WORDS[row.inputHeld] || `its machine is not connected (${row.inputHeld}) — a line would only wait`} (as the hub last said, ${LI.ageWords(Date.now() - (doc.writtenAt || 0))} ago)` : null;
+  const tty = !!(process.stdin.isTTY && process.stdout.isTTY);
+  say(dim(readOnly ? `read-only: ${readOnly}` : `type a line + Enter to send it · ${tty ? 'Esc or ' : ''}/stop = Stop the running turn · ${tty ? 'Ctrl-C' : 'end of input'} = leave (the session keeps running)`));
+
+  const sock = net.createConnection(row.socket);
+  const dec = new StringDecoder('utf8');
+  let acc = '', chunkOpen = false, ackWaiter = null, leaving = false, rl = null;
+  const out = (line) => {
+    if (chunkOpen) { process.stdout.write('\n'); chunkOpen = false; }
+    if (rl && tty) { readline.clearLine(process.stdout, 0); readline.cursorTo(process.stdout, 0); process.stdout.write(line + '\n'); rl.prompt(true); }
+    else process.stdout.write(line + '\n');
+  };
+  const onRecord = (rec) => {
+    if (rec.type === '_stdin_ack') { if (ackWaiter) { const w = ackWaiter; ackWaiter = null; w(true); } return; }
+    for (const m of LI.recordLines(rec)) {
+      if (m.who === 'you') continue;   // the person's own line is echoed when it is sent
+      if (m.chunk) {
+        if (!chunkOpen) { if (rl && tty) { readline.clearLine(process.stdout, 0); readline.cursorTo(process.stdout, 0); } process.stdout.write(`${bold(agentName)}: `); chunkOpen = true; }
+        process.stdout.write(m.text);
+        continue;
+      }
+      out(msgText(m, agentName));
+    }
+  };
+  sock.on('connect', () => sock.write(LI.dtachAttach()));
+  sock.on('data', (d) => {
+    acc += dec.write(d);
+    let i;
+    while ((i = acc.indexOf('\n')) >= 0) {
+      const ln = acc.slice(0, i).replace(/\r$/, '').trim(); acc = acc.slice(i + 1);
+      if (!ln || ln[0] !== '{') continue;
+      let rec; try { rec = JSON.parse(ln); } catch { continue; }
+      onRecord(rec);
+    }
+  });
+  const leave = (code = 0, words = null) => {
+    if (leaving) return; leaving = true;
+    if (words) out(words);
+    try { sock.end(); } catch { }
+    try { if (rl) rl.close(); } catch { }
+    setTimeout(() => process.exit(code), 50);
+  };
+  sock.on('error', (e) => leave(1, `the session's socket failed (${e.code || e.message}) — left ${label(row)}`));
+  sock.on('close', () => leave(1, `the session's socket closed — its wrapper ended`));
+  const push = (frame) => sock.write(LI.dtachPush(JSON.stringify(frame) + '\n'));
+  const waitAck = () => new Promise((resolve) => { ackWaiter = resolve; setTimeout(() => { if (ackWaiter === resolve) { ackWaiter = null; resolve(false); } }, ACK_MS); });
+  const newId = () => 'vs-cli-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const stop = async () => {
+    if (!row.input) { out(dim('  (read-only — no Stop frame known)')); return; }
+    push(LI.fillFrame(row.input.stop, { id: newId() }));
+    out(dim('  (Stop sent — the running turn ends; anything held is dropped)'));
+    await waitAck();
+  };
+  const sendLine = async (text) => {
+    if (text === '/stop') return stop();
+    if (text === '/quit' || text === '/exit') return leave(0, `left ${label(row)} — it keeps running`);
+    if (readOnly) { out(dim(`  (read-only: ${readOnly} — not sent)`)); return; }
+    push(LI.fillFrame(row.input.line, { text, id: newId() }));
+    out(msgText({ who: 'you', text }, agentName));
+    if (!(await waitAck())) {
+      readOnly = `the wrapper did not take the line within ${ACK_MS / 1000} s — it may not have reached the session`;
+      out(dim(`  (read-only from here: ${readOnly})`));
+    }
+  };
+  await new Promise((r) => (sock.connecting ? sock.once('connect', r) : r()));
+  rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: tty, prompt: tty ? '> ' : '' });
+  let chain = Promise.resolve();
+  rl.on('line', (line) => { const t = line.trim(); if (!t) { if (tty) rl.prompt(); return; } chain = chain.then(() => sendLine(t)).then(() => { if (tty && !leaving) rl.prompt(); }); });
+  rl.on('SIGINT', () => leave(0, `left ${label(row)} — it keeps running`));
+  rl.on('close', () => { chain.then(() => setTimeout(() => leave(0, tty ? `left ${label(row)} — it keeps running` : null), Math.max(0, opts.wait * 1000))); });
+  if (tty) { process.stdin.on('keypress', (s, key) => { if (key && key.name === 'escape' && !leaving) chain = chain.then(stop); }); rl.prompt(); }
+  return new Promise(() => { });   // runs until leave()
+}
+
+// ── main ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+function parseArgs(a) {
+  const opts = { json: false, n: 20, wait: 0, pos: [] };
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    if (x === '--json') opts.json = true;
+    else if (x === '-n' || x === '--last') opts.n = Math.max(1, Math.min(500, Number(a[++i]) || 20));
+    else if (x === '--wait') opts.wait = Math.max(0, Math.min(600, Number(a[++i]) || 0));
+    else if (x === '-h' || x === '--help') opts.help = true;
+    else opts.pos.push(x);
+  }
+  return opts;
+}
+async function main() {
+  const [verb, ...rest] = process.argv.slice(2);
+  const opts = parseArgs(rest);
+  if (!verb || verb === 'help' || verb === '-h' || verb === '--help') { say(USAGE); if (!verb) { say(''); return cmdLs(opts); } return 0; }
+  if (opts.help) { say(USAGE); return 0; }
+  // THE PERSON'S CLI, not an agent's: data/bin is on every agent session's PATH. Inside an agent session or a job every
+  // verb refuses — `ls` would print other sessions' names (peer-written words) to an agent unbelted, and an agent reaches
+  // another session through vibespace-msg (its reach rules), never by typing into its socket. Only the env's PRESENCE is read.
+  if (['VIBESPACE_SESSION_TOKEN', 'VIBESPACE_JOB_TOKEN'].some((k) => process.env[k])) {
+    warn(`vibespace: the person's own door — refused inside an agent session or a background job; an agent reaches another session with \`vibespace-msg send <agent> "…"\` (its reach rules apply)`);
+    return 2;
+  }
+  if (verb === 'ls' || verb === 'list') return cmdLs(opts);
+  if (verb === 'status') return cmdStatus(opts);
+  if (verb === 'attach' || verb === 'a') return cmdAttach(opts.pos[0]);
+  if (verb === 'chat' || verb === 'c') return cmdChat(opts.pos[0], opts);
+  warn(`vibespace: unknown command «${verb}»\n\n${USAGE}`);
+  return 2;
+}
+// a verb that answered ends the process: nothing it gave up on (a child in a mount's kernel wait) may hold it
+if (require.main === module) main().then((code) => { if (typeof code === 'number') { process.exitCode = code; setTimeout(() => process.exit(code), 500).unref(); } }, (e) => { warn('vibespace: ' + (e && e.stack || e)); process.exit(1); });
+module.exports = { parseArgs, historySources, goneWords, dtachBin, USAGE };

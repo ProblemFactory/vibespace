@@ -2145,7 +2145,7 @@ console.log('§51 no suite writes a patched copy into the tree');
   const ls = String(spawnSync('git', ['ls-files', '-s', 'data/bin'], { cwd: REPO, encoding: 'utf8', env: gitEnvFrom(process.env) }).stdout || '').trim().split('\n').filter(Boolean);
   // the INDEX says what is a tracked tool (data/bin also holds generated and downloaded files)
   const tracked = new Map(ls.map((l) => { const m = /^(\d+) \S+ \d+\t(.+)$/.exec(l); return [path.basename(m[2]), m[1]]; }));
-  const onDisk = fs.readdirSync(path.join(REPO, 'data/bin')).filter((n) => (/^vibespace-/.test(n) || n === 'agent-browser') && tracked.has(n));
+  const onDisk = fs.readdirSync(path.join(REPO, 'data/bin')).filter((n) => (/^vibespace-/.test(n) || n === 'vibespace' || n === 'agent-browser') && tracked.has(n));   // lane human-cli: `vibespace` = the person's CLI
   const execs = onDisk.filter((n) => (fs.statSync(path.join(REPO, 'data/bin', n)).mode & 0o111) !== 0);
   ok(execs.length >= 15 && execs.includes('vibespace-browser'), `§52a census scope is non-vacuous (${execs.length} executable tracked tools)`);
   const missingFrom = (list) => execs.filter((n) => !list.includes(n) && !EXEMPT[n]);
@@ -5629,6 +5629,64 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(bare.length === 0, `§102 every client fetch / fetchJson with a JSON.stringify body names its content type (headers) — a bare one is text/plain to express.json() and the route reads an empty body${bare.length ? ': ' + bare.join(' ') : ''}`);
   const control = bareJsonCalls("const r = await fetchJson('/api/x', { method: 'POST', body: JSON.stringify({ a: 1 }) });\nawait fetch('/api/y', { method: 'POST', headers: H, body: JSON.stringify({}) });");
   ok(control.length === 1 && control[0] === 1, `§102 CONTROL: the census sees a bare JSON POST (line 1) and spares the one with headers (${JSON.stringify(control)})`);
+}
+
+// ── §103 (lane human-cli, 2026-10-28 — the 89-minute hub freeze of 2026-10-27): THE PERSON'S SESSION INDEX HAS ONE WRITER
+// AND EVERY SESSION STATE CHANGE REACHES IT. The index (<home>/.vibespace/local/sessions.json — what `vibespace ls /
+// attach / chat` read with no hub) is written by src/server/local-index.js only, fed by the session list's ONE notify
+// point (server.js broadcastActiveSessions), a client attach, the boot and the shutdown. A session that enters or leaves
+// the list without reaching that notify point is a session the person cannot find when the hub is gone (the census
+// found one: a daemon pipe session re-opened at boot joined the list silently — boot-restore now broadcasts it).
+//   (a) every activeSessions.set( / .delete( call in src/ + server.js sits in a function that calls broadcastActiveSessions(
+//   (b) the notify point calls the writer's note('sessions'); the attach case notes 'attach'; the boot configures it; the
+//       shutdown stops it — and nothing else requires the writer
+//   (c) the index's file name and folder are spelled in the PURE module only; the CLI never writes, renames or deletes
+{
+  const acorn = (await import('node:module')).createRequire(import.meta.url)('acorn');
+  const parse = (src) => acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true });
+  const visit = (node, fn, anc = []) => { if (!node || typeof node.type !== 'string') return; const a = [...anc, node]; fn(node, a); for (const k of Object.keys(node)) { const v = node[k]; if (Array.isArray(v)) { for (const x of v) if (x && typeof x.type === 'string') visit(x, fn, a); } else if (v && typeof v.type === 'string') visit(v, fn, a); } };
+  /** Every activeSessions.set/delete in `src` whose innermost enclosing function never calls broadcastActiveSessions(. */
+  const silentChanges = (src, file) => {
+    const out = []; let n = 0;
+    visit(parse(src), (node, anc) => {
+      const c = node.type === 'CallExpression' && node.callee;
+      if (!(c && c.type === 'MemberExpression' && c.object.type === 'Identifier' && c.object.name === 'activeSessions' && c.property && ['set', 'delete'].includes(c.property.name))) return;
+      n++;
+      const fnNode = anc.slice().reverse().find((a) => /Function/.test(a.type));
+      if (!fnNode || !src.slice(fnNode.start, fnNode.end).includes('broadcastActiveSessions(')) out.push(`${file}:${src.slice(0, node.start).split('\n').length} ${c.property.name}`);
+    });
+    return { n, out };
+  };
+  const files = ['server.js'];
+  const walkDir = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.join(d, e.name); if (e.isDirectory()) { if (e.name !== 'lib') walkDir(r); } else if (e.name.endsWith('.js')) files.push(r); } };
+  walkDir('src');
+  let sites = 0; const silent = [];
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(REPO, f), 'utf8');
+    if (!/activeSessions\.(set|delete)\(/.test(src)) continue;
+    const r = silentChanges(src, f); sites += r.n; silent.push(...r.out);
+  }
+  ok(sites >= 8 && silent.length === 0, `§103a every session that enters or leaves the list reaches its ONE notify point (broadcastActiveSessions) — ${sites} set/delete sites${silent.length ? '; SILENT: ' + silent.join(', ') : ''}`);
+  const ctl = silentChanges("function a() { activeSessions.set(id, s); broadcastActiveSessions(); }\nfunction b() { activeSessions.delete(id); }\nfunction c() { x.then(() => { activeSessions.set(id, s); }); broadcastActiveSessions(); }", 'planted.js');
+  ok(ctl.n === 3 && JSON.stringify(ctl.out) === JSON.stringify(['planted.js:2 delete', 'planted.js:3 set']), `§103a CONTROL: a delete with no broadcast and a set in a callback whose function never broadcasts are both named (${JSON.stringify(ctl.out)})`);
+
+  const server = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  const fnBody = (src, name) => { let body = null; visit(parse(src), (node) => { if (body == null && node.type === 'FunctionDeclaration' && node.id && node.id.name === name) body = src.slice(node.start, node.end); }); return body || ''; };
+  const notify = fnBody(server, 'broadcastActiveSessions');
+  ok(/require\('\.\/src\/server\/local-index\.js'\)\.note\('sessions'\)/.test(notify), '§103b the session list\'s ONE notify point (server.js broadcastActiveSessions) feeds the index writer: note(\'sessions\')');
+  ok(/require\('\.\/src\/server\/local-index\.js'\)\.stop\(\)/.test(fnBody(server, 'shutdownNow')), '§103b the shutdown tells the index the hub STOPPED (shutdownNow → stop())');
+  ok((server.match(/require\('\.\/src\/server\/local-index\.js'\)\.configure\(/g) || []).length === 1 && /hub\.listen\(PORT, HOST, \(\) => \{[\s\S]{0,1200}local-index\.js'\)\.configure\(\{ rootDir: __dirname/.test(server), '§103b the boot configures it ONCE, at listen (the place decided once, the whole list written)');
+  const wsh = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+  const attachCase = (wsh.split("case 'attach': {")[1] || '').slice(0, 1500);
+  ok(/require\('\.\/server\/local-index\.js'\)\.note\('attach', data\.sessionId\)/.test(attachCase), '§103b a client attach is noted (the row\'s attachedAt) in ws-handler\'s attach case');
+  const requirers = files.concat(['data/bin/vibespace']).filter((f) => /local-index\.js'\)/.test(fs.readFileSync(path.join(REPO, f), 'utf8').replace(/^\s*\/\/.*$/gm, '')) && /server\/local-index\.js'\)/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
+  ok(JSON.stringify(requirers.sort()) === JSON.stringify(['server.js', 'src/ws-handler.js']), `§103b nothing else drives the ONE writer (${requirers.join(', ')})`);
+
+  const spelled = files.filter((f) => f !== 'src/local-index.js' && /['"`]sessions\.json['"`]|\.vibespace\/local\b|'\.vibespace', 'local'/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
+  ok(spelled.length === 0, `§103c the index's file and folder are spelled ONCE (src/local-index.js indexPlaceOf) — also: ${spelled.join(', ') || 'none'}`);
+  const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  const writes = cli.match(/\b(writeFileSync|writeFile|appendFileSync|renameSync|unlinkSync|rmSync|rmdirSync|mkdirSync|chmodSync|process\.kill)\(/g) || [];
+  ok(writes.length === 0, `§103c the person's CLI never writes, renames, deletes or kills (${writes.join(', ') || 'none'})`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

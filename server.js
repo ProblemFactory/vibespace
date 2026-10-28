@@ -1596,7 +1596,7 @@ function activeSessionsPayload() {
 }
 
 function broadcastActiveSessions() { try { channelsWiring.groups.noteRoster(); } catch {} try { convOps.settleBirthGroups(); } catch { } // r3: the session list's ONE notify point — a renamed/ended member re-announces its groups (their views' names are live-roster derived; nothing moved ⇒ nothing sent); lane open-task-binds: a conversation opened INTO a Task Group joins its sessions[] once its own id is adopted (every adoption broadcasts; before convOps exists a caught TDZ)
-  try { exitProxy.rejudgeAll('sessions'); } catch { } // verify-r3 census: a session's own reach facts moved (a fork adopting its id, a codex / ACP thread change, its cwd under the folder rule) — every such writer broadcasts, so the exit re-judge rides this ONE notify point (a boot-time call before exitProxy exists is a caught TDZ)
+  try { exitProxy.rejudgeAll('sessions'); } catch { } try { require('./src/server/local-index.js').note('sessions'); } catch { } // lane human-cli: the person's session index (src/server/local-index.js, the ONE writer) rides this ONE notify point · verify-r3 census: a session's own reach facts moved (a fork adopting its id, a codex / ACP thread change, its cwd under the folder rule) — every such writer broadcasts, so the exit re-judge rides this ONE notify point (a boot-time call before exitProxy exists is a caught TDZ)
   const msg = JSON.stringify({ type: 'active-sessions', sessions: activeSessionsPayload() });
   wss.clients.forEach(client => {
     if (client.readyState === WS_OPEN) {
@@ -1752,7 +1752,7 @@ if (METRICS_PORT > 0) {
 
 probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(); // B-1319: after the restore's probes (boot-restore probeSockets) — the one-port demux (src/server/tls.js) — listen errors / EADDRINUSE as before
   const ver = require('./package.json').version;
-  console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}${hub.bootSuffix()}`); hub.start(); // + " and https://<domain>:PORT" while a certificate is live; start = the boot pass + hourly
+  console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}${hub.bootSuffix()}`); hub.start(); try { require('./src/server/local-index.js').configure({ rootDir: __dirname, port: PORT, host: HOST, version: ver, throwaway: throwawayRoot, adapters: adapterRegistry, sessions: () => activeSessions, buffersDir: BUFFERS_DIR, dataDir: path.join(__dirname, 'data'), turnOf: (s) => require('./src/server/turn-facts.js').turnOf(s), log: console }); } catch (e) { console.warn('[local-index] not started: ' + e.message); } // lane human-cli: the person's CLI index on the machine's own disk · + " and https://<domain>:PORT" while a certificate is live; start = the boot pass + hourly
   // PID file for the supervised-restart path (scripts/update.sh in a container:
   // no systemd — the entrypoint respawn loop restarts us when update.sh kills
   // this pid; dtach sessions live in the same PID namespace and survive).
@@ -1882,7 +1882,7 @@ function shutdown() {
   shutdownNow();
 }
 function shutdownNow() {
-  try { spendGuard.flush(); } catch {} // the unattended-spend ledger FIRST (a debounced-only write would hand the next boot a fresh hour — the whole point of persisting it)
+  try { spendGuard.flush(); } catch {} try { require('./src/server/local-index.js').stop(); } catch {} // lane human-cli: the index says the hub STOPPED (a reader tells a clean stop from a crash) · the unattended-spend ledger FIRST (a debounced-only write would hand the next boot a fresh hour — the whole point of persisting it)
   bridgeWatch.endAttachPtys(); // THE teardown of every attach pty — shared with the crash path (lane-dead-bridge)
   // SyncStores + layouts persist on a debounce — flush so changes made within
   // the last couple seconds aren't lost across a restart

@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.361 — 2026-10-28
+
+### Added
+- When the hub is down, vibespace ls / attach / chat on the machine itself lists your sessions, shows a terminal session's screen and talks to a chat session.
+
 ## 2.369.359 — 2026-10-26
 
 ### Fixed

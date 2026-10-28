@@ -30,6 +30,8 @@ data/bin/vibespace-browser-passkey.js
 data/bin/agent-cli-text.js
 # lane cli-call-timeouts: THE ONE CALL every agent CLI makes to the hub, copied at startup from src/cli-call.js
 data/bin/cli-call.js
+# lane human-cli: the person's CLI's PURE half (index place, judge, table, dtach packet, chat frames), copied at startup from src/local-index.js
+data/bin/vibespace-local-index.js
 # downloaded by installRclone()/boot self-heal — a 60MB arch-specific binary must
 # never live in git (2.368.9: it did since the one-click-install commit; every pin
 # bump would grow public history by 60MB+, and the boot self-heal writing a tracked

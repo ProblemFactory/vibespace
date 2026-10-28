@@ -22,6 +22,8 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). §-numbers referenced elsewhere r
 
 **CRITICAL**: Never delete dtach socket files during server restart. The socket IS the session.
 
+**The person's attach (lane human-cli, 2026-10-28):** `vibespace attach <n>` runs `dtach -a <socket> -e '^\' -r winch` — the bridge's attach with dtach's own detach key (a bridge passes every byte with `-E`; a person must be able to leave). A chat session is reached through the SAME socket without a terminal: the CLI speaks dtach's client packet itself (MSG_ATTACH, then MSG_PUSH ≤ 8 bytes) — kb-file-structure «data/bin/vibespace».
+
 ### 2. Mouse/Scroll Handling
 With dtach, there is NO middle layer — xterm.js talks directly to Claude Code's PTY. Mouse events, scroll, selection all work natively without any configuration.
 
@@ -570,6 +572,14 @@ REMAINING BACKLOG (not yet fixed — see [[project-code-review-2026-07-backlog]]
 
 
 ## §18 The three-tier routing table — full rows, and the long laws (moved VERBATIM from the CLAUDE.md index on 2026-09-15 — CLAUDE.md keeps the head of each entry; this section is the full text)
+
+### Row: The person's session index + CLI (lane human-cli, 2026-10-28)
+
+**The change touches…** **What a person at the machine reaches with no hub** — a session's row in the machine's own index (`<home>/.vibespace/local/sessions.json`), what `vibespace ls / status / attach / chat` judge or send, where the index lives.
+
+**It belongs in…** PURE `src/local-index.js` (the place ladder, the CLOSED row + hub keys, the kernel judge, the table, the pick, the dtach packet, the frame fill, the record lines — shipped beside the CLI as `vibespace-local-index.js`) + the ONE writer `src/server/local-index.js` (fed ONLY by server.js `broadcastActiveSessions` — the session list's notify point — the ws attach case, the boot `configure` and the shutdown `stop`) + the CLI `data/bin/vibespace` (builtins + its PURE half only; every touch of a mount in a child with a clock; never writes, never kills; never reads the vault or an account store). A new session field a person needs = a ROW_KEYS row; a new harness needs nothing here (its chat frames are its adapter's own, written into the row by the writer). CLAUDE.md needs ONE line in its tool list for `vibespace` (added at integration).
+
+**Gated by (run BEFORE commit):** test-local-index (fast) + test-human-cli (heavy) + test-architecture §103 (every set/delete of a live session reaches the notify point; the wiring; one writer) + §52a (AGENT_TOOLS).
 
 ### Row: A browser ENGINE plugin (lane engine-plugin, 2026-10-25)
 

@@ -42,6 +42,8 @@ const K1 = 'The vault is locked — unlock it first (Unlock… at the top of the
 const K1N = 'The vault is locked — unlock it first';   // the rows' needle: a site that drops a fact stays ITS row's, judged without it
 const TAIL = 'Unlock… at the top of the page; For you names what is waiting on it';
 const ROWS = {
+  // lane human-cli: `vibespace chat` opened read-only on a session the hub last said waits for the vault (its row's inputHeld) — the person at the machine
+  'data/bin/vibespace': [['the hub\'s vault is locked and the session waits for it', 'person', 'lane human-cli: the person\'s CLI says why a chat is read-only (inputHeld vault-locked, the hub\'s last word with its age)']],
   // lane passkey-sink: the kernel road's refusal when the passkeys' sealed key cannot be opened (refusedText 'webauthn_key_locked') —
   // toward the AGENT: the user already knows, a person unlocks it on this instance's page, never ask them
   'src/browser-passkey.js': [['VibeSpace\'s saved passkeys cannot be opened right now', 'agent', 'lane passkey-sink: a kernel ceremony refused webauthn_key_locked — said to the agent\'s next verbs (PK.refusedText)']],

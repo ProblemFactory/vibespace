@@ -741,6 +741,7 @@ function restoreAgentdPipeSessions() {
       activeSessions.set(id, session);
       session._webuiId = id;
       setupSessionPty(session, id, shim);
+      broadcastActiveSessions();   // lane human-cli (test-architecture §103): a re-opened pipe session reaches the list's ONE notify point — the web and the person's index learn it now, not at the next unrelated broadcast
       console.log(`[restore] re-opened daemon pipe session ${id} "${session.name}"`);
       armRestoredCapture(id, session); // a pipe session's capture arms from its own re-open (the sweep above may run before it)
     }).catch((e) => console.warn(`[restore] daemon pipe session ${id} not re-opened (view-only rescue covers it): ${e.message}`));
