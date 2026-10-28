@@ -44,6 +44,11 @@
  * card whose answer is final; the standing item is a subject's standing state — counted in place, closed by its ✓
  * (seen), by itself (no longer asked, allowed by another road) and reopened while still refused — so the decision-row
  * law never applies to it, and a re-file after the owner's Deny meets the Deny (`decided`), never a second item.
+ * r9: IT IS A NOTICE, AND IT RENDERS AS ONE — filed `kind: 'notice'`, its type in no answer list (the For-you row, the Inbox
+ * window, the reply verdict): no Allow once / Always / Deny on it (r8 gave it the type and kept the buttons — rendered, it
+ * drew the 60 s card's three answers). Its one verb is its door: the row opens Manage Agents → Machines, where the
+ * machine's Hub automation is set; its words say so (hub-act-policy `standingOf`). The answer route still settles a
+ * standing ask id (a Deny from before r9 is read back at boot, r3/r5) — no control draws it.
  */
 const crypto = require('crypto');
 const P = require('../hub-act-policy.js');
@@ -404,7 +409,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
     st.consequence = w.consequence;
     try {
       const it = userTodos.add(INBOX_KEY, {
-        origin: 'machines', text: w.text, detail: w.detail, i18n: w.i18n, urgency: 'high', kind: 'action', by: 'agent', sessionName: 'Machines',
+        origin: 'machines', text: w.text, detail: w.detail, i18n: w.i18n, urgency: 'high', kind: 'notice', by: 'agent', sessionName: 'Machines', // r9: a notice (no answers drawn)
         action: { type: STANDING_TYPE, askId: st.askId, hostId: String(st.hostId).slice(0, 160), machine: String(st.machine).slice(0, 80), kind: st.kind, standing: true, by: String(st.by).slice(0, 160), consequence: st.consequence, count: st.count, firstAt: st.firstAt, lastAt: st.lastAt },
       });
       st.todoId = (it && it.id) || st.todoId; st.writtenAt = t; st.fileError = null;

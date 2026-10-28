@@ -40,6 +40,13 @@
  * 500 ms debounce: a restart said 0 of 33). A re-word whose count is unknown (a hold still being read: `dropped` null)
  * keeps the line it said; a count that may hold rows the ledger has (`unchecked`) says so; a count the end filtered to 0
  * removes the line. The `_held/` listing that FAILED is ONE notice ('hold-list'), closed when a listing works.
+ * Round 9 (THE COUNT IS THE GENERATION'S): an item's «Past the bound» line says ONE hold's count — its generation's
+ * (`gen` in the text's params), REPLACED by that generation's every count, never summed with it (r8 added an open
+ * item's count to the hold's own as `carried` whenever the item had said a «dropped» count — the same generation read
+ * back after a crash said «66» for 33); the count of a generation that ENDED is kept as a line of its own («Earlier: …»,
+ * `earlier`) when the month's next hold re-words or reopens the item — a re-word never loses a count (r4–r8 dropped a
+ * closed item's «36» when the month's next episode reopened it). A hold whose read-back FAILED (its file unreadable —
+ * EACCES, EIO) is ONE notice per hold ('hold-read'), naming the file, closed when it is read.
  * `wire({usageHistory, userTodos})` = server.js's one line (it sets `usageHistory.onShape`, reconciles 3 s after boot).
  */
 const INBOX_KEY = 'usage-ledger';
@@ -59,6 +66,16 @@ const D_DROPPED = i18nKey('Past the bound: the {dropped} oldest held events of {
 // not in memory) — checked, and corrected, once the file is back in shape
 const D_DROPPED_MAYBE = i18nKey('Past the bound: the {dropped} oldest held events of {month} were dropped — counted here; some of them may already be recorded (checked once the file is back in shape).');
 const isDropKey = (k) => k === D_DROPPED || k === D_DROPPED_MAYBE;
+// r9: the count of a hold of this month that ENDED before this one (said then) — kept, as its own line
+const D_DROPPED_EARLIER = i18nKey('Earlier: {dropped} held events of {month} had been dropped past the bound — counted, never recorded.');
+// r9: a hold whose file could not be read back — ONE notice per hold, closed when it is read
+const READ_KEY = 'hold-read';
+const TEXT_READ = i18nKey('The held usage of {machine} for {month} cannot be read ({code}) — that month waits');
+const D_READ = [
+  i18nKey('What: data/usage-history/_held/{file} could not be read ({code}) since {since} — the events of {month} held for {machine} stay on the disk, unread. Until it is read, the new events of {month} from that machine wait (it keeps them and sends them again) unless the month\'s file is in shape; its other months are recorded as usual.'),
+  i18nKey('What happens now: VibeSpace reads the file again by itself — after a few seconds, then less often (at most once a minute); this notice closes when it is read.'),
+  i18nKey('What to do: check the file\'s permissions and the disk that holds VibeSpace\'s data folder. If this notice is still here in an hour, send feedback from the gear menu.'),
+];
 // r8: a count said where no pause carries it (a hold drained at a boot with no open notice, one read back with nothing live)
 const TEXT_DROPPED = i18nKey('Usage of {machine} for {month}: {dropped} held events were dropped past the bound — never recorded');
 const D_DROPPED_WHAT = i18nKey('What: while data/usage-history/{shard} was out of shape, the events of {month} were held beside it (at most {bound}); the rest of them are in the ledger now.');
@@ -100,7 +117,7 @@ const hhmm = (t) => { const d = new Date(Number(t) || 0); return `${String(d.get
 /** The notice's words → {text, detail, i18n} (PURE). `remedy` = usage-history's `_remedyOf` ({state, code, error, removed,
  *  nextAt}); `host` and THE RULE that opened it (`why`, `exact`) ride the text's params (the boot reconcile reads them
  *  back). A state without words of its own is said as `none` (recording paused — no claim of what is being done). */
-function noticeOf({ hostName, host, shard, month, size, ratio, why, exact, remedy, held, dropped, unchecked = false, holdMax, holdError, drain, tag = '' } = {}) {
+function noticeOf({ hostName, host, shard, month, size, ratio, why, exact, remedy, held, dropped, unchecked = false, holdMax, holdError, drain, tag = '', gen = null, earlier = 0 } = {}) {
   // r5: a month whose held events could not be recorded says THAT (its file is back in shape — no remedy words)
   const drained = !!(drain && drain.state === 'failed');
   const r = drained ? { state: 'drain-failed', code: drain.code || null, error: drain.code || null } : remedy && typeof remedy === 'object' ? remedy : { state: 'none' };
@@ -114,27 +131,38 @@ function noticeOf({ hostName, host, shard, month, size, ratio, why, exact, remed
   const todo = drained ? (NO_SPACE.has(r.code) ? D_TODO.drainSpace : D_TODO.look) : state === 'running' || state === 'judging' || state === 'none' ? D_TODO.wait : state === 'failed' && NO_SPACE.has(r.code) ? D_TODO.space : state === 'proven-over' || state === 'ids' ? D_TODO.stopped : D_TODO.look;
   const lines = [{ key: what, params: { shard: p.shard, size: p.size, ratio: p.ratio, month: p.month } }, { key: who, params: { machine: p.machine, month: p.month, held: p.held, bound: p.bound, error: p.holdError } }];
   if (Number(dropped) > 0) lines.push({ key: unchecked ? D_DROPPED_MAYBE : D_DROPPED, params: { dropped: p.dropped, month: p.month } }); // past the bound: counted, never silently
+  if (Number(earlier) > 0) lines.push({ key: D_DROPPED_EARLIER, params: { dropped: String(Math.floor(Number(earlier))), month: p.month } }); // r9: an ended hold's count, kept
   lines.push({ key: now, params: { error: p.error, next: p.next, removed: p.removed, size: p.size, ...(drained ? { held: p.held } : {}) } }, { key: todo });
   const fill = (k, q = p) => fillOf(k, q);
   const head = drained ? TEXT_DRAIN : TEXT;
   return {
     text: fill(head),
     detail: lines.map((l) => fill(l.key, { ...p, ...(l.params || {}) })).join('\n'),
-    i18n: { text: { key: head, params: { machine: p.machine, name, tag: t, month: p.month, shard: p.shard, host: String(host || '').slice(0, 160), why: Object.prototype.hasOwnProperty.call(D_WHAT, why) ? why : 'size', exact: exact ? '1' : '' } }, detail: lines },
+    i18n: { text: { key: head, params: { machine: p.machine, name, tag: t, month: p.month, shard: p.shard, host: String(host || '').slice(0, 160), why: Object.prototype.hasOwnProperty.call(D_WHAT, why) ? why : 'size', exact: exact ? '1' : '', ...genParams(gen, earlier) } }, detail: lines },
   };
 }
+/** r9: the generation an item's count is of, and the count of the ones that ended before it (text params). */
+const genParams = (gen, earlier) => ({ ...(gen != null && gen !== '' ? { gen: String(gen) } : {}), ...(Number(earlier) > 0 ? { earlier: String(Math.floor(Number(earlier))) } : {}) });
 
 /** r8: the words of a count said where no pause carries it (PURE) → {text, detail, i18n}. */
-function droppedNoticeOf({ hostName, host, shard, month, dropped, holdMax, tag = '' } = {}) {
+function droppedNoticeOf({ hostName, host, shard, month, dropped, holdMax, tag = '', gen = null, earlier = 0 } = {}) {
   const sh = String(shard || '').slice(0, 60), mo = /^\d{4}-\d{2}$/.test(String(month || '')) ? String(month) : (/(\d{4}-\d{2})/.exec(sh) || [])[1] || 'this month';
   const name = String(hostName || host || 'a machine').slice(0, 80), t = String(tag || '').slice(0, 24);
   const p = { machine: t ? `${name} (${t})` : name, shard: sh, month: mo, dropped: String(Math.max(0, Number(dropped) || 0)), bound: `${Math.round((Number(holdMax) || 64 * 2 ** 20) / 2 ** 20)} MiB` };
-  const lines = [{ key: D_DROPPED_WHAT, params: { shard: p.shard, month: p.month, bound: p.bound } }, { key: D_DROPPED, params: { dropped: p.dropped, month: p.month } }, { key: D_TODO_READ }];
+  const lines = [{ key: D_DROPPED_WHAT, params: { shard: p.shard, month: p.month, bound: p.bound } }, { key: D_DROPPED, params: { dropped: p.dropped, month: p.month } }, ...(Number(earlier) > 0 ? [{ key: D_DROPPED_EARLIER, params: { dropped: String(Math.floor(Number(earlier))), month: p.month } }] : []), { key: D_TODO_READ }];
   return {
     text: fillOf(TEXT_DROPPED, p),
     detail: lines.map((l) => fillOf(l.key, { ...p, ...(l.params || {}) })).join('\n'),
-    i18n: { text: { key: TEXT_DROPPED, params: { machine: p.machine, name, tag: t, month: p.month, shard: p.shard, dropped: p.dropped, host: String(host || '').slice(0, 160), why: 'drain', exact: '' } }, detail: lines },
+    i18n: { text: { key: TEXT_DROPPED, params: { machine: p.machine, name, tag: t, month: p.month, shard: p.shard, dropped: p.dropped, host: String(host || '').slice(0, 160), why: 'drain', exact: '', ...genParams(gen, earlier) } }, detail: lines },
   };
+}
+/** r9: the words of a hold whose file could not be read back (PURE). */
+function readNoticeOf({ hostName, host, shard, month, file, code, since, tag = '' } = {}) {
+  const sh = String(shard || '').slice(0, 60), mo = /^\d{4}-\d{2}$/.test(String(month || '')) ? String(month) : (/(\d{4}-\d{2})/.exec(sh) || [])[1] || 'this month';
+  const name = String(hostName || host || 'a machine').slice(0, 80), t = String(tag || '').slice(0, 24);
+  const p = { machine: t ? `${name} (${t})` : name, month: mo, file: String(file || '').slice(0, 120), code: String(code || 'an error').slice(0, 40), since: since ? hhmm(since) : 'a while' };
+  const lines = D_READ.map((key, i) => (i === 0 ? { key, params: { file: p.file, code: p.code, since: p.since, month: p.month, machine: p.machine } } : { key }));
+  return { text: fillOf(TEXT_READ, p), detail: lines.map((l) => fillOf(l.key, { ...p, ...(l.params || {}) })).join('\n'), i18n: { text: { key: TEXT_READ, params: { machine: p.machine, name, tag: t, month: p.month, shard: sh, host: String(host || '').slice(0, 160), code: p.code } }, detail: lines } };
 }
 /** r8: the words of the `_held/` listing that failed (PURE). */
 function listNoticeOf({ code, since } = {}) {
@@ -190,20 +218,40 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
       return true;
     });
   }
+  /** r9: THE COUNT IS THE GENERATION'S — what an item says (its generation `gen`, its «Past the bound» count, `earlier`: the
+   *  ended generations') against an event of generation `ev.gen` → {dropped, unchecked, gen, earlier}: the event's count
+   *  REPLACES the item's when both are of one generation (never summed — r8's `carried` said 66 for the 33 of one
+   *  generation read back after a crash); the item's count of ANOTHER generation (one that ended) joins `earlier`; a count
+   *  the event does not know (null: its hold still being read) keeps the item's. */
+  function countsOf(prev, ev) {
+    const q = paramsOf(prev), line = dropLineOf(prev), said = line && line.params ? Math.max(0, Number(line.params.dropped) || 0) : 0;
+    const was = q.gen != null && q.gen !== '' ? String(q.gen) : null, gen = ev.gen != null && ev.gen !== '' ? String(ev.gen) : null;
+    const earlier = Math.max(0, Number(q.earlier) || 0);
+    if (ev.dropped == null) return { dropped: said || null, unchecked: line ? line.key === D_DROPPED_MAYBE : !!ev.unchecked, gen: was, earlier };
+    return { dropped: Math.max(0, Number(ev.dropped) || 0), unchecked: !!ev.unchecked, gen: gen != null ? gen : was, earlier: earlier + (said && was !== gen ? said : 0) };
+  }
   /** r7: the «Past the bound» line re-said with the count the hold ENDED with (rows dropped while it drained — a harvest
-   *  mid-drain pushed out a segment not drained yet) — in place, before 'resumed' closes the item. */
-  function redrop(item, dropped, month, unchecked = false) {
+   *  mid-drain pushed out a segment not drained yet) — in place, before 'resumed' closes the item. r9: `c` = countsOf's
+   *  answer — the generation's line (0 removes it: every one of them was recorded), the ended ones' «Earlier» line. */
+  function redrop(item, c, month) {
     userTodos.reshapeItems((it) => {
       if (it.id !== item.id || !it.i18n || !Array.isArray(it.i18n.detail)) return false;
-      const d = it.i18n.detail, at = d.findIndex((l) => l && isDropKey(l.key)), n = String(Math.max(0, Number(dropped) || 0)), key = unchecked ? D_DROPPED_MAYBE : D_DROPPED;
-      if (n === '0' ? at < 0 : at >= 0 && d[at].key === key && d[at].params && d[at].params.dropped === n) return false;
-      const i18n = JSON.parse(JSON.stringify(it.i18n)), line = { key, params: { dropped: n, month: String(month || (at >= 0 && d[at].params ? d[at].params.month : '') || '') } };
-      if (n === '0') i18n.detail.splice(at, 1); // r8: the end filtered it to nothing (every one of them was recorded)
-      else if (at >= 0) i18n.detail[at] = line; else i18n.detail.splice(Math.min(2, i18n.detail.length), 0, line);
-      it.i18n = i18n; it.detail = i18n.detail.map((l) => fillOf(l.key, l.params || {})).join('\n');
+      const i18n = JSON.parse(JSON.stringify(it.i18n)), d = i18n.detail, p = i18n.text.params || (i18n.text.params = {});
+      const mo = String(month || p.month || ''), n = String(Math.max(0, Number(c.dropped) || 0)), e = String(Math.max(0, Math.floor(Number(c.earlier) || 0)));
+      const at = d.findIndex((l) => l && isDropKey(l.key));
+      if (n === '0') { if (at >= 0) d.splice(at, 1); } else { const line = { key: c.unchecked ? D_DROPPED_MAYBE : D_DROPPED, params: { dropped: n, month: mo } }; if (at >= 0) d[at] = line; else d.splice(Math.min(2, d.length), 0, line); }
+      const ea = d.findIndex((l) => l && l.key === D_DROPPED_EARLIER);
+      if (e === '0') { if (ea >= 0) d.splice(ea, 1); } else { const line = { key: D_DROPPED_EARLIER, params: { dropped: e, month: mo } }; if (ea >= 0) d[ea] = line; else { const after = d.findIndex((l) => l && isDropKey(l.key)); d.splice(after >= 0 ? after + 1 : Math.min(2, d.length), 0, line); } }
+      delete p.gen; delete p.earlier; delete p.carried; Object.assign(p, genParams(c.gen, c.earlier));
+      if (i18n.text.key === TEXT_DROPPED && n !== '0') p.dropped = n;
+      if (JSON.stringify(i18n) === JSON.stringify(it.i18n)) return false;
+      it.i18n = i18n; it.text = fillOf(i18n.text.key, p); it.detail = d.map((l) => fillOf(l.key, l.params || {})).join('\n');
       return true;
     });
   }
+  // r9: every generation an item names is one usage-history has seen — a month's next hold is minted past it (a restart with
+  // no file of it left minted generation 0 again: the new hold's count read as the ended one's)
+  try { if (typeof userTodos.idsWhere === 'function' && typeof usageHistory.holdGenSeen === 'function') for (const id of userTodos.idsWhere((i) => ours(i) && paramsOf(i).gen != null)) { const q = paramsOf(userTodos.get(id)); usageHistory.holdGenSeen(q.host, q.shard, q.gen); } } catch { }
   usageHistory.onShape = (ev) => {
     if (!ev || !userTodos) return;
     if (ev.kind === 'paused') {
@@ -214,13 +262,10 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
       // r7: the tag an OPEN item carries is kept (sticky until it closes); a new or reopened item is tagged when a twin is open
       const stuck = prev && prev.status === 'open' ? String(paramsOf(prev).tag || '') : '';
       // r8: a re-word never loses a count — one not known yet (its hold still being read: null) keeps the one the item says;
-      // an open item that said an ENDED hold's count (`dropped`, not read yet) carries it into the new hold's words
-      const q = prev && prev.status === 'open' ? paramsOf(prev) : null;
-      const carried = q ? (prev.i18n.text.key === TEXT_DROPPED ? Number(q.dropped) || 0 : Number(q.carried) || 0) : 0;
-      const said = q && ev.dropped == null ? dropLineOf(prev) : null;
-      const counts = said && said.params ? { dropped: said.params.dropped, unchecked: said.key === D_DROPPED_MAYBE } : carried ? { dropped: carried + (Number(ev.dropped) || 0) } : {};
+      // r9: the item's count is its GENERATION's (replaced, never summed); an ended generation's — an open item's or a
+      // closed one's the month's next hold reopens — is kept as its «Earlier» line
+      const counts = prev ? countsOf(prev, ev) : {};
       const w = noticeOf({ ...ev, ...counts, hostName: name, tag: stuck || (twins.length ? shortHost(ev.host) : '') });
-      if (carried) w.i18n.text.params.carried = String(carried);
       try {
         // r6: each twin told by ITS host id too (its words re-filled in place) — r7: once (a twin that has a tag keeps it)
         for (const t of twins) relabel(t, name);
@@ -243,15 +288,27 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
     } else if (ev.kind === 'resumed') {
       const it = itemOf(ev.host, ev.shard); // whatever it says (r5)
       open.delete(keyOf(ev.host, ev.shard));
-      // r7: the count it ended with; r8: filtered against the ledger (0 removes the line), and ON DISK before the hold forgets it
-      const total = (Number(it && paramsOf(it).carried) || 0) + (Number(ev.dropped) || 0); // r8: with a count an ended hold's notice carried in
-      if (it && (total > 0 || dropLineOf(it))) { try { redrop(it, total, ev.month, !!ev.unchecked); } catch { } }
+      // r7: the count it ended with; r8: filtered against the ledger (0 removes the line), and ON DISK before the hold forgets it;
+      // r9: the generation's count replaces the item's (an ended one's kept as its «Earlier» line)
+      const n = Math.max(0, Number(ev.dropped) || 0);
+      if (it) { try { redrop(it, countsOf(it, { ...ev, dropped: n }), ev.month); } catch { } }
       if (it) close(it.id, 'shape-ok');
-      if (!(total > 0)) return true;
+      if (!(n > 0)) return true;
       if (!it) return sayDropped(ev);
       return flushed();
     } else if (ev.kind === 'dropped') {
       return sayDropped(ev);
+    } else if (ev.kind === 'hold-read') {
+      // r9: a hold whose file could not be read back — ONE item per hold (said once, closed when it is read)
+      try {
+        const k = `${READ_KEY}\n${ev.host}\n${ev.shard}`, it = keyedItem(k);
+        if (ev.state === 'ok') { if (it && it.status === 'open') close(it.id, 'read'); return; }
+        const pause = itemOf(ev.host, ev.shard), name = (ev.hostName && ev.hostName !== ev.host ? ev.hostName : nameOf(pause)) || ev.host;
+        const w = readNoticeOf({ ...ev, hostName: name });
+        if (!it) { fileItem(w, k); return; }
+        if (it.status === 'open') return; // said once
+        userTodos.reshapeItems((x, now) => { if (x.id !== it.id) return false; x.text = w.text; x.detail = w.detail; x.i18n = w.i18n; x.urgency = 'high'; x.status = 'open'; x.resolvedAt = null; x.resolvedBy = null; x.expiresAt = null; x.createdAt = now; delete x.judged; return true; });
+      } catch (e) { log(`the unreadable hold's notice was not filed: ${e.message}`); }
     } else if (ev.kind === 'hold-list') {
       try {
         const it = listItem();
@@ -263,8 +320,10 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
       } catch (e) { log(`the hold folder's notice was not filed: ${e.message}`); }
     }
   };
-  /** r8: the listing's ONE item. */
-  const listItem = () => { const ids = typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => ours(i) && i.itemKey === LIST_KEY) : []; return ids.map((x) => userTodos.get(x)).filter(Boolean).sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0)).pop() || null; };
+  /** r8: the item filed by `itemKey` (the listing's ONE — r9: a hold read-back's ONE). */
+  const keyedItem = (k) => { const ids = typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => ours(i) && i.itemKey === k) : []; return ids.map((x) => userTodos.get(x)).filter(Boolean).sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0)).pop() || null; };
+  const listItem = () => keyedItem(LIST_KEY);
+  const isRead = (it) => String((it && it.itemKey) || '').startsWith(READ_KEY + '\n');
   /** r8: a count said where no open pause carries it — the item of (host, file) says it already (open or closed: its line
    *  has the count), else it is re-said in place (open) or one is filed (a closed one reopened: never a second) → whether
    *  it is on disk. */
@@ -272,11 +331,13 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
     const n = String(Math.max(0, Number(ev.dropped) || 0));
     if (n === '0') return true;
     try {
-      const it = itemOf(ev.host, ev.shard), line = it && dropLineOf(it);
-      if (line && line.params && line.params.dropped === n) return flushed();
-      if (it && it.status === 'open') { redrop(it, ev.dropped, ev.month, !!ev.unchecked); return flushed(); }
+      const it = itemOf(ev.host, ev.shard), line = it && dropLineOf(it), q = it ? paramsOf(it) : {};
+      // said already: the item's line says this count — r9: of this generation (an item of no generation: r8's words)
+      if (line && line.params && line.params.dropped === n && (q.gen == null || ev.gen == null || String(q.gen) === String(ev.gen))) return flushed();
+      const c = it ? countsOf(it, ev) : { dropped: Number(n), gen: ev.gen, earlier: 0, unchecked: !!ev.unchecked };
+      if (it && it.status === 'open') { redrop(it, c, ev.month); return flushed(); }
       const name = ev.hostName && ev.hostName !== ev.host ? ev.hostName : nameOf(it) || ev.hostName;
-      const w = droppedNoticeOf({ ...ev, hostName: name, tag: twinsOf(ev.host, name).length ? shortHost(ev.host) : '' });
+      const w = droppedNoticeOf({ ...ev, hostName: name, gen: c.gen, earlier: c.earlier, tag: twinsOf(ev.host, name).length ? shortHost(ev.host) : '' });
       if (!it) {
         const made = fileItem(w, keyOf(ev.host, ev.shard));
         if (made && made.id) open.set(keyOf(ev.host, ev.shard), made.id);
@@ -298,7 +359,7 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
     try {
       for (const it of (userTodos.snapshot?.() || {}).open || []) {
         if (!it || it.sessionKey !== INBOX_KEY || it.kind !== 'notice' || it.origin !== 'server') continue;
-        if (it.itemKey === LIST_KEY) continue; // r8: judged after the holds are listed (below)
+        if (it.itemKey === LIST_KEY || isRead(it)) continue; // r8: judged after the holds are listed (below) — r9: a hold read-back's too
         if (it.i18n && it.i18n.text && it.i18n.text.key === TEXT_DROPPED) continue; // r8: a count said — the owner closes it
         const p = (it.i18n && it.i18n.text && it.i18n.text.params) || {};
         if (open.get(keyOf(p.host, p.shard)) === it.id) continue;
@@ -316,10 +377,19 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
     try { usageHistory.restoreHolds?.(); } catch (e) { log(`the held usage could not be read back: ${e.message}`); }
     // r8: the listing's notice from before the restart — closed when this process listed the folder (a failure re-says it)
     try { const it = listItem(); if (it && it.status === 'open' && !(usageHistory.holdListFailed && usageHistory.holdListFailed())) { close(it.id, 'listed'); n++; } } catch { }
+    // r9: a hold read-back's notice from before the restart — closed when its hold is no longer waiting to be read (gone from
+    // the disk, or read by now); one whose read is still pending is closed by its read (a failure re-says it)
+    try {
+      for (const it of (userTodos.snapshot?.() || {}).open || []) {
+        if (!ours(it) || !isRead(it)) continue;
+        const p = paramsOf(it);
+        if (!(usageHistory.holdReadPending && usageHistory.holdReadPending(p.host, p.shard))) { close(it.id, 'read'); n++; }
+      }
+    } catch { }
     return n;
   }
   if (reconcileAfterMs != null) setTimeout(() => { try { const n = reconcile(); if (n) log(`${n} growth-alarm notice(s) from before the restart closed — their files are in shape`); } catch { } }, reconcileAfterMs).unref?.();
   return { open, reconcile };
 }
 
-module.exports = { wire, noticeOf, droppedNoticeOf, listNoticeOf, INBOX_KEY, LIST_KEY, TEXT, TEXT_DRAIN, TEXT_DROPPED, TEXT_LIST, D_WHAT, D_HELD, D_DROPPED, D_DROPPED_MAYBE, D_DROPPED_WHAT, D_TODO_READ, D_LIST, D_NOW, D_DRAIN_FAILED, D_TODO };
+module.exports = { wire, noticeOf, droppedNoticeOf, listNoticeOf, readNoticeOf, INBOX_KEY, LIST_KEY, READ_KEY, TEXT, TEXT_DRAIN, TEXT_DROPPED, TEXT_LIST, TEXT_READ, D_WHAT, D_HELD, D_DROPPED, D_DROPPED_MAYBE, D_DROPPED_EARLIER, D_DROPPED_WHAT, D_TODO_READ, D_LIST, D_READ, D_NOW, D_DRAIN_FAILED, D_TODO };

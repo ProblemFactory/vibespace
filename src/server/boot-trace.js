@@ -106,7 +106,12 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
   return one;
 }
 
-/** VIBESPACE_BOOT_TRACE=1: every sync fs / child call + every ≥ 1 MB JSON.parse, timed with its first repo frame. Returns the unwrap. */
+/** VIBESPACE_BOOT_TRACE=1: every sync fs / child call + every ≥ 1 MB JSON.parse, timed with its first repo frame. Returns the unwrap.
+ *  Lane ledger-dedup-law r9: A SITE IS NAMED BY ITS CALLS, never by a 1 ms floor — every call is kept, a run of calls at one
+ *  site (each starting ≤ 1 ms after the one before ended) folded into one op (`n` calls, their summed ms): a hold made of
+ *  many short calls (the ledger warm's sync tail read, TAIL_STEP_BYTES slices under 1 ms each since e11e1f61) named no
+ *  site at all. Bounded: OPS_MAX ops, the rest counted (`dropped`). */
+const OPS_MAX = 200000;
 function wrapSync({ ops, now }) {
   const root = path.join(__dirname, '..', '..') + path.sep, undo = [];
   let depth = 0;
@@ -122,7 +127,13 @@ function wrapSync({ ops, now }) {
       const t0 = now(); depth++;
       try { return orig.apply(this, a); } finally {
         depth--; const ms = now() - t0;
-        if (ms >= 1 && keep(a)) { let what = ''; try { what = typeof a[0] === 'string' ? a[0].split(root).join('').slice(0, 120) : ''; } catch { } ops.push({ op: label, at: t0, ms, site: `${site()}${what ? ' ' + what : ''}`, nested: depth > 0 }); }
+        if (keep(a)) {
+          let what = ''; try { what = typeof a[0] === 'string' ? a[0].split(root).join('').slice(0, 120) : ''; } catch { }
+          const s = `${site()}${what ? ' ' + what : ''}`, last = ops[ops.length - 1], nested = depth > 0;
+          if (last && last.op === label && last.site === s && last.nested === nested && t0 - (last.at + last.span) <= 1) { last.ms += ms; last.n++; last.span = t0 + ms - last.at; }
+          else if (ops.length < OPS_MAX) ops.push({ op: label, at: t0, ms, span: ms, n: 1, site: s, nested });
+          else ops.dropped = (ops.dropped || 0) + 1;
+        }
       }
     };
     undo.push(() => { obj[name] = orig; });

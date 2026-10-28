@@ -873,6 +873,46 @@ console.log('lane browser-takeover-queue: a takeover request\'s ONE item — its
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   } finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
 }
+console.log('lane ledger-dedup-law r9: a background subject\'s STANDING item renders as a NOTICE row — no decision buttons (the 60 s card keeps its three)');
+{
+  // THE REAL FILING (src/server/hub-act-ask.js over a real store and a paired machine) rendered by the REAL row under the
+  // minimal DOM (renderRow builds innerHTML) — acceptance r8: the standing item drew «Allow once / Always on this machine /
+  // Deny», the 60 s card's answers, on a subject's standing state
+  const noop = () => {};
+  const mkEl = () => ({ dataset: {}, className: '', innerHTML: '', querySelector: () => null, querySelectorAll: () => [], appendChild: noop, addEventListener: noop, setAttribute: noop, classList: { add: noop, remove: noop, toggle: noop }, style: {} });
+  const had = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, addEventListener: globalThis.addEventListener };
+  globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || noop; globalThis.removeEventListener = globalThis.removeEventListener || noop;
+  globalThis.localStorage = { getItem: () => null, setItem: noop, removeItem: noop };
+  globalThis.document = { createElement: mkEl, querySelector: () => null, querySelectorAll: () => [], getElementById: () => null, addEventListener: noop, removeEventListener: noop, documentElement: { style: {}, lang: 'en' }, body: mkEl(), head: mkEl() };
+  const os = await import('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-standing-'));
+  try {
+    const { pathToFileURL } = await import('node:url');
+    const { createRequire } = await import('node:module');
+    const req = createRequire(import.meta.url);
+    const R = await import(pathToFileURL(path.join(ROOT, 'src/lib/user-todos-row.js')).href);
+    const { UserTodoManager } = req(path.join(ROOT, 'src/user-todos.js'));
+    const { HostManager } = req(path.join(ROOT, 'src/hosts.js'));
+    const ASK = req(path.join(ROOT, 'src/server/hub-act-ask.js')), P = req(path.join(ROOT, 'src/hub-act-policy.js'));
+    const clock = { t: 1_800_000_000_000 }, timers = [];
+    const hosts = new HostManager({ dataDir: dir }); hosts.setDialToken('mac1', 'x'.repeat(64));
+    const hid = hosts.findByDeviceId('mac1').id;
+    const todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0, now: () => clock.t });
+    const asker = ASK.create({ hosts, userTodos: todos, log: () => { }, now: () => clock.t, instanceKind: 'cluster', settingOf: () => undefined, timers: { set: (fn, ms) => { const h = { fn, ms, live: true }; timers.push(h); return h; }, clear: (h) => { if (h) h.live = false; } } });
+    const held = [asker.check(hid, { op: 'run-cmd', cmd: 'node', args: [], by: 'system:usage-harvest' }), asker.check(hid, { op: 'run-cmd', cmd: 'ls', args: [], by: 'agent:claude:c1' })];
+    await new Promise((r) => setImmediate(r));
+    const items = todos._state.items.filter((i) => i.action && i.action.askId);
+    const st = items.find((i) => i.action.standing), card = items.find((i) => !i.action.standing);
+    const ctx = { t: (x, p) => (p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x), wordsOf: (i) => i.text, detailOf: (i) => i.detail || '', nameFor: () => 'Machines', replyState: () => ({ show: false }) };
+    const answersOf = (html) => (html.match(/data-answer="[^"]+"/g) || []).map((x) => x.slice(13, -1));
+    const hs = st ? R.renderRow({ item: st }, ctx).innerHTML : '', hc = card ? R.renderRow({ item: card }, ctx).innerHTML : '';
+    ok(st && st.kind === 'notice' && st.action.type === 'hub-act-standing' && !answersOf(hs).length && !/ut-hub-answer|Allow once|Always on this machine|>Deny</.test(hs) && hs.includes('Hub automation'),
+      'the standing item (filed by hub-act-ask, kind notice) renders with NO decision buttons — its words and its way out (the machine\'s Hub automation) only', { kind: st && st.kind, answers: answersOf(hs), html: hs.slice(0, 400) });
+    ok(card && card.action.type === 'hub-act-ask' && answersOf(hc).join() === 'once,always,deny', 'the 60 s card beside it keeps Allow once / Always on this machine / Deny', answersOf(hc));
+    ok(P.standingOf({ by: 'system:usage-harvest', machine: 'mac1', kind: 'run' }).detail.split('\n').every((l) => !/Allow once|Deny/.test(l)), 'the standing item\'s words name no answer it does not draw');
+    clock.t += 61000; for (const h of timers.splice(0)) if (h.live) { h.live = false; h.fn(); } await Promise.all(held);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
+}
 console.log('lane-pairing naive-user N-ask: an exit ask\'s Allow / Deny are their own line, never in the hover-dimmed action bar');
 {
   // THE ROW RENDERER in node under a minimal DOM (renderRow only builds innerHTML); the patched copy through mutant-copy

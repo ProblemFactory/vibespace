@@ -158,9 +158,10 @@ function eachLine(file, from, to, fn, { step = STEP_BYTES, limit = Infinity } = 
  *  `lineEnd` = the place after the last whole line, `end` = where a next read starts (the file's end once `eof` — a torn
  *  tail included; else `lineEnd`). `limit`: stop at the first line end past `from + limit` (a drain's slice). A file that
  *  does not exist → {end: from, lineEnd: from, eof: true, missing: true}. `fn(buf, a, b, offset)` as eachLine's. */
-async function eachLineAsync(file, from, fn, { step = STEP_BYTES, limit = Infinity } = {}) {
+async function eachLineAsync(file, from, fn, { step = STEP_BYTES, limit = Infinity, io = null } = {}) {
+  const on = io || ((f, p) => p); // r9 (ledger-dedup-law): the caller's wrapper of each file call (usage-history `_holdIO`: bounded and said)
   let fh;
-  try { fh = await fs.promises.open(file, 'r'); } catch (e) { if (e && e.code === 'ENOENT') return { end: from, lineEnd: from, eof: true, missing: true }; throw e; }
+  try { fh = await on(file, fs.promises.open(file, 'r')); } catch (e) { if (e && e.code === 'ENOENT') return { end: from, lineEnd: from, eof: true, missing: true }; throw e; }
   try {
     let buf = Buffer.alloc(step), pos = from, lineEnd = from, carry = 0; // buf[0, carry) = an unfinished line read at `pos`
     for (;;) {
@@ -168,7 +169,7 @@ async function eachLineAsync(file, from, fn, { step = STEP_BYTES, limit = Infini
         if (buf.length >= LINE_MAX) { pos += carry; carry = 0; } // a MiB with no newline is no row: stepped over
         else { const b2 = Buffer.alloc(Math.min(LINE_MAX, buf.length * 2)); buf.copy(b2, 0, 0, carry); buf = b2; }
       }
-      const { bytesRead } = await fh.read(buf, carry, buf.length - carry, pos + carry);
+      const { bytesRead } = await on(file, fh.read(buf, carry, buf.length - carry, pos + carry));
       if (bytesRead <= 0) return { end: pos + carry, lineEnd, eof: true };
       const n = carry + bytesRead, last = buf.subarray(0, n).lastIndexOf(10);
       if (last < 0) { carry = n; continue; }

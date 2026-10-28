@@ -152,12 +152,14 @@ function cardOf({ by, name = null, machine = '', kind = 'run', summary = '' } = 
 // often it was refused and when last, and what each answer does. The text is the item's identity (fixed at its filing: the
 // SUBJECT — machine × kind × who asks, r2); the detail is re-worded in place as the count moves.
 const STANDING_TITLE = Object.freeze({
-  usage: i18nKey('Usage of {machine} is not being recorded — VibeSpace\'s automation waits for your Allow there'),
-  upgrade: i18nKey('The device agent on {machine} waits for an update — VibeSpace\'s automation waits for your Allow'),
+  usage: i18nKey('Usage of {machine} is not being recorded — its Hub automation asks first'),
+  upgrade: i18nKey('The device agent on {machine} waits for an update — its Hub automation asks first'),
   // any other subject: the card's own title for its kind ("{who} wants to … on {machine}")
 });
 const STANDING_DETAIL_WHO = i18nKey('Asked by {by} — its last act: {summary}. Refused {count} time(s), the last at {last}. Nothing waits on it — each later act is refused at once and counted here, never a new card.');
-const STANDING_DETAIL_HOW = i18nKey('Allow once lets the next act of {by} go — no one else\'s. Always on this machine sets Hub automation of {machine} to Always allow — every kind and every asker. Deny keeps {by} refused until you allow it (here, or by Hub automation) and stops counting here.');
+// lane ledger-dedup-law r9: THE STANDING ITEM IS A NOTICE — no Allow once / Always / Deny on it (r8 drew them: the decision
+// row's buttons on a subject's standing state); its way out is the machine's Hub automation, where the notice opens
+const STANDING_DETAIL_HOW = i18nKey('To let {by} act on {machine}, set its Hub automation to Always allow (open this notice: Machines → {machine} → Who can use it). Until then each of its acts is refused at once and counted here; ✓ hides this for a day.');
 /** Which consequence a standing subject names: VibeSpace's usage harvest ⇒ `usage`; a device-agent update ⇒ `upgrade`. */
 const consequenceOf = (by, kind) => (String(by || '').startsWith('system:usage-harvest') ? 'usage' : kind === 'upgrade' ? 'upgrade' : 'other');
 /** THE STANDING ITEM's words → {text, detail, i18n}. `count` = refusals so far, `lastAt` = the last one (ms). */
@@ -184,7 +186,7 @@ function refusalText(code, { machine = '', kind = 'run', reason = '', until = nu
       if (reason === 'nobody') return `${M} does not let VibeSpace's automation ${what} there (its Hub automation list is Never) — nothing was done; do not retry: ${WAY_OUT}`;
       if (reason === 'quiet') return `the user did not allow VibeSpace to ${what} on ${M} a moment ago — nothing was done; it is not asked again until ${hhmm(until)}: ${WAY_OUT}`;
       return `the user denied it: VibeSpace may not ${what} on ${M} — nothing was done; do not retry in a loop: ${WAY_OUT}`;
-    case 'ask_standing': return `VibeSpace may not ${what} on ${M} until the user answers its item in For you — nothing was done; this refusal is counted there (no new card): ${WAY_OUT}`;
+    case 'ask_standing': return `VibeSpace may not ${what} on ${M} while its Hub automation asks first and nobody is there to answer — nothing was done; this refusal is counted on its notice in For you (no new card): ${WAY_OUT}`;
     case 'ask_expired':
       if (reason === 'quiet') return `nobody answered the last ask to ${what} on ${M} — refused, nothing was done; it is not asked again until ${hhmm(until)}: ${WAY_OUT}`;
       return `nobody answered within 60 s — VibeSpace did not ${what} on ${M}, nothing was done; do not retry in a loop: ask the user, or ${WAY_OUT}`;

@@ -358,6 +358,7 @@ class UsageHistory {
     this._ingestIx = new Map(); this._shapes = new Map(); this._pausedShards = new Map(); this._proven = new Map(); this._dedupJobs = new Map(); this._remedies = new Map(); this._judging = new Map(); this._judgeKick = new Map();
     this._holds = new Map(); this._heldList = null; this._holdGens = new Map(); this._dropFiles = new Map(); // r6: the newest hold generation of each (month, host); the set files listed
     this._diskFiles = new Set(); this._listFail = null; this._listing = null; this._inflight = new Set(); // r8: the segment files on disk; the listing's failure state; the hold road's promises in flight
+    this._readFail = new Map(); this._lines = new Map(); // r9: each hold's failed read-back (its state, `_readFailed`); a line many batches meet, said once a minute
     this._hostCursors = new Map(); this._dupLog = new Map();
     this.hostCursorsDir = path.join(this.dir, '_host-cursors');
     this.heldDir = path.join(this.dir, '_held');
@@ -813,70 +814,126 @@ class UsageHistory {
     return this._ingestBatch(hostId, hostName, shardBuffers, added, { cursors, since });
   }
   /** The parsed batch (its rows by month) → the answer — r8: a promise when a month of it goes to a hold (its jobs run on the
-   *  hold's async road and are awaited, ≤ HOLD_ANSWER_MS) or waits for a hold being read back; the answer itself otherwise. */
-  _ingestBatch(hostId, hostName, shardBuffers, added, { cursors = null, since = null, tries = 0 } = {}) {
-    const shards = Object.keys(shardBuffers);
+   *  hold's async road and are awaited, ≤ HOLD_ANSWER_MS) or waits for a hold being read back; the answer itself otherwise.
+   *  r9: A MONTH THAT NEEDS NO HOLD NEVER WAITS — the months that go are appended NOW, before any wait (r8 deferred the whole
+   *  batch while one month's hold was read back, and a read-back that failed was started again at every try: every month
+   *  answered `deferred`, 0 of 6 November batches recorded); a month whose hold is being read back waits for it, bounded
+   *  (HOLD_ANSWER_MS ⇒ `hold-slow`; HOLD_QUEUE_MAX batches waiting ⇒ `hold-busy` at once); one whose read-back FAILED answers
+   *  `holdFailed` with its code and `retryAfter` (the read-back's own timer reads it again — never an ingest). */
+  _ingestBatch(hostId, hostName, shardBuffers, added, { cursors = null, since = null } = {}) {
+    const b = { hostId, hostName, shardBuffers, added, cursors, since, appended: 0, duplicates: 0, lastTs: 0, lastRid: null, held: false, jobs: [], holdFailed: [], retry: [], waits: [] };
+    const deferred = this._ingestPass(b, Object.keys(shardBuffers), true);
+    if (deferred) return deferred; // a big shard's index still loading in steps — nothing appended, the device keeps the batch
+    if (b.waits.length) {
+      const waited = b.waits.map((w) => w.shard);
+      return this._track(this._loadsBounded(b.waits).then(() => { this._ingestPass(b, waited, false); return Promise.all(b.jobs); }).then((r) => this._ingestEnd(b, r)));
+    }
+    return b.jobs.length ? this._track(Promise.all(b.jobs).then((r) => this._ingestEnd(b, r))) : this._ingestEnd(b, []);
+  }
+  /** r9: one pass of a batch over some of its months (`first`: the batch's own; else the months that waited for their hold's
+   *  read-back) — each judged, then held or appended → a `deferred` answer (the first pass only: a big shard's index still
+   *  loading) | null. */
+  _ingestPass(b, shards, first) {
+    const { hostId, hostName, shardBuffers } = b, go = [], hold = [];
     // F4, r4: THE BATCH SPLIT BY MONTH — a month out of shape is never appended to nor streamed for its index: its rows are
     // HELD (its hold, in order) and that month paused and said; a month back in shape drains its hold first (these rows
     // then queued in the hold behind it); every other month ingests as usual
-    const go = [], hold = [], holdFailed = [], waits = [];
-    const failOf = (shard, e) => ({ month: path.basename(shard).slice(7, 14), shard: path.basename(shard), error: (e && e.code) || String((e && e.message) || e).slice(0, 80) });
     for (const shard of shards) {
       const v = this._shapeVerdict(shard), paused = this._pausedShards.has(this._pauseKey(hostId, shard));
       // r7 (e5): a hold listing that FAILS (EIO) is no empty disk — r8: a month that needs its hold (out of shape, paused)
       // waits, unacked (`holdFailed` + `retryAfter`), until the listing's own retry works; one in shape and not paused needs
-      // no hold — it goes (r7 refused every month of the batch, the in-shape November too)
-      let h; try { h = this._holdOf(shard, hostId); } catch (e) { if (v.ok && !paused) go.push(shard); else holdFailed.push(failOf(shard, e)); continue; }
-      if (!h) { const r = this._holds.get(this._holdKey(shard, hostId)); waits.push(r && r.loading); continue; } // r8: a hold being read back — the batch waits for it
+      // no hold — it goes (r7 refused every month of the batch, the in-shape November too). r9: a hold whose read-back
+      // FAILED is the same state — that hold's own (`_readFailed`)
+      let h; try { h = this._holdOf(shard, hostId); } catch (e) { if (v.ok && !paused) go.push(shard); else this._holdFailedOf(b, shard, e); continue; }
+      if (!h) {
+        // r9: a hold being read back — this month waits for it (bounded); past the bound, or with too many batches waiting
+        // already, it is answered unacked (the device keeps its rows)
+        const r = this._holds.get(this._holdKey(shard, hostId));
+        if (!first || !r) this._holdFailedOf(b, shard, { code: 'hold-slow' });
+        else if (r.waiting + r.pending >= (this.holdQueueMax || HOLD_QUEUE_MAX)) this._holdFailedOf(b, shard, { code: 'hold-busy' });
+        else { r.waiting++; b.waits.push({ shard, h: r }); }
+        continue;
+      }
       if (v.ok && this._holdBusy(h)) { if (paused) this._resume(hostId, shard); else this._drainHold(h); h = this._holdOf(shard, hostId) || h; }
       if (!v.ok || this._holdBusy(h)) hold.push({ shard, v }); else go.push(shard);
     }
-    if (waits.length) {
-      if (tries) return { added: 0, appended: 0, duplicates: 0, deferred: 'ledger-hold-loading', ack: false }; // its read-back failed: the device keeps the batch
-      return this._track(Promise.all(waits.map((p) => Promise.resolve(p).catch(() => { }))).then(() => this._ingestBatch(hostId, hostName, shardBuffers, added, { cursors, since, tries: tries + 1 })));
-    }
-    // F1 — every appended shard's rid index ready (a big one loads in steps; the batch waits, the device keeps it)
-    for (const shard of go) if (!this._ingestIndex(shard)) return { added: 0, appended: 0, duplicates: 0, deferred: 'ledger-index-loading', ack: false };
+    // F1 — every appended shard's rid index ready (a big one loads in steps; the batch waits, the device keeps it — r9: a month
+    // that waited for its hold meets it as that month's answer: the rest of the batch is appended already)
+    for (const shard of [...go]) if (!this._ingestIndex(shard)) { if (first) return { added: 0, appended: 0, duplicates: 0, deferred: 'ledger-index-loading', ack: false }; go.splice(go.indexOf(shard), 1); this._holdFailedOf(b, shard, { code: 'ledger-index-loading' }); }
     // r8: the held months' rows go on their hold's road (r5: a hold that could not be written is THAT month's — its notice,
     // the answer's `holdFailed` — never stamped on the batch's other months); r8 (residual 3): the month's rid index, when it
     // is in memory, tells the rows the ledger already has
-    const jobs = hold.map(({ shard, v }) => {
-      let h; try { h = this._holdOf(shard, hostId, true); } catch (e) { return Promise.resolve({ shard, v, e }); }
+    if (hold.length) b.held = true;
+    for (const { shard, v } of hold) {
+      let h; try { h = this._holdOf(shard, hostId, true); } catch (e) { b.jobs.push(Promise.resolve({ shard, v, e })); continue; }
       const ix = this._ingestIx.get(shard), use = ix && !ix.loading && !ix.over ? ix : null;
       const job = this._holdRows(h, shardBuffers[shard], hostName, { ix: use, checked: !!(use && use.ino && v.size != null && use.size === v.size) }).then((r) => ({ shard, v, r }), (e) => ({ shard, v, e }));
-      return this._bounded(job, { shard, v });
-    });
-    // r4: this machine's other paused months judged again at its every ingest (a month split by hand, a bound raised, a
-    // dedup that ended) — a month with no new rows is never left paused for want of a batch; r5: a month whose drain failed
-    // is tried again here (any month's batch of the machine), and one out of shape again is a shape pause again
-    for (const rec of this._pausedOf(hostId)) {
-      const shard = this._shardPath(rec.shard);
-      if (shardBuffers[shard]) continue;
-      let v; try { v = this._shapeVerdict(shard); } catch { continue; }
-      if (v.ok) this._resume(hostId, shard); else if (rec.drain) this._pause(hostId, hostName || rec.hostName, shard, v);
+      b.jobs.push(this._bounded(job, { shard, v }));
     }
-    const { appended, duplicates, lastTs, lastRid } = this._appendRemote(shardBuffers, go);
+    if (first) {
+      // r4: this machine's other paused months judged again at its every ingest (a month split by hand, a bound raised, a
+      // dedup that ended) — a month with no new rows is never left paused for want of a batch; r5: a month whose drain failed
+      // is tried again here (any month's batch of the machine), and one out of shape again is a shape pause again
+      for (const rec of this._pausedOf(hostId)) {
+        const shard = this._shardPath(rec.shard);
+        if (shardBuffers[shard]) continue;
+        let v; try { v = this._shapeVerdict(shard); } catch { continue; }
+        if (v.ok) this._resume(hostId, shard); else if (rec.drain) this._pause(hostId, hostName || rec.hostName, shard, v);
+      }
+      // r9: a hold whose count could not be put on disk at its end (the notice store refused its write: `unsaid`) is said
+      // again at its machine's every ingest (r8 wrote `unsaid` and never read it)
+      for (const h of [...this._holds.values()]) if (h.unsaid && h.host === String(hostId)) this._sayUnsaid(h);
+    }
+    const a = this._appendRemote(shardBuffers, go);
+    b.appended += a.appended; b.duplicates += a.duplicates; if (a.lastRid && a.lastTs >= b.lastTs) { b.lastTs = a.lastTs; b.lastRid = a.lastRid; }
     // r8 (e5's stuck pause): a month in shape whose pause holds nothing resumes at its first ingest that recorded it (a pause
     // with no hold — its write refused, its listing failed at boot — was never resumed while the month took rows)
     for (const shard of go) if (this._pausedShards.has(this._pauseKey(hostId, shard))) this._resume(hostId, shard);
-    const finish = (results) => {
-      let held = 0, heldDup = 0; const paused = [];
-      for (const { shard, v, r, e } of results) {
-        let holdError = null;
-        if (e) { const f = failOf(shard, e); holdError = f.error; holdFailed.push(f); console.warn(`[usage] the rows of ${path.basename(shard)} from ${hostName || hostId} could not be held (${holdError}) — this batch is not acked: its device sends it again`); }
-        else { held += r.held; heldDup += r.duplicates; }
-        if (!v.ok) paused.push(this._pause(hostId, hostName, shard, v, holdError));
-      }
-      if (duplicates + heldDup) this._noteDuplicates(hostId, appended, duplicates + heldDup);
-      const retryAfter = holdFailed.length ? this._retryAfter() : 0;
-      const answer = { added: appended, appended, duplicates: duplicates + heldDup, ...(hold.length ? { held } : {}), ...(paused.length ? { paused: paused[0], pausedMonths: paused } : {}), ...(holdFailed.length ? { holdFailed } : {}), ...(retryAfter ? { retryAfter } : {}) };
-      answer.ack = ackOf(answer);
-      // F2 — r5: THE ACK commits the hub's copy of the device cursor (every row appended or held beside the ledger)
-      if (cursors && typeof cursors === 'object' && answer.ack) this._writeHostCursor(hostId, { cursors, since: since || 'hub', lastTs: lastTs || null, lastRid, events: added });
-      return answer;
-    };
-    if (!jobs.length) return finish([]);
-    return this._track(Promise.all(jobs).then(finish));
+    return null;
+  }
+  /** r9: a month of the batch that is not acked → its entry (its code; a failed listing or read-back also tells the answer
+   *  when it is tried again — `retryAfter`). */
+  _holdFailedOf(b, shard, e) {
+    const f = { month: path.basename(shard).slice(7, 14), shard: path.basename(shard), error: (e && e.code) || String((e && e.message) || e).slice(0, 80) };
+    b.holdFailed.push(f);
+    const ra = this._retryAfter(this._holdKey(shard, b.hostId));
+    if (ra) b.retry.push(ra);
+    return f;
+  }
+  /** r9: the batch's answer once its holds answered (`results` = [{shard, v, r | e}]). */
+  _ingestEnd(b, results) {
+    const { hostId, hostName } = b;
+    let held = 0, heldDup = 0; const paused = [];
+    for (const { shard, v, r, e } of results) {
+      let holdError = null;
+      if (e) { const f = this._holdFailedOf(b, shard, e); holdError = f.error; this._sayAgain(`held\n${hostId}\n${f.shard}\n${holdError}`, (n) => `[usage] the rows of ${f.shard} from ${hostName || hostId} could not be held (${holdError}) — this batch is not acked: its device sends it again${n ? ` (${n} more batch(es) since the last such line)` : ''}`); }
+      else { held += r.held; heldDup += r.duplicates; }
+      if (!v.ok) paused.push(this._pause(hostId, hostName, shard, v, holdError));
+    }
+    const duplicates = b.duplicates + heldDup, holdFailed = b.holdFailed;
+    if (duplicates) this._noteDuplicates(hostId, b.appended, duplicates);
+    const retryAfter = holdFailed.length && b.retry.length ? Math.max(...b.retry) : 0;
+    const answer = { added: b.appended, appended: b.appended, duplicates, ...(b.held ? { held } : {}), ...(paused.length ? { paused: paused[0], pausedMonths: paused } : {}), ...(holdFailed.length ? { holdFailed } : {}), ...(retryAfter ? { retryAfter } : {}) };
+    answer.ack = ackOf(answer);
+    // F2 — r5: THE ACK commits the hub's copy of the device cursor (every row appended or held beside the ledger)
+    if (b.cursors && typeof b.cursors === 'object' && answer.ack) this._writeHostCursor(hostId, { cursors: b.cursors, since: b.since || 'hub', lastTs: b.lastTs || null, lastRid: b.lastRid, events: b.added });
+    return answer;
+  }
+  /** r9: the read-backs a batch waits for, BOUNDED (HOLD_ANSWER_MS — a disk that does not answer: the batch answered
+   *  `hold-slow`, the read-back running on; r8 waited for it with no bound and no line) → Promise (settled either way). */
+  _loadsBounded(waits) {
+    let t = null;
+    const late = new Promise((resolve) => { t = setTimeout(resolve, this.holdAnswerMs || HOLD_ANSWER_MS); t.unref?.(); });
+    return Promise.race([Promise.all(waits.map((w) => Promise.resolve(w.h.loading).catch(() => { }))), late]).finally(() => { clearTimeout(t); for (const w of waits) w.h.waiting--; });
+  }
+  /** r9: ONE line for a state many batches meet (r8: a stalled hold said 127 identical lines in one millisecond) — said, then
+   *  at most once a minute, with how many met it since. */
+  _sayAgain(key, words) {
+    const now = Date.now(), s = this._lines.get(key);
+    if (s && now - s.at < HOLD_SLOW_AGAIN_MS) { s.n++; return; }
+    console.warn(words(s ? s.n : 0));
+    this._lines.set(key, { at: now, n: 0 });
+    if (this._lines.size > 256) this._lines.delete(this._lines.keys().next().value);
   }
   /** r8: a hold job's answer, BOUNDED — past HOLD_ANSWER_MS its batch is answered unacked (`hold-slow`: the device keeps it);
    *  the job runs on (what it lands is in memory and on disk; the device's re-send of it is a duplicate). */
@@ -1039,14 +1096,18 @@ class UsageHistory {
     return this._listHeldNow();
   }
   /** The names of `_held/` → the listing (the segments not read back, the set files, the generations seen; a
-   *  `.dropped.tmp` — a compaction killed before its rename, the old file whole — swept). */
+   *  `.dropped.tmp` — a compaction killed before its rename, the old file whole — swept). r9: A SET FILE IS LISTED ON ITS
+   *  OWN — a generation is a set file with or without segments: a key whose every segment was drained and unlinked is in
+   *  the listing too (an empty list of segments), read back and said (r8 listed segments only: a drained generation's
+   *  count — its set, no segment left — was never read back, the boot re-worded its notice to «0 dropped» and swept the
+   *  set: 33 rows said nowhere). */
   _listOf(names) {
     const m = new Map();
     for (const n of names) {
       let x = HOLD_NAME_RE.exec(n);
       if (x) { const k = `${x[1]}~${x[2]}`; if (!m.has(k)) m.set(k, []); m.get(k).push(Number(x[3])); this._holdGenSeen(k, holdGenOf(x[3])); this._diskFiles.add(path.join(this.heldDir, n)); continue; }
       x = HOLD_DROP_RE.exec(n);
-      if (x) { const k = `${x[1]}~${x[2]}`; if (!this._dropFiles.has(k)) this._dropFiles.set(k, []); if (!this._dropFiles.get(k).includes(Number(x[3]))) this._dropFiles.get(k).push(Number(x[3])); this._holdGenSeen(k, Number(x[3])); continue; }
+      if (x) { const k = `${x[1]}~${x[2]}`; if (!m.has(k)) m.set(k, []); if (!this._dropFiles.has(k)) this._dropFiles.set(k, []); if (!this._dropFiles.get(k).includes(Number(x[3]))) this._dropFiles.get(k).push(Number(x[3])); this._holdGenSeen(k, Number(x[3])); continue; }
       if (HOLD_DROP_TMP_RE.test(n)) this._track(this._heldUnlink(path.join(this.heldDir, n)));
     }
     return m;
@@ -1062,7 +1123,8 @@ class UsageHistory {
   _listHeld() {
     if (this._heldList) return Promise.resolve(this._heldList);
     if (!this._listing) {
-      this._listing = this._track(fs.promises.readdir(this.heldDir).catch((e) => { if (e && e.code === 'ENOENT') return []; throw e; }).then((names) => {
+      if (this._listFail) this._listFail.retrying = true; // r9: `holdListFailed` says a retry is in flight
+      this._listing = this._track(this._holdIO('listing', this.heldDir, fs.promises.readdir(this.heldDir)).catch((e) => { if (e && e.code === 'ENOENT') return []; throw e; }).then((names) => {
         this._listing = null;
         this._heldList = this._listOf(names);
         if (this._listFail) this._listBack();
@@ -1080,7 +1142,7 @@ class UsageHistory {
     const wait = Math.min(this.holdListRetryMaxMs || HOLD_LIST_RETRY_MAX_MS, (this.holdListRetryMs || HOLD_LIST_RETRY_MS) * 2 ** (tries - 1));
     const code = String((e && e.code) || (e && e.message) || e).slice(0, 40);
     if (prev && prev.timer) clearTimeout(prev.timer);
-    const f = { error: e, code, since: prev ? prev.since : now, tries, nextAt: now + wait, timer: null };
+    const f = { error: e, code, since: prev ? prev.since : now, tries, nextAt: now + wait, nextWait: Math.min(this.holdListRetryMaxMs || HOLD_LIST_RETRY_MAX_MS, wait * 2), retrying: false, timer: null };
     f.timer = setTimeout(() => { if (this._listFail === f) this._listHeld().catch(() => { }); }, wait); f.timer.unref?.();
     this._listFail = f;
     if (prev) return;
@@ -1093,11 +1155,49 @@ class UsageHistory {
     this._emitShape({ kind: 'hold-list', state: 'ok', code: f.code, since: f.since });
     setImmediate(() => { try { this.restoreHolds(); } catch (e) { console.warn(`[usage] the holds could not be read back: ${(e && e.message) || e}`); } });
   }
-  /** r8: the listing's failure state (the notice's reconcile; the Usage window) → {code, since, tries, retryAfter} | null. */
-  holdListFailed() { const f = this._listFail; return f ? { code: f.code, since: f.since, tries: f.tries, retryAfter: this._retryAfter() } : null; }
-  /** r8: seconds until the listing is tried again (the answer's `retryAfter`; 0 = it is not failing). */
-  _retryAfter() { const f = this._listFail; return f ? Math.max(1, Math.ceil((f.nextAt - Date.now()) / 1000)) : 0; }
+  /** r8: the listing's failure state (the notice's reconcile; the Usage window) → {code, since, tries, retryAfter, retrying}
+   *  | null. r9: `retrying` — its retry is in flight now (r8 said the old state, and `retryAfter: 1`, for as long as a slow
+   *  retry waited). */
+  holdListFailed() { const f = this._listFail; return f ? { code: f.code, since: f.since, tries: f.tries, retryAfter: this._retryAfter(), retrying: !!f.retrying } : null; }
+  /** r8: seconds until a failed listing — r9: or the read-back of the hold `key` — is tried again (the answer's
+   *  `retryAfter`; 0 = neither is failing). A retry in flight answers the wait the next one would have. */
+  _retryAfter(key = null) {
+    const now = Date.now(), waits = [this._listFail, key ? this._readFail.get(key) : null].filter(Boolean).map((f) => (f.retrying ? f.nextWait : f.nextAt - now));
+    return waits.length ? Math.max(1, Math.ceil(Math.max(...waits) / 1000)) : 0;
+  }
+  /** r9: A HOLD'S READ-BACK THAT FAILED (EACCES, EIO …) — a state of that hold, like the listing's: said ONCE (a journal line,
+   *  the For-you notice `hold-read` naming the file), read again on its own timer (HOLD_LIST_RETRY_MS doubling to
+   *  …_MAX_MS), never at an ingest (r8 started a new read-back at every try of every batch and answered every month of it
+   *  `deferred` — 2 warn lines a batch, 0 of 6 November batches recorded); while it fails `_holdOf` throws its error: a
+   *  month that needs that hold answers `holdFailed` + `retryAfter`, one in shape and not paused goes. */
+  _readFailed(key, shard, host, e) {
+    const prev = this._readFail.get(key), now = Date.now(), tries = (prev ? prev.tries : 0) + 1;
+    const wait = Math.min(this.holdListRetryMaxMs || HOLD_LIST_RETRY_MAX_MS, (this.holdListRetryMs || HOLD_LIST_RETRY_MS) * 2 ** (tries - 1));
+    const code = String((e && e.code) || (e && e.message) || e).slice(0, 40), file = path.basename(String((e && e.path) || key));
+    if (prev && prev.timer) clearTimeout(prev.timer);
+    const f = { error: e, code, file, shard, host: String(host), since: prev ? prev.since : now, tries, nextAt: now + wait, nextWait: Math.min(this.holdListRetryMaxMs || HOLD_LIST_RETRY_MAX_MS, wait * 2), retrying: false, timer: null };
+    f.timer = setTimeout(() => { if (this._readFail.get(key) !== f) return; f.retrying = true; try { this._holdOf(shard, host); } catch { } }, wait); f.timer.unref?.();
+    this._readFail.set(key, f);
+    if (prev) return;
+    const base = path.basename(shard);
+    console.warn(`[usage] the hold ${key} could not be read (${code}: ${file}) — ${base.slice(7, 14)} of ${host} waits, unacked (its machine sends it again) unless its file is in shape; every other month is recorded; read again in ${Math.round(wait / 1000)} s, then less often (every ${Math.round((this.holdListRetryMaxMs || HOLD_LIST_RETRY_MAX_MS) / 1000)} s at most)`);
+    this._emitShape({ kind: 'hold-read', state: 'failed', host: String(host), hostName: String(host), shard: base, month: base.slice(7, 14), file, code, since: f.since });
+  }
+  /** r9: the read-back that failed works now — its state gone, its notice closed. */
+  _readBack(key) {
+    const f = this._readFail.get(key); if (!f) return;
+    this._readFail.delete(key); if (f.timer) clearTimeout(f.timer);
+    console.log(`[usage] the hold ${key} is read again (${f.code} for ${Math.round((Date.now() - f.since) / 1000)} s, ${f.tries} tr${f.tries === 1 ? 'y' : 'ies'})`);
+    const base = path.basename(f.shard);
+    this._emitShape({ kind: 'hold-read', state: 'ok', host: f.host, shard: base, month: base.slice(7, 14), file: f.file, code: f.code, since: f.since });
+  }
+  /** r9: is the hold of (host, file) still to be read (its read-back failing, in flight, or listed)? (the notice's reconcile) */
+  holdReadPending(host, shardName) { const k = this._holdKey(this._shardPath(shardName), host), h = this._holds.get(k); if (this._readFail.has(k) || (h && h.loading)) return true; try { return this._heldOnDisk().has(k); } catch { return true; } }
   _holdGenSeen(key, gen) { if (!(this._holdGens.get(key) >= gen)) this._holdGens.set(key, gen); }
+  /** r9: a generation a notice names (ledger-shape-notice's `wire`, every item it holds) — the next hold of that month is a
+   *  newer one, even when no file of it is left on disk (a restart minted generation 0 again, and the item read the new
+   *  hold's count as the same generation's: the ended hold's «36» lost when the month's next hold re-worded it). */
+  holdGenSeen(host, shardName, gen) { const g = Number(gen); if (host && shardName && Number.isInteger(g) && g >= 0) this._holdGenSeen(this._holdKey(this._shardPath(String(shardName)), host), g); }
   /** r6: a NEW hold of (month, host) — a generation newer than any this process or its disk has seen. */
   _holdGenNext(key) { this._heldOnDisk(); const g = this._holdGens.has(key) ? this._holdGens.get(key) + 1 : 0; this._holdGens.set(key, g); return g; }
   /** r6: the set files of `key` other than generation `keep`'s — a stale hold's — unlinked (an error leaves them: never
@@ -1121,33 +1221,40 @@ class UsageHistory {
    *  generation's set file). r6 (R1): the hold's generation is its newest segment's — an OLDER one's segment is a
    *  drained hold's file whose unlink failed: unlinked, never read, never counted. r7: the newest generation itself may
    *  be done — `retired` (r8: honoured only when its `below` covers every one of its segments): its files unlinked
-   *  unread, nothing held. Throws when the listing failed (the caller's batch waits). */
+   *  unread, nothing held. Throws when the listing failed (the caller's batch waits) — r9: and while its own read-back
+   *  fails (`_readFailed`: retried on its timer, never here). r9: a generation is its newest file's — a segment's or a
+   *  set file's (a drained generation: its set alone). */
   _holdOf(shard, host, create = false) {
     const key = this._holdKey(shard, host);
     let h = this._holds.get(key);
     if (h) return h.loading ? null : h;
-    const listed = (this._heldOnDisk().get(key) || []).sort((a, b) => a - b);
-    if (!listed.length && !create) return NO_HOLD;
+    const rf = this._readFail.get(key);
+    if (rf && !rf.retrying) throw rf.error;
+    const onDisk = this._heldOnDisk().get(key);
+    if (!onDisk && !create) return NO_HOLD;
+    const listed = (onDisk || []).slice().sort((a, b) => a - b);
     this._heldOnDisk().delete(key);
-    const gen = listed.length ? holdGenOf(listed[listed.length - 1]) : this._holdGenNext(key);
+    const top = Math.max(listed.length ? holdGenOf(listed[listed.length - 1]) : -1, ...(onDisk ? this._dropFiles.get(key) || [] : []));
+    const gen = top >= 0 ? top : this._holdGenNext(key);
     const seqs = listed.filter((q) => holdGenOf(q) === gen), old = listed.filter((q) => holdGenOf(q) !== gen);
-    h = { key, gen, base: path.basename(shard, '.ndjson'), host: String(host), hostName: null, segs: [], nextSeq: gen * HOLD_GEN_SPAN, gone: new Set(), goneBytes: 0, goneTorn: false, below: 0, retired: false, stale: false, unchecked: false, unsaid: false, compactAt: DROP_COMPACT_MIN, loading: null, draining: null, ending: null, io: Promise.resolve(), pending: 0 };
+    h = { key, gen, base: path.basename(shard, '.ndjson'), host: String(host), hostName: null, segs: [], nextSeq: gen * HOLD_GEN_SPAN, gone: new Set(), goneBytes: 0, goneTorn: false, below: 0, retired: false, stale: false, unchecked: false, unsaid: false, compactAt: DROP_COMPACT_MIN, loading: null, draining: null, ending: null, io: Promise.resolve(), pending: 0, waiting: 0 };
     this._holds.set(key, h);
-    if (!listed.length) { this._dropStale(key, gen); return h; }
+    if (!onDisk) { this._dropStale(key, gen); return h; }
     h.loading = this._holdJob(h, async () => {
       for (const q of old) await this._heldUnlink(path.join(this.heldDir, `${key}.${q}.ndjson`));
       this._dropStale(key, gen);
-      if (seqs.length) await this._holdLoad(h, seqs);
+      await this._holdLoad(h, seqs); // r9: a set-only generation too (its count)
     }).then(() => {
       h.loading = null;
+      this._readBack(key);
       if (this._holds.get(key) !== h) return;
       if (h.retired) { this._holds.delete(key); return; }
       this._afterHoldLoad(h);
     }, (e) => {
       h.loading = null;
-      console.warn(`[usage] the hold ${h.key} could not be read: ${(e && e.message) || e} — read again at the next ingest`);
       if (this._holds.get(key) === h) this._holds.delete(key);
-      if (this._heldList) this._heldList.set(key, listed);
+      if (this._heldList) this._heldList.set(key, listed); // still on disk, unread — r9: read again by its own timer
+      this._readFailed(key, shard, host, e);
     });
     return null;
   }
@@ -1162,7 +1269,15 @@ class UsageHistory {
   _droppedFinal(h, shard) {
     if (!h || h.none) return 0;
     const ix = this._ingestIx.get(shard);
-    if (ix && !ix.loading && !ix.over && ix.ino) { for (const r of [...h.gone]) if (ix.rids.has(r)) h.gone.delete(r); h.unchecked = false; }
+    if (ix && !ix.loading && !ix.over && ix.ino) {
+      const back = [...h.gone].filter((r) => ix.rids.has(r)), was = h.unchecked;
+      for (const r of back) h.gone.delete(r);
+      h.unchecked = false;
+      // r9: WHAT THE INDEX TOLD IS A RECORD — the rows it found leave the set on disk too (`back`), and the set is `checked`
+      // (the rest are not in the ledger), one job before the end's own: a restart reads back the count the end said (c2:
+      // a restart with the index not in memory re-said 8 recorded rows «never recorded»)
+      if (back.length || (was && h.gone.size)) this._holdJob(h, () => this._holdMark(h, dropLines('back', back) + JSON.stringify({ checked: h.gone.size }) + '\n'));
+    }
     return this._droppedOf(h);
   }
   /** r8: a hold being read back — the generation's set first (`gone` adds, `back` removes — in their order; `below`: every
@@ -1170,15 +1285,17 @@ class UsageHistory {
    *  road: a slice per read (≤ LD.STEP_BYTES), the loop free between them. */
   async _holdLoad(h, seqs) {
     const df = this._dropFile(h.key, h.gen);
+    let checked = false; // r9: the set's last `checked` record came after its last `gone` line (every dropped row checked)
     const s = await LD.eachLineAsync(df, 0, (buf, a, b) => {
       try {
         const j = JSON.parse(buf.toString('utf8', a, b));
-        if (Array.isArray(j && j.gone)) for (const r of j.gone) h.gone.add(String(r));
+        if (Array.isArray(j && j.gone)) { for (const r of j.gone) h.gone.add(String(r)); checked = false; }
         else if (Array.isArray(j && j.back)) for (const r of j.back) h.gone.delete(String(r));
         else if (j && Number.isFinite(j.below)) h.below = Math.max(h.below, j.below);
         else if (j && j.retired != null) h.retired = true;
+        else if (j && Number.isFinite(j.checked)) checked = true;
       } catch { } // a line torn mid-append (a crash, or a cut that failed too) is no line
-    });
+    }, { io: this._ioOf('read-back') });
     h.goneBytes = s.end; h.goneTorn = s.end > s.lineEnd; // a crash mid-append: the next line starts on a line of its own
     const live = seqs.filter((q) => q >= h.below);
     // r8: a `retired` line is honoured only when `below` covers every segment of the generation (nothing live is left: its
@@ -1204,7 +1321,7 @@ class UsageHistory {
         const x = rowStart(buf, a, b); // r7: a torn line is no row
         const rid = x < 0 ? null : LD.ridAt(buf, x, b);
         if (rid) { seg.rows++; seg.rids.add(rid); }
-      });
+      }, { io: this._ioOf('read-back') });
       seg.bytes = r.end; seg.torn = r.end > r.lineEnd;
       if (seg.rids.size) h.segs.push(seg); else await this._holdUnlink(h, seq); // r7: no whole row — nothing to hold or drain
     }
@@ -1214,6 +1331,7 @@ class UsageHistory {
       // counts dropped rows was never retired — its count may never have reached the owner (its notice in the store's
       // debounce at a crash): it is KEPT (empty), said and ended by `_afterHoldLoad`
       if (!h.gone.size) { h.retired = true; if (!h.stale) await this._heldUnlink(df); }
+      h.unchecked = h.gone.size > 0 && !checked; // r9: a count the end checked (its `checked` record) is said as checked
       return;
     }
     // a row in a live segment is HELD (it will be recorded), never in the set — r7: whatever a line said (a crash between
@@ -1243,14 +1361,19 @@ class UsageHistory {
     for (let i = 0; i < 10000 && this._inflight.size; i++) await Promise.allSettled([...this._inflight]);
   }
   /** r8: a file call of the hold's road, SAID while it waits (HOLD_SLOW_MS — the main thread is free to say it; r7's
-   *  timedSync recorded a call only once it returned, and a hung one never). */
+   *  timedSync recorded a call only once it returned, and a hung one never). r9: EVERY WAIT IS BOUNDED AND SAID — every
+   *  call of the road past its one listing goes through here (the read-back's opens and reads, the drain's, the unlinks,
+   *  the stats, the cuts, the renames, the listing's retry; r8 wrapped the appends and the compaction only: a hung
+   *  read-back was silent, and its batch waited with no bound — `_loadsBounded` now). */
   _holdIO(what, file, p) {
     const t0 = Date.now();
     let t = null;
-    const say = () => { console.warn(`[usage] the hold's ${what} of ${path.basename(file)} has waited ${Math.round((Date.now() - t0) / 1000)} s — the disk of the data folder is not answering; its batch waits, unacked`); t = setTimeout(say, HOLD_SLOW_AGAIN_MS); t.unref?.(); };
+    const say = () => { const ms = Date.now() - t0; console.warn(`[usage] the hold's ${what} of ${path.basename(file)} has waited ${ms < 10e3 ? (ms / 1000).toFixed(1) : Math.round(ms / 1000)} s — the disk of the data folder is not answering; its batch waits, unacked`); t = setTimeout(say, HOLD_SLOW_AGAIN_MS); t.unref?.(); };
     t = setTimeout(say, this.holdSlowMs || HOLD_SLOW_MS); t.unref?.();
     return p.finally(() => clearTimeout(t));
   }
+  /** r9: LD.eachLineAsync's `io` — each of its file calls through `_holdIO`. */
+  _ioOf(what) { return (file, p) => this._holdIO(what, file, p); }
   /** Rows of a paused month into its hold: a row the hold already has is a duplicate (an older daemon re-sends its window),
    *  so is one the month's rid index holds (r8 — residual 3: the ledger has it; consulted when the index is in memory), the
    *  rest appended in their order → Promise({held, duplicates}). r6: a re-sent row the hold DROPPED that stays dropped (no
@@ -1314,7 +1437,7 @@ class UsageHistory {
     const below = gone.length ? segs[gone.length].seq : 0; // r7: every segment numbered under it is done (its rows in the set)
     const setText = dropRids.length || backRids.length || below ? (h.goneTorn ? '\n' : '') + dropLines('gone', dropRids) + dropLines('back', backRids) + (below ? JSON.stringify({ below }) + '\n' : '') : '';
     const text = keep.length ? (seg.torn ? '\n' : '') + keep.map((e) => e.line).join('\n') + '\n' : '';
-    await fs.promises.mkdir(this.heldDir, { recursive: true });
+    await this._holdIO('folder', this.heldDir, fs.promises.mkdir(this.heldDir, { recursive: true }));
     // r7 THE ORDER — the rows first: one that throws is cut back, the hold as it was (disk and memory)
     const file = this._holdFile(h, seg.seq);
     if (text) {
@@ -1356,11 +1479,11 @@ class UsageHistory {
   /** r7: a hold's file cut back to `before` bytes → its length now (`before`; the real one when the cut fails; −1 unknown).
    *  A file the append created (`before` 0) is unlinked — never an empty file left beside the hold. */
   async _holdCut(file, before) {
-    try { if (before > 0 || !(await this._heldUnlink(file))) await fs.promises.truncate(file, before); return before; }
+    try { if (before > 0 || !(await this._heldUnlink(file))) await this._holdIO('cut', file, fs.promises.truncate(file, before)); return before; }
     catch (e) { if (e && e.code === 'ENOENT') return 0; return this._heldSize(file); }
   }
   /** r8: a hold file's length (−1: unknown). */
-  async _heldSize(file) { try { return (await fs.promises.stat(file)).size; } catch { return -1; } }
+  async _heldSize(file) { try { return (await this._holdIO('stat', file, fs.promises.stat(file))).size; } catch { return -1; } }
   /** r7: a segment an append left torn (its cut failed too) — known in-process: its next line on a line of its own, its
    *  length the real one, a fresh one's number used. r8: a length that could not be read SEALS it (r7 kept the old one,
    *  and a later cut back truncated rows an append between had landed and acked — 2 of 10 lost, counted nowhere). */
@@ -1377,13 +1500,14 @@ class UsageHistory {
     h.goneTorn = true; if (at > h.goneBytes) h.goneBytes = at;
     h.compactAt = 0;
   }
-  /** r7: one RECORD line in the generation's set file (`below`, `retired`) → whether it landed. */
+  /** r7: one RECORD line in the generation's set file (`below`, `retired`; r9: or the lines themselves — `back` + `checked`)
+   *  → whether it landed. */
   async _holdMark(h, line) {
-    const text = (h.goneTorn ? '\n' : '') + JSON.stringify(line) + '\n';
+    const text = (h.goneTorn ? '\n' : '') + (typeof line === 'string' ? line : JSON.stringify(line) + '\n');
     const f = await this._holdWrite(this._dropFile(h.key, h.gen), text, h.goneBytes);
     if (f) { this._goneTorn(h, f.at); return false; }
     h.goneBytes += Buffer.byteLength(text); h.goneTorn = false;
-    if (line.below) h.below = Math.max(h.below, line.below);
+    if (line && line.below) h.below = Math.max(h.below, line.below);
     return true;
   }
   /** r6: the set file rewritten as the set (tmp + rename) once its lines pass 4× it — an error leaves the old one (valid).
@@ -1393,7 +1517,7 @@ class UsageHistory {
     const f = this._dropFile(h.key, h.gen), text = dropLines('gone', [...h.gone]) + (h.below ? JSON.stringify({ below: h.below }) + '\n' : '');
     try {
       if (!text) { if (await this._heldUnlink(f)) h.goneBytes = 0; }
-      else { await this._holdIO('compaction', f, fs.promises.writeFile(f + '.tmp', text)); await fs.promises.rename(f + '.tmp', f); h.goneBytes = Buffer.byteLength(text); }
+      else { await this._holdIO('compaction', f, fs.promises.writeFile(f + '.tmp', text)); await this._holdIO('compaction', f, fs.promises.rename(f + '.tmp', f)); h.goneBytes = Buffer.byteLength(text); }
       h.goneTorn = false;
     } catch { await this._heldUnlink(f + '.tmp'); }
     h.compactAt = Math.max(DROP_COMPACT_MIN, 4 * h.goneBytes);
@@ -1405,7 +1529,7 @@ class UsageHistory {
    *  month's next episode continues it, a read-back says it again. One job of the hold's road. → Promise(ended) | null. */
   _holdEnd(h, said = true) {
     if (!h || h.none) return null;
-    if (!said) { h.unsaid = true; return null; }
+    if (!said) { h.unsaid = true; return null; } // r9: said again at its machine's every ingest (`_sayUnsaid`) and, after a restart, by its read-back (its set)
     if (h.ending) return h.ending;
     const p = h.ending = this._holdJob(h, async () => {
       if (h.segs.length || h.pending > 0) return false; // rows arrived meanwhile: not over
@@ -1424,18 +1548,20 @@ class UsageHistory {
     return this._emitShape({ kind: 'dropped', host: h.host, hostName: h.hostName || h.host, shard: base, month: base.slice(7, 14), dropped, gen: h.gen, unchecked: !!h.unchecked, holdMax: this._holdMax() }) !== false;
   }
   /** r7: ONE unlink of a hold's file → whether it is gone (an error — EBUSY on the NFS data dir — leaves it: `stale`). */
-  async _heldUnlink(p) { try { await fs.promises.unlink(p); this._diskFiles.delete(p); return true; } catch (e) { if (e && e.code === 'ENOENT') { this._diskFiles.delete(p); return true; } return false; } }
+  async _heldUnlink(p) { try { await this._holdIO('unlink', p, fs.promises.unlink(p)); this._diskFiles.delete(p); return true; } catch (e) { if (e && e.code === 'ENOENT') { this._diskFiles.delete(p); return true; } return false; } }
   async _holdUnlink(h, seq) { const done = await this._heldUnlink(this._holdFile(h, seq)); if (!done) h.stale = true; return done; }
   /** r4: a month back in shape — its held rows ingested IN ORDER (the oldest segment first) through the ingest's own law (the
    *  shard's rid index: a row the ledger already holds costs zero bytes), a slice at a time. One drain per hold; a failed
    *  append leaves the rest held. r5: its end (`_drained`) is what ends the month's pause; its failure (`_drainFailed`)
    *  keeps it, `drain-failed`, tried again at the machine's every ingest and at a restart. r8: every step a job of the
    *  hold's road (r7 drained a hold ≤ 8 MiB inline) — the rows the month gets meanwhile queued in the hold behind it.
+   *  r9: a hold with nothing held left and a count goes this road too (r8 ended it at once): the month's index is loaded
+   *  first, so its count is judged against the ledger — never «never recorded» for rows a restart could not check.
    *  → its promise | null. */
   _drainHold(h) {
     if (!h || h.none || h.loading) return null;
     if (h.draining) return h.draining;
-    if (!h.segs.length && !h.pending) { this._holdEnd(h, this._sayDropped(h, this._droppedFinal(h, this._shardPath(h.base + '.ndjson')))); return null; } // r6: nothing held in a month in shape — the hold is over
+    h.unsaid = false;
     const shard = this._shardPath(h.base + '.ndjson'), sum = { rows: 0, appended: 0, duplicates: 0 };
     h.draining = this._track((async () => {
       for (let waits = 0; ;) {
@@ -1461,7 +1587,7 @@ class UsageHistory {
       const x = rowStart(buf, a, b); // a line torn by a crash mid-append is no row
       const rid = x < 0 ? null : LD.ridAt(buf, x, b);
       if (rid) rows.push({ rid, line: buf.toString('utf8', x, b) });
-    }, { limit: WARM_SLICE_BYTES });
+    }, { limit: WARM_SLICE_BYTES, io: this._ioOf('drain') });
     if (rows.length) {
       const a = this._appendRemote({ [shard]: rows }, [shard]); sum.rows += rows.length; sum.appended += a.appended; sum.duplicates += a.duplicates; seg.rows = Math.max(0, seg.rows - rows.length);
       for (const x of rows) seg.done.add(x.rid); // r8: the drain's own record — `rids` stays whole (the duplicate check)
@@ -1482,7 +1608,8 @@ class UsageHistory {
     if (h.segs.length || h.pending) return;
     const shard = this._shardPath(h.base + '.ndjson'), rec = this._pausedShards.get(this._pauseKey(h.host, shard));
     const dropped = this._droppedFinal(h, shard);
-    console.log(`[usage] ${h.base}: the ${sum.rows} row(s) held for ${h.hostName || h.host} are in the ledger, in order — ${sum.appended} appended, ${sum.duplicates} it already held${dropped ? `; ${dropped} older held row(s) had been dropped past the hold's ${Math.round(this._holdMax() / 2 ** 20)} MiB` : ''}`);
+    if (sum.rows) console.log(`[usage] ${h.base}: the ${sum.rows} row(s) held for ${h.hostName || h.host} are in the ledger, in order — ${sum.appended} appended, ${sum.duplicates} it already held${dropped ? `; ${dropped} older held row(s) had been dropped past the hold's ${Math.round(this._holdMax() / 2 ** 20)} MiB` : ''}`);
+    else if (dropped) console.log(`[usage] ${h.base}: the hold of ${h.hostName || h.host} ends with nothing left to record — ${dropped} held row(s) had been dropped past its ${Math.round(this._holdMax() / 2 ** 20)} MiB (said in its notice)`);
     if (!rec) { this._holdEnd(h, this._sayDropped(h, dropped)); return; }
     let v; try { v = this._shapeVerdict(shard); } catch { v = { ok: true }; }
     if (v.ok) this._holdEnd(h, this._resumed(h.host, shard, rec, { drained: sum.rows, dropped, gen: h.gen }));
@@ -1502,6 +1629,13 @@ class UsageHistory {
     console.warn(`[usage] the ${rec.held} row(s) of ${base} held for ${rec.hostName} could not be recorded (${code}) — they stay held and ${rec.month} stays paused; tried again at the machine's next harvest and at a restart`);
     this._emitShape({ kind: 'paused', ...rec });
   }
+  /** r9: a hold whose count its end could not put on disk (`unsaid`) — said again: its month in shape ⇒ its end again (the
+   *  drain's road: the index, the count, the notice, the end); out of shape ⇒ it goes on (its next pause says it). */
+  _sayUnsaid(h) {
+    if (!h.unsaid || h.ending || h.loading || h.draining || this._holdBusy(h)) return;
+    let v; try { v = this._shapeVerdict(this._shardPath(h.base + '.ndjson')); } catch { return; }
+    if (v.ok) this._drainHold(h);
+  }
   /** A hold read back (a restart, an ingest's first touch): its month in shape ⇒ drained (its pause, if any, resumed); out
    *  of shape ⇒ that month paused and said with its counts (a hold with no notice gets its one). r8: a hold read back
    *  with nothing live and a count (never retired: its count may never have reached the owner) — said (`dropped`) and,
@@ -1515,8 +1649,11 @@ class UsageHistory {
     else this._sayDropped(h, this._droppedOf(h));
   }
   /** Boot (r4): every hold on disk read back and judged (`_afterHoldLoad`, once its read-back ends — r8: on the async road)
-   *  → how many; then (r5) a month the boot kept paused for its hold (restorePause) whose hold is read is resumed, and (r6)
-   *  a set file whose hold has no segment left is swept — r8: only when NO file of its generation is left. */
+   *  → how many; then (r5) a month the boot kept paused for its hold (restorePause) whose hold is read is resumed. r9: no
+   *  sweep of set files (r6–r8 unlinked a set whose hold had no segment left — the drained generation's count, never
+   *  said): a set file IS a generation (`_listOf`), read back like any — a retired or empty one unlinked by its read-back,
+   *  one with a count said, then ended; an older generation's set goes with `_dropStale` (its count said before a newer
+   *  generation could be minted). */
   restoreHolds() {
     let n = 0, keys;
     // r7: a listing that fails (EIO) reads nothing back now — r8: its retry reads every hold back (`_listBack`)
@@ -1527,13 +1664,12 @@ class UsageHistory {
       if (!x) continue;
       n++;
       const shard = this._shardPath(x[1] + '.ndjson'), host = holdHostOf(x[2]);
-      const h = this._holdOf(shard, host);
+      let h; try { h = this._holdOf(shard, host); } catch { continue; } // r9: its read-back failing — its own timer reads it
       const r = h === null ? this._holds.get(this._holdKey(shard, host)) : null;
       if (r && r.loading) loads.push(r.loading); else if (h && !h.none) this._afterHoldLoad(h);
     }
     this._track(Promise.allSettled(loads).then(() => {
       for (const rec of [...this._pausedShards.values()]) if (rec.drain && rec.drain.state === 'pending') this._resume(rec.host, this._shardPath(rec.shard));
-      for (const key of [...this._dropFiles.keys()]) if (!this._holds.has(key) && !(this._heldList && this._heldList.has(key))) this._dropStale(key, -1);
     }));
     return n;
   }
@@ -1649,7 +1785,7 @@ class UsageHistory {
     if (!rec) return;
     let h; try { h = this._holdOf(this._shardPath(rec.shard), hostId); } catch { return; } // r7: its hold unknown (a listing failed) — it stays paused
     if (!h) return;
-    if (this._holdBusy(h)) {
+    if (this._holdBusy(h) || (!h.none && h.gone.size)) { // r9: nothing held but a count — said through the drain's road (the index first)
       this._drainHold(h);
       const now = this._pausedShards.get(key);
       if (now && h.draining && (!now.drain || now.drain.state !== 'failed')) now.drain = { ...(now.drain || {}), state: 'draining' };
