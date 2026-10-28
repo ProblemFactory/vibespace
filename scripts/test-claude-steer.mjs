@@ -34,6 +34,7 @@ const guard = async (name, fn) => { try { await fn(); } catch (e) { ok(false, `$
 const { capsOf } = require(path.join(REPO, 'src/backend-caps.js'));
 const AM = await import(path.join(REPO, 'src/lib/agent-meta.js'));
 const { ChatInput } = await import(path.join(REPO, 'src/lib/chat-input.js'));
+const ENTER = await import(path.join(REPO, 'src/lib/chat-enter-keys.js'));
 const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
 const ad = new ClaudeCodeAdapter({ buffersDir: os.tmpdir() });
 
@@ -97,11 +98,24 @@ await guard('§2 the composer', () => {
   // unstamped frame is a plain send (eeece327 gated it on the flag: the lagging tab's Alt+Enter fell through to a STAMPED send)
   const ia = mkCI(live(cl, NEW), { _isStreaming: false }); const iaHeld = ia.ci.holdNow();
   ok(ia.ci.holdChordAllowed === true && iaHeld === true && ia.frames.length === 1 && !('steer' in ia.frames[0]) && mkCI(live(cl, NEW)).ci.holdChordAllowed === true && mkCI(live(cl, W354)).ci.holdChordAllowed === false, 'the hold chord: the CAPABILITY alone — a lagging client (flag false) still HOLDS, unstamped; never where the wrapper does not back both doors', ia.frames);
+  // r4: the hold chord is a LIVE-TURN verb — the capability says it EXISTS, the turn says it ACTS; at idle Alt+Enter is the
+  // composer's own Enter (a newline where Enter is one), and where it sends it sends UNSTAMPED (7df30f96 sent the draft at
+  // idle in the expanded composer and with chat.enterSends off, where the key had always been a newline)
+  const { EnterGuard } = ENTER;
+  const key = () => { const ev = { key: 'Enter', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, prevented: false }; ev.preventDefault = () => { ev.prevented = true; }; return ev; };
+  const chord = (over) => { const c = mkCI(live(cl, NEW), { _enterGuard: new EnterGuard(), _getTouchEnterSends: () => false, _showImeHint() { }, ...over }); const ev = key(); const did = c.ci._altEnter(ev); return { did, prevented: ev.prevented, frames: c.frames }; };
+  const run = chord({ _isStreaming: true }), runX = chord({ _isStreaming: true, _expanded: true, _textarea: { value: 'words for the agent', style: {}, classList: { remove() { } }, parentElement: null }, _shortcutHint: {} });
+  ok(run.did === 'hold' && run.prevented && run.frames.length === 1 && !('steer' in run.frames[0]) && runX.did === 'hold' && runX.frames.length === 1, 'Alt+Enter while a turn runs HOLDS — in the expanded composer too (an unstamped frame the wrapper keeps)', { run, runX });
+  const idleX = chord({ _isStreaming: false, _expanded: true }), idleOff = chord({ _isStreaming: false, _getEnterSends: () => false });
+  ok(idleX.did === 'newline' && !idleX.prevented && idleX.frames.length === 0 && idleOff.did === 'newline' && !idleOff.prevented && idleOff.frames.length === 0, 'Alt+Enter at IDLE in the expanded composer / with chat.enterSends off: a NEWLINE (the textarea\'s default — nothing sent, nothing prevented)', { idleX, idleOff });
+  const idle = chord({ _isStreaming: false });
+  ok(idle.did === 'send' && idle.prevented && idle.frames.length === 1 && !('steer' in idle.frames[0]), 'Alt+Enter at idle where Enter sends: a send, UNSTAMPED — so a tab whose flag lags behind a running turn still has it HELD by the wrapper (r2)', idle);
+  ok(mkCI(live(cl, NEW), { _isStreaming: false }).ci.holdChordActs === false && mkCI(live(cl, NEW)).ci.holdChordActs === true && mkCI(live(cl, W354)).ci.holdChordActs === false, 'holdChordActs = the door exists AND a turn runs');
   const att = mkCI(live(cl, NEW), { _attachments: [{ mediaType: 'image/png', base64: 'iVBORw0KGgo=' }], _renderAttachments() { } }); att.ci._send();
   ok(att.frames[0].steer === true && /"type":"image"/.test(att.frames[0].text), 'attachments ride a stamped frame as on a plain send (one frame: the image blocks + the words)', att.frames);
 });
 const ciSrc = read('src/lib/chat-input.js'), cvSrc = read('src/lib/chat-view.js');
-ok(/e\.key === 'Enter' && e\.altKey && !e\.ctrlKey && !e\.metaKey && !e\.shiftKey && \(this\.steerChordAllowed \|\| this\.holdChordAllowed\)\) \{\n\s+e\.preventDefault\(\);\n\s+if \(this\.steerChordAllowed\) \{ if \(this\._onSteerChord\) this\._onSteerChord\(\); else this\.steerNow\(\); \}\n\s+else if \(this\._onHoldChord\) this\._onHoldChord\(\); else this\.holdNow\(\);/.test(ciSrc) && (ciSrc.match(/e\.key === 'Enter' && e\.altKey/g) || []).length === 1, 'ONE Alt+Enter chord, the session\'s second door: steer (chat.steerNow) or — here — HOLD (chat.holdNow); still the only chord');
+ok(/e\.key === 'Enter' && e\.altKey && !e\.ctrlKey && !e\.metaKey && !e\.shiftKey && \(this\.steerChordAllowed \|\| this\.holdChordAllowed\)\) \{ this\._altEnter\(e\); return; \}/.test(ciSrc) && (ciSrc.match(/e\.key === 'Enter' && e\.altKey/g) || []).length === 1 && /_altEnter\(e\) \{\n\s+if \(this\.steerChordAllowed\) \{ e\.preventDefault\(\); if \(this\._onSteerChord\) this\._onSteerChord\(\); else this\.steerNow\(\); return 'steer'; \}\n\s+if \(this\.holdChordActs\) \{ e\.preventDefault\(\); if \(this\._onHoldChord\) this\._onHoldChord\(\); else this\.holdNow\(\); return 'hold'; \}/.test(ciSrc) && /_canHoldComposer\(\) \{ return !!this\._chatInput\?\.holdChordActs; \}/.test(cvSrc), 'ONE Alt+Enter chord, the session\'s second door: steer (chat.steerNow) or — here — HOLD (chat.holdNow); still the only chord');
 ok(/export const HOLD_NOW_COMMAND = 'chat\.holdNow';/.test(cvSrc) && /command: HOLD_NOW_COMMAND,\n\s+when: \(ctx\) => steerTargetView\(ctx\) === this && this\._canHoldComposer\(\),/.test(cvSrc) && /onHoldChord: \(\) => runCommand\(HOLD_NOW_COMMAND, \{ view: this \}\)/.test(cvSrc) && /this\._holdKeyDispose\?\.\(\)/.test(cvSrc), 'chat.holdNow: registered once, keybound per view with its own `when` (mutually exclusive with chat.steerNow on the one chord), disposed with the view');
 ok(/this\._holdBtn\.classList\.toggle\('hidden', !modes\.allowHoldChord\)/.test(ciSrc) && /get holdChordAllowed\(\) \{ return !!this\._sendModes\(\)\.allowHoldChord; \}/.test(ciSrc) && /this\._holdBtn\.innerHTML = UI_ICONS\.clock;/.test(ciSrc) && /\.chat-hold-btn:not\(\.hidden\)/.test(read('public/chat.css')), '≤ 768 px: the hold button beside Send (Send itself hands the message over), shown on the capability alone like the chord (r2), placed by CSS');
 
@@ -186,32 +200,72 @@ await guard('§5 the put-back count', async () => {
 console.log('§6 a mid-turn frame survives a restart: the wrapper\'s buffer copy, drawn once');
 await guard('§6 the buffer copy', () => {
   const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js'));
-  const copy = (text, msgId) => ({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] }, msgId, _fromWebui: true, webui_copy: true, timestamp: new Date().toISOString() });
+  // r4: the copy names the WITNESS (`cliUuid`, the uuid the wrapper stamped on the frame); the CLI keeps it as its user record's
+  // uuid and as a queued_command attachment's source_uuid (measured on 2.1.312)
+  const U = (n) => 'e2e00000-0000-4000-8000-' + String(n).padStart(12, '0');
+  const copy = (text, msgId, cliUuid = null, extra = []) => ({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }, ...extra] }, msgId, ...(cliUuid ? { cliUuid } : {}), _fromWebui: true, webui_copy: true, timestamp: new Date().toISOString() });
+  const IMG = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo' } };
+  const imgs = (m) => (m.content || []).filter((b) => b.type === 'image').length;
   const users = (mm, text) => mm.messages.filter((m) => m.role === 'user' && S(m.content).includes(text));
   // a restart's history: the copy, the wrapper's records about it — the bubble comes back with its last chip
   const a = createMessageManager('claude', 'copy-a');
-  a.processLive(copy('B handed mid tool', 'm-b'));
+  a.processLive(copy('B handed mid tool', 'm-b', U(1)));
   a.processLive({ type: 'input_handover', state: 'handed', msg_ids: ['m-b'], via: 'enter' });
   a.processLive({ type: 'input_handover', state: 'landed', msg_ids: ['m-b'] });
-  a.processLive({ type: 'attachment', attachment: { type: 'queued_command', prompt: [{ type: 'text', text: 'B handed mid tool' }] } });
+  a.processLive({ type: 'attachment', attachment: { type: 'queued_command', prompt: [{ type: 'text', text: 'B handed mid tool' }], source_uuid: U(1) } });
   ok(users(a, 'B handed mid tool').length === 1 && users(a, 'B handed mid tool')[0].queueState === 'steered' && users(a, 'B handed mid tool')[0].webuiMsgId === 'm-b', 'the copy draws the bubble (its msgId, «Steered»); the CLI\'s own attachment of the same words claims it — ONE bubble', users(a, 'B handed mid tool'));
   const b = createMessageManager('claude', 'copy-b');
   b.processLive(ad.formatChatInput('C sent live', 'm-c', { steer: true }).userMsg);
   b.processLive(copy('C sent live', 'm-c'));
   ok(users(b, 'C sent live').length === 1, 'the live send and the copy of it (one msgId) are ONE bubble', users(b, 'C sent live'));
   const c = createMessageManager('claude', 'copy-c');
-  c.processLive(copy('D held, then ran', 'm-d'));
+  c.processLive(copy('D held, then ran', 'm-d', U(4)));
   c.processLive({ type: 'queued_input', msg_id: 'm-d', turn_id: null });
-  c.processLive({ type: 'user', promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: 'D held, then ran' }] } });
-  ok(users(c, 'D held, then ran').length === 1, 'the CLI\'s own record of the turn it ran (a held frame drained, a kept frame\'s follow-up) claims the copy — ONE bubble', users(c, 'D held, then ran'));
+  c.processLive({ type: 'user', uuid: U(4), promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: 'D held, then ran' }] } });
+  ok(users(c, 'D held, then ran').length === 1, 'the CLI\'s own record of the turn it ran (a held frame drained, a kept frame\'s follow-up) — its uuid the copy\'s witness — claims the copy: ONE bubble', users(c, 'D held, then ran'));
+  // the claim is by WITNESS, never by distance (7df30f96: a copy more than 60 messages back was drawn twice) …
+  for (const N of [59, 61, 150]) {
+    const w = createMessageManager('claude', 'copy-w' + N);
+    w.processLive(copy('W held through a long turn', 'm-w', U(5)));
+    w.processLive({ type: 'queued_input', msg_id: 'm-w', turn_id: null });
+    for (let i = 0; i < N; i++) {
+      w.processLive({ type: 'assistant', message: { id: 'msg_w' + i, role: 'assistant', content: [{ type: 'tool_use', id: 'tw' + i, name: 'Bash', input: { command: 'ls' } }] } });
+      w.processLive({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tw' + i, content: 'ok' }] } });
+    }
+    w.processLive({ type: 'result', subtype: 'success' });
+    w.processLive({ type: 'user', uuid: U(5), promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: 'W held through a long turn' }] } });
+    ok(users(w, 'W held through a long turn').length === 1, `…at ANY distance: ${N} tool round trips between the copy and the record — ONE bubble`, users(w, 'W held through a long turn').length);
+  }
+  // … and never by its words: the same words in a record that is not the copy's (a person typing them again) are their own bubble
+  const n = createMessageManager('claude', 'copy-n');
+  n.processLive(copy('N said twice', 'm-n', U(6)));
+  n.processLive({ type: 'user', uuid: U(7), promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: 'N said twice' }] } });
+  ok(users(n, 'N said twice').length === 2, '…and never by its WORDS: a record of the same words under another uuid is its own bubble', users(n, 'N said twice').length);
+  // a copy never hides a RICHER record (7df30f96: the text-only copy of a 400 KB screenshot frame claimed the CLI's record and the
+  // screenshot was gone after a restart) — the bubble shows what the CLI recorded, image and all, with the copy's chip
+  const r = createMessageManager('claude', 'copy-r');
+  r.processLive(copy('what is wrong in this screenshot?', 'm-r', U(8)));
+  r.processLive({ type: 'queued_input', msg_id: 'm-r', turn_id: null });
+  r.processLive({ type: 'result', subtype: 'success', result: 'x' });
+  r.processLive({ type: 'user', uuid: U(8), promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: 'what is wrong in this screenshot?' }, IMG] } });
+  const ru = users(r, 'what is wrong in this screenshot?');
+  ok(ru.length === 1 && imgs(ru[0]) === 1 && ru[0].webuiMsgId === 'm-r', 'a text-only copy (a frame over 256 KB) and the CLI\'s record WITH the image ⇒ ONE bubble, WITH the image (the record\'s blocks), the copy\'s msgId and chip', ru.map((m) => ({ images: imgs(m), chip: m.queueState || null })));
+  const ra = createMessageManager('claude', 'copy-ra');
+  ra.processLive(copy('see this', 'm-ra', U(9)));
+  ra.processLive({ type: 'attachment', attachment: { type: 'queued_command', prompt: [{ type: 'text', text: 'see this' }, IMG], source_uuid: U(9) } });
+  ok(users(ra, 'see this').length === 1 && imgs(users(ra, 'see this')[0]) === 1, '…the same through the CLI\'s queued_command attachment (a frame taken in at a tool result): ONE bubble, with the image', users(ra, 'see this').map(imgs));
+  const eq = createMessageManager('claude', 'copy-eq');
+  eq.processLive(copy('small image', 'm-eq', U(10), [IMG]));
+  eq.processLive({ type: 'user', uuid: U(10), promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: 'small image' }, IMG] } });
+  ok(users(eq, 'small image').length === 1 && imgs(users(eq, 'small image')[0]) === 1, 'CONTROL: a whole copy (under 256 KB, its image inline) and the record ⇒ one bubble, one image (never two)', users(eq, 'small image').map(imgs));
   const e = createMessageManager('claude', 'copy-e');
-  e.processLive(copy('E put back', 'm-e'));
+  e.processLive(copy('E put back', 'm-e', U(11)));
   e.processLive({ type: 'queue_dropped', dropId: '9-9', by: 'stop', turnId: null, items: [{ id: 'q', msgId: 'm-e', text: 'E put back' }], omitted: 0 });
-  e.processLive({ type: 'user', promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: 'E put back' }] } });
+  e.processLive({ type: 'user', uuid: U(12), promptSource: 'sdk', message: { role: 'user', content: [{ type: 'text', text: 'E put back' }] } });
   ok(users(e, 'E put back').length === 2 && users(e, 'E put back')[0].queueState === 'removed', 'a frame Stop PUT BACK never ran: the person\'s resend of the same words is its own bubble (the copy keeps «Removed»)', users(e, 'E put back').map((m) => m.queueState || null));
   ok(/if \(msg\._fromWebui && msg\.timestamp && !msg\.webui_copy\) \{/.test(read('src/session-store.js')), 'the history merge keeps a copy whatever user record follows it (a tool_result is one) — src/session-store.js');
   const wr = read('data/bin/chat-wrapper.js');
-  ok(/if \(!origin && msgId && !isCommandFrame\(o\) && recordPersonFrame\(o, msgId\)\) buffered = false;/.test(wr) && /buffer \+= JSON\.stringify\(\{ type: 'user', message: \{ role: 'user', content \}, msgId, _fromWebui: true, webui_copy: true, timestamp: new Date\(\)\.toISOString\(\) \}\) \+ '\\n';/.test(wr), 'the wrapper writes the copy into its HISTORY BUFFER only (never stdout — the live view drew it at send), for the person\'s mid-turn frames (never a slash command — the CLI records the command it runs its own way)');
+  ok(/if \(!origin && msgId && !isCommandFrame\(o\)\) \{\n\s+const st = stampFrame\(line, o\);\n\s+line = st\.line;\n\s+if \(recordPersonFrame\(o, msgId, st\.uuid\)\) buffered = false;\n\s+\}/.test(wr) && /return JSON\.stringify\(\{ type: 'user', message: \{ role: 'user', content \}, msgId, cliUuid, _fromWebui: true, webui_copy: true, timestamp: ts \}\);/.test(wr) && /buffer \+= line \+ '\\n';\n\s+copies\.set\(msgId, \{ line, ts, cliUuid \}\);/.test(wr) && /rewriteCopy\(entry\.msgId, o\);/.test(wr), 'the wrapper writes the copy into its HISTORY BUFFER only (never stdout — the live view drew it at send), for the person\'s mid-turn frames (never a slash command — the CLI records the command it runs its own way)');
 });
 
 // ── §7 THE STRIP AND THE REFUSALS (r2) ──

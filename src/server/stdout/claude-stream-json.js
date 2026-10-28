@@ -1036,6 +1036,14 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
               // here would be a cost with no reader (and a comment claiming a
               // chip that does not exist).
               if (changed || first) broadcastToSession(session, id, { type: 'turn-state', sessionId: id, state: st, authoritative: true });
+            } else if (msg.type === 'system' && msg.subtype === 'init' && !msg.parent_tool_use_id && authoritative
+              && (session._turnState === 'running' || session._turnState === 'requires_action') && !session._streamingLabel) {
+              // A TURN THE CLI STARTS BY ITSELF (lane claude-steer-inject r4): a frame it held past a turn's end runs as a turn
+              // of its own — after the result, with NO state word between (the CLI never left 'running') and no user record on
+              // stdout, so the result's cleared line stayed clear until the model's first record (the composer showed no turn
+              // and no Stop for the whole of it). Its init, said while the CLI's last word is 'running', IS the turn's start —
+              // the same predicate data/bin/chat-wrapper.js's turn gate opens on.
+              newLabel = 'thinking...';
             } else if (msg.type === 'user' && !msg.parent_tool_use_id && !msg.isSidechain) {
               // Local-command echoes (e.g. "<local-command-stdout>Set model
               // to ...") are user records with NO turn behind them — treating

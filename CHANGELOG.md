@@ -8,7 +8,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A message sent while a Claude conversation works now reaches it at its next tool call, as in the CLI; to hold it for the turn's end or edit it, use Alt+Enter.
 
 ### Fixed
-- A message you send while a Claude reply runs stays in the chat after the server restarts, with its label; it used to disappear.
+- A message you send while a Claude reply runs stays in the chat after the server restarts, with its label and its pictures; it used to disappear.
+- When Claude runs a message it was holding as a turn of its own, the chat shows the turn running and its Stop button.
+- After the Claude CLI updates itself, chats no longer show a red unknown-event card.
 
 ## 2.369.360 — 2026-10-27
 

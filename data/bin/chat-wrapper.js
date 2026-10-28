@@ -80,11 +80,18 @@
 // CLI's request leaves ~12 ms after that line, a second interrupt is acked in
 // 8–14 ms: 25 ms late was answered; on 2.1.312 the request leaves 12–17 ms
 // after the init, the second interrupt ends it in 10–19 ms and no guarded
-// follow-up sent one). Nothing here waits for ever: 2 s after the
-// CLI's last result (its own follow-up starts within ~14 ms of it) the window
-// and the owed turn are DISARMED with one log line naming them. Stop's ONE
+// follow-up sent one). The window CLOSES ON THE CLI'S WORDS (acceptance r4):
+// the CLI runs its UserPromptSubmit hook between the interrupted result and
+// the follow-up's init — the product's own hook waits on the hub up to 3 s, so
+// r2's 2 s clock answered a turn after Stop — and it says the hook's phase
+// (the adapter's CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS): no clock
+// counts while a hook runs, and a clock is only the BACKSTOP for «neither
+// word comes» — 30 s where the CLI owes a turn, 2 s where it owes nothing —
+// with one log line saying which. Never an interrupt inside the hook: that
+// drops the frame the CLI held from the conversation (measured). Stop's ONE
 // `queue_dropped` says what happened to EACH frame: `items` (held here — back in
-// the box), `keptIds` (handed, still held by the CLI — they stay in the
+// the box), `keptIds` (handed — a frame riding a tool result the model has
+// not answered yet too, r4 — still held by the CLI: they stay in the
 // conversation as «[Request interrupted by user]»), `landedIds` (the model had
 // read them already); a frame whose OWN turn Stop ended is a stopped turn, in
 // none of them.
@@ -92,6 +99,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { randomUUID } = require('crypto');
 
 const logFile = path.join(path.dirname(process.argv[2] || '/tmp/chat-wrapper'), 'chat-wrapper.log');
 // Rotate at 5MB (shared by all sessions' wrappers, grew without bound)
@@ -257,8 +265,17 @@ let landedThisTurn = [];    // msgIds witnessed INTO the turn now running (the m
 let cliOwesTurn = false;    // the turn ended before the CLI took handed frames in: it runs them as a turn of its own next
 let stateProven = false;    // this CLI has said a state word: the door is advertised and a stamp is honoured (r2)
 let stopping = null;        // THE STOP WINDOW: {held, follows} from the person's Stop until the CLI settles (r2)
-let boundTimer = null;      // the ceiling on cliOwesTurn / stopping: armed at a result, never while a turn runs
-const SETTLE_BOUND_MS = 2000;
+let boundTimer = null;      // the BACKSTOP on cliOwesTurn / stopping (r4): armed at the CLI's last word, never while a turn or a prompt hook runs
+// THE WINDOW CLOSES ON THE CLI'S WORDS (acceptance r4) — the follow-up's prompt hook / init (interrupted) or idle (settled);
+// a clock is only the backstop for «neither ever comes», and which one depends on what the CLI owes:
+const SETTLE_BOUND_MS = 2000;     // owes NOTHING (a Stop with no frame held by the CLI): no follow-up, so no prompt hook can run —
+                                  // no idle in 2 s means a background task keeps the session 'running'
+const OWED_BACKSTOP_MS = 30000;   // owes a TURN (a frame the CLI holds: its own turn, a Stop's follow-up): the CLI runs the
+                                  // UserPromptSubmit hook BEFORE that turn's init — the product's hook (data/bin/vibespace-hook.mjs)
+                                  // aborts its fetch at 3 s and the CLI kills it at its registered `timeout: 10` s — so 30 s is
+                                  // above every hook budget the product installs, and it is PAUSED while the CLI says a prompt hook runs
+const promptHooks = new Set();    // the UserPromptSubmit hooks the CLI said started and has not said ended (hook_id)
+const copies = new Map();         // msgId → {line, ts, cliUuid}: the history-buffer copy of a mid-turn frame (an edit rewrites it)
 let handSeq = 0;
 const queueVerbs = () => (stateProven ? CLAUDE_QUEUE_VERBS : CLAUDE_HOLD_VERBS);
 
@@ -351,12 +368,42 @@ function forwardUser(line, o, buffered) {
  *  src/message-manager.js draws it once (the same msgId is the same bubble; the CLI's own later record of the same words
  *  claims it). A frame over 256 KB is copied as its words alone (the 500 KB ring is the conversation's, not a picture's).
  *  It replaces a frame-file body's raw line (returns true): one record per frame. */
-function recordPersonFrame(o, msgId) {
+function copyLineOf(o, msgId, ts, cliUuid) {
   let content = o.message.content;
   if (JSON.stringify(content).length > 256 * 1024) content = frameBlocks(o).filter((b) => b && b.type === 'text');
-  buffer += JSON.stringify({ type: 'user', message: { role: 'user', content }, msgId, _fromWebui: true, webui_copy: true, timestamp: new Date().toISOString() }) + '\n';
+  return JSON.stringify({ type: 'user', message: { role: 'user', content }, msgId, cliUuid, _fromWebui: true, webui_copy: true, timestamp: ts });
+}
+function recordPersonFrame(o, msgId, cliUuid) {
+  const ts = new Date().toISOString();
+  const line = copyLineOf(o, msgId, ts, cliUuid);
+  buffer += line + '\n';
+  copies.set(msgId, { line, ts, cliUuid });
+  if (copies.size > 64) copies.delete(copies.keys().next().value);
   schedulePersist();
   return true;
+}
+/** THE WITNESS (acceptance r4): the uuid a person's mid-turn frame carries to the CLI — the CLI keeps it as the uuid of its
+ *  own user record of those words (a turn they ran as, a held frame drained, a kept frame's interrupted follow-up) and as
+ *  the `source_uuid` of the `queued_command` attachment a frame taken in at a tool result becomes (measured on 2.1.312).
+ *  The copy names it (`cliUuid`), so the normalizer claims the copy by THAT record, at any distance — never by its words.
+ *  A frame that already carries a uuid keeps it; the stamp is spliced in front of the first key (never re-serialized). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function stampFrame(line, o) {
+  if (o && typeof o.uuid === 'string' && UUID_RE.test(o.uuid)) return { line, uuid: o.uuid };
+  const uuid = randomUUID();
+  if (o) o.uuid = uuid;
+  const t = String(line).trimStart();
+  // a frame that opens a turn has a `message` key, so the object is never empty: the stamp is its new first key
+  return { line: t.startsWith('{') ? `{"uuid":${JSON.stringify(uuid)},${t.slice(1)}` : line, uuid };
+}
+/** An EDITED held frame: its copy says the latest words (one record of the message, never the original beside it). */
+function rewriteCopy(msgId, o) {
+  const c = copies.get(msgId);
+  if (!c) return;
+  const next = copyLineOf(o, msgId, c.ts, c.cliUuid);
+  const at = buffer.lastIndexOf(c.line + '\n');
+  if (at >= 0) { buffer = buffer.slice(0, at) + next + '\n' + buffer.slice(at + c.line.length + 1); schedulePersist(); }
+  copies.set(msgId, { ...c, line: next });
 }
 
 /** A frame goes to the CLI WHILE A TURN RUNS: never held, never editable again — witnessed into the turn (processLine). */
@@ -375,21 +422,37 @@ function settleHanded(state) {
   return ids;
 }
 
-/** The ceiling on every "until the CLI says so" flag (acceptance r2): armed at a result while the CLI owes a turn or a
- *  Stop has not settled — its own follow-up starts within ~14 ms of that result (measured), so 2 s of silence means it
- *  is not coming — and never while a turn runs (that turn's own result comes first). ONE log line names what it ends. */
+/** The BACKSTOP on every "until the CLI says so" flag (acceptance r2, re-derived r4): the window closes on the CLI's
+ *  WORDS — never on a clock the product's own prompt hook can outrun (r2's 2 s, started at the interrupted result, ran
+ *  out inside a 2.5–3 s hook: the follow-up went uninterrupted and was answered after Stop; an owed turn's hook let a held
+ *  frame drain into the turn the CLI was starting). So: no clock while a turn runs or a prompt hook runs; where the CLI
+ *  owes a turn, OWED_BACKSTOP_MS (above every hook budget the product installs); where it owes nothing, SETTLE_BOUND_MS
+ *  (no prompt hook can run). ONE log line says which, and why. */
+const cliOwes = () => cliOwesTurn || !!(stopping && stopping.held > 0);
 function armBound() {
-  clearTimeout(boundTimer);
-  boundTimer = (cliOwesTurn || stopping) && !turnBusy ? setTimeout(onBound, SETTLE_BOUND_MS) : null;
+  clearTimeout(boundTimer); boundTimer = null;
+  if (turnBusy || promptHooks.size || !(cliOwesTurn || stopping)) return;
+  boundTimer = setTimeout(onBound, cliOwes() ? OWED_BACKSTOP_MS : SETTLE_BOUND_MS);
 }
 function onBound() {
   boundTimer = null;
-  if (turnBusy) return;
+  if (turnBusy || promptHooks.size) return;
+  const owed = cliOwes(), ms = owed ? OWED_BACKSTOP_MS : SETTLE_BOUND_MS;
   const what = [];
   if (cliOwesTurn) { cliOwesTurn = false; what.push(`the turn owed for ${settleHanded('own-turn').length} handed frame(s)`); }
-  if (stopping) { what.push(`the Stop window (${stopping.held} frame(s) the CLI held, ${stopping.follows} follow-up turn(s) interrupted)`); stopping = null; }
-  if (what.length) log(`bound: nothing settled ${SETTLE_BOUND_MS} ms after the CLI's last result — disarmed ${what.join(' + ')}`);
+  if (stopping) { what.push(`the Stop window (${stopping.held} frame(s) the CLI held, ${stopping.follows} follow-up turn(s) interrupted)`); landRiding('the window closed with no follow-up'); stopping = null; }
+  if (what.length) log(owed
+    ? `backstop: no prompt hook, no follow-up turn and no idle ${ms} ms after the CLI's last word (above the product's prompt-hook budget: 3 s fetch, 10 s CLI timeout) — disarmed ${what.join(' + ')}`
+    : `bound: the CLI owes nothing and said no idle ${ms} ms after its last result (a background task keeps it running) — closed ${what.join(' + ')}`);
   drainPromptQueue();
+}
+/** A frame that RODE the tool result at Stop counted as held (the CLI may still hold it — r4); a window that closes with
+ *  no follow-up turn proves the turn's last request took it: it is the turn's, as read — and the record says so. */
+function landRiding(why) {
+  if (!stopping || !stopping.riding || !stopping.riding.length || stopping.follows) return;
+  record('input_handover', { state: 'landed', msg_ids: stopping.riding });
+  log(`the frame(s) that rode the last tool result went with the turn's last request — landed (${why})`);
+  stopping.riding = [];
 }
 
 /** A user frame from the server: forwarded when no turn runs; while one runs, HANDED OVER when the person's door says so
@@ -401,7 +464,11 @@ function submitUser(line, o, { buffered = false } = {}) {
   const origin = typeof o.webui_origin === 'string' && o.webui_origin ? o.webui_origin : null;
   // the person's words are a record of the conversation the moment they reach us — before any chip names them (a slash
   // command is not: the CLI records the command it runs in a shape of its own)
-  if (!origin && msgId && !isCommandFrame(o) && recordPersonFrame(o, msgId)) buffered = false;
+  if (!origin && msgId && !isCommandFrame(o)) {
+    const st = stampFrame(line, o);
+    line = st.line;
+    if (recordPersonFrame(o, msgId, st.uuid)) buffered = false;
+  }
   if (o.webui_steer === true && !origin && !isCommandFrame(o) && stateProven && !stopping) { handOver(line, { buffered, msgId, via: 'enter' }); return; }
   promptQueue.push({ id: `q${++queueSeq}-${process.pid}`, ts: Date.now(), line, msgId, origin, text: frameText(o), preview: framePreview(o), attachments: frameAttachments(o), buffered });
   publishQueue();
@@ -429,12 +496,19 @@ function dropHeldForStop() {
   // EACH handed frame's fate, as the wrapper witnessed it: one the model already read (`riding` — the tool result took it
   // in — or landed) stays in the conversation as read; one the CLI still holds would RUN after the interrupt (measured),
   // so it is KEPT — the turn the CLI starts for it is interrupted on its init. Neither is put back: they are the turn's.
-  const keptIds = handed.filter((h) => h.phase === 'handed').map((h) => h.msgId).filter(Boolean);
-  const landedIds = landedThisTurn.concat(handed.filter((h) => h.phase === 'riding').map((h) => h.msgId).filter(Boolean));
-  const held = handed.filter((h) => h.phase === 'handed').length + (stopping ? stopping.held : 0);
+  // A frame that RODE a tool result (`riding`: written before that tool_result line, the model has not spoken since) is
+  // NOT landed yet (acceptance r4): written just before the line, it may have missed that request — the CLI then still
+  // holds it and runs it after the interrupt. Only the model's next record proves it was read, so at Stop it counts as
+  // HELD (the follow-up is interrupted); a window that closes with no follow-up settles it as landed afterwards
+  // (landRiding). The window is the model's time to its first record after the tool result, plus the pipe's latency —
+  // longer on an ssh keeper session.
+  const keptIds = handed.map((h) => h.msgId).filter(Boolean);
+  const riding = handed.filter((h) => h.phase === 'riding').map((h) => h.msgId).filter(Boolean);
+  const landedIds = landedThisTurn.slice();
+  const held = handed.length + (stopping ? stopping.held : 0);
   const live = turnBusy || cliOwesTurn || !!stopping;
   handed.length = 0; landedThisTurn = []; cliOwesTurn = false;
-  if (live) { stopping = { held, follows: stopping ? stopping.follows : 0 }; armBound(); }
+  if (live) { stopping = { held, follows: stopping ? stopping.follows : 0, riding: (stopping ? stopping.riding || [] : []).concat(riding) }; armBound(); }
   const dropped = promptQueue.splice(0, promptQueue.length);
   for (const q of dropped) record('queue_op_result', { op: 'remove', id: q.id, ok: true, msg_id: q.msgId, reason: 'stopped' });
   const putBack = dropped.filter((q) => !q.origin);
@@ -446,11 +520,12 @@ function dropHeldForStop() {
     });
   }
   if (dropped.length) publishQueue();
-  log(`interrupt: dropped ${dropped.length} held frame(s) (put back=${putBack.length}); handed: ${keptIds.length} kept, ${landedIds.length} landed${live ? ' — the Stop window is open' : ''}`);
+  log(`interrupt: dropped ${dropped.length} held frame(s) (put back=${putBack.length}); handed: ${keptIds.length} kept (${riding.length} of them riding a tool result), ${landedIds.length} landed${live ? ' — the Stop window is open' : ''}`);
 }
 /** The Stop window closes: the CLI settled (its idle — or its result, where it says no state word). */
 function settleStop(why) {
   if (!stopping) return;
+  landRiding(why);
   log(`stop settled (${why}): ${stopping.held} frame(s) the CLI held at Stop, ${stopping.follows} follow-up turn(s) interrupted`);
   stopping = null;
   armBound();
@@ -551,6 +626,7 @@ function handleQueueOp(msg) {
     }
     entry.line = JSON.stringify(o);
     entry.text = frameText(o); entry.preview = framePreview(o);
+    rewriteCopy(entry.msgId, o);
     record('queue_op_result', { op, id, ok: true, msg_id: entry.msgId });
     publishQueue();
     return;
@@ -579,6 +655,27 @@ function processLine(line) {
     // (an older writer on the host) records null — never invented.
     remoteExitSignal = (typeof msg.signal === 'string' && msg.signal) || null;
     log(`remote session exited on host with code ${remoteExited} signal ${remoteExitSignal}`);
+    return;
+  }
+
+  // THE PROMPT HOOK'S PHASE (acceptance r4): the adapter spawns the CLI with CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS,
+  // so it says when a UserPromptSubmit hook starts and ends — the ONE word before a turn's init that says "a turn is
+  // starting" (2.1.312: after an interrupted result the follow-up's hook starts ~10 ms later; the product's own hook then
+  // waits on the hub for up to 3 s before the init). These lines are the wrapper's instrumentation, never the chat's: not
+  // teed, not buffered. While one runs NO backstop counts — the window stays open until the init it precedes (interrupted
+  // there) or the idle. The follow-up is NOT interrupted here: measured on 2.1.312, an interrupt during the hook makes the
+  // CLI cancel it AND DROP the frame it held from the conversation (no user record, the next request lacks it) — the kept
+  // frame «stays with the turn» only when the init is what is interrupted.
+  if (msg.type === 'system' && msg.hook_event === 'UserPromptSubmit' && !msg.parent_tool_use_id
+      && (msg.subtype === 'hook_started' || msg.subtype === 'hook_progress' || msg.subtype === 'hook_response')) {
+    if (msg.subtype === 'hook_started') {
+      promptHooks.add(String(msg.hook_id || ''));
+      clearTimeout(boundTimer); boundTimer = null;
+      if (stopping && stopping.held > 0 && !turnBusy) log(`the CLI is running a follow-up turn's prompt hook for what it held at Stop — the window waits for its init`);
+    } else if (msg.subtype === 'hook_response') {
+      promptHooks.delete(String(msg.hook_id || ''));
+      armBound();
+    }
     return;
   }
 
@@ -631,6 +728,7 @@ function processLine(line) {
     if (starts) {
       turnBusy = true; awaitingStart = false;
       clearTimeout(boundTimer); boundTimer = null;
+      promptHooks.clear(); // the turn started: no prompt hook of its own still runs (a lost hook_response never pins the clock)
       if (stopping && stopping.held > 0) {
         // A TURN THE CLI STARTS INSIDE THE STOP WINDOW for frames it held at Stop — EVERY one (it may split them into
         // several): a second interrupt on THIS line, IN THIS TICK. Its request leaves ~12 ms after this init (measured);
@@ -735,6 +833,7 @@ function startChild() {
     process.exit(1);
   }
   childDead = false;
+  promptHooks.clear();
   log(`Spawned child PID=${child.pid}${REMOTE_SID ? ` offset=${remoteOffset} attempt=${reconnectAttempts}` : ''}`);
   meta.childPid = child.pid;
   // its BIRTH beside the pid, same write (B-5ee1): the server's interrupt signals meta.childPid only while this names it;

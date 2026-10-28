@@ -327,6 +327,12 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // with an extra record — turning a record ON for a surface that cannot use
     // it is exactly the kind of unverified spawn change this batch is not for.
     if (mode === 'chat') env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1';
+    // THE PROMPT HOOK'S PHASE (lane claude-steer-inject r4): with this set the CLI says `system/hook_started` /
+    // `hook_response` for its UserPromptSubmit hooks (`if (i.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS)
+    // userPromptSubmitStartAndEndEnabled = !0`, 2.1.312) — the one word before a turn's init that says a turn is starting.
+    // data/bin/chat-wrapper.js reads them (no backstop counts while a prompt hook runs: the Stop window and an owed turn
+    // wait for the init the hook precedes) and keeps them out of the chat. Pure observability, chat only, like the state events above.
+    if (mode === 'chat') env.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS = '1';
     // Per-session apiKeyHelper neutralization (2.236.0, userN's "can't
     // switch to my subscription" on a keyHelper machine): a configured
     // apiKeyHelper in the merged settings UNCONDITIONALLY overrides claude.ai

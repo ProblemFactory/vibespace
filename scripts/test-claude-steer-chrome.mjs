@@ -57,6 +57,7 @@ const WebSocket = require('ws');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STAND_IN = path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs');
 const INPROC = path.join(REPO, 'scripts/fixtures/claude-inproc-cli.cjs');
+const RACE = path.join(REPO, 'scripts/fixtures/claude-race-cli.cjs');
 const BASE = '6428c67e';
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : '')); } return !!c; };
@@ -73,6 +74,10 @@ if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 // /tmp/vs-cst-chrome-<pid> left by every run that ended early). Each section pushes what ends its processes.
 const atExit = [];
 process.on('exit', () => { for (const f of atExit.splice(0)) { try { f(); } catch { } } });
+// …and on a SIGNAL (acceptance r4): node's default for SIGTERM / SIGINT / SIGHUP ends the process WITHOUT its 'exit'
+// handlers, so a run stopped in its first half (§0 / §A) left its wrappers, its CLIs and its scratch dirs behind. The
+// teardown runs first; process.exit then lets scratch.mjs remove the dirs.
+for (const [sig, code] of [['SIGTERM', 143], ['SIGINT', 130], ['SIGHUP', 129]]) process.on(sig, () => { for (const f of atExit.splice(0)) { try { f(); } catch { } } process.exit(code); });
 
 // ── §0 THE REAL WRAPPER over the stand-in CLI (moved from the fast suite: the fast tier's 910 s sum had 0.77 s left) ──
 console.log('§0 the REAL chat-wrapper over the stand-in CLI (the R0 turn shape)');
@@ -91,12 +96,16 @@ let baseSrc = null;
 try { baseSrc = execFileSync('git', ['-C', REPO, 'show', `${BASE}:data/bin/chat-wrapper.js`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { baseSrc = null; }
 const BASE_WRAPPER = baseSrc ? wrapperCopy('base', baseSrc) : null;
 const LANE_WRAPPER = path.join(REPO, 'data/bin/chat-wrapper.js');
-async function boot(wrapperPath, label, { toolMs = 1500, env = {}, inproc = false } = {}) {
+async function boot(wrapperPath, label, { toolMs = 1500, env = {}, inproc = false, race = false } = {}) {
   const dir = fs.mkdtempSync(path.join(scratchRoot, label + '-'));
-  const cap = path.join(dir, 'cli-got.jsonl'), dlv = path.join(dir, 'delivered.jsonl'), inOut = path.join(dir, 'inproc.jsonl');
-  // ⑭ the in-process CLI (scripts/fixtures/claude-inproc-cli.cjs) is preloaded INTO the wrapper's own process
-  const argv = inproc ? ['-r', INPROC, wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), 'inproc-claude'] : [wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN];
-  const w = spawn(process.execPath, argv, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STUB_CAPTURE: cap, STAND_IN_DELIVERED: dlv, INPROC_OUT: inOut, STAND_IN_LONG_MS: String(toolMs), VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env } });
+  const cap = path.join(dir, 'cli-got.jsonl'), dlv = path.join(dir, 'delivered.jsonl'), inOut = path.join(dir, 'inproc.jsonl'), raceOut = path.join(dir, 'race.jsonl');
+  // ⑭ the in-process CLI (scripts/fixtures/claude-inproc-cli.cjs) is preloaded INTO the wrapper's own process — and ⑮ the
+  // riding race's scripted CLI (scripts/fixtures/claude-race-cli.cjs) the same way
+  const argv = inproc ? ['-r', INPROC, wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), 'inproc-claude']
+    : race ? ['-r', RACE, wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), 'race-claude']
+    : [wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN];
+  const w = spawn(process.execPath, argv, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STUB_CAPTURE: cap, STAND_IN_DELIVERED: dlv, INPROC_OUT: inOut, RACE_OUT: raceOut, STAND_IN_LONG_MS: String(toolMs), VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env } });
+  atExit.push(() => { try { w.kill('SIGKILL'); } catch { } }); // a signal mid-run ends it too (its stand-in exits on stdin's end)
   const recs = []; let lb = '';
   w.stdout.setEncoding('utf8');
   w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); try { const r = JSON.parse(l); r.__at = Date.now(); recs.push(r); } catch { } } });
@@ -115,6 +124,8 @@ async function boot(wrapperPath, label, { toolMs = 1500, env = {}, inproc = fals
     idx: (pred) => recs.findIndex(pred),
     meta: () => { try { return JSON.parse(fs.readFileSync(path.join(dir, 's.json'), 'utf8')); } catch { return null; } },
     inproc: () => lines(inOut),
+    race: () => lines(raceOut),
+    buf: () => { try { return fs.readFileSync(path.join(dir, 's.buf'), 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } }); } catch { return []; } },
     log: () => { try { return fs.readFileSync(path.join(dir, 'chat-wrapper.log'), 'utf8'); } catch { return ''; } },
     stop: () => w.stdin.write(ad.formatInterrupt() + '\n'),
     queued: (msgId) => recs.some((r) => r.type === 'queued_input' && r.msg_id === msgId),
@@ -301,7 +312,7 @@ async function legRide(wp) {
   await sleep(200);
   h.stop();
   await sleep(800);
-  const out = { tookIn: h.delivered().filter((d) => d.how === 'tool_result').map((d) => d.text), drops: h.drops(), follows: h.follows() };
+  const out = { tookIn: h.delivered().filter((d) => d.how === 'tool_result').map((d) => d.text), drops: h.drops(), follows: h.follows(), landedAfter: h.hand('landed').flatMap((r) => r.msg_ids || []) };
   await h.kill();
   return out;
 }
@@ -346,9 +357,77 @@ async function legBound(wp) {
   h.say('C typed after Stop', 'm-c', { steer: true });
   const t0 = Date.now();
   await until(() => h.got().some((f) => f.type === 'user' && S(f).includes('C typed after Stop')), 5000);
-  const out = { cHeld: h.queued('m-c'), reachedMs: Date.now() - t0, boundLines: h.log().split('\n').filter((l) => /bound: nothing settled 2000 ms after the CLI's last result — disarmed the Stop window/.test(l)).length };
+  const out = { cHeld: h.queued('m-c'), reachedMs: Date.now() - t0, boundLines: h.log().split('\n').filter((l) => /bound: the CLI owes nothing and said no idle 2000 ms after its last result \(a background task keeps it running\) — closed the Stop window/.test(l)).length };
   await h.kill();
   return out;
+}
+/** ⑮ (r4) RIDING IS NOT LANDED: B handed mid-tool reached the CLI just before its tool_result line but MISSED that request
+ *  (scripts/fixtures/claude-race-cli.cjs) — a Stop before the model spoke counts B as HELD: kept, its follow-up interrupted
+ *  in the same tick, nothing answered (7df30f96: `landed`, no interrupt, the follow-up answered after Stop). */
+async function legRace(wp, label) {
+  const h = await boot(wp, label, { race: true });
+  h.say('TOOL-A run the slow command', 'm-a');
+  await until(h.toolUse, 3000);
+  h.say('MARK-B handed mid tool', 'm-b', { steer: true });
+  await until(() => h.race().some((x) => x.toolResultAfterB), 3000);
+  h.stop();
+  await sleep(600);
+  const out = { drops: h.drops(), race: h.race(), landedAfter: h.hand('landed').flatMap((r) => r.msg_ids || []) };
+  await h.kill();
+  return out;
+}
+/** ⑯ (r4) THE WINDOW CLOSES ON THE CLI'S WORDS: a Stop that found B held by the CLI, and a 2.5 s prompt hook before the
+ *  follow-up's init (the product's own hook waits on the hub up to 3 s) — the window waits through the hook and the init
+ *  is interrupted. `emit` = the CLI says the hook's phase (the adapter's switch); without it the 30 s backstop alone. */
+async function legHookStop(wp, label, { emit = true, hookMs = 2500 } = {}) {
+  const h = await boot(wp, label, { toolMs: 1500, env: { STAND_IN_PROMPT_HOOK_MS: String(hookMs), ...(emit ? { CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS: '1' } : {}) } });
+  h.say('TOOL-A run the slow command', 'm-a');
+  await until(h.toolUse, hookMs + 4000);
+  h.say('MARK-B handed mid tool', 'm-b', { steer: true });
+  await sleep(300);
+  h.stop();
+  await until(() => /stop settled|bound:|backstop:/.test(h.log()), hookMs + 6000);
+  // a clock that closed the window early lets the follow-up run once the hook ends: wait for its answer or the settle
+  await until(() => said(h, /reply: MARK-B/) || /stop settled/.test(h.log()), hookMs + 4000);
+  await sleep(500);
+  const lg = h.log();
+  const out = { answeredB: said(h, /reply: MARK-B/), follows: h.follows(), hookWordsTeed: h.recs.filter((r) => r.type === 'system' && r.hook_event === 'UserPromptSubmit').length, settled: /stop settled \(idle\)/.test(lg), clockLines: lg.split('\n').filter((l) => /bound:|backstop:/.test(l)).map((l) => l.replace(/^\[[^\]]+\] /, '')), waited: /the window waits for its init/.test(lg) };
+  await h.kill();
+  return out;
+}
+/** ⑰ (r4) …and an OWED turn waits for its words too: A a text turn, B handed (the CLI owes it its own turn, which runs a
+ *  tool, after a 2.5 s prompt hook), C held with Alt+Enter — C stays held until B's own turn ENDS (7df30f96: the 2 s bound
+ *  drained C into the turn the CLI was starting, and C rode B's tool result — the hold became a hand-over). */
+async function legHookOwed(wp, label) {
+  const h = await boot(wp, label, { toolMs: 1200, env: { STAND_IN_PROMPT_HOOK_MS: '2500', CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS: '1', STAND_IN_LONG_MS: '1200' } });
+  h.say('LONG-A a text turn', 'm-a');
+  await until(() => h.recs.some((r) => r.type === 'system' && r.subtype === 'init'), 6000);
+  await sleep(200);
+  h.say('TOOL-B handed, owed its own turn', 'm-b', { steer: true });
+  await sleep(100);
+  h.say('C held until the turn ends', 'm-c');
+  await until(() => h.results() >= 3, 15000);
+  await sleep(300);
+  const out = { rodeB: h.delivered().filter((d) => d.how === 'tool_result').map((d) => d.text), turns: h.delivered().filter((d) => d.how === 'turn').map((d) => d.text), cHeld: h.queued('m-c') };
+  await h.kill();
+  return out;
+}
+/** ⑱ (r4) THE COPY IS THE MESSAGE'S ONE RECORD — an edit rewrites it, and it names its witness: the uuid the wrapper
+ *  stamped on the frame the CLI got (the CLI keeps it as its user record's uuid). */
+async function legEditCopy(wp) {
+  const h = await boot(wp, 'editcopy', { toolMs: 1500 });
+  h.say('TOOL-A run the slow command', 'm-a');
+  await until(h.toolUse, 4000);
+  h.say('E please run the tests on staging', 'm-e');
+  await until(() => h.held('m-e'), 3000);
+  const row = h.queueItems().find((it) => it.msgId === 'm-e') || {};
+  h.write(S({ type: 'queue-op', op: 'edit', id: row.id, text: 'E please run the tests locally, NOT on staging' }));
+  await until(() => h.got().some((f) => f.type === 'user' && S(f).includes('locally, NOT on staging')), 6000);
+  await sleep(2300); // the wrapper persists its buffer on a 2 s timer (the leg's dir goes with the kill)
+  const copies = h.buf().filter((r) => r.webui_copy && r.msgId === 'm-e');
+  const sent = h.got().find((f) => f.type === 'user' && S(f).includes('locally, NOT on staging')) || {};
+  await h.kill();
+  return { copies: copies.map((c) => ({ text: (c.message?.content || []).map((b) => b.text).join(''), cliUuid: c.cliUuid || null })), sentUuid: sent.uuid || null };
 }
 /** ⑭ (r2) the follow-up interrupt leaves IN THE SAME TICK as the init line's parse (the in-process CLI looks at once). */
 async function legSameTick(wp, label) {
@@ -379,7 +458,21 @@ async function legAdvert(wp) {
 const followMutant = wrapperCopy('no-follow-interrupt', fs.readFileSync(LANE_WRAPPER, 'utf8').replace("sendChild(JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-", "void (JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-"));
 // ⑭'s CONTROL: the same interrupt, 25 ms late (what a timer between the init line and the write would do)
 const lateMutant = wrapperCopy('late-follow-interrupt', fs.readFileSync(LANE_WRAPPER, 'utf8').replace("sendChild(JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-", "setTimeout(sendChild, 25, JSON.stringify({ type: 'control_request', request_id: `vs-stop-follow-"));
+// r4: the r2 rule, replayed — a 2 s clock from the result that never hears the prompt hook (the RED control for ⑯ / ⑰)
+const LANE_SRC = fs.readFileSync(LANE_WRAPPER, 'utf8');
+const r2Clock = LANE_SRC.includes('const OWED_BACKSTOP_MS = 30000;') && LANE_SRC.includes("if (msg.type === 'system' && msg.hook_event === 'UserPromptSubmit' && !msg.parent_tool_use_id")
+  ? wrapperCopy('r2-clock', LANE_SRC.replace('const OWED_BACKSTOP_MS = 30000;', 'const OWED_BACKSTOP_MS = 2000;').replace("if (msg.type === 'system' && msg.hook_event === 'UserPromptSubmit' && !msg.parent_tool_use_id", "if (false && msg.type === 'system' && msg.hook_event === 'UserPromptSubmit' && !msg.parent_tool_use_id"))
+  : null;
 const leg = (p) => p.catch((e) => ({ threw: String(e && e.message || e) }));
+const [race, hookStop, hookStopNoEmit, hookStopCtl, hookOwed, hookOwedCtl, editCopy] = await Promise.all([
+  leg(legRace(LANE_WRAPPER, 'race')),
+  leg(legHookStop(LANE_WRAPPER, 'hookstop')),
+  leg(legHookStop(LANE_WRAPPER, 'hookstop-noemit', { emit: false })),
+  r2Clock ? leg(legHookStop(r2Clock, 'hookstop-ctl')) : null,
+  leg(legHookOwed(LANE_WRAPPER, 'hookowed')),
+  r2Clock ? leg(legHookOwed(r2Clock, 'hookowed-ctl')) : null,
+  leg(legEditCopy(LANE_WRAPPER)),
+]);
 const [noState, late0, lateAfter, split, ride, ownStop, origin, bound, sameTick, sameTickCtl] = await Promise.all([
   leg(legNoState(LANE_WRAPPER)),
   leg(legLateC(LANE_WRAPPER, 'late0', { delay: 0 })),
@@ -434,10 +527,18 @@ ok(late0.cHeld && !late0.cHanded && late0.cOwnTurn, '⑩ the Stop window: C stam
 ok(late0.follows === 1 && !late0.answeredB && S(late0.drops?.map((x) => x.keptIds)) === S([['m-b']]), '⑩ …the frame the CLI held at Stop is never answered (its follow-up interrupted), and the ONE record keeps it', late0);
 ok(!lateAfter.cHeld && !lateAfter.cHanded && lateAfter.cOwnTurn && lateAfter.follows === 1 && !lateAfter.answeredB, '⑩ CONTROL: C typed once the stop has SETTLED is a plain send at idle (the window closed — it holds nothing for ever)', lateAfter);
 ok(split.follows === 2 && !split.answered && S(split.drops?.map((x) => x.keptIds)) === S([['m-b1', 'm-b2']]) && split.settled, '⑩ the split shape: the CLI started a follow-up turn PER held frame — EVERY one interrupted on its init (eeece327: the second was answered); one record, kept 2', split);
-ok(S(ride.tookIn) === S(['B handed mid tool']) && S(ride.drops) === S([{ items: [], kept: 0, keptIds: [], landed: 1, landedIds: ['m-b'] }]) && ride.follows === 0, '⑪ Stop after B RODE the tool result: the record says `landed` (the model has it as read), NOT kept (eeece327: kept 1)', ride);
+ok(S(ride.tookIn) === S(['B handed mid tool']) && S(ride.drops) === S([{ items: [], kept: 1, keptIds: ['m-b'], landed: 0, landedIds: [] }]) && ride.follows === 0 && S(ride.landedAfter) === S(['m-b']), '⑪ (r4) Stop after B RODE the tool result, before the model spoke: not proven read, so the record KEEPS it (its follow-up would be interrupted) — no follow-up came, so the settle says `landed` afterwards (chip «Steered»)', ride);
 ok(S(ownStop.own) === S(['m-b']) && !ownStop.drops?.length && ownStop.follows === 0, '⑪ Stop while B\'s OWN turn runs a tool: a stopped turn — no record counts B as kept (eeece327: kept 1)', ownStop);
 ok(origin.steerable === false && S(origin.res) === S(['false:not-steerable:origin']), '⑫ a row VibeSpace typed: `steerable: false` on the row (no ⚡) and the wrapper refuses «VibeSpace\'s own message runs between turns» (eeece327: handed it)', origin);
-ok(bound.cHeld && bound.reachedMs >= 1500 && bound.reachedMs < 4000 && bound.boundLines === 1, '⑬ the Stop window is BOUNDED: no idle came (a helper kept the CLI running) — 2 s after the last result ONE log line disarms it and the frame held in it runs', bound);
+ok(bound.cHeld && bound.reachedMs >= 1500 && bound.reachedMs < 4000 && bound.boundLines === 1, '⑬ the Stop window is BOUNDED where the CLI owes nothing: no idle came (a helper kept the CLI running) — 2 s after the last result ONE log line says why it closed, and the frame held in it runs', bound);
+// ── ACCEPTANCE r4 ──
+ok(S(race.drops) === S([{ items: [], kept: 1, keptIds: ['m-b'], landed: 0, landedIds: [] }]) && race.race?.some((x) => x.followInit && x.interruptedSameTick === true) && !race.race?.some((x) => x.answeredAfterStop) && !race.landedAfter?.length, '⑮ RIDING IS NOT LANDED: B reached the CLI just before its tool_result line but missed that request — Stop counts it HELD (kept 1), the follow-up is interrupted in the same tick, nothing is answered (7df30f96: landed 1 and the follow-up answered)', race);
+ok(!hookStop.answeredB && hookStop.follows === 1 && hookStop.settled && hookStop.waited && hookStop.hookWordsTeed === 0 && !hookStop.clockLines?.length, '⑯ a 2.5 s prompt hook before the follow-up\'s init: the window WAITS through it (the CLI said the hook\'s phase) and the init is interrupted — nothing answered; the hook words never reach the chat; no clock closed anything', hookStop);
+ok(!hookStopNoEmit.answeredB && hookStopNoEmit.follows === 1 && hookStopNoEmit.settled && !hookStopNoEmit.clockLines?.length, '⑯ …and where the CLI says no hook phase, the 30 s backstop (above the product\'s 10 s hook timeout) still outlasts it: the init is interrupted, nothing answered', hookStopNoEmit);
+if (hookStopCtl) ok(hookStopCtl.answeredB && hookStopCtl.follows === 0 && hookStopCtl.clockLines?.length === 1, '⑯ RED CONTROL: the r2 rule (a 2 s clock from the result, deaf to the hook) — the clock closed the window inside the hook and the follow-up was ANSWERED after Stop', hookStopCtl);
+ok(!hookOwed.rodeB?.length && S(hookOwed.turns) === S(['LONG-A a text turn', 'TOOL-B handed, owed its own turn', 'C held until the turn ends']) && hookOwed.cHeld, '⑰ an OWED turn under a 2.5 s prompt hook: C (Alt+Enter) stays held until B\'s own turn ENDS — it never rides B\'s tool result, it runs as a turn of its own', hookOwed);
+if (hookOwedCtl) ok(S(hookOwedCtl.rodeB) === S(['C held until the turn ends']), '⑰ RED CONTROL: the r2 rule drained C inside B\'s hook — it rode B\'s tool result (the hold became a hand-over)', hookOwedCtl);
+ok(editCopy.copies?.length === 1 && editCopy.copies[0].text === 'E please run the tests locally, NOT on staging' && !!editCopy.sentUuid && editCopy.copies[0].cliUuid === editCopy.sentUuid, '⑱ an EDITED held frame: its ONE buffer copy says the latest words (7df30f96 kept the never-sent original) and names the uuid the wrapper stamped on the frame the CLI got — its witness', editCopy);
 ok(sameTick.inproc?.length === 1 && sameTick.inproc[0].sameTick === true && !sameTick.answered, '⑭ the follow-up interrupt is written IN THE SAME TICK as the init line\'s parse (the in-process CLI saw it before init() returned)', sameTick);
 ok(sameTickCtl.inproc?.length === 1 && sameTickCtl.inproc[0].sameTick === false, '⑭ CONTROL: a copy that writes it 25 ms late (a timer between) is caught — the pin can say no', sameTickCtl);
 
@@ -499,14 +600,39 @@ const cliEnv = (home, port) => ({
   HOME: home, PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8', TERM: 'dumb',
   ANTHROPIC_BASE_URL: `http://127.0.0.1:${port}`, ANTHROPIC_API_KEY: ['sk-ant-api03', 'MOCK', 'not-a-real-key-measurement-only'].join('-'),
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_TELEMETRY: '1', DISABLE_AUTOUPDATER: '1', DISABLE_ERROR_REPORTING: '1', DISABLE_BUG_COMMAND: '1', CLAUDE_CODE_ENABLE_TELEMETRY: '0',
-  CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1',
+  // the product's chat spawn sets both (src/adapters/claude-code.js): the turn state, and the prompt hook's phase (r4)
+  CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1',
 });
-async function realWrapper(label, { postMs = 0 } = {}) {
+/** r4: the product's OWN hooks — registered the product's way (data/bin/vibespace-hook-register.mjs into the leg's HOME:
+ *  SessionStart / UserPromptSubmit / Stop → node data/bin/vibespace-hook.mjs, `timeout: 10`) — against a loopback stand-in
+ *  for the hub's /api/agent/* whose prompt-context answers after `ctxMs` (the hook aborts its fetch at 3 s). */
+async function hubStandIn(ctxMs) {
+  const calls = [];
+  const srv = http.createServer((req, res) => {
+    const at = Date.now();
+    const answer = (o) => { try { res.writeHead(200, { 'content-type': 'application/json' }); res.end(S(o)); } catch { } calls.push({ url: req.url, at }); };
+    if (req.url.startsWith('/api/agent/prompt-context')) setTimeout(() => answer({ context: '' }), ctxMs);
+    else if (req.url.startsWith('/api/agent/stop-check')) answer({ block: false });
+    else answer({ context: '' });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  return { port: srv.address().port, calls, close: () => srv.close() };
+}
+async function realWrapper(label, { postMs = 0, hookCtxMs = null } = {}) {
   const mock = await startMock({ postMs });
   const dir = scratchDir('cst-real-' + label);
   const home = path.join(dir, 'home'), work = path.join(dir, 'work');
   fs.mkdirSync(home, { recursive: true }); fs.mkdirSync(work, { recursive: true });
-  const w = spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), path.join(dir, 's.buf'), path.join(dir, 's.json'), claudeBin, '--model', 'claude-sonnet-4-5'], { cwd: work, env: cliEnv(home, mock.port), stdio: ['pipe', 'pipe', 'pipe'] });
+  const env = cliEnv(home, mock.port);
+  let hub = null;
+  if (hookCtxMs !== null) {
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    execFileSync(process.execPath, [path.join(REPO, 'data/bin/vibespace-hook-register.mjs')], { env: { HOME: home, PATH: process.env.PATH }, encoding: 'utf8' });
+    hub = await hubStandIn(hookCtxMs);
+    Object.assign(env, { VIBESPACE_API: 'http://127.0.0.1:' + hub.port, VIBESPACE_SESSION_TOKEN: ['vsst', 'suite', 'not-a-token'].join('_'), HTTPS_PROXY: 'http://127.0.0.1:9', HTTP_PROXY: 'http://127.0.0.1:9', NO_PROXY: '127.0.0.1,localhost' });
+    delete env.VIBESPACE_SKIP_AGENT_HOOKS;
+  }
+  const w = spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), path.join(dir, 's.buf'), path.join(dir, 's.json'), claudeBin, '--model', 'claude-sonnet-4-5'], { cwd: work, env, stdio: ['pipe', 'pipe', 'pipe'] });
   atExit.push(() => { try { w.kill('SIGKILL'); } catch { } try { endRootedProcesses(dir); } catch { } });
   const recs = []; let lb = '';
   w.stdout.setEncoding('utf8');
@@ -521,7 +647,10 @@ async function realWrapper(label, { postMs = 0 } = {}) {
   });
   await sleep(500);
   return {
-    recs, mock, w,
+    recs, mock, w, dir, home, work, hub,
+    log: () => { try { return fs.readFileSync(path.join(dir, 'chat-wrapper.log'), 'utf8'); } catch { return ''; } },
+    sayBig: (o) => { const fp = path.join(dir, 'frame-' + Date.now() + '.json'); fs.writeFileSync(fp, S(o)); w.stdin.write(S({ type: '_frame_file', path: fp }) + '\n'); },
+    write: (o) => w.stdin.write(S(o) + '\n'),
     say: (text, msgId, opts) => w.stdin.write(ad.formatChatInput(text, msgId, opts).stdinPayload + '\n'),
     stop: () => w.stdin.write(ad.formatInterrupt() + '\n'),
     hand: (state) => recs.filter((r) => r.type === 'input_handover' && r.state === state).flatMap((r) => r.msg_ids || []),
@@ -531,20 +660,39 @@ async function realWrapper(label, { postMs = 0 } = {}) {
     drops: () => recs.filter((x) => x.type === 'queue_dropped').map((d) => ({ items: (d.items || []).length, kept: d.kept || 0, keptIds: d.keptIds || [], landed: d.landed || 0, landedIds: d.landedIds || [] })),
     follows: () => recs.filter((x) => x.type === 'control_response' && /^vs-stop-follow-/.test(x.response?.request_id || '')).length,
     // the wrapper ends its CLI with it (SIGTERM, its exit awaited), then whatever is still rooted in the leg's dir
-    end: async () => { await stopWrapper(w); try { endRootedProcesses(dir); } catch { } mock.close(); },
+    end: async () => { await stopWrapper(w); try { endRootedProcesses(dir); } catch { } mock.close(); if (hub) hub.close(); },
   };
 }
-/** §A ③ (r2): C, stamped, δ ms after a Stop that found B still held by the CLI. */
-async function realLateC(delta) {
-  const r = await realWrapper('late' + delta);
+/** THE RESTART, replayed (r4): the wrapper's history buffer (what boot-restore loads as session.buffer) merged with the CLI's
+ *  JSONL by src/session-store.js, then rebuilt by the claude normalizer — in a child whose HOME is the leg's (the JSONL is
+ *  found under it). Returns the user bubbles: words, images, chip, msgId. */
+function restartReplay(r) {
+  const js = `const path=require('path'),fs=require('fs');const SS=require(${S(path.join(REPO, 'src/session-store.js'))});const {createMessageManager}=require(${S(path.join(REPO, 'src/normalizers.js'))});
+const buffer=fs.readFileSync(${S(path.join(r.dir, 's.buf'))},'utf8');let sid=null;for(const l of buffer.split('\\n')){try{const x=JSON.parse(l);if(x.type==='system'&&x.subtype==='init'&&x.session_id){sid=x.session_id;break;}}catch{}}
+const recs=new SS.SessionMessages({buffer,cwd:${S(r.work)},claudeSessionId:sid,backend:'claude'},'replay',{buffersDir:${S(r.dir)}}).raw();
+const mm=createMessageManager('claude','replay');mm.convertHistory(recs);
+process.stdout.write(JSON.stringify(mm.messages.filter(m=>m.role==='user').map(m=>({text:(m.content||[]).filter(b=>b.type==='text').map(b=>b.text).join(' ').slice(0,80),images:(m.content||[]).filter(b=>b.type==='image').length,chip:m.queueState||null,msgId:m.webuiMsgId||null}))));`;
+  try { return JSON.parse(execFileSync(process.execPath, ['-e', js], { env: { HOME: r.home, PATH: process.env.PATH }, encoding: 'utf8', maxBuffer: 64 * 1048576, timeout: 60000 })); } catch (e) { return { threw: String(e.message || e).slice(0, 300) }; }
+}
+/** §A ③ (r2, re-derived r4): C, stamped, after a Stop that found B still held by the CLI — sent on the CLI's SIGNALS, never
+ *  a fixed δ (the settle lands 38–70 ms after Stop on this box, so a fixed 45 ms was a coin flip): 'stop' (at once — always
+ *  inside the window), 'result' (the moment the wrapper tees the CLI's interrupted result: B's follow-up is still to come —
+ *  inside), 'settled' (once the wrapper logged the settle — outside: a plain send), or a number = a fixed δ the leg
+ *  CLASSIFIES by what the wrapper did (held ⇒ it came inside, a plain send ⇒ after the settle) and prints. */
+async function realLateC(at) {
+  const r = await realWrapper('late-' + at);
   r.say('TOOL-5S run a slow command', 'm-a');
   await until(r.toolUse, 30000);
   await sleep(1200);
   r.say('MARK-B handed while the Bash runs', 'm-b', { steer: true });
   await sleep(1200);
   const reqsAtStop = r.mock.reqs.length;
+  const tStop = Date.now();
   r.stop();
-  if (delta) { const tgt = Date.now() + delta; while (Date.now() < tgt) await sleep(1); }
+  if (at === 'result') await until(() => r.recs.some((x) => x.type === 'result' && x.__at >= tStop), 5000, 1);
+  else if (at === 'settled') await until(() => /stop settled/.test(r.log()), 8000, 2);
+  else if (typeof at === 'number' && at > 0) { const tgt = tStop + at; while (Date.now() < tgt) await sleep(1); }
+  const tC = Date.now() - tStop;
   r.say('MARK-C sent after Stop', 'm-c', { steer: true });
   await sleep(3500);
   // C left the held queue (the drain) at…
@@ -553,7 +701,9 @@ async function realLateC(delta) {
   const drainAt = drained ? drained.__at : null;
   const after = r.mock.reqs.slice(reqsAtStop);
   const out = {
-    delta, cHeld: r.queued('m-c'), cHanded: r.hand('handed').includes('m-c'), follows: r.follows(), drops: r.drops(),
+    at, tC, delta: at, cHeld: r.queued('m-c'), cHanded: r.hand('handed').includes('m-c'), follows: r.follows(), drops: r.drops(),
+    // the wrapper's own order of events: its settle line before C's «held» line (or C never held) = C came after the settle
+    settledBeforeC: (() => { const lg = r.log(); const iS = lg.indexOf('stop settled'), iC = lg.indexOf('held a mid-turn frame'); return iS >= 0 && (iC < 0 || iS < iC); })(),
     reqsAfterStop: after.map((q) => ({ beforeDrain: drainAt === null || q.t < drainAt, carries: q.all })),
     answeredC: r.recs.some((x) => x.type === 'assistant' && /MARK-C/.test(S(x.message?.content || []))),
   };
@@ -562,7 +712,7 @@ async function realLateC(delta) {
 if (!claudeBin) skip('§A', 'no claude binary ($VS_CLAUDE_BIN, PATH, ~/.local/bin/claude) — the stand-in legs below still run');
 else {
   console.log(`  (claude ${(() => { try { return execFileSync(claudeBin, ['--version'], { encoding: 'utf8', timeout: 20000, env: { HOME: os.tmpdir(), PATH: '/usr/bin:/bin' } }).trim(); } catch { return '?'; } })()})`);
-  const [lands, stops, rl0, rl20, rl45, rride] = await Promise.all([
+  const [lands, stops, rl0, rlRes, rlSet, rl20, rl45, rride] = await Promise.all([
     (async () => {
       const r = await realWrapper('lands');
       r.say('TOOL-6S run a slow command', 'm-a');
@@ -597,7 +747,7 @@ else {
       const out = { reqsAfterStop, follow, kept, drop, nextCarries: next ? next.all : null };
       await r.end(); return out;
     })(),
-    realLateC(0), realLateC(20), realLateC(45),
+    realLateC('stop'), realLateC('result'), realLateC('settled'), realLateC(20), realLateC(45),
     (async () => {
       // ④ B rides the tool result, the model takes 1.5 s to answer it — Stop in that window
       const r = await realWrapper('ride', { postMs: 1500 });
@@ -609,7 +759,7 @@ else {
       await sleep(300);
       r.stop();
       await sleep(2000);
-      const out = { rodeWith: (r.mock.reqs.find((q) => q.hasTool) || {}).lastText?.includes('MARK-B') || false, drops: r.drops(), follows: r.follows() };
+      const out = { rodeWith: (r.mock.reqs.find((q) => q.hasTool) || {}).lastText?.includes('MARK-B') || false, drops: r.drops(), follows: r.follows(), landedAfter: r.hand('landed') };
       await r.end(); return out;
     })(),
   ]);
@@ -618,11 +768,68 @@ else {
   ok(stops.follow === 1 && S(stops.kept) === S(['m-b']) && stops.reqsAfterStop === 0, '§A ② Stop while the CLI held it: the CLI started a turn for it, the wrapper interrupted it on its init — NO request reached the model after Stop', stops);
   ok(S(stops.drop) === S([{ items: 0, kept: 1 }]), '§A ② …ONE queue_dropped that puts nothing back and counts the handed frame (the toast\'s «stays with the turn»)', stops);
   ok(Array.isArray(stops.nextCarries) && stops.nextCarries.includes('MARK-B') && stops.nextCarries.includes('MARK-D'), '§A ② …and it stayed in the conversation: the next message\'s request carries it too', stops);
-  for (const l of [rl0, rl20, rl45]) {
-    ok(l.cHeld && !l.cHanded && S(l.drops?.map((d) => d.keptIds)) === S([['m-b']]), `§A ③ the REAL CLI, C stamped δ=${l.delta} ms after Stop: HELD (the Stop window), never handed — ONE record keeps B`, l);
-    ok(l.reqsAfterStop?.length === 1 && l.reqsAfterStop.every((q) => !q.beforeDrain) && l.answeredC, `§A ③ …δ=${l.delta}: NO request reached the model before the stop settled; the one after it is C's own turn (eeece327 at δ=20: a billed follow-up answered B and C)`, l);
+  for (const l of [rl0, rlRes]) {
+    ok(l.cHeld && !l.cHanded && S(l.drops?.map((d) => d.keptIds)) === S([['m-b']]), `§A ③ the REAL CLI, C stamped at «${l.at}» (inside the Stop window by its signal, +${l.tC} ms): HELD as a plain queued send, never handed — ONE record keeps B`, l);
+    ok(l.reqsAfterStop?.length === 1 && l.reqsAfterStop.every((q) => !q.beforeDrain) && l.answeredC, `§A ③ …«${l.at}»: NO request reached the model before the stop settled; the one after it is C's own turn (eeece327 at δ=20: a billed follow-up answered B and C)`, l);
   }
-  ok(rride.rodeWith && S(rride.drops) === S([{ items: 0, kept: 0, keptIds: [], landed: 1, landedIds: ['m-b'] }]) && rride.follows === 0, '§A ④ the REAL CLI, Stop after B rode the tool result: the record says `landed` (the next request has it as read) — never kept (eeece327: kept 1)', rride);
+  ok(!rlSet.cHeld && !rlSet.cHanded && rlSet.answeredC && rlSet.reqsAfterStop?.length === 1 && rlSet.follows === 1, `§A ③ C stamped once the stop SETTLED (+${rlSet.tC} ms, the wrapper's own settle line): a plain send — it runs as its own turn, and B's follow-up was still interrupted`, rlSet);
+  for (const l of [rl20, rl45]) {
+    const inside = l.cHeld;
+    console.log(`    §A ③ δ=${l.at} ms: C came ${inside ? 'INSIDE the window (held)' : 'AFTER the settle (a plain send)'} — the settle ${l.settledBeforeC ? 'preceded' : 'followed'} it`);
+    ok(!l.cHanded && l.answeredC && l.reqsAfterStop?.length === 1 && l.reqsAfterStop.every((q) => !inside || !q.beforeDrain) && S(l.drops?.map((d) => d.keptIds)) === S([['m-b']]) && (inside || l.settledBeforeC), `§A ③ δ=${l.at} ms, judged by its signal: never handed, nothing answered B, C ran as its own turn — ${inside ? 'held until the settle' : 'a plain send after it'}`, l);
+  }
+  ok(rride.rodeWith && S(rride.drops) === S([{ items: 0, kept: 1, keptIds: ['m-b'], landed: 0, landedIds: [] }]) && rride.follows === 0 && S(rride.landedAfter) === S(['m-b']), '§A ④ (r4) the REAL CLI, Stop after B rode the tool result but before the model spoke: not proven read, so the record KEEPS it — the CLI started no follow-up (it had taken it in), so the settle says `landed` afterwards', rride);
+  // ── §A, ACCEPTANCE r4: the product's own prompt hook, and the restart ──
+  const [hookStopReal, copyReal, editReal] = await Promise.all([
+    (async () => {
+      // ⑤ the product's hook taking ~2.9 s (prompt-context answers after 2.8 s) before the follow-up's init
+      const r = await realWrapper('hookstop', { hookCtxMs: 2800 });
+      r.say('TOOL-8S run a slow command', 'm-a');
+      await until(r.toolUse, 30000);
+      await sleep(1500);
+      r.say('MARK-B handed then Stop', 'm-b', { steer: true });
+      await sleep(1500);
+      const reqsAtStop = r.mock.reqs.length, tStop = Date.now();
+      r.stop();
+      await until(() => /stop settled/.test(r.log()), 15000);
+      await sleep(800);
+      const lg = r.log();
+      const out = { reqsAfterStop: r.mock.reqs.length - reqsAtStop, follows: r.follows(), waited: /the window waits for its init/.test(lg), clockLines: lg.split('\n').filter((l) => /bound:|backstop:/.test(l)).length, hookAfterStop: r.hub.calls.filter((c) => c.at > tStop && /prompt-context/.test(c.url)).length };
+      await r.end(); return out;
+    })(),
+    (async () => {
+      // ⑥ a 400 KB screenshot frame held mid-tool (the server's _frame_file road), drained, run — then THE RESTART
+      const r = await realWrapper('copy');
+      r.say('TOOL-4S run a slow command', 'm-a');
+      await until(r.toolUse, 30000);
+      await sleep(800);
+      r.sayBig({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'IMG-1 what is wrong in this screenshot?' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo' + 'A'.repeat(400 * 1024) } }] }, webui_msg_id: 'm-i' });
+      await until(() => r.results() >= 2, 30000);
+      await sleep(500);
+      await r.end();
+      return { bubbles: restartReplay(r) };
+    })(),
+    (async () => {
+      // ⑦ a held frame EDITED on the strip, drained, run — then THE RESTART
+      const r = await realWrapper('edit');
+      r.say('TOOL-4S run a slow command', 'm-a');
+      await until(r.toolUse, 30000);
+      await sleep(800);
+      r.say('MARK-E please run the tests on staging', 'm-e');
+      await until(() => r.recs.some((x) => x.type === 'queue_changed' && (x.items || []).some((it) => it.msgId === 'm-e')), 5000);
+      const row = (r.recs.filter((x) => x.type === 'queue_changed').pop().items || []).find((it) => it.msgId === 'm-e') || {};
+      r.write({ type: 'queue-op', op: 'edit', id: row.id, text: 'MARK-E please run the tests locally, NOT on staging' });
+      await until(() => r.results() >= 2, 30000);
+      await sleep(500);
+      await r.end();
+      return { bubbles: restartReplay(r) };
+    })(),
+  ]);
+  ok(hookStopReal.reqsAfterStop === 0 && hookStopReal.follows === 1 && hookStopReal.waited && hookStopReal.clockLines === 0, '§A ⑤ the REAL CLI with the product\'s OWN prompt hook (~2.9 s before the follow-up\'s init): the window waited through it, the init was interrupted — NO request after Stop (7df30f96: its 2 s clock closed the window inside the hook and the follow-up was answered)', hookStopReal);
+  const img = Array.isArray(copyReal.bubbles) ? copyReal.bubbles.filter((b) => /IMG-1/.test(b.text)) : [];
+  ok(img.length === 1 && img[0].images === 1 && img[0].msgId === 'm-i', '§A ⑥ a 400 KB screenshot held mid-turn, after THE RESTART (the buffer merged with the CLI\'s JSONL, rebuilt): ONE bubble, WITH the image (7df30f96: one bubble, 0 images — its text-only copy hid the record)', copyReal);
+  const ed = Array.isArray(editReal.bubbles) ? editReal.bubbles.filter((b) => /MARK-E/.test(b.text)) : [];
+  ok(ed.length === 1 && /locally, NOT on staging/.test(ed[0].text), '§A ⑦ a held frame EDITED then run, after THE RESTART: ONE bubble with the latest words (7df30f96: the never-sent original beside it)', editReal);
 }
 
 // ── §B THE CHAT WINDOW IN A REAL BROWSER ──

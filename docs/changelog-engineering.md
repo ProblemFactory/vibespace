@@ -6,6 +6,36 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ## 2.369.361 — 2026-10-27
 
+### claude-steer-inject r4 — a Stop window closes on the CLI's words, a copy is claimed by its witness, riding is not landed, the hold chord keeps the composer's law at idle (acceptance r2's verdict: 11 reviewers on 7df30f96)
+- **Why:** r2's 2 s clock started at the interrupted result, but the CLI runs its UserPromptSubmit hook BEFORE the follow-up's init, and the product's own hook (data/bin/vibespace-hook.mjs) waits on the hub up to 3 s. With a ~2.9 s hook the clock closed the window first: MARK-B was answered after Stop. In the owed-turn shape it drained an Alt+Enter-held frame into the turn the CLI was starting. r2 had measured with VIBESPACE_SKIP_AGENT_HOOKS=1.
+- **Measured on 2.1.312** (measure/probe-r4.mjs raw, probe-r4w.mjs through each tree's own wrapper; the product's hooks registered by data/bin/vibespace-hook-register.mjs into a scratch HOME; a loopback hub and mock):
+  - The CLI's hook timeout is the registered `timeout: 10` (600 s when a hook names none: `Hf = 600000`).
+  - `CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS` makes the CLI say `hook_started` ~10 ms after the interrupted result and `hook_response` when the hook ends.
+  - An interrupt INSIDE the hook cancels it and DROPS the held frame from the conversation: no user record, and the next request lacks it. So the init stays the interrupt point.
+  - A person's frame's `uuid` becomes the CLI's user-record uuid, and the `source_uuid` of a queued_command attachment.
+- **Built:**
+  - The adapter sets the hook-events switch (chat only).
+  - The wrapper consumes the UserPromptSubmit hook lines (never teed) and arms no clock while a hook runs. Its backstop is 30 s where the CLI owes a turn and 2 s where it owes nothing.
+  - Stop keeps a `riding` frame, and a window that closes with no follow-up settles it as `landed`.
+  - The wrapper stamps a `uuid` on each person's mid-turn frame. The copy names it (`cliUuid`), and an edit rewrites the copy.
+  - The normalizer claims a copy by witness only, and a record with a block kind the copy lacks gives the bubble its blocks.
+  - Alt+Enter is `_altEnter`: it holds during a turn and is the composer's own Enter at idle (unstamped).
+  - The stream consumer draws the running line at a CLI-started turn's init.
+  - The heavy suite runs its teardown on signals.
+- **RED controls (7df30f96 vs this commit, the real 2.1.312 + the product's hooks):**
+  - hook-stop (~2.9 s hook): answered after Stop vs 0 requests.
+  - hook-owed: C rode B's tool result vs C ran as its own turn.
+  - A 400 KB screenshot held / handed-own / kept, then restarted: 0 images vs 1 image each.
+  - edit, restarted: 2 bubbles vs 1.
+  - A 61-call turn, restarted: 2 bubbles vs 1.
+  - The riding race (in-process): landed + answered vs kept + interrupted in the same tick.
+  - The 1.5 s hook and the no-hook cases are green on both trees.
+- **Accepted limit:** the init-tick interrupt races the CLI's first request. The reviewers saw 2/9 on 2.1.308 with a bare `sleep` hook; with the product's own 1.5 s hook it was 0/10 on 2.1.308 and 0/20 (+0/9 raw) on 2.1.312.
+- **Tests:**
+  - test-claude-steer 66 (base 54/8).
+  - test-claude-steer-chrome 79 (base 66/11; new legs ⑮–⑱ and §A ⑤–⑦, the δ legs judged by signal).
+  - test-stdout-registry 269 (base 267/2).
+
 ### claude-steer-inject r3 = cli-2-1-312-records — the box's claude self-updated to 2.1.312: its records registered by measurement, and the hand-over table re-measured on it (the same rows)
 - **Why:** `claude --version` = 2.1.312 since 18:44 PT (it updated itself during the NAS outage). test-record-shape was red on every tree: «UNLISTED: inherited_asks_settled» and «UNDECLARED: claude:stream:result.shell_cpu_ms_turn, …».
 - **The dump** (strings over a 0644 copy under the lane dir, never run for it) minus 2.1.308's: one subtype, 12 `result` fields, `turn_handoff_available.requires_rewind_request_id`, an MCP config's `connectorId`, five non-record zod objects, the 14 sentences renamed (Qu / Im / Kr, suffix _Ct).

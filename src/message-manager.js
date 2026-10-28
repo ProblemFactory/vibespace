@@ -183,8 +183,6 @@ function peerDisplayName(origin, text) {
 // (since lane S3) our notice head. Anywhere else it is somebody QUOTING it (a
 // group wake carrying a member's words), which must never name the record.
 const escRe = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-/** A user record's words, its text blocks joined — the key a wrapper copy and the CLI's own record of a frame share. */
-const textOfBlocks = (blocks) => (Array.isArray(blocks) ? blocks : []).filter((b) => b && b.type === 'text').map((b) => b.text || '').join('');
 const NOTICE_AT_START_RE = new RegExp('^\\s*(?:Another Claude session sent a message:\\s*)?' + escRe(VIBESPACE_NOTICE_HEAD));
 const BW_AT_START_RE = new RegExp('^\\s*(?:Another Claude session sent a message:\\s*)?(?:' + escRe(VIBESPACE_NOTICE_HEAD) + '\\s*)?\\[VibeSpace Background Work\\] \\w+ "([^"]+)"');
 /**
@@ -320,7 +318,7 @@ class MessageManager extends MessageWindow {
     // THE WRAPPER'S QUEUE (2.369.354, lane claude-wrapper-queue): data/bin/chat-wrapper.js HOLDS a frame sent mid-turn
     // and says so on the acp/codex wire — queued_input / queue_changed / queue_op_result / queue_dropped, top-level lines
     this.userMessageIds = new Map();      // webui msgId → message id (the bubble a queue row belongs to)
-    this._webuiCopies = new Map();        // msgId → {text, at}: a wrapper's copy of a mid-turn frame the CLI's own record may claim
+    this._webuiCopies = new Map();        // msgId → {cliUuid, id, types}: a wrapper's copy of a mid-turn frame — claimed by the CLI's record of it
     this._queue = [];                     // the wrapper's promptQueue, as published
     this._queuedMsgIds = new Set();       // bubbles currently wearing a 'queued' chip
     this._queuePublished = false;         // has this wrapper ever published a queue? (in-band capability signal)
@@ -1492,6 +1490,10 @@ class MessageManager extends MessageWindow {
           .filter((b) => b && b.type === 'text' && typeof b.text === 'string' && b.text.trim())
           .map((b) => ({ type: 'text', text: b.text }));
       const text = blocks.map((b) => b.text).join('');
+      // a wrapper's copy of the same mid-turn frame drew it (acceptance r4): this attachment is its record by WITNESS — its
+      // source_uuid is the uuid the wrapper stamped on the frame — and its blocks (the image too) are what is drawn
+      const fullBlocks = typeof a.prompt === 'string' ? blocks : (Array.isArray(a.prompt) ? a.prompt : []).map((b) => (b && b.type === 'text' && typeof b.text === 'string' ? { type: 'text', text: b.text } : (b && b.type === 'image' ? { type: 'image', mediaType: b.source?.media_type || 'image/png', data: b.source?.data || '' } : null))).filter(Boolean);
+      if (a.source_uuid && this._claimWebuiCopy(fullBlocks, a.source_uuid, emit)) return;
       if (!text.trim()) return;
       // Mid-turn task completion (2.368.31): the notification rides THIS
       // attachment when the agent was busy — close the task and render the
@@ -1507,7 +1509,7 @@ class MessageManager extends MessageWindow {
       for (let i = this.messages.length - 1, seen = 0; i >= 0 && seen < 12; i--, seen++) {
         const m = this.messages[i];
         // (a wrapper's copy of the same mid-turn frame drew it: this attachment is its record — the copy is claimed)
-        if (m.role === 'user' && (m[PEER_RECORDED] || (m.content || []).map((b) => b.text || '').join('')) === text) { this._claimWebuiCopy(blocks); return; }
+        if (m.role === 'user' && (m[PEER_RECORDED] || (m.content || []).map((b) => b.text || '').join('')) === text) return;
       }
       if (a.origin?.kind === 'peer' && a.origin.msg_id && this._peerMsgIds.has(a.origin.msg_id)) return; // already rendered (msg_id is authoritative)
       this.turnIndex++;
@@ -1599,15 +1601,23 @@ class MessageManager extends MessageWindow {
   // whose wrapper predates it never publishes, so they answer [] / false / null
   // — null = "named no verb list", not "serves none".
 
-  /** The CLI's own record of words a wrapper copy already drew (src/server/session-store.js keeps that copy through a
-   *  restart): claimed — never a second bubble. Only a copy a few records back, once, and never one Stop put back. */
-  _claimWebuiCopy(content) {
-    if (!this._webuiCopies.size) return false;
-    const text = textOfBlocks(content);
-    if (!text.trim()) return false;
+  /** The CLI's own record of a frame a wrapper copy already drew (src/server/session-store.js keeps that copy through a
+   *  restart) — found by its WITNESS (acceptance r4): the uuid the wrapper stamped on the frame, which the CLI keeps as
+   *  its user record's `uuid` and as a queued_command attachment's `source_uuid` (measured on 2.1.312). Claimed once —
+   *  never a second bubble — at ANY distance (a held frame drained after a 60-call turn is still the same message), and
+   *  never by its words. A record RICHER than the copy (a block kind the copy lacks: a frame over 256 KB is copied as its
+   *  words alone, the CLI's record keeps the image) is what is drawn: the copy's bubble takes the record's blocks, so the
+   *  screenshot is never hidden behind its own copy. Never a copy Stop put back (removed / stopped: it never ran). */
+  _claimWebuiCopy(content, uuid, emit) {
+    if (!uuid || !this._webuiCopies.size) return false;
     for (const [msgId, c] of this._webuiCopies) {
-      if (c.text !== text || this.messages.length - c.at > 60) continue;
+      if (!c.cliUuid || c.cliUuid !== String(uuid)) continue;
       this._webuiCopies.delete(msgId);
+      const has = new Set(c.types);
+      if ((content || []).some((b) => b && b.type && !has.has(b.type))) {
+        const msg = this.messageIndex.get(c.id);
+        if (msg) { msg.content = content.map((b) => ({ ...b })); if (emit) this._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } }); }
+      }
       return true;
     }
     return false;
@@ -1869,12 +1879,12 @@ class MessageManager extends MessageWindow {
       // msgId already has a bubble is that bubble (the live send's or the copy's), and the CLI's own record of those words
       // a little later (the turn they ran as, a held frame drained, a kept frame's interrupted follow-up) claims the copy.
       if (raw._fromWebui && raw.msgId && this.userMessageIds.has(String(raw.msgId)) && (raw.webui_copy || this._webuiCopies.has(String(raw.msgId)))) return;
-      if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent)) return;
+      if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent, raw.uuid, emit)) return;
       this.turnIndex++;
       // Use original msgId if present (for dedup with client-side local preview)
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });
       if (raw.webui_copy && raw._fromWebui && raw.msgId) {
-        this._webuiCopies.set(String(raw.msgId), { text: textOfBlocks(normalizedContent), at: this.messages.length });
+        this._webuiCopies.set(String(raw.msgId), { cliUuid: typeof raw.cliUuid === 'string' && raw.cliUuid ? raw.cliUuid : null, id: msg.id, types: [...new Set(normalizedContent.map((b) => b.type))] });
         if (this._webuiCopies.size > 32) this._webuiCopies.delete(this._webuiCopies.keys().next().value);
       }
       // Provenance for the notification classifier: promptSource = the CLI's

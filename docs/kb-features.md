@@ -792,6 +792,17 @@ impossible rather than a review promise.
   false`). A message sent mid-turn **survives a server restart and a reload**
   with its last chip — the wrapper keeps a copy in its history buffer (a held
   «Queued» bubble too, which .354 lost the same way).
+  **Acceptance r4 (the same 2.369.361):** the Stop window and a turn the CLI owes
+  wait for the CLI's own words — the follow-up's init (interrupted) or its idle —
+  through the prompt hook the CLI runs first (the product's own waits on the hub
+  up to 3 s; the CLI says the hook's phase, the wrapper keeps those lines out of
+  the chat); a clock only backstops «neither came» (30 s where a turn is owed,
+  2 s where nothing is). A message that rode a tool result but was not yet
+  answered counts as kept at Stop, and «Steered» once nothing followed. After a
+  restart a mid-turn message is ONE bubble with its pictures and its latest
+  (edited) words, however long the turn it waited behind. Alt+Enter at idle is
+  the composer's own Enter (a newline where Enter is one). A turn the CLI starts
+  by itself for a message it held shows as running, with its Stop button.
 - **Removing a queued agent-to-agent / job message gives it back.** It was
   already reported delivered, so `remove` re-reports `peer_message_result
   ok:false` with the text and sender and the delivery ladder re-stashes it for

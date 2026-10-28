@@ -1733,8 +1733,9 @@ class ChatView {
 
   /** Run the chord. @returns {boolean} whether a message went out. */
   steerComposerText() { return !!this._chatInput?.steerNow(); }
-  /** The hold door's twins (lane claude-steer-inject): Alt+Enter where Enter itself hands the message over. */
-  _canHoldComposer() { return !!this._chatInput?.holdChordAllowed; }
+  /** The hold door's twins (lane claude-steer-inject): Alt+Enter where Enter itself hands the message over — the
+   *  binding's `when` is the chord's own: it acts only while a turn runs (acceptance r4; at idle the key is the composer's). */
+  _canHoldComposer() { return !!this._chatInput?.holdChordActs; }
   holdComposerText() { return !!this._chatInput?.holdNow(); }
 
   /** THE CHORD'S SECOND HALF. A steer NAMES A QUEUED ITEM — codex's

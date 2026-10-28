@@ -42,6 +42,11 @@
 // re-measured on 2026-10-27 — the same rows as 2.1.308) names the build in every init, and from 2.1.312 on every `result` carries
 // model_usage_since_last_result (measured on every result of a local stream-json 2.1.312; `{}` = nothing counted — the stand-in bills
 // nothing). STAND_IN_CLI_VERSION=2.1.308 writes the 2.1.308 result. test-record-shape judges both against src/record-shape.js.
+// A PROMPT HOOK PHASE (acceptance r4, measured on 2.1.312 with the product's own hook): with $STAND_IN_PROMPT_HOOK_MS > 0
+// every turn first runs a UserPromptSubmit hook for that long — a follow-up and an owed turn too, BEFORE their init — and
+// with CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS=1 (what the adapter sets) it says so: system/hook_started, then
+// hook_response (`success`, or `cancelled` when an interrupt arrives during the hook — the turn's init still follows, and
+// a second interrupt there ends it, as the real CLI does).
 // Used by scripts/test-queue-putback.mjs §6, scripts/test-queue-steer.mjs ⑯ and scripts/test-claude-steer-chrome.mjs.
 // Never a vendor call: no network at all.
 const fs = require('fs');
@@ -56,6 +61,10 @@ const HELPER_MS = Number(process.env.STAND_IN_HELPER_MS || LONG_MS);
 const CLI_VERSION = process.env.STAND_IN_CLI_VERSION || '2.1.312';
 const atLeast = (v) => { const a = CLI_VERSION.split('.').map(Number), b = v.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); return true; };
 const SINCE_LAST = atLeast('2.1.312'); // the per-result usage delta 2.1.312 writes on every result
+const PROMPT_HOOK_MS = Number(process.env.STAND_IN_PROMPT_HOOK_MS || 0);
+const SAYS_HOOKS = process.env.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS === '1';
+let hookSeq = 0;
+const hookWord = (subtype, id, outcome) => { if (SAYS_HOOKS) out({ type: 'system', subtype, hook_id: id, hook_name: 'UserPromptSubmit', hook_event: 'UserPromptSubmit', ...(outcome ? { output: '', stdout: '', stderr: '', exit_code: outcome === 'success' ? 0 : undefined, outcome } : {}), session_id: SID }); };
 const argv = process.argv.slice(2);
 const argAfter = (flag) => { const i = argv.indexOf(flag); return i >= 0 && argv[i + 1] ? argv[i + 1] : null; };
 const SID = argAfter('--session-id') || argAfter('--resume') || '00000000-0000-4000-8000-00000000c0de';
@@ -96,6 +105,27 @@ function end(subtype) {
   if (!helper) setState('idle');
 }
 function start(f, { follow = false } = {}) {
+  if (PROMPT_HOOK_MS > 0) {
+    // the prompt hook runs first (the turn has no init yet); an interrupt now cancels the hook — see the stdin handler
+    const id = 'hook-' + (++hookSeq);
+    busy = { text: textOf(f), timer: null, follow, hook: id, frame: f };
+    setState('running');
+    hookWord('hook_started', id);
+    busy.timer = setTimeout(() => { const b = busy; b.hook = null; hookWord('hook_response', id, 'success'); begin(b.frame, { follow: b.follow }); }, PROMPT_HOOK_MS);
+    return;
+  }
+  begin(f, { follow });
+}
+/** An interrupt during the prompt hook: the hook is cancelled, the turn's init still comes — as a follow-up a second
+ *  interrupt can end (2.1.312: hook_response «cancelled», then init). */
+function cancelHook() {
+  const b = busy;
+  clearTimeout(b.timer);
+  hookWord('hook_response', b.hook, 'cancelled');
+  b.hook = null;
+  begin(b.frame, { follow: true });
+}
+function begin(f, { follow = false } = {}) {
   const text = textOf(f);
   turnSeq++;
   delivered('turn', text);
@@ -141,6 +171,7 @@ process.stdin.on('data', (d) => {
     let f; try { f = JSON.parse(line); } catch { continue; }
     if (f.type === 'control_request' && f.request && f.request.subtype === 'interrupt') {
       out({ type: 'control_response', response: { subtype: 'success', request_id: f.request_id } });
+      if (busy && busy.hook) { cancelHook(); continue; }
       end('error_during_execution');
       continue;
     }

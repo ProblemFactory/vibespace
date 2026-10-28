@@ -312,12 +312,7 @@ export class ChatInput {
       // ONE chord, the session's SECOND door (lane claude-steer-inject — the owner's «Enter 立即送入，Alt+Enter 排队»):
       // where plain Enter queues it injects (codex); where Enter itself hands the message to the running turn (claude) it
       // HOLDS it until the turn ends (editable, Stop gives it back) — each through its own contributed command
-      if (e.key === 'Enter' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (this.steerChordAllowed || this.holdChordAllowed)) {
-        e.preventDefault();
-        if (this.steerChordAllowed) { if (this._onSteerChord) this._onSteerChord(); else this.steerNow(); }
-        else if (this._onHoldChord) this._onHoldChord(); else this.holdNow();
-        return;
-      }
+      if (e.key === 'Enter' && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (this.steerChordAllowed || this.holdChordAllowed)) { this._altEnter(e); return; }
       // Enter: chat-enter-keys.js decides (PURE). Touch soft keyboards have no Shift — their enter key is the only way
       // to type a newline, so by default it inserts one and sending is the button (2.234.0, real report "点换行之后就发出了";
       // chat.touchEnterSends opts back in). The expanded composer and chat.enterSends off: Ctrl/Cmd+Enter sends.
@@ -700,6 +695,26 @@ export class ChatInput {
    *  flag (acceptance r2: a second tab whose flag lagged turned the person's HOLD into a stamped Enter — a hand-over).
    *  An unstamped frame with no turn running is a plain send, so the hold door is always safe to open where it exists. */
   get holdChordAllowed() { return !!this._sendModes().allowHoldChord; }
+  /** …and whether Alt+Enter HOLDS right now (acceptance r4): the door exists AND this composer sees a turn running. At
+   *  idle the chord is the composer's own Enter (a newline where Enter is one) — the clock button stays a hold at idle
+   *  (a button is asked for; a chord is typed through). */
+  get holdChordActs() { return this.holdChordAllowed && !!this._isStreaming; }
+
+  /** ALT+ENTER — the session's second door, ONE chord: where plain Enter queues it injects (codex), where Enter itself hands
+   *  the message to the running turn (claude) it HOLDS it. @returns {'steer'|'hold'|'send'|'newline'|'ime-swallow'} what it did.
+   *  THE HOLD CHORD IS A LIVE-TURN VERB (acceptance r4): the capability decides that it EXISTS, the turn decides that it
+   *  ACTS. While this composer sees a turn running it holds; at idle it falls through to the composer's own law — a newline
+   *  where Enter is a newline (the expanded composer, chat.enterSends off: the textarea's default), a send only where Enter
+   *  sends — and that send carries NO hand-over stamp (a tab whose streaming flag lags may be looking at a running turn:
+   *  the wrapper then holds it, acceptance r2). */
+  _altEnter(e) {
+    if (this.steerChordAllowed) { e.preventDefault(); if (this._onSteerChord) this._onSteerChord(); else this.steerNow(); return 'steer'; }
+    if (this.holdChordActs) { e.preventDefault(); if (this._onHoldChord) this._onHoldChord(); else this.holdNow(); return 'hold'; }
+    const act = this._enterGuard.enter(e, { expanded: this._expanded, touch: this._isTouch(), touchEnterSends: this._getTouchEnterSends(), enterSends: this._getEnterSends() !== false });
+    if (act === 'send') { e.preventDefault(); this._send({ hold: true }); }
+    else if (act === 'ime-swallow') { e.preventDefault(); this._showImeHint(); }
+    return act;
+  }
 
   /** THE HOLD DOOR'S ACTION: the ordinary send WITHOUT the hand-over stamp — the wrapper keeps a frame that arrives
    *  mid-turn (the .354 queue: a row on the strip, editable, given back by Stop). @returns {boolean} whether it went out */
