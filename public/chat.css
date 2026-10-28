@@ -1665,6 +1665,9 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-msg.chat-vs-note.chat-channel-compact > .chat-hook-details > .chat-hook-summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-msg.chat-vs-note.chat-channel-compact > .chat-hook-details[open] { flex-basis: 100%; max-width: 100%; }
 .chat-msg.chat-vs-note.chat-channel-compact > .chat-channel-touches { flex: 1 1 0; min-width: 0; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 4px; margin: 0; overflow: hidden; }
+/* r2: a proposal / API card a note row's touches filed takes its OWN line (the tool card's rule below — never squeezed beside the chips) */
+.chat-msg.chat-vs-note.chat-channel-compact > .chat-api-cards, .chat-msg.chat-vs-note.chat-channel-compact > .chat-chan-props { flex: 1 1 100%; min-width: 0; }
+.chat-msg.chat-vs-note.chat-channel-compact > .chat-chan-props[hidden] { display: none; }
 /* lane touch-chip-cause (the owner 2026-10-28, 「这个展开方式对吗？」 — «+14 more» pressed, ten chips squeezed to «Lar…»):
    the strip's chips get their MEASURED readable minimum inline (channel-touch-view fitStrip — what does not fit folds
    into «+N more»), and «+N more» expands into ROWS: the box leaves the head's line, one full row per conversation with

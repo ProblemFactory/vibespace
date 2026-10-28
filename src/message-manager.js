@@ -1497,6 +1497,7 @@ class MessageManager extends MessageWindow {
         this.turnIndex++;
         const nmsg = this._create({ role: 'user', status: 'complete', content: blocks, turnIndex: this.turnIndex });
         nmsg.originKind = 'task-notification';
+        nmsg.midTurn = true; // lane touch-chip-cause r2: it entered a RUNNING turn (codex's mark — the channel binder's turn model never starts a turn here)
         if (emit) this._emit({ op: 'create', message: nmsg });
         return;
       }
@@ -1507,6 +1508,7 @@ class MessageManager extends MessageWindow {
       if (a.origin?.kind === 'peer' && a.origin.msg_id && this._peerMsgIds.has(a.origin.msg_id)) return; // already rendered (msg_id is authoritative)
       this.turnIndex++;
       const msg = this._create({ role: 'user', status: 'complete', content: blocks, turnIndex: this.turnIndex });
+      msg.midTurn = true; // lane touch-chip-cause r2: a message that entered a RUNNING turn (a steer, a mid-turn peer message) — no new turn's note follows it; codex's mark
       if (a.origin?.kind === 'peer') {
         // same provenance law as the idle-wake user record — render the
         // peer card, never a "You" bubble of someone else's words

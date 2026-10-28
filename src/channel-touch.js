@@ -33,12 +33,16 @@
  *    lane touch-chip-cause (the owner 2026-10-28, 「这个展开方式对吗？」 — 17 conversation rows hung on a
  *    `vibespace-status` call): A CONVERSATION ENTRY HANGS ON THE ACT THAT CAUSED IT. Every record carries its
  *    `cause` (CAUSES: `agent` — the agent's own channel verb, the only writer there is; `delivery` — the hub handing
- *    a conversation's words to the agent, declared and DEFERRED: no writer records one). A call is a candidate only
- *    when it COULD have caused the touch (`callCauses`): its command names it, or it is a shell call that runs
- *    `vibespace-channels`, or a helper (an Agent / Task call — its own calls run the CLI with this session's token);
- *    a shell call that never runs the CLI (`vibespace-status …`) is never the cause. A touch no rendered call could
- *    have caused hangs on the turn's VibeSpace NOTE row (`notes` — «VibeSpace gave the assistant its task context»),
- *    never silently on a neighbour; a `delivery` touch always does.
+ *    a conversation's words to the agent, declared and DEFERRED: no writer records one). THE LADDER (round 2):
+ *    ① a running call whose command NAMES the touch, or runs `vibespace-channels` as a COMMAND WORD (`channelsRuns` —
+ *    never the name inside a quoted argument or another command's argument: `--reason "… vibespace-channels read …"`
+ *    is prose) — the one naming it first, then the latest to start; ② else exactly ONE call running in the touch's
+ *    span, when it could have run anything (`callCanRun`: a shell call that is not made only of INERT_COMMANDS — a
+ *    script, an interpreter, a `bash -c` wrapper; a helper by its TOOL NAME, HELPER_TOOLS) — the only thing that
+ *    could have run the CLI; ③ else (several running, none naming it — or a lone `vibespace-status …`, which runs
+ *    nothing) the turn's VibeSpace NOTE row (`notes` — «VibeSpace gave the assistant its task context»), never
+ *    silently on a neighbour; ④ no note in the touch's turn (`turns` — the records that start a turn, `opensTurn`;
+ *    the skew window never crosses one) ⇒ unbound, the chip still lists it. A `delivery` touch always takes ③/④.
  *  - `foldTouches` / `foldView`: one ROW per conversation — the ops counted
  *    (read = messages read, search = hits, reply / compose / refresh /
  *    request / status = calls), replied or composed first, then by the last
@@ -82,9 +86,25 @@ const CAUSES = Object.freeze(['agent', 'delivery']);
 /** What a rendered call IS, for the cause rule: a `command` (a shell call — its command text is known), a `helper` (an Agent /
  *  Task call: its own calls run under this session's token), anything `other` (a Read, an Edit, an MCP call). */
 const CALL_KINDS = Object.freeze(['command', 'helper', 'other']);
+/** lane touch-chip-cause r2: the TOOLS whose call is a `helper` — another agent running under this session's token
+ *  (claude's Agent / Task, codex's Sub-agent card): classified by the tool's NAME, never by an input field (a WebFetch
+ *  carries a `prompt` and runs nothing). */
+const HELPER_TOOLS = Object.freeze(['Agent', 'Task', 'Sub-agent']);
+/** lane touch-chip-cause r2: the command words that RUN NOTHING ELSE — a shell call made only of these could not have
+ *  run the channels CLI, so it is never a lone call's cause (the owner's `vibespace-status working --reason …`). Any
+ *  other word (a script, an interpreter, a wrapper's operand, an unknown program) could have. */
+const INERT_COMMANDS = Object.freeze(['vibespace-status', 'vibespace-task', 'vibespace-msg', 'vibespace-ask', 'vibespace-feedback', 'vibespace-docs',
+  ':', 'true', 'false', 'cd', 'pwd', 'echo', 'printf', 'sleep', 'test', '[', 'ls', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'jq', 'sort', 'uniq', 'cut', 'tr',
+  'date', 'mkdir', 'touch', 'cp', 'mv', 'rm', 'ln', 'stat', 'diff', 'basename', 'dirname', 'realpath', 'which', 'type', 'git']);
+/** lane touch-chip-cause r2: what a user-role record's queue chip says when it entered a RUNNING turn (live — the
+ *  transcript's own mark is `midTurn`): never a turn's start. */
+const MID_TURN_QUEUE = Object.freeze(['queued', 'steered', 'removed']);
 /** lane touch-chip-cause: a chip in a one-line strip keeps the account and at least this many code points of its title
  *  (the owner's screenshot: ten chips squeezed to «Lar…» / «Gm…»). */
 const READABLE_TITLE_CHARS = 12;
+/** lane touch-chip-cause r2: a strip's FIRST chip gives its name down to this many code points + «…» before the fold
+ *  control leaves the line (a long account label at phone width — the control is never clipped). */
+const TIGHT_NAME_CHARS = 6;
 /** One search records at most this many conversations (by hits) — a search is one card, not a ring flush. */
 const SEARCH_MAX_CONVS = 20;
 /** A search touch keeps at most this many hit refs per conversation ({msgId, at} — never the words), the newest. */
@@ -165,7 +185,7 @@ function normalizeTouch(x) {
  *  @returns {{touch, merged}} — the touch as stored (the one to broadcast). */
 function appendTouch(ring, t, { mergeMs = MERGE_MS, max = RING_MAX } = {}) {
   const last = ring.length ? ring[ring.length - 1] : null;
-  if (last && last.op === t.op && touchKey(last) === touchKey(t) && t.at >= last.at && t.at - last.at < mergeMs) {
+  if (last && last.op === t.op && touchKey(last) === touchKey(t) && causeOf(last) === causeOf(t) && t.at >= last.at && t.at - last.at < mergeMs) {
     last.count = num(last.count) + num(t.count);
     last.at = t.at;
     if (t.title) last.title = t.title;
@@ -193,33 +213,238 @@ function upsertTouch(list, t, { max = RING_MAX } = {}) {
   return list;
 }
 
-/** Does a shell call run the agent's channels CLI? (the renderer's holder gate — harness-neutral: the command TEXT). */
-function commandTouchesChannels(cmd) { return /(^|[\s;&|(`/])vibespace-channels(\s|$)/.test(String(cmd || '')); }
+const CLI = 'vibespace-channels';
+const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
+/** words after which the next word is again a command word */
+const OPENERS = new Set(['then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', '{', '}', 'time', 'fi', 'done', 'esac']);
+/** words that open a construct whose words are data (`for c in …`) */
+const DATA_HEADS = new Set(['for', 'case', 'select', 'function']);
+/** wrappers that run their operand as a command — the options that take an argument (skipped with it) */
+const WRAPPERS = new Map([['exec', []], ['env', ['-u', '-C', '-S']], ['sudo', ['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U']], ['doas', ['-u']],
+  ['nohup', []], ['timeout', ['-s', '-k']], ['xargs', ['-n', '-P', '-I', '-L', '-s', '-d', '-E', '-a']], ['nice', ['-n']], ['stdbuf', ['-i', '-o', '-e']], ['setsid', []]]);
+const ASSIGN_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const SCAN_MAX = 8192;
 
-/** Does this call's command (or prompt) NAME the touch? The strongest evidence of which card a touch is. */
-function namesTouch(text, t) {
+/** The closing index of a `$(` / `${` / backtick span opening at `i` (quotes inside honoured), or the end. */
+function spanEnd(s, i, open, close) {
+  let depth = 0;
+  for (let j = i; j < s.length; j++) {
+    const ch = s[j];
+    if (ch === '\\') { j++; continue; }
+    if (ch === "'" && open !== '`') { const k = s.indexOf("'", j + 1); if (k < 0) return s.length; j = k; continue; }
+    if (ch === '"' && open !== '`') { for (j++; j < s.length && s[j] !== '"'; j++) if (s[j] === '\\') j++; continue; }
+    if (open === '`') { if (ch === '`' && j > i) return j; continue; }
+    if (ch === open) depth++;
+    else if (ch === close && --depth === 0) return j;
+  }
+  return s.length;
+}
+
+/** THE SHELL'S WORDS (lane touch-chip-cause r2 — enough of the grammar to tell a COMMAND WORD from prose): one entry
+ *  per simple command, `{words: [{v, at}], owner}` — `v` is the word with its quotes and escapes removed, `at` its index;
+ *  ; & && || | ( ) newline end a simple command; a `$( … )` / backtick span is a command line of its own (its commands'
+ *  `owner` = the word holding it); a heredoc's lines are kept on the command that reads them (`words.heredocs`); a # comment
+ *  and a redirection's target are no words. PURE, bounded (SCAN_MAX characters, nesting 4). */
+function shellCommands(src, owner = null, depth = 0) {
+  const s = String(src || '').slice(0, SCAN_MAX);
+  const out = [];
+  if (depth > 4) return out;
+  let words = [], pending = [], redirect = false;
+  const end = () => { if (words.length) out.push({ words, owner }); words = []; };
+  const nested = (body, at) => { for (const c of shellCommands(body, owner === null ? at : owner, depth + 1)) out.push(c); };
+  const readWord = (i) => {
+    let v = '';
+    const at = i;
+    while (i < s.length) {
+      const ch = s[i];
+      if (' \t\r\n;&|()<>'.includes(ch)) break;
+      if (ch === '\\') { if (s[i + 1] !== '\n') v += s[i + 1] || ''; i += 2; continue; }
+      if (ch === "'") { const k = s.indexOf("'", i + 1); const e = k < 0 ? s.length : k; v += s.slice(i + 1, e); i = e + 1; continue; }
+      if (ch === '"') {
+        let j = i + 1;
+        for (; j < s.length && s[j] !== '"'; j++) {
+          if (s[j] === '\\') { v += s[j + 1] || ''; j++; continue; }
+          if (s[j] === '$' && s[j + 1] === '(') { const e = spanEnd(s, j + 1, '(', ')'); nested(s.slice(j + 2, e), at); v += '$()'; j = e; continue; }
+          if (s[j] === '`') { const e = spanEnd(s, j, '`', '`'); nested(s.slice(j + 1, e), at); v += '$()'; j = e; continue; }
+          v += s[j];
+        }
+        i = j + 1;
+        continue;
+      }
+      if (ch === '$' && s[i + 1] === '(') { const e = spanEnd(s, i + 1, '(', ')'); nested(s.slice(i + 2, e), at); v += '$()'; i = e + 1; continue; }
+      if (ch === '$' && s[i + 1] === '{') { const e = spanEnd(s, i + 1, '{', '}'); v += s.slice(i, e + 1); i = e + 1; continue; }
+      if (ch === '`') { const e = spanEnd(s, i, '`', '`'); nested(s.slice(i + 1, e), at); v += '$()'; i = e + 1; continue; }
+      v += ch;
+      i++;
+    }
+    return { v, at, end: i };
+  };
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === '\n') {
+      end();
+      i++;
+      for (const h of pending) {   // the heredoc's lines: up to the delimiter line
+        const lines = [];
+        while (i < s.length) {
+          let j = s.indexOf('\n', i);
+          if (j < 0) j = s.length;
+          const line = s.slice(i, j);
+          i = j + 1;
+          if ((h.strip ? line.replace(/^\t+/, '') : line) === h.delim) break;
+          lines.push(line);
+        }
+        (h.words.heredocs || (h.words.heredocs = [])).push(lines.join('\n'));
+      }
+      pending = [];
+      continue;
+    }
+    if (ch === ' ' || ch === '\t' || ch === '\r') { i++; continue; }
+    if (ch === '\\' && s[i + 1] === '\n') { i += 2; continue; }
+    if (ch === '#' && !words.length) { while (i < s.length && s[i] !== '\n') i++; continue; }
+    if (ch === '&' && s[i + 1] === '>') { i += s[i + 2] === '>' ? 3 : 2; redirect = true; continue; }
+    if (';&|()'.includes(ch)) { end(); i += (ch === '&' || ch === '|' || ch === ';') && s[i + 1] === ch ? 2 : 1; continue; }
+    if (ch === '<' && s[i + 1] === '<' && s[i + 2] !== '<') {   // a heredoc: its delimiter, its lines after this line
+      i += 2;
+      const strip = s[i] === '-';
+      if (strip) i++;
+      while (s[i] === ' ' || s[i] === '\t') i++;
+      const w = readWord(i);
+      i = w.end;
+      if (w.v) pending.push({ delim: w.v, strip, words });
+      continue;
+    }
+    if (ch === '<' || ch === '>') { i++; while ('<>&|'.includes(s[i] || '_')) i++; redirect = true; continue; }
+    const w = readWord(i);
+    i = w.end > i ? w.end : i + 1;
+    if (redirect) { redirect = false; continue; }
+    if (/^\d+$/.test(w.v) && (s[i] === '<' || s[i] === '>')) continue;   // a file descriptor before a redirection
+    words.push({ v: w.v, at: w.at });
+  }
+  end();
+  return out;
+}
+
+/** One simple command's COMMAND WORD — `{base, k}` (base = the word after its last `/`): leading assignments, openers
+ *  (do / then / ! / { …) and wrappers with their options (env X=1, sudo -u x, timeout 60, xargs -n1, nohup, exec …)
+ *  skipped; null when there is none, or when the command is a construct whose words are data (`for c in …`). */
+function commandWord(words) {
+  let k = 0;
+  while (k < words.length) {
+    const v = words[k].v;
+    if (ASSIGN_RE.test(v) || OPENERS.has(v)) { k++; continue; }
+    if (DATA_HEADS.has(v)) return null;
+    const base = v.slice(v.lastIndexOf('/') + 1);
+    const opts = WRAPPERS.get(base);
+    if (!opts) return { base, k };
+    k++;
+    let positional = base === 'timeout' ? 1 : 0;
+    while (k < words.length) {
+      const o = words[k].v;
+      if (o.length > 1 && o[0] === '-') { k += opts.includes(o) ? 2 : 1; continue; }
+      if (positional) { positional--; k++; continue; }
+      break;
+    }
+  }
+  return null;
+}
+
+/** A shell's `-c` command string (`bash -c '…'`, `sh -lc "…"`), or null. */
+function shellString(words, k) {
+  let c = false;
+  for (let j = k + 1; j < words.length; j++) {
+    const o = words[j].v;
+    if (o === '-o' || o === '+o') { j++; continue; }
+    if (o.length > 1 && (o[0] === '-' || o[0] === '+')) { if (o[0] === '-' && o[1] !== '-' && o.includes('c')) c = true; continue; }
+    return c ? o : null;
+  }
+  return null;
+}
+
+/** Every simple command a command line RUNS — its own, its `$( … )` spans, a shell's `-c` string and a shell's heredoc
+ *  (each nested one owned by the word that runs it): `[{base, at, verb}]`. */
+function commandsRun(cmd, owner = null, depth = 0) {
+  const out = [];
+  for (const c of shellCommands(cmd, owner, depth)) {
+    const cw = commandWord(c.words);
+    if (!cw) continue;
+    const at = c.owner === null ? c.words[cw.k].at : c.owner;
+    out.push({ base: cw.base, at, verb: c.words[cw.k + 1] ? c.words[cw.k + 1].v : '' });
+    if (SHELLS.has(cw.base) && depth < 4) {
+      const inner = shellString(c.words, cw.k);
+      if (inner !== null) for (const x of commandsRun(inner, at, depth + 1)) out.push(x);
+      for (const body of c.words.heredocs || []) for (const x of commandsRun(body, at, depth + 1)) out.push(x);
+    }
+  }
+  return out;
+}
+
+/** lane touch-chip-cause r2: WHERE A COMMAND LINE RUNS THE CHANNELS CLI — `[{at, verb}]`, the CLI as a COMMAND WORD
+ *  (the line's start, after ; && || | ( `$(` a newline, then / do, after a wrapper — env X=… / sudo … / exec / timeout N
+ *  / xargs …; quotes removed, a path before the name kept): `at` = the index of the word that runs it (for a `bash -c`
+ *  string, the shell's word), `verb` = its first argument. The name inside a quoted argument (`--reason "… vibespace-
+ *  channels read …"`), a heredoc's data or another command's argument (`grep vibespace-channels`) is prose. PURE. */
+function channelsRuns(cmd) { return commandsRun(cmd).filter((x) => x.base === CLI).map(({ at, verb }) => ({ at, verb })); }
+
+/** Does a shell call run the agent's channels CLI? (the renderer's holder gate — harness-neutral: the command TEXT, the
+ *  CLI as a command word since round 2). */
+function commandTouchesChannels(cmd) { return channelsRuns(cmd).length > 0; }
+
+/** lane touch-chip-cause r2: a command line every command word of which RUNS NOTHING ELSE (INERT_COMMANDS) — it could not
+ *  have run the CLI. An empty line runs nothing. */
+function runsNothing(cmd) { return commandsRun(cmd).every((x) => INERT_COMMANDS.includes(x.base)); }
+
+/** Does this call's command (or prompt) NAME the touch? The strongest evidence of which card a touch is. `runs` = the
+ *  call's channelsRuns (the verb is read off the CLI's command word, never off prose). */
+function namesTouch(text, t, runs) {
   const s = String(text || '');
   if (!s || !t) return false;
   if (t.convId && s.includes(`${t.adapterId}/${t.convId}`)) return true;
-  if (t.op === 'search' && /vibespace-channels\s+search\b/.test(s)) return true;
-  if (t.op === 'compose' && /vibespace-channels\s+compose\b/.test(s) && s.includes(t.adapterId)) return true;
   if (t.proposalId && s.includes(t.proposalId)) return true;
-  if (t.op === 'connect' && /vibespace-channels\s+connect\b/.test(s) && s.includes(t.adapterId)) return true;   // lane pod-oauth-callback
+  const verbs = (runs || channelsRuns(s)).map((r) => r.verb);
+  if (t.op === 'search' && verbs.includes('search')) return true;
+  if (t.op === 'compose' && verbs.includes('compose') && s.includes(t.adapterId)) return true;
+  if (t.op === 'connect' && verbs.includes('connect') && s.includes(t.adapterId)) return true;   // lane pod-oauth-callback
   return false;
 }
 
 /** lane touch-chip-cause: the cause a record carries. A record with none was written before the cause existed — and
  *  every writer then was an agent verb (agent-routes touchChannel), so it is the agent's. */
 function causeOf(t) { return t && CAUSES.includes(t.cause) ? t.cause : 'agent'; }
-/** COULD THIS CALL HAVE CAUSED THIS TOUCH? Its command / prompt names it; or a shell call that runs the channels CLI;
- *  or a helper. A shell call without the CLI, or another tool, never did. A call with no `kind` (a caller that knows
- *  only the instants) is judged by the time rules alone, as before the cause rule. */
-function callCauses(c, t) {
+/** lane touch-chip-cause r2: what a rendered call IS (CALL_KINDS) — a `command` when it carries a command line; a `helper`
+ *  when its TOOL NAME is one (HELPER_TOOLS) or the harness folds it as an agent card (codex's collab cards); else
+ *  `other`. Never read off an input field (a WebFetch's `prompt`). */
+function callKindOf({ name = '', collapseKind = null, command = '' } = {}) {
+  if (command) return 'command';
+  return HELPER_TOOLS.includes(String(name || '')) || collapseKind === 'agent' ? 'helper' : 'other';
+}
+/** THE LADDER'S FIRST RUNG — does this call NAME the touch, or run the CLI as a command word? A call with no `kind` (a
+ *  caller that knows only the instants) is judged by the time rules alone, as before the cause rule. */
+function callNames(c, t) {
   if (!c) return false;
-  if (namesTouch(c.text, t)) return true;
-  if (c.kind === 'command') return commandTouchesChannels(c.text);
-  if (c.kind === 'helper') return true;
-  return c.kind === undefined || c.kind === null;
+  if (c.kind === undefined || c.kind === null) return true;
+  const runs = c.runs || (c.kind === 'command' ? channelsRuns(c.text) : []);
+  return runs.length > 0 || namesTouch(c.text, t, runs);
+}
+/** THE SECOND RUNG — could this call have run ANYTHING? A shell call unless it is made only of INERT_COMMANDS (a script,
+ *  an interpreter, a `bash -c` wrapper could run the CLI unseen); a helper. Never another tool (a Read, a WebFetch). */
+function callCanRun(c) {
+  if (!c) return false;
+  if (c.kind === 'command') return !(typeof c.inert === 'boolean' ? c.inert : runsNothing(c.text));
+  return c.kind !== 'other';
+}
+/** COULD THIS CALL HAVE CAUSED THIS TOUCH? (either rung — the tail rule asks it of the view's last call) */
+function callCauses(c, t) { return callNames(c, t) || callCanRun(c); }
+
+/** lane touch-chip-cause r2: DOES THIS RECORD START A TURN? — the transcript's turn (the renderer's turnIndex): a
+ *  user-role record that moved the turn on (`prev` = the record before it): the person's message that opened it, a
+ *  wake, a peer message, a task notification. Never a record that entered a RUNNING turn — `midTurn` (a message typed
+ *  while the agent worked: the CLI folds it into the turn and no new note follows), a live queue chip (MID_TURN_QUEUE)
+ *  — nor an attached page image. The view leaves its VibeSpace note rows out. */
+function opensTurn(msg, prev) {
+  if (!msg || msg.role !== 'user' || msg.midTurn || msg.imageAttachment || MID_TURN_QUEUE.includes(msg.queueState)) return false;
+  return !(prev && Number.isFinite(prev.turnIndex) && Number.isFinite(msg.turnIndex) && prev.turnIndex === msg.turnIndex);
 }
 
 /**
@@ -233,7 +458,12 @@ function callCauses(c, t) {
  */
 function bindToCall(touches, calls, { tail = false, notes = [], turns = [], skewMs = SKEW_MS, batchMs = BATCH_MS } = {}) {
   const cs = (Array.isArray(calls) ? calls : [])
-    .map((c, i) => ({ id: String(c.id), start: num(c.start), end: c.end === null || c.end === undefined ? null : num(c.end), text: c.text || '', kind: CALL_KINDS.includes(c.kind) ? c.kind : undefined, i }))
+    .map((c, i) => {
+      const kind = CALL_KINDS.includes(c.kind) ? c.kind : undefined, text = c.text || '';
+      const ran = kind === 'helper' || kind === 'other' ? [] : commandsRun(text);   // ONE scan per call: the CLI's runs + whether it runs nothing
+      return { id: String(c.id), start: num(c.start), end: c.end === null || c.end === undefined ? null : num(c.end), text, kind, i,
+        runs: ran.filter((x) => x.base === CLI).map(({ at, verb }) => ({ at, verb })), inert: ran.every((x) => INERT_COMMANDS.includes(x.base)) };
+    })
     .filter((c) => c.id && c.start > 0)
     .sort((a, b) => a.start - b.start || a.i - b.i);
   // the instant each call stops RUNNING: the next call outside its batch, or its own end, whichever is first
@@ -244,14 +474,20 @@ function bindToCall(touches, calls, { tail = false, notes = [], turns = [], skew
     }
     cs[i].stop = stop;
   }
-  // lane touch-chip-cause: THE TURN'S NOTE ROW — the newest VibeSpace note at (or a skew after) the touch, unless a
-  // user message started another turn between that note and the touch
+  // lane touch-chip-cause: THE TURN'S NOTE ROW — the newest VibeSpace note of the touch's own TURN: at (or a skew after)
+  // the touch, and no turn starts between them (r2: the skew window never crosses a turn — the NEXT turn's note a
+  // moment after this turn's last touch is not its note; a note may precede its own turn's start by the skew)
   const ns = (Array.isArray(notes) ? notes : []).map((n) => ({ id: String(n && n.id), at: num(n && n.at) })).filter((n) => n.id && n.at > 0).sort((a, b) => a.at - b.at);
   const us = (Array.isArray(turns) ? turns : []).map(num).filter((v) => v > 0);
   const noteFor = (at) => {
-    let best = null;
-    for (const n of ns) { if (n.at <= at + skewMs) best = n; else break; }
-    return best && !us.some((u) => u > best.at + skewMs && u <= at) ? best : null;
+    for (let k = ns.length - 1; k >= 0; k--) {
+      const n = ns[k];
+      if (n.at > at + skewMs) continue;
+      const crosses = n.at > at ? us.some((u) => u > at && u <= n.at + skewMs) : us.some((u) => u > n.at + skewMs && u <= at);
+      if (!crosses) return n;
+      if (n.at <= at) return null;
+    }
+    return null;
   };
   const byCall = {};
   const byNote = {};
@@ -262,14 +498,19 @@ function bindToCall(touches, calls, { tail = false, notes = [], turns = [], skew
     let pick = null;
     if (causeOf(t) === 'agent') {
       const running = cs.filter((c) => c.start - skewMs <= at && (c.stop === null || at < c.stop + skewMs));
-      const able = running.filter((c) => callCauses(c, t));
-      if (able.length) {
-        const named = able.filter((c) => namesTouch(c.text, t));
-        const pool = named.length ? named : able;
+      // ① a running call that names the touch or runs the CLI as a command word — the one naming it, then the latest
+      const named = running.filter((c) => callNames(c, t));
+      if (named.length) {
+        const exact = named.filter((c) => namesTouch(c.text, t, c.runs));
+        const pool = exact.length ? exact : named;
         pick = pool[pool.length - 1];
+      } else if (running.length === 1 && callCanRun(running[0])) {
+        // ② a LONE running call that could have run anything (a script, an interpreter, a wrapper, a helper)
+        pick = running[0];
       } else if (!running.length && tail && cs.length && at >= cs[cs.length - 1].start - skewMs && callCauses(cs[cs.length - 1], t)) {
         pick = cs[cs.length - 1];
       }
+      // ③ several running and none naming it, or a lone call that runs nothing: the note row below; ④ no note: the chip
     }
     if (pick) { (byCall[pick.id] || (byCall[pick.id] = [])).push(t); continue; }
     const note = noteFor(at);
@@ -411,6 +652,14 @@ function readableCut(row, chars = READABLE_TITLE_CHARS) {
   return Math.min(name.length, head + [...title].slice(0, Math.max(0, chars)).join('').length);
 }
 
+/** lane touch-chip-cause r2: THE TIGHT CUT — how many UTF-16 units of `rowName(row)` a strip's first chip keeps when its
+ *  readable minimum and the fold control do not fit one line: the first `chars` code points of the name (the account's,
+ *  as it leads), + the «…» the view adds. The control has priority over chip 0. */
+function tightCut(row, chars = TIGHT_NAME_CHARS) {
+  const name = rowName(row);
+  return Math.min(name.length, [...name].slice(0, Math.max(1, chars)).join('').length);
+}
+
 /** The library glyphs a row may wear — the adapter's DECLARED `caps.glyph` (lane dc-channels-blocks, C7). */
 const GLYPHS = Object.freeze(['chat', 'mail', 'robot']);
 /** Which library glyph a row wears: the row's `icon` (its adapter's declared caps.glyph, stamped by the witness);
@@ -486,6 +735,7 @@ function searchTouches(results, { max = SEARCH_MAX_CONVS, query = '', memo = nul
 module.exports = {
   OPS, DRAFT_OPS, FILED_OPS, RING_MAX, MERGE_MS, SKEW_MS, BATCH_MS, FOLD_SHOWN, SEARCH_MAX_CONVS, SEARCH_HITS_MAX, QUERY_MAX, TITLE_MAX, LABEL_MAX, TOUCH_PLACEMENTS,
   CAUSES, CALL_KINDS, READABLE_TITLE_CHARS, causeOf, callCauses, readableCut,
+  HELPER_TOOLS, INERT_COMMANDS, MID_TURN_QUEUE, TIGHT_NAME_CHARS, shellCommands, channelsRuns, runsNothing, callKindOf, callNames, callCanRun, opensTurn, tightCut,
   touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, bindToCall, foldTouches, filedProposals, foldView, rowWords, replyWords, rowName,
   GLYPHS, glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, tailVerdict,
 };

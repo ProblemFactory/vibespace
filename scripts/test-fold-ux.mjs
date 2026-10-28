@@ -33,6 +33,9 @@
 //     account + 12 characters of the title, measured by an independent probe), the rest fold into «另有 N 个», and a
 //     REAL press expands into ROWS (one per conversation, stacked, full width, with a time); RED CONTROL: a patched
 //     view without the cause / the fit ⇒ the 17 on vibespace-status, the chips below their readable minimum.
+//     Round 2: the head opens only at the CLI's COMMAND WORD (never inside a quoted `--reason`); at UI scale 60 / 80 /
+//     125 % the strip keeps the minimum in CSS px (the same min-width at every scale, every chip readable, no chip
+//     folded that would fit); a LONG account label at 390 never clips the fold control (chip 0 gives its name first).
 // Run: node scripts/test-fold-ux.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -120,9 +123,14 @@ check('files/errors/running composition', S.runSummaryLabel({ byKind: S.countKin
     && S.commandHeadWords('vibespace-status working\nvibespace-channels read lark/oc_1') === '… vibespace-channels read lark/oc_1'
     && S.commandHeadWords('/opt/x/bin/vibespace-channels read a/b') === '/opt/x/bin/vibespace-channels read a/b' && S.commandHeadWords('vibespace-status x && /opt/x/bin/vibespace-channels read a/b') === '… /opt/x/bin/vibespace-channels read a/b'
     && S.commandHeadWords('echo vibespace-channelsX') === 'echo vibespace-channelsX' && S.commandHeadWords('  vibespace-channels list') === 'vibespace-channels list');
+  check('commandHeadWords (touch-chip-cause r2): the CLI\'s name inside QUOTED prose or another command\'s argument never opens the head — the whole command reads; a `bash -c` string opens at its shell',
+    S.commandHeadWords('vibespace-status working --reason "triage the inbox with vibespace-channels read next"') === 'vibespace-status working --reason "triage the inbox with vibespace-channels read next"'
+    && S.commandHeadWords('cd repo && grep -rn vibespace-channels docs/ | head') === 'cd repo && grep -rn vibespace-channels docs/ | head'
+    && S.commandHeadWords('git commit -m "fix vibespace-channels search paging"') === 'git commit -m "fix vibespace-channels search paging"'
+    && S.commandHeadWords(`cd x && bash -c 'vibespace-channels read "$X"'`) === `… bash -c 'vibespace-channels read "$X"'`);
 }
 check('mcpParts splits mcp__server__tool and rejects the rest', JSON.stringify(S.mcpParts('mcp__a__b_c')) === '{"server":"a","tool":"b_c"}' && S.mcpParts('Bash') === null && S.mcpParts('') === null);
-check('the pure module imports nothing but PURE rules (DOM-free by construction; B-40f8: src/assistant-note.js; lane exit-calls-in-history: src/exit-call.js)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/(?:assistant-note|exit-call)\.js';/.test(l)));
+check('the pure module imports nothing but PURE rules (DOM-free by construction; B-40f8: src/assistant-note.js; lane exit-calls-in-history: src/exit-call.js; lane touch-chip-cause r2: src/channel-touch.js — where a command line runs the channels CLI)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/(?:assistant-note|exit-call|channel-touch)\.js';/.test(l)));
 
 // ── inc-mudv05ja-n5rv: WHEN THE FOLD PASS RUNS — the PURE classifier ─────────
 {
@@ -1235,7 +1243,7 @@ const TC_KIT = `(() => {
     'Re: Support escalation for the dock', 'Shipping window moved to Thursday', 'Re: Re: Contract redlines round two', 'Welcome aboard — first-week plan', 'Fixture survey results are in', 'Re: Office move logistics', 'Training slots open for review'];
   const LK = ['Ops desk', '季度汇报群 · 数字核对', 'Pairing room (night shift)', 'Release train coordination', '客户支持升级处理'];
   window.__tc = {
-    async open({ maximize } = {}) {
+    async open({ maximize, account } = {}) {
       let cv = findCv();
       if (!cv) window.app.viewSession(${JSON.stringify(TC_SID)}, ${JSON.stringify(CWD)}, 'touch cause');
       for (let i = 0; i < 80 && !(cv = findCv()); i++) await sleep(250);
@@ -1248,7 +1256,7 @@ const TC_KIT = `(() => {
       const touches = [];
       // the OWNER's shape: 17 conversations (5 Lark, 12 Gmail) touched while vibespace-status ran — no call in view ran the CLI then
       for (let i = 0; i < 17; i++) { const lark = i % 4 === 0 && i < 20 && touches.filter((x) => x.adapterId === 'lark').length < 5;
-        touches.push({ id: 'tc-o' + i, op: 'read', adapterId: lark ? 'lark' : 'gmail', convId: 'fx-o' + i, title: lark ? LK[touches.filter((x) => x.adapterId === 'lark').length] : GM[i % GM.length] + (i >= 12 ? ' #' + i : ''), account: lark ? 'Lark / 飞书' : 'Gmail', icon: lark ? 'chat' : 'mail', kind: lark ? 'group' : 'gmail', count: 1 + (i % 4), at: at(0, 1500 + i * 10) }); }
+        touches.push({ id: 'tc-o' + i, op: 'read', adapterId: lark ? 'lark' : 'gmail', convId: 'fx-o' + i, title: lark ? LK[touches.filter((x) => x.adapterId === 'lark').length] : GM[i % GM.length] + (i >= 12 ? ' #' + i : ''), account: account ? account[lark ? 0 : 1] : lark ? 'Lark / 飞书' : 'Gmail', icon: lark ? 'chat' : 'mail', kind: lark ? 'group' : 'gmail', count: 1 + (i % 4), at: at(0, 1500 + i * 10) }); }
       // …and the read the agent ran itself (its read call names it)
       touches.push({ id: 'tc-r', op: 'read', adapterId: 'lark', convId: 'oc_f1x7ure0', title: 'Ops desk', account: 'Lark / 飞书', icon: 'chat', kind: 'group', count: 60, at: at(1, 1500) });
       // H1: the chained command's search — 17 conversations, one instant
@@ -1278,7 +1286,8 @@ const TC_KIT = `(() => {
       const box = el.querySelector('.chat-channel-touches'), br = box.getBoundingClientRect();
       const chips = [...box.querySelectorAll(':scope > .chat-channel-touch')].filter(vis);
       const more = box.querySelector(':scope > .chat-channel-touches-more');
-      const probe = document.createElement('span'); probe.style.cssText = 'position:fixed;left:-9999px;top:0;visibility:hidden;white-space:pre'; document.body.appendChild(probe);
+      // the probe lives in the LIST's own tree (r2: the UI scale and the chat's font scale zoom it like the names)
+      const probe = document.createElement('span'); probe.style.cssText = 'position:absolute;left:0;top:0;visibility:hidden;white-space:pre;pointer-events:none'; this.list.appendChild(probe);
       const facts = chips.map((c) => {
         const name = c.querySelector('.cct-name'), ns = getComputedStyle(name), row = c._row || {};
         probe.style.fontFamily = ns.fontFamily; probe.style.fontSize = ns.fontSize; probe.style.fontWeight = ns.fontWeight; probe.style.fontStyle = ns.fontStyle;
@@ -1288,13 +1297,22 @@ const TC_KIT = `(() => {
         const part = (row.account ? row.account + ' › ' : '') + title.slice(0, 12).join('');
         probe.textContent = title.length > 12 ? part + '…' : full;
         const need = probe.getBoundingClientRect().width, have = name.getBoundingClientRect().width, r = c.getBoundingClientRect();
-        return { need: Math.round(need * 10) / 10, have: Math.round(have * 10) / 10, readable: have + 0.01 >= need, inside: r.left >= br.left - 1 && r.right <= br.right + 1, top: Math.round(r.top + r.height / 2), w: Math.round(r.width), tw: vis(c.querySelector('.cct-time')) };
+        // chip 0's TIGHT floor (r2): the first 6 code points of the name + «…»
+        probe.textContent = [...full].slice(0, 6).join('') + (full.length > 6 ? '…' : '');
+        const tightNeed = probe.getBoundingClientRect().width;
+        return { need: Math.round(need * 10) / 10, have: Math.round(have * 10) / 10, readable: have + 0.01 >= need, tight: have + 0.01 >= tightNeed, inside: r.left >= br.left - 1 && r.right <= br.right + 1, top: Math.round(r.top + r.height / 2), w: Math.round(r.width), tw: vis(c.querySelector('.cct-time')), min: parseFloat(c.style.minWidth) || 0 };
       });
       probe.remove();
       const mr = more && vis(more) ? more.getBoundingClientRect() : null;
+      // NO CHIP FOLDED THAT WOULD FIT (CSS px, r2): the visible chips' minimums + the first hidden one + the fold control vs the box
+      const all = [...box.querySelectorAll(':scope > .chat-channel-touch')], gapPx = parseFloat(getComputedStyle(box).columnGap) || 0;
+      const nextHidden = all.find((x) => x.hidden);
+      const usedCss = facts.reduce((s, f, i) => s + f.min + (i ? gapPx : 0), 0);
+      const underFilled = !!(nextHidden && more && usedCss + gapPx + (parseFloat(nextHidden.style.minWidth) || 0) + (all.indexOf(nextHidden) + 1 < all.length || (more._rows || []).length > all.indexOf(nextHidden) + 1 ? gapPx + more.offsetWidth : 0) <= box.clientWidth - 1);
       return { n: facts.length, facts, total: this.total(el), readable: facts.filter((f) => f.readable).length, inside: facts.every((f) => f.inside), oneLine: new Set(facts.map((f) => Math.round(f.top / 4))).size <= 1,
         stacked: facts.every((f, i) => i === 0 || f.top > facts[i - 1].top + 6), fullWidth: facts.every((f) => f.w >= br.width * 0.9), times: facts.filter((f) => f.tw).length,
-        more: mr ? more.textContent : '', moreInside: mr ? mr.right <= br.right + 1 && mr.left >= br.left - 1 : null, boxW: Math.round(br.width), expanded: box.dataset.expanded === '1', compact: el.classList.contains('chat-channel-compact') };
+        more: mr ? more.textContent : '', moreInside: mr ? mr.right <= br.right + 1 && mr.left >= br.left - 1 : null, moreWhole: mr ? mr.right <= br.right + 1 && mr.left >= br.left - 1 && more.scrollWidth <= more.clientWidth + 1 : null,
+        boxW: Math.round(br.width), boxCss: box.clientWidth, underFilled, mins: facts.map((f) => f.min), zoom: Math.round((br.width / (box.offsetWidth || 1)) * 100) / 100, expanded: box.dataset.expanded === '1', compact: el.classList.contains('chat-channel-compact') };
     },
     async moreAt(el) {
       const more = el.querySelector('.chat-channel-touches > .chat-channel-touches-more');
@@ -1370,6 +1388,34 @@ for (const [size, metrics] of [[1280, D1280], [390, P390]]) {
   const a = r.again;
   check(`${size}: 「收起」 (a real press) gives the strip back — the same readable chips and fold`, r.p2?.hit && a && !a.expanded && a.n === c?.n && a.readable === a.n && a.more === c?.more, tcStrip(a));
 }
+// ── touch-chip-cause round 2 (the r1 verdict, confirmed 0.93 / 0.88): THE MINIMUM IN ONE UNIT — the readable minimum was
+// on-screen px written as a CSS min-width: at UI scale 80 % 129 px for a 156 px minimum, names cut below it; at 125 %
+// fewer chips than fit. The real setting (localStorage `vibespace.uiScale`, applied at boot as the body's zoom), 1280.
+{
+  const z100 = (await (async () => { await tcLoad(cdp, evaljs, D1280); await evaljs('window.__tc.open({ maximize: true })'); return evaljs('window.__tc.strip(window.__tc.holder())'); })());
+  for (const pct of [60, 80, 125]) {
+    await evaljs(`localStorage.setItem('vibespace.uiScale', '${pct}'); true`);
+    await tcLoad(cdp, evaljs, D1280);
+    const o = await evaljs('window.__tc.open({ maximize: true })');
+    const z = await evaljs('window.__tc.strip(window.__tc.holder())');
+    if (pct === 80) await tcShot(cdp, evaljs, `touch-chip-cause-1280-ui${pct}.png`);
+    check(`UI SCALE ${pct} % (body zoom ${z?.zoom}): every visible chip of the 17 READABLE (${z?.facts?.map((f) => `${f.have}≥${f.need}`).join(', ')}), its minimum the SAME CSS px as at 100 % (${z?.mins?.[0]} vs ${z100?.mins?.[0]}), inside, one line, the fold whole; no chip folded that would fit`,
+      o?.ok && z && z.compact && z.n >= 1 && z.readable === z.n && z.inside && z.oneLine && z.moreWhole && !z.underFilled && z.more === `另有 ${17 - z.n} 个` && Math.abs((z.mins?.[0] || 0) - (z100?.mins?.[0] || -9)) <= 1, tcStrip(z) + ' ' + JSON.stringify({ zoom: z?.zoom, mins: z?.mins, under: z?.underFilled, boxCss: z?.boxCss }));
+  }
+  await evaljs(`localStorage.removeItem('vibespace.uiScale'); true`);
+  // THE FOLD CONTROL IS NEVER CLIPPED (unverified r1 finding, reproduced with this suite: an email-shaped account label at
+  // 390 kept chip 0 at its full minimum and pushed «另有 16 个» past the box — one glyph showed)
+  await tcLoad(cdp, evaljs, P390);
+  const ol = await evaljs(`window.__tc.open({ account: ['team.inbox.overflow@fixture-lark.example', 'team.inbox.overflow@fixture-mail.example'] })`);
+  const lg = await evaljs('window.__tc.strip(window.__tc.holder())');
+  await tcShot(cdp, evaljs, 'touch-chip-cause-390-long-label.png');
+  check(`390 LONG ACCOUNT LABEL: the fold control 「${lg?.more}」 is WHOLE inside the box (${lg?.boxW} px); chip 0 inside it, its name cut to no less than its first 6 characters + «…» (${lg?.facts?.map((f) => f.have).join(', ')} px drawn)`,
+    ol?.ok && lg && lg.n >= 1 && lg.inside && lg.oneLine && lg.moreWhole && lg.more === `另有 ${17 - lg.n} 个` && lg.facts.every((f) => f.tight), tcStrip(lg) + ' ' + JSON.stringify({ moreWhole: lg?.moreWhole, tight: lg?.facts?.map((f) => f.tight) }));
+  const lp = await tcPress(cdp, evaljs, 'window.__tc.holder()');
+  const le = await evaljs('window.__tc.strip(window.__tc.holder())');
+  check(`390 LONG ACCOUNT LABEL: a REAL press on the whole control expands into 17 stacked rows`, lp?.hit && le && le.expanded && le.n === 17 && le.stacked, JSON.stringify({ lp, n: le?.n, stacked: le?.stacked }));
+}
+
 // RED CONTROL: the pre-lane view — a patched channel-touch-view.js whose calls carry no kind and whose binder sees no note
 // rows (the pre-lane binding: time alone) and whose strip is never fitted — served to a second page at 390: the owner's 17
 // land on vibespace-status, H2's reads on vibespace-status, and the chips sit below their readable minimum

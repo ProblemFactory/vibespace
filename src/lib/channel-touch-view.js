@@ -30,7 +30,12 @@
 //     run's one-line strip a chip never goes below its READABLE MINIMUM (glyph +
 //     account + 12 characters of the title, measured): what does not fit folds
 //     into "+N more", and "+N more" expands into ROWS — one ResizeObserver per
-//     view re-fits a strip when its width changes.
+//     view re-fits a strip when its width changes. Round 2: a lone call that
+//     could have run the CLI (a script, an interpreter, a helper by its TOOL
+//     NAME) is the cause; a turn is the transcript's (T.opensTurn — a steer
+//     typed mid-turn belongs to its turn); every width is measured in CSS px
+//     (a rect ÷ the zoom it is drawn at — the UI scale × the chat's font
+//     scale); the fold control is never clipped (chip 0 gives its name first).
 //  ② THE CHIP: this turn's touches (at or after the turn's start — the
 //     server's, or the newest live user message) → the status bar's keyed
 //     `channels` chip ("Channels · <latest title>"), gone when a new turn
@@ -71,15 +76,14 @@ export function openTouchRow(app, row) {
   else if (typeof app.openChannelOutbox === 'function') app.openChannelOutbox();   // a composed message has no conversation until it is sent
 }
 
-/** lane touch-chip-cause: what a card's call IS for the cause rule (PURE T.CALL_KINDS): a `command` (a shell call), a
- *  helper (an Agent / Task call — a prompt; its own calls run under this session's token), anything else. */
+/** lane touch-chip-cause: what a card's call IS for the cause rule (PURE T.callKindOf): a `command` (a shell call), a
+ *  `helper` BY ITS TOOL NAME (T.HELPER_TOOLS — Agent / Task, codex's Sub-agent card; r2: never by a `prompt` field — a
+ *  WebFetch carries one), anything else. */
 function callKind(cardEl) {
   const m = cardEl && cardEl._rawMsg;
   const b = m && m.content && m.content[0];
   const input = b && b.input;
-  if (!input || typeof input !== 'object') return 'other';
-  if (toolCommandText(input)) return 'command';
-  return typeof input.prompt === 'string' ? 'helper' : 'other';
+  return T.callKindOf({ name: (b && (b.toolName || b.name)) || (m && m.toolName) || '', collapseKind: m && m.collapseKind, command: input && typeof input === 'object' ? toolCommandText(input) : '' });
 }
 /** A VibeSpace note row's key (its message id — never a tool id). */
 const noteKey = (n) => (n && n.dataset && n.dataset.msgId ? `note:${n.dataset.msgId}` : '');
@@ -134,13 +138,27 @@ export function createChannelTouchView(view) {
       return { id: c.dataset.toolId, start, end, text: callText(c), kind: callKind(c), el: c };
     });
   }
-  /** lane touch-chip-cause: the VibeSpace note rows (where a touch no call caused hangs) and the user messages (each
-   *  starts a turn — a note of an earlier turn never takes a later turn's touch). */
+  /** lane touch-chip-cause: the VibeSpace note rows (where a touch no call caused hangs) and the instants TURNS start (a
+   *  note of an earlier turn never takes a later turn's touch). r2: a turn is the TRANSCRIPT's (PURE T.opensTurn over
+   *  each record and the one before it — the person's message, a wake, a peer message, a task notification), never the
+   *  CSS class of a user bubble: a steer typed mid-turn belongs to its turn. */
   function notesOf(list) {
     return [...list.querySelectorAll('.chat-msg.chat-vs-note')].map((n) => ({ id: noteKey(n), at: Number(n.dataset.ts) || 0, el: n })).filter((n) => n.id && n.at > 0);
   }
   function turnsOf(list) {
-    return [...list.querySelectorAll('.chat-msg.chat-msg-user')].map((u) => Number(u.dataset.ts) || 0).filter((v) => v > 0);
+    const out = [];
+    let prev = null;
+    // the RECORD each element draws, read through the view's own message list (a card drawn from its text alone — the
+    // task-notification wake — carries a stand-in `_rawMsg` with no turn); `_rawMsg` only where the list has none
+    const byId = new Map((Array.isArray(view._messages) ? view._messages : []).map((x) => [x && x.id, x]));
+    for (const el of list.children) {
+      if (!el.classList || !el.classList.contains('chat-msg')) continue;
+      const m = (el.dataset.msgId && byId.get(el.dataset.msgId)) || el._rawMsg;
+      if (!m) continue;
+      if (!isNote(el) && T.opensTurn(m, prev)) { const v = Number(el.dataset.ts) || 0; if (v > 0) out.push(v); }
+      prev = m;
+    }
+    return out;
   }
   function rebind() {
     if (st.disposed) return;
@@ -264,25 +282,36 @@ export function createChannelTouchView(view) {
     if (more.title !== moreTip) more.title = moreTip;
     if (box.lastElementChild !== more) box.appendChild(more);
   }
-  /** A chip's READABLE MINIMUM (px): from its left edge to the end of the name's readable prefix (T.readableCut — the
-   *  account whole + 12 code points of the title, + the «…» a longer name is cut with), laid out by `ruler` in the
-   *  name's own font, + the gap before its words, its right padding and border. 0 when it cannot be measured (the CSS
-   *  floor stands). */
-  function readableMin(chip, ruler) {
+  /** The ZOOM the box is drawn at (the UI scale × the chat's font scale): a rect is ON-SCREEN px, a CSS width is not —
+   *  measured as the on-screen width of a 1000 CSS px ruler in the box's own tree (the codebase's uiScale rule for
+   *  viewport → CSS px, with the list's zoom in it). */
+  function zoomOf(ruler) {
+    ruler.textContent = '';
+    ruler.style.width = '1000px';
+    const z = ruler.getBoundingClientRect().width / 1000;
+    ruler.style.width = '';
+    return z > 0 ? z : 1;
+  }
+  /** A chip's MINIMUM (CSS px) keeping `cut` UTF-16 units of its name (+ the «…» a longer name is cut with): from its
+   *  left edge to the end of that prefix, laid out by `ruler` in the name's own font, + the gap before its words, its
+   *  right padding and border. Every rect is divided by `z` — ONE unit (r2: on-screen px added to CSS px gave 129 px
+   *  for a 156 px minimum at 80 %). 0 when it cannot be measured (the CSS floor stands). */
+  function minFor(chip, ruler, z, cut) {
     const name = chip.querySelector('.cct-name');
-    const row = chip._row;
-    if (!name || !row || !ruler) return 0;
+    if (!name || !ruler || !chip._row) return 0;
     const text = name.textContent || '';
-    const cut = Math.min(text.length, T.readableCut(row));
+    const n = Math.min(text.length, cut);
     const cs = getComputedStyle(chip), ns = getComputedStyle(name);
     for (const p of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing']) ruler.style[p] = ns[p];
-    ruler.textContent = text.slice(0, cut) + (cut < text.length ? '…' : '');
-    const w = ruler.getBoundingClientRect().width;
-    const left = name.getBoundingClientRect().left - chip.getBoundingClientRect().left;
+    ruler.textContent = text.slice(0, n) + (n < text.length ? '…' : '');
+    const w = ruler.getBoundingClientRect().width / z;
+    const left = (name.getBoundingClientRect().left - chip.getBoundingClientRect().left) / z;
     const words = chip.querySelector('.cct-words');
     const gap = words && getComputedStyle(words).display !== 'none' ? parseFloat(cs.columnGap) || 0 : 0;
     return Math.ceil(left + w + gap + (parseFloat(cs.paddingRight) || 0) + (parseFloat(cs.borderRightWidth) || 0) + 1);
   }
+  /** A chip's READABLE MINIMUM: the account whole + 12 code points of the title (T.readableCut). */
+  const readableMin = (chip, ruler, z) => minFor(chip, ruler, z, T.readableCut(chip._row));
   /**
    * A STRIP NEVER SQUEEZES A CHIP UNREADABLE (lane touch-chip-cause — the owner's screenshot: «+14 more» pressed, ten
    * chips squeezed to «Lar…» / «Gm…» on one line). While the card is COMPACT (a closed run's one line) and the box is
@@ -290,6 +319,9 @@ export function createChannelTouchView(view) {
    * stay, the rest join "+N more" (always at least one chip — the box drops under its head, the card's flex-wrap, when
    * one readable chip and the fold do not fit beside it). Expanded, or not compact, the rows are ROWS (CSS) and every
    * inline width this pass set is cleared. Re-run on every render and on every width change (the view's ONE observer).
+   * r2: every width in CSS px (zoomOf); THE FOLD CONTROL IS NEVER CLIPPED — when chip 0's readable minimum and the
+   * control do not fit the line, chip 0 gives its name down to T.tightCut (the glyph + 6 characters + «…»; a long
+   * account label at phone width) before the control leaves the box.
    */
   function fitStrip(box) {
     const chips = [...box.querySelectorAll(':scope > .chat-channel-touch')];
@@ -304,13 +336,15 @@ export function createChannelTouchView(view) {
     }
     if (!box.getClientRects().length) { setMore(box, rows, chips.length); return; }   // not laid out: the observer fits it when it is
     for (const c of chips) if (c.hidden) c.hidden = false;
-    // ONE ruler for this fit: a hidden span laid out like the name (the browser's own shaping — CJK, a fallback font), gone after
+    // ONE ruler for this fit: a hidden span laid out like the name (the browser's own shaping — CJK, a fallback font) IN
+    // THE BOX'S OWN TREE (its zoom is the names' zoom), out of the flow, gone after
     const ruler = document.createElement('span');
-    ruler.style.cssText = 'position:fixed;left:-9999px;top:0;visibility:hidden;white-space:pre;pointer-events:none';
-    document.body.appendChild(ruler);
-    const mins = chips.map((c) => readableMin(c, ruler));
+    ruler.style.cssText = 'position:absolute;left:0;top:0;display:inline-block;visibility:hidden;white-space:pre;pointer-events:none';
+    box.appendChild(ruler);
+    const z = zoomOf(ruler);
+    const mins = chips.map((c) => readableMin(c, ruler, z));
+    const tight0 = chips.length ? minFor(chips[0], ruler, z, T.tightCut(chips[0]._row)) : 0;
     ruler.remove();
-    chips.forEach((c, i) => { const v = mins[i] ? `${mins[i]}px` : ''; if (c.style.minWidth !== v) c.style.minWidth = v; });
     const gap = parseFloat(getComputedStyle(box).columnGap) || 0;
     // the fold's widest words: one chip shown, the rest behind it
     let moreW = 0;
@@ -319,11 +353,17 @@ export function createChannelTouchView(view) {
       const keep = more.textContent;
       more.textContent = t('+{n} more', { n: rows.length - 1 });
       if (box.lastElementChild !== more) box.appendChild(more);
-      moreW = Math.ceil(more.getBoundingClientRect().width);
+      moreW = Math.ceil(more.getBoundingClientRect().width / z);
       more.textContent = keep;
     }
-    const lineW = (box.parentElement && box.parentElement.clientWidth) || 0;
-    const floor = Math.ceil((mins[0] || 0) + (rows.length > 1 ? gap + moreW : 0));
+    const line = box.parentElement;
+    const ls = line ? getComputedStyle(line) : null;
+    const lineW = line ? Math.max(0, line.clientWidth - (parseFloat(ls.paddingLeft) || 0) - (parseFloat(ls.paddingRight) || 0)) : 0;
+    const tail = rows.length > 1 ? gap + moreW : 0;
+    // the control has priority over chip 0: its name gives way down to the tight cut before the control leaves the line
+    if (lineW && mins[0] && mins[0] + tail > lineW) mins[0] = Math.max(Math.min(tight0 || mins[0], mins[0]), Math.floor(lineW - tail));
+    chips.forEach((c, i) => { const v = mins[i] ? `${mins[i]}px` : ''; if (c.style.minWidth !== v) c.style.minWidth = v; });
+    const floor = Math.ceil((mins[0] || 0) + tail);
     const bm = floor > 0 ? `${lineW ? Math.min(floor, lineW) : floor}px` : '';
     if (box.style.minWidth !== bm) box.style.minWidth = bm;
     const avail = box.clientWidth;
