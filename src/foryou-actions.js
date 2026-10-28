@@ -94,7 +94,7 @@ const ROWS = Object.freeze([
   { type: 'hub-act-ask', identity: 'askId', producer: 'src/server/hub-act-ask.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'about', decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over'], stamp: 'allow' },   // r3: `about` = the asking conversation (an agent's act) — its chat draws the card
   // ── vault ──
   { type: 'automation-ask', identity: 'askId', producer: 'src/server/automation-engine.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-api', 'an automation key\'s first use', 'own'), scope: 'conversation' },
-  { type: 'vault-run-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'run', 'wait'), scope: 'conversation', decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over', 'ask-changed', 'vault_locked'], stamp: 'allow' },
+  { type: 'vault-run-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'run', 'wait'), scope: 'conversation', lateAnswer: true, decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over', 'ask-changed', 'vault_locked'], stamp: 'allow' },   // r7c (the owner's ruling «A»): past its 60 s the command is refused and the card stays answerable — an Allow then lets the agent's next run of that command through once
   { type: 'vault-grant-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'request <vault://…>', 'filed'), scope: 'conversation', decide: 'person', ends: ['granted', 'denied', 'vault_locked', 'ask-changed', 'ask-over'], stamp: 'grant' },   // r4: Allow once / For 8 hours / Deny are its three verbs (+ a lock, a changed card, an ask that is over); r6: a grant is `granted` (every reader knows it) + `resolvedFact.grantedFor` — its life: grantLifeOf
   { type: 'secret-request', identity: 'requestId', producer: 'src/server/vault-paste-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'secret', cli: C('vibespace-vault', 'request "<what>"', 'filed'), scope: 'conversation', decide: 'person', ends: ['stored', 'denied', 'vault_locked', 'ask-over', 'expired'], stamp: 'store' },
   { type: 'vault-unlock', identity: null, producer: 'src/server/vault-hooks.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group' },
@@ -275,6 +275,7 @@ function settledWords(item, t = fmt, kind = null) {
   if (by === 'delivered') return t('delivered');   // r6: a held digest the owner released
   if (by === 'discarded') return t('discarded — nothing was sent');
   if (by === 'expired' && item && item.action && item.action.type === 'channel-held-digest') return t('expired — discarded, nothing was sent');   // r6: its end discards
+  if (by === 'ask-expired' && item && item.action) return t(DEADLINE_WORDS['timed-out']);   // r7 addendum: a held ask nobody answered in time (a command: exit / run / hub act / automation) keeps its place with its outcome
   if (by === 'expired' || by === 'ask-expired') return isDecisionRow(item) ? t('expired · the agent can ask again') : t('expired');   // r2: a decision's end
   if (by === HIDDEN_BY) return t('hidden — nothing was decided');   // r3: a pointer the person hid
   if (by === 'agent') return t('withdrawn by the agent');
@@ -338,6 +339,40 @@ function expiryWords(item, { t = fmt, now = Date.now() } = {}) {
   return t('expires in {n} d', { n: Math.round((at - now) / DAY_MS) });
 }
 
+/** A CARD WITH A DEADLINE SHOWS IT (lane wake-approve-card r7 addendum — the owner: «这种 approval 卡片如果我一直不管，那边指令就会
+ *  超时？会发生什么？是不是应该显示个倒计时警告一下用户？»; the run card waited its 60 s in silence, then left). EVERY open ACTION
+ *  item carrying `expiresAt` — a generic rule, never one kind's: the run card, a hub act, an automation call, an exit ask —
+ *  whose window is ≤ DEADLINE_LIVE_MS counts down BY THE SECOND: «valid for 60 sec · 42 sec left», the warning accent under
+ *  DEADLINE_WARN_MS (a longer window — the 7-day wake ask — keeps expiryWords' «expires in 7 d»). Past its end: a row with a
+ *  LATE ANSWER (`lateAnswer` — r7c, the owner's ruling «A»: the agent's command was refused, an Allow now lets its next run of
+ *  that command through once) keeps its buttons and says so — as does an item its producer marked `action.late`; any other
+ *  row says «timed out — …» and draws no answer (its producer's settle follows; the record keeps its place). → {at, from,
+ *  left, total, warn, state: 'live' | 'late' | 'timed-out', text} | null (no live deadline: a notice words its own window). */
+const DEADLINE_LIVE_MS = 60 * 60e3;
+const DEADLINE_WARN_MS = 15e3;
+const DEADLINE_WORDS = Object.freeze({
+  live: i18nKey('valid for {total} · {left} left'),
+  late: i18nKey('timed out — the agent\'s command was refused; Allow now = its next run of this command goes through (once)'),
+  'timed-out': i18nKey('timed out — the agent\'s command was refused (it may ask again)'),
+});
+const spanWords = (ms, t) => {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  if (s < 120) return t('{n} sec', { n: s });
+  const m = Math.round(s / 60);
+  return m < 120 ? t('{n} min', { n: m }) : t('{n} h', { n: Math.round(m / 60) });
+};
+function deadlineOf(item, { t = fmt, now = Date.now() } = {}) {
+  if (!item || item.status !== 'open' || item.kind === 'notice' || item.clearedAt) return null;
+  const row = item.action && typeof item.action.type === 'string' ? ROW_OF[item.action.type] : null;
+  const marked = !!(item.action && item.action.late);   // the producer says the deadline passed and the card still answers
+  const at = Number(item.expiresAt), from = Number(item.createdAt);
+  if (!marked && !(Number.isFinite(at) && Number.isFinite(from) && at > from && at - from <= DEADLINE_LIVE_MS)) return null;
+  const left = Number.isFinite(at) ? at - now : 0, total = Number.isFinite(at) && Number.isFinite(from) ? at - from : 0;
+  const state = marked || (left <= 0 && row && row.lateAnswer) ? 'late' : left <= 0 ? 'timed-out' : 'live';
+  const text = state === 'live' ? t(DEADLINE_WORDS.live, { total: spanWords(total, t), left: spanWords(left, t) }) : t(DEADLINE_WORDS[state]);
+  return { at, from, left: Math.max(0, left), total, warn: state !== 'live' || left < DEADLINE_WARN_MS, state, text };
+}
+
 /** WHO MAY DECIDE (lane wake-approve-card — 主开发's ruling 2026-10-27: canDecide is an IDENTITY fact, never a VIEW fact).
  *  The person holding the owner's cookie decides from EVERY view they open — the live chat, a view-* history, a sub-*
  *  viewer: taking the buttons from a read-only view would cost the owner a door and fence nothing (the fence is the
@@ -371,7 +406,7 @@ function clockWords(ts, now = Date.now()) {
  *  request's «stored · HH:MM»): resolvedBy → the verb. A resolution the table does not name has no stamp (its own words). */
 const STAMPS = Object.freeze({
   approve: Object.freeze({ allowed: i18nKey('approved by you'), denied: i18nKey('denied by you') }),
-  allow: Object.freeze({ allowed: i18nKey('allowed by you'), always: i18nKey('always allowed by you'), denied: i18nKey('denied by you') }),
+  allow: Object.freeze({ allowed: i18nKey('allowed by you'), 'allowed:late': i18nKey('let through once by you · waiting for it to run again'), always: i18nKey('always allowed by you'), denied: i18nKey('denied by you') }),   // r7c: a LATE Allow (`resolvedFact.late`) — the agent's next run of the command goes through once
   store: Object.freeze({ stored: i18nKey('stored'), denied: i18nKey('refused by you') }),
   deliver: Object.freeze({ delivered: i18nKey('delivered by you'), discarded: i18nKey('discarded by you') }),   // r6: a held digest's Deliver / Discard
   grant: Object.freeze({ 'granted:once': i18nKey('allowed once by you'), 'granted:8h': i18nKey('allowed by you for 8 h'), denied: i18nKey('denied by you') }),   // r4: vault-grant-ask's three verbs — r6: keyed `granted:<grantedFor>` (the record's fact); an old `granted` (no duration) has no stamp — its own words, «allowed»
@@ -420,12 +455,106 @@ function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
   const gw = by === 'granted' || by === 'always' ? grantWords(item, { t, now }) : null;
   if (gw && gw.state !== 'live') return { verb: gw.verb, time: gw.when, text: gw.text, denied: false, ended: gw.state };
   const words = STAMPS[ROW_OF[item.action.type].stamp] || STAMPS.approve;
-  const key = by === 'granted' && fact && (fact.grantedFor === 'once' || fact.grantedFor === '8h') ? `granted:${fact.grantedFor}` : by;
+  const key = by === 'granted' && fact && (fact.grantedFor === 'once' || fact.grantedFor === '8h') ? `granted:${fact.grantedFor}` : by === 'allowed' && fact && fact.late === true ? 'allowed:late' : by;
   if (!Object.prototype.hasOwnProperty.call(words, key)) return null;
   if (!fact || fact.decidedBy !== 'person') return null;
   const verb = t(words[key]);
   const time = clockWords(Number(fact.decidedAt) || item.resolvedAt || item.createdAt, now);
   return { verb, time, text: `${verb} · ${time}`, denied: by === 'denied' || by === 'discarded' };   // `denied`: the card's quiet red
+}
+/** THE VAULT-RUN CARD (lane wake-approve-card r7 — the owner, 2026-10-27: «这个卡片的可读性很差», the run card was an English
+ *  prose wall on a Chinese UI). The door writes `item.facts` (lane vault-agent-own's PURE `cardFactsOf`: {v, who, tool, cmd,
+ *  folder, secrets, hosts, shape, always, templates, masking} — every reason a CODE from its closed tables, never a
+ *  sentence); THIS is the ONE reader the tray row, the chat card and the For-you window word it through, in the viewer's
+ *  language: a HEADLINE (who + verb + what), the COMMAND (its own box), ≤ 4 fact ROWS with the deciding fact FIRST and
+ *  marked, the «Always» HINT (why it is not offered) and the FOLD's technical lines (the full path, the references, what
+ *  «Always» remembers, the masking, the templates — never in the body). A value is SEGMENTS: {text} words, {mono} data (a
+ *  path, a host, a variable), {aside} a parenthesis, {code} a code these tables have no words for — drawn monospace, never guessed into a
+ *  sentence. null = no facts this client reads (v ≠ 1, another kind): the record's prose `detail`, exactly as before. */
+const RUN_ALWAYS_WHY = Object.freeze({   // = vault-run.js's ALWAYS_WHY (int-C: its export is the census's list)
+  'destination-unknown': i18nKey('where it sends what it reads is unknown'),
+  'program-writable': i18nKey('the program sits in a folder an agent can write'),
+  'config-reads': i18nKey('it reads a config file this card cannot show'),
+  'card-too-long': i18nKey('what it would run is too long to show on this card'),
+  redirect: i18nKey('it follows redirects, so where it ends up is not known'),
+  'brace-var': i18nKey('its address is built from a variable this card cannot read'),
+  'opaque-route': i18nKey('it routes the connection somewhere its address does not say'),
+  'agent-template': i18nKey('the template it fills in sits where an agent could have written it'),
+});
+const RUN_HOSTS_WHY = Object.freeze({   // = vault-run.js's HOSTS_WHY
+  'tool-names-none': i18nKey('this tool does not say where it sends what it reads'),
+  opaque: i18nKey('its route hides the host'),
+  'config-driven': i18nKey('its config file decides'),
+});
+const RUN_MASKING = Object.freeze({   // = vault-run.js's MASKING — the sentence the run card said before r7
+  'common-encodings': i18nKey('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.'),
+});
+const RUN_SHAPE = Object.freeze({   // what «Always» remembers (the shape key's kind)
+  tool: i18nKey('«Always» remembers the tool, its flags, the hosts and the secrets — its other arguments may change'),
+  line: i18nKey('«Always» remembers this whole command line'),
+});
+const RUN_AS = Object.freeze({ file: i18nKey('file {name}'), arg: i18nKey('on the command line'), stdin: i18nKey('standard input') });   // env: the variable's own name
+/** The fact row a reason is ABOUT — that row goes first, with the warning accent. */
+const RUN_DECIDES = Object.freeze({ 'destination-unknown': 'hosts', redirect: 'hosts', 'brace-var': 'hosts', 'opaque-route': 'hosts', 'program-writable': 'program' });
+const RUN_ROWS = Object.freeze(['hosts', 'program', 'folder', 'secrets']);
+const RUN_LABEL = Object.freeze({ hosts: i18nKey('Sends to'), program: i18nKey('Program'), folder: i18nKey('Working folder'), secrets: i18nKey('Secrets') });
+function runCardOf(item, { t = fmt } = {}) {
+  const f = item && item.action && item.action.type === 'vault-run-ask' && item.facts && typeof item.facts === 'object' && item.facts.v === 1 ? item.facts : null;
+  if (!f) return null;
+  const str = (x) => (typeof x === 'string' ? x : '');
+  const own = (table, code) => typeof code === 'string' && Object.prototype.hasOwnProperty.call(table, code);
+  const said = (table, code) => (own(table, code) ? [{ text: t(table[code]) }] : code ? [{ code: String(code) }] : []);
+  const list = (xs) => xs.flatMap((x, k) => (k ? [{ text: t(', ') }, ...x] : x));
+  const tool = f.tool && typeof f.tool === 'object' ? f.tool : {};
+  const folder = str(f.folder);
+  const asOf = (a) => {
+    const kind = a && typeof a === 'object' ? str(a.kind) : '', name = a && typeof a === 'object' ? str(a.name) : '';
+    if (kind === 'env') return [{ mono: name }];
+    return own(RUN_AS, kind) ? [{ text: t(RUN_AS[kind], { name }) }] : kind ? [{ code: kind }] : [];
+  };
+  // the secrets by their ENTRY (`entry`, the door's grouping key): «UniFi 账号 · 用户名» and «UniFi 账号 · 密码» are ONE entry
+  // «UniFi 账号 → UNIFI_USER、UNIFI_PASS» — its name the head the Vault window's «entry · field» names share (the full names
+  // and references: the fold)
+  const secrets = (Array.isArray(f.secrets) ? f.secrets : []).filter((s) => s && typeof s === 'object');
+  const headOf = (n) => { const cut = n.indexOf(' · '); return cut > 0 ? n.slice(0, cut) : n; };
+  const groups = [];
+  for (const s of secrets) {
+    const name = str(s.name) || str(s.ref), key = str(s.entry) || headOf(name);
+    let g = groups.find((x) => x.key === key);
+    if (!g) groups.push(g = { key, names: [], as: [] });
+    g.names.push(name); g.as.push(asOf(s.as));
+  }
+  const entryName = (g) => (g.names.length === 1 ? g.names[0] : g.names.every((n) => headOf(n) === headOf(g.names[0])) ? headOf(g.names[0]) : g.names.join(t(', ')));
+  const who = str(f.who) || str(item.sessionName) || t('An agent'), toolName = str(tool.name) || str(tool.path);
+  const headline = groups.length ? t('{who} wants to run {tool} with “{entries}”', { who, tool: toolName, entries: groups.map(entryName).join(t(', ')) }) : t('{who} wants to run {tool}', { who, tool: toolName });
+  const a = f.always && typeof f.always === 'object' ? f.always : {};
+  const h = f.hosts && typeof f.hosts === 'object' ? f.hosts : {};
+  const hosts = (Array.isArray(h.list) ? h.list : []).filter((x) => typeof x === 'string' && x);
+  const known = h.known === true && hosts.length > 0;
+  const hostWhy = own(RUN_HOSTS_WHY, h.why) ? [{ text: t('unknown ({why})', { why: t(RUN_HOSTS_WHY[h.why]) }) }] : h.why ? [{ text: t('unknown') }, { text: ' ' }, { code: String(h.why) }] : [{ text: t('unknown') }];
+  const path = str(tool.path) || toolName;
+  const rel = folder && path.startsWith(folder + '/') ? path.slice(folder.length + 1) : path;
+  const decides = a.offered === true ? null : RUN_DECIDES[a.why] || null;
+  const lines = {
+    hosts: [known ? list(hosts.map((x) => [{ mono: x }])) : hostWhy],
+    program: [[{ mono: rel }, ...(tool.writable === true ? [{ aside: t('(in a folder an agent can write)') }] : [])]],
+    folder: [[{ mono: folder }]],
+    secrets: groups.map((g) => [{ text: entryName(g) }, { text: ' → ' }, ...list(g.as.filter((x) => x.length))]),
+  };
+  const rows = [...(decides ? [decides] : []), ...RUN_ROWS.filter((k) => k !== decides)]
+    .filter((k) => k !== 'folder' || folder).filter((k) => k !== 'secrets' || groups.length)
+    .map((key) => ({ key, label: t(RUN_LABEL[key]), lines: lines[key], warn: key === decides || (key === 'hosts' && !known) }));
+  const hint = a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: str(a.directive) }] : [])];
+  const templates = (Array.isArray(f.templates) ? f.templates : []).filter((x) => x && typeof x === 'object');
+  const fold = [
+    { label: t(RUN_LABEL.program), lines: [[{ mono: path }]] },
+    ...(secrets.length ? [{ label: t(RUN_LABEL.secrets), lines: secrets.map((s) => [{ text: str(s.name) }, { text: ' — ' }, { mono: str(s.ref) }, { text: ' → ' }, ...asOf(s.as)]) }] : []),
+    ...(known ? [{ label: t(RUN_LABEL.hosts), lines: hosts.map((x) => [{ mono: x }]) }] : []),
+    ...(f.shape ? [{ label: t('Shape'), lines: [said(RUN_SHAPE, f.shape)] }] : []),
+    ...(f.masking ? [{ label: t('Output'), lines: [said(RUN_MASKING, f.masking)] }] : []),
+    ...(templates.length ? [{ label: t('Templates'), lines: templates.map((x) => [{ mono: str(x.label) }, { text: ' · ' + t('{n} bytes', { n: Number(x.bytes) || 0 }) + (x.shown === false ? ' · ' + t('not shown on this card') : '') }]) }] : []),
+  ];
+  return { headline, cmd: str(f.cmd), rows, always: { offered: a.offered === true, hint }, fold };
 }
 /** THE DECISION CARD'S MODEL (lane wake-approve-card) — `item` → {state, buttons, stamp, waiting}:
  *   'filed'         open, and this viewer may decide ⇒ buttons ['approve', 'deny'] (the row's own verbs — the tray's route)
@@ -484,4 +613,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, RUN_ALWAYS_WHY, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS };

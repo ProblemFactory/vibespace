@@ -8,6 +8,7 @@ Moved VERBATIM out of CLAUDE.md (tier-2 pass). Each `### path` section is that f
 
 ```
 src/foryou-actions.js decide / closer / ends / stamp · user-todos.js decision law + hideOf · channels-access.js lifetime + wakeHeldAt · routes/channels.js decide + the grain gate (lane wake-approve-card) — a click at either door, own verbs, «approved by you · 09:41» ⇒ kb-file-structure.md
+src/foryou-actions.js runCardOf / deadlineOf (lane wake-approve-card r7) — the vault-run card's `facts` worded (headline · command box · ≤ 4 rows, the deciding one first · the «Always» hint · a fold) and a card's deadline (live / late / timed out); user-todos-row runFactsHtml + ONE page ticker ⇒
 src/channel-filter.js grainAsFired (lane wake-approve-card r5–r6) — THE ONE READER of a grain: {access, watchers in effect, stored, inert}; effectiveGrants walks its three grains through it; «held», the writer, the dialogs and the boot censuses read it ⇒ kb-file-structure.md
 src/server/channels-access.js readGrainHolder / grainReadAt / heldRead (r5–r6) — the engine reads every grain through F.grainAsFired (`without` an account / a rule); wakeHeldAt = own rows + the rows below; holdAside ⇒ kb-file-structure.md
 scripts/test-wake-approve-card.mjs (fast) · test-wake-approve-card-chrome.mjs (heavy) (lane wake-approve-card) — the card model, the kinds, one item per request, the person verdict on the decide route (RED copies); two pages + the phone, the doors ⇒ kb-file-structure.md
@@ -1387,6 +1388,62 @@ src/server/wrapper-files.js sweepAgedWrapperFiles (ci358-reds round 2) — the b
 - **Acceptance round 5 — «held» is read by the reader that fires; a record says only what was decided; a webhook path is a wake grain:** src/channel-filter.js `grainRowsOf(rec, legacy)` (a grain's rows AS STORED, the legacy lift merged — `grainOf` judges them) and `grainAsFired(kind, rec, {accountKeys, account, above})` → `{access, watchers, stored, inert}` (an account read with its grants, a rule with the account's access rows + grants, a conversation with everything above it) — `effectiveGrants` reads its three grains through it. src/server/channels-access.js `readGrainHolder(adapterId, kind, holder)` / `grainReadAt(adapterId, grain)` / `heldRead(holder)` — THE engine reader: `convGrainOf`, `wakeHeldAt` (every STORED wake row, `{held, rows, inert, why}`; `{kind:'path'}` = a webhook path: its conversation, the account or any rule), `wakeNamesFilter`, `setGrain` (reads through it; keeps the inert rows a write does not name — `clear` from setAssignment / setScopeAssignment null takes them), `grainView`, `storedWatcherFor` (a scope digest's own watcher), `removePattern`, `setScopeAssignment`, `accessFor` / `estimateScope`; `grainReadAt` is on the engine API. src/routes/channels.js `wakeRefused(req, res, at, rows = [], eng = engine)` exported; src/routes/webhook.js `pathGrain` / `pathRefused` before every path verb that writes (after `owner()`), the join's after its slug. src/server/vault-run-door.js For 8 hours settles `granted-8h`; foryou-actions / user-todos-row: `granted` (pre-.360) ⇒ «allowed».
 - **Acceptance round 6 — a removal names the stored row; every door that can revive an inert wake is a wake door; a held delivery says its age or asks; a grant's card follows its life; a gate judges at completion:** src/server/channels-access.js `setGrain` `{drop}` (the principal keys whose STORED rows a write removes — `agentUnwatch` names its own) and `wakes` in its answer (`wakeRowsNow` before / `wakeReachDiff` after: reactivated / madeInert, said and audited — `setReach` too); `readGrainHolder(…, {without: {account | rule}})` + `convInheritedOf` / `grantsOfConversation` `{skipAccount, skipRule}`; `wakesBelow(adapterId, grain, {pattern, access})`, `ownWakes`, `wakeHeldAt(adapterId, grain, proposed)` (+ `{kind:'adapter'}`, `names`); `holdAside(plan)` / `releaseAside` / `decideHeld` (a `kind:'held'` request in `watchRequests`, For-you `channel-held-digest`, the decide route; `openWatchRequestsOf` / fileWatchRequest skip it); `pendingOf` skips `aside` rows and reports `oldest`; `agentWatchesFor` through the one reader (inert rows marked, an unreadable conversation's by id). src/server/channels-engine.js `scheduleBootPending` plans each delivery and asks `F.heldTooOld` (`armBoot`), `heldSpanOf` → the digest renderers' `since`; `orphanWatchers` / `eachRowInEffect` (capZeroDigests, deprecatedReceiptWakes) through `grainReadAt`; `flushScope` / `flushPending` on the context. src/channel-filter.js `HELD_AGE_WINDOWS`, `heldWindowMinutes`, `heldTooOld`, `heldSinceWords`; `renderScopeDigestBlock` / `renderDigestBlock` `since`. src/routes/channels.js `wakeHeld(at)` / `wakeRefused(req, res, at, rows)` — the ONE wiring's engine, the account owned, the refusal naming `held`; `ruleGrain` carries the body's `proposed`; `switchGrain` for `enabled: true`. src/routes/webhook.js `heldAtCompletion` (the completion), the pair-code row's `person`, joinRefusal `pair-wake-held`, the join's second ask at its write; src/webhook-pair.js `person` on a pending row. src/server/vault-run-door.js `grantEnded` / `armGrantEnd` + the boot's restart stamp; the record `granted` + `{grantedFor, until}`; src/user-todos.js `noteFact` / `resolvedOf`; src/foryou-actions.js `grantLifeOf` / `grantWords` / `verbsOf`, the `channel-held-digest` row (verbs Deliver / Discard, stamp `deliver`), `granted:<for>` stamps, decisionCard 'ended' / 'revoked'; user-todos-row / -actions / chat-needs-card read them; data/bin/vibespace-channels prints an inert row's mark.
 - **Gates:** test-wake-approve-card (fast — ⑦ the store law, ⑧ the row + window verbs, ⑨ the wake doors + THE WRITER CENSUS) · test-wake-approve-card-chrome (heavy — ⓪b the doors on the real hub, ①/①c the phone's two verbs and no other closer, ⑤b a decision is final) · test-channel-agent-watch ④b · test-foryou-actions-census (ACTION_IDENTITY) · test-approval-census (the reach-request row's pins + the wake gate; inbox-close pins the decision law) · r3: test-wake-approve-card ⑩ the pointer, ⑪ the lifetime's words, ⑫ the vault / hub rows · test-channel-agent-watch ④c / ④d · test-hub-act-ask (about + the person verdict) · test-vault-run / test-vault-paste (the decision law on their items) · the chrome suite ⑦ (the pointer's Hide, «expires in 7 d», the paste request then the run card in the asking chat). · r4: test-wake-approve-card ⑨ (the grain gate over a stub engine marking held grains; RED: round 3's gate rebuilt; THE WRITER CENSUS derived from the engine) and ⑬ (409 expired, the grant row) · test-channel-agent-watch ④d / ④e (the real engine + routes) · test-migrations (2026-10-closed-access-pointers-hidden) · test-vault-run (the grant's stamps) · the chrome suite ⑦d · r5: test-wake-approve-card ⑭ (the one reader + its census) and ⑨ (the derived file list, webhook.js) · test-channel-agent-watch ④f / ④g (the real engine + routes: a rule wake through the account's access, an inert row, a rule digest, the webhook path verbs) · r6: test-channel-agent-watch ④h · test-wake-approve-card ⑨ (the census over the AST) / ⑭ (17 roads) · test-vault-run (the grant's life, the old clients) · test-spend-paths §10c · the chrome suite ⑦d
+
+### src/foryou-actions.js runCardOf / deadlineOf + src/lib/user-todos-row.js runFactsHtml / deadlineHtml / tickDeadlines + src/lib/inbox-window.js + src/user-todos.js `facts` — THE RUN CARD AS FACTS, A CARD'S DEADLINE (lane wake-approve-card, round 7)
+
+- **Why:** the owner (2026-10-27, a screenshot of the tray): «这个卡片的可读性很差». The vault-run card was the door's English prose on a Chinese UI, with the deciding fact (where the secret is SENT: unknown) buried mid-paragraph. Then: «如果我一直不管…是不是应该显示个倒计时» — a 60 s card waited in silence and left the tray.
+- **The record (src/user-todos.js):**
+  - `add({facts})` keeps a producer's FACTS (`normalizeCardFacts` = the card's plain-data walk: depth ≤ 4, strings ≤ 2 000, ≤ 24 KB; a malformed shape throws by name) as `item.facts`;
+  - a re-file replaces them;
+  - src/record-clear.js `todo` drops them on Clear content (they hold the command, the names and the paths);
+  - `item.judged.facts` (decision-inbox-rank) is another thing with its own `normalizeFacts`.
+- **The door (lane vault-agent-own r20, PURE `cardFactsOf` in src/vault-run.js)** writes `{v: 1, who, tool {name, path, writable}, cmd, folder, secrets [{name, entry, ref, as {kind, name}}], hosts {known, list | why}, shape, always {offered, why, directive}, templates, masking}`.
+  - Every reason is a CODE of its closed tables (VR.ALWAYS_WHY / HOSTS_WHY / MASKING / CARD_SHAPES — `CARD_FACTS_CODES`).
+  - `detail` stays the old clients' prose and is never shown by a client that reads `facts`.
+  - The shared fixture is scripts/fixtures/vault-run-card-facts.json (vault-agent-own's bytes; its `codes` block echoes the exports).
+- **THE ONE READER (src/foryou-actions.js `runCardOf(item, {t})`)** builds the card from `facts`. It returns null for any `v` other than 1 (that record draws its prose):
+  - the headline «{who} 想用「{entries}」运行 {tool}»;
+  - the command;
+  - ≤ 4 rows (发往 / 程序 / 目录 / 密钥). The row the `always.why` is about (`RUN_DECIDES`: destination-unknown / redirect / brace-var / opaque-route → 发往; program-writable → 程序) comes FIRST with `warn`; 发往 is also `warn` while the hosts are unknown;
+  - the «Always» hint (its reason's words, then the directive);
+  - the fold (the full path, every reference, what «Always» remembers, the masking, the templates).
+  - A value is SEGMENTS: {text} words, {mono} data, {code} a code its tables (RUN_ALWAYS_WHY / RUN_HOSTS_WHY / RUN_MASKING / RUN_SHAPE, i18nKey) have no words for. The renderer draws a {code} monospace, never as a sentence.
+  - The secrets are grouped by `entry`; the group's name is the head their «entry · field» names share.
+- **The renderer (src/lib/user-todos-row.js `runFactsHtml(i, t, {buttons})`):**
+  - the command in `pre.ut-run-cmd` (pre-wrap, overflow-wrap anywhere, word-break break-all: a hex id wraps INSIDE the box);
+  - the rows (a grid);
+  - 允许一次 (`.ut-exit-allow`, the accent) · 拒绝 (neutral) with `.ut-run-hint` IN their row;
+  - `<details class="ut-run-fold">` «技术细节».
+  - hubAskHtml draws it for a record with facts. Without facts, the prose branch is byte-identical (test-wake-approve-card ⑮ pins 98b6fdf7's bytes).
+  - partsOf's question = the headline (escaped). A resolved record's «detail» fold holds the facts card.
+  - The For-you window draws the same HTML (`buttons: false`), the headline as its title, the command as a list row's preview, and runHintHtml after its Deny.
+- **A CARD WITH A DEADLINE SHOWS IT (`deadlineOf(item, {t, now})`, generic — every open ACTION item whose `expiresAt − createdAt` ≤ 1 h):**
+  - «valid for 60 sec · 42 sec left», with `warn` under 15 s.
+  - Past its end:
+    - `late` when the row has `lateAnswer` (the run card — the owner's ruling «A») or the producer marked `action.late` (r20b, `lateAt`; expiresAt + 24 h). Its buttons stay: «timed out — the agent's command was refused; Allow now = its next run of this command goes through (once)»;
+    - otherwise `timed-out` («… refused (it may ask again)»): the row gets `.ut-timed-out` and the style withdraws its answers.
+  - A longer window (the 7-day wake ask) keeps expiryWords' «expires in 7 d». A notice words its own window.
+- **The line (`deadlineHtml`, under the question):**
+  - `data-deadline-at/-from/-type/-late`; the folded phone row keeps it (style.css's folded-row list).
+  - The row signature drops its words, accent and state, so a repaint is not a rebuild every second.
+  - ONE page ticker (`tickDeadlines` / `armDeadlines`) re-reads every `[data-deadline-at]` in the document once a second. It is armed by renderRow / patchRow / the window's paint, and it stops itself when no line is still counting. A row taken out of the document takes its line with it, so nothing per row needs tearing down (the listener-lifecycle law).
+- **The ends, in words:**
+  - 'ask-expired' → statusWords «timed out — the agent's command was refused (it may ask again)» on the row, the window and the chat card (settledWords). resolvedByText says '' for it; «expired (no answer in 60 s)» is gone from both dictionaries.
+  - A late Allow (`resolvedFact.late`) → the stamp «let through once by you · waiting for it to run again · HH:MM» (STAMPS.allow `allowed:late`).
+  - The late card's 24 h end ('expired') → «expired · the agent can ask again».
+- **Gates:**
+  - test-wake-approve-card ⑮:
+    - the fixture × en / zh / ja (order, the marks, the hint in the answers' row, the fold, no prose);
+    - every closed code with zh + ja words;
+    - the prose branch pinned;
+    - unknown codes monospace, peer words escaped;
+    - the stress shapes;
+    - the fake clock at +0 / +50 / +61 s and the ticker;
+    - the ends' words.
+  - test-wake-approve-card-chrome ⑧: the real door with the server half's stand-in (the scratch copy's door gets the fixture's facts and r20b's late mark; skipped on a door with cardFactsOf). Its shots:
+    - three surfaces × 1280 / 390 × zh / en / ja;
+    - the warning accent, the end kept in place, the late card;
+    - the variants and the stress shapes.
 
 ### src/channel-filter.js — THE ONE READER OF A GRAIN (lane wake-approve-card, acceptance rounds 5–6)
 

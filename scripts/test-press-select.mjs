@@ -354,6 +354,7 @@ const OPT_INS = {
   '.integ-cb-url': 'the OAuth callback URL a person pastes into a vendor console (all: one tap selects it whole)',
   '.prc-cmdline': 'a process command line in the System panel',
   '.ut-exit-cmd': 'the exit-run command above Allow (verify-r4 F4: the whole command, read before allowing)',
+  '.ut-run-cmd': 'the vault-run card\'s command in its own box above Allow (lane wake-approve-card r7: the whole command, read — and copied — before allowing)',
   '.iw-exit-cmd': 'the same command in the For-you window',
   '.chat-exit-out, .chat-exit-out-all': 'a command\'s output on its exit-run chat card (lane exit-run-output — read and copied; joined at the 2.369.200 integration)',
   '.exit-runs-pre': 'a command\'s output in the machine\'s Commands… list (lane exit-run-output; joined at the 2.369.200 integration)',

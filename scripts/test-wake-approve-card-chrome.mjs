@@ -49,6 +49,15 @@
 //     carry the request; «ALWAYS» in the chat whenever the tray offers it (a known tool naming a host: chat = tray = once / always
 //     / deny; an interpreter: once / deny on both). SHOTS r3-chat-pointer(-hidden)-1280, r3-chat-vault-always-1280, r3-chat-vault-request / -cards / -records-1280,
 //     r3-phone-vault-cards-375. (The hub-act ask needs a paired machine: test-hub-act-ask drives the real asker — its `about`.)
+// ACCEPTANCE ROUND 7 (the owner: «这个卡片的可读性很差»; «…是不是应该显示个倒计时»): ⑧ THE RUN CARD READS AS FACTS — the owner's
+//     own run (a program in a folder an agent can write, two secrets, no host named) through the REAL door, its `facts` the
+//     shared fixture's (scripts/fixtures/vault-run-card-facts.json — the server half's stand-in below until int-C): the chat
+//     card, the tray row and the For-you window at 1280 and 390 in zh / en / ja — the headline, the command in its own box
+//     (wrapping inside it), the deciding row first in the warning accent, 允许一次 the primary accent with the «Always» hint
+//     beside it, the technical fold closed, no prose, no sideways scroll; A CARD WITH A DEADLINE SHOWS IT (the countdown, its
+//     warning accent under 15 s); past its 60 s THE LATE CARD
+//     (the owner's ruling «A»: r20b's `late` mark — its answers stay); the other two variants and the stress shapes LOOKED at
+//     on both widths. SHOTS r7-<lang>-<1280|390>-<chat|tray|window>.png, r7-zh-*-warn / -ended / -late / -<variant>.png.
 // Requires google-chrome (SKIP without) and a fresh `npm run build`. Run: node scripts/test-wake-approve-card-chrome.mjs [--shots <dir>]
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -119,6 +128,13 @@ const VRUN = 'const { spawnSync } = require("child_process"); const B = ' + JSON
 const VGRANT = 'const { spawnSync } = require("child_process"); const B = ' + JSON.stringify(BIN) + '; const ref = require("fs").readFileSync(' + JSON.stringify(DIR + '/grant-ref') + ', "utf8").trim();'
   + ' const r = spawnSync(process.execPath, [B + "/vibespace-vault", "request", ref, "--for", "upload the nightly backup to the bucket"], { env: process.env, encoding: "utf8", timeout: 30000 });'
   + ' console.log("vibespace-vault request: rc=" + r.status + " " + String(r.stdout) + String(r.stderr)); process.exit(r.status || 0);';
+// round 7: the owner's own run (its argv and a tag that makes each shape new: scripts the suite writes) with the entry the agent
+// may use, as UNIFI_USER / UNIFI_PASS — a card the door files with the facts the stand-in hands it
+const VFACTS = 'const { spawnSync } = require("child_process"); const fs = require("fs"); const B = ' + JSON.stringify(BIN) + '; const spec = JSON.parse(fs.readFileSync(' + JSON.stringify(DIR + '/r7-run.json') + ', "utf8"));'
+  + ' const l = spawnSync(process.execPath, [B + "/vibespace-vault", "list"], { env: process.env, encoding: "utf8" }); const ref = String(l.stdout).split(String.fromCharCode(10)).join(" ").split(" ").find((w) => w.startsWith("vault://"));'
+  + ' if (!ref) { console.log("vibespace-vault list: " + l.stdout + l.stderr); process.exit(3); }'
+  + ' const r = spawnSync(process.execPath, [B + "/vibespace-vault", "run", "--env", "UNIFI_USER=" + ref, "--env", "UNIFI_PASS=" + ref, "--env", "RUN_TAG=" + spec.tag, "--", ...spec.argv], { env: process.env, encoding: "utf8", timeout: 90000 });'
+  + ' console.log("vibespace-vault run: rc=" + r.status + " " + String(r.stdout) + String(r.stderr)); process.exit(r.status || 0);';
 const VERBS = {
   watch2: [watch(${JSON.stringify(POLL)}), watch(${JSON.stringify(PUSH)})],
   watchnt: [['vibespace-channels', ['watch', ${JSON.stringify(POLL)}, '--mode', 'next-turn', '--keyword', 'outage', '--why', 'tell me about outages on my next turn']]],   // round 2: the agent's own NON-wake road
@@ -130,7 +146,8 @@ const VERBS = {
   vreq: [['vibespace-vault', ['request', 'UniFi UCG-Fiber local admin', '--purpose', 'log in to the controller to read the WAN state', '--kind', 'password', '--name', 'UniFi UCG-Fiber local admin (agent-ops)']]],
   vrun: [['node', ['-e', VRUN]]],
   vrunall: [['node', ['-e', VRUN.replace('process.execPath, "-e", "console.log(process.env.PW ? 1 : 0)"', '"curl", "-s", "https://api.example.com/v1/items"')]]],   // round 3: a known tool naming a host — «Always» offered
-  vgrant: [['node', ['-e', VGRANT]]],   // round 4: the agent asks for a STORED entry (the vault's grant request — Allow once / For 8 hours / Deny)
+  vgrant: [['node', ['-e', VGRANT]]],
+  vfacts: [['node', ['-e', VFACTS]]],   // round 7: the owner's run card (its facts: the stand-in's)   // round 4: the agent asks for a STORED entry (the vault's grant request — Allow once / For 8 hours / Deny)
 };
 let n = 0, buf = '';
 const turn = (line) => {
@@ -174,6 +191,24 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
+// ROUND 7 — THE SERVER HALF'S STAND-IN (until int-C): this tree's vault-run door files no `facts` (lane vault-agent-own r20's
+// cardFactsOf) and no `late` mark (its r20b): the SCRATCH COPY's door hands the run card the facts the suite wrote (R7_FACTS)
+// and, while R7_LATE exists, keeps a card nobody answered OPEN at its 60 s, marked `late` (its expiresAt + 24 h) — the agent's
+// command refused all the same. A door that has cardFactsOf is left exactly as it is (int-C runs this leg on the real one)
+const R7_FACTS = path.join(stubDir, 'r7-facts.json'), R7_LATE = path.join(stubDir, 'r7-late');
+{
+  const f = path.join(wt, 'src', 'server', 'vault-run-door.js');
+  let d = fs.readFileSync(f, 'utf8');
+  if (!/cardFactsOf/.test(d)) {
+    const ACT = "action: { type: 'vault-run-ask', askId, always: !!shape.always, tool: String(shape.name || '').slice(0, 40) },";
+    const OPEN = "why === 'gone' ? 'ask-over' : outcome === 'changed' ? 'ask-changed' : outcome; if (it && it.status === 'open') {";   // the RUN card's settle (its 'expired')
+    if (d.split(ACT).length !== 2 || d.split(OPEN).length !== 2) throw new Error('r7 stand-in: the door\'s anchors moved');
+    d = d.replace(ACT, ACT + ` ...(() => { try { return { facts: JSON.parse(require('fs').readFileSync(${JSON.stringify(R7_FACTS)}, 'utf8')) }; } catch { return {}; } })(),`);
+    d = d.replace(OPEN, OPEN.replace("if (it && it.status === 'open') {", `if (it && it.status === 'open' && outcome === 'expired' && require('fs').existsSync(${JSON.stringify(R7_LATE)})) { it.action = { ...it.action, late: true, lateAt: now() }; it.expiresAt = now() + 86400e3; userTodos._save(); userTodos._notify(); } else if (it && it.status === 'open') {`));
+    fs.writeFileSync(f, d);
+    console.log('  (r7: the scratch door stands in for the server half — facts from the fixture, the late mark)');
+  }
+}
 const srvLog = fs.openSync(path.join(SHOTS, 'server.log'), 'a');
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: path.join(stubDir, 'claude'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1' }, stdio: ['ignore', srvLog, srvLog] });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
@@ -188,7 +223,7 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 const PENDS = new Map();
-armWatchdog({ capMs: 480e3, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
+armWatchdog({ capMs: 720e3, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
 for (let i = 0; i < 120; i++) { try { await fetch(`${ORIGIN}/api/home`); break; } catch { await sleep(250); } }
 
 // ── raw CDP, one connection per page (+ a RED control's bundle through the Fetch domain) ──
@@ -711,6 +746,119 @@ try {
     check(`…For 8 hours on the card (the second password first): the record «${gCard && gCard.line}» (${gDone && gDone.resolvedBy} + ${gDone && gDone.resolvedFact && gDone.resolvedFact.grantedFor}, the person verdict's mark), the toast «${toast8}»`, !!p8 && p8.pressed && !!gDone && gDone.resolvedBy === 'granted' && /Granted for 8 hours/.test(toast8 || '') && !!gDone.resolvedFact && gDone.resolvedFact.decidedBy === 'person' && gDone.resolvedFact.grantedFor === '8h' && Number(gDone.resolvedFact.until) > 0 && !!gCard && gCard.line.includes(stampG) && gCard.closers === 0, { by: gDone && gDone.resolvedBy, fact: gDone && gDone.resolvedFact, line: gCard && gCard.line, toast: toast8 });
   }
   await lap('⑦d done');
+  // ⑧ ROUND 7 — THE RUN CARD READS AS FACTS (the owner, 2026-10-27: «这个卡片的可读性很差» — an English prose wall on a Chinese
+  // UI) and A CARD WITH A DEADLINE SHOWS IT («如果我一直不管…是不是应该显示个倒计时»): the owner's own run (a program in a folder
+  // an agent can write, two secrets, no host named) through the REAL door, its facts the shared fixture's (the stand-in above
+  // until int-C) — the chat card, the tray row and the For-you window at 1280 and 390, in zh / en / ja; the countdown, its
+  // warning accent, its end (the record keeps its place in words) and the late card (its answers stay); the other two
+  // variants and the stress shapes LOOKED at on both widths
+  console.log('⑧ ROUND 7 — the run card as facts (three surfaces × 1280 / 390 × zh / en / ja); its deadline and the late card; the variants and the stress shapes');
+  try {
+    const V7 = Object.fromEntries(JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/vault-run-card-facts.json'), 'utf8')).variants.map((v) => [v.name, v.facts]));
+    fs.mkdirSync(path.join(WORK, 'office-net'), { recursive: true });
+    fs.writeFileSync(path.join(WORK, 'office-net', 'unifi-api.sh'), '#!/bin/sh\necho ok\n', { mode: 0o755 });
+    const UNIFI = ['./office-net/unifi-api.sh', 'PUT', '/proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4', '/tmp/unifi-work/wan2-primary.json'];
+    const CURL = ['curl', '-s', 'https://api.example.com/v1/health'];   // a known tool naming a host — «Always» offered (action.always)
+    let tag7 = 0;
+    const ran7 = () => (cliLog().match(/### vfacts 0 rc=/g) || []).length;
+    const runCard = async (facts, argv = UNIFI) => {
+      fs.writeFileSync(R7_FACTS, JSON.stringify(facts));
+      fs.writeFileSync(path.join(stubDir, 'r7-run.json'), JSON.stringify({ tag: 'r7-' + (++tag7), argv }));
+      const seen = new Set([...(await api()).open, ...(await api()).resolved].map((i) => i.id));
+      say('now do:vfacts');
+      return until(async () => (await api()).open.find((i) => i.action && i.action.type === 'vault-run-ask' && !seen.has(i.id)) || null, 30000);
+    };
+    const release = async (it) => {   // the owner's Deny through the card's own route (the CLI ends; the next card can come)
+      const n = ran7();
+      if (it) await A.evalJs(`fetch('/api/vault/run/asks/${it.action.askId}', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ answer: 'deny' }) }).then((r) => r.status)`);
+      await until(async () => ran7() > n, 30000);
+    };
+    // what a page shows of the card `sel` — its parts in order, the deciding row, the answers (the primary accent), the hint
+    // in their row, the fold, the command box wrapping INSIDE itself, the page never scrolling sideways
+    const LOOK7 = (sel) => `(() => { const c = document.querySelector(${JSON.stringify(sel)}); if (!c || !c.getClientRects().length) return null; const r = c.getBoundingClientRect(); const q = (s) => c.querySelector(s);
+      const probe = document.createElement('i'); probe.style.background = 'var(--accent)'; document.body.append(probe); const accent = getComputedStyle(probe).backgroundColor; probe.remove();
+      const cmd = q('.ut-run-cmd'), cr = cmd && cmd.getBoundingClientRect(), once = q('[data-answer="once"], [data-act="hub-once"]'), deny = q('[data-answer="deny"], [data-act="hub-deny"]'), hint = q('.ut-run-hint'), dl = q('.ut-deadline'), fold = q('.ut-run-fold');
+      const k = c.cloneNode(true); k.querySelectorAll('.ut-run-fold, details').forEach((x) => x.remove()); const body = k.textContent || '';
+      const vis = (b) => !!b && !!b.getClientRects().length && getComputedStyle(b).display !== 'none';
+      return { headline: (q('.ut-text, .iw-title')?.textContent || '').trim().slice(0, 120), deadline: dl && vis(dl) ? dl.textContent.trim() : null, dlState: dl ? dl.dataset.state || null : null, dlWarn: !!dl && dl.classList.contains('ut-deadline-warn'),
+        cmd: !!cmd, cmdWraps: !!cmd && cmd.scrollWidth <= cmd.clientWidth + 1, cmdInside: !!cr && cr.left >= r.left - 0.5 && cr.right <= r.right + 0.5,
+        rows: [...c.querySelectorAll('.ut-run-facts > .ut-run-row')].map((x) => x.dataset.fact + (x.classList.contains('ut-run-warn') ? '!' : '')),
+        once: vis(once) ? { primary: getComputedStyle(once).backgroundColor === accent, opacity: getComputedStyle(once).opacity, disabled: !!once.disabled } : null, deny: vis(deny) ? { neutral: getComputedStyle(deny).backgroundColor !== accent } : null,
+        always: vis(q('[data-answer="always"], [data-act="shape-always"]')), hint: hint ? hint.textContent.trim() : null, hintBeside: !!hint && !!hint.closest('.ut-exit-answer, .iw-actions'),
+        fold: fold ? (fold.open ? 'open' : 'closed') : null, prose: /vault:\\/\\/|Program: |Secrets: /.test(body), sideways: document.scrollingElement.scrollWidth > innerWidth + 1, overflowCard: c.scrollWidth > c.clientWidth + 1 }; })()`;
+    const CARD7 = (id) => `.cn-card[data-item="${id}"]`, TRAY7 = (id) => `#user-todos-popup .ut-item[data-id="${id}"]`, WIN7 = '.iw-item';
+    const tray = async (P, open) => P.evalJs(`(() => { const p = document.getElementById('user-todos-popup'); const shown = p && !p.classList.contains('hidden'); if (${open} !== shown) document.getElementById('taskbar-user-todos')?.click(); return true; })()`);
+    const unfold = (P, sel) => P.evalJs(`(() => { const r = document.querySelector(${JSON.stringify(sel)}); const row = r && (r.matches('.ut-item') ? r : r.querySelector('.ut-item')); if (row && !row.classList.contains('ut-open') && getComputedStyle(row.querySelector('.ut-body > .ut-run, .ut-body > .ut-exit-answer') || row).display === 'none') row.click(); return true; })()`);
+    const win = async (P, id) => { await P.evalJs(`app.openInbox({ itemId: ${JSON.stringify(id)} }); true`); await P.waitFor(`!!document.querySelector('.iw-item[data-id="${id}"]')`, 8000); await sleep(500); };
+    const unwin = (P) => P.evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'inbox'); if (w) app.wm.closeWindow(w.id); return true; })()`);
+    const lang = async (P, l, phone) => { await P.evalJs(`localStorage.setItem('vibespace.lang', ${JSON.stringify(l)}); true`); await P.device(phone ? 390 : 1280, phone ? 844 : 800, { mouse: !phone }); await P.load(); if (phone) await P.evalJs(`app.phoneHome?.hide?.(); true`).catch(() => null); await openChat(P); await sleep(600); };
+    // three surfaces of ONE page at its width → their looks (+ shots)
+    const quiet = (P) => P.evalJs(`(() => { if (!document.getElementById('r7-quiet')) { const s = document.createElement('style'); s.id = 'r7-quiet'; s.textContent = '.global-toast, .toast { visibility: hidden !important; }'; document.head.append(s); } return true; })()`);   // a new item's «added to For you» toasts are not under test — they covered the card at 390
+    const surfaces = async (P, it, tagShot) => {
+      await quiet(P);
+      const out = {};
+      await P.waitFor(`!!document.querySelector('${CARD7(it.id)}')`, 15000);
+      await unfold(P, CARD7(it.id)); await P.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
+      out.chat = await P.evalJs(LOOK7(CARD7(it.id))); await P.shot(`r7-${tagShot}-chat.png`);
+      await tray(P, true); await P.waitFor(`!!document.querySelector('${TRAY7(it.id)}')`, 8000); await unfold(P, TRAY7(it.id));
+      await P.evalJs(`document.querySelector('${TRAY7(it.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
+      out.tray = await P.evalJs(LOOK7(TRAY7(it.id))); await P.shot(`r7-${tagShot}-tray.png`); await tray(P, false); await sleep(300);
+      await win(P, it.id); out.win = await P.evalJs(LOOK7(WIN7)); await P.shot(`r7-${tagShot}-window.png`); await unwin(P); await sleep(300);
+      return out;
+    };
+    const facts1 = (o) => !!o && o.cmd && o.cmdWraps && o.cmdInside && !o.prose && !o.sideways && J3(o.rows) === J3(['hosts!', 'program', 'folder', 'secrets']) && o.fold === 'closed';
+    const answers1 = (o) => !!o && !!o.once && o.once.primary && Number(o.once.opacity) === 1 && !o.once.disabled && !!o.deny && o.deny.neutral && !o.always && !!o.hint && o.hintBeside;
+    const HEAD = { zh: 'ops watch 想用「UniFi 账号」运行 unifi-api.sh', en: 'ops watch wants to run unifi-api.sh with “UniFi 账号”', ja: 'ops watch が「UniFi 账号」を使って unifi-api.sh を実行しようとしています' };
+    const facts = { ...V7['hosts-unknown'], who: 'ops watch' };
+    const look7 = {};
+    for (const l of ['zh', 'en', 'ja']) {
+      await lang(A, l, false); await lang(B, l, true);
+      await A.front();
+      if (l === 'zh') fs.writeFileSync(R7_LATE, '1');   // the zh card runs out its 60 s: the LATE card (r20b's mark — the stand-in)
+      const it = await runCard(facts);
+      look7[l] = { desk: await surfaces(A, it, `${l}-1280`) };
+      await B.front(); look7[l].phone = await surfaces(B, it, `${l}-390`); await A.front();
+      const all = [...Object.values(look7[l].desk), ...Object.values(look7[l].phone)];
+      check(`r7 ⑧ (${l}): the chat card, the tray row and the For-you window at 1280 and 390 read the FACTS — «${(look7[l].desk.chat || {}).headline}»; the command in its own box (wrapping inside it at 390), 发往 FIRST in the warning accent, 4 rows, the fold closed, no prose; the page never scrolls sideways`,
+        all.every(facts1) && all.every((o) => o.headline === HEAD[l]) && all.every((o) => o.deadline && /60/.test(o.deadline)), { desk: look7[l].desk, phone: look7[l].phone });
+      check(`r7 ⑧ (${l}): ${l === 'zh' ? '允许一次' : 'Allow once'} is the PRIMARY accent (never drawn disabled), Deny neutral, no «Always» — and beside them, in their row, why: «${(look7[l].desk.chat || {}).hint}»`, all.every(answers1), all.map((o) => o && { once: o.once, deny: o.deny, hint: o.hint, beside: o.hintBeside }));
+      if (l !== 'zh') { await release(it); continue; }
+      // THE DEADLINE (zh): the warning accent under 15 s, then THE LATE CARD (the owner's ruling «A», r20b's mark — the stand-in):
+      // past its 60 s the command is refused and the card stays OPEN — the late words replace the countdown, 允许一次 / 拒绝 stay
+      await quiet(A); await quiet(B); await A.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'center' }); true`);
+      const warnAt = Number(it.expiresAt) - 12e3 - Date.now(); if (warnAt > 0) await sleep(warnAt);
+      const w = await A.evalJs(LOOK7(CARD7(it.id))); await A.shot('r7-zh-1280-chat-warn.png');
+      await B.front(); await B.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(300); const wB = await B.evalJs(LOOK7(CARD7(it.id))); await B.shot('r7-zh-390-chat-warn.png'); await A.front();
+      check(`r7 ⑧ the countdown ticks on the card «${w && w.deadline}» and turns to the warning accent under 15 s (1280 and 390)`, !!w && !!wB && w.dlWarn && wB.dlWarn && /还剩 1?\d 秒/.test(w.deadline || ''), { w: w && [w.deadline, w.dlWarn], wB: wB && [wB.deadline, wB.dlWarn] });
+      await sleep(Math.max(0, Number(it.expiresAt) - Date.now() + 1500));
+      const marked = await until(async () => (await api()).open.find((i) => i.id === it.id && i.action && i.action.late) || null, 15000);
+      await A.waitFor(`/已超时/.test(document.querySelector('${CARD7(it.id)}')?.textContent || '')`, 8000);
+      const late = await surfaces(A, it, 'zh-1280-late');
+      await B.front(); await B.waitFor(`!!document.querySelector('${CARD7(it.id)}')`, 8000); await unfold(B, CARD7(it.id)); await B.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
+      late.phone = await B.evalJs(LOOK7(CARD7(it.id))); await B.shot('r7-zh-390-late-chat.png'); await A.front();
+      const LATE_W = '已超时 — agent 的命令被拒绝；现在允许 = 它下次运行这条命令时直接放行（1 次）';
+      check(`r7 ⑧ THE LATE CARD (the stand-in's \`late\` mark — r20b): the chat card, the tray and the window (and the 390 card) say «${LATE_W}» in place of the countdown and KEEP 允许一次 (primary) / 拒绝 (the base: no countdown, the card as it was)`, !!marked && [late.chat, late.tray, late.win, late.phone].every((o) => !!o && o.deadline === LATE_W && o.dlState === 'late' && !!o.once && o.once.primary && !!o.deny), { marked: !!marked, ...Object.fromEntries(Object.entries(late).map(([k, o]) => [k, o && { deadline: o.deadline, once: o.once, deny: !!o.deny }])) });
+      fs.rmSync(R7_LATE, { force: true });
+      await until(async () => ran7() >= 1, 30000);   // its command was refused at 60 s — the turn is over
+    }
+    await lap('⑧ three languages done');
+    // THE OTHER TWO VARIANTS and THE STRESS SHAPES — the chat card LOOKED at on both widths (zh)
+    const stress = { ...facts, cmd: UNIFI.join(' ') + ' --note ' + 'a1b2c3d4e5f6'.repeat(16), secrets: ['运维控制器本地管理员账号用于读取广域网状态和切换主线路的那一个账号条目名字很长很长很长', 'B', 'C', 'D'].map((n, k) => ({ name: `${n} · 密码`, ref: `vault://secrets/secret:stress-${k}/secret`, as: { kind: 'env', name: `STRESS_${k}` } })), hosts: { known: true, list: ['a.example.com:443', 'b.example.com', '10.0.0.7:8443'] }, always: { offered: false, why: 'program-writable', directive: null } };
+    await lang(A, 'zh', false); await lang(B, 'zh', true); await A.front(); await quiet(A); await quiet(B);   // the variants are LOOKED at in zh (the language loop ends in ja)
+    const shapes = [['hosts-known-always', { ...V7['hosts-known-always'], who: 'ops watch' }, CURL], ['config-reads', { ...V7['config-reads'], who: 'ops watch' }, UNIFI], ['stress', stress, UNIFI]];
+    for (const [name, f, argv] of shapes) {
+      const it = await runCard(f, argv);
+      await A.waitFor(`!!document.querySelector('${CARD7(it.id)}')`, 15000); await A.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
+      const dA = await A.evalJs(LOOK7(CARD7(it.id))); await A.shot(`r7-zh-1280-${name}.png`);
+      await B.front(); await B.waitFor(`!!document.querySelector('${CARD7(it.id)}')`, 15000); await unfold(B, CARD7(it.id)); await B.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'start' }); true`); await sleep(500);
+      const dB = await B.evalJs(LOOK7(CARD7(it.id))); await B.shot(`r7-zh-390-${name}.png`); await A.front();
+      const sane = (o) => !!o && o.cmd && o.cmdWraps && o.cmdInside && !o.sideways && !o.overflowCard && !o.prose && o.rows.length <= 4;
+      const want = name === 'hosts-known-always' ? (o) => o.always && !o.hint && !o.rows.some((x) => x.endsWith('!')) : name === 'config-reads' ? (o) => !o.always && (o.hint || '').includes(V7['config-reads'].always.directive) : (o) => o.rows[0] === 'program!' && o.rows.length === 4;
+      check(`r7 ⑧ ${name} (zh, 1280 + 390): ${name === 'stress' ? 'a 300-character command, 4 entries (one named in 40+ CJK characters), 3 hosts — wrapped inside the card, nothing out of it, «程序» first (the deciding fact)' : name === 'config-reads' ? 'the hint names the reason and its directive' : '«Always» offered — no hint, nothing marked'}`, [dA, dB].every((o) => sane(o) && want(o)), { dA, dB });
+      await release(it);
+    }
+    await lap('⑧ done');
+  } catch (e) { fail++; console.log('  ✗ ⑧ threw: ' + (e?.stack || e)); }
   check('no page threw', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 

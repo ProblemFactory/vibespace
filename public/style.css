@@ -5158,6 +5158,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > .ut-meta .ut-sess { display: inline; min-height: 0; padding-block: 0; }
   :is(#user-todos-popup, #phone-home, .cn-card.cn-fold) .ut-item:not(.ut-open) > .ut-body > :is(.ut-text, .ut-meta),
   :is(#user-todos-popup, #phone-home, .cn-card.cn-fold) .ut-item:not(.ut-open) > .ut-body > :is(.ut-text, .ut-meta) * { pointer-events: none; }
+  :is(#user-todos-popup, #phone-home, .cn-card.cn-fold) .ut-item:not(.ut-open) > .ut-body > .ut-deadline { display: block !important; pointer-events: none; } /* r7 addendum: a FOLDED row keeps its deadline line (the hide rule above has the same weight — the later wins) — the tap still opens the row */
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go { display: inline-flex; position: absolute; top: 4px; right: 0; min-width: 52px; min-height: 44px; padding: 3px 4px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-window); color: var(--accent); cursor: pointer; }
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go svg { width: 18px; height: 18px; }
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go::after { content: attr(data-label); font-size: 14px; line-height: 1.1; white-space: nowrap; }
@@ -8133,6 +8134,36 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .ut-api-chip { display: inline-block; padding: 0 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--attn-text) 50%, var(--border)); color: var(--attn-text); background: color-mix(in srgb, var(--attn-text) 8%, transparent); font-size: 10px; line-height: 15px; white-space: nowrap; } /* lane card-grammar-exceptions: a raw-API proposal's policy, a chip */
 .ut-api-tech .ut-detail { font-family: var(--font-mono, monospace); word-break: break-all; }
 .ut-proposal-plan { font-size: 11px; color: var(--text); margin-top: 3px; white-space: pre-line; overflow-wrap: anywhere; user-select: text; } /* lane browser-propose: what Approve runs, the card's words line for line, ABOVE the buttons (never folded) */
+/* lane wake-approve-card r7 — THE RUN CARD'S FACTS (the owner: «这个卡片的可读性很差»): the command in its OWN box (it wraps inside
+   it — a hex id never widens the card), ≤ 4 fact rows (the deciding one first, in the warning accent), the answers with the
+   «Always» hint beside them, the technical lines folded. Theme vars only. */
+.ut-run { margin-top: 4px; min-width: 0; }
+.ut-run-cmd { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; color: var(--text); background: var(--bg-input); border-radius: var(--radius-sm); padding: 4px 6px; margin: 0; max-width: 100%; box-sizing: border-box; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; user-select: text; }
+.ut-run-facts, .ut-run-tech { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 8px; row-gap: 3px; margin-top: 6px; font-size: 11px; line-height: 1.45; }
+.ut-run-row { display: contents; }
+.ut-run-lbl { color: var(--text-secondary); white-space: nowrap; }
+.ut-run-val { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.ut-run-line { display: block; }
+.ut-run-mono, .ut-run-code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.95em; }
+.ut-run-code { background: var(--bg-input); border-radius: var(--radius-sm); padding: 0 3px; }
+.ut-run-aside { color: var(--text-secondary); margin-inline-start: 0.3em; }
+.ut-run-warn > .ut-run-lbl, .ut-run-warn > .ut-run-val { color: var(--warn-text); font-weight: 600; }
+.ut-run-answer { align-items: center; flex-wrap: wrap; }
+.ut-run-hint { flex: 1 1 16em; min-width: 0; font-size: 11px; color: var(--text-secondary); } /* beside the answers at a desk; its own line under them on a phone */
+.ut-run-fold { margin-top: 6px; }
+.ut-run-fold > summary { font-size: 11px; color: var(--text-secondary); cursor: pointer; }
+.ut-run-tech { margin-top: 4px; }
+.iw-actions .ut-run-hint { align-self: center; font-size: 12px; }
+.iw-detail .ut-run { white-space: normal; } /* the pane's words keep their line breaks; the card's own boxes say how they wrap */
+.iw-detail .ut-run-cmd { font-size: 12px; padding: 6px 8px; }
+.iw-detail .ut-run-facts, .iw-detail .ut-run-tech { font-size: 12px; }
+/* r7 addendum — A CARD WITH A DEADLINE SHOWS IT: the time left under the question (the page ticker moves it), the warning accent
+   under 15 s; past it the late answer's words (the answers stay) or «timed out» (the answers withdrawn — the record keeps its place) */
+.ut-deadline { margin-top: 2px; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.ut-deadline-warn { color: var(--warn-text); font-weight: 600; }
+.ut-deadline[data-state="late"], .ut-deadline[data-state="timed-out"] { color: var(--bad-text); }
+.iw-deadline { margin-top: 6px; font-size: 12px; }
+.ut-item.ut-timed-out .ut-exit-answer, .iw-item.ut-timed-out .iw-act-exit { display: none; }
 .ut-action-proposal { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); } /* lane browser-propose: a WORDED button on the 24 px .ut-act icon box — its own width (the exit ask's rule) */
 .ut-proposal-answer .ut-action-proposal { height: 24px; min-width: 64px; }
 .ut-proposal-answer .ut-proposal-approve { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }

@@ -102,9 +102,9 @@ function normalizeAction(x) {
  *  plain keys, strings ≤ 2 000 chars, finite numbers, booleans, null, arrays ≤ 64, depth ≤ 4, ≤ 24 KB as JSON; a value
  *  inside those bounds is kept EXACTLY (the card's Install sends a digest of what the client drew — src/app-card.js).
  *  A shape outside them THROWS by name. null = none. */
-function normalizeCard(x) {
+function normalizeCard(x, name = 'card') {
   if (x == null) return null;
-  if (typeof x !== 'object' || Array.isArray(x)) throw new Error('card must be an object');
+  if (typeof x !== 'object' || Array.isArray(x)) throw new Error(`${name} must be an object`);
   const walk = (v, depth, at) => {
     if (v === null || typeof v === 'boolean') return v;
     if (typeof v === 'number') { if (!Number.isFinite(v)) throw new Error(`${at} must be finite`); return v; }
@@ -122,10 +122,15 @@ function normalizeCard(x) {
     }
     return out;
   };
-  const out = walk(x, 0, 'card');
-  if (JSON.stringify(out).length > 24000) throw new Error('card is larger than 24 KB');
+  const out = walk(x, 0, name);
+  if (JSON.stringify(out).length > 24000) throw new Error(`${name} is larger than 24 KB`);
   return out;
 }
+/** lane wake-approve-card r7 (the owner: «这个卡片的可读性很差» — the vault-run card was an English prose wall): a producer's
+ *  FACTS about what it asks (vault-run-door's `cardFactsOf` — {v, who, tool, cmd, folder, secrets, hosts, shape, always,
+ *  templates, masking}; every reason a CODE, never a sentence). The client words them with its own t()
+ *  (src/foryou-actions.js runCardOf); `detail` stays the old clients' prose. The same plain-data bounds as a card. */
+const normalizeCardFacts = (x) => normalizeCard(x, 'facts');
 
 // THE DOOR (lane foryou-plugin-notices, owner 2026-10-19 on Dropline's 「建议加入词库」 rows: 「这个部分点击应该要自动跳转」): where a
 // click on the item's BODY takes the owner — declared by the producer at filing, validated like `action`:
@@ -474,7 +479,7 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, facts = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null } = {}) {
     const _dataDir = path.dirname(this._file);   // agent-output-sinks: the belt finds the vault from here
     const rawText = typeof text === 'string' ? (origin === 'agent' ? belt.maskForSink(text.trim(), { dataDir: _dataDir }) : text.trim()) : '';   // agent-output-sinks: belt the AGENT's own ask (origin 'agent'), never a system producer's notice (vault / spend / channels / …)
     text = rawText.slice(0, TEXT_MAX);
@@ -491,6 +496,7 @@ class UserTodoManager {
     i18n = normalizeI18n(i18n);
     action = normalizeAction(action); // a server producer's decision payload (reset credit, §5), or null
     card = normalizeCard(card); // a server producer's view of the item (design 009: an app install's one card), or null
+    facts = normalizeCardFacts(facts); // r7: a producer's facts the client words (the vault-run card), or null
     options = normalizeOptions(options); // option chips (vibespace-ask --options "A|B|C"): ≤6 distinct labels ≤40 chars, else THROWS by name — or null
     const arts = normalizeArtifacts(artifacts); // lane foryou-attachments: vibespace-ask --artifact — ≤8 rows, the cut named, a bad shape THROWS by name
     artifacts = arts.artifacts;
@@ -586,6 +592,7 @@ class UserTodoManager {
       if (i18n && JSON.stringify(i18n) !== JSON.stringify(existing.i18n || null)) { existing.i18n = i18n; changed = true; }
       if (action && JSON.stringify(action) !== JSON.stringify(existing.action || null)) { existing.action = action; changed = true; }
       if (card && JSON.stringify(card) !== JSON.stringify(existing.card || null)) { existing.card = card; changed = true; }
+      if (facts && JSON.stringify(facts) !== JSON.stringify(existing.facts || null)) { existing.facts = facts; changed = true; }
       if (options && JSON.stringify(options) !== JSON.stringify(existing.options || null)) { existing.options = options; changed = true; } // a re-file WITH options replaces them; one without keeps the old set
       if (artifacts && JSON.stringify(artifacts) !== JSON.stringify(existing.artifacts || null)) { existing.artifacts = artifacts; changed = true; } // lane foryou-attachments: the same rule as options
       if (cwd && cwd !== existing.cwd) { existing.cwd = cwd; changed = true; }
@@ -610,6 +617,7 @@ class UserTodoManager {
       i18n, // the words as structure, or null (an agent's own item is its own words)
       action, // what the item's button does ({type, …facts}), or null — a server producer's only
       ...(card ? { card } : {}), // design 009: the producer's VIEW the client draws the item from (an app install's one card)
+      ...(facts ? { facts } : {}), // r7: the producer's FACTS the client words (the vault-run card) — `detail` stays the old clients' prose
       expiresAt, // ms epoch the item dies at (resolved 'expired' by expireDue), or null = lasting
       options, // the one-click answers (≤6 labels), or null — a chip's reply IS its label (design-user-inbox-reply D3a)
       ...(artifacts ? { artifacts } : {}), // lane foryou-attachments: what the agent asks the owner to open (chips → the one artifact door)

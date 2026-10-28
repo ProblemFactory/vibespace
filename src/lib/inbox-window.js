@@ -31,9 +31,9 @@ import { registerMenuItem } from './contributions.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: an automation card's reach choices in the pane
 import { inboxModel, actionWords } from './user-todos-actions.js'; // THE store + the verbs (one implementation with the popup)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, isNotice, noticeGroups, noticeReadAll, tabCounts, originOf, ORIGIN_LABELS } from './user-todos-layout.js'; // PURE: the popup's order, notices, counts; «Mark all read»'s ids
-import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml } from './user-todos-row.js'; // THE keyed reconciler + the row words
+import { reconcileKeyed, agoText, expiresText, statusWords, resolvedByText, appCardHtml, askChipEls, linkifyInto, grantAskOf, optionWords, wordsHtml, runFactsHtml, armDeadlines } from './user-todos-row.js'; // THE keyed reconciler + the row words (r7: the run card's facts, its deadline's ticker)
 import { TABS, nextSelection, holdSelection, paneMode, scopeRows, rowPreview, itemView, readOnSight, NOTICE_READ_MS } from './inbox-window-layout.js'; // PURE: the window's rules (test-inbox-window-model)
-import { closersOf, isDecisionRow } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
+import { closersOf, isDecisionRow, runCardOf, deadlineOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card r2): a decision row's two verbs, no generic closer; r3: a pointer's one closer, Hide
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { showSecretPasteDialog } from './vault-paste-box.js'; // lane vault-paste-request: a paste request's box, as a dialog over this window
 
@@ -165,15 +165,17 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
   // ── the list ──
   const rowSig = (e) => {
     const i = e.item;
-    const words = model.wordsOf(i);
+    const run = runCardOf(i, { t }); // r7: a run card reads its headline, its command under it (never the old clients' prose)
+    const words = run ? run.headline : model.wordsOf(i);
     const sub = rowPreview(model.detailOf(i), 160); // the CUT form — the pane has the whole text
+    const cut = run ? rowPreview(run.cmd, 160) : sub; // r7: a run card's preview is its command
     const bits = [];
     if (!st.scopeKey || e.notice || e.tail) bits.push(model.nameFor(i.sessionKey, [i]));
     bits.push(agoText(e.resolved ? (i.resolvedAt || i.createdAt) : i.createdAt, t));
     if (e.resolved) bits.push(statusWords(i, t)); // r3: a hidden pointer «hidden — nothing was decided»
     else if (model.optionsFor(i).length) bits.push(t('{n} options', { n: model.optionsFor(i).length })); // lane foryou-honest: a parsed «A …；B …» counts too
     const urg = e.resolved ? '' : (e.notice ? 'notice' : (i.urgency || 'normal'));
-    return { words, sub, meta: bits.join(' · '), urg, sig: [words, sub, bits.join('\u0001'), urg, e.resolved ? 1 : 0].join('\u0000') };
+    return { words, sub: cut, meta: bits.join(' · '), urg, sig: [words, cut, bits.join('\u0001'), urg, e.resolved ? 1 : 0].join('\u0000') };
   };
   const patchListRow = (el, e) => {
     const p = rowSig(e);
@@ -291,6 +293,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const meta = mk('div', 'iw-meta');
     head.append(dot, sess, meta);
     const title = mk('div', 'iw-title');
+    const dl = mk('div', 'ut-deadline iw-deadline'); // r7 addendum: a card with a deadline shows it (the row's line, the page ticker's)
     const detail = mk('div', 'iw-detail');
     const replied = mk('div', 'iw-replied');
     const cutLine = mk('div', 'iw-detail-cut'); // "showing the first N characters — loading the rest…" / the load's failure, by name
@@ -307,8 +310,8 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     reply.append(why, voiceField(ta, attachDictation(ta)));
     const actions = mk('div', 'iw-actions');
     const arts = mk('div', 'iw-arts'); // lane foryou-attachments: the ask's --artifact chips, under the question
-    el.append(head, title, arts, detail, cutLine, replied, opts, reach, reply, actions);
-    return { el, id, dot, sess, ld, nm, board, meta, title, arts, detail, cutLine, replied, opts, reach, reply, ta, why, actions, sig: {} };
+    el.append(head, title, dl, arts, detail, cutLine, replied, opts, reach, reply, actions);
+    return { el, id, dot, sess, ld, nm, board, meta, title, dl, arts, detail, cutLine, replied, opts, reach, reply, ta, why, actions, sig: {} };
   };
   /** A previewed detail (a resolved item's snapshot carries 300 chars): load the rest ONCE
    *  through the model; a failure lands on the pane as its sentence, never silently. */
@@ -372,9 +375,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     'app-reject': () => actBtn('app-reject', UI_ICONS.close, t('Not now'), t('Not now'), 'iw-act-exit'),
   };
   const viewOf = (it, e) => itemView(it, {
-    t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : model.wordsOf(it), detail: model.detailOf(it), options: model.optionsFor(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
+    t, words: it.card && it.action && it.action.type === 'app-install' ? cardWords(it.card, t, resolveLang()).title : (runCardOf(it, { t }) || { headline: model.wordsOf(it) }).headline, detail: model.detailOf(it), options: model.optionsFor(it), replyOpen: st.replyOpen === it.id, name: model.nameFor(it.sessionKey, [it]),
     origin: { origin: originOf(it), label: ORIGIN_LABELS[originOf(it)] || '' }, notice: isNotice(it), resolved: !!(e && e.resolved) || it.status !== 'open',
-    reply: model.replyState(it), closers: closersOf(it, !!(e && e.resolved) || it.status !== 'open'), ago: (ts) => agoText(ts, t), expires: (ts) => expiresText(ts, t), statusWords: (item) => statusWords(item, t), resolvedBy: (by, item) => resolvedByText(by, t, item),
+    reply: model.replyState(it), closers: closersOf(it, !!(e && e.resolved) || it.status !== 'open'), ago: (ts) => agoText(ts, t), expires: (ts) => { const d = deadlineOf(it, { t }); return d && d.state !== 'late' ? '' : expiresText(ts, t); }, statusWords: (item) => statusWords(item, t), resolvedBy: (by, item) => resolvedByText(by, t, item),
     detailState: !it.detailTruncated ? 'whole' : (st.loadErr && st.loadErr.id === it.id ? 'failed' : 'loading'), loadError: st.loadErr && st.loadErr.id === it.id ? st.loadErr.why : '',
   });
   /** The session's board chip beside its name (the popup's chunk-4 chip: needs input / blocked / review / working). */
@@ -453,6 +456,22 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     c.el.classList.toggle('iw-item-cleared', model.isCleared(it)); // "Clear content…": the cleared sentence, dimmed
     // the words: the title and the detail at FULL width, THE tray's renderer (plain + links, escaped), selectable
     if (c.sig.title !== v.title) { wordsInto(c.title, v.title); c.sig.title = v.title; } // lane foryou-attachments: its paths / links press-to-open (lane foryou-honest: wordsHtml makes them)
+    // r7 addendum: THE deadline line (foryou-actions deadlineOf — «valid for 60 sec · 42 sec left», then the late answer's words or
+    // «timed out — …»); the page ticker (user-todos-row tickDeadlines) moves it every second, this paint only (re)arms it
+    const dln = v.resolved ? null : deadlineOf(it, { t });
+    const dlSig = dln ? [dln.at, dln.from, dln.state, it.action && it.action.type, it.action && it.action.late ? 1 : 0].join('\u0000') : '';
+    if (c.sig.deadline !== dlSig) {
+      for (const k of ['deadlineAt', 'deadlineFrom', 'deadlineType', 'deadlineLate']) delete c.dl.dataset[k];
+      if (dln) {
+        Object.assign(c.dl.dataset, { deadlineAt: String(dln.at), deadlineFrom: String(dln.from), deadlineType: String((it.action && it.action.type) || ''), state: dln.state }, it.action && it.action.late ? { deadlineLate: '1' } : {});
+        c.dl.textContent = dln.text;
+        c.dl.classList.toggle('ut-deadline-warn', dln.warn);
+        armDeadlines();
+      }
+      c.el.classList.toggle('ut-timed-out', !!dln && dln.state === 'timed-out');
+      c.dl.style.display = dln ? '' : 'none';
+      c.sig.deadline = dlSig;
+    }
     const artsSig = JSON.stringify((!model.isCleared(it) && it.artifacts) || null);
     if (c.sig.arts !== artsSig) { c.arts.replaceChildren(...askChipEls(it, t)); c.arts.style.display = c.arts.childElementCount ? '' : 'none'; c.sig.arts = artsSig; } // NODES, its words textContent
     // verify-r4 F4: an exit ask's detail IS the command it asks to run — shown VERBATIM (textContent in a <pre>), never as
@@ -467,7 +486,9 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const plain = verbatim || !!(it.action && (it.action.type === 'browser-proposal' || it.action.type === 'main-ask' || it.action.type === 'vault-grant-ask' || it.action.type === 'secret-request'));   // lane vault-paste-request: a paste request's words are the agent's OWN — verbatim   // lane vault-manual-and-lock (int331 seam): a vault GRANT ask's detail = the entry ref + the agent's OWN words (the purpose) — shown verbatim, never markdown (a `*`/`#`/line-break the agent wrote must not re-render — the exit card's verify-r4 F4 trap)
     // design 009: an app install's ONE card — its lines, progress and Details fold (escaped; its buttons are the action row)
     const card = it.card && it.action && it.action.type === 'app-install' ? it.card : null;
-    const detailSig = card ? 'card\u0000' + (v.resolved ? 'r' : 'o') + JSON.stringify(card) : (plain ? 'cmd\u0000' : 'txt\u0000') + v.detail;
+    const run = card ? null : runCardOf(it, { t }); // r7: the run card's FACTS (a record without them: its prose, as before)
+    const detailSig = card ? 'card\u0000' + (v.resolved ? 'r' : 'o') + JSON.stringify(card) : run ? 'run\u0000' + JSON.stringify(it.facts) : (plain ? 'cmd\u0000' : 'txt\u0000') + v.detail;
+    if (run && c.sig.detail !== detailSig) { c.detail.innerHTML = runFactsHtml(it, t, { buttons: false }); c.detail.style.display = ''; c.sig.detail = detailSig; } // r7: its answers are this pane's action row; the masking sentence is in its fold
     if (c.sig.detail !== detailSig) {
       if (card) { c.detail.innerHTML = appCardHtml(it, t, { lang: resolveLang(), resolved: v.resolved, buttons: false }); c.detail.style.display = ''; }
       else if (plain) { const pre = mk('pre', 'iw-exit-cmd'); pre.textContent = v.detail; c.detail.replaceChildren(pre); }
@@ -513,8 +534,15 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     // the action row, keyed by the verdict's action list
     // …and, last, Clear content… on an item that still has words (a cleared one has nothing left to clear)
     const acts = model.isCleared(it) || v.actions.includes('more') ? v.actions : [...v.actions, 'clear']; // a card's Clear content… is in its ⋯
-    const actSig = acts.join(',');
-    if (c.sig.actions !== actSig) { c.actions.replaceChildren(...acts.map((a) => ACT[a](it))); c.sig.actions = actSig; }
+    // r7: beside a run card's missing «Always», why it is not offered (the model's words, in the answers' row)
+    const hint = run && !v.resolved && acts.includes('hub-once') && !acts.includes('shape-always') ? run.always.hint : null;
+    const actSig = acts.join(',') + '\u0000' + JSON.stringify(hint);
+    if (c.sig.actions !== actSig) {
+      c.actions.replaceChildren(...acts.map((a) => ACT[a](it)));
+      const deny = hint && c.actions.querySelector('[data-act="hub-deny"]');
+      if (deny) { const h = mk('span', 'ut-run-hint'); h.append(...hint.map((x) => (x.code != null ? mk('code', 'ut-run-code', x.code) : x.mono != null ? mk('span', 'ut-run-mono', x.mono) : document.createTextNode(x.text || '')))); deny.after(h); } // TEXT nodes
+      c.sig.actions = actSig;
+    }
     // the verdict's sentence sits under the box — or, with no box, where the box would be
     // (a helper's ask is answered on its card, a job item in the job panel: itemView's `why`)
     if (!v.reply.show) { if (c.why.parentNode !== c.el) c.el.insertBefore(c.why, c.actions); }

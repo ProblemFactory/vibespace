@@ -9,6 +9,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A decided request says who and when, on its card and in For you: «approved by you · 09:41».
 - An unanswered wake request expires after 7 days; its card says «expires in 7 d», and the agent can ask again.
 - A vault command an agent wants to run and an action on a paired machine show their card in the chat that asked, like a paste request.
+- A vault command card now reads in your language: who wants to run which program with which secret, the command in its own box, where it sends what it reads first (marked when that is unknown), and the technical details folded away.
+- A card that waits for your answer only briefly shows the time it has left, counting down, and turns amber in its last 15 seconds.
 
 ### Fixed
 - With sign-in off, a script or an agent's token could approve a channel request by calling its route; now only a click on this page decides one.
@@ -28,6 +30,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A digest of held messages now says since when they were held, not «in the last 60 min».
 - A stored-secret approval shows when it ended or that you revoked it, instead of «allowed for 8 hours» for ever.
 - An agent's list of its notifications shows the ones that stopped firing, marked as such.
+- A vault command card nobody answered in time no longer disappears; it stays in place and says it timed out and that the agent's command was refused.
 
 ### Security
 - With sign-in off, an agent could widen a wake you approved by editing its rule or filter; changing what a wake reacts to now takes your click.

@@ -761,6 +761,33 @@
 - (2026-10-26) THE FIRST APPROVE AFTER A SCROLL SAID «moved under the pointer» (chat-needs-you-card): the press arm read a button's place only at a row pass. 不变量 = a press guard measures what moved since the person looked, never what a stale reading says (kb-bugfix-invariants)
 - (2026-10-27) THE BOX'S CLAUDE SELF-UPDATED TO 2.1.312 AND EVERY CLAUDE CONVERSATION'S RESULT GREW A «NEW FIELDS» CARD (cli-2-1-312-records). 不变量 = a record is known by its measured shape and version; a release re-measures what it claims of a CLI on each build it pins ⇒ kb-bugfix-invariants
 - (2026-10-27) A WAKE REQUEST'S APPROVE SAT ONLY IN THE TRAY; A BEARER COULD DECIDE IT; ✓ DENIED IT; ITS RULE WIDENED IT (wake-approve-card). 不变量 = a decision the owner must click is offered where the owner looks; one decider, its own verbs; what a wake reaches is the person's, read as it fires.
+- (2026-10-27) THE RUN CARD WAS AN ENGLISH PROSE WALL AND LEFT IN SILENCE AT 60 S (the owner, wake-approve-card r7). 不变量 = a card is actor + verb + object, the deciding fact first, worded by the viewer's client from codes; a deadline is shown and its end keeps its place (kb-bugfix-invariants)
+
+## THE RUN CARD WAS A PROSE WALL IN ENGLISH, AND A 60-SECOND CARD LEFT IN SILENCE (the owner, 2026-10-27 — lane wake-approve-card round 7, the client half beside lane vault-agent-own r20)
+
+- **SYMPTOM:**
+  - «这个卡片的可读性很差» (a screenshot of the For-you tray). The vault-run card was vault-run-door's `detailOf` prose, in English on a zh UI: «Program: /home/…/unifi-api.sh — in a folder an agent can write / Secrets: vault://… / Given as: env:… / Hosts: unknown — the tool names none / Folder: … / This shape = … / «Always» is not offered: …».
+  - The fact that decides — where the secret is SENT: unknown — was mid-paragraph.
+  - 允许一次 read as disabled.
+  - Then: «如果我一直不管…会发生什么？是不是应该显示个倒计时». The card waited its 60 s with nothing said; the ask settled 'ask-expired', the agent's command was refused, and the row read «done · expired (no answer in 60 s)».
+- **ROOT:** a server composed prose for a person (human-visible words are the viewer's client's, through t()). And no surface read an action item's `expiresAt` — only a notice's window was ever printed.
+- **FIX:**
+  - **The record** carries `facts`: codes, never sentences (the door's PURE `cardFactsOf`; the store keeps the field — src/user-todos.js `normalizeCardFacts`; Clear content drops it).
+  - **ONE reader** (src/foryou-actions.js `runCardOf`) words it in the viewer's language: headline → the command's own box → ≤ 4 rows, the deciding one first in the warning accent → 允许一次 (primary) · 拒绝 with the «Always» hint in their row → the «技术细节» fold.
+  - The tray row, the chat card and the For-you window draw it (`runFactsHtml`). A record without facts draws today's prose byte for byte.
+  - **A CARD WITH A DEADLINE SHOWS IT** (`deadlineOf`, every open action item with a window ≤ 1 h): «60 秒内有效 · 还剩 42 秒», ticking (ONE page ticker), in the warning accent under 15 s.
+    - Past its end, the run card (`lateAnswer` / the server's `late` mark — the owner's ruling «A») keeps its buttons under «已超时 — …现在允许 = 它下次运行这条命令时直接放行（1 次）».
+    - Any other card withdraws its answers: «已超时 — agent 的命令被拒绝（它可能会再问）».
+    - 'ask-expired' reads the same words, in place.
+- **INVARIANTS:**
+  - a server writes codes, the client words them;
+  - a code without words is shown as itself in monospace, never guessed into a sentence;
+  - the deciding fact is first and marked;
+  - a decision's YES is never drawn as disabled;
+  - a card with a deadline shows it, and its end keeps its place.
+- **GATES:**
+  - test-wake-approve-card ⑮: the fixture × three languages, the closed codes' words, the prose branch pinned, unknown codes, the stress shapes, a fake clock at +0 / +50 / +61 s, the ticker, the ends' words. RED: 98b6fdf7 has none.
+  - test-wake-approve-card-chrome ⑧: three surfaces × 1280 / 390 × zh / en / ja, the warning, the end, the late card, the variants and the stress shapes. The BEFORE shots are the base's.
 
 ## A WAKE REQUEST'S APPROVE SAT ONLY IN THE TRAY — AND THE ROUTE BEHIND IT TOOK ANY BEARER, AND ITS ✕ LEFT IT OPEN FOR EVER (userW, fleet feedback fb-dc7d20f1cb on 2.369.358 — the owner's ruling 2026-10-27; lane wake-approve-card, .360)
 - THE SYMPTOM: an agent asked to be WOKEN by a chat (`vibespace-channels watch … --mode wake` — billed turns); userW looked for Approve in the conversation that asked and found none; the For-you tray had it (pressed 7 minutes later).
